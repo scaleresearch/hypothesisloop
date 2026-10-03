@@ -18,7 +18,7 @@ export function Skeleton({ className }: { className?: string }) {
   return (
     <div
       className={clsx(
-        'h-3 animate-shimmer rounded-sm bg-gradient-to-r from-foreground/5 via-foreground/10 to-foreground/5 bg-[length:400%_100%]',
+        'h-3 animate-pulse rounded-sm bg-foreground/[0.06]',
         className,
       )}
     />

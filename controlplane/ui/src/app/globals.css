@@ -4,75 +4,88 @@
 
 /* Colours are space-separated RGB channels so Tailwind can apply opacity (bg-primary/10).
    theme-contrast.test.ts holds every pair below to WCAG AA in both schemes. */
+/* Warm paper neutrals carry the interface; primary actions are ink; one petrol accent marks links,
+   focus and selection. Status tones only say how a thing is going. chart-1..8 is the ordered series
+   palette, checked for colour-blind separation on surface in both schemes. */
 :root {
-  --background: 245 246 249;
+  --background: 247 246 243;
   --surface: 255 255 255;
-  --surface-inset: 247 248 250;
+  --surface-inset: 243 242 239;
   --surface-raised: 255 255 255;
-  --border: 225 227 234;
-  --border-strong: 201 205 216;
-  --border-control: 139 141 149;
-  --text: 23 25 35;
-  --text-muted: 84 90 108;
-  --text-subtle: 101 108 126;
-  --primary: 98 81 224;
-  --primary-hover: 84 66 204;
+  --border: 228 227 223;
+  --border-strong: 208 207 202;
+  --border-control: 140 139 134;
+  --text: 30 30 30;
+  --text-muted: 80 80 80;
+  --text-subtle: 98 98 96;
+  --primary: 35 35 35;
+  --primary-hover: 17 17 17;
   --primary-foreground: 255 255 255;
-  --accent: 84 66 204;
-  --success: 16 107 50;
-  --warning: 134 79 5;
-  --danger: 174 27 52;
-  --info: 13 104 97;
-  --purple: 129 46 192;
-  --pink: 173 22 85;
-  --orange: 162 55 10;
-  --neutral: 82 88 105;
-  --ring: 98 81 224;
-  --overlay: 23 25 35;
+  --accent: 29 90 115;
+  --success: 37 104 55;
+  --warning: 122 79 16;
+  --danger: 150 48 48;
+  --info: 46 88 140;
+  --neutral: 88 88 86;
+  --ring: 29 90 115;
+  --overlay: 30 30 30;
 
-  --radius-sm: 6px;
-  --radius: 8px;
-  --radius-lg: 12px;
+  --chart-1: 42 107 168;
+  --chart-2: 192 122 36;
+  --chart-3: 46 156 126;
+  --chart-4: 181 80 62;
+  --chart-5: 116 104 184;
+  --chart-6: 156 132 24;
+  --chart-7: 176 98 142;
+  --chart-8: 92 138 58;
 
-  --shadow-sm: 0 1px 2px rgb(23 25 35 / 0.06);
-  --shadow-md: 0 8px 24px -8px rgb(23 25 35 / 0.16), 0 2px 6px rgb(23 25 35 / 0.06);
-  --shadow-lg: 0 24px 60px -16px rgb(23 25 35 / 0.28);
-  --shadow-glow: 0 0 0 1px rgb(var(--primary) / 0.35), 0 4px 14px rgb(var(--primary) / 0.25);
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 10px;
+
+  --shadow-sm: 0 1px 2px rgb(30 30 30 / 0.04);
+  --shadow-md: 0 4px 16px -4px rgb(30 30 30 / 0.10), 0 1px 3px rgb(30 30 30 / 0.05);
+  --shadow-lg: 0 16px 48px -12px rgb(30 30 30 / 0.20);
 
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: 8 9 12;
-    --surface: 15 17 22;
-    --surface-inset: 20 22 29;
-    --surface-raised: 25 28 36;
-    --border: 36 39 48;
-    --border-strong: 54 58 70;
-    --border-control: 101 104 113;
-    --text: 242 243 247;
-    --text-muted: 146 151 170;
-    --text-subtle: 134 140 160;
-    --primary: 108 92 231;
-    --primary-hover: 96 80 216;
-    --primary-foreground: 255 255 255;
-    --accent: 166 152 255;
-    --success: 74 222 128;
-    --warning: 251 191 36;
-    --danger: 244 104 120;
-    --info: 45 212 191;
-    --purple: 208 147 247;
-    --pink: 244 114 182;
-    --orange: 251 146 60;
-    --neutral: 183 188 201;
-    --ring: 166 152 255;
+    --background: 20 20 19;
+    --surface: 28 28 26;
+    --surface-inset: 34 34 32;
+    --surface-raised: 38 38 36;
+    --border: 46 46 43;
+    --border-strong: 61 61 57;
+    --border-control: 117 115 109;
+    --text: 237 237 234;
+    --text-muted: 176 175 170;
+    --text-subtle: 168 167 161;
+    --primary: 237 237 234;
+    --primary-hover: 255 255 255;
+    --primary-foreground: 20 20 19;
+    --accent: 127 179 201;
+    --success: 120 190 138;
+    --warning: 214 168 98;
+    --danger: 236 150 141;
+    --info: 138 175 219;
+    --neutral: 176 175 170;
+    --ring: 127 179 201;
     --overlay: 0 0 0;
 
-    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.35);
-    --shadow-md: 0 10px 30px -8px rgb(0 0 0 / 0.55), 0 2px 8px rgb(0 0 0 / 0.35);
-    --shadow-lg: 0 24px 60px -16px rgb(0 0 0 / 0.65);
-    --shadow-glow: 0 0 0 1px rgb(var(--primary) / 0.4), 0 4px 18px rgb(var(--primary) / 0.35);
+    --chart-1: 74 138 198;
+    --chart-2: 201 130 42;
+    --chart-3: 46 162 143;
+    --chart-4: 199 90 72;
+    --chart-5: 133 121 201;
+    --chart-6: 168 142 34;
+    --chart-7: 186 110 152;
+    --chart-8: 102 153 63;
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
+    --shadow-md: 0 6px 20px -6px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.3);
+    --shadow-lg: 0 16px 48px -12px rgb(0 0 0 / 0.6);
 
     color-scheme: dark;
   }
@@ -89,19 +102,16 @@
   }
 
   body {
-    background:
-      radial-gradient(1200px 480px at 100% -10%, rgb(var(--primary) / 0.08), transparent 60%),
-      radial-gradient(900px 500px at -10% 110%, rgb(var(--primary) / 0.04), transparent 55%),
-      rgb(var(--background));
+    background: rgb(var(--background));
     color: rgb(var(--text));
     font-family: var(--font-sans), system-ui, sans-serif;
     font-size: 13.5px;
     line-height: 1.55;
-    letter-spacing: -0.006em;
+    letter-spacing: -0.01em;
   }
 
   ::selection {
-    background: rgb(var(--primary) / 0.3);
+    background: rgb(var(--accent) / 0.2);
   }
 
   :focus-visible {

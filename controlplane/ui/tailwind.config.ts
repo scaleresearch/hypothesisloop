@@ -38,10 +38,8 @@ const config: Config = {
       warning: token('warning'),
       danger: token('danger'),
       info: token('info'),
-      purple: token('purple'),
-      pink: token('pink'),
-      orange: token('orange'),
       neutral: token('neutral'),
+      chart: Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8].map(n => [n, token(`chart-${n}`)])),
       ring: token('ring'),
       overlay: token('overlay'),
     },
@@ -67,7 +65,6 @@ const config: Config = {
       sm: 'var(--shadow-sm)',
       md: 'var(--shadow-md)',
       lg: 'var(--shadow-lg)',
-      glow: 'var(--shadow-glow)',
     },
     extend: {
       fontFamily: {
@@ -79,14 +76,9 @@ const config: Config = {
           from: { opacity: '0', transform: 'translateY(6px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
         },
-        shimmer: {
-          from: { backgroundPosition: '100% 50%' },
-          to: { backgroundPosition: '0% 50%' },
-        },
       },
       animation: {
         rise: 'rise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both',
-        shimmer: 'shimmer 1.6s ease-in-out infinite',
       },
     },
   },

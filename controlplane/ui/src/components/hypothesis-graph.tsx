@@ -34,7 +34,7 @@ export function NodeMeta({ item }: { item: HypothesisGraphNode }) {
       </span>
       <span className={COUNT} title={`${item.comment_count} comments`}><MessageSquare size={11} /> {item.comment_count}</span>
       {item.best_job && (
-        <span className={clsx(COUNT, 'text-accent')} title={`Best ${item.best_job.metric.name} of its jobs`}>
+        <span className={clsx(COUNT, 'text-foreground')} title={`Best ${item.best_job.metric.name} of its jobs`}>
           {item.best_job.metric.value.toFixed(4)}
         </span>
       )}
@@ -50,7 +50,7 @@ export function ObjectiveMeta({ objective }: { objective: Evidence }) {
         <span className={COUNT} title={`Baseline finding: ${objective.finding.summary}`}><FileText size={11} aria-label="Baseline finding" /></span>
       )}
       {objective.best_job && (
-        <span className={clsx(COUNT, 'text-accent')} title={`Best ${objective.best_job.metric.name} of the baseline's jobs`}>
+        <span className={clsx(COUNT, 'text-foreground')} title={`Best ${objective.best_job.metric.name} of the baseline's jobs`}>
           baseline {objective.best_job.metric.value.toFixed(4)}
         </span>
       )}
@@ -91,7 +91,7 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
       className={clsx(
         NODE,
         'justify-between border-border-strong',
-        selected === item.id ? 'bg-surface-raised shadow-glow' : 'bg-surface-inset',
+        selected === item.id ? 'bg-surface-raised shadow-md ring-1 ring-accent' : 'bg-surface-inset',
         hits.has(item.id) && 'ring-2 ring-warning',
         dimmed.has(item.id) && 'opacity-20',
       )}
@@ -111,7 +111,7 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
 const ObjectiveNode = memo(function ObjectiveNode({ id, data }: NodeProps<Node<ObjectiveNodeData>>) {
   const { selected } = useContext(Highlight)
   return (
-    <div className={clsx(NODE, 'justify-center border-primary', selected === id ? 'bg-surface-raised shadow-glow' : 'bg-primary/10')}>
+    <div className={clsx(NODE, 'justify-center border-primary', selected === id ? 'bg-surface-raised shadow-md ring-1 ring-accent' : 'bg-primary/5')}>
       <HiddenHandles />
       <div className="flex items-center justify-between gap-2">
         <Eyebrow>Objective</Eyebrow>

@@ -108,7 +108,7 @@ export function Nav() {
                 aria-current={active ? 'page' : undefined}
                 className={clsx(
                   'flex items-center gap-2.5 rounded px-3 py-2 text-sm font-medium transition-colors',
-                  active ? 'bg-primary text-primary-foreground shadow-glow' : 'text-muted hover:bg-foreground/5 hover:text-foreground',
+                  active ? 'bg-foreground/[0.07] text-foreground' : 'text-muted hover:bg-foreground/5 hover:text-foreground',
                 )}
               >
                 <Icon aria-hidden="true" size={16} strokeWidth={2} className="flex-none" />

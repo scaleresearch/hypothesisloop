@@ -53,9 +53,9 @@ function Credential({ actor }: { actor: ActorRecord }) {
     case 'user':
       return <><Badge status="human">human</Badge><span title={actor.id}>{actor.name}</span></>
     case 'key':
-      return <><Badge tone="info">key</Badge><span title={actor.id}>{actor.name}</span></>
+      return <><Badge tone="neutral">key</Badge><span title={actor.id}>{actor.name}</span></>
     case 'coordinator':
-      return <Badge tone="purple" title={actor.id}>coordinator</Badge>
+      return <Badge tone="neutral" title={actor.id}>coordinator</Badge>
     case 'staff':
       return <Badge tone="neutral">staff</Badge>
     case 'unverified':

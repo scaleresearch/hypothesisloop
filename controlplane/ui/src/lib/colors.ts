@@ -8,9 +8,6 @@ export const semantic = {
   info: token('info'),
   accent: token('accent'),
   primary: token('primary'),
-  purple: token('purple'),
-  pink: token('pink'),
-  orange: token('orange'),
   neutral: token('neutral'),
   text: token('text'),
   muted: token('text-muted'),
@@ -32,31 +29,31 @@ export function tint(color: string, opacity: number): string {
   return `color-mix(in srgb, ${color} ${Math.round(opacity * 100)}%, transparent)`
 }
 
-export type Tone = 'success' | 'warning' | 'danger' | 'info' | 'accent' | 'purple' | 'pink' | 'neutral'
+export type Tone = 'success' | 'warning' | 'danger' | 'info' | 'accent' | 'neutral'
 
 // Job, platform experiment, capacity tier, hypothesis and participant states, lowercased.
 // success, warning and danger say how a thing is going and nothing else: running or confirmed,
-// waiting, failed or refuted. What is only a kind takes one of the other tones.
+// waiting, failed or refuted. What is only a kind stays neutral; its label tells it apart.
 const tones: Record<string, Tone> = {
   running: 'success',
-  completed: 'accent',
+  completed: 'info',
   queued: 'warning',
   failed: 'danger',
-  evicted: 'purple',
+  evicted: 'warning',
   admitted: 'info',
   submitted: 'neutral',
-  promoted: 'pink',
+  promoted: 'success',
   rejected: 'danger',
   cancelled: 'neutral',
   draft: 'neutral',
-  open: 'accent',
+  open: 'info',
   closed: 'neutral',
-  guaranteed: 'accent',
-  burst: 'purple',
+  guaranteed: 'neutral',
+  burst: 'neutral',
   confirmed: 'success',
   refuted: 'danger',
   inconclusive: 'neutral',
-  human: 'info',
+  human: 'neutral',
   agent: 'neutral',
 }
 
@@ -68,17 +65,11 @@ export function statusColor(status?: string | null): string {
   return semantic[statusTone(status)]
 }
 
-/** Categorical palette for per-agent series in charts (recharts Line/Cell colors). */
-export const agentPalette = [
-  semantic.accent,
-  semantic.warning,
-  semantic.success,
-  semantic.pink,
-  semantic.danger,
-  semantic.info,
-  semantic.orange,
-  semantic.purple,
-]
+/** The ordered series palette for charts. Assign in order; the order keeps neighbours apart for colour-blind readers. */
+export const seriesPalette = [1, 2, 3, 4, 5, 6, 7, 8].map(n => token(`chart-${n}`))
+
+/** Per-agent series in charts (recharts Line/Cell colors). */
+export const agentPalette = seriesPalette
 
 export const hypothesisStatuses = ['open', 'confirmed', 'refuted', 'inconclusive'] as const
 

@@ -402,7 +402,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
         <Card className={clsx('border-l-[3px]', stagesStatus.cut_agents.length > 0 ? 'border-l-warning hover:border-l-warning' : 'border-l-accent hover:border-l-accent')}>
           <CardContent>
             <div className="flex flex-wrap items-center gap-3">
-              <Badge tone="accent">Stage {stagesStatus.current_stage} of {stagesStatus.stages.length}</Badge>
+              <Badge tone="neutral">Stage {stagesStatus.current_stage} of {stagesStatus.stages.length}</Badge>
               <span className="text-xs text-subtle">
                 {Math.round(stagesStatus.progress * 100)}% through the experiment
                 {stagesStatus.current_stage < stagesStatus.stages.length && (
@@ -422,8 +422,8 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                 const filled = Math.max(0, Math.min(1, (stagesStatus.progress - acc.start) / (end - acc.start)))
                 acc.nodes.push(
                   <div key={stageNo} className="min-w-0" style={{ flex: stage.length_pct }} title={stage.max_job_hours ? `No single job may run longer than ${stage.max_job_hours}h during this stage` : 'No job length limit during this stage'}>
-                    <div className={clsx('h-2 overflow-hidden rounded-sm bg-border', current && 'shadow-glow')}>
-                      <div className={clsx('h-full', current ? 'bg-accent' : 'bg-accent/55')} style={{ width: `${filled * 100}%` }} />
+                    <div className={clsx('h-2 overflow-hidden rounded-sm bg-border', current && 'ring-1 ring-accent')}>
+                      <div className={clsx('h-full', current ? 'bg-accent' : 'bg-accent/50')} style={{ width: `${filled * 100}%` }} />
                     </div>
                     <div className="mt-1 truncate font-mono text-2xs text-subtle">
                       {stage.length_pct}%{stage.evict_pct > 0 && ` · cut ${stage.evict_pct}%`}{stage.max_job_hours ? ` · ≤${stage.max_job_hours}h/job` : ''}
@@ -451,7 +451,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
             <StatTile
               label={held.label}
               value={held.value}
-              tone={held.atCap ? 'accent' : undefined}
+              tone={held.atCap ? 'warning' : undefined}
               sub={pe.max_concurrent_accelerators == null ? 'no cap set' : undefined}
             />
             <StatTile label="Agents" value={pe.signup_count.toString()} sub={`at most ${pe.max_agents} researchers`} />
@@ -466,14 +466,13 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
             <StatTile
               label="Evicted"
               value={(jobsByStatus.EVICTED ?? 0).toString()}
-              tone={(jobsByStatus.EVICTED ?? 0) > 0 ? 'purple' : undefined}
+              tone={(jobsByStatus.EVICTED ?? 0) > 0 ? 'warning' : undefined}
               sub={[evictionFaultBreakdown, evictionBreakdown].filter(Boolean).join(' — ') || undefined}
               href={`/jobs?platform_experiment_id=${pe.id}&status=EVICTED`}
             />
             <StatTile
               label="Hypotheses"
               value={hypothesisCount.toString()}
-              tone="accent"
               sub={hypothesisSub}
               href={graphHref(pe.id)}
             />

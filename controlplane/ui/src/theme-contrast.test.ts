@@ -28,7 +28,8 @@ const over = (fg: RGB, bg: RGB, alpha: number): RGB => fg.map((c, i) => c * alph
 
 const SURFACES = ['background', 'surface', 'surface-inset', 'surface-raised']
 const TEXT = ['text', 'text-muted', 'text-subtle', 'accent']
-const TONES = ['success', 'warning', 'danger', 'info', 'accent', 'purple', 'pink', 'orange', 'neutral']
+const TONES = ['success', 'warning', 'danger', 'info', 'accent', 'neutral']
+const SERIES = [1, 2, 3, 4, 5, 6, 7, 8].map(n => `chart-${n}`)
 const BODY = 4.5
 const UI_PART = 3
 
@@ -62,5 +63,9 @@ describe.each(Object.entries(schemes))('%s scheme meets WCAG AA', (_, t) => {
 
   it('the edge of a control, the focus ring and a filled control against every surface', () => {
     expect(failures(SURFACES.flatMap(bg => ['border-control', 'ring', 'primary'].map((part): [string, RGB, RGB, number] => [`${part} against ${bg}`, t[part], t[bg], UI_PART])))).toEqual([])
+  })
+
+  it('each chart series against the surfaces a chart sits on', () => {
+    expect(failures(['surface', 'surface-raised'].flatMap(bg => SERIES.map((s): [string, RGB, RGB, number] => [`${s} against ${bg}`, t[s], t[bg], UI_PART])))).toEqual([])
   })
 })

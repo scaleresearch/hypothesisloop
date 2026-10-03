@@ -5,14 +5,12 @@ import type { Tone } from '@/lib/colors'
 import { toneText } from '@/components/ui/tone'
 
 const toneClass: Record<Tone, string> = {
-  success: 'bg-success/15 text-success',
-  warning: 'bg-warning/15 text-warning',
-  danger: 'bg-danger/15 text-danger',
-  info: 'bg-info/15 text-info',
-  accent: 'bg-accent/15 text-accent',
-  purple: 'bg-purple/15 text-purple',
-  pink: 'bg-pink/15 text-pink',
-  neutral: 'bg-neutral/15 text-neutral',
+  success: 'bg-success/10 text-success',
+  warning: 'bg-warning/10 text-warning',
+  danger: 'bg-danger/10 text-danger',
+  info: 'bg-info/10 text-info',
+  accent: 'bg-accent/10 text-accent',
+  neutral: 'bg-neutral/10 text-neutral',
 }
 
 interface BadgeProps {
@@ -30,7 +28,7 @@ export function Badge({ children, status, tone, className, title }: BadgeProps) 
     <span
       title={title}
       className={clsx(
-        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full py-0.5 pl-1.5 pr-2 font-mono text-2xs font-bold uppercase tracking-wide ring-1 ring-inset ring-current',
+        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-sm py-0.5 pl-1.5 pr-2 font-mono text-2xs font-medium uppercase tracking-wider',
         toneClass[tone ?? statusTone(status)],
         className,
       )}
