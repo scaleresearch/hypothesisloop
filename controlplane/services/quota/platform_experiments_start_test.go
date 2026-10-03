@@ -292,7 +292,7 @@ func TestEveryStatusSaysWhyInItsStatusReason(t *testing.T) {
 		"closed":          {ID: "pe-1", Status: domain.PlatformExpClosed},
 	}
 	for _, reason := range []domain.CloseReason{domain.CloseEndTimeReached, domain.CloseByRequest, domain.ClosePlanningLimitReached,
-		domain.CloseProposalExpired, domain.CloseBaselineLimitReached, domain.CloseAgentsNotStarted} {
+		domain.CloseProposalExpired, domain.CloseBaselineLimitReached, domain.CloseAgentsNotStarted, domain.ClosePlannerStopped} {
 		cases[string(reason)] = &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpClosed, CloseReason: reason}
 	}
 	for want, pe := range cases {

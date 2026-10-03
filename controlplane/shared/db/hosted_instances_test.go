@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -609,5 +610,61 @@ func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t 
 	release()
 	if got := instanceOfAgent(draft, planner); got.Restarts != 0 || got.EndReason != string(InstanceReleased) {
 		t.Fatalf("after the revision: got = %+v", got)
+	}
+}
+
+// A planner whose machine dies is asked for again with its session, like any agent, and a draft
+// whose planner was given up on read planning until its limit, then planning_limit_reached, with
+// nobody to answer it. The write that gives the planner up closes the draft and says why. A
+// planner that had answered leaves its proposal waiting for the person.
+func TestADraftWhosePlannerIsGivenUpOnIsClosedSayingSo(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	launcher := "launcher-" + uuid.New().String()[:8]
+	const maxRestarts = 2
+	die := func(draft, planner string, times int) (after domain.AgentInstance) {
+		t.Helper()
+		for i := 0; i < times; i++ {
+			name := fmt.Sprintf("planner-machine-%d", i)
+			if err := pes.AskInstance(ctx, draft, planner, name, "launch-1"); err != nil {
+				t.Fatal(err)
+			}
+			var recorded bool
+			var err error
+			if after, recorded, err = pes.EndInstance(ctx, draft, planner, name, InstanceExited, "out of memory", time.Minute, maxRestarts); err != nil || !recorded {
+				t.Fatalf("machine %d ending: recorded %v, %v", i, recorded, err)
+			}
+		}
+		return after
+	}
+
+	draft, planner := createTestDraft(t, pool, launcher)
+	if after := die(draft, planner, maxRestarts); after.Stopped || after.Restarts != maxRestarts {
+		t.Fatalf("after %d machines: got = %+v, want every restart spent and the planner still asked for", maxRestarts, after)
+	}
+	if got, err := pes.GetPlatformExperiment(ctx, draft); err != nil || got.Status != domain.PlatformExpDraft {
+		t.Fatalf("a draft whose planner is being restarted: got = %+v, %v, want it a draft still", got, err)
+	}
+	if wanted, err := pes.ListLauncherAgents(ctx, launcher, time.Minute); err != nil || len(wanted) != 1 || wanted[0].AgentID != planner {
+		t.Fatalf("the launcher is asked for %+v, %v, want the planner again", wanted, err)
+	}
+	if after := die(draft, planner, 1); !after.Stopped {
+		t.Fatalf("one machine more: got = %+v, want the planner stopped", after)
+	}
+	got, err := pes.GetPlatformExperiment(ctx, draft)
+	if err != nil || got.Status != domain.PlatformExpClosed || got.CloseReason != domain.ClosePlannerStopped || got.ClosedBy != nil || got.ClosedAt == nil {
+		t.Fatalf("the draft of a stopped planner: got = %s %q closed by %v at %v, %v, want it closed planner_stopped by the platform", got.Status, got.CloseReason, got.ClosedBy, got.ClosedAt, err)
+	}
+
+	answered, answering := createTestDraft(t, pool, launcher)
+	if err := pes.SetProposal(ctx, answered, []byte(`{}`), time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if after := die(answered, answering, maxRestarts+1); !after.Stopped {
+		t.Fatalf("got = %+v, want the planner stopped", after)
+	}
+	if got, err := pes.GetPlatformExperiment(ctx, answered); err != nil || got.Status != domain.PlatformExpDraft || got.ProposedAt == nil {
+		t.Fatalf("a draft whose planner stopped after it proposed: got = %+v, %v, want its proposal still waiting", got, err)
 	}
 }

@@ -261,3 +261,13 @@ class NewMachineNoteTest(unittest.TestCase):
         self.assertNotIn("hypothes", baseline)
         self.assertNotIn("branch", coordinator)
         self.assertIn("summary", coordinator)
+
+    # A planner whose machine died was restarted with the researcher's note, and has no hypothesis
+    # to check out and no job to look at.
+    def test_a_planner_is_sent_back_to_its_draft_and_its_proposal(self):
+        from types import SimpleNamespace
+        note = run._new_machine_note(SimpleNamespace(flavor="planner", role="planner"))
+        self.assertIn("The machine you ran on was replaced", note)
+        self.assertIn("write your proposal's file again", note)
+        self.assertNotIn("hypothes", note)
+        self.assertNotIn("jobs", note)

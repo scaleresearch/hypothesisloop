@@ -131,7 +131,12 @@ func (s *PlatformExperimentsStore) EndInstance(ctx context.Context, platformExpI
 	default:
 		return after, false, fmt.Errorf("platform_experiments_store.EndInstance: unknown end %q", how)
 	}
-	err = s.pool.pool.QueryRow(ctx, `
+	tx, err := s.pool.pool.Begin(ctx)
+	if err != nil {
+		return after, false, fmt.Errorf("platform_experiments_store.EndInstance: begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	err = tx.QueryRow(ctx, `
 UPDATE `+c.table+`
 SET `+c.prefix+`name = '', `+c.prefix+`exited_at = now(), `+c.prefix+`exit_log = $4, `+c.prefix+`end_reason = $7, `+c.prefix+`state = '',
     `+c.prefix+`stopped = `+c.prefix+`restarts >= $5,
@@ -145,6 +150,22 @@ RETURNING `+c.prefix+`restarts, `+c.prefix+`stopped, `+c.prefix+`exited_at, `+c.
 	}
 	if err != nil {
 		return after, false, fmt.Errorf("platform_experiments_store.EndInstance: %w", err)
+	}
+	// A draft whose planner is given up on before it answered has nobody left to answer it: it is
+	// closed with the stop, saying so, where it would have read planning until its limit.
+	if after.Stopped && agentID != "" {
+		if _, err := tx.Exec(ctx, `
+UPDATE platform_experiments pe
+SET status = 'closed', updated_at = now(), closed_at = now(), close_reason = '`+string(domain.ClosePlannerStopped)+`'
+WHERE pe.id = $1 AND pe.status = 'draft' AND pe.proposed_at IS NULL
+  AND EXISTS (SELECT 1 FROM experiment_signups s
+              WHERE s.platform_experiment_id = pe.id AND s.agent_id = $2 AND s.role = '`+string(domain.SignupRolePlanner)+`')`,
+			platformExpID, agentID); err != nil {
+			return after, false, fmt.Errorf("platform_experiments_store.EndInstance: close the draft of a stopped planner: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return after, false, fmt.Errorf("platform_experiments_store.EndInstance: commit: %w", err)
 	}
 	return after, true, nil
 }

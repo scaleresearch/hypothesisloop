@@ -273,7 +273,7 @@ type PlatformExperiment struct {
 	// ClosedAt is when it closed and CloseReason why; ClosedBy is whose credential closed it,
 	// absent when the platform did at ClosesAt. A list carries the first two and no ClosedBy.
 	ClosedAt    *time.Time  `json:"closed_at,omitempty"`
-	CloseReason CloseReason `json:"close_reason,omitempty" enum:"end_time_reached,closed_by_request,planning_limit_reached,proposal_expired,baseline_limit_reached,agents_not_started" doc:"Absent while it is not closed, and on one closed before reasons were kept. status_reason says the same with a sentence."`
+	CloseReason CloseReason `json:"close_reason,omitempty" enum:"end_time_reached,closed_by_request,planning_limit_reached,proposal_expired,baseline_limit_reached,agents_not_started,planner_stopped" doc:"Absent while it is not closed, and on one closed before reasons were kept. status_reason says the same with a sentence. planner_stopped is a draft whose planner's machine ended with every restart spent before it answered: the platform restarts a planner that dies, with its session, as it does any agent, and closes the draft in the write that gives the machine up."`
 	ClosedBy    *Actor      `json:"closed_by,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
@@ -376,6 +376,9 @@ const (
 	// CloseAgentsNotStarted is a running platform experiment none of whose researchers' machines
 	// was running by its AgentsDueAt. None of its duration was counted.
 	CloseAgentsNotStarted CloseReason = "agents_not_started"
+	// ClosePlannerStopped is a draft whose planner's machine was given up on, every restart
+	// spent, before the planner answered.
+	ClosePlannerStopped CloseReason = "planner_stopped"
 )
 
 // PlanningRequest is one request to a draft's planner to change its proposal.

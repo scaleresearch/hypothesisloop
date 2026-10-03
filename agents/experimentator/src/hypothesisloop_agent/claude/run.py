@@ -316,11 +316,17 @@ _NEW_MACHINE_COORDINATOR = (
     "Keep the summary's file again from `hl platform-experiments get`, clone the repository only "
     "if you need to read it, and look at the state of the jobs and hypotheses with hl before you "
     "go on.")
+# A planner has no job and no hypothesis: what it had was its clone and the proposal it was writing.
+_NEW_MACHINE_PLANNER = (
+    "Clone the repository again, read the draft with `hl platform-experiments get`, and write "
+    "your proposal's file again from what you had worked out before you go on.")
 
 
 def _new_machine_note(cfg) -> str:
     if config.coordinates(cfg):
         return _NEW_MACHINE_NOTE + _NEW_MACHINE_COORDINATOR
+    if config.plans(cfg):
+        return _NEW_MACHINE_NOTE + _NEW_MACHINE_PLANNER
     return _NEW_MACHINE_NOTE + (_NEW_MACHINE_BASELINE if config.measures_baseline(cfg) else _NEW_MACHINE_RESEARCHER)
 
 
