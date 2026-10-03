@@ -3,8 +3,10 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  apiSend, createPlatformExperiment, fetchAgentsPage, fetchExperimentStats, fetchGitHubInstallations, fetchOrgClusters, fetchPlatformExperimentsPage,
+  ApiError, apiSend, createPlatformExperiment, fetchAgentsPage, fetchExperimentStats, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories,
+  fetchOrgClusters, fetchPlatformExperimentsPage,
 } from '@/lib/api'
+import { GOAL_EXAMPLES } from '@/lib/goal-examples'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import PlatformExperimentsPage from '@/app/(app)/platform-experiments/page'
 import type { Me, PlatformExperiment } from '@/types'
@@ -18,8 +20,8 @@ vi.mock('next/navigation', () => ({
 }))
 vi.mock('@/lib/api', async importActual => ({
   ...(await importActual<typeof import('@/lib/api')>()),
-  apiSend: vi.fn(), createPlatformExperiment: vi.fn(), fetchAgentsPage: vi.fn(), fetchExperimentStats: vi.fn(), fetchGitHubInstallations: vi.fn(),
-  fetchOrgClusters: vi.fn(), fetchPlatformExperimentsPage: vi.fn(),
+  apiSend: vi.fn(), createPlatformExperiment: vi.fn(), fetchAgentsPage: vi.fn(), fetchExperimentStats: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(),
+  fetchGitHubRepositories: vi.fn(), fetchOrgClusters: vi.fn(), fetchPlatformExperimentsPage: vi.fn(),
 }))
 vi.mock('@/components/platform-experiment-card', () => ({
   PlatformExperimentCard: ({ pe }: { pe: PlatformExperiment }) => <article>{pe.name}{pe.shared ? ' (shared)' : ''}</article>,
@@ -53,7 +55,9 @@ beforeEach(() => {
   vi.mocked(fetchOrgClusters).mockResolvedValue([])
   vi.mocked(fetchExperimentStats).mockResolvedValue({ total: 0, by_status: {} } as never)
   vi.mocked(fetchAgentsPage).mockResolvedValue({ items: [], total: 0 })
+  vi.mocked(fetchGitHubApp).mockRejectedValue(new ApiError(503, 'no GitHub App', 'github_not_configured'))
   vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [], total: 0 })
+  vi.mocked(fetchGitHubRepositories).mockResolvedValue({ items: [{ repository: 'acme/widgets', installation_id: 7, private: true }], total: 1 })
   vi.mocked(fetchPlatformExperimentsPage).mockImplementation(async params => {
     const all = params?.shared === false ? own : [...own, ...shared]
     return { items: all.slice(0, params?.limit), total: all.length }
@@ -75,7 +79,7 @@ describe('the experiments page', () => {
       expect(screen.queryByPlaceholderText('e.g. Q3 Vision Benchmark')).toBeNull()
       if (existing.length === 0) expect(await screen.findByText(/None yet\. Write what you want to find out above/)).toBeTruthy()
       await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'Is a cosine schedule better?')
-      await userEvent.click(screen.getByRole('button', { name: 'Plan this experiment' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Plan it' }))
       expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/drafts', { project_id: 'prj_1', goal: 'Is a cosine schedule better?' })
       await waitFor(() => expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/platform-experiments/pe-draft?project=prj_1'))
       expect(createPlatformExperiment).not.toHaveBeenCalled()
@@ -101,22 +105,22 @@ describe('the experiments page', () => {
   it('says why a sentence was refused, and that no cluster is online, and stays', async () => {
     vi.mocked(apiSend).mockRejectedValue(new Error('no launcher is registered, so nothing would run the planner'))
     show()
-    expect(await screen.findByText(/No cluster this org can use is online/)).toBeTruthy()
+    expect(await screen.findByText(/^No compute is online yet\./)).toBeTruthy()
     await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'goal')
-    await userEvent.click(screen.getByRole('button', { name: 'Plan this experiment' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Plan it' }))
     expect(await screen.findByText(/no launcher is registered/)).toBeTruthy()
     expect(navigation.push).not.toHaveBeenCalled()
   })
 
-  it('keeps the full form behind Advanced: Cancel creates nothing, a refusal stays, a created experiment opens', async () => {
+  it('keeps the full form behind Configure it yourself: Cancel creates nothing, a refusal stays, a created experiment opens', async () => {
     show()
-    await userEvent.click(screen.getByRole('button', { name: 'Advanced' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Configure it yourself' }))
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(createPlatformExperiment).not.toHaveBeenCalled()
 
     vi.mocked(createPlatformExperiment).mockRejectedValueOnce(new Error('the org has reached its limit of platform experiments'))
-    await userEvent.click(screen.getByRole('button', { name: 'Advanced' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Configure it yourself' }))
     const dialog = within(screen.getByRole('dialog'))
     await userEvent.type(dialog.getByPlaceholderText('e.g. Q3 Vision Benchmark'), 'First run')
     await userEvent.type(dialog.getByPlaceholderText(/^Goals, evaluation protocol/), 'The brief')
@@ -143,5 +147,124 @@ describe('the experiments page', () => {
     show()
     expect(await screen.findByText('Could not load the experiments of default: API unreachable')).toBeTruthy()
     expect(screen.getByLabelText('What do you want to find out?')).toBeTruthy()
+  })
+})
+
+// The way to plan and the way to configure were a box and a grey link labelled Advanced, under
+// two paragraphs on Enter, spending and GitHub permissions.
+describe('the two ways to a new experiment', () => {
+  const way = (name: string) => screen.getByRole('button', { name })
+
+  it('offers both side by side, planning pressed, and the form pressed while it is open', async () => {
+    show()
+    expect(within(screen.getByRole('group', { name: 'How to start' })).getAllByRole('button').map(b => b.getAttribute('aria-pressed'))).toEqual(['true', 'false'])
+    expect(way('Let us plan it').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.queryByText(/Advanced/)).toBeNull()
+    await userEvent.click(way('Configure it yourself'))
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect(way('Configure it yourself').getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('takes the person to the goal box from Let us plan it', async () => {
+    show()
+    await userEvent.click(way('Let us plan it'))
+    expect(document.activeElement).toBe(screen.getByLabelText('What do you want to find out?'))
+  })
+
+  it('plans from a button beside the box, which waits for a sentence, and says nothing is spent before approval', async () => {
+    vi.mocked(apiSend).mockResolvedValue(experiment('pe-draft'))
+    show()
+    expect(way('Plan it')).toHaveProperty('disabled', true)
+    expect(screen.getByText('Nothing runs or is spent until you approve.')).toBeTruthy()
+    expect(screen.queryByText(/Shift\+Enter/)).toBeNull()
+    await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'Is a cosine schedule better?')
+    await userEvent.click(way('Plan it'))
+    expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/drafts', { project_id: 'prj_1', goal: 'Is a cosine schedule better?' })
+  })
+
+  it('says in one line that no compute is online, and nothing of compute while a cluster is', async () => {
+    const offline = show()
+    const line = await screen.findByText(/^No compute is online yet\./)
+    expect(line.textContent).toBe('No compute is online yet. Compute resources')
+    expect(within(line).getByRole('link', { name: 'Compute resources' }).getAttribute('href')).toBe('/cluster?project=prj_1')
+    offline.unmount()
+
+    vi.mocked(fetchOrgClusters).mockResolvedValue([{ name: 'c1', enabled: true, connected: true } as never])
+    show()
+    await waitFor(() => expect(fetchOrgClusters).toHaveBeenCalledTimes(2))
+    await screen.findByRole('button', { name: 'Plan it' })
+    expect(screen.queryByText(/No compute is online/)).toBeNull()
+  })
+})
+
+// The box gave one fixed example in its placeholder, and nothing that followed what was typed.
+describe('suggested goals', () => {
+  const suggestions = () => screen.queryByRole('list', { name: 'Suggestions' }) ? within(screen.getByRole('list', { name: 'Suggestions' })).getAllByRole('button').map(b => b.textContent) : []
+  const box = () => screen.getByLabelText('What do you want to find out?')
+
+  it('shows three to start from in an empty box', () => {
+    show()
+    expect(suggestions()).toEqual(GOAL_EXAMPLES.slice(0, 3))
+  })
+
+  it('follows the words typed so far, a word still being typed included, three at most', async () => {
+    show()
+    await userEvent.type(box(), 'SOTA lid')
+    expect(suggestions()).toEqual(['Beat the SOTA bits-per-point on lidar point cloud compression for KITTI'])
+    await userEvent.clear(box())
+    await userEvent.type(box(), 'sota')
+    expect(suggestions()).toHaveLength(3)
+    expect(suggestions().every(s => s!.includes('SOTA'))).toBe(true)
+  })
+
+  it('shows none when nothing matches', async () => {
+    show()
+    await userEvent.type(box(), 'Why does my sourdough not rise')
+    expect(screen.queryByRole('list', { name: 'Suggestions' })).toBeNull()
+  })
+
+  it('fills the box with the one clicked, and plans it as typed', async () => {
+    vi.mocked(apiSend).mockResolvedValue(experiment('pe-draft'))
+    show()
+    await userEvent.type(box(), 'muon')
+    const muon = 'Does Muon beat AdamW at equal compute for a 125M-parameter GPT on FineWeb?'
+    await userEvent.click(screen.getByRole('button', { name: muon }))
+    expect(box()).toHaveProperty('value', muon)
+    expect(document.activeElement).toBe(box())
+    expect(screen.queryByRole('button', { name: muon })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Plan it' }))
+    expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/drafts', { project_id: 'prj_1', goal: muon })
+  })
+})
+
+// The page explained GitHub permissions in a paragraph and named no repository to start from.
+describe('the repository of a planned experiment', () => {
+  const app = { slug: 'hl', client_id: 'c', install_url: 'https://github.test/install', authorize_url: 'https://github.test/authorize', new_repository_url: 'https://github.test/new' }
+
+  it('leads to Settings in one line while GitHub is not connected, and the button says why it waits', async () => {
+    vi.mocked(fetchGitHubApp).mockResolvedValue(app)
+    show()
+    const connect = await screen.findByRole('link', { name: 'Connect GitHub in Settings' })
+    expect(connect.getAttribute('href')).toBe('/settings?project=prj_1#github')
+    expect(connect.parentElement!.textContent).toBe('Connect GitHub in Settings to start.')
+    await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'Is a cosine schedule better?')
+    const plan = screen.getByRole('button', { name: 'Plan it' })
+    expect(plan).toHaveProperty('disabled', true)
+    expect(plan.closest('[title]')!.getAttribute('title')).toBe('Connect GitHub in Settings to start')
+    expect(screen.queryByText(/permission|select one only/i)).toBeNull()
+    await userEvent.type(screen.getByLabelText('What do you want to find out?'), '{Enter}')
+    expect(apiSend).not.toHaveBeenCalled()
+  })
+
+  it('defaults to a new private repository once connected, in one control with no how-to', async () => {
+    vi.mocked(fetchGitHubApp).mockResolvedValue(app)
+    vi.mocked(fetchGitHubInstallations).mockResolvedValue({
+      items: [{ org_id: 'org_a', installation_id: 7, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: 'u9', name: 'Una' }, connected_at: at }], total: 1,
+    })
+    show()
+    const field = await screen.findByLabelText('Repository')
+    expect(field.getAttribute('placeholder')).toBe('A new private repository')
+    expect(screen.queryByRole('link', { name: 'create it on GitHub' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Connect GitHub in Settings' })).toBeNull()
   })
 })

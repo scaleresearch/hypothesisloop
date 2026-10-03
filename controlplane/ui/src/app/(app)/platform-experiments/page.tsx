@@ -1,7 +1,8 @@
 'use client'
 
-import { Suspense, useState } from 'react'
+import { Suspense, useId, useRef, useState } from 'react'
 import useSWR from 'swr'
+import { clsx } from 'clsx'
 import { clustersInUse } from '@/lib/clusters'
 import { semantic } from '@/lib/colors'
 import { useProjectRouter, useQueryParam } from '@/lib/query-state'
@@ -14,11 +15,11 @@ import { PlatformExperimentDialog } from '@/components/platform-experiment-form'
 import { PlatformExperimentCard } from '@/components/platform-experiment-card'
 import { Dot } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button, Chip } from '@/components/ui/button'
+import { Chip } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { TextLink } from '@/components/ui/link'
 import { Select } from '@/components/ui/select'
-import { Callout, Loading, ErrorMessage } from '@/components/ui/status-message'
+import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Pagination } from '@/components/ui/pagination'
 
 const PAGE_SIZE = 10
@@ -62,6 +63,27 @@ function LiveStrip() {
   )
 }
 
+/** One of the two ways to a new experiment, side by side and alike. */
+function WayIn({ pressed, title, line, onClick }: { pressed: boolean; title: string; line: string; onClick: () => void }) {
+  const id = useId()
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      aria-labelledby={`${id}-title`}
+      aria-describedby={`${id}-line`}
+      onClick={onClick}
+      className={clsx(
+        'grid gap-0.5 rounded border px-3 py-2 text-left transition-colors',
+        pressed ? 'border-primary bg-primary/10' : 'border-border-control hover:bg-foreground/5',
+      )}
+    >
+      <span id={`${id}-title`} className="text-sm font-semibold text-foreground">{title}</span>
+      <span id={`${id}-line`} className="text-xs text-muted">{line}</span>
+    </button>
+  )
+}
+
 export default function PlatformExperimentsPage() {
   return (
     <Suspense fallback={<Loading />}>
@@ -71,10 +93,9 @@ export default function PlatformExperimentsPage() {
 }
 
 /**
- * The experiments of the selected project and the way to a new one: a sentence saying what to
- * find out, which the platform plans. The full form, for who wants to state the metrics, the
- * budget and the agents themselves, is behind Advanced and opens in a dialog, as it does for an
- * edit. The experiments the platform shares are listed too, read only.
+ * The experiments of the selected project and two ways to a new one: a sentence the platform
+ * plans, or the full form, which opens in a dialog as it does for an edit. The experiments the
+ * platform shares are listed too, read only.
  */
 function PlatformExperimentsPageContent() {
   const { org, project } = useTenant()
@@ -84,6 +105,8 @@ function PlatformExperimentsPageContent() {
   const [sort, setSort] = useQueryParam('sort', '-starts_at')
   const [page, setPage] = useState(0)
   const [dialog, setDialog] = useState<{ editing: PlatformExperiment | null } | null>(null)
+  const configuring = dialog !== null && dialog.editing === null
+  const planning = useRef<HTMLDivElement>(null)
 
   const { data, error, isLoading, mutate } = useSWR(
     ['platform-experiments', project.id, statusFilter, search, sort, page],
@@ -117,24 +140,23 @@ function PlatformExperimentsPageContent() {
         />
       )}
 
-      <PageHeader
-        title="Experiments"
-        description="Write what you want to find out. The platform plans the experiment, and agents run it on your compute."
-      />
+      <PageHeader title="Experiments" />
       <LiveStrip />
 
       <Card className="mb-6 max-w-[720px]">
         <CardHeader><CardTitle>New experiment in {org.name} / {project.name}</CardTitle></CardHeader>
-        <CardContent className="grid gap-3">
+        <CardContent className="grid gap-4">
           {clusters && clustersInUse(clusters).online === 0 && (
-            <Callout tone="warning" className="mb-0">
-              No cluster this org can use is online, so no experiment can be planned or run. <TextLink href="/cluster">Compute resources</TextLink> shows what is connected.
-            </Callout>
+            <p className="text-sm text-warning">
+              No compute is online yet. <TextLink inline href="/cluster">Compute resources</TextLink>
+            </p>
           )}
-          <GoalInput projectID={project.id} onCreated={open} />
-          <div>
-            <Button variant="link" onClick={() => setDialog({ editing: null })}>Advanced</Button>
-            <span className="ml-2 text-xs text-subtle">Set the metrics, the budget, the repository and the agents yourself.</span>
+          <div role="group" aria-label="How to start" className="grid gap-2 sm:grid-cols-2">
+            <WayIn pressed={!configuring} title="Let us plan it" line="Say what to find out. We propose, you approve." onClick={() => planning.current?.querySelector('textarea')?.focus()} />
+            <WayIn pressed={configuring} title="Configure it yourself" line="Set the metrics, budget and agents in a form." onClick={() => setDialog({ editing: null })} />
+          </div>
+          <div ref={planning}>
+            <GoalInput projectID={project.id} onCreated={open} />
           </div>
         </CardContent>
       </Card>

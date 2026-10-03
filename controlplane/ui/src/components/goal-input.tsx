@@ -1,20 +1,24 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { repositoryNotProvided } from '@/lib/api'
+import { GITHUB_CARD } from '@/lib/github-connect'
+import { matchingGoals } from '@/lib/goal-examples'
 import { createDraft, MAX_GOAL_LENGTH } from '@/lib/planning'
 import type { Draft } from '@/lib/planning'
 import { Button } from '@/components/ui/button'
 import { FormField } from '@/components/ui/form-field'
 import { Textarea } from '@/components/ui/input'
+import { TextLink } from '@/components/ui/link'
 import { InlineError } from '@/components/ui/status-message'
-import { ConnectGitHubStep, useGitHub } from '@/components/connect-github-step'
+import { useGitHub } from '@/components/connect-github-step'
 import { RepositorySelect, repositoryFields } from '@/components/repository-select'
+
+const CONNECT_FIRST = 'Connect GitHub in Settings to start'
 
 /**
  * The shortest way to an experiment: one sentence saying what to find out. The platform plans
- * the rest (the metric, a measured baseline, the brief, the cost) and proposes it on the draft's
- * page, where the person accepts it and states what the run may spend.
+ * the rest and proposes it on the draft's page, where the person approves it.
  */
 export function GoalInput({ projectID, onCreated }: { projectID: string; onCreated: (draft: Draft) => void }) {
   const [goal, setGoal] = useState('')
@@ -24,6 +28,8 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
   const [notCreated, setNotCreated] = useState<string | null>(null)
   const github = useGitHub()
   const [repository, setRepository] = useState('')
+  const box = useRef<HTMLTextAreaElement>(null)
+  const suggestions = matchingGoals(goal)
 
   // One rule for the button and for Enter: a sentence, GitHub connected where it is needed, and no plan already on its way.
   const ready = goal.trim() !== '' && !sending && github !== 'unconnected'
@@ -43,13 +49,11 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
   }
 
   return (
-    <div className="grid gap-2">
-      <FormField
-        label="What do you want to find out?"
-        hint="One sentence is enough. Enter plans it, Shift+Enter starts a new line. The platform works out how to measure it and proposes the experiment in a few minutes. Nothing runs and nothing is spent until you accept."
-      >
+    <div className="grid gap-3">
+      <FormField label="What do you want to find out?">
         <Textarea
-          rows={3}
+          ref={box}
+          rows={2}
           maxLength={MAX_GOAL_LENGTH}
           value={goal}
           onChange={e => setGoal(e.target.value)}
@@ -58,20 +62,44 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
             e.preventDefault()
             void plan()
           }}
-          placeholder="e.g. Does a cosine learning-rate schedule beat a constant one for a small transformer on character-level text?"
+          placeholder="Describe your goal in one sentence"
         />
       </FormField>
+      {suggestions.length > 0 && (
+        <ul aria-label="Suggestions" className="grid justify-items-start gap-1">
+          {suggestions.map(example => (
+            <li key={example}>
+              <button
+                type="button"
+                className="rounded text-left text-xs text-muted hover:text-foreground hover:underline"
+                onClick={() => { setGoal(example); box.current?.focus() }}
+              >
+                {example}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       {github === 'connected' && (
-        <FormField label="Repository" hint="Where the planner and the agents keep their code, each on its own branch. Fixed once created.">
-          <RepositorySelect value={repository} onChange={r => { setRepository(r); setNotCreated(null) }} notCreated={notCreated ?? undefined} />
+        <FormField label="Repository">
+          <RepositorySelect compact value={repository} onChange={r => { setRepository(r); setNotCreated(null) }} notCreated={notCreated ?? undefined} />
         </FormField>
       )}
-      {github === 'unconnected' ? <ConnectGitHubStep /> : (
-        <div className="flex items-center gap-3">
-          <Button variant="primary" loading={sending} disabled={goal.trim() === ''} onClick={plan} aria-keyshortcuts="Enter">Plan this experiment</Button>
-          {error && <InlineError>{error}</InlineError>}
-        </div>
+      {github === 'unconnected' && (
+        <p className="text-sm text-muted">
+          <TextLink inline href={`/settings#${GITHUB_CARD}`}>Connect GitHub in Settings</TextLink> to start.
+        </p>
       )}
+      <div className="flex flex-wrap items-center gap-3">
+        {/* A disabled button shows no tooltip in every browser, so the reason sits on its wrapper. */}
+        <span title={github === 'unconnected' ? CONNECT_FIRST : undefined}>
+          <Button variant="primary" loading={sending} disabled={goal.trim() === '' || github === 'unconnected'} onClick={plan} aria-keyshortcuts="Enter">
+            Plan it
+          </Button>
+        </span>
+        <span className="text-xs text-subtle">Nothing runs or is spent until you approve.</span>
+        {error && <InlineError>{error}</InlineError>}
+      </div>
     </div>
   )
 }
