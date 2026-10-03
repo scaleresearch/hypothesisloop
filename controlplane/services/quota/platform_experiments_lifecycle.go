@@ -508,6 +508,16 @@ func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.Pl
 	return nil
 }
 
+// Answer is the body of every route that answers one platform experiment, so each of them says
+// where it stands (Describe) as its reader is to read it.
+func (h *PlatformExperimentsHandler) Answer(ctx context.Context, pe *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error) {
+	reader, _ := auth.FromContext(ctx)
+	if err := h.svc.Describe(ctx, pe, reader); err != nil {
+		return nil, auth.Internal(h.logger, "describe platform experiment", err, zap.String("id", pe.ID))
+	}
+	return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
+}
+
 // start makes the open pe running and allocates each agent that shares the budget its quota. It
 // answers the refusal of notStartable when pe is not to be started.
 func (s *PlatformExperimentsService) start(ctx context.Context, pe *domain.PlatformExperiment, now time.Time) ([]*domain.AgentQuota, error) {

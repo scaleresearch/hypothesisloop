@@ -531,6 +531,10 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	if code != http.StatusOK {
 		t.Fatalf("accept: got = %d %v, want 200", code, out)
 	}
+	// The answer says what the open experiment waits for, as every later read of it does.
+	if why, _ := out["status_reason"].(map[string]any); why["reason"] != "baseline_required" {
+		t.Errorf("accept: status_reason = %v, want baseline_required", out["status_reason"])
+	}
 	pe := store.created[0]
 	if pe.Status != domain.PlatformExpOpen || out["status"] != "open" || pe.Name != "Cosine or constant" || !strings.HasPrefix(pe.Description, "Train the small transformer") ||
 		len(pe.Metrics) != 1 || pe.Metrics[0].Key != "val_loss" || pe.ReportIntervalSeconds != 30 || len(pe.Stages) != 1 || pe.Goal != "g" {
@@ -734,7 +738,7 @@ func TestAPlannerDeclinesWithAReasonThePersonReadsAndCanAnswer(t *testing.T) {
 	before := time.Now()
 	const why = "\"Make the model better\" names nothing to measure: say which model, on what data, and what better means."
 	code, out := asPlanner("PUT", "/platform-experiments/pe-draft/decline", map[string]any{"reason": "  " + why + "\n"})
-	if code != http.StatusOK || out["declined_reason"] != why || out["declined_at"] == nil || out["proposed_at"] != nil || out["proposal"] != nil || out["status"] != "draft" {
+	if code != http.StatusOK || out["declined_reason"] != why || out["declined_at"] == nil || out["proposed_at"] != nil || out["proposal"] != nil || out["status"] != "draft" || out["status_reason"].(map[string]any)["reason"] != "declined" {
 		t.Fatalf("decline: got = %d %v, want the reason, when it declined, and nothing proposed", code, out)
 	}
 	if _, read := call("GET", "/platform-experiments/pe-draft", nil); read["status_reason"].(map[string]any)["reason"] != "declined" {

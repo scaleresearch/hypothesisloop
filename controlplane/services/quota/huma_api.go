@@ -242,7 +242,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if err != nil {
 			return nil, auth.Internal(peh.logger, "create platform experiment", err)
 		}
-		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
+		return peh.Answer(ctx, pe)
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
@@ -359,17 +359,13 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		pe.SignedUpAgents = signups
 		pe.SignupCount = len(signups)
-		reader, _ := auth.FromContext(ctx)
-		if err := peh.svc.Describe(ctx, pe, reader); err != nil {
-			return nil, auth.Internal(peh.logger, "get platform experiment", err, zap.String("id", in.ID))
-		}
 		if err := peh.svc.Spend(ctx, pe); err != nil {
 			return nil, auth.Internal(peh.logger, "get platform experiment", err, zap.String("id", in.ID))
 		}
 		if err := peh.nameActors(ctx, pe); err != nil {
 			return nil, auth.Internal(peh.logger, "get platform experiment", err, zap.String("id", in.ID))
 		}
-		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
+		return peh.Answer(ctx, pe)
 	})
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
@@ -411,10 +407,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			return nil, peh.refusal("update platform experiment", err)
 		}
 		answered := *pe
-		if err := peh.svc.Describe(ctx, &answered, caller); err != nil {
-			return nil, peh.refusal("update platform experiment", err)
-		}
-		return &struct{ Body *domain.PlatformExperiment }{Body: &answered}, nil
+		return peh.Answer(ctx, &answered)
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{

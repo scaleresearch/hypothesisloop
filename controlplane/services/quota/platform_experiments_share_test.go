@@ -46,7 +46,10 @@ func shareAs(t *testing.T, store Sharing, caller auth.Principal, path string) (i
 	t.Helper()
 	router := chi.NewRouter()
 	doc := apidocs.New(router, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	RegisterShareHuma(doc, store, zap.NewNop())
+	answer := func(_ context.Context, pe *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error) {
+		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
+	}
+	RegisterShareHuma(doc, store, answer, zap.NewNop())
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest("POST", path, nil)))
 	var body map[string]any

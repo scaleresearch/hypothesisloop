@@ -152,6 +152,6 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err != nil {
 			return nil, h.refusal("create draft", err)
 		}
-		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
+		return h.Answer(ctx, pe)
 	})
 }

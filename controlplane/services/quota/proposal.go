@@ -189,7 +189,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err := h.nameActors(ctx, pe); err != nil {
 			return nil, h.refusal("name actors", err)
 		}
-		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
+		return h.Answer(ctx, pe)
 	})
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
@@ -214,7 +214,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err != nil {
 			return nil, err
 		}
-		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
+		return h.Answer(ctx, pe)
 	})
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "put-proposal", Method: "PUT", Path: "/platform-experiments/{id}/proposal",
@@ -269,7 +269,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err != nil || pe == nil {
 			return nil, h.refusal("read draft", errors.Join(err, errors.New("the draft is gone")))
 		}
-		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
+		return h.Answer(ctx, pe)
 	})
 }
 
@@ -440,7 +440,7 @@ func registerDeclineHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err != nil || pe == nil {
 			return nil, h.refusal("read draft", errors.Join(err, errors.New("the draft is gone")))
 		}
-		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
+		return h.Answer(ctx, pe)
 	})
 }
 

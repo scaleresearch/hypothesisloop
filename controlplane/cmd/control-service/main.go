@@ -267,7 +267,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	quota.RegisterHuma(doc, handler, peHandler)
 	quota.RegisterAgentsHuma(doc, peHandler)
 	quota.RegisterPlanningHuma(doc, peHandler)
-	quota.RegisterShareHuma(doc, db.NewPlatformExperimentsStore(pool), logger)
+	quota.RegisterShareHuma(doc, db.NewPlatformExperimentsStore(pool), peHandler.Answer, logger)
 	quota.RegisterDataUsageHuma(doc, dataUsageHandler)
 	quota.RegisterSessionsHuma(doc, dataStore, logger)
 	connectedClusters := func(ctx context.Context) (map[string]bool, error) {

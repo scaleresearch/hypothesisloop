@@ -20,10 +20,14 @@ type Sharing interface {
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
 }
 
+// PlatformExperimentAnswer is how a route answers one platform experiment:
+// PlatformExperimentsHandler.Answer.
+type PlatformExperimentAnswer func(context.Context, *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error)
+
 // RegisterShareHuma registers how staff share a platform experiment with every account and take
 // that back. The staff audience is the whole rule: what sharing lets a caller reach is
 // auth.Access's.
-func RegisterShareHuma(doc *apidocs.Doc, store Sharing, logger *zap.Logger) {
+func RegisterShareHuma(doc *apidocs.Doc, store Sharing, answer PlatformExperimentAnswer, logger *zap.Logger) {
 	failed := func(id string, err error) error {
 		return auth.Internal(logger, "sharing a platform experiment failed", err, zap.String("platform_experiment_id", id))
 	}
@@ -51,7 +55,7 @@ func RegisterShareHuma(doc *apidocs.Doc, store Sharing, logger *zap.Logger) {
 			if pe == nil {
 				return nil, missing
 			}
-			return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
+			return answer(ctx, pe)
 		}
 	}
 	apidocs.Register(doc, apidocs.AudienceStaff, huma.Operation{
