@@ -163,10 +163,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"whose one commit is the experiment template (README.md, " + domain.ExperimentFile + " and .hypothesisloop/job.yaml, the base job spec), " +
 			"stores it as if the request had named it and answers with it in repository and repository_url. The installation covers a repository it created whichever repositories its owner selected. " +
 			"With several accounts connected, repository_account says which, and 422 repository_account_required lists them when it is left out; it is never stated with repository (422 invalid_request). " +
-			"The platform creates on a GitHub organisation only: on a person's own account GitHub lets no App installation create a repository, so the answer is 422 repository_account_personal " +
-			"and GitHub is not asked. The person creates an empty private repository there and the request names it, or the org connects an organisation. " +
-			"422 github_not_connected when the org has connected no GitHub account, 422 repository_creation_not_permitted when GitHub refuses the installation the creation of repositories " +
-			"(the message says which permissions GitHub takes for it; the organisation's owner grants one, or the request names a repository), 409 repository_exists when the name is taken, " +
+			"On a GitHub organisation the installation creates the repository. On a person's own account GitHub creates one for its owner alone, so the platform creates it with the authorisation the owner connected the account with " +
+			"and adds it to the installation: 422 repository_authorization_required when the platform does not hold that authorisation or GitHub no longer takes it (the owner connects the account again), " +
+			"502 repository_not_added when GitHub created the repository and did not add it to the installation (the message names it, and its owner adds it there). " +
+			"422 github_not_connected when the org has connected no GitHub account, 422 repository_creation_not_permitted when GitHub refuses the creation " +
+			"(the message says which permissions GitHub takes for it; the account's owner grants one, or the request names a repository), 409 repository_exists when the name is taken, " +
 			"502 repository_not_created when GitHub refused the create for another reason, with GitHub's message, or made the repository and refused its first commit: " +
 			"then the message names the repository left on the account, which the next request may name. Nothing is created without its repository. A repository the request names is never written to. " +
 			"Named, an installation of the platform's GitHub App that the org connected must cover it " +
