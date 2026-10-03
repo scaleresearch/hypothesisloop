@@ -54,6 +54,8 @@ func platformRoutes(caller auth.Principal) http.Handler {
 		WithLoop(struct{ scheduler.Triggerable }{})))
 	registry.RegisterHuma(doc, registry.NewHandler(registry.New(nil, nil, logger, "http://metrics.invalid", nil), logger))
 	registry.RegisterWatchHuma(doc)
+	access := auth.NewAccess(authtest.Placement{})
+	r.Get("/watch", registry.NewWatchHandler(nil, nil, authtest.As(caller), access, logger).ServeHTTP)
 	return r
 }
 
@@ -144,6 +146,7 @@ func TestNoCommandAnAgentRunsCallsARouteAnAgentMayNot(t *testing.T) {
 		{"capacity"},
 		{"data-key"},
 		{"watch", "--wake", "experiment.status", "--no-wait"},
+		{"watch", "--experiment", "job-1", "--until", "status in COMPLETED,FAILED,EVICTED,REJECTED,CANCELLED", "--timeout", "1"},
 	} {
 		requests = 0
 		var stdout, stderr bytes.Buffer

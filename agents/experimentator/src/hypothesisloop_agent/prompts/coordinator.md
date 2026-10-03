@@ -43,7 +43,7 @@ written, the brief changes, the run starts or closes, and while it is `open` whe
 The rest (job outcomes of a run, quota, hypotheses, findings) comes with the next wake, or
 by itself while you work.
 
-Never poll or sleep-wait. On each wake, look at what the update points to, then at these:
+On each wake, look at what the update points to, then at these:
 
   - Standings: `hl results`. A job that has run long with no new point is likely dead:
     `hl job status ID` and `hl job logs ID` say which.

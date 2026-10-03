@@ -33,7 +33,7 @@ class SystemPromptTest(unittest.TestCase):
                           "implementation of a claim, yours or another agent's, is your branch of its hypothesis", flat)
             self.assertNotIn("git checkout -b", flat)
             self.assertNotIn("hl/pe-1/agent-a", flat)
-            self.assertLess(len(prompt.encode()), 7_970)
+            self.assertLess(len(prompt.encode()), 7_900)
 
     def test_why_its_jobs_wait_for_the_start_is_read_from_status_reason(self):
         self.assertIn("with its `status_reason`, `metrics`, `stages` and `current_stage`", " ".join(self.render("generalist").split()))
@@ -56,12 +56,14 @@ class SystemPromptTest(unittest.TestCase):
         self.assertIn("\"the platform could not be reached\", from `hl` or in a failed `git push`, is the platform failing: "
                       "stop there, and an update wakes you to retry once it is back.", " ".join(self.render("generalist").split()))
 
-    # Six hosted agents were told by a brief to block in `hl watch --until` and all did, for the
-    # whole job: the turn stayed in flight, so a frozen agent had no stored session to resume.
-    def test_waiting_for_a_job_is_ending_the_turn_whatever_a_brief_says(self):
+    # Agents waited for a job in sleep loops around `hl job status`. The listed help of hl names
+    # the one command that waits, and a session is stored while its turn is in flight, so no
+    # briefing forbids a wait.
+    def test_a_turn_ends_with_the_last_reply_and_no_wait_is_forbidden(self):
         prompt = " ".join(self.render("generalist").split())
-        self.assertIn("Never poll, sleep or block in `hl watch`, whatever a brief says of waiting", prompt)
         self.assertIn("A reply with no command in it ends your turn, and the next update starts another.", prompt)
+        for forbidden in ("Never poll", "sleep", "hl watch"):
+            self.assertNotIn(forbidden, prompt)
 
     # Four of six hosted agents wrote a job's result twice, as its summary and again as a comment
     # headed "Finding:", because the briefing used both words for it.

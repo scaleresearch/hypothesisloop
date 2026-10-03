@@ -133,7 +133,7 @@ const usage = `usage: hl <command> ...
   project               list | create NAME | rename NAME
   api-key               create NAME | list | revoke ID
   cluster               add NAME | list | token | order | settings | disable | enable | forget-identity | remove
-  watch                 [--agent A | --all] [--platform-experiment PE] | --experiment JOB [--until ...] [--follow]
+  watch                 --experiment JOB --until 'status in COMPLETED,FAILED,EVICTED,REJECTED,CANCELLED' returns when the job ends, or after --timeout seconds (540): the wait that needs no sleep loop. With no flag, your own updates
   exec                  --stop-grace SECONDS -- COMMAND: a runtime's wrapper around a job's command
 
 An ID is positional; --id ID works too. The platform experiment is never an operand. A command

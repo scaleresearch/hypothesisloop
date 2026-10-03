@@ -121,7 +121,7 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertIn('`hl platform-experiments agents finish --reason "baseline measured by job ID"`', flat)
         self.assertNotIn("Every agent competes", flat)
         self.assertNotIn("hl platform-experiments propose", flat)
-        self.assertLess(len(prompt.encode()), 4_240)
+        self.assertLess(len(prompt.encode()), 4_200)
         self.assertEqual(listed(baseline_agent()), [[], ["job"], ["job", "submit"], ["repo"]])
 
     # It reads where its code goes in the words the researchers' briefing uses.
@@ -173,13 +173,13 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertIn("Write no estimate into the file, or every researcher's job carries it", flat)
         self.assertIn("the `--env` that vary it, and no estimate: theirs is measured on your job", flat)
 
-    # Six agents once blocked in `hl watch` for a whole job, and none had a session to resume.
     def test_waiting_for_the_baseline_is_ending_the_turn(self):
         flat = render(baseline_agent())[1]
         # Agents of one run ended seven turns with `true` or an `echo`, each between what they
         # had written and the one-line reply the briefing asked a turn to end with.
         self.assertIn("A reply with no command in it ends your turn, and the next update starts another. "
-                      "Never poll, sleep or block in `hl watch`", flat)
+                      "A job that failed", flat)
+        self.assertNotIn("hl watch", flat)
         self.assertIn("A reply with no command in it ends your turn, and a revision starts another.", render(planner())[1])
 
     # A baseline that cannot be measured must not hold the experiment open until its limit.
