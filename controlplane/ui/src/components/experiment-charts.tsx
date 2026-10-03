@@ -293,7 +293,7 @@ export function MetricSelector({
               label={<>
                 {i === 0 && <span className="font-bold">★</span>}
                 {m.key}
-                <span className="opacity-70">{m.direction === 'maximize' ? '↑' : '↓'}</span>
+                <span>{m.direction === 'maximize' ? '↑' : '↓'}</span>
               </>}
             />
           )
@@ -387,7 +387,7 @@ export function CompetingAgentsChart({
     <>
       {nonRawAgentIds.size > 0 && (
         <div
-          className="mb-2 inline-block px-2 py-0.5 rounded-sm border border-danger bg-danger/10 font-mono text-2xs text-danger"
+          className="mb-2 inline-block px-2 py-0.5 rounded-sm border border-danger bg-danger-tint font-mono text-2xs text-danger"
           title="These agents also reported this metric on a non-&quot;raw&quot; basis (a rescaled/transformed value); that data is excluded from this chart and never compared to raw-basis agents."
         >
           Non-raw basis data excluded for: {Array.from(nonRawAgentIds).sort().map((agentID, i) => <Fragment key={agentID}>{i > 0 && ', '}<AgentLabel id={agentID} /></Fragment>)}

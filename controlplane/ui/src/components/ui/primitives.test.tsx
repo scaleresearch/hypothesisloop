@@ -28,7 +28,7 @@ describe('a badge', () => {
 describe('theme colours in script', () => {
   it('are the tokens of the stylesheet, so charts follow the theme', () => {
     expect(statusColor('FAILED')).toBe('rgb(var(--danger))')
-    expect(tint(statusColor('FAILED'), 0.1)).toBe('color-mix(in srgb, rgb(var(--danger)) 10%, transparent)')
+    expect(tint(statusColor('FAILED'), 'tint')).toBe('color-mix(in srgb, rgb(var(--danger)) calc(var(--alpha-tint) * 100%), transparent)')
   })
 })
 

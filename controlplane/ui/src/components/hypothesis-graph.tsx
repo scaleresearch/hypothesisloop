@@ -77,7 +77,7 @@ const Highlight = createContext({
 
 function pickClass(pickable: Set<string> | null, id: string) {
   if (!pickable) return undefined
-  return pickable.has(id) ? 'cursor-crosshair ring-1 ring-primary' : 'cursor-not-allowed opacity-30'
+  return pickable.has(id) ? 'cursor-crosshair ring-1 ring-primary' : 'cursor-not-allowed opacity-dimmed'
 }
 
 const HANDLE = 'pointer-events-none opacity-0'
@@ -108,7 +108,7 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
         'justify-between border-border-strong',
         selected === item.id ? 'bg-surface-raised shadow-md ring-1 ring-accent' : 'bg-surface-inset',
         hits.has(item.id) && 'ring-2 ring-warning',
-        dimmed.has(item.id) && 'opacity-20',
+        dimmed.has(item.id) && 'opacity-dimmed',
         pickClass(pickable, item.id),
       )}
       style={{ borderLeftColor: color }}
@@ -127,7 +127,7 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
 const ObjectiveNode = memo(function ObjectiveNode({ id, data }: NodeProps<Node<ObjectiveNodeData>>) {
   const { selected, pickable } = useContext(Highlight)
   return (
-    <div className={clsx(NODE, 'justify-center border-primary', selected === id ? 'bg-surface-raised shadow-md ring-1 ring-accent' : 'bg-primary/5', pickClass(pickable, id))}>
+    <div className={clsx(NODE, 'justify-center border-primary', selected === id ? 'bg-surface-raised shadow-md ring-1 ring-accent' : 'bg-surface-inset', pickClass(pickable, id))}>
       <HiddenHandles />
       <div className="flex items-center justify-between gap-2">
         <Eyebrow>Objective</Eyebrow>
@@ -285,7 +285,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
       pathOptions: hierarchy ? undefined : { stepPosition: 1, offset: e.type === 'related' ? 12 : 20 },
       label: hierarchy && !further ? undefined : s.label,
       zIndex: hierarchy && !further ? 0 : 1,
-      labelStyle: { fill: s.color, fontSize: 10, fontWeight: 600, opacity },
+      labelStyle: { fill: s.text, fontSize: 10, fontWeight: 600, opacity },
       labelBgStyle: { fill: semantic.surface },
       labelBgPadding: [4, 2] as [number, number],
       style: {
@@ -339,7 +339,6 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
         edges={edges}
         nodeTypes={nodeTypes}
         connectionMode={ConnectionMode.Loose}
-        colorMode="system"
         onInit={() => setReady(true)}
         minZoom={0.05}
         maxZoom={2}
@@ -351,7 +350,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
         proOptions={{ hideAttribution: true }}
         style={{ background: semantic.surface, flex: 1, height: 'auto', minHeight: 0 }}
       >
-        <Background gap={24} color={tint(semantic.text, 0.06)} />
+        <Background gap={24} color={tint(semantic.text, 'track')} />
         <Controls showInteractive={false} position="top-left" />
         {below && (adding !== null ? (
           <Anchored at={below}><IdeaEditor key={adding} /></Anchored>
@@ -369,7 +368,6 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
             pannable
             zoomable
             nodeColor={n => n.type === 'objective' ? semantic.primary : statusColor((n.data as HypothesisNodeData).item.status)}
-            maskColor={tint(semantic.surface, 0.7)}
             style={{ background: semantic.surfaceInset, width: 150, height: 100 }}
           />
         )}

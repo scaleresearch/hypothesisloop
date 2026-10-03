@@ -14,6 +14,7 @@ export const semantic = {
   subtle: token('text-subtle'),
   border: token('border'),
   borderStrong: token('border-strong'),
+  borderControl: token('border-control'),
   surface: token('surface'),
   surfaceInset: token('surface-inset'),
   surfaceRaised: token('surface-raised'),
@@ -24,9 +25,12 @@ export const brand = {
   google: { blue: '#4285F4', green: '#34A853', yellow: '#FBBC05', red: '#EA4335' },
 } as const
 
-/** A colour at the given opacity (0 to 1), for fills behind a line or dot of the same colour. */
-export function tint(color: string, opacity: number): string {
-  return `color-mix(in srgb, ${color} ${Math.round(opacity * 100)}%, transparent)`
+/** The states of globals.css a colour can be laid on at, the same as the class tints of tailwind.config.ts. */
+export type TintLevel = 'hover' | 'track' | 'tint' | 'faint' | 'edge'
+
+/** A colour at one of the theme's state strengths, for a fill behind a line or dot of the same colour. */
+export function tint(color: string, level: TintLevel): string {
+  return `color-mix(in srgb, ${color} calc(var(--alpha-${level}) * 100%), transparent)`
 }
 
 export type Tone = 'success' | 'warning' | 'danger' | 'info' | 'accent' | 'neutral'
@@ -77,11 +81,13 @@ export const hypothesisStatuses = ['open', 'confirmed', 'refuted', 'inconclusive
  * Hypothesis graph edges. builds_on is the hierarchy; a cross link carries its label on the edge
  * and stays solid: a dashed stroke is generated along the whole path, offscreen parts included,
  * and long cross links in a graph of thousands made every pan frame take seconds.
+ * builds_on is drawn in the control edge colour, the lightest grey that holds 3:1 on the canvas,
+ * and labelled in muted text, as no border grey can carry text.
  */
 export const hypothesisLinkStyles = {
-  builds_on: { color: semantic.borderStrong, label: 'builds on' },
-  contradicts: { color: semantic.danger, label: 'contradicts' },
-  related: { color: semantic.info, label: 'related' },
+  builds_on: { color: semantic.borderControl, text: semantic.muted, label: 'builds on' },
+  contradicts: { color: semantic.danger, text: semantic.danger, label: 'contradicts' },
+  related: { color: semantic.info, text: semantic.info, label: 'related' },
 } as const
 
 /** Props every recharts chart shares, so axes, grid and tooltip look the same on each. */
@@ -96,7 +102,7 @@ export const chart = {
       fontSize: 12,
     },
     labelStyle: { color: semantic.text },
-    cursor: { fill: tint(semantic.text, 0.04) },
+    cursor: { fill: tint(semantic.text, 'hover') },
   },
   legend: { fontSize: 10 },
 } as const

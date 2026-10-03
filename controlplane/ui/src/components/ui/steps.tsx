@@ -19,10 +19,10 @@ export function Steps({ label, steps, current, live }: {
           aria-current={i === at ? 'step' : undefined}
           className={clsx('flex items-center gap-2', i === at ? 'font-semibold text-accent' : i < at ? 'text-muted' : 'text-subtle')}
         >
-          {i > 0 && <span aria-hidden="true" className={clsx('h-px w-5', i <= at ? 'bg-accent/50' : 'bg-border-strong')} />}
+          {i > 0 && <span aria-hidden="true" className={clsx('h-px w-5', i <= at ? 'bg-accent-edge' : 'bg-border-strong')} />}
           <span
             aria-hidden="true"
-            className={clsx('h-2 w-2 rounded-full', i === at ? 'bg-accent' : i < at ? 'bg-accent/50' : 'bg-border-strong', i === at && live && 'animate-pulse')}
+            className={clsx('h-2 w-2 rounded-full', i === at ? 'bg-accent' : i < at ? 'bg-accent-edge' : 'bg-border-strong', i === at && live && 'animate-pulse')}
           />
           {step.label}
         </li>

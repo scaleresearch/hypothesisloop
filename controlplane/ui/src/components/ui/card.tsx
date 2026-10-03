@@ -59,7 +59,7 @@ export function CardLink({ className, ...props }: ComponentProps<typeof Link>) {
 export function RowLink({ className, ...props }: ComponentProps<typeof Link>) {
   return (
     <Link
-      className={clsx('flex w-full min-w-0 items-center gap-2 rounded px-2 py-1.5 text-xs text-foreground transition-colors hover:bg-foreground/5', className)}
+      className={clsx('flex w-full min-w-0 items-center gap-2 rounded px-2 py-1.5 text-xs text-foreground transition-colors hover:bg-hover', className)}
       {...props}
     />
   )

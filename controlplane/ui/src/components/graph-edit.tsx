@@ -289,7 +289,7 @@ function SimilarIdeas({ similar, choices, onChoose, onShow }: {
   onShow: (id: string) => void
 }) {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-2 rounded border border-warning/60 p-2 text-xs">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-2 rounded border border-warning-edge p-2 text-xs">
       <span className="text-muted">
         Not added yet: these read close to your idea, or it builds on a refuted one. Link yours to each, or keep it distinct.
       </span>

@@ -18,7 +18,7 @@ export function Skeleton({ className }: { className?: string }) {
   return (
     <div
       className={clsx(
-        'h-3 animate-pulse rounded-sm bg-foreground/[0.06]',
+        'h-3 animate-pulse rounded-sm bg-track',
         className,
       )}
     />
@@ -33,7 +33,7 @@ export function Spinner({ className }: { className?: string }) {
 // error-banner and text-error carry no style: the browser suite finds errors by them.
 export function ErrorMessage({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div role="alert" className={clsx('error-banner flex items-center gap-2 rounded border border-danger/30 bg-danger/10 px-3.5 py-2.5 text-sm text-danger', className)}>
+    <div role="alert" className={clsx('error-banner flex items-center gap-2 rounded border border-danger-edge bg-danger-tint px-3.5 py-2.5 text-sm text-danger', className)}>
       <span aria-hidden="true" className="h-1.5 w-1.5 flex-none rounded-full bg-danger" />
       <span>{children}</span>
     </div>

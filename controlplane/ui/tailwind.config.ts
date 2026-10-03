@@ -1,14 +1,25 @@
 import type { Config } from 'tailwindcss'
 
 const token = (name: string) => `rgb(var(--${name}) / <alpha-value>)`
+const state = (name: string, alpha: string) => `rgb(var(--${name}) / var(--alpha-${alpha}))`
 
-// The whole palette: every colour class resolves to a token in globals.css.
+// A tone with the fills it is laid on: tint behind its own text (a badge, an error), faint behind
+// a note (a callout), edge for the border of either.
+const tone = (name: string) => ({
+  DEFAULT: token(name),
+  tint: state(name, 'tint'),
+  faint: state(name, 'faint'),
+  edge: state(name, 'edge'),
+})
+
+// The whole palette: every colour class resolves to a token in globals.css. There is no opacity
+// modifier in the components: a hover, a selection or a tint is one of the named states below.
 const config: Config = {
   content: [
     './src/app/**/*.{js,ts,jsx,tsx,mdx}',
     './src/components/**/*.{js,ts,jsx,tsx,mdx}',
   ],
-  darkMode: 'media',
+  darkMode: ['selector', '[data-theme="dark"]'],
   theme: {
     colors: {
       transparent: 'transparent',
@@ -33,15 +44,32 @@ const config: Config = {
         hover: token('primary-hover'),
         foreground: token('primary-foreground'),
       },
-      accent: token('accent'),
-      success: token('success'),
-      warning: token('warning'),
-      danger: token('danger'),
-      info: token('info'),
-      neutral: token('neutral'),
+      accent: tone('accent'),
+      success: tone('success'),
+      warning: tone('warning'),
+      danger: tone('danger'),
+      info: tone('info'),
+      neutral: tone('neutral'),
       chart: Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8].map(n => [n, token(`chart-${n}`)])),
       ring: token('ring'),
-      overlay: token('overlay'),
+      // The row or button under the pointer.
+      hover: state('text', 'hover'),
+      // The item a person is on: the current page in the nav, the option the arrow keys reached.
+      highlight: state('text', 'highlight'),
+      // What a person picked and that stays picked: a row, a toggle, a filter in force.
+      selected: state('accent', 'selected'),
+      // The empty part of a bar, and a skeleton.
+      track: state('text', 'track'),
+      // Behind a dialog.
+      scrim: state('overlay', 'scrim'),
+    },
+    opacity: {
+      0: '0',
+      // A control that cannot be used now.
+      disabled: '0.5',
+      // A thing set aside: filtered out, or not a choice in the current step.
+      dimmed: '0.25',
+      100: '1',
     },
     fontSize: {
       '2xs': ['11px', '1.4'],

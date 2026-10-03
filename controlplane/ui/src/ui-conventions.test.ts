@@ -29,6 +29,8 @@ const colours = {
   'Tailwind palette class, use a token class': new RegExp(`\\b(${COLOR_UTILITY})-((${PALETTE})-\\d{2,3}|white|black)\\b`),
   'hex colour, use a token': /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})\b/,
   'colour function, use a token': /\b(?:rgba?|hsla?)\(/,
+  'opacity on a colour, use a state or tint token (bg-hover, bg-selected, bg-danger-tint, ...)': new RegExp(`\\b(${COLOR_UTILITY})-[a-z][\\w-]*/(\\d|\\[)`),
+  'numbered opacity, use opacity-disabled or opacity-dimmed': /\bopacity-(?!0\b|100\b|disabled\b|dimmed\b)[\w[]/,
 }
 
 const controls = {

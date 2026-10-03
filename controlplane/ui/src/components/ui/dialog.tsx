@@ -17,7 +17,7 @@ interface DialogProps {
 export function Dialog({ open, onClose, title, size = 'default', children }: DialogProps) {
   return (
     <HeadlessDialog open={open} onClose={onClose} className="relative z-50">
-      <DialogBackdrop className="fixed inset-0 bg-overlay/60" />
+      <DialogBackdrop className="fixed inset-0 bg-scrim" />
       <div className="fixed inset-0 flex items-center justify-center p-4">
         <DialogPanel
           className={clsx(

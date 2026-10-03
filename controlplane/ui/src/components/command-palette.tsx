@@ -150,7 +150,7 @@ export function CommandPalette() {
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-overlay/60 pt-[14vh] backdrop-blur-sm" onClick={close}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-scrim pt-[14vh] backdrop-blur-sm" onClick={close}>
       <div
         role="dialog"
         aria-modal="true"
@@ -185,7 +185,7 @@ export function CommandPalette() {
                 key={item.id}
                 role="option"
                 aria-selected={active}
-                className={clsx('flex cursor-pointer items-center gap-2.5 rounded px-2.5 py-2', active ? 'bg-primary/15 text-foreground' : 'text-muted')}
+                className={clsx('flex cursor-pointer items-center gap-2.5 rounded px-2.5 py-2', active ? 'bg-highlight text-foreground' : 'text-muted')}
                 onMouseEnter={() => setActiveIndex(i)}
                 onClick={item.action}
               >

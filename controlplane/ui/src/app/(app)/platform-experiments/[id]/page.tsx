@@ -423,7 +423,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                 acc.nodes.push(
                   <div key={stageNo} className="min-w-0" style={{ flex: stage.length_pct }} title={stage.max_job_hours ? `No single job may run longer than ${stage.max_job_hours}h during this stage` : 'No job length limit during this stage'}>
                     <div className={clsx('h-2 overflow-hidden rounded-sm bg-border', current && 'ring-1 ring-accent')}>
-                      <div className={clsx('h-full', current ? 'bg-accent' : 'bg-accent/50')} style={{ width: `${filled * 100}%` }} />
+                      <div className={clsx('h-full', current ? 'bg-accent' : 'bg-accent-edge')} style={{ width: `${filled * 100}%` }} />
                     </div>
                     <div className="mt-1 truncate font-mono text-2xs text-subtle">
                       {stage.length_pct}%{stage.evict_pct > 0 && ` · cut ${stage.evict_pct}%`}{stage.max_job_hours ? ` · ≤${stage.max_job_hours}h/job` : ''}
@@ -531,7 +531,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                     <Fragment key={agentId}>
                       <tr
                         onClick={() => setExpandedAgentId(isExpanded ? null : agentId)}
-                        className={clsx('cursor-pointer', isCut ? 'bg-warning/5 opacity-60' : isWinner && 'bg-primary/5')}
+                        className={clsx('cursor-pointer', isCut ? 'bg-danger-faint' : isWinner && 'bg-success-faint')}
                       >
                         <td className="font-mono text-xs font-semibold">{rank != null ? `#${rank}` : '—'}</td>
                         <td className="whitespace-nowrap font-mono text-xs font-semibold">

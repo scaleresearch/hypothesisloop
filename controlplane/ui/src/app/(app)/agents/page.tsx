@@ -47,7 +47,7 @@ function AgentExperimentQuota({ agentId, pe, colSpan }: { agentId: string; pe: P
   const unit = unitOf(pe)
   const room = q.remaining_guaranteed_accelerator_hours > 0 || q.remaining_burst_accelerator_hours > 0
   return (
-    <tr className="bg-foreground/5">
+    <tr className="bg-surface-inset">
       <td colSpan={colSpan} className="pl-7 text-2xs">
         <div className="flex flex-wrap items-center gap-6">
           <TextLink href={`/platform-experiments/${pe.id}`} className="text-xs">{pe.name}</TextLink>

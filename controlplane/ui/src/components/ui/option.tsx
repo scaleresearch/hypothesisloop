@@ -18,7 +18,7 @@ export function panelClass(field: 'button' | 'input') {
 export function optionClass(size: FieldSize = 'default', mono?: boolean) {
   return clsx(
     'group flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-foreground',
-    'data-[focus]:bg-primary/10 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50',
+    'data-[focus]:bg-highlight data-[disabled]:cursor-not-allowed data-[disabled]:opacity-disabled',
     size === 'sm' ? 'text-xs' : 'text-sm',
     mono && 'font-mono',
   )

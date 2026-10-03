@@ -11,7 +11,7 @@ const tableClass = clsx(
   '[:where(&)_th]:overflow-hidden [:where(&)_th]:text-ellipsis [:where(&)_th]:whitespace-nowrap [:where(&)_th]:border-b [:where(&)_th]:px-3 [:where(&)_th]:py-2 [:where(&)_th]:text-left',
   '[:where(&)_th]:text-2xs [:where(&)_th]:font-bold [:where(&)_th]:uppercase [:where(&)_th]:tracking-wider [:where(&)_th]:text-muted',
   '[:where(&)_td]:border-b [:where(&)_td]:px-3 [:where(&)_td]:py-2.5 [:where(&)_td]:align-middle',
-  '[:where(&)_tbody>tr:last-child>td]:border-b-0 [:where(&)_tbody>tr:hover>td]:bg-primary/5',
+  '[:where(&)_tbody>tr:last-child>td]:border-b-0 [:where(&)_tbody>tr:hover>td]:bg-hover',
 )
 
 /** The data table. Rows and cells inside are plain thead, tbody, tr, th and td. */

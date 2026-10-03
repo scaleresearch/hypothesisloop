@@ -15,7 +15,7 @@ export function Link({ href, ...props }: Omit<ComponentProps<typeof NextLink>, '
 export const textLinkClass = 'rounded-sm text-accent hover:underline'
 
 /** How a link inside a sentence reads: underlined, so colour is not all that tells it from the words around it. */
-export const inlineLinkClass = 'rounded-sm text-accent underline decoration-accent/50 underline-offset-2 hover:decoration-accent'
+export const inlineLinkClass = 'rounded-sm text-accent underline decoration-accent-edgeunderline-offset-2 hover:decoration-accent'
 
 /** An in-app link that reads as one. `inline` is for a link inside a sentence. */
 export function TextLink({ inline, className, ...props }: ComponentProps<typeof Link> & { inline?: boolean }) {

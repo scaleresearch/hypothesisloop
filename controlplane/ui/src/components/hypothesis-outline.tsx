@@ -44,7 +44,7 @@ function Row({ id, depth, selected, selectedRef, hit, className, onSelect, child
           ref={selected ? selectedRef : undefined}
           selected={selected || editor?.adding === id}
           hit={hit}
-          className={clsx(className, picking && (pickable ? 'cursor-crosshair' : 'cursor-not-allowed opacity-30'))}
+          className={clsx(className, picking && (pickable ? 'cursor-crosshair' : 'cursor-not-allowed opacity-dimmed'))}
           style={{ paddingLeft: indent(depth) }}
           aria-current={selected}
           onClick={() => (picking ? pickable && editor!.pick(id) : onSelect(id))}
@@ -86,7 +86,7 @@ export function HypothesisOutline({ graph, rootLabel, selected, hits, filters, o
           depth={depth + 1}
           selected={selected === node.id}
           hit={hits.has(node.id)}
-          className={clsx(!matchesFilters(node, filters) && 'opacity-40')}
+          className={clsx(!matchesFilters(node, filters) && 'opacity-dimmed')}
           {...common}
         >
           <span title={verdictBy(node) && `${node.status} ${verdictBy(node)}`}><Badge status={node.status}>{node.status}</Badge></span>

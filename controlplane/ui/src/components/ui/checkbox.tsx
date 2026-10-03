@@ -15,10 +15,10 @@ export function Checkbox({ label, pill, color, className, ...props }: CheckboxPr
     <label
       className={clsx(
         'inline-flex cursor-pointer items-center gap-1.5 text-xs',
-        pill && 'rounded-full border bg-surface-inset px-2 py-0.5 font-mono text-muted has-[:checked]:border-primary has-[:checked]:bg-primary/15 has-[:checked]:text-foreground',
+        pill && 'rounded-full border bg-surface-inset px-2 py-0.5 font-mono text-muted has-[:checked]:border-accent has-[:checked]:bg-selected has-[:checked]:text-foreground',
         className,
       )}
-      style={pill && color && props.checked ? { borderColor: color, background: tint(color, 0.1) } : undefined}
+      style={pill && color && props.checked ? { borderColor: color, background: tint(color, 'tint') } : undefined}
     >
       <input type="checkbox" className="m-0 h-3.5 w-3.5 cursor-pointer accent-primary" {...props} />
       {label}

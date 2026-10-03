@@ -18,7 +18,7 @@ interface StatTileProps {
 
 const tileClass = 'block min-w-0 overflow-hidden rounded-lg border bg-surface px-4 py-3.5 shadow-sm'
 const linkedClass = 'transition-shadow hover:border-border-strong hover:shadow-md'
-const activeClass = 'border-primary bg-primary/5 ring-1 ring-inset ring-primary'
+const activeClass = 'border-accent bg-selected ring-1 ring-inset ring-accent'
 
 /** One figure of a summary row. Only a tile that is a link lifts on hover. */
 export function StatTile({ label, value, sub, tone, href, active }: StatTileProps) {

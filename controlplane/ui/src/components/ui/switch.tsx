@@ -21,7 +21,7 @@ export function Switch({ checked, onChange, label, disabled, className }: Switch
       aria-label={label}
       className={clsx(
         'group inline-flex h-5 w-9 flex-none cursor-pointer items-center rounded-full border border-border-control bg-surface-inset p-0.5 transition-colors',
-        'data-[checked]:border-primary data-[checked]:bg-primary data-[disabled]:cursor-not-allowed data-[disabled]:opacity-60',
+        'data-[checked]:border-primary data-[checked]:bg-primary data-[disabled]:cursor-not-allowed data-[disabled]:opacity-disabled',
         className,
       )}
     >

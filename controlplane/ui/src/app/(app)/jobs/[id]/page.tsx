@@ -252,7 +252,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
                     {name}{name === primaryMetricName ? ' (ranking metric)' : ''}
                     {nonRaw.length > 0 && (
                       <span
-                        className="ml-2 rounded-sm border border-danger bg-danger/10 px-1.5 py-px font-mono text-2xs text-danger"
+                        className="ml-2 rounded-sm border border-danger bg-danger-tint px-1.5 py-px font-mono text-2xs text-danger"
                         title="One or more values on this chart are not on the metric's normal ('raw') scale — do not compare them to a raw-basis run."
                       >
                         basis: {bases.join(', ')}

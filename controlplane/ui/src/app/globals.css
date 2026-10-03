@@ -2,33 +2,36 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Colours are space-separated RGB channels so Tailwind can apply opacity (bg-primary/10).
-   theme-contrast.test.ts holds every pair below to WCAG AA in both schemes. */
+/* Colours are space-separated RGB channels; tailwind.config.ts turns them into classes.
+   theme-contrast.test.ts holds every pair below, and the fills the --alpha-* states make, to WCAG AA
+   in both themes. */
 /* Warm paper neutrals carry the interface; primary actions are ink; one petrol accent marks links,
    focus and selection. Status tones only say how a thing is going. chart-1..8 is the ordered series
    palette, checked for colour-blind separation on surface in both schemes. */
+/* Light is the default. lib/theme.ts sets data-theme="dark" on <html> before first paint when a
+   person chose Dark, or chose System on a machine in dark mode. */
 :root {
-  --background: 247 246 243;
+  --background: 251 250 247;
   --surface: 255 255 255;
-  --surface-inset: 243 242 239;
+  --surface-inset: 240 239 236;
   --surface-raised: 255 255 255;
-  --border: 228 227 223;
-  --border-strong: 208 207 202;
-  --border-control: 140 139 134;
-  --text: 30 30 30;
+  --border: 217 217 214;
+  --border-strong: 196 195 190;
+  --border-control: 134 133 128;
+  --text: 35 35 35;
   --text-muted: 80 80 80;
   --text-subtle: 98 98 96;
   --primary: 35 35 35;
   --primary-hover: 17 17 17;
   --primary-foreground: 255 255 255;
-  --accent: 29 90 115;
-  --success: 37 104 55;
+  --accent: 22 90 117;
+  --success: 37 106 55;
   --warning: 122 79 16;
-  --danger: 150 48 48;
-  --info: 46 88 140;
+  --danger: 160 52 52;
+  --info: 40 98 150;
   --neutral: 88 88 86;
-  --ring: 29 90 115;
-  --overlay: 30 30 30;
+  --ring: 22 90 117;
+  --overlay: 35 35 35;
 
   --chart-1: 42 107 168;
   --chart-2: 192 122 36;
@@ -39,56 +42,88 @@
   --chart-7: 176 98 142;
   --chart-8: 92 138 58;
 
+  /* How strongly a state lays a token over what is under it. hover, highlight and track are the
+     text colour; selected is the accent; tint, faint and edge are a tone over a surface. */
+  --alpha-hover: 0.05;
+  --alpha-highlight: 0.08;
+  --alpha-selected: 0.1;
+  --alpha-track: 0.07;
+  --alpha-tint: 0.1;
+  --alpha-faint: 0.05;
+  --alpha-edge: 0.3;
+  --alpha-scrim: 0.45;
+
   --radius-sm: 4px;
   --radius: 6px;
   --radius-lg: 10px;
 
-  --shadow-sm: 0 1px 2px rgb(30 30 30 / 0.04);
-  --shadow-md: 0 4px 16px -4px rgb(30 30 30 / 0.10), 0 1px 3px rgb(30 30 30 / 0.05);
-  --shadow-lg: 0 16px 48px -12px rgb(30 30 30 / 0.20);
+  /* Surfaces in the page are told apart by a 1px border; only what floats over it has a shadow. */
+  --shadow-sm: 0 0 #0000;
+  --shadow-md: 0 4px 16px -4px rgb(35 35 35 / 0.10), 0 1px 3px rgb(35 35 35 / 0.05);
+  --shadow-lg: 0 16px 48px -12px rgb(35 35 35 / 0.20);
 
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: 20 20 19;
-    --surface: 28 28 26;
-    --surface-inset: 34 34 32;
-    --surface-raised: 38 38 36;
-    --border: 46 46 43;
-    --border-strong: 61 61 57;
-    --border-control: 117 115 109;
-    --text: 237 237 234;
-    --text-muted: 176 175 170;
-    --text-subtle: 168 167 161;
-    --primary: 237 237 234;
-    --primary-hover: 255 255 255;
-    --primary-foreground: 20 20 19;
-    --accent: 127 179 201;
-    --success: 120 190 138;
-    --warning: 214 168 98;
-    --danger: 236 150 141;
-    --info: 138 175 219;
-    --neutral: 176 175 170;
-    --ring: 127 179 201;
-    --overlay: 0 0 0;
+:root[data-theme='dark'] {
+  --background: 20 20 19;
+  --surface: 28 28 26;
+  --surface-inset: 34 34 32;
+  --surface-raised: 38 38 36;
+  --border: 46 46 43;
+  --border-strong: 61 61 57;
+  --border-control: 117 115 109;
+  --text: 237 237 234;
+  --text-muted: 176 175 170;
+  --text-subtle: 168 167 161;
+  --primary: 237 237 234;
+  --primary-hover: 255 255 255;
+  --primary-foreground: 20 20 19;
+  --accent: 127 179 201;
+  --success: 120 190 138;
+  --warning: 214 168 98;
+  --danger: 236 150 141;
+  --info: 138 175 219;
+  --neutral: 176 175 170;
+  --ring: 127 179 201;
+  --overlay: 0 0 0;
 
-    --chart-1: 74 138 198;
-    --chart-2: 201 130 42;
-    --chart-3: 46 162 143;
-    --chart-4: 199 90 72;
-    --chart-5: 133 121 201;
-    --chart-6: 168 142 34;
-    --chart-7: 186 110 152;
-    --chart-8: 102 153 63;
+  --chart-1: 74 138 198;
+  --chart-2: 201 130 42;
+  --chart-3: 46 162 143;
+  --chart-4: 199 90 72;
+  --chart-5: 133 121 201;
+  --chart-6: 168 142 34;
+  --chart-7: 186 110 152;
+  --chart-8: 102 153 63;
 
-    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
-    --shadow-md: 0 6px 20px -6px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.3);
-    --shadow-lg: 0 16px 48px -12px rgb(0 0 0 / 0.6);
+  --alpha-hover: 0.07;
+  --alpha-highlight: 0.11;
+  --alpha-selected: 0.16;
+  --alpha-track: 0.1;
+  --alpha-tint: 0.16;
+  --alpha-faint: 0.08;
+  --alpha-edge: 0.4;
+  --alpha-scrim: 0.6;
 
-    color-scheme: dark;
-  }
+  --shadow-sm: 0 0 #0000;
+  --shadow-md: 0 6px 20px -6px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.3);
+  --shadow-lg: 0 16px 48px -12px rgb(0 0 0 / 0.6);
+
+  color-scheme: dark;
+}
+
+/* The graph library's own controls, drawn from the tokens so they follow the theme. */
+.react-flow {
+  --xy-controls-button-background-color: rgb(var(--surface-raised));
+  --xy-controls-button-background-color-hover: rgb(var(--surface-inset));
+  --xy-controls-button-color: rgb(var(--text));
+  --xy-controls-button-color-hover: rgb(var(--text));
+  --xy-controls-button-border-color: rgb(var(--border));
+  --xy-controls-box-shadow: var(--shadow-md);
+  --xy-minimap-mask-background-color: rgb(var(--surface) / 0.7);
+  --xy-edge-label-background-color: rgb(var(--surface));
+  --xy-edge-label-color: rgb(var(--text-muted));
 }
 
 @layer base {

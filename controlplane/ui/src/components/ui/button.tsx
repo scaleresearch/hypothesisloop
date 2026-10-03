@@ -14,16 +14,16 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   loading?: boolean
 }
 
-const base = 'inline-flex items-center justify-center gap-1.5 whitespace-nowrap font-medium transition-colors disabled:cursor-default disabled:opacity-50'
+const base = 'inline-flex items-center justify-center gap-1.5 whitespace-nowrap font-medium transition-colors disabled:cursor-default disabled:opacity-disabled'
 
 const boxed = 'rounded border shadow-sm active:translate-y-px disabled:shadow-none'
 
 // Hover is written for anything not disabled, so the same classes serve a link, which is never `:enabled`.
 const variantClass: Record<Variant, string> = {
-  default: clsx(boxed, 'border-border-control bg-surface-raised text-foreground [&:not(:disabled)]:hover:bg-foreground/5'),
+  default: clsx(boxed, 'border-border-control bg-surface-raised text-foreground [&:not(:disabled)]:hover:bg-hover'),
   primary: clsx(boxed, 'border-primary bg-primary text-primary-foreground [&:not(:disabled)]:hover:border-primary-hover [&:not(:disabled)]:hover:bg-primary-hover'),
-  danger: clsx(boxed, 'border-danger/40 bg-danger/10 text-danger [&:not(:disabled)]:hover:border-danger/60 [&:not(:disabled)]:hover:bg-danger/20'),
-  ghost: 'rounded text-muted [&:not(:disabled)]:hover:bg-foreground/5 [&:not(:disabled)]:hover:text-foreground',
+  danger: clsx(boxed, 'border-danger-edge bg-danger-tint text-danger [&:not(:disabled)]:hover:border-danger'),
+  ghost: 'rounded text-muted [&:not(:disabled)]:hover:bg-hover [&:not(:disabled)]:hover:text-foreground',
   link: 'text-accent [&:not(:disabled)]:hover:underline',
 }
 
@@ -76,7 +76,7 @@ export function Chip({ active, className, ...props }: ChipProps) {
         'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
         active
           ? 'border-primary bg-primary text-primary-foreground'
-          : 'border-border-control bg-surface text-muted hover:bg-foreground/5 hover:text-foreground',
+          : 'border-border-control bg-surface text-muted hover:bg-hover hover:text-foreground',
         className,
       )}
       {...props}
@@ -97,8 +97,8 @@ export const RowButton = forwardRef<HTMLButtonElement, RowButtonProps>(function 
       ref={ref}
       className={clsx(
         'flex w-full min-w-0 items-center gap-2 rounded border px-2 py-1.5 text-left text-sm text-foreground transition-colors',
-        selected ? 'bg-primary/15' : 'hover:bg-foreground/5',
-        hit ? 'border-warning/60' : selected ? 'border-primary/40' : 'border-transparent',
+        selected ? 'bg-selected' : 'hover:bg-hover',
+        hit ? 'border-warning' : selected ? 'border-accent' : 'border-transparent',
         className,
       )}
       {...props}

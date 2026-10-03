@@ -74,7 +74,7 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
               <button
                 type="button"
                 title={example}
-                className="block max-w-full truncate rounded-full border border-border-control px-2.5 py-0.5 text-xs text-muted transition-colors hover:bg-foreground/5 hover:text-foreground"
+                className="block max-w-full truncate rounded-full border border-border-control px-2.5 py-0.5 text-xs text-muted transition-colors hover:bg-hover hover:text-foreground"
                 onClick={() => { setGoal(example); box.current?.focus() }}
               >
                 {example}

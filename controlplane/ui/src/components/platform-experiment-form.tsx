@@ -263,7 +263,7 @@ function MetricsEditor({ metrics, onChange }: { metrics: MetricDefinition[]; onC
             return (
               <Pill key={m.key} tone={m.direction === 'maximize' ? 'success' : 'warning'} active={primary}>
                 {primary ? (
-                  <span title="Primary metric — used for ranking" className="opacity-80">★</span>
+                  <span title="Primary metric — used for ranking" >★</span>
                 ) : (
                   <Button type="button" variant="ghost" size="icon" onClick={() => makePrimary(m.key)} title="Make primary">☆</Button>
                 )}
