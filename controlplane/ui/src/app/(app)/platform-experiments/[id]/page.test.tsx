@@ -78,14 +78,26 @@ describe('a shared platform experiment of another org', () => {
   it('says why a closed one closed: its end time, or who closed it early', async () => {
     const closed = { status: PlatformExperimentStatus.CLOSED, closed_at: at }
     const first = show('project=prj_1', { ...closed, close_reason: 'end_time_reached' })
-    expect(await screen.findByText('reached its end time')).toBeTruthy()
+    expect(await screen.findByText(/It reached its end time\.$/)).toBeTruthy()
     first.unmount()
     show('project=prj_1', { ...closed, close_reason: 'closed_by_request', closed_by: { kind: 'user', id: 'u2', name: 'Grace' } })
-    expect((await screen.findByText(/closed early by/)).textContent).toContain('Grace')
-    expect(screen.queryByText('reached its end time')).toBeNull()
+    expect(await screen.findByText(/It was closed early by Grace\.$/)).toBeTruthy()
+    expect(screen.queryByText(/reached its end time/)).toBeNull()
     cleanup()
     show('project=prj_1', { ...closed, close_reason: 'planning_limit_reached' })
     expect(await screen.findByText(/its planner proposed nothing within the planning limit/)).toBeTruthy()
+  })
+
+  // The coordinator's closing summary was filed and shown nowhere.
+  it('shows the coordinator\'s summary of a run, and no card for one that has none', async () => {
+    const first = show('project=prj_1', { status: PlatformExperimentStatus.CLOSED, close_reason: 'end_time_reached', summary: 'Cosine won by 0.04 val_loss.\nWarmup mattered more than decay.' })
+    const card = (await screen.findByRole('heading', { name: 'The coordinator\'s summary' })).parentElement!.parentElement!
+    expect(card.querySelector('p')!.textContent).toBe('Cosine won by 0.04 val_loss.\nWarmup mattered more than decay.')
+    first.unmount()
+    cleanup()
+    show('project=prj_1', { status: PlatformExperimentStatus.CLOSED, close_reason: 'end_time_reached' })
+    await screen.findByRole('heading', { name: 'Vision benchmark' })
+    expect(screen.queryByRole('heading', { name: 'The coordinator\'s summary' })).toBeNull()
   })
 
   it('shows its agents and no control that writes', async () => {
@@ -137,7 +149,7 @@ describe('the baseline of a platform experiment', () => {
     first.unmount()
     cleanup()
     show('project=prj_1', { status: PlatformExperimentStatus.CLOSED, close_reason: 'baseline_limit_reached' })
-    expect(await screen.findByText('never ran: no baseline was measured and declared in time')).toBeTruthy()
+    expect(await screen.findByText(/It never ran: no baseline was measured in time\.$/)).toBeTruthy()
   })
 })
 

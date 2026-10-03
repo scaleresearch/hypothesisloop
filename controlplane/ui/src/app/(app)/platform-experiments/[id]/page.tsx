@@ -31,7 +31,7 @@ import { AgentJobsPanel, AgentSelector, CompetingAgentsChart, LiveMetricsPicker,
 import { ExperimentAgents } from '@/components/experiment-agents'
 import { HostedMachines } from '@/components/hosted-machines'
 import { AgentLabel, AgentNames } from '@/components/agent-label'
-import { Actor, verdictBy } from '@/components/actor'
+import { verdictBy } from '@/components/actor'
 import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
 import { Badge, NoSummary } from '@/components/ui/badge'
 import { MetricBar } from '@/components/ui/metric-bar'
@@ -55,25 +55,6 @@ import { pollEvery } from '@/lib/roster'
 
 function StatusBadge({ status }: { status: string }) {
   return <Badge status={status}>{status}</Badge>
-}
-
-const CLOSED_BY_THE_PLATFORM: Partial<Record<NonNullable<PlatformExperiment['close_reason']>, string>> = {
-  end_time_reached: 'reached its end time',
-  planning_limit_reached: 'never ran: its planner proposed nothing within the planning limit',
-  proposal_expired: 'never ran: nobody took up its planner\'s answer in time',
-  baseline_limit_reached: 'never ran: no baseline was measured and declared in time',
-}
-
-/** Why a closed experiment closed. Nothing for one closed before reasons were kept. */
-function CloseReason({ pe }: { pe: PlatformExperiment }) {
-  const byThePlatform = pe.close_reason && CLOSED_BY_THE_PLATFORM[pe.close_reason]
-  if (byThePlatform) return <span className="text-xs text-subtle">{byThePlatform}</span>
-  if (pe.close_reason !== 'closed_by_request' || !pe.closed_by) return null
-  return (
-    <span className="inline-flex items-center gap-1.5 text-xs text-subtle" title={pe.closed_at && formatDate(pe.closed_at)}>
-      closed early by <Actor actor={pe.closed_by} />
-    </span>
-  )
 }
 
 // How many of the newest jobs the page reads, for the jobs table and the metrics picker.
@@ -271,7 +252,6 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
         description={
           <div className="flex flex-wrap items-center gap-2.5">
             <StatusBadge status={pe.status} />
-            <CloseReason pe={pe} />
             <SharedBadge pe={pe} />
             {clock && <span className="text-xs text-subtle">{clock}</span>}
             <TextLink href={graphHref(pe.id)} className="text-xs">
@@ -287,6 +267,12 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
       <PhaseStrip pe={pe} jobs={jobRows} readOnly={readOnly} />
       <HostedMachines pe={pe} jobs={stats?.total ?? 0} />
       <Baseline pe={pe} />
+      {pe.summary && (
+        <Card>
+          <CardHeader><CardTitle>The coordinator&apos;s summary</CardTitle></CardHeader>
+          <CardContent><p className="whitespace-pre-wrap text-sm">{pe.summary}</p></CardContent>
+        </Card>
+      )}
 
       {readOnly && (
         <p role="note" className="-mt-3 mb-4 text-xs text-muted">

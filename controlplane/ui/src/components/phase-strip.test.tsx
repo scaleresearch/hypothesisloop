@@ -105,6 +105,27 @@ describe('the phase strip', () => {
   })
 })
 
+// Why an experiment closed was a few grey words beside its status badge, and a run whose
+// machines never came up had none.
+describe('a closed experiment', () => {
+  it.each([
+    ['end_time_reached', 'It reached its end time.'],
+    ['planning_limit_reached', 'It never ran: its planner proposed nothing within the planning limit.'],
+    ['proposal_expired', 'It never ran: nobody took up its planner\'s answer in time.'],
+    ['baseline_limit_reached', 'It never ran: no baseline was measured in time.'],
+    ['agents_not_started', 'It started, and no researcher\'s machine was running in time, so the platform closed it. None of its duration was used. Agents, below, says why each machine did not come up.'],
+    ['closed', 'the API\'s sentence for closed'],
+  ])('says why in words: %s', (reason, words) => {
+    show(experiment('closed', reason, { closed_at: at }))
+    expect(sentence()).toBe(`Closed ${formatDate(at)}. ${words}`)
+  })
+
+  it('names who closed it early', () => {
+    show(experiment('closed', 'closed_by_request', { closed_at: at, closed_by: { kind: 'user', id: 'u2', name: 'Grace' } }))
+    expect(sentence()).toBe(`Closed ${formatDate(at)}. It was closed early by Grace.`)
+  })
+})
+
 // What an experiment waited for was a sentence in the agents card, the same whether the person
 // reading it had to act or only to wait.
 describe('whose move it is', () => {

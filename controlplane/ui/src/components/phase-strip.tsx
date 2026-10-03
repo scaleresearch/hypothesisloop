@@ -9,6 +9,7 @@ import type { Draft } from '@/lib/planning'
 import { useRoster } from '@/lib/roster'
 import { ExperimentStatus, PlatformExperimentStatus } from '@/types'
 import type { Experiment, JoinedAgent, StatusReason } from '@/types'
+import { actorLabel } from '@/components/actor'
 import { AgentAtWork } from '@/components/agent-at-work'
 import { AGENTS_CARD } from '@/components/experiment-agents'
 import { JobReason } from '@/components/job-reason'
@@ -31,6 +32,12 @@ const SENTENCE: Record<string, (pe: Draft) => string> = {
   declined: () => 'The planner proposed no experiment and says why below.',
   agents_starting: pe => `The researchers' machines are starting. The run's clock starts when the first one is running, and the platform closes the experiment if none is by ${formatDate(pe.agents_due_at)}.`,
   running: pe => `The researchers are at work until ${formatDate(pe.ends_at)}.`,
+  end_time_reached: () => 'It reached its end time.',
+  closed_by_request: pe => `It was closed early by ${actorLabel(pe.closed_by!)}.`,
+  planning_limit_reached: () => 'It never ran: its planner proposed nothing within the planning limit.',
+  proposal_expired: () => 'It never ran: nobody took up its planner\'s answer in time.',
+  baseline_limit_reached: () => 'It never ran: no baseline was measured in time.',
+  agents_not_started: () => 'It started, and no researcher\'s machine was running in time, so the platform closed it. None of its duration was used. Agents, below, says why each machine did not come up.',
 }
 
 function sentenceOf(pe: Draft): string {
@@ -107,6 +114,7 @@ export function PhaseStrip({ pe, jobs = [], readOnly = false }: { pe: Draft; job
   const why = (
     <p role="status" className="text-sm">
       {phase === 'baseline' && !pe.baseline_job_id && 'Preparing the baseline. No researcher starts and none of their machines is rented until it is measured. '}
+      {phase === 'closed' && pe.closed_at && `Closed ${formatDate(pe.closed_at)}. `}
       {sentenceOf(pe)}
     </p>
   )
