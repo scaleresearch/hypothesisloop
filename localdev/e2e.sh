@@ -100,7 +100,7 @@ installed="$(kubectl get nodes -o json | python3 -c 'import json, sys; print(sum
 reported=""
 for _ in $(seq 1 60); do
   reported="$(curl -fsS -H "Authorization: Bearer ${HL_TOKEN}" "${api}/resource-catalog/capacity" |
-    python3 -c 'import json, sys; print(sum(a["total"] for c in json.load(sys.stdin)["clusters"] if c["cluster_name"] == "local" for a in c["accelerators"] or []))')"
+    python3 -c 'import json, sys; print(sum(a["total"] for c in json.load(sys.stdin)["clusters"] if c["cluster_name"] == "local" for a in c["accelerators"] or [] if a["kind"] == "accelerator"))')"
   [[ "${reported}" == "${installed}" ]] && break
   sleep 2
 done
