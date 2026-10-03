@@ -1,4 +1,4 @@
-# Oversee experiment & record all issues — master prompt
+# Run one experiment as its coordinator: the assignment
 
 Launch and run one full experiment end to end, fully unattended. Fill in the variables, then
 follow the body below.

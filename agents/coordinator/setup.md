@@ -5,7 +5,7 @@ when supervising surfaces an environment/platform problem.
 
 ## Variables
 
-Set by the caller (e.g. `repeatable/oversee-experiment-record-all-issues.md`) or default as
+Set by the caller (e.g. `agents/coordinator/run-one-experiment.md`) or default as
 shown. Resolve against the live environment, never guess.
 
     EXPERIMENT=<name>                          # required — agents/coordinator/experiments/<name>/
