@@ -1,110 +1,56 @@
-# Coordinator: supervise a run
+# Coordinator: supervise a run from a host
 
-For after `setup.md` has agents running. Variables are the same as `setup.md`. You watch; you
-never act on an agent's behalf.
+For after `setup.md` has agents running, with the same variables.
 
-A coordinator the platform runs (`coordinator_hosted`, `setup.md` section 2) works from
-`agents/experimentator/src/hypothesisloop_agent/prompts/coordinator.md`: this file with every
-step that needs a host removed. A change to how a run is supervised belongs in both.
+How a run is supervised is written once, in the coordinator briefing
+`agents/experimentator/src/hypothesisloop_agent/prompts/coordinator.md`: what to watch, the
+brief, the baseline, the flavor mix, blockers, the summary and the close. Read it and work from
+it with your own token and `hl`. This file holds only the steps that need a host, which a
+coordinator the platform runs (`coordinator_hosted`) has none of.
 
-## Poll periodically
+You watch. You never act on an agent's behalf.
 
-Every 5-10 min at first, widen once behavior looks steady.
+## Agents you run yourself
 
-- `podman logs --tail 100 agent-<n>` (or `tail -100` of its `.activity.log`) for an agent you
-  run yourself — progress or stuck loop? A hosted agent's activity is read from its provider
-  through the launcher's account. Each line is one `say`, `tool`, `error` or `event` (a platform update the agent was
-  handed); see setup.md section 4.
-- `GET $API_URL/platform-experiments/{id}/stages` — current stage, progress, cut agents. A job
-  stuck past `max_job_hours` is a bug, not just slow.
-- `GET $API_URL/...` — is the ranking metric moving, reporting at `experiment.md`'s cadence?
-  Long-running with no new point = likely dead.
-- `podman ps` / `$API_URL` job status — stuck/crashed containers, pending jobs (capacity
-  starvation, image pull failure).
+Every 5 to 10 minutes at first, less often once the run is steady:
 
-  **Never pipe a raw `GET .../experiments?platform_experiment_id=...` listing straight into your
-  context.** That endpoint returns every job's full `job`/`resolved_job`/hypothesis/theory/
-  objective text, unpaginated defaults grow with every job ever submitted, and it gets bigger
-  every single poll for the life of the experiment (a mature run's full listing is commonly
-  >1MB, i.e. several hundred thousand tokens if read raw). Always pipe through `jq`/`python3` and
-  extract only `id`+`status` (add `updated_at`/one metric field only when you specifically need
-  it) before it reaches your context — the same discipline applies to `fix-later.md`: read only
-  the tail/recent entries, not the whole file, once it's grown past a page or two, and archive
-  resolved entries out of it promptly (see "Record findings" below) instead of letting it grow
-  unbounded — a large shared findings file costs every future agent that's told to consult it.
+- `podman ps`: a self-run agent whose container is gone has exited. Read its `.err`.
+- `podman logs --tail 100 agent-<n>`, or the tail of its `.activity.log`: progress or a loop.
+  `setup.md` section 4 lists the kinds of line.
 
-## Revisit the flavor mix at stage boundaries
+A hosted agent needs neither: `hl platform-experiments agents list` shows its machine
+(`instance`), and `hl platform-experiments agents session AGENT` writes out what it said and saw.
 
-`setup.md` step 3 is not a one-time decision — every `GET .../stages` poll that shows a stage
-boundary crossed (or a hypothesis newly `confirmed` with a clear metric lead) is also a checkpoint
-to ask whether the *next* wave of agents should still be spawned with the same flavor mix. Broad
-(`generalist` + one of each targeted flavor) while no region is promising yet; narrowed toward
-the axis whose branch of the hypothesis graph is confirmed once one is, away from refuted
-branches. This never touches an agent already running; it only changes what flavor the next
-`hl platform-experiments agents add` asks for, in the next platform experiment: a roster is
-fixed once its experiment starts. So read the graph before every new wave, not just at kickoff, e.g. statuses per
-direction:
+`hl job list` prints one brief line per job, 20 a page and 50 at most (`--limit`, `--offset`),
+and says how many more there are. `hl job status ID` prints a job's whole record, so ask it
+only for the jobs you need.
 
-    hl hypothesis query --platform-experiment $PLATFORM_EXPERIMENT_ID "MATCH (d:Hypothesis)-[:BUILDS_ON]->(:Objective)
-      OPTIONAL MATCH (h:Hypothesis)-[:BUILDS_ON*0..]->(d:Hypothesis) RETURN d.id, d.text, h.status, count(h)"
+## The brief and its files
 
-and log the mix and its reasoning in `$FINDINGS_FILE` each time it changes, the same way the
-initial mix is logged.
+The live `description` is the only place an agent reads the question. On a host the
+`EXPERIMENT DESCRIPTION` block is also kept in `experiment.md` and
+`.hypothesisloop/experiment.yaml`, so an edit to either file is finished only once
+`hl platform-experiments update --description-file FILE` has sent the block and the description
+it answers with matches the file (`setup.md` step 2). The update tells every agent that the
+brief changed, with a `platform_experiment.description` event that carries no text.
 
-## When something actually blocks research
+## Blockers a host can fix
 
-Not a style nit, not a hypothetical. Go to `setup.md`'s "Fixing a blocker" section and fix it
-there. If the platform experiment itself is unrecoverable (misconfigured, capacity lost), close
-and restart clean — but log why in `$FINDINGS_FILE` first. Keep in mind these instructions should be generic and work for every experiment.
+Capacity, an image, the repository, platform code: `setup.md`, "Fixing a blocker". When the
+platform experiment cannot be recovered, write why into the summary, close it and start a new
+one.
 
-## Baseline
+## Findings
 
-The `BASELINE` block in the live description (`setup.md` step 2, `experiment-checklist.md` item 1)
-is the thing to watch, not a number you hold in your head.
-
-- When the baseline job completes, declare it in the same turn:
-  `hl platform-experiments update --baseline-job JOB`. The platform writes the job, its
-  `code_ref` and what it measured into the description, and the answer says whether the run
-  started. A baseline sitting measured and undeclared starts nothing.
-- If a later run makes the block wrong (the pin moved, the config changed), that is a description
-  edit like any other and follows the same same-turn sync rule.
-
-## Keeping the live description in sync
-
-Every time you edit `experiment.md` or `FINAL_RESULT.md` (a resolved question, a redirect, a new
-recommended direction), immediately `PUT` the refreshed `EXPERIMENT DESCRIPTION` block to the live
-platform experiment's `description` field, then `GET` it back and diff against the file — see
-`setup.md` step 2. Don't rely on a hypothesis comment alone to redirect an agent's in-flight retry
-loop; it has failed to stop one before. If an agent keeps retrying past a comment, verify the
-*description* actually changed before assuming the agent is ignoring you.
-
-That `PUT` emits a `platform_experiment.description` event on `/watch`, which the harness hands to
-every agent as an update, and agents are told to re-read the description when it arrives. That does not weaken anything above: the event carries no
-text, so the description remains the only place the new question exists, and an agent that is
-mid-job, disconnected or restarting learns nothing until it reads it. The event only shortens the
-delay between your edit and the agent noticing — which is why the edit still has to happen, and
-still has to be read back and diffed. An unsynced description is silent in exactly the same way it
-was before; it now also emits nothing, so nobody is even nudged to look.
-
-## Record findings
-
-Append to `$FINDINGS_FILE` as you go, not just at the end. Each entry: what happened (observed,
-not paraphrased), what you changed and why, resolved or still open. Bias toward what speeds up the
-*next* run, not what's already obvious from the experiment's own metrics. Skip a "routine poll,
-nothing new" entry entirely rather than appending one — every entry costs every future agent told
-to read this file, forever; only append when there's an actual new fact, change, or decision.
-
-If `$FINDINGS_FILE` has grown past a couple hundred lines, archive its resolved entries to
-`fix-later-archive-<date>.md` and leave only what's still open/actionable in the live file before
-continuing — do this as routine housekeeping, not just when someone complains it's slow.
+The run's findings go into the summary, as the briefing says. What concerns the platform or
+the next run's setup goes into `$FINDINGS_FILE` as one plain line under the heading it belongs
+to. Add a line only for a new fact, and delete one that is done.
 
 ## End the run
 
-- `POST .../platform-experiments/{id}/close` with a JSON body — `{}` is enough (a request with no
-  body at all 400s: "request body is required").
+- Write the summary, then `hl platform-experiments close`.
 - `lib_detach_node $KUBE_CONTEXT $NODE_NAME`.
-- `podman stop -t 90 agent-<n>` for each agent you run yourself (the agent takes one last turn
-  of up to a minute to file owed summaries and verdicts). A hosted agent needs nothing: its token
-  works for two more minutes and its machine is taken down after them. Leave branches/commits in
-  the experiment's repository intact.
-- Final pass over `$FINDINGS_FILE` — anything still open should say so explicitly.
+- `podman stop -t 90 agent-<n>` for each agent you run yourself: the agent takes one last turn
+  of up to a minute to file owed summaries and verdicts. A hosted agent needs nothing: its token
+  works for two more minutes and its machine is taken down after them. Leave the branches and
+  commits in the experiment's repository.
