@@ -48,6 +48,16 @@ func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string, _ i
 		if resp.Container.State.Error != "" {
 			return podexecPhaseReason(resp.Container.State.Error), resp.Container.State.Error, restartCount, scheduledNodes, "", nil
 		}
+		// The states PollJobStatus does not report as what the job itself did.
+		switch c.State {
+		case "running", "created", "restarting", "removing", "exited", "stopped":
+		case "paused":
+			return "", "the container is paused on this node's engine, so the job's command does not run until somebody unpauses it", restartCount, scheduledNodes, "", nil
+		case "dead":
+			return domain.PhaseReasonContainerFailed, "the engine reports the container dead: it could neither run it nor remove it", restartCount, scheduledNodes, "", nil
+		default:
+			return domain.PhaseReasonContainerFailed, fmt.Sprintf("the engine reports the container in state %q, which this runtime does not know", c.State), restartCount, scheduledNodes, "", nil
+		}
 		if resp.Container.State.ExitCode != 0 {
 			return domain.PhaseReasonOfExit(resp.Container.State.ExitCode), fmt.Sprintf("container exited with code %d", resp.Container.State.ExitCode), restartCount, scheduledNodes, "", nil
 		}

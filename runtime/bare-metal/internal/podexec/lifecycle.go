@@ -261,6 +261,10 @@ func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *domain.Exper
 // PollJobStatus inspects experimentID's container state. The container ID itself stands
 // in for k8s's UID: it changes on every stop+remove+recreate cycle, so callers can still detect
 // a preempt-then-recreate race the same way status.go's reportChangedStatuses does.
+//
+// Every state the engine has is mapped by name. One this runtime was not written for is the
+// job's failure, with the state as the reason in PollPhaseDetail: an error here would withhold
+// the node's whole status push for as long as the container stays that way.
 func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agentexec.JobStatus, error) {
 	pending := agentexec.JobStatus{Phase: workload.JobPhasePending, Attempt: workload.AttemptUnknown}
 	op, busy := e.operations()[experimentID]
@@ -282,6 +286,13 @@ func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agen
 			// Created but not started is not running: it consumes nothing and may never start.
 			// Reporting it as running billed a wedged container as if it were training.
 			observed.Phase = workload.JobPhasePending
+		case "paused", "restarting":
+			// The container exists and its command does not run: frozen by somebody on the
+			// host, or between two starts. Reported as running it would read as alive for good.
+			observed.Phase = workload.JobPhasePending
+		case "removing":
+			// It is leaving the engine and nothing of it can be read any more.
+			return agentexec.JobStatus{Phase: workload.JobPhaseGone, Attempt: workload.AttemptUnknown}, nil
 		case "exited", "stopped":
 			code, reported, err := e.exitCode(ctx, c.ID)
 			if err != nil {
@@ -292,8 +303,11 @@ func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agen
 			if reported && code == 0 {
 				observed.Phase = workload.JobPhaseSucceeded
 			}
+		case "dead":
+			// The engine's word for a container it could neither run nor remove.
+			observed.Phase = workload.JobPhaseFailed
 		default:
-			observed.Phase = workload.JobPhasePending
+			observed.Phase = workload.JobPhaseFailed
 		}
 		return observed, nil
 	}

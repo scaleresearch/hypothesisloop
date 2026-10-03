@@ -123,6 +123,42 @@ func TestAnExitedContainerWithNoReportedStateIsFailedWithAReason(t *testing.T) {
 	}
 }
 
+// Every state the engine has is reported as what it is. A paused container read as pending with
+// nothing said, a dead one as pending for good, and so did any state nobody had thought of.
+func TestEveryEngineStateIsReportedByNameAndAnUnknownOneIsAFailureWithTheReason(t *testing.T) {
+	for state, want := range map[string]struct {
+		phase   workload.JobPhase
+		reason  string
+		message string
+	}{
+		"running":     {workload.JobPhaseRunning, "", ""},
+		"created":     {workload.JobPhasePending, "", ""},
+		"restarting":  {workload.JobPhasePending, "", ""},
+		"paused":      {workload.JobPhasePending, "", "paused"},
+		"removing":    {workload.JobPhaseGone, "", ""},
+		"dead":        {workload.JobPhaseFailed, domain.PhaseReasonContainerFailed, "dead"},
+		"hibernating": {workload.JobPhaseFailed, domain.PhaseReasonContainerFailed, `"hibernating"`},
+	} {
+		t.Run(state, func(t *testing.T) {
+			engine := newFakeEngine()
+			c := jobContainer("east", state, true)
+			c.labels[LabelExperimentID] = "job"
+			engine.containers[containerName("job")] = c
+			east := newFakeExecutor(engine)
+			east.clusterName = "east"
+
+			status, err := east.PollJobStatus(context.Background(), "job")
+			if err != nil || status.Phase != want.phase {
+				t.Fatalf("status = %s (err %v), want %s", status.Phase, err, want.phase)
+			}
+			reason, message, _, _, _, err := east.PollPhaseDetail(context.Background(), "job", 0)
+			if err != nil || reason != want.reason || !strings.Contains(message, want.message) || (want.message == "" && message != "") {
+				t.Fatalf("phase detail = %q %q (err %v), want reason %q and a message with %q", reason, message, err, want.reason, want.message)
+			}
+		})
+	}
+}
+
 func TestAContainerThatExitedNonZeroIsReportedAsFailedWithItsCode(t *testing.T) {
 	engine := newFakeEngine()
 	for id, exit := range map[string]int{"crashed": 3, "finished": 0} {
