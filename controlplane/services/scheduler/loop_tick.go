@@ -17,7 +17,7 @@ import (
 )
 
 // tick runs one full admission pass. Single-threaded — no concurrent ticks.
-func (l *Loop) tick(ctx context.Context) error {
+func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	if !l.ticking.CompareAndSwap(false, true) {
 		panic("scheduler: tick() re-entered concurrently — capacity accounting is not safe under concurrency, see Loop.ticking")
 	}
@@ -44,10 +44,10 @@ func (l *Loop) tick(ctx context.Context) error {
 	resolveCache := newResolutionCache(l)
 
 	// Reprioritize all queued jobs after every tick, regardless of outcome — deferred so every
-	// exit path (including early returns below) runs it.
+	// exit path (including early returns below) runs it. Its failure is the tick's.
 	defer func() {
 		if err := l.reprioritizer.RePrioritize(ctx); err != nil {
-			l.logger.Warn("reprioritize after tick", zap.Error(err))
+			tickErr = errors.Join(tickErr, fmt.Errorf("reprioritize after tick: %w", err))
 		}
 	}()
 
@@ -492,6 +492,7 @@ func (l *Loop) tick(ctx context.Context) error {
 				committed, err = l.preempt(ctx, cluster, gAvail[cluster], nodeAvail[cluster], nodeResources[cluster], nodeResourcesTotal[cluster], nodeLabels[cluster], burstRunning, exp)
 				if err != nil {
 					l.logger.Warn("preemption failed", zap.String("exp", exp.ID), zap.Error(err))
+					tickErrs = append(tickErrs, fmt.Errorf("experiment %s: preempt on %s: %w", exp.ID, cluster, err))
 				}
 			}
 			// A guaranteed job whose capacity is being freed holds what is free against the burst
@@ -524,6 +525,7 @@ func (l *Loop) tick(ctx context.Context) error {
 				disbalanceRan[cluster] = true
 				if err := l.evictDisbalanced(ctx, exp, cluster, gAvail[cluster], totalCapacity[cluster], nodeResourcesTotal[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], fp); err != nil {
 					l.logger.Warn("disbalance eviction failed", zap.String("exp", exp.ID), zap.Error(err))
+					tickErrs = append(tickErrs, fmt.Errorf("experiment %s: disbalance eviction on %s: %w", exp.ID, cluster, err))
 				}
 			}
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
@@ -672,6 +674,7 @@ func (l *Loop) tick(ctx context.Context) error {
 				disbalanceRan[cluster] = true
 				if err := l.evictDisbalanced(ctx, exp, cluster, bAvail[cluster], totalCapacity[cluster], nodeResourcesTotal[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], fp); err != nil {
 					l.logger.Warn("disbalance eviction failed", zap.String("exp", exp.ID), zap.Error(err))
+					tickErrs = append(tickErrs, fmt.Errorf("experiment %s: disbalance eviction on %s: %w", exp.ID, cluster, err))
 				}
 			}
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()

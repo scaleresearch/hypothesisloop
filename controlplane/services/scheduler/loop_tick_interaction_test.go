@@ -691,6 +691,45 @@ func TestTickEvictsNothingForABurstJobHeldByAWaitingGuaranteedJob(t *testing.T) 
 	}
 }
 
+// keepingStore requeues no victim a preemption planned.
+type keepingStore struct{ holdStore }
+
+func (*keepingStore) RequeuePreempted(context.Context, string, float64, float64) (bool, error) {
+	return false, nil
+}
+
+type failingReprioritizer struct{}
+
+func (failingReprioritizer) RePrioritize(context.Context) error {
+	return errors.New("queue unreadable")
+}
+
+// A preemption that requeued none of its victims and a reprioritization that failed were logged
+// and the tick answered nil, so a pass that did neither looked whole. Both are the tick's errors.
+func TestTickReturnsAFailedPreemptionAndAFailedReprioritization(t *testing.T) {
+	guaranteed := holdJob("guaranteed", domain.CapacityGuaranteed, h100, 4, "4")
+	guaranteed.ClusterName = "cluster-a"
+	victim := holdJob("victim", domain.CapacityBurst, h100, 1, "1")
+	victim.ClusterName = "cluster-a"
+	victim.Status = domain.StatusRunning
+	store := &keepingStore{holdStore{
+		noRunningListStore: noRunningListStore{t: t, queued: []*domain.Experiment{guaranteed}},
+		running:            []*domain.Experiment{victim},
+	}}
+	l := holdLoop(store, holdWorkload{cpuCores: 16}, noopEvictor{})
+	l.observed = fakeObserved{node: map[string]string{"victim": "node-a"}}
+	l.settler = &recordingSettler{}
+	l.reprioritizer = failingReprioritizer{}
+
+	err := l.tick(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "experiment guaranteed: preempt on cluster-a") || !strings.Contains(err.Error(), "reprioritize after tick: queue unreadable") {
+		t.Fatalf("tick() = %v, want the failed preemption and the failed reprioritization", err)
+	}
+	if reasonCode(store.notAdmitted["guaranteed"]) == "" {
+		t.Errorf("the job the preemption failed for carries no reason: the pass did not finish it")
+	}
+}
+
 // --- Tick-level: one shortage is preempted for once, however long the victim takes to go ---
 
 // terminatingStore requeues a preempted job out of the running set at once.
