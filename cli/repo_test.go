@@ -305,14 +305,14 @@ func TestRepoCheckNamesWhatAClonesFilesLack(t *testing.T) {
 		"a job spec that is not YAML":       {repotemplate.JobSpec, "job:\n  image: a\n command: b\n", "job-spec: " + repotemplate.JobSpec + " is not the YAML of a job spec: line 3, column 2: did not find expected key, where the line reads: command: b"},
 		"a job spec with no job":            {repotemplate.JobSpec, "metadata:\n  theory: t\n", "states no job"},
 		// A spec with no image passed three checks, was submitted and sat in the queue.
-		"a job spec with no image": {repotemplate.JobSpec, "job:\n  cpu: 2\n  memory: 8Gi\n  storage: 4Gi\n", "states no job.image: every job names the image it runs in, a job_image of hl capacity"},
-		"a job spec with no cpu":            {repotemplate.JobSpec, "job:\n  image: a\n  memory: 8Gi\n  storage: 4Gi\n", "states no job.cpu: state the cores one node of the job uses, as in cpu: 2"},
-		"a job spec with no memory":         {repotemplate.JobSpec, "job:\n  image: a\n  cpu: 2\n  storage: 4Gi\n", "states no job.memory"},
-		"a job spec with no storage":        {repotemplate.JobSpec, "job:\n  image: a\n  cpu: 2\n  memory: 8Gi\n", "states no job.storage"},
-		"memory as a share of the node":     {repotemplate.JobSpec, "job:\n  image: a\n  cpu: 2\n  memory: max\n  storage: 4Gi\n", "states job.memory as max"},
-		"storage as a share of the node":    {repotemplate.JobSpec, "job:\n  image: a\n  cpu: 2\n  memory: 8Gi\n  storage: max\n", "states job.storage as max"},
-		"a group with no memory":            {repotemplate.JobSpec, "job:\n  image: a\n  groups:\n    - name: w\n      cpu: 2\n      memory: 8Gi\n      storage: 4Gi\n    - name: ps\n      cpu: 1\n", "states no job.groups[1].memory"},
-		"a secret in the committed spec":    {repotemplate.JobSpec, filledJobSpec + "  secret_env:\n    TOKEN: x\n", "sets job.secret_env"},
+		"a job spec with no image":       {repotemplate.JobSpec, "job:\n  cpu: 2\n  memory: 8Gi\n  storage: 4Gi\n", "states no job.image: every job names the image it runs in, a job_image of hl capacity"},
+		"a job spec with no cpu":         {repotemplate.JobSpec, "job:\n  image: a\n  memory: 8Gi\n  storage: 4Gi\n", "states no job.cpu: state the cores one node of the job uses, as in cpu: 2"},
+		"a job spec with no memory":      {repotemplate.JobSpec, "job:\n  image: a\n  cpu: 2\n  storage: 4Gi\n", "states no job.memory"},
+		"a job spec with no storage":     {repotemplate.JobSpec, "job:\n  image: a\n  cpu: 2\n  memory: 8Gi\n", "states no job.storage"},
+		"memory as a share of the node":  {repotemplate.JobSpec, "job:\n  image: a\n  cpu: 2\n  memory: max\n  storage: 4Gi\n", "states job.memory as max"},
+		"storage as a share of the node": {repotemplate.JobSpec, "job:\n  image: a\n  cpu: 2\n  memory: 8Gi\n  storage: max\n", "states job.storage as max"},
+		"a group with no memory":         {repotemplate.JobSpec, "job:\n  image: a\n  groups:\n    - name: w\n      cpu: 2\n      memory: 8Gi\n      storage: 4Gi\n    - name: ps\n      cpu: 1\n", "states no job.groups[1].memory"},
+		"a secret in the committed spec": {repotemplate.JobSpec, filledJobSpec + "  secret_env:\n    TOKEN: x\n", "sets job.secret_env"},
 	} {
 		write(t, clone, repotemplate.ExperimentFile, filledExperiment)
 		write(t, clone, repotemplate.JobSpec, filledJobSpec)
