@@ -148,8 +148,8 @@ func TestAQueryHoldsPrintableASCIIOutsideStringsAndBacktickNames(t *testing.T) {
 			}
 		}
 		for q, want := range map[string]string{
-			"MATCH (n:Hypothesis {text: '%c'}) RETURN n":  "MATCH (n:Hypothesis {platform_experiment_id: $pe, text: '%c'}) RETURN n",
-			"MATCH (n:Hypothesis) RETURN n.id AS `x%c`": "MATCH (n:Hypothesis {platform_experiment_id: $pe}) RETURN n.id AS `x%c`",
+			"MATCH (n:Hypothesis {text: '%c'}) RETURN n": "MATCH (n:Hypothesis {platform_experiment_id: $pe, text: '%c'}) RETURN n",
+			"MATCH (n:Hypothesis) RETURN n.id AS `x%c`":  "MATCH (n:Hypothesis {platform_experiment_id: $pe}) RETURN n.id AS `x%c`",
 		} {
 			q, want = fmt.Sprintf(q, r), fmt.Sprintf(want, r)
 			if got, err := scoped(q); err != nil || got != want {
