@@ -249,6 +249,33 @@ class HookTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.drains, 0)
 
 
+# A coordinator sent a researcher a message with the CLI's SendMessage, was answered "No agent
+# named ... Spawn a new one or use the agent ID", and sent it again under the agent's id.
+class UndeliveredMessageTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        from hypothesisloop_agent.claude import run
+
+        self.harness = run
+
+    async def call(self, **hook_input):
+        return await self.harness._undelivered_hook({"tool_name": "SendMessage", **hook_input}, "tool-1", {"signal": None})
+
+    async def test_a_message_that_reached_nobody_is_answered_with_the_update_a_comment_arrives_in(self):
+        for event, said in (("PostToolUse", {"tool_response": {"success": False, "message": "No agent named 'ag-1'"}}),
+                            ("PostToolUseFailure", {"error": "No agent named 'ag-1' is reachable."})):
+            told = (await self.call(hook_event_name=event, **said))["hookSpecificOutput"]
+            self.assertEqual(told["hookEventName"], event)
+            self.assertIn("send none again", told["additionalContext"])
+            self.assertIn("`hl hypothesis comment ID --text T` on a hypothesis of that agent: its owner and the "
+                          "coordinator get it as `comment.new` in their next update", told["additionalContext"])
+
+    async def test_a_message_its_own_subagent_got_is_left_alone(self):
+        self.assertEqual(await self.call(hook_event_name="PostToolUse", tool_response={"success": True}), {})
+
+    def test_the_hook_listens_to_send_message_alone(self):
+        self.assertEqual(self.harness._UNDELIVERED_MATCHER.matcher, "SendMessage")
+
+
 class FormatTest(unittest.TestCase):
     def test_one_compact_line_per_event_naming_only_other_actors(self):
         events = [{"kind": "experiment.status", "subject": "exp-1", "value": "COMPLETED", "detail": "",

@@ -95,6 +95,26 @@ def _updates_hook(watch_env: dict[str, str], agent_id: str):
     return hook
 
 
+# SendMessage reaches this session's own subagents and no agent of the platform experiment. The
+# CLI answers one it could not deliver with "use the agent ID", and an agent then tries each id.
+_UNDELIVERED = (
+    "No message reaches another agent of the platform experiment, under any name or id: send none again. "
+    "Write it with `hl hypothesis comment ID --text T` on a hypothesis of that agent: its owner and the "
+    "coordinator get it as `comment.new` in their next update.")
+
+
+async def _undelivered_hook(hook_input, tool_use_id, context) -> dict:
+    """Tells an agent whose SendMessage reached nobody how the other agent gets what it wrote. The
+    CLI reports that as a failed call or as an answer with success false."""
+    event = hook_input["hook_event_name"]
+    if event == "PostToolUse" and hook_input["tool_response"].get("success") is not False:
+        return {}
+    return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": _UNDELIVERED}}
+
+
+_UNDELIVERED_MATCHER = HookMatcher(matcher="SendMessage", hooks=[_undelivered_hook])
+
+
 def _session_file(setup: core.RunSetup) -> str:
     return os.path.join(setup.statedir, _SESSION_ID_FILE)
 
@@ -469,7 +489,8 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
         # The 2 min default backgrounds long commands, and agents then poll their output files.
         # Without background tasks Bash has no run_in_background to wait in.
         env={"BASH_DEFAULT_TIMEOUT_MS": "600000", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1", **core.git_identity(cfg)},
-        hooks={"PostToolUse": [HookMatcher(hooks=[_updates_hook(watch_env, cfg.agent_id)])]},
+        hooks={"PostToolUse": [HookMatcher(hooks=[_updates_hook(watch_env, cfg.agent_id)]), _UNDELIVERED_MATCHER],
+               "PostToolUseFailure": [_UNDELIVERED_MATCHER]},
     )
 
     rate_limited_resets_at: float | None = None
