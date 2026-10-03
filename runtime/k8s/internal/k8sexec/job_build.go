@@ -30,9 +30,8 @@ import (
 // nothing is lost by not being a label.
 const AcceleratorTypeAnnotation = workloadkeys.AcceleratorType
 
-// AcceleratorCountAnnotation carries spec.AcceleratorCount onto the pod template — read back by
-// GetLiveAcceleratorCapacitySnapshot's DRA branch, which (unlike the classic-mode branch) has no
-// extended-resource request on the pod to sum directly.
+// AcceleratorCountAnnotation carries the group's per-pod accelerator count onto the pod template,
+// read back by ensureResourceClaimTemplate as the count one pod claims.
 const AcceleratorCountAnnotation = workloadkeys.AcceleratorCount
 
 const DesiredSpecHashAnnotation = workloadkeys.DesiredSpecHash
@@ -214,9 +213,6 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 		corev1.ResourceMemory:           {"memory", group.Memory},
 		corev1.ResourceEphemeralStorage: {"storage", group.Storage},
 	} {
-		if dimension.qty == "" {
-			continue
-		}
 		q, err := resource.ParseQuantity(dimension.qty)
 		if err != nil {
 			return nil, fmt.Errorf("workload: job.%s %q: %w", dimension.field, dimension.qty, err)
@@ -235,9 +231,6 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 		resources.Limits[acceleratorResource] = acceleratorQty
 	}
 	for name, qty := range spec.ExtraResources {
-		if qty == "" {
-			continue
-		}
 		q, err := resource.ParseQuantity(qty)
 		if err != nil {
 			return nil, fmt.Errorf("workload: extra_resources[%q]: %w", name, err)
