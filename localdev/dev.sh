@@ -252,7 +252,10 @@ start_git_server() {
 
 start_datastores() {
   podman compose -f "${compose}" stop control-service metrics-service >/dev/null 2>&1 || true
-  REGISTRY=unused TAG=unused podman compose -f "${compose}" up -d --no-recreate postgres memgraph greptimedb minio minio-init >/dev/null
+  # Every checkout's compose project has the same name, so a container may have been made from
+  # another checkout's paths. compose replaces one whose definition differs from this tree's; the
+  # data is in named volumes and stays.
+  REGISTRY=unused TAG=unused podman compose -f "${compose}" up -d postgres memgraph greptimedb minio minio-init >/dev/null
 }
 
 start_ui() {
