@@ -40,17 +40,44 @@ var desiredStatuses = []string{
 // ListDesiredWorkloads returns every experiment in clusterName that should currently have a
 // Job running — the cluster-agent's whole "what should exist" view. Read-only; needs no
 // locking, since it's not claiming anything, just reporting current truth.
-func (s *ClusterQueueStore) ListDesiredWorkloads(ctx context.Context, clusterName string) ([]*domain.Experiment, error) {
-	q := `SELECT` + experimentColumns + `FROM experiments
-WHERE cluster_name = $1 AND status = ANY($2)
+//
+// Each carries EndsAt: the latest moment its platform experiment can still have a machine
+// (launcherEndsBySQL, the rule a hosted agent's machine ends by), with windDown for the close to
+// reach the job and for the checkpoint window it is then given. The platform ends every job of a
+// platform experiment at its close, so no job is wanted past that.
+func (s *ClusterQueueStore) ListDesiredWorkloads(ctx context.Context, clusterName string, windDown time.Duration) ([]*domain.Experiment, error) {
+	q := `SELECT` + experimentColumns + `, (SELECT ` + launcherEndsBySQL + ` FROM platform_experiments pe WHERE pe.id = experiments.platform_experiment_id)
+FROM experiments
+WHERE cluster_name = $1 AND status = ANY($3)
 ORDER BY id`
-	rows, err := s.pool.pool.Query(ctx, q, clusterName, desiredStatuses)
+	rows, err := s.pool.pool.Query(ctx, q, clusterName, windDown.Seconds(), desiredStatuses)
 	if err != nil {
 		return nil, fmt.Errorf("db.ListDesiredWorkloads: %w", err)
 	}
 	defer rows.Close()
-	return collectExperiments(rows)
+	out := []*domain.Experiment{}
+	for rows.Next() {
+		var endsAt time.Time
+		exp, err := scanExperiment(alsoScanning{rows, []any{&endsAt}})
+		if err != nil {
+			return nil, fmt.Errorf("db.ListDesiredWorkloads: %w", err)
+		}
+		exp.EndsAt = &endsAt
+		out = append(out, exp)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("db.ListDesiredWorkloads: %w", err)
+	}
+	return out, nil
 }
+
+// alsoScanning scans the columns selected after a row's own into more.
+type alsoScanning struct {
+	row  rowScanner
+	more []any
+}
+
+func (a alsoScanning) Scan(dest ...any) error { return a.row.Scan(append(dest, a.more...)...) }
 
 // recentlyUndesiredWorkloadsQuery is a package-level constant so its shape can be asserted on
 // without a database. It narrows by last_cluster, which the claim writes and nothing clears, and

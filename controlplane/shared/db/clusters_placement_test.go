@@ -188,9 +188,19 @@ func TestEndingTheSharingOfAClusterRequeuesTheOtherOrgsJobsPlacedOnIt(t *testing
 		}
 	}
 
-	desired, err := queue.ListDesiredWorkloads(ctx, w.ofA)
+	desired, err := queue.ListDesiredWorkloads(ctx, w.ofA, 10*time.Minute)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// A job's instance may run until its platform experiment's end and the wind-down past it.
+	var experimentEnds time.Time
+	if err := w.pool.pool.QueryRow(ctx, `SELECT ends_at FROM platform_experiments WHERE id = $1`, w.peA).Scan(&experimentEnds); err != nil {
+		t.Fatal(err)
+	}
+	for _, job := range desired {
+		if job.EndsAt == nil || !job.EndsAt.Equal(experimentEnds.Add(10*time.Minute)) || job.ForRuntime().EndsAt != job.EndsAt {
+			t.Fatalf("desired job %s ends at %v, want the end of its platform experiment %v and 10 minutes, handed to the runtime", job.ID, job.EndsAt, experimentEnds)
+		}
 	}
 	if got := ids(desired); len(got) != 1 || !got[owners] {
 		t.Fatalf("desired on %s = %v, want only its own org's job, so its runtime is handed no other org's token", w.ofA, got)
