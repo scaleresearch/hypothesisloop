@@ -236,4 +236,22 @@ describe('editing a platform experiment', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
     await waitFor(() => expect(updatePlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-1', { duration_hours: 24 }))
   })
+
+  it('refuses to empty a setting the update cannot unset, and sends a changed one', async () => {
+    const set = { ...existing, report_interval_seconds: 30, max_concurrent_accelerators: 4 } as PlatformExperiment
+    vi.mocked(updatePlatformExperiment).mockReset().mockResolvedValue(set)
+    show(set)
+    await userEvent.click(screen.getByRole('tab', { name: '2. Budget and rules' }))
+    await userEvent.click(screen.getByRole('button', { name: 'More settings' }))
+    await userEvent.clear(screen.getByLabelText('Report interval (seconds)'))
+    await userEvent.clear(screen.getByLabelText('Max concurrent accelerators'))
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(await screen.findByText('Max concurrent accelerators, Report interval cannot be emptied once set: state a value.')).toBeTruthy()
+    expect(updatePlatformExperiment).not.toHaveBeenCalled()
+    expect(onSaved).not.toHaveBeenCalled()
+    await userEvent.type(screen.getByLabelText('Report interval (seconds)'), '60')
+    await userEvent.type(screen.getByLabelText('Max concurrent accelerators'), '4')
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(updatePlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-1', { report_interval_seconds: 60 }))
+  })
 })

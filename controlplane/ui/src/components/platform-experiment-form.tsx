@@ -389,12 +389,24 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
     if (lockedWhileRunning) return patch
     if (Number(form.budget_accelerator_hours) !== Number(opened.budget_accelerator_hours)) patch.budget_accelerator_hours = Number(form.budget_accelerator_hours)
     if (Number(form.max_agents) !== Number(opened.max_agents)) patch.max_agents = Number(form.max_agents)
-    if (form.max_concurrent_accelerators.trim() !== '' && form.max_concurrent_accelerators !== opened.max_concurrent_accelerators) patch.max_concurrent_accelerators = Number(form.max_concurrent_accelerators)
+    if (form.max_concurrent_accelerators !== opened.max_concurrent_accelerators) patch.max_concurrent_accelerators = Number(form.max_concurrent_accelerators)
     if (JSON.stringify(form.metrics) !== JSON.stringify(opened.metrics)) patch.metrics = form.metrics
-    if (form.report_interval_seconds.trim() !== '' && form.report_interval_seconds !== opened.report_interval_seconds) patch.report_interval_seconds = Number(form.report_interval_seconds)
-    if (form.starts_at && form.starts_at !== opened.starts_at) patch.starts_at = new Date(form.starts_at).toISOString()
+    if (form.report_interval_seconds !== opened.report_interval_seconds) patch.report_interval_seconds = Number(form.report_interval_seconds)
+    if (form.starts_at !== opened.starts_at) patch.starts_at = new Date(form.starts_at).toISOString()
     if (Number(form.duration_hours) !== Number(opened.duration_hours)) patch.duration_hours = Number(form.duration_hours)
     return patch
+  }
+
+  // The update takes a value for each of these and nothing that puts one back to unset, so an
+  // edit that empties one that was set is refused here.
+  function clearedError(): string | null {
+    if (!isEdit) return null
+    const cleared = ([
+      ['starts_at', 'Starts at'],
+      ['max_concurrent_accelerators', 'Max concurrent accelerators'],
+      ['report_interval_seconds', 'Report interval'],
+    ] as const).filter(([field]) => opened[field].trim() !== '' && form[field].trim() === '').map(([, label]) => label)
+    return cleared.length > 0 ? `${cleared.join(', ')} cannot be emptied once set: state a value.` : null
   }
 
   // Lives on step 2 now (moved alongside Max researchers), so it no longer gates the step 1→2
@@ -408,7 +420,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
     // Both steps are validated here, not just the visible one — a bad ladder on step 2 must not
     // be submittable just because step 1 passed. Tab navigation itself is never gated — only
     // submit is, so the user is free to jump between tabs while filling the form out of order.
-    const err = step1Error() ?? step2BudgetError() ?? (isEdit ? null : ladderError)
+    const err = step1Error() ?? step2BudgetError() ?? clearedError() ?? (isEdit ? null : ladderError)
     if (err) { setError(err); return }
     setSubmitting(true)
     setError(null)
