@@ -1,0 +1,38 @@
+export const GOAL_EXAMPLES = [
+  'Beat the SOTA bits-per-point on lidar point cloud compression for KITTI',
+  'Does Muon beat AdamW at equal compute for a 125M-parameter GPT on FineWeb?',
+  'Cut grasp-success failures of a diffusion policy on the RoboMimic Lift task',
+  'Improve ESM-2 contact prediction on CASP15 targets with LoRA fine-tuning',
+  'Find the fastest stable learning-rate schedule for ViT-B on ImageNet-1k',
+  'Raise sample efficiency of PPO on MuJoCo Humanoid with a learned world model',
+  'Beat the SOTA top-1 accuracy on CIFAR-100 for a ResNet-18 trained in one GPU-hour',
+  'Does Schedule-Free AdamW match cosine decay for nanoGPT on OpenWebText at equal tokens?',
+  'Does Lion beat AdamW for LoRA fine-tuning of Llama-3-8B on GSM8K?',
+  'Find the voxel size that maximises PointPillars mAP on nuScenes lidar',
+  'Reach the SOTA word error rate of Whisper-small on LibriSpeech test-other with 8-bit weights',
+  'Raise ACT policy success on ALOHA bimanual insertion with half the demonstrations',
+  'Beat the SOTA Spearman correlation on ProteinGym substitutions with a protein language model',
+  'Improve scGPT cell-type annotation accuracy on the Tabula Sapiens atlas',
+  'Find the KV-cache eviction policy that keeps Llama-3-8B accuracy on LongBench at a quarter of the memory',
+  'Does muP let a 350M transformer reuse the learning rate tuned at 40M?',
+  'Shrink a 3D Gaussian splatting scene on Mip-NeRF 360 tenfold at equal PSNR',
+  'Lower Chamfer distance of point cloud completion on ShapeNet-55 with a transformer decoder',
+]
+
+const IGNORED = new Set(['a', 'an', 'the', 'of', 'on', 'for', 'to', 'in', 'with', 'and', 'or', 'at', 'is', 'by'])
+
+const words = (text: string) => text.toLowerCase().match(/[a-z0-9]+/g) ?? []
+
+/**
+ * The examples that hold every word typed so far, each word matching the start of one of theirs,
+ * so a word still being typed matches too. An empty box shows the first ones.
+ */
+export function matchingGoals(typed: string, limit = 3, examples: readonly string[] = GOAL_EXAMPLES): string[] {
+  const text = typed.trim()
+  if (text === '') return examples.slice(0, limit)
+  const wanted = words(text).filter(word => !IGNORED.has(word))
+  if (wanted.length === 0) return []
+  return examples
+    .filter(example => example !== text && wanted.every(word => words(example).some(own => own.startsWith(word))))
+    .slice(0, limit)
+}
