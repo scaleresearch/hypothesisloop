@@ -1058,6 +1058,9 @@ CREATE (a)-[:RELATED]->(b)-[:RELATED]->(c), (b)-[:BUILDS_ON]->(a)`, map[string]a
 		`MATCH (h:Hypothesis) CALL { MATCH (o:Hypothesis) RETURN count(o) AS c } RETURN DISTINCT c`:                                                      1,
 		`MATCH (h:Hypothesis) RETURN h.text AS t UNION MATCH (o:Hypothesis)-[:BUILDS_ON]->(:Objective) RETURN o.text AS t`:                               2,
 		`MATCH (d:Hypothesis)-[:BUILDS_ON]->(:Objective) OPTIONAL MATCH (h:Hypothesis)-[:BUILDS_ON*0..]->(d:Hypothesis) RETURN d.id, h.status, count(h)`: 1,
+		`MATCH p = (a:Hypothesis)-[*BFS]-(b:Hypothesis) RETURN [n IN nodes(p) | n.text]`:                                                                 2,
+		`MATCH (a:Hypothesis)-[r*]-(b:Hypothesis) RETURN [e IN r | startnode(e).text], (size(r) + 1)`:                                                    2,
+		`MATCH (h:Hypothesis) RETURN h {.*, related: [(h:Hypothesis)--(o:Hypothesis) | o.text]}`:                                                         2,
 		search + `RETURN node.text, score`:                                                                                                               2,
 		search + `RETURN count(node) AS n, collect(node.text) AS texts`:                                                                                  1,
 		search + `WHERE node.text CONTAINS 'warmup' RETURN node`:                                                                                         1,
@@ -1088,6 +1091,42 @@ CREATE (a)-[:RELATED]->(b)-[:RELATED]->(c), (b)-[:BUILDS_ON]->(a)`, map[string]a
 		`CALL text_search.aggregate('` + TextIndex + `', 'cosine', '{"count": {"value_count": {"field": "data.text"}}}') YIELD aggregation RETURN aggregation`,
 	} {
 		if result, err := s.Query(ctx, pe, q, map[string]any{"other": other}); !errors.Is(err, ErrInvalidQuery) {
+			t.Errorf("Query %q: got = (%+v, %v), want %v", q, result, err, ErrInvalidQuery)
+		}
+	}
+	// Memgraph takes each of these as written and reads across platform experiments: a rune it
+	// reads as whitespace, as part of a name or as a dash, where this package's tokenizer saw
+	// another token.
+	for _, q := range []string{
+		"MATCH (n\x1f) RETURN n",
+		"MATCH (\x1cn) RETURN n",
+		"MATCH (n" + string(rune(0x20ac)) + ") RETURN n" + string(rune(0x20ac)),
+		"MATCH (n" + string(rune(0x301)) + ") RETURN n" + string(rune(0x301)),
+		"MATCH p = (a:Hypothesis)" + string(rune(0x2010)) + "[*]" + string(rune(0x2010)) + "(b:Hypothesis) RETURN [n IN nodes(p) | n.text]",
+	} {
+		seen, err := s.read(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+			records, err := collect(ctx, tx, q, nil)
+			var values []any
+			for _, r := range records {
+				values = append(values, r.Values...)
+			}
+			return fmt.Sprint(values), err
+		})
+		if err != nil || !strings.Contains(seen.(string), theirs.Text) {
+			t.Errorf("Memgraph on %+q as written: got = (%s, %v), want it to read %q", q, seen, err, theirs.Text)
+		}
+		if result, err := s.Query(ctx, pe, q, nil); !errors.Is(err, ErrInvalidQuery) {
+			t.Errorf("Query %+q: got = (%+v, %v), want %v", q, result, err, ErrInvalidQuery)
+		}
+	}
+	for _, q := range []string{
+		`MATCH p = (a:Hypothesis)-[*WSHORTEST 5]-(b:Hypothesis) RETURN [n IN nodes(p) | n.text]`,
+		`WITH 1 AS x LOAD PARQUET FROM '/etc/passwd' AS row RETURN row`,
+		`MATCH (h:Hypothesis) RETURN COUNT { MATCH (o) } AS c`,
+		`MATCH (h:Hypothesis) CALL (h) { MATCH (h)--(o) RETURN o } RETURN o.text`,
+		`MATCH (h:Hypothesis) WHERE h.text CONTAINS (n)--(m:Hypothesis) RETURN h.text`,
+	} {
+		if result, err := s.Query(ctx, pe, q, nil); !errors.Is(err, ErrInvalidQuery) {
 			t.Errorf("Query %q: got = (%+v, %v), want %v", q, result, err, ErrInvalidQuery)
 		}
 	}

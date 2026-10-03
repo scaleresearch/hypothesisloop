@@ -1,3 +1,10 @@
+// Why a query cannot read another platform experiment. Outside string literals and backtick names
+// a query is printable ASCII with no $ glued to a name, and on that text this tokenizer and
+// Memgraph's lexer cut the same tokens, so Memgraph sees no pattern this file missed. Each of the
+// three ways tokens reach the graph (node pattern, variable-length relationship, procedure call)
+// is tied to $pe or refused, and a parenthesis that reads as neither a node pattern nor a listed
+// expression is refused. So is a function or a procedure outside the lists here, and LOAD, the
+// clause that reads without a pattern.
 package graphdb
 
 import (
@@ -33,6 +40,19 @@ var groupKeywords = []string{
 	"MATCH", "WHERE", "AND", "OR", "XOR", "NOT", "RETURN", "WITH", "DISTINCT", "IN", "BY",
 	"CASE", "WHEN", "THEN", "ELSE", "UNWIND", "LIMIT", "SKIP", "CONTAINS",
 }
+
+// patternParts are what follows the opening parenthesis of a node pattern, or its variable.
+var patternParts = []string{")", ":", "{", "$"}
+
+// A parenthesis that is no node pattern is an expression when it opens with one of
+// expressionStarts or expressionPrefixes, or with a name that one of expressionOperators or
+// expressionInfixes follows. Any other is refused.
+var (
+	expressionStarts    = []string{"(", "[", "'", "\"", "-", "+"}
+	expressionPrefixes  = []string{"NOT", "CASE"}
+	expressionOperators = []string{".", "+", "-", "*", "/", "%", "^", "=", "<", ">", "[", "("}
+	expressionInfixes   = []string{"AND", "OR", "XOR", "IN", "IS", "STARTS", "ENDS", "CONTAINS"}
+)
 
 // hopScope is the filter put on every variable-length relationship, whose inner nodes have no
 // node pattern of their own.
@@ -174,6 +194,9 @@ func (s *scoper) procedure(i int) error {
 			variable = s.toks[at].text
 		}
 		if field == "node" {
+			if node != "" {
+				return shape
+			}
 			node = variable
 		}
 		if !s.is(at+1, ",") {
@@ -209,17 +232,29 @@ func (s *scoper) parenthesis(i int) error {
 	}
 	end := s.closes[i]
 	at := i + 1
+	opens := func(at int, texts []string) bool {
+		return slices.ContainsFunc(texts, func(text string) bool { return s.is(at, text) })
+	}
+	unread := fmt.Errorf("%w: a parenthesis holds a node pattern or an expression, and this one reads as neither", ErrInvalidQuery)
 	if s.name(at) {
-		if isKeyword(s.toks, at, "WHERE") || isKeyword(s.toks, at+1, "WHERE") ||
-			(isKeyword(s.toks, at+1, "IS") && !isKeyword(s.toks, at+2, "NULL") && !isKeyword(s.toks, at+2, "NOT")) {
+		isNull := isKeyword(s.toks, at+2, "NULL") || (isKeyword(s.toks, at+2, "NOT") && isKeyword(s.toks, at+3, "NULL"))
+		if isKeyword(s.toks, at, "WHERE") || isKeyword(s.toks, at+1, "WHERE") || (isKeyword(s.toks, at+1, "IS") && !isNull) {
 			return fmt.Errorf("%w: a node pattern takes a label and a property map only, put its condition in WHERE after the pattern", ErrInvalidQuery)
 		}
-		if !s.is(at+1, ")") && !s.is(at+1, ":") && !s.is(at+1, "{") && !s.is(at+1, "$") {
-			return nil
+		if !opens(at+1, patternParts) {
+			prefixed := slices.ContainsFunc(expressionPrefixes, func(w string) bool { return isKeyword(s.toks, at, w) })
+			infix := slices.ContainsFunc(expressionInfixes, func(w string) bool { return isKeyword(s.toks, at+1, w) })
+			if prefixed || infix || opens(at+1, expressionOperators) {
+				return nil
+			}
+			return unread
 		}
 		at++
-	} else if at != end && !s.is(at, ":") && !s.is(at, "{") && !s.is(at, "$") {
-		return nil
+	} else if at != end && !opens(at, patternParts) {
+		if opens(at, expressionStarts) {
+			return nil
+		}
+		return unread
 	}
 	pattern := fmt.Errorf("%w: %s; no other label, no second label and no parameter as the property map", ErrInvalidQuery, scopeHelp)
 	if !s.is(at, ":") || !s.name(at+1) {
@@ -275,10 +310,13 @@ func (s *scoper) properties(i int, key string) error {
 // relationship scopes the relationship detail opened at i when it is of variable length.
 func (s *scoper) relationship(i int) error {
 	end := s.closes[i]
-	variable, lambda := false, false
+	variable, lambda, weighted := false, false, false
 	for at := i + 1; at < end; at++ {
 		variable = variable || s.is(at, "*")
 		lambda = lambda || s.is(at, "(")
+		// A weighted expansion (*WSHORTEST, *ALLSHORTEST) reads its first lambda as the weight,
+		// so the filter added below would not filter.
+		weighted = weighted || (s.is(at-1, "*") && s.word(at) && !isKeyword(s.toks, at, "BFS") && strings.Trim(s.toks[at].text, "0123456789") != "")
 		if next, ok := s.closes[at]; ok {
 			at = next
 		}
@@ -286,8 +324,8 @@ func (s *scoper) relationship(i int) error {
 	if !variable {
 		return nil
 	}
-	if lambda {
-		return fmt.Errorf("%w: a variable-length relationship takes its type, bounds and property map only ([:BUILDS_ON*1..3]); the platform adds the filter that keeps it in $pe", ErrInvalidQuery)
+	if lambda || weighted {
+		return fmt.Errorf("%w: a variable-length relationship takes its type, bounds and property map only ([:BUILDS_ON*1..3], [*BFS]); the platform adds the filter that keeps it in $pe", ErrInvalidQuery)
 	}
 	s.insertions = append(s.insertions, insertion{s.toks[end].start, hopScope})
 	return nil

@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
@@ -280,8 +279,8 @@ func mapProps(props map[string]any, ids map[int64]string) map[string]any {
 	return out
 }
 
-// checkReadOnly refuses the statements an always-rolled-back transaction cannot contain: LOAD CSV
-// (reads files on the database host), USING PERIODIC COMMIT and CALL {...} IN TRANSACTIONS (commit
+// checkReadOnly refuses the statements an always-rolled-back transaction cannot contain: LOAD
+// (CSV, PARQUET and JSONL each read files on the database host), USING PERIODIC COMMIT and CALL {...} IN TRANSACTIONS (commit
 // batches on their own, verified to persist through a rollback), and any CALL of a procedure
 // outside QueryProcedures. It works on tokens with strings and comments removed, so a keyword
 // inside a string literal or a comment is not mistaken for one in the query.
@@ -289,8 +288,8 @@ func checkReadOnly(toks []token) error {
 	keyword := func(i int, word string) bool { return isKeyword(toks, i, word) }
 	for i := range toks {
 		switch {
-		case keyword(i, "LOAD") && keyword(i+1, "CSV"):
-			return fmt.Errorf("%w: LOAD CSV is not available, this endpoint reads the hypothesis graph only", ErrInvalidQuery)
+		case keyword(i, "LOAD"):
+			return fmt.Errorf("%w: LOAD is not available, this endpoint reads the hypothesis graph only", ErrInvalidQuery)
 		case keyword(i, "USING") && keyword(i+1, "PERIODIC"),
 			keyword(i, "IN") && (keyword(i+1, "TRANSACTIONS") || keyword(i+1, "CONCURRENT")):
 			return fmt.Errorf("%w: USING PERIODIC COMMIT and CALL {...} IN TRANSACTIONS are not available, this endpoint is read-only", ErrInvalidQuery)
@@ -342,13 +341,24 @@ type token struct {
 	start, end int
 }
 
+func isWordRune(r rune) bool {
+	return r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+}
+
 func isWord(s string) bool {
-	for _, r := range s {
-		if r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
-			return false
+	return s != "" && !strings.ContainsFunc(s, func(r rune) bool { return !isWordRune(r) })
+}
+
+// plainText returns the first rune of rs that is neither printable ASCII nor a tab or a line
+// break as a refusal. Memgraph reads more runes as whitespace, name parts and dashes than any
+// list kept here would hold, so outside string literals and backtick names a query has none.
+func plainText(rs []rune) error {
+	for _, r := range rs {
+		if r != '\t' && r != '\n' && r != '\r' && (r < ' ' || r > '~') {
+			return fmt.Errorf("%w: outside string literals and backtick names a query is printable ASCII, and this one holds %U", ErrInvalidQuery, r)
 		}
 	}
-	return s != ""
+	return nil
 }
 
 // tokenize splits cypher into words, backtick-quoted names and single punctuation characters,
@@ -360,12 +370,17 @@ func tokenize(rs []rune) ([]token, error) {
 	for i := 0; i < len(rs); {
 		r := rs[i]
 		switch {
-		case unicode.IsSpace(r):
+		case r == ' ' || r == '\t' || r == '\n' || r == '\r':
 			i++
 		case r == '/' && i+1 < len(rs) && rs[i+1] == '/':
-			for i < len(rs) && rs[i] != '\n' && rs[i] != '\r' {
-				i++
+			j := i
+			for j < len(rs) && rs[j] != '\n' && rs[j] != '\r' {
+				j++
 			}
+			if err := plainText(rs[i:j]); err != nil {
+				return nil, err
+			}
+			i = j
 		case r == '/' && i+1 < len(rs) && rs[i+1] == '*':
 			j := i + 2
 			for j+1 < len(rs) && (rs[j] != '*' || rs[j+1] != '/') {
@@ -373,6 +388,9 @@ func tokenize(rs []rune) ([]token, error) {
 			}
 			if j+1 >= len(rs) {
 				return nil, fmt.Errorf("%w: unterminated /* comment", ErrInvalidQuery)
+			}
+			if err := plainText(rs[i:j]); err != nil {
+				return nil, err
 			}
 			i = j + 2
 		case r == '\'' || r == '"':
@@ -408,14 +426,19 @@ func tokenize(rs []rune) ([]token, error) {
 			}
 			toks = append(toks, token{text: name.String(), quoted: true, start: i, end: j + 1})
 			i = j + 1
-		case r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r):
+		case isWordRune(r):
 			j := i
-			for j < len(rs) && (rs[j] == '_' || unicode.IsLetter(rs[j]) || unicode.IsDigit(rs[j])) {
+			for j < len(rs) && isWordRune(rs[j]) {
 				j++
 			}
 			toks = append(toks, token{text: string(rs[i:j]), start: i, end: j})
 			i = j
+		case r == '$' && i > 0 && isWordRune(rs[i-1]):
+			return nil, fmt.Errorf("%w: write a space before $: Memgraph reads a $ that follows a name as part of that name", ErrInvalidQuery)
 		default:
+			if err := plainText(rs[i : i+1]); err != nil {
+				return nil, err
+			}
 			toks = append(toks, token{text: string(r), start: i, end: i + 1})
 			i++
 		}

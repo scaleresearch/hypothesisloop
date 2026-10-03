@@ -2,6 +2,7 @@ package graphdb
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -107,9 +108,68 @@ func TestAQueryThatCannotBeScopedIsRefused(t *testing.T) {
 		"EXPLAIN MATCH (h:Hypothesis) RETURN h",
 		"// MATCH\rMATCH (n) RETURN n.text",
 		"MATCH (h:Hypothesis RETURN h",
+		"MATCH (n IS NOT Objective) RETURN n.text",
+		"MATCH (h:Hypothesis) RETURN (h ; 1)",
+		"MATCH (h:Hypothesis) RETURN (h h)",
+		"MATCH (h:Hypothesis) RETURN (, h)",
+		"MATCH (n$:Hypothesis) RETURN n$.text",
+		"MATCH (h:Hypothesis) WITH h AS n$ RETURN n$.text",
+		"MATCH (a:Hypothesis)-[*WSHORTEST 5]-(b:Hypothesis) RETURN b.id",
+		"MATCH (a:Hypothesis)-[*ALLSHORTEST 5]-(b:Hypothesis) RETURN b.id",
+		"MATCH (a:Hypothesis)-[*KSHORTEST|3]-(b:Hypothesis) RETURN b.id",
+		"CALL text_search.search_all('i', 'x') YIELD node AS a, node AS b RETURN a.text",
+		"WITH 1 AS x LOAD PARQUET FROM '/etc/passwd' AS row RETURN row",
+		"WITH 1 AS x LOAD JSONL FROM '/etc/passwd' AS row RETURN row",
 	} {
 		if got, err := scoped(q); !errors.Is(err, ErrInvalidQuery) {
 			t.Errorf("scoped(%q): got = (%q, %v), want %v", q, got, err, ErrInvalidQuery)
+		}
+	}
+}
+
+// Memgraph reads far more runes as whitespace, name parts and dashes than this package's
+// tokenizer could list: (n<U+001F>) and (n<U+20AC>) were sent as written and read every platform
+// experiment. Outside a string literal and a backtick name every such rune is refused, wherever
+// it stands.
+func TestAQueryHoldsPrintableASCIIOutsideStringsAndBacktickNames(t *testing.T) {
+	for _, r := range []rune{0x00, 0x08, 0x0b, 0x0c, 0x1c, 0x1f, 0x7f, 0x85, 0xa0, 0xad, 0xe9, 0x301, 0x1680, 0x2003, 0x2010, 0x200b, 0x2028, 0x20ac, 0x2212, 0x3000, 0x3008, 0xfeff} {
+		for _, q := range []string{
+			"MATCH (n%c) RETURN n",
+			"MATCH (%cn) RETURN n",
+			"MATCH (n%c:Hypothesis) RETURN n",
+			"MATCH (a:Hypothesis)%c[*]%[1]c(b:Hypothesis) RETURN a",
+			"MATCH (n:Hypothesis) RETURN n.id AS x%c",
+			"MATCH (n:Hypothesis) RETURN n.id // %c",
+			"MATCH (n:Hypothesis) RETURN n.id /* %c */",
+		} {
+			q = fmt.Sprintf(q, r)
+			if got, err := scoped(q); !errors.Is(err, ErrInvalidQuery) {
+				t.Errorf("scoped(%+q): got = (%+q, %v), want %v", q, got, err, ErrInvalidQuery)
+			}
+		}
+		for q, want := range map[string]string{
+			"MATCH (n:Hypothesis {text: '%c'}) RETURN n":  "MATCH (n:Hypothesis {platform_experiment_id: $pe, text: '%c'}) RETURN n",
+			"MATCH (n:Hypothesis) RETURN n.id AS `x%c`": "MATCH (n:Hypothesis {platform_experiment_id: $pe}) RETURN n.id AS `x%c`",
+		} {
+			q, want = fmt.Sprintf(q, r), fmt.Sprintf(want, r)
+			if got, err := scoped(q); err != nil || got != want {
+				t.Errorf("scoped(%+q):\n got = (%+q, %v)\nwant = %+q", q, got, err, want)
+			}
+		}
+	}
+}
+
+// A parenthesis that is no node pattern is passed on only as an expression this package knows.
+func TestAParenthesisedExpressionIsNotTakenForANodePattern(t *testing.T) {
+	const match = "MATCH (h:Hypothesis {platform_experiment_id: $pe}) RETURN "
+	for _, expression := range []string{
+		"(h.a + 1)", "('a' + 'b')", "(\"a\")", "(-1)", "(+1)", "([1, 2])", "((h.a))", "(NOT true)", "(true AND false)",
+		"(size([1]) > 0)", "(CASE WHEN true THEN 1 ELSE 2 END)", "(h.text STARTS WITH 'a')", "(1 IN [1])",
+		"(h.a IS NULL)", "(h.a IS NOT NULL)", "(h.text =~ 'a')", "(h.a <> 1)", "(h.a % 2)", "(h.a ^ 2)", "(h.a / 2)", "(h.a * 2)",
+		"(`h`.text CONTAINS 'a')", "(h.tags[0])", "(1.5)",
+	} {
+		if got, err := scoped(match + expression); err != nil || got != match+expression {
+			t.Errorf("scoped(%q): got = (%q, %v), want it unchanged", match+expression, got, err)
 		}
 	}
 }
