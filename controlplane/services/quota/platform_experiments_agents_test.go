@@ -3,6 +3,7 @@ package quota
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -19,6 +20,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
 )
 
 const agentsTestSecret = "a-signing-secret-only-this-test-knows"
@@ -35,6 +37,23 @@ type rosterStore struct {
 	left []*domain.Experiment
 	// inFlight is the agents that have a job queued or running.
 	inFlight map[string]bool
+	// hypotheses is the graph, and graphErr what reading it fails with.
+	hypotheses []*domain.Hypothesis
+	graphErr   error
+}
+
+// ListHypotheses answers as the graph does: the hypotheses the filter keeps, in the order given.
+func (f *rosterStore) ListHypotheses(_ context.Context, filter graphdb.ListFilter) ([]*domain.HypothesisListItem, error) {
+	if f.graphErr != nil {
+		return nil, f.graphErr
+	}
+	var out []*domain.HypothesisListItem
+	for _, h := range f.hypotheses {
+		if h.PlatformExperimentID == filter.PlatformExperimentID && h.AgentID == filter.AgentID && h.Status == filter.Status && len(out) < filter.Limit {
+			out = append(out, &domain.HypothesisListItem{Hypothesis: h})
+		}
+	}
+	return out, nil
 }
 
 func (f *rosterStore) FinishedBaselineJobs(context.Context, string) ([]*domain.Experiment, error) {
@@ -231,7 +250,7 @@ func agentsRouter(t *testing.T, store *rosterStore, caller auth.Principal) http.
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(agentsTestPlacement), zap.NewNop())
 	handler := NewPlatformExperimentsHandler(newSignupTestService(t, store), store, testPlanning, zap.NewNop()).WithAgentLaunch(agentsTestLaunch())
-	RegisterAgentsHuma(doc, handler)
+	RegisterAgentsHuma(doc, handler, store)
 	return r
 }
 
@@ -668,7 +687,7 @@ func TestTheAgentsAPICannotBeRegisteredWithoutALauncherAndASecret(t *testing.T) 
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(agentsTestPlacement), zap.NewNop())
 	store := newRosterStore(domain.PlatformExpOpen, 1)
-	RegisterAgentsHuma(doc, NewPlatformExperimentsHandler(newSignupTestService(t, store), store, testPlanning, zap.NewNop()))
+	RegisterAgentsHuma(doc, NewPlatformExperimentsHandler(newSignupTestService(t, store), store, testPlanning, zap.NewNop()), store)
 }
 
 // Hosting needed a repository to clone, and a person with an idea and no repository could not
@@ -818,6 +837,46 @@ func TestAFinishPastTheCloseIsRefusedAsEverythingElseSentThen(t *testing.T) {
 		if message, _ := out["message"].(string); status == domain.PlatformExpClosed && message != "platform experiment pe-1 is closed: your run is over and nothing is left to finish" {
 			t.Errorf("closed: message %q, want one short sentence", message)
 		}
+	}
+}
+
+// A researcher was briefed to settle every hypothesis before it finishes, and nothing told one
+// that had not. The finish answers the hypotheses the agent leaves open, its own and of this
+// platform experiment alone, and is taken whatever they are. A graph that does not answer leaves
+// the agent unfinished.
+func TestAFinishAnswersTheHypothesesTheAgentLeavesOpen(t *testing.T) {
+	dana := auth.Principal{Kind: auth.KindAgent, PlatformExperimentID: "pe-1", AgentID: "dana", OrgIDs: []string{"org-a"}}
+	newStore := func() *rosterStore {
+		store := newRosterStore(domain.PlatformExpRunning, 5)
+		store.signups = []domain.AgentSignup{{PlatformExperimentID: "pe-1", AgentID: "dana", Role: domain.SignupRoleCompetitor}}
+		store.hypotheses = []*domain.Hypothesis{
+			{ID: "h-open", AgentID: "dana", PlatformExperimentID: "pe-1", Text: "warmup helps", Status: domain.HypothesisOpen},
+			{ID: "h-settled", AgentID: "dana", PlatformExperimentID: "pe-1", Text: "depth helps", Status: domain.HypothesisRefuted},
+			{ID: "h-another's", AgentID: "eli", PlatformExperimentID: "pe-1", Text: "width helps", Status: domain.HypothesisOpen},
+			{ID: "h-elsewhere", AgentID: "dana", PlatformExperimentID: "pe-2", Text: "dropout helps", Status: domain.HypothesisOpen},
+		}
+		return store
+	}
+	const finish = "/platform-experiments/pe-1/agents/dana/finish"
+
+	store := newStore()
+	code, out := call(t, agentsRouter(t, store, dana), "POST", finish, `{"reason":"quota spent"}`)
+	want := []any{map[string]any{"id": "h-open", "text": "warmup helps"}}
+	if code != http.StatusOK || !reflect.DeepEqual(out["open_hypotheses"], want) || store.signups[0].FinishedAt == nil {
+		t.Errorf("got = %d %v, finished %v, want 200 with the one hypothesis left open and the agent finished", code, out, store.signups[0].FinishedAt)
+	}
+
+	store = newStore()
+	store.hypotheses = store.hypotheses[1:]
+	code, out = call(t, agentsRouter(t, store, dana), "POST", finish, `{"reason":"quota spent"}`)
+	if open, listed := out["open_hypotheses"].([]any); code != http.StatusOK || !listed || len(open) != 0 {
+		t.Errorf("nothing left open: got = %d %v, want 200 and an empty list", code, out)
+	}
+
+	store = newStore()
+	store.graphErr = errors.New("the graph is away")
+	if code, out := call(t, agentsRouter(t, store, dana), "POST", finish, `{"reason":"quota spent"}`); code != http.StatusInternalServerError || store.signups[0].FinishedAt != nil {
+		t.Errorf("a graph that does not answer: got = %d %v, finished %v, want 500 and nothing changed", code, out, store.signups[0].FinishedAt)
 	}
 }
 

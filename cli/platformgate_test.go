@@ -44,7 +44,7 @@ func platformRoutes(caller auth.Principal) http.Handler {
 	experiments := quota.NewPlatformExperimentsHandler(nil, struct{ githost.Provider }{}, quota.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}, logger).
 		WithAgentLaunch(quota.AgentLaunch{Launcher: "launcher", DefaultModel: "model", SigningSecret: "secret", MaxHosted: 1})
 	quota.RegisterHuma(doc, quota.NewHandler(nil, logger), experiments)
-	quota.RegisterAgentsHuma(doc, experiments)
+	quota.RegisterAgentsHuma(doc, experiments, struct{ quota.Hypotheses }{})
 	quota.RegisterPlanningHuma(doc, experiments)
 	quota.RegisterDataUsageHuma(doc, quota.NewDataUsageHandler(nil, nil, nil, 0, logger))
 	quota.RegisterSessionsHuma(doc, nil, logger)

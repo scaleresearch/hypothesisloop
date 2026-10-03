@@ -155,7 +155,9 @@ completed job without its summary (work_unfinished). Once the platform experimen
 answer is experiment_closed: your run is over already and nothing is left to finish, so end
 your turn. It cannot be taken back. Prints you as finished, the line of
 hl platform-experiments agents list. An agent finishes itself: the command takes who and where
-from its token, and the platform refuses any other.`, stderr)
+from its token, and the platform refuses any other. A hypothesis of yours that is still open
+refuses nothing: each is printed after you as a note, with its id and text, and stays open for
+good unless you give its verdict (hl hypothesis status ID VERDICT) before this turn ends.`, stderr)
 	reason := fs.String("reason", "", "why nothing is left to do")
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
@@ -164,5 +166,26 @@ from its token, and the platform refuses any other.`, stderr)
 		return parseExit(misuse(fs, "want --reason"))
 	}
 	_, pe, agent := scopeOf(c.Token)
-	return call(c, "POST", agentsPath(pe)+"/"+url.PathEscape(agent)+"/finish", map[string]string{"reason": *reason}, "agents", "", stdout, stderr)
+	var out struct {
+		Agents []json.RawMessage `json:"agents"`
+		Open   []struct {
+			ID   string `json:"id"`
+			Text string `json:"text"`
+		} `json:"open_hypotheses"`
+	}
+	if err := c.Do("POST", agentsPath(pe)+"/"+url.PathEscape(agent)+"/finish", map[string]string{"reason": *reason}, &out); err != nil {
+		return fail(stderr, err)
+	}
+	for _, finished := range out.Agents {
+		if err := printLine(stdout, finished); err != nil {
+			return fail(stderr, err)
+		}
+	}
+	if len(out.Open) > 0 {
+		fmt.Fprintf(stderr, "hl: platform-experiments agents finish: note: you finished with %d of your hypotheses still open. Each stays open for good unless you give its verdict before this turn ends, with hl hypothesis status ID VERDICT:\n", len(out.Open))
+		for _, h := range out.Open {
+			fmt.Fprintf(stderr, "  %s %s\n", h.ID, strings.Join(strings.Fields(h.Text), " "))
+		}
+	}
+	return 0
 }

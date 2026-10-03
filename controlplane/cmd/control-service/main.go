@@ -270,7 +270,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	// registered here, so /openapi.json and /explore describe all of it in one place.
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules, gate.authenticator, gate.access, logger)
 	quota.RegisterHuma(doc, handler, peHandler)
-	quota.RegisterAgentsHuma(doc, peHandler)
+	quota.RegisterAgentsHuma(doc, peHandler, graph)
 	quota.RegisterPlanningHuma(doc, peHandler)
 	quota.RegisterShareHuma(doc, db.NewPlatformExperimentsStore(pool), peHandler.Answer, logger)
 	quota.RegisterDataUsageHuma(doc, dataUsageHandler)

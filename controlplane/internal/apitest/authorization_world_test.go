@@ -283,7 +283,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	api.docs[""] = doc
 	peHandler := quota.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, logger).WithAgentLaunch(quota.AgentLaunch{Launcher: worldLauncher, DefaultModel: "model-1", SigningSecret: worldSecret, MaxHosted: 20})
 	quota.RegisterHuma(doc, quota.NewHandler(nil, logger), peHandler)
-	quota.RegisterAgentsHuma(doc, peHandler)
+	quota.RegisterAgentsHuma(doc, peHandler, worldGraph{world: w})
 	quota.RegisterPlanningHuma(doc, peHandler)
 	quota.RegisterShareHuma(doc, nil, peHandler.Answer, logger)
 	quota.RegisterDataUsageHuma(doc, quota.NewDataUsageHandler(nil, nil, nil, 0, zap.NewNop()))

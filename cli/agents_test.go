@@ -160,6 +160,30 @@ func TestAgentsRemoveAndList(t *testing.T) {
 	}
 }
 
+// A researcher was briefed to settle every hypothesis before it finishes. The finish says which
+// it left open, as a note beside the line it prints, and is no failure.
+func TestAgentsFinishPrintsTheHypothesesLeftOpenAsANote(t *testing.T) {
+	open := []map[string]any{{"id": "h-1", "text": "warmup helps\nat small batch sizes"}, {"id": "h-2", "text": "depth helps"}}
+	recordingServer(t, func(int, recorded) any {
+		return map[string]any{"agents": []map[string]any{{"agent_id": "ag-1", "finished_reason": "quota spent"}}, "open_hypotheses": open}
+	})
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-1/ag-1"))
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"platform-experiments", "agents", "finish", "--reason", "quota spent"}, &stdout, &stderr)
+	note := "hl: platform-experiments agents finish: note: you finished with 2 of your hypotheses still open. Each stays open for good unless you give its verdict before this turn ends, with hl hypothesis status ID VERDICT:\n" +
+		"  h-1 warmup helps at small batch sizes\n  h-2 depth helps\n"
+	if code != 0 || stdout.String() != `{"agent_id":"ag-1","finished_reason":"quota spent"}`+"\n" || stderr.String() != note {
+		t.Errorf("exit %d, stdout %q, stderr %q, want the agent as finished and the note %q", code, stdout.String(), stderr.String(), note)
+	}
+
+	open = nil
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"platform-experiments", "agents", "finish", "--reason", "quota spent"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+		t.Errorf("nothing left open: exit %d, stderr %q, want no note", code, stderr.String())
+	}
+}
+
 // The help of get listed five of the reasons by hand while the platform answered a dozen more.
 // It names every reason of the platform's one table and each value of waits_for.
 func TestTheHelpOfGetNamesEveryStatusReasonThePlatformAnswers(t *testing.T) {

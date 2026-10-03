@@ -17,6 +17,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
 )
 
 // AddAgentRequest is the body of POST /platform-experiments/{id}/agents: the one way an agent
@@ -434,10 +435,44 @@ type joinedAgentsBody struct {
 	Agents []JoinedAgent `json:"agents"`
 }
 
-// RegisterAgentsHuma registers how agents join and leave a platform experiment.
-func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
-	if h.launch.Launcher == "" || h.launch.DefaultModel == "" || h.launch.SigningSecret == "" || h.launch.MaxHosted <= 0 || h.repos == nil {
-		panic("quota.RegisterAgentsHuma: the handler needs its repositories and WithAgentLaunch with every field set")
+// Hypotheses reads the hypothesis graph, through the graph's own package. Implemented by
+// graphdb.Store.
+type Hypotheses interface {
+	ListHypotheses(ctx context.Context, f graphdb.ListFilter) ([]*domain.HypothesisListItem, error)
+}
+
+// OpenHypothesis is a hypothesis its agent left without a verdict.
+type OpenHypothesis struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
+}
+
+// maxOpenHypotheses is how many a finish answers: the largest page the graph lists.
+const maxOpenHypotheses = 200
+
+type finishedAgentBody struct {
+	Agents         []JoinedAgent    `json:"agents"`
+	OpenHypotheses []OpenHypothesis `json:"open_hypotheses" doc:"The hypotheses of the agent that are still open, newest first, at most 200: each stays open for good unless the agent gives its verdict (POST /hypotheses/{id}/status) while its token still works. Empty when it left none. Nothing is refused for them."`
+}
+
+// openHypotheses is the hypotheses of the agent in the platform experiment that have no verdict.
+func openHypotheses(ctx context.Context, graph Hypotheses, platformExpID, agentID string) ([]OpenHypothesis, error) {
+	items, err := graph.ListHypotheses(ctx, graphdb.ListFilter{PlatformExperimentID: platformExpID, AgentID: agentID, Status: domain.HypothesisOpen, Limit: maxOpenHypotheses})
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.openHypotheses: %w", err)
+	}
+	open := make([]OpenHypothesis, len(items))
+	for i, item := range items {
+		open[i] = OpenHypothesis{ID: item.ID, Text: item.Text}
+	}
+	return open, nil
+}
+
+// RegisterAgentsHuma registers how agents join and leave a platform experiment. graph is where a
+// finish reads what the agent left open.
+func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler, graph Hypotheses) {
+	if h.launch.Launcher == "" || h.launch.DefaultModel == "" || h.launch.SigningSecret == "" || h.launch.MaxHosted <= 0 || h.repos == nil || graph == nil {
+		panic("quota.RegisterAgentsHuma: the handler needs its repositories, WithAgentLaunch with every field set and the hypothesis graph")
 	}
 	access := doc.Access
 
@@ -566,7 +601,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Summary: "Say that an agent has nothing left to do", Tags: []string{"platform-experiments"},
 		DefaultStatus: 200,
 		Description: "Called by the agent itself, with its own token, in a running platform experiment, and by an agent of role baseline also in an open one, where it measures the baseline. From then its machine, if the platform runs it, is taken down after its last turn, " +
-			"its signup reads finished_at and finished_reason, and agent.finished is sent. The answer is agents, a list holding that one agent as finished. Its quota, jobs and findings stay as they are, and its token stops working two minutes later. " +
+			"its signup reads finished_at and finished_reason, and agent.finished is sent. The answer is agents, a list holding that one agent as finished, and open_hypotheses, the id and text of each hypothesis of the agent that still has no verdict: the finish is taken whatever they are. Its quota, jobs and findings stay as they are, and its token stops working two minutes later. " +
 			"409 work_unfinished while it has a job queued or running or a completed job without its summary, 409 experiment_closed once the platform experiment closed, which ended the agent's run already and leaves nothing to finish, 409 not_running in one not started yet for any role but baseline. Calling it again changes nothing. " +
 			"The finish of an agent of role baseline in an open platform experiment hands over what it measured: when the baseline agents that finished left exactly one COMPLETED job that reports the ranking metric, the platform declares that job as the baseline in this request, as PATCH /platform-experiments/{id} with baseline_job_id does, and starts the run when nothing else is missing. " +
 			"The finish is answered 200 whatever became of the declaration: one that is refused, or a finish that left no such job or several, declares nothing, and the platform experiment's status_reason says which it was and who acts (baseline_required, baseline_undeclared, or the refusal of the declaration such as budget_below_baseline).",
@@ -576,7 +611,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Body    struct {
 			Reason string `json:"reason" minLength:"1" doc:"Why nothing is left to do: quota spent, or what was tried and why no further idea is worth a job."`
 		}
-	}) (*struct{ Body joinedAgentsBody }, error) {
+	}) (*struct{ Body finishedAgentBody }, error) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
@@ -587,6 +622,11 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if caller.Kind != auth.KindAgent || caller.AgentID != in.AgentID || caller.PlatformExperimentID != in.ID {
 			return nil, huma.Error403Forbidden("an agent finishes itself, with its own token")
 		}
+		// Read before the finish is stored: a graph that does not answer leaves nothing changed.
+		out := &struct{ Body finishedAgentBody }{}
+		if out.Body.OpenHypotheses, err = openHypotheses(ctx, graph, in.ID, in.AgentID); err != nil {
+			return nil, h.refusal("finish agent", err)
+		}
 		finished, err := h.svc.FinishAgent(ctx, in.ID, in.AgentID, in.Body.Reason)
 		if err != nil {
 			return nil, h.refusal("finish agent", err)
@@ -595,7 +635,6 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err := h.nameAddedBy(ctx, signups); err != nil {
 			return nil, h.refusal("finish agent", err)
 		}
-		out := &struct{ Body joinedAgentsBody }{}
 		if out.Body.Agents, err = h.svc.roster(ctx, in.ID, signups); err != nil {
 			return nil, h.refusal("finish agent", err)
 		}
