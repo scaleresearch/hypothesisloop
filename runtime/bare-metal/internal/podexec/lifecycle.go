@@ -100,12 +100,11 @@ func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string, gran
 			continue
 		}
 		name := c.name()
-		// A nil grace is the engine's own default. A container that cannot say its grace must
-		// still be stoppable, or it holds its device for good.
+		// A container that cannot say its grace is still stopped, or it holds its device for
+		// good. The engine then decides the grace (nil), and the delete is an error saying so.
 		var grace *int
-		if seconds, err := stopGrace(c.Labels, grantCheckpointWindow); err != nil {
-			log.Printf("podexec: container %s: %v; stopping it on the engine's default grace", name, err)
-		} else {
+		seconds, graceErr := stopGrace(c.Labels, grantCheckpointWindow)
+		if graceErr == nil {
 			timeout := int(seconds)
 			grace = &timeout
 		}
@@ -116,6 +115,9 @@ func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string, gran
 		e.begin(ctx, experimentID, "delete workload", operation{labels: c.Labels, devices: devices}, func(ctx context.Context) error {
 			return e.stopContainer(ctx, name, grace)
 		})
+		if graceErr != nil {
+			return fmt.Errorf("podexec: container %s is being stopped on the engine's own grace, its job's is lost: %w", name, graceErr)
+		}
 		return nil
 	}
 	return nil // nothing to delete
@@ -129,8 +131,7 @@ func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string, gran
 // workload failure, a drift replacement -- stops on the ordinary grace whatever the job
 // declared, because there is nothing to save or nothing left to save it with.
 //
-// A container with no readable grace is an error rather than a guess; DeleteWorkload then leaves
-// the grace to the engine.
+// A container with no readable grace is an error rather than a guess.
 func stopGrace(labels map[string]string, grantCheckpointWindow bool) (int64, error) {
 	grace, err := strconv.ParseInt(labels[LabelGraceSeconds], 10, 64)
 	if err != nil {

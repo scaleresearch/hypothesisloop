@@ -725,7 +725,7 @@ func TestAJobPullingItsImageIsReportedPendingAndPlaced(t *testing.T) {
 	}
 }
 
-func TestAContainerWithNoReadableGraceIsStoppedOnTheEngineDefault(t *testing.T) {
+func TestAContainerWithNoReadableGraceIsStoppedAndItsDeleteIsAnError(t *testing.T) {
 	f := newFakeEngine()
 	e := newFakeExecutor(f, "/dev/fake/0")
 	ctx := t.Context()
@@ -740,7 +740,13 @@ func TestAContainerWithNoReadableGraceIsStoppedOnTheEngineDefault(t *testing.T) 
 	delete(f.containers[containerName("unlabelled")].labels, LabelGraceSeconds)
 	f.mu.Unlock()
 
-	pass(t, ctx, e)
+	if err := e.DeleteWorkload(ctx, "labelled", false); err != nil {
+		t.Fatalf("DeleteWorkload of a container with its grace: %v", err)
+	}
+	err := e.DeleteWorkload(ctx, "unlabelled", false)
+	if err == nil || !strings.Contains(err.Error(), containerName("unlabelled")) || !strings.Contains(err.Error(), "no readable shutdown grace") {
+		t.Fatalf("DeleteWorkload = %v, want an error naming the container and its unreadable grace", err)
+	}
 	eventually(t, "both jobs are stopped", func() bool {
 		return f.state("labelled") != "running" && f.state("unlabelled") != "running"
 	})
