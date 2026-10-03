@@ -394,9 +394,8 @@ func jobList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 
 One job per line, newest first: ids (hypothesis_id is the hypothesis it tests; a baseline
 agent's job tests none and prints "objective":true in its place, so there is nothing to
-hl hypothesis get), status, metrics (one value per declared metric: on a
-ranking metric the job's best in its direction, on a constraint or an attribute its last, so
-report a ranking metric as a result, never as a running timer),
+hl hypothesis get), status, metrics (one value per declared metric, the last the job
+reported: its final report on a metric is its result),
 ran_on (the machine: numbers compare only between jobs that share it), reasons (for a QUEUED
 job not_admitted_reason, the code of what it waits for, and not_admitted_message, its
 sentence), theory, cost

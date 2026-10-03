@@ -4,7 +4,7 @@
     post_metric(fraction_complete, value, "metric_key")
 
 Report every declared metric as the run goes and once more at the end: a job that reports
-nothing is taken for stuck and evicted. Metrics are all a job sends. Its logs are read from
+nothing is taken for stuck and evicted, and its final report on a metric is its result. Metrics are all a job sends. Its logs are read from
 its output. Outside a job this module imports and post_metric raises: only a job reports.
 """
 

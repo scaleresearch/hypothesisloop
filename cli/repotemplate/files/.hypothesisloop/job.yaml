@@ -2,14 +2,14 @@
 #
 #   hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..." --env KEY=VALUE
 #
-# The flags set what differs from one trial to the next, and hl fills id and code_ref from the
+# The flags set what differs from one trial to the next, and hl fills code_ref from the
 # clone it runs in. `hl job submit --help` lists every field. No secret belongs here: a job takes
 # one with --secret-env.
 # No estimated_duration_hours is stated here. A job holds its estimate of its agent's quota from
 # submit until it ends, and a job that states none gets the one the platform measured on the
 # experiment's baseline job when it was declared: what it ran plus a half.
-# --estimated-duration-hours states it for one submit: for the baseline job itself, which has
-# nothing measured yet, and for a trial that will run longer.
+# The baseline job itself, which nothing was measured before, is given the largest its agent's
+# quota admits. --estimated-duration-hours states one for a trial that will run longer.
 job:
   # REQUIRED on every cluster, CPU, GPU or chip. The name
   # of a job image exactly as `hl capacity` shows it (job_image; the line of the type below

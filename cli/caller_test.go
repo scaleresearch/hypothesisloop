@@ -205,8 +205,8 @@ func TestCloseAndSummaryAreWhatACoordinatorEndsARunWith(t *testing.T) {
 	if code := run([]string{"platform-experiments", "update", "--platform-experiment", "pe-2", "--name", "renamed", fields}, &stdout, &stderr); code != 0 {
 		t.Fatalf("update fields of a named experiment: exit %d, stderr %s", code, stderr.String())
 	}
-	// The baseline is declared with the brief that hands it over, in the one call.
-	if code := run([]string{"platform-experiments", "update", "--description-file", file, "--baseline-job", "job-1"}, &stdout, &stderr); code != 0 {
+	// The baseline is declared with its job alone: the platform writes it into the brief.
+	if code := run([]string{"platform-experiments", "update", "--baseline-job", "job-1"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("declare the baseline: exit %d, stderr %s", code, stderr.String())
 	}
 	if code := run([]string{"platform-experiments", "update"}, &stdout, &stderr); code != 2 {
@@ -218,7 +218,7 @@ func TestCloseAndSummaryAreWhatACoordinatorEndsARunWith(t *testing.T) {
 		{Method: "POST", Path: "/platform-experiments/pe-1/close", Body: map[string]any{}},
 		{Method: "PATCH", Path: "/platform-experiments/pe-1", Body: map[string]any{"description": "from a file\n"}},
 		{Method: "PATCH", Path: "/platform-experiments/pe-2", Body: map[string]any{"name": "renamed", "max_agents": float64(4)}},
-		{Method: "PATCH", Path: "/platform-experiments/pe-1", Body: map[string]any{"description": "from a file\n", "baseline_job_id": "job-1"}},
+		{Method: "PATCH", Path: "/platform-experiments/pe-1", Body: map[string]any{"baseline_job_id": "job-1"}},
 	}
 	if !reflect.DeepEqual(*got, want) {
 		t.Fatalf("requests = %+v\nwant %+v", *got, want)
@@ -307,5 +307,23 @@ func TestAPlannerProposesItsDraftFromAFile(t *testing.T) {
 	}
 	if code := run([]string{"platform-experiments", "decline", "--reason", " "}, &stdout, &stderr); code != 2 || len(*got) != 2 {
 		t.Errorf("declining with no reason: exit %d with %d requests, want 2 and nothing sent", code, len(*got))
+	}
+}
+
+// A coordinator that declared a baseline polled for a minute to learn whether the run had
+// started. The declaration starts the run or says what it still waits for, and hl prints which.
+func TestDeclaringABaselineSaysWhetherTheRunStarted(t *testing.T) {
+	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
+	for want, answer := range map[string]map[string]any{
+		"hl: platform-experiments update: the baseline is declared and the run started (agents_starting): no researcher's machine is running yet\n": {
+			"id": "pe-1", "status": "running", "status_reason": map[string]any{"reason": "agents_starting", "message": "no researcher's machine is running yet"}},
+		"hl: platform-experiments update: the baseline is declared and the run has not started (no_researchers): add a researcher\n": {
+			"id": "pe-1", "status": "open", "status_reason": map[string]any{"reason": "no_researchers", "message": "add a researcher"}},
+	} {
+		recordingServer(t, func(int, recorded) any { return answer })
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"platform-experiments", "update", "--baseline-job", "job-1"}, &stdout, &stderr); code != 0 || stderr.String() != want || !strings.Contains(stdout.String(), `"pe-1"`) {
+			t.Errorf("exit %d, stdout %q, stderr %q\nwant stderr %q", code, stdout.String(), stderr.String(), want)
+		}
 	}
 }

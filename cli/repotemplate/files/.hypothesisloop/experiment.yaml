@@ -10,9 +10,8 @@
 #   is the goal, what to vary, the gate, how to run a trial, when to stop, and
 #   BASELINE
 #     config:    the exact configuration
-#     code_ref:  <repository address>@<40 character commit>
-#     metric:    <ranking metric key> = <the value measured>
-#     measured:  <the job that measured it, or "not yet established">
+#     trial:     how a researcher runs one trial
+#   The platform adds the job that measured it, its code_ref and its values once it is declared.
 # metrics:
 #   - key: the_ranked_metric
 #     direction: maximize   # or minimize

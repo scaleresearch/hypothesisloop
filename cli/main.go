@@ -713,9 +713,9 @@ It is created open and nothing runs yet. Add the researchers while it is open
 (hl platform-experiments agents add). It starts on a declared baseline: with coordinator_hosted
 the coordinator adds the baseline agent and declares its job. Without it you do both: add an
 agent with --role baseline, and once its job is COMPLETED with a summary, run
-hl platform-experiments update --description-file brief.md --baseline-job JOB. The platform
-starts the run within a minute once the baseline is declared, a researcher has joined and
-starts_at, when the file states one, has passed; nothing else starts it. While it is open
+hl platform-experiments update --baseline-job JOB. That request starts the run when a
+researcher has joined and starts_at, when the file states one, has passed; otherwise the
+request that adds the researcher starts it, or starts_at does. While it is open
 hl platform-experiments get answers in status_reason what the start waits for and your next step, and in
 baseline_due_at when the platform closes it, with close_reason baseline_limit_reached, if it is
 not running by then.
@@ -785,11 +785,15 @@ Changes the fields you name and leaves every other as it is. The brief is one co
 
   hl platform-experiments update --description-file brief.md
 
---baseline-job JOB declares the baseline while the platform experiment is open, with the
-description whose BASELINE block names JOB and its code_ref. The platform starts the run within
-a minute of a valid one and never without. It reads JOB itself and refuses with what is wrong: no_baseline (JOB is no job of an agent
+--baseline-job JOB declares the baseline while the platform experiment is open, and needs
+nothing beside it. The platform writes JOB, its code_ref and what it measured into the
+description, a block it keeps through every later change of the description, and starts the run
+in that request when a researcher has joined and no starts_at is ahead. The line printed after
+the experiment says whether the run started, with its status_reason: what an open one still
+waits for, and agents_starting while no researcher's machine is up yet. The platform reads JOB
+itself and refuses with what is wrong: no_baseline (JOB is no job of an agent
 of role baseline here), baseline_not_completed, baseline_without_finding (its summary is not
-filed), brief_without_baseline, baseline_missing_metric (a declared metric JOB never reported),
+filed), baseline_missing_metric (a declared metric JOB never reported),
 baseline_breaks_constraint (JOB's value breaks a gate), budget_below_baseline (the budget does
 not hold one trial per researcher: JOB again at the estimate measured on it). The last two are
 the owner's to change.
@@ -851,12 +855,26 @@ A coordinator's token changes the description and declares the baseline, and not
 	if len(body) == 0 {
 		return parseExit(misuse(fs, "nothing to change: name a field"))
 	}
-	var out any
+	var out map[string]any
 	if err := c.Do("PATCH", "/platform-experiments/"+url.PathEscape(id), body, &out); err != nil {
 		return fail(stderr, err)
 	}
 	printJSON(stdout, out)
+	if *baselineJob != "" {
+		fmt.Fprintln(stderr, "hl: platform-experiments update: "+baselineDeclared(out))
+	}
 	return 0
+}
+
+// baselineDeclared says of the platform experiment a declaration answered whether its run
+// started, and why it is in the status it is in.
+func baselineDeclared(experiment map[string]any) string {
+	started := "has not started"
+	if experiment["status"] == "running" {
+		started = "started"
+	}
+	reason, _ := experiment["status_reason"].(map[string]any)
+	return fmt.Sprintf("the baseline is declared and the run %s (%v): %v", started, reason["reason"], reason["message"])
 }
 
 func cmdPlatformExperimentsPropose(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -873,12 +891,13 @@ a leading quote.
     description: |
       the brief, the only thing researchers read. Its BASELINE block states the control:
         config: the exact control configuration
-        measured: not yet established
+        trial: how a researcher runs one trial
+      The platform adds the job that measured it, its code_ref and its values once it is declared.
     report_interval_seconds: 30        # how often a job is to report
     metrics:
       - key: val_accuracy              # one metric ranks: role ranking is the default. A job ranks
-        direction: maximize            # by the best value it reports on it (or minimize: the
-                                       # lowest), so a harness reports there only its result
+        direction: maximize            # by the last value it reports on it (or minimize), so a
+                                       # harness's final report there is its result
       - key: exact_match               # optional gate
         direction: maximize
         role: constraint
@@ -886,6 +905,9 @@ a leading quote.
   accelerator_type: ...                # copied verbatim from 'hl capacity', the CPU type for work on cores
   image: ...                           # the job image the brief names, from the same line of 'hl capacity':
                                        # one of its job_images, or its only_job_image where it shows one
+  cpu: 8                               # optional, like memory and storage: what one node of a job
+  memory: 32Gi                         # asks for, as job.cpu, job.memory and job.storage state it.
+  storage: 100Gi                       # hl repo init writes them into job.yaml, so no brief repeats them
   budget_accelerator_hours: 6          # proposed; the person states the real ones at accept
   duration_hours: 4
   agents:                              # one entry per researcher
@@ -914,7 +936,8 @@ a leading quote.
 
 The proposal is checked before it is stored, and a refusal names what to fix: for a file that
 is no YAML the line and what is wrong there, which is all the checking the file needs, and for
-the image what a job submit would refuse it for (unknown_job_image, no_cluster_for_image). A
+the image what a job submit would refuse it for (unknown_job_image, no_cluster_for_image), as
+for a cpu, memory or storage that is no quantity (invalid_resources). A
 refused proposal changes nothing, so fix the file and run propose again. One that passes is
 stored at once, replaces the one before, releases your machine and is what the person is asked
 to accept: send only the finished proposal, never one written to try the checks.`, stderr)
