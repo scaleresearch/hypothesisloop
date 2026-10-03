@@ -72,7 +72,7 @@ type Service struct {
 	// dataStore is the only way this service learns what a job wrote — listed live, never
 	// mirrored into PostgreSQL.
 	dataStore *objectstore.Client
-	// events, when wired, carries to /watch subscribers the events no Postgres trigger emits: the
+	// events carries to /watch subscribers the events no Postgres trigger emits: the
 	// metric-arrival pointer and every hypothesis event (the graph store has no NOTIFY).
 	events EventNotifier
 }
@@ -84,18 +84,13 @@ type EventNotifier interface {
 	Emit(ctx context.Context, write func(stamp db.Stamp) ([]db.Event, error)) error
 }
 
-// WithEvents wires the change stream this service announces metric arrivals and hypothesis
-// changes on.
-func (s *Service) WithEvents(events EventNotifier) *Service {
-	s.events = events
-	return s
-}
-
-// New returns a new registry Service.
-func New(store Store, graph Graph, logger *zap.Logger, metricsDBURL string, dataStore *objectstore.Client) *Service {
+// New returns a new registry Service, which announces metric arrivals and hypothesis changes on
+// events.
+func New(store Store, graph Graph, events EventNotifier, logger *zap.Logger, metricsDBURL string, dataStore *objectstore.Client) *Service {
 	return &Service{
 		store:        store,
 		graph:        graph,
+		events:       events,
 		logger:       logger,
 		metricsDBURL: metricsDBURL,
 		dataStore:    dataStore,

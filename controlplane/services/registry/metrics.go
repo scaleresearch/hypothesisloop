@@ -299,9 +299,6 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 // refusing an accepted push because a transient stream could not be told about it would turn a
 // notification outage into lost measurements.
 func (s *Service) notifyMetricArrived(ctx context.Context, experimentID, platformExperimentID, agentID, metricName string, fractionComplete float64) {
-	if s.events == nil {
-		return
-	}
 	err := s.events.NotifyEvent(ctx, db.Event{
 		Kind:                 db.EventMetricPoint,
 		Subject:              experimentID,

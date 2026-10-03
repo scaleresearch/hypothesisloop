@@ -69,8 +69,12 @@ func (s *poolStore) GetAgent(_ context.Context, id string) (*domain.Agent, error
 	return &domain.Agent{ID: id}, nil
 }
 
-// GetAgentSignup signs every agent up as a researcher, but the one named baseline-agent.
+// GetAgentSignup signs every agent up as a researcher, but the one named baseline-agent, and
+// the one named agent-elsewhere not at all.
 func (s *poolStore) GetAgentSignup(_ context.Context, _, agentID string) (*domain.AgentSignup, error) {
+	if agentID == "agent-elsewhere" {
+		return nil, nil
+	}
 	role := domain.SignupRoleCompetitor
 	if agentID == "baseline-agent" {
 		role = domain.SignupRoleBaseline
@@ -402,7 +406,8 @@ func TestAddHypothesisCommentAcceptsAnAgentsNoteOnAHumanSubmittedRow(t *testing.
 // stored value, and a reconnecting watcher must see one event, not two.
 func TestRegisteringANewHypothesisStampsTheGraphWriteWithItsEventsPosition(t *testing.T) {
 	events := &recordedEvents{}
-	svc := poolService(newPoolStore()).WithEvents(events)
+	svc := poolService(newPoolStore())
+	svc.events = events
 	graph := svc.graph.(*fakeGraph)
 
 	h, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", agentActor("agent-1"), "pe-1", "warmup helps", buildOnRoot, nil)
@@ -423,7 +428,8 @@ func TestRegisteringANewHypothesisStampsTheGraphWriteWithItsEventsPosition(t *te
 // a claim they already know about.
 func TestRegisteringAnExistingHypothesisAnnouncesNothing(t *testing.T) {
 	events := &recordedEvents{}
-	svc := poolService(newPoolStore()).WithEvents(events)
+	svc := poolService(newPoolStore())
+	svc.events = events
 	if _, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", agentActor("agent-1"), "pe-1", "warmup helps", buildOnRoot, nil); err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
@@ -439,7 +445,8 @@ func TestRegisteringAnExistingHypothesisAnnouncesNothing(t *testing.T) {
 // A verdict is announced once, when it changes; re-sending the same verdict is not news.
 func TestSettlingAHypothesisAnnouncesTheVerdictOnlyWhenItChanges(t *testing.T) {
 	events := &recordedEvents{}
-	svc := poolService(newPoolStore()).WithEvents(events)
+	svc := poolService(newPoolStore())
+	svc.events = events
 	h, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", agentActor("agent-1"), "pe-1", "warmup helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
@@ -464,7 +471,8 @@ func TestSettlingAHypothesisAnnouncesTheVerdictOnlyWhenItChanges(t *testing.T) {
 // and other agents need to hear about it; a link that already existed changed nothing.
 func TestAddingALinkAnnouncesItOnceWithTheTargetAsDetail(t *testing.T) {
 	events := &recordedEvents{}
-	svc := poolService(newPoolStore()).WithEvents(events)
+	svc := poolService(newPoolStore())
+	svc.events = events
 	a, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", agentActor("agent-1"), "pe-1", "warmup helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
@@ -494,7 +502,8 @@ func TestAddingALinkAnnouncesItOnceWithTheTargetAsDetail(t *testing.T) {
 // the event the failed attempt never did, once, at the retry's own position.
 func TestARetryAfterAFailedEmitSendsTheEventTheFailureLost(t *testing.T) {
 	events := &recordedEvents{}
-	svc := poolService(newPoolStore()).WithEvents(events)
+	svc := poolService(newPoolStore())
+	svc.events = events
 	ctx := context.Background()
 	b, _, _, err := svc.RegisterHypothesis(ctx, "agent-2", agentActor("agent-2"), "pe-1", "cooldown helps", buildOnRoot, nil)
 	if err != nil {
@@ -735,7 +744,7 @@ func TestFindingsPairEachHypothesisWithItsNewestFindingAndBestJob(t *testing.T) 
 			{"metric":{"job_id":"job-rescaled","metric_name":"loss","metric_basis":"per_token"},"value":[1,"0.01"]}]}}`))
 	}))
 	defer metrics.Close()
-	svc := New(findingsStore{newPoolStore()}, findingsGraph{}, zap.NewNop(), metrics.URL, nil)
+	svc := New(findingsStore{newPoolStore()}, findingsGraph{}, &recordedEvents{}, zap.NewNop(), metrics.URL, nil)
 
 	got, err := svc.Findings(context.Background(), "pe-1")
 	if err != nil || len(got) != 3 {

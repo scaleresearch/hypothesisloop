@@ -124,7 +124,7 @@ func TestPlatformExperimentTimeseriesEndsItsWindowWhereAskedAndNeverAhead(t *tes
 		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"matrix","result":[]}}`))
 	}))
 	defer srv.Close()
-	svc := New(nil, nil, nil, srv.URL, nil)
+	svc := New(nil, nil, nil, nil, srv.URL, nil)
 	unix := func(s string) time.Time {
 		f, err := strconv.ParseFloat(s, 64)
 		if err != nil {
