@@ -2,21 +2,27 @@
 
 import { createContext, memo, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ReactFlow, ReactFlowProvider, Background, ConnectionMode, Controls, MiniMap, Handle,
-  Position as Side, useReactFlow, useStore,
+  ReactFlow, ReactFlowProvider, Background, ConnectionMode, Controls, MiniMap, Handle, Panel,
+  Position as Side, ViewportPortal, useReactFlow, useStore,
 } from '@xyflow/react'
 import type { Edge, Node, NodeProps, NodeTypes } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { clsx } from 'clsx'
+import type { ReactNode } from 'react'
 import { FileText, MessageSquare } from 'lucide-react'
-import type { Evidence, HypothesisGraph, HypothesisGraphNode } from '@/types'
+import type { Evidence, HypothesisGraph, HypothesisGraphNode, HypothesisLinkType } from '@/types'
 import { hypothesisLinkStyles, hypothesisStatuses, semantic, statusColor, tint } from '@/lib/colors'
 import { Dot } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Eyebrow } from '@/components/ui/text'
 import { filedAfterVerdict } from '@/lib/hypothesis-progress'
 import { Actor, verdictBy } from '@/components/actor'
+import { IdeaEditor, NodeActions, useEditor } from '@/components/graph-edit'
 import { NODE_HEIGHT, NODE_WIDTH, ROW, matchesFilters } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
+
+// Kinds read apart by line as well as colour: a related link is dotted, the others solid.
+const LINK_DASH: Partial<Record<HypothesisLinkType, string>> = { related: '2 4' }
 
 const COUNT = 'inline-flex items-center gap-0.5'
 
@@ -63,7 +69,16 @@ type ObjectiveNodeData = { label: string; objective: Evidence }
 
 // Kept out of node data so that selecting or filtering re-renders only the drawn nodes instead of
 // rebuilding every React Flow node.
-const Highlight = createContext({ selected: '', hits: new Set<string>(), dimmed: new Set<string>() })
+const Highlight = createContext({
+  selected: '', hits: new Set<string>(), dimmed: new Set<string>(),
+  /** While a link target is being picked: the nodes that can take it. */
+  pickable: null as Set<string> | null,
+})
+
+function pickClass(pickable: Set<string> | null, id: string) {
+  if (!pickable) return undefined
+  return pickable.has(id) ? 'cursor-crosshair ring-1 ring-primary' : 'cursor-not-allowed opacity-30'
+}
 
 const HANDLE = 'pointer-events-none opacity-0'
 
@@ -84,7 +99,7 @@ function HiddenHandles() {
 
 const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<HypothesisNodeData>>) {
   const { item } = data
-  const { selected, hits, dimmed } = useContext(Highlight)
+  const { selected, hits, dimmed, pickable } = useContext(Highlight)
   const color = statusColor(item.status)
   return (
     <div
@@ -94,6 +109,7 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
         selected === item.id ? 'bg-surface-raised shadow-md ring-1 ring-accent' : 'bg-surface-inset',
         hits.has(item.id) && 'ring-2 ring-warning',
         dimmed.has(item.id) && 'opacity-20',
+        pickClass(pickable, item.id),
       )}
       style={{ borderLeftColor: color }}
       title={item.text}
@@ -109,9 +125,9 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
 })
 
 const ObjectiveNode = memo(function ObjectiveNode({ id, data }: NodeProps<Node<ObjectiveNodeData>>) {
-  const { selected } = useContext(Highlight)
+  const { selected, pickable } = useContext(Highlight)
   return (
-    <div className={clsx(NODE, 'justify-center border-primary', selected === id ? 'bg-surface-raised shadow-md ring-1 ring-accent' : 'bg-primary/5')}>
+    <div className={clsx(NODE, 'justify-center border-primary', selected === id ? 'bg-surface-raised shadow-md ring-1 ring-accent' : 'bg-primary/5', pickClass(pickable, id))}>
       <HiddenHandles />
       <div className="flex items-center justify-between gap-2">
         <Eyebrow>Objective</Eyebrow>
@@ -124,15 +140,15 @@ const ObjectiveNode = memo(function ObjectiveNode({ id, data }: NodeProps<Node<O
 
 const nodeTypes: NodeTypes = { hypothesis: HypothesisNode, objective: ObjectiveNode }
 
-function Legend() {
+function Legend({ onTidy }: { onTidy?: () => void }) {
   return (
-    <div className="flex flex-wrap gap-x-3 gap-y-1 border-b px-3 py-1.5 text-2xs text-muted">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-1.5 text-2xs text-muted">
       {(Object.keys(hypothesisLinkStyles) as Array<keyof typeof hypothesisLinkStyles>).map(type => {
         const s = hypothesisLinkStyles[type]
         return (
           <span key={type} className="inline-flex items-center gap-1.5">
             <svg width="26" height="8" aria-hidden="true">
-              <line x1="0" y1="4" x2="26" y2="4" stroke={s.color} strokeWidth="2" />
+              <line x1="0" y1="4" x2="26" y2="4" stroke={s.color} strokeWidth="2" strokeDasharray={LINK_DASH[type]} />
             </svg>
             {s.label}
           </span>
@@ -144,7 +160,27 @@ function Legend() {
           {status}
         </span>
       ))}
+      {onTidy && (
+        <Button variant="link" size="sm" className="ml-auto" title="New ideas were placed beside the others; lay the whole graph out again" onClick={onTidy}>
+          Tidy layout
+        </Button>
+      )}
     </div>
+  )
+}
+
+/** Content pinned to a point of the graph, drawn at screen size whatever the zoom. */
+function Anchored({ at, children }: { at: Position; children: ReactNode }) {
+  const zoom = useStore(s => s.transform[2])
+  return (
+    <ViewportPortal>
+      <div
+        className="nodrag nopan nowheel absolute left-0 top-0 z-10"
+        style={{ transform: `translate(${at.x}px, ${at.y}px) scale(${1 / zoom})`, transformOrigin: '0 0', pointerEvents: 'all' }}
+      >
+        {children}
+      </div>
+    </ViewportPortal>
   )
 }
 
@@ -160,6 +196,8 @@ interface HypothesisGraphCanvasProps {
   /** Off while the side panel narrows the canvas: the map would lie over the cards around the focus. */
   minimap: boolean
   onSelect: (id: string) => void
+  /** Present while ideas added since the graph was laid out sit beside the others. */
+  onTidy?: () => void
 }
 
 export function HypothesisGraphCanvas(props: HypothesisGraphCanvasProps) {
@@ -170,8 +208,11 @@ export function HypothesisGraphCanvas(props: HypothesisGraphCanvasProps) {
   )
 }
 
-function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, minimap, onSelect }: HypothesisGraphCanvasProps) {
+function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, minimap, onSelect, onTidy }: HypothesisGraphCanvasProps) {
   const { setCenter, setViewport, getZoom } = useReactFlow()
+  const editor = useEditor()
+  const picking = editor?.picking ?? false
+  const adding = editor?.adding ?? null
   const width = useStore(s => s.width)
   const height = useStore(s => s.height)
   const [ready, setReady] = useState(false)
@@ -200,7 +241,15 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
       data: { item },
     })),
   ], [graph, positions, rootLabel])
-  const highlight = useMemo(() => ({ selected, hits, dimmed }), [selected, hits, dimmed])
+  const canPick = editor?.canPick
+  const pickable = useMemo(
+    () => (picking && canPick ? new Set([graph.root, ...graph.nodes.map(n => n.id)].filter(canPick)) : null),
+    [picking, canPick, graph],
+  )
+  const highlight = useMemo(
+    () => ({ selected: adding ?? selected, hits, dimmed, pickable }),
+    [adding, selected, hits, dimmed, pickable],
+  )
 
   const edges = useMemo<Edge[]>(() => {
     const builtOn = new Set(graph.edges.filter(e => e.type === 'builds_on').flatMap(e => [`${e.from}>${e.to}`, `${e.to}>${e.from}`]))
@@ -242,7 +291,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
       style: {
         stroke: s.color,
         strokeWidth: hierarchy ? 1.5 : 2,
-        strokeDasharray: further ? '6 4' : undefined,
+        strokeDasharray: further ? '6 4' : LINK_DASH[e.type],
         opacity,
       },
     }
@@ -267,9 +316,24 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
     }
   }, [ready, focus, graph.root, positions, width, height, setCenter, setViewport, getZoom])
 
+  // The editor opens under its node: bring both into view, at a zoom the node can be read at.
+  const opened = useRef<string | null>(null)
+  useEffect(() => {
+    const p = adding === null ? undefined : positions.get(adding)
+    if (!ready || !p || opened.current === adding) return
+    opened.current = adding
+    setCenter(p.x + NODE_WIDTH / 2, p.y + NODE_HEIGHT + 60, { zoom: Math.max(getZoom(), 0.7), duration: 300 })
+  }, [ready, adding, positions, setCenter, getZoom])
+  useEffect(() => {
+    if (adding === null) opened.current = null
+  }, [adding])
+
+  const at = positions.get(adding ?? selected)
+  const below = at && { x: at.x, y: at.y + NODE_HEIGHT + 8 }
+
   return (
     <Highlight.Provider value={highlight}>
-      <Legend />
+      <Legend onTidy={onTidy} />
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -279,16 +343,26 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
         onInit={() => setReady(true)}
         minZoom={0.05}
         maxZoom={2}
-        onlyRenderVisibleElements
+        onlyRenderVisibleElements={nodes.length > 200}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
-        onNodeClick={(_, node) => onSelect(node.id)}
+        onNodeClick={(_, node) => (picking ? editor?.pick(node.id) : onSelect(node.id))}
         proOptions={{ hideAttribution: true }}
         style={{ background: semantic.surface, flex: 1, height: 'auto', minHeight: 0 }}
       >
         <Background gap={24} color={tint(semantic.text, 0.06)} />
         <Controls showInteractive={false} position="top-left" />
+        {below && (adding !== null ? (
+          <Anchored at={below}><IdeaEditor key={adding} /></Anchored>
+        ) : (
+          <Anchored at={below}><NodeActions id={selected} /></Anchored>
+        ))}
+        {graph.nodes.length === 0 && (
+          <Panel position="bottom-center" className="text-xs text-muted">
+            No hypotheses yet. Agents place each idea under the objective or an earlier one.
+          </Panel>
+        )}
         {minimap && (
           <MiniMap
             position="top-right"
