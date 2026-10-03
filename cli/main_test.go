@@ -196,32 +196,27 @@ func TestJobSubmitFromYAML(t *testing.T) {
 	}
 }
 
-func TestJobSubmitHeldForSummariesNamesEachCommand(t *testing.T) {
-	var listQuery string
-	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			listQuery = r.URL.RawQuery
-			_, _ = w.Write([]byte(`[{"id":"job-1"},{"id":"job-2"}]`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"id":"job-3","status":"QUEUED","not_admitted_reason":"summary_gate"}`))
+// hl dropped the platform's sentence for a held job, asked for the owed jobs in a second request
+// and worded the commands itself. The answer to the submit says it all, and hl prints that.
+func TestJobSubmitHeldForASummaryPrintsThePlatformsReasonAndSentence(t *testing.T) {
+	const sentence = "jobs job-1, job-2 of this agent are COMPLETED and have no summary: hl job summary job-1 --text T files one, and this job is admitted once none is owed"
+	got := recordingServer(t, func(int, recorded) any {
+		return map[string]any{"id": "job-3", "status": "QUEUED", "not_admitted_reason": "summary_gate", "not_admitted_message": sentence}
 	})
-	setAPIURL(t, url)
 	jobFile := t.TempDir() + "/job.yaml"
 	if err := os.WriteFile(jobFile, []byte("metadata:\n  code_ref: repo@abc\n  platform_experiment_id: pe-1\njob:\n  image: foo:latest\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"job", "submit", "--agent", "jane", jobFile}, &stdout, &stderr)
-	if code != 0 || listQuery != "agent_id=jane&needs_summary=true&platform_experiment_id=pe-1" {
-		t.Fatalf("exit %d, list query %q, stderr %s", code, listQuery, stderr.String())
+	if code != 0 || len(*got) != 1 {
+		t.Fatalf("exit %d after %d requests, stderr %s, want 0 after the submit alone", code, len(*got), stderr.String())
 	}
 	if want := `{"id":"job-3","status":"QUEUED"}` + "\n"; stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
-	got := stderr.String()
-	if strings.Count(got, "\n") != 1 || !strings.HasSuffix(got, "hl job summary job-1 --text T; hl job summary job-2 --text T\n") {
-		t.Fatalf("stderr = %q, want one line ending in the summary command of each job", got)
+	if want := "hl: job submit: accepted and held (summary_gate): " + sentence + "\n"; stderr.String() != want {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 	}
 }
 
@@ -263,27 +258,6 @@ func TestJobSubmitBeforeTheStartPrintsTheRefusalAndAsksNothingMore(t *testing.T)
 	if code != 1 || requests != 1 || stdout.Len() != 0 || strings.Count(stderr.String(), "\n") != 1 ||
 		!strings.Contains(stderr.String(), `"reason":"experiment_not_started"`) || !strings.Contains(stderr.String(), "pe-1 has not started") {
 		t.Fatalf("exit %d after %d requests, stdout %q, stderr %q", code, requests, stdout.String(), stderr.String())
-	}
-}
-
-func TestJobSubmitHeldForSummariesStaysOneAcceptedLineWhenTheLookupFails(t *testing.T) {
-	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			http.Error(w, `{"detail":"failed to list experiments"}`, http.StatusInternalServerError)
-			return
-		}
-		_, _ = w.Write([]byte(`{"id":"job-3","status":"QUEUED","not_admitted_reason":"summary_gate"}`))
-	})
-	setAPIURL(t, url)
-	jobFile := t.TempDir() + "/job.yaml"
-	if err := os.WriteFile(jobFile, []byte("metadata:\n  code_ref: repo@abc\n  platform_experiment_id: pe-1\njob:\n  image: foo:latest\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"job", "submit", "--agent", "jane", jobFile}, &stdout, &stderr)
-	want := "hl: job submit: accepted; it starts once each of your COMPLETED jobs has a summary: hl job list --needs-summary --agent jane lists them\n"
-	if code != 0 || stderr.String() != want {
-		t.Fatalf("exit %d, stderr = %q, want exit 0 and %q", code, stderr.String(), want)
 	}
 }
 

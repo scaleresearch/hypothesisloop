@@ -182,12 +182,15 @@ agents/coordinator/experiments.`, stderr)
 		EstimatedHours float64 `json:"estimated_duration_hours,omitempty"`
 		EstimatedCost  float64 `json:"estimated_cost_acch,omitempty"`
 		Reason         string  `json:"not_admitted_reason,omitempty"`
+		Message        string  `json:"not_admitted_message,omitempty"`
 	}
 	if err := c.Do("POST", "/experiments", body, &out); err != nil {
 		return fail(stderr, err)
 	}
-	held := out.Reason == summaryGate
-	out.Reason = ""
+	// Every job waits a moment for the scheduler's first look. The one that waits for its agent
+	// is said beside the line, in the platform's words.
+	reason, message := out.Reason, out.Message
+	out.Reason, out.Message = "", ""
 	line, _ := json.Marshal(out)
 	fmt.Fprintf(stdout, "%s\n", line)
 	// A job this submit created is QUEUED in its answer, so any other status is that of the job
@@ -201,24 +204,11 @@ agents/coordinator/experiments.`, stderr)
 		fmt.Fprintf(stderr, "hl: job submit: an identical submit already created %s, which is %s, and nothing more was submitted: %s. %s\n", out.ID, out.Status, resultArrives, again)
 		return 0
 	}
-	if !held {
-		fmt.Fprintln(stderr, "hl: job submit: "+resultArrives)
+	if reason == summaryGate {
+		fmt.Fprintf(stderr, "hl: job submit: accepted and held (%s): %s\n", reason, message)
 		return 0
 	}
-	q := url.Values{"needs_summary": {"true"}, "agent_id": {*agent}}
-	q.Set("platform_experiment_id", fmt.Sprint(metadata["platform_experiment_id"]))
-	var owed []struct {
-		ID string `json:"id"`
-	}
-	// The job is accepted whatever this read does: a failed one must not print as an error.
-	commands := []string{"hl job list --needs-summary --agent " + *agent + " lists them"}
-	if err := c.Do("GET", "/experiments?"+q.Encode(), nil, &owed); err == nil && len(owed) > 0 {
-		commands = commands[:0]
-		for _, job := range owed {
-			commands = append(commands, "hl job summary "+job.ID+" --text T")
-		}
-	}
-	fmt.Fprintln(stderr, "hl: job submit: accepted; it starts once each of your COMPLETED jobs has a summary: "+strings.Join(commands, "; "))
+	fmt.Fprintln(stderr, "hl: job submit: "+resultArrives)
 	return 0
 }
 
