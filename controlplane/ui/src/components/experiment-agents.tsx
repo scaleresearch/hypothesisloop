@@ -186,6 +186,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
                 <span className="text-xs text-muted">run by the platform · model <span className="font-mono">{pe.coordinator.model}</span></span>
               </div>
               <InstanceHealth instance={pe.coordinator.instance} />
+              {pe.coordinator.activity && <Activity activity={pe.coordinator.activity} />}
             </div>
           )}
           {error && <ErrorMessage>Could not load agents: {error.message}</ErrorMessage>}

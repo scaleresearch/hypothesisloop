@@ -11,6 +11,10 @@ import { clearRunFailure, createAndRun, runFailure } from '@/lib/run-experiment'
 import { PlatformExperimentStatus } from '@/types'
 import type { AgentSignup, JoinedAgent, PlatformExperiment } from '@/types'
 
+class ApiError extends Error {
+  constructor(readonly status: number, message: string, readonly reason?: string) { super(message) }
+}
+
 vi.mock('@/lib/api', () => ({
   apiURL: () => 'http://api.test',
   createPlatformExperiment: vi.fn(),
@@ -139,6 +143,16 @@ describe('removing an agent', () => {
     expect(removePlatformExperimentAgent).not.toHaveBeenCalled()
   })
 
+  it('says in the API\'s words that an agent with a job queued or running stays', async () => {
+    const unfinished = 'agent ag-old has a job queued or running, and its quota, which that job is charged to, goes with the agent: cancel the job (`hl job cancel`) or wait for it to end, then remove the agent'
+    vi.mocked(removePlatformExperimentAgent).mockRejectedValue(new ApiError(409, unfinished, 'work_unfinished'))
+    show()
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }))
+    expect((await screen.findByRole('alert')).textContent).toBe(unfinished)
+    expect(screen.getByRole('cell', { name: 'ag-old' })).toBeTruthy()
+  })
+
   it('shows why the API refused, as when the experiment started in the meantime', async () => {
     vi.mocked(removePlatformExperimentAgent).mockRejectedValue(new Error('experiment_started: experiment is running'))
     show()
@@ -221,6 +235,17 @@ describe('the machines the platform runs', () => {
     expect(coordinator.queryByText(/restarted/)).toBeNull()
   })
 
+  it('shows what the coordinator says it is doing, with how long ago', async () => {
+    show(PlatformExperimentStatus.RUNNING, {
+      coordinator: {
+        launcher: 'vast', model: 'claude-opus-4-5', instance: { state: 'running', restarts: 0, stopped: false },
+        activity: { text: 'waiting for platform updates', at: new Date(Date.now() - 30_000).toISOString() },
+      },
+    })
+    const coordinator = within(await screen.findByRole('group', { name: 'Coordinator' }))
+    expect(coordinator.getByText('waiting for platform updates').parentElement!.textContent).toMatch(/^waiting for platform updates 3\ds ago$/)
+  })
+
   it('shows no coordinator for an experiment the platform runs none for', async () => {
     show()
     await screen.findByRole('cell', { name: 'ag-old' })
@@ -238,7 +263,7 @@ describe('a machine on its way', () => {
 })
 
 describe('an experiment waiting to start', () => {
-  const waits = { reason: 'baseline_required', actor: 'coordinator' as const, message: 'Add a baseline agent with `hl platform-experiments agents add --hosted --role baseline`: none has joined. platform experiment pe-1 has no baseline declared' }
+  const waits = { reason: 'baseline_required', waits_for: 'coordinator' as const, message: 'Add a baseline agent with `hl platform-experiments agents add --hosted --role baseline`: none has joined. platform experiment pe-1 has no baseline declared' }
   const agentWaits = { reason: 'baseline_required', message: 'its machine is asked for when the platform starts the run, and none is before: platform experiment pe-1 has no baseline declared' }
   const requested = { state: 'requested', restarts: 0, stopped: false } as const
 
