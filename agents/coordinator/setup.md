@@ -169,12 +169,14 @@ The create body is two files laid end to end.
 experiment is: `name`, `description`, `metrics`. Confirm its `description` is still
 `experiment.md`'s current `EXPERIMENT DESCRIPTION` block verbatim (the only thing agents read
 about the objective — system prompt is experiment-agnostic). A copy of
-`agents/coordinator/experiments/template/run.yaml`, kept outside the tree, states this run:
+`agents/coordinator/experiments/template/run.yaml`, kept in `agents/coordinator/runs.local/<run>/`
+(git ignores `*.local`, and unlike `/tmp` it outlives a reboot; make it with `mkdir -m 700`, since
+agent tokens are kept there too), states this run:
 `repository`, `budget_accelerator_hours`, `max_agents`, `duration_hours`, `coordinator_hosted`. They
 depend on `NUM_AGENTS`/`CHIPS_PER_AGENT`/`planned_run_hours`, decided now, not ahead of time.
 Fill in every `REPLACE-WITH`, then:
 
-    cat agents/coordinator/experiments/$EXPERIMENT/.hypothesisloop/experiment.yaml /tmp/hlrun/<run>/run.yaml |
+    cat agents/coordinator/experiments/$EXPERIMENT/.hypothesisloop/experiment.yaml agents/coordinator/runs.local/<run>/run.yaml |
       hl platform-experiments create -
 
 `controlplane/settings/examples/experiment.yaml` is the full DSL reference.
@@ -404,8 +406,9 @@ Without `--hosted` you run each agent yourself, which is how an experiment with 
 image runs (`make experimentator-image EXPERIMENT=$EXPERIMENT`). Every line the command prints is
 one agent with its `agent_id` and its `token`, which acts as that agent in that platform
 experiment and nowhere else. The harness starts with `API_URL` and that token as `HL_TOKEN`, and
-nothing else. Run outside its image it also needs `AGENT_VENV`, the virtualenv the agent
-installs into, which the image sets. The token says which agent of which platform experiment it is, and the harness reads
+nothing else. Run outside its image it also needs what the image sets: `AGENT_VENV`, the
+virtualenv the agent installs into, `AGENT_WORKDIR`, where it clones and works, and
+`AGENT_STATE_DIR`, where the harness keeps its own state. The token says which agent of which platform experiment it is, and the harness reads
 its flavor, model and hyperparameters from its signup. It registers nothing, defaults nothing, and
 exits if the platform does not know the agent. Write the two to one env file per agent, readable by you
 alone, instead of putting a token on a command line, where it would sit in the process list and
@@ -415,9 +418,9 @@ in the shell's history:
     hl platform-experiments agents add --platform-experiment $PLATFORM_EXPERIMENT_ID --flavor hyperparameter-search \
       --hyperparameters '{"batch_size":64}' |
       jq -r --arg api "$API_URL" '"API_URL=\($api)\nHL_TOKEN=\(.token)"' \
-      > /tmp/hlrun/<run>/agent-1.env
+      > agents/coordinator/runs.local/<run>/agent-1.env
 
-    podman run -d --name agent-1 --network host --env-file /tmp/hlrun/<run>/agent-1.env \
+    podman run -d --name agent-1 --network host --env-file agents/coordinator/runs.local/<run>/agent-1.env \
       -e CLAUDE_CODE_OAUTH_TOKEN \
       localhost/hypothesisloop-experimentator-$EXPERIMENT
 
@@ -441,14 +444,14 @@ summary), where the kind is `say` (its own text), `tool` (a tool call, with the 
 `error` (the first line of a failed tool result) or `event` (a platform update the harness handed
 the agent). The agent does not run `hl watch` itself: whenever it ends its turn, the harness runs
 it for the agent's own resources and starts the next turn with the batch it returns, and nudges the
-agent after 30 minutes without one. The cursor lives in `.hl-state/` in the agent's workdir, so a
+agent after 30 minutes without one. The cursor lives in `.hl-state/` under `AGENT_STATE_DIR`, so a
 restarted agent resumes where it stopped. Harness logs (turn results, rate limits,
 reconnects) go to stderr and the full transcript stays in the Claude Code session jsonl under
 `~/.claude/projects/` inside the container. For a per-agent activity file, run the container
 attached in the background instead of `-d` and redirect its streams:
 
     podman run --name agent-1 ... localhost/hypothesisloop-experimentator-$EXPERIMENT \
-      > /tmp/hlrun/<run>/agent-1.activity.log 2> /tmp/hlrun/<run>/agent-1.err &
+      > agents/coordinator/runs.local/<run>/agent-1.activity.log 2> agents/coordinator/runs.local/<run>/agent-1.err &
 
 One private repository per project. Every job runs a commit on a branch under
 `hl/$PLATFORM_EXPERIMENT_ID/`, which `hl job submit` pushes, so `code_ref`
