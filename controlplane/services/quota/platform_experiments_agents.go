@@ -303,26 +303,9 @@ func (s *PlatformExperimentsService) RemoveAgent(ctx context.Context, platformEx
 }
 
 // FinishAgent records that an agent has nothing left to do, which releases its machine. Calling
-// it again changes nothing. It is the agent's own finish and is refused while a hypothesis the
-// agent owns is open: a close and a cut end a run without passing here.
+// it again changes nothing.
 func (s *PlatformExperimentsService) FinishAgent(ctx context.Context, platformExpID, agentID, reason string) error {
-	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
-	if err != nil {
-		return fmt.Errorf("platform_experiments.FinishAgent: %w", err)
-	}
-	// Past the close the store answers experiment_closed, and no verdict is asked for then.
-	if pe != nil && pe.Status != domain.PlatformExpClosed {
-		open, err := s.hypotheses.OpenHypothesisIDs(ctx, platformExpID, agentID)
-		if err != nil {
-			return fmt.Errorf("platform_experiments.FinishAgent: %w", err)
-		}
-		if len(open) > 0 {
-			return &hypothesesOpenError{Reason: "hypotheses_open", HypothesisIDs: open,
-				Message: fmt.Sprintf("agent %s owns %d hypotheses that are still open: %s. Give each its verdict, then finish: hl hypothesis status ID inconclusive, or confirmed|refuted --against CONTROL_JOB, or confirmed|refuted --despite REASON",
-					agentID, len(open), strings.Join(open, ", "))}
-		}
-	}
-	err = s.store.FinishAgent(ctx, platformExpID, agentID, reason)
+	err := s.store.FinishAgent(ctx, platformExpID, agentID, reason)
 	switch {
 	case errors.Is(err, db.ErrNotSignedUp):
 		return refuseSignup(404, "not_signed_up", "agent %s is not in platform experiment %s", agentID, platformExpID)
@@ -346,16 +329,6 @@ func (s *PlatformExperimentsService) FinishAgent(ctx context.Context, platformEx
 	return nil
 }
 
-// hypothesesOpenError refuses a finish with the hypotheses that wait for a verdict.
-type hypothesesOpenError struct {
-	Reason        string   `json:"reason"`
-	Message       string   `json:"message"`
-	HypothesisIDs []string `json:"hypothesis_ids"`
-}
-
-func (e *hypothesesOpenError) Error() string  { return e.Message }
-func (e *hypothesesOpenError) GetStatus() int { return http.StatusConflict }
-
 // WithAgentLaunch attaches what joining needs beyond the store.
 func (h *PlatformExperimentsHandler) WithAgentLaunch(launch AgentLaunch) *PlatformExperimentsHandler {
 	h.launch = launch
@@ -368,10 +341,6 @@ func (h *PlatformExperimentsHandler) refusal(op string, err error) error {
 	var refused *api.Refusal
 	if errors.As(err, &refused) {
 		return refused
-	}
-	var open *hypothesesOpenError
-	if errors.As(err, &open) {
-		return open
 	}
 	return auth.Internal(h.logger, op+" failed", err)
 }
@@ -529,7 +498,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		DefaultStatus: 200,
 		Description: "Called by the agent itself, with its own token, in a running platform experiment, and by an agent of role baseline also in an open one, where it measures the baseline. From then its machine, if the platform runs it, is taken down after its last turn, " +
 			"its signup reads finished_at and finished_reason, and agent.finished is sent. Its quota, jobs and findings stay as they are, and its token stops working two minutes later. " +
-			"409 work_unfinished while it has a job queued or running or a completed job without its summary, 409 hypotheses_open while a hypothesis the agent owns is still open, with their ids in hypothesis_ids: each is given its verdict first (hl hypothesis status), inconclusive when nothing settled it. A run ended by a close or a cut is asked for none. 409 experiment_closed once the platform experiment closed, which ended the agent's run already and leaves nothing to finish, 409 not_running in one not started yet for any role but baseline. Calling it again changes nothing.",
+			"409 work_unfinished while it has a job queued or running or a completed job without its summary, 409 experiment_closed once the platform experiment closed, which ended the agent's run already and leaves nothing to finish, 409 not_running in one not started yet for any role but baseline. Calling it again changes nothing.",
 	}, func(ctx context.Context, in *struct {
 		ID      string `path:"id"`
 		AgentID string `path:"agent_id"`

@@ -3,7 +3,6 @@ package quota
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -119,29 +118,6 @@ type PlatformExperimentsService struct {
 	// reachable reads the accelerator types jobs of a project's org can be placed on now. The
 	// handler's WithLiveCapacity sets it, and until then it answers ErrLiveCapacityUnconfigured.
 	reachable func(ctx context.Context, projectID string) (map[string]bool, error)
-	// hypotheses reads which hypotheses an agent left open. WithHypotheses sets it, and until
-	// then it answers ErrHypothesesUnconfigured.
-	hypotheses OpenHypotheses
-}
-
-// OpenHypotheses is the one read of the hypothesis graph a finish needs. *graphdb.Store satisfies it.
-type OpenHypotheses interface {
-	OpenHypothesisIDs(ctx context.Context, platformExperimentID, agentID string) ([]string, error)
-}
-
-// ErrHypothesesUnconfigured is a finish asked of a service that was never given the graph.
-var ErrHypothesesUnconfigured = errors.New("finish: hypothesis graph not configured (WithHypotheses was never called)")
-
-type unconfiguredHypotheses struct{}
-
-func (unconfiguredHypotheses) OpenHypothesisIDs(context.Context, string, string) ([]string, error) {
-	return nil, ErrHypothesesUnconfigured
-}
-
-// WithHypotheses wires the graph a finish reads the agent's open hypotheses from.
-func (s *PlatformExperimentsService) WithHypotheses(graph OpenHypotheses) *PlatformExperimentsService {
-	s.hypotheses = graph
-	return s
 }
 
 // WithDataStore wires the store a removed agent's key is deleted from, and the durable-data
@@ -168,7 +144,6 @@ func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.Qu
 		observedGapCap: observedGapCap,
 	}
 	s.baseline = s.readBaseline
-	s.hypotheses = unconfiguredHypotheses{}
 	s.reachable = func(context.Context, string) (map[string]bool, error) { return nil, ErrLiveCapacityUnconfigured }
 	return s
 }
