@@ -53,6 +53,53 @@ func TestResolveHostMounts(t *testing.T) {
 	})
 }
 
+// A job on a Tenstorrent chip is given hugepages-1Gi by the platform. Started on a node with no
+// 1 GiB hugetlbfs mount it died in its driver with nothing in its phase reason.
+func TestAJobAskingForWhatTheNodeCannotGiveIsUnrunnable(t *testing.T) {
+	present, absent := t.TempDir(), filepath.Join(t.TempDir(), "hugepages-1G")
+	saved := hugepageMountPoints
+	hugepageMountPoints = map[string]string{"hugepages-2Mi": present, "hugepages-1Gi": absent}
+	defer func() { hugepageMountPoints = saved }()
+	e := &Executor{apiURL: "http://example.invalid:8083"}
+	placement := Placement{DevicePaths: []string{"/dev/tenstorrent/0"}}
+
+	for name, tc := range map[string]struct {
+		change func(*domain.JobSpec)
+		want   string
+	}{
+		"a hugepage size with no mount on the node": {func(s *domain.JobSpec) {
+			s.AcceleratorPodResources = map[string]string{"hugepages-1Gi": "4Gi"}
+		}, absent},
+		"a pod resource that is no hugepage size": {func(s *domain.JobSpec) {
+			s.AcceleratorPodResources = map[string]string{"example.com/thing": "1"}
+		}, "accelerator_pod_resources[example.com/thing]"},
+		"extra_resources": {func(s *domain.JobSpec) {
+			s.ExtraResources = map[string]string{"google.com/tpu": "1"}
+		}, "google.com/tpu"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			exp := checkpointWindowExperiment(nil)
+			tc.change(&exp.Job)
+			_, err := e.BuildContainerSpec(exp, placement)
+			var unrunnable *agentexec.Unrunnable
+			if !errors.As(err, &unrunnable) || !strings.Contains(unrunnable.Why, tc.want) {
+				t.Fatalf("BuildContainerSpec: err = %v, want an Unrunnable naming %q", err, tc.want)
+			}
+		})
+	}
+
+	exp := checkpointWindowExperiment(nil)
+	exp.Job.AcceleratorPodResources = map[string]string{"hugepages-2Mi": "64Mi"}
+	exp.Job.AcceleratorTolerations = []string{"nvidia.com/gpu"}
+	cs, err := e.BuildContainerSpec(exp, placement)
+	if err != nil {
+		t.Fatalf("BuildContainerSpec refused a hugepage size the node has and a toleration, which asks for nothing: %v", err)
+	}
+	if len(cs.Mounts) != 1 || cs.Mounts[0] != present {
+		t.Fatalf("mounts = %v, want the node's hugetlbfs mount %s", cs.Mounts, present)
+	}
+}
+
 // TestHashContainerSpecDetectsReadOnlyMountsDrift guards against a regression where
 // ReadOnlyMounts was omitted from hashContainerSpec's input: reconcile compares this hash
 // against the running container's desired-spec label to decide whether to recreate it, so a

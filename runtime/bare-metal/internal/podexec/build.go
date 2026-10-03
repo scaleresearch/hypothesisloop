@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"sort"
 	"strings"
@@ -54,33 +53,34 @@ var hugepageMountPoints = map[string]string{
 	"hugepages-1Gi": "/dev/hugepages-1G",
 }
 
-// hugepageMountsFor resolves accelerator_pod_resources's hugepage keys to real, existing
-// hugetlbfs mount points on this node, logging (not failing) anything it can't resolve — an
-// unrecognized size or a node that was never configured with that size reserved is a real gap
-// the workload will likely hit itself (as a driver error), not something worth failing job
-// admission over.
-func hugepageMountsFor(experimentID string, podResources map[string]string) []string {
-	var mounts []string
+// hugepageMountsFor resolves accelerator_pod_resources's hugepage keys to the hugetlbfs mount
+// points of this node. A key that names no hugepage size, or a size this node has no mount for,
+// makes the job unrunnable here: started without the mount it dies in its device driver with
+// nothing in its phase reason.
+func hugepageMountsFor(podResources map[string]string) ([]string, error) {
+	keys := make([]string, 0, len(podResources))
 	for key := range podResources {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var mounts []string
+	for _, key := range keys {
 		mount, known := hugepageMountPoints[key]
 		if !known {
-			log.Printf("podexec: experiment %s requests accelerator_pod_resources[%s], which this bare node does not recognize as a hugepage size — ignoring", experimentID, key)
-			continue
+			return nil, &agentexec.Unrunnable{Why: fmt.Sprintf("accelerator_pod_resources[%s] is not a hugepage size a bare node can give a job (it gives hugepages-2Mi and hugepages-1Gi)", key)}
 		}
 		if _, err := os.Stat(mount); err != nil {
-			log.Printf("podexec: experiment %s requests %s but this node has no %s hugetlbfs mount (%v) — ignoring, the workload may fail to initialize its device", experimentID, key, mount, err)
-			continue
+			return nil, &agentexec.Unrunnable{Why: fmt.Sprintf("accelerator_pod_resources[%s] needs the hugetlbfs mount %s, which this node does not have: %v", key, mount, err)}
 		}
 		mounts = append(mounts, mount)
 	}
-	return mounts
+	return mounts, nil
 }
 
-// resolveHostMounts validates JobSpec.HostMounts against this node's actual filesystem —
-// unlike hugepageMountsFor (which logs and drops an unresolvable request, since hugepages are a
-// soft prerequisite some workloads tolerate missing), a requested host mount that doesn't exist
-// on this node fails admission outright: a job silently running without the dataset it expects
-// at a given path is a correctness bug that looks like a working job, not a visible failure.
+// resolveHostMounts validates JobSpec.HostMounts against this node's actual filesystem. A
+// requested host mount that doesn't exist on this node makes the job unrunnable: a job silently
+// running without the dataset it expects at a given path is a correctness bug that looks like a
+// working job, not a visible failure.
 func resolveHostMounts(hostMounts map[string]string) (map[string]string, error) {
 	if len(hostMounts) == 0 {
 		return nil, nil
@@ -113,18 +113,12 @@ type Placement struct {
 // to the same spec, since its output feeds the desired-spec hash reconcile compares against.
 //
 // The control plane picks which runtime (k8s or bare-metal) a job lands on; the job spec itself
-// is written against neither in particular. Per different-backend.md §1 coupling 2,
-// accelerator_tolerations/extra_resources only have meaning under a k8s taint/device-plugin
-// model — there is nothing on a bare node to enforce them against, so they are logged and
-// ignored rather than rejecting a spec that happens to carry them (which would make a job work
-// or fail to submit purely based on which runtime it happens to be admitted onto).
-// accelerator_pod_resources (hugepages) is different: the *quota* it requests has no bare-node
-// enforcement either, but the underlying hugetlbfs mount it names is a real, physical
-// prerequisite some workloads (e.g. tt-metal's UMD driver) fail without — so that part is
-// honored via a bind mount (see hugepageMountPoints), not silently dropped. NumNodes > 1 is
-// still a hard error: distributed placement across multiple bare nodes is deliberately out of
-// scope for a single-node runtime (different-backend.md §4.4) and there is no way to honor it
-// partially.
+// is written against neither in particular. What a job asks for and this node cannot give makes
+// the job unrunnable here, with the reason: extra_resources, which only a k8s device plugin
+// provides, a hugepage size of accelerator_pod_resources with no hugetlbfs mount on this node
+// (see hugepageMountsFor), a host mount that is not there, and more than one node.
+// accelerator_tolerations ask for nothing: they permit landing on a tainted node, and a bare
+// node has no taints, so a job that carries them runs as it would without.
 func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placement) (containerSpec, error) {
 	// EffectiveJob, never exp.Job directly: the job as admission resolved it lives in
 	// exp.ResolvedJob (see domain.Experiment.ResolvedJob).
@@ -146,13 +140,18 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 	if spec.Image == "" {
 		return containerSpec{}, fmt.Errorf("podexec: experiment %s has no image in desired state", exp.ID)
 	}
-	if len(spec.AcceleratorTolerations) > 0 {
-		log.Printf("podexec: experiment %s requests accelerator_tolerations, which has no meaning on a bare node — ignoring", exp.ID)
-	}
 	if len(spec.ExtraResources) > 0 {
-		log.Printf("podexec: experiment %s requests extra_resources, which requires a k8s device plugin — ignoring on this bare node", exp.ID)
+		names := make([]string, 0, len(spec.ExtraResources))
+		for name := range spec.ExtraResources {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		return containerSpec{}, &agentexec.Unrunnable{Why: fmt.Sprintf("extra_resources (%s) are given by a Kubernetes device plugin, and this bare node has none", strings.Join(names, ", "))}
 	}
-	hugepageMounts := hugepageMountsFor(exp.ID, spec.AcceleratorPodResources)
+	hugepageMounts, err := hugepageMountsFor(spec.AcceleratorPodResources)
+	if err != nil {
+		return containerSpec{}, err
+	}
 	readOnlyMounts, err := resolveHostMounts(spec.HostMounts)
 	if err != nil {
 		return containerSpec{}, err

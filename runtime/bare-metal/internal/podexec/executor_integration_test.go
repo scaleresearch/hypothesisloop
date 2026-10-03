@@ -169,43 +169,17 @@ func TestIntegrationRejectsMultiNode(t *testing.T) {
 	}
 }
 
-// TestIntegrationIgnoresK8sOnlyFields confirms the three fields that only have meaning under a
-// k8s device-plugin/taint model (accelerator_tolerations/extra_resources/
-// accelerator_pod_resources) are accepted rather than rejected: the same job spec submitted
-// against either runtime must build successfully, since the control plane — not the job spec —
-// decides which runtime a job lands on.
-func TestIntegrationIgnoresK8sOnlyFields(t *testing.T) {
+// TestIntegrationToleratesTolerations confirms a job that carries accelerator_tolerations builds:
+// they permit a tainted node and ask for nothing, and a bare node has no taints.
+func TestIntegrationToleratesTolerations(t *testing.T) {
 	e := newTestExecutor(t)
-	base := domain.JobSpec{
-		Image:      "busybox",
-		CPU:        "0.5",
-		Memory:     "64Mi",
-		Storage:    "128Mi",
+	spec := domain.JobSpec{
+		Image: "busybox", CPU: "0.5", Memory: "64Mi", Storage: "128Mi",
 		MaxRetries: maxRetries(0), TerminationGracePeriodSeconds: int64Ptr(5),
+		AcceleratorTolerations: []string{"x"},
 	}
-
-	cases := []struct {
-		name string
-		spec domain.JobSpec
-	}{
-		{"tolerations", func() domain.JobSpec { s := base; s.AcceleratorTolerations = []string{"x"}; return s }()},
-		{"extra_resources", func() domain.JobSpec {
-			s := base
-			s.ExtraResources = map[string]string{"google.com/tpu": "1"}
-			return s
-		}()},
-		{"accelerator_pod_resources", func() domain.JobSpec {
-			s := base
-			s.AcceleratorPodResources = map[string]string{"hugepages-1Gi": "1Gi"}
-			return s
-		}()},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			exp := &domain.Experiment{ID: "ignore-" + tc.name, Job: tc.spec, Data: testDataAccess(), Token: "test-job-token"}
-			if _, err := e.BuildContainerSpec(exp, Placement{}); err != nil {
-				t.Fatalf("expected %s to be ignored, not rejected: %v", tc.name, err)
-			}
-		})
+	exp := &domain.Experiment{ID: "tolerations", Job: spec, Data: testDataAccess(), Token: "test-job-token"}
+	if _, err := e.BuildContainerSpec(exp, Placement{}); err != nil {
+		t.Fatalf("a job carrying tolerations was refused: %v", err)
 	}
 }
