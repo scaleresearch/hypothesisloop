@@ -46,8 +46,8 @@ function Revise({ draft, declined, onDone }: { draft: Draft; declined: boolean; 
         <FormField
           label={declined ? 'What was missing?' : 'What should be different?'}
           hint={`${waiting
-            ? `The planner is still up until ${formatDate(draft.planner_ends_at)}, so what you ask before then it takes up at once. After that it is started again with what it knows, which takes about a minute.`
-            : 'The planner is started again with what it knows, which takes about a minute.'} ${declined ? 'It answers anew with what you say.' : 'The proposal above stays until it proposes anew.'}`}
+            ? `The planner is still running until ${formatDate(draft.planner_ends_at)} and starts on this at once.`
+            : 'The planner starts again first, usually about a minute.'}${declined ? '' : ' The current plan stays until the new one is ready.'}`}
         >
           <Textarea
             rows={2}
@@ -114,12 +114,12 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
       </Card>
       {draft.declined_reason && (
         <Card>
-          <CardHeader>The planner proposed no experiment</CardHeader>
+          <CardHeader>What the planner needs</CardHeader>
           <CardContent className="grid gap-2">
             <p className="text-sm">{draft.declined_reason}</p>
             {state === 'declined' && (
               <p className="text-xs text-muted">
-                Nothing runs and nothing is spent. Answer below to have it try again, or abandon this draft; it is closed on {formatDate(draft.proposal_expires_at)} otherwise.
+                Answer below and it tries again. Otherwise the draft closes on {formatDate(draft.proposal_expires_at)}.
               </p>
             )}
           </CardContent>

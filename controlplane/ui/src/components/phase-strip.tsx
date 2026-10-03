@@ -9,7 +9,7 @@ import { useRoster } from '@/lib/roster'
 import { ExperimentStatus } from '@/types'
 import type { Experiment, JoinedAgent, StatusReason } from '@/types'
 import { actorLabel } from '@/components/actor'
-import { AgentAtWork } from '@/components/agent-at-work'
+import { AgentAtWork, PlannerAtWork } from '@/components/agent-at-work'
 import { AGENTS_CARD } from '@/components/experiment-agents'
 import { JobReason } from '@/components/job-reason'
 import { PlatformExperimentDialog } from '@/components/platform-experiment-form'
@@ -20,15 +20,13 @@ import { Callout } from '@/components/ui/status-message'
 import { Steps } from '@/components/ui/steps'
 import { Eyebrow } from '@/components/ui/text'
 
-const planningEnds = (pe: Draft) => `It has until ${formatDate(pe.planning_ends_at)}; a draft with no proposal by then is closed. This page updates by itself.`
-
 // The states this page has words of its own for, by status_reason.reason. Any other is said in
 // the API's message, which is worded for whoever reads it.
 const SENTENCE: Record<string, (pe: Draft) => string> = {
-  planning: pe => `The planner is working out how to measure this. ${planningEnds(pe)}`,
-  revising: pe => `The planner is changing its proposal. ${planningEnds(pe)}`,
-  proposed: pe => `The planner proposed the experiment below. Nothing runs and nothing is spent until it is accepted, and the draft is closed on ${formatDate(pe.proposal_expires_at)} if nobody does.`,
-  declined: () => 'The planner proposed no experiment and says why below.',
+  planning: () => 'Planning your experiment.',
+  revising: () => 'Updating the plan with your change.',
+  proposed: pe => `Your plan is ready. Nothing runs or is spent until you accept it. It stays open until ${formatDate(pe.proposal_expires_at)}.`,
+  declined: () => 'The planner needs more from you. Its reason is below.',
   agents_starting: pe => `The researchers' machines are starting. The run's clock starts when the first one is running, and the platform closes the experiment if none is by ${formatDate(pe.agents_due_at)}.`,
   running: pe => `The researchers are at work until ${formatDate(pe.ends_at)}.`,
   researchers_done: pe => `No researcher is left to submit a job: each one finished, was cut or lost its machine. The platform closes the experiment on ${formatDate(pe.ends_at)}. Before then its summary is written with \`hl platform-experiments summary --file FILE --platform-experiment ${pe.id}\` and it is closed with \`hl platform-experiments close --platform-experiment ${pe.id}\`.`,
@@ -132,10 +130,10 @@ export function PhaseStrip({ pe, jobs = [], readOnly = false }: { pe: Draft; job
         ) : (
           <div>
             {why}
-            <p className="text-xs text-muted">Nothing is needed from you: {NEXT_IS[who]}.</p>
+            {phase !== 'planning' && <p className="text-xs text-muted">Nothing is needed from you: {NEXT_IS[who]}.</p>}
           </div>
         )}
-        {phase === 'planning' && <AgentAtWork agent={planner} activity={pe.activity} />}
+        {phase === 'planning' && <PlannerAtWork agent={planner} activity={pe.activity} />}
         {phase === 'baseline' && baseline && (
           <div role="group" aria-label="Baseline agent" className="grid gap-1.5 rounded border bg-surface-inset px-3 py-2.5">
             <Eyebrow>Baseline agent {baseline.name}</Eyebrow>

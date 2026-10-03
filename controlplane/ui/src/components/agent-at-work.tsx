@@ -26,13 +26,45 @@ export function machineSentence(instance: AgentInstance | undefined): string {
 }
 
 /** The sentence an agent last said of what it is doing, with its age, which keeps up with the clock. */
-export function Activity({ activity, className }: { activity: AgentActivity; className?: string }) {
+export function Activity({ activity, prominent = false, className }: { activity: AgentActivity; prominent?: boolean; className?: string }) {
   useTick(1_000)
   return (
-    <p className={clsx('text-xs', className)}>
+    <p className={clsx(prominent ? 'text-base font-medium' : 'text-xs', className)}>
       <span aria-live="polite">{activity.text}</span>{' '}
-      <time dateTime={activity.at} title={new Date(activity.at).toLocaleString()} className="whitespace-nowrap text-subtle">{relTime(activity.at)}</time>
+      <time dateTime={activity.at} title={new Date(activity.at).toLocaleString()} className="whitespace-nowrap text-xs font-normal text-subtle">{relTime(activity.at)}</time>
     </p>
+  )
+}
+
+const PLANNER_STEPS = [
+  { key: 'requested', label: 'Finding a machine' },
+  { key: 'starting', label: 'Starting the planner' },
+  { key: 'running', label: 'Planning' },
+]
+
+/** Where a draft's planner stands, in the person's words. Undefined when its own sentence says enough. */
+export function plannerSentence(instance: AgentInstance | undefined, saidSomething: boolean): string | undefined {
+  if (!instance) return 'Finding a machine for the planner.'
+  const restart = instance.restarts > 0 ? ` (restart ${instance.restarts})` : ''
+  switch (instance.state) {
+    case 'requested': return restart ? `The planner's machine ended. Finding another${restart}.` : 'Finding a machine for the planner.'
+    case 'starting': return restart ? `The planner's machine ended. Starting another${restart}.` : 'Starting the planner, usually about a minute.'
+    case 'running': return restart ? `The planner is back at work${restart}.` : saidSomething ? undefined : 'The planner is at work.'
+    case 'stopped': return instance.end_reason === 'released' ? 'The planner is done.' : 'The planner stopped and is not started again.'
+    default: return machineSentence(instance)
+  }
+}
+
+/** A draft's planner: what it says it is doing, first and largest, then where it stands. */
+export function PlannerAtWork({ agent, activity }: { agent: JoinedAgent | undefined; activity?: AgentActivity }) {
+  const instance = agent?.instance
+  const sentence = agent?.finished_at ? `${agent.name} finished: ${agent.finished_reason}` : plannerSentence(instance, !!activity)
+  return (
+    <div className="grid gap-1.5">
+      {activity && <Activity activity={activity} prominent />}
+      <Steps label="Machine" steps={PLANNER_STEPS} current={instance?.state ?? 'requested'} live />
+      {sentence && <p aria-live="polite" className="text-xs text-muted">{sentence}</p>}
+    </div>
   )
 }
 

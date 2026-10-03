@@ -85,8 +85,9 @@ describe('the phase strip', () => {
   it('says a planner is at work, with what it says it is doing, while a draft is planned', async () => {
     vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([agent('planner')])
     show(experiment('draft', 'planning', { planning_ends_at: at, activity: { text: 'Sizing a trial on rtx-4090.', at: new Date().toISOString() } }))
-    expect(sentence()).toMatch(/^The planner is working out how to measure this\. It has until/)
+    expect(sentence()).toBe('Planning your experiment.')
     expect(await screen.findByText('Sizing a trial on rtx-4090.')).toBeTruthy()
+    expect(within(screen.getByRole('list', { name: 'Machine' })).getAllByRole('listitem').map(li => li.textContent)).toEqual(['Finding a machine', 'Starting the planner', 'Planning'])
   })
 
   it('says in the API\'s words why an open experiment is not running, and that its baseline is being prepared while it has none', () => {

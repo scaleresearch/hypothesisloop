@@ -73,10 +73,11 @@ describe('a draft being planned', () => {
   it('says the phase and where the planner\'s machine stands, and offers nothing to accept', async () => {
     show(draft('planning'))
     expect(screen.getByText('Does a cosine schedule beat a constant one?')).toBeTruthy()
-    expect(screen.getByRole('status').textContent).toBe(`The planner is working out how to measure this. It has until ${formatDate('2026-10-05T12:30:00Z')}; a draft with no proposal by then is closed. This page updates by itself.`)
+    expect(screen.getByRole('status').textContent).toBe('Planning your experiment.')
+    expect(screen.queryByText(/Nothing is needed from you/)).toBeNull()
     expect(phase()).toBe('Planning')
-    expect(await screen.findByText('Its machine is starting, which takes about a minute.')).toBeTruthy()
-    expect(machineStep()).toBe('Machine starting')
+    expect(await screen.findByText('Starting the planner, usually about a minute.')).toBeTruthy()
+    expect(machineStep()).toBe('Starting the planner')
     expect(screen.queryByRole('button', { name: 'Accept and run' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Revise' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Abandon this draft' })).toBeTruthy()
@@ -87,15 +88,18 @@ describe('a draft being planned', () => {
     show(draft('planning', { activity: { text: 'Reading train.py to find what the loss is computed on.', at: new Date(Date.now() - 12_000).toISOString() } }))
     const said = await screen.findByText('Reading train.py to find what the loss is computed on.')
     expect(said.parentElement!.textContent).toMatch(/computed on\. 1[2-5]s ago$/)
-    expect(screen.getByText('Its machine is working.')).toBeTruthy()
-    expect(machineStep()).toBe('Working')
+    expect(said.parentElement!.className).toContain('text-base')
+    expect(said.parentElement!.querySelector('time')!.className).toContain('text-xs')
+    expect(screen.queryByText('The planner is at work.')).toBeNull()
+    expect(machineStep()).toBe('Planning')
   })
 
   it.each([
-    [undefined, 'Its machine is being asked for.', 'Machine asked for'],
-    [{ state: 'requested', restarts: 0, stopped: false }, 'Its machine is being asked for.', 'Machine asked for'],
-    [{ state: 'starting', restarts: 2, stopped: false }, 'Its machine ended and another is starting (restart 2).', 'Machine starting'],
-    [{ state: 'stopped', restarts: 3, stopped: true }, 'Its machine stopped and is not asked for again.', undefined],
+    [undefined, 'Finding a machine for the planner.', 'Finding a machine'],
+    [{ state: 'requested', restarts: 0, stopped: false }, 'Finding a machine for the planner.', 'Finding a machine'],
+    [{ state: 'starting', restarts: 2, stopped: false }, 'The planner\'s machine ended. Starting another (restart 2).', 'Starting the planner'],
+    [{ state: 'running', restarts: 0, stopped: false }, 'The planner is at work.', 'Planning'],
+    [{ state: 'stopped', restarts: 3, stopped: true }, 'The planner stopped and is not started again.', undefined],
   ] as const)('names the machine state it was told and lights no step it was not: %j', async (instance, sentence, step) => {
     vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([planner({ instance })])
     show(draft('planning'))
@@ -139,7 +143,7 @@ describe('a proposed draft', () => {
     expect(within(screen.getByText('Why this size').parentElement!).getByText(/30 trials each for 2 researchers is 6/)).toBeTruthy()
     expect(screen.getByText('Validation loss on held-out text is the goal itself.')).toBeTruthy()
     expect(phase()).toBe('Proposal')
-    expect(screen.getByRole('status').textContent).toMatch(/^The planner proposed the experiment below\. Nothing runs and nothing is spent until it is accepted/)
+    expect(screen.getByRole('status').textContent).toMatch(/^Your plan is ready\. Nothing runs or is spent until you accept it\. It stays open until /)
     expect(screen.queryByRole('list', { name: 'Machine' })).toBeNull()
   })
 
@@ -224,11 +228,11 @@ describe('a proposed draft', () => {
   it('says beside the revise box until when the planner is still up, and no longer once that passed', async () => {
     const soon = new Date(Date.now() + 5 * 60_000).toISOString()
     const first = show(draft('proposed', { proposal, proposed_at: '2026-10-05T12:10:00Z', planner_ends_at: soon }))
-    expect(screen.getByText(new RegExp(`^The planner is still up until ${formatDate(soon)}, so what you ask before then it takes up at once\\.`))).toBeTruthy()
+    expect(screen.getByText(new RegExp(`^The planner is still running until ${formatDate(soon)} and starts on this at once\\.`))).toBeTruthy()
     first.unmount()
     show(draft('proposed', { proposal, proposed_at: '2026-10-05T12:10:00Z', planner_ends_at: new Date(Date.now() - 60_000).toISOString() }))
-    expect(screen.queryByText(/still up until/)).toBeNull()
-    expect(screen.getByText('The planner is started again with what it knows, which takes about a minute. The proposal above stays until it proposes anew.')).toBeTruthy()
+    expect(screen.queryByText(/still running until/)).toBeNull()
+    expect(screen.getByText('The planner starts again first, usually about a minute. The current plan stays until the new one is ready.')).toBeTruthy()
   })
 
   it('says why the API refused to accept', async () => {
@@ -252,7 +256,7 @@ describe('a proposed draft', () => {
     expect(screen.getByText('It must fit one RTX 4090.')).toBeTruthy()
     expect(screen.getByText(/Ada asked/)).toBeTruthy()
     expect(screen.getByLabelText('Name')).toMatchObject({ value: 'Cosine or constant', disabled: true })
-    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/changing its proposal/))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Updating the plan with your change.'))
     expect(phase()).toBe('Planning')
     expect(screen.queryByRole('button', { name: 'Accept and run' })).toBeNull()
   })
@@ -404,12 +408,12 @@ describe('a draft the planner declined', () => {
 
   it('shows the reason, nothing to accept, and the ways to answer it or drop it', async () => {
     show(declined())
-    expect(screen.getByText('The planner proposed no experiment')).toBeTruthy()
+    expect(screen.getByText('What the planner needs')).toBeTruthy()
     expect(screen.getByText(why)).toBeTruthy()
     expect(screen.getByText(/Draft, waiting for you/)).toBeTruthy()
-    expect(screen.getByText(new RegExp(`it is closed on ${formatDate('2026-10-12T12:10:00Z')} otherwise`))).toBeTruthy()
+    expect(screen.getByText(new RegExp(`^Answer below and it tries again\\. Otherwise the draft closes on ${formatDate('2026-10-12T12:10:00Z')}\\.$`))).toBeTruthy()
     expect(phase()).toBe('Proposal')
-    expect(screen.getByRole('status').textContent).toBe('The planner proposed no experiment and says why below.')
+    expect(screen.getByRole('status').textContent).toBe('The planner needs more from you. Its reason is below.')
     expect(screen.queryByRole('button', { name: 'Accept and run' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Abandon this draft' })).toBeTruthy()
     await userEvent.type(screen.getByLabelText('What was missing?'), 'The small transformer, by validation loss.')
@@ -421,7 +425,7 @@ describe('a draft the planner declined', () => {
     const retrying = draft('revising', { declined_reason: why })
     show(retrying)
     expect(screen.getByText(why)).toBeTruthy()
-    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/changing its proposal/))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Updating the plan with your change.'))
     expect(screen.queryByRole('button', { name: 'Revise' })).toBeNull()
   })
 

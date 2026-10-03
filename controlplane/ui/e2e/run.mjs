@@ -727,7 +727,7 @@ async function scenarios(browser) {
   await page.getByRole('button', { name: 'Plan it', exact: true }).click()
   await page.waitForURL(u => u.pathname === `/platform-experiments/${draftID}`)
   assert.deepEqual(draftWrites, [{ path: '/platform-experiments/drafts', body: { project_id: adaMe.projects[0].id, goal: draftGoal } }], 'the sentence and the project, and nothing else')
-  await page.getByRole('status').filter({ hasText: 'The planner is working out how to measure this' }).waitFor()
+  await page.getByRole('status').filter({ hasText: 'Planning your experiment.' }).waitFor()
   assert.equal(await page.getByRole('button', { name: 'Accept and run' }).count(), 0, 'nothing to accept while it is planned')
 
   // A proposal that arrives on a page that watched it being planned is accepted by itself after
@@ -751,7 +751,7 @@ async function scenarios(browser) {
   draftWrites.length = 0
   await page.getByLabel('What should be different?').fill('It must fit one RTX 4090.')
   await page.getByRole('button', { name: 'Revise', exact: true }).click()
-  await page.getByRole('status').filter({ hasText: 'The planner is changing its proposal' }).waitFor()
+  await page.getByRole('status').filter({ hasText: 'Updating the plan with your change.' }).waitFor()
   await page.getByText('It must fit one RTX 4090.').waitFor()
   assert.deepEqual(draftWrites, [{ path: `/platform-experiments/${draftID}/revise`, body: { message: 'It must fit one RTX 4090.' } }])
 
