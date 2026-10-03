@@ -167,13 +167,14 @@ def test_cli_full_flow_happy_path(api, run_id, tmp_path):
     assert dedup["already_existed"] is True
     assert dedup["id"] == hyp_id, f"hl hypothesis submit: dedup returned {dedup['id']}, want {hyp_id}"
 
-    # -- with no --agent a write is the caller's own: no agent owns it, and the actor is the credential --
-    staff = {"kind": "staff", "id": "", "name": "staff"}
+    # -- with no --agent a write is the caller's own: no agent owns it, and the actor is the credential.
+    # hl leaves out every empty value, so no agent reads as no agent_id and staff's actor has no id --
+    staff = {"kind": "staff", "name": "staff"}
     own = json.loads(api.hl("hypothesis", "submit", "--platform-experiment", pe_id, "--text",
                             f"an idea of the caller's own {uuid.uuid4().hex[:8]}", "--builds-on", "root"))
-    assert (own["agent_id"], own["actor"]) == ("", staff) and "source" not in own, own
+    assert "agent_id" not in own and own["actor"] == staff and "source" not in own, own
     note = json.loads(api.hl("hypothesis", "comment", own["id"], "--text", "a note of the caller's own"))
-    assert (note["agent_id"], note["actor"]) == ("", staff), note
+    assert "agent_id" not in note and note["actor"] == staff, note
     links = json.loads(api.hl("hypothesis", "link", own["id"], "--type", "related", "--to", hyp_id))
     assert {(l["type"], l["actor"]["kind"]) for l in links} == {("builds_on", "staff"), ("related", "staff")}, links
     settled = json.loads(api.hl("hypothesis", "status", own["id"], "inconclusive"))
