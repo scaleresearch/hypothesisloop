@@ -288,7 +288,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	quota.RegisterShareHuma(doc, nil, peHandler.Answer, logger)
 	quota.RegisterDataUsageHuma(doc, quota.NewDataUsageHandler(nil, nil, nil, 0, zap.NewNop()))
 	quota.RegisterSessionsHuma(doc, nil, logger)
-	accounts.RegisterHuma(doc, accounts.NewHandler(nil, nil, nil, worldSecret, accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, logger))
+	accounts.RegisterHuma(doc, accounts.NewHandler(nil, nil, nil, nil, worldSecret, accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, logger))
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
 		scheduler.NewService(nil, nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", logger).WithLoop(noopLoop{})))
 	registry.RegisterHuma(doc, registry.NewHandler(registry.New(nil, worldGraph{world: w}, nil, logger, "http://metrics.invalid", nil), logger))

@@ -90,20 +90,16 @@ type Limits struct {
 	MaxProjectsPerOrg int `json:"max_projects_per_org" doc:"How many projects one org may hold. The projects of this answer with that org_id are the ones that count."`
 }
 
-// WithAutoscalers tells the handler which connected clusters report an autoscaler, by name.
-func (h *Handler) WithAutoscalers(autoscalers Connectivity) *Handler {
-	h.autoscalers = autoscalers
-	return h
-}
-
-func NewHandler(accounts Accounts, clusters Clusters, connected Connectivity, signingSecret string, runtimes RuntimeAddresses, limits Limits, logger *zap.Logger) *Handler {
+// NewHandler takes connected, the clusters with an agent connected now, and autoscalers, those
+// whose connected agent reports an autoscaler, both by name.
+func NewHandler(accounts Accounts, clusters Clusters, connected, autoscalers Connectivity, signingSecret string, runtimes RuntimeAddresses, limits Limits, logger *zap.Logger) *Handler {
 	if logger == nil {
 		panic("accounts.NewHandler: a logger is required")
 	}
 	if limits.MaxOrgsPerUser <= 0 || limits.MaxProjectsPerOrg <= 0 {
 		panic("accounts.NewHandler: both account limits are required and positive")
 	}
-	return &Handler{accounts: accounts, clusters: clusters, connected: connected, signingSecret: signingSecret, runtimes: runtimes, limits: limits, logger: logger}
+	return &Handler{accounts: accounts, clusters: clusters, connected: connected, autoscalers: autoscalers, signingSecret: signingSecret, runtimes: runtimes, limits: limits, logger: logger}
 }
 
 // limit is bound for a caller held to the account limits, and none, zero, for staff.
@@ -202,11 +198,9 @@ func (h *Handler) listClusters(ctx context.Context, orgID string, caller auth.Pr
 	if err != nil {
 		return nil, err
 	}
-	autoscalers := map[string]bool{}
-	if h.autoscalers != nil {
-		if autoscalers, err = h.autoscalers(ctx); err != nil {
-			return nil, err
-		}
+	autoscalers, err := h.autoscalers(ctx)
+	if err != nil {
+		return nil, err
 	}
 	out := &clusterList{}
 	out.Body.Clusters = make([]ListedCluster, len(clusters))

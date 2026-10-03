@@ -152,7 +152,8 @@ func newWorld(t *testing.T) *world {
 	router := chi.NewRouter()
 	doc := apidocs.New(router, "test", "1.0.0", "", tokens{w}, auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
 	connected := func(context.Context) (map[string]bool, error) { return map[string]bool{w.clusterA: true}, nil }
-	RegisterHuma(doc, NewHandler(w.store, w.store, connected, testSigningSecret, testRuntimeAddresses, testLimits, zap.NewNop()))
+	autoscalers := func(context.Context) (map[string]bool, error) { return map[string]bool{}, nil }
+	RegisterHuma(doc, NewHandler(w.store, w.store, connected, autoscalers, testSigningSecret, testRuntimeAddresses, testLimits, zap.NewNop()))
 	w.router = router
 	return w
 }
@@ -913,7 +914,7 @@ func TestAFailureOfThePlatformIsAnsweredWithoutItsText(t *testing.T) {
 	connected := func(context.Context) (map[string]bool, error) {
 		return nil, errors.New("metrics store at 10.0.0.7 refused the connection")
 	}
-	RegisterHuma(doc, NewHandler(failingStore{w.store}, w.store, connected, testSigningSecret, testRuntimeAddresses, testLimits, zap.NewNop()))
+	RegisterHuma(doc, NewHandler(failingStore{w.store}, w.store, connected, connected, testSigningSecret, testRuntimeAddresses, testLimits, zap.NewNop()))
 	w.router = router
 	for _, path := range []string{"/me", "/orgs/" + w.orgA + "/projects", "/orgs/" + w.orgA + "/clusters"} {
 		rec := w.call("owner", "GET", path, nil)
