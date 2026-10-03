@@ -71,7 +71,8 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
     draft = created.json()
     pe_id = draft["id"]
     try:
-        assert draft["status"] == "draft" and draft["goal"] == GOAL and draft["budget_accelerator_hours"] == 2.0, draft
+        # A draft has no budget: the proposal states one and the person accepts at a cost they state.
+        assert draft["status"] == "draft" and draft["goal"] == GOAL and draft["budget_accelerator_hours"] == 0, draft
         assert draft["actor"]["kind"] in ("staff", "user", "key"), draft["actor"]
         assert draft["repository"] == api.sandbox_repository() and draft["repository"] in draft["repository_url"], draft
 
@@ -184,7 +185,13 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         assert planner_id not in shares, "a planner holds a quota"
         # The first stage's share of the budget over the researchers' places.
         assert shares[baseline.agent] == pytest.approx(pe["stages"][0]["length_pct"] / 100 * 1 / 2), shares
-        assert all(0 < shares[a["agent_id"]] < shares[baseline.agent] for a in researchers), "the baseline's cost was not taken from the budget before the shares"
+        # Two researchers are too few for a cut, so the run has one stage and each holds its whole
+        # share of what the baseline left of the budget.
+        assert [(s["length_pct"], s["evict_pct"]) for s in api.stages(pe_id)["stages"]] == [(100, 0)]
+        spent = api.quota_field(pe_id, baseline.agent, "used_guaranteed_acch")
+        assert spent > 0, "the baseline job cost nothing"
+        assert all(shares[a["agent_id"]] == pytest.approx((1 - spent) / 2, abs=1e-6) for a in researchers), \
+            f"the baseline's cost was not taken from the budget before the shares: {shares}, baseline spent {spent}"
         instance, _ = _planner_instance(api, pe_id)
         assert instance is None, "the planner is run in the experiment it planned"
     finally:
