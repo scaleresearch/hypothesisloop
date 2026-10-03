@@ -2,14 +2,11 @@ package domain
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // AgentSignup is one agent's place in one platform experiment, and for an agent the platform
@@ -263,14 +260,4 @@ func AgentName(role SignupRole, taken func(name string) bool) string {
 			return name
 		}
 	}
-}
-
-// NewAgentID returns the id of an agent the platform creates: time-ordered, and within the
-// identifier rule every agent id meets.
-func NewAgentID() (string, error) {
-	id, err := uuid.NewV7()
-	if err != nil {
-		return "", errors.New("generate agent id: " + err.Error())
-	}
-	return "ag-" + strings.ReplaceAll(id.String(), "-", ""), nil
 }

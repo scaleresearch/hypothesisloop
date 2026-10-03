@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
@@ -165,8 +164,12 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	if req.CoordinatorHosted != (req.coordinator != nil) {
 		return nil, fmt.Errorf("platform_experiments.Create: coordinator_hosted is %v and its launcher and model are resolved: %v", req.CoordinatorHosted, req.coordinator != nil)
 	}
+	id, err := domain.NewID(domain.PlatformExperimentIDPrefix)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
+	}
 	pe := &domain.PlatformExperiment{
-		ID:                        "pe-" + uuid.New().String()[:8],
+		ID:                        id,
 		ProjectID:                 req.ProjectID,
 		Name:                      req.Name,
 		Description:               req.Description,
@@ -601,8 +604,12 @@ func (s *PlatformExperimentsService) start(ctx context.Context, pe *domain.Platf
 			// into burst, not taken away.
 			acceleratorGuaranteed, acceleratorBurst = domain.ApplyQuotaTier(
 				domain.ResolveQuotaTier(p.QuotaTierOverride, pe.DefaultQuotaTier), acceleratorGuaranteed, acceleratorBurst)
+			id, err := domain.NewID(domain.AgentQuotaIDPrefix)
+			if err != nil {
+				return nil, nil, fmt.Errorf("platform_experiments.start: %w", err)
+			}
 			allocated = append(allocated, &domain.AgentQuota{
-				ID:                         uuid.New().String(),
+				ID:                         id,
 				AgentID:                    p.AgentID,
 				PlatformExperimentID:       pe.ID,
 				GuaranteedAcceleratorHours: acceleratorGuaranteed,

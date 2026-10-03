@@ -18,7 +18,7 @@ func spawnTestAgents(t *testing.T, pes *PlatformExperimentsStore, pe string, sig
 	t.Helper()
 	ids := make([]string, len(signups))
 	for i := range signups {
-		id, err := domain.NewAgentID()
+		id, err := domain.NewID(domain.AgentIDPrefix)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -123,7 +123,7 @@ func TestASpawnThatDoesNotFitOrComesTooLateLeavesNothingBehind(t *testing.T) {
 	}
 	before := agentCount()
 	spawn := func(pe string) error {
-		id, _ := domain.NewAgentID()
+		id, _ := domain.NewID(domain.AgentIDPrefix)
 		agent := &domain.Agent{ID: id, Name: "spawn-rollback-" + id, CreatedAt: time.Now().UTC()}
 		return pes.SpawnAgent(ctx, pe, agent, domain.AgentSignup{AgentID: id, Role: domain.SignupRoleCompetitor})
 	}
@@ -492,7 +492,7 @@ func TestAgentsOfAPlatformExperimentAreNamedByRoleAndNoTwoAlike(t *testing.T) {
 	pes := NewPlatformExperimentsStore(pool)
 	add := func(role domain.SignupRole, name string) (*domain.Agent, error) {
 		t.Helper()
-		id, err := domain.NewAgentID()
+		id, err := domain.NewID(domain.AgentIDPrefix)
 		if err != nil {
 			t.Fatal(err)
 		}

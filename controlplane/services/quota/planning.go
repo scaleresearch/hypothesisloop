@@ -9,7 +9,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
@@ -60,7 +59,11 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 	if err := s.requireLauncher(ctx, launch.Launcher); err != nil {
 		return nil, err
 	}
-	plannerID, err := domain.NewAgentID()
+	plannerID, err := domain.NewID(domain.AgentIDPrefix)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.CreateDraft: %w", err)
+	}
+	id, err := domain.NewID(domain.PlatformExperimentIDPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.CreateDraft: %w", err)
 	}
@@ -68,7 +71,7 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 	// A draft states nothing of a run yet, so its ladder and its policies are the platform's.
 	settings := s.withSettings(CreatePlatformExperimentRequest{})
 	pe := &domain.PlatformExperiment{
-		ID:                    "pe-" + uuid.New().String()[:8],
+		ID:                    id,
 		ProjectID:             projectID,
 		Name:                  draftName(goal),
 		Goal:                  goal,

@@ -1,8 +1,11 @@
 package domain
 
 import (
+	"encoding/hex"
 	"fmt"
 	"regexp"
+
+	"github.com/google/uuid"
 )
 
 // identifierPattern is the shape every id the platform accepts from outside must have: RFC1123,
@@ -35,6 +38,24 @@ func ValidateIdentifier(kind, value string) error {
 			kind, value)
 	}
 	return nil
+}
+
+// The prefixes of the ids the platform issues (docs/api-conventions.md).
+const (
+	PlatformExperimentIDPrefix = "pe"
+	AgentIDPrefix              = "ag"
+	AgentQuotaIDPrefix         = "quota"
+)
+
+// NewID returns an id the platform issues: prefix, a dash and a UUIDv7 as 32 hex digits. It is
+// time-ordered, within the identifier rule, and of one length whatever it names, so no two
+// resources are told apart by fewer random bits than another's.
+func NewID(prefix string) (string, error) {
+	id, err := uuid.NewV7()
+	if err != nil {
+		return "", fmt.Errorf("generate %s id: %w", prefix, err)
+	}
+	return prefix + "-" + hex.EncodeToString(id[:]), nil
 }
 
 // IdentifierShaped reports whether value has the shape of an id the platform issues or accepts,

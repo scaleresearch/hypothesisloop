@@ -328,7 +328,7 @@ func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExp
 		t.Fatal(err)
 	}
 	add := func(signup domain.AgentSignup) error {
-		id, err := domain.NewAgentID()
+		id, err := domain.NewID(domain.AgentIDPrefix)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -376,7 +376,7 @@ func TestOneMachineIsKeptForTheBaselineAndAFinishedAgentHoldsNone(t *testing.T) 
 		t.Fatal(err)
 	}
 	add := func(role domain.SignupRole) (string, error) {
-		id, err := domain.NewAgentID()
+		id, err := domain.NewID(domain.AgentIDPrefix)
 		if err != nil {
 			t.Fatal(err)
 		}

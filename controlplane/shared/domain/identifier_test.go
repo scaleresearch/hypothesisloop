@@ -1,6 +1,31 @@
 package domain
 
-import "testing"
+import (
+	"regexp"
+	"testing"
+)
+
+// A platform experiment's id was pe- and 8 hex of a random UUID, 32 bits, where an agent's was a
+// whole UUIDv7. Every id the platform issues is made one way.
+func TestAnIssuedIDIsItsPrefixAndAUUID7AndIsNeverRepeated(t *testing.T) {
+	seen := map[string]bool{}
+	for _, prefix := range []string{PlatformExperimentIDPrefix, AgentIDPrefix, AgentQuotaIDPrefix} {
+		shape := regexp.MustCompile(`^` + prefix + `-[0-9a-f]{12}7[0-9a-f]{19}$`)
+		for range 1000 {
+			id, err := NewID(prefix)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ValidateIdentifier("id", id); err != nil {
+				t.Fatalf("%q: %v", id, err)
+			}
+			if !shape.MatchString(id) || seen[id] {
+				t.Fatalf("id %q is repeated or is not %s- and a UUIDv7 as 32 hex digits", id, prefix)
+			}
+			seen[id] = true
+		}
+	}
+}
 
 // The characters this rejects are not cosmetic. An id reaches two places that interpret it as a
 // pattern rather than a name: Kubernetes object names, and the object-store key policy that

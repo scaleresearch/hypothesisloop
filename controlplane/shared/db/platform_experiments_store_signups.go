@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -85,8 +84,12 @@ func (s *PlatformExperimentsStore) enrol(ctx context.Context, platformExpID stri
 func allocateBaselineQuota(ctx context.Context, tx pgx.Tx, platformExpID, agentID string, tier domain.QuotaTier, budget float64, firstStage domain.Stage, maxAgents int, defaultTier domain.QuotaTier) error {
 	share := domain.RoundHours(budget * firstStage.LengthPct / 100 / float64(maxAgents))
 	guaranteed, burst := domain.ApplyQuotaTier(domain.ResolveQuotaTier(tier, defaultTier), share, 0)
+	id, err := domain.NewID(domain.AgentQuotaIDPrefix)
+	if err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, upsertAgentQuotaSQL, agentQuotaUpsertArgs(&domain.AgentQuota{
-		ID: uuid.New().String(), AgentID: agentID, PlatformExperimentID: platformExpID,
+		ID: id, AgentID: agentID, PlatformExperimentID: platformExpID,
 		GuaranteedAcceleratorHours: guaranteed, BurstAcceleratorHours: burst, CreatedAt: time.Now().UTC(),
 	})...); err != nil {
 		return fmt.Errorf("allocate the quota of baseline agent %s: %w", agentID, err)

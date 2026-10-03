@@ -7,23 +7,6 @@ import (
 	"testing"
 )
 
-func TestAGeneratedAgentIDMeetsTheIdentifierRuleAndIsNeverRepeated(t *testing.T) {
-	seen := map[string]bool{}
-	for range 1000 {
-		id, err := NewAgentID()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := ValidateIdentifier("id", id); err != nil {
-			t.Fatalf("%q: %v", id, err)
-		}
-		if !strings.HasPrefix(id, "ag-") || seen[id] {
-			t.Fatalf("id %q is repeated or has no ag- prefix", id)
-		}
-		seen[id] = true
-	}
-}
-
 func TestAgentLaunchValuesAreResolvedAndSafeAsEnvironment(t *testing.T) {
 	const platformModel = "platform-model-1"
 	for _, ok := range []struct{ flavor, model, wantFlavor, wantModel string }{

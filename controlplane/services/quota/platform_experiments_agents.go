@@ -234,7 +234,7 @@ func (s *PlatformExperimentsService) spawn(ctx context.Context, platformExpID st
 	if pe == nil {
 		return nil, refuseSignup(404, "experiment_not_found", "no platform experiment %s", platformExpID)
 	}
-	id, err := domain.NewAgentID()
+	id, err := domain.NewID(domain.AgentIDPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}

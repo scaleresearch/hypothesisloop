@@ -353,7 +353,7 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 		if err != nil {
 			return nil, refusedProposal("invalid_agents", "agents[%d]: %s", i, err)
 		}
-		agentID, err := domain.NewAgentID()
+		agentID, err := domain.NewID(domain.AgentIDPrefix)
 		if err != nil {
 			return nil, h.refusal("accept", err)
 		}
