@@ -76,7 +76,9 @@ class BriefingTest(unittest.TestCase):
         prompt = self.render()
         self.assertIn("\n\nRULES\n\n## hl commands\n\nCOMMANDS\n\n", prompt)
         self.assertIn("run `git clone https://github.com/acme/model.git .` in /agent/workspace, the directory you start in", " ".join(prompt.split()))
-        self.assertIn("(:Objective {id:'pe-1'})", prompt)
+        self.assertIn('hl hypothesis query "MATCH (d:Hypothesis)-[:BUILDS_ON]->(:Objective) '
+                      'OPTIONAL MATCH (h:Hypothesis)-[:BUILDS_ON*0..]->(d:Hypothesis) RETURN d.id, d.text, h.status, count(h)"',
+                      " ".join(prompt.split()))
         self.assertIsNone(re.search(r"\{[a-z_]+\}", prompt), "a placeholder was left unfilled")
 
     def test_it_acts_through_hl_and_names_no_host_tool_and_no_http_endpoint(self):
