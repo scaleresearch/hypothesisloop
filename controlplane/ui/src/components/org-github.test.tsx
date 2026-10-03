@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, connectGitHubInstallation, disconnectGitHubInstallation, fetchGitHubApp, fetchGitHubInstallations } from '@/lib/api'
-import { beginConnect, beginInstall, leaveFor, resetConnect, takeReturn } from '@/lib/github-connect'
+import { beginConnect, leaveFor, resetConnect, takeReturn } from '@/lib/github-connect'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { OrgGitHub } from '@/components/org-github'
 import type { GitHubInstallation, Me } from '@/types'
@@ -43,8 +43,8 @@ function show(as: Me = owner) {
 // Leaves for GitHub as the card does and comes back with what GitHub would return.
 async function comeBack(query: (state: string) => string, installationID?: number) {
   const address = beginConnect(app.authorize_url, { orgID: 'org_a', projectID: 'prj_1' }, installationID)
-  await takeReturn(query(new URL(address).searchParams.get('state')!), {
-    authorizeURL: async () => app.authorize_url,
+  return takeReturn(query(new URL(address).searchParams.get('state')!), {
+    app: async () => app,
     connect: (orgID, code, id) => connectGitHubInstallation(orgID, { code, redirectURI: 'u', installationID: id }),
   })
 }
@@ -63,13 +63,15 @@ beforeEach(() => {
 })
 
 describe('the connected GitHub accounts', () => {
-  it('are listed with who connected each and when', async () => {
-    installations = [acme, lab]
+  it('are listed with their kind, who connected each and when', async () => {
+    installations = [{ ...acme, account_type: 'Organization' }, { ...lab, account_type: 'User' }]
     show()
     const row = (await screen.findByRole('cell', { name: 'acme' })).closest('tr')!
+    expect(within(row).getByText('Organisation')).toBeTruthy()
     expect(within(row).getByText('Ada Lovelace').getAttribute('title')).toBe('u1')
     expect(within(row).getByText('you')).toBeTruthy()
-    expect(within(row).getByText(new Date(at).toLocaleString())).toBeTruthy()
+    expect(within(row).getByTitle(new Date(at).toLocaleString())).toBeTruthy()
+    expect(within(screen.getByRole('cell', { name: 'lab' }).closest('tr')!).getByText('Personal')).toBeTruthy()
     const other = screen.getByRole('cell', { name: 'lab' }).closest('tr')!
     expect(within(other).getByText('ci').getAttribute('title')).toBe('key_3')
     expect(within(other).queryByText('you')).toBeNull()
@@ -105,6 +107,7 @@ describe('a member who is no owner', () => {
 
 describe('connecting', () => {
   it('leaves for GitHub\'s authorisation with a state, and where to return', async () => {
+    installations = []
     show()
     await userEvent.click(await screen.findByRole('button', { name: 'Connect GitHub' }))
     const address = new URL(vi.mocked(leaveFor).mock.calls[0][0])
@@ -115,17 +118,17 @@ describe('connecting', () => {
     expect(screen.getByRole('button', { name: 'Connect GitHub' })).toHaveProperty('disabled', true)
   })
 
-  it('leaves for the App\'s install page when asked to install first', async () => {
+  it('is the one button, which says it adds another account once one is connected', async () => {
     show()
-    await userEvent.click(await screen.findByRole('button', { name: 'Install the App on an account' }))
-    expect(leaveFor).toHaveBeenCalledExactlyOnceWith(app.install_url)
+    expect(await screen.findByRole('button', { name: 'Connect another account' })).toBeTruthy()
+    expect(screen.getAllByRole('button').map(b => b.textContent)).toEqual(['Disconnect', 'Connect another account'])
   })
 
-  it('says which account was connected and lists it', async () => {
+  it('lists the account connected once, with nothing else saying so', async () => {
     await comeBack(state => `code=c&state=${state}`)
     show()
-    expect(await screen.findByText('Connected lab.')).toBeTruthy()
     expect(await screen.findByRole('cell', { name: 'lab' })).toBeTruthy()
+    expect(screen.queryByText(/Connected lab/)).toBeNull()
   })
 
   it('asks which account when the person reaches several, and authorises again for the one chosen', async () => {
@@ -135,18 +138,31 @@ describe('connecting', () => {
     await comeBack(state => `code=c&state=${state}`)
     show()
     const choice = within(await screen.findByRole('group', { name: 'GitHub account to connect' }))
-    expect(choice.getByText(/Which one do you connect to Lab\?/)).toBeTruthy()
+    expect(choice.getByText('Which GitHub account do you connect to Lab?')).toBeTruthy()
     await userEvent.click(choice.getByRole('button', { name: 'lab' }))
     const address = new URL(vi.mocked(leaveFor).mock.calls[0][0])
     expect(address.searchParams.get('state')).toBeTruthy()
 
-    vi.mocked(connectGitHubInstallation).mockResolvedValue(lab)
+    vi.mocked(connectGitHubInstallation).mockImplementation(async () => {
+      installations = [...installations, lab]
+      return lab
+    })
     await takeReturn(`code=c2&state=${address.searchParams.get('state')}`, {
-      authorizeURL: async () => app.authorize_url,
+      app: async () => app,
       connect: (orgID, code, id) => connectGitHubInstallation(orgID, { code, redirectURI: 'u', installationID: id }),
     })
     expect(connectGitHubInstallation).toHaveBeenLastCalledWith('org_a', { code: 'c2', redirectURI: 'u', installationID: 9 })
-    expect(await screen.findByText('Connected lab.')).toBeTruthy()
+    expect(await screen.findByRole('cell', { name: 'lab' })).toBeTruthy()
+  })
+
+  it('offers to install the App on another account instead of those listed', async () => {
+    vi.mocked(connectGitHubInstallation).mockRejectedValue(new ApiError(409, 'name one', 'installation_choice_required', {
+      installations: [{ installation_id: 7, account_login: 'acme' }, { installation_id: 9, account_login: 'lab' }],
+    }))
+    await comeBack(state => `code=c&state=${state}`)
+    show()
+    await userEvent.click(within(await screen.findByRole('group', { name: 'GitHub account to connect' })).getByRole('button', { name: 'Another account' }))
+    expect(leaveFor).toHaveBeenCalledExactlyOnceWith(app.install_url)
   })
 
   it('lets the person drop the choice', async () => {
@@ -159,36 +175,36 @@ describe('connecting', () => {
     expect(screen.queryByRole('group', { name: 'GitHub account to connect' })).toBeNull()
   })
 
-  it('points to installing the App when the person reaches no installation', async () => {
-    vi.mocked(connectGitHubInstallation).mockRejectedValue(new ApiError(422, 'you reach no installation', 'app_not_installed'))
-    await comeBack(state => `code=c&state=${state}`)
+  it('goes on to install the App when the person controls no account to connect', async () => {
+    vi.mocked(connectGitHubInstallation).mockRejectedValue(new ApiError(422, 'Install the GitHub App', 'app_not_installed'))
+    await expect(comeBack(state => `code=c&state=${state}`)).resolves.toEqual({ to: 'github', address: app.install_url })
     show()
-    expect(await screen.findByText(/Your GitHub account reaches no installation of the App\. Install it/)).toBeTruthy()
-    expect(await screen.findByRole('button', { name: 'Install the App on an account' })).toBeTruthy()
+    await screen.findByRole('cell', { name: 'acme' })
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it('shows any other refusal in the API\'s words', async () => {
-    vi.mocked(connectGitHubInstallation).mockRejectedValue(new ApiError(422, 'GitHub did not take the code', 'code_rejected'))
+  it('shows a refusal in the API\'s one sentence', async () => {
+    vi.mocked(connectGitHubInstallation).mockRejectedValue(new ApiError(422, 'Ask an admin of the GitHub organisation acme to connect it.', 'installation_not_controlled'))
     await comeBack(state => `code=c&state=${state}`)
     show()
-    expect(await screen.findByText('GitHub was not connected: GitHub did not take the code')).toBeTruthy()
+    expect((await screen.findByRole('alert')).textContent).toBe('Ask an admin of the GitHub organisation acme to connect it.')
   })
 
   it('shows GitHub\'s refusal when the person declined', async () => {
     await comeBack(state => `error=access_denied&error_description=denied&state=${state}`)
     show()
-    expect(await screen.findByText('GitHub was not connected: GitHub did not authorise the App: denied')).toBeTruthy()
+    expect(await screen.findByText('GitHub did not authorise the App: denied')).toBeTruthy()
     expect(connectGitHubInstallation).not.toHaveBeenCalled()
   })
 
   it('says nothing of a connect that belongs to another org', async () => {
     const address = beginConnect(app.authorize_url, { orgID: 'org_other', projectID: 'prj_9' })
     await takeReturn(`code=c&state=${new URL(address).searchParams.get('state')}`, {
-      authorizeURL: async () => app.authorize_url, connect: async () => ({ ...lab, org_id: 'org_other' }),
+      app: async () => app, connect: async () => ({ ...lab, org_id: 'org_other' }),
     })
     show()
     await screen.findByRole('cell', { name: 'acme' })
-    expect(screen.queryByText(/Connected lab/)).toBeNull()
+    expect(fetchGitHubInstallations).toHaveBeenCalledTimes(1)
   })
 
   it('is not offered, and says why, on a deployment without a GitHub App', async () => {

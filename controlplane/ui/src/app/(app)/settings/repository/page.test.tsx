@@ -62,7 +62,7 @@ describe('the address GitHub returns to', () => {
     arrive('code=c&state=s', { to: 'settings', projectID: 'prj_1' })
     const calls = vi.mocked(takeReturn).mock.calls[0][1]
     vi.mocked(fetchGitHubApp).mockResolvedValue({ slug: 'hl', client_id: 'app', install_url: 'i', authorize_url: 'a', new_repository_url: 'n' })
-    await expect(calls.authorizeURL()).resolves.toBe('a')
+    await expect(calls.app()).resolves.toMatchObject({ authorize_url: 'a', install_url: 'i' })
     await calls.connect('org_a', 'c', 9)
     expect(connectGitHubInstallation).toHaveBeenCalledExactlyOnceWith('org_a', {
       code: 'c', redirectURI: `${window.location.origin}/settings/repository`, installationID: 9,

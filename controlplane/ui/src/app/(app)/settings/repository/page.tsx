@@ -9,7 +9,8 @@ import { Loading } from '@/components/ui/status-message'
 
 /**
  * Where GitHub returns the person from installing or authorising the platform's App. The path is
- * the one registered on the App. The return is taken once and the person lands on the GitHub card
+ * the one registered on the App. The return is taken once, the connect it carries is made while
+ * this page shows, and the person goes on to GitHub to install the App or lands on the GitHub card
  * of Settings, which shows how it went.
  */
 export default function GitHubReturnPage() {
@@ -19,7 +20,7 @@ export default function GitHubReturnPage() {
 
   useEffect(() => {
     void takeReturn(query, {
-      authorizeURL: async () => (await fetchGitHubApp()).authorize_url,
+      app: fetchGitHubApp,
       connect: (orgID, code, installationID) => connectGitHubInstallation(orgID, { code, redirectURI: redirectURI(), installationID }),
     }).then(next => {
       if (next.to === 'github') leaveFor(next.address)

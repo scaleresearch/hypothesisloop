@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import useSWR from 'swr'
-import { ApiError, INSTALLATION_CHOICE_REQUIRED, fetchGitHubApp } from '@/lib/api'
-import type { GitHubInstallation, ReachableInstallation } from '@/types'
+import { APP_NOT_INSTALLED, ApiError, INSTALLATION_CHOICE_REQUIRED, fetchGitHubApp } from '@/lib/api'
+import type { GitHubApp, GitHubInstallation, ReachableInstallation } from '@/types'
 
 const KEY = 'hl-github-connect'
 
@@ -26,8 +26,9 @@ export const GITHUB_CARD = 'github'
 // An attempt is read once: a second return with the same state finds nothing.
 interface Attempt {
   nonce: string
-  // 'install' left for the App's install page, which returns with the installation it made and no
-  // state; 'authorise' left to prove who the person is, which returns with a code and the state.
+  // 'install' left for the App's install page, which returns with setup_action, the installation it
+  // made or changed and no state; 'authorise' left to prove who the person is, which returns with
+  // a code and the state.
   step: 'install' | 'authorise'
   orgID: string
   projectID: string
@@ -40,7 +41,6 @@ interface Attempt {
  */
 export type Connect =
   | { state: 'idle' }
-  | { state: 'connecting'; orgID: string }
   | { state: 'connected'; orgID: string; installation: GitHubInstallation }
   // The person reaches several installations and named none: they are asked which.
   | { state: 'choice'; orgID: string; installations: ReachableInstallation[] }
@@ -117,15 +117,20 @@ const NOT_STARTED_HERE = 'This return from GitHub does not belong to a connect s
 export type Next = { to: 'settings'; projectID: string | null } | { to: 'github'; address: string }
 
 interface Calls {
-  authorizeURL: () => Promise<string>
+  app: () => Promise<GitHubApp>
   connect: (orgID: string, code: string, installationID?: number) => Promise<GitHubInstallation>
 }
 
+const NOT_INSTALLED = 'Install the App on the GitHub account to connect, then connect again.'
+const REQUESTED = 'GitHub asked an owner of that organisation to install the App: connect again once they have.'
+
 /**
- * Takes a return from GitHub. From installing the App, with the installation it made, the person
- * goes on to authorise for that installation. From authorising, with the state of this tab's
- * attempt and a code, the installation is connected through `connect`, once. With GitHub's refusal
- * the attempt ends with its words. Any other return is refused and nothing is sent.
+ * Takes a return from GitHub. Connecting is one pass: the person authorises, and the account they
+ * control that the org has not connected is connected. With none, they go on to install the App,
+ * and from installing, with the installation GitHub made or changed, to authorise for it. A return
+ * from authorising needs the state of this tab's attempt and a code, and is connected through
+ * `connect`, once. With GitHub's refusal the attempt ends with its words. Any other return is
+ * refused and nothing is sent.
  */
 export function takeReturn(query: string, calls: Calls): Promise<Next> {
   // React runs an effect twice in development, and an attempt is taken once: the second run is
@@ -142,12 +147,16 @@ async function take(params: URLSearchParams, calls: Calls): Promise<Next> {
   const state = params.get('state')
   const installed = Number(params.get('installation_id'))
 
-  if (attempt?.step === 'install' && state == null && Number.isSafeInteger(installed) && installed > 0) {
+  if (attempt?.step === 'install' && state == null && params.has('setup_action')) {
     const { orgID, projectID } = attempt
+    if (!Number.isSafeInteger(installed) || installed <= 0) {
+      set({ state: 'failed', orgID, message: params.get('setup_action') === 'request' ? REQUESTED : NOT_INSTALLED })
+      return { to: 'settings', projectID }
+    }
     try {
-      return { to: 'github', address: beginConnect(await calls.authorizeURL(), { orgID, projectID }, installed) }
+      return { to: 'github', address: beginConnect((await calls.app()).authorize_url, { orgID, projectID }, installed) }
     } catch (error) {
-      set({ state: 'failed', orgID, message: error instanceof Error ? error.message : String(error) })
+      set({ state: 'failed', orgID, message: messageOf(error) })
       return { to: 'settings', projectID }
     }
   }
@@ -164,22 +173,30 @@ async function take(params: URLSearchParams, calls: Calls): Promise<Next> {
     set({ state: 'failed', orgID, message: said ? `GitHub did not authorise the App: ${said}` : 'GitHub returned without a code.' })
     return { to: 'settings', projectID }
   }
-  set({ state: 'connecting', orgID })
-  calls.connect(orgID, code, installationID).then(
-    installation => set({ state: 'connected', orgID, installation }),
-    (error: unknown) => {
-      if (error instanceof ApiError && error.reason === INSTALLATION_CHOICE_REQUIRED && Array.isArray(error.body?.installations)) {
-        set({ state: 'choice', orgID, installations: error.body.installations as ReachableInstallation[] })
-        return
+  try {
+    set({ state: 'connected', orgID, installation: await calls.connect(orgID, code, installationID) })
+    return { to: 'settings', projectID }
+  } catch (error) {
+    const reason = error instanceof ApiError ? error.reason : undefined
+    if (reason === APP_NOT_INSTALLED && installationID == null) {
+      try {
+        return { to: 'github', address: beginInstall((await calls.app()).install_url, { orgID, projectID }) }
+      } catch (unread) {
+        set({ state: 'failed', orgID, message: messageOf(unread) })
+        return { to: 'settings', projectID }
       }
-      set({
-        state: 'failed', orgID,
-        message: error instanceof Error ? error.message : String(error),
-        reason: error instanceof ApiError ? error.reason : undefined,
-      })
-    },
-  )
-  return { to: 'settings', projectID }
+    }
+    if (error instanceof ApiError && reason === INSTALLATION_CHOICE_REQUIRED && Array.isArray(error.body?.installations)) {
+      set({ state: 'choice', orgID, installations: error.body.installations as ReachableInstallation[] })
+    } else {
+      set({ state: 'failed', orgID, message: reason === APP_NOT_INSTALLED ? NOT_INSTALLED : messageOf(error), reason })
+    }
+    return { to: 'settings', projectID }
+  }
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 /** Leaves the app for an address on GitHub, without leaving this page behind for Back to return to. */
