@@ -120,8 +120,6 @@ class RequireJoinedTest(PlatformCase):
 
 
 class StartupTest(PlatformCase):
-    """core.prepare is what both backends start with."""
-
     def environment(self, **overrides):
         env = {"API_URL": self.url, "HL_TOKEN": AGENT_TOKEN, "AGENT_WORKDIR": self.workdir, "AGENT_STATE_DIR": self.workdir,
                "AGENT_VENV": "/agent/.venv", "PATH": "/usr/bin"}

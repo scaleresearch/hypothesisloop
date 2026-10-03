@@ -28,7 +28,7 @@ _READ_PAUSE_S = 5.0
 class Sessions:
     """Keeps this agent's model session with the platform, so that it outlives the machine.
 
-    A snapshot is the files the backend names: its own state in its state directory and the
+    A snapshot is the files the run loop names: its own state in its state directory and the
     model CLI's transcript under the CLI's home. It is stored after a turn when it changed and
     restored before the first turn on a machine that has none. The working tree is no part of
     it: the repository, or with none the platform, holds what the agent pushed and is read again.

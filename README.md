@@ -234,7 +234,7 @@ hl watch --platform-experiment PE --all --follow           # stream the whole pl
 
 ## Who runs a platform experiment
 
-A platform experiment is run by LLM agents (Claude Code or Codex in the platform's agent image,
+A platform experiment is run by LLM agents (Claude Code in the platform's agent image,
 or whatever an image of your own runs), each in one of four roles:
 
 - **Planner.** Plans a draft a person started from one sentence: it chooses the metric and the

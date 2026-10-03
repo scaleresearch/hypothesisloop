@@ -14,7 +14,7 @@ from hypothesisloop_agent import api_client, config
 
 log = logging.getLogger("llm_agent")
 
-# One briefing for every backend and flavor. It names hl's commands and repeats neither the
+# One briefing for every flavor. It names hl's commands and repeats neither the
 # platform's rules nor hl's command listing: both are spliced in at startup, the rules from the
 # platform as {rules} and the listing from the hl on this PATH as {hl_commands}, so neither is a
 # copy that can drift. The specialization lives in prompts/flavors/<flavor>.md, spliced in as
@@ -93,7 +93,7 @@ def install_signal_handler() -> list:
 
 @dataclass
 class RunSetup:
-    """Everything a backend's run loop needs, assembled once from the environment."""
+    """Everything the run loop needs, assembled once from the environment."""
     cfg: config.Config
     client: api_client.PlatformClient
     system_prompt: str
@@ -292,7 +292,7 @@ async def until_lost(setup: RunSetup) -> str:
 
 
 async def run_until_lost(setup: RunSetup, work) -> None:
-    """Awaits work, the backend's loop, and exits the process as soon as the platform is lost:
+    """Awaits work, the run loop, and exits the process as soon as the platform is lost:
     its turn in flight is dropped and no last turn follows, since both need the platform."""
     work, lost = asyncio.ensure_future(work), asyncio.ensure_future(until_lost(setup))
     try:

@@ -461,7 +461,7 @@ added itself.
 
 Default: the token from `agents/coordinator/.env` (loaded in step 0). Host credential files
 mount with `--userns=keep-id -v ~/.claude/.credentials.json:/agent/.claude/.credentials.json:ro
--v ~/.claude.json:/agent/.claude.json:ro -v ~/.codex/auth.json:/agent/.codex/auth.json:ro`,
+-v ~/.claude.json:/agent/.claude.json:ro`,
 on rootless podman only: a rootful podman machine (macOS) rejects `--userns=keep-id` with
 `crun: mount sysfs to sys: Operation not permitted`. The SDK prefers the token when both are set.
 Never use `--bare`; it ignores the token.

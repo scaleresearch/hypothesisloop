@@ -41,8 +41,7 @@ DISALLOWED_TOOLS = ["ScheduleWakeup", "Monitor", "TaskCreate", "TaskUpdate", "Ta
 
 
 # The CLI's Write refuses an existing file the session has not opened with its Read, and no
-# setting lifts that: an agent that had only `cat` a file was refused its Write. Said here
-# because the briefings are the Codex backend's too.
+# setting lifts that: an agent that had only `cat` a file was refused its Write.
 _FILE_TOOLS_NOTE = "\n\nWrite and Edit refuse an existing file you have not opened with Read: `cat` does not count."
 
 
