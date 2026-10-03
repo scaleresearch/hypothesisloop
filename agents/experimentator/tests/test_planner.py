@@ -209,6 +209,12 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertIn("What the image does not carry it installs with `uv pip install X`", flat)
         self.assertIn("`image` a job image name of `hl capacity` or a full address: any other word is refused", flat)
 
+    # One spent twelve minutes proving a GPU harness on its own machine: a three-minute timeout,
+    # four slow reruns on CPU and two failed installs of torch.
+    def test_the_harness_is_tested_by_the_baseline_job_and_not_on_the_agents_machine(self):
+        self.assertIn("This machine has no accelerator and no framework: check syntax and a tiny dry path only. "
+                      "The baseline job is the test", render(baseline_agent())[1])
+
     # A baseline agent stopped at the close answered its last turn with a finish, which the
     # platform refuses: the close had ended its run.
     def test_a_refusal_for_a_closed_experiment_ends_the_turn(self):
@@ -228,7 +234,7 @@ class BaselinePromptTest(unittest.TestCase):
     # whole node. A submit without any of the three is now refused.
     def test_every_job_states_its_cpu_memory_and_storage_and_takes_no_whole_node(self):
         self.assertIn("Every job states `cpu`, `memory` and `storage` for what it needs, small enough that other jobs fit beside it, "
-                      "never a whole node: one left out is refused. `max_retries` may be left out", render(baseline_agent())[1])
+                      "never a whole node: one left out is refused", render(baseline_agent())[1])
 
 
 class RunEndedTest(unittest.TestCase):
