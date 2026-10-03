@@ -1,7 +1,6 @@
 package k8sexec
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -9,34 +8,34 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
+
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/boundedname"
 )
 
+// dnsLabelLength bounds a Job name (Kubernetes copies it into the job-name label), a Service name,
+// a label value and a pod hostname alike.
+const dnsLabelLength = 63
+
+// jobName names the experiment's headless Service, and its Job when that Job is the only one.
 func jobName(experimentID string) string {
-	return boundedName("exp-"+experimentID, experimentID)
+	return groupJobName(experimentID, "", 0)
 }
 
 // groupJobName names the Job compiled from one group of a heterogeneous experiment (see
-// domain.JobSpec.Groups). An empty group is an ungrouped job and keeps the plain jobName, so
-// nothing about an existing job's identity moves.
-func groupJobName(experimentID, group string) string {
-	if group == "" {
-		return jobName(experimentID)
+// domain.JobSpec.Groups). An empty group is an ungrouped job, named by its experiment alone.
+//
+// ranks is how many pods of an Indexed Job the name is for, 0 for a Job that is not Indexed.
+// Kubernetes makes the hostname of each such pod from the Job's name, a dash and the pod's index,
+// and refuses a Job whose last hostname is longer than a DNS label, so the name leaves that room.
+func groupJobName(experimentID, group string, ranks int) string {
+	readable, identity, limit := "exp-"+experimentID, experimentID, dnsLabelLength
+	if group != "" {
+		readable, identity = readable+"-"+group, identity+"/"+group
 	}
-	return boundedName("exp-"+experimentID+"-"+group, experimentID+"/"+group)
-}
-
-// boundedName keeps name inside Kubernetes' 63-character limit. identity is what makes a
-// truncated name unique: two identities sharing a long prefix would collide on a plain
-// truncation, and the name is the reconciliation identity — one workload would silently adopt
-// another's Job. Suffixing a short hash of the full identity keeps truncated names unique and
-// deterministic.
-func boundedName(name, identity string) string {
-	if len(name) <= 63 {
-		return name
+	if ranks > 0 {
+		limit -= len(fmt.Sprintf("-%d", ranks-1))
 	}
-	h := sha256.Sum256([]byte(identity))
-	suffix := fmt.Sprintf("-%x", h[:4]) // 9 chars: '-' + 8 hex
-	return name[:63-len(suffix)] + suffix
+	return boundedname.Name(readable, identity, limit)
 }
 
 func sanitizeLabel(s string) string {
@@ -48,13 +47,7 @@ func sanitizeLabel(s string) string {
 			b.WriteRune('-')
 		}
 	}
-	v := strings.ToLower(strings.Trim(b.String(), "-."))
-	if len(v) > 63 {
-		// Trim again after truncating: a cut landing on a '-'/'.' would otherwise leave an
-		// invalid trailing char (k8s label values must start and end alphanumeric).
-		v = strings.Trim(v[:63], "-.")
-	}
-	return v
+	return boundedname.Name(strings.ToLower(strings.Trim(b.String(), "-.")), s, dnsLabelLength)
 }
 
 // client-go's own default (QPS 5, Burst 10) is sized for a single controller managing a handful

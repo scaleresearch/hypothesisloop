@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/boundedname"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
@@ -99,12 +100,16 @@ func (c *JobWorkloadClient) BuildJobs(exp *domain.Experiment, placement Accelera
 	plans := make([]groupPlan, 0, len(groups))
 	rankOffset := 0
 	for _, group := range groups {
+		ranks := 0
+		if spec.Nodes() > 1 {
+			ranks = group.Replicas
+		}
 		plans = append(plans, groupPlan{
 			group:      group,
 			grouped:    len(spec.Groups) > 0,
 			rankOffset: rankOffset,
 			totalNodes: spec.Nodes(),
-			jobName:    groupJobName(exp.ID, group.Name),
+			jobName:    groupJobName(exp.ID, group.Name, ranks),
 			service:    jobName(exp.ID),
 		})
 		rankOffset += group.Replicas
@@ -449,7 +454,7 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 		// On the Job only, never on the pod template: the headless Service selects this
 		// experiment's pods by experiment id alone, and a group label down there would split one
 		// rendezvous into one Service's worth of pods per group.
-		job.Labels[workloadkeys.JobGroup] = group.Name
+		job.Labels[workloadkeys.JobGroup] = boundedname.Name(group.Name, group.Name, dnsLabelLength)
 	}
 
 	if jobUsesDRA {

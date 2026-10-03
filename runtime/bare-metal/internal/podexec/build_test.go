@@ -185,6 +185,22 @@ func TestBuildContainerSpecInjectsPerNodeAcceleratorCount(t *testing.T) {
 	}
 }
 
+// The engines hold a name to an alphabet and to no length; the name is no hostname, which the
+// engine makes from the container's own id.
+func TestAContainerIsNamedByItsWholeExperimentId(t *testing.T) {
+	const issued, sameMillisecond = "job-0199c2a4b7d07f3a9c1e5b2d4f608a13", "job-0199c2a4b7d07e11a04c7d9e3b5f2c68"
+	longest := strings.Repeat("a", domain.MaxIdentifierLength)
+	for _, id := range []string{issued, sameMillisecond, longest} {
+		if got := containerName(id); got != containerNamePrefix+id {
+			t.Errorf("containerName(%q) = %q", id, got)
+		}
+	}
+	one, other := containerName(strings.Repeat("a", 300)+"1"), containerName(strings.Repeat("a", 300)+"2")
+	if len(one) != 200 || len(other) != 200 || one == other {
+		t.Errorf("ids past the cut are named %q and %q", one, other)
+	}
+}
+
 // Every job in every test gets the same durable-data access the control plane really sends,
 // because BuildJob refuses to build a job without one: a job with nowhere to save is a job whose
 // result cannot outlive it, and that must fail at build time rather than at the end of a run.

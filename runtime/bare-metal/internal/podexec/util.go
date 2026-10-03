@@ -2,12 +2,13 @@ package podexec
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/moby/moby/client"
+
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/boundedname"
 )
 
 // candidateEngineSockets is tried in order at startup: podman's rootful and rootless
@@ -64,13 +65,7 @@ func localNodeName() (string, error) {
 // (names must match [a-zA-Z0-9][a-zA-Z0-9_.-]*) — the reconciliation identity, exactly like
 // k8sexec.jobName.
 func containerName(experimentID string) string {
-	name := containerNamePrefix + sanitizeName(experimentID)
-	if len(name) > 200 {
-		h := sha256.Sum256([]byte(experimentID))
-		suffix := fmt.Sprintf("-%x", h[:4])
-		name = name[:200-len(suffix)] + suffix
-	}
-	return name
+	return boundedname.Name(containerNamePrefix+sanitizeName(experimentID), experimentID, 200)
 }
 
 func sanitizeName(s string) string {

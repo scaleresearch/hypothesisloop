@@ -135,6 +135,15 @@ func TestAnInstanceNameIsReadBackAsWhatItWasBuiltFrom(t *testing.T) {
 	if !ok || parsed.experimentID != "exp-with-dashes-a2" || parsed.attempt != 7 || parsed.slot() != "h100-1" {
 		t.Fatalf("parsed = %+v, %v", parsed, ok)
 	}
+	const issued = "job-0199c2a4b7d07f3a9c1e5b2d4f608a13"
+	name = e.instanceName(issued, attemptBudget, "h100", 1)
+	parsed, ok = e.parseInstanceName(name)
+	if !ok || parsed.experimentID != issued || parsed.attempt != attemptBudget || parsed.slot() != "h100-1" {
+		t.Fatalf("issued id: parsed = %+v, %v from %q", parsed, ok, name)
+	}
+	if err := provider.ValidateName(name); err != nil {
+		t.Fatalf("issued id: %v", err)
+	}
 	for _, foreign := range []string{
 		"hl-agent-t1-pe-bot", "hl-job-t1-exp-a1-h100", "hl-job-t1--a1-h100-0", "hl-job-t1-exp-a01-h100-0",
 		"hl-job-t2-exp-a1-h100-0", "hl-job-t10-exp-a1-h100-0", "hl-exp-a1-h100-0",
