@@ -3,6 +3,7 @@ package podexec
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -11,7 +12,7 @@ import (
 
 // tenstorrentClassDir is the tt-kmd driver's sysfs class directory: one entry per chip, named
 // "tenstorrent!N", symlinked to that chip's backing PCI device directory.
-const tenstorrentClassDir = "/sys/class/tenstorrent"
+var tenstorrentClassDir = "/sys/class/tenstorrent"
 
 // tenstorrentChipArch maps a Tenstorrent PCI device ID — the kernel's own "device" sysfs
 // attribute, not anything we compute — to the chip architecture name tt-metal/ttnn and this
@@ -40,6 +41,8 @@ func probeTenstorrent(_ context.Context) ([]acceleratorDevice, error) {
 		return nil, fmt.Errorf("podexec: read %s: %w", tenstorrentClassDir, err)
 	}
 
+	// One chip that cannot be read is skipped and the rest reported, as probeNVIDIA does and for
+	// the same reason: a failed probe stops every pass on the node, deletes included.
 	devices := make([]acceleratorDevice, 0, len(entries))
 	for _, entry := range entries {
 		index := strings.TrimPrefix(entry.Name(), "tenstorrent!")
@@ -53,19 +56,22 @@ func probeTenstorrent(_ context.Context) ([]acceleratorDevice, error) {
 		classLink := filepath.Join(tenstorrentClassDir, entry.Name())
 		chipDir, err := filepath.EvalSymlinks(classLink)
 		if err != nil {
-			return nil, fmt.Errorf("podexec: resolve %s: %w", classLink, err)
+			log.Printf("podexec: skipping Tenstorrent chip %s: resolve %s: %v", index, classLink, err)
+			continue
 		}
 		// chipDir is .../<pci-addr>/tenstorrent/tenstorrent!N; the PCI device directory itself
 		// (carrying the "device" attribute) is two levels up.
 		pciDeviceDir := filepath.Dir(filepath.Dir(chipDir))
 		raw, err := os.ReadFile(filepath.Join(pciDeviceDir, "device"))
 		if err != nil {
-			return nil, fmt.Errorf("podexec: read %s: %w", filepath.Join(pciDeviceDir, "device"), err)
+			log.Printf("podexec: skipping Tenstorrent chip %s: %v", index, err)
+			continue
 		}
 		deviceID := strings.ToLower(strings.TrimSpace(string(raw)))
 		arch, known := tenstorrentChipArch[deviceID]
 		if !known {
-			return nil, fmt.Errorf("podexec: tenstorrent chip at %s has unrecognized PCI device id %q", pciDeviceDir, deviceID)
+			log.Printf("podexec: skipping Tenstorrent chip %s at %s: unrecognized PCI device id %q", index, pciDeviceDir, deviceID)
+			continue
 		}
 
 		devices = append(devices, acceleratorDevice{

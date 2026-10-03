@@ -82,6 +82,39 @@ func TestPreflightNamesTheAcceleratorsAsJobsAskForThem(t *testing.T) {
 	}
 }
 
+// The probe runs before every pass, so a chip whose id this build does not know failed the whole
+// inventory and with it every start and stop on the node.
+func TestAChipTheProbeCannotReadIsSkippedAndTheRestReported(t *testing.T) {
+	sys := t.TempDir()
+	class := filepath.Join(sys, "class")
+	if err := os.MkdirAll(class, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for index, deviceID := range map[string]string{"0": "0xb140", "1": "0xffff"} {
+		chip := filepath.Join(sys, "pci"+index, "tenstorrent", "tenstorrent!"+index)
+		if err := os.MkdirAll(chip, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sys, "pci"+index, "device"), []byte(deviceID+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(chip, filepath.Join(class, "tenstorrent!"+index)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(sys, "gone"), filepath.Join(class, "tenstorrent!2")); err != nil {
+		t.Fatal(err)
+	}
+	old := tenstorrentClassDir
+	tenstorrentClassDir = class
+	defer func() { tenstorrentClassDir = old }()
+
+	devices, err := probeTenstorrent(context.Background())
+	if err != nil || len(devices) != 1 || devices[0].DevicePath != "/dev/tenstorrent/0" || devices[0].Labels[0] != "tenstorrent.com/chipArch=blackhole" {
+		t.Fatalf("probe = %+v (err %v), want the one readable Blackhole chip", devices, err)
+	}
+}
+
 // An agent that cannot load the NVIDIA library reads a GPU node as one with no GPUs. The card is
 // on the PCI bus whatever the agent can load, so it stops and says so.
 func TestPreflightStopsANodeWhoseNVIDIACardsItCannotRead(t *testing.T) {
