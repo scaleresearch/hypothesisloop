@@ -25,6 +25,8 @@ type Host interface {
 	// WriteFile replaces path in one step, so a running binary or a unit being read is never
 	// seen half written.
 	WriteFile(path string, data []byte, mode os.FileMode) error
+	// Rename moves from over to in one step. Both are in one directory.
+	Rename(from, to string) error
 	// Remove of a file that is not there is not an error.
 	Remove(path string) error
 	Systemctl(args ...string) error
@@ -107,6 +109,11 @@ WantedBy=multi-user.target
 // check runs the agent's own preflight with those settings and names the engine it found, which
 // the unit is ordered after. When check fails the node is left as it was. Running Install again
 // with another binary is the upgrade.
+//
+// The three files are written beside the ones they replace and renamed into place only once all
+// three are written, so a write that fails leaves the install that was there whole, and the
+// agent of that install running. A systemctl call that fails leaves the new install whole on
+// disk and the agent that was running untouched.
 func Install(host Host, binary []byte, settings Settings, check func() (engine string, err error)) error {
 	env, err := settings.envFile()
 	if err != nil {
@@ -120,12 +127,21 @@ func Install(host Host, binary []byte, settings Settings, check func() (engine s
 	if err != nil {
 		return err
 	}
-	for _, file := range []struct {
+	files := []struct {
 		path string
 		data []byte
 		mode os.FileMode
-	}{{BinaryPath, binary, 0o755}, {EnvPath, env, 0o600}, {UnitPath, unitFile, 0o644}} {
-		if err := host.WriteFile(file.path, file.data, file.mode); err != nil {
+	}{{BinaryPath, binary, 0o755}, {EnvPath, env, 0o600}, {UnitPath, unitFile, 0o644}}
+	for _, file := range files {
+		if err := host.WriteFile(staged(file.path), file.data, file.mode); err != nil {
+			for _, written := range files {
+				err = errors.Join(err, host.Remove(staged(written.path)))
+			}
+			return err
+		}
+	}
+	for _, file := range files {
+		if err := host.Rename(staged(file.path), file.path); err != nil {
 			return err
 		}
 	}
@@ -136,6 +152,10 @@ func Install(host Host, binary []byte, settings Settings, check func() (engine s
 	}
 	return nil
 }
+
+// staged is where a file of an install waits beside path until all of them are written. systemd
+// reads no unit from a name that ends this way.
+func staged(path string) string { return path + ".new" }
 
 // Attached reports whether the unit is installed and enabled, which is how a node that has an
 // agent for a cluster differs from one that detached.
@@ -208,6 +228,13 @@ func (Node) WriteFile(path string, data []byte, mode os.FileMode) error {
 	}
 	if err := os.Rename(staged.Name(), path); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
+func (Node) Rename(from, to string) error {
+	if err := os.Rename(from, to); err != nil {
+		return fmt.Errorf("put %s in place: %w", to, err)
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ package hostinstall
 import (
 	"errors"
 	"io/fs"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -16,6 +17,8 @@ type fakeHost struct {
 	asked   []string
 	enabled bool
 	refuse  string
+	// unwritable is a path every write to fails.
+	unwritable string
 }
 
 func newFakeHost() *fakeHost {
@@ -31,7 +34,21 @@ func (h *fakeHost) ReadFile(path string) ([]byte, error) {
 }
 
 func (h *fakeHost) WriteFile(path string, data []byte, mode os.FileMode) error {
+	if path == h.unwritable {
+		return errors.New("write " + path + ": no space left on device")
+	}
 	h.files[path], h.modes[path] = string(data), mode
+	return nil
+}
+
+func (h *fakeHost) Rename(from, to string) error {
+	content, found := h.files[from]
+	if !found {
+		return fs.ErrNotExist
+	}
+	h.files[to], h.modes[to] = content, h.modes[from]
+	delete(h.files, from)
+	delete(h.modes, from)
 	return nil
 }
 
@@ -134,6 +151,31 @@ func TestInstallAgainReplacesTheBinaryAndRestartsTheAgent(t *testing.T) {
 	}
 	if last := host.asked[len(host.asked)-1]; last != "restart "+UnitName {
 		t.Errorf("the last systemctl call was %q, so the running agent is still the old binary", last)
+	}
+}
+
+// An upgrade that cannot write one of its files must not leave the new binary under the old unit
+// and settings: the agent that runs would be restarted into a mix at the next boot.
+func TestAnInstallThatCannotWriteOneFileLeavesTheInstallBeforeItWhole(t *testing.T) {
+	for _, unwritable := range []string{BinaryPath, EnvPath, UnitPath} {
+		host := newFakeHost()
+		if err := Install(host, []byte("binary-1"), settings, passes("docker")); err != nil {
+			t.Fatal(err)
+		}
+		before, asked := maps.Clone(host.files), len(host.asked)
+		host.unwritable = unwritable + ".new"
+
+		moved := Settings{ClusterName: "gpu-box", APIURL: "https://api.other.example", Token: "hls_b3RoZXI.c2ln"}
+		err := Install(host, []byte("binary-2"), moved, passes("podman"))
+		if err == nil || !strings.Contains(err.Error(), "no space left on device") {
+			t.Fatalf("%s unwritable: err = %v, want the write's", unwritable, err)
+		}
+		if !maps.Equal(host.files, before) {
+			t.Errorf("%s unwritable: files = %v, want the first install and nothing beside it: %v", unwritable, host.files, before)
+		}
+		if len(host.asked) != asked {
+			t.Errorf("%s unwritable: systemctl was asked %v after the failed write", unwritable, host.asked[asked:])
+		}
 	}
 }
 
