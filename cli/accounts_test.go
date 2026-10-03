@@ -415,24 +415,43 @@ func TestInviteCreatePrintsTheTokenItWillNeverSeeAgain(t *testing.T) {
 	}
 }
 
-// Removing and revoking answer with no body, so the command says what it did.
+// Removing and revoking answer with no body, so the command says what it did. Three deletes
+// still answer 200 with the resource where the conventions say 204, and hl had one helper for
+// each kind of answer: a delete that moves to 204 would have printed "response is not JSON".
+// One helper takes both, so every delete here is answered 204 and then with a body.
 func TestACommandAnsweredWithNoBodySaysWhatItDid(t *testing.T) {
 	var asked []string
+	body := ""
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		asked = append(asked, r.Method+" "+r.URL.Path)
-		w.WriteHeader(http.StatusNoContent)
+		if body == "" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		_, _ = io.WriteString(w, body)
 	})
 	setAPIURL(t, url)
-	for args, said := range map[string]string{
-		"org members remove u-1 --org org-1": "removed u-1 from org org-1",
-		"org invites revoke inv-1":           "revoked invite inv-1",
-	} {
+	deletes := map[string]string{
+		"org members remove u-1 --org org-1":                           "removed u-1 from org org-1",
+		"org invites revoke inv-1":                                     "revoked invite inv-1",
+		"api-key revoke key-1":                                         "revoked API key key-1",
+		"cluster remove main --org org-1":                              "DELETE /orgs/org-1/clusters/main: done",
+		"cluster forget-identity main --org org-1":                     "DELETE /orgs/org-1/clusters/main/identity: done",
+		"platform-experiments agents remove ag-1 --platform-experiment pe-1": "removed ag-1 from platform experiment pe-1",
+	}
+	for args, said := range deletes {
+		body = ""
 		code, stdout, stderr := hl(t, strings.Fields(args)...)
-		if code != 0 || stdout != "" || !strings.Contains(stderr, said) {
-			t.Errorf("hl %s: exit code = %d, stdout = %q, stderr = %q, want %q on stderr", args, code, stdout, stderr, said)
+		if code != 0 || stdout != "" || stderr != "hl: "+said+"\n" {
+			t.Errorf("hl %s answered 204: exit code = %d, stdout = %q, stderr = %q, want %q on stderr", args, code, stdout, stderr, said)
+		}
+		body = `{"id":"the-resource"}`
+		code, stdout, stderr = hl(t, strings.Fields(args)...)
+		if code != 0 || stdout != body+"\n" || stderr != "" {
+			t.Errorf("hl %s answered with the resource: exit code = %d, stdout = %q, stderr = %q, want the resource printed", args, code, stdout, stderr)
 		}
 	}
-	if len(asked) != 2 {
+	if len(asked) != 2*len(deletes) {
 		t.Fatalf("asked %v, want one call each", asked)
 	}
 }

@@ -97,7 +97,7 @@ func TestAgentsAddRefusesWhatTheServerWouldBeforeSending(t *testing.T) {
 func TestAgentsRemoveAndList(t *testing.T) {
 	got := recordingServer(t, func(_ int, r recorded) any {
 		if r.Method == "DELETE" {
-			return map[string]any{"status": "removed"}
+			return nil
 		}
 		if r.Method == "POST" {
 			return map[string]any{"status": "finished"}

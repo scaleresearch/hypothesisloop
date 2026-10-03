@@ -81,11 +81,20 @@ func resolveOrg(c *apiclient.Client, flagValue string) (string, error) {
 }
 
 // call makes one request and prints its reply, an object or the list under listKey, one compact
-// line each.
+// line each. An answer that holds nothing, no body or an empty list, says none on stderr, so that
+// no output is never mistaken for a command that did nothing. A route may answer a change with
+// the resource or with 204, and either is the command done.
 func call(c *apiclient.Client, method, path string, body any, listKey, none string, stdout, stderr io.Writer) int {
 	var out json.RawMessage
 	if err := c.Do(method, path, body, &out); err != nil {
 		return fail(stderr, err)
+	}
+	if len(out) == 0 || string(out) == "null" {
+		if none == "" {
+			none = method + " " + path + ": done"
+		}
+		fmt.Fprintf(stderr, "hl: %s\n", none)
+		return 0
 	}
 	if listKey != "" {
 		var keyed map[string]json.RawMessage
@@ -143,16 +152,6 @@ func orgRename(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 		return fail(stderr, err)
 	}
 	return call(c, "PATCH", orgPath(id, ""), map[string]string{"name": name}, "", "", stdout, stderr)
-}
-
-// done makes a request that answers with no body and says on stderr what it did, so that no
-// output is never mistaken for a command that did nothing.
-func done(c *apiclient.Client, method, path, said string, stderr io.Writer) int {
-	if err := c.Do(method, path, nil, nil); err != nil {
-		return fail(stderr, err)
-	}
-	fmt.Fprintf(stderr, "hl: %s\n", said)
-	return 0
 }
 
 // pageFlags are --limit and --offset of a list the platform pages.
@@ -231,7 +230,7 @@ invites they made are revoked.`, stderr)
 	if err != nil {
 		return fail(stderr, err)
 	}
-	return done(c, "DELETE", orgPath(id, "/members/"+url.PathEscape(user)), fmt.Sprintf("removed %s from org %s", user, id), stderr)
+	return call(c, "DELETE", orgPath(id, "/members/"+url.PathEscape(user)), nil, "", fmt.Sprintf("removed %s from org %s", user, id), stdout, stderr)
 }
 
 func orgInvitesCreate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -275,7 +274,7 @@ func orgInvitesRevoke(c *apiclient.Client, args []string, stdout, stderr io.Writ
 	if err != nil {
 		return parseExit(err)
 	}
-	return done(c, "DELETE", "/invites/"+url.PathEscape(id), "revoked invite "+id, stderr)
+	return call(c, "DELETE", "/invites/"+url.PathEscape(id), nil, "", "revoked invite "+id, stdout, stderr)
 }
 
 func orgInvitesAccept(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -373,7 +372,7 @@ func apiKeyRevoke(c *apiclient.Client, args []string, stdout, stderr io.Writer) 
 	if err != nil {
 		return parseExit(err)
 	}
-	return call(c, "DELETE", "/api-keys/"+url.PathEscape(id), nil, "", "", stdout, stderr)
+	return call(c, "DELETE", "/api-keys/"+url.PathEscape(id), nil, "", "revoked API key "+id, stdout, stderr)
 }
 
 // registeredCluster is what registering a cluster answers.
