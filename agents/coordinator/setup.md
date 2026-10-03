@@ -210,11 +210,14 @@ on both.
 
 Creating makes the experiment, `open`, and no agent. From there every experiment goes the same
 way, whoever does each part: the researchers are added (section 4), a baseline agent measures
-the control, its job is declared as the baseline, and the platform starts the run within a
-minute of the declaration. Nobody starts it by hand, and `duration_hours` counts from that
-start (`started_at`). While it is `open`, `hl platform-experiments get` says in `status_reason`
-what the start waits for: `baseline_required`, `starts_at_ahead`, `no_researchers`,
-`budget_spent`, or `starting`. Its `message` begins with your next step, the command included,
+the control, and its job is declared as the baseline. The request that declares it starts the
+run when a researcher has joined and `starts_at`, where one is stated, has passed. Nobody
+starts it by hand. `duration_hours` counts from `started_at`, the moment the first researcher
+is at work: at the start when you run one yourself, and for hosted ones when the first machine
+is reported running. While it is `open`, `hl platform-experiments get` says in `status_reason`
+what the start waits for: `baseline_required`, `baseline_measuring`, `baseline_undeclared`,
+`baseline_declaring`, `starts_at_ahead`, `no_researchers`, `budget_spent`, or `starting`. Its
+`message` begins with your next step, the command included,
 and nothing else says it.
 
 The platform can run the whole experiment. Agents the platform runs join with
@@ -226,7 +229,8 @@ for a coordinator that has `hl`, the repository and no host. It is no agent of t
 holds no quota and is not ranked. `coordinator_model` names its model; omitted, the platform's
 default applies. Both keys are read from the request only. With a hosted coordinator and hosted
 agents, creating the experiment and adding the researchers is all there is to do: the
-coordinator adds the baseline agent, declares its job, keeps the
+coordinator adds the baseline agent, the platform declares the job it leaves, and the
+coordinator keeps the
 description true to what is learned and writes its findings as the experiment's summary
 (`hl platform-experiments summary`), which `hl platform-experiments get` shows as `summary`
 beside `coordinator`: its launcher, its model and `instance`, which reads as an agent's does
@@ -239,7 +243,7 @@ budget, `max_agents`, the schedule and the stages answer 403 to its token); it w
 down for you.
 
 Without `coordinator_hosted` you are the coordinator, with your own token: you add the baseline
-agent and declare its job, as the baseline item below says, and supervise with `supervise.md`.
+agent, as the baseline item below says, and supervise with `supervise.md`.
 
 - `budget_accelerator_hours = NUM_AGENTS * CHIPS_PER_AGENT * planned_run_hours` — not a round
   number, or quota throttles the fleet mid-run. Count every agent you will launch here.
@@ -296,13 +300,16 @@ agent and declare its job, as the baseline item below says, and supervise with `
      experiment accepts, it does not count against `max_agents`, and it takes no share at the
      start;
   2. it runs the repository's job spec, files the job's summary and finishes;
-  3. declare the job: `hl platform-experiments update --baseline-job JOB`. The platform writes
-     the job, its `code_ref` and what it measured into the description and keeps that block
+  3. the platform declares the job in the request the baseline agent finishes in, when the
+     baseline agents left exactly one COMPLETED job that reports the ranked metric. Left with
+     several (`baseline_undeclared`), declare the one the run is ranked against:
+     `hl platform-experiments update --baseline-job JOB`. Either way the platform writes the
+     job, its `code_ref` and what it measured into the description and keeps that block
      through later updates. A refusal names what does not hold: the job, a gate the baseline
      breaks, or a budget that does not cover one such trial for each of `max_agents`.
-  A hosted coordinator does steps 1 and 3 itself. Without one you do them. The declaration
-  starts the run in that request when a researcher has joined, and its answer says whether it
-  did: `status_reason` names what an open one still waits for, and reads `agents_starting`
+  A hosted coordinator does step 1 itself. Without one you do it. The declaration starts the
+  run in that request when a researcher has joined, and the answer to
+  `update --baseline-job` says whether it did: `status_reason` names what an open one still waits for, and reads `agents_starting`
   (status `running`, no `started_at` yet, `agents_due_at` given) while the researchers'
   machines come up, a state to wait through. An experiment not running by its
   `baseline_due_at` (`planning.baseline_limit_minutes`, 90, after it was created or after its
