@@ -855,6 +855,58 @@ func TestQuickEngineCallsCarryADeadlineAndSlowOnesDoNot(t *testing.T) {
 	}
 }
 
+// A container holds its cores, memory and device for as long as it exists with its command not
+// ended, whatever the engine calls its state. Counted only while running or created, a paused or
+// dead one's device read as free and went to a second job. One paused or restarting is still the
+// pass's to compare and stop; one whose command has ended holds nothing.
+func TestAContainerHoldsWhatItRequestsInEveryStateButExited(t *testing.T) {
+	for state, actual := range map[string]bool{"paused": true, "restarting": true, "dead": false, "removing": false, "hibernating": false} {
+		t.Run(state, func(t *testing.T) {
+			f := newFakeEngine()
+			e := newFakeExecutor(f, "/dev/fake/0", "/dev/fake/1")
+			ctx := t.Context()
+			held, second := fakeJob("held", "fast", 1), fakeJob("second", "fast", 1)
+
+			pass(t, ctx, e, held)
+			eventually(t, "the job runs", func() bool { return f.state("held") == "running" })
+			eventually(t, "its start has returned", idle(e, "held"))
+			f.mu.Lock()
+			f.containers[containerName("held")].state = state
+			f.mu.Unlock()
+
+			available, total, err := e.GetLiveCPUCapacity(ctx)
+			if err != nil || available != total-1 {
+				t.Fatalf("CPU available = %v of %v (err %v), want the container's core held", available, total, err)
+			}
+			if free := freeAccelerators(t, ctx, e); free != 1 {
+				t.Fatalf("%d accelerators free, want 1: the container holds the other", free)
+			}
+			jobs, err := e.ListManagedJobs(ctx)
+			if err != nil || slices.Contains(jobs, "held") != actual {
+				t.Fatalf("actual jobs = %v (err %v), want the container listed: %v", jobs, err, actual)
+			}
+
+			pass(t, ctx, e, held, second)
+			eventually(t, "the second job runs", func() bool { return f.state("second") == "running" })
+			if a, b := f.devices("held"), f.devices("second"); len(a) != 1 || len(b) != 1 || a[0] == b[0] {
+				t.Fatalf("the %s job holds %v and the second job %v, want one distinct device each", state, a, b)
+			}
+			if len(f.doubleBooked) > 0 {
+				t.Fatalf("device handed out twice: %v", f.doubleBooked)
+			}
+
+			// Its job is over: the container goes, stopped first where its command can still run.
+			pass(t, ctx, e, second)
+			eventually(t, "the container is gone or stopped", func() bool { return f.state("held") == "" || f.state("held") == "exited" })
+			eventually(t, "the operation has returned", idle(e, "held"))
+			if stops := f.count(f.stops, containerName("held")); (stops == 1) != actual {
+				t.Fatalf("%d stops of a %s container, want a stop: %v", stops, state, actual)
+			}
+			eventually(t, "its device is free again", func() bool { return freeAccelerators(t, ctx, e) == 1 })
+		})
+	}
+}
+
 // Left out of the capacity read, the container's share read as free while it was held, and a
 // second job was booked onto it.
 func TestAContainerWithNoReadableRequestsLeavesNothingFreeAndKeepsItsDevice(t *testing.T) {

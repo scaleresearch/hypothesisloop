@@ -147,10 +147,11 @@ func stopGrace(labels map[string]string, grantCheckpointWindow bool) (int64, err
 	return max(grace, window), nil
 }
 
-// ListManagedJobs returns the experiment IDs of every container this executor manages that is
-// still running or pending — used by the reconcile loop to diff actual vs desired. A container
-// already stopped is not "actual" (its job no longer occupies capacity), matching k8sexec
-// excluding Jobs mid-teardown.
+// ListManagedJobs returns the experiment IDs of every container this executor manages whose
+// command runs or can still run (live) — used by the reconcile loop to diff actual vs desired. A
+// paused or restarting one is actual: left out, it was never stopped on its grace when its job
+// ended. A container already stopped is not "actual" (its job no longer occupies capacity),
+// matching k8sexec excluding Jobs mid-teardown.
 //
 // A job with an operation in flight is listed from the operation alone: one that is pulling is
 // actual, so the pass compares it with desired state and deletes it when it is no longer wanted,
@@ -168,7 +169,7 @@ func (e *Executor) ListManagedJobs(ctx context.Context) ([]string, error) {
 		}
 	}
 	for _, c := range containers {
-		if c.State != "running" && c.State != "created" {
+		if !live(c.State) {
 			continue
 		}
 		id := c.Labels[LabelExperimentID]
@@ -362,7 +363,7 @@ func (e *Executor) ReapTerminal(ctx context.Context, desired map[string]*domain.
 	return e.reapTerminal(ctx, desiredIDs)
 }
 
-// reapTerminal removes containers that are both stopped and no longer desired
+// reapTerminal removes containers that are both not live and no longer desired
 // (different-backend.md §4.6: the stopped container is the "gone" record right up until it's
 // pruned). No retained cleanup queue — every tick recomputes purely from currently-listed
 // containers, so a restart of this process loses nothing.
@@ -378,7 +379,7 @@ func (e *Executor) reapTerminal(ctx context.Context, desiredIDs map[string]bool)
 		return err
 	}
 	for _, c := range containers {
-		if c.State == "running" || c.State == "created" {
+		if live(c.State) {
 			continue
 		}
 		id := c.Labels[LabelExperimentID]

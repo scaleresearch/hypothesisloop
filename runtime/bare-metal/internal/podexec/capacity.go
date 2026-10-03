@@ -16,8 +16,27 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
+// holds says a container in this engine state still holds what its labels request. Every
+// container that exists does, paused, restarting, dead or in a state nobody thought of, except
+// one whose command has ended: that one has given back its memory and its devices, and what it
+// wrote is counted from the filesystem.
+func holds(state string) bool {
+	return state != "exited" && state != "stopped"
+}
+
+// live says the container's command runs or can still run, so the reconcile pass compares it
+// with desired state and stops it when it is no longer wanted. Any other container is only
+// reported and, once undesired, removed.
+func live(state string) bool {
+	switch state {
+	case "running", "created", "paused", "restarting":
+		return true
+	}
+	return false
+}
+
 // runningRequests sums the resource requests recorded (as labels, at creation time) on every
-// currently running/pending managed container — the bare-node analogue of k8sexec summing pod
+// managed container that holds them — the bare-node analogue of k8sexec summing pod
 // Resources.Requests for pods already assigned to a node. There is no separate bookkeeping
 // store: the containers themselves are the record (important.md #4).
 type runningRequests struct {
@@ -61,7 +80,7 @@ func sumRequests(ops map[string]operation, containers []containerInfo) runningRe
 		if _, busy := ops[c.Labels[LabelExperimentID]]; busy {
 			continue
 		}
-		if c.State != "running" && c.State != "created" {
+		if !holds(c.State) {
 			continue
 		}
 		claims = append(claims, c)
@@ -102,7 +121,7 @@ func requestLabel(c containerInfo, key string) (int64, error) {
 }
 
 // GetLiveCPUCapacity reports this node's real, current CPU-core capacity: total logical cores
-// minus every running/pending managed container's recorded request.
+// minus the recorded request of every managed container that holds it.
 func (e *Executor) GetLiveCPUCapacity(ctx context.Context) (available, total float64, err error) {
 	requests, err := e.sumRunningRequests(ctx)
 	if err != nil {
@@ -329,7 +348,7 @@ func (p *passExecutor) GetNodeTotalCapacity(ctx context.Context) (map[string]map
 
 // devicesInUseExcluding returns the set of host device paths (case-folded, matching the
 // case-insensitive comparison already used by GetLiveAcceleratorCapacitySnapshot above) actually
-// bound to a running/pending managed container or held by an operation in flight, skipping
+// bound to a managed container that holds them (holds) or held by an operation in flight, skipping
 // excludeExperimentID's own: counting a job's devices against its own placement would move it to
 // a different device every pass, flip its spec hash and recreate it forever.
 //
@@ -358,7 +377,7 @@ func (e *Executor) devicesInUseExcluding(ctx context.Context, excludeExperimentI
 		if excludeExperimentID != "" && c.Labels[LabelExperimentID] == excludeExperimentID {
 			continue
 		}
-		if c.State != "running" && c.State != "created" {
+		if !holds(c.State) {
 			continue
 		}
 		resp, err := e.docker.ContainerInspect(ctx, c.ID, client.ContainerInspectOptions{})
