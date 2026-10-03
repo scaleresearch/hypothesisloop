@@ -58,6 +58,12 @@ def _code_sections() -> dict[str, str]:
     return sections
 
 
+# Said once, to every role. Agents ended turns with `true` or an `echo` and waited for a job in
+# sleep loops around `hl job status`: ending the turn is the one way to wait.
+_EVERY_ROLE = ("\nTo wait, reply with no command in it: your turn ends, and the next update starts another. "
+               "An error from `hl` is signal: do what it says.")
+
+
 def system_prompt(cfg: config.Config, rules: str, commands: str, repository_url: str, workdir: str) -> str:
     values = dict(rules=rules.strip(), hl_commands=commands, platform_experiment_id=cfg.platform_experiment_id,
                   repository_url=repository_url, workdir=workdir)
@@ -75,7 +81,7 @@ def system_prompt(cfg: config.Config, rules: str, commands: str, repository_url:
         values.update(agent_id=cfg.agent_id, flavor=cfg.flavor, hyperparameters=json.dumps(cfg.hyperparameters),
                       flavor_brief=(_PROMPTS_DIR / "flavors" / f"{cfg.flavor}.md").read_text().strip())
         values.update(start=code["start_researcher"].format(**values))
-    return (_PROMPTS_DIR / template).read_text().format(**values, **{name: code[name].format(**values) for name in sections})
+    return (_PROMPTS_DIR / template).read_text().format(**values, **{name: code[name].format(**values) for name in sections}) + _EVERY_ROLE
 
 
 def install_signal_handler() -> list:

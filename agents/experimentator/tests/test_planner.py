@@ -43,9 +43,12 @@ class PlannerPromptTest(unittest.TestCase):
         self.assertIn("2 unless plainly more, never above the draft's `max_agents`, a ceiling", flat)
         self.assertNotIn("Every agent competes", flat)
         # Directions like "sweep num_workers, try 1, 2, 4, 8, 16 and 32" made each researcher's
-        # graph one root holding a whole sweep: a direction is a way to the goal, and its
-        # researcher splits it into claims.
-        self.assertIn("One researcher per approach, a mechanism and no list of values: 2 unless plainly more", flat)
+        # graph one root holding a whole sweep. The help of propose, listed here, says a
+        # direction is a mechanism and never a list of values.
+        self.assertIn("One researcher per approach: 2 unless plainly more", flat)
+        self.assertNotIn("list of values", flat)
+        # A machine kept after its answer gets a revision as its next update.
+        self.assertIn("are sent a revision, which can arrive as an update after your answer, read `hl platform-experiments get`", flat)
         for word in ("One ranked metric that is the goal itself", "role `constraint`",
                      "With revisions, the last one is what the person wants now"):
             self.assertIn(word, flat)
@@ -67,14 +70,15 @@ class PlannerPromptTest(unittest.TestCase):
         # and is refused for one no job could be submitted with.
         self.assertIn("the accelerator type, its count per job and the `image`", flat)
         # What one node of a job asks for was prose of the brief, which the baseline agent
-        # copied into the job spec. The proposal states it as fields, and `hl repo init` writes them.
-        self.assertIn("`cpu`, `memory`, `storage`: one node's.", flat)
-        self.assertNotIn("cores per job", flat)
+        # copied into the job spec. The proposal states it as fields, which the help of propose
+        # shows, and `hl repo init` writes them.
+        for said_there in ("cores per job", "`memory`"):
+            self.assertNotIn(said_there, flat)
         self.assertNotIn("job_images", flat)
         self.assertIn("prescribe no install command: you have run none", flat)
         for absent in ("hl repo init", "hl job submit", "hl job summary", "$WORKLOAD_SAMPLES", "hl quota"):
             self.assertNotIn(absent, flat)
-        self.assertLess(len(prompt.encode()), 4_377)
+        self.assertLess(len(prompt.encode()), 4_278)
         # hl's own listing named `quota`, which answers a planner 404, and no `repo init`, whose
         # files one guessed at.
         self.assertEqual(listed(planner()), [["platform-experiments", "propose"], ["platform-experiments", "decline"], ["repo", "init"]])
@@ -93,10 +97,10 @@ class PlannerPromptTest(unittest.TestCase):
     # known yet, said as such.
     def test_the_proposal_states_an_estimated_size(self):
         flat = render(planner())[1]
-        self.assertIn("`sizing_reason`: nothing has run; the trial length is read or assumed", flat)
+        self.assertIn("`sizing_reason`: the trial length is read or assumed", flat)
         self.assertIn("the budget is a cap", flat)
         self.assertIn("the run does not start if the budget cannot cover one trial for each researcher", flat)
-        self.assertIn("`accelerator_type`: a line of `hl capacity` with available > 0", flat)
+        self.assertIn("`accelerator_type`: one with available > 0", flat)
 
     # A gate whose bound the control fails disqualifies everyone, and no baseline exists to
     # check a proposed bound against.
@@ -132,7 +136,10 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertIn('`hl platform-experiments agents finish --reason "baseline measured by job ID"`', flat)
         self.assertNotIn("Every agent competes", flat)
         self.assertNotIn("hl platform-experiments propose", flat)
-        self.assertLess(len(prompt.encode()), 3_320)
+        # Its finish is the hand-over: the platform declares the job and starts the run.
+        self.assertIn("When you finish, the platform declares your completed job the baseline and starts the run", flat)
+        self.assertNotIn("coordinator has declared", flat)
+        self.assertLess(len(prompt.encode()), 3_292)
         self.assertEqual(listed(baseline_agent()), [[], ["job"], ["job", "submit"], ["repo"]])
 
     # It reads where its code goes in the words the researchers' briefing uses.
@@ -165,7 +172,7 @@ class BaselinePromptTest(unittest.TestCase):
         # Told "H a generous guess", one asked 0.25 h of a share that held 0.13 h and was
         # refused. Nothing is measured before the baseline, so the platform gives its job the
         # largest estimate the agent's quota admits and the briefing names no flag for it.
-        self.assertIn("The run: `hl job submit .hypothesisloop/job.yaml`. A reply with no command", flat)
+        self.assertIn("The run: `hl job submit .hypothesisloop/job.yaml`. A job that failed", flat)
         self.assertNotIn("--estimated-duration-hours", flat)
         self.assertNotIn("guess", flat)
         # The repository template supplies the helper, so no briefing sends an agent to the samples.
@@ -179,15 +186,6 @@ class BaselinePromptTest(unittest.TestCase):
         flat = render(baseline_agent())[1]
         self.assertNotIn("--hypothesis", flat)
         self.assertNotIn("--theory", flat)
-
-    def test_waiting_for_the_baseline_is_ending_the_turn(self):
-        flat = render(baseline_agent())[1]
-        # Agents of one run ended seven turns with `true` or an `echo`, each between what they
-        # had written and the one-line reply the briefing asked a turn to end with.
-        self.assertIn("A reply with no command in it ends your turn, and the next update starts another. "
-                      "A job that failed", flat)
-        self.assertNotIn("hl watch", flat)
-        self.assertIn("A reply with no command in it ends your turn, and a revision starts another.", render(planner())[1])
 
     # A baseline that cannot be measured must not hold the experiment open until its limit.
     # Told to give up after three failed jobs, one finished with the fix for the third already

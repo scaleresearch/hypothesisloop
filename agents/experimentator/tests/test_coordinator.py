@@ -84,34 +84,33 @@ class BriefingTest(unittest.TestCase):
     def test_it_acts_through_hl_and_names_no_host_tool_and_no_http_endpoint(self):
         prompt = self.render()
         self.assertIsNone(re.search(r"podman|kubectl|\bmake\b|docker|(GET|POST|PUT) /|\$API_URL|curl", prompt))
-        self.assertLess(len(prompt.encode()), 7_476)
+        self.assertLess(len(prompt.encode()), 7_049)
 
     # A coordinator of an accepted draft read "not started" and waited 36 minutes for a start
-    # that only its own baseline agent could bring. The `status_reason` of an open experiment
-    # now names the baseline agent to add and the declaration, each with its command.
-    def test_its_next_step_on_an_open_experiment_is_read_from_status_reason(self):
+    # that only its own baseline agent could bring. The accept now creates that agent, the
+    # platform declares the job it finishes with and starts the run, and `status_reason` says
+    # who acts: a coordinator has a step before the run only where it names the coordinator,
+    # and its message carries the step with its command.
+    def test_before_the_run_it_acts_only_where_status_reason_waits_for_it(self):
         flat = " ".join(self.render().split())
         self.assertIn("`status_reason` (while `open`, your next step and its command)", flat)
-        self.assertIn("The run's duration counts from the start the platform gives it once a valid baseline is declared, "
-                      "and an experiment still `open` at its `baseline_due_at` is closed", flat)
-        # One wrote "proceeding" of a declared baseline whose run had no researcher to start for.
-        self.assertIn("Not started, `status_reason` says what the start waits for: a researcher it lacks you add", flat)
-        # One copied the job's code_ref into the brief by hand, got it wrong and waited. The
-        # declaration is the job alone, and a started run whose machines are coming up is waited through.
-        self.assertIn("declare it, `hl platform-experiments update --baseline-job JOB`. The platform writes it into the brief "
-                      "and answers whether the run started", flat)
-        self.assertIn("`agents_starting` is a started run whose machines boot: wait", flat)
-        for filled_by_no_coordinator in ("`code_ref:`", "`measured:`", "`BASELINE` block"):
-            self.assertNotIn(filled_by_no_coordinator, flat)
-        self.assertNotIn("starts_at", flat)
+        self.assertIn("The platform declares the job the baseline agent finishes with and starts the run, whose duration counts from "
+                      "the first researcher at work. An experiment still `open` at its `baseline_due_at` is closed", flat)
+        self.assertIn("When `status_reason.waits_for` reads `coordinator`, its message is your step.", flat)
+        # One wrote "proceeding" of a declared baseline whose run had no researcher to start for,
+        # and a started run whose machines are coming up is waited through.
+        self.assertIn("Any other `waits_for` you wait through, `agents_starting` too: a started run whose machines boot", flat)
+        for said_by_status_reason in ("--baseline-job", "--role baseline", "`code_ref:`", "`measured:`", "`BASELINE` block", "starts_at",
+                                      "baseline_undeclared", "baseline_required"):
+            self.assertNotIn(said_by_status_reason, flat)
 
     # One removed the owner's researcher to "match max_agents" and cancelled the baseline
-    # agent's queued job itself. Both are refused now, each with whose it is.
-    def test_it_changes_nothing_of_the_owners_and_nothing_of_an_agents(self):
+    # agent's queued job itself. Both are refused now, each with whose it is, as a change of
+    # what is the owner's is.
+    def test_it_changes_nothing_of_an_agents(self):
         flat = " ".join(self.render().split())
-        self.assertIn("What the run may spend, how long it lasts and its gate are the owner's", flat)
         self.assertIn("An agent's jobs, hypotheses and branches are the agent's: what is wrong with a job you say in the brief", flat)
-        for said_there in ("agents remove", "--help", "refuses", "--role baseline", "baseline_breaks_constraint"):
+        for said_there in ("agents remove", "--help", "refuses", "max_agents", "one per call", "are the owner's"):
             self.assertNotIn(said_there, flat)
 
     # Three baseline jobs failed for what the brief said of the image before a coordinator
@@ -133,7 +132,7 @@ class BriefingTest(unittest.TestCase):
         self.assertIn("Rewrite it as your last act before `hl platform-experiments close`: what was found, in the past tense, "
                       "with nothing in it still waiting or under way", flat)
         self.assertIn("It opens with the `status` that `get` shows now, and of an `open` experiment its `status_reason`: no run is under way", flat)
-        self.assertIn("A reply with no command in it ends your turn, and the next update starts another.", flat)
+        self.assertIn("To wait, reply with no command in it: your turn ends, and the next update starts another.", flat)
         for form in ("one line", "call no tool", "echo"):
             self.assertNotIn(form, flat)
         self.assertEqual(updates.message([{"kind": "comment.new", "subject": "hyp-1"}], ""), "Platform updates:\ncomment.new hyp-1")

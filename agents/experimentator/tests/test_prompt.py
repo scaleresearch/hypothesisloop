@@ -33,16 +33,29 @@ class SystemPromptTest(unittest.TestCase):
                           "implementation of a claim, yours or another agent's, is your branch of its hypothesis", flat)
             self.assertNotIn("git checkout -b", flat)
             self.assertNotIn("hl/pe-1/agent-a", flat)
-            self.assertLess(len(prompt.encode()), 7_570)
+            self.assertLess(len(prompt.encode()), 6_912)
 
     def test_why_its_jobs_wait_for_the_start_is_read_from_status_reason(self):
         self.assertIn("with its `status_reason`, `metrics`, `stages` and `current_stage`", " ".join(self.render("generalist").split()))
 
-    # A submit answers with the estimate it applied, so the briefing names no flag for it.
-    def test_a_trial_leaves_its_estimate_to_the_one_measured_on_the_baseline(self):
+    # The help of hl job submit says how the command gets the commit and a package, what a secret
+    # is, which estimate a job holds and what a submit answers, and the base job spec carries the
+    # command. The briefing points there once.
+    def test_what_a_job_spec_means_is_left_to_the_help_of_submit(self):
         prompt = " ".join(self.render("generalist").split())
-        self.assertIn("each holds its estimate of your quota until it ends, the one measured on the baseline unless you state another.", prompt)
-        self.assertNotIn("--estimated-duration-hours", prompt)
+        self.assertIn("`hl job submit --help` has the rest of a spec, to read before you change one", prompt)
+        self.assertIn("Jobs run in parallel while their estimates fit your quota.", prompt)
+        for said_there in ("--estimated-duration-hours", "hl-clone", "pip install", "--secret-env", "hl capacity", "measured on the baseline"):
+            self.assertNotIn(said_there, prompt)
+
+    # A planner is told a direction is a mechanism, the hyperparameter-search brief called the
+    # same keys starting values, and this briefing left their meaning to the agent.
+    def test_hyperparameters_are_the_direction_the_agent_was_given(self):
+        for flavor in FLAVORS:
+            prompt = " ".join(self.render(flavor).split())
+            self.assertIn("Your `hyperparameters` are the direction whoever added you gave you: the approach you explore, "
+                          "each claim under it a hypothesis of yours.", prompt)
+            self.assertEqual(prompt.count("`hyperparameters`"), 1, flavor)
 
     # One config differed up to 2.3x between rented hosts, and researchers who compared across
     # them found fp16 slower than fp32. Told `on host N`, a researcher on a cluster of one node,
@@ -55,21 +68,23 @@ class SystemPromptTest(unittest.TestCase):
         for worded_for_rented in ("on host N", "rented"):
             self.assertNotIn(worded_for_rented, prompt)
 
-    # In a platform outage one researcher ran `hl quota` in sleep loops and another pushed five
-    # times. The harness wakes an agent that ended its turn once its polls are answered again,
-    # and neither hl's refusal nor git's says so.
-    def test_a_platform_that_fails_is_waited_for_with_the_turn_ended(self):
-        self.assertIn("\"the platform could not be reached\", from `hl` or in a failed `git push`, is the platform failing: "
-                      "stop there, and an update wakes you to retry once it is back.", " ".join(self.render("generalist").split()))
-
-    # Agents waited for a job in sleep loops around `hl job status`. The listed help of hl names
-    # the one command that waits, and a session is stored while its turn is in flight, so no
-    # briefing forbids a wait.
-    def test_a_turn_ends_with_the_last_reply_and_no_wait_is_forbidden(self):
-        prompt = " ".join(self.render("generalist").split())
-        self.assertIn("A reply with no command in it ends your turn, and the next update starts another.", prompt)
-        for forbidden in ("Never poll", "sleep", "hl watch"):
-            self.assertNotIn(forbidden, prompt)
+    # Agents waited for a job in sleep loops around `hl job status`, and in a platform outage one
+    # ran `hl quota` in sleep loops and another pushed five times. Ending the turn is the one way
+    # to wait, said once to every role by the harness, and hl's own line says what a platform
+    # that could not be reached asks of the agent.
+    def test_every_role_is_told_once_that_ending_the_turn_is_how_it_waits(self):
+        coordinator = SimpleNamespace(agent_id="coordinator", flavor="coordinator", role="", platform_experiment_id="pe-1")
+        planner = SimpleNamespace(agent_id="ag-p", flavor="planner", role="planner", platform_experiment_id="pe-1")
+        baseline = SimpleNamespace(agent_id="ag-b", flavor="generalist", role="baseline", platform_experiment_id="pe-1", hyperparameters={})
+        prompts = [self.render("generalist"), *(core.system_prompt(cfg, "RULES\n", "COMMANDS", "https://github.com/acme/model.git", "/agent/workspace")
+                                                for cfg in (coordinator, planner, baseline))]
+        for prompt in prompts:
+            self.assertTrue(prompt.endswith("\n\nTo wait, reply with no command in it: your turn ends, and the next update starts another. "
+                                            "An error from `hl` is signal: do what it says."), prompt[-300:])
+            for said_once in ("your turn", "An error from `hl`"):
+                self.assertEqual(prompt.count(said_once), 1)
+            for forbidden in ("Never poll", "sleep", "hl watch", "could not be reached"):
+                self.assertNotIn(forbidden, prompt)
 
     # Four of six hosted agents wrote a job's result twice, as its summary and again as a comment
     # headed "Finding:", because the briefing used both words for it.
@@ -86,7 +101,7 @@ class SystemPromptTest(unittest.TestCase):
         self.assertIn("Every *hypothesis* is one falsifiable claim", prompt)
         self.assertIn("the root's children are the distinct approaches to the objective, each a different mechanism", prompt)
         self.assertIn("Before adding a root child, read the existing ones: take a mechanism none of them has, or go under one", prompt)
-        self.assertIn("with `--related` for a combination's second parent", prompt)
+        self.assertIn("A refinement `--builds-on` the most specific hypothesis it refines.", prompt)
         self.assertIn("a sweep is one hypothesis only while it tests one claim, and its winning configuration, once more work "
                       "builds on it, is registered as a child, so the best result is a node", prompt)
         # Both researchers of one run registered the winner as a child with no job of its own:
@@ -105,9 +120,9 @@ class SystemPromptTest(unittest.TestCase):
     # update that ends a job its quota with what a later stage raises it to.
     def test_the_briefing_leaves_to_the_platform_what_the_platform_says_when_it_matters(self):
         prompt = " ".join(self.render("generalist").split())
-        for said_there in ("--help", "is refused", "`memory`", "job.held", "402", "next_stage", "hl job summary",
-                           "--against", "--contradicts", "--distinct-from", "git push` needs", "pip install X` and",
-                           "hl hypothesis query", "experiment_closed", "agent_held"):
+        for said_there in ("is refused", "`memory`", "job.held", "402", "next_stage", "hl job summary",
+                           "--against", "--contradicts", "--distinct-from", "--related", "git push` needs",
+                           "hl hypothesis query", "experiment_closed", "agent_held", "are cut"):
             self.assertNotIn(said_there, prompt)
 
     # Every agent's commits carried the image's one name, so a branch's history did not say who
