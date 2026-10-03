@@ -218,8 +218,10 @@ func refuseUpdate(status int, reason, format string, args ...any) error {
 // planner's proposal fills, take no patch.
 //
 // baseline_job_id declares the baseline. An open experiment that has one, or is given one, is
-// held as patched to what that job did (checkBaseline), so its brief, its metrics and its budget
-// cannot leave the baseline behind before it starts.
+// held as patched to what that job did (checkBaseline), so its metrics and its budget cannot
+// leave the baseline behind before it starts, and its description is given what the job is and
+// measured (baselineBlock). Stored with a baseline, it is started at once when nothing else
+// is missing (StartIfReady), and answered as that left it.
 func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patch PlatformExperimentPatch) (*domain.PlatformExperiment, error) {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
@@ -262,6 +264,10 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 		patched.Metrics = *patch.Metrics
 	}
 	if patch.ReportIntervalSeconds != nil {
+		// A create that leaves it out takes the platform's setting. A patch that carries it states it.
+		if *patch.ReportIntervalSeconds <= 0 {
+			return nil, refuseUpdate(422, "invalid_experiment", "report_interval_seconds must be positive: how often a job really reports. Leave it out to keep %d", pe.ReportIntervalSeconds)
+		}
 		patched.ReportIntervalSeconds = *patch.ReportIntervalSeconds
 	}
 	if patch.StartsAt != nil {
@@ -277,8 +283,12 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	if patch.BaselineJobID != nil {
 		patched.BaselineJobID = *patch.BaselineJobID
 	}
+	// The block that hands the baseline over is the platform's: a patch of the description
+	// neither writes it nor loses it.
+	authored, _ := splitMeasuredBaseline(patched.Description)
+	_, measured := splitMeasuredBaseline(pe.Description)
 	checked, err := s.validate(CreatePlatformExperimentRequest{
-		Name: patched.Name, Description: patched.Description,
+		Name: patched.Name, Description: authored,
 		BudgetAcceleratorHours: patched.BudgetAcceleratorHours, MaxAgents: patched.MaxAgents,
 		MaxConcurrentAccelerators: patched.MaxConcurrentAccelerators, Metrics: patched.Metrics,
 		ReportIntervalSeconds: patched.ReportIntervalSeconds, StartsAt: patched.StartsAt, DurationHours: patched.DurationHours,
@@ -300,12 +310,45 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 		if err := budgetCoversTrials(&patched, baseline.Job); err != nil {
 			return nil, err
 		}
+		measured = baselineBlock(baseline, patched.Metrics)
 	}
+	patched.Description = withMeasuredBaseline(patched.Description, measured)
 	pe = &patched
 	if err := s.store.UpdatePlatformExperiment(ctx, pe, expectedStatus); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Update: %w", err)
 	}
-	return pe, nil
+	if pe.Status != domain.PlatformExpOpen || pe.BaselineJobID == "" {
+		return pe, nil
+	}
+	// Nothing but the baseline may have been missing: the run starts in the request that
+	// declared it, and one that still waits says for what in its status_reason.
+	if err := s.StartIfReady(ctx, pe.ID); err != nil {
+		return nil, err
+	}
+	return s.stored(ctx, pe.ID)
+}
+
+// StartIfReady starts the open platform experiment id when nothing is missing, in the request
+// that supplied what was: a declared baseline or a researcher. One that still waits is left open.
+// The sweep starts what only time brings: a starts_at that arrives.
+func (s *PlatformExperimentsService) StartIfReady(ctx context.Context, id string) error {
+	pe, err := s.stored(ctx, id)
+	if err != nil {
+		return err
+	}
+	if pe.Status != domain.PlatformExpOpen {
+		return nil
+	}
+	_, err = s.start(ctx, pe, time.Now().UTC())
+	var waiting *api.Refusal
+	if errors.As(err, &waiting) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("platform_experiments.StartIfReady: %w", err)
+	}
+	s.logger.Info("started platform experiment", zap.String("platform_experiment_id", id))
+	return nil
 }
 
 // maxAgentsReached refuses a researcher past max_agents, which counts researchers and nothing else.
@@ -457,7 +500,7 @@ func draftReason(pe *domain.PlatformExperiment) *domain.StatusReason {
 
 const (
 	addBaselineAgent = "`hl platform-experiments agents add --hosted --role baseline`"
-	declareBaseline  = "`hl platform-experiments update --baseline-job JOB --description-file brief.md`, the brief's BASELINE block naming JOB and its code_ref"
+	declareBaseline  = "`hl platform-experiments update --baseline-job JOB`, which writes the job, its code_ref and what it measured into the description and starts the run"
 )
 
 // waiting is why the open pe, whose roster is signups, is not running yet: the reason and the
@@ -471,7 +514,7 @@ func (s *PlatformExperimentsService) waiting(ctx context.Context, pe *domain.Pla
 	case err != nil:
 		return nil, err
 	}
-	return &domain.StatusReason{Reason: "starting", Message: "the baseline is declared and the platform starts the run within a minute"}, nil
+	return &domain.StatusReason{Reason: "starting", Message: "nothing is missing and the platform starts the run within a minute"}, nil
 }
 
 // nextStep is what reader does about an open pe that waits for reason, a sentence that ends in
@@ -761,9 +804,10 @@ func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 }
 
 // SweepAutoStart starts every open platform experiment that is to be started: its baseline is
-// declared, its starts_at is absent or past, and it has a researcher and budget left for one. It
-// is the one way a run starts. One that is not startable waits, saying why in its status_reason
-// (Describe), until SweepExpired closes it.
+// declared, its starts_at is absent or past, and it has a researcher and budget left for one.
+// The request that declares the baseline or adds the researcher starts it itself (StartIfReady),
+// so what the sweep brings is time: a starts_at that arrives. One that is not startable waits,
+// saying why in its status_reason (Describe), until SweepExpired closes it.
 func (s *PlatformExperimentsService) SweepAutoStart(ctx context.Context) error {
 	now := time.Now().UTC()
 	pes, err := s.store.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpOpen)

@@ -20,8 +20,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-const baselineBrief = "Train train.py and report val_loss.\nBASELINE\n  config: lr 0.1\n  code_ref: git://seed@abc\n  metric: val_loss = 1.8\n  measured: job-1"
-
 func openExperiment() *domain.PlatformExperiment {
 	bound := 1.0
 	return &domain.PlatformExperiment{
@@ -78,17 +76,28 @@ func declareAPI(t *testing.T, pe *domain.PlatformExperiment, baseline *Baseline,
 
 var theCoordinator = auth.Principal{Kind: auth.KindCoordinator, OrgIDs: []string{"org-a"}, ProjectID: "prj-a", PlatformExperimentID: "pe-1"}
 
+// theMeasuredBlock is what the platform writes into the brief of an experiment whose baseline is
+// measuredBaseline.
+const theMeasuredBlock = "\n\n" + measuredBaselineHeader + "\njob: job-1\ncode_ref: git://seed@abc\nmeasured: val_loss = 1.8, exact_match = 1"
+
 // A baseline was something only a draft's planner could give an experiment, inside its proposal.
-// It is declared on the open experiment, by its coordinator or its owner, with the brief that
-// hands it over, and the platform reads the job itself before it stores anything.
+// It is declared on the open experiment, by its coordinator or its owner, and the platform reads
+// the job itself before it stores anything. Declaring was the job's id and a brief rewritten by
+// hand to name the job and its code_ref, refused when either was missing: it is the job's id
+// alone, and the platform writes what it holds of the job into the brief.
 func TestABaselineIsDeclaredOnAnOpenExperimentAndCheckedAgainstTheJob(t *testing.T) {
-	declaration := map[string]any{"description": baselineBrief, "baseline_job_id": "job-1"}
+	declaration := map[string]any{"baseline_job_id": "job-1"}
 	for name, caller := range map[string]auth.Principal{"its coordinator": theCoordinator, "its owner": auth.Principal(ownerOfA)} {
 		store, patch := declareAPI(t, openExperiment(), measuredBaseline(), caller)
 		code, out := patch(declaration)
 		stored := store.created[0]
-		if code != http.StatusOK || stored.BaselineJobID != "job-1" || math.Abs(stored.JobEstimatedDurationHours-0.3) > 1e-9 || stored.Description != baselineBrief {
-			t.Fatalf("%s: got = %d %v, stored baseline %q with an estimate of %g, want job-1 and one and a half times its 0.2 hours", name, code, out, stored.BaselineJobID, stored.JobEstimatedDurationHours)
+		if code != http.StatusOK || stored.BaselineJobID != "job-1" || math.Abs(stored.JobEstimatedDurationHours-0.3) > 1e-9 || stored.Description != openExperiment().Description+theMeasuredBlock {
+			t.Fatalf("%s: got = %d %v, stored baseline %q with an estimate of %g and the brief %q, want job-1, one and a half times its 0.2 hours and the brief with what the job measured", name, code, out, stored.BaselineJobID, stored.JobEstimatedDurationHours, stored.Description)
+		}
+		// Declared again with a brief that carries the block, the brief holds it once.
+		if code, _ := patch(map[string]any{"baseline_job_id": "job-1", "description": stored.Description + "\n\nA trial runs train.py."}); code != http.StatusOK ||
+			store.created[0].Description != openExperiment().Description+"\n\nA trial runs train.py."+theMeasuredBlock {
+			t.Fatalf("%s: declared again: got = %d, brief %q, want the block once, after what its author wrote", name, code, store.created[0].Description)
 		}
 		if estimate, _ := out["job_estimated_duration_hours"].(float64); out["baseline_job_id"] != "job-1" || math.Abs(estimate-0.3) > 1e-9 {
 			t.Errorf("%s: answered %v and %v, want the baseline and the estimate", name, out["baseline_job_id"], out["job_estimated_duration_hours"])
@@ -100,14 +109,12 @@ func TestABaselineIsDeclaredOnAnOpenExperimentAndCheckedAgainstTheJob(t *testing
 		change func(*Baseline, *domain.PlatformExperiment)
 		reason string
 	}{
-		"a job that does not exist":       {map[string]any{"description": baselineBrief, "baseline_job_id": "job-2"}, nil, "no_baseline"},
-		"no job named":                    {map[string]any{"description": baselineBrief, "baseline_job_id": ""}, nil, "no_baseline"},
+		"a job that does not exist":       {map[string]any{"baseline_job_id": "job-2"}, nil, "no_baseline"},
+		"no job named":                    {map[string]any{"baseline_job_id": ""}, nil, "no_baseline"},
 		"a researcher's job":              {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.OwnerRole = domain.SignupRoleCompetitor }, "no_baseline"},
 		"a job of another experiment":     {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Job.PlatformExperimentID = "pe-other" }, "no_baseline"},
 		"a job that failed":               {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Job.Status = domain.StatusFailed }, "baseline_not_completed"},
 		"nothing filed":                   {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Finding = false }, "baseline_without_finding"},
-		"a brief left as it was":          {map[string]any{"baseline_job_id": "job-1"}, nil, "brief_without_baseline"},
-		"a brief without the commit":      {map[string]any{"description": "BASELINE measured: job-1", "baseline_job_id": "job-1"}, nil, "brief_without_baseline"},
 		"a metric the job never reported": {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { delete(b.Reported, "val_loss") }, "baseline_missing_metric"},
 		"a gate the baseline fails":       {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Reported["exact_match"] = 0.97 }, "baseline_breaks_constraint"},
 		// The baseline cost 0.4 and a trial holds 0.6, its estimate: a budget of 1 covered the
@@ -126,10 +133,13 @@ func TestABaselineIsDeclaredOnAnOpenExperimentAndCheckedAgainstTheJob(t *testing
 	}
 }
 
-// Its metrics, its budget and its brief are what the baseline was checked against. An owner who
-// changes one after the declaration is held to the same job, so no experiment starts on a
-// baseline its definition has left behind.
-func TestAnOpenExperimentIsHeldToItsDeclaredBaselineByEveryLaterChange(t *testing.T) {
+// Its metrics and its budget are what the baseline was checked against. An owner who changes one
+// after the declaration is held to the same job, so no experiment starts on a baseline its
+// definition has left behind. Its brief keeps what the platform wrote of the job whatever a
+// later patch of it says. The run started up to a minute after the last thing it waited for: it
+// starts in the request that supplies it.
+func TestAnOpenExperimentIsHeldToItsDeclaredBaselineAndStartsOnceNothingIsMissing(t *testing.T) {
+	const baselineBrief = "Train train.py and report val_loss." + theMeasuredBlock
 	declared := func() *domain.PlatformExperiment {
 		pe := openExperiment()
 		pe.Description, pe.BaselineJobID, pe.JobEstimatedDurationHours = baselineBrief, "job-1", 0.3
@@ -142,7 +152,6 @@ func TestAnOpenExperimentIsHeldToItsDeclaredBaselineByEveryLaterChange(t *testin
 		"a budget one run apiece no longer fits": {map[string]any{"budget_accelerator_hours": 0.3}, "budget_below_baseline"},
 		"more researchers than the budget fits":  {map[string]any{"max_agents": 40}, "budget_below_baseline"},
 		"a metric the baseline never reported":   {map[string]any{"metrics": []map[string]any{{"key": "val_accuracy", "direction": "maximize"}}}, "baseline_missing_metric"},
-		"a brief that drops the baseline":        {map[string]any{"description": "Train train.py."}, "brief_without_baseline"},
 	} {
 		store, patch := declareAPI(t, declared(), measuredBaseline(), auth.Principal(ownerOfA))
 		code, out := patch(c.body)
@@ -161,15 +170,29 @@ func TestAnOpenExperimentIsHeldToItsDeclaredBaselineByEveryLaterChange(t *testin
 	if code, out := patch(map[string]any{"budget_accelerator_hours": 8}); code != http.StatusOK || out["status_reason"].(map[string]any)["reason"] != "no_researchers" {
 		t.Errorf("a declared experiment nobody joined: got = %d %v, want status_reason no_researchers", code, out["status_reason"])
 	}
-	store.researchers = []string{"ag-1", "ag-2"}
-	if code, out := patch(map[string]any{"budget_accelerator_hours": 9}); code != http.StatusOK || out["status_reason"].(map[string]any)["reason"] != "starting" {
-		t.Errorf("a declared experiment with its researchers: got = %d %v, want status_reason starting", code, out["status_reason"])
+	if code, _ := patch(map[string]any{"description": "The brief, rewritten."}); code != http.StatusOK || store.created[0].Description != "The brief, rewritten."+theMeasuredBlock || store.started != 0 {
+		t.Errorf("a brief that drops what the platform wrote: got = %d, brief %q, %d starts, want the block kept and no start", code, store.created[0].Description, store.started)
 	}
+	store.researchers = []string{"ag-1", "ag-2"}
 	if code, out := patch(map[string]any{"max_agents": 1}); code != http.StatusConflict || out["reason"] != "max_agents_below_researchers" || store.created[0].MaxAgents != 2 {
 		t.Errorf("max_agents under the researchers that joined: got = %d %v, want 409 max_agents_below_researchers and nothing changed", code, out)
 	}
-	if code, out := patch(map[string]any{"max_agents": 3}); code != http.StatusOK || store.created[0].MaxAgents != 3 {
-		t.Errorf("max_agents over the researchers that joined: got = %d %v, want 200", code, out)
+	if code, out := patch(map[string]any{"max_agents": 3}); code != http.StatusOK || store.created[0].MaxAgents != 3 || store.started != 1 ||
+		out["status"] != "running" || out["status_reason"].(map[string]any)["reason"] != "running" {
+		t.Errorf("a stored change with its baseline and its researchers: got = %d %v, %d starts, want 200 and the run started in this request", code, out, store.started)
+	}
+
+	// The declaration itself starts the run when a researcher already joined.
+	store, patch = declareAPI(t, openExperiment(), measuredBaseline(), theCoordinator)
+	store.researchers = []string{"ag-1"}
+	if code, out := patch(map[string]any{"baseline_job_id": "job-1"}); code != http.StatusOK || store.started != 1 || out["status"] != "running" || out["started_at"] == nil {
+		t.Errorf("declaring with a researcher joined: got = %d %v, %d starts, want the run started by the declaration", code, out, store.started)
+	}
+
+	// A patch states the report interval it carries: 0 was stored as it came.
+	store, patch = declareAPI(t, openExperiment(), nil, auth.Principal(ownerOfA))
+	if code, out := patch(map[string]any{"report_interval_seconds": 0}); code != http.StatusUnprocessableEntity || out["reason"] != "invalid_experiment" || store.created[0].ReportIntervalSeconds != 30 {
+		t.Errorf("report_interval_seconds 0: got = %d %v, stored %d, want 422 invalid_experiment and 30 kept", code, out, store.created[0].ReportIntervalSeconds)
 	}
 
 	// Once it runs the baseline is what the shares were carved after, and the brief is the
@@ -180,7 +203,8 @@ func TestAnOpenExperimentIsHeldToItsDeclaredBaselineByEveryLaterChange(t *testin
 	if code, out := patch(map[string]any{"baseline_job_id": "job-1"}); code != http.StatusConflict || out["reason"] != "experiment_running" {
 		t.Errorf("declaring on a running experiment: got = %d %v, want 409 experiment_running", code, out)
 	}
-	if code, out := patch(map[string]any{"description": "The brief, redirected."}); code != http.StatusOK || store.created[0].BaselineJobID != "job-1" || store.created[0].JobEstimatedDurationHours != 0.3 {
-		t.Errorf("a running experiment's brief: got = %d %v, want 200 with the baseline and the estimate as they were", code, out)
+	if code, out := patch(map[string]any{"description": "The brief, redirected."}); code != http.StatusOK || store.created[0].BaselineJobID != "job-1" || store.created[0].JobEstimatedDurationHours != 0.3 ||
+		store.created[0].Description != "The brief, redirected."+theMeasuredBlock {
+		t.Errorf("a running experiment's brief: got = %d %v, brief %q, want 200 with the baseline, the estimate and what the platform wrote of the job as they were", code, out, store.created[0].Description)
 	}
 }

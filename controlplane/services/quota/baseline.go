@@ -3,6 +3,7 @@ package quota
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -90,12 +91,6 @@ func checkBaseline(pe *domain.PlatformExperiment, baseline *Baseline) error {
 	if !baseline.Finding {
 		return refusedBaseline("baseline_without_finding", "baseline job %s has no finding: its agent files what it measured with `hl job summary`, so the researchers start from it", baseline.Job.ID)
 	}
-	// The brief is all a researcher reads, so one that does not hand over the baseline is refused.
-	for _, named := range [][2]string{{"job", baseline.Job.ID}, {"code_ref", baseline.Job.CodeRef}} {
-		if named[1] == "" || !strings.Contains(pe.Description, named[1]) {
-			return refusedBaseline("brief_without_baseline", "the description does not name the baseline's %s %s: its BASELINE block states config, code_ref, metric and measured, so that a researcher starts from what ran", named[0], named[1])
-		}
-	}
 	var missing []string
 	for _, metric := range pe.Metrics {
 		value, reported := baseline.Reported[metric.Key]
@@ -115,6 +110,53 @@ func checkBaseline(pe *domain.PlatformExperiment, baseline *Baseline) error {
 		return refusedBaseline("baseline_missing_metric", "baseline job %s reported no %s: every metric of the platform experiment must be one the harness really reports", baseline.Job.ID, strings.Join(missing, ", "))
 	}
 	return nil
+}
+
+// measuredBaselineHeader opens the block of the description the platform writes: what the
+// declared baseline job is, from the platform's own records. The brief is all a researcher reads,
+// and a coordinator that copied these lines into it by hand got one of them wrong and waited.
+const measuredBaselineHeader = "MEASURED BASELINE (written by the platform from the declared job)"
+
+// baselineBlock is the block for baseline, with the last value it reported on each of metrics
+// in declared order.
+func baselineBlock(baseline *Baseline, metrics []domain.MetricDefinition) string {
+	measured := make([]string, 0, len(metrics))
+	for _, metric := range metrics {
+		if value, reported := baseline.Reported[metric.Key]; reported {
+			measured = append(measured, fmt.Sprintf("%s = %g", metric.Key, value))
+		}
+	}
+	return strings.Join([]string{measuredBaselineHeader, "job: " + baseline.Job.ID, "code_ref: " + baseline.Job.CodeRef,
+		"measured: " + strings.Join(measured, ", ")}, "\n")
+}
+
+// splitMeasuredBaseline parts description into what its author wrote and the block the platform
+// wrote into it, empty when it holds none. The block runs from its header to the next empty line.
+func splitMeasuredBaseline(description string) (authored, block string) {
+	lines := strings.Split(description, "\n")
+	start := slices.IndexFunc(lines, func(line string) bool { return strings.TrimSpace(line) == measuredBaselineHeader })
+	if start < 0 {
+		return description, ""
+	}
+	end := start
+	for end < len(lines) && strings.TrimSpace(lines[end]) != "" {
+		end++
+	}
+	before, after := strings.TrimSpace(strings.Join(lines[:start], "\n")), strings.TrimSpace(strings.Join(lines[end:], "\n"))
+	authored = before
+	if before != "" && after != "" {
+		authored += "\n\n"
+	}
+	return authored + after, strings.Join(lines[start:end], "\n")
+}
+
+// withMeasuredBaseline is description ending in block, in place of any block it held.
+func withMeasuredBaseline(description, block string) string {
+	authored, _ := splitMeasuredBaseline(description)
+	if block == "" {
+		return authored
+	}
+	return authored + "\n\n" + block
 }
 
 // budgetCoversTrials refuses a budget that cannot hold one trial for each researcher. A trial is

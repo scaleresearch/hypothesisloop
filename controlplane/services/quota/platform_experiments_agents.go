@@ -154,10 +154,19 @@ func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID
 			return nil, err
 		}
 	}
+	join := s.spawn
 	if req.AgentID != "" {
-		return s.joinRegistered(ctx, platformExpID, req, signup)
+		join = s.joinRegistered
 	}
-	return s.spawn(ctx, platformExpID, req, signup)
+	joined, err := join(ctx, platformExpID, req, signup)
+	if err != nil || !signup.SharesBudget() {
+		return joined, err
+	}
+	// A researcher may be all a declared baseline still waited for.
+	if err := s.StartIfReady(ctx, platformExpID); err != nil {
+		return nil, err
+	}
+	return joined, nil
 }
 
 // agentNameTaken refuses an agent whose name another agent of the platform experiment carries.
@@ -381,7 +390,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		OperationID: "add-platform-experiment-agent", Method: "POST", Path: "/platform-experiments/{id}/agents",
 		Summary: "Add one agent to a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
-		Description: "The only way an agent joins, and only while the experiment is open: the platform starts the run once its baseline is declared, and quota is divided then over the agents present, those of role baseline apart. " +
+		Description: "The only way an agent joins, and only while the experiment is open: the platform starts the run once its baseline is declared, and quota is divided then over the agents present, those of role baseline apart. Adding the researcher a declared baseline still waited for starts the run in this request. " +
 			"Creates one agent with a generated id and signs it up; or, with agent_id, signs up that registered agent. For several agents, call once for each. " +
 			"An agent's name is unique in the platform experiment and, when the platform gives it, says its role: 409 agent_name_taken for a stated name, or a registered agent's, that another agent of it carries. " +
 			"The answer is agents, a list holding that one agent. " +

@@ -19,6 +19,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 )
@@ -134,6 +135,28 @@ type createdStore struct {
 	created []*domain.PlatformExperiment
 	// researchers are the agents of role competitor that joined.
 	researchers []string
+	// started counts the starts that reached the store.
+	started int
+}
+
+// StartPlatformExperimentTx starts the open platform experiment id with a researcher at work.
+func (s *createdStore) StartPlatformExperimentTx(_ context.Context, id string, _ time.Duration, quotasFor func([]db.StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error) {
+	participants := make([]db.StartParticipant, len(s.researchers))
+	for i, agentID := range s.researchers {
+		participants[i] = db.StartParticipant{AgentID: agentID, Role: domain.SignupRoleCompetitor, AgentExists: true}
+	}
+	quotas, _, err := quotasFor(participants)
+	if err != nil {
+		return false, nil, err
+	}
+	for _, pe := range s.created {
+		if pe.ID == id {
+			pe.Status, pe.StartedAt = domain.PlatformExpRunning, time.Now().UTC()
+			pe.SetClosesAt(pe.StartedAt.Add(time.Hour))
+		}
+	}
+	s.started++
+	return true, quotas, nil
 }
 
 func (s *createdStore) ListSignupsByRole(_ context.Context, _ string, role domain.SignupRole) ([]string, error) {
