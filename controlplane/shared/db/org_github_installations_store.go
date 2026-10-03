@@ -2,8 +2,14 @@ package db
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/hkdf"
+	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -95,24 +101,79 @@ ORDER BY connected_at DESC LIMIT 1`, orgID, accountLogin), in)
 	return in, nil
 }
 
-// SetGitHubInstallationAccountType records the type of the account an installation is on, on
-// every org's record of it.
-func (s *AccountsStore) SetGitHubInstallationAccountType(ctx context.Context, installationID int64, accountType string) error {
-	if accountType == "" {
-		return errors.New("accounts_store.SetGitHubInstallationAccountType: the account's type is required")
-	}
-	if _, err := s.pool.pool.Exec(ctx, `UPDATE org_github_installations SET account_type = $2 WHERE installation_id = $1`, installationID, accountType); err != nil {
-		return fmt.Errorf("accounts_store.SetGitHubInstallationAccountType: %w", err)
-	}
-	return nil
+// ErrGitHubAuthorizationUnreadable reports a kept authorisation that the deployment's secret no
+// longer opens: the secret was replaced since the account was connected.
+var ErrGitHubAuthorizationUnreadable = errors.New("the GitHub authorisation kept for the installation cannot be read with the deployment's secret")
+
+// GitHubInstallationsStore is the installations orgs connected together with the authorisation
+// kept for one on a person's own account. That authorisation acts as the person on GitHub, so it
+// is stored sealed (AES-256-GCM) under a key derived from the deployment's signing secret and
+// bound to its row, and leaves this store only through RenewGitHubUserToken.
+type GitHubInstallationsStore struct {
+	*AccountsStore
+	seal cipher.AEAD
 }
 
-// KeepGitHubUserToken records the refresh token of the person who connected an installation on
-// their own account to an org, in place of any kept before. An empty one keeps none.
-func (s *AccountsStore) KeepGitHubUserToken(ctx context.Context, orgID string, installationID int64, refreshToken string) error {
-	tag, err := s.pool.pool.Exec(ctx, `UPDATE org_github_installations SET user_refresh_token = $3 WHERE org_id = $1 AND installation_id = $2`, orgID, installationID, refreshToken)
+func NewGitHubInstallationsStore(accounts *AccountsStore, signingSecret string) (*GitHubInstallationsStore, error) {
+	if accounts == nil || signingSecret == "" {
+		return nil, errors.New("github_installations_store: the accounts store and the signing secret are required")
+	}
+	key, err := hkdf.Key(sha256.New, []byte(signingSecret), nil, "hypothesisloop github user authorisation", 32)
 	if err != nil {
-		return fmt.Errorf("accounts_store.KeepGitHubUserToken: %w", err)
+		return nil, fmt.Errorf("github_installations_store: derive the key: %w", err)
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("github_installations_store: %w", err)
+	}
+	seal, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("github_installations_store: %w", err)
+	}
+	return &GitHubInstallationsStore{AccountsStore: accounts, seal: seal}, nil
+}
+
+func rowOf(orgID string, installationID int64) []byte {
+	return fmt.Appendf(nil, "%s/%d", orgID, installationID)
+}
+
+func (s *GitHubInstallationsStore) sealed(orgID string, installationID int64, authorization string) ([]byte, error) {
+	nonce := make([]byte, s.seal.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	return s.seal.Seal(nonce, nonce, []byte(authorization), rowOf(orgID, installationID)), nil
+}
+
+// opened is the authorisation a row keeps, and empty for a row that keeps none.
+func (s *GitHubInstallationsStore) opened(orgID string, installationID int64, kept []byte) (string, error) {
+	if kept == nil {
+		return "", nil
+	}
+	if len(kept) < s.seal.NonceSize() {
+		return "", ErrGitHubAuthorizationUnreadable
+	}
+	nonce, sealed := kept[:s.seal.NonceSize()], kept[s.seal.NonceSize():]
+	authorization, err := s.seal.Open(nil, nonce, sealed, rowOf(orgID, installationID))
+	if err != nil {
+		return "", ErrGitHubAuthorizationUnreadable
+	}
+	return string(authorization), nil
+}
+
+// KeepGitHubUserAuthorization records the authorisation of the person who connected an
+// installation on their own account to an org, in place of any kept before.
+func (s *GitHubInstallationsStore) KeepGitHubUserAuthorization(ctx context.Context, orgID string, installationID int64, authorization string) error {
+	if authorization == "" {
+		return errors.New("github_installations_store.KeepGitHubUserAuthorization: there is no authorisation to keep")
+	}
+	sealed, err := s.sealed(orgID, installationID, authorization)
+	if err != nil {
+		return fmt.Errorf("github_installations_store.KeepGitHubUserAuthorization: %w", err)
+	}
+	tag, err := s.pool.pool.Exec(ctx, `UPDATE org_github_installations SET user_authorization = $3 WHERE org_id = $1 AND installation_id = $2`, orgID, installationID, sealed)
+	if err != nil {
+		return fmt.Errorf("github_installations_store.KeepGitHubUserAuthorization: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrGitHubInstallationNotFound
@@ -120,39 +181,58 @@ func (s *AccountsStore) KeepGitHubUserToken(ctx context.Context, orgID string, i
 	return nil
 }
 
-// RenewGitHubUserToken hands renew the refresh token kept for an org's installation, empty when
-// none is, and keeps the one renew answers in its place. GitHub takes a refresh token once, so
-// the row is held from the read to the write and a second renewal waits for the first. What
-// renew returns beside the next token is returned. ErrGitHubInstallationNotFound when the org
-// has not connected the installation.
-func (s *AccountsStore) RenewGitHubUserToken(ctx context.Context, orgID string, installationID int64, renew func(ctx context.Context, refreshToken string) (accessToken, next string, err error)) (string, error) {
+// renewalLimit bounds a renewal, which does not end with the request that asked for it.
+const renewalLimit = time.Minute
+
+// RenewGitHubUserToken hands renew the authorisation kept for an org's installation, empty when
+// none is, and keeps the one renew answers in its place. What renew returns beside the next one
+// is returned. GitHub takes a refresh token once, so the row is held from the read to the write
+// and a second renewal waits for the first, and none of it follows the request's cancellation: a
+// caller that went away after GitHub replaced the token would leave the spent one stored.
+// ErrGitHubInstallationNotFound when the org has not connected the installation,
+// ErrGitHubAuthorizationUnreadable when what is kept was sealed under another secret.
+func (s *GitHubInstallationsStore) RenewGitHubUserToken(ctx context.Context, orgID string, installationID int64, renew func(ctx context.Context, authorization string) (accessToken, next string, err error)) (string, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), renewalLimit)
+	defer cancel()
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
-		return "", fmt.Errorf("accounts_store.RenewGitHubUserToken: begin: %w", err)
+		return "", fmt.Errorf("github_installations_store.RenewGitHubUserToken: begin: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	var kept string
-	err = tx.QueryRow(ctx, `SELECT user_refresh_token FROM org_github_installations WHERE org_id = $1 AND installation_id = $2 FOR UPDATE`, orgID, installationID).Scan(&kept)
+	var kept []byte
+	err = tx.QueryRow(ctx, `SELECT user_authorization FROM org_github_installations WHERE org_id = $1 AND installation_id = $2 FOR UPDATE`, orgID, installationID).Scan(&kept)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrGitHubInstallationNotFound
 	}
 	if err != nil {
-		return "", fmt.Errorf("accounts_store.RenewGitHubUserToken: %w", err)
+		return "", fmt.Errorf("github_installations_store.RenewGitHubUserToken: %w", err)
 	}
-	accessToken, next, err := renew(ctx, kept)
+	authorization, err := s.opened(orgID, installationID, kept)
 	if err != nil {
 		return "", err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE org_github_installations SET user_refresh_token = $3 WHERE org_id = $1 AND installation_id = $2`, orgID, installationID, next); err != nil {
-		return "", fmt.Errorf("accounts_store.RenewGitHubUserToken: keep the next token: %w", err)
+	accessToken, next, err := renew(ctx, authorization)
+	if err != nil {
+		return "", err
+	}
+	if next == "" {
+		return "", errors.New("github_installations_store.RenewGitHubUserToken: the renewal answered no authorisation to keep")
+	}
+	sealed, err := s.sealed(orgID, installationID, next)
+	if err != nil {
+		return "", fmt.Errorf("github_installations_store.RenewGitHubUserToken: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE org_github_installations SET user_authorization = $3 WHERE org_id = $1 AND installation_id = $2`, orgID, installationID, sealed); err != nil {
+		return "", fmt.Errorf("github_installations_store.RenewGitHubUserToken: keep the next authorisation: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return "", fmt.Errorf("accounts_store.RenewGitHubUserToken: commit: %w", err)
+		return "", fmt.Errorf("github_installations_store.RenewGitHubUserToken: commit: %w", err)
 	}
 	return accessToken, nil
 }
 
-// DisconnectGitHubInstallation takes an installation away from an org.
+// DisconnectGitHubInstallation takes an installation away from an org, with the authorisation
+// kept for it.
 // ErrGitHubInstallationNotFound when the org had not connected it.
 func (s *AccountsStore) DisconnectGitHubInstallation(ctx context.Context, orgID string, installationID int64) error {
 	tag, err := s.pool.pool.Exec(ctx, `DELETE FROM org_github_installations WHERE org_id = $1 AND installation_id = $2`, orgID, installationID)

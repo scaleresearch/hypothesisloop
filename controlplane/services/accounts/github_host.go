@@ -99,12 +99,9 @@ func (h *GitHubHost) Create(ctx context.Context, projectID, account, name, descr
 	case chosen == nil:
 		return "", refusal(h.logger, op, errNotConnected, http.StatusUnprocessableEntity)
 	}
-	if err := accountType(ctx, h.store, h.github, chosen); err != nil {
-		return "", refusal(h.logger, op, err, http.StatusUnprocessableEntity)
-	}
 	userToken := ""
 	if chosen.AccountType == github.AccountUser {
-		if userToken, err = h.store.RenewGitHubUserToken(ctx, project.OrgID, chosen.InstallationID, h.github.RefreshUser); err != nil {
+		if userToken, err = h.store.RenewGitHubUserToken(ctx, project.OrgID, chosen.InstallationID, h.github.UserToken); err != nil {
 			return "", refusal(h.logger, op, err, http.StatusUnprocessableEntity)
 		}
 	}

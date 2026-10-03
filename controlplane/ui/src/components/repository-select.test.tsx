@@ -102,7 +102,7 @@ describe('the repository of a new platform experiment', () => {
     expect(screen.queryByRole('option', { name: 'A new private repository' })).toBeNull()
   })
 
-  it('offers no new one on an account whose type GitHub has not said', async () => {
+  it('offers no new one on an account connected before its type was kept', async () => {
     vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [{ ...organisation, account_type: undefined }], total: 1 })
     show()
     await userEvent.click(await screen.findByRole('combobox'))

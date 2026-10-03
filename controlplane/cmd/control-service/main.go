@@ -137,7 +137,10 @@ func main() {
 
 	// The git host is one of two. On a plain one there is no GitHub App and no client for it:
 	// connecting GitHub answers that there is none.
-	accountsStore := db.NewAccountsStore(pool)
+	accountsStore, err := db.NewGitHubInstallationsStore(db.NewAccountsStore(pool), pcfg.Auth.SigningSecret)
+	if err != nil {
+		logger.Fatal("control-service: configure the GitHub installations store", zap.Error(err))
+	}
 	var githubApp accounts.GitHubApp
 	var gitHost githost.Provider
 	switch pcfg.Git.Provider {

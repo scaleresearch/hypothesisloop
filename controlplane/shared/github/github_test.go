@@ -83,7 +83,7 @@ type fakeGitHub struct {
 	tokens     map[string]mintedToken
 	userTokens map[string]string
 	// refreshTokens maps each refresh token GitHub still takes to its user. unexpiring is an App
-	// whose user tokens do not expire, which issues none.
+	// whose user tokens do not expire, which issues none and no expiry.
 	refreshTokens map[string]string
 	unexpiring    bool
 	// addStatus, when set, answers the adding of a repository to an installation.
@@ -274,10 +274,11 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		f.sequence++
 		token := fmt.Sprintf("ghu_user_%d", f.sequence)
 		f.userTokens[token] = user
-		answer := map[string]string{"access_token": token, "token_type": "bearer"}
+		answer := map[string]any{"access_token": token, "token_type": "bearer"}
 		if !f.unexpiring {
-			answer["refresh_token"] = fmt.Sprintf("ghr_refresh_%d", f.sequence)
-			f.refreshTokens[answer["refresh_token"]] = user
+			refresh := fmt.Sprintf("ghr_refresh_%d", f.sequence)
+			answer["expires_in"], answer["refresh_token"] = 28800, refresh
+			f.refreshTokens[refresh] = user
 		}
 		f.answer(w, http.StatusOK, answer)
 		return
@@ -704,10 +705,10 @@ func TestUserInstallationsAreThoseThePersonReachesAndTheGrantIsTheCallersToKeepO
 	if err != nil || !slices.Equal(carol.Installations, want) {
 		t.Fatalf("UserInstallations = %+v, %v, want %+v", carol, err, want)
 	}
-	if len(f.revoked) != 0 || f.refreshTokens[reader.RefreshToken] != "reader" || f.refreshTokens[carol.RefreshToken] != "carol" || len(f.redirects) != 2 || f.redirects[0] != testRedirect {
+	if len(f.revoked) != 0 || f.refreshTokens[refreshTokenOf(reader)] != "reader" || f.refreshTokens[refreshTokenOf(carol)] != "carol" || len(f.redirects) != 2 || f.redirects[0] != testRedirect {
 		t.Fatalf("revoked %v, grants %+v and %+v, redirects %v: want each grant with its own refresh token, none revoked, and the redirect sent", f.revoked, reader, carol, f.redirects)
 	}
-	if err := client.RevokeUser(ctx, reader); err != nil || len(f.revoked) != 1 || len(f.userTokens) != 1 {
+	if err := client.RevokeUser(ctx, reader.AccessToken); err != nil || len(f.revoked) != 1 || len(f.userTokens) != 1 {
 		t.Fatalf("RevokeUser = %v, revoked %v with %d user tokens left, want the one grant ended", err, f.revoked, len(f.userTokens))
 	}
 	if len(f.tokens) != 0 {
@@ -717,10 +718,45 @@ func TestUserInstallationsAreThoseThePersonReachesAndTheGrantIsTheCallersToKeepO
 	if found, err := client.UserInstallations(ctx, "code-mallory", testRedirect); err != nil || len(found.Installations) != 0 || found.Installations == nil {
 		t.Fatalf("a person with no installation: %+v, %v, want an empty list", found, err)
 	}
-	// An App whose user tokens do not expire issues no refresh token, and the grant says so.
+}
+
+func refreshTokenOf(grant *UserGrant) string {
+	return strings.TrimPrefix(grant.Authorization, byRefreshToken)
+}
+
+// An App whose user tokens do not expire issues no refresh token: the grant is kept by the
+// token itself, which acts as the person at every later use and is traded for nothing.
+func TestAGrantOfAnAppWhoseUserTokensDoNotExpireIsKeptByTheTokenItself(t *testing.T) {
+	f, client := newFakeGitHub(t)
 	f.unexpiring = true
-	if found, err := client.UserInstallations(ctx, "code-alice", testRedirect); err != nil || found.RefreshToken != "" {
-		t.Fatalf("with user tokens that do not expire: %+v, %v, want a grant with no refresh token", found, err)
+	grant, err := client.UserInstallations(ctx, "code-carol", testRedirect)
+	if err != nil || grant.Authorization != byAccessToken+grant.AccessToken || f.userTokens[grant.AccessToken] != "carol" {
+		t.Fatalf("UserInstallations = %+v, %v, want a grant kept by carol's own token", grant, err)
+	}
+	asked := len(f.calls)
+	for range 2 {
+		access, next, err := client.UserToken(ctx, grant.Authorization)
+		if err != nil || access != grant.AccessToken || next != grant.Authorization {
+			t.Fatalf("UserToken = %q, %q, %v, want the same token and the same authorisation at each use", access, next, err)
+		}
+	}
+	if len(f.calls) != asked {
+		t.Fatalf("GitHub was asked %v to use a token that does not expire", f.calls[asked:])
+	}
+	f.installations[300].all = true
+	if created, err := client.CreateRepository(ctx, 300, grant.AccessToken, "sweep", "", firstFiles); err != nil || created.FullName != "carol/sweep" {
+		t.Fatalf("CreateRepository with the token kept = %+v, %v, want carol/sweep", created, err)
+	}
+	// Revoked on GitHub, it is an authorisation GitHub no longer takes.
+	if err := client.RevokeUser(ctx, grant.AccessToken); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.CreateRepository(ctx, 300, grant.AccessToken, "again", "", firstFiles); !errors.Is(err, ErrUserAuthorization) {
+		t.Fatalf("CreateRepository with a revoked token = %v, want %v", err, ErrUserAuthorization)
+	}
+	// A token that expires and came with nothing to renew it keeps no grant.
+	if _, err := (&userTokens{AccessToken: "ghu_x", ExpiresIn: 28800}).authorization(); err == nil {
+		t.Fatal("a token that expires with no refresh token was taken for an authorisation")
 	}
 }
 
@@ -731,16 +767,19 @@ func TestAPersonsAuthorisationIsRenewedByItsRefreshTokenOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	access, next, err := client.RefreshUser(ctx, grant.RefreshToken)
-	if err != nil || f.userTokens[access] != "carol" || next == "" || next == grant.RefreshToken || f.refreshTokens[next] != "carol" {
-		t.Fatalf("RefreshUser = %q, %q, %v, want carol's token and the refresh token that replaces the one used", access, next, err)
+	access, next, err := client.UserToken(ctx, grant.Authorization)
+	if err != nil || f.userTokens[access] != "carol" || next == grant.Authorization || f.refreshTokens[strings.TrimPrefix(next, byRefreshToken)] != "carol" {
+		t.Fatalf("UserToken = %q, %q, %v, want carol's token and the refresh token that replaces the one used", access, next, err)
 	}
-	for name, spent := range map[string]string{"a refresh token used before": grant.RefreshToken, "none": "", "one GitHub never issued": "ghr_made_up"} {
-		if access, next, err := client.RefreshUser(ctx, spent); !errors.Is(err, ErrUserAuthorization) || access != "" || next != "" {
-			t.Errorf("%s: RefreshUser = %q, %q, %v, want %v", name, access, next, err, ErrUserAuthorization)
+	for name, spent := range map[string]string{"a refresh token used before": grant.Authorization, "none": "", "one GitHub never issued": byRefreshToken + "ghr_made_up"} {
+		if access, next, err := client.UserToken(ctx, spent); !errors.Is(err, ErrUserAuthorization) || access != "" || next != "" {
+			t.Errorf("%s: UserToken = %q, %q, %v, want %v", name, access, next, err, ErrUserAuthorization)
 		}
 	}
-	if _, _, err := client.RefreshUser(ctx, next); err != nil {
+	if _, _, err := client.UserToken(ctx, "ghr_bare"); err == nil || errors.Is(err, ErrUserAuthorization) {
+		t.Fatalf("an authorisation this client did not issue: UserToken = %v, want a failure of the platform's", err)
+	}
+	if _, _, err := client.UserToken(ctx, next); err != nil {
 		t.Fatalf("the refresh token that replaced the first: %v", err)
 	}
 }
@@ -802,7 +841,7 @@ func TestARevocationGitHubRefusesIsAFailure(t *testing.T) {
 			t.Fatal(err)
 		}
 		f.revokeStatus = status
-		if err := client.RevokeUser(ctx, grant); err == nil {
+		if err := client.RevokeUser(ctx, grant.AccessToken); err == nil {
 			t.Errorf("revocation answered %d: RevokeUser = nil, want a failure", status)
 		}
 	}
@@ -875,11 +914,7 @@ func carolsToken(t *testing.T, client *Client) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	access, _, err := client.RefreshUser(ctx, grant.RefreshToken)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return access
+	return grant.AccessToken
 }
 
 // GitHub creates on a person's own account "for the authenticated user", and an installation
@@ -946,11 +981,7 @@ func TestACreateOnAPersonsOwnAccountRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	alice, _, err := client.RefreshUser(ctx, grant.RefreshToken)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if created, err := client.CreateRepository(ctx, 300, alice, "sweep", "", firstFiles); created != nil || err == nil || f.installations[300].repos[f.repos["alice/sweep"].id] {
+	if created, err := client.CreateRepository(ctx, 300, grant.AccessToken, "sweep", "", firstFiles); created != nil || err == nil || f.installations[300].repos[f.repos["alice/sweep"].id] {
 		t.Fatalf("with another person's token: CreateRepository = %+v, %v, want a failure and nothing covered by carol's installation", created, err)
 	}
 }

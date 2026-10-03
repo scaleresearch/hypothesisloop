@@ -704,7 +704,7 @@ export interface GitHubInstallation {
   installation_id: number
   /** The GitHub user or organisation the App is installed on. */
   account_login: string
-  /** Which of the two it is. Absent while GitHub has not said, as for an installation removed there. */
+  /** Which of the two it is. Absent on one connected before the type was kept, until it is connected again. */
   account_type?: GitHubAccountType
   /** Who connected it: a user, the API key it was connected with, or staff. */
   connected_actor: Actor

@@ -25,8 +25,8 @@ import (
 type GitHubApp interface {
 	App() github.App
 	UserInstallations(ctx context.Context, userCode, redirectURI string) (*github.UserGrant, error)
-	RevokeUser(ctx context.Context, grant *github.UserGrant) error
-	RefreshUser(ctx context.Context, refreshToken string) (accessToken, next string, err error)
+	RevokeUser(ctx context.Context, accessToken string) error
+	UserToken(ctx context.Context, authorization string) (accessToken, next string, err error)
 	Installation(ctx context.Context, installationID int64) (*github.Installation, error)
 	Repositories(ctx context.Context, installationID int64) ([]github.Repository, error)
 	Token(ctx context.Context, installationID int64, fullName string, access github.Access) (*github.Token, error)
@@ -34,34 +34,16 @@ type GitHubApp interface {
 	CreateRepository(ctx context.Context, installationID int64, userToken, name, description string, files map[string]string) (*github.Repository, error)
 }
 
-// InstallationStore is the persistence of the installations orgs connected. *db.AccountsStore
-// satisfies it.
+// InstallationStore is the persistence of the installations orgs connected.
+// *db.GitHubInstallationsStore satisfies it.
 type InstallationStore interface {
 	GetProject(ctx context.Context, id string) (*domain.Project, error)
 	ConnectGitHubInstallation(ctx context.Context, installation *domain.OrgGitHubInstallation) error
 	ListGitHubInstallations(ctx context.Context, orgID string) ([]*domain.OrgGitHubInstallation, error)
 	GitHubInstallationOfAccount(ctx context.Context, orgID, accountLogin string) (*domain.OrgGitHubInstallation, error)
-	SetGitHubInstallationAccountType(ctx context.Context, installationID int64, accountType string) error
-	KeepGitHubUserToken(ctx context.Context, orgID string, installationID int64, refreshToken string) error
-	RenewGitHubUserToken(ctx context.Context, orgID string, installationID int64, renew func(ctx context.Context, refreshToken string) (accessToken, next string, err error)) (string, error)
+	KeepGitHubUserAuthorization(ctx context.Context, orgID string, installationID int64, authorization string) error
+	RenewGitHubUserToken(ctx context.Context, orgID string, installationID int64, renew func(ctx context.Context, authorization string) (accessToken, next string, err error)) (string, error)
 	DisconnectGitHubInstallation(ctx context.Context, orgID string, installationID int64) error
-}
-
-// accountType gives a record from before the type of its account was kept that type: GitHub is
-// asked, and the answer recorded for every later use.
-func accountType(ctx context.Context, store InstallationStore, app GitHubApp, installation *domain.OrgGitHubInstallation) error {
-	if installation.AccountType != "" {
-		return nil
-	}
-	found, err := app.Installation(ctx, installation.InstallationID)
-	if err != nil {
-		return err
-	}
-	if err := store.SetGitHubInstallationAccountType(ctx, installation.InstallationID, found.AccountType); err != nil {
-		return err
-	}
-	installation.AccountType = found.AccountType
-	return nil
 }
 
 // ExperimentRepositories says which repository a platform experiment names and which project
@@ -172,6 +154,9 @@ func refusal(logger *zap.Logger, op string, err error, gone int) error {
 	case errors.As(err, &notCovered):
 		logger.Error("github created a repository and did not add it to the installation", zap.String("operation", op), zap.Error(err))
 		return api.Refuse(http.StatusBadGateway, ReasonRepositoryNotAdded, "GitHub created the repository "+notCovered.Repository+" and did not let the platform add it to the GitHub App's installation, which covers selected repositories only, so nothing else was created. Add it to the installation on GitHub (the account's Settings, Applications, Configure), then name it in repository on the next try, where hl repo init adds the experiment's files")
+	case errors.Is(err, db.ErrGitHubAuthorizationUnreadable):
+		logger.Error("a kept github authorisation cannot be read: the signing secret was replaced since the account was connected", zap.String("operation", op))
+		return authorizationRequired()
 	case errors.Is(err, db.ErrOrgNotFound):
 		return notFound("org")
 	case errors.Is(err, db.ErrGitHubInstallationNotFound):
@@ -183,7 +168,7 @@ func refusal(logger *zap.Logger, op string, err error, gone int) error {
 	case errors.Is(err, errNoInstallation):
 		return invalid(ReasonGitHubNotConnected, "a platform experiment keeps its code in a GitHub repository, and the org has connected no GitHub account: an owner of the org connects one with POST /orgs/{id}/github-installations (Settings, GitHub), and the experiment then names a repository there or the platform creates one")
 	case errors.Is(err, github.ErrUserAuthorization):
-		return invalid(ReasonRepositoryAuthorizationRequired, "the GitHub account the repository was asked on is a personal account, where GitHub creates a repository for its owner alone, and the platform holds no authorisation of that owner that GitHub still takes: the owner connects the account again with POST /orgs/{id}/github-installations (Settings, GitHub, Connect GitHub), or creates a private repository on it, adds it to the installation when that covers selected repositories only, and the request names it in repository")
+		return authorizationRequired()
 	case errors.As(err, &notPermitted):
 		accepted := ""
 		if notPermitted.Accepted != "" {
@@ -222,6 +207,10 @@ func refusal(logger *zap.Logger, op string, err error, gone int) error {
 	}
 }
 
+func authorizationRequired() *api.Refusal {
+	return invalid(ReasonRepositoryAuthorizationRequired, "the GitHub account the repository was asked on is a personal account, where GitHub creates a repository for its owner alone, and the platform holds no authorisation of that owner that GitHub still takes: the owner connects the account again with POST /orgs/{id}/github-installations (Settings, GitHub, Connect GitHub), or creates a private repository on it, adds it to the installation when that covers selected repositories only, and the request names it in repository")
+}
+
 func (r *Repositories) app() (GitHubApp, error) {
 	if r.github == nil {
 		return nil, errNoApp
@@ -252,14 +241,10 @@ func (r *Repositories) connect(ctx context.Context, orgID, code, redirectURI str
 		return nil, err
 	}
 	// On a person's own account GitHub creates a repository for that person alone, so the grant
-	// of the one who connects theirs is kept by its refresh token. Any other is ended here.
+	// of the one who connects theirs is kept. Any other is ended here.
 	chosen, err := chosenInstallation(grant.Installations, installationID)
-	kept := ""
-	if err == nil && chosen.AccountType == github.AccountUser {
-		kept = grant.RefreshToken
-	}
-	if kept == "" {
-		if revokeErr := app.RevokeUser(ctx, grant); revokeErr != nil && err == nil {
+	if err != nil || chosen.AccountType != github.AccountUser {
+		if revokeErr := app.RevokeUser(ctx, grant.AccessToken); revokeErr != nil && err == nil {
 			err = revokeErr
 		}
 	}
@@ -271,14 +256,35 @@ func (r *Repositories) connect(ctx context.Context, orgID, code, redirectURI str
 		return nil, err
 	}
 	if chosen.AccountType == github.AccountUser {
-		if kept == "" {
-			r.logger.Warn("a personal github account was connected with no refresh token: the GitHub App's user tokens do not expire, and no repository can be created there until they do", zap.String("orgID", orgID), zap.Int64("installationID", chosen.ID))
-		}
-		if err := r.store.KeepGitHubUserToken(ctx, orgID, chosen.ID, kept); err != nil {
+		if err := r.store.KeepGitHubUserAuthorization(ctx, orgID, chosen.ID, grant.Authorization); err != nil {
 			return nil, err
 		}
 	}
 	return installation, nil
+}
+
+// disconnect takes an installation away from an org. The authorisation kept for one on a
+// person's own account is ended at GitHub first, so that none outlives the connection: with
+// GitHub not answering, the installation stays connected and the call is made again.
+func (r *Repositories) disconnect(ctx context.Context, orgID string, installationID int64) error {
+	if _, err := r.access.OrgAdmin(ctx, orgID); err != nil {
+		return err
+	}
+	if r.github != nil {
+		accessToken, err := r.store.RenewGitHubUserToken(ctx, orgID, installationID, r.github.UserToken)
+		switch {
+		case errors.Is(err, github.ErrUserAuthorization):
+		case errors.Is(err, db.ErrGitHubAuthorizationUnreadable):
+			r.logger.Error("a kept github authorisation cannot be read and is dropped without being ended at GitHub", zap.String("orgID", orgID), zap.Int64("installationID", installationID))
+		case err != nil:
+			return err
+		default:
+			if err := r.github.RevokeUser(ctx, accessToken); err != nil && !errors.Is(err, github.ErrUserAuthorization) {
+				return err
+			}
+		}
+	}
+	return r.store.DisconnectGitHubInstallation(ctx, orgID, installationID)
 }
 
 // chosenInstallation is the installation a connect means among those the person reaches: the one
@@ -416,7 +422,8 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 			"owner of the GitHub account decides that set on GitHub. code, from GitHub's authorisation of the App, must belong to a GitHub account that " +
 			"controls the account the installation is on: that account itself, or an admin of the GitHub organisation. GitHub is asked which installations it reaches " +
 			"and which accounts it controls. The person's token is revoked before this call returns, but for an installation on their own account: GitHub creates a repository " +
-			"there for its owner alone, so the platform keeps that authorisation, renewed at each use for up to six months, until the installation is disconnected. " +
+			"there for its owner alone, so the platform keeps that authorisation, stored sealed, until the installation is disconnected: renewed at each use for up to six months, " +
+			"or for as long as GitHub takes it where the GitHub App's user tokens do not expire. " +
 			"Reaching an installation, as a collaborator on one of its repositories does, connects nothing. " +
 			"redirect_uri is the one the code was issued to. Verify state before calling (see GET /github/app). " +
 			"installation_id may be left out when GitHub did not hand one back, as when the App was installed before: the one installation the " +
@@ -451,8 +458,8 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 		Summary: "List the GitHub App installations an org connected", Tags: []string{"github"},
 		Description: "For any member of the org, oldest first. What was recorded at connect: GitHub is not asked, so an installation removed there " +
 			"since still shows, and a platform experiment that names a repository of it is refused its git credential. " +
-			"account_type is User for a person's own account and Organization. An installation connected before " +
-			"the type was kept gets it from GitHub the first time it is listed or a repository is asked on it, and shows without it when it was removed on GitHub.",
+			"account_type is User for a person's own account and Organization, and absent on an installation connected before " +
+			"the type was kept, until it is connected again.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 		Page
@@ -469,17 +476,6 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 		if err != nil {
 			return nil, refusal(r.logger, op, err, http.StatusConflict)
 		}
-		if r.github != nil {
-			for _, installation := range installations {
-				err := accountType(ctx, r.store, r.github, installation)
-				if errors.Is(err, github.ErrInstallationGone) {
-					continue
-				}
-				if err != nil {
-					return nil, refusal(r.logger, op, err, http.StatusConflict)
-				}
-			}
-		}
 		return &installationsPage{TotalCount: len(installations), Body: pageOf(installations, limit, offset)}, nil
 	})
 
@@ -488,16 +484,14 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 		Summary: "Disconnect a GitHub App installation from an org", Tags: []string{"github"},
 		Description: "For an owner of the org. No git credential is minted through it from then on: a platform experiment that names a repository of " +
 			"it keeps running, its agents and jobs can no longer clone, fetch or push once the credential they hold runs out, within the hour, and " +
-			"their next credential call answers 409 installation_not_connected. The authorisation kept for a personal account is dropped. The App stays installed on GitHub: removing it there is the account " +
+			"their next credential call answers 409 installation_not_connected. The authorisation kept for a personal account is ended at GitHub and dropped: " +
+			"when GitHub does not answer for that, the installation stays connected and the call is made again. The App stays installed on GitHub: removing it there is the account " +
 			"owner's own step. 404 not_found when the org had not connected it.",
 	}, func(ctx context.Context, in *struct {
 		ID             string `path:"id"`
 		InstallationID int64  `path:"installation_id"`
 	}) (*struct{}, error) {
-		if _, err := r.access.OrgAdmin(ctx, in.ID); err != nil {
-			return nil, err
-		}
-		if err := r.store.DisconnectGitHubInstallation(ctx, in.ID, in.InstallationID); err != nil {
+		if err := r.disconnect(ctx, in.ID, in.InstallationID); err != nil {
 			return nil, refusal(r.logger, "delete-github-installation", err, http.StatusConflict)
 		}
 		return &struct{}{}, nil

@@ -1205,13 +1205,16 @@ BEGIN
     END IF;
 END $$;
 -- Whether the account is a person's own or an organisation, User or Organization as GitHub
--- says. Only GitHub knows it of a row from before it was kept, so that row holds '' until its
--- next use asks GitHub.
+-- says at connect. Only GitHub knows it of a row from before it was kept, so that row holds ''
+-- until the account is connected again.
 ALTER TABLE org_github_installations ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT '';
--- On a person's own account GitHub creates a repository for that person alone, so the refresh
--- token of the authorisation they connected it with is kept, and replaced at each use. '' on an
--- organisation, and on a personal account connected before it was kept or by staff.
-ALTER TABLE org_github_installations ADD COLUMN IF NOT EXISTS user_refresh_token TEXT NOT NULL DEFAULT '';
+-- On a person's own account GitHub creates a repository for that person alone, so the
+-- authorisation they connected it with is kept, sealed by the store under a key derived from the
+-- deployment's signing secret, and replaced at each use. NULL on an organisation, and on a
+-- personal account connected by staff or before it was kept sealed: user_refresh_token held it
+-- in the clear, and its owner connects the account again.
+ALTER TABLE org_github_installations DROP COLUMN IF EXISTS user_refresh_token;
+ALTER TABLE org_github_installations ADD COLUMN IF NOT EXISTS user_authorization BYTEA;
 -- The code a platform experiment works on, owner/name on GitHub, and the image its hosted agents
 -- and coordinator run. An empty image is the platform's own (config agents.image). Both are
 -- fixed at creation.

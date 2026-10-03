@@ -78,7 +78,7 @@ export function RepositorySelect({ value, onChange, notCreated }: { value: strin
   const options = listed.map(r => ({ value: r.repository, label: r.repository, badge: r.private ? 'private' : undefined }))
   if (value && !value.startsWith(ON_ACCOUNT) && !listed.some(r => r.repository === value)) options.unshift({ value, label: value, badge: undefined })
   // With several accounts connected, which one a new repository goes to is the person's to say.
-  // One whose type GitHub has not said was removed there, and takes no new repository.
+  // One connected before its type was kept takes no new repository until it is connected again.
   const accounts = installations.data?.items ?? []
   const creating = accounts.filter(a => a.account_type != null)
   const createsUnasked = accounts.length === 1 && creating.length === 1

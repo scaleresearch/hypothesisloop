@@ -73,12 +73,12 @@ type Project struct {
 
 // OrgGitHubInstallation is an installation of the platform's GitHub App that an org connected.
 // AccountLogin is the GitHub account it is on, the owner part of every repository it covers.
-// AccountType is empty on one connected before the type was kept, until GitHub is next asked.
+// AccountType is empty on one connected before the type was kept, until it is connected again.
 type OrgGitHubInstallation struct {
 	OrgID          string    `json:"org_id"`
 	InstallationID int64     `json:"installation_id"`
 	AccountLogin   string    `json:"account_login"`
-	AccountType    string    `json:"account_type,omitempty" enum:"User,Organization" doc:"Whether the account is a person's own or an organisation, as GitHub says. On a person's own account the platform creates a repository with the authorisation its owner connected it with. Absent while GitHub has not said, as for an installation removed there."`
+	AccountType    string    `json:"account_type,omitempty" enum:"User,Organization" doc:"Whether the account is a person's own or an organisation, as GitHub says. On a person's own account the platform creates a repository with the authorisation its owner connected it with. Absent on an installation connected before the type was kept, until it is connected again."`
 	ConnectedActor Actor     `json:"connected_actor" doc:"Who connected it: a user, the API key it was connected with, or staff."`
 	ConnectedAt    time.Time `json:"connected_at"`
 }

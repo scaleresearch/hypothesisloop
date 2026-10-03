@@ -30,22 +30,33 @@ import (
 type memInstallations struct {
 	*memStore
 	connected map[string][]*domain.OrgGitHubInstallation
-	// refresh holds the refresh token kept for an org's installation, by "org installation".
-	refresh map[string]string
+	// kept holds the authorisation kept for an org's installation, by "org installation", and
+	// unreadable makes every one of them sealed under another secret.
+	kept       map[string]string
+	unreadable bool
 }
 
-func (s *memInstallations) KeepGitHubUserToken(_ context.Context, orgID string, id int64, refreshToken string) error {
-	s.refresh[fmt.Sprintf("%s %d", orgID, id)] = refreshToken
+func (s *memInstallations) KeepGitHubUserAuthorization(_ context.Context, orgID string, id int64, authorization string) error {
+	if authorization == "" {
+		return errors.New("there is no authorisation to keep")
+	}
+	s.kept[fmt.Sprintf("%s %d", orgID, id)] = authorization
 	return nil
 }
 
 func (s *memInstallations) RenewGitHubUserToken(ctx context.Context, orgID string, id int64, renew func(context.Context, string) (string, string, error)) (string, error) {
+	if !slices.ContainsFunc(s.connected[orgID], func(have *domain.OrgGitHubInstallation) bool { return have.InstallationID == id }) {
+		return "", db.ErrGitHubInstallationNotFound
+	}
 	key := fmt.Sprintf("%s %d", orgID, id)
-	access, next, err := renew(ctx, s.refresh[key])
+	if s.unreadable && s.kept[key] != "" {
+		return "", db.ErrGitHubAuthorizationUnreadable
+	}
+	access, next, err := renew(ctx, s.kept[key])
 	if err != nil {
 		return "", err
 	}
-	s.refresh[key] = next
+	s.kept[key] = next
 	return access, nil
 }
 
@@ -85,21 +96,11 @@ func (s *memInstallations) GitHubInstallationOfAccount(_ context.Context, orgID,
 	return nil, nil
 }
 
-func (s *memInstallations) SetGitHubInstallationAccountType(_ context.Context, id int64, accountType string) error {
-	for _, connected := range s.connected {
-		for _, have := range connected {
-			if have.InstallationID == id {
-				have.AccountType = accountType
-			}
-		}
-	}
-	return nil
-}
-
 func (s *memInstallations) DisconnectGitHubInstallation(_ context.Context, orgID string, id int64) error {
 	for i, have := range s.connected[orgID] {
 		if have.InstallationID == id {
 			s.connected[orgID] = slices.Delete(s.connected[orgID], i, i+1)
+			delete(s.kept, fmt.Sprintf("%s %d", orgID, id))
 			return nil
 		}
 	}
@@ -153,12 +154,14 @@ type fakeApp struct {
 	created   []string
 	committed map[string]string
 	createErr error
-	// revoked counts the grants ended, refreshed holds each refresh token traded, and unexpiring
-	// is an App whose user tokens do not expire, which issues no refresh token.
-	revoked    int
+	// revoked holds each person's token ended, refreshed each refresh token traded, and unexpiring
+	// is an App whose user tokens do not expire, which issues no refresh token. revokeErr fails
+	// every revocation.
+	revoked    []string
 	refreshed  []string
 	unexpiring bool
 	refreshErr error
+	revokeErr  error
 }
 
 // CreateRepository creates as GitHub does: on a person's own account for the person whose token
@@ -181,22 +184,28 @@ func (a *fakeApp) CreateRepository(_ context.Context, installationID int64, user
 	return &github.Repository{FullName: owner + "/" + name, Private: true}, nil
 }
 
-func (a *fakeApp) RevokeUser(context.Context, *github.UserGrant) error {
-	a.revoked++
+func (a *fakeApp) RevokeUser(_ context.Context, accessToken string) error {
+	if a.revokeErr != nil {
+		return a.revokeErr
+	}
+	a.revoked = append(a.revoked, accessToken)
 	return nil
 }
 
-// RefreshUser takes a refresh token once, as GitHub does: ghr_carol_N becomes ghu_carol_N and
-// ghr_carol_N+1.
-func (a *fakeApp) RefreshUser(_ context.Context, refreshToken string) (string, string, error) {
+// UserToken takes a refresh token once, as GitHub does: ghr_carol_N becomes ghu_carol_N and
+// ghr_carol_N+1. A token that does not expire is the authorisation itself, at every use.
+func (a *fakeApp) UserToken(_ context.Context, authorization string) (string, string, error) {
 	if a.refreshErr != nil {
 		return "", "", a.refreshErr
 	}
+	if strings.HasPrefix(authorization, "ghu_carol_") {
+		return authorization, authorization, nil
+	}
 	var n int
-	if _, err := fmt.Sscanf(refreshToken, "ghr_carol_%d", &n); err != nil || slices.Contains(a.refreshed, refreshToken) {
+	if _, err := fmt.Sscanf(authorization, "ghr_carol_%d", &n); err != nil || slices.Contains(a.refreshed, authorization) {
 		return "", "", github.ErrUserAuthorization
 	}
-	a.refreshed = append(a.refreshed, refreshToken)
+	a.refreshed = append(a.refreshed, authorization)
 	return fmt.Sprintf("ghu_carol_%d", n), fmt.Sprintf("ghr_carol_%d", n+1), nil
 }
 
@@ -232,9 +241,10 @@ func (a *fakeApp) UserInstallations(_ context.Context, code, redirect string) (*
 	if !ok {
 		return nil, github.ErrCodeRejected
 	}
-	grant := &github.UserGrant{Installations: []github.Installation{}}
-	if !a.unexpiring {
-		grant.RefreshToken = fmt.Sprintf("ghr_carol_%d", 10*len(a.asked))
+	n := 10 * len(a.asked)
+	grant := &github.UserGrant{Installations: []github.Installation{}, AccessToken: fmt.Sprintf("ghu_carol_%d", n), Authorization: fmt.Sprintf("ghr_carol_%d", n)}
+	if a.unexpiring {
+		grant.Authorization = grant.AccessToken
 	}
 	for _, one := range reached {
 		one.Controlled = !a.guests[code][one.ID]
@@ -307,7 +317,7 @@ type githubWorld struct {
 func newGitHubWorld(t *testing.T, withApp bool) *githubWorld {
 	t.Helper()
 	w := &githubWorld{world: newWorld(t), app: newFakeApp()}
-	w.installations = &memInstallations{memStore: w.store, connected: map[string][]*domain.OrgGitHubInstallation{}, refresh: map[string]string{}}
+	w.installations = &memInstallations{memStore: w.store, connected: map[string][]*domain.OrgGitHubInstallation{}, kept: map[string]string{}}
 	w.experiments = experiments{"pe-a": {w.projectA, "Acme/Model"}, "pe-bare": {w.projectA, ""}, "pe-b": {w.projectB, "Acme/Model"}}
 	access := auth.NewAccess(placement{memStore: w.store})
 	if withApp {
@@ -943,8 +953,8 @@ func TestARepositoryIsCreatedOnAPersonalAccountWithTheAuthorisationItsOwnerConne
 	var connected domain.OrgGitHubInstallation
 	w.ok("owner", "POST", path, connectBody("code-carol", 0), http.StatusCreated, &connected)
 	key := fmt.Sprintf("%s %d", w.orgA, carol.ID)
-	if connected.InstallationID != carol.ID || connected.AccountType != github.AccountUser || w.installations.refresh[key] != "ghr_carol_10" || w.app.revoked != 0 {
-		t.Fatalf("connected = %+v keeping %q with %d grants revoked, want carol's own account with her refresh token kept and not revoked", connected, w.installations.refresh[key], w.app.revoked)
+	if connected.InstallationID != carol.ID || connected.AccountType != github.AccountUser || w.installations.kept[key] != "ghr_carol_10" || len(w.app.revoked) != 0 {
+		t.Fatalf("connected = %+v keeping %q with %v revoked, want carol's own account with her refresh token kept and not revoked", connected, w.installations.kept[key], w.app.revoked)
 	}
 	if strings.Contains(w.call("owner", "GET", path, nil).Body.String(), "ghr_") {
 		t.Fatal("the listing of installations holds the refresh token")
@@ -952,8 +962,8 @@ func TestARepositoryIsCreatedOnAPersonalAccountWithTheAuthorisationItsOwnerConne
 	for i, want := range []string{"ghr_carol_11", "ghr_carol_12"} {
 		name := fmt.Sprintf("sweep-%d", i)
 		named, err := w.host.Create(ctx, w.projectA, "", name, "", firstFiles)
-		if err != nil || named != "carol/"+name || w.app.created[i] != "300 "+name || w.installations.refresh[key] != want {
-			t.Fatalf("Create %d on a personal account = %q, %v (created %v, keeping %q), want it created with the refresh token replaced by %s", i, named, err, w.app.created, w.installations.refresh[key], want)
+		if err != nil || named != "carol/"+name || w.app.created[i] != "300 "+name || w.installations.kept[key] != want {
+			t.Fatalf("Create %d on a personal account = %q, %v (created %v, keeping %q), want it created with the refresh token replaced by %s", i, named, err, w.app.created, w.installations.kept[key], want)
 		}
 	}
 	// Beside an organisation the request says which, and each is created its own way.
@@ -966,13 +976,93 @@ func TestARepositoryIsCreatedOnAPersonalAccountWithTheAuthorisationItsOwnerConne
 	}
 	// An organisation's connect keeps nothing of the person: the grant is revoked.
 	w.ok("owner", "POST", path, connectBody("code-acme", 0), http.StatusCreated, &connected)
-	if w.app.revoked != 1 || w.installations.refresh[fmt.Sprintf("%s %d", w.orgA, acme.ID)] != "" {
-		t.Fatalf("an organisation connected: %d grants revoked, keeping %q, want the grant revoked and nothing kept", w.app.revoked, w.installations.refresh[fmt.Sprintf("%s %d", w.orgA, acme.ID)])
+	if len(w.app.revoked) != 1 || w.installations.kept[fmt.Sprintf("%s %d", w.orgA, acme.ID)] != "" {
+		t.Fatalf("an organisation connected: %v revoked, keeping %q, want the grant revoked and nothing kept", w.app.revoked, w.installations.kept[fmt.Sprintf("%s %d", w.orgA, acme.ID)])
 	}
 	// So is the grant of a connect that is refused.
 	w.refused("owner", "POST", path, connectBody("code-guest", 0), http.StatusUnprocessableEntity, ReasonInstallationNotControlled)
-	if w.app.revoked != 2 {
-		t.Fatalf("a refused connect left its grant: %d revoked, want 2", w.app.revoked)
+	if len(w.app.revoked) != 2 {
+		t.Fatalf("a refused connect left its grant: %v revoked, want 2", w.app.revoked)
+	}
+}
+
+// An App whose user tokens do not expire issues no refresh token: the person's token itself is
+// what is kept, and each create uses it as it is.
+func TestAPersonalAccountOfAnAppWhoseUserTokensDoNotExpireIsKeptByTheTokenItself(t *testing.T) {
+	ctx := context.Background()
+	w := newGitHubWorld(t, true)
+	w.app.unexpiring = true
+	w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
+	key := fmt.Sprintf("%s %d", w.orgA, carol.ID)
+	if w.installations.kept[key] != "ghu_carol_10" || len(w.app.revoked) != 0 {
+		t.Fatalf("keeping %q with %v revoked, want carol's token kept and not revoked", w.installations.kept[key], w.app.revoked)
+	}
+	for i := range 2 {
+		name := fmt.Sprintf("sweep-%d", i)
+		if named, err := w.host.Create(ctx, w.projectA, "", name, "", firstFiles); err != nil || named != "carol/"+name || w.installations.kept[key] != "ghu_carol_10" || len(w.app.refreshed) != 0 {
+			t.Fatalf("Create %d = %q, %v (keeping %q after %d trades), want it created with the token kept as it is", i, named, err, w.installations.kept[key], len(w.app.refreshed))
+		}
+	}
+}
+
+// Disconnecting a personal account ends at GitHub the authorisation kept for it, and one GitHub
+// does not answer for stays connected, so that no authorisation outlives its connection unseen.
+func TestDisconnectingAPersonalAccountEndsTheAuthorisationKeptForItAtGitHub(t *testing.T) {
+	path := func(w *githubWorld) string {
+		return fmt.Sprintf("/orgs/%s/github-installations/%d", w.orgA, carol.ID)
+	}
+	connected := func() *githubWorld {
+		w := newGitHubWorld(t, true)
+		w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
+		return w
+	}
+	w := connected()
+	w.ok("owner", "DELETE", path(w), nil, http.StatusNoContent, nil)
+	if !slices.Equal(w.app.revoked, []string{"ghu_carol_10"}) || len(w.installations.connected[w.orgA]) != 0 || len(w.installations.kept) != 0 {
+		t.Fatalf("revoked %v with %d connected and %v kept, want the token of the renewed authorisation ended and nothing left", w.app.revoked, len(w.installations.connected[w.orgA]), w.installations.kept)
+	}
+
+	// GitHub fails the revocation: the installation stays, holding the authorisation that
+	// replaced the one spent, and the next call ends it.
+	w = connected()
+	w.app.revokeErr = errors.New("github: DELETE /applications/Iv23test/token answered 500: " + leak)
+	if message := w.refused("owner", "DELETE", path(w), nil, http.StatusInternalServerError, ""); strings.Contains(message, leak) {
+		t.Fatalf("the answer repeats the failure's text: %s", message)
+	}
+	key := fmt.Sprintf("%s %d", w.orgA, carol.ID)
+	if len(w.installations.connected[w.orgA]) != 1 || w.installations.kept[key] != "ghr_carol_11" {
+		t.Fatalf("after a failed revocation: %d connected keeping %q, want it connected with the next refresh token", len(w.installations.connected[w.orgA]), w.installations.kept[key])
+	}
+	w.app.revokeErr = nil
+	w.ok("owner", "DELETE", path(w), nil, http.StatusNoContent, nil)
+	if !slices.Equal(w.app.revoked, []string{"ghu_carol_11"}) {
+		t.Fatalf("revoked %v, want the token of the second renewal", w.app.revoked)
+	}
+
+	// An authorisation GitHub no longer takes, or one the deployment can no longer read, has
+	// nothing to end and does not keep the installation connected.
+	for name, arrange := range map[string]func(*githubWorld){
+		"ran out or revoked on GitHub":  func(w *githubWorld) { w.app.refreshErr = github.ErrUserAuthorization },
+		"sealed under another secret":   func(w *githubWorld) { w.installations.unreadable = true },
+		"an organisation, keeping none": func(w *githubWorld) { w.connect(w.orgA, acme) },
+	} {
+		w := connected()
+		arrange(w)
+		target := path(w)
+		if name == "an organisation, keeping none" {
+			target = fmt.Sprintf("/orgs/%s/github-installations/%d", w.orgA, acme.ID)
+		}
+		w.ok("owner", "DELETE", target, nil, http.StatusNoContent, nil)
+		if len(w.app.revoked) != 0 {
+			t.Errorf("%s: revoked %v, want nothing ended at GitHub", name, w.app.revoked)
+		}
+	}
+	// GitHub rate limiting the renewal is no reason to drop a live authorisation.
+	w = connected()
+	w.app.refreshErr = github.ErrRateLimited
+	w.refused("owner", "DELETE", path(w), nil, http.StatusServiceUnavailable, ReasonUnavailable)
+	if len(w.installations.connected[w.orgA]) != 1 {
+		t.Fatal("a disconnect GitHub rate limited dropped the installation")
 	}
 }
 
@@ -989,9 +1079,9 @@ func TestACreateOnAPersonalAccountThatGitHubRefusesSaysWhatItsOwnerDoes(t *testi
 	}{
 		"connected before the authorisation was kept": {func(w *githubWorld) { w.connect(w.orgA, carol) },
 			422, ReasonRepositoryAuthorizationRequired, []string{"connects the account again", "names it in repository"}},
-		"an App whose user tokens do not expire": {func(w *githubWorld) {
-			w.app.unexpiring = true
+		"an authorisation sealed under a secret since replaced": {func(w *githubWorld) {
 			w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
+			w.installations.unreadable = true
 		}, 422, ReasonRepositoryAuthorizationRequired, []string{"connects the account again"}},
 		"an authorisation that ran out or was revoked": {func(w *githubWorld) {
 			w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
@@ -1031,43 +1121,31 @@ func TestACreateOnAPersonalAccountThatGitHubRefusesSaysWhatItsOwnerDoes(t *testi
 	}
 }
 
-// An installation connected before the type of its account was kept gets it from GitHub at its
-// next use, once, and the answer is recorded.
-func TestAnInstallationConnectedBeforeItsAccountTypeWasKeptLearnsItFromGitHub(t *testing.T) {
+// An installation connected before the type of its account was kept is listed without it and
+// GitHub is not asked: a create on it is GitHub's to place, and a personal one says to connect
+// the account again, which records the type.
+func TestAnInstallationConnectedBeforeItsAccountTypeWasKeptIsReadAsStored(t *testing.T) {
 	ctx := context.Background()
 	w := newGitHubWorld(t, true)
-	untyped := func(installation github.Installation) github.Installation {
-		installation.AccountType = ""
-		return installation
-	}
-	w.connect(w.orgA, untyped(carol))
-	if _, err := w.host.Create(ctx, w.projectA, "", "sweep", "", firstFiles); reasonOf(err) != ReasonRepositoryAuthorizationRequired || len(w.app.created) != 0 {
-		t.Fatalf("Create on an untyped personal account: %v (created %v), want it known for a personal one, with no authorisation kept", err, w.app.created)
-	}
-	if _, err := w.host.Create(ctx, w.projectA, "", "sweep", "", firstFiles); reasonOf(err) != ReasonRepositoryAuthorizationRequired || !slices.Equal(w.app.looked, []int64{300}) {
-		t.Fatalf("a second create: %v after asking GitHub about %v, want the type asked for once", err, w.app.looked)
-	}
-
-	w = newGitHubWorld(t, true)
-	for _, one := range []github.Installation{acme, rival, carol} {
-		w.connect(w.orgA, untyped(one))
-		w.store.clock = w.store.clock.Add(time.Minute)
-	}
-	delete(w.app.covers, 200)
+	untyped := carol
+	untyped.AccountType = ""
+	w.connect(w.orgA, untyped)
 	path := "/orgs/" + w.orgA + "/github-installations"
 	var listed []domain.OrgGitHubInstallation
 	w.ok("member", "GET", path, nil, http.StatusOK, &listed)
-	if len(listed) != 3 || listed[0].AccountType != github.AccountOrganization || listed[1].AccountType != "" || listed[2].AccountType != github.AccountUser {
-		t.Fatalf("listed = %+v, want each typed by GitHub but the one removed there", listed)
+	if len(listed) != 1 || listed[0].AccountType != "" || len(w.app.looked) != 0 {
+		t.Fatalf("listed = %+v after asking GitHub about %v, want it as stored and GitHub not asked", listed, w.app.looked)
 	}
-	w.ok("member", "GET", path, nil, http.StatusOK, &listed)
-	if !slices.Equal(w.app.looked, []int64{100, 200, 300, 200}) {
-		t.Fatalf("GitHub was asked about %v, want each once and the one it did not answer for again", w.app.looked)
+	if _, err := w.host.Create(ctx, w.projectA, "", "sweep", "", firstFiles); reasonOf(err) != ReasonRepositoryAuthorizationRequired || len(w.app.created) != 0 {
+		t.Fatalf("Create on an untyped personal account: %v (created %v), want repository_authorization_required", err, w.app.created)
 	}
-	w.app.covers[200] = nil
+	w.ok("owner", "POST", path, connectBody("code-carol", 0), http.StatusCreated, nil)
 	w.ok("member", "GET", path, nil, http.StatusOK, &listed)
-	if listed[1].AccountType != github.AccountOrganization {
-		t.Fatalf("listed = %+v, want the installation typed once GitHub answers for it", listed[1])
+	if listed[0].AccountType != github.AccountUser {
+		t.Fatalf("listed = %+v, want the type recorded once the account is connected again", listed[0])
+	}
+	if named, err := w.host.Create(ctx, w.projectA, "", "sweep", "", firstFiles); err != nil || named != "carol/sweep" {
+		t.Fatalf("Create after connecting again = %q, %v, want it created", named, err)
 	}
 }
 

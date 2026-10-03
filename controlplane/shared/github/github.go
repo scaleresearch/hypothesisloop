@@ -159,13 +159,13 @@ type Installation struct {
 	SelectedRepositories bool `json:"-"`
 }
 
-// UserGrant is what a person's authorisation of the App gave: the installations they reach, and
-// RefreshToken, which renews the authorisation for six months and is empty when the App's user
-// tokens do not expire.
+// UserGrant is what a person's authorisation of the App gave: the installations they reach,
+// AccessToken, which acts as them now and which RevokeUser ends, and Authorization, which
+// UserToken takes for a token that acts as them later.
 type UserGrant struct {
 	Installations []Installation
-	RefreshToken  string
-	accessToken   string
+	AccessToken   string
+	Authorization string
 }
 
 // Repository is a repository an installation covers, named owner/name in GitHub's own casing.
@@ -255,7 +255,7 @@ func CloneURL(fullName string) string {
 // reaches on GitHub, each marked with whether they control the account it is on. Reaching one
 // takes no more than being a collaborator on a single repository it covers, so only Controlled
 // says who may connect it. redirectURI is the one the code was issued to. The grant is the
-// caller's to keep by its RefreshToken or to end with RevokeUser. One whose installations could
+// caller's to keep by its Authorization or to end with RevokeUser. One whose installations could
 // not be read is revoked here.
 func (c *Client) UserInstallations(ctx context.Context, userCode, redirectURI string) (*UserGrant, error) {
 	if userCode == "" {
@@ -265,29 +265,60 @@ func (c *Client) UserInstallations(ctx context.Context, userCode, redirectURI st
 	if err != nil {
 		return nil, err
 	}
-	grant := &UserGrant{RefreshToken: tokens.RefreshToken, accessToken: tokens.AccessToken}
-	if grant.Installations, err = c.installationsOf(ctx, grant.accessToken); err != nil {
-		_ = c.RevokeUser(ctx, grant)
+	grant := &UserGrant{AccessToken: tokens.AccessToken}
+	if grant.Authorization, err = tokens.authorization(); err == nil {
+		grant.Installations, err = c.installationsOf(ctx, grant.AccessToken)
+	}
+	if err != nil {
+		_ = c.RevokeUser(ctx, grant.AccessToken)
 		return nil, err
 	}
 	return grant, nil
 }
 
-// RefreshUser trades the refresh token of a person's grant for a token that acts as them for
-// eight hours and for the refresh token that replaces the one given, which GitHub takes once.
+// The two forms of what keeps a person's grant. Which one GitHub issues is the App's setting
+// "Expire user authorization tokens": with it on, a refresh token that GitHub takes once and
+// answers with its replacement, good for six months; with it off, the access token itself, which
+// does not expire.
+const (
+	byRefreshToken = "refresh:"
+	byAccessToken  = "access:"
+)
+
+func (t *userTokens) authorization() (string, error) {
+	switch {
+	case t.RefreshToken != "":
+		return byRefreshToken + t.RefreshToken, nil
+	case t.ExpiresIn == 0:
+		return byAccessToken + t.AccessToken, nil
+	default:
+		return "", errors.New("github: the user token expires and came with no refresh token")
+	}
+}
+
+// UserToken returns a token that acts as the person whose grant authorization keeps, and the
+// authorization that keeps the grant from here on: the caller stores next in place of the one
+// given before anything else, since GitHub takes a refresh token once.
 // ErrUserAuthorization when there is none or GitHub no longer takes it.
-func (c *Client) RefreshUser(ctx context.Context, refreshToken string) (accessToken, next string, err error) {
-	if refreshToken == "" {
+func (c *Client) UserToken(ctx context.Context, authorization string) (accessToken, next string, err error) {
+	if kept, ok := strings.CutPrefix(authorization, byAccessToken); ok && kept != "" {
+		return kept, authorization, nil
+	}
+	refreshToken, ok := strings.CutPrefix(authorization, byRefreshToken)
+	switch {
+	case authorization == "":
 		return "", "", ErrUserAuthorization
+	case !ok || refreshToken == "":
+		return "", "", errors.New("github: the authorisation kept is none this client issued")
 	}
 	tokens, err := c.userTokens(ctx, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refreshToken}})
 	if err != nil {
 		return "", "", err
 	}
-	if tokens.RefreshToken == "" {
-		return "", "", errors.New("github: the refresh answered without the refresh token that replaces the one used")
+	if next, err = tokens.authorization(); err != nil {
+		return "", "", err
 	}
-	return tokens.AccessToken, tokens.RefreshToken, nil
+	return tokens.AccessToken, next, nil
 }
 
 const pageSize = 100
@@ -455,7 +486,7 @@ var newRepositoryName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
 // creates it, with a token that holds everything it granted, and GitHub then counts it among the
 // repositories the installation covers, whichever ones its owner selected. On a person's own
 // account GitHub creates "for the authenticated user", and an installation token is no user's:
-// userToken, that person's from RefreshUser, creates it, and adds it to an installation that
+// userToken, that person's from UserToken, creates it, and adds it to an installation that
 // covers selected repositories only. Neither token leaves here.
 func (c *Client) CreateRepository(ctx context.Context, installationID int64, userToken, name, description string, files map[string]string) (*Repository, error) {
 	if !newRepositoryName.MatchString(name) || name == "." || name == ".." {
@@ -553,14 +584,17 @@ func (c *Client) firstCommit(ctx context.Context, token *Token, branch string, f
 	return c.call(ctx, http.MethodPatch, git+"refs/heads/"+branch, token.Value, map[string]any{"sha": commit.SHA, "force": true}, nil)
 }
 
-// RevokeUser ends a grant at GitHub, so that nothing of the person's outlives the question it
-// was issued to answer.
-func (c *Client) RevokeUser(ctx context.Context, grant *UserGrant) error {
+// RevokeUser ends a person's token at GitHub, so that nothing of theirs outlives what it was
+// issued for. ErrUserAuthorization when GitHub knows no such token: it was ended before.
+func (c *Client) RevokeUser(ctx context.Context, accessToken string) error {
 	basic := "Basic " + base64.StdEncoding.EncodeToString([]byte(c.clientID+":"+c.clientSecret))
 	path := "/applications/" + url.PathEscape(c.clientID) + "/token"
-	err := c.request(ctx, http.MethodDelete, path, basic, maxResponseBytes, map[string]string{"access_token": grant.accessToken}, nil)
-	if errors.Is(err, errUnauthorized) {
+	err := c.request(ctx, http.MethodDelete, path, basic, maxResponseBytes, map[string]string{"access_token": accessToken}, nil)
+	switch {
+	case errors.Is(err, errUnauthorized):
 		return ErrAppCredentials
+	case errors.Is(err, errNotFound):
+		return ErrUserAuthorization
 	}
 	return err
 }
@@ -679,6 +713,7 @@ func (c *Client) File(ctx context.Context, token *Token, ref, path string) ([]by
 
 type userTokens struct {
 	AccessToken  string `json:"access_token"`
+	ExpiresIn    int    `json:"expires_in"`
 	RefreshToken string `json:"refresh_token"`
 	Error        string `json:"error"`
 }
