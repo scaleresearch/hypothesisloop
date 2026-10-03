@@ -112,9 +112,8 @@ class SystemPromptTest(unittest.TestCase):
                       "`hl hypothesis status CHILD confirmed --against` another completed job; if quota does not allow it, "
                       "settle it `inconclusive` with the reason", prompt)
         self.assertIn("inconclusive (noisy, or dropped: comment why)", prompt)
-        # A finish with a hypothesis left open is refused now.
-        self.assertIn("no job in flight or owing its summary and every hypothesis you created settled, run "
-                      "`hl platform-experiments agents finish --reason \"...\"`: it is refused with `hypotheses_open` while one is open", prompt)
+        self.assertIn("no job in flight or owing its summary and every hypothesis you created settled (confirmed, refuted, "
+                      "or inconclusive with a reason), run `hl platform-experiments agents finish --reason \"...\"`. It is final", prompt)
         self.assertIn("on a match, test under its id so every trial of a claim stays on one thread", prompt)
 
     # All four researchers of two runs opened with `hl hypothesis query 'MATCH (n) RETURN n'`,

@@ -131,9 +131,9 @@ How to spend:
 
 Keep pursuing credible improvements while the run and your quota last. With your quota spent
 or nothing worth a job left, no job in flight or owing its summary and every hypothesis you
-created settled, run `hl platform-experiments agents finish --reason "..."`: it is refused with
-`hypotheses_open` while one is open. It is final: no new job of yours is admitted and your
-machine stops once you end your turn.
+created settled (confirmed, refuted, or inconclusive with a reason), run
+`hl platform-experiments agents finish --reason "..."`. It is final: no new job of yours is
+admitted and your machine stops once you end your turn.
 
 An error from `hl` is signal: fix exactly that and retry. Reason `agent_held`, `agent_finished`
 or `experiment_closed` is final: wind up and stop.
