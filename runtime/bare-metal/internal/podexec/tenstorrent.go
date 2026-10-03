@@ -76,8 +76,26 @@ func probeTenstorrent(_ context.Context) ([]acceleratorDevice, error) {
 
 		devices = append(devices, acceleratorDevice{
 			DevicePath: filepath.Join("/dev/tenstorrent", index),
-			Labels:     []string{"tenstorrent.com/chipArch=" + arch},
+			Labels:     []string{tenstorrentLabelPrefix + "chipArch=" + arch},
 		})
 	}
 	return devices, nil
+}
+
+const tenstorrentLabelPrefix = "tenstorrent.com/"
+
+// tenstorrentPreflight says how many 1 GiB hugepages a node with a chip has reserved: the
+// platform gives every job on a chip hugepages-1Gi, which its driver maps the chip through.
+func tenstorrentPreflight(devices []acceleratorDevice) ([]string, error) {
+	if !anyLabelled(devices, tenstorrentLabelPrefix) {
+		return nil, nil
+	}
+	reserved, err := hugepageSizes["hugepages-1Gi"].reservedPages()
+	if err != nil {
+		return []string{"hugepages: cannot read how many 1 GiB hugepages are reserved on this host: " + err.Error()}, nil
+	}
+	if reserved == 0 {
+		return []string{"hugepages: no 1 GiB hugepages are reserved on this host, and a job that asks for hugepages-1Gi is refused as one this node cannot run"}, nil
+	}
+	return []string{fmt.Sprintf("hugepages: %d x 1 GiB reserved", reserved)}, nil
 }

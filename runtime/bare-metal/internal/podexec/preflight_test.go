@@ -52,9 +52,9 @@ func TestPreflightNamesTheAcceleratorsAsJobsAskForThem(t *testing.T) {
 	if err := os.WriteFile(reserved, []byte("4\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	old := gigabyteHugepages
-	gigabyteHugepages = reserved
-	defer func() { gigabyteHugepages = old }()
+	old := hugepageSizes
+	hugepageSizes = map[string]hugepageSize{"hugepages-1Gi": {reserved: reserved}}
+	defer func() { hugepageSizes = old }()
 
 	lines, err := preflightExecutor(server.URL, chip, chip).Preflight(context.Background(), server.Client())
 	if err != nil {
@@ -73,6 +73,13 @@ func TestPreflightNamesTheAcceleratorsAsJobsAskForThem(t *testing.T) {
 	lines, _ = preflightExecutor(server.URL, chip).Preflight(context.Background(), server.Client())
 	if !strings.Contains(strings.Join(lines, "\n"), "no 1 GiB hugepages are reserved") {
 		t.Errorf("a Tenstorrent node without hugepages was not told so:\n%s", strings.Join(lines, "\n"))
+	}
+	if err := os.WriteFile(reserved, []byte("many\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lines, _ = preflightExecutor(server.URL, chip).Preflight(context.Background(), server.Client())
+	if said := strings.Join(lines, "\n"); !strings.Contains(said, "cannot read how many 1 GiB hugepages") || strings.Contains(said, "no 1 GiB hugepages are reserved") {
+		t.Errorf("a count that is no number was read as none reserved:\n%s", said)
 	}
 
 	lines, _ = preflightExecutor(server.URL).Preflight(context.Background(), server.Client())
@@ -142,5 +149,13 @@ func TestPreflightStopsANodeWhoseNVIDIACardsItCannotRead(t *testing.T) {
 	gpu := acceleratorDevice{DevicePath: "/dev/nvidia0", Labels: []string{"nvidia.com/gpu.product=NVIDIA-L40"}}
 	if _, err := preflightExecutor(server.URL, gpu).Preflight(context.Background(), server.Client()); err != nil {
 		t.Fatalf("a node that reads its GPU: %v", err)
+	}
+
+	// A device whose attributes cannot be read may be the GPU: the count is not taken without it.
+	if err := os.Remove(filepath.Join(bus, "0000:01:00.0", "class")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := preflightExecutor(server.URL, gpu).Preflight(context.Background(), server.Client()); err == nil || !strings.Contains(err.Error(), "0000:01:00.0") {
+		t.Fatalf("an unreadable PCI device: err = %v, want it named", err)
 	}
 }

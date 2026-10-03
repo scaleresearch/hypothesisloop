@@ -72,6 +72,19 @@ type acceleratorDevice struct {
 	Labels     []string // e.g. "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"
 }
 
+// anyLabelled says whether one of devices carries a label of the vendor whose labels start with
+// prefix.
+func anyLabelled(devices []acceleratorDevice, prefix string) bool {
+	for _, device := range devices {
+		for _, label := range device.Labels {
+			if strings.HasPrefix(label, prefix) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // deviceRequester is a vendor whose devices reach a container as an engine device request in
 // place of a plain device mapping. id reads the request's device id off a host device path the
 // vendor's probe returned, with ok false for a path that is not the vendor's, and path reverses it.

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -63,6 +65,49 @@ func probeNVIDIA(_ context.Context) ([]acceleratorDevice, error) {
 		})
 	}
 	return devices, nil
+}
+
+// pciDevicesDir lists every PCI device of the host, whether or not a driver is loaded for it.
+var pciDevicesDir = "/sys/bus/pci/devices"
+
+// nvidiaCardsOnTheBus counts the NVIDIA display and 3D controllers the kernel enumerated.
+func nvidiaCardsOnTheBus() (int, error) {
+	entries, err := os.ReadDir(pciDevicesDir)
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read %s: %w", pciDevicesDir, err)
+	}
+	cards := 0
+	for _, entry := range entries {
+		vendor, err := os.ReadFile(filepath.Join(pciDevicesDir, entry.Name(), "vendor"))
+		if err != nil {
+			return 0, fmt.Errorf("read the vendor of PCI device %s: %w", entry.Name(), err)
+		}
+		class, err := os.ReadFile(filepath.Join(pciDevicesDir, entry.Name(), "class"))
+		if err != nil {
+			return 0, fmt.Errorf("read the class of PCI device %s: %w", entry.Name(), err)
+		}
+		if strings.TrimSpace(string(vendor)) == "0x10de" && strings.HasPrefix(strings.TrimSpace(string(class)), "0x03") {
+			cards++
+		}
+	}
+	return cards, nil
+}
+
+// nvidiaPreflight stops a node whose GPUs the probe cannot see. The NVIDIA library missing reads
+// as a node without GPUs, which is what most nodes are. A card on the bus says this one has
+// them, and it would otherwise report none and take no GPU job with nothing said.
+func nvidiaPreflight(devices []acceleratorDevice) ([]string, error) {
+	cards, err := nvidiaCardsOnTheBus()
+	if err != nil {
+		return nil, err
+	}
+	if cards > 0 && !anyLabelled(devices, "nvidia.com/") {
+		return nil, fmt.Errorf("this host has %d NVIDIA card(s) on its PCI bus and the agent reads none of them: libnvidia-ml.so is not loadable where the agent runs, or the NVIDIA driver is not loaded", cards)
+	}
+	return nil, nil
 }
 
 const nvidiaDevicePrefix = "/dev/nvidia"
