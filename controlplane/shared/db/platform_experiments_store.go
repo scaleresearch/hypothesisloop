@@ -528,7 +528,7 @@ WHERE platform_experiment_id = $1 AND role = $2`, pe.ID, string(domain.SignupRol
 
 // StageRedistribution describes one resource dimension's move across a stage boundary: the cut
 // agents' unspent allocation, plus the share of the platform budget withheld for the incoming
-// stage, split evenly across survivors.
+// stage, split evenly across survivors (domain.StageCredit).
 //
 // UsedByAgent carries observed consumption per cut agent, which is metrics-store data and so
 // cannot be read under the Postgres lock. That is safe in a way the allocation is not: observed
@@ -647,19 +647,6 @@ ORDER BY s.agent_id`, id)
 	return true, quotas, nil
 }
 
-// StageReleaseTotal is what returns to the survivors at a boundary: the share of the platform
-// budget withheld for the incoming stage, plus whatever the cut agents did not spend. An agent
-// that overspent its guarantee contributes nothing rather than a negative.
-func StageReleaseTotal(dim StageRedistribution, allocatedByAgent map[string]float64) float64 {
-	release := dim.Budget * dim.ReleaseFrac
-	for agentID, allocated := range allocatedByAgent {
-		if unspent := allocated - dim.UsedByAgent[agentID]; unspent > 0 {
-			release += unspent
-		}
-	}
-	return release
-}
-
 // AdvanceStage commits one stage boundary in a single Postgres transaction: it claims
 // stageIndex in platform_experiment_stage_advances, records the cut agents, applies every
 // zero/add quota op, and moves current_stage to stageIndex+1.
@@ -751,18 +738,18 @@ func (s *PlatformExperimentsStore) AdvanceStage(ctx context.Context, platformExp
 		if err := rows.Err(); err != nil {
 			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: lock cut allocations: %w", err)
 		}
-		dim.UsedByAgent = used
-		release := StageReleaseTotal(dim, allocated)
-
 		zeroQ := fmt.Sprintf(`UPDATE agent_quotas SET %s=0, %s=0 WHERE platform_experiment_id=$1 AND agent_id = ANY($2)`, guaranteed, burst)
 		if _, err := tx.Exec(ctx, zeroQ, platformExpID, cutAgentIDs); err != nil {
 			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: zero %s: %w", dim.ResourceType, err)
 		}
-		if len(survivorIDs) == 0 || release <= 0 {
+		if len(survivorIDs) == 0 {
 			continue
 		}
-		if err := creditIntoTier(ctx, tx, platformExpID, survivorIDs, guaranteed, burst,
-			domain.RoundHours(release/float64(len(survivorIDs))), 0); err != nil {
+		credit := domain.StageCredit(dim.Budget, dim.ReleaseFrac, allocated, used, len(survivorIDs))
+		if credit <= 0 {
+			continue
+		}
+		if err := creditIntoTier(ctx, tx, platformExpID, survivorIDs, guaranteed, burst, credit, 0); err != nil {
 			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: add %s: %w", dim.ResourceType, err)
 		}
 	}

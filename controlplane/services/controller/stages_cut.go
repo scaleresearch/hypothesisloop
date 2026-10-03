@@ -48,7 +48,7 @@ func (c *Controller) applyCut(ctx context.Context, pe *domain.PlatformExperiment
 	// The share of the budget withheld for the stage now starting is released here. Only real
 	// (guaranteed) hours move — burst is a virtual overcommit limit, not physical compute, so
 	// redistributing it would inflate survivors' allocations beyond the actual remaining budget.
-	releaseFrac := pe.Stages[stageIndex].LengthPct / 100.0
+	releaseFrac := pe.Stages[stageIndex].ReleaseFrac()
 
 	// Accelerator-hours drives progress itself and always moves. Only observed usage travels into
 	// the transaction — the allocation each unspent figure is measured against is read there,

@@ -61,6 +61,32 @@ func TestBoundaryProgress(t *testing.T) {
 	}
 }
 
+// When a stage ends and what its end gives were worked out apart by the submit refusal, the
+// quota read and the boundary itself.
+func TestAStageBoundaryIsWhenItFallsAndWhatItGivesEachSurvivor(t *testing.T) {
+	started := time.Date(2026, 10, 6, 21, 0, 0, 0, time.UTC)
+	pe := &PlatformExperiment{StartedAt: started, EndsAt: started.Add(45 * time.Minute),
+		Stages: []Stage{{LengthPct: 40, EvictPct: 50}, {LengthPct: 60}}}
+	if got, want := pe.StageEndsAt(1), started.Add(18*time.Minute); !got.Equal(want) {
+		t.Errorf("stage 1 ends at %s, want %s: 40%% of 45 minutes", got, want)
+	}
+	if got := pe.StageEndsAt(2); !got.Equal(pe.EndsAt) {
+		t.Errorf("the last stage ends at %s, want the run's end", got)
+	}
+	if got := (&PlatformExperiment{Stages: pe.Stages}).StageEndsAt(1); !got.IsZero() {
+		t.Errorf("before the clock started: stage 1 ends at %s, want no moment", got)
+	}
+
+	// 60% of 6 hours over 2 survivors, and with it the 4 hours one cut agent left of its 10.
+	if got := StageCredit(6, pe.Stages[1].ReleaseFrac(), nil, nil, 2); got != 1.8 {
+		t.Errorf("credit = %v, want 1.8", got)
+	}
+	allocated, used := map[string]float64{"cut1": 10, "cut2": 10}, map[string]float64{"cut1": 6, "cut2": 12}
+	if got := StageCredit(6, pe.Stages[1].ReleaseFrac(), allocated, used, 2); got != 3.8 {
+		t.Errorf("credit with a cut agent's unspent hours = %v, want 3.8: an agent that overspent takes nothing back", got)
+	}
+}
+
 func TestStageProgress(t *testing.T) {
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(10 * time.Hour)

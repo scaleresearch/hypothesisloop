@@ -578,7 +578,7 @@ func (s *PlatformExperimentsService) start(ctx context.Context, pe *domain.Platf
 		// stage releases its own at the boundary it starts (see controller.applyCut), which stops
 		// one agent exhausting the budget before the ladder has cut anyone.
 		stages := domain.RunStages(pe.Stages, researchers)
-		exploreFrac := stages[0].LengthPct / 100.0
+		exploreFrac := stages[0].ReleaseFrac()
 		// Every signed-up agent participates or the start fails. Skipping the ones that could not
 		// be resolved used to mean a transient database error permanently disinherited an agent:
 		// the experiment started without it, and there is no second allocation pass.

@@ -122,6 +122,36 @@ func (p *PlatformExperiment) CurrentStageDef() (Stage, bool) {
 	return p.Stages[p.CurrentStage-1], true
 }
 
+// StageEndsAt is the latest moment stage index (1-based) of the run ends, by the clock: the
+// boundary's share of the run past the run's start. It ends sooner once the same share of the
+// budget is spent (StageProgress). Zero while the run's clock has not started.
+func (p *PlatformExperiment) StageEndsAt(stageIndex int) time.Time {
+	if p.StartedAt.IsZero() {
+		return time.Time{}
+	}
+	return p.StartedAt.Add(time.Duration(BoundaryProgress(p.Stages, stageIndex) * float64(p.EndsAt.Sub(p.StartedAt)))).UTC()
+}
+
+// ReleaseFrac is the part of the run's budget the stage releases when it starts: its share of
+// the run's length.
+func (s Stage) ReleaseFrac() float64 {
+	return s.LengthPct / 100
+}
+
+// StageCredit is what each of survivors is given when a stage starts at a boundary: the stage's
+// part of budget, releaseFrac of it, plus what the agents cut there left unspent of what they
+// were allocated, split evenly. An agent that overspent contributes nothing rather than a
+// negative. The boundary credits it and a quota read promises it, from here alone.
+func StageCredit(budget, releaseFrac float64, allocatedByCut, usedByCut map[string]float64, survivors int) float64 {
+	release := budget * releaseFrac
+	for agentID, allocated := range allocatedByCut {
+		if unspent := allocated - usedByCut[agentID]; unspent > 0 {
+			release += unspent
+		}
+	}
+	return RoundHours(release / float64(survivors))
+}
+
 // BoundaryProgress returns the progress fraction (0..1) at which stage index (1-based) ends.
 // The final stage's boundary is 1.0 — the end of the experiment, where no cut can happen.
 func BoundaryProgress(stages []Stage, stageIndex int) float64 {

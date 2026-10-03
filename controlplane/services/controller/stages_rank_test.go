@@ -99,7 +99,7 @@ func TestStageReleaseSplitsBudgetShareAndReclaimsUnspent(t *testing.T) {
 	allocated := map[string]float64{"cut1": 10, "cut2": 10}
 
 	// 60% of a 100 AccH budget, plus cut1's 4 unspent hours.
-	if got, want := db.StageReleaseTotal(dim, allocated), 64.0; got != want {
+	if got, want := domain.StageCredit(dim.Budget, dim.ReleaseFrac, allocated, dim.UsedByAgent, 1), 64.0; got != want {
 		t.Fatalf("release = %v, want %v", got, want)
 	}
 }
@@ -107,7 +107,7 @@ func TestStageReleaseSplitsBudgetShareAndReclaimsUnspent(t *testing.T) {
 // A dimension the platform experiment does not budget releases nothing.
 func TestStageReleaseSkipsUntrackedDimension(t *testing.T) {
 	dim := db.StageRedistribution{ResourceType: domain.ResourceAcceleratorHours, Budget: 0, ReleaseFrac: 0.6}
-	if got := db.StageReleaseTotal(dim, map[string]float64{}); got != 0 {
+	if got := domain.StageCredit(dim.Budget, dim.ReleaseFrac, nil, nil, 1); got != 0 {
 		t.Fatalf("release = %v, want 0 for an untracked dimension", got)
 	}
 }

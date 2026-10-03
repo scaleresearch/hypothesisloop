@@ -19,19 +19,16 @@ type nextStage struct {
 // nextStageRelease is when the stage after pe's current one starts by the clock and what each of
 // standing researchers is given of runBudget then, as the boundary releases it
 // (controller.applyCut): the incoming stage's part of the budget, split evenly. ok is false when
-// no boundary is ahead: pe is not running, it is in its last stage, or nobody stands.
+// no boundary is ahead: pe is not running, its clock has not started, it is in its last stage, or
+// nobody stands.
 func nextStageRelease(pe *domain.PlatformExperiment, runBudget float64, standing int) (startsAt time.Time, credit float64, ok bool) {
 	if pe.Status != domain.PlatformExpRunning || pe.CurrentStage < 1 || pe.CurrentStage >= len(pe.Stages) || standing == 0 {
 		return time.Time{}, 0, false
 	}
-	window := pe.EndsAt.Sub(pe.StartedAt)
-	if pe.StartedAt.IsZero() || window <= 0 {
+	if startsAt = pe.StageEndsAt(pe.CurrentStage); startsAt.IsZero() {
 		return time.Time{}, 0, false
 	}
-	boundary := domain.BoundaryProgress(pe.Stages, pe.CurrentStage)
-	startsAt = pe.StartedAt.Add(time.Duration(boundary * float64(window))).UTC()
-	credit = domain.RoundHours(runBudget * pe.Stages[pe.CurrentStage].LengthPct / 100 / float64(standing))
-	return startsAt, credit, true
+	return startsAt, domain.StageCredit(runBudget, pe.Stages[pe.CurrentStage].ReleaseFrac(), nil, nil, standing), true
 }
 
 // nextStage reads the boundary ahead of pe, nil when there is none.

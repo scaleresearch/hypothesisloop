@@ -82,7 +82,7 @@ func (s *PlatformExperimentsStore) enrol(ctx context.Context, platformExpID stri
 // over max_agents, in the column its tier names (domain.ApplyQuotaTier). It is written when the
 // agent joins and again whenever the budget or max_agents of the open experiment changes.
 func allocateBaselineQuota(ctx context.Context, tx pgx.Tx, platformExpID, agentID string, tier domain.QuotaTier, budget float64, firstStage domain.Stage, maxAgents int, defaultTier domain.QuotaTier) error {
-	share := domain.RoundHours(budget * firstStage.LengthPct / 100 / float64(maxAgents))
+	share := domain.StageCredit(budget, firstStage.ReleaseFrac(), nil, nil, maxAgents)
 	guaranteed, burst := domain.ApplyQuotaTier(domain.ResolveQuotaTier(tier, defaultTier), share, 0)
 	id, err := domain.NewID(domain.AgentQuotaIDPrefix)
 	if err != nil {
