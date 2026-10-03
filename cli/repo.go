@@ -304,13 +304,16 @@ hl repo init writes a missing file.`, stderr)
 	if err != nil {
 		return fail(stderr, err)
 	}
+	// What follows fails nothing. Code may build a metric's key, so a key no file spells out is
+	// said and not refused.
+	var notes []string
 	for _, metric := range experiment.Metrics {
 		named, err := namedInClone(root, metric.Key)
 		if err != nil {
 			return fail(stderr, err)
 		}
 		if !named {
-			failures = append(failures, fmt.Sprintf("metrics: no file of the clone besides %s and %s names %s, a metric platform experiment %s declares: a job reports each declared metric under its key, as in post_metric(fraction_complete, value, %q)", repotemplate.Readme, repotemplate.ExperimentFile, metric.Key, id, metric.Key))
+			notes = append(notes, metricNotSpelled(metric.Key, id))
 		}
 	}
 	helper := metricsHelperAbsent
@@ -319,11 +322,12 @@ hl repo init writes a missing file.`, stderr)
 	} else if !errors.Is(err, iofs.ErrNotExist) {
 		return fail(stderr, err)
 	}
+	notes = append(notes, helper)
 	if len(failures) > 0 {
-		fmt.Fprintln(stdout, strings.Join(append(failures, helper), "\n"))
+		fmt.Fprintln(stdout, strings.Join(append(failures, notes...), "\n"))
 		return 1
 	}
-	fmt.Fprintln(stdout, helper)
+	fmt.Fprintln(stdout, strings.Join(notes, "\n"))
 	fmt.Fprintln(stdout, repoChecked(id))
 	return 0
 }
@@ -419,8 +423,13 @@ const (
 	metricsHelperAbsent  = "helper: no " + repotemplate.MetricsHelper + ", which fails nothing: a job reports a metric with POST $HYPOTHESISLOOP_API_URL/experiments/$HYPOTHESISLOOP_EXPERIMENT_ID/metrics, Authorization: Bearer $HYPOTHESISLOOP_TOKEN, body {\"metric_name\", \"fraction_complete\", \"metric_value\"}"
 )
 
+// metricNotSpelled says of a declared metric that no code of the clone spells its key out.
+func metricNotSpelled(key, id string) string {
+	return fmt.Sprintf("metrics: no file of the clone besides %s and %s spells out %s, a metric platform experiment %s declares, which fails nothing: code that builds its keys may still report it. A job reports each declared metric under its key, as in post_metric(fraction_complete, value, %q)", repotemplate.Readme, repotemplate.ExperimentFile, key, id, key)
+}
+
 func repoChecked(id string) string {
-	return "checked: the layout, each file's validity, and that " + repotemplate.ExperimentFile + ", " + repotemplate.JobSpec + " and the metrics the code names fit platform experiment " + id + ". Not checked: the README's text and the code the job spec runs."
+	return "checked: the layout, each file's validity, and that " + repotemplate.ExperimentFile + " and " + repotemplate.JobSpec + " fit platform experiment " + id + ". Not checked: the README's text, the code the job spec runs and which metrics it reports."
 }
 
 func cloneRoot() (string, error) {

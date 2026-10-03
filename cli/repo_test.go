@@ -271,10 +271,12 @@ func TestRepoCheckNamesWhatAClonesFilesLack(t *testing.T) {
 	write(t, clone, "README.md", "# sweep\n")
 	write(t, clone, repotemplate.ExperimentFile, filledExperiment)
 	write(t, clone, repotemplate.JobSpec, filledJobSpec)
-	// The files are whole and no code reports the metric the experiment ranks on.
-	want := "metrics: no file of the clone besides README.md and " + repotemplate.ExperimentFile + " names val_accuracy, a metric platform experiment pe-1 declares"
-	if code, out := repo(t, "check"); code != 1 || !strings.HasPrefix(out, want) || strings.Count(out, "\n") != 2 {
-		t.Fatalf("a clone whose code names no declared metric: hl repo check = %d, want only %q in\n%s", code, want, out)
+	// The files are whole and no code spells out the metric the experiment ranks on. A harness
+	// that built its keys, f"val_{name}", was failed for that and given a dummy literal to pass:
+	// the check says it and fails nothing.
+	write(t, clone, "train.py", "post_metric(1.0, accuracy, f\"val_{name}\")\n")
+	if code, out := repo(t, "check"); code != 0 || out != metricNotSpelled("val_accuracy", "pe-1")+"\n"+metricsHelperPresent+"\n"+repoChecked("pe-1")+"\n" || !strings.Contains(out, "which fails nothing") {
+		t.Fatalf("a clone whose code spells out no declared metric: hl repo check = %d, want it said and passed in\n%s", code, out)
 	}
 	write(t, clone, "train.py", "post_metric(1.0, accuracy, \"val_accuracy\")\n")
 	// A prepared repository, or one in another language, reports through the platform's request
@@ -289,7 +291,7 @@ func TestRepoCheckNamesWhatAClonesFilesLack(t *testing.T) {
 	// A baseline agent read "ready" of another experiment's files and went on with them: a pass
 	// says what was checked and what was not, in one line, and never calls the repository ready.
 	if code, out := repo(t, "check"); code != 0 || out != metricsHelperPresent+"\n"+repoChecked("pe-1")+"\n" || strings.Contains(out, "ready") ||
-		!strings.Contains(out, "\nchecked: the layout, each file's validity, and that") || !strings.HasSuffix(out, "fit platform experiment pe-1. Not checked: the README's text and the code the job spec runs.\n") {
+		!strings.Contains(out, "\nchecked: the layout, each file's validity, and that") || !strings.HasSuffix(out, "fit platform experiment pe-1. Not checked: the README's text, the code the job spec runs and which metrics it reports.\n") {
 		t.Fatalf("a filled clone: hl repo check = %d\n%s", code, out)
 	}
 	for name, tc := range map[string]struct{ path, content, want string }{
