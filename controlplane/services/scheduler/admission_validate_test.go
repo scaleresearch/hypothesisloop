@@ -261,14 +261,12 @@ func TestANegativeAcceleratorCountIsRejected(t *testing.T) {
 	mustReject(t, exp, "accelerator_count")
 }
 
-// Duration is the denominator of every per-hour rate this job is billed at. Zero or negative makes
-// that rate undefined or inverted.
-func TestANonPositiveEstimatedDurationIsRejected(t *testing.T) {
-	for _, hours := range []float64{0, -1} {
-		exp := validSubmission()
-		exp.EstimatedDurationHours = hours
-		mustReject(t, exp, "estimated_duration_hours")
-	}
+// Duration is the denominator of every per-hour rate this job is billed at, and a negative one
+// inverts that rate. One left out is the submit's to give or to refuse (estimate_required).
+func TestANegativeEstimatedDurationIsRejected(t *testing.T) {
+	exp := validSubmission()
+	exp.EstimatedDurationHours = -1
+	mustReject(t, exp, "estimated_duration_hours")
 }
 
 // Every identifying field is required: a submission missing one cannot be attributed, ranked, or

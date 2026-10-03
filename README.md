@@ -402,8 +402,8 @@ is sized from the node it lands on. `max_retries` left out is 0. A job that asks
 for more than every cluster that runs it has when idle is refused with 422
 `exceeds_cluster_capacity`, which states what it asks for and what each cluster has. The
 least a submission holds is `hypothesis_id`, `theory`, `estimated_duration_hours` (left out
-once the experiment's baseline is declared, 422 `estimate_required` for the baseline job
-itself), and in `job` a
+once the experiment's baseline is declared, and by the baseline job itself, which is given the
+largest its agent's quota admits), and in `job` a
 `command`, an `image`, `cpu`, `memory`, `storage` and, on an accelerator, `accelerator_type` with
 `accelerator_count`. `code_ref` is the
 experiment's repository at a commit and `branch` the branch it is on, both filled in by `hl` from its clone. Budget, quota, fairness, the concurrency cap

@@ -32,8 +32,7 @@ and the experiment is closed if not running by its `baseline_due_at`.
   2. The job spec, `.hypothesisloop/job.yaml`: its command, and `cpu`, `memory` and `storage`
      sized to what the job uses, so that other jobs fit beside it. Size it to finish in
      minutes: every trial runs it.
-  3. The run: `hl job submit .hypothesisloop/job.yaml --estimated-duration-hours H`, H the
-     most it may take: a refusal for quota states the largest H that fits. A reply with no command in it ends your
+  3. The run: `hl job submit .hypothesisloop/job.yaml`. A reply with no command in it ends your
      turn, and the next update starts another. A job that failed, or completed without one of the experiment's `metrics`, has its cause in
      `hl job logs ID`: fix it, commit and submit again, as often as you know a fix.
   4. The finding. When it has COMPLETED, file `hl job summary`: the config that ran, the

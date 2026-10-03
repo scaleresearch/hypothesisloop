@@ -45,7 +45,8 @@ A job holds its estimated_cost_acch of your quota from submit until it ends, the
 was billed (hl job cost ID). A job that states no estimate, in FILE or with
 --estimated-duration-hours, gets the one the platform measured on its platform experiment's
 baseline job when it was declared: what that job ran plus a half, job_estimated_duration_hours
-of the experiment. The baseline job itself has none measured and states one. A submit refused for quota fits once a job of
+of the experiment. A baseline agent's job has none measured: the platform gives it the largest
+your quota admits. A submit refused for quota fits once a job of
 yours ends or with a lower --estimated-duration-hours; state no less than the job takes. --capacity-tier burst runs
 on idle capacity and can be evicted for a guaranteed job; it draws on the same quota and gives
 no extra hours (hl quota).
@@ -66,7 +67,7 @@ metadata.theory is REQUIRED (from the file or --theory): what you predict this j
 A baseline agent's job is the one exception: the baseline is the objective's own measurement,
 so it names no hypothesis and no theory (baseline_tests_no_hypothesis if it names one), and it
 runs on branch hl/PE/baseline, which you make with git checkout -b hl/PE/baseline. It takes
-FILE, --env, --secret-env, --capacity-tier and --estimated-duration-hours, which it must state.
+FILE, --env, --secret-env and --capacity-tier.
 --secret-env NAME sends the value of $NAME from this command's environment as job.secret_env:
 the job gets it as an environment variable and no read of the job shows it. FILE may not carry
 job.secret_env, since a job spec is a committed file.
@@ -94,8 +95,7 @@ Minimal shape:
     ...                           # every other field: $WORKLOAD_SAMPLES/experiment-submission.yaml
 
 Only hypothesis_id, theory and, in job, an image, a command, cpu, memory, storage and, for a
-job on an accelerator, accelerator_type with accelerator_count are needed, and
-estimated_duration_hours where the platform measured none. Any other image is refused. A job adds a package with uv pip install or pip install.
+job on an accelerator, accelerator_type with accelerator_count are needed. Any other image is refused. A job adds a package with uv pip install or pip install.
 cpu, memory and storage are always stated, as quantities, in each group of a job with groups:
 a job holds what it states. max_retries left out is 0.
 

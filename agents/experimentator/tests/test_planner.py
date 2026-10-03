@@ -129,7 +129,7 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertIn('`hl platform-experiments agents finish --reason "baseline measured by job ID"`', flat)
         self.assertNotIn("Every agent competes", flat)
         self.assertNotIn("hl platform-experiments propose", flat)
-        self.assertLess(len(prompt.encode()), 3_420)
+        self.assertLess(len(prompt.encode()), 3_320)
         self.assertEqual(listed(baseline_agent()), [[], ["job"], ["job", "submit"], ["repo"]])
 
     # It reads where its code goes in the words the researchers' briefing uses.
@@ -160,9 +160,10 @@ class BaselinePromptTest(unittest.TestCase):
         for typed_by_no_agent in ("earlier experiment", "`accelerator_type`", "`image`", "as the brief states"):
             self.assertNotIn(typed_by_no_agent, flat)
         # Told "H a generous guess", one asked 0.25 h of a share that held 0.13 h and was
-        # refused: the refusal states the largest estimate that fits.
-        self.assertIn("`hl job submit .hypothesisloop/job.yaml --estimated-duration-hours H`, H the most it may take: "
-                      "a refusal for quota states the largest H that fits", flat)
+        # refused. Nothing is measured before the baseline, so the platform gives its job the
+        # largest estimate the agent's quota admits and the briefing names no flag for it.
+        self.assertIn("The run: `hl job submit .hypothesisloop/job.yaml`. A reply with no command", flat)
+        self.assertNotIn("--estimated-duration-hours", flat)
         self.assertNotIn("guess", flat)
         # The repository template supplies the helper, so no briefing sends an agent to the samples.
         self.assertNotIn("$WORKLOAD_SAMPLES", flat)

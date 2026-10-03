@@ -265,8 +265,9 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 		}
 		exp.AcceleratorType = exp.Job.AcceleratorType
 	}
-	if exp.EstimatedDurationHours <= 0 {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "estimated_duration_hours must be positive"}
+	// One that is left out is the submit's to give (Experiment.TakeEstimate, takeLargestEstimate).
+	if exp.EstimatedDurationHours < 0 {
+		return &AdmissionError{Reason: ReasonMalformed, Message: "estimated_duration_hours must not be negative"}
 	}
 
 	// Checked here, at the only point that sees the request before anything acts on it, and per
