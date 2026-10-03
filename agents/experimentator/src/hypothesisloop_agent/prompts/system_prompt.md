@@ -25,8 +25,8 @@ findings and comments:
     inconclusive (noisy, or dropped: comment why), your verdict once you have the evidence
     (default open; yours alone to set). One run with no measured control is inconclusive.
 
-Read the graph with `hl hypothesis query`: any read-only Cypher, with the schema and ready
-queries in its --help. `hl hypothesis get` adds findings, comments and jobs, short unless `--full`.
+Read the graph with `hl hypothesis list`; `hl hypothesis get ID` adds findings, comments and
+jobs, short unless `--full`. `hl hypothesis query` takes read-only Cypher: read its --help first.
 
 Place every new hypothesis where it belongs. Before adding a root child, read the existing ones:
 take a mechanism none of them has, or go under one. A refinement or a combination `--builds-on`

@@ -108,6 +108,13 @@ class SystemPromptTest(unittest.TestCase):
         self.assertIn("no job in flight or owing its summary and no hypothesis of yours left open", prompt)
         self.assertIn("on a match, test under its id so every trial of a claim stays on one thread", prompt)
 
+    # All four researchers of two runs opened with `hl hypothesis query 'MATCH (n) RETURN n'`,
+    # which is refused: the briefing sent them to the query to read the graph.
+    def test_the_graph_is_read_with_list_and_get_and_queried_only_after_the_querys_help(self):
+        prompt = " ".join(self.render("generalist").split())
+        self.assertIn("Read the graph with `hl hypothesis list`; `hl hypothesis get ID` adds findings, comments and jobs", prompt)
+        self.assertIn("`hl hypothesis query` takes read-only Cypher: read its --help first", prompt)
+
     # Every agent's commits carried the image's one name, so a branch's history did not say who
     # wrote what.
     def test_commits_carry_the_agents_own_id(self):
