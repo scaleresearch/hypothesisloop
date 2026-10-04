@@ -10,7 +10,6 @@ import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { PlatformExperimentForm } from '@/components/platform-experiment-form'
 import type { Me, PlatformExperiment } from '@/types'
 
-vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('project=prj_1') }))
 vi.mock('@/lib/api', async importActual => ({
   ...(await importActual<typeof import('@/lib/api')>()),
   addPlatformExperimentAgents: vi.fn(), createPlatformExperiment: vi.fn(), fetchExperimentFile: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),

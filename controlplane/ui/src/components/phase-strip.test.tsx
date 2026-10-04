@@ -10,8 +10,8 @@ import type { JoinedAgent, StatusReason } from '@/types'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
-  usePathname: () => '/platform-experiments/pe-1',
-  useSearchParams: () => new URLSearchParams('project=prj_1'),
+  usePathname: () => '/experiments/pe-1',
+  useSearchParams: () => new URLSearchParams(),
 }))
 vi.mock('@/lib/api', () => ({ fetchPlatformExperimentAgents: vi.fn() }))
 vi.mock('@/components/platform-experiment-form', () => ({

@@ -2,38 +2,48 @@
 
 import type { ReactNode } from 'react'
 import useSWR from 'swr'
-import { fetchMe } from '@/lib/api'
-import { usePathname } from 'next/navigation'
-import { useDropProject, useProjectParam } from '@/lib/query-state'
-import { resolveTenant, TenantContext } from '@/lib/tenant'
+import { useParams } from 'next/navigation'
+import { ApiError, fetchMe, fetchPlatformExperiment } from '@/lib/api'
+import { HOME_PATH } from '@/lib/auth'
+import { resolveExperimentTenant, resolveOrgTenant, resolveTenant, TenantContext, type TenantResolution } from '@/lib/tenant'
+import type { Me, PlatformExperiment } from '@/types'
 import { Nav } from '@/components/nav'
 import { CommandPalette } from '@/components/command-palette'
-import { Button } from '@/components/ui/button'
+import { ButtonLink } from '@/components/ui/button'
 import { Centered } from '@/components/ui/centered'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 
-// The pages that open one record by its id.
-const RECORD_PAGE = /^\/(platform-experiments|jobs|hypotheses)\/[^/]+$/
+// The dynamic segments of the routes that name what they show. A page of an experiment, or of a
+// record in it, is shown in the experiment's project, which is read from the experiment itself.
+type Place = { projectId?: string; orgId?: string; experimentId?: string }
 
 function Standalone({ children }: { children: ReactNode }) {
   return <Centered wide>{children}</Centered>
 }
 
+const goHome = <ButtonLink href={HOME_PATH} variant="primary">Go to your experiments</ButtonLink>
+
+function resolve(me: Me, place: Place, pe: PlatformExperiment | undefined): TenantResolution {
+  if (pe) return resolveExperimentTenant(me, pe)
+  if (place.orgId) return resolveOrgTenant(me, place.orgId)
+  return resolveTenant(me, place.projectId ?? '')
+}
+
 /**
- * Everything behind sign-in: asks the API who the session is, resolves the project the URL names,
- * and renders the app inside it. Pages below never render without a project.
+ * Everything behind sign-in: asks the API who the session is, resolves the project or org the
+ * URL names, or the one the experiment it names belongs to, and renders the app inside it.
+ * Pages below never render without a project.
  */
 export function AppShell({ children }: { children: ReactNode }) {
   // Reread on focus and on a timer: that is how a rename made in another tab, or a membership
   // that ended, reaches a page that is already open.
   const { data: me, error } = useSWR('me', fetchMe, { refreshInterval: 30_000 })
-  const [projectID, selectProject] = useProjectParam()
-  // A record is reached by its id whatever project the link named, and one of a shared platform
-  // experiment is read from any project. So a project the caller does not reach is dropped
-  // from the address of a record, which then opens in their own or says it is not found.
-  const foreignRecord = RECORD_PAGE.test(usePathname()) && me !== undefined && resolveTenant(me, projectID).state === 'unavailable'
-  useDropProject(foreignRecord)
+  const place = useParams<Place>()
+  const { data: pe, error: peError } = useSWR(
+    place.experimentId ? ['pe', place.experimentId] : null,
+    () => fetchPlatformExperiment(place.experimentId as string),
+  )
 
   if (error && !me) {
     return (
@@ -44,7 +54,22 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
   if (!me) return <Standalone><Loading text="Loading your account…" /></Standalone>
 
-  const resolution = resolveTenant(me, foreignRecord ? '' : projectID)
+  if (place.experimentId && !pe) {
+    if (peError instanceof ApiError && peError.status === 404) {
+      return (
+        <Standalone>
+          <ErrorMessage>
+            Experiment <Text as="span" variant="code">{place.experimentId}</Text> was not found: it does not exist, or it belongs to an organization you are not in.
+          </ErrorMessage>
+          {goHome}
+        </Standalone>
+      )
+    }
+    if (peError) return <Standalone><ErrorMessage>Could not load experiment {place.experimentId}: {peError.message}. Retrying.</ErrorMessage></Standalone>
+    return <Standalone><Loading text="Loading the experiment…" /></Standalone>
+  }
+
+  const resolution = resolve(me, place, pe)
   if (resolution.state === 'none') {
     return (
       <Standalone>
@@ -53,17 +78,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     )
   }
   if (resolution.state === 'unavailable') {
-    const home = resolveTenant(me, '')
     return (
       <Standalone>
         <ErrorMessage>
-          Project <Text as="span" variant="code">{resolution.projectID}</Text> is not available to you: it was removed, or your access to its organization ended.
+          The {resolution.what} <Text as="span" variant="code">{resolution.id}</Text> is not available to you: it was removed, or your access to it ended.
         </ErrorMessage>
-        {home.state === 'selected' && (
-          <Button variant="primary" onClick={() => selectProject(home.tenant.project.id)}>
-            Go to {home.tenant.org.name} / {home.tenant.project.name}
-          </Button>
-        )}
+        {goHome}
       </Standalone>
     )
   }

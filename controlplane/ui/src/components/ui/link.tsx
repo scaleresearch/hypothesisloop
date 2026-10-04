@@ -3,12 +3,10 @@
 import NextLink from 'next/link'
 import type { ComponentProps } from 'react'
 import { clsx } from 'clsx'
-import { useProjectHref } from '@/lib/query-state'
 
-/** An in-app link that stays inside the selected project. */
-export function Link({ href, ...props }: Omit<ComponentProps<typeof NextLink>, 'href'> & { href: string }) {
-  const projectHref = useProjectHref()
-  return <NextLink href={projectHref(href)} {...props} />
+/** An in-app link. Its path names what it opens, so it reads the same to whoever it is sent to. */
+export function Link(props: Omit<ComponentProps<typeof NextLink>, 'href'> & { href: string }) {
+  return <NextLink {...props} />
 }
 
 /** How a link that stands alone reads, a record's name in a table cell, for an anchor that is no in-app Link. */

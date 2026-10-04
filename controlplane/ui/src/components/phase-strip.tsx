@@ -22,6 +22,7 @@ import { TextLink, textLinkClass } from '@/components/ui/link'
 import { Callout } from '@/components/ui/status-message'
 import { Steps } from '@/components/ui/steps'
 import { Eyebrow, Text } from '@/components/ui/text'
+import { jobPath } from '@/lib/routes'
 
 // The states this page has words of its own for, by status_reason.reason. Any other is said in
 // the API's message, which is worded for whoever reads it.
@@ -73,7 +74,7 @@ const NEXT_IS: Record<Exclude<StatusReason['waits_for'], 'owner' | undefined>, s
 /** Where the baseline agent's job stands, in a line of its own. */
 function BaselineJob({ job }: { job: Experiment | undefined }) {
   if (!job) return <Text variant="note">It has submitted no job yet.</Text>
-  const link = <TextLink inline href={`/jobs/${job.id}`}>Its job</TextLink>
+  const link = <TextLink inline href={jobPath(job.platform_experiment_id, job.id)}>Its job</TextLink>
   const value = job.metric ? `: ${job.metric.name} ${job.metric.value}` : ''
   switch (job.status) {
     case ExperimentStatus.SUBMITTED:

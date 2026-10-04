@@ -5,15 +5,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createOrg, createProject, fetchMe } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { ProjectSwitcher } from '@/components/project-switcher'
-import { Link } from '@/components/ui/link'
 import type { Me } from '@/types'
 
-const navigation = vi.hoisted(() => ({ push: vi.fn(), pathname: '/jobs', search: '' }))
+const navigation = vi.hoisted(() => ({ push: vi.fn(), pathname: '/projects/prj_a1/jobs' }))
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: navigation.push }),
   usePathname: () => navigation.pathname,
-  useSearchParams: () => new URLSearchParams(navigation.search),
 }))
 
 vi.mock('@/lib/api', () => ({ createOrg: vi.fn(), createProject: vi.fn(), fetchMe: vi.fn() }))
@@ -37,7 +35,6 @@ const me: Me = {
 }
 
 function show(projectID: string, children = <ProjectSwitcher />, as: Me = me) {
-  navigation.search = projectID ? `project=${projectID}` : ''
   const resolved = resolveTenant(as, projectID)
   if (resolved.state !== 'selected') throw new Error(`no tenant for ${projectID}`)
   return render(
@@ -58,7 +55,7 @@ function field(label: string) {
 }
 
 beforeEach(() => {
-  navigation.pathname = '/jobs'
+  navigation.pathname = '/projects/prj_a1/jobs'
 })
 
 describe('the org and project switcher', () => {
@@ -86,34 +83,46 @@ describe('the org and project switcher', () => {
     expect(screen.getAllByRole('option').map(o => o.textContent)).toEqual(['Ada', 'Lab'])
   })
 
-  it('puts a chosen project in the URL of the current page', async () => {
+  it('opens the same section of a chosen project', async () => {
     show('prj_a1')
     await userEvent.click(field('Project'))
     await userEvent.click(screen.getByRole('option', { name: 'vision' }))
-    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/jobs?project=prj_a2')
+    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/projects/prj_a2/jobs')
   })
 
   it('lands a chosen org on its first project', async () => {
     show('prj_a2')
     await userEvent.click(field('Organization'))
     await userEvent.click(screen.getByRole('option', { name: 'Lab' }))
-    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/jobs?project=prj_b1')
+    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/projects/prj_b1/jobs')
+  })
+
+  it('keeps a page of the org a page of the org', async () => {
+    navigation.pathname = '/orgs/org_a/settings'
+    show('prj_a1')
+    await userEvent.click(field('Organization'))
+    await userEvent.click(screen.getByRole('option', { name: 'Lab' }))
+    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/orgs/org_b/settings')
   })
 
   it('leaves a record of the old project for the list it belongs to, with its filters dropped', async () => {
-    navigation.pathname = '/platform-experiments/pe-1'
-    show('prj_a1')
-    await userEvent.click(field('Project'))
-    await userEvent.click(screen.getByRole('option', { name: 'vision' }))
-    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/platform-experiments?project=prj_a2')
+    for (const [pathname, list] of [['/experiments/pe-1', 'experiments'], ['/experiments/pe-1/jobs/j1', 'jobs'], ['/experiments/pe-1/hypotheses/h1', 'hypotheses']]) {
+      navigation.pathname = pathname
+      navigation.push.mockClear()
+      const view = show('prj_a1')
+      await userEvent.click(field('Project'))
+      await userEvent.click(screen.getByRole('option', { name: 'vision' }))
+      expect(navigation.push).toHaveBeenCalledExactlyOnceWith(`/projects/prj_a2/${list}`)
+      view.unmount()
+    }
   })
 
-  it('stays on the home page when switching there', async () => {
-    navigation.pathname = '/'
+  it('lands on the experiments from a page of no section', async () => {
+    navigation.pathname = '/console'
     show('prj_a1')
     await userEvent.click(field('Project'))
     await userEvent.click(screen.getByRole('option', { name: 'vision' }))
-    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/?project=prj_a2')
+    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/projects/prj_a2/experiments')
   })
 
   it('does nothing when the selected project is chosen again', async () => {
@@ -141,7 +150,7 @@ describe('creating an organization', () => {
     show('prj_a1')
     await createByName('organization', '  Robotics ')
     expect(createOrg).toHaveBeenCalledExactlyOnceWith('Robotics')
-    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/jobs?project=prj_new')
+    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/projects/prj_new/jobs')
     expect(screen.queryByLabelText('New organization name')).toBeNull()
   })
 
@@ -190,7 +199,7 @@ describe('creating a project', () => {
     show('prj_a1')
     await createByName('project', 'speech')
     expect(createProject).toHaveBeenCalledExactlyOnceWith('org_a', 'speech')
-    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/jobs?project=prj_a3')
+    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/projects/prj_a3/jobs')
   })
 
   it('shows a name that is taken as the API says it, and switches nowhere', async () => {
@@ -217,17 +226,5 @@ describe('two orgs with the same name', () => {
     show('prj_a1', <ProjectSwitcher />, twins)
     await userEvent.click(field('Organization'))
     expect(screen.getAllByRole('option').map(o => o.textContent)).toEqual(['Ada', 'Lab (org_b)', 'Lab (zzz999)'])
-  })
-})
-
-describe('in-app links', () => {
-  it('carry the selected project, beside the link\'s own query', () => {
-    show('prj_b1', <Link href="/jobs?status=RUNNING">jobs</Link>)
-    expect(screen.getByRole('link', { name: 'jobs' }).getAttribute('href')).toBe('/jobs?status=RUNNING&project=prj_b1')
-  })
-
-  it('are left alone when the URL names no project', () => {
-    show('', <Link href="/jobs/j1">job</Link>)
-    expect(screen.getByRole('link', { name: 'job' }).getAttribute('href')).toBe('/jobs/j1')
   })
 })

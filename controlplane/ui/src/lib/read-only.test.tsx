@@ -1,19 +1,12 @@
 import { renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { SWRConfig } from 'swr'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { fetchPlatformExperiment } from '@/lib/api'
-import { isReadOnly, listProject, ReadOnlyProvider, useExperimentAccess, useReadOnly, useRecordScope } from '@/lib/read-only'
+import { isReadOnly, listProject, ReadOnlyProvider, useExperimentAccess, useReadOnly } from '@/lib/read-only'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import type { Me, PlatformExperiment } from '@/types'
 
-const navigation = vi.hoisted(() => ({ replace: vi.fn(), search: '' }))
-
-vi.mock('next/navigation', () => ({
-  useRouter: () => navigation,
-  usePathname: () => '/jobs/j1',
-  useSearchParams: () => new URLSearchParams(navigation.search),
-}))
 vi.mock('@/lib/api', () => ({ fetchPlatformExperiment: vi.fn() }))
 
 const at = '2026-01-01T00:00:00Z'
@@ -46,10 +39,6 @@ function wrapper(who: Me) {
 function experiment(projectID: string, shared: boolean) {
   return { id: 'pe-x', project_id: projectID, shared } as PlatformExperiment
 }
-
-beforeEach(() => {
-  navigation.search = 'project=prj_1'
-})
 
 describe('read only', () => {
   it('is a shared platform experiment in a project the caller does not reach', () => {
@@ -105,24 +94,5 @@ describe('what a page may do in its platform experiment', () => {
     await waitFor(() => expect(result.current.known).toBe(true))
     expect(result.current.readOnly).toBe(true)
     expect(listProject(project, result.current)).toEqual({ project_id: 'prj_1' })
-  })
-})
-
-describe('the project of an open record', () => {
-  it('goes in the URL when it is one of the caller\'s', () => {
-    navigation.search = ''
-    renderHook(() => useRecordScope('prj_1'), { wrapper: wrapper(me) })
-    expect(navigation.replace).toHaveBeenCalledExactlyOnceWith('/jobs/j1?project=prj_1')
-  })
-
-  it('never does when the record is another org\'s: the reader stays in their own project', () => {
-    renderHook(() => useRecordScope('prj_platform'), { wrapper: wrapper(me) })
-    renderHook(() => useRecordScope(undefined), { wrapper: wrapper(me) })
-    expect(navigation.replace).not.toHaveBeenCalled()
-  })
-
-  it('takes staff, who reach every project, into the record\'s own', () => {
-    renderHook(() => useRecordScope('prj_platform'), { wrapper: wrapper(staff) })
-    expect(navigation.replace).toHaveBeenCalledExactlyOnceWith('/jobs/j1?project=prj_platform')
   })
 })

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import { ApiError, GITHUB_NOT_CONFIGURED, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api'
-import { GITHUB_CARD, useGitHubApp } from '@/lib/github-connect'
+import { githubCardPath, useGitHubApp } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
 import type { GitHubInstallation } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -67,7 +67,7 @@ export function RepositorySelect({ value, onChange, compact = false }: { value: 
     return (
       <Text variant="note">
         No GitHub account is connected to {org.name}.{' '}
-        <TextLink inline href={`/settings#${GITHUB_CARD}`}>Connect GitHub in Settings</TextLink>
+        <TextLink inline href={githubCardPath(org.id)}>Connect GitHub in Settings</TextLink>
       </Text>
     )
   }

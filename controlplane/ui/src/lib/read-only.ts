@@ -3,7 +3,6 @@
 import { createContext, useContext } from 'react'
 import useSWR from 'swr'
 import { fetchPlatformExperiment } from '@/lib/api'
-import { useRecordProject } from '@/lib/query-state'
 import { useTenant } from '@/lib/tenant'
 import type { Me, PlatformExperiment, Project } from '@/types'
 
@@ -58,13 +57,4 @@ export function useExperimentAccess(platformExperimentID: string | undefined): E
  */
 export function listProject(project: Project, access: ExperimentAccess): { project_id?: string } {
   return access.pe && access.readOnly ? {} : { project_id: project.id }
-}
-
-/**
- * Puts the project of a loaded record in the URL when it is one of the caller's. A record of a
- * shared platform experiment is read from whatever project the caller is in.
- */
-export function useRecordScope(projectID: string | undefined) {
-  const { me } = useTenant()
-  useRecordProject(projectID && reaches(me, projectID) ? projectID : undefined)
 }

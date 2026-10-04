@@ -3,19 +3,19 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig, useSWRConfig } from 'swr'
 import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchMe } from '@/lib/api'
+import { ApiError, fetchMe, fetchPlatformExperiment } from '@/lib/api'
 import { useTenant } from '@/lib/tenant'
 import { AppShell } from '@/components/app-shell'
-import type { Me } from '@/types'
+import type { Me, PlatformExperiment } from '@/types'
 
-const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn(), search: '', pathname: '/jobs/j1' }))
+const navigation = vi.hoisted(() => ({ params: {} as Record<string, string> }))
 
-vi.mock('next/navigation', () => ({
-  useRouter: () => navigation,
-  usePathname: () => navigation.pathname,
-  useSearchParams: () => new URLSearchParams(navigation.search),
+vi.mock('next/navigation', () => ({ useParams: () => navigation.params }))
+vi.mock('@/lib/api', async importOriginal => ({
+  ApiError: (await importOriginal<typeof import('@/lib/api')>()).ApiError,
+  fetchMe: vi.fn(),
+  fetchPlatformExperiment: vi.fn(),
 }))
-vi.mock('@/lib/api', () => ({ fetchMe: vi.fn() }))
 vi.mock('@/components/nav', () => ({ Nav: () => <nav>nav</nav> }))
 vi.mock('@/components/command-palette', async () => {
   const { useState } = await import('react')
@@ -61,13 +61,12 @@ function tree() {
   )
 }
 
-function show(search = '') {
-  navigation.search = search
+function show(params: Record<string, string> = {}) {
+  navigation.params = params
   return render(tree())
 }
 
 beforeEach(() => {
-  navigation.pathname = '/jobs/j1'
   vi.mocked(fetchMe).mockResolvedValue(me)
 })
 
@@ -94,41 +93,54 @@ describe('the signed-in shell', () => {
   })
 
   it('says so when the URL names a project that is gone or out of reach, and offers the way home', async () => {
-    navigation.pathname = '/jobs'
-    show('project=prj_deleted')
+    show({ projectId: 'prj_deleted' })
     expect(await screen.findByText(/is not available to you/)).toBeTruthy()
     expect(screen.getByText('prj_deleted')).toBeTruthy()
     expect(screen.queryByText(/page of/)).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: 'Go to Ada / default' }))
-    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/jobs?project=prj_a1')
+    expect(screen.getByRole('link', { name: 'Go to your experiments' }).getAttribute('href')).toBe('/console')
   })
 
-  it('opens a record in the caller\'s own project when its link names one they do not reach', async () => {
-    // A link to a record of a shared platform experiment, copied by someone of the org that owns it.
-    for (const pathname of ['/platform-experiments/pe-x', '/jobs/j1', '/hypotheses/hyp-1']) {
-      navigation.pathname = pathname
-      const view = show('project=prj_of_another_org&tab=logs')
-      expect(await screen.findByText('page of Ada / default')).toBeTruthy()
-      expect(screen.queryByText(/is not available to you/)).toBeNull()
-      expect(navigation.replace).toHaveBeenLastCalledWith(`${pathname}?tab=logs`)
-      view.unmount()
-    }
+  it('renders a page of an org in the first of its projects', async () => {
+    show({ orgId: 'org_a' })
+    expect(await screen.findByText('page of Ada / default')).toBeTruthy()
   })
 
-  it('leaves the address of a record alone when it names a project of the caller\'s', async () => {
-    show('project=prj_a2')
+  it('says so when the URL names an org the caller is not in', async () => {
+    show({ orgId: 'org_other' })
+    expect(await screen.findByText(/organization/)).toBeTruthy()
+    expect(screen.getByText('org_other')).toBeTruthy()
+    expect(screen.queryByText(/page of/)).toBeNull()
+  })
+
+  it('opens a page of an experiment in the experiment\'s own project, read from the experiment', async () => {
+    vi.mocked(fetchPlatformExperiment).mockResolvedValue({ id: 'pe-1', project_id: 'prj_a2' } as PlatformExperiment)
+    show({ experimentId: 'pe-1', jobId: 'j1' })
     expect(await screen.findByText('page of Ada / vision')).toBeTruthy()
-    expect(navigation.replace).not.toHaveBeenCalled()
+    expect(fetchPlatformExperiment).toHaveBeenCalledWith('pe-1')
+  })
+
+  it('opens one shared by another org in the caller\'s own project', async () => {
+    vi.mocked(fetchPlatformExperiment).mockResolvedValue({ id: 'pe-x', project_id: 'prj_of_another_org', shared: true } as PlatformExperiment)
+    show({ experimentId: 'pe-x' })
+    expect(await screen.findByText('page of Ada / default')).toBeTruthy()
+  })
+
+  it('says an experiment the caller cannot read was not found, and renders no page', async () => {
+    vi.mocked(fetchPlatformExperiment).mockRejectedValue(new ApiError(404, 'platform experiment not found'))
+    show({ experimentId: 'pe-gone' })
+    expect(await screen.findByText(/was not found/)).toBeTruthy()
+    expect(screen.getByText('pe-gone')).toBeTruthy()
+    expect(screen.queryByText(/page of/)).toBeNull()
   })
 
   it('drops what a page and the palette held when the project changes', async () => {
-    const view = show('project=prj_a1')
+    const view = show({ projectId: 'prj_a1' })
     await userEvent.click(await screen.findByRole('button', { name: 'show token' }))
     await userEvent.click(screen.getByRole('button', { name: 'palette closed' }))
     expect(screen.getByRole('status').textContent).toBe('hls_shown')
     expect(screen.getByRole('button', { name: 'palette open' })).toBeTruthy()
 
-    navigation.search = 'project=prj_a2'
+    navigation.params = { projectId: 'prj_a2' }
     view.rerender(tree())
     expect(await screen.findByText('page of Ada / vision')).toBeTruthy()
     expect(screen.getByRole('status').textContent).toBe('')
@@ -136,7 +148,7 @@ describe('the signed-in shell', () => {
   })
 
   it('keeps what a page holds while the project stays the same', async () => {
-    const view = show('project=prj_a1')
+    const view = show({ projectId: 'prj_a1' })
     await userEvent.click(await screen.findByRole('button', { name: 'show token' }))
     view.rerender(tree())
     expect(screen.getByRole('status').textContent).toBe('hls_shown')

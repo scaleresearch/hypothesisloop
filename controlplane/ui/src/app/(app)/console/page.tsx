@@ -1,7 +1,15 @@
-import { redirect } from 'next/navigation'
+'use client'
 
-/** Home is the experiments page. The query goes along: it names the project. */
-export default function Home({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
-  const query = new URLSearchParams(Object.entries(searchParams).flatMap(([key, value]) => [value ?? ''].flat().map(v => [key, v])))
-  redirect(`/platform-experiments${query.size > 0 ? `?${query}` : ''}`)
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { projectPath } from '@/lib/routes'
+import { useTenant } from '@/lib/tenant'
+import { Loading } from '@/components/ui/status-message'
+
+/** Where sign-in lands: the experiments of the caller's home project. */
+export default function ConsolePage() {
+  const { project } = useTenant()
+  const router = useRouter()
+  useEffect(() => router.replace(projectPath(project.id, 'experiments')), [project.id, router])
+  return <Loading />
 }

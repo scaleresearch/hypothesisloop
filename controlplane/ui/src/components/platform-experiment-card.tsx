@@ -5,7 +5,8 @@ import { clsx } from 'clsx'
 import { fetchPlatformExperimentQuotas, fetchHypothesisStats } from '@/lib/api'
 import { PlatformExperimentStatus } from '@/types'
 import type { PlatformExperiment, AgentQuota } from '@/types'
-import { useProjectRouter } from '@/lib/query-state'
+import { useRouter } from 'next/navigation'
+import { experimentPath } from '@/lib/routes'
 import { isReadOnly } from '@/lib/read-only'
 import { formatAccH, isZeroDate } from '@/lib/format'
 import { budgetKind, budgetUnit } from '@/lib/units'
@@ -33,10 +34,10 @@ export function PlatformExperimentCard({
   pe: PlatformExperiment
   onEdit: (pe: PlatformExperiment) => void
 }) {
-  const router = useProjectRouter()
+  const router = useRouter()
   const { me } = useTenant()
   const readOnly = isReadOnly(me, pe)
-  const href = `/platform-experiments/${pe.id}`
+  const href = experimentPath(pe.id)
   const started = pe.status !== PlatformExperimentStatus.DRAFT
 
   const { data: quotas } = useSWR<AgentQuota[]>(

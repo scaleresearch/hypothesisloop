@@ -4,15 +4,16 @@ import { SWRConfig } from 'swr'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiSend, fetchPlatformExperimentAgents } from '@/lib/api'
 import { DraftView } from '@/components/draft'
+import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { formatDate } from '@/lib/format'
 import type { Draft, Proposal } from '@/lib/planning'
 import { PlatformExperimentStatus } from '@/types'
-import type { AgentSignup } from '@/types'
+import type { AgentSignup, Me } from '@/types'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
-  usePathname: () => '/platform-experiments/pe-1',
-  useSearchParams: () => new URLSearchParams('project=prj_1'),
+  usePathname: () => '/experiments/pe-1',
+  useSearchParams: () => new URLSearchParams(),
 }))
 vi.mock('@/lib/api', async importActual => ({
   ApiError: (await importActual<typeof import('@/lib/api')>()).ApiError,
@@ -43,6 +44,16 @@ const proposal: Proposal = {
   risks: ['One seed only.'],
 }
 
+const me: Me = {
+  kind: 'user',
+  user_id: 'u1',
+  orgs: [{ id: 'org_a', name: 'Ada', role: 'owner', created_at: '2026-01-01T00:00:00Z' }],
+  projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: '2026-01-01T00:00:00Z' }],
+}
+const resolved = resolveTenant(me, 'prj_1')
+if (resolved.state !== 'selected') throw new Error('no tenant')
+const tenant = resolved.tenant
+
 function draft(reason: 'planning' | 'revising' | 'proposed' | 'declined', more: Partial<Draft> = {}): Draft {
   return {
     id: 'pe-1', project_id: 'prj_1', name: 'Does a cosine schedule beat…', status: PlatformExperimentStatus.DRAFT,
@@ -52,7 +63,7 @@ function draft(reason: 'planning' | 'revising' | 'proposed' | 'declined', more: 
 }
 
 function show(d: Draft) {
-  return render(<SWRConfig value={{ provider: () => new Map() }}><DraftView draft={d} /></SWRConfig>)
+  return render(<SWRConfig value={{ provider: () => new Map() }}><TenantContext.Provider value={tenant}><DraftView draft={d} /></TenantContext.Provider></SWRConfig>)
 }
 
 beforeEach(() => {
@@ -167,7 +178,7 @@ describe('a proposed draft', () => {
   })
 
   it('shows a reader of a shared draft the proposal and no control that writes', async () => {
-    render(<SWRConfig value={{ provider: () => new Map() }}><DraftView draft={proposed()} readOnly /></SWRConfig>)
+    render(<SWRConfig value={{ provider: () => new Map() }}><TenantContext.Provider value={tenant}><DraftView draft={proposed()} readOnly /></TenantContext.Provider></SWRConfig>)
     expect(screen.getByLabelText('Name')).toMatchObject({ value: 'Cosine or constant', disabled: true })
     expect(screen.getByLabelText('Budget (accelerator-hours)')).toHaveProperty('disabled', true)
     for (const name of ['Accept and run', 'Revise', 'Abandon this draft']) expect(screen.queryByRole('button', { name })).toBeNull()
@@ -196,7 +207,7 @@ describe('a proposal that arrives while the person watches it being planned', ()
     fireEvent(document, new Event('visibilitychange'))
   }
 
-  const page = (d: Draft, readOnly = false) => <SWRConfig value={{ provider: () => new Map() }}><DraftView draft={d} readOnly={readOnly} /></SWRConfig>
+  const page = (d: Draft, readOnly = false) => <SWRConfig value={{ provider: () => new Map() }}><TenantContext.Provider value={tenant}><DraftView draft={d} readOnly={readOnly} /></TenantContext.Provider></SWRConfig>
   // The page as it is while the planner works, then as the next read of the draft makes it.
   function arrive(to = proposed(), from = draft('planning'), readOnly = false) {
     const view = render(page(from, readOnly))

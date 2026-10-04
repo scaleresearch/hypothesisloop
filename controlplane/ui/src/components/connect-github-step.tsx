@@ -2,7 +2,7 @@
 
 import useSWR from 'swr'
 import { fetchGitHubInstallations } from '@/lib/api'
-import { GITHUB_CARD, useGitHubApp } from '@/lib/github-connect'
+import { githubCardPath, useGitHubApp } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
 import { TextLink } from '@/components/ui/link'
 import { Text } from '@/components/ui/text'
@@ -32,7 +32,7 @@ export function ConnectGitHubStep() {
   return (
     <Text tone="muted">
       An experiment keeps its code in a GitHub repository, and no GitHub account is connected to {org.name}.{' '}
-      <TextLink inline href={`/settings#${GITHUB_CARD}`}>Connect GitHub in Settings</TextLink>{' '}
+      <TextLink inline href={githubCardPath(org.id)}>Connect GitHub in Settings</TextLink>{' '}
       first. The platform asks to create repositories and needs none of your existing ones: select one only to run an experiment in a repository you already have.
     </Text>
   )

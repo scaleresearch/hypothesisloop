@@ -7,7 +7,7 @@ type Module = typeof import('@/lib/github-connect')
 
 const AUTHORIZE = 'https://github.test/login/oauth/authorize?client_id=app'
 const INSTALL = 'https://github.test/apps/hl/installations/new'
-const origin = { orgID: 'org_a', projectID: 'prj_1' }
+const origin = { orgID: 'org_a' }
 const installation: GitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_actor: { kind: 'user', id: 'u1', name: 'Ada' }, connected_at: '2026-01-01T00:00:00Z' }
 
 let lib: Module
@@ -54,9 +54,9 @@ describe('leaving to authorise', () => {
 })
 
 describe('a return from authorising', () => {
-  it('connects once with the code, and leads back to the project the person was in', async () => {
+  it('connects once with the code, and leads back to the org the person was in', async () => {
     const nonce = sentState(lib.beginConnect(AUTHORIZE, origin))
-    await expect(returned(`code=code-1&state=${nonce}`)).resolves.toEqual({ to: 'settings', projectID: 'prj_1' })
+    await expect(returned(`code=code-1&state=${nonce}`)).resolves.toEqual({ to: 'settings', orgID: 'org_a' })
     expect(connect).toHaveBeenCalledExactlyOnceWith('org_a', 'code-1', undefined)
     expect(state()).toEqual({ state: 'connected', orgID: 'org_a', installation })
   })
@@ -84,7 +84,7 @@ describe('a return from authorising', () => {
 
   it('ends with the API\'s words and reason when it refuses', async () => {
     connect.mockRejectedValue(new ApiError(422, 'Ask an admin of the GitHub organisation acme to connect it.', 'installation_not_controlled'))
-    await expect(returned(`code=c&state=${sentState(lib.beginConnect(AUTHORIZE, origin))}`)).resolves.toEqual({ to: 'settings', projectID: 'prj_1' })
+    await expect(returned(`code=c&state=${sentState(lib.beginConnect(AUTHORIZE, origin))}`)).resolves.toEqual({ to: 'settings', orgID: 'org_a' })
     expect(state()).toEqual({ state: 'failed', orgID: 'org_a', message: 'Ask an admin of the GitHub organisation acme to connect it.', reason: 'installation_not_controlled' })
   })
 
@@ -104,7 +104,7 @@ describe('a return from authorising', () => {
 
   it('does not go round again when the installation it named is not reached', async () => {
     connect.mockRejectedValue(new ApiError(422, 'Install the GitHub App', 'app_not_installed'))
-    await expect(returned(`code=c&state=${sentState(lib.beginConnect(AUTHORIZE, origin, 4242))}`)).resolves.toEqual({ to: 'settings', projectID: 'prj_1' })
+    await expect(returned(`code=c&state=${sentState(lib.beginConnect(AUTHORIZE, origin, 4242))}`)).resolves.toEqual({ to: 'settings', orgID: 'org_a' })
     expect(state()).toEqual({ state: 'failed', orgID: 'org_a', message: 'Install the App on the GitHub account to connect, then connect again.', reason: 'app_not_installed' })
   })
 
@@ -120,13 +120,13 @@ describe('a return from authorising', () => {
     ['no state', 'code=stolen'],
   ])('is refused with %s than the one this tab sent, and sends nothing', async (_, query) => {
     lib.beginConnect(AUTHORIZE, origin)
-    await expect(returned(query)).resolves.toEqual({ to: 'settings', projectID: 'prj_1' })
+    await expect(returned(query)).resolves.toEqual({ to: 'settings', orgID: 'org_a' })
     expect(state().state).toBe('refused')
     expect(connect).not.toHaveBeenCalled()
   })
 
   it('is refused when this tab started nothing', async () => {
-    await expect(returned('code=stolen&state=forged')).resolves.toEqual({ to: 'settings', projectID: null })
+    await expect(returned('code=stolen&state=forged')).resolves.toEqual({ to: 'settings', orgID: null })
     expect(state().state).toBe('refused')
     expect(connect).not.toHaveBeenCalled()
   })
@@ -162,13 +162,13 @@ describe('a return from installing the App', () => {
 
   it('says what to do when an organisation owner was asked to install the App', async () => {
     lib.beginInstall(INSTALL, origin)
-    await expect(returned('setup_action=request')).resolves.toEqual({ to: 'settings', projectID: 'prj_1' })
+    await expect(returned('setup_action=request')).resolves.toEqual({ to: 'settings', orgID: 'org_a' })
     expect(state()).toEqual({ state: 'failed', orgID: 'org_a', message: 'GitHub asked an owner of that organisation to install the App: connect again once they have.' })
     expect(connect).not.toHaveBeenCalled()
   })
 
   it('does nothing with an installation this tab did not leave to make', async () => {
-    await expect(returned('installation_id=4242&setup_action=install')).resolves.toEqual({ to: 'settings', projectID: null })
+    await expect(returned('installation_id=4242&setup_action=install')).resolves.toEqual({ to: 'settings', orgID: null })
     expect(state()).toEqual({ state: 'idle' })
     expect(app).not.toHaveBeenCalled()
     expect(connect).not.toHaveBeenCalled()
@@ -176,14 +176,14 @@ describe('a return from installing the App', () => {
 
   it('does not go on for an attempt that left to authorise', async () => {
     lib.beginConnect(AUTHORIZE, origin)
-    await expect(returned('installation_id=4242&setup_action=install')).resolves.toEqual({ to: 'settings', projectID: 'prj_1' })
+    await expect(returned('installation_id=4242&setup_action=install')).resolves.toEqual({ to: 'settings', orgID: 'org_a' })
     expect(app).not.toHaveBeenCalled()
   })
 
   it('says so when the App\'s addresses cannot be read', async () => {
     app.mockRejectedValue(new Error('API unreachable'))
     lib.beginInstall(INSTALL, origin)
-    await expect(returned('installation_id=4242&setup_action=install')).resolves.toEqual({ to: 'settings', projectID: 'prj_1' })
+    await expect(returned('installation_id=4242&setup_action=install')).resolves.toEqual({ to: 'settings', orgID: 'org_a' })
     expect(state()).toEqual({ state: 'failed', orgID: 'org_a', message: 'API unreachable' })
   })
 })

@@ -94,7 +94,8 @@ async function main() {
     const me = await (await fetch(`${API}/me`, { headers: { Authorization: `Bearer ${token}` } })).json()
     const org = me.orgs[0]
     console.log(`org ${org.id} "${org.name}", project "${me.projects[0].name}"`)
-    await page.goto(`${UI}/settings`)
+    const project = me.projects[0]
+    await page.goto(`${UI}/orgs/${org.id}/settings`)
     await page.waitForLoadState('networkidle')
     passed('settings-before-github')
     hlAdmin('github', 'connect', org.id, INSTALLATION)
@@ -102,7 +103,7 @@ async function main() {
     await page.reload()
     await page.waitForLoadState('networkidle')
     passed('settings-github-and-clusters')
-    await page.goto(`${UI}/cluster`)
+    await page.goto(`${UI}/orgs/${org.id}/clusters`)
     await page.waitForLoadState('networkidle')
     for (const cluster of off) {
       const use = page.getByRole('switch', { name: `Use ${cluster} for the jobs of ${org.name}` })
@@ -111,7 +112,7 @@ async function main() {
       await page.waitForFunction(label => document.querySelector(`[aria-label="${label}"]`)?.getAttribute('aria-checked') === 'false', `Use ${cluster} for the jobs of ${org.name}`)
     }
     passed('compute-resources')
-    await page.goto(`${UI}/platform-experiments`)
+    await page.goto(`${UI}/projects/${project.id}/experiments`)
     await page.waitForLoadState('networkidle')
     passed('console')
     if (until === 'form') return
@@ -131,7 +132,7 @@ async function main() {
     await form.getByRole('button', { name: 'Create and run' }).click()
     await page.waitForTimeout(700)
     passed('pressed-create-and-run')
-    await page.waitForURL(/\/platform-experiments\/pe-/, { timeout: 120000 })
+    await page.waitForURL(/\/experiments\/pe-/, { timeout: 120000 })
     experimentID = new URL(page.url()).pathname.split('/').pop()
     console.log(`experiment ${experimentID}`)
     const started = Date.now()
@@ -165,10 +166,11 @@ async function main() {
       if (Date.now() - lastPrinted > 5 * 60 * 1000) { lastPrinted = Date.now(); passed(`at-${Math.round((Date.now() - started) / 60000)}min`) }
       await sleep(10000)
     }
-    for (const path of ['/jobs', '/hypotheses', '/cluster', '/platform-experiments']) {
+    const ends = { jobs: `/projects/${project.id}/jobs`, hypotheses: `/projects/${project.id}/hypotheses`, cluster: `/orgs/${org.id}/clusters`, 'platform-experiments': `/projects/${project.id}/experiments` }
+    for (const [name, path] of Object.entries(ends)) {
       await page.goto(`${UI}${path}`)
       await page.waitForLoadState('networkidle')
-      passed(`end${path.replace('/', '-')}`)
+      passed(`end-${name}`)
     }
     console.log(`MARKS ${JSON.stringify(marks)}`)
     if (problems.length) console.log(`PROBLEMS\n${[...new Set(problems)].join('\n')}`)

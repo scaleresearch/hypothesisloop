@@ -35,6 +35,7 @@ import { SearchableSelect } from '@/components/ui/searchable-select'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Code, Eyebrow, Pill, Text } from '@/components/ui/text'
 import { semantic, seriesPalette, chart } from '@/lib/colors'
+import { jobPath } from '@/lib/routes'
 
 // Bounded-score metrics (roughly 0-1) get their own axis so they aren't flattened to a
 // hairline by unbounded metrics like seconds_per_subject/cv_seconds sitting in the tens+.
@@ -446,7 +447,7 @@ export function AgentJobsPanel({ projectId, platformExperimentId, agentId, track
       {jobs.map(job => (
         <InsetCard key={job.id} gap="xs">
           <Inline nowrap className="justify-between text-2xs">
-            <TextLink href={`/jobs/${job.id}`} className="font-mono font-medium">{shortId(job.id)}</TextLink>
+            <TextLink href={jobPath(platformExperimentId, job.id)} className="font-mono font-medium">{shortId(job.id)}</TextLink>
             <Badge status={job.status} />
           </Inline>
           <JobMetricMini jobId={job.id} trackedMetrics={trackedMetrics} />

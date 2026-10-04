@@ -1,4 +1,5 @@
 import type { Hypothesis, HypothesisGraph, HypothesisLinkType, HypothesisListItem } from '@/types'
+import { experimentPath, withQuery } from '@/lib/routes'
 
 export const NODE_WIDTH = 240
 export const NODE_HEIGHT = 92
@@ -261,7 +262,5 @@ export function linkGroups<T extends { type: HypothesisLinkType }>(out: T[], inc
 }
 
 export function graphHref(platformExperimentID: string, focus?: string): string {
-  const params = new URLSearchParams({ pe: platformExperimentID })
-  if (focus) params.set('focus', focus)
-  return `/hypotheses?${params}`
+  return withQuery(experimentPath(platformExperimentID, 'hypotheses'), { focus })
 }

@@ -25,7 +25,7 @@ const KIND = { User: 'Personal', Organization: 'Organisation' } as const
  * disconnects one; a member reads the list.
  */
 export function OrgGitHub() {
-  const { me, org, project, administers } = useTenant()
+  const { me, org, administers } = useTenant()
   const connect = useConnect()
   const { data, error, mutate } = useSWR(['github-installations', org.id], () => fetchGitHubInstallations(org.id))
   const app = useGitHubApp(administers)
@@ -40,7 +40,7 @@ export function OrgGitHub() {
     if (connected) void mutate()
   }, [connected, mutate])
 
-  const origin = { orgID: org.id, projectID: project.id }
+  const origin = { orgID: org.id }
   function leave(address: string) {
     setLeaving(true)
     leaveFor(address)

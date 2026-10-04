@@ -3,7 +3,7 @@
 import { createContext, useContext } from 'react'
 import { useSWRConfig } from 'swr'
 import { fetchMe } from '@/lib/api'
-import type { Me, Org, Project } from '@/types'
+import type { Me, Org, PlatformExperiment, Project } from '@/types'
 
 /** The signed-in caller and the org and project every page is showing. */
 export interface Tenant {
@@ -20,8 +20,8 @@ export type TenantResolution =
   | { state: 'selected'; tenant: Tenant }
   // The caller reaches no project at all.
   | { state: 'none' }
-  // The URL names a project the caller does not reach: removed, or their membership ended.
-  | { state: 'unavailable'; projectID: string }
+  // The URL names a project or org the caller does not reach: removed, or their membership ended.
+  | { state: 'unavailable'; what: 'project' | 'organization'; id: string }
 
 // Where a caller lands when the URL names no project: the first project of the first org they
 // belong to. Staff are listed every org, their own among them, and one who belongs to none lands
@@ -31,14 +31,34 @@ function homeProject(me: Me): Project | undefined {
   return (own.length > 0 ? own : me.orgs).map(o => me.projects.find(p => p.org_id === o.id)).find(p => p !== undefined)
 }
 
-/** Picks the project the URL names, or with none named the caller's home project. */
-export function resolveTenant(me: Me, projectID: string): TenantResolution {
-  const project = projectID ? me.projects.find(p => p.id === projectID) : homeProject(me)
-  if (!project) return projectID ? { state: 'unavailable', projectID } : { state: 'none' }
+function selected(me: Me, project: Project): TenantResolution {
   const org = me.orgs.find(o => o.id === project.org_id)
   if (!org) throw new Error(`project ${project.id} belongs to org ${project.org_id}, which GET /me did not list`)
   const staff = me.kind === 'staff'
   return { state: 'selected', tenant: { me, org, project, staff, administers: staff || org.role === 'owner' } }
+}
+
+/** Picks the project the URL names, or with none named the caller's home project. */
+export function resolveTenant(me: Me, projectID: string): TenantResolution {
+  const project = projectID ? me.projects.find(p => p.id === projectID) : homeProject(me)
+  if (!project) return projectID ? { state: 'unavailable', what: 'project', id: projectID } : { state: 'none' }
+  return selected(me, project)
+}
+
+/** Picks the org the URL names, shown with the first of its projects the caller reaches. */
+export function resolveOrgTenant(me: Me, orgID: string): TenantResolution {
+  const project = me.projects.find(p => p.org_id === orgID)
+  if (!project) return { state: 'unavailable', what: 'organization', id: orgID }
+  return selected(me, project)
+}
+
+/**
+ * Picks the project a page of a platform experiment is shown in: the experiment's own when the
+ * caller reaches it, and otherwise their home project, from which a shared experiment of another
+ * org is read.
+ */
+export function resolveExperimentTenant(me: Me, pe: Pick<PlatformExperiment, 'project_id'>): TenantResolution {
+  return resolveTenant(me, me.projects.some(p => p.id === pe.project_id) ? pe.project_id : '')
 }
 
 export const TenantContext = createContext<Tenant | null>(null)

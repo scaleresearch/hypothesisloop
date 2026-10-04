@@ -21,9 +21,9 @@ beforeEach(() => signedIn(false))
 
 describe('a visitor without a session', () => {
   it('is sent to sign in, with the page they asked for as the way back', async () => {
-    const response = await visit('/jobs?status=RUNNING&project=prj_1')
+    const response = await visit('/projects/prj_1/jobs?status=RUNNING')
     expect(response.status).toBe(307)
-    expect(response.headers.get('location')).toBe('http://ui.test/login?next=%2Fjobs%3Fstatus%3DRUNNING%26project%3Dprj_1')
+    expect(response.headers.get('location')).toBe('http://ui.test/login?next=%2Fprojects%2Fprj_1%2Fjobs%3Fstatus%3DRUNNING')
   })
 
   it('reaches the landing page', async () => {
@@ -34,7 +34,7 @@ describe('a visitor without a session', () => {
 
   it('is sent to sign in from the console and from a record', async () => {
     expect((await visit('/console')).headers.get('location')).toBe('http://ui.test/login?next=%2Fconsole')
-    expect((await visit('/platform-experiments/pe-1')).headers.get('location')).toBe('http://ui.test/login?next=%2Fplatform-experiments%2Fpe-1')
+    expect((await visit('/experiments/pe-1')).headers.get('location')).toBe('http://ui.test/login?next=%2Fexperiments%2Fpe-1')
   })
 
   it('reaches the invite page, which keeps the token of its link before it sends them to sign in', async () => {
@@ -144,7 +144,7 @@ describe('the paths the middleware runs on', () => {
   const matcher = new RegExp(`^${config.matcher[0]}$`)
 
   it('are every page', () => {
-    for (const path of ['/', '/login', '/console', '/jobs', '/platform-experiments/pe-1', '/settings']) expect(path).toMatch(matcher)
+    for (const path of ['/', '/login', '/console', '/jobs', '/experiments/pe-1', '/orgs/org_1/settings']) expect(path).toMatch(matcher)
   })
 
   it('leave out the sign-in callback and the framework\'s own assets', () => {

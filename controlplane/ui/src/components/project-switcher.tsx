@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import { createOrg, createProject } from '@/lib/api'
-import { useProjectParam } from '@/lib/query-state'
+import { usePathname, useRouter } from 'next/navigation'
+import { sectionOf, sectionPath } from '@/lib/routes'
 import { useRefreshMe, useTenant } from '@/lib/tenant'
 import type { Me, Project } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -66,11 +67,17 @@ function CreateByName({ what, create }: { what: string; create: (name: string) =
   )
 }
 
-/** Picks the org and the project every page shows, and creates either. The choice lives in the URL. */
+/**
+ * Picks the org and the project every page shows, and creates either. The choice lives in the URL.
+ * Switching lands on the same section of the other project with its filters cleared: a record
+ * open in one project and a filter on its experiments mean nothing in another.
+ */
 export function ProjectSwitcher() {
   const { me, org, project, administers } = useTenant()
-  const [, selectProject] = useProjectParam()
+  const router = useRouter()
+  const section = sectionOf(usePathname()) ?? 'experiments'
   const refreshMe = useRefreshMe()
+  const selectProject = (to: Project) => router.push(sectionPath(section, to))
 
   const projectsOf = (orgID: string) => me.projects.filter(p => p.org_id === orgID)
   const orgs = me.orgs.filter(o => projectsOf(o.id).length > 0)
@@ -80,7 +87,7 @@ export function ProjectSwitcher() {
   async function land(find: (p: Project) => boolean, missing: string) {
     const created = (await refreshMe()).projects.find(find)
     if (!created) throw new Error(missing)
-    selectProject(created.id)
+    selectProject(created)
   }
 
   async function newOrg(name: string) {
@@ -103,7 +110,7 @@ export function ProjectSwitcher() {
           value={org.id}
           options={orgs.map(o => ({ value: o.id, label: labels.get(o.id) as string }))}
           // Clearing the field picks nothing; switching org lands on its first project.
-          onChange={id => { if (id && id !== org.id) selectProject(projectsOf(id)[0].id) }}
+          onChange={id => { if (id && id !== org.id) selectProject(projectsOf(id)[0]) }}
         />
       </Stack>
       <CreateByName what="organization" create={newOrg} />
@@ -113,7 +120,7 @@ export function ProjectSwitcher() {
           hideAllOption
           value={project.id}
           options={projectsOf(org.id).map(p => ({ value: p.id, label: p.name }))}
-          onChange={id => { if (id && id !== project.id) selectProject(id) }}
+          onChange={id => { if (id && id !== project.id) selectProject(projectsOf(org.id).find(p => p.id === id) as Project) }}
         />
       </Stack>
       {administers && <CreateByName what="project" create={newProject} />}

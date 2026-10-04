@@ -18,6 +18,7 @@ import { semantic, statusColor } from '@/lib/colors'
 import { filedAfterVerdict } from '@/lib/hypothesis-progress'
 import { relTime } from '@/lib/format'
 import { useReadOnly } from '@/lib/read-only'
+import { experimentPath, hypothesisPath, jobPath } from '@/lib/routes'
 
 interface HypothesisPanelProps {
   graph: HypothesisGraph
@@ -47,20 +48,20 @@ export function ObjectiveBar({ graph, pe, onAddIdea }: {
           </Text>
           <span className="ml-auto flex items-center gap-3">
             {!readOnly ? <Button size="sm" variant="primary" onClick={() => onAddIdea(graph.root)}>+ Add idea under the objective</Button> : closed && <ClosedNote />}
-            <TextLink href={`/platform-experiments/${graph.root}`} className="text-xs">Experiment →</TextLink>
+            <TextLink href={experimentPath(graph.root)} className="text-xs">Experiment →</TextLink>
           </span>
         </Inline>
         {pe.description && <CollapsibleDescription text={pe.description} collapseLength={140} />}
         {bestJob && (
           <Text as="div" variant="code">
             <span className="text-muted">Baseline job </span>
-            <TextLink href={`/jobs/${bestJob.id}`}>{bestJob.metric.name} {bestJob.metric.value.toFixed(4)}</TextLink>
+            <TextLink href={jobPath(graph.root, bestJob.id)}>{bestJob.metric.name} {bestJob.metric.value.toFixed(4)}</TextLink>
           </Text>
         )}
         {finding && (
           <Stack gap="xs">
             <Eyebrow>
-              Baseline finding · <TextLink href={`/jobs/${finding.experiment_id}`} className="font-mono normal-case">{finding.experiment_id}</TextLink>
+              Baseline finding · <TextLink href={jobPath(graph.root, finding.experiment_id)} className="font-mono normal-case">{finding.experiment_id}</TextLink>
             </Eyebrow>
             <CollapsibleDescription text={finding.summary} collapseLength={140} />
           </Stack>
@@ -106,13 +107,13 @@ export function HypothesisPanel({ graph, nodeByID, selected, onSelect, onAddIdea
         {bestJob && (
           <Text as="div" variant="code">
             <span className="text-muted">Best job </span>
-            <TextLink href={`/jobs/${bestJob.id}`}>{bestJob.metric.name} {bestJob.metric.value.toFixed(4)}</TextLink>
+            <TextLink href={jobPath(graph.root, bestJob.id)}>{bestJob.metric.name} {bestJob.metric.value.toFixed(4)}</TextLink>
           </Text>
         )}
         {finding && (
           <Stack gap="xs">
             <Eyebrow>
-              Newest finding · <TextLink href={`/jobs/${finding.experiment_id}`} className="font-mono normal-case">{finding.experiment_id}</TextLink>
+              Newest finding · <TextLink href={jobPath(graph.root, finding.experiment_id)} className="font-mono normal-case">{finding.experiment_id}</TextLink>
               {filedAfterVerdict(node, finding.created_at) && <span className="text-warning"> · filed after the verdict</span>}
             </Eyebrow>
             <Text variant="note" tone="default" pre className="max-h-40 overflow-y-auto">
@@ -130,7 +131,7 @@ export function HypothesisPanel({ graph, nodeByID, selected, onSelect, onAddIdea
         ))}
         <Inline gap="md">
           {!readOnly ? <Button size="sm" variant="primary" onClick={() => onAddIdea(node.id)}>+ Add idea under this</Button> : closed && <ClosedNote />}
-          <TextLink href={`/hypotheses/${node.id}`} className="text-xs">Open detail →</TextLink>
+          <TextLink href={hypothesisPath(graph.root, node.id)} className="text-xs">Open detail →</TextLink>
         </Inline>
       </Stack>
     </Section>

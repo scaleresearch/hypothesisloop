@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveTenant } from '@/lib/tenant'
+import { resolveExperimentTenant, resolveOrgTenant, resolveTenant } from '@/lib/tenant'
 import type { Me } from '@/types'
 
 const at = '2026-01-01T00:00:00Z'
@@ -36,12 +36,12 @@ describe('resolveTenant', () => {
   })
 
   it('reports a project the caller does not reach, and never substitutes another', () => {
-    expect(resolveTenant(twoOrgs, 'prj_gone')).toEqual({ state: 'unavailable', projectID: 'prj_gone' })
+    expect(resolveTenant(twoOrgs, 'prj_gone')).toEqual({ state: 'unavailable', what: 'project', id: 'prj_gone' })
   })
 
   it('reports a membership that ended: the project is no longer among what the caller reaches', () => {
     const afterRemoval: Me = { ...twoOrgs, orgs: [twoOrgs.orgs[0]], projects: twoOrgs.projects.filter(p => p.org_id === 'org_a') }
-    expect(resolveTenant(afterRemoval, 'prj_b1')).toEqual({ state: 'unavailable', projectID: 'prj_b1' })
+    expect(resolveTenant(afterRemoval, 'prj_b1')).toEqual({ state: 'unavailable', what: 'project', id: 'prj_b1' })
   })
 
   it('reports a caller who reaches nothing', () => {
@@ -72,5 +72,25 @@ describe('resolveTenant', () => {
       projects: [{ id: 'prj_x', org_id: 'org_x', name: 'default', created_at: at }],
     }
     expect(resolveTenant(token, '')).toMatchObject({ tenant: { project: { id: 'prj_x' } } })
+  })
+})
+
+describe('resolveOrgTenant', () => {
+  it('selects the org the URL names, in the first of its projects', () => {
+    expect(resolveOrgTenant(twoOrgs, 'org_a')).toMatchObject({ state: 'selected', tenant: { org: { id: 'org_a' }, project: { id: 'prj_a1' } } })
+  })
+
+  it('reports an org the caller does not reach', () => {
+    expect(resolveOrgTenant(twoOrgs, 'org_gone')).toEqual({ state: 'unavailable', what: 'organization', id: 'org_gone' })
+  })
+})
+
+describe('resolveExperimentTenant', () => {
+  it('shows an experiment in its own project when the caller reaches it', () => {
+    expect(resolveExperimentTenant(twoOrgs, { project_id: 'prj_b1' })).toMatchObject({ tenant: { org: { id: 'org_b' }, project: { id: 'prj_b1' } } })
+  })
+
+  it('shows one of another org, shared with every account, in the caller\'s home project', () => {
+    expect(resolveExperimentTenant(twoOrgs, { project_id: 'prj_platform' })).toMatchObject({ tenant: { project: { id: 'prj_a1' } } })
   })
 })

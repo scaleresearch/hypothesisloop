@@ -1,7 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useProjectRouter } from '@/lib/query-state'
+import { useRouter } from 'next/navigation'
+import { experimentPath, jobPath, sectionPath, type Section } from '@/lib/routes'
 import {
   FlaskConical, ListTree, Server, LineChart, Lightbulb, Search, CornerDownLeft,
   ArrowUp, ArrowDown, Hash, Zap, type LucideIcon,
@@ -24,21 +25,13 @@ type CommandItem = {
   action: () => void
 }
 
-const DESTINATIONS: (Omit<CommandItem, 'action'> & { staffOnly?: boolean })[] = [
-  { id: 'nav-pe',   label: 'Experiments',          sub: 'Go to page', icon: FlaskConical, keywords: 'experiments campaigns' },
-  { id: 'nav-hyp',  label: 'Hypotheses',           sub: 'Go to page', icon: Lightbulb,    keywords: 'hypothesis graph claims findings' },
-  { id: 'nav-jobs', label: 'Jobs',                 sub: 'Go to page', icon: ListTree,     keywords: 'jobs runs workloads' },
-  { id: 'nav-clu',  label: 'Compute Resources',    sub: 'Go to page', icon: Server,       keywords: 'clusters compute accelerator' },
-  { id: 'nav-stat', label: 'Statistics',           sub: 'Go to page', icon: LineChart,    keywords: 'dashboard scheduler quality evictions completion rate', staffOnly: true },
+const DESTINATIONS: (Omit<CommandItem, 'action'> & { section: Section; staffOnly?: boolean })[] = [
+  { id: 'nav-pe',   section: 'experiments', label: 'Experiments',       sub: 'Go to page', icon: FlaskConical, keywords: 'experiments campaigns' },
+  { id: 'nav-hyp',  section: 'hypotheses',  label: 'Hypotheses',        sub: 'Go to page', icon: Lightbulb,    keywords: 'hypothesis graph claims findings' },
+  { id: 'nav-jobs', section: 'jobs',        label: 'Jobs',              sub: 'Go to page', icon: ListTree,     keywords: 'jobs runs workloads' },
+  { id: 'nav-clu',  section: 'clusters',    label: 'Compute Resources', sub: 'Go to page', icon: Server,       keywords: 'clusters compute accelerator' },
+  { id: 'nav-stat', section: 'statistics',  label: 'Statistics',        sub: 'Go to page', icon: LineChart,    keywords: 'dashboard scheduler quality evictions completion rate', staffOnly: true },
 ]
-
-const DEST_HREF: Record<string, string> = {
-  'nav-pe': '/platform-experiments',
-  'nav-hyp': '/hypotheses',
-  'nav-jobs': '/jobs',
-  'nav-clu': '/cluster',
-  'nav-stat': '/statistics',
-}
 
 /**
  * Global ⌘K / Ctrl+K command palette. It's the primary way both human
@@ -46,8 +39,8 @@ const DEST_HREF: Record<string, string> = {
  * nav: fuzzy destination search plus "paste an ID, land on the record."
  */
 export function CommandPalette() {
-  const router = useProjectRouter()
-  const { staff } = useTenant()
+  const router = useRouter()
+  const { project, staff } = useTenant()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
@@ -101,7 +94,7 @@ export function CommandPalette() {
           label: `Job ${q.slice(0, 12)}…`,
           sub: `${exp.status} · open job`,
           icon: Hash,
-          action: () => { router.push(`/jobs/${q}`); close() },
+          action: () => { router.push(jobPath(exp.platform_experiment_id, q)); close() },
         })
       })
       .catch(() =>
@@ -113,7 +106,7 @@ export function CommandPalette() {
               label: pe.name || `Platform experiment ${q.slice(0, 12)}…`,
               sub: 'open experiment',
               icon: Hash,
-              action: () => { router.push(`/platform-experiments/${q}`); close() },
+              action: () => { router.push(experimentPath(q)); close() },
             })
           })
           .catch(() => { if (!cancelled) setIdResult(null) }),
@@ -123,16 +116,16 @@ export function CommandPalette() {
   }, [query, router, close])
 
   const items: CommandItem[] = useMemo(() => {
-    const base: CommandItem[] = DESTINATIONS.filter(d => staff || !d.staffOnly).map(d => ({
+    const base: CommandItem[] = DESTINATIONS.filter(d => staff || !d.staffOnly).map(({ section, ...d }) => ({
       ...d,
-      action: () => { router.push(DEST_HREF[d.id]); close() },
+      action: () => { router.push(sectionPath(section, project)); close() },
     }))
     const q = query.trim().toLowerCase()
     const filtered = q
       ? base.filter(i => (i.label + ' ' + (i.sub ?? '') + ' ' + (i.keywords ?? '')).toLowerCase().includes(q))
       : base
     return idResult ? [idResult, ...filtered] : filtered
-  }, [query, router, close, idResult, staff])
+  }, [query, router, close, idResult, staff, project])
 
   useEffect(() => { setActiveIndex(0) }, [items.length, query])
 

@@ -39,17 +39,17 @@ beforeEach(() => {
 })
 
 describe('the address GitHub returns to', () => {
-  it('takes the return and lands on the GitHub card of the project the person left from', async () => {
-    arrive('code=c&state=s', { to: 'settings', projectID: 'prj_7' })
+  it('takes the return and lands on the GitHub card of the org the person left from', async () => {
+    arrive('code=c&state=s', { to: 'settings', orgID: 'org_7' })
     expect(screen.getByRole('status', { name: 'Returning from GitHub…' })).toBeTruthy()
     expect(vi.mocked(takeReturn).mock.calls[0][0]).toBe('code=c&state=s')
-    await waitFor(() => expect(navigation.replace).toHaveBeenCalledExactlyOnceWith('/settings?project=prj_7#github'))
+    await waitFor(() => expect(navigation.replace).toHaveBeenCalledExactlyOnceWith('/orgs/org_7/settings#github'))
     expect(leaveFor).not.toHaveBeenCalled()
   })
 
-  it('lands on the selected project when the return names none, as on a plain visit', async () => {
-    arrive('', { to: 'settings', projectID: null })
-    await waitFor(() => expect(navigation.replace).toHaveBeenCalledExactlyOnceWith('/settings?project=prj_1#github'))
+  it('lands on the caller\'s own org when the return names none, as on a plain visit', async () => {
+    arrive('', { to: 'settings', orgID: null })
+    await waitFor(() => expect(navigation.replace).toHaveBeenCalledExactlyOnceWith('/orgs/org_a/settings#github'))
   })
 
   it('goes on to GitHub when the App was just installed and is yet to be authorised', async () => {
@@ -59,7 +59,7 @@ describe('the address GitHub returns to', () => {
   })
 
   it('connects through the API with the code, where GitHub returned it and the installation', async () => {
-    arrive('code=c&state=s', { to: 'settings', projectID: 'prj_1' })
+    arrive('code=c&state=s', { to: 'settings', orgID: 'org_a' })
     const calls = vi.mocked(takeReturn).mock.calls[0][1]
     vi.mocked(fetchGitHubApp).mockResolvedValue({ slug: 'hl', client_id: 'app', install_url: 'i', authorize_url: 'a', new_repository_url: 'n' })
     await expect(calls.app()).resolves.toMatchObject({ authorize_url: 'a', install_url: 'i' })

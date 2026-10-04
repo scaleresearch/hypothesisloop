@@ -1,0 +1,255 @@
+'use client'
+
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import useSWR from 'swr'
+import type { KeyedMutator } from 'swr'
+import { clsx } from 'clsx'
+import { fetchHypothesisGraph, fetchPlatformExperiment } from '@/lib/api'
+import type { HypothesisSearchHit } from '@/lib/api'
+import { PlatformExperimentStatus } from '@/types'
+import type { HypothesisGraph, PlatformExperiment } from '@/types'
+import { Page } from '@/components/ui/page'
+import { Card } from '@/components/ui/card'
+import { Button, Chip } from '@/components/ui/button'
+import { FormField } from '@/components/ui/form-field'
+import { Section } from '@/components/ui/section'
+import { Inline, Stack } from '@/components/ui/stack'
+import { Text } from '@/components/ui/text'
+import { Loading, ErrorMessage } from '@/components/ui/status-message'
+import { SearchableSelect } from '@/components/ui/searchable-select'
+import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
+import { AgentNames, useAgentName } from '@/components/agent-label'
+import { GraphEditorProvider, LinkBar, useGraphEditor } from '@/components/graph-edit'
+import { HypothesisGraphCanvas } from '@/components/hypothesis-graph'
+import { HypothesisOutline } from '@/components/hypothesis-outline'
+import { HypothesisPanel, ObjectiveBar } from '@/components/hypothesis-panel'
+import { SearchBox, SearchHits, useHypothesisSearch } from '@/components/hypothesis-search'
+import { useQueryParam } from '@/lib/query-state'
+import { withQuery } from '@/lib/routes'
+import { useTenant } from '@/lib/tenant'
+import { isReadOnly, ReadOnlyProvider } from '@/lib/read-only'
+import { HUMAN_OWNER, extendLayout, graphHref, layoutGraph, matchesFilters } from '@/lib/hypothesis-graph'
+import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
+
+const STATUS_OPTIONS = ['open', 'confirmed', 'refuted', 'inconclusive'].map(s => ({ value: s, label: s }))
+
+/** Narrows the graph to one agent's hypotheses, or to the ones people added. */
+function OwnerFilter({ graph, value, onChange }: { graph: HypothesisGraph | undefined; value: string; onChange: (owner: string) => void }) {
+  const agentName = useAgentName()
+  const options = useMemo(() => {
+    const nodes = graph?.nodes ?? []
+    const agents = Array.from(new Set(nodes.map(n => n.agent_id).filter(Boolean)))
+    const listed = agents.map(a => ({ value: a, label: agentName(a) })).sort((a, b) => a.label.localeCompare(b.label))
+    if (nodes.some(n => !n.agent_id && n.actor.kind === 'user')) listed.push({ value: HUMAN_OWNER, label: 'People' })
+    return listed
+  }, [graph, agentName])
+  return <SearchableSelect value={value} onChange={onChange} allLabel="All agents" options={options} />
+}
+
+interface Layout {
+  /** Counts the times it was laid out whole. */
+  epoch: number
+  positions: Map<string, Position>
+  /** Some node was placed beside the others since the graph was last laid out whole. */
+  extended: boolean
+}
+
+// The graph is laid out whole when it opens and when asked to tidy; a node that joins later is
+// placed beside the others, so nothing already drawn moves under the reader.
+function useStableLayout(graph: HypothesisGraph) {
+  const last = useRef<Layout | null>(null)
+  const [epoch, setEpoch] = useState(0)
+  const layout = useMemo<Layout>(() => {
+    const prev = last.current
+    if (!prev || prev.epoch !== epoch) return { epoch, positions: layoutGraph(graph), extended: false }
+    const positions = extendLayout(graph, prev.positions)
+    return { epoch, positions, extended: prev.extended || graph.nodes.some(n => positions.has(n.id) && !prev.positions.has(n.id)) }
+  }, [graph, epoch])
+  useEffect(() => {
+    last.current = layout
+  }, [layout])
+  return { ...layout, tidy: () => setEpoch(e => e + 1) }
+}
+
+export default function HypothesesPage({ params }: { params: { experimentId: string } }) {
+  return (
+    <Suspense fallback={<Loading />}>
+      <HypothesesPageContent peID={params.experimentId} />
+    </Suspense>
+  )
+}
+
+function HypothesesPageContent({ peID }: { peID: string }) {
+  const { me } = useTenant()
+  const router = useRouter()
+  const [view, setView] = useQueryParam('view', 'graph')
+  const [statusFilter, setStatusFilter] = useQueryParam('status')
+  const [ownerFilter, setOwnerFilter] = useQueryParam('agent')
+  const [q, setQ] = useQueryParam('q')
+
+  const { data: pe, error: selectedError } = useSWR(['pe', peID], () => fetchPlatformExperiment(peID))
+
+  const { data: graph, error, mutate } = useSWR(
+    ['hypothesis-graph', peID],
+    () => fetchHypothesisGraph(peID),
+    { refreshInterval: 15_000 },
+  )
+  const search = useHypothesisSearch(peID, q)
+  const filters = useMemo(() => ({ status: statusFilter, owner: ownerFilter }), [statusFilter, ownerFilter])
+
+  const filtering = statusFilter !== '' || ownerFilter !== ''
+  const matching = graph ? graph.nodes.filter(n => matchesFilters(n, filters)).length : 0
+
+  function selectExperiment(next: string) {
+    router.push(withQuery(graphHref(next), { view: view === 'graph' ? undefined : view }))
+  }
+
+  // Nothing is added to a graph whose experiment has not been read yet, nor to a closed one.
+  const closed = pe?.status === PlatformExperimentStatus.CLOSED
+  const readOnly = pe ? isReadOnly(me, pe) || closed : true
+
+  const page = (
+    <ReadOnlyProvider value={readOnly}>
+    <Page
+      fill
+      title="Hypotheses"
+      description="Each experiment grows a graph of research claims. Every hypothesis builds on the experiment's objective or on earlier hypotheses, and may contradict or relate to others."
+    >
+      <Stack>
+      <Inline gap="md">
+        <FormField inline label="Experiment">
+          <PlatformExperimentSelect
+            value={peID}
+            onChange={selectExperiment}
+            hideAllOption
+            placeholder="Select an experiment"
+            className="min-w-64"
+          />
+        </FormField>
+        <Inline gap="xs" nowrap className="ml-auto" role="group" aria-label="View">
+          <Chip active={view === 'graph'} onClick={() => setView('graph')}>Graph</Chip>
+          <Chip active={view === 'outline'} onClick={() => setView('outline')}>Outline</Chip>
+        </Inline>
+      </Inline>
+
+      <Inline gap="md">
+        <SearchBox key={peID} initial={q} placeholder="Search hypotheses by text" onSearch={setQ} />
+        <FormField inline label="Status" className="ml-2">
+          <SearchableSelect
+            value={statusFilter}
+            onChange={setStatusFilter}
+            allLabel="All"
+            options={STATUS_OPTIONS}
+          />
+        </FormField>
+        <FormField inline label="Agent" className="ml-2">
+          <OwnerFilter graph={graph} value={ownerFilter} onChange={setOwnerFilter} />
+        </FormField>
+        {filtering && graph && (
+          <Text as="span" variant="hint">{matching} of {graph.nodes.length} match</Text>
+        )}
+      </Inline>
+      </Stack>
+
+      {selectedError && <ErrorMessage>Could not load experiment {peID}: {selectedError.message}</ErrorMessage>}
+      {error && <ErrorMessage>Could not load the hypothesis graph: {error.message}</ErrorMessage>}
+      {!(graph && pe) && !error && !selectedError && <Loading />}
+
+      {graph && pe && (
+        <Workspace
+          key={graph.root}
+          graph={graph}
+          pe={pe}
+          mutate={mutate}
+          canWrite={!readOnly}
+          closed={closed}
+          view={view}
+          q={q}
+          setQ={setQ}
+          search={search}
+          filters={filters}
+        />
+      )}
+    </Page>
+    </ReadOnlyProvider>
+  )
+  return <AgentNames platformExperimentID={peID}>{page}</AgentNames>
+}
+
+function Workspace({ graph, pe, mutate, canWrite, closed, view, q, setQ, search, filters }: {
+  graph: HypothesisGraph
+  pe: PlatformExperiment
+  mutate: KeyedMutator<HypothesisGraph>
+  canWrite: boolean
+  closed: boolean
+  view: string
+  q: string
+  setQ: (q: string) => void
+  search: { data?: HypothesisSearchHit[]; isLoading: boolean; error?: Error }
+  filters: GraphFilters
+}) {
+  const [focus, setFocus] = useQueryParam('focus')
+  const layout = useStableLayout(graph)
+  const editor = useGraphEditor({ graph, rootLabel: pe.name, canWrite, closed, mutate, onSelect: setFocus })
+  const nodeByID = useMemo(() => new Map(graph.nodes.map(n => [n.id, n])), [graph])
+  const hits = useMemo(() => new Set((search.data ?? []).map(h => h.id)), [search.data])
+
+  const selected = focus || graph.root
+  const showSide = q !== '' || selected !== graph.root
+
+  return (
+    <GraphEditorProvider value={editor}>
+      <ObjectiveBar graph={graph} pe={pe} onAddIdea={editor.startAdding} />
+      <div className={clsx('grid min-h-canvas flex-fill grid-rows-1 gap-4', showSide ? 'grid-cols-with-aside' : 'grid-cols-1')}>
+        <Card className="flex flex-col">
+          <LinkBar />
+          {view === 'outline' ? (
+            <>
+              {graph.nodes.length === 0 && (
+                <Text variant="note" className="px-3 pt-2.5">No hypotheses yet. Agents place each idea under the objective or an earlier one.</Text>
+              )}
+              <HypothesisOutline
+                graph={graph}
+                rootLabel={pe.name}
+                selected={selected}
+                hits={hits}
+                filters={filters}
+                onSelect={setFocus}
+              />
+            </>
+          ) : (
+            <HypothesisGraphCanvas
+              graph={graph}
+              positions={layout.positions}
+              rootLabel={pe.name}
+              focus={focus}
+              selected={selected}
+              hits={hits}
+              filters={filters}
+              minimap={!showSide}
+              onSelect={setFocus}
+              onTidy={layout.extended ? layout.tidy : undefined}
+            />
+          )}
+        </Card>
+        {showSide && <Stack as="aside" gap="xl" className="overflow-y-auto">
+          {q && (
+            <Section title="Search results" actions={<Button variant="link" size="sm" onClick={() => setQ('')}>Clear</Button>}>
+              <SearchHits hits={search.data} onPick={h => setFocus(h.id)} isLoading={search.isLoading} error={search.error} />
+            </Section>
+          )}
+          {selected !== graph.root && (
+            <HypothesisPanel
+              graph={graph}
+              nodeByID={nodeByID}
+              selected={selected}
+              onSelect={setFocus}
+              onAddIdea={editor.startAdding}
+            />
+          )}
+        </Stack>}
+      </div>
+    </GraphEditorProvider>
+  )
+}

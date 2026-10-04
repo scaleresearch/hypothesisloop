@@ -8,7 +8,6 @@ import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { RepositorySelect, repositoryFields } from '@/components/repository-select'
 import type { GitHubInstallation, GitHubRepository, Me } from '@/types'
 
-vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('project=prj_1') }))
 vi.mock('@/lib/api', async importActual => ({
   ...(await importActual<typeof import('@/lib/api')>()),
   fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
@@ -150,7 +149,7 @@ describe('the repository of a new platform experiment', () => {
   it('leads to the GitHub card of Settings when no account is connected, and asks GitHub nothing', async () => {
     vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [], total: 0 })
     show()
-    expect((await screen.findByRole('link', { name: 'Connect GitHub in Settings' })).getAttribute('href')).toBe('/settings?project=prj_1#github')
+    expect((await screen.findByRole('link', { name: 'Connect GitHub in Settings' })).getAttribute('href')).toBe('/orgs/org_a/settings#github')
     expect(screen.queryByRole('combobox')).toBeNull()
     expect(fetchGitHubRepositories).not.toHaveBeenCalled()
   })

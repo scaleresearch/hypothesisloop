@@ -6,7 +6,9 @@ import { formatDate, relTime } from '@/lib/format'
 import { abandonDraft, reviseDraft } from '@/lib/planning'
 import type { Draft } from '@/lib/planning'
 import { reasonOf } from '@/lib/phase'
-import { useProjectRouter } from '@/lib/query-state'
+import { useRouter } from 'next/navigation'
+import { projectPath } from '@/lib/routes'
+import { useTenant } from '@/lib/tenant'
 import { actorLabel } from '@/components/actor'
 import { PhaseStrip } from '@/components/phase-strip'
 import { ProposalForm } from '@/components/proposal-form'
@@ -72,7 +74,8 @@ function Revise({ draft, declined, onDone }: { draft: Draft; declined: boolean; 
  * at a cost they state or asking for a change. A reader of a shared draft is shown neither.
  */
 export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?: boolean }) {
-  const router = useProjectRouter()
+  const router = useRouter()
+  const { project } = useTenant()
   const { mutate } = useSWRConfig()
   const [abandonError, setAbandonError] = useState<string | null>(null)
   const state = reasonOf(draft).reason
@@ -95,7 +98,7 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
 
   return (
     <Page
-      back={{ label: 'Experiments', onClick: () => router.push('/platform-experiments') }}
+      back={{ label: 'Experiments', onClick: () => router.push(projectPath(project.id, 'experiments')) }}
       title={draft.name}
       description={<Text as="span" variant="hint">Draft, {state === 'proposed' || state === 'declined' ? 'waiting for you' : 'being planned'}</Text>}
     >

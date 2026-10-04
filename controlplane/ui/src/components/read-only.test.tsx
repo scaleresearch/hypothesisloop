@@ -16,8 +16,8 @@ import type { HypothesisGraph, HypothesisListItem, HypothesisWithJobs, Me, Platf
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
-  usePathname: () => '/platform-experiments/pe-x',
-  useSearchParams: () => new URLSearchParams('project=prj_1'),
+  usePathname: () => '/experiments/pe-x/hypotheses',
+  useSearchParams: () => new URLSearchParams(),
 }))
 vi.mock('@/lib/api', () => ({
   addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
@@ -99,8 +99,8 @@ describe('a shared platform experiment of another org shows no control that writ
     show(panel, true)
     expect(names('button').filter(n => n?.includes('Add idea'))).toEqual([])
     // Reading on stays possible, from the reader's own project.
-    expect(screen.getByRole('link', { name: 'Open detail →' }).getAttribute('href')).toBe('/hypotheses/hyp-1?project=prj_1')
-    expect(screen.getByRole('link', { name: 'Experiment →' }).getAttribute('href')).toBe('/platform-experiments/pe-x?project=prj_1')
+    expect(screen.getByRole('link', { name: 'Open detail →' }).getAttribute('href')).toBe('/experiments/pe-x/hypotheses/hyp-1')
+    expect(screen.getByRole('link', { name: 'Experiment →' }).getAttribute('href')).toBe('/experiments/pe-x')
   })
 
   it('to a hypothesis: no link or comment form', () => {

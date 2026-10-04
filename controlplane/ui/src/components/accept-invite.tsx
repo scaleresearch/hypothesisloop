@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { ApiError, acceptOrgInvite } from '@/lib/api'
 import { HOME_PATH, LOGIN_PATH, accessToken } from '@/lib/auth'
 import { INVITE_PATH, dropInvite, heldInvite } from '@/lib/invite'
+import { projectPath } from '@/lib/routes'
 import { useRefreshMe } from '@/lib/tenant'
 import type { OrgMember } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -89,7 +90,7 @@ export function AcceptInvite() {
     setStep({ at: 'joined', member })
     try {
       const project = (await refreshMe()).projects.find(p => p.org_id === member.org_id)
-      if (project) router.replace(`${HOME_PATH}?project=${project.id}`)
+      if (project) router.replace(projectPath(project.id, 'experiments'))
       else setStep({ at: 'joined', member, stranded: 'The organization has no project yet.' })
     } catch (e) {
       setStep({ at: 'joined', member, stranded: `Your account could not be read again: ${e instanceof Error ? e.message : String(e)}` })

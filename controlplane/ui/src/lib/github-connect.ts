@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import useSWR from 'swr'
 import { APP_NOT_INSTALLED, ApiError, INSTALLATION_CHOICE_REQUIRED, fetchGitHubApp } from '@/lib/api'
+import { orgPath } from '@/lib/routes'
 import type { GitHubApp, GitHubInstallation, ReachableInstallation } from '@/types'
 
 const KEY = 'hl-github-connect'
@@ -21,8 +22,12 @@ export const GITHUB_RETURN_PATH = '/settings/repository'
 /** The id of the GitHub card in the org's settings, for a link that leads to it. */
 export const GITHUB_CARD = 'github'
 
-// What this tab left for GitHub with. GitHub returns to one fixed address that names neither the
-// org nor the project, so the return is tied to the attempt by the random value sent as `state`.
+/** The GitHub card in the settings of an org. */
+export function githubCardPath(orgID: string): string {
+  return `${orgPath(orgID, 'settings')}#${GITHUB_CARD}`
+}
+
+// What this tab left for GitHub with. GitHub returns to one fixed address that names no org, so the return is tied to the attempt by the random value sent as `state`.
 // An attempt is read once: a second return with the same state finds nothing.
 interface Attempt {
   nonce: string
@@ -31,7 +36,6 @@ interface Attempt {
   // a code and the state.
   step: 'install' | 'authorise'
   orgID: string
-  projectID: string
   installationID?: number
 }
 
@@ -87,9 +91,8 @@ function held(): Attempt | null {
 }
 
 interface Origin {
+  /** The org whose settings the person left from and returns to. */
   orgID: string
-  /** The project the person was in, to return them to. */
-  projectID: string
 }
 
 /**
@@ -113,8 +116,8 @@ export function beginInstall(installURL: string, origin: Origin): string {
 
 const NOT_STARTED_HERE = 'This return from GitHub does not belong to a connect started in this tab, so nothing was done with it.'
 
-/** What the return page does next: show Settings of a project, or go on to GitHub once more. */
-export type Next = { to: 'settings'; projectID: string | null } | { to: 'github'; address: string }
+/** What the return page does next: show the settings of an org, or go on to GitHub once more. */
+export type Next = { to: 'settings'; orgID: string | null } | { to: 'github'; address: string }
 
 interface Calls {
   app: () => Promise<GitHubApp>
@@ -148,42 +151,42 @@ async function take(params: URLSearchParams, calls: Calls): Promise<Next> {
   const installed = Number(params.get('installation_id'))
 
   if (attempt?.step === 'install' && state == null && params.has('setup_action')) {
-    const { orgID, projectID } = attempt
+    const { orgID } = attempt
     if (!Number.isSafeInteger(installed) || installed <= 0) {
       set({ state: 'failed', orgID, message: params.get('setup_action') === 'request' ? REQUESTED : NOT_INSTALLED })
-      return { to: 'settings', projectID }
+      return { to: 'settings', orgID }
     }
     try {
-      return { to: 'github', address: beginConnect((await calls.app()).authorize_url, { orgID, projectID }, installed) }
+      return { to: 'github', address: beginConnect((await calls.app()).authorize_url, { orgID }, installed) }
     } catch (error) {
       set({ state: 'failed', orgID, message: messageOf(error) })
-      return { to: 'settings', projectID }
+      return { to: 'settings', orgID }
     }
   }
   if (attempt?.step !== 'authorise' || attempt.nonce !== state) {
     // A return to this address with nothing GitHub would send is a visit, and says nothing.
     if (params.has('code') || params.has('state') || params.has('error')) set({ state: 'refused', message: NOT_STARTED_HERE })
-    return { to: 'settings', projectID: attempt?.projectID ?? null }
+    return { to: 'settings', orgID: attempt?.orgID ?? null }
   }
 
-  const { orgID, projectID, installationID } = attempt
+  const { orgID, installationID } = attempt
   const code = params.get('code')
   if (code == null) {
     const said = params.get('error_description') ?? params.get('error')
     set({ state: 'failed', orgID, message: said ? `GitHub did not authorise the App: ${said}` : 'GitHub returned without a code.' })
-    return { to: 'settings', projectID }
+    return { to: 'settings', orgID }
   }
   try {
     set({ state: 'connected', orgID, installation: await calls.connect(orgID, code, installationID) })
-    return { to: 'settings', projectID }
+    return { to: 'settings', orgID }
   } catch (error) {
     const reason = error instanceof ApiError ? error.reason : undefined
     if (reason === APP_NOT_INSTALLED && installationID == null) {
       try {
-        return { to: 'github', address: beginInstall((await calls.app()).install_url, { orgID, projectID }) }
+        return { to: 'github', address: beginInstall((await calls.app()).install_url, { orgID }) }
       } catch (unread) {
         set({ state: 'failed', orgID, message: messageOf(unread) })
-        return { to: 'settings', projectID }
+        return { to: 'settings', orgID }
       }
     }
     if (error instanceof ApiError && reason === INSTALLATION_CHOICE_REQUIRED && Array.isArray(error.body?.installations)) {
@@ -191,7 +194,7 @@ async function take(params: URLSearchParams, calls: Calls): Promise<Next> {
     } else {
       set({ state: 'failed', orgID, message: reason === APP_NOT_INSTALLED ? NOT_INSTALLED : messageOf(error), reason })
     }
-    return { to: 'settings', projectID }
+    return { to: 'settings', orgID }
   }
 }
 

@@ -3,7 +3,7 @@
 import type { HTMLAttributes, TableHTMLAttributes, ThHTMLAttributes } from 'react'
 import type { Header } from '@tanstack/react-table'
 import { clsx } from 'clsx'
-import { useProjectRouter } from '@/lib/query-state'
+import { useRouter } from 'next/navigation'
 
 /** The data table. Rows and cells inside are plain thead, tbody, tr, th and td, styled by .data-table in globals.css. */
 export function Table({ className, ...props }: TableHTMLAttributes<HTMLTableElement>) {
@@ -18,7 +18,7 @@ export const quiet = 'whitespace-nowrap font-mono text-2xs text-subtle'
 
 /** A row that opens the record it lists, on a click or Enter. A control inside stops its own click. */
 export function LinkTr({ href, className, ...props }: HTMLAttributes<HTMLTableRowElement> & { href: string }) {
-  const router = useProjectRouter()
+  const router = useRouter()
   return (
     <tr
       tabIndex={0}

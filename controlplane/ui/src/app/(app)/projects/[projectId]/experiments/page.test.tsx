@@ -1,0 +1,171 @@
+import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { SWRConfig } from 'swr'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  ApiError, apiSend, createPlatformExperiment, fetchAgentsPage, fetchExperimentStats, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories,
+  fetchOrgClusters, fetchPlatformExperimentsPage,
+} from '@/lib/api'
+import { resolveTenant, TenantContext } from '@/lib/tenant'
+import PlatformExperimentsPage from '@/app/(app)/projects/[projectId]/experiments/page'
+import type { Me, PlatformExperiment } from '@/types'
+
+const navigation = vi.hoisted(() => ({ push: vi.fn() }))
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: navigation.push, replace: vi.fn() }),
+  usePathname: () => '/projects/prj_1/experiments',
+  useSearchParams: () => new URLSearchParams(),
+}))
+vi.mock('@/lib/api', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api')>()),
+  addPlatformExperimentAgents: vi.fn(), apiSend: vi.fn(), createPlatformExperiment: vi.fn(), fetchAgentsPage: vi.fn(), fetchExperimentStats: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(),
+  fetchGitHubRepositories: vi.fn(), fetchOrgClusters: vi.fn(), fetchPlatformExperimentsPage: vi.fn(),
+}))
+vi.mock('@/components/platform-experiment-card', () => ({
+  PlatformExperimentCard: ({ pe }: { pe: PlatformExperiment }) => <article>{pe.name}{pe.shared ? ' (shared)' : ''}</article>,
+}))
+
+const at = '2026-01-01T00:00:00Z'
+const me: Me = {
+  kind: 'user', user_id: 'u1', name: 'Ada',
+  orgs: [{ id: 'org_a', name: 'Lab', role: 'member', created_at: at }],
+  projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
+}
+const experiment = (id: string, more: Partial<PlatformExperiment> = {}) => ({ id, project_id: 'prj_1', name: id, shared: false, ...more }) as PlatformExperiment
+
+let own: PlatformExperiment[]
+let shared: PlatformExperiment[]
+
+function show() {
+  const resolved = resolveTenant(me, '')
+  if (resolved.state !== 'selected') throw new Error('no tenant')
+  return render(
+    <SWRConfig value={{ provider: () => new Map() }}>
+      <TenantContext.Provider value={resolved.tenant}><PlatformExperimentsPage /></TenantContext.Provider>
+    </SWRConfig>,
+  )
+}
+
+beforeEach(() => {
+  navigation.push.mockReset()
+  own = []
+  shared = []
+  vi.mocked(fetchOrgClusters).mockResolvedValue([])
+  vi.mocked(fetchExperimentStats).mockResolvedValue({ total: 0, by_status: {} } as never)
+  vi.mocked(fetchAgentsPage).mockResolvedValue({ items: [], total: 0 })
+  vi.mocked(fetchGitHubApp).mockRejectedValue(new ApiError(503, 'no GitHub App', 'github_not_configured'))
+  vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [], total: 0 })
+  vi.mocked(fetchGitHubRepositories).mockResolvedValue({ items: [{ repository: 'acme/widgets', installation_id: 7, private: true }], total: 1 })
+  vi.mocked(fetchPlatformExperimentsPage).mockImplementation(async params => {
+    const all = params?.shared === false ? own : [...own, ...shared]
+    return { items: all.slice(0, params?.limit), total: all.length }
+  })
+  vi.mocked(createPlatformExperiment).mockImplementation(async (_project, req) => experiment('pe-new', { name: req.name }))
+})
+
+// The form asks for metrics, a budget and dates before anything exists, so the page starts
+// from a sentence and keeps the form for who wants to state all of that themselves.
+describe('the experiments page', () => {
+  it('starts an experiment from one sentence, in an empty project and in one with experiments', async () => {
+    vi.mocked(apiSend).mockResolvedValue(experiment('pe-draft'))
+    for (const existing of [[], [experiment('pe-0')]]) {
+      own = existing
+      navigation.push.mockReset()
+      vi.mocked(apiSend).mockClear()
+      const { unmount } = show()
+      expect(screen.queryByText(/New experiment in/)).toBeNull()
+      expect(screen.queryByPlaceholderText('e.g. Q3 Vision Benchmark')).toBeNull()
+      if (existing.length === 0) expect(await screen.findByText('No experiments yet.')).toBeTruthy()
+      await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'Is a cosine schedule better?')
+      await userEvent.click(screen.getByRole('button', { name: 'Plan it' }))
+      expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/drafts', { project_id: 'prj_1', goal: 'Is a cosine schedule better?' })
+      await waitFor(() => expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/experiments/pe-draft'))
+      expect(createPlatformExperiment).not.toHaveBeenCalled()
+      unmount()
+    }
+  })
+
+  it('plans on Enter as the button does, keeps Shift+Enter for a new line, and plans nothing from an empty box', async () => {
+    vi.mocked(apiSend).mockReset().mockResolvedValue(experiment('pe-draft'))
+    show()
+    const goal = screen.getByLabelText('What do you want to find out?')
+    await userEvent.type(goal, '  {Enter}')
+    expect(apiSend).not.toHaveBeenCalled()
+    await userEvent.clear(goal)
+    await userEvent.type(goal, 'Is a cosine schedule better?{Shift>}{Enter}{/Shift}On small models.')
+    expect(apiSend).not.toHaveBeenCalled()
+    expect(goal).toHaveProperty('value', 'Is a cosine schedule better?\nOn small models.')
+    await userEvent.type(goal, '{Enter}')
+    expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/drafts', { project_id: 'prj_1', goal: 'Is a cosine schedule better?\nOn small models.' })
+    await waitFor(() => expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/experiments/pe-draft'))
+  })
+
+  it('says why a sentence was refused, and that no cluster is online, and stays', async () => {
+    vi.mocked(apiSend).mockRejectedValue(new Error('no launcher is registered, so nothing would run the planner'))
+    show()
+    expect(await screen.findByText(/^No compute is online yet\./)).toBeTruthy()
+    await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'goal')
+    await userEvent.click(screen.getByRole('button', { name: 'Plan it' }))
+    expect(await screen.findByText(/no launcher is registered/)).toBeTruthy()
+    expect(navigation.push).not.toHaveBeenCalled()
+  })
+
+  it('keeps the full form behind Configure it myself: Cancel creates nothing, a refusal stays, a created experiment opens', async () => {
+    show()
+    await userEvent.click(screen.getByRole('button', { name: 'Configure it myself' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(createPlatformExperiment).not.toHaveBeenCalled()
+
+    vi.mocked(createPlatformExperiment).mockRejectedValueOnce(new Error('the org has reached its limit of platform experiments'))
+    await userEvent.click(screen.getByRole('button', { name: 'Configure it myself' }))
+    const dialog = within(screen.getByRole('dialog'))
+    await userEvent.type(dialog.getByPlaceholderText('e.g. Q3 Vision Benchmark'), 'First run')
+    await userEvent.type(dialog.getByPlaceholderText(/^Goals, evaluation protocol/), 'The brief')
+    await userEvent.click(dialog.getByRole('button', { name: 'Next' }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Next' }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Create experiment' }))
+    expect(await dialog.findByText('the org has reached its limit of platform experiments')).toBeTruthy()
+    expect(navigation.push).not.toHaveBeenCalled()
+    await userEvent.click(dialog.getByRole('button', { name: 'Create experiment' }))
+    expect(vi.mocked(createPlatformExperiment).mock.calls[1]).toMatchObject(['prj_1', { name: 'First run', description: 'The brief' }])
+    await waitFor(() => expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/experiments/pe-new'))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('lists the experiments under the goal box, or says it could not read them and keeps the box', async () => {
+    own = [experiment('pe-0'), experiment('pe-1')]
+    shared = [experiment('pe-shared', { project_id: 'prj_other', shared: true })]
+    const { unmount } = show()
+    expect(await screen.findByRole('heading', { name: 'Experiments' })).toBeTruthy()
+    await screen.findByText('pe-0')
+    expect(screen.getAllByRole('article').map(a => a.textContent)).toEqual(['pe-0', 'pe-1', 'pe-shared (shared)'])
+    unmount()
+
+    vi.mocked(fetchPlatformExperimentsPage).mockRejectedValue(new Error('API unreachable'))
+    show()
+    expect(await screen.findByText('Could not load the experiments of default: API unreachable')).toBeTruthy()
+    expect(screen.getByLabelText('What do you want to find out?')).toBeTruthy()
+  })
+})
+
+// The page explained GitHub permissions in a paragraph and named no repository to start from.
+describe('the repository of a planned experiment', () => {
+  const app = { slug: 'hl', client_id: 'c', install_url: 'https://github.test/install', authorize_url: 'https://github.test/authorize', new_repository_url: 'https://github.test/new' }
+
+  it('leads to Settings in one line while GitHub is not connected, and the button says why it waits', async () => {
+    vi.mocked(fetchGitHubApp).mockResolvedValue(app)
+    show()
+    const connect = await screen.findByRole('link', { name: 'Connect GitHub in Settings' })
+    expect(connect.getAttribute('href')).toBe('/orgs/org_a/settings#github')
+    expect(connect.parentElement!.textContent).toBe('Connect GitHub in Settings to start.')
+    await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'Is a cosine schedule better?')
+    const plan = screen.getByRole('button', { name: 'Plan it' })
+    expect(plan).toHaveProperty('disabled', true)
+    expect(plan.closest('[title]')!.getAttribute('title')).toBe('Connect GitHub in Settings to start')
+    expect(screen.queryByText(/permission|select one only/i)).toBeNull()
+    await userEvent.type(screen.getByLabelText('What do you want to find out?'), '{Enter}')
+    expect(apiSend).not.toHaveBeenCalled()
+  })
+})

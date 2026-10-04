@@ -42,7 +42,7 @@ function show(as: Me = owner) {
 
 // Leaves for GitHub as the card does and comes back with what GitHub would return.
 async function comeBack(query: (state: string) => string, installationID?: number) {
-  const address = beginConnect(app.authorize_url, { orgID: 'org_a', projectID: 'prj_1' }, installationID)
+  const address = beginConnect(app.authorize_url, { orgID: 'org_a' }, installationID)
   return takeReturn(query(new URL(address).searchParams.get('state')!), {
     app: async () => app,
     connect: (orgID, code, id) => connectGitHubInstallation(orgID, { code, redirectURI: 'u', installationID: id }),
@@ -159,7 +159,7 @@ describe('connecting', () => {
   })
 
   it('says nothing of a connect that belongs to another org', async () => {
-    const address = beginConnect(app.authorize_url, { orgID: 'org_other', projectID: 'prj_9' })
+    const address = beginConnect(app.authorize_url, { orgID: 'org_other' })
     await takeReturn(`code=c&state=${new URL(address).searchParams.get('state')}`, {
       app: async () => app, connect: async () => ({ ...lab, org_id: 'org_other' }),
     })

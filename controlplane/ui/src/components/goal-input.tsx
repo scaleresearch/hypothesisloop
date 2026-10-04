@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { Field, Label } from '@headlessui/react'
-import { GITHUB_CARD } from '@/lib/github-connect'
+import { githubCardPath } from '@/lib/github-connect'
+import { useTenant } from '@/lib/tenant'
 import { GOAL_EXAMPLES } from '@/lib/goal-examples'
 import { createDraft, MAX_GOAL_LENGTH } from '@/lib/planning'
 import type { Draft } from '@/lib/planning'
@@ -67,6 +68,7 @@ function useTypedExamples(stopped: boolean): string {
  * the rest and proposes it on the draft's page, where the person approves it.
  */
 export function GoalInput({ projectID, onCreated }: { projectID: string; onCreated: (draft: Draft) => void }) {
+  const { org } = useTenant()
   const [goal, setGoal] = useState('')
   const [touched, setTouched] = useState(false)
   const [sending, setSending] = useState(false)
@@ -118,7 +120,7 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
         )}
         {github === 'unconnected' && (
           <Text variant="note" className="px-2">
-            <TextLink inline href={`/settings#${GITHUB_CARD}`}>Connect GitHub in Settings</TextLink> to start.
+            <TextLink inline href={githubCardPath(org.id)}>Connect GitHub in Settings</TextLink> to start.
           </Text>
         )}
         {error && <InlineError className="px-2">{error}</InlineError>}
