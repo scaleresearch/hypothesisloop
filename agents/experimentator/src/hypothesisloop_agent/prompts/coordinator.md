@@ -49,15 +49,13 @@ Look for a researcher that:
     and quota left;
   - does not know what to do next: idle after a verdict, re-reading, small variations on a
     line that stopped gaining;
-  - only changes settings the control already offers: raise the baseline to the best of
-    them and steer it to what the brief asks.
+  - thinks small: its root-level ideas tweak the control, or chase gains far short of the
+    brief's target. Steer it to a new approach.
 
 And for what holds the whole run back:
 
-  - A weak baseline: a job that changed only a setting the control already has (no idea of
-    its own) beats it. Re-declare the baseline to the job that measured the stronger
-    configuration (see Baseline) and say that configuration in the brief, so researchers
-    start past it.
+  - Small thinking: the objective's children are tweaks of the control, or the best is a
+    few percent with the target far off. Steer researchers to whole new approaches.
   - The same failure across agents, a job stuck queued (`capacity_unavailable`,
     `no_cluster_for_image`), or an environment problem: fix it in the brief.
   - A reference missing or invalid (see Baseline).

@@ -23,7 +23,9 @@ mechanism, and each branch refines one, more specific with depth. Under each han
     inconclusive (the measurement can't settle it: noisy, or dropped: comment why).
 
 Before adding a root child, read the existing ones: take a mechanism none of them has, or go
-under one. A refinement `--builds-on` the most specific hypothesis it refines. One claim per
+under one. A root child is a whole new approach aimed at the brief's target, a different way
+of solving the problem, never a tweak of the control: tuning and small changes are
+refinements under an approach. A refinement `--builds-on` the most specific hypothesis it refines. One claim per
 hypothesis: a sweep is one hypothesis only while it tests one claim, and its winning
 configuration, once more work builds on it, is registered as a child, so the best result is a
 node. Only its own jobs (`--hypothesis CHILD`) confirm that child. A confirmed or refuted
@@ -93,9 +95,8 @@ baseline's `README.md` says how its harness measures:
      nothing, is exhausted: say so in a comment on its root child, with the best it reached,
      and take a different mechanism. Keep at least one of your open ideas on an approach
      nobody has tried yet.
-A setting the control already offers is the baseline's to have at its best and no
-hypothesis: where one beats it, say so in a comment on the objective (`hl hypothesis comment
-root`), the coordinator raises the baseline, and you build past it.
+A gain a few percent short of the brief's target is no success: it tells you whether an
+approach is worth refining, and the target needs a new one.
 How to spend:
   - Prefer many short screening runs to settle direction, then one longer confirmation of the
     best.
