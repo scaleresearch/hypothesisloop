@@ -925,6 +925,7 @@ revision the person asks for in that time arrives as your next update.`, stderr)
 		return 2
 	}
 	quantitiesAsStrings(body)
+	textsAsLists(body)
 	var out any
 	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(id)+"/proposal", body, &out); err != nil {
 		return fail(stderr, err)
@@ -940,6 +941,16 @@ func quantitiesAsStrings(body map[string]any) {
 		switch v := body[key].(type) {
 		case int, int64, uint64, float64:
 			body[key] = fmt.Sprint(v)
+		}
+	}
+}
+
+// textsAsLists sends a proposal's out_of_scope, risks or questions written as one | block as the
+// one-item list the API reads. A planner was refused 422 "expected array" for questions: |.
+func textsAsLists(body map[string]any) {
+	for _, key := range []string{"out_of_scope", "risks", "questions"} {
+		if text, ok := body[key].(string); ok {
+			body[key] = []any{text}
 		}
 	}
 }

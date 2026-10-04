@@ -282,6 +282,21 @@ func TestTheProposeExampleIsSentAsTheAPIReadsIt(t *testing.T) {
 	}
 }
 
+// A planner wrote questions: | and was refused 422 "expected array": one block is a one-item list.
+func TestAProposalsListOfTextsMayBeOneBlock(t *testing.T) {
+	got := recordingServer(t, func(int, recorded) any { return map[string]any{"status": "draft"} })
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/ag-1"))
+	var stdout, stderr bytes.Buffer
+	file := writeFile(t, "questions: |\n  what the goal left open\nrisks:\n  - |\n    a risk\n")
+	if code := run([]string{"platform-experiments", "propose", file}, &stdout, &stderr); code != 0 {
+		t.Fatalf("propose: exit %d, stderr %s", code, stderr.String())
+	}
+	body := (*got)[0].Body
+	if !reflect.DeepEqual(body["questions"], []any{"what the goal left open\n"}) || !reflect.DeepEqual(body["risks"], []any{"a risk\n"}) {
+		t.Errorf("sent questions %#v and risks %#v, want each a list of one text", body["questions"], body["risks"])
+	}
+}
+
 func TestAPlannerProposesItsDraftFromAFile(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any { return map[string]any{"status": "draft"} })
 	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/ag-1"))
