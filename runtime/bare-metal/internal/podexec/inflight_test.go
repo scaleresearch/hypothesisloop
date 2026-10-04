@@ -2,6 +2,8 @@ package podexec
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/registry"
 	"github.com/moby/moby/client"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -45,6 +48,8 @@ type fakeEngine struct {
 	gates        map[string]chan struct{}
 	waiting      map[string]bool
 	pullFailures map[string]int
+	// pullAuths is the registry login each image was last pulled with.
+	pullAuths    map[string]string
 	doubleBooked []string
 	// stoppingState is what a container inside its stop grace is listed as: podman says
 	// "stopping", docker keeps saying "running".
@@ -59,6 +64,7 @@ func newFakeEngine() *fakeEngine {
 		pulls: map[string]int{}, stops: map[string]int{}, stopGraces: map[string]*int{},
 		deadlines: map[string]bool{},
 		gates:     map[string]chan struct{}{}, waiting: map[string]bool{}, pullFailures: map[string]int{},
+		pullAuths:     map[string]string{},
 		stoppingState: "stopping",
 	}
 }
@@ -248,10 +254,11 @@ type fakePull struct{ client.ImagePullResponse }
 
 func (fakePull) Wait(context.Context) error { return nil }
 
-func (f *fakeEngine) ImagePull(ctx context.Context, image string, _ client.ImagePullOptions) (client.ImagePullResponse, error) {
+func (f *fakeEngine) ImagePull(ctx context.Context, image string, options client.ImagePullOptions) (client.ImagePullResponse, error) {
 	f.sawDeadline(ctx, "pull")
 	f.mu.Lock()
 	f.pulls[image]++
+	f.pullAuths[image] = options.RegistryAuth
 	fail := f.pullFailures[image] > 0
 	if fail {
 		f.pullFailures[image]--
@@ -324,7 +331,7 @@ func pass(t *testing.T, ctx context.Context, e *Executor, desired ...*domain.Exp
 		}
 		for id, exp := range byID {
 			if !actualSet[id] {
-				if err := e.CreateWorkload(ctx, exp); err != nil {
+				if err := e.CreateWorkload(ctx, exp, nil); err != nil {
 					t.Logf("create workload %s: %v", id, err)
 				}
 				continue
@@ -664,7 +671,7 @@ func TestAnImageThatCanNeverBePulledMakesTheJobUnrunnable(t *testing.T) {
 
 	pass(t, ctx, e, job)
 	eventually(t, "the failed pull has returned", idle(e, "hopeless"))
-	err := e.CreateWorkload(ctx, job)
+	err := e.CreateWorkload(ctx, job, nil)
 	var unrunnable *agentexec.Unrunnable
 	if !errors.As(err, &unrunnable) || unrunnable.Reason != domain.PhaseReasonImagePullFailed || !strings.Contains(unrunnable.Why, "manifest unknown") {
 		t.Fatalf("CreateWorkload = %v, want an Unrunnable for a failed image pull carrying the engine's error", err)
@@ -944,5 +951,44 @@ func TestAContainerWithNoReadableRequestsLeavesNothingFreeAndKeepsItsDevice(t *t
 	}
 	if len(f.doubleBooked) > 0 {
 		t.Fatalf("device handed out twice: %v", f.doubleBooked)
+	}
+}
+
+// A job that runs in an environment pulls its image with the reconcile answer's login, a job on a
+// public job image with none, and a job in an environment is not pulled at all without a login.
+func TestAJobInAnEnvironmentPullsWithTheAnswersLogin(t *testing.T) {
+	f := newFakeEngine()
+	e := newFakeExecutor(f)
+	ctx := t.Context()
+	pull := &domain.RegistryLogin{Registry: "europe-west1-docker.pkg.dev", Username: "oauth2accesstoken", Password: "pull-token"}
+	inEnvironment := fakeJob("in-environment", "europe-west1-docker.pkg.dev/p/r-environments/environment@sha256:abc", 0)
+	inEnvironment.EnvironmentKey = "key-1"
+
+	if err := e.CreateWorkload(ctx, fakeJob("plain", "public-job-image", 0), pull); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.CreateWorkload(ctx, inEnvironment, pull); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "both pulls have returned", func() bool { return idle(e, "plain")() && idle(e, "in-environment")() })
+
+	f.mu.Lock()
+	plainAuth, environmentAuth := f.pullAuths["public-job-image"], f.pullAuths[inEnvironment.Job.Image]
+	f.mu.Unlock()
+	if plainAuth != "" {
+		t.Fatalf("a public job image was pulled with login %q", plainAuth)
+	}
+	decoded, err := base64.URLEncoding.DecodeString(environmentAuth)
+	if err != nil {
+		t.Fatalf("the environment's login %q is not what the engine decodes: %v", environmentAuth, err)
+	}
+	var login registry.AuthConfig
+	if err := json.Unmarshal(decoded, &login); err != nil || login.Username != "oauth2accesstoken" || login.Password != "pull-token" || login.ServerAddress != "europe-west1-docker.pkg.dev" {
+		t.Fatalf("the environment was pulled with %+v (%v), want the answer's login", login, err)
+	}
+
+	inEnvironment.ID = "without-login"
+	if err := e.CreateWorkload(ctx, inEnvironment, nil); err == nil || !strings.Contains(err.Error(), "registry_pull") {
+		t.Fatalf("a job in an environment with no login = %v, want an error naming registry_pull", err)
 	}
 }

@@ -9,6 +9,11 @@ api_url: https://api.example.invalid
 # own instance when the job ends, and refuses to start the job without curl.
 job_image: registry.example.invalid/hypothesisloop-job:latest
 
+# The repository of the environments the control plane builds on job_image (its settings'
+# environments.repository). A job may boot one of its images, named by digest, which the
+# instance pulls with the login the control plane hands out. Left out, jobs boot job_image only.
+environments_repository: registry.example.invalid/hypothesisloop-environments/environment
+
 # Do not change it while instances of this agent exist: the agent would no longer see them, they
 # would run and bill unmanaged, and every job still desired would be rented a second time.
 namespace: main

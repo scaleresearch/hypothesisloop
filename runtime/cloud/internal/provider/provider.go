@@ -89,6 +89,9 @@ func ValidateName(name string) error {
 type Spec struct {
 	Name  string
 	Image string
+	// ImageLogin is what Image is pulled with, nil for a public image. An adapter whose vendor
+	// pulls only public images refuses a spec that has one.
+	ImageLogin *ImageLogin
 	// Command is the whole argv the instance runs, in place of the image's entrypoint and
 	// arguments. Every element reaches the process as one argument, unchanged.
 	Command []string
@@ -115,6 +118,11 @@ type Spec struct {
 	// Zero asks for no end beyond what the vendor imposes. An instance the vendor's own limit
 	// ends first is listed as exited with Instance.Expired.
 	Lifetime time.Duration
+}
+
+// ImageLogin is a login to the registry host Registry.
+type ImageLogin struct {
+	Registry, Username, Password string
 }
 
 // ErrNoOffer is a Create that rented nothing because the vendor has no machine for the spec

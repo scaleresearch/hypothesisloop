@@ -168,7 +168,7 @@ func TestAPassFollowsItsOwnChangesAndIsReadAgainForTheNext(t *testing.T) {
 	}
 	pass := scoped.(*Executor)
 	mustCreate(t, pass, job(t, "exp-2", 0, 1))
-	if err := pass.CreateWorkload(ctx, on(job(t, "exp-3", 0, 1), "h100-0")); err == nil {
+	if err := pass.CreateWorkload(ctx, on(job(t, "exp-3", 0, 1), "h100-0"), nil); err == nil {
 		t.Fatal("a slot rented earlier in the pass was rented again")
 	}
 	if err := pass.DeleteWorkload(ctx, "exp-1", false); err != nil {

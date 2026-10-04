@@ -19,6 +19,9 @@ type config struct {
 	// able to reach it.
 	APIURL   string `yaml:"api_url"`
 	JobImage string `yaml:"job_image"`
+	// EnvironmentsRepository is where the environments built on JobImage are, which a job may
+	// run in by digest. Empty runs none.
+	EnvironmentsRepository string `yaml:"environments_repository"`
 	// Namespace is part of every instance name, so agents sharing an account keep apart.
 	Namespace string `yaml:"namespace"`
 	// The loop intervals and how much of a job's output a status push relays. Each pass costs
@@ -84,15 +87,16 @@ func loadConfig(path string) (*config, error) {
 // executor is the executor's configuration over rented.
 func (cfg *config) executor(rented provider.Provider) cloudexec.Config {
 	return cloudexec.Config{
-		ClusterID:    cfg.Provider.Name + "-" + cfg.Provider.AccountID,
-		Namespace:    cfg.Namespace,
-		APIURL:       cfg.APIURL,
-		JobImage:     cfg.JobImage,
-		LogTailLines: cfg.LogTailLines,
-		OfferWait:    time.Duration(cfg.OfferWaitSeconds) * time.Second,
-		Startup:      time.Duration(cfg.StartupSeconds) * time.Second,
-		Shapes:       cfg.shapes,
-		Provider:     rented,
+		ClusterID:              cfg.Provider.Name + "-" + cfg.Provider.AccountID,
+		Namespace:              cfg.Namespace,
+		APIURL:                 cfg.APIURL,
+		JobImage:               cfg.JobImage,
+		EnvironmentsRepository: cfg.EnvironmentsRepository,
+		LogTailLines:           cfg.LogTailLines,
+		OfferWait:              time.Duration(cfg.OfferWaitSeconds) * time.Second,
+		Startup:                time.Duration(cfg.StartupSeconds) * time.Second,
+		Shapes:                 cfg.shapes,
+		Provider:               rented,
 	}
 }
 

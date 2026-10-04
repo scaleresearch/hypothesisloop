@@ -33,10 +33,18 @@ func workloadOf(exp *domain.Experiment, i instance) bool {
 // placement. An exited one is destroyed before the new instance is rented, so a status read
 // never finds two instances of one job to choose between. A live one is the reconcile pass's to
 // delete first, and until it has, nothing is rented.
-func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) error {
+//
+// An instance that boots an environment pulls it with pull, the reconcile answer's registry_pull.
+func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment, pull *domain.RegistryLogin) error {
 	spec, err := e.buildSpec(exp)
 	if err != nil {
 		return err
+	}
+	if spec.Image != e.jobImage {
+		if pull == nil {
+			return fmt.Errorf("cloudexec: experiment %s runs in an environment and the reconcile answer has no registry_pull", exp.ID)
+		}
+		spec.ImageLogin = &provider.ImageLogin{Registry: pull.Registry, Username: pull.Username, Password: pull.Password}
 	}
 	name := exp.EffectiveJob().NodeSelector[domain.NodeSlotLabel]
 	if name == "" {

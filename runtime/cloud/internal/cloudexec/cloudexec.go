@@ -45,8 +45,11 @@ type Config struct {
 	// rented instance.
 	APIURL string
 	// JobImage is the image this cluster's jobs name. It carries hl, which the job's command runs
-	// under. A job may run in an environment the control plane built on it.
+	// under.
 	JobImage string
+	// EnvironmentsRepository is where the environments the control plane builds on JobImage are,
+	// host/path: a job may run in one of its images, named by digest. Empty runs none.
+	EnvironmentsRepository string
 	// LogTailLines is how much of an instance's output one pass reads.
 	LogTailLines int
 	Shapes       []Shape
@@ -66,6 +69,7 @@ type Executor struct {
 	prefix       string
 	apiURL       string
 	jobImage     string
+	environments string
 	logTailLines int
 	shapes       []Shape
 	provider     provider.Provider
@@ -116,6 +120,7 @@ func New(cfg Config) (*Executor, error) {
 		prefix:       cfg.prefix(),
 		apiURL:       cfg.APIURL,
 		jobImage:     cfg.JobImage,
+		environments: cfg.EnvironmentsRepository,
 		logTailLines: cfg.LogTailLines,
 		shapes:       append([]Shape(nil), cfg.Shapes...),
 		provider:     rented,
@@ -132,6 +137,9 @@ func (cfg Config) prefix() string { return provider.JobPrefix(cfg.Namespace) }
 func (cfg Config) Validate() error {
 	if cfg.ClusterID == "" || cfg.APIURL == "" || cfg.JobImage == "" {
 		return fmt.Errorf("cloudexec: ClusterID, APIURL and JobImage are required")
+	}
+	if r := cfg.EnvironmentsRepository; r != "" && (!strings.Contains(r, "/") || strings.ContainsAny(r, " \t@")) {
+		return fmt.Errorf("cloudexec: EnvironmentsRepository %q must be host/path with no digest", r)
 	}
 	if err := provider.ValidateSegment("namespace", cfg.Namespace); err != nil {
 		return fmt.Errorf("cloudexec: %w", err)

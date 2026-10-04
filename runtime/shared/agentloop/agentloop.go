@@ -232,7 +232,7 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 			}
 			continue
 		}
-		if err := exec.CreateWorkload(ctx, exp); err != nil {
+		if err := exec.CreateWorkload(ctx, exp, answer.RegistryPull); err != nil {
 			// A job that waits is reported with the next status push and asked for again. Its
 			// wait is logged when it begins or its reason changes, not every pass.
 			var waiting *agentexec.Waiting
@@ -329,13 +329,15 @@ func orphanAuxiliaryIDs(desired map[string]*domain.Experiment, actualJobs map[st
 
 // reconcileAnswer is one pass's view of desired state: the workloads that should exist, the
 // experiment ids whose termination the control plane granted a checkpoint window, which of the
-// things that should not exist may still exist for a moment, and the builds this cluster runs.
+// things that should not exist may still exist for a moment, the builds this cluster runs, and
+// the login the jobs that run in an environment pull their image with.
 type reconcileAnswer struct {
 	Experiments []*domain.Experiment `json:"experiments"`
 	// CheckpointWindow is a plain grant list, not a class or a rule: this loop hands each id
 	// straight to DeleteWorkload and interprets nothing.
 	CheckpointWindow []string                  `json:"checkpoint_window"`
 	Builds           []domain.EnvironmentBuild `json:"builds"`
+	RegistryPull     *domain.RegistryLogin     `json:"registry_pull"`
 }
 
 // fetchDesiredState returns this cluster's desired state. A removed cluster's is empty.

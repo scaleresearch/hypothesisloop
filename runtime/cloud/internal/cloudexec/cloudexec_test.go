@@ -24,6 +24,8 @@ const (
 	h100      = "nvidia.com/gpu.product=NVIDIA-H100"
 	testAPI   = "https://api.example.invalid"
 	testImage = "registry.example.invalid/job:1"
+	// testEnvironments is the repository the environments built on testImage are in.
+	testEnvironments = "registry.test/hl-environments/environment"
 )
 
 var testShapes = []Shape{
@@ -42,7 +44,7 @@ func newTestExecutor(t *testing.T) (*Executor, *fake.Provider) {
 }
 
 func testConfig(p provider.Provider) Config {
-	return Config{ClusterID: "fake-account-1", Namespace: "t1", APIURL: testAPI, JobImage: testImage, LogTailLines: 100, OfferWait: 3 * time.Minute, Startup: 4 * time.Minute, Shapes: testShapes, Provider: p}
+	return Config{ClusterID: "fake-account-1", Namespace: "t1", APIURL: testAPI, JobImage: testImage, EnvironmentsRepository: testEnvironments, LogTailLines: 100, OfferWait: 3 * time.Minute, Startup: 4 * time.Minute, Shapes: testShapes, Provider: p}
 }
 
 type goldenAnswer struct {
@@ -111,7 +113,7 @@ func asHanded(t *testing.T, exp *domain.Experiment) *domain.Experiment {
 
 func mustCreate(t *testing.T, e *Executor, exp *domain.Experiment) {
 	t.Helper()
-	if err := e.CreateWorkload(context.Background(), exp); err != nil {
+	if err := e.CreateWorkload(context.Background(), exp, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -194,7 +196,7 @@ func TestAnInstanceIsRentedWithTheTimeLeftUntilItsJobsEndAndNeverWithoutOne(t *t
 	passed := time.Now().Add(-time.Minute)
 	late.EndsAt = &passed
 	for want, exp := range map[string]*domain.Experiment{"no ends_at": endless, "has passed": late} {
-		err := e.CreateWorkload(context.Background(), exp)
+		err := e.CreateWorkload(context.Background(), exp, nil)
 		var unrunnable *agentexec.Unrunnable
 		if err == nil || !strings.Contains(err.Error(), want) || errors.As(err, &unrunnable) {
 			t.Errorf("%s: err = %v, want an error saying %q that does not end the job", exp.ID, err, want)
@@ -214,7 +216,7 @@ func TestAJobThatCannotRunAsOneWrappedInstanceIsRefused(t *testing.T) {
 	hostMount := job(t, "exp-3", 0, 0)
 	hostMount.ResolvedJob.HostMounts = map[string]string{"/data": "/mnt/data"}
 	for _, exp := range []*domain.Experiment{noCommand, twoNodes, hostMount} {
-		if err := e.CreateWorkload(context.Background(), exp); err == nil {
+		if err := e.CreateWorkload(context.Background(), exp, nil); err == nil {
 			t.Errorf("%s was rented", exp.ID)
 		}
 	}
@@ -223,32 +225,54 @@ func TestAJobThatCannotRunAsOneWrappedInstanceIsRefused(t *testing.T) {
 	}
 }
 
-// An instance boots the image desired state names: the job image, or the environment the
-// control plane built on it. A job that names none is one it does not rent for.
-func TestAnInstanceBootsExactlyTheImageDesiredStateNames(t *testing.T) {
+// An instance boots the image desired state names: the job image, or an environment of the
+// environments repository by digest, which it pulls with the reconcile answer's login. Any other
+// image, or none, is one it does not rent for.
+func TestAnInstanceBootsTheJobImageOrAnEnvironmentAndNothingElse(t *testing.T) {
 	e, p := newTestExecutor(t)
-	mustCreate(t, e, job(t, "exp-1", 0, 0))
+	pull := &domain.RegistryLogin{Registry: "registry.test", Username: "oauth2accesstoken", Password: "pull-token"}
+	if err := e.CreateWorkload(context.Background(), job(t, "exp-1", 0, 0), pull); err != nil {
+		t.Fatal(err)
+	}
 	environment := on(job(t, "exp-2", 0, 0), "h100-1")
-	environment.ResolvedJob.Image = "registry.test/hypothesisloop-environment:abc"
-	mustCreate(t, e, environment)
+	environment.ResolvedJob.Image = testEnvironments + "@sha256:" + strings.Repeat("ab", 32)
+	if err := e.CreateWorkload(context.Background(), environment, pull); err != nil {
+		t.Fatal(err)
+	}
 	names := p.Names()
 	if len(names) != 2 {
 		t.Fatalf("rented %v, want both jobs", names)
 	}
 	for _, name := range names {
-		want := testImage
+		spec := p.Spec(name)
+		want, wantLogin := testImage, (*provider.ImageLogin)(nil)
 		if strings.Contains(name, "-exp-2-") {
-			want = environment.ResolvedJob.Image
+			want, wantLogin = environment.ResolvedJob.Image, &provider.ImageLogin{Registry: "registry.test", Username: "oauth2accesstoken", Password: "pull-token"}
 		}
-		if got := p.Spec(name).Image; got != want {
-			t.Errorf("%s boots %q, want %q", name, got, want)
+		if spec.Image != want || !reflect.DeepEqual(spec.ImageLogin, wantLogin) {
+			t.Errorf("%s boots %q with login %+v, want %q with %+v", name, spec.Image, spec.ImageLogin, want, wantLogin)
 		}
 	}
-	none := on(job(t, "exp-3", 0, 0), "cpu-0")
-	none.ResolvedJob.Image = ""
-	var unrunnable *agentexec.Unrunnable
-	if err := e.CreateWorkload(context.Background(), none); !errors.As(err, &unrunnable) {
-		t.Fatalf("no image: err = %v, want it unrunnable", err)
+
+	if err := e.CreateWorkload(context.Background(), on(environment, "cpu-0"), nil); err == nil || !strings.Contains(err.Error(), "registry_pull") {
+		t.Fatalf("an environment with no login: err = %v, want one naming registry_pull", err)
+	}
+	for image, why := range map[string]string{
+		"":                                  "no image",
+		"registry.test/someone-else:latest": "another image",
+		testEnvironments + ":latest":        "an environment by tag",
+		testEnvironments + "@sha256:abc":    "a malformed digest",
+		testEnvironments + "-other@sha256:" + strings.Repeat("ab", 32): "another repository",
+	} {
+		other := on(job(t, "exp-3", 0, 0), "cpu-0")
+		other.ResolvedJob.Image = image
+		var unrunnable *agentexec.Unrunnable
+		if err := e.CreateWorkload(context.Background(), other, pull); !errors.As(err, &unrunnable) {
+			t.Errorf("%s (%q): err = %v, want it unrunnable", why, image, err)
+		}
+	}
+	if len(p.Names()) != 2 {
+		t.Fatalf("rented %v, want nothing beyond the two jobs", p.Names())
 	}
 }
 
@@ -275,7 +299,7 @@ func TestAJobIsRentedInExactlyTheSlotItWasAdmittedTo(t *testing.T) {
 		"exceed the slot":        tooLarge,
 		"is not the slot's \"\"": otherType,
 	} {
-		if err := e.CreateWorkload(ctx, exp); err == nil || !strings.Contains(err.Error(), want) {
+		if err := e.CreateWorkload(ctx, exp, nil); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: err = %v, want one saying %q", exp.ID, err, want)
 		}
 	}
@@ -301,7 +325,7 @@ func TestAJobIsNotRefusedForHowItCasedItsAcceleratorType(t *testing.T) {
 
 	another := on(job(t, "exp-2", 0, 1), "h100-1")
 	another.AcceleratorType = "nvidia.com/gpu.product=NVIDIA-L40"
-	if err := e.CreateWorkload(context.Background(), another); err == nil || !strings.Contains(err.Error(), "is not the slot's") {
+	if err := e.CreateWorkload(context.Background(), another, nil); err == nil || !strings.Contains(err.Error(), "is not the slot's") {
 		t.Fatalf("another type: err = %v", err)
 	}
 }
@@ -309,7 +333,7 @@ func TestAJobIsNotRefusedForHowItCasedItsAcceleratorType(t *testing.T) {
 func TestAnInstanceNameThatTheProviderCannotHoldIsRefused(t *testing.T) {
 	e, p := newTestExecutor(t)
 	for _, id := range []string{strings.Repeat("x", 120), "Exp_1"} {
-		if err := e.CreateWorkload(context.Background(), job(t, id, 0, 0)); err == nil || len(p.Names()) != 0 {
+		if err := e.CreateWorkload(context.Background(), job(t, id, 0, 0), nil); err == nil || len(p.Names()) != 0 {
 			t.Errorf("%q: err = %v, rented %v", id, err, p.Names())
 		}
 	}
@@ -322,7 +346,7 @@ func TestASlotIsHeldUntilItsInstanceIsDestroyed(t *testing.T) {
 	mustCreate(t, e, on(job(t, "exp-2", 0, 1), "h100-1"))
 	// An exited instance is still rented, so it still holds its slot.
 	p.Exit("hl-job-t1-exp-1-a0-h100-0", exitline.Format(0))
-	if err := e.CreateWorkload(context.Background(), job(t, "exp-3", 0, 1)); err == nil {
+	if err := e.CreateWorkload(context.Background(), job(t, "exp-3", 0, 1), nil); err == nil {
 		t.Fatal("a slot held by an exited instance was rented again")
 	}
 	if err := e.ReapTerminal(context.Background(), nil); err != nil {
@@ -587,6 +611,8 @@ func TestTheConfigurationIsValidatedAtStartup(t *testing.T) {
 		"namespace too long":     func(c *Config) { c.Namespace = "a1234567890123456" },
 		"no log tail":            func(c *Config) { c.LogTailLines = 0 },
 		"no job image":           func(c *Config) { c.JobImage = "" },
+		"environments by digest": func(c *Config) { c.EnvironmentsRepository = testEnvironments + "@sha256:abc" },
+		"environments no path":   func(c *Config) { c.EnvironmentsRepository = "registry.test" },
 		"name beyond the provider": func(c *Config) {
 			c.Namespace, c.Shapes[0].Name, c.Shapes[0].MaxInstances = "a123456789012345", "b123456789012345", 1<<62
 		},
@@ -618,7 +644,7 @@ func TestAJobARentedInstanceCanNeverRunIsUnrunnableAndAFailedRentIsNot(t *testin
 	} {
 		exp := job(t, "exp-"+strings.ReplaceAll(name, " ", "-"), 0, 0)
 		c.spoil(exp.ResolvedJob)
-		err := e.CreateWorkload(context.Background(), exp)
+		err := e.CreateWorkload(context.Background(), exp, nil)
 		var unrunnable *agentexec.Unrunnable
 		if !errors.As(err, &unrunnable) || !strings.Contains(unrunnable.Why, c.says) {
 			t.Errorf("%s: err = %v, want an Unrunnable that says %q", name, err, c.says)
@@ -634,7 +660,7 @@ func TestAJobARentedInstanceCanNeverRunIsUnrunnableAndAFailedRentIsNot(t *testin
 		}
 		return nil
 	}
-	err := e.CreateWorkload(context.Background(), job(t, "exp-later", 0, 1))
+	err := e.CreateWorkload(context.Background(), job(t, "exp-later", 0, 1), nil)
 	var unrunnable *agentexec.Unrunnable
 	if err == nil || errors.As(err, &unrunnable) {
 		t.Fatalf("a rent the vendor refused: err = %v, want an error that is not Unrunnable", err)

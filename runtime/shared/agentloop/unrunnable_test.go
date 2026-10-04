@@ -18,10 +18,12 @@ import (
 
 // controlPlane answers reconcile with the desired jobs it holds and keeps what was sent to it.
 type controlPlane struct {
-	mu        sync.Mutex
-	desired   string
-	reconcile []map[string]any
-	statuses  [][]statusReportWire
+	mu      sync.Mutex
+	desired string
+	// registryPull is the answer's registry_pull, as JSON. Empty sends none.
+	registryPull string
+	reconcile    []map[string]any
+	statuses     [][]statusReportWire
 }
 
 func (c *controlPlane) serve(t *testing.T) *httptest.Server {
@@ -34,7 +36,11 @@ func (c *controlPlane) serve(t *testing.T) *httptest.Server {
 			var sent map[string]any
 			_ = json.Unmarshal(body, &sent)
 			c.reconcile = append(c.reconcile, sent)
-			_, _ = w.Write([]byte(`{"experiments":` + c.desired + `}`))
+			answer := `{"experiments":` + c.desired
+			if c.registryPull != "" {
+				answer += `,"registry_pull":` + c.registryPull
+			}
+			_, _ = w.Write([]byte(answer + `}`))
 			return
 		}
 		var sent struct {
@@ -134,5 +140,34 @@ func TestTheReconcileReportCarriesTheOneImageTheRuntimeRuns(t *testing.T) {
 		if _, sent := cp.reconcile[0]["job_image_default"]; sent {
 			t.Fatal("the report carries job_image_default")
 		}
+	}
+}
+
+// The answer's registry_pull is what every job created in the pass is handed, and a pass whose
+// answer has none hands none.
+func TestEveryJobCreatedIsHandedTheAnswersPullLogin(t *testing.T) {
+	exec := &captureExecutor{}
+	cp := &controlPlane{
+		desired:      `[{"id":"exp-env","environment_key":"k1"},{"id":"exp-plain"}]`,
+		registryPull: `{"registry":"europe-west1-docker.pkg.dev","username":"oauth2accesstoken","password":"pull-token","expires_at":"2030-01-01T00:00:00Z"}`,
+	}
+	agent := newTestAgent(cp.serve(t), exec)
+	if err := agent.reconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"exp-env", "exp-plain"} {
+		if pull := exec.pulls[id]; pull == nil || pull.Registry != "europe-west1-docker.pkg.dev" || pull.Username != "oauth2accesstoken" || pull.Password != "pull-token" {
+			t.Fatalf("%s was handed %+v, want the answer's registry_pull", id, pull)
+		}
+	}
+
+	cp.mu.Lock()
+	cp.desired, cp.registryPull = `[{"id":"exp-next"}]`, ""
+	cp.mu.Unlock()
+	if err := agent.reconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if pull, created := exec.pulls["exp-next"]; !created || pull != nil {
+		t.Fatalf("exp-next was handed %+v, want no login from an answer that has none", pull)
 	}
 }

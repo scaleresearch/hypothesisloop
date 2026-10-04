@@ -2,13 +2,18 @@ package podexec
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sort"
 
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/registry"
 	"github.com/moby/moby/client"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // containerInfo is the subset of a container.Summary this runtime reads. The engine is the
@@ -244,13 +249,31 @@ func (e *Executor) removeContainer(ctx context.Context, name string) error {
 // pull always fails, even though the image already sits in the local store from the build step
 // this ran right after. Skipping the network round-trip when the image is already present is also
 // just the IfNotPresent policy every other image in this repo already runs under.
-func (e *Executor) pullImage(ctx context.Context, image string) error {
+// registryAuth is what the engine pulls exp's image with: pull, encoded as the engine takes it,
+// for a job that runs in an environment, and nothing for one on a public job image.
+func registryAuth(exp *domain.Experiment, pull *domain.RegistryLogin) (string, error) {
+	if exp.EnvironmentKey == "" {
+		return "", nil
+	}
+	if pull == nil {
+		return "", fmt.Errorf("podexec: experiment %s runs in an environment and the reconcile answer has no registry_pull", exp.ID)
+	}
+	encoded, err := json.Marshal(registry.AuthConfig{Username: pull.Username, Password: pull.Password, ServerAddress: pull.Registry})
+	if err != nil {
+		return "", fmt.Errorf("podexec: encode the registry login of %s: %w", exp.ID, err)
+	}
+	return base64.URLEncoding.EncodeToString(encoded), nil
+}
+
+// pullImage pulls image unless the engine holds it. auth is the engine's encoded login, empty
+// for a public image.
+func (e *Executor) pullImage(ctx context.Context, image, auth string) error {
 	if _, err := e.docker.ImageInspect(ctx, image); err == nil {
 		return nil
 	} else if !errdefs.IsNotFound(err) {
 		return fmt.Errorf("inspect image %s: %w", image, err)
 	}
-	body, err := e.docker.ImagePull(ctx, image, client.ImagePullOptions{})
+	body, err := e.docker.ImagePull(ctx, image, client.ImagePullOptions{RegistryAuth: auth})
 	if err != nil {
 		return fmt.Errorf("pull image %s: %w", image, err)
 	}

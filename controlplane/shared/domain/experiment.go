@@ -221,9 +221,10 @@ func (e *Experiment) EffectiveJob() JobSpec {
 // objective, the theory and where the job sits in its org stay with the platform. The fields
 // kept are the ones the executors and the workload environment read
 // (runtime/shared/workloadenv), under the names they already decode, and the admission time, which
-// a runtime that waits for a machine to rent measures that wait from. This is the one place the
-// job's secret_env leaves the platform: on the spec, where the runtime reads the rest of the
-// job's environment.
+// a runtime that waits for a machine to rent measures that wait from, and the environment key,
+// which tells a runtime the job's image is pulled with the reconcile answer's registry_pull. This
+// is the one place the job's secret_env leaves the platform: on the spec, where the runtime reads
+// the rest of the job's environment.
 func (e *Experiment) ForRuntime() *Experiment {
 	job := e.Job
 	job.SecretEnv = e.SecretEnv
@@ -251,6 +252,7 @@ func (e *Experiment) ForRuntime() *Experiment {
 		Data:                   e.Data,
 		Token:                  e.Token,
 		EndsAt:                 e.EndsAt,
+		EnvironmentKey:         e.EnvironmentKey,
 	}
 }
 

@@ -40,6 +40,8 @@ type captureExecutor struct {
 	mu                 sync.Mutex
 	deleted            []string
 	created            int
+	// pulls is the registry login each created job was handed.
+	pulls map[string]*domain.RegistryLogin
 }
 
 func (e *captureExecutor) ListManagedJobs(context.Context) ([]string, error) { return e.managed, nil }
@@ -64,13 +66,17 @@ func (e *captureExecutor) ReapTerminal(context.Context, map[string]*domain.Exper
 func (e *captureExecutor) WorkloadMatchesDesired(context.Context, *domain.Experiment) (bool, error) {
 	return !e.drifted, nil
 }
-func (e *captureExecutor) CreateWorkload(_ context.Context, exp *domain.Experiment) error {
+func (e *captureExecutor) CreateWorkload(_ context.Context, exp *domain.Experiment, pull *domain.RegistryLogin) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if err := e.uncreatable[exp.ID]; err != nil {
 		return err
 	}
 	e.created++
+	if e.pulls == nil {
+		e.pulls = map[string]*domain.RegistryLogin{}
+	}
+	e.pulls[exp.ID] = pull
 	return nil
 }
 func (e *captureExecutor) PollJobStatus(_ context.Context, id string) (agentexec.JobStatus, error) {

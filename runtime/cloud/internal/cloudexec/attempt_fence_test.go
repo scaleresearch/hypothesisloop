@@ -85,7 +85,7 @@ func TestALeftoverThatCannotBeDestroyedHoldsBackTheNewInstance(t *testing.T) {
 	p.Fail = failing("Destroy", "")
 
 	requeued := on(job(t, "exp-1", 2, 1), "h100-1")
-	if err := e.CreateWorkload(context.Background(), requeued); !errors.Is(err, errVendor) {
+	if err := e.CreateWorkload(context.Background(), requeued, nil); !errors.Is(err, errVendor) {
 		t.Fatalf("err = %v", err)
 	}
 	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a1-h100-0"}) {
@@ -114,7 +114,7 @@ func TestAPreemptedJobReadmittedUnderTheSameAttemptIsRentedOnItsNewSlot(t *testi
 	if err != nil || matches {
 		t.Fatalf("the instance on the slot the job was preempted from matched: %v, %v", matches, err)
 	}
-	if err := e.CreateWorkload(ctx, readmitted); err == nil {
+	if err := e.CreateWorkload(ctx, readmitted, nil); err == nil {
 		t.Fatal("the job was rented a second time while its old instance still runs")
 	}
 	// What the reconcile pass does with a mismatch: delete without a window, create next pass.

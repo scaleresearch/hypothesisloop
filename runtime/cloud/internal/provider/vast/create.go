@@ -28,6 +28,8 @@ type createRequest struct {
 	// OnStart is the entrypoint override under run type "args", one executable and no arguments.
 	OnStart string   `json:"onstart"`
 	Args    []string `json:"args"`
+	// ImageLogin is the docker login arguments the image is pulled with, empty for a public one.
+	ImageLogin string `json:"image_login,omitempty"`
 }
 
 func (p *Provider) Create(ctx context.Context, spec provider.Spec) (string, error) {
@@ -158,6 +160,9 @@ func newCreateRequest(spec provider.Spec) createRequest {
 	}
 	if req.Env == nil {
 		req.Env = map[string]string{}
+	}
+	if login := spec.ImageLogin; login != nil {
+		req.ImageLogin = "-u " + login.Username + " -p " + login.Password + " " + login.Registry
 	}
 	return req
 }

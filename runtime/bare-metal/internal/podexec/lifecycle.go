@@ -21,9 +21,13 @@ import (
 // the job still without a container, tries again. How the pull ended is remembered: a pass that
 // finds the image of this very spec and attempt can never be pulled starts no further pull and
 // returns the job as unrunnable with what the engine said.
-func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) error {
+func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment, pull *domain.RegistryLogin) error {
 	if _, busy := e.operations()[exp.ID]; busy {
 		return nil
+	}
+	auth, err := registryAuth(exp, pull)
+	if err != nil {
+		return err
 	}
 	placement, err := e.resolvePlacementFor(ctx, exp)
 	if err != nil {
@@ -65,7 +69,7 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) e
 		return &agentexec.Unrunnable{Reason: failed.reason, Why: failed.message}
 	}
 	e.begin(ctx, exp.ID, "create workload", operation{starting: true, labels: spec.Labels, devices: placement.DevicePaths}, func(ctx context.Context) error {
-		err := e.pullImage(ctx, spec.Image)
+		err := e.pullImage(ctx, spec.Image, auth)
 		e.recordPull(ctx, exp.ID, spec.Labels, err)
 		if err != nil {
 			return err

@@ -21,7 +21,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
-func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *domain.Experiment) error {
+func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *domain.Experiment, pull *domain.RegistryLogin) error {
 	// Reconcile calls this only when no live Job exists for the experiment, so any pod still
 	// carrying its identity belongs to the previous generation and may be inside its checkpoint
 	// window. A new pod started now would read the store before that checkpoint lands, restart
@@ -44,6 +44,12 @@ func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *domain.Expe
 	jobs, err := c.BuildJobs(exp, placement)
 	if err != nil {
 		return err
+	}
+	// The pull Secret before any pod that names it.
+	if exp.EnvironmentKey != "" {
+		if err := c.ensurePullSecret(ctx, exp, pull); err != nil {
+			return err
+		}
 	}
 	// The Service first, and once for the whole experiment however many groups it has: a pod
 	// that starts before the name its peers are told to dial exists resolves nothing and dies in
@@ -301,8 +307,8 @@ func (c *JobWorkloadClient) WorkloadMatchesDesired(ctx context.Context, exp *dom
 	return true, nil
 }
 
-// ListManagedAuxiliaryWorkloads returns experiment IDs referenced by managed headless Services
-// and DRA ResourceClaimTemplates. Used only to remove orphans; auxiliary existence must never
+// ListManagedAuxiliaryWorkloads returns experiment IDs referenced by managed headless Services,
+// DRA ResourceClaimTemplates and pull Secrets. Used only to remove orphans; auxiliary existence must never
 // stand in for Job existence when deciding whether to create.
 func (c *JobWorkloadClient) ListManagedAuxiliaryWorkloads(ctx context.Context) ([]string, error) {
 	ids := map[string]struct{}{}
@@ -322,6 +328,9 @@ func (c *JobWorkloadClient) ListManagedAuxiliaryWorkloads(ctx context.Context) (
 	}
 	if err := c.addManagedDRAIDs(ctx, ids); err != nil {
 		return nil, fmt.Errorf("workload: list managed resource claim templates: %w", err)
+	}
+	if err := c.addManagedPullSecretIDs(ctx, ids); err != nil {
+		return nil, fmt.Errorf("workload: list managed pull secrets: %w", err)
 	}
 	out := make([]string, 0, len(ids))
 	for id := range ids {
@@ -762,7 +771,8 @@ func (c *JobWorkloadClient) DeleteWorkload(ctx context.Context, experimentID str
 	// allocation_mode here. The kubelet-derived ResourceClaim(s) are owned by the pod and
 	// cleaned up natively by k8s; this only removes the template object itself.
 	claimErr := c.deleteDRAResource(ctx, experimentID)
-	return stderrors.Join(append(jobErrs, signalErr, listErr, svcErr, claimErr)...)
+	pullErr := c.deletePullSecret(ctx, experimentID)
+	return stderrors.Join(append(jobErrs, signalErr, listErr, svcErr, claimErr, pullErr)...)
 }
 
 // PollJobStatus reports the phase of the experiment's whole workload, a UID that changes

@@ -144,6 +144,9 @@ func validateSpec(spec provider.Spec) error {
 	if err := spec.Validate(); err != nil {
 		return fmt.Errorf("fly: %w", err)
 	}
+	if spec.ImageLogin != nil {
+		return fmt.Errorf("fly: spec %q pulls its image with a login, and this adapter pulls only public images", spec.Name)
+	}
 	if spec.AcceleratorCount != 0 {
 		return fmt.Errorf("fly: spec %q asks for %d accelerators of type %q, and this adapter rents none", spec.Name, spec.AcceleratorCount, spec.AcceleratorType)
 	}

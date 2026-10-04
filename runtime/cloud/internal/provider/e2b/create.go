@@ -148,6 +148,9 @@ func validateSpec(spec provider.Spec) error {
 	if err := spec.Validate(); err != nil {
 		return fmt.Errorf("e2b: %w", err)
 	}
+	if spec.ImageLogin != nil {
+		return fmt.Errorf("e2b: spec %q pulls its image with a login, and the vendor pulls only public images", spec.Name)
+	}
 	if spec.AcceleratorCount != 0 {
 		return fmt.Errorf("e2b: spec %q asks for %d accelerators of type %q, and the vendor rents none", spec.Name, spec.AcceleratorCount, spec.AcceleratorType)
 	}

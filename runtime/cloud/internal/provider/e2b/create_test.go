@@ -185,7 +185,10 @@ func TestCreateRefusesBeforeSpendingAnything(t *testing.T) {
 		"an accelerator": {func(s *provider.Spec) {
 			s.AcceleratorCount, s.AcceleratorType = 1, "nvidia.com/gpu.product=NVIDIA-H100"
 		}, "rents none"},
-		"negative accelerator":   {func(s *provider.Spec) { s.AcceleratorCount = -1 }, "-1 accelerators"},
+		"negative accelerator": {func(s *provider.Spec) { s.AcceleratorCount = -1 }, "-1 accelerators"},
+		"image login": {func(s *provider.Spec) {
+			s.ImageLogin = &provider.ImageLogin{Registry: "r", Username: "u", Password: "p"}
+		}, "only public images"},
 		"a shell in an env name": {func(s *provider.Spec) { s.Env = map[string]string{"A=1; rm -rf /; B": "1"} }, "not an environment variable name"},
 	}
 	for name, tc := range cases {

@@ -57,7 +57,7 @@ func TestARuntimeIsHandedOnlyWhatItBuildsAWorkloadFrom(t *testing.T) {
 	handed := map[string]bool{
 		"ID": true, "AgentID": true, "ProjectID": true, "CodeRef": true, "ConfigHash": true, "DataRef": true,
 		"Job": true, "ResolvedJob": true, "AcceleratorType": true, "AcceleratorCount": true,
-		"EstimatedDurationHours": true, "CapacityTier": true, "AttemptCount": true, "SubmittedAt": true, "Data": true, "Token": true, "EndsAt": true,
+		"EstimatedDurationHours": true, "CapacityTier": true, "AttemptCount": true, "SubmittedAt": true, "Data": true, "Token": true, "EndsAt": true, "EnvironmentKey": true,
 	}
 	full := filled(t)
 	view := reflect.ValueOf(full.ForRuntime()).Elem()

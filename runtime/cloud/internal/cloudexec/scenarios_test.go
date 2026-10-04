@@ -92,7 +92,7 @@ func TestWhatAPassRentsAvoidsTheHostsOfTheInstancesItFoundOverdue(t *testing.T) 
 	if err := pass.DeleteWorkload(ctx, "exp-1", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := pass.CreateWorkload(ctx, job(t, "exp-3", 0, 0)); err != nil {
+	if err := pass.CreateWorkload(ctx, job(t, "exp-3", 0, 0), nil); err != nil {
 		t.Fatal(err)
 	}
 	if avoided := p.Spec("hl-job-t1-exp-3-a0-cpu-0").AvoidHosts; !reflect.DeepEqual(avoided, []string{"124592"}) {
@@ -223,7 +223,7 @@ func TestAnUnreadableProviderFailsEveryReadInsteadOfAnsweringEmpty(t *testing.T)
 		"GetLiveStorageCapacity": storageErr, "GetLiveNodeResourceCapacity": nodeErr,
 		"GetLiveAcceleratorCapacitySnapshot": acceleratorErr, "FetchLogTail": tailErr, "PollPhaseDetail": detailErr,
 		"ResolveAdmittedAcceleratorType": admittedErr,
-		"CreateWorkload":                 e.CreateWorkload(ctx, job(t, "exp-2", 0, 1)),
+		"CreateWorkload":                 e.CreateWorkload(ctx, job(t, "exp-2", 0, 1), nil),
 		"DeleteWorkload":                 e.DeleteWorkload(ctx, "exp-1", false),
 		"ReapTerminal":                   e.ReapTerminal(ctx, nil),
 	} {
@@ -243,7 +243,7 @@ func TestAFailedCreateRentsNothingAndTheNextPassTriesAgain(t *testing.T) {
 	ctx := context.Background()
 	exp := job(t, "exp-1", 0, 1)
 	p.Fail = failing("Create", "")
-	if err := e.CreateWorkload(ctx, exp); !errors.Is(err, errVendor) {
+	if err := e.CreateWorkload(ctx, exp, nil); !errors.Is(err, errVendor) {
 		t.Fatalf("err = %v", err)
 	}
 	if phase, _ := status(t, e, "exp-1"); phase != workload.JobPhaseGone || len(p.Names()) != 0 {
@@ -262,13 +262,13 @@ func TestAFailedCreateRentsNothingAndTheNextPassTriesAgain(t *testing.T) {
 	exp.SubmittedAt = &admitted
 	exp = asHanded(t, exp)
 	var waiting *agentexec.Waiting
-	if err := e.CreateWorkload(ctx, exp); !errors.As(err, &waiting) || waiting.Reason != domain.PhaseReasonWaitingForOffer || !strings.Contains(waiting.Why, "h100") {
+	if err := e.CreateWorkload(ctx, exp, nil); !errors.As(err, &waiting) || waiting.Reason != domain.PhaseReasonWaitingForOffer || !strings.Contains(waiting.Why, "h100") {
 		t.Fatalf("no offer yet: err = %v, want the job waiting for one for its shape", err)
 	}
 	admitted = time.Now().Add(-time.Hour)
 	exp.SubmittedAt = &admitted
 	var unrunnable *agentexec.Unrunnable
-	if err := e.CreateWorkload(ctx, exp); !errors.As(err, &unrunnable) || unrunnable.Reason != domain.PhaseReasonNoOffer {
+	if err := e.CreateWorkload(ctx, exp, nil); !errors.As(err, &unrunnable) || unrunnable.Reason != domain.PhaseReasonNoOffer {
 		t.Fatalf("no offer past the bound: err = %v, want no_offer", err)
 	}
 

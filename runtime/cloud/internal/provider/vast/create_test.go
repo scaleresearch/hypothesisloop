@@ -123,6 +123,28 @@ func TestCreateSearchesForTheSpecAndRentsTheCheapestOffer(t *testing.T) {
 	}
 }
 
+// An image read only with a login is rented with it as vast.ai's image_login, the arguments of
+// a docker login, and a public image with none.
+func TestCreatePullsAnImageWithItsLoginAsImageLogin(t *testing.T) {
+	api := newFakeAPI(t)
+	rentable(api, "hl-exp1-a2")
+	p := newTestProvider(t, api, gpuSettings())
+	spec := gpuSpec()
+	spec.Image = "europe-west1-docker.pkg.dev/p/r-environments/environment@sha256:abc"
+	spec.ImageLogin = &provider.ImageLogin{Registry: "europe-west1-docker.pkg.dev", Username: "oauth2accesstoken", Password: "pull-token"}
+
+	if _, err := p.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	body := api.sent(http.MethodPut, rentPath)[0].Body
+	if got := body["image_login"]; got != "-u oauth2accesstoken -p pull-token europe-west1-docker.pkg.dev" {
+		t.Fatalf("image_login = %v, want the login as docker login arguments", got)
+	}
+	if body["image"] != spec.Image {
+		t.Fatalf("image = %v, want %s", body["image"], spec.Image)
+	}
+}
+
 func TestCreateCPUOnlyTakesAnyGPUModelAndNoOptionalFilters(t *testing.T) {
 	api := newFakeAPI(t)
 	rentable(api, "hl-exp1-a2")

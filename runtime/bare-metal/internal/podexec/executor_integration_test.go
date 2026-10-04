@@ -57,7 +57,7 @@ func TestIntegrationLifecycle(t *testing.T) {
 		},
 	}
 
-	if err := e.CreateWorkload(ctx, exp); err != nil {
+	if err := e.CreateWorkload(ctx, exp, nil); err != nil {
 		t.Fatalf("CreateWorkload: %v", err)
 	}
 	e.Wait()

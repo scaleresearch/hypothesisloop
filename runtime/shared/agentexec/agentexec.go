@@ -38,7 +38,10 @@ func (w *Waiting) Error() string { return w.Why }
 // agent-facing contract each cluster-agent/bare-agent binary drives its local reconcile/status
 // loop with.
 type Executor interface {
-	CreateWorkload(ctx context.Context, exp *domain.Experiment) error
+	// CreateWorkload creates exp's workload. pull is the reconcile answer's registry_pull, the
+	// login a job that runs in an environment (exp.EnvironmentKey) pulls its image with, and nil
+	// when no desired job runs in one.
+	CreateWorkload(ctx context.Context, exp *domain.Experiment, pull *domain.RegistryLogin) error
 	// DeleteWorkload removes the experiment's workload. grantCheckpointWindow says whether the
 	// control plane granted this termination the checkpoint window the job declared: true for a
 	// policy-class termination (the platform decided and the job was fine), false for everything

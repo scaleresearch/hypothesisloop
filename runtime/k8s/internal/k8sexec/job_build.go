@@ -457,6 +457,11 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 		job.Labels[workloadkeys.JobGroup] = boundedname.Name(group.Name, group.Name, dnsLabelLength)
 	}
 
+	if exp.EnvironmentKey != "" {
+		// The environment's image is read only with the login CreateWorkload writes here.
+		job.Spec.Template.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: pullSecretName(exp.ID)}}
+	}
+
 	if jobUsesDRA {
 		claimTemplateName := resourceClaimTemplateName(job.Name)
 		job.Spec.Template.Spec.ResourceClaims = []corev1.PodResourceClaim{{

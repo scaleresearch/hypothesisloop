@@ -3,8 +3,10 @@ package cloudexec
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/opencontainers/go-digest"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -19,6 +21,16 @@ func wrapperCommand(stopGrace int64, command []string) []string {
 	return append([]string{"hl", "exec", "--stop-grace", strconv.FormatInt(stopGrace, 10), "--"}, command...)
 }
 
+// isEnvironment says image is one of the environments repository's, named by its digest alone.
+func (e *Executor) isEnvironment(image string) bool {
+	reference, found := strings.CutPrefix(image, e.environments+"@")
+	if e.environments == "" || !found {
+		return false
+	}
+	parsed, err := digest.Parse(reference)
+	return err == nil && parsed.Algorithm() == digest.SHA256
+}
+
 // buildSpec compiles exp into the instance to rent, without its name.
 func (e *Executor) buildSpec(exp *domain.Experiment) (provider.Spec, error) {
 	// EffectiveJob, never exp.Job: an admitted experiment's literal quantities and graces are in
@@ -28,10 +40,10 @@ func (e *Executor) buildSpec(exp *domain.Experiment) (provider.Spec, error) {
 		return provider.Spec{}, &agentexec.Unrunnable{Why: fmt.Sprintf("the job asks for %d nodes, and a job on this cluster is one rented instance", spec.Nodes())}
 	}
 	// An instance boots the image desired state names: the job image this cluster reports
-	// (OnlyImage), or the environment the control plane built on it, which carries the wrapper
-	// as well.
-	if spec.Image == "" {
-		return provider.Spec{}, &agentexec.Unrunnable{Why: "the job's desired state names no image to boot"}
+	// (OnlyImage), or an environment the control plane built on it, which carries the wrapper
+	// as well. Any other is an image this cluster does not run.
+	if spec.Image != e.jobImage && !e.isEnvironment(spec.Image) {
+		return provider.Spec{}, &agentexec.Unrunnable{Why: fmt.Sprintf("the job is to run in image %q, and this cluster runs only %q and the environments in %q by digest", spec.Image, e.jobImage, e.environments)}
 	}
 	group := spec.NodeGroups()[0]
 	for name, quantity := range map[string]string{"cpu": group.CPU, "memory": group.Memory, "storage": group.Storage} {
