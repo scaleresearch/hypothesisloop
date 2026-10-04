@@ -867,3 +867,70 @@ func TestSubmitRefusesABranchThatIsNotThePlatformExperiments(t *testing.T) {
 		}
 	}
 }
+
+// checkSubmission is a check as hl env run sends it: no hypothesis, no theory, no estimate.
+func checkSubmission() *domain.Experiment {
+	exp := humanIdeaSubmission()
+	exp.HypothesisID, exp.Theory, exp.EstimatedDurationHours, exp.Check = "", "", 0, true
+	return exp
+}
+
+// A check runs the code in the environment before a job that measures: it tests no hypothesis,
+// runs from any branch of the experiment, is held for no summary and holds a few minutes.
+func TestACheckTestsNoHypothesisAndHoldsAFewMinutesOnAnyBranch(t *testing.T) {
+	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: unsummarizedStore{}, hypotheses: oneHypothesis{}}
+	exp := checkSubmission()
+	if err := s.Submit(context.Background(), exp); !errors.Is(err, errReachedScoring) {
+		t.Fatalf("a researcher's check: got = %v, want it taken", err)
+	}
+	if exp.HypothesisID != "" || exp.Hypothesis != "" || exp.EstimatedDurationHours != domain.CheckJobHours || exp.NotAdmittedReason != "" {
+		t.Errorf("the check is on %q, estimates %g h and waits for %q, want no hypothesis, %g h and no summary gate",
+			exp.HypothesisID, exp.EstimatedDurationHours, exp.NotAdmittedReason, domain.CheckJobHours)
+	}
+
+	baseline := &domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: domain.DefaultAgentFlavor}
+	before := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: unstartedStore{status: domain.PlatformExpOpen, signup: baseline}, hypotheses: oneHypothesis{}}
+	for _, branch := range []string{"hl/pe-1/baseline", "hl/pe-1/baseline-check", "hl/pe-1/try-the-build"} {
+		check := checkSubmission()
+		check.Branch = branch
+		if err := before.Submit(context.Background(), check); !errors.Is(err, errReachedScoring) || check.HypothesisID != "" {
+			t.Errorf("a baseline agent's check on %s: got = %v on %q, want it taken on no hypothesis", branch, err, check.HypothesisID)
+		}
+	}
+
+	var refused *AdmissionError
+	for name, spoil := range map[string]func(*domain.Experiment){
+		"a hypothesis": func(e *domain.Experiment) { e.HypothesisID = "h-human" },
+		"a theory":     func(e *domain.Experiment) { e.Theory = "faster" },
+	} {
+		check := checkSubmission()
+		spoil(check)
+		if err := s.Submit(context.Background(), check); !errors.As(err, &refused) || refused.Reason != ReasonCheckTestsNoHypothesis {
+			t.Errorf("a check naming %s: got = %v, want %s", name, err, ReasonCheckTestsNoHypothesis)
+		}
+	}
+	long := checkSubmission()
+	long.EstimatedDurationHours = 1
+	if err := s.Submit(context.Background(), long); !errors.As(err, &refused) || refused.Reason != ReasonCheckTooLong {
+		t.Errorf("a check of an hour: got = %v, want %s", err, ReasonCheckTooLong)
+	}
+	outside := checkSubmission()
+	outside.Branch = "main"
+	if err := s.Submit(context.Background(), outside); !errors.As(err, &refused) || refused.Reason != ReasonBranchNotOfExperiment {
+		t.Errorf("a check on main: got = %v, want %s", err, ReasonBranchNotOfExperiment)
+	}
+}
+
+// An agent's check goes ahead of its own queued jobs and of no other agent's.
+func TestAnAgentsCheckGoesAheadOfItsOwnJobsOnly(t *testing.T) {
+	exps := []*domain.Experiment{
+		{ID: "a1", AgentID: "a"}, {ID: "b1", AgentID: "b"}, {ID: "a2", AgentID: "a"}, {ID: "a-check", AgentID: "a", Check: true}, {ID: "b2", AgentID: "b"},
+	}
+	var got []string
+	for _, e := range interleaveByAgent(exps) {
+		got = append(got, e.ID)
+	}
+	if want := []string{"a-check", "b1", "a1", "b2", "a2"}; !slices.Equal(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+}

@@ -297,6 +297,7 @@ func TestNoCommandAnAgentRunsCallsARouteAnAgentMayNot(t *testing.T) {
 		{"platform-experiments", "decline", "--reason", "nothing to measure"},
 		{"job", "submit", "job.yaml", "--hypothesis", "h1", "--theory", "t"},
 		{"env", "build", "job.yaml"},
+		{"env", "run", "job.yaml", "--", "cargo build"},
 		{"job", "list"},
 		{"job", "list", "--needs-summary"},
 		{"job", "status", "job-1"},

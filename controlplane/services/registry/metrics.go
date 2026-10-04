@@ -74,6 +74,10 @@ func (s *Service) RecordMetric(ctx context.Context, experimentID, metricName, ba
 	if exp.Status.IsTerminal() {
 		return fmt.Errorf("%w: experiment %s is %s (terminal); progress metrics are not accepted", ErrInvalidMetric, experimentID, exp.Status)
 	}
+	// Refused only once it reached here, so the refusal also tells the check its reporting works.
+	if exp.Check {
+		return fmt.Errorf("%w: %s = %g reached the platform, and job %s is a check (hl env run), which records no metric and ranks nowhere", ErrInvalidMetric, metricName, value, experimentID)
+	}
 
 	labels := map[string]string{
 		"job_id":                 experimentID,

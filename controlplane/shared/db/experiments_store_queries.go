@@ -91,7 +91,7 @@ ORDER BY created_at ASC`
 // CompletedJobIDs returns the jobs of a platform experiment that ran to a successful end. Only
 // their metrics count for an agent's best: a job that failed or was stopped proved nothing.
 func (s *ExperimentsStore) CompletedJobIDs(ctx context.Context, platformExpID string) (map[string]bool, error) {
-	rows, err := s.pool.pool.Query(ctx, `SELECT id FROM experiments WHERE platform_experiment_id = $1 AND status = 'COMPLETED'`, platformExpID)
+	rows, err := s.pool.pool.Query(ctx, `SELECT id FROM experiments WHERE platform_experiment_id = $1 AND status = 'COMPLETED' AND NOT is_check`, platformExpID)
 	if err != nil {
 		return nil, fmt.Errorf("experiments_store.CompletedJobIDs: %w", err)
 	}
@@ -109,7 +109,7 @@ func (s *ExperimentsStore) CompletedJobIDs(ctx context.Context, platformExpID st
 // CompletedJobs returns every COMPLETED job of a platform experiment, whoever ran it on whichever
 // branch, oldest first.
 func (s *ExperimentsStore) CompletedJobs(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {
-	q := `SELECT` + experimentColumns + `FROM experiments WHERE platform_experiment_id = $1 AND status = 'COMPLETED' ORDER BY created_at, id`
+	q := `SELECT` + experimentColumns + `FROM experiments WHERE platform_experiment_id = $1 AND status = 'COMPLETED' AND NOT is_check ORDER BY created_at, id`
 	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
 	if err != nil {
 		return nil, fmt.Errorf("experiments_store.CompletedJobs: %w", err)
@@ -123,7 +123,7 @@ func (s *ExperimentsStore) CompletedJobs(ctx context.Context, platformExpID stri
 // from once nobody is measuring any more.
 func (s *ExperimentsStore) FinishedBaselineJobs(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
-WHERE platform_experiment_id = $1 AND status = 'COMPLETED' AND hypothesis_id = platform_experiment_id
+WHERE platform_experiment_id = $1 AND status = 'COMPLETED' AND hypothesis_id = platform_experiment_id AND NOT is_check
   AND EXISTS (SELECT 1 FROM experiment_signups s
               WHERE s.platform_experiment_id = experiments.platform_experiment_id AND s.agent_id = experiments.agent_id
                 AND s.role = '` + string(domain.SignupRoleBaseline) + `' AND s.finished_at IS NOT NULL)
@@ -153,7 +153,7 @@ func (s *ExperimentsStore) AgentJobsByAgent(ctx context.Context, platformExpID s
 	rows, err := s.pool.pool.Query(ctx, `SELECT agent_id, COUNT(*),
        bool_or(status = 'COMPLETED'),
        bool_or(status IN ('SUBMITTED', 'RUNNING'))
-FROM experiments WHERE platform_experiment_id = $1 GROUP BY agent_id`, platformExpID)
+FROM experiments WHERE platform_experiment_id = $1 AND NOT is_check GROUP BY agent_id`, platformExpID)
 	if err != nil {
 		return nil, fmt.Errorf("experiments_store.AgentJobsByAgent: %w", err)
 	}
@@ -243,7 +243,7 @@ ORDER BY queued_at ASC`
 // the matching rows that ended before it was submitted (UnsummarizedCompleted), and
 // GET /experiments?needs_summary=true lists every row that matches. One definition, so the set
 // an agent is told to clear always contains the jobs that hold one of its own.
-const UnsummarizedCompletedPredicate = `status = 'COMPLETED' AND NOT EXISTS (
+const UnsummarizedCompletedPredicate = `status = 'COMPLETED' AND NOT is_check AND NOT EXISTS (
 	SELECT 1 FROM hypothesis_findings f WHERE f.experiment_id = experiments.id)`
 
 // UnsummarizedCompleted returns the ids of the agent's COMPLETED jobs in the platform experiment

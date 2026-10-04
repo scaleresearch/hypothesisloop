@@ -20,7 +20,7 @@ import { Code, Pill, Text } from '@/components/ui/text'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Actor } from '@/components/actor'
 import { Branch } from '@/components/code-ref'
-import { BASELINE_JOB, measuresBaseline } from '@/components/job-hypothesis'
+import { BASELINE_JOB, CHECK_JOB, measuresBaseline } from '@/components/job-hypothesis'
 import { Callout, Loading, ErrorMessage } from '@/components/ui/status-message'
 import { semantic, seriesPalette, chart } from '@/lib/colors'
 import { formatAccH, formatDuration } from '@/lib/format'
@@ -106,7 +106,7 @@ export default function JobDetailPage({ params }: { params: { experimentId: stri
     <Page
         title={
           <>
-            <span className="line-clamp-3 min-w-0 text-lg leading-snug" title={j.hypothesis}>{baseline ? BASELINE_JOB : j.hypothesis}</span>
+            <span className="line-clamp-3 min-w-0 text-lg leading-snug" title={j.hypothesis}>{j.check ? CHECK_JOB : baseline ? BASELINE_JOB : j.hypothesis}</span>
             <Badge status={j.status ?? 'UNKNOWN'} />
           </>
         }
@@ -114,7 +114,7 @@ export default function JobDetailPage({ params }: { params: { experimentId: stri
           <Inline gap="md" className="text-xs">
             <Text as="span" variant="meta" mono tone="default">Job {j.id}</Text>
             <CopyButton value={j.id} />
-            {!baseline && <TextLink href={hypothesisPath(experimentId, j.hypothesis_id!)} className="whitespace-nowrap">View hypothesis →</TextLink>}
+            {!baseline && !j.check && <TextLink href={hypothesisPath(experimentId, j.hypothesis_id!)} className="whitespace-nowrap">View hypothesis →</TextLink>}
             <TextLink href={graphHref(j.platform_experiment_id, j.hypothesis_id)} className="whitespace-nowrap">In graph →</TextLink>
           </Inline>
         }

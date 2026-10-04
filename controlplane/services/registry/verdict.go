@@ -71,6 +71,9 @@ func (s *Service) supported(ctx context.Context, h *domain.Hypothesis, v Verdict
 	if control == nil || control.PlatformExperimentID != h.PlatformExperimentID {
 		return &UnsupportedVerdictError{Detail: fmt.Sprintf("the control %s is no job of this platform experiment. %s", v.Against, otherwise)}
 	}
+	if control.Check {
+		return &UnsupportedVerdictError{Detail: fmt.Sprintf("the control %s is a check (hl env run), which measures nothing: name a completed job of hl job submit. %s", v.Against, otherwise)}
+	}
 	if control.Status != domain.StatusCompleted {
 		return &UnsupportedVerdictError{Detail: fmt.Sprintf("the control %s is %s, and a control is a job that completed. %s", v.Against, control.Status, otherwise)}
 	}

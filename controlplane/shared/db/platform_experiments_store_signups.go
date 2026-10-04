@@ -504,14 +504,14 @@ WITH idle AS (
     SELECT s.platform_experiment_id, s.agent_id,
            GREATEST(pe.started_at, s.signed_up_at,
                     (SELECT max(e.created_at) FROM experiments e
-                     WHERE e.platform_experiment_id = s.platform_experiment_id AND e.agent_id = s.agent_id)) AS since
+                     WHERE e.platform_experiment_id = s.platform_experiment_id AND e.agent_id = s.agent_id AND NOT e.is_check)) AS since
     FROM experiment_signups s JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
     WHERE pe.status = 'running' AND pe.started_at IS NOT NULL AND s.role = $2 AND s.finished_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM platform_experiment_cuts c
                       WHERE c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id)
       AND NOT EXISTS (SELECT 1 FROM experiments e
                       WHERE e.platform_experiment_id = s.platform_experiment_id AND e.agent_id = s.agent_id
-                        AND e.status IN ('QUEUED', 'SUBMITTED', 'RUNNING'))
+                        AND e.status IN ('QUEUED', 'SUBMITTED', 'RUNNING') AND NOT e.is_check)
 )
 UPDATE experiment_signups s
 SET idle_noticed_at = now(), idle_xid = pg_current_xact_id()::text::bigint,

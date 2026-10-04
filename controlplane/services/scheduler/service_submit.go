@@ -171,6 +171,26 @@ func unestimatedLimit(pe *domain.PlatformExperiment, now time.Time) float64 {
 	return left
 }
 
+// ReasonCheckTestsNoHypothesis refuses a check that names a hypothesis or a theory.
+const ReasonCheckTestsNoHypothesis = "check_tests_no_hypothesis"
+
+// ReasonCheckTooLong refuses a check whose estimate is over domain.CheckJobHours.
+const ReasonCheckTooLong = "check_too_long"
+
+// takeCheck holds a check to what it is: no claim, and a few minutes long.
+func takeCheck(exp *domain.Experiment) error {
+	if exp.HypothesisID != "" || exp.Theory != "" {
+		return &AdmissionError{Reason: ReasonCheckTestsNoHypothesis, Message: "a check only runs the code in the environment, so it names no hypothesis and no theory: leave both out (hl env run does), or submit a job that measures with hl job submit"}
+	}
+	if exp.EstimatedDurationHours == 0 {
+		exp.EstimatedDurationHours = domain.CheckJobHours
+	}
+	if exp.EstimatedDurationHours > domain.CheckJobHours {
+		return &AdmissionError{Reason: ReasonCheckTooLong, Message: fmt.Sprintf("a check runs for %d minutes at most and this one estimates %g hours: check a shorter command, or submit a job that measures with hl job submit", int(domain.CheckJobHours*60), exp.EstimatedDurationHours)}
+	}
+	return nil
+}
+
 // errNoCaller is a request that reached the service with no authenticated caller: every route
 // is behind the token check, so it is the platform's fault and never the submitter's.
 var errNoCaller = errors.New("scheduler: no authenticated caller in the request context")
@@ -242,6 +262,12 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		}
 	}
 
+	if exp.Check {
+		if err := takeCheck(exp); err != nil {
+			return err
+		}
+	}
+
 	// With no estimate stated and none measured there is nothing to hold of the agent's quota. The
 	// baseline's job is the one nothing was measured before: it is sized below, once its units are known.
 	if !exp.TakeEstimate(pe) && !measuresBaseline {
@@ -253,7 +279,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 
 	// The baseline is the objective's own measurement and no claim: its job tests no hypothesis
 	// and is kept on the objective, which the platform experiment's id names.
-	if measuresBaseline {
+	if measuresBaseline && !exp.Check {
 		if exp.HypothesisID != "" {
 			return &AdmissionError{Reason: ReasonBaselineTestsNoHypothesis, Message: fmt.Sprintf("agent %s measures the baseline, and the baseline is the objective's own: its job names no hypothesis. Submit it without one", exp.AgentID)}
 		}
@@ -267,7 +293,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	if err := s.codeInRepository(pe, exp.CodeRef); err != nil {
 		return err
 	}
-	if err := branchOfExperiment(exp, measuresBaseline); err != nil {
+	if err := branchOfExperiment(exp, measuresBaseline && !exp.Check); err != nil {
 		return err
 	}
 	if err := s.resolveImage(&exp.Job); err != nil {
@@ -344,13 +370,13 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	if err != nil {
 		return fmt.Errorf("scheduler: check unsummarized completed: %w", err)
 	}
-	if len(owed) > 0 {
+	if len(owed) > 0 && !exp.Check {
 		exp.NotAdmittedReason = summaryGateReason(owed)
 	}
 
-	// 2b. Every job but the baseline's tests a hypothesis registered before it (POST /hypotheses),
-	// whose text is kept on the job for cheap reads.
-	if !measuresBaseline {
+	// 2b. Every job but the baseline's and a check tests a hypothesis registered before it (POST
+	// /hypotheses), whose text is kept on the job for cheap reads.
+	if !measuresBaseline && !exp.Check {
 		if err := s.bindHypothesis(ctx, exp); err != nil {
 			return err
 		}

@@ -69,6 +69,11 @@ type Experiment struct {
 	// Objective is set in an answer only, never in memory: read OnObjective.
 	Objective  bool   `json:"objective,omitempty" doc:"True on a baseline agent's job: it measures the platform experiment's objective and tests no hypothesis, so it has no hypothesis_id. GET /experiments?hypothesis_id=<platform_experiment_id> still lists such jobs."`
 	Hypothesis string `json:"hypothesis"`
+	// Check marks a job its agent ran to see its code build and run in the experiment's
+	// environment before a job that measures. It tests no hypothesis (HypothesisID is empty),
+	// owes no summary, records no metric and ranks nowhere, and runs for CheckJobHours at most.
+	// Its quota is held and billed like any job's.
+	Check bool `json:"check,omitempty" doc:"True on a check: a job its agent ran to see its code build and run in the experiment's environment (hl env run). It tests no hypothesis, records no metric, owes no summary, ranks nowhere and runs for 10 minutes at most. It holds and is billed quota like any job."`
 	// Theory is the agent's specific prediction or bet they want to verify with this run.
 	// Agents should check for duplicate submissions before submitting (GET /experiments?status=QUEUED&status=RUNNING).
 	Theory                 string           `json:"theory,omitempty"`
@@ -196,6 +201,10 @@ type Experiment struct {
 
 // OnObjective reports whether the job is a baseline agent's: it tests no hypothesis and is kept
 // on the objective of its platform experiment.
+// CheckJobHours is the longest a check (Experiment.Check) runs, and its estimate when it states
+// none: long enough to build and start the code, short enough to hold little of a quota.
+const CheckJobHours = 1.0 / 6
+
 func (e *Experiment) OnObjective() bool {
 	return e.HypothesisID != "" && e.HypothesisID == e.PlatformExperimentID
 }

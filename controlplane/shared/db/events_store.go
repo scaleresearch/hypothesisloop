@@ -607,7 +607,7 @@ func replayExperiments(ctx context.Context, tx pgx.Tx, peID string, since int64)
 	queued_xid, submitted_xid, status_xid, not_admitted_xid, COALESCE(underperforming_metric, ''), underperforming_xid,
 	COALESCE(held_reason, ''), held_xid
 FROM experiments
-WHERE platform_experiment_id = $1
+WHERE platform_experiment_id = $1 AND NOT is_check
   AND (status_xid >= $2 OR not_admitted_xid >= $2 OR queued_xid >= $2 OR submitted_xid >= $2 OR underperforming_xid >= $2 OR held_xid >= $2)`
 	rows, err := tx.Query(ctx, q, peID, since)
 	if err != nil {

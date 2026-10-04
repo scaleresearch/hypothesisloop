@@ -805,6 +805,10 @@ CREATE TRIGGER experiments_touch BEFORE INSERT OR UPDATE ON experiments
 
 CREATE OR REPLACE FUNCTION hypothesisloop_experiments_notify() RETURNS trigger AS $$
 BEGIN
+    -- A check's agent follows it in hl env run, and nobody else is told of it.
+    IF NEW.is_check THEN
+        RETURN NULL;
+    END IF;
     IF TG_OP = 'INSERT' OR NEW.status IS DISTINCT FROM OLD.status THEN
         PERFORM hypothesisloop_notify_event('experiment.status', NEW.id, NEW.status::text,
             COALESCE(NEW.eviction_reason, ''), NEW.platform_experiment_id, NEW.agent_id);
@@ -1433,6 +1437,9 @@ ALTER TABLE clusters ADD COLUMN IF NOT EXISTS builds BOOLEAN NOT NULL DEFAULT fa
 -- The environment a job's commit declares: admission claims the job only once it is ready, in
 -- its image. NULL for a commit that declares none.
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS environment_key TEXT REFERENCES environments (key);
+-- A check (domain.Experiment.Check): a job its agent ran to see its code run in the environment.
+-- It has no hypothesis, sends no job event, owes no summary and is no research result.
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS is_check BOOLEAN NOT NULL DEFAULT false;
 -- Agent machines run the platform's agent image and build nothing: only jobs run in an
 -- environment.
 ALTER TABLE platform_experiments DROP COLUMN IF EXISTS agent_environment_key;

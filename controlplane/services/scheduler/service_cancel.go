@@ -150,6 +150,9 @@ func (s *Service) WriteExperimentSummary(ctx context.Context, id string, actor d
 	if exp == nil {
 		return nil, &AdmissionError{Reason: "not_found", Message: "experiment not found"}
 	}
+	if exp.Check {
+		return nil, &AdmissionError{Reason: ReasonCheckTestsNoHypothesis, Message: fmt.Sprintf("job %s is a check (hl env run): it measured nothing and owes no summary", id)}
+	}
 	switch exp.Status {
 	case domain.StatusCompleted, domain.StatusFailed, domain.StatusEvicted, domain.StatusRejected:
 		// ok

@@ -63,6 +63,9 @@ the code as a researcher would. Only a job of hl/PE/baseline is declared the bas
 job shows; FILE may not carry job.secret_env. An agent's token says whose job it is and where;
 a person or an API key states --agent and --platform-experiment.
 
+hl env run -- CMD checks that code builds and runs in the environment, on the job's hardware,
+before a job.
+
 Code: commit first (uncommitted changes to tracked files are refused). HEAD must be on a branch
 under hl/PE/ (hl hypothesis checkout ID puts you on yours). The submit fills an empty
 metadata.code_ref with <origin url>@<HEAD sha> and metadata.branch with that branch, and pushes

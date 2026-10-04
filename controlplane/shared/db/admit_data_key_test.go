@@ -298,3 +298,42 @@ func TestAnUnsummarisedJobIsOwedOnlyByWhatWasSubmittedAfterItEnded(t *testing.T)
 		}
 	}
 }
+
+// A check is stored as one and is no research result: it owes no summary, is no completed job
+// of the platform experiment and sends no job event.
+func TestACheckIsStoredAsOneAndCountsAsNoResult(t *testing.T) {
+	store, exp := admitDataKeyFixture(t)
+	ctx := context.Background()
+	exp.Check, exp.HypothesisID, exp.Hypothesis = true, "", ""
+	if decision, err := store.AdmitExperimentTx(ctx, exp, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); err != nil || decision != AdmitInserted {
+		t.Fatalf("admit = %v %v, want inserted", decision, err)
+	}
+	if _, err := store.ExperimentsStore.pool.pool.Exec(ctx, `UPDATE experiments SET status = 'COMPLETED', not_admitted_reason = NULL WHERE id = $1`, exp.ID); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.GetExperiment(ctx, exp.ID)
+	if err != nil || stored == nil || !stored.Check || stored.HypothesisID != "" {
+		t.Fatalf("stored = %+v (%v), want a check on no hypothesis", stored, err)
+	}
+	owed, err := store.UnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID, time.Now().Add(time.Hour))
+	if err != nil || len(owed) != 0 {
+		t.Errorf("owed = %v (%v), want no summary owed for a check", owed, err)
+	}
+	completed, err := store.CompletedJobs(ctx, exp.PlatformExperimentID)
+	if err != nil || len(completed) != 0 {
+		t.Errorf("completed jobs = %d (%v), want none", len(completed), err)
+	}
+	ids, err := store.CompletedJobIDs(ctx, exp.PlatformExperimentID)
+	if err != nil || ids[exp.ID] {
+		t.Errorf("completed job ids = %v (%v), want no check among them", ids, err)
+	}
+	replayed, err := NewEventsStore(store.ExperimentsStore.pool, noHypothesisEvents{}).Replay(ctx, EventFilter{PlatformExperimentID: exp.PlatformExperimentID}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range replayed {
+		if e.Subject == exp.ID {
+			t.Errorf("replayed %s %s for the check", e.Kind, e.Value)
+		}
+	}
+}

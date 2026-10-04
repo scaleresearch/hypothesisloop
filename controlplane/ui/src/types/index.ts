@@ -138,6 +138,9 @@ export interface Experiment {
   // objective is true and hypothesis is empty.
   hypothesis_id?: string
   objective?: boolean
+  // A check (hl env run) ran the code in the environment before a job: it tests no hypothesis,
+  // has no hypothesis_id and is no result.
+  check?: boolean
   hypothesis: string
   theory?: string
   status: ExperimentStatus
