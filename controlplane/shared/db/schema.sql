@@ -1308,17 +1308,13 @@ SET duration_hours = EXTRACT(EPOCH FROM ends_at - GREATEST(starts_at, created_at
 WHERE duration_hours = 0 AND ends_at > GREATEST(starts_at, created_at)
   AND (status IN ('open', 'running') OR status = 'closed' AND (goal = '' OR starts_at > '0001-01-02'));
 
--- A baseline its creator stated in place of a measured one, by metric key, and the commit the
--- baseline stands for: the declared job's, or the head of the default branch a stated one was
--- given at. A run with neither a baseline job nor a stated baseline has no baseline. The block
--- the platform writes into the brief no longer says the baseline was measured.
-ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS stated_baseline   JSONB;
-ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS baseline_code_ref TEXT NOT NULL DEFAULT '';
-UPDATE platform_experiments pe SET baseline_code_ref = e.code_ref
-FROM experiments e
-WHERE e.id = pe.baseline_job_id AND pe.baseline_code_ref = '';
+-- A baseline was once stated by its creator in place of a measured one, with the commit it stood
+-- for kept beside it. Every baseline is measured by its declared job again, so both columns go
+-- and the block the platform writes into the brief says the baseline was measured.
+ALTER TABLE platform_experiments DROP COLUMN IF EXISTS stated_baseline;
+ALTER TABLE platform_experiments DROP COLUMN IF EXISTS baseline_code_ref;
 UPDATE platform_experiments
-SET description = replace(description, 'MEASURED BASELINE (written by the platform from the declared job)', 'BASELINE (written by the platform)')
-WHERE description LIKE '%MEASURED BASELINE (written by the platform from the declared job)%';
+SET description = replace(description, 'BASELINE (written by the platform)', 'MEASURED BASELINE (written by the platform from the declared job)')
+WHERE description LIKE '%BASELINE (written by the platform)%';
 
 COMMIT;
