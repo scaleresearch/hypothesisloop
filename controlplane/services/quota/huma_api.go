@@ -172,6 +172,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"(GET /orgs/{id}/github-repositories lists what may be named): 422 invalid_repository when it is not owner/name, installation_not_connected when " +
 			"the org connected no installation on the account that owns it, repository_not_reachable when the installation does not cover it, " +
 			"and installation_gone when the App was removed on GitHub. " +
+			"502 github_failed when GitHub answers 5xx or not at all for the installation, the message naming it and GitHub's answer. " +
 			"On a deployment whose git host is plain the platform creates none and reads no experiment file: repository is a name under the host's root, created there beforehand, " +
 			"422 repository_required without it, repository_not_reachable when it does not answer git, and 422 experiment_file_unsupported with from_repo. " +
 			"agent_image is the image the hosted agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Left out, " +
