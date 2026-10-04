@@ -60,8 +60,8 @@ type Agent struct {
 	Builder Builder
 	Log     func(format string, args ...any)
 
-	// unrunnable is what the last reconcile pass found it can never create, by experiment, with
-	// the attempt and the runtime's words. It is that pass's observation and nothing more: every
+	// unrunnable is what the last reconcile pass did not create, by experiment, with the attempt,
+	// the reason and the runtime's words. It is that pass's observation and nothing more: every
 	// pass replaces it whole, and a status push reports it beside what exists.
 	unrunnableMu sync.Mutex
 	unrunnable   map[string]refusedCreate
@@ -251,15 +251,18 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 				}
 				continue
 			}
-			a.Log("create workload %s: %v", id, err)
-			// A job that can never be created here is the control plane's to end. It is told
-			// with the next status push, and the pass is not failed for it.
+			// A job that can never be created here is the control plane's to end. Any other
+			// failure is tried again next pass, and said as create_failed so its owner reads why
+			// it waits. Both are told with the next status push, logged when they change, and
+			// fail no pass.
+			refused[id] = refusedCreate{attempt: exp.AttemptCount, reason: domain.PhaseReasonCreateFailed, why: err.Error()}
 			var unrunnable *agentexec.Unrunnable
 			if errors.As(err, &unrunnable) {
 				refused[id] = refusedCreate{attempt: exp.AttemptCount, reason: cmp.Or(unrunnable.Reason, domain.PhaseReasonConfigError), why: unrunnable.Why}
-				continue
 			}
-			reconcileErrors = append(reconcileErrors, fmt.Errorf("create workload %s: %w", id, err))
+			if a.lastRefused(id) != refused[id] {
+				a.Log("create workload %s: %v", id, err)
+			}
 			continue
 		}
 	}
@@ -500,13 +503,6 @@ func (a *Agent) reportStatuses(ctx context.Context, exec agentexec.Executor) {
 // no workload: pending, under the reason the runtime gave, which the control plane ends the job
 // for when it is one that never heals, and with the runtime's words as the message its owner
 // reads.
-// lastRefused is what the pass before this one said of id.
-func (a *Agent) lastRefused(id string) refusedCreate {
-	a.unrunnableMu.Lock()
-	defer a.unrunnableMu.Unlock()
-	return a.unrunnable[id]
-}
-
 func (a *Agent) refusedReports(existing []string) []statusReportWire {
 	a.unrunnableMu.Lock()
 	defer a.unrunnableMu.Unlock()
@@ -523,6 +519,13 @@ func (a *Agent) refusedReports(existing []string) []statusReportWire {
 	}
 	sort.Slice(reports, func(i, j int) bool { return reports[i].ExperimentID < reports[j].ExperimentID })
 	return reports
+}
+
+// lastRefused is what the pass before this one said of id.
+func (a *Agent) lastRefused(id string) refusedCreate {
+	a.unrunnableMu.Lock()
+	defer a.unrunnableMu.Unlock()
+	return a.unrunnable[id]
 }
 
 // statusReportFor observes one job: its phase, where it landed, its log tail and why its

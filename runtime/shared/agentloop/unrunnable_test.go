@@ -64,23 +64,34 @@ func (c *controlPlane) lastStatus() []statusReportWire {
 }
 
 // A job the runtime can never create is said to the control plane, in the runtime's words, with
-// the one reason the control plane ends a job for without waiting. Before this the refusal went
-// to the runtime's own log on every pass and the job's owner was told nothing.
-func TestAJobTheRuntimeCanNeverCreateIsReportedWithItsReasonAndATransientFailureIsNot(t *testing.T) {
+// the one reason the control plane ends a job for without waiting. A create that failed otherwise
+// is said as create_failed, which ends nothing, so its owner reads why it waits. Neither fails
+// the pass, and each is logged when it changes.
+func TestAJobTheRuntimeDidNotCreateIsReportedWithItsReason(t *testing.T) {
 	exec := &captureExecutor{managed: []string{"exp-running"}, uncreatable: map[string]error{
 		"exp-refused": fmt.Errorf("build: %w", &agentexec.Unrunnable{Why: "the job asks for host_mounts, and a rented instance has none"}),
-		"exp-later":   errors.New("vendor: HTTP 503"),
+		"exp-later":   errors.New(`jobs.batch is forbidden: User "system:serviceaccount:hl:agent" cannot create resource "jobs"`),
 	}}
-	cp := &controlPlane{desired: `[{"id":"exp-running"},{"id":"exp-refused","attempt_count":2},{"id":"exp-later"},{"id":"exp-fine"}]`}
+	cp := &controlPlane{desired: `[{"id":"exp-running"},{"id":"exp-refused","attempt_count":2},{"id":"exp-later","attempt_count":1},{"id":"exp-fine"}]`}
 	agent := newTestAgent(cp.serve(t), exec)
+	var logged agentLog
+	agent.Log = logged.log
 	ctx := context.Background()
 
-	err := agent.reconcileOnce(ctx)
-	if err == nil || !strings.Contains(err.Error(), "exp-later") || strings.Contains(err.Error(), "exp-refused") {
-		t.Fatalf("pass error = %v, want it to name the transient failure and not the job handed to the control plane", err)
+	if err := agent.reconcileOnce(ctx); err != nil {
+		t.Fatalf("pass error = %v, want none: every refused create is the control plane's to read", err)
 	}
 	if exec.created != 1 {
 		t.Fatalf("created %d workloads, want the one that could be", exec.created)
+	}
+	exec.managed = append(exec.managed, "exp-fine")
+	for range 2 {
+		if err := agent.reconcileOnce(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := len(logged.lines); n != 2 {
+		t.Fatalf("logged %q over three passes, want each refused create once", logged.lines)
 	}
 	agent.reportStatuses(ctx, exec)
 	reports := map[string]statusReportWire{}
@@ -95,20 +106,28 @@ func TestAJobTheRuntimeCanNeverCreateIsReportedWithItsReasonAndATransientFailure
 	if !domain.NeverSelfHealsPhaseReasons[refused.Reason] {
 		t.Fatalf("reason %q is not one the control plane ends a job for", refused.Reason)
 	}
-	if _, reported := reports["exp-later"]; reported || len(reports) != 2 {
-		t.Fatalf("reported %v, want the running job and the refused one only: a create that may work next pass is no status", reports)
+	failed, reported := reports["exp-later"]
+	if !reported || failed.Phase != "pending" || failed.Reason != domain.PhaseReasonCreateFailed ||
+		failed.Message != exec.uncreatable["exp-later"].Error() || failed.Attempt == nil || *failed.Attempt != 1 {
+		t.Fatalf("the job whose create failed was reported as %+v", failed)
+	}
+	if domain.NeverSelfHealsPhaseReasons[failed.Reason] {
+		t.Fatalf("reason %q ends the job, want it to wait for the next try", failed.Reason)
+	}
+	if len(reports) != 4 {
+		t.Fatalf("reported %v, want the two running jobs and the two not created", reports)
 	}
 
-	// The control plane took the job away: nothing is said of it any more.
+	// The control plane took the jobs away: nothing is said of them any more.
 	cp.mu.Lock()
-	cp.desired = `[{"id":"exp-running"}]`
+	cp.desired = `[{"id":"exp-running"},{"id":"exp-fine"}]`
 	cp.mu.Unlock()
 	if err := agent.reconcileOnce(ctx); err != nil {
 		t.Fatal(err)
 	}
 	agent.reportStatuses(ctx, exec)
-	if got := cp.lastStatus(); len(got) != 1 || got[0].ExperimentID != "exp-running" {
-		t.Fatalf("after the job was withdrawn the status still holds %+v", got)
+	if got := cp.lastStatus(); len(got) != 2 {
+		t.Fatalf("after the jobs were withdrawn the status still holds %+v", got)
 	}
 }
 
