@@ -105,6 +105,9 @@ func checkServer(t *testing.T, polls []checkReply) (*map[string]any, *[]string) 
 	statusReads, logReads := 0, 0
 	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.URL.Path == "/environments":
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = json.NewEncoder(w).Encode(map[string]any{"reason": "no_environment_file", "message": "commit holds no .hypothesisloop/Dockerfile"})
 		case r.Method == "POST" && r.URL.Path == "/experiments":
 			_ = json.NewDecoder(r.Body).Decode(&sent)
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "job-c", "status": "QUEUED", "check": true})
@@ -224,5 +227,75 @@ func TestEnvRunCancelsTheCheckWhenInterrupted(t *testing.T) {
 	code := runCheck(c, []string{"--agent", "ag-1", "--platform-experiment", "pe-1", "job.yaml", "--", "sleep 100"}, &stdout, &stderr, signals)
 	if code != 130 || len(*cancelled) != 1 || (*cancelled)[0] != "/experiments/job-c/cancel" {
 		t.Errorf("exit %d, cancelled %v, stderr %s", code, *cancelled, stderr.String())
+	}
+}
+
+// Run 10's baseline ran hl env run three times to see whether its build was done, and one made a
+// job that was rejected once the build failed. A check waits for its environment, makes no job
+// while it builds, and none once its file failed.
+func TestEnvRunWaitsForItsEnvironmentAndMakesNoCheckOfAFailedOne(t *testing.T) {
+	for name, final := range map[string]map[string]string{
+		"failed": {"key": "k1", "state": "failed", "fault": "file", "message": "error: unexpected argument '--locked=false'"},
+		"ready":  {"key": "k1", "state": "ready", "image": "registry.test/env@sha256:1", "message": "built"},
+	} {
+		pushedClone(t)
+		fastCheckPoll(t)
+		var asked []string
+		checks := 0
+		reads := 0
+		setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "POST" && r.URL.Path == "/environments":
+				asked = append(asked, "POST")
+				_ = json.NewEncoder(w).Encode(map[string]string{"key": "k1", "state": "building", "message": "It builds on cluster quietbox"})
+			case r.Method == "GET" && r.URL.Path == "/environments":
+				if r.URL.Query().Get("image") != "foo" || r.URL.Query().Get("code_ref") == "" {
+					t.Errorf("%s: read %s, want the check's commit and image", name, r.URL.RawQuery)
+				}
+				if reads++; reads < 3 {
+					_ = json.NewEncoder(w).Encode(map[string]string{"key": "k1", "state": "building", "message": "It builds on cluster quietbox"})
+					return
+				}
+				_ = json.NewEncoder(w).Encode(final)
+			case r.Method == "POST" && r.URL.Path == "/experiments":
+				checks++
+				_ = json.NewEncoder(w).Encode(map[string]any{"id": "job-c", "status": "QUEUED", "check": true})
+			case r.URL.Path == "/experiments/job-c/logs":
+				_ = json.NewEncoder(w).Encode([]string{})
+			case r.URL.Path == "/experiments/job-c":
+				_ = json.NewEncoder(w).Encode(map[string]any{"status": "COMPLETED"})
+			default:
+				t.Errorf("%s: unexpected %s %s", name, r.Method, r.URL.Path)
+			}
+		}))
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"env", "run", "--agent", "ag-1", "--platform-experiment", "pe-1", "job.yaml", "--", "true"}, &stdout, &stderr)
+		if len(asked) != 1 || strings.Count(stderr.String(), "no check is made until the environment is built") != 1 {
+			t.Errorf("%s: asked %v, stderr %q, want one build asked and the wait said once", name, asked, stderr.String())
+		}
+		switch name {
+		case "failed":
+			if code != 1 || checks != 0 || !strings.Contains(stdout.String(), "--locked=false") {
+				t.Errorf("failed: exit %d with %d checks, stdout %q, want 1, no check and the build's output", code, checks, stdout.String())
+			}
+		case "ready":
+			if code != 0 || checks != 1 {
+				t.Errorf("ready: exit %d with %d checks, want the check made once built", code, checks)
+			}
+		}
+	}
+}
+
+// The state of an environment is read without building it.
+func TestEnvStatusReadsTheEnvironmentAndBuildsNothing(t *testing.T) {
+	pushedClone(t)
+	var path string
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		path = r.Method + " " + r.URL.Path
+		_ = json.NewEncoder(w).Encode(map[string]string{"key": "k1", "state": "failed", "fault": "file", "message": "E: Unable to locate package rustc"})
+	}))
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"env", "status", "--platform-experiment", "pe-1", "--image", "python", "--hypothesis", "h1"}, &stdout, &stderr); code != 1 || path != "GET /environments" || !strings.Contains(stdout.String(), "rustc") {
+		t.Errorf("exit %d after %s, stdout %q, want 1 from a read with the build's output", code, path, stdout.String())
 	}
 }

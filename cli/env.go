@@ -22,6 +22,7 @@ import (
 
 var envCommands = []subcommand{
 	{"build", "start building HEAD's .hypothesisloop/Dockerfile before the job that runs in it", envBuild, asAgent},
+	{"status", "say whether HEAD's .hypothesisloop/Dockerfile is building, built or failed, building nothing", envStatus, asAgent},
 	{"run", "run a command in the environment on the job's hardware, to check code before a job", envRun, asAgent},
 }
 
@@ -45,12 +46,82 @@ invalid_environment_file; no_environment_builder; unknown_job_image; code_ref_no
 	image := fs.String("image", "", "the image the job will name, job.image of FILE by default")
 	hypothesis := fs.String("hypothesis", "", "the hypothesis the job will test, metadata.hypothesis_id of FILE by default")
 	pe := experimentFlag(fs)
+	request, code := environmentAsked(c, fs, args, image, hypothesis, pe, "env build", stderr)
+	if code >= 0 {
+		return code
+	}
+	var out environmentState
+	if err := c.Do("POST", "/environments", request, &out); err != nil {
+		return fail(stderr, err)
+	}
+	return printEnvironment(stdout, out)
+}
+
+func envStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("env status", `usage: hl env status [FILE] [--image IMAGE] [--hypothesis ID] [--platform-experiment PE]
+
+Prints the environment HEAD's commit declares in .hypothesisloop/Dockerfile, on the image its
+job will name, as it is: its key, state (building, ready, failed) and a message saying where the
+build is, or the end of its output once the file failed. It builds nothing: a failed file stays
+failed, and a job is never made. FILE, --image and --hypothesis are those of hl env build.
+Exits 0 while building or once ready, 1 once failed.
+
+Refusals: environment_not_requested (nothing asked for its build: hl env build starts it);
+no_environment_file; invalid_environment_file.`, stderr)
+	image := fs.String("image", "", "the image the job will name, job.image of FILE by default")
+	hypothesis := fs.String("hypothesis", "", "the hypothesis the job will test, metadata.hypothesis_id of FILE by default")
+	pe := experimentFlag(fs)
+	request, code := environmentAsked(c, fs, args, image, hypothesis, pe, "env status", stderr)
+	if code >= 0 {
+		return code
+	}
+	var out environmentState
+	if err := c.Do("GET", environmentPath(request), nil, &out); err != nil {
+		return fail(stderr, err)
+	}
+	return printEnvironment(stdout, out)
+}
+
+// environmentState is an environment as the platform answers it.
+type environmentState struct {
+	Key     string `json:"key"`
+	State   string `json:"state"`
+	Base    string `json:"base"`
+	Image   string `json:"image,omitempty"`
+	Fault   string `json:"fault,omitempty"`
+	Message string `json:"message"`
+}
+
+func printEnvironment(stdout io.Writer, out environmentState) int {
+	line, _ := json.Marshal(out)
+	fmt.Fprintf(stdout, "%s\n", line)
+	if out.State == "failed" {
+		return 1
+	}
+	return 0
+}
+
+// environmentPath is GET /environments of the environment request names.
+func environmentPath(request map[string]any) string {
+	query := url.Values{}
+	for _, name := range []string{"platform_experiment_id", "code_ref", "image"} {
+		if v, _ := request[name].(string); v != "" {
+			query.Set(name, v)
+		}
+	}
+	return "/environments?" + query.Encode()
+}
+
+// environmentAsked is the request naming the environment HEAD's commit declares for the job of
+// FILE, the one operand of args, or of the repository's job spec, with image and hypothesis in
+// place of the file's. A code of 0 or more is the exit of a command that cannot ask.
+func environmentAsked(c *apiclient.Client, fs *flagSet, args []string, image, hypothesis, pe *string, command string, stderr io.Writer) (map[string]any, int) {
 	operands, err := parseOperands(fs, args)
 	if err != nil {
-		return parseExit(err)
+		return nil, parseExit(err)
 	}
 	if len(operands) > 1 {
-		return parseExit(misuse(fs, "want at most one FILE, got %d", len(operands)))
+		return nil, parseExit(misuse(fs, "want at most one FILE, got %d", len(operands)))
 	}
 	if len(operands) == 0 {
 		if root, err := git(".", "rev-parse", "--show-toplevel"); err == nil {
@@ -65,7 +136,7 @@ invalid_environment_file; no_environment_builder; unknown_job_image; code_ref_no
 		body, err := readYAMLBody(operands[0])
 		if err != nil {
 			fmt.Fprintf(stderr, "hl: %s\n", err)
-			return 2
+			return nil, 2
 		}
 		if m, ok := body["metadata"].(map[string]any); ok {
 			metadata = m
@@ -75,7 +146,7 @@ invalid_environment_file; no_environment_builder; unknown_job_image; code_ref_no
 		}
 	}
 	if *image == "" {
-		return parseExit(misuse(fs, "no image: name the job spec FILE or --image IMAGE, the image the job will run on"))
+		return nil, parseExit(misuse(fs, "no image: name the job spec FILE or --image IMAGE, the image the job will run on"))
 	}
 	if *hypothesis != "" {
 		metadata["hypothesis_id"] = *hypothesis
@@ -85,26 +156,56 @@ invalid_environment_file; no_environment_builder; unknown_job_image; code_ref_no
 	}
 	metadata["platform_experiment_id"] = experimentOf(c, *pe)
 	if err := fillCodeRef(metadata, ""); err != nil {
-		return fail(stderr, fmt.Errorf("env build: %w", err))
+		return nil, fail(stderr, fmt.Errorf("%s: %w", command, err))
 	}
-	request := map[string]any{"platform_experiment_id": metadata["platform_experiment_id"], "code_ref": metadata["code_ref"], "image": *image}
-	var out struct {
-		Key     string `json:"key"`
-		State   string `json:"state"`
-		Base    string `json:"base"`
-		Image   string `json:"image,omitempty"`
-		Fault   string `json:"fault,omitempty"`
-		Message string `json:"message"`
+	return map[string]any{"platform_experiment_id": metadata["platform_experiment_id"], "code_ref": metadata["code_ref"], "image": *image}, -1
+}
+
+// environmentReadTries is the most reads of a building environment in a row that may fail before hl
+// env run stops waiting for it.
+const environmentReadTries = 10
+
+// awaitEnvironment starts the build of the environment the check's commit declares on its image,
+// as its submit would, and waits for it, so no check is made while it builds or once its file
+// failed. It returns -1 once the check may be made: the environment is ready, or the commit
+// declares none. Otherwise it returns the exit of hl env run, and no check was made.
+func awaitEnvironment(c *apiclient.Client, request map[string]any, stdout, stderr io.Writer, signals <-chan os.Signal) int {
+	var env environmentState
+	if err := c.Do("POST", "/environments", request, &env); err != nil {
+		if reason, _ := refusalOf(err); reason == "no_environment_file" {
+			return -1
+		}
+		return fail(stderr, fmt.Errorf("env run: the environment: %w", err))
 	}
-	if err := c.Do("POST", "/environments", request, &out); err != nil {
-		return fail(stderr, err)
+	said, failedReads := "", 0
+	for {
+		switch env.State {
+		case "building":
+		case "failed":
+			fmt.Fprintf(stderr, "hl: env run: the environment failed to build, so no check was made: fix .hypothesisloop/Dockerfile, commit and run again\n")
+			return printEnvironment(stdout, env)
+		default:
+			return -1
+		}
+		if env.Message != said {
+			fmt.Fprintf(stderr, "hl: env run: no check is made until the environment is built: %s\n", env.Message)
+			said = env.Message
+		}
+		select {
+		case <-signals:
+			fmt.Fprintf(stderr, "hl: env run: interrupted while the environment builds; no check was made, and hl env status says where the build is\n")
+			return 130
+		case <-time.After(checkPoll):
+		}
+		var now environmentState
+		if err := c.Do("GET", environmentPath(request), nil, &now); err != nil {
+			if failedReads++; failedReads >= environmentReadTries {
+				return fail(stderr, fmt.Errorf("env run: reading the environment: %w; no check was made, and hl env status says where the build is", err))
+			}
+			continue
+		}
+		failedReads, env = 0, now
 	}
-	line, _ := json.Marshal(out)
-	fmt.Fprintf(stdout, "%s\n", line)
-	if out.State == "failed" {
-		return 1
-	}
-	return 0
 }
 
 // checkPoll is how often hl env run reads its check's status and logs.
@@ -141,9 +242,13 @@ the repository's .hypothesisloop/job.yaml by default; its command is replaced by
 from the clone's root. One COMMAND argument is run as a shell line ('cargo build && ./x');
 several are run as one command with their arguments quoted.
 
+A commit that declares .hypothesisloop/Dockerfile is built first, as hl env build builds it, and
+no check is made until it is built: hl env run says on stderr where the build is while it waits,
+and once the file failed it prints the environment with the end of its output and exits 1.
+
 Prints the check's id, then its output as it arrives, and its status on stderr while it waits
 or runs. Exits with COMMAND's exit code, 0 once COMPLETED, 1 for an end that has no code.
-Interrupted, it cancels the check.`, stderr)
+Interrupted, it cancels the check, or makes none while the environment builds.`, stderr)
 	agent := fs.String("agent", "", "whose check it is, for a person or an API key; an agent's token says it")
 	pe := experimentFlag(fs)
 	cpu := fs.String("cpu", "", "sets job.cpu, the cores the check holds")
@@ -244,6 +349,12 @@ Interrupted, it cancels the check.`, stderr)
 		return fail(stderr, fmt.Errorf("env run: %w", err))
 	}
 	body["metadata"] = metadata
+	if image, _ := job["image"].(string); image != "" {
+		request := map[string]any{"platform_experiment_id": metadata["platform_experiment_id"], "code_ref": metadata["code_ref"], "image": image}
+		if code := awaitEnvironment(c, request, stdout, stderr, signals); code >= 0 {
+			return code
+		}
+	}
 	if body["submission_key"], err = submissionKey(body, *repeat); err != nil {
 		return fail(stderr, fmt.Errorf("env run: %w", err))
 	}

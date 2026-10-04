@@ -22,6 +22,22 @@ type declared struct {
 	err       error
 	asked     *[]string
 	noBuilder bool
+	// known are the environments asked for, by key, which Find reads.
+	known map[string]*domain.Environment
+}
+
+func (d declared) Find(_ context.Context, orgID, _, _, ref, base string) (*domain.Environment, bool, error) {
+	if d.err != nil {
+		return nil, false, d.err
+	}
+	file, ok := d.files[ref]
+	if !ok {
+		return nil, false, nil
+	}
+	if err := domain.ValidateEnvironmentFile(file); err != nil {
+		return nil, true, err
+	}
+	return d.known[domain.EnvironmentKey(orgID, file, base, "")], true, nil
 }
 
 func (d declared) Declared(_ context.Context, orgID, _, _, ref, base string) (*domain.Environment, error) {

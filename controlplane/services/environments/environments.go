@@ -126,6 +126,28 @@ func (s *Service) Declared(ctx context.Context, orgID, projectID, repository, re
 	return s.ensure(ctx, orgID, *file, image)
 }
 
+// Find returns the environment the repository's commit ref declares for a job of orgID naming
+// image as it is, and builds nothing: nil when the commit declares none, and declared false with
+// it, or when it was never asked for.
+func (s *Service) Find(ctx context.Context, orgID, projectID, repository, ref, image string) (env *domain.Environment, declared bool, err error) {
+	file, err := s.Read(ctx, projectID, repository, ref)
+	if err != nil || file == nil {
+		return nil, false, err
+	}
+	if err := domain.ValidateEnvironmentFile(*file); err != nil {
+		return nil, true, err
+	}
+	base, tools, err := s.builtFrom(ctx, image)
+	if err != nil {
+		return nil, true, err
+	}
+	env, err = s.store.GetEnvironment(ctx, domain.EnvironmentKey(orgID, *file, base, tools))
+	if err != nil {
+		return nil, true, fmt.Errorf("environments: %w", err)
+	}
+	return env, true, nil
+}
+
 // Get returns the environment of key, nil when there is none.
 func (s *Service) Get(ctx context.Context, key string) (*domain.Environment, error) {
 	return s.store.GetEnvironment(ctx, key)

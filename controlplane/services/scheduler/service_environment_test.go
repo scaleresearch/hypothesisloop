@@ -65,3 +65,36 @@ func TestAnEnvironmentIsNotBuiltAheadForACommitWithoutOneOrOutsideTheRepository(
 		}
 	}
 }
+
+// An environment is read as it is, building nothing: a failed one stays failed, and one never
+// asked for, or a commit without the file, is told so.
+func TestAnEnvironmentIsReadWithoutBuildingIt(t *testing.T) {
+	commit := strings.Repeat("a", 40)
+	key := domain.EnvironmentKey("org-a", rustEnvironment, "registry.test/job:1", "")
+	failed := &domain.Environment{Key: key, Base: "registry.test/job:1", State: domain.EnvironmentFailed, Fault: domain.EnvironmentFaultFile, LogTail: "error: unexpected argument '--locked=false'"}
+	var assigned []string
+	s := &Service{store: poolOnlyStore{}, codeHost: testCodeHost{}, builds: assigning{&assigned},
+		environments: declared{files: map[string]string{commit: rustEnvironment}, known: map[string]*domain.Environment{key: failed}}}
+	env, err := s.FindEnvironment(context.Background(), "pe-1", "https://example.com/repo.git@"+commit, "registry.test/job:1")
+	if err != nil || env != failed || len(assigned) != 0 {
+		t.Fatalf("got %+v, %v with %v assigned, want the failed one as it is and nothing assigned", env, err, assigned)
+	}
+	if got := answerEnvironment(env); got.State != domain.EnvironmentFailed || !strings.Contains(got.Message, "--locked=false") {
+		t.Errorf("answered %+v, want it failed with the end of its output", got)
+	}
+
+	for name, c := range map[string]struct {
+		commit string
+		known  map[string]*domain.Environment
+		reason string
+	}{
+		"never asked": {commit, nil, ReasonEnvironmentNotRequested},
+		"no file":     {strings.Repeat("b", 40), nil, ReasonNoEnvironmentFile},
+	} {
+		s.environments = declared{files: map[string]string{commit: rustEnvironment}, known: c.known}
+		var refused *AdmissionError
+		if _, err := s.FindEnvironment(context.Background(), "pe-1", "https://example.com/repo.git@"+c.commit, "registry.test/job:1"); !errors.As(err, &refused) || refused.Reason != c.reason {
+			t.Errorf("%s: got %v, want %s", name, err, c.reason)
+		}
+	}
+}

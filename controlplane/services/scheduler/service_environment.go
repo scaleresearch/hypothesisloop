@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -34,34 +36,15 @@ func (s *Service) WithBuildAssigner(builds BuildAssigner) *Service {
 // cluster that builds for the org and has room, or else by the first tick a job waits for it. A
 // failed one is built again, as a submit would.
 func (s *Service) BuildEnvironment(ctx context.Context, peID, codeRef, image string) (*domain.Environment, error) {
-	pe, err := s.store.GetPlatformExperiment(ctx, peID)
+	pe, exp, err := s.environmentJob(ctx, peID, codeRef, image)
 	if err != nil {
-		return nil, fmt.Errorf("scheduler: get platform experiment: %w", err)
-	}
-	if pe == nil {
-		return nil, &AdmissionError{Reason: "experiment_not_found", Message: fmt.Sprintf("platform experiment %s not found", peID)}
-	}
-	if pe.Status != domain.PlatformExpOpen && pe.Status != domain.PlatformExpRunning {
-		return nil, &AdmissionError{Reason: "experiment_closed", Message: fmt.Sprintf("platform experiment %s is %s: environments are built for its jobs while it is open or running", pe.ID, pe.Status)}
-	}
-	if !codeRefPattern.MatchString(codeRef) {
-		return nil, &AdmissionError{Reason: ReasonMalformed, Message: "code_ref must be \"<git-remote-url>@<commit-sha>\", a full 40-character commit SHA"}
-	}
-	if err := s.codeInRepository(pe, codeRef); err != nil {
 		return nil, err
-	}
-	exp := &domain.Experiment{CodeRef: codeRef, Job: domain.JobSpec{Image: image}}
-	if err := s.resolveImage(&exp.Job); err != nil {
-		return nil, err
-	}
-	if exp.OrgID, err = s.store.ProjectOrg(ctx, pe.ProjectID); err != nil {
-		return nil, fmt.Errorf("scheduler: org of platform experiment: %w", err)
 	}
 	if err := s.declaredEnvironment(ctx, pe, exp); err != nil {
 		return nil, err
 	}
 	if exp.EnvironmentKey == "" {
-		return nil, &AdmissionError{Reason: ReasonNoEnvironmentFile, Message: fmt.Sprintf("commit %s holds no %s, so there is nothing to build: commit the file first", codeRef, domain.EnvironmentFile)}
+		return nil, noEnvironmentFile(codeRef)
 	}
 	if s.builds == nil {
 		return nil, errors.New("scheduler: no build assigner is wired (WithBuildAssigner)")
@@ -74,6 +57,72 @@ func (s *Service) BuildEnvironment(ctx context.Context, peID, codeRef, image str
 		return nil, fmt.Errorf("scheduler: environment %s is gone", exp.EnvironmentKey)
 	}
 	return env, nil
+}
+
+// ReasonEnvironmentNotRequested answers the state of an environment no build or job asked for.
+const ReasonEnvironmentNotRequested = "environment_not_requested"
+
+// FindEnvironment returns the environment commit codeRef declares, on image, for the org of
+// platform experiment peID, as it is, and builds nothing: a failed one stays failed.
+func (s *Service) FindEnvironment(ctx context.Context, peID, codeRef, image string) (*domain.Environment, error) {
+	pe, exp, err := s.environmentJob(ctx, peID, codeRef, image)
+	if err != nil {
+		return nil, err
+	}
+	commit := codeRef[strings.LastIndex(codeRef, "@")+1:]
+	env, declared, err := s.environments.Find(ctx, exp.OrgID, pe.ProjectID, pe.Repository, commit, exp.Job.Image)
+	var invalid *domain.EnvironmentFileError
+	var refused *api.Refusal
+	var unresolved *domain.ImageUnresolvedError
+	switch {
+	case errors.As(err, &invalid):
+		return nil, &AdmissionError{Reason: domain.ReasonInvalidEnvironmentFile, Message: invalid.Why + ". Fix it, commit and build again"}
+	case errors.As(err, &refused):
+		return nil, &AdmissionError{Reason: ReasonEnvironmentUnreadable, Message: fmt.Sprintf("the platform could not read %s at commit %s: %s", domain.EnvironmentFile, commit, refused.Message)}
+	case errors.As(err, &unresolved):
+		return nil, &AdmissionError{Reason: ReasonImageUnresolved, Message: fmt.Sprintf("commit %s declares %s, and %s: ask again in a minute", commit, domain.EnvironmentFile, unresolved.Error())}
+	case err != nil:
+		return nil, fmt.Errorf("scheduler: environment of %s: %w", commit, err)
+	case !declared:
+		return nil, noEnvironmentFile(codeRef)
+	case env == nil:
+		return nil, &AdmissionError{Reason: ReasonEnvironmentNotRequested, Message: fmt.Sprintf("the %s of commit %s on this image was never asked to be built: hl env build starts it", domain.EnvironmentFile, commit)}
+	}
+	return env, nil
+}
+
+func noEnvironmentFile(codeRef string) error {
+	return &AdmissionError{Reason: ReasonNoEnvironmentFile, Message: fmt.Sprintf("commit %s holds no %s, so there is nothing to build: commit the file first", codeRef, domain.EnvironmentFile)}
+}
+
+// environmentJob checks that platform experiment peID takes an environment of commit codeRef on
+// image now, and returns it with a job of that commit naming image, its image resolved and its
+// org set.
+func (s *Service) environmentJob(ctx context.Context, peID, codeRef, image string) (*domain.PlatformExperiment, *domain.Experiment, error) {
+	pe, err := s.store.GetPlatformExperiment(ctx, peID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("scheduler: get platform experiment: %w", err)
+	}
+	if pe == nil {
+		return nil, nil, &AdmissionError{Reason: "experiment_not_found", Message: fmt.Sprintf("platform experiment %s not found", peID)}
+	}
+	if pe.Status != domain.PlatformExpOpen && pe.Status != domain.PlatformExpRunning {
+		return nil, nil, &AdmissionError{Reason: "experiment_closed", Message: fmt.Sprintf("platform experiment %s is %s: environments are built for its jobs while it is open or running", pe.ID, pe.Status)}
+	}
+	if !codeRefPattern.MatchString(codeRef) {
+		return nil, nil, &AdmissionError{Reason: ReasonMalformed, Message: "code_ref must be \"<git-remote-url>@<commit-sha>\", a full 40-character commit SHA"}
+	}
+	if err := s.codeInRepository(pe, codeRef); err != nil {
+		return nil, nil, err
+	}
+	exp := &domain.Experiment{CodeRef: codeRef, Job: domain.JobSpec{Image: image}}
+	if err := s.resolveImage(&exp.Job); err != nil {
+		return nil, nil, err
+	}
+	if exp.OrgID, err = s.store.ProjectOrg(ctx, pe.ProjectID); err != nil {
+		return nil, nil, fmt.Errorf("scheduler: org of platform experiment: %w", err)
+	}
+	return pe, exp, nil
 }
 
 // environmentRequest is the wire shape of POST /environments.
@@ -137,6 +186,41 @@ func registerEnvironments(doc *apidocs.Doc, h *Handler) {
 				return nil, api.Refuse(admissionHTTPStatus(refused.Reason), refused.Reason, refused.Message)
 			}
 			return nil, auth.Internal(h.svc.logger, "build environment", err)
+		}
+		return &struct{ Body environmentAnswer }{Body: answerEnvironment(env)}, nil
+	})
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+		OperationID: "get-environment", Method: "GET", Path: "/environments",
+		Summary: "Read the environment a commit declares, building nothing", Tags: []string{"experiments"},
+		Description: "Answers the environment the .hypothesisloop/Dockerfile of commit code_ref on image is, as POST /environments answers it, and starts no build: one that failed stays failed. " +
+			"404 environment_not_requested while nothing asked for its build; 422 no_environment_file and invalid_environment_file as POST /environments answers them.",
+	}, func(ctx context.Context, in *struct {
+		PlatformExperimentID string `query:"platform_experiment_id" required:"false" doc:"The platform experiment whose repository holds the commit. Absent with an agent's token, it is that agent's."`
+		CodeRef              string `query:"code_ref" required:"true" doc:"The commit, as code_ref of POST /environments."`
+		Image                string `query:"image" required:"true" doc:"The image it is built on, as image of POST /environments."`
+	}) (*struct{ Body environmentAnswer }, error) {
+		caller, ok := auth.FromContext(ctx)
+		if !ok {
+			return nil, auth.Internal(h.svc.logger, "get environment", errNoCaller)
+		}
+		peID := in.PlatformExperimentID
+		if peID == "" && caller.Kind == auth.KindAgent {
+			peID = caller.PlatformExperimentID
+		}
+		if err := access.PlatformExperiment(ctx, peID); err != nil {
+			return nil, err
+		}
+		env, err := h.svc.FindEnvironment(ctx, peID, in.CodeRef, in.Image)
+		if err != nil {
+			var refused *AdmissionError
+			if errors.As(err, &refused) {
+				status := admissionHTTPStatus(refused.Reason)
+				if refused.Reason == ReasonEnvironmentNotRequested {
+					status = http.StatusNotFound
+				}
+				return nil, api.Refuse(status, refused.Reason, refused.Message)
+			}
+			return nil, auth.Internal(h.svc.logger, "get environment", err)
 		}
 		return &struct{ Body environmentAnswer }{Body: answerEnvironment(env)}, nil
 	})

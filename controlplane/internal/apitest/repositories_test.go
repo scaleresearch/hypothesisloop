@@ -49,3 +49,7 @@ type noEnvironments struct{}
 func (noEnvironments) Declared(context.Context, string, string, string, string, string) (*domain.Environment, error) {
 	return nil, nil
 }
+
+func (noEnvironments) Find(context.Context, string, string, string, string, string) (*domain.Environment, bool, error) {
+	return nil, false, nil
+}

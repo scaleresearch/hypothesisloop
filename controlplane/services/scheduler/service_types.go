@@ -101,9 +101,11 @@ type CodeHost interface {
 
 // Environments finds the environment a commit declares (environments.Service.Declared): nil when
 // it declares none, a *domain.EnvironmentFileError for a file the platform does not build and
-// domain.ErrNoEnvironmentBuilder while no cluster builds for the org.
+// domain.ErrNoEnvironmentBuilder while no cluster builds for the org. Find reads it as it is and
+// builds nothing (environments.Service.Find).
 type Environments interface {
 	Declared(ctx context.Context, orgID, projectID, repository, ref, image string) (*domain.Environment, error)
+	Find(ctx context.Context, orgID, projectID, repository, ref, image string) (env *domain.Environment, declared bool, err error)
 }
 
 // InstalledCapacity is what each connected cluster and each of its nodes has installed, whether

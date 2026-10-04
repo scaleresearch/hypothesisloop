@@ -258,6 +258,7 @@ var routes = []route{
 	{method: "GET", path: "/experiments/{id}/logs", request: "/experiments/<job>/logs", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "GET", path: "/experiments/{id}/cost", request: "/experiments/<job>/cost", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "POST", path: "/environments", body: `{"platform_experiment_id":"<pe>","code_ref":"r@0","image":"i"}`, rule: scoped(agentAudience, reached)},
+	{method: "GET", path: "/environments", request: "/environments?platform_experiment_id=<pe>&code_ref=r@0&image=i", rule: scoped(agentAudience, reached), sharedRead: true},
 
 	// ---- cluster settings ----
 
