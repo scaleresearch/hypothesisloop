@@ -17,6 +17,10 @@ func (admittingStore) GetRunningAndQueued(context.Context, string) ([]*domain.Ex
 	return nil, nil
 }
 
+func (admittingStore) ContinuedRuns(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+
 type novel struct{}
 
 func (novel) ComputeNovelty(context.Context, string, []*domain.Experiment) (float64, error) {
