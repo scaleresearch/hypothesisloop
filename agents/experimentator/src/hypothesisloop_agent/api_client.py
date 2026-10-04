@@ -5,22 +5,51 @@ client stays minimal.
 """
 from __future__ import annotations
 
+import http.client
 import json
+import time
 import urllib.error
 import urllib.request
 from typing import Any
 
 
 class APIError(Exception):
-    def __init__(self, method: str, url: str, status: int, body: str):
-        super().__init__(f"{method} {url} -> HTTP {status}: {body[:500]}")
+    """status 0 when no HTTP answer came back: unreachable, reset or timed out."""
+
+    def __init__(self, method: str, url: str, status: int, body: str, attempts: int = 1):
+        tried = f" (gave up after {attempts} attempts)" if attempts > 1 else ""
+        super().__init__(f"{method} {url} -> HTTP {status}: {body[:500]}{tried}")
         self.status = status
         self.body = body
 
 
+# A read through the public tunnel timed out once and the harness died of it. Only a GET is asked
+# again: a write that timed out may have landed.
+_TRANSIENT_STATUSES = (0, 502, 503, 504)
+_GET_ATTEMPTS = 5
+_BACKOFF_S = 1.0
+
+
 def _send(method: str, url: str, token: str, payload: dict | None = None, timeout: float = 15.0,
           content: bytes | None = None) -> bytes:
-    """One request. payload is sent as JSON, content as the bytes they are."""
+    """One request, asked again with backoff while a GET fails transiently. payload is sent as
+    JSON, content as the bytes they are."""
+    attempts = _GET_ATTEMPTS if method == "GET" else 1
+    attempt = 1
+    while True:
+        try:
+            return _send_once(method, url, token, payload, timeout, content)
+        except APIError as e:
+            if e.status not in _TRANSIENT_STATUSES or attempt == attempts:
+                if attempt == 1:
+                    raise
+                raise APIError(method, url, e.status, e.body, attempt) from None
+        time.sleep(_BACKOFF_S * 2 ** (attempt - 1))
+        attempt += 1
+
+
+def _send_once(method: str, url: str, token: str, payload: dict | None, timeout: float,
+               content: bytes | None) -> bytes:
     data = json.dumps(payload).encode() if payload is not None else content
     headers = {"Authorization": f"Bearer {token}"}
     if data:
@@ -33,6 +62,9 @@ def _send(method: str, url: str, token: str, payload: dict | None = None, timeou
         raise APIError(method, url, e.code, e.read().decode(errors="replace")) from None
     except urllib.error.URLError as e:
         raise APIError(method, url, 0, str(e.reason)) from None
+    # A timeout or reset while the answer is read is no URLError.
+    except (OSError, http.client.HTTPException) as e:
+        raise APIError(method, url, 0, f"{type(e).__name__}: {e}") from None
 
 
 # A session snapshot is megabytes, on whatever line the machine has.

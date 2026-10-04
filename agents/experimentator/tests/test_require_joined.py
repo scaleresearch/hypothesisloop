@@ -104,7 +104,7 @@ class RequireJoinedTest(PlatformCase):
 
     def test_an_unreachable_platform_is_not_read_as_not_joined(self):
         client = api_client.PlatformClient("http://127.0.0.1:1", "agent-token")
-        with self.assertRaises(api_client.APIError) as ctx:
+        with mock.patch.object(api_client, "_BACKOFF_S", 0), self.assertRaises(api_client.APIError) as ctx:
             client.require_joined("agent-a", "pe-1")
         self.assertEqual(ctx.exception.status, 0)
 

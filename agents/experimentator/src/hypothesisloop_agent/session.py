@@ -5,7 +5,6 @@ import hashlib
 import io
 import logging
 import tarfile
-import time
 from pathlib import Path
 
 from hypothesisloop_agent import api_client, config
@@ -19,9 +18,6 @@ MAX_BYTES = 32 << 20
 # harness's state is named workdir there: sessions stored while it was kept in the working
 # directory are restored under that name.
 _STATE, _MODEL_HOME = "workdir", "model-home"
-
-_READ_ATTEMPTS = 5
-_READ_PAUSE_S = 5.0
 
 
 class Sessions:
@@ -60,15 +56,11 @@ class Sessions:
 
     def _read(self) -> bytes | None:
         # Starting without a session that exists would throw the agent's work so far away, so a
-        # platform that does not answer is asked again before the harness gives up and exits.
-        for attempt in range(_READ_ATTEMPTS):
-            try:
-                return self._client.get_bytes(self._path)
-            except api_client.APIError as e:
-                if attempt == _READ_ATTEMPTS - 1 or 400 <= e.status < 500:
-                    raise SystemExit(f"agent: could not read the stored session: {e}") from None
-                log.warning("could not read the stored session (%s): asking again", e)
-                time.sleep(_READ_PAUSE_S)
+        # read that fails, after the client has asked again, ends the harness.
+        try:
+            return self._client.get_bytes(self._path)
+        except api_client.APIError as e:
+            raise SystemExit(f"agent: could not read the stored session: {e}") from None
 
     def save(self, state_files: list[str], model_home_files: list[str]) -> bool:
         """Stores the named files, relative to their roots, when they differ from what is stored.

@@ -117,30 +117,15 @@ class SessionsTest(unittest.TestCase):
         self.assertFalse(machine.sessions.restore())
         self.assertEqual(list(machine.workdir.iterdir()), [])
 
-    def test_a_platform_that_does_not_answer_is_asked_again_and_a_refusal_stops_the_agent(self):
+    def test_a_session_that_cannot_be_read_stops_the_agent_with_why(self):
         platform = Platform()
-        old = Machine(platform)
-        old.write(old.workdir, ".claude_session_id", "s-1")
-        old.sessions.save([".claude_session_id"], [])
-        answers = [api_client.APIError("GET", "http://x", 0, "timed out"), api_client.APIError("GET", "http://x", 502, "bad gateway")]
-        real = platform.get_bytes
-
-        def flaky(path):
-            if answers:
-                raise answers.pop(0)
-            return real(path)
-
-        new = Machine(platform)
-        with mock.patch.object(platform, "get_bytes", flaky), mock.patch.object(session, "_READ_PAUSE_S", 0), \
-                self.assertLogs("llm_agent", "WARNING"):
-            self.assertTrue(new.sessions.restore())
-        self.assertEqual((new.workdir / ".claude_session_id").read_text(), "s-1")
 
         def refused(path):
             raise api_client.APIError("GET", "http://x", 403, "not yours")
 
-        with mock.patch.object(platform, "get_bytes", refused), self.assertRaises(SystemExit):
+        with mock.patch.object(platform, "get_bytes", refused), self.assertRaises(SystemExit) as stopped:
             Machine(platform).sessions.restore()
+        self.assertIn("not yours", str(stopped.exception))
 
     def test_a_stored_session_that_names_a_path_outside_its_roots_stops_the_agent(self):
         import io
