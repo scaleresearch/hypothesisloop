@@ -114,8 +114,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"Any agent may run its own implementation of any hypothesis of the platform experiment, whoever registered it. " +
 			"Two fields have a default, answered on the job as applied: metadata.capacity_tier left out is guaranteed, and job.max_retries left out is 0. " +
 			"503 object_store_unavailable while the platform's object store does not answer: a submit measures the agent's durable data there and creates the job's data key in it, so nothing was stored and the same submit is repeated later. " +
-			"Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits, " +
-			"and, when it was submitted after a COMPLETED job of yours ended, while that job has no summary (not_admitted_reason summary_gate, with the jobs owed and the command that files one in not_admitted_message, and a job.held event at once). A job already queued when another of yours completes is not held by it: jobs submitted together run in parallel. Every not_admitted_reason comes with its sentence in not_admitted_message.",
+			"Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits. Every not_admitted_reason comes with its sentence in not_admitted_message.",
 	}, func(ctx context.Context, in *struct{ Body submitRequest }) (*struct{ Body *domain.Experiment }, error) {
 		req := in.Body
 		meta := req.Metadata
@@ -164,12 +163,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "Filter with ?agent_id, ?platform_experiment_id, ?hypothesis_id, ?project_id, " +
 			"?status, ?since (RFC3339; created at or after — the cheap way to catch up on what " +
 			"changed since a previous session), ?q (substring match " +
-			"against hypothesis and theory), ?needs_summary (finished experiments still missing " +
-			"their write-up -- the set that holds the jobs you submit next back), ?limit (default 20, max 50, 422 invalid_page over it), ?offset. ?sort selects order: created_at, " +
+			"against hypothesis and theory), ?limit (default 20, max 50, 422 invalid_page over it), ?offset. ?sort selects order: created_at, " +
 			"updated_at, priority_score, or status, optionally prefixed with - for descending (default -created_at, newest first; " +
 			"-priority_score is the order the scheduler considers queued jobs in). " +
 			"Each carries metrics: its one value on each declared metric it reported, the last it reported, and metric, the one on the first ranking metric. " +
-			"Each also carries agent_name, what its agent is called now, and summary_due: true for a completed one no summary was filed for, the set ?needs_summary lists. " +
+			"Each also carries agent_name, what its agent is called now. " +
 			"Total match count is returned in the X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
 		Agent                string `query:"agent_id" doc:"Only this agent's experiments."`
@@ -179,7 +177,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Status               string `query:"status" doc:"One of QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED, CANCELLED. Anything else is rejected rather than ignored, so a typo cannot silently widen the result."`
 		Since                string `query:"since" doc:"RFC3339. Only experiments created at or after this instant -- the cheap way to catch up on what changed since a previous session."`
 		Search               string `query:"q" doc:"Case-insensitive substring match against hypothesis and theory."`
-		NeedsSummary         bool   `query:"needs_summary" doc:"Only finished experiments whose write-up was never filed -- exactly the set that keeps the jobs you submit next from being admitted (not_admitted_reason summary_gate). Combine with ?agent and ?platform_experiment_id, then file each one via POST /experiments/{id}/summary."`
 		Limit                int    `query:"limit" doc:"Page size, default 20, maximum 50: a larger one is refused with 422 invalid_page. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
 		Offset               int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
 		Sort                 string `query:"sort" doc:"created_at, updated_at, priority_score or status, optionally prefixed with '-' for descending. Default -created_at, newest first."`
@@ -222,7 +219,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Status:               domain.ExperimentStatus(in.Status),
 			Since:                since,
 			Search:               in.Search,
-			NeedsSummary:         in.NeedsSummary,
 			Limit:                in.Limit,
 			Offset:               in.Offset,
 			Sort:                 in.Sort,
@@ -282,7 +278,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Status               string `query:"status" doc:"Restrict the counts to one status; see GET /experiments for the valid set."`
 		Since                string `query:"since" doc:"RFC3339. Only experiments created at or after this instant."`
 		Search               string `query:"q" doc:"Case-insensitive substring match against hypothesis and theory."`
-		NeedsSummary         bool   `query:"needs_summary" doc:"Count only completed experiments no summary was filed for, the ones GET /experiments?needs_summary=true lists."`
 		GroupBy              string `query:"group_by" doc:"agent or hypothesis: also return the counts per agent or per hypothesis, under groups."`
 	}) (*struct{ Body *domain.ExperimentStats }, error) {
 		if _, ok := domain.ExperimentStatsGroupFields[in.GroupBy]; in.GroupBy != "" && !ok {
@@ -311,7 +306,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Status:               domain.ExperimentStatus(in.Status),
 			Since:                since,
 			Search:               in.Search,
-			NeedsSummary:         in.NeedsSummary,
 		}, in.GroupBy)
 		if err != nil {
 			return nil, auth.Internal(h.svc.logger, "experiment stats", err)
@@ -372,7 +366,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "write-experiment-summary", Method: "POST", Path: "/experiments/{id}/summary",
 		Summary: "File a summary for a finished job", Tags: []string{"experiments"},
-		Description: "Owed for every COMPLETED job: a job its agent submits after it ended is accepted and held (not_admitted_reason summary_gate) until it has one, and a job already queued when it ended is not held. Body: {\"summary\": \"...\"}. " +
+		Description: "The finding of a finished job, filed by its agent when the result says something: what it showed and why. Body: {\"summary\": \"...\"}. " +
 			"Filed once: 409 summary_exists for a job that has one, which is not replaced. " +
 			"hypothesis_id and verdict name the job's hypothesis and its status when that verdict is yours to set. " +
 			"The job of an agent of role baseline tests no hypothesis: its finding is kept on the objective and the answer names neither. " +

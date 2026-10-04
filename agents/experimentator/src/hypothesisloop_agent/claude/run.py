@@ -273,8 +273,8 @@ _SHUTDOWN_TURN_S = 60
 _COORDINATOR_SHUTDOWN_TURN_S = 240
 _LAST_TURN = (
     "This is your last turn, about a minute long. Start nothing new and "
-    "leave unfinished jobs running: they cannot be summarised yet. File the summaries you owe on "
-    "finished jobs{verdicts}, then end your turn. "
+    "leave unfinished jobs running: they cannot be summarised yet. File what your finished jobs "
+    "showed as their summaries{verdicts}, then end your turn. "
     "A refusal with reason `experiment_closed` ends it too: your run is over, so retry nothing."
 )
 _SHUTDOWN_PROMPT = _LAST_TURN.format(verdicts=" and set the verdicts your evidence already supports")

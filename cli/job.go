@@ -164,16 +164,10 @@ whole jobs to read first: each sample's seed/ reports its metrics and its
 		CapacityTier   string  `json:"capacity_tier,omitempty"`
 		EstimatedHours float64 `json:"estimated_duration_hours,omitempty"`
 		EstimatedCost  float64 `json:"estimated_cost_acch,omitempty"`
-		Reason         string  `json:"not_admitted_reason,omitempty"`
-		Message        string  `json:"not_admitted_message,omitempty"`
 	}
 	if err := c.Do("POST", "/experiments", body, &out); err != nil {
 		return fail(stderr, err)
 	}
-	// Every job waits a moment for the scheduler's first look. The one that waits for its agent
-	// is said beside the line, in the platform's words.
-	reason, message := out.Reason, out.Message
-	out.Reason, out.Message = "", ""
 	line, _ := json.Marshal(out)
 	fmt.Fprintf(stdout, "%s\n", line)
 	// A job this submit created is QUEUED in its answer, so any other status is that of the job
@@ -185,10 +179,6 @@ whole jobs to read first: each sample's seed/ reports its metrics and its
 			return 1
 		}
 		fmt.Fprintf(stderr, "hl: job submit: an identical submit already created %s, which is %s, and nothing more was submitted: %s. %s\n", out.ID, out.Status, resultArrives, again)
-		return 0
-	}
-	if reason == summaryGate {
-		fmt.Fprintf(stderr, "hl: job submit: accepted and held (%s): %s\n", reason, message)
 		return 0
 	}
 	fmt.Fprintln(stderr, "hl: job submit: "+resultArrives)
@@ -207,9 +197,6 @@ func submissionKey(body map[string]any, repeat int) (string, error) {
 	}
 	return fmt.Sprintf("%x", sha256.Sum256(request)), nil
 }
-
-// summaryGate is the not_admitted_reason of a queued job whose agent owes a summary.
-const summaryGate = "summary_gate"
 
 // resultArrives is what a submit says of the job's result. An agent told only that it arrives once
 // it ends its turn ended its turn after every submit, and ran one job at a time on idle machines.
@@ -401,7 +388,7 @@ func withJobEnv(line, env []byte) []byte {
 }
 
 func jobList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job list", `usage: hl job list [--agent A] [--status S] [--needs-summary] [--limit N] [--offset N]
+	fs := newFlags("job list", `usage: hl job list [--agent A] [--status S] [--limit N] [--offset N]
 
 One job per line, newest first: ids (hypothesis_id is the hypothesis it tests; a baseline
 agent's job tests none and prints "objective":true in its place, so there is nothing to
@@ -417,7 +404,6 @@ prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	agent := fs.String("agent", "", "only this agent's jobs; omit to see every agent's")
 	pe := fs.String("platform-experiment", "", "platform experiment (default the token's)")
 	status := fs.String("status", "", "QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED or CANCELLED")
-	needsSummary := fs.Bool("needs-summary", false, "only COMPLETED jobs still missing a summary, the set that holds back the jobs submitted after they ended")
 	limit := fs.Int("limit", 0, "page size (server default 20, max 50)")
 	offset := fs.Int("offset", 0, "jobs to skip")
 	if err := fs.Parse(args); err != nil {
@@ -435,9 +421,6 @@ prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	}
 	if *status != "" {
 		q.Set("status", *status)
-	}
-	if *needsSummary {
-		q.Set("needs_summary", "true")
 	}
 	if *limit != 0 {
 		q.Set("limit", strconv.Itoa(*limit))
@@ -482,9 +465,7 @@ Two jobs of one spec on different machines are not the same measurement.
 A COMPLETED job of an experiment with a constraint metric carries rankable. False means it is
 in no standing: not_rankable_reason names the constraint it broke or did not report.
 While QUEUED, not_admitted_reason is the code of what the job waits for: awaiting_admission for
-the scheduler's first look at it, summary_gate for a summary on each of your jobs that was
-COMPLETED before this one was submitted (hl job list --needs-summary), environment_building for
-its environment, capacity_unavailable for room on a cluster. not_admitted_message is its
+the scheduler's first look at it, environment_building for its environment, capacity_unavailable for room on a cluster. not_admitted_message is its
 sentence.`, stderr)
 	ids, err := parseOperands(fs, args, "id", "experiment")
 	if err != nil {
@@ -576,12 +557,11 @@ the output is JSON lines, one object per line and no enclosing array: parse it l
 func jobSummary(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("job summary", `usage: hl job summary ID --text T
 
-Files the write-up of a finished job: what changed, what the metric did, what it means. It is
-the job's finding on its hypothesis, shown there and announced as finding.new, so it needs no
-comment that repeats it. It is filed once and cannot be replaced (409 summary_exists): others
-read it the moment it is announced, so a correction is a comment on the hypothesis.
-While a COMPLETED job of yours has none, a job you submit after it ended is accepted and held
-(summary_gate) until it has one; a job already queued when it ended is not held.`, stderr)
+Files the write-up of a finished job when its result says something: what changed, what the
+metric did, what it means. It is the job's finding on its hypothesis, shown there and announced
+as finding.new, so it needs no comment that repeats it. It is filed once and cannot be replaced
+(409 summary_exists): others read it the moment it is announced, so a correction is a comment
+on the hypothesis.`, stderr)
 	var text string
 	fs.StringVar(&text, "text", "", "the summary (required)")
 	id, err := parseOne(fs, args, "ID", "", "id", "experiment")

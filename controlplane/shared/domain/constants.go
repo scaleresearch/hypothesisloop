@@ -51,7 +51,6 @@ const (
 	NotAdmittedAwaitingAdmission   = "awaiting_admission"
 	NotAdmittedCapacityUnavailable = "capacity_unavailable"
 	NotAdmittedOutranked           = "outranked"
-	NotAdmittedSummaryGate         = "summary_gate"
 	NotAdmittedStageCut            = "stage_cut"
 	NotAdmittedJobTooLong          = "job_too_long"
 	NotAdmittedWorkloadCreation    = "workload_creation_failed"
@@ -135,12 +134,12 @@ const (
 )
 
 // QueueReasonClearsByWaiting reports whether a not_admitted_reason describes a job that only
-// waits its turn: for the scheduler's first look, an owed summary, free capacity or a scale-up.
+// waits its turn: for the scheduler's first look, free capacity or a scale-up.
 // Every other reason stays until its agent changes the job.
 func QueueReasonClearsByWaiting(reason string) bool {
 	code, _, _ := strings.Cut(reason, ":")
 	switch code {
-	case NotAdmittedAwaitingAdmission, NotAdmittedSummaryGate, NotAdmittedCapacityUnavailable, NotAdmittedOutranked,
+	case NotAdmittedAwaitingAdmission, NotAdmittedCapacityUnavailable, NotAdmittedOutranked,
 		NotAdmittedWaitingForScaleUp, NotAdmittedNoScalableCapacity, NotAdmittedConcurrencyCap:
 		return true
 	}

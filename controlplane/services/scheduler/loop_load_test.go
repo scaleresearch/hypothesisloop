@@ -223,10 +223,6 @@ func (s *sim) MarkHeldJobs(context.Context, time.Duration) error {
 	s.count("MarkHeldJobs")
 	return nil
 }
-func (s *sim) UnsummarizedCompleted(context.Context, string, string, time.Time) ([]string, error) {
-	s.count("UnsummarizedCompleted")
-	return nil, nil
-}
 func (s *sim) IsAgentCut(context.Context, string, string) (bool, error) {
 	s.count("IsAgentCut")
 	return false, nil
@@ -858,7 +854,7 @@ func TestAPassOverHundredsOfQueuedJobsReadsPerAgentNotPerJob(t *testing.T) {
 	t.Logf("first pass over %d queued: %v, admitted %d, calls %v", first.queued, first.took, len(first.admitted), first.calls)
 	t.Logf("next pass over %d queued: %v, calls %v", steady.queued, steady.took, steady.calls)
 
-	for _, read := range []string{"IsAgentCut", "UnsummarizedCompleted", "GetAgentQuota", "GetPlatformExperiment", "ObservedElapsedHours"} {
+	for _, read := range []string{"IsAgentCut", "GetAgentQuota", "GetPlatformExperiment", "ObservedElapsedHours"} {
 		if n := first.calls[read]; n > len(agents) {
 			t.Errorf("%s was read %d times in a pass over %d queued jobs of %d agents", read, n, first.queued, len(agents))
 		}

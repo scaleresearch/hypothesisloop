@@ -25,8 +25,7 @@ def mixed_pe(api, experiment, run_id):
 
 
 def _finish_if_completed(api, job_id, deadline):
-    """Files a finding once a job completes -- otherwise a job the same agent submits to the PE
-    afterwards is held in the queue with not_admitted_reason summary_gate."""
+    """Waits for a job to end, and files its finding once it completed."""
     final = eventually(
         f"{job_id} to reach a terminal status",
         lambda: api.experiment(job_id),

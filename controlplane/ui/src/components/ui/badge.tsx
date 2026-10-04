@@ -56,11 +56,3 @@ export function TierBadge({ tier }: { tier?: string }) {
   return <Badge status={tier}>{tier}</Badge>
 }
 
-/** Marks a completed job whose agent filed no summary of it. */
-export function NoSummary({ className }: { className?: string }) {
-  return (
-    <span title="This job completed and its agent filed no summary of it" className={clsx('whitespace-nowrap text-2xs text-warning', className)}>
-      no summary
-    </span>
-  )
-}

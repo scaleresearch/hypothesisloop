@@ -2,8 +2,8 @@
 to claim every unit of capacity that frees up in one tick ahead of another agent with only one job
 waiting (see interleaveByAgent in controlplane/services/scheduler/loop_sort.go).
 
-One full-node filler job (accelerator_count=8), owned by a THIRD agent so its completion and
-summary gate never touch either contender, frees the whole node in a single terminal transition --
+One full-node filler job (accelerator_count=8), owned by a THIRD agent so its completion never
+touches either contender, frees the whole node in a single terminal transition --
 both of the node's two half-node (accelerator_count=4) slots become free together, in the same
 tick, with no risk of the two slots freeing at different times. The three then-queued jobs are A2,
 A3 (agent A, submitted first) and B1 (agent B, submitted last). Plain FIFO/priority-tiebreak order

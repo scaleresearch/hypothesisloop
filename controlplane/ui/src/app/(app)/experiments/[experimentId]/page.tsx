@@ -36,7 +36,7 @@ import { verdictBy } from '@/components/actor'
 import { Captioned } from '@/components/ui/captioned'
 import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
-import { Badge, NoSummary } from '@/components/ui/badge'
+import { Badge } from '@/components/ui/badge'
 import { MetricBar } from '@/components/ui/metric-bar'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { Disclosure } from '@/components/ui/disclosure'
@@ -354,7 +354,6 @@ function PlatformExperimentDetail({ id }: { id: string }) {
                     {h.best_job.metric.name} {h.best_job.metric.value.toFixed(4)}
                   </TextLink>
                 ) : <span className="text-xs text-muted">—</span>}
-                {h.best_job?.summary_due && <div><NoSummary /></div>}
               </td>
               <td className="text-xs">
                 {h.best_job?.summary ? (
@@ -492,7 +491,6 @@ function PlatformExperimentDetail({ id }: { id: string }) {
                                   {best.best.toFixed(4)}
                                 </TextLink>
                               ) : best ? best.best.toFixed(4) : '—'}
-                              {best?.summary_due && <div><NoSummary /></div>}
                             </td>
                           )
                         }) : <td className={num}>—</td>}
@@ -611,7 +609,6 @@ function PlatformExperimentDetail({ id }: { id: string }) {
                       <td className="whitespace-nowrap text-xs"><AgentLabel id={exp.agent_id} /></td>
                       <td>
                         <Badge status={exp.status} />
-                        {exp.summary_due && <NoSummary className="ml-1.5" />}
                         {exp.eviction_reason && (
                           <Text as="div" variant="meta" tone="subtle" className="max-w-sm">
                             <JobReason reason={exp.eviction_reason} />

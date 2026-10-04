@@ -13,7 +13,7 @@ import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
 import { Section } from '@/components/ui/section'
 import { StatTile } from '@/components/ui/stat-tile'
-import { Badge, NoSummary } from '@/components/ui/badge'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
@@ -257,7 +257,6 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
                     )}
                     <td>
                       <Badge status={status} />
-                      {j.summary_due && <div><NoSummary /></div>}
                       {status === 'QUEUED' && j.not_admitted_reason && (
                         <Text as="div" variant="meta">
                           {notAdmittedLabel(j.not_admitted_reason, j.not_admitted_message)}

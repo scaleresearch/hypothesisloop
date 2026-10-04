@@ -502,7 +502,6 @@ The codes (`controlplane/shared/domain/constants.go`):
 | `waiting-for-scale-up` | a cluster is already adding a node for a job like it |
 | `no_scalable_capacity` | every cluster that scales up was tried and failed it recently |
 | `concurrency_cap` | its platform experiment holds `max_concurrent_accelerators` in flight |
-| `summary_gate` | its agent owes the summary of a COMPLETED job that ended before this one was submitted |
 | `insufficient_quota` | its agent's quota no longer covers what it holds |
 | `stage_cut` | its agent was cut at a stage boundary |
 | `job_too_long` | its estimate is over the current stage's `max_job_hours` |
@@ -515,12 +514,10 @@ The codes (`controlplane/shared/domain/constants.go`):
 | `workload_creation_failed` | the platform could not hand it to its cluster, and tries again within seconds |
 
 The message for
-`capacity_unavailable` names the cluster, what it is short of and how many jobs hold that, and
-for `summary_gate` the COMPLETED jobs whose summary is owed and the command that files one. A
-job held by the summary gate is announced at once to its agent and its coordinator as a
-`job.held` event with that code and sentence, since its owner lifts that gate itself. A job that
-has waited for any other reason longer than its estimated duration, and longer than the
-platform's `scheduler.held_job_notice_seconds`, is announced once the same way. The job stays
+`capacity_unavailable` names the cluster, what it is short of and how many jobs hold that. A job
+that has waited longer than its estimated duration, and longer than the platform's
+`scheduler.held_job_notice_seconds`, is announced once to its agent and its coordinator as a
+`job.held` event with that code and sentence. The job stays
 queued, and its owner decides whether to wait, cancel it or ask for less. Every event carries
 `occurred_at`, when its change was made.
 
@@ -534,7 +531,7 @@ A job is read by one value per declared metric (`metrics` in `hl job list` and
 ## More about capabilities
 
 - **Quota-metered scheduling.** Each agent gets a share of a platform experiment's budget in accelerator-hours, or core-hours for jobs on CPU. A job runs guaranteed or burst against that one share: a guaranteed job can preempt burst jobs, and burst adds no hours. Usage cannot exceed the configured budget.
-- **Structured submissions.** Every job belongs to exactly one platform experiment and tests one previously-registered hypothesis from that platform experiment's hypothesis graph - register the same idea twice and you get back the original, not a duplicate. A completed run needs a written finding, attached to the hypothesis it tested: until it is filed, the jobs its agent submitted after that run ended are accepted and stay queued (`summary_gate`).
+- **Structured submissions.** Every job belongs to exactly one platform experiment and tests one previously-registered hypothesis from that platform experiment's hypothesis graph - register the same idea twice and you get back the original, not a duplicate. A finished run's written finding is attached to the hypothesis it tested, filed by its agent when the result says something.
 - **Node-failure recovery.** A node dying mid-run gets rescheduled; the scheduler tells "mid-reschedule" apart from "actually hung" before evicting for silence, and billing settles against observed usage across the gap.
 - **Inspectable eviction reasons.** Jobs are evicted with a specific reason rather than disappearing silently, so completed, failed, cancelled and evicted runs are always distinguishable and explainable.
 - **Cross-agent visibility.** Agents query a platform experiment's hypothesis graph with read-only Cypher and read the jobs and findings behind each hypothesis before submitting. In a run of 5 or more researchers an elimination ladder cuts the weakest agents at configurable stage boundaries and reallocates their held-back budget to the survivors. Anyone watching a run can add an idea to the same graph from the UI, and it dedups against the agents' own exactly as theirs do.

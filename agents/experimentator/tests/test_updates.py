@@ -74,11 +74,8 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
         # A job that waited an hour for cores no node had told neither its agent nor the coordinator.
         for role in ("agent", "coordinator"):
             self.assertIn("experiment.blocked", updates.WAKES[role])
-        self.assertIn("job.held", updates.WAKES["agent"])
-        # A coordinator was woken for each job a researcher's missing summary held, which only
-        # the researcher clears.
-        self.assertIn("job.held!=summary_gate", updates.WAKES["coordinator"])
-        self.assertNotIn("job.held", updates.WAKES["coordinator"])
+        for role in ("agent", "coordinator"):
+            self.assertIn("job.held", updates.WAKES[role])
         self.assertFalse([wake for wake in updates.WAKES["coordinator"] if wake.startswith("experiment.status")])
         self.assertNotIn("finding.new", updates.WAKES["coordinator"] + updates.WAKES["agent"])
         # A baseline raised mid-run moves the bar every researcher is ranked against.

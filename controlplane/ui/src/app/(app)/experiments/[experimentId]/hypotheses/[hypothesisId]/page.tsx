@@ -18,7 +18,7 @@ import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { LinkTr, Table, num, quiet } from '@/components/ui/table'
 import { Code, Eyebrow, Text } from '@/components/ui/text'
-import { Badge, NoSummary } from '@/components/ui/badge'
+import { Badge } from '@/components/ui/badge'
 import { Loading, InlineError } from '@/components/ui/status-message'
 import { acceleratorLabel, formatAccH, relTime, shortId } from '@/lib/format'
 import { budgetUnit, kindOf } from '@/lib/units'
@@ -257,7 +257,6 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
                     <td className="text-xs" title={job.agent_id}>{job.agent_name}</td>
                     <td className="whitespace-nowrap">
                       <Badge status={status}>{status}</Badge>
-                      {job.summary_due && <NoSummary className="ml-1.5" />}
                     </td>
                     <td className="font-mono text-2xs">
                       {envSettings(j, shownEnv) || '—'}

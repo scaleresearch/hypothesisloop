@@ -7,14 +7,14 @@ flow:
   - the baseline posts the best ranking-metric value and is still absent from standings; rank 1
     is the best *competitor*, and the baseline's own metrics stay readable.
   - the baseline's job is billed exactly like a competitor's -- role changes ranking, never
-    accounting -- and the summary gate applies to it the same way.
+    accounting.
   - a reviewer comments on another agent's hypothesis without ever entering standings.
   - at a real stage boundary, a baseline deliberately holding the worst value in the run is
     never cut, and every cut agent comes from the competitor field.
 
 The ranking arithmetic itself is pinned by controller/stages_rank_test.go and
 quota/platform_experiments_roles_test.go; what only a live run can show is that the role recorded
-at signup actually reaches the ranker, the cut, the quota ledger and the summary gate.
+at signup actually reaches the ranker, the cut and the quota ledger.
 
 API-only, parallel-safe (own platform experiments, own agents).
 
@@ -139,16 +139,6 @@ def test_baseline_and_reviewer_excluded_from_standings_billing_and_gate(api, run
     for job in comp_jobs:
         api.file_finding(job)
 
-    # The summary gate applies to the baseline exactly like a competitor: a job it submits after
-    # its completed one ended is held in the queue while it owes that one's finding.
-    held_job = api.submit_job(pe_id, baseline, hours=JOB_HOURS, hyp_id="")
-    eventually(
-        f"the baseline's {held_job} to be held by the summary gate -- the reference run needs a finding as much as a treatment does",
-        lambda: api.experiment(held_job),
-        accept=lambda e: e["status"] == "QUEUED" and e.get("not_admitted_reason") == "summary_gate",
-        deadline=deadline,
-    )
-    api.cancel_job(held_job)
     api.file_finding(baseline_job)
 
     # A job is ranked by the last value it reported.

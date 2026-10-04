@@ -202,8 +202,7 @@ func TestResultsListEveryAgentsBestOnEveryDeclaredMetric(t *testing.T) {
 	if len(results.Bests) != 2 || results.Bests[0].Metric != "score" || results.Bests[1].Metric != "loss" {
 		t.Fatalf("bests = %+v, want score then loss", results.Bests)
 	}
-	// The best job of c1 completed with no summary filed.
-	want := []AgentBest{{"baseline", 99, "job-baseline", false}, {"c1", 50, "job-c1", true}, {"c2", 40, "job-c2", false}}
+	want := []AgentBest{{"baseline", 99, "job-baseline"}, {"c1", 50, "job-c1"}, {"c2", 40, "job-c2"}}
 	for _, bests := range results.Bests {
 		if fmt.Sprint(bests.Agents) != fmt.Sprint(want) {
 			t.Errorf("bests on %s = %+v, want %+v", bests.Metric, bests.Agents, want)
@@ -360,13 +359,6 @@ func TestAReferenceIsBeatenOnlyByALeaderStrictlyBetterInItsDirection(t *testing.
 			t.Errorf("%s: best, leader, beaten = %v, want %v", c.name, got, []string{c.best, c.leader, c.beaten})
 		}
 	}
-}
-
-func (f *standingsStore) DescribeJobs(_ context.Context, jobs []*domain.Experiment) error {
-	for _, job := range jobs {
-		job.SummaryDue = job.ID == "job-c1"
-	}
-	return nil
 }
 
 func (f *standingsStore) ListSignups(ctx context.Context, platformExpID string) ([]string, error) {

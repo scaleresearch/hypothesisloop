@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -83,29 +82,17 @@ func (insertingQuota) AdmitExperiment(context.Context, *domain.Experiment, db.Su
 	return db.AdmitInserted, nil
 }
 
-type owingStore struct{ admittingStore }
-
-func (owingStore) UnsummarizedCompleted(context.Context, string, string, time.Time) ([]string, error) {
-	return []string{"job-done"}, nil
-}
-
 type wokenLoop struct{ woken *int }
 
 func (l wokenLoop) Trigger() { *l.woken++ }
 
-// The answer to a submit carried the stored "summary_gate: sentence" as its not_admitted_reason
-// and no not_admitted_message, so hl, which branches on the code, never saw a job as held. The
-// answer states the code and the sentence apart, as every read of the job does.
-func TestTheAnswerToASubmitStatesWhyTheJobWaitsAsACodeAndASentence(t *testing.T) {
+// A job taken wakes the admission loop, which judges it at once.
+func TestASubmitTakenWakesTheAdmissionLoopOnce(t *testing.T) {
 	woken := 0
-	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: owingStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
+	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: admittingStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
 		quota: insertingQuota{}, loop: wokenLoop{&woken}}
-	exp := humanIdeaSubmission()
-	if err := s.Submit(context.Background(), exp); err != nil || woken != 1 {
+	if err := s.Submit(context.Background(), humanIdeaSubmission()); err != nil || woken != 1 {
 		t.Fatalf("got = %v after waking the loop %d times, want the job taken and the loop woken once", err, woken)
-	}
-	if exp.NotAdmittedReason != domain.NotAdmittedSummaryGate || !strings.HasPrefix(exp.NotAdmittedMessage, "job job-done of this agent is COMPLETED and has no summary: hl job summary job-done --text T files one") {
-		t.Errorf("not_admitted_reason %q, not_admitted_message %q, want the code summary_gate and its sentence apart", exp.NotAdmittedReason, exp.NotAdmittedMessage)
 	}
 }
 

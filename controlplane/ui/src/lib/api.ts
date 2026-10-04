@@ -216,8 +216,6 @@ export interface ExperimentsParams {
   platform_experiment_id?: string
   /** Substring match against hypothesis and theory. */
   q?: string
-  /** Only COMPLETED jobs whose agent filed no summary. */
-  needs_summary?: boolean
   limit?: number
   offset?: number
   /** "created_at" | "updated_at" | "status", optionally prefixed with "-" for descending. */
@@ -321,9 +319,8 @@ export function fetchHypothesisStats(platformExperimentID: string): Promise<Hypo
 // testing it that did best on the ranking metric.
 export interface HypothesisEvidence extends Hypothesis {
   finding?: HypothesisFinding
-  // summary is the write-up filed for that job, absent when none was. summary_due says the job
-  // completed and none was filed.
-  best_job?: { id: string; metric: JobMetric; summary?: string; summary_due: boolean }
+  // summary is the write-up filed for that job, absent when none was.
+  best_job?: { id: string; metric: JobMetric; summary?: string }
 }
 
 // Drawn from the 200 newest hypotheses.
@@ -528,7 +525,7 @@ export interface PlatformExperimentResults {
   metrics: { metric: string; direction: 'maximize' | 'minimize'; standings: AgentStanding[] }[]
   bests: {
     metric: string
-    agents: { agent_id: string; best: number; experiment_id?: string; summary_due: boolean }[]
+    agents: { agent_id: string; best: number; experiment_id?: string }[]
     non_raw_basis_agents?: string[]
   }[]
   references?: MetricReference[]

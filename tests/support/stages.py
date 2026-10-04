@@ -56,8 +56,6 @@ def cross_first_boundary_ranked(
             reject=lambda e: e["status"] in ("FAILED", "EVICTED", "REJECTED"),
             deadline=deadline,
         )
-        # The summary gate holds a job its agent submits after a completed one ended with no finding.
-        api.file_finding(job)
     assert api.stages(pe_id)["current_stage"] == 1, "the boundary was crossed before the second wave was submitted"
 
     burn = {a: api.submit_job(pe_id, a, hours=BURN_JOB_HOURS, hyp_id=tests[a], job_overrides=_job(BURN_RUN_SECONDS, None)) for a in agents}

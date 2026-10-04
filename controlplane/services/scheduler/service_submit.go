@@ -334,19 +334,8 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		}
 	}
 
-	// 3a. Summary gate. A job that completed during the agent's turn is unknown to the agent until
-	// the turn ends, so a refusal here would hit every submit of a batch. The job is queued and
-	// says at once why the admission loop will hold it: for the jobs that ended before this
-	// moment, the one the row is dated by.
 	now := time.Now().UTC()
 	exp.CreatedAt, exp.UpdatedAt = now, now
-	owed, err := s.store.UnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID, exp.CreatedAt)
-	if err != nil {
-		return fmt.Errorf("scheduler: check unsummarized completed: %w", err)
-	}
-	if len(owed) > 0 {
-		exp.NotAdmittedReason = summaryGateReason(owed)
-	}
 
 	// 2b. Every job but the baseline's tests a hypothesis registered before it (POST /hypotheses),
 	// whose text is kept on the job for cheap reads.

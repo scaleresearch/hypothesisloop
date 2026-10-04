@@ -54,8 +54,8 @@ type capExceeded struct{ error }
 func (capExceeded) ConcurrencyCapExceeded() bool { return true }
 
 // Every reason a queued job can carry is stored with a sentence: it is what not_admitted_message
-// and the detail of job.held say, and a job held 5 minutes behind an unfiled summary was told
-// "summary_gate" and nothing else. Each code is produced here the way the scheduler produces it.
+// and the detail of job.held say, and a job told its code alone learns nothing of what it waits
+// for. Each code is produced here the way the scheduler produces it.
 func TestEveryNotAdmittedReasonIsStoredWithASentence(t *testing.T) {
 	exp := holdJob("job", domain.CapacityGuaranteed, h100, 1, "1")
 	exp.RanOnAcceleratorType = h100
@@ -74,7 +74,6 @@ func TestEveryNotAdmittedReasonIsStoredWithASentence(t *testing.T) {
 			waitingForSlotReason("cluster-a", "h100-0"),
 		},
 		domain.NotAdmittedOutranked:          {notAdmittedReasonFor(true, false, false, short, "cluster-a", holders{})},
-		domain.NotAdmittedSummaryGate:        {summaryGateReason([]string{"job-a"}), summaryGateReason([]string{"job-a", "job-b", "job-c", "job-d"})},
 		domain.NotAdmittedStageCut:           {stageCutReason()},
 		domain.NotAdmittedJobTooLong:         {jobTooLongReason(2, 0.5)},
 		domain.NotAdmittedWorkloadCreation:   {workloadCreationReason(), notAdmittedReasonForSubmitError(errors.New("boom"))},

@@ -286,11 +286,11 @@ func TestExperimentStatsForwardsKnownGroupByAndRejectsOthers(t *testing.T) {
 	spy := &filterSpyStore{}
 	r := schedulerRouter(t, spy)
 
-	if code, body := get(t, r, "/experiments/stats?platform_experiment_id=pe-1&group_by=agent&needs_summary=true"); code != 200 {
+	if code, body := get(t, r, "/experiments/stats?platform_experiment_id=pe-1&group_by=agent"); code != 200 {
 		t.Fatalf("status = %d (%s), want 200", code, body)
 	}
-	if spy.gotGroupBy != "agent" || spy.gotStats.PlatformExperimentID != "pe-1" || !spy.gotStats.NeedsSummary {
-		t.Errorf("group by = %q, platform experiment = %q, needs summary = %v, want agent, pe-1, true", spy.gotGroupBy, spy.gotStats.PlatformExperimentID, spy.gotStats.NeedsSummary)
+	if spy.gotGroupBy != "agent" || spy.gotStats.PlatformExperimentID != "pe-1" {
+		t.Errorf("group by = %q, platform experiment = %q, want agent, pe-1", spy.gotGroupBy, spy.gotStats.PlatformExperimentID)
 	}
 	if code, body := get(t, r, "/experiments/stats?group_by=status"); code != 400 {
 		t.Errorf("unknown group_by: status = %d (%s), want 400", code, body)

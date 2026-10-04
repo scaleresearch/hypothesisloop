@@ -191,10 +191,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	}
 	completion := l.completionFractions(ctx, queued)
 
-	// 3a. Enforce the summary gate: a COMPLETED job is summarised before its agent's next job
-	// runs. It holds a job the agent submitted after that job ended, and never one that was
-	// already queued then: a batch submitted together runs in parallel.
-	// 3b. Enforce the current stage's max_job_hours: a job queued while an earlier, looser stage
+	// 3a. Enforce the current stage's max_job_hours: a job queued while an earlier, looser stage
 	// was running must not slip through after the ladder tightened. Held, not rejected — a later
 	// stage may lift the cap, and then it admits normally.
 	// One unreadable row must not decide the fate of every other queued job. A QUEUED experiment
@@ -204,16 +201,8 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	// experiment is dropped from this tick's consideration; the pass finishes, and the joined
 	// error surfaces at the end so the failure is still loud.
 	maxJobHours := map[string]float64{} // key: platformExpID; 0 = unlimited
-	// Read once per agent of a platform experiment, as quota is (quotaKey). What the agent owes for
-	// its latest job it owes for every earlier one, so one read clears all of them in the usual
-	// case of nothing owed.
-	cut, owing := map[string]bool{}, map[string]bool{}
-	latest := map[string]time.Time{}
-	for _, exp := range queued {
-		if key := quotaKey(exp.AgentID, exp.PlatformExperimentID); exp.CreatedAt.After(latest[key]) {
-			latest[key] = exp.CreatedAt
-		}
-	}
+	// Read once per agent of a platform experiment, as quota is (quotaKey).
+	cut := map[string]bool{}
 	filtered := queued[:0]
 	environments := newEnvironmentPass()
 	for _, exp := range queued {
@@ -265,30 +254,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 			}
 			continue
 		}
-		owes, read := owing[key]
-		if !read {
-			owedByLatest, err := l.store.UnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID, latest[key])
-			if err != nil {
-				l.skipExperiment(&tickErrs, exp, fmt.Errorf("summary gate: %w", err))
-				continue
-			}
-			owes = len(owedByLatest) > 0
-			owing[key] = owes
-		}
-		var owed []string
-		if owes {
-			if owed, err = l.store.UnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID, exp.CreatedAt); err != nil {
-				l.skipExperiment(&tickErrs, exp, fmt.Errorf("summary gate: %w", err))
-				continue
-			}
-		}
-		if len(owed) == 0 {
-			filtered = append(filtered, exp)
-			continue
-		}
-		if err := l.markNotAdmitted(ctx, exp, summaryGateReason(owed)); err != nil {
-			l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark summary gate: %w", err))
-		}
+		filtered = append(filtered, exp)
 	}
 	queued = filtered
 

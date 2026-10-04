@@ -177,9 +177,6 @@ func (s *noRunningListStore) GetPlatformExperiment(_ context.Context, id string)
 func (s *noRunningListStore) IsAgentCut(context.Context, string, string) (bool, error) {
 	return false, nil
 }
-func (s *noRunningListStore) UnsummarizedCompleted(context.Context, string, string, time.Time) ([]string, error) {
-	return nil, nil
-}
 func (s *noRunningListStore) UpdateNotAdmittedReason(_ context.Context, id, reason string) error {
 	if s.notAdmitted == nil {
 		s.notAdmitted = map[string]string{}
@@ -403,58 +400,6 @@ func TestTickNamesTheAcceleratorShareWhenARequestExceedsIt(t *testing.T) {
 				t.Fatalf("not_admitted_reason = %q\nwant                  %q", got, want)
 			}
 		})
-	}
-}
-
-// summaryOwedStore is agent-owing with one COMPLETED job, job-done, that ended at ended and has
-// no summary.
-type summaryOwedStore struct {
-	noRunningListStore
-	ended time.Time
-}
-
-func (s *summaryOwedStore) UnsummarizedCompleted(_ context.Context, agentID, _ string, endedBy time.Time) ([]string, error) {
-	if agentID == "agent-owing" && !s.ended.After(endedBy) {
-		return []string{"job-done"}, nil
-	}
-	return nil, nil
-}
-
-// A summary is owed before the agent's next job runs. Five jobs a researcher submitted together
-// once ran one per 25 s, each completed one holding the rest: the gate holds what was submitted
-// after the unsummarised job ended, and nothing that was already queued then.
-func TestTickHoldsOnlyTheJobsSubmittedAfterAnUnsummarisedJobEnded(t *testing.T) {
-	ended := time.Date(2026, 10, 6, 23, 0, 0, 0, time.UTC)
-	job := func(id, agent string, submitted time.Time) *domain.Experiment {
-		return &domain.Experiment{
-			ID: id, AgentID: agent, PlatformExperimentID: "pe-1", CapacityTier: domain.CapacityGuaranteed,
-			AcceleratorType: h100, AcceleratorCount: 1, CreatedAt: submitted,
-			Job: domain.JobSpec{Image: "registry.test/job:1", CPU: "1", Memory: "1Gi", Storage: "1Gi", AcceleratorType: h100, AcceleratorCount: 1},
-		}
-	}
-	store := &summaryOwedStore{ended: ended, noRunningListStore: noRunningListStore{t: t, queued: []*domain.Experiment{
-		job("batch-2", "agent-owing", ended.Add(-time.Minute)), job("batch-3", "agent-owing", ended.Add(-time.Minute)),
-		job("next-1", "agent-owing", ended.Add(time.Second)), job("next-2", "agent-owing", ended.Add(time.Minute)),
-		job("other", "agent-clear", ended.Add(time.Minute)),
-	}}}
-	l := NewLoop(store, tickQuota{}, shareWorkload{}, testGraceLimits, zap.NewNop())
-	l.observed = fakeObserved{}
-	l.evictor = noopEvictor{}
-	l.disbalanceTolerance = testDisbalanceTolerance
-	l.reprioritizer = noopReprioritizer{}
-
-	if err := l.tick(context.Background()); err != nil {
-		t.Fatalf("tick() = %v, want nil", err)
-	}
-	for _, id := range []string{"next-1", "next-2"} {
-		if got := store.notAdmitted[id]; got != summaryGateReason([]string{"job-done"}) || !strings.Contains(got, "hl job summary job-done --text T") {
-			t.Errorf("not_admitted_reason of %s = %q, want the summary gate naming job-done and the command that files its summary", id, got)
-		}
-	}
-	for _, id := range []string{"batch-2", "batch-3", "other"} {
-		if got := store.notAdmitted[id]; reasonCode(got) == domain.NotAdmittedSummaryGate {
-			t.Errorf("%s was held by the summary gate (%q): it was queued before job-done ended, or its agent owes nothing", id, got)
-		}
 	}
 }
 

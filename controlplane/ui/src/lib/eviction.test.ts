@@ -7,11 +7,6 @@ describe('notAdmittedLabel', () => {
       .toBe('No capacity available: cluster dev is short of 2 cores, held by 3 jobs')
   })
 
-  it('follows the summary gate with the jobs owed and the command that files a summary', () => {
-    expect(notAdmittedLabel('summary_gate', 'job job-1 of this agent is COMPLETED and has no summary: hl job summary job-1 --text T files one'))
-      .toBe('Held until its agent files the summary of a job that ended before this one was submitted: job job-1 of this agent is COMPLETED and has no summary: hl job summary job-1 --text T files one')
-  })
-
   it('shows a code it has no label for as it is', () => {
     expect(notAdmittedLabel('a_new_code')).toBe('a_new_code')
   })

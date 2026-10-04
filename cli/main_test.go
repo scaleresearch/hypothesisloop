@@ -194,30 +194,6 @@ func TestJobSubmitFromYAML(t *testing.T) {
 	}
 }
 
-// hl dropped the platform's sentence for a held job, asked for the owed jobs in a second request
-// and worded the commands itself. The answer to the submit says it all, and hl prints that.
-func TestJobSubmitHeldForASummaryPrintsThePlatformsReasonAndSentence(t *testing.T) {
-	const sentence = "jobs job-1, job-2 of this agent are COMPLETED and have no summary: hl job summary job-1 --text T files one, and this job is admitted once none is owed"
-	got := recordingServer(t, func(int, recorded) any {
-		return map[string]any{"id": "job-3", "status": "QUEUED", "not_admitted_reason": "summary_gate", "not_admitted_message": sentence}
-	})
-	jobFile := t.TempDir() + "/job.yaml"
-	if err := os.WriteFile(jobFile, []byte("metadata:\n  code_ref: repo@abc\n  platform_experiment_id: pe-1\njob:\n  image: foo:latest\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"job", "submit", "--agent", "jane", jobFile}, &stdout, &stderr)
-	if code != 0 || len(*got) != 1 {
-		t.Fatalf("exit %d after %d requests, stderr %s, want 0 after the submit alone", code, len(*got), stderr.String())
-	}
-	if want := `{"id":"job-3","status":"QUEUED"}` + "\n"; stdout.String() != want {
-		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
-	}
-	if want := "hl: job submit: accepted and held (summary_gate): " + sentence + "\n"; stderr.String() != want {
-		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
-	}
-}
-
 // The refusal is the platform's whole word on a job sent before the start: hl asks nothing more
 // and prints it as any other.
 func TestJobSubmitBeforeTheStartPrintsTheRefusalAndAsksNothingMore(t *testing.T) {
@@ -307,7 +283,7 @@ func TestMisuseIsAnsweredWithTheErrorAndTheSynopsis(t *testing.T) {
 		}
 	}
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"job", "list", "--help"}, &stdout, &stderr); code != 0 || !strings.Contains(stderr.String(), "--needs-summary\n") {
+	if code := run([]string{"job", "list", "--help"}, &stdout, &stderr); code != 0 || !strings.Contains(stderr.String(), "--status") {
 		t.Fatalf("--help: exit %d, want the flag list, got %q", code, stderr.String())
 	}
 	if len(*got) != 0 {
@@ -419,7 +395,7 @@ func TestJobSummary(t *testing.T) {
 	}
 }
 
-func TestJobListNeedsSummary(t *testing.T) {
+func TestJobListSendsItsFilters(t *testing.T) {
 	var gotQuery string
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
@@ -429,11 +405,11 @@ func TestJobListNeedsSummary(t *testing.T) {
 	setAPIURL(t, url)
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"job", "list", "--agent", "a", "--platform-experiment", "pe-1", "--needs-summary"}, &stdout, &stderr)
+	code := run([]string{"job", "list", "--agent", "a", "--platform-experiment", "pe-1"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
-	if gotQuery != "agent_id=a&needs_summary=true&platform_experiment_id=pe-1" {
+	if gotQuery != "agent_id=a&platform_experiment_id=pe-1" {
 		t.Fatalf("got query %s", gotQuery)
 	}
 }
@@ -657,13 +633,12 @@ func TestAWakeKindThePlatformDoesNotKnowIsRefusedBeforeAnyWatch(t *testing.T) {
 }
 
 // A coordinator was woken for a baseline job that completed, which it acts on only once the
-// agent finishes, and for a job held by a summary only its researcher files: a kind wakes for
-// the values its reader can act on.
+// agent finishes: a kind wakes for the values its reader can act on.
 func TestAWakeEntryNamesAKindOrAKindWithTheValueThatWakesOrTheOneThatDoesNot(t *testing.T) {
 	for entry, wakes := range map[string]map[string]bool{
 		"experiment.status":        {"FAILED": true, "COMPLETED": true},
 		"experiment.status=FAILED": {"FAILED": true, "COMPLETED": false},
-		"job.held!=summary_gate":   {"summary_gate": false, "capacity_unavailable": true},
+		"job.held!=stage_cut":      {"stage_cut": false, "capacity_unavailable": true},
 	} {
 		kind, value, woken := cutWake(entry)
 		if wantKind, _, _ := strings.Cut(strings.ReplaceAll(entry, "!", ""), "="); kind != wantKind {

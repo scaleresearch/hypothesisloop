@@ -135,7 +135,7 @@ var EventKinds = []EventKindDoc{
 	{Kind: EventExperimentStatus, Subject: "experiment id", Value: "QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED, CANCELLED",
 		Description: "Your job moved. detail carries why, when the platform knows, as a reason code, or the code, a colon and a sentence (code: sentence): the reason a job was evicted, rejected or requeued (no_offer: no machine to rent for shape rtx4090 in 3m0s of asking), or how a FAILED job's process ended (container_failed: container exited with code 1, then a line last output: and the last lines it said, the most recent last), which a FAILED job always has. The code is the text before the first colon, and the same split as eviction_reason on the job. A job requeued for a fault of the platform's (code_unreachable, no_offer, stuck_pending and the like) is QUEUED with that detail and runs again at no cost. The queue reason is experiment.blocked."},
 	{Kind: EventExperimentBlocked, Subject: "experiment id", Value: "the code of the queue reason (not_admitted_reason)",
-		Description: "Why a job is still waiting. detail is the sentence that goes with the code (not_admitted_message). It changes while the status does not, so a stuck job has something to wait on. awaiting_admission and summary_gate are not sent, and an agent scope leaves out every reason that waiting clears, such as capacity_unavailable and outranked: GET /experiments has them."},
+		Description: "Why a job is still waiting. detail is the sentence that goes with the code (not_admitted_message). It changes while the status does not, so a stuck job has something to wait on. awaiting_admission is not sent, and an agent scope leaves out every reason that waiting clears, such as capacity_unavailable and outranked: GET /experiments has them."},
 	{Kind: EventQuotaChanged, Subject: "agent id", Value: "share_accelerator_hours of GET /quota: all the agent may spend",
 		Description: "A grant or a stage move landed. What is used of the share comes from GET /quota."},
 	{Kind: EventStageBoundary, Subject: "platform experiment id", Value: "stage index",
@@ -169,7 +169,7 @@ var EventKinds = []EventKindDoc{
 	{Kind: EventMetricPoint, Subject: "experiment id", Value: "metric name and fraction complete",
 		Description: "A sample arrived. The number lives only in the metrics store — read it with GET /experiments/{id}/metrics. The one kind replay cannot return."},
 	{Kind: EventJobHeld, Subject: "experiment id", Value: "the code of the queue reason (not_admitted_reason), or baseline_late",
-		Description: "This job is held in the queue. For summary_gate it is sent as soon as the scheduler holds the job: detail names the COMPLETED jobs whose summary its agent owes and the command that files one, and the job starts once none is owed. For any other reason it is sent when the job has waited longer than its estimated duration, and for at least the platform's scheduler.held_job_notice_seconds: detail is the sentence that says why (not_admitted_message), never empty, for capacity_unavailable the cluster, what it is short of and how many jobs hold that. Nothing is done to the job: it stays queued, and its owner decides whether to wait, cancel it or ask for less. Sent once per job for each of the two, with the reason it had then. " +
+		Description: "This job is held in the queue. It is sent when the job has waited longer than its estimated duration, and for at least the platform's scheduler.held_job_notice_seconds: detail is the sentence that says why (not_admitted_message), never empty, for capacity_unavailable the cluster, what it is short of and how many jobs hold that. Nothing is done to the job: it stays queued, and its owner decides whether to wait, cancel it or ask for less. Sent once per job, with the reason it had then. " +
 			"baseline_late is a job of an open platform experiment's baseline, queued or placed and not running yet, that started now would end after baseline_due_at: detail says so with baseline_due_at, sent once per job."},
 	{Kind: EventJobUnderperforming, Subject: "experiment id", Value: "the metric name it trails on",
 		Description: "This job trails its cohort on the ranking metric by a real margin. An opinion, not a command: nothing stops it but you. Consider POST /experiments/{id}/cancel if it is not worth its allocation. Sent once per job, and not for a job that has already ended."},
@@ -650,7 +650,7 @@ WHERE platform_experiment_id = $1
 		}
 		events = append(events, answered(Event{Kind: EventExperimentStatus, Subject: id, Value: status, Detail: evictionReason,
 			PlatformExperimentID: peID, AgentID: agentID, Position: statusXid}))
-		if reason, message := domain.SplitQueueReason(notAdmitted); reason != "" && reason != domain.NotAdmittedAwaitingAdmission && reason != domain.NotAdmittedSummaryGate {
+		if reason, message := domain.SplitQueueReason(notAdmitted); reason != "" && reason != domain.NotAdmittedAwaitingAdmission {
 			events = append(events, Event{Kind: EventExperimentBlocked, Subject: id, Value: reason, Detail: message,
 				PlatformExperimentID: peID, AgentID: agentID, Position: notAdmittedXid})
 		}

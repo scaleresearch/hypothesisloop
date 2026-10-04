@@ -334,9 +334,6 @@ func experimentFilterClauses(filter domain.ExperimentFilter) ([]string, []any) {
 		args = append(args, filter.Since)
 		n++
 	}
-	if filter.NeedsSummary {
-		clauses = append(clauses, UnsummarizedCompletedPredicate)
-	}
 	if filter.Search != "" {
 		clauses = append(clauses, fmt.Sprintf("(hypothesis ILIKE $%d OR theory ILIKE $%d)", n, n))
 		args = append(args, "%"+filter.Search+"%")

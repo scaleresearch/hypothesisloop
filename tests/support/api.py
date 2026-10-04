@@ -692,12 +692,6 @@ class API:
             f"/experiments/{job_id}/summary", {"summary": summary or f"e2e pytest finding for {job_id}"}
         ).raise_for_status()
 
-    def needs_summary(self, agent_id: str, pe_id: str, limit: int = 50) -> list[str]:
-        docs = self.get_json(
-            f"/experiments?needs_summary=true&agent_id={agent_id}&platform_experiment_id={pe_id}&limit={limit}"
-        )
-        return [e["id"] for e in docs]
-
     def logs(self, job_id: str, n: int = 200) -> str:
         r = self.get(f"/experiments/{job_id}/logs", params={"n": n})
         r.raise_for_status()

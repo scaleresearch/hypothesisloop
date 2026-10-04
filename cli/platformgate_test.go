@@ -261,7 +261,7 @@ func TestNoCommandACoordinatorRunsCallsARouteACoordinatorMayNot(t *testing.T) {
 		{"quota", "--all"},
 		{"results"},
 		{"capacity"},
-		{"watch", "--all", "--decisions", "--wake", "agent.finished,job.held!=summary_gate,experiment.status=FAILED", "--no-wait"},
+		{"watch", "--all", "--decisions", "--wake", "agent.finished,job.held,experiment.status=FAILED", "--no-wait"},
 	}
 	requireEveryListedCommandSent(t, callerCoordinator, sent)
 	for _, command := range sent {
@@ -303,7 +303,6 @@ func TestNoCommandAnAgentRunsCallsARouteAnAgentMayNot(t *testing.T) {
 		{"env", "build", "job.yaml"},
 		{"env", "status", "job.yaml"},
 		{"job", "list"},
-		{"job", "list", "--needs-summary"},
 		{"job", "status", "job-1"},
 		{"job", "metrics", "job-1"},
 		{"job", "summary", "job-1", "--text", "what it found"},

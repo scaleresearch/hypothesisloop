@@ -222,7 +222,7 @@ CREATE TABLE IF NOT EXISTS experiments (
     agent_id                 TEXT              NOT NULL REFERENCES agents(id),
     cluster_name             TEXT              NOT NULL DEFAULT '',
     -- Every job must belong to exactly one platform experiment — there is no such thing as
-    -- an unscoped job. Required so quota, the summary gate, and the hypothesis pool below
+    -- an unscoped job. Required so quota and the hypothesis pool below
     -- all have an unambiguous platform experiment to key off.
     platform_experiment_id   TEXT              NOT NULL REFERENCES platform_experiments(id),
     code_ref                 TEXT              NOT NULL,
@@ -811,9 +811,8 @@ BEGIN
     END IF;
     -- The queue reason is what an agent polls hardest for: it changes while the status does not,
     -- so it needs an event of its own or a waiting agent learns nothing until admission. A job
-    -- nobody has judged yet has no reason to tell, and the submit reply already says summary_gate
-    -- (replayExperiments leaves out the same two).
-    IF split_part(NEW.not_admitted_reason, ': ', 1) NOT IN ('awaiting_admission', 'summary_gate')
+    -- nobody has judged yet has no reason to tell (replayExperiments leaves it out too).
+    IF split_part(NEW.not_admitted_reason, ': ', 1) <> 'awaiting_admission'
        AND (TG_OP = 'INSERT' OR NEW.not_admitted_reason IS DISTINCT FROM OLD.not_admitted_reason) THEN
         PERFORM hypothesisloop_notify_event('experiment.blocked', NEW.id,
             split_part(NEW.not_admitted_reason, ': ', 1),

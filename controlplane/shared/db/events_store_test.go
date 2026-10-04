@@ -310,8 +310,8 @@ func TestReplayedJobEventsEqualTheirLiveTwins(t *testing.T) {
 	}
 }
 
-// A job nobody has judged yet has nothing to report, and hl job submit already says summary_gate.
-func TestAJobAwaitingAdmissionOrASummaryIsNotAnnouncedAsBlocked(t *testing.T) {
+// A job nobody has judged yet has nothing to report.
+func TestAJobAwaitingAdmissionIsNotAnnouncedAsBlocked(t *testing.T) {
 	pool := eventsTestDB(t)
 	events, stop := listenForEvents(t, pool)
 	defer stop()
@@ -326,7 +326,7 @@ VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'test-accelerator',
         'QUEUED', 'awaiting_admission', 1, now(), 'AK', 'SK')`, jobID, agentID, peID, hypothesisID)
 	store := NewEventsStore(pool, noHypothesisEvents{})
 	filter := EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventExperimentBlocked: true}}
-	for _, reason := range []string{domain.QueueReasonAwaitingAdmission, "summary_gate: job job-a of this agent is COMPLETED and has no summary"} {
+	for _, reason := range []string{domain.QueueReasonAwaitingAdmission} {
 		exec(t, pool, `UPDATE experiments SET not_admitted_reason = $2, updated_at = now() WHERE id = $1`, jobID, reason)
 		replayed, err := store.Replay(context.Background(), filter, before)
 		if err != nil || len(replayed) != 0 {
@@ -1236,65 +1236,6 @@ VALUES ('agent', 'times-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accele
 	}
 	if payload, _ := json.Marshal(replayed[0]); strings.Contains(string(payload), "occurred_at") {
 		t.Errorf("delivered event = %s, want no occurred_at", payload)
-	}
-}
-
-// The summary gate is the one hold the job's owner lifts itself, so it is told as soon as the
-// scheduler holds the job, with the jobs it owes a summary for. The same job is announced once
-// more when it has then waited past its estimate for something else.
-func TestAJobHeldByTheSummaryGateIsAnnouncedAtOnce(t *testing.T) {
-	pool := eventsTestDB(t)
-	events, stop := listenForEvents(t, pool)
-	defer stop()
-	agentID, peID, hypothesisID := seedRun(t, pool, "gate", true)
-	experiments := NewExperimentsStore(pool)
-	const gate = "job gate-job-done of this agent is COMPLETED and has no summary: hl job summary gate-job-done --text T files one"
-	const short = "cluster box-b is short of 2 cores"
-	exec(t, pool, `INSERT INTO experiments
-(actor_kind, id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
- hypothesis_id, hypothesis, accelerator_type, status, not_admitted_reason,
- estimated_duration_hours, queued_at, data_access_key_id, data_secret_access_key)
-VALUES ('agent', 'gate-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator',
-        'QUEUED', $4, 1, now(), 'AK', 'SK')`, agentID, peID, hypothesisID, "summary_gate: "+gate)
-	mark := func() {
-		t.Helper()
-		if err := experiments.MarkHeldJobs(context.Background(), 5*time.Minute); err != nil {
-			t.Fatalf("MarkHeldJobs: %v", err)
-		}
-	}
-	held := func() string {
-		t.Helper()
-		var reason *string
-		if err := pool.pool.QueryRow(context.Background(), `SELECT held_reason FROM experiments WHERE id = 'gate-job'`).Scan(&reason); err != nil {
-			t.Fatal(err)
-		}
-		if reason == nil {
-			return ""
-		}
-		return *reason
-	}
-
-	mark()
-	if got := awaitEvent(t, events, EventJobHeld, "gate-job"); got.Value != "summary_gate" || got.Detail != gate || got.AgentID != agentID {
-		t.Fatalf("held event of a job queued a moment ago behind a summary: got = %+v, want the code and the sentence", got)
-	}
-
-	// The gate lifts and the job waits for room: nothing more until it has waited past its
-	// estimate, and then once.
-	exec(t, pool, `UPDATE experiments SET not_admitted_reason = $1 WHERE id = 'gate-job'`, "capacity_unavailable: "+short)
-	mark()
-	if got := held(); got != "summary_gate: "+gate {
-		t.Fatalf("held_reason of a job that has not waited past its estimate = %q, want the gate's still", got)
-	}
-	exec(t, pool, `UPDATE experiments SET queued_at = now() - interval '2 hours' WHERE id = 'gate-job'`)
-	mark()
-	if got := awaitEvent(t, events, EventJobHeld, "gate-job"); got.Value != "capacity_unavailable" || got.Detail != short {
-		t.Fatalf("held event once it waited past its estimate: got = %+v", got)
-	}
-	exec(t, pool, `UPDATE experiments SET not_admitted_reason = 'outranked: jobs ahead took the room' WHERE id = 'gate-job'`)
-	mark()
-	if got := held(); got != "capacity_unavailable: "+short {
-		t.Errorf("held_reason after a third pass = %q, want the second notice to be the last", got)
 	}
 }
 

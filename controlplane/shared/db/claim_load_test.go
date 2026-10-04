@@ -106,8 +106,7 @@ func TestClaimsRacingForTwoClustersNeverOvercommitOrPlaceAJobTwice(t *testing.T)
 }
 
 // The reads one admission pass makes over a queue of 600 rows and six agents, timed against
-// Postgres: one list of the queue, one per agent of the cut and the summary gate, and the reads
-// of desired state.
+// Postgres: one list of the queue, one read per agent of the cut, and the reads of desired state.
 func TestTheReadsOfAPassOverHundredsOfQueuedRowsAreQuick(t *testing.T) {
 	w := newTwoOrgs(t)
 	ctx := context.Background()
@@ -143,12 +142,9 @@ func TestTheReadsOfAPassOverHundredsOfQueuedRowsAreQuick(t *testing.T) {
 	if len(queued) < 600 {
 		t.Fatalf("listed %d queued, want at least 600", len(queued))
 	}
-	total += timed("cut and summary gate, once per agent", func() error {
+	total += timed("cut, once per agent", func() error {
 		for _, agent := range agents {
 			if _, err := pes.IsAgentCut(ctx, w.peA, agent); err != nil {
-				return err
-			}
-			if _, err := w.exps.UnsummarizedCompleted(ctx, agent, w.peA, time.Now()); err != nil {
 				return err
 			}
 		}
@@ -168,12 +164,9 @@ func TestTheReadsOfAPassOverHundredsOfQueuedRowsAreQuick(t *testing.T) {
 	})
 	total += timed("mark held jobs", func() error { return w.exps.MarkHeldJobs(ctx, 5*time.Minute) })
 	t.Logf("the reads of one pass: %v", total)
-	timed("for comparison, the cut and summary gate once per queued job", func() error {
+	timed("for comparison, the cut once per queued job", func() error {
 		for _, exp := range queued[:600] {
 			if _, err := pes.IsAgentCut(ctx, exp.PlatformExperimentID, exp.AgentID); err != nil {
-				return err
-			}
-			if _, err := w.exps.UnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID, exp.CreatedAt); err != nil {
 				return err
 			}
 		}

@@ -32,9 +32,9 @@ solving the problem aimed at the brief's target, never a tweak of the control. T
 changes are refinements, built on the most specific hypothesis they refine. Read the existing
 approaches before adding one: take a mechanism none has, or go under one. A sweep's winning
 configuration that more work builds on is registered as a child, so the best result is a node.
-On each hypothesis: a job's *summary* is its finding; a *comment* holds what has no job behind
-it (a verified fact, a dead end, a revision); its *status* is your verdict once the evidence
-allows it (a null result is refuted).
+On each hypothesis: a job's *summary* is its finding, filed when a result says something; a
+*comment* holds what has no job behind it (a verified fact, a dead end, a revision); its
+*status* is your verdict once the evidence allows it (a null result is refuted).
 
 How you work is yours. What the run expects of you:
   - The code: {workspace}

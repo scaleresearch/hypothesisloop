@@ -114,9 +114,6 @@ func (poolOnlyStore) IsAgentCut(_ context.Context, _, _ string) (bool, error) { 
 func (poolOnlyStore) IsAgentFinished(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
 }
-func (poolOnlyStore) UnsummarizedCompleted(_ context.Context, _, _ string, _ time.Time) ([]string, error) {
-	return nil, nil
-}
 func (poolOnlyStore) ProjectOrg(context.Context, string) (string, error) { return "org-a", nil }
 func (poolOnlyStore) RegisteredClusters(context.Context) (map[string]domain.Cluster, error) {
 	return map[string]domain.Cluster{"k8s": {Name: "k8s", OrgID: "org-a"}}, nil
@@ -238,26 +235,6 @@ func TestSubmitRefusesAJobAgainstAHumanHypothesisFromAnotherPlatformExperiment(t
 	}
 	if admission.Reason != ReasonMalformed {
 		t.Errorf("reason: got = %v, want %v", admission.Reason, ReasonMalformed)
-	}
-}
-
-type unsummarizedStore struct{ poolOnlyStore }
-
-func (unsummarizedStore) UnsummarizedCompleted(_ context.Context, _, _ string, _ time.Time) ([]string, error) {
-	return []string{"job-done"}, nil
-}
-
-// A job that completed during the agent's turn is unknown to it, so the submit is not refused: it
-// goes on to be queued, saying at once what holds it.
-func TestSubmitWhileASummaryIsOwedIsAcceptedAndSaysWhatHoldsIt(t *testing.T) {
-	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: unsummarizedStore{}, hypotheses: humanHypothesis("pe-1")}
-	exp := humanIdeaSubmission()
-
-	if err := s.Submit(context.Background(), exp); !errors.Is(err, errReachedScoring) {
-		t.Fatalf("Submit with unsummarized jobs: got = %v, want it to pass the summary gate", err)
-	}
-	if exp.NotAdmittedReason != summaryGateReason([]string{"job-done"}) {
-		t.Errorf("not_admitted_reason: got = %q, want the summary gate naming job-done", exp.NotAdmittedReason)
 	}
 }
 

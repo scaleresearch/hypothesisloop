@@ -172,8 +172,6 @@ export interface Experiment {
   metrics?: JobMetric[]
   // The write-up its agent filed, on a read of one job only.
   summary?: string
-  /** The job completed and its agent filed no summary of it. */
-  summary_due: boolean
   // When the job reached its terminal status; absent while it can still run.
   finished_at?: string
   // Lineage: the commit it ran, repository_url@sha, and the branch that commit was pushed on, one
@@ -482,7 +480,7 @@ interface HypothesisGraphEdge {
 // there is none.
 export interface Evidence {
   finding?: HypothesisFinding
-  best_job?: { id: string; metric: JobMetric; summary?: string; summary_due: boolean }
+  best_job?: { id: string; metric: JobMetric; summary?: string }
 }
 
 export interface HypothesisGraphNode extends HypothesisListItem, Evidence {}

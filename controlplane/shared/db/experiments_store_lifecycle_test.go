@@ -105,8 +105,8 @@ func TestUnderperformingIsSentOnceAndReplayed(t *testing.T) {
 }
 
 // A job read says when the job ended and carries the summary filed for it, so no reader has to
-// infer the first from updated_at or search a hypothesis's findings for the second. Its summary
-// is due from the time it completed until one is filed, and it names its agent.
+// infer the first from updated_at or search a hypothesis's findings for the second. It names its
+// agent.
 func TestAFinishedJobCarriesItsFinishTimeAndItsFiledSummary(t *testing.T) {
 	pool, _, agentID, peID := setupCapTestPool(t, 4)
 	exps, hyps := NewExperimentsStore(pool), NewHypothesesStore(pool)
@@ -124,23 +124,17 @@ func TestAFinishedJobCarriesItsFinishTimeAndItsFiledSummary(t *testing.T) {
 	if _, err := pool.pool.Exec(ctx, `UPDATE agents SET name = 'Ada' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("name the agent: %v", err)
 	}
-	summaryDue := func(when string, want bool) {
-		t.Helper()
-		job := &domain.Experiment{ID: id, AgentID: agentID}
-		if err := exps.DescribeJobs(ctx, []*domain.Experiment{job}); err != nil || job.SummaryDue != want || job.AgentName != "Ada" {
-			t.Errorf("DescribeJobs %s: summary_due = %v, agent_name = %q, %v, want %v of Ada", when, job.SummaryDue, job.AgentName, err, want)
-		}
+	named := &domain.Experiment{ID: id, AgentID: agentID}
+	if err := exps.DescribeJobs(ctx, []*domain.Experiment{named}); err != nil || named.AgentName != "Ada" {
+		t.Errorf("DescribeJobs: agent_name = %q, %v, want Ada", named.AgentName, err)
 	}
-	summaryDue("while it runs", false)
 
 	if ok, err := exps.TransitionStatus(ctx, id, domain.StatusRunning, domain.StatusCompleted, ""); err != nil || !ok {
 		t.Fatalf("TransitionStatus: got = %v, %v, want true", ok, err)
 	}
-	summaryDue("once it completed", true)
 	if _, err := hyps.CreateHypothesisFinding(ctx, running.HypothesisID, peID, id, agentID, domain.Actor{Kind: domain.ActorAgent, ID: agentID}, "it held"); err != nil {
 		t.Fatalf("CreateHypothesisFinding: %v", err)
 	}
-	summaryDue("once its summary is filed", false)
 	done, err := exps.GetExperiment(ctx, id)
 	if err != nil || done.FinishedAt == nil || !done.FinishedAt.After(running.UpdatedAt) {
 		t.Fatalf("a completed job: finished_at = %v, %v, want a time after %v", done.FinishedAt, err, running.UpdatedAt)

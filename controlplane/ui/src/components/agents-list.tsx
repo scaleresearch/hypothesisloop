@@ -127,16 +127,10 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
     { refreshInterval: 30_000 },
   )
 
-  // What each agent did in the selected experiment: its jobs, its best result and standing, and
-  // how many of its completed jobs it left without a summary.
+  // What each agent did in the selected experiment: its jobs, its best result and standing.
   const { data: jobStats } = useSWR(
     experimentFilter ? ['pe-stats-by-agent', experimentFilter] : null,
     () => fetchExperimentStats({ project_id: project.id, platform_experiment_id: experimentFilter, group_by: 'agent' }),
-    { refreshInterval: 15_000 },
-  )
-  const { data: summariesDue } = useSWR(
-    experimentFilter ? ['pe-summaries-due-by-agent', experimentFilter] : null,
-    () => fetchExperimentStats({ project_id: project.id, platform_experiment_id: experimentFilter, group_by: 'agent', needs_summary: true }),
     { refreshInterval: 15_000 },
   )
   const { data: results } = useSWR(
@@ -145,7 +139,7 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
     { refreshInterval: 15_000 },
   )
   const ranking = results?.metrics[0]
-  const colSpan = experimentFilter ? 8 : 4
+  const colSpan = experimentFilter ? 7 : 4
 
   const [sorting, setSorting] = useState<SortingState>([{ id: 'performance_score', desc: true }])
   const agentColumns = useMemo(() => [
@@ -208,7 +202,6 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
                     <th className="text-right">Share{selectedPE ? `, ${unitOf(selectedPE)}` : ''}</th>
                     <th className="text-right">Best {ranking?.metric ?? 'metric'}</th>
                     <th>Jobs</th>
-                    <th>Summaries filed</th>
                   </>
                 )}
                 <th><span className="sr-only">Compute</span></th>
@@ -228,8 +221,6 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
                 const standing = ranking?.standings.find(st => st.agent_id === a.id)
                 const quota = quotas?.find(q => q.agent_id === a.id)
                 const jobs = jobStats?.groups?.[a.id]
-                const completed = jobs?.by_status.COMPLETED ?? 0
-                const due = summariesDue?.groups?.[a.id]?.total ?? 0
                 const shown = selectedPE ? [selectedPE] : running
                 return (
                   <Fragment key={a.id}>
@@ -261,9 +252,6 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
                             {jobs
                               ? Object.entries(jobs.by_status).map(([status, n]) => `${n} ${status.toLowerCase()}`).join(' · ')
                               : <span className="text-xs text-subtle">none</span>}
-                          </td>
-                          <td className={clsx('text-2xs', due > 0 && 'text-warning')}>
-                            {summariesDue ? `${completed - due} of ${completed} completed` : '—'}
                           </td>
                         </>
                       )}

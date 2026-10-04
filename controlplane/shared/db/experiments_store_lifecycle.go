@@ -181,18 +181,13 @@ func sentenced(reason string) error {
 }
 
 // MarkHeldJobs records on a QUEUED job the queue reason it is held for, and that write is what
-// emits job.held (see schema.sql). A job held by the summary gate is marked at once: its owner
-// lifts that gate itself, so every minute untold is a minute lost. Any other reason is marked
-// when the job has waited since it was queued for longer than its estimated duration and longer
-// than minimum, once, also after a notice of the summary gate. A job the scheduler has not judged
-// yet has no reason to tell.
+// emits job.held (see schema.sql): once, when the job has waited since it was queued for longer
+// than its estimated duration and longer than minimum. A job the scheduler has not judged yet has
+// no reason to tell.
 func (s *ExperimentsStore) MarkHeldJobs(ctx context.Context, minimum time.Duration) error {
 	const q = `UPDATE experiments SET held_reason = not_admitted_reason
-WHERE status = 'QUEUED' AND split_part(not_admitted_reason, ': ', 1) <> 'awaiting_admission'
-  AND ((held_reason IS NULL AND split_part(not_admitted_reason, ': ', 1) = 'summary_gate')
-    OR ((held_reason IS NULL OR split_part(held_reason, ': ', 1) = 'summary_gate')
-        AND split_part(not_admitted_reason, ': ', 1) <> 'summary_gate'
-        AND NOW() - queued_at > GREATEST($1 * INTERVAL '1 second', estimated_duration_hours * INTERVAL '1 hour')))`
+WHERE status = 'QUEUED' AND held_reason IS NULL AND split_part(not_admitted_reason, ': ', 1) <> 'awaiting_admission'
+  AND NOW() - queued_at > GREATEST($1 * INTERVAL '1 second', estimated_duration_hours * INTERVAL '1 hour')`
 	if _, err := s.pool.pool.Exec(ctx, q, minimum.Seconds()); err != nil {
 		return fmt.Errorf("experiments_store.MarkHeldJobs: %w", err)
 	}

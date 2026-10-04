@@ -46,10 +46,6 @@ func (s *resilienceStore) IsAgentCut(context.Context, string, string) (bool, err
 	return false, nil
 }
 
-func (s *resilienceStore) UnsummarizedCompleted(context.Context, string, string, time.Time) ([]string, error) {
-	return nil, nil
-}
-
 func (s *resilienceStore) UpdateNotAdmittedReason(_ context.Context, id, reason string) error {
 	if s.notAdmitted == nil {
 		s.notAdmitted = map[string]string{}

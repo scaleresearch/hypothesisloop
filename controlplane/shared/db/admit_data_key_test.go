@@ -271,30 +271,3 @@ func TestSecretEnvIsStoredApartFromTheJobSpec(t *testing.T) {
 		t.Fatal("a job whose spec still carries secret_env was stored, want an error")
 	}
 }
-
-// The summary gate holds a job submitted after an unsummarised job ended, and none that was
-// queued before: the query takes the moment the waiting job was submitted.
-func TestAnUnsummarisedJobIsOwedOnlyByWhatWasSubmittedAfterItEnded(t *testing.T) {
-	store, exp := admitDataKeyFixture(t)
-	ctx := context.Background()
-	if decision, err := store.AdmitExperimentTx(ctx, exp, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); err != nil || decision != AdmitInserted {
-		t.Fatalf("admit = %v %v, want inserted", decision, err)
-	}
-	ended := time.Now().UTC().Truncate(time.Microsecond)
-	if _, err := store.ExperimentsStore.pool.pool.Exec(ctx, `UPDATE experiments SET status = 'COMPLETED', not_admitted_reason = NULL, updated_at = $2 WHERE id = $1`, exp.ID, ended); err != nil {
-		t.Fatal(err)
-	}
-	for name, c := range map[string]struct {
-		submitted time.Time
-		want      int
-	}{
-		"queued a second before it ended":   {ended.Add(-time.Second), 0},
-		"submitted the moment it ended":     {ended, 1},
-		"submitted a second after it ended": {ended.Add(time.Second), 1},
-	} {
-		owed, err := store.UnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID, c.submitted)
-		if err != nil || len(owed) != c.want || c.want == 1 && owed[0] != exp.ID {
-			t.Errorf("a job %s: owed = %v (%v), want %d", name, owed, err, c.want)
-		}
-	}
-}

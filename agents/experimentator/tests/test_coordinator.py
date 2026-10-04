@@ -131,7 +131,7 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
             setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", flavor="generalist", role=role, platform_experiment_id="pe-1"),
                                     client=SimpleNamespace(get_platform_experiment=lambda _id: closed, get_signup=lambda *_: {"ended": "closed"}))
             prompt = run._shutdown_prompt(setup)
-            self.assertIn("File the summaries you owe on finished jobs", prompt)
+            self.assertIn("File what your finished jobs showed as their summaries", prompt)
             self.assertEqual("verdict" in prompt, verdicts, prompt)
 
     # A researcher that finished, a planner whose proposal was stored and a coordinator that

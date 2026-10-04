@@ -70,12 +70,12 @@ describe('objectiveFinding', () => {
   const reference = { id: 'f2', hypothesis_id: 'pe', experiment_id: 'job-ref', agent_id: 'b', actor, summary: 'Reference', created_at: at }
 
   it('shows the baseline job write-up over a newer one on the objective', () => {
-    expect(objectiveFinding({ finding: reference, best_job: { id: 'job-control', metric, summary: 'Control', summary_due: false } }))
+    expect(objectiveFinding({ finding: reference, best_job: { id: 'job-control', metric, summary: 'Control' } }))
       .toEqual({ job: 'job-control', summary: 'Control', baseline: true })
   })
 
   it('names the newest finding as such while the baseline job has none', () => {
-    expect(objectiveFinding({ finding: reference, best_job: { id: 'job-control', metric, summary_due: true } }))
+    expect(objectiveFinding({ finding: reference, best_job: { id: 'job-control', metric } }))
       .toEqual({ job: 'job-ref', summary: 'Reference', baseline: false })
   })
 })

@@ -41,10 +41,9 @@ _DRAIN_S = 5
 # that built an environment ahead of its job learns its build was loaded on a cluster, where its
 # jobs run before the upload ends, or ended (environment.status) the same way: told to end its
 # turn while it built, nothing else would wake it.
-# Everything else is read when next acting. A kind wakes only for what its reader can act on: a job held for a summary is cleared by its agent
-# alone, so it wakes no coordinator.
+# Everything else is read when next acting. A kind wakes only for what its reader can act on.
 WAKES = {
-    "coordinator": ("agent.finished", "agent.idle", "experiment.blocked", "job.held!=summary_gate", "stage.boundary", "comment.new",
+    "coordinator": ("agent.finished", "agent.idle", "experiment.blocked", "job.held", "stage.boundary", "comment.new",
                     "platform_experiment.status", "platform_experiment.description", "platform_experiment.baseline"),
     "agent": ("experiment.status", "experiment.blocked", "job.held", "job.underperforming", "agent.cut", "agent.idle",
               "agent.message", "stage.boundary", "comment.new", "platform_experiment.status", "platform_experiment.description",

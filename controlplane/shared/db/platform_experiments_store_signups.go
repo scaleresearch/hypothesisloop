@@ -441,9 +441,9 @@ WHERE s.platform_experiment_id=$1 AND s.agent_id=$2 FOR UPDATE OF s`, platformEx
 	return nil
 }
 
-// ErrWorkUnfinished refuses finishing an agent that still has a job queued or running, or a
-// completed job without its summary, and removing one that has a job queued or running.
-var ErrWorkUnfinished = errors.New("the agent has a job in flight or a summary due")
+// ErrWorkUnfinished refuses finishing or removing an agent that still has a job queued or
+// running.
+var ErrWorkUnfinished = errors.New("the agent has a job in flight")
 
 // FinishAgent records that an agent of a running platform experiment has nothing left to do, or
 // that one that measures the baseline is done in an open one, where its work is. It answers
@@ -467,7 +467,7 @@ func (s *PlatformExperimentsStore) FinishAgent(ctx context.Context, platformExpI
 SELECT pe.status = 'running' OR pe.status = 'open' AND s.role = '`+string(domain.SignupRoleBaseline)+`', s.finished_at,
        EXISTS (SELECT 1 FROM experiments
                WHERE platform_experiment_id = s.platform_experiment_id AND agent_id = s.agent_id
-                 AND (status IN ('QUEUED', 'SUBMITTED', 'RUNNING') OR `+UnsummarizedCompletedPredicate+`))
+                 AND status IN ('QUEUED', 'SUBMITTED', 'RUNNING'))
 FROM experiment_signups s JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
 WHERE s.platform_experiment_id = $1 AND s.agent_id = $2
 FOR UPDATE OF s`, platformExpID, agentID).Scan(&running, &finishedAt, &unfinished)
@@ -495,7 +495,7 @@ WHERE platform_experiment_id = $1 AND agent_id = $2`, platformExpID, agentID, re
 }
 
 // NoticeIdleResearchers tells every researcher of a running platform experiment that had no job
-// and no check of its own created or running for after, since the run started or it joined, and
+// of its own created or running for after, since the run started or it joined, and
 // has none queued or running, that it is idle: agent.idle, once for each such stretch. A
 // researcher that finished or was cut is told nothing.
 func (s *PlatformExperimentsStore) NoticeIdleResearchers(ctx context.Context, after time.Duration) error {

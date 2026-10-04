@@ -238,34 +238,8 @@ ORDER BY queued_at ASC`
 	return collectExperiments(rows)
 }
 
-// UnsummarizedCompletedPredicate is the admission summary gate written as SQL over the
-// experiments table: a finished job whose write-up was never filed. Admission holds a job for
-// the matching rows that ended before it was submitted (UnsummarizedCompleted), and
-// GET /experiments?needs_summary=true lists every row that matches. One definition, so the set
-// an agent is told to clear always contains the jobs that hold one of its own.
-const UnsummarizedCompletedPredicate = `status = 'COMPLETED' AND NOT EXISTS (
-	SELECT 1 FROM hypothesis_findings f WHERE f.experiment_id = experiments.id)`
-
-// UnsummarizedCompleted returns the ids of the agent's COMPLETED jobs in the platform experiment
-// that have no summary and ended by endedBy, oldest first: the jobs that hold back a job the
-// agent submitted at that moment. A job that was queued before one of them ended is not held by
-// it. FAILED and EVICTED jobs owe none. A COMPLETED row's updated_at is when it ended.
-func (s *ExperimentsStore) UnsummarizedCompleted(ctx context.Context, agentID, platformExpID string, endedBy time.Time) ([]string, error) {
-	const q = `SELECT id FROM experiments
-		WHERE agent_id = $1
-		  AND platform_experiment_id = $2
-		  AND updated_at <= $3
-		  AND ` + UnsummarizedCompletedPredicate + `
-		ORDER BY created_at, id`
-	rows, err := s.pool.pool.Query(ctx, q, agentID, platformExpID, endedBy)
-	if err != nil {
-		return nil, fmt.Errorf("experiments_store.UnsummarizedCompleted: %w", err)
-	}
-	return pgx.CollectRows(rows, pgx.RowTo[string])
-}
-
 // DescribeJobs sets on each job what an answer says of it beyond its own row: its agent's name,
-// the agent's id when it has none, and whether its summary is due. It is one read however many
+// the agent's id when it has none. It is one read however many
 // jobs are given. Every job an operation answers with passes here, so Status becomes the
 // answered one (domain.AnsweredStatus) and a described job is good for answering only.
 func (s *ExperimentsStore) DescribeJobs(ctx context.Context, jobs []*domain.Experiment) error {
@@ -280,8 +254,7 @@ func (s *ExperimentsStore) DescribeJobs(ctx context.Context, jobs []*domain.Expe
 		job.Status = domain.AnsweredStatus(job.Status, job.EvictionReason)
 	}
 	rows, err := s.pool.pool.Query(ctx, `SELECT id,
-		COALESCE((SELECT NULLIF(a.name, '') FROM agents a WHERE a.id = experiments.agent_id), agent_id),
-		`+UnsummarizedCompletedPredicate+`
+		COALESCE((SELECT NULLIF(a.name, '') FROM agents a WHERE a.id = experiments.agent_id), agent_id)
 		FROM experiments WHERE id = ANY($1)`, ids)
 	if err != nil {
 		return fmt.Errorf("experiments_store.DescribeJobs: %w", err)
@@ -289,11 +262,10 @@ func (s *ExperimentsStore) DescribeJobs(ctx context.Context, jobs []*domain.Expe
 	defer rows.Close()
 	for rows.Next() {
 		var id, agentName string
-		var summaryDue bool
-		if err := rows.Scan(&id, &agentName, &summaryDue); err != nil {
+		if err := rows.Scan(&id, &agentName); err != nil {
 			return fmt.Errorf("experiments_store.DescribeJobs: scan: %w", err)
 		}
-		byID[id].AgentName, byID[id].SummaryDue = agentName, summaryDue
+		byID[id].AgentName = agentName
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("experiments_store.DescribeJobs: %w", err)
