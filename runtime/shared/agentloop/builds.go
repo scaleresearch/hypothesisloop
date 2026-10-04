@@ -31,7 +31,6 @@ func (a *Agent) reconcileBuilds(ctx context.Context, listed []domain.Environment
 		if attempt, ok := attempts[key]; !ok || attempt != running.attempt {
 			running.cancel()
 			delete(a.builds, key)
-			a.Log("build %s attempt %d: no longer this cluster's, cancelled", key, running.attempt)
 		}
 	}
 	for _, b := range listed {
@@ -47,7 +46,8 @@ func (a *Agent) reconcileBuilds(ctx context.Context, listed []domain.Environment
 }
 
 // runBuild runs b and reports how it ended, unless it was cancelled. A report the control plane
-// did not take forgets the build, so the next pass that still lists it runs it again.
+// did not take forgets the build, so the next pass that still lists it runs it again. A reported
+// build is cancelled too once the list drops it, which stops nothing, so the cancel is told here.
 func (a *Agent) runBuild(ctx context.Context, running *runningBuild, b domain.EnvironmentBuild) {
 	defer a.building.Done()
 	defer running.cancel()
@@ -56,8 +56,11 @@ func (a *Agent) runBuild(ctx context.Context, running *runningBuild, b domain.En
 		var login domain.RegistryLogin
 		err := a.postJSON(ctx, "/builds/"+url.PathEscape(b.Key)+"/credential", domain.EnvironmentBuildCredentialRequest{Attempt: b.Attempt}, &login)
 		return login.Username, login.Password, err
+	}, func(format string, args ...any) {
+		a.Log("build %s attempt %d: %s", b.Key, b.Attempt, fmt.Sprintf(format, args...))
 	})
 	if ctx.Err() != nil {
+		a.Log("build %s attempt %d: no longer this cluster's, cancelled", b.Key, b.Attempt)
 		return
 	}
 	report.Attempt = b.Attempt

@@ -3,8 +3,10 @@ package agentloop
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -83,7 +85,8 @@ func newFakeBuilder() *fakeBuilder {
 	return &fakeBuilder{runs: map[string]int{}, cancelled: map[string]int{}, release: make(chan struct{})}
 }
 
-func (b *fakeBuilder) Run(ctx context.Context, build domain.EnvironmentBuild, credential func(context.Context) (string, string, error)) domain.EnvironmentBuildReport {
+func (b *fakeBuilder) Run(ctx context.Context, build domain.EnvironmentBuild, credential func(context.Context) (string, string, error), progress func(string, ...any)) domain.EnvironmentBuildReport {
+	progress("[1/1] RUN make: started")
 	b.mu.Lock()
 	b.runs[build.Key]++
 	b.mu.Unlock()
@@ -231,5 +234,63 @@ func TestAnAgentWithoutABuilderSaysItDoesNotBuildAndRunsNone(t *testing.T) {
 	}
 	if api.reportsBuilds[0] || len(agent.builds) != 0 {
 		t.Errorf("reported builds %v and runs %v, want neither", api.reportsBuilds[0], agent.builds)
+	}
+}
+
+// agentLog is what an agent logs, safe to read while its builds run.
+type agentLog struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (l *agentLog) log(format string, args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.lines = append(l.lines, fmt.Sprintf(format, args...))
+}
+
+func (l *agentLog) has(line string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Contains(l.lines, line)
+}
+
+// A build the control plane took the report of leaves the list on the next pass. It ended, and
+// only a build a cancel cut short is told as cancelled.
+func TestABuildIsToldAsItGoesAndCancelledOnlyWhenACancelCutItShort(t *testing.T) {
+	api := &buildsAPI{reports: map[string][]domain.EnvironmentBuildReport{}}
+	server := api.serve(t)
+	builder := newFakeBuilder()
+	agent := buildAgent(server, builder)
+	var logged agentLog
+	agent.Log = logged.log
+	ctx := context.Background()
+	k2 := domain.EnvironmentBuild{Key: "k2", Attempt: 1}
+
+	api.list(k1, k2)
+	if err := agent.reconcileOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "both builds", func() bool { return builder.count(builder.runs, "k1") == 1 && builder.count(builder.runs, "k2") == 1 })
+	api.list(k1)
+	if err := agent.reconcileOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	close(builder.release)
+	waitFor(t, "the report", func() bool { return len(api.reported("k1")) == 1 })
+	api.list()
+	if err := agent.reconcileOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	agent.building.Wait()
+
+	if !logged.has("build k1 attempt 1: [1/1] RUN make: started") {
+		t.Errorf("logged %q, want the build's steps", logged.lines)
+	}
+	if !logged.has("build k2 attempt 1: no longer this cluster's, cancelled") {
+		t.Errorf("logged %q, want the build a cancel cut short told as cancelled", logged.lines)
+	}
+	if logged.has("build k1 attempt 1: no longer this cluster's, cancelled") {
+		t.Errorf("logged %q: a build that ended and reported is told as cancelled", logged.lines)
 	}
 }

@@ -44,17 +44,21 @@ func Dial(ctx context.Context, address string) (*Daemon, error) {
 	return &Daemon{solver: c}, nil
 }
 
+// Progress is told each step of a build as it starts and ends, and how far its transfers are.
+type Progress = func(format string, args ...any)
+
 // Run pulls the base, then builds b and pushes it by digest, and reports how it ended under no
 // attempt. A base that does not pull is the platform's fault, whatever the reason, so a registry
 // outage never fails a file. Once ctx is done the report is meaningless and the caller sends
 // none.
-func (d *Daemon) Run(ctx context.Context, b domain.EnvironmentBuild, credential Credential) domain.EnvironmentBuildReport {
-	if err := d.pull(ctx, b.Base); err != nil {
+func (d *Daemon) Run(ctx context.Context, b domain.EnvironmentBuild, credential Credential, progress Progress) domain.EnvironmentBuildReport {
+	steps := newSteps(progress)
+	if err := d.pull(ctx, b.Base, steps); err != nil {
 		return platformFault(err)
 	}
 	host, _, _ := strings.Cut(b.Repository, "/")
 	attachables := []session.Attachable{&registryAuth{host: host, credential: credential}}
-	digest, err := d.build(ctx, attachables, b)
+	digest, err := d.build(ctx, attachables, b, steps)
 	var failed *buildFailed
 	switch {
 	case errors.As(err, &failed):
@@ -70,15 +74,34 @@ func platformFault(err error) domain.EnvironmentBuildReport {
 }
 
 // pull runs a command on image, which pulls and unpacks it into the daemon's cache.
-func (d *Daemon) pull(ctx context.Context, image string) error {
+func (d *Daemon) pull(ctx context.Context, image string, steps *steps) error {
 	def, err := llb.Image(image, llb.Platform(platforms.MustParse(buildPlatform))).Run(llb.Args([]string{"true"})).Root().Marshal(ctx)
 	if err != nil {
 		return err
 	}
-	if _, err := d.solver.Solve(ctx, def, client.SolveOpt{}, nil); err != nil {
+	if _, err := d.solve(ctx, def, client.SolveOpt{}, steps.follow); err != nil {
 		return fmt.Errorf("pull %s: %w", image, err)
 	}
 	return nil
+}
+
+// solve runs one solve on the daemon and hands each status it streams to onStatus.
+func (d *Daemon) solve(ctx context.Context, def *llb.Definition, opt client.SolveOpt, onStatus func(*client.SolveStatus)) (*client.SolveResponse, error) {
+	var resp *client.SolveResponse
+	statuses := make(chan *client.SolveStatus)
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.Go(func() error {
+		var err error
+		resp, err = d.solver.Solve(groupCtx, def, opt, statuses)
+		return err
+	})
+	group.Go(func() error {
+		for s := range statuses {
+			onStatus(s)
+		}
+		return nil
+	})
+	return resp, group.Wait()
 }
 
 // buildFailed is a build an instruction of the file failed, with the end of its output, at most
@@ -90,7 +113,7 @@ func (e *buildFailed) Error() string { return "the build failed" }
 // build builds the file on a context holding only the file and pushes the result by digest,
 // with no tag, which it returns. A *buildFailed is an instruction of the file failing; any other
 // error is the platform's.
-func (d *Daemon) build(ctx context.Context, attachables []session.Attachable, b domain.EnvironmentBuild) (string, error) {
+func (d *Daemon) build(ctx context.Context, attachables []session.Attachable, b domain.EnvironmentBuild, steps *steps) (string, error) {
 	file := dockerfileState(b.Dockerfile)
 	opt := client.SolveOpt{
 		Frontend:       "dockerfile.v0",
@@ -103,33 +126,22 @@ func (d *Daemon) build(ctx context.Context, attachables []session.Attachable, b 
 	}
 
 	var log strings.Builder
-	var resp *client.SolveResponse
-	statuses := make(chan *client.SolveStatus)
-	group, groupCtx := errgroup.WithContext(ctx)
-	group.Go(func() error {
-		var err error
-		resp, err = d.solver.Solve(groupCtx, nil, opt, statuses)
-		return err
-	})
-	group.Go(func() error {
-		for s := range statuses {
-			for _, v := range s.Logs {
-				log.Write(v.Data)
-			}
-			for _, v := range s.Vertexes {
-				if v.Error != "" {
-					fmt.Fprintf(&log, "\n%s: %s\n", v.Name, v.Error)
-				}
-			}
-			if log.Len() > 4*domain.MaxEnvironmentLogBytes {
-				tail := lastBytes(log.String(), domain.MaxEnvironmentLogBytes)
-				log.Reset()
-				log.WriteString(tail)
+	resp, err := d.solve(ctx, nil, opt, func(s *client.SolveStatus) {
+		steps.follow(s)
+		for _, v := range s.Logs {
+			log.Write(v.Data)
+		}
+		for _, v := range s.Vertexes {
+			if v.Error != "" {
+				fmt.Fprintf(&log, "\n%s: %s\n", v.Name, v.Error)
 			}
 		}
-		return nil
+		if log.Len() > 4*domain.MaxEnvironmentLogBytes {
+			tail := lastBytes(log.String(), domain.MaxEnvironmentLogBytes)
+			log.Reset()
+			log.WriteString(tail)
+		}
 	})
-	err := group.Wait()
 	if err != nil {
 		// A RUN a cancel stopped exits with a code it did not choose.
 		if ctx.Err() == nil && fileFault(err) {

@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/client/llb"
@@ -98,9 +100,7 @@ type fakeDaemon struct {
 }
 
 func (d *fakeDaemon) Solve(_ context.Context, def *llb.Definition, opt client.SolveOpt, statuses chan *client.SolveStatus) (*client.SolveResponse, error) {
-	if statuses != nil {
-		defer close(statuses)
-	}
+	defer close(statuses)
 	if def != nil {
 		return &client.SolveResponse{}, d.pull
 	}
@@ -114,7 +114,7 @@ func (d *fakeDaemon) Solve(_ context.Context, def *llb.Definition, opt client.So
 
 func TestABuildIsReadyWithTheDigestItPushedUntagged(t *testing.T) {
 	daemon := &fakeDaemon{digest: "sha256:abc"}
-	got := (&Daemon{solver: daemon}).Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Dockerfile: "ARG BASE\nFROM ${BASE}\n", Repository: "registry.test/envs/env"}, nil)
+	got := (&Daemon{solver: daemon}).Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Dockerfile: "ARG BASE\nFROM ${BASE}\n", Repository: "registry.test/envs/env"}, nil, ignoreProgress)
 	if got.Outcome != domain.EnvironmentBuildPushed || got.Digest != "sha256:abc" {
 		t.Fatalf("result %+v, want ready with the digest", got)
 	}
@@ -141,7 +141,7 @@ func TestWhoseFaultABuildThatPushedNothingIs(t *testing.T) {
 		"the push fails":          {&fakeDaemon{build: errors.New("failed to push: failed to authorize")}, domain.EnvironmentBuildPlatformFault, "failed to authorize"},
 		"no digest is named":      {&fakeDaemon{}, domain.EnvironmentBuildPlatformFault, "no digest"},
 	} {
-		got := (&Daemon{solver: c.daemon}).Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil)
+		got := (&Daemon{solver: c.daemon}).Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil, ignoreProgress)
 		if got.Outcome != c.fault || got.Digest != "" || !strings.Contains(got.LogTail, c.log) {
 			t.Errorf("%s: %+v, want fault %q with %q in its log", name, got, c.fault, c.log)
 		}
@@ -155,8 +155,45 @@ func TestARunACancelStoppedIsNotTheFiles(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	killed := &gatewaypb.ExitError{ExitCode: 137, Err: errors.New("exit code: 137")}
-	got := (&Daemon{solver: &fakeDaemon{build: killed}}).Run(ctx, domain.EnvironmentBuild{Repository: "registry.test/envs/env"}, nil)
+	got := (&Daemon{solver: &fakeDaemon{build: killed}}).Run(ctx, domain.EnvironmentBuild{Repository: "registry.test/envs/env"}, nil, ignoreProgress)
 	if got.Outcome == domain.EnvironmentBuildFileFault {
 		t.Errorf("a cancelled build is %+v, the file's fault", got)
+	}
+}
+
+func ignoreProgress(string, ...any) {}
+
+// A build is followed in the agent's log step by step: each step once as it starts and once as it
+// ends, and its transfers no more often than every transferInterval however fast they stream.
+func TestABuildTellsEachStepOnceAsItStartsAndEndsAndItsTransfersSparingly(t *testing.T) {
+	var told []string
+	steps := newSteps(func(format string, args ...any) { told = append(told, fmt.Sprintf(format, args...)) })
+	start := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	later := start.Add(90 * time.Second)
+	run, push, cached, failing := digest.FromString("run"), digest.FromString("push"), digest.FromString("cached"), digest.FromString("failing")
+	for _, status := range []*client.SolveStatus{
+		{Vertexes: []*client.Vertex{{Digest: cached, Name: "[1/3] FROM base", Started: &start, Completed: &start, Cached: true}}},
+		{Vertexes: []*client.Vertex{{Digest: run, Name: "[2/3] RUN make", Started: &start}}},
+		{Vertexes: []*client.Vertex{{Digest: run, Name: "[2/3] RUN make", Started: &start}}},
+		{Vertexes: []*client.Vertex{{Digest: run, Name: "[2/3] RUN make", Started: &start, Completed: &later}}},
+		{Vertexes: []*client.Vertex{{Digest: push, Name: "pushing layers", Started: &later}}},
+		{Statuses: []*client.VertexStatus{{Vertex: push, ID: "sha256:aaa", Current: 100e6, Total: 1200e6}}},
+		{Statuses: []*client.VertexStatus{{Vertex: push, ID: "sha256:aaa", Current: 200e6, Total: 1200e6}}},
+		{Vertexes: []*client.Vertex{{Digest: push, Name: "pushing layers", Started: &later, Completed: &later}}},
+		{Vertexes: []*client.Vertex{{Digest: failing, Name: "[3/3] RUN false", Started: &later, Completed: &later, Error: "exit code: 1"}}},
+	} {
+		steps.follow(status)
+	}
+	want := []string{
+		"[1/3] FROM base: cached",
+		"[2/3] RUN make: started",
+		"[2/3] RUN make: done in 1m30s",
+		"pushing layers: started",
+		"pushing layers: sha256:aaa 100/1200 MB",
+		"pushing layers: done in 0s",
+		"[3/3] RUN false: failed",
+	}
+	if !slices.Equal(told, want) {
+		t.Errorf("told\n%s\nwant\n%s", strings.Join(told, "\n"), strings.Join(want, "\n"))
 	}
 }
