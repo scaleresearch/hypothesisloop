@@ -280,16 +280,25 @@ func TestABuildThatFailsBeforeItsExportLoadsNothing(t *testing.T) {
 	}
 }
 
-// A build is followed in the agent's log step by step: each step once as it starts and once as it
-// ends, and its transfers no more often than every transferInterval however fast they stream.
+// A build is followed in the agent's log step by step: each run of a step once as it starts and
+// once as it ends, a step an earlier build ran as reused, and its transfers no more often than
+// every transferInterval however fast they stream.
 func TestABuildTellsEachStepOnceAsItStartsAndEndsAndItsTransfersSparingly(t *testing.T) {
 	var told []string
 	steps := newSteps(func(format string, args ...any) { told = append(told, fmt.Sprintf(format, args...)) })
 	start := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	steps.since = start
+	earlier, earlierEnd := start.Add(-5*time.Minute), start.Add(-3*time.Minute)
 	later := start.Add(90 * time.Second)
 	run, push, cached, failing := digest.FromString("run"), digest.FromString("push"), digest.FromString("cached"), digest.FromString("failing")
+	shared, again := digest.FromString("shared"), digest.FromString("again")
 	for _, status := range []*client.SolveStatus{
 		{Vertexes: []*client.Vertex{{Digest: cached, Name: "[1/3] FROM base", Started: &start, Completed: &start, Cached: true}}},
+		{Vertexes: []*client.Vertex{{Digest: shared, Name: "[2/5] RUN apt-get install", Started: &earlier, Completed: &earlierEnd}}},
+		{Vertexes: []*client.Vertex{{Digest: again, Name: "[3/5] RUN rustup", Started: &earlierEnd}}},
+		{Vertexes: []*client.Vertex{{Digest: again, Name: "[3/5] RUN rustup", Started: &earlierEnd, Completed: &start, Error: "context canceled"}}},
+		{Vertexes: []*client.Vertex{{Digest: again, Name: "[3/5] RUN rustup", Started: &start}}},
+		{Vertexes: []*client.Vertex{{Digest: again, Name: "[3/5] RUN rustup", Started: &start, Completed: &later}}},
 		{Vertexes: []*client.Vertex{{Digest: run, Name: "[2/3] RUN make", Started: &start}}},
 		{Vertexes: []*client.Vertex{{Digest: run, Name: "[2/3] RUN make", Started: &start}}},
 		{Vertexes: []*client.Vertex{{Digest: run, Name: "[2/3] RUN make", Started: &start, Completed: &later}}},
@@ -303,6 +312,11 @@ func TestABuildTellsEachStepOnceAsItStartsAndEndsAndItsTransfersSparingly(t *tes
 	}
 	want := []string{
 		"[1/3] FROM base: cached",
+		"[2/5] RUN apt-get install: reused from an earlier build, which ran it in 2m0s",
+		"[3/5] RUN rustup: started",
+		"[3/5] RUN rustup: failed",
+		"[3/5] RUN rustup: started",
+		"[3/5] RUN rustup: done in 1m30s",
 		"[2/3] RUN make: started",
 		"[2/3] RUN make: done in 1m30s",
 		"pushing layers: started",
