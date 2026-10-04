@@ -144,7 +144,7 @@ hl platform-experiments agents add --agent ID prints a self-run agent's token ag
 }
 
 func agentsFinish(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments agents finish", `usage: hl platform-experiments agents finish --reason TEXT [--blocker TEXT]
+	fs := newFlags("platform-experiments agents finish", `usage: hl platform-experiments agents finish --reason TEXT [--blocker TEXT] [--baseline JOB]
 
 Says that you have nothing left to do: your quota is spent, or nothing you could still try is
 worth a job. Your machine stops after this turn and the coordinator is told the reason, with the
@@ -154,9 +154,16 @@ left, unless --blocker says what stops it that the time and quota cannot fix. Re
 its summary (work_unfinished). Once the platform experiment closed there is nothing to finish:
 hl says so and exits 0. Prints you as finished. Your token says who and where. Each hypothesis
 of yours still open is listed after you and stays open for good unless you give its verdict
-(hl hypothesis status ID VERDICT) before this turn ends.`, stderr)
+(hl hypothesis status ID VERDICT) before this turn ends.
+
+An agent of role baseline names with --baseline the COMPLETED job of the control, which the
+platform declares as the baseline in this request. It must be your own job and pass every check
+of a declared baseline, or the finish is refused with the reason (422) and nothing is recorded:
+fix what it says and finish again. Without --baseline the platform declares a job only when the
+baseline agents left exactly one that reports the ranking metric.`, stderr)
 	reason := fs.String("reason", "", "why nothing is left to do")
 	blocker := fs.String("blocker", "", "what stops you that the time and quota left cannot fix")
+	baseline := fs.String("baseline", "", "an agent of role baseline: the job of the control to declare as the baseline")
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
 	}
@@ -174,6 +181,9 @@ of yours still open is listed after you and stays open for good unless you give 
 	body := map[string]string{"reason": *reason}
 	if *blocker != "" {
 		body["blocker"] = *blocker
+	}
+	if *baseline != "" {
+		body["baseline_job_id"] = *baseline
 	}
 	if err := c.Do("POST", agentsPath(pe)+"/"+url.PathEscape(agent)+"/finish", body, &out); err != nil {
 		if reason, _ := refusalOf(err); reason == "experiment_closed" {

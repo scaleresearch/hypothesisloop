@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -1141,7 +1142,7 @@ func TestAnAcceptedDraftRunsOnceItsBaselineAgentFinishesWithNoCoordinatorAction(
 	gaveUp.baselines = append([]domain.AgentSignup{}, store.baselines...)
 	gaveUp.created = []*domain.PlatformExperiment{store.created[0]}
 	gaveUpSvc, _ := planningAPI(t, &gaveUp, planner)
-	if _, err := gaveUpSvc.FinishAgent(ctx, "pe-draft", measures, "train.py does not run", ""); err != nil {
+	if _, err := gaveUpSvc.FinishAgent(ctx, "pe-draft", measures, "train.py does not run", "", ""); err != nil {
 		t.Fatalf("a baseline agent finishing with no job: %v", err)
 	}
 	left := gaveUp.created[0]
@@ -1152,7 +1153,7 @@ func TestAnAcceptedDraftRunsOnceItsBaselineAgentFinishesWithNoCoordinatorAction(
 
 	// The one that measured: its finish declares its job and starts the run.
 	store.left = []*domain.Experiment{measured.Job}
-	finished, err := svc.FinishAgent(ctx, "pe-draft", measures, "the baseline is measured", "")
+	finished, err := svc.FinishAgent(ctx, "pe-draft", measures, "the baseline is measured", "", "")
 	if err != nil || finished.FinishedAt == nil {
 		t.Fatalf("the baseline agent finishing: %+v, %v", finished, err)
 	}
@@ -1163,8 +1164,98 @@ func TestAnAcceptedDraftRunsOnceItsBaselineAgentFinishesWithNoCoordinatorAction(
 			pe.BaselineJobID, pe.Status, store.started, pe.JobEstimatedDurationHours, pe.Description)
 	}
 	// Finishing again changes nothing.
-	if _, err := svc.FinishAgent(ctx, "pe-draft", measures, "the baseline is measured", ""); err != nil || store.started != 1 {
+	if _, err := svc.FinishAgent(ctx, "pe-draft", measures, "the baseline is measured", "", ""); err != nil || store.started != 1 {
 		t.Fatalf("a second finish: %v with %d starts, want nothing changed", err, store.started)
+	}
+}
+
+// Run 7's baseline agent reran the control after changing its environment and ran a check from a
+// fresh checkout, so it left three jobs that report the ranking metric and nothing was declared.
+// Its finish names the control, which is declared as a PATCH declares it; a job that could not
+// be is refused before the finish is recorded, so the agent fixes it and finishes again.
+func TestABaselineAgentNamesTheJobItsFinishDeclares(t *testing.T) {
+	store := draftWithPlanner()
+	_, propose := planningAPI(t, store, thePlanner)
+	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
+		t.Fatalf("propose: %d %v", code, out)
+	}
+	svc, call := planningAPI(t, store, planner)
+	accept := map[string]any{"budget_accelerator_hours": 6, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}, {}}}
+	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept); code != http.StatusOK {
+		t.Fatalf("accept: %d %v", code, out)
+	}
+	measures := store.baselines[0].AgentID
+	job := func(id, agent string, status domain.ExperimentStatus) *Baseline {
+		b := measuredBaseline()
+		b.Job.ID, b.Job.AgentID, b.Job.PlatformExperimentID, b.Job.Status, b.Reported = id, agent, "pe-draft", status, map[string]float64{"val_loss": 1.8}
+		return b
+	}
+	jobs := map[string]*Baseline{
+		"job-first": job("job-first", measures, domain.StatusCompleted), "job-control": job("job-control", measures, domain.StatusCompleted),
+		"job-check": job("job-check", measures, domain.StatusCompleted), "job-failed": job("job-failed", measures, domain.StatusFailed),
+		"job-other": job("job-other", "ag-other", domain.StatusCompleted),
+	}
+	svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) { return jobs[jobID], nil }
+	store.left = []*domain.Experiment{jobs["job-first"].Job, jobs["job-control"].Job, jobs["job-check"].Job}
+	ctx := context.Background()
+
+	for named, reason := range map[string]string{"job-failed": "baseline_not_completed", "job-other": "no_baseline", "job-missing": "no_baseline"} {
+		_, err := svc.FinishAgent(ctx, "pe-draft", measures, "the baseline is measured", "", named)
+		var refused *api.Refusal
+		if !errors.As(err, &refused) || refused.GetStatus() != http.StatusUnprocessableEntity || refused.Reason != reason {
+			t.Errorf("a finish naming %s: %v, want 422 %s", named, err, reason)
+		}
+		if store.baselines[0].FinishedAt != nil || store.created[0].BaselineJobID != "" {
+			t.Fatalf("a finish naming %s was refused and still recorded: finished %v, baseline %q", named, store.baselines[0].FinishedAt, store.created[0].BaselineJobID)
+		}
+	}
+	var refused *api.Refusal
+	if _, err := svc.FinishAgent(ctx, "pe-draft", "ag-researcher", "done", "", "job-control"); !errors.As(err, &refused) || refused.Reason != "not_a_baseline_agent" {
+		t.Errorf("a researcher naming a baseline: %v, want 422 not_a_baseline_agent", err)
+	}
+
+	finished, err := svc.FinishAgent(ctx, "pe-draft", measures, "the baseline is measured by job-control", "", "job-control")
+	if err != nil || finished.FinishedAt == nil {
+		t.Fatalf("the finish naming the control: %+v, %v", finished, err)
+	}
+	pe := store.created[0]
+	if pe.BaselineJobID != "job-control" || pe.Status != domain.PlatformExpRunning || store.started != 1 || !strings.Contains(pe.Description, measuredBaselineHeader+"\njob: job-control") {
+		t.Fatalf("after the finish: baseline %q, status %s, %d starts: want job-control declared and the run started", pe.BaselineJobID, pe.Status, store.started)
+	}
+	if _, err := svc.FinishAgent(ctx, "pe-draft", measures, "again", "", "job-control"); err != nil || store.started != 1 {
+		t.Errorf("finishing again with the same job: %v with %d starts, want nothing changed", err, store.started)
+	}
+	if _, err := svc.FinishAgent(ctx, "pe-draft", measures, "again", "", "job-check"); !errors.As(err, &refused) || refused.Reason != "baseline_declared" {
+		t.Errorf("finishing again naming another job: %v, want 409 baseline_declared", err)
+	}
+}
+
+// Run 7 recorded a baseline agent's finish and answered it 500, when declaring its job failed
+// after the finish was stored. A stored finish is answered as one.
+func TestAStoredFinishIsAnsweredAsOneWhenItsDeclarationFails(t *testing.T) {
+	store := draftWithPlanner()
+	_, propose := planningAPI(t, store, thePlanner)
+	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
+		t.Fatalf("propose: %d %v", code, out)
+	}
+	svc, call := planningAPI(t, store, planner)
+	accept := map[string]any{"budget_accelerator_hours": 6, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}}}
+	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept); code != http.StatusOK {
+		t.Fatalf("accept: %d %v", code, out)
+	}
+	measured := measuredBaseline()
+	store.left = []*domain.Experiment{measured.Job}
+	svc.baseline = func(context.Context, *domain.PlatformExperiment, string) (*Baseline, error) {
+		return nil, errors.New("the metrics store does not answer")
+	}
+	finished, err := svc.FinishAgent(context.Background(), "pe-draft", store.baselines[0].AgentID, "the baseline is measured", "", "")
+	if err != nil || finished == nil || finished.FinishedAt == nil || store.created[0].Status != domain.PlatformExpOpen {
+		t.Fatalf("a finish whose declaration failed: %+v, %v, status %s: want it answered as finished and the experiment left open", finished, err, store.created[0].Status)
+	}
+	// Named, the same failure comes before anything is stored, and the finish is retried.
+	store.baselines[0].FinishedAt = nil
+	if _, err := svc.FinishAgent(context.Background(), "pe-draft", store.baselines[0].AgentID, "the baseline is measured", "", "job-1"); err == nil || store.baselines[0].FinishedAt != nil {
+		t.Errorf("a named job that could not be read: %v, finished %v, want an error and nothing recorded", err, store.baselines[0].FinishedAt)
 	}
 }
 

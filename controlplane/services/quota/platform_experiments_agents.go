@@ -473,16 +473,22 @@ func (s *PlatformExperimentsService) RemoveAgent(ctx context.Context, platformEx
 
 // FinishAgent records that an agent has nothing left to do, which releases its machine, and
 // answers its signup as finished. Calling it again changes nothing. The finish of an agent of
-// role baseline is the hand-over of what it measured: the platform declares the job it left in
-// this request (DeclareMeasured), which starts the run when nothing else is missing.
+// role baseline is the hand-over of what it measured: the platform declares baselineJobID, or
+// without it the one job it left (DeclareMeasured), in this request, which starts the run when
+// nothing else is missing. A baselineJobID that could not be declared refuses the finish.
 //
 // A researcher that finishes with more than finishEarlyShare of the run's time and of its quota
 // left names the blocker that stops it, and the time and quota it leaves are recorded with its
 // reason, which agent.finished tells the coordinator.
-func (s *PlatformExperimentsService) FinishAgent(ctx context.Context, platformExpID, agentID, reason, blocker string) (*domain.AgentSignup, error) {
+func (s *PlatformExperimentsService) FinishAgent(ctx context.Context, platformExpID, agentID, reason, blocker, baselineJobID string) (*domain.AgentSignup, error) {
 	reason, err := s.finishReason(ctx, platformExpID, agentID, reason, blocker)
 	if err != nil {
 		return nil, err
+	}
+	if baselineJobID != "" {
+		if err := s.checkNamedBaseline(ctx, platformExpID, agentID, baselineJobID); err != nil {
+			return nil, err
+		}
 	}
 	err = s.store.FinishAgent(ctx, platformExpID, agentID, reason)
 	switch {
@@ -513,11 +519,52 @@ func (s *PlatformExperimentsService) FinishAgent(ctx context.Context, platformEx
 	}
 	s.logger.Info("agent finished", zap.String("platformExpID", platformExpID), zap.String("agentID", agentID))
 	if finished.Role == domain.SignupRoleBaseline {
-		if err := s.DeclareMeasured(ctx, platformExpID); err != nil {
-			return nil, err
+		// The finish is stored, so it is answered as one: a declaration that fails now is the
+		// sweep's to make again, and the experiment's status_reason says what it waits for.
+		if err := s.declareFinished(ctx, platformExpID, baselineJobID); err != nil {
+			s.logger.Error("declare the baseline of a finished agent", zap.String("platformExpID", platformExpID), zap.String("agentID", agentID), zap.String("jobID", baselineJobID), zap.Error(err))
 		}
 	}
 	return finished, nil
+}
+
+// checkNamedBaseline refuses, before anything is stored, a finish whose agent names as the
+// baseline baselineJobID and could not have it declared: the agent is of role baseline, the job
+// is its own, and it passes the check of PATCH baseline_job_id.
+func (s *PlatformExperimentsService) checkNamedBaseline(ctx context.Context, platformExpID, agentID, baselineJobID string) error {
+	signup, err := s.store.GetAgentSignup(ctx, platformExpID, agentID)
+	if err != nil {
+		return fmt.Errorf("platform_experiments.checkNamedBaseline: %w", err)
+	}
+	if signup == nil {
+		return refuseSignup(404, "not_signed_up", "agent %s is not in platform experiment %s", agentID, platformExpID)
+	}
+	if signup.Role != domain.SignupRoleBaseline {
+		return refuseSignup(422, "not_a_baseline_agent", "agent %s is of role %s, and only an agent of role baseline names the baseline it measured: finish without baseline_job_id", agentID, signup.Role)
+	}
+	pe, err := s.stored(ctx, platformExpID)
+	if err != nil {
+		return err
+	}
+	switch {
+	case pe.Status == domain.PlatformExpClosed || pe.BaselineJobID == baselineJobID:
+		return nil
+	case pe.BaselineJobID != "":
+		return refuseSignup(409, "baseline_declared", "platform experiment %s already has job %s declared as its baseline: finish without baseline_job_id, or name that job", platformExpID, pe.BaselineJobID)
+	case pe.Status != domain.PlatformExpOpen:
+		return nil
+	}
+	baseline, err := s.baseline(ctx, pe, baselineJobID)
+	if err != nil {
+		return fmt.Errorf("platform_experiments: read baseline %s: %w", baselineJobID, err)
+	}
+	if baseline == nil || baseline.Job == nil || baseline.Job.AgentID != agentID || baseline.Job.PlatformExperimentID != platformExpID {
+		return refusedBaseline("no_baseline", "baseline_job_id %q is no job of yours in platform experiment %s: name the COMPLETED job of the control you submitted (`hl job list`)", baselineJobID, platformExpID)
+	}
+	declared := *pe
+	declared.BaselineJobID = baselineJobID
+	_, err = s.heldToBaseline(ctx, &declared)
+	return err
 }
 
 // finishEarlyShare is the share of the run's time and of a researcher's quota that, both left,
@@ -774,14 +821,18 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler, graph H
 			"A researcher's finished_reason, which agent.finished carries to the coordinator, ends with the time and quota it left, after the blocker it named. " +
 			"409 time_and_quota_left, saying how much of each is left, for a researcher that has more than a tenth of the run's time and of its quota left and names no blocker. " +
 			"409 work_unfinished while it has a job queued or running or a completed job without its summary, 409 experiment_closed once the platform experiment closed, which ended the agent's run already and leaves nothing to finish, 409 not_running in one not started yet for any role but baseline. Calling it again changes nothing. " +
-			"The finish of an agent of role baseline in an open platform experiment hands over what it measured: when the baseline agents that finished left exactly one COMPLETED job that reports the ranking metric, the platform declares that job as the baseline in this request, as PATCH /platform-experiments/{id} with baseline_job_id does, and starts the run when nothing else is missing. " +
-			"The finish is answered 200 whatever became of the declaration: one that is refused, or a finish that left no such job or several, declares nothing, and the platform experiment's status_reason says which it was and who acts (baseline_required, baseline_undeclared, or the refusal of the declaration such as budget_below_baseline).",
+			"The finish of an agent of role baseline in an open platform experiment hands over what it measured: with baseline_job_id the platform declares that job as the baseline in this request, as PATCH /platform-experiments/{id} with baseline_job_id does, and starts the run when nothing else is missing. " +
+			"The job must be the agent's own and pass every check of that PATCH, or the finish is refused with its 422 (no_baseline, baseline_not_completed, baseline_without_finding, baseline_missing_metric, baseline_breaks_constraint, budget_below_baseline and the others) and nothing is stored, so the agent fixes what it says and finishes again. " +
+			"422 not_a_baseline_agent for baseline_job_id from an agent of another role, 409 baseline_declared when it names another job than the baseline already declared. " +
+			"Without baseline_job_id, when the baseline agents that finished left exactly one COMPLETED job that reports the ranking metric, the platform declares that job the same way. " +
+			"Such a finish is answered 200 whatever became of the declaration: one that is refused, or a finish that left no such job or several, declares nothing, and the platform experiment's status_reason says which it was and who acts (baseline_required, baseline_undeclared, or the refusal of the declaration such as budget_below_baseline).",
 	}, func(ctx context.Context, in *struct {
 		ID      string `path:"id"`
 		AgentID string `path:"agent_id"`
 		Body    struct {
-			Reason  string `json:"reason" minLength:"1" doc:"Why nothing is left to do: quota spent, or what was tried and why no further idea is worth a job."`
-			Blocker string `json:"blocker,omitempty" doc:"What stops the agent that the time and quota it has left cannot fix. Required of a researcher with more than a tenth of the run's time and of its quota left."`
+			Reason        string `json:"reason" minLength:"1" doc:"Why nothing is left to do: quota spent, or what was tried and why no further idea is worth a job."`
+			Blocker       string `json:"blocker,omitempty" doc:"What stops the agent that the time and quota it has left cannot fix. Required of a researcher with more than a tenth of the run's time and of its quota left."`
+			BaselineJobID string `json:"baseline_job_id,omitempty" doc:"For an agent of role baseline: its COMPLETED job the platform declares as the baseline in this request, the control the run is ranked against. Needed when it left several jobs that report the ranking metric."`
 		}
 	}) (*struct{ Body finishedAgentBody }, error) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
@@ -799,7 +850,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler, graph H
 		if out.Body.OpenHypotheses, err = openHypotheses(ctx, graph, in.ID, in.AgentID); err != nil {
 			return nil, h.refusal("finish agent", err)
 		}
-		finished, err := h.svc.FinishAgent(ctx, in.ID, in.AgentID, in.Body.Reason, strings.TrimSpace(in.Body.Blocker))
+		finished, err := h.svc.FinishAgent(ctx, in.ID, in.AgentID, in.Body.Reason, strings.TrimSpace(in.Body.Blocker), strings.TrimSpace(in.Body.BaselineJobID))
 		if err != nil {
 			return nil, h.refusal("finish agent", err)
 		}

@@ -306,8 +306,9 @@ agent, as the baseline item below says, and supervise with `supervise.md`.
      experiment accepts, it does not count against `max_agents`, and it takes no share at the
      start;
   2. it runs the repository's job spec, files the job's summary and finishes;
-  3. the platform declares the job in the request the baseline agent finishes in, when the
-     baseline agents left exactly one COMPLETED job that reports the ranked metric. Left with
+  3. the platform declares the job in the request the baseline agent finishes in: the one its
+     finish names (`--baseline JOB`), or without one, when the baseline agents left exactly one
+     COMPLETED job that reports the ranked metric. Left with
      several (`baseline_undeclared`), declare the one the run is ranked against:
      `hl platform-experiments update --platform-experiment $PLATFORM_EXPERIMENT_ID
      --baseline-job JOB`. Either way the platform writes the

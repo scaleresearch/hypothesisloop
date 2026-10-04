@@ -897,7 +897,7 @@ func TestAResearcherFinishingEarlyNamesItsBlockerAndTheTimeAndQuotaItLeavesAreTo
 	}
 	finish := func(store *rosterStore, blocker string) (*domain.AgentSignup, error) {
 		svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), 3*time.Minute)
-		return svc.FinishAgent(context.Background(), "pe-1", "dana", "nothing beat the control", blocker)
+		return svc.FinishAgent(context.Background(), "pe-1", "dana", "nothing beat the control", blocker, "")
 	}
 
 	store := newStore(domain.SignupRoleCompetitor, 16*time.Minute+30*time.Second, 0.2)

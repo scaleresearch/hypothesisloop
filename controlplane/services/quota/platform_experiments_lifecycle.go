@@ -430,6 +430,12 @@ func (s *PlatformExperimentsService) measuredJob(ctx context.Context, pe *domain
 // sweep for what neither could do. A declaration that is refused stores nothing, and the
 // experiment's status_reason says the refusal (undeclared) until it is cleared.
 func (s *PlatformExperimentsService) DeclareMeasured(ctx context.Context, id string) error {
+	return s.declareFinished(ctx, id, "")
+}
+
+// declareFinished is DeclareMeasured for the job a finishing baseline agent named, or for the
+// one measuredJob finds when it named none.
+func (s *PlatformExperimentsService) declareFinished(ctx context.Context, id, jobID string) error {
 	pe, err := s.stored(ctx, id)
 	if err != nil {
 		return err
@@ -437,17 +443,19 @@ func (s *PlatformExperimentsService) DeclareMeasured(ctx context.Context, id str
 	if pe.Status != domain.PlatformExpOpen || pe.BaselineJobID != "" {
 		return nil
 	}
-	signups, err := s.store.ListAgentSignups(ctx, id)
-	if err != nil {
-		return fmt.Errorf("platform_experiments.DeclareMeasured: %w", err)
-	}
-	jobID, err := s.measuredJob(ctx, pe, signups)
 	var refused *api.Refusal
-	if errors.As(err, &refused) {
-		return nil
-	}
-	if err != nil {
-		return err
+	if jobID == "" {
+		signups, err := s.store.ListAgentSignups(ctx, id)
+		if err != nil {
+			return fmt.Errorf("platform_experiments.DeclareMeasured: %w", err)
+		}
+		jobID, err = s.measuredJob(ctx, pe, signups)
+		if errors.As(err, &refused) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 	}
 	if _, err := s.Update(ctx, id, PlatformExperimentPatch{BaselineJobID: &jobID}); errors.As(err, &refused) {
 		s.logger.Info("the platform did not declare the measured baseline", zap.String("platform_experiment_id", id), zap.String("job_id", jobID), zap.String("reason", refused.Reason))
@@ -698,7 +706,7 @@ func nextStep(pe *domain.PlatformExperiment, reason string, signups []domain.Age
 	}
 	step := ""
 	if signups[own].FinishedAt == nil && reason == "baseline_measuring" {
-		step = "Your job is admitted now: measure the baseline with one job (hl job submit), file its summary (hl job summary), then hl platform-experiments agents finish, and the platform declares that job. Your quota is half the budget, for the measurement and any rerun of it (hl quota). "
+		step = "Your job is admitted now: measure the baseline with one job (hl job submit), file its summary (hl job summary), then hl platform-experiments agents finish --baseline JOB, and the platform declares that job. Your quota is half the budget, for the measurement and any rerun of it (hl quota). "
 	}
 	return step + baselineClock(pe.BaselineDueAt, now) + runClock(pe)
 }
