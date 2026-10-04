@@ -69,8 +69,8 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
     with a fifth to spare.
     Duration = the rounds those trials take side by side.
     A goal that states a time and no budget gets the budget that keeps the machines busy for
-    that time: the trials that fit side by side on the capacity `hl capacity` shows, at the
-    trial's `cpu`, x `acch_per_hour` x `duration_hours`.
+    that time: the trials that fit side by side on the capacity `hl capacity` shows, summed
+    over its clusters, at the trial's `cpu`, x `acch_per_hour` x `duration_hours`.
     `baseline_minutes`: from the accept until the control and each reference are measured,
     the sum of writing the harness (none when it runs unchanged), building the job's
     environment from nothing (toolchains, dependencies, the references), moving that image to

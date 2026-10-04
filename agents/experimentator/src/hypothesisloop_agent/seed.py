@@ -83,7 +83,7 @@ def planner(workdir: str) -> str:
     if files:
         listing = files[:TREE_LINES]
         more = f"\n[... {len(files) - TREE_LINES} more files]" if len(files) > TREE_LINES else ""
-        sections.append(_section(f"git ls-files ({len(files)} files)", "\n".join(listing) + more))
+        sections.append(_section(f"git ls-files ({len(files)} files) in {workdir}, your working directory", "\n".join(listing) + more))
         readme = _readme(workdir, files)
         for path in ([readme] if readme else []) + sorted(f for f in files if f.startswith(".hypothesisloop/")):
             try:
