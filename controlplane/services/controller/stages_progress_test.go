@@ -36,6 +36,26 @@ func TestStageProgressCountsARequeuedJobsSettledStintOnce(t *testing.T) {
 	}
 }
 
+// Settlement bills a CPU job at its estimate's rate, so the boundary counts it while it runs.
+func TestStageProgressCountsARunningCPUJob(t *testing.T) {
+	now := time.Now().UTC()
+	pe := &domain.PlatformExperiment{ID: "pe-1", BudgetAcceleratorHours: 100, CreatedAt: now.Add(-time.Hour)}
+	cpu := &domain.Experiment{
+		ID: "cpu", PlatformExperimentID: pe.ID,
+		EstimatedDurationHours: 2, EstimatedCostAccH: 20,
+	}
+	c := &Controller{observed: fakeObserved{}}
+	obs := &tickObservations{elapsedHours: map[string]float64{"cpu": 1}}
+
+	got, err := c.stageProgress(context.Background(), pe, []*domain.Experiment{cpu}, obs, now)
+	if err != nil {
+		t.Fatalf("stageProgress: %v", err)
+	}
+	if want := 0.10; math.Abs(got-want) > 1e-9 {
+		t.Fatalf("progress = %v, want %v", got, want)
+	}
+}
+
 // Stages were measured from the accept, so the wait for a baseline ended stage 1 four minutes
 // after the researchers started. The ladder's clock is the run's: it counts from started_at to
 // ends_at, and what came before the start moves no boundary.
