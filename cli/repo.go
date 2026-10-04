@@ -128,21 +128,39 @@ commit (hl hypothesis checkout ID).`, stderr)
 // baselineOnly refuses an agent that is not the baseline of platform experiment pe: the baseline
 // writes the experiment's files once, and every other agent starts from its commit.
 func baselineOnly(c *apiclient.Client, pe string) error {
+	role, err := agentRole(c, pe)
+	if err != nil {
+		return err
+	}
+	if role != "" && role != "baseline" {
+		return fmt.Errorf("only the baseline agent writes the experiment's files, and your role is %s. Your files come with the baseline's commit: "+
+			"hl hypothesis checkout ID puts your clone on a branch made from it", role)
+	}
+	return nil
+}
+
+// agentRole is the role in pe of the agent the token is, empty for a caller that is no agent.
+func agentRole(c *apiclient.Client, pe string) (string, error) {
 	kind, _, agent := scopeOf(c.Token)
 	if kind != callerAgent {
-		return nil
+		return "", nil
 	}
 	var signup struct {
 		Role string `json:"role"`
 	}
 	if err := c.Do("GET", signupPath(pe, agent), nil, &signup); err != nil {
-		return err
+		return "", err
 	}
-	if signup.Role != "baseline" {
-		return fmt.Errorf("only the baseline agent writes the experiment's files, and your role is %s. Your files come with the baseline's commit: "+
-			"hl hypothesis checkout ID puts your clone on a branch made from it", signup.Role)
+	return signup.Role, nil
+}
+
+// missingFileHint is how the caller gets a missing experiment file: hl repo init writes it for
+// the baseline and anyone who is no agent, and every other agent gets the baseline's.
+func missingFileHint(role string) string {
+	if role == "" || role == "baseline" {
+		return "hl repo init writes it"
 	}
-	return nil
+	return "it comes with the baseline's commit: hl hypothesis checkout ID puts your clone on a branch made from it"
 }
 
 // defaultBranch is the branch hl gives a repository that has none.
@@ -305,7 +323,8 @@ helper line is printed either way and fails nothing.
 
 Not checked: the README's text, the code the job spec runs or its baseline job, which the
 platform checks when the baseline is declared (hl platform-experiments update --baseline-job).
-hl repo init writes a missing file.`, stderr)
+hl repo init writes a missing file for the baseline; any other agent gets it with the baseline's
+commit (hl hypothesis checkout ID).`, stderr)
 	pe := experimentFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -325,8 +344,12 @@ hl repo init writes a missing file.`, stderr)
 	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(id), nil, &experiment); err != nil {
 		return fail(stderr, err)
 	}
+	role, err := agentRole(c, id)
+	if err != nil {
+		return fail(stderr, err)
+	}
 	clone := os.DirFS(root)
-	failures, err := notReady(clone, experiment)
+	failures, err := notReady(clone, experiment, missingFileHint(role))
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -476,8 +499,8 @@ func sortedPaths(files map[string]string) []string {
 }
 
 // notReady lists what the files of a clone lack in layout, validity and fit to experiment, each
-// under the name the checklist gives the item.
-func notReady(clone iofs.FS, experiment declaredExperiment) ([]string, error) {
+// under the name the checklist gives the item. missing says how the caller gets a missing file.
+func notReady(clone iofs.FS, experiment declaredExperiment, missing string) ([]string, error) {
 	var failures []string
 	for _, item := range []struct {
 		name, path string
@@ -491,7 +514,7 @@ func notReady(clone iofs.FS, experiment declaredExperiment) ([]string, error) {
 		var gap string
 		switch {
 		case errors.Is(err, iofs.ErrNotExist):
-			gap = "is missing: hl repo init writes it"
+			gap = "is missing: " + missing
 		case err != nil:
 			return nil, err
 		case strings.TrimSpace(string(data)) == "":

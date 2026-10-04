@@ -98,6 +98,20 @@ func TestRepoInitIsRefusedToAnAgentOtherThanTheBaseline(t *testing.T) {
 	}
 }
 
+// hl repo check sent researchers to hl repo init for a missing file, which refuses them. It
+// names the command that gets the file for the caller's role.
+func TestRepoCheckSaysHowTheCallersRoleGetsAMissingFile(t *testing.T) {
+	cloneAs(t, emptyExperiment, "competitor")
+	if code, out := repo(t, "check"); code != 1 || strings.Contains(out, "hl repo init writes it") ||
+		!strings.Contains(out, "job-spec: .hypothesisloop/job.yaml is missing: it comes with the baseline's commit: hl hypothesis checkout ID") {
+		t.Errorf("hl repo check by a researcher = %d, want the missing file sent to checkout:\n%s", code, out)
+	}
+	cloneAs(t, emptyExperiment, "baseline")
+	if code, out := repo(t, "check"); code != 1 || !strings.Contains(out, "job-spec: .hypothesisloop/job.yaml is missing: hl repo init writes it") {
+		t.Errorf("hl repo check by the baseline = %d, want the missing file sent to hl repo init:\n%s", code, out)
+	}
+}
+
 // A baseline agent copied a 54-line brief into experiment.yaml by hand, broke the YAML on the
 // colon in the experiment's name and committed placeholders: what the platform holds of the
 // experiment is written by hl repo init, and only the command of a trial is left to type.
