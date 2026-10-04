@@ -17,11 +17,11 @@ func runningOnBaseline() *domain.PlatformExperiment {
 	return pe
 }
 
-// strongerControl is a researcher's job, on its own branch, that measured the control with one
-// of its settings switched and reached a better val_loss than the declared baseline.
+// strongerControl is a researcher's job, on its own branch, that ran the baseline's commit with
+// one of its settings switched and reached a better val_loss than the declared baseline.
 func strongerControl() *Baseline {
 	b := measuredBaseline()
-	b.Job.ID, b.Job.AgentID, b.Job.Branch, b.Job.CodeRef = "job-2", "ag-r1", "hl/pe-1/researcher-1/coder", "git://seed@def"
+	b.Job.ID, b.Job.AgentID, b.Job.Branch = "job-2", "ag-r1", "hl/pe-1/researcher-1/coder"
 	b.Job.Job.Env = map[string]string{"CODER": "rans"}
 	b.OwnerRole, b.Reported = domain.SignupRoleCompetitor, map[string]float64{"val_loss": 1.6, "exact_match": 1}
 	return b
@@ -47,7 +47,7 @@ func TestARunningExperimentsBaselineIsRaisedToAStrongerJobOfTheControl(t *testin
 		store, patch := jobsAPI(t, runningOnBaseline(), []*Baseline{measuredBaseline(), strongerControl()}, c.caller)
 		code, out := patch(raise)
 		stored := store.created[0]
-		wantBrief := "Train train.py and report val_loss.\n\n" + measuredBaselineHeader + "\njob: job-2\ncode_ref: git://seed@def\nenv: CODER=rans\nmeasured: val_loss = 1.6, exact_match = 1"
+		wantBrief := "Train train.py and report val_loss.\n\n" + measuredBaselineHeader + "\njob: job-2\ncode_ref: git://seed@abc\nenv: CODER=rans\nmeasured: val_loss = 1.6, exact_match = 1"
 		if code != http.StatusOK || stored.BaselineJobID != "job-2" || stored.Description != wantBrief || stored.JobEstimatedDurationHours != 0.3 || stored.Status != domain.PlatformExpRunning {
 			t.Fatalf("%s: got = %d %v, stored %q, brief %q, estimate %g, want job-2 with its block and the estimate kept", name, code, out, stored.BaselineJobID, stored.Description, stored.JobEstimatedDurationHours)
 		}
@@ -83,6 +83,7 @@ func TestARunningExperimentsBaselineIsRaisedToAStrongerJobOfTheControl(t *testin
 		"the baseline itself":            {map[string]any{"baseline_job_id": "job-1", "baseline_reason": raiseReason}, nil, 422, "baseline_unchanged"},
 		"a weaker job":                   {raise, func(_, b *Baseline) { b.Reported["val_loss"] = 1.9 }, 422, "baseline_not_stronger"},
 		"a job only as good":             {raise, func(_, b *Baseline) { b.Reported["val_loss"] = 1.8 }, 422, "baseline_not_stronger"},
+		"a researcher's own code":        {raise, func(_, b *Baseline) { b.Job.CodeRef = "git://seed@def" }, 422, "baseline_code_differs"},
 		"a job that does not exist":      {map[string]any{"baseline_job_id": "job-9", "baseline_reason": raiseReason}, nil, 422, "no_baseline"},
 		"a job of another experiment":    {raise, func(_, b *Baseline) { b.Job.PlatformExperimentID = "pe-other" }, 422, "no_baseline"},
 		"a job that failed":              {raise, func(_, b *Baseline) { b.Job.Status = domain.StatusFailed }, 422, "baseline_not_completed"},

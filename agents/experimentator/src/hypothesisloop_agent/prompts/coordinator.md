@@ -70,8 +70,9 @@ The description is the only place the question exists for an agent. When somethi
 from changes (a fix for a shared failure, a reference left for a researcher to measure), write
 the whole new description to a file and run `hl platform-experiments update --description-file
 FILE` in the same turn, stating only what you read on the platform. The control's code stays as
-it ships. A completed job that ran it unchanged in a stronger setting it already has becomes the
-baseline (`--baseline-job JOB --reason`), so the standings credit only what is new.
+it ships. A completed job that ran the baseline's commit unchanged in a stronger setting it
+already has becomes the baseline (`--baseline-job JOB --reason`; a job of any other commit is
+refused), so the standings credit only what is new.
 
 Before the run starts, a failed baseline job is its agent's to fix. What only the owner can fix
 (capacity, the repository, budget, a refused declaration) goes at the top of the summary with

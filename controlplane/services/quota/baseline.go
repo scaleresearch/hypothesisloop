@@ -236,15 +236,19 @@ func checkRaiseRequest(pe *domain.PlatformExperiment, patch PlatformExperimentPa
 }
 
 // raisedBaseline holds a raise of the running pe's baseline to the job patched names: a completed
-// job of the experiment, whoever ran it on whichever branch, measured as a baseline is
-// (checkMeasurement) and strictly better than the baseline it replaces on the first ranking
-// metric. Whether the job measured the control in another configuration, and not a new idea, the
-// platform cannot tell: reason says it. It answers the raise to record and the block the brief is
-// given. The estimate of a job that states none stays the declared baseline's.
+// job of the experiment, whoever ran it on whichever branch, that ran the baseline's commit
+// unchanged, measured as a baseline is (checkMeasurement) and strictly better than the baseline it
+// replaces on the first ranking metric. Only its arguments or environment differ, so a researcher's
+// new method never becomes the bar; reason says which configuration it measured. It answers the
+// raise to record and the block the brief is given. The estimate of a job that states none stays
+// the declared baseline's.
 func (s *PlatformExperimentsService) raisedBaseline(ctx context.Context, pe, patched *domain.PlatformExperiment, reason string, by *domain.Actor) (domain.BaselineRaise, string, error) {
 	current, err := s.baseline(ctx, pe, pe.BaselineJobID)
 	if err != nil {
 		return domain.BaselineRaise{}, "", fmt.Errorf("platform_experiments: read baseline %s: %w", pe.BaselineJobID, err)
+	}
+	if current == nil || current.Job == nil {
+		return domain.BaselineRaise{}, "", fmt.Errorf("platform_experiments: baseline job %s of running %s not found", pe.BaselineJobID, pe.ID)
 	}
 	candidate, err := s.baseline(ctx, patched, patched.BaselineJobID)
 	if err != nil {
@@ -253,15 +257,15 @@ func (s *PlatformExperimentsService) raisedBaseline(ctx context.Context, pe, pat
 	if candidate == nil || candidate.Job == nil || candidate.Job.PlatformExperimentID != pe.ID {
 		return domain.BaselineRaise{}, "", refusedBaseline("no_baseline", "baseline_job_id %q is no job of this platform experiment: name a COMPLETED job of it that measured the control in a stronger configuration", patched.BaselineJobID)
 	}
+	if candidate.Job.CodeRef != current.Job.CodeRef {
+		return domain.BaselineRaise{}, "", refuseUpdate(422, "baseline_code_differs", "job %s ran %s, and the baseline's code is %s (job %s): a raised baseline runs the baseline's commit unchanged, only its arguments or environment differ. Run that commit in the stronger configuration and name that job", candidate.Job.ID, candidate.Job.CodeRef, current.Job.CodeRef, pe.BaselineJobID)
+	}
 	if err := checkMeasurement(patched, candidate); err != nil {
 		return domain.BaselineRaise{}, "", err
 	}
 	ranked, _ := domain.PrimaryRankingMetric(patched.Metrics)
 	to := candidate.Reported[ranked.Key]
-	from, measured := 0.0, current != nil
-	if measured {
-		from, measured = current.Reported[ranked.Key]
-	}
+	from, measured := current.Reported[ranked.Key]
 	if measured && !ranked.Better(to, from) {
 		return domain.BaselineRaise{}, "", refuseUpdate(422, "baseline_not_stronger", "job %s measured %s = %g, and the baseline, job %s, %g: a raised baseline is strictly better on the ranking metric (%s)", candidate.Job.ID, ranked.Key, to, pe.BaselineJobID, from, ranked.Direction)
 	}

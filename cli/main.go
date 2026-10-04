@@ -742,9 +742,10 @@ baseline_not_in_environment: JOB did not run in the environment the head of the 
 declares in .hypothesisloop/Dockerfile.
 
 --baseline-job JOB --reason TEXT raises the baseline while the run goes on, to a stronger
-COMPLETED job of the experiment that measured the control in a better configuration (a setting
-the control already has, not a new idea), whoever ran it on whichever branch. TEXT says which
-configuration. JOB is held to the checks above but the agent's role and the branch, and must be
+COMPLETED job of the experiment that ran the baseline's code unchanged in a better configuration
+of the control, whoever ran it on whichever branch: its commit equals the current baseline's
+code_ref and only its arguments or environment differ (baseline_code_differs names both commits
+otherwise). TEXT says which configuration. JOB is held to the checks above but the agent's role and the branch, and must be
 strictly better than the baseline on the first ranking metric (baseline_not_stronger). The
 description's measured block is rewritten from JOB, the raise is kept in baseline_raises and the
 record of the close, every agent is told (platform_experiment.baseline), and hl results sets the
