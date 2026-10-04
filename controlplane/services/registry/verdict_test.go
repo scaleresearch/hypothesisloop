@@ -39,7 +39,7 @@ func TestAConfirmedOrRefutedVerdictNeedsARepeatedRunAndACompletedControl(t *test
 			says    []string
 		}{
 			"one run, no control":       {Verdict{Status: status}, []string{"no control is named", "against", "inconclusive"}},
-			"one run with a control":    {Verdict{Status: status, Against: "job-control"}, []string{"needs 2 completed jobs", "has 1 (job-1)", "run it again"}},
+			"one run with a control":    {Verdict{Status: status, Against: "job-control"}, []string{"needs 2 completed jobs", "has 1 (job-1)", "where results vary between runs", "run it again", "for a deterministic job"}},
 			"its only run as control":   {Verdict{Status: status, Against: "job-1"}, []string{"has 0 (none)"}},
 			"a control still running":   {Verdict{Status: status, Against: "job-control-running"}, []string{"is RUNNING"}},
 			"a control of another one":  {Verdict{Status: status, Against: "job-elsewhere"}, []string{"no job of this platform experiment"}},

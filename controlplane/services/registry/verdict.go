@@ -34,8 +34,9 @@ func (e *UnsupportedVerdictError) Error() string { return e.Detail }
 
 // supported checks a confirmed or refuted verdict against the jobs on record. The rule knows
 // nothing of the task: it asks for a repeated measurement and a named control, both finished,
-// both of this platform experiment. What it cannot see (a failure that needs no repeat, a
-// control measured elsewhere) the agent states in Despite, which is kept beside the verdict.
+// both of this platform experiment. What it cannot see (a deterministic job, whose repeat gives
+// the same numbers, a failure that needs no repeat, a control measured elsewhere) the agent
+// states in Despite, which is kept beside the verdict.
 func (s *Service) supported(ctx context.Context, h *domain.Hypothesis, v Verdict) error {
 	if v.Status != domain.HypothesisConfirmed && v.Status != domain.HypothesisRefuted {
 		return nil
@@ -56,9 +57,10 @@ func (s *Service) supported(ctx context.Context, h *domain.Hypothesis, v Verdict
 			own = append(own, job.ID)
 		}
 	}
-	otherwise := fmt.Sprintf("Until then the verdict is inconclusive. If the record cannot show what you know (a failure that needs "+
-		"no repeat, a control measured outside this experiment), give the verdict with despite, a sentence of at least %d "+
-		"characters saying why it holds without them: hl hypothesis status %s %s --despite \"<why>\"", minDespiteLength, h.ID, v.Status)
+	otherwise := fmt.Sprintf("Until then the verdict is inconclusive. A repeat is needed only where results vary between runs: "+
+		"for a deterministic job (the same code and data give the same numbers), a failure that needs no repeat, or a control "+
+		"measured outside this experiment, give the verdict with despite, a sentence of at least %d characters saying why it "+
+		"holds without them: hl hypothesis status %s %s --despite \"<why>\"", minDespiteLength, h.ID, v.Status)
 	if v.Against == "" {
 		return &UnsupportedVerdictError{Detail: fmt.Sprintf("%s says the hypothesis's jobs differ from a control, and no control is named: give the completed job you compare with as against (a baseline run, or the same job without your change; run one if there is none). %s", v.Status, otherwise)}
 	}
@@ -77,7 +79,7 @@ func (s *Service) supported(ctx context.Context, h *domain.Hypothesis, v Verdict
 		if len(own) > 0 {
 			have = strings.Join(own, ", ")
 		}
-		return &UnsupportedVerdictError{Detail: fmt.Sprintf("%s needs %d completed jobs on the hypothesis besides the control %s, and it has %d (%s): one run does not tell an effect from the spread between two runs of the same thing, so run it again. %s", v.Status, minJobsForAVerdict, v.Against, len(own), have, otherwise)}
+		return &UnsupportedVerdictError{Detail: fmt.Sprintf("%s needs %d completed jobs on the hypothesis besides the control %s, and it has %d (%s): where results vary between runs, one run does not tell an effect from that spread, so run it again. %s", v.Status, minJobsForAVerdict, v.Against, len(own), have, otherwise)}
 	}
 	return nil
 }

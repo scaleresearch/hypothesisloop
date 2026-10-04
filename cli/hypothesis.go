@@ -81,7 +81,7 @@ var hypothesisCommands = []subcommand{
 	{"checkout", "put the clone on your branch for a hypothesis, made from what the hypothesis builds on", hypothesisCheckout, asAgent},
 	{"link", "add a link from your own hypothesis", hypothesisLink, everyone},
 	{"comment", "add a note to a hypothesis", hypothesisComment, everyone},
-	{"status", "set your hypothesis's verdict; confirmed and refuted need two completed jobs of its own besides the control", hypothesisStatus, everyone},
+	{"status", "set your hypothesis's verdict; confirmed and refuted need two completed jobs of its own besides the control, or --despite with why one suffices (a deterministic job)", hypothesisStatus, everyone},
 	{"list", "hypotheses, most recent first", hypothesisList, everyone},
 	{"get", "one hypothesis with its links, findings, implementations, comments and jobs, short unless --full", hypothesisGet, everyone},
 	{"query", "read-only Cypher over the graph, including its text search", hypothesisQuery, everyone},
@@ -483,9 +483,11 @@ kept as who gave the verdict.
 confirmed and refuted say the hypothesis's jobs differ from a control, so they need the record
 to show it: --against names the control, a completed job of this experiment (a baseline run, or
 the same job without your change), and the hypothesis has two completed jobs of its own besides
-it. One run with no measured control is inconclusive. When the record cannot show what you know
-(a failure that needs no repeat, a control measured outside this experiment), --despite takes a
-sentence of why the verdict holds anyway. What a verdict rests on is kept as a comment.`, stderr)
+it. One run with no measured control is inconclusive. A repeat is needed only where results vary
+between runs. When the record cannot show what you know (a deterministic job, whose repeat gives
+the same numbers; a failure that needs no repeat; a control measured outside this experiment),
+--despite takes a sentence of why the verdict holds anyway. What a verdict rests on is kept as a
+comment.`, stderr)
 	agent := fs.String("agent", "", "agent whose hypothesis ID is (default the token's agent, else the caller's own)")
 	status := fs.String("status", "", "")
 	against := fs.String("against", "", "the control job a confirmed or refuted verdict compares with")
