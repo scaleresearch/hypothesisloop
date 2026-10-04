@@ -10,7 +10,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Eyebrow, Text } from '@/components/ui/text'
-import { LinkButton } from '@/components/graph-edit'
+import { IdeaText, LinkButton } from '@/components/graph-edit'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { Actor, Verdict } from '@/components/actor'
 import { linkGroups } from '@/lib/hypothesis-graph'
@@ -81,9 +81,7 @@ export function HypothesisPanel({ graph, nodeByID, selected, onSelect }: Hypothe
   return (
     <Section title="Hypothesis" actions={<Badge status={node.status}>{node.status}</Badge>}>
       <Stack>
-        <Text pre className="max-h-60 overflow-y-auto leading-relaxed">
-          {node.text}
-        </Text>
+        <IdeaText node={node} />
         <Text as="div" variant="meta">
           <Actor actor={node.actor} agentID={node.agent_id} /> · {relTime(node.created_at)}
           {node.status_changed_at && <> · <Verdict hypothesis={node} /></>}

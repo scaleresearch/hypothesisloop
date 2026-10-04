@@ -420,6 +420,16 @@ export function addHumanHypothesisLink(
   return apiSend<HypothesisLink[]>('POST', `/hypotheses/${hypothesisID}/links`, { type, to })
 }
 
+// The author edits their own idea, and the author or an org owner removes it, while no agent has
+// acted on it and the experiment is open.
+export function editHumanHypothesis(hypothesisID: string, text: string): Promise<Hypothesis> {
+  return apiSend<Hypothesis>('PATCH', `/hypotheses/${hypothesisID}`, { text })
+}
+
+export async function removeHumanHypothesis(hypothesisID: string): Promise<void> {
+  await answer('DELETE', `/hypotheses/${hypothesisID}`)
+}
+
 export function addHumanHypothesisComment(hypothesisID: string, text: string): Promise<HypothesisComment> {
   return apiSend<HypothesisComment>('POST', `/hypotheses/${hypothesisID}/comments`, { text })
 }

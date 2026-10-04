@@ -2,7 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { useMemo, useState } from 'react'
 import type { KeyedMutator } from 'swr'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { addHumanHypothesisLink, registerHumanHypothesis } from '@/lib/api'
+import { addHumanHypothesisLink, editHumanHypothesis, registerHumanHypothesis, removeHumanHypothesis } from '@/lib/api'
+import { resolveTenant, TenantContext } from '@/lib/tenant'
 import type { RegisteredHypothesis } from '@/lib/api'
 import { AddIdeaButton, GraphEditorProvider, IdeaEditor, LinkBar, useGraphEditor } from '@/components/graph-edit'
 import { HypothesisPanel } from '@/components/hypothesis-panel'
@@ -13,7 +14,7 @@ import type { HypothesisGraph, HypothesisGraphNode } from '@/types'
 
 // Its dot pattern reads a size jsdom never lays out.
 vi.mock('@xyflow/react', async original => ({ ...await original(), Background: () => null }))
-vi.mock('@/lib/api', () => ({ registerHumanHypothesis: vi.fn(), addHumanHypothesisLink: vi.fn() }))
+vi.mock('@/lib/api', () => ({ registerHumanHypothesis: vi.fn(), addHumanHypothesisLink: vi.fn(), editHumanHypothesis: vi.fn(), removeHumanHypothesis: vi.fn() }))
 vi.mock('@/components/agent-label', () => ({ AgentLabel: ({ id }: { id: string }) => <span>{id}</span>, useAgentName: () => (id: string) => id }))
 
 const at = '2026-01-01T00:00:00Z'
@@ -43,17 +44,28 @@ function registered(id: string, text: string, links: Array<{ type: 'builds_on' |
   }
 }
 
-function Harness({ view }: { view: 'graph' | 'outline' }) {
-  const [graph, setGraph] = useState(initial)
+// What reading the graph again answers, when a test changed it behind the view.
+let served: HypothesisGraph | null = null
+
+function Harness({ view, role = 'member', graph: start = initial }: { view: 'graph' | 'outline'; role?: 'owner' | 'member'; graph?: HypothesisGraph }) {
+  const [graph, setGraph] = useState(start)
   const [selected, setSelected] = useState(initial.root)
   const mutate = (async (change?: unknown) => {
     if (typeof change === 'function') setGraph(g => change(g))
+    else if (served) setGraph(served)
     return undefined
   }) as KeyedMutator<HypothesisGraph>
   const editor = useGraphEditor({ graph, rootLabel: 'Vision benchmark', canWrite: true, mutate, onSelect: setSelected })
   const positions = useMemo(() => layoutGraph(graph), [graph])
   const common = { graph, rootLabel: 'Vision benchmark', selected, hits: new Set<string>(), filters: { status: '', owner: '' }, onSelect: setSelected }
+  const resolved = resolveTenant({
+    kind: 'user', user_id: 'u1',
+    orgs: [{ id: 'org_a', name: 'Ada', role, created_at: at }],
+    projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
+  }, '')
+  if (resolved.state !== 'selected') throw new Error('no tenant')
   return (
+    <TenantContext.Provider value={resolved.tenant}>
     <GraphEditorProvider value={editor}>
       <AddIdeaButton />
       <LinkBar />
@@ -63,8 +75,11 @@ function Harness({ view }: { view: 'graph' | 'outline' }) {
       {view === 'graph'
         ? <div style={{ width: 1000, height: 800 }}><HypothesisGraphCanvas {...common} positions={positions} focus="" minimap={false} /></div>
         : <HypothesisOutline {...common} />}
-      {selected !== graph.root && <HypothesisPanel graph={graph} nodeByID={new Map(graph.nodes.map(n => [n.id, n]))} selected={selected} onSelect={setSelected} />}
+      <section aria-label="Side panel">
+        {selected !== graph.root && <HypothesisPanel graph={graph} nodeByID={new Map(graph.nodes.map(n => [n.id, n]))} selected={selected} onSelect={setSelected} />}
+      </section>
     </GraphEditorProvider>
+    </TenantContext.Provider>
   )
 }
 
@@ -82,6 +97,7 @@ beforeAll(() => {
 })
 
 beforeEach(() => {
+  served = null
   vi.mocked(registerHumanHypothesis).mockReset()
   vi.mocked(addHumanHypothesisLink).mockReset()
 })
@@ -287,5 +303,69 @@ describe('in the outline', () => {
     fireEvent.change(search, { target: { value: 'cosine' } })
     fireEvent.click(within(search.parentElement!).getByRole('button', { name: /a cosine schedule helps/ }))
     await waitFor(() => expect(addHumanHypothesisLink).toHaveBeenCalledExactlyOnceWith('hyp-1', 'contradicts', 'hyp-2'))
+  })
+})
+
+describe('a person\'s own idea', () => {
+  const bob = { kind: 'user' as const, id: 'u2', name: 'Bob' }
+  const withBob: HypothesisGraph = {
+    ...initial,
+    nodes: [...initial.nodes, { ...idea('hyp-4', 'mixup helps', ['pe-x']), actor: bob }],
+    edges: [...initial.edges, { from: 'hyp-4', to: 'pe-x', type: 'builds_on', agent_id: '', actor: bob, created_at: at }],
+  }
+  const panel = () => screen.getByRole('region', { name: 'Side panel' })
+
+  it('is edited inline by its author, and the graph read again', async () => {
+    vi.mocked(editHumanHypothesis).mockResolvedValue({} as never)
+    served = { ...initial, nodes: initial.nodes.map(n => (n.id === 'hyp-1' ? { ...n, text: 'a short warmup helps' } : n)) }
+    render(<Harness view="outline" />)
+    fireEvent.click(screen.getByRole('button', { name: /warmup helps/ }))
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Edit' }))
+    fireEvent.change(within(panel()).getByRole('textbox', { name: 'Text of the idea' }), { target: { value: 'a short warmup helps' } })
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(within(panel()).getByText('a short warmup helps')).toBeTruthy())
+    expect(editHumanHypothesis).toHaveBeenCalledExactlyOnceWith('hyp-1', 'a short warmup helps')
+    expect(within(panel()).queryByRole('textbox')).toBeNull()
+  })
+
+  it('is removed after a confirmation, and the platform\'s refusal is shown as it says it', async () => {
+    vi.mocked(removeHumanHypothesis).mockRejectedValueOnce(new Error('hyp-1 is part of the record: job j1 tested it. Add a comment to it instead'))
+    render(<Harness view="outline" />)
+    fireEvent.click(screen.getByRole('button', { name: /warmup helps/ }))
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Remove' }))
+    expect(within(panel()).getByText('Remove this idea and its comments?')).toBeTruthy()
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Remove' }))
+    expect(await within(panel()).findByText('hyp-1 is part of the record: job j1 tested it. Add a comment to it instead')).toBeTruthy()
+
+    vi.mocked(removeHumanHypothesis).mockResolvedValueOnce(undefined)
+    served = { ...initial, nodes: initial.nodes.filter(n => n.id !== 'hyp-1'), edges: initial.edges.filter(e => e.from !== 'hyp-1') }
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Remove' }))
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(screen.getByLabelText('selected').textContent).toBe(''))
+    expect(removeHumanHypothesis).toHaveBeenLastCalledWith('hyp-1')
+    expect(screen.queryByRole('button', { name: /warmup helps/ })).toBeNull()
+  })
+
+  it('is changed by nobody else: an owner of its org only removes it, and an agent\'s idea takes neither', () => {
+    const { unmount } = render(<Harness view="outline" graph={withBob} />)
+    fireEvent.click(screen.getByRole('button', { name: /mixup helps/ }))
+    expect(within(panel()).queryByRole('button', { name: 'Edit' })).toBeNull()
+    expect(within(panel()).queryByRole('button', { name: 'Remove' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /a cosine schedule helps/ }))
+    expect(within(panel()).queryByRole('button', { name: 'Remove' })).toBeNull()
+    unmount()
+
+    render(<Harness view="outline" graph={withBob} role="owner" />)
+    fireEvent.click(screen.getByRole('button', { name: /mixup helps/ }))
+    expect(within(panel()).queryByRole('button', { name: 'Edit' })).toBeNull()
+    expect(within(panel()).getByRole('button', { name: 'Remove' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /a cosine schedule helps/ }))
+    expect(within(panel()).queryByRole('button', { name: 'Remove' })).toBeNull()
+  })
+
+  it('is left as it is once another idea links to it', () => {
+    render(<Harness view="outline" graph={{ ...initial, edges: [...initial.edges, { from: 'hyp-2', to: 'hyp-1', type: 'related', agent_id: 'ag-1', actor: ada, created_at: at }] }} />)
+    fireEvent.click(screen.getByRole('button', { name: /^open warmup helps/ }))
+    expect(within(panel()).queryByRole('button', { name: 'Edit' })).toBeNull()
   })
 })
