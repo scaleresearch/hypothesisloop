@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -459,5 +460,86 @@ func TestAnEnvironmentKeepsTheImageItsToolsComeFrom(t *testing.T) {
 	}
 	if made.Tools != tools || assigned.Tools != tools {
 		t.Errorf("made %+v and assigned %+v, want both with the tools' image", made, assigned)
+	}
+}
+
+// An agent that asks for a build while it builds is told once it ends, live and replayed, with
+// the outcome and, once the file failed, where the end of its output is read. One that asks of a
+// build already over waits for nothing, and asking again once it ended waits for the next build.
+func TestAnAgentThatAskedForABuildIsToldItEnded(t *testing.T) {
+	w := newEnvironments(t)
+	ctx := context.Background()
+	codeRef := "https://example.com/repo.git@" + strings.Repeat("c", 40)
+	before := cursorNow(t, w.pool)
+	events, stop := listenForEvents(t, w.pool)
+	defer stop()
+
+	failing := w.ensure(t, w.orgA, "told failing")
+	for _, image := range []string{"pytorch", "another"} {
+		if err := w.envs.AwaitEnvironmentBuild(ctx, failing.Key, w.peA, w.agent, codeRef, image); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := w.assign(t, failing.Key, w.ofA)
+	if !w.finish(t, w.ofA, env, domain.EnvironmentBuildOutcome{Fault: domain.EnvironmentFaultFile, LogTail: "E: no package"}) {
+		t.Fatal("the assigned cluster's report was refused")
+	}
+	failed := awaitEvent(t, events, EventEnvironmentStatus, failing.Key)
+	if failed.Value != "failed" || failed.AgentID != w.agent || failed.PlatformExperimentID != w.peA ||
+		!strings.Contains(failed.Detail, "commit cccccccccccc ") || !strings.Contains(failed.Detail, "on pytorch") || !strings.Contains(failed.Detail, "`hl env status`") {
+		t.Fatalf("failed: got = %+v, want it failed for the agent, naming the commit, the image and hl env status", failed)
+	}
+	if own := (EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent}); !own.Matches(failed) {
+		t.Error("the agent's own subscription does not carry the end of its build")
+	}
+	if rival := (EventFilter{PlatformExperimentID: w.peA, AgentID: "another"}); rival.Matches(failed) {
+		t.Error("a rival's subscription carries the end of the agent's build")
+	}
+
+	ready := w.ensure(t, w.orgA, "told ready")
+	if err := w.envs.AwaitEnvironmentBuild(ctx, ready.Key, w.peA, w.agent, codeRef, "pytorch"); err != nil {
+		t.Fatal(err)
+	}
+	env = w.assign(t, ready.Key, w.ofA)
+	if !w.finish(t, w.ofA, env, domain.EnvironmentBuildOutcome{Image: "registry.test/env@sha256:" + w.suffix}) {
+		t.Fatal("the assigned cluster's report was refused")
+	}
+	built := awaitEvent(t, events, EventEnvironmentStatus, ready.Key)
+	if built.Value != "ready" || !strings.Contains(built.Detail, "is built on pytorch") {
+		t.Fatalf("ready: got = %+v, want it built", built)
+	}
+	if decisions := (EventFilter{PlatformExperimentID: w.peA, Decisions: true}); decisions.Matches(built) || !decisions.Matches(failed) {
+		t.Error("a decisions stream carries a build that is ready, or not one that failed")
+	}
+
+	if err := w.envs.AwaitEnvironmentBuild(ctx, ready.Key, w.peA, w.agent, codeRef, "pytorch"); err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := NewEventsStore(w.pool, noHypothesisEvents{}).Replay(ctx, EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent}, before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var told []Event
+	for _, e := range replayed {
+		if e.Kind == EventEnvironmentStatus {
+			told = append(told, e)
+		}
+	}
+	if len(told) != 2 || told[0].Identity() != failed.Identity() || told[1].Identity() != built.Identity() {
+		t.Fatalf("replayed: got = %+v, want the two live events %+v, %+v", told, failed, built)
+	}
+
+	again := w.ensure(t, w.orgA, "told failing")
+	if err := w.envs.AwaitEnvironmentBuild(ctx, again.Key, w.peA, w.agent, codeRef, "pytorch"); err != nil {
+		t.Fatal(err)
+	}
+	replayed, err = NewEventsStore(w.pool, noHypothesisEvents{}).Replay(ctx, EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent}, before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range replayed {
+		if e.Kind == EventEnvironmentStatus && e.Subject == again.Key {
+			t.Errorf("asked again once it failed: still told %+v, want it waiting for the next build", e)
+		}
 	}
 }

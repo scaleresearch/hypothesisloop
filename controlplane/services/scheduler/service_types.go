@@ -52,6 +52,9 @@ type Store interface {
 	FindingSummary(ctx context.Context, experimentID string) (string, error)
 	// GetEnvironment is the environment of key, nil when there is none.
 	GetEnvironment(ctx context.Context, key string) (*domain.Environment, error)
+	// AwaitEnvironmentBuild has an agent told once the build of key it asked for ends
+	// (db.EnvironmentsStore.AwaitEnvironmentBuild).
+	AwaitEnvironmentBuild(ctx context.Context, key, peID, agentID, codeRef, image string) error
 	// ProjectOrg and RegisteredClusters say which clusters take a job's org's jobs, and which
 	// image each runs.
 	ProjectOrg(ctx context.Context, projectID string) (string, error)

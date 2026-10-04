@@ -1526,3 +1526,47 @@ $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS agent_messages_notify ON agent_messages;
 CREATE TRIGGER agent_messages_notify AFTER INSERT ON agent_messages
     FOR EACH ROW EXECUTE FUNCTION hypothesisloop_agent_message_notify();
+
+-- Each agent that asked for the build of an environment (hl env build, hl env run) while it was
+-- building, told environment.status once that build ends, ready or failed, with what to do next:
+-- a job waiting for it is told by its own status, and an agent that asked ahead had no job to be
+-- told by. code_ref and image are what it last asked with. ended_xid is the transaction that
+-- ended the build, NULL while it builds, which the event replays from with the state and detail
+-- it was told. Asking again once it ended waits for the next build.
+CREATE TABLE IF NOT EXISTS environment_waiters (
+    environment_key        TEXT   NOT NULL REFERENCES environments (key) ON DELETE CASCADE,
+    platform_experiment_id TEXT   NOT NULL REFERENCES platform_experiments (id) ON DELETE CASCADE,
+    agent_id               TEXT   NOT NULL,
+    code_ref               TEXT   NOT NULL,
+    image                  TEXT   NOT NULL,
+    state                  TEXT   NOT NULL DEFAULT '',
+    detail                 TEXT   NOT NULL DEFAULT '',
+    ended_xid              BIGINT,
+    PRIMARY KEY (environment_key, platform_experiment_id, agent_id)
+);
+CREATE INDEX IF NOT EXISTS environment_waiters_ended ON environment_waiters (platform_experiment_id, ended_xid) WHERE ended_xid IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION hypothesisloop_environment_ended_notify() RETURNS trigger AS $$
+DECLARE
+    w environment_waiters;
+BEGIN
+    FOR w IN
+        UPDATE environment_waiters SET state = NEW.state, ended_xid = pg_current_xact_id()::text::bigint,
+            detail = 'the environment commit ' || left(right(code_ref, 40), 12) || ' declares in .hypothesisloop/Dockerfile '
+                || CASE WHEN NEW.state = 'ready' THEN 'is built on ' || image || ': a job of that commit on that image runs in it'
+                        WHEN NEW.fault = 'file' THEN 'did not build on ' || image || ': `hl env status` at that commit prints the end of its output. Fix the file, commit and build again'
+                        ELSE 'was not built on ' || image || ', no fault of the file''s: the platform could not build it, and `hl env build` builds it again' END
+        WHERE environment_key = NEW.key AND ended_xid IS NULL
+        RETURNING *
+    LOOP
+        PERFORM hypothesisloop_notify_event('environment.status', w.environment_key, w.state, w.detail,
+            w.platform_experiment_id, w.agent_id);
+    END LOOP;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS environments_ended_notify ON environments;
+CREATE TRIGGER environments_ended_notify AFTER UPDATE OF state ON environments
+    FOR EACH ROW WHEN (OLD.state = 'building' AND NEW.state <> 'building')
+    EXECUTE FUNCTION hypothesisloop_environment_ended_notify();

@@ -104,6 +104,10 @@ const (
 	// this an agent whose job never starts learns nothing. The job's row records the reason its
 	// owner was told, once, and that write is the event, live and replayed.
 	EventJobHeld = "job.held"
+	// EventEnvironmentStatus says the build of an environment an agent asked for ended, ready or
+	// failed, to that agent. A job waiting for it is told by its own status; an agent that built
+	// ahead of its job had nothing else to tell it.
+	EventEnvironmentStatus = "environment.status"
 )
 
 // EventKindDoc describes one kind well enough to subscribe to it without reading this file: what
@@ -168,6 +172,8 @@ var EventKinds = []EventKindDoc{
 			"baseline_late is a job of an open platform experiment's baseline, queued or placed and not running yet, that started now would end after baseline_due_at: detail says so with baseline_due_at, sent once per job."},
 	{Kind: EventJobUnderperforming, Subject: "experiment id", Value: "the metric name it trails on",
 		Description: "This job trails its cohort on the ranking metric by a real margin. An opinion, not a command: nothing stops it but you. Consider POST /experiments/{id}/cancel if it is not worth its allocation. Sent once per job, and not for a job that has already ended."},
+	{Kind: EventEnvironmentStatus, Subject: "environment key", Value: "ready or failed",
+		Description: "The build of an environment this agent asked for while it was building (POST /environments: hl env build, hl env run) ended. detail names the commit and image it asked with and says what to do: once the file failed, GET /environments (hl env status) has the end of its output. Sent once per build, to each agent that asked."},
 }
 
 func init() {
@@ -236,7 +242,8 @@ func isExperimentSubject(kind string) bool {
 // one agent's stop condition, the boundary is about the ladder.
 func isAgentOwned(kind string) bool {
 	switch kind {
-	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventQuotaChanged, EventAgentCut, EventAgentFinished, EventAgentIdle, EventAgentMessage, EventJobUnderperforming, EventJobHeld:
+	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventQuotaChanged, EventAgentCut, EventAgentFinished, EventAgentIdle, EventAgentMessage, EventJobUnderperforming, EventJobHeld,
+		EventEnvironmentStatus:
 		return true
 	default:
 		return false
@@ -304,6 +311,8 @@ func (f EventFilter) Matches(e Event) bool {
 			return domain.ExperimentStatus(e.Value).IsTerminal()
 		case e.Kind == EventExperimentBlocked:
 			return !domain.QueueReasonClearsByWaiting(e.Value)
+		case e.Kind == EventEnvironmentStatus:
+			return e.Value == string(domain.EnvironmentFailed)
 		default:
 			return true
 		}
@@ -556,6 +565,7 @@ FROM pg_current_snapshot() s`).Scan(&horizon, &next); err != nil {
 		replayRevisions,
 		replayBaselineRaises,
 		replayAgentMessages,
+		replayEnvironmentBuilds,
 	} {
 		part, err := derive(ctx, tx, filter.PlatformExperimentID, since)
 		if err != nil {
@@ -933,6 +943,25 @@ func replayAgentMessages(ctx context.Context, tx pgx.Tx, peID string, since int6
 	})
 	if err != nil {
 		return nil, fmt.Errorf("events_store.replayAgentMessages: %w", err)
+	}
+	return events, nil
+}
+
+// replayEnvironmentBuilds derives environment.status from the agents that waited for a build,
+// one row each, which keeps what each was told.
+func replayEnvironmentBuilds(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]Event, error) {
+	rows, err := tx.Query(ctx, `SELECT environment_key, agent_id, state, detail, ended_xid FROM environment_waiters
+WHERE platform_experiment_id = $1 AND ended_xid >= $2`, peID, since)
+	if err != nil {
+		return nil, fmt.Errorf("events_store.replayEnvironmentBuilds: %w", err)
+	}
+	events, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Event, error) {
+		event := Event{Kind: EventEnvironmentStatus, PlatformExperimentID: peID}
+		err := row.Scan(&event.Subject, &event.AgentID, &event.Value, &event.Detail, &event.Position)
+		return event, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("events_store.replayEnvironmentBuilds: %w", err)
 	}
 	return events, nil
 }

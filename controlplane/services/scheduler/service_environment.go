@@ -34,8 +34,9 @@ func (s *Service) WithBuildAssigner(builds BuildAssigner) *Service {
 // the one key, that a job of that commit naming that image waits for, so the job finds it built
 // or building. It returns the environment as it is then: ready, or building, assigned to a live
 // cluster that builds for the org and has room, or else by the first tick a job waits for it. A
-// failed one is built again, as a submit would.
-func (s *Service) BuildEnvironment(ctx context.Context, peID, codeRef, image string) (*domain.Environment, error) {
+// failed one is built again, as a submit would. An agent that asks, agentID, is told once the
+// build ends (environment.status): it may have no job yet that would be.
+func (s *Service) BuildEnvironment(ctx context.Context, peID, agentID, codeRef, image string) (*domain.Environment, error) {
 	pe, exp, err := s.environmentJob(ctx, peID, codeRef, image)
 	if err != nil {
 		return nil, err
@@ -48,6 +49,11 @@ func (s *Service) BuildEnvironment(ctx context.Context, peID, codeRef, image str
 	}
 	if s.builds == nil {
 		return nil, errors.New("scheduler: no build assigner is wired (WithBuildAssigner)")
+	}
+	if agentID != "" {
+		if err := s.store.AwaitEnvironmentBuild(ctx, exp.EnvironmentKey, peID, agentID, codeRef, image); err != nil {
+			return nil, fmt.Errorf("scheduler: await the build of %s: %w", exp.EnvironmentKey, err)
+		}
 	}
 	env, err := s.builds.AssignBuild(ctx, exp.EnvironmentKey)
 	if err != nil {
@@ -63,8 +69,9 @@ func (s *Service) BuildEnvironment(ctx context.Context, peID, codeRef, image str
 const ReasonEnvironmentNotRequested = "environment_not_requested"
 
 // FindEnvironment returns the environment commit codeRef declares, on image, for the org of
-// platform experiment peID, as it is, and builds nothing: a failed one stays failed.
-func (s *Service) FindEnvironment(ctx context.Context, peID, codeRef, image string) (*domain.Environment, error) {
+// platform experiment peID, as it is, and builds nothing: a failed one stays failed. An agent that
+// reads one building, agentID, is told once it ends, as one that asked for it is.
+func (s *Service) FindEnvironment(ctx context.Context, peID, agentID, codeRef, image string) (*domain.Environment, error) {
 	pe, exp, err := s.environmentJob(ctx, peID, codeRef, image)
 	if err != nil {
 		return nil, err
@@ -87,6 +94,11 @@ func (s *Service) FindEnvironment(ctx context.Context, peID, codeRef, image stri
 		return nil, noEnvironmentFile(codeRef)
 	case env == nil:
 		return nil, &AdmissionError{Reason: ReasonEnvironmentNotRequested, Message: fmt.Sprintf("the %s of commit %s on this image was never asked to be built: hl env build starts it", domain.EnvironmentFile, commit)}
+	}
+	if agentID != "" && env.State == domain.EnvironmentBuilding {
+		if err := s.store.AwaitEnvironmentBuild(ctx, env.Key, peID, agentID, codeRef, image); err != nil {
+			return nil, fmt.Errorf("scheduler: await the build of %s: %w", env.Key, err)
+		}
 	}
 	return env, nil
 }
@@ -165,6 +177,7 @@ func registerEnvironments(doc *apidocs.Doc, h *Handler) {
 		Summary: "Build the environment a commit declares, ahead of its job", Tags: []string{"experiments"},
 		Description: "Starts building the .hypothesisloop/Dockerfile of commit code_ref on image, the build a job of that commit naming that image waits for (environment_key), so the job finds it built or building when it is submitted. " +
 			"Asking again is safe: it answers the one environment as it is then, and builds again one that failed. " +
+			"An agent that asks while it builds is told once the build ends, ready or failed, as environment.status on its event stream. " +
 			"422 no_environment_file for a commit without the file, invalid_environment_file for one the platform does not build, no_environment_builder while no cluster the org may use builds, " +
 			"unknown_job_image and code_ref_not_in_repository as a submit answers them.",
 	}, func(ctx context.Context, in *struct{ Body environmentRequest }) (*struct{ Body environmentAnswer }, error) {
@@ -172,14 +185,17 @@ func registerEnvironments(doc *apidocs.Doc, h *Handler) {
 		if !ok {
 			return nil, auth.Internal(h.svc.logger, "build environment", errNoCaller)
 		}
-		peID := in.Body.PlatformExperimentID
-		if peID == "" && caller.Kind == auth.KindAgent {
-			peID = caller.PlatformExperimentID
+		peID, agentID := in.Body.PlatformExperimentID, ""
+		if caller.Kind == auth.KindAgent {
+			agentID = caller.AgentID
+			if peID == "" {
+				peID = caller.PlatformExperimentID
+			}
 		}
 		if err := access.PlatformExperiment(ctx, peID); err != nil {
 			return nil, err
 		}
-		env, err := h.svc.BuildEnvironment(ctx, peID, in.Body.CodeRef, in.Body.Image)
+		env, err := h.svc.BuildEnvironment(ctx, peID, agentID, in.Body.CodeRef, in.Body.Image)
 		if err != nil {
 			var refused *AdmissionError
 			if errors.As(err, &refused) {
@@ -193,6 +209,7 @@ func registerEnvironments(doc *apidocs.Doc, h *Handler) {
 		OperationID: "get-environment", Method: "GET", Path: "/environments",
 		Summary: "Read the environment a commit declares, building nothing", Tags: []string{"experiments"},
 		Description: "Answers the environment the .hypothesisloop/Dockerfile of commit code_ref on image is, as POST /environments answers it, and starts no build: one that failed stays failed. " +
+			"An agent that reads it building is told once the build ends, as environment.status. " +
 			"404 environment_not_requested while nothing asked for its build; 422 no_environment_file and invalid_environment_file as POST /environments answers them.",
 	}, func(ctx context.Context, in *struct {
 		PlatformExperimentID string `query:"platform_experiment_id" required:"false" doc:"The platform experiment whose repository holds the commit. Absent with an agent's token, it is that agent's."`
@@ -203,14 +220,17 @@ func registerEnvironments(doc *apidocs.Doc, h *Handler) {
 		if !ok {
 			return nil, auth.Internal(h.svc.logger, "get environment", errNoCaller)
 		}
-		peID := in.PlatformExperimentID
-		if peID == "" && caller.Kind == auth.KindAgent {
-			peID = caller.PlatformExperimentID
+		peID, agentID := in.PlatformExperimentID, ""
+		if caller.Kind == auth.KindAgent {
+			agentID = caller.AgentID
+			if peID == "" {
+				peID = caller.PlatformExperimentID
+			}
 		}
 		if err := access.PlatformExperiment(ctx, peID); err != nil {
 			return nil, err
 		}
-		env, err := h.svc.FindEnvironment(ctx, peID, in.CodeRef, in.Image)
+		env, err := h.svc.FindEnvironment(ctx, peID, agentID, in.CodeRef, in.Image)
 		if err != nil {
 			var refused *AdmissionError
 			if errors.As(err, &refused) {

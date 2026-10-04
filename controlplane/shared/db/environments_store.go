@@ -84,6 +84,22 @@ func (s *EnvironmentsStore) GetEnvironment(ctx context.Context, key string) (*do
 	return env, nil
 }
 
+// AwaitEnvironmentBuild has agentID of platform experiment peID told environment.status once the
+// build of key ends, when it is building now; codeRef and image are what the agent first asked
+// with while it builds, so asking again writes nothing until the build ended. The
+// environment's row is held while it is read, so a build that ends at once tells the agent or was
+// over before it asked.
+func (s *EnvironmentsStore) AwaitEnvironmentBuild(ctx context.Context, key, peID, agentID, codeRef, image string) error {
+	if _, err := s.pool.pool.Exec(ctx, `INSERT INTO environment_waiters (environment_key, platform_experiment_id, agent_id, code_ref, image)
+SELECT key, $2, $3, $4, $5 FROM environments WHERE key = $1 AND state = 'building' FOR SHARE
+ON CONFLICT (environment_key, platform_experiment_id, agent_id) DO UPDATE SET code_ref = EXCLUDED.code_ref, image = EXCLUDED.image,
+	state = '', detail = '', ended_xid = NULL
+WHERE environment_waiters.ended_xid IS NOT NULL`, key, peID, agentID, codeRef, image); err != nil {
+		return fmt.Errorf("environments_store.AwaitBuild: %w", err)
+	}
+	return nil
+}
+
 // AssignEnvironment decides which cluster builds the environment of key and returns it as it is
 // then. A building environment is assigned when it is assigned to none, its lease has passed, or
 // its cluster is not among holding: to the live cluster that builds for its org with the fewest

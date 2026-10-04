@@ -39,7 +39,8 @@ FILE is the job spec the job will be submitted with: its job.image, and metadata
 for any agent but the baseline. It defaults to the repository's .hypothesisloop/job.yaml when
 that exists. --image and --hypothesis set them, and override the file's. Prints the
 environment: its key, state (building, ready, failed) and a message saying where the build is,
-or the end of its output once the file failed.
+or the end of its output once the file failed. An agent that asks while it builds is told when
+the build ends, ready or failed, as environment.status on hl watch.
 
 Refusals: no_environment_file (the commit has no .hypothesisloop/Dockerfile);
 invalid_environment_file; no_environment_builder; unknown_job_image; code_ref_not_in_repository.`, stderr)
