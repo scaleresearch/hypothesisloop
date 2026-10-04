@@ -49,12 +49,16 @@ DISALLOWED_TOOLS = ["ScheduleWakeup", "Monitor", "TaskCreate", "TaskUpdate", "Ta
 # ToolSearch "select:WebSearch" first, and no researcher of run 8 or planner of run 9 searched at
 # all. With tool search off every allowed tool is sent whole, so these two are directly callable.
 CLI_ENV = {"ENABLE_TOOL_SEARCH": "false",
-           # The 2 min default backgrounds long commands, and agents then poll their output files.
-           # Without background tasks Bash has no run_in_background to wait in. The briefings say
-           # every command starts in the working directory: the CLI keeps a `cd` otherwise, and an
-           # agent that repeated one failed.
-           "BASH_DEFAULT_TIMEOUT_MS": "600000", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
-           "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1"}
+           # Background tasks stay on so subagents can run in the background: the CLI starts the
+           # lead's next turn when one ends. A backgrounded command is refused (_wait_hook), since
+           # agents polled their output files; the 10 min timeout keeps long commands in the
+           # foreground. The briefings say every command starts in the working directory: the CLI
+           # keeps a `cd` otherwise, and an agent that repeated one failed.
+           "BASH_DEFAULT_TIMEOUT_MS": "600000", "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1"}
+
+# Refused for a Bash call with run_in_background: work that outlasts a command goes to a subagent.
+BACKGROUND_COMMAND = ("Commands run in the foreground here. Work that should go on while you do something "
+                      "else goes to a subagent started with run_in_background; its end starts your next turn.")
 
 # The CLI writes each message as one line, and the SDK ends the session on a line past its bound,
 # 1 MB by default: a run 12 researcher whose six subagents read papers lost its session to one.
@@ -171,7 +175,13 @@ def _repeated_read(command: str, now: float) -> str | None:
 
 async def _wait_hook(hook_input, tool_use_id, context) -> dict:
     command = hook_input["tool_input"].get("command", "")
-    if _waits(command):
+    if hook_input["tool_input"].get("run_in_background"):
+        reason = BACKGROUND_COMMAND
+    elif hook_input.get("agent_id"):
+        # A subagent carries one idea to its jobs' results: waiting for them keeps nothing else
+        # from the agent, which gets its updates meanwhile.
+        return {}
+    elif _waits(command):
         reason = core.WAIT
     elif read := _repeated_read(command, time.monotonic()):
         reason = (f"`{read}` was read under {_REREAD_S // 60} minutes ago and no update has come since: "
@@ -830,6 +840,8 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     opening = await asyncio.to_thread(_opening, setup, resume_id, initial_prompt)
     connecting = time.monotonic()
     idle_s, told_nothing_in_flight = updates.IDLE_NUDGE_S, False
+    background: set[str] = set()
+    pending = None
     async with ClaudeSDKClient(options=options) as client:
         log.info("model CLI connected in %.1fs", time.monotonic() - connecting)
         await client.query(opening)
@@ -843,6 +855,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 async for message in _receive_turn(client):
                     _seen_session(setup, message)
                     _log_message(message, setup.cfg.agent_id)
+                    _note_background(message, background)
                     if isinstance(message, AssistantMessage) and message.usage and not message.parent_tool_use_id:
                         context_tokens = _context_tokens(message.usage)
                     if isinstance(message, RateLimitEvent) and message.rate_limit_info.status == "rejected":
@@ -921,10 +934,10 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 await _rotate(setup, handoff, resume_id)
                 return None, True
 
-            # The agent ended its turn. With no job of its own queued or running its wait waits
-            # for nothing: it is told so at once, and not again until an update or a job of its
-            # own comes.
-            if config.submits_jobs(cfg):
+            # The agent ended its turn. With no job of its own queued or running and nothing in the
+            # background its wait waits for nothing: it is told so at once, and not again until an
+            # update or a job of its own comes.
+            if config.submits_jobs(cfg) and not background:
                 in_flight = await updates.jobs_in_flight(watch_env)
                 if in_flight:
                     told_nothing_in_flight = False
@@ -935,13 +948,25 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                     await client.query(updates.NOTHING_IN_FLIGHT)
                     continue
             # Wait for the next batch of updates about its own jobs and hypotheses and hand it
-            # over on the same connection.
-            while True:
-                events = await updates.next_batch(watch_env, stopped, idle_s)
-                told = "" if stopped() else await _told(setup, events)
-                # A batch that tells nothing held only a revision answered since: the wait goes on.
-                if told or not events or stopped():
-                    break
+            # over on the same connection. While a subagent works, the turn the CLI starts when it
+            # ends comes first if it comes before the batch; a batch that came with it is handed
+            # over after it.
+            batch = asyncio.ensure_future(_next_told(setup, watch_env, stopped, idle_s)) if pending is None else pending
+            pending = None
+            if background and not batch.done():
+                own = asyncio.ensure_future(_own_turn(client, setup, background))
+                await asyncio.wait({batch, own}, return_when=asyncio.FIRST_COMPLETED)
+                if own.done():
+                    if batch.done():
+                        pending = batch
+                    else:
+                        batch.cancel()
+                        await asyncio.gather(batch, return_exceptions=True)
+                    _forget_job_reads()
+                    continue
+                own.cancel()
+                await asyncio.gather(own, return_exceptions=True)
+            events, told = await batch
             # A batch that comes with the end of the run, the close among its events, opens the
             # last turn rather than a turn of its own that the stop then cuts short.
             if await over(events):
@@ -957,6 +982,35 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             _forget_job_reads()
             await client.query(updates.IDLE_PROMPT.format(minutes=round(idle_s / 60)))
             idle_s = min(idle_s * 2, updates.IDLE_NUDGE_MAX_S)
+
+
+async def _next_told(setup: core.RunSetup, watch_env: dict[str, str], stopped, idle_s: float) -> tuple[list[dict], str]:
+    """The next batch of updates and what the agent is told of it. A batch that tells nothing held
+    only a revision answered since, and the wait goes on."""
+    while True:
+        events = await updates.next_batch(watch_env, stopped, idle_s)
+        told = "" if stopped() else await _told(setup, events)
+        if told or not events or stopped():
+            return events, told
+
+
+def _note_background(message, background: set[str]) -> None:
+    """Keeps background to the tasks the CLI says run in the background: subagents, and a command
+    the CLI backgrounded by itself."""
+    if isinstance(message, SystemMessage) and message.subtype == "background_tasks_changed":
+        background.clear()
+        background.update(task["task_id"] for task in message.data.get("tasks", []))
+
+
+async def _own_turn(client, setup: core.RunSetup, background: set[str]) -> None:
+    """Returns once the CLI starts a turn of the agent's own, which it does when a background
+    task ends; what the subagents do meanwhile is logged."""
+    async for message in client.receive_messages():
+        _seen_session(setup, message)
+        _log_message(message, setup.cfg.agent_id)
+        _note_background(message, background)
+        if isinstance(message, SystemMessage) and message.subtype == "init":
+            return
 
 
 def _restart_state(setup: core.RunSetup) -> tuple[str | None, str | None]:

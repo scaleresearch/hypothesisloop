@@ -410,6 +410,16 @@ class WaitTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(told["permissionDecision"], "deny", command)
             self.assertIn("To wait, reply with no command in it", told["permissionDecisionReason"])
 
+    async def test_a_backgrounded_command_is_refused_and_a_subagent_may_wait_for_its_jobs(self):
+        from hypothesisloop_agent.claude import run
+
+        told = (await run._wait_hook({"tool_name": "Bash", "tool_input": {"command": "make", "run_in_background": True}},
+                                     "tool-1", {}))["hookSpecificOutput"]
+        self.assertEqual((told["permissionDecision"], told["permissionDecisionReason"]), ("deny", run.BACKGROUND_COMMAND))
+        for command in ("hl job wait job-1", "sleep 90; hl job status job-1"):
+            self.assertEqual(await run._wait_hook({"tool_name": "Bash", "agent_id": "sub-1", "tool_input": {"command": command}},
+                                                  "tool-1", {}), {}, command)
+
     async def test_a_short_pause_and_a_command_that_only_names_sleep_run(self):
         from hypothesisloop_agent.claude import run
 
@@ -621,6 +631,68 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
         sent, _ = await self._turn_ends(cfg, [None, 2, 0, 0], [update, update, []])
         self.assertEqual(sent[1:], ["Platform updates:\ncomment.new hyp-1 agent by agent-b",
                                     "Platform updates:\ncomment.new hyp-1 agent by agent-b", updates.NOTHING_IN_FLIGHT])
+
+    # A lead whose subagents work in the background gets the turn the CLI starts when one ends,
+    # without waiting for a platform update, and is not told it has nothing in flight meanwhile.
+    async def test_a_subagent_ending_starts_the_next_turn_before_any_update(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from claude_agent_sdk import ResultMessage, SystemMessage
+
+        from hypothesisloop_agent.claude import run
+
+        stop_flag = [False]
+        sent = []
+        result = ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1, session_id="s")
+        turns = [[SystemMessage("background_tasks_changed", {"tasks": [{"task_id": "sub-1"}]}), result],
+                 [SystemMessage("background_tasks_changed", {"tasks": []}), result], [result]]
+
+        class Client:
+            def __init__(self, options):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def query(self, prompt):
+                sent.append(prompt)
+
+            async def receive_response(self):
+                for message in turns.pop(0):
+                    yield message
+
+            async def receive_messages(self):
+                yield SystemMessage("task_notification", {"task_id": "sub-1", "status": "completed"})
+                yield SystemMessage("init", {"session_id": "s"})
+                await asyncio.Event().wait()
+
+        waits = []
+
+        async def next_batch(env, stopped, idle_s):
+            waits.append(idle_s)
+            if len(waits) == 1:
+                await asyncio.Event().wait()
+            stop_flag[0] = True
+            return []
+
+        setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
+                                client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
+                                cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", role="competitor", api_url="http://x",
+                                                    token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
+        read = mock.AsyncMock(return_value=1)
+        with mock.patch.object(run, "ClaudeSDKClient", Client), \
+                mock.patch.object(updates, "next_batch", next_batch), \
+                mock.patch.object(updates, "jobs_in_flight", read), \
+                mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
+                redirect_stdout(StringIO()):
+            await asyncio.wait_for(run._run_one_session(setup, "m", None, stop_flag), timeout=5)
+        self.assertEqual((sent[:-1], len(waits), read.await_count), (["Begin."], 2, 1))
 
     async def test_a_coordinator_has_no_jobs_of_its_own_to_be_told_of(self):
         from types import SimpleNamespace
