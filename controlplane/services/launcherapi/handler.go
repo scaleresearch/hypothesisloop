@@ -32,16 +32,16 @@ type Store interface {
 	ListLauncherMachines(ctx context.Context, launcher string) ([]db.LauncherMachine, error)
 }
 
-// Metrics is where the rate limits the launchers report are kept: the run's health series.
+// Metrics is where the harness states the launchers report are kept: the run's health series.
 type Metrics interface {
-	RecordRateLimits(ctx context.Context, at time.Time, readings []domain.RateLimitReading) error
+	RecordHarnessState(ctx context.Context, at time.Time, states []domain.HarnessState) error
 }
 
 // MetricsDB is Metrics in the metrics store at URL.
 type MetricsDB struct{ URL string }
 
-func (m MetricsDB) RecordRateLimits(ctx context.Context, at time.Time, readings []domain.RateLimitReading) error {
-	return metricsdb.RecordRateLimits(ctx, m.URL, at, readings)
+func (m MetricsDB) RecordHarnessState(ctx context.Context, at time.Time, states []domain.HarnessState) error {
+	return metricsdb.RecordHarnessState(ctx, m.URL, at, states)
 }
 
 // Settings is what the platform's config decides about hosted machines.
@@ -97,9 +97,9 @@ type ObservedInstance struct {
 	// command ended.
 	Expired bool `json:"expired,omitempty" doc:"For an exited instance, true when its provider ended it at the provider's own limit on how long it rents one. Its end is recorded as expired, spends no restart and never stops the agent, which is asked for again under a new name."`
 	// Progress is a pointer so that "could not be read" differs from "read, and none printed".
-	Progress  *string `json:"progress,omitempty" maxLength:"64" doc:"For a running instance, the progress marker its command last printed: what follows hl-progress on the newest such line of its output, empty when it has printed none. Left out when the launcher could not read the output: an instance with no progress recorded for the platform's progress limit is then replaced with no restart spent. The platform compares it with the one before and reads nothing else from it."`
-	Activity  string  `json:"activity,omitempty" maxLength:"120" doc:"For a running instance, what its agent last said it is doing: what follows hl-activity on the newest such line of the output the progress marker is read from, left out when it has printed none. It rides on the report the launcher already makes. The platform keeps the latest with the time it first read it and answers it as activity on the agent, the coordinator or the draft."`
-	RateLimit string  `json:"rate_limit,omitempty" maxLength:"200" doc:"For a running instance, the model provider's rate limit as its agent last read it: what follows hl-rate-limit on the newest such line of the same output, space-separated key=value fields: status (allowed, allowed_warning or rejected), and when known type, utilization (0 to 1) and resets_at (Unix seconds). Left out when it has printed none. The platform writes it to the run's health series and reads nothing else from it."`
+	Progress     *string `json:"progress,omitempty" maxLength:"64" doc:"For a running instance, the progress marker its command last printed: what follows hl-progress on the newest such line of its output, empty when it has printed none. Left out when the launcher could not read the output: an instance with no progress recorded for the platform's progress limit is then replaced with no restart spent. The platform compares it with the one before and reads nothing else from it."`
+	Activity     string  `json:"activity,omitempty" maxLength:"120" doc:"For a running instance, what its agent last said it is doing: what follows hl-activity on the newest such line of the output the progress marker is read from, left out when it has printed none. It rides on the report the launcher already makes. The platform keeps the latest with the time it first read it and answers it as activity on the agent, the coordinator or the draft."`
+	HarnessState string  `json:"harness_state,omitempty" maxLength:"200" doc:"For a running instance, what its agent's harness last said of itself: what follows hl-state on the newest such line of the same output, space-separated key=value fields: subagents (how many it has running), turn (working or waiting), since (Unix seconds the turn has been so), and once it has read the model provider's rate limit model_status (allowed, allowed_warning or rejected) and when known model_type, model_utilization (0 to 1) and model_resets_at (Unix seconds). Left out when it has printed none. The platform writes it to the run's health series and reads nothing else from it."`
 }
 
 const (
@@ -227,7 +227,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 
 	out := &Desired{Instances: []Instance{}, Ending: []string{}, Image: h.cfg.Image, Refusal: refusal}
 	asked := 0
-	var readings []domain.RateLimitReading
+	var states []domain.HarnessState
 	for _, one := range all {
 		log := h.logger.With(zap.String("launcher", launcher), zap.String("platformExpID", one.platformExperimentID), zap.String("agentID", one.agentID))
 		current := one.instance
@@ -260,13 +260,13 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		// What the launcher reports counts only for the machine that is still the one wanted. A
 		// name that config has since changed is replaced and its end is nobody's fault.
 		if current.Name == instance.Name {
-			if reported := seen[current.Name]; reported.State == stateRunning && reported.RateLimit != "" {
-				reading, err := parseRateLimit(reported.RateLimit)
+			if reported := seen[current.Name]; reported.State == stateRunning && reported.HarnessState != "" {
+				state, err := parseHarnessState(reported.HarnessState)
 				if err != nil {
-					log.Warn("hosted instance reported a rate limit that cannot be read", zap.String("instance", current.Name), zap.Error(err))
+					log.Warn("hosted instance reported a harness state that cannot be read", zap.String("instance", current.Name), zap.Error(err))
 				} else {
-					reading.PlatformExperimentID, reading.AgentID, reading.Role = one.platformExperimentID, one.agentID, one.role
-					readings = append(readings, reading)
+					state.PlatformExperimentID, state.AgentID, state.Role = one.platformExperimentID, one.agentID, one.role
+					states = append(states, state)
 				}
 			}
 			after, ended, err := h.observe(ctx, one, seen, instance.Env["HL_TOKEN"])
@@ -302,11 +302,11 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		}
 		out.Instances = append(out.Instances, instance)
 	}
-	// The readings are health, which an answer does not wait for: one that is not written is
+	// The states are health, which an answer does not wait for: one that is not written is
 	// followed by the next pass's.
-	if len(readings) > 0 {
-		if err := h.metrics.RecordRateLimits(ctx, time.Now().UTC(), readings); err != nil {
-			h.logger.Error("record rate limits failed", zap.String("launcher", launcher), zap.Error(err))
+	if len(states) > 0 {
+		if err := h.metrics.RecordHarnessState(ctx, time.Now().UTC(), states); err != nil {
+			h.logger.Error("record harness states failed", zap.String("launcher", launcher), zap.Error(err))
 		}
 	}
 	// Written before the answer leaves: a launcher is removed only once a question of it listed
@@ -400,39 +400,85 @@ func said(activity, token string) string {
 	return strings.Join(strings.Fields(strings.ToValidUTF8(activity, "")), " ")
 }
 
-// parseRateLimit reads the rate limit a harness printed (agents/experimentator, progress.py
-// rate_limit_line): key=value fields, status required, other keys passed over.
-func parseRateLimit(line string) (domain.RateLimitReading, error) {
-	var reading domain.RateLimitReading
-	status := ""
+// parseHarnessState reads the state line a harness printed (agents/experimentator, progress.py):
+// key=value fields, subagents, turn and since required, the model_ ones present once the harness
+// has read a rate limit, and then model_status among them.
+func parseHarnessState(line string) (domain.HarnessState, error) {
+	var state domain.HarnessState
+	fields := map[string]string{}
 	for _, field := range strings.Fields(line) {
-		key, value, _ := strings.Cut(field, "=")
+		key, value, found := strings.Cut(field, "=")
+		if !found {
+			return state, fmt.Errorf("%q is no key=value field", field)
+		}
+		if _, twice := fields[key]; twice {
+			return state, fmt.Errorf("%s is given twice", key)
+		}
+		fields[key] = value
+	}
+	unixTime := func(key string) (time.Time, error) {
+		seconds, err := strconv.ParseInt(fields[key], 10, 64)
+		if err != nil || seconds <= 0 {
+			return time.Time{}, fmt.Errorf("%s %q is no Unix time", key, fields[key])
+		}
+		return time.Unix(seconds, 0).UTC(), nil
+	}
+	modelRead := false
+	for key, value := range fields {
+		var err error
 		switch key {
-		case "status":
-			status = value
-		case "utilization":
+		case "subagents":
+			state.Subagents, err = strconv.Atoi(value)
+			if err != nil || state.Subagents < 0 {
+				return state, fmt.Errorf("subagents %q is no count", value)
+			}
+		case "turn":
+			switch value {
+			case "working":
+			case "waiting":
+				state.TurnWaiting = true
+			default:
+				return state, fmt.Errorf("turn %q is neither working nor waiting", value)
+			}
+		case "since":
+			if state.TurnSince, err = unixTime(key); err != nil {
+				return state, err
+			}
+		case "model_status":
+			switch value {
+			case "allowed", "allowed_warning":
+			case "rejected":
+				state.Model.Rejected = true
+			default:
+				return state, fmt.Errorf("model_status %q is none of allowed, allowed_warning and rejected", value)
+			}
+		case "model_type":
+		case "model_utilization":
 			u, err := strconv.ParseFloat(value, 64)
 			if err != nil || u < 0 || u > 1 {
-				return reading, fmt.Errorf("utilization %q is no number from 0 to 1", value)
+				return state, fmt.Errorf("model_utilization %q is no number from 0 to 1", value)
 			}
-			reading.Utilization = &u
-		case "resets_at":
-			seconds, err := strconv.ParseInt(value, 10, 64)
-			if err != nil || seconds <= 0 {
-				return reading, fmt.Errorf("resets_at %q is no Unix time", value)
+			state.Model.Utilization = &u
+		case "model_resets_at":
+			at, err := unixTime(key)
+			if err != nil {
+				return state, err
 			}
-			at := time.Unix(seconds, 0).UTC()
-			reading.ResetsAt = &at
+			state.Model.ResetsAt = &at
+		default:
+			return state, fmt.Errorf("%s is no field of a harness state", key)
+		}
+		modelRead = modelRead || strings.HasPrefix(key, "model_")
+	}
+	for _, key := range []string{"subagents", "turn", "since"} {
+		if _, given := fields[key]; !given {
+			return state, fmt.Errorf("%s is required", key)
 		}
 	}
-	switch status {
-	case "allowed", "allowed_warning":
-	case "rejected":
-		reading.Rejected = true
-	default:
-		return reading, fmt.Errorf("status %q is none of allowed, allowed_warning and rejected", status)
+	if _, given := fields["model_status"]; modelRead && !given {
+		return state, fmt.Errorf("model_status is required with the other model_ fields")
 	}
-	return reading, nil
+	return state, nil
 }
 
 // lastBytes keeps the end of text, cut at a line where one starts inside the limit.
@@ -461,8 +507,8 @@ func (o Observed) validate() error {
 		if instance.Progress != nil && instance.State != stateRunning {
 			return fmt.Errorf("progress is reported of a running instance, and %s is %s", instance.Name, instance.State)
 		}
-		if instance.RateLimit != "" && instance.State != stateRunning {
-			return fmt.Errorf("rate_limit is reported of a running instance, and %s is %s", instance.Name, instance.State)
+		if instance.HarnessState != "" && instance.State != stateRunning {
+			return fmt.Errorf("harness_state is reported of a running instance, and %s is %s", instance.Name, instance.State)
 		}
 		if instance.Expired && instance.State != stateExited {
 			return fmt.Errorf("expired is reported of an exited instance, and %s is %s", instance.Name, instance.State)
@@ -535,7 +581,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "launcher-reconcile", Method: "POST", Path: "/{name}/reconcile",
 		Summary: "Report a launcher's instances and receive the ones it should keep", Tags: []string{"agent-launcher"},
 		MaxBodyBytes: maxRequestBytes,
-		Description: "The launcher sends what its provider lists, for an exited instance the end of its output, for a running one its progress marker, what its agent says it is doing (activity) and the model provider's rate limit it last read (rate_limit), and how it paces its passes. The answer is its complete desired state. " +
+		Description: "The launcher sends what its provider lists, for an exited instance the end of its output, for a running one its progress marker, what its agent says it is doing (activity) and what its agent's harness last said of itself (harness_state: subagents, turn and the model provider's rate limit), and how it paces its passes. The answer is its complete desired state. " +
 			"instances: each {name, image, env, ends_at} should exist and be running: one per hosted agent, and one per platform experiment whose coordinator the platform runs. " +
 			"ends_at is the latest moment its platform experiment can still have a machine, wind-down included, and the launcher rents the instance so that it ends by itself then, reachable or not. It decides nothing about an instance already rented. " +
 			"ending: names whose agent's run is over; each is told to stop and is otherwise left to finish, neither created nor replaced, and destroyed once its command has exited. " +

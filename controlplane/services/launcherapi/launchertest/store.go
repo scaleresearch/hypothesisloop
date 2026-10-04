@@ -284,15 +284,22 @@ func (s *Store) SetLauncherHolds(_ context.Context, launcher string, holds bool)
 	return nil
 }
 
-// Metrics is the handler's health series in memory: the rate limits written, in order.
+// Metrics is the handler's health series in memory: the harness states written, in order.
 type Metrics struct {
-	mu         sync.Mutex
-	RateLimits []domain.RateLimitReading
+	mu            sync.Mutex
+	HarnessStates []domain.HarnessState
 }
 
-func (m *Metrics) RecordRateLimits(_ context.Context, _ time.Time, readings []domain.RateLimitReading) error {
+func (m *Metrics) RecordHarnessState(_ context.Context, _ time.Time, states []domain.HarnessState) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.RateLimits = append(m.RateLimits, readings...)
+	m.HarnessStates = append(m.HarnessStates, states...)
 	return nil
+}
+
+// Written is a copy of the harness states written so far.
+func (m *Metrics) Written() []domain.HarnessState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]domain.HarnessState(nil), m.HarnessStates...)
 }

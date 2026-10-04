@@ -83,9 +83,9 @@ const stopRetry = 2 * time.Minute
 type outputRead struct {
 	at time.Time
 	// exited says that log is the end of the output of an instance that exited.
-	exited                        bool
-	progress, activity, rateLimit string
-	log                           string
+	exited                           bool
+	progress, activity, harnessState string
+	log                              string
 }
 
 func New(cfg Config) (*Launcher, error) {
@@ -464,14 +464,15 @@ func lastActivity(lines []string) string {
 	return ""
 }
 
-// rateLimitPattern is the line an agent's harness prints with its progress to say the model
-// provider's rate limit it last read, which only the control plane gives a meaning to.
-var rateLimitPattern = regexp.MustCompile(`^hl-rate-limit (.{1,200})$`)
+// harnessStatePattern is the line an agent's harness prints with its progress to say what it is
+// running and the model provider's rate limit it last read, which only the control plane gives a
+// meaning to.
+var harnessStatePattern = regexp.MustCompile(`^hl-state (.{1,200})$`)
 
-// lastRateLimit is what follows the word on the newest rate-limit line among lines, or "".
-func lastRateLimit(lines []string) string {
+// lastHarnessState is what follows the word on the newest state line among lines, or "".
+func lastHarnessState(lines []string) string {
 	for i := len(lines) - 1; i >= 0; i-- {
-		if found := rateLimitPattern.FindStringSubmatch(strings.TrimRight(lines[i], "\r")); found != nil {
+		if found := harnessStatePattern.FindStringSubmatch(strings.TrimRight(lines[i], "\r")); found != nil {
 			return found[1]
 		}
 	}
@@ -523,7 +524,7 @@ func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Ins
 			if seen, ok := l.progressOf(ctx, *running); ok {
 				entry.Progress = &seen.progress
 				entry.Activity = seen.activity
-				entry.RateLimit = seen.rateLimit
+				entry.HarnessState = seen.harnessState
 			}
 		}
 		if state == provider.StateExited {
@@ -546,7 +547,7 @@ func (l *Launcher) progressOf(ctx context.Context, i provider.Instance) (outputR
 		l.cfg.Log("read the progress of running %s: %v", i.Name, err)
 		return outputRead{}, false
 	}
-	seen := outputRead{at: time.Now(), progress: lastProgress(lines), activity: l.activityOf(lines), rateLimit: lastRateLimit(lines)}
+	seen := outputRead{at: time.Now(), progress: lastProgress(lines), activity: l.activityOf(lines), harnessState: lastHarnessState(lines)}
 	l.outputs[i.ID] = seen
 	return seen, true
 }

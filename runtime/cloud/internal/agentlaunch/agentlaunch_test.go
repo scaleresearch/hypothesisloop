@@ -1291,24 +1291,25 @@ func TestWhatARunningAgentSaysItIsDoingIsReportedWithItsProgress(t *testing.T) {
 	}
 }
 
-// The model provider's rate limit an agent last read lived only in its machine's log. The harness
-// prints it with every beat and the launcher hands the newest to the control plane from the same
-// read as the progress.
-func TestTheRateLimitARunningAgentLastReadIsReportedWithItsProgress(t *testing.T) {
+// What an agent's harness says of itself (subagents, turn, the model provider's rate limit) lived
+// only in its machine's log. The harness prints it with every beat and the launcher hands the
+// newest line verbatim to the control plane from the same read as the progress.
+func TestTheHarnessStateOfARunningAgentIsReportedWithItsProgress(t *testing.T) {
 	h := newHarness(t)
 	h.cp.want([]entry{agent("a"), agent("b")}, nil)
 	h.mustPass()
 	h.rented.Start(full("a"))
 	h.rented.Start(full("b"))
-	h.rented.Print(full("a"), "hl-progress 1", "hl-rate-limit status=allowed_warning utilization=0.9", "hl-progress 2", "hl-rate-limit status=rejected type=seven_day resets_at=1760000000", "chatter")
-	h.rented.Print(full("b"), "hl-progress 1", "hl-rate-limit", "not hl-rate-limit status=rejected")
+	newest := "subagents=2 turn=waiting since=1759990000 model_status=rejected model_type=seven_day model_resets_at=1760000000"
+	h.rented.Print(full("a"), "hl-progress 1", "hl-state subagents=0 turn=working since=1759980000", "hl-progress 2", "hl-state "+newest, "chatter")
+	h.rented.Print(full("b"), "hl-progress 1", "hl-state", "not hl-state subagents=1 turn=working since=1759980000")
 	h.mustPass()
 	told := h.cp.lastQuestion().Instances
-	if told[0].RateLimit != "status=rejected type=seven_day resets_at=1760000000" {
-		t.Fatalf("a: told rate limit %q, want its newest line", told[0].RateLimit)
+	if told[0].HarnessState != newest {
+		t.Fatalf("a: told harness state %q, want its newest line", told[0].HarnessState)
 	}
-	if told[1].RateLimit != "" {
-		t.Fatalf("b, which printed no such line: told rate limit %q, want none", told[1].RateLimit)
+	if told[1].HarnessState != "" {
+		t.Fatalf("b, which printed no such line: told harness state %q, want none", told[1].HarnessState)
 	}
 }
 

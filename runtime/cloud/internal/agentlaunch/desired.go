@@ -73,9 +73,9 @@ type observedInstance struct {
 	// Activity is what the agent of a running instance last said it is doing, empty when it
 	// said nothing in the output the progress was read from.
 	Activity string `json:"activity,omitempty"`
-	// RateLimit is the model provider's rate limit the agent of a running instance last read,
-	// empty when it printed none in that output.
-	RateLimit string `json:"rate_limit,omitempty"`
+	// HarnessState is what the harness of a running instance last said of itself on its state
+	// line, verbatim, empty when it printed none in that output.
+	HarnessState string `json:"harness_state,omitempty"`
 }
 
 // reconcileQuestion is what the launcher tells the control plane with every question.

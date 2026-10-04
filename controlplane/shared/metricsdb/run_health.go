@@ -19,12 +19,18 @@ const (
 	agentJobsInFlightMetric             = "agent_jobs_in_flight"
 	agentRestartsMetric                 = "agent_restarts"
 	agentCoordinatorMessagesMetric      = "agent_coordinator_messages"
-	// The rate-limit series are written from the launchers' reports (RecordRateLimits) and carry
-	// the same labels.
+	// The harness series are written from the launchers' reports (RecordHarnessState) and carry
+	// the same labels, the rate-limit ones once a harness has read a rate limit.
+	agentStateReportedAtMetric      = "agent_state_reported_at_seconds"
+	agentSubagentsMetric            = "agent_subagents"
+	agentTurnWaitingMetric          = "agent_turn_waiting"
+	agentTurnSinceMetric            = "agent_turn_since_seconds"
 	agentRateLimitUtilizationMetric = "agent_rate_limit_utilization"
 	agentRateLimitRejectedMetric    = "agent_rate_limit_rejected"
 	agentRateLimitResetsAtMetric    = "agent_rate_limit_resets_at_seconds"
 )
+
+var rateLimitMetrics = []string{agentRateLimitUtilizationMetric, agentRateLimitRejectedMetric, agentRateLimitResetsAtMetric}
 
 func healthLabels(platformExperimentID, agentID, role string) map[string]string {
 	labels := map[string]string{"platform_experiment_id": platformExperimentID, "role": role}
@@ -59,86 +65,135 @@ func RecordRunHealth(ctx context.Context, dbURL string, at time.Time, agents []d
 	return nil
 }
 
-// RecordRateLimits writes the rate limit each hosted agent's harness last read, at at, in one
-// request: whether the provider refuses its calls, and the utilization and reset time a reading
-// holds.
-func RecordRateLimits(ctx context.Context, dbURL string, at time.Time, readings []domain.RateLimitReading) error {
+// RecordHarnessState writes what each hosted harness last said of itself, read at at, in one
+// request: its subagents, its turn, and the rate limit when it has read one.
+func RecordHarnessState(ctx context.Context, dbURL string, at time.Time, states []domain.HarnessState) error {
 	var samples []GaugeSample
-	for _, r := range readings {
-		labels := healthLabels(r.PlatformExperimentID, r.AgentID, r.Role)
+	for _, s := range states {
+		labels := healthLabels(s.PlatformExperimentID, s.AgentID, s.Role)
 		gauge := func(name string, value float64) {
 			samples = append(samples, GaugeSample{MetricName: name, Labels: labels, Value: value, At: at})
 		}
-		rejected := 0.0
-		if r.Rejected {
-			rejected = 1
+		gauge(agentStateReportedAtMetric, float64(at.Unix()))
+		gauge(agentSubagentsMetric, float64(s.Subagents))
+		gauge(agentTurnWaitingMetric, boolGauge(s.TurnWaiting))
+		gauge(agentTurnSinceMetric, float64(s.TurnSince.Unix()))
+		if s.Model == (domain.RateLimit{}) {
+			continue
 		}
-		gauge(agentRateLimitRejectedMetric, rejected)
-		if r.Utilization != nil {
-			gauge(agentRateLimitUtilizationMetric, *r.Utilization)
+		gauge(agentRateLimitRejectedMetric, boolGauge(s.Model.Rejected))
+		if s.Model.Utilization != nil {
+			gauge(agentRateLimitUtilizationMetric, *s.Model.Utilization)
 		}
-		if r.ResetsAt != nil {
-			gauge(agentRateLimitResetsAtMetric, float64(r.ResetsAt.Unix()))
+		if s.Model.ResetsAt != nil {
+			gauge(agentRateLimitResetsAtMetric, float64(s.Model.ResetsAt.Unix()))
 		}
 	}
 	if err := WriteGaugesAt(ctx, dbURL, samples); err != nil {
-		return fmt.Errorf("metricsdb.RecordRateLimits: %w", err)
+		return fmt.Errorf("metricsdb.RecordHarnessState: %w", err)
 	}
 	return nil
+}
+
+type healthSeries struct{ role, agentID string }
+
+// latestHealth is the latest value of each of metrics, per series of platformExperimentID, since
+// the run's row came into being at createdAt.
+func latestHealth(ctx context.Context, dbURL, platformExperimentID string, createdAt time.Time, metrics []string) (map[healthSeries]map[string]float64, error) {
+	window := promSeconds(time.Since(ObservationWindowStart(createdAt)))
+	out := map[healthSeries]map[string]float64{}
+	for _, metric := range metrics {
+		samples, err := QueryVector(ctx, dbURL, fmt.Sprintf(`last_over_time(%s{platform_experiment_id=%q}[%s])`, metric, platformExperimentID, window))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", metric, err)
+		}
+		for _, sample := range samples {
+			key := healthSeries{sample.Labels["role"], sample.Labels["agent_id"]}
+			if out[key] == nil {
+				out[key] = map[string]float64{}
+			}
+			out[key][metric] = sample.Value
+		}
+	}
+	return out, nil
+}
+
+func unixGauge(value float64) time.Time {
+	return time.Unix(int64(value), 0).UTC()
+}
+
+// refusedUntil is when the refusal of the provider a series holds ends, false for none. A refusal
+// whose reset has passed is over, whether or not a reading has said so since.
+func refusedUntil(values map[string]float64) (time.Time, bool) {
+	resets, known := values[agentRateLimitResetsAtMetric]
+	if values[agentRateLimitRejectedMetric] != 1 || !known || !unixGauge(resets).After(time.Now()) {
+		return time.Time{}, false
+	}
+	return unixGauge(resets), true
 }
 
 // LatestRunHealth reads where each agent of platformExperimentID, and its hosted coordinator,
 // last stood: the latest value of each of its health series since the run's row came into being
 // at createdAt. A first-job value is nil until there is a first job. Sorted by role, then agent.
 func LatestRunHealth(ctx context.Context, dbURL, platformExperimentID string, createdAt time.Time) ([]domain.AgentHealth, error) {
-	window := promSeconds(time.Since(ObservationWindowStart(createdAt)))
-	type series struct{ role, agentID string }
-	agents := map[series]*domain.AgentHealth{}
-	rejected, resetsAt := map[series]bool{}, map[series]time.Time{}
-	for _, metric := range []string{agentFirstJobSecondsMetric, agentFirstCompletedJobSecondsMetric, agentJobsInFlightMetric, agentRestartsMetric, agentCoordinatorMessagesMetric,
-		agentRateLimitUtilizationMetric, agentRateLimitRejectedMetric, agentRateLimitResetsAtMetric} {
-		samples, err := QueryVector(ctx, dbURL, fmt.Sprintf(`last_over_time(%s{platform_experiment_id=%q}[%s])`, metric, platformExperimentID, window))
-		if err != nil {
-			return nil, fmt.Errorf("metricsdb.LatestRunHealth: %s: %w", metric, err)
-		}
-		for _, sample := range samples {
-			key := series{sample.Labels["role"], sample.Labels["agent_id"]}
-			a := agents[key]
-			if a == nil {
-				a = &domain.AgentHealth{PlatformExperimentID: platformExperimentID, Role: key.role, AgentID: key.agentID}
-				agents[key] = a
-			}
-			switch value := sample.Value; metric {
-			case agentFirstJobSecondsMetric:
-				a.FirstJobSeconds = &value
-			case agentFirstCompletedJobSecondsMetric:
-				a.FirstCompletedSeconds = &value
-			case agentJobsInFlightMetric:
-				a.JobsInFlight = int(value)
-			case agentRestartsMetric:
-				a.Restarts = int(value)
-			case agentCoordinatorMessagesMetric:
-				a.CoordinatorMessages = int(value)
-			case agentRateLimitUtilizationMetric:
-				a.RateLimitUtilization = &value
-			case agentRateLimitRejectedMetric:
-				rejected[key] = value == 1
-			case agentRateLimitResetsAtMetric:
-				resetsAt[key] = time.Unix(int64(value), 0).UTC()
-			}
-		}
+	series, err := latestHealth(ctx, dbURL, platformExperimentID, createdAt, append([]string{agentFirstJobSecondsMetric, agentFirstCompletedJobSecondsMetric,
+		agentJobsInFlightMetric, agentRestartsMetric, agentCoordinatorMessagesMetric}, rateLimitMetrics...))
+	if err != nil {
+		return nil, fmt.Errorf("metricsdb.LatestRunHealth: %w", err)
 	}
-	// A refusal whose reset has passed is over, whether or not a reading has said so since.
-	for key, a := range agents {
-		if until, ok := resetsAt[key]; rejected[key] && ok && until.After(time.Now()) {
+	out := make([]domain.AgentHealth, 0, len(series))
+	for key, values := range series {
+		a := domain.AgentHealth{PlatformExperimentID: platformExperimentID, Role: key.role, AgentID: key.agentID,
+			JobsInFlight: int(values[agentJobsInFlightMetric]), Restarts: int(values[agentRestartsMetric]), CoordinatorMessages: int(values[agentCoordinatorMessagesMetric])}
+		if value, ok := values[agentFirstJobSecondsMetric]; ok {
+			a.FirstJobSeconds = &value
+		}
+		if value, ok := values[agentFirstCompletedJobSecondsMetric]; ok {
+			a.FirstCompletedSeconds = &value
+		}
+		if value, ok := values[agentRateLimitUtilizationMetric]; ok {
+			a.RateLimitUtilization = &value
+		}
+		if until, ok := refusedUntil(values); ok {
 			a.RateLimitedUntil = &until
 		}
-	}
-	out := make([]domain.AgentHealth, 0, len(agents))
-	for _, a := range agents {
-		out = append(out, *a)
+		out = append(out, a)
 	}
 	slices.SortFunc(out, func(a, b domain.AgentHealth) int {
+		return cmp.Or(cmp.Compare(a.Role, b.Role), cmp.Compare(a.AgentID, b.AgentID))
+	})
+	return out, nil
+}
+
+// LatestHarnessState reads what the harness of each hosted agent of platformExperimentID, and of
+// its hosted coordinator, last said of itself since the run's row came into being at createdAt.
+// One whose harness said nothing in that time is left out. Model is the rate limit last read,
+// Rejected only while its reset is ahead. Sorted by role, then agent.
+func LatestHarnessState(ctx context.Context, dbURL, platformExperimentID string, createdAt time.Time) ([]domain.HarnessState, error) {
+	series, err := latestHealth(ctx, dbURL, platformExperimentID, createdAt, append([]string{agentStateReportedAtMetric,
+		agentSubagentsMetric, agentTurnWaitingMetric, agentTurnSinceMetric}, rateLimitMetrics...))
+	if err != nil {
+		return nil, fmt.Errorf("metricsdb.LatestHarnessState: %w", err)
+	}
+	out := make([]domain.HarnessState, 0, len(series))
+	for key, values := range series {
+		at, reported := values[agentStateReportedAtMetric]
+		if !reported {
+			continue
+		}
+		s := domain.HarnessState{PlatformExperimentID: platformExperimentID, Role: key.role, AgentID: key.agentID, At: unixGauge(at),
+			Subagents: int(values[agentSubagentsMetric]), TurnWaiting: values[agentTurnWaitingMetric] == 1, TurnSince: unixGauge(values[agentTurnSinceMetric])}
+		if value, ok := values[agentRateLimitUtilizationMetric]; ok {
+			s.Model.Utilization = &value
+		}
+		if value, ok := values[agentRateLimitResetsAtMetric]; ok {
+			resets := unixGauge(value)
+			s.Model.ResetsAt = &resets
+		}
+		_, s.Model.Rejected = refusedUntil(values)
+		out = append(out, s)
+	}
+	slices.SortFunc(out, func(a, b domain.HarnessState) int {
 		return cmp.Or(cmp.Compare(a.Role, b.Role), cmp.Compare(a.AgentID, b.AgentID))
 	})
 	return out, nil

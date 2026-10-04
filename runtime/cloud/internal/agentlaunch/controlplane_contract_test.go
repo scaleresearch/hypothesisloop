@@ -58,6 +58,7 @@ func (r *registered) LauncherKnown(_ context.Context, name string) (bool, error)
 type contract struct {
 	t          *testing.T
 	store      *launchertest.Store
+	metrics    *launchertest.Metrics
 	rented     *fake.Provider
 	launcher   *Launcher
 	registered *registered
@@ -74,7 +75,8 @@ func newContractUnder(t *testing.T, settings launcherapi.Settings, agents ...db.
 	t.Helper()
 	c := &contract{
 		t: t, rented: fake.New(), registered: &registered{launchers: map[string]bool{"main": true}},
-		store: &launchertest.Store{ByLauncher: map[string][]db.LauncherAgent{"main": agents}},
+		store:   &launchertest.Store{ByLauncher: map[string][]db.LauncherAgent{"main": agents}},
+		metrics: &launchertest.Metrics{},
 	}
 	authenticator, err := auth.NewAuthenticator(config.AuthConfig{SigningSecret: contractSecret}, c.registered)
 	if err != nil {
@@ -82,7 +84,7 @@ func newContractUnder(t *testing.T, settings launcherapi.Settings, agents ...db.
 	}
 	launchers := chi.NewRouter()
 	doc := apidocs.New(launchers, "launcher", "1.0.0", "", authenticator, auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	launcherapi.RegisterHuma(doc, launcherapi.NewHandler(c.store, &launchertest.Metrics{}, settings, zap.NewNop()))
+	launcherapi.RegisterHuma(doc, launcherapi.NewHandler(c.store, c.metrics, settings, zap.NewNop()))
 	root := chi.NewRouter()
 	root.Mount("/internal/launchers", launchers)
 	server := httptest.NewServer(root)
@@ -843,5 +845,22 @@ func TestWhatAnAgentIsDoingIsKeptAsItsLatestSentenceUntilItsMachineEnds(t *testi
 	c.pass()
 	if left, said := c.store.Activity["pe-1/ag-one"]; said {
 		t.Fatalf("after its machine exited: kept %+v, want nothing said of a machine that is gone", left)
+	}
+}
+
+// The state line a harness prints reaches the run's health series on the question the launcher
+// already asks, read by the control plane as the harness wrote it.
+func TestWhatAHarnessSaysOfItselfReachesTheRunsHealth(t *testing.T) {
+	c := newContract(t, hostedAgent("pe-1", "ag-one"))
+	c.pass()
+	name := c.rented.Names()[0]
+	c.rented.Start(name)
+	c.rented.Print(name, "hl-progress 1", "hl-state subagents=4 turn=waiting since=1759990000 model_status=allowed_warning model_type=five_hour model_utilization=0.8 model_resets_at=1760000000")
+	c.pass()
+	utilization, resets := 0.8, time.Unix(1760000000, 0).UTC()
+	want := []domain.HarnessState{{PlatformExperimentID: "pe-1", AgentID: "ag-one", Subagents: 4, TurnWaiting: true, TurnSince: time.Unix(1759990000, 0).UTC(),
+		Model: domain.RateLimit{Utilization: &utilization, ResetsAt: &resets}}}
+	if got := c.metrics.Written(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("written %+v, want %+v", got, want)
 	}
 }

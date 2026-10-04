@@ -679,38 +679,61 @@ func reconcileRecording(t *testing.T, store Store, metrics Metrics, cfg Settings
 	return rec.Code, rec.Body.Bytes()
 }
 
-// The rate limit a hosted agent's harness last read lived only in its machine's log. The launcher
+// What a hosted agent's harness says of itself lived only in its machine's log. The launcher
 // reports it with the progress, and it goes to the run's health series under the agent's role,
 // the coordinator's under its own; a line that cannot be read is passed over.
-func TestARunningMachinesRateLimitGoesToTheRunsHealth(t *testing.T) {
+func TestARunningMachinesHarnessStateGoesToTheRunsHealth(t *testing.T) {
 	store := oneAgentAndACoordinator()
 	store.ByLauncher["main"][0].Role = domain.SignupRoleCompetitor
 	first := mustReconcile(t, store, observed())
 	agent, coordinator := first.Instances[0].Name, first.Instances[1].Name
 	metrics := &launchertest.Metrics{}
 	body := observed(
-		ObservedInstance{Name: agent, State: "running", Progress: marker("1"), RateLimit: "status=rejected type=seven_day utilization=1.0 resets_at=1760000000"},
-		ObservedInstance{Name: coordinator, State: "running", Progress: marker("1"), RateLimit: "status=allowed_warning utilization=0.95"})
+		ObservedInstance{Name: agent, State: "running", Progress: marker("1"), HarnessState: "subagents=3 turn=working since=1759990000 model_status=rejected model_type=seven_day model_utilization=1.0 model_resets_at=1760000000"},
+		ObservedInstance{Name: coordinator, State: "running", Progress: marker("1"), HarnessState: "subagents=0 turn=waiting since=1759999000"})
 	if code, raw := reconcileRecording(t, store, metrics, testSettings, body); code != http.StatusOK {
 		t.Fatalf("status = %d: %s", code, raw)
 	}
-	full, warned, resets := 1.0, 0.95, time.Unix(1760000000, 0).UTC()
-	want := []domain.RateLimitReading{
-		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "competitor", Rejected: true, Utilization: &full, ResetsAt: &resets},
-		{PlatformExperimentID: "pe-1", Role: domain.CoordinatorHealthRole, Utilization: &warned},
+	full, resets := 1.0, time.Unix(1760000000, 0).UTC()
+	want := []domain.HarnessState{
+		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "competitor", Subagents: 3, TurnSince: time.Unix(1759990000, 0).UTC(),
+			Model: domain.RateLimit{Rejected: true, Utilization: &full, ResetsAt: &resets}},
+		{PlatformExperimentID: "pe-1", Role: domain.CoordinatorHealthRole, TurnWaiting: true, TurnSince: time.Unix(1759999000, 0).UTC()},
 	}
-	if !reflect.DeepEqual(metrics.RateLimits, want) {
-		t.Fatalf("written %+v, want %+v", metrics.RateLimits, want)
+	if got := metrics.Written(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("written %+v, want %+v", got, want)
 	}
 
 	metrics = &launchertest.Metrics{}
-	body.Instances[0].RateLimit, body.Instances[1].RateLimit = "status=exhausted", "status=rejected utilization=7"
-	if code, raw := reconcileRecording(t, store, metrics, testSettings, body); code != http.StatusOK || len(metrics.RateLimits) != 0 {
-		t.Fatalf("lines that cannot be read: status = %d, written %+v: %s", code, metrics.RateLimits, raw)
+	body.Instances[0].HarnessState, body.Instances[1].HarnessState = "subagents=1 turn=working since=1759990000 model_status=exhausted", "subagents=0 turn=idle since=1759999000"
+	if code, raw := reconcileRecording(t, store, metrics, testSettings, body); code != http.StatusOK || len(metrics.Written()) != 0 {
+		t.Fatalf("lines that cannot be read: status = %d, written %+v: %s", code, metrics.Written(), raw)
 	}
-	body = observed(ObservedInstance{Name: agent, State: "starting", RateLimit: "status=allowed"})
-	if code, raw := reconcileUnder(t, store, testSettings, body); code != http.StatusBadRequest || !strings.Contains(string(raw), "rate_limit is reported of a running instance") {
-		t.Fatalf("a rate limit of a machine that is starting: status = %d: %s", code, raw)
+	body = observed(ObservedInstance{Name: agent, State: "starting", HarnessState: "subagents=0 turn=working since=1759990000"})
+	if code, raw := reconcileUnder(t, store, testSettings, body); code != http.StatusBadRequest || !strings.Contains(string(raw), "harness_state is reported of a running instance") {
+		t.Fatalf("a harness state of a machine that is starting: status = %d: %s", code, raw)
+	}
+}
+
+func TestParseHarnessStateRefusesWhatTheHarnessDoesNotPrint(t *testing.T) {
+	for _, line := range []string{
+		"",
+		"turn=working since=1759990000",
+		"subagents=1 since=1759990000",
+		"subagents=1 turn=working",
+		"subagents=-1 turn=working since=1759990000",
+		"subagents=1 turn=busy since=1759990000",
+		"subagents=1 turn=working since=0",
+		"subagents=1 turn=working since=1759990000 subagents=2",
+		"subagents=1 turn=working since=1759990000 model_utilization=0.5",
+		"subagents=1 turn=working since=1759990000 model_status=allowed model_utilization=1.5",
+		"subagents=1 turn=working since=1759990000 model_status=allowed model_resets_at=soon",
+		"subagents=1 turn=working since=1759990000 status=allowed",
+		"subagents=1 turn=working since=1759990000 stray",
+	} {
+		if state, err := parseHarnessState(line); err == nil {
+			t.Errorf("%q: read %+v, want an error", line, state)
+		}
 	}
 }
 
