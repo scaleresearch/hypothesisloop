@@ -139,13 +139,15 @@ const summarySQL = `concat_ws(E'\n\n', NULLIF(pe.summary, ''), NULLIF(pe.close_r
 const plannerOfDraft = `planner.platform_experiment_id = pe.id AND planner.role = '` + string(domain.SignupRolePlanner) + `' AND pe.status = 'draft'`
 
 // priorRuns selects, latest close first, the ids of the prior runs of platform experiment $1:
-// every other closed one of its project that works on the same repository. The run its
-// continues names, and each one that run carried on, is among them, since only such a run can
-// be continued.
+// every other closed one of its project that works on the same repository and ran: its
+// researchers started or it declared a baseline, so a draft closed before either is none. The run
+// its continues names, and each one that run carried on, is among them, since only a run that
+// declared a baseline can be continued.
 const priorRuns = `
 SELECT prior.id FROM platform_experiments run
 JOIN platform_experiments prior ON prior.project_id = run.project_id AND prior.repository = run.repository
 WHERE run.id = $1 AND run.repository <> '' AND prior.id <> run.id AND prior.status = '` + string(domain.PlatformExpClosed) + `'
+  AND (prior.started_at IS NOT NULL OR prior.baseline_job_id <> '')
 ORDER BY prior.closed_at DESC, prior.id`
 
 // PriorRuns is the ids of the prior runs of platform experiment id, empty when it has none.

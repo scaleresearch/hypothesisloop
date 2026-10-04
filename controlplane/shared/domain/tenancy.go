@@ -234,7 +234,8 @@ type Tenancy struct {
 	// Shared is the platform's decision that every account may read the platform experiment.
 	Shared bool
 	// PriorRuns are every other closed platform experiment of the project that works on the same
-	// repository, the runs its continues chain carries on among them. Its agents and its
+	// repository and ran (its researchers started or it declared a baseline), the runs its
+	// continues chain carries on among them. Its agents and its
 	// coordinator read them as their own. Set when what was placed is a platform experiment.
 	PriorRuns []string
 }

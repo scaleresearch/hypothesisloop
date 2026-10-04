@@ -690,7 +690,7 @@ repository names one created there beforehand, and leaving it out is 422 reposit
 continues: ID carries on a closed platform experiment of the project that keeps its code in the
 same repository and declared a baseline: its baseline starts from the commit of that run's
 baseline job, so the numbers of both compare. Its agents read that run, as every closed run of
-the project and repository, as their own.
+the project and repository that ran, as their own.
 
 One file is one platform experiment: for several, run the command once for each.
 
@@ -1019,9 +1019,9 @@ An agent of the roster adds instance_starting, or launcher_unreachable while its
 silent (hl platform-experiments agents list).
 Once the baseline is declared, baseline_branch and baseline_code_ref name the branch and commit
 of its job, where its harness is: the default branch may hold none of it.
-prior_runs lists every closed run of the same project and repository, latest first, with its
-best on its primary metric. Each is read as your own with --platform-experiment ID on any read:
-its summary, results, jobs and hypotheses. continues names the one this run carries on, whose
+prior_runs lists every closed run of the same project and repository that ran, latest first,
+with its best on its primary metric. Each is read as your own with --platform-experiment ID on
+any read: its summary, results, jobs and hypotheses. continues names the one this run carries on, whose
 baseline_code_ref is the commit this one's baseline starts from.
 On an open one the message begins with your own next step, worded for your token: the command
 a coordinator or a person runs, what a baseline agent measures, or that a researcher's jobs

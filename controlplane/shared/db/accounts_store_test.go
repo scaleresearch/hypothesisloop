@@ -410,8 +410,9 @@ func TestTenancyIsDerivedThroughTheProject(t *testing.T) {
 	}
 }
 
-// The prior runs of a run are every other closed run of its project on its repository, whatever
-// it continues, latest close first: a sibling run nothing continued is read as its chain is.
+// The prior runs of a run are every other closed run of its project on its repository that
+// ran, whatever it continues, latest close first: a sibling run nothing continued is read as its
+// chain is, a run that only measured its baseline is one, and a draft closed before it ran is none.
 func TestPriorRunsAreTheClosedRunsOfTheProjectOnTheSameRepository(t *testing.T) {
 	pool := eventsTestDB(t)
 	accounts := NewAccountsStore(pool)
@@ -431,8 +432,17 @@ func TestPriorRunsAreTheClosedRunsOfTheProjectOnTheSameRepository(t *testing.T) 
 			at := now.Add(-closedAgo)
 			closedAt = &at
 		}
-		if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET repository = $2, status = $3, closed_at = $4, continues = NULLIF($5, '') WHERE id = $1`,
-			id, repository, string(status), closedAt, continues); err != nil {
+		var startedAt *time.Time
+		if status == domain.PlatformExpClosed && name != "never-ran" && name != "baseline-only" {
+			at := now.Add(-closedAgo - time.Hour)
+			startedAt = &at
+		}
+		baseline := ""
+		if name == "baseline-only" {
+			baseline = "job-baseline-" + suffix
+		}
+		if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET repository = $2, status = $3, closed_at = $4, continues = NULLIF($5, ''), started_at = $6, baseline_job_id = $7 WHERE id = $1`,
+			id, repository, string(status), closedAt, continues, startedAt, baseline); err != nil {
 			t.Fatalf("seed %s: %v", name, err)
 		}
 		return id
@@ -442,13 +452,15 @@ func TestPriorRunsAreTheClosedRunsOfTheProjectOnTheSameRepository(t *testing.T) 
 	continued := seed("continued", project.ID, "o/r", domain.PlatformExpClosed, time.Hour, first)
 	seed("other-repository", project.ID, "o/x", domain.PlatformExpClosed, time.Hour, "")
 	seed("still-running", project.ID, "o/r", domain.PlatformExpRunning, 0, "")
+	seed("never-ran", project.ID, "o/r", domain.PlatformExpClosed, time.Hour, "")
+	baselineOnly := seed("baseline-only", project.ID, "o/r", domain.PlatformExpClosed, 150*time.Minute, "")
 	seed("other-project", otherProject.ID, "o/r", domain.PlatformExpClosed, time.Hour, "")
 	run := seed("run", project.ID, "o/r", domain.PlatformExpRunning, 0, continued)
 	unnamed := seed("unnamed", project.ID, "", domain.PlatformExpOpen, 0, "")
 
 	for id, want := range map[string][]string{
-		run:       {continued, sibling, first},
-		continued: {sibling, first},
+		run:       {continued, sibling, baselineOnly, first},
+		continued: {sibling, baselineOnly, first},
 		unnamed:   {},
 	} {
 		got, err := pes.PriorRuns(ctx, id)
