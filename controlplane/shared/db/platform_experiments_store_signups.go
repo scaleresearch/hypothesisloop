@@ -602,11 +602,16 @@ func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 	return signup, nil
 }
 
-// ListAgentSignups returns every agent's place in a platform experiment, in signup order.
+// ListAgentSignups returns every agent's place in a platform experiment, in signup order, each
+// with what of its own is in flight.
 func (s *PlatformExperimentsStore) ListAgentSignups(ctx context.Context, platformExpID string) ([]domain.AgentSignup, error) {
 	rows, err := s.pool.pool.Query(ctx, `
-SELECT `+agentSignupColumns+`
+SELECT `+agentSignupColumns+`, f.jobs, f.checks
 FROM experiment_signups s LEFT JOIN agents a ON a.id = s.agent_id
+CROSS JOIN LATERAL (SELECT count(*) FILTER (WHERE NOT e.is_check) AS jobs, count(*) FILTER (WHERE e.is_check) AS checks
+                    FROM experiments e
+                    WHERE e.platform_experiment_id = s.platform_experiment_id AND e.agent_id = s.agent_id
+                      AND e.status IN ('QUEUED', 'SUBMITTED', 'RUNNING')) f
 WHERE s.platform_experiment_id = $1
 ORDER BY s.signed_up_at, s.agent_id`, platformExpID)
 	if err != nil {
@@ -615,10 +620,12 @@ ORDER BY s.signed_up_at, s.agent_id`, platformExpID)
 	defer rows.Close()
 	signups := []domain.AgentSignup{}
 	for rows.Next() {
-		signup, err := scanAgentSignup(rows)
+		var inFlight domain.InFlight
+		signup, err := scanAgentSignup(rows, &inFlight.Jobs, &inFlight.Checks)
 		if err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.ListAgentSignups: %w", err)
 		}
+		signup.InFlight = &inFlight
 		signups = append(signups, signup)
 	}
 	return signups, rows.Err()

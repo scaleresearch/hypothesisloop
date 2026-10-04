@@ -131,8 +131,9 @@ in actor whose credential added it. A draft's planner has role planner. While th
 experiment is open, every agent but a baseline agent waits for the start and says so in
 status_reason, with the reason the experiment is not running yet: no machine is asked for it
 before, and its instance.state reads waiting until then. After the start instance.state is
-requested once a machine is asked for, starting while it boots, running, and stopped. No token
-is listed:
+requested once a machine is asked for, starting while it boots, running, and stopped.
+in_flight counts its jobs and checks queued or running: both 0 is nothing of its own in flight.
+No token is listed:
 hl platform-experiments agents add --agent ID prints a self-run agent's token again.`, stderr)
 	named := experimentFlag(fs)
 	if err := parseNone(fs, args); err != nil {

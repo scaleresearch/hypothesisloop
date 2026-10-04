@@ -100,6 +100,10 @@ func TestSpawnedAgentsAreCreatedInTheExperimentsOrgWithWhatTheyWereLaunchedWith(
 		own.Hyperparameters == nil || len(own.Hyperparameters) != 0 {
 		t.Errorf("self-run signup: got = %+v", own)
 	}
+	if hosted.InFlight == nil || *hosted.InFlight != (domain.InFlight{}) {
+		t.Errorf("hosted signup with nothing submitted: in_flight %+v, want 0 jobs and 0 checks", hosted.InFlight)
+	}
+	hosted.InFlight = nil
 	one, err := pes.GetAgentSignup(ctx, pe, ids[0])
 	if err != nil || one == nil || !reflect.DeepEqual(*one, hosted) {
 		t.Errorf("get signup: got = %+v, %v, want = %+v", one, err, hosted)

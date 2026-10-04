@@ -1464,7 +1464,7 @@ VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $
 
 // A researcher ran hl env run checks every minute or two and was told it had submitted no
 // job for 10 minutes. A check created or running is activity, and the stretch starts when the
-// last one ended.
+// last one ended. The roster says what it has in flight.
 func TestAResearcherRunningChecksIsNotIdle(t *testing.T) {
 	pool := eventsTestDB(t)
 	agentID, peID, hypothesisID := seedRun(t, pool, "checking", true)
@@ -1490,9 +1490,21 @@ VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $
 		return detail
 	}
 
+	inFlight := func() domain.InFlight {
+		t.Helper()
+		signups, err := store.ListAgentSignups(ctx, peID)
+		if err != nil || len(signups) != 1 || signups[0].InFlight == nil {
+			t.Fatalf("roster: %+v, %v", signups, err)
+		}
+		return *signups[0].InFlight
+	}
+
 	check("check-running", "RUNNING", "30 minutes", "30 minutes")
 	if err := store.NoticeIdleResearchers(ctx, 0); err != nil || detail() != "" {
 		t.Fatalf("a check running: detail %q, %v, want no notice", detail(), err)
+	}
+	if got := inFlight(); got != (domain.InFlight{Checks: 1}) {
+		t.Fatalf("a check running: in_flight %+v, want the check", got)
 	}
 	exec(t, pool, `UPDATE experiments SET status = 'COMPLETED', run_reported_at = now() - interval '3 minutes' WHERE id = 'check-running'`)
 	if err := store.NoticeIdleResearchers(ctx, 10*time.Minute); err != nil || detail() != "" {
@@ -1500,5 +1512,8 @@ VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $
 	}
 	if err := store.NoticeIdleResearchers(ctx, 2*time.Minute); err != nil || detail() != "no job or check of its own ran on the platform for 3 minutes, and it has none queued or running" {
 		t.Fatalf("notice at 2: detail %q, %v, want the 3 minutes since the check ended", detail(), err)
+	}
+	if got := inFlight(); got != (domain.InFlight{}) {
+		t.Fatalf("idle: in_flight %+v, want nothing", got)
 	}
 }
