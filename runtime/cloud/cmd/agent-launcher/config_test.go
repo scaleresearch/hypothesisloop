@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/agentlaunch"
+	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
+	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/fake"
 )
 
 const shippedConfig = "../../settings/agent-launcher.yaml"
@@ -38,20 +40,45 @@ func TestTheShippedConfigLoadsIntoWhatTheLauncherRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := agentlaunch.Config{
-		Name:          "main",
-		APIURL:        "https://api.example.invalid",
-		Command:       []string{"uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"},
-		Size:          agentlaunch.Size{CPUMillis: 8000, MemoryBytes: 16 << 30, DiskBytes: 50 << 30},
-		ModelProvider: "anthropic",
-		Env:           map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "oauth-secret-value"},
-		Interval:      15 * time.Second,
-		CreatePause:   time.Second,
+		Name:             "main",
+		APIURL:           "https://api.example.invalid",
+		Command:          []string{"/opt/hypothesisloop-agent/.venv/bin/python3", "-m", "hypothesisloop_agent.claude.run"},
+		Size:             agentlaunch.Size{CPUMillis: 8000, MemoryBytes: 16 << 30, DiskBytes: 50 << 30},
+		ModelProvider:    "anthropic",
+		Env:              map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "oauth-secret-value"},
+		Interval:         2 * time.Second,
+		CreatePause:      time.Second,
+		ProgressInterval: 15 * time.Second,
 	}
 	if got := cfg.launch(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("launch config = %+v\nwant          %+v", got, want)
 	}
 	if cfg.Provider.Name != "example" {
 		t.Fatalf("provider = %q", cfg.Provider.Name)
+	}
+	if got := cfg.warmPool(fake.New()); got != 2 {
+		t.Fatalf("warm pool = %d, want the file's 2", got)
+	}
+}
+
+func TestTheWarmPoolLeftOutIsTwoOnAProviderThatWarmsAndNoneOnAnother(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-secret-value")
+	cfg, err := loadText(t, strings.Replace(shipped(t), "warm_pool_size: 2\n", "", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.warmPool(fake.New()); got != 2 {
+		t.Errorf("on a provider that warms: %d", got)
+	}
+	if got := cfg.warmPool(struct{ provider.Provider }{fake.New()}); got != 0 {
+		t.Errorf("on a provider that cannot warm: %d", got)
+	}
+	cfg, err = loadText(t, strings.Replace(shipped(t), "warm_pool_size: 2", "warm_pool_size: 0", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.warmPool(fake.New()); got != 0 {
+		t.Errorf("set to 0: %d", got)
 	}
 }
 
@@ -84,15 +111,16 @@ func TestAConfigThatIsIncompleteOrMisspelledIsRefused(t *testing.T) {
 		"no api url":              {"api_url: https://api.example.invalid", `api_url: ""`},
 		"a namespace":             {"launcher_name: main\n", "launcher_name: main\nnamespace: main\n"},
 		"launcher name with dash": {"launcher_name: main", "launcher_name: team-a"},
-		"no interval":             {"reconcile_interval_seconds: 15\n", ""},
-		"negative interval":       {"reconcile_interval_seconds: 15", "reconcile_interval_seconds: -1"},
+		"no interval":             {"reconcile_interval_seconds: 2\n", ""},
+		"negative interval":       {"reconcile_interval_seconds: 2", "reconcile_interval_seconds: -1"},
+		"negative warm pool":      {"warm_pool_size: 2", "warm_pool_size: -1"},
 		"a boot limit of its own": {"create_pause_milliseconds: 1000", "create_pause_milliseconds: 1000\nboot_limit_seconds: 120"},
 		"no create pause":         {"create_pause_milliseconds: 1000\n", ""},
 		"negative create pause":   {"create_pause_milliseconds: 1000", "create_pause_milliseconds: -1"},
 		"no provider name":        {"name: example", `name: ""`},
 		"misspelled in provider":  {"settings: {}", "setings: {}"},
-		"no command":              {`command: ["uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"]`, "command: []"},
-		"command not a list":      {`command: ["uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"]`, "command: uv run"},
+		"no command":              {`command: ["/opt/hypothesisloop-agent/.venv/bin/python3", "-m", "hypothesisloop_agent.claude.run"]`, "command: []"},
+		"command not a list":      {`command: ["/opt/hypothesisloop-agent/.venv/bin/python3", "-m", "hypothesisloop_agent.claude.run"]`, "command: python3"},
 		"bad quantity":            {"memory: 16Gi", "memory: lots"},
 		"no cpu":                  {`cpu: "8"`, `cpu: "0"`},
 		"no storage":              {"storage: 50Gi\n", ""},

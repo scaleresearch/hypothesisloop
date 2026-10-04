@@ -42,18 +42,42 @@ type Config struct {
 	Provider      provider.Provider
 	HTTPClient    *http.Client
 	Interval      time.Duration
-	// CreatePause is waited between two creates of one pass, for a provider that limits how fast
-	// instances may be rented. Zero is no pause.
+	// CreatePause is waited between two rentals of one pass (a create or a warm), for a provider
+	// that limits how fast instances may be rented. Zero is no pause. Starting a warm instance is
+	// no rental and is never paused for.
 	CreatePause time.Duration
-	Log         func(format string, args ...any)
+	// ProgressInterval is how often a running instance's output is read for its progress when the
+	// passes come faster: a pass in between reports what the last read found. Zero reads it on
+	// every pass.
+	ProgressInterval time.Duration
+	// WarmPool is how many warm instances the launcher keeps ready to start in place of a create
+	// (pool.go). Zero keeps none and destroys any there are. Above zero the provider must be a
+	// provider.Warmer.
+	WarmPool int
+	Log      func(format string, args ...any)
 }
 
 type Launcher struct {
 	cfg          Config
 	prefix       string
+	poolPrefix   string
 	provider     provider.Provider
+	warmer       provider.Warmer
 	launchDigest string
 	maxAnswer    int
+	// outputs is what was last read of each instance's output, by instance id, to spare the
+	// provider's log API a read on every pass: a running instance's progress for
+	// ProgressInterval, and an exited instance's end for as long as it is listed. Losing it
+	// costs a read and nothing else.
+	outputs map[string]outputRead
+}
+
+type outputRead struct {
+	at time.Time
+	// exited says that log is the end of the output of an instance that exited.
+	exited             bool
+	progress, activity string
+	log                string
 }
 
 func New(cfg Config) (*Launcher, error) {
@@ -67,10 +91,16 @@ func New(cfg Config) (*Launcher, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Launcher{
+	l := &Launcher{
 		cfg: cfg, prefix: provider.AgentPrefix(cfg.Name), provider: provider.Bounded(cfg.Provider),
-		launchDigest: digest, maxAnswer: maxAnswerBytes,
-	}, nil
+		launchDigest: digest, maxAnswer: maxAnswerBytes, outputs: map[string]outputRead{},
+	}
+	l.poolPrefix = l.prefix + poolSegment
+	l.warmer, _ = l.provider.(provider.Warmer)
+	if cfg.WarmPool > 0 && l.warmer == nil {
+		return nil, fmt.Errorf("agentlaunch: a warm pool of %d needs a provider that can warm instances, and this one can %v", cfg.WarmPool, provider.Capabilities(cfg.Provider))
+	}
+	return l, nil
 }
 
 // launchDigest is a digest of everything this launcher itself starts an instance with. The
@@ -112,8 +142,8 @@ func (cfg Config) Validate() error {
 	if cfg.Interval <= 0 {
 		return errors.New("agentlaunch: Interval must be positive")
 	}
-	if cfg.CreatePause < 0 {
-		return errors.New("agentlaunch: CreatePause must not be negative")
+	if cfg.CreatePause < 0 || cfg.ProgressInterval < 0 || cfg.WarmPool < 0 {
+		return errors.New("agentlaunch: CreatePause, ProgressInterval and WarmPool must not be negative")
 	}
 	if cfg.ModelProvider == "" || len(cfg.Env) == 0 {
 		return errors.New("agentlaunch: ModelProvider and its Env are required")
@@ -131,6 +161,9 @@ func (cfg Config) Validate() error {
 // nothing either, on the first pass or a later one: this process is the only thing that stops and
 // destroys the instances under its name, an earlier process's among them, so it goes on passing
 // and says the refusal on every pass until the config or the platform's limits are corrected.
+//
+// Once ctx is cancelled the warm pool is destroyed, and the agents' instances are left to the
+// next process.
 func (l *Launcher) Run(ctx context.Context) error {
 	ticker := time.NewTicker(l.cfg.Interval)
 	defer ticker.Stop()
@@ -140,6 +173,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 		}
 		select {
 		case <-ctx.Done():
+			l.drainPool(context.WithoutCancel(ctx))
 			return nil
 		case <-ticker.C:
 		}
@@ -152,6 +186,11 @@ func (l *Launcher) Run(ctx context.Context) error {
 // instance is handled by itself: one that cannot be created, stopped or destroyed is reported in
 // the returned error and the rest of the pass still runs.
 //
+// What is missing is created first, from the warm pool where it has an instance ready, and what
+// goes is destroyed after, so a replacement waits for no destroy. An agent whose instance is
+// replaced under a new name still does not run twice: the old instance is destroyed in the same
+// pass, seconds before the new one's command starts.
+//
 // An answer that states a refusal is acted on like any other, except that nothing is created,
 // and the pass returns ErrRefused with the control plane's words.
 func (l *Launcher) Pass(ctx context.Context) error {
@@ -162,31 +201,27 @@ func (l *Launcher) Pass(ctx context.Context) error {
 		return fmt.Errorf("list instances: %w", err)
 	}
 	byName := map[string][]provider.Instance{}
+	var pool []provider.Instance
 	for _, i := range rented {
+		if strings.HasPrefix(i.Name, l.poolPrefix) {
+			pool = append(pool, i)
+			continue
+		}
 		byName[i.Name] = append(byName[i.Name], i)
 	}
+	l.forgetUnlisted(rented)
 	want, err := l.fetchDesired(ctx, l.observe(ctx, byName))
 	if err != nil {
 		return fmt.Errorf("fetch desired state: %w", err)
 	}
 
-	var failures []error
-	destroy := func(i provider.Instance, why string) bool {
-		if err := l.provider.Destroy(ctx, i.ID); err != nil {
-			l.cfg.Log("destroy %s (%s), instance %s: %v", i.Name, why, i.ID, err)
-			failures = append(failures, fmt.Errorf("destroy %s: %w", i.Name, err))
-			return false
-		}
-		l.cfg.Log("destroyed %s (%s), instance %s", i.Name, why, i.ID)
-		return true
-	}
+	p := &pass{l: l, ready: l.readyPool(pool), started: map[string]bool{}}
+	p.create(ctx, want, byName)
 
-	// Everything that goes is destroyed before anything is created, so an agent whose instance
-	// is replaced under a new name runs twice for as short a time as the provider allows.
 	for _, name := range sortedKeys(byName) {
 		if _, wanted := want.instances[name]; !wanted && !want.ending[name] {
 			for _, i := range byName[name] {
-				destroy(i, "no longer desired")
+				p.destroy(ctx, i, "no longer desired")
 			}
 		}
 	}
@@ -200,13 +235,53 @@ func (l *Launcher) Pass(ctx context.Context) error {
 			}
 			if err := l.provider.Stop(ctx, i.ID); err != nil {
 				l.cfg.Log("stop %s (ending), instance %s: %v", i.Name, i.ID, err)
-				failures = append(failures, fmt.Errorf("stop %s: %w", i.Name, err))
+				p.failures = append(p.failures, fmt.Errorf("stop %s: %w", i.Name, err))
 				continue
 			}
 			l.cfg.Log("told %s to stop (ending), instance %s", i.Name, i.ID)
 		}
 	}
 
+	p.keepPool(ctx, pool, want)
+	if want.refusal != "" {
+		p.failures = append(p.failures, fmt.Errorf("%w, so nothing is created: %s", ErrRefused, want.refusal))
+	}
+	return errors.Join(p.failures...)
+}
+
+// pass is what one Pass keeps while it acts on an answer.
+type pass struct {
+	l *Launcher
+	// ready is the warm pool's instances that can be started, by pool name, oldest first.
+	ready map[string][]provider.Instance
+	// started is the pool instances this pass took, by id, which are no longer the pool's.
+	started  map[string]bool
+	rentals  int
+	failures []error
+}
+
+func (p *pass) destroy(ctx context.Context, i provider.Instance, why string) bool {
+	if err := p.l.provider.Destroy(ctx, i.ID); err != nil {
+		p.l.cfg.Log("destroy %s (%s), instance %s: %v", i.Name, why, i.ID, err)
+		p.failures = append(p.failures, fmt.Errorf("destroy %s: %w", i.Name, err))
+		return false
+	}
+	p.l.cfg.Log("destroyed %s (%s), instance %s", i.Name, why, i.ID)
+	return true
+}
+
+// rent waits the pause before every rental of the pass but the first, and reports false when
+// ctx ended first.
+func (p *pass) rent(ctx context.Context) bool {
+	if p.rentals > 0 && !p.l.pause(ctx) {
+		return false
+	}
+	p.rentals++
+	return true
+}
+
+func (p *pass) create(ctx context.Context, want *desired, byName map[string][]provider.Instance) {
+	l := p.l
 	var creates, failedCreates int
 	var lastCreateError error
 	for _, name := range sortedKeys(want.instances) {
@@ -227,14 +302,14 @@ func (l *Launcher) Pass(ctx context.Context) error {
 			case i.State == provider.StateExited:
 				exited = append(exited, i)
 			case len(live) > 0:
-				cleared = destroy(i, "duplicate") && cleared
+				cleared = p.destroy(ctx, i, "duplicate") && cleared
 			default:
 				live = append(live, i)
 			}
 		}
 		if len(live) > 0 {
 			for _, i := range exited {
-				destroy(i, "its command exited beside a live instance of the name")
+				p.destroy(ctx, i, "its command exited beside a live instance of the name")
 			}
 			continue
 		}
@@ -251,28 +326,30 @@ func (l *Launcher) Pass(ctx context.Context) error {
 		if lifetime <= 0 {
 			err := fmt.Errorf("create %s: its ends_at %s has passed", name, want.instances[name].endsAt.Format(time.RFC3339))
 			l.cfg.Log("%v", err)
-			failures = append(failures, err)
+			p.failures = append(p.failures, err)
 			continue
 		}
-		if creates > 0 && !l.pause(ctx) {
-			failures = append(failures, fmt.Errorf("create %s: %w", name, ctx.Err()))
+		spec := l.spec(want.instances[name], lifetime)
+		endsAt := want.instances[name].endsAt.UTC().Format(time.RFC3339)
+		if id, ok := p.startWarm(ctx, spec); ok {
+			l.cfg.Log("started %s (asked for and not rented) on warm instance %s, which ends itself at %s", name, id, endsAt)
+			continue
+		}
+		if !p.rent(ctx) {
+			p.failures = append(p.failures, fmt.Errorf("create %s: %w", name, ctx.Err()))
 			break
 		}
 		creates++
-		spec := l.spec(want.instances[name], lifetime)
 		id, err := l.provider.Create(ctx, spec)
 		if err != nil {
 			err = withoutEnvironment(err, spec.Env)
 			l.cfg.Log("create %s: %v", name, err)
-			failures = append(failures, fmt.Errorf("create %s: %w", name, err))
+			p.failures = append(p.failures, fmt.Errorf("create %s: %w", name, err))
 			failedCreates++
 			lastCreateError = err
 			continue
 		}
-		l.cfg.Log("created %s (asked for and not rented), instance %s, which ends itself at %s", name, id, want.instances[name].endsAt.UTC().Format(time.RFC3339))
-	}
-	if want.refusal != "" {
-		failures = append(failures, fmt.Errorf("%w, so nothing is created: %s", ErrRefused, want.refusal))
+		l.cfg.Log("created %s (asked for and not rented), instance %s, which ends itself at %s", name, id, endsAt)
 	}
 	// Every create failing is rarely one agent's fault, so it is said once more in a line of its
 	// own. Nothing is given up on here: the control plane asks again until a machine has gone
@@ -281,7 +358,6 @@ func (l *Launcher) Pass(ctx context.Context) error {
 	if creates > 0 && failedCreates == creates {
 		l.cfg.Log("NO INSTANCE COULD BE CREATED: all %d creates of this pass failed, the last with: %v. Look at the provider account and its limits, the image the control plane names, and instance in this launcher's config", creates, lastCreateError)
 	}
-	return errors.Join(failures...)
 }
 
 const (
@@ -365,25 +441,63 @@ func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Ins
 		}
 		entry := observedInstance{Name: name[len(l.prefix):], State: string(state)}
 		if running != nil {
-			if lines, err := l.provider.Logs(ctx, running.ID, progressLines); err != nil {
-				l.cfg.Log("read the progress of running %s: %v", name, err)
-			} else {
-				progress := lastProgress(lines)
-				entry.Progress = &progress
-				entry.Activity = l.activityOf(lines)
+			if seen, ok := l.progressOf(ctx, *running); ok {
+				entry.Progress = &seen.progress
+				entry.Activity = seen.activity
 			}
 		}
 		if state == provider.StateExited {
-			lines, err := l.provider.Logs(ctx, last.ID, exitLogLines)
-			if err != nil {
-				l.cfg.Log("read the output of exited %s: %v", name, err)
-			}
-			entry.Log = tail(l.withoutOwnEnvironment(strings.Join(lines, "\n")), exitLogBytes)
+			entry.Log = l.exitLogOf(ctx, last)
 			entry.Expired = last.Expired
 		}
 		observed = append(observed, entry)
 	}
 	return observed
+}
+
+// progressOf is the progress and activity of a running instance, read from its output unless a
+// read of it is younger than ProgressInterval and the passes come faster than that.
+func (l *Launcher) progressOf(ctx context.Context, i provider.Instance) (outputRead, bool) {
+	if seen, ok := l.outputs[i.ID]; ok && !seen.exited && l.cfg.Interval < l.cfg.ProgressInterval && time.Since(seen.at) < l.cfg.ProgressInterval {
+		return seen, true
+	}
+	lines, err := l.provider.Logs(ctx, i.ID, progressLines)
+	if err != nil {
+		l.cfg.Log("read the progress of running %s: %v", i.Name, err)
+		return outputRead{}, false
+	}
+	seen := outputRead{at: time.Now(), progress: lastProgress(lines), activity: l.activityOf(lines)}
+	l.outputs[i.ID] = seen
+	return seen, true
+}
+
+// exitLogOf is the end of an exited instance's output, read once: an instance shows as exited
+// only when its output is complete.
+func (l *Launcher) exitLogOf(ctx context.Context, i provider.Instance) string {
+	if seen, ok := l.outputs[i.ID]; ok && seen.exited {
+		return seen.log
+	}
+	lines, err := l.provider.Logs(ctx, i.ID, exitLogLines)
+	if err != nil {
+		l.cfg.Log("read the output of exited %s: %v", i.Name, err)
+		return ""
+	}
+	log := tail(l.withoutOwnEnvironment(strings.Join(lines, "\n")), exitLogBytes)
+	l.outputs[i.ID] = outputRead{at: time.Now(), exited: true, log: log}
+	return log
+}
+
+// forgetUnlisted drops what was read of instances that are no longer listed.
+func (l *Launcher) forgetUnlisted(listed []provider.Instance) {
+	ids := make(map[string]bool, len(listed))
+	for _, i := range listed {
+		ids[i.ID] = true
+	}
+	for id := range l.outputs {
+		if !ids[id] {
+			delete(l.outputs, id)
+		}
+	}
 }
 
 // withoutOwnEnvironment is text with every value this launcher adds to an instance's environment

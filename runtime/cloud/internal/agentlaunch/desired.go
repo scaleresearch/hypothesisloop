@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
@@ -135,6 +136,9 @@ func (l *Launcher) read(answer reconcileAnswer) (*desired, error) {
 		if err := provider.ValidateName(name); err != nil {
 			return nil, fmt.Errorf("desired state: %w", err)
 		}
+		if strings.HasPrefix(entry.Name, poolSegment) {
+			return nil, fmt.Errorf("desired instance %q starts with %q, which names this launcher's warm pool", entry.Name, poolSegment)
+		}
 		if _, twice := want.instances[name]; twice {
 			return nil, fmt.Errorf("desired state names instance %q twice", entry.Name)
 		}
@@ -155,6 +159,9 @@ func (l *Launcher) read(answer reconcileAnswer) (*desired, error) {
 		name := l.prefix + short
 		if short == "" {
 			return nil, errors.New("desired state names an ending instance with no name")
+		}
+		if strings.HasPrefix(short, poolSegment) {
+			return nil, fmt.Errorf("ending instance %q starts with %q, which names this launcher's warm pool", short, poolSegment)
 		}
 		if _, wanted := want.instances[name]; wanted {
 			return nil, fmt.Errorf("desired state names instance %q as both running and ending", short)

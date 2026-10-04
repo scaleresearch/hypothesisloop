@@ -32,6 +32,7 @@ func main() {
 	launch := cfg.launch()
 	launch.Token = agentloop.RequiredEnv(binaryName, "LAUNCHER_TOKEN")
 	launch.Provider = rented
+	launch.WarmPool = cfg.warmPool(rented)
 	launch.HTTPClient = &http.Client{Timeout: 35 * time.Second}
 	launch.Log = log.Printf
 	launcher, err := agentlaunch.New(launch)
@@ -42,8 +43,8 @@ func main() {
 
 	ctx, cancel := agentloop.SignalContext(log.Printf)
 	defer cancel()
-	log.Printf("starting: launcher=%s provider=%s capabilities=%v control_plane=%s model_provider=%s interval=%s create_pause=%s",
-		cfg.LauncherName, cfg.Provider.Name, provider.Capabilities(rented), cfg.APIURL, cfg.ModelProvider.Name, launch.Interval, launch.CreatePause)
+	log.Printf("starting: launcher=%s provider=%s capabilities=%v control_plane=%s model_provider=%s interval=%s create_pause=%s warm_pool=%d",
+		cfg.LauncherName, cfg.Provider.Name, provider.Capabilities(rented), cfg.APIURL, cfg.ModelProvider.Name, launch.Interval, launch.CreatePause, launch.WarmPool)
 	if err := launcher.Run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "agent-launcher: %v\n", err)
 		os.Exit(1)

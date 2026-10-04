@@ -11,6 +11,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/agentlaunch"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/configfile"
+	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 )
 
 type config struct {
@@ -24,10 +25,13 @@ type config struct {
 	ReconcileIntervalSeconds int `yaml:"reconcile_interval_seconds"`
 	// CreatePauseMilliseconds is waited between two creates of one pass. 0 is no pause, and the
 	// key must be present either way.
-	CreatePauseMilliseconds *int                `yaml:"create_pause_milliseconds"`
-	Provider                providerConfig      `yaml:"provider"`
-	Instance                instanceConfig      `yaml:"instance"`
-	ModelProvider           modelProviderConfig `yaml:"model_provider"`
+	CreatePauseMilliseconds *int `yaml:"create_pause_milliseconds"`
+	// WarmPoolSize is how many warm instances the launcher keeps ready to start agents in. Left
+	// out, it is defaultWarmPool on a provider that can warm instances and none on another.
+	WarmPoolSize  *int                `yaml:"warm_pool_size"`
+	Provider      providerConfig      `yaml:"provider"`
+	Instance      instanceConfig      `yaml:"instance"`
+	ModelProvider modelProviderConfig `yaml:"model_provider"`
 
 	size             agentlaunch.Size
 	modelProviderEnv map[string]string
@@ -96,6 +100,9 @@ func loadConfig(path string) (*config, error) {
 		}
 		cfg.modelProviderEnv[variable.Name] = value
 	}
+	if cfg.WarmPoolSize != nil && *cfg.WarmPoolSize < 0 {
+		return nil, fmt.Errorf("config: warm_pool_size must not be negative")
+	}
 	if err := cfg.launch().Validate(); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
@@ -104,18 +111,38 @@ func loadConfig(path string) (*config, error) {
 
 var variableName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
+const (
+	defaultWarmPool = 2
+	// progressInterval is how often a running agent's output is read for its progress when the
+	// passes come faster: once a pass would be a log search per agent every two seconds.
+	progressInterval = 15 * time.Second
+)
+
+// warmPool is the pool the launcher keeps on p: the configured size, or the default where p can
+// warm instances.
+func (cfg *config) warmPool(p provider.Provider) int {
+	if cfg.WarmPoolSize != nil {
+		return *cfg.WarmPoolSize
+	}
+	if _, warms := p.(provider.Warmer); warms {
+		return defaultWarmPool
+	}
+	return 0
+}
+
 // launch is the launcher's configuration as the file decides it. The token, the provider, the
-// HTTP client and the log are the process's to add.
+// warm pool that depends on it (warmPool), the HTTP client and the log are the process's to add.
 func (cfg *config) launch() agentlaunch.Config {
 	return agentlaunch.Config{
-		Name:          cfg.LauncherName,
-		APIURL:        cfg.APIURL,
-		Command:       cfg.Instance.Command,
-		Size:          cfg.size,
-		ModelProvider: cfg.ModelProvider.Name,
-		Env:           cfg.modelProviderEnv,
-		Interval:      time.Duration(cfg.ReconcileIntervalSeconds) * time.Second,
-		CreatePause:   time.Duration(*cfg.CreatePauseMilliseconds) * time.Millisecond,
+		Name:             cfg.LauncherName,
+		APIURL:           cfg.APIURL,
+		Command:          cfg.Instance.Command,
+		Size:             cfg.size,
+		ModelProvider:    cfg.ModelProvider.Name,
+		Env:              cfg.modelProviderEnv,
+		Interval:         time.Duration(cfg.ReconcileIntervalSeconds) * time.Second,
+		CreatePause:      time.Duration(*cfg.CreatePauseMilliseconds) * time.Millisecond,
+		ProgressInterval: progressInterval,
 	}
 }
 
