@@ -357,6 +357,7 @@ var routes = []route{
 	{method: "DELETE", path: "/internal/clusters/{name}", request: "/internal/clusters/<cluster>", rule: ofCluster(reached)},
 	{method: "POST", path: "/internal/clusters/{name}/status", request: "/internal/clusters/<cluster>/status", body: `{"reports":[]}`, rule: ofCluster(reached)},
 	{method: "POST", path: "/internal/clusters/{name}/builds/{key}/credential", request: "/internal/clusters/<cluster>/builds/key-1/credential", body: `{"attempt":1}`, rule: ofCluster(reached)},
+	{method: "POST", path: "/internal/clusters/{name}/builds/{key}/git-credential", request: "/internal/clusters/<cluster>/builds/key-1/git-credential", body: `{"attempt":1}`, rule: ofCluster(reached)},
 	{method: "POST", path: "/internal/clusters/{name}/builds/{key}/progress", request: "/internal/clusters/<cluster>/builds/key-1/progress", body: `{"attempt":1,"step":"[1/2] FROM base: started"}`, rule: ofCluster(reached)},
 	{method: "POST", path: "/internal/clusters/{name}/builds/{key}/loaded", request: "/internal/clusters/<cluster>/builds/key-1/loaded", body: `{"attempt":1,"node":"node-1","digest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}`, rule: ofCluster(reached)},
 	{method: "POST", path: "/internal/clusters/{name}/builds/{key}", request: "/internal/clusters/<cluster>/builds/key-1", body: `{"attempt":1,"outcome":"pushed","digest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}`, rule: ofCluster(reached)},
