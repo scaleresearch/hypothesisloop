@@ -9,6 +9,7 @@ import { AddIdeaButton, AddedNote, GraphEditorProvider, IdeaEditor, LinkBar, use
 import { HypothesisPanel } from '@/components/hypothesis-panel'
 import { HypothesisGraphCanvas } from '@/components/hypothesis-graph'
 import { HypothesisOutline } from '@/components/hypothesis-outline'
+import { Expandable } from '@/components/ui/expandable'
 import { layoutGraph } from '@/lib/hypothesis-graph'
 import type { HypothesisGraph, HypothesisGraphNode } from '@/types'
 
@@ -67,6 +68,7 @@ function Harness({ view, role = 'member', graph: start = initial }: { view: 'gra
   return (
     <TenantContext.Provider value={resolved.tenant}>
     <GraphEditorProvider value={editor}>
+    <Expandable label="Hypothesis graph" className="contents">
       <AddIdeaButton />
       <LinkBar />
       <IdeaEditor />
@@ -79,6 +81,7 @@ function Harness({ view, role = 'member', graph: start = initial }: { view: 'gra
       <section aria-label="Side panel">
         {selected !== graph.root && <HypothesisPanel graph={graph} nodeByID={new Map(graph.nodes.map(n => [n.id, n]))} selected={selected} onSelect={setSelected} />}
       </section>
+    </Expandable>
     </GraphEditorProvider>
     </TenantContext.Provider>
   )
@@ -120,6 +123,20 @@ describe('on the graph', () => {
     expect(registerHumanHypothesis).toHaveBeenCalledExactlyOnceWith('pe-x', 'label smoothing helps', [{ type: 'builds_on', to: 'pe-x' }])
     expect(node('label smoothing helps')).toBeTruthy()
     expect(screen.queryByRole('group', { name: 'New idea' })).toBeNull()
+  })
+
+  it('opens in the whole window, where Escape cancels an idea first and then restores the page', async () => {
+    render(<Harness view="graph" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Open in the whole window' }))
+    const whole = screen.getByLabelText('Hypothesis graph')
+    expect(whole.className).toContain('fixed')
+    fireEvent.click(within(whole).getByRole('button', { name: 'Add idea' }))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('group', { name: 'New idea' })).toBeNull()
+    expect(screen.getByLabelText('Hypothesis graph')).toBe(whole)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByLabelText('Hypothesis graph')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Open in the whole window' })).toBeTruthy()
   })
 
   it('adds an idea under a hypothesis, with an extra link picked by clicking another node', async () => {

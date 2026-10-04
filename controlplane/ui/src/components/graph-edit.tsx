@@ -86,13 +86,15 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
 
   useEffect(() => {
     if (!composing && linking === null) return
+    // On the document, ahead of the window, so the graph stays in the whole window while Escape cancels an edit.
     function onKey(e: KeyboardEvent) {
       if (e.key !== 'Escape') return
+      e.preventDefault()
       if (findingTarget) setFindingTarget(false)
       else cancel()
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
   }, [composing, linking, findingTarget, cancel])
 
   function targetAllowed(id: string): boolean {

@@ -13,6 +13,7 @@ import type { HypothesisGraph, HypothesisGraphNode, HypothesisLinkType, Objectiv
 import { chart, hypothesisLinkStyles, hypothesisStatuses, semantic, statusColor, statusTone, tint } from '@/lib/colors'
 import { opacity as scale } from '@/lib/scale'
 import { Button } from '@/components/ui/button'
+import { ExpandButton, useExpanded } from '@/components/ui/expandable'
 import { Dot } from '@/components/ui/dot'
 import { StatusLabel } from '@/components/ui/badge'
 import { Inline } from '@/components/ui/stack'
@@ -199,11 +200,14 @@ function Legend({ onTidy }: { onTidy?: () => void }) {
           {status}
         </span>
       ))}
-      {onTidy && (
-        <Button variant="link" size="sm" className="ml-auto" title="New ideas were placed beside the others; lay the whole graph out again" onClick={onTidy}>
-          Tidy layout
-        </Button>
-      )}
+      <Inline gap="sm" nowrap className="ml-auto">
+        {onTidy && (
+          <Button variant="link" size="sm" title="New ideas were placed beside the others; lay the whole graph out again" onClick={onTidy}>
+            Tidy layout
+          </Button>
+        )}
+        <ExpandButton />
+      </Inline>
     </Inline>
   )
 }
@@ -243,6 +247,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
   const height = useStore(s => s.height)
   const [ready, setReady] = useState(false)
   const centered = useRef('')
+  const expanded = useExpanded()
   const flow = useRef<HTMLDivElement>(null)
   const store = useStoreApi()
   useEffect(() => {
@@ -329,6 +334,11 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
       },
     }
   })}, [graph, positions, dimmed])
+
+  // Opening in or leaving the whole window resizes the canvas: the view is placed again once it has.
+  useEffect(() => {
+    centered.current = ''
+  }, [expanded])
 
   // Without a focus the view opens on the whole graph under the objective, or on its top when
   // the whole would be too small to read.

@@ -12,6 +12,7 @@ import { PlatformExperimentStatus } from '@/types'
 import type { HypothesisGraph, PlatformExperiment } from '@/types'
 import { Page } from '@/components/ui/page'
 import { Card } from '@/components/ui/card'
+import { Expandable } from '@/components/ui/expandable'
 import { Button, Chip } from '@/components/ui/button'
 import { FormField } from '@/components/ui/form-field'
 import { Section } from '@/components/ui/section'
@@ -213,6 +214,7 @@ function Workspace({ graph, pe, mutate, canWrite, closed, view, q, setQ, search,
     <GraphEditorProvider value={editor}>
       {toolbar(<AddIdeaButton />)}
       <ObjectiveBar graph={graph} pe={pe} />
+      <Expandable label="Hypothesis graph" className="contents">
       <div className={clsx('grid min-h-canvas flex-fill grid-rows-1 gap-4', showSide ? 'grid-cols-with-aside' : 'grid-cols-1')}>
         <Card className="flex flex-col">
           <LinkBar />
@@ -263,6 +265,7 @@ function Workspace({ graph, pe, mutate, canWrite, closed, view, q, setQ, search,
           )}
         </Stack>}
       </div>
+      </Expandable>
     </GraphEditorProvider>
   )
 }

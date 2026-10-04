@@ -2,6 +2,7 @@
 
 import { shortId } from '@/lib/format'
 import { Fragment, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import { TextLink } from '@/components/ui/link'
 import useSWR from 'swr'
 import {
@@ -30,10 +31,10 @@ import { Captioned } from '@/components/ui/captioned'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Dialog } from '@/components/ui/dialog'
+import { ExpandButton, Expandable, useExpanded } from '@/components/ui/expandable'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
-import { Code, Eyebrow, Pill, Text } from '@/components/ui/text'
+import { Eyebrow, Pill, Text } from '@/components/ui/text'
 import { semantic, seriesPalette, chart } from '@/lib/colors'
 import { jobPath } from '@/lib/routes'
 
@@ -46,7 +47,28 @@ function isBoundedMetric(name: string): boolean {
   return BOUNDED_METRIC_RE.test(name)
 }
 
-// Shared chart body for both the mini card and the expanded dialog view. `trackedMetrics`
+/** A chart that can fill the window, named by its label while it does. */
+function ExpandableChart({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Expandable label={label} className="relative">
+      <ChartTitle label={label} />
+      <ExpandButton className="absolute right-0 top-0 z-10" />
+      {children}
+    </Expandable>
+  )
+}
+
+function ChartTitle({ label }: { label: string }) {
+  return useExpanded() ? <Eyebrow className="mb-2">{label}</Eyebrow> : null
+}
+
+/** Holds a chart at its height in the page, and grows it into the rest of the window while it fills it. */
+function ChartBox({ height, children }: { height: number; children: ReactNode }) {
+  const expanded = useExpanded()
+  return <div className={expanded ? 'min-h-0 flex-fill' : undefined} style={expanded ? undefined : { height }}>{children}</div>
+}
+
+// Shared chart body for the per-job card and the job picker. `trackedMetrics`
 // scopes the plot to the experiment's official tracked/ranking metrics rather than every
 // ad-hoc metric_name a job happens to report.
 function MetricLineChart({ points, trackedMetrics, height }: { points: MetricDataPoint[]; trackedMetrics: string[]; height: number }) {
@@ -69,7 +91,8 @@ function MetricLineChart({ points, trackedMetrics, height }: { points: MetricDat
   const hasUnbounded = metricNames.some((n) => !isBoundedMetric(n))
   const axisOf = (name: string) => (isBoundedMetric(name) ? 'left' : 'right')
   return (
-    <ResponsiveContainer width="100%" height={height}>
+    <ChartBox height={height}>
+    <ResponsiveContainer width="100%" height="100%">
       <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
         <XAxis dataKey="frac" type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={chart.tick} />
@@ -93,6 +116,7 @@ function MetricLineChart({ points, trackedMetrics, height }: { points: MetricDat
         ))}
       </LineChart>
     </ResponsiveContainer>
+    </ChartBox>
   )
 }
 
@@ -105,25 +129,11 @@ function JobMetricMini({ jobId, trackedMetrics }: { jobId: string; trackedMetric
     () => fetchExperimentMetrics(jobId),
     { refreshInterval: 30_000 },
   )
-  const [expanded, setExpanded] = useState(false)
   const points = (metrics ?? []).filter((p) => p.recorded_at)
   return (
-    <div className="relative">
-      <Button
-        type="button"
-        size="icon"
-        onClick={() => setExpanded(true)}
-        title="Expand chart"
-        aria-label="Expand chart"
-        className="absolute right-0 top-0 z-10 text-muted"
-      >
-        ⤢
-      </Button>
+    <ExpandableChart label={`Metrics of job ${jobId}`}>
       <MetricLineChart points={points} trackedMetrics={trackedMetrics} height={400} />
-      <Dialog open={expanded} onClose={() => setExpanded(false)} size="wide" title={<Code>{jobId}</Code>}>
-        <MetricLineChart points={points} trackedMetrics={trackedMetrics} height={640} />
-      </Dialog>
-    </div>
+    </ExpandableChart>
   )
 }
 
@@ -205,7 +215,9 @@ export function LiveMetricsPicker({ jobs }: { jobs: Experiment[] }) {
           )}
         </Captioned>
       </Inline>
-      <MetricLineChart points={points} trackedMetrics={Array.from(selected)} height={420} />
+      <ExpandableChart label={`Metrics of job ${selectedJob.id}`}>
+        <MetricLineChart points={points} trackedMetrics={Array.from(selected)} height={420} />
+      </ExpandableChart>
     </Stack>
   )
 }
@@ -383,7 +395,7 @@ export function CompetingAgentsChart({
   }
 
   return (
-    <>
+    <ExpandableChart label={metricName}>
       {nonRawAgentIds.size > 0 && (
         <Pill
           tone="danger"
@@ -393,7 +405,8 @@ export function CompetingAgentsChart({
           Non-raw basis data excluded for: {Array.from(nonRawAgentIds).sort().map((agentID, i) => <Fragment key={agentID}>{i > 0 && ', '}<AgentLabel id={agentID} /></Fragment>)}
         </Pill>
       )}
-    <ResponsiveContainer width="100%" height={300}>
+    <ChartBox height={300}>
+    <ResponsiveContainer width="100%" height="100%">
       <LineChart data={rows} margin={{ top: 8, right: 24, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
         <XAxis dataKey="t" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => new Date(v).toLocaleTimeString()} tick={chart.tick} />
@@ -426,7 +439,8 @@ export function CompetingAgentsChart({
         ))}
       </LineChart>
     </ResponsiveContainer>
-    </>
+    </ChartBox>
+    </ExpandableChart>
   )
 }
 
