@@ -2,7 +2,7 @@
 .PHONY: dev reset build test agent-test lint check images job-images sparse-sdpa-workload-image \
 	experimentator-base-image experimentator-image check-tag ui-image check-ui-build-args registry-up prune-images \
 	helm-prepare helm-lint chart-push \
-	controlplane-up controlplane-down controlplane-destroy render-settings \
+	controlplane-up controlplane-down controlplane-destroy render-settings environment-builder \
 	cluster-agent-up cluster-agent-down staff-token token runtime-token \
 	k3s-up k3s-down full-up k3s-dev-nodes-up k3s-dev-nodes-down e2e \
 	full-stop full-start reload stack-not-held \
@@ -85,10 +85,15 @@ BUILDS := images ui-image tt-hardware-image sparse-sdpa-workload-image
 $(BUILDS):
 	@python3 localdev/images-lock.py $(MAKE) locked-$@ TAG="$(TAG)"
 
+# The control service does not start without its environment builder and Google credentials
+# (localdev/lib/auth.sh's lib_environment_builder), so that is checked before any image is built.
+environment-builder:
+	@bash -c '. localdev/lib/auth.sh && lib_environment_builder'
+
 # compose is started under auth.sh, which exports the GitHub App's secrets when .env has an App:
 # a PEM does not survive being a make variable.
-controlplane-up: registry-up render-settings images
-	bash -c '. localdev/lib/auth.sh && podman compose -f $(COMPOSE_FILE) up -d'
+controlplane-up: environment-builder registry-up render-settings images
+	bash -c '. localdev/lib/auth.sh && lib_environment_builder && podman compose -f $(COMPOSE_FILE) up -d'
 	@until curl -fsS -o /dev/null http://localhost:$${API_HOST_PORT:-8081}/health; do sleep 1; done
 	@until curl -fsS -o /dev/null http://localhost:8084/health; do sleep 1; done
 	bash -c '. localdev/lib/auth.sh && lib_register_clusters && lib_register_local_cluster'

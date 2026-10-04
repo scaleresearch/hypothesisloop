@@ -55,11 +55,26 @@ spec:
             - name: HYPOTHESISLOOP_CONFIG
               value: /settings/hypothesisloop.yaml
             {{- include "hypothesisloop.configSecretEnv" . | nindent 12 }}
+            - name: HYPOTHESISLOOP_ENVIRONMENT_BUILDER_ADDR
+              value: {{ required "environmentBuilder.address is required: tcp://host:port of the builder a cluster attached with BUILDER=true runs" .Values.environmentBuilder.address | quote }}
+            - name: HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CA
+              value: /credentials/ca.pem
+            - name: HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CERT
+              value: /credentials/cert.pem
+            - name: HYPOTHESISLOOP_ENVIRONMENT_BUILDER_KEY
+              value: /credentials/key.pem
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: /credentials/google.json
           ports:
             - containerPort: {{ .Values.controlService.port }}
           volumeMounts:
             - name: config
               mountPath: /settings
+              readOnly: true
+            # A directory, never subPath: the builder's files are read at each build, so a renewed
+            # Secret reaches the process without a restart.
+            - name: credentials
+              mountPath: /credentials
               readOnly: true
           resources:
             {{- toYaml .Values.controlService.resources | nindent 12 }}
@@ -73,3 +88,11 @@ spec:
         - name: config
           configMap:
             name: hypothesisloop-config
+        - name: credentials
+          secret:
+            secretName: {{ include "hypothesisloop.secretName" . }}
+            items:
+              - { key: ENVIRONMENT_BUILDER_CA, path: ca.pem }
+              - { key: ENVIRONMENT_BUILDER_CERT, path: cert.pem }
+              - { key: ENVIRONMENT_BUILDER_KEY, path: key.pem }
+              - { key: GOOGLE_CREDENTIALS, path: google.json }

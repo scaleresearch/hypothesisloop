@@ -549,9 +549,9 @@ HypothesisLoop is split into two kinds of deployable things:
 
 - **Control plane** - one instance, runs anywhere (Postgres, Memgraph for the
   hypothesis graph, control-service, metrics-service, GreptimeDB - a plain
-  Docker Compose stack). It never connects to a target cluster directly - no
-  credentials for one anywhere in this stack. `control-service` is the
-  entire agent- and UI-facing API - quota, scheduling, and registry all
+  Docker Compose stack). It holds no credentials for a target cluster and
+  reaches one only for the image builder a `BUILDER=true` attach runs there.
+  `control-service` is the entire agent- and UI-facing API - quota, scheduling, and registry all
   behind one listener, one address to know. `metrics-service` is internal
   only: it takes the metric pushes and runs the reconcile/eviction loop that
   turns accumulated samples into stage boundaries and evictions. Nothing it
@@ -617,9 +617,9 @@ hl cluster add my-cluster
 ```
 
 Both addresses must answer from inside the cluster, and so must `data_store.endpoint`, which
-every job is handed for its data. The control plane never connects to a cluster, so it needs no
-kubeconfig and no credential of one. A control plane started with `make dev` or
-`make controlplane-up` names this host as local containers reach it
+every job is handed for its data. The control plane needs no kubeconfig and no credential of a
+cluster, and connects to one only to build images on the builder a `BUILDER=true` attach runs.
+A control plane started with `make dev` or `make controlplane-up` names this host as local containers reach it
 (`host.containers.internal` on macOS), which no other machine resolves. For a cluster elsewhere
 the settings must name addresses that cluster reaches. `API_URL` and `METRICS_URL` can also be
 given to the install command directly, and `data_store.endpoint` cannot.
@@ -772,6 +772,11 @@ The signing secret is the deployment's own: control-service and metrics-service 
 `HYPOTHESISLOOP_SIGNING_SECRET` and do not start without it, and the settings file only names
 the variable. Local development's is made by the first render (`localdev/.run/signing-secret`)
 and supplied by `make`. Whoever holds the secret can derive every token, so rotating it ends them all.
+
+control-service does not start without the builder it builds environment images on and the Google
+credentials it pushes them with either. Locally `make` takes the builder from
+`localdev/.run/environment-builder`, which attaching box-a with `BUILDER=true` writes, and the
+credentials gcloud holds for `GCP_ACCOUNT` of `.env`.
 
 A cluster runs the jobs of its own org and no other. Admission places a job on a cluster of
 the job's org or on a shared cluster, and a job whose org has neither waits with

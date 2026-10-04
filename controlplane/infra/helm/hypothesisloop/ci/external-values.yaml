@@ -25,6 +25,8 @@ agents:
   launcher: main
   image: registry.example.invalid/hypothesisloop-experimentator-base:test
 publicAPIURL: https://api.example.invalid
+environmentBuilder:
+  address: tcp://builder.example.invalid:31234
 postgres:
   enabled: false
 runtimes:

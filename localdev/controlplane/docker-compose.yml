@@ -126,12 +126,23 @@ services:
       HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY: ${HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY:-}
       # The local git server's password, which the rendered settings name when .env has no App.
       HYPOTHESISLOOP_GIT_PASSWORD: ${HYPOTHESISLOOP_GIT_PASSWORD:-}
+      # The environment builder and the Google credentials environment images are pushed with
+      # (localdev/lib/auth.sh's lib_environment_builder, which make controlplane-up runs first).
+      # The builder's directory is mounted, since its PEM files are read at each build and a new
+      # attach replaces them. The address is empty, and refused by control-service, otherwise.
+      HYPOTHESISLOOP_ENVIRONMENT_BUILDER_ADDR: ${HYPOTHESISLOOP_ENVIRONMENT_BUILDER_ADDR:-}
+      HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CA: /environment-builder/ca.pem
+      HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CERT: /environment-builder/cert.pem
+      HYPOTHESISLOOP_ENVIRONMENT_BUILDER_KEY: /environment-builder/key.pem
+      GOOGLE_APPLICATION_CREDENTIALS: /google/credentials.json
     ports:
       - "${API_HOST_PORT:-8081}:8081"
     volumes:
       # Rendered by `make render-settings` (host address substituted into data_store.endpoint) —
       # same file both services mount, same as the pod model this replaces.
       - ../../controlplane/settings/.hypothesisloop.rendered.yaml:/settings/hypothesisloop.yaml:ro
+      - ../../localdev/.run/environment-builder:/environment-builder:ro
+      - ../../localdev/.run/google-credentials.json:/google/credentials.json:ro
     depends_on:
       postgres:
         condition: service_healthy

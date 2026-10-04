@@ -92,6 +92,44 @@ func TestEveryPodReadsTheOneNamedSecret(t *testing.T) {
 	}
 }
 
+// control-service reads the builder's PEM files and the Google credentials at each build, so they
+// are files of the Secret in a mounted directory, and only the builder's address is a value.
+func TestControlServiceReadsTheBuilderAndGoogleCredentialsAsFilesOfTheSecret(t *testing.T) {
+	release := charttest.Render(t, charttest.External)
+	env := release.Env(t, "hypothesisloop-control-service", secretNames[charttest.External])
+	pod := release.Deployments["hypothesisloop-control-service"].Spec.Template.Spec
+	var mount string
+	for _, m := range pod.Containers[0].VolumeMounts {
+		if m.Name == "credentials" && m.SubPath == "" {
+			mount = m.MountPath
+		}
+	}
+	files := map[string]string{}
+	for _, volume := range pod.Volumes {
+		if volume.Name == "credentials" && volume.Secret != nil && volume.Secret.SecretName == secretNames[charttest.External] {
+			for _, item := range volume.Secret.Items {
+				files[mount+"/"+item.Path] = item.Key
+			}
+		}
+	}
+	if env["HYPOTHESISLOOP_ENVIRONMENT_BUILDER_ADDR"] != "tcp://builder.example.invalid:31234" {
+		t.Errorf("builder address = %q, want the values'", env["HYPOTHESISLOOP_ENVIRONMENT_BUILDER_ADDR"])
+	}
+	for name, key := range map[string]string{
+		"HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CA":   "ENVIRONMENT_BUILDER_CA",
+		"HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CERT": "ENVIRONMENT_BUILDER_CERT",
+		"HYPOTHESISLOOP_ENVIRONMENT_BUILDER_KEY":  "ENVIRONMENT_BUILDER_KEY",
+		"GOOGLE_APPLICATION_CREDENTIALS":          "GOOGLE_CREDENTIALS",
+	} {
+		if got := files[env[name]]; got != key {
+			t.Errorf("%s = %q, which is Secret key %q of a mounted directory, want %s", name, env[name], got, key)
+		}
+		if _, known := charttest.Secret[key]; !known {
+			t.Errorf("charttest.Secret has no %s", key)
+		}
+	}
+}
+
 func TestTwoRendersOfTheSameValuesAreIdentical(t *testing.T) {
 	for _, values := range []string{charttest.InCluster, charttest.External} {
 		if first, second := charttest.Render(t, values).Text, charttest.Render(t, values).Text; first != second {
@@ -166,6 +204,7 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		"no launcher":                 {charttest.InCluster, `agents.launcher=""`, "agents.launcher is required"},
 		"no agent image":              {charttest.InCluster, `agents.image=""`, "agents.image is required"},
 		"no API address":              {charttest.InCluster, `publicAPIURL=""`, "publicAPIURL is required"},
+		"no environment builder":      {charttest.InCluster, `environmentBuilder.address=""`, "environmentBuilder.address is required"},
 		"the API address per reader":  {charttest.InCluster, `agents.apiURL=http://api.example.invalid`, "apiURL"},
 		"no runtime metrics address":  {charttest.InCluster, `runtimes.metricsURL=""`, "runtimes.metricsURL is required"},
 		"no object store address":     {charttest.InCluster, `objectStore.endpoint=""`, "objectStore.endpoint is required"},

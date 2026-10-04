@@ -11,6 +11,8 @@ auth:
 agents:
   image: registry.example.invalid/hypothesisloop-experimentator-base:test
 publicAPIURL: http://api.example.invalid:30081
+environmentBuilder:
+  address: tcp://builder.example.invalid:31234
 runtimes:
   metricsURL: http://metrics.example.invalid:30084
 objectStore:
