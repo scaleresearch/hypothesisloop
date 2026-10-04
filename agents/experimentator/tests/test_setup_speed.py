@@ -105,11 +105,11 @@ class PlannerOpeningTest(unittest.TestCase):
         self.assertEqual(run._opening(SimpleNamespace(cfg=baseline_agent(), client=client, workdir="/w"), "s-1", None), "Continue where you left off.")
 
     # Runs 8 to 10's baseline agents built the environment 9.5 to 14.5 min in. A fresh baseline
-    # session opens with its goal in time, the slowest part first, and the planner's pins.
+    # session opens with its goal, the slowest part first, and the planner's pins.
     def test_a_baseline_agent_opens_with_its_goal(self):
         opened = seed.baseline("src/: the code. rust-toolchain.toml pins 1.95.0.")
         first, _, rest = opened.partition("\n\n")
-        for said in ("15 minutes after the plan was accepted", "slowest first", "environment build", "the planner's map below names", "subagents"):
+        for said in ("researchers, who wait for it", "slowest first", "environment build", "the planner's map below names", "subagents"):
             self.assertIn(said, first)
         self.assertTrue(rest.endswith("rust-toolchain.toml pins 1.95.0."), rest)
         bare = seed.baseline("")

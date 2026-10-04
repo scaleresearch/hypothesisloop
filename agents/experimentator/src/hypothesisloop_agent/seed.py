@@ -107,10 +107,10 @@ def planner(workdir: str) -> str:
 
 
 # Runs 8 to 10's baseline agents built the environment 9.5 to 14.5 min in, and the control
-# waited for it. The opening says the goal is time and what usually takes longest.
+# waited for it. The opening says the run waits on the goal and what usually takes longest.
 _BASELINE_OPENING = (
-    "Your goal is the control and each reference measured and your branch ready for researchers "
-    "about 15 minutes after the plan was accepted. Start what is slowest first, often the "
+    "Your goal is the control and each reference measured and your branch ready for researchers, "
+    "who wait for it to start. Start what is slowest first, often the "
     "environment build from the toolchain and dependency pins {source}, and do the rest alongside "
     "it, with subagents where parallel work is faster.")
 _FROM_MAP = "the planner's map below names"
