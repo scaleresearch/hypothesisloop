@@ -101,8 +101,10 @@ def _updates_hook(setup: core.RunSetup, watch_env: dict[str, str]):
         if draining.locked() or hook_input.get("agent_id"):
             return {}
         async with draining:
-            events = await updates.drain(watch_env)
-        told = await _told(setup, events)
+            env = updates.taking(watch_env, "draining")
+            events = await updates.drain(env)
+            told = await _told(setup, events)
+            updates.delivered(env)
         if not told:
             return {}
         _forget_job_reads()
@@ -570,19 +572,21 @@ async def _interrupt_on_stop(client, setup: core.RunSetup, stopped) -> None:
         log.warning("could not interrupt the turn (%s): it runs to its own end", e)
 
 
-async def _last_turn(client, setup: core.RunSetup, watch_env: dict[str, str], events: list[dict]) -> None:
-    """The shutdown turn, opened with events and whatever else finished since the last delivery.
-    An agent whose own action ended its run gets none."""
+async def _last_turn(client, setup: core.RunSetup, watch_env: dict[str, str]) -> None:
+    """The shutdown turn, opened with whatever finished since the last delivery. An agent whose
+    own action ended its run gets none."""
     prompt = _shutdown_prompt(setup)
     if prompt is None:
         log.info("stopping: the agent ended its own run, no last turn")
         return
     log.info("stopping: one last turn to file what is owed")
     agent = setup.cfg.agent_id
-    events = [*events, *await updates.drain(watch_env)]
+    env = updates.taking(watch_env, "closing")
+    events = await updates.drain(env)
     for line in activity.event_lines(events, agent):
         print(line, flush=True)
     await client.query(prompt + ("\n\n" + updates.message(events, agent) if events else ""))
+    updates.delivered(env)
     limit = _shutdown_turn_s(setup)
     try:
         async with asyncio.timeout(limit):
@@ -824,7 +828,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     def stopped() -> bool:
         return stop_flag[0]
 
-    async def over(events: list[dict]) -> bool:
+    async def over() -> bool:
         """Whether the run loop stops here, after the last turn when there is a platform to file
         with: a run it ended and a machine told to stop get one, a refused token and a platform
         out of reach for the limit get none. The one place a last turn is given."""
@@ -833,7 +837,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             return False
         log.info("stopping: %s", lost or "received signal")
         if not core.lost_platform(lost):
-            await _last_turn(client, setup, watch_env, events)
+            await _last_turn(client, setup, watch_env)
             await _store_session(setup)
         return True
 
@@ -841,7 +845,6 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     connecting = time.monotonic()
     idle_s, told_nothing_in_flight = updates.IDLE_NUDGE_S, False
     background: set[str] = set()
-    pending = None
     async with ClaudeSDKClient(options=options) as client:
         log.info("model CLI connected in %.1fs", time.monotonic() - connecting)
         await client.query(opening)
@@ -881,7 +884,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             if got_result:
                 await _store_session(setup)
 
-            if got_result and not rate_limited_resets_at and await over([]):
+            if got_result and not rate_limited_resets_at and await over():
                 return None, False
 
             if rate_limited_resets_at:
@@ -948,34 +951,27 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                     await client.query(updates.NOTHING_IN_FLIGHT)
                     continue
             # Wait for the next batch of updates about its own jobs and hypotheses and hand it
-            # over on the same connection. While a subagent works, the turn the CLI starts when it
-            # ends comes first if it comes before the batch; a batch that came with it is handed
-            # over after it.
-            batch = asyncio.ensure_future(_next_told(setup, watch_env, stopped, idle_s)) if pending is None else pending
-            pending = None
-            if background and not batch.done():
-                own = asyncio.ensure_future(_own_turn(client, setup, background))
-                await asyncio.wait({batch, own}, return_when=asyncio.FIRST_COMPLETED)
-                if own.done():
-                    if batch.done():
-                        pending = batch
-                    else:
-                        batch.cancel()
-                        await asyncio.gather(batch, return_exceptions=True)
-                    _forget_job_reads()
-                    continue
-                own.cancel()
-                await asyncio.gather(own, return_exceptions=True)
-            events, told = await batch
+            # over on the same connection. A turn the CLI starts by itself ends the wait and is
+            # read first: one starts when a subagent ends, and on a resume to say which stopped.
+            # The batch the wait took is then read again, as its cursor moves only once handed over.
+            own = asyncio.ensure_future(_own_turn(client, setup, background))
+            events, told, taken = await _next_told(setup, watch_env, lambda: stopped() or own.done(), idle_s)
+            came = own.done()
+            own.cancel()
+            await asyncio.gather(own, return_exceptions=True)
+            if came:
+                _forget_job_reads()
+                continue
             # A batch that comes with the end of the run, the close among its events, opens the
             # last turn rather than a turn of its own that the stop then cuts short.
-            if await over(events):
+            if await over():
                 return None, False
             if told:
                 for line in activity.event_lines(events, cfg.agent_id):
                     print(line, flush=True)
                 _forget_job_reads()
                 await client.query(told)
+                updates.delivered(taken)
                 idle_s, told_nothing_in_flight = updates.IDLE_NUDGE_S, False
                 continue
             log.info("no platform updates for %ds, nudging", idle_s)
@@ -984,14 +980,18 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             idle_s = min(idle_s * 2, updates.IDLE_NUDGE_MAX_S)
 
 
-async def _next_told(setup: core.RunSetup, watch_env: dict[str, str], stopped, idle_s: float) -> tuple[list[dict], str]:
-    """The next batch of updates and what the agent is told of it. A batch that tells nothing held
-    only a revision answered since, and the wait goes on."""
+async def _next_told(setup: core.RunSetup, watch_env: dict[str, str], ended,
+                     idle_s: float) -> tuple[list[dict], str, dict[str, str]]:
+    """The next batch of updates, what the agent is told of it, "" once ended(), and the env that
+    took it, for updates.delivered. A batch that tells nothing held only a revision answered
+    since: it is passed and the wait goes on."""
     while True:
-        events = await updates.next_batch(watch_env, stopped, idle_s)
-        told = "" if stopped() else await _told(setup, events)
-        if told or not events or stopped():
-            return events, told
+        taken = updates.taking(watch_env, "waiting")
+        events = await updates.next_batch(taken, ended, idle_s)
+        told = await _told(setup, events) if events and not ended() else ""
+        if told or not events or ended():
+            return events, told, taken
+        updates.delivered(taken)
 
 
 def _note_background(message, background: set[str]) -> None:
@@ -1003,8 +1003,10 @@ def _note_background(message, background: set[str]) -> None:
 
 
 async def _own_turn(client, setup: core.RunSetup, background: set[str]) -> None:
-    """Returns once the CLI starts a turn of the agent's own, which it does when a background
-    task ends; what the subagents do meanwhile is logged."""
+    """Returns once the CLI starts a turn by itself, or its stream ends. It starts one when a
+    background task ends, and on a resume it answers the opening with a turn of its own, without
+    a model call, for the subagents that stopped with the last process before the opening's turn.
+    What the subagents do meanwhile is logged."""
     async for message in client.receive_messages():
         _seen_session(setup, message)
         _log_message(message, setup.cfg.agent_id)

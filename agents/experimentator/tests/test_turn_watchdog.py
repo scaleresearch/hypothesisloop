@@ -37,6 +37,10 @@ class HangingClient:
         yield AssistantMessage(content=[TextBlock(text="pulling metrics")], model="m")
         await asyncio.Event().wait()
 
+    async def receive_messages(self):
+        await asyncio.Event().wait()
+        yield
+
 
 def _setup():
     return SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
@@ -199,7 +203,7 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
 
     # Run 6: the close arrived as an update, was handed over as a turn of its own and cut by the
     # stop four seconds later, and only then did the last turn start. A batch that comes with the
-    # end of the run opens the last turn, with the batch in it.
+    # end of the run opens the last turn, with the batch in it: not handed over, it is read again.
     async def test_a_batch_that_comes_with_the_close_opens_the_last_turn(self):
         closed_event = {"kind": "platform_experiment.status", "subject": "pe-1", "value": "closed"}
         experiment = {"status": "running"}
@@ -213,7 +217,7 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
         setup.client = SimpleNamespace(get_platform_experiment=lambda _id: experiment, get_signup=lambda *_: {})
         with mock.patch.object(run, "ClaudeSDKClient", IdleClient), \
                 mock.patch.object(run.updates, "next_batch", the_close), \
-                mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=[])), \
+                mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=[closed_event])), \
                 contextlib.redirect_stdout(io.StringIO()):
             await asyncio.wait_for(run._run_one_session(setup, "m", None, [False]), timeout=5)
         self.assertEqual(HangingClient.instances[-1].queries, [
@@ -228,7 +232,7 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
     async def test_the_last_turn_opens_with_what_finished_since_the_last_delivery(self):
         done = {"kind": "experiment.status", "subject": "exp-1", "value": "COMPLETED", "detail": "acc 0.9"}
         comment = {"kind": "comment.new", "subject": "hyp-1", "value": "human"}
-        self.assertEqual(await self.stop_while_idle([comment], [done]), [
+        self.assertEqual(await self.stop_while_idle([comment], [comment, done]), [
             "Begin.", LAST + "\n\nPlatform updates:\ncomment.new hyp-1 human\n"
                            "experiment.status exp-1 COMPLETED acc 0.9"])
 

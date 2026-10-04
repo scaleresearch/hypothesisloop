@@ -3,10 +3,10 @@
 The harness runs `hl watch` whenever the agent ends its turn, and briefly after each of its tool
 calls: the platform holds whatever happened while the agent worked and replays it from the cursor
 hl saved, so a batch waits server-side instead of in this process, survives a restart, and is
-delivered once whichever of the two reads it. An event is a pointer; a job that ended is handed
-over with the machine it ran on and its metrics, and to its agent with the count of its jobs
-still unfinished and the quota it has used, read once per batch, so that learning of it costs
-no call.
+delivered once whichever of the two hands it over, which is when its cursor moves. An event is a
+pointer; a job that ended is handed over with the machine it ran on and its metrics, and to its
+agent with the count of its jobs still unfinished and the quota it has used, read once per batch,
+so that learning of it costs no call.
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import time
 from collections.abc import Callable
 
@@ -81,6 +82,31 @@ def watch_env(api_url: str, token: str, statedir: str) -> dict[str, str]:
     a state dir that outlives the process."""
     return {**os.environ, "API_URL": api_url, "HL_TOKEN": token,
             "HL_STATE_DIR": os.path.join(os.path.abspath(statedir), ".hl-state")}
+
+
+_DELIVERED_TO = "HL_STATE_DIR_DELIVERED"
+
+
+def taking(env: dict[str, str], reader: str) -> dict[str, str]:
+    """env whose hl watch moves the cursor in reader's copy of hl's state, put in place by
+    delivered() once what it read was handed over. A batch never handed over, as when the wait
+    for it ended or the session died first, is read again."""
+    state = env["HL_STATE_DIR"]
+    copy = f"{state}.{reader}"
+    shutil.rmtree(copy, ignore_errors=True)
+    if os.path.isdir(state):
+        shutil.copytree(state, copy)
+    else:
+        os.makedirs(copy)
+    return {**env, "HL_STATE_DIR": copy, _DELIVERED_TO: state}
+
+
+def delivered(env: dict[str, str]) -> None:
+    """Moves the cursor that the watches with env, from taking(), advanced into place."""
+    os.makedirs(env[_DELIVERED_TO], exist_ok=True)
+    for name in os.listdir(env["HL_STATE_DIR"]):
+        if name.endswith(".json"):
+            os.replace(os.path.join(env["HL_STATE_DIR"], name), os.path.join(env[_DELIVERED_TO], name))
 
 
 def _agent(env: dict[str, str]) -> str:

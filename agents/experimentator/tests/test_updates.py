@@ -286,6 +286,25 @@ class DrainTest(unittest.IsolatedAsyncioTestCase):
                 await updates.drain(ENV, command=command)
         self.assertEqual(len(logged.records), 1)
 
+    # A batch the harness took and never handed over, as when the CLI started a turn first or the
+    # session died, is read again: the cursor its watch saved moves into place only once delivered.
+    async def test_the_cursor_moves_only_once_what_was_read_is_delivered(self):
+        command, _ = fake_hl(f"echo \"$RUNS\" > \"$HL_STATE_DIR/watch-pe-1-agent-a.json\"\necho '{COMPLETED}'\n")
+        state = os.path.join(tempfile.mkdtemp(), ".hl-state")
+        env = {**ENV, "HL_STATE_DIR": state}
+        cursor = os.path.join(state, "watch-pe-1-agent-a.json")
+
+        await updates.drain(updates.taking(env, "waiting"), command=command)
+        self.assertFalse(os.path.exists(cursor))
+        taken = updates.taking(env, "waiting")
+        await updates.drain(taken, command=command)
+        updates.delivered(taken)
+        with open(cursor) as f:
+            self.assertEqual(f.read().strip(), "2")
+        taken = updates.taking(env, "draining")
+        with open(os.path.join(taken["HL_STATE_DIR"], "watch-pe-1-agent-a.json")) as f:
+            self.assertEqual(f.read().strip(), "2", "a read starts from the cursor delivered")
+
 
 class HookTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -312,7 +331,7 @@ class HookTest(unittest.IsolatedAsyncioTestCase):
         self.setup = SimpleNamespace(cfg=self.cfg, client=SimpleNamespace(get_platform_experiment=lambda _id: self.draft),
                                      workdir=tempfile.mkdtemp())
         self.cfg.platform_experiment_id = "pe-1"
-        self.hook = run._updates_hook(self.setup, {})
+        self.hook = run._updates_hook(self.setup, {"HL_STATE_DIR": os.path.join(tempfile.mkdtemp(), ".hl-state")})
 
     async def call(self, **hook_input):
         from contextlib import redirect_stdout
@@ -545,6 +564,10 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
                 yield ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
                                     num_turns=1, session_id="s")
 
+            async def receive_messages(self):
+                await asyncio.Event().wait()
+                yield
+
         async def one_batch(env, stopped, idle_s):
             return [{"kind": "experiment.status", "subject": "exp-1", "value": "COMPLETED", "agent_id": "agent-a"}]
 
@@ -594,6 +617,10 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
             async def receive_response(self):
                 yield ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
                                     num_turns=1, session_id="s")
+
+            async def receive_messages(self):
+                await asyncio.Event().wait()
+                yield
 
         async def next_batch(env, stopped, idle_s):
             batch = batches.pop(0)
@@ -668,16 +695,20 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
                     yield message
 
             async def receive_messages(self):
-                yield SystemMessage("task_notification", {"task_id": "sub-1", "status": "completed"})
-                yield SystemMessage("init", {"session_id": "s"})
+                if not own_turns:
+                    own_turns.append(1)
+                    yield SystemMessage("task_notification", {"task_id": "sub-1", "status": "completed"})
+                    yield SystemMessage("init", {"session_id": "s"})
                 await asyncio.Event().wait()
 
-        waits = []
+        waits, own_turns = [], []
 
         async def next_batch(env, stopped, idle_s):
             waits.append(idle_s)
             if len(waits) == 1:
-                await asyncio.Event().wait()
+                while not stopped():
+                    await asyncio.sleep(0.01)
+                return []
             stop_flag[0] = True
             return []
 
@@ -693,6 +724,73 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
                 redirect_stdout(StringIO()):
             await asyncio.wait_for(run._run_one_session(setup, "m", None, stop_flag), timeout=5)
         self.assertEqual((sent[:-1], len(waits), read.await_count), (["Begin."], 2, 1))
+
+    # A resumed session whose subagents stopped with the last process answers the opening with an
+    # empty turn and then the opening's own, nothing in the background. The second is read as a
+    # turn, and the batch the wait took as it came is not handed over: it is read again.
+    async def test_a_turn_the_cli_starts_by_itself_is_read_and_the_batch_taken_meanwhile_is_read_again(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from claude_agent_sdk import ResultMessage, SystemMessage
+
+        from hypothesisloop_agent.claude import run
+
+        stop_flag = [False]
+        sent, read_turns, own_turns = [], [], []
+        result = ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1, session_id="s")
+
+        class Client:
+            def __init__(self, options):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def query(self, prompt):
+                sent.append(prompt)
+
+            async def receive_response(self):
+                read_turns.append(1)
+                yield result
+
+            async def receive_messages(self):
+                if not own_turns:
+                    own_turns.append(1)
+                    yield SystemMessage("init", {"session_id": "s"})
+                await asyncio.Event().wait()
+
+        update = {"kind": "comment.new", "subject": "hyp-1", "value": "agent", "agent_id": "agent-b"}
+        waits = []
+
+        async def next_batch(env, stopped, idle_s):
+            waits.append(env)
+            if len(waits) == 1:
+                await asyncio.sleep(0.05)
+                return [update]
+            stop_flag[0] = True
+            return []
+
+        setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
+                                client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
+                                cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", role="competitor", api_url="http://x",
+                                                    token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
+        delivered = mock.Mock()
+        with mock.patch.object(run, "ClaudeSDKClient", Client), \
+                mock.patch.object(updates, "next_batch", next_batch), \
+                mock.patch.object(updates, "delivered", delivered), \
+                mock.patch.object(updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \
+                mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[update])), \
+                redirect_stdout(StringIO()):
+            await asyncio.wait_for(run._run_one_session(setup, "m", "s", stop_flag), timeout=5)
+        self.assertEqual(len(read_turns), 3, "the opening's turn, the CLI's own and the last")
+        self.assertEqual(sent[1:], [run._shutdown_prompt(setup) + "\n\nPlatform updates:\ncomment.new hyp-1 agent by agent-b"])
+        self.assertEqual([call.args[0]["HL_STATE_DIR"].rsplit(".", 1)[1] for call in delivered.call_args_list], ["closing"])
 
     async def test_a_coordinator_has_no_jobs_of_its_own_to_be_told_of(self):
         from types import SimpleNamespace
@@ -741,6 +839,10 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
             async def receive_response(self):
                 yield ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
                                     num_turns=1, session_id="s")
+
+            async def receive_messages(self):
+                await asyncio.Event().wait()
+                yield
 
         async def revised(env, stopped, idle_s):
             # The first batch replays a revision answered already, the second is one asked now.
