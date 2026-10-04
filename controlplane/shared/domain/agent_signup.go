@@ -55,6 +55,20 @@ type InFlight struct {
 	Jobs int `json:"jobs" doc:"Its jobs queued or running, those waiting for their environment's build included. 0: nothing of its own is on the platform, and an agent waiting then waits for nothing it started."`
 }
 
+// AgentHealth is how one agent of a platform experiment is getting on, as the run's health series
+// in the metrics store record it.
+type AgentHealth struct {
+	AgentID string
+	Role    SignupRole
+	// FirstJobSeconds and FirstCompletedSeconds run from when the agent could first submit to its
+	// first job submitted and its first job completed; nil before there is one.
+	FirstJobSeconds       *float64
+	FirstCompletedSeconds *float64
+	JobsInFlight          int
+	Restarts              int
+	CoordinatorMessages   int
+}
+
 // AgentActivity is what a hosted agent or coordinator is doing now, as its harness last said it
 // beside its progress marker. The platform keeps the latest sentence only.
 type AgentActivity struct {

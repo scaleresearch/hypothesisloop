@@ -127,3 +127,7 @@ func (f fakeObserved) PopulateUsage(_ context.Context, _ time.Time, _ string, _ 
 func (f fakeObserved) BestPerAgentOnMetric(_ context.Context, _ *domain.PlatformExperiment, _ domain.MetricDefinition, _ map[string]bool) (map[string]metricsdb.AgentBest, []string, error) {
 	return f.best, f.nonRaw, f.fail("BestPerAgentOnMetric")
 }
+
+func (fakeObserved) RecordRunHealth(context.Context, string, time.Time, []domain.AgentHealth) error {
+	return nil
+}

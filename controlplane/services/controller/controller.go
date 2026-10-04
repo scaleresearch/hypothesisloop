@@ -178,6 +178,9 @@ func (c *Controller) Start(ctx context.Context) error {
 				if err := c.Reconcile(ctx); err != nil {
 					c.logger.Error("reconcile error", zap.Error(err))
 				}
+				if err := c.recordRunHealth(ctx); err != nil {
+					c.logger.Error("run health", zap.Error(err))
+				}
 			}
 		}
 	}()
