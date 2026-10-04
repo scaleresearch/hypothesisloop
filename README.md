@@ -669,7 +669,7 @@ Left out, `REGISTRY` and `TAG` are the local development registry and the tag of
 which only the local cluster pulls. `BUILDER=true` also runs the platform's image builder
 (BuildKit) there, on node port 31234 of the host `KUBE_CONTEXT` reaches the cluster's API at,
 accepting only the client certificate the same install writes, with that address, to
-`localdev/.run/environment-builder` (`addr`, `ca.pem`, `cert.pem`, `key.pem`). Each install
+`localdev/.run/environment-builder` (`addr`, `cluster`, `ca.pem`, `cert.pem`, `key.pem`). Each install
 makes new certificates. An install without it removes the builder. The builder requests
 `builder.requests` of the chart (4 cores and 8 GiB), which the cluster leaves out of the capacity
 it reports for jobs.

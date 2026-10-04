@@ -57,6 +57,8 @@ spec:
             {{- include "hypothesisloop.configSecretEnv" . | nindent 12 }}
             - name: HYPOTHESISLOOP_ENVIRONMENT_BUILDER_ADDR
               value: {{ required "environmentBuilder.address is required: tcp://host:port of the builder a cluster attached with BUILDER=true runs" .Values.environmentBuilder.address | quote }}
+            - name: HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CLUSTER
+              value: {{ required "environmentBuilder.cluster is required: the name of the cluster the builder runs on" .Values.environmentBuilder.cluster | quote }}
             - name: HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CA
               value: /credentials/ca.pem
             - name: HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CERT

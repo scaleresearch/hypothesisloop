@@ -27,6 +27,7 @@ agents:
 publicAPIURL: https://api.example.invalid
 environmentBuilder:
   address: tcp://builder.example.invalid:31234
+  cluster: tt-box
 postgres:
   enabled: false
 runtimes:

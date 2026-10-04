@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"syscall"
 	"time"
@@ -399,8 +401,8 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 
 // newEnvironmentBuilds is the builder of environments, on the BuildKit daemon the control
 // service's environment names, pushing with the Google credentials of the process. It warms the
-// daemon's cache with the job images that suit the hardware of the clusters reporting within
-// connectedWithin.
+// daemon's cache with the job images that suit the hardware the daemon's own cluster reported
+// within connectedWithin.
 func newEnvironmentBuilds(ctx context.Context, store *db.Store, pcfg *hypothesisloopcfg.Config, metricsDBURL string, connectedWithin time.Duration, logger *zap.Logger) *environments.Loop {
 	credential, err := environments.GoogleCredential(ctx)
 	if err != nil {
@@ -415,18 +417,13 @@ func newEnvironmentBuilds(ctx context.Context, store *db.Store, pcfg *hypothesis
 	if err != nil {
 		logger.Fatal("control-service: configure the environment builder", zap.Error(err))
 	}
+	cluster := requiredEnv("HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CLUSTER", logger)
 	liveTypes := func(ctx context.Context) ([]string, error) {
 		_, total, err := metricsdb.LiveClusterAcceleratorAvailableAndTotal(ctx, metricsDBURL, connectedWithin)
 		if err != nil {
 			return nil, err
 		}
-		var types []string
-		for _, byType := range total {
-			for acceleratorType := range byType {
-				types = append(types, acceleratorType)
-			}
-		}
-		return types, nil
+		return slices.Collect(maps.Keys(total[cluster])), nil
 	}
 	return environments.NewLoop(store.EnvironmentsStore, builder, pcfg.OfferedJobImages(), liveTypes, logger)
 }

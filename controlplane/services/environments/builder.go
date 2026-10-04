@@ -41,15 +41,16 @@ const (
 	maxParallel = 4
 )
 
-// LiveTypes is the accelerator types of the clusters that report capacity now.
+// LiveTypes is the accelerator types the builder's own cluster reports now.
 type LiveTypes func(ctx context.Context) ([]string, error)
 
 // Loop builds every environment that is building, on the leader alone.
 type Loop struct {
 	store   Store
 	builder Builder
-	// jobImages and liveTypes say which bases the loop pulls into the builder's cache as it
-	// starts: the job images that suit the hardware of a cluster that runs jobs now.
+	// jobImages and liveTypes say which bases the loop pulls into the builder's cache once as it
+	// starts: the job images that suit the hardware of the builder's own cluster. Every other base
+	// is pulled by the first build on it.
 	jobImages []domain.JobImage
 	liveTypes LiveTypes
 	logger    *zap.Logger
@@ -87,8 +88,9 @@ func (l *Loop) Start(ctx context.Context) {
 	}
 }
 
-// warm pulls the job images that suit a live cluster's hardware into the builder's cache, one
-// after another, each within buildLimit.
+// warm pulls the job images that suit the hardware of the builder's cluster into its cache, one
+// after another, each once and within buildLimit. A base's address names its tag, and the tag
+// changes only with a restart.
 func (l *Loop) warm(ctx context.Context) {
 	types, err := l.liveTypes(ctx)
 	if err != nil {

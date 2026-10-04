@@ -98,6 +98,9 @@ func TestInstallWithABuilderLeavesTheControlPlaneItsAddressAndCredentials(t *tes
 	if addr, _ := os.ReadFile(filepath.Join(client, "addr")); string(addr) != "tcp://box.example:31234\n" {
 		t.Errorf("addr = %q", addr)
 	}
+	if cluster, _ := os.ReadFile(filepath.Join(client, "cluster")); string(cluster) != "edge\n" {
+		t.Errorf("cluster = %q, want the cluster the builder runs on", cluster)
+	}
 	if info, err := os.Stat(filepath.Join(client, "key.pem")); err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("key.pem: %v, %v; want it readable by its owner only", info, err)
 	}

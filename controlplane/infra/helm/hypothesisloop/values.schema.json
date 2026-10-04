@@ -135,6 +135,9 @@
       "properties": {
         "address": {
           "type": "string"
+        },
+        "cluster": {
+          "type": "string"
         }
       }
     },

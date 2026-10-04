@@ -205,6 +205,7 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		"no agent image":              {charttest.InCluster, `agents.image=""`, "agents.image is required"},
 		"no API address":              {charttest.InCluster, `publicAPIURL=""`, "publicAPIURL is required"},
 		"no environment builder":      {charttest.InCluster, `environmentBuilder.address=""`, "environmentBuilder.address is required"},
+		"no builder cluster":          {charttest.InCluster, `environmentBuilder.cluster=""`, "environmentBuilder.cluster is required"},
 		"the API address per reader":  {charttest.InCluster, `agents.apiURL=http://api.example.invalid`, "apiURL"},
 		"no runtime metrics address":  {charttest.InCluster, `runtimes.metricsURL=""`, "runtimes.metricsURL is required"},
 		"no object store address":     {charttest.InCluster, `objectStore.endpoint=""`, "objectStore.endpoint is required"},

@@ -93,6 +93,9 @@ publicAPIURL: ""
 environmentBuilder:
   # Required: tcp://host:port, as control-service reaches it.
   address: ""
+  # Required: the cluster it runs on. The images of that cluster's hardware are pulled into its
+  # cache as control-service starts.
+  cluster: ""
 
 # Hosted agents: the agents section of hypothesisloop.yaml.
 agents:

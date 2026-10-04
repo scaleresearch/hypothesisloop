@@ -21,7 +21,7 @@
 #   BUILDER_CLIENT_DIR -> builder.*. Set, the cluster also runs the platform's image builder,
 #                         reached at the host this context reaches the cluster's API at, and this
 #                         directory gets what the control plane connects with: addr, ca.pem,
-#                         cert.pem and key.pem. Every install makes new certificates, so the
+#                         cert.pem and key.pem, and cluster, this cluster's name. Every install makes new certificates, so the
 #                         previous client's stop working (default: no builder)
 set -euo pipefail
 
@@ -117,6 +117,7 @@ if [[ -n "${BUILDER_CLIENT_DIR}" ]]; then
   mkdir -p "${BUILDER_CLIENT_DIR}"
   chmod 700 "${BUILDER_CLIENT_DIR}"
   (umask 077 && cp "${certs}/ca.pem" "${BUILDER_CLIENT_DIR}/ca.pem" && cp "${certs}/client.pem" "${BUILDER_CLIENT_DIR}/cert.pem" \
-    && cp "${certs}/client-key.pem" "${BUILDER_CLIENT_DIR}/key.pem" && printf 'tcp://%s:%s\n' "${BUILDER_HOST}" "${port}" > "${BUILDER_CLIENT_DIR}/addr")
+    && cp "${certs}/client-key.pem" "${BUILDER_CLIENT_DIR}/key.pem" && printf 'tcp://%s:%s\n' "${BUILDER_HOST}" "${port}" > "${BUILDER_CLIENT_DIR}/addr" \
+    && printf '%s\n' "${CLUSTER_NAME}" > "${BUILDER_CLIENT_DIR}/cluster")
   echo "==> Builder at $(<"${BUILDER_CLIENT_DIR}/addr"), its client credentials in ${BUILDER_CLIENT_DIR}"
 fi
