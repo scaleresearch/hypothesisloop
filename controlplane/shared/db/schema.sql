@@ -1336,17 +1336,23 @@ WHERE status IN ('open', 'running') AND starts_at < '0001-01-02';
 
 -- An environment is an image the platform builds from a repository's .hypothesisloop/Dockerfile
 -- on one base image (domain.Environment). key names the pair, so one pair is built once. A row
--- is made building, and the builder (services/environments) moves it to ready or failed once.
+-- is made building, and the builder (services/environments) moves it to ready, or to failed when
+-- an instruction of the file failed. A build the platform failed is counted in attempts, and the
+-- row is abandoned after the last one allowed, to be made building again by the next submit that
+-- names it.
 CREATE TABLE IF NOT EXISTS environments (
     key        TEXT        PRIMARY KEY,
     base       TEXT        NOT NULL,
     dockerfile TEXT        NOT NULL,
     image      TEXT        NOT NULL,
-    state      TEXT        NOT NULL CHECK (state IN ('building', 'ready', 'failed')),
+    state      TEXT        NOT NULL,
     log_tail   TEXT        NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE environments ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE environments DROP CONSTRAINT IF EXISTS environments_state_check;
+ALTER TABLE environments ADD CONSTRAINT environments_state_check CHECK (state IN ('building', 'ready', 'failed', 'abandoned'));
 CREATE INDEX IF NOT EXISTS environments_building ON environments (created_at) WHERE state = 'building';
 -- The environment a job's commit declares: admission claims the job only once it is ready, in
 -- its image. NULL for a commit that declares none.

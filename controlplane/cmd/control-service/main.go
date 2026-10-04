@@ -346,7 +346,7 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 	schedulerSvc := scheduler.NewService(store, expQuotaSvc, noveltyDetector, graph, gitHost, queueBackend, settler, metricsDBURL, logger).
 		WithQuotaConfig(quotaCfg).
 		WithJobImages(pcfg.OfferedJobImages()).
-		WithEnvironments(environmentsSvc).
+		WithEnvironments(environmentsSvc, pcfg.Agents.Image).
 		WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent)
 
 	schedulerLoop := scheduler.NewLoop(store, expQuotaSvc, jwc, grace, logger).
@@ -398,7 +398,8 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 }
 
 // newEnvironmentBuilds is the builder of environments, on the BuildKit daemon the control
-// service's environment names, pushing with the Google credentials of the process.
+// service's environment names, pushing with the Google credentials of the process. It warms the
+// daemon's cache with the agent image and every job image, the bases of every environment.
 func newEnvironmentBuilds(ctx context.Context, store *db.Store, pcfg *hypothesisloopcfg.Config, logger *zap.Logger) *environments.Loop {
 	credential, err := environments.GoogleCredential(ctx)
 	if err != nil {
@@ -413,7 +414,11 @@ func newEnvironmentBuilds(ctx context.Context, store *db.Store, pcfg *hypothesis
 	if err != nil {
 		logger.Fatal("control-service: configure the environment builder", zap.Error(err))
 	}
-	return environments.NewLoop(store.EnvironmentsStore, builder, logger)
+	bases := []string{pcfg.Agents.Image}
+	for _, image := range pcfg.OfferedJobImages() {
+		bases = append(bases, image.Image)
+	}
+	return environments.NewLoop(store.EnvironmentsStore, builder, bases, logger)
 }
 
 // openGraph connects to the hypothesis graph, makes sure its schema exists, moves any hypotheses

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/url"
 	"strings"
 
@@ -14,13 +13,13 @@ import (
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/client/llb/sourceresolver"
 	gateway "github.com/moby/buildkit/frontend/gateway/client"
+	gatewaypb "github.com/moby/buildkit/frontend/gateway/pb"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/session/auth"
+	"github.com/moby/buildkit/solver/errdefs"
 	"github.com/moby/buildkit/solver/pb"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // RegistryCredential is what the builder pushes to registryHost with, asked for at each build: a
@@ -54,21 +53,48 @@ func NewBuildKit(addr, caFile, certFile, keyFile, registryHost string, credentia
 // amd64.
 const buildPlatform = "linux/amd64"
 
-func (b *BuildKit) Build(ctx context.Context, dockerfile, base, image string) error {
+// connect reaches the daemon, with the session that hands it the registry's credential.
+func (b *BuildKit) connect(ctx context.Context) (*client.Client, []session.Attachable, error) {
 	username, password, err := b.Credential(ctx)
 	if err != nil {
-		return fmt.Errorf("environments: registry credential: %w", err)
+		return nil, nil, fmt.Errorf("environments: registry credential: %w", err)
 	}
 	u, _ := url.Parse(b.Addr)
 	c, err := client.New(ctx, b.Addr, client.WithServerConfig(u.Hostname(), b.CAFile), client.WithCredentials(b.CertFile, b.KeyFile))
 	if err != nil {
-		return fmt.Errorf("environments: connect to the builder: %w", err)
+		return nil, nil, fmt.Errorf("environments: connect to the builder: %w", err)
+	}
+	return c, []session.Attachable{&registryAuth{host: b.RegistryHost, username: username, password: password}}, nil
+}
+
+// Pull runs a command on image, which the daemon pulls and unpacks for, so its layers stay in the
+// daemon's cache.
+func (b *BuildKit) Pull(ctx context.Context, image string) error {
+	c, attachables, err := b.connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer c.Close() //nolint:errcheck
+	def, err := llb.Image(image, llb.Platform(platforms.MustParse(buildPlatform))).Run(llb.Args([]string{"true"})).Root().Marshal(ctx)
+	if err != nil {
+		return err
+	}
+	if _, err := c.Solve(ctx, def, client.SolveOpt{Session: attachables}, nil); err != nil {
+		return fmt.Errorf("environments: pull %s: %w", image, err)
+	}
+	return nil
+}
+
+func (b *BuildKit) Build(ctx context.Context, dockerfile, base, image string) error {
+	c, attachables, err := b.connect(ctx)
+	if err != nil {
+		return err
 	}
 	defer c.Close() //nolint:errcheck
 
 	opt := client.SolveOpt{
 		Exports: []client.ExportEntry{{Type: client.ExporterImage, Attrs: map[string]string{"name": image, "push": "true"}}},
-		Session: []session.Attachable{&registryAuth{host: b.RegistryHost, username: username, password: password}},
+		Session: attachables,
 	}
 	build := func(ctx context.Context, gw gateway.Client) (*gateway.Result, error) {
 		platform := platforms.MustParse(buildPlatform)
@@ -124,10 +150,11 @@ func (b *BuildKit) Build(ctx context.Context, dockerfile, base, image string) er
 	if err == nil {
 		return nil
 	}
-	if builderFault(err) || ctx.Err() != nil {
-		return fmt.Errorf("environments: build: %w", err)
+	// A RUN the deadline or a shutdown stopped exits with a code it did not choose.
+	if ctx.Err() == nil && fileFault(err) {
+		return &BuildFailed{Log: log.String() + "\n" + err.Error()}
 	}
-	return &BuildFailed{Log: log.String() + "\n" + err.Error()}
+	return fmt.Errorf("environments: build: %w", err)
 }
 
 // registryAuth hands the daemon the credential of the one registry it pushes to and is no token
@@ -161,15 +188,17 @@ func frontendInputs(ctx context.Context, dockerfile string) (map[string]*pb.Defi
 
 const maxLogBytes = 64 << 10
 
-// builderFault tells an error of reaching the builder from a build the file failed.
-func builderFault(err error) bool {
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return true
+// fileFault tells an instruction of the file failing from every other error, which is the
+// platform's: a RUN that exited with a code of its own, or the frontend refusing a line of the
+// file before anything ran (a parse error, a FROM it cannot resolve), which carries the line and
+// no vertex. An operation that failed otherwise, a pull, the push, the daemon, carries no exit
+// code or a vertex beside its line.
+func fileFault(err error) bool {
+	var exit *gatewaypb.ExitError
+	if errors.As(err, &exit) {
+		return exit.ExitCode != gatewaypb.UnknownExitStatus
 	}
-	switch status.Code(err) {
-	case codes.Unavailable, codes.Canceled, codes.DeadlineExceeded, codes.Unauthenticated, codes.ResourceExhausted:
-		return true
-	}
-	return false
+	var line *errdefs.SourceError
+	var vertex *errdefs.VertexError
+	return errors.As(err, &line) && !errors.As(err, &vertex)
 }

@@ -1908,8 +1908,9 @@ func cloneNodeAvailByCluster(byCluster map[string]map[string]map[string]int64) m
 }
 
 // heldForEnvironment says whether exp waits for the environment its commit declares: while it is
-// built it says so, and once it failed exp ends with the end of the build's output, so its agent
-// fixes the file and submits again. seen holds the environments this tick read.
+// built it says so, once the file failed exp ends with the end of the build's output, so its agent
+// fixes the file and submits again, and once the platform abandoned it exp ends as the platform's
+// fault, and a submit builds it again. seen holds the environments this tick read.
 func (l *Loop) heldForEnvironment(ctx context.Context, seen map[string]*domain.Environment, exp *domain.Experiment) (bool, error) {
 	env, ok := seen[exp.EnvironmentKey]
 	if !ok {
@@ -1928,18 +1929,28 @@ func (l *Loop) heldForEnvironment(ctx context.Context, seen map[string]*domain.E
 	case domain.EnvironmentBuilding:
 		reason := domain.NotAdmittedEnvironmentBuilding + ": the platform is building the environment " + domain.EnvironmentFile + " of its commit declares, on " + env.Base + ", since " + env.CreatedAt.UTC().Format(time.RFC3339) + ". The job runs in it once it is built"
 		return true, l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason)
+	case domain.EnvironmentFailed:
+		return true, l.endForEnvironment(ctx, exp, domain.StatusRejected, string(domain.EvictionEnvironmentFailed.WithDetail(domain.EnvironmentFile+" of its commit did not build on "+env.Base+
+			". Fix it, commit and submit again. The end of the build's output:\n"+env.LogTail)))
+	case domain.EnvironmentAbandoned:
+		return true, l.endForEnvironment(ctx, exp, domain.StatusEvicted, string(domain.EvictionCodeUnreachable.WithDetail("the platform could not build the environment "+domain.EnvironmentFile+
+			" of its commit declares on "+env.Base+", no fault of the file's. Submit it again and the platform builds it again")))
 	}
-	reason := string(domain.EvictionEnvironmentFailed.WithDetail(domain.EnvironmentFile + " of its commit did not build on " + env.Base +
-		". Fix it, commit and submit again. The end of the build's output:\n" + env.LogTail))
-	outcome, err := l.store.ResolveTermination(ctx, exp.ID, domain.StatusQueued, domain.StatusRejected, reason)
+	return false, fmt.Errorf("environment %s of job %s is %s", env.Key, exp.ID, env.State)
+}
+
+// endForEnvironment ends exp, queued for its environment, as to with reason. A platform fault is
+// queued again while its allowance lasts (db.Store.ResolveTermination).
+func (l *Loop) endForEnvironment(ctx context.Context, exp *domain.Experiment, to domain.ExperimentStatus, reason string) error {
+	outcome, err := l.store.ResolveTermination(ctx, exp.ID, domain.StatusQueued, to, reason)
 	if err != nil {
-		return true, err
+		return err
 	}
 	if outcome == domain.TerminationWritten {
-		exp.Status, exp.EvictionReason = domain.StatusRejected, reason
+		exp.Status, exp.EvictionReason = to, reason
 		if err := l.settler.Settle(ctx, exp); err != nil {
-			l.logger.Warn("settle a job whose environment failed", zap.String("id", exp.ID), zap.Error(err))
+			l.logger.Warn("settle a job whose environment did not build", zap.String("id", exp.ID), zap.Error(err))
 		}
 	}
-	return true, nil
+	return nil
 }

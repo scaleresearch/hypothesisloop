@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
@@ -14,8 +15,9 @@ import (
 type Store interface {
 	EnsureEnvironment(ctx context.Context, env *domain.Environment) (*domain.Environment, error)
 	GetEnvironment(ctx context.Context, key string) (*domain.Environment, error)
-	ListBuildingEnvironments(ctx context.Context) ([]*domain.Environment, error)
+	ListBuildingEnvironments(ctx context.Context, retryAfter time.Duration) ([]*domain.Environment, error)
 	FinishEnvironment(ctx context.Context, key string, state domain.EnvironmentState, logTail string) error
+	FailEnvironmentAttempt(ctx context.Context, key string, maxAttempts int) (bool, error)
 }
 
 // Service finds the environment a repository declares and makes it known to the builder.
@@ -46,8 +48,8 @@ func (s *Service) Read(ctx context.Context, projectID, repository, ref string) (
 	return &file, nil
 }
 
-// Ensure returns the environment of dockerfile built on base, to be built when it is new. A file
-// the platform does not build is a *domain.EnvironmentFileError.
+// Ensure returns the environment of dockerfile built on base, to be built when it is new or
+// abandoned. A file the platform does not build is a *domain.EnvironmentFileError.
 func (s *Service) Ensure(ctx context.Context, dockerfile, base string) (*domain.Environment, error) {
 	if err := domain.ValidateEnvironmentFile(dockerfile); err != nil {
 		return nil, err

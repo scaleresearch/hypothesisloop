@@ -317,6 +317,15 @@ func (p *PlatformExperiment) AwaitsAgents() bool {
 	return p.Status == PlatformExpRunning && p.StartedAt.IsZero()
 }
 
+// AgentBase is the image its agent machines boot and its agents' environment is built on:
+// platformImage, the platform's own, unless it names one.
+func (p *PlatformExperiment) AgentBase(platformImage string) string {
+	if p.AgentImage != "" {
+		return p.AgentImage
+	}
+	return platformImage
+}
+
 // AwaitsRepository says the platform has yet to create the repository it keeps its code in. No
 // machine of it is wanted until then.
 func (p *PlatformExperiment) AwaitsRepository() bool {

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -47,7 +48,7 @@ func TestAJobIsClaimedOnlyOnceItsEnvironmentIsReadyAndRunsInItsImage(t *testing.
 	if w.claim(t, id, w.ofA) {
 		t.Fatal("a job was placed while its environment builds")
 	}
-	if building, err := envs.ListBuildingEnvironments(ctx); err != nil || !containsEnvironment(building, key) {
+	if building, err := envs.ListBuildingEnvironments(ctx, 0); err != nil || !containsEnvironment(building, key) {
 		t.Fatalf("building: %v, want %s among them", err, key)
 	}
 	if err := envs.FinishEnvironment(ctx, key, domain.EnvironmentReady, ""); err != nil {
@@ -60,6 +61,43 @@ func TestAJobIsClaimedOnlyOnceItsEnvironmentIsReadyAndRunsInItsImage(t *testing.
 	}
 	if stored := w.get(t, id); stored.ResolvedJob == nil || stored.ResolvedJob.Image != want.Image || stored.Job.Image != "registry.test/job:1" {
 		t.Errorf("stored image %+v and job image %q, want the environment's resolved and the named one kept", stored.ResolvedJob, stored.Job.Image)
+	}
+}
+
+// A build the platform failed waits retryAfter before it is listed again, the last attempt
+// abandons the environment, and ensuring it again makes it building from the first attempt.
+func TestAnEnvironmentThePlatformFailsIsRetriedThenAbandonedAndEnsuredAgain(t *testing.T) {
+	w := newTwoOrgs(t)
+	ctx := context.Background()
+	envs := NewEnvironmentsStore(w.pool)
+	dockerfile := "ARG BASE\nFROM ${BASE}\nRUN echo " + w.suffix + " retried\n"
+	key := domain.EnvironmentKey(dockerfile, "registry.test/job:1")
+	env := &domain.Environment{Key: key, Base: "registry.test/job:1", Dockerfile: dockerfile, Image: "registry.test/env:" + key}
+	if _, err := envs.EnsureEnvironment(ctx, env); err != nil {
+		t.Fatal(err)
+	}
+	listed := func(retryAfter time.Duration) bool {
+		building, err := envs.ListBuildingEnvironments(ctx, retryAfter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return containsEnvironment(building, key)
+	}
+	for attempt := 1; attempt <= 3; attempt++ {
+		abandoned, err := envs.FailEnvironmentAttempt(ctx, key, 3)
+		if err != nil || abandoned != (attempt == 3) {
+			t.Fatalf("attempt %d: abandoned %v, %v", attempt, abandoned, err)
+		}
+		if attempt < 3 && (listed(time.Hour) || !listed(0)) {
+			t.Fatalf("attempt %d: listed within the hour %v, want held back until retryAfter passed", attempt, listed(time.Hour))
+		}
+	}
+	if stored, _ := envs.GetEnvironment(ctx, key); stored.State != domain.EnvironmentAbandoned || stored.Attempts != 3 || listed(0) {
+		t.Fatalf("after the last attempt: %+v, want it abandoned and not listed", stored)
+	}
+	again, err := envs.EnsureEnvironment(ctx, env)
+	if err != nil || again.State != domain.EnvironmentBuilding || again.Attempts != 0 || !listed(time.Hour) {
+		t.Fatalf("ensured again: %+v, %v, want it building from the first attempt", again, err)
 	}
 }
 

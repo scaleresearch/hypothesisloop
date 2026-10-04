@@ -3,7 +3,6 @@ package environments
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -14,10 +13,12 @@ import (
 )
 
 // Builder builds a Dockerfile with BASE set to base and baseUserArg to the user of base's image, on
-// a context holding only the file, and pushes the result as image. A *BuildFailed is the file failing to build. Any other error is the builder's own, and
-// the build is tried again.
+// a context holding only the file, and pushes the result as image. A *BuildFailed is an
+// instruction of the file failing. Any other error is the platform's, and the build is tried
+// again. Pull fetches image into the builder's cache, so a build on it does not wait for it.
 type Builder interface {
 	Build(ctx context.Context, dockerfile, base, image string) error
+	Pull(ctx context.Context, image string) error
 }
 
 // BuildFailed is a build the file failed, with the end of its output.
@@ -28,9 +29,11 @@ func (e *BuildFailed) Error() string { return "the build failed" }
 const (
 	// passInterval is how soon a new environment starts building.
 	passInterval = 5 * time.Second
-	// retryAfter is how long a build the builder failed waits before it is tried again.
+	// retryAfter is how long a build the platform failed waits before it is tried again.
 	retryAfter = time.Minute
-	// buildLimit bounds one build. One that runs longer failed.
+	// maxAttempts is how many builds of one environment the platform fails before it abandons it.
+	maxAttempts = 3
+	// buildLimit bounds one build, and one pull into the cache.
 	buildLimit = 30 * time.Minute
 	// maxParallel is how many builds run at once.
 	maxParallel = 4
@@ -40,26 +43,32 @@ const (
 type Loop struct {
 	store   Store
 	builder Builder
-	logger  *zap.Logger
+	// bases are the images environments are built on, pulled into the builder's cache as the loop
+	// starts.
+	bases  []string
+	logger *zap.Logger
 
 	mu       sync.Mutex
 	inFlight map[string]bool
-	// notBefore holds back a build the builder failed, by key.
-	notBefore map[string]time.Time
 }
 
-func NewLoop(store Store, builder Builder, logger *zap.Logger) *Loop {
-	if store == nil || builder == nil || logger == nil {
-		panic("environments.NewLoop: the store, the builder and a logger are required")
+func NewLoop(store Store, builder Builder, bases []string, logger *zap.Logger) *Loop {
+	if store == nil || builder == nil || len(bases) == 0 || logger == nil {
+		panic("environments.NewLoop: the store, the builder, the bases and a logger are required")
 	}
-	return &Loop{store: store, builder: builder, logger: logger, inFlight: map[string]bool{}, notBefore: map[string]time.Time{}}
+	return &Loop{store: store, builder: builder, bases: bases, logger: logger, inFlight: map[string]bool{}}
 }
 
-// Start runs passes until ctx ends and waits for the builds it started.
+// Start warms the builder's cache, runs passes until ctx ends and waits for what it started.
 func (l *Loop) Start(ctx context.Context) {
 	l.logger.Info("environments: building on this replica, the leader")
 	var builds sync.WaitGroup
 	defer builds.Wait()
+	builds.Add(1)
+	go func() {
+		defer builds.Done()
+		l.warm(ctx)
+	}()
 	ticker := time.NewTicker(passInterval)
 	defer ticker.Stop()
 	for {
@@ -72,20 +81,40 @@ func (l *Loop) Start(ctx context.Context) {
 	}
 }
 
+// warm pulls every base into the builder's cache, one after another.
+func (l *Loop) warm(ctx context.Context) {
+	l.logger.Info("environments: warming the builder's cache", zap.Strings("bases", l.bases))
+	began := time.Now()
+	for _, base := range l.bases {
+		start := time.Now()
+		pullCtx, cancel := context.WithTimeout(ctx, buildLimit)
+		err := l.builder.Pull(pullCtx, base)
+		cancel()
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil {
+			l.logger.Warn("environments: warm the builder's cache", zap.String("base", base), zap.Duration("took", time.Since(start)), zap.Error(err))
+			continue
+		}
+		l.logger.Info("environments: pulled into the builder's cache", zap.String("base", base), zap.Duration("took", time.Since(start)))
+	}
+	l.logger.Info("environments: warmed the builder's cache", zap.Duration("took", time.Since(began)))
+}
+
 func (l *Loop) pass(ctx context.Context, builds *sync.WaitGroup) {
-	building, err := l.store.ListBuildingEnvironments(ctx)
+	building, err := l.store.ListBuildingEnvironments(ctx, retryAfter)
 	if err != nil {
 		l.logger.Error("environments: list building", zap.Error(err))
 		return
 	}
-	now := time.Now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, env := range building {
 		if len(l.inFlight) == maxParallel {
 			return
 		}
-		if l.inFlight[env.Key] || now.Before(l.notBefore[env.Key]) {
+		if l.inFlight[env.Key] {
 			continue
 		}
 		l.inFlight[env.Key] = true
@@ -102,9 +131,9 @@ func (l *Loop) pass(ctx context.Context, builds *sync.WaitGroup) {
 
 func (l *Loop) build(ctx context.Context, env *domain.Environment) {
 	log := l.logger.With(zap.String("environment", env.Key), zap.String("base", env.Base))
+	start := time.Now()
 	buildCtx, cancel := context.WithTimeout(ctx, buildLimit)
 	err := l.builder.Build(buildCtx, asRoot(env.Dockerfile), env.Base, env.Image)
-	overrun := errors.Is(buildCtx.Err(), context.DeadlineExceeded)
 	cancel()
 	var failed *BuildFailed
 	state, tail := domain.EnvironmentReady, ""
@@ -112,25 +141,22 @@ func (l *Loop) build(ctx context.Context, env *domain.Environment) {
 	case err == nil:
 	case errors.As(err, &failed):
 		state, tail = domain.EnvironmentFailed, LastBytes(failed.Log, domain.MaxEnvironmentLogBytes)
-	case overrun:
-		state, tail = domain.EnvironmentFailed, fmt.Sprintf("the build ran longer than %s, the most one may take", buildLimit)
 	case ctx.Err() != nil:
 		return
 	default:
-		log.Warn("environments: the builder failed a build, it is tried again", zap.Error(err))
-		l.mu.Lock()
-		l.notBefore[env.Key] = time.Now().Add(retryAfter)
-		l.mu.Unlock()
+		abandoned, recordErr := l.store.FailEnvironmentAttempt(ctx, env.Key, maxAttempts)
+		if recordErr != nil {
+			log.Error("environments: record a build the platform failed", zap.Error(recordErr))
+			return
+		}
+		log.Warn("environments: the platform failed a build", zap.Int("attempt", env.Attempts+1), zap.Bool("abandoned", abandoned), zap.Duration("took", time.Since(start)), zap.Error(err))
 		return
 	}
 	if err := l.store.FinishEnvironment(ctx, env.Key, state, tail); err != nil {
 		log.Error("environments: record the build", zap.Error(err))
 		return
 	}
-	l.mu.Lock()
-	delete(l.notBefore, env.Key)
-	l.mu.Unlock()
-	log.Info("environments: built", zap.String("state", string(state)))
+	log.Info("environments: built", zap.String("state", string(state)), zap.Duration("took", time.Since(start)))
 }
 
 // LastBytes keeps the end of text, from the start of a line where one starts inside the limit.

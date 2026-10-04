@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -19,12 +20,12 @@ func NewEnvironmentsStore(pool *Pool) *EnvironmentsStore {
 	return &EnvironmentsStore{pool: pool}
 }
 
-const environmentColumns = ` key, base, dockerfile, image, state, log_tail, created_at, updated_at `
+const environmentColumns = ` key, base, dockerfile, image, state, log_tail, attempts, created_at, updated_at `
 
 func scanEnvironment(row rowScanner) (*domain.Environment, error) {
 	env := &domain.Environment{}
 	var state string
-	if err := row.Scan(&env.Key, &env.Base, &env.Dockerfile, &env.Image, &state, &env.LogTail, &env.CreatedAt, &env.UpdatedAt); err != nil {
+	if err := row.Scan(&env.Key, &env.Base, &env.Dockerfile, &env.Image, &state, &env.LogTail, &env.Attempts, &env.CreatedAt, &env.UpdatedAt); err != nil {
 		return nil, err
 	}
 	env.State = domain.EnvironmentState(state)
@@ -32,11 +33,12 @@ func scanEnvironment(row rowScanner) (*domain.Environment, error) {
 }
 
 // EnsureEnvironment returns the environment of env's key as it is stored, writing env as building
-// when there is none.
+// when there is none and making an abandoned one building again.
 func (s *EnvironmentsStore) EnsureEnvironment(ctx context.Context, env *domain.Environment) (*domain.Environment, error) {
 	const q = `WITH made AS (
 	INSERT INTO environments (key, base, dockerfile, image, state) VALUES ($1, $2, $3, $4, 'building')
-	ON CONFLICT (key) DO NOTHING
+	ON CONFLICT (key) DO UPDATE SET state = 'building', attempts = 0, updated_at = now()
+	WHERE environments.state = 'abandoned'
 	RETURNING` + environmentColumns + `)
 SELECT` + environmentColumns + `FROM made
 UNION ALL
@@ -61,9 +63,12 @@ func (s *EnvironmentsStore) GetEnvironment(ctx context.Context, key string) (*do
 	return env, nil
 }
 
-// ListBuildingEnvironments returns the environments still to be built, oldest first.
-func (s *EnvironmentsStore) ListBuildingEnvironments(ctx context.Context) ([]*domain.Environment, error) {
-	rows, err := s.pool.pool.Query(ctx, `SELECT`+environmentColumns+`FROM environments WHERE state = 'building' ORDER BY created_at, key`)
+// ListBuildingEnvironments returns the environments still to be built, oldest first, leaving out
+// those whose last build the platform failed less than retryAfter ago.
+func (s *EnvironmentsStore) ListBuildingEnvironments(ctx context.Context, retryAfter time.Duration) ([]*domain.Environment, error) {
+	rows, err := s.pool.pool.Query(ctx, `SELECT`+environmentColumns+`FROM environments
+WHERE state = 'building' AND (attempts = 0 OR updated_at <= now() - make_interval(secs => $1))
+ORDER BY created_at, key`, retryAfter.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("environments_store.ListBuilding: %w", err)
 	}
@@ -89,4 +94,21 @@ func (s *EnvironmentsStore) FinishEnvironment(ctx context.Context, key string, s
 		return fmt.Errorf("environments_store.Finish: %w", err)
 	}
 	return nil
+}
+
+// FailEnvironmentAttempt counts a build of a building environment the platform failed, and
+// abandons it once maxAttempts are spent. It answers whether it abandoned it.
+func (s *EnvironmentsStore) FailEnvironmentAttempt(ctx context.Context, key string, maxAttempts int) (bool, error) {
+	var abandoned bool
+	err := s.pool.pool.QueryRow(ctx, `UPDATE environments
+SET attempts = attempts + 1, state = CASE WHEN attempts + 1 >= $2 THEN 'abandoned' ELSE 'building' END, updated_at = now()
+WHERE key = $1 AND state = 'building'
+RETURNING state = 'abandoned'`, key, maxAttempts).Scan(&abandoned)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("environments_store.FailAttempt: %w", err)
+	}
+	return abandoned, nil
 }

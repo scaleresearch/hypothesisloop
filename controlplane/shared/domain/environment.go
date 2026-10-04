@@ -26,12 +26,18 @@ type EnvironmentState string
 const (
 	EnvironmentBuilding EnvironmentState = "building"
 	EnvironmentReady    EnvironmentState = "ready"
-	EnvironmentFailed   EnvironmentState = "failed"
+	// EnvironmentFailed is a file a Dockerfile instruction of which failed. It is final for that
+	// file on that base.
+	EnvironmentFailed EnvironmentState = "failed"
+	// EnvironmentAbandoned is one the platform failed to build on every attempt it allows, no
+	// fault of the file's. The next submit or declaration that names it builds it again.
+	EnvironmentAbandoned EnvironmentState = "abandoned"
 )
 
 // Environment is one image the platform builds from an environment file on one base image. Key
 // names the pair, so the same file on the same base is built once. Image is where the build is
-// pushed, and runs once State is ready. LogTail is the end of a failed build's output.
+// pushed, and runs once State is ready. LogTail is the end of a failed build's output. Attempts
+// counts the builds the platform failed since it was last made building.
 type Environment struct {
 	Key        string
 	Base       string
@@ -39,6 +45,7 @@ type Environment struct {
 	Image      string
 	State      EnvironmentState
 	LogTail    string
+	Attempts   int
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 }
@@ -53,7 +60,7 @@ const (
 	// NotAdmittedEnvironmentBuilding holds a job whose commit declares an environment that is
 	// being built.
 	NotAdmittedEnvironmentBuilding = "environment_building"
-	// EvictionEnvironmentFailed ends a job whose environment did not build.
+	// EvictionEnvironmentFailed ends a job whose environment file did not build.
 	EvictionEnvironmentFailed EvictionReason = "environment_failed"
 	// ReasonInvalidEnvironmentFile refuses an environment file that is not built on BASE.
 	ReasonInvalidEnvironmentFile = "invalid_environment_file"

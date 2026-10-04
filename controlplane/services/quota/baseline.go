@@ -150,10 +150,7 @@ func (s *PlatformExperimentsService) agentEnvironment(ctx context.Context, pe *d
 	if declared == nil {
 		return nil, nil
 	}
-	base := pe.AgentImage
-	if base == "" {
-		base = s.agentImage
-	}
+	base := pe.AgentBase(s.agentImage)
 	env, err := s.environments.Ensure(ctx, *declared, base)
 	var invalid *domain.EnvironmentFileError
 	if errors.As(err, &invalid) {
@@ -169,8 +166,10 @@ func (s *PlatformExperimentsService) agentEnvironment(ctx context.Context, pe *d
 	case domain.EnvironmentFailed:
 		return nil, refusedBaseline(string(domain.EvictionEnvironmentFailed), "%s of branch %s did not build on the agent image %s, though the baseline's did on its job image. Fix it, run the baseline again and declare that job. The end of the build's output:\n%s",
 			domain.EnvironmentFile, domain.BaselineBranch(pe.ID), base, env.LogTail)
+	case domain.EnvironmentReady:
+		return env, nil
 	}
-	return env, nil
+	return nil, fmt.Errorf("platform_experiments: the agents' environment %s is %s", env.Key, env.State)
 }
 
 // measuredBaselineHeader opens the block of the description the platform writes: what the

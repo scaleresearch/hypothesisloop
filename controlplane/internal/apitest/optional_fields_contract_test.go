@@ -64,7 +64,7 @@ func openAPISpec(t *testing.T) map[string]any {
 	quota.RegisterAgentsHuma(doc, platformExperiments, struct{ quota.Hypotheses }{})
 	quota.RegisterPlanningHuma(doc, platformExperiments)
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
-		scheduler.NewService(nil, nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{})))
+		scheduler.NewService(nil, nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithEnvironments(noEnvironments{}, "").WithLoop(noopLoop{})))
 	registry.RegisterHuma(doc, registry.NewHandler(nil, nil))
 	doc.MountExplore(r)
 

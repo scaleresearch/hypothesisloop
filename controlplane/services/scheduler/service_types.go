@@ -98,9 +98,11 @@ type CodeHost interface {
 }
 
 // Environments finds the environment a commit declares (environments.Service.Declared): nil when
-// it declares none, a *domain.EnvironmentFileError for a file the platform does not build.
+// it declares none, a *domain.EnvironmentFileError for a file the platform does not build. Ensure
+// has a file built on another base.
 type Environments interface {
 	Declared(ctx context.Context, projectID, repository, ref, base string) (*domain.Environment, error)
+	Ensure(ctx context.Context, dockerfile, base string) (*domain.Environment, error)
 }
 
 // InstalledCapacity is what each connected cluster and each of its nodes has installed, whether
@@ -121,7 +123,9 @@ type Service struct {
 	hypotheses   HypothesisStore
 	codeHost     CodeHost
 	environments Environments
-	clusters     InstalledCapacity
+	// agentImage is the image agent machines boot unless a platform experiment names its own.
+	agentImage string
+	clusters   InstalledCapacity
 	// jobImages is the images the deployment offers a job to run in, which a job names by name.
 	jobImages    []domain.JobImage
 	weights      domain.SchedulingWeights
@@ -190,9 +194,10 @@ func (s *Service) WithDataStore(client *objectstore.Client, maxBytesPerAgent int
 	return s
 }
 
-// WithEnvironments wires what finds the environment a job's commit declares.
-func (s *Service) WithEnvironments(environments Environments) *Service {
-	s.environments = environments
+// WithEnvironments wires what finds the environment a job's commit declares and the image agent
+// machines boot by default.
+func (s *Service) WithEnvironments(environments Environments, agentImage string) *Service {
+	s.environments, s.agentImage = environments, agentImage
 	return s
 }
 
