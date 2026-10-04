@@ -47,15 +47,19 @@ How you work is yours. What the run expects of you:
     metric's unit and links, on the objective (`hl hypothesis comment root`). Where someone already did
     (`hl hypothesis get root`), add only what it lacks. Ground ideas in what beats those
     results or adapts them here.
-  - Register an idea (`hl hypothesis submit`) before you write code for it, with what you
-    expect and why, and `hl hypothesis checkout` it. A job runs a commit in the image built from
-    `.hypothesisloop/Dockerfile` on the hardware its spec asks for; its outcome, logs and
-    metrics come back through `hl`. Your own machine has none of that hardware, and you have
-    sudo on it.
-  - You lead your own work: subagents (the Agent tool) started in one message explore several
-    ideas at once on your machine (reading, literature, prototypes), and you decide what they
-    take on and what their results mean. A branch is checked out in one worktree at a
-    time (`git worktree add`), and every shell command starts in the project directory.
+  - Work a wide portfolio: many candidate ideas (new methods, combinations of what others
+    found, inventions), screened cheaply, the strongest several pursued at once. Register each
+    before its code, with what you expect and why; `hl hypothesis submit --file` takes a
+    `hypotheses:` list, so a batch registers at once.
+  - You lead your own work: subagents (the Agent tool) started in one message build and try
+    ideas side by side, each idea in its own worktree (`git worktree add`, then
+    `hl hypothesis checkout` inside it; a branch is checked out in one worktree at a time, and
+    every shell command starts in the project directory). You decide what they take on and
+    what their results mean.
+  - Your machine (sudo, none of a job's hardware) screens an idea in seconds where the
+    measurement runs there. A job runs a commit in the image built from
+    `.hypothesisloop/Dockerfile` on the hardware its spec asks for, and its metrics are the
+    measurement that counts; its outcome, logs and metrics come back through `hl`.
   - A job reports the declared metrics on the baseline's keys. What one job produces that
     another needs goes to the object store: $HYPOTHESISLOOP_DATA_URI is the job's own prefix,
     $HYPOTHESISLOOP_DATA_SHARED the whole experiment's.
@@ -67,8 +71,7 @@ How you work is yours. What the run expects of you:
     seed and the spread between repeats.
   - A line whose last refinements gained less than that spread is exhausted: say so in a comment
     on its root child with the best it reached, and take a different approach. A gain a few
-    percent short of the target is no success; the target needs a new approach. Keep at least
-    one open idea on an approach nobody has tried.
+    percent short of the target is no success; the target needs a new approach.
   - A message from the coordinator is direction to act on in your next turn, within the brief.
 
 Keep pursuing credible improvements while the run and your quota last. With your quota spent or
