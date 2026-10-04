@@ -99,6 +99,37 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 	}
 }
 
+// The ladder an experiment is stored with is the one its run starts with: a field no boundary can
+// cut from takes the default as one stage, and a ladder stated for it is refused.
+func TestAFieldNoBoundaryCanCutIsStoredWithTheLadderItRuns(t *testing.T) {
+	ladder := []domain.Stage{{LengthPct: 40, EvictPct: 75, MaxJobHours: 2}, {LengthPct: 60, MaxJobHours: 6}}
+	settings := testSettings
+	settings.DefaultStages = ladder
+	svc := NewPlatformExperimentsService(&createStore{}, settings, zap.NewNop(), "", time.Minute)
+	spec := func(researchers int, stages []domain.Stage) CreatePlatformExperimentRequest {
+		return CreatePlatformExperimentRequest{
+			Name: "exp", Description: "the brief", BudgetAcceleratorHours: 10, DurationHours: 24, MaxAgents: researchers,
+			Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}}, Stages: stages,
+		}
+	}
+	for _, researchers := range []int{2, domain.MinResearchersForCut} {
+		checked, err := svc.validate(spec(researchers, nil))
+		if err != nil {
+			t.Fatalf("%d researchers, stages left out: %v", researchers, err)
+		}
+		if want := domain.RunStages(ladder, researchers); !reflect.DeepEqual(checked.Stages, want) {
+			t.Errorf("%d researchers, stages left out: stored %+v, want the ladder the run starts with %+v", researchers, checked.Stages, want)
+		}
+	}
+	var refused *api.Refusal
+	if _, err := svc.validate(spec(2, ladder)); !errors.As(err, &refused) || refused.GetStatus() != 422 || refused.Reason != "invalid_stages" {
+		t.Errorf("two stages stated for 2 researchers: got %v, want 422 invalid_stages", err)
+	}
+	if _, err := svc.validate(spec(domain.MinResearchersForCut, ladder)); err != nil {
+		t.Errorf("two stages stated for %d researchers: %v", domain.MinResearchersForCut, err)
+	}
+}
+
 // A platform experiment comes into being only where something could run it: a create in an org
 // whose jobs a cluster takes now, a proposal and an accept sized for a type one of them has.
 func TestAPlatformExperimentNoClusterCouldRunIsRefusedWhereItComesIntoBeing(t *testing.T) {

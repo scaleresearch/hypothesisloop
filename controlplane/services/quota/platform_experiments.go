@@ -265,7 +265,7 @@ type CreatePlatformExperimentRequest struct {
 	StartsAt                  time.Time                 `json:"starts_at" required:"false" doc:"When its baseline begins to be measured, for a later start than this create. Left out, or past, it is this create."`
 	DurationHours             float64                   `json:"duration_hours" required:"false" doc:"How long the run lasts, in hours from the moment it starts, at most quota.max_platform_experiment_days. Required: 422 invalid_length without it. The time it is open before, while its baseline is measured, is no part of it."`
 	// Stages is the elimination ladder, fixed at creation. Omit to get the platform default
-	// (config stages.default).
+	// (config stages.default), as one stage when max_agents is below domain.MinResearchersForCut.
 	Stages []domain.Stage `json:"stages,omitempty"`
 	// DefaultQuotaTier controls signups that omit quota_tier: "guaranteed" or "burst_only". Omit
 	// to get the platform's (config quota.default_quota_tier).

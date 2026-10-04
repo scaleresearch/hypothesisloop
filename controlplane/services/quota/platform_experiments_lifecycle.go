@@ -34,13 +34,14 @@ func (s *PlatformExperimentsService) checkLength(durationHours float64) error {
 }
 
 // withSettings returns spec with the platform's settings in the fields a request may leave to
-// them: scheduler.default_report_interval_seconds, stages.default and quota.default_quota_tier.
+// them: scheduler.default_report_interval_seconds, stages.default as a run of max_agents
+// researchers has it (domain.RunStages) and quota.default_quota_tier.
 func (s *PlatformExperimentsService) withSettings(spec CreatePlatformExperimentRequest) CreatePlatformExperimentRequest {
 	if spec.ReportIntervalSeconds == 0 {
 		spec.ReportIntervalSeconds = s.cfg.DefaultReportIntervalSeconds
 	}
 	if len(spec.Stages) == 0 {
-		spec.Stages = s.cfg.DefaultStages
+		spec.Stages = domain.RunStages(s.cfg.DefaultStages, spec.MaxAgents)
 	}
 	if spec.DefaultQuotaTier == "" {
 		spec.DefaultQuotaTier = string(s.cfg.DefaultQuotaTier)
@@ -107,6 +108,10 @@ func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentReque
 	}
 	if spec.MaxAgents <= 0 {
 		return spec, refuseUpdate(422, "invalid_agents", "max_agents is required and must be positive: how many researchers (agents of role competitor) may join")
+	}
+	if len(spec.Stages) > 1 && spec.MaxAgents < domain.MinResearchersForCut {
+		return spec, refuseUpdate(422, "invalid_stages", "stages: %d stages for at most %d researchers, and a run of fewer than %d has one stage since no boundary cuts: state one stage or leave stages out",
+			len(spec.Stages), spec.MaxAgents, domain.MinResearchersForCut)
 	}
 	return spec, s.checkLength(spec.DurationHours)
 }

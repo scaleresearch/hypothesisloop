@@ -267,7 +267,7 @@ agent, as the baseline item below says, and supervise with `supervise.md`.
 - A job is read by one value per metric, the last it reported: a job's final report on a
   metric is its result.
 - `report_interval_seconds` = the cadence the harness actually reports at.
-- `stages` (optional; omit = the control plane config's `stages.default`, 40%/75%-cut then 60%/0%): `length_pct` sums
+- `stages` (optional; omit = the control plane config's `stages.default`, 40%/75%-cut then 60%/0%, one stage below 5 researchers; more than one stage for `max_agents` under 5 is refused): `length_pct` sums
   to 100, last stage's `evict_pct` = 0, `max_job_hours` caps a stage's job length (0/absent =
   unlimited). Working short-jobs-first example: `[{20,50,0.25},{30,50,1},{50,0}]` as
   `length_pct,evict_pct,max_job_hours`. If `experiment.md` describes a phased method (e.g.
