@@ -27,7 +27,9 @@ files it points you to and leave the rest unread.
      to 4. Otherwise write the smallest program that measures them and submit it (2 to 4)
      before refining it: fixed seeds, pinned revisions, every input fetched by the job, the
      metrics reported as it goes and at the end with `post_metric` of `metrics.py`. The first
-     job measures the control; the references follow at 6. Keep the part researchers vary
+     job measures the control; the references follow at 6. The control and each reference
+     run in their strongest configuration that meets the goal's constraints: where several
+     exist and the docs don't settle which is best, one job measures each and reports the best. Keep the part researchers vary
      apart from the part that measures, and record both in `README.md`, which researchers
      read, with the conventions you chose and how a trial runs.
   2. The environment, `.hypothesisloop/Dockerfile`, built from that file alone: toolchains
