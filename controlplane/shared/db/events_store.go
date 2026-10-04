@@ -69,8 +69,8 @@ const (
 	// EventAgentFinished says an agent told the platform it has nothing left to do. It is the
 	// agent's own, so no rival is woken by it; whoever steers the run sees every one.
 	EventAgentFinished = "agent.finished"
-	// EventAgentIdle says a researcher of a running platform experiment submitted no job for a
-	// while and has none queued or running: its machines are idle. It is the agent's own, so it
+	// EventAgentIdle says no job or check of a researcher of a running platform experiment ran on
+	// the platform for a while, and it has none queued or running: its machines are idle. It is the agent's own, so it
 	// reaches that agent and whoever steers the run, and no rival.
 	EventAgentIdle = "agent.idle"
 	// EventAgentMessage is a direct message from the coordinator or the owner to one agent, with
@@ -145,7 +145,7 @@ var EventKinds = []EventKindDoc{
 	{Kind: EventAgentFinished, Subject: "agent id", Value: "empty by design",
 		Description: "This agent said it has nothing left to do, and its machine stops. detail is the reason it gave, and for a researcher the blocker it named and the time and quota it left. When every agent is finished or cut the run has nobody left to wait for."},
 	{Kind: EventAgentIdle, Subject: "agent id", Value: "empty by design",
-		Description: "This researcher of a running platform experiment has submitted no job for the platform's agents.idle_notice_minutes and has none queued or running, so nothing of its runs on the platform. detail says for how long. Sent once for each such stretch: a job it submits ends the stretch. Nothing is done to the agent."},
+		Description: "No job and no check (hl env run) of this researcher of a running platform experiment ran on the platform for the platform's agents.idle_notice_minutes, and it has none queued or running: nothing of its own is in flight. detail says for how long. Sent once for each such stretch: a job or check it starts ends the stretch. Nothing is done to the agent."},
 	{Kind: EventAgentMessage, Subject: "agent id, the one it was sent to", Value: "coordinator or owner: who it is from",
 		Description: "A direct message to this agent from its platform experiment's coordinator or owner (POST /platform-experiments/{id}/messages). detail is the text, direction to act on. GET /platform-experiments/{id}/messages reads every one sent."},
 	{Kind: EventHypothesisNew, Subject: "hypothesis id", Value: "empty by design",

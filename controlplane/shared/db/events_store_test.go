@@ -1428,7 +1428,7 @@ VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $
 	}
 	live := awaitEvent(t, events, EventAgentIdle, agentID)
 	stop()
-	if live.Detail != "submitted no job for 20 minutes and has none queued or running" || live.PlatformExperimentID != peID {
+	if live.Detail != "no job or check of its own ran on the platform for 20 minutes, and it has none queued or running" || live.PlatformExperimentID != peID {
 		t.Fatalf("live: got = %+v, want the 20 minutes since the run started", live)
 	}
 	if err := store.NoticeIdleResearchers(ctx, 10*time.Minute); err != nil || told() != 1 {
@@ -1447,7 +1447,7 @@ VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $
 		t.Fatalf("a new stretch: told %d, %v, want the last notice replayed alone", told(), err)
 	}
 	var detail string
-	if err := pool.pool.QueryRow(ctx, `SELECT idle_detail FROM experiment_signups WHERE platform_experiment_id = $1 AND agent_id = $2`, peID, agentID).Scan(&detail); err != nil || detail != "submitted no job for 0 minutes and has none queued or running" {
+	if err := pool.pool.QueryRow(ctx, `SELECT idle_detail FROM experiment_signups WHERE platform_experiment_id = $1 AND agent_id = $2`, peID, agentID).Scan(&detail); err != nil || detail != "no job or check of its own ran on the platform for 0 minutes, and it has none queued or running" {
 		t.Fatalf("a new stretch: detail %q, %v, want it told again", detail, err)
 	}
 
@@ -1459,5 +1459,46 @@ VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $
 	var untold bool
 	if err := pool.pool.QueryRow(ctx, `SELECT idle_noticed_at IS NULL FROM experiment_signups WHERE platform_experiment_id = $1`, peID).Scan(&untold); err != nil || !untold {
 		t.Fatalf("a finished researcher: told %v, want not", !untold)
+	}
+}
+
+// A researcher ran hl env run checks every minute or two and was told it had submitted no
+// job for 10 minutes. A check created or running is activity, and the stretch starts when the
+// last one ended.
+func TestAResearcherRunningChecksIsNotIdle(t *testing.T) {
+	pool := eventsTestDB(t)
+	agentID, peID, hypothesisID := seedRun(t, pool, "checking", true)
+	store := NewPlatformExperimentsStore(pool)
+	ctx := context.Background()
+	exec(t, pool, `UPDATE platform_experiments SET status = 'running', started_at = now() - interval '40 minutes' WHERE id = $1`, peID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at) VALUES ($1, $2, now() - interval '40 minutes')`, peID, agentID)
+	check := func(id, status, created, reported string) {
+		t.Helper()
+		exec(t, pool, `INSERT INTO experiments
+(actor_kind, id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
+ hypothesis_id, hypothesis, accelerator_type, status, estimated_duration_hours, data_access_key_id, data_secret_access_key,
+ is_check, created_at, run_reported_at)
+VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $5, 1, 'AK', 'SK',
+        true, now() - $6::interval, now() - $7::interval)`, agentID, peID, hypothesisID, id, status, created, reported)
+	}
+	detail := func() string {
+		t.Helper()
+		var detail string
+		if err := pool.pool.QueryRow(ctx, `SELECT idle_detail FROM experiment_signups WHERE platform_experiment_id = $1 AND agent_id = $2`, peID, agentID).Scan(&detail); err != nil {
+			t.Fatal(err)
+		}
+		return detail
+	}
+
+	check("check-running", "RUNNING", "30 minutes", "30 minutes")
+	if err := store.NoticeIdleResearchers(ctx, 0); err != nil || detail() != "" {
+		t.Fatalf("a check running: detail %q, %v, want no notice", detail(), err)
+	}
+	exec(t, pool, `UPDATE experiments SET status = 'COMPLETED', run_reported_at = now() - interval '3 minutes' WHERE id = 'check-running'`)
+	if err := store.NoticeIdleResearchers(ctx, 10*time.Minute); err != nil || detail() != "" {
+		t.Fatalf("a check that ended 3 minutes ago, notice at 10: detail %q, %v, want no notice", detail(), err)
+	}
+	if err := store.NoticeIdleResearchers(ctx, 2*time.Minute); err != nil || detail() != "no job or check of its own ran on the platform for 3 minutes, and it has none queued or running" {
+		t.Fatalf("notice at 2: detail %q, %v, want the 3 minutes since the check ended", detail(), err)
 	}
 }

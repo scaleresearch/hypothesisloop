@@ -494,28 +494,28 @@ WHERE platform_experiment_id = $1 AND agent_id = $2`, platformExpID, agentID, re
 	return nil
 }
 
-// NoticeIdleResearchers tells every researcher of a running platform experiment that submitted
-// no job for after, since the run started or it joined, and has none queued or running, that
-// it is idle: agent.idle, once for each such stretch. A researcher that finished or was cut is
-// told nothing.
+// NoticeIdleResearchers tells every researcher of a running platform experiment that had no job
+// and no check of its own created or running for after, since the run started or it joined, and
+// has none queued or running, that it is idle: agent.idle, once for each such stretch. A
+// researcher that finished or was cut is told nothing.
 func (s *PlatformExperimentsStore) NoticeIdleResearchers(ctx context.Context, after time.Duration) error {
 	if _, err := s.pool.pool.Exec(ctx, `
 WITH idle AS (
     SELECT s.platform_experiment_id, s.agent_id,
            GREATEST(pe.started_at, s.signed_up_at,
-                    (SELECT max(e.created_at) FROM experiments e
-                     WHERE e.platform_experiment_id = s.platform_experiment_id AND e.agent_id = s.agent_id AND NOT e.is_check)) AS since
+                    (SELECT max(GREATEST(e.created_at, e.run_reported_at)) FROM experiments e
+                     WHERE e.platform_experiment_id = s.platform_experiment_id AND e.agent_id = s.agent_id)) AS since
     FROM experiment_signups s JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
     WHERE pe.status = 'running' AND pe.started_at IS NOT NULL AND s.role = $2 AND s.finished_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM platform_experiment_cuts c
                       WHERE c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id)
       AND NOT EXISTS (SELECT 1 FROM experiments e
                       WHERE e.platform_experiment_id = s.platform_experiment_id AND e.agent_id = s.agent_id
-                        AND e.status IN ('QUEUED', 'SUBMITTED', 'RUNNING') AND NOT e.is_check)
+                        AND e.status IN ('QUEUED', 'SUBMITTED', 'RUNNING'))
 )
 UPDATE experiment_signups s
 SET idle_noticed_at = now(), idle_xid = pg_current_xact_id()::text::bigint,
-    idle_detail = format('submitted no job for %s minutes and has none queued or running',
+    idle_detail = format('no job or check of its own ran on the platform for %s minutes, and it has none queued or running',
                          floor(extract(epoch FROM now() - idle.since) / 60)::int)
 FROM idle
 WHERE s.platform_experiment_id = idle.platform_experiment_id AND s.agent_id = idle.agent_id

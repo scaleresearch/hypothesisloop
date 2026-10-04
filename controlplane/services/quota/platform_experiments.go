@@ -177,13 +177,13 @@ type PlatformExperimentsService struct {
 	repositoryWake chan struct{}
 	// environments reads what the baseline branch declares and the environment a job ran in.
 	environments Environments
-	// idle tells researchers with no job for idleAfter that they are idle (WithIdleNotice).
+	// idle tells researchers with no job or check for idleAfter that they are idle (WithIdleNotice).
 	idle      IdleNotices
 	idleAfter time.Duration
 }
 
-// IdleNotices tells researchers of running platform experiments that submitted no job for after
-// and have none in flight, once per such stretch (db.PlatformExperimentsStore.NoticeIdleResearchers).
+// IdleNotices tells researchers of running platform experiments that had no job or check of their
+// own on the platform for after, once per such stretch (db.PlatformExperimentsStore.NoticeIdleResearchers).
 type IdleNotices interface {
 	NoticeIdleResearchers(ctx context.Context, after time.Duration) error
 }

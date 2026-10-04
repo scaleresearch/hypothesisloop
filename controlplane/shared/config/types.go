@@ -275,7 +275,7 @@ type AgentsConfig struct {
 	// experiment: its hosted agents of every role and its coordinator.
 	MaxHostedPerPlatformExperiment int `yaml:"max_hosted_per_platform_experiment"`
 	// IdleNoticeMinutes is how long a researcher of a running platform experiment may go with no
-	// job submitted and none queued or running before it and the coordinator are told (agent.idle).
+	// job or check of its own on the platform before it and the coordinator are told (agent.idle).
 	IdleNoticeMinutes int `yaml:"idle_notice_minutes"`
 }
 

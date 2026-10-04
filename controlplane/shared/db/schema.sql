@@ -522,10 +522,10 @@ CREATE TABLE IF NOT EXISTS experiment_signups (
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS finished_at     TIMESTAMPTZ;
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS finished_reason TEXT NOT NULL DEFAULT '';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS finished_xid    BIGINT;
--- A researcher of a running platform experiment told it has gone idle (agent.idle): no job
--- submitted for the platform's agents.idle_notice_minutes and none queued or running. When it
--- was told, the transaction that told it for the replay, and what it was told. Told again only
--- after a job of its own submitted since.
+-- A researcher of a running platform experiment told it has gone idle (agent.idle): no job or
+-- check of its own ran for the platform's agents.idle_notice_minutes and none is queued or
+-- running. When it was told, the transaction that told it for the replay, and what it was told.
+-- Told again only after a job or check of its own ran since.
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS idle_noticed_at TIMESTAMPTZ;
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS idle_xid        BIGINT;
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS idle_detail     TEXT NOT NULL DEFAULT '';
