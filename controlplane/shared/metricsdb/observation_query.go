@@ -77,6 +77,10 @@ func HasEverReportedMetric(ctx context.Context, dbURL, experimentID string, crea
 // judge (a single point can't distinguish "just started" from "stuck at a constant" — see
 // AnyDeclaredMetricChanged); max_over_time - min_over_time over the same series is non-zero iff
 // the value moved between at least two points.
+//
+// The fraction_complete written beside each value counts as movement too: a metric that
+// plateaus while training goes on is progress, and a hung loop re-emitting a cached point
+// repeats its fraction as well as its value.
 func declaredMetricSpread(ctx context.Context, dbURL, experimentID, metricKey string, window time.Duration) (reported, changed bool, err error) {
 	count, err := metricSampleCount(ctx, dbURL, experimentID, metricKey, window)
 	if err != nil {
@@ -87,21 +91,20 @@ func declaredMetricSpread(ctx context.Context, dbURL, experimentID, metricKey st
 		// and it can't be confirmed either — treat exactly like "not reported", not like "stuck".
 		return false, false, nil
 	}
-	sel := fmt.Sprintf(`%s{job_id=%q, metric_name=%q}[%s]`, ExperimentMetricValue, experimentID, metricKey, promSeconds(window))
-	spreadQL := fmt.Sprintf(`max_over_time(%s) - min_over_time(%s)`, sel, sel)
-	samples, err := QueryVector(ctx, dbURL, spreadQL)
-	if err != nil {
-		return false, false, err
-	}
-	if len(samples) == 0 {
-		return false, false, nil
-	}
-	for _, s := range samples {
-		if s.Value != 0 {
-			return true, true, nil
+	for _, series := range []string{ExperimentMetricValue, ExperimentMetricFraction} {
+		sel := fmt.Sprintf(`%s{job_id=%q, metric_name=%q}[%s]`, series, experimentID, metricKey, promSeconds(window))
+		samples, err := QueryVector(ctx, dbURL, fmt.Sprintf(`max_over_time(%s) - min_over_time(%s)`, sel, sel))
+		if err != nil {
+			return false, false, err
+		}
+		for _, s := range samples {
+			reported = true
+			if s.Value != 0 {
+				return true, true, nil
+			}
 		}
 	}
-	return true, false, nil
+	return reported, false, nil
 }
 
 // AnyDeclaredMetricReported reports whether experimentID has posted even one sample of any of
@@ -145,8 +148,8 @@ func metricSampleCount(ctx context.Context, dbURL, experimentID, metricKey strin
 // real progress for experimentID, as opposed to merely arriving. reported=false means none of
 // metricKeys has posted a single sample within window yet — early warmup or a broken reporting
 // path, not evidence of a stuck job, so callers must not treat that as silence. reported=true,
-// changed=false means every declared metric that did report held a single constant value the
-// whole window: a job whose training loop hung but keeps re-emitting the same point (e.g. a
+// changed=false means every declared metric that did report held a single constant value and
+// fraction_complete the whole window: a job whose training loop hung but keeps re-emitting the same point (e.g. a
 // cached last-value) would otherwise look perpetually alive to naive "did any sample arrive"
 // silence detection. changed=true as soon as any one declared metric moved.
 func AnyDeclaredMetricChanged(ctx context.Context, dbURL, experimentID string, metricKeys []string, window time.Duration) (reported, changed bool, err error) {

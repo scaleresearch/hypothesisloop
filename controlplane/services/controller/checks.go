@@ -130,7 +130,8 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 			return false, "", nil // moving, which is the whole point
 		}
 		if reported {
-			// Reporting, but every declared metric held one constant value across the window.
+			// Reporting, but every declared metric held one constant value and one constant
+			// fraction_complete across the window.
 			// reported=true means at least two samples (see declaredMetricSpread — a single point
 			// reads as not-reported precisely because it cannot show movement), so this is a job
 			// re-emitting a cached value with its training loop hung, not one still warming up.
