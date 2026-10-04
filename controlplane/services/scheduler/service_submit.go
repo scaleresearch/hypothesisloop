@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"strings"
 	"time"
@@ -154,6 +155,22 @@ func (s *Service) runsAsStated(ctx context.Context, exp *domain.Experiment) erro
 	return nil
 }
 
+// unestimatedLimit bounds the estimate of a baseline agent's job that states none: the stage's
+// per-job limit and, while the platform experiment is open, the time left until baseline_due_at.
+// Sized by the quota alone, a control was held at once as baseline_late, two hours past the due
+// time, and its agent cancelled it to submit it again with an estimate of its own. 0 is no bound.
+func unestimatedLimit(pe *domain.PlatformExperiment, now time.Time) float64 {
+	limit := pe.CurrentMaxJobHours()
+	if pe.Status != domain.PlatformExpOpen || pe.BaselineDueAt.IsZero() {
+		return limit
+	}
+	left := math.Floor(pe.BaselineDueAt.Sub(now).Hours()*1e4) / 1e4
+	if left <= 0 || (limit > 0 && limit <= left) {
+		return limit
+	}
+	return left
+}
+
 // errNoCaller is a request that reached the service with no authenticated caller: every route
 // is behind the token check, so it is the platform's fault and never the submitter's.
 var errNoCaller = errors.New("scheduler: no authenticated caller in the request context")
@@ -302,9 +319,9 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	}
 
 	// A baseline agent's job that states no estimate is sized by the admission transaction, from
-	// the figure it admits on: the largest the agent's quota holds, within the stage's limit.
+	// the figure it admits on: the largest the agent's quota holds, within unestimatedLimit.
 	if exp.EstimatedDurationHours == 0 {
-		exp.MaxEstimateHours = pe.CurrentMaxJobHours()
+		exp.MaxEstimateHours = unestimatedLimit(pe, time.Now())
 	}
 
 	// 3aa. Stage job-length cap. Rejecting at submit is the honest half of the gate — the agent

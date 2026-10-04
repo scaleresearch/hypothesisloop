@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -71,6 +72,33 @@ func TestABaselineJobThatStatesNoEstimateIsSizedByTheAdmission(t *testing.T) {
 	var refused *AdmissionError
 	if err := s.Submit(context.Background(), exp); !errors.As(err, &refused) || refused.Reason != ReasonEstimateRequired {
 		t.Errorf("a researcher's job with no estimate and none measured: got = %v, want %s", err, ReasonEstimateRequired)
+	}
+}
+
+// A control that stated no estimate was given the whole quota, 2.25 h, with 80 minutes left until
+// baseline_due_at: it was held as baseline_late at once and its agent cancelled it to submit it
+// again with an estimate. Before the run the estimate is bounded by the time left, then by the
+// stage's limit alone.
+func TestABaselineJobThatStatesNoEstimateEndsByTheBaselineDueTime(t *testing.T) {
+	now := time.Date(2026, 10, 8, 20, 2, 0, 0, time.UTC)
+	due := now.Add(80 * time.Minute)
+	open := func(maxJobHours float64) *domain.PlatformExperiment {
+		return &domain.PlatformExperiment{Status: domain.PlatformExpOpen, BaselineDueAt: due,
+			Stages: []domain.Stage{{LengthPct: 100, MaxJobHours: maxJobHours}}, CurrentStage: 1}
+	}
+	for name, tc := range map[string]struct {
+		pe   *domain.PlatformExperiment
+		want float64
+	}{
+		"open, no per-job limit":           {open(0), 1.3333},
+		"open, a per-job limit under it":   {open(0.5), 0.5},
+		"open, a per-job limit over it":    {open(2), 1.3333},
+		"open, past its due time":          {&domain.PlatformExperiment{Status: domain.PlatformExpOpen, BaselineDueAt: now.Add(-time.Minute)}, 0},
+		"running, the stage's limit alone": {&domain.PlatformExperiment{Status: domain.PlatformExpRunning, BaselineDueAt: due}, 0},
+	} {
+		if got := unestimatedLimit(tc.pe, now); got != tc.want {
+			t.Errorf("%s: got = %g, want %g", name, got, tc.want)
+		}
 	}
 }
 
