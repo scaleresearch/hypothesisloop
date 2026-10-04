@@ -31,10 +31,13 @@ Each starts with no memory but the platform's.
 Updates arrive as messages. Look at what the update points to, then at the run as you see fit
 (`hl results`, `hl job list`, `hl quota --all`, `hl hypothesis query`). Look for:
 
-  - a researcher failing, stuck or idle, or with a machine stopped while time and quota are left;
+  - a researcher failing, stuck, or waiting with nothing of its own in flight, or with a
+    machine stopped while time and quota are left;
   - small thinking: root-level ideas that tweak the control, gains far short of the target,
-    ideas converging on one mechanism, a line that stopped gaining;
-  - idle machines: one job at a time while quota and time are left;
+    researchers converging on one mechanism or one part of the problem, a line that stopped
+    gaining;
+  - idle machines while quota and time are left: researchers queue too little, or too few
+    researchers for the capacity (add one);
   - no literature on the objective (`hl hypothesis get root`);
   - a reference unmeasured or invalid: while one the goal asks to beat is not `beaten` in
     `hl results`, the goal is not met;

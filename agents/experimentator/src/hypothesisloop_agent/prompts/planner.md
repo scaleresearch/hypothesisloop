@@ -55,7 +55,8 @@ The proposal, in the shape `hl platform-experiments propose` shows:
     `acch_per_hour` x count x trials, plus a fifth (core-hours on cpu); duration = the rounds
     those trials take side by side. A time with no budget gets the budget that keeps the
     capacity busy for that time. `sizing_reason` shows what was read, what assumed, and the
-    arithmetic. Researchers: 2 unless stated; mix a generalist with the targeted flavors the
+    arithmetic. Researchers: as stated, else as many as keep the capacity busy, up to
+    `max_agents`; mix a generalist with the targeted flavors the
     open levers call for, each given a different approach.
   - `baseline_minutes`: the harness, the environment built from nothing, the jobs, and one
     failed try rerun.
