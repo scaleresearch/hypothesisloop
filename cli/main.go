@@ -97,13 +97,10 @@ var commands = []struct {
 }
 
 const usageRules = `
-An ID is positional; --id ID works too. The platform experiment is never an operand. A command
-given the ID of a job or a hypothesis takes no --platform-experiment, since an ID is unique on
-the platform; every other command that works in a platform experiment takes it. --agent and
---platform-experiment default to what the token names, an agent's its agent and platform
-experiment and a coordinator's its platform experiment, so neither writes them. A person or
-an API key writes both out: no environment variable names either. Where --agent filters a
-list it has no default: write the id out.`
+An ID is positional (--id ID works too). A command given a job's or a hypothesis's ID takes no
+--platform-experiment; every other one in a platform experiment takes it as a flag, never an
+operand. --agent and --platform-experiment default to what an agent's or a coordinator's token
+names; a person or an API key writes both out. Where --agent filters a list it has no default.`
 
 const usageOfPeople = ` --org defaults to $HL_ORG and
 then to the one org the token reaches, --project to $HL_PROJECT. hl job --help, hl hypothesis
@@ -724,29 +721,22 @@ See controlplane/settings/examples/experiment.yaml for the full DSL reference.`,
 func cmdPlatformExperimentsUpdate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("platform-experiments update", `usage: hl platform-experiments update [--platform-experiment PE] [--description-file FILE] [--description TEXT] [--baseline-job JOB] [--name NAME] [FIELDS.yaml]
 
-Changes the fields you name and leaves every other as it is. The brief is one command:
+Changes the fields you name and no other. A coordinator's token changes the description and
+declares the baseline, nothing else. The brief: hl platform-experiments update --description-file brief.md
 
-  hl platform-experiments update --description-file brief.md
+--baseline-job JOB declares the baseline while the platform experiment is open. The platform
+writes JOB, its code_ref and what it measured into a block of the description it keeps through
+later changes, and starts the run in that request when a researcher has joined and no starts_at
+is ahead. The line printed after says whether it started, with status_reason. Refusals:
+no_baseline (JOB is no baseline agent's job here), baseline_not_completed,
+baseline_without_finding (no summary filed), baseline_missing_metric, baseline_breaks_constraint
+and budget_below_baseline (the budget does not hold one trial per researcher at JOB's
+estimate); the last two are the owner's to change.
 
---baseline-job JOB declares the baseline while the platform experiment is open, and needs
-nothing beside it. The platform writes JOB, its code_ref and what it measured into the
-description, a block it keeps through every later change of the description, and starts the run
-in that request when a researcher has joined and no starts_at is ahead. The line printed after
-the experiment says whether the run started, with its status_reason: what an open one still
-waits for, and agents_starting while no researcher's machine is up yet. The platform reads JOB
-itself and refuses with what is wrong: no_baseline (JOB is no job of an agent
-of role baseline here), baseline_not_completed, baseline_without_finding (its summary is not
-filed), baseline_missing_metric (a declared metric JOB never reported),
-baseline_breaks_constraint (JOB's value breaks a gate), budget_below_baseline (the budget does
-not hold one trial per researcher: JOB again at the estimate measured on it). The last two are
-the owner's to change.
-
-FIELDS.yaml, for the rest, is a YAML mapping of the fields that change, such as
-budget_accelerator_hours, max_agents, duration_hours, metrics, report_interval_seconds. While the
-platform experiment is open any of them can change; once it runs only name and description do.
-max_agents below the researchers that joined is 409 max_agents_below_researchers.
-The experiment as changed is checked like a create, so neither name nor description is emptied.
-A coordinator's token changes the description and declares the baseline, and nothing else.`, stderr)
+FIELDS.yaml maps the other fields that change (budget_accelerator_hours, max_agents,
+duration_hours, metrics, report_interval_seconds): any while it is open, only name and
+description once it runs. The result is checked like a create, so name and description stay
+non-empty; max_agents below the researchers that joined is 409 max_agents_below_researchers.`, stderr)
 	pe := experimentFlag(fs)
 	name := fs.String("name", "", "the new name")
 	description := fs.String("description", "", "the new description")
@@ -877,14 +867,12 @@ a leading quote.
     - |
       what the goal left open and you decided
 
-The proposal is checked before it is stored, and a refusal names what to fix: for a file that
-is no YAML the line and what is wrong there, which is all the checking the file needs, and for
-the image what a job submit would refuse it for (unknown_job_image, no_cluster_for_image), as
-for a cpu, memory or storage that is no quantity (invalid_resources). A
-refused proposal changes nothing, so fix the file and run propose again. One that passes is
-stored at once, replaces the one before and is what the person is asked to accept: send only
-the finished proposal, never one written to try the checks. Your machine is kept for some
-minutes after it, and a revision the person asks for in that time arrives as your next update.`, stderr)
+A refusal names what to fix and changes nothing: for a file that is no YAML the line and what
+is wrong there, for the image what a job submit would refuse (unknown_job_image,
+no_cluster_for_image), and invalid_resources for a cpu, memory or storage that is no quantity.
+One that passes is stored at once, replaces the one before and is what the person is asked to
+accept, so send only the finished proposal. Your machine is kept some minutes after it, and a
+revision the person asks for in that time arrives as your next update.`, stderr)
 	pe := experimentFlag(fs)
 	operands, err := parseArgs(fs, args)
 	if err != nil {
@@ -906,12 +894,24 @@ minutes after it, and a revision the person asks for in that time arrives as you
 		fmt.Fprintf(stderr, "hl: %s\n", err)
 		return 2
 	}
+	quantitiesAsStrings(body)
 	var out any
 	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(id)+"/proposal", body, &out); err != nil {
 		return fail(stderr, err)
 	}
 	printJSON(stdout, out)
 	return 0
+}
+
+// quantitiesAsStrings sends a proposal's cpu, memory and storage as the strings the API reads,
+// where YAML reads cpu: 8 as a number.
+func quantitiesAsStrings(body map[string]any) {
+	for _, key := range []string{"cpu", "memory", "storage"} {
+		switch v := body[key].(type) {
+		case int, int64, uint64, float64:
+			body[key] = fmt.Sprint(v)
+		}
+	}
 }
 
 func cmdPlatformExperimentsDecline(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -966,6 +966,8 @@ state. The reasons:
   any, while a machine it wants is on a launcher that stopped asking: launcher_unreachable
 An agent of the roster adds instance_starting, or launcher_unreachable while its launcher is
 silent (hl platform-experiments agents list).
+Once the baseline is declared, baseline_branch and baseline_code_ref name the branch and commit
+of its job, where its harness is: the default branch may hold none of it.
 On an open one the message begins with your own next step, worded for your token: the command
 a coordinator or a person runs, what a baseline agent measures, or that a researcher's jobs
 are refused until the start. status_reason is printed ahead of the record with id and status,
@@ -983,6 +985,16 @@ and nothing is written beside the JSON, so the output parses whole.`, stderr)
 		return fail(stderr, err)
 	}
 	delete(out, "$schema")
+	if job, _ := out["baseline_job_id"].(string); job != "" {
+		var baseline struct {
+			Branch  string `json:"branch"`
+			CodeRef string `json:"code_ref"`
+		}
+		if err := c.Do("GET", "/experiments/"+url.PathEscape(job), nil, &baseline); err != nil {
+			return fail(stderr, fmt.Errorf("reading the baseline job %s: %w", job, err))
+		}
+		out["baseline_branch"], out["baseline_code_ref"] = baseline.Branch, baseline.CodeRef
+	}
 	printLeading(stdout, out, "id", "status", "status_reason")
 	return 0
 }

@@ -14,13 +14,14 @@ import (
 func cmdQuota(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("quota", `usage: hl quota [--agent A | --all] [--platform-experiment PE]
 
-Accelerator-hours granted and used, one line per agent. share_accelerator_hours is all the
-agent may spend, on guaranteed and burst jobs together. remaining_guaranteed_accelerator_hours
-and remaining_burst_accelerator_hours are the largest estimated_cost_acch a job of that tier
-submitted now is admitted with: every job that has not ended holds its whole estimate, so they
-are less than the share minus what is used while jobs run. Burst gives no hours on top of the
-share: burst_accelerator_hours is how much of it may run at burst priority, on idle capacity.
-Used counts a job that has not started at its estimate and a running one at what it has spent.
+Accelerator-hours granted, used and held, one line per agent. share_accelerator_hours is all the
+agent may spend, on guaranteed and burst jobs together. used_guaranteed_acch and used_burst_acch
+count a job that has not started at its estimate and a running one at what it has spent.
+held_acch is what running jobs hold beyond what they spent: each holds its whole estimate until
+it ends. remaining_guaranteed_accelerator_hours and remaining_burst_accelerator_hours are the
+largest estimated_cost_acch a job of that tier submitted now is admitted with: the share less
+used and held. Burst gives no hours on top of the share: burst_accelerator_hours is how much of
+it may run at burst priority, on idle capacity.
 In an experiment on CPU cores these are CPU core-hours: a core for an hour costs 1.
 A run started with fewer than 5 researchers has one stage, and each holds its whole share
 from the start. In a run with more stages a share grows at each stage boundary. While a later

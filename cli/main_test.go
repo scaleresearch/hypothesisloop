@@ -27,6 +27,25 @@ func setAPIURL(t *testing.T, url string) {
 	t.Setenv("HL_TOKEN", "test-token")
 }
 
+// A coordinator looked for the baseline's harness on the default branch: the platform experiment
+// names the branch and commit of its declared baseline job.
+func TestGetNamesTheBranchThatHoldsTheBaseline(t *testing.T) {
+	recordingServer(t, func(_ int, r recorded) any {
+		if r.Path == "/experiments/job-b" {
+			return map[string]any{"id": "job-b", "branch": "hl/pe-1/baseline", "code_ref": "https://git/repo@abc123"}
+		}
+		return map[string]any{"id": "pe-1", "status": "running", "baseline_job_id": "job-b"}
+	})
+	code, stdout, stderr := hl(t, "platform-experiments", "get", "--platform-experiment", "pe-1")
+	var out map[string]any
+	if code != 0 || json.Unmarshal([]byte(stdout), &out) != nil {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if out["baseline_branch"] != "hl/pe-1/baseline" || out["baseline_code_ref"] != "https://git/repo@abc123" {
+		t.Errorf("printed %s, want baseline_branch and baseline_code_ref of job-b", stdout)
+	}
+}
+
 func TestEveryRequestCarriesTheTokenAndNoTokenIsAnError(t *testing.T) {
 	var gotAuthorization string
 	calls := 0

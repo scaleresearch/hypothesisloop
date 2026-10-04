@@ -12,8 +12,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
+	"github.com/scaleresearch/hypothesisloop/cli/internal/watchclient"
 )
 
 var jobCommands = []subcommand{
@@ -22,6 +24,7 @@ var jobCommands = []subcommand{
 	{"status", "a job's whole record", jobStatus, everyone},
 	{"metrics", "per metric: last value, min, max and points reported", jobMetrics, everyone},
 	{"summary", "file the write-up of a finished job; hl job status shows it", jobSummary, everyone},
+	{"wait", "block until jobs end, then print each as list does", jobWait, everyone},
 	{"logs", "the last log lines its cluster reported", jobLogs, everyone},
 	{"data", "what the job wrote to the object store", func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 		return jobRead(c, "data", "/data", "What the job wrote under its data prefix, one object per line", args, stdout, stderr)
@@ -36,54 +39,39 @@ var jobCommands = []subcommand{
 func jobSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("job submit", `usage: hl job submit [FILE|-] [--hypothesis ID] [--theory T] [--env K=V ...] [--estimated-duration-hours H] [--capacity-tier guaranteed|burst] [--secret-env NAME ...] [--repeat N]
 
-FILE is a YAML job spec: metadata, job. The flags override it for this one submission, so
-one committed base spec serves every job that differs only in its hypothesis, env, estimate and
-tier, with nothing to edit and nothing to commit. Prints the accepted job's id, which the
-platform issues, status,
-code_ref, branch, capacity_tier and its estimate as applied: estimated_duration_hours, and
-estimated_cost_acch, what those hours hold of your quota; hl job status ID has the rest.
-A submit that is the same in every part (agent, hypothesis, commit, FILE and flags) is one job
-however often it is sent, so one that timed out is safe to send again; --repeat N (2, 3, ...)
-makes it the Nth job of that same request.
-A job holds its estimated_cost_acch of your quota from submit until it ends, then only what it
-was billed (hl job cost ID). A job that states no estimate, in FILE or with
---estimated-duration-hours, gets the one the platform measured on its platform experiment's
-baseline job when it was declared: what that job ran plus a half, job_estimated_duration_hours
-of the experiment. A baseline agent's job has none measured: the platform gives it the largest
-your quota admits. A submit refused for quota fits once a job of
-yours ends or with a lower --estimated-duration-hours; state no less than the job takes. --capacity-tier burst runs
-on idle capacity and can be evicted for a guaranteed job; it draws on the same quota and gives
-no extra hours (hl quota).
-A submit is refused with a reason: image_required for a job that names no image,
-unknown_job_image for an image that is neither, as below;
-no_cluster_for_image when no cluster could run the job with its image;
-cpu_required, memory_required or storage_required for a job that leaves job.cpu, job.memory
-or job.storage out;
-exceeds_cluster_capacity for one that asks for more than every cluster that runs it has when
-idle, with what it asks for and what each cluster has;
-experiment_not_started before the platform starts the run, when only a baseline agent's job is
-taken (status_reason of hl platform-experiments get says what the start waits for and what you
-do until then); experiment_closed after the experiment's end.
-metadata.hypothesis_id is REQUIRED (from the file or --hypothesis):
-every job tests a registered hypothesis (see 'hl hypothesis submit'), yours or anyone's: a
-hypothesis and a branch are two things, and any agent may run its own implementation of any.
-metadata.theory is REQUIRED (from the file or --theory): what you predict this job will show.
-A baseline agent's job is the one exception: the baseline is the objective's own measurement,
-so it names no hypothesis and no theory (baseline_tests_no_hypothesis if it names one), and it
-runs on branch hl/PE/baseline, which you make with git checkout -b hl/PE/baseline. It takes
-FILE, --env, --secret-env and --capacity-tier.
---secret-env NAME sends the value of $NAME from this command's environment as job.secret_env:
-the job gets it as an environment variable and no read of the job shows it. FILE may not carry
-job.secret_env, since a job spec is a committed file.
-An agent's token says whose job it is and where it runs, so neither is stated. A person or an
-API key names the agent with --agent and the experiment with --platform-experiment.
-An empty metadata.code_ref is filled with <origin url>@<HEAD sha> of the git repository in
-the current directory, your clone of the platform experiment's repository, and metadata.branch
-with the branch HEAD is on. Commit first: uncommitted changes to tracked files are refused.
-HEAD must be on a branch under hl/PE/ (hl hypothesis checkout ID puts you on yours); on the
-default branch or a detached HEAD nothing is pushed and nothing is sent. The submit pushes that
-branch itself, so there is no git push to run. What a job ran is its code_ref, the commit.
-Minimal shape:
+FILE is a YAML job spec (metadata, job). The flags override it for this submission, so one
+committed spec serves every job that differs in hypothesis, env, estimate or tier. Prints the
+job's id, status, code_ref, branch, capacity_tier, estimated_duration_hours and
+estimated_cost_acch; hl job status ID has the rest.
+A submit the same in every part (agent, hypothesis, commit, FILE, flags) is one job however
+often it is sent, so one that timed out is safe to resend; --repeat N makes it the Nth job of
+that request.
+
+Quota: a job holds its estimated_cost_acch from submit until it ends, then what it was billed
+(hl job cost ID). With no estimate in FILE or --estimated-duration-hours it gets
+job_estimated_duration_hours of the experiment, the baseline job's run time plus a half; a
+baseline agent's job gets the largest your quota admits. A submit refused for quota fits once a
+job of yours ends, or with a lower estimate that is still no less than the job takes. Burst runs
+on idle capacity and can be evicted for a guaranteed job; it draws on the same quota.
+
+Required: metadata.hypothesis_id (or --hypothesis), any agent's registered hypothesis (a
+hypothesis and a branch are two things), and metadata.theory (or --theory), what you predict
+the job will show. A baseline agent's job names neither (baseline_tests_no_hypothesis) and runs
+on branch hl/PE/baseline (git checkout -b hl/PE/baseline).
+--secret-env NAME sends $NAME from this environment as job.secret_env, which no read of the
+job shows; FILE may not carry job.secret_env. An agent's token says whose job it is and where;
+a person or an API key states --agent and --platform-experiment.
+
+Code: commit first (uncommitted changes to tracked files are refused). HEAD must be on a branch
+under hl/PE/ (hl hypothesis checkout ID puts you on yours). The submit fills an empty
+metadata.code_ref with <origin url>@<HEAD sha> and metadata.branch with that branch, and pushes
+the branch itself. What a job ran is its code_ref.
+
+Refusals: image_required; unknown_job_image (neither a name from hl capacity nor a full
+address); no_cluster_for_image; cpu_required, memory_required, storage_required;
+exceeds_cluster_capacity (more than any cluster has idle, with both figures);
+experiment_not_started (before the start only a baseline agent's job is taken; see status_reason
+of hl platform-experiments get); experiment_closed.
 
   metadata:
     hypothesis_id: hyp-456        # from 'hl hypothesis submit'
@@ -93,21 +81,15 @@ Minimal shape:
                                   # hl-clone checks out the commit you submit from and prints where
     accelerator_type: ...         # a job on CPU leaves these two out and holds its cpu, whole cores
     accelerator_count: 1
-    cpu: 2                        # the cores one node of the job uses
-    memory: 8Gi                   # the memory one node of the job uses
-    storage: 4Gi                  # the scratch space one node of the job writes
-    ...                           # every other field: $WORKLOAD_SAMPLES/experiment-submission.yaml
+    cpu: 2                        # per node, like memory and storage, and in each group of a
+    memory: 8Gi                   # job with groups: a job holds what it states
+    storage: 4Gi                  # scratch space
+                                  # max_retries left out is 0; add packages with uv pip install
 
-Only hypothesis_id, theory and, in job, an image, a command, cpu, memory, storage and, for a
-job on an accelerator, accelerator_type with accelerator_count are needed. Any other image is refused. A job adds a package with uv pip install or pip install.
-cpu, memory and storage are always stated, as quantities, in each group of a job with groups:
-a job holds what it states. max_retries left out is 0.
-
-$WORKLOAD_SAMPLES, in an agent's image, holds experiment-submission.yaml, the full DSL
-reference, and whole jobs to read before writing one: each sample's seed/ is a workload that
-reports its metrics and its .hypothesisloop/job.yaml the spec that runs it. In the repository
-the reference is under controlplane/settings/examples and the samples under
-agents/coordinator/experiments.`, stderr)
+Every other field: $WORKLOAD_SAMPLES/experiment-submission.yaml. $WORKLOAD_SAMPLES also holds
+whole jobs to read first: each sample's seed/ reports its metrics and its
+.hypothesisloop/job.yaml runs it (in the repository: controlplane/settings/examples and
+agents/coordinator/experiments).`, stderr)
 	agent := fs.String("agent", "", "whose job it is, for a person or an API key; an agent's token says it")
 	overrides := map[string]*string{
 		"hypothesis_id":          fs.String("hypothesis", "", "sets metadata.hypothesis_id"),
@@ -618,6 +600,75 @@ While a COMPLETED job of yours has none, a job you submit after it ended is acce
 		fmt.Fprintf(stderr, "hl: job summary: the verdict of %s is open and yours to set: hl hypothesis status %s inconclusive, or confirmed|refuted --against CONTROL_JOB once a second run agrees\n", out.Hypothesis, out.Hypothesis)
 	default:
 		fmt.Fprintf(stderr, "hl: job summary: the verdict of %s is %s and yours to change if this finding does not fit it\n", out.Hypothesis, out.Verdict)
+	}
+	return 0
+}
+
+func jobWait(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("job wait", `usage: hl job wait ID [ID ...] [--timeout SECONDS]
+
+Blocks until every named job has ended, then prints each as hl job list does: a FAILED job's
+cause and last lines of output are its eviction_reason. Exits 0 once all ended, or 124 at
+--timeout with the jobs as they stand.`, stderr)
+	timeout := fs.Float64("timeout", 540, "give up after this many `seconds`")
+	ids, err := parseOperands(fs, args, "id", "experiment")
+	if err != nil {
+		return parseExit(err)
+	}
+	if len(ids) == 0 {
+		return parseExit(misuse(fs, "want at least one ID"))
+	}
+	if *timeout <= 0 {
+		return parseExit(misuse(fs, "--timeout wants a positive number of seconds"))
+	}
+	deadline := time.Now().Add(time.Duration(*timeout * float64(time.Second)))
+	for _, id := range ids {
+		left := time.Until(deadline)
+		if left <= 0 {
+			break
+		}
+		// The watch of one job replays its current status first, so one that ended already
+		// returns at once.
+		var said bytes.Buffer
+		code := watchclient.Run(watchclient.Options{
+			URL: c.BaseURL, Token: c.Token, Experiment: id,
+			Until:   "status in " + strings.Join(endedStatuses, ","),
+			Timeout: left, Stdout: io.Discard, Stderr: &said,
+		})
+		if code == watchclient.TimeoutExitCode {
+			break
+		}
+		if code != 0 {
+			fmt.Fprint(stderr, said.String())
+			return code
+		}
+	}
+	jobs := make([]json.RawMessage, 0, len(ids))
+	ended := true
+	for _, id := range ids {
+		var job json.RawMessage
+		if err := c.Do("GET", "/experiments/"+url.PathEscape(id), nil, &job); err != nil {
+			return fail(stderr, err)
+		}
+		var status struct {
+			Status string `json:"status"`
+		}
+		if err := json.Unmarshal(job, &status); err != nil {
+			return fail(stderr, fmt.Errorf("response is not a job: %w", err))
+		}
+		ended = ended && slices.Contains(endedStatuses, status.Status)
+		jobs = append(jobs, job)
+	}
+	lines, err := briefJobs[jobBrief](jobs)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	for _, line := range lines {
+		fmt.Fprintf(stdout, "%s\n", line)
+	}
+	if !ended {
+		fmt.Fprintf(stderr, "hl: job wait: timed out after %gs with a job not ended\n", *timeout)
+		return watchclient.TimeoutExitCode
 	}
 	return 0
 }

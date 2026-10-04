@@ -256,6 +256,25 @@ func TestARequestRefusedForItsShapeIsOneLineNamingTheFields(t *testing.T) {
 	}
 }
 
+// A planner copied cpu: 8 from the help's example and was refused 422 "expected string": the
+// example, proposed as it stands, sends what the API reads.
+func TestTheProposeExampleIsSentAsTheAPIReadsIt(t *testing.T) {
+	got := recordingServer(t, func(int, recorded) any { return map[string]any{"status": "draft"} })
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/ag-1"))
+	var help bytes.Buffer
+	cmdPlatformExperimentsPropose(nil, []string{"-h"}, &help, &help)
+	_, example, _ := strings.Cut(help.String(), "\n\n  experiment:")
+	example, _, _ = strings.Cut("  experiment:"+example, "\n\nThe proposal is checked")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"platform-experiments", "propose", writeFile(t, example)}, &stdout, &stderr); code != 0 {
+		t.Fatalf("propose the help's example: exit %d, stderr %s", code, stderr.String())
+	}
+	body := (*got)[0].Body
+	if body["cpu"] != "8" || body["memory"] != "32Gi" || body["storage"] != "100Gi" {
+		t.Errorf("sent cpu %#v, memory %#v, storage %#v, want the strings \"8\", \"32Gi\" and \"100Gi\"", body["cpu"], body["memory"], body["storage"])
+	}
+}
+
 func TestAPlannerProposesItsDraftFromAFile(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any { return map[string]any{"status": "draft"} })
 	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/ag-1"))

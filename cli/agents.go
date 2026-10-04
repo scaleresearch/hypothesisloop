@@ -50,18 +50,15 @@ func agentsAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 	fs := newFlags("platform-experiments agents add", `usage: hl platform-experiments agents add [--platform-experiment PE] [--hosted] [--flavor F] [--hyperparameters JSON] [--model M] [--name NAME] [--role ROLE] [--quota-tier TIER]
    or: hl platform-experiments agents add [--platform-experiment PE] --agent ID [--role ROLE] [--quota-tier TIER]
 
-The only way an agent joins a platform experiment, and only while it is open. The first form creates one agent; the second joins one that is
-registered already: an agent that was removed joins again under its id, and for a self-run
-agent that joined it prints the token again. For several agents, run it once for each.
-A reviewer re-checks what other agents claim and records agreement or dispute; like a baseline
-agent it is not ranked, not cut and not counted against max_agents.
-With --hosted the platform runs the agent:
-a baseline agent's machine at once, any other's from the start of the run, and until then its
-status_reason says what the start waits for.
-max_agents counts researchers (role competitor) alone, finished ones too.
-Without it the line printed carries the agent's token: start the agent yourself with that as
-HL_TOKEN and the API's address as API_URL, which is all it needs. Keep the token out of
-command lines and shell history; write it to an env file the container reads.`, stderr)
+The only way an agent joins a platform experiment, while it is open; once per agent. The first
+form creates one; the second joins a registered one again under its id (a removed agent), or
+prints a self-run agent's token again. max_agents counts researchers (role competitor),
+finished ones too. A reviewer re-checks others' claims and records agreement or dispute; like a
+baseline agent it is not ranked, cut or counted.
+--hosted: the platform runs the agent, starting a baseline agent's machine at once and any
+other's at the start of the run (its status_reason says what the start waits for). Without --hosted the line printed
+carries the agent's token: run the agent with it as HL_TOKEN and the API's address as API_URL,
+from an env file the container reads, never a command line.`, stderr)
 	agent := fs.String("agent", "", "join this registered agent instead of creating a new one")
 	hosted := fs.Bool("hosted", false, "the platform runs the agent")
 	flavor := fs.String("flavor", "", "the specialization the agent runs")
@@ -148,16 +145,13 @@ hl platform-experiments agents add --agent ID prints a self-run agent's token ag
 func agentsFinish(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("platform-experiments agents finish", `usage: hl platform-experiments agents finish --reason TEXT
 
-Says that you have nothing left to do in the platform experiment: your quota is spent, or
-nothing you could still try is worth a job. Your machine is then stopped after this turn and the
-coordinator is told, with the reason. Refused while you have a job queued or running or a
-completed job without its summary (work_unfinished). Once the platform experiment closed the
-answer is experiment_closed: your run is over already and nothing is left to finish, so end
-your turn. It cannot be taken back. Prints you as finished, the line of
-hl platform-experiments agents list. An agent finishes itself: the command takes who and where
-from its token, and the platform refuses any other. A hypothesis of yours that is still open
-refuses nothing: each is printed after you as a note, with its id and text, and stays open for
-good unless you give its verdict (hl hypothesis status ID VERDICT) before this turn ends.`, stderr)
+Says that you have nothing left to do: your quota is spent, or nothing you could still try is
+worth a job. Your machine stops after this turn and the coordinator is told the reason. It
+cannot be taken back. Refused while you have a job queued or running or a completed job without
+its summary (work_unfinished). Once the platform experiment closed there is nothing to finish:
+hl says so and exits 0. Prints you as finished. Your token says who and where. Each hypothesis
+of yours still open is listed after you and stays open for good unless you give its verdict
+(hl hypothesis status ID VERDICT) before this turn ends.`, stderr)
 	reason := fs.String("reason", "", "why nothing is left to do")
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
@@ -174,6 +168,10 @@ good unless you give its verdict (hl hypothesis status ID VERDICT) before this t
 		} `json:"open_hypotheses"`
 	}
 	if err := c.Do("POST", agentsPath(pe)+"/"+url.PathEscape(agent)+"/finish", map[string]string{"reason": *reason}, &out); err != nil {
+		if reason, _ := refusalOf(err); reason == "experiment_closed" {
+			fmt.Fprintln(stderr, "hl: platform-experiments agents finish: the platform experiment is closed, which ended your run: nothing needs finishing, so end your turn")
+			return 0
+		}
 		return fail(stderr, err)
 	}
 	for _, finished := range out.Agents {

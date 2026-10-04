@@ -193,10 +193,10 @@ func TestACallerIsListedTheCommandsItRunsAndRefusedTheOthersBeforeAnyRequest(t *
 			run([]string{"--help"}, &listing, &none)
 			return listing.String()
 		}()
-		wantJobs := "submit | list | status | metrics | summary | logs | data | cost | cancel | stats"
+		wantJobs := "submit | list | status | metrics | summary | wait | logs | data | cost | cancel | stats"
 		wantRun := "list | get | propose | decline | agents"
 		if kind == callerCoordinator {
-			wantJobs = "list | status | metrics | summary | logs | data | cost | cancel | stats"
+			wantJobs = "list | status | metrics | summary | wait | logs | data | cost | cancel | stats"
 			wantRun = "list | get | update | close | summary | agents"
 		}
 		for _, line := range []string{"\n  job                   " + wantJobs + "\n", "\n  platform-experiments  " + wantRun + "\n"} {
@@ -239,6 +239,7 @@ func TestNoCommandACoordinatorRunsCallsARouteACoordinatorMayNot(t *testing.T) {
 		{"job", "list", "--agent", "ag-1"},
 		{"job", "status", "job-1"},
 		{"job", "logs", "job-1"},
+		{"job", "wait", "job-1", "--timeout", "1"},
 		{"job", "metrics", "job-1"},
 		{"job", "data", "job-1"},
 		{"job", "cost", "job-1"},
@@ -301,6 +302,7 @@ func TestNoCommandAnAgentRunsCallsARouteAnAgentMayNot(t *testing.T) {
 		{"job", "metrics", "job-1"},
 		{"job", "summary", "job-1", "--text", "what it found"},
 		{"job", "logs", "job-1"},
+		{"job", "wait", "job-1", "--timeout", "1"},
 		{"job", "data", "job-1"},
 		{"job", "cost", "job-1"},
 		{"job", "cancel", "job-1"},
