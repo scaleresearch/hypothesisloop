@@ -50,18 +50,26 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
       - the accelerator type, its count per job and the `image`;
       - the levers open and fixed, and when to stop: the target reached, no gain after
         several honest tries, or the quota.
-    No API calls, commands, field layouts or conventions of yours: point to files. How the
-    harness measures (data splits, seeds, repeats, conventions) the baseline chooses and
-    records in the repository's README.
+    Name each part by its file or directory and the behaviour you mean, in the control and
+    the levers too: no function, type or API names, commands, flags, field layouts or
+    conventions of yours. How the harness measures (data splits, seeds, repeats, conventions)
+    the baseline chooses and records in the repository's README.
   - The size: a budget or count the goal states, as stated; a time it states is
     `duration_hours`, never a trial length. Else the smallest plan: count the trials the goal
     needs (the levers worth trying, a control and a repeat). Budget = the trial length the
     repository states, else one you assume, its job's build of the code it varies included,
-    x `acch_per_hour` of the type x its count x those trials, with a fifth to spare. Duration = the rounds those trials take side by side.
-    `baseline_minutes`: few for a harness that runs unchanged, more for one and its toolchain
-    written from nothing. Researchers: 2 unless stated, never above `max_agents`.
-  - `sizing_reason`: the trial length is read or assumed; the arithmetic; the budget is a
-    cap; the run does not start if the budget cannot cover one trial for each researcher.
+    x `acch_per_hour` of the type x its count x those trials, with a fifth to spare.
+    Duration = the rounds those trials take side by side.
+    `baseline_minutes`: from the accept until the control and each reference are measured,
+    the sum of writing the harness (none when it runs unchanged), building the job's
+    environment from nothing (toolchains, dependencies, the references), moving that image to
+    the cluster, the jobs themselves, and one failed try fixed and rerun.
+    Researchers: 2 unless stated, never above `max_agents`. With 2 or more, mix flavors
+    unless the goal says otherwise: a generalist and the targeted flavors whose axis the
+    levers leave open, each direction on its flavor's axis.
+  - `sizing_reason`: the trial length is read or assumed; the arithmetic, baseline_minutes'
+    too; the budget is a cap; the run does not start if the budget cannot cover one trial for
+    each researcher.
 
 If the goal cannot be made into an experiment (nothing measurable, or nothing this platform
 can run now), decline with `hl platform-experiments decline`. A gate you doubt is a risk and
