@@ -84,6 +84,7 @@ var commands = []struct {
 	}, everyone}, nil},
 	{subcommand{"hypothesis", "", cmdHypothesis, everyone}, hypothesisCommands},
 	{subcommand{"job", "", group("job", jobCommands), everyone}, jobCommands},
+	{subcommand{"env", "", group("env", envCommands), everyone}, envCommands},
 	{subcommand{"repo", "the files every experiment's repository holds", group("repo", repoCommands), everyone}, repoCommands},
 	{subcommand{"org", "", group("org", orgCommands), ofPeople}, orgCommands},
 	{subcommand{"project", "", group("project", projectCommands), ofPeople}, projectCommands},
@@ -717,7 +718,7 @@ See controlplane/settings/examples/experiment.yaml for the full DSL reference.`,
 // cmdPlatformExperimentsUpdate handles `hl platform-experiments update [FIELDS.yaml]`. FILE is a
 // YAML file shaped exactly like the create body (see controlplane/settings/examples/
 // experiment.yaml) — while the platform experiment is still open, every field including metrics
-// is editable; once running, only name and description are.
+// is editable; once running, only name, description and duration_hours are.
 func cmdPlatformExperimentsUpdate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("platform-experiments update", `usage: hl platform-experiments update [--platform-experiment PE] [--description-file FILE] [--description TEXT] [--baseline-job JOB] [--name NAME] [FIELDS.yaml]
 
@@ -736,8 +737,8 @@ baseline_not_in_environment: JOB did not run in the environment the head of the 
 declares in .hypothesisloop/Dockerfile.
 
 FIELDS.yaml maps the other fields that change (budget_accelerator_hours, max_agents,
-duration_hours, metrics, report_interval_seconds): any while it is open, only name and
-description once it runs. The result is checked like a create, so name and description stay
+duration_hours, metrics, report_interval_seconds): any while it is open, only name,
+description and duration_hours once it runs. The result is checked like a create, so name and description stay
 non-empty; max_agents below the researchers that joined is 409 max_agents_below_researchers.`, stderr)
 	pe := experimentFlag(fs)
 	name := fs.String("name", "", "the new name")
@@ -872,6 +873,9 @@ a leading quote.
   questions:
     - |
       what the goal left open and you decided
+  repo_map: |                          # optional, at most 4000 bytes: what you read of the repository,
+    a line per file or directory that matters, its entry points, how it builds and runs, and
+    the toolchain and dependency pins. The baseline agent is given it when it starts.
 
 A refusal names what to fix and changes nothing: for a file that is no YAML the line and what
 is wrong there, for the image what a job submit would refuse (unknown_job_image,
@@ -960,7 +964,7 @@ duration_hours, once it runs. status_reason says where one that is not closed st
 is the code, message the sentence, and waits_for whose move it is: owner, coordinator, or
 platform when it is nobody's and the platform, an agent at work or the clock brings the next
 state. The reasons:
-  a draft: repository_creating, planning, revising, proposed, declined
+  a draft: repository_creating, planning, revising, accepting, proposed, declined
   open, its baseline not declared: baseline_measuring, baseline_declaring, baseline_required,
     baseline_undeclared
   open, the declaration of the measured job refused: no_baseline, baseline_not_completed,

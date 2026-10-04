@@ -303,6 +303,9 @@ func (c *Config) build() error {
 	if c.Planning.PlannerKeptMinutes <= 0 {
 		return fmt.Errorf("planning planner_kept_minutes is required and positive: how long a planner's machine is kept after its answer for a revision asked for soon")
 	}
+	if c.Planning.AutoAcceptSeconds < 0 {
+		return fmt.Errorf("planning auto_accept_seconds is 0 or positive: how long a proposal waits before the platform accepts it as proposed, 0 for never")
+	}
 	if c.Accounts.MaxOrgsPerUser <= 0 {
 		return fmt.Errorf("accounts max_orgs_per_user is required and positive: how many orgs a person may own when they create one")
 	}

@@ -377,7 +377,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Summary: "Change fields of a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "Takes only the fields that change; a field left out keeps its value, and a body with none answers 422 nothing_to_change. " +
 			"While the experiment is open every field of the body can change, `metrics` among them, so a mis-specified ranking metric is fixed in place. " +
-			"Once it runs only `name` and `description` do, because admission and the stage ladder have acted on the rest: a body that carries another field answers 409 experiment_running and names it. " +
+			"Once it runs only `name`, `description` and `duration_hours` do, because admission and the stage ladder have acted on the rest: a body that carries another field answers 409 experiment_running and names it. " +
+			"A duration_hours of a running one moves the end of its run, still counted from its start, and one that ends it before now is 422 invalid_length. A new description or duration_hours reaches every agent of it as platform_experiment.description. " +
 			"409 experiment_not_editable for a draft or a closed one. The experiment as patched is checked like a create and refused with the same 422: " +
 			"invalid_experiment (an empty name or description among them), invalid_metrics, invalid_cost, invalid_agents, invalid_length, " +
 			"409 max_agents_below_researchers for a max_agents under the researchers (agents of role competitor) that already joined, " +

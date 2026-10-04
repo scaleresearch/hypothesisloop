@@ -632,6 +632,13 @@ const launcherEndsBySQL = `(CASE
             WHEN pe.status = 'running' AND pe.started_at IS NULL THEN ` + runOverAtSQL + `
             ELSE pe.ends_at END + make_interval(secs => $2))`
 
+// launcherAgentEndsBySQL is launcherEndsBySQL for the agent s, but for the baseline agent of a
+// draft, whose machine starts before the draft is accepted and has to outlast the baseline:
+// it is bounded by the draft's own end, when an unaccepted proposal is closed.
+const launcherAgentEndsBySQL = `(CASE WHEN pe.status = 'draft' AND s.role = '` + string(domain.SignupRoleBaseline) + `'
+            THEN pe.ends_at + make_interval(secs => $2)
+            ELSE ` + launcherEndsBySQL + ` END)`
+
 // launcherAgentsFrom selects the hosted agents a launcher still has something to do for: those
 // of a running platform experiment that were not cut and did not finish, those that measure the
 // baseline of an open one, since no researcher's machine is rented before there is a baseline to
@@ -642,6 +649,10 @@ const launcherEndsBySQL = `(CASE
 //
 // None of them has anything to do while the platform still creates the repository they clone
 // (awaitsRepository).
+//
+// A draft's baseline agent, which its planner's proposal signed up, has something to do while the
+// platform is to accept that proposal by itself (accepts_at): its machine starts then, so that it
+// is up once the draft is accepted. A draft that waits for a person keeps no machine of it.
 //
 // A draft's planner is the other way round. It has something to do while the draft is a draft
 // and nothing is proposed, which a revision makes true again. After its answer it is kept until
@@ -656,6 +667,7 @@ LEFT JOIN platform_experiment_cuts c ON c.platform_experiment_id = s.platform_ex
 WHERE s.hosted AND s.launcher = $1 AND NOT (` + awaitsRepository + `)
   AND (pe.status = 'closed' AND pe.closed_at > now() - make_interval(secs => $2)
        OR s.role <> '` + string(domain.SignupRolePlanner) + `' AND (pe.status = 'running' OR pe.status = 'open' AND s.role = '` + string(domain.SignupRoleBaseline) + `')
+       OR s.role = '` + string(domain.SignupRoleBaseline) + `' AND pe.status = 'draft' AND pe.accepts_at IS NOT NULL
        OR s.role = '` + string(domain.SignupRolePlanner) + `' AND pe.status = 'draft' AND (pe.planner_ends_at IS NULL OR pe.planner_ends_at > now() - make_interval(secs => $2)))
   AND (c.agent_id IS NULL OR c.cut_at > now() - make_interval(secs => $2))
   AND (s.finished_at IS NULL OR s.finished_at > now() - make_interval(secs => $2))`
@@ -663,7 +675,7 @@ WHERE s.hosted AND s.launcher = $1 AND NOT (` + awaitsRepository + `)
 // ListLauncherAgents returns the hosted agents the launcher's desired state is decided from.
 func (s *PlatformExperimentsStore) ListLauncherAgents(ctx context.Context, launcher string, windDown time.Duration) ([]LauncherAgent, error) {
 	rows, err := s.pool.pool.Query(ctx, `
-SELECT `+agentSignupColumns+`, pe.agent_image, `+launcherEndsBySQL+launcherAgentsFrom+`
+SELECT `+agentSignupColumns+`, pe.agent_image, `+launcherAgentEndsBySQL+launcherAgentsFrom+`
 ORDER BY s.platform_experiment_id, s.agent_id`, launcher, windDown.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.ListLauncherAgents: %w", err)

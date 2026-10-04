@@ -294,6 +294,10 @@ type PlanningConfig struct {
 	// PlannerKeptMinutes is how long a planner's machine is kept after its answer, so that a
 	// revision asked for in that time reaches the planner that is still there.
 	PlannerKeptMinutes int `yaml:"planner_kept_minutes"`
+	// AutoAcceptSeconds is how long a proposal waits before the platform accepts it as proposed,
+	// unless a person accepts it sooner, holds it to edit it, revises it or closes it. 0 leaves
+	// every proposal to a person.
+	AutoAcceptSeconds int `yaml:"auto_accept_seconds"`
 }
 
 // AccountsConfig bounds what one account creates. Staff are held to neither bound.

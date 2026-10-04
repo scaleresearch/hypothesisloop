@@ -831,7 +831,7 @@ func TestADraftWhosePlannerIsGivenUpOnIsClosedSayingSo(t *testing.T) {
 	}
 
 	answered, answering := createTestDraft(t, pool, launcher)
-	if err := pes.SetProposal(ctx, answered, []byte(`{}`), time.Now().UTC().Add(time.Hour), 10*time.Minute); err != nil {
+	if err := pes.SetProposal(ctx, answered, []byte(`{}`), Proposed{WaitUntil: time.Now().UTC().Add(time.Hour), KeepPlanner: 10 * time.Minute}); err != nil {
 		t.Fatal(err)
 	}
 	if after := die(answered, answering, maxRestarts+1); !after.Stopped {
@@ -929,7 +929,7 @@ func TestWhatAHostedAgentIsDoingIsKeptOnItsRowAndAnsweredWhereItIsRead(t *testin
 		t.Fatalf("a coordinator asked for on a new machine: got = %+v, want none", got)
 	}
 	// Released with its draft's answer, the planner's machine says nothing either.
-	if err := pes.SetProposal(ctx, draft, []byte(`{}`), time.Now().UTC().Add(time.Hour), 0); err != nil {
+	if err := pes.SetProposal(ctx, draft, []byte(`{}`), Proposed{WaitUntil: time.Now().UTC().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	if err := pes.ReleaseInstances(ctx, launcher, 0); err != nil {

@@ -869,7 +869,8 @@ BEGIN
     IF NEW.coordinator_reason IS DISTINCT FROM OLD.coordinator_reason THEN
         NEW.coordinator_reason_xid := pg_current_xact_id()::text::bigint;
     END IF;
-    IF NEW.description IS DISTINCT FROM OLD.description THEN
+    -- The run's length is part of what every agent plans its work by, as the brief is.
+    IF NEW.description IS DISTINCT FROM OLD.description OR NEW.duration_hours IS DISTINCT FROM OLD.duration_hours THEN
         NEW.description_changed_at := now();
         NEW.description_changed_xid := pg_current_xact_id()::text::bigint;
     END IF;
@@ -898,8 +899,8 @@ BEGIN
     -- The brief is the question every agent is working on, and it is edited mid-run when the
     -- coordinator resolves or redirects something. The new text is deliberately NOT carried: a
     -- description is unbounded, and an event is a pointer — a subscriber re-reads it with the
-    -- ordinary GET, exactly as it would have anyway.
-    IF NEW.description IS DISTINCT FROM OLD.description THEN
+    -- ordinary GET, exactly as it would have anyway. A new duration_hours is told the same way.
+    IF NEW.description IS DISTINCT FROM OLD.description OR NEW.duration_hours IS DISTINCT FROM OLD.duration_hours THEN
         PERFORM hypothesisloop_notify_event('platform_experiment.description', NEW.id, '', '',
             NEW.id, '');
     END IF;
@@ -1417,6 +1418,12 @@ COMMIT;
 -- sweep that saw it waiting, NULL when the last one did not.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS baseline_held_seconds DOUBLE PRECISION NOT NULL DEFAULT 0;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS baseline_held_at      TIMESTAMPTZ;
+-- When the platform accepts a proposed draft as proposed (planning.auto_accept_seconds after the
+-- proposal), unless a person accepts it sooner, holds it to edit it, revises it or closes it.
+-- NULL on a draft that waits for a person, and on anything that is no proposed draft. While it is
+-- set, the baseline agent the proposal signed up has its machine.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS accepts_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS platform_experiments_accepts_at ON platform_experiments (accepts_at) WHERE accepts_at IS NOT NULL;
 -- The image of an environment's assigned attempt once its cluster holds it in the image store of
 -- node loaded_node, repository@digest, while the push goes on: a job pinned to that node runs it
 -- before it is ready. Empty otherwise, and cleared by every new assignment and every outcome.

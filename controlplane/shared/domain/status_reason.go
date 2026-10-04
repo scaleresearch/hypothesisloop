@@ -27,6 +27,7 @@ var statusWaiters = map[string]Waiter{
 	"repository_creating": WaitsForPlatform,
 	"planning":            WaitsForPlatform,
 	"revising":            WaitsForPlatform,
+	"accepting":           WaitsForPlatform,
 	"proposed":            WaitsForOwner,
 	"declined":            WaitsForOwner,
 

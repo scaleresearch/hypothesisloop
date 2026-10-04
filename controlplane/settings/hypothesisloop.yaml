@@ -112,12 +112,17 @@ agents:
 #   min_baseline_minutes  the fewest baseline_minutes a proposal or an accept may state: a
 #              baseline written from nothing writes its harness, waits for its environment to
 #              build and measures once, and a shorter window closes the run before it starts.
+#   auto_accept_seconds  how long a proposal waits before the platform accepts it as proposed,
+#              unless a person accepts it sooner, holds it to edit it, revises it or closes
+#              it. Its baseline agent's machine starts with the proposal, so measuring begins
+#              as the proposal is accepted. 0 leaves every proposal to a person.
 planning:
   limit_minutes: 30
   proposed_for_days: 7
   planner_kept_minutes: 10
   baseline_limit_minutes: 90
   min_baseline_minutes: 45
+  auto_accept_seconds: 30
 
 # What one account may create. Staff, the platform's operators, are held to neither.
 #

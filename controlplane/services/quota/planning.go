@@ -24,6 +24,9 @@ type Planning struct {
 	// PlannerKept is how long a planner's machine is kept after its answer, for a revision asked
 	// for in that time to reach the planner that is still there.
 	PlannerKept time.Duration
+	// AutoAccept is how long a proposal waits before the platform accepts it as proposed, unless
+	// a person accepts it sooner, holds it, revises it or closes it. 0 leaves it to a person.
+	AutoAccept time.Duration
 }
 
 // draftNameLength bounds the name a draft takes from its goal until the proposal names it.
@@ -123,7 +126,7 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Description: "Creates a platform experiment in status draft from goal, one sentence saying what the caller wants to find out. " +
 			"A draft has no budget, no metrics, and one agent, its planner, which the platform runs (role planner, in the roster like any agent) " +
 			"and nobody else joins: the planner works out how to measure the goal and proposes the metrics, " +
-			"the brief, the hardware, the budget and the agents, and it opens only when a person accepts that proposal. Until then its max_agents is the most researchers a proposal may name: max_hosted less the coordinator and the baseline agent an accepted draft is given. A draft takes no job, so nothing is measured " +
+			"the brief, the hardware, the budget and the agents, and it opens only when that proposal is accepted: by a person, or by the platform as proposed at accepts_at. Until then its max_agents is the most researchers a proposal may name: max_hosted less the coordinator and the baseline agent an accepted draft is given. A draft takes no job, so nothing is measured " +
 			"and no compute is spent until then. Its name is the goal cut short until the proposal names it. POST /platform-experiments creates one whole instead, " +
 			"and states what a run costs itself. Closing a draft (POST /platform-experiments/{id}/close) abandons it. " +
 			"Its planner and later its agents keep their code in repository: the one the request names, checked as on POST /platform-experiments, or a private one the platform creates on the GitHub account the org connected. " +

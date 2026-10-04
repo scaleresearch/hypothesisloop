@@ -142,7 +142,7 @@ var EventKinds = []EventKindDoc{
 	{Kind: EventPlatformExperimentStatus, Subject: "platform experiment id", Value: "draft, open, running, closed",
 		Description: "The run itself moved. 'closed' is a stop condition for every agent in it. With a detail the status stayed and its status_reason changed to one that waits for its coordinator, where the platform hosts one: detail is that reason, such as researchers_done once no researcher is left to work, sent within a minute of the change and once for each. GET /platform-experiments/{id} has its message."},
 	{Kind: EventPlatformExperimentDescription, Subject: "platform experiment id", Value: "empty by design",
-		Description: "The brief changed. A description is unbounded and is never copied into an event: re-read it with GET /platform-experiments/{id}."},
+		Description: "The brief or the run's length (duration_hours) changed. A description is unbounded and is never copied into an event: re-read both with GET /platform-experiments/{id}."},
 	{Kind: EventPlatformExperimentRevision, Subject: "platform experiment id", Value: "empty by design",
 		Description: "A person asked the planner of a draft to change its answer (POST /platform-experiments/{id}/revise). What was asked is the last of revisions on GET /platform-experiments/{id}, whose status_reason reads revising until the planner answers again. A planner whose machine is still there after its answer is told by this event, and one whose machine was released is started again."},
 	{Kind: EventMetricPoint, Subject: "experiment id", Value: "metric name and fraction complete",

@@ -562,7 +562,7 @@ func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
 		reason, says string
 	}{
 		"nothing":                       {domain.PlatformExpOpen, map[string]any{}, 422, "nothing_to_change", ""},
-		"a budget once it runs":         {domain.PlatformExpRunning, map[string]any{"description": "d", "budget_accelerator_hours": 9, "duration_hours": 9}, 409, "experiment_running", "budget_accelerator_hours, duration_hours"},
+		"a budget once it runs":         {domain.PlatformExpRunning, map[string]any{"description": "d", "budget_accelerator_hours": 9, "max_agents": 9, "duration_hours": 9}, 409, "experiment_running", "budget_accelerator_hours, max_agents"},
 		"a closed one":                  {domain.PlatformExpClosed, map[string]any{"description": "d"}, 409, "experiment_not_editable", ""},
 		"a draft":                       {domain.PlatformExpDraft, map[string]any{"description": "d"}, 409, "experiment_not_editable", ""},
 		"no name":                       {domain.PlatformExpOpen, map[string]any{"name": " "}, 422, "invalid_experiment", "name"},
@@ -591,6 +591,43 @@ func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
 	// The whole-body PUT is gone.
 	if rec := call("PUT", "/platform-experiments/pe-1", map[string]any{"description": "d"}); rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("PUT: got = %d, want 405", rec.Code)
+	}
+}
+
+// The owner who wants the run longer or shorter had to close it and start again. Its length
+// changes while it runs, still counted from its start, and never to an end that has passed.
+func TestARunningExperimentTakesANewDuration(t *testing.T) {
+	started := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
+	repos := &fakeRepositories{}
+	store, call, _ := repoAPI(t, authtest.Staff, repos)
+	patch := func(awaitingAgents bool, hours float64) (int, map[string]any, *domain.PlatformExperiment) {
+		t.Helper()
+		pe := &domain.PlatformExperiment{
+			ID: "pe-1", ProjectID: "prj-a", Name: "kept", Description: "the brief agents work from", Status: domain.PlatformExpRunning,
+			Repository: testRepository, BudgetAcceleratorHours: 5, MaxAgents: 3, ReportIntervalSeconds: 10,
+			StartsAt: started, DurationHours: 4, Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
+		}
+		if awaitingAgents {
+			pe.SetClosesAt(time.Now().UTC().Add(10 * time.Minute))
+		} else {
+			pe.StartedAt = started
+			pe.SetClosesAt(started.Add(4 * time.Hour))
+		}
+		store.created = []*domain.PlatformExperiment{pe}
+		rec := call("PATCH", "/platform-experiments/pe-1", map[string]any{"duration_hours": hours})
+		out := map[string]any{}
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out, store.created[0]
+	}
+	if code, out, stored := patch(false, 6); code != http.StatusOK || stored.DurationHours != 6 || !stored.ClosesAt().Equal(started.Add(6*time.Hour)) {
+		t.Errorf("six hours: got = %d %v, closes at %v, want the run's end moved to %v", code, out, stored.ClosesAt(), started.Add(6*time.Hour))
+	}
+	if code, out, stored := patch(false, 1); code != http.StatusUnprocessableEntity || out["reason"] != "invalid_length" || stored.DurationHours != 4 {
+		t.Errorf("an end that passed: got = %d %v, want 422 invalid_length and the run as it was", code, out)
+	}
+	// With no researcher at work yet it closes at the end of its run when that comes first.
+	if code, out, stored := patch(true, 2.1); code != http.StatusOK || !stored.AgentsDueAt.Equal(started.Add(126*time.Minute)) {
+		t.Errorf("a run that waits for its researchers, shortened: got = %d %v, agents due %v, want the new end", code, out, stored.AgentsDueAt)
 	}
 }
 

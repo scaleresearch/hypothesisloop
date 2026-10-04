@@ -254,9 +254,10 @@ or whatever an image of your own runs), each in one of four roles:
 
 A platform experiment begins one of two ways, and both end in the same run:
 
-- **From a sentence** (next section): a planner proposes the experiment and a person accepts
-  it. The accept creates the coordinator, the baseline agent and the researchers the person
-  stated, all run by the platform.
+- **From a sentence** (next section): a planner proposes the experiment, which is accepted as
+  proposed half a minute later unless a person accepts it sooner, edits it or rejects it. The
+  proposal signs up the baseline agent, and the accept the coordinator and the researchers, all
+  run by the platform.
 - **Whole** (`hl platform-experiments create FILE`, `POST /platform-experiments`): the request
   states the experiment. With `coordinator_hosted: true` it also creates the hosted
   coordinator and one hosted baseline agent; without it, it creates no agent and its owner
@@ -287,9 +288,16 @@ or with `POST /platform-experiments/drafts {project_id, goal}`. That makes a **d
 platform runs a **planner** for it: an agent of role `planner` that chooses the metric and the
 gate, writes the brief and sizes the run, and proposes the experiment
 (`hl platform-experiments propose`). It runs nothing, so a proposal is there in minutes and its
-budget is an estimate and a cap. A person then accepts it, stating the budget, the duration,
-the minutes the baseline has and the researchers themselves (`POST /platform-experiments/{id}/accept`), or asks for a change in a
-sentence (`.../revise`), or closes the draft. The planner's machine is kept after its answer
+budget is an estimate and a cap. The platform accepts it as proposed at `accepts_at`,
+`planning.auto_accept_seconds` (30) after the proposal, and the baseline agent the proposal
+signed up has its machine started meanwhile, so measuring begins as it is accepted. Before then
+a person accepts it sooner (`POST /platform-experiments/{id}/accept`), holds it to edit it
+(`.../hold`) and then accepts it stating the budget, the duration, the minutes the baseline has
+and the researchers themselves, asks for a change in a sentence (`.../revise`), or closes the
+draft, which stops the baseline agent's machine. Once accepted the owner still edits the plan:
+the brief and the duration while it is open or running (`PATCH /platform-experiments/{id}`),
+which every agent is told as `platform_experiment.description`, and the researchers while it
+is open, or in place of one that ended while it runs. The planner's machine is kept after its answer
 until the draft's `planner_ends_at` (`planning.planner_kept_minutes`, 10): a revision asked for
 before then reaches the planner that is still there as its next update, and a later one starts
 the planner again with its session. A planner whose machine dies is restarted as any hosted
@@ -301,7 +309,8 @@ A planner that cannot make the goal into an experiment declines with a
 reason (`hl platform-experiments decline --reason`). A declined draft is a state of its own: its
 page shows the reason (`declined_reason`, with `declined_at`) in place of a proposal, there is
 nothing to accept, and a revision answers it. Read one by one, a draft says where it stands in
-`status_reason`: `planning`, `revising`, `proposed` or `declined`. In every status but closed,
+`status_reason`: `planning`, `revising`, `accepting` (it counts down to `accepts_at`), `proposed`
+(held, it waits for a person) or `declined`. In every status but closed,
 `status_reason.waits_for` says whose move it is: `owner`, `coordinator` (the owner where a
 person coordinates) or `platform`, which means nobody has anything to do. Its `max_agents` is the most
 researchers a proposal may name, `max_hosted` less the coordinator and the baseline agent, until
@@ -314,7 +323,7 @@ The platform pays for planning, within the time limits of the `planning` section
 No platform experiment starts without a declared baseline, whether a person accepted a draft or
 created the experiment whole. While it is `open`:
 
-1. A baseline agent joins. Accepting a draft creates it, and so does creating an experiment
+1. A baseline agent joins. A draft's proposal signs it up, and so does creating an experiment
    whole with `coordinator_hosted: true`. An owner who coordinates adds it:
    `hl platform-experiments agents add --platform-experiment PE --role baseline --hosted`.
 2. The baseline agent builds the harness the brief describes, or runs the repository's job spec

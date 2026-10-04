@@ -219,8 +219,9 @@ func refuseUpdate(status int, reason, format string, args ...any) error {
 
 // Update changes the fields the patch carries and no others, and the experiment as patched has
 // to pass validate. While the experiment is open every
-// field of the patch can change. Once it runs, only the name and the description can: admission
-// and the stage ladder have already acted on the rest. A closed one, and a draft, which its
+// field of the patch can change. Once it runs, only the name, the description and duration_hours
+// can: admission and the stage ladder have already acted on the rest. A new duration_hours moves
+// the end of the run, counted from its start as before. A closed one, and a draft, which its
 // planner's proposal fills, take no patch.
 //
 // baseline_job_id declares the baseline. An open experiment that has one, or is given one, is
@@ -242,8 +243,8 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	if pe.Status != domain.PlatformExpOpen && pe.Status != domain.PlatformExpRunning {
 		return nil, refuseUpdate(409, "experiment_not_editable", "platform experiment %s is %s: only an open or running one is changed", id, pe.Status)
 	}
-	if locked := patch.carried("name", "description"); pe.Status == domain.PlatformExpRunning && len(locked) > 0 {
-		return nil, refuseUpdate(409, "experiment_running", "only name and description change once a platform experiment runs, and the body also carries: %s. Leave them out", strings.Join(locked, ", "))
+	if locked := patch.carried("name", "description", "duration_hours"); pe.Status == domain.PlatformExpRunning && len(locked) > 0 {
+		return nil, refuseUpdate(409, "experiment_running", "only name, description and duration_hours change once a platform experiment runs, and the body also carries: %s. Leave them out", strings.Join(locked, ", "))
 	}
 	expectedStatus := pe.Status
 	patched := *pe
@@ -282,6 +283,17 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	}
 	if patch.DurationHours != nil {
 		patched.DurationHours = *patch.DurationHours
+		if pe.Status == domain.PlatformExpRunning {
+			end := pe.StartsAt.Add(time.Duration(patched.DurationHours * float64(time.Hour)))
+			if !end.After(time.Now()) {
+				return nil, refuseUpdate(422, "invalid_length", "duration_hours %g ends the run at %s, which has passed: close it instead, or state a duration that ends later", patched.DurationHours, end.UTC().Format(time.RFC3339))
+			}
+			if !pe.StartedAt.IsZero() {
+				patched.EndsAt = end
+			} else {
+				patched.EndsAt, patched.AgentsDueAt = end, minTime(pe.AgentsDueAt, end)
+			}
+		}
 	}
 	if patch.MaxConcurrentAccelerators != nil {
 		patched.MaxConcurrentAccelerators = patch.MaxConcurrentAccelerators
@@ -632,6 +644,8 @@ func draftReason(pe *domain.PlatformExperiment) *domain.StatusReason {
 	switch {
 	case pe.DeclinedAt != nil:
 		return &domain.StatusReason{Reason: "declined", Message: "its planner proposed no experiment, for declined_reason: revise it with POST /platform-experiments/" + pe.ID + "/revise, saying what the planner lacked, or close it. The platform closes it at proposal_expires_at"}
+	case pe.ProposedAt != nil && pe.AcceptsAt != nil:
+		return &domain.StatusReason{Reason: "accepting", Message: "its planner proposed an experiment, in proposal, and the platform accepts it as proposed at accepts_at, with its baseline agent's machine starting now. Accept it sooner with POST /platform-experiments/" + pe.ID + "/accept, hold it to edit it with POST /platform-experiments/" + pe.ID + "/hold, revise it or close it"}
 	case pe.ProposedAt != nil:
 		return &domain.StatusReason{Reason: "proposed", Message: "its planner proposed an experiment, in proposal: accept it with POST /platform-experiments/" + pe.ID + "/accept, revise it or close it. The platform closes it at proposal_expires_at"}
 	case len(pe.Revisions) > 0:
@@ -1382,4 +1396,11 @@ func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, inter
 			}
 		}
 	}
+}
+
+func minTime(a, b time.Time) time.Time {
+	if b.Before(a) {
+		return b
+	}
+	return a
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -422,6 +423,27 @@ func TestEditingTheDescriptionAnnouncesThatItChangedAndCarriesNoneOfItsText(t *t
 	e := awaitEvent(t, events, EventPlatformExperimentDescription, peID)
 	if e.Value != "" || e.Detail != "" {
 		t.Errorf("description event payload: got = %v/%v, want = empty, a pointer only", e.Value, e.Detail)
+	}
+}
+
+// The owner may lengthen or shorten a run while it goes on, and every agent plans its work by
+// the time left: a new duration_hours is told as the brief is, live and replayed.
+func TestChangingTheDurationIsAnnouncedAsTheBriefIs(t *testing.T) {
+	pool := eventsTestDB(t)
+	_, peID, _ := seedRun(t, pool, "length", true)
+	before := cursorNow(t, pool)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+
+	exec(t, pool, `UPDATE platform_experiments SET duration_hours = duration_hours + 2 WHERE id = $1`, peID)
+
+	awaitEvent(t, events, EventPlatformExperimentDescription, peID)
+	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(), EventFilter{PlatformExperimentID: peID}, before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(replayed, func(e Event) bool { return e.Kind == EventPlatformExperimentDescription }) {
+		t.Fatalf("replayed %+v, want the change among them", replayed)
 	}
 }
 

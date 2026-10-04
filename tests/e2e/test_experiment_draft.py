@@ -119,6 +119,17 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         proposed = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(on, image, **node))
         assert proposed.status_code == 200, proposed.text
         assert proposed.json()["proposed_at"] and proposed.json()["status"] == "draft"
+        # Proposed, the platform accepts it as proposed at accepts_at unless the person acts
+        # first, and the agent that measures the baseline is signed up with a machine asked for.
+        counting = api.get_json(f"/platform-experiments/{pe_id}")
+        assert (counting["status_reason"]["reason"], counting["status_reason"]["waits_for"]) == ("accepting", "platform"), counting["status_reason"]
+        assert _at(counting["accepts_at"]) > _at(proposed.json()["proposed_at"]), counting
+        measurers = [a for a in api.agents(pe_id) if a["role"] == "baseline"]
+        assert [a["name"] for a in measurers] == ["Baseline 1"], measurers
+        assert len(_researcher_instances(api, pe_id, measurers)) == 1, "the baseline agent of a proposal has no machine asked for"
+        # Held, it waits for the person and the baseline agent's machine is let go until the accept.
+        held = api.post(f"/platform-experiments/{pe_id}/hold")
+        assert held.status_code == 200 and "accepts_at" not in held.json(), held.text
         waits = api.get_json(f"/platform-experiments/{pe_id}")["status_reason"]
         assert (waits["reason"], waits["waits_for"]) == ("proposed", "owner"), waits
         assert proposed.json()["proposal"]["accelerator_type"] == on and "baseline_job_id" not in proposed.json()["proposal"], proposed.json()["proposal"]
@@ -130,6 +141,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         kept, _ = _planner_instance(api, pe_id)
         assert kept is not None and kept["name"] == instance["name"], "the planner's machine was released with its proposal"
         assert planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(on, image, **node)).json()["planner_ends_at"] == kept_until
+        assert api.post(f"/platform-experiments/{pe_id}/hold").status_code == 200
 
         # A change asked for in a sentence reaches the planner that is still there, and it
         # proposes again.
@@ -140,6 +152,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         instance, _ = _planner_instance(api, pe_id)
         assert instance is not None and instance["name"] == kept["name"], "a draft revised while its planner was kept got another machine"
         assert planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(on, image, agents=[{}, {}, {}])).status_code == 200
+        assert api.post(f"/platform-experiments/{pe_id}/hold").status_code == 200
 
         # Accepted at the cost the person states, whatever was proposed, and under the name the
         # person gives it.
@@ -149,7 +162,8 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         pe = accepted.json()
         assert (pe["status"], pe["name"], pe["budget_accelerator_hours"], pe["max_agents"]) == ("open", "Hidden layer width, accepted", 1, 2), pe
         assert pe["coordinator"]["launcher"] == LAUNCHER and pe["goal"] == GOAL
-        # The accept made the researchers and the one agent that measures the baseline.
+        # The accept made the researchers, beside the one agent the proposal signed up to measure
+        # the baseline.
         joined = [a for a in api.agents(pe_id) if a["flavor"] != "planner"]
         assert all(a["hosted"] for a in joined), joined
         researchers = [a for a in joined if a["role"] == "competitor"]

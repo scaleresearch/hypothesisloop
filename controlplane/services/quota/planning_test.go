@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -536,18 +537,50 @@ func (s *draftStore) GetAgentSignup(_ context.Context, platformExperimentID, age
 	return nil, nil
 }
 
-func (s *draftStore) SetProposal(_ context.Context, id string, proposal []byte, waitUntil time.Time, keepPlanner time.Duration) error {
+func (s *draftStore) SetProposal(_ context.Context, id string, proposal []byte, p db.Proposed) error {
 	for _, pe := range s.created {
 		if pe.ID == id && pe.Status == domain.PlatformExpDraft {
 			now := time.Now().UTC()
-			kept := now.Add(keepPlanner)
-			pe.Proposal, pe.DeclinedReason, pe.PlannerEndsAt = proposal, "", &kept
+			kept := now.Add(p.KeepPlanner)
+			pe.Proposal, pe.DeclinedReason, pe.PlannerEndsAt, pe.AcceptsAt = proposal, "", &kept, p.AcceptsAt
 			pe.SetAnswered(&now, true)
-			pe.SetClosesAt(waitUntil)
+			pe.SetClosesAt(p.WaitUntil)
+			if p.Baseline != nil && len(s.baselines) == 0 {
+				signup := p.BaselineSignup
+				signup.Name = domain.AgentName(signup.Role, func(string) bool { return false })
+				s.baselines = append(s.baselines, signup)
+			}
 			return nil
 		}
 	}
 	return db.ErrNotDraft
+}
+
+func (s *draftStore) HoldAccept(_ context.Context, id string) error {
+	for _, pe := range s.created {
+		if pe.ID != id {
+			continue
+		}
+		if pe.Status != domain.PlatformExpDraft {
+			return db.ErrNotDraft
+		}
+		if pe.ProposedAt == nil {
+			return db.ErrNotProposed
+		}
+		pe.AcceptsAt = nil
+		return nil
+	}
+	return db.ErrNotDraft
+}
+
+func (s *draftStore) DraftsToAccept(context.Context) ([]string, error) {
+	var due []string
+	for _, pe := range s.created {
+		if pe.Status == domain.PlatformExpDraft && pe.ProposedAt != nil && pe.AcceptsAt != nil && !pe.AcceptsAt.After(time.Now()) {
+			due = append(due, pe.ID)
+		}
+	}
+	return due, nil
 }
 
 // aProposal is one the check takes, with more laid over it.
@@ -711,7 +744,7 @@ func (s *draftStore) AcceptDraft(_ context.Context, pe *domain.PlatformExperimen
 			return db.ErrNothingProposed
 		}
 		accepted := *pe
-		accepted.Status = domain.PlatformExpOpen
+		accepted.Status, accepted.AcceptsAt = domain.PlatformExpOpen, nil
 		s.created[i] = &accepted
 		s.acceptedAgents, s.acceptedSignups = create, signups
 		for _, signup := range signups {
@@ -776,22 +809,19 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 		t.Errorf("coordinator %+v, want one the platform hosts", pe.Coordinator)
 	}
 	// A coordinator had to boot, take a turn and add the agent that measures the baseline before
-	// anything was measured: the accept signs it up beside the researchers.
-	if len(store.acceptedAgents) != 4 || len(store.acceptedSignups) != 4 {
-		t.Fatalf("signed up %d agents with %d signups, want the 3 researchers and the baseline agent", len(store.acceptedAgents), len(store.acceptedSignups))
+	// anything was measured: the proposal signed it up, and the accept signs up the researchers.
+	if len(store.acceptedAgents) != 3 || len(store.acceptedSignups) != 3 || len(store.baselines) != 1 {
+		t.Fatalf("signed up %d agents with %d signups beside %d baseline agents, want the 3 researchers beside the one the proposal signed up", len(store.acceptedAgents), len(store.acceptedSignups), len(store.baselines))
 	}
 	for i, signup := range store.acceptedSignups {
-		agent, role := store.acceptedAgents[i], domain.SignupRoleCompetitor
-		if i == 3 {
-			role = domain.SignupRoleBaseline
-		}
-		if agent.Name != "" || signup.AgentID != agent.ID || !signup.Hosted || signup.Launcher != "main" || signup.Role != role || signup.Model != "platform-model-1" ||
+		agent := store.acceptedAgents[i]
+		if agent.Name != "" || signup.AgentID != agent.ID || !signup.Hosted || signup.Launcher != "main" || signup.Role != domain.SignupRoleCompetitor || signup.Model != "platform-model-1" ||
 			signup.Actor == nil || signup.Actor.ID != "u-1" {
-			t.Errorf("agent %d: %+v signed up as %+v, want a hosted one of role %s added by the person who accepted", i, agent, signup, role)
+			t.Errorf("agent %d: %+v signed up as %+v, want a hosted researcher added by the person who accepted", i, agent, signup)
 		}
 	}
-	if measures := store.acceptedSignups[3]; measures.Flavor != domain.DefaultAgentFlavor || len(measures.Hyperparameters) != 0 {
-		t.Errorf("the baseline agent runs as %+v, want the default flavor and no hyperparameters", measures)
+	if measures := store.baselines[0]; measures.Role != domain.SignupRoleBaseline || !measures.Hosted || measures.Launcher != "main" || measures.Flavor != domain.DefaultAgentFlavor || len(measures.Hyperparameters) != 0 {
+		t.Errorf("the baseline agent runs as %+v, want a hosted one of the default flavor and no hyperparameters", measures)
 	}
 	if first := store.acceptedSignups[0]; first.Flavor != "architecture-search" || first.Hyperparameters["depth"] != float64(4) || store.acceptedSignups[1].Flavor != domain.DefaultAgentFlavor {
 		t.Errorf("signups %+v, want the flavors and hyperparameters the person stated", store.acceptedSignups)
@@ -876,7 +906,7 @@ func (s *draftStore) Revise(_ context.Context, id, message string, by domain.Act
 			return db.ErrNothingProposed
 		}
 		pe.SetAnswered(nil, false)
-		pe.PlannerEndsAt = nil
+		pe.PlannerEndsAt, pe.AcceptsAt = nil, nil
 		pe.SetClosesAt(planUntil)
 		pe.Revisions = append(pe.Revisions, domain.PlanningRequest{Message: message, Actor: by, At: time.Now().UTC()})
 		return nil
@@ -950,7 +980,7 @@ func (s *draftStore) Decline(_ context.Context, id, reason string, waitUntil tim
 		if pe.ID == id && pe.Status == domain.PlatformExpDraft {
 			now := time.Now().UTC()
 			kept := now.Add(keepPlanner)
-			pe.DeclinedReason, pe.Proposal, pe.PlannerEndsAt = reason, nil, &kept
+			pe.DeclinedReason, pe.Proposal, pe.PlannerEndsAt, pe.AcceptsAt = reason, nil, &kept, nil
 			pe.SetAnswered(&now, false)
 			pe.SetClosesAt(waitUntil)
 			return nil
@@ -1151,5 +1181,99 @@ func TestAcceptingADraftTakesTheNameThePersonGaveIt(t *testing.T) {
 	store, call = proposed()
 	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept(map[string]any{"description": "another brief"})); code != http.StatusUnprocessableEntity || store.created[0].Status != domain.PlatformExpDraft {
 		t.Errorf("an accept that states a brief: got = %d %v, want 422 and nothing accepted", code, out)
+	}
+}
+
+// Run 5's owner accepted 10 s after the proposal and its set-up still took 30 minutes, and an
+// owner away from the page held the run up for as long as they were away. A proposal is accepted
+// as proposed by itself unless a person acts first: accepts it, holds it to edit it, revises it
+// or closes it.
+func TestAProposalIsAcceptedAsProposedUnlessAPersonActsFirst(t *testing.T) {
+	creator := domain.Actor{Kind: domain.ActorUser, ID: "u-creator"}
+	proposed := func(t *testing.T) (*draftStore, *PlatformExperimentsHandler, func(method, path string, body any) (int, map[string]any)) {
+		t.Helper()
+		store := draftWithPlanner()
+		store.created[0].Actor = &creator
+		_, propose := planningAPI(t, store, thePlanner)
+		code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
+		if code != http.StatusOK {
+			t.Fatalf("propose: %d %v", code, out)
+		}
+		svc, call := planningAPI(t, store, planner)
+		handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).
+			WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
+			WithJobImages([]domain.JobImage{{Name: "torch", Image: "registry.example.com/hl/torch:1"}})
+		return store, handler, call
+	}
+	due := func(store *draftStore) {
+		past := time.Now().Add(-time.Second)
+		store.created[0].AcceptsAt = &past
+	}
+
+	store, handler, call := proposed(t)
+	_, out := call("GET", "/platform-experiments/pe-draft", nil)
+	why, _ := out["status_reason"].(map[string]any)
+	accepts, _ := time.Parse(time.RFC3339, fmt.Sprint(out["accepts_at"]))
+	if why["reason"] != "accepting" || why["waits_for"] != "platform" || time.Until(accepts) < 25*time.Second || time.Until(accepts) > 35*time.Second {
+		t.Fatalf("proposed: status_reason %v, accepts_at %v, want accepting by the platform in 30 s", why, out["accepts_at"])
+	}
+	// The proposal signed up the agent that measures the baseline, for the person who created the
+	// draft, so that its machine starts while the proposal is read.
+	if len(store.baselines) != 1 || store.baselines[0].Role != domain.SignupRoleBaseline || !store.baselines[0].Hosted || store.baselines[0].Actor == nil || store.baselines[0].Actor.ID != "u-creator" {
+		t.Fatalf("baseline agents after the proposal: %+v, want one hosted, added for the creator", store.baselines)
+	}
+	if err := handler.AcceptDue(context.Background()); err != nil || store.created[0].Status != domain.PlatformExpDraft {
+		t.Fatalf("before accepts_at: %v, status %s, want a draft still", err, store.created[0].Status)
+	}
+	due(store)
+	if err := handler.AcceptDue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	pe := store.created[0]
+	if pe.Status != domain.PlatformExpOpen || pe.BudgetAcceleratorHours != 6 || pe.DurationHours != 4 || pe.MaxAgents != 2 || !pe.BaselineDueAt.Equal(pe.StartsAt.Add(30*time.Minute)) || pe.AcceptsAt != nil {
+		t.Fatalf("accepted as proposed: got %+v, want open at the proposal's 6 hours of budget, 4 of run, 2 researchers and 30 minutes of baseline", pe)
+	}
+	if len(store.acceptedSignups) != 2 || store.acceptedSignups[0].Flavor != "hyperparameter-search" || store.acceptedSignups[0].Actor.ID != "u-creator" || len(store.baselines) != 1 {
+		t.Fatalf("researchers %+v beside %d baseline agents, want the 2 proposed, added for the creator, and the one baseline agent", store.acceptedSignups, len(store.baselines))
+	}
+
+	// Held, it waits for a person and is not accepted by itself.
+	store, handler, call = proposed(t)
+	code, out := call("POST", "/platform-experiments/pe-draft/hold", nil)
+	if why, _ := out["status_reason"].(map[string]any); code != http.StatusOK || why["reason"] != "proposed" || why["waits_for"] != "owner" || out["accepts_at"] != nil {
+		t.Fatalf("hold: got = %d %v, want proposed, waiting for the owner, with no accepts_at", code, out)
+	}
+	if err := handler.AcceptDue(context.Background()); err != nil || store.created[0].Status != domain.PlatformExpDraft {
+		t.Fatalf("a held draft: %v, status %s, want a draft still", err, store.created[0].Status)
+	}
+	if code, out := call("POST", "/platform-experiments/pe-draft/hold", nil); code != http.StatusOK {
+		t.Errorf("holding a held draft: got = %d %v, want 200", code, out)
+	}
+	// The person accepts what they edited.
+	if code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 2, "duration_hours": 1, "baseline_minutes": 45, "agents": []map[string]any{{}}}); code != http.StatusOK || store.created[0].BudgetAcceleratorHours != 2 {
+		t.Fatalf("accepting the edited proposal: got = %d %v", code, out)
+	}
+	if code, out := call("POST", "/platform-experiments/pe-draft/hold", nil); code != http.StatusConflict || out["reason"] != "invalid_transition" {
+		t.Errorf("holding what is no draft: got = %d %v, want 409 invalid_transition", code, out)
+	}
+
+	// Revised, nothing is accepted until the planner proposes again.
+	store, handler, call = proposed(t)
+	if code, out := call("POST", "/platform-experiments/pe-draft/revise", map[string]any{"message": "smaller"}); code != http.StatusOK || out["accepts_at"] != nil {
+		t.Fatalf("revise: got = %d %v, want no accepts_at", code, out)
+	}
+	if code, out := call("POST", "/platform-experiments/pe-draft/hold", nil); code != http.StatusConflict || out["reason"] != "invalid_transition" {
+		t.Errorf("holding a draft being revised: got = %d %v, want 409 invalid_transition", code, out)
+	}
+
+	// One the check refuses when its time comes waits for a person, who is told why on accepting.
+	store, handler, _ = proposed(t)
+	store.reachable = map[string][]domain.Cluster{}
+	due(store)
+	if err := handler.AcceptDue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if pe := store.created[0]; pe.Status != domain.PlatformExpDraft || pe.AcceptsAt != nil {
+		t.Fatalf("a proposal the check refuses: status %s, accepts_at %v, want a draft held for a person", pe.Status, pe.AcceptsAt)
 	}
 }

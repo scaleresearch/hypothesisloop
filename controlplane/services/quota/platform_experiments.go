@@ -54,9 +54,15 @@ type PlatformExperimentsStore interface {
 	LauncherKnown(ctx context.Context, name string) (bool, error)
 	// LauncherAnsweredAt is when each launcher named last asked for its machines, nil for never.
 	LauncherAnsweredAt(ctx context.Context, names []string) (map[string]*time.Time, error)
-	// SetProposal stores a draft's proposal, until when it waits for a person and how long its
-	// planner's machine is kept for a revision; db.ErrNotDraft for anything but a draft.
-	SetProposal(ctx context.Context, id string, proposal []byte, waitUntil time.Time, keepPlanner time.Duration) error
+	// SetProposal stores a draft's proposal with what p says of it: until when it waits, when the
+	// platform accepts it by itself, how long its planner's machine is kept for a revision and
+	// the baseline agent it signs up; db.ErrNotDraft for anything but a draft.
+	SetProposal(ctx context.Context, id string, proposal []byte, p db.Proposed) error
+	// HoldAccept stops the platform accepting a proposed draft by itself: db.ErrNotDraft,
+	// db.ErrNotProposed.
+	HoldAccept(ctx context.Context, id string) error
+	// DraftsToAccept is the proposed drafts whose accepts_at has passed.
+	DraftsToAccept(ctx context.Context) ([]string, error)
 	// AcceptDraft makes a proposed draft the open platform experiment pe describes, with its
 	// researchers signed up, or does neither: db.ErrNotDraft, db.ErrNothingProposed.
 	AcceptDraft(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error
