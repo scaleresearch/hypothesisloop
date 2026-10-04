@@ -597,15 +597,15 @@ function PlatformExperimentDetail({ id }: { id: string }) {
                   const cost = exp.estimated_cost_acch
                   return (
                     <LinkTr key={exp.id} href={jobPath(id, exp.id)}>
-                      <td className="font-mono text-2xs">
+                      <td className="whitespace-nowrap font-mono text-2xs">
                         <TextLink onClick={e => e.stopPropagation()} href={jobPath(id, exp.id)}>{shortId(exp.id)}</TextLink>
                       </td>
-                      <td className="font-mono text-xs"><AgentLabel id={exp.agent_id} /></td>
+                      <td className="whitespace-nowrap text-xs"><AgentLabel id={exp.agent_id} /></td>
                       <td>
                         <Badge status={exp.status} />
                         {exp.summary_due && <NoSummary className="ml-1.5" />}
                         {exp.eviction_reason && (
-                          <Text as="div" variant="meta" tone="subtle" title="eviction_reason">
+                          <Text as="div" variant="meta" tone="subtle" className="max-w-sm">
                             <JobReason reason={exp.eviction_reason} />
                           </Text>
                         )}

@@ -127,7 +127,7 @@ export default function JobDetailPage({ params }: { params: { experimentId: stri
       {lastAttempt && j.eviction_reason && (
         <Callout tone="warning">
           <span className="font-medium text-warning">{lastAttempt}</span>
-          <JobReason reason={j.eviction_reason} />
+          <JobReason reason={j.eviction_reason} outputOpen />
         </Callout>
       )}
 
