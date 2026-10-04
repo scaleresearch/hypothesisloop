@@ -38,8 +38,9 @@ _DRAIN_S = 5
 # the reason as its detail, as when the last researcher's machine stops for good). An agent has
 # to learn the same of its own jobs ending, and at once of a message the coordinator or the owner
 # sent it (agent.message), which wakes no coordinator: its stream echoes the ones it sent. An agent
-# that built an environment ahead of its job learns its build ended (environment.status) the
-# same way: told to end its turn while it built, nothing else would wake it.
+# that built an environment ahead of its job learns its build was loaded on a cluster, where its
+# jobs run before the upload ends, or ended (environment.status) the same way: told to end its
+# turn while it built, nothing else would wake it.
 # Everything else is read when next acting. A kind wakes only for what its reader can act on: a job held for a summary is cleared by its agent
 # alone, so it wakes no coordinator.
 WAKES = {
@@ -54,8 +55,8 @@ MESSAGE = "agent.message"
 # A person asked a draft's planner to change its answer. The event is a pointer: what was asked is
 # read from the draft (core.revising), and whoever hands a batch over says it in place of the event.
 REVISION = "platform_experiment.revision"
-# The end of a build an agent asked for. Its subject is the environment's key, which says nothing
-# to the agent: the detail names the commit and image it asked with.
+# A build an agent asked for, loaded on a cluster or ended. Its subject is the environment's key,
+# which says nothing to the agent: the detail names the commit and image it asked with.
 ENVIRONMENT = "environment.status"
 # What wakes a coordinator besides, while its platform experiment is open: a job that failed then
 # is a baseline agent's, and one that failed for what the brief says is the coordinator's to
