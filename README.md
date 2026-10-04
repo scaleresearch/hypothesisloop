@@ -383,7 +383,7 @@ Three request bodies are plain YAML files rather than flags: a platform experime
 name: my-platform-experiment
 description: what this research program is investigating
 budget_accelerator_hours: 10
-max_agents: 5             # researchers only: baseline agents and the coordinator never count
+max_agents: 2             # researchers only: baseline agents and the coordinator never count
 duration_hours: 24        # counted from the moment the run starts. A run lasts 30 days at most
 coordinator_hosted: true  # optional: the platform runs the coordinator and a baseline agent. Left out, you add one and declare the baseline
 metrics:

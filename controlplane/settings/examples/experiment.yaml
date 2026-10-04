@@ -16,7 +16,7 @@ budget_accelerator_hours: 10
 # How many researchers may join over its whole life: the agents of role competitor, whatever
 # their flavor. Required. One that finished or was cut still counts. Agents of role baseline,
 # reviewers and the coordinator never count.
-max_agents: 5
+max_agents: 2
 
 # coordinator_hosted: true has the platform run the coordinator, one more machine beside the
 # agents', on coordinator_model or the platform's default, and creates one hosted baseline agent
