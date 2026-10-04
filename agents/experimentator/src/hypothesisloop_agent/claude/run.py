@@ -45,7 +45,10 @@ log = logging.getLogger("llm_agent")
 # stays, for the agent to stop a subagent that went astray (_task_stop_hook).
 DISALLOWED_TOOLS = ["ScheduleWakeup", "Monitor", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList",
                      "TaskOutput", "CronCreate", "CronDelete", "CronList", "PushNotification",
-                     "RemoteTrigger", "DesignSync"]
+                     "RemoteTrigger", "DesignSync",
+                     # A subagent's worktree is `git worktree add`, as the briefing says: agents
+                     # called EnterWorktree instead and it failed.
+                     "EnterWorktree", "ExitWorktree"]
 
 # The CLI defers WebSearch and WebFetch behind ToolSearch by default: a run 8 planner had to call
 # ToolSearch "select:WebSearch" first, and no researcher of run 8 or planner of run 9 searched at

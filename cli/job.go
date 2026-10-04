@@ -23,7 +23,7 @@ var jobCommands = []subcommand{
 	{"list", "jobs, newest first, one brief line each with its metrics", jobList, everyone},
 	{"status", "a job's whole record", jobStatus, everyone},
 	{"metrics", "per metric: last value, min, max and points reported", jobMetrics, everyone},
-	{"summary", "file the write-up of a finished job; hl job status shows it", jobSummary, everyone},
+	{"summary", "print a job's write-up, or file it with --text", jobSummary, everyone},
 	{"wait", "block until jobs end, then print each as list does", jobWait, everyone},
 	{"logs", "the last log lines its cluster reported", jobLogs, everyone},
 	{"data", "what the job wrote to the object store", func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -555,22 +555,32 @@ the output is JSON lines, one object per line and no enclosing array: parse it l
 }
 
 func jobSummary(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job summary", `usage: hl job summary ID --text T
+	fs := newFlags("job summary", `usage: hl job summary ID [--text T]
 
-Files the write-up of a finished job when its result says something: what changed, what the
-metric did, what it means. It is the job's finding on its hypothesis, shown there and announced
+Prints the job's summary. With --text, files the write-up of a finished job when its result
+says something: what changed, what the metric did, what it means. It is the job's finding on its hypothesis, shown there and announced
 as finding.new, so it needs no comment that repeats it. It is filed once and cannot be replaced
 (409 summary_exists): others read it the moment it is announced, so a correction is a comment
 on the hypothesis.`, stderr)
 	var text string
-	fs.StringVar(&text, "text", "", "the summary (required)")
+	fs.StringVar(&text, "text", "", "the summary to file")
 	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
 	if err != nil {
 		return parseExit(err)
 	}
 	if text == "" {
-		fmt.Fprintf(stderr, "hl: job summary: --text T files a summary; to read one, hl job status %s prints it as summary\n", id)
-		return 2
+		var job struct {
+			Summary string `json:"summary"`
+		}
+		if err := c.Do("GET", "/experiments/"+url.PathEscape(id), nil, &job); err != nil {
+			return fail(stderr, err)
+		}
+		if job.Summary == "" {
+			fmt.Fprintf(stderr, "hl: job summary: %s has none filed yet: hl job summary %s --text T files it\n", id, id)
+			return 0
+		}
+		fmt.Fprintln(stdout, job.Summary)
+		return 0
 	}
 	var out struct {
 		Status     string `json:"status"`

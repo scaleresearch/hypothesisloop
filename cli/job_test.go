@@ -139,3 +139,17 @@ func TestASubmitAnsweredWithAnEarlierJobSaysNothingWasSubmitted(t *testing.T) {
 		}
 	}
 }
+
+// Agents ran hl job summary ID to read a summary and were refused: without --text it prints it.
+func TestJobSummaryWithoutTextPrintsIt(t *testing.T) {
+	got := recordingServer(t, func(_ int, r recorded) any {
+		return map[string]any{"id": "job-1", "summary": "bf16 won by 3%"}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"job", "summary", "job-1"}, &stdout, &stderr); code != 0 || stdout.String() != "bf16 won by 3%\n" {
+		t.Errorf("exit %d, stdout %q, stderr %q, want the summary", code, stdout.String(), stderr.String())
+	}
+	if len(*got) != 1 || (*got)[0].Method != "GET" || (*got)[0].Path != "/experiments/job-1" {
+		t.Errorf("asked %+v, want one read of the job", *got)
+	}
+}
