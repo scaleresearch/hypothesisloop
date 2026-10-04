@@ -6,9 +6,7 @@ import (
 	"testing"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -17,7 +15,7 @@ import (
 // Every reconcile pass reads capacity several times. The nodes and pods behind it are listed once
 // for the life of the agent and kept current by a watch.
 func TestCapacityReadsListNodesAndPodsOnceAndFollowTheWatch(t *testing.T) {
-	kube := fake.NewClientset(totalCapacityTestNode("node-a", 8, 32), requestingPod("cni-agent", "node-a", false, 500))
+	kube := chartKube(t, totalCapacityTestNode("node-a", 8, 32), requestingPod("cni-agent", "node-a", false, 500))
 	podsWatched, watchedOnce := make(chan struct{}), sync.Once{}
 	kube.PrependWatchReactor("pods", func(action k8stesting.Action) (bool, watch.Interface, error) {
 		w, err := kube.Tracker().Watch(action.GetResource(), action.GetNamespace())
@@ -58,7 +56,8 @@ func TestCapacityReadsListNodesAndPodsOnceAndFollowTheWatch(t *testing.T) {
 	}
 
 	<-podsWatched
-	if _, err := kube.CoreV1().Pods("default").Create(ctx, requestingPod("job", "node-a", true, 2000), metav1.CreateOptions{}); err != nil {
+	// Through the tracker: the pod is another's to start, and the agent's calls are held to the chart.
+	if err := kube.Tracker().Add(requestingPod("job", "node-a", true, 2000)); err != nil {
 		t.Fatal(err)
 	}
 	for freeCPU() != 5500 {

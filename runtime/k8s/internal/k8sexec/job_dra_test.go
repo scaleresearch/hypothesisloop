@@ -8,7 +8,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	dynamicfake "k8s.io/client-go/dynamic/fake"
 )
 
 func TestDeviceClassDriverRequiresDirectDriverSelector(t *testing.T) {
@@ -30,14 +29,13 @@ func TestDeviceClassDriverRequiresDirectDriverSelector(t *testing.T) {
 	}
 }
 
-func newDRATestClient(objects ...runtime.Object) *JobWorkloadClient {
-	scheme := runtime.NewScheme()
+func newDRATestClient(t *testing.T, objects ...runtime.Object) *JobWorkloadClient {
 	listKinds := map[schema.GroupVersionResource]string{
 		resourceSliceGVR: "ResourceSliceList",
 		resourceClaimGVR: "ResourceClaimList",
 		deviceClassGVR:   "DeviceClassList",
 	}
-	return &JobWorkloadClient{dyn: dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, listKinds, objects...)}
+	return &JobWorkloadClient{dyn: chartDynamic(t, listKinds, objects...)}
 }
 
 func tenstorrentDeviceClass() *unstructured.Unstructured {
@@ -81,7 +79,7 @@ func tenstorrentResourceSlice(name, node string, devices ...string) *unstructure
 // scheduler/loop_tick.go's reportsEveryDimension for the scheduler side that consumed the bad
 // snapshot.
 func TestLiveDRACapacitySnapshotsRejectsTransientEmptyListing(t *testing.T) {
-	c := newDRATestClient(tenstorrentDeviceClass())
+	c := newDRATestClient(t, tenstorrentDeviceClass())
 
 	_, err := c.liveDRACapacitySnapshots(context.Background(), map[string]bool{"worker-a": true})
 	if err == nil {
@@ -97,7 +95,7 @@ func TestLiveDRACapacitySnapshotsRejectsTransientEmptyListing(t *testing.T) {
 // currently fully allocated (available 0, total > 0) — proving the fix above doesn't regress
 // the ordinary "hardware is just busy" case into the same error.
 func TestLiveDRACapacitySnapshotsReportsRealInventory(t *testing.T) {
-	c := newDRATestClient(
+	c := newDRATestClient(t,
 		tenstorrentDeviceClass(),
 		tenstorrentResourceSlice("slice-a", "worker-a", "chip-0", "chip-1", "chip-2", "chip-3"),
 	)
@@ -118,7 +116,7 @@ func TestLiveDRACapacitySnapshotsReportsRealInventory(t *testing.T) {
 // A slice that names no node has devices no node's figure holds. Counted in the total alone they
 // read as free hardware a job is admitted for and no node can take.
 func TestDevicesOfASliceThatNamesNoNodeAreInNoFigure(t *testing.T) {
-	c := newDRATestClient(
+	c := newDRATestClient(t,
 		tenstorrentDeviceClass(),
 		tenstorrentResourceSlice("slice-a", "worker-a", "chip-0", "chip-1"),
 		tenstorrentResourceSlice("slice-anywhere", "", "chip-2", "chip-3", "chip-4"),
@@ -138,7 +136,7 @@ func TestDevicesOfASliceThatNamesNoNodeAreInNoFigure(t *testing.T) {
 	}
 
 	// A driver whose every slice names no node is still one that reported its inventory.
-	c = newDRATestClient(tenstorrentDeviceClass(), tenstorrentResourceSlice("slice-anywhere", "", "chip-2"))
+	c = newDRATestClient(t, tenstorrentDeviceClass(), tenstorrentResourceSlice("slice-anywhere", "", "chip-2"))
 	if out, err := c.liveDRACapacitySnapshots(context.Background(), map[string]bool{"worker-a": true}); err != nil || len(out) != 0 {
 		t.Fatalf("only a slice with no node: %v, %v, want no capacity and no error", out, err)
 	}
@@ -152,7 +150,7 @@ func TestLiveDRACapacitySnapshotsSkipsADeviceClassItCannotRead(t *testing.T) {
 			"cel": map[string]interface{}{"expression": `device.attributes["foreign.example"].model == "x"`},
 		}}},
 	}}
-	c := newDRATestClient(
+	c := newDRATestClient(t,
 		foreignClass,
 		tenstorrentDeviceClass(),
 		tenstorrentResourceSlice("slice-a", "worker-a", "chip-0", "chip-1"),
@@ -187,7 +185,7 @@ func TestLiveDRACapacitySnapshotsUnrelatedDriverUnaffected(t *testing.T) {
 			"devices": []interface{}{map[string]interface{}{"name": "dev-0"}},
 		},
 	}}
-	c := newDRATestClient(tenstorrentDeviceClass(), otherClass, otherSlice)
+	c := newDRATestClient(t, tenstorrentDeviceClass(), otherClass, otherSlice)
 
 	_, err := c.liveDRACapacitySnapshots(context.Background(), map[string]bool{"worker-a": true})
 	if err == nil || !strings.Contains(err.Error(), "tenstorrent.com") {
@@ -205,7 +203,7 @@ func TestLiveDRACapacitySnapshotsUnrelatedDriverUnaffected(t *testing.T) {
 // cluster_unresolved=true despite GreptimeDB and kubectl both confirming 3/4 blackhole chips free
 // and no error logged from the first (ResourceSlices-side) fix — see fix-later.md.
 func TestLiveDRACapacitySnapshotsRejectsMissingDeviceClass(t *testing.T) {
-	c := newDRATestClient(tenstorrentResourceSlice("slice-a", "worker-a", "chip-0"))
+	c := newDRATestClient(t, tenstorrentResourceSlice("slice-a", "worker-a", "chip-0"))
 
 	_, err := c.liveDRACapacitySnapshots(context.Background(), map[string]bool{"worker-a": true})
 	if err == nil {

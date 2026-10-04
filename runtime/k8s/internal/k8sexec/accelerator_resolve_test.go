@@ -22,7 +22,7 @@ func TestADRATypeResolvesToTheOneDeviceClassOfItsDriver(t *testing.T) {
 	foreign.Object["spec"] = map[string]interface{}{"selectors": []interface{}{map[string]interface{}{
 		"cel": map[string]interface{}{"expression": `device.attributes["foreign.example"].model == "x"`},
 	}}}
-	c := newDRATestClient(
+	c := newDRATestClient(t,
 		foreign,
 		deviceClassFor("other", "other.example.com"),
 		tenstorrentDeviceClass(),
@@ -40,7 +40,7 @@ func TestADRATypeResolvesToTheOneDeviceClassOfItsDriver(t *testing.T) {
 
 // A claim names one DeviceClass. Two for one driver resolved to whichever the API listed first.
 func TestTwoDeviceClassesForOneDriverAreAnAmbiguityAndNotAChoice(t *testing.T) {
-	c := newDRATestClient(
+	c := newDRATestClient(t,
 		tenstorrentDeviceClass(),
 		deviceClassFor("tenstorrent-b", "tenstorrent.com"),
 		tenstorrentResourceSlice("slice-a", "worker-a", "chip-0"),
@@ -64,7 +64,7 @@ func TestAResourceSliceThatCannotBeReadFailsTheResolutionAsItFailsTheCapacityRea
 			broken := tenstorrentResourceSlice("slice-broken", "worker-a", "chip-9")
 			broken.Object["spec"].(map[string]interface{})["devices"] = []interface{}{map[string]interface{}{"name": "chip-9"}}
 			spoil(broken.Object["spec"].(map[string]interface{}))
-			c := newDRATestClient(tenstorrentDeviceClass(), broken, tenstorrentResourceSlice("slice-z", "worker-a", "chip-0"))
+			c := newDRATestClient(t, tenstorrentDeviceClass(), broken, tenstorrentResourceSlice("slice-z", "worker-a", "chip-0"))
 
 			_, found, err := c.resolveDRAPlacement(context.Background(), "tenstorrent.com/chipArch=blackhole")
 			if err == nil || found || !strings.Contains(err.Error(), "slice-broken") {

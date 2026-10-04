@@ -13,7 +13,6 @@ import (
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
 
@@ -31,7 +30,7 @@ func TestSetupClusterNamesWhatTheChartDidNotInstallAndCreatesNothing(t *testing.
 		"no namespace":           {[]runtime.Object{guaranteed, burst}, HypothesisLoopNamespace},
 		"no burst PriorityClass": {[]runtime.Object{namespace, guaranteed}, PriorityClassBurst},
 	} {
-		kube := fake.NewClientset(tc.installed...)
+		kube := chartKube(t, tc.installed...)
 		err := (&JobWorkloadClient{kube: kube}).SetupCluster(context.Background())
 		if tc.missing == "" && err != nil {
 			t.Errorf("%s: %v", name, err)
@@ -55,7 +54,7 @@ func TestSetupClusterWaitsForAnAPIServerItCannotReachYet(t *testing.T) {
 	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: HypothesisLoopNamespace}}
 	guaranteed := &schedulingv1.PriorityClass{ObjectMeta: metav1.ObjectMeta{Name: PriorityClassGuaranteed}}
 	burst := &schedulingv1.PriorityClass{ObjectMeta: metav1.ObjectMeta{Name: PriorityClassBurst}}
-	kube := fake.NewClientset(namespace, guaranteed, burst)
+	kube := chartKube(t, namespace, guaranteed, burst)
 	unreachable := 3
 	kube.PrependReactor("get", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
 		if unreachable == 0 {

@@ -11,7 +11,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -20,12 +19,12 @@ import (
 
 const environmentImage = "europe-west1-docker.pkg.dev/p/hl-environments/environment@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
-func pullTestClient(objects ...runtime.Object) *JobWorkloadClient {
+func pullTestClient(t *testing.T, objects ...runtime.Object) *JobWorkloadClient {
 	listKinds := map[schema.GroupVersionResource]string{resourceClaimTemplateGVR: "ResourceClaimTemplateList"}
 	return &JobWorkloadClient{
 		apiURL: "http://api",
-		kube:   fake.NewClientset(objects...),
-		dyn:    dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds),
+		kube:   chartKube(t, objects...),
+		dyn:    chartDynamic(t, listKinds),
 	}
 }
 
@@ -62,7 +61,7 @@ func secretLogin(t *testing.T, secret *corev1.Secret, registry string) (username
 // in a Secret of its own from before its pods exist until its workload is deleted.
 func TestAJobInAnEnvironmentPullsWithASecretThatGoesWithIt(t *testing.T) {
 	ctx := context.Background()
-	c := pullTestClient()
+	c := pullTestClient(t)
 	exp := pullTestExperiment("exp-env", "key-1", environmentImage)
 	if err := c.CreateWorkload(ctx, exp, pullLogin("pull-token")); err != nil {
 		t.Fatal(err)
@@ -110,7 +109,7 @@ func TestALeftoverPullSecretIsReplacedOrReportedAsAnOrphan(t *testing.T) {
 			Data: map[string][]byte{corev1.DockerConfigJsonKey: []byte(`{"auths":{"europe-west1-docker.pkg.dev":{"password":"expired"}}}`)},
 		}
 	}
-	c := pullTestClient(leftover("exp-env"), leftover("exp-gone"))
+	c := pullTestClient(t, leftover("exp-env"), leftover("exp-gone"))
 
 	auxiliary, err := c.ListManagedAuxiliaryWorkloads(ctx)
 	if err != nil {
@@ -136,7 +135,7 @@ func TestALeftoverPullSecretIsReplacedOrReportedAsAnOrphan(t *testing.T) {
 // environment is not created without one.
 func TestOnlyAJobInAnEnvironmentHasAPullSecretAndItNeedsALogin(t *testing.T) {
 	ctx := context.Background()
-	c := pullTestClient()
+	c := pullTestClient(t)
 	plain := pullTestExperiment("exp-plain", "", "registry.test/hypothesisloop-job:7")
 	if err := c.CreateWorkload(ctx, plain, pullLogin("pull-token")); err != nil {
 		t.Fatal(err)
@@ -163,7 +162,7 @@ func TestOnlyAJobInAnEnvironmentHasAPullSecretAndItNeedsALogin(t *testing.T) {
 // and leaves it alone when it holds that one already.
 func TestALiveJobsPullSecretFollowsTheCurrentLogin(t *testing.T) {
 	ctx := context.Background()
-	c := pullTestClient()
+	c := pullTestClient(t)
 	exp := pullTestExperiment("exp-env", "key-1", environmentImage)
 	if err := c.CreateWorkload(ctx, exp, pullLogin("first-token")); err != nil {
 		t.Fatal(err)

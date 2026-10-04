@@ -7,7 +7,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
@@ -48,7 +47,7 @@ func schedulingPodAttempt(name string, scheduled bool, message string, attempt i
 // from the still-Pending one so the watcher's early-exit path has something to read.
 func TestPollPhaseDetailCountsScheduledNodesAndSurfacesTheAutoscalerRefusalOnAPartialGang(t *testing.T) {
 	c := phaseDetailTestClient()
-	c.kube = fake.NewClientset(
+	c.kube = chartKube(t,
 		schedulingPod("gang-exp-0", true, ""),
 		schedulingPod("gang-exp-1", true, ""),
 		schedulingPod("gang-exp-2", false, "0/3 nodes are available: 3 Insufficient nvidia.com/gpu."),
@@ -70,7 +69,7 @@ func TestPollPhaseDetailCountsScheduledNodesAndSurfacesTheAutoscalerRefusalOnAPa
 // every pod carries a PodScheduled=True condition with no message.
 func TestPollPhaseDetailReportsNoSchedulingReasonWhenEveryPodHasBound(t *testing.T) {
 	c := phaseDetailTestClient()
-	c.kube = fake.NewClientset(
+	c.kube = chartKube(t,
 		schedulingPod("gang-exp-0", true, ""),
 		schedulingPod("gang-exp-1", true, ""),
 	)
@@ -93,7 +92,7 @@ func TestPollPhaseDetailReportsNoSchedulingReasonWhenEveryPodHasBound(t *testing
 // which disables the placement-deadline check that is supposed to bound exactly this case.
 func TestPollPhaseDetailCountsOnlyTheRequestedAttemptsPods(t *testing.T) {
 	c := phaseDetailTestClient()
-	c.kube = fake.NewClientset(
+	c.kube = chartKube(t,
 		schedulingPodAttempt("gang-exp-0-old", true, "", 0),
 		schedulingPodAttempt("gang-exp-1-old", true, "", 0),
 	)
@@ -112,7 +111,7 @@ func TestPollPhaseDetailCountsOnlyTheRequestedAttemptsPods(t *testing.T) {
 // label value that doesn't exist.
 func TestPollPhaseDetailCountsEveryPodWhenAttemptIsUnknown(t *testing.T) {
 	c := phaseDetailTestClient()
-	c.kube = fake.NewClientset(
+	c.kube = chartKube(t,
 		schedulingPodAttempt("gang-exp-0", true, "", 3),
 	)
 
@@ -137,7 +136,7 @@ func TestACrashedRankIsReportedBesideARankThatStillWaits(t *testing.T) {
 		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 137, Reason: "OOMKilled"}},
 	}}
 	c := phaseDetailTestClient()
-	c.kube = fake.NewClientset(waiting, crashed)
+	c.kube = chartKube(t, waiting, crashed)
 
 	reason, message, _, scheduledNodes, _, err := c.PollPhaseDetail(context.Background(), "gang-exp", 0)
 	if err != nil || reason != domain.PhaseReasonOOMKilled || message != "container exited with code 137 (OOMKilled)" || scheduledNodes != 2 {
@@ -145,7 +144,7 @@ func TestACrashedRankIsReportedBesideARankThatStillWaits(t *testing.T) {
 	}
 
 	// With no crash the wait is what there is to say.
-	c.kube = fake.NewClientset(waiting)
+	c.kube = chartKube(t, waiting)
 	if reason, message, _, _, _, err := c.PollPhaseDetail(context.Background(), "gang-exp", 0); err != nil || reason != "" || message != "pulling image" {
 		t.Fatalf("a waiting rank alone: reason %q, message %q, %v", reason, message, err)
 	}
@@ -155,7 +154,7 @@ func TestACrashedRankIsReportedBesideARankThatStillWaits(t *testing.T) {
 // "Cluster identity") — it must come back verbatim, not derived or reformatted.
 func TestGetClusterIDReturnsTheKubeSystemNamespaceUID(t *testing.T) {
 	c := phaseDetailTestClient()
-	c.kube = fake.NewClientset(&corev1.Namespace{
+	c.kube = chartKube(t, &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{Name: "kube-system", UID: "fixed-cluster-uid-1234"},
 	})
 

@@ -7,7 +7,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
@@ -41,7 +40,7 @@ func TestAWorkloadsAttemptSurvivesTheRoundTripFromDesiredStateBackToItsStatus(t 
 		t.Fatalf("BuildJob: %v", err)
 	}
 
-	c.kube = fake.NewClientset(job)
+	c.kube = chartKube(t, job)
 	status, err := c.PollJobStatus(context.Background(), "attempt-test")
 	if err != nil {
 		t.Fatalf("PollJobStatus: %v", err)
@@ -60,7 +59,7 @@ func TestAFirstAttemptIsReportedAsZeroRatherThanUnknown(t *testing.T) {
 		t.Fatalf("BuildJob: %v", err)
 	}
 
-	c.kube = fake.NewClientset(job)
+	c.kube = chartKube(t, job)
 	status, err := c.PollJobStatus(context.Background(), "attempt-test")
 	if err != nil {
 		t.Fatalf("PollJobStatus: %v", err)
@@ -82,7 +81,7 @@ func TestAWorkloadWithNoAttemptLabelReportsUnknownRatherThanZero(t *testing.T) {
 	}
 	delete(job.Labels, workloadkeys.Attempt)
 
-	c.kube = fake.NewClientset(job)
+	c.kube = chartKube(t, job)
 	status, err := c.PollJobStatus(context.Background(), "attempt-test")
 	if err != nil {
 		t.Fatalf("PollJobStatus: %v", err)
@@ -96,7 +95,7 @@ func TestAWorkloadWithNoAttemptLabelReportsUnknownRatherThanZero(t *testing.T) {
 // carried one, and claiming a number would fence a real absence out of being seen.
 func TestAnAbsentWorkloadReportsGoneWithNoAttempt(t *testing.T) {
 	c := attemptTestClient()
-	c.kube = fake.NewClientset()
+	c.kube = chartKube(t)
 
 	status, err := c.PollJobStatus(context.Background(), "attempt-test")
 	if err != nil {
@@ -113,7 +112,7 @@ func TestAnAbsentWorkloadReportsGoneWithNoAttempt(t *testing.T) {
 func TestAWorkloadIsNotRecreatedWhileAPodOfItsPreviousGenerationExists(t *testing.T) {
 	exp := attemptTestExperiment(2)
 	c := attemptTestClient()
-	c.kube = fake.NewClientset(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+	c.kube = chartKube(t, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 		Name: "old", Namespace: HypothesisLoopNamespace, Labels: map[string]string{workloadkeys.ExperimentID: exp.ID},
 	}})
 	if err := c.CreateWorkload(context.Background(), exp, nil); err == nil || !strings.Contains(err.Error(), "previous generation") {

@@ -7,7 +7,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
@@ -57,7 +56,7 @@ func TestGetNodeTotalCapacityExcludesNonPlatformPodsButNotPlatformOnes(t *testin
 	daemonset := requestingPod("cni-agent", "node-a", false, 500) // 500m — not platform-managed
 	platform := requestingPod("hl-job-1", "node-a", true, 2000)   // 2000m — platform-managed
 
-	kube := fake.NewClientset(node, daemonset, platform)
+	kube := chartKube(t, node, daemonset, platform)
 	c := &JobWorkloadClient{kube: kube}
 
 	got, err := c.GetNodeTotalCapacity(context.Background())
@@ -92,8 +91,8 @@ func TestANodeWithTwoResourcesInOneDomainReportsNoCapacityForIt(t *testing.T) {
 	}
 	holder := requestingPod("holder", "plain", true, 1000)
 	holder.Spec.Containers[0].Resources.Requests["nvidia.com/gpu"] = *resource.NewQuantity(1, resource.DecimalSI)
-	c := newDRATestClient()
-	c.kube = fake.NewClientset(
+	c := newDRATestClient(t)
+	c.kube = chartKube(t,
 		gpuNode("plain", map[corev1.ResourceName]int64{"nvidia.com/gpu": 4}),
 		gpuNode("mixed", map[corev1.ResourceName]int64{"nvidia.com/gpu": 2, "nvidia.com/mig-1g.5gb": 7}),
 		holder)
@@ -122,8 +121,8 @@ func TestANodesCoresAreUnitsOfTheCPUTypeWithNothingWrittenToTheCluster(t *testin
 	}
 	cordoned := milliNode("cordoned", 16000)
 	cordoned.Spec.Unschedulable = true
-	c := newDRATestClient()
-	kube := fake.NewClientset(milliNode("box", 15800), milliNode("small", 3999), cordoned,
+	c := newDRATestClient(t)
+	kube := chartKube(t, milliNode("box", 15800), milliNode("small", 3999), cordoned,
 		requestingPod("cni-agent", "box", false, 300), requestingPod("chip-job", "box", true, 4000))
 	c.kube = kube
 	ctx := context.Background()

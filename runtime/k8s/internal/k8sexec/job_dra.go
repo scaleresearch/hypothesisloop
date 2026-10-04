@@ -266,16 +266,20 @@ func (c *JobWorkloadClient) ensureResourceClaimTemplate(ctx context.Context, job
 		return fmt.Errorf("accelerator type %q has invalid per-pod count %q", exp.AcceleratorType, job.Spec.Template.Annotations[AcceleratorCountAnnotation])
 	}
 
+	labels := make(map[string]interface{}, len(job.Labels))
+	for key, value := range job.Labels {
+		labels[key] = value
+	}
 	obj := &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": resourceClaimTemplateGVR.GroupVersion().String(),
 		"kind":       "ResourceClaimTemplate",
 		"metadata": map[string]interface{}{
 			"name": resourceClaimTemplateName(job.Name), "namespace": HypothesisLoopNamespace,
-			"labels":      job.Labels,
+			"labels":      labels,
 			"annotations": map[string]interface{}{DesiredSpecHashAnnotation: job.Annotations[DesiredSpecHashAnnotation]},
 		},
 		"spec": map[string]interface{}{
-			"metadata": map[string]interface{}{"labels": job.Labels},
+			"metadata": map[string]interface{}{"labels": labels},
 			"spec": map[string]interface{}{"devices": map[string]interface{}{"requests": []interface{}{
 				map[string]interface{}{"name": draClaimName, "exactly": map[string]interface{}{
 					"deviceClassName": deviceClassName, "allocationMode": "ExactCount", "count": int64(perPod),
