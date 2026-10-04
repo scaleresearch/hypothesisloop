@@ -136,7 +136,7 @@ func (w buildersLive) GetLiveClusters(context.Context) (map[string]bool, error) 
 	return w.live, nil
 }
 
-// A job waits, saying where its environment builds, ends with the end of the build's output once
+// A job waits with a queue reason that changes with none of its build's attempts, ends with the end of the build's output once
 // the file failed, ends at no cost and is not queued again once the platform failed every attempt,
 // and goes on to placement once it is ready. Each environment is assigned against the live
 // clusters once a tick.
@@ -147,7 +147,7 @@ func TestAJobWaitsForItsAssignedEnvironmentAndEndsByWhoseFaultItFailed(t *testin
 		want string
 	}{
 		"assigned":   {domain.Environment{State: domain.EnvironmentBuilding, ClusterName: "builder-a", Attempt: 2, AssignedAt: &assignedAt}, "held"},
-		"unassigned": {domain.Environment{State: domain.EnvironmentBuilding}, "waiting"},
+		"unassigned": {domain.Environment{State: domain.EnvironmentBuilding}, "held"},
 		"again":      {domain.Environment{State: domain.EnvironmentBuilding, ClusterName: "builder-a", Attempt: 1, AssignedAt: &assignedAt, FailedLog: "curl: (6) Could not resolve host"}, "again"},
 		"file":       {domain.Environment{State: domain.EnvironmentFailed, Fault: domain.EnvironmentFaultFile}, "rejected"},
 		"platform":   {domain.Environment{State: domain.EnvironmentFailed, Fault: domain.EnvironmentFaultPlatform}, "unbuilt"},
@@ -174,17 +174,13 @@ func TestAJobWaitsForItsAssignedEnvironmentAndEndsByWhoseFaultItFailed(t *testin
 		reason, ended := store.reasons["job-1"], store.terminated["job-1"]
 		switch c.want {
 		case "held":
-			if !held || reason != domain.NotAdmittedEnvironmentBuilding+": the platform builds the environment its commit declares in .hypothesisloop/Dockerfile, on registry.test/job:1, on cluster builder-a, attempt 2 of 3 (the platform builds a file again only after a failure of its own). The job runs in it once it is built" || len(store.terminated) > 0 {
-				t.Errorf("%s: held %v, reason %q, want held naming the cluster and the attempt", name, held, reason)
+			if !held || reason != domain.NotAdmittedEnvironmentBuilding+": the platform builds the environment its commit declares in .hypothesisloop/Dockerfile, on registry.test/job:1. The job runs in it once it is built" || len(store.terminated) > 0 {
+				t.Errorf("%s: held %v, reason %q, want held naming no cluster, attempt or step", name, held, reason)
 			}
 		case "again":
-			if !held || !strings.Contains(reason, "attempt 1 of 3. The job runs in it once it is built. This file failed to build before, and the platform builds it once more") ||
+			if !held || !strings.Contains(reason, "The job runs in it once it is built. This file failed to build before, and the platform builds it once more") ||
 				!strings.HasSuffix(reason, "\ncurl: (6) Could not resolve host") || len(store.terminated) > 0 {
 				t.Errorf("%s: held %v, reason %q, want it held saying the file failed before, with that output", name, held, reason)
-			}
-		case "waiting":
-			if !held || !strings.HasPrefix(reason, domain.NotAdmittedEnvironmentBuilding+": ") || !strings.Contains(reason, "has room") || len(store.terminated) > 0 {
-				t.Errorf("%s: held %v, reason %q, want held waiting for a cluster", name, held, reason)
 			}
 		case "rejected":
 			if !held || !strings.HasPrefix(ended, "REJECTED "+string(domain.EvictionEnvironmentFailed)+": ") || !strings.HasSuffix(ended, env.LogTail) || len(settler.settled) != 2 {
@@ -214,13 +210,13 @@ func (s builtStore) GetEnvironment(_ context.Context, key string) (*domain.Envir
 }
 
 // Run 3's agent read environment_building for 19 minutes while its build pulled, installed and
-// pushed. A job waiting for its environment says the step its build last reported, read with the
-// job: a step changes no queue reason and wakes nobody.
-func TestAJobWaitingForItsEnvironmentSaysTheStepItsBuildReported(t *testing.T) {
+// pushed, and run 4's was woken for a turn by each new attempt. A job waiting for its environment
+// says where the build runs, its attempt and the step it last reported, read with the job.
+func TestAJobWaitingForItsEnvironmentSaysWhereItsBuildIs(t *testing.T) {
 	at := time.Date(2026, 10, 8, 9, 14, 10, 0, time.UTC)
 	svc := &Service{store: builtStore{envs: map[string]*domain.Environment{
-		"k1": {Key: "k1", State: domain.EnvironmentBuilding, ClusterName: "builder-a", Attempt: 1, Progress: "[2/3] RUN apt-get install gcc: started", ProgressAt: &at},
-		"k2": {Key: "k2", State: domain.EnvironmentBuilding, Attempt: 1, Progress: "stale"},
+		"k1": {Key: "k1", Base: "registry.test/job:1", State: domain.EnvironmentBuilding, ClusterName: "builder-a", Attempt: 2, Progress: "[2/3] RUN apt-get install gcc: started", ProgressAt: &at},
+		"k2": {Key: "k2", Base: "registry.test/job:1", State: domain.EnvironmentBuilding, Attempt: 1, Progress: "stale"},
 	}}}
 	waiting := func(id, key string) *domain.Experiment {
 		return &domain.Experiment{ID: id, Status: domain.StatusQueued, EnvironmentKey: key, NotAdmittedReason: domain.NotAdmittedEnvironmentBuilding, NotAdmittedMessage: "the platform builds it"}
@@ -229,11 +225,12 @@ func TestAJobWaitingForItsEnvironmentSaysTheStepItsBuildReported(t *testing.T) {
 	if err := svc.mergeBuildProgress(context.Background(), []*domain.Experiment{building, unassigned, placed}); err != nil {
 		t.Fatal(err)
 	}
-	if want := "the platform builds it. Its build reported at 2026-10-08T09:14:10Z: [2/3] RUN apt-get install gcc: started"; building.NotAdmittedMessage != want {
+	if want := "the platform builds the environment its commit declares in .hypothesisloop/Dockerfile, on registry.test/job:1. The job runs in it once it is built. " +
+		"It builds on cluster builder-a, attempt 2 of 3 (the platform builds a file again only after a failure of its own), and reported at 2026-10-08T09:14:10Z: [2/3] RUN apt-get install gcc: started"; building.NotAdmittedMessage != want {
 		t.Errorf("building: %q, want %q", building.NotAdmittedMessage, want)
 	}
-	if unassigned.NotAdmittedMessage != "the platform builds it" || placed.NotAdmittedMessage != "" {
-		t.Errorf("a build no cluster runs said %q and a placed job %q, want nothing added", unassigned.NotAdmittedMessage, placed.NotAdmittedMessage)
+	if !strings.HasSuffix(unassigned.NotAdmittedMessage, "It waits for a live cluster that builds for its org to have room") || placed.NotAdmittedMessage != "" {
+		t.Errorf("a build no cluster runs said %q and a placed job %q, want waiting for a cluster and nothing", unassigned.NotAdmittedMessage, placed.NotAdmittedMessage)
 	}
 	if err := svc.mergeBuildProgress(context.Background(), []*domain.Experiment{waiting("job-4", "gone")}); err == nil {
 		t.Error("a job naming no environment that exists: no error")

@@ -1954,18 +1954,7 @@ func (l *Loop) heldForEnvironment(ctx context.Context, pass *environmentPass, ex
 	case env.State == domain.EnvironmentReady:
 		return false, nil
 	case env.State == domain.EnvironmentBuilding:
-		where := "on cluster " + env.ClusterName + ", attempt " + strconv.Itoa(env.Attempt) + " of " + strconv.Itoa(domain.MaxEnvironmentAttempts)
-		if env.Attempt > 1 {
-			where += " (the platform builds a file again only after a failure of its own)"
-		}
-		if env.ClusterName == "" {
-			where = "once a live cluster that builds for its org has room"
-		}
-		reason := domain.NotAdmittedEnvironmentBuilding + ": the platform builds the environment its commit declares in " + domain.EnvironmentFile + ", on " + env.Base + ", " + where +
-			". The job runs in it once it is built"
-		if env.FailedLog != "" {
-			reason += ". This file failed to build before, and the platform builds it once more. The end of that build's output:\n" + env.FailedLog
-		}
+		reason := domain.NotAdmittedEnvironmentBuilding + ": " + buildingMessage(env, false)
 		return true, l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason)
 	case env.State == domain.EnvironmentFailed && env.Fault == domain.EnvironmentFaultFile:
 		return true, l.endForEnvironment(ctx, exp, domain.StatusRejected, string(domain.EvictionEnvironmentFailed.WithDetail(fileFailed(env))))
@@ -1974,6 +1963,34 @@ func (l *Loop) heldForEnvironment(ctx context.Context, pass *environmentPass, ex
 			" on "+env.Base+" in "+strconv.Itoa(domain.MaxEnvironmentAttempts)+" attempts, no fault of the file's. It costs nothing: submit again and the platform builds it again")))
 	}
 	return false, fmt.Errorf("environment %s of job %s is %s with fault %q", env.Key, exp.ID, env.State, env.Fault)
+}
+
+// buildingMessage is what a job waiting for env to build is told. Where the build runs, its attempt
+// and its last step are said only with live, on a read: the stored queue reason changes with none
+// of them, since its every change is an update that wakes the job's agent.
+func buildingMessage(env *domain.Environment, live bool) string {
+	message := "the platform builds the environment its commit declares in " + domain.EnvironmentFile + ", on " + env.Base + ". The job runs in it once it is built"
+	if live {
+		message += ". " + buildProgress(env)
+	}
+	if env.FailedLog != "" {
+		message += ". This file failed to build before, and the platform builds it once more. The end of that build's output:\n" + env.FailedLog
+	}
+	return message
+}
+
+func buildProgress(env *domain.Environment) string {
+	if env.ClusterName == "" {
+		return "It waits for a live cluster that builds for its org to have room"
+	}
+	progress := "It builds on cluster " + env.ClusterName + ", attempt " + strconv.Itoa(env.Attempt) + " of " + strconv.Itoa(domain.MaxEnvironmentAttempts)
+	if env.Attempt > 1 {
+		progress += " (the platform builds a file again only after a failure of its own)"
+	}
+	if env.Progress != "" && env.ProgressAt != nil {
+		progress += ", and reported at " + env.ProgressAt.UTC().Format(time.RFC3339) + ": " + env.Progress
+	}
+	return progress
 }
 
 // fileFailed says that the environment file of env did not build, with the end of its output.

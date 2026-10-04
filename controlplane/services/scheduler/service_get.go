@@ -108,9 +108,8 @@ func (s *Service) mergePhaseDetails(ctx context.Context, exps []*domain.Experime
 	return nil
 }
 
-// mergeBuildProgress adds to the not_admitted_message of each job that waits for its environment
-// the step its build last reported. It is read with the job and never stored in the job's queue
-// reason, whose every change is an update that wakes the job's agent: a build's steps are not.
+// mergeBuildProgress says in the not_admitted_message of each job that waits for its environment
+// where its build runs, its attempt and the step it last reported (buildingMessage).
 func (s *Service) mergeBuildProgress(ctx context.Context, exps []*domain.Experiment) error {
 	envs := map[string]*domain.Environment{}
 	for _, exp := range exps {
@@ -128,8 +127,8 @@ func (s *Service) mergeBuildProgress(ctx context.Context, exps []*domain.Experim
 			}
 			envs[exp.EnvironmentKey] = env
 		}
-		if env.State == domain.EnvironmentBuilding && env.ClusterName != "" && env.Progress != "" {
-			exp.NotAdmittedMessage += ". Its build reported at " + env.ProgressAt.UTC().Format(time.RFC3339) + ": " + env.Progress
+		if env.State == domain.EnvironmentBuilding {
+			exp.NotAdmittedMessage = buildingMessage(env, true)
 		}
 	}
 	return nil
