@@ -189,6 +189,50 @@ def baseline_clock(setup: RunSetup) -> str:
     return f"baseline_due_at is {due}, {max(0, int(left))} minutes from now."
 
 
+# A baseline agent is signed up with the planner's proposal, so that its machine starts while the
+# draft counts down to being accepted. It has nothing to measure before that.
+ACCEPT_POLL_S = 3
+
+
+async def until_accepted(setup: RunSetup, stop_flag: list, poll_s: float = ACCEPT_POLL_S, said=lambda: None) -> None:
+    """Returns once the platform experiment of a baseline agent is no longer a draft, or a stop is
+    asked for, and at once for any other agent. A platform that does not answer is waited out:
+    until_lost ends the process when that lasts. said() is called once, when it starts waiting."""
+    if not config.measures_baseline(setup.cfg):
+        return
+    waiting = False
+    while not stop_flag[0]:
+        try:
+            status = (await asyncio.to_thread(setup.client.get_platform_experiment, setup.cfg.platform_experiment_id)).get("status")
+        except api_client.APIError as e:
+            log.warning("could not read whether the draft was accepted (%s)", e)
+            status = None
+        if status is not None and status != "draft":
+            return
+        if not waiting:
+            log.info("waiting for the draft to be accepted before measuring its baseline")
+            said()
+            waiting = True
+        await asyncio.sleep(poll_s)
+
+
+def repo_map(setup: RunSetup) -> str:
+    """What the planner recorded of the repository, said to a baseline agent whose session starts
+    fresh, "" for any other agent and where it recorded nothing."""
+    if not config.measures_baseline(setup.cfg):
+        return ""
+    try:
+        proposal = setup.client.get_platform_experiment(setup.cfg.platform_experiment_id).get("proposal") or {}
+    except api_client.APIError as e:
+        log.warning("could not read the planner's map of the repository (%s)", e)
+        return ""
+    text = (proposal.get("repo_map") or "").strip()
+    if not text:
+        return ""
+    return ("The planner read the repository and left this map of it. Start from it: open the files "
+            "you need, and leave the rest unread.\n\n" + text)
+
+
 def _closer(actor: dict | None) -> str:
     kind, name = (actor or {}).get("kind"), (actor or {}).get("name") or "unnamed"
     if kind == "coordinator":

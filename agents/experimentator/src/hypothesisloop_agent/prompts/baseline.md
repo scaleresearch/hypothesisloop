@@ -19,7 +19,8 @@ Your assignment:
 
 Read the `description` of `hl platform-experiments get` completely, its `metrics`,
 `status_reason` and the minutes left until `baseline_due_at`, when it closes. `hl quota` is
-all you may spend.
+all you may spend. Your first prompt may carry the planner's map of the repository: open the
+files it points you to and leave the rest unread.
 
   1. The code. Where it is kept: {workspace}
      Only a harness that already measures these metrics on the control runs unchanged: go

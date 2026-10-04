@@ -72,7 +72,7 @@ baseline's `README.md` says how its harness measures:
          `hl job data` lists what a job left; a stage chained onto its parent sets `parent_id`
          and reads the parent's prefix.
   5. Updates about your jobs and hypotheses, your quota, the stages, the run and its brief
-     arrive as messages. Re-read a changed brief before your next trial.
+     arrive as messages. Re-read a changed brief, and the run's end, before your next trial.
   6. Once the evidence lets you call it honestly, set your hypothesis's status. Then back to 2.
 How to spend:
   - Prefer many short screening runs to settle direction, then one longer confirmation of the

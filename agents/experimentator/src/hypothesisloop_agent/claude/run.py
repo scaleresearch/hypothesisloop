@@ -30,7 +30,7 @@ from claude_agent_sdk import (
     SystemMessage,
 )
 
-from hypothesisloop_agent import config, core, progress, proposal, session, updates
+from hypothesisloop_agent import config, core, progress, proposal, seed, session, updates
 from hypothesisloop_agent.claude import activity
 
 log = logging.getLogger("llm_agent")
@@ -450,6 +450,16 @@ def _first_prompt(setup: core.RunSetup, resume_id: str | None, initial_prompt: s
     return _new_machine_note(setup.cfg) + "\n\n" + prompt if _on_new_machine else prompt
 
 
+def _opening(setup: core.RunSetup, resume_id: str | None, initial_prompt: str | None) -> str:
+    """_first_prompt, and for a session that starts fresh what its role reads first: a planner's
+    opening reads, a baseline agent's map of the repository from the planner."""
+    prompt = _first_prompt(setup, resume_id, initial_prompt)
+    if resume_id or initial_prompt:
+        return prompt
+    extra = seed.planner(setup.workdir) if config.plans(setup.cfg) else core.repo_map(setup)
+    return prompt + "\n\n" + extra if extra else prompt
+
+
 _on_new_machine = False
 
 
@@ -577,10 +587,11 @@ async def _receive_turn(client):
 
 # How hard the model thinks before each step. A baseline agent measures a control it is told how to
 # run, against a deadline: at high it thought for 107 s (9155 tokens) before running `date` and
-# for 135 s (10529 tokens) before a `cat`, 7 min of 40 in single calls. The other roles design
-# and judge experiments and keep high.
+# for 135 s (10529 tokens) before a `cat`, 7 min of 40 in single calls. A planner at high spent
+# 155 s of its 3m41s in three generations. Researchers and the coordinator design and judge
+# experiments and keep high.
 def _effort(cfg) -> str:
-    return "medium" if config.measures_baseline(cfg) else "high"
+    return "medium" if config.measures_baseline(cfg) or config.plans(cfg) else "high"
 
 
 def _context_tokens(usage: dict) -> int:
@@ -757,11 +768,12 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             await _store_session(setup)
         return True
 
+    opening = await asyncio.to_thread(_opening, setup, resume_id, initial_prompt)
     connecting = time.monotonic()
     idle_s = updates.IDLE_NUDGE_S
     async with ClaudeSDKClient(options=options) as client:
         log.info("model CLI connected in %.1fs", time.monotonic() - connecting)
-        await client.query(_first_prompt(setup, resume_id, initial_prompt))
+        await client.query(opening)
         while True:
             got_result = False
             turn_is_error = overflowed = False
@@ -897,6 +909,7 @@ async def _run(setup: core.RunSetup, model: str) -> None:
 
 async def _run_until_stopped(setup: core.RunSetup, model: str, stop_flag: list) -> None:
     backoff_s = _RECONNECT_BACKOFF_INITIAL_S
+    await core.until_accepted(setup, stop_flag, said=lambda: _progress.doing("waiting for the plan to be accepted"))
 
     def reset_backoff() -> None:
         nonlocal backoff_s

@@ -64,7 +64,8 @@ The description is the only place the question exists for an agent. Whenever som
 agents work from changes, change the description in the same turn: write the whole new
 description to a file, run `hl platform-experiments update --description-file FILE`, and
 check it answers with yours. State in it only what you read on the platform. Agents are told
-only that it changed and re-read it between jobs.
+only that it changed and re-read it between jobs. A run length the owner changes reaches them
+the same way.
 
 ## Baseline
 

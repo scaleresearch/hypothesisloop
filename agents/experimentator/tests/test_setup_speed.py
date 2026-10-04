@@ -1,0 +1,111 @@
+import asyncio
+import json
+import os
+import subprocess
+import tempfile
+import unittest
+from types import SimpleNamespace
+from unittest import mock
+
+from hypothesisloop_agent import api_client, core, seed
+from hypothesisloop_agent.claude import run
+
+
+def planner():
+    return SimpleNamespace(agent_id="ag-planner", flavor="planner", role="planner", platform_experiment_id="pe-1", hyperparameters={})
+
+
+def baseline_agent():
+    return SimpleNamespace(agent_id="ag-baseline", flavor="generalist", role="baseline", platform_experiment_id="pe-1", hyperparameters={})
+
+
+def git(*args, cwd):
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True,
+                   env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
+
+
+class PlannerOpeningTest(unittest.TestCase):
+    # Run 5's planner spent its first turns on the same reads every plan makes: the draft, the
+    # capacity, the clone, its README and .hypothesisloop/. The harness makes them.
+    def test_the_draft_the_capacity_and_the_repository_open_a_fresh_plan(self):
+        with tempfile.TemporaryDirectory() as origin, tempfile.TemporaryDirectory() as workdir:
+            git("init", "-q", cwd=origin)
+            os.makedirs(os.path.join(origin, ".hypothesisloop"))
+            os.makedirs(os.path.join(origin, "src"))
+            for path, text in {"README.md": "# Codec\nRun bench.py.\n", ".hypothesisloop/experiment.yaml": "name: codec\n", "src/codec.py": "x = 1\n"}.items():
+                with open(os.path.join(origin, path), "w") as f:
+                    f.write(text)
+            git("add", ".", cwd=origin)
+            git("commit", "-qm", "init", cwd=origin)
+            draft = json.dumps({"id": "pe-1", "status": "draft", "repository_url": "file://" + origin})
+            real = seed._run
+
+            def fake(command, cwd=None):
+                if command[0] == "hl":
+                    return draft if command[1] == "platform-experiments" else "cluster k3s cpu cores_available=8"
+                return real(command, cwd)
+
+            with mock.patch.object(seed, "_run", fake):
+                opening = seed.planner(workdir)
+            self.assertTrue(os.path.exists(os.path.join(workdir, "src", "codec.py")), "the repository was not cloned into the working directory")
+            for shown in ("=== hl platform-experiments get\n" + draft, "=== hl capacity\ncluster k3s", "src/codec.py",
+                          "=== README.md\n# Codec\nRun bench.py.", "=== .hypothesisloop/experiment.yaml\nname: codec"):
+                self.assertIn(shown, opening)
+            self.assertNotIn("Not read", opening)
+
+    def test_what_could_not_be_read_is_left_to_the_planner(self):
+        def fake(command, cwd=None):
+            raise RuntimeError(f"`{command[0]}` exited 1: refused")
+
+        with tempfile.TemporaryDirectory() as workdir, mock.patch.object(seed, "_run", fake):
+            opening = seed.planner(workdir)
+        self.assertIn("=== Not read, do it yourself\n`hl` exited 1: refused", opening)
+        self.assertIn("the repository was not read", opening)
+
+    # Only a session that starts fresh is opened with them: a resumed one has read them.
+    def test_only_a_fresh_session_is_opened_with_its_roles_reads(self):
+        pe = {"status": "draft", "status_reason": {"reason": "planning"}, "proposal": {"repo_map": "bench.py: the harness"}}
+        client = SimpleNamespace(get_platform_experiment=lambda _id: pe)
+        with mock.patch.object(seed, "planner", lambda workdir: "READS"):
+            self.assertEqual(run._opening(SimpleNamespace(cfg=planner(), client=client, workdir="/w"), None, None), "Begin.\n\nREADS")
+            self.assertEqual(run._opening(SimpleNamespace(cfg=planner(), client=client, workdir="/w"), "s-1", None), "Continue where you left off.")
+        opened = run._opening(SimpleNamespace(cfg=baseline_agent(), client=client, workdir="/w"), None, None)
+        self.assertTrue(opened.startswith("Begin.\n\nThe planner read the repository") and opened.endswith("\n\nbench.py: the harness"), opened)
+        self.assertEqual(run._opening(SimpleNamespace(cfg=baseline_agent(), client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "open"}), workdir="/w"), None, None), "Begin.")
+
+
+class UntilAcceptedTest(unittest.TestCase):
+    # The baseline agent is signed up with the proposal and its machine starts while the draft
+    # counts down: it starts its session once the draft is accepted, and not before.
+    def test_a_baseline_agent_starts_once_its_draft_is_accepted(self):
+        statuses = iter([{"status": "draft"}, api_client.APIError("GET", "/pe", 503, "down"), {"status": "draft"}, {"status": "open"}])
+        read = []
+
+        def get(_id):
+            read.append(_id)
+            answer = next(statuses)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        said = []
+        setup = SimpleNamespace(cfg=baseline_agent(), client=SimpleNamespace(get_platform_experiment=get))
+        asyncio.run(core.until_accepted(setup, [False], poll_s=0, said=lambda: said.append(1)))
+        self.assertEqual(len(read), 4)
+        self.assertEqual(said, [1])
+
+    def test_no_other_agent_waits_and_a_stop_ends_the_wait(self):
+        never = SimpleNamespace(get_platform_experiment=lambda _id: self.fail("read"))
+        asyncio.run(core.until_accepted(SimpleNamespace(cfg=planner(), client=never), [False], poll_s=0))
+        asyncio.run(core.until_accepted(SimpleNamespace(cfg=baseline_agent(), client=never), [True], poll_s=0))
+        stop = [False]
+
+        def get(_id):
+            stop[0] = True
+            return {"status": "draft"}
+
+        asyncio.run(core.until_accepted(SimpleNamespace(cfg=baseline_agent(), client=SimpleNamespace(get_platform_experiment=get)), stop, poll_s=0))
+
+
+if __name__ == "__main__":
+    unittest.main()

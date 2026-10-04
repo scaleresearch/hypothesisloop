@@ -512,6 +512,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
                                 cfg=SimpleNamespace(agent_id="agent-a", flavor=config.PLANNER_FLAVOR, role="planner", api_url="http://x",
                                                     token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
         with mock.patch.object(run, "ClaudeSDKClient", Client), \
+                mock.patch.object(run.seed, "planner", lambda workdir: ""), \
                 mock.patch.object(updates, "next_batch", revised), \
                 mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 redirect_stdout(StringIO()):

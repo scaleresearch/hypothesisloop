@@ -175,9 +175,10 @@ class StreamedCallTest(unittest.IsolatedAsyncioTestCase):
 
 
 class EffortTest(unittest.TestCase):
-    def test_a_baseline_agent_thinks_at_medium_and_every_other_role_at_high(self):
-        for role, effort in {"baseline": "medium", "planner": "high", "competitor": "high", "": "high"}.items():
-            self.assertEqual(run._effort(SimpleNamespace(role=role)), effort, role)
+    def test_a_baseline_agent_and_a_planner_think_at_medium_and_every_other_role_at_high(self):
+        for role, effort in {"baseline": "medium", "planner": "medium", "competitor": "high", "": "high"}.items():
+            flavor = "planner" if role == "planner" else "generalist"
+            self.assertEqual(run._effort(SimpleNamespace(role=role, flavor=flavor)), effort, role)
 
 
 if __name__ == "__main__":
