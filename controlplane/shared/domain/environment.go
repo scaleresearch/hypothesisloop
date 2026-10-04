@@ -66,13 +66,17 @@ const (
 // ClusterName is empty. Image is the pushed build, repository@digest, and runs once State is
 // ready. LogTail is the end of the output of a build that failed, and FailedLog that of the file's
 // last failed build while a later submit builds the same file once more. Progress is the step its
-// assigned cluster last reported of the attempt it builds, at ProgressAt.
+// assigned cluster last reported of the attempt it builds, at ProgressAt. LoadedImage is that
+// attempt's image, repository@digest, once it is in the image store of node LoadedNode of
+// ClusterName and not yet pushed: a job pinned to that node runs it before it is ready.
 type Environment struct {
 	Key         string
 	OrgID       string
 	Base        string
 	Dockerfile  string
 	Image       string
+	LoadedImage string
+	LoadedNode  string
 	State       EnvironmentState
 	Fault       EnvironmentFault
 	LogTail     string
@@ -85,6 +89,9 @@ type Environment struct {
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
+
+// NodeHostnameLabel is the label that names one node, which a job is pinned to its node by.
+const NodeHostnameLabel = "kubernetes.io/hostname"
 
 // EnvironmentKey names the build of dockerfile on base for orgID.
 func EnvironmentKey(orgID, dockerfile, base string) string {

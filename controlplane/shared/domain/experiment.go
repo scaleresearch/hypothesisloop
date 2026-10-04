@@ -138,6 +138,10 @@ type Experiment struct {
 	// MaxEstimateHours bounds the estimate admission gives a job that reaches it with none
 	// (EstimatedDurationHours 0), 0 for no bound. Read by the admission transaction alone.
 	MaxEstimateHours float64 `json:"-"`
+	// EnvironmentImage is set by one admission pass alone, on a job whose environment is loaded
+	// on one node (Environment.LoadedImage) and not yet pushed: its Job is pinned to that node
+	// for the pass, and the claim runs it in that image.
+	EnvironmentImage string `json:"-"`
 	// QuotaSettledAt is set once this (terminal) experiment's final usage has been durably
 	// written to the metrics DB. nil means settlement is pending — the signal a background
 	// reconciler uses to retry after a crash or outage. Meaningless for non-terminal experiments.

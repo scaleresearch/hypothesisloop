@@ -164,7 +164,7 @@ func TestAJobWaitsForItsAssignedEnvironmentAndEndsByWhoseFaultItFailed(t *testin
 		var held bool
 		for _, id := range []string{"job-1", "job-2"} {
 			var err error
-			if held, err = l.heldForEnvironment(context.Background(), pass, &domain.Experiment{ID: id, Status: domain.StatusQueued, EnvironmentKey: "k1"}); err != nil {
+			if held, err = l.heldForEnvironment(context.Background(), pass, &domain.Experiment{ID: id, Status: domain.StatusQueued, EnvironmentKey: "k1"}, nil, nil); err != nil {
 				t.Fatalf("%s: %v", name, err)
 			}
 		}
@@ -195,6 +195,68 @@ func TestAJobWaitsForItsAssignedEnvironmentAndEndsByWhoseFaultItFailed(t *testin
 			if held || len(store.reasons)+len(store.terminated) > 0 {
 				t.Errorf("%s: held %v, want it left to placement", name, held)
 			}
+		}
+	}
+}
+
+// A build its cluster holds on one node places the job that waits for it there, pinned to that
+// node's hostname and run in the image held there, while the push goes on. The job's own spec is
+// left as it was submitted.
+func TestAJobWhoseEnvironmentIsLoadedOnANodeIsPinnedThereInThatImage(t *testing.T) {
+	assignedAt := time.Now()
+	loaded := domain.Environment{Key: "k1", Base: "registry.test/job:1", State: domain.EnvironmentBuilding, ClusterName: "builder-a", Attempt: 1, AssignedAt: &assignedAt,
+		LoadedImage: "registry.test/env@sha256:1", LoadedNode: "node-1"}
+	registered := map[string]domain.Cluster{"builder-a": {Name: "builder-a", OrgID: "org-a"}}
+	labels := map[string]map[string]map[string]string{"builder-a": {"node-1": {domain.NodeHostnameLabel: "host-1"}, "node-2": {domain.NodeHostnameLabel: "host-2"}}}
+	job := func(mutate func(*domain.Experiment)) *domain.Experiment {
+		exp := &domain.Experiment{ID: "job-1", OrgID: "org-a", Status: domain.StatusQueued, EnvironmentKey: "k1",
+			Job: domain.JobSpec{Image: "registry.test/job:1", NodeSelector: map[string]string{"zone": "a"}}}
+		if mutate != nil {
+			mutate(exp)
+		}
+		return exp
+	}
+	held := func(env domain.Environment, exp *domain.Experiment) (bool, map[string]string) {
+		store := &environmentStore{env: &env, reasons: map[string]string{}, terminated: map[string]string{}, settler: &recordingSettler{}}
+		l := NewLoop(store, nil, buildersLive{live: map[string]bool{"builder-a": true}, reads: new(int)}, testGraceLimits, zap.NewNop())
+		waits, err := l.heldForEnvironment(context.Background(), newEnvironmentPass(), exp, registered, labels)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return waits, store.reasons
+	}
+
+	submitted := job(nil)
+	selector := submitted.Job.NodeSelector
+	if waits, reasons := held(loaded, submitted); waits || len(reasons) != 0 {
+		t.Fatalf("held %v with %v, want the job left to placement", waits, reasons)
+	}
+	if submitted.ClusterName != "builder-a" || submitted.EnvironmentImage != loaded.LoadedImage ||
+		submitted.Job.NodeSelector[domain.NodeHostnameLabel] != "host-1" || submitted.Job.NodeSelector["zone"] != "a" {
+		t.Errorf("pinned to %q in %q with selector %v, want builder-a's node-1 in the loaded image beside its own selector",
+			submitted.ClusterName, submitted.EnvironmentImage, submitted.Job.NodeSelector)
+	}
+	if len(selector) != 1 {
+		t.Errorf("the job's own selector became %v", selector)
+	}
+
+	unloaded := loaded
+	unloaded.LoadedImage, unloaded.LoadedNode = "", ""
+	unlabelled := loaded
+	unlabelled.LoadedNode = "node-9"
+	for name, c := range map[string]struct {
+		env domain.Environment
+		exp *domain.Experiment
+	}{
+		"not loaded":                {unloaded, job(nil)},
+		"loaded on a node not seen": {unlabelled, job(nil)},
+		"a job on two nodes":        {loaded, job(func(e *domain.Experiment) { e.Job.NumNodes = 2 })},
+		"a job pinned elsewhere":    {loaded, job(func(e *domain.Experiment) { e.Job.NodeSelector = map[string]string{domain.NodeHostnameLabel: "host-2"} })},
+		"a job of another org":      {loaded, job(func(e *domain.Experiment) { e.OrgID = "org-b" })},
+	} {
+		waits, reasons := held(c.env, c.exp)
+		if !waits || !strings.HasPrefix(reasons["job-1"], domain.NotAdmittedEnvironmentBuilding+": ") || c.exp.ClusterName != "" || c.exp.EnvironmentImage != "" {
+			t.Errorf("%s: held %v with %q on %q in %q, want it waiting for the push, unpinned", name, waits, reasons["job-1"], c.exp.ClusterName, c.exp.EnvironmentImage)
 		}
 	}
 }

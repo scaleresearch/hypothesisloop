@@ -208,7 +208,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	environments := newEnvironmentPass()
 	for _, exp := range queued {
 		if exp.EnvironmentKey != "" {
-			if held, err := l.heldForEnvironment(ctx, environments, exp); err != nil {
+			if held, err := l.heldForEnvironment(ctx, environments, exp, registeredClusters, nodeLabels); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("environment: %w", err))
 				continue
 			} else if held {
@@ -302,6 +302,10 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 		// are evaluated separately rather than or-ed into one condition.
 		scalarFits := domain.Fits(gAvail[cluster], fp)
 		liveFits := scalarFits && topologyFits(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp)
+		if exp.EnvironmentImage != "" && (misfit != "" || !liveFits) {
+			l.waitForPush(ctx, "guaranteed", environments, exp, &tickErrs)
+			continue
+		}
 		// Speculative submit (autoscaler.md): before spending a guaranteed job's preemption
 		// power, try every autoscaler-enabled cluster this job hasn't already failed over
 		// from. A candidate has no live capacity by definition — the SUBMITTED row itself is the
@@ -312,7 +316,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 		// bet times out (job_watcher's scale-up deadline) and the cluster is excluded for it.
 		var bets []string
 		var provenFitByCluster map[string]bool
-		if !liveFits || scalesAbove(cluster, exp, autoscalerEnabled, connectedClusters, registeredClusters) {
+		if !liveFits || (exp.EnvironmentImage == "" && scalesAbove(cluster, exp, autoscalerEnabled, connectedClusters, registeredClusters)) {
 			chosenFlavor := exp.AcceleratorType
 			if liveFits {
 				// The flavor the lower cluster fit at is that cluster's. The bet is for the one
@@ -563,7 +567,12 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 			continue
 		}
 		cluster, fp, misfit := placed.cluster, placed.fp, placed.misfit
-		if !domain.Fits(bAvail[cluster], fp) || !topologyFits(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp) {
+		fits := domain.Fits(bAvail[cluster], fp) && topologyFits(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp)
+		if exp.EnvironmentImage != "" && (misfit != "" || !fits) {
+			l.waitForPush(ctx, "burst", environments, exp, &tickErrs)
+			continue
+		}
+		if !fits {
 			// Same shortage vector the guaranteed pass computes, for the same reason: "short
 			// {cpu: 12}" tells an operator which dimension to fix, where a bare
 			// capacity_unavailable tells them only that something, somewhere, did not fit.
@@ -1925,8 +1934,9 @@ func newEnvironmentPass() *environmentPass {
 // it assigns to a live cluster first (db.EnvironmentsStore.AssignEnvironment): while it is built
 // it says so, once the file failed exp ends with the end of the build's output, so its agent fixes
 // the file and submits again, and once the platform failed it on every attempt exp ends as the
-// platform's fault at no cost, and the next submit builds it again.
-func (l *Loop) heldForEnvironment(ctx context.Context, pass *environmentPass, exp *domain.Experiment) (bool, error) {
+// platform's fault at no cost, and the next submit builds it again. A build its cluster already
+// holds on one node does not hold exp: exp is pinned there for this pass (pinToLoadedNode).
+func (l *Loop) heldForEnvironment(ctx context.Context, pass *environmentPass, exp *domain.Experiment, registered map[string]domain.Cluster, nodeLabels map[string]map[string]map[string]string) (bool, error) {
 	env, ok := pass.seen[exp.EnvironmentKey]
 	if !ok {
 		if !pass.read {
@@ -1954,6 +1964,9 @@ func (l *Loop) heldForEnvironment(ctx context.Context, pass *environmentPass, ex
 	case env.State == domain.EnvironmentReady:
 		return false, nil
 	case env.State == domain.EnvironmentBuilding:
+		if pinToLoadedNode(exp, env, registered, nodeLabels) {
+			return false, nil
+		}
 		reason := domain.NotAdmittedEnvironmentBuilding + ": " + buildingMessage(env, false)
 		return true, l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason)
 	case env.State == domain.EnvironmentFailed && env.Fault == domain.EnvironmentFaultFile:
@@ -1963,6 +1976,43 @@ func (l *Loop) heldForEnvironment(ctx context.Context, pass *environmentPass, ex
 			" on "+env.Base+" in "+strconv.Itoa(domain.MaxEnvironmentAttempts)+" attempts, no fault of the file's. It costs nothing: submit again and the platform builds it again")))
 	}
 	return false, fmt.Errorf("environment %s of job %s is %s with fault %q", env.Key, exp.ID, env.State, env.Fault)
+}
+
+// pinToLoadedNode pins exp, for this pass, to the node of the cluster building its environment
+// that holds the build's image before it is pushed, and to that image (domain.Experiment.
+// EnvironmentImage), and says whether it did. The pin is the node's hostname label in exp's node
+// selector, which placement honours as any other and the runtime is handed with the resolved job:
+// a job placed so starts there without a pull while the push goes on. A job on more than one node,
+// one whose own selector names another node, and one that cluster does not host wait for the push.
+func pinToLoadedNode(exp *domain.Experiment, env *domain.Environment, registered map[string]domain.Cluster, nodeLabels map[string]map[string]map[string]string) bool {
+	if env.LoadedImage == "" || env.ClusterName == "" || exp.Job.Nodes() > 1 || !hostsJob(registered, env.ClusterName, exp) {
+		return false
+	}
+	hostname := nodeLabels[env.ClusterName][env.LoadedNode][domain.NodeHostnameLabel]
+	if hostname == "" {
+		return false
+	}
+	if own, ok := exp.Job.NodeSelector[domain.NodeHostnameLabel]; ok && own != hostname {
+		return false
+	}
+	selector := make(map[string]string, len(exp.Job.NodeSelector)+1)
+	maps.Copy(selector, exp.Job.NodeSelector)
+	selector[domain.NodeHostnameLabel] = hostname
+	exp.Job.NodeSelector = selector
+	exp.ClusterName = env.ClusterName
+	exp.EnvironmentImage = env.LoadedImage
+	return true
+}
+
+// waitForPush leaves exp, pinned to the node its environment is loaded on, queued for this pass:
+// that node has no room for it now, and nothing is preempted or bet for a wait that ends with the
+// push, after which it is placed anywhere.
+func (l *Loop) waitForPush(ctx context.Context, pass string, environments *environmentPass, exp *domain.Experiment, tickErrs *[]error) {
+	obsmetrics.AdmissionTickResultsTotal.WithLabelValues(pass, "skipped").Inc()
+	reason := domain.NotAdmittedEnvironmentBuilding + ": " + buildingMessage(environments.seen[exp.EnvironmentKey], false)
+	if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
+		l.skipExperiment(tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
+	}
 }
 
 // buildingMessage is what a job waiting for env to build is told. Where the build runs, its attempt

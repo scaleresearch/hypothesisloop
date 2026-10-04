@@ -44,6 +44,16 @@ type reconcileStore struct {
 	assigned map[string][]*domain.Environment
 	finished []string
 	progress []string
+	loaded   []string
+}
+
+func (s *reconcileStore) RecordEnvironmentLoaded(ctx context.Context, cluster, key string, attempt int, node, image string) (bool, error) {
+	env, _ := s.AssignedEnvironmentBuild(ctx, cluster, key, attempt)
+	if env == nil {
+		return false, nil
+	}
+	s.loaded = append(s.loaded, key+" "+node+" "+image)
+	return true, nil
 }
 
 func (s *reconcileStore) RecordEnvironmentProgress(ctx context.Context, cluster, key string, attempt int, step string) (bool, error) {

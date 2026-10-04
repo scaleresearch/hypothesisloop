@@ -1417,3 +1417,8 @@ COMMIT;
 -- sweep that saw it waiting, NULL when the last one did not.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS baseline_held_seconds DOUBLE PRECISION NOT NULL DEFAULT 0;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS baseline_held_at      TIMESTAMPTZ;
+-- The image of an environment's assigned attempt once its cluster holds it in the image store of
+-- node loaded_node, repository@digest, while the push goes on: a job pinned to that node runs it
+-- before it is ready. Empty otherwise, and cleared by every new assignment and every outcome.
+ALTER TABLE environments ADD COLUMN IF NOT EXISTS loaded_image TEXT NOT NULL DEFAULT '';
+ALTER TABLE environments ADD COLUMN IF NOT EXISTS loaded_node  TEXT NOT NULL DEFAULT '';

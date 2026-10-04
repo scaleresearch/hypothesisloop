@@ -7,6 +7,7 @@
 //	POST /internal/clusters/{name}/builds/{key}/credential — the push login of an assigned build
 //	POST /internal/clusters/{name}/builds/{key}  — the outcome of an assigned build
 //	POST /internal/clusters/{name}/builds/{key}/progress — the step an assigned build is at
+//	POST /internal/clusters/{name}/builds/{key}/loaded — an assigned build held on one node
 //
 // There is no command/ack protocol: an experiment's own status (SUBMITTED/RUNNING)
 // is the single source of truth for "should a Job exist" — the agent fetches that view and
@@ -73,6 +74,7 @@ type Store interface {
 	AssignedEnvironmentBuild(ctx context.Context, cluster, key string, attempt int) (*domain.Environment, error)
 	FinishEnvironmentBuild(ctx context.Context, cluster, key string, attempt int, outcome domain.EnvironmentBuildOutcome) (bool, error)
 	RecordEnvironmentProgress(ctx context.Context, cluster, key string, attempt int, step string) (bool, error)
+	RecordEnvironmentLoaded(ctx context.Context, cluster, key string, attempt int, node, image string) (bool, error)
 }
 
 // RegistryLogins hands out logins to the registry of environment images (registrycred.Source).
@@ -529,6 +531,40 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		h.logger.Info("environment build reported", zap.String("cluster", in.Name), zap.String("key", in.Key),
 			zap.Int("attempt", report.Attempt), zap.String("outcome", string(report.Outcome)))
+		h.wakeAdmission()
+		return nil, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{
+		OperationID: "cluster-build-loaded", Method: "POST", Path: "/{name}/builds/{key}/loaded",
+		Summary: "Report an assigned environment build held on one node", Tags: []string{"cluster-agent"},
+		Description: "The image of the build, the repository's under digest, is in the image store of node while its push goes on: a job that waits for the environment and fits on that node is placed there, pinned to it, " +
+			"and runs the image from there before it is pushed. The outcome is still reported once the push ends. " +
+			"Recorded only while the build of key is assigned to this cluster at attempt and still building; otherwise 409.",
+	}, func(ctx context.Context, in *struct {
+		Name string `path:"name"`
+		Key  string `path:"key"`
+		Body domain.EnvironmentBuildLoaded
+	}) (*struct{}, error) {
+		if h.environments == nil {
+			return nil, huma.Error409Conflict("this deployment builds no environments")
+		}
+		loaded := in.Body
+		if parsed, err := digest.Parse(loaded.Digest); err != nil || parsed.Algorithm() != digest.SHA256 {
+			return nil, huma.Error400BadRequest("digest is the image's, sha256:<hex>")
+		}
+		if loaded.Node == "" || len(loaded.Node) > domain.MaxNodeNameBytes || strings.ContainsFunc(loaded.Node, func(r rune) bool { return r <= ' ' || r == 0x7f }) {
+			return nil, huma.Error400BadRequest("node is the name of the node, 1 to " + strconv.Itoa(domain.MaxNodeNameBytes) + " bytes")
+		}
+		current, err := h.store.RecordEnvironmentLoaded(ctx, in.Name, in.Key, loaded.Attempt, loaded.Node, h.environments.Repository+"@"+loaded.Digest)
+		if err != nil {
+			return nil, auth.Internal(h.logger, "environment build loaded", err, zap.String("cluster", in.Name), zap.String("key", in.Key))
+		}
+		if !current {
+			return nil, huma.Error409Conflict("the build of " + in.Key + " is not assigned to cluster " + in.Name + " at attempt " + strconv.Itoa(loaded.Attempt))
+		}
+		h.logger.Info("environment build loaded", zap.String("cluster", in.Name), zap.String("key", in.Key),
+			zap.Int("attempt", loaded.Attempt), zap.String("node", loaded.Node), zap.String("digest", loaded.Digest))
 		h.wakeAdmission()
 		return nil, nil
 	})

@@ -55,6 +55,19 @@ type EnvironmentBuildReport struct {
 	LogTail string                      `json:"log_tail,omitempty"`
 }
 
+// EnvironmentBuildLoaded is what a cluster reports of a build it was assigned at Attempt once its
+// image is in the image store of its node Node as repository@Digest, while the push goes on
+// (POST /internal/clusters/{name}/builds/{key}/loaded). A job placed on that node runs it from
+// there before it is pushed.
+type EnvironmentBuildLoaded struct {
+	Attempt int    `json:"attempt"`
+	Node    string `json:"node"`
+	Digest  string `json:"digest"`
+}
+
+// MaxNodeNameBytes bounds a node's name, a DNS subdomain.
+const MaxNodeNameBytes = 253
+
 // MaxEnvironmentProgressBytes bounds the step of a build's progress report.
 const MaxEnvironmentProgressBytes = 512
 

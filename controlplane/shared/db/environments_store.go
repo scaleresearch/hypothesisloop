@@ -21,12 +21,12 @@ func NewEnvironmentsStore(pool *Pool) *EnvironmentsStore {
 	return &EnvironmentsStore{pool: pool}
 }
 
-const environmentColumns = ` key, org_id, base, dockerfile, image, state, fault, log_tail, failed_log, cluster_name, attempt, assigned_at, progress, progress_at, created_at, updated_at `
+const environmentColumns = ` key, org_id, base, dockerfile, image, loaded_image, loaded_node, state, fault, log_tail, failed_log, cluster_name, attempt, assigned_at, progress, progress_at, created_at, updated_at `
 
 func scanEnvironment(row rowScanner) (*domain.Environment, error) {
 	env := &domain.Environment{}
 	var state, fault string
-	if err := row.Scan(&env.Key, &env.OrgID, &env.Base, &env.Dockerfile, &env.Image, &state, &fault, &env.LogTail, &env.FailedLog,
+	if err := row.Scan(&env.Key, &env.OrgID, &env.Base, &env.Dockerfile, &env.Image, &env.LoadedImage, &env.LoadedNode, &state, &fault, &env.LogTail, &env.FailedLog,
 		&env.ClusterName, &env.Attempt, &env.AssignedAt, &env.Progress, &env.ProgressAt, &env.CreatedAt, &env.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func (s *EnvironmentsStore) AssignEnvironment(ctx context.Context, key string, l
 		cluster_name = CASE WHEN e.attempt >= $4 THEN '' ELSE COALESCE(pick.name, '') END,
 		attempt = CASE WHEN e.attempt < $4 AND pick.name IS NOT NULL THEN e.attempt + 1 ELSE e.attempt END,
 		assigned_at = CASE WHEN e.attempt < $4 AND pick.name IS NOT NULL THEN now() END,
-		progress = '', progress_at = NULL,
+		progress = '', progress_at = NULL, loaded_image = '', loaded_node = '',
 		updated_at = now()
 	FROM (SELECT 1) one LEFT JOIN pick ON true
 	WHERE e.key = $1 AND e.state = 'building'
@@ -176,10 +176,25 @@ func (s *EnvironmentsStore) FinishEnvironmentBuild(ctx context.Context, cluster,
 	default:
 		return false, fmt.Errorf("environments_store.FinishBuild: %q is no fault of a build", outcome.Fault)
 	}
-	tag, err := s.pool.pool.Exec(ctx, `UPDATE environments SET `+set+`, updated_at = now()
+	tag, err := s.pool.pool.Exec(ctx, `UPDATE environments SET `+set+`, loaded_image = '', loaded_node = '', updated_at = now()
 WHERE key = $1 AND attempt = $2 AND cluster_name = $3 AND state = 'building'`, args...)
 	if err != nil {
 		return false, fmt.Errorf("environments_store.FinishBuild: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// RecordEnvironmentLoaded keeps image, repository@digest, as the image of the build of key that
+// cluster runs at attempt, held on its node node while it is pushed, and says whether it was still
+// that build's to report.
+func (s *EnvironmentsStore) RecordEnvironmentLoaded(ctx context.Context, cluster, key string, attempt int, node, image string) (bool, error) {
+	if node == "" || image == "" {
+		return false, errors.New("environments_store.RecordLoaded: a loaded build names its node and its image")
+	}
+	tag, err := s.pool.pool.Exec(ctx, `UPDATE environments SET loaded_image = $5, loaded_node = $4, updated_at = now()
+WHERE key = $1 AND attempt = $2 AND cluster_name = $3 AND state = 'building'`, key, attempt, cluster, node, image)
+	if err != nil {
+		return false, fmt.Errorf("environments_store.RecordLoaded: %w", err)
 	}
 	return tag.RowsAffected() == 1, nil
 }

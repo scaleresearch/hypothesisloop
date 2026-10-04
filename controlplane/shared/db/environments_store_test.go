@@ -337,3 +337,62 @@ func TestABuildsProgressIsTheAssignedAttemptsAndANewAssignmentClearsIt(t *testin
 		t.Fatalf("taken from its cluster: progress %q at %v, want none", again.Progress, again.ProgressAt)
 	}
 }
+
+// A build its cluster holds on one node places a job before it is ready, but only in the image
+// held there, which the admission pinned the job to, on that cluster, at that attempt. Any new
+// assignment and any outcome forgets it.
+func TestABuildLoadedOnANodePlacesAJobOnlyInThatImageOnItsCluster(t *testing.T) {
+	w := newEnvironments(t)
+	ctx := context.Background()
+	env := w.assign(t, w.ensure(t, w.orgA, "loaded").Key, w.ofA)
+	id := w.queued(t, "loaded-job", w.peA)
+	if _, err := w.pool.pool.Exec(ctx, `UPDATE experiments SET environment_key = $2 WHERE id = $1`, id, env.Key); err != nil {
+		t.Fatal(err)
+	}
+	image := "registry.test/env@sha256:" + w.suffix
+	for name, c := range map[string]struct {
+		cluster string
+		attempt int
+	}{"another cluster": {w.ofB, env.Attempt}, "another attempt": {w.ofA, env.Attempt + 1}} {
+		if took, err := w.envs.RecordEnvironmentLoaded(ctx, c.cluster, env.Key, c.attempt, "node-1", image); err != nil || took {
+			t.Fatalf("%s: took %v, %v", name, took, err)
+		}
+	}
+	if took, err := w.envs.RecordEnvironmentLoaded(ctx, w.ofA, env.Key, env.Attempt, "node-1", image); err != nil || !took {
+		t.Fatalf("the assigned attempt: took %v, %v", took, err)
+	}
+	if got, _ := w.envs.GetEnvironment(ctx, env.Key); got.State != domain.EnvironmentBuilding || got.LoadedImage != image || got.LoadedNode != "node-1" || got.Image != "" {
+		t.Fatalf("loaded: %+v, want it building, held on node-1 in %s", got, image)
+	}
+
+	if w.claim(t, id, w.ofA) {
+		t.Fatal("a job not pinned to the loaded image was placed before the push")
+	}
+	pinned := &domain.JobSpec{Image: image, AcceleratorCount: 1, NodeSelector: map[string]string{domain.NodeHostnameLabel: "node-1"}}
+	if claimed, err := w.exps.ClaimSubmitted(ctx, id, w.ofA, pinned, nil); err != nil || !claimed || pinned.Image != image {
+		t.Fatalf("claim pinned to the loaded image: %v, %v, image %q", claimed, err, pinned.Image)
+	}
+	if stored := w.get(t, id); stored.ResolvedJob == nil || stored.ResolvedJob.Image != image || stored.ResolvedJob.NodeSelector[domain.NodeHostnameLabel] != "node-1" {
+		t.Errorf("stored %+v, want the loaded image pinned to its node", stored.ResolvedJob)
+	}
+
+	again := w.assign(t, w.ensure(t, w.orgA, "reassigned").Key, w.ofA)
+	if took, err := w.envs.RecordEnvironmentLoaded(ctx, w.ofA, again.Key, again.Attempt, "node-1", image); err != nil || !took {
+		t.Fatalf("loaded: took %v, %v", took, err)
+	}
+	if _, err := w.pool.pool.Exec(ctx, `UPDATE environments SET assigned_at = now() - interval '1 hour' WHERE key = $1`, again.Key); err != nil {
+		t.Fatal(err)
+	}
+	if next := w.assign(t, again.Key, w.ofA); next.Attempt != again.Attempt+1 || next.LoadedImage != "" || next.LoadedNode != "" {
+		t.Errorf("reassigned: %+v, want the next attempt holding nothing", next)
+	}
+	if took, err := w.envs.RecordEnvironmentLoaded(ctx, w.ofA, again.Key, again.Attempt+1, "node-1", image); err != nil || !took {
+		t.Fatalf("loaded again: took %v, %v", took, err)
+	}
+	if !w.finish(t, w.ofA, &domain.Environment{Key: again.Key, Attempt: again.Attempt + 1}, domain.EnvironmentBuildOutcome{Fault: domain.EnvironmentFaultPlatform, LogTail: "push: 503"}) {
+		t.Fatal("the platform's fault was refused")
+	}
+	if got, _ := w.envs.GetEnvironment(ctx, again.Key); got.LoadedImage != "" || got.LoadedNode != "" {
+		t.Errorf("after the platform's fault: %+v, want nothing held", got)
+	}
+}

@@ -140,6 +140,7 @@ func TestADeploymentWithoutEnvironmentsCountsNoClusterAsBuilding(t *testing.T) {
 	for _, rec := range []*httptest.ResponseRecorder{
 		w.post(t, "/of-a/builds/key-1/credential", domain.EnvironmentBuildCredentialRequest{Attempt: 1}),
 		w.post(t, "/of-a/builds/key-1", domain.EnvironmentBuildReport{Attempt: 1, Outcome: domain.EnvironmentBuildPushed, Digest: pushedDigest}),
+		w.post(t, "/of-a/builds/key-1/loaded", domain.EnvironmentBuildLoaded{Attempt: 1, Node: "node-1", Digest: pushedDigest}),
 	} {
 		if rec.Code != http.StatusConflict {
 			t.Errorf("got = %d %s, want = 409", rec.Code, rec.Body)
@@ -204,6 +205,39 @@ func TestABuildReportIsRecordedFencedOnItsAttempt(t *testing.T) {
 	}
 	if got := w.wakes.Load(); got != 3 {
 		t.Errorf("admission woken %d times, want once per recorded report and not for the refused one", got)
+	}
+}
+
+// A build held on its node is recorded as the repository's image at its digest on that node, and
+// wakes admission, so a job that fits there starts while the push goes on.
+func TestABuildLoadedOnANodeIsRecordedFencedOnItsAttemptAndWakesAdmission(t *testing.T) {
+	w := newReconcileWorld(t, "of-a")
+	w.store.assigned["of-a"] = []*domain.Environment{assignedBuild("key-1", 1)}
+	if rec := w.post(t, "/of-a/builds/key-1/loaded", domain.EnvironmentBuildLoaded{Attempt: 1, Node: "node-1", Digest: pushedDigest}); rec.Code != http.StatusNoContent {
+		t.Fatalf("got = %d %s, want = 204", rec.Code, rec.Body)
+	}
+	if want := []string{"key-1 node-1 " + testRepository + "@" + pushedDigest}; !slices.Equal(w.store.loaded, want) {
+		t.Errorf("loaded = %q, want %q", w.store.loaded, want)
+	}
+	if w.wakes.Load() != 1 {
+		t.Errorf("admission woken %d times, want once", w.wakes.Load())
+	}
+	if rec := w.post(t, "/of-a/builds/key-1/loaded", domain.EnvironmentBuildLoaded{Attempt: 2, Node: "node-1", Digest: pushedDigest}); rec.Code != http.StatusConflict {
+		t.Errorf("an attempt not assigned: got = %d %s, want = 409", rec.Code, rec.Body)
+	}
+	for name, loaded := range map[string]domain.EnvironmentBuildLoaded{
+		"no digest":         {Attempt: 1, Node: "node-1"},
+		"a tag":             {Attempt: 1, Node: "node-1", Digest: "latest"},
+		"no node":           {Attempt: 1, Digest: pushedDigest},
+		"a node with space": {Attempt: 1, Node: "node 1", Digest: pushedDigest},
+		"a node too long":   {Attempt: 1, Node: strings.Repeat("n", domain.MaxNodeNameBytes+1), Digest: pushedDigest},
+	} {
+		if rec := w.post(t, "/of-a/builds/key-1/loaded", loaded); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: got = %d %s, want = 400", name, rec.Code, rec.Body)
+		}
+	}
+	if len(w.store.loaded) != 1 || w.wakes.Load() != 1 {
+		t.Errorf("loaded = %q after %d wakes, want only the first recorded", w.store.loaded, w.wakes.Load())
 	}
 }
 

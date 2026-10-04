@@ -461,6 +461,9 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 		return err
 	}
 	resolved.AcceleratorPodResources = exp.AcceleratorType.WithPodResources(resolved.AcceleratorPodResources)
+	if exp.EnvironmentImage != "" {
+		resolved.Image = exp.EnvironmentImage
+	}
 	exp.ResolvedJob = &resolved
 	if err := l.observed.RecordAdmission(ctx, exp.ID, time.Now().UTC()); err != nil {
 		return err
