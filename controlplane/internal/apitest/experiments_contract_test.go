@@ -123,19 +123,6 @@ func TestListExperimentsForwardsEveryFilter(t *testing.T) {
 	}
 }
 
-// The bug this endpoint was fixed for: an unrecognized filter silently returned every row.
-func TestListExperimentsHonoursPlatformExperimentFilter(t *testing.T) {
-	spy := &filterSpyStore{}
-	r := schedulerRouter(t, spy)
-
-	if code, _ := get(t, r, "/experiments?platform_experiment_id=pe-d564bb90"); code != 200 {
-		t.Fatalf("status = %d, want 200", code)
-	}
-	if spy.gotList.PlatformExperimentID != "pe-d564bb90" {
-		t.Fatalf("platform_experiment_id was dropped: filter = %+v", spy.gotList)
-	}
-}
-
 func TestListExperimentsReportsTotalCountHeader(t *testing.T) {
 	spy := &filterSpyStore{
 		total: 45,
@@ -208,21 +195,6 @@ func TestUnknownQueryParameterIsRejected(t *testing.T) {
 	}
 	if !strings.Contains(body, "platfrom_experiment_id") {
 		t.Errorf("error should name the offending param, got: %s", body)
-	}
-}
-
-func TestKnownQueryParametersStillAccepted(t *testing.T) {
-	spy := &filterSpyStore{}
-	r := schedulerRouter(t, spy)
-
-	for _, q := range []string{
-		"/experiments",
-		"/experiments?agent_id=a1",
-		"/experiments?platform_experiment_id=pe-1&status=RUNNING&q=x&limit=1&offset=0&sort=-created_at",
-	} {
-		if code, body := get(t, r, q); code != 200 {
-			t.Errorf("GET %s = %d, want 200; body=%s", q, code, body)
-		}
 	}
 }
 

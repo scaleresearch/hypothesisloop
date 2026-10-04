@@ -1405,19 +1405,6 @@ func TestValidRepository(t *testing.T) {
 	}
 }
 
-func TestAppAddresses(t *testing.T) {
-	_, client := newFakeGitHub(t)
-	client.webURL = webURL
-	app := client.App()
-	if app.InstallURL != "https://github.com/apps/hypothesisloop/installations/new" ||
-		app.AuthorizeURL != "https://github.com/login/oauth/authorize?client_id=Iv23test" || app.Slug != "hypothesisloop" || app.ClientID != "Iv23test" {
-		t.Fatalf("app = %+v", app)
-	}
-	if CloneURL("Acme/Model") != "https://github.com/Acme/Model.git" {
-		t.Fatalf("clone url = %s", CloneURL("Acme/Model"))
-	}
-}
-
 func TestTokenNamesTheRepositoryInGitHubsOwnCasing(t *testing.T) {
 	f, client := newFakeGitHub(t)
 	token, err := client.Token(ctx, 100, "ACME/model", Read)

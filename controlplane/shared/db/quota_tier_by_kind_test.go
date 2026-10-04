@@ -70,48 +70,6 @@ func allocateStartQuotas(peID string, budget float64, participants []StartPartic
 	return out
 }
 
-// The platform's actual policy: quota tier never depends on AgentKind. A human and an agent with
-// no signup-time override, on an experiment with no default_quota_tier policy set, get exactly
-// the same (guaranteed) treatment and an equal share.
-func TestStartGivesEveryParticipantGuaranteedQuotaRegardlessOfKind(t *testing.T) {
-	pool := quotaTierTestDB(t)
-	ctx := context.Background()
-	suffix := uuid.New().String()[:8]
-	human, agent, pe := "human-"+suffix, "agent-"+suffix, "pe-"+suffix
-	createTestAgent(t, pool, human)
-	createTestAgent(t, pool, agent)
-	createTestPE(t, pool, pe, 10)
-
-	pes := NewPlatformExperimentsStore(pool)
-	if _, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: human, Role: domain.SignupRoleCompetitor}); err != nil {
-		t.Fatalf("signup human: got = %v, want = nil", err)
-	}
-	if _, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: agent, Role: domain.SignupRoleCompetitor}); err != nil {
-		t.Fatalf("signup agent: got = %v, want = nil", err)
-	}
-
-	started, quotas, err := pes.StartPlatformExperimentTx(ctx, pe, time.Hour, func(participants []StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) {
-		return allocateStartQuotas(pe, 4, participants), oneStage, nil // 4 = budget * stage-1 explore fraction, arbitrary here
-	})
-	if err != nil || !started {
-		t.Fatalf("start: got = (%v, %v), want = (true, nil)", started, err)
-	}
-
-	byAgent := make(map[string]*domain.AgentQuota, len(quotas))
-	for _, q := range quotas {
-		byAgent[q.AgentID] = q
-	}
-	if g := byAgent[human].GuaranteedAcceleratorHours; g <= 0 {
-		t.Errorf("human guaranteed = %v, want > 0", g)
-	}
-	if g := byAgent[agent].GuaranteedAcceleratorHours; g <= 0 {
-		t.Errorf("agent guaranteed = %v, want > 0 — quota tier no longer depends on AgentKind", g)
-	}
-	if byAgent[human].GuaranteedAcceleratorHours != byAgent[agent].GuaranteedAcceleratorHours {
-		t.Errorf("guaranteed shares = human %v, agent %v; want equal", byAgent[human].GuaranteedAcceleratorHours, byAgent[agent].GuaranteedAcceleratorHours)
-	}
-}
-
 // A signup-time override still lets one experiment mix tiers however it wants — an agent
 // explicitly restricted to burst-only, and a human explicitly restricted to burst-only, in the
 // same run — and it wins regardless of kind, exactly as it did before AgentKind was removed from

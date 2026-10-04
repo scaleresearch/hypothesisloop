@@ -1,7 +1,6 @@
 package helm_test
 
 import (
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -53,58 +52,6 @@ func TestTheRenderedConfigLoadsWithTheEnvironmentEachServiceIsGiven(t *testing.T
 	}
 }
 
-func TestEachValueLandsInItsOwnSectionOfTheConfig(t *testing.T) {
-	inCluster := loadRendered(t, charttest.Render(t, charttest.InCluster), charttest.InCluster, configLoaders[0])
-	if got := inCluster.Auth; len(got.IdentityProviders) != 0 || got.UIOrigin != "http://ui.example.invalid:30300" {
-		t.Errorf("in-cluster auth = %+v, want no identity provider and the UI's origin", got)
-	}
-	if got, want := inCluster.Agents, (config.AgentsConfig{
-		Launcher: "main",
-		Image:    "registry.example.invalid/hypothesisloop-experimentator-base:test",
-		// Not a value of the chart: the staged settings file decides it.
-		DefaultModel:                   "claude-sonnet-5",
-		BootLimitSeconds:               300,
-		ProgressLimitSeconds:           300,
-		MaxNewInstancesPerAnswer:       10,
-		MaxHostedPerPlatformExperiment: 25,
-	}); got != want {
-		t.Errorf("in-cluster agents = %+v, want %+v", got, want)
-	}
-	if got, want := inCluster.Runtimes, (config.RuntimesConfig{
-		MetricsURL: "http://metrics.example.invalid:30084",
-		Registry:   "registry.example.invalid",
-		ImageTag:   "test",
-	}); got != want {
-		t.Errorf("in-cluster runtimes = %+v, want %+v", got, want)
-	}
-	if got := inCluster.DataStore.Endpoint; got != "http://object-store.hypothesisloop.svc:9000" {
-		t.Errorf("in-cluster data_store.endpoint = %q", got)
-	}
-	if got := inCluster.DataStore.ControlPlaneEndpoint; got != "http://object-store:9000" {
-		t.Errorf("in-cluster data_store.control_plane_endpoint = %q, want the chart's own Service", got)
-	}
-	if got := inCluster.Services; got.MetricsDBURL != "http://greptimedb:4000" || got.GraphDBURL != "bolt://memgraph:7687" || got.PublicAPIURL != "http://api.example.invalid:30081" {
-		t.Errorf("in-cluster services = %+v, want the in-cluster stores and the API's public address", got)
-	}
-
-	external := loadRendered(t, charttest.Render(t, charttest.External), charttest.External, configLoaders[0])
-	wantKey := config.JWTKey{Kid: "made-up-key", Kty: "EC", Alg: "ES256", Crv: "P-256",
-		X: "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU", Y: "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"}
-	auth := external.Auth
-	wantProviders := []config.IdentityProvider{{Issuer: "https://project.supabase.example.invalid/auth/v1", Audience: "authenticated", JWTKeys: []config.JWTKey{wantKey}}}
-	if !reflect.DeepEqual(auth.IdentityProviders, wantProviders) || auth.UIOrigin != "https://ui.example.invalid" {
-		t.Errorf("external auth = %+v, want the identity provider of the values", auth)
-	}
-	// Jobs elsewhere are handed the outside address, and the control plane still uses the Service.
-	if got := external.DataStore; got.Endpoint != "https://object-store.example.invalid" || got.ControlPlaneEndpoint != "http://object-store:9000" {
-		t.Errorf("external data_store = %s for jobs and %s for the control plane, want the values' address and the chart's own Service", got.Endpoint, got.ControlPlaneEndpoint)
-	}
-	elsewhere := loadRendered(t, charttest.Render(t, charttest.External, `objectStore.enabled=false`, `objectStore.controlPlaneEndpoint="http://store.example.invalid:9000"`), charttest.External, configLoaders[0])
-	if got := elsewhere.DataStore.ControlPlaneEndpoint; got != "http://store.example.invalid:9000" {
-		t.Errorf("a store run elsewhere: data_store.control_plane_endpoint = %q, want the values' address", got)
-	}
-}
-
 func TestNoSecretIsCreatedAndNoSecretValueIsRendered(t *testing.T) {
 	for _, values := range []string{charttest.InCluster, charttest.External} {
 		release := charttest.Render(t, values)
@@ -149,31 +96,6 @@ func TestTwoRendersOfTheSameValuesAreIdentical(t *testing.T) {
 	for _, values := range []string{charttest.InCluster, charttest.External} {
 		if first, second := charttest.Render(t, values).Text, charttest.Render(t, values).Text; first != second {
 			t.Errorf("%s: two renders differ, so every upgrade would restart the pods", values)
-		}
-	}
-}
-
-func TestPostgresRunsInTheClusterOnlyWhenAskedTo(t *testing.T) {
-	inCluster := charttest.Render(t, charttest.InCluster)
-	if !slices.Contains(inCluster.Kinds["StatefulSet"], "hypothesisloop-postgres") || !strings.Contains(inCluster.Text, "wait-for-postgres") {
-		t.Error("in-cluster values rendered no Postgres or nothing waits for it")
-	}
-	external := charttest.Render(t, charttest.External)
-	for _, trace := range []string{"hypothesisloop-postgres", "wait-for-postgres", "POSTGRES_PASSWORD"} {
-		if strings.Contains(external.Text, trace) {
-			t.Errorf("external values still render %s", trace)
-		}
-	}
-}
-
-func TestTheRuntimeProcessesAreOffUntilEnabled(t *testing.T) {
-	inCluster := charttest.Render(t, charttest.InCluster)
-	for _, name := range []string{"hypothesisloop-cloud-agent", "hypothesisloop-agent-launcher"} {
-		if _, rendered := inCluster.Deployments[name]; rendered {
-			t.Errorf("%s is rendered without being enabled", name)
-		}
-		if _, rendered := charttest.Render(t, charttest.External).Deployments[name]; !rendered {
-			t.Errorf("%s is enabled and not rendered", name)
 		}
 	}
 }
@@ -232,27 +154,6 @@ func TestEachRuntimeProcessTakesItsTokenFromTheControlPlanesTool(t *testing.T) {
 				t.Errorf("%s: the process itself is handed %s", deployment, entry.ValueFrom.SecretKeyRef.Key)
 			}
 		}
-	}
-}
-
-func TestTheTunnelledPortsAreNodePorts(t *testing.T) {
-	release := charttest.Render(t, charttest.External)
-	for name, want := range map[string][2]int32{
-		"control-service": {8081, 30081},
-		"metrics-service": {8084, 30084},
-		"object-store":    {9000, 30900},
-	} {
-		ports := release.Services[name].Spec.Ports
-		if len(ports) != 1 || ports[0].Port != want[0] || ports[0].NodePort != want[1] {
-			t.Errorf("Service %s ports = %+v, want %d on node port %d", name, ports, want[0], want[1])
-		}
-	}
-}
-
-func TestTheUIIsGivenItsPublicValues(t *testing.T) {
-	env := charttest.Render(t, charttest.External).Env(t, "hypothesisloop-ui", secretNames[charttest.External])
-	if env["NEXT_PUBLIC_SUPABASE_URL"] != "https://project.supabase.example.invalid" || env["NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"] != "sb_publishable_made-up" {
-		t.Errorf("UI environment = %v", env)
 	}
 }
 

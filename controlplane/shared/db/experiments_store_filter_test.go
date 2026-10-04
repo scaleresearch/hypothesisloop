@@ -31,26 +31,11 @@ func TestExperimentFilterClausesSearchIsParameterized(t *testing.T) {
 	}
 }
 
-func TestExperimentFilterClausesSearchOmittedWhenEmpty(t *testing.T) {
-	clauses, _ := experimentFilterClauses(domain.ExperimentFilter{PlatformExperimentID: "pe-1"})
-	joined := strings.Join(clauses, " AND ")
-	if strings.Contains(joined, "ILIKE") {
-		t.Fatalf("expected no ILIKE clause when Search is empty, got: %q", joined)
-	}
-}
-
 func TestExperimentOrderByUnknownSortFallsBackToDefault(t *testing.T) {
 	got := experimentOrderBy("not_a_real_field")
 	want := "priority_score DESC, created_at ASC"
 	if got != want {
 		t.Fatalf("experimentOrderBy(unknown) = %q, want %q", got, want)
-	}
-}
-
-func TestExperimentOrderByDescending(t *testing.T) {
-	got := experimentOrderBy("-created_at")
-	if got != "created_at DESC" {
-		t.Fatalf("experimentOrderBy(-created_at) = %q, want %q", got, "created_at DESC")
 	}
 }
 

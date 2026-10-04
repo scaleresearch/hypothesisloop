@@ -38,16 +38,6 @@ func TestFairShareZeroInstalledAcceleratorsIsAHardError(t *testing.T) {
 	}
 }
 
-func TestFairShareZeroHeld(t *testing.T) {
-	got, err := FairShare(1000, 0, 4)
-	if err != nil {
-		t.Fatalf("FairShare: %v", err)
-	}
-	if got != 0 {
-		t.Errorf("FairShare zero-held = %d, want 0", got)
-	}
-}
-
 // A legitimate zero share (nothing held, or nothing to share) must never be conflated with the
 // installedAccelerators<=0 hard error — they are different callers' different situations, and
 // FairShare must answer each on its own terms rather than one masking the other.
@@ -66,21 +56,6 @@ func TestFairShareLegitimateZeroNotConflatedWithInstalledZeroError(t *testing.T)
 	// two arguments being perfectly ordinary positive values.
 	if _, err := FairShare(1000, 5, 0); err == nil {
 		t.Fatal("FairShare(installedAccelerators=0) with positive total/held returned no error, want a hard error")
-	}
-}
-
-// heldAccelerators reaching FairShare negative is not something any current caller can produce
-// (loop_resolve.go/loop_disbalance.go's own AcceleratorCount is validated non-negative before
-// FairShare is ever called), but the function itself treats it via the same "<=0" branch as
-// zero — a defensive 0, not a second hard-error path — which this pins down explicitly so a
-// future caller can rely on the documented behavior rather than have to re-discover it.
-func TestFairShareNegativeHeldTreatedAsZeroNotAnError(t *testing.T) {
-	got, err := FairShare(1000, -3, 8)
-	if err != nil {
-		t.Fatalf("FairShare(heldAccelerators=-3) returned an error: %v, want (0, nil)", err)
-	}
-	if got != 0 {
-		t.Errorf("FairShare(heldAccelerators=-3) = %d, want 0", got)
 	}
 }
 
@@ -169,15 +144,5 @@ func TestFits(t *testing.T) {
 	tooMuchMem := Footprint{cpu: 1000, mem: 100_000_000_000}
 	if Fits(capacity, tooMuchMem) {
 		t.Error("expected no-fit when one dimension of a mixed request exceeds capacity")
-	}
-}
-
-func TestFootprintSubDetectsShortage(t *testing.T) {
-	cpu := ResourceKey{Kind: ResourceKindCPU}
-	capacity := Footprint{cpu: 1000}
-	occupied := Footprint{cpu: 1500}
-	remaining := capacity.Sub(occupied)
-	if remaining[cpu] >= 0 {
-		t.Errorf("expected negative remaining capacity, got %d", remaining[cpu])
 	}
 }

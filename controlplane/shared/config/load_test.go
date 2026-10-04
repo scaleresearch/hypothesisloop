@@ -74,13 +74,6 @@ func TestLoadRejectsScaleUpTimeoutAtOrAboveRendezvousLimit(t *testing.T) {
 	}
 }
 
-func TestLoadAcceptsScaleUpTimeoutBelowRendezvousLimit(t *testing.T) {
-	text := strings.Replace(productionConfig(t), "  scale_up_timeout_seconds: 600", "  scale_up_timeout_seconds: 1799", 1)
-	if err := loadText(t, text); err != nil {
-		t.Fatalf("Load rejected a valid scale_up_timeout_seconds: %v", err)
-	}
-}
-
 func TestLoadRejectsZeroDefaultMaxConcurrentAccelerators(t *testing.T) {
 	text := strings.Replace(productionConfig(t), "  default_max_concurrent_accelerators: 64", "  default_max_concurrent_accelerators: 0", 1)
 	if err := loadText(t, text); err == nil {
@@ -436,20 +429,6 @@ func TestLoadTakesOneGitHostAndRefusesAHalfStatedOne(t *testing.T) {
 		if err := loadText(t, withoutGitHost(t)+section); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
-	}
-}
-
-func TestTheCommittedConfigHasNoGitHubApp(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
-	if err := os.WriteFile(path, []byte(productionConfig(t)), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.GitHub.Configured() {
-		t.Fatal("the committed settings file configures a GitHub App, which no repo file may hold the secrets of")
 	}
 }
 

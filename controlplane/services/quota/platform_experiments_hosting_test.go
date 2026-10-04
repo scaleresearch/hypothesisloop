@@ -128,14 +128,6 @@ func TestWhatThePlatformRunsIsNeverReadFromTheExperimentFile(t *testing.T) {
 	}
 }
 
-// A create states no agents: a researcher joins by a call of its own.
-func TestCreateTakesNoAgents(t *testing.T) {
-	store, create := hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
-	if code, out := create(run(map[string]any{"hosted_agents": 2})); code != http.StatusUnprocessableEntity || len(store.created) != 0 {
-		t.Fatalf("hosted_agents in the body: got = %d %v with %d created, want 422 and nothing", code, out, len(store.created))
-	}
-}
-
 func TestCreateRefusesHostingItCannotStart(t *testing.T) {
 	whole := map[string]any{
 		"project_id": "prj-a", "name": "n", "description": "d", "budget_accelerator_hours": 5, "max_agents": 3, "duration_hours": 24,

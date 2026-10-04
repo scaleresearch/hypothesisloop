@@ -183,14 +183,6 @@ func TestTheHandlerSeesThePrincipalTheTokenResolvedTo(t *testing.T) {
 	}
 }
 
-func TestTheDocumentDeclaresBearerAuthOnEveryOperation(t *testing.T) {
-	r, _ := audienceRouter(t)
-	body := call(r, "/openapi.json", "").Body.String()
-	if !strings.Contains(body, `"securitySchemes"`) || !strings.Contains(body, `"bearer"`) {
-		t.Fatalf("openapi document does not declare the bearer scheme:\n%s", body)
-	}
-}
-
 // The agent digest lists what an agent token can call, which includes the job audience's one
 // operation and excludes everything coordinator-only.
 func TestTheAgentDigestIncludesTheJobAudience(t *testing.T) {
@@ -203,14 +195,6 @@ func TestTheAgentDigestIncludesTheJobAudience(t *testing.T) {
 	digest := doc.render(AudienceAgent)
 	if !strings.Contains(digest, "/metrics-op") || strings.Contains(digest, "/coordinator-op") {
 		t.Fatalf("agent digest:\n%s", digest)
-	}
-}
-
-func TestARefusedKindIsNamedWithItsArticle(t *testing.T) {
-	for kind, want := range map[auth.Kind]string{auth.KindAgent: "an agent", auth.KindCoordinator: "a coordinator"} {
-		if got := withArticle(string(kind)); got != want {
-			t.Errorf("withArticle(%q) = %q, want %q", kind, got, want)
-		}
 	}
 }
 

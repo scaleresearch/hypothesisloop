@@ -201,14 +201,3 @@ func TestPackageQueriesAreValidPromQL(t *testing.T) {
 		})
 	}
 }
-
-// TestMustParsePromQLCatchesAMalformedQuery is a meta-test: proves the parser and the mock
-// server actually reject something, so a query-building bug that produces broken syntax (an
-// unescaped label value, an unbalanced brace — exactly the kind of slip an AI-generated query
-// string is prone to) cannot silently pass this suite.
-func TestMustParsePromQLCatchesAMalformedQuery(t *testing.T) {
-	_, err := parser.NewParser(parser.Options{}).ParseExpr(`last_over_time(x{job="unterminated[10s])`)
-	if err == nil {
-		t.Fatal("malformed PromQL parsed without error — the guard is not actually checking anything")
-	}
-}

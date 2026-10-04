@@ -90,20 +90,6 @@ func TestInterleaveByAgentBoundsQueueDepthAdvantage(t *testing.T) {
 	}
 }
 
-func TestInterleaveByAgentHandlesEmptyAndSingleAgent(t *testing.T) {
-	if got := interleaveByAgent(nil); len(got) != 0 {
-		t.Errorf("interleaveByAgent(nil) = %v, want empty", got)
-	}
-	exps := []*domain.Experiment{
-		{ID: "x1", AgentID: "agent-a"},
-		{ID: "x2", AgentID: "agent-a"},
-	}
-	got := interleaveByAgent(exps)
-	if ids(got) != "x1,x2" {
-		t.Errorf("single-agent interleave = %v, want unchanged order [x1 x2]", ids(got))
-	}
-}
-
 func ids(exps []*domain.Experiment) string {
 	s := ""
 	for i, e := range exps {

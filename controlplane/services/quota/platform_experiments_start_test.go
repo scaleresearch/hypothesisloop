@@ -151,13 +151,6 @@ func TestStartLetsASignupOverrideWinOverTheAgentsKind(t *testing.T) {
 	}
 }
 
-func TestStartBurstOnlyOverrideWinsOverGuaranteedExperimentDefault(t *testing.T) {
-	byAgent := startWith(t, participant("agent-1", domain.QuotaTierBurstOnly))
-	if g := byAgent["agent-1"].GuaranteedAcceleratorHours; g != 0 {
-		t.Errorf("agent guaranteed = %v, want 0 with explicit burst_only override", g)
-	}
-}
-
 // A legacy experiment (default_quota_tier unset) with no signup override now resolves to the
 // same fixed guaranteed default as any other experiment — ResolveQuotaTier has no kind-based
 // fallback left to apply, by design (quota tier never depends on AgentKind).

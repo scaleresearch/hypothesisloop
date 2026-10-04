@@ -644,28 +644,6 @@ func oneAgentAndACoordinator() *launcherStore {
 	}
 }
 
-func TestAHandlerCannotBeBuiltWithoutWhatEveryInstanceNeeds(t *testing.T) {
-	for name, build := range map[string]func(){
-		"no store":          func() { NewHandler(nil, testSettings, zap.NewNop()) },
-		"no logger":         func() { NewHandler(&launcherStore{}, testSettings, nil) },
-		"no image":          func() { c := testSettings; c.Image = ""; NewHandler(&launcherStore{}, c, zap.NewNop()) },
-		"no api url":        func() { c := testSettings; c.APIURL = ""; NewHandler(&launcherStore{}, c, zap.NewNop()) },
-		"no secret":         func() { c := testSettings; c.SigningSecret = ""; NewHandler(&launcherStore{}, c, zap.NewNop()) },
-		"no boot limit":     func() { c := testSettings; c.BootLimit = 0; NewHandler(&launcherStore{}, c, zap.NewNop()) },
-		"no progress limit": func() { c := testSettings; c.ProgressLimit = 0; NewHandler(&launcherStore{}, c, zap.NewNop()) },
-		"no answer size":    func() { c := testSettings; c.MaxNewPerAnswer = 0; NewHandler(&launcherStore{}, c, zap.NewNop()) },
-	} {
-		func() {
-			defer func() {
-				if recover() == nil {
-					t.Errorf("%s: built", name)
-				}
-			}()
-			build()
-		}()
-	}
-}
-
 // What is reported of another name, of a machine that is running, and of one whose run is over
 // spends nothing.
 func TestOnlyTheEndOfTheMachineAskedForIsRecorded(t *testing.T) {

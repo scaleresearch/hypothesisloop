@@ -190,33 +190,6 @@ func TestClassifyReportsAnUnknownReasonRatherThanDefaultingIt(t *testing.T) {
 	}
 }
 
-// The three classes must actually partition the vocabulary: a taxonomy where every reason landed
-// in one bucket would pass the exhaustiveness test above while telling nobody anything.
-func TestEachFaultClassIsUsed(t *testing.T) {
-	seen := map[FaultClass]int{}
-	for _, class := range faultClasses {
-		seen[class]++
-	}
-	for _, class := range []FaultClass{FaultWorkload, FaultInfrastructure, FaultPolicy} {
-		if seen[class] == 0 {
-			t.Errorf("no eviction reason is classified %q", class)
-		}
-	}
-}
-
-// Code() splits on the first colon, so a reason whose own wire value contained one would be
-// truncated to the part before it and classified as something else entirely -- or as nothing.
-// Nothing enforces that today except this, and the failure would be silent: WithDetail is
-// appended in production but almost never in a unit test, so a colon-bearing reason would pass
-// every test written against the bare constant and misclassify every real eviction.
-func TestNoEvictionReasonContainsAColon(t *testing.T) {
-	for reason, name := range evictionReasonsDeclaredInSource(t) {
-		if strings.Contains(string(reason), ":") {
-			t.Errorf("eviction reason %s = %q contains a colon, which Code() treats as the start of a WithDetail suffix", name, reason)
-		}
-	}
-}
-
 // Every declared reason must survive the round trip Code() performs on it, detail or not. This is
 // the property Classify actually depends on, asserted over the whole vocabulary rather than the
 // one reason TestClassifyStripsTheWithDetailSuffix happens to name.

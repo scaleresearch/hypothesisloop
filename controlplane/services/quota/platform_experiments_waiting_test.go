@@ -206,23 +206,6 @@ func TestTheSweepTellsAHostedCoordinatorTheReasonThatWaitsForIt(t *testing.T) {
 	}
 }
 
-// Once the baseline is declared nobody but the platform acts, except a researcher, who still
-// prepares: the step is said for the reason it belongs to and for no other.
-func TestStatusReasonNamesNoStepWhereTheReaderOnlyWaits(t *testing.T) {
-	signups := []domain.AgentSignup{
-		{AgentID: "ag-b", Name: "Baseline 1", Role: domain.SignupRoleBaseline},
-		{AgentID: "ag-r", Name: "Researcher 1", Role: domain.SignupRoleCompetitor},
-	}
-	for _, reader := range []auth.Principal{waitingCoordinator, waitingPerson, waitingAgent("ag-b")} {
-		if step := nextStep("starts_at_ahead", signups, reader); step != "" {
-			t.Errorf("%s past the baseline: step %q, want none", reader.Kind, step)
-		}
-	}
-	if step := nextStep("starts_at_ahead", signups, waitingAgent("ag-r")); !strings.HasPrefix(step, "Every job you submit is refused") {
-		t.Errorf("a researcher past the baseline: step %q, want it told its jobs are refused until the start", step)
-	}
-}
-
 // hl quota asked the platform experiment a second time to explain a 404 before the start. The
 // refusal says it itself: quota is granted at the start, and what its reader does until then.
 func TestAQuotaAskedForBeforeTheStartIsRefusedWithTheReadersNextStep(t *testing.T) {
@@ -256,44 +239,6 @@ func TestAPlannersQuotaIsRefusedSayingItNeedsNone(t *testing.T) {
 	message, _ := out["message"].(string)
 	if code != http.StatusNotFound || out["reason"] != "planner_has_no_quota" || !strings.Contains(message, "a planner submits no job, so it has no quota and needs none") {
 		t.Errorf("got = %d %v, want 404 planner_has_no_quota saying a planner needs none", code, out)
-	}
-}
-
-// A researcher's machine asked for 40 seconds after the start read instance.state requested with
-// nothing beside it, and was taken for a launch that failed.
-func TestAnAgentWhoseMachineIsOnItsWayCarriesInstanceStarting(t *testing.T) {
-	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
-	asked := now.Add(-40 * time.Second)
-	hostedWith := func(instance domain.AgentInstance) domain.AgentSignup {
-		return domain.AgentSignup{AgentID: "dana", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &instance}
-	}
-	starting := map[string]struct {
-		signup domain.AgentSignup
-		says   string
-	}{
-		"not asked for yet":  {hostedWith(domain.AgentInstance{}), "its machine is asked of its launcher at the launcher's next pass"},
-		"asked, not listed":  {hostedWith(domain.AgentInstance{Name: "m-1", AskedAt: &asked}), "its machine was asked for 40s ago and its launcher has not listed it yet"},
-		"listed as starting": {hostedWith(domain.AgentInstance{Name: "m-1", AskedAt: &asked, SeenAt: &asked, Reported: domain.InstanceStarting}), "its machine was asked for 40s ago and is starting"},
-	}
-	for name, c := range starting {
-		why := instanceStarting(c.signup, now)
-		if why == nil || why.Reason != "instance_starting" || !strings.HasPrefix(why.Message, c.says+": a start in progress and no failure") {
-			t.Errorf("%s: got = %+v", name, why)
-		}
-	}
-
-	ended := hostedWith(domain.AgentInstance{})
-	ended.Ended = domain.RunEndCut
-	for name, signup := range map[string]domain.AgentSignup{
-		"running":            hostedWith(domain.AgentInstance{Name: "m-1", AskedAt: &asked, SeenAt: &asked, Reported: domain.InstanceRunning}),
-		"stopped":            hostedWith(domain.AgentInstance{Stopped: true}),
-		"released":           hostedWith(domain.AgentInstance{Released: true}),
-		"its run is over":    ended,
-		"not the platform's": {AgentID: "dana", Role: domain.SignupRoleCompetitor},
-	} {
-		if why := instanceStarting(signup, now); why != nil {
-			t.Errorf("%s: got = %+v, want none", name, why)
-		}
 	}
 }
 

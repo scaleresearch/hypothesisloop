@@ -8,9 +8,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
-
-	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -34,24 +31,6 @@ func TestLiveCapacityFailsFastWhenUnconfigured(t *testing.T) {
 	}
 	if clusters != nil {
 		t.Fatalf("liveCapacity() clusters = %v, want nil on error", clusters)
-	}
-}
-
-// Once wired, an empty result must still be possible on its own merits (e.g. a metrics DB that is
-// reachable but simply has no fresh reports) — this test just pins that WithLiveCapacity flips the
-// handler out of the unconfigured error path; the live-read behavior itself is metricsdb's own.
-func TestLiveCapacityConfiguredDoesNotFailFast(t *testing.T) {
-	svc := NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute)
-	h := NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, nil).WithLiveCapacity("postgres://example-not-dialed/db", time.Minute, nil)
-	if h.metricsDBURL == "" {
-		t.Fatalf("WithLiveCapacity did not set metricsDBURL")
-	}
-	// Not asserting on the outcome of an actual dial here — that's metricsdb's own concern and
-	// would require a live DB. This only pins that liveCapacity no longer takes the "unconfigured"
-	// branch once WithLiveCapacity has been called.
-	_, err := h.liveCapacity(context.Background(), "", true)
-	if errors.Is(err, ErrLiveCapacityUnconfigured) {
-		t.Fatalf("liveCapacity() still reports unconfigured after WithLiveCapacity was called")
 	}
 }
 

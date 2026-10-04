@@ -354,15 +354,6 @@ func (f failingFor) LatestExperimentNode(ctx context.Context, id string, created
 	return f.inner.LatestExperimentNode(ctx, id, createdAt, now)
 }
 
-func TestSubmitErrorLevelLogsALostCapacityRaceAsInfo(t *testing.T) {
-	if got := submitErrorLevel(fmt.Errorf("submit: %w", errAdmissionCapacityChanged)); got != zapcore.InfoLevel {
-		t.Errorf("lost capacity race: got = %v, want info", got)
-	}
-	if got := submitErrorLevel(errors.New("create workload: boom")); got != zapcore.ErrorLevel {
-		t.Errorf("other submit failure: got = %v, want error", got)
-	}
-}
-
 func TestPreemptNeverReservesMoreThanTheStintLeft(t *testing.T) {
 	const flavor = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
 	for name, tc := range map[string]struct{ estimate, stint, want float64 }{

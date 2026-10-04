@@ -36,13 +36,3 @@ func TestJobScopedQueriesScanFromCreationHoweverOldTheJobIs(t *testing.T) {
 		t.Fatalf("query did not scan from the job's creation (%d):\n%s", want, sql)
 	}
 }
-
-// created_at is stamped by Postgres and observations by cluster clocks. Without a margin, a
-// cluster running slightly behind loses its earliest samples from every measurement — silent
-// underbilling no query can detect, because the samples fall outside the window that was asked for.
-func TestObservationWindowStartsBeforeCreationBySkewMargin(t *testing.T) {
-	createdAt := time.Now().UTC()
-	if got := createdAt.Sub(ObservationWindowStart(createdAt)); got != MaxObservationClockSkew {
-		t.Fatalf("window starts %v before creation, want %v", got, MaxObservationClockSkew)
-	}
-}

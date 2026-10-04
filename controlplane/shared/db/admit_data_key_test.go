@@ -41,6 +41,10 @@ func admitDataKeyFixture(t *testing.T) (*PlatformExperimentsFullStore, *domain.E
 
 func noUsage(context.Context) (*domain.AgentQuota, error) { return &domain.AgentQuota{}, nil }
 
+func fortyHexChars() string {
+	return "0123456789abcdef0123456789abcdef01234567"
+}
+
 // The key is written with the row and read back with every experiment, so the reconcile answer
 // can hand it out without asking the store.
 func TestAdmitExperimentTxStoresTheDataKeyWithTheRow(t *testing.T) {

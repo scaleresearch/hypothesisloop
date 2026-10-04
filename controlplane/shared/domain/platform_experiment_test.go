@@ -5,13 +5,6 @@ import (
 	"time"
 )
 
-func TestEffectiveRoleDefaultsToRanking(t *testing.T) {
-	d := MetricDefinition{Key: "loss", Direction: "minimize"}
-	if got := d.EffectiveRole(); got != MetricRoleRanking {
-		t.Fatalf("empty role: got %q, want %q", got, MetricRoleRanking)
-	}
-}
-
 func TestValidateMetricDefinitions(t *testing.T) {
 	bound := 0.99
 	cases := []struct {

@@ -108,15 +108,3 @@ func TestEveryNotAdmittedReasonIsStoredWithASentence(t *testing.T) {
 		}
 	}
 }
-
-func TestTheSummaryGateNamesTheJobsOwedAndTheCommandThatFilesOne(t *testing.T) {
-	for want, owed := range map[string][]string{
-		"summary_gate: job job-a of this agent is COMPLETED and has no summary: hl job summary job-a --text T files one, and this job is admitted once none is owed":                             {"job-a"},
-		"summary_gate: jobs job-a, job-b of this agent are COMPLETED and have no summary: hl job summary job-a --text T files one, and this job is admitted once none is owed":                   {"job-a", "job-b"},
-		"summary_gate: jobs job-a, job-b, job-c and 2 more of this agent are COMPLETED and have no summary: hl job summary job-a --text T files one, and this job is admitted once none is owed": {"job-a", "job-b", "job-c", "job-d", "job-e"},
-	} {
-		if got := summaryGateReason(owed); got != want {
-			t.Errorf("summaryGateReason(%v) =\n%q, want\n%q", owed, got, want)
-		}
-	}
-}

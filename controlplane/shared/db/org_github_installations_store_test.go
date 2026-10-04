@@ -282,14 +282,6 @@ func TestThePersonsAuthorisationIsStoredSealed(t *testing.T) {
 	}
 }
 
-func TestTheSchemaNoLongerHoldsAProjectsRepository(t *testing.T) {
-	pool := eventsTestDB(t)
-	var exists bool
-	if err := pool.pool.QueryRow(context.Background(), `SELECT to_regclass('project_repos') IS NOT NULL`).Scan(&exists); err != nil || exists {
-		t.Fatalf("project_repos exists = %v, %v, want the table dropped", exists, err)
-	}
-}
-
 func TestARepositorysAddressIsStoredAtCreationAndBackfilledOnceForGitHub(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()

@@ -52,7 +52,6 @@ type Release struct {
 	Kinds       map[string][]string
 	ConfigMaps  map[string]corev1.ConfigMap
 	Deployments map[string]appsv1.Deployment
-	Services    map[string]corev1.Service
 	// StatefulSets are the stores the chart runs, and NetworkPolicies what may connect to each.
 	StatefulSets    map[string]appsv1.StatefulSet
 	NetworkPolicies map[string]networkingv1.NetworkPolicy
@@ -118,7 +117,6 @@ func Render(t testing.TB, values string, set ...string) *Release {
 		Kinds:       map[string][]string{},
 		ConfigMaps:  map[string]corev1.ConfigMap{},
 		Deployments: map[string]appsv1.Deployment{},
-		Services:    map[string]corev1.Service{},
 
 		StatefulSets:    map[string]appsv1.StatefulSet{},
 		NetworkPolicies: map[string]networkingv1.NetworkPolicy{},
@@ -149,10 +147,6 @@ func Render(t testing.TB, values string, set ...string) *Release {
 			var deployment appsv1.Deployment
 			decode(t, document, &deployment)
 			release.Deployments[deployment.Name] = deployment
-		case "Service":
-			var service corev1.Service
-			decode(t, document, &service)
-			release.Services[service.Name] = service
 		case "StatefulSet":
 			var statefulSet appsv1.StatefulSet
 			decode(t, document, &statefulSet)

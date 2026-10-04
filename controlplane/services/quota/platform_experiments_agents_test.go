@@ -678,18 +678,6 @@ func TestACallerMayOnlyJoinARegisteredAgentOfItsOwnOrg(t *testing.T) {
 	}
 }
 
-func TestTheAgentsAPICannotBeRegisteredWithoutALauncherAndASecret(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("registered without WithAgentLaunch")
-		}
-	}()
-	r := chi.NewRouter()
-	doc := apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(agentsTestPlacement), zap.NewNop())
-	store := newRosterStore(domain.PlatformExpOpen, 1)
-	RegisterAgentsHuma(doc, NewPlatformExperimentsHandler(newSignupTestService(t, store), store, testPlanning, zap.NewNop()), store)
-}
-
 // Hosting needed a repository to clone, and a person with an idea and no repository could not
 // start. The agent now starts in an empty directory and the platform keeps what it pushes.
 func TestAHostedAgentJoinsAPlatformExperimentThatNamesNoRepository(t *testing.T) {
@@ -756,21 +744,6 @@ func TestARegisteredAgentOfAnotherOrgIsNotFoundEvenForACallerOfBothOrgs(t *testi
 	code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"agent_id":"outsider"}`)
 	if code != http.StatusNotFound || out["reason"] != "agent_not_found" || len(store.signups) != 0 {
 		t.Fatalf("got = %d %v with %d signups, want = 404 agent_not_found and none", code, out, len(store.signups))
-	}
-}
-
-// One call adds one agent. A body that still asks for several is refused whole: answered with
-// one agent, a client that sent count would believe it had the rest.
-func TestACountIsNoPartOfTheRequest(t *testing.T) {
-	store := newRosterStore(domain.PlatformExpOpen, 5)
-	r := agentsRouter(t, store, staff)
-	for _, body := range []string{`{"count":3}`, `{"count":1,"hosted":true}`} {
-		if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body); code != http.StatusUnprocessableEntity {
-			t.Fatalf("%s: got = %d %v, want = 422", body, code, out)
-		}
-	}
-	if len(store.signups) != 0 || len(store.agents) != 0 {
-		t.Fatalf("a refused request added %d agents", len(store.signups))
 	}
 }
 

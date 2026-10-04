@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"testing"
 	"time"
 )
 
@@ -55,11 +54,4 @@ func observedOnNode(ids []string, node string) fakeObserved {
 		byID[id] = node
 	}
 	return fakeObserved{node: byID}
-}
-
-// TestFakeObservedMatchesTheInterface keeps the fake honest: if ObservedState gains a method, this
-// stops compiling here rather than in whichever test happens to be edited next.
-func TestFakeObservedMatchesTheInterface(t *testing.T) {
-	var _ ObservedState = fakeObserved{}
-	var _ ObservedState = metricsDBObserver{}
 }

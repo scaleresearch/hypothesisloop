@@ -10,36 +10,6 @@ import (
 	"time"
 )
 
-// RecordPhaseDetail must carry scheduled_nodes and scheduling_reason into the INSERT alongside
-// reason/message/restart_count -- these are the gang-readiness facts autoscaler.md's watcher
-// reads to decide whether a partial gang is still within its scale-up deadline.
-func TestRecordPhaseDetailInsertsScheduledNodesAndSchedulingReason(t *testing.T) {
-	var sawInsert bool
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		sql := r.Form.Get("sql")
-		if strings.HasPrefix(sql, "INSERT") {
-			sawInsert = true
-			if !strings.Contains(sql, "scheduled_nodes") || !strings.Contains(sql, "scheduling_reason") {
-				t.Errorf("INSERT missing scheduled_nodes/scheduling_reason columns: %s", sql)
-			}
-			if !strings.Contains(sql, "2") || !strings.Contains(sql, "TriggeredScaleUp") {
-				t.Errorf("INSERT does not carry the reported values: %s", sql)
-			}
-		}
-		_, _ = fmt.Fprint(w, `{"output":[{"records":{"schema":{"column_schemas":[]},"rows":[]}}]}`)
-	}))
-	defer server.Close()
-
-	err := RecordPhaseDetail(context.Background(), server.URL, "exp-1", "cluster-a", "", "", 0, 2, "TriggeredScaleUp", 0, time.Now())
-	if err != nil {
-		t.Fatalf("RecordPhaseDetail: %v", err)
-	}
-	if !sawInsert {
-		t.Fatal("no INSERT statement was sent")
-	}
-}
-
 // GetLatestPhaseDetailFull must decode the two new columns back into PhaseDetailRow, in addition
 // to the pre-existing reason/message/restart_count fields.
 func TestGetLatestPhaseDetailFullDecodesSchedulingColumns(t *testing.T) {

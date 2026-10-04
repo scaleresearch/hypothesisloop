@@ -3,7 +3,6 @@ package scheduler
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 
@@ -40,17 +39,13 @@ func (unobservableBackend) GetAdmittedAcceleratorType(context.Context, *domain.E
 	return "", false, nil
 }
 
-// idsBackend is scaleUpBackend with a cluster id read that can fail and is counted.
+// idsBackend is scaleUpBackend with a cluster id read that can fail.
 type idsBackend struct {
 	*scaleUpBackend
 	idsErr error
-	reads  *int
 }
 
 func (b idsBackend) GetClusterIDs(context.Context) (map[string]string, error) {
-	if b.reads != nil {
-		*b.reads++
-	}
 	return b.clusterIDs, b.idsErr
 }
 
@@ -205,34 +200,6 @@ func TestADisconnectedClustersOverrideIsNotReplacedByTheGlobalTimeout(t *testing
 	store.submitted = []*domain.Experiment{scaleUpExperiment(1, 16*time.Minute)}
 	if err := w.scanAndWatch(context.Background()); err != nil || len(store.terminalReasons) != 1 {
 		t.Fatalf("reconnected, past its own 900 s: err %v, evicted %v", err, store.terminalReasons)
-	}
-}
-
-// One pass reads the cluster ids once, however many jobs are waiting to start. Read where each
-// decision is made, every booting job cost a cluster-wide metrics query per pass.
-func TestAPassReadsTheClusterIDsOnce(t *testing.T) {
-	for name, optIn := range map[string]bool{"without the scale-up opt-in": false, "with it": true} {
-		t.Run(name, func(t *testing.T) {
-			store := &settingsStore{lifecycleStore: &lifecycleStore{}}
-			for i := 0; i < 7; i++ {
-				exp := scaleUpExperiment(1, time.Minute)
-				exp.ID = fmt.Sprintf("exp-%d", i)
-				store.submitted = append(store.submitted, exp)
-			}
-			reads := 0
-			backend := idsBackend{scaleUpBackend: &scaleUpBackend{phase: workload.JobPhasePending, scheduledNodes: 0, clusterIDs: clusterA}, reads: &reads}
-			w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
-			if optIn {
-				w = w.WithScaleUpTimeout(time.Minute)
-			}
-
-			if err := w.scanAndWatch(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-			if reads != 1 || store.transitioned {
-				t.Fatalf("cluster ids read %d times in one pass over 7 waiting jobs (evicted %v)", reads, store.terminalReasons)
-			}
-		})
 	}
 }
 

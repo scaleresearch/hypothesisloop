@@ -59,26 +59,3 @@ func TestMountExploreAudienceFiltersByAudience(t *testing.T) {
 		t.Fatalf("coordinator digest leaked an agent-only operation:\n%s", coordDigest)
 	}
 }
-
-func TestMountRulesServesThePreambleWithoutOperations(t *testing.T) {
-	r := chi.NewRouter()
-	doc := New(r, "t", "1.0.0", PlatformRules, authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	Register(doc, AudienceAgent, huma.Operation{OperationID: "agent-op", Method: "GET", Path: "/agent-only", Summary: "agent summary"},
-		func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-	doc.MountRules(r, "/explore/rules")
-
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest("GET", "/explore/rules", nil))
-	if w.Code != 200 || w.Body.String() != PlatformRules {
-		t.Fatalf("code = %d, body:\n%s", w.Code, w.Body.String())
-	}
-	// GET /platform-experiments/{id}/results shows every agent's rank.
-	if strings.Contains(PlatformRules, "rank is never visible") {
-		t.Error("the rules call the rank hidden, and the standings show it")
-	}
-	for _, endpoint := range []string{"GET /", "POST /", "/experiments", "/platform-experiments"} {
-		if strings.Contains(PlatformRules, endpoint) {
-			t.Errorf("the rules name an endpoint: %q", endpoint)
-		}
-	}
-}

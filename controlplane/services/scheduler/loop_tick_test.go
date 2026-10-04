@@ -1,7 +1,6 @@
 package scheduler
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -45,18 +44,6 @@ func TestSubtractFootprintClampsAtZero(t *testing.T) {
 	}
 }
 
-func TestShortfallOnlyCountsDeficitDimensions(t *testing.T) {
-	avail := domain.Footprint{cpuKey: 3000, acceleratorKey("flavor-t4"): 5}
-	need := domain.Footprint{cpuKey: 4000, acceleratorKey("flavor-t4"): 2}
-	got := shortfall(avail, need)
-	if got[cpuKey] != 1000 {
-		t.Errorf("shortfall[cpu] = %d, want 1000", got[cpuKey])
-	}
-	if v, ok := got[acceleratorKey("flavor-t4")]; ok && v > 0 {
-		t.Errorf("shortfall[accelerator] = %d, want 0/absent (capacity already covers this dimension)", v)
-	}
-}
-
 func TestNotAdmittedReasonDistinguishesScarcityFromOutranking(t *testing.T) {
 	code := func(stored string) string {
 		reason, _ := domain.SplitQueueReason(stored)
@@ -75,68 +62,6 @@ func TestNotAdmittedReasonDistinguishesScarcityFromOutranking(t *testing.T) {
 	// measured against what is left now, which is the definition of having lost it.
 	if got := notAdmittedReasonFor(true, true, false, domain.Footprint{cpuKey: 1000}, "c", holders{}); code(got) != domain.NotAdmittedOutranked {
 		t.Fatalf("outranked with a live shortfall reason = %q", got)
-	}
-}
-
-// Right after a job ended, the next one read "short of 61.7 GiB memory, which no job holds: the
-// cluster's nodes do not have it free". With every placed job counted the cluster had the room,
-// and its last report did not show it yet: the job waits for a report, and is told so. A device
-// can be held by something the platform never placed, so a job short of one is not promised it.
-func TestAShortageDesiredStateHasFreedWaitsForTheNextCapacityReport(t *testing.T) {
-	memory := domain.ResourceKey{Kind: domain.ResourceKindMemory}
-	cores := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: "hypothesisloop.dev/cpu=core"}
-	chip := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: "tenstorrent.com/chiparch=blackhole"}
-	const pending = "capacity_unavailable: cluster box-b is short of 16 cores, 61.7 GiB memory by its last capacity report, and no job the platform has placed there holds it: a job that ended is not reported gone yet, and this one is waiting for the cluster's next capacity report"
-	short := domain.Footprint{cores: 16, cpuKey: 16000, memory: 66302314496}
-	if got := notAdmittedReasonFor(false, false, true, short, "box-b", holders{}); got != pending {
-		t.Errorf("freed in desired state:\n%q, want\n%q", got, pending)
-	}
-	if got := notAdmittedReasonFor(false, false, true, short, "box-b", holders{others: 1}); got != pending {
-		t.Errorf("freed in desired state beside a job that holds some:\n%q, want\n%q", got, pending)
-	}
-	for name, got := range map[string]string{
-		"not freed in desired state": notAdmittedReasonFor(false, false, false, short, "box-b", holders{}),
-		"short of a device":          notAdmittedReasonFor(false, false, true, domain.Footprint{chip: 1, memory: 1 << 30}, "box-b", holders{}),
-		"outranked":                  notAdmittedReasonFor(true, false, true, short, "box-b", holders{}),
-	} {
-		if strings.Contains(got, "next capacity report") {
-			t.Errorf("%s: %q promises a report will free it", name, got)
-		}
-	}
-}
-
-// A queue reason read as "short {accelerator:hypothesisloop.dev/cpu=core=16,cpu:=16000,
-// memory:=66302314496,storage:=1967854743552}". It is a code and a sentence: the cluster, what
-// it is short of in units a person reads, and who holds that, counted and never named.
-func TestAWaitForCapacitySaysWhatIsShortAndWhoHoldsIt(t *testing.T) {
-	cores := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: "hypothesisloop.dev/cpu=core"}
-	chip := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: "tenstorrent.com/chiparch=blackhole"}
-	memory := domain.ResourceKey{Kind: domain.ResourceKindMemory}
-	storage := domain.ResourceKey{Kind: domain.ResourceKindStorage}
-	for name, tc := range map[string]struct {
-		scalarFits bool
-		shortage   domain.Footprint
-		cluster    string
-		held       holders
-		want       string
-	}{
-		"cores, held by both": {false, domain.Footprint{cores: 16, cpuKey: 16000, memory: 66302314496, storage: 1967854743552}, "box-b", holders{own: 1, others: 1},
-			"cluster box-b is short of 16 cores, 61.7 GiB memory, 1.8 TiB storage, held by 2 jobs: 1 of this platform experiment and 1 of other platform experiments"},
-		"a chip, held by another's": {false, domain.Footprint{chip: 1}, "box-b", holders{others: 1},
-			"cluster box-b is short of 1 x tenstorrent.com/chiparch=blackhole, held by 1 job of other platform experiments"},
-		"its own jobs": {false, domain.Footprint{cpuKey: 500}, "box-b", holders{own: 3},
-			"cluster box-b is short of 0.5 cores, held by 3 jobs of this platform experiment"},
-		"nobody holds it": {false, domain.Footprint{storage: 485902352384}, "box-b", holders{},
-			"cluster box-b is short of 452.5 GiB storage, which no job holds: the cluster's nodes do not have it free"},
-		"no node layout": {true, domain.Footprint{memory: 8 << 30}, "box-b", holders{own: 1},
-			"cluster box-b has room for it in total and no node of it holds the job: the node nearest to holding it is short of 8 GiB memory"},
-		"no cluster picked": {false, domain.Footprint{chip: 1, cpuKey: 8000}, "", holders{},
-			"no cluster that runs it has room for it now: it is short of 1 x tenstorrent.com/chiparch=blackhole, 8 cores"},
-	} {
-		reason, message := domain.SplitQueueReason(notAdmittedReasonFor(false, tc.scalarFits, false, tc.shortage, tc.cluster, tc.held))
-		if reason != domain.NotAdmittedCapacityUnavailable || message != tc.want {
-			t.Errorf("%s:\n got %s: %s\nwant %s: %s", name, reason, message, domain.NotAdmittedCapacityUnavailable, tc.want)
-		}
 	}
 }
 

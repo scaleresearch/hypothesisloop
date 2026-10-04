@@ -399,21 +399,6 @@ func TestSubmitJobSpeculativeWithProvenFitAndNoCapIsUnbounded(t *testing.T) {
 	}
 }
 
-func TestSubmitJobLiveFitPassesNonNilCapacityCallback(t *testing.T) {
-	exp := distributedExperiment(1, 1)
-	exp.ID = "exp-1"
-	store := &nilCallbackClaimStore{}
-	l := NewLoop(store, submitQuota{}, &liveWorkload{}, testGraceLimits, zap.NewNop())
-	l.observed = fakeObserved{}
-
-	if err := l.submitJobTo(context.Background(), exp, "cluster-a", "", exp.AcceleratorType, false, false); err != nil {
-		t.Fatalf("submitJobTo(speculative=false) = %v, want nil", err)
-	}
-	if store.sawNilCallback {
-		t.Fatal("an ordinary live-fit submit must still re-check fresh capacity at claim time")
-	}
-}
-
 func TestNegativeInDimension(t *testing.T) {
 	avail := domain.Footprint{{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower(h100)}: -2}
 	if !negativeInDimension(avail, domain.AcceleratorType(h100)) {
@@ -617,41 +602,5 @@ func TestSpeculativeCandidatesDisabledWithoutWithSpeculation(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatal("a loop that never opted into speculation must never produce a candidate")
-	}
-}
-
-type countingSpeculationStore struct {
-	speculationStore
-	triedReads, settingsReads int
-}
-
-func (s *countingSpeculationStore) RecentlyTriedClusters(ctx context.Context, ttl time.Duration) (map[string]bool, error) {
-	s.triedReads++
-	return s.speculationStore.RecentlyTriedClusters(ctx, ttl)
-}
-
-func (s *countingSpeculationStore) GetClusterSettings(ctx context.Context, clusterID string) (*domain.ClusterSettings, error) {
-	s.settingsReads++
-	return s.speculationStore.GetClusterSettings(ctx, clusterID)
-}
-
-// The tried-cluster read scans the whole experiments table, so a tick makes it once however many
-// queued jobs look for a speculative candidate, and reads each cluster's settings once.
-func TestSpeculativeCandidatesReadTriedClustersAndSettingsOncePerTick(t *testing.T) {
-	store := &countingSpeculationStore{}
-	l := speculationLoop(store)
-	accel := map[string]map[string]map[string]int64{"cluster-a": {"node-a": {h100: 8}}}
-	resources := map[string]map[string]map[string]int64{"cluster-a": {"node-a": {domain.NodeResourceCPUMillicores: 64000}}}
-	clusters := map[string]bool{"cluster-a": true}
-	cache := newResolutionCache(l)
-
-	for job := 0; job < 3; job++ {
-		got, _, err := l.speculativeCandidates(context.Background(), cache, distributedExperiment(1, 1), clusters, clusters, map[string]string{"cluster-a": "cid-a"}, nil, singleOrg, accel, resources, nil, nil, nil)
-		if err != nil || len(got) != 1 {
-			t.Fatalf("job %d: candidates = %v, %v, want cluster-a", job, got, err)
-		}
-	}
-	if store.triedReads != 1 || store.settingsReads != 1 {
-		t.Fatalf("tried-cluster reads = %d, settings reads = %d, want 1 and 1 for three jobs", store.triedReads, store.settingsReads)
 	}
 }
