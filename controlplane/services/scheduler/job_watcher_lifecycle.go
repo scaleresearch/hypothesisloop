@@ -288,6 +288,9 @@ func (w *JobWatcher) evictNotYetRunningWithFailover(ctx context.Context, exp *do
 	// Settle reads the reason off the experiment, so it has to be the one just persisted rather
 	// than whatever the row carried from a previous attempt.
 	exp.EvictionReason = string(reason)
+	if outcome != domain.TerminationSkipped {
+		w.wakeAdmission()
+	}
 	switch outcome {
 	case domain.TerminationSkipped:
 		// Already moved on (e.g. finished right before this check) — nothing to do.
@@ -433,6 +436,7 @@ func (w *JobWatcher) onFinished(ctx context.Context, exp *domain.Experiment, sta
 	if !updated {
 		return nil
 	}
+	w.wakeAdmission()
 
 	// Durably settle each resource dimension's observed cost. See settleQuota's doc comment for
 	// the crash/outage retry story.
@@ -469,6 +473,7 @@ func (w *JobWatcher) retryGang(ctx context.Context, exp *domain.Experiment) bool
 		// terminal status if it still can.
 		return false
 	}
+	w.wakeAdmission()
 	w.logger.Info("job_watcher: gang failed, requeued for a fresh attempt",
 		zap.String("id", exp.ID),
 		zap.Int("attempts_used", exp.RetriesUsed()+1),

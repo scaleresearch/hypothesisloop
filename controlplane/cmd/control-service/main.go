@@ -364,6 +364,7 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 		WithQuotaSettler(settler).
 		WithSpeculation(time.Duration(pcfg.Scheduler.TriedClusterTTLSeconds) * time.Second)
 	schedulerSvc = schedulerSvc.WithLoop(schedulerLoop).WithBuildAssigner(schedulerLoop)
+	watcher.WithCapacityFreed(schedulerLoop.Trigger)
 
 	// Admission (read-decide-write, not a CAS) and JobWatcher's per-experiment pollers must run
 	// on exactly one replica. leaderelection.Run holds a Postgres advisory lock to pick that

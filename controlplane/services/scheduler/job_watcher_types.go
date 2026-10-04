@@ -112,6 +112,10 @@ type JobWatcher struct {
 	// Loop.WithSpeculation, for the same reason (a deployment/test fake that never wired the new
 	// capability calls must not be asked to answer them).
 	scaleUpTimeout time.Duration
+
+	// freed wakes admission when a job lets go of what it held, so its room is refilled without
+	// waiting for the loop's heartbeat.
+	freed func()
 }
 
 // NewJobWatcher constructs a JobWatcher.
@@ -124,6 +128,18 @@ func NewJobWatcher(store JobStatusStore, backend JobBackendClient, settler Quota
 		backend: backend,
 		settler: settler,
 		logger:  logger,
+	}
+}
+
+// WithCapacityFreed has every job the watcher ends or requeues call wake.
+func (w *JobWatcher) WithCapacityFreed(wake func()) *JobWatcher {
+	w.freed = wake
+	return w
+}
+
+func (w *JobWatcher) wakeAdmission() {
+	if w.freed != nil {
+		w.freed()
 	}
 }
 
