@@ -1009,8 +1009,12 @@ func noPlatformExperiment(id string) error {
 
 // SetSummary records the operator's narrative verdict on a run and answers the platform
 // experiment with it. Unlike every other field, this is writable after the experiment closes: a
-// summary only exists once the run is over.
+// summary only exists once the run is over. The platform's record of the close is kept beside it
+// and answered after it, so a copy of the record read back with the summary is dropped.
 func (s *PlatformExperimentsService) SetSummary(ctx context.Context, id, summary string) (*domain.PlatformExperiment, error) {
+	if i := strings.Index(summary, closeRecordHeading); i >= 0 {
+		summary = strings.TrimRight(summary[:i], " \n")
+	}
 	if len(summary) > domain.MaxProseBytes {
 		return nil, refuseUpdate(422, "summary_too_long", "%s", tooLong("summary", len(summary)))
 	}
@@ -1060,7 +1064,7 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, by *d
 		return nil, fmt.Errorf("close: %w", err)
 	}
 	closed, err := s.stored(ctx, id)
-	if err != nil || pe.Status == domain.PlatformExpDraft || closed.Summary != "" {
+	if err != nil || pe.Status == domain.PlatformExpDraft {
 		return closed, err
 	}
 	// A job still live at the close is billed when it ends, and a record written before would
@@ -1098,10 +1102,14 @@ func (s *PlatformExperimentsService) RecordCloses(ctx context.Context) error {
 	return nil
 }
 
-// recordClose writes as the summary of pe, which closed with none after it was open and whose
-// every job ended and was settled, what the platform knows of it: why it closed, the jobs
-// submitted, each agent's last activity and how its run ended, and the spend, which is then
-// consumed_accelerator_hours whole. A coordinator still on its last turn writes over it.
+// closeRecordHeading opens the platform's record of a close.
+const closeRecordHeading = "Recorded by the platform:"
+
+// recordClose writes beside the summary of pe, which closed after it was open and whose every
+// job ended and was settled, what the platform knows of it: why it closed, the jobs submitted,
+// each agent's last activity and how its run ended, and the spend, which is then
+// consumed_accelerator_hours whole. It is answered after the coordinator's summary, which a
+// coordinator on its last turn still rewrites, so an interim summary never stands alone.
 func (s *PlatformExperimentsService) recordClose(ctx context.Context, pe *domain.PlatformExperiment) error {
 	why, err := s.closedReason(ctx, pe)
 	if err != nil {
@@ -1123,7 +1131,7 @@ func (s *PlatformExperimentsService) recordClose(ctx context.Context, pe *domain
 		submitted += agent.Submitted
 	}
 	var record strings.Builder
-	fmt.Fprintf(&record, "Recorded by the platform: it closed at %s with no summary written.\n\n", pe.ClosedAt.UTC().Format(time.RFC3339))
+	fmt.Fprintf(&record, "%s it closed at %s.\n\n", closeRecordHeading, pe.ClosedAt.UTC().Format(time.RFC3339))
 	fmt.Fprintf(&record, "Close reason: %s: %s.\n", why.Reason, why.Message)
 	fmt.Fprintf(&record, "Jobs submitted: %d.\n", submitted)
 	fmt.Fprintf(&record, "Spent: %g of the budget of %g accelerator hours.\n\nAgents:\n", *pe.ConsumedAcceleratorHours, pe.BudgetAcceleratorHours)
@@ -1224,8 +1232,18 @@ func runEnded(instance *domain.AgentInstance, finishedAt *time.Time, finishedRea
 // whose answer no person took up, which releases its machine, and an open one that is not running
 // by its BaselineDueAt: the machines that were to measure its baseline would be rented for nothing.
 func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
+	return s.sweepExpired(ctx, domain.PlatformExpDraft, domain.PlatformExpOpen, domain.PlatformExpRunning)
+}
+
+// SweepEnded is SweepExpired for running platform experiments alone: a run's end is what its
+// agents and its coordinator's last turn are timed by, so it is closed on time.
+func (s *PlatformExperimentsService) SweepEnded(ctx context.Context) error {
+	return s.sweepExpired(ctx, domain.PlatformExpRunning)
+}
+
+func (s *PlatformExperimentsService) sweepExpired(ctx context.Context, statuses ...domain.PlatformExperimentStatus) error {
 	now := time.Now()
-	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpDraft, domain.PlatformExpOpen, domain.PlatformExpRunning} {
+	for _, status := range statuses {
 		pes, err := s.store.ListPlatformExperimentsByStatus(ctx, status)
 		if err != nil {
 			return fmt.Errorf("list %s platform experiments: %w", status, err)
@@ -1393,6 +1411,23 @@ func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, inter
 			}
 			if err := s.TellCoordinators(ctx); err != nil {
 				s.logger.Error("tell_coordinators: scan", zap.Error(err))
+			}
+		}
+	}
+}
+
+// StartEndSweep runs SweepEnded on a ticker until ctx is cancelled: StartExpirySweep's interval
+// would close a run up to that long after its end.
+func (s *PlatformExperimentsService) StartEndSweep(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := s.SweepEnded(ctx); err != nil {
+				s.logger.Error("sweep_ended: scan", zap.Error(err))
 			}
 		}
 	}

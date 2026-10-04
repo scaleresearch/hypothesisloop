@@ -249,11 +249,15 @@ _STALL_PROMPT = f"Your last model call sent nothing for {_CALL_STALL_S} s and wa
 
 
 # On a stop a turn in flight is interrupted and the agent, working or idle, gets one turn of this
-# length to write down what it already knows. `podman stop` must allow for it: -t 90. Jobs still
-# in flight are left running and without a summary: nothing of theirs can be written yet. An agent
-# whose own action ended its run owes nothing: its turn in flight gets this long to end by itself
-# and no turn follows.
+# length to write down what it already knows, inside the wind-down its token and machine outlive
+# the end of its run by (domain.AgentWindDown, 120 s), with a run check of _RUN_CHECK_INTERVAL_S
+# to spare. Jobs still in flight are left running and without a summary: nothing of theirs can be
+# written yet. An agent whose own action ended its run owes nothing: its turn in flight gets this
+# long to end by itself and no turn follows.
 _SHUTDOWN_TURN_S = 60
+# A coordinator's last turn writes the run's final summary, which takes reading the standings and
+# the graph first: it is given most of domain.CoordinatorWindDown (300 s).
+_COORDINATOR_SHUTDOWN_TURN_S = 240
 _LAST_TURN = (
     "This is your last turn, about a minute long. Start nothing new and "
     "leave unfinished jobs running: they cannot be summarised yet. File the summaries you owe on "
@@ -266,10 +270,15 @@ _BASELINE_SHUTDOWN_PROMPT = _LAST_TURN.format(verdicts="")
 
 
 _COORDINATOR_SHUTDOWN_PROMPT = (
-    "This is your last turn, about a minute long. Start nothing new. "
-    "Write the summary with everything you have found (`hl platform-experiments summary`), and "
-    "where it says why the run ended, say what is stated above. Then end your turn."
+    f"This is your last turn, {_COORDINATOR_SHUTDOWN_TURN_S // 60} minutes long. Start nothing new. "
+    "Rewrite the summary as the record of the ended run (`hl platform-experiments summary --file FILE`), "
+    "in the past tense, with nothing in it still under way, and where it says why the run ended, say "
+    "what is stated above. The platform adds its own record of the close after it. Then end your turn."
 )
+
+
+def _shutdown_turn_s(setup: core.RunSetup) -> int:
+    return _COORDINATOR_SHUTDOWN_TURN_S if config.coordinates(setup.cfg) else _SHUTDOWN_TURN_S
 
 
 def _shutdown_prompt(setup: core.RunSetup) -> str | None:
@@ -518,12 +527,13 @@ def _restore_session(setup: core.RunSetup) -> None:
 
 async def _interrupt_on_stop(client, setup: core.RunSetup, stopped) -> None:
     """Interrupts the turn in flight as soon as stopped() is true. The turn of an agent whose own
-    action ended its run is its last and is interrupted only if it goes on past _SHUTDOWN_TURN_S."""
+    action ended its run is its last and is interrupted only if it goes on past _shutdown_turn_s."""
     while not stopped():
         await asyncio.sleep(1)
     if core.stop_cause(setup) is None:
-        log.info("stop requested after the agent ended its own run: its turn has %ss to end by itself", _SHUTDOWN_TURN_S)
-        await asyncio.sleep(_SHUTDOWN_TURN_S)
+        limit = _shutdown_turn_s(setup)
+        log.info("stop requested after the agent ended its own run: its turn has %ss to end by itself", limit)
+        await asyncio.sleep(limit)
     try:
         await client.interrupt()
     except Exception as e:
@@ -543,12 +553,13 @@ async def _last_turn(client, setup: core.RunSetup, watch_env: dict[str, str], ev
     for line in activity.event_lines(events, agent):
         print(line, flush=True)
     await client.query(prompt + ("\n\n" + updates.message(events, agent) if events else ""))
+    limit = _shutdown_turn_s(setup)
     try:
-        async with asyncio.timeout(_SHUTDOWN_TURN_S):
+        async with asyncio.timeout(limit):
             async for message in client.receive_response():
                 _log_message(message, agent)
     except TimeoutError:
-        log.info("last turn cut off after %ss", _SHUTDOWN_TURN_S)
+        log.info("last turn cut off after %ss", limit)
 
 
 def _in_call(message, in_call: bool) -> bool:
@@ -902,7 +913,9 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 # A batch that tells nothing held only a revision answered since: the wait goes on.
                 if told or not events or stopped():
                     break
-            if not told and await over(events):
+            # A batch that comes with the end of the run, the close among its events, opens the
+            # last turn rather than a turn of its own that the stop then cuts short.
+            if await over(events):
                 return None, False
             if told:
                 for line in activity.event_lines(events, cfg.agent_id):

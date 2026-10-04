@@ -21,7 +21,7 @@ import (
 type Store interface {
 	ListLauncherAgents(ctx context.Context, launcher string, windDown time.Duration) ([]db.LauncherAgent, error)
 	ListLauncherCoordinators(ctx context.Context, launcher string, windDown time.Duration) ([]db.LauncherCoordinator, error)
-	ReleaseInstances(ctx context.Context, launcher string, windDown time.Duration) error
+	ReleaseInstances(ctx context.Context, launcher string, windDown, coordinatorWindDown time.Duration) error
 	// The three writes take a hosted agent's id, or none for a platform experiment's coordinator.
 	AskInstance(ctx context.Context, platformExpID, agentID, name, launch string) error
 	ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity string) error
@@ -150,7 +150,7 @@ func (h *Handler) imageOf(agentImage string) string {
 
 // reconcile records what the launcher observed and evaluates everything else: which agents and
 // coordinators are the launcher's, which of them still run, which have domain.AgentWindDown
-// left, and which get another machine after theirs ended. One that cannot be evaluated is
+// (a coordinator domain.CoordinatorWindDown) left, and which get another machine after theirs ended. One that cannot be evaluated is
 // logged and left out and the rest of the list stands. It also records whether the launcher
 // holds machines once it has acted on the answer, which is what its removal waits for.
 //
@@ -159,14 +159,14 @@ func (h *Handler) imageOf(agentImage string) string {
 func (h *Handler) reconcile(ctx context.Context, launcher string, observed Observed, refusal *Refusal) (*Desired, error) {
 	// A machine this answer no longer names is taken down by the launcher: that is written
 	// down first, as the platform's own doing, so no later answer reads it as lost.
-	if err := h.store.ReleaseInstances(ctx, launcher, domain.AgentWindDown); err != nil {
+	if err := h.store.ReleaseInstances(ctx, launcher, domain.AgentWindDown, domain.CoordinatorWindDown); err != nil {
 		return nil, err
 	}
 	agents, err := h.store.ListLauncherAgents(ctx, launcher, domain.AgentWindDown)
 	if err != nil {
 		return nil, err
 	}
-	coordinators, err := h.store.ListLauncherCoordinators(ctx, launcher, domain.AgentWindDown)
+	coordinators, err := h.store.ListLauncherCoordinators(ctx, launcher, domain.CoordinatorWindDown)
 	if err != nil {
 		return nil, err
 	}

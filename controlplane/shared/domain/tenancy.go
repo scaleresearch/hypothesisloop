@@ -220,6 +220,10 @@ func (c Cluster) EnabledFor(orgID string) bool {
 // its token keeps working and its machine keeps running, so its last turn can file summaries.
 const AgentWindDown = 120 * time.Second
 
+// CoordinatorWindDown is AgentWindDown for a coordinator: its last turn after the close writes
+// the run's final summary, which takes reading the standings and the graph first.
+const CoordinatorWindDown = 5 * time.Minute
+
 // Tenancy places one platform experiment: org is always derived through its project. AgentID is
 // set when what was placed is a job, which belongs to one agent.
 type Tenancy struct {

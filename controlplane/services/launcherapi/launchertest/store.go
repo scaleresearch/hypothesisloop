@@ -21,8 +21,10 @@ type Store struct {
 	Err      error
 	WriteErr map[string]error
 	// Listed are the launchers the agents were listed for, and WindDown the last one asked with.
-	Listed   []string
-	WindDown time.Duration
+	// CoordinatorWindDown is the last one the coordinators were listed with.
+	Listed              []string
+	WindDown            time.Duration
+	CoordinatorWindDown time.Duration
 	// Over holds, by platform experiment and agent id joined with a slash, the agents whose run
 	// ended longer ago than the wind-down, and why: the launcher is no longer asked to keep
 	// them, and the next question releases their machines.
@@ -71,9 +73,10 @@ func (s *Store) ListLauncherAgents(_ context.Context, launcher string, windDown 
 	return listed, s.Err
 }
 
-func (s *Store) ListLauncherCoordinators(_ context.Context, launcher string, _ time.Duration) ([]db.LauncherCoordinator, error) {
+func (s *Store) ListLauncherCoordinators(_ context.Context, launcher string, windDown time.Duration) ([]db.LauncherCoordinator, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.CoordinatorWindDown = windDown
 	listed := []db.LauncherCoordinator{}
 	for _, coordinator := range s.Coordinators {
 		if coordinator.Launcher == launcher {
@@ -84,7 +87,7 @@ func (s *Store) ListLauncherCoordinators(_ context.Context, launcher string, _ t
 }
 
 // ReleaseInstances records the machines of the agents in Over as released by the platform.
-func (s *Store) ReleaseInstances(_ context.Context, launcher string, _ time.Duration) error {
+func (s *Store) ReleaseInstances(_ context.Context, launcher string, _, _ time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.Err != nil {

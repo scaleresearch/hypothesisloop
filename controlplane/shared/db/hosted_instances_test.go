@@ -371,7 +371,9 @@ func TestALaunchersTokenFollowsItsRow(t *testing.T) {
 	using := []string{pe, coordinated}
 	slices.Sort(using)
 	refused("with an agent and a coordinator in open platform experiments", using...)
-	setPEStatus(t, pool, coordinated, domain.PlatformExpClosed, domain.AgentWindDown+time.Minute)
+	setPEStatus(t, pool, coordinated, domain.PlatformExpClosed, domain.AgentWindDown+time.Second)
+	refused("inside a coordinator's wind-down, past an agent's", using...)
+	setPEStatus(t, pool, coordinated, domain.PlatformExpClosed, domain.CoordinatorWindDown+time.Second)
 	refused("with an agent in an open platform experiment", pe)
 	setPEStatus(t, pool, pe, domain.PlatformExpClosed, domain.AgentWindDown/2)
 	refused("inside the wind-down of its last platform experiment", pe)
@@ -692,7 +694,7 @@ func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t 
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
 	launcher := "launcher-" + uuid.New().String()[:8]
-	const windDown = 2 * time.Minute
+	const windDown, coordinatorWindDown = 2 * time.Minute, 5 * time.Minute
 	running := "running"
 	rent := func(pe, agent, name string) {
 		t.Helper()
@@ -705,7 +707,7 @@ func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t 
 	}
 	release := func() {
 		t.Helper()
-		if err := pes.ReleaseInstances(ctx, launcher, windDown); err != nil {
+		if err := pes.ReleaseInstances(ctx, launcher, windDown, coordinatorWindDown); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -741,13 +743,13 @@ func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t 
 	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET proposed_at = now() - make_interval(secs => $2), planner_ends_at = now() - make_interval(secs => $2) WHERE id = $1`, draft, (windDown + time.Second).Seconds()); err != nil {
 		t.Fatal(err)
 	}
-	for _, pe := range []string{closing, coordinated} {
-		setPEStatus(t, pool, pe, domain.PlatformExpClosed, windDown+time.Second)
-	}
-	// Within the wind-down a machine is still the launcher's to keep.
+	setPEStatus(t, pool, closing, domain.PlatformExpClosed, windDown+time.Second)
+	setPEStatus(t, pool, coordinated, domain.PlatformExpClosed, coordinatorWindDown+time.Second)
+	// Within its wind-down, which outlasts an agent's, a coordinator's machine is still the
+	// launcher's to keep.
 	fresh := createTestPEWithCoordinator(t, pool, launcher)
 	rent(fresh, "", "fresh-coordinator-machine")
-	setPEStatus(t, pool, fresh, domain.PlatformExpClosed, time.Second)
+	setPEStatus(t, pool, fresh, domain.PlatformExpClosed, windDown+time.Second)
 	release()
 	release()
 
@@ -932,7 +934,7 @@ func TestWhatAHostedAgentIsDoingIsKeptOnItsRowAndAnsweredWhereItIsRead(t *testin
 	if err := pes.SetProposal(ctx, draft, []byte(`{}`), Proposed{WaitUntil: time.Now().UTC().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := pes.ReleaseInstances(ctx, launcher, 0); err != nil {
+	if err := pes.ReleaseInstances(ctx, launcher, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := pes.GetPlatformExperiment(ctx, draft); err != nil || got.Activity != nil || said(draft, planner) != nil {

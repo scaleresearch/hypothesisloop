@@ -378,6 +378,8 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 			go settlementReconciler.Start(leaderCtx)
 			// Auto-close platform experiments past their ends_at deadline.
 			go expQuotaSvc.StartExpirySweep(leaderCtx, 60*time.Second)
+			// A run closes within seconds of its ends_at.
+			go expQuotaSvc.StartEndSweep(leaderCtx, 5*time.Second)
 			// A draft's create wakes this pass on the leader; the interval covers one created on
 			// another replica and one left by a restart.
 			go expQuotaSvc.StartRepositoryPass(leaderCtx, 5*time.Second)

@@ -144,6 +144,12 @@ ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS proposed_at TIMESTAMPT
 -- decline answers the goal as a proposal does, so it sets proposed_at and clears proposal, and
 -- the next proposal clears it. Empty when the planner never declined.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS declined_reason TEXT NOT NULL DEFAULT '';
+-- The platform's record of a close (quota.recordClose), kept beside the coordinator's summary and
+-- answered after it, so a summary written before the close never stands alone as the record.
+-- Empty until written. A record that once was written as the summary itself moves here.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS close_record TEXT NOT NULL DEFAULT '';
+UPDATE platform_experiments SET close_record = summary, summary = ''
+WHERE close_record = '' AND summary LIKE 'Recorded by the platform:%';
 -- The completed job that measured the baseline, and the estimate of a job that states none: the
 -- hours that job was observed running, with headroom (0 when it was too short to be observed).
 -- Both are written when the baseline is declared, and a platform experiment starts only with

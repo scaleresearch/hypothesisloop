@@ -153,7 +153,7 @@ func (a *Authenticator) derived(ctx context.Context, token string) (Principal, e
 		if tenancy == nil {
 			return Principal{}, unauthenticated("platform experiment %s does not exist", p.PlatformExperimentID)
 		}
-		if a.woundDown(closedAt) {
+		if a.woundDownAfter(closedAt, domain.CoordinatorWindDown) {
 			return Principal{}, unauthenticated("platform experiment %s is closed", p.PlatformExperimentID)
 		}
 		p = p.within(tenancy)
@@ -206,9 +206,14 @@ func (a *Authenticator) derived(ctx context.Context, token string) (Principal, e
 
 // woundDown reports whether a token's time after its run ended has run out. An agent's run ends
 // when its platform experiment closed, it was cut, it finished, or for a planner its answer to
-// its draft was stored. A coordinator's ends when its platform experiment closed.
+// its draft was stored. A coordinator's ends when its platform experiment closed, and its token
+// works for domain.CoordinatorWindDown after.
 func (a *Authenticator) woundDown(endedAt *time.Time) bool {
-	return endedAt != nil && !a.now().Before(endedAt.Add(domain.AgentWindDown))
+	return a.woundDownAfter(endedAt, domain.AgentWindDown)
+}
+
+func (a *Authenticator) woundDownAfter(endedAt *time.Time, windDown time.Duration) bool {
+	return endedAt != nil && !a.now().Before(endedAt.Add(windDown))
 }
 
 func (p Principal) within(t *domain.Tenancy) Principal {

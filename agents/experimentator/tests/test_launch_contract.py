@@ -48,6 +48,11 @@ class StopSignalTest(unittest.TestCase):
         # the close or the cut, and the signal arrives one launcher pass into it.
         self.assertLessEqual(run._SHUTDOWN_TURN_S, 90)
 
+    def test_the_coordinators_last_turn_fits_inside_its_own_wind_down(self):
+        # domain.CoordinatorWindDown is 300 s: the coordinator writes the final summary in it.
+        self.assertLessEqual(run._COORDINATOR_SHUTDOWN_TURN_S, 300 - 60)
+        self.assertGreater(run._COORDINATOR_SHUTDOWN_TURN_S, run._SHUTDOWN_TURN_S)
+
 
 class ErrorTurnClient:
     """Ends its one turn with the error text the test set."""

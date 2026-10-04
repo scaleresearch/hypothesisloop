@@ -311,7 +311,7 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 	}
 	// A revision then gives the draft back, and the planner has a plan to make again, on a
 	// machine that owes nothing to the restarts of the one before.
-	if err := pes.ReleaseInstances(ctx, launcher, windDown); err != nil {
+	if err := pes.ReleaseInstances(ctx, launcher, windDown, windDown); err != nil {
 		t.Fatal(err)
 	}
 	if err := pes.Revise(ctx, pe, "and a second seed", by, until); err != nil {

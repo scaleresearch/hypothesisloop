@@ -196,6 +196,30 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.run_ends_while_idle("generalist", {"ended": "cut"}, {"status": "running"}), [
             "Begin.", "You are being stopped because you were cut from the platform experiment at a stage boundary. " + run._SHUTDOWN_PROMPT])
 
+    # Run 6: the close arrived as an update, was handed over as a turn of its own and cut by the
+    # stop four seconds later, and only then did the last turn start. A batch that comes with the
+    # end of the run opens the last turn, with the batch in it.
+    async def test_a_batch_that_comes_with_the_close_opens_the_last_turn(self):
+        closed_event = {"kind": "platform_experiment.status", "subject": "pe-1", "value": "closed"}
+        experiment = {"status": "running"}
+
+        async def the_close(env, stopped, idle_s):
+            experiment.update(status="closed", closed_at="2026-01-01T02:48:05Z", close_reason="end_time_reached")
+            return [closed_event]
+
+        setup = _setup()
+        setup.cfg.flavor = "coordinator"
+        setup.client = SimpleNamespace(get_platform_experiment=lambda _id: experiment, get_signup=lambda *_: {})
+        with mock.patch.object(run, "ClaudeSDKClient", IdleClient), \
+                mock.patch.object(run.updates, "next_batch", the_close), \
+                mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=[])), \
+                contextlib.redirect_stdout(io.StringIO()):
+            await asyncio.wait_for(run._run_one_session(setup, "m", None, [False]), timeout=5)
+        self.assertEqual(HangingClient.instances[-1].queries, [
+            "Begin.", "You are being stopped because the platform experiment reached its end time and the platform closed it at "
+                      "2026-01-01T02:48:05Z. " + run._COORDINATOR_SHUTDOWN_PROMPT + "\n\nPlatform updates:\n"
+                      "platform_experiment.status pe-1 closed"])
+
     async def test_a_refused_token_gets_no_last_turn(self):
         refused = run.core.api_client.APIError("GET", "http://api/x", 401, "unauthenticated")
         self.assertEqual(await self.run_ends_while_idle("generalist", refused, {"status": "running"}), ["Begin."])

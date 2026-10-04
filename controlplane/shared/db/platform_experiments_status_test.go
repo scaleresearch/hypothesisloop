@@ -187,19 +187,41 @@ func TestARunWaitsForItsFirstResearchersMachineWithinItsRun(t *testing.T) {
 	}
 }
 
-// The platform's record of a close is written only where nobody wrote a summary: a coordinator's
-// summary written meanwhile stands.
-func TestTheRecordOfACloseIsWrittenOnlyWhereThereIsNoSummary(t *testing.T) {
+// The platform's record of a close is written once and kept beside the coordinator's summary,
+// after it: a summary written before the close never stands alone as the record, and one
+// written after it replaces only the coordinator's part. A record that was once written as the
+// summary itself moves beside it when the schema is applied.
+func TestTheRecordOfACloseIsKeptBesideTheSummary(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
+	summary := func() string {
+		t.Helper()
+		got, err := pes.GetPlatformExperiment(ctx, pe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		listed, err := pes.ListPlatformExperimentsByStatus(ctx, got.Status)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, one := range listed {
+			if one.ID == pe && one.Summary != got.Summary {
+				t.Fatalf("listed with summary %q, read with %q", one.Summary, got.Summary)
+			}
+		}
+		return got.Summary
+	}
 	if err := pes.RecordClose(ctx, pe, "too early"); err != nil {
 		t.Fatal(err)
 	}
-	if open, err := pes.GetPlatformExperiment(ctx, pe); err != nil || open.Summary != "" {
-		t.Fatalf("an open one: summary %q, %v, want none", open.Summary, err)
+	if got := summary(); got != "" {
+		t.Fatalf("an open one: summary %q, want none", got)
+	}
+	if err := pes.SetPlatformExperimentSummary(ctx, pe, "Status: running."); err != nil {
+		t.Fatal(err)
 	}
 	if err := pes.ClosePlatformExperiment(ctx, pe, nil); err != nil {
 		t.Fatal(err)
@@ -209,8 +231,28 @@ func TestTheRecordOfACloseIsWrittenOnlyWhereThereIsNoSummary(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if closed, err := pes.GetPlatformExperiment(ctx, pe); err != nil || closed.Summary != "the record" {
-		t.Fatalf("closed: summary %q, %v, want the first record alone", closed.Summary, err)
+	if got := summary(); got != "Status: running.\n\nthe record" {
+		t.Fatalf("closed: summary %q, want the coordinator's and the first record after it", got)
+	}
+	if err := pes.SetPlatformExperimentSummary(ctx, pe, "The run found it."); err != nil {
+		t.Fatal(err)
+	}
+	if got := summary(); got != "The run found it.\n\nthe record" {
+		t.Fatalf("rewritten after the close: summary %q, want the new one and the record", got)
+	}
+
+	exec(t, pool, `UPDATE platform_experiments SET summary = 'Recorded by the platform: it closed.', close_record = '' WHERE id = $1`, pe)
+	if err := applySchemaAt(ctx, testDSN()); err != nil {
+		t.Fatal(err)
+	}
+	if got := summary(); got != "Recorded by the platform: it closed." {
+		t.Fatalf("an old record after the schema is applied: summary %q", got)
+	}
+	if err := pes.SetPlatformExperimentSummary(ctx, pe, "Written after."); err != nil {
+		t.Fatal(err)
+	}
+	if got := summary(); got != "Written after.\n\nRecorded by the platform: it closed." {
+		t.Fatalf("an old record kept beside a summary: %q", got)
 	}
 }
 

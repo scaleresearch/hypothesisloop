@@ -134,8 +134,8 @@ func TestTheAnswerIsTheLaunchersRunningInstancesAndItsEndingOnes(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("status = %d: %s", code, raw)
 	}
-	if !reflect.DeepEqual(store.Listed, []string{"main"}) || store.WindDown != domain.AgentWindDown {
-		t.Fatalf("store asked for %v with wind-down %s", store.Listed, store.WindDown)
+	if !reflect.DeepEqual(store.Listed, []string{"main"}) || store.WindDown != domain.AgentWindDown || store.CoordinatorWindDown != domain.CoordinatorWindDown {
+		t.Fatalf("store asked for %v with wind-down %s, coordinators %s", store.Listed, store.WindDown, store.CoordinatorWindDown)
 	}
 	desired := decode(t, raw)
 	if len(desired.Instances) != 2 || len(desired.Ending) != 2 {

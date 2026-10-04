@@ -142,6 +142,9 @@ func (s *summarizedStore) SetPlatformExperimentSummary(_ context.Context, id, su
 	}
 	for _, pe := range s.created {
 		if pe.ID == id {
+			if record := s.records[id]; record != "" {
+				summary = strings.TrimLeft(summary+"\n\n"+record, "\n")
+			}
 			pe.Summary = summary
 			return nil
 		}

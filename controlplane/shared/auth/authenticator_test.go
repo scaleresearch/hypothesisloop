@@ -177,7 +177,7 @@ func TestADerivedTokenStopsWorkingWhenItsRowSaysSo(t *testing.T) {
 		"agent cut long ago in a platform experiment just closed":     {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.cutAt["pe-a/agent-1"] = woundDown; d.closedAt["pe-a"] = testNow }},
 		"planner that answered its draft a wind-down ago":             {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.answeredAt["pe-a/agent-1"] = woundDown }},
 		"agent that finished a wind-down ago":                         {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.finishedAt["pe-a/agent-1"] = woundDown }},
-		"coordinator of a platform experiment closed a wind-down ago": {CoordinatorScope("pe-a"), func(d *fakeDirectory) { d.closedAt["pe-a"] = woundDown }},
+		"coordinator of a platform experiment closed a wind-down ago": {CoordinatorScope("pe-a"), func(d *fakeDirectory) { d.closedAt["pe-a"] = testNow.Add(-domain.CoordinatorWindDown) }},
 		"coordinator of a missing platform experiment":                {CoordinatorScope("pe-missing"), func(*fakeDirectory) {}},
 	} {
 		a, directory := newTestAuthenticator(t)
@@ -216,7 +216,8 @@ func TestAnAgentTokenOutlivesTheEndOfItsRunByTheWindDownOnly(t *testing.T) {
 }
 
 // A coordinator writes its closing summary after the close, in the wind-down its machine is kept
-// for. Its token says the experiment is closed for as long as it works, and works no longer.
+// for, longer than an agent's. Its token says the experiment is closed for as long as it works,
+// and works no longer.
 func TestACoordinatorTokenOutlivesCloseByTheWindDownOnlyAndSaysSo(t *testing.T) {
 	a, directory := newTestAuthenticator(t)
 	ctx := context.Background()
@@ -227,7 +228,8 @@ func TestACoordinatorTokenOutlivesCloseByTheWindDownOnlyAndSaysSo(t *testing.T) 
 	}
 	for name, closedAt := range map[string]time.Time{
 		"closed this instant":                  testNow,
-		"closed a second short of a wind-down": testNow.Add(-domain.AgentWindDown + time.Second),
+		"closed an agent's wind-down ago":      testNow.Add(-domain.AgentWindDown),
+		"closed a second short of a wind-down": testNow.Add(-domain.CoordinatorWindDown + time.Second),
 	} {
 		directory.closedAt["pe-a"] = closedAt
 		closed, err := a.Authenticate(ctx, token)
@@ -235,7 +237,7 @@ func TestACoordinatorTokenOutlivesCloseByTheWindDownOnlyAndSaysSo(t *testing.T) 
 			t.Fatalf("%s: got = %+v, %v, want it admitted and marked closed", name, closed, err)
 		}
 	}
-	directory.closedAt["pe-a"] = testNow.Add(-domain.AgentWindDown)
+	directory.closedAt["pe-a"] = testNow.Add(-domain.CoordinatorWindDown)
 	p, err := a.Authenticate(ctx, token)
 	assertRefused(t, "a wind-down after the close", p, err)
 }

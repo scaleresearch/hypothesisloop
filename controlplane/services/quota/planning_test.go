@@ -328,6 +328,46 @@ func TestAnOpenExperimentNotRunningByItsBaselineDeadlineIsClosed(t *testing.T) {
 	}
 }
 
+// Run 6 closed 59 s after its ends_at, on the minute tick of the expiry sweep. SweepEnded, on
+// its own short tick, closes a running one past its end and leaves what the minute tick tends.
+func TestSweepEndedClosesARunPastItsEndAndNothingElse(t *testing.T) {
+	now := time.Now().UTC()
+	ended := &domain.PlatformExperiment{ID: "pe-ended", ProjectID: "prj-a", Status: domain.PlatformExpRunning, CreatedAt: now.Add(-2 * time.Hour),
+		StartedAt: now.Add(-time.Hour), EndsAt: now.Add(-time.Second), DurationHours: 1, BudgetAcceleratorHours: 6, Stages: []domain.Stage{{LengthPct: 100}}}
+	going := &domain.PlatformExperiment{ID: "pe-going", ProjectID: "prj-a", Status: domain.PlatformExpRunning, CreatedAt: now.Add(-2 * time.Hour),
+		StartedAt: now.Add(-time.Hour), EndsAt: now.Add(time.Minute), DurationHours: 1, BudgetAcceleratorHours: 6, Stages: []domain.Stage{{LengthPct: 100}}}
+	late := &domain.PlatformExperiment{ID: "pe-late", ProjectID: "prj-a", Status: domain.PlatformExpOpen, CreatedAt: now.Add(-time.Hour),
+		DurationHours: 1, BudgetAcceleratorHours: 6, BaselineDueAt: now.Add(-time.Minute), Stages: []domain.Stage{{LengthPct: 100}}}
+	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{ended, going, late}}}
+	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute)
+	if err := svc.SweepEnded(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if ended.Status != domain.PlatformExpClosed || going.Status != domain.PlatformExpRunning || late.Status != domain.PlatformExpOpen {
+		t.Fatalf("got ended %s, going %s, late %s, want closed, running and open", ended.Status, going.Status, late.Status)
+	}
+}
+
+// A coordinator that rewrites its summary after the close from the one it read back, the record
+// included, leaves the record once, after its words.
+func TestASummaryWrittenWithTheRecordInItKeepsTheRecordOnce(t *testing.T) {
+	now := time.Now().UTC()
+	pe := &domain.PlatformExperiment{ID: "pe-ended", ProjectID: "prj-a", Status: domain.PlatformExpRunning, CreatedAt: now.Add(-2 * time.Hour),
+		StartedAt: now.Add(-time.Hour), EndsAt: now.Add(-time.Second), DurationHours: 1, BudgetAcceleratorHours: 6, Stages: []domain.Stage{{LengthPct: 100}}}
+	store := &summarizedStore{statusStore: statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}}}}
+	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute)
+	if err := svc.SweepExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	record := pe.Summary
+	if _, err := svc.SetSummary(context.Background(), pe.ID, "The run found it.\n\n"+record); err != nil {
+		t.Fatal(err)
+	}
+	if pe.Summary != "The run found it.\n\n"+record {
+		t.Fatalf("summary = %q, want the coordinator's words and the record once", pe.Summary)
+	}
+}
+
 // Run 2 closed at its baseline deadline with no coordinator ever started: its summary stayed
 // empty and the close message did not say that no job was ever submitted.
 func TestAnExperimentThatClosesWithNoSummaryIsGivenTheRecordOfItsClose(t *testing.T) {
@@ -349,10 +389,23 @@ func TestAnExperimentThatClosesWithNoSummaryIsGivenTheRecordOfItsClose(t *testin
 			t.Errorf("summary = %q, want it to say %q", pe.Summary, want)
 		}
 	}
-	written := pe.Summary
-	pe.Summary = "the coordinator's own"
-	if err := store.RecordClose(context.Background(), pe.ID, written); err != nil || pe.Summary != "the coordinator's own" {
-		t.Errorf("a record over a summary written meanwhile: got = %q, %v, want the summary kept", pe.Summary, err)
+}
+
+// Run 6's coordinator wrote a summary mid-run ("Status: running") and its rewrite at the close
+// was cut off: the close record was skipped because a summary existed, so the stale one stood
+// alone. The platform writes its record of every close, after whatever summary there is.
+func TestTheRecordOfACloseFollowsASummaryWrittenBefore(t *testing.T) {
+	now := time.Now().UTC()
+	pe := &domain.PlatformExperiment{ID: "pe-ended", ProjectID: "prj-a", Status: domain.PlatformExpRunning, CreatedAt: now.Add(-2 * time.Hour),
+		StartedAt: now.Add(-time.Hour), EndsAt: now.Add(-time.Second), DurationHours: 1, BudgetAcceleratorHours: 6,
+		Stages: []domain.Stage{{LengthPct: 100}}, Summary: "Status: running. Researchers are at work."}
+	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}}}
+	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute)
+	if err := svc.SweepExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if pe.Status != domain.PlatformExpClosed || !strings.HasPrefix(pe.Summary, "Status: running. Researchers are at work.\n\nRecorded by the platform: it closed at ") {
+		t.Fatalf("status %s, summary %q, want closed with the record after the summary written before", pe.Status, pe.Summary)
 	}
 }
 
@@ -440,6 +493,7 @@ func noUsage(t *testing.T) string {
 type statusStore struct {
 	createdStore
 	unsettled map[string]bool
+	records   map[string]string
 }
 
 func (s *statusStore) JobsSettled(_ context.Context, id string) (bool, error) {
@@ -449,7 +503,7 @@ func (s *statusStore) JobsSettled(_ context.Context, id string) (bool, error) {
 func (s *statusStore) ClosesToRecord(context.Context, time.Duration) ([]string, error) {
 	var ids []string
 	for _, pe := range s.created {
-		if pe.Status == domain.PlatformExpClosed && pe.Summary == "" && !s.unsettled[pe.ID] {
+		if pe.Status == domain.PlatformExpClosed && s.records[pe.ID] == "" && !s.unsettled[pe.ID] {
 			ids = append(ids, pe.ID)
 		}
 	}
@@ -484,10 +538,15 @@ func (s *statusStore) AgentJobsByAgent(context.Context, string) (map[string]db.A
 	return map[string]db.AgentJobs{}, nil
 }
 
+// RecordClose keeps the first record and answers it after the summary, as the store does.
 func (s *statusStore) RecordClose(_ context.Context, id, record string) error {
 	for _, pe := range s.created {
-		if pe.ID == id && pe.Status == domain.PlatformExpClosed && pe.Summary == "" {
-			pe.Summary = record
+		if pe.ID == id && pe.Status == domain.PlatformExpClosed && s.records[id] == "" {
+			if s.records == nil {
+				s.records = map[string]string{}
+			}
+			s.records[id] = record
+			pe.Summary = strings.TrimLeft(pe.Summary+"\n\n"+record, "\n")
 		}
 	}
 	return nil

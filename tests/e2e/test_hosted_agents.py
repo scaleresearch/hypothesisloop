@@ -499,7 +499,7 @@ def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_
 
         # For its wind-down after the close its token reads and writes the summary, and nothing else.
         as_coordinator.hl("platform-experiments", "summary", "--platform-experiment", pe_id, "--text", "the final summary")
-        assert as_coordinator.get_json(f"/platform-experiments/{pe_id}")["summary"] == "the final summary"
+        assert as_coordinator.get_json(f"/platform-experiments/{pe_id}")["summary"].startswith("the final summary")
         late = as_coordinator.patch(f"/platform-experiments/{pe_id}", changed)
         assert late.status_code in (403, 409), f"a description update after the close: {late.status_code} {late.text}"
     finally:
@@ -547,7 +547,7 @@ def test_a_coordinator_closes_its_platform_experiment_through_hl(with_repo: API,
         as_coordinator.hl("platform-experiments", "summary", "--platform-experiment", pe_id, "--text", "why it is closed")
         as_coordinator.hl("platform-experiments", "close", "--platform-experiment", pe_id)
         pe = with_repo.get_json(f"/platform-experiments/{pe_id}")
-        assert pe["status"] == "closed" and pe["summary"] == "why it is closed", pe
+        assert pe["status"] == "closed" and pe["summary"].startswith("why it is closed"), pe
     finally:
         with_repo.close_platform_experiment(pe_id)
 

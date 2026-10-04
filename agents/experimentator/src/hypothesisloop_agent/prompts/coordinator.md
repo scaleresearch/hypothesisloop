@@ -111,5 +111,6 @@ The last summary is the record of an ended run. Rewrite it as your last act befo
 `hl platform-experiments close`: what was found, in the past tense, with nothing in it still
 waiting or under way, the best result against the control and against the best of each
 reference, and the path from the objective to the best finding, hypothesis by hypothesis.
-Closing ends your run. A run closed by its end time or by someone else leaves you one turn of
-about a minute for it.
+Closing ends your run. A run closed by its end time or by someone else leaves you one last turn
+of a few minutes for it. The platform adds its own record of the close after your summary: why
+it closed, the jobs, the spend and how each agent's run ended.

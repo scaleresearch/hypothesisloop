@@ -205,7 +205,8 @@ WHERE pe.id = $1 AND pe.status = 'draft' AND pe.proposed_at IS NULL
 // a machine down on its next answer, so without the record a later question about the same agent,
 // a planner whose draft is revised, finds a machine that was seen and is gone and counts a
 // machine the provider lost. No restart is spent. A pass with nothing to release writes nothing.
-func (s *PlatformExperimentsStore) ReleaseInstances(ctx context.Context, launcher string, windDown time.Duration) error {
+// An agent's machine is kept windDown after its run ended, a coordinator's coordinatorWindDown.
+func (s *PlatformExperimentsStore) ReleaseInstances(ctx context.Context, launcher string, windDown, coordinatorWindDown time.Duration) error {
 	sentences := map[string]string{}
 	for _, end := range []domain.RunEnd{"", domain.RunEndClosed, domain.RunEndCut, domain.RunEndFinished, domain.RunEndPlanned} {
 		sentences[string(end)] = end.ReleasedBecause()
@@ -231,7 +232,7 @@ SET coordinator_instance_name = '', coordinator_instance_state = '', coordinator
     coordinator_instance_end_reason = '`+string(InstanceReleased)+`', coordinator_instance_exit_log = $3
 WHERE pe.coordinator_hosted AND pe.coordinator_launcher = $1 AND pe.coordinator_instance_name <> ''
   AND pe.id NOT IN (SELECT pe.id`+launcherCoordinatorsWhere+`)`,
-		launcher, windDown.Seconds(), domain.RunEndClosed.ReleasedBecause()); err != nil {
+		launcher, coordinatorWindDown.Seconds(), domain.RunEndClosed.ReleasedBecause()); err != nil {
 		return fmt.Errorf("platform_experiments_store.ReleaseInstances: coordinators: %w", err)
 	}
 	return nil
@@ -281,8 +282,8 @@ func (s *PlatformExperimentsStore) LauncherAnsweredAt(ctx context.Context, names
 // down, so it is kept while there is a machine to take down or an agent that may be given one.
 type LauncherInUseError struct {
 	Name string
-	// PlatformExperiments are those not yet closed for domain.AgentWindDown that have a hosted
-	// agent or coordinator of this launcher. With none, the launcher's last question still
+	// PlatformExperiments are those that have a hosted agent or coordinator of this launcher and
+	// did not close more than its wind-down ago. With none, the launcher's last question still
 	// listed machines or was answered with some.
 	PlatformExperiments []string
 }
@@ -314,10 +315,10 @@ func (s *PlatformExperimentsStore) RemoveLauncher(ctx context.Context, name stri
 	}
 	rows, err := tx.Query(ctx, `
 SELECT pe.id FROM platform_experiments pe
-WHERE (pe.status <> 'closed' OR pe.closed_at > now() - make_interval(secs => $2))
-  AND (pe.coordinator_hosted AND pe.coordinator_launcher = $1
-       OR EXISTS (SELECT 1 FROM experiment_signups s WHERE s.platform_experiment_id = pe.id AND s.hosted AND s.launcher = $1))
-ORDER BY pe.id`, name, domain.AgentWindDown.Seconds())
+WHERE pe.coordinator_hosted AND pe.coordinator_launcher = $1 AND (pe.status <> 'closed' OR pe.closed_at > now() - make_interval(secs => $3))
+   OR EXISTS (SELECT 1 FROM experiment_signups s WHERE s.platform_experiment_id = pe.id AND s.hosted AND s.launcher = $1)
+      AND (pe.status <> 'closed' OR pe.closed_at > now() - make_interval(secs => $2))
+ORDER BY pe.id`, name, domain.AgentWindDown.Seconds(), domain.CoordinatorWindDown.Seconds())
 	if err != nil {
 		return false, fmt.Errorf("platform_experiments_store.RemoveLauncher: list platform experiments: %w", err)
 	}

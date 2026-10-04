@@ -34,8 +34,9 @@ WATCH_SUBPROTOCOL = "hypothesisloop.watch"
 # for it, submitted while its org has no cluster a submit could be judged against, stays QUEUED:
 # its token stays valid and it holds nothing.
 UNAVAILABLE_ACCELERATOR = "nvidia.com/gpu.product=NVIDIA-H200"
-# domain.AgentWindDown, in seconds.
+# domain.AgentWindDown and domain.CoordinatorWindDown, in seconds.
 AGENT_WIND_DOWN = 120
+COORDINATOR_WIND_DOWN = 300
 SAMPLE = {"metric_name": "val_accuracy", "fraction_complete": 0.25, "metric_value": 0.5}
 
 
@@ -363,9 +364,9 @@ def test_a_person_signs_in_with_a_jwt_and_writes_under_the_providers_name(api: A
 
 
 def test_tokens_after_a_close(org: Org, run_id: str):
-    """Both tokens live the wind-down past the close and then die: the agent's and the
-    coordinator's, which reads and files the summary meanwhile. Nothing that spends or starts
-    work gets through either."""
+    """Both tokens live their wind-down past the close and then die: the agent's and the
+    coordinator's, longer, which reads and files the summary meanwhile. Nothing that spends or
+    starts work gets through either. The platform's record of the close follows the summary."""
     pe_id, (member,) = _running_experiment(org, org.key, run_id, 1)
     coordinator = org.key.as_caller(admin.token(f"coordinator:{pe_id}"))
     org.key.post(f"/experiments/{member.job_id}/cancel")
@@ -404,20 +405,25 @@ def test_tokens_after_a_close(org: Org, run_id: str):
     ]:
         got, text = _status(coordinator, method, path, body)
         assert (got, json.loads(text).get("reason")) == (409, "experiment_closed"), f"the coordinator after the close {method} {path}: {got} {text}"
-    assert org.key.get_json(f"/platform-experiments/{pe_id}")["summary"] == "what the run showed"
+    assert org.key.get_json(f"/platform-experiments/{pe_id}")["summary"].startswith("what the run showed")
 
     time.sleep(max(0.0, AGENT_WIND_DOWN + 5 - (time.monotonic() - closed_at)))
     _assert_each(member.token, "the agent after the wind-down", [
         ("GET", f"/platform-experiments/{pe_id}", None, 401),
         ("POST", f"/hypotheses/{member.hypothesis_id}/comments", {"agent_id": member.agent, "text": "too late"}, 401),
     ])
-    _assert_each(coordinator, "the coordinator after the wind-down", [
+    _assert_each(coordinator, "the coordinator after an agent's wind-down", [
+        ("PUT", f"/platform-experiments/{pe_id}/summary", {"summary": "what the run showed, final"}, 200),
+    ])
+    time.sleep(max(0.0, COORDINATOR_WIND_DOWN + 5 - (time.monotonic() - closed_at)))
+    _assert_each(coordinator, "the coordinator after its wind-down", [
         ("GET", f"/platform-experiments/{pe_id}", None, 401),
         ("PUT", f"/platform-experiments/{pe_id}/summary", {"summary": "amended"}, 401),
     ])
     amended = org.key.put(f"/platform-experiments/{pe_id}/summary", {"summary": "amended"})
     assert amended.status_code == 200, f"the owner amending the summary after the wind-down: {amended.status_code} {amended.text}"
-    assert (amended.json()["id"], amended.json()["summary"]) == (pe_id, "amended"), f"a summary answers the platform experiment with it: {amended.text}"
+    assert amended.json()["id"] == pe_id and amended.json()["summary"].startswith("amended"), f"a summary answers the platform experiment with it: {amended.text}"
+    assert "Recorded by the platform:" in amended.json()["summary"], f"the record of the close follows the summary: {amended.text}"
 
 
 # ---- what a /watch stream delivers, and for how long ------------------------------------------

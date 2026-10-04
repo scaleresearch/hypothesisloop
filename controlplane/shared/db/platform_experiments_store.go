@@ -131,13 +131,17 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 	return nil
 }
 
+// summarySQL is the summary a platform experiment is answered with: the coordinator's, then the
+// platform's record of the close once it is written.
+const summarySQL = `concat_ws(E'\n\n', NULLIF(pe.summary, ''), NULLIF(pe.close_record, ''))`
+
 // plannerOfDraft selects, of experiment_signups as planner, the planner of pe while pe is a draft.
 const plannerOfDraft = `planner.platform_experiment_id = pe.id AND planner.role = '` + string(domain.SignupRolePlanner) + `' AND pe.status = 'draft'`
 
 // GetPlatformExperiment fetches a single platform experiment by ID.
 func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	q := `
-SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, pe.shared,
+SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, ` + summarySQL + `, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, pe.shared,
        ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.repository_url, pe.agent_image, pe.goal, pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason,
        pe.baseline_job_id, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id, pe.repository_error, pe.repository_account,
        pe.duration_hours, pe.started_at, pe.planner_ends_at, pe.accepts_at, pe.coordinator_instance_activity, pe.coordinator_instance_activity_at,
@@ -374,7 +378,7 @@ func platformExperimentSelect(clauses []string, sort string) string {
 SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hours, pe.max_agents,
        pe.metrics, pe.report_interval_seconds,
        pe.starts_at, pe.ends_at, pe.status,
-       pe.stages, pe.current_stage, pe.summary,
+       pe.stages, pe.current_stage, ` + summarySQL + `,
        pe.created_at, pe.updated_at, pe.max_concurrent_accelerators, pe.default_quota_tier, pe.shared,
        pe.coordinator_hosted, pe.max_hosted, pe.repository, pe.repository_url, pe.agent_image, pe.goal, pe.proposed_at, pe.proposal IS NOT NULL, pe.declined_reason, pe.baseline_job_id,
        pe.duration_hours, pe.started_at, pe.closed_at, pe.close_reason,
@@ -469,10 +473,10 @@ WHERE id = $1 AND status <> 'closed'`
 	return nil
 }
 
-// RecordClose writes record as the summary of the closed platform experiment id when it has
-// none, and leaves one written before it, or meanwhile, as it is.
+// RecordClose writes record as the platform's record of the close of the closed platform
+// experiment id, once: one written before stays. The coordinator's summary is kept beside it.
 func (s *PlatformExperimentsStore) RecordClose(ctx context.Context, id, record string) error {
-	const q = `UPDATE platform_experiments SET summary = $2, updated_at = NOW() WHERE id = $1 AND status = 'closed' AND COALESCE(summary, '') = ''`
+	const q = `UPDATE platform_experiments SET close_record = $2, updated_at = NOW() WHERE id = $1 AND status = 'closed' AND close_record = ''`
 	if _, err := s.pool.pool.Exec(ctx, q, id, record); err != nil {
 		return fmt.Errorf("platform_experiments_store.RecordClose: %w", err)
 	}
@@ -495,11 +499,11 @@ func (s *PlatformExperimentsStore) JobsSettled(ctx context.Context, id string) (
 }
 
 // ClosesToRecord is the platform experiments closed in the last within, after they were open,
-// that have no summary yet and whose every job ended and was settled (JobsSettled): those whose
+// that have no record of the close yet and whose every job ended and was settled (JobsSettled): those whose
 // record of the close waited for what they spent to be whole.
 func (s *PlatformExperimentsStore) ClosesToRecord(ctx context.Context, within time.Duration) ([]string, error) {
 	rows, err := s.pool.pool.Query(ctx, `SELECT pe.id FROM platform_experiments pe
-WHERE pe.status = 'closed' AND COALESCE(pe.summary, '') = '' AND pe.closed_at > now() - make_interval(secs => $1)
+WHERE pe.status = 'closed' AND pe.close_record = '' AND pe.closed_at > now() - make_interval(secs => $1)
   AND pe.close_reason IN ($2, $3, $4, $5) AND (pe.goal = '' OR pe.starts_at >= '0001-01-02')
   AND NOT `+unsettledJobsSQL+`
 ORDER BY pe.closed_at`, within.Seconds(), string(domain.CloseEndTimeReached), string(domain.CloseByRequest), string(domain.CloseBaselineLimitReached), string(domain.CloseAgentsNotStarted))
