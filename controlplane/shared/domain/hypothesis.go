@@ -42,6 +42,18 @@ func BaselineBranch(platformExperimentID string) string {
 	return BranchPrefix(platformExperimentID) + "baseline"
 }
 
+// IsBaselineAgentBranch is whether a baseline agent's job may run on branch: the baseline branch,
+// or one beside it, baseline-<name>, where the agent tries its code as a researcher would. Only a
+// job of the baseline branch itself is declared the baseline.
+func IsBaselineAgentBranch(platformExperimentID, branch string) bool {
+	baseline := BaselineBranch(platformExperimentID)
+	if branch == baseline {
+		return true
+	}
+	name, beside := strings.CutPrefix(branch, baseline+"-")
+	return beside && name != "" && !strings.ContainsAny(name, "/ \t\n")
+}
+
 // Implementation is one agent's code for a hypothesis: the branch its jobs ran on and the commit
 // the newest of them ran. A hypothesis has as many as there are agents that ran it, and none is
 // stored: they are read off the jobs.

@@ -343,6 +343,13 @@ func TestTheBaselinesJobTestsNoHypothesisAndIsKeptOnTheObjective(t *testing.T) {
 			t.Errorf("%s: the job is on %q with text %q, want the objective pe-1 and no text", status, exp.HypothesisID, exp.Hypothesis)
 		}
 
+		// It checks its code as a researcher would on a branch beside the baseline's.
+		check := baselineSubmission()
+		check.Branch = "hl/pe-1/baseline-check"
+		if err := s.Submit(context.Background(), check); !errors.Is(err, errReachedScoring) {
+			t.Errorf("%s, a baseline job on %s: got = %v, want the job taken", status, check.Branch, err)
+		}
+
 		var refused *AdmissionError
 		named := baselineSubmission()
 		named.HypothesisID = "h-human"
@@ -351,7 +358,7 @@ func TestTheBaselinesJobTestsNoHypothesisAndIsKeptOnTheObjective(t *testing.T) {
 		}
 		// A baseline agent has no hypothesis to check out, on a branch of the experiment or on
 		// the default one: the refusal names its branch and the git command that makes it.
-		for _, branch := range []string{"hl/pe-1/baseline-1/control-abc123", "main", ""} {
+		for _, branch := range []string{"hl/pe-1/baseline-1/control-abc123", "hl/pe-1/baseline-", "hl/pe-1/baselinecheck", "main", ""} {
 			elsewhere := baselineSubmission()
 			elsewhere.Branch = branch
 			if err := s.Submit(context.Background(), elsewhere); !errors.As(err, &refused) || refused.Reason != ReasonBranchNotOfExperiment ||

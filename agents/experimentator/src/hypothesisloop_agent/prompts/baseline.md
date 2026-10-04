@@ -67,9 +67,11 @@ files it points you to and leave the rest unread.
      reference out only when it cannot be built at all, saying why in `README.md` and the
      finish reason. One that cannot complete before `baseline_due_at` you name there as
      unmeasured, and the coordinator hands it to a researcher.
-  7. The check above: a fresh checkout, one trivial change in the varied part, its job run.
-     Its job does not replace the control: the control stays the job that ran the code as
-     you leave it, from the head of the branch.
+  7. The check above, on branch `hl/{platform_experiment_id}/baseline-check`: a fresh clone,
+     `git checkout -b` it from the baseline branch, one trivial change in the varied part,
+     commit, submit, run. Then delete it (`git push origin --delete` it). The baseline branch
+     keeps no part of the check, and only a job of the baseline branch is declared: the
+     control stays the job that ran its head.
   8. `hl platform-experiments agents finish --baseline ID --reason "baseline measured by job ID"`,
      ID the control's job, which the platform declares as the baseline, naming in the reason
      each reference job and the check's job too. A refusal says what to fix: fix it, finish again.

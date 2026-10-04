@@ -1128,7 +1128,7 @@ func TestAnAcceptedDraftRunsOnceItsBaselineAgentFinishesWithNoCoordinatorAction(
 	}
 	measures := store.baselines[0].AgentID
 	measured := measuredBaseline()
-	measured.Job.AgentID, measured.Job.PlatformExperimentID, measured.Reported = measures, "pe-draft", map[string]float64{"val_loss": 1.8}
+	measured.Job.AgentID, measured.Job.PlatformExperimentID, measured.Job.Branch, measured.Reported = measures, "pe-draft", "hl/pe-draft/baseline", map[string]float64{"val_loss": 1.8}
 	svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) {
 		if jobID != measured.Job.ID {
 			return nil, nil
@@ -1187,7 +1187,7 @@ func TestABaselineAgentNamesTheJobItsFinishDeclares(t *testing.T) {
 	measures := store.baselines[0].AgentID
 	job := func(id, agent string, status domain.ExperimentStatus) *Baseline {
 		b := measuredBaseline()
-		b.Job.ID, b.Job.AgentID, b.Job.PlatformExperimentID, b.Job.Status, b.Reported = id, agent, "pe-draft", status, map[string]float64{"val_loss": 1.8}
+		b.Job.ID, b.Job.AgentID, b.Job.PlatformExperimentID, b.Job.Branch, b.Job.Status, b.Reported = id, agent, "pe-draft", "hl/pe-draft/baseline", status, map[string]float64{"val_loss": 1.8}
 		return b
 	}
 	jobs := map[string]*Baseline{
@@ -1195,11 +1195,13 @@ func TestABaselineAgentNamesTheJobItsFinishDeclares(t *testing.T) {
 		"job-check": job("job-check", measures, domain.StatusCompleted), "job-failed": job("job-failed", measures, domain.StatusFailed),
 		"job-other": job("job-other", "ag-other", domain.StatusCompleted),
 	}
+	// Run 8's check ran from a branch beside the baseline's, and only the baseline's is declared.
+	jobs["job-check"].Job.Branch = "hl/pe-draft/baseline-check"
 	svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) { return jobs[jobID], nil }
 	store.left = []*domain.Experiment{jobs["job-first"].Job, jobs["job-control"].Job, jobs["job-check"].Job}
 	ctx := context.Background()
 
-	for named, reason := range map[string]string{"job-failed": "baseline_not_completed", "job-other": "no_baseline", "job-missing": "no_baseline"} {
+	for named, reason := range map[string]string{"job-failed": "baseline_not_completed", "job-other": "no_baseline", "job-missing": "no_baseline", "job-check": "baseline_not_on_branch"} {
 		_, err := svc.FinishAgent(ctx, "pe-draft", measures, "the baseline is measured", "", named)
 		var refused *api.Refusal
 		if !errors.As(err, &refused) || refused.GetStatus() != http.StatusUnprocessableEntity || refused.Reason != reason {

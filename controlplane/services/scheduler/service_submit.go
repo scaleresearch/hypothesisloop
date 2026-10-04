@@ -41,12 +41,12 @@ const ReasonBranchNotOfExperiment = "branch_not_of_experiment"
 
 // branchOfExperiment checks that a job names the branch its commit was pushed on, and that the
 // branch is one of its platform experiment's: the default branch is nobody's implementation. The
-// baseline is measured on one branch, which the refusal of a baseline agent's job names with the
+// baseline is measured on one branch (and checked on those beside it), which the refusal of a baseline agent's job names with the
 // git command that makes it, since a baseline agent has no hypothesis to check out.
 func branchOfExperiment(exp *domain.Experiment, measuresBaseline bool) error {
 	if measuresBaseline {
-		if baseline := domain.BaselineBranch(exp.PlatformExperimentID); exp.Branch != baseline {
-			return &AdmissionError{Reason: ReasonBranchNotOfExperiment, Message: fmt.Sprintf("the baseline is measured on branch %s, and this job names %q: git checkout -b %s, commit there and submit again", baseline, exp.Branch, baseline)}
+		if baseline := domain.BaselineBranch(exp.PlatformExperimentID); !domain.IsBaselineAgentBranch(exp.PlatformExperimentID, exp.Branch) {
+			return &AdmissionError{Reason: ReasonBranchNotOfExperiment, Message: fmt.Sprintf("the baseline is measured on branch %s, and this job names %q: git checkout -b %s, commit there and submit again (a check of your code as a researcher would run it goes on %s-check)", baseline, exp.Branch, baseline, baseline)}
 		}
 		return nil
 	}

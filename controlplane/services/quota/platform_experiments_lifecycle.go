@@ -398,7 +398,7 @@ func (s *PlatformExperimentsService) measuredJob(ctx context.Context, pe *domain
 			if err != nil {
 				return "", fmt.Errorf("platform_experiments.measuredJob: read %s: %w", job.ID, err)
 			}
-			if baseline == nil {
+			if baseline == nil || job.Branch != domain.BaselineBranch(pe.ID) {
 				continue
 			}
 			if _, reported := baseline.Reported[ranked.Key]; reported {

@@ -52,6 +52,8 @@ func TestStatusReasonOfAnOpenPlatformExperimentSaysWhereItsBaselineStands(t *tes
 		return &measured
 	}
 
+	check := job("job-2")
+	check.Branch = "hl/pe-1/baseline-check"
 	building := &domain.Experiment{ID: "job-9", Status: domain.StatusQueued, NotAdmittedReason: domain.NotAdmittedEnvironmentBuilding, EstimatedDurationHours: 0.5}
 	quick := &domain.Experiment{ID: "job-8", Status: domain.StatusSubmitted, EstimatedDurationHours: 0.1}
 	for name, c := range map[string]struct {
@@ -72,6 +74,7 @@ func TestStatusReasonOfAnOpenPlatformExperimentSaysWhereItsBaselineStands(t *tes
 		"one that left a job the budget is under": {waitingPerson, []domain.AgentSignup{done}, []*domain.Experiment{job("job-1")}, nil, 1, "budget_below_baseline",
 			[]string{"the platform did not declare job job-1", "its owner raises budget_accelerator_hours", "declares it in the request that clears this"}, []string{add, declare}},
 		"one that left a job the sweep has yet to declare": {waitingPerson, []domain.AgentSignup{done}, []*domain.Experiment{job("job-1")}, nil, 6, "baseline_declaring", []string{"job-1"}, []string{add, declare}},
+		"one that left the control and its check":          {waitingPerson, []domain.AgentSignup{done}, []*domain.Experiment{job("job-1"), check}, nil, 6, "baseline_declaring", []string{"job-1"}, []string{"job-2", add, declare}},
 		"the baseline agent":                               {waitingAgent("ag-b"), []domain.AgentSignup{measuring, researcher}, nil, nil, 6, "baseline_measuring", []string{"Your job is admitted now", "hl job summary", "agents finish", "baseline_due_at is " + due.Format(time.RFC3339) + ", 9 minutes from now", "The run lasts its duration_hours, 1, from the moment the platform starts it, once its baseline is declared"}, []string{add, "cannot be met"}},
 		"the baseline agent whose job cannot end in time": {waitingAgent("ag-b"), []domain.AgentSignup{measuring, researcher}, nil, []*domain.Experiment{quick, building}, 6, "baseline_measuring",
 			[]string{"job job-9 is QUEUED (environment_building) and its estimated_duration_hours is 0.5: started now it ends after baseline_due_at, 9 minutes from now, so baseline_due_at cannot be met by it"}, []string{"job-8"}},

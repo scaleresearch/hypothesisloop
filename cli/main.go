@@ -730,6 +730,7 @@ writes JOB, its code_ref and what it measured into a block of the description it
 later changes, and starts the run in that request when a researcher has joined and no starts_at
 is ahead. The line printed after says whether it started, with status_reason. Refusals:
 no_baseline (JOB is no baseline agent's job here), baseline_not_completed,
+baseline_not_on_branch (JOB ran a branch other than hl/PE/baseline),
 baseline_without_finding (no summary filed), baseline_missing_metric, baseline_breaks_constraint
 and budget_below_baseline (the budget does not hold one trial per researcher at JOB's
 estimate); the last two are the owner's to change. baseline_environment_differs and
@@ -969,6 +970,7 @@ state. The reasons:
   open, its baseline not declared: baseline_measuring, baseline_declaring, baseline_required,
     baseline_undeclared
   open, the declaration of the measured job refused: no_baseline, baseline_not_completed,
+    baseline_not_on_branch,
     baseline_without_finding, baseline_missing_metric, baseline_breaks_constraint,
     budget_below_baseline
   open, its baseline declared: starts_at_ahead, no_researchers, budget_spent, starting

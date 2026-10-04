@@ -129,6 +129,15 @@ func TestJobSubmitWithNoHypothesisIsTheBaselinesOnItsBranch(t *testing.T) {
 	if pushed := mustGit(t, origin, "rev-parse", "refs/heads/hl/pe-1/baseline"); pushed != mustGit(t, clone, "rev-parse", "HEAD") {
 		t.Fatalf("origin has the baseline's branch at %s, want the submitted commit", pushed)
 	}
+	// Its check of the code as a researcher would run it goes on a branch beside the baseline's.
+	mustGit(t, clone, "checkout", "-q", "-b", "hl/pe-1/baseline-check")
+	if code, stderr, sent = submit(t, "job.yaml"); code != 0 || sent["branch"] != "hl/pe-1/baseline-check" {
+		t.Fatalf("on the check branch: exit code = %d, sent = %v, stderr = %s, want it sent", code, sent, stderr)
+	}
+	mustGit(t, clone, "checkout", "-q", "-b", "hl/pe-1/baseline-1/control")
+	if code, stderr, sent = submit(t, "job.yaml"); code != 1 || sent != nil {
+		t.Fatalf("on another agent's branch: exit code = %d, sent = %v, stderr = %s, want it refused", code, sent, stderr)
+	}
 }
 
 func TestJobSubmitRefusesDirtyTree(t *testing.T) {

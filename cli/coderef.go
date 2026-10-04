@@ -16,6 +16,17 @@ func baselineBranch(platformExperiment string) string {
 	return branchPrefix(platformExperiment) + "baseline"
 }
 
+// ofBaselineAgent is whether a baseline agent's job may run on branch: the baseline branch, or
+// one beside it, baseline-<name>, where the agent tries its code as a researcher would. Only a
+// job of the baseline branch itself is declared the baseline.
+func ofBaselineAgent(platformExperiment, branch string) bool {
+	if branch == baselineBranch(platformExperiment) {
+		return true
+	}
+	name, beside := strings.CutPrefix(branch, baselineBranch(platformExperiment)+"-")
+	return beside && name != "" && !strings.ContainsAny(name, "/ \t\n")
+}
+
 // fillCodeRef sets an empty metadata.code_ref to the commit at HEAD of the git repository in dir,
 // "<origin url>@<sha>", and metadata.branch to the branch HEAD is on, which it pushes to origin.
 // The branch is one of the platform experiment's: nothing is pushed from any other, and a job
@@ -47,8 +58,8 @@ func fillCodeRef(metadata map[string]any, dir string) error {
 	branch, _ := git(dir, "symbolic-ref", "--quiet", "--short", "HEAD")
 	hypothesis, _ := metadata["hypothesis_id"].(string)
 	switch {
-	case hypothesis == "" && branch != baselineBranch(pe):
-		return fmt.Errorf("no hypothesis is named and HEAD is not on %s: only a baseline agent's job runs without one, on that branch (git checkout -b %s). Every other job names its hypothesis with --hypothesis ID", baselineBranch(pe), baselineBranch(pe))
+	case hypothesis == "" && !ofBaselineAgent(pe, branch):
+		return fmt.Errorf("no hypothesis is named and HEAD is not on %s: only a baseline agent's job runs without one, on that branch (git checkout -b %s) or, to check its code as a researcher would, on %s-check. Every other job names its hypothesis with --hypothesis ID", baselineBranch(pe), baselineBranch(pe), baselineBranch(pe))
 	case !strings.HasPrefix(branch, branchPrefix(pe)) || branch == branchPrefix(pe):
 		on := "detached"
 		if branch != "" {

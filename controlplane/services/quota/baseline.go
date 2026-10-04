@@ -107,6 +107,9 @@ func checkBaseline(pe *domain.PlatformExperiment, baseline *Baseline) error {
 	if baseline.Job.Status != domain.StatusCompleted {
 		return refusedBaseline("baseline_not_completed", "baseline job %s is %s: a run rests on a baseline that ran to the end. Wait for it, or have it fixed and run again", baseline.Job.ID, baseline.Job.Status)
 	}
+	if branch := domain.BaselineBranch(pe.ID); baseline.Job.Branch != branch {
+		return refusedBaseline("baseline_not_on_branch", "baseline job %s ran branch %q, and the baseline is measured on %s alone: name the control's job of that branch", baseline.Job.ID, baseline.Job.Branch, branch)
+	}
 	if !baseline.Finding {
 		return refusedBaseline("baseline_without_finding", "baseline job %s has no finding: its agent files what it measured with `hl job summary`, so the researchers start from it", baseline.Job.ID)
 	}
