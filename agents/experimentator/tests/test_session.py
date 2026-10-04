@@ -43,6 +43,13 @@ class Machine:
         (root / relative).write_text(text)
 
 
+def _new_process(test: unittest.TestCase) -> None:
+    """A harness process of its own: no session in flight left by another test."""
+    patcher = mock.patch.object(run, "_live_session_id", None)
+    patcher.start()
+    test.addCleanup(patcher.stop)
+
+
 class SessionsTest(unittest.TestCase):
     def test_a_session_stored_on_one_machine_is_restored_on_the_next_file_for_file(self):
         platform = Platform()
@@ -143,6 +150,9 @@ class SessionsTest(unittest.TestCase):
 
 
 class ClaudeSessionFilesTest(unittest.TestCase):
+    def setUp(self):
+        _new_process(self)
+
     def test_the_harness_takes_the_platforms_session_only_on_a_machine_that_has_none(self):
         platform = Platform()
         old = Machine(platform)
@@ -223,6 +233,9 @@ class NotStoredTest(unittest.IsolatedAsyncioTestCase):
 
 
 class MidTurnTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        _new_process(self)
+
     async def test_a_machine_lost_inside_its_first_turn_is_resumed_in_that_turn_with_its_update_cursor(self):
         platform = Platform()
         old = Machine(platform)

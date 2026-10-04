@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import io
+import os
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -127,6 +128,8 @@ class BeatInTheRunLoopTest(unittest.IsolatedAsyncioTestCase):
                 mock.patch.object(progress, "INTERVAL_S", 0.02), \
                 mock.patch.object(run.core, "stop_reason", lambda *a: None), \
                 mock.patch.object(run.core, "install_signal_handler", lambda: [False]), \
+                mock.patch.object(run, "_live_session_id", None), \
+                mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": tempfile.mkdtemp()}), \
                 contextlib.redirect_stdout(io.StringIO()):
             task = asyncio.ensure_future(run._run(setup, "m"))
             await asyncio.sleep(0.1)

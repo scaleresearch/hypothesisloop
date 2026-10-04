@@ -381,6 +381,13 @@ class CallStallTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ReconnectTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # A machine of its own: no session in flight from another test, and a model home.
+        for patcher in (mock.patch.object(run, "_live_session_id", None),
+                        mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": tempfile.mkdtemp()})):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     async def test_a_raised_session_is_followed_by_what_it_left_on_disk_and_a_good_turn_resets_the_backoff(self):
         setup = _setup()
         stop_flag = [False]
@@ -458,6 +465,17 @@ class ReconnectTest(unittest.IsolatedAsyncioTestCase):
                          (None, "Continue this experiment from the following handoff:\n\nstate so far"))
         run._save_resume_id(setup, "s-3")
         self.assertEqual(run._restart_state(setup), ("s-3", None))
+
+    def test_the_session_in_flight_is_resumed_over_the_one_saved_once_its_transcript_holds_the_turn(self):
+        setup = _setup()
+        run._save_resume_id(setup, "s-saved")
+        with mock.patch.object(run, "_live_session_id", "s-live"):
+            self.assertEqual(run._restart_state(setup), ("s-saved", None), "a session in flight with no transcript")
+            transcript = os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "projects", "p", "s-live.jsonl")
+            os.makedirs(os.path.dirname(transcript))
+            with open(transcript, "w") as f:
+                f.write("the turn so far\n")
+            self.assertEqual(run._restart_state(setup), ("s-live", None))
 
 
 if __name__ == "__main__":

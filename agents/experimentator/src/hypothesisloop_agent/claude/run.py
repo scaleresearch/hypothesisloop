@@ -962,13 +962,14 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
 def _restart_state(setup: core.RunSetup) -> tuple[str | None, str | None]:
     """The session to resume and the prompt that opens the next connection, as persisted.
 
+    The session resumed is the newest one stored: the one in flight once its transcript holds
+    what the turn did, else the one saved at the last result. A run 12 researcher that lost its
+    first turn began again from nothing, and the session in flight holds more than the saved one.
     A session id beside a handoff means the replacement session already produced a result, so it
-    is resumed and the bridge is not injected twice. A connection lost before a session's first
-    result resumes the session in flight once its transcript holds what the turn did: a run 12
-    researcher began again from nothing after losing its first turn.
+    is resumed and the bridge is not injected twice.
     """
     in_flight = _live_session_id if _transcript_files(_live_session_id) else None
-    resume_id = _load_resume_id(setup) or in_flight
+    resume_id = in_flight or _load_resume_id(setup)
     handoff = _load_handoff(setup)
     if resume_id or not handoff:
         return resume_id, None
