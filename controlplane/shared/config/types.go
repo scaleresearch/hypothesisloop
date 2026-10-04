@@ -2,7 +2,6 @@
 package config
 
 import (
-	"strings"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -311,8 +310,7 @@ type RuntimesConfig struct {
 }
 
 // EnvironmentsConfig is where the images a repository's .hypothesisloop/Dockerfile declares are
-// pushed (services/environments). The builder they are built on is the control service's
-// environment: HYPOTHESISLOOP_ENVIRONMENT_BUILDER_ADDR and the paths of its PEM files.
+// pushed (services/environments) by the cluster each build is assigned to.
 type EnvironmentsConfig struct {
 	// Repository is the name under runtimes.registry every environment image is pushed to,
 	// tagged with its key.
@@ -328,12 +326,6 @@ const RegistryCredentialGoogle = "google"
 // EnvironmentImages is the repository every environment image is pushed to.
 func (c *Config) EnvironmentImages() string {
 	return c.Runtimes.Registry + "/" + c.Environments.Repository
-}
-
-// RegistryHost is the host of runtimes.registry.
-func (c *Config) RegistryHost() string {
-	host, _, _ := strings.Cut(c.Runtimes.Registry, "/")
-	return host
 }
 
 // JobImageConfig is one image the deployment offers a job to run in. It is named by image, a

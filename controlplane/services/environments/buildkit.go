@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 
 	"github.com/containerd/platforms"
@@ -20,58 +19,18 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// RegistryCredential is what the builder pushes to registryHost with, asked for at each build: a
-// token lives about an hour.
-type RegistryCredential func(ctx context.Context) (username, password string, err error)
+// BuildFailed is a build the file failed, with the end of its output, at most
+// domain.MaxEnvironmentLogBytes.
+type BuildFailed struct{ Log string }
 
-// BuildKit builds on a BuildKit daemon reached at Addr over mutual TLS. The PEM files are read at
-// each build: attaching the builder again issues new ones.
-type BuildKit struct {
-	Addr              string
-	CAFile            string
-	CertFile, KeyFile string
-	RegistryHost      string
-	Credential        RegistryCredential
-}
-
-var _ Builder = (*BuildKit)(nil)
-
-func NewBuildKit(addr, caFile, certFile, keyFile, registryHost string, credential RegistryCredential) (*BuildKit, error) {
-	u, err := url.Parse(addr)
-	if err != nil || u.Scheme != "tcp" || u.Hostname() == "" || u.Port() == "" {
-		return nil, fmt.Errorf("environments: the builder address %q is not tcp://host:port", addr)
-	}
-	if caFile == "" || certFile == "" || keyFile == "" || registryHost == "" || credential == nil {
-		return nil, errors.New("environments: the builder's CA, certificate and key, the registry and its credential are required")
-	}
-	return &BuildKit{Addr: addr, CAFile: caFile, CertFile: certFile, KeyFile: keyFile, RegistryHost: registryHost, Credential: credential}, nil
-}
+func (e *BuildFailed) Error() string { return "the build failed" }
 
 // buildPlatform is the platform every environment is built for: the job images are amd64.
 const buildPlatform = "linux/amd64"
 
-// connect reaches the daemon, with the session that hands it the registry's credential.
-func (b *BuildKit) connect(ctx context.Context) (*client.Client, []session.Attachable, error) {
-	username, password, err := b.Credential(ctx)
-	if err != nil {
-		return nil, nil, fmt.Errorf("environments: registry credential: %w", err)
-	}
-	u, _ := url.Parse(b.Addr)
-	c, err := client.New(ctx, b.Addr, client.WithServerConfig(u.Hostname(), b.CAFile), client.WithCredentials(b.CertFile, b.KeyFile))
-	if err != nil {
-		return nil, nil, fmt.Errorf("environments: connect to the builder: %w", err)
-	}
-	return c, []session.Attachable{&registryAuth{host: b.RegistryHost, username: username, password: password}}, nil
-}
-
-// Pull runs a command on image, which the daemon pulls and unpacks for, so its layers stay in the
-// daemon's cache.
-func (b *BuildKit) Pull(ctx context.Context, image string) error {
-	c, attachables, err := b.connect(ctx)
-	if err != nil {
-		return err
-	}
-	defer c.Close() //nolint:errcheck
+// Pull runs a command on image on the daemon c reaches, which pulls and unpacks it for that, so
+// its layers stay in the daemon's cache.
+func Pull(ctx context.Context, c *client.Client, attachables []session.Attachable, image string) error {
 	def, err := llb.Image(image, llb.Platform(platforms.MustParse(buildPlatform))).Run(llb.Args([]string{"true"})).Root().Marshal(ctx)
 	if err != nil {
 		return err
@@ -82,12 +41,10 @@ func (b *BuildKit) Pull(ctx context.Context, image string) error {
 	return nil
 }
 
-func (b *BuildKit) Build(ctx context.Context, dockerfile, base, image string) error {
-	c, attachables, err := b.connect(ctx)
-	if err != nil {
-		return err
-	}
-	defer c.Close() //nolint:errcheck
+// Build builds dockerfile with BASE set to base, on a context holding only the file, on the
+// daemon c reaches, and pushes the result as image. A *BuildFailed is an instruction of the file
+// failing; any other error is the platform's.
+func Build(ctx context.Context, c *client.Client, attachables []session.Attachable, dockerfile, base, image string) error {
 	file := dockerfileState(dockerfile)
 	opt := client.SolveOpt{
 		Frontend:       "dockerfile.v0",
@@ -122,7 +79,7 @@ func (b *BuildKit) Build(ctx context.Context, dockerfile, base, image string) er
 		}
 		return nil
 	})
-	err = group.Wait()
+	err := group.Wait()
 	if err == nil {
 		return nil
 	}
@@ -171,4 +128,16 @@ func fileFault(err error) bool {
 	var line *errdefs.SourceError
 	var vertex *errdefs.VertexError
 	return errors.As(err, &line) && !errors.As(err, &vertex)
+}
+
+// lastBytes keeps the end of text, from the start of a line where one starts inside the limit.
+func lastBytes(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	text = text[len(text)-limit:]
+	if newline := strings.IndexByte(text, '\n'); newline >= 0 && newline < len(text)-1 {
+		text = text[newline+1:]
+	}
+	return strings.ToValidUTF8(text, "")
 }

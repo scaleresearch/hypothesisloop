@@ -64,8 +64,9 @@ type LoopStore interface {
 	// attempt on within ttl — the cross-job half of the tried-cluster backoff (autoscaler.md line
 	// 109): a job never speculates onto a node group another job just watched fail to deliver.
 	RecentlyTriedClusters(ctx context.Context, ttl time.Duration) (map[string]bool, error)
-	// GetEnvironment is the environment a job's commit declares, which it waits for.
-	GetEnvironment(ctx context.Context, key string) (*domain.Environment, error)
+	// AssignEnvironment is the environment a job's commit declares, which it waits for, with its
+	// build assigned to one of live (db.EnvironmentsStore.AssignEnvironment).
+	AssignEnvironment(ctx context.Context, key string, live []string, lease time.Duration) (*domain.Environment, error)
 	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
 }
 
@@ -143,6 +144,9 @@ type LoopWorkloadClient interface {
 	// GetClusterIDs reports each connected cluster's runtime-derived stable identity, keyed by
 	// cluster_name. A cluster absent from the map has not yet reported one.
 	GetClusterIDs(ctx context.Context) (map[string]string, error)
+	// GetLiveClusters reports the clusters that reported within the connected window: those an
+	// environment's build may be assigned to and stay assigned to.
+	GetLiveClusters(ctx context.Context) (map[string]bool, error)
 	// GetTotalCapacity reports each cluster's installed capacity — the per-accelerator
 	// CPU/memory share the disbalance evictor measures requests against. Clusters without a
 	// fresh report are absent, never zero-filled. Only read when that evictor is enabled.

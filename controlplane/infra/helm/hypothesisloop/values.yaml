@@ -31,9 +31,6 @@ images:
 #   HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET   only with github.appId: the App's OAuth client
 #   HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY     secret and the PEM GitHub issued for it
 #   HYPOTHESISLOOP_GIT_PASSWORD      only with git.username: that account's password
-#   ENVIRONMENT_BUILDER_CA           the mutual TLS files control-service reaches the environment
-#   ENVIRONMENT_BUILDER_CERT         builder with: the PEMs a cluster attached with BUILDER=true
-#   ENVIRONMENT_BUILDER_KEY          hands out (ca.pem, cert.pem, key.pem)
 #   GOOGLE_CREDENTIALS               the Google application default credentials file control-service
 #                                    pushes environment images with, with write on the
 #                                    environments repository
@@ -87,15 +84,6 @@ git:
 # Required: the one address this API is reached at from outside the control plane, by hosted
 # agents and by every cluster's runtime. services.public_api_url of hypothesisloop.yaml.
 publicAPIURL: ""
-
-# The BuildKit daemon a repository's environment is built on (services/environments), which a
-# cluster attached with BUILDER=true runs. Its mutual TLS files come from the Secret.
-environmentBuilder:
-  # Required: tcp://host:port, as control-service reaches it.
-  address: ""
-  # Required: the cluster it runs on. The images of that cluster's hardware are pulled into its
-  # cache as control-service starts.
-  cluster: ""
 
 # Hosted agents: the agents section of hypothesisloop.yaml.
 agents:

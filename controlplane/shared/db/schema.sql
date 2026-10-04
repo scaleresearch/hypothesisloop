@@ -1334,26 +1334,59 @@ WHERE description LIKE '%BASELINE (written by the platform)%';
 UPDATE platform_experiments SET starts_at = COALESCE(started_at, created_at)
 WHERE status IN ('open', 'running') AND starts_at < '0001-01-02';
 
--- An environment is an image the platform builds from a repository's .hypothesisloop/Dockerfile
--- on one base image (domain.Environment). key names the pair, so one pair is built once. A row
--- is made building, and the builder (services/environments) moves it to ready, or to failed when
--- an instruction of the file failed. A build the platform failed is counted in attempts, and the
--- row is abandoned after the last one allowed, to be made building again by the next submit that
--- names it.
+-- An environment is an image the platform builds for an org from a repository's
+-- .hypothesisloop/Dockerfile on one base image (domain.Environment). key names the three, so one
+-- is built once. A row is made building, and the scheduler assigns its build to a cluster that
+-- builds (clusters.builds), the attempt-th time at assigned_at, cluster_name empty while it is
+-- assigned to none. That cluster reports it ready with image, repository@digest, or failed with
+-- fault file. A build assigned for the last attempt allowed and not finished fails with fault
+-- platform. A failed row is made building again by the next submit that names it.
 CREATE TABLE IF NOT EXISTS environments (
-    key        TEXT        PRIMARY KEY,
-    base       TEXT        NOT NULL,
-    dockerfile TEXT        NOT NULL,
-    image      TEXT        NOT NULL,
-    state      TEXT        NOT NULL,
-    log_tail   TEXT        NOT NULL DEFAULT '',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    key          TEXT        PRIMARY KEY,
+    org_id       TEXT        NOT NULL REFERENCES orgs (id),
+    base         TEXT        NOT NULL,
+    dockerfile   TEXT        NOT NULL,
+    image        TEXT        NOT NULL,
+    state        TEXT        NOT NULL,
+    fault        TEXT        NOT NULL DEFAULT '',
+    log_tail     TEXT        NOT NULL DEFAULT '',
+    cluster_name TEXT        NOT NULL DEFAULT '',
+    attempt      INTEGER     NOT NULL DEFAULT 0,
+    assigned_at  TIMESTAMPTZ,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-ALTER TABLE environments ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
+-- Rows from when one builder the control plane dialled built every org's files, keyed without
+-- the org: each takes the org of the first job that named it, one no job named goes, and an
+-- abandoned one is failed as the platform's fault.
+ALTER TABLE environments ADD COLUMN IF NOT EXISTS org_id TEXT REFERENCES orgs (id);
+ALTER TABLE environments ADD COLUMN IF NOT EXISTS fault TEXT NOT NULL DEFAULT '';
+ALTER TABLE environments ADD COLUMN IF NOT EXISTS cluster_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE environments ADD COLUMN IF NOT EXISTS attempt INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE environments ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMPTZ;
 ALTER TABLE environments DROP CONSTRAINT IF EXISTS environments_state_check;
-ALTER TABLE environments ADD CONSTRAINT environments_state_check CHECK (state IN ('building', 'ready', 'failed', 'abandoned'));
-CREATE INDEX IF NOT EXISTS environments_building ON environments (created_at) WHERE state = 'building';
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'environments' AND column_name = 'attempts') THEN
+        UPDATE environments v SET org_id = (
+            SELECT p.org_id FROM experiments e
+            JOIN platform_experiments pe ON pe.id = e.platform_experiment_id
+            JOIN projects p ON p.id = pe.project_id
+            WHERE e.environment_key = v.key ORDER BY e.created_at LIMIT 1)
+        WHERE v.org_id IS NULL;
+        DELETE FROM environments v WHERE v.org_id IS NULL;
+        UPDATE environments SET fault = CASE state WHEN 'failed' THEN 'file' WHEN 'abandoned' THEN 'platform' ELSE '' END,
+            state = CASE state WHEN 'abandoned' THEN 'failed' ELSE state END;
+        ALTER TABLE environments DROP COLUMN attempts;
+    END IF;
+END $$;
+ALTER TABLE environments ALTER COLUMN org_id SET NOT NULL;
+ALTER TABLE environments ADD CONSTRAINT environments_state_check CHECK (
+    state IN ('building', 'ready', 'failed') AND fault IN ('', 'file', 'platform') AND (state = 'failed') = (fault <> '')
+    AND (cluster_name = '') = (assigned_at IS NULL));
+DROP INDEX IF EXISTS environments_building;
+CREATE INDEX IF NOT EXISTS environments_assigned ON environments (cluster_name) WHERE state = 'building';
+-- builds is whether the cluster's runtime builds environments, as it last reported it.
+ALTER TABLE clusters ADD COLUMN IF NOT EXISTS builds BOOLEAN NOT NULL DEFAULT false;
 -- The environment a job's commit declares: admission claims the job only once it is ready, in
 -- its image. NULL for a commit that declares none.
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS environment_key TEXT REFERENCES environments (key);

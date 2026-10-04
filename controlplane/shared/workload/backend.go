@@ -85,6 +85,10 @@ type Backend interface {
 	// cluster whose agent has not yet started sending cluster_id is absent from the map.
 	GetClusterIDs(ctx context.Context) (map[string]string, error)
 
+	// GetLiveClusters reports the clusters whose runtime reported within the connected window,
+	// whatever their capacity snapshot holds.
+	GetLiveClusters(ctx context.Context) (map[string]bool, error)
+
 	// GetTotalCapacity reports each cluster's installed (not free) capacity as a canonical
 	// domain.Footprint — the denominator for "how much CPU/memory does one accelerator on this
 	// cluster come with", which GetFlavorCapacity's availability numbers cannot answer. A

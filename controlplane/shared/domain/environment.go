@@ -3,6 +3,7 @@ package domain
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -26,34 +27,66 @@ type EnvironmentState string
 const (
 	EnvironmentBuilding EnvironmentState = "building"
 	EnvironmentReady    EnvironmentState = "ready"
-	// EnvironmentFailed is a file a Dockerfile instruction of which failed. It is final for that
-	// file on that base.
+	// EnvironmentFailed is a build that ended without an image, for the EnvironmentFault it
+	// carries. The next submit that names it builds it again.
 	EnvironmentFailed EnvironmentState = "failed"
-	// EnvironmentAbandoned is one the platform failed to build on every attempt it allows, no
-	// fault of the file's. The next submit or declaration that names it builds it again.
-	EnvironmentAbandoned EnvironmentState = "abandoned"
 )
 
-// Environment is one image the platform builds from an environment file on one base image. Key
-// names the pair, so the same file on the same base is built once. Image is where the build is
-// pushed, and runs once State is ready. LogTail is the end of a failed build's output. Attempts
-// counts the builds the platform failed since it was last made building.
+// EnvironmentFault is whose fault a failed environment is.
+type EnvironmentFault string
+
+const (
+	// EnvironmentFaultFile is an instruction of the file that failed.
+	EnvironmentFaultFile EnvironmentFault = "file"
+	// EnvironmentFaultPlatform is a build the platform did not finish on any of the
+	// MaxEnvironmentAttempts assignments it made.
+	EnvironmentFaultPlatform EnvironmentFault = "platform"
+)
+
+const (
+	// MaxEnvironmentAttempts is how many times one build of an environment is assigned to a
+	// cluster before it fails as the platform's fault.
+	MaxEnvironmentAttempts = 3
+	// MaxEnvironmentBuildsPerCluster is how many builds one cluster is assigned at once.
+	MaxEnvironmentBuildsPerCluster = 2
+	// EnvironmentBuildLease is how long a cluster holds an assigned build before it is assigned
+	// again.
+	EnvironmentBuildLease = 30 * time.Minute
+)
+
+// Environment is one image the platform builds for an org from an environment file on one base
+// image. Key names the three, so the same file on the same base is built once per org. A building
+// one is assigned to ClusterName at AssignedAt for its Attempt-th time, or to none while
+// ClusterName is empty. Image is the pushed build, repository@digest, and runs once State is
+// ready. LogTail is the end of the output of a build that failed.
 type Environment struct {
-	Key        string
-	Base       string
-	Dockerfile string
-	Image      string
-	State      EnvironmentState
-	LogTail    string
-	Attempts   int
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	Key         string
+	OrgID       string
+	Base        string
+	Dockerfile  string
+	Image       string
+	State       EnvironmentState
+	Fault       EnvironmentFault
+	LogTail     string
+	ClusterName string
+	Attempt     int
+	AssignedAt  *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
-// EnvironmentKey names the build of dockerfile on base.
-func EnvironmentKey(dockerfile, base string) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%s%d:%s", len(base), base, len(dockerfile), dockerfile)))
+// EnvironmentKey names the build of dockerfile on base for orgID.
+func EnvironmentKey(orgID, dockerfile, base string) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%s%d:%s%d:%s", len(orgID), orgID, len(base), base, len(dockerfile), dockerfile)))
 	return hex.EncodeToString(sum[:])
+}
+
+// EnvironmentBuildOutcome is what the cluster a build was assigned to reports of it.
+type EnvironmentBuildOutcome struct {
+	// Fault is empty for a build that pushed Image, repository@digest.
+	Fault   EnvironmentFault
+	Image   string
+	LogTail string
 }
 
 const (
@@ -62,9 +95,19 @@ const (
 	NotAdmittedEnvironmentBuilding = "environment_building"
 	// EvictionEnvironmentFailed ends a job whose environment file did not build.
 	EvictionEnvironmentFailed EvictionReason = "environment_failed"
+	// EvictionEnvironmentUnbuilt ends a job whose environment the platform did not build, no
+	// fault of the file's. It costs nothing and is not queued again: the environment stays
+	// failed until a submit names it, so the agent submits again.
+	EvictionEnvironmentUnbuilt EvictionReason = "environment_unbuilt"
 	// ReasonInvalidEnvironmentFile refuses an environment file that is not built on BASE.
 	ReasonInvalidEnvironmentFile = "invalid_environment_file"
+	// ReasonNoEnvironmentBuilder refuses a job whose commit declares an environment while no
+	// cluster the org may use builds environments.
+	ReasonNoEnvironmentBuilder = "no_environment_builder"
 )
+
+// ErrNoEnvironmentBuilder is an environment declared while no cluster the org may use builds.
+var ErrNoEnvironmentBuilder = errors.New("no registered cluster the org may use builds environments")
 
 // EnvironmentFileError is an environment file the platform does not build, with why.
 type EnvironmentFileError struct{ Why string }

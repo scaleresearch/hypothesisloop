@@ -20,9 +20,10 @@ func TestAnEnvironmentFileIsBuiltOnTheBaseThePlatformPasses(t *testing.T) {
 	}
 }
 
-func TestAnEnvironmentKeyNamesTheFileAndTheBaseApart(t *testing.T) {
-	if EnvironmentKey("ab", "c") == EnvironmentKey("a", "bc") || EnvironmentKey("x", "base:1") == EnvironmentKey("x", "base:2") ||
-		EnvironmentKey("x", "base:1") != EnvironmentKey("x", "base:1") {
-		t.Error("a key must change with the file and with the base, and only with them")
+func TestAnEnvironmentKeyNamesTheOrgTheFileAndTheBaseApart(t *testing.T) {
+	if EnvironmentKey("o", "ab", "c") == EnvironmentKey("o", "a", "bc") || EnvironmentKey("o", "x", "base:1") == EnvironmentKey("o", "x", "base:2") ||
+		EnvironmentKey("o1", "x", "base:1") == EnvironmentKey("o", "1x", "base:1") || EnvironmentKey("a", "x", "b") == EnvironmentKey("b", "x", "b") ||
+		EnvironmentKey("o", "x", "base:1") != EnvironmentKey("o", "x", "base:1") {
+		t.Error("a key must change with the org, the file and the base, and only with them")
 	}
 }

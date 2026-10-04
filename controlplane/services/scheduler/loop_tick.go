@@ -7,6 +7,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -204,7 +205,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	// error surfaces at the end so the failure is still loud.
 	maxJobHours := map[string]float64{} // key: platformExpID; 0 = unlimited
 	filtered := queued[:0]
-	environments := map[string]*domain.Environment{}
+	environments := newEnvironmentPass()
 	for _, exp := range queued {
 		if exp.EnvironmentKey != "" {
 			if held, err := l.heldForEnvironment(ctx, environments, exp); err != nil {
@@ -1907,40 +1908,71 @@ func cloneNodeAvailByCluster(byCluster map[string]map[string]map[string]int64) m
 	return cloned
 }
 
-// heldForEnvironment says whether exp waits for the environment its commit declares: while it is
-// built it says so, once the file failed exp ends with the end of the build's output, so its agent
-// fixes the file and submits again, and once the platform abandoned it exp ends as the platform's
-// fault, and a submit builds it again. seen holds the environments this tick read.
-func (l *Loop) heldForEnvironment(ctx context.Context, seen map[string]*domain.Environment, exp *domain.Experiment) (bool, error) {
-	env, ok := seen[exp.EnvironmentKey]
+// environmentPass is what one tick read of the environments queued jobs wait for: each
+// environment once, after its build was assigned, and the live clusters once, when a first
+// environment is assigned.
+type environmentPass struct {
+	seen map[string]*domain.Environment
+	live []string
+	read bool
+}
+
+func newEnvironmentPass() *environmentPass {
+	return &environmentPass{seen: map[string]*domain.Environment{}}
+}
+
+// heldForEnvironment says whether exp waits for the environment its commit declares, whose build
+// it assigns to a live cluster first (db.EnvironmentsStore.AssignEnvironment): while it is built
+// it says so, once the file failed exp ends with the end of the build's output, so its agent fixes
+// the file and submits again, and once the platform failed it on every attempt exp ends as the
+// platform's fault at no cost, and the next submit builds it again.
+func (l *Loop) heldForEnvironment(ctx context.Context, pass *environmentPass, exp *domain.Experiment) (bool, error) {
+	env, ok := pass.seen[exp.EnvironmentKey]
 	if !ok {
+		if !pass.read {
+			live, err := l.workload.GetLiveClusters(ctx)
+			if err != nil {
+				return false, fmt.Errorf("live clusters: %w", err)
+			}
+			for name, connected := range live {
+				if connected {
+					pass.live = append(pass.live, name)
+				}
+			}
+			pass.read = true
+		}
 		var err error
-		if env, err = l.store.GetEnvironment(ctx, exp.EnvironmentKey); err != nil {
+		if env, err = l.store.AssignEnvironment(ctx, exp.EnvironmentKey, pass.live, domain.EnvironmentBuildLease); err != nil {
 			return false, err
 		}
 		if env == nil {
 			return false, fmt.Errorf("job %s names environment %s, which does not exist", exp.ID, exp.EnvironmentKey)
 		}
-		seen[exp.EnvironmentKey] = env
+		pass.seen[exp.EnvironmentKey] = env
 	}
-	switch env.State {
-	case domain.EnvironmentReady:
+	switch {
+	case env.State == domain.EnvironmentReady:
 		return false, nil
-	case domain.EnvironmentBuilding:
-		reason := domain.NotAdmittedEnvironmentBuilding + ": the platform is building the environment " + domain.EnvironmentFile + " of its commit declares, on " + env.Base + ", since " + env.CreatedAt.UTC().Format(time.RFC3339) + ". The job runs in it once it is built"
+	case env.State == domain.EnvironmentBuilding:
+		where := "on cluster " + env.ClusterName + ", attempt " + strconv.Itoa(env.Attempt) + " of " + strconv.Itoa(domain.MaxEnvironmentAttempts)
+		if env.ClusterName == "" {
+			where = "once a live cluster that builds for its org has room"
+		}
+		reason := domain.NotAdmittedEnvironmentBuilding + ": the platform builds the environment " + domain.EnvironmentFile + " of its commit declares, on " + env.Base + ", " + where +
+			". The job runs in it once it is built"
 		return true, l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason)
-	case domain.EnvironmentFailed:
+	case env.State == domain.EnvironmentFailed && env.Fault == domain.EnvironmentFaultFile:
 		return true, l.endForEnvironment(ctx, exp, domain.StatusRejected, string(domain.EvictionEnvironmentFailed.WithDetail(domain.EnvironmentFile+" of its commit did not build on "+env.Base+
 			". Fix it, commit and submit again. The end of the build's output:\n"+env.LogTail)))
-	case domain.EnvironmentAbandoned:
-		return true, l.endForEnvironment(ctx, exp, domain.StatusEvicted, string(domain.EvictionCodeUnreachable.WithDetail("the platform could not build the environment "+domain.EnvironmentFile+
-			" of its commit declares on "+env.Base+", no fault of the file's. Submit it again and the platform builds it again")))
+	case env.State == domain.EnvironmentFailed && env.Fault == domain.EnvironmentFaultPlatform:
+		return true, l.endForEnvironment(ctx, exp, domain.StatusEvicted, string(domain.EvictionEnvironmentUnbuilt.WithDetail("the platform could not build the environment "+domain.EnvironmentFile+
+			" of its commit declares on "+env.Base+" in "+strconv.Itoa(domain.MaxEnvironmentAttempts)+" attempts, no fault of the file's. It costs nothing: submit again and the platform builds it again")))
 	}
-	return false, fmt.Errorf("environment %s of job %s is %s", env.Key, exp.ID, env.State)
+	return false, fmt.Errorf("environment %s of job %s is %s with fault %q", env.Key, exp.ID, env.State, env.Fault)
 }
 
-// endForEnvironment ends exp, queued for its environment, as to with reason. A platform fault is
-// queued again while its allowance lasts (db.Store.ResolveTermination).
+// endForEnvironment ends exp, queued for its environment, as to with reason, and settles it: an
+// environment the platform did not build costs nothing.
 func (l *Loop) endForEnvironment(ctx context.Context, exp *domain.Experiment, to domain.ExperimentStatus, reason string) error {
 	outcome, err := l.store.ResolveTermination(ctx, exp.ID, domain.StatusQueued, to, reason)
 	if err != nil {

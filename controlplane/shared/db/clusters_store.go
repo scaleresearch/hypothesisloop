@@ -150,6 +150,15 @@ func (s *ClustersStore) RecordJobImage(ctx context.Context, name, image string) 
 	return nil
 }
 
+// RecordBuilds keeps whether the cluster's runtime says it builds environments. A report that
+// changes nothing writes nothing.
+func (s *ClustersStore) RecordBuilds(ctx context.Context, name string, builds bool) error {
+	if _, err := s.pool.pool.Exec(ctx, `UPDATE clusters SET builds = $2 WHERE name = $1 AND builds <> $2`, name, builds); err != nil {
+		return fmt.Errorf("clusters_store.RecordBuilds: %w", err)
+	}
+	return nil
+}
+
 // RegisteredClusters returns every registered cluster by name.
 func (s *ClustersStore) RegisteredClusters(ctx context.Context) (map[string]domain.Cluster, error) {
 	rows, err := s.pool.pool.Query(ctx, `SELECT `+clusterColumns+` FROM clusters`)

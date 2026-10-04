@@ -12,7 +12,7 @@ import (
 // RowsAffected guard means a concurrent status change (e.g. natural completion racing with
 // eviction) can never double-transition.
 //
-// Except when the reason names an infrastructure fault. Then the job did nothing wrong: the
+// Except when the reason names an infrastructure fault that is requeued (domain.RequeuedOnFault). Then the job did nothing wrong: the
 // environment failed it, so while the experiment still has infrastructure-requeue budget the row
 // goes back to QUEUED instead, and the caller is told so. That decision lives here, in the same
 // statement that spends the budget, rather than at each of the two eviction paths that can raise
@@ -24,7 +24,7 @@ import (
 // idempotent absolute-set writes can retry until quota_settled_at is set. Settle is what turns an
 // infrastructure fault into a refund; see its doc comment.
 func (s *Store) ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error) {
-	if domain.IsInfrastructureFault(domain.EvictionReason(reason)) {
+	if domain.RequeuedOnFault(domain.EvictionReason(reason)) {
 		requeued, err := s.ExperimentsStore.RequeueInfrastructureFault(ctx, id, from, reason, s.maxInfraRequeues)
 		if err != nil {
 			return domain.TerminationSkipped, err

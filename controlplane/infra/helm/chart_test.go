@@ -92,9 +92,9 @@ func TestEveryPodReadsTheOneNamedSecret(t *testing.T) {
 	}
 }
 
-// control-service reads the builder's PEM files and the Google credentials at each build, so they
-// are files of the Secret in a mounted directory, and only the builder's address is a value.
-func TestControlServiceReadsTheBuilderAndGoogleCredentialsAsFilesOfTheSecret(t *testing.T) {
+// control-service reads the Google credentials as a file of the Secret in a mounted directory, and
+// reaches no environment builder.
+func TestControlServiceReadsTheGoogleCredentialsAsAFileOfTheSecretAndNoBuilder(t *testing.T) {
 	release := charttest.Render(t, charttest.External)
 	env := release.Env(t, "hypothesisloop-control-service", secretNames[charttest.External])
 	pod := release.Deployments["hypothesisloop-control-service"].Spec.Template.Spec
@@ -112,21 +112,16 @@ func TestControlServiceReadsTheBuilderAndGoogleCredentialsAsFilesOfTheSecret(t *
 			}
 		}
 	}
-	if env["HYPOTHESISLOOP_ENVIRONMENT_BUILDER_ADDR"] != "tcp://builder.example.invalid:31234" {
-		t.Errorf("builder address = %q, want the values'", env["HYPOTHESISLOOP_ENVIRONMENT_BUILDER_ADDR"])
+	for name := range env {
+		if strings.HasPrefix(name, "HYPOTHESISLOOP_ENVIRONMENT_BUILDER") {
+			t.Errorf("control-service is handed %s", name)
+		}
 	}
-	for name, key := range map[string]string{
-		"HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CA":   "ENVIRONMENT_BUILDER_CA",
-		"HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CERT": "ENVIRONMENT_BUILDER_CERT",
-		"HYPOTHESISLOOP_ENVIRONMENT_BUILDER_KEY":  "ENVIRONMENT_BUILDER_KEY",
-		"GOOGLE_APPLICATION_CREDENTIALS":          "GOOGLE_CREDENTIALS",
-	} {
-		if got := files[env[name]]; got != key {
-			t.Errorf("%s = %q, which is Secret key %q of a mounted directory, want %s", name, env[name], got, key)
-		}
-		if _, known := charttest.Secret[key]; !known {
-			t.Errorf("charttest.Secret has no %s", key)
-		}
+	if len(files) != 1 || files[env["GOOGLE_APPLICATION_CREDENTIALS"]] != "GOOGLE_CREDENTIALS" {
+		t.Errorf("GOOGLE_APPLICATION_CREDENTIALS = %q among the mounted files %v, want the one file of Secret key GOOGLE_CREDENTIALS", env["GOOGLE_APPLICATION_CREDENTIALS"], files)
+	}
+	if _, known := charttest.Secret["GOOGLE_CREDENTIALS"]; !known {
+		t.Error("charttest.Secret has no GOOGLE_CREDENTIALS")
 	}
 }
 
@@ -204,8 +199,7 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		"no launcher":                 {charttest.InCluster, `agents.launcher=""`, "agents.launcher is required"},
 		"no agent image":              {charttest.InCluster, `agents.image=""`, "agents.image is required"},
 		"no API address":              {charttest.InCluster, `publicAPIURL=""`, "publicAPIURL is required"},
-		"no environment builder":      {charttest.InCluster, `environmentBuilder.address=""`, "environmentBuilder.address is required"},
-		"no builder cluster":          {charttest.InCluster, `environmentBuilder.cluster=""`, "environmentBuilder.cluster is required"},
+		"an environment builder":      {charttest.InCluster, `environmentBuilder.address=tcp://builder.example.invalid:31234`, "environmentBuilder"},
 		"the API address per reader":  {charttest.InCluster, `agents.apiURL=http://api.example.invalid`, "apiURL"},
 		"no runtime metrics address":  {charttest.InCluster, `runtimes.metricsURL=""`, "runtimes.metricsURL is required"},
 		"no object store address":     {charttest.InCluster, `objectStore.endpoint=""`, "objectStore.endpoint is required"},

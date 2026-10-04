@@ -129,18 +129,6 @@
     "publicAPIURL": {
       "type": "string"
     },
-    "environmentBuilder": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "address": {
-          "type": "string"
-        },
-        "cluster": {
-          "type": "string"
-        }
-      }
-    },
     "runtimes": {
       "type": "object",
       "additionalProperties": false,

@@ -46,6 +46,6 @@ func (worldRepositories) Create(_ context.Context, _, _, name, _ string, _ map[s
 // noEnvironments is a git host whose commits declare no environment.
 type noEnvironments struct{}
 
-func (noEnvironments) Declared(context.Context, string, string, string, string) (*domain.Environment, error) {
+func (noEnvironments) Declared(context.Context, string, string, string, string, string) (*domain.Environment, error) {
 	return nil, nil
 }

@@ -66,11 +66,12 @@ under hl/PE/ (hl hypothesis checkout ID puts you on yours). The submit fills an 
 metadata.code_ref with <origin url>@<HEAD sha> and metadata.branch with that branch, and pushes
 the branch itself. What a job ran is its code_ref. A commit holding .hypothesisloop/Dockerfile
 runs in the environment built from it: QUEUED as environment_building until built, REJECTED
-as environment_failed with the build's output when the file failed, EVICTED as code_unreachable
-when the platform could not build it (submit again).
+as environment_failed with the build's output when the file failed, EVICTED as
+environment_unbuilt at no cost when the platform could not build it (submit again).
 
 Refusals: image_required; unknown_job_image (neither a name from hl capacity nor a full
-address); no_cluster_for_image; cpu_required, memory_required, storage_required;
+address); no_cluster_for_image; no_environment_builder (the commit declares an environment and
+no cluster your org may use builds); cpu_required, memory_required, storage_required;
 exceeds_cluster_capacity (more than any cluster has idle, with both figures);
 experiment_not_started (before the start only a baseline agent's job is taken; see status_reason
 of hl platform-experiments get); experiment_closed.

@@ -385,6 +385,10 @@ func (b *Backend) GetClusterIDs(ctx context.Context) (map[string]string, error) 
 	return metricsdb.LiveClusterIDs(ctx, b.metricsDBURL, b.connectedWithin)
 }
 
+func (b *Backend) GetLiveClusters(ctx context.Context) (map[string]bool, error) {
+	return metricsdb.LiveClusterHeartbeats(ctx, b.metricsDBURL, b.connectedWithin)
+}
+
 func minimumFootprint(a, b domain.Footprint) domain.Footprint {
 	out := domain.NewFootprint()
 	for resource, av := range a {

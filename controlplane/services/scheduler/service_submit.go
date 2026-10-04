@@ -102,12 +102,14 @@ const ReasonEnvironmentUnreadable = "environment_unreadable"
 // code was pushed with.
 func (s *Service) declaredEnvironment(ctx context.Context, pe *domain.PlatformExperiment, exp *domain.Experiment) error {
 	commit := exp.CodeRef[strings.LastIndex(exp.CodeRef, "@")+1:]
-	env, err := s.environments.Declared(ctx, pe.ProjectID, pe.Repository, commit, exp.Job.Image)
+	env, err := s.environments.Declared(ctx, exp.OrgID, pe.ProjectID, pe.Repository, commit, exp.Job.Image)
 	var invalid *domain.EnvironmentFileError
 	var refused *api.Refusal
 	switch {
 	case errors.As(err, &invalid):
 		return &AdmissionError{Reason: domain.ReasonInvalidEnvironmentFile, Message: invalid.Why + ". Fix it, commit and submit again"}
+	case errors.Is(err, domain.ErrNoEnvironmentBuilder):
+		return &AdmissionError{Reason: domain.ReasonNoEnvironmentBuilder, Message: fmt.Sprintf("commit %s declares %s, and no cluster your org may use builds environments: submit from a commit without the file, or attach a cluster that builds", commit, domain.EnvironmentFile)}
 	case errors.As(err, &refused):
 		return &AdmissionError{Reason: ReasonEnvironmentUnreadable, Message: fmt.Sprintf("the platform could not read %s at commit %s: %s", domain.EnvironmentFile, commit, refused.Message)}
 	case err != nil:
