@@ -106,14 +106,19 @@ USER agent
 ENV AGENT_VENV=/agent/.venv
 RUN uv venv --seed --no-cache --python /usr/local/bin/python3 $AGENT_VENV
 WORKDIR /opt/hypothesisloop-agent
+# Every module is compiled to bytecode here: a machine that boots compiles what it imports
+# otherwise, which took two of the harness's first four seconds on a Fly machine.
 COPY --chown=agent:agent agents/experimentator/pyproject.toml agents/experimentator/uv.lock .
-RUN uv sync --no-dev --locked --no-cache --no-install-project
+RUN uv sync --no-dev --locked --no-cache --compile-bytecode --no-install-project
 
 # The harness itself is installed once its source is there. Installed before, it was recorded as
 # built without src/, and every `uv run` of a new machine fetched the build backend and built it
-# again before the harness started.
+# again before the harness started. `uv run` still builds it again on every boot (1.4 seconds
+# measured), so nothing runs it: the entrypoint and the launcher's command start the
+# environment's python directly.
 COPY --chown=agent:agent agents/experimentator/src/ src/
-RUN uv sync --no-dev --locked --no-cache
+RUN uv sync --no-dev --locked --no-cache --compile-bytecode \
+ && .venv/bin/python3 -m compileall -q src
 # No docs/ copy: the platform rules are fetched live at startup (api_client.PlatformClient.fetch_rules).
 
 # /agent/workspace is where the agent clones and works, and nothing else is ever written there:
@@ -131,7 +136,7 @@ ENV AGENT_STATE_DIR=/agent/.harness
 # requires it, so that the two never differ on where a transcript is.
 ENV CLAUDE_CONFIG_DIR=/agent/.claude
 
-ENTRYPOINT ["uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"]
+ENTRYPOINT ["/opt/hypothesisloop-agent/.venv/bin/python3", "-m", "hypothesisloop_agent.claude.run"]
 # A per-experiment overlay that needs to install/clone as root (e.g. tt-metal source) must
 # `USER root` for that layer and switch back to `USER agent` itself afterwards -- ENTRYPOINT is
 # inherited as-is and does not need repeating.
