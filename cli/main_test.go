@@ -178,7 +178,7 @@ func TestJobSubmitFromYAML(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "arrives as an update with its metrics when you end your turn") {
+	if !strings.Contains(stderr.String(), "arrives as an update with its metrics, unasked: while your quota has room, submit the next independent trial beside it") {
 		t.Fatalf("stderr = %q, want the note that the result arrives as an update", stderr.String())
 	}
 	if want := `{"id":"job-1","status":"QUEUED","code_ref":"repo@abc","capacity_tier":"guaranteed","estimated_cost_acch":0.5}` + "\n"; stdout.String() != want {

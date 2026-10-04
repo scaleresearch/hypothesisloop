@@ -127,7 +127,7 @@ func TestASubmitAnsweredWithAnEarlierJobSaysNothingWasSubmitted(t *testing.T) {
 		code   int
 		want   string
 	}{
-		{"RUNNING", nil, 0, "hl: job submit: an identical submit already created job-1, which is RUNNING, and nothing more was submitted: the result arrives as an update with its metrics when you end your turn. --repeat 2 submits the same request as another job\n"},
+		{"RUNNING", nil, 0, "hl: job submit: an identical submit already created job-1, which is RUNNING, and nothing more was submitted: the result arrives as an update with its metrics, unasked: while your quota has room, submit the next independent trial beside it, and end your turn once nothing else is worth a job. --repeat 2 submits the same request as another job\n"},
 		{"EVICTED", nil, 1, "hl: job submit: nothing was submitted: an identical submit already created job-1, which ended EVICTED. --repeat 2 submits the same request as another job\n"},
 		{"COMPLETED", []string{"--repeat", "2"}, 1, "hl: job submit: nothing was submitted: an identical submit already created job-1, which ended COMPLETED. --repeat 3 submits the same request as another job\n"},
 	} {

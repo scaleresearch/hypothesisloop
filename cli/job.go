@@ -49,9 +49,10 @@ that request.
 Quota: a job holds its estimated_cost_acch from submit until it ends, then what it was billed
 (hl job cost ID). With no estimate in FILE or --estimated-duration-hours it gets
 job_estimated_duration_hours of the experiment, the baseline job's run time plus a half; a
-baseline agent's job gets the largest your quota admits. A submit refused for quota fits once a
-job of yours ends, or with a lower estimate that is still no less than the job takes. Burst runs
-on idle capacity and can be evicted for a guaranteed job; it draws on the same quota.
+baseline agent's job gets the largest your quota admits that ends by baseline_due_at. A submit
+refused for quota fits once a job of yours ends, or with a lower estimate that is still no less
+than the job takes. Burst runs on idle capacity and can be evicted for a guaranteed job; it
+draws on the same quota.
 
 Required: metadata.hypothesis_id (or --hypothesis), any agent's registered hypothesis (a
 hypothesis and a branch are two things), and metadata.theory (or --theory), what you predict
@@ -210,7 +211,9 @@ func submissionKey(body map[string]any, repeat int) (string, error) {
 // summaryGate is the not_admitted_reason of a queued job whose agent owes a summary.
 const summaryGate = "summary_gate"
 
-const resultArrives = "the result arrives as an update with its metrics when you end your turn"
+// resultArrives is what a submit says of the job's result. An agent told only that it arrives once
+// it ends its turn ended its turn after every submit, and ran one job at a time on idle machines.
+const resultArrives = "the result arrives as an update with its metrics, unasked: while your quota has room, submit the next independent trial beside it, and end your turn once nothing else is worth a job"
 
 // setJobEnv applies K=V pairs onto body's job.env.
 func setJobEnv(body map[string]any, pairs []string) error {

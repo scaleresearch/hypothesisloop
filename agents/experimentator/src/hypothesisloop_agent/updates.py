@@ -186,8 +186,8 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
     for q in await read("your quota", "quota"):
         events.append({"kind": "quota_used", "value": (
             f"{q['used_guaranteed_acch'] + q['used_burst_acch']:.3g} of {q['share_accelerator_hours']:g} AccH, "
-            f"room for a job of {q['remaining_guaranteed_accelerator_hours']:.3g} guaranteed "
-            f"or {q['remaining_burst_accelerator_hours']:.3g} burst" + _next_stage(q))})
+            f"room for jobs holding {q['remaining_guaranteed_accelerator_hours']:.3g} guaranteed "
+            f"or {q['remaining_burst_accelerator_hours']:.3g} burst at once" + _next_stage(q))})
     return events + not_read
 
 

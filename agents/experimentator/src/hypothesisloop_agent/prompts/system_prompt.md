@@ -81,9 +81,11 @@ baseline's `README.md` says how its harness measures:
          `hl job data` lists what a job left; a stage chained onto its parent sets `parent_id`
          and reads the parent's prefix.
   5. Updates about your jobs and hypotheses, your quota, the stages, the run and its brief
-     arrive as messages, and one wakes you after you end your turn: while jobs run and nothing
-     else is due, end it. `agent.idle` says nothing of yours has run on the platform for a
-     while: submit a job. Re-read a changed brief, and the run's end, before your next trial.
+     arrive as messages, and one wakes you after you end your turn. A job in flight is no reason
+     to end it: while your quota has room, submit the next independent trial beside it, and end
+     your turn once a few of yours are queued beyond what runs, or nothing else is worth a job.
+     `agent.idle` says nothing of yours has run on the platform for a while: submit a job.
+     Re-read a changed brief, and the run's end, before your next trial.
   6. Once the evidence lets you call it honestly, set your hypothesis's status. Then back to 2.
      A line whose last refinements each gained less than the spread between repeats, or
      nothing, is exhausted: say so in a comment on its root child, with the best it reached,

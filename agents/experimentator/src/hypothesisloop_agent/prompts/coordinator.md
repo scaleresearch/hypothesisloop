@@ -63,6 +63,8 @@ And for what holds the whole run back:
   - A reference missing or invalid (see Baseline).
   - No literature: no comment on the objective (`hl hypothesis get root`) with the best
     published results and links. Tell a researcher to post one before its next idea.
+  - Idle machines: each researcher runs one job at a time while quota and time are left
+    (`hl quota --all`, `hl job list`). Tell researchers to queue independent trials together.
   - Converging ideas: the objective's children are not distinct mechanisms, or the
     researchers all work the same one. Give each a different direction.
   - A plateau: a line whose last refinements gained less than the spread between repeats.

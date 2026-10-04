@@ -196,7 +196,7 @@ class JobStateTest(unittest.IsolatedAsyncioTestCase):
                          "ranks nowhere: constraint exact_match is 0.5, and must be at least 1\n"
                          "experiment.status exp-3 EVICTED oom on node blackhole-1\n"
                          "unfinished_jobs 1 QUEUED, 2 RUNNING\n"
-                         "quota_used 0.113 of 2 AccH, room for a job of 1.85 guaranteed or 1.85 burst")
+                         "quota_used 0.113 of 2 AccH, room for jobs holding 1.85 guaranteed or 1.85 burst at once")
         with open(counter.replace(".runs", ".reads")) as f:
             self.assertEqual(f.read(), "job status exp-1 exp-2 exp-3\njob stats --agent agent-a\nquota\n")
 
@@ -211,7 +211,7 @@ class JobStateTest(unittest.IsolatedAsyncioTestCase):
         command, _ = fake_hl(f"echo '{COMPLETED}'\n", self.JOBS, self.STATS, quota)
         events = await updates.drain(ENV, command=command)
         self.assertEqual(updates.message(events, "agent-a").splitlines()[-1],
-                         "quota_used 0.113 of 2 AccH, room for a job of 1.85 guaranteed or 1.85 burst, "
+                         "quota_used 0.113 of 2 AccH, room for jobs holding 1.85 guaranteed or 1.85 burst at once, "
                          "and the share rises to 2.83 AccH by 2026-10-06T21:43:44Z")
 
     async def test_a_batch_without_an_ended_job_reads_no_job(self):
