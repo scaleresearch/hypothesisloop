@@ -71,6 +71,10 @@ OPEN_WAKES = ("experiment.status=FAILED",)
 IDLE_NUDGE_S = 1800
 IDLE_NUDGE_MAX_S = 4 * IDLE_NUDGE_S
 IDLE_PROMPT = "No platform updates for {minutes} minutes. Continue with the most useful work available, if there is any."
+# Said at once to an agent that ends its turn with no job of its own queued or running: it would
+# otherwise wait until IDLE_NUDGE_S or the platform's agent.idle for an update that cannot come.
+NOTHING_IN_FLIGHT = ("No job of yours is queued or running, so no update of your own is coming. A job submitted "
+                     "while its environment builds waits for that build on the platform.")
 
 
 def watch_env(api_url: str, token: str, statedir: str) -> dict[str, str]:
@@ -188,16 +192,37 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
     agent = _agent(env)
     if not agent:
         return events + not_read
-    for stats in await read("your unfinished jobs", "job", "stats", "--agent", agent):
-        counts = stats["by_status"]
+    for stats in await read("your unfinished jobs", *_unfinished_read(agent)):
         events.append({"kind": "unfinished_jobs",
-                       "value": ", ".join(f"{counts[s]} {s}" for s in _UNFINISHED if counts.get(s)) or "none"})
+                       "value": ", ".join(f"{n} {s}" for s, n in _unfinished(stats).items()) or "none"})
     for q in await read("your quota", "quota"):
         events.append({"kind": "quota_used", "value": (
             f"{q['used_guaranteed_acch'] + q['used_burst_acch']:.3g} of {q['share_accelerator_hours']:g} AccH, "
             f"room for jobs holding {q['remaining_guaranteed_accelerator_hours']:.3g} guaranteed "
             f"or {q['remaining_burst_accelerator_hours']:.3g} burst at once" + _next_stage(q))})
     return events + not_read
+
+
+def _unfinished_read(agent: str) -> list[str]:
+    return ["job", "stats", "--agent", agent]
+
+
+def _unfinished(stats: dict) -> dict[str, int]:
+    """The agent's job counts by unfinished status, those it has none of left out."""
+    return {s: stats["by_status"][s] for s in _UNFINISHED if stats["by_status"].get(s)}
+
+
+async def jobs_in_flight(env: dict[str, str], hl: str = "hl") -> int | None:
+    """How many jobs of the agent watching with env are queued or running, None when that could
+    not be read."""
+    command = [hl, *_unfinished_read(_agent(env))]
+    code, stdout, said = await _run_hl(command, env, lambda: False, warn=False)
+    stats = _events(stdout) if code == 0 else []
+    if not stats:
+        if not outage.under_way():
+            _warn(command, code, said or "no stats in the answer")
+        return None
+    return sum(_unfinished(stats[0]).values())
 
 
 def _next_stage(quota: dict) -> str:

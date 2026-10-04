@@ -158,6 +158,7 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
         setup = _setup()
         with mock.patch.object(run, "ClaudeSDKClient", IdleClient), \
                 mock.patch.object(run.updates, "next_batch", stopped_while_waiting), \
+                mock.patch.object(run.updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \
                 mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=finished_since)), \
                 contextlib.redirect_stdout(io.StringIO()):
             await asyncio.wait_for(run._run_one_session(setup, "m", None, stop_flag), timeout=5)
@@ -246,6 +247,7 @@ class IdleNudgeTest(unittest.IsolatedAsyncioTestCase):
 
         with mock.patch.object(run, "ClaudeSDKClient", IdleClient), \
                 mock.patch.object(run.updates, "next_batch", next_batch), \
+                mock.patch.object(run.updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \
                 mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=[])), \
                 contextlib.redirect_stdout(io.StringIO()), self.assertLogs("llm_agent"):
             await asyncio.wait_for(run._run_one_session(_setup(), "m", None, stop_flag), timeout=5)

@@ -823,7 +823,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
 
     opening = await asyncio.to_thread(_opening, setup, resume_id, initial_prompt)
     connecting = time.monotonic()
-    idle_s = updates.IDLE_NUDGE_S
+    idle_s, told_nothing_in_flight = updates.IDLE_NUDGE_S, False
     async with ClaudeSDKClient(options=options) as client:
         log.info("model CLI connected in %.1fs", time.monotonic() - connecting)
         await client.query(opening)
@@ -915,8 +915,21 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 await _rotate(setup, handoff, resume_id)
                 return None, True
 
-            # The agent ended its turn: wait for the next batch of updates about its own jobs and
-            # hypotheses and hand it over on the same connection.
+            # The agent ended its turn. With no job of its own queued or running its wait waits
+            # for nothing: it is told so at once, and not again until an update or a job of its
+            # own comes.
+            if config.submits_jobs(cfg):
+                in_flight = await updates.jobs_in_flight(watch_env)
+                if in_flight:
+                    told_nothing_in_flight = False
+                elif in_flight == 0 and not told_nothing_in_flight:
+                    told_nothing_in_flight = True
+                    log.info("no job in flight at the end of the turn, saying so")
+                    _forget_job_reads()
+                    await client.query(updates.NOTHING_IN_FLIGHT)
+                    continue
+            # Wait for the next batch of updates about its own jobs and hypotheses and hand it
+            # over on the same connection.
             while True:
                 events = await updates.next_batch(watch_env, stopped, idle_s)
                 told = "" if stopped() else await _told(setup, events)
@@ -932,7 +945,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                     print(line, flush=True)
                 _forget_job_reads()
                 await client.query(told)
-                idle_s = updates.IDLE_NUDGE_S
+                idle_s, told_nothing_in_flight = updates.IDLE_NUDGE_S, False
                 continue
             log.info("no platform updates for %ds, nudging", idle_s)
             _forget_job_reads()

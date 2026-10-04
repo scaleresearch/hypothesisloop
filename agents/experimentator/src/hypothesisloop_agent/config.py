@@ -96,3 +96,8 @@ def measures_baseline(cfg) -> bool:
     return cfg.role == BASELINE_ROLE
 
 
+def submits_jobs(cfg) -> bool:
+    """A researcher or a baseline agent: whoever has jobs of its own to wait for."""
+    return not coordinates(cfg) and not plans(cfg)
+
+

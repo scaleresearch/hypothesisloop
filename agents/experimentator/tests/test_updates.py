@@ -257,6 +257,22 @@ class JobStateTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(logged.records), 1)
 
 
+class JobsInFlightTest(unittest.IsolatedAsyncioTestCase):
+    async def test_queued_submitted_and_running_jobs_count_and_ended_ones_do_not(self):
+        command, counter = fake_hl("", stats='{"total":9,"by_status":{"COMPLETED":6,"RUNNING":2,"SUBMITTED":1,"QUEUED":1}}\n')
+        self.assertEqual(await updates.jobs_in_flight(ENV, hl=command[0]), 4)
+        with open(counter.replace(".runs", ".reads")) as f:
+            self.assertEqual(f.read(), "job stats --agent agent-a\n")
+        command, _ = fake_hl("", stats='{"total":1,"by_status":{"COMPLETED":1}}\n')
+        self.assertEqual(await updates.jobs_in_flight(ENV, hl=command[0]), 0)
+
+    # Nothing is said on a guess: a read that failed is no "nothing in flight".
+    async def test_a_read_that_failed_is_none_and_logged(self):
+        command, _ = fake_hl("", stats=JobStateTest.STATS, read_exit=1)
+        with self.assertLogs("llm_agent", "WARNING"):
+            self.assertIsNone(await updates.jobs_in_flight(ENV, hl=command[0]))
+
+
 class DrainTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_drain_returns_what_waits_without_listening_for_more(self):
         command, _ = fake_hl(f"[ \"$2\" = '--no-wait' ] || exit 2\necho '{COMPLETED}'\n")
@@ -530,6 +546,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
                                 cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", role="competitor", api_url="http://x", token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
         with mock.patch.object(run, "ClaudeSDKClient", Client), \
                 mock.patch.object(updates, "next_batch", one_batch), \
+                mock.patch.object(updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \
                 mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 redirect_stdout(StringIO()) as out:
             await asyncio.wait_for(run._run_one_session(setup, "m", None, stop_flag), timeout=5)
@@ -537,6 +554,88 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("agent-a event experiment.status exp-1 COMPLETED", out.getvalue())
         self.assertEqual(os.listdir(setup.workdir), [], "the harness wrote into the directory the agent clones into")
         self.assertIn(".claude_session_id", os.listdir(setup.statedir))
+
+    async def _turn_ends(self, cfg, in_flight: list, batches: list) -> tuple[list, int]:
+        """The prompts a session of cfg is sent while each turn it ends finds the next of
+        in_flight jobs of its own, and each wait hands it the next of batches; the last batch
+        stops it. Also how many times its jobs were read."""
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from claude_agent_sdk import ResultMessage
+
+        from hypothesisloop_agent.claude import run
+
+        stop_flag = [False]
+        sent = []
+
+        class Client:
+            def __init__(self, options):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def query(self, prompt):
+                sent.append(prompt)
+
+            async def receive_response(self):
+                yield ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
+                                    num_turns=1, session_id="s")
+
+        async def next_batch(env, stopped, idle_s):
+            batch = batches.pop(0)
+            stop_flag[0] = not batches
+            return batch
+
+        read = mock.AsyncMock(side_effect=in_flight)
+        setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
+                                client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
+                                cfg=cfg)
+        with mock.patch.object(run, "ClaudeSDKClient", Client), \
+                mock.patch.object(updates, "next_batch", next_batch), \
+                mock.patch.object(updates, "jobs_in_flight", read), \
+                mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
+                redirect_stdout(StringIO()):
+            await asyncio.wait_for(run._run_one_session(setup, "m", None, stop_flag), timeout=5)
+        return sent[:-1], read.await_count
+
+    # A researcher whose last job ended waited 10 minutes for agent.idle, or 30 for the harness's
+    # nudge, for an update nothing of its own would send. It is told at once, once a stretch.
+    async def test_a_turn_ended_with_no_job_in_flight_is_told_at_once_and_again_only_after_an_update(self):
+        from types import SimpleNamespace
+        cfg = SimpleNamespace(agent_id="agent-a", flavor="generalist", role="competitor", api_url="http://x",
+                              token=ENV["HL_TOKEN"], platform_experiment_id="pe-1")
+        update = [{"kind": "comment.new", "subject": "hyp-1", "value": "agent", "agent_id": "agent-b"}]
+        sent, _ = await self._turn_ends(cfg, [0, 0, 0, 0], [update, []])
+        self.assertEqual(sent, ["Begin.", updates.NOTHING_IN_FLIGHT, "Platform updates:\ncomment.new hyp-1 agent by agent-b",
+                                updates.NOTHING_IN_FLIGHT])
+
+    async def test_a_job_seen_in_flight_starts_a_new_stretch_and_a_failed_read_says_nothing(self):
+        from types import SimpleNamespace
+        cfg = SimpleNamespace(agent_id="agent-a", flavor="generalist", role="baseline", api_url="http://x",
+                              token=ENV["HL_TOKEN"], platform_experiment_id="pe-1")
+        update = [{"kind": "comment.new", "subject": "hyp-1", "value": "agent", "agent_id": "agent-b"}]
+        sent, _ = await self._turn_ends(cfg, [None, 2, 0, 0], [update, update, []])
+        self.assertEqual(sent[1:], ["Platform updates:\ncomment.new hyp-1 agent by agent-b",
+                                    "Platform updates:\ncomment.new hyp-1 agent by agent-b", updates.NOTHING_IN_FLIGHT])
+
+    async def test_a_coordinator_has_no_jobs_of_its_own_to_be_told_of(self):
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from hypothesisloop_agent import config
+        cfg = SimpleNamespace(agent_id="", flavor=config.COORDINATOR_FLAVOR, role="", api_url="http://x",
+                              token=ENV["HL_TOKEN"], platform_experiment_id="pe-1")
+        update = [{"kind": "comment.new", "subject": "hyp-1", "value": "agent", "agent_id": "agent-b"}]
+        with mock.patch("hypothesisloop_agent.claude.run._told", mock.AsyncMock(return_value="told")):
+            sent, reads = await self._turn_ends(cfg, [], [update, []])
+        self.assertEqual((sent[1:], reads), (["told"], 0))
 
     # A planner whose machine is kept after its answer waits like any agent whose turn ended. A
     # revision is its next update and reaches the session it already has. One it answered before,
