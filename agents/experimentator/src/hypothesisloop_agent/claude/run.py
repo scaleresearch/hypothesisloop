@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 from pathlib import Path
 
@@ -106,6 +107,28 @@ async def _undelivered_hook(hook_input, tool_use_id, context) -> dict:
 _UNDELIVERED_MATCHER = HookMatcher(matcher="SendMessage", hooks=[_undelivered_hook])
 
 
+# A baseline agent slept 23 times around `hl job status` for a job being built, though hl job
+# submit had said the result arrives as an update: each wake was a model call over its whole
+# context, 44% of what it spent. A command that waits is refused with how to wait.
+_WAIT_LIMIT_S = 30
+_SLEEP = re.compile(r"\bsleep((?:\s+\d+(?:\.\d+)?[smhd]?\b)+)")
+_SECONDS = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def _waits(command: str) -> bool:
+    if re.search(r"\bhl\s+job\s+wait\b", command):
+        return True
+    return sum(float(n) * _SECONDS[unit] for args in _SLEEP.findall(command)
+               for n, unit in re.findall(r"(\d+(?:\.\d+)?)([smhd]?)", args)) >= _WAIT_LIMIT_S
+
+
+async def _wait_hook(hook_input, tool_use_id, context) -> dict:
+    if not _waits(hook_input["tool_input"].get("command", "")):
+        return {}
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                   "permissionDecisionReason": core.WAIT}}
+
+
 def _session_file(setup: core.RunSetup) -> str:
     return os.path.join(setup.statedir, _SESSION_ID_FILE)
 
@@ -184,12 +207,15 @@ _TURN_SILENCE_TIMEOUT_S = 900
 # whose own action ended its run owes nothing: its turn in flight gets this long to end by itself
 # and no turn follows.
 _SHUTDOWN_TURN_S = 60
-_SHUTDOWN_PROMPT = (
+_LAST_TURN = (
     "This is your last turn, about a minute long. Start nothing new and "
     "leave unfinished jobs running: they cannot be summarised yet. File the summaries you owe on "
-    "finished jobs and set the verdicts your evidence already supports, then end your turn. "
+    "finished jobs{verdicts}, then end your turn. "
     "A refusal with reason `experiment_closed` ends it too: your run is over, so retry nothing."
 )
+_SHUTDOWN_PROMPT = _LAST_TURN.format(verdicts=" and set the verdicts your evidence already supports")
+# A baseline agent registers no hypothesis, so it has no verdict to set.
+_BASELINE_SHUTDOWN_PROMPT = _LAST_TURN.format(verdicts="")
 
 
 _COORDINATOR_SHUTDOWN_PROMPT = (
@@ -205,7 +231,9 @@ def _shutdown_prompt(setup: core.RunSetup) -> str | None:
     cause = core.stop_cause(setup)
     if cause is None:
         return None
-    return f"{cause} {_COORDINATOR_SHUTDOWN_PROMPT if config.coordinates(setup.cfg) else _SHUTDOWN_PROMPT}"
+    if config.coordinates(setup.cfg):
+        return f"{cause} {_COORDINATOR_SHUTDOWN_PROMPT}"
+    return f"{cause} {_BASELINE_SHUTDOWN_PROMPT if config.measures_baseline(setup.cfg) else _SHUTDOWN_PROMPT}"
 
 
 class TurnStalled(Exception):
@@ -537,9 +565,13 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
         strict_mcp_config=True,
         disallowed_tools=DISALLOWED_TOOLS,
         # The 2 min default backgrounds long commands, and agents then poll their output files.
-        # Without background tasks Bash has no run_in_background to wait in.
-        env={"BASH_DEFAULT_TIMEOUT_MS": "600000", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1", **core.git_identity(cfg)},
-        hooks={"PostToolUse": [HookMatcher(hooks=[_updates_hook(setup, watch_env)]), _UNDELIVERED_MATCHER],
+        # Without background tasks Bash has no run_in_background to wait in. The briefings say
+        # every command starts in the working directory: the CLI keeps a `cd` otherwise, and an
+        # agent that repeated one failed.
+        env={"BASH_DEFAULT_TIMEOUT_MS": "600000", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
+             "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1", **core.git_identity(cfg)},
+        hooks={"PreToolUse": [HookMatcher(matcher="Bash", hooks=[_wait_hook])],
+               "PostToolUse": [HookMatcher(hooks=[_updates_hook(setup, watch_env)]), _UNDELIVERED_MATCHER],
                "PostToolUseFailure": [_UNDELIVERED_MATCHER]},
     )
 

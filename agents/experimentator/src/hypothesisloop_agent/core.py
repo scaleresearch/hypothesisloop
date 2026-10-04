@@ -61,8 +61,8 @@ def _code_sections() -> dict[str, str]:
 
 # Said once, to every role. Agents ended turns with `true` or an `echo` and waited for a job in
 # sleep loops around `hl job status`: ending the turn is the one way to wait.
-_EVERY_ROLE = ("\nTo wait, reply with no command in it: your turn ends, and the next update starts another. "
-               "An error from `hl` is signal: do what it says.")
+WAIT = "To wait, reply with no command in it: your turn ends, and the next update starts another."
+_EVERY_ROLE = f"\n{WAIT} An error from `hl` is signal: do what it says."
 
 
 def system_prompt(cfg: config.Config, rules: str, commands: str, repository_url: str, workdir: str) -> str:

@@ -115,12 +115,22 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
             ({"status": "running"}, {}, "coordinator", "Only this machine is being stopped, and the platform does not say why"),
             ({"status": "running"}, {"ended": "cut"}, "generalist", "you were cut from the platform experiment at a stage boundary"),
         ):
-            setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", flavor=flavor, platform_experiment_id="pe-1"),
+            setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", flavor=flavor, role="competitor", platform_experiment_id="pe-1"),
                                     client=SimpleNamespace(get_platform_experiment=lambda _id, e=experiment: e, get_signup=lambda *_, s=signup: s))
             prompt = run._shutdown_prompt(setup)
             self.assertTrue(prompt.startswith("You are being stopped"), prompt)
             self.assertIn(want, prompt)
             self.assertNotIn("owner", prompt)
+
+    # A baseline agent's last turn asked it for verdicts, and it registers no hypothesis.
+    def test_a_baseline_agent_is_asked_for_no_verdict(self):
+        closed = {"status": "closed", "closed_at": "2026-01-01T02:48:05Z", "close_reason": "baseline_limit_reached"}
+        for role, verdicts in (("baseline", False), ("competitor", True)):
+            setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", flavor="generalist", role=role, platform_experiment_id="pe-1"),
+                                    client=SimpleNamespace(get_platform_experiment=lambda _id: closed, get_signup=lambda *_: {"ended": "closed"}))
+            prompt = run._shutdown_prompt(setup)
+            self.assertIn("File the summaries you owe on finished jobs", prompt)
+            self.assertEqual("verdict" in prompt, verdicts, prompt)
 
     # A researcher that finished, a planner whose proposal was stored and a coordinator that
     # closed its own run were each interrupted in their closing words and given a turn to file
@@ -132,7 +142,7 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
             ({"status": "draft"}, {"ended": "planned"}, "planner"),
             (closed, {}, "coordinator"),
         ):
-            setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", flavor=flavor, platform_experiment_id="pe-1"),
+            setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", flavor=flavor, role="competitor", platform_experiment_id="pe-1"),
                                     client=SimpleNamespace(get_platform_experiment=lambda _id, e=experiment: e, get_signup=lambda *_, s=signup: s))
             self.assertIsNone(run._shutdown_prompt(setup), flavor)
 

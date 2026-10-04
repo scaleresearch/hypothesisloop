@@ -365,6 +365,26 @@ class UndeliveredMessageTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.call(hook_event_name="PostToolUse", tool_response={"success": True}), {})
 
 
+# A baseline agent slept 23 times around `hl job status` for a job being built, though hl job
+# submit had said the result arrives as an update when it ends its turn.
+class WaitTest(unittest.IsolatedAsyncioTestCase):
+    async def call(self, command):
+        from hypothesisloop_agent.claude import run
+
+        return await run._wait_hook({"tool_name": "Bash", "tool_input": {"command": command}}, "tool-1", {"signal": None})
+
+    async def test_a_command_that_waits_is_refused_with_how_to_wait(self):
+        for command in ("sleep 90; hl job status job-1", "sleep 2m && hl job logs job-1", "sleep 20; sleep 15",
+                        "hl job wait job-1 --timeout 540"):
+            told = (await self.call(command))["hookSpecificOutput"]
+            self.assertEqual(told["permissionDecision"], "deny", command)
+            self.assertIn("To wait, reply with no command in it", told["permissionDecisionReason"])
+
+    async def test_a_short_pause_and_a_command_that_only_names_sleep_run(self):
+        for command in ("sleep 5 && curl -s localhost:8000", "grep -n sleep src/train.py", "hl job status job-1"):
+            self.assertEqual(await self.call(command), {}, command)
+
+
 class FormatTest(unittest.TestCase):
     def test_one_compact_line_per_event_naming_only_other_actors(self):
         events = [{"kind": "experiment.status", "subject": "exp-1", "value": "COMPLETED", "detail": "",
