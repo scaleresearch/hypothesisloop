@@ -159,6 +159,8 @@ type createdStore struct {
 	left      []*domain.Experiment
 	// objective are the jobs on the objective, oldest first.
 	objective []*domain.Experiment
+	// completed is every COMPLETED job, oldest first.
+	completed []*domain.Experiment
 	// started counts the starts that reached the store.
 	started int
 	// answered is when a launcher last asked for its machines, by name. One not in it asked now.
@@ -216,6 +218,10 @@ func (s *createdStore) ListExperimentsTesting(context.Context, []string) ([]*dom
 
 func (s *createdStore) FinishedBaselineJobs(context.Context, string) ([]*domain.Experiment, error) {
 	return s.left, nil
+}
+
+func (s *createdStore) CompletedJobs(context.Context, string) ([]*domain.Experiment, error) {
+	return s.completed, nil
 }
 
 // StartPlatformExperimentTx starts the open platform experiment id with a researcher at work.

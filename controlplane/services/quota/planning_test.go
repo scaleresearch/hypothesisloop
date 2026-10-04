@@ -1238,6 +1238,91 @@ func TestABaselineAgentNamesTheJobItsFinishDeclares(t *testing.T) {
 	}
 }
 
+// Run 8's baseline agent declared the default configuration of the control while its own check,
+// on the branch beside the baseline's, had measured a better one. A finish naming a job that
+// another completed job of the same agent beat on the ranking metric, holding every constraint,
+// is refused naming that job and its value. A job that broke a constraint, another agent's job and
+// a tie do not count. The agent finishes naming the job of the stronger configuration.
+func TestABaselineAgentDeclaresNoJobItsOwnJobsBeat(t *testing.T) {
+	store := draftWithPlanner()
+	_, propose := planningAPI(t, store, thePlanner)
+	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
+		t.Fatalf("propose: %d %v", code, out)
+	}
+	svc, call := planningAPI(t, store, planner)
+	accept := map[string]any{"budget_accelerator_hours": 6, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}, {}}}
+	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept); code != http.StatusOK {
+		t.Fatalf("accept: %d %v", code, out)
+	}
+	measures := store.baselines[0].AgentID
+	jobs := map[string]*Baseline{}
+	job := func(id, agent, branch string, valLoss float64) {
+		b := measuredBaseline()
+		b.Job.ID, b.Job.AgentID, b.Job.PlatformExperimentID, b.Job.Branch, b.Reported = id, agent, "pe-draft", "hl/pe-draft/"+branch, map[string]float64{"val_loss": valLoss}
+		jobs[id] = b
+		store.completed = append(store.completed, b.Job)
+	}
+	job("job-default", measures, "baseline", 1.8)
+	job("job-tie", measures, "baseline", 1.8)
+	job("job-check", measures, "baseline-check", 1.7)
+	job("job-other", "ag-other", "baseline", 1.2)
+	svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) { return jobs[jobID], nil }
+	ctx := context.Background()
+
+	_, err := svc.FinishAgent(ctx, "pe-draft", measures, "the baseline is measured", "", "job-default")
+	var refused *api.Refusal
+	if !errors.As(err, &refused) || refused.Reason != "baseline_weaker_than_own_job" || !strings.Contains(refused.Message, "job-check") || !strings.Contains(refused.Message, "val_loss = 1.7") {
+		t.Fatalf("a finish naming the default its check beat: %v, want 422 baseline_weaker_than_own_job naming job-check and 1.7", err)
+	}
+	if store.baselines[0].FinishedAt != nil || store.created[0].BaselineJobID != "" {
+		t.Fatalf("a refused finish was recorded")
+	}
+
+	job("job-strong", measures, "baseline", 1.7)
+	finished, err := svc.FinishAgent(ctx, "pe-draft", measures, "the baseline is measured by job-strong", "", "job-strong")
+	if err != nil || finished.FinishedAt == nil || store.created[0].BaselineJobID != "job-strong" {
+		t.Fatalf("the finish naming the stronger configuration: %+v, %v, baseline %q", finished, err, store.created[0].BaselineJobID)
+	}
+}
+
+// A job that broke a constraint beat nothing, and a person or coordinator who declares chose
+// among the baseline agent's jobs.
+func TestOnlyAJobHoldingTheConstraintsMakesADeclarationWeak(t *testing.T) {
+	pe := openExperiment()
+	declared := measuredBaseline()
+	broken := measuredBaseline()
+	broken.Job.ID, broken.Reported = "job-broken", map[string]float64{"val_loss": 1.1, "exact_match": 0.5}
+	unreported := measuredBaseline()
+	unreported.Job.ID, unreported.Reported = "job-unreported", map[string]float64{"val_loss": 1.1}
+	stronger := measuredBaseline()
+	stronger.Job.ID, stronger.Job.Branch, stronger.Reported = "job-check", "hl/pe-1/baseline-check", map[string]float64{"val_loss": 1.5, "exact_match": 1}
+	jobs := map[string]*Baseline{"job-1": declared, "job-broken": broken, "job-unreported": unreported, "job-check": stronger}
+	newSvc := func(completed ...*Baseline) (*PlatformExperimentsService, *createdStore) {
+		stored := *pe
+		store := &createdStore{created: []*domain.PlatformExperiment{&stored}}
+		for _, b := range completed {
+			store.completed = append(store.completed, b.Job)
+		}
+		svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)
+		svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) { return jobs[jobID], nil }
+		return svc, store
+	}
+	p := *pe
+	p.BaselineJobID = "job-1"
+	svc, _ := newSvc(declared, broken, unreported)
+	if _, err := svc.heldToBaseline(context.Background(), &p, true); err != nil {
+		t.Errorf("beaten only by jobs that broke or left out a constraint: %v, want declared", err)
+	}
+	svc, _ = newSvc(declared, broken, stronger)
+	var refused *api.Refusal
+	if _, err := svc.heldToBaseline(context.Background(), &p, true); !errors.As(err, &refused) || refused.Reason != "baseline_weaker_than_own_job" || !strings.Contains(refused.Message, "job job-check") {
+		t.Errorf("beaten by the check: %v, want baseline_weaker_than_own_job naming job-check", err)
+	}
+	if _, err := svc.heldToBaseline(context.Background(), &p, false); err != nil {
+		t.Errorf("declared by a person: %v, want declared", err)
+	}
+}
+
 // Run 7 recorded a baseline agent's finish and answered it 500, when declaring its job failed
 // after the finish was stored. A stored finish is answered as one.
 func TestAStoredFinishIsAnsweredAsOneWhenItsDeclarationFails(t *testing.T) {

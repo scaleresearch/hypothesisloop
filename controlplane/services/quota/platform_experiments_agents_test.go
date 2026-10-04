@@ -38,6 +38,8 @@ type rosterStore struct {
 	left []*domain.Experiment
 	// objective is every job on the objective, oldest first.
 	objective []*domain.Experiment
+	// completed is every COMPLETED job, oldest first.
+	completed []*domain.Experiment
 	// inFlight is the agents that have a job queued or running.
 	inFlight map[string]bool
 	// lateShare is what the researchers that ended left unspent, for one joining the run.
@@ -79,6 +81,10 @@ func (f *rosterStore) ListExperimentsTesting(context.Context, []string) ([]*doma
 
 func (f *rosterStore) FinishedBaselineJobs(context.Context, string) ([]*domain.Experiment, error) {
 	return f.left, nil
+}
+
+func (f *rosterStore) CompletedJobs(context.Context, string) ([]*domain.Experiment, error) {
+	return f.completed, nil
 }
 
 func (f *rosterStore) Reachable(_ context.Context, _, repository string) (string, error) {

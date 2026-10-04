@@ -323,7 +323,10 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	}
 	patched.Name, patched.Description, patched.Metrics = checked.Name, checked.Description, checked.Metrics
 	if pe.Status == domain.PlatformExpOpen && (patch.BaselineJobID != nil || pe.BaselineJobID != "") {
-		if measured, err = s.heldToBaseline(ctx, &patched); err != nil {
+		// The platform declares what its baseline agent measured, held to the agent's own
+		// stronger jobs; a person or coordinator that declares chose among them.
+		ownJobs := patch.BaselineJobID != nil && patch.by == nil
+		if measured, err = s.heldToBaseline(ctx, &patched, ownJobs); err != nil {
 			return nil, err
 		}
 	}
@@ -366,15 +369,21 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 
 // heldToBaseline holds pe, as it would be stored, to the job it names as its baseline: the job
 // must have done what a baseline does (checkBaseline) and the budget must hold a trial of it for
-// each researcher (budgetCoversTrials). It sets on pe the estimate of a job that states none and
-// answers the block the brief is given. It is the one check of a declaration, whoever declares.
-func (s *PlatformExperimentsService) heldToBaseline(ctx context.Context, pe *domain.PlatformExperiment) (string, error) {
+// each researcher (budgetCoversTrials), and with ownJobs no other job of its agent beat it
+// (strongerOwnJob). It sets on pe the estimate of a job that states none and answers the block
+// the brief is given. It is the one check of a declaration, whoever declares.
+func (s *PlatformExperimentsService) heldToBaseline(ctx context.Context, pe *domain.PlatformExperiment, ownJobs bool) (string, error) {
 	baseline, err := s.baseline(ctx, pe, pe.BaselineJobID)
 	if err != nil {
 		return "", fmt.Errorf("platform_experiments: read baseline %s: %w", pe.BaselineJobID, err)
 	}
 	if err := checkBaseline(pe, baseline); err != nil {
 		return "", err
+	}
+	if ownJobs {
+		if err := s.strongerOwnJob(ctx, pe, baseline); err != nil {
+			return "", err
+		}
 	}
 	pe.JobEstimatedDurationHours = baselineHeadroom * baseline.ObservedHours
 	if err := budgetCoversTrials(pe, baseline.Job); err != nil {
@@ -499,7 +508,7 @@ func (s *PlatformExperimentsService) undeclared(ctx context.Context, pe *domain.
 	}
 	declared := *pe
 	declared.BaselineJobID = jobID
-	if _, err := s.heldToBaseline(ctx, &declared); errors.As(err, &refused) {
+	if _, err := s.heldToBaseline(ctx, &declared, true); errors.As(err, &refused) {
 		return api.Refuse(http.StatusConflict, refused.Reason, fmt.Sprintf("the platform did not declare job %s, the one job its baseline agents left, as the baseline of platform experiment %s: %s. The platform declares it in the request that clears this",
 			jobID, pe.ID, refused.Message)), nil
 	} else if err != nil {

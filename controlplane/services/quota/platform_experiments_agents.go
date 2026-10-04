@@ -530,7 +530,7 @@ func (s *PlatformExperimentsService) FinishAgent(ctx context.Context, platformEx
 
 // checkNamedBaseline refuses, before anything is stored, a finish whose agent names as the
 // baseline baselineJobID and could not have it declared: the agent is of role baseline, the job
-// is its own, and it passes the check of PATCH baseline_job_id.
+// is its own, it passes the check of PATCH baseline_job_id, and no other job of the agent beat it.
 func (s *PlatformExperimentsService) checkNamedBaseline(ctx context.Context, platformExpID, agentID, baselineJobID string) error {
 	signup, err := s.store.GetAgentSignup(ctx, platformExpID, agentID)
 	if err != nil {
@@ -563,7 +563,7 @@ func (s *PlatformExperimentsService) checkNamedBaseline(ctx context.Context, pla
 	}
 	declared := *pe
 	declared.BaselineJobID = baselineJobID
-	_, err = s.heldToBaseline(ctx, &declared)
+	_, err = s.heldToBaseline(ctx, &declared, true)
 	return err
 }
 

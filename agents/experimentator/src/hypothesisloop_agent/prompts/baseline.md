@@ -76,7 +76,9 @@ files it points you to and leave the rest unread.
      keeps no part of the check, and only a job of the baseline branch is declared: the
      control stays the job that ran its head.
   8. `hl platform-experiments agents finish --baseline ID --reason "baseline measured by job ID"`,
-     ID the control's job, which the platform declares as the baseline, naming in the reason
+     ID the control's job in its strongest configuration, which the platform declares as the
+     baseline: it refuses a job that another of your completed jobs, the check's among them,
+     beat on the ranking metric within the constraints. Name in the reason
      each reference job and the check's job too. A refusal says what to fix: fix it, finish again.
 
 You finish at 8, or once you can say why no baseline is possible: one failure came back three

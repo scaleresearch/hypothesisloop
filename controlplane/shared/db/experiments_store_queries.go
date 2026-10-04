@@ -106,6 +106,18 @@ func (s *ExperimentsStore) CompletedJobIDs(ctx context.Context, platformExpID st
 	return completed, nil
 }
 
+// CompletedJobs returns every COMPLETED job of a platform experiment, whoever ran it on whichever
+// branch, oldest first.
+func (s *ExperimentsStore) CompletedJobs(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {
+	q := `SELECT` + experimentColumns + `FROM experiments WHERE platform_experiment_id = $1 AND status = 'COMPLETED' ORDER BY created_at, id`
+	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.CompletedJobs: %w", err)
+	}
+	defer rows.Close()
+	return collectExperiments(rows)
+}
+
 // FinishedBaselineJobs returns the COMPLETED jobs on the objective of a platform experiment whose
 // agent is one of role baseline that finished, oldest first: what its baseline can be declared
 // from once nobody is measuring any more.

@@ -160,6 +160,62 @@ func checkBaselineEnvironment(pe *domain.PlatformExperiment, baseline *Baseline)
 	return nil
 }
 
+// strongerOwnJob refuses baseline, as its agent's declaration, when another COMPLETED job of the
+// same agent in pe, of the baseline branch or one beside it, held every constraint, reported the
+// first ranking metric and beat baseline on it. Run 8's baseline agent declared a default its own
+// check had beaten, and the researchers were ranked against the weaker control. It names the
+// strongest such job.
+func (s *PlatformExperimentsService) strongerOwnJob(ctx context.Context, pe *domain.PlatformExperiment, baseline *Baseline) error {
+	ranked, ok := domain.PrimaryRankingMetric(pe.Metrics)
+	if !ok {
+		return nil
+	}
+	declared, reported := baseline.Reported[ranked.Key]
+	if !reported {
+		return nil
+	}
+	jobs, err := s.store.CompletedJobs(ctx, pe.ID)
+	if err != nil {
+		return fmt.Errorf("platform_experiments: list the completed jobs of %s: %w", pe.ID, err)
+	}
+	var stronger *Baseline
+	best := declared
+	for _, job := range jobs {
+		if job.ID == baseline.Job.ID || job.AgentID != baseline.Job.AgentID {
+			continue
+		}
+		other, err := s.baseline(ctx, pe, job.ID)
+		if err != nil {
+			return fmt.Errorf("platform_experiments: read job %s: %w", job.ID, err)
+		}
+		if other == nil || other.Job == nil || other.Job.Status != domain.StatusCompleted {
+			continue
+		}
+		value, reported := other.Reported[ranked.Key]
+		if reported && ranked.Better(value, best) && holdsConstraints(pe.Metrics, other.Reported) {
+			stronger, best = other, value
+		}
+	}
+	if stronger == nil {
+		return nil
+	}
+	return refusedBaseline("baseline_weaker_than_own_job", "job %s of the same baseline agent (branch %s) measured %s = %g and held every constraint, better than %g of job %s: the baseline is the control in its strongest configuration. Run the configuration of job %s as a job of %s and name that job",
+		stronger.Job.ID, stronger.Job.Branch, ranked.Key, best, declared, baseline.Job.ID, stronger.Job.ID, domain.BaselineBranch(pe.ID))
+}
+
+// holdsConstraints is whether reported holds every constraint metric, each of them reported.
+func holdsConstraints(metrics []domain.MetricDefinition, reported map[string]float64) bool {
+	for _, metric := range metrics {
+		if metric.EffectiveRole() != domain.MetricRoleConstraint {
+			continue
+		}
+		if value, ok := reported[metric.Key]; !ok || !metric.Holds(value) {
+			return false
+		}
+	}
+	return true
+}
+
 // checkRaiseRequest refuses a raise of the baseline outside a running platform experiment, and
 // one with no reason: while it is open the baseline agent's job is declared, and once it is
 // closed nothing changes.

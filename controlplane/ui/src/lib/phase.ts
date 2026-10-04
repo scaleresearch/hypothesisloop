@@ -53,6 +53,7 @@ export const OWNER_ACTIONS: Record<string, OwnerAction | null> = {
   baseline_environment_differs: null,
   baseline_not_in_environment: null,
   baseline_not_on_branch: null,
+  baseline_weaker_than_own_job: null,
   budget_below_baseline: { opens: 'edit', label: 'Edit budget' },
   budget_spent: { opens: 'edit', label: 'Edit budget' },
   no_researchers: { opens: 'agents', label: 'Add a researcher' },
