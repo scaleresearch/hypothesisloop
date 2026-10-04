@@ -478,7 +478,7 @@ func (s *PlatformExperimentsService) RemoveAgent(ctx context.Context, platformEx
 // nothing else is missing. A baselineJobID that could not be declared refuses the finish.
 //
 // A researcher that finishes with more than finishEarlyShare of the run's time and of its quota
-// left names the blocker that stops it, and the time and quota it leaves are recorded with its
+// left, and more time than its jobs typically take, names the blocker that stops it, and the time and quota it leaves are recorded with its
 // reason, which agent.finished tells the coordinator.
 func (s *PlatformExperimentsService) FinishAgent(ctx context.Context, platformExpID, agentID, reason, blocker, baselineJobID string) (*domain.AgentSignup, error) {
 	reason, err := s.finishReason(ctx, platformExpID, agentID, reason, blocker)
@@ -573,7 +573,8 @@ const finishEarlyShare = 0.1
 
 // finishReason is what the finish of agentID records as its reason: reason, the blocker, and for
 // a researcher in a run that has a clock the time and quota it leaves. A researcher with more than
-// finishEarlyShare of both left and no blocker is refused, told what is left.
+// finishEarlyShare of both left, and more time than its jobs typically take (typicalJobTime), and
+// no blocker is refused, told what is left.
 func (s *PlatformExperimentsService) finishReason(ctx context.Context, platformExpID, agentID, reason, blocker string) (string, error) {
 	if blocker != "" {
 		reason = sentence(reason) + " Blocker: " + blocker
@@ -604,11 +605,46 @@ func (s *PlatformExperimentsService) finishReason(ctx context.Context, platformE
 	room := max(quota.Remaining(domain.CapacityGuaranteed), quota.Remaining(domain.CapacityBurst))
 	left := fmt.Sprintf("%d of the run's %d minutes and %.3g of the agent's %.3g AccH were left, room for a job of %.3g AccH",
 		int(timeLeft.Minutes()), int(run.Minutes()), max(0, quota.Share()-quota.Used()), quota.Share(), room)
-	if blocker == "" && timeLeft > time.Duration(finishEarlyShare*float64(run)) && room > finishEarlyShare*quota.Share() {
+	// Run 8's researcher was refused with 4 minutes left, when its jobs took 2 to 7, and sat idle
+	// until the close: time no job of it fits in is no time left.
+	typical, err := s.typicalJobTime(ctx, platformExpID, agentID)
+	if err != nil {
+		return "", fmt.Errorf("platform_experiments.finishReason: %w", err)
+	}
+	enough := max(time.Duration(finishEarlyShare*float64(run)), typical)
+	if blocker == "" && timeLeft > enough && room > finishEarlyShare*quota.Share() {
 		return "", refuseSignup(409, "time_and_quota_left", "%s. Keep pursuing credible improvements while both last. "+
 			"If something stops you that this time and quota cannot fix, finish again with blocker saying what it is", left)
 	}
 	return sentence(reason) + " When it finished, " + left + ".", nil
+}
+
+// typicalJobTime is the median time agentID's COMPLETED jobs in the platform experiment took from
+// submit to end, or with none of its own every COMPLETED job's there, and 0 with none at all.
+func (s *PlatformExperimentsService) typicalJobTime(ctx context.Context, platformExpID, agentID string) (time.Duration, error) {
+	jobs, err := s.store.CompletedJobs(ctx, platformExpID)
+	if err != nil {
+		return 0, err
+	}
+	var own, all []time.Duration
+	for _, job := range jobs {
+		if job.FinishedAt == nil || job.FinishedAt.Before(job.CreatedAt) {
+			continue
+		}
+		took := job.FinishedAt.Sub(job.CreatedAt)
+		all = append(all, took)
+		if job.AgentID == agentID {
+			own = append(own, took)
+		}
+	}
+	if len(own) == 0 {
+		own = all
+	}
+	if len(own) == 0 {
+		return 0, nil
+	}
+	slices.Sort(own)
+	return own[len(own)/2], nil
 }
 
 // sentence is text ending in a full stop, so that another can follow it on the same line.

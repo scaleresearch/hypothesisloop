@@ -934,6 +934,44 @@ func TestAResearcherFinishingEarlyNamesItsBlockerAndTheTimeAndQuotaItLeavesAreTo
 	}
 }
 
+// Run 8's researcher was refused a finish with 4 minutes of 30 left, more than a tenth, when its
+// jobs took 2 to 7 minutes, and sat idle until the close. Less time left than the agent's jobs
+// typically take, or with none of its own the experiment's, is too little to ask a blocker for.
+func TestAResearcherFinishesWithoutABlockerWhenNoJobOfItFitsInTheTimeLeft(t *testing.T) {
+	took := func(agent string, minutes int) *domain.Experiment {
+		end := time.Now().Add(-time.Hour)
+		return &domain.Experiment{AgentID: agent, Status: domain.StatusCompleted, CreatedAt: end.Add(-time.Duration(minutes) * time.Minute), FinishedAt: &end}
+	}
+	finish := func(completed ...*domain.Experiment) error {
+		store := newRosterStore(domain.PlatformExpRunning, 5)
+		store.pe.DurationHours, store.pe.EndsAt = 0.5, time.Now().Add(4*time.Minute+30*time.Second)
+		store.pe.StartsAt = store.pe.EndsAt.Add(-30 * time.Minute)
+		store.signups = []domain.AgentSignup{{PlatformExperimentID: "pe-1", AgentID: "dana", Role: domain.SignupRoleCompetitor}}
+		store.quota = &domain.AgentQuota{AgentID: "dana", PlatformExperimentID: "pe-1", GuaranteedAcceleratorHours: 3, UsedGuaranteedAccH: 0.2}
+		store.completed = completed
+		svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), 3*time.Minute)
+		_, err := svc.FinishAgent(context.Background(), "pe-1", "dana", "nothing beat the control", "", "")
+		return err
+	}
+	for name, completed := range map[string][]*domain.Experiment{
+		"its own jobs take longer":          {took("dana", 2), took("dana", 6), took("dana", 7), took("ali", 1)},
+		"the experiment's jobs take longer": {took("ali", 5), took("ali", 6)},
+	} {
+		if err := finish(completed...); err != nil {
+			t.Errorf("%s: %v, want finished without a blocker", name, err)
+		}
+	}
+	for name, completed := range map[string][]*domain.Experiment{
+		"its own jobs are quick": {took("dana", 1), took("dana", 2), took("ali", 20)},
+		"no job completed":       nil,
+	} {
+		var refused *api.Refusal
+		if err := finish(completed...); !errors.As(err, &refused) || refused.Reason != "time_and_quota_left" {
+			t.Errorf("%s: %v, want 409 time_and_quota_left", name, err)
+		}
+	}
+}
+
 // A baseline agent that finished after its platform experiment closed was answered 409 not_running
 // and a paragraph about roles. Its token still works then, to file summaries, and anything else it
 // sends is answered experiment_closed. A finish that is taken answers the agent as finished.
