@@ -959,15 +959,29 @@ func checkoutBranch(dir, branch, base, from string) (created string, err error) 
 		if localErr != nil {
 			args = []string{"checkout", "--quiet", "-b", branch, "--track", "origin/" + branch}
 		}
-		_, err := git(dir, args...)
-		return "", err
+		return "", switchBranch(dir, args...)
 	}
 	if base == "" {
 		return "", errors.New("there is no commit to start from: the hypothesis builds up to the objective and no baseline is declared yet. Wait for the baseline, or name a job to start from with --from JOB")
 	}
 	sha := base[strings.LastIndex(base, "@")+1:]
-	if _, err := git(dir, "checkout", "--quiet", "-b", branch, sha); err != nil {
+	if err := switchBranch(dir, "checkout", "--quiet", "-b", branch, sha); err != nil {
 		return "", err
 	}
 	return sha, nil
+}
+
+// switchBranch runs the git checkout of args. Refused over changes in the clone, it says what to
+// do about them in place of git's error.
+func switchBranch(dir string, args ...string) error {
+	_, err := git(dir, args...)
+	if err == nil {
+		return nil
+	}
+	if changes, statusErr := git(dir, "status", "--porcelain"); statusErr == nil && strings.TrimSpace(changes) != "" {
+		return errors.New("git will not switch branches over the changes in your clone (git status lists them). " +
+			"Commit them (git add -A && git commit) or stash them (git stash -u), then run hl hypothesis checkout again; " +
+			"the branch starts from its base, and git cherry-pick or git stash pop brings your changes onto it")
+	}
+	return err
 }

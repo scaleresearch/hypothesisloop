@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -118,5 +120,30 @@ func TestHypothesisCheckoutStartsFromAJobOrSaysThereIsNoBase(t *testing.T) {
 	code, stdout, stderr := checkout(checkoutHypothesis, "--from", "job-other")
 	if want := `{"branch":"` + checkoutBranchName + `","base":"` + other + `"}`; code != 0 || stdout != want || mustGit(t, clone, "rev-parse", "HEAD") != other {
 		t.Fatalf("--from: exit code = %d, stdout = %s, stderr = %s, want %s", code, stdout, stderr, want)
+	}
+}
+
+// In run 4 researchers wrote files in their clone before they checked out a hypothesis, and git's
+// own refusal sent them into a stash dance that failed too. The refusal says what to do.
+func TestHypothesisCheckoutOverChangesSaysToCommitOrStashThem(t *testing.T) {
+	clone, origin := pushedClone(t)
+	if err := os.WriteFile(filepath.Join(clone, "metrics.py"), []byte("baseline's\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, clone, "add", "metrics.py")
+	mustGit(t, clone, "commit", "-q", "-m", "the baseline")
+	base := mustGit(t, clone, "rev-parse", "HEAD")
+	mustGit(t, clone, "reset", "-q", "--hard", "HEAD~1")
+	if err := os.WriteFile(filepath.Join(clone, "metrics.py"), []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	checkoutServer(t, origin+"@"+base, "")
+
+	code, _, stderr := checkout(checkoutHypothesis)
+	if code != 1 || !strings.Contains(stderr, "Commit them (git add -A && git commit) or stash them (git stash -u), then run hl hypothesis checkout again") || strings.Contains(stderr, "exit status") {
+		t.Fatalf("checkout over an untracked file: exit code = %d, stderr = %s, want it refused saying to commit or stash", code, stderr)
+	}
+	if on := mustGit(t, clone, "symbolic-ref", "--short", "HEAD"); on != testBranch || read(t, clone, "metrics.py") != "mine\n" {
+		t.Fatalf("a refused checkout left the clone on %s, want %s with the file untouched", on, testBranch)
 	}
 }

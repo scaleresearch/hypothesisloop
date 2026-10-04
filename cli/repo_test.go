@@ -35,20 +35,32 @@ func repo(t *testing.T, command string) (int, string) {
 // answers it: named sweep and ranked on val_accuracy.
 func emptyClone(t *testing.T) string {
 	t.Helper()
-	return cloneOf(t, `{"id":"pe-1","name":"sweep","description":"the brief\n","metrics":[{"key":"val_accuracy","direction":"maximize"}]}`)
+	return cloneOf(t, emptyExperiment)
 }
 
+const emptyExperiment = `{"id":"pe-1","name":"sweep","description":"the brief\n","metrics":[{"key":"val_accuracy","direction":"maximize"}]}`
+
 // cloneOf is a repository with nothing in it, of platform experiment pe-1 as the platform
-// answers it with experiment.
+// answers it with experiment, worked in by its baseline agent.
 func cloneOf(t *testing.T, experiment string) string {
+	t.Helper()
+	return cloneAs(t, experiment, "baseline")
+}
+
+// cloneAs is cloneOf worked in by an agent of role.
+func cloneAs(t *testing.T, experiment, role string) string {
 	t.Helper()
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "GET" || r.URL.Path != "/platform-experiments/pe-1" {
-			t.Errorf("hl repo asked %s %s, want only the platform experiment", r.Method, r.URL.Path)
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/platform-experiments/pe-1":
+			_, _ = io.WriteString(w, experiment)
+		case r.Method == "GET" && r.URL.Path == "/platform-experiments/pe-1/signups/ag-1":
+			_, _ = io.WriteString(w, `{"agent_id":"ag-1","role":"`+role+`"}`)
+		default:
+			t.Errorf("hl repo asked %s %s, want only the platform experiment and the agent's signup", r.Method, r.URL.Path)
 		}
-		_, _ = io.WriteString(w, experiment)
 	}))
 	t.Setenv("HL_TOKEN", derivedToken("agent:pe-1/ag-1"))
 	clone := t.TempDir()
@@ -70,6 +82,20 @@ func read(t *testing.T, clone, path string) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+// In run 4 a researcher ran hl repo init on main before it had a branch, and the files it wrote
+// stopped hl hypothesis checkout. The baseline writes the files; every other agent gets them with
+// the baseline's commit.
+func TestRepoInitIsRefusedToAnAgentOtherThanTheBaseline(t *testing.T) {
+	clone := cloneAs(t, emptyExperiment, "competitor")
+	code, out := repo(t, "init")
+	if code != 1 || !strings.Contains(out, "only the baseline agent writes the experiment's files, and your role is competitor") || !strings.Contains(out, "hl hypothesis checkout ID") {
+		t.Fatalf("hl repo init by a researcher = %d, want refused pointing at checkout:\n%s", code, out)
+	}
+	if entries, err := os.ReadDir(clone); err != nil || len(entries) != 1 {
+		t.Errorf("the clone holds %v, %v, want nothing written besides .git", entries, err)
+	}
 }
 
 // A baseline agent copied a 54-line brief into experiment.yaml by hand, broke the YAML on the

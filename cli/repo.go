@@ -49,7 +49,9 @@ work of yours and are replaced, and the old ones stay in git.
 What is left to write is marked REPLACE-WITH: the command of one trial and the README's account
 of the harness. On a repository with no branch yet it first pushes an empty commit as main, so
 that the default branch is main and no experiment's. Nothing else is committed: git add and
-commit on your branch, and hl job submit pushes it. hl repo check says what is left.`, stderr)
+commit on your branch, and hl job submit pushes it. hl repo check says what is left.
+Of the agents only the baseline runs it: every other one gets the files with the baseline's
+commit (hl hypothesis checkout ID).`, stderr)
 	pe := experimentFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -64,6 +66,9 @@ commit on your branch, and hl job submit pushes it. hl repo check says what is l
 	id, err := namedExperiment(fs, c, *pe)
 	if err != nil {
 		return parseExit(err)
+	}
+	if err := baselineOnly(c, id); err != nil {
+		return fail(stderr, fmt.Errorf("repo init: %w", err))
 	}
 	var experiment declaredExperiment
 	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(id), nil, &experiment); err != nil {
@@ -118,6 +123,26 @@ commit on your branch, and hl job submit pushes it. hl repo check says what is l
 		fmt.Fprintln(stdout, did)
 	}
 	return 0
+}
+
+// baselineOnly refuses an agent that is not the baseline of platform experiment pe: the baseline
+// writes the experiment's files once, and every other agent starts from its commit.
+func baselineOnly(c *apiclient.Client, pe string) error {
+	kind, _, agent := scopeOf(c.Token)
+	if kind != callerAgent {
+		return nil
+	}
+	var signup struct {
+		Role string `json:"role"`
+	}
+	if err := c.Do("GET", signupPath(pe, agent), nil, &signup); err != nil {
+		return err
+	}
+	if signup.Role != "baseline" {
+		return fmt.Errorf("only the baseline agent writes the experiment's files, and your role is %s. Your files come with the baseline's commit: "+
+			"hl hypothesis checkout ID puts your clone on a branch made from it", signup.Role)
+	}
+	return nil
 }
 
 // defaultBranch is the branch hl gives a repository that has none.
