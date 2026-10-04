@@ -91,7 +91,7 @@ describe('on the graph', () => {
     render(<Harness view="graph" />)
     fireEvent.click(await screen.findByRole('button', { name: 'Add idea here' }))
     const editor = screen.getByRole('group', { name: 'New idea' })
-    expect(within(editor).getByText('Objective: Vision benchmark')).toBeTruthy()
+    expect(within(editor).getByText('A new approach to: Vision benchmark')).toBeTruthy()
     await write('label smoothing helps')
     fireEvent.click(within(editor).getByRole('button', { name: 'Add idea' }))
     await waitFor(() => expect(screen.getByLabelText('selected').textContent).toBe('hyp-3'))
@@ -123,26 +123,32 @@ describe('on the graph', () => {
     expect(node('a longer warmup')).toBeTruthy()
   })
 
-  it('links the objective only by builds on, and needs a builds on link to add the idea', async () => {
+  it('links the objective as a new approach, a hypothesis by a chosen kind, and needs a builds on link', async () => {
+    vi.mocked(registerHumanHypothesis).mockResolvedValue(registered('hyp-3', 'label smoothing helps', [{ type: 'builds_on', to: 'hyp-1' }]))
     render(<Harness view="graph" />)
     fireEvent.click(await screen.findByRole('button', { name: 'Add idea here' }))
     const editor = screen.getByRole('group', { name: 'New idea' })
     await write('label smoothing helps')
     const objective = within(editor).getByRole('listitem', { name: 'Link to Objective: Vision benchmark' })
-    expect(within(objective).getAllByRole('button').map(b => b.textContent)).toEqual(['', 'builds on'])
+    expect(within(objective).getByText('A new approach to: Vision benchmark')).toBeTruthy()
+    expect(within(objective).getAllByRole('button').map(b => b.getAttribute('aria-label'))).toEqual(['Remove link to Objective: Vision benchmark'])
 
     fireEvent.click(within(editor).getByRole('button', { name: '+ Add a link' }))
     fireEvent.click(node('warmup helps'))
     const other = within(editor).getByRole('listitem', { name: 'Link to warmup helps' })
-    expect(within(other).getAllByRole('button').map(b => b.textContent)).toEqual(['', 'builds on', 'related to', 'contradicts'])
-    fireEvent.click(within(other).getByRole('button', { name: 'related to' }))
+    expect(within(other).getAllByRole('button').map(b => b.textContent)).toEqual(['', 'refines', 'related', 'contradicts'])
+    expect(within(other).getByText('Mine extends or narrows that idea.')).toBeTruthy()
+    fireEvent.click(within(other).getByRole('button', { name: 'related' }))
+    expect(within(other).getByText('Mine touches the same thing.')).toBeTruthy()
     fireEvent.click(within(objective).getByRole('button', { name: 'Remove link to Objective: Vision benchmark' }))
     const add = within(editor).getByRole('button', { name: 'Add idea' }) as HTMLButtonElement
     expect(add.disabled).toBe(true)
     expect(within(editor).getByText('It needs a builds on link, to the objective or to an earlier idea.')).toBeTruthy()
 
-    fireEvent.click(within(other).getByRole('button', { name: 'builds on' }))
+    fireEvent.click(within(other).getByRole('button', { name: 'refines' }))
     expect(add.disabled).toBe(false)
+    fireEvent.click(add)
+    await waitFor(() => expect(registerHumanHypothesis).toHaveBeenCalledExactlyOnceWith('pe-x', 'label smoothing helps', [{ type: 'builds_on', to: 'hyp-1' }], []))
   })
 
   it('shows the refusal of the platform', async () => {

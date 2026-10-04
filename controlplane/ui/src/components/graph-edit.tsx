@@ -288,6 +288,13 @@ export function LinkBar() {
   )
 }
 
+// How a new idea reads against one already there, in a person's words; sent as the link kinds.
+const NEW_IDEA_LINKS: Record<HypothesisLinkType, { label: string; hint: string }> = {
+  builds_on: { label: 'refines', hint: 'extends or narrows that idea' },
+  contradicts: { label: 'contradicts', hint: 'expects the opposite outcome' },
+  related: { label: 'related', hint: 'touches the same thing' },
+}
+
 type Choice = 'related' | 'contradicts' | 'distinct'
 
 const CHOICES: Array<{ value: Choice; label: string }> = [
@@ -404,15 +411,28 @@ export function IdeaEditor({ maxHeight }: { maxHeight?: number }) {
         <Eyebrow>Links</Eyebrow>
         {ed.links.length > 0 && (
           <Stack as="ul" gap="sm" className="list-none">
-            {ed.links.map(l => (
-              <Stack as="li" gap="2xs" key={l.to} aria-label={`Link to ${nodeLabel(ed, l.to)}`}>
-                <Inline gap="xs" nowrap>
-                  <span className="line-clamp-2 min-w-0 flex-1" title={nodeLabel(ed, l.to)}>{nodeLabel(ed, l.to)}</span>
-                  <Button variant="ghost" size="icon" aria-label={`Remove link to ${nodeLabel(ed, l.to)}`} onClick={() => ed.removeLink(l.to)}><X size={12} /></Button>
-                </Inline>
-                <KindChips value={l.type} onChange={k => ed.setLinkType(l.to, k)} kinds={allowedLinkKinds(ed.graph, l.to)} />
-              </Stack>
-            ))}
+            {ed.links.map(l => {
+              const objective = l.to === ed.graph.root
+              const label = objective ? `A new approach to: ${ed.rootLabel}` : nodeLabel(ed, l.to)
+              return (
+                <Stack as="li" gap="2xs" key={l.to} aria-label={`Link to ${nodeLabel(ed, l.to)}`}>
+                  <Inline gap="xs" nowrap>
+                    <span className="line-clamp-2 min-w-0 flex-1" title={label}>{label}</span>
+                    <Button variant="ghost" size="icon" aria-label={`Remove link to ${nodeLabel(ed, l.to)}`} onClick={() => ed.removeLink(l.to)}><X size={12} /></Button>
+                  </Inline>
+                  {!objective && (
+                    <>
+                      <Inline gap="xs" role="group" aria-label="Mine">
+                        {LINK_KINDS.map(k => (
+                          <Chip key={k} active={l.type === k} title={NEW_IDEA_LINKS[k].hint} onClick={() => ed.setLinkType(l.to, k)}>{NEW_IDEA_LINKS[k].label}</Chip>
+                        ))}
+                      </Inline>
+                      <span className="text-subtle">Mine {NEW_IDEA_LINKS[l.type].hint}.</span>
+                    </>
+                  )}
+                </Stack>
+              )
+            })}
           </Stack>
         )}
         {ed.findingTarget ? (
