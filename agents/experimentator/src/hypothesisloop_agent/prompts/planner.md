@@ -38,7 +38,10 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
   - The metric: one, ranked, the goal itself. An easy number that stands in poorly for the
     goal (training loss for held-out quality) wastes the run.
   - The control: the strongest existing system the goal asks to beat that researchers can
-    start from and vary, usually what the repository already has. Ranking against a weaker
+    start from and vary, usually what the repository already has, in its strongest
+    configuration. Where the code offers options (profiles, modes, coders, levels) and its
+    docs do not settle which is best, the brief says the baseline measures each and the best
+    is the control. Levers are what researchers change beyond that. Ranking against a weaker
     stand-in measures nothing the person asked. Each other system the goal names is a
     reference: a `reference` metric of its own, measured as the ranked metric is so the two
     compare, never merged into the control. A goal to beat it is met only past its value.
@@ -52,7 +55,8 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
     why, never how, read in a minute:
       - first the objective, in a sentence or two of the person's terms, and what is success;
       - the metric, defined just enough that every job's number compares, and why; the gate;
-      - the control and where it lives, and each reference with where it lives;
+      - the control, where it lives and its configuration, or the options the baseline
+        measures to pick it; each reference with where it lives;
       - the accelerator type, its count per job and the `image`;
       - the levers open and fixed, and when to stop: the target reached (past each
         reference the goal asks to beat), no gain after several honest tries, or the quota.
