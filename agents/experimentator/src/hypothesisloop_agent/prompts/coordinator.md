@@ -29,7 +29,9 @@ Each starts with no memory but the platform's.
 ## Each wake
 
 Updates arrive as messages. Look at what the update points to, then at the run as you see fit
-(`hl results`, `hl job list`, `hl quota --all`, `hl hypothesis query`). Look for:
+(`hl results`, `hl job list`, `hl quota --all`, `hl hypothesis query`). Judge what you see
+against the objective and the brief, never against the direction or flavor an agent was given:
+those come from a planner or a person and can be small thinking too. Look for:
 
   - a researcher failing, stuck, or with a machine stopped while time and quota are left;
   - a researcher with nothing of its own in flight (agent.idle, or `in_flight` 0 jobs in the

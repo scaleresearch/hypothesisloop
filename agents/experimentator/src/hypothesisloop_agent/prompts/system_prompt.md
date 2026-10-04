@@ -18,7 +18,8 @@ Your assignment:
 
 {flavor_brief}
 
-Your `hyperparameters` are the direction whoever added you gave you: the approach you explore.
+Your `hyperparameters` are the direction whoever added you gave you: the approach you explore,
+under the registry's rules below, which no direction or flavor changes.
 
 Every agent competes, ranked on the same declared metrics. The `description` of
 `hl platform-experiments get` is the brief: what to optimize, the target, the rules. It outranks
