@@ -87,15 +87,23 @@ type fakeRepositories struct {
 }
 
 func (f *fakeRepositories) Create(_ context.Context, projectID, account, name, _ string, files map[string]string) (string, error) {
-	if account != "" {
-		return account + "/" + name, nil
-	}
 	if f.notCreated != nil {
 		return "", f.notCreated
 	}
 	f.created = append(f.created, projectID+" "+name)
 	f.committed = files
-	return "acme/" + name, nil
+	if account == "" {
+		account = "acme"
+	}
+	return account + "/" + name, nil
+}
+
+// CreatesOn answers the account named, or acme, the only one the org connected.
+func (f *fakeRepositories) CreatesOn(_ context.Context, _, account string) (string, error) {
+	if account == "" {
+		return "acme", nil
+	}
+	return account, nil
 }
 
 const testRepository = "Acme/Model"

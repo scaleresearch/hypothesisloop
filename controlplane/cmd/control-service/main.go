@@ -207,7 +207,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	// or the same job's cost depends on which of them is asked.
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
-	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap).WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent)
+	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap).WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent).WithRepositories(gitHost)
 	peHandler := quota.NewPlatformExperimentsHandler(peSvc, gitHost, quota.Planning{
 		Limit:       time.Duration(pcfg.Planning.LimitMinutes) * time.Minute,
 		ProposedFor: time.Duration(pcfg.Planning.ProposedForDays) * 24 * time.Hour,
@@ -367,6 +367,9 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 			go settlementReconciler.Start(leaderCtx)
 			// Auto-close platform experiments past their ends_at deadline.
 			go expQuotaSvc.StartExpirySweep(leaderCtx, 60*time.Second)
+			// A draft's create wakes this pass on the leader; the interval covers one created on
+			// another replica and one left by a restart.
+			go expQuotaSvc.StartRepositoryPass(leaderCtx, 5*time.Second)
 			schedulerLoop.Start(leaderCtx)
 			watcher.Start(leaderCtx)
 		})

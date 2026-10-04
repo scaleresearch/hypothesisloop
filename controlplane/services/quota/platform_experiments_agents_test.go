@@ -80,6 +80,8 @@ func (f *rosterStore) Create(context.Context, string, string, string, string, ma
 	return "", nil
 }
 
+func (f *rosterStore) CreatesOn(context.Context, string, string) (string, error) { return "", nil }
+
 const rosterMaxHosted = 6
 
 func (f *rosterStore) ListSignups(context.Context, string) ([]string, error) {

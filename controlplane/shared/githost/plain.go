@@ -72,8 +72,16 @@ func (p *Plain) Reachable(ctx context.Context, _, repository string) (string, er
 	return repository, nil
 }
 
+func (p *Plain) CreatesOn(context.Context, string, string) (string, error) {
+	return "", p.createsNone()
+}
+
 func (p *Plain) Create(context.Context, string, string, string, string, map[string]string) (string, error) {
-	return "", api.Refuse(http.StatusUnprocessableEntity, "repository_required", "the platform creates no repository on this deployment's git host: create one under "+p.base.String()+" and name it in repository")
+	return "", p.createsNone()
+}
+
+func (p *Plain) createsNone() error {
+	return api.Refuse(http.StatusUnprocessableEntity, "repository_required", "the platform creates no repository on this deployment's git host: create one under "+p.base.String()+" and name it in repository")
 }
 
 func (p *Plain) File(_ context.Context, _, _, path string) ([]byte, error) {

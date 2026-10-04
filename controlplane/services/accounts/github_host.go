@@ -71,19 +71,49 @@ func (h *GitHubHost) Reachable(ctx context.Context, projectID, repository string
 // with that person's token, renewed from the authorisation kept when they connected it.
 func (h *GitHubHost) Create(ctx context.Context, projectID, account, name, description string, files map[string]string) (string, error) {
 	const op = "create-repository"
-	project, err := h.store.GetProject(ctx, projectID)
+	orgID, chosen, err := h.createsOn(ctx, projectID, account)
+	if err != nil {
+		return "", err
+	}
+	userToken := ""
+	if chosen.AccountType == github.AccountUser {
+		if userToken, err = h.store.RenewGitHubUserToken(ctx, orgID, chosen.InstallationID, h.github.UserToken); err != nil {
+			return "", refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+		}
+	}
+	created, err := h.github.CreateRepository(ctx, chosen.InstallationID, userToken, name, description, files)
 	if err != nil {
 		return "", refusal(h.logger, op, err, http.StatusUnprocessableEntity)
 	}
+	h.logger.Info("repository created for a platform experiment", zap.String("repository", created.FullName), zap.String("orgID", orgID))
+	return created.FullName, nil
+}
+
+func (h *GitHubHost) CreatesOn(ctx context.Context, projectID, account string) (string, error) {
+	_, chosen, err := h.createsOn(ctx, projectID, account)
+	if err != nil {
+		return "", err
+	}
+	return chosen.AccountLogin, nil
+}
+
+// createsOn is the org of the project and the installation a repository is created through: the
+// one on account, or with none named the only one the org connected.
+func (h *GitHubHost) createsOn(ctx context.Context, projectID, account string) (string, *domain.OrgGitHubInstallation, error) {
+	const op = "create-repository"
+	project, err := h.store.GetProject(ctx, projectID)
+	if err != nil {
+		return "", nil, refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+	}
 	if project == nil {
-		return "", notFound("project")
+		return "", nil, notFound("project")
 	}
 	installations, err := h.store.ListGitHubInstallations(ctx, project.OrgID)
 	if err != nil {
-		return "", refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+		return "", nil, refusal(h.logger, op, err, http.StatusUnprocessableEntity)
 	}
 	if len(installations) == 0 {
-		return "", refusal(h.logger, op, errNoInstallation, http.StatusUnprocessableEntity)
+		return "", nil, refusal(h.logger, op, errNoInstallation, http.StatusUnprocessableEntity)
 	}
 	var chosen *domain.OrgGitHubInstallation
 	logins := []string{}
@@ -95,22 +125,11 @@ func (h *GitHubHost) Create(ctx context.Context, projectID, account, name, descr
 	}
 	switch {
 	case chosen == nil && account == "":
-		return "", invalid(ReasonRepositoryAccountRequired, "the org has connected several GitHub accounts ("+strings.Join(logins, ", ")+"): say in repository_account which one the new repository is created on, or name a repository")
+		return "", nil, invalid(ReasonRepositoryAccountRequired, "the org has connected several GitHub accounts ("+strings.Join(logins, ", ")+"): say in repository_account which one the new repository is created on, or name a repository")
 	case chosen == nil:
-		return "", refusal(h.logger, op, errNotConnected, http.StatusUnprocessableEntity)
+		return "", nil, refusal(h.logger, op, errNotConnected, http.StatusUnprocessableEntity)
 	}
-	userToken := ""
-	if chosen.AccountType == github.AccountUser {
-		if userToken, err = h.store.RenewGitHubUserToken(ctx, project.OrgID, chosen.InstallationID, h.github.UserToken); err != nil {
-			return "", refusal(h.logger, op, err, http.StatusUnprocessableEntity)
-		}
-	}
-	created, err := h.github.CreateRepository(ctx, chosen.InstallationID, userToken, name, description, files)
-	if err != nil {
-		return "", refusal(h.logger, op, err, http.StatusUnprocessableEntity)
-	}
-	h.logger.Info("repository created for a platform experiment", zap.String("repository", created.FullName), zap.String("orgID", project.OrgID))
-	return created.FullName, nil
+	return project.OrgID, chosen, nil
 }
 
 func (h *GitHubHost) File(ctx context.Context, projectID, repository, path string) ([]byte, error) {

@@ -540,7 +540,7 @@ const launcherEndsBySQL = `(CASE
 // clock.
 //
 // A draft's planner is the other way round. It has something to do while the draft is a draft
-// and nothing is proposed, which a revision makes true again. After its answer it is kept until
+// with its repository, which it clones, and nothing is proposed, which a revision makes true again. After its answer it is kept until
 // the draft's planner_ends_at, for a revision asked for soon, and then let wind down for $2
 // seconds, as it is after the draft closed. Once the draft is accepted it has nothing left to
 // do, in an experiment that is then open or running.
@@ -552,7 +552,7 @@ LEFT JOIN platform_experiment_cuts c ON c.platform_experiment_id = s.platform_ex
 WHERE s.hosted AND s.launcher = $1
   AND (pe.status = 'closed' AND pe.closed_at > now() - make_interval(secs => $2)
        OR s.role <> '` + string(domain.SignupRolePlanner) + `' AND (pe.status = 'running' OR pe.status = 'open' AND s.role = '` + string(domain.SignupRoleBaseline) + `')
-       OR s.role = '` + string(domain.SignupRolePlanner) + `' AND pe.status = 'draft' AND (pe.planner_ends_at IS NULL OR pe.planner_ends_at > now() - make_interval(secs => $2)))
+       OR s.role = '` + string(domain.SignupRolePlanner) + `' AND pe.status = 'draft' AND pe.repository <> '' AND (pe.planner_ends_at IS NULL OR pe.planner_ends_at > now() - make_interval(secs => $2)))
   AND (c.agent_id IS NULL OR c.cut_at > now() - make_interval(secs => $2))
   AND (s.finished_at IS NULL OR s.finished_at > now() - make_interval(secs => $2))`
 

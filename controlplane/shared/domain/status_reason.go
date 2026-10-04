@@ -24,10 +24,11 @@ const (
 // status_reason, and for the reason an agent of its roster adds, who acts on it. It is the one
 // place that says so.
 var statusWaiters = map[string]Waiter{
-	"planning": WaitsForPlatform,
-	"revising": WaitsForPlatform,
-	"proposed": WaitsForOwner,
-	"declined": WaitsForOwner,
+	"repository_creating": WaitsForPlatform,
+	"planning":            WaitsForPlatform,
+	"revising":            WaitsForPlatform,
+	"proposed":            WaitsForOwner,
+	"declined":            WaitsForOwner,
 
 	"baseline_measuring":  WaitsForPlatform,
 	"baseline_declaring":  WaitsForPlatform,

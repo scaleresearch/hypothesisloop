@@ -16,6 +16,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/cli/repotemplate"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/accounts"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
@@ -35,6 +36,7 @@ func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Princ
 	router := chi.NewRouter()
 	doc := apidocs.New(router, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(placement), zap.NewNop())
 	planningRepositories = &fakeRepositories{files: map[string]string{"prj-a": ""}}
+	svc.WithRepositories(planningRepositories)
 	handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).
 		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
 		WithJobImages([]domain.JobImage{{Name: "torch", Image: "registry.example.com/hl/torch:1"}})
@@ -70,7 +72,7 @@ var planningRepositories *fakeRepositories
 
 func TestADraftIsCreatedFromOneSentenceWithItsPlannerAndNothingOfARun(t *testing.T) {
 	store := &draftStore{}
-	_, call := planningAPI(t, store, planner)
+	svc, call := planningAPI(t, store, planner)
 	goal := "Find out whether a cosine schedule beats a constant learning rate for a small transformer on character-level text, measured by validation loss"
 	before := time.Now()
 	code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": "  " + goal + "\n"})
@@ -106,16 +108,20 @@ func TestADraftIsCreatedFromOneSentenceWithItsPlannerAndNothingOfARun(t *testing
 		signup.Flavor != domain.PlannerFlavor || signup.Role != domain.SignupRolePlanner || signup.Model != "platform-model-1" || out["signup_count"] != float64(1) {
 		t.Errorf("planner %+v signed up as %+v, want a hosted planner of role baseline on the platform's model", planner, signup)
 	}
-	// A draft has a repository: the one named, or a new one.
-	if pe.Repository != "acme/"+RepositoryName(pe) || len(planningRepositories.created) != 1 || !maps.Equal(planningRepositories.committed, repotemplate.Files()) || planningRepositories.committed[domain.ExperimentFile] == "" {
+	// A draft has a repository: the one named, or a new one the repository pass makes after the
+	// create answered.
+	if pe.Repository != "" || len(planningRepositories.created) != 0 || out["status_reason"].(map[string]any)["reason"] != "repository_creating" {
+		t.Errorf("repository = %q (created %v), status_reason %v: want none yet and repository_creating", pe.Repository, planningRepositories.created, out["status_reason"])
+	}
+	if err := svc.ProvideRepositories(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if pe.Repository != "acme/"+RepositoryName(pe) || pe.RepositoryURL != "https://github.com/"+pe.Repository+".git" || len(planningRepositories.created) != 1 ||
+		!maps.Equal(planningRepositories.committed, repotemplate.Files()) || planningRepositories.committed[domain.ExperimentFile] == "" {
 		t.Errorf("repository = %q (created %v), want one made for the draft from the template, which holds %s", pe.Repository, planningRepositories.created, domain.ExperimentFile)
 	}
 	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal, "repository": "acme/model"}); code != http.StatusCreated || out["repository"] != testRepository || len(planningRepositories.created) != 1 {
 		t.Errorf("naming a repository: got = %d %v, want it as GitHub spells it and none created", code, out["repository"])
-	}
-	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal}); code != http.StatusCreated || len(planningRepositories.created) != 2 ||
-		out["repository"] != "acme/"+RepositoryName(store.created[2]) {
-		t.Errorf("naming none: got = %d %v (created %v), want a repository made for the draft", code, out["repository"], planningRepositories.created)
 	}
 	store.created = store.created[:1]
 
@@ -147,6 +153,32 @@ func TestADraftIsCreatedFromOneSentenceWithItsPlannerAndNothingOfARun(t *testing
 	}
 }
 
+// "Plan it" froze for seven seconds while GitHub created the draft's repository inside the
+// request. The create answers once the draft is stored, and a repository GitHub then refuses
+// closes the draft with what GitHub said.
+func TestADraftIsAnsweredBeforeItsRepositoryAndARefusedOneClosesIt(t *testing.T) {
+	store := &draftStore{}
+	svc, call := planningAPI(t, store, planner)
+	planningRepositories.notCreated = api.Refuse(http.StatusConflict, "repository_exists", "the account already has a repository of that name")
+	code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": "Find out whether warmup helps"})
+	if code != http.StatusCreated || out["status_reason"].(map[string]any)["reason"] != "repository_creating" {
+		t.Fatalf("got = %d %v, want 201 with the repository still being created", code, out)
+	}
+	if err := svc.ProvideRepositories(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	pe := store.created[0]
+	if err := svc.Describe(context.Background(), pe, planner); err != nil || pe.Status != domain.PlatformExpClosed || pe.StatusReason.Reason != string(domain.CloseRepositoryNotCreated) ||
+		!strings.Contains(pe.StatusReason.Message, "already has a repository of that name") {
+		t.Fatalf("after the refusal: %s %+v, %v, want it closed repository_not_created with GitHub's answer", pe.Status, pe.StatusReason, err)
+	}
+	// Nothing is created again for a draft that is closed.
+	planningRepositories.notCreated = nil
+	if err := svc.ProvideRepositories(context.Background()); err != nil || len(planningRepositories.created) != 0 {
+		t.Fatalf("a second pass created %v, %v: want nothing", planningRepositories.created, err)
+	}
+}
+
 // draftRepositories answers the git credential service from the drafts a store holds.
 type draftRepositories struct{ store *draftStore }
 
@@ -162,9 +194,12 @@ func (d draftRepositories) PlatformExperimentRepository(ctx context.Context, id 
 // is handed the git credential of that repository, and of no other.
 func TestThePlannerOfADraftIsGivenAGitCredentialForItsRepository(t *testing.T) {
 	store := &draftStore{}
-	_, call := planningAPI(t, store, planner)
+	svc, call := planningAPI(t, store, planner)
 	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": "Find out whether warmup helps"}); code != http.StatusCreated {
 		t.Fatalf("got = %d %v, want a draft", code, out)
+	}
+	if err := svc.ProvideRepositories(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 	pe := store.created[0]
 	host, err := githost.NewPlain("https://git.test", "platform", "secret")
@@ -280,6 +315,8 @@ type draftStore struct {
 	statusStore
 	planners map[string]*domain.Agent
 	signups  map[string]domain.AgentSignup
+	// createOn is, by draft, the account its repository is to be created on.
+	createOn map[string]string
 	// unregistered is a launcher config names and no operator registered.
 	unregistered bool
 
@@ -295,15 +332,45 @@ func (s *draftStore) LauncherKnown(context.Context, string) (bool, error) {
 	return !s.unregistered, nil
 }
 
-func (s *draftStore) CreateDraft(_ context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, prepare func(context.Context, *domain.PlatformExperiment) error) error {
-	if err := prepare(context.Background(), pe); err != nil {
-		return err
-	}
+func (s *draftStore) CreateDraft(_ context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, createOn string) error {
 	if s.planners == nil {
-		s.planners, s.signups = map[string]*domain.Agent{}, map[string]domain.AgentSignup{}
+		s.planners, s.signups, s.createOn = map[string]*domain.Agent{}, map[string]domain.AgentSignup{}, map[string]string{}
 	}
 	s.created = append(s.created, pe)
-	s.planners[pe.ID], s.signups[pe.ID] = planner, signup
+	s.planners[pe.ID], s.signups[pe.ID], s.createOn[pe.ID] = planner, signup, createOn
+	return nil
+}
+
+func (s *draftStore) awaiting(pe *domain.PlatformExperiment) bool {
+	return pe.Status == domain.PlatformExpDraft && pe.Repository == "" && s.createOn[pe.ID] != ""
+}
+
+func (s *draftStore) DraftsAwaitingRepository(context.Context) ([]db.DraftAwaitingRepository, error) {
+	var out []db.DraftAwaitingRepository
+	for _, pe := range s.created {
+		if s.awaiting(pe) {
+			out = append(out, db.DraftAwaitingRepository{ID: pe.ID, ProjectID: pe.ProjectID, Name: pe.Name, Account: s.createOn[pe.ID]})
+		}
+	}
+	return out, nil
+}
+
+func (s *draftStore) GiveDraftRepository(_ context.Context, id, repository, url string) error {
+	for _, pe := range s.created {
+		if pe.ID == id && s.awaiting(pe) {
+			pe.Repository, pe.RepositoryURL = repository, url
+			return nil
+		}
+	}
+	return db.ErrNotDraft
+}
+
+func (s *draftStore) FailDraftRepository(_ context.Context, id, answer string) error {
+	for _, pe := range s.created {
+		if pe.ID == id && s.awaiting(pe) {
+			pe.Status, pe.CloseReason, pe.RepositoryError = domain.PlatformExpClosed, domain.CloseRepositoryNotCreated, answer
+		}
+	}
 	return nil
 }
 

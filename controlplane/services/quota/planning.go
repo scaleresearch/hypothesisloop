@@ -11,6 +11,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/cli/repotemplate"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -42,10 +43,17 @@ func draftName(goal string) string {
 	return string(runes) + "…"
 }
 
+// DraftRepository is where a draft keeps its code: Named, the repository the request named, at
+// URL, or with none named CreateOn, the account the repository pass creates one on.
+type DraftRepository struct {
+	Named, URL, CreateOn string
+}
+
 // CreateDraft creates a platform experiment in status draft from one sentence, with its planner:
 // an agent the platform runs, of role planner. The draft has the planning limit for an end and nothing of a run, no budget among it:
-// the planner proposes the rest and a person accepts it.
-func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID, goal string, by domain.Actor, planning Planning, launch AgentLaunch, prepare func(context.Context, *domain.PlatformExperiment) error) (*domain.PlatformExperiment, error) {
+// the planner proposes the rest and a person accepts it. A repository to be created is created
+// after this returns, by the repository pass it wakes (ProvideRepositories).
+func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID, goal string, by domain.Actor, planning Planning, launch AgentLaunch, repository DraftRepository) (*domain.PlatformExperiment, error) {
 	goal = strings.TrimSpace(goal)
 	if goal == "" {
 		return nil, refuseUpdate(422, "invalid_goal", "goal is required: one sentence saying what you want to find out")
@@ -88,6 +96,8 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 		CurrentStage:          1,
 		DefaultQuotaTier:      domain.QuotaTier(settings.DefaultQuotaTier),
 		MaxHosted:             launch.MaxHosted,
+		Repository:            repository.Named,
+		RepositoryURL:         repository.URL,
 		CreatedAt:             now,
 		UpdatedAt:             now,
 	}
@@ -97,17 +107,69 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 		Hosted: true, Launcher: launch.Launcher, Flavor: domain.PlannerFlavor, Model: launch.DefaultModel,
 		Actor: &by,
 	}
-	err = s.store.CreateDraft(ctx, pe, planner, signup, prepare)
-	var answered huma.StatusError
-	if errors.As(err, &answered) {
-		return nil, err
-	}
-	if err != nil {
+	if err := s.store.CreateDraft(ctx, pe, planner, signup, repository.CreateOn); err != nil {
 		return nil, fmt.Errorf("platform_experiments.CreateDraft: %w", err)
 	}
 	pe.SignupCount = 1
 	s.logger.Info("draft created", zap.String("id", pe.ID), zap.String("planner", plannerID))
+	if repository.CreateOn != "" {
+		select {
+		case s.repositoryWake <- struct{}{}:
+		default:
+		}
+	}
 	return pe, nil
+}
+
+// ProvideRepositories creates the repository of every draft that awaits one, from the template,
+// and records it, from which its planner is started. A draft whose repository the git host does
+// not create is closed repository_not_created with what the host answered.
+func (s *PlatformExperimentsService) ProvideRepositories(ctx context.Context) error {
+	drafts, err := s.store.DraftsAwaitingRepository(ctx)
+	if err != nil {
+		return fmt.Errorf("platform_experiments.ProvideRepositories: %w", err)
+	}
+	for _, draft := range drafts {
+		pe := &domain.PlatformExperiment{ID: draft.ID, Name: draft.Name}
+		created, err := s.repos.Create(ctx, draft.ProjectID, draft.Account, RepositoryName(pe), "Platform experiment "+pe.ID+": "+pe.Name, repotemplate.Files())
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err != nil {
+			s.logger.Warn("provide_repositories: not created", zap.String("platform_experiment_id", draft.ID), zap.Error(err))
+			if err := s.store.FailDraftRepository(ctx, draft.ID, err.Error()); err != nil {
+				s.logger.Error("provide_repositories: close the draft", zap.String("platform_experiment_id", draft.ID), zap.Error(err))
+			}
+			continue
+		}
+		if err := s.store.GiveDraftRepository(ctx, draft.ID, created, s.repos.URL(created)); err != nil {
+			s.logger.Error("provide_repositories: record the repository", zap.String("platform_experiment_id", draft.ID), zap.String("repository", created), zap.Error(err))
+			continue
+		}
+		s.logger.Info("provide_repositories: created", zap.String("platform_experiment_id", draft.ID), zap.String("repository", created))
+	}
+	return nil
+}
+
+// StartRepositoryPass runs ProvideRepositories when CreateDraft wakes it and every interval,
+// until ctx is cancelled.
+func (s *PlatformExperimentsService) StartRepositoryPass(ctx context.Context, interval time.Duration) {
+	if s.repos == nil {
+		panic("quota: StartRepositoryPass without WithRepositories: drafts would never get their repository")
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.repositoryWake:
+		case <-ticker.C:
+		}
+		if err := s.ProvideRepositories(ctx); err != nil {
+			s.logger.Error("provide_repositories: scan", zap.Error(err))
+		}
+	}
 }
 
 // RegisterPlanningHuma registers the way from one sentence to a running platform experiment:
@@ -127,7 +189,9 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"and no compute is spent until then. Its name is the goal cut short until the proposal names it. POST /platform-experiments creates one whole instead, " +
 			"and states what a run costs itself. Closing a draft (POST /platform-experiments/{id}/close) abandons it. " +
 			"Its planner and later its agents keep their code in repository: the one the request names, checked as on POST /platform-experiments, or a private one the platform creates on the GitHub account the org connected. " +
-			"repository_account says which account when the org connected several. 422 github_not_connected, repository_account_required, repository_authorization_required, repository_creation_not_permitted, 409 repository_exists, 502 repository_not_added and repository_not_created as on POST /platform-experiments. " +
+			"repository_account says which account when the org connected several. 422 github_not_connected, repository_account_required and installation_not_connected as on POST /platform-experiments. " +
+			"A repository the platform creates is created after this answers: the draft is answered without repository and with status_reason repository_creating, and its planner starts once the repository is there. " +
+			"When GitHub does not create it the draft is closed with close_reason repository_not_created, and its status_reason message says what GitHub answered. " +
 			"On a deployment whose git host is plain, repository is a name under the host's root and is required: 422 repository_required without it, repository_not_reachable when it does not answer git. " +
 			"422 invalid_goal for a goal that is empty or over the length. 503 launcher_not_registered when the deployment has no launcher to run the planner.",
 	}, func(ctx context.Context, in *struct {
@@ -148,11 +212,20 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err != nil {
 			return nil, err
 		}
+		repository := DraftRepository{Named: named}
+		if named == "" {
+			repository.CreateOn, err = h.repos.CreatesOn(ctx, in.Body.ProjectID, in.Body.RepositoryAccount)
+		} else {
+			repository.URL = h.repos.URL(named)
+		}
+		if err != nil {
+			return nil, err
+		}
 		caller, err := h.caller(ctx)
 		if err != nil {
 			return nil, err
 		}
-		pe, err := h.svc.CreateDraft(ctx, in.Body.ProjectID, in.Body.Goal, caller.Actor(), h.planning, h.launch, h.provideRepository(named, in.Body.RepositoryAccount))
+		pe, err := h.svc.CreateDraft(ctx, in.Body.ProjectID, in.Body.Goal, caller.Actor(), h.planning, h.launch, repository)
 		var answered huma.StatusError
 		if errors.As(err, &answered) {
 			return nil, err

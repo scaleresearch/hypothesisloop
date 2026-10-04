@@ -9,6 +9,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 	"go.uber.org/zap"
@@ -57,8 +58,14 @@ type PlatformExperimentsStore interface {
 	// Decline stores why a draft's planner proposes nothing, until when the draft waits for a
 	// person and how long the planner's machine is kept; db.ErrNotDraft for anything but a draft.
 	Decline(ctx context.Context, id, reason string, waitUntil time.Time, keepPlanner time.Duration) error
-	// CreateDraft creates a draft with its planner signed up, or neither.
-	CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, prepare func(context.Context, *domain.PlatformExperiment) error) error
+	// CreateDraft creates a draft with its planner signed up, or neither. The draft names its
+	// repository, or createOn is the account one is to be created on.
+	CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, createOn string) error
+	// DraftsAwaitingRepository, GiveDraftRepository and FailDraftRepository are the repository
+	// pass's: the drafts whose repository is to be created, and what became of each.
+	DraftsAwaitingRepository(ctx context.Context) ([]db.DraftAwaitingRepository, error)
+	GiveDraftRepository(ctx context.Context, id, repository, url string) error
+	FailDraftRepository(ctx context.Context, id, answer string) error
 	// SpawnAgent creates an agent in the experiment's org and signs it up, or does neither.
 	SpawnAgent(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup) error
 	RemoveAgent(ctx context.Context, platformExpID, agentID string, deleteDataKey func(ctx context.Context, accessKeyID string) error) error
@@ -126,6 +133,16 @@ type PlatformExperimentsService struct {
 	// with the clusters that have it. The handler's WithLiveCapacity sets it, and until then it
 	// answers ErrLiveCapacityUnconfigured.
 	reachable func(ctx context.Context, projectID string) (map[string][]domain.Cluster, error)
+	// repos is the git host the repository pass creates a draft's repository on, and
+	// repositoryWake wakes the pass for a draft just created.
+	repos          githost.Provider
+	repositoryWake chan struct{}
+}
+
+// WithRepositories wires the git host the repository pass creates drafts' repositories on.
+func (s *PlatformExperimentsService) WithRepositories(repos githost.Provider) *PlatformExperimentsService {
+	s.repos = repos
+	return s
 }
 
 // WithDataStore wires the store a removed agent's key is deleted from, and the durable-data
@@ -150,6 +167,7 @@ func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.Qu
 		cfg:            cfg,
 		logger:         logger,
 		observedGapCap: observedGapCap,
+		repositoryWake: make(chan struct{}, 1),
 	}
 	s.baseline = s.readBaseline
 	s.reachable = func(context.Context, string) (map[string][]domain.Cluster, error) {

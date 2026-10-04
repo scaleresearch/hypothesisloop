@@ -631,6 +631,8 @@ func draftReason(pe *domain.PlatformExperiment) *domain.StatusReason {
 		return &domain.StatusReason{Reason: "proposed", Message: "its planner proposed an experiment, in proposal: accept it with POST /platform-experiments/" + pe.ID + "/accept, revise it or close it. The platform closes it at proposal_expires_at"}
 	case len(pe.Revisions) > 0:
 		return &domain.StatusReason{Reason: "revising", Message: "its planner is answering the last of revisions and has until planning_ends_at"}
+	case pe.Repository == "":
+		return &domain.StatusReason{Reason: "repository_creating", Message: "the platform is creating its repository on GitHub, and its planner starts once the repository is there"}
 	}
 	return &domain.StatusReason{Reason: "planning", Message: "its planner is working out how to measure the goal and has until planning_ends_at"}
 }
@@ -714,6 +716,7 @@ func closedReason(pe *domain.PlatformExperiment) *domain.StatusReason {
 		domain.ClosePlannerStopped:       "its planner's machine ended before it answered and the platform had restarted it as often as it restarts one, so it closed the draft: the planner's instance in the roster says how the last machine ended (end_reason, exit_log). Nothing was spent on a run, and the same goal makes a new draft",
 		domain.CloseBaselineLimitReached: "it was not running by baseline_due_at and the platform closed it: no baseline was declared, or the start still waited for something",
 		domain.CloseAgentsNotStarted:     "it started and no researcher's machine was running by agents_due_at, so the platform closed it. None of its duration_hours was counted and no researcher took a turn: read each agent's instance for why its machine did not come up, and create it again",
+		domain.CloseRepositoryNotCreated: "the platform could not create its repository, so its planner never started and nothing was spent. The same goal makes a new draft, or name a repository. GitHub answered: " + pe.RepositoryError,
 	}
 	if sentence, known := how[pe.CloseReason]; known {
 		return &domain.StatusReason{Reason: string(pe.CloseReason), Message: sentence}
