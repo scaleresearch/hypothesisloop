@@ -161,6 +161,7 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *Client) {
 		t.Fatal(err)
 	}
 	client.apiURL, client.webURL = f.server.URL, f.server.URL
+	client.mintRetries = []time.Duration{time.Millisecond, time.Millisecond}
 	return f, client
 }
 
@@ -1323,6 +1324,40 @@ func TestGitHubFailingACallNamesTheInstallation(t *testing.T) {
 			if err := call(); !errors.As(err, &failed) || failed.Installation != 100 || failed.Status != server.status || failed.Message != "" {
 				t.Errorf("%s with GitHub answering %d: got = %v, want a FailedError of installation 100", name, server.status, err)
 			}
+		}
+	}
+}
+
+// GitHub answered one mint of a token for git 500 among many that worked, and the agent's git
+// command failed with it: a mint GitHub failed is asked again, and one it refused is not.
+func TestAMintGitHubFailedIsAskedAgain(t *testing.T) {
+	f, client := newFakeGitHub(t)
+	for _, tc := range []struct {
+		status, failures, wantMints int
+		ok                          bool
+	}{
+		{http.StatusInternalServerError, 1, 2, true},
+		{http.StatusBadGateway, 2, 3, true},
+		{http.StatusInternalServerError, 3, 3, false},
+		{http.StatusUnprocessableEntity, 1, 1, false},
+	} {
+		failures, mints := tc.failures, 0
+		flaky := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/access_tokens") {
+				mints++
+				if failures > 0 {
+					failures--
+					f.refuse(w, tc.status, "")
+					return
+				}
+			}
+			f.serve(w, r)
+		}))
+		client.apiURL = flaky.URL
+		token, err := client.Token(ctx, 100, "acme/model", Write)
+		flaky.Close()
+		if (err == nil) != tc.ok || (token != nil) != tc.ok || mints != tc.wantMints {
+			t.Errorf("GitHub answering %d %d times: Token = %v, %v after %d mints, want ok %v after %d", tc.status, tc.failures, token, err, mints, tc.ok, tc.wantMints)
 		}
 	}
 }

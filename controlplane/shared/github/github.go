@@ -250,6 +250,8 @@ type Client struct {
 	webURL       string
 	http         *http.Client
 	now          func() time.Time
+	// mintRetries is the wait before each retry of a mint GitHub answered 5xx.
+	mintRetries []time.Duration
 }
 
 // New builds the client of the configured App. The private key is the PEM GitHub issued.
@@ -265,6 +267,7 @@ func New(cfg config.GitHubConfig) (*Client, error) {
 	return &Client{
 		appID: cfg.AppID, slug: cfg.AppSlug, clientID: cfg.ClientID, clientSecret: cfg.ClientSecret, key: key,
 		apiURL: apiURL, webURL: webURL, http: &http.Client{Timeout: 20 * time.Second}, now: time.Now,
+		mintRetries: []time.Duration{time.Second, 3 * time.Second},
 	}, nil
 }
 
@@ -711,7 +714,21 @@ func (c *Client) mint(ctx context.Context, installationID int64, body map[string
 	var out minted
 	path := "/app/installations/" + strconv.FormatInt(installationID, 10) + "/access_tokens"
 	var refused *refusal
-	switch err := c.call(ctx, http.MethodPost, path, jwt, body, &out); {
+	err = c.call(ctx, http.MethodPost, path, jwt, body, &out)
+	// GitHub has answered a mint 500 once among many that worked, and the git command an agent
+	// ran failed with it: a mint changes nothing, so one GitHub failed is asked again.
+	for _, wait := range c.mintRetries {
+		if !errors.As(err, &refused) || refused.status < 500 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, failedFor(installationID, err)
+		case <-time.After(wait):
+		}
+		err = c.call(ctx, http.MethodPost, path, jwt, body, &out)
+	}
+	switch {
 	case errors.Is(err, errNotFound), errors.Is(err, errForbidden):
 		return nil, ErrInstallationGone
 	// GitHub answers 422 both for a repository outside the installation and for a permission the
