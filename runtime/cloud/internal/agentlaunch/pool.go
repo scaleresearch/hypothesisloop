@@ -25,7 +25,8 @@ import (
 //
 // Which image the pool holds follows the answers: the image of an agent asked for that the pool
 // already holds, or else the one most agents are asked for under. An answer that asks for no
-// agent leaves the pool as it is.
+// agent holds the platform's own image, which the next agent most likely boots, and one that
+// does not name it either leaves the pool as it is.
 
 // poolSegment follows the launcher's prefix in a pool instance's name.
 const poolSegment = "pool-"
@@ -129,14 +130,14 @@ func (p *pass) keepPool(ctx context.Context, pool []provider.Instance, want *des
 
 // poolImage is the image the pool should hold after this answer, "" for no change: the image
 // of an agent asked for that a live pool instance holds, or else the one most agents are asked
-// for under, the first in order of a tie.
+// for under, the first in order of a tie. With no agent asked for it is the platform's image.
 func (l *Launcher) poolImage(pool []provider.Instance, want *desired) string {
 	counts := map[string]int{}
 	for _, i := range want.instances {
 		counts[i.image] = counts[i.image] + 1
 	}
 	if len(counts) == 0 {
-		return ""
+		return want.image
 	}
 	images := sortedKeys(counts)
 	for _, i := range pool {

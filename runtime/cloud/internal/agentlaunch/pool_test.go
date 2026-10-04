@@ -2,7 +2,9 @@ package agentlaunch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
 	"reflect"
 	"strings"
 	"sync"
@@ -162,6 +164,38 @@ func TestAnAgentOfAnotherImageIsCreatedAndThePoolFollowsTheImageAsked(t *testing
 	h.cp.want(nil, nil)
 	h.mustPass()
 	h.names(h.launcher.poolName(image2))
+}
+
+func TestWithNoAgentAskedForThePoolHoldsThePlatformsImage(t *testing.T) {
+	h := newPoolHarness(t, 1)
+	h.cp.idle(image1)
+	h.mustPass()
+	pool := h.launcher.poolName(image1)
+	h.names(pool)
+	h.rented.Ready(pool)
+
+	// The planner, the first agent of an experiment, starts on it.
+	h.cp.want([]entry{agent("a")}, nil)
+	h.mustPass()
+	if h.rented.Calls("Create") != 0 || h.logged("on warm instance") != 1 {
+		t.Fatalf("creates = %d, log = %q, want a warm start", h.rented.Calls("Create"), h.log)
+	}
+
+	// An idle platform whose image changed moves the pool to the new one.
+	h.cp.idle(image2)
+	h.mustPass()
+	h.names(h.launcher.poolName(image2))
+}
+
+func TestThePlatformsImageNeverOutweighsTheAgentsAskedFor(t *testing.T) {
+	h := newPoolHarness(t, 1)
+	other := agent("a")
+	other.Image = image2
+	answer := map[string]any{"instances": []entry{other}, "ending": []string{}, "image": image1}
+	raw, _ := json.Marshal(answer)
+	h.cp.answer(http.StatusOK, string(raw))
+	h.mustPass()
+	h.names(full("a"), h.launcher.poolName(image2))
 }
 
 func TestPoolInstancesThatRanOrHungOrAreTooManyGoAndAPoolOfNoneEmptiesIt(t *testing.T) {

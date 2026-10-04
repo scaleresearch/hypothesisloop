@@ -83,6 +83,13 @@ func (cp *controlPlane) refuse(instances []entry, ending []string, message strin
 	cp.answer(http.StatusOK, answerOf(instances, ending, message))
 }
 
+// idle answers that no agent is wanted and that the platform's image is image.
+func (cp *controlPlane) idle(image string) {
+	answer := map[string]any{"instances": []entry{}, "ending": []string{}, "image": image}
+	raw, _ := json.Marshal(answer)
+	cp.answer(http.StatusOK, string(raw))
+}
+
 func answerOf(instances []entry, ending []string, refusal string) string {
 	if instances == nil {
 		instances = []entry{}

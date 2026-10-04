@@ -104,9 +104,13 @@ const maxRequestBytes = 16 << 20
 // Refusal is set while the platform refuses the launcher's own configuration. The lists stand
 // and are acted on as in any answer, so every machine whose run is over is still ended, and
 // nothing new is rented: Instances then names only machines asked for before.
+//
+// Image is the platform's image, which a launcher can warm ahead of the next machine while
+// nothing is asked for.
 type Desired struct {
 	Instances []Instance `json:"instances"`
 	Ending    []string   `json:"ending"`
+	Image     string     `json:"image,omitempty" doc:"The image an instance boots unless its platform experiment names its own. A launcher with a warm pool keeps it for this image while no instance is asked for."`
 	Refusal   *Refusal   `json:"refusal,omitempty" doc:"Present while the platform refuses this launcher's configuration. The launcher creates no instance, and stops and destroys by the two lists as always."`
 }
 
@@ -201,7 +205,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		})
 	}
 
-	out := &Desired{Instances: []Instance{}, Ending: []string{}, Refusal: refusal}
+	out := &Desired{Instances: []Instance{}, Ending: []string{}, Image: h.cfg.Image, Refusal: refusal}
 	asked := 0
 	for _, one := range all {
 		log := h.logger.With(zap.String("launcher", launcher), zap.String("platformExpID", one.platformExperimentID), zap.String("agentID", one.agentID))
@@ -433,6 +437,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"instances: each {name, image, env, ends_at} should exist and be running: one per hosted agent, and one per platform experiment whose coordinator the platform runs. " +
 			"ends_at is the latest moment its platform experiment can still have a machine, wind-down included, and the launcher rents the instance so that it ends by itself then, reachable or not. It decides nothing about an instance already rented. " +
 			"ending: names whose agent's run is over; each is told to stop and is otherwise left to finish, neither created nor replaced nor destroyed. " +
+			"image: the image an instance boots unless its platform experiment names its own, which a launcher with a warm pool warms while no instance is asked for. " +
 			"Any other instance of the launcher should not exist, and an answer asks for a bounded number of instances that do not exist yet: the rest follow in the next. " +
 			"The platform gives up on an instance that exited, that the provider listed and no longer does, that was not listed within the platform's boot limit of being asked for, " +
 			"that stayed starting for the boot limit, or that runs while the progress marker it reports has not changed for the platform's progress limit. An instance reported unknown is held to the progress limit if it was last reported running and to the boot limit otherwise. An exited instance reported with expired, which its provider ended at the provider's own lifetime, is given up on as expired, and a running one reported without progress, whose output the launcher could not read, as progress_unreadable once no progress was recorded for the progress limit: neither spends one of the agent's restarts or stops it. That is recorded on its agent, and the launcher never replaces one on its own: " +

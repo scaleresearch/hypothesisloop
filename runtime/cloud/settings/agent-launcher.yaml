@@ -36,7 +36,8 @@ reconcile_interval_seconds: 2
 create_pause_milliseconds: 1000
 
 # How many instances the launcher keeps warm: rented ahead at the size below with the image the
-# agents are asked for under, that image on their host, running nothing. A missing agent is
+# agents are asked for under, or the platform's own image while none is, that image on their
+# host, running nothing. A missing agent is
 # started in one of them in seconds, where a create waits for the image's pull, and the pool is
 # topped up after. A warm instance is billed for its disk only (on Fly the root filesystem of a
 # stopped machine, $0.15 a GB a month), never runs, and is replaced when the agents' image or

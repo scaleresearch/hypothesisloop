@@ -33,6 +33,8 @@ type desired struct {
 	instances map[string]instance
 	ending    map[string]bool
 	refusal   string
+	// image is the platform's own image, "" from a control plane that does not say.
+	image string
 }
 
 // reconcileAnswer is the wire shape. Both lists are pointers because an answer without one is
@@ -46,6 +48,7 @@ type reconcileAnswer struct {
 		EndsAt time.Time         `json:"ends_at"`
 	} `json:"instances"`
 	Ending  *[]string `json:"ending"`
+	Image   string    `json:"image"`
 	Refusal *struct {
 		Reason  string `json:"reason"`
 		Message string `json:"message"`
@@ -127,7 +130,7 @@ func (l *Launcher) read(answer reconcileAnswer) (*desired, error) {
 	if answer.Instances == nil || answer.Ending == nil {
 		return nil, errors.New("answer carries no instances or no ending list")
 	}
-	want := &desired{instances: map[string]instance{}, ending: map[string]bool{}}
+	want := &desired{instances: map[string]instance{}, ending: map[string]bool{}, image: answer.Image}
 	for _, entry := range *answer.Instances {
 		name := l.prefix + entry.Name
 		if entry.Name == "" || entry.Image == "" || entry.EndsAt.IsZero() {

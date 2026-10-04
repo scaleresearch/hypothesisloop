@@ -151,6 +151,15 @@ func TestTheLaunchersPassAgainstTheControlPlanesOwnHandler(t *testing.T) {
 	}
 }
 
+func TestAnIdleControlPlaneHasTheLauncherWarmThePlatformsImage(t *testing.T) {
+	c := newContract(t)
+	c.launcher.cfg.WarmPool = 1
+	c.pass()
+	if want := []string{c.launcher.poolName(contractSettings.Image)}; !reflect.DeepEqual(c.rented.Names(), want) {
+		t.Fatalf("rented %v, want the pool warmed for the platform's image %v", c.rented.Names(), want)
+	}
+}
+
 func TestAnExitTravelsToTheControlPlaneWhichRestartsTheAgentAFewTimesAndThenStopsIt(t *testing.T) {
 	c := newContract(t, hostedAgent("pe-1", "ag-crashing"), hostedAgent("pe-1", "ag-steady"))
 	c.pass()

@@ -167,14 +167,14 @@ func TestTheAnswerIsTheLaunchersRunningInstancesAndItsEndingOnes(t *testing.T) {
 	}
 }
 
-func TestALauncherWithNothingToRunIsAnsweredWithTwoEmptyLists(t *testing.T) {
+func TestALauncherWithNothingToRunIsAnsweredWithTwoEmptyListsAndThePlatformsImage(t *testing.T) {
 	code, raw := reconcile(t, &launcherStore{}, mainLauncher, "main", zap.NewNop())
 	if code != http.StatusOK {
 		t.Fatalf("got = %d %s", code, raw)
 	}
 	// decode refuses an answer in which either list is missing or null.
-	if desired := decode(t, raw); len(desired.Instances) != 0 || len(desired.Ending) != 0 {
-		t.Fatalf("got = %s, want two empty lists", raw)
+	if desired := decode(t, raw); len(desired.Instances) != 0 || len(desired.Ending) != 0 || desired.Image != testImage {
+		t.Fatalf("got = %s, want two empty lists and image %s", raw, testImage)
 	}
 }
 
