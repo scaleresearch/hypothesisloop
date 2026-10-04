@@ -824,10 +824,9 @@ a leading quote.
     name: |
       short title
     description: |
-      the brief, the only thing researchers read. Its BASELINE block states the control:
-        config: the exact control configuration
-        trial: how a researcher runs one trial
-      The platform adds the job that measured it, its code_ref and its values once it is declared.
+      the brief, the only thing the baseline and researchers read: the objective first, then
+      the metric, gate, control, references and levers. How they are measured is the baseline's
+      to choose. The platform adds the baseline job, its code_ref and values once declared.
     report_interval_seconds: 30        # how often a job is to report
     metrics:
       - key: val_accuracy              # one metric ranks: role ranking is the default. A job ranks

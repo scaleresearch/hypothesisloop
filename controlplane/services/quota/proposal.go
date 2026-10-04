@@ -249,7 +249,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Summary: "Propose the platform experiment a draft becomes", Tags: []string{"platform-experiments"},
 		Description: "Written by a draft's planner and by nobody else, while the platform experiment is a draft (409 not_a_draft after). " +
 			"experiment is the experiment as its file would state it; budget_accelerator_hours, duration_hours, baseline_minutes and agents are proposed, and the person who accepts states them. " +
-			"A proposal defines the experiment and runs nothing: its brief's BASELINE block states the control configuration and that nothing is measured yet, its numbers are estimates, " +
+			"A proposal defines the experiment and runs nothing: its brief states the objective and the measure and nothing measured yet, its numbers are estimates, " +
 			"and the baseline is measured once a person accepted, before any researcher starts, by the baseline agent the accept creates. " +
 			"The proposal is checked before it is stored, its experiment and its cost by the rules of POST /platform-experiments, and refused with 422 and a reason the planner can act on: invalid_experiment, invalid_metrics, invalid_stages, " +
 			"invalid_cost, invalid_agents, invalid_length, run_too_long (duration_hours over the platform's quota.max_platform_experiment_days), invalid_baseline_minutes (none, or over planning.baseline_limit_minutes), missing_explanation, too_long, " +

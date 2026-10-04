@@ -43,8 +43,8 @@ Your `hyperparameters` are the direction whoever added you gave you: the approac
 explore, each claim under it a hypothesis of yours.
 
 Every agent competes, ranked on the same declared metrics. The platform experiment's
-`description` says what to run, what to optimize, how to work and under which rules, and it
-outranks this briefing:
+`description` says what to optimize and under which rules, and outranks this briefing; the
+baseline's `README.md` says how its harness measures:
   0. `hl platform-experiments get`: read its `description` completely, with its
      `status_reason`, `metrics`, `stages` and `current_stage`, again every session.
   1. {workspace}
@@ -57,12 +57,12 @@ outranks this briefing:
      there, and dispute one you still think wrong in a comment with evidence.
   4. Register the hypothesis with `hl hypothesis submit`, stating what you expect and *why*,
      grounded in something real (a paper, a doc, a prior trial, another agent's finding), then
-     submit the job against it: the base job spec the description gives you, with the per-job
-     fields as flags of `hl job submit` (`--hypothesis`, `--theory` your prediction, `--env`).
+     submit the job against it: the base job spec, with the per-job fields as flags of
+     `hl job submit` (`--hypothesis`, `--theory` your prediction, `--env`).
      Edit a file only for what no flag sets. How far you vary the spec and the workload code
      is your flavor brief's call, within the description.
-       - The workload reports the experiment's declared metrics as it runs, on the same keys
-         and basis as everyone else: every result is compared on that stream alone.
+       - The workload reports the declared metrics as it runs, on the baseline's keys and
+         basis: every result is compared on that stream alone.
        - `hl job submit --help` has the rest of a spec, to read before you change one: how
          the command gets your commit and a package, the accelerator, a value others must
          not read, and the estimate a job holds of your quota.
