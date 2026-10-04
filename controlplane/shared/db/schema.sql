@@ -1296,8 +1296,8 @@ UPDATE experiment_signups SET role = 'planner' WHERE flavor = 'planner' AND role
 -- before this was kept.
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS added_by_kind TEXT NOT NULL DEFAULT '';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS added_by_id   TEXT NOT NULL DEFAULT '';
--- The run's clock. duration_hours is the whole wall clock, counted from starts_at with measuring
--- the baseline inside it, and started_at the moment a researcher was first at work in the running
+-- The run's clock. duration_hours is the run's length, counted from its start, which a running
+-- one holds in starts_at, and started_at the moment a researcher was first at work in the running
 -- platform experiment. ends_at is what closes it: a draft's planning or proposal limit, an open
 -- one's baseline deadline, a running one's deadline for a researcher's machine to be running, and
 -- once started_at is written, starts_at plus duration_hours. A row from
@@ -1327,10 +1327,10 @@ UPDATE platform_experiments
 SET description = replace(description, 'BASELINE (written by the platform)', 'MEASURED BASELINE (written by the platform from the declared job)')
 WHERE description LIKE '%BASELINE (written by the platform)%';
 
--- duration_hours is the whole wall clock, from starts_at, measuring the baseline included: an
--- open or running platform experiment ends duration_hours after its starts_at, which is when it
--- was created or accepted, or a later one stated. One created with none stated kept the zero
--- time, and its clock started at its creation, or at started_at where a researcher already works.
+-- An open or running platform experiment holds in starts_at when its clock started: an open
+-- one's baseline is measured from then, a running one's run. One created with none stated kept
+-- the zero time, and its clock started at its creation, or at started_at where a researcher
+-- already works.
 UPDATE platform_experiments SET starts_at = COALESCE(started_at, created_at)
 WHERE status IN ('open', 'running') AND starts_at < '0001-01-02';
 

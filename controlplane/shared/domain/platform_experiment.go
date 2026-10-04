@@ -188,23 +188,24 @@ type PlatformExperiment struct {
 	MaxConcurrentAccelerators *int               `json:"max_concurrent_accelerators,omitempty"`
 	Metrics                   []MetricDefinition `json:"metrics"`                 // metrics jobs must emit; used for ranking
 	ReportIntervalSeconds     int                `json:"report_interval_seconds"` // expected reporting cadence (for silent-eviction guard)
-	// StartsAt is when the wall clock starts: the moment it was created or accepted, or a later
-	// starts_at stated. It lasts DurationHours from then, measuring the baseline included, and
-	// EndsAt is the two added. StartedAt is the moment a researcher was first at work in the
-	// running platform experiment, which is the start itself when one of them is run by its
-	// owner and otherwise the moment the first machine the platform runs for one was reported
-	// running.
-	StartsAt      time.Time `json:"starts_at" doc:"When its wall clock started: the moment it was created or accepted, or a later starts_at stated. Its baseline is measured from then and its run starts once the baseline is declared. The zero time on a draft."`
+	// StartsAt is when the clock that runs started. While it is open that is the moment it was
+	// created or accepted, or a later starts_at stated, and its baseline is due BaselineDueAt from
+	// then. Once it runs it is the moment the run started, when its baseline was declared and
+	// nothing else was missing, and DurationHours count from it: EndsAt is the two added.
+	// StartedAt is the moment a researcher was first at work in the running platform experiment,
+	// which is the start itself when one of them is run by its owner and otherwise the moment the
+	// first machine the platform runs for one was reported running.
+	StartsAt      time.Time `json:"starts_at" doc:"While it is open: when its baseline began to be measured, the moment it was created or accepted, or a later starts_at stated. Once it runs: the moment the run started, once its baseline was declared, from which duration_hours count. The zero time on a draft."`
 	StartedAt     time.Time `json:"started_at,omitzero" doc:"The moment a researcher was first at work in the running platform experiment. That is the moment it became running when a researcher is run by its owner, and otherwise the moment the first researcher's machine was reported running. Absent before, and on a running one that still waits for that machine (status_reason agents_starting)."`
-	DurationHours float64   `json:"duration_hours,omitzero" doc:"Its whole wall clock, counted from starts_at: measuring the baseline and the run both fit in it. Absent on a draft."`
+	DurationHours float64   `json:"duration_hours,omitzero" doc:"How long the run lasts, the research time, counted from the moment it starts, once its baseline is declared. Measuring the baseline takes nothing from it: baseline_due_at bounds that. Absent on a draft."`
 	// A platform experiment has exactly one stored moment at which the platform closes it if
 	// nobody does, under the name of what ends then: PlanningEndsAt or ProposalExpiresAt on a
 	// draft, BaselineDueAt while it is open, AgentsDueAt while it runs and no researcher is at
-	// work, EndsAt from then. EndsAt of one that is open or waits for a researcher is StartsAt
-	// plus DurationHours. One that closed keeps the one it had. See ClosesAt.
-	EndsAt            time.Time `json:"ends_at,omitzero" doc:"When it ends and the platform closes it: starts_at plus duration_hours, whatever measuring the baseline took. Present while it is open or running, and on one closed after it ran."`
+	// work, EndsAt from then. EndsAt of one that waits for a researcher is StartsAt plus
+	// DurationHours. One that closed keeps the one it had. See ClosesAt.
+	EndsAt            time.Time `json:"ends_at,omitzero" doc:"When the run ends and the platform closes it: starts_at, the start of the run, plus duration_hours. Absent until the run starts."`
 	AgentsDueAt       time.Time `json:"agents_due_at,omitzero" doc:"On a running platform experiment with no started_at: when the platform closes it, with close_reason agents_not_started, if no researcher's machine is running by then. Never later than ends_at."`
-	BaselineDueAt     time.Time `json:"baseline_due_at,omitzero" doc:"On an open platform experiment: when the platform closes it, with close_reason baseline_limit_reached, if it is not running by then. planning.baseline_limit_minutes after starts_at, or halfway to ends_at when that is sooner, so the researchers always have at least half of duration_hours."`
+	BaselineDueAt     time.Time `json:"baseline_due_at,omitzero" doc:"On an open platform experiment: when the platform closes it, with close_reason baseline_limit_reached, if it is not running by then. starts_at plus the minutes its baseline was given: the ones accepted for a draft, at most planning.baseline_limit_minutes, and that limit for one created whole."`
 	PlanningEndsAt    time.Time `json:"planning_ends_at,omitzero" doc:"On a draft being planned or revised: when the platform closes it if its planner has answered nothing by then."`
 	ProposalExpiresAt time.Time `json:"proposal_expires_at,omitzero" doc:"On a draft whose planner proposed or declined: when the platform closes it if no person has accepted or revised it by then."`
 	// Activity is what a draft's planner last said it is doing.
@@ -214,13 +215,14 @@ type PlatformExperiment struct {
 	Status        PlatformExperimentStatus `json:"status"`
 	// StatusReason is why the platform experiment is in its status, in every status. Worked out
 	// when one is read and stored nowhere.
-	StatusReason *StatusReason `json:"status_reason,omitempty" doc:"Why it is in its status, in every answer that is one platform experiment (a read of it and each write that answers it, never a list). Any that is not closed reads repository_creating while the platform creates its repository, before any machine of it starts. A draft's reason is then planning, revising, proposed (it waits for a person to accept) or declined (its planner proposed nothing, for declined_reason, and it waits for a person to revise or close it). An open one's is why it is not running yet: without a baseline baseline_measuring, baseline_required, baseline_undeclared, baseline_declaring or the reason the platform's declaration of the measured job is refused for (budget_below_baseline, baseline_breaks_constraint, baseline_missing_metric), and with one starts_at_ahead, no_researchers, budget_spent, or starting once nothing is missing.A running one's is agents_starting while no researcher's machine is running yet, when none of duration_hours is counted and the platform closes it at agents_due_at, and running from then. Any that is not closed reads launcher_unreachable instead while a machine it wants, of its planner, coordinator, baseline agents or researchers, is on a launcher that has not asked for its machines for a minute: message names the launcher and how long ago it last asked. A closed one's is its close_reason, or closed on one closed before reasons were kept. message says what the state waits for or how it came about and who acts, the command included, and to an agent that reads an open one it begins with the agent's own next step."`
+	StatusReason *StatusReason `json:"status_reason,omitempty" doc:"Why it is in its status, in every answer that is one platform experiment (a read of it and each write that answers it, never a list). Any that is not closed reads repository_creating while the platform creates its repository, before any machine of it starts. A draft's reason is then planning, revising, proposed (it waits for a person to accept) or declined (its planner proposed nothing, for declined_reason, and it waits for a person to revise or close it). An open one's is why it is not running yet: without a baseline baseline_measuring, baseline_required, baseline_undeclared, baseline_declaring or the reason the platform's declaration of the measured job is refused for (budget_below_baseline, baseline_breaks_constraint, baseline_missing_metric), and with one starts_at_ahead, no_researchers, budget_spent, or starting once nothing is missing.A running one's is agents_starting while no researcher's machine is running yet, when the platform closes it at agents_due_at, and running from then. Any that is not closed reads launcher_unreachable instead while a machine it wants, of its planner, coordinator, baseline agents or researchers, is on a launcher that has not asked for its machines for a minute: message names the launcher and how long ago it last asked. A closed one's is its close_reason, or closed on one closed before reasons were kept. message says what the state waits for or how it came about and who acts, the command included, and to an agent that reads an open one it begins with the agent's own next step."`
 	// Stages is the elimination ladder, fixed at creation.
 	Stages []Stage `json:"stages"`
 	// CurrentStage is the 1-based index into Stages of the stage currently running.
 	CurrentStage int `json:"current_stage"`
-	// Summary is the operator's narrative verdict on the finished run. Prose only: the standings
-	// are derived from the metrics store on read, never copied here.
+	// Summary is the operator's narrative verdict on the finished run, or the platform's record
+	// of the close where none was written by then. Prose only: the standings are derived from
+	// the metrics store on read, never copied here.
 	Summary        string   `json:"summary,omitempty"`
 	SignedUpAgents []string `json:"signed_up_agents,omitempty"`
 	SignupCount    int      `json:"signup_count"`
@@ -337,12 +339,11 @@ func (p *PlatformExperiment) SetAnswered(at *time.Time, proposed bool) {
 }
 
 // SetClosesAt records at under the name of what ends then, which Status, StartedAt, CloseReason,
-// Goal, StartsAt and Answered decide. One whose clock started ends its run then. One that runs
-// with no clock, or closed so, has until then for a researcher's machine to be running. A draft,
-// or one closed as a draft, which was planned from a goal and never got a start, is being planned
-// until its planner answers and waits for a person from then. Any other is open, or closed before
-// it ran, and has until then to be running. One that is open or waits for a researcher ends
-// DurationHours after StartsAt.
+// Goal, StartsAt and Answered decide. One with a researcher at work ends its run then. One that
+// runs with none, or closed so, has until then for a researcher's machine to be running, and its
+// run ends DurationHours after StartsAt. A draft, or one closed as a draft, which was planned
+// from a goal and never got a start, is being planned until its planner answers and waits for a
+// person from then. Any other is open, or closed before it ran, and has until then to be running.
 func (p *PlatformExperiment) SetClosesAt(at time.Time) {
 	p.EndsAt, p.AgentsDueAt, p.BaselineDueAt, p.PlanningEndsAt, p.ProposalExpiresAt = time.Time{}, time.Time{}, time.Time{}, time.Time{}, time.Time{}
 	switch {
@@ -357,27 +358,18 @@ func (p *PlatformExperiment) SetClosesAt(at time.Time) {
 	default:
 		p.PlanningEndsAt = at
 	}
-	if p.StartedAt.IsZero() && (p.Status == PlatformExpOpen || p.Status == PlatformExpRunning) {
+	if p.AwaitsAgents() {
 		p.EndsAt = p.StartsAt.Add(time.Duration(p.DurationHours * float64(time.Hour)))
 	}
 }
 
-// ClockStart is when the wall clock of a platform experiment that opens, or whose starts_at is
-// stated, at now starts: stated, or now when that is later or none is stated.
+// ClockStart is when the baseline of a platform experiment that opens, or whose starts_at is
+// stated, at now begins to be measured: stated, or now when that is later or none is stated.
 func ClockStart(stated, now time.Time) time.Time {
 	if stated.After(now) {
 		return stated
 	}
 	return now
-}
-
-// SetClock sets the moments of an open platform experiment from its StartsAt and DurationHours:
-// it ends DurationHours after StartsAt, and its baseline is due baselineLimit after StartsAt or
-// halfway to its end, whichever is sooner, so its researchers always have half of it.
-func (p *PlatformExperiment) SetClock(baselineLimit time.Duration) {
-	length := time.Duration(p.DurationHours * float64(time.Hour))
-	p.EndsAt = p.StartsAt.Add(length)
-	p.BaselineDueAt = p.StartsAt.Add(min(baselineLimit, length/2))
 }
 
 // StatusReason says why a platform experiment is in its status: a stable code, a sentence for

@@ -20,11 +20,11 @@ import (
 
 var ErrPlatformExperimentNotFound = errors.New("platform experiment not found")
 
-// checkLength holds a platform experiment to a wall clock of at most
-// quota.max_platform_experiment_days. Until its end it may rent machines.
+// checkLength holds a platform experiment to a run of at most quota.max_platform_experiment_days.
+// Until its end it may rent machines.
 func (s *PlatformExperimentsService) checkLength(durationHours float64) error {
 	if durationHours <= 0 {
-		return refuseUpdate(422, "invalid_length", "duration_hours is required and must be positive: the whole wall clock from starts_at, measuring the baseline included")
+		return refuseUpdate(422, "invalid_length", "duration_hours is required and must be positive: how long the run lasts from the moment it starts")
 	}
 	if length := time.Duration(durationHours * float64(time.Hour)); length > s.cfg.MaxRunLength {
 		return refuseUpdate(422, "run_too_long", "it would run %.1f days, and a platform experiment runs at most %g days (quota.max_platform_experiment_days): state a shorter duration_hours",
@@ -196,7 +196,7 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		AgentImage:                req.AgentImage,
 		Actor:                     req.createdBy,
 	}
-	pe.SetClock(s.cfg.BaselineLimit)
+	pe.BaselineDueAt = pe.StartsAt.Add(s.cfg.BaselineLimit)
 	if err := s.store.CreatePlatformExperiment(ctx, pe, req.agents, req.signups); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
 	}
@@ -275,12 +275,10 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	}
 	if patch.StartsAt != nil {
 		patched.StartsAt = domain.ClockStart(*patch.StartsAt, time.Now().UTC())
+		patched.BaselineDueAt = patched.StartsAt.Add(pe.BaselineDueAt.Sub(pe.StartsAt))
 	}
 	if patch.DurationHours != nil {
 		patched.DurationHours = *patch.DurationHours
-	}
-	if patch.StartsAt != nil || patch.DurationHours != nil {
-		patched.SetClock(s.cfg.BaselineLimit)
 	}
 	if patch.MaxConcurrentAccelerators != nil {
 		patched.MaxConcurrentAccelerators = patch.MaxConcurrentAccelerators
@@ -668,21 +666,28 @@ func (s *PlatformExperimentsService) waiting(ctx context.Context, pe *domain.Pla
 	return &domain.StatusReason{Reason: "starting", Message: "nothing is missing and the platform starts the run within a minute"}, nil
 }
 
-// nextStep is what an agent that reads an open pe does while it waits for reason, a sentence that
-// ends in a space, or nothing when all it can do is wait. The reason's own sentence says what
-// everyone else does.
-func nextStep(reason string, signups []domain.AgentSignup, reader auth.Principal) string {
+// nextStep is what an agent that reads an open pe at now does while it waits for reason, a
+// sentence that ends in a space, or nothing when all it can do is wait. The reason's own sentence
+// says what everyone else does. An agent of role baseline is told its clock with it.
+func nextStep(pe *domain.PlatformExperiment, reason string, signups []domain.AgentSignup, reader auth.Principal, now time.Time) string {
 	if reader.Kind != auth.KindAgent {
 		return ""
 	}
 	own := slices.IndexFunc(signups, func(signup domain.AgentSignup) bool { return signup.AgentID == reader.AgentID })
-	switch {
-	case own < 0 || signups[own].Role != domain.SignupRoleBaseline:
+	if own < 0 || signups[own].Role != domain.SignupRoleBaseline {
 		return "Every job you submit is refused until the platform starts the run: prepare, then end your turn, and the start arrives as an update. "
-	case signups[own].FinishedAt == nil && reason == "baseline_measuring":
-		return "Your job is admitted now: measure the baseline with one job (hl job submit), file its summary (hl job summary), then hl platform-experiments agents finish, and the platform declares that job. Your quota is half the budget, for the measurement and any rerun of it (hl quota). "
 	}
-	return ""
+	step := ""
+	if signups[own].FinishedAt == nil && reason == "baseline_measuring" {
+		step = "Your job is admitted now: measure the baseline with one job (hl job submit), file its summary (hl job summary), then hl platform-experiments agents finish, and the platform declares that job. Your quota is half the budget, for the measurement and any rerun of it (hl quota). "
+	}
+	return step + baselineClock(pe.BaselineDueAt, now)
+}
+
+// baselineClock says when an open platform experiment whose baseline is due at due closes, and
+// how long that is from now.
+func baselineClock(due, now time.Time) string {
+	return fmt.Sprintf("baseline_due_at is %s, %d minutes from now: the platform closes it then if the run has not started. ", due.UTC().Format(time.RFC3339), max(0, int(due.Sub(now).Minutes())))
 }
 
 // researcherLeft says a researcher of signups may still work: one that neither finished nor was
@@ -707,22 +712,55 @@ func runningReason(pe *domain.PlatformExperiment, signups []domain.AgentSignup) 
 	return &domain.StatusReason{Reason: "running", Message: "its researchers are at work and the platform closes it at ends_at"}
 }
 
-// closedReason is why a closed pe closed: its close_reason and what that means.
-func closedReason(pe *domain.PlatformExperiment) *domain.StatusReason {
+// closedReason is why the closed pe closed: its close_reason and what that means. Of one closed
+// before its run started for want of a baseline, it says whether a job was submitted for one.
+func (s *PlatformExperimentsService) closedReason(ctx context.Context, pe *domain.PlatformExperiment) (*domain.StatusReason, error) {
 	how := map[domain.CloseReason]string{
 		domain.CloseEndTimeReached:       "the run reached its ends_at and the platform closed it",
 		domain.CloseByRequest:            "closed_by asked for it to be closed",
 		domain.ClosePlanningLimitReached: "its planner answered nothing by planning_ends_at and the platform closed the draft",
 		domain.CloseProposalExpired:      "no person accepted or revised its planner's answer by proposal_expires_at and the platform closed the draft",
 		domain.ClosePlannerStopped:       "its planner's machine ended before it answered and the platform had restarted it as often as it restarts one, so it closed the draft: the planner's instance in the roster says how the last machine ended (end_reason, exit_log). Nothing was spent on a run, and the same goal makes a new draft",
-		domain.CloseBaselineLimitReached: "it was not running by baseline_due_at and the platform closed it: no baseline was declared, or the start still waited for something",
 		domain.CloseAgentsNotStarted:     "it started and no researcher's machine was running by agents_due_at, so the platform closed it. No researcher took a turn: read each agent's instance for why its machine did not come up, and create it again",
 		domain.CloseRepositoryNotCreated: "the platform could not create its repository, so none of its machines started and nothing was spent. Create it again, or name a repository. GitHub answered: " + pe.RepositoryError,
 	}
-	if sentence, known := how[pe.CloseReason]; known {
-		return &domain.StatusReason{Reason: string(pe.CloseReason), Message: sentence}
+	if pe.CloseReason == domain.CloseBaselineLimitReached {
+		submitted, err := s.jobsSubmitted(ctx, pe.ID)
+		if err != nil {
+			return nil, err
+		}
+		how[pe.CloseReason] = baselineLimitReached(pe, submitted)
 	}
-	return &domain.StatusReason{Reason: "closed", Message: "it closed before the platform kept why"}
+	if sentence, known := how[pe.CloseReason]; known {
+		return &domain.StatusReason{Reason: string(pe.CloseReason), Message: sentence}, nil
+	}
+	return &domain.StatusReason{Reason: "closed", Message: "it closed before the platform kept why"}, nil
+}
+
+// baselineLimitReached is why pe, closed at its baseline_due_at with submitted jobs, never ran.
+// An open platform experiment admits the jobs of its baseline agents alone.
+func baselineLimitReached(pe *domain.PlatformExperiment, submitted int) string {
+	const closed = "it was not running by baseline_due_at and the platform closed it: "
+	switch {
+	case pe.BaselineJobID != "":
+		return closed + "its baseline, job " + pe.BaselineJobID + ", was declared and the start still waited for a researcher, or for budget left to share among them"
+	case submitted == 0:
+		return closed + "no job was ever submitted to measure its baseline"
+	}
+	return closed + fmt.Sprintf("%d jobs were submitted to measure its baseline and none was declared: the roster says how each baseline agent ended", submitted)
+}
+
+// jobsSubmitted is how many jobs the platform experiment id took, by every agent.
+func (s *PlatformExperimentsService) jobsSubmitted(ctx context.Context, id string) (int, error) {
+	jobs, err := s.store.AgentJobsByAgent(ctx, id)
+	if err != nil {
+		return 0, fmt.Errorf("platform_experiments.jobsSubmitted: %w", err)
+	}
+	total := 0
+	for _, agent := range jobs {
+		total += agent.Submitted
+	}
+	return total, nil
 }
 
 // Describe sets on pe why it is in its status (StatusReason): on a draft where it stands with its
@@ -735,7 +773,9 @@ func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.Pl
 	var signups []domain.AgentSignup
 	var err error
 	if pe.Status == domain.PlatformExpClosed {
-		pe.StatusReason = closedReason(pe)
+		if pe.StatusReason, err = s.closedReason(ctx, pe); err != nil {
+			return fmt.Errorf("platform_experiments.Describe: %w", err)
+		}
 		return nil
 	}
 	// A draft's planner has a machine only while it plans.
@@ -755,7 +795,7 @@ func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.Pl
 		if why, err = s.waiting(ctx, pe, signups); err != nil {
 			return err
 		}
-		why.Message = nextStep(why.Reason, signups, reader) + why.Message
+		why.Message = nextStep(pe, why.Reason, signups, reader, time.Now().UTC()) + why.Message
 	}
 	silent, err := s.launcherUnreachable(ctx, pe, signups)
 	if err != nil {
@@ -933,7 +973,77 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, by *d
 	if err := s.store.ClosePlatformExperiment(ctx, id, by); err != nil {
 		return nil, fmt.Errorf("close: %w", err)
 	}
+	closed, err := s.stored(ctx, id)
+	if err != nil || pe.Status == domain.PlatformExpDraft || closed.Summary != "" {
+		return closed, err
+	}
+	if err := s.recordClose(ctx, closed); err != nil {
+		return nil, fmt.Errorf("close: %w", err)
+	}
 	return s.stored(ctx, id)
+}
+
+// recordClose writes as the summary of pe, which closed with none after it was open, what the
+// platform knows of it: why it closed, the jobs submitted, each agent's last activity and how
+// its run ended, and the spend. A coordinator still on its last turn writes over it.
+func (s *PlatformExperimentsService) recordClose(ctx context.Context, pe *domain.PlatformExperiment) error {
+	why, err := s.closedReason(ctx, pe)
+	if err != nil {
+		return err
+	}
+	jobs, err := s.store.AgentJobsByAgent(ctx, pe.ID)
+	if err != nil {
+		return fmt.Errorf("recordClose: %w", err)
+	}
+	signups, err := s.store.ListAgentSignups(ctx, pe.ID)
+	if err != nil {
+		return fmt.Errorf("recordClose: %w", err)
+	}
+	if err := s.Spend(ctx, pe); err != nil {
+		return err
+	}
+	submitted := 0
+	for _, agent := range jobs {
+		submitted += agent.Submitted
+	}
+	var record strings.Builder
+	fmt.Fprintf(&record, "Recorded by the platform: it closed at %s with no summary written.\n\n", pe.ClosedAt.UTC().Format(time.RFC3339))
+	fmt.Fprintf(&record, "Close reason: %s: %s.\n", why.Reason, why.Message)
+	fmt.Fprintf(&record, "Jobs submitted: %d.\n", submitted)
+	fmt.Fprintf(&record, "Spent: %g of the budget of %g accelerator hours.\n\nAgents:\n", *pe.ConsumedAcceleratorHours, pe.BudgetAcceleratorHours)
+	if pe.Coordinator != nil {
+		fmt.Fprintf(&record, "- coordinator: %s; %s.\n", lastActivity(pe.Coordinator.Activity), runEnded(&pe.Coordinator.Instance, nil, ""))
+	}
+	for _, signup := range signups {
+		if signup.Role == domain.SignupRolePlanner {
+			continue
+		}
+		fmt.Fprintf(&record, "- %s (%s): %d jobs submitted; %s; %s.\n", signup.Name, signup.Role, jobs[signup.AgentID].Submitted,
+			lastActivity(signup.Activity), runEnded(signup.Instance, signup.FinishedAt, signup.FinishedReason))
+	}
+	return s.store.RecordClose(ctx, pe.ID, record.String())
+}
+
+// lastActivity is what an agent last said it was doing, as a close record states it.
+func lastActivity(activity *domain.AgentActivity) string {
+	if activity == nil {
+		return "no activity reported"
+	}
+	return fmt.Sprintf("last activity %q since %s", activity.Text, activity.At.UTC().Format(time.RFC3339))
+}
+
+// runEnded is how an agent's run stood at the close: finished for its reason, never launched
+// when no machine was asked for it, or what its machine was doing.
+func runEnded(instance *domain.AgentInstance, finishedAt *time.Time, finishedReason string) string {
+	switch {
+	case finishedAt != nil:
+		return fmt.Sprintf("finished at %s: %q", finishedAt.UTC().Format(time.RFC3339), finishedReason)
+	case instance == nil || instance.AskedAt == nil:
+		return "never launched"
+	case instance.EndReason != "":
+		return "did not finish: its machine ended (" + instance.EndReason + ")"
+	}
+	return "did not finish: its machine was " + instance.State + " at the close"
 }
 
 // SweepExpired closes every platform experiment whose ClosesAt has passed: a run at its end, one

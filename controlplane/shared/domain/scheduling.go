@@ -32,9 +32,9 @@ type QuotaConfig struct {
 	DefaultQuotaTier QuotaTier `json:"default_quota_tier,omitempty"`
 	// MaxRunLength is the longest wall clock a platform experiment may have, from its starts_at to its end.
 	MaxRunLength time.Duration `json:"max_run_length,omitempty"`
-	// BaselineLimit is how long a platform experiment may stay open before the platform closes
-	// it, at most half its duration: the time it has to get its baseline declared and its run
-	// started (PlatformExperiment.SetClock).
+	// BaselineLimit is the longest a platform experiment may stay open before the platform
+	// closes it: the time it has to get its baseline declared and its run started. One created
+	// whole has all of it, and an accepted draft the minutes accepted, at most this.
 	BaselineLimit time.Duration `json:"baseline_limit,omitempty"`
 	// AgentsDue is how long a started platform experiment whose researchers the platform runs
 	// waits for the first one's machine to be running before the platform closes it: the time

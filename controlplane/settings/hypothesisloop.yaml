@@ -100,13 +100,13 @@ agents:
 #              with nothing to boot. It ends earlier at the planning limit the machine was
 #              rented with, and with the accept. After it no machine runs while the answer
 #              waits, and a revision starts one.
-#   baseline_limit_minutes  how long a platform experiment may stay open, counted from its
-#              starts_at (its creation or acceptance, or a later one stated), and never more
-#              than half its duration_hours, which are its whole wall clock. The platform
-#              starts the run once a baseline is declared (PATCH baseline_job_id), and one
-#              not running by then (its baseline_due_at) is closed with close_reason
-#              baseline_limit_reached and its machines are released. This holds for an
-#              accepted draft and for a platform experiment created whole alike.
+#   baseline_limit_minutes  the longest a platform experiment may stay open, counted from its
+#              starts_at (its creation or acceptance, or a later one stated). One created whole
+#              has all of it; an accepted draft has the baseline_minutes its planner estimated
+#              and the person accepted, at most this. The platform starts the run once a
+#              baseline is declared (PATCH baseline_job_id), and its duration_hours count from
+#              then. One not running by its baseline_due_at is closed with close_reason
+#              baseline_limit_reached and its machines are released.
 planning:
   limit_minutes: 30
   proposed_for_days: 7

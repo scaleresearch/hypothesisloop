@@ -132,7 +132,7 @@ var ErrNothingProposed = errors.New("nothing is proposed")
 
 // AcceptDraft makes a proposed draft the open platform experiment pe describes and signs its
 // researchers up, or does neither. pe carries what the proposal stated and what the person who
-// accepts stated; its wall clock starts at its StartsAt, and it is open until its
+// accepts stated; its baseline is measured from its StartsAt, and it is open until its
 // BaselineDueAt. Its planner has nothing left to answer, so the time its machine was kept for a
 // revision ends with the accept. The limits a signup holds are held here too
 // (ErrMaxAgentsReached, ErrMaxHostedReached).

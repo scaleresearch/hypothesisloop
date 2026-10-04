@@ -51,9 +51,9 @@ metrics:
   #   direction: maximize
   #   role: attribute
 
-# The whole wall clock in hours from starts_at (the create, or a later starts_at), the baseline
-# included. Required, and at most 30 days (quota.max_platform_experiment_days). It closes at its
-# end (ends_at in the answer), and the elimination ladder advances on the clock between its start and its end or on budget
+# How long the run lasts, in hours from the moment it starts, once its baseline is declared:
+# measuring the baseline takes none of it. Required, and at most 30 days
+# (quota.max_platform_experiment_days). It closes at its end (ends_at in the answer), and the elimination ladder advances on the clock between its start and its end or on budget
 # spent, whichever is ahead.
 duration_hours: 24
 
@@ -61,7 +61,7 @@ duration_hours: 24
 # (PATCH baseline_job_id), at starts_at, or at once without one or with one past. Signup only
 # succeeds before the start. Until then it is open, says in status_reason what it waits for, and
 # is closed with close_reason baseline_limit_reached if it is not running by baseline_due_at
-# (planning.baseline_limit_minutes).
+# (planning.baseline_limit_minutes after starts_at, the create or a later one stated).
 # starts_at: "2029-12-01T00:05:00Z"
 
 # stages: optional elimination ladder. Omit to get the platform default

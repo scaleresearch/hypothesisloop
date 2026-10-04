@@ -192,9 +192,10 @@ func TestEndingTheSharingOfAClusterRequeuesTheOtherOrgsJobsPlacedOnIt(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A job's instance may run until its platform experiment's end and the wind-down past it.
+	// A job's instance may run until the end of the longest run its open platform experiment can
+	// still have, which starts at its baseline deadline, and the wind-down past it.
 	var experimentEnds time.Time
-	if err := w.pool.pool.QueryRow(ctx, `SELECT ends_at FROM platform_experiments WHERE id = $1`, w.peA).Scan(&experimentEnds); err != nil {
+	if err := w.pool.pool.QueryRow(ctx, `SELECT ends_at + make_interval(secs => duration_hours * 3600) FROM platform_experiments WHERE id = $1 AND status = 'open'`, w.peA).Scan(&experimentEnds); err != nil {
 		t.Fatal(err)
 	}
 	for _, job := range desired {

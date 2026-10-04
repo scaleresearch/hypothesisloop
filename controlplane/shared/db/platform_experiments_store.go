@@ -469,6 +469,16 @@ WHERE id = $1 AND status <> 'closed'`
 	return nil
 }
 
+// RecordClose writes record as the summary of the closed platform experiment id when it has
+// none, and leaves one written before it, or meanwhile, as it is.
+func (s *PlatformExperimentsStore) RecordClose(ctx context.Context, id, record string) error {
+	const q = `UPDATE platform_experiments SET summary = $2, updated_at = NOW() WHERE id = $1 AND status = 'closed' AND COALESCE(summary, '') = ''`
+	if _, err := s.pool.pool.Exec(ctx, q, id, record); err != nil {
+		return fmt.Errorf("platform_experiments_store.RecordClose: %w", err)
+	}
+	return nil
+}
+
 // SetPlatformExperimentSummary records the operator's narrative verdict on a run. Separate from
 // UpdatePlatformExperiment because it is the one field that is written *after* the experiment
 // closes, when everything else is frozen. ErrPlatformExperimentNotFound for an id none has.
@@ -608,17 +618,18 @@ type StartParticipant struct {
 // agent the start gives a share.
 const sharesBudgetSQL = `s.role NOT IN ('` + string(domain.SignupRoleBaseline) + `', '` + string(domain.SignupRolePlanner) + `')`
 
-// wallClockEndSQL is the end of pe's wall clock: duration_hours after its starts_at.
-const wallClockEndSQL = `pe.starts_at + make_interval(secs => pe.duration_hours * 3600)`
+// runOverAtSQL is the end of the run of the running pe: duration_hours after its starts_at, the
+// moment the run started.
+const runOverAtSQL = `pe.starts_at + make_interval(secs => pe.duration_hours * 3600)`
 
 // startClock records that a running platform experiment that waits for a researcher's machine
 // has one at work, once the machine asked for under name for agentID is reported running:
-// started_at is now, and it closes at the end of its wall clock. It writes nothing for one that
-// has a researcher at work.
+// started_at is now, and it closes at the end of its run. It writes nothing for one that has a
+// researcher at work.
 func (s *PlatformExperimentsStore) startClock(ctx context.Context, platformExpID, agentID, name string) error {
 	if _, err := s.pool.pool.Exec(ctx, `
 UPDATE platform_experiments pe
-SET started_at = NOW(), ends_at = `+wallClockEndSQL+`, updated_at = NOW()
+SET started_at = NOW(), ends_at = `+runOverAtSQL+`, updated_at = NOW()
 WHERE pe.id = $1 AND pe.status = 'running' AND pe.started_at IS NULL
   AND EXISTS (SELECT 1 FROM experiment_signups s
               WHERE s.platform_experiment_id = pe.id AND s.agent_id = $2 AND s.hosted AND s.instance_name = $3
@@ -631,11 +642,11 @@ WHERE pe.id = $1 AND pe.status = 'running' AND pe.started_at IS NULL
 
 // StartPlatformExperimentTx flips a platform experiment open->running and writes every
 // participating agent's quota and the ladder the run has (domain.RunStages) in one transaction.
-// Its wall clock ran from starts_at and ends duration_hours later whatever the start. With a
-// researcher its owner runs, started_at is now and it closes at that end. With only researchers
-// the platform runs, started_at stays empty until the first one's machine is reported running
-// (startClock), and it closes agentsDue from now, or at that end when sooner: the sweep closes
-// one whose machines never came. quotasFor is
+// The run starts now: starts_at is now, and it ends duration_hours later whatever measuring the
+// baseline took. With a researcher its owner runs, started_at is now and it closes at that end.
+// With only researchers the platform runs, started_at stays empty until the first one's machine
+// is reported running (startClock), and it closes agentsDue from now, or at that end when sooner:
+// the sweep closes one whose machines never came. quotasFor is
 // called with the signup set read inside that transaction; returning an error rolls the whole
 // thing back, leaving the experiment open and the call safe to retry.
 //
@@ -660,9 +671,9 @@ WITH at_work AS (
                    WHERE s.platform_experiment_id = $1 AND NOT s.hosted AND `+sharesBudgetSQL+`) AS already
 )
 UPDATE platform_experiments pe
-SET status='running', updated_at=NOW(),
+SET status='running', updated_at=NOW(), starts_at = NOW(),
     started_at = CASE WHEN at_work.already THEN NOW() END,
-    ends_at = CASE WHEN at_work.already THEN `+wallClockEndSQL+` ELSE LEAST(NOW() + make_interval(secs => $2), `+wallClockEndSQL+`) END
+    ends_at = NOW() + make_interval(secs => CASE WHEN at_work.already THEN pe.duration_hours * 3600 ELSE LEAST($2, pe.duration_hours * 3600) END)
 FROM at_work
 WHERE pe.id=$1 AND pe.status='open'`, id, agentsDue.Seconds())
 	if err != nil {

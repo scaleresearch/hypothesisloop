@@ -513,13 +513,15 @@ type LauncherAgent struct {
 
 // launcherEndsBySQL is the latest moment platform experiment pe can still have a machine, $2
 // seconds of wind-down included: of a draft the end of its planning, and once its planner
-// answered the moment the planner is kept until, of an open or running one the end of its wall
-// clock. An open one's moves only when its owner changes starts_at or duration_hours, and a
-// machine rented before that ends at the moment it was rented with.
+// answered the moment the planner is kept until, of an open one the end of the longest run it
+// can still have, which starts at its baseline_due_at, and of a running one the end of its run.
+// An open one's moves only when its owner changes starts_at or duration_hours, and a machine
+// rented before that ends at the moment it was rented with.
 const launcherEndsBySQL = `(CASE
             WHEN pe.status = 'closed' THEN pe.closed_at
             WHEN pe.status = 'draft' AND pe.planner_ends_at IS NOT NULL THEN pe.planner_ends_at
-            WHEN pe.status = 'open' OR pe.status = 'running' AND pe.started_at IS NULL THEN ` + wallClockEndSQL + `
+            WHEN pe.status = 'open' THEN pe.ends_at + make_interval(secs => pe.duration_hours * 3600)
+            WHEN pe.status = 'running' AND pe.started_at IS NULL THEN ` + runOverAtSQL + `
             ELSE pe.ends_at END + make_interval(secs => $2))`
 
 // launcherAgentsFrom selects the hosted agents a launcher still has something to do for: those

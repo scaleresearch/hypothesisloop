@@ -37,9 +37,19 @@ type rosterStore struct {
 	left []*domain.Experiment
 	// inFlight is the agents that have a job queued or running.
 	inFlight map[string]bool
+	// submitted is how many jobs each agent submitted.
+	submitted map[string]int
 	// hypotheses is the graph, and graphErr what reading it fails with.
 	hypotheses []*domain.Hypothesis
 	graphErr   error
+}
+
+func (s *rosterStore) AgentJobsByAgent(context.Context, string) (map[string]db.AgentJobs, error) {
+	jobs := map[string]db.AgentJobs{}
+	for agentID, submitted := range s.submitted {
+		jobs[agentID] = db.AgentJobs{Submitted: submitted}
+	}
+	return jobs, nil
 }
 
 // ListHypotheses answers as the graph does: the hypotheses the filter keeps, in the order given.

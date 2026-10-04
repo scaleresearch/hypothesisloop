@@ -386,11 +386,11 @@ func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 		t.Fatalf("a body with a duration and no report interval or start: got = %d %s, want 201", rec.Code, rec.Body)
 	}
 	pe := store.created[0]
-	// Its two hours are its whole wall clock from the create, and the baseline has half of them,
-	// the platform's limit being longer.
+	// Its two hours count from the start of its run, so until then it has no end: its baseline has
+	// the platform's limit from the create.
 	if pe.ReportIntervalSeconds != 30 || pe.StartsAt.Before(before) || pe.StartsAt.After(time.Now()) || pe.DurationHours != 2 ||
-		!pe.EndsAt.Equal(pe.StartsAt.Add(2*time.Hour)) || !pe.BaselineDueAt.Equal(pe.StartsAt.Add(time.Hour)) {
-		t.Fatalf("created = %+v, want the platform's report interval, a start at the create, an end two hours later and the baseline due halfway", pe)
+		!pe.EndsAt.IsZero() || !pe.BaselineDueAt.Equal(pe.StartsAt.Add(testSettings.BaselineLimit)) {
+		t.Fatalf("created = %+v, want the platform's report interval, a start at the create, no end yet and the baseline due at the platform's limit", pe)
 	}
 	for _, field := range []string{"name", "description", "metrics", "budget_accelerator_hours", "max_agents", "duration_hours"} {
 		body := whole()
@@ -545,7 +545,7 @@ func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
 		"metrics": []map[string]any{{"key": "val_accuracy", "direction": "maximize"}},
 	})
 	if code != http.StatusOK || stored.BudgetAcceleratorHours != 8 || stored.MaxAgents != 6 || *stored.MaxConcurrentAccelerators != 4 || stored.ReportIntervalSeconds != 60 ||
-		stored.Metrics[0].Key != "val_accuracy" || !stored.StartsAt.Equal(starts) || stored.DurationHours != 36 || !stored.BaselineDueAt.Equal(starts.Add(testSettings.BaselineLimit)) || !stored.EndsAt.Equal(starts.Add(36*time.Hour)) || stored.Description != "the brief agents work from" {
+		stored.Metrics[0].Key != "val_accuracy" || !stored.StartsAt.Equal(starts) || stored.DurationHours != 36 || !stored.BaselineDueAt.Equal(ends) || !stored.EndsAt.IsZero() || stored.Description != "the brief agents work from" {
 		t.Errorf("an open experiment's fields: got = %d %v, stored %+v", code, out, stored)
 	}
 

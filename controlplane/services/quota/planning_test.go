@@ -312,7 +312,7 @@ func TestAnOpenExperimentNotRunningByItsBaselineDeadlineIsClosed(t *testing.T) {
 		open("pe-in-time", now.Add(time.Minute), ""),
 		open("pe-declared-in-time", now.Add(time.Minute), "job-1"),
 	}}}
-	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)
+	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute)
 	if err := svc.SweepExpired(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -325,6 +325,44 @@ func TestAnOpenExperimentNotRunningByItsBaselineDeadlineIsClosed(t *testing.T) {
 			t.Errorf("%s: status %s closed by %v, want %s by the platform", pe.ID, pe.Status, pe.ClosedBy, want)
 		}
 	}
+}
+
+// Run 2 closed at its baseline deadline with no coordinator ever started: its summary stayed
+// empty and the close message did not say that no job was ever submitted.
+func TestAnExperimentThatClosesWithNoSummaryIsGivenTheRecordOfItsClose(t *testing.T) {
+	now := time.Now().UTC()
+	asked := now.Add(-10 * time.Minute)
+	pe := &domain.PlatformExperiment{ID: "pe-late", ProjectID: "prj-a", Status: domain.PlatformExpOpen, CreatedAt: now.Add(-time.Hour),
+		DurationHours: 1, BudgetAcceleratorHours: 18, BaselineDueAt: now.Add(-time.Minute), Stages: []domain.Stage{{LengthPct: 100}},
+		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Instance: domain.AgentInstance{State: domain.InstanceWaiting}}}
+	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, researchers: []string{"ag-researcher"},
+		baselines: []domain.AgentSignup{{AgentID: "ag-baseline", Name: "baseline", Role: domain.SignupRoleBaseline,
+			Instance: &domain.AgentInstance{AskedAt: &asked, State: domain.InstanceRunning}, Activity: &domain.AgentActivity{Text: "writing harness/run_trial.py", At: asked}}}}}
+	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute)
+	if err := svc.SweepExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"baseline_limit_reached", "no job was ever submitted", "Jobs submitted: 0.", "Spent: 0 of the budget of 18",
+		"- coordinator: no activity reported; never launched.", `- baseline (baseline): 0 jobs submitted; last activity "writing harness/run_trial.py"`, "did not finish", "(competitor): 0 jobs submitted; no activity reported; never launched."} {
+		if !strings.Contains(pe.Summary, want) {
+			t.Errorf("summary = %q, want it to say %q", pe.Summary, want)
+		}
+	}
+	written := pe.Summary
+	pe.Summary = "the coordinator's own"
+	if err := store.RecordClose(context.Background(), pe.ID, written); err != nil || pe.Summary != "the coordinator's own" {
+		t.Errorf("a record over a summary written meanwhile: got = %q, %v, want the summary kept", pe.Summary, err)
+	}
+}
+
+// noUsage is a metrics store that holds no usage.
+func noUsage(t *testing.T) string {
+	metrics := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
+	}))
+	t.Cleanup(metrics.Close)
+	return metrics.URL
 }
 
 // statusStore is createdStore with the reads and the write a close and a sweep make.
@@ -343,7 +381,25 @@ func (s *statusStore) ListPlatformExperimentsByStatus(_ context.Context, status 
 func (s *statusStore) ClosePlatformExperiment(_ context.Context, id string, by *domain.Actor) error {
 	for _, pe := range s.created {
 		if pe.ID == id {
-			pe.Status, pe.ClosedBy = domain.PlatformExpClosed, by
+			closedAt := time.Now().UTC()
+			pe.CloseReason = domain.CloseByRequest
+			if by == nil && pe.Status == domain.PlatformExpOpen {
+				pe.CloseReason = domain.CloseBaselineLimitReached
+			}
+			pe.Status, pe.ClosedBy, pe.ClosedAt = domain.PlatformExpClosed, by, &closedAt
+		}
+	}
+	return nil
+}
+
+func (s *statusStore) AgentJobsByAgent(context.Context, string) (map[string]db.AgentJobs, error) {
+	return map[string]db.AgentJobs{}, nil
+}
+
+func (s *statusStore) RecordClose(_ context.Context, id, record string) error {
+	for _, pe := range s.created {
+		if pe.ID == id && pe.Status == domain.PlatformExpClosed && pe.Summary == "" {
+			pe.Summary = record
 		}
 	}
 	return nil
@@ -414,7 +470,7 @@ func aProposal(more map[string]any) map[string]any {
 			"name": "Cosine or constant", "description": "Train the small transformer in train.py and report val_loss. BASELINE config: constant lr 3e-4 measured: not yet established",
 			"metrics": []map[string]any{{"key": "val_loss", "direction": "minimize"}},
 		},
-		"budget_accelerator_hours": 6, "duration_hours": 4, "agents": []map[string]any{{"flavor": "hyperparameter-search"}, {}},
+		"budget_accelerator_hours": 6, "duration_hours": 4, "baseline_minutes": 30, "agents": []map[string]any{{"flavor": "hyperparameter-search"}, {}},
 		"accelerator_type": "rtx-4090",
 		"image":            "torch",
 		"metric_reason":    "Validation loss on held-out text is the goal itself.",
@@ -493,25 +549,27 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 		more   map[string]any
 		reason string
 	}{
-		"an experiment that sets its own budget": {experiment(map[string]any{"budget": 3}), "invalid_experiment"},
-		"no brief":                               {experiment(map[string]any{"description": " "}), "invalid_experiment"},
-		"no ranked metric":                       {experiment(map[string]any{"metrics": []map[string]any{{"key": "val_loss", "direction": "minimize", "role": "constraint", "bound": 1}}}), "invalid_metrics"},
-		"a ladder that is not one":               {experiment(map[string]any{"stages": []map[string]any{{"length_pct": 40, "evict_pct": 50}}}), "invalid_stages"},
-		"no cost":                                {map[string]any{"budget_accelerator_hours": 0}, "invalid_cost"},
-		"no length":                              {map[string]any{"duration_hours": 0}, "invalid_length"},
-		"longer than the platform runs one":      {map[string]any{"duration_hours": 31 * 24}, "run_too_long"},
-		"nobody to run it":                       {map[string]any{"agents": []map[string]any{}}, "invalid_agents"},
-		"more machines than it gets":             {map[string]any{"agents": []map[string]any{{}, {}, {}, {}}}, "invalid_agents"},
-		"a planner among the agents":             {map[string]any{"agents": []map[string]any{{"flavor": "planner"}}}, "invalid_agents"},
-		"no reason for the metric":               {map[string]any{"metric_reason": ""}, "missing_explanation"},
-		"no reason for the size":                 {map[string]any{"sizing_reason": " "}, "missing_explanation"},
-		"a measurement that is a paper":          {map[string]any{"measurement": strings.Repeat("x", maxProposalTextBytes+1)}, "too_long"},
-		"a type nobody has now":                  {map[string]any{"accelerator_type": "a100"}, "accelerator_unreachable"},
-		"no type":                                {map[string]any{"accelerator_type": ""}, "accelerator_unreachable"},
-		"an image by a word of its own":          {map[string]any{"image": "pytorch"}, "unknown_job_image"},
-		"no image":                               {map[string]any{"image": ""}, "unknown_job_image"},
-		"memory that is no quantity":             {map[string]any{"memory": "lots"}, "invalid_resources"},
-		"negative storage":                       {map[string]any{"storage": "-100Gi"}, "invalid_resources"},
+		"an experiment that sets its own budget":  {experiment(map[string]any{"budget": 3}), "invalid_experiment"},
+		"no brief":                                {experiment(map[string]any{"description": " "}), "invalid_experiment"},
+		"no ranked metric":                        {experiment(map[string]any{"metrics": []map[string]any{{"key": "val_loss", "direction": "minimize", "role": "constraint", "bound": 1}}}), "invalid_metrics"},
+		"a ladder that is not one":                {experiment(map[string]any{"stages": []map[string]any{{"length_pct": 40, "evict_pct": 50}}}), "invalid_stages"},
+		"no cost":                                 {map[string]any{"budget_accelerator_hours": 0}, "invalid_cost"},
+		"no length":                               {map[string]any{"duration_hours": 0}, "invalid_length"},
+		"longer than the platform runs one":       {map[string]any{"duration_hours": 31 * 24}, "run_too_long"},
+		"no time for the baseline":                {map[string]any{"baseline_minutes": 0}, "invalid_baseline_minutes"},
+		"more time for the baseline than allowed": {map[string]any{"baseline_minutes": 91}, "invalid_baseline_minutes"},
+		"nobody to run it":                        {map[string]any{"agents": []map[string]any{}}, "invalid_agents"},
+		"more machines than it gets":              {map[string]any{"agents": []map[string]any{{}, {}, {}, {}}}, "invalid_agents"},
+		"a planner among the agents":              {map[string]any{"agents": []map[string]any{{"flavor": "planner"}}}, "invalid_agents"},
+		"no reason for the metric":                {map[string]any{"metric_reason": ""}, "missing_explanation"},
+		"no reason for the size":                  {map[string]any{"sizing_reason": " "}, "missing_explanation"},
+		"a measurement that is a paper":           {map[string]any{"measurement": strings.Repeat("x", maxProposalTextBytes+1)}, "too_long"},
+		"a type nobody has now":                   {map[string]any{"accelerator_type": "a100"}, "accelerator_unreachable"},
+		"no type":                                 {map[string]any{"accelerator_type": ""}, "accelerator_unreachable"},
+		"an image by a word of its own":           {map[string]any{"image": "pytorch"}, "unknown_job_image"},
+		"no image":                                {map[string]any{"image": ""}, "unknown_job_image"},
+		"memory that is no quantity":              {map[string]any{"memory": "lots"}, "invalid_resources"},
+		"negative storage":                        {map[string]any{"storage": "-100Gi"}, "invalid_resources"},
 	} {
 		store := draftWithPlanner()
 		_, call := planningAPI(t, store, thePlanner)
@@ -604,7 +662,7 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	_, call := planningAPI(t, store, planner)
 	before := time.Now()
 	code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{
-		"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{{"flavor": "architecture-search", "hyperparameters": map[string]any{"depth": 4}}, {}, {}},
+		"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 25, "agents": []map[string]any{{"flavor": "architecture-search", "hyperparameters": map[string]any{"depth": 4}}, {}, {}},
 	})
 	if code != http.StatusOK {
 		t.Fatalf("accept: got = %d %v, want 200", code, out)
@@ -621,9 +679,10 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	if pe.BudgetAcceleratorHours != 3 || pe.MaxAgents != 3 {
 		t.Errorf("budget %v for %d agents, want what the person stated (3 and 3), not the proposal's 6 and 2", pe.BudgetAcceleratorHours, pe.MaxAgents)
 	}
-	// Its two hours are its whole wall clock from the accept, and the baseline has half of them.
-	if pe.StartsAt.Before(before) || pe.DurationHours != 2 || !pe.EndsAt.Equal(pe.StartsAt.Add(2*time.Hour)) || !pe.BaselineDueAt.Equal(pe.StartsAt.Add(time.Hour)) {
-		t.Errorf("starts %v, %v hours ending %v, baseline due %v: want 2 hours from the accept and the baseline due halfway", pe.StartsAt, pe.DurationHours, pe.EndsAt, pe.BaselineDueAt)
+	// The baseline has the minutes the person stated, not the proposal's 30, and the run's two
+	// hours count from its start: until then it has no end.
+	if pe.StartsAt.Before(before) || pe.DurationHours != 2 || !pe.EndsAt.IsZero() || !pe.BaselineDueAt.Equal(pe.StartsAt.Add(25*time.Minute)) {
+		t.Errorf("starts %v, %v hours ending %v, baseline due %v: want 2 hours with no end yet and the baseline due 25 minutes after the accept", pe.StartsAt, pe.DurationHours, pe.EndsAt, pe.BaselineDueAt)
 	}
 	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Launcher != "main" || pe.Coordinator.Model != "platform-model-1" {
 		t.Errorf("coordinator %+v, want one the platform hosts", pe.Coordinator)
@@ -651,13 +710,13 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	}
 
 	// Accepting is refused by state, so a second press and a lost answer do no harm.
-	if code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{{}}}); code != http.StatusConflict || out["reason"] != "invalid_transition" {
+	if code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}}}); code != http.StatusConflict || out["reason"] != "invalid_transition" {
 		t.Errorf("accepting twice: got = %d %v, want 409 invalid_transition", code, out)
 	}
 
 	unproposed := draftWithPlanner()
 	_, call = planningAPI(t, unproposed, planner)
-	if code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{{}}}); code != http.StatusConflict || out["reason"] != "invalid_transition" {
+	if code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}}}); code != http.StatusConflict || out["reason"] != "invalid_transition" {
 		t.Errorf("accepting before anything is proposed: got = %d %v, want 409 invalid_transition", code, out)
 	}
 
@@ -665,10 +724,10 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 		body   map[string]any
 		reason string
 	}{
-		"no budget":         {map[string]any{"budget_accelerator_hours": 0, "duration_hours": 2, "agents": []map[string]any{{}}}, "invalid_cost"},
-		"too long":          {map[string]any{"budget_accelerator_hours": 3, "duration_hours": 31 * 24, "agents": []map[string]any{{}}}, "run_too_long"},
-		"nobody":            {map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{}}, "invalid_agents"},
-		"too many machines": {map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{{}, {}, {}, {}}}, "invalid_agents"},
+		"no budget":         {map[string]any{"budget_accelerator_hours": 0, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}}}, "invalid_cost"},
+		"too long":          {map[string]any{"budget_accelerator_hours": 3, "duration_hours": 31 * 24, "baseline_minutes": 30, "agents": []map[string]any{{}}}, "run_too_long"},
+		"nobody":            {map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{}}, "invalid_agents"},
+		"too many machines": {map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}, {}, {}, {}}}, "invalid_agents"},
 	} {
 		store := draftWithPlanner()
 		_, propose := planningAPI(t, store, thePlanner)
@@ -683,7 +742,7 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	store = draftWithPlanner()
 	_, propose = planningAPI(t, store, thePlanner)
 	propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
-	if code, _ := propose("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{{}}}); code != http.StatusForbidden || store.created[0].Status != domain.PlatformExpDraft {
+	if code, _ := propose("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}}}); code != http.StatusForbidden || store.created[0].Status != domain.PlatformExpDraft {
 		t.Errorf("the planner accepting its own proposal: got = %d, want 403", code)
 	}
 }
@@ -837,7 +896,7 @@ func TestAPlannerDeclinesWithAReasonThePersonReadsAndCanAnswer(t *testing.T) {
 		t.Errorf("a declined draft ends in %v, want it to wait for the person as a proposal does", wait)
 	}
 	// The earlier proposal no longer stands, so nothing is accepted.
-	accept := map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{{}}}
+	accept := map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}}}
 	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept); code != http.StatusConflict || out["reason"] != "invalid_transition" || !strings.Contains(out["message"].(string), "declined") {
 		t.Errorf("accepting a declined draft: got = %d %v, want 409 invalid_transition that says it declined", code, out)
 	}
@@ -870,7 +929,7 @@ func TestAnAcceptedDraftRunsOnceItsBaselineAgentFinishesWithNoCoordinatorAction(
 		t.Fatalf("propose: %d %v", code, out)
 	}
 	svc, call := planningAPI(t, store, planner)
-	accept := map[string]any{"budget_accelerator_hours": 6, "duration_hours": 2, "agents": []map[string]any{{}, {}}}
+	accept := map[string]any{"budget_accelerator_hours": 6, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}, {}}}
 	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept); code != http.StatusOK || out["status"] != "open" || out["status_reason"].(map[string]any)["reason"] != "baseline_measuring" {
 		t.Fatalf("accept: got = %d %v, want it open with its baseline agent measuring", code, out)
 	}
@@ -959,7 +1018,7 @@ func TestAcceptingADraftTakesTheNameThePersonGaveIt(t *testing.T) {
 		return store, call
 	}
 	accept := func(more map[string]any) map[string]any {
-		body := map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{{}}}
+		body := map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}}}
 		for key, value := range more {
 			body[key] = value
 		}

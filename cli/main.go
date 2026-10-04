@@ -655,7 +655,7 @@ Minimal shape:
   budget_accelerator_hours: 10
   max_agents: 2               # researchers only: a finished one still counts, baseline agents
                               # and the coordinator never do
-  duration_hours: 24          # the whole wall clock from creation, baseline included
+  duration_hours: 24          # the run, from its start once the baseline is declared
   coordinator_hosted: true    # optional: the platform runs the coordinator
   metrics:
     - key: val_accuracy
@@ -844,7 +844,9 @@ a leading quote.
   memory: 32Gi                         # asks for, as job.cpu, job.memory and job.storage state it.
   storage: 100Gi                       # hl repo init writes them into job.yaml, so no brief repeats them
   budget_accelerator_hours: 6          # proposed; the person states the real ones at accept
-  duration_hours: 4
+  duration_hours: 4                    # the run, from its start: a time the goal states is this
+  baseline_minutes: 30                 # what measuring the baseline needs from the accept, at
+                                       # most planning.baseline_limit_minutes
   agents:                              # one entry per researcher
     - flavor: hyperparameter-search    # optional: generalist (the default), architecture-search,
       hyperparameters:                 #   data-search or hyperparameter-search. The direction you

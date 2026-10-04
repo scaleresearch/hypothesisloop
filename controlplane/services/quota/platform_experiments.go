@@ -32,6 +32,8 @@ type PlatformExperimentsStore interface {
 	// implementation's comment for why the compare-and-swap matters here.
 	UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus) error
 	SetPlatformExperimentSummary(ctx context.Context, id, summary string) error
+	// RecordClose writes the summary of a closed platform experiment that has none.
+	RecordClose(ctx context.Context, id, record string) error
 	// TellCoordinator records the status_reason the experiment waits for its coordinator with,
 	// "" for none, and announces one that changed.
 	TellCoordinator(ctx context.Context, id, reason string) error
@@ -90,6 +92,8 @@ type PlatformExperimentsStore interface {
 	// CompletedJobIDs is the jobs that ran to a successful end: of them, the ones that hold every
 	// constraint rank.
 	CompletedJobIDs(ctx context.Context, platformExpID string) (map[string]bool, error)
+	// AgentJobsByAgent is, for every agent that submitted a job, how many it submitted.
+	AgentJobsByAgent(ctx context.Context, platformExpID string) (map[string]db.AgentJobs, error)
 	IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error)
 	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)
 	// GetAgentQuota/ListAgentQuotas cover allocation only (guaranteed/burst
@@ -212,8 +216,8 @@ type CreatePlatformExperimentRequest struct {
 	MaxConcurrentAccelerators *int                      `json:"max_concurrent_accelerators,omitempty"`
 	Metrics                   []domain.MetricDefinition `json:"metrics" required:"false"` // metric keys jobs must emit
 	ReportIntervalSeconds     int                       `json:"report_interval_seconds,omitempty" doc:"How often a job is expected to report. Left out, it is the platform's scheduler.default_report_interval_seconds."`
-	StartsAt                  time.Time                 `json:"starts_at" required:"false" doc:"When its wall clock starts, for a later start than this create. Left out, or past, it is this create."`
-	DurationHours             float64                   `json:"duration_hours" required:"false" doc:"Its whole wall clock in hours from starts_at, measuring the baseline included, at most quota.max_platform_experiment_days: it ends duration_hours after starts_at. Required: 422 invalid_length without it."`
+	StartsAt                  time.Time                 `json:"starts_at" required:"false" doc:"When its baseline begins to be measured, for a later start than this create. Left out, or past, it is this create."`
+	DurationHours             float64                   `json:"duration_hours" required:"false" doc:"How long the run lasts, in hours from the moment it starts, at most quota.max_platform_experiment_days. Required: 422 invalid_length without it. The time it is open before, while its baseline is measured, is no part of it."`
 	// Stages is the elimination ladder, fixed at creation. Omit to get the platform default
 	// (config stages.default).
 	Stages []domain.Stage `json:"stages,omitempty"`
@@ -275,8 +279,8 @@ type PlatformExperimentPatch struct {
 	MaxConcurrentAccelerators *int                       `json:"max_concurrent_accelerators,omitempty"`
 	Metrics                   *[]domain.MetricDefinition `json:"metrics,omitempty"`
 	ReportIntervalSeconds     *int                       `json:"report_interval_seconds,omitempty"`
-	StartsAt                  *time.Time                 `json:"starts_at,omitempty" doc:"When its wall clock starts, now when past. Stated, baseline_due_at and ends_at move with it."`
-	DurationHours             *float64                   `json:"duration_hours,omitempty" doc:"Its whole wall clock from starts_at, measuring the baseline included. Stated, baseline_due_at and ends_at move with it."`
+	StartsAt                  *time.Time                 `json:"starts_at,omitempty" doc:"When its baseline begins to be measured, now when past. Stated, baseline_due_at moves with it."`
+	DurationHours             *float64                   `json:"duration_hours,omitempty" doc:"How long the run lasts from the moment it starts."`
 	BaselineJobID             *string                    `json:"baseline_job_id,omitempty" doc:"Declares the baseline: the completed job of an agent of role baseline that measured it, with its finding filed. Taken while the platform experiment is open."`
 }
 

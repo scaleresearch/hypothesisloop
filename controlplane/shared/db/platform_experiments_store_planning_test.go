@@ -381,7 +381,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		pe.Metrics = []domain.MetricDefinition{{Key: "val_loss", Direction: "minimize"}}
 		pe.Stages = []domain.Stage{{LengthPct: 40, EvictPct: 50}, {LengthPct: 60}}
 		pe.StartsAt, pe.DurationHours = time.Now().UTC(), 4
-		pe.SetClock(time.Hour)
+		pe.BaselineDueAt = pe.StartsAt.Add(time.Hour)
 		pe.DefaultQuotaTier = domain.QuotaTierGuaranteed
 		pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: launcher, Model: "model-1"}
 		var agents []*domain.Agent
@@ -482,7 +482,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		t.Fatalf("accepted: got = %+v (coordinator %+v), %v", got, got.Coordinator, err)
 	}
 	if got.StartsAt.IsZero() || time.Since(got.StartsAt) > time.Minute {
-		t.Errorf("starts_at = %v, want now, the start of its wall clock", got.StartsAt)
+		t.Errorf("starts_at = %v, want now, when its baseline begins to be measured", got.StartsAt)
 	}
 	if err := pes.AcceptDraft(ctx, pe, nil, nil); err != ErrNotDraft {
 		t.Fatalf("accepting twice: got = %v, want ErrNotDraft", err)

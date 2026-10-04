@@ -125,19 +125,20 @@ ORDER BY created_at, id`
 }
 
 // AgentJobs is what one agent's jobs in a platform experiment can still give a stage boundary to
-// rank on.
+// rank on, and how many it submitted.
 type AgentJobs struct {
+	Submitted int
 	// Completed is at least one COMPLETED job, the only kind whose metrics rank.
 	Completed bool
 	// InFlight is at least one admitted job that has not ended, SUBMITTED or RUNNING.
 	InFlight bool
 }
 
-// AgentJobsByAgent returns, for every agent with a job in a platform experiment, whether it has a
-// completed job and whether it has one in flight. One statement, so both answers describe the
-// same moment.
+// AgentJobsByAgent returns, for every agent with a job in a platform experiment, how many it
+// submitted, whether it has a completed job and whether it has one in flight. One statement, so
+// the answers describe the same moment.
 func (s *ExperimentsStore) AgentJobsByAgent(ctx context.Context, platformExpID string) (map[string]AgentJobs, error) {
-	rows, err := s.pool.pool.Query(ctx, `SELECT agent_id,
+	rows, err := s.pool.pool.Query(ctx, `SELECT agent_id, COUNT(*),
        bool_or(status = 'COMPLETED'),
        bool_or(status IN ('SUBMITTED', 'RUNNING'))
 FROM experiments WHERE platform_experiment_id = $1 GROUP BY agent_id`, platformExpID)
@@ -149,7 +150,7 @@ FROM experiments WHERE platform_experiment_id = $1 GROUP BY agent_id`, platformE
 	for rows.Next() {
 		var agentID string
 		var jobs AgentJobs
-		if err := rows.Scan(&agentID, &jobs.Completed, &jobs.InFlight); err != nil {
+		if err := rows.Scan(&agentID, &jobs.Submitted, &jobs.Completed, &jobs.InFlight); err != nil {
 			return nil, fmt.Errorf("experiments_store.AgentJobsByAgent: %w", err)
 		}
 		agents[agentID] = jobs

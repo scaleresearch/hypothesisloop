@@ -446,9 +446,9 @@ export interface CreatePlatformExperimentRequest {
   report_interval_seconds?: number
   /** Elimination ladder; omitted means the platform default. See docs/stages.md. */
   stages?: Stage[]
-  /** When its wall clock starts. Omitted, the create. */
+  /** When its baseline begins to be measured. Omitted, the create. */
   starts_at?: string
-  /** The whole wall clock from starts_at, the baseline included. */
+  /** How long the run lasts from its start, once the baseline is declared. */
   duration_hours: number
   /** owner/name of a repository a connected GitHub account covers. Read at creation only. */
   repository?: string

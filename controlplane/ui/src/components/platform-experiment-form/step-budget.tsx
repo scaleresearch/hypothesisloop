@@ -68,7 +68,7 @@ export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps 
             </FormField>
           )}
           {isEdit && (
-            <FormField label="Starts at" hint={locked ? LOCKED : 'When its wall clock starts. Its end and baseline deadline move with it.'}>
+            <FormField label="Starts at" hint={locked ? LOCKED : 'When its baseline begins to be measured. Its baseline deadline moves with it.'}>
               <Input type="datetime-local" value={form.starts_at} disabled={locked} onChange={e => set('starts_at', e.target.value)} />
             </FormField>
           )}

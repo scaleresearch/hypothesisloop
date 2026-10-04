@@ -32,6 +32,7 @@ const proposal: Proposal = {
   },
   budget_accelerator_hours: 6,
   duration_hours: 4,
+  baseline_minutes: 30,
   agents: [sweeper, {}],
   accelerator_type: 'rtx-4090',
   image: 'pytorch',
@@ -113,9 +114,13 @@ describe('a proposed draft', () => {
     const researchers = screen.getByLabelText('Researchers')
     await userEvent.clear(researchers)
     await userEvent.type(researchers, '3')
+    const baseline = screen.getByLabelText('Baseline (minutes)')
+    expect(baseline).toHaveProperty('value', '30')
+    await userEvent.clear(baseline)
+    await userEvent.type(baseline, '45')
     await userEvent.click(screen.getByRole('button', { name: 'Accept and run' }))
     expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/accept', {
-      name: 'Cosine or constant', budget_accelerator_hours: 3, duration_hours: 4, agents: [sweeper, {}, {}],
+      name: 'Cosine or constant', budget_accelerator_hours: 3, duration_hours: 4, baseline_minutes: 45, agents: [sweeper, {}, {}],
     })
   })
 
@@ -131,7 +136,7 @@ describe('a proposed draft', () => {
     expect(screen.queryByText('Researcher 2')).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Accept and run' }))
     expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/accept', {
-      name: 'Schedules on tiny transformers', budget_accelerator_hours: 6, duration_hours: 4, agents: [sweeper],
+      name: 'Schedules on tiny transformers', budget_accelerator_hours: 6, duration_hours: 4, baseline_minutes: 30, agents: [sweeper],
     })
   })
 
@@ -180,7 +185,7 @@ describe('a proposed draft', () => {
 describe('a proposal that arrives while the person watches it being planned', () => {
   const proposedAt = '2026-10-05T12:10:00Z'
   const proposed = (at = proposedAt) => draft('proposed', { proposal, proposed_at: at })
-  const accepted = ['POST', '/platform-experiments/pe-1/accept', { name: 'Cosine or constant', budget_accelerator_hours: 6, duration_hours: 4, agents: [sweeper, {}] }]
+  const accepted = ['POST', '/platform-experiments/pe-1/accept', { name: 'Cosine or constant', budget_accelerator_hours: 6, duration_hours: 4, baseline_minutes: 30, agents: [sweeper, {}] }]
   const countdown = () => screen.queryByRole('timer')?.textContent
   // A second at a time: each second of the countdown is set from the render of the one before.
   const pass = async (seconds: number) => {

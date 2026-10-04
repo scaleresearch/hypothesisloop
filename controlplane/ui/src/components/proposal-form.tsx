@@ -70,8 +70,9 @@ function Researcher({ n, agent }: { n: number; agent: ProposedAgent }) {
 
 /**
  * What the planner proposed, as the experiment filled in: what is measured, how and on what,
- * who runs it, and what it may spend. The name, the budget, the duration and the number of
- * researchers are the person's to change, and accepting sends them as shown. Nothing has run.
+ * who runs it, and what it may spend. The name, the budget, the duration, the minutes the baseline
+ * has and the number of researchers are the person's to change, and accepting sends them as shown.
+ * Nothing has run.
  * `editable` is off for a reader and while the planner revises, when it is only read. A proposal
  * that `arrived` while the person watched it being planned is accepted by itself after a
  * countdown, unless they do anything in the form or in `children`, the box that asks the planner
@@ -88,6 +89,7 @@ export function ProposalForm({ draft, proposal, editable, arrived, onDone, child
   const [name, setName] = useState(proposal.experiment.name)
   const [budget, setBudget] = useState(String(proposal.budget_accelerator_hours))
   const [hours, setHours] = useState(String(proposal.duration_hours))
+  const [baselineMinutes, setBaselineMinutes] = useState(String(proposal.baseline_minutes))
   const [researchers, setResearchers] = useState(String(proposal.agents.length))
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -98,7 +100,7 @@ export function ProposalForm({ draft, proposal, editable, arrived, onDone, child
   const unit = budgetUnit(kindOf(proposal.accelerator_type), 'long')
   const count = Number(researchers)
   const countValid = Number.isInteger(count) && count > 0
-  const valid = name.trim() !== '' && Number(budget) > 0 && Number(hours) > 0 && countValid
+  const valid = name.trim() !== '' && Number(budget) > 0 && Number(hours) > 0 && Number.isInteger(Number(baselineMinutes)) && Number(baselineMinutes) > 0 && countValid
   // The researchers proposed keep what the planner gave them; one added beyond them is a generalist.
   const agents = Array.from({ length: countValid ? count : proposal.agents.length }, (_, i) => proposal.agents[i] ?? {})
 
@@ -107,7 +109,7 @@ export function ProposalForm({ draft, proposal, editable, arrived, onDone, child
     setError(null)
     setNameError(null)
     try {
-      await acceptDraft(draft.id, { name: name.trim(), budget_accelerator_hours: Number(budget), duration_hours: Number(hours), agents })
+      await acceptDraft(draft.id, { name: name.trim(), budget_accelerator_hours: Number(budget), duration_hours: Number(hours), baseline_minutes: Number(baselineMinutes), agents })
       onDone()
     } catch (e) {
       // Accepting changes nothing of the proposal's experiment but its name.
@@ -185,12 +187,13 @@ export function ProposalForm({ draft, proposal, editable, arrived, onDone, child
         )}
         <Captioned caption="What it may spend">
           <Text tone="muted" className="mb-2">
-            These three are yours to state. The planner proposed {formatAccH(proposal.budget_accelerator_hours)} {unit} over {proposal.duration_hours} hours
-            for {proposal.agents.length} {proposal.agents.length === 1 ? 'researcher' : 'researchers'}; the figures are an estimate, since nothing has run, and the budget is a cap on everything the run spends, the baseline and burst hours included.
+            These four are yours to state. The planner proposed {formatAccH(proposal.budget_accelerator_hours)} {unit} over {proposal.duration_hours} hours of research
+            for {proposal.agents.length} {proposal.agents.length === 1 ? 'researcher' : 'researchers'}, after {proposal.baseline_minutes} minutes to measure the baseline; the figures are an estimate, since nothing has run, and the budget is a cap on everything the run spends, the baseline and burst hours included.
           </Text>
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <FormField label={`Budget (${unit})`}><Input type="number" min={0} step="any" value={budget} disabled={!editable} onChange={e => setBudget(e.target.value)} /></FormField>
-            <FormField label="Duration (hours)"><Input type="number" min={0} step="any" value={hours} disabled={!editable} onChange={e => setHours(e.target.value)} /></FormField>
+            <FormField label="Baseline (minutes)" hint="Until the baseline is due. The run starts once it is measured."><Input type="number" min={1} step={1} value={baselineMinutes} disabled={!editable} onChange={e => setBaselineMinutes(e.target.value)} /></FormField>
+            <FormField label="Duration (hours)" hint="Research time, from the start of the run."><Input type="number" min={0} step="any" value={hours} disabled={!editable} onChange={e => setHours(e.target.value)} /></FormField>
             <FormField label="Researchers"><Input type="number" min={1} step={1} value={researchers} disabled={!editable} onChange={e => setResearchers(e.target.value)} /></FormField>
           </div>
         </Captioned>

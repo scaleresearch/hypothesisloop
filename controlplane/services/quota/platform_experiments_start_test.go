@@ -50,6 +50,10 @@ func (f *startStore) ListAgentSignups(context.Context, string) ([]domain.AgentSi
 	return signups, nil
 }
 
+func (f *startStore) AgentJobsByAgent(context.Context, string) (map[string]db.AgentJobs, error) {
+	return map[string]db.AgentJobs{}, nil
+}
+
 func (f *startStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	return f.pe, nil
 }

@@ -21,7 +21,10 @@ export interface Proposal {
     stages?: PlatformExperiment['stages']
   }
   budget_accelerator_hours: number
+  // The run's length, from its start once the baseline is declared.
   duration_hours: number
+  // The minutes measuring the baseline needs from the accept.
+  baseline_minutes: number
   agents: ProposedAgent[]
   // The type the jobs are sized for: an accelerator, or CPU cores (units.CPU_TYPE) for work that needs none.
   accelerator_type: string
@@ -75,6 +78,7 @@ export interface Acceptance {
   name: string
   budget_accelerator_hours: number
   duration_hours: number
+  baseline_minutes: number
   agents: ProposedAgent[]
 }
 

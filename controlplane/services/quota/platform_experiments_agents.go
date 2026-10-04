@@ -91,9 +91,13 @@ func (s *PlatformExperimentsService) roster(ctx context.Context, platformExpID s
 		return nil, fmt.Errorf("platform_experiments.roster: %w", err)
 	}
 	if pe != nil && pe.Status == domain.PlatformExpClosed && pe.StartedAt.IsZero() {
+		why, err := s.closedReason(ctx, pe)
+		if err != nil {
+			return nil, fmt.Errorf("platform_experiments.roster: %w", err)
+		}
 		for i, signup := range signups {
 			if signup.SharesBudget() && (signup.Instance == nil || signup.Instance.AskedAt == nil) {
-				out[i].StatusReason = neverLaunched(pe)
+				out[i].StatusReason = neverLaunched(why)
 			}
 		}
 		return out, nil
@@ -134,10 +138,9 @@ func (s *PlatformExperimentsService) roster(ctx context.Context, platformExpID s
 // reasonInstanceStarting is the status_reason of an agent whose machine is on its way.
 const reasonInstanceStarting = "instance_starting"
 
-// neverLaunched is the status_reason of an agent of the closed pe that waited for a run that
-// never started: no machine was asked for it and it took no turn.
-func neverLaunched(pe *domain.PlatformExperiment) *domain.StatusReason {
-	why := closedReason(pe)
+// neverLaunched is the status_reason of an agent of a platform experiment closed for why that
+// waited for a run that never started: no machine was asked for it and it took no turn.
+func neverLaunched(why *domain.StatusReason) *domain.StatusReason {
 	return &domain.StatusReason{Reason: "never_launched", Message: "it never took a turn and no machine was asked for it: its platform experiment closed before the run started, with close_reason " + why.Reason + ": " + why.Message}
 }
 

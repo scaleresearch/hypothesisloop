@@ -200,7 +200,7 @@ Fill in every `REPLACE-WITH`, then:
 Required of a direct create (`$API_URL/explore/coordinator` reads the API out in plain text and
 `GET $API_URL/openapi.json` is the source of truth): `name`,
 `description`, `metrics`, `budget_accelerator_hours`, a positive `max_agents`, and
-`duration_hours`, the whole wall clock from `starts_at`, the baseline included. No request
+`duration_hours`, how long the run lasts from the moment it starts, the baseline not included. No request
 states `ends_at`: the platform answers it. A run lasts 30 days at most
 (`quota.max_platform_experiment_days`), and one stated longer is refused `run_too_long`.
 
@@ -215,8 +215,8 @@ Creating makes the experiment, `open`, and no agent. From there every experiment
 way, whoever does each part: the researchers are added (section 4), a baseline agent measures
 the control, and its job is declared as the baseline. The request that declares it starts the
 run when a researcher has joined and `starts_at`, where one is stated, has passed. Nobody
-starts it by hand. `duration_hours` counts from `starts_at`, the creation or a later moment
-stated, the baseline included. While it is `open`,
+starts it by hand. `duration_hours` counts from that start, and measuring the baseline takes
+none of it. While it is `open`,
 `hl platform-experiments get --platform-experiment $PLATFORM_EXPERIMENT_ID` says in `status_reason`
 what the start waits for: `baseline_required`, `baseline_measuring`, `baseline_undeclared`,
 `baseline_declaring`, `starts_at_ahead`, `no_researchers`, `budget_spent`, or `starting`. Its
@@ -319,8 +319,8 @@ agent, as the baseline item below says, and supervise with `supervise.md`.
   `update --baseline-job` says whether it did: `status_reason` names what an open one still waits for, and reads `agents_starting`
   (status `running`, no `started_at` yet, `agents_due_at` given) while the researchers'
   machines come up, a state to wait through. An experiment not running by its
-  `baseline_due_at` (`planning.baseline_limit_minutes`, 90, after `starts_at`, or half of
-  `duration_hours` when sooner) is closed (`baseline_limit_reached`).
+  `baseline_due_at` (`planning.baseline_limit_minutes`, 90, after `starts_at`) is closed
+  (`baseline_limit_reached`).
 - Add every researcher (step 4) before the baseline is declared. Agents join only while the
   status is `open`. Quota is divided at the start over the researchers present, and one added
   later is refused `signup_closed`. How long an agent's container takes to boot does not

@@ -296,7 +296,7 @@ def test_an_exited_machine_is_recorded_restarted_a_few_times_and_then_stops_its_
     crashing, steady = (a["agent_id"] for a in api.add_agents(pe_id, count=2, hosted=True))
     api.declare_baseline_and_wait_running(pe_id)
     # Every researcher is one the platform runs, so none is at work until the first one's machine
-    # is running. The wall clock ran from starts_at all along.
+    # is running. The run's clock ran from its start all along.
     waiting = api.get_json(f"/platform-experiments/{pe_id}")
     assert (waiting["status_reason"]["reason"], waiting["status_reason"]["waits_for"]) == ("agents_starting", "platform"), waiting["status_reason"]
     assert "started_at" not in waiting and _at(waiting["agents_due_at"]) <= _at(waiting["ends_at"]), waiting
@@ -370,7 +370,7 @@ def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_rep
     for agent in survivors:
         assert instances[agent] == before[agent], f"the survivor {agent} would be replaced by the cut"
     # That report was the first of a researcher's machine running and set started_at. The next
-    # answer names the same machines, each still ending after the wall clock.
+    # answer names the same machines, each still ending after the run.
     clocked = api.get_json(f"/platform-experiments/{pe_id}")
     assert clocked["status_reason"]["reason"] == "running" and clocked["started_at"], clocked
     later, _ = desired_for(api, pe_id, up)

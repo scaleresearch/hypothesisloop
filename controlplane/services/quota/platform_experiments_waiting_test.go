@@ -43,6 +43,7 @@ func TestStatusReasonOfAnOpenPlatformExperimentSaysWhereItsBaselineStands(t *tes
 	stopped.Instance = &domain.AgentInstance{Stopped: true}
 	second := domain.AgentSignup{AgentID: "ag-c", Name: "Baseline 2", Role: domain.SignupRoleBaseline, Hosted: true}
 	researcher := domain.AgentSignup{AgentID: "ag-r", Name: "Researcher 1", Role: domain.SignupRoleCompetitor, Hosted: true}
+	due := time.Now().UTC().Add(10*time.Minute - time.Second).Truncate(time.Second)
 	const add, declare = "`hl platform-experiments agents add --hosted --role baseline --platform-experiment pe-1`", "`hl platform-experiments update --baseline-job JOB --platform-experiment pe-1`"
 	job := func(id string) *domain.Experiment {
 		measured := *measuredBaseline().Job
@@ -67,13 +68,13 @@ func TestStatusReasonOfAnOpenPlatformExperimentSaysWhereItsBaselineStands(t *tes
 		"one that left a job the budget is under": {waitingPerson, []domain.AgentSignup{done}, []*domain.Experiment{job("job-1")}, 1, "budget_below_baseline",
 			[]string{"the platform did not declare job job-1", "its owner raises budget_accelerator_hours", "declares it in the request that clears this"}, []string{add, declare}},
 		"one that left a job the sweep has yet to declare": {waitingPerson, []domain.AgentSignup{done}, []*domain.Experiment{job("job-1")}, 6, "baseline_declaring", []string{"job-1"}, []string{add, declare}},
-		"the baseline agent":                               {waitingAgent("ag-b"), []domain.AgentSignup{measuring, researcher}, nil, 6, "baseline_measuring", []string{"Your job is admitted now", "hl job summary", "agents finish"}, []string{add}},
+		"the baseline agent":                               {waitingAgent("ag-b"), []domain.AgentSignup{measuring, researcher}, nil, 6, "baseline_measuring", []string{"Your job is admitted now", "hl job summary", "agents finish", "baseline_due_at is " + due.Format(time.RFC3339) + ", 9 minutes from now"}, []string{add}},
 		"a baseline agent that finished":                   {waitingAgent("ag-b"), []domain.AgentSignup{done, second}, nil, 6, "baseline_measuring", nil, []string{"Your job is admitted now", "Every job you submit"}},
-		"a researcher":                                     {waitingAgent("ag-r"), []domain.AgentSignup{measuring, researcher}, nil, 6, "baseline_measuring", []string{"Every job you submit is refused until the platform starts the run", "end your turn"}, []string{add}},
+		"a researcher":                                     {waitingAgent("ag-r"), []domain.AgentSignup{measuring, researcher}, nil, 6, "baseline_measuring", []string{"Every job you submit is refused until the platform starts the run", "end your turn"}, []string{add, "baseline_due_at is"}},
 	} {
 		store := newRosterStore(domain.PlatformExpOpen, 2)
 		store.pe.CoordinatorHosted, store.signups, store.left = true, c.signups, c.left
-		store.pe.Metrics, store.pe.BudgetAcceleratorHours = openExperiment().Metrics, c.budget
+		store.pe.Metrics, store.pe.BudgetAcceleratorHours, store.pe.BaselineDueAt = openExperiment().Metrics, c.budget, due
 		svc := newSignupTestService(t, store)
 		svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) {
 			baseline := measuredBaseline()
@@ -332,6 +333,7 @@ func TestAResearchersInstanceReadsWaitingUntilThePlatformExperimentStarts(t *tes
 func TestAResearcherOfAnExperimentClosedBeforeItsRunSaysItNeverLaunchedAndWhy(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpClosed, 5)
 	store.pe.CloseReason = domain.CloseBaselineLimitReached
+	store.submitted = map[string]int{"bo": 2}
 	asked := time.Now()
 	store.signups = []domain.AgentSignup{
 		{AgentID: "dana", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{Released: true}},
@@ -341,8 +343,8 @@ func TestAResearcherOfAnExperimentClosedBeforeItsRunSaysItNeverLaunchedAndWhy(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if why := roster[0].StatusReason; why == nil || why.Reason != "never_launched" || !strings.Contains(why.Message, string(domain.CloseBaselineLimitReached)) || why.WaitsFor != "" {
-		t.Errorf("a researcher whose run never started: got = %+v, want never_launched naming the close_reason and waiting for nobody", why)
+	if why := roster[0].StatusReason; why == nil || why.Reason != "never_launched" || !strings.Contains(why.Message, string(domain.CloseBaselineLimitReached)) || !strings.Contains(why.Message, "2 jobs were submitted to measure its baseline") || why.WaitsFor != "" {
+		t.Errorf("a researcher whose run never started: got = %+v, want never_launched naming the close_reason, the baseline jobs submitted, and waiting for nobody", why)
 	}
 	if roster[1].StatusReason != nil {
 		t.Errorf("the baseline agent, whose machine ran: got = %+v, want no reason", roster[1].StatusReason)

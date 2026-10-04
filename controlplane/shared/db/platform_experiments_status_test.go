@@ -51,30 +51,28 @@ func TestClosingAPlatformExperimentExecutesAgainstARealDatabase(t *testing.T) {
 	}
 }
 
-// The owner said 20 minutes and the experiment ran 60 without a baseline: the clock waited for
-// the run. Its duration is the whole wall clock from starts_at, and the start moves no end.
-func TestTheDurationIsTheWholeWallClockFromStartsAt(t *testing.T) {
+// The owner said 20 minutes and the baseline got 10 of them, since the duration was counted from
+// the accept. The run lasts its duration from its start, however long the baseline took.
+func TestTheRunLastsItsDurationFromItsStart(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
 	created := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Microsecond)
 	pe := &domain.PlatformExperiment{
 		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "an hour's run", BudgetAcceleratorHours: 10, MaxAgents: 2,
-		StartsAt: created, DurationHours: 1, Status: domain.PlatformExpOpen,
+		StartsAt: created, BaselineDueAt: created.Add(45 * time.Minute), DurationHours: 1, Status: domain.PlatformExpOpen,
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
 		Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: created, UpdatedAt: created,
 	}
-	pe.SetClock(90 * time.Minute)
 	if err := pes.CreatePlatformExperiment(ctx, pe, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	end := created.Add(time.Hour)
 	open, err := pes.GetPlatformExperiment(ctx, pe.ID)
-	if err != nil || !open.EndsAt.Equal(end) || !open.StartedAt.IsZero() || !open.BaselineDueAt.Equal(created.Add(30*time.Minute)) || !open.ClosesAt().Equal(open.BaselineDueAt) {
-		t.Fatalf("open: got = ends %v, started %v, baseline due %v, %v, want an end an hour after starts_at and the baseline due halfway", open.EndsAt, open.StartedAt, open.BaselineDueAt, err)
+	if err != nil || !open.EndsAt.IsZero() || !open.StartedAt.IsZero() || !open.BaselineDueAt.Equal(pe.BaselineDueAt) || !open.ClosesAt().Equal(open.BaselineDueAt) {
+		t.Fatalf("open: got = ends %v, started %v, baseline due %v, %v, want no end before the run and the baseline due as stored", open.EndsAt, open.StartedAt, open.BaselineDueAt, err)
 	}
 
-	// A researcher its owner runs is at work from the start, and the end stays where it was.
+	// A researcher its owner runs is at work from the start, and the run ends an hour after it.
 	spawnTestAgents(t, pes, pe.ID, domain.AgentSignup{})
 	before := time.Now().Add(-time.Second)
 	started, _, err := pes.StartPlatformExperimentTx(ctx, pe.ID, time.Hour, func([]StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) { return nil, oneStage, nil })
@@ -82,8 +80,8 @@ func TestTheDurationIsTheWholeWallClockFromStartsAt(t *testing.T) {
 		t.Fatalf("start: got = %v, %v, want started", started, err)
 	}
 	running, err := pes.GetPlatformExperiment(ctx, pe.ID)
-	if err != nil || running.StartedAt.Before(before) || !running.EndsAt.Equal(end) || !running.BaselineDueAt.IsZero() {
-		t.Fatalf("running: got = started %v, ends %v, baseline due %v, %v, want it started now and ending an hour after starts_at", running.StartedAt, running.EndsAt, running.BaselineDueAt, err)
+	if err != nil || running.StartsAt.Before(before) || !running.StartedAt.Equal(running.StartsAt) || !running.EndsAt.Equal(running.StartsAt.Add(time.Hour)) || !running.BaselineDueAt.IsZero() {
+		t.Fatalf("running: got = starts %v, started %v, ends %v, baseline due %v, %v, want it started now and ending an hour later", running.StartsAt, running.StartedAt, running.EndsAt, running.BaselineDueAt, err)
 	}
 	listed, err := pes.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpRunning)
 	if err != nil {
@@ -105,7 +103,7 @@ func TestTheDurationIsTheWholeWallClockFromStartsAt(t *testing.T) {
 // A run started while its launcher was unreachable: no researcher's machine came up and it
 // waited with nobody at work. started_at is when the first researcher's machine is reported
 // running, the wait is bounded and never passes the end, and one closed waiting says so.
-func TestARunWaitsForItsFirstResearchersMachineWithinItsWallClock(t *testing.T) {
+func TestARunWaitsForItsFirstResearchersMachineWithinItsRun(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
@@ -148,7 +146,7 @@ func TestARunWaitsForItsFirstResearchersMachineWithinItsWallClock(t *testing.T) 
 	waiting := read(pe)
 	end := waiting.StartsAt.Add(time.Hour)
 	if !waiting.AwaitsAgents() || !waiting.EndsAt.Equal(end) || time.Until(waiting.AgentsDueAt) > agentsDue+time.Second || time.Until(waiting.AgentsDueAt) < agentsDue-time.Minute {
-		t.Fatalf("started with no machine up: got = started %v, ends %v, agents due %v, want no researcher at work, the end an hour after starts_at %v and the machines due in %s", waiting.StartedAt, waiting.EndsAt, waiting.AgentsDueAt, waiting.StartsAt, agentsDue)
+		t.Fatalf("started with no machine up: got = started %v, ends %v, agents due %v, want no researcher at work, the end an hour after the start %v and the machines due in %s", waiting.StartedAt, waiting.EndsAt, waiting.AgentsDueAt, waiting.StartsAt, agentsDue)
 	}
 	agents, err := pes.ListLauncherAgents(ctx, waiting.Coordinator.Launcher, windDown)
 	if err != nil || len(agents) == 0 || !agents[0].EndsBy.Equal(end.Add(windDown)) {
@@ -185,6 +183,33 @@ func TestARunWaitsForItsFirstResearchersMachineWithinItsWallClock(t *testing.T) 
 	}
 	if closed := read(pe); !closed.StartedAt.IsZero() {
 		t.Fatalf("after the schema is applied again: started %v, want none", closed.StartedAt)
+	}
+}
+
+// The platform's record of a close is written only where nobody wrote a summary: a coordinator's
+// summary written meanwhile stands.
+func TestTheRecordOfACloseIsWrittenOnlyWhereThereIsNoSummary(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	pe := "pe-" + uuid.New().String()[:8]
+	createTestPE(t, pool, pe, 10)
+	if err := pes.RecordClose(ctx, pe, "too early"); err != nil {
+		t.Fatal(err)
+	}
+	if open, err := pes.GetPlatformExperiment(ctx, pe); err != nil || open.Summary != "" {
+		t.Fatalf("an open one: summary %q, %v, want none", open.Summary, err)
+	}
+	if err := pes.ClosePlatformExperiment(ctx, pe, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range []string{"the record", "a second record"} {
+		if err := pes.RecordClose(ctx, pe, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if closed, err := pes.GetPlatformExperiment(ctx, pe); err != nil || closed.Summary != "the record" {
+		t.Fatalf("closed: summary %q, %v, want the first record alone", closed.Summary, err)
 	}
 }
 

@@ -67,30 +67,22 @@ func TestTheMomentThePlatformClosesItIsNamedForWhatEndsThen(t *testing.T) {
 	}
 }
 
-// The owner stated 20 minutes and the experiment ran 60 without a baseline: its end was counted
-// from a start that never came, and the baseline had an hour whatever the duration.
-func TestTheDurationIsTheWholeWallClockAndTheBaselineHasAtMostHalf(t *testing.T) {
-	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	for _, c := range []struct {
-		hours   float64
-		limit   time.Duration
-		wantDue time.Duration
-	}{
-		{1.0 / 3, time.Hour, 10 * time.Minute},
-		{4, time.Hour, time.Hour},
-	} {
-		pe := PlatformExperiment{Status: PlatformExpOpen, StartsAt: start, DurationHours: c.hours}
-		pe.SetClock(c.limit)
-		if end := start.Add(time.Duration(c.hours * float64(time.Hour))); !pe.EndsAt.Equal(end) || !pe.BaselineDueAt.Equal(start.Add(c.wantDue)) {
-			t.Errorf("%g h with a %s limit: got = ends %v, baseline due %v, want ends %v and baseline due %v", c.hours, c.limit, pe.EndsAt, pe.BaselineDueAt, end, start.Add(c.wantDue))
-		}
-		read := PlatformExperiment{Status: PlatformExpOpen, StartsAt: start, DurationHours: c.hours}
-		read.SetClosesAt(pe.ClosesAt())
-		if !read.EndsAt.Equal(pe.EndsAt) || !read.BaselineDueAt.Equal(pe.BaselineDueAt) {
-			t.Errorf("%g h read back: got = ends %v, baseline due %v, want %v and %v", c.hours, read.EndsAt, read.BaselineDueAt, pe.EndsAt, pe.BaselineDueAt)
-		}
+// The owner stated 20 minutes of research and the baseline got 10 of them: the run's duration
+// was counted from the accept, so a baseline that took long left nothing to research in.
+func TestTheRunEndsItsDurationAfterItStartsWhateverTheBaselineTook(t *testing.T) {
+	accepted := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	open := PlatformExperiment{Status: PlatformExpOpen, StartsAt: accepted, DurationHours: 1.0 / 3}
+	open.SetClosesAt(accepted.Add(45 * time.Minute))
+	if !open.EndsAt.IsZero() || !open.BaselineDueAt.Equal(accepted.Add(45*time.Minute)) {
+		t.Errorf("open: got = ends %v, baseline due %v, want no end before the run starts and the baseline due at the moment stored", open.EndsAt, open.BaselineDueAt)
 	}
-	if got := ClockStart(time.Time{}, start); !got.Equal(start) {
+	started := accepted.Add(40 * time.Minute)
+	waiting := PlatformExperiment{Status: PlatformExpRunning, StartsAt: started, DurationHours: 1.0 / 3}
+	waiting.SetClosesAt(started.Add(5 * time.Minute))
+	if !waiting.EndsAt.Equal(started.Add(20*time.Minute)) || !waiting.AgentsDueAt.Equal(started.Add(5*time.Minute)) {
+		t.Errorf("waiting for a researcher: got = ends %v, agents due %v, want the end 20 minutes after the run started", waiting.EndsAt, waiting.AgentsDueAt)
+	}
+	if got := ClockStart(time.Time{}, accepted); !got.Equal(accepted) {
 		t.Errorf("no starts_at stated: got = %v, want the moment it opens", got)
 	}
 }
