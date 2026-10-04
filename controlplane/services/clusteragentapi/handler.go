@@ -118,6 +118,21 @@ type Handler struct {
 	// environments is nil on a deployment that builds no environments, which counts no cluster
 	// as building.
 	environments *EnvironmentRegistry
+	// buildReported wakes admission once a build is loaded on a node or ends, so the jobs that
+	// wait for it are placed without waiting for the next heartbeat.
+	buildReported func()
+}
+
+// WithBuildReported has every recorded build report that can place a job call wake.
+func (h *Handler) WithBuildReported(wake func()) *Handler {
+	h.buildReported = wake
+	return h
+}
+
+func (h *Handler) wakeAdmission() {
+	if h.buildReported != nil {
+		h.buildReported()
+	}
 }
 
 // NewHandler constructs a Handler. connectedWithin is how recent a cluster's heartbeat must be
@@ -514,6 +529,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		h.logger.Info("environment build reported", zap.String("cluster", in.Name), zap.String("key", in.Key),
 			zap.Int("attempt", report.Attempt), zap.String("outcome", string(report.Outcome)))
+		h.wakeAdmission()
 		return nil, nil
 	})
 

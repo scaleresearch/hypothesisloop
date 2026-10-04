@@ -139,6 +139,8 @@ type reconcileWorld struct {
 	// job's log tail and phase detail.
 	metricsWrites atomic.Int32
 	sqlDown       atomic.Bool
+	// wakes counts the times admission was woken.
+	wakes atomic.Int32
 }
 
 func newReconcileWorld(t *testing.T, cluster string) *reconcileWorld {
@@ -178,7 +180,8 @@ func newWorld(t *testing.T, cluster string, wrap func(*reconcileStore) Store, bu
 	router := chi.NewRouter()
 	caller := authtest.As{Kind: auth.KindRuntime, ClusterName: cluster, OrgIDs: []string{"org-a"}}
 	doc := apidocs.New(router, "test", "1.0.0", "", caller, auth.NewAccess(authtest.Placement{Clusters: map[string]string{cluster: "org-a"}}), zap.NewNop())
-	RegisterHuma(doc, NewHandler(wrap(w.store), time.Minute, metrics.URL, 90*time.Second, data, time.Minute, nil, 100, "test-signing-secret-of-enough-length", environments, zap.NewNop()))
+	RegisterHuma(doc, NewHandler(wrap(w.store), time.Minute, metrics.URL, 90*time.Second, data, time.Minute, nil, 100, "test-signing-secret-of-enough-length", environments, zap.NewNop()).
+		WithBuildReported(func() { w.wakes.Add(1) }))
 	w.router = router
 	return w
 }

@@ -202,6 +202,9 @@ func TestABuildReportIsRecordedFencedOnItsAttempt(t *testing.T) {
 	if rec := w.post(t, "/of-a/builds/key-1", domain.EnvironmentBuildReport{Attempt: 2, Outcome: domain.EnvironmentBuildPushed, Digest: pushedDigest}); rec.Code != http.StatusConflict {
 		t.Errorf("a report of an attempt not assigned: got = %d %s, want = 409", rec.Code, rec.Body)
 	}
+	if got := w.wakes.Load(); got != 3 {
+		t.Errorf("admission woken %d times, want once per recorded report and not for the refused one", got)
+	}
 }
 
 func TestABuildReportThatSaysTooLittleOrTooMuchIsRefused(t *testing.T) {

@@ -388,7 +388,8 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 	clusterAgentHandler := clusteragentapi.NewHandler(store,
 		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metricsDBURL, pcfg.Scheduler.ObservationCadence(), dataStore,
 		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second,
-		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.Auth.SigningSecret, newEnvironmentRegistry(runCtx, pcfg, logger), logger)
+		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.Auth.SigningSecret, newEnvironmentRegistry(runCtx, pcfg, logger), logger).
+		WithBuildReported(schedulerLoop.Trigger)
 	clusterAgentRouter := chi.NewRouter()
 	caDoc := apidocs.New(clusterAgentRouter, "hypothesisloop cluster-agent API", "1.0.0", "", gate.authenticator, gate.access, logger)
 	clusteragentapi.RegisterHuma(caDoc, clusterAgentHandler)
