@@ -145,6 +145,12 @@ whole jobs to read first: each sample's seed/ reports its metrics and its
 	if v := metadata["platform_experiment_id"]; v == nil || v == "" {
 		metadata["platform_experiment_id"] = experimentOf(c, "")
 	}
+	if id, _ := metadata["hypothesis_id"].(string); id != "" {
+		pe, _ := metadata["platform_experiment_id"].(string)
+		if metadata["hypothesis_id"], err = fullHypothesisID(c, pe, id); err != nil {
+			return fail(stderr, fmt.Errorf("job submit: %w", err))
+		}
+	}
 	if err := fillCodeRef(metadata, ""); err != nil {
 		return fail(stderr, fmt.Errorf("job submit: %w", err))
 	}
@@ -745,7 +751,11 @@ Counts over every matching job: by status, capacity tier, eviction reason and ev
 		q.Set("agent_id", *agent)
 	}
 	if *hypothesis != "" {
-		q.Set("hypothesis_id", *hypothesis)
+		id, err := fullHypothesisID(c, q.Get("platform_experiment_id"), *hypothesis)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		q.Set("hypothesis_id", id)
 	}
 	var out json.RawMessage
 	if err := c.Do("GET", "/experiments/stats?"+q.Encode(), nil, &out); err != nil {

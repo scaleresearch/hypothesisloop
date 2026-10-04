@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -145,14 +146,23 @@ func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writ
 
 	ids := map[string]string{}
 	for i, body := range bodies {
-		for j, l := range body.Links {
-			if id, ok := ids[l.To]; ok {
-				body.Links[j].To = id
+		named := func(ref string) (string, error) {
+			if id, ok := ids[ref]; ok {
+				return id, nil
+			}
+			if slices.Contains(keys, ref) {
+				return ref, nil
+			}
+			return fullHypothesisID(c, body.PlatformExperimentID, ref)
+		}
+		for j := range body.Links {
+			if body.Links[j].To, err = named(body.Links[j].To); err != nil {
+				return fail(stderr, err)
 			}
 		}
-		for j, d := range body.DistinctFrom {
-			if id, ok := ids[d]; ok {
-				body.DistinctFrom[j] = id
+		for j := range body.DistinctFrom {
+			if body.DistinctFrom[j], err = named(body.DistinctFrom[j]); err != nil {
+				return fail(stderr, err)
 			}
 		}
 		var out json.RawMessage
@@ -423,6 +433,11 @@ an agent's hypothesis names that agent with --agent, and is kept as who made the
 	if !validLinkType(*typ) {
 		return parseExit(misuse(fs, "--type must be one of %s, got %q", strings.Join(linkTypes, ", "), *typ))
 	}
+	for _, id := range []*string{&from, to} {
+		if *id, err = fullHypothesisID(c, experimentOf(c, ""), *id); err != nil {
+			return fail(stderr, err)
+		}
+	}
 	owner, err := recordOwner(c, *agent)
 	if err != nil {
 		return fail(stderr, err)
@@ -459,8 +474,14 @@ an API key writes their own, or an agent's with --agent.`, stderr)
 	if *text == "" {
 		return parseExit(misuse(fs, "--text is required"))
 	}
-	if id, _, err = objectiveOr(fs, c, id, *pe); err != nil {
+	id, objective, err := objectiveOr(fs, c, id, *pe)
+	if err != nil {
 		return parseExit(err)
+	}
+	if !objective {
+		if id, err = fullHypothesisID(c, experimentOf(c, *pe), id); err != nil {
+			return fail(stderr, err)
+		}
 	}
 	owner, err := recordOwner(c, *agent)
 	if err != nil {
@@ -510,7 +531,10 @@ comment.`, stderr)
 	if len(operands) != 1 || *status == "" {
 		return parseExit(misuse(fs, "want ID and a verdict"))
 	}
-	id := operands[0]
+	id, err := fullHypothesisID(c, experimentOf(c, ""), operands[0])
+	if err != nil {
+		return fail(stderr, err)
+	}
 	var out json.RawMessage
 	owner, err := recordOwner(c, *agent)
 	if err != nil {
@@ -723,6 +747,9 @@ wrote each, and a job as hl job list prints it. hl job status ID prints a job's 
 	}
 	if objective {
 		return objectiveGet(c, id, *full, *limit, stdout, stderr)
+	}
+	if id, err = fullHypothesisID(c, experimentOf(c, *pe), id); err != nil {
+		return fail(stderr, err)
 	}
 	path := "/hypotheses/" + url.PathEscape(id)
 	if *limit != 0 {
@@ -989,6 +1016,9 @@ with the reason when there is nothing to start from (no baseline is declared yet
 	if *agent = agentOf(c, *agent); *agent == "" {
 		return parseExit(misuse(fs, "--agent is required: HL_TOKEN is no agent's token, so say whose branch this is"))
 	}
+	if id, err = fullHypothesisID(c, experimentOf(c, ""), id); err != nil {
+		return fail(stderr, err)
+	}
 	var h struct {
 		ID                 string `json:"id"`
 		PlatformExperiment string `json:"platform_experiment_id"`
@@ -1081,4 +1111,45 @@ func switchBranch(dir string, args ...string) error {
 			"the branch starts from its base, and git cherry-pick or git stash pop brings your changes onto it")
 	}
 	return err
+}
+
+// shortID is the start of a hypothesis id, which is a UUID: what an agent copies from a listing.
+var shortID = regexp.MustCompile(`^[0-9a-f][0-9a-f-]{3,34}$`)
+
+// maxPrefixMatches is how many ids an ambiguous start lists.
+const maxPrefixMatches = 10
+
+// fullHypothesisID is the hypothesis of platform experiment pe whose id starts with id, as git
+// takes the start of a commit: id itself when it is no such start or pe is unknown, refused when
+// no hypothesis's id starts with it or several do, with the ones that do.
+func fullHypothesisID(c *apiclient.Client, pe, id string) (string, error) {
+	if pe == "" || !shortID.MatchString(id) {
+		return id, nil
+	}
+	var out struct {
+		Rows [][]string `json:"rows"`
+	}
+	query := map[string]any{
+		"platform_experiment_id": pe,
+		"cypher":                 fmt.Sprintf("MATCH (h:Hypothesis) WHERE h.id STARTS WITH $prefix RETURN h.id ORDER BY h.id LIMIT %d", maxPrefixMatches+1),
+		"params":                 map[string]any{"prefix": id},
+	}
+	if err := c.Do("POST", "/hypotheses/query", query, &out); err != nil {
+		return "", fmt.Errorf("find the hypothesis whose id starts with %s: %w", id, err)
+	}
+	var ids []string
+	for _, row := range out.Rows {
+		if len(row) == 1 {
+			ids = append(ids, row[0])
+		}
+	}
+	switch {
+	case len(ids) == 1:
+		return ids[0], nil
+	case len(ids) == 0:
+		return "", fmt.Errorf("no hypothesis of %s has an id that starts with %s: hl hypothesis list prints their ids", pe, id)
+	case len(ids) > maxPrefixMatches:
+		return "", fmt.Errorf("more than %d hypotheses of %s have an id that starts with %s, among them %s: give more of the id", maxPrefixMatches, pe, id, strings.Join(ids[:maxPrefixMatches], ", "))
+	}
+	return "", fmt.Errorf("%d hypotheses of %s have an id that starts with %s: %s. Give more of the id", len(ids), pe, id, strings.Join(ids, ", "))
 }

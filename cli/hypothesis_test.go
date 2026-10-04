@@ -716,3 +716,40 @@ func TestCommentsOnTheObjective(t *testing.T) {
 		t.Errorf("list stderr = %q, want the comments on the objective pointed at", stderr.String())
 	}
 }
+
+func TestTheStartOfAHypothesisIDNamesTheOneItStarts(t *testing.T) {
+	full := "019a3f2c-1b2d-7e00-8000-000000000001"
+	got := recordingServer(t, func(_ int, r recorded) any {
+		if r.Path == "/hypotheses/query" {
+			return map[string]any{"columns": []string{"h.id"}, "rows": [][]string{{full}}}
+		}
+		return map[string]any{"id": full}
+	})
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/ag-1"))
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"hypothesis", "status", "019a3f2c", "inconclusive"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	query := (*got)[0]
+	if query.Body["platform_experiment_id"] != "pe-env" || !reflect.DeepEqual(query.Body["params"], map[string]any{"prefix": "019a3f2c"}) {
+		t.Fatalf("query = %+v", query)
+	}
+	if (*got)[1].Path != "/hypotheses/"+full+"/status" {
+		t.Fatalf("status went to %s", (*got)[1].Path)
+	}
+}
+
+func TestTheStartOfSeveralHypothesisIDsListsThem(t *testing.T) {
+	ids := []string{"019a3f2c-1b2d-7e00-8000-000000000001", "019a3f2c-1b2d-7e00-8000-000000000002"}
+	got := recordingServer(t, func(int, recorded) any {
+		return map[string]any{"columns": []string{"h.id"}, "rows": [][]string{{ids[0]}, {ids[1]}}}
+	})
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/ag-1"))
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"hypothesis", "get", "019a3f2c"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	if len(*got) != 1 || !strings.Contains(stderr.String(), ids[0]+", "+ids[1]) || !strings.Contains(stderr.String(), "Give more of the id") {
+		t.Fatalf("requests %+v, stderr %s", *got, stderr.String())
+	}
+}
