@@ -62,7 +62,7 @@ import { pollEvery, useRoster } from '@/lib/roster'
 const RECENT_JOBS = 20
 
 // The reasons a draft closes for, before anything was accepted.
-const PLANNED_ONLY: NonNullable<PlatformExperiment['close_reason']>[] = ['planning_limit_reached', 'proposal_expired', 'planner_stopped']
+const PLANNED_ONLY: NonNullable<PlatformExperiment['close_reason']>[] = ['planning_limit_reached', 'proposal_expired', 'planner_stopped', 'repository_not_created']
 
 export default function PlatformExperimentDetailPage({ params }: { params: { id: string } }) {
   return <AgentNames platformExperimentID={params.id}><PlatformExperimentDetail params={params} /></AgentNames>

@@ -26,6 +26,7 @@ import { Eyebrow, Text } from '@/components/ui/text'
 // The states this page has words of its own for, by status_reason.reason. Any other is said in
 // the API's message, which is worded for whoever reads it.
 const SENTENCE: Record<string, (pe: Draft) => string> = {
+  repository_creating: () => 'Creating your experiment\'s repository.',
   planning: () => 'Planning your experiment.',
   revising: () => 'Updating the plan with your change.',
   proposed: pe => `Your plan is ready. Nothing runs or is spent until you accept it. It stays open until ${formatDate(pe.proposal_expires_at)}.`,

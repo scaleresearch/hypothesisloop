@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { Field, Label } from '@headlessui/react'
-import { repositoryNotProvided } from '@/lib/api'
 import { GITHUB_CARD } from '@/lib/github-connect'
 import { GOAL_EXAMPLES } from '@/lib/goal-examples'
 import { createDraft, MAX_GOAL_LENGTH } from '@/lib/planning'
@@ -72,8 +71,6 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
   const [touched, setTouched] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // What the API said of a new repository GitHub would not give it, shown where one is chosen.
-  const [notCreated, setNotCreated] = useState<string | null>(null)
   const github = useGitHub()
   const [repository, setRepository] = useState('')
   const placeholder = useTypedExamples(touched)
@@ -85,12 +82,10 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
     if (!ready) return
     setSending(true)
     setError(null)
-    setNotCreated(null)
     try {
       onCreated(await createDraft(projectID, goal.trim(), repositoryFields(repository)))
     } catch (e) {
-      if (repositoryNotProvided(e)) setNotCreated(e.message)
-      else setError(e instanceof Error ? e.message : String(e))
+      setError(e instanceof Error ? e.message : String(e))
       setSending(false)
     }
   }
@@ -118,7 +113,7 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
         {github === 'connected' && (
           <Field>
             <Label className="sr-only">Repository</Label>
-            <RepositorySelect compact value={repository} onChange={r => { setRepository(r); setNotCreated(null) }} notCreated={notCreated ?? undefined} />
+            <RepositorySelect compact value={repository} onChange={setRepository} />
           </Field>
         )}
         {github === 'unconnected' && (

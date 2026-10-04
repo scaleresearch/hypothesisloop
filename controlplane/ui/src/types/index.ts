@@ -263,7 +263,7 @@ export interface PlatformExperiment {
   // Why a closed one closed, and whose credential closed it when a caller did. Absent on one
   // closed before reasons were kept.
   closed_at?: string
-  close_reason?: 'end_time_reached' | 'closed_by_request' | 'planning_limit_reached' | 'proposal_expired' | 'baseline_limit_reached' | 'agents_not_started' | 'planner_stopped'
+  close_reason?: 'end_time_reached' | 'closed_by_request' | 'planning_limit_reached' | 'proposal_expired' | 'baseline_limit_reached' | 'agents_not_started' | 'planner_stopped' | 'repository_not_created'
   closed_by?: Actor
   // The coordinator's closing summary of the run. Absent until one is filed.
   summary?: string

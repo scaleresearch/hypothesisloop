@@ -61,7 +61,7 @@ export function phaseOf(pe: Stated): Phase {
   switch (pe.status) {
     case PlatformExperimentStatus.DRAFT: {
       const { reason } = reasonOf(pe)
-      return reason === 'planning' || reason === 'revising' ? 'planning' : 'proposal'
+      return reason === 'planning' || reason === 'revising' || reason === 'repository_creating' ? 'planning' : 'proposal'
     }
     case PlatformExperimentStatus.OPEN: return 'baseline'
     case PlatformExperimentStatus.RUNNING: return 'running'
