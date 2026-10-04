@@ -81,9 +81,10 @@ baseline's `README.md` says how its harness measures:
 How to spend:
   - Prefer many short screening runs to settle direction, then one longer confirmation of the
     best.
-  - Jobs run in parallel while their estimates fit your quota. Keep the machines busy: submit
-    independent trials (variants, repeats, a sweep) together rather than one at a time, as
-    many as `hl capacity` has room for, and size `cpu` to the cores the program keeps busy.
+  - Jobs run in parallel while their estimates fit your quota. Keep the machines busy: register
+    several ideas ahead, submit independent trials (variants, repeats, a sweep) together, and
+    keep a few queued beyond what runs: the platform starts them as room frees. Size `cpu` to
+    the cores the program keeps busy.
   - Compare a trial only with a control whose update ends in the same `on ...`, its
     machine, never with a default nobody measured: machines of one type differ 2x. With
     none there, rerun the control alongside. A finding across machines says so, and every
