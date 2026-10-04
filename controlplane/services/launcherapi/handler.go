@@ -125,21 +125,10 @@ type kept struct {
 	ending                        bool
 	// endsBy is the latest moment a machine rented for it now may still run.
 	endsBy time.Time
-	// base is the image its machines boot until its platform experiment has an agent
-	// environment, and environment that environment's image, empty without one.
-	base, environment string
-	// describe takes the image a machine boots and how many machines of this one ended before.
-	describe func(image string, ended int) (Instance, error)
-}
-
-// image is what the next machine of one boots: its agent environment once there is one. A
-// machine still running in the base keeps it until it ends, so the declaration of the baseline,
-// which an agent may make on that very machine, never cuts a turn short.
-func (one kept) image(current domain.AgentInstance, launchDigest string) string {
-	if one.environment == "" || current.Name != "" && current.Launch == launchOf(one.base, launchDigest) {
-		return one.base
-	}
-	return one.environment
+	// launch is launchOf the image this one boots and the launcher's digest.
+	launch string
+	// describe takes how many machines of this one ended before, under its launch.
+	describe func(ended int) (Instance, error)
 }
 
 // launchOf identifies what a machine is started with on the platform's and the launcher's side.
@@ -150,8 +139,8 @@ func launchOf(image, launchDigest string) string {
 	return hex.EncodeToString(digest[:16])
 }
 
-// imageOf is the image a platform experiment's machines boot before it has an agent environment:
-// the one it names, or the platform's own. Its agent environment is built on it.
+// imageOf is the image a platform experiment's machines boot: the one it names, or the
+// platform's own.
 func (h *Handler) imageOf(agentImage string) string {
 	if agentImage != "" {
 		return agentImage
@@ -192,21 +181,21 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 			h.logger.Error("launcher list holds an agent that is not hosted", zap.String("launcher", launcher), zap.String("platformExpID", agent.PlatformExperimentID), zap.String("agentID", agent.AgentID))
 			continue
 		}
-		signup := agent.AgentSignup
+		signup, image := agent.AgentSignup, h.imageOf(agent.AgentImage)
 		all = append(all, kept{
 			platformExperimentID: agent.PlatformExperimentID, agentID: agent.AgentID, instance: *agent.Instance, ending: agent.Ended != "", endsBy: agent.EndsBy,
-			base: h.imageOf(agent.AgentImage), environment: agent.EnvironmentImage,
-			describe: func(image string, ended int) (Instance, error) {
+			launch: launchOf(image, observed.LaunchDigest),
+			describe: func(ended int) (Instance, error) {
 				return instanceFor(signup, ended, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
 			},
 		})
 	}
 	for _, coordinator := range coordinators {
-		pe, model := coordinator.PlatformExperimentID, coordinator.Model
+		pe, model, image := coordinator.PlatformExperimentID, coordinator.Model, h.imageOf(coordinator.AgentImage)
 		all = append(all, kept{
 			platformExperimentID: pe, instance: coordinator.Instance, ending: coordinator.Ending, endsBy: coordinator.EndsBy,
-			base: h.imageOf(coordinator.AgentImage), environment: coordinator.EnvironmentImage,
-			describe: func(image string, ended int) (Instance, error) {
+			launch: launchOf(image, observed.LaunchDigest),
+			describe: func(ended int) (Instance, error) {
 				return coordinatorInstanceFor(pe, model, ended, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
 			},
 		})
@@ -217,12 +206,10 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 	for _, one := range all {
 		log := h.logger.With(zap.String("launcher", launcher), zap.String("platformExpID", one.platformExperimentID), zap.String("agentID", one.agentID))
 		current := one.instance
-		image := one.image(current, observed.LaunchDigest)
-		launch := launchOf(image, observed.LaunchDigest)
 		// A machine is named after how many ended before it, whether or not their end spent a
 		// restart, so every one that ends is followed by another name.
 		describe := func(restarts, renewals int) (Instance, error) {
-			instance, err := one.describe(image, restarts+renewals)
+			instance, err := one.describe(restarts + renewals)
 			instance.EndsAt = one.endsBy.UTC()
 			return instance, err
 		}
@@ -237,7 +224,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		// Restarts were spent under one launch. Under another none is, and one that was stopped
 		// is asked for again: what stopped it may have been the image or the launcher's config.
 		restarts := current.Restarts
-		if current.Launch != launch {
+		if current.Launch != one.launch {
 			restarts = 0
 		} else if current.Stopped {
 			continue
@@ -261,8 +248,6 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 					continue
 				}
 				current.Name = ""
-				image = one.image(current, observed.LaunchDigest)
-				launch = launchOf(image, observed.LaunchDigest)
 				if instance, err = describe(after.Restarts, after.Renewals); err != nil {
 					log.Error("hosted instance cannot be described", zap.Error(err))
 					continue
@@ -278,7 +263,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 				continue
 			}
 			asked++
-			if err := h.store.AskInstance(ctx, one.platformExperimentID, one.agentID, instance.Name, launch); err != nil {
+			if err := h.store.AskInstance(ctx, one.platformExperimentID, one.agentID, instance.Name, one.launch); err != nil {
 				log.Error("record instance name failed", zap.Error(err))
 				continue
 			}

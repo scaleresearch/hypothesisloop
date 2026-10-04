@@ -10,8 +10,8 @@ import (
 )
 
 // EnvironmentFile is the file of an experiment repository that declares the environment its jobs
-// and agent machines run in: a Dockerfile built on the image the platform passes as BASE. Code is
-// not in it: a job clones its commit at start, as without one.
+// run in: a Dockerfile built on the job's image, which the platform passes as BASE. Code is not in
+// it: a job clones its commit at start, as without one.
 const EnvironmentFile = ".hypothesisloop/Dockerfile"
 
 // MaxEnvironmentFileBytes bounds an environment file.
@@ -94,7 +94,7 @@ func ValidateEnvironmentFile(dockerfile string) error {
 		(instructions[1][1] == "${BASE}" || instructions[1][1] == "$BASE") &&
 		(len(instructions[1]) == 2 || len(instructions[1]) == 4 && strings.EqualFold(instructions[1][2], "AS"))
 	if !arg || !from {
-		return &EnvironmentFileError{Why: EnvironmentFile + " begins with the two lines ARG BASE and FROM ${BASE}: the platform passes as BASE the image of the job's hardware or of the agent machines, and builds what follows on it"}
+		return &EnvironmentFileError{Why: EnvironmentFile + " begins with the two lines ARG BASE and FROM ${BASE}: the platform passes as BASE the image the job names, and builds what follows on it"}
 	}
 	return nil
 }

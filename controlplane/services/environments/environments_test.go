@@ -125,7 +125,7 @@ func TestTheSameFileOnTheSameBaseIsOneEnvironmentAndAnotherBaseAnother(t *testin
 		t.Errorf("a commit without the file: %+v, %v, want none", none, err)
 	}
 	var invalid *domain.EnvironmentFileError
-	if _, err := svc.Ensure(ctx, "FROM ubuntu:24.04\n", "registry.test/hl/job:1"); !errors.As(err, &invalid) {
+	if _, err := svc.ensure(ctx, "FROM ubuntu:24.04\n", "registry.test/hl/job:1"); !errors.As(err, &invalid) {
 		t.Errorf("a file on its own base: %v, want an EnvironmentFileError", err)
 	}
 }
@@ -175,10 +175,10 @@ func TestTheBuilderBlamesTheFileOnlyForItsOwnFailureAndGivesUpOnThePlatformsAfte
 	store := &memoryStore{envs: map[string]*domain.Environment{}}
 	svc := NewService(store, &fileHost{}, "registry.test/env")
 	ctx := context.Background()
-	good, _ := svc.Ensure(ctx, rust, "base:1")
-	bad, _ := svc.Ensure(ctx, "ARG BASE\nFROM ${BASE}\nRUN apt-get install -y nonexistent\n", "base:1")
+	good, _ := svc.ensure(ctx, rust, "base:1")
+	bad, _ := svc.ensure(ctx, "ARG BASE\nFROM ${BASE}\nRUN apt-get install -y nonexistent\n", "base:1")
 	builder := &builds{down: true, asked: map[string]int{}}
-	loop := NewLoop(store, builder, []string{"base:1"}, zap.NewNop())
+	loop := NewLoop(store, builder, nil, func(context.Context) ([]string, error) { return nil, nil }, zap.NewNop())
 
 	passes(ctx, loop)
 	if store.state(good.Key) != domain.EnvironmentBuilding || store.state(bad.Key) != domain.EnvironmentFailed {
@@ -188,48 +188,54 @@ func TestTheBuilderBlamesTheFileOnlyForItsOwnFailureAndGivesUpOnThePlatformsAfte
 		t.Errorf("the failed build keeps %q, want the end of its output", tail)
 	}
 	passes(ctx, loop)
-	if builder.asked[asRoot(rust)] != 1 {
-		t.Fatalf("asked %d times, want the build the platform failed held back", builder.asked[asRoot(rust)])
+	if builder.asked[rust] != 1 {
+		t.Fatalf("asked %d times, want the build the platform failed held back", builder.asked[rust])
 	}
 	for attempt := 2; attempt <= maxAttempts; attempt++ {
 		store.due(good.Key)
 		passes(ctx, loop)
 	}
-	if store.state(good.Key) != domain.EnvironmentAbandoned || builder.asked[asRoot(rust)] != maxAttempts {
-		t.Fatalf("after %d builds the platform failed: %s, want it abandoned", builder.asked[asRoot(rust)], store.state(good.Key))
+	if store.state(good.Key) != domain.EnvironmentAbandoned || builder.asked[rust] != maxAttempts {
+		t.Fatalf("after %d builds the platform failed: %s, want it abandoned", builder.asked[rust], store.state(good.Key))
 	}
 	store.due(good.Key)
 	passes(ctx, loop)
-	if builder.asked[asRoot(rust)] != maxAttempts {
+	if builder.asked[rust] != maxAttempts {
 		t.Fatalf("an abandoned environment was built again by the loop alone")
 	}
 
 	builder.down = false
-	if again, err := svc.Ensure(ctx, rust, "base:1"); err != nil || again.State != domain.EnvironmentBuilding || again.Attempts != 0 {
+	if again, err := svc.ensure(ctx, rust, "base:1"); err != nil || again.State != domain.EnvironmentBuilding || again.Attempts != 0 {
 		t.Fatalf("a submit naming the abandoned environment: %+v, %v, want it building again", again, err)
 	}
-	if failed, _ := svc.Ensure(ctx, "ARG BASE\nFROM ${BASE}\nRUN apt-get install -y nonexistent\n", "base:1"); failed.State != domain.EnvironmentFailed {
+	if failed, _ := svc.ensure(ctx, "ARG BASE\nFROM ${BASE}\nRUN apt-get install -y nonexistent\n", "base:1"); failed.State != domain.EnvironmentFailed {
 		t.Errorf("a submit naming the failed file: %s, want it failed still", failed.State)
 	}
 	passes(ctx, loop)
-	if store.state(good.Key) != domain.EnvironmentReady || builder.asked[asRoot(rust)] != maxAttempts+1 {
-		t.Errorf("rebuilt: %s after %d builds, want ready", store.state(good.Key), builder.asked[asRoot(rust)])
+	if store.state(good.Key) != domain.EnvironmentReady || builder.asked[rust] != maxAttempts+1 {
+		t.Errorf("rebuilt: %s after %d builds, want ready", store.state(good.Key), builder.asked[rust])
 	}
 }
 
-// The loop pulls every base into the builder's cache as it starts, past one that fails.
-func TestTheLoopWarmsTheBuildersCacheWithEveryBase(t *testing.T) {
+// The loop pulls into the builder's cache the job images that suit the hardware of the clusters
+// running now, past one that fails.
+func TestTheLoopWarmsTheBuildersCacheWithTheJobImagesOfTheLiveHardware(t *testing.T) {
+	images := []domain.JobImage{
+		{Name: "python", Image: "registry.test/job:1"},
+		{Name: "pytorch-cuda", Image: "registry.test/job-cuda:1", Suits: []string{"nvidia.com/"}},
+		{Name: "tenstorrent", Image: "registry.test/job-tt:1", Suits: []string{"tenstorrent.com/"}},
+	}
 	builder := &builds{asked: map[string]int{}, refused: map[string]bool{"registry.test/job:1": true}}
-	loop := NewLoop(&memoryStore{envs: map[string]*domain.Environment{}}, builder, []string{"registry.test/agent:1", "registry.test/job:1", "registry.test/job-tt:1"}, zap.NewNop())
-	loop.warm(context.Background())
-	if want := []string{"registry.test/agent:1", "registry.test/job:1", "registry.test/job-tt:1"}; !slices.Equal(builder.pulled, want) {
+	live := func(context.Context) ([]string, error) { return []string{"tenstorrent.com/chipArch=blackhole"}, nil }
+	NewLoop(&memoryStore{envs: map[string]*domain.Environment{}}, builder, images, live, zap.NewNop()).warm(context.Background())
+	if want := []string{"registry.test/job:1", "registry.test/job-tt:1"}; !slices.Equal(builder.pulled, want) {
 		t.Errorf("pulled %v, want %v", builder.pulled, want)
 	}
 }
 
 func TestOnlyTheEndOfALongBuildOutputIsKept(t *testing.T) {
 	log := strings.Repeat("compiling a crate\n", 2000) + "error[E0425]: cannot find value\n"
-	tail := LastBytes(log, domain.MaxEnvironmentLogBytes)
+	tail := lastBytes(log, domain.MaxEnvironmentLogBytes)
 	if len(tail) > domain.MaxEnvironmentLogBytes || !strings.HasSuffix(tail, "error[E0425]: cannot find value\n") || !strings.HasPrefix(tail, "compiling") {
 		t.Errorf("tail of %d bytes, want at most %d starting on a line and ending with the error", len(tail), domain.MaxEnvironmentLogBytes)
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -48,13 +47,13 @@ func (s *Service) Read(ctx context.Context, projectID, repository, ref string) (
 	return &file, nil
 }
 
-// Ensure returns the environment of dockerfile built on base, to be built when it is new or
+// ensure returns the environment of dockerfile built on base, to be built when it is new or
 // abandoned. A file the platform does not build is a *domain.EnvironmentFileError.
-func (s *Service) Ensure(ctx context.Context, dockerfile, base string) (*domain.Environment, error) {
+func (s *Service) ensure(ctx context.Context, dockerfile, base string) (*domain.Environment, error) {
 	if err := domain.ValidateEnvironmentFile(dockerfile); err != nil {
 		return nil, err
 	}
-	key := domain.EnvironmentKey(asRoot(dockerfile), base)
+	key := domain.EnvironmentKey(dockerfile, base)
 	env, err := s.store.EnsureEnvironment(ctx, &domain.Environment{Key: key, Base: base, Dockerfile: dockerfile, Image: s.repository + ":" + key})
 	if err != nil {
 		return nil, fmt.Errorf("environments: %w", err)
@@ -69,31 +68,7 @@ func (s *Service) Declared(ctx context.Context, projectID, repository, ref, base
 	if err != nil || file == nil {
 		return nil, err
 	}
-	return s.Ensure(ctx, *file, base)
-}
-
-// baseUserArg is the build argument that carries the user of the base image.
-const baseUserArg = "HL_BASE_USER"
-
-// asRoot is what is built of a valid environment file: its instructions run as root and the user
-// of the base image, passed as baseUserArg, is restored after them. The job images run as root and
-// the agent image as agent, and one file installs system packages on both.
-func asRoot(dockerfile string) string {
-	lines := strings.SplitAfter(dockerfile, "\n")
-	instructions := 0
-	for i, line := range lines {
-		fields := strings.Fields(line)
-		if len(fields) == 0 || strings.HasPrefix(fields[0], "#") {
-			continue
-		}
-		if instructions++; instructions < 2 {
-			continue
-		}
-		from := strings.TrimSuffix(strings.Join(lines[:i+1], ""), "\n")
-		rest := strings.TrimSuffix(strings.Join(lines[i+1:], ""), "\n")
-		return from + "\nUSER root\n" + rest + "\nARG " + baseUserArg + "\nUSER ${" + baseUserArg + "}\n"
-	}
-	panic("environments.asRoot: a file domain.ValidateEnvironmentFile refuses")
+	return s.ensure(ctx, *file, base)
 }
 
 // Get returns the environment of key, nil when there is none.

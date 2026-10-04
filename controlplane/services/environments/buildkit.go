@@ -2,7 +2,6 @@ package environments
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -11,15 +10,14 @@ import (
 	"github.com/containerd/platforms"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/client/llb"
-	"github.com/moby/buildkit/client/llb/sourceresolver"
-	gateway "github.com/moby/buildkit/frontend/gateway/client"
 	gatewaypb "github.com/moby/buildkit/frontend/gateway/pb"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/session/auth"
 	"github.com/moby/buildkit/solver/errdefs"
-	"github.com/moby/buildkit/solver/pb"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // RegistryCredential is what the builder pushes to registryHost with, asked for at each build: a
@@ -49,8 +47,7 @@ func NewBuildKit(addr, caFile, certFile, keyFile, registryHost string, credentia
 	return &BuildKit{Addr: addr, CAFile: caFile, CertFile: certFile, KeyFile: keyFile, RegistryHost: registryHost, Credential: credential}, nil
 }
 
-// buildPlatform is the platform every environment is built for: the job and agent images are
-// amd64.
+// buildPlatform is the platform every environment is built for: the job images are amd64.
 const buildPlatform = "linux/amd64"
 
 // connect reaches the daemon, with the session that hands it the registry's credential.
@@ -91,41 +88,20 @@ func (b *BuildKit) Build(ctx context.Context, dockerfile, base, image string) er
 		return err
 	}
 	defer c.Close() //nolint:errcheck
-
+	file := dockerfileState(dockerfile)
 	opt := client.SolveOpt{
-		Exports: []client.ExportEntry{{Type: client.ExporterImage, Attrs: map[string]string{"name": image, "push": "true"}}},
-		Session: attachables,
-	}
-	build := func(ctx context.Context, gw gateway.Client) (*gateway.Result, error) {
-		platform := platforms.MustParse(buildPlatform)
-		_, _, config, err := gw.ResolveImageConfig(ctx, base, sourceresolver.Opt{ImageOpt: &sourceresolver.ResolveImageOpt{Platform: &platform}})
-		if err != nil {
-			return nil, err
-		}
-		var baseImage struct{ Config struct{ User string } }
-		if err := json.Unmarshal(config, &baseImage); err != nil {
-			return nil, fmt.Errorf("the configuration of %s: %w", base, err)
-		}
-		inputs, err := frontendInputs(ctx, dockerfile)
-		if err != nil {
-			return nil, err
-		}
-		return gw.Solve(ctx, gateway.SolveRequest{
-			Frontend: "dockerfile.v0",
-			FrontendOpt: map[string]string{
-				"build-arg:BASE":           base,
-				"build-arg:" + baseUserArg: baseImage.Config.User,
-				"platform":                 buildPlatform,
-			},
-			FrontendInputs: inputs,
-		})
+		Frontend:       "dockerfile.v0",
+		FrontendAttrs:  map[string]string{"build-arg:BASE": base, "platform": buildPlatform},
+		FrontendInputs: map[string]llb.State{"dockerfile": file, "context": file},
+		Exports:        []client.ExportEntry{{Type: client.ExporterImage, Attrs: map[string]string{"name": image, "push": "true"}}},
+		Session:        attachables,
 	}
 
 	var log strings.Builder
 	statuses := make(chan *client.SolveStatus)
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.Go(func() error {
-		_, err := c.Build(groupCtx, opt, "", build, statuses)
+		_, err := c.Solve(groupCtx, nil, opt, statuses)
 		return err
 	})
 	group.Go(func() error {
@@ -138,8 +114,8 @@ func (b *BuildKit) Build(ctx context.Context, dockerfile, base, image string) er
 					fmt.Fprintf(&log, "\n%s: %s\n", v.Name, v.Error)
 				}
 			}
-			if log.Len() > 4*maxLogBytes {
-				tail := LastBytes(log.String(), maxLogBytes)
+			if log.Len() > 4*domain.MaxEnvironmentLogBytes {
+				tail := lastBytes(log.String(), domain.MaxEnvironmentLogBytes)
 				log.Reset()
 				log.WriteString(tail)
 			}
@@ -152,7 +128,7 @@ func (b *BuildKit) Build(ctx context.Context, dockerfile, base, image string) er
 	}
 	// A RUN the deadline or a shutdown stopped exits with a code it did not choose.
 	if ctx.Err() == nil && fileFault(err) {
-		return &BuildFailed{Log: log.String() + "\n" + err.Error()}
+		return &BuildFailed{Log: lastBytes(log.String()+"\n"+err.Error(), domain.MaxEnvironmentLogBytes)}
 	}
 	return fmt.Errorf("environments: build: %w", err)
 }
@@ -175,18 +151,12 @@ func (a *registryAuth) Credentials(_ context.Context, req *auth.CredentialsReque
 	return &auth.CredentialsResponse{Username: a.username, Secret: a.password}, nil
 }
 
-// frontendInputs is the Dockerfile and the build context the frontend reads it from: the same
-// state, holding the file alone. The daemon refuses an input with no operation, which an empty
+// dockerfileState is the Dockerfile and the build context the frontend reads it from: one state
+// holding the file alone. The daemon refuses an input with no operation, which an empty
 // llb.Scratch() is.
-func frontendInputs(ctx context.Context, dockerfile string) (map[string]*pb.Definition, error) {
-	file, err := llb.Scratch().File(llb.Mkfile("Dockerfile", 0o644, []byte(dockerfile))).Marshal(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]*pb.Definition{"dockerfile": file.ToPB(), "context": file.ToPB()}, nil
+func dockerfileState(dockerfile string) llb.State {
+	return llb.Scratch().File(llb.Mkfile("Dockerfile", 0o644, []byte(dockerfile)))
 }
-
-const maxLogBytes = 64 << 10
 
 // fileFault tells an instruction of the file failing from every other error, which is the
 // platform's: a RUN that exited with a code of its own, or the frontend refusing a line of the

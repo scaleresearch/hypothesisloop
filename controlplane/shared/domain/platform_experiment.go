@@ -257,10 +257,6 @@ type PlatformExperiment struct {
 	// starts only with a baseline.
 	BaselineJobID             string  `json:"baseline_job_id,omitempty" doc:"The completed job that measured the baseline. Absent until one is declared with PATCH /platform-experiments/{id}."`
 	JobEstimatedDurationHours float64 `json:"job_estimated_duration_hours,omitzero" doc:"The estimated_duration_hours of a job that states none: one and a half times the hours the baseline job was observed running. Absent without a baseline, and for one too short to be observed alive."`
-	// AgentEnvironmentKey is the environment its agent machines start in from the declaration of
-	// the baseline on: the baseline branch's EnvironmentFile built on the agent image, ready when
-	// it was written. Empty when the branch declares none.
-	AgentEnvironmentKey string `json:"agent_environment_key,omitempty" doc:"The environment its agent machines start in once the baseline is declared: the baseline branch's .hypothesisloop/Dockerfile built on the agent image. Absent when the branch has none."`
 
 	// Goal is the sentence a draft was created from, fixed from then on. Empty for a platform
 	// experiment that was created whole.
@@ -315,15 +311,6 @@ func (p *PlatformExperiment) ClosesAt() time.Time {
 // AwaitsAgents says the platform experiment runs and no researcher is at work yet.
 func (p *PlatformExperiment) AwaitsAgents() bool {
 	return p.Status == PlatformExpRunning && p.StartedAt.IsZero()
-}
-
-// AgentBase is the image its agent machines boot and its agents' environment is built on:
-// platformImage, the platform's own, unless it names one.
-func (p *PlatformExperiment) AgentBase(platformImage string) string {
-	if p.AgentImage != "" {
-		return p.AgentImage
-	}
-	return platformImage
 }
 
 // AwaitsRepository says the platform has yet to create the repository it keeps its code in. No

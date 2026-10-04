@@ -209,10 +209,10 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
 	environmentsSvc := environments.NewService(store.EnvironmentsStore, gitHost, pcfg.EnvironmentImages())
-	environmentBuilds := newEnvironmentBuilds(runCtx, store, pcfg, logger)
+	environmentBuilds := newEnvironmentBuilds(runCtx, store, pcfg, metricsDBURL, connectedWithin, logger)
 
 	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap).WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent).WithRepositories(gitHost).
-		WithEnvironments(environmentsSvc, pcfg.Agents.Image)
+		WithEnvironments(environmentsSvc)
 	peHandler := quota.NewPlatformExperimentsHandler(peSvc, gitHost, quota.Planning{
 		Limit:       time.Duration(pcfg.Planning.LimitMinutes) * time.Minute,
 		ProposedFor: time.Duration(pcfg.Planning.ProposedForDays) * 24 * time.Hour,
@@ -346,7 +346,7 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 	schedulerSvc := scheduler.NewService(store, expQuotaSvc, noveltyDetector, graph, gitHost, queueBackend, settler, metricsDBURL, logger).
 		WithQuotaConfig(quotaCfg).
 		WithJobImages(pcfg.OfferedJobImages()).
-		WithEnvironments(environmentsSvc, pcfg.Agents.Image).
+		WithEnvironments(environmentsSvc).
 		WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent)
 
 	schedulerLoop := scheduler.NewLoop(store, expQuotaSvc, jwc, grace, logger).
@@ -399,8 +399,9 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 
 // newEnvironmentBuilds is the builder of environments, on the BuildKit daemon the control
 // service's environment names, pushing with the Google credentials of the process. It warms the
-// daemon's cache with the agent image and every job image, the bases of every environment.
-func newEnvironmentBuilds(ctx context.Context, store *db.Store, pcfg *hypothesisloopcfg.Config, logger *zap.Logger) *environments.Loop {
+// daemon's cache with the job images that suit the hardware of the clusters reporting within
+// connectedWithin.
+func newEnvironmentBuilds(ctx context.Context, store *db.Store, pcfg *hypothesisloopcfg.Config, metricsDBURL string, connectedWithin time.Duration, logger *zap.Logger) *environments.Loop {
 	credential, err := environments.GoogleCredential(ctx)
 	if err != nil {
 		logger.Fatal("control-service: the registry credential of environment builds", zap.Error(err))
@@ -414,11 +415,20 @@ func newEnvironmentBuilds(ctx context.Context, store *db.Store, pcfg *hypothesis
 	if err != nil {
 		logger.Fatal("control-service: configure the environment builder", zap.Error(err))
 	}
-	bases := []string{pcfg.Agents.Image}
-	for _, image := range pcfg.OfferedJobImages() {
-		bases = append(bases, image.Image)
+	liveTypes := func(ctx context.Context) ([]string, error) {
+		_, total, err := metricsdb.LiveClusterAcceleratorAvailableAndTotal(ctx, metricsDBURL, connectedWithin)
+		if err != nil {
+			return nil, err
+		}
+		var types []string
+		for _, byType := range total {
+			for acceleratorType := range byType {
+				types = append(types, acceleratorType)
+			}
+		}
+		return types, nil
 	}
-	return environments.NewLoop(store.EnvironmentsStore, builder, bases, logger)
+	return environments.NewLoop(store.EnvironmentsStore, builder, pcfg.OfferedJobImages(), liveTypes, logger)
 }
 
 // openGraph connects to the hypothesis graph, makes sure its schema exists, moves any hypotheses

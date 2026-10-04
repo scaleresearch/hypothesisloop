@@ -34,19 +34,13 @@ func TestTheDaemonGetsTheCredentialOfTheRegistryAloneAndFetchesItsTokenItself(t 
 	}
 }
 
-func TestEveryFrontendInputIsADefinitionTheDaemonAccepts(t *testing.T) {
-	inputs, err := frontendInputs(context.Background(), "ARG BASE\nFROM ${BASE}\n")
+func TestTheDockerfileInputIsADefinitionTheDaemonAccepts(t *testing.T) {
+	def, err := dockerfileState("ARG BASE\nFROM ${BASE}\n").Marshal(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"dockerfile", "context"} {
-		def, ok := inputs[name]
-		if !ok {
-			t.Fatalf("no %s input", name)
-		}
-		if _, err := llb.NewDefinitionOp(def); err != nil {
-			t.Errorf("the %s input: %v", name, err)
-		}
+	if _, err := llb.NewDefinitionOp(def.ToPB()); err != nil {
+		t.Errorf("the input: %v", err)
 	}
 }
 

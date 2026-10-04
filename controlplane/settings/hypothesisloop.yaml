@@ -166,8 +166,8 @@ job_images:
 
 # Environments: a repository's .hypothesisloop/Dockerfile, beginning ARG BASE and FROM ${BASE}, is
 # built once per content and base on a BuildKit daemon and pushed here. A job runs in the one its
-# commit declares, built on its job image, and agent machines in the one the baseline branch
-# declares, built on agents.image. The daemon is the control service's environment, not this file:
+# commit declares, built on its job image. Agents run agents.image and build nothing. The daemon
+# is the control service's environment, not this file:
 # HYPOTHESISLOOP_ENVIRONMENT_BUILDER_ADDR (tcp://host:port) and the paths of its mutual TLS files,
 # HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CA, _CERT and _KEY, read at each build.
 #

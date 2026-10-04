@@ -3,6 +3,7 @@ package environments
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -12,16 +13,17 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// Builder builds a Dockerfile with BASE set to base and baseUserArg to the user of base's image, on
-// a context holding only the file, and pushes the result as image. A *BuildFailed is an
-// instruction of the file failing. Any other error is the platform's, and the build is tried
-// again. Pull fetches image into the builder's cache, so a build on it does not wait for it.
+// Builder builds a Dockerfile with BASE set to base, on a context holding only the file, and
+// pushes the result as image. A *BuildFailed is an instruction of the file failing; any other
+// error is the platform's, and the build is tried again. Pull fetches image into the builder's
+// cache, so a build on it does not wait for it.
 type Builder interface {
 	Build(ctx context.Context, dockerfile, base, image string) error
 	Pull(ctx context.Context, image string) error
 }
 
-// BuildFailed is a build the file failed, with the end of its output.
+// BuildFailed is a build the file failed, with the end of its output, at most
+// domain.MaxEnvironmentLogBytes.
 type BuildFailed struct{ Log string }
 
 func (e *BuildFailed) Error() string { return "the build failed" }
@@ -39,24 +41,28 @@ const (
 	maxParallel = 4
 )
 
+// LiveTypes is the accelerator types of the clusters that report capacity now.
+type LiveTypes func(ctx context.Context) ([]string, error)
+
 // Loop builds every environment that is building, on the leader alone.
 type Loop struct {
 	store   Store
 	builder Builder
-	// bases are the images environments are built on, pulled into the builder's cache as the loop
-	// starts.
-	bases  []string
-	logger *zap.Logger
+	// jobImages and liveTypes say which bases the loop pulls into the builder's cache as it
+	// starts: the job images that suit the hardware of a cluster that runs jobs now.
+	jobImages []domain.JobImage
+	liveTypes LiveTypes
+	logger    *zap.Logger
 
 	mu       sync.Mutex
 	inFlight map[string]bool
 }
 
-func NewLoop(store Store, builder Builder, bases []string, logger *zap.Logger) *Loop {
-	if store == nil || builder == nil || len(bases) == 0 || logger == nil {
-		panic("environments.NewLoop: the store, the builder, the bases and a logger are required")
+func NewLoop(store Store, builder Builder, jobImages []domain.JobImage, liveTypes LiveTypes, logger *zap.Logger) *Loop {
+	if store == nil || builder == nil || liveTypes == nil || logger == nil {
+		panic("environments.NewLoop: the store, the builder, the live types and a logger are required")
 	}
-	return &Loop{store: store, builder: builder, bases: bases, logger: logger, inFlight: map[string]bool{}}
+	return &Loop{store: store, builder: builder, jobImages: jobImages, liveTypes: liveTypes, logger: logger, inFlight: map[string]bool{}}
 }
 
 // Start warms the builder's cache, runs passes until ctx ends and waits for what it started.
@@ -81,11 +87,18 @@ func (l *Loop) Start(ctx context.Context) {
 	}
 }
 
-// warm pulls every base into the builder's cache, one after another.
+// warm pulls the job images that suit a live cluster's hardware into the builder's cache, one
+// after another, each within buildLimit.
 func (l *Loop) warm(ctx context.Context) {
-	l.logger.Info("environments: warming the builder's cache", zap.Strings("bases", l.bases))
+	types, err := l.liveTypes(ctx)
+	if err != nil {
+		l.logger.Warn("environments: the hardware to warm the builder's cache for", zap.Error(err))
+		return
+	}
+	bases := suitedImages(l.jobImages, types)
+	l.logger.Info("environments: warming the builder's cache", zap.Strings("bases", bases))
 	began := time.Now()
-	for _, base := range l.bases {
+	for _, base := range bases {
 		start := time.Now()
 		pullCtx, cancel := context.WithTimeout(ctx, buildLimit)
 		err := l.builder.Pull(pullCtx, base)
@@ -100,6 +113,17 @@ func (l *Loop) warm(ctx context.Context) {
 		l.logger.Info("environments: pulled into the builder's cache", zap.String("base", base), zap.Duration("took", time.Since(start)))
 	}
 	l.logger.Info("environments: warmed the builder's cache", zap.Duration("took", time.Since(began)))
+}
+
+// suitedImages is the addresses of the images that suit one of types.
+func suitedImages(images []domain.JobImage, types []string) []string {
+	var out []string
+	for _, image := range images {
+		if slices.ContainsFunc(types, image.SuitsType) {
+			out = append(out, image.Image)
+		}
+	}
+	return out
 }
 
 func (l *Loop) pass(ctx context.Context, builds *sync.WaitGroup) {
@@ -133,14 +157,14 @@ func (l *Loop) build(ctx context.Context, env *domain.Environment) {
 	log := l.logger.With(zap.String("environment", env.Key), zap.String("base", env.Base))
 	start := time.Now()
 	buildCtx, cancel := context.WithTimeout(ctx, buildLimit)
-	err := l.builder.Build(buildCtx, asRoot(env.Dockerfile), env.Base, env.Image)
+	err := l.builder.Build(buildCtx, env.Dockerfile, env.Base, env.Image)
 	cancel()
 	var failed *BuildFailed
 	state, tail := domain.EnvironmentReady, ""
 	switch {
 	case err == nil:
 	case errors.As(err, &failed):
-		state, tail = domain.EnvironmentFailed, LastBytes(failed.Log, domain.MaxEnvironmentLogBytes)
+		state, tail = domain.EnvironmentFailed, failed.Log
 	case ctx.Err() != nil:
 		return
 	default:
@@ -159,8 +183,8 @@ func (l *Loop) build(ctx context.Context, env *domain.Environment) {
 	log.Info("environments: built", zap.String("state", string(state)), zap.Duration("took", time.Since(start)))
 }
 
-// LastBytes keeps the end of text, from the start of a line where one starts inside the limit.
-func LastBytes(text string, limit int) string {
+// lastBytes keeps the end of text, from the start of a line where one starts inside the limit.
+func lastBytes(text string, limit int) string {
 	if len(text) <= limit {
 		return text
 	}

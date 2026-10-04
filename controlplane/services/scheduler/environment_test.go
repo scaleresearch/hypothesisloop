@@ -14,18 +14,11 @@ import (
 )
 
 // declared is a repository whose commits declare the environment files held by commit, and none
-// otherwise. bases records the base each was asked to be built on, and ensured the bases a file
-// was built on besides.
+// otherwise. bases records the base each was asked to be built on.
 type declared struct {
-	files   map[string]string
-	err     error
-	bases   *[]string
-	ensured *[]string
-}
-
-func (d declared) Ensure(_ context.Context, dockerfile, base string) (*domain.Environment, error) {
-	*d.ensured = append(*d.ensured, base)
-	return &domain.Environment{Key: domain.EnvironmentKey(dockerfile, base), Base: base, Dockerfile: dockerfile, State: domain.EnvironmentBuilding}, nil
+	files map[string]string
+	err   error
+	bases *[]string
 }
 
 func (d declared) Declared(_ context.Context, _, _, ref, base string) (*domain.Environment, error) {
@@ -47,24 +40,13 @@ func (d declared) Declared(_ context.Context, _, _, ref, base string) (*domain.E
 
 const rustEnvironment = "ARG BASE\nFROM ${BASE}\nRUN apt-get install -y rustc\n"
 
-// baselineDeclaredStore is a platform experiment whose baseline is declared.
-type baselineDeclaredStore struct{ admittingStore }
-
-func (s baselineDeclaredStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
-	pe, err := s.admittingStore.GetPlatformExperiment(ctx, id)
-	pe.BaselineJobID = "baseline-job"
-	return pe, err
-}
-
 // A job runs in the environment its own commit declares, built on the image it names, and a
-// commit that declares none leaves the job as it was. Until the baseline is declared the file is
-// built on the agents' image too, so the declaration does not wait for that build.
+// commit that declares none leaves the job as it was.
 func TestASubmitKeepsTheEnvironmentItsCommitDeclaresOnItsImage(t *testing.T) {
 	commit := strings.Repeat("a", 40)
-	var bases, ensured []string
+	var bases []string
 	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: admittingStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
-		quota: insertingQuota{}, loop: wokenLoop{new(int)}, environments: declared{files: map[string]string{commit: rustEnvironment}, bases: &bases, ensured: &ensured},
-		agentImage: "registry.test/agent:1"}
+		quota: insertingQuota{}, loop: wokenLoop{new(int)}, environments: declared{files: map[string]string{commit: rustEnvironment}, bases: &bases}}
 	exp := humanIdeaSubmission()
 	if err := s.Submit(context.Background(), exp); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -72,16 +54,8 @@ func TestASubmitKeepsTheEnvironmentItsCommitDeclaresOnItsImage(t *testing.T) {
 	if want := domain.EnvironmentKey(rustEnvironment, "registry.test/job:1"); exp.EnvironmentKey != want || len(bases) != 1 || bases[0] != "registry.test/job:1" {
 		t.Errorf("environment %q built on %v, want %q on the job's image", exp.EnvironmentKey, bases, want)
 	}
-	if len(ensured) != 1 || ensured[0] != "registry.test/agent:1" {
-		t.Errorf("before the baseline is declared the file is built besides on %v, want the agents' image", ensured)
-	}
 
-	s.store = baselineDeclaredStore{}
-	if err := s.Submit(context.Background(), humanIdeaSubmission()); err != nil || len(ensured) != 1 {
-		t.Errorf("after the baseline is declared: got = %v, built besides on %v, want only the job's environment", err, ensured)
-	}
-
-	s.store, s.environments = admittingStore{}, declared{}
+	s.environments = declared{}
 	none := humanIdeaSubmission()
 	if err := s.Submit(context.Background(), none); err != nil || none.EnvironmentKey != "" {
 		t.Errorf("a commit with no environment file: got = %v and environment %q, want the job taken with none", err, none.EnvironmentKey)

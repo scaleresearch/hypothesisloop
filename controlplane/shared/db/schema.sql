@@ -1357,8 +1357,8 @@ CREATE INDEX IF NOT EXISTS environments_building ON environments (created_at) WH
 -- The environment a job's commit declares: admission claims the job only once it is ready, in
 -- its image. NULL for a commit that declares none.
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS environment_key TEXT REFERENCES environments (key);
--- The environment a platform experiment's agent machines start in from the declaration of its
--- baseline on, ready when it is written.
-ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS agent_environment_key TEXT REFERENCES environments (key);
+-- Agent machines run the platform's agent image and build nothing: only jobs run in an
+-- environment.
+ALTER TABLE platform_experiments DROP COLUMN IF EXISTS agent_environment_key;
 
 COMMIT;

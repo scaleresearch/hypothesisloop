@@ -2,7 +2,6 @@ package quota
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -29,7 +28,7 @@ type Baseline struct {
 	// Environment is the environment the job's commit declared, nil when it declared none.
 	Environment *domain.Environment
 	// Declared is the environment file at the head of the baseline branch, nil when it holds
-	// none: what every agent machine is built from once the baseline is declared.
+	// none: what a job of the default branch runs in.
 	Declared *string
 }
 
@@ -127,49 +126,19 @@ func checkBaseline(pe *domain.PlatformExperiment, baseline *Baseline) error {
 }
 
 // checkBaselineEnvironment holds the baseline job to the environment the baseline branch
-// declares: every agent machine starts in it and every researcher's job inherits it, so the
-// baseline is measured in it too.
+// declares: every researcher's job inherits it, so the baseline is measured in it too.
 func checkBaselineEnvironment(pe *domain.PlatformExperiment, baseline *Baseline) error {
 	ran, declared := baseline.Environment, baseline.Declared
 	branch := domain.BaselineBranch(pe.ID)
 	switch {
 	case declared != nil && (ran == nil || ran.Dockerfile != *declared):
-		return refusedBaseline("baseline_environment_differs", "branch %s declares in %s an environment that baseline job %s did not run in: the agents start in it, so the baseline is measured in it too. Submit the baseline again from the head of the branch and declare that job", branch, domain.EnvironmentFile, baseline.Job.ID)
+		return refusedBaseline("baseline_environment_differs", "branch %s declares in %s an environment that baseline job %s did not run in: every researcher's job runs in it, so the baseline is measured in it too. Submit the baseline again from the head of the branch and declare that job", branch, domain.EnvironmentFile, baseline.Job.ID)
 	case declared == nil && ran != nil:
 		return refusedBaseline("baseline_environment_differs", "baseline job %s ran in the environment its commit declares in %s, and the head of branch %s declares none: commit the file there again, or submit the baseline again from the head and declare that job", baseline.Job.ID, domain.EnvironmentFile, branch)
 	case ran != nil && (baseline.Job.ResolvedJob == nil || baseline.Job.ResolvedJob.Image != ran.Image):
 		return refusedBaseline("baseline_not_in_environment", "baseline job %s did not run in the image of the environment its commit declares (%s): submit the baseline again and declare that job", baseline.Job.ID, ran.Image)
 	}
 	return nil
-}
-
-// agentEnvironment is the environment the agent machines of pe start in, from the file the
-// baseline branch declares, nil when it declares none. The declaration waits for it to be built,
-// so no machine is ever asked for in an image that is not there.
-func (s *PlatformExperimentsService) agentEnvironment(ctx context.Context, pe *domain.PlatformExperiment, declared *string) (*domain.Environment, error) {
-	if declared == nil {
-		return nil, nil
-	}
-	base := pe.AgentBase(s.agentImage)
-	env, err := s.environments.Ensure(ctx, *declared, base)
-	var invalid *domain.EnvironmentFileError
-	if errors.As(err, &invalid) {
-		return nil, refusedBaseline(domain.ReasonInvalidEnvironmentFile, "%s", invalid.Why)
-	}
-	if err != nil {
-		return nil, err
-	}
-	switch env.State {
-	case domain.EnvironmentBuilding:
-		return nil, refuseUpdate(409, domain.NotAdmittedEnvironmentBuilding, "the platform is building the agents' environment, %s of branch %s on %s, since %s: the baseline is declared once it is built. Declare it again in a few minutes",
-			domain.EnvironmentFile, domain.BaselineBranch(pe.ID), base, env.CreatedAt.UTC().Format(time.RFC3339))
-	case domain.EnvironmentFailed:
-		return nil, refusedBaseline(string(domain.EvictionEnvironmentFailed), "%s of branch %s did not build on the agent image %s, though the baseline's did on its job image. Fix it, run the baseline again and declare that job. The end of the build's output:\n%s",
-			domain.EnvironmentFile, domain.BaselineBranch(pe.ID), base, env.LogTail)
-	case domain.EnvironmentReady:
-		return env, nil
-	}
-	return nil, fmt.Errorf("platform_experiments: the agents' environment %s is %s", env.Key, env.State)
 }
 
 // measuredBaselineHeader opens the block of the description the platform writes: what the

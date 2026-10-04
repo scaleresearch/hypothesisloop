@@ -49,7 +49,3 @@ type noEnvironments struct{}
 func (noEnvironments) Declared(context.Context, string, string, string, string) (*domain.Environment, error) {
 	return nil, nil
 }
-
-func (noEnvironments) Ensure(context.Context, string, string) (*domain.Environment, error) {
-	panic("noEnvironments: no commit declares an environment to build")
-}

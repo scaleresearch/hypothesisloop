@@ -99,8 +99,7 @@ const ReasonEnvironmentUnreadable = "environment_unreadable"
 
 // declaredEnvironment keeps on exp the environment its commit declares, built on its image, which
 // admission waits for. The file is read at the commit itself, so the environment is the one the
-// code was pushed with. Before pe's baseline is declared the same file is built on its agents'
-// image too, so the agents' environment the declaration waits for is built beside the baseline.
+// code was pushed with.
 func (s *Service) declaredEnvironment(ctx context.Context, pe *domain.PlatformExperiment, exp *domain.Experiment) error {
 	commit := exp.CodeRef[strings.LastIndex(exp.CodeRef, "@")+1:]
 	env, err := s.environments.Declared(ctx, pe.ProjectID, pe.Repository, commit, exp.Job.Image)
@@ -113,14 +112,8 @@ func (s *Service) declaredEnvironment(ctx context.Context, pe *domain.PlatformEx
 		return &AdmissionError{Reason: ReasonEnvironmentUnreadable, Message: fmt.Sprintf("the platform could not read %s at commit %s: %s", domain.EnvironmentFile, commit, refused.Message)}
 	case err != nil:
 		return fmt.Errorf("scheduler: environment of %s: %w", commit, err)
-	case env == nil:
-		return nil
-	}
-	exp.EnvironmentKey = env.Key
-	if pe.BaselineJobID == "" {
-		if _, err := s.environments.Ensure(ctx, env.Dockerfile, pe.AgentBase(s.agentImage)); err != nil {
-			return fmt.Errorf("scheduler: agents' environment of %s: %w", commit, err)
-		}
+	case env != nil:
+		exp.EnvironmentKey = env.Key
 	}
 	return nil
 }
