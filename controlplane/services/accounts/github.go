@@ -48,10 +48,10 @@ type InstallationStore interface {
 	DisconnectGitHubInstallation(ctx context.Context, orgID string, installationID int64) error
 }
 
-// ExperimentRepositories says which repository a platform experiment names and which project
-// it is in. *db.PlatformExperimentsStore satisfies it.
+// ExperimentRepositories says which repository a platform experiment names, which project it is
+// in and whether it is closed. *db.PlatformExperimentsStore satisfies it.
 type ExperimentRepositories interface {
-	PlatformExperimentRepository(ctx context.Context, id string) (projectID, repository string, err error)
+	PlatformExperimentRepository(ctx context.Context, id string) (projectID, repository string, closed bool, err error)
 }
 
 // Repositories serves the GitHub installations orgs connect and what they cover, and the git
@@ -399,7 +399,8 @@ func (r *Repositories) repositories(ctx context.Context, orgID, q string) ([]Rep
 // credential mints the caller's git credential. It goes only to what the platform launched into
 // a platform experiment, for the repository that experiment names and for no other address: an
 // agent may push, a coordinator and a job read. Nothing is minted for a run that is over, though
-// its token still files summaries, since the credential would outlive the token by an hour.
+// its token still files summaries, since the credential would outlive the token by an hour. The
+// close is read again here, so a run closed after the token was read asks nothing of the git host.
 func (r *Repositories) credential(ctx context.Context, protocol, host, path string) (*GitCredential, error) {
 	p, ok := auth.FromContext(ctx)
 	if !ok {
@@ -413,12 +414,17 @@ func (r *Repositories) credential(ctx context.Context, protocol, host, path stri
 	default:
 		return nil, api.Refuse(http.StatusForbidden, ReasonForbidden, "a "+string(p.Kind)+" token has no repository of its own: a git credential goes to an agent, a coordinator or a job")
 	}
-	if p.RunOver {
-		return nil, api.Refuse(http.StatusForbidden, ReasonRunOver, "the run of this "+string(p.Kind)+" token in platform experiment "+p.PlatformExperimentID+" is over, and no git credential is handed out for it")
-	}
-	projectID, repository, err := r.experiments.PlatformExperimentRepository(ctx, p.PlatformExperimentID)
+	projectID, repository, closed, err := r.experiments.PlatformExperimentRepository(ctx, p.PlatformExperimentID)
 	if err != nil {
 		return nil, err
+	}
+	if closed {
+		return nil, api.Refuse(http.StatusForbidden, ReasonRunOver, "run closed, nothing more is pushed: platform experiment "+p.PlatformExperimentID+" is closed, so no git credential is handed out for it. "+
+			"What is not pushed stays out of the repository; the summary and comments still take what matters until the token ends")
+	}
+	if p.RunOver {
+		return nil, api.Refuse(http.StatusForbidden, ReasonRunOver, "run over, nothing more is pushed: the run of this "+string(p.Kind)+" token in platform experiment "+p.PlatformExperimentID+
+			" has ended (finished, cut, or for a job its agent's run ended), so no git credential is handed out for it")
 	}
 	if repository == "" {
 		return nil, api.Refuse(http.StatusNotFound, ReasonNoRepository, "platform experiment "+p.PlatformExperimentID+" names no repository")

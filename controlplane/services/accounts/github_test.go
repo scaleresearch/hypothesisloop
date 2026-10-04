@@ -108,14 +108,14 @@ func (s *memInstallations) DisconnectGitHubInstallation(_ context.Context, orgID
 }
 
 // experiments says which repository each platform experiment names, and in which org.
-type experiments map[string][2]string
+type experiments map[string][3]string
 
-func (e experiments) PlatformExperimentRepository(_ context.Context, id string) (string, string, error) {
+func (e experiments) PlatformExperimentRepository(_ context.Context, id string) (string, string, bool, error) {
 	found, ok := e[id]
 	if !ok {
-		return "", "", db.ErrPlatformExperimentNotFound
+		return "", "", false, db.ErrPlatformExperimentNotFound
 	}
-	return found[0], found[1], nil
+	return found[0], found[1], found[2] == "closed", nil
 }
 
 type minted struct {
@@ -332,7 +332,7 @@ func newGitHubWorld(t *testing.T, withApp bool) *githubWorld {
 	t.Helper()
 	w := &githubWorld{world: newWorld(t), app: newFakeApp()}
 	w.installations = &memInstallations{memStore: w.store, connected: map[string][]*domain.OrgGitHubInstallation{}, kept: map[string]string{}}
-	w.experiments = experiments{"pe-a": {w.projectA, "Acme/Model"}, "pe-bare": {w.projectA, ""}, "pe-b": {w.projectB, "Acme/Model"}}
+	w.experiments = experiments{"pe-a": {w.projectA, "Acme/Model"}, "pe-bare": {w.projectA, ""}, "pe-b": {w.projectB, "Acme/Model"}, "pe-closed": {w.projectA, "Acme/Model", "closed"}}
 	access := auth.NewAccess(placement{memStore: w.store})
 	if withApp {
 		w.host = NewGitHubHost(w.installations, w.app, zap.NewNop())
@@ -351,6 +351,9 @@ func newGitHubWorld(t *testing.T, withApp bool) *githubWorld {
 		over.RunOver = true
 		w.callers[kind+"-run-over"] = over
 	}
+	closedAfterTheToken := w.callers["agent"]
+	closedAfterTheToken.PlatformExperimentID = "pe-closed"
+	w.callers["agent-closed"] = closedAfterTheToken
 	router := chi.NewRouter()
 	doc := apidocs.New(router, "test", "1.0.0", "", tokens{w.world}, access, zap.NewNop())
 	RegisterRepositoriesHuma(doc, w.svc)
@@ -854,6 +857,21 @@ func TestNoGitCredentialOnceTheRunIsOver(t *testing.T) {
 	}
 	for _, caller := range []string{"agent", "coordinator", "job"} {
 		w.ok(caller, "POST", "/git-credentials", modelCredential, http.StatusCreated, nil)
+	}
+}
+
+// An agent's last turn after the close pushed, and GitHub was asked for a token. A run closed
+// after its token was read is refused all the same, with what it means for the push, and GitHub
+// is asked nothing.
+func TestAClosedRunIsToldNothingMoreIsPushedAndGitHubIsNotAsked(t *testing.T) {
+	w := newGitHubWorld(t, true)
+	w.connect(w.orgA, acme)
+	rec := w.call("agent-closed", "POST", "/git-credentials", modelCredential)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), ReasonRunOver) || !strings.Contains(rec.Body.String(), "run closed, nothing more is pushed") {
+		t.Fatalf("got = %d %s, want 403 run_over saying nothing more is pushed", rec.Code, rec.Body)
+	}
+	if len(w.app.mints) != 0 {
+		t.Fatalf("a token was minted for a closed run: %+v", w.app.mints)
 	}
 }
 

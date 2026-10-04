@@ -323,7 +323,13 @@ func TestARepositorysAddressIsStoredAtCreationAndBackfilledOnceForGitHub(t *test
 			t.Errorf("%s: repository_url = %q, want %q", name, got, tc[1])
 		}
 	}
-	if project, repository, err := pes.PlatformExperimentRepository(ctx, elsewhere); err != nil || project != "default" || repository != "group/model" {
-		t.Fatalf("PlatformExperimentRepository = %q, %q, %v, want the project and the name", project, repository, err)
+	if project, repository, closed, err := pes.PlatformExperimentRepository(ctx, elsewhere); err != nil || project != "default" || repository != "group/model" || closed {
+		t.Fatalf("PlatformExperimentRepository = %q, %q, %v, %v, want the project and the name of one still open", project, repository, closed, err)
+	}
+	if err := pes.ClosePlatformExperiment(ctx, elsewhere, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, closed, err := pes.PlatformExperimentRepository(ctx, elsewhere); err != nil || !closed {
+		t.Fatalf("PlatformExperimentRepository of a closed one: closed %v, %v, want it closed", closed, err)
 	}
 }

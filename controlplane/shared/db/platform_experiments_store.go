@@ -1048,15 +1048,16 @@ func (s *PlatformExperimentsStore) AgentCutAt(ctx context.Context, platformExpID
 var ErrPlatformExperimentNotFound = errors.New("platform experiment not found")
 
 // PlatformExperimentRepository returns the repository a platform experiment names, empty for
-// none, and the project it is in. ErrPlatformExperimentNotFound when there is no such one.
-func (s *PlatformExperimentsStore) PlatformExperimentRepository(ctx context.Context, id string) (projectID, repository string, err error) {
+// none, the project it is in and whether it is closed. ErrPlatformExperimentNotFound when there
+// is no such one.
+func (s *PlatformExperimentsStore) PlatformExperimentRepository(ctx context.Context, id string) (projectID, repository string, closed bool, err error) {
 	err = s.pool.pool.QueryRow(ctx, `
-SELECT project_id, repository FROM platform_experiments WHERE id = $1`, id).Scan(&projectID, &repository)
+SELECT project_id, repository, closed_at IS NOT NULL FROM platform_experiments WHERE id = $1`, id).Scan(&projectID, &repository, &closed)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", "", ErrPlatformExperimentNotFound
+		return "", "", false, ErrPlatformExperimentNotFound
 	}
 	if err != nil {
-		return "", "", fmt.Errorf("platform_experiments_store.PlatformExperimentRepository: %w", err)
+		return "", "", false, fmt.Errorf("platform_experiments_store.PlatformExperimentRepository: %w", err)
 	}
-	return projectID, repository, nil
+	return projectID, repository, closed, nil
 }

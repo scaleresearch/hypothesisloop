@@ -132,7 +132,6 @@ func TestGitCredentialReportsARefusalAndPrintsNoCredential(t *testing.T) {
 		status int
 		body   string
 	}{
-		"the run is over": {http.StatusForbidden, `{"reason":"run_over","message":"the run of this agent token in platform experiment pe-1 is over"}`},
 		"token refused":   {http.StatusUnauthorized, `{"error":"unauthenticated: job job-1 is not running"}`},
 	} {
 		setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -143,6 +142,15 @@ func TestGitCredentialReportsARefusalAndPrintsNoCredential(t *testing.T) {
 		if code != 1 || stdout != "" || !strings.Contains(stderr, tc.body[10:30]) {
 			t.Errorf("%s: exit %d, stdout %q, stderr %q, want exit 1 with the platform's reason", name, code, stdout, stderr)
 		}
+	}
+	// An agent's last turn pushes after the close: git shows the platform's one line, no HTTP dump.
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"reason":"run_over","message":"run closed, nothing more is pushed: platform experiment pe-1 is closed"}`)) //nolint:errcheck
+	}))
+	if code, stdout, stderr := gitCredential(t, "get", "protocol=https\nhost=github.com\npath=Acme/Model.git\n\n"); code != 1 || stdout != "" ||
+		stderr != "hl: git-credential: run closed, nothing more is pushed: platform experiment pe-1 is closed\n" {
+		t.Errorf("a closed run: exit %d, stdout %q, stderr %q, want exit 1 and the platform's line", code, stdout, stderr)
 	}
 	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
