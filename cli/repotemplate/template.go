@@ -9,6 +9,7 @@ const (
 	Readme         = "README.md"
 	ExperimentFile = ".hypothesisloop/experiment.yaml"
 	JobSpec        = ".hypothesisloop/job.yaml"
+	Environment    = ".hypothesisloop/Dockerfile"
 	Gitignore      = ".gitignore"
 	// MetricsHelper posts a job's metric. A repository may leave it out and post the metric
 	// itself, which hl repo check says how to do and fails nothing for.
@@ -25,6 +26,8 @@ var (
 	experimentFile string
 	//go:embed files/.hypothesisloop/job.yaml
 	jobSpec string
+	//go:embed files/.hypothesisloop/Dockerfile
+	environment string
 	//go:embed files/.gitignore
 	gitignore string
 	//go:embed files/metrics.py
@@ -34,5 +37,5 @@ var (
 // Files is the template: what a repository the platform creates starts from and what hl repo
 // init adds to one that lacks it, by path.
 func Files() map[string]string {
-	return map[string]string{Readme: readme, ExperimentFile: experimentFile, JobSpec: jobSpec, Gitignore: gitignore, MetricsHelper: metricsHelper}
+	return map[string]string{Readme: readme, ExperimentFile: experimentFile, JobSpec: jobSpec, Environment: environment, Gitignore: gitignore, MetricsHelper: metricsHelper}
 }

@@ -41,8 +41,7 @@ func jobSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 
 FILE is a YAML job spec (metadata, job). The flags override it for this submission, so one
 committed spec serves every job that differs in hypothesis, env, estimate or tier. Prints the
-job's id, status, code_ref, branch, capacity_tier, estimated_duration_hours and
-estimated_cost_acch; hl job status ID has the rest.
+job's id, status, code_ref, branch and estimates; hl job status ID has the rest.
 A submit the same in every part (agent, hypothesis, commit, FILE, flags) is one job however
 often it is sent, so one that timed out is safe to resend; --repeat N makes it the Nth job of
 that request.
@@ -65,7 +64,9 @@ a person or an API key states --agent and --platform-experiment.
 Code: commit first (uncommitted changes to tracked files are refused). HEAD must be on a branch
 under hl/PE/ (hl hypothesis checkout ID puts you on yours). The submit fills an empty
 metadata.code_ref with <origin url>@<HEAD sha> and metadata.branch with that branch, and pushes
-the branch itself. What a job ran is its code_ref.
+the branch itself. What a job ran is its code_ref. A commit holding .hypothesisloop/Dockerfile
+runs in the environment built from it: QUEUED as environment_building until built, REJECTED
+as environment_failed with the build's output.
 
 Refusals: image_required; unknown_job_image (neither a name from hl capacity nor a full
 address); no_cluster_for_image; cpu_required, memory_required, storage_required;
@@ -84,12 +85,11 @@ of hl platform-experiments get); experiment_closed.
     cpu: 2                        # per node, like memory and storage, and in each group of a
     memory: 8Gi                   # job with groups: a job holds what it states
     storage: 4Gi                  # scratch space
-                                  # max_retries left out is 0; add packages with uv pip install
+                                  # max_retries left out is 0
 
 Every other field: $WORKLOAD_SAMPLES/experiment-submission.yaml. $WORKLOAD_SAMPLES also holds
 whole jobs to read first: each sample's seed/ reports its metrics and its
-.hypothesisloop/job.yaml runs it (in the repository: controlplane/settings/examples and
-agents/coordinator/experiments).`, stderr)
+.hypothesisloop/job.yaml runs it.`, stderr)
 	agent := fs.String("agent", "", "whose job it is, for a person or an API key; an agent's token says it")
 	overrides := map[string]*string{
 		"hypothesis_id":          fs.String("hypothesis", "", "sets metadata.hypothesis_id"),
@@ -280,6 +280,7 @@ type jobBrief struct {
 	NotAdmittedReason  string          `json:"not_admitted_reason"`
 	NotAdmittedMessage string          `json:"not_admitted_message"`
 	EvictionReason     string          `json:"eviction_reason"`
+	EnvironmentKey     string          `json:"environment_key"`
 	PhaseDetail        json.RawMessage `json:"phase_detail"`
 	Theory             string          `json:"theory"`
 	EstimatedCost      float64         `json:"estimated_cost_acch"`
@@ -465,9 +466,10 @@ func jobStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 One line per job, its whole record: hypothesis_id, or "objective":true on a baseline agent's
 job, which tests no hypothesis; status (QUEUED, SUBMITTED, RUNNING, then COMPLETED, FAILED,
 EVICTED, REJECTED or CANCELLED), metrics (one value each, as in hl job list), finished_at,
-summary, phase_detail and the spec under job, its settings as job.env.
+summary, phase_detail, environment_key and the spec under job, its settings as job.env.
 eviction_reason says why the last attempt ended, as code or "code: detail": for a FAILED job
-how its process ended (container_failed, oom_killed), when its runtime reported that.
+how its process ended (container_failed, oom_killed), environment_failed for a REJECTED
+one whose environment did not build.
 ran_on is where it ran: node, and under machine, for a rented one, instance_id, host_id (the
 physical machine, stable across rentals), accelerator_model, cpu_model and price_per_hour_usd.
 Two jobs of one spec on different machines are not the same measurement.
@@ -475,10 +477,9 @@ A COMPLETED job of an experiment with a constraint metric carries rankable. Fals
 in no standing: not_rankable_reason names the constraint it broke or did not report.
 While QUEUED, not_admitted_reason is the code of what the job waits for: awaiting_admission for
 the scheduler's first look at it, summary_gate for a summary on each of your jobs that was
-COMPLETED before this one was submitted (hl job list --needs-summary), capacity_unavailable for
-room on a cluster. not_admitted_message is
-its sentence: for capacity_unavailable the cluster, what it is short of and how many jobs hold
-that, of your platform experiment and of others.`, stderr)
+COMPLETED before this one was submitted (hl job list --needs-summary), environment_building for
+its environment, capacity_unavailable for room on a cluster. not_admitted_message is its
+sentence.`, stderr)
 	ids, err := parseOperands(fs, args, "id", "experiment")
 	if err != nil {
 		return parseExit(err)

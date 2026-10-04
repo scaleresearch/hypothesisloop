@@ -19,16 +19,16 @@ log = logging.getLogger("llm_agent")
 # copy that can drift. The specialization lives in prompts/flavors/<flavor>.md, spliced in as
 # {flavor_brief}.
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
-_HL_HELP = ([], ["job"], ["hypothesis"])
-# A coordinator changes the roster and the brief, which no agent does.
-# A planner proposes or declines and runs nothing, so hl's own listing, of commands that run
-# something, is not for it: it is shown its two commands and what hl repo init will write from
-# its proposal. A baseline agent writes the first job spec.
+# Each role reads hl's listing, which holds the rules every command shares, and the help of the
+# commands it acts with; it reads the help of any other when it runs one. A planner runs nothing,
+# so the listing is not for it: it is shown its two commands and what hl repo init will write
+# from its proposal.
+_HL_HELP = ([], ["hypothesis", "submit"])
 _HL_HELP_PLANNER = (["platform-experiments", "propose"], ["platform-experiments", "decline"], ["repo", "init"])
-_HL_HELP_BASELINE = ([], ["job"], ["job", "submit"], ["repo"])
-_HL_HELP_COORDINATOR = ([], ["platform-experiments", "agents"], ["platform-experiments", "agents", "add"],
-                        ["platform-experiments", "update"], ["platform-experiments", "summary"],
-                        ["platform-experiments", "close"], ["job"], ["hypothesis"])
+_HL_HELP_BASELINE = ([], ["job", "submit"], ["job", "summary"], ["platform-experiments", "agents", "finish"])
+_HL_HELP_COORDINATOR = ([], ["platform-experiments", "update"], ["platform-experiments", "summary"],
+                        ["platform-experiments", "close"], ["platform-experiments", "agents", "add"],
+                        ["hypothesis", "comment"])
 
 
 def hl_commands(cfg: config.Config) -> str:

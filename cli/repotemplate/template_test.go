@@ -41,8 +41,11 @@ func TestTheMetricsHelperImportsOutsideAJobAndSaysWhyItReportsNothingThere(t *te
 // from_repo must not take an example for an experiment: the experiment file states nothing.
 func TestTheTemplateIsAJobSpecToFillInAndAnExperimentFileThatStatesNothing(t *testing.T) {
 	files := Files()
-	if len(files) != 5 || !strings.Contains(files[Gitignore], "__pycache__/") {
-		t.Fatalf("the template holds %d files, want README.md, the experiment file, the job spec, the metrics helper and a .gitignore for bytecode caches", len(files))
+	if len(files) != 6 || !strings.Contains(files[Gitignore], "__pycache__/") {
+		t.Fatalf("the template holds %d files, want README.md, the experiment file, the job spec, the environment, the metrics helper and a .gitignore for bytecode caches", len(files))
+	}
+	if !strings.HasPrefix(files[Environment], "ARG BASE\nFROM ${BASE}\n") {
+		t.Fatalf("the environment begins %q, want the two lines the platform builds on", files[Environment])
 	}
 	// A baseline agent retyped this file by hand from a sample: the template supplies it.
 	for _, said := range []string{"def post_metric(fraction: float, value: float, metric_name: str)", "/experiments/{job['HYPOTHESISLOOP_EXPERIMENT_ID']}/metrics", "HYPOTHESISLOOP_TOKEN"} {

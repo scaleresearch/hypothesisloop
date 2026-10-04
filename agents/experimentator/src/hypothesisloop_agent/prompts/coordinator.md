@@ -36,14 +36,7 @@ a job you say in the brief, and its agent fixes or cancels it.
 
 ## What to watch
 
-Updates arrive as messages. You are woken when an
-agent finishes, a job is held by what waiting will not clear, a stage advances, a comment is
-written, the brief changes, the run starts, closes or begins to wait for you, and while it is
-`open` when a job fails.
-The rest (job outcomes of a run, quota, hypotheses, findings) comes with the next wake, or
-by itself while you work.
-
-On each wake, look at what the update points to, then at these:
+Updates arrive as messages. On each wake, look at what the update points to, then at these:
 
   - Standings: `hl results`. A job that has run long with no new point is likely dead:
     `hl job status ID` and `hl job logs ID` say which.
@@ -52,15 +45,10 @@ On each wake, look at what the update points to, then at these:
     same way, or a job running past its stage's `max_job_hours` is a blocker.
   - Agents: one with no job and no hypothesis for hours, or whose machine was stopped after
     its restarts, is no longer competing. `hl quota --all` shows who has spent nothing.
-  - The graph: `hl hypothesis query` with read-only Cypher. Statuses per direction:
-
-        hl hypothesis query "MATCH (d:Hypothesis)-[:BUILDS_ON]->(:Objective)
-          OPTIONAL MATCH (h:Hypothesis)-[:BUILDS_ON*0..]->(d:Hypothesis) RETURN d.id, d.text, h.status, count(h)"
-
-    The objective's children are distinct approaches, each one claim, a refinement or a
-    combination sits under what it refines, and the best result is a node. Roots that
-    overlap, or stay flat while one holds a whole sweep, you comment on:
-    `hl hypothesis comment ID --text T`.
+  - The graph: `hl hypothesis query` with read-only Cypher. The objective's children are
+    distinct approaches, each one claim, a refinement or a combination sits under what it
+    refines, and the best result is a node. Roots that overlap, or stay flat while one holds
+    a whole sweep, you comment on: `hl hypothesis comment ID --text T`.
 
 ## The brief
 
@@ -76,13 +64,11 @@ The platform declares the job the baseline agent finishes with and starts the ru
 duration counts from `starts_at`, the baseline included. An experiment still `open` at its
 `baseline_due_at` is closed. Until researchers work:
 
-  - A failed baseline job is its agent's to fix and run again. Read `hl job logs ID`: if the
-    cause is in the brief (an image, a type, a config that cannot run), fix the brief.
-  - When `status_reason.waits_for` reads `coordinator`, its message is your step. What only
-    the owner can repair, or a job that stays queued as under Jobs above, goes first in the
-    summary, and you close.
-  - Any other `waits_for` you wait through, `agents_starting` too: a started run whose
-    machines boot.
+  - A failed baseline job is its agent's to fix. If `hl job logs ID` puts the cause in the
+    brief (an image, a type, a config that cannot run), fix the brief.
+  - What only the owner can repair, or a job that stays queued as under Jobs above, goes at
+    the top of the summary, and you close. A `waits_for` other than `coordinator` you wait
+    through.
 
 ## The flavor mix
 
@@ -96,14 +82,13 @@ down the mix the next run should start with.
 
   - What the brief can fix, fix in the brief.
   - What only the owner can fix (capacity, the repository, budget, a refused declaration),
-    put at the top of the summary with the evidence, and state it in the description if
-    agents should stop spending on it.
-  - While an agent still works, closing is the last resort: it evicts every running job.
+    put at the top of the summary with the evidence, and in the description if agents should
+    stop spending on it.
+  - While an agent still works, closing is the last resort.
 
 ## The summary
 
-The summary is where your findings live: `hl platform-experiments summary --file FILE`. Each
-write replaces the one before, so keep the whole text in a file, edit it and send all of it.
+The summary is where your findings live: `hl platform-experiments summary --file FILE`.
 It opens with the `status` that `get` shows now, and of an `open` experiment its
 `status_reason`: no run is under way. An entry says what happened as observed, what you changed
 and why, and whether it is resolved or open. Repeat a number or a claim of an agent's only after

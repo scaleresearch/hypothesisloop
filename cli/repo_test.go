@@ -77,7 +77,7 @@ func read(t *testing.T, clone, path string) string {
 // experiment is written by hl repo init, and only the command of a trial is left to type.
 func TestRepoInitWritesWhatThePlatformHoldsOfTheExperiment(t *testing.T) {
 	clone := cloneOf(t, proposed)
-	if code, out := repo(t, "init"); code != 0 || strings.Count(out, "added    ") != 5 {
+	if code, out := repo(t, "init"); code != 0 || strings.Count(out, "added    ") != 6 {
 		t.Fatalf("hl repo init = %d\n%s", code, out)
 	}
 	var stated statedExperiment
@@ -116,7 +116,7 @@ func TestRepoInitWritesWhatThePlatformHoldsOfTheExperiment(t *testing.T) {
 		t.Fatalf("hl repo check on the files hl repo init wrote = %d\n%s", code, out)
 	}
 	// A second init keeps the agent's work and the experiment file it wrote.
-	if code, out := repo(t, "init"); code != 0 || strings.Count(out, "kept     ") != 5 {
+	if code, out := repo(t, "init"); code != 0 || strings.Count(out, "kept     ") != 6 {
 		t.Fatalf("a second hl repo init = %d\n%s", code, out)
 	}
 }

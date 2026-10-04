@@ -27,6 +27,7 @@ const repoFiles = `  .hypothesisloop/experiment.yaml   the experiment: name, des
                                     metrics, written whole from the platform experiment
   .hypothesisloop/job.yaml          the base job spec, submitted unedited for every trial, with the image,
                                     the accelerator_type and the cpu, memory and storage its proposal states
+  .hypothesisloop/Dockerfile        system packages and toolchains
   README.md                         what is measured, how one trial runs, what to vary, what must not
                                     change, with the experiment's name and what its proposal says is measured
   metrics.py                        how a job reports a metric: post_metric(fraction_complete, value, "key")
@@ -44,7 +45,7 @@ holds, with what the platform holds of the experiment filled in, so none of it i
 The experiment file is always the platform's. Of the others a file that is there is kept, unless
 it is still the unfilled template or the clone's experiment file stated another experiment (a
 name or metrics that are not this one's, the test hl repo check applies): those belong to no
-work of yours and are replaced, and the old ones stay in git. One line per file says which.
+work of yours and are replaced, and the old ones stay in git.
 What is left to write is marked REPLACE-WITH: the command of one trial and the README's account
 of the harness. On a repository with no branch yet it first pushes an empty commit as main, so
 that the default branch is main and no experiment's. Nothing else is committed: git add and

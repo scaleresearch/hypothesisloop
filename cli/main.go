@@ -722,7 +722,7 @@ func cmdPlatformExperimentsUpdate(c *apiclient.Client, args []string, stdout, st
 	fs := newFlags("platform-experiments update", `usage: hl platform-experiments update [--platform-experiment PE] [--description-file FILE] [--description TEXT] [--baseline-job JOB] [--name NAME] [FIELDS.yaml]
 
 Changes the fields you name and no other. A coordinator's token changes the description and
-declares the baseline, nothing else. The brief: hl platform-experiments update --description-file brief.md
+declares the baseline, nothing else.
 
 --baseline-job JOB declares the baseline while the platform experiment is open. The platform
 writes JOB, its code_ref and what it measured into a block of the description it keeps through
@@ -731,7 +731,7 @@ is ahead. The line printed after says whether it started, with status_reason. Re
 no_baseline (JOB is no baseline agent's job here), baseline_not_completed,
 baseline_without_finding (no summary filed), baseline_missing_metric, baseline_breaks_constraint
 and budget_below_baseline (the budget does not hold one trial per researcher at JOB's
-estimate); the last two are the owner's to change.
+estimate); the last two are the owner's to change. 409 environment_building: try again shortly.
 
 FIELDS.yaml maps the other fields that change (budget_accelerator_hours, max_agents,
 duration_hours, metrics, report_interval_seconds): any while it is open, only name and
