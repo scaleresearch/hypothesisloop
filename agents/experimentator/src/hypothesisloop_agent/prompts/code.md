@@ -6,7 +6,9 @@ core.system_prompt: a section per placeholder, each opened by a line of ==== and
 run `git clone {repository_url} .` in {workdir}, the directory every command starts
     in. {start}
 ==== start_baseline
-Work on branch `hl/{platform_experiment_id}/baseline`; `hl job submit` pushes it. Run
+Work on branch `hl/{platform_experiment_id}/baseline`; `hl job submit` pushes it. A run that
+    `continues` another starts that branch from the other's `baseline_code_ref` and measures
+    the control with its harness as it is, so the numbers of both compare. Run
     `hl repo init` in the clone before you write anything: it writes the experiment's files
     from what the platform holds. `hl repo check` says what is left.
 ==== start_researcher
