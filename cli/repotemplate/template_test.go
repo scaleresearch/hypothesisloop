@@ -19,7 +19,7 @@ func TestTheEnvironmentFileSaysItIsBuiltAloneAndTheCodeComesByTheClone(t *testin
 	if err := domain.ValidateEnvironmentFile(file); err != nil {
 		t.Fatalf("the template: %v", err)
 	}
-	if !strings.Contains(file, "from this file alone") || !strings.Contains(file, "clones the code") {
+	if !strings.Contains(file, "from this file alone") || !strings.Contains(file, "clones its commit") {
 		t.Errorf("the template says nothing of how it is built:\n%s", file)
 	}
 }
