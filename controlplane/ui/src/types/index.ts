@@ -254,9 +254,8 @@ export interface PlatformExperiment {
   // Absent when the platform runs no coordinator for it.
   coordinator?: HostedCoordinator
   // The baseline no experiment starts without: the completed job that measured it, absent until
-  // one is declared, or the values its creator stated on create, by metric key.
+  // one is declared.
   baseline_job_id?: string
-  stated_baseline?: Record<string, number>
   // The commit the baseline stands for, repository_url@sha.
   baseline_code_ref?: string
   // Staff shared it with every account: listed in every project, read by all, written by its own org alone.

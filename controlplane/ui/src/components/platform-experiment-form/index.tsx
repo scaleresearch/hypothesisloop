@@ -17,7 +17,7 @@ import { Dialog } from '@/components/ui/dialog'
 import { Inline, Stack } from '@/components/ui/stack'
 import { ErrorMessage } from '@/components/ui/status-message'
 import { Tabs } from '@/components/ui/tabs'
-import { NEW_EXPERIMENT, STEPS, ranked, stagesError, toDrafts, toStages } from '@/components/platform-experiment-form/model'
+import { NEW_EXPERIMENT, STEPS, stagesError, toDrafts, toStages } from '@/components/platform-experiment-form/model'
 import type { FormState, StepID } from '@/components/platform-experiment-form/model'
 import { StepWhat } from '@/components/platform-experiment-form/step-what'
 import type { FileNote } from '@/components/platform-experiment-form/step-what'
@@ -59,7 +59,6 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
     starts_at: !isZeroDate(initial?.starts_at) ? new Date(initial!.starts_at!).toISOString().slice(0, 16) : '',
     duration_hours: String(initial?.duration_hours ?? NEW_EXPERIMENT.duration_hours),
     metrics: initial?.metrics ?? [],
-    baseline: null,
     report_interval_seconds: initial?.report_interval_seconds ? String(initial.report_interval_seconds) : '',
     stages: initial?.stages?.length ? toDrafts(initial.stages) : null,
     repository: initial?.repository ?? '',
@@ -116,8 +115,6 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
     if (Number(form.duration_hours) <= 0) return 'Duration must be greater than 0.'
     if (Number(form.budget_accelerator_hours) <= 0) return 'Budget must be greater than 0.'
     if (!isEdit && Number(form.max_agents) < 1) return 'At least one researcher.'
-    const baseline = form.baseline
-    if (!isEdit && baseline && ranked(form.metrics).some(m => (baseline[m.key] ?? '').trim() === '' || !Number.isFinite(Number(baseline[m.key])))) return 'Give the baseline as a number for every metric.'
     return null
   }
 
@@ -175,7 +172,6 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
         ...(form.stages ? { stages: toStages(form.stages) } : {}),
         ...repositoryFields(form.repository),
         ...(form.agent_image.trim() ? { agent_image: form.agent_image.trim() } : {}),
-        ...(form.baseline ? { stated_baseline: Object.fromEntries(ranked(form.metrics).map(m => [m.key, Number(form.baseline![m.key])])) } : {}),
         duration_hours: Number(form.duration_hours),
       }
       const { experiment, failure } = await createAndRun(project.id, payload, Number(form.max_agents))

@@ -18,8 +18,6 @@ export interface FormState {
   starts_at: string
   duration_hours: string
   metrics: MetricDefinition[]
-  // null has an agent measure the baseline. Otherwise the value typed for each ranking metric.
-  baseline: Record<string, string> | null
   // Empty is the platform's default.
   report_interval_seconds: string
   // null is the platform's default ladder.
@@ -56,9 +54,6 @@ export function toDrafts(stages: Stage[]): StageDraft[] {
     max_job_hours: s.max_job_hours ? String(s.max_job_hours) : '',
   }))
 }
-
-// The metrics a stated baseline gives a value of, as the API requires them.
-export const ranked = (metrics: MetricDefinition[]) => metrics.filter(m => !m.role || m.role === 'ranking')
 
 // An empty max_job_hours means "no limit" and parses to 0; an empty length/evict is a genuine
 // gap that stagesError reports.
