@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from claude_agent_sdk import (
     AssistantMessage,
+    StreamEvent,
     SystemMessage,
     TextBlock,
     ToolResultBlock,
@@ -81,6 +82,46 @@ class DoingTest(unittest.TestCase):
         inside = AssistantMessage(content=[ToolUseBlock(id="t", name="Bash", input={"command": "ls"})], model="m", parent_tool_use_id="task-1")
         self.assertEqual(activity.doing(inside), "")
         self.assertEqual(activity.doing(SystemMessage(subtype="init", data={})), "")
+
+
+def event(event, parent=None):
+    return StreamEvent(uuid="u", session_id="s", event=event, parent_tool_use_id=parent)
+
+
+def start(block):
+    return event({"type": "content_block_start", "index": 0, "content_block": block})
+
+
+def json_delta(partial):
+    return event({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": partial}})
+
+
+# A model call can think for minutes and then write a whole file into one tool call for another:
+# the platform shows which of the two it is doing while it does it.
+class ComposingTest(unittest.TestCase):
+    def test_a_file_being_written_is_said_by_its_name_once_written(self):
+        composing = activity.Composing()
+        self.assertEqual(composing.doing(start({"type": "thinking", "thinking": ""})), "thinking")
+        self.assertEqual(composing.doing(start({"type": "tool_use", "id": "t", "name": "Write", "input": {}})), "writing a file")
+        self.assertEqual(composing.doing(json_delta('{"file_path": "/w/prop')), "")
+        self.assertEqual(composing.doing(json_delta('osal.yaml", "content": "password: hun')), "writing proposal.yaml")
+        self.assertEqual(composing.doing(json_delta('ter2"}')), "")
+
+    def test_other_calls_and_text_say_no_argument(self):
+        composing = activity.Composing()
+        self.assertEqual(composing.doing(start({"type": "tool_use", "id": "t", "name": "Bash", "input": {}})), "writing a command")
+        self.assertEqual(composing.doing(json_delta('{"command": "curl -H \'Bearer hls_x\'"}')), "")
+        self.assertEqual(composing.doing(start({"type": "tool_use", "id": "t", "name": "Edit", "input": {}})), "editing a file")
+        self.assertEqual(composing.doing(json_delta('{"file_path": "/w/a file with spaces"')), "editing a file")
+        self.assertEqual(composing.doing(start({"type": "text", "text": ""})), "")
+        self.assertEqual(composing.doing(event({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "x"}})), "")
+
+    def test_a_subagent_and_whole_messages_change_nothing(self):
+        composing = activity.Composing()
+        self.assertEqual(composing.doing(event({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking"}}, parent="task-1")), "")
+        self.assertEqual(composing.doing(bash("ls")), "")
+        self.assertEqual(activity.doing(start({"type": "thinking"})), "")
+        self.assertEqual(activity.lines(start({"type": "thinking"}), "a", NOW), [])
 
 
 if __name__ == "__main__":

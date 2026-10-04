@@ -24,6 +24,7 @@ from claude_agent_sdk import (
     ProcessError,
     RateLimitEvent,
     ResultMessage,
+    StreamEvent,
 )
 
 from hypothesisloop_agent import config, core, progress, proposal, session, updates
@@ -50,7 +51,7 @@ def _log_message(message, agent: str) -> None:
     """Prints the activity lines to stdout, notes what the agent is doing now and logs the rest."""
     for line in activity.lines(message, agent, waited=_progress.waited()):
         print(line, flush=True)
-    if doing := activity.doing(message):
+    if doing := activity.doing(message) or _composing.doing(message):
         _progress.doing(doing)
     if isinstance(message, ResultMessage):
         log.info(
@@ -250,6 +251,8 @@ def _transport_error(error: Exception) -> bool:
 # What the platform reads this agent's health from, see progress.py. A turn silent for longer
 # than the watchdog below allows is one the watchdog failed to end.
 _progress = progress.Progress(quiet_limit_s=_TURN_SILENCE_TIMEOUT_S + 60)
+
+_composing = activity.Composing()
 
 # Where the session is kept so that it outlives this machine. Set by main().
 _sessions: session.Sessions | None = None
@@ -496,9 +499,9 @@ async def _receive_turn(client):
     """client.receive_response(), failing with TurnStalled when the CLI goes silent."""
     messages = client.receive_response().__aiter__()
     _progress.doing(progress.THINKING)
+    _progress.awaiting()
     try:
         while True:
-            _progress.awaiting()
             try:
                 async with asyncio.timeout(_TURN_SILENCE_TIMEOUT_S):
                     message = await anext(messages)
@@ -507,9 +510,21 @@ async def _receive_turn(client):
             except TimeoutError:
                 raise TurnStalled(f"no message from the CLI for {_TURN_SILENCE_TIMEOUT_S}s") from None
             yield message
+            # A stream event is part of the model call in flight, which is still awaited: how long
+            # it took is said when it answers.
+            if not isinstance(message, StreamEvent):
+                _progress.awaiting()
     finally:
         _progress.resting()
         _progress.doing(progress.WAITING)
+
+
+# How hard the model thinks before each step. A baseline agent measures a control it is told how to
+# run, against a deadline: at high it thought for 107 s (9155 tokens) before running `date` and
+# for 135 s (10529 tokens) before a `cat`, 7 min of 40 in single calls. The other roles design
+# and judge experiments and keep high.
+def _effort(cfg) -> str:
+    return "medium" if config.measures_baseline(cfg) else "high"
 
 
 def _context_tokens(usage: dict) -> int:
@@ -547,6 +562,9 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     options = ClaudeAgentOptions(
         system_prompt=setup.system_prompt + _FILE_TOOLS_NOTE,
         model=model,
+        effort=_effort(cfg),
+        # The stream events of a model call say what it writes while it writes, see activity.Composing.
+        include_partial_messages=True,
         permission_mode="bypassPermissions",
         # No max_turns cap: this session is meant to run for the platform experiment's whole
         # lifetime (hours to days), not a bounded number of turns. The only real stop conditions

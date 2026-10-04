@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from claude_agent_sdk import (
     AssistantMessage,
     RateLimitEvent,
+    StreamEvent,
     SystemMessage,
     TextBlock,
     ToolResultBlock,
@@ -187,3 +188,38 @@ def doing(message) -> str:
     if isinstance(message, UserMessage) and isinstance(message.content, list) and any(isinstance(block, ToolResultBlock) for block in message.content):
         return progress.THINKING
     return ""
+
+
+_PATH = re.compile(r'"(?:file_path|notebook_path)"\s*:\s*("(?:[^"\\]|\\.)*")')
+
+
+class Composing:
+    """What the agent is doing while the model writes its answer, from the stream events of the
+    call in flight: a model call can write a whole file into one tool call for a minute, and it is
+    shown as that once the file's name has been written."""
+
+    def __init__(self):
+        self._name = ""
+        self._input = ""
+
+    def doing(self, message) -> str:
+        if not isinstance(message, StreamEvent) or message.parent_tool_use_id:
+            return ""
+        event = message.event
+        if event.get("type") == "content_block_start":
+            block = event.get("content_block") or {}
+            self._name = block.get("name", "") if block.get("type") == "tool_use" else ""
+            self._input = ""
+            if block.get("type") == "thinking":
+                return progress.THINKING
+            if self._name == "Bash":
+                return "writing a command"
+            return progress.sentence(_tool(ToolUseBlock(id="", name=self._name, input={}))) if self._name else ""
+        delta = event.get("delta") or {}
+        if self._name not in _FILE_TOOLS or delta.get("type") != "input_json_delta":
+            return ""
+        self._input += delta.get("partial_json", "")
+        if not (found := _PATH.search(self._input)):
+            return ""
+        name, self._name = self._name, ""
+        return progress.sentence(_tool(ToolUseBlock(id="", name=name, input={"file_path": json.loads(found[1])})))

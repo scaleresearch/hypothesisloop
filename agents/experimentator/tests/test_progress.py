@@ -6,7 +6,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from claude_agent_sdk import AssistantMessage, TextBlock
+from claude_agent_sdk import AssistantMessage, StreamEvent, TextBlock
 
 from hypothesisloop_agent import progress
 from test_require_joined import AGENT_TOKEN
@@ -143,6 +143,41 @@ class BeatInTheRunLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(set(markers)), len(markers))
         # Beside each marker the loop says what the agent is at: a turn in flight is thinking.
         self.assertEqual({line for line in printed if line not in markers}, {"hl-activity thinking"})
+
+
+class StreamingClient:
+    """Answers with a thinking block, then a minute of stream events for one tool call."""
+
+    def __init__(self, clock):
+        self.clock = clock
+
+    async def receive_response(self):
+        self.clock.now += 100
+        yield AssistantMessage(content=[TextBlock(text="thought")], model="m")
+        for _ in range(6):
+            self.clock.now += 10
+            yield StreamEvent(uuid="u", session_id="s", event={"type": "content_block_delta"})
+        yield AssistantMessage(content=[TextBlock(text="wrote")], model="m")
+
+
+class StreamedCallTest(unittest.IsolatedAsyncioTestCase):
+    # A model call that streams is still awaited until it answers: the slow call is said with its
+    # whole length, and a turn that streams is no silence to the watchdog.
+    async def test_stream_events_leave_the_call_awaited(self):
+        clock = Clock()
+        awaited = progress.Progress(quiet_limit_s=1000, clock=clock, emit=lambda line: None)
+        waited = []
+        with mock.patch.object(run, "_progress", awaited):
+            async for message in run._receive_turn(StreamingClient(clock)):
+                if isinstance(message, AssistantMessage):
+                    waited.append(awaited.waited())
+        self.assertEqual(waited, [100, 60])
+
+
+class EffortTest(unittest.TestCase):
+    def test_a_baseline_agent_thinks_at_medium_and_every_other_role_at_high(self):
+        for role, effort in {"baseline": "medium", "planner": "high", "competitor": "high", "": "high"}.items():
+            self.assertEqual(run._effort(SimpleNamespace(role=role)), effort, role)
 
 
 if __name__ == "__main__":
