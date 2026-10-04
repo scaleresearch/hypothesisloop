@@ -85,8 +85,8 @@ type execer interface {
 
 func insertPlatformExperiment(ctx context.Context, db execer, pe *domain.PlatformExperiment) error {
 	const q = `
-INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_launcher, coordinator_model, max_hosted, repository, repository_url, agent_image, goal, created_by_kind, created_by_id, duration_hours)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)`
+INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_launcher, coordinator_model, max_hosted, repository, repository_url, agent_image, goal, created_by_kind, created_by_id, duration_hours, repository_account)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)`
 
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {
@@ -100,6 +100,9 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 	stages, err := json.Marshal(pe.Stages)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Create: marshal stages: %w", err)
+	}
+	if pe.Repository != "" && pe.RepositoryAccount != "" {
+		return fmt.Errorf("platform_experiments_store.Create: a platform experiment names its repository or the account one is created on, got repository %q and account %q", pe.Repository, pe.RepositoryAccount)
 	}
 	if pe.CoordinatorHosted != (pe.Coordinator != nil) {
 		return fmt.Errorf("platform_experiments_store.Create: coordinator_hosted is %v and a coordinator is given: %v", pe.CoordinatorHosted, pe.Coordinator != nil)
@@ -120,7 +123,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 		pe.CreatedAt, pe.UpdatedAt, pe.MaxConcurrentAccelerators, string(pe.DefaultQuotaTier),
 		pe.CoordinatorHosted, coordinator.Launcher, coordinator.Model, pe.MaxHosted,
 		pe.Repository, pe.RepositoryURL, pe.AgentImage,
-		pe.Goal, string(createdBy.Kind), createdBy.ID, pe.DurationHours,
+		pe.Goal, string(createdBy.Kind), createdBy.ID, pe.DurationHours, pe.RepositoryAccount,
 	)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Create: %w", err)
@@ -136,7 +139,7 @@ func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id
 	q := `
 SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, pe.shared,
        ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.repository_url, pe.agent_image, pe.goal, pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason,
-       pe.baseline_job_id, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id, pe.repository_error,
+       pe.baseline_job_id, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id, pe.repository_error, pe.repository_account,
        pe.duration_hours, pe.started_at, pe.planner_ends_at, pe.coordinator_instance_activity, pe.coordinator_instance_activity_at,
        (SELECT planner.instance_activity FROM experiment_signups planner WHERE ` + plannerOfDraft + `),
        (SELECT planner.instance_activity_at FROM experiment_signups planner WHERE ` + plannerOfDraft + `)
@@ -163,7 +166,7 @@ WHERE id = $1`
 		&coordinator.Instance.Renewals, &coordinator.Instance.Stopped, &coordinator.Instance.ExitedAt, &coordinator.Instance.ExitLog,
 		&coordinator.Instance.SeenAt, &coordinator.Instance.AskedAt, &coordinator.Instance.Launch, &coordinator.Instance.Reported, &coordinator.Instance.ProgressAt, &coordinator.Instance.EndReason, &coordinator.Instance.Released, &pe.MaxHosted, &pe.Repository, &pe.RepositoryURL, &pe.AgentImage,
 		&pe.Goal, &createdBy.Kind, &createdBy.ID, &proposal, &answeredAt, &pe.DeclinedReason,
-		&pe.BaselineJobID, &pe.JobEstimatedDurationHours, &pe.ClosedAt, &pe.CloseReason, &closedBy.Kind, &closedBy.ID, &pe.RepositoryError,
+		&pe.BaselineJobID, &pe.JobEstimatedDurationHours, &pe.ClosedAt, &pe.CloseReason, &closedBy.Kind, &closedBy.ID, &pe.RepositoryError, &pe.RepositoryAccount,
 		&pe.DurationHours, &startedAt, &plannerEndsAt, &coordinatorActivity, &coordinatorActivityAt,
 		&plannerActivity, &plannerActivityAt,
 	)

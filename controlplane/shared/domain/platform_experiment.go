@@ -214,7 +214,7 @@ type PlatformExperiment struct {
 	Status        PlatformExperimentStatus `json:"status"`
 	// StatusReason is why the platform experiment is in its status, in every status. Worked out
 	// when one is read and stored nowhere.
-	StatusReason *StatusReason `json:"status_reason,omitempty" doc:"Why it is in its status, in every answer that is one platform experiment (a read of it and each write that answers it, never a list). A draft's reason is repository_creating while the platform creates its repository, before its planner starts, then planning, revising, proposed (it waits for a person to accept) or declined (its planner proposed nothing, for declined_reason, and it waits for a person to revise or close it). An open one's is why it is not running yet: without a baseline baseline_measuring, baseline_required, baseline_undeclared, baseline_declaring or the reason the platform's declaration of the measured job is refused for (budget_below_baseline, baseline_breaks_constraint, baseline_missing_metric), and with one starts_at_ahead, no_researchers, budget_spent, or starting once nothing is missing.A running one's is agents_starting while no researcher's machine is running yet, when none of duration_hours is counted and the platform closes it at agents_due_at, and running from then. Any that is not closed reads launcher_unreachable instead while a machine it wants, of its planner, coordinator, baseline agents or researchers, is on a launcher that has not asked for its machines for a minute: message names the launcher and how long ago it last asked. A closed one's is its close_reason, or closed on one closed before reasons were kept. message says what the state waits for or how it came about and who acts, the command included, and to an agent that reads an open one it begins with the agent's own next step."`
+	StatusReason *StatusReason `json:"status_reason,omitempty" doc:"Why it is in its status, in every answer that is one platform experiment (a read of it and each write that answers it, never a list). Any that is not closed reads repository_creating while the platform creates its repository, before any machine of it starts. A draft's reason is then planning, revising, proposed (it waits for a person to accept) or declined (its planner proposed nothing, for declined_reason, and it waits for a person to revise or close it). An open one's is why it is not running yet: without a baseline baseline_measuring, baseline_required, baseline_undeclared, baseline_declaring or the reason the platform's declaration of the measured job is refused for (budget_below_baseline, baseline_breaks_constraint, baseline_missing_metric), and with one starts_at_ahead, no_researchers, budget_spent, or starting once nothing is missing.A running one's is agents_starting while no researcher's machine is running yet, when none of duration_hours is counted and the platform closes it at agents_due_at, and running from then. Any that is not closed reads launcher_unreachable instead while a machine it wants, of its planner, coordinator, baseline agents or researchers, is on a launcher that has not asked for its machines for a minute: message names the launcher and how long ago it last asked. A closed one's is its close_reason, or closed on one closed before reasons were kept. message says what the state waits for or how it came about and who acts, the command included, and to an agent that reads an open one it begins with the agent's own next step."`
 	// Stages is the elimination ladder, fixed at creation.
 	Stages []Stage `json:"stages"`
 	// CurrentStage is the 1-based index into Stages of the stage currently running.
@@ -245,7 +245,11 @@ type PlatformExperiment struct {
 	// coordinator run, empty for the platform's own. All fixed at creation.
 	Repository    string `json:"repository,omitempty"`
 	RepositoryURL string `json:"repository_url,omitempty" doc:"The HTTPS address agents and jobs clone."`
-	AgentImage    string `json:"agent_image,omitempty"`
+	// RepositoryAccount is the account the platform creates the repository on, for one created
+	// without naming its repository: the repository pass creates it after the create answered
+	// (AwaitsRepository). Empty for one that named its repository.
+	RepositoryAccount string `json:"-"`
+	AgentImage        string `json:"agent_image,omitempty"`
 
 	// BaselineJobID is the completed job that measured the baseline, as the platform checked it
 	// when it was declared, and JobEstimatedDurationHours the estimate of a job that states
@@ -277,10 +281,10 @@ type PlatformExperiment struct {
 	// ClosedAt is when it closed and CloseReason why; ClosedBy is whose credential closed it,
 	// absent when the platform did at ClosesAt. A list carries the first two and no ClosedBy.
 	ClosedAt    *time.Time  `json:"closed_at,omitempty"`
-	CloseReason CloseReason `json:"close_reason,omitempty" enum:"end_time_reached,closed_by_request,planning_limit_reached,proposal_expired,baseline_limit_reached,agents_not_started,planner_stopped,repository_not_created" doc:"Absent while it is not closed, and on one closed before reasons were kept. status_reason says the same with a sentence. planner_stopped is a draft whose planner's machine ended with every restart spent before it answered: the platform restarts a planner that dies, with its session, as it does any agent, and closes the draft in the write that gives the machine up. repository_not_created is a draft whose repository the platform could not create after the create answered, and its status_reason message says what the git host answered."`
+	CloseReason CloseReason `json:"close_reason,omitempty" enum:"end_time_reached,closed_by_request,planning_limit_reached,proposal_expired,baseline_limit_reached,agents_not_started,planner_stopped,repository_not_created" doc:"Absent while it is not closed, and on one closed before reasons were kept. status_reason says the same with a sentence. planner_stopped is a draft whose planner's machine ended with every restart spent before it answered: the platform restarts a planner that dies, with its session, as it does any agent, and closes the draft in the write that gives the machine up. repository_not_created is a draft or an experiment whose repository the platform could not create after the create answered, and its status_reason message says what the git host answered."`
 	ClosedBy    *Actor      `json:"closed_by,omitempty"`
-	// RepositoryError is what the git host answered when it did not create the repository of a
-	// draft closed repository_not_created. status_reason carries it.
+	// RepositoryError is what the git host answered when it did not create the repository of one
+	// closed repository_not_created. status_reason carries it.
 	RepositoryError string `json:"-"`
 
 	CreatedAt time.Time `json:"created_at"`
@@ -307,6 +311,12 @@ func (p *PlatformExperiment) ClosesAt() time.Time {
 // at work yet, and none of its duration is counted.
 func (p *PlatformExperiment) AwaitsAgents() bool {
 	return p.Status == PlatformExpRunning && p.StartedAt.IsZero()
+}
+
+// AwaitsRepository says the platform has yet to create the repository it keeps its code in. No
+// machine of it is wanted until then.
+func (p *PlatformExperiment) AwaitsRepository() bool {
+	return p.Repository == "" && p.RepositoryAccount != ""
 }
 
 // Answered says a draft's planner has answered its goal, with a proposal or a decline, and the
@@ -386,8 +396,8 @@ const (
 	// ClosePlannerStopped is a draft whose planner's machine was given up on, every restart
 	// spent, before the planner answered.
 	ClosePlannerStopped CloseReason = "planner_stopped"
-	// CloseRepositoryNotCreated is a draft whose repository the git host did not create, for
-	// RepositoryError. Its planner never started.
+	// CloseRepositoryNotCreated is one whose repository the git host did not create, for
+	// RepositoryError. None of its machines started.
 	CloseRepositoryNotCreated CloseReason = "repository_not_created"
 )
 

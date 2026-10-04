@@ -16,14 +16,14 @@ import (
 // signed up as the platform runs it, or creates neither. A draft takes no other signup: joining
 // is for an open platform experiment (enrolTx), which a draft becomes when it is accepted.
 //
-// A draft names its repository, or createOn is the account the platform creates one on, after
-// this returns (DraftsAwaitingRepository).
-func (s *PlatformExperimentsStore) CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, createOn string) error {
+// A draft names its repository, or the account the platform creates one on after this returns
+// (RepositoriesToCreate).
+func (s *PlatformExperimentsStore) CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup) error {
 	if pe.Status != domain.PlatformExpDraft || signup.AgentID != planner.ID || signup.Role != domain.SignupRolePlanner || !signup.Hosted {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: a draft is created with status draft and its hosted planner, got status %s and signup %+v", pe.Status, signup)
 	}
-	if (pe.Repository == "") == (createOn == "") {
-		return fmt.Errorf("platform_experiments_store.CreateDraft: a draft names its repository or the account one is created on, got repository %q and account %q", pe.Repository, createOn)
+	if (pe.Repository == "") == (pe.RepositoryAccount == "") {
+		return fmt.Errorf("platform_experiments_store.CreateDraft: a draft names its repository or the account one is created on, got repository %q and account %q", pe.Repository, pe.RepositoryAccount)
 	}
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
@@ -38,9 +38,6 @@ func (s *PlatformExperimentsStore) CreateDraft(ctx context.Context, pe *domain.P
 	}
 	if err := insertPlatformExperiment(ctx, tx, pe); err != nil {
 		return err
-	}
-	if _, err := tx.Exec(ctx, `UPDATE platform_experiments SET repository_account = $2 WHERE id = $1`, pe.ID, createOn); err != nil {
-		return fmt.Errorf("platform_experiments_store.CreateDraft: record the repository's account: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
 INSERT INTO agents (id, name, org_id, performance_score, created_at)
@@ -63,58 +60,6 @@ VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9, $10, $11)`, pe.ID, signup.Age
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: commit: %w", err)
-	}
-	return nil
-}
-
-// DraftAwaitingRepository is a draft whose repository the platform is to create, on Account.
-type DraftAwaitingRepository struct {
-	ID, ProjectID, Name, Account string
-}
-
-// awaitingRepository selects a draft whose repository is still to be created.
-const awaitingRepository = `status = 'draft' AND repository = '' AND repository_account <> ''`
-
-// DraftsAwaitingRepository returns the drafts whose repository is still to be created, oldest
-// first.
-func (s *PlatformExperimentsStore) DraftsAwaitingRepository(ctx context.Context) ([]DraftAwaitingRepository, error) {
-	rows, err := s.pool.pool.Query(ctx, `
-SELECT id, project_id, name, repository_account FROM platform_experiments
-WHERE `+awaitingRepository+`
-ORDER BY created_at`)
-	if err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.DraftsAwaitingRepository: %w", err)
-	}
-	drafts, err := pgx.CollectRows(rows, pgx.RowToStructByPos[DraftAwaitingRepository])
-	if err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.DraftsAwaitingRepository: %w", err)
-	}
-	return drafts, nil
-}
-
-// GiveDraftRepository records the repository created for a draft, from which its planner is
-// started. ErrNotDraft when the draft closed meanwhile.
-func (s *PlatformExperimentsStore) GiveDraftRepository(ctx context.Context, id, repository, url string) error {
-	tag, err := s.pool.pool.Exec(ctx, `
-UPDATE platform_experiments SET repository = $2, repository_url = $3, updated_at = now()
-WHERE id = $1 AND `+awaitingRepository, id, repository, url)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.GiveDraftRepository: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotDraft
-	}
-	return nil
-}
-
-// FailDraftRepository closes a draft whose repository the git host did not create, with what it
-// answered. A draft that closed meanwhile keeps what it has.
-func (s *PlatformExperimentsStore) FailDraftRepository(ctx context.Context, id, answer string) error {
-	if _, err := s.pool.pool.Exec(ctx, `
-UPDATE platform_experiments
-SET status = 'closed', updated_at = now(), closed_at = now(), close_reason = '`+string(domain.CloseRepositoryNotCreated)+`', repository_error = $2
-WHERE id = $1 AND `+awaitingRepository, id, answer); err != nil {
-		return fmt.Errorf("platform_experiments_store.FailDraftRepository: %w", err)
 	}
 	return nil
 }

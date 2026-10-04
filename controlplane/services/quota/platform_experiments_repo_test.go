@@ -84,6 +84,8 @@ type fakeRepositories struct {
 	created    []string
 	committed  map[string]string
 	notCreated error
+	// notOn is what refuses an account before anything is created.
+	notOn error
 }
 
 func (f *fakeRepositories) Create(_ context.Context, projectID, account, name, _ string, files map[string]string) (string, error) {
@@ -98,8 +100,12 @@ func (f *fakeRepositories) Create(_ context.Context, projectID, account, name, _
 	return account + "/" + name, nil
 }
 
-// CreatesOn answers the account named, or acme, the only one the org connected.
+// CreatesOn answers the account named, or acme, the only one the org connected, and notOn when
+// that is set.
 func (f *fakeRepositories) CreatesOn(_ context.Context, _, account string) (string, error) {
+	if f.notOn != nil {
+		return "", f.notOn
+	}
 	if account == "" {
 		return "acme", nil
 	}
@@ -151,6 +157,39 @@ type createdStore struct {
 	started int
 	// answered is when a launcher last asked for its machines, by name. One not in it asked now.
 	answered map[string]*time.Time
+}
+
+func (s *createdStore) awaiting(pe *domain.PlatformExperiment) bool {
+	return pe.Status != domain.PlatformExpClosed && pe.AwaitsRepository()
+}
+
+func (s *createdStore) RepositoriesToCreate(context.Context) ([]db.RepositoryToCreate, error) {
+	var out []db.RepositoryToCreate
+	for _, pe := range s.created {
+		if s.awaiting(pe) {
+			out = append(out, db.RepositoryToCreate{ID: pe.ID, ProjectID: pe.ProjectID, Name: pe.Name, Account: pe.RepositoryAccount})
+		}
+	}
+	return out, nil
+}
+
+func (s *createdStore) GiveRepository(_ context.Context, id, repository, url string) error {
+	for _, pe := range s.created {
+		if pe.ID == id && s.awaiting(pe) {
+			pe.Repository, pe.RepositoryURL = repository, url
+			return nil
+		}
+	}
+	return db.ErrRepositoryNotAwaited
+}
+
+func (s *createdStore) FailRepository(_ context.Context, id, answer string) error {
+	for _, pe := range s.created {
+		if pe.ID == id && s.awaiting(pe) {
+			pe.Status, pe.CloseReason, pe.RepositoryError = domain.PlatformExpClosed, domain.CloseRepositoryNotCreated, answer
+		}
+	}
+	return nil
 }
 
 func (s *createdStore) LauncherAnsweredAt(_ context.Context, names []string) (map[string]*time.Time, error) {
@@ -238,10 +277,10 @@ func (s *createdStore) UpdatePlatformExperiment(_ context.Context, pe *domain.Pl
 	return nil
 }
 
-func repoAPI(t *testing.T, caller authtest.As, repos *fakeRepositories) (*createdStore, func(method, path string, body any) *httptest.ResponseRecorder) {
+func repoAPI(t *testing.T, caller authtest.As, repos *fakeRepositories) (*createdStore, func(method, path string, body any) *httptest.ResponseRecorder, *PlatformExperimentsService) {
 	t.Helper()
 	store := &createdStore{}
-	svc := reaching(NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute), domain.CPUType)
+	svc := reaching(NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute), domain.CPUType).WithRepositories(repos)
 	placement := authtest.Placement{
 		Projects:            map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}, "prj-b": {ID: "prj-b", OrgID: "org-b"}},
 		PlatformExperiments: map[string]domain.Tenancy{},
@@ -261,7 +300,7 @@ func repoAPI(t *testing.T, caller authtest.As, repos *fakeRepositories) (*create
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 		return rec
-	}
+	}, svc
 }
 
 var ownerOfA = authtest.As{Kind: auth.KindUser, UserID: "u-1", OrgIDs: []string{"org-a"}}
@@ -277,7 +316,7 @@ func run(more map[string]any) map[string]any {
 
 func TestCreateFromRepoTakesWhatTheRequestLeavesOutFromTheFile(t *testing.T) {
 	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
-	store, call := repoAPI(t, ownerOfA, repos)
+	store, call, _ := repoAPI(t, ownerOfA, repos)
 	rec := call("POST", "/platform-experiments", run(map[string]any{"description": "the request's brief"}))
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("got = %d %s, want 201", rec.Code, rec.Body)
@@ -311,7 +350,7 @@ func TestCreateFromRepoTakesWhatTheRequestLeavesOutFromTheFile(t *testing.T) {
 func TestCreateFromRepoNeverTakesTheCostOfARunFromTheFile(t *testing.T) {
 	for _, field := range []string{"budget_accelerator_hours", "duration_hours"} {
 		repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
-		store, call := repoAPI(t, ownerOfA, repos)
+		store, call, _ := repoAPI(t, ownerOfA, repos)
 		body := run(nil)
 		delete(body, field)
 		rec := call("POST", "/platform-experiments", body)
@@ -320,7 +359,7 @@ func TestCreateFromRepoNeverTakesTheCostOfARunFromTheFile(t *testing.T) {
 		}
 	}
 	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
-	store, call := repoAPI(t, ownerOfA, repos)
+	store, call, _ := repoAPI(t, ownerOfA, repos)
 	if rec := call("POST", "/platform-experiments", run(map[string]any{"budget_accelerator_hours": 0})); rec.Code != http.StatusUnprocessableEntity || len(store.created) != 0 {
 		t.Errorf("a zero budget in the request: got = %d %s, want 422 and the file's 40 hours left unread", rec.Code, rec.Body)
 	}
@@ -337,7 +376,7 @@ func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 		}
 	}
 	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
-	store, call := repoAPI(t, ownerOfA, repos)
+	store, call, svc := repoAPI(t, ownerOfA, repos)
 	before := time.Now()
 	if rec := call("POST", "/platform-experiments", whole()); rec.Code != http.StatusCreated {
 		t.Fatalf("a body with a duration and no report interval or start: got = %d %s, want 201", rec.Code, rec.Body)
@@ -362,40 +401,48 @@ func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 	if rec := call("POST", "/platform-experiments", both); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "ends_at") {
 		t.Errorf("an end stated beside the duration: got = %d %s, want 422 naming ends_at, which is no field of a create", rec.Code, rec.Body)
 	}
-	if len(store.created) != 1 || len(repos.asked) != 0 || len(repos.created) != 1 {
-		t.Fatalf("created %d, repository read %v, made %v, want only the whole body created with its one repository and no read", len(store.created), repos.asked, repos.created)
+	if len(store.created) != 1 || len(repos.asked) != 0 || len(repos.created) != 0 {
+		t.Fatalf("created %d, repository read %v, made %v, want only the whole body created, no read and its repository not made yet", len(store.created), repos.asked, repos.created)
 	}
 
-	// One that names no repository gets its own on the org's account, and none is made for a
-	// body that is refused or stored when it cannot be made.
+	// One that names no repository is answered at once and gets its own on the org's account from
+	// the repository pass, and none is made for a body that is refused.
 	named := whole()
 	named["name"] = "LR warm-up: a sweep!"
 	rec := call("POST", "/platform-experiments", named)
-	var out domain.PlatformExperiment
+	var out map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
-	want := "acme/lr-warm-up-a-sweep-" + strings.TrimPrefix(out.ID, "pe-")
-	if rec.Code != http.StatusCreated || out.Repository != want || out.RepositoryURL != "https://github.com/"+want+".git" ||
-		store.created[1].Repository != want || len(repos.created) != 2 || !strings.HasPrefix(repos.created[1], "prj-a ") {
-		t.Fatalf("with no repository: got = %d %s (created %v), want %s made for the project's org and stored", rec.Code, rec.Body, repos.created, want)
+	if rec.Code != http.StatusCreated || out["repository"] != nil || out["status_reason"].(map[string]any)["reason"] != "repository_creating" {
+		t.Fatalf("with no repository: got = %d %s, want 201 with no repository yet and repository_creating", rec.Code, rec.Body)
+	}
+	if err := svc.ProvideRepositories(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	want := "acme/lr-warm-up-a-sweep-" + strings.TrimPrefix(out["id"].(string), "pe-")
+	if pe := store.created[1]; pe.Repository != want || pe.RepositoryURL != "https://github.com/"+want+".git" || len(repos.created) != 2 || !strings.HasPrefix(repos.created[1], "prj-a ") {
+		t.Fatalf("after the pass: repository %q at %q (created %v), want %s made for the project's org and stored", pe.Repository, pe.RepositoryURL, repos.created, want)
 	}
 	invalid := whole()
 	invalid["metrics"] = []map[string]any{}
-	repos.notCreated = api.Refuse(http.StatusUnprocessableEntity, "github_not_connected", "the org has connected no GitHub account")
 	if rec := call("POST", "/platform-experiments", invalid); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "invalid_metrics") {
-		t.Errorf("a body with no ranking metric: got = %d %s, want 422 invalid_metrics before any repository is asked for", rec.Code, rec.Body)
+		t.Errorf("a body with no ranking metric: got = %d %s, want 422 invalid_metrics", rec.Code, rec.Body)
 	}
+	repos.notOn = api.Refuse(http.StatusUnprocessableEntity, "github_not_connected", "the org has connected no GitHub account")
 	if rec := call("POST", "/platform-experiments", whole()); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "github_not_connected") {
 		t.Errorf("when the org has connected no GitHub account: got = %d %s, want 422 github_not_connected", rec.Code, rec.Body)
 	}
-	if len(store.created) != 2 || len(repos.created) != 2 {
-		t.Fatalf("created %d with %d repositories, want nothing more stored or made", len(store.created), len(repos.created))
+	if len(store.created) != 2 {
+		t.Fatalf("created %d, want nothing more stored", len(store.created))
 	}
 	// The account a new repository goes to is the request's to say, and never beside a repository.
-	repos.notCreated = nil
+	repos.notOn = nil
 	onAccount := whole()
 	onAccount["repository_account"] = "second-account"
-	if rec := call("POST", "/platform-experiments", onAccount); rec.Code != http.StatusCreated || !strings.HasPrefix(store.created[2].Repository, "second-account/") {
-		t.Errorf("naming the account: got = %d %s, want the repository made there", rec.Code, rec.Body)
+	if rec := call("POST", "/platform-experiments", onAccount); rec.Code != http.StatusCreated || store.created[2].RepositoryAccount != "second-account" {
+		t.Errorf("naming the account: got = %d %s, want the repository to be made there", rec.Code, rec.Body)
+	}
+	if err := svc.ProvideRepositories(context.Background()); err != nil || !strings.HasPrefix(store.created[2].Repository, "second-account/") {
+		t.Errorf("after the pass: repository %q, %v, want it made on second-account", store.created[2].Repository, err)
 	}
 	onAccount["repository"] = "acme/model"
 	if rec := call("POST", "/platform-experiments", onAccount); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "invalid_request") || len(store.created) != 3 {
@@ -407,7 +454,7 @@ func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 // through another org's installation.
 func TestCreateFromRepoChecksTheProjectFirst(t *testing.T) {
 	repos := &fakeRepositories{files: map[string]string{"prj-b": experimentBase}}
-	store, call := repoAPI(t, ownerOfA, repos)
+	store, call, _ := repoAPI(t, ownerOfA, repos)
 	for _, project := range []string{"prj-b", "prj-missing"} {
 		rec := call("POST", "/platform-experiments", run(map[string]any{"project_id": project}))
 		if rec.Code != http.StatusNotFound {
@@ -443,7 +490,7 @@ func TestCreateFromRepoRefusals(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			repos := &fakeRepositories{files: map[string]string{"prj-a": tc.file}, refusal: tc.refusal}
-			store, call := repoAPI(t, ownerOfA, repos)
+			store, call, _ := repoAPI(t, ownerOfA, repos)
 			rec := call("POST", "/platform-experiments", run(tc.more))
 			if rec.Code != tc.want || len(store.created) != 0 || names(rec.Body.String()) != tc.namesFile {
 				t.Fatalf("got = %d %s, created %d, want %d, nothing created, the file named: %v", rec.Code, rec.Body, len(store.created), tc.want, tc.namesFile)
@@ -465,7 +512,7 @@ func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
 		}
 	}
 	repos := &fakeRepositories{}
-	store, call := repoAPI(t, authtest.Staff, repos)
+	store, call, _ := repoAPI(t, authtest.Staff, repos)
 	patch := func(status domain.PlatformExperimentStatus, body map[string]any) (int, map[string]any, *domain.PlatformExperiment) {
 		t.Helper()
 		store.created = []*domain.PlatformExperiment{live(status)}
@@ -542,7 +589,7 @@ func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
 // may not state.
 func TestTheExperimentFileOfARepositoryIsReadWithoutCreatingAnything(t *testing.T) {
 	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
-	store, call := repoAPI(t, authtest.As(auth.Principal{Kind: auth.KindUser, OrgIDs: []string{"org-a"}}), repos)
+	store, call, _ := repoAPI(t, authtest.As(auth.Principal{Kind: auth.KindUser, OrgIDs: []string{"org-a"}}), repos)
 
 	rec := call("GET", "/projects/prj-a/experiment-file?repository=acme/model", nil)
 	var file map[string]any

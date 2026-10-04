@@ -1282,10 +1282,11 @@ ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS agent_image TEXT NOT N
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS repository_url TEXT NOT NULL DEFAULT '';
 UPDATE platform_experiments SET repository_url = 'https://github.com/' || repository || '.git'
 WHERE repository <> '' AND repository_url = '';
--- A draft whose repository the platform creates is stored without it, and repository_account is
--- the account it is created on: the repository pass (quota.ProvideRepositories) creates it after
--- the create answered, and the draft's planner starts once it is there. repository_error is what
--- the git host answered on a draft closed repository_not_created.
+-- A platform experiment or draft whose repository the platform creates is stored without it, and
+-- repository_account is the account it is created on: the repository pass
+-- (quota.ProvideRepositories) creates it after the create answered, and none of its machines
+-- starts before it is there. repository_error is what the git host answered on one closed
+-- repository_not_created.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS repository_account TEXT NOT NULL DEFAULT '';
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS repository_error   TEXT NOT NULL DEFAULT '';
 

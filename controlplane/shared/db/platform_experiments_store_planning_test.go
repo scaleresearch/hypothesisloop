@@ -26,7 +26,7 @@ func createTestDraft(t *testing.T, pool *Pool, launcher string) (peID, plannerID
 	planner := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Planner", PerformanceScore: 0.5, CreatedAt: now}
 	signup := domain.AgentSignup{AgentID: planner.ID, Role: domain.SignupRolePlanner, QuotaTier: domain.QuotaTierGuaranteed,
 		Hosted: true, Launcher: launcher, Flavor: domain.PlannerFlavor, Model: "model-1"}
-	if err := NewPlatformExperimentsStore(pool).CreateDraft(context.Background(), pe, planner, signup, ""); err != nil {
+	if err := NewPlatformExperimentsStore(pool).CreateDraft(context.Background(), pe, planner, signup); err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
 	if planner.OrgID != "default" {
@@ -97,7 +97,7 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 	now := time.Now().UTC()
 	bad := &domain.PlatformExperiment{ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Status: domain.PlatformExpDraft, PlanningEndsAt: now, Stages: []domain.Stage{{LengthPct: 100}}}
 	agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12]}
-	if err := pes.CreateDraft(ctx, bad, agent, domain.AgentSignup{AgentID: agent.ID, Flavor: "generalist", Hosted: true}, "acme"); err == nil {
+	if err := pes.CreateDraft(ctx, bad, agent, domain.AgentSignup{AgentID: agent.ID, Flavor: "generalist", Hosted: true}); err == nil {
 		t.Fatal("a draft whose agent is no planner was created")
 	}
 	if got, _ := pes.GetPlatformExperiment(ctx, bad.ID); got != nil {
@@ -105,9 +105,10 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 	}
 }
 
-// A draft whose repository the platform creates is stored before it, and its planner is wanted
-// only once the repository is recorded. One GitHub refuses closes with what GitHub answered.
-func TestADraftAwaitsItsRepositoryBeforeItsPlannerIsWanted(t *testing.T) {
+// A draft or experiment whose repository the platform creates is stored before it, and its
+// machines are wanted only once the repository is recorded. One GitHub refuses closes with what
+// GitHub answered.
+func TestNoMachineIsWantedBeforeTheRepositoryIsRecorded(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
@@ -116,10 +117,10 @@ func TestADraftAwaitsItsRepositoryBeforeItsPlannerIsWanted(t *testing.T) {
 		now := time.Now().UTC()
 		pe := &domain.PlatformExperiment{ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "a goal", Goal: "a goal",
 			MaxAgents: 1, PlanningEndsAt: now.Add(30 * time.Minute), Status: domain.PlatformExpDraft,
-			Metrics: []domain.MetricDefinition{}, ReportIntervalSeconds: 30, Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: now, UpdatedAt: now, MaxHosted: 5}
+			Metrics: []domain.MetricDefinition{}, ReportIntervalSeconds: 30, Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: now, UpdatedAt: now, MaxHosted: 5, RepositoryAccount: "acme"}
 		planner := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Planner", CreatedAt: now}
 		if err := pes.CreateDraft(ctx, pe, planner, domain.AgentSignup{AgentID: planner.ID, Role: domain.SignupRolePlanner, QuotaTier: domain.QuotaTierGuaranteed,
-			Hosted: true, Launcher: launcher, Flavor: domain.PlannerFlavor, Model: "model-1"}, "acme"); err != nil {
+			Hosted: true, Launcher: launcher, Flavor: domain.PlannerFlavor, Model: "model-1"}); err != nil {
 			t.Fatal(err)
 		}
 		return pe, planner.ID
@@ -136,29 +137,52 @@ func TestADraftAwaitsItsRepositoryBeforeItsPlannerIsWanted(t *testing.T) {
 		return ids
 	}
 	awaiting := func(id string) bool {
-		drafts, err := pes.DraftsAwaitingRepository(ctx)
+		drafts, err := pes.RepositoriesToCreate(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return slices.ContainsFunc(drafts, func(d DraftAwaitingRepository) bool { return d.ID == id && d.Account == "acme" && d.Name == "a goal" })
+		return slices.ContainsFunc(drafts, func(d RepositoryToCreate) bool { return d.ID == id && d.Account == "acme" })
 	}
 
 	given, planner := draft()
 	if !awaiting(given.ID) || len(wanted()) != 0 {
 		t.Fatalf("a draft without its repository: awaiting %v, planners wanted %v, want it awaiting and none", awaiting(given.ID), wanted())
 	}
-	if err := pes.GiveDraftRepository(ctx, given.ID, "acme/a-goal", "https://github.com/acme/a-goal.git"); err != nil {
+	if err := pes.GiveRepository(ctx, given.ID, "acme/a-goal", "https://github.com/acme/a-goal.git"); err != nil {
 		t.Fatal(err)
 	}
 	if awaiting(given.ID) || !slices.Equal(wanted(), []string{planner}) {
 		t.Fatalf("a draft given its repository: awaiting %v, planners wanted %v, want its planner", awaiting(given.ID), wanted())
 	}
-	if err := pes.GiveDraftRepository(ctx, given.ID, "acme/other", ""); !errors.Is(err, ErrNotDraft) {
-		t.Fatalf("giving a second repository: %v, want ErrNotDraft", err)
+	if err := pes.GiveRepository(ctx, given.ID, "acme/other", ""); !errors.Is(err, ErrRepositoryNotAwaited) {
+		t.Fatalf("giving a second repository: %v, want ErrRepositoryNotAwaited", err)
+	}
+
+	// A whole experiment's coordinator waits for the repository the same way.
+	now := time.Now().UTC()
+	whole := &domain.PlatformExperiment{ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "whole", BudgetAcceleratorHours: 10,
+		MaxAgents: 2, Status: domain.PlatformExpOpen, Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}}, ReportIntervalSeconds: 30,
+		Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: now, UpdatedAt: now, BaselineDueAt: now.Add(time.Hour), MaxHosted: 5, RepositoryAccount: "acme",
+		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Launcher: launcher, Model: "model-1"}}
+	if err := pes.CreatePlatformExperiment(ctx, whole, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	coordinators := func() int {
+		listed, err := pes.ListLauncherCoordinators(ctx, launcher, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(listed)
+	}
+	if !awaiting(whole.ID) || coordinators() != 0 {
+		t.Fatalf("a whole experiment without its repository: awaiting %v, %d coordinators wanted, want it awaiting and none", awaiting(whole.ID), coordinators())
+	}
+	if err := pes.GiveRepository(ctx, whole.ID, "acme/whole", "https://github.com/acme/whole.git"); err != nil || coordinators() != 1 {
+		t.Fatalf("given its repository: %v, %d coordinators wanted, want its coordinator", err, coordinators())
 	}
 
 	refused, _ := draft()
-	if err := pes.FailDraftRepository(ctx, refused.ID, "GitHub said no"); err != nil {
+	if err := pes.FailRepository(ctx, refused.ID, "GitHub said no"); err != nil {
 		t.Fatal(err)
 	}
 	got, err := pes.GetPlatformExperiment(ctx, refused.ID)

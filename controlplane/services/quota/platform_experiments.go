@@ -60,14 +60,13 @@ type PlatformExperimentsStore interface {
 	// Decline stores why a draft's planner proposes nothing, until when the draft waits for a
 	// person and how long the planner's machine is kept; db.ErrNotDraft for anything but a draft.
 	Decline(ctx context.Context, id, reason string, waitUntil time.Time, keepPlanner time.Duration) error
-	// CreateDraft creates a draft with its planner signed up, or neither. The draft names its
-	// repository, or createOn is the account one is to be created on.
-	CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, createOn string) error
-	// DraftsAwaitingRepository, GiveDraftRepository and FailDraftRepository are the repository
-	// pass's: the drafts whose repository is to be created, and what became of each.
-	DraftsAwaitingRepository(ctx context.Context) ([]db.DraftAwaitingRepository, error)
-	GiveDraftRepository(ctx context.Context, id, repository, url string) error
-	FailDraftRepository(ctx context.Context, id, answer string) error
+	// CreateDraft creates a draft with its planner signed up, or neither.
+	CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup) error
+	// RepositoriesToCreate, GiveRepository and FailRepository are the repository pass's: the
+	// platform experiments whose repository is to be created, and what became of each.
+	RepositoriesToCreate(ctx context.Context) ([]db.RepositoryToCreate, error)
+	GiveRepository(ctx context.Context, id, repository, url string) error
+	FailRepository(ctx context.Context, id, answer string) error
 	// SpawnAgent creates an agent in the experiment's org and signs it up, or does neither.
 	SpawnAgent(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup) error
 	RemoveAgent(ctx context.Context, platformExpID, agentID string, deleteDataKey func(ctx context.Context, accessKeyID string) error) error
@@ -231,9 +230,9 @@ type CreatePlatformExperimentRequest struct {
 	maxHosted int
 	// createdBy is whose credential the request came with.
 	createdBy *domain.Actor
-	// prepare runs on the platform experiment once the request is found valid and before it is
-	// stored.
-	prepare func(context.Context, *domain.PlatformExperiment) error
+	// repository is where it keeps its code, as the handler resolved the request's repository
+	// and repository_account (chooseRepository).
+	repository RepositoryChoice
 
 	// raw is the body as it arrived. Which keys it carried is what tells a field left out from
 	// one stated as its zero value.

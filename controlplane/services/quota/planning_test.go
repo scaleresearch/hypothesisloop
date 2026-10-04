@@ -354,8 +354,6 @@ type draftStore struct {
 	statusStore
 	planners map[string]*domain.Agent
 	signups  map[string]domain.AgentSignup
-	// createOn is, by draft, the account its repository is to be created on.
-	createOn map[string]string
 	// unregistered is a launcher config names and no operator registered.
 	unregistered bool
 
@@ -371,45 +369,12 @@ func (s *draftStore) LauncherKnown(context.Context, string) (bool, error) {
 	return !s.unregistered, nil
 }
 
-func (s *draftStore) CreateDraft(_ context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, createOn string) error {
+func (s *draftStore) CreateDraft(_ context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup) error {
 	if s.planners == nil {
-		s.planners, s.signups, s.createOn = map[string]*domain.Agent{}, map[string]domain.AgentSignup{}, map[string]string{}
+		s.planners, s.signups = map[string]*domain.Agent{}, map[string]domain.AgentSignup{}
 	}
 	s.created = append(s.created, pe)
-	s.planners[pe.ID], s.signups[pe.ID], s.createOn[pe.ID] = planner, signup, createOn
-	return nil
-}
-
-func (s *draftStore) awaiting(pe *domain.PlatformExperiment) bool {
-	return pe.Status == domain.PlatformExpDraft && pe.Repository == "" && s.createOn[pe.ID] != ""
-}
-
-func (s *draftStore) DraftsAwaitingRepository(context.Context) ([]db.DraftAwaitingRepository, error) {
-	var out []db.DraftAwaitingRepository
-	for _, pe := range s.created {
-		if s.awaiting(pe) {
-			out = append(out, db.DraftAwaitingRepository{ID: pe.ID, ProjectID: pe.ProjectID, Name: pe.Name, Account: s.createOn[pe.ID]})
-		}
-	}
-	return out, nil
-}
-
-func (s *draftStore) GiveDraftRepository(_ context.Context, id, repository, url string) error {
-	for _, pe := range s.created {
-		if pe.ID == id && s.awaiting(pe) {
-			pe.Repository, pe.RepositoryURL = repository, url
-			return nil
-		}
-	}
-	return db.ErrNotDraft
-}
-
-func (s *draftStore) FailDraftRepository(_ context.Context, id, answer string) error {
-	for _, pe := range s.created {
-		if pe.ID == id && s.awaiting(pe) {
-			pe.Status, pe.CloseReason, pe.RepositoryError = domain.PlatformExpClosed, domain.CloseRepositoryNotCreated, answer
-		}
-	}
+	s.planners[pe.ID], s.signups[pe.ID] = planner, signup
 	return nil
 }
 

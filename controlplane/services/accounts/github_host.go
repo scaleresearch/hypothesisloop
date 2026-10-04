@@ -2,6 +2,7 @@ package accounts
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -82,11 +83,33 @@ func (h *GitHubHost) Create(ctx context.Context, projectID, account, name, descr
 		}
 	}
 	created, err := h.github.CreateRepository(ctx, chosen.InstallationID, userToken, name, description, files)
+	if errors.Is(err, github.ErrRepositoryExists) {
+		if adopted, ours := h.madeHere(ctx, chosen, name, files); ours {
+			h.logger.Info("repository found as created before, adopted", zap.String("repository", adopted), zap.String("orgID", orgID))
+			return adopted, nil
+		}
+	}
 	if err != nil {
 		return "", refusal(h.logger, op, err, http.StatusUnprocessableEntity)
 	}
 	h.logger.Info("repository created for a platform experiment", zap.String("repository", created.FullName), zap.String("orgID", orgID))
 	return created.FullName, nil
+}
+
+// madeHere says the repository of that name on the chosen account is the one an earlier Create
+// with the same files made, which a restart left unrecorded: the installation reaches it and its
+// experiment file is the template's. The name carries the platform experiment's id, so a
+// repository that passes both is no one else's. It returns the repository as GitHub names it.
+func (h *GitHubHost) madeHere(ctx context.Context, chosen *domain.OrgGitHubInstallation, name string, files map[string]string) (string, bool) {
+	token, err := h.github.Token(ctx, chosen.InstallationID, chosen.AccountLogin+"/"+name, github.Read)
+	if err != nil {
+		return "", false
+	}
+	data, err := h.github.File(ctx, token, "", domain.ExperimentFile)
+	if err != nil || string(data) != files[domain.ExperimentFile] {
+		return "", false
+	}
+	return token.Repository, true
 }
 
 func (h *GitHubHost) CreatesOn(ctx context.Context, projectID, account string) (string, error) {

@@ -968,6 +968,24 @@ func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 	if statusOf(err) != 502 || reasonOf(err) != ReasonRepositoryNotCreated || !strings.Contains(err.Error(), "Acme/another") || !strings.Contains(err.Error(), "name it in repository") || strings.Contains(err.Error(), "409") {
 		t.Errorf("a first commit GitHub refused: Create = %v, want 502 repository_not_created naming the repository left behind and nothing GitHub said", err)
 	}
+
+	// A restart between the create and its record left the repository made and unrecorded: the
+	// same create finds it on the account, from the template, and takes it. One of the name that
+	// holds anything else is someone else's.
+	template := map[string]string{"README.md": "what this is\n", domain.ExperimentFile: "name: the template\n"}
+	w.app.createErr = github.ErrRepositoryExists
+	w.app.file = template[domain.ExperimentFile]
+	if named, err := w.host.Create(ctx, w.projectA, "acme", "model", "", template); err != nil || named != "Acme/Model" {
+		t.Errorf("a repository made before from the template: Create = %q, %v, want Acme/Model taken as it is", named, err)
+	}
+	w.app.file = "name: their own\n"
+	if named, err := w.host.Create(ctx, w.projectA, "acme", "model", "", template); named != "" || statusOf(err) != 409 || reasonOf(err) != ReasonRepositoryExists {
+		t.Errorf("a repository of the name with another experiment file: Create = %q, %v, want 409 repository_exists", named, err)
+	}
+	w.app.fileErr = github.ErrFileNotFound
+	if named, err := w.host.Create(ctx, w.projectA, "acme", "model", "", template); named != "" || statusOf(err) != 409 {
+		t.Errorf("a repository of the name with no experiment file: Create = %q, %v, want 409 repository_exists", named, err)
+	}
 }
 
 // GitHub creates on a person's own account for that person alone, so the authorisation they

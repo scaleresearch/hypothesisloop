@@ -162,15 +162,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"repository is the code the platform experiment works on, owner/name on GitHub: agents clone it and push their branches to it, jobs check it out, and repository_url in the answer is where from. " +
 			"A platform experiment keeps its code in a repository: left out, the platform creates a private one on the GitHub account the org connected, named from the experiment and its id, " +
 			"whose one commit is the experiment template (README.md, " + domain.ExperimentFile + " and .hypothesisloop/job.yaml, the base job spec), " +
-			"stores it as if the request had named it and answers with it in repository and repository_url. The installation covers a repository it created whichever repositories its owner selected. " +
+			"after the create answered: the answer has no repository yet and status_reason repository_creating, no machine of it starts before the repository is recorded, and a read then names it in repository and repository_url. The installation covers a repository it created whichever repositories its owner selected. " +
 			"With several accounts connected, repository_account says which, and 422 repository_account_required lists them when it is left out; it is never stated with repository (422 invalid_request). " +
+			"422 github_not_connected when the org has connected no GitHub account, and installation_not_connected when repository_account is none it connected: those are answered before anything is created. " +
 			"On a GitHub organisation the installation creates the repository. On a person's own account GitHub creates one for its owner alone, so the platform creates it with the authorisation the owner connected the account with " +
-			"and adds it to the installation: 422 repository_authorization_required when the platform does not hold that authorisation or GitHub no longer takes it (the owner connects the account again), " +
-			"502 repository_not_added when GitHub created the repository and did not add it to the installation (the message names it, and its owner adds it there). " +
-			"422 github_not_connected when the org has connected no GitHub account, 422 repository_creation_not_permitted when GitHub refuses the creation " +
-			"(the message says which permissions GitHub takes for it; the account's owner grants one, or the request names a repository), 409 repository_exists when the name is taken, " +
-			"502 repository_not_created when GitHub refused the create for another reason, with GitHub's message, or made the repository and refused its first commit: " +
-			"then the message names the repository left on the account, which the next request may name. Nothing is created without its repository. A repository the request names is never written to. " +
+			"and adds it to the installation. When GitHub does not create it (the authorisation is gone, GitHub refuses the creation or its first commit, the name is taken by a repository that is not this experiment's), " +
+			"the platform experiment is closed with close_reason repository_not_created, and its status_reason message carries what GitHub answered. A repository the request names is never written to. " +
 			"Named, an installation of the platform's GitHub App that the org connected must cover it " +
 			"(GET /orgs/{id}/github-repositories lists what may be named): 422 invalid_repository when it is not owner/name, installation_not_connected when " +
 			"the org connected no installation on the account that owns it, repository_not_reachable when the installation does not cover it, " +
@@ -232,7 +229,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 				return nil, peh.refusal("create platform experiment", err)
 			}
 		}
-		hosting.prepare = peh.provideRepository(hosting.Repository, in.Body.RepositoryAccount)
+		if hosting.repository, err = peh.chooseRepository(ctx, in.Body.ProjectID, hosting.Repository, in.Body.RepositoryAccount); err != nil {
+			return nil, err
+		}
 		pe, err := peh.svc.Create(ctx, hosting)
 		// What is wrong with a body laid over the experiment file may be the file's doing.
 		var refused *api.Refusal

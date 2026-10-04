@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
+	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 
 	"github.com/scaleresearch/hypothesisloop/cli/repotemplate"
@@ -37,20 +39,85 @@ func RepositoryName(pe *domain.PlatformExperiment) string {
 	return name + "-" + strings.TrimPrefix(pe.ID, "pe-")
 }
 
-// provideRepository gives a platform experiment the repository the request named, as it is, or
-// with none named one the platform creates for it from the template, on account when the
-// request says which.
-func (h *PlatformExperimentsHandler) provideRepository(named, account string) func(context.Context, *domain.PlatformExperiment) error {
-	return func(ctx context.Context, pe *domain.PlatformExperiment) error {
-		if named == "" {
-			created, err := h.repos.Create(ctx, pe.ProjectID, account, RepositoryName(pe), "Platform experiment "+pe.ID+": "+pe.Name, repotemplate.Files())
-			if err != nil {
-				return err
-			}
-			named = created
+// RepositoryChoice is where a platform experiment or draft keeps its code: Named, the repository
+// the request named, at URL, or with none named CreateOn, the account the repository pass creates
+// one on after the create answered (ProvideRepositories).
+type RepositoryChoice struct {
+	Named, URL, CreateOn string
+}
+
+// chooseRepository is where a create keeps its code: named, which repositoryOf checked, or the
+// account a new one is created on, which the git host refuses here when it would refuse the
+// creation for the account alone.
+func (h *PlatformExperimentsHandler) chooseRepository(ctx context.Context, projectID, named, account string) (RepositoryChoice, error) {
+	if named != "" {
+		return RepositoryChoice{Named: named, URL: h.repos.URL(named)}, nil
+	}
+	on, err := h.repos.CreatesOn(ctx, projectID, account)
+	return RepositoryChoice{CreateOn: on}, err
+}
+
+// ProvideRepositories creates the repository of every platform experiment and draft that awaits
+// one, from the template, and records it, from which its machines are started. One whose
+// repository the git host does not create is closed repository_not_created with what the host
+// answered.
+func (s *PlatformExperimentsService) ProvideRepositories(ctx context.Context) error {
+	pending, err := s.store.RepositoriesToCreate(ctx)
+	if err != nil {
+		return fmt.Errorf("platform_experiments.ProvideRepositories: %w", err)
+	}
+	for _, one := range pending {
+		pe := &domain.PlatformExperiment{ID: one.ID, Name: one.Name}
+		created, err := s.repos.Create(ctx, one.ProjectID, one.Account, RepositoryName(pe), "Platform experiment "+pe.ID+": "+pe.Name, repotemplate.Files())
+		if ctx.Err() != nil {
+			return nil
 		}
-		pe.Repository, pe.RepositoryURL = named, h.repos.URL(named)
-		return nil
+		log := s.logger.With(zap.String("platform_experiment_id", one.ID))
+		if err != nil {
+			log.Warn("provide_repositories: not created", zap.Error(err))
+			if err := s.store.FailRepository(ctx, one.ID, err.Error()); err != nil {
+				log.Error("provide_repositories: close it", zap.Error(err))
+			}
+			continue
+		}
+		if err := s.store.GiveRepository(ctx, one.ID, created, s.repos.URL(created)); err != nil {
+			log.Error("provide_repositories: record the repository", zap.String("repository", created), zap.Error(err))
+			continue
+		}
+		log.Info("provide_repositories: created", zap.String("repository", created))
+	}
+	return nil
+}
+
+// wakeRepositories wakes the repository pass for pe when it awaits its repository.
+func (s *PlatformExperimentsService) wakeRepositories(pe *domain.PlatformExperiment) {
+	if !pe.AwaitsRepository() {
+		return
+	}
+	select {
+	case s.repositoryWake <- struct{}{}:
+	default:
+	}
+}
+
+// StartRepositoryPass runs ProvideRepositories when a create wakes it and every interval, until
+// ctx is cancelled.
+func (s *PlatformExperimentsService) StartRepositoryPass(ctx context.Context, interval time.Duration) {
+	if s.repos == nil {
+		panic("quota: StartRepositoryPass without WithRepositories: no platform experiment would get its repository")
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.repositoryWake:
+		case <-ticker.C:
+		}
+		if err := s.ProvideRepositories(ctx); err != nil {
+			s.logger.Error("provide_repositories: scan", zap.Error(err))
+		}
 	}
 }
 

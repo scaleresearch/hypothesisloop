@@ -25,10 +25,11 @@ type LauncherCoordinator struct {
 
 // launcherCoordinatorsWhere selects the platform experiments whose coordinator a launcher still
 // has something to do for: open or running ones, and those closed less than $2 seconds ago, on
-// the database's clock. A stopped coordinator is among them, as a stopped agent is.
+// the database's clock. A stopped coordinator is among them, as a stopped agent is. None is while
+// the platform still creates the repository (awaitsRepository).
 const launcherCoordinatorsWhere = `
 FROM platform_experiments pe
-WHERE pe.coordinator_hosted AND pe.coordinator_launcher = $1
+WHERE pe.coordinator_hosted AND pe.coordinator_launcher = $1 AND NOT (` + awaitsRepository + `)
   AND (pe.status IN ('open', 'running') OR (pe.status = 'closed' AND pe.closed_at > now() - make_interval(secs => $2)))`
 
 // ListLauncherCoordinators returns the hosted coordinators the launcher's desired state is

@@ -17,16 +17,16 @@ const reasonLauncherUnreachable = "launcher_unreachable"
 // it is to run says it waits for it: several of its passes, which are seconds apart.
 const launcherSilentAfter = time.Minute
 
-// wantsMachine says pe wants a machine now for signup, a hosted agent of it: a draft's planner
-// while it plans in its repository, an open one's baseline agents until they finish, and a
+// wantsMachine says pe, which has its repository, wants a machine now for signup, a hosted agent
+// of it: a draft's planner while it plans, an open one's baseline agents until they finish, and a
 // running one's agents whose run goes on.
 func wantsMachine(pe *domain.PlatformExperiment, signup domain.AgentSignup) bool {
-	if !signup.Hosted || signup.Ended != "" || signup.Instance != nil && signup.Instance.Stopped {
+	if pe.AwaitsRepository() || !signup.Hosted || signup.Ended != "" || signup.Instance != nil && signup.Instance.Stopped {
 		return false
 	}
 	switch pe.Status {
 	case domain.PlatformExpDraft:
-		return signup.Role == domain.SignupRolePlanner && pe.Repository != "" && !pe.Answered()
+		return signup.Role == domain.SignupRolePlanner && !pe.Answered()
 	case domain.PlatformExpOpen:
 		return signup.Role == domain.SignupRoleBaseline && signup.FinishedAt == nil
 	case domain.PlatformExpRunning:
@@ -67,7 +67,7 @@ func (s *PlatformExperimentsService) launcherUnreachable(ctx context.Context, pe
 			names = append(names, signup.Launcher)
 		}
 	}
-	if pe.Coordinator != nil && !pe.Coordinator.Instance.Stopped && (pe.Status == domain.PlatformExpOpen || pe.Status == domain.PlatformExpRunning) {
+	if pe.Coordinator != nil && !pe.Coordinator.Instance.Stopped && !pe.AwaitsRepository() && (pe.Status == domain.PlatformExpOpen || pe.Status == domain.PlatformExpRunning) {
 		names = append(names, pe.Coordinator.Launcher)
 	}
 	slices.Sort(names)
