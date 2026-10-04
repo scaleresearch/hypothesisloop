@@ -128,7 +128,7 @@ var EventKinds = []EventKindDoc{
 	{Kind: EventAgentCut, Subject: "agent id", Value: "stage index",
 		Description: "This agent was cut at a stage boundary. Its own stop condition, without a GET to find out whether the cut was its."},
 	{Kind: EventAgentFinished, Subject: "agent id", Value: "empty by design",
-		Description: "This agent said it has nothing left to do, and its machine stops. detail is the reason it gave. When every agent is finished or cut the run has nobody left to wait for."},
+		Description: "This agent said it has nothing left to do, and its machine stops. detail is the reason it gave, and for a researcher the blocker it named and the time and quota it left. When every agent is finished or cut the run has nobody left to wait for."},
 	{Kind: EventHypothesisNew, Subject: "hypothesis id", Value: "empty by design",
 		Description: "An idea entered the shared pool. agent_id is whose it is, empty on one no agent owns. The claim itself and who registered it come from GET /hypotheses/{id}."},
 	{Kind: EventHypothesisStatus, Subject: "hypothesis id", Value: "open, confirmed, refuted, inconclusive",

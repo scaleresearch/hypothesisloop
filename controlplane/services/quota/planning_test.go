@@ -989,7 +989,7 @@ func TestAnAcceptedDraftRunsOnceItsBaselineAgentFinishesWithNoCoordinatorAction(
 	gaveUp.baselines = append([]domain.AgentSignup{}, store.baselines...)
 	gaveUp.created = []*domain.PlatformExperiment{store.created[0]}
 	gaveUpSvc, _ := planningAPI(t, &gaveUp, planner)
-	if _, err := gaveUpSvc.FinishAgent(ctx, "pe-draft", measures, "train.py does not run"); err != nil {
+	if _, err := gaveUpSvc.FinishAgent(ctx, "pe-draft", measures, "train.py does not run", ""); err != nil {
 		t.Fatalf("a baseline agent finishing with no job: %v", err)
 	}
 	left := gaveUp.created[0]
@@ -1000,7 +1000,7 @@ func TestAnAcceptedDraftRunsOnceItsBaselineAgentFinishesWithNoCoordinatorAction(
 
 	// The one that measured: its finish declares its job and starts the run.
 	store.left = []*domain.Experiment{measured.Job}
-	finished, err := svc.FinishAgent(ctx, "pe-draft", measures, "the baseline is measured")
+	finished, err := svc.FinishAgent(ctx, "pe-draft", measures, "the baseline is measured", "")
 	if err != nil || finished.FinishedAt == nil {
 		t.Fatalf("the baseline agent finishing: %+v, %v", finished, err)
 	}
@@ -1011,7 +1011,7 @@ func TestAnAcceptedDraftRunsOnceItsBaselineAgentFinishesWithNoCoordinatorAction(
 			pe.BaselineJobID, pe.Status, store.started, pe.JobEstimatedDurationHours, pe.Description)
 	}
 	// Finishing again changes nothing.
-	if _, err := svc.FinishAgent(ctx, "pe-draft", measures, "the baseline is measured"); err != nil || store.started != 1 {
+	if _, err := svc.FinishAgent(ctx, "pe-draft", measures, "the baseline is measured", ""); err != nil || store.started != 1 {
 		t.Fatalf("a second finish: %v with %d starts, want nothing changed", err, store.started)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
@@ -44,6 +45,8 @@ type rosterStore struct {
 	// hypotheses is the graph, and graphErr what reading it fails with.
 	hypotheses []*domain.Hypothesis
 	graphErr   error
+	// quota is every agent's allocation, nil for none.
+	quota *domain.AgentQuota
 }
 
 func (s *rosterStore) AgentJobsByAgent(context.Context, string) (map[string]db.AgentJobs, error) {
@@ -817,6 +820,58 @@ func (f *rosterStore) FinishAgent(_ context.Context, _, agentID, reason string) 
 		return db.ErrSignupClosed
 	}
 	return db.ErrNotSignedUp
+}
+
+func (f *rosterStore) AddDesiredQuotaUsageOne(context.Context, *domain.AgentQuota) error { return nil }
+
+func (f *rosterStore) GetAgentRunningExperiments(context.Context, string, string) ([]*domain.Experiment, error) {
+	return nil, nil
+}
+
+// In run 4 both researchers finished with 11 to 16 minutes of an hour and most of their quota
+// left, and the coordinator heard only their reasons. A researcher with more than a tenth of
+// both left names its blocker or is told what is left, and every researcher's finish records
+// the time and quota it left, which agent.finished carries. No other role is asked.
+func TestAResearcherFinishingEarlyNamesItsBlockerAndTheTimeAndQuotaItLeavesAreTold(t *testing.T) {
+	newStore := func(role domain.SignupRole, left time.Duration, spent float64) *rosterStore {
+		store := newRosterStore(domain.PlatformExpRunning, 5)
+		store.pe.DurationHours, store.pe.EndsAt = 1, time.Now().Add(left)
+		store.pe.StartsAt = store.pe.EndsAt.Add(-time.Hour)
+		store.signups = []domain.AgentSignup{{PlatformExperimentID: "pe-1", AgentID: "dana", Role: role}}
+		store.quota = &domain.AgentQuota{AgentID: "dana", PlatformExperimentID: "pe-1", GuaranteedAcceleratorHours: 3, UsedGuaranteedAccH: spent}
+		return store
+	}
+	finish := func(store *rosterStore, blocker string) (*domain.AgentSignup, error) {
+		svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), 3*time.Minute)
+		return svc.FinishAgent(context.Background(), "pe-1", "dana", "nothing beat the control", blocker)
+	}
+
+	store := newStore(domain.SignupRoleCompetitor, 16*time.Minute+30*time.Second, 0.2)
+	_, err := finish(store, "")
+	var refused *api.Refusal
+	if !errors.As(err, &refused) || refused.Reason != "time_and_quota_left" || refused.GetStatus() != http.StatusConflict ||
+		!strings.Contains(refused.Message, "16 of the run's 60 minutes and 2.8 of the agent's 3 AccH were left") || !strings.Contains(refused.Message, "blocker") ||
+		store.signups[0].FinishedAt != nil {
+		t.Fatalf("an early finish with no blocker: got %v, want 409 time_and_quota_left saying what is left, and no finish", err)
+	}
+	finished, err := finish(store, "every job needs a toolchain the environment cannot build")
+	if err != nil || !strings.HasPrefix(finished.FinishedReason, "nothing beat the control. Blocker: every job needs a toolchain the environment cannot build. When it finished, 16 of the run's 60 minutes") {
+		t.Errorf("an early finish naming its blocker: got %+v, %v, want finished with the reason, the blocker and what it left", finished, err)
+	}
+
+	for name, store := range map[string]*rosterStore{
+		"little time left": newStore(domain.SignupRoleCompetitor, 5*time.Minute, 0.2),
+		"little quota left": newStore(domain.SignupRoleCompetitor, 30*time.Minute, 2.8),
+	} {
+		finished, err := finish(store, "")
+		if err != nil || !strings.HasPrefix(finished.FinishedReason, "nothing beat the control. When it finished, ") {
+			t.Errorf("%s: got %+v, %v, want finished with what it left and no blocker asked", name, finished, err)
+		}
+	}
+	store = newStore(domain.SignupRoleReviewer, 30*time.Minute, 0.2)
+	if finished, err := finish(store, ""); err != nil || finished.FinishedReason != "nothing beat the control" {
+		t.Errorf("a reviewer: got %+v, %v, want finished with its reason as it gave it", finished, err)
+	}
 }
 
 // A baseline agent that finished after its platform experiment closed was answered 409 not_running

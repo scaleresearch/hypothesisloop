@@ -18,7 +18,7 @@ import (
 )
 
 func (f *rosterStore) GetAgentQuota(context.Context, string, string) (*domain.AgentQuota, error) {
-	return nil, nil
+	return f.quota, nil
 }
 
 var (

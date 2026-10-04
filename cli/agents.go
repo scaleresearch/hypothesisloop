@@ -143,16 +143,19 @@ hl platform-experiments agents add --agent ID prints a self-run agent's token ag
 }
 
 func agentsFinish(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments agents finish", `usage: hl platform-experiments agents finish --reason TEXT
+	fs := newFlags("platform-experiments agents finish", `usage: hl platform-experiments agents finish --reason TEXT [--blocker TEXT]
 
 Says that you have nothing left to do: your quota is spent, or nothing you could still try is
-worth a job. Your machine stops after this turn and the coordinator is told the reason. It
-cannot be taken back. Refused while you have a job queued or running or a completed job without
+worth a job. Your machine stops after this turn and the coordinator is told the reason, with the
+time and quota you leave. It cannot be taken back. A researcher with more than a tenth of the
+run's time and of its quota left is refused (time_and_quota_left), told how much of each is
+left, unless --blocker says what stops it that the time and quota cannot fix. Refused while you have a job queued or running or a completed job without
 its summary (work_unfinished). Once the platform experiment closed there is nothing to finish:
 hl says so and exits 0. Prints you as finished. Your token says who and where. Each hypothesis
 of yours still open is listed after you and stays open for good unless you give its verdict
 (hl hypothesis status ID VERDICT) before this turn ends.`, stderr)
 	reason := fs.String("reason", "", "why nothing is left to do")
+	blocker := fs.String("blocker", "", "what stops you that the time and quota left cannot fix")
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
 	}
@@ -167,7 +170,11 @@ of yours still open is listed after you and stays open for good unless you give 
 			Text string `json:"text"`
 		} `json:"open_hypotheses"`
 	}
-	if err := c.Do("POST", agentsPath(pe)+"/"+url.PathEscape(agent)+"/finish", map[string]string{"reason": *reason}, &out); err != nil {
+	body := map[string]string{"reason": *reason}
+	if *blocker != "" {
+		body["blocker"] = *blocker
+	}
+	if err := c.Do("POST", agentsPath(pe)+"/"+url.PathEscape(agent)+"/finish", body, &out); err != nil {
 		if reason, _ := refusalOf(err); reason == "experiment_closed" {
 			fmt.Fprintln(stderr, "hl: platform-experiments agents finish: the platform experiment is closed, which ended your run: nothing needs finishing, so end your turn")
 			return 0

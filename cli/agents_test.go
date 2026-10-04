@@ -132,6 +132,12 @@ func TestAgentsRemoveAndList(t *testing.T) {
 	if want := `{"agent_id":"ag-1","finished_reason":"quota spent"}` + "\n"; stdout.String() != want {
 		t.Errorf("finish printed %q, want %q", stdout.String(), want)
 	}
+	stdout.Reset()
+	if code := run([]string{"platform-experiments", "agents", "finish", "--reason", "quota spent", "--blocker", "the build has no network"}, &stdout, &stderr); code != 0 ||
+		!reflect.DeepEqual((*got)[1].Body, map[string]any{"reason": "quota spent", "blocker": "the build has no network"}) {
+		t.Fatalf("finish with a blocker: exit %d, request %+v, want the blocker sent", code, (*got)[1])
+	}
+	*got = (*got)[:1]
 	if code := run([]string{"platform-experiments", "agents", "finish"}, &stdout, &stderr); code != 2 || len(*got) != 1 {
 		t.Errorf("finish without a reason: exit %d with %d requests, want 2 and no further one", code, len(*got))
 	}
