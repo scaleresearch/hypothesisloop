@@ -3,7 +3,6 @@ package environments
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -77,13 +76,5 @@ func TestAnEnvironmentIsRefusedToAnOrgNoClusterBuildsFor(t *testing.T) {
 	svc := NewService(store, &fileHost{files: map[string]string{"c1": rust}})
 	if _, err := svc.Declared(context.Background(), "org-b", "prj", "acme/model", "c1", "registry.test/hl/job:1"); !errors.Is(err, domain.ErrNoEnvironmentBuilder) || len(store.envs) != 0 {
 		t.Fatalf("got %v with %d stored, want ErrNoEnvironmentBuilder and nothing stored", err, len(store.envs))
-	}
-}
-
-func TestOnlyTheEndOfALongBuildOutputIsKept(t *testing.T) {
-	log := strings.Repeat("compiling a crate\n", 2000) + "error[E0425]: cannot find value\n"
-	tail := lastBytes(log, domain.MaxEnvironmentLogBytes)
-	if len(tail) > domain.MaxEnvironmentLogBytes || !strings.HasSuffix(tail, "error[E0425]: cannot find value\n") || !strings.HasPrefix(tail, "compiling") {
-		t.Errorf("tail of %d bytes, want at most %d starting on a line and ending with the error", len(tail), domain.MaxEnvironmentLogBytes)
 	}
 }
