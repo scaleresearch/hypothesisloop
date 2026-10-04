@@ -31,8 +31,8 @@ What it takes:
   - The environment: one `.hypothesisloop/Dockerfile` for the whole experiment, holding what the
     control and every reference need at the versions the repository pins, with dependencies
     already fetched and built where the job's build finds them, so a job compiles only the
-    code researchers vary. Commit it and run `hl env build` as soon as it is written: an update
-    says once its jobs can run, often before its upload ends, or that it failed.
+    code researchers vary. `hl env build` takes minutes and jobs wait for it; an update says
+    once its jobs can run, often before its upload ends, or that it failed.
   - The harness: a harness that already measures these metrics runs unchanged. Otherwise the
     smallest program that does: fixed seeds, pinned revisions, inputs fetched by the job,
     metrics reported as it goes and at the end with `post_metric` of `metrics.py`. The control
@@ -42,8 +42,8 @@ What it takes:
   - The job spec: a command that finishes in minutes, and the `cpu`, `memory` and `storage` it
     uses. `cpu` is the cores the program keeps busy; the job reads them in
     $HYPOTHESISLOOP_CPUS, since `nproc` counts the whole machine.
-  - Build and run the code on your own machine before a job, with what the Dockerfile installs
-    installed there too (you have sudo); only a job has the job's hardware. A failed job has its
+  - A job runs a commit in the image the Dockerfile builds, on the hardware its spec asks for.
+    Your own machine has none of that hardware, and you have sudo on it. A failed job has its
     cause in `hl job status` and `hl job logs`.
   - The control's job, and a summary on it once COMPLETED: the configuration that ran, every
     metric's value, duration and cost (`hl job cost`).

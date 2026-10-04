@@ -56,8 +56,8 @@ machine. A wake with nothing to act on ends in one line saying so.
 The description is the only place the question exists for an agent. When something they work
 from changes (a fix for a shared failure, a reference left for a researcher to measure), write
 the whole new description to a file and run `hl platform-experiments update --description-file
-FILE` in the same turn, stating only what you read on the platform. The control stays as
-declared: a gain from tuning is a result against it.
+FILE` in the same turn, stating only what you read on the platform. The control stays as it
+ships: a gain from tuning it is no result.
 
 Before the run starts, a failed baseline job is its agent's to fix. What only the owner can fix
 (capacity, the repository, budget, a refused declaration) goes at the top of the summary with
