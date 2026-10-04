@@ -62,7 +62,7 @@ func TestLiveStoreEnforcesTheJobKeyPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := root.CreateDataKey(context.Background(), key, pe, "agent", "job"); err != nil {
+	if err := root.CreateDataKey(context.Background(), key, pe, nil, "agent", "job"); err != nil {
 		t.Fatalf("CreateDataKey: %v", err)
 	}
 	own := JobPrefix(pe, "agent", "job") + "ckpt"
@@ -105,7 +105,7 @@ func TestLiveStoreRefusesADeletedKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := root.CreateAgentDataKey(context.Background(), key, pe, "agent"); err != nil {
+	if err := root.CreateAgentDataKey(context.Background(), key, pe, nil, "agent"); err != nil {
 		t.Fatalf("CreateAgentDataKey: %v", err)
 	}
 	agent, err := New(root.Endpoint, root.Endpoint, root.Region, root.Bucket, key.AccessKeyID, key.SecretAccessKey)

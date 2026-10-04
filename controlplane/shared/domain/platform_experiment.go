@@ -283,8 +283,9 @@ type PlatformExperiment struct {
 	// experiment that was created whole.
 	Goal string `json:"goal,omitempty"`
 	// Continues is the closed run it carries on, fixed at creation, empty for one that starts
-	// fresh. Its agents read that run as they read their own, and do nothing else to it.
-	Continues string `json:"continues,omitempty" doc:"The closed platform experiment of the same project and repository this one carries on, fixed at creation. Absent on one that starts fresh. Its agents and its coordinator read that run as they read their own, passing its id as platform_experiment_id or --platform-experiment: its summary, standings, jobs and their logs, and its hypotheses and findings. Its baseline starts from the commit of that run's baseline job (that run's baseline_job_id), so the two are measured by the same harness."`
+	// fresh. Its agents read that run and the ones it carried on as they read their own, and do
+	// nothing else to them.
+	Continues string `json:"continues,omitempty" doc:"The closed platform experiment of the same project and repository this one carries on, fixed at creation. Absent on one that starts fresh. Its agents and its coordinator read that run, and each run that one carried on, as they read their own, passing its id as platform_experiment_id or --platform-experiment: its summary, standings, jobs and their logs, its hypotheses and findings, and with their data keys the data under its prefix. Its baseline starts from the commit of that run's baseline job (that run's baseline_job_id), so the two are measured by the same harness."`
 	// Actor is whose credential created it, unverified with no id on one created before this
 	// was kept. Carried by a read of one platform experiment and left out of a list.
 	Actor *Actor `json:"actor,omitempty"`

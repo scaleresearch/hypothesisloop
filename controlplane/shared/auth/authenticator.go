@@ -217,7 +217,7 @@ func (a *Authenticator) woundDownAfter(endedAt *time.Time, windDown time.Duratio
 }
 
 func (p Principal) within(t *domain.Tenancy) Principal {
-	p.PlatformExperimentID, p.ProjectID, p.OrgIDs, p.Continues = t.PlatformExperimentID, t.ProjectID, []string{t.OrgID}, t.Continues
+	p.PlatformExperimentID, p.ProjectID, p.OrgIDs, p.Continued = t.PlatformExperimentID, t.ProjectID, []string{t.OrgID}, t.Continued
 	return p
 }
 

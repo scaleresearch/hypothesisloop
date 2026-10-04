@@ -138,14 +138,14 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"A repository the platform creates is created after this answers: the draft is answered without repository and with status_reason repository_creating, and its planner starts once the repository is there. " +
 			"When GitHub does not create it the draft is closed with close_reason repository_not_created, and its status_reason message says what GitHub answered. " +
 			"On a deployment whose git host is plain, repository is a name under the host's root and is required: 422 repository_required without it, repository_not_reachable when it does not answer git. " +
-			"422 invalid_goal for a goal that is empty or over the length, invalid_continues for a continues that names no closed platform experiment of the project and repository. 503 launcher_not_registered when the deployment has no launcher to run the planner.",
+			"422 invalid_goal for a goal that is empty or over the length, invalid_continues for a continues that names no closed platform experiment of the project and repository with a declared baseline. 503 launcher_not_registered when the deployment has no launcher to run the planner.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
 			ProjectID         string `json:"project_id"`
 			Goal              string `json:"goal" doc:"What you want to find out, in a sentence or two. At most 2000 bytes."`
 			Repository        string `json:"repository,omitempty" required:"false" doc:"owner/name on GitHub, covered by an installation the org connected. Left out, the platform creates a private repository on the GitHub account the org connected."`
 			RepositoryAccount string `json:"repository_account,omitempty" required:"false" doc:"The connected GitHub account the new repository is created on. Required only when the org connected several."`
-			Continues         string `json:"continues,omitempty" required:"false" doc:"The id of a closed platform experiment of the same project to carry on, which keeps its code in the repository this one names. Its agents and its coordinator read that run as their own, its summary, standings, jobs and hypotheses, and its baseline starts from the commit of that run's baseline job, so both are measured by the same harness. Left out, it starts fresh. 422 invalid_continues for one that is no closed platform experiment of the project, or keeps its code in another repository."`
+			Continues         string `json:"continues,omitempty" required:"false" doc:"The id of a closed platform experiment of the same project to carry on, which keeps its code in the repository this one names. Its agents and its coordinator read that run, and each run that one carried on, as their own: its summary, standings, jobs, hypotheses and data. Its baseline starts from the commit of that run's baseline job, so both are measured by the same harness. Left out, it starts fresh. 422 invalid_continues for one that is no closed platform experiment of the project, keeps its code in another repository or declared no baseline."`
 		}
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
 		if in.Body.ProjectID == "" {

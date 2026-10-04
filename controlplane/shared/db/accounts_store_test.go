@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -340,15 +341,15 @@ func TestTenancyIsDerivedThroughTheProject(t *testing.T) {
 	createTestAgent(t, pool, agentID)
 	seedExperimentForCapTest(t, pool, jobID, agentID, peID, 1, domain.StatusQueued)
 
-	want := domain.Tenancy{PlatformExperimentID: peID, ProjectID: project.ID, OrgID: orgID}
+	want := domain.Tenancy{PlatformExperimentID: peID, ProjectID: project.ID, OrgID: orgID, Continued: []string{}}
 	got, closedAt, err := accounts.PlatformExperimentTenancy(ctx, peID)
-	if err != nil || got == nil || *got != want || closedAt != nil {
+	if err != nil || got == nil || !reflect.DeepEqual(*got, want) || closedAt != nil {
 		t.Fatalf("platform experiment tenancy: got = %+v closed at %v, %v, want %+v open", got, closedAt, err, want)
 	}
 	ofAgent := want
-	ofAgent.AgentID = agentID
+	ofAgent.AgentID, ofAgent.Continued = agentID, nil
 	job, ended, err := accounts.ExperimentTenancy(ctx, jobID)
-	if err != nil || job == nil || *job != ofAgent || ended {
+	if err != nil || job == nil || !reflect.DeepEqual(*job, ofAgent) || ended {
 		t.Fatalf("job tenancy: got = %+v ended=%v, %v, want %+v running", job, ended, err, ofAgent)
 	}
 

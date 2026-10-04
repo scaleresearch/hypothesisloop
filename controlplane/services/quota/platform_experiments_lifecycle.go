@@ -214,7 +214,8 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 }
 
 // requireContinuable refuses a run to continue that is not one: continues names a closed platform
-// experiment of the project that keeps its code in repository. Empty continues starts fresh.
+// experiment of the project that keeps its code in repository and declared a baseline, whose
+// commit the new baseline starts from. Empty continues starts fresh.
 func (s *PlatformExperimentsService) requireContinuable(ctx context.Context, projectID, repository, continues string) error {
 	if continues == "" {
 		return nil
@@ -230,6 +231,8 @@ func (s *PlatformExperimentsService) requireContinuable(ctx context.Context, pro
 		return refuseUpdate(422, "invalid_continues", "continues %s, which is %s: a run carries on one that closed", continues, prior.Status)
 	case prior.Repository == "" || prior.Repository != repository:
 		return refuseUpdate(422, "invalid_continues", "continues %s, which keeps its code in %q: name that repository", continues, prior.Repository)
+	case prior.BaselineJobID == "":
+		return refuseUpdate(422, "invalid_continues", "continues %s, which declared no baseline: there is no harness to carry on", continues)
 	}
 	return nil
 }

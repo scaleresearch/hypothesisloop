@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -82,16 +83,17 @@ func holdsAccount(p Principal) bool {
 	return p.Kind == KindUser || p.Kind == KindKey || p.Kind == KindStaff
 }
 
-// readsContinued reports whether the request reads the run the caller's own platform experiment
-// continues: an agent or a coordinator reads that run as its own, and writes nothing to it.
+// readsContinued reports whether the request reads a run the caller's own platform experiment
+// carries on: an agent or a coordinator reads each run of its chain as its own, and writes
+// nothing to them.
 func readsContinued(ctx context.Context, p Principal, platformExperimentID string) bool {
 	_, reading := ctx.Value(readKey{}).(read)
-	return reading && (p.Kind == KindAgent || p.Kind == KindCoordinator) && p.Continues != "" && p.Continues == platformExperimentID
+	return reading && (p.Kind == KindAgent || p.Kind == KindCoordinator) && slices.Contains(p.Continued, platformExperimentID)
 }
 
 // reaches is the one statement of what a caller reaches: what its scope admits, for a read by an
-// account a platform experiment staff shared, and for a read by an agent or a coordinator the run
-// its own continues, with everything placed in them.
+// account a platform experiment staff shared, and for a read by an agent or a coordinator the runs
+// its own carries on, with everything placed in them.
 func reaches(ctx context.Context, p Principal, t domain.Tenancy) bool {
 	return p.Scope().Admits(t) || (t.Shared && readsShared(ctx, p)) || readsContinued(ctx, p, t.PlatformExperimentID)
 }
@@ -360,7 +362,7 @@ func (a *Access) Org(ctx context.Context, requested string) (string, error) {
 // ListScope is the principal's scope for a listing, narrowed to one project when asked. A
 // listing is the caller's own, with two exceptions: narrowed by platform_experiment_id to a
 // platform experiment staff shared, it is that platform experiment's for an account that reads,
-// and narrowed to the run an agent's or a coordinator's own continues, it is that run's.
+// and narrowed to a run an agent's or a coordinator's own carries on, it is that run's.
 func (a *Access) ListScope(ctx context.Context, projectID string) (domain.TenantScope, error) {
 	p, err := principal(ctx)
 	if err != nil {
@@ -368,7 +370,7 @@ func (a *Access) ListScope(ctx context.Context, projectID string) (domain.Tenant
 	}
 	scope := p.Scope()
 	if named, _ := ctx.Value(readKey{}).(read); readsContinued(ctx, p, named.platformExperimentID) {
-		scope.PlatformExperimentID = p.Continues
+		scope.PlatformExperimentID = named.platformExperimentID
 	}
 	if named, _ := ctx.Value(readKey{}).(read); named.platformExperimentID != "" && !scope.Unrestricted() && readsShared(ctx, p) &&
 		domain.IdentifierShaped(named.platformExperimentID) {

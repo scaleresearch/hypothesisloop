@@ -548,7 +548,9 @@ func cmdDataKey(c *apiclient.Client, args []string, stdout, stderr io.Writer) in
 
 Your own S3 key to the platform experiment's data, as export lines: eval "$(hl data-key)".
 It reads everything under $HYPOTHESISLOOP_DATA_SHARED and writes under $HYPOTHESISLOOP_DATA_URI,
-where your jobs write. The same key every time; it does not expire. Any S3 client works:
+where your jobs write. A run this one continues, and each run it carried on, is read the same
+way: the URI with that run's id in place of this one's. The same key every time; it does not
+expire. Any S3 client works:
   uvx --from awscli aws s3 ls "$HYPOTHESISLOOP_DATA_SHARED"`, stderr)
 	pe := fs.String("platform-experiment", "", "platform experiment id (default the token's)")
 	agent := fs.String("agent", "", "whose key it is, for a person or an API key; an agent's token says it")
@@ -685,8 +687,9 @@ github_not_connected: an owner connects GitHub in Settings first. On any other g
 repository names one created there beforehand, and leaving it out is 422 repository_required.
 
 continues: ID carries on a closed platform experiment of the project that keeps its code in the
-same repository: its agents read that run as their own, and its baseline starts from the commit
-of that run's baseline job, so the numbers of both compare.
+same repository and declared a baseline: its agents read that run, and the runs it carried on,
+as their own, and its baseline starts from the commit of that run's baseline job, so the numbers
+of both compare.
 
 One file is one platform experiment: for several, run the command once for each.
 
@@ -1016,8 +1019,8 @@ silent (hl platform-experiments agents list).
 Once the baseline is declared, baseline_branch and baseline_code_ref name the branch and commit
 of its job, where its harness is: the default branch may hold none of it.
 continues names the closed run this one carries on, read as your own with
---platform-experiment ID on any read: its summary, results, jobs and hypotheses. Its
-baseline_code_ref is the commit this one's baseline starts from.
+--platform-experiment ID on any read: its summary, results, jobs and hypotheses, and so is the
+run it continues in turn. Its baseline_code_ref is the commit this one's baseline starts from.
 On an open one the message begins with your own next step, worded for your token: the command
 a coordinator or a person runs, what a baseline agent measures, or that a researcher's jobs
 are refused until the start. status_reason is printed ahead of the record with id and status,

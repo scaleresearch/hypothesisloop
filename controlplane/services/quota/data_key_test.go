@@ -40,6 +40,10 @@ func (s *signupKeys) AgentDataKey(ctx context.Context, _, agentID string, create
 	return key, nil
 }
 
+func (s *signupKeys) ContinuedRuns(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+
 type anyoneActive struct{}
 
 func (anyoneActive) RequireActive(context.Context, string, string) error { return nil }

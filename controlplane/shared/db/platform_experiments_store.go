@@ -138,6 +138,26 @@ const summarySQL = `concat_ws(E'\n\n', NULLIF(pe.summary, ''), NULLIF(pe.close_r
 // plannerOfDraft selects, of experiment_signups as planner, the planner of pe while pe is a draft.
 const plannerOfDraft = `planner.platform_experiment_id = pe.id AND planner.role = '` + string(domain.SignupRolePlanner) + `' AND pe.status = 'draft'`
 
+// continuedRuns selects the ids of every run platform experiment $1 carries on: the one its
+// continues names, the one that one continues, and so on. A run continues one that closed
+// before it was created, so the chain ends.
+const continuedRuns = `
+WITH RECURSIVE continued (id) AS (
+    SELECT continues FROM platform_experiments WHERE id = $1 AND continues IS NOT NULL
+    UNION
+    SELECT pe.continues FROM platform_experiments pe JOIN continued c ON pe.id = c.id WHERE pe.continues IS NOT NULL
+)
+SELECT id FROM continued`
+
+// ContinuedRuns is every run platform experiment id carries on, empty for one that starts fresh.
+func (s *PlatformExperimentsStore) ContinuedRuns(ctx context.Context, id string) ([]string, error) {
+	var ids []string
+	if err := s.pool.pool.QueryRow(ctx, `SELECT ARRAY(`+continuedRuns+`)`, id).Scan(&ids); err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.ContinuedRuns: %w", err)
+	}
+	return ids, nil
+}
+
 // GetPlatformExperiment fetches a single platform experiment by ID.
 func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	q := `

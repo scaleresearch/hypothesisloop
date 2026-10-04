@@ -322,8 +322,10 @@ accepting replaces it with the number accepted.
 
 A new run, a draft or one created whole, names with `continues` the closed platform experiment
 of the same project and repository it carries on. Nothing is copied: its agents and its
-coordinator read that run as their own, passing its id as `--platform-experiment` (its
-summary, standings, jobs and their logs, hypotheses and findings), and write nothing to it. Its
+coordinator read that run, and each run it carried on, as their own, passing its id as
+`--platform-experiment` (its summary, standings, jobs and their logs, hypotheses and findings),
+and their data keys read its data prefix; they write nothing to it. Only a run that declared a
+baseline can be continued. Its
 baseline agent starts its branch from that run's `baseline_code_ref` and measures the control
 with the same harness, so the numbers of both runs compare; its planner keeps that run's metric
 and states in the brief what it established and what it refuted.

@@ -51,8 +51,8 @@ type addServiceAccountRequest struct {
 // CreateDataKey registers key with the store as a service account of the control plane's own key,
 // limited by JobPolicy. This is the MinIO admin API (Silo, MinIO, AIStor). The store refuses an
 // access key that already exists, so a key is never silently redefined.
-func (c *Client) CreateDataKey(ctx context.Context, key domain.DataKey, platformExperimentID, agentID, experimentID string) error {
-	policy, err := JobPolicy(c.Bucket, platformExperimentID, agentID, experimentID)
+func (c *Client) CreateDataKey(ctx context.Context, key domain.DataKey, platformExperimentID string, continued []string, agentID, experimentID string) error {
+	policy, err := JobPolicy(c.Bucket, platformExperimentID, continued, agentID, experimentID)
 	if err != nil {
 		return err
 	}
@@ -60,8 +60,8 @@ func (c *Client) CreateDataKey(ctx context.Context, key domain.DataKey, platform
 }
 
 // CreateAgentDataKey is CreateDataKey for an agent's own key, limited by AgentPolicy.
-func (c *Client) CreateAgentDataKey(ctx context.Context, key domain.DataKey, platformExperimentID, agentID string) error {
-	policy, err := AgentPolicy(c.Bucket, platformExperimentID, agentID)
+func (c *Client) CreateAgentDataKey(ctx context.Context, key domain.DataKey, platformExperimentID string, continued []string, agentID string) error {
+	policy, err := AgentPolicy(c.Bucket, platformExperimentID, continued, agentID)
 	if err != nil {
 		return err
 	}
