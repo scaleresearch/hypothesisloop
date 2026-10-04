@@ -25,6 +25,7 @@ from claude_agent_sdk import (
     RateLimitEvent,
     ResultMessage,
     StreamEvent,
+    SystemMessage,
 )
 
 from hypothesisloop_agent import config, core, progress, proposal, session, updates
@@ -200,6 +201,13 @@ _COMPACTION_PROMPT = (
 # call at 10 min (BASH_MAX_TIMEOUT_MS) and one API request at 10 min (API_TIMEOUT_MS). Seen live:
 # an agent got no model response after a tool result and sat silent until stopped.
 _TURN_SILENCE_TIMEOUT_S = 900
+
+# Longest a model call may go without a message, from its request to its last stream event. A
+# healthy call sends one at least every 1.5 s, thinking included (an empty thinking_delta per ~50
+# tokens, measured on the bundled CLI); one call sat 6 min on 2790 tokens. A stalled call is
+# interrupted and asked for again once.
+_CALL_STALL_S = 120
+_STALL_PROMPT = f"Your last model call sent nothing for {_CALL_STALL_S} s and was interrupted. Go on from where it stopped."
 
 
 # On a stop a turn in flight is interrupted and the agent, working or idle, gets one turn of this
@@ -495,20 +503,62 @@ async def _last_turn(client, setup: core.RunSetup, watch_env: dict[str, str], ev
         log.info("last turn cut off after %ss", _SHUTDOWN_TURN_S)
 
 
+def _in_call(message, in_call: bool) -> bool:
+    """Whether a model call is in flight once message has arrived."""
+    if isinstance(message, SystemMessage) and message.subtype == "status":
+        return in_call or message.data.get("status") == "requesting"
+    if isinstance(message, StreamEvent):
+        kind = message.event.get("type")
+        if kind == "message_start" and not message.parent_tool_use_id:
+            return True
+        if kind == "message_stop":
+            return False
+    return in_call and not isinstance(message, ResultMessage)
+
+
+async def _interrupt_stalled_call(client) -> list:
+    """Interrupts the call in flight and returns what the CLI sent until it ended the turn. The
+    timeout closed the response iterator it cut, and the CLI's messages wait for a new one."""
+    log.warning("a model call sent nothing for %ss: interrupting it and asking again once", _CALL_STALL_S)
+    await client.interrupt()
+    sent = []
+    try:
+        async with asyncio.timeout(_CALL_STALL_S):
+            async for message in client.receive_response():
+                if isinstance(message, ResultMessage):
+                    break
+                sent.append(message)
+    except TimeoutError:
+        raise TurnStalled(f"the interrupted model call did not end in {_CALL_STALL_S}s") from None
+    await client.query(_STALL_PROMPT)
+    return sent
+
+
 async def _receive_turn(client):
-    """client.receive_response(), failing with TurnStalled when the CLI goes silent."""
+    """client.receive_response(), failing with TurnStalled when the CLI goes silent, or when a
+    model call stalls a second time."""
     messages = client.receive_response().__aiter__()
     _progress.doing(progress.THINKING)
     _progress.awaiting()
+    in_call = retried = False
     try:
         while True:
+            limit = _CALL_STALL_S if in_call else _TURN_SILENCE_TIMEOUT_S
             try:
-                async with asyncio.timeout(_TURN_SILENCE_TIMEOUT_S):
+                async with asyncio.timeout(limit):
                     message = await anext(messages)
             except StopAsyncIteration:
                 return
             except TimeoutError:
-                raise TurnStalled(f"no message from the CLI for {_TURN_SILENCE_TIMEOUT_S}s") from None
+                if not in_call or retried:
+                    raise TurnStalled(f"no message from the CLI for {limit}s") from None
+                in_call = retried = True
+                for message in await _interrupt_stalled_call(client):
+                    yield message
+                messages = client.receive_response().__aiter__()
+                continue
+            in_call = _in_call(message, in_call)
+            retried = retried and in_call
             yield message
             # A stream event is part of the model call in flight, which is still awaited: how long
             # it took is said when it answers.

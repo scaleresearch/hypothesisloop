@@ -6,7 +6,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
+from claude_agent_sdk import AssistantMessage, ResultMessage, StreamEvent, SystemMessage, TextBlock
 
 from hypothesisloop_agent.claude import run
 from test_require_joined import AGENT_TOKEN
@@ -217,6 +217,72 @@ class TurnWatchdogTest(unittest.IsolatedAsyncioTestCase):
                     run._run_one_session(setup, "m", None, [False]), timeout=5)
         self.assertTrue(HangingClient.instances[-1].disconnected)
         self.assertIn("agent-a say   pulling metrics", out.getvalue())
+
+
+def _event(kind):
+    return StreamEvent(uuid="u", session_id="s", event={"type": kind})
+
+
+class StallingClient:
+    """One CLI stream: each call it is asked for starts and then goes silent until interrupted,
+    the first stalls times; a call after those answers."""
+
+    def __init__(self, stalls):
+        self.stalls, self.queries, self.stream = stalls, [], asyncio.Queue()
+        self.ask()
+
+    def ask(self):
+        for message in (SystemMessage(subtype="status", data={"status": "requesting"}), _event("message_start")):
+            self.stream.put_nowait(message)
+        if self.stalls:
+            self.stalls -= 1
+            return
+        for message in (AssistantMessage(content=[TextBlock(text="answered")], model="m"), _event("message_stop"), _result()):
+            self.stream.put_nowait(message)
+
+    async def query(self, prompt):
+        self.queries.append(prompt)
+        self.ask()
+
+    async def interrupt(self):
+        self.stream.put_nowait(_event("message_stop"))
+        self.stream.put_nowait(_result())
+
+    async def receive_response(self):
+        while not isinstance(message := await self.stream.get(), ResultMessage):
+            yield message
+        yield message
+
+
+class CallStallTest(unittest.IsolatedAsyncioTestCase):
+    async def receive(self, client):
+        received = []
+        with mock.patch.object(run, "_CALL_STALL_S", 0.05):
+            async for message in run._receive_turn(client):
+                received.append(message)
+        return received
+
+    async def test_a_stalled_call_is_interrupted_and_asked_for_again_once(self):
+        client = StallingClient(stalls=1)
+        received = await self.receive(client)
+        self.assertEqual(client.queries, [run._STALL_PROMPT])
+        self.assertEqual([m.content[0].text for m in received if isinstance(m, AssistantMessage)], ["answered"])
+        self.assertEqual(sum(isinstance(m, ResultMessage) for m in received), 1)
+
+    async def test_a_call_that_stalls_again_ends_the_session(self):
+        with self.assertRaises(run.TurnStalled):
+            await self.receive(StallingClient(stalls=2))
+
+    async def test_a_tool_running_after_its_call_ended_is_no_stall(self):
+        class SlowTool(StallingClient):
+            def ask(self):
+                self.stream.put_nowait(_event("message_start"))
+                self.stream.put_nowait(_event("message_stop"))
+                asyncio.get_running_loop().call_later(0.2, self.stream.put_nowait, _result())
+
+        client = SlowTool(stalls=0)
+        await self.receive(client)
+        self.assertEqual(client.queries, [])
 
 
 class ReconnectTest(unittest.IsolatedAsyncioTestCase):
