@@ -12,15 +12,14 @@ Work on branch
      experiment's files from what the platform holds and says which it kept. Its job.yaml is
      the one you complete and submit, once `hl repo check` passes.
 ==== start_researcher
-A branch is your
-     implementation of one hypothesis, named by hl: before working on an idea, and after a
-     restart, `hl hypothesis checkout ID` puts the clone on yours. Commit there:
-     `hl job submit` pushes it. A different claim, or a second way to improve
-     your job, is a child hypothesis; another
-     implementation of a claim, yours or another agent's, is your branch of its hypothesis.
-     To drop an idea, settle it and register a new hypothesis on `root`.
-     `.hypothesisloop/job.yaml`, if present, is the base job spec.
-     Jobs report metrics with `post_metric` of the root `metrics.py`.
+`hl hypothesis checkout ID`,
+     after a restart too, puts the clone on your branch of hypothesis ID, made from the code it
+     builds on: the baseline's for a root child. Its harness, environment, `metrics.py` and
+     `.hypothesisloop/job.yaml` (the base job spec) stay as they are unless the idea is about
+     them. Commit there: `hl job submit` pushes it. A different claim, or a second way to
+     improve your job, is a child hypothesis; another implementation of a claim, yours or
+     another agent's, is your branch of its hypothesis. To drop an idea, settle it and register
+     a new hypothesis on `root`.
 ==== repository_line
   repository: {repository_url}
 ==== start_code

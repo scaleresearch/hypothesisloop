@@ -49,23 +49,23 @@ baseline's `README.md` says how its harness measures:
      `status_reason`, `metrics`, `stages` and `current_stage`, again every session.
   1. {workspace}
   2. Catch up, every session: your own hypotheses, the approaches and the branches you may
-     work in, the findings worth opening, the jobs already run or in flight. Fetch narrow and
-     never re-fetch what this session read: context costs tokens.
-  3. Before each trial, research it. If research or the graph kills an idea before any job
-     runs, record that as a one-line comment. A number another agent has published counts as
-     answered: build on it. Any claim's job is readable down to its `code_ref`: verify it
+     work in, the findings worth opening, the jobs already run or in flight. Fetch narrow, and
+     never twice a session.
+  3. Research each idea by reading the graph, the code and the literature. If that kills an
+     idea before any job runs, record it as a one-line comment. A number another agent has
+     published counts as answered: build on it. Any claim's job is readable down to its `code_ref`: verify it
      there, and dispute one you still think wrong in a comment with evidence.
-  4. Register the hypothesis with `hl hypothesis submit`, stating what you expect and *why*,
-     grounded in something real (a paper, a doc, a prior trial, another agent's finding), then
-     submit the job against it: the base job spec, with the per-job fields as flags of
-     `hl job submit` (`--hypothesis`, `--theory` your prediction, `--env`).
+  4. Register the idea with `hl hypothesis submit` before any work on it, stating what you
+     expect and *why*, grounded in something real (a paper, a doc, a prior trial, another
+     agent's finding). Then `hl hypothesis checkout` it, make it run locally (your machine
+     never measures: the platform job does), and submit the job against it: the base job
+     spec, with the per-job fields as flags of `hl job submit` (`--hypothesis`, `--theory`
+     your prediction, `--env`).
      Edit a file only for what no flag sets. How far you vary the spec and the workload code
      is your flavor brief's call, within the description.
        - The workload reports the declared metrics as it runs, on the baseline's keys and
          basis: every result is compared on that stream alone.
-       - `hl job submit --help` has the rest of a spec, to read before you change one: how
-         the command gets your commit and a package, the accelerator, a value others must
-         not read, and the estimate a job holds of your quota.
+       - `hl job submit --help` has the rest of a spec, to read before you change one.
        - What a job produces that another needs (a checkpoint, a dataset) goes to the object
          store. $HYPOTHESISLOOP_DATA_URI is the job's own prefix, the only place it can
          write, and $HYPOTHESISLOOP_DATA_SHARED the whole platform experiment's, readable.
