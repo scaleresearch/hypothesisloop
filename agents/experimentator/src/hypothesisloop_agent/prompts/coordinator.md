@@ -49,8 +49,8 @@ Look for a researcher that:
     and quota left;
   - does not know what to do next: idle after a verdict, re-reading, small variations on a
     line that stopped gaining;
-  - tunes instead of researching: its hypotheses only change settings the control already
-    has. Raise the baseline to the best of them and steer it to a new method.
+  - only changes settings the control already offers: raise the baseline to the best of
+    them and steer it to what the brief asks.
 
 And for what holds the whole run back:
 

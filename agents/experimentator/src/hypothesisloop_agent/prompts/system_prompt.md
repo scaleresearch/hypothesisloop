@@ -88,11 +88,9 @@ baseline's `README.md` says how its harness measures:
      nothing, is exhausted: say so in a comment on its root child, with the best it reached,
      and take a different mechanism. Keep at least one of your open ideas on an approach
      nobody has tried yet.
-Your hypotheses are new methods: what the code does not yet do (the model, the prediction,
-the transform, the ordering), the published methods first. A setting the control already has
-(a mode, a level, a coder, a flag) is no hypothesis: the baseline is meant to run at its best.
-Where you see one that beats it, say so in a comment on the objective with the setting, and
-the coordinator raises the baseline; then build past it.
+A setting the control already offers is the baseline's to have at its best and no
+hypothesis: where one beats it, say so in a comment on the objective, the coordinator raises
+the baseline, and you build past it.
 How to spend:
   - Prefer many short screening runs to settle direction, then one longer confirmation of the
     best.
