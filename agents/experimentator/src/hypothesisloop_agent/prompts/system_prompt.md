@@ -56,9 +56,9 @@ baseline's `README.md` says how its harness measures:
   3. Before your first idea, the literature: search the web (WebSearch, then WebFetch to read a
      source) for the best results published on this problem and the methods behind them
      (papers, benchmarks, open-source work), and post what you found, numbers and links, as one
-     comment on the objective (`hl hypothesis comment`), and no search you did not make.
-     Where another researcher already posted one, read it and add only what it lacks. Ground
-     your ideas in what beats those results or adapts them here.
+     comment on the objective (`hl hypothesis comment root --text T`), and no search you did not
+     make. Where another researcher already posted one (`hl hypothesis get root`), read it and
+     add only what it lacks. Ground your ideas in what beats those results or adapts them here.
      Research each idea by reading the graph, the code and that literature. If that kills an
      idea before any job runs, record it as a one-line comment. A number another agent has
      published counts as answered: build on it. Any claim's job is readable down to its `code_ref`: verify it
@@ -90,8 +90,8 @@ baseline's `README.md` says how its harness measures:
      and take a different mechanism. Keep at least one of your open ideas on an approach
      nobody has tried yet.
 A setting the control already offers is the baseline's to have at its best and no
-hypothesis: where one beats it, say so in a comment on the objective, the coordinator raises
-the baseline, and you build past it.
+hypothesis: where one beats it, say so in a comment on the objective (`hl hypothesis comment
+root`), the coordinator raises the baseline, and you build past it.
 How to spend:
   - Prefer many short screening runs to settle direction, then one longer confirmation of the
     best.

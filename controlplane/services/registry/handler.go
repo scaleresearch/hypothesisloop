@@ -143,6 +143,7 @@ var queryDescription = "Read-only Cypher against one platform experiment's hypot
 	"$evidence is bound to a map by hypothesis id of what is outside the graph: {jobs (rejected aside), submitted, queued, " +
 	"running, completed, failed, evicted, rejected, findings, comments} as counts and last_finding_at (datetime). A hypothesis with none " +
 	"of these has no entry and reads as null: `WHERE coalesce($evidence[h.id].jobs, 0) = 0` finds the untested ones. " +
+	"$evidence[$pe] is the objective's: the baseline's jobs and the comments on the objective. " +
 	"Full-text index " + graphdb.TextIndex + " over Hypothesis.text, ranked by how many of your words match: " +
 	"`CALL text_search.search_all('" + graphdb.TextIndex + "', 'warmup cosine schedule') YIELD node, score " +
 	"RETURN node.id, node.text, node.status, score ORDER BY score DESC LIMIT 10` " +
@@ -153,7 +154,7 @@ var queryDescription = "Read-only Cypher against one platform experiment's hypot
 	"LOAD CSV, periodic commits and procedures other than " + strings.Join(graphdb.QueryProcedures, ", ") + " are refused. Limits: " +
 	fmt.Sprintf("%s and %d MB of memory per query, %d rows (truncated=true when cut). ", graphdb.QueryTimeout, graphdb.QueryMemoryLimitMB, graphdb.QueryRowCap) +
 	"A Cypher error comes back as 400 with Memgraph's message. Findings, comments and jobs are not in the graph: " +
-	"GET /hypotheses/{id} returns them."
+	"GET /hypotheses/{id} returns them, and GET /hypotheses/{platform_experiment_id}/comments the objective's comments."
 
 // RegisterHuma registers the registry's operations: what hangs off an experiment (metrics,
 // logs) and the hypothesis notebook. Paths sit under the resource they belong to —
@@ -192,6 +193,26 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, auth.NotFound("hypothesis")
 		}
 		return hyp, access.Within(ctx, "hypothesis", hyp.PlatformExperimentID)
+	}
+	// commentsOf admits the caller to the comments of id: a hypothesis it reaches, or the
+	// objective of a platform experiment it reaches, named by the platform experiment's id.
+	commentsOf := func(ctx context.Context, id string) error {
+		hyp, err := h.svc.GetHypothesis(ctx, id)
+		if err != nil {
+			return auth.Internal(h.logger, "get hypothesis", err)
+		}
+		if hyp != nil {
+			return access.Within(ctx, "hypothesis", hyp.PlatformExperimentID)
+		}
+		if err := access.Within(ctx, "hypothesis", id); err != nil {
+			return err
+		}
+		if _, err := h.svc.CommentTarget(ctx, id); errors.Is(err, ErrHypothesisNotFound) {
+			return auth.NotFound("hypothesis")
+		} else if err != nil {
+			return auth.Internal(h.logger, "get hypothesis", err)
+		}
+		return nil
 	}
 	// referencesInScope admits the caller to everything a write names as a link target or in
 	// distinct_from: a hypothesis it reaches, or its platform experiment's id for the objective.
@@ -513,7 +534,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"(edges, {from, to, type, agent_id, actor, created_at}); an edge to the objective has to = root = the platform_experiment_id. " +
 			"A node also carries finding, the newest one filed against it, and best_job {id, metric, summary, summary_due}, the completed job testing it with the " +
 			"best raw value on the first ranking metric and the summary filed for that job; each is absent when there is none. " +
-			"objective carries the same two for the root: the jobs of the baseline agent test no hypothesis and hang on the objective. Unpaged, " +
+			"objective carries the same two for the root: the jobs of the baseline agent test no hypothesis and hang on the objective. " +
+			"It also carries comment_count, the comments on the objective, and comments, the newest five of them, oldest first. Unpaged, " +
 			"for drawing the graph.",
 	}, func(ctx context.Context, in *struct {
 		PlatformExperimentID string `query:"platform_experiment_id" doc:"Required."`
@@ -651,6 +673,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		hyp, err := loadHypothesis(ctx, in.ID)
 		if err != nil {
+			if commentsOf(ctx, in.ID) == nil {
+				return nil, huma.Error404NotFound(fmt.Sprintf("%s is the objective, no hypothesis: GET /hypotheses/%s/comments lists the comments on it, and its jobs are the baseline's", in.ID, in.ID))
+			}
 			return nil, err
 		}
 		if err := h.svc.NameHypothesis(ctx, hyp); err != nil {
@@ -779,11 +804,13 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 
 	apidocs.Register(doc, apidocs.AudienceAgent, apidocs.AfterClose(huma.Operation{
 		OperationID: "add-hypothesis-comment", Method: "POST", Path: "/hypotheses/{id}/comments",
-		Summary: "Add a comment to a hypothesis", Tags: []string{"hypotheses"},
+		Summary: "Add a comment to a hypothesis or to the objective", Tags: []string{"hypotheses"},
 		DefaultStatus: 201,
 		Description: "A freeform note with no job behind it (abandon/revise/cross-reference), as opposed to " +
-			"a finding, which requires a terminal job. Read the hypothesis's existing comments (GET " +
-			"/hypotheses/{id}) first — don't re-record a conclusion already there. " +
+			"a finding, which requires a terminal job. id is a hypothesis, or the platform_experiment_id for the objective, the root " +
+			"of its graph: what concerns every approach, such as the published results on the problem. A comment on the objective " +
+			"reaches every agent of the platform experiment as comment.new with that id as subject. Read the existing comments " +
+			"(GET /hypotheses/{id}/comments) first — don't re-record a conclusion already there. " +
 			"Who wrote it is the caller, answered as actor, and no field of the body names it: author is refused. " +
 			"agent_id says whose note it is. An agent token's note is its own agent's, named or not. " +
 			"Any other caller names an agent it reaches to write that agent's note, or names none and the note is the caller's own. " +
@@ -801,7 +828,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if in.Body.Text == "" {
 			return nil, huma.Error400BadRequest("text is required")
 		}
-		if _, err := loadHypothesis(ctx, in.ID); err != nil {
+		if err := commentsOf(ctx, in.ID); err != nil {
 			return nil, err
 		}
 		owner, actor, err := access.Writer(ctx, in.Body.AgentID)
@@ -817,6 +844,37 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Status int
 			Body   *domain.HypothesisComment
 		}{Status: http.StatusCreated, Body: c}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+		OperationID: "list-hypothesis-comments", Method: "GET", Path: "/hypotheses/{id}/comments",
+		Summary: "List the comments on a hypothesis or on the objective", Tags: []string{"hypotheses"},
+		Description: "id is a hypothesis, or the platform_experiment_id for the objective, whose comments no other read " +
+			"returns in full. Oldest first, ?limit (default 20, max 200, 422 invalid_page over it) and ?offset; the full count " +
+			"is in the X-Total-Count response header.",
+	}, func(ctx context.Context, in *struct {
+		ID     string `path:"id"`
+		Limit  int    `query:"limit" doc:"Page size, default 20, maximum 200. A larger one is refused."`
+		Offset int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count comments."`
+	}) (*struct {
+		Body       []*domain.HypothesisComment
+		TotalCount int `header:"X-Total-Count"`
+	}, error) {
+		limit, offset, err := page(in.Limit, in.Offset)
+		if err != nil {
+			return nil, err
+		}
+		if err := commentsOf(ctx, in.ID); err != nil {
+			return nil, err
+		}
+		comments, total, err := h.svc.ListHypothesisComments(ctx, in.ID, limit, offset)
+		if err != nil {
+			return nil, auth.Internal(h.logger, "list hypothesis comments", err, zap.String("id", in.ID))
+		}
+		return &struct {
+			Body       []*domain.HypothesisComment
+			TotalCount int `header:"X-Total-Count"`
+		}{Body: comments, TotalCount: total}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, apidocs.AfterClose(huma.Operation{

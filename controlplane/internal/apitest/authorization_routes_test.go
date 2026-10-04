@@ -273,6 +273,7 @@ var routes = []route{
 	{method: "DELETE", path: "/hypotheses/{id}", request: "/hypotheses/<hyp>", rule: scoped(coordinatorAudience, http.StatusForbidden)},
 	{method: "POST", path: "/hypotheses/{id}/links", request: "/hypotheses/<hyp>/links", body: `{"agent_id":"<agent>","type":"related","to":"hyp-own"}`, rule: owned(agentAudience, reached)},
 	{method: "POST", path: "/hypotheses/{id}/comments", request: "/hypotheses/<hyp>/comments", body: `{"agent_id":"<agent>","text":"t"}`, rule: owned(agentAudience, reached)},
+	{method: "GET", path: "/hypotheses/{id}/comments", request: "/hypotheses/<hyp>/comments", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "POST", path: "/hypotheses/{id}/status", request: "/hypotheses/<hyp>/status", body: `{"agent_id":"<agent>","status":"confirmed"}`, rule: owned(agentAudience, reached)},
 	{method: "GET", path: "/platform-experiments/{id}/findings", request: "/platform-experiments/<pe>/findings", rule: scoped(coordinatorAudience, reached), sharedRead: true},
 
@@ -424,6 +425,10 @@ var cases = []struct {
 	{"a user commenting as themselves", "user", "POST", "/hypotheses/hyp-own/comments", `{"text":"t"}`, reached},
 	{"a user commenting for an agent of another org", "user", "POST", "/hypotheses/hyp-own/comments", `{"agent_id":"agent-9","text":"t"}`, 404},
 	{"a user commenting for an agent nobody registered", "user", "POST", "/hypotheses/hyp-own/comments", `{"agent_id":"agent-none","text":"t"}`, 404},
+	{"an agent commenting on the objective of its platform experiment", "agent", "POST", "/hypotheses/pe-a1/comments", `{"text":"t"}`, reached},
+	{"an agent commenting on the objective of another org's platform experiment", "agent", "POST", "/hypotheses/pe-b/comments", `{"text":"t"}`, 404},
+	{"an agent reading the comments on the objective of its platform experiment", "agent", "GET", "/hypotheses/pe-a1/comments", "", reached},
+	{"an agent reading the comments on the objective of another org's platform experiment", "agent", "GET", "/hypotheses/pe-b/comments", "", 404},
 
 	{"an agent submitting a job as another agent", "agent", "POST", "/experiments", `{"id":"job-new","metadata":{"platform_experiment_id":"pe-a1","agent_id":"agent-2","hypothesis_id":"hyp-own","code_ref":"r@0","config_hash":"h","data_ref":"d","theory":"t","estimated_duration_hours":1},"job":{"image":"i","cpu":"1","memory":"1Gi","storage":"1Gi","max_retries":0}}`, 403},
 	{"an agent submitting a job and naming neither itself nor its experiment", "agent", "POST", "/experiments", `{"id":"job-new","metadata":{"hypothesis_id":"hyp-own","code_ref":"r@0","config_hash":"h","data_ref":"d","theory":"t","estimated_duration_hours":1},"job":{"image":"i","cpu":"1","memory":"1Gi","storage":"1Gi","max_retries":0}}`, reached},
@@ -468,6 +473,7 @@ var cases = []struct {
 	{"the same watch with a coordinator token of another platform experiment", "coordinator", "GET", "/watch?platform_experiment_id=pe-show", "", 404},
 	{"a hypothesis written into the shared platform experiment under a person's name", "user", "POST", "/hypotheses", `{"platform_experiment_id":"pe-show","text":"t","links":[{"type":"builds_on","to":"pe-show"}]}`, 404},
 	{"a comment on a hypothesis of the shared platform experiment", "user", "POST", "/hypotheses/hyp-shared/comments", `{"text":"t"}`, 404},
+	{"a comment on the objective of the shared platform experiment", "user", "POST", "/hypotheses/pe-show/comments", `{"text":"t"}`, 404},
 	{"a link from the caller's hypothesis into the shared platform experiment", "user", "POST", "/hypotheses/hyp-own/links", `{"agent_id":"agent-1","type":"related","to":"hyp-shared"}`, 404},
 	{"an agent of the caller's org joined to the shared platform experiment", "org key", "POST", "/platform-experiments/pe-show/agents", `{"agent_id":"agent-1"}`, 404},
 	{"the data key of the shared platform experiment for the caller's own agent", "user", "POST", "/platform-experiments/pe-show/data-key", `{"agent_id":"agent-1"}`, 404},

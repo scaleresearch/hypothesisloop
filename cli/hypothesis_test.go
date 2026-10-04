@@ -660,3 +660,59 @@ func TestHypothesisGetIsShortUnlessToldFull(t *testing.T) {
 		}
 	}
 }
+
+// Researchers posted the literature as a comment on the objective with hl hypothesis comment root
+// and got 404 five times: root names the objective of the token's platform experiment, and the
+// comments on it are read back with hl hypothesis get root and pointed at by hl hypothesis list.
+func TestCommentsOnTheObjective(t *testing.T) {
+	var got []recorded
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		rec := recorded{Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery}
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &rec.Body)
+		got = append(got, rec)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/hypotheses/pe-env/comments":
+			w.Header().Set("X-Total-Count", "2")
+			_, _ = io.WriteString(w, `[{"id":"c-1","hypothesis_id":"pe-env","platform_experiment_id":"pe-env","agent_id":"ag-2","actor":{"kind":"agent"},"text":"`+strings.Repeat("x", commentCut+5)+`","created_at":"t1"}]`)
+		case r.URL.Path == "/hypotheses":
+			_, _ = io.WriteString(w, `[]`)
+		default:
+			_, _ = io.WriteString(w, `{"id":"c-2"}`)
+		}
+	})
+	setAPIURL(t, url)
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/ag-1"))
+
+	for _, target := range []string{"root", "pe-env"} {
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"hypothesis", "comment", target, "--text", "published: 4.3x"}, &stdout, &stderr); code != 0 {
+			t.Fatalf("comment %s: exit %d, stderr %s", target, code, stderr.String())
+		}
+		if last := got[len(got)-1]; last.Method != "POST" || last.Path != "/hypotheses/pe-env/comments" || last.Body["text"] != "published: 4.3x" {
+			t.Errorf("comment %s sent %+v, want POST /hypotheses/pe-env/comments", target, last)
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"hypothesis", "get", "root"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("get root: exit %d, stderr %s", code, stderr.String())
+	}
+	want := `{"id":"pe-env","objective":true,"comment_count":2,"comments":[{"agent_id":"ag-2","created_at":"t1","text":"` + strings.Repeat("x", commentCut) + `…"}]}` + "\n"
+	if stdout.String() != want {
+		t.Errorf("get root = %s, want %s", stdout.String(), want)
+	}
+	if !strings.Contains(stderr.String(), "1 more comments") || !strings.Contains(stderr.String(), "1 comments cut") {
+		t.Errorf("get root stderr = %q, want the cut and the comment not shown", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"hypothesis", "list"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("list: exit %d, stderr %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "2 comments on the objective (root): hl hypothesis get root prints them") {
+		t.Errorf("list stderr = %q, want the comments on the objective pointed at", stderr.String())
+	}
+}

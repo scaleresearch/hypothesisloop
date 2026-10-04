@@ -9,7 +9,7 @@ import type { Edge, Node, NodeProps, NodeTypes } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { clsx } from 'clsx'
 import { FileText, MessageSquare, Plus } from 'lucide-react'
-import type { Evidence, HypothesisGraph, HypothesisGraphNode, HypothesisLinkType } from '@/types'
+import type { HypothesisGraph, HypothesisGraphNode, HypothesisLinkType, ObjectiveEvidence } from '@/types'
 import { chart, hypothesisLinkStyles, hypothesisStatuses, semantic, statusColor, statusTone, tint } from '@/lib/colors'
 import { opacity as scale } from '@/lib/scale'
 import { Button } from '@/components/ui/button'
@@ -51,10 +51,14 @@ export function NodeMeta({ item }: { item: HypothesisGraphNode }) {
 }
 
 /** What the baseline found, on the objective its jobs hang on: shared by the graph's root node and the outline's root row. */
-export function ObjectiveMeta({ objective }: { objective: Evidence }) {
+export function ObjectiveMeta({ objective }: { objective: ObjectiveEvidence }) {
   const shown = objectiveFinding(objective)
+  const comments = objective.comment_count ?? 0
   return (
     <Text as="span" variant="meta" className="inline-flex items-center gap-2 whitespace-nowrap tabular-nums">
+      {comments > 0 && (
+        <span className={COUNT} title={`${comments} comments on the objective`}><MessageSquare size={11} /> {comments}</span>
+      )}
       {shown && (
         <span className={COUNT} title={`${shown.baseline ? 'Baseline finding' : 'Newest finding'}: ${shown.summary}`}><FileText size={11} aria-label={shown.baseline ? 'Baseline finding' : 'Newest finding'} /></span>
       )}
@@ -68,7 +72,7 @@ export function ObjectiveMeta({ objective }: { objective: Evidence }) {
 }
 
 type HypothesisNodeData = { item: HypothesisGraphNode }
-type ObjectiveNodeData = { label: string; objective: Evidence }
+type ObjectiveNodeData = { label: string; objective: ObjectiveEvidence }
 
 // A small graph is seen whole on the canvas; the map only takes room from it.
 const MINIMAP_FROM = 15

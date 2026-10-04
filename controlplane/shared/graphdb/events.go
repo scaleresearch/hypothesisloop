@@ -56,16 +56,18 @@ RETURN 'hypothesis.link' AS kind, h.id AS subject, toLower(type(r)) AS value, t.
 
 // ConcernsAgent reports, per event, whether a hypothesis event concerns a hypothesis agentID
 // registered: the subject of a comment, finding or status, the target of a link, or a target of
-// the links a new hypothesis was registered with. A link added to a new hypothesis later is its
-// own event, so it does not make the hypothesis.new concern the agent, live or in a replay. It is
-// one read however many events are asked about.
+// the links a new hypothesis was registered with. A comment on the objective, whose subject is the
+// platform experiment's id, concerns every agent: the objective is everyone's. A link added to a
+// new hypothesis later is its own event, so it does not make the hypothesis.new concern the agent,
+// live or in a replay. It is one read however many events are asked about.
 func (s *Store) ConcernsAgent(ctx context.Context, agentID string, events []db.Event) ([]bool, error) {
 	var targets, created []string
 	for _, e := range events {
-		switch e.Kind {
-		case db.EventHypothesisNew:
+		switch {
+		case onObjective(e):
+		case e.Kind == db.EventHypothesisNew:
 			created = append(created, e.Subject)
-		case db.EventHypothesisLink:
+		case e.Kind == db.EventHypothesisLink:
 			targets = append(targets, e.Detail)
 		default:
 			targets = append(targets, e.Subject)
@@ -108,7 +110,12 @@ RETURN DISTINCT h.id`, created},
 		if e.Kind == db.EventHypothesisLink {
 			id = e.Detail
 		}
-		result[i] = concerned[id]
+		result[i] = onObjective(e) || concerned[id]
 	}
 	return result, nil
+}
+
+// onObjective is a comment on the objective, the root of its platform experiment's graph.
+func onObjective(e db.Event) bool {
+	return e.Kind == db.EventCommentNew && e.Subject != "" && e.Subject == e.PlatformExperimentID
 }

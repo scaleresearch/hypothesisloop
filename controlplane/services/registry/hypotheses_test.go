@@ -65,8 +65,9 @@ func (s *poolStore) GetExperiment(_ context.Context, id string) (*domain.Experim
 
 func newPoolStore() *poolStore { return &poolStore{} }
 
-func (s *poolStore) PlatformExperimentExists(_ context.Context, _ string) (bool, error) {
-	return true, nil
+// PlatformExperimentExists knows every platform experiment id but pe-none.
+func (s *poolStore) PlatformExperimentExists(_ context.Context, id string) (bool, error) {
+	return strings.HasPrefix(id, "pe-") && id != "pe-none", nil
 }
 
 func (s *poolStore) GetAgent(_ context.Context, id string) (*domain.Agent, error) {
@@ -151,6 +152,16 @@ func (s *poolStore) ListCommentsByHypothesis(_ context.Context, hypothesisID str
 	}
 	of = of[min(offset, len(of)):]
 	return of[:min(limit, len(of))], nil
+}
+
+func (s *poolStore) CountCommentsByHypothesis(_ context.Context, hypothesisID string) (int, error) {
+	n := 0
+	for _, c := range s.commentRows {
+		if c.HypothesisID == hypothesisID {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // NameActors names an actor as the database does: by the name kept for it, else by its id, and a
@@ -468,6 +479,28 @@ func TestAddHypothesisCommentAcceptsAnAgentsNoteOnAHumanSubmittedRow(t *testing.
 	}
 	if c.HypothesisID != human.ID {
 		t.Errorf("comment hypothesis_id: got = %v, want %v", c.HypothesisID, human.ID)
+	}
+}
+
+// Researchers were told to post the literature as a comment on the objective, and each try was
+// 404: the objective is no hypothesis node. It holds comments under its platform experiment's
+// id, the id that names it in every link and in the baseline's jobs, and a platform experiment
+// that does not exist holds none.
+func TestACommentOnTheObjectiveIsKeptUnderThePlatformExperimentsID(t *testing.T) {
+	svc := poolService(newPoolStore())
+	c, err := svc.AddHypothesisComment(context.Background(), "pe-1", "agent-1", agentActor("agent-1"), "published: 4.3x, link")
+	if err != nil {
+		t.Fatalf("AddHypothesisComment on the objective: got = %v, want nil", err)
+	}
+	if c.HypothesisID != "pe-1" || c.PlatformExperimentID != "pe-1" {
+		t.Errorf("comment on the objective: hypothesis_id %q, platform_experiment_id %q, want both pe-1", c.HypothesisID, c.PlatformExperimentID)
+	}
+	comments, total, err := svc.ListHypothesisComments(context.Background(), "pe-1", 20, 0)
+	if err != nil || total != 1 || len(comments) != 1 || comments[0].Text != "published: 4.3x, link" {
+		t.Errorf("ListHypothesisComments(pe-1): got = %v, %d, %v, want the comment", comments, total, err)
+	}
+	if _, err := svc.AddHypothesisComment(context.Background(), "pe-none", "agent-1", agentActor("agent-1"), "x"); !errors.Is(err, ErrHypothesisNotFound) {
+		t.Errorf("AddHypothesisComment on no platform experiment: got = %v, want %v", err, ErrHypothesisNotFound)
 	}
 }
 

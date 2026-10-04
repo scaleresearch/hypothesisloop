@@ -1199,8 +1199,8 @@ func TestAQueryFiltersAndRanksHypothesesByABoundEvidenceMap(t *testing.T) {
 
 // An agent's watch carries other people's activity on hypotheses it registered: a comment or
 // finding on one, a link to one, a new hypothesis building on one. The graph is the only place
-// that knows who registered what. A hypothesis linked to one of the agent's only later stays out
-// of it: the later link is its own event.
+// that knows who registered what, and a comment on the objective is everyone's. A hypothesis
+// linked to one of the agent's only later stays out of it: the later link is its own event.
 func TestConcernsAgentFindsActivityOnTheAgentsOwnHypotheses(t *testing.T) {
 	s := testStore(t)
 	pe := testExperiment(t, s)
@@ -1222,6 +1222,8 @@ func TestConcernsAgentFindsActivityOnTheAgentsOwnHypotheses(t *testing.T) {
 		{db.Event{Kind: db.EventHypothesisLink, Subject: theirs.ID, Detail: pe}, false},
 		{db.Event{Kind: db.EventHypothesisNew, Subject: child.ID}, true},
 		{db.Event{Kind: db.EventHypothesisNew, Subject: theirs.ID}, false},
+		{db.Event{Kind: db.EventCommentNew, Subject: pe, PlatformExperimentID: pe}, true},
+		{db.Event{Kind: db.EventFindingNew, Subject: pe, PlatformExperimentID: pe}, false},
 	}
 	events := make([]db.Event, len(cases))
 	for i, c := range cases {

@@ -61,8 +61,8 @@ And for what holds the whole run back:
   - The same failure across agents, a job stuck queued (`capacity_unavailable`,
     `no_cluster_for_image`), or an environment problem: fix it in the brief.
   - A reference missing or invalid (see Baseline).
-  - No literature: no comment on the objective with the best published results and links.
-    Tell a researcher to post one before its next idea.
+  - No literature: no comment on the objective (`hl hypothesis get root`) with the best
+    published results and links. Tell a researcher to post one before its next idea.
   - Converging ideas: the objective's children are not distinct mechanisms, or the
     researchers all work the same one. Give each a different direction.
   - A plateau: a line whose last refinements gained less than the spread between repeats.

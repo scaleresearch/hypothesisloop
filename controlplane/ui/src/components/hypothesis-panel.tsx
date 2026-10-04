@@ -29,6 +29,8 @@ interface HypothesisPanelProps {
 export function ObjectiveBar({ graph, pe }: { graph: HypothesisGraph; pe: PlatformExperiment }) {
   const { best_job: bestJob } = graph.objective
   const shown = objectiveFinding(graph.objective)
+  const comments = graph.objective.comments ?? []
+  const commentCount = graph.objective.comment_count ?? comments.length
   return (
     <Card>
       <CardContent>
@@ -54,6 +56,19 @@ export function ObjectiveBar({ graph, pe }: { graph: HypothesisGraph; pe: Platfo
               {shown.baseline ? 'Baseline finding' : 'Newest finding on the objective'} · <TextLink href={jobPath(graph.root, shown.job)} className="font-mono">{shown.job}</TextLink>
             </Eyebrow>
             <CollapsibleDescription text={shown.summary} collapseLength={140} />
+          </Stack>
+        )}
+        {comments.length > 0 && (
+          <Stack gap="xs">
+            <Eyebrow>
+              {commentCount} comments on the objective{commentCount > comments.length && `, the newest ${comments.length}`}
+            </Eyebrow>
+            {comments.map(c => (
+              <Stack gap="xs" key={c.id}>
+                <Text as="div" variant="meta"><Actor actor={c.actor} agentID={c.agent_id} /> · {relTime(c.created_at)}</Text>
+                <CollapsibleDescription text={c.text} collapseLength={140} />
+              </Stack>
+            ))}
           </Stack>
         )}
         </Stack>

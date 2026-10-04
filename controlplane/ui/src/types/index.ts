@@ -476,12 +476,19 @@ export interface Evidence {
 
 export interface HypothesisGraphNode extends HypothesisListItem, Evidence {}
 
+// The objective's evidence with the comments on it: comment_count of them and the newest five,
+// oldest first. Comments on the objective are kept under the platform_experiment_id.
+export interface ObjectiveEvidence extends Evidence {
+  comments?: HypothesisComment[]
+  comment_count?: number
+}
+
 // GET /hypotheses/graph: one platform experiment's whole graph. `root` is the objective's id,
 // equal to the platform_experiment_id. `objective` is the baseline's evidence: a baseline agent's
 // jobs test no hypothesis and hang on the root.
 export interface HypothesisGraph {
   root: string
-  objective: Evidence
+  objective: ObjectiveEvidence
   nodes: HypothesisGraphNode[]
   edges: HypothesisGraphEdge[]
 }

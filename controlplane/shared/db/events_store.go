@@ -146,8 +146,8 @@ var EventKinds = []EventKindDoc{
 		Description: "A link was added to an existing hypothesis. detail is the target: a hypothesis id, or the platform experiment id for the objective. Links given at registration ride on hypothesis.new instead."},
 	{Kind: EventFindingNew, Subject: "hypothesis id", Value: "the experiment id that produced it",
 		Description: "A result was attached to a claim — someone's number is now readable instead of yours being re-derived."},
-	{Kind: EventCommentNew, Subject: "hypothesis id", Value: "empty by design",
-		Description: "Someone said something on a claim, people included. agent_id is whose note it is, empty on one no agent owns."},
+	{Kind: EventCommentNew, Subject: "hypothesis id, or the platform experiment id for the objective", Value: "empty by design",
+		Description: "Someone said something on a claim, or on the objective, people included. agent_id is whose note it is, empty on one no agent owns. GET /hypotheses/{id}/comments reads it."},
 	{Kind: EventPlatformExperimentStatus, Subject: "platform experiment id", Value: "draft, open, running, closed",
 		Description: "The run itself moved. 'closed' is a stop condition for every agent in it. With a detail the status stayed and its status_reason changed to one that waits for its coordinator, where the platform hosts one: detail is that reason, such as researchers_done once no researcher is left to work, sent within a minute of the change and once for each. GET /platform-experiments/{id} has its message."},
 	{Kind: EventPlatformExperimentDescription, Subject: "platform experiment id", Value: "empty by design",
@@ -258,6 +258,8 @@ func agentScope(kind string) string {
 		return "your own"
 	case kind == EventHypothesisNew:
 		return "someone else's hypothesis linking to one you registered"
+	case kind == EventCommentNew:
+		return "someone else's, on a hypothesis you registered or on the objective"
 	case isHypothesisActivity(kind):
 		return "someone else's, on a hypothesis you registered"
 	case kind == EventStageBoundary:

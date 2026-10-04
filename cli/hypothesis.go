@@ -80,10 +80,10 @@ var hypothesisCommands = []subcommand{
 	{"submit", "register an idea under the objective or the hypotheses it builds on", hypothesisSubmit, everyone},
 	{"checkout", "put the clone on your branch for a hypothesis, made from what the hypothesis builds on", hypothesisCheckout, asAgent},
 	{"link", "add a link from your own hypothesis", hypothesisLink, everyone},
-	{"comment", "add a note to a hypothesis", hypothesisComment, everyone},
+	{"comment", "add a note to a hypothesis, or to the objective as root", hypothesisComment, everyone},
 	{"status", "set your hypothesis's verdict; confirmed and refuted need two completed jobs of its own besides the control, or --despite with why one suffices (a deterministic job)", hypothesisStatus, everyone},
 	{"list", "hypotheses, most recent first", hypothesisList, everyone},
-	{"get", "one hypothesis with its links, findings, implementations, comments and jobs, short unless --full", hypothesisGet, everyone},
+	{"get", "one hypothesis with its links, findings, implementations, comments and jobs, short unless --full; root: the comments on the objective", hypothesisGet, everyone},
 	{"query", "read-only Cypher over the graph, including its text search", hypothesisQuery, everyone},
 }
 
@@ -442,12 +442,15 @@ an agent's hypothesis names that agent with --agent, and is kept as who made the
 }
 
 func hypothesisComment(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("hypothesis comment", `usage: hl hypothesis comment ID --text T
+	fs := newFlags("hypothesis comment", `usage: hl hypothesis comment ID|root --text T
 
-A note on any hypothesis with no job behind it: a verified fact, a dead end, a revision. It is
-written by whoever HL_TOKEN is. An agent's token writes its own agent's note; a person or an
-API key writes their own, or an agent's with --agent.`, stderr)
+A note on any hypothesis with no job behind it: a verified fact, a dead end, a revision. root,
+or the platform experiment's id, is the objective: a note for every approach, such as the
+published results on the problem, which every agent of the platform experiment is told of.
+It is written by whoever HL_TOKEN is. An agent's token writes its own agent's note; a person or
+an API key writes their own, or an agent's with --agent.`, stderr)
 	agent := fs.String("agent", "", "agent whose note it is (default the token's agent, else the caller's own)")
+	pe := fs.String("platform-experiment", "", "the platform experiment whose objective root names (default the token's)")
 	text := fs.String("text", "", "the note")
 	id, err := parseOne(fs, args, "ID", "", "id")
 	if err != nil {
@@ -455,6 +458,9 @@ API key writes their own, or an agent's with --agent.`, stderr)
 	}
 	if *text == "" {
 		return parseExit(misuse(fs, "--text is required"))
+	}
+	if id, _, err = objectiveOr(fs, c, id, *pe); err != nil {
+		return parseExit(err)
 	}
 	owner, err := recordOwner(c, *agent)
 	if err != nil {
@@ -577,11 +583,87 @@ hypothesis was run on are in hl hypothesis get ID, as implementations.`, stderr)
 	if total, _ := strconv.Atoi(header.Get("X-Total-Count")); total > *offset+len(out) {
 		fmt.Fprintf(stderr, "hl: hypothesis list: %d more; --limit N (max 200) and --offset N show them\n", total-*offset-len(out))
 	}
+	if *offset == 0 {
+		objectiveComments(c, *pe, stderr)
+	}
 	return 0
 }
 
 // commentCut is how many characters of a comment hl hypothesis get prints unless told --full.
 const commentCut = 160
+
+// objectiveOr is the id a hypothesis command addresses, and whether it is the objective: root
+// names the objective of the platform experiment (flagValue, else the token's), and so does that
+// platform experiment's id, which the platform answers for it everywhere.
+func objectiveOr(fs *flagSet, c *apiclient.Client, id, flagValue string) (string, bool, error) {
+	if id != rootTarget {
+		pe := experimentOf(c, flagValue)
+		return id, id == pe || strings.HasPrefix(id, "pe-"), nil
+	}
+	pe, err := namedExperiment(fs, c, flagValue)
+	return pe, true, err
+}
+
+// objectiveGet prints the objective as hl hypothesis get prints a hypothesis: its comments, cut
+// unless full, and how many there are. The rest of the objective is read elsewhere.
+func objectiveGet(c *apiclient.Client, pe string, full bool, limit int, stdout, stderr io.Writer) int {
+	path := "/hypotheses/" + url.PathEscape(pe) + "/comments"
+	if limit != 0 {
+		path += "?limit=" + strconv.Itoa(limit)
+	}
+	var comments []map[string]any
+	header, err := c.DoHeader("GET", path, nil, &comments)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	total, _ := strconv.Atoi(header.Get("X-Total-Count"))
+	cut := 0
+	if !full {
+		for _, comment := range comments {
+			for _, key := range []string{"id", "hypothesis_id", "platform_experiment_id", "actor"} {
+				delete(comment, key)
+			}
+			if text, _ := comment["text"].(string); len([]rune(text)) > commentCut {
+				comment["text"] = string([]rune(text)[:commentCut]) + "…"
+				cut++
+			}
+		}
+	}
+	if comments == nil {
+		comments = []map[string]any{}
+	}
+	line, err := json.Marshal(struct {
+		ID           string           `json:"id"`
+		Objective    bool             `json:"objective"`
+		CommentCount int              `json:"comment_count"`
+		Comments     []map[string]any `json:"comments"`
+	}{pe, true, total, comments})
+	if err != nil {
+		return fail(stderr, err)
+	}
+	fmt.Fprintf(stdout, "%s\n", line)
+	if cut > 0 {
+		fmt.Fprintf(stderr, "hl: hypothesis get: %d comments cut at %d characters; --full prints them whole\n", cut, commentCut)
+	}
+	if total > len(comments) {
+		fmt.Fprintf(stderr, "hl: hypothesis get: %d more comments; --limit N (max 200) shows them\n", total-len(comments))
+	}
+	fmt.Fprintln(stderr, "hl: hypothesis get: the objective is the platform experiment's: hl platform-experiments get has its description and baseline, and its approaches are the hypotheses that build on root")
+	return 0
+}
+
+// objectiveComments says on stderr how many comments the objective of pe holds, where a list of
+// its hypotheses is read: they are on no hypothesis it lists. A failed read says nothing.
+func objectiveComments(c *apiclient.Client, pe string, stderr io.Writer) {
+	var comments []json.RawMessage
+	header, err := c.DoHeader("GET", "/hypotheses/"+url.PathEscape(pe)+"/comments?limit=1", nil, &comments)
+	if err != nil {
+		return
+	}
+	if total, _ := strconv.Atoi(header.Get("X-Total-Count")); total > 0 {
+		fmt.Fprintf(stderr, "hl: hypothesis list: %d comments on the objective (root): hl hypothesis get root prints them\n", total)
+	}
+}
 
 // hypothesisBrief is what hl hypothesis get prints of the lists of a hypothesis unless told
 // --full: a link without the text of the hypothesis it names, a finding and a comment without
@@ -611,8 +693,10 @@ type briefLink struct {
 }
 
 func hypothesisGet(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("hypothesis get", `usage: hl hypothesis get ID [--full] [--limit N]
+	fs := newFlags("hypothesis get", `usage: hl hypothesis get ID|root [--full] [--limit N]
 
+root, or the platform experiment's id, prints the objective: the comments on it, oldest first,
+cut like a hypothesis's, with comment_count.
 One hypothesis on one line, short enough to read whole: its text and status, its links in and
 out (type, hypothesis_id and status of each), its findings in full (experiment_id is the job
 one is of), its comments cut to their first 160 characters, and its jobs, oldest first, each
@@ -626,9 +710,17 @@ any agent may run its own code for it. base_ref is the commit a new implementati
 wrote each, and a job as hl job list prints it. hl job status ID prints a job's whole record.`, stderr)
 	full := fs.Bool("full", false, "the whole record: comments uncut, linked hypotheses with their text, jobs as in hl job list")
 	limit := fs.Int("limit", 0, "how many of its jobs, findings and comments each (server default 20, max 200)")
+	pe := fs.String("platform-experiment", "", "the platform experiment whose objective root names (default the token's)")
 	id, err := parseOne(fs, args, "ID", "", "id")
 	if err != nil {
 		return parseExit(err)
+	}
+	id, objective, err := objectiveOr(fs, c, id, *pe)
+	if err != nil {
+		return parseExit(err)
+	}
+	if objective {
+		return objectiveGet(c, id, *full, *limit, stdout, stderr)
 	}
 	path := "/hypotheses/" + url.PathEscape(id)
 	if *limit != 0 {
@@ -719,7 +811,8 @@ Schema:
   (:Hypothesis)-[:CONTRADICTS]->(:Hypothesis), (:Hypothesis)-[:RELATED]->(:Hypothesis)
   every relationship {agent_id, actor_kind, actor_id, created_at}
 $evidence[h.id]: counts {jobs, each lowercase job status, findings, comments} and
-last_finding_at, or null. Text: hl hypothesis get ID.
+last_finding_at, or null; $evidence[$pe] is the objective's, its jobs the baseline's. Text:
+hl hypothesis get ID, and hl hypothesis get root for the comments on the objective.
 
 Examples:
 

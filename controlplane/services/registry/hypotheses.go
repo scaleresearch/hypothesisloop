@@ -275,11 +275,23 @@ type GraphNode struct {
 // HypothesisGraph is one platform experiment's whole hypothesis graph, rooted at its objective.
 type HypothesisGraph struct {
 	Root string `json:"root"`
-	// Objective is what the baseline's jobs found: they test no hypothesis and hang on the root.
-	Objective Evidence           `json:"objective"`
+	// Objective is what the baseline's jobs found, they test no hypothesis and hang on the root,
+	// and what was said on the objective itself.
+	Objective ObjectiveEvidence  `json:"objective"`
 	Nodes     []*GraphNode       `json:"nodes"`
 	Edges     []domain.GraphEdge `json:"edges"`
 }
+
+// ObjectiveEvidence is the Evidence of the objective with the comments on it: CommentCount of
+// them, and the newest objectiveComments, oldest first.
+type ObjectiveEvidence struct {
+	Evidence
+	Comments     []*domain.HypothesisComment `json:"comments"`
+	CommentCount int                         `json:"comment_count"`
+}
+
+// objectiveComments is how many of the newest comments on the objective its graph carries.
+const objectiveComments = 5
 
 // HypothesisGraph returns the whole hypothesis graph of one platform experiment, each node with
 // its newest finding and its best job, and the same of the objective, whose jobs are the
@@ -315,9 +327,18 @@ func (s *Service) HypothesisGraph(ctx context.Context, platformExperimentID stri
 			actors = append(actors, &f.Actor)
 		}
 	}
-	objective := evidence[platformExperimentID]
+	objective := ObjectiveEvidence{Evidence: evidence[platformExperimentID]}
 	if objective.Finding != nil {
 		actors = append(actors, &objective.Finding.Actor)
+	}
+	if objective.CommentCount, err = s.store.CountCommentsByHypothesis(ctx, platformExperimentID); err != nil {
+		return nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
+	}
+	if objective.Comments, err = s.store.ListCommentsByHypothesis(ctx, platformExperimentID, objectiveComments, max(0, objective.CommentCount-objectiveComments)); err != nil {
+		return nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
+	}
+	for _, c := range objective.Comments {
+		actors = append(actors, &c.Actor)
 	}
 	for i := range edges {
 		actors = append(actors, &edges[i].Actor)
@@ -745,18 +766,16 @@ func (s *Service) ListHypothesisFindings(ctx context.Context, hypothesisID strin
 	return fs, total, nil
 }
 
-// AddHypothesisComment records a freeform, job-independent note against a hypothesis — see
-// domain.HypothesisComment for how this differs from a finding. agentID is the agent whose note
-// it is, empty for one no agent owns, and actor the credential writing it.
+// AddHypothesisComment records a freeform, job-independent note against a hypothesis, or against
+// the objective when hypothesisID is a platform experiment's id — see domain.HypothesisComment for
+// how this differs from a finding. agentID is the agent whose note it is, empty for one no agent
+// owns, and actor the credential writing it.
 func (s *Service) AddHypothesisComment(ctx context.Context, hypothesisID, agentID string, actor domain.Actor, text string) (*domain.HypothesisComment, error) {
-	h, err := s.graph.GetHypothesis(ctx, hypothesisID)
+	platformExperimentID, err := s.CommentTarget(ctx, hypothesisID)
 	if err != nil {
 		return nil, fmt.Errorf("registry.AddHypothesisComment: %w", err)
 	}
-	if h == nil {
-		return nil, fmt.Errorf("registry.AddHypothesisComment: %w: %s", ErrHypothesisNotFound, hypothesisID)
-	}
-	c, err := s.store.CreateHypothesisComment(ctx, hypothesisID, h.PlatformExperimentID, agentID, actor, text)
+	c, err := s.store.CreateHypothesisComment(ctx, hypothesisID, platformExperimentID, agentID, actor, text)
 	if err != nil {
 		return nil, fmt.Errorf("registry.AddHypothesisComment: %w", err)
 	}
@@ -769,8 +788,30 @@ func (s *Service) AddHypothesisComment(ctx context.Context, hypothesisID, agentI
 	return c, nil
 }
 
-// ListHypothesisComments returns one page of the comments filed against a hypothesis, oldest
-// first, alongside the full count the page was taken from.
+// CommentTarget is the platform experiment a comment on id lands in: the hypothesis's, or id
+// itself when it names a platform experiment, whose objective is the root of its graph and holds
+// comments like any hypothesis, under its id.
+func (s *Service) CommentTarget(ctx context.Context, id string) (string, error) {
+	h, err := s.graph.GetHypothesis(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if h != nil {
+		return h.PlatformExperimentID, nil
+	}
+	found, err := s.store.PlatformExperimentExists(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", fmt.Errorf("%w: %s", ErrHypothesisNotFound, id)
+	}
+	return id, nil
+}
+
+// ListHypothesisComments returns one page of the comments filed against a hypothesis, or against
+// the objective under its platform experiment's id, oldest first, alongside the full count the
+// page was taken from.
 func (s *Service) ListHypothesisComments(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, int, error) {
 	cs, err := s.store.ListCommentsByHypothesis(ctx, hypothesisID, limit, offset)
 	if err != nil {
