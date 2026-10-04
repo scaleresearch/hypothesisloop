@@ -10,16 +10,17 @@ import '@xyflow/react/dist/style.css'
 import { clsx } from 'clsx'
 import { FileText, MessageSquare, Plus } from 'lucide-react'
 import type { Evidence, HypothesisGraph, HypothesisGraphNode, HypothesisLinkType } from '@/types'
-import { chart, hypothesisLinkStyles, hypothesisStatuses, semantic, statusColor, tint } from '@/lib/colors'
+import { chart, hypothesisLinkStyles, hypothesisStatuses, semantic, statusColor, statusTone, tint } from '@/lib/colors'
 import { opacity as scale } from '@/lib/scale'
 import { Button } from '@/components/ui/button'
 import { Dot } from '@/components/ui/dot'
+import { StatusLabel } from '@/components/ui/badge'
 import { Inline } from '@/components/ui/stack'
 import { Eyebrow, Text } from '@/components/ui/text'
 import { filedAfterVerdict } from '@/lib/hypothesis-progress'
 import { Actor, verdictBy } from '@/components/actor'
 import { addHereLabel, useEditor } from '@/components/graph-edit'
-import { LINK_KIND_LABELS, NODE_HEIGHT, NODE_WIDTH, ROW, matchesFilters } from '@/lib/hypothesis-graph'
+import { LINK_KIND_LABELS, NODE_HEIGHT, NODE_WIDTH, ROW, matchesFilters, objectiveFinding } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
 
 // Kinds read apart by line as well as colour: a related link is dotted, the others solid.
@@ -31,7 +32,7 @@ const COUNT = 'inline-flex items-center gap-0.5'
 export function NodeMeta({ item }: { item: HypothesisGraphNode }) {
   const newer = item.finding !== undefined && filedAfterVerdict(item, item.finding.created_at)
   return (
-    <Text as="span" variant="meta" mono className="inline-flex min-w-0 items-center gap-2 whitespace-nowrap">
+    <Text as="span" variant="meta" className="inline-flex min-w-0 items-center gap-2 whitespace-nowrap tabular-nums">
       <Actor actor={item.actor} agentID={item.agent_id} compact />
       <span
         className={clsx(COUNT, newer && 'text-warning')}
@@ -51,10 +52,11 @@ export function NodeMeta({ item }: { item: HypothesisGraphNode }) {
 
 /** What the baseline found, on the objective its jobs hang on: shared by the graph's root node and the outline's root row. */
 export function ObjectiveMeta({ objective }: { objective: Evidence }) {
+  const shown = objectiveFinding(objective)
   return (
-    <Text as="span" variant="meta" mono className="inline-flex items-center gap-2 whitespace-nowrap">
-      {objective.finding && (
-        <span className={COUNT} title={`Baseline finding: ${objective.finding.summary}`}><FileText size={11} aria-label="Baseline finding" /></span>
+    <Text as="span" variant="meta" className="inline-flex items-center gap-2 whitespace-nowrap tabular-nums">
+      {shown && (
+        <span className={COUNT} title={`${shown.baseline ? 'Baseline finding' : 'Newest finding'}: ${shown.summary}`}><FileText size={11} aria-label={shown.baseline ? 'Baseline finding' : 'Newest finding'} /></span>
       )}
       {objective.best_job && (
         <span className={clsx(COUNT, 'text-foreground')} title={`Best ${objective.best_job.metric.name} of the baseline's jobs`}>
@@ -67,6 +69,9 @@ export function ObjectiveMeta({ objective }: { objective: Evidence }) {
 
 type HypothesisNodeData = { item: HypothesisGraphNode }
 type ObjectiveNodeData = { label: string; objective: Evidence }
+
+// A small graph is seen whole on the canvas; the map only takes room from it.
+const MINIMAP_FROM = 15
 
 // Kept out of node data so that selecting or filtering re-renders only the drawn nodes instead of
 // rebuilding every React Flow node.
@@ -110,7 +115,7 @@ function NodeAdd({ id, objective }: { id: string; objective: boolean }) {
 const NODE = 'group relative flex cursor-pointer flex-col gap-1.5 rounded border border-l-3 py-2 pl-3 pr-2.5 text-foreground transition hover:bg-surface-raised'
 // The box is NODE_WIDTH by NODE_HEIGHT: the layout places nodes by those.
 const NODE_BOX = { width: NODE_WIDTH, height: NODE_HEIGHT }
-const NODE_TEXT = 'line-clamp-3 break-words text-xs leading-snug'
+const NODE_TEXT = 'line-clamp-3 break-words text-sm'
 
 function HiddenHandles() {
   return (
@@ -144,7 +149,9 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
       <NodeAdd id={item.id} objective={false} />
       <div className={NODE_TEXT}>{item.text}</div>
       <div className="flex min-w-0 items-center gap-2">
-        <span className="inline-block text-2xs font-medium lowercase first-letter:uppercase" style={{ color }} title={verdictBy(item) && `${item.status} ${verdictBy(item)}`}>{item.status}</span>
+        <StatusLabel tone={statusTone(item.status)} title={verdictBy(item) && `${item.status} ${verdictBy(item)}`} className="flex-none">
+          <span className="inline-block lowercase first-letter:uppercase">{item.status}</span>
+        </StatusLabel>
         <NodeMeta item={item} />
       </div>
     </div>
@@ -333,7 +340,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
       const all = Array.from(positions.values())
       const halfWidth = Math.max(...all.map(q => Math.abs(q.x - p.x))) + NODE_WIDTH / 2
       const depth = Math.max(...all.map(q => q.y)) + NODE_HEIGHT
-      const zoom = Math.min(0.8, Math.max(0.4, Math.min((width / 2 - 20) / halfWidth, (height - 60) / depth)))
+      const zoom = Math.min(0.8, Math.max(0.65, Math.min((width / 2 - 20) / halfWidth, (height - 60) / depth)))
       setViewport({ x: width / 2 - (p.x + NODE_WIDTH / 2) * zoom, y: 40 - p.y * zoom, zoom })
     }
   }, [ready, focus, graph.root, positions, width, height, setCenter, setViewport, getZoom])
@@ -366,7 +373,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
             No hypotheses yet. Agents place each idea under the objective or an earlier one.
           </Panel>
         )}
-        {minimap && graph.nodes.length > 0 && (
+        {minimap && graph.nodes.length >= MINIMAP_FROM && (
           <MiniMap
             position="top-right"
             pannable

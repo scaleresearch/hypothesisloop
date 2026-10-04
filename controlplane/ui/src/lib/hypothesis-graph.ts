@@ -1,8 +1,8 @@
-import type { Hypothesis, HypothesisGraph, HypothesisLinkType, HypothesisListItem } from '@/types'
+import type { Evidence, Hypothesis, HypothesisGraph, HypothesisLinkType, HypothesisListItem } from '@/types'
 import { experimentPath, withQuery } from '@/lib/routes'
 
-export const NODE_WIDTH = 240
-export const NODE_HEIGHT = 92
+export const NODE_WIDTH = 280
+export const NODE_HEIGHT = 112
 
 export const HUMAN_OWNER = 'human'
 
@@ -275,4 +275,15 @@ export function linkGroups<T extends { type: HypothesisLinkType }>(out: T[], inc
 
 export function graphHref(platformExperimentID: string, focus?: string): string {
   return withQuery(experimentPath(platformExperimentID, 'hypotheses'), { focus })
+}
+
+/**
+ * The write-up to show for the objective: that of the baseline job, else the newest filed on the
+ * objective, which may be a reference job's.
+ */
+export function objectiveFinding(objective: Evidence): { job: string; summary: string; baseline: boolean } | null {
+  const { best_job: best, finding } = objective
+  if (best?.summary) return { job: best.id, summary: best.summary, baseline: true }
+  if (finding) return { job: finding.experiment_id, summary: finding.summary, baseline: finding.experiment_id === best?.id }
+  return null
 }

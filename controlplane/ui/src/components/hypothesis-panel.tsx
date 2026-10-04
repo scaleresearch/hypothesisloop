@@ -13,7 +13,7 @@ import { Eyebrow, Text } from '@/components/ui/text'
 import { IdeaText, LinkButton } from '@/components/graph-edit'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { Actor, Verdict } from '@/components/actor'
-import { linkGroups } from '@/lib/hypothesis-graph'
+import { linkGroups, objectiveFinding } from '@/lib/hypothesis-graph'
 import { semantic, statusColor } from '@/lib/colors'
 import { filedAfterVerdict } from '@/lib/hypothesis-progress'
 import { relTime } from '@/lib/format'
@@ -27,7 +27,8 @@ interface HypothesisPanelProps {
 }
 
 export function ObjectiveBar({ graph, pe }: { graph: HypothesisGraph; pe: PlatformExperiment }) {
-  const { finding, best_job: bestJob } = graph.objective
+  const { best_job: bestJob } = graph.objective
+  const shown = objectiveFinding(graph.objective)
   return (
     <Card>
       <CardContent>
@@ -42,17 +43,17 @@ export function ObjectiveBar({ graph, pe }: { graph: HypothesisGraph; pe: Platfo
         </Inline>
         {pe.description && <CollapsibleDescription text={pe.description} collapseLength={140} />}
         {bestJob && (
-          <Text as="div" variant="code">
-            <span className="text-muted">Baseline job </span>
+          <Text as="div" variant="note" className="tabular-nums">
+            Baseline job{' '}
             <TextLink href={jobPath(graph.root, bestJob.id)}>{bestJob.metric.name} {bestJob.metric.value.toFixed(4)}</TextLink>
           </Text>
         )}
-        {finding && (
+        {shown && (
           <Stack gap="xs">
             <Eyebrow>
-              Baseline finding · <TextLink href={jobPath(graph.root, finding.experiment_id)} className="font-mono normal-case">{finding.experiment_id}</TextLink>
+              {shown.baseline ? 'Baseline finding' : 'Newest finding on the objective'} · <TextLink href={jobPath(graph.root, shown.job)} className="font-mono">{shown.job}</TextLink>
             </Eyebrow>
-            <CollapsibleDescription text={finding.summary} collapseLength={140} />
+            <CollapsibleDescription text={shown.summary} collapseLength={140} />
           </Stack>
         )}
         </Stack>

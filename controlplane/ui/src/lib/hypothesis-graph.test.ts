@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { COLUMN, ROW, extendLayout, layoutGraph, linkPlanner } from '@/lib/hypothesis-graph'
+import { COLUMN, ROW, extendLayout, layoutGraph, linkPlanner, objectiveFinding } from '@/lib/hypothesis-graph'
 import type { HypothesisGraph, HypothesisGraphNode } from '@/types'
 
 const at = '2026-01-01T00:00:00Z'
@@ -62,5 +62,20 @@ describe('a node that joins the graph', () => {
     const laid = layoutGraph(before)
     const after = extendLayout(graphOf([...before.nodes, idea('x', ['pe', 'a1'])]), laid)
     expect(after.get('x')!.y).toBe(laid.get('a1')!.y + ROW)
+  })
+})
+
+describe('objectiveFinding', () => {
+  const metric = { name: 'ratio', value: 1.5, basis: 'raw' }
+  const reference = { id: 'f2', hypothesis_id: 'pe', experiment_id: 'job-ref', agent_id: 'b', actor, summary: 'Reference', created_at: at }
+
+  it('shows the baseline job write-up over a newer one on the objective', () => {
+    expect(objectiveFinding({ finding: reference, best_job: { id: 'job-control', metric, summary: 'Control', summary_due: false } }))
+      .toEqual({ job: 'job-control', summary: 'Control', baseline: true })
+  })
+
+  it('names the newest finding as such while the baseline job has none', () => {
+    expect(objectiveFinding({ finding: reference, best_job: { id: 'job-control', metric, summary_due: true } }))
+      .toEqual({ job: 'job-ref', summary: 'Reference', baseline: false })
   })
 })
