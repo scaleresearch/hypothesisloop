@@ -325,23 +325,34 @@ func (s *PlatformExperimentsService) primaryStandings(ctx context.Context, pe *d
 }
 
 // PriorRuns describes each of ids, prior runs of one platform experiment, in their order, with
-// the leading standing on its primary ranking metric.
+// the leading standing on its primary ranking metric, as results ranks it. One query of each
+// store reads them all, whatever their number.
 func (s *PlatformExperimentsService) PriorRuns(ctx context.Context, ids []string) ([]domain.PriorRun, error) {
-	out := make([]domain.PriorRun, 0, len(ids))
-	for _, id := range ids {
-		pe, err := s.stored(ctx, id)
-		if err != nil {
-			return nil, fmt.Errorf("prior runs: %w", err)
+	runs, err := s.store.RunsToRank(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("prior runs: %w", err)
+	}
+	var rankings []metricsdb.Ranking
+	for _, run := range runs {
+		if primary, ok := domain.PrimaryRankingMetric(run.PE.Metrics); ok {
+			rankings = append(rankings, metricsdb.Ranking{PE: run.PE, Metric: primary, Completed: run.Completed})
 		}
-		primary, standings, err := s.primaryStandings(ctx, pe)
-		if err != nil {
-			return nil, fmt.Errorf("prior runs: %w", err)
+	}
+	best, err := metricsdb.BestPerAgentOnMetrics(ctx, s.metricsDBURL, rankings)
+	if err != nil {
+		return nil, fmt.Errorf("prior runs: %w", err)
+	}
+	out := make([]domain.PriorRun, 0, len(runs))
+	for _, run := range runs {
+		pe := run.PE
+		prior := domain.PriorRun{ID: pe.ID, Name: pe.Name, Status: pe.Status, ClosedAt: pe.ClosedAt, CloseReason: pe.CloseReason}
+		if primary, ok := domain.PrimaryRankingMetric(pe.Metrics); ok {
+			prior.Metric = primary.Key
+			if standings := order(primary, best[pe.ID], run.Competitors); len(standings) > 0 {
+				prior.Best, prior.BestJobID = &standings[0].Best, standings[0].ExperimentID
+			}
 		}
-		run := domain.PriorRun{ID: pe.ID, Name: pe.Name, Status: pe.Status, ClosedAt: pe.ClosedAt, CloseReason: pe.CloseReason, Metric: primary.Key}
-		if len(standings) > 0 {
-			run.Best, run.BestJobID = &standings[0].Best, standings[0].ExperimentID
-		}
-		out = append(out, run)
+		out = append(out, prior)
 	}
 	return out, nil
 }
@@ -372,26 +383,33 @@ func (s *PlatformExperimentsService) rank(ctx context.Context, pe *domain.Platfo
 	for _, agentID := range competitors {
 		isCompetitor[agentID] = true
 	}
-
-	standings := make([]AgentStanding, 0, len(best))
-	for agentID, b := range best {
-		if !isCompetitor[agentID] {
+	standings := order(metric, best, isCompetitor)
+	for i := range standings {
+		st := &standings[i]
+		if st.ExperimentID == "" {
 			continue
 		}
-		st := AgentStanding{AgentID: agentID, Best: b.Value, Basis: "raw", ExperimentID: b.ExperimentID}
-		if b.ExperimentID != "" {
-			exp, err := s.store.GetExperiment(ctx, b.ExperimentID)
-			if err != nil {
-				return nil, fmt.Errorf("results: %s: job %s: %w", metric.Key, b.ExperimentID, err)
-			}
-			if exp != nil {
-				st.CodeRef, st.Env, st.Objective = exp.CodeRef, exp.Job.Env, exp.OnObjective()
-				if !st.Objective {
-					st.HypothesisID = exp.HypothesisID
-				}
+		exp, err := s.store.GetExperiment(ctx, st.ExperimentID)
+		if err != nil {
+			return nil, fmt.Errorf("results: %s: job %s: %w", metric.Key, st.ExperimentID, err)
+		}
+		if exp != nil {
+			st.CodeRef, st.Env, st.Objective = exp.CodeRef, exp.Job.Env, exp.OnObjective()
+			if !st.Objective {
+				st.HypothesisID = exp.HypothesisID
 			}
 		}
-		standings = append(standings, st)
+	}
+	return standings, nil
+}
+
+// order is the competitors' bests on metric as standings, sorted best first and ranked.
+func order(metric domain.MetricDefinition, best map[string]metricsdb.AgentBest, isCompetitor map[string]bool) []AgentStanding {
+	standings := make([]AgentStanding, 0, len(best))
+	for agentID, b := range best {
+		if isCompetitor[agentID] {
+			standings = append(standings, AgentStanding{AgentID: agentID, Best: b.Value, Basis: "raw", ExperimentID: b.ExperimentID})
+		}
 	}
 	sort.Slice(standings, func(i, j int) bool {
 		if standings[i].Best != standings[j].Best {
@@ -403,7 +421,7 @@ func (s *PlatformExperimentsService) rank(ctx context.Context, pe *domain.Platfo
 		return standings[i].AgentID < standings[j].AgentID
 	})
 	assignRanks(standings)
-	return standings, nil
+	return standings
 }
 
 // assignRanks numbers standings that are sorted best-first. Agents with the same best share a

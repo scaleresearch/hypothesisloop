@@ -474,6 +474,39 @@ func TestPriorRunsAreTheClosedRunsOfTheProjectOnTheSameRepository(t *testing.T) 
 	}
 }
 
+// The standings of every prior run are read from one query of the relational store: each run in
+// the order asked, with its completed jobs and its researchers.
+func TestRunsToRankAreReadInTheOrderAsked(t *testing.T) {
+	pool := eventsTestDB(t)
+	pes := NewPlatformExperimentsStore(pool)
+	ctx := context.Background()
+	suffix := uuid.New().String()[:8]
+	first, second := "pe-rank-first-"+suffix, "pe-rank-second-"+suffix
+	researcher, baseline := "rank-researcher-"+suffix, "rank-baseline-"+suffix
+	createTestPE(t, pool, first, 10)
+	createTestPE(t, pool, second, 10)
+	createTestAgent(t, pool, researcher)
+	createTestAgent(t, pool, baseline)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id) VALUES ($1, $2)`, first, researcher)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, role) VALUES ($1, $2, 'baseline')`, first, baseline)
+	seedExperimentForCapTest(t, pool, "job-rank-done-"+suffix, researcher, first, 1, domain.StatusCompleted)
+	seedExperimentForCapTest(t, pool, "job-rank-failed-"+suffix, researcher, first, 1, domain.StatusFailed)
+
+	got, err := pes.RunsToRank(ctx, []string{second, "pe-rank-missing-" + suffix, first})
+	if err != nil || len(got) != 2 || got[0].PE.ID != second || got[1].PE.ID != first {
+		t.Fatalf("runs to rank: got = %+v, %v, want %s then %s", got, err, second, first)
+	}
+	if want := map[string]bool{"job-rank-done-" + suffix: true}; !reflect.DeepEqual(got[1].Completed, want) {
+		t.Errorf("completed = %v, want %v", got[1].Completed, want)
+	}
+	if want := map[string]bool{researcher: true}; !reflect.DeepEqual(got[1].Competitors, want) {
+		t.Errorf("competitors = %v, want %v", got[1].Competitors, want)
+	}
+	if len(got[0].Completed) != 0 || len(got[0].Competitors) != 0 {
+		t.Errorf("a run with neither: got = %+v", got[0])
+	}
+}
+
 // Every list read takes the caller's scope. This holds two orgs side by side and reads each
 // listing as each of them, as a key bound to one project, and as an agent token.
 func TestListingsKeepToTheCallersScope(t *testing.T) {

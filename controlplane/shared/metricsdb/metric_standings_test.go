@@ -256,3 +256,60 @@ func TestBestPerAgentOnAnyMetricReadsEachJobsLastValue(t *testing.T) {
 		t.Fatalf("a1 best = %+v, want job-2 at 0: the lowest of its jobs' last values", got)
 	}
 }
+
+// The read of a run listed every prior run's best with queries per prior run. Their bests come
+// from two queries whatever their number, judged and ranked per run as one run's are.
+func TestTheBestsOfManyRunsAreReadInTwoQueries(t *testing.T) {
+	vector := func(samples ...string) string {
+		return `{"status":"success","data":{"resultType":"vector","result":[` + strings.Join(samples, ",") + `]}}`
+	}
+	var queries []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		query := r.Form.Get("query")
+		queries = append(queries, query)
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(query, "by (platform_experiment_id, metric_name, job_id, metric_basis)") {
+			_, _ = w.Write([]byte(vector(
+				`{"metric":{"platform_experiment_id":"pe-a","metric_name":"agreement","job_id":"a-broken","metric_basis":"raw"},"value":[1,"0.5"]}`,
+				`{"metric":{"platform_experiment_id":"pe-a","metric_name":"agreement","job_id":"a-ok","metric_basis":"raw"},"value":[1,"1"]}`)))
+			return
+		}
+		_, _ = w.Write([]byte(vector(
+			`{"metric":{"platform_experiment_id":"pe-a","metric_name":"auroc","agent_id":"r1","metric_basis":"raw","job_id":"a-broken"},"value":[1,"0.99"]}`,
+			`{"metric":{"platform_experiment_id":"pe-a","metric_name":"auroc","agent_id":"r1","metric_basis":"raw","job_id":"a-ok"},"value":[1,"0.8"]}`,
+			`{"metric":{"platform_experiment_id":"pe-a","metric_name":"loss","agent_id":"r1","metric_basis":"raw","job_id":"a-ok"},"value":[1,"0.01"]}`,
+			`{"metric":{"platform_experiment_id":"pe-b","metric_name":"loss","agent_id":"r2","metric_basis":"raw","job_id":"b-1"},"value":[1,"3"]}`,
+			`{"metric":{"platform_experiment_id":"pe-b","metric_name":"loss","agent_id":"r2","metric_basis":"raw","job_id":"b-2"},"value":[1,"2"]}`)))
+	}))
+	defer server.Close()
+
+	bound := 0.9
+	a := &domain.PlatformExperiment{ID: "pe-a", CreatedAt: time.Now().Add(-2 * time.Hour), Metrics: []domain.MetricDefinition{
+		{Key: "auroc", Direction: "maximize"},
+		{Key: "agreement", Direction: "maximize", Role: domain.MetricRoleConstraint, Bound: &bound},
+	}}
+	b := &domain.PlatformExperiment{ID: "pe-b", CreatedAt: time.Now().Add(-time.Hour), Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}}}
+	best, err := BestPerAgentOnMetrics(context.Background(), server.URL, []Ranking{
+		{PE: a, Metric: a.Metrics[0], Completed: map[string]bool{"a-broken": true, "a-ok": true}},
+		{PE: b, Metric: b.Metrics[0], Completed: map[string]bool{"b-1": true, "b-2": true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queries) != 2 {
+		t.Fatalf("%d queries, want 2 for any number of runs: %q", len(queries), queries)
+	}
+	for _, query := range queries {
+		if !strings.Contains(query, `platform_experiment_id=~"pe-a|pe-b"`) {
+			t.Errorf("query %q does not read both runs", query)
+		}
+	}
+	want := map[string]map[string]AgentBest{
+		"pe-a": {"r1": {Value: 0.8, ExperimentID: "a-ok"}},
+		"pe-b": {"r2": {Value: 2, ExperimentID: "b-2"}},
+	}
+	if !reflect.DeepEqual(best, want) {
+		t.Errorf("bests = %v, want %v: the job that broke pe-a's constraint and pe-a's other metric rank nowhere", best, want)
+	}
+}

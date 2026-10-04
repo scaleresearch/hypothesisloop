@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -87,37 +89,43 @@ func judgeConstraints(ctx context.Context, dbURL string, pe *domain.PlatformExpe
 		if err != nil {
 			return nil, nil, fmt.Errorf("metricsdb.UnrankableJobs: %s: %w", metric.Key, err)
 		}
-		reported, violated := map[string]bool{}, map[string]float64{}
-		for _, sm := range samples {
-			if basis := sm.Labels["metric_basis"]; basis != "" && basis != "raw" {
-				continue
-			}
-			job := sm.Labels["job_id"]
-			reported[job] = true
-			if !metric.Holds(sm.Value) {
-				violated[job] = sm.Value
-			}
-		}
-		bound := "at least"
-		if metric.Direction == "minimize" {
-			bound = "at most"
-		}
-		for job := range completed {
-			value, broke := violated[job]
-			if broke {
-				broken[job] = true
-			}
-			if _, judged := unrankable[job]; judged {
-				continue
-			}
-			if broke {
-				unrankable[job] = fmt.Sprintf("constraint %s is %g, and must be %s %g", metric.Key, value, bound, *metric.Bound)
-			} else if !reported[job] {
-				unrankable[job] = fmt.Sprintf("constraint %s was not reported, and must be %s %g", metric.Key, bound, *metric.Bound)
-			}
-		}
+		judgeConstraint(metric, samples, completed, unrankable, broken)
 	}
 	return unrankable, broken, nil
+}
+
+// judgeConstraint judges each job of completed on one constraint metric from its samples, one
+// per job and basis, into unrankable and broken. A job that has a reason already keeps its first.
+func judgeConstraint(metric domain.MetricDefinition, samples []VectorSample, completed map[string]bool, unrankable map[string]string, broken map[string]bool) {
+	reported, violated := map[string]bool{}, map[string]float64{}
+	for _, sm := range samples {
+		if basis := sm.Labels["metric_basis"]; basis != "" && basis != "raw" {
+			continue
+		}
+		job := sm.Labels["job_id"]
+		reported[job] = true
+		if !metric.Holds(sm.Value) {
+			violated[job] = sm.Value
+		}
+	}
+	bound := "at least"
+	if metric.Direction == "minimize" {
+		bound = "at most"
+	}
+	for job := range completed {
+		value, broke := violated[job]
+		if broke {
+			broken[job] = true
+		}
+		if _, judged := unrankable[job]; judged {
+			continue
+		}
+		if broke {
+			unrankable[job] = fmt.Sprintf("constraint %s is %g, and must be %s %g", metric.Key, value, bound, *metric.Bound)
+		} else if !reported[job] {
+			unrankable[job] = fmt.Sprintf("constraint %s was not reported, and must be %s %g", metric.Key, bound, *metric.Bound)
+		}
+	}
 }
 
 // JobValue is one job's last "raw"-basis value on one metric.
@@ -197,7 +205,12 @@ func BestPerAgentOnMetric(ctx context.Context, dbURL string, pe *domain.Platform
 	if err != nil {
 		return nil, nil, fmt.Errorf("metricsdb.BestPerAgentOnMetric: %s: %w", metric.Key, err)
 	}
+	return bestOf(metric, samples, rankable)
+}
 
+// bestOf is each agent's best on metric over the rankable jobs among samples, one per agent,
+// basis and job, and the agents that reported it only on another basis.
+func bestOf(metric domain.MetricDefinition, samples []VectorSample, rankable map[string]bool) (map[string]AgentBest, []string, error) {
 	best := make(map[string]AgentBest, len(samples))
 	nonRaw := make(map[string]bool)
 	for _, sm := range samples {
@@ -223,6 +236,93 @@ func BestPerAgentOnMetric(ctx context.Context, dbURL string, pe *domain.Platform
 		}
 	}
 	return best, sortedKeys(nonRaw), nil
+}
+
+// Ranking is what one platform experiment ranks by: one of its metrics over its COMPLETED jobs.
+type Ranking struct {
+	PE        *domain.PlatformExperiment
+	Metric    domain.MetricDefinition
+	Completed map[string]bool
+}
+
+// BestPerAgentOnMetrics is BestPerAgentOnMetric of each of runs, keyed by platform experiment, in
+// two queries whatever their number: one for every constraint metric of them all and one for
+// every metric they rank by, each grouped by platform experiment and metric besides and judged
+// and ranked per run as BestPerAgentOnMetric does.
+func BestPerAgentOnMetrics(ctx context.Context, dbURL string, runs []Ranking) (map[string]map[string]AgentBest, error) {
+	out := make(map[string]map[string]AgentBest, len(runs))
+	if len(runs) == 0 {
+		return out, nil
+	}
+	var ids, ranked, constraints []string
+	oldest := runs[0].PE.CreatedAt
+	for _, run := range runs {
+		ids, ranked = append(ids, run.PE.ID), append(ranked, run.Metric.Key)
+		for _, metric := range run.PE.Metrics {
+			if metric.EffectiveRole() == domain.MetricRoleConstraint {
+				constraints = append(constraints, metric.Key)
+			}
+		}
+		if run.PE.CreatedAt.Before(oldest) {
+			oldest = run.PE.CreatedAt
+		}
+	}
+	byRunAndMetric := func(names []string, by string) (map[[2]string][]VectorSample, error) {
+		if len(names) == 0 {
+			return nil, nil
+		}
+		promQL := fmt.Sprintf(`max by (platform_experiment_id, metric_name, %s) (last_over_time(%s{platform_experiment_id=~%q, metric_name=~%q}[%s]))`,
+			by, ExperimentMetricValue, anyOf(ids), anyOf(names), ObservedLookback(oldest))
+		samples, err := QueryVector(ctx, dbURL, promQL)
+		if err != nil {
+			return nil, err
+		}
+		grouped := map[[2]string][]VectorSample{}
+		for _, sm := range samples {
+			key := [2]string{sm.Labels["platform_experiment_id"], sm.Labels["metric_name"]}
+			grouped[key] = append(grouped[key], sm)
+		}
+		return grouped, nil
+	}
+	constraintSamples, err := byRunAndMetric(constraints, "job_id, metric_basis")
+	if err != nil {
+		return nil, fmt.Errorf("metricsdb.BestPerAgentOnMetrics: constraints: %w", err)
+	}
+	rankedSamples, err := byRunAndMetric(ranked, "agent_id, metric_basis, job_id")
+	if err != nil {
+		return nil, fmt.Errorf("metricsdb.BestPerAgentOnMetrics: %w", err)
+	}
+	for _, run := range runs {
+		unrankable, broken := map[string]string{}, map[string]bool{}
+		for _, metric := range run.PE.Metrics {
+			if metric.EffectiveRole() == domain.MetricRoleConstraint {
+				judgeConstraint(metric, constraintSamples[[2]string{run.PE.ID, metric.Key}], run.Completed, unrankable, broken)
+			}
+		}
+		rankable := maps.Clone(run.Completed)
+		for job := range unrankable {
+			delete(rankable, job)
+		}
+		best, _, err := bestOf(run.Metric, rankedSamples[[2]string{run.PE.ID, run.Metric.Key}], rankable)
+		if err != nil {
+			return nil, fmt.Errorf("metricsdb.BestPerAgentOnMetrics: %s: %w", run.PE.ID, err)
+		}
+		out[run.PE.ID] = best
+	}
+	return out, nil
+}
+
+// anyOf is a regular expression matching exactly one of values, as PromQL anchors it.
+func anyOf(values []string) string {
+	quoted := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, v := range values {
+		if !seen[v] {
+			seen[v] = true
+			quoted = append(quoted, regexp.QuoteMeta(v))
+		}
+	}
+	return strings.Join(quoted, "|")
 }
 
 // betterOn reports whether a beats b for a metric ranked in the given direction. Exact ties fall

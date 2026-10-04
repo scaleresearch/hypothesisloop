@@ -411,6 +411,59 @@ func bestPerAgentMetricServer(t *testing.T, values map[string]float64) *httptest
 	}))
 }
 
+type priorRunsStore struct {
+	PlatformExperimentsStore
+	runs []db.RunToRank
+}
+
+func (s *priorRunsStore) RunsToRank(context.Context, []string) ([]db.RunToRank, error) {
+	return s.runs, nil
+}
+
+// Each prior run's best is its leading researcher's, as results ranks it, and every prior run is
+// read together, by one query of the metrics store for their bests and one for their constraints
+// when any declares one.
+func TestPriorRunsAreRankedAsResultsRanksThemAndReadTogether(t *testing.T) {
+	queries := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[` +
+			`{"metric":{"platform_experiment_id":"pe-a","metric_name":"score","agent_id":"baseline","metric_basis":"raw","job_id":"job-base"},"value":[1,"99"]},` +
+			`{"metric":{"platform_experiment_id":"pe-a","metric_name":"score","agent_id":"c1","metric_basis":"raw","job_id":"job-c1"},"value":[1,"50"]},` +
+			`{"metric":{"platform_experiment_id":"pe-b","metric_name":"loss","agent_id":"c2","metric_basis":"raw","job_id":"job-c2"},"value":[1,"3"]}` +
+			`]}}`))
+	}))
+	defer srv.Close()
+	created := time.Now().UTC().Add(-time.Hour)
+	store := &priorRunsStore{runs: []db.RunToRank{
+		{PE: &domain.PlatformExperiment{ID: "pe-a", Status: domain.PlatformExpClosed, CreatedAt: created, Metrics: []domain.MetricDefinition{{Key: "score", Direction: "maximize"}}},
+			Completed: map[string]bool{"job-base": true, "job-c1": true}, Competitors: map[string]bool{"c1": true}},
+		{PE: &domain.PlatformExperiment{ID: "pe-b", Status: domain.PlatformExpClosed, CreatedAt: created, Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}}},
+			Completed: map[string]bool{"job-c2": true}},
+		{PE: &domain.PlatformExperiment{ID: "pe-c", Status: domain.PlatformExpClosed, CreatedAt: created}},
+	}}
+	svc := newSignupTestService(t, store)
+	svc.metricsDBURL = srv.URL
+
+	got, err := svc.PriorRuns(context.Background(), []string{"pe-a", "pe-b", "pe-c"})
+	if err != nil || len(got) != 3 {
+		t.Fatalf("prior runs: got = %+v, %v, want three", got, err)
+	}
+	if got[0].Metric != "score" || got[0].Best == nil || *got[0].Best != 50 || got[0].BestJobID != "job-c1" {
+		t.Errorf("pe-a = %+v, want c1's 50 on score: the baseline agent ranks nowhere", got[0])
+	}
+	if got[1].Metric != "loss" || got[1].Best != nil {
+		t.Errorf("pe-b = %+v, want no best: nobody who reported it is a researcher", got[1])
+	}
+	if got[2].Metric != "" || got[2].Best != nil {
+		t.Errorf("pe-c = %+v, want neither metric nor best", got[2])
+	}
+	if queries != 1 {
+		t.Errorf("%d queries of the metrics store, want 1 with no constraint declared", queries)
+	}
+}
+
 // A member signing up again has succeeded: it is in the experiment, which is all it asked for.
 // The harness repeats signup on every restart, by which time the run has usually started and
 // filled up, so neither may turn the repeat into an error.

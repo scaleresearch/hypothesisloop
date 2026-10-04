@@ -179,6 +179,18 @@ func (s *createdStore) PriorRuns(context.Context, string) ([]string, error) {
 	return s.prior, nil
 }
 
+func (s *createdStore) RunsToRank(_ context.Context, ids []string) ([]db.RunToRank, error) {
+	var out []db.RunToRank
+	for _, id := range ids {
+		for _, pe := range s.created {
+			if pe.ID == id {
+				out = append(out, db.RunToRank{PE: pe})
+			}
+		}
+	}
+	return out, nil
+}
+
 func (s *createdStore) RepositoriesToCreate(context.Context) ([]db.RepositoryToCreate, error) {
 	var out []db.RepositoryToCreate
 	for _, pe := range s.created {

@@ -159,6 +159,53 @@ func (s *PlatformExperimentsStore) PriorRuns(ctx context.Context, id string) ([]
 	return ids, nil
 }
 
+// RunToRank is a platform experiment as its standings are read: what a listing names it by, its
+// metrics and creation, its COMPLETED jobs and its researchers.
+type RunToRank struct {
+	PE          *domain.PlatformExperiment
+	Completed   map[string]bool
+	Competitors map[string]bool
+}
+
+// RunsToRank reads the platform experiments ids, in their order, in one query. One with no row
+// is left out.
+func (s *PlatformExperimentsStore) RunsToRank(ctx context.Context, ids []string) ([]RunToRank, error) {
+	rows, err := s.pool.pool.Query(ctx, `
+SELECT pe.id, pe.name, pe.status, pe.closed_at, pe.close_reason, pe.metrics, pe.created_at,
+       ARRAY(SELECT e.id FROM experiments e WHERE e.platform_experiment_id = pe.id AND e.status = 'COMPLETED'),
+       ARRAY(SELECT s.agent_id FROM experiment_signups s WHERE s.platform_experiment_id = pe.id AND s.role = $2)
+FROM unnest($1::text[]) WITH ORDINALITY AS wanted(id, n)
+JOIN platform_experiments pe ON pe.id = wanted.id
+ORDER BY wanted.n`, ids, string(domain.SignupRoleCompetitor))
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.RunsToRank: %w", err)
+	}
+	defer rows.Close()
+	var out []RunToRank
+	for rows.Next() {
+		pe := &domain.PlatformExperiment{}
+		var status string
+		var metricsRaw []byte
+		var completed, competitors []string
+		if err := rows.Scan(&pe.ID, &pe.Name, &status, &pe.ClosedAt, &pe.CloseReason, &metricsRaw, &pe.CreatedAt, &completed, &competitors); err != nil {
+			return nil, fmt.Errorf("platform_experiments_store.RunsToRank: scan: %w", err)
+		}
+		if err := json.Unmarshal(metricsRaw, &pe.Metrics); err != nil {
+			return nil, fmt.Errorf("platform_experiments_store.RunsToRank: unmarshal metrics of %s: %w", pe.ID, err)
+		}
+		pe.Status = domain.PlatformExperimentStatus(status)
+		run := RunToRank{PE: pe, Completed: make(map[string]bool, len(completed)), Competitors: make(map[string]bool, len(competitors))}
+		for _, id := range completed {
+			run.Completed[id] = true
+		}
+		for _, id := range competitors {
+			run.Competitors[id] = true
+		}
+		out = append(out, run)
+	}
+	return out, rows.Err()
+}
+
 // GetPlatformExperiment fetches a single platform experiment by ID.
 func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	q := `

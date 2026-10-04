@@ -22,6 +22,8 @@ type PlatformExperimentsStore interface {
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
 	// PriorRuns is the ids of the prior runs of platform experiment id (domain.Tenancy.PriorRuns).
 	PriorRuns(ctx context.Context, id string) ([]string, error)
+	// RunsToRank reads platform experiments ids as their standings are read, in their order.
+	RunsToRank(ctx context.Context, ids []string) ([]db.RunToRank, error)
 	ListPlatformExperiments(ctx context.Context, filter db.PlatformExperimentsFilter) ([]*domain.PlatformExperiment, error)
 	// ListPlatformExperimentsByStatus is the unpaginated read the sweeps use. A sweep that
 	// borrowed the paged list above silently stopped at its default page — see the store.
