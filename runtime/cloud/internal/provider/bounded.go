@@ -13,25 +13,65 @@ const CallTimeout = time.Minute
 func Bounded(p Provider) Provider {
 	pauser, pauses := p.(Pauser)
 	market, counts := p.(Market)
+	warmer, warms := p.(Warmer)
+	b, bp, bm, bw := bounded{p}, boundedPauser{pauser}, boundedMarket{market}, boundedWarmer{warmer}
 	switch {
+	case pauses && counts && warms:
+		return struct {
+			bounded
+			boundedPauser
+			boundedMarket
+			boundedWarmer
+		}{b, bp, bm, bw}
 	case pauses && counts:
 		return struct {
 			bounded
 			boundedPauser
 			boundedMarket
-		}{bounded{p}, boundedPauser{pauser}, boundedMarket{market}}
+		}{b, bp, bm}
+	case pauses && warms:
+		return struct {
+			bounded
+			boundedPauser
+			boundedWarmer
+		}{b, bp, bw}
+	case counts && warms:
+		return struct {
+			bounded
+			boundedMarket
+			boundedWarmer
+		}{b, bm, bw}
 	case pauses:
 		return struct {
 			bounded
 			boundedPauser
-		}{bounded{p}, boundedPauser{pauser}}
+		}{b, bp}
 	case counts:
 		return struct {
 			bounded
 			boundedMarket
-		}{bounded{p}, boundedMarket{market}}
+		}{b, bm}
+	case warms:
+		return struct {
+			bounded
+			boundedWarmer
+		}{b, bw}
 	}
-	return bounded{p}
+	return b
+}
+
+type boundedWarmer struct{ warmer Warmer }
+
+func (b boundedWarmer) Warm(ctx context.Context, spec Spec) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
+	defer cancel()
+	return b.warmer.Warm(ctx, spec)
+}
+
+func (b boundedWarmer) StartWarm(ctx context.Context, id string, spec Spec) error {
+	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
+	defer cancel()
+	return b.warmer.StartWarm(ctx, id, spec)
 }
 
 type boundedMarket struct{ market Market }

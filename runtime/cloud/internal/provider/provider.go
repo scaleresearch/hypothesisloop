@@ -20,7 +20,7 @@
 //     vendor, and fake implements it.
 //   - A wrapper of a Provider passes on the capabilities of what it wraps (Bounded does).
 //
-// Pauser and Market are the capabilities there are. The ones foreseen, to be shaped the same way when
+// Pauser, Market and Warmer are the capabilities there are. The ones foreseen, to be shaped the same way when
 // something needs them and not before:
 //
 //   - Extender: Extend(ctx, id, until) to move the end of an instance rented with a
@@ -65,6 +65,10 @@ const (
 	// nothing and is not billed for compute. Logs need not work for it. Only an adapter that
 	// implements Pauser reports it.
 	StatePaused State = "paused"
+	// StateWarm is an instance a Warmer warmed and made ready: it exists, runs nothing and is
+	// billed for its disk only, until StartWarm gives it a spec. Only an adapter that implements
+	// Warmer reports it.
+	StateWarm State = "warm"
 )
 
 // MaxNameLength is the longest Spec.Name a caller may ask for.

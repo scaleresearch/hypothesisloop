@@ -3,6 +3,7 @@ package provider_test
 import (
 	"context"
 	"reflect"
+	"sort"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
@@ -12,33 +13,75 @@ import (
 // core is a provider with the required calls and nothing more.
 type core struct{ provider.Provider }
 
-type pausesOnly struct {
-	provider.Provider
-	provider.Pauser
-}
-
-type countsOnly struct {
-	provider.Provider
-	provider.Market
+// some is a provider that has the capabilities of its fields that are set.
+func some(p *fake.Provider, pauses, counts, warms bool) provider.Provider {
+	type (
+		P = provider.Pauser
+		M = provider.Market
+		W = provider.Warmer
+	)
+	c := core{p}
+	switch {
+	case pauses && counts && warms:
+		return p
+	case pauses && counts:
+		return struct {
+			core
+			P
+			M
+		}{c, p, p}
+	case pauses && warms:
+		return struct {
+			core
+			P
+			W
+		}{c, p, p}
+	case counts && warms:
+		return struct {
+			core
+			M
+			W
+		}{c, p, p}
+	case pauses:
+		return struct {
+			core
+			P
+		}{c, p}
+	case counts:
+		return struct {
+			core
+			M
+		}{c, p}
+	case warms:
+		return struct {
+			core
+			W
+		}{c, p}
+	}
+	return c
 }
 
 func TestACapabilityIsFoundOnTheProviderAndSurvivesTheBoundingWrapper(t *testing.T) {
 	pausing := fake.New()
-	both := []string{provider.CapabilityPause, provider.CapabilityMarket}
-	if got := provider.Capabilities(pausing); !reflect.DeepEqual(got, both) {
-		t.Fatalf("Capabilities = %v", got)
-	}
-	if got := provider.Capabilities(provider.Bounded(pausing)); !reflect.DeepEqual(got, both) {
-		t.Fatalf("Capabilities of the bounded provider = %v: the wrapper hid what it wraps", got)
-	}
-	for _, plain := range []provider.Provider{core{pausing}, provider.Bounded(core{pausing})} {
-		if got := provider.Capabilities(plain); len(got) != 0 {
-			t.Fatalf("Capabilities of a provider that cannot pause = %v", got)
-		}
-	}
-	for name, one := range map[string]provider.Provider{provider.CapabilityPause: pausesOnly{pausing, pausing}, provider.CapabilityMarket: countsOnly{pausing, pausing}} {
-		if got := provider.Capabilities(provider.Bounded(one)); !reflect.DeepEqual(got, []string{name}) {
-			t.Fatalf("Capabilities of a bounded provider that has only %s = %v", name, got)
+	for _, pauses := range []bool{false, true} {
+		for _, counts := range []bool{false, true} {
+			for _, warms := range []bool{false, true} {
+				want := []string{}
+				for name, has := range map[string]bool{provider.CapabilityPause: pauses, provider.CapabilityMarket: counts, provider.CapabilityWarm: warms} {
+					if has {
+						want = append(want, name)
+					}
+				}
+				sort.Strings(want)
+				one := some(pausing, pauses, counts, warms)
+				for _, p := range []provider.Provider{one, provider.Bounded(one)} {
+					got := provider.Capabilities(p)
+					sort.Strings(got)
+					if !reflect.DeepEqual(got, want) {
+						t.Fatalf("Capabilities of %T = %v, want %v: the wrapper hid what it wraps or made up what it does not", p, got, want)
+					}
+				}
+			}
 		}
 	}
 	pausing.Market = func(provider.Spec) int { return 3 }

@@ -44,6 +44,10 @@ func (r *run) checkState(t testing.TB, i provider.Instance) {
 		if r.ran[i.ID] {
 			t.Errorf("instance %s (%s) is starting after its command ran: what is not known to be running is %s", i.ID, i.Name, provider.StateUnknown)
 		}
+	case provider.StateWarm:
+		if r.ran[i.ID] {
+			t.Errorf("instance %s (%s) is warm after its command ran", i.ID, i.Name)
+		}
 	case provider.StateUnknown:
 	default:
 		t.Errorf("instance %s (%s) is listed in state %q, which the contract does not have", i.ID, i.Name, i.State)

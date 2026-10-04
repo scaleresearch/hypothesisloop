@@ -60,7 +60,18 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 // A stopped Machine is exited only once its output is complete, and until then it is running:
 // the log trails the Machine by a moment, and the contract lets a caller read the last lines
 // once, at the first look that shows exited.
+//
+// A warm Machine is stopped once its image is ready and has written nothing, so no log is read
+// for it. One that failed is exited, and one in any other state went on as any Machine does.
 func (p *Provider) stateOf(ctx context.Context, found machine, now time.Time) (state provider.State, exists bool) {
+	if found.Config.Metadata[warmKey] != "" {
+		switch found.State {
+		case "stopped":
+			return provider.StateWarm, true
+		case "failed":
+			return provider.StateExited, true
+		}
+	}
 	switch found.State {
 	case "created", "creating", "starting":
 		return provider.StateStarting, true

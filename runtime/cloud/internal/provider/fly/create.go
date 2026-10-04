@@ -17,6 +17,9 @@ const nameKey = "hl_name"
 type createRequest struct {
 	Region string        `json:"region"`
 	Config machineConfig `json:"config"`
+	// SkipLaunch leaves a created Machine stopped once its image is ready, and an updated one
+	// stopped whatever it was (warm.go).
+	SkipLaunch bool `json:"skip_launch,omitempty"`
 }
 
 type machineConfig struct {

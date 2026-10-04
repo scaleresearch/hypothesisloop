@@ -19,6 +19,8 @@ type instance struct {
 	spec  provider.Spec
 	logs  []string
 	stops int
+	// warm is an instance Warm rented and StartWarm has not started.
+	warm bool
 }
 
 type Provider struct {
@@ -28,8 +30,9 @@ type Provider struct {
 	calls     map[string]int
 
 	// Fail, when set, is asked before every call and its error returned in place of the call.
-	// method is "Create", "List", "Logs", "Stop", "Destroy", "Pause", "Resume" or "Rentable"; name
-	// is the instance's, empty for List and Rentable.
+	// method is "Create", "List", "Logs", "Stop", "Destroy", "Pause", "Resume", "Rentable", "Warm"
+	// or "StartWarm"; name is the instance's, empty for List and Rentable, and for StartWarm the
+	// name it is started under.
 	Fail func(method, name string) error
 
 	// Market, when set, is how many instances of a spec the vendor has to rent right now.
@@ -45,6 +48,7 @@ var (
 	_ provider.Provider = (*Provider)(nil)
 	_ provider.Pauser   = (*Provider)(nil)
 	_ provider.Market   = (*Provider)(nil)
+	_ provider.Warmer   = (*Provider)(nil)
 )
 
 func (p *Provider) Rentable(_ context.Context, spec provider.Spec, atMost int) (int, error) {
@@ -75,6 +79,56 @@ func (p *Provider) Create(_ context.Context, spec provider.Spec) (string, error)
 		spec:     spec,
 	}
 	return id, nil
+}
+
+// Warm rents an instance that is starting until Ready makes it warm.
+func (p *Provider) Warm(_ context.Context, spec provider.Spec) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := p.fail("Warm", spec.Name); err != nil {
+		return "", err
+	}
+	if err := provider.ValidateName(spec.Name); err != nil {
+		return "", fmt.Errorf("fake: %w", err)
+	}
+	p.created++
+	id := fmt.Sprintf("fake-%04d", p.created)
+	p.instances[id] = &instance{
+		Instance: provider.Instance{ID: id, Name: spec.Name, State: provider.StateStarting, StartedAt: time.Now()},
+		spec:     provider.Spec{Name: spec.Name, Image: spec.Image, CPUMillis: spec.CPUMillis, MemoryBytes: spec.MemoryBytes, DiskBytes: spec.DiskBytes},
+		warm:     true,
+	}
+	return id, nil
+}
+
+// StartWarm refuses an instance that is not warm, as a vendor would one that runs or is gone.
+func (p *Provider) StartWarm(_ context.Context, id string, spec provider.Spec) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := p.fail("StartWarm", spec.Name); err != nil {
+		return err
+	}
+	i, ok := p.instances[id]
+	if !ok {
+		return fmt.Errorf("fake: no instance %q to start", id)
+	}
+	if i.State != provider.StateWarm {
+		return fmt.Errorf("fake: instance %q is %s, and only a warm instance is started", id, i.State)
+	}
+	if i.spec.Image != spec.Image || i.spec.CPUMillis != spec.CPUMillis || i.spec.MemoryBytes != spec.MemoryBytes || i.spec.DiskBytes != spec.DiskBytes {
+		return fmt.Errorf("fake: instance %q was warmed for another image or size", id)
+	}
+	i.Name, i.spec, i.State, i.warm, i.StartedAt = spec.Name, spec, provider.StateStarting, false, time.Now()
+	return nil
+}
+
+// Ready moves every warmed instance of the name that is still starting to StateWarm.
+func (p *Provider) Ready(name string) {
+	p.each(name, func(i *instance) {
+		if i.warm && i.State == provider.StateStarting {
+			i.State = provider.StateWarm
+		}
+	})
 }
 
 func (p *Provider) List(_ context.Context, namePrefix string) ([]provider.Instance, error) {
@@ -181,6 +235,11 @@ func (p *Provider) Start(name string) {
 		i.State = provider.StateRunning
 		i.StartedAt = time.Now()
 	})
+}
+
+// Age moves the start of every instance of the name back by d.
+func (p *Provider) Age(name string, d time.Duration) {
+	p.each(name, func(i *instance) { i.StartedAt = i.StartedAt.Add(-d) })
 }
 
 // Lose moves every instance of the name to StateUnknown, as a vendor that cannot reach its host
