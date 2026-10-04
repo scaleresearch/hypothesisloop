@@ -69,8 +69,8 @@ describe('the hypothesis graph', () => {
 
   it('of one of the caller\'s own takes ideas, shared or not', async () => {
     show('focus=hyp-1', { project_id: 'prj_1', shared: true })
-    expect(await screen.findByRole('button', { name: '+ Add idea under the objective' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '+ Add idea under this' })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Add idea' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Link to…' })).toBeTruthy()
   })
 
   it.each([

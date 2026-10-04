@@ -10,14 +10,13 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Eyebrow, Text } from '@/components/ui/text'
-import { ClosedNote, useEditor } from '@/components/graph-edit'
+import { LinkButton } from '@/components/graph-edit'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { Actor, Verdict } from '@/components/actor'
 import { linkGroups } from '@/lib/hypothesis-graph'
 import { semantic, statusColor } from '@/lib/colors'
 import { filedAfterVerdict } from '@/lib/hypothesis-progress'
 import { relTime } from '@/lib/format'
-import { useReadOnly } from '@/lib/read-only'
 import { experimentPath, hypothesisPath, jobPath } from '@/lib/routes'
 
 interface HypothesisPanelProps {
@@ -25,16 +24,9 @@ interface HypothesisPanelProps {
   nodeByID: Map<string, HypothesisGraphNode>
   selected: string
   onSelect: (id: string) => void
-  onAddIdea: (parentID: string) => void
 }
 
-export function ObjectiveBar({ graph, pe, onAddIdea }: {
-  graph: HypothesisGraph
-  pe: PlatformExperiment
-  onAddIdea: (parentID: string) => void
-}) {
-  const readOnly = useReadOnly()
-  const closed = useEditor()?.closed ?? false
+export function ObjectiveBar({ graph, pe }: { graph: HypothesisGraph; pe: PlatformExperiment }) {
   const { finding, best_job: bestJob } = graph.objective
   return (
     <Card>
@@ -46,10 +38,7 @@ export function ObjectiveBar({ graph, pe, onAddIdea }: {
           <Text as="span" variant="note">
             {graph.nodes.length} hypotheses, {graph.nodes.filter(n => n.builds_on.includes(graph.root)).length} building directly on the objective
           </Text>
-          <span className="ml-auto flex items-center gap-3">
-            {!readOnly ? <Button size="sm" variant="primary" onClick={() => onAddIdea(graph.root)}>+ Add idea under the objective</Button> : closed && <ClosedNote />}
-            <TextLink href={experimentPath(graph.root)} className="text-xs">Experiment →</TextLink>
-          </span>
+          <TextLink href={experimentPath(graph.root)} className="ml-auto text-xs">Experiment →</TextLink>
         </Inline>
         {pe.description && <CollapsibleDescription text={pe.description} collapseLength={140} />}
         {bestJob && (
@@ -72,9 +61,7 @@ export function ObjectiveBar({ graph, pe, onAddIdea }: {
   )
 }
 
-export function HypothesisPanel({ graph, nodeByID, selected, onSelect, onAddIdea }: HypothesisPanelProps) {
-  const readOnly = useReadOnly()
-  const closed = useEditor()?.closed ?? false
+export function HypothesisPanel({ graph, nodeByID, selected, onSelect }: HypothesisPanelProps) {
   const node = nodeByID.get(selected)
   if (!node) {
     return (
@@ -130,7 +117,7 @@ export function HypothesisPanel({ graph, nodeByID, selected, onSelect, onAddIdea
           </Stack>
         ))}
         <Inline gap="md">
-          {!readOnly ? <Button size="sm" variant="primary" onClick={() => onAddIdea(node.id)}>+ Add idea under this</Button> : closed && <ClosedNote />}
+          <LinkButton id={node.id} />
           <TextLink href={hypothesisPath(graph.root, node.id)} className="text-xs">Open detail →</TextLink>
         </Inline>
       </Stack>

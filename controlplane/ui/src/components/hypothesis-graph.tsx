@@ -3,13 +3,12 @@
 import { createContext, memo, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow, ReactFlowProvider, Background, ConnectionMode, Controls, MiniMap, Handle, Panel,
-  Position as Side, ViewportPortal, useReactFlow, useStore,
+  Position as Side, useReactFlow, useStore, useStoreApi,
 } from '@xyflow/react'
 import type { Edge, Node, NodeProps, NodeTypes } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { clsx } from 'clsx'
-import type { ReactNode, Ref } from 'react'
-import { FileText, MessageSquare } from 'lucide-react'
+import { FileText, MessageSquare, Plus } from 'lucide-react'
 import type { Evidence, HypothesisGraph, HypothesisGraphNode, HypothesisLinkType } from '@/types'
 import { chart, hypothesisLinkStyles, hypothesisStatuses, semantic, statusColor, tint } from '@/lib/colors'
 import { opacity as scale } from '@/lib/scale'
@@ -19,7 +18,7 @@ import { Inline } from '@/components/ui/stack'
 import { Eyebrow, Text } from '@/components/ui/text'
 import { filedAfterVerdict } from '@/lib/hypothesis-progress'
 import { Actor, verdictBy } from '@/components/actor'
-import { IdeaEditor, NodeActions, useEditor } from '@/components/graph-edit'
+import { addHereLabel, useEditor } from '@/components/graph-edit'
 import { LINK_KIND_LABELS, NODE_HEIGHT, NODE_WIDTH, ROW, matchesFilters } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
 
@@ -75,6 +74,7 @@ const Highlight = createContext({
   selected: '', hits: new Set<string>(), dimmed: new Set<string>(),
   /** While a link target is being picked: the nodes that can take it. */
   pickable: null as Set<string> | null,
+  onAdd: null as ((id: string) => void) | null,
 })
 
 function pickClass(pickable: Set<string> | null, id: string) {
@@ -84,7 +84,30 @@ function pickClass(pickable: Set<string> | null, id: string) {
 
 const HANDLE = 'pointer-events-none opacity-0'
 
-const NODE = 'flex cursor-pointer flex-col gap-1.5 rounded border border-l-3 py-2 pl-3 pr-2.5 text-foreground transition hover:bg-surface-raised'
+// Drawn at screen size whatever the zoom: the canvas keeps its zoom in --zoom.
+function NodeAdd({ id, objective }: { id: string; objective: boolean }) {
+  const { onAdd } = useContext(Highlight)
+  if (!onAdd) return null
+  const label = addHereLabel(objective)
+  return (
+    <Button
+      variant="primary"
+      size="icon"
+      className="nodrag nopan absolute -bottom-2.5 -right-2.5 rounded-full opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+      style={{ transform: 'scale(calc(1 / var(--zoom, 1)))' }}
+      aria-label={label}
+      title={label}
+      onClick={e => {
+        e.stopPropagation()
+        onAdd(id)
+      }}
+    >
+      <Plus size={12} />
+    </Button>
+  )
+}
+
+const NODE = 'group relative flex cursor-pointer flex-col gap-1.5 rounded border border-l-3 py-2 pl-3 pr-2.5 text-foreground transition hover:bg-surface-raised'
 // The box is NODE_WIDTH by NODE_HEIGHT: the layout places nodes by those.
 const NODE_BOX = { width: NODE_WIDTH, height: NODE_HEIGHT }
 const NODE_TEXT = 'line-clamp-3 break-words text-xs leading-snug'
@@ -118,6 +141,7 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
       title={item.text}
     >
       <HiddenHandles />
+      <NodeAdd id={item.id} objective={false} />
       <div className={NODE_TEXT}>{item.text}</div>
       <div className="flex min-w-0 items-center gap-2">
         <span className="inline-block text-2xs font-medium lowercase first-letter:uppercase" style={{ color }} title={verdictBy(item) && `${item.status} ${verdictBy(item)}`}>{item.status}</span>
@@ -136,6 +160,7 @@ const ObjectiveNode = memo(function ObjectiveNode({ id, data }: NodeProps<Node<O
         <Eyebrow>Objective</Eyebrow>
         <ObjectiveMeta objective={data.objective} />
       </div>
+      <NodeAdd id={id} objective />
       <div className={NODE_TEXT}>{data.label}</div>
     </div>
   )
@@ -173,23 +198,6 @@ function Legend({ onTidy }: { onTidy?: () => void }) {
 }
 
 /** Content pinned to a point of the graph, drawn at screen size whatever the zoom. */
-const EDGE = 12
-
-function Anchored({ at, children, innerRef }: { at: Position; children: ReactNode; innerRef?: Ref<HTMLDivElement> }) {
-  const zoom = useStore(s => s.transform[2])
-  return (
-    <ViewportPortal>
-      <div
-        ref={innerRef}
-        className="nodrag nopan nowheel absolute left-0 top-0 z-10"
-        style={{ transform: `translate(${at.x}px, ${at.y}px) scale(${1 / zoom})`, transformOrigin: '0 0', pointerEvents: 'all' }}
-      >
-        {children}
-      </div>
-    </ViewportPortal>
-  )
-}
-
 interface HypothesisGraphCanvasProps {
   graph: HypothesisGraph
   positions: Map<string, Position>
@@ -215,14 +223,22 @@ export function HypothesisGraphCanvas(props: HypothesisGraphCanvasProps) {
 }
 
 function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, minimap, onSelect, onTidy }: HypothesisGraphCanvasProps) {
-  const { setCenter, setViewport, getViewport, getZoom } = useReactFlow()
+  const { setCenter, setViewport, getZoom } = useReactFlow()
   const editor = useEditor()
   const picking = editor?.picking ?? false
-  const adding = editor?.adding ?? null
+  // The "+" of each node, while one can be added; the nodes stay memoized as the editor changes.
+  const onAdd = editor?.canWrite && !editor.composing && !picking ? editor.startAdding : null
   const width = useStore(s => s.width)
   const height = useStore(s => s.height)
   const [ready, setReady] = useState(false)
   const centered = useRef('')
+  const flow = useRef<HTMLDivElement>(null)
+  const store = useStoreApi()
+  useEffect(() => {
+    const set = (zoom: number) => flow.current?.style.setProperty('--zoom', String(zoom))
+    set(store.getState().transform[2])
+    return store.subscribe(s => set(s.transform[2]))
+  }, [store])
 
   const dimmed = useMemo(
     () => new Set(graph.nodes.filter(n => !matchesFilters(n, filters)).map(n => n.id)),
@@ -253,8 +269,8 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
     [picking, canPick, graph],
   )
   const highlight = useMemo(
-    () => ({ selected: adding ?? selected, hits, dimmed, pickable }),
-    [adding, selected, hits, dimmed, pickable],
+    () => ({ selected, hits, dimmed, pickable, onAdd }),
+    [selected, hits, dimmed, pickable, onAdd],
   )
 
   const edges = useMemo<Edge[]>(() => {
@@ -322,38 +338,12 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
     }
   }, [ready, focus, graph.root, positions, width, height, setCenter, setViewport, getZoom])
 
-  // The editor opens under its node, drawn at screen size whatever the zoom, and no taller than the
-  // view. Whenever it opens or changes size the view pans the least that shows all of it, and its
-  // node above it when both fit, at a zoom the node can be read at.
-  const composer = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const el = composer.current
-    const p = adding === null ? undefined : positions.get(adding)
-    if (!ready || !el || !p || width === 0) return
-    function reveal() {
-      const v = getViewport()
-      const zoom = Math.max(v.zoom, 0.7)
-      const left = p!.x * zoom
-      const right = Math.max((p!.x + NODE_WIDTH) * zoom, left + el!.offsetWidth)
-      const top = p!.y * zoom
-      const bottom = (p!.y + NODE_HEIGHT + 8) * zoom + el!.offsetHeight
-      const x = Math.min(Math.max(v.x, EDGE - left), width - EDGE - right)
-      const y = Math.min(Math.max(v.y, EDGE - top), height - EDGE - bottom)
-      if (x !== v.x || y !== v.y || zoom !== v.zoom) void setViewport({ x, y, zoom }, { duration: 300 })
-    }
-    // It reports the editor's size once on observing, and again on every change.
-    const observer = new ResizeObserver(reveal)
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [ready, adding, positions, width, height, getViewport, setViewport])
-
-  const at = positions.get(adding ?? selected)
-  const below = at && { x: at.x, y: at.y + NODE_HEIGHT + 8 }
 
   return (
     <Highlight.Provider value={highlight}>
       <Legend onTidy={onTidy} />
       <ReactFlow
+        ref={flow}
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
@@ -371,12 +361,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
       >
         <Background gap={24} color={tint(semantic.text, 'track')} />
         <Controls showInteractive={false} position="top-left" />
-        {below && (adding !== null ? (
-          <Anchored at={below} innerRef={composer}><IdeaEditor key={adding} maxHeight={Math.max(height - 2 * EDGE, 200)} /></Anchored>
-        ) : (
-          <Anchored at={below}><NodeActions id={selected} /></Anchored>
-        ))}
-        {graph.nodes.length === 0 && adding === null && (
+        {graph.nodes.length === 0 && (
           <Panel position="bottom-center" className="text-xs text-muted">
             No hypotheses yet. Agents place each idea under the objective or an earlier one.
           </Panel>

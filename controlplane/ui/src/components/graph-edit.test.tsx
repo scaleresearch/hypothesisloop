@@ -4,7 +4,8 @@ import type { KeyedMutator } from 'swr'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { addHumanHypothesisLink, registerHumanHypothesis } from '@/lib/api'
 import type { RegisteredHypothesis } from '@/lib/api'
-import { GraphEditorProvider, LinkBar, useGraphEditor } from '@/components/graph-edit'
+import { AddIdeaButton, GraphEditorProvider, IdeaEditor, LinkBar, useGraphEditor } from '@/components/graph-edit'
+import { HypothesisPanel } from '@/components/hypothesis-panel'
 import { HypothesisGraphCanvas } from '@/components/hypothesis-graph'
 import { HypothesisOutline } from '@/components/hypothesis-outline'
 import { layoutGraph } from '@/lib/hypothesis-graph'
@@ -54,17 +55,21 @@ function Harness({ view }: { view: 'graph' | 'outline' }) {
   const common = { graph, rootLabel: 'Vision benchmark', selected, hits: new Set<string>(), filters: { status: '', owner: '' }, onSelect: setSelected }
   return (
     <GraphEditorProvider value={editor}>
+      <AddIdeaButton />
       <LinkBar />
+      <IdeaEditor />
       <output aria-label="selected">{selected}</output>
       <output aria-label="links">{graph.edges.map(e => `${e.from} ${e.type} ${e.to}`).join(', ')}</output>
       {view === 'graph'
         ? <div style={{ width: 1000, height: 800 }}><HypothesisGraphCanvas {...common} positions={positions} focus="" minimap={false} /></div>
         : <HypothesisOutline {...common} />}
+      {selected !== graph.root && <HypothesisPanel graph={graph} nodeByID={new Map(graph.nodes.map(n => [n.id, n]))} selected={selected} onSelect={setSelected} />}
     </GraphEditorProvider>
   )
 }
 
 const node = (text: string) => screen.getByText(text, { selector: '.react-flow__node *' })
+const nodeBox = (text: string) => node(text).closest('.react-flow__node') as HTMLElement
 
 beforeAll(() => {
   // React Flow measures its pane and nodes; jsdom lays nothing out.
@@ -89,7 +94,7 @@ describe('on the graph', () => {
   it('adds a foundational idea under the objective, drawn in place', async () => {
     vi.mocked(registerHumanHypothesis).mockResolvedValue(registered('hyp-3', 'label smoothing helps', [{ type: 'builds_on', to: 'pe-x' }]))
     render(<Harness view="graph" />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Add idea here' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Add idea' }))
     const editor = screen.getByRole('group', { name: 'New idea' })
     expect(within(editor).getByText('A new approach to: Vision benchmark')).toBeTruthy()
     await write('label smoothing helps')
@@ -106,8 +111,12 @@ describe('on the graph', () => {
     ]))
     render(<Harness view="graph" />)
     fireEvent.click(node('warmup helps'))
-    fireEvent.click(await screen.findByRole('button', { name: 'Add idea here' }))
+    const plus = within(nodeBox('warmup helps')).getByRole('button', { name: 'Add an idea refining this one' })
+    expect(plus.style.transform).toBe('scale(calc(1 / var(--zoom, 1)))')
+    fireEvent.click(plus)
     const editor = screen.getByRole('group', { name: 'New idea' })
+    expect(editor.closest('.react-flow')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Add an idea refining this one' })).toBeNull()
     expect(within(editor).getByText('warmup helps')).toBeTruthy()
     await write('a longer warmup')
     fireEvent.click(within(editor).getByRole('button', { name: '+ Add a link' }))
@@ -126,7 +135,7 @@ describe('on the graph', () => {
   it('links the objective as a new approach, a hypothesis by a chosen kind, and needs one it refines', async () => {
     vi.mocked(registerHumanHypothesis).mockResolvedValue(registered('hyp-3', 'label smoothing helps', [{ type: 'builds_on', to: 'hyp-1' }]))
     render(<Harness view="graph" />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Add idea here' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Add idea' }))
     const editor = screen.getByRole('group', { name: 'New idea' })
     await write('label smoothing helps')
     const objective = within(editor).getByRole('listitem', { name: 'Link to Objective: Vision benchmark' })
@@ -154,7 +163,7 @@ describe('on the graph', () => {
   it('shows the refusal of the platform', async () => {
     vi.mocked(registerHumanHypothesis).mockRejectedValue(new Error('invalid link: at least one builds_on link is required'))
     render(<Harness view="graph" />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Add idea here' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Add idea' }))
     await write('label smoothing helps')
     fireEvent.click(screen.getByRole('button', { name: 'Add idea' }))
     expect(await screen.findByText('invalid link: at least one builds_on link is required')).toBeTruthy()
@@ -198,7 +207,7 @@ describe('an idea that reads close to others', () => {
       .mockResolvedValueOnce({ similar })
       .mockResolvedValueOnce(registered('hyp-3', 'warmup helps a lot', [{ type: 'builds_on', to: 'pe-x' }, { type: 'related', to: 'hyp-1' }]))
     render(<Harness view="outline" />)
-    fireEvent.click(screen.getByRole('button', { name: 'Add idea here' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add idea' }))
     await write('warmup helps a lot')
     const editor = screen.getByRole('group', { name: 'New idea' })
     fireEvent.click(within(editor).getByRole('button', { name: 'Add idea' }))
@@ -216,7 +225,7 @@ describe('an idea that reads close to others', () => {
   it('is kept distinct from all in one step, or dropped for the one already there', async () => {
     vi.mocked(registerHumanHypothesis).mockResolvedValue({ similar })
     render(<Harness view="outline" />)
-    fireEvent.click(screen.getByRole('button', { name: 'Add idea here' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add idea' }))
     await write('warmup helps a lot')
     fireEvent.click(screen.getByRole('button', { name: 'Add idea' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Keep mine distinct from all' }))
@@ -230,14 +239,12 @@ describe('an idea that reads close to others', () => {
 })
 
 describe('in the outline', () => {
-  it('adds an idea under a row, indented as its child', async () => {
+  it('adds an idea from the + of a row, listed under it', async () => {
     vi.mocked(registerHumanHypothesis).mockResolvedValue(registered('hyp-3', 'a longer warmup', [{ type: 'builds_on', to: 'hyp-1' }]))
     render(<Harness view="outline" />)
     fireEvent.click(screen.getByRole('button', { name: /warmup helps/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'Add idea here' }))
+    fireEvent.click(within(screen.getByRole('button', { name: /warmup helps/ }).closest('li')!).getByRole('button', { name: 'Add an idea refining this one' }))
     const editor = screen.getByRole('group', { name: 'New idea' })
-    expect(editor.closest('li')!.textContent).toContain('warmup helps')
-    expect((editor.parentElement as HTMLElement).style.paddingLeft).toBe('48px')
     await write('a longer warmup')
     fireEvent.click(within(editor).getByRole('button', { name: 'Add idea' }))
     await waitFor(() => expect(screen.getByLabelText('selected').textContent).toBe('hyp-3'))

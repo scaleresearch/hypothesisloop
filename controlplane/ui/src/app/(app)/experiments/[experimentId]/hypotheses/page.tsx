@@ -1,6 +1,7 @@
 'use client'
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import type { KeyedMutator } from 'swr'
@@ -20,7 +21,7 @@ import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
 import { AgentNames, useAgentName } from '@/components/agent-label'
-import { GraphEditorProvider, LinkBar, useGraphEditor } from '@/components/graph-edit'
+import { AddIdeaButton, GraphEditorProvider, IdeaEditor, LinkBar, useGraphEditor } from '@/components/graph-edit'
 import { HypothesisGraphCanvas } from '@/components/hypothesis-graph'
 import { HypothesisOutline } from '@/components/hypothesis-outline'
 import { HypothesisPanel, ObjectiveBar } from '@/components/hypothesis-panel'
@@ -109,6 +110,48 @@ function HypothesesPageContent({ peID }: { peID: string }) {
   const closed = pe?.status === PlatformExperimentStatus.CLOSED
   const readOnly = pe ? isReadOnly(me, pe) || closed : true
 
+  // The toolbar heads the workspace once the graph is read, with the action that adds an idea to it.
+  const toolbar = (action?: ReactNode) => (
+    <Stack>
+    <Inline gap="md">
+      <FormField inline label="Experiment">
+        <PlatformExperimentSelect
+          value={peID}
+          onChange={selectExperiment}
+          hideAllOption
+          placeholder="Select an experiment"
+          className="min-w-64"
+        />
+      </FormField>
+      <Inline gap="md" nowrap className="ml-auto">
+        {action}
+        <Inline gap="xs" nowrap role="group" aria-label="View">
+          <Chip active={view === 'graph'} onClick={() => setView('graph')}>Graph</Chip>
+          <Chip active={view === 'outline'} onClick={() => setView('outline')}>Outline</Chip>
+        </Inline>
+      </Inline>
+    </Inline>
+
+    <Inline gap="md">
+      <SearchBox key={peID} initial={q} placeholder="Search hypotheses by text" onSearch={setQ} />
+      <FormField inline label="Status" className="ml-2">
+        <SearchableSelect
+          value={statusFilter}
+          onChange={setStatusFilter}
+          allLabel="All"
+          options={STATUS_OPTIONS}
+        />
+      </FormField>
+      <FormField inline label="Agent" className="ml-2">
+        <OwnerFilter graph={graph} value={ownerFilter} onChange={setOwnerFilter} />
+      </FormField>
+      {filtering && graph && (
+        <Text as="span" variant="hint">{matching} of {graph.nodes.length} match</Text>
+      )}
+    </Inline>
+    </Stack>
+  )
+
   const page = (
     <ReadOnlyProvider value={readOnly}>
     <Page
@@ -116,41 +159,7 @@ function HypothesesPageContent({ peID }: { peID: string }) {
       title="Hypotheses"
       description="Each experiment grows a graph of research claims. Every hypothesis is a new approach to the experiment's objective or refines earlier hypotheses, and may contradict or relate to others."
     >
-      <Stack>
-      <Inline gap="md">
-        <FormField inline label="Experiment">
-          <PlatformExperimentSelect
-            value={peID}
-            onChange={selectExperiment}
-            hideAllOption
-            placeholder="Select an experiment"
-            className="min-w-64"
-          />
-        </FormField>
-        <Inline gap="xs" nowrap className="ml-auto" role="group" aria-label="View">
-          <Chip active={view === 'graph'} onClick={() => setView('graph')}>Graph</Chip>
-          <Chip active={view === 'outline'} onClick={() => setView('outline')}>Outline</Chip>
-        </Inline>
-      </Inline>
-
-      <Inline gap="md">
-        <SearchBox key={peID} initial={q} placeholder="Search hypotheses by text" onSearch={setQ} />
-        <FormField inline label="Status" className="ml-2">
-          <SearchableSelect
-            value={statusFilter}
-            onChange={setStatusFilter}
-            allLabel="All"
-            options={STATUS_OPTIONS}
-          />
-        </FormField>
-        <FormField inline label="Agent" className="ml-2">
-          <OwnerFilter graph={graph} value={ownerFilter} onChange={setOwnerFilter} />
-        </FormField>
-        {filtering && graph && (
-          <Text as="span" variant="hint">{matching} of {graph.nodes.length} match</Text>
-        )}
-      </Inline>
-      </Stack>
+      {!(graph && pe) && toolbar()}
 
       {selectedError && <ErrorMessage>Could not load experiment {peID}: {selectedError.message}</ErrorMessage>}
       {error && <ErrorMessage>Could not load the hypothesis graph: {error.message}</ErrorMessage>}
@@ -169,6 +178,7 @@ function HypothesesPageContent({ peID }: { peID: string }) {
           setQ={setQ}
           search={search}
           filters={filters}
+          toolbar={toolbar}
         />
       )}
     </Page>
@@ -177,7 +187,7 @@ function HypothesesPageContent({ peID }: { peID: string }) {
   return <AgentNames platformExperimentID={peID}>{page}</AgentNames>
 }
 
-function Workspace({ graph, pe, mutate, canWrite, closed, view, q, setQ, search, filters }: {
+function Workspace({ graph, pe, mutate, canWrite, closed, view, q, setQ, search, filters, toolbar }: {
   graph: HypothesisGraph
   pe: PlatformExperiment
   mutate: KeyedMutator<HypothesisGraph>
@@ -188,6 +198,7 @@ function Workspace({ graph, pe, mutate, canWrite, closed, view, q, setQ, search,
   setQ: (q: string) => void
   search: { data?: HypothesisSearchHit[]; isLoading: boolean; error?: Error }
   filters: GraphFilters
+  toolbar: (action: ReactNode) => ReactNode
 }) {
   const [focus, setFocus] = useQueryParam('focus')
   const layout = useStableLayout(graph)
@@ -196,11 +207,12 @@ function Workspace({ graph, pe, mutate, canWrite, closed, view, q, setQ, search,
   const hits = useMemo(() => new Set((search.data ?? []).map(h => h.id)), [search.data])
 
   const selected = focus || graph.root
-  const showSide = q !== '' || selected !== graph.root
+  const showSide = q !== '' || selected !== graph.root || editor.composing
 
   return (
     <GraphEditorProvider value={editor}>
-      <ObjectiveBar graph={graph} pe={pe} onAddIdea={editor.startAdding} />
+      {toolbar(<AddIdeaButton />)}
+      <ObjectiveBar graph={graph} pe={pe} />
       <div className={clsx('grid min-h-canvas flex-fill grid-rows-1 gap-4', showSide ? 'grid-cols-with-aside' : 'grid-cols-1')}>
         <Card className="flex flex-col">
           <LinkBar />
@@ -234,6 +246,7 @@ function Workspace({ graph, pe, mutate, canWrite, closed, view, q, setQ, search,
           )}
         </Card>
         {showSide && <Stack as="aside" gap="xl" className="overflow-y-auto">
+          <IdeaEditor />
           {q && (
             <Section title="Search results" actions={<Button variant="link" size="sm" onClick={() => setQ('')}>Clear</Button>}>
               <SearchHits hits={search.data} onPick={h => setFocus(h.id)} isLoading={search.isLoading} error={search.error} />
@@ -245,7 +258,6 @@ function Workspace({ graph, pe, mutate, canWrite, closed, view, q, setQ, search,
               nodeByID={nodeByID}
               selected={selected}
               onSelect={setFocus}
-              onAddIdea={editor.startAdding}
             />
           )}
         </Stack>}

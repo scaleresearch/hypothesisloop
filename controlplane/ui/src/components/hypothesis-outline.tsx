@@ -9,7 +9,7 @@ import { RowButton } from '@/components/ui/button'
 import { Inline } from '@/components/ui/stack'
 import { Eyebrow, Text } from '@/components/ui/text'
 import { NodeMeta, ObjectiveMeta } from '@/components/hypothesis-graph'
-import { IdeaEditor, NodeActions, useEditor } from '@/components/graph-edit'
+import { AddHereButton, useEditor } from '@/components/graph-edit'
 import { matchesFilters, outlineRows } from '@/lib/hypothesis-graph'
 import { verdictBy } from '@/components/actor'
 import type { GraphFilters } from '@/lib/hypothesis-graph'
@@ -40,10 +40,10 @@ function Row({ id, depth, selected, selectedRef, hit, className, onSelect, child
   const pickable = picking && editor!.canPick(id)
   return (
     <li>
-      <Inline nowrap>
+      <Inline nowrap className="group pr-1.5">
         <RowButton
           ref={selected ? selectedRef : undefined}
-          selected={selected || editor?.adding === id}
+          selected={selected}
           hit={hit}
           className={clsx(className, picking && (pickable ? 'cursor-crosshair' : 'cursor-not-allowed opacity-dimmed'))}
           style={{ paddingLeft: indent(depth) }}
@@ -52,13 +52,8 @@ function Row({ id, depth, selected, selectedRef, hit, className, onSelect, child
         >
           {children}
         </RowButton>
-        {selected && <NodeActions id={id} />}
+        <AddHereButton id={id} />
       </Inline>
-      {editor?.adding === id && (
-        <div className="py-1.5" style={{ paddingLeft: indent(depth + 1) }}>
-          <IdeaEditor />
-        </div>
-      )}
     </li>
   )
 }

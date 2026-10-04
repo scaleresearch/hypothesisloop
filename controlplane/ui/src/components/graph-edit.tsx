@@ -1,8 +1,10 @@
 'use client'
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import type { CSSProperties } from 'react'
 import type { KeyedMutator } from 'swr'
-import { X } from 'lucide-react'
+import { Plus, X } from 'lucide-react'
+import { clsx } from 'clsx'
 import { addHumanHypothesisLink, registerHumanHypothesis } from '@/lib/api'
 import type { RegisteredHypothesis, SimilarHypothesis } from '@/lib/api'
 import type { HypothesisGraph, HypothesisLinkInput, HypothesisLinkType } from '@/types'
@@ -21,10 +23,11 @@ export interface GraphEditor {
   canWrite: boolean
   /** The experiment is closed: the platform refuses new ideas, and the views say so where they would be added. */
   closed: boolean
-  /** The node the idea being written builds on. */
-  adding: string | null
-  startAdding: (parent: string) => void
-  /** The links of the idea being written, starting with builds_on to the node it was opened under. */
+  /** An idea is being written. */
+  composing: boolean
+  /** Opens the composer with its first link refining `target`, or a new approach when it is the objective. */
+  startAdding: (target: string) => void
+  /** The links of the idea being written, starting with builds_on to the node it was opened for. */
   links: HypothesisLinkInput[]
   setLinkType: (to: string, type: HypothesisLinkType) => void
   removeLink: (to: string) => void
@@ -54,7 +57,7 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
   mutate: KeyedMutator<HypothesisGraph>
   onSelect: (id: string) => void
 }): GraphEditor {
-  const [adding, setAdding] = useState<string | null>(null)
+  const [composing, setComposing] = useState(false)
   const [links, setLinks] = useState<HypothesisLinkInput[]>([])
   const [findingTarget, setFindingTarget] = useState(false)
   const [linking, setLinking] = useState<{ from: string; kind: HypothesisLinkType } | null>(null)
@@ -63,17 +66,17 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
   const plan = useMemo(() => linkPlanner(graph), [graph])
 
   const cancel = useCallback(() => {
-    setAdding(null)
+    setComposing(false)
     setLinks([])
     setFindingTarget(false)
     setLinking(null)
     setLinkError('')
   }, [])
 
-  const picking = linking !== null || (adding !== null && findingTarget)
+  const picking = linking !== null || (composing && findingTarget)
 
   useEffect(() => {
-    if (adding === null && linking === null) return
+    if (!composing && linking === null) return
     function onKey(e: KeyboardEvent) {
       if (e.key !== 'Escape') return
       if (findingTarget) setFindingTarget(false)
@@ -81,10 +84,10 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [adding, linking, findingTarget, cancel])
+  }, [composing, linking, findingTarget, cancel])
 
   function targetAllowed(id: string): boolean {
-    return adding !== null && findingTarget && !links.some(l => l.to === id)
+    return composing && findingTarget && !links.some(l => l.to === id)
   }
 
   function canPick(id: string): boolean {
@@ -130,6 +133,12 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
     setFindingTarget(false)
   }
 
+  const startAdding = useCallback((target: string) => {
+    cancel()
+    setComposing(true)
+    setLinks([{ type: 'builds_on', to: target }])
+  }, [cancel])
+
   async function added(h: RegisteredHypothesis) {
     const links = h.links ?? []
     const node = {
@@ -149,12 +158,8 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
     rootLabel,
     canWrite,
     closed,
-    adding: canWrite ? adding : null,
-    startAdding: parent => {
-      cancel()
-      setAdding(parent)
-      setLinks([{ type: 'builds_on', to: parent }])
-    },
+    composing: canWrite && composing,
+    startAdding,
     links,
     setLinkType: (to, type) => {
       if (allowedLinkKinds(graph, to).includes(type)) setLinks(links.map(l => (l.to === to ? { ...l, type } : l)))
@@ -203,25 +208,47 @@ export function ClosedNote() {
   return <Text as="span" variant="hint">Closed. New ideas go into a new experiment.</Text>
 }
 
-/** The two things a person does at a node: add an idea that builds on it, and link it to another. */
-export function NodeActions({ id }: { id: string }) {
+/** The one way to start writing an idea, opened as a new approach to the objective. */
+export function AddIdeaButton() {
   const editor = useEditor()
-  if (!editor || editor.picking || editor.adding !== null) return null
+  if (!editor) return null
   if (!editor.canWrite) return editor.closed ? <ClosedNote /> : null
-  const root = id === editor.graph.root
+  if (editor.composing) return null
+  return <Button size="sm" variant="primary" onClick={() => editor.startAdding(editor.graph.root)}>Add idea</Button>
+}
+
+export function addHereLabel(objective: boolean): string {
+  return objective ? 'Add a new approach to the objective' : 'Add an idea refining this one'
+}
+
+/** The small "+" that opens the composer for one node, shown while the pointer or focus is on its row. */
+export function AddHereButton({ id, className, style }: { id: string; className?: string; style?: CSSProperties }) {
+  const editor = useEditor()
+  if (!editor?.canWrite || editor.composing || editor.picking) return null
+  const label = addHereLabel(id === editor.graph.root)
   return (
-    <Inline gap="xs" nowrap>
-      <Button
-        size="sm"
-        variant="primary"
-        title={root ? 'A new approach to the objective' : 'An idea that refines this one'}
-        onClick={() => editor.startAdding(id)}
-      >
-        Add idea here
-      </Button>
-      {!root && <Button size="sm" onClick={() => editor.startLinking(id)}>Link to…</Button>}
-    </Inline>
+    <Button
+      variant="primary"
+      size="icon"
+      className={clsx('nodrag nopan opacity-0 focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100', className)}
+      style={style}
+      aria-label={label}
+      title={label}
+      onClick={e => {
+        e.stopPropagation()
+        editor.startAdding(id)
+      }}
+    >
+      <Plus size={12} />
+    </Button>
   )
+}
+
+/** Starts linking an idea to another. */
+export function LinkButton({ id }: { id: string }) {
+  const editor = useEditor()
+  if (!editor?.canWrite || editor.picking || editor.composing || id === editor.graph.root) return null
+  return <Button size="sm" onClick={() => editor.startLinking(id)}>Link to…</Button>
 }
 
 /** Finds a node of the graph by its text, without a round trip, and hands the chosen one back. */
@@ -335,10 +362,11 @@ function SimilarIdeas({ similar, choices, onChoose, onShow }: {
 }
 
 /**
- * Writing a new idea in place, under the node it was opened at: its text, its links (builds_on to
- * that node to start with), and the choice the API asks for when it reads close to ideas already there.
+ * Writing a new idea, the same beside the graph and the outline: its text, its links (builds_on to
+ * the node it was opened for to start with), and the choice the API asks for when it reads close to
+ * ideas already there.
  */
-export function IdeaEditor({ maxHeight }: { maxHeight?: number }) {
+export function IdeaEditor() {
   const editor = useEditor()
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -346,7 +374,7 @@ export function IdeaEditor({ maxHeight }: { maxHeight?: number }) {
   const [existingID, setExistingID] = useState('')
   const [similar, setSimilar] = useState<SimilarHypothesis[]>([])
   const [choices, setChoices] = useState<Record<string, Choice>>({})
-  if (!editor || editor.adding === null) return null
+  if (!editor?.composing) return null
   const ed = editor
 
   async function submit(chosen: Record<string, Choice>) {
@@ -384,13 +412,8 @@ export function IdeaEditor({ maxHeight }: { maxHeight?: number }) {
   const buildsOn = ed.links.some(l => l.type === 'builds_on')
 
   return (
-    <Stack
-      gap="sm"
-      className="w-aside overflow-y-auto rounded-lg border border-primary bg-surface-raised p-3 shadow-lg"
-      style={{ maxHeight }}
-      role="group"
-      aria-label="New idea"
-    >
+    <Stack gap="sm" className="rounded-lg border border-primary bg-surface-raised p-3" role="group" aria-label="New idea">
+      <Eyebrow>New idea</Eyebrow>
       <Textarea
         className="min-h-16 w-full overflow-x-hidden whitespace-pre-wrap break-words"
         rows={3}

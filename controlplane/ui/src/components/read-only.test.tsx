@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   fetchExperimentStats, fetchHypothesisStats, fetchPlatformExperimentAgents, fetchPlatformExperimentQuotas,
 } from '@/lib/api'
-import { ReadOnlyProvider } from '@/lib/read-only'
+import { ReadOnlyProvider, useReadOnly } from '@/lib/read-only'
+import { AddIdeaButton, GraphEditorProvider, useGraphEditor } from '@/components/graph-edit'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { ExperimentAgents } from '@/components/experiment-agents'
 import { AddCommentForm, AddLinkForm } from '@/components/human-idea'
@@ -44,6 +45,19 @@ const node = {
   created_at: at, builds_on: ['pe-x'], finding_count: 0, comment_count: 0, child_count: 0,
 } as unknown as HypothesisListItem
 const graph: HypothesisGraph = { root: 'pe-x', objective: {}, nodes: [node], edges: [] } as unknown as HypothesisGraph
+
+// As the hypotheses page wires them: an account that only reads writes nothing.
+function GraphPanels() {
+  const readOnly = useReadOnly()
+  const editor = useGraphEditor({ graph, rootLabel: pe.name, canWrite: !readOnly, mutate: vi.fn(), onSelect: () => {} })
+  return (
+    <GraphEditorProvider value={editor}>
+      <AddIdeaButton />
+      <ObjectiveBar graph={graph} pe={pe} />
+      <HypothesisPanel graph={graph} nodeByID={new Map([[node.id, node]])} selected="hyp-1" onSelect={() => {}} />
+    </GraphEditorProvider>
+  )
+}
 
 // Each case renders the same thing twice: as the owner sees it, where the control must be there
 // for its absence to mean anything, and as an account that only reads the shared experiment.
@@ -86,18 +100,12 @@ describe('a shared platform experiment of another org shows no control that writ
   })
 
   it('to its hypothesis graph: no idea under the objective or under a hypothesis', () => {
-    const panel = (
-      <>
-        <ObjectiveBar graph={graph} pe={pe} onAddIdea={() => {}} />
-        <HypothesisPanel graph={graph} nodeByID={new Map([[node.id, node]])} selected="hyp-1" onSelect={() => {}} onAddIdea={() => {}} />
-      </>
-    )
-    const own = show(panel, false)
-    expect(names('button')).toEqual(expect.arrayContaining(['+ Add idea under the objective', '+ Add idea under this']))
+    const own = show(<GraphPanels />, false)
+    expect(names('button')).toEqual(expect.arrayContaining(['Add idea', 'Link to…']))
     own.unmount()
 
-    show(panel, true)
-    expect(names('button').filter(n => n?.includes('Add idea'))).toEqual([])
+    show(<GraphPanels />, true)
+    expect(names('button').filter(n => n?.includes('Add idea') || n?.includes('Link to'))).toEqual([])
     // Reading on stays possible, from the reader's own project.
     expect(screen.getByRole('link', { name: 'Open detail →' }).getAttribute('href')).toBe('/experiments/pe-x/hypotheses/hyp-1')
     expect(screen.getByRole('link', { name: 'Experiment →' }).getAttribute('href')).toBe('/experiments/pe-x')
