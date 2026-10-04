@@ -44,6 +44,10 @@ FROM python:3.13-slim
 # that is the trace from a submitted job back to its source.
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
+ENV PATH=/usr/local/cargo/bin:$PATH
+RUN --mount=type=bind,source=infra/images/native-toolchain.sh,target=/tmp/native-toolchain.sh \
+    sh /tmp/native-toolchain.sh
 COPY --from=uv /uv /uvx /usr/local/bin/
 
 # Non-interactive git auth, baked so the agent never handles credentials: git asks `hl
