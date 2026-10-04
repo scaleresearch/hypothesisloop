@@ -46,18 +46,21 @@ The proposal, in the shape `hl platform-experiments propose` shows:
       - the accelerator type, count per job and image;
       - the levers open and fixed, and when to stop: the target reached (and past each
         reference the goal asks to beat), no gain after several honest tries, or the quota;
-      - the best published result your search found under the goal's constraints, with its
-        source, or that it found none.
+      - the best published result your search found under the goal's constraints, as a number
+        in the metric's own unit, with its source and the setting it was measured in, or that
+        it found none.
     Name parts by file or directory and behaviour; how the harness measures is the
     baseline's to choose.
   - The size: a budget, count or time the goal states, as stated (a time is `duration_hours`).
-    Else the smallest plan that answers the goal: budget = trial length with its build x
-    `acch_per_hour` x count x trials, plus a fifth (core-hours on cpu); duration = the rounds
-    those trials take side by side. A time with no budget gets the budget that keeps the
-    capacity busy for that time. `sizing_reason` shows what was read, what assumed, and the
-    arithmetic. Researchers: as stated, else as many as keep the capacity busy, up to
-    `max_agents`; mix a generalist with the targeted flavors the
-    open levers call for, each given a different approach.
+    A time with no budget gets the budget that keeps the capacity busy for that time: the jobs
+    `hl capacity` fits side by side x `acch_per_hour` x count x hours. Else the smallest plan
+    that answers the goal: budget = trial length x `acch_per_hour` x count x trials, plus a
+    fifth (core-hours on cpu); duration = the rounds those trials take side by side. A trial's
+    length is estimated from what the harness runs and on how much data. `sizing_reason`
+    shows what was read, what assumed, and the arithmetic. Researchers: as stated, else as many
+    as keep the capacity busy, each keeping a few jobs in flight, up to `max_agents`; mix a
+    generalist with the targeted flavors the open levers call for, each given a different
+    approach.
   - `baseline_minutes`: the harness, the environment built from nothing, the jobs, and one
     failed try rerun.
   - `repo_map`: only what you read, so the baseline agent need not read it again.
