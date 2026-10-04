@@ -171,3 +171,40 @@ func TestANodesCoresAreUnitsOfTheCPUTypeWithNothingWrittenToTheCluster(t *testin
 		t.Errorf("the pod is recorded as %q, want the CPU type", got)
 	}
 }
+
+// The builder's BuildKit is a sidecar of the cluster-agent pod, and the scheduler holds its
+// request on the node. Capacity counted from the containers alone reported box-a's 4 builder
+// cores as free for jobs, and a job sized to them waited Pending.
+func TestASidecarsRequestIsHeldOfItsNodeAsTheSchedulerHoldsIt(t *testing.T) {
+	always := corev1.ContainerRestartPolicyAlways
+	agent := requestingPod("cluster-agent", "box", false, 10)
+	agent.Spec.InitContainers = []corev1.Container{
+		{Name: "setup", Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+			corev1.ResourceCPU: *resource.NewQuantity(6, resource.DecimalSI)}}},
+		{Name: "buildkitd", RestartPolicy: &always, Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    *resource.NewQuantity(4, resource.DecimalSI),
+			corev1.ResourceMemory: *resource.NewQuantity(8<<30, resource.BinarySI)}}},
+	}
+	agent.Spec.Overhead = corev1.ResourceList{corev1.ResourceCPU: *resource.NewMilliQuantity(100, resource.DecimalSI)}
+	if got := podRequests(agent); got.Cpu().MilliValue() != 6100 || got.Memory().Value() != 8<<30 {
+		t.Fatalf("pod requests %v; want cpu 6100m (the one-shot init's 6 cores exceed 4010m running) and the sidecar's 8Gi", got)
+	}
+	agent.Spec.InitContainers = agent.Spec.InitContainers[1:]
+
+	c := newDRATestClient(t)
+	c.kube = chartKube(t, totalCapacityTestNode("box", 16, 64), agent)
+	ctx := context.Background()
+	available, total, _, _, err := c.GetLiveAcceleratorCapacitySnapshot(ctx)
+	cores := string(domain.CPUType)
+	if err != nil || total[cores] != 11 || available[cores] != 11 {
+		t.Fatalf("cores total %v, available %v, %v; want 11 of 16 once the agent's 4110m are held", total, available, err)
+	}
+	totals, err := c.GetNodeTotalCapacity(ctx)
+	if err != nil || totals["box"][domain.NodeResourceMemoryBytes] != 56<<30 {
+		t.Fatalf("box's totals %v, %v; want 56Gi of memory left after the sidecar's 8Gi", totals["box"], err)
+	}
+	free, err := c.GetLiveNodeResourceCapacity(ctx)
+	if err != nil || free["box"][domain.NodeResourceCPUMillicores] != 11890 {
+		t.Fatalf("box's free %v, %v; want 11890m", free["box"], err)
+	}
+}

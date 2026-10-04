@@ -455,10 +455,8 @@ func sumAllocatableAndRequested(nodes []corev1.Node, pods []corev1.Pod, resource
 		if p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
 			continue
 		}
-		for _, ctr := range p.Spec.Containers {
-			if q, ok := ctr.Resources.Requests[resourceName]; ok {
-				requested += extract(q)
-			}
+		if q, ok := podRequests(&p)[resourceName]; ok {
+			requested += extract(q)
 		}
 	}
 	return total, requested
@@ -500,10 +498,8 @@ func (c *JobWorkloadClient) GetLiveNodeResourceCapacity(ctx context.Context) (ma
 				if p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
 					continue
 				}
-				for _, ctr := range p.Spec.Containers {
-					if q, ok := ctr.Resources.Requests[d.name]; ok {
-						requested += d.quantity(q)
-					}
+				if q, ok := podRequests(&p)[d.name]; ok {
+					requested += d.quantity(q)
 				}
 			}
 			if free[d.key] = allocatable - requested; free[d.key] < 0 {
@@ -559,10 +555,8 @@ func (c *JobWorkloadClient) GetNodeTotalCapacity(ctx context.Context) (map[strin
 				if p.Labels[workloadkeys.ManagedBy] == workloadkeys.ManagedByValue {
 					continue // a platform job pod's own request is not subtracted — see doc comment
 				}
-				for _, ctr := range p.Spec.Containers {
-					if q, ok := ctr.Resources.Requests[d.name]; ok {
-						nonPlatformRequested += d.quantity(q)
-					}
+				if q, ok := podRequests(&p)[d.name]; ok {
+					nonPlatformRequested += d.quantity(q)
 				}
 			}
 			if total[d.key] = allocatable - nonPlatformRequested; total[d.key] < 0 {
@@ -591,10 +585,8 @@ func (c *JobWorkloadClient) GetLiveAcceleratorCapacitySnapshot(ctx context.Conte
 		if requested[pod.Spec.NodeName] == nil {
 			requested[pod.Spec.NodeName] = make(map[corev1.ResourceName]int64)
 		}
-		for _, ctr := range pod.Spec.Containers {
-			for name, qty := range ctr.Resources.Requests {
-				requested[pod.Spec.NodeName][name] += qty.Value()
-			}
+		for name, qty := range podRequests(&pod) {
+			requested[pod.Spec.NodeName][name] += qty.Value()
 		}
 	}
 
