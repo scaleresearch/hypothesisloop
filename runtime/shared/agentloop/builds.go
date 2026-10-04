@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -52,13 +54,29 @@ func (a *Agent) runBuild(ctx context.Context, running *runningBuild, b domain.En
 	defer a.building.Done()
 	defer running.cancel()
 	a.Log("build %s attempt %d: started on %s", b.Key, b.Attempt, b.Base)
+	steps := make(chan string, 1)
+	posted := make(chan struct{})
+	go a.postProgress(ctx, b, steps, posted)
 	report := a.Builder.Run(ctx, b, func(ctx context.Context) (string, string, error) {
 		var login domain.RegistryLogin
 		err := a.postJSON(ctx, "/builds/"+url.PathEscape(b.Key)+"/credential", domain.EnvironmentBuildCredentialRequest{Attempt: b.Attempt}, &login)
 		return login.Username, login.Password, err
 	}, func(format string, args ...any) {
-		a.Log("build %s attempt %d: %s", b.Key, b.Attempt, fmt.Sprintf(format, args...))
+		line := fmt.Sprintf(format, args...)
+		a.Log("build %s attempt %d: %s", b.Key, b.Attempt, line)
+		step := progressStep(line)
+		if step == "" {
+			return
+		}
+		// The build tells its steps from one goroutine, so after the drain the send never blocks.
+		select {
+		case <-steps:
+		default:
+		}
+		steps <- step
 	})
+	close(steps)
+	<-posted
 	if ctx.Err() != nil {
 		a.Log("build %s attempt %d: no longer this cluster's, cancelled", b.Key, b.Attempt)
 		return
@@ -75,6 +93,34 @@ func (a *Agent) runBuild(ctx context.Context, running *runningBuild, b domain.En
 	if a.builds[b.Key] == running {
 		delete(a.builds, b.Key)
 	}
+}
+
+// postProgress posts each step it receives as the step b is at, until steps closes, then closes
+// posted. A step told while one is posted replaces the one waiting, so a slow control plane holds
+// no build back, and a post that fails is logged and costs the build nothing.
+func (a *Agent) postProgress(ctx context.Context, b domain.EnvironmentBuild, steps <-chan string, posted chan<- struct{}) {
+	defer close(posted)
+	for step := range steps {
+		err := a.postJSON(ctx, "/builds/"+url.PathEscape(b.Key)+"/progress", domain.EnvironmentBuildProgress{Attempt: b.Attempt, Step: step}, nil)
+		if err != nil && ctx.Err() == nil {
+			a.Log("build %s attempt %d: progress: %v", b.Key, b.Attempt, err)
+		}
+	}
+}
+
+// progressStep is the first line of line, cut to domain.MaxEnvironmentProgressBytes on a rune
+// boundary.
+func progressStep(line string) string {
+	line, _, _ = strings.Cut(strings.ReplaceAll(line, "\r", "\n"), "\n")
+	line = strings.TrimSpace(line)
+	if len(line) <= domain.MaxEnvironmentProgressBytes {
+		return line
+	}
+	cut := domain.MaxEnvironmentProgressBytes
+	for !utf8.RuneStart(line[cut]) {
+		cut--
+	}
+	return strings.TrimSpace(line[:cut])
 }
 
 // postJSON posts body to path under this cluster's API and decodes a 2xx answer into out, when

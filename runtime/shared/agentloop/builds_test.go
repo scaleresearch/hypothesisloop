@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -22,6 +24,9 @@ type buildsAPI struct {
 	credentials   []domain.EnvironmentBuildCredentialRequest
 	reports       map[string][]domain.EnvironmentBuildReport
 	refuse        bool
+	progress      map[string][]domain.EnvironmentBuildProgress
+	// refuseProgress answers every progress report 503.
+	refuseProgress bool
 }
 
 func (api *buildsAPI) serve(t *testing.T) *httptest.Server {
@@ -41,6 +46,19 @@ func (api *buildsAPI) serve(t *testing.T) *httptest.Server {
 			_ = json.NewDecoder(r.Body).Decode(&req)
 			api.credentials = append(api.credentials, req)
 			_ = json.NewEncoder(w).Encode(domain.RegistryLogin{Registry: "registry.test", Username: "oauth2accesstoken", Password: "push-token"})
+		case "/internal/clusters/test/builds/k1/progress", "/internal/clusters/test/builds/k2/progress":
+			if api.refuseProgress {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			var progress domain.EnvironmentBuildProgress
+			_ = json.NewDecoder(r.Body).Decode(&progress)
+			key := strings.TrimSuffix(r.URL.Path[len("/internal/clusters/test/builds/"):], "/progress")
+			if api.progress == nil {
+				api.progress = map[string][]domain.EnvironmentBuildProgress{}
+			}
+			api.progress[key] = append(api.progress[key], progress)
+			w.WriteHeader(http.StatusNoContent)
 		case "/internal/clusters/test/builds/k1", "/internal/clusters/test/builds/k2":
 			if api.refuse {
 				w.WriteHeader(http.StatusServiceUnavailable)
@@ -79,6 +97,8 @@ type fakeBuilder struct {
 	cancelled map[string]int
 	logins    []string
 	release   chan struct{}
+	// steps is what each run tells as its progress. Nil tells one step.
+	steps []string
 }
 
 func newFakeBuilder() *fakeBuilder {
@@ -86,7 +106,13 @@ func newFakeBuilder() *fakeBuilder {
 }
 
 func (b *fakeBuilder) Run(ctx context.Context, build domain.EnvironmentBuild, credential func(context.Context) (string, string, error), progress func(string, ...any)) domain.EnvironmentBuildReport {
-	progress("[1/1] RUN make: started")
+	steps := b.steps
+	if steps == nil {
+		steps = []string{"[1/1] RUN make: started"}
+	}
+	for _, step := range steps {
+		progress("%s", step)
+	}
 	b.mu.Lock()
 	b.runs[build.Key]++
 	b.mu.Unlock()
@@ -292,5 +318,63 @@ func TestABuildIsToldAsItGoesAndCancelledOnlyWhenACancelCutItShort(t *testing.T)
 	}
 	if logged.has("build k1 attempt 1: no longer this cluster's, cancelled") {
 		t.Errorf("logged %q: a build that ended and reported is told as cancelled", logged.lines)
+	}
+}
+
+// The step a build is at is posted to the control plane, one line within its bound, so the job
+// waiting for the environment shows it. A progress post the control plane refuses costs the
+// build nothing.
+func TestABuildPostsTheStepItIsAtAndARefusedPostCostsItNothing(t *testing.T) {
+	long := "[2/2] RUN " + strings.Repeat("é", domain.MaxEnvironmentProgressBytes)
+	for _, refuse := range []bool{false, true} {
+		api := &buildsAPI{reports: map[string][]domain.EnvironmentBuildReport{}, refuseProgress: refuse}
+		builder := newFakeBuilder()
+		builder.steps = []string{"[1/2] RUN cat <<EOF\nsecond line: started", "", long}
+		close(builder.release)
+		agent := buildAgent(api.serve(t), builder)
+		var logged agentLog
+		agent.Log = logged.log
+
+		api.list(k1)
+		if err := agent.reconcileOnce(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, "the report", func() bool { return len(api.reported("k1")) == 1 })
+		if got := api.reported("k1")[0]; got.Outcome != domain.EnvironmentBuildPushed {
+			t.Fatalf("refuse=%v: reported %+v, want the build pushed", refuse, got)
+		}
+		api.mu.Lock()
+		progress := api.progress["k1"]
+		api.mu.Unlock()
+		if refuse {
+			if len(progress) != 0 || !slices.ContainsFunc(logged.lines, func(l string) bool { return strings.HasPrefix(l, "build k1 attempt 1: progress: ") }) {
+				t.Fatalf("recorded %v and logged %q, want the refusal logged", progress, logged.lines)
+			}
+			continue
+		}
+		if len(progress) == 0 || len(progress) > 2 {
+			t.Fatalf("posted %+v, want the steps, the latest replacing one still waiting", progress)
+		}
+		for _, p := range progress {
+			if p.Attempt != 1 || p.Step == "" || strings.ContainsAny(p.Step, "\r\n") || len(p.Step) > domain.MaxEnvironmentProgressBytes || !utf8.ValidString(p.Step) {
+				t.Errorf("posted %+v, want one valid line within the bound at attempt 1", p)
+			}
+		}
+		if last := progress[len(progress)-1].Step; !strings.HasPrefix(long, last) || len(last) < domain.MaxEnvironmentProgressBytes-1 {
+			t.Errorf("last step %q, want the long step cut to the bound", last)
+		}
+	}
+}
+
+func TestAProgressStepIsTheFirstLineCutOnARuneBoundary(t *testing.T) {
+	for line, want := range map[string]string{
+		"[1/2] RUN a\nb: started": "[1/2] RUN a",
+		"  x\r\n":                 "x",
+		"\nlater":                 "",
+		strings.Repeat("a", domain.MaxEnvironmentProgressBytes-1) + "é": strings.Repeat("a", domain.MaxEnvironmentProgressBytes-1),
+	} {
+		if got := progressStep(line); got != want {
+			t.Errorf("progressStep(%q) = %q, want %q", line, got, want)
+		}
 	}
 }
