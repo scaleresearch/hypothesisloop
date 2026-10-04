@@ -101,20 +101,18 @@ class PlannerOpeningTest(unittest.TestCase):
             self.assertEqual(run._opening(SimpleNamespace(cfg=planner(), client=client, workdir="/w"), None, None), "Begin.\n\nREADS")
             self.assertEqual(run._opening(SimpleNamespace(cfg=planner(), client=client, workdir="/w"), "s-1", None), "Continue where you left off.")
         opened = run._opening(SimpleNamespace(cfg=baseline_agent(), client=client, workdir="/w"), None, None)
-        self.assertTrue(opened.startswith("Your first action, before you read the code: the environment") and opened.endswith("\n\n=== The planner's map of the repository\nbench.py: the harness"), opened)
+        self.assertTrue(opened.startswith("Your goal is the control") and opened.endswith("\n\n=== The planner's map of the repository\nbench.py: the harness"), opened)
         self.assertEqual(run._opening(SimpleNamespace(cfg=baseline_agent(), client=client, workdir="/w"), "s-1", None), "Continue where you left off.")
 
-    # Run 8's and run 9's baseline agents wrote the harness before the Dockerfile, and run 9's
-    # control waited out a build started 9.5 min in. A fresh baseline session opens with the
-    # Dockerfile from the planner's pins, its commit and `hl env build`, whatever the map says.
-    def test_a_baseline_agent_opens_with_its_environment(self):
-        opened = seed.baseline("/w", "src/: the code. rust-toolchain.toml pins 1.95.0.")
+    # Runs 8 to 10's baseline agents built the environment 9.5 to 14.5 min in. A fresh baseline
+    # session opens with its goal in time, the slowest part first, and the planner's pins.
+    def test_a_baseline_agent_opens_with_its_goal(self):
+        opened = seed.baseline("src/: the code. rust-toolchain.toml pins 1.95.0.")
         first, _, rest = opened.partition("\n\n")
-        for said in ("In /w, clone", "`hl repo init`", "`.hypothesisloop/Dockerfile`", "the planner's map below names", "Commit it and run `hl env build`"):
+        for said in ("15 minutes after the plan was accepted", "slowest first", "environment build", "the planner's map below names", "subagents"):
             self.assertIn(said, first)
-        self.assertLess(first.index("Dockerfile"), first.index("read and write the rest"))
         self.assertTrue(rest.endswith("rust-toolchain.toml pins 1.95.0."), rest)
-        bare = seed.baseline("/w", "")
+        bare = seed.baseline("")
         self.assertNotIn("map", bare)
         self.assertIn("the repository's pin files state", bare)
         open_pe = SimpleNamespace(get_platform_experiment=lambda _id: {"status": "open", "baseline_due_at": None})

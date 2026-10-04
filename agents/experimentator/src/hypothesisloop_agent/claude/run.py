@@ -505,11 +505,11 @@ def _first_prompt(setup: core.RunSetup, resume_id: str | None, initial_prompt: s
 
 def _opening(setup: core.RunSetup, resume_id: str | None, initial_prompt: str | None) -> str:
     """_first_prompt, and for a session that starts fresh what its role reads first: a planner's
-    opening reads, a baseline agent's first action with the planner's map of the repository."""
+    opening reads, a baseline agent's goal with the planner's map of the repository."""
     if resume_id or initial_prompt:
         return _first_prompt(setup, resume_id, initial_prompt)
     if config.measures_baseline(setup.cfg):
-        return _first_prompt(setup, None, seed.baseline(setup.workdir, core.repo_map(setup)))
+        return _first_prompt(setup, None, seed.baseline(core.repo_map(setup)))
     prompt = _first_prompt(setup, None, None)
     reads = seed.planner(setup.workdir) if config.plans(setup.cfg) else ""
     return prompt + "\n\n" + reads if reads else prompt

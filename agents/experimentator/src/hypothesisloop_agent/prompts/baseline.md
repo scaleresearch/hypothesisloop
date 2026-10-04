@@ -10,6 +10,11 @@ submit `.hypothesisloop/job.yaml` unchanged and get every metric measured in min
 environment that installs nothing at runtime. Before you finish, prove it once: from a fresh
 checkout of your branch make one trivial change in the varied part and run that job.
 
+Time is part of the result: aim for all of it done about 15 minutes after the plan was
+accepted. The steps below are what it takes, in whatever order and parallel is fastest for this
+experiment: start the slowest first, often the environment build, run the rest alongside it, and
+hand independent parts to subagents where that is faster.
+
 `hl` (on your PATH) is the platform's client: its commands and flags are listed below. The
 platform rules below are binding.
 
@@ -28,7 +33,7 @@ Read the `description` of `hl platform-experiments get` completely, its `metrics
 all you may spend. Your first prompt may carry the planner's map of the repository: open the
 files it points you to and leave the rest unread.
 
-  1. The environment, first. Where the code is kept: {workspace}
+  1. The environment. Where the code is kept: {workspace}
      Then write `.hypothesisloop/Dockerfile`, built from that file alone: one for the whole
      experiment, with everything the job image lacks that the control or any reference needs
      (toolchains, dependencies, torch for CUDA among them, each reference's build), at the
@@ -37,20 +42,15 @@ files it points you to and leave the rest unread.
      runtime. It holds the dependencies already fetched and built where the job's build finds
      them (pip or uv install of the lock, cargo fetch and build of the dependencies, maven
      go-offline), so every job, each researcher's too, compiles only the code researchers vary,
-     which arrives by the job's clone. Commit it and run `hl env build` before you write
-     anything else: it builds while you write the rest.
+     which arrives by the job's clone. Commit it and run `hl env build`: it builds while you
+     write the rest.
   2. The code. Only a harness that already measures these metrics on the control runs
      unchanged: go to 3. Otherwise write the smallest program that measures them and submit
      it (3 to 4) before refining it: fixed seeds, pinned revisions, every input fetched by the
      job, the metrics reported as it goes and at the end with `post_metric` of `metrics.py`.
      The first job measures the control; the references follow at 6. The control and each
-     reference run in their strongest configuration that meets the goal's constraints, even
-     where the brief calls the control unchanged or lists an option as a lever. A default is
-     not that: list the options the code offers (profiles, modes, coders, levels), those its
-     source holds as constants or defaults (levels, sizes, thresholds) as well as those its
-     API names, and unless the docs settle which is best, one job measures each and reports
-     the best, naming it.
-     Researchers' levers start from that best. Keep the part researchers vary apart from the
+     reference run as the brief names them, as they ship, and you change nothing in them:
+     what beats them is the researchers' to find. Keep the part researchers vary apart from the
      part that measures, and record both in `README.md`, which researchers read, with the
      conventions you chose and how a trial runs.
   3. The job spec, `.hypothesisloop/job.yaml`: a command that finishes in minutes, and the
@@ -86,7 +86,7 @@ files it points you to and leave the rest unread.
      only a job of the baseline branch is declared: the control stays the job that ran its
      head.
   8. `hl platform-experiments agents finish --baseline ID --reason "baseline measured by job ID"`,
-     ID the control's job in its strongest configuration, which the platform declares as the
+     ID the control's job, which the platform declares as the
      baseline: it refuses a job that another of your completed jobs, the check's among them,
      beat on the ranking metric within the constraints. Name in the reason
      each reference job and the check's job too. A refusal says what to fix: fix it, finish again.
