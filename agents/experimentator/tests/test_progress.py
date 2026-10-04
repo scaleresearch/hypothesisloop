@@ -88,6 +88,18 @@ class ProgressTest(unittest.TestCase):
         self.assertRegex(line, r"^hl-activity .+$")
         self.assertNotIn("\n", line)
 
+    # The launcher hands the newest rate-limit line to the platform's run health, so it goes out
+    # with every beat once there is a reading. launcherapi.parseRateLimit reads this format.
+    def test_the_rate_limit_last_read_is_said_with_every_beat(self):
+        self.progress.beat()
+        line = progress.rate_limit_line("allowed_warning", "seven_day", 0.95, 1760000000)
+        self.assertEqual(line, "hl-rate-limit status=allowed_warning type=seven_day utilization=0.95 resets_at=1760000000")
+        self.assertEqual(progress.rate_limit_line("rejected", None, None, None), "hl-rate-limit status=rejected")
+        self.progress.rate_limit(line)
+        self.progress.beat()
+        self.progress.beat()
+        self.assertEqual(self.lines, ["hl-progress 1", "hl-progress 2", line, "hl-progress 3", line])
+
     def test_a_harness_that_has_said_nothing_prints_no_activity(self):
         self.progress.beat()
         self.progress.doing("  ")

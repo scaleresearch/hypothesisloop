@@ -4,11 +4,13 @@ import io
 import json
 import os
 import tempfile
+import time
 import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from claude_agent_sdk import AssistantMessage, ResultMessage, StreamEvent, SystemMessage, TextBlock, UserMessage
+from claude_agent_sdk import (AssistantMessage, RateLimitEvent, RateLimitInfo, ResultMessage, StreamEvent, SystemMessage,
+                              TextBlock, UserMessage)
 
 from hypothesisloop_agent.claude import run
 from test_require_joined import AGENT_TOKEN
@@ -285,7 +287,7 @@ class ContextOverflowTest(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(run, "ClaudeSDKClient", OverflowingClient), \
                 mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": home}), \
                 contextlib.redirect_stdout(io.StringIO()), self.assertLogs("llm_agent"):
-            self.assertEqual(await asyncio.wait_for(run._run_one_session(setup, "m", "s-1", [False]), timeout=5), (None, False))
+            self.assertEqual(await asyncio.wait_for(run._run_one_session(setup, "m", "s-1", [False]), timeout=5), False)
             resume_id, prompt = run._restart_state(setup)
             self.assertIsNone(resume_id)
             self.assertIn("job exp-7 runs lr 3e-4", prompt)
@@ -314,7 +316,7 @@ class ContextOverflowTest(unittest.IsolatedAsyncioTestCase):
         setup = _setup()
         with mock.patch.object(run, "ClaudeSDKClient", RotatingClient), \
                 contextlib.redirect_stdout(io.StringIO()), self.assertLogs("llm_agent"):
-            self.assertEqual(await asyncio.wait_for(run._run_one_session(setup, "m", None, [False]), timeout=5), (None, True))
+            self.assertEqual(await asyncio.wait_for(run._run_one_session(setup, "m", None, [False]), timeout=5), True)
         self.assertEqual(run._load_handoff(setup), "where things stand")
 
     def test_the_rotation_point_follows_a_smaller_context_window(self):
@@ -431,15 +433,15 @@ class ReconnectTest(unittest.IsolatedAsyncioTestCase):
             on_good_turn()
             if len(resumed) == 4:
                 stop_flag[0] = True
-            return None, False
+            return False
 
         really_sleep = asyncio.sleep
 
         async def sleep(seconds):
-            # The beat and the session store sleep too, here for less than any backoff.
-            if seconds >= run._RECONNECT_BACKOFF_INITIAL_S:
-                sleeps.append(seconds)
             await really_sleep(0)
+
+        async def pause(seconds, stop_flag_):
+            sleeps.append(seconds)
 
         async def never(setup, stop_flag):
             await asyncio.Event().wait()
@@ -449,6 +451,7 @@ class ReconnectTest(unittest.IsolatedAsyncioTestCase):
                 mock.patch.object(run, "_SESSION_STORE_INTERVAL_S", 1), \
                 mock.patch.object(run.core, "install_signal_handler", lambda: stop_flag), \
                 mock.patch.object(run.asyncio, "sleep", sleep), \
+                mock.patch.object(run, "_pause", pause), \
                 self.assertLogs("llm_agent"):
             await asyncio.wait_for(run._run(setup, "m"), timeout=5)
         self.assertEqual(resumed, [None, "s-2", "s-2", "s-2"])
@@ -461,7 +464,7 @@ class ReconnectTest(unittest.IsolatedAsyncioTestCase):
 
         async def session(*_):
             order.append("the CLI exited")
-            return None, False
+            return False
 
         async def store(setup):
             order.append("stored")
@@ -504,6 +507,74 @@ class ReconnectTest(unittest.IsolatedAsyncioTestCase):
             with open(transcript, "w") as f:
                 f.write("the turn so far\n")
             self.assertEqual(run._restart_state(setup), ("s-live", None))
+
+
+def _refusal(resets_at: float) -> RateLimitEvent:
+    return RateLimitEvent(rate_limit_info=RateLimitInfo(status="rejected", resets_at=int(resets_at), rate_limit_type="seven_day",
+                                                        utilization=1.0), uuid="u", session_id="s-1")
+
+
+class RefusedClient(HangingClient):
+    """Answers every turn as the CLI does once the model provider refuses the account's calls."""
+
+    resets_at = 0.0
+
+    async def receive_response(self):
+        yield _refusal(RefusedClient.resets_at)
+        yield ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=True, num_turns=1,
+                            session_id="s-1", result="You've hit your weekly limit")
+
+
+# Round 14's account neared its 7-day allowance. A refused agent must wait for the reset the
+# provider states, spend no restart and no reconnect on the way, and resume.
+class RateLimitTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        for patcher in (mock.patch.object(run, "_rate_limit", None), mock.patch.object(run, "_limit_since", None),
+                        mock.patch.object(run._progress, "_rate_limit", ""),
+                        mock.patch.object(run, "_live_session_id", None),
+                        mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": tempfile.mkdtemp()})):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    async def test_a_refused_turn_ends_the_session_and_the_run_loop_waits_until_the_reset(self):
+        resets_at = time.time() + 3 * 86400
+        with mock.patch.object(run, "ClaudeSDKClient", RefusedClient), mock.patch.object(RefusedClient, "resets_at", resets_at), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertLogs("llm_agent"):
+            self.assertFalse(await asyncio.wait_for(run._run_one_session(_setup(), "m", None, [False]), timeout=5))
+        self.assertEqual(run._refused_until(), int(resets_at))
+
+        setup, stop_flag, openings, pauses = _setup(), [False], [], []
+
+        async def session(setup, model, resume_id, stop_flag_, initial_prompt, on_good_turn):
+            openings.append(run._first_prompt(setup, "s-1", None))
+            if len(openings) == 2:
+                run._settled_on_this_machine()
+                stop_flag[0] = True
+            return False
+
+        async def pause(seconds, stop_flag_):
+            pauses.append(seconds)
+
+        said = []
+        with mock.patch.object(run, "_run_one_session", session), mock.patch.object(run, "_pause", pause), \
+                mock.patch.object(run._progress, "doing", said.append), self.assertLogs("llm_agent"):
+            await asyncio.wait_for(run._run_until_stopped(setup, "m", stop_flag), timeout=5)
+        [waited] = pauses
+        self.assertAlmostEqual(waited, 3 * 86400, delta=60)
+        self.assertIn("paused until", said[-1])
+        self.assertIn("seven_day limit", said[-1])
+        self.assertNotIn("refused your calls", openings[0])
+        self.assertIn("refused your calls", openings[1])
+        self.assertIsNone(run._limit_since, "a good turn after the wait still says it")
+
+    async def test_a_reset_that_has_passed_refuses_nothing(self):
+        run._rate_limit = _refusal(time.time() - 1).rate_limit_info
+        self.assertIsNone(run._refused_until())
+
+    async def test_a_stop_ends_a_wait_at_once(self):
+        stop_flag = [False]
+        asyncio.get_running_loop().call_later(0.05, stop_flag.__setitem__, 0, True)
+        await asyncio.wait_for(run._pause(3600, stop_flag), timeout=5)
 
 
 if __name__ == "__main__":

@@ -101,7 +101,7 @@ class RefusedCredentialTest(unittest.IsolatedAsyncioTestCase):
     async def test_an_error_that_can_pass_is_waited_out(self):
         for transient in ('API Error: 529 {"type":"error","error":{"type":"overloaded_error"}}',
                           "API Error: 500 Internal server error", "Connection error.", "", "You've hit your usage limit"):
-            self.assertEqual(await self.session(transient), (None, False), transient)
+            self.assertEqual(await self.session(transient), False, transient)
 
     def test_only_the_providers_refusal_of_the_credential_counts(self):
         self.assertFalse(run.credential_refused(None))

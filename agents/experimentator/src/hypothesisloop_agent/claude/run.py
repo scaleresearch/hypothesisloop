@@ -86,6 +86,7 @@ _FILE_TOOLS_NOTE = "\n\nWrite and Edit refuse an existing file you have not open
 
 def _log_message(message, agent: str) -> None:
     """Prints the activity lines to stdout, notes what the agent is doing now and logs the rest."""
+    global _rate_limit
     for line in activity.lines(message, agent, waited=_progress.waited()):
         print(line, flush=True)
     if doing := activity.doing(message) or _composing.doing(message):
@@ -96,11 +97,26 @@ def _log_message(message, agent: str) -> None:
             message.subtype, message.num_turns, message.total_cost_usd, message.stop_reason,
         )
     elif isinstance(message, RateLimitEvent):
-        info = message.rate_limit_info
+        info = _rate_limit = message.rate_limit_info
         log.info(
             "rate_limit: status=%s type=%s utilization=%s resets_at=%s",
             info.status, info.rate_limit_type, info.utilization, info.resets_at,
         )
+        _progress.rate_limit(progress.rate_limit_line(info.status, info.rate_limit_type, info.utilization, info.resets_at))
+
+
+# The model provider's rate limit as the CLI last said it, for the whole account: a subagent's
+# call that was refused refuses the agent's own, and the CLI says each change once.
+_rate_limit = None
+
+
+def _refused_until() -> float | None:
+    """When the model provider's limit resets, while it refuses this account's calls. None while
+    it takes them, or when it said no reset time."""
+    info = _rate_limit
+    if info is None or info.status != "rejected" or not info.resets_at or info.resets_at <= time.time():
+        return None
+    return float(info.resets_at)
 
 
 def _updates_hook(setup: core.RunSetup, watch_env: dict[str, str], handing: asyncio.Lock):
@@ -260,10 +276,35 @@ def _remove_file(path: str) -> None:
 _RECONNECT_BACKOFF_INITIAL_S = 30
 _RECONNECT_BACKOFF_MAX_S = 900
 
-# Anthropic's stated rate-limit windows top out at 7 days; cap how long we'll sleep on a single
-# resets_at read in case of a bogus/far-future timestamp, and re-check state after waking rather
-# than trusting one read for arbitrarily long.
-_MAX_SINGLE_SLEEP_S = 3600
+# An agent the model provider refuses waits until the reset time the provider gave, and its
+# windows top out at 7 days. Each attempt before that would be one more refused turn in the session.
+_MAX_LIMIT_WAIT_S = 7 * 86400
+# Said first to the session that follows a wait for the limit, until a turn there has ended well.
+_LIMIT_WAITED = ("The model provider refused your calls from {since} UTC, its usage limit reached, and you were "
+                 "paused until it reset. Jobs on the platform ran on meanwhile; any subagent of yours stopped. "
+                 "Look at the state of your jobs and hypotheses with hl before you go on.")
+_limit_since: float | None = None
+
+
+async def _pause(seconds: float, stop_flag: list) -> None:
+    """Sleeps for seconds, or until a stop: a machine told to stop exits within a second."""
+    deadline = time.monotonic() + seconds
+    while not stop_flag[0] and (left := deadline - time.monotonic()) > 0:
+        await asyncio.sleep(min(left, 1.0))
+
+
+async def _wait_out_limit(resets_at: float, stop_flag: list) -> None:
+    """Waits until the model provider's limit resets, saying so as what the agent is doing. The
+    process stays up and its progress beats on, so the wait spends none of its restarts."""
+    global _limit_since
+    _limit_since = _limit_since or time.time()
+    wait_s = max(1.0, min(resets_at - time.time(), _MAX_LIMIT_WAIT_S))
+    kind = getattr(_rate_limit, "rate_limit_type", None) or "usage"
+    until = time.strftime("%Y-%m-%d %H:%M", time.gmtime(resets_at))
+    log.warning("the model provider refuses calls (%s limit): waiting %.0fs until it resets at %s UTC", kind, wait_s, until)
+    _progress.doing(f"paused until {until} UTC: the model provider's {kind} limit is reached")
+    await _pause(wait_s, stop_flag)
+
 
 # Claude Code normally auto-compacts near its model-dependent context limit, but that path does
 # not fire reliably for this SDK's long-lived sequence of query()/receive_response() calls (the
@@ -541,7 +582,8 @@ def _first_prompt(setup: core.RunSetup, resume_id: str | None, initial_prompt: s
     draft = core.revising(setup) if resume_id and not initial_prompt else None
     if draft:
         return _revision_prompt(setup, draft)
-    prompt = "\n\n".join(part for part in (initial_prompt or ("Continue where you left off." if resume_id else "Begin."),
+    waited = _LIMIT_WAITED.format(since=time.strftime("%Y-%m-%d %H:%M", time.gmtime(_limit_since))) if _limit_since else ""
+    prompt = "\n\n".join(part for part in (waited, initial_prompt or ("Continue where you left off." if resume_id else "Begin."),
                                              core.baseline_clock(setup)) if part)
     return _new_machine_note(setup.cfg) + "\n\n" + prompt if _on_new_machine else prompt
 
@@ -562,8 +604,9 @@ _on_new_machine = False
 
 
 def _settled_on_this_machine() -> None:
-    global _on_new_machine
+    global _on_new_machine, _limit_since
     _on_new_machine = False
+    _limit_since = None
 
 
 def _restore_session(setup: core.RunSetup) -> None:
@@ -811,11 +854,11 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                             stop_flag: list,
                             initial_prompt: str | None = None,
                             on_good_turn=lambda: None,
-                            ) -> tuple[float | None, bool]:
+                            ) -> bool:
     """Runs one ClaudeSDKClient connection until it ends (real stop, error, or rate limit).
 
-    Returns (rate-limit reset time, rotated). Rotated means a handoff was written and the next
-    session starts fresh from it. The session id and the handoff live on disk, see _restart_state.
+    Returns whether it rotated: a handoff was written and the next session starts fresh from
+    it. A rate limit is read by the run loop from _refused_until. The session id and the handoff live on disk, see _restart_state.
     """
     cfg = setup.cfg
     watch_env = updates.watch_env(cfg.api_url, cfg.token, setup.statedir)
@@ -853,8 +896,6 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                "PostToolUseFailure": [_UNDELIVERED_MATCHER]},
     )
 
-    rate_limited_resets_at: float | None = None
-
     def stopped() -> bool:
         return stop_flag[0]
 
@@ -891,8 +932,6 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                     _note_background(message, background)
                     if isinstance(message, AssistantMessage) and message.usage and not message.parent_tool_use_id:
                         context_tokens = _context_tokens(message.usage)
-                    if isinstance(message, RateLimitEvent) and message.rate_limit_info.status == "rejected":
-                        rate_limited_resets_at = message.rate_limit_info.resets_at
                     if isinstance(message, ResultMessage):
                         got_result = True
                         turn_is_error = message.is_error
@@ -914,12 +953,13 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             if got_result:
                 await _store_session(setup)
 
-            if got_result and not rate_limited_resets_at and await over():
-                return None, False
+            # A refused agent can take no turn, the last one included: the run loop waits.
+            if refused_until := _refused_until():
+                log.info("stopping session: the model provider refuses calls until %s", refused_until)
+                return False
 
-            if rate_limited_resets_at:
-                log.info("stopping session: rate-limited, resets_at=%s", rate_limited_resets_at)
-                return rate_limited_resets_at, False
+            if got_result and await over():
+                return False
 
             if not got_result:
                 # The stream ended without a ResultMessage — typically the CLI process itself
@@ -928,14 +968,14 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 # reason to stop the whole agent: a quota outage must not end the run, it must
                 # pause it.
                 log.warning("stream ended without a ResultMessage — treating as transient")
-                return None, False
+                return False
 
             if overflowed:
                 # The session no longer fits and cannot write its own handoff: the next one starts
                 # fresh from what the agent last wrote, after the usual reconnect backoff.
                 log.warning("the session overflowed its context: starting a fresh one from its last messages")
                 await _rotate(setup, _overflow_handoff(resume_id), resume_id)
-                return None, False
+                return False
 
             if turn_is_error:
                 # is_error=True with subtype="success" is the CLI's signal for an underlying
@@ -945,7 +985,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 # broken session as an idle agent. Route it through the same backoff as a
                 # transient error instead.
                 log.warning("turn completed with an underlying error (is_error) — treating as transient")
-                return None, False
+                return False
 
             transcript_bytes = _transcript_bytes(resume_id)
             if context_tokens >= rotate_at or transcript_bytes >= _TRANSCRIPT_ROTATION_BYTES:
@@ -955,13 +995,13 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 handoff_result = await _answer(client, setup, _COMPACTION_PROMPT)
                 if not handoff_result or handoff_result.is_error:
                     log.warning("context handoff failed — preserving old session for retry")
-                    return None, False
+                    return False
                 handoff = (handoff_result.result or "").strip()
                 if not handoff:
                     log.warning("context handoff was empty — preserving old session for retry")
-                    return None, False
+                    return False
                 await _rotate(setup, handoff, resume_id)
-                return None, True
+                return True
 
             # The agent ended its turn. With no job of its own queued or running and nothing in the
             # background its wait waits for nothing: it is told so at once, and not again until an
@@ -991,7 +1031,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             # A batch that comes with the end of the run, the close among its events, opens the
             # last turn rather than a turn of its own that the stop then cuts short.
             if await over():
-                return None, False
+                return False
             if told:
                 async with handing:
                     # A drain since the batch was taken belongs to a turn under way, which is
@@ -1110,14 +1150,14 @@ async def _run_until_stopped(setup: core.RunSetup, model: str, stop_flag: list) 
 
         resume_id, initial_prompt = _restart_state(setup)
         try:
-            resets_at, rotated = await _run_one_session(
+            rotated = await _run_one_session(
                 setup, model, resume_id, stop_flag, initial_prompt, reset_backoff,
             )
         except Exception as e:
             if not _transport_error(e):
                 raise
             log.warning("session lost its connection to the CLI (%s): reconnecting after backoff", e)
-            resets_at, rotated = None, False
+            rotated = False
         # The CLI has exited here and written all of its transcript. The store at the end of a
         # turn can come before the CLI wrote the turn's last reply, and after a planner's
         # answer or an agent's finish no turn follows to store it.
@@ -1126,14 +1166,13 @@ async def _run_until_stopped(setup: core.RunSetup, model: str, stop_flag: list) 
         if rotated or core.stop_reason(setup, stop_flag):
             continue
 
-        if resets_at:
-            sleep_s = max(1.0, min(resets_at - time.time(), _MAX_SINGLE_SLEEP_S))
-            log.info("quota/rate limit hit — sleeping %.0fs before resuming", sleep_s)
-            await asyncio.sleep(sleep_s)
+        # Whatever ended the session, a refused account is waited out until its stated reset.
+        if refused_until := _refused_until():
+            await _wait_out_limit(refused_until, stop_flag)
             reset_backoff()
         else:
             log.info("reconnecting in %ss", backoff_s)
-            await asyncio.sleep(backoff_s)
+            await _pause(backoff_s, stop_flag)
             backoff_s = min(backoff_s * 2, _RECONNECT_BACKOFF_MAX_S)
 
 
