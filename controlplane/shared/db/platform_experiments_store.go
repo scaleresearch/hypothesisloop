@@ -141,6 +141,7 @@ SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, 
        ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.repository_url, pe.agent_image, pe.goal, pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason,
        pe.baseline_job_id, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id, pe.repository_error, pe.repository_account,
        pe.duration_hours, pe.started_at, pe.planner_ends_at, pe.coordinator_instance_activity, pe.coordinator_instance_activity_at,
+       pe.status = 'open' AND NOT ` + coordinatorWantedSQL + `,
        (SELECT planner.instance_activity FROM experiment_signups planner WHERE ` + plannerOfDraft + `),
        (SELECT planner.instance_activity_at FROM experiment_signups planner WHERE ` + plannerOfDraft + `)
 FROM platform_experiments pe
@@ -168,7 +169,7 @@ WHERE id = $1`
 		&pe.Goal, &createdBy.Kind, &createdBy.ID, &proposal, &answeredAt, &pe.DeclinedReason,
 		&pe.BaselineJobID, &pe.JobEstimatedDurationHours, &pe.ClosedAt, &pe.CloseReason, &closedBy.Kind, &closedBy.ID, &pe.RepositoryError, &pe.RepositoryAccount,
 		&pe.DurationHours, &startedAt, &plannerEndsAt, &coordinatorActivity, &coordinatorActivityAt,
-		&plannerActivity, &plannerActivityAt,
+		&coordinator.Instance.Waiting, &plannerActivity, &plannerActivityAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -503,8 +504,8 @@ WHERE id = $1 AND status <> 'closed' AND coordinator_reason IS DISTINCT FROM NUL
 // computed under the stale "open" decision would land after admission already used the old value.
 // A mismatch (0 rows affected) means status moved: fail fast rather than silently no-op.
 //
-// The quota of an agent of role baseline is a share of the budget over max_agents, so in an open
-// experiment, where both change, it is written again from the row as patched in the same
+// The quota of an agent of role baseline is a share of the budget, so in an open experiment,
+// where the budget changes, it is written again from the row as patched in the same
 // transaction (allocateBaselineQuota).
 func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus) error {
 	metrics, err := json.Marshal(pe.Metrics)
@@ -545,11 +546,8 @@ WHERE id=$1 AND status=$10`
 }
 
 // reallocateBaselineQuotas writes the quota of every agent of role baseline of pe again, from
-// pe's budget and max_agents.
+// pe's budget.
 func reallocateBaselineQuotas(ctx context.Context, tx pgx.Tx, pe *domain.PlatformExperiment) error {
-	if len(pe.Stages) == 0 {
-		return fmt.Errorf("platform experiment %s has no stages to take the first one's share from", pe.ID)
-	}
 	rows, err := tx.Query(ctx, `
 SELECT agent_id, quota_tier FROM experiment_signups
 WHERE platform_experiment_id = $1 AND role = $2`, pe.ID, string(domain.SignupRoleBaseline))
@@ -565,7 +563,7 @@ WHERE platform_experiment_id = $1 AND role = $2`, pe.ID, string(domain.SignupRol
 		return fmt.Errorf("list baseline agents: %w", err)
 	}
 	for _, h := range holders {
-		if err := allocateBaselineQuota(ctx, tx, pe.ID, h.AgentID, h.Tier, pe.BudgetAcceleratorHours, pe.Stages[0], pe.MaxAgents, pe.DefaultQuotaTier); err != nil {
+		if err := allocateBaselineQuota(ctx, tx, pe.ID, h.AgentID, h.Tier, pe.BudgetAcceleratorHours, pe.DefaultQuotaTier); err != nil {
 			return err
 		}
 	}
@@ -610,13 +608,17 @@ type StartParticipant struct {
 // agent the start gives a share.
 const sharesBudgetSQL = `s.role NOT IN ('` + string(domain.SignupRoleBaseline) + `', '` + string(domain.SignupRolePlanner) + `')`
 
-// startClock starts the clock of a running platform experiment that waits for a researcher's
-// machine, once the machine asked for under name for agentID is reported running: started_at is
-// now and ends_at duration_hours later. It writes nothing for one whose clock runs.
+// wallClockEndSQL is the end of pe's wall clock: duration_hours after its starts_at.
+const wallClockEndSQL = `pe.starts_at + make_interval(secs => pe.duration_hours * 3600)`
+
+// startClock records that a running platform experiment that waits for a researcher's machine
+// has one at work, once the machine asked for under name for agentID is reported running:
+// started_at is now, and it closes at the end of its wall clock. It writes nothing for one that
+// has a researcher at work.
 func (s *PlatformExperimentsStore) startClock(ctx context.Context, platformExpID, agentID, name string) error {
 	if _, err := s.pool.pool.Exec(ctx, `
 UPDATE platform_experiments pe
-SET started_at = NOW(), ends_at = NOW() + make_interval(secs => pe.duration_hours * 3600), updated_at = NOW()
+SET started_at = NOW(), ends_at = `+wallClockEndSQL+`, updated_at = NOW()
 WHERE pe.id = $1 AND pe.status = 'running' AND pe.started_at IS NULL
   AND EXISTS (SELECT 1 FROM experiment_signups s
               WHERE s.platform_experiment_id = pe.id AND s.agent_id = $2 AND s.hosted AND s.instance_name = $3
@@ -629,11 +631,11 @@ WHERE pe.id = $1 AND pe.status = 'running' AND pe.started_at IS NULL
 
 // StartPlatformExperimentTx flips a platform experiment open->running and writes every
 // participating agent's quota and the ladder the run has (domain.RunStages) in one transaction.
-// The run's clock starts once a researcher is at work, so nothing of the time it was open or
-// waited for a machine is taken from it. With a researcher its owner runs that is here:
-// started_at is now and ends_at duration_hours later. With only researchers the platform runs,
-// started_at stays empty until the first one's machine is reported running (startClock), and
-// ends_at is agentsDue from now: the sweep closes one whose machines never came. quotasFor is
+// Its wall clock ran from starts_at and ends duration_hours later whatever the start. With a
+// researcher its owner runs, started_at is now and it closes at that end. With only researchers
+// the platform runs, started_at stays empty until the first one's machine is reported running
+// (startClock), and it closes agentsDue from now, or at that end when sooner: the sweep closes
+// one whose machines never came. quotasFor is
 // called with the signup set read inside that transaction; returning an error rolls the whole
 // thing back, leaving the experiment open and the call safe to retry.
 //
@@ -657,12 +659,12 @@ WITH at_work AS (
     SELECT EXISTS (SELECT 1 FROM experiment_signups s
                    WHERE s.platform_experiment_id = $1 AND NOT s.hosted AND `+sharesBudgetSQL+`) AS already
 )
-UPDATE platform_experiments
+UPDATE platform_experiments pe
 SET status='running', updated_at=NOW(),
     started_at = CASE WHEN at_work.already THEN NOW() END,
-    ends_at = NOW() + make_interval(secs => CASE WHEN at_work.already THEN duration_hours * 3600 ELSE $2 END)
+    ends_at = CASE WHEN at_work.already THEN `+wallClockEndSQL+` ELSE LEAST(NOW() + make_interval(secs => $2), `+wallClockEndSQL+`) END
 FROM at_work
-WHERE id=$1 AND status='open'`, id, agentsDue.Seconds())
+WHERE pe.id=$1 AND pe.status='open'`, id, agentsDue.Seconds())
 	if err != nil {
 		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: claim: %w", err)
 	}

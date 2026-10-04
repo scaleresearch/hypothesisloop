@@ -387,7 +387,7 @@ func TestAMachineOfARunThatEndedIsShownAsStoppedOnceItsWindDownPassed(t *testing
 	if _, err := pool.pool.Exec(ctx, `UPDATE experiment_signups SET instance_name = 'm', instance_state = 'running' WHERE platform_experiment_id = $1`, pe); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET coordinator_hosted = true, coordinator_launcher = $2, coordinator_instance_name = 'm', coordinator_instance_state = 'running' WHERE id = $1`, pe, launcher); err != nil {
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET coordinator_hosted = true, coordinator_launcher = $2, coordinator_instance_name = 'm', coordinator_instance_asked_at = now(), coordinator_instance_state = 'running' WHERE id = $1`, pe, launcher); err != nil {
 		t.Fatal(err)
 	}
 	shown := func() (first, second, coordinator string) {

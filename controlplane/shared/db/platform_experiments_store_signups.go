@@ -78,12 +78,11 @@ func (s *PlatformExperimentsStore) enrol(ctx context.Context, platformExpID stri
 }
 
 // allocateBaselineQuota writes what an agent of role baseline holds while its platform experiment
-// is open: what one researcher holds in the first stage, the first stage's share of the budget
-// over max_agents, in the column its tier names (domain.ApplyQuotaTier). It is written when the
-// agent joins and again whenever the budget or max_agents of the open experiment changes.
-func allocateBaselineQuota(ctx context.Context, tx pgx.Tx, platformExpID, agentID string, tier domain.QuotaTier, budget float64, firstStage domain.Stage, maxAgents int, defaultTier domain.QuotaTier) error {
-	share := domain.StageCredit(budget, firstStage.ReleaseFrac(), nil, nil, maxAgents)
-	guaranteed, burst := domain.ApplyQuotaTier(domain.ResolveQuotaTier(tier, defaultTier), share, 0)
+// is open: half the budget (domain.BaselineShare), in the column its tier names
+// (domain.ApplyQuotaTier). It is written when the agent joins and again whenever the budget of
+// the open experiment changes.
+func allocateBaselineQuota(ctx context.Context, tx pgx.Tx, platformExpID, agentID string, tier domain.QuotaTier, budget float64, defaultTier domain.QuotaTier) error {
+	guaranteed, burst := domain.ApplyQuotaTier(domain.ResolveQuotaTier(tier, defaultTier), domain.BaselineShare(budget), 0)
 	id, err := domain.NewID(domain.AgentQuotaIDPrefix)
 	if err != nil {
 		return err
@@ -106,20 +105,15 @@ func enrolTx(ctx context.Context, tx pgx.Tx, platformExpID string, create []*dom
 	var maxAgents, maxHosted int
 	var coordinatorHosted bool
 	var budget float64
-	var stagesRaw []byte
 	var defaultTier domain.QuotaTier
 	if err := tx.QueryRow(ctx, `
-SELECT pe.status, pe.max_agents, pe.max_hosted, pe.coordinator_hosted, p.org_id, pe.budget_accelerator_hours, pe.stages, pe.default_quota_tier
+SELECT pe.status, pe.max_agents, pe.max_hosted, pe.coordinator_hosted, p.org_id, pe.budget_accelerator_hours, pe.default_quota_tier
 FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
-WHERE pe.id=$1 FOR UPDATE OF pe`, platformExpID).Scan(&status, &maxAgents, &maxHosted, &coordinatorHosted, &orgID, &budget, &stagesRaw, &defaultTier); err != nil {
+WHERE pe.id=$1 FOR UPDATE OF pe`, platformExpID).Scan(&status, &maxAgents, &maxHosted, &coordinatorHosted, &orgID, &budget, &defaultTier); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, ErrSignupClosed
 		}
 		return 0, fmt.Errorf("platform_experiments_store.Signup: lock experiment: %w", err)
-	}
-	var stages []domain.Stage
-	if err := json.Unmarshal(stagesRaw, &stages); err != nil || len(stages) == 0 {
-		return 0, fmt.Errorf("platform_experiments_store.Signup: stages of %s: %v", platformExpID, errors.Join(err, errors.New("want at least one")))
 	}
 	if status != string(domain.PlatformExpOpen) {
 		return 0, ErrSignupClosed
@@ -199,7 +193,7 @@ ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signu
 		if signup.Role != domain.SignupRoleBaseline {
 			continue
 		}
-		if err := allocateBaselineQuota(ctx, tx, platformExpID, signup.AgentID, signup.QuotaTier, budget, stages[0], maxAgents, defaultTier); err != nil {
+		if err := allocateBaselineQuota(ctx, tx, platformExpID, signup.AgentID, signup.QuotaTier, budget, defaultTier); err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: %w", err)
 		}
 	}
@@ -519,16 +513,13 @@ type LauncherAgent struct {
 
 // launcherEndsBySQL is the latest moment platform experiment pe can still have a machine, $2
 // seconds of wind-down included: of a draft the end of its planning, and once its planner
-// answered the moment the planner is kept until, of a running one the end
-// of its run, and of an open one, or a running one whose clock waits for a researcher's machine,
-// the end of the longest run it can still have, which starts at the deadline it has. Once the
-// clock runs it never moves. An open one's moves only when its owner changes starts_at or
-// duration_hours, and a machine rented before that ends at the moment it was rented with.
+// answered the moment the planner is kept until, of an open or running one the end of its wall
+// clock. An open one's moves only when its owner changes starts_at or duration_hours, and a
+// machine rented before that ends at the moment it was rented with.
 const launcherEndsBySQL = `(CASE
             WHEN pe.status = 'closed' THEN pe.closed_at
             WHEN pe.status = 'draft' AND pe.planner_ends_at IS NOT NULL THEN pe.planner_ends_at
-            WHEN pe.status = 'open' OR pe.status = 'running' AND pe.started_at IS NULL
-                THEN pe.ends_at + make_interval(secs => pe.duration_hours * 3600)
+            WHEN pe.status = 'open' OR pe.status = 'running' AND pe.started_at IS NULL THEN ` + wallClockEndSQL + `
             ELSE pe.ends_at END + make_interval(secs => $2))`
 
 // launcherAgentsFrom selects the hosted agents a launcher still has something to do for: those

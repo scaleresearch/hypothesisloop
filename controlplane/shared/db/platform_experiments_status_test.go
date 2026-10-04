@@ -51,29 +51,30 @@ func TestClosingAPlatformExperimentExecutesAgainstARealDatabase(t *testing.T) {
 	}
 }
 
-// A run of one hour once closed end_time_reached while its baseline was still being prepared:
-// its hour counted from the moment it was accepted. The hour counts from the start of the run.
-func TestARunsLengthCountsFromTheMomentItStarts(t *testing.T) {
+// The owner said 20 minutes and the experiment ran 60 without a baseline: the clock waited for
+// the run. Its duration is the whole wall clock from starts_at, and the start moves no end.
+func TestTheDurationIsTheWholeWallClockFromStartsAt(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
-	created := time.Now().UTC().Add(-3 * time.Hour)
-	due := time.Now().UTC().Add(30 * time.Minute).Truncate(time.Microsecond)
+	created := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Microsecond)
 	pe := &domain.PlatformExperiment{
 		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "an hour's run", BudgetAcceleratorHours: 10, MaxAgents: 2,
-		DurationHours: 1, BaselineDueAt: due, Status: domain.PlatformExpOpen,
+		StartsAt: created, DurationHours: 1, Status: domain.PlatformExpOpen,
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
 		Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: created, UpdatedAt: created,
 	}
+	pe.SetClock(90 * time.Minute)
 	if err := pes.CreatePlatformExperiment(ctx, pe, nil, nil); err != nil {
 		t.Fatal(err)
 	}
+	end := created.Add(time.Hour)
 	open, err := pes.GetPlatformExperiment(ctx, pe.ID)
-	if err != nil || !open.EndsAt.IsZero() || !open.StartedAt.IsZero() || !open.BaselineDueAt.Equal(due) || open.DurationHours != 1 {
-		t.Fatalf("open: got = ends %v, started %v, baseline due %v, %v hours, %v, want no end, no start, its baseline deadline and one hour", open.EndsAt, open.StartedAt, open.BaselineDueAt, open.DurationHours, err)
+	if err != nil || !open.EndsAt.Equal(end) || !open.StartedAt.IsZero() || !open.BaselineDueAt.Equal(created.Add(30*time.Minute)) || !open.ClosesAt().Equal(open.BaselineDueAt) {
+		t.Fatalf("open: got = ends %v, started %v, baseline due %v, %v, want an end an hour after starts_at and the baseline due halfway", open.EndsAt, open.StartedAt, open.BaselineDueAt, err)
 	}
 
-	// A researcher its owner runs is at work from the start, so the clock starts with it.
+	// A researcher its owner runs is at work from the start, and the end stays where it was.
 	spawnTestAgents(t, pes, pe.ID, domain.AgentSignup{})
 	before := time.Now().Add(-time.Second)
 	started, _, err := pes.StartPlatformExperimentTx(ctx, pe.ID, time.Hour, func([]StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) { return nil, oneStage, nil })
@@ -81,8 +82,8 @@ func TestARunsLengthCountsFromTheMomentItStarts(t *testing.T) {
 		t.Fatalf("start: got = %v, %v, want started", started, err)
 	}
 	running, err := pes.GetPlatformExperiment(ctx, pe.ID)
-	if err != nil || running.StartedAt.Before(before) || !running.EndsAt.Equal(running.StartedAt.Add(time.Hour)) || !running.BaselineDueAt.IsZero() {
-		t.Fatalf("running: got = started %v, ends %v, baseline due %v, %v, want it started now and ending one hour later", running.StartedAt, running.EndsAt, running.BaselineDueAt, err)
+	if err != nil || running.StartedAt.Before(before) || !running.EndsAt.Equal(end) || !running.BaselineDueAt.IsZero() {
+		t.Fatalf("running: got = started %v, ends %v, baseline due %v, %v, want it started now and ending an hour after starts_at", running.StartedAt, running.EndsAt, running.BaselineDueAt, err)
 	}
 	listed, err := pes.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpRunning)
 	if err != nil {
@@ -101,11 +102,10 @@ func TestARunsLengthCountsFromTheMomentItStarts(t *testing.T) {
 	}
 }
 
-// A run started while its launcher was unreachable: no researcher's machine came up, its 45
-// minutes passed with nobody at work and it closed end_time_reached. The clock of a run whose
-// researchers the platform runs starts when the first one's machine is reported running, the wait
-// is bounded, and one closed waiting says so.
-func TestARunsLengthCountsFromTheFirstResearchersMachineRunning(t *testing.T) {
+// A run started while its launcher was unreachable: no researcher's machine came up and it
+// waited with nobody at work. started_at is when the first researcher's machine is reported
+// running, the wait is bounded and never passes the end, and one closed waiting says so.
+func TestARunWaitsForItsFirstResearchersMachineWithinItsWallClock(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
@@ -146,12 +146,13 @@ func TestARunsLengthCountsFromTheFirstResearchersMachineRunning(t *testing.T) {
 
 	pe, researcher, baseline := start()
 	waiting := read(pe)
-	if !waiting.AwaitsAgents() || !waiting.EndsAt.IsZero() || time.Until(waiting.AgentsDueAt) > agentsDue || time.Until(waiting.AgentsDueAt) < agentsDue-time.Minute {
-		t.Fatalf("started with no machine up: got = started %v, ends %v, agents due %v, want no clock and the machines due in %s", waiting.StartedAt, waiting.EndsAt, waiting.AgentsDueAt, agentsDue)
+	end := waiting.StartsAt.Add(time.Hour)
+	if !waiting.AwaitsAgents() || !waiting.EndsAt.Equal(end) || time.Until(waiting.AgentsDueAt) > agentsDue+time.Second || time.Until(waiting.AgentsDueAt) < agentsDue-time.Minute {
+		t.Fatalf("started with no machine up: got = started %v, ends %v, agents due %v, want no researcher at work, the end an hour after starts_at %v and the machines due in %s", waiting.StartedAt, waiting.EndsAt, waiting.AgentsDueAt, waiting.StartsAt, agentsDue)
 	}
 	agents, err := pes.ListLauncherAgents(ctx, waiting.Coordinator.Launcher, windDown)
-	if err != nil || len(agents) == 0 || !agents[0].EndsBy.Equal(waiting.AgentsDueAt.Add(time.Hour+windDown)) {
-		t.Fatalf("machines rented while it waits: got = %+v, %v, want them bound by the latest end the run can have, %s", agents, err, waiting.AgentsDueAt.Add(time.Hour+windDown))
+	if err != nil || len(agents) == 0 || !agents[0].EndsBy.Equal(end.Add(windDown)) {
+		t.Fatalf("machines rented while it waits: got = %+v, %v, want them bound by its end, %s", agents, err, end.Add(windDown))
 	}
 	observe(pe, baseline, domain.InstanceRunning)
 	observe(pe, researcher, domain.InstanceStarting)
@@ -161,8 +162,8 @@ func TestARunsLengthCountsFromTheFirstResearchersMachineRunning(t *testing.T) {
 	before := time.Now().Add(-time.Second)
 	observe(pe, researcher, domain.InstanceRunning)
 	running := read(pe)
-	if running.StartedAt.Before(before) || !running.EndsAt.Equal(running.StartedAt.Add(time.Hour)) || !running.AgentsDueAt.IsZero() {
-		t.Fatalf("a researcher's machine running: got = started %v, ends %v, agents due %v, want the clock started now for one hour", running.StartedAt, running.EndsAt, running.AgentsDueAt)
+	if running.StartedAt.Before(before) || !running.EndsAt.Equal(end) || !running.AgentsDueAt.IsZero() {
+		t.Fatalf("a researcher's machine running: got = started %v, ends %v, agents due %v, want started now and the end kept", running.StartedAt, running.EndsAt, running.AgentsDueAt)
 	}
 	observe(pe, researcher, domain.InstanceRunning)
 	if again := read(pe); !again.StartedAt.Equal(running.StartedAt) {

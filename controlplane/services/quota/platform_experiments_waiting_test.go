@@ -327,6 +327,28 @@ func TestAResearchersInstanceReadsWaitingUntilThePlatformExperimentStarts(t *tes
 	}
 }
 
+// A researcher of an experiment that closed before its run started read stopped with no reason,
+// as if its machine had failed.
+func TestAResearcherOfAnExperimentClosedBeforeItsRunSaysItNeverLaunchedAndWhy(t *testing.T) {
+	store := newRosterStore(domain.PlatformExpClosed, 5)
+	store.pe.CloseReason = domain.CloseBaselineLimitReached
+	asked := time.Now()
+	store.signups = []domain.AgentSignup{
+		{AgentID: "dana", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{Released: true}},
+		{AgentID: "bo", Role: domain.SignupRoleBaseline, Hosted: true, Instance: &domain.AgentInstance{AskedAt: &asked, Released: true}},
+	}
+	roster, err := newSignupTestService(t, store).roster(context.Background(), "pe-1", store.signups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if why := roster[0].StatusReason; why == nil || why.Reason != "never_launched" || !strings.Contains(why.Message, string(domain.CloseBaselineLimitReached)) || why.WaitsFor != "" {
+		t.Errorf("a researcher whose run never started: got = %+v, want never_launched naming the close_reason and waiting for nobody", why)
+	}
+	if roster[1].StatusReason != nil {
+		t.Errorf("the baseline agent, whose machine ran: got = %+v, want no reason", roster[1].StatusReason)
+	}
+}
+
 // The roster said which machines ran and nothing of what their agents did. Each entry answers
 // what its agent is doing now and since when, and one whose machine says nothing answers none.
 func TestTheRosterAnswersWhatEachHostedAgentIsDoing(t *testing.T) {

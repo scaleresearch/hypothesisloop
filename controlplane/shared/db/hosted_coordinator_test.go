@@ -15,7 +15,7 @@ func createTestPEWithCoordinator(t *testing.T, pool *Pool, launcher string) stri
 	now := time.Now().UTC()
 	pe := &domain.PlatformExperiment{
 		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "coordinated", BudgetAcceleratorHours: 10,
-		MaxAgents: 10, StartsAt: now, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
+		MaxAgents: 10, StartsAt: now, DurationHours: 24, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
 		Stages:    []domain.Stage{{LengthPct: 40, EvictPct: 75}, {LengthPct: 60, EvictPct: 0}},
 		CreatedAt: now, UpdatedAt: now,
@@ -27,9 +27,9 @@ func createTestPEWithCoordinator(t *testing.T, pool *Pool, launcher string) stri
 	return pe.ID
 }
 
-// An open platform experiment can still start as late as its baseline deadline and then runs its
-// whole length, so that is what bounds a machine rented while it is open. A running one ends at
-// its end time.
+// An open platform experiment ends duration_hours after its starts_at, measuring the baseline
+// included, so that is what bounds a machine rented while it is open. A running one ends at its
+// end time.
 func TestAMachineIsBoundByTheLatestEndItsPlatformExperimentCanStillHave(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
@@ -39,7 +39,10 @@ func TestAMachineIsBoundByTheLatestEndItsPlatformExperimentCanStillHave(t *testi
 	spawnTestAgents(t, pes, pe, domain.AgentSignup{Hosted: true, Launcher: launcher, Flavor: "generalist", Role: domain.SignupRoleBaseline})
 	const windDown = 2 * time.Minute
 	deadline := time.Now().UTC().Add(3 * time.Hour).Truncate(time.Second)
-	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET ends_at = $2, duration_hours = 5 WHERE id = $1`, pe, deadline); err != nil {
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET starts_at = $2, ends_at = $2, duration_hours = 5, coordinator_reason = 'baseline_required' WHERE id = $1`, pe, deadline); err != nil {
+		t.Fatal(err)
+	}
+	if err := pes.AskInstance(ctx, pe, "", "c", "launch-1"); err != nil {
 		t.Fatal(err)
 	}
 	bounds := func() (agent, coordinator time.Time) {
@@ -55,14 +58,14 @@ func TestAMachineIsBoundByTheLatestEndItsPlatformExperimentCanStillHave(t *testi
 		return agents[0].EndsBy, coordinators[0].EndsBy
 	}
 	if agent, coordinator := bounds(); !agent.Equal(deadline.Add(5*time.Hour+windDown)) || !coordinator.Equal(agent) {
-		t.Fatalf("open: bounds = %s and %s, want the baseline deadline %s, 5h of run and the wind-down", agent, coordinator, deadline)
+		t.Fatalf("open: bounds = %s and %s, want starts_at %s, its 5h and the wind-down", agent, coordinator, deadline)
 	}
 	setPEStatus(t, pool, pe, domain.PlatformExpRunning, 0)
 	if agent, coordinator := bounds(); !agent.Equal(deadline.Add(windDown)) || !coordinator.Equal(agent) {
 		t.Fatalf("running: bounds = %s and %s, want the end time %s and the wind-down", agent, coordinator, deadline)
 	}
 	setPEStatus(t, pool, pe, domain.PlatformExpClosed, time.Minute)
-	if agent, coordinator := bounds(); !coordinator.Equal(agent) || time.Until(agent) > windDown-time.Minute || time.Until(agent) < windDown-2*time.Minute {
+	if agent, coordinator := bounds(); !coordinator.Equal(agent) || time.Until(agent) > windDown-time.Minute+time.Second || time.Until(agent) < windDown-2*time.Minute {
 		t.Fatalf("closed a minute ago: bounds = %s and %s, want the wind-down after the close", agent, coordinator)
 	}
 }
@@ -108,8 +111,26 @@ func TestAHostedCoordinatorIsStoredReadAndListedOnlyWhereItIsOne(t *testing.T) {
 		}
 		return out
 	}
+	if out := listed(); len(out) != 0 {
+		t.Fatalf("open, its baseline measured with nothing for the coordinator: listed = %+v, want none", out)
+	}
+	if got, err := pes.GetPlatformExperiment(ctx, pe); err != nil || got.Coordinator.Instance.Shown() != domain.InstanceWaiting {
+		t.Fatalf("open, not wanted yet: coordinator = %+v, %v, want its instance waiting", got.Coordinator, err)
+	}
+	if err := pes.TellCoordinator(ctx, pe, "baseline_required"); err != nil {
+		t.Fatal(err)
+	}
 	if out := listed(); len(out) != 1 || out[0].PlatformExperimentID != pe || out[0].Model != "model-1" || out[0].Ending {
-		t.Fatalf("open: listed = %+v", out)
+		t.Fatalf("open, waiting for its coordinator: listed = %+v", out)
+	}
+	if err := pes.AskInstance(ctx, pe, "", "c", "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := pes.TellCoordinator(ctx, pe, ""); err != nil {
+		t.Fatal(err)
+	}
+	if out := listed(); len(out) != 1 {
+		t.Fatalf("open, asked for and no longer waited for: listed = %+v, want it kept", out)
 	}
 	setPEStatus(t, pool, pe, domain.PlatformExpRunning, 0)
 	if out := listed(); len(out) != 1 || out[0].Ending {
@@ -161,8 +182,8 @@ func TestAPlatformExperimentIsCreatedWithItsAgentsOrNotAtAll(t *testing.T) {
 	if err != nil || len(wanted) != 1 || wanted[0].AgentID != agents[0].ID {
 		t.Fatalf("the launcher is asked for %+v, %v, want the baseline agent's machine from the create on", wanted, err)
 	}
-	if quota, err := pes.GetAgentQuota(ctx, agents[0].ID, pe.ID); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 0.8 {
-		t.Fatalf("the baseline agent's quota = %+v, %v, want what one researcher holds in the first stage, 0.8", quota, err)
+	if quota, err := pes.GetAgentQuota(ctx, agents[0].ID, pe.ID); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 3 {
+		t.Fatalf("the baseline agent's quota = %+v, %v, want half the budget, 3", quota, err)
 	}
 	if joined, err := pes.ListAgentSignups(ctx, pe.ID); err != nil || len(joined) != 1 || joined[0].Role != domain.SignupRoleBaseline {
 		t.Fatalf("joined = %+v, %v, want the baseline agent alone", joined, err)

@@ -52,14 +52,15 @@ type JoinedAgent struct {
 	domain.AgentSignup
 	// StatusReason is why the agent is not at work yet: its platform experiment is open and has
 	// not started, or its machine is asked for and not running.
-	StatusReason *domain.StatusReason `json:"status_reason,omitempty" doc:"Why the agent is not at work yet. On an agent that waits for its open platform experiment to start, every one but those of role baseline: reason is the platform experiment's own (baseline_measuring, baseline_required and the others of its status_reason), and message says the agent takes no turn and, when the platform runs it, has no machine asked for until the start. Its instance reads waiting until then. On a hosted agent whose machine is asked for and not running yet, its instance reading requested or starting: instance_starting, and message says how long ago the machine was asked for. That is a start in progress and no failure. Such an agent whose launcher has not asked for its machines for a minute: launcher_unreachable, and message names the launcher and how long ago it last asked."`
+	StatusReason *domain.StatusReason `json:"status_reason,omitempty" doc:"Why the agent is not at work yet. On an agent that waits for its open platform experiment to start, every one but those of role baseline: reason is the platform experiment's own (baseline_measuring, baseline_required and the others of its status_reason), and message says the agent takes no turn and, when the platform runs it, has no machine asked for until the start. Its instance reads waiting until then. On a hosted agent whose machine is asked for and not running yet, its instance reading requested or starting: instance_starting, and message says how long ago the machine was asked for. That is a start in progress and no failure. Such an agent whose launcher has not asked for its machines for a minute: launcher_unreachable, and message names the launcher and how long ago it last asked. On an agent that waited for the start of a platform experiment that closed before its run started, and had no machine asked for it: never_launched, with no waits_for, and message gives the close_reason and why it closed. Its instance reads stopped with no end_reason."`
 	Token        string               `json:"token,omitempty"`
 }
 
 // roster is signups as the API answers them. In an open platform experiment a researcher's
 // machine is not asked for, and reading requested it was taken for a launch that failed: each
-// agent that waits for the start says so, and for what, and its instance reads waiting. A machine
-// that is asked for and not running yet says that too (instanceStarting), in any status.
+// agent that waits for the start says so, and for what, and its instance reads waiting. Once it
+// closed before the start, each says it never launched and why (neverLaunched). A machine that is
+// asked for and not running yet says that too (instanceStarting), in any status.
 func (s *PlatformExperimentsService) roster(ctx context.Context, platformExpID string, signups []domain.AgentSignup) ([]JoinedAgent, error) {
 	out := make([]JoinedAgent, len(signups))
 	now := time.Now()
@@ -88,6 +89,14 @@ func (s *PlatformExperimentsService) roster(ctx context.Context, platformExpID s
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.roster: %w", err)
+	}
+	if pe != nil && pe.Status == domain.PlatformExpClosed && pe.StartedAt.IsZero() {
+		for i, signup := range signups {
+			if signup.SharesBudget() && (signup.Instance == nil || signup.Instance.AskedAt == nil) {
+				out[i].StatusReason = neverLaunched(pe)
+			}
+		}
+		return out, nil
 	}
 	if pe == nil || pe.Status != domain.PlatformExpOpen {
 		return out, nil
@@ -124,6 +133,13 @@ func (s *PlatformExperimentsService) roster(ctx context.Context, platformExpID s
 
 // reasonInstanceStarting is the status_reason of an agent whose machine is on its way.
 const reasonInstanceStarting = "instance_starting"
+
+// neverLaunched is the status_reason of an agent of the closed pe that waited for a run that
+// never started: no machine was asked for it and it took no turn.
+func neverLaunched(pe *domain.PlatformExperiment) *domain.StatusReason {
+	why := closedReason(pe)
+	return &domain.StatusReason{Reason: "never_launched", Message: "it never took a turn and no machine was asked for it: its platform experiment closed before the run started, with close_reason " + why.Reason + ": " + why.Message}
+}
 
 // instanceStarting is the status_reason of a hosted agent whose run goes on and whose machine is
 // not running yet, nil for every other. Its instance reads requested or starting then, which is
@@ -506,7 +522,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler, graph H
 			"role decides ranking: \"competitor\" (default) is a researcher, whatever its flavor: ranked, cut-eligible and counted against max_agents; \"baseline\" and " +
 			"\"reviewer\" are none of the three, though their jobs are billed and gated identically. " +
 			"409 max_agents_reached for a researcher past max_agents, which counts every researcher that joined, one that finished or was cut included, and no agent of another role and no coordinator. 409 signup_closed once the experiment is no longer open. " +
-			"An agent of role baseline measures the baseline before the start: its machine, when hosted, starts at once, it holds a quota from the moment it joins (the first stage's share of the budget over max_agents, what one researcher holds then, which follows a later change of either while the experiment is open), " +
+			"An agent of role baseline measures the baseline before the start: its machine, when hosted, starts at once, it holds a quota from the moment it joins (half the budget, which no researcher can spend before the start, so a failed measurement can be run again; it follows a later change of the budget while the experiment is open)," +
 			"and its job is the only one an open experiment accepts. It takes no share at the start, and what it spent is taken from the budget before the others' shares are carved.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
@@ -555,7 +571,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler, graph H
 			"A hosted agent carries instance: the name its machine was last asked for under, how many times it exited and was started again, " +
 			"and once it exited with no restart left, stopped=true with exited_at and exit_log, the end of what its command wrote. " +
 			"A hosted agent whose machine is up carries activity {text, at}: what the agent is doing now, in a short sentence its harness writes from the tool call in flight (\"thinking\", \"running hl job submit\", \"waiting for platform updates\"), and when the platform first read that sentence. Only the latest is kept, it is read from the machine about every 15 seconds, and it is absent while no machine is up. The coordinator's is coordinator.activity on GET /platform-experiments/{id}, and a draft's planner's is activity there. " +
-			"While the platform experiment is open, every agent but those of role baseline waits for the start and carries status_reason: the reason the platform experiment is not running yet, and that no machine is asked for the agent before it is. Its instance reads waiting until then. A hosted agent whose machine is asked for and not running yet, its instance reading requested or starting, carries status_reason instance_starting with how long ago the machine was asked for: a start in progress, and a failed one reads stopped with end_reason.",
+			"While the platform experiment is open, every agent but those of role baseline waits for the start and carries status_reason: the reason the platform experiment is not running yet, and that no machine is asked for the agent before it is. Its instance reads waiting until then. One that closed before its run started leaves each of them status_reason never_launched, whose message gives the close_reason and why it closed.A hosted agent whose machine is asked for and not running yet, its instance reading requested or starting, carries status_reason instance_starting with how long ago the machine was asked for: a start in progress, and a failed one reads stopped with end_reason.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body joinedAgentsBody }, error) {

@@ -188,23 +188,23 @@ type PlatformExperiment struct {
 	MaxConcurrentAccelerators *int               `json:"max_concurrent_accelerators,omitempty"`
 	Metrics                   []MetricDefinition `json:"metrics"`                 // metrics jobs must emit; used for ranking
 	ReportIntervalSeconds     int                `json:"report_interval_seconds"` // expected reporting cadence (for silent-eviction guard)
-	// StartsAt is the earliest moment the platform starts the run, zero for as soon as the
-	// baseline is declared. StartedAt is when the run's clock started: the moment a researcher
-	// was first at work in the running platform experiment, which is the start itself when one of
-	// them is run by its owner and otherwise the moment the first machine the platform runs for
-	// one was reported running. The run lasts DurationHours from then: EndsAt is the two added,
-	// written with StartedAt. Neither preparing the baseline nor waiting for a machine takes
-	// anything from the run.
-	StartsAt      time.Time `json:"starts_at" doc:"The earliest moment the platform starts the run. The zero time when none was stated: it starts once its baseline is declared."`
-	StartedAt     time.Time `json:"started_at,omitzero" doc:"When the run's duration began to count: the moment a researcher was first at work in the running platform experiment. That is the moment it became running when a researcher is run by its owner, and otherwise the moment the first researcher's machine was reported running. Absent before, and on a running one that still waits for that machine (status_reason agents_starting)."`
-	DurationHours float64   `json:"duration_hours,omitzero" doc:"How long the run lasts, counted from started_at. Absent on a draft."`
-	// A platform experiment has exactly one moment at which the platform closes it if nobody
-	// does, under the name of what ends then: PlanningEndsAt or ProposalExpiresAt on a draft,
-	// BaselineDueAt while it is open, AgentsDueAt while it runs and its clock has not started,
-	// EndsAt from then. One that closed keeps the one it had. See ClosesAt.
-	EndsAt            time.Time `json:"ends_at,omitzero" doc:"When the run ends and the platform closes it: started_at plus duration_hours. Absent until started_at is set."`
-	AgentsDueAt       time.Time `json:"agents_due_at,omitzero" doc:"On a running platform experiment with no started_at: when the platform closes it, with close_reason agents_not_started, if no researcher's machine is running by then."`
-	BaselineDueAt     time.Time `json:"baseline_due_at,omitzero" doc:"On an open platform experiment: when the platform closes it, with close_reason baseline_limit_reached, if it is not running by then. planning.baseline_limit_minutes after its starts_at, or after it was created or accepted when that is later."`
+	// StartsAt is when the wall clock starts: the moment it was created or accepted, or a later
+	// starts_at stated. It lasts DurationHours from then, measuring the baseline included, and
+	// EndsAt is the two added. StartedAt is the moment a researcher was first at work in the
+	// running platform experiment, which is the start itself when one of them is run by its
+	// owner and otherwise the moment the first machine the platform runs for one was reported
+	// running.
+	StartsAt      time.Time `json:"starts_at" doc:"When its wall clock started: the moment it was created or accepted, or a later starts_at stated. Its baseline is measured from then and its run starts once the baseline is declared. The zero time on a draft."`
+	StartedAt     time.Time `json:"started_at,omitzero" doc:"The moment a researcher was first at work in the running platform experiment. That is the moment it became running when a researcher is run by its owner, and otherwise the moment the first researcher's machine was reported running. Absent before, and on a running one that still waits for that machine (status_reason agents_starting)."`
+	DurationHours float64   `json:"duration_hours,omitzero" doc:"Its whole wall clock, counted from starts_at: measuring the baseline and the run both fit in it. Absent on a draft."`
+	// A platform experiment has exactly one stored moment at which the platform closes it if
+	// nobody does, under the name of what ends then: PlanningEndsAt or ProposalExpiresAt on a
+	// draft, BaselineDueAt while it is open, AgentsDueAt while it runs and no researcher is at
+	// work, EndsAt from then. EndsAt of one that is open or waits for a researcher is StartsAt
+	// plus DurationHours. One that closed keeps the one it had. See ClosesAt.
+	EndsAt            time.Time `json:"ends_at,omitzero" doc:"When it ends and the platform closes it: starts_at plus duration_hours, whatever measuring the baseline took. Present while it is open or running, and on one closed after it ran."`
+	AgentsDueAt       time.Time `json:"agents_due_at,omitzero" doc:"On a running platform experiment with no started_at: when the platform closes it, with close_reason agents_not_started, if no researcher's machine is running by then. Never later than ends_at."`
+	BaselineDueAt     time.Time `json:"baseline_due_at,omitzero" doc:"On an open platform experiment: when the platform closes it, with close_reason baseline_limit_reached, if it is not running by then. planning.baseline_limit_minutes after starts_at, or halfway to ends_at when that is sooner, so the researchers always have at least half of duration_hours."`
 	PlanningEndsAt    time.Time `json:"planning_ends_at,omitzero" doc:"On a draft being planned or revised: when the platform closes it if its planner has answered nothing by then."`
 	ProposalExpiresAt time.Time `json:"proposal_expires_at,omitzero" doc:"On a draft whose planner proposed or declined: when the platform closes it if no person has accepted or revised it by then."`
 	// Activity is what a draft's planner last said it is doing.
@@ -291,8 +291,9 @@ type PlatformExperiment struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// ClosesAt is when the platform closes it if nobody does: EndsAt, AgentsDueAt, BaselineDueAt,
-// PlanningEndsAt or ProposalExpiresAt, whichever it has. It is the one moment stored.
+// ClosesAt is when the platform closes it if nobody does: PlanningEndsAt, ProposalExpiresAt,
+// BaselineDueAt or AgentsDueAt, whichever it has, and EndsAt with none of them. It is the one
+// moment stored.
 func (p *PlatformExperiment) ClosesAt() time.Time {
 	switch {
 	case !p.PlanningEndsAt.IsZero():
@@ -307,8 +308,7 @@ func (p *PlatformExperiment) ClosesAt() time.Time {
 	return p.EndsAt
 }
 
-// AwaitsAgents says the platform experiment runs and its clock has not started: no researcher is
-// at work yet, and none of its duration is counted.
+// AwaitsAgents says the platform experiment runs and no researcher is at work yet.
 func (p *PlatformExperiment) AwaitsAgents() bool {
 	return p.Status == PlatformExpRunning && p.StartedAt.IsZero()
 }
@@ -341,7 +341,8 @@ func (p *PlatformExperiment) SetAnswered(at *time.Time, proposed bool) {
 // with no clock, or closed so, has until then for a researcher's machine to be running. A draft,
 // or one closed as a draft, which was planned from a goal and never got a start, is being planned
 // until its planner answers and waits for a person from then. Any other is open, or closed before
-// it ran, and has until then to be running.
+// it ran, and has until then to be running. One that is open or waits for a researcher ends
+// DurationHours after StartsAt.
 func (p *PlatformExperiment) SetClosesAt(at time.Time) {
 	p.EndsAt, p.AgentsDueAt, p.BaselineDueAt, p.PlanningEndsAt, p.ProposalExpiresAt = time.Time{}, time.Time{}, time.Time{}, time.Time{}, time.Time{}
 	switch {
@@ -356,15 +357,27 @@ func (p *PlatformExperiment) SetClosesAt(at time.Time) {
 	default:
 		p.PlanningEndsAt = at
 	}
+	if p.StartedAt.IsZero() && (p.Status == PlatformExpOpen || p.Status == PlatformExpRunning) {
+		p.EndsAt = p.StartsAt.Add(time.Duration(p.DurationHours * float64(time.Hour)))
+	}
 }
 
-// OpenUntil is the BaselineDueAt of a platform experiment that becomes open, or whose start is
-// set, at now: limit after its start, or after now when it states no start or one already past.
-func (p *PlatformExperiment) OpenUntil(now time.Time, limit time.Duration) time.Time {
-	if p.StartsAt.After(now) {
-		return p.StartsAt.Add(limit)
+// ClockStart is when the wall clock of a platform experiment that opens, or whose starts_at is
+// stated, at now starts: stated, or now when that is later or none is stated.
+func ClockStart(stated, now time.Time) time.Time {
+	if stated.After(now) {
+		return stated
 	}
-	return now.Add(limit)
+	return now
+}
+
+// SetClock sets the moments of an open platform experiment from its StartsAt and DurationHours:
+// it ends DurationHours after StartsAt, and its baseline is due baselineLimit after StartsAt or
+// halfway to its end, whichever is sooner, so its researchers always have half of it.
+func (p *PlatformExperiment) SetClock(baselineLimit time.Duration) {
+	length := time.Duration(p.DurationHours * float64(time.Hour))
+	p.EndsAt = p.StartsAt.Add(length)
+	p.BaselineDueAt = p.StartsAt.Add(min(baselineLimit, length/2))
 }
 
 // StatusReason says why a platform experiment is in its status: a stable code, a sentence for
@@ -391,7 +404,7 @@ const (
 	// BaselineDueAt: nobody declared a baseline for it, or it could not start with one.
 	CloseBaselineLimitReached CloseReason = "baseline_limit_reached"
 	// CloseAgentsNotStarted is a running platform experiment none of whose researchers' machines
-	// was running by its AgentsDueAt. None of its duration was counted.
+	// was running by its AgentsDueAt.
 	CloseAgentsNotStarted CloseReason = "agents_not_started"
 	// ClosePlannerStopped is a draft whose planner's machine was given up on, every restart
 	// spent, before the planner answered.
@@ -437,6 +450,14 @@ const (
 	// request can ask for it.
 	SignupRolePlanner SignupRole = "planner"
 )
+
+// BaselineShare is the quota of an agent of role baseline of a platform experiment whose budget
+// is budget: half of it. No researcher can spend before the run starts, so measuring the
+// baseline draws on the budget they wait for, retries included, and one baseline agent leaves
+// them at least half.
+func BaselineShare(budget float64) float64 {
+	return RoundHours(budget / 2)
+}
 
 // ParseSignupRole resolves a requested role. An empty string is the competitor default, so every
 // caller written before roles existed keeps meaning what it meant. Anything else unrecognized is

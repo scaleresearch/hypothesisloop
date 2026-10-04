@@ -33,7 +33,7 @@ type Proposal struct {
 	Experiment json.RawMessage `json:"experiment" doc:"The experiment as .hypothesisloop/experiment.yaml would state it: name, description, metrics, and optionally report_interval_seconds, stages and default_quota_tier, which left out are the platform's settings, and max_concurrent_accelerators."`
 
 	BudgetAcceleratorHours float64         `json:"budget_accelerator_hours" doc:"Proposed budget of the run: a cap, estimated before anything ran."`
-	DurationHours          float64         `json:"duration_hours" doc:"Proposed length of the run, from its start."`
+	DurationHours          float64         `json:"duration_hours" doc:"Proposed wall clock of the experiment from the accept, measuring the baseline included."`
 	Agents                 []ProposedAgent `json:"agents" doc:"The researchers proposed, one entry each."`
 
 	AcceleratorType domain.AcceleratorType `json:"accelerator_type" doc:"The type the run's jobs are sized for, as GET /resource-catalog/capacity lists it for a cluster this org's jobs can be placed on: an accelerator, or the CPU type for work that needs none, whose budget is then CPU core-hours."`
@@ -221,7 +221,8 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"its budget, its length and its researchers are the ones this body states, whatever the proposal proposed, because an agent wrote the proposal. " +
 			"name, when the body states one, replaces the proposal's name and nothing else of it (422 invalid_experiment for one that is no name). " +
 			"The budget caps everything the platform experiment spends, the baseline included: what measuring it cost is taken from the budget, the rest is shared among the researchers, and an agent's burst hours run on idle capacity and come out of its share, never on top of it. " +
-			"The platform hosts its coordinator, each researcher and one agent of role baseline, created here and named by its role, whose machine is asked for at once beside the coordinator's, and starts_at is now.Its length counts from the start of the run and measuring the baseline takes nothing from it: it is open until baseline_due_at, planning.baseline_limit_minutes from now, and one not running by then is closed with close_reason baseline_limit_reached. Nothing has run yet: the baseline agent measures the baseline, the platform declares the job it leaves when it finishes and starts the run, " +
+			"The platform hosts its coordinator, each researcher and one agent of role baseline, created here and named by its role, whose machine is asked for at once. " + coordinatorWanted + " " +
+			"starts_at is now and ends_at duration_hours later, measuring the baseline included: it is open until baseline_due_at, planning.baseline_limit_minutes from now or halfway to ends_at when that is sooner, and one not running by then is closed with close_reason baseline_limit_reached. Nothing has run yet: the baseline agent measures the baseline, the platform declares the job it leaves when it finishes and starts the run, " +
 			"and no researcher's machine is started before. Where that agent leaves no job, or several, the coordinator adds another or declares one (PATCH /platform-experiments/{id}, baseline_job_id), and status_reason says so. " +
 			"409 invalid_transition for anything but a draft with a proposal; 422 with the proposal's reasons when the stated cost or agents do not pass its check, " +
 			"accelerator_unreachable among them when the proposal's accelerator_type is on no cluster the org's jobs can be placed on now, and no_cluster_for_image when none that has it runs the proposal's image any more; " +
@@ -301,7 +302,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 // how long it lasts and who runs it. The proposal only proposed them, since an agent wrote it.
 type AcceptRequest struct {
 	BudgetAcceleratorHours float64         `json:"budget_accelerator_hours" doc:"The budget of the run: a cap on everything it spends, with what measuring the baseline costs and burst hours included."`
-	DurationHours          float64         `json:"duration_hours" doc:"How long the run lasts from the moment it starts, which is once its baseline is declared."`
+	DurationHours          float64         `json:"duration_hours" doc:"The experiment's whole wall clock from this accept: it ends duration_hours later, and measuring the baseline, due at the latest halfway, is part of it."`
 	Agents                 []ProposedAgent `json:"agents" doc:"The researchers the platform runs, one entry each."`
 	Name                   string          `json:"name,omitempty" doc:"The name of the platform experiment, when the person changed the one proposed. One line, held to the rule of name on POST /platform-experiments. Left out, the proposal's name stands. Nothing else of the proposal's experiment is changed here: its metrics and its brief change by a revision."`
 }
@@ -370,7 +371,8 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	pe.Stages, pe.DefaultQuotaTier = experiment.Stages, domain.QuotaTier(experiment.DefaultQuotaTier)
 	pe.MaxConcurrentAccelerators = experiment.MaxConcurrentAccelerators
 	pe.BudgetAcceleratorHours, pe.MaxAgents, pe.DurationHours = experiment.BudgetAcceleratorHours, experiment.MaxAgents, experiment.DurationHours
-	pe.BaselineDueAt = pe.OpenUntil(now, h.svc.cfg.BaselineLimit)
+	pe.StartsAt = now
+	pe.SetClock(h.svc.cfg.BaselineLimit)
 	pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: h.launch.Launcher, Model: h.launch.DefaultModel}
 
 	caller, err := h.caller(ctx)

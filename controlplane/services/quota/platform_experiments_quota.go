@@ -108,7 +108,7 @@ type AgentQuotaView struct {
 	ID                         string     `json:"id"`
 	AgentID                    string     `json:"agent_id"`
 	PlatformExperimentID       string     `json:"platform_experiment_id"`
-	ShareAcceleratorHours      float64    `json:"share_accelerator_hours" doc:"All the agent may spend, on guaranteed and burst jobs together: its part of the budget released so far."`
+	ShareAcceleratorHours      float64    `json:"share_accelerator_hours" doc:"All the agent may spend, on guaranteed and burst jobs together: its part of the budget released so far. For an agent of role baseline, half the budget, held from the moment it joins for measuring the baseline and running it again."`
 	GuaranteedAcceleratorHours float64    `json:"guaranteed_accelerator_hours" doc:"How much of the share may run at guaranteed priority."`
 	BurstAcceleratorHours      float64    `json:"burst_accelerator_hours" doc:"How much of the share may run at burst priority, on idle capacity. Burst hours are part of the share and never on top of it."`
 	UsedGuaranteedAccH         float64    `json:"used_guaranteed_acch" doc:"Spent at guaranteed priority, with a job that has not started at its estimate and a running one at what it has spent so far."`

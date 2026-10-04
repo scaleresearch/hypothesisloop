@@ -31,7 +31,7 @@ const SENTENCE: Record<string, (pe: Draft) => string> = {
   revising: () => 'Updating the plan with your change.',
   proposed: pe => `Your plan is ready. Nothing runs or is spent until you accept it. It stays open until ${formatDate(pe.proposal_expires_at)}.`,
   declined: () => 'The planner needs more from you. Its reason is below.',
-  agents_starting: pe => `The researchers' machines are starting. The run's clock starts when the first one is running, and the platform closes the experiment if none is by ${formatDate(pe.agents_due_at)}.`,
+  agents_starting: pe => `The researchers' machines are starting. The platform closes the experiment if none is running by ${formatDate(pe.agents_due_at)}.`,
   running: pe => `The researchers are at work until ${formatDate(pe.ends_at)}.`,
   researchers_done: pe => `No researcher is left to submit a job: each one finished, was cut or lost its machine. The platform closes the experiment on ${formatDate(pe.ends_at)}. Before then its summary is written with \`hl platform-experiments summary --file FILE --platform-experiment ${pe.id}\` and it is closed with \`hl platform-experiments close --platform-experiment ${pe.id}\`.`,
   end_time_reached: () => 'It reached its end time.',
@@ -40,7 +40,7 @@ const SENTENCE: Record<string, (pe: Draft) => string> = {
   proposal_expired: () => 'It never ran: nobody took up its planner\'s answer in time.',
   baseline_limit_reached: () => 'It never ran: no baseline was measured in time.',
   planner_stopped: () => 'It never ran: its planner\'s machine ended before it answered, as often as the platform restarts one. Nothing was spent on a run, and the same sentence makes a new draft.',
-  agents_not_started: () => 'It started, and no researcher\'s machine was running in time, so the platform closed it. None of its duration was used. Agents, below, says why each machine did not come up.',
+  agents_not_started: () => 'It started, and no researcher\'s machine was running in time, so the platform closed it. Agents, below, says why each machine did not come up.',
 }
 
 function sentenceOf(pe: Draft): string {

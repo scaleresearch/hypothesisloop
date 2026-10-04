@@ -23,14 +23,25 @@ type LauncherCoordinator struct {
 	EndsBy time.Time
 }
 
+// coordinatorAskedSQL says the machine of pe's hosted coordinator was asked for at least once.
+const coordinatorAskedSQL = `pe.coordinator_instance_asked_at IS NOT NULL`
+
+// coordinatorWantedSQL says pe, open or running, has work for its hosted coordinator: its run
+// started, or it waits for the coordinator (coordinator_reason, TellCoordinator). While its
+// baseline is measured nobody needs it, and its machine would idle. Once asked for, the machine
+// is kept until the close, so a reason that clears never cuts a turn short.
+const coordinatorWantedSQL = `(pe.status = 'running' OR pe.coordinator_reason IS NOT NULL OR ` + coordinatorAskedSQL + `)`
+
 // launcherCoordinatorsWhere selects the platform experiments whose coordinator a launcher still
-// has something to do for: open or running ones, and those closed less than $2 seconds ago, on
-// the database's clock. A stopped coordinator is among them, as a stopped agent is. None is while
-// the platform still creates the repository (awaitsRepository).
+// has something to do for: open or running ones that want it (coordinatorWantedSQL), and those
+// closed less than $2 seconds ago whose coordinator's machine was asked for, on the database's
+// clock. A stopped coordinator is among them, as a stopped agent is. None is while the platform
+// still creates the repository (awaitsRepository).
 const launcherCoordinatorsWhere = `
 FROM platform_experiments pe
 WHERE pe.coordinator_hosted AND pe.coordinator_launcher = $1 AND NOT (` + awaitsRepository + `)
-  AND (pe.status IN ('open', 'running') OR (pe.status = 'closed' AND pe.closed_at > now() - make_interval(secs => $2)))`
+  AND (pe.status IN ('open', 'running') AND ` + coordinatorWantedSQL + `
+       OR pe.status = 'closed' AND pe.closed_at > now() - make_interval(secs => $2) AND ` + coordinatorAskedSQL + `)`
 
 // ListLauncherCoordinators returns the hosted coordinators the launcher's desired state is
 // decided from.

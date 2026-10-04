@@ -114,7 +114,8 @@ type AgentInstance struct {
 	// inputs. A machine asked for under another starts with none spent.
 	Launch string `json:"-"`
 	// State is what the machine is now: "waiting" while none is asked for because the platform
-	// experiment has not started, "requested" while its launcher has not listed the one
+	// experiment has not started, or of a coordinator because its open platform experiment has
+	// not yet waited for it, "requested" while its launcher has not listed the one
 	// asked for, "starting" and "running" as the launcher last reported it, "stopped" once no
 	// further machine is asked for: its restarts ran out (Stopped), or its run is over. It is
 	// worked out from the fields around it when written.
@@ -140,7 +141,8 @@ type AgentInstance struct {
 	// machine and has destroyed it, so what it last reported of it says nothing any more.
 	Released bool `json:"-"`
 	// Waiting means no machine is asked for yet: the agent's platform experiment is open and its
-	// machine is asked for at the start. Whoever reads the roster of an open one sets it.
+	// machine is asked for at the start, or the coordinator's is open and has not needed it yet.
+	// Whoever reads the roster or the coordinator of an open one sets it.
 	Waiting bool `json:"-"`
 }
 

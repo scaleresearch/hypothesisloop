@@ -198,8 +198,8 @@ type CreatePlatformExperimentRequest struct {
 	MaxConcurrentAccelerators *int                      `json:"max_concurrent_accelerators,omitempty"`
 	Metrics                   []domain.MetricDefinition `json:"metrics" required:"false"` // metric keys jobs must emit
 	ReportIntervalSeconds     int                       `json:"report_interval_seconds,omitempty" doc:"How often a job is expected to report. Left out, it is the platform's scheduler.default_report_interval_seconds."`
-	StartsAt                  time.Time                 `json:"starts_at" required:"false" doc:"The earliest moment the platform starts the run. Left out, or past, it starts once the baseline is declared."`
-	DurationHours             float64                   `json:"duration_hours" required:"false" doc:"How long the run lasts, in hours from the moment it starts, at most quota.max_platform_experiment_days. Required: 422 invalid_length without it. The time it is open before, while its baseline is measured, is no part of it."`
+	StartsAt                  time.Time                 `json:"starts_at" required:"false" doc:"When its wall clock starts, for a later start than this create. Left out, or past, it is this create."`
+	DurationHours             float64                   `json:"duration_hours" required:"false" doc:"Its whole wall clock in hours from starts_at, measuring the baseline included, at most quota.max_platform_experiment_days: it ends duration_hours after starts_at. Required: 422 invalid_length without it."`
 	// Stages is the elimination ladder, fixed at creation. Omit to get the platform default
 	// (config stages.default).
 	Stages []domain.Stage `json:"stages,omitempty"`
@@ -261,8 +261,8 @@ type PlatformExperimentPatch struct {
 	MaxConcurrentAccelerators *int                       `json:"max_concurrent_accelerators,omitempty"`
 	Metrics                   *[]domain.MetricDefinition `json:"metrics,omitempty"`
 	ReportIntervalSeconds     *int                       `json:"report_interval_seconds,omitempty"`
-	StartsAt                  *time.Time                 `json:"starts_at,omitempty" doc:"The earliest moment the platform starts the run. Stated, baseline_due_at moves with it."`
-	DurationHours             *float64                   `json:"duration_hours,omitempty" doc:"How long the run lasts from the moment it starts."`
+	StartsAt                  *time.Time                 `json:"starts_at,omitempty" doc:"When its wall clock starts, now when past. Stated, baseline_due_at and ends_at move with it."`
+	DurationHours             *float64                   `json:"duration_hours,omitempty" doc:"Its whole wall clock from starts_at, measuring the baseline included. Stated, baseline_due_at and ends_at move with it."`
 	BaselineJobID             *string                    `json:"baseline_job_id,omitempty" doc:"Declares the baseline: the completed job of an agent of role baseline that measured it, with its finding filed. Taken while the platform experiment is open."`
 }
 

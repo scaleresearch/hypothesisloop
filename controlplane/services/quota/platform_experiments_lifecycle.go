@@ -20,11 +20,11 @@ import (
 
 var ErrPlatformExperimentNotFound = errors.New("platform experiment not found")
 
-// checkLength holds a platform experiment to a run of at most quota.max_platform_experiment_days.
-// Until its end it may rent machines.
+// checkLength holds a platform experiment to a wall clock of at most
+// quota.max_platform_experiment_days. Until its end it may rent machines.
 func (s *PlatformExperimentsService) checkLength(durationHours float64) error {
 	if durationHours <= 0 {
-		return refuseUpdate(422, "invalid_length", "duration_hours is required and must be positive: how long the run lasts from the moment it starts")
+		return refuseUpdate(422, "invalid_length", "duration_hours is required and must be positive: the whole wall clock from starts_at, measuring the baseline included")
 	}
 	if length := time.Duration(durationHours * float64(time.Hour)); length > s.cfg.MaxRunLength {
 		return refuseUpdate(422, "run_too_long", "it would run %.1f days, and a platform experiment runs at most %g days (quota.max_platform_experiment_days): state a shorter duration_hours",
@@ -178,7 +178,7 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		MaxAgents:                 req.MaxAgents,
 		Metrics:                   req.Metrics,
 		ReportIntervalSeconds:     req.ReportIntervalSeconds,
-		StartsAt:                  req.StartsAt,
+		StartsAt:                  domain.ClockStart(req.StartsAt, now),
 		DurationHours:             req.DurationHours,
 		Status:                    domain.PlatformExpOpen,
 		Stages:                    req.Stages,
@@ -196,7 +196,7 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		AgentImage:                req.AgentImage,
 		Actor:                     req.createdBy,
 	}
-	pe.BaselineDueAt = pe.OpenUntil(now, s.cfg.BaselineLimit)
+	pe.SetClock(s.cfg.BaselineLimit)
 	if err := s.store.CreatePlatformExperiment(ctx, pe, req.agents, req.signups); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
 	}
@@ -205,6 +205,9 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	s.wakeRepositories(pe)
 	return pe, nil
 }
+
+// coordinatorWanted says when the platform runs a hosted coordinator's machine (db.coordinatorWantedSQL).
+const coordinatorWanted = "The coordinator's machine is asked for once the experiment runs or its status_reason waits for the coordinator (a baseline agent that gave up, several jobs to choose from), and is kept from then until the experiment closes: while the baseline is measured with nothing for it to do, coordinator.instance reads waiting."
 
 // refuseUpdate is a create or a patch the caller can fix.
 func refuseUpdate(status int, reason, format string, args ...any) error {
@@ -271,11 +274,13 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 		patched.ReportIntervalSeconds = *patch.ReportIntervalSeconds
 	}
 	if patch.StartsAt != nil {
-		patched.StartsAt = *patch.StartsAt
-		patched.BaselineDueAt = patched.OpenUntil(time.Now().UTC(), s.cfg.BaselineLimit)
+		patched.StartsAt = domain.ClockStart(*patch.StartsAt, time.Now().UTC())
 	}
 	if patch.DurationHours != nil {
 		patched.DurationHours = *patch.DurationHours
+	}
+	if patch.StartsAt != nil || patch.DurationHours != nil {
+		patched.SetClock(s.cfg.BaselineLimit)
 	}
 	if patch.MaxConcurrentAccelerators != nil {
 		patched.MaxConcurrentAccelerators = patch.MaxConcurrentAccelerators
@@ -675,7 +680,7 @@ func nextStep(reason string, signups []domain.AgentSignup, reader auth.Principal
 	case own < 0 || signups[own].Role != domain.SignupRoleBaseline:
 		return "Every job you submit is refused until the platform starts the run: prepare, then end your turn, and the start arrives as an update. "
 	case signups[own].FinishedAt == nil && reason == "baseline_measuring":
-		return "Your job is admitted now: measure the baseline with one job (hl job submit), file its summary (hl job summary), then hl platform-experiments agents finish, and the platform declares that job. "
+		return "Your job is admitted now: measure the baseline with one job (hl job submit), file its summary (hl job summary), then hl platform-experiments agents finish, and the platform declares that job. Your quota is half the budget, for the measurement and any rerun of it (hl quota). "
 	}
 	return ""
 }
@@ -694,7 +699,7 @@ func researcherLeft(signups []domain.AgentSignup) bool {
 func runningReason(pe *domain.PlatformExperiment, signups []domain.AgentSignup) *domain.StatusReason {
 	switch {
 	case pe.AwaitsAgents():
-		return &domain.StatusReason{Reason: "agents_starting", Message: "the run has started and none of its duration_hours is counted yet: they count from the moment the first researcher's machine is running, which sets started_at and ends_at. The platform closes it at agents_due_at, with close_reason " + string(domain.CloseAgentsNotStarted) + ", if none is running by then"}
+		return &domain.StatusReason{Reason: "agents_starting", Message: "the run has started and its researchers' machines are starting: the first one running sets started_at. The platform closes it at agents_due_at, with close_reason " + string(domain.CloseAgentsNotStarted) + ", if none is running by then, and at ends_at in any case"}
 	case !researcherLeft(signups):
 		return &domain.StatusReason{Reason: "researchers_done", Message: fmt.Sprintf("every researcher of platform experiment %s has finished, was cut or lost its machine with no restart left, so nobody is left to submit a job and the run only waits for its ends_at, when the platform closes it: its coordinator writes the summary with `hl platform-experiments summary --file FILE --platform-experiment %s` and closes it with `hl platform-experiments close --platform-experiment %s`",
 			pe.ID, pe.ID, pe.ID)}
@@ -711,7 +716,7 @@ func closedReason(pe *domain.PlatformExperiment) *domain.StatusReason {
 		domain.CloseProposalExpired:      "no person accepted or revised its planner's answer by proposal_expires_at and the platform closed the draft",
 		domain.ClosePlannerStopped:       "its planner's machine ended before it answered and the platform had restarted it as often as it restarts one, so it closed the draft: the planner's instance in the roster says how the last machine ended (end_reason, exit_log). Nothing was spent on a run, and the same goal makes a new draft",
 		domain.CloseBaselineLimitReached: "it was not running by baseline_due_at and the platform closed it: no baseline was declared, or the start still waited for something",
-		domain.CloseAgentsNotStarted:     "it started and no researcher's machine was running by agents_due_at, so the platform closed it. None of its duration_hours was counted and no researcher took a turn: read each agent's instance for why its machine did not come up, and create it again",
+		domain.CloseAgentsNotStarted:     "it started and no researcher's machine was running by agents_due_at, so the platform closed it. No researcher took a turn: read each agent's instance for why its machine did not come up, and create it again",
 		domain.CloseRepositoryNotCreated: "the platform could not create its repository, so none of its machines started and nothing was spent. Create it again, or name a repository. GitHub answered: " + pe.RepositoryError,
 	}
 	if sentence, known := how[pe.CloseReason]; known {

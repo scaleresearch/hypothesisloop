@@ -565,7 +565,7 @@ func (s *draftStore) AcceptDraft(_ context.Context, pe *domain.PlatformExperimen
 			return db.ErrNothingProposed
 		}
 		accepted := *pe
-		accepted.Status, accepted.StartsAt = domain.PlatformExpOpen, time.Now().UTC()
+		accepted.Status = domain.PlatformExpOpen
 		s.created[i] = &accepted
 		s.acceptedAgents, s.acceptedSignups = create, signups
 		for _, signup := range signups {
@@ -621,9 +621,9 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	if pe.BudgetAcceleratorHours != 3 || pe.MaxAgents != 3 {
 		t.Errorf("budget %v for %d agents, want what the person stated (3 and 3), not the proposal's 6 and 2", pe.BudgetAcceleratorHours, pe.MaxAgents)
 	}
-	// Its two hours count from the start of the run. Until then it has the baseline limit.
-	if open := pe.BaselineDueAt.Sub(before); pe.DurationHours != 2 || !pe.EndsAt.IsZero() || open < testSettings.BaselineLimit || open > testSettings.BaselineLimit+time.Minute {
-		t.Errorf("a run of %v hours ending %v, open for %v: want 2 hours with no end yet and the baseline limit to be running", pe.DurationHours, pe.EndsAt, open)
+	// Its two hours are its whole wall clock from the accept, and the baseline has half of them.
+	if pe.StartsAt.Before(before) || pe.DurationHours != 2 || !pe.EndsAt.Equal(pe.StartsAt.Add(2*time.Hour)) || !pe.BaselineDueAt.Equal(pe.StartsAt.Add(time.Hour)) {
+		t.Errorf("starts %v, %v hours ending %v, baseline due %v: want 2 hours from the accept and the baseline due halfway", pe.StartsAt, pe.DurationHours, pe.EndsAt, pe.BaselineDueAt)
 	}
 	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Launcher != "main" || pe.Coordinator.Model != "platform-model-1" {
 		t.Errorf("coordinator %+v, want one the platform hosts", pe.Coordinator)

@@ -40,6 +40,7 @@ func hostedThings(t *testing.T, pool *Pool) map[string]hostedThing {
 	createTestPE(t, pool, pe, 10)
 	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Hosted: true, Launcher: "main"})[0]
 	coordinated := createTestPEWithCoordinator(t, pool, "main")
+	setPEStatus(t, pool, coordinated, domain.PlatformExpRunning, 0)
 	return map[string]hostedThing{
 		"agent": {pe, agent, func() domain.AgentInstance {
 			t.Helper()

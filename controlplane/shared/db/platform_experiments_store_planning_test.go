@@ -177,6 +177,9 @@ func TestNoMachineIsWantedBeforeTheRepositoryIsRecorded(t *testing.T) {
 	if !awaiting(whole.ID) || coordinators() != 0 {
 		t.Fatalf("a whole experiment without its repository: awaiting %v, %d coordinators wanted, want it awaiting and none", awaiting(whole.ID), coordinators())
 	}
+	if err := pes.TellCoordinator(ctx, whole.ID, "baseline_required"); err != nil {
+		t.Fatal(err)
+	}
 	if err := pes.GiveRepository(ctx, whole.ID, "acme/whole", "https://github.com/acme/whole.git"); err != nil || coordinators() != 1 {
 		t.Fatalf("given its repository: %v, %d coordinators wanted, want its coordinator", err, coordinators())
 	}
@@ -329,7 +332,7 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 	if err := pes.SetProposal(ctx, short, []byte(`{}`), wait, kept); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := pes.GetPlatformExperiment(ctx, short); got.PlannerEndsAt == nil || time.Until(*got.PlannerEndsAt) > 2*time.Minute || time.Until(*got.PlannerEndsAt) < time.Minute {
+	if got, _ := pes.GetPlatformExperiment(ctx, short); got.PlannerEndsAt == nil || time.Until(*got.PlannerEndsAt) > 2*time.Minute+time.Second || time.Until(*got.PlannerEndsAt) < time.Minute {
 		t.Fatalf("proposed two minutes before the planning limit: planner %s kept until %v, want the limit", shortPlanner, got.PlannerEndsAt)
 	}
 
@@ -377,7 +380,8 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents = "accepted", "the brief", 6, researchers
 		pe.Metrics = []domain.MetricDefinition{{Key: "val_loss", Direction: "minimize"}}
 		pe.Stages = []domain.Stage{{LengthPct: 40, EvictPct: 50}, {LengthPct: 60}}
-		pe.EndsAt = time.Now().UTC().Add(4 * time.Hour)
+		pe.StartsAt, pe.DurationHours = time.Now().UTC(), 4
+		pe.SetClock(time.Hour)
 		pe.DefaultQuotaTier = domain.QuotaTierGuaranteed
 		pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: launcher, Model: "model-1"}
 		var agents []*domain.Agent
@@ -478,7 +482,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		t.Fatalf("accepted: got = %+v (coordinator %+v), %v", got, got.Coordinator, err)
 	}
 	if got.StartsAt.IsZero() || time.Since(got.StartsAt) > time.Minute {
-		t.Errorf("starts_at = %v, want now, so that the platform starts it if nobody does", got.StartsAt)
+		t.Errorf("starts_at = %v, want now, the start of its wall clock", got.StartsAt)
 	}
 	if err := pes.AcceptDraft(ctx, pe, nil, nil); err != ErrNotDraft {
 		t.Fatalf("accepting twice: got = %v, want ErrNotDraft", err)
@@ -490,9 +494,9 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	}
 
 	// Accepted, nothing has run. The agent that measures the baseline joined with the accept, so
-	// the launcher is asked for its machine in the pass that asks for the coordinator's, and for
-	// no researcher's yet, and no longer for the planner's. It was named by its role, and holds
-	// what one researcher holds in the first stage: 40 percent of 6 over 3 places.
+	// the launcher is asked for its machine, for no researcher's yet, no longer for the planner's,
+	// and not for the coordinator's, which nothing waits for yet. It was named by its role, and
+	// holds half the budget of 6.
 	baseline := agents[3]
 	if baseline.Name != "Baseline 1" {
 		t.Fatalf("the baseline agent is named %q, want Baseline 1", baseline.Name)
@@ -502,11 +506,11 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		t.Fatalf("the launcher is asked for %+v, %v, want the baseline agent alone", wanted, err)
 	}
 	coordinators, err := pes.ListLauncherCoordinators(ctx, launcher, time.Minute)
-	if err != nil || len(coordinators) != 1 || coordinators[0].PlatformExperimentID != id {
-		t.Fatalf("coordinators = %+v, %v", coordinators, err)
+	if err != nil || len(coordinators) != 0 {
+		t.Fatalf("coordinators = %+v, %v, want none while the baseline is measured", coordinators, err)
 	}
-	if quota, err := pes.GetAgentQuota(ctx, baseline.ID, id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 0.8 || quota.BurstAcceleratorHours != 0 {
-		t.Fatalf("the baseline agent's quota = %+v, %v, want 0.8 guaranteed accelerator-hours", quota, err)
+	if quota, err := pes.GetAgentQuota(ctx, baseline.ID, id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 3 || quota.BurstAcceleratorHours != 0 {
+		t.Fatalf("the baseline agent's quota = %+v, %v, want 3 guaranteed accelerator-hours", quota, err)
 	}
 	// Every machine the draft may have is taken, so a second baseline agent has none while the
 	// first holds its own, and takes its place once the first's machine stopped for good.
@@ -543,8 +547,8 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	if err != nil || !started || len(quotas) != 3 {
 		t.Fatalf("start: started %v with %d quotas, %v, want the 3 researchers'", started, len(quotas), err)
 	}
-	if quota, err := pes.GetAgentQuota(ctx, baseline.ID, id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 0.8 {
-		t.Fatalf("the baseline agent's quota after the start = %+v, %v, want the 0.8 it joined with", quota, err)
+	if quota, err := pes.GetAgentQuota(ctx, baseline.ID, id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 3 {
+		t.Fatalf("the baseline agent's quota after the start = %+v, %v, want the 3 it joined with", quota, err)
 	}
 	if wanted, err = pes.ListLauncherAgents(ctx, launcher, time.Minute); err != nil || len(wanted) != 4 {
 		t.Fatalf("the launcher of a running experiment is asked for %d agents, %v, want the 3 researchers and the baseline agent", len(wanted), err)
@@ -564,8 +568,8 @@ func TestABaselineAgentHoldsItsQuotaFromSignupUntilItIsRemoved(t *testing.T) {
 		domain.AgentSignup{Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierBurstOnly, Flavor: "generalist"},
 		domain.AgentSignup{Role: domain.SignupRoleCompetitor, Flavor: "generalist"},
 		domain.AgentSignup{Role: domain.SignupRoleReviewer, Flavor: "generalist"})
-	// 40 percent of 10 over 10 places.
-	for i, want := range [][2]float64{{0.4, 0}, {0, 0.4}} {
+	// Half the budget of 10.
+	for i, want := range [][2]float64{{5, 0}, {0, 5}} {
 		if quota, err := pes.GetAgentQuota(ctx, agents[i], id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != want[0] || quota.BurstAcceleratorHours != want[1] {
 			t.Errorf("baseline agent %d: quota = %+v, %v, want %v guaranteed and %v burst", i, quota, err, want[0], want[1])
 		}
@@ -595,9 +599,10 @@ func TestABaselineAgentHoldsItsQuotaFromSignupUntilItIsRemoved(t *testing.T) {
 	}
 }
 
-// A baseline agent's quota is a share of the budget over max_agents, so it is the share of the
-// open experiment as it stands, whatever it was when the agent joined.
-func TestABaselineAgentsQuotaFollowsTheBudgetAndTheFieldOfAnOpenExperiment(t *testing.T) {
+// A baseline agent held what one researcher holds in the first stage, 1.6 of 8 core-hours, and
+// could not run a failed measurement again while the researchers' budget sat unused. It holds
+// half the budget of the open experiment as it stands, whatever it was when the agent joined.
+func TestABaselineAgentsQuotaIsHalfTheBudgetOfAnOpenExperiment(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
@@ -618,8 +623,7 @@ func TestABaselineAgentsQuotaFollowsTheBudgetAndTheFieldOfAnOpenExperiment(t *te
 			t.Errorf("%s, a researcher: quota = %+v, %v, want none before the start", when, quota, err)
 		}
 	}
-	// 40 percent of 10 over 10 places.
-	held("at signup", 0.4)
+	held("at signup", 5)
 	pe, err := pes.GetPlatformExperiment(ctx, id)
 	if err != nil {
 		t.Fatal(err)
@@ -628,19 +632,19 @@ func TestABaselineAgentsQuotaFollowsTheBudgetAndTheFieldOfAnOpenExperiment(t *te
 	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpOpen); err != nil {
 		t.Fatal(err)
 	}
-	held("with the budget raised to 50", 2)
+	held("with the budget raised to 50", 25)
 	pe.MaxAgents = 4
 	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpOpen); err != nil {
 		t.Fatal(err)
 	}
-	held("with max_agents lowered to 4", 5)
+	held("with max_agents lowered to 4", 25)
 
 	// An update that is refused leaves the quota with the experiment it was refused for.
 	pe.BudgetAcceleratorHours = 1
 	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpRunning); err == nil {
 		t.Fatal("an update checked for a running experiment was written to an open one")
 	}
-	held("after a refused update", 5)
+	held("after a refused update", 25)
 
 	// Running, the shares are what the start and the stage ladder made them.
 	setPEStatus(t, pool, id, domain.PlatformExpRunning, 0)
@@ -648,7 +652,7 @@ func TestABaselineAgentsQuotaFollowsTheBudgetAndTheFieldOfAnOpenExperiment(t *te
 	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpRunning); err != nil {
 		t.Fatal(err)
 	}
-	held("renamed while running", 5)
+	held("renamed while running", 25)
 }
 
 // An agent's token is wound down from the moment it finished, which is read here.

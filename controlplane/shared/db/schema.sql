@@ -1327,4 +1327,11 @@ UPDATE platform_experiments
 SET description = replace(description, 'BASELINE (written by the platform)', 'MEASURED BASELINE (written by the platform from the declared job)')
 WHERE description LIKE '%BASELINE (written by the platform)%';
 
+-- duration_hours is the whole wall clock, from starts_at, measuring the baseline included: an
+-- open or running platform experiment ends duration_hours after its starts_at, which is when it
+-- was created or accepted, or a later one stated. One created with none stated kept the zero
+-- time, and its clock started at its creation, or at started_at where a researcher already works.
+UPDATE platform_experiments SET starts_at = COALESCE(started_at, created_at)
+WHERE status IN ('open', 'running') AND starts_at < '0001-01-02';
+
 COMMIT;

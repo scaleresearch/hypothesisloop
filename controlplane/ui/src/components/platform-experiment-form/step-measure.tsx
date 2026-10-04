@@ -23,7 +23,7 @@ export function StepMeasure({ form, set, locked }: StepProps) {
           <MetricsEditor metrics={form.metrics} onChange={m => set('metrics', m)} />
         )}
       </FieldGroup>
-      <FormField label="Duration (hours)" hint={locked ? LOCKED : 'Counted from the start.'}>
+      <FormField label="Duration (hours)" hint={locked ? LOCKED : 'The whole wall clock, measuring the baseline included.'}>
         <Input type="number" className="w-40" min={0} step="any" value={form.duration_hours} disabled={locked} onChange={e => set('duration_hours', e.target.value)} />
       </FormField>
     </>

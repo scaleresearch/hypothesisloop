@@ -30,14 +30,15 @@ type QuotaConfig struct {
 	DefaultStages []Stage `json:"default_stages"`
 	// DefaultQuotaTier is the default_quota_tier of a platform experiment created without its own.
 	DefaultQuotaTier QuotaTier `json:"default_quota_tier,omitempty"`
-	// MaxRunLength is the longest a platform experiment may run, from the start of its run to its end.
+	// MaxRunLength is the longest wall clock a platform experiment may have, from its starts_at to its end.
 	MaxRunLength time.Duration `json:"max_run_length,omitempty"`
 	// BaselineLimit is how long a platform experiment may stay open before the platform closes
-	// it: the time it has to get its baseline declared and its run started.
+	// it, at most half its duration: the time it has to get its baseline declared and its run
+	// started (PlatformExperiment.SetClock).
 	BaselineLimit time.Duration `json:"baseline_limit,omitempty"`
 	// AgentsDue is how long a started platform experiment whose researchers the platform runs
 	// waits for the first one's machine to be running before the platform closes it: the time
-	// one machine and every restart of it may take to come up.
+	// one machine and every restart of it may take to come up, and never past its end.
 	AgentsDue time.Duration `json:"agents_due,omitempty"`
 	// MaxSubmissionsPerHour caps how many experiments an agent may submit per hour within
 	// a single platform experiment.

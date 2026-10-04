@@ -221,11 +221,12 @@ export interface PlatformExperiment {
   // Accelerators-in-flight (SUBMITTED+RUNNING) this experiment may hold at once. Absent uses the
   // platform default (quota.default_max_concurrent_accelerators).
   max_concurrent_accelerators?: number
-  // The earliest it may start: the zero time when none is stated.
+  // When its wall clock started: created or accepted, or a later time stated. The zero time on a
+  // draft.
   starts_at?: string
-  // The run's own clock. started_at and ends_at are absent until the first researcher is at
-  // work in the running experiment, and ends_at is then started_at plus duration_hours. A draft
-  // has no duration_hours.
+  // duration_hours is the whole wall clock, measuring the baseline included, and ends_at is
+  // starts_at plus duration_hours. started_at is when the first researcher was at work. A draft
+  // has neither.
   started_at?: string
   duration_hours?: number
   ends_at?: string

@@ -67,7 +67,7 @@ func (s *PlatformExperimentsService) launcherUnreachable(ctx context.Context, pe
 			names = append(names, signup.Launcher)
 		}
 	}
-	if pe.Coordinator != nil && !pe.Coordinator.Instance.Stopped && !pe.AwaitsRepository() && (pe.Status == domain.PlatformExpOpen || pe.Status == domain.PlatformExpRunning) {
+	if pe.Coordinator != nil && !pe.Coordinator.Instance.Stopped && !pe.Coordinator.Instance.Waiting && !pe.AwaitsRepository() && (pe.Status == domain.PlatformExpOpen || pe.Status == domain.PlatformExpRunning) {
 		names = append(names, pe.Coordinator.Launcher)
 	}
 	slices.Sort(names)
