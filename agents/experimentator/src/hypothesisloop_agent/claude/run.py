@@ -242,7 +242,8 @@ _COMPACTION_PROMPT = (
     "We must rotate to a fresh session because this session has reached its context budget. "
     "Produce a concise but complete handoff for the next instance of yourself: current platform "
     "experiment state, hypotheses and evidence, actions/results so far, important files or jobs, "
-    "decisions and rejected paths, and the exact next useful steps. Do not do more research or "
+    "decisions and rejected paths, any message from the coordinator or the owner not yet acted on, "
+    "word for word, and the exact next useful steps. Do not do more research or "
     "use tools; output only the handoff."
 )
 

@@ -69,11 +69,14 @@ And for what holds the whole run back:
     Mark it exhausted in a comment on its root child and steer its owner to an untried
     mechanism, published methods first.
 
-Act in the same wake, with the lightest steer that works: a comment on the researcher's
-latest hypothesis with a concrete direction (it is woken by it), a correction of the brief, a
-re-declared baseline, directions reassigned among researchers, and only as the last resort a
-researcher replaced (`hl platform-experiments agents add --hosted --flavor F` once the brief
-fixes what stopped the one before). Each steer names what you saw, by job and hypothesis id.
+Act in the same wake, with the lightest steer that works: a message to the researcher with a
+concrete direction (`hl platform-experiments agents message ID --text T`, or `--all`; it is
+woken by it, and `hl platform-experiments agents messages` shows what you already told whom),
+a correction of the brief, a re-declared baseline, directions reassigned among researchers,
+and only as the last resort a researcher replaced
+(`hl platform-experiments agents add --hosted --flavor F` once the brief fixes what stopped
+the one before). Each steer names what you saw, by job and hypothesis id. Steering goes by
+message; a comment is for a fact on the graph, such as a line marked exhausted.
 What only the owner can fix (capacity, the repository, budget, a refused declaration) goes at
 the top of the summary with the evidence, and in the brief if agents should stop spending on
 it. While time and quota are left, add a researcher in the place of one that finished, was cut

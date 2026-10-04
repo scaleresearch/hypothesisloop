@@ -463,6 +463,16 @@ class FormatTest(unittest.TestCase):
                          "experiment.blocked exp-2 no_cluster_for_image no cluster runs image torch")
         self.assertEqual(updates.event_line(held, ""), f"job.held exp-1 capacity_unavailable {sentence} by agent-a")
 
+    # A coordinator's only steer was a comment on the researcher's latest hypothesis, which put
+    # direction in the lab notebook and reached no researcher without one.
+    def test_a_message_wakes_its_agent_and_is_told_as_what_it_says(self):
+        sent = {"kind": "agent.message", "subject": "agent-a", "value": "coordinator", "detail": "leave the lr line, try warmup",
+                "agent_id": "agent-a", "position": 9, "cursor": 9}
+        self.assertEqual(updates.event_line(sent, "agent-a"), "message from the coordinator: leave the lr line, try warmup")
+        self.assertEqual(updates.event_line(dict(sent, value="owner"), ""), "message to agent-a from the owner: leave the lr line, try warmup")
+        self.assertIn("agent.message", updates.WAKES["agent"])
+        self.assertNotIn("agent.message", updates.WAKES["coordinator"])
+
 
 
 if __name__ == "__main__":

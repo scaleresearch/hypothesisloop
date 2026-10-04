@@ -36,16 +36,19 @@ _DRAIN_S = 5
 # baseline is the bar every researcher is set against from then on), that the run closed or that its
 # status_reason began to wait for the coordinator (platform_experiment.status, sent again with
 # the reason as its detail, as when the last researcher's machine stops for good). An agent has
-# to learn the same of its own jobs ending. Everything else is read when next acting. A kind
-# wakes only for what its reader can act on: a job held for a summary is cleared by its agent
+# to learn the same of its own jobs ending, and at once of a message the coordinator or the owner
+# sent it (agent.message), which wakes no coordinator: its stream echoes the ones it sent.
+# Everything else is read when next acting. A kind wakes only for what its reader can act on: a job held for a summary is cleared by its agent
 # alone, so it wakes no coordinator.
 WAKES = {
     "coordinator": ("agent.finished", "agent.idle", "experiment.blocked", "job.held!=summary_gate", "stage.boundary", "comment.new",
                     "platform_experiment.status", "platform_experiment.description", "platform_experiment.baseline"),
     "agent": ("experiment.status", "experiment.blocked", "job.held", "job.underperforming", "agent.cut", "agent.idle",
-              "stage.boundary", "comment.new", "platform_experiment.status", "platform_experiment.description",
+              "agent.message", "stage.boundary", "comment.new", "platform_experiment.status", "platform_experiment.description",
               "platform_experiment.baseline", "platform_experiment.revision"),
 }
+# A message to one agent from the coordinator or the owner, told as what it says.
+MESSAGE = "agent.message"
 # A person asked a draft's planner to change its answer. The event is a pointer: what was asked is
 # read from the draft (core.revising), and whoever hands a batch over says it in place of the event.
 REVISION = "platform_experiment.revision"
@@ -262,6 +265,9 @@ def event_line(event: dict, agent_id: str) -> str:
     """One compact line per event: kind, subject, value, detail, the machine an ended job ran on,
     and who did it when not the agent. The detail of a queue reason is its sentence, and that of
     a job evicted, requeued or failed its reason, as a code or as code: sentence."""
+    if event.get("kind") == MESSAGE:
+        to = "" if event.get("agent_id") == agent_id else f" to {event.get('subject', '')}"
+        return f"message{to} from the {event.get('value', '')}: {event.get('detail', '')}"
     parts = [event.get("kind", ""), event.get("subject", ""), event.get("value", ""), event.get("detail", "")]
     if event.get("machine"):
         parts.append(f"on {event['machine']}")
