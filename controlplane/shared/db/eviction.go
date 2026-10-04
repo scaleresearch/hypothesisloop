@@ -46,3 +46,17 @@ func (s *Store) ResolveTermination(ctx context.Context, id string, from, to doma
 	}
 	return domain.TerminationWritten, nil
 }
+
+// EndQueuedSettled ends the queued experiment id as to with reason and marks its quota settled in
+// the same statement, so whoever the status change notifies reads the hold already released. The
+// caller writes its final usage first (settlement.Settler.Settle). It says whether the row was
+// still queued.
+func (s *Store) EndQueuedSettled(ctx context.Context, id string, to domain.ExperimentStatus, reason string) (bool, error) {
+	tag, err := s.ExperimentsStore.pool.pool.Exec(ctx, `
+		UPDATE experiments SET status = $2, eviction_reason = $3, not_admitted_reason = NULL, quota_settled_at = NOW(), updated_at = NOW()
+		WHERE id = $1 AND status = 'QUEUED'`, id, string(to), reason)
+	if err != nil {
+		return false, fmt.Errorf("db.EndQueuedSettled: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}

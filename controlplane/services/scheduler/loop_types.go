@@ -68,6 +68,8 @@ type LoopStore interface {
 	// build assigned to one of live (db.EnvironmentsStore.AssignEnvironment).
 	AssignEnvironment(ctx context.Context, key string, live []string, lease time.Duration) (*domain.Environment, error)
 	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
+	// EndQueuedSettled ends a queued job and releases its hold in one write (db.Store.EndQueuedSettled).
+	EndQueuedSettled(ctx context.Context, id string, to domain.ExperimentStatus, reason string) (bool, error)
 }
 
 // LoopQuotaStore handles quota bookkeeping for the loop. Preemption requeues the victim without

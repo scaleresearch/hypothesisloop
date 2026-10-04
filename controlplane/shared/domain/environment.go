@@ -5,9 +5,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/moby/buildkit/frontend/dockerfile/parser"
 )
 
 // EnvironmentFile is the file of an experiment repository that declares the environment its jobs
@@ -28,7 +31,8 @@ const (
 	EnvironmentBuilding EnvironmentState = "building"
 	EnvironmentReady    EnvironmentState = "ready"
 	// EnvironmentFailed is a build that ended without an image, for the EnvironmentFault it
-	// carries. The next submit that names it builds it again.
+	// carries. The next submit that names one the platform failed builds it again; one the file
+	// failed is never built again.
 	EnvironmentFailed EnvironmentState = "failed"
 )
 
@@ -118,8 +122,8 @@ type EnvironmentFileError struct{ Why string }
 func (e *EnvironmentFileError) Error() string { return e.Why }
 
 // ValidateEnvironmentFile accepts a file whose first two instructions are ARG BASE and FROM
-// ${BASE}, so whatever it adds sits on the image the platform runs (hl inside). Comments and
-// blank lines may come before them.
+// ${BASE}, so whatever it adds sits on the image the platform runs (hl inside), and that reads
+// nothing from a build context. Comments and blank lines may come before them.
 func ValidateEnvironmentFile(dockerfile string) error {
 	if len(dockerfile) > MaxEnvironmentFileBytes || !utf8.ValidString(dockerfile) {
 		return &EnvironmentFileError{Why: fmt.Sprintf("%s must be UTF-8 text of at most %d bytes", EnvironmentFile, MaxEnvironmentFileBytes)}
@@ -142,5 +146,44 @@ func ValidateEnvironmentFile(dockerfile string) error {
 	if !arg || !from {
 		return &EnvironmentFileError{Why: EnvironmentFile + " begins with the two lines ARG BASE and FROM ${BASE}: the platform passes as BASE the image the job names, and builds what follows on it"}
 	}
+	return refuseBuildContext(dockerfile)
+}
+
+// refuseBuildContext refuses a file that reads from a build context: the platform builds the
+// file alone, so a COPY or ADD of a local path can only fail once it is built.
+func refuseBuildContext(dockerfile string) error {
+	parsed, err := parser.Parse(strings.NewReader(dockerfile))
+	if err != nil {
+		return &EnvironmentFileError{Why: EnvironmentFile + " does not parse: " + err.Error()}
+	}
+	for _, node := range parsed.AST.Children {
+		instruction := strings.ToLower(node.Value)
+		if instruction != "copy" && instruction != "add" {
+			continue
+		}
+		if slices.ContainsFunc(node.Flags, func(flag string) bool { return strings.HasPrefix(flag, "--from") }) {
+			continue
+		}
+		var args []string
+		for next := node.Next; next != nil; next = next.Next {
+			args = append(args, next.Value)
+		}
+		for _, source := range args[:max(len(args)-1, 0)] {
+			if strings.HasPrefix(source, "<<") || instruction == "add" && remoteSource(source) {
+				continue
+			}
+			return &EnvironmentFileError{Why: fmt.Sprintf("%s line %d, %s, reads %s from a build context the build does not have: the environment is built from this file alone, and a job gets the repository's code by its clone at start. Install what the code needs with RUN or COPY --from an image, and build the code itself in the job",
+				EnvironmentFile, node.StartLine, strings.TrimSpace(node.Original), source)}
+		}
+	}
 	return nil
+}
+
+func remoteSource(source string) bool {
+	for _, prefix := range []string{"http://", "https://", "git@", "git://"} {
+		if strings.HasPrefix(source, prefix) {
+			return true
+		}
+	}
+	return false
 }

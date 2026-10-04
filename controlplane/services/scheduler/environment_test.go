@@ -22,6 +22,7 @@ type declared struct {
 	err       error
 	asked     *[]string
 	noBuilder bool
+	failed    bool
 }
 
 func (d declared) Declared(_ context.Context, orgID, _, _, ref, base string) (*domain.Environment, error) {
@@ -40,6 +41,9 @@ func (d declared) Declared(_ context.Context, orgID, _, _, ref, base string) (*d
 	}
 	if d.noBuilder {
 		return nil, domain.ErrNoEnvironmentBuilder
+	}
+	if d.failed {
+		return &domain.Environment{Key: domain.EnvironmentKey(orgID, file, base), Base: base, State: domain.EnvironmentFailed, Fault: domain.EnvironmentFaultFile, LogTail: "E: Unable to locate package rustc"}, nil
 	}
 	return &domain.Environment{Key: domain.EnvironmentKey(orgID, file, base), OrgID: orgID, Base: base, Dockerfile: file, State: domain.EnvironmentBuilding}, nil
 }
@@ -78,12 +82,17 @@ func TestASubmitIsRefusedAnEnvironmentFileNotBuiltOnBaseUnreadableOrWithNoBuilde
 		"BASE with a default": {declared{files: map[string]string{commit: "ARG BASE=python\nFROM ${BASE}\n"}}, domain.ReasonInvalidEnvironmentFile},
 		"unreadable":          {declared{err: api.Refuse(http.StatusServiceUnavailable, "unavailable", "GitHub is rate limiting the platform")}, ReasonEnvironmentUnreadable},
 		"no builder":          {declared{files: map[string]string{commit: rustEnvironment}, noBuilder: true}, domain.ReasonNoEnvironmentBuilder},
+		"a build context":     {declared{files: map[string]string{commit: "ARG BASE\nFROM ${BASE}\nCOPY vendor/codec /opt/codec\n"}}, domain.ReasonInvalidEnvironmentFile},
+		"the file failed":     {declared{files: map[string]string{commit: rustEnvironment}, failed: true}, string(domain.EvictionEnvironmentFailed)},
 	} {
 		s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: admittingStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
 			quota: insertingQuota{}, loop: wokenLoop{new(int)}, environments: c.environments}
 		var refused *AdmissionError
 		if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &refused) || refused.Reason != c.reason || !strings.Contains(refused.Message, domain.EnvironmentFile) {
 			t.Errorf("%s: got = %v, want %s naming the file", name, err, c.reason)
+		}
+		if c.environments.failed && !strings.HasSuffix(refused.Message, "E: Unable to locate package rustc") {
+			t.Errorf("%s: %q, want the end of the build's output", name, refused.Message)
 		}
 	}
 }
@@ -96,6 +105,7 @@ type environmentStore struct {
 	assigned   [][]string
 	reasons    map[string]string
 	terminated map[string]string
+	settler    *recordingSettler
 }
 
 func (s *environmentStore) AssignEnvironment(_ context.Context, key string, live []string, lease time.Duration) (*domain.Environment, error) {
@@ -114,12 +124,12 @@ func (s *environmentStore) UpdateNotAdmittedReason(_ context.Context, id, reason
 	return nil
 }
 
-func (s *environmentStore) ResolveTermination(_ context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error) {
-	if from != domain.StatusQueued {
-		return domain.TerminationSkipped, errors.New("only a queued job is ended for its environment")
+func (s *environmentStore) EndQueuedSettled(_ context.Context, id string, to domain.ExperimentStatus, reason string) (bool, error) {
+	if !slices.Contains(s.settler.settled, id) {
+		return false, errors.New("ended before its usage was settled")
 	}
 	s.terminated[id] = string(to) + " " + reason
-	return domain.TerminationWritten, nil
+	return true, nil
 }
 
 // buildersLive reports the clusters that are live.
@@ -152,8 +162,8 @@ func TestAJobWaitsForItsAssignedEnvironmentAndEndsByWhoseFaultItFailed(t *testin
 	} {
 		env := c.env
 		env.Key, env.Base, env.LogTail = "k1", "registry.test/job:1", "E: Unable to locate package rustc"
-		store := &environmentStore{env: &env, reasons: map[string]string{}, terminated: map[string]string{}}
 		settler := &recordingSettler{}
+		store := &environmentStore{env: &env, reasons: map[string]string{}, terminated: map[string]string{}, settler: settler}
 		reads := 0
 		workload := buildersLive{live: map[string]bool{"builder-a": true, "gone": false, "builder-b": true}, reads: &reads}
 		l := NewLoop(store, nil, workload, testGraceLimits, zap.NewNop()).WithQuotaSettler(settler)
@@ -171,7 +181,7 @@ func TestAJobWaitsForItsAssignedEnvironmentAndEndsByWhoseFaultItFailed(t *testin
 		reason, ended := store.reasons["job-1"], store.terminated["job-1"]
 		switch c.want {
 		case "held":
-			if !held || reason != domain.NotAdmittedEnvironmentBuilding+": the platform builds the environment its commit declares in .hypothesisloop/Dockerfile, on registry.test/job:1, on cluster builder-a, attempt 2 of 3. The job runs in it once it is built" || len(store.terminated) > 0 {
+			if !held || reason != domain.NotAdmittedEnvironmentBuilding+": the platform builds the environment its commit declares in .hypothesisloop/Dockerfile, on registry.test/job:1, on cluster builder-a, attempt 2 of 3 (the platform builds a file again only after a failure of its own). The job runs in it once it is built" || len(store.terminated) > 0 {
 				t.Errorf("%s: held %v, reason %q, want held naming the cluster and the attempt", name, held, reason)
 			}
 		case "waiting":

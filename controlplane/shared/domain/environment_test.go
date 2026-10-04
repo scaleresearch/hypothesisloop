@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestAnEnvironmentFileIsBuiltOnTheBaseThePlatformPasses(t *testing.T) {
 	for file, valid := range map[string]bool{
@@ -12,11 +15,26 @@ func TestAnEnvironmentFileIsBuiltOnTheBaseThePlatformPasses(t *testing.T) {
 		"ARG BASE\nARG OTHER\nFROM ${BASE}\n":                   false,
 		"ARG BASE\nFROM ${BASE} AS\n":                           false,
 		"":                                                      false,
-		"ARG BASE\nFROM ${BASE}\n" + string(make([]byte, MaxEnvironmentFileBytes)): false,
+		"ARG BASE\nFROM ${BASE}\n" + string(make([]byte, MaxEnvironmentFileBytes)):   false,
+		"ARG BASE\nFROM ${BASE}\nCOPY vendor/codec /opt/codec\n":                     false,
+		"ARG BASE\nFROM ${BASE}\nRUN true\nadd --chown=1:1 \\\n  setup.sh /opt/\n":   false,
+		"ARG BASE\nFROM ${BASE}\nCOPY [\"requirements.txt\", \"/tmp/\"]\n":           false,
+		"ARG BASE\nFROM ${BASE}\nCOPY --from=ghcr.io/astral-sh/uv:0.4 /uv /bin/uv\n": true,
+		"ARG BASE\nFROM ${BASE}\nADD https://example.test/tool.tgz /opt/\n":          true,
+		"ARG BASE\nFROM ${BASE}\nCOPY <<EOF /etc/tool.conf\nCOPY x y\nEOF\n":         true,
+		"ARG BASE\nFROM ${BASE}\nRUN <<EOF\necho COPY a b\nEOF\n":                    true,
 	} {
 		if err := ValidateEnvironmentFile(file); (err == nil) != valid {
 			t.Errorf("%.60q: got = %v, want valid %v", file, err, valid)
 		}
+	}
+}
+
+func TestAFileThatCopiesFromABuildContextIsToldItIsBuiltAlone(t *testing.T) {
+	err := ValidateEnvironmentFile("ARG BASE\nFROM ${BASE}\nRUN true\nCOPY vendor/codec /opt/codec\n")
+	if err == nil || !strings.Contains(err.Error(), "line 4") || !strings.Contains(err.Error(), "vendor/codec") ||
+		!strings.Contains(err.Error(), "built from this file alone") || !strings.Contains(err.Error(), "clone") {
+		t.Errorf("got %v, want the line, the source, and that the file is built alone and the code comes by the clone", err)
 	}
 }
 

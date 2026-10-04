@@ -52,12 +52,13 @@ func (s *EnvironmentsStore) OrgHasEnvironmentBuilder(ctx context.Context, orgID 
 }
 
 // EnsureEnvironment returns the environment of env's key as it is stored, writing env as building
-// when there is none and making a failed one building again from its first attempt.
+// when there is none and making one the platform failed building again from its first attempt.
+// One the file failed stays failed: the key names the file, which fails the same way again.
 func (s *EnvironmentsStore) EnsureEnvironment(ctx context.Context, env *domain.Environment) (*domain.Environment, error) {
 	const q = `WITH made AS (
 	INSERT INTO environments (key, org_id, base, dockerfile, image, state) VALUES ($1, $2, $3, $4, '', 'building')
 	ON CONFLICT (key) DO UPDATE SET state = 'building', fault = '', log_tail = '', image = '', cluster_name = '', attempt = 0, assigned_at = NULL, updated_at = now()
-	WHERE environments.state = 'failed'
+	WHERE environments.state = 'failed' AND environments.fault = 'platform'
 	RETURNING` + environmentColumns + `)
 SELECT` + environmentColumns + `FROM made
 UNION ALL

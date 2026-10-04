@@ -98,7 +98,7 @@ func (s *Service) resolveImage(job *domain.JobSpec) error {
 const ReasonEnvironmentUnreadable = "environment_unreadable"
 
 // declaredEnvironment keeps on exp the environment its commit declares, built on its image, which
-// admission waits for. The file is read at the commit itself, so the environment is the one the
+// admission waits for, and refuses exp at once when that file already failed to build. The file is read at the commit itself, so the environment is the one the
 // code was pushed with.
 func (s *Service) declaredEnvironment(ctx context.Context, pe *domain.PlatformExperiment, exp *domain.Experiment) error {
 	commit := exp.CodeRef[strings.LastIndex(exp.CodeRef, "@")+1:]
@@ -114,6 +114,8 @@ func (s *Service) declaredEnvironment(ctx context.Context, pe *domain.PlatformEx
 		return &AdmissionError{Reason: ReasonEnvironmentUnreadable, Message: fmt.Sprintf("the platform could not read %s at commit %s: %s", domain.EnvironmentFile, commit, refused.Message)}
 	case err != nil:
 		return fmt.Errorf("scheduler: environment of %s: %w", commit, err)
+	case env != nil && env.State == domain.EnvironmentFailed && env.Fault == domain.EnvironmentFaultFile:
+		return &AdmissionError{Reason: string(domain.EvictionEnvironmentFailed), Message: fileFailed(env)}
 	case env != nil:
 		exp.EnvironmentKey = env.Key
 	}

@@ -208,8 +208,8 @@ func TestABuildIsReassignedOffADeadClusterOrAPassedLeaseUntilItsAttemptsAreSpent
 }
 
 // Only the cluster a build is assigned to, at its attempt, reports it, once. A file's fault fails
-// it, and the next submit builds it again; a ready environment stays ready.
-func TestOnlyTheAssignedAttemptReportsABuildAndAFailedOneIsBuiltAgain(t *testing.T) {
+// it for good, since the key names the file; a ready environment stays ready.
+func TestOnlyTheAssignedAttemptReportsABuildAndOneTheFileFailedIsNotBuiltAgain(t *testing.T) {
 	w := newEnvironments(t)
 	ctx := context.Background()
 	env := w.assign(t, w.ensure(t, w.orgA, "fenced").Key, w.ofA)
@@ -235,11 +235,12 @@ func TestOnlyTheAssignedAttemptReportsABuildAndAFailedOneIsBuiltAgain(t *testing
 		t.Fatalf("a failed environment was assigned: %+v", assigned)
 	}
 	again, err := w.envs.EnsureEnvironment(ctx, env)
-	if err != nil || again.State != domain.EnvironmentBuilding || again.Attempt != 0 || again.Fault != "" {
-		t.Fatalf("ensured again: %+v, %v", again, err)
+	if err != nil || again.State != domain.EnvironmentFailed || again.Fault != domain.EnvironmentFaultFile || again.LogTail != "E: Unable to locate package" {
+		t.Fatalf("ensured again: %+v, %v, want it failed by the file with its output", again, err)
 	}
 
-	ready := w.assign(t, env.Key, w.ofA)
+	env = w.assign(t, w.ensure(t, w.orgA, "builds").Key, w.ofA)
+	ready := env
 	if !w.finish(t, w.ofA, ready, domain.EnvironmentBuildOutcome{Image: "registry.test/env@sha256:ok"}) {
 		t.Fatal("the build was refused")
 	}
@@ -248,19 +249,24 @@ func TestOnlyTheAssignedAttemptReportsABuildAndAFailedOneIsBuiltAgain(t *testing
 	}
 }
 
-// A job ended because the platform did not build its environment ends there, refunded by its
-// settlement, and is not queued again while the environment stays failed.
-func TestAJobEndedForAnUnbuiltEnvironmentIsNotRequeued(t *testing.T) {
+// A job ended because the platform did not build its environment ends there, its hold released
+// by the same write that tells its agent, and is not queued again while the environment stays
+// failed. A job no longer queued is left as it is.
+func TestAJobEndedForAnUnbuiltEnvironmentIsSettledWithItsStatusAndNotRequeued(t *testing.T) {
 	w := newEnvironments(t)
 	store := NewStore(w.pool, "http://metrics.invalid", 3)
 	id := w.queued(t, "unbuilt", w.peA)
 	reason := string(domain.EvictionEnvironmentUnbuilt.WithDetail("no fault of the file's"))
-	got, err := store.ResolveTermination(context.Background(), id, domain.StatusQueued, domain.StatusEvicted, reason)
-	if err != nil || got != domain.TerminationWritten {
-		t.Fatalf("ResolveTermination: %v, %v, want it written", got, err)
+	written, err := store.EndQueuedSettled(context.Background(), id, domain.StatusEvicted, reason)
+	if err != nil || !written {
+		t.Fatalf("EndQueuedSettled: %v, %v, want it written", written, err)
 	}
-	if ended := w.get(t, id); ended.Status != domain.StatusEvicted || ended.EvictionReason != reason || ended.InfraRequeueCount != 0 {
-		t.Fatalf("ended: %s, %q, %d infra requeues, want it evicted and not queued again", ended.Status, ended.EvictionReason, ended.InfraRequeueCount)
+	ended := w.get(t, id)
+	if ended.Status != domain.StatusEvicted || ended.EvictionReason != reason || ended.InfraRequeueCount != 0 || ended.QuotaSettledAt == nil {
+		t.Fatalf("ended: %s, %q, %d infra requeues, settled %v, want it evicted, settled and not queued again", ended.Status, ended.EvictionReason, ended.InfraRequeueCount, ended.QuotaSettledAt)
+	}
+	if again, err := store.EndQueuedSettled(context.Background(), id, domain.StatusRejected, "other"); err != nil || again {
+		t.Fatalf("an ended job ended again: %v, %v", again, err)
 	}
 }
 

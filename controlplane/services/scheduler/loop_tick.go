@@ -1955,6 +1955,9 @@ func (l *Loop) heldForEnvironment(ctx context.Context, pass *environmentPass, ex
 		return false, nil
 	case env.State == domain.EnvironmentBuilding:
 		where := "on cluster " + env.ClusterName + ", attempt " + strconv.Itoa(env.Attempt) + " of " + strconv.Itoa(domain.MaxEnvironmentAttempts)
+		if env.Attempt > 1 {
+			where += " (the platform builds a file again only after a failure of its own)"
+		}
 		if env.ClusterName == "" {
 			where = "once a live cluster that builds for its org has room"
 		}
@@ -1962,8 +1965,7 @@ func (l *Loop) heldForEnvironment(ctx context.Context, pass *environmentPass, ex
 			". The job runs in it once it is built"
 		return true, l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason)
 	case env.State == domain.EnvironmentFailed && env.Fault == domain.EnvironmentFaultFile:
-		return true, l.endForEnvironment(ctx, exp, domain.StatusRejected, string(domain.EvictionEnvironmentFailed.WithDetail(domain.EnvironmentFile+" of its commit did not build on "+env.Base+
-			". Fix it, commit and submit again. The end of the build's output:\n"+env.LogTail)))
+		return true, l.endForEnvironment(ctx, exp, domain.StatusRejected, string(domain.EvictionEnvironmentFailed.WithDetail(fileFailed(env))))
 	case env.State == domain.EnvironmentFailed && env.Fault == domain.EnvironmentFaultPlatform:
 		return true, l.endForEnvironment(ctx, exp, domain.StatusEvicted, string(domain.EvictionEnvironmentUnbuilt.WithDetail("the platform could not build the environment its commit declares in "+domain.EnvironmentFile+
 			" on "+env.Base+" in "+strconv.Itoa(domain.MaxEnvironmentAttempts)+" attempts, no fault of the file's. It costs nothing: submit again and the platform builds it again")))
@@ -1971,18 +1973,24 @@ func (l *Loop) heldForEnvironment(ctx context.Context, pass *environmentPass, ex
 	return false, fmt.Errorf("environment %s of job %s is %s with fault %q", env.Key, exp.ID, env.State, env.Fault)
 }
 
-// endForEnvironment ends exp, queued for its environment, as to with reason, and settles it: an
-// environment the platform did not build costs nothing.
+// fileFailed says that the environment file of env did not build, with the end of its output.
+func fileFailed(env *domain.Environment) string {
+	return domain.EnvironmentFile + " of its commit did not build on " + env.Base + ", and the platform does not build the same file again. Fix it, commit and submit again. The end of the build's output:\n" + env.LogTail
+}
+
+// endForEnvironment ends exp, queued for its environment, as to with reason, settled: its usage
+// is written first and the hold goes with the status, so the agent the status notifies reads its
+// quota as it stands. An environment the platform did not build costs nothing.
 func (l *Loop) endForEnvironment(ctx context.Context, exp *domain.Experiment, to domain.ExperimentStatus, reason string) error {
-	outcome, err := l.store.ResolveTermination(ctx, exp.ID, domain.StatusQueued, to, reason)
-	if err != nil {
+	ended := *exp
+	ended.Status, ended.EvictionReason = to, reason
+	if err := l.settler.Settle(ctx, &ended); err != nil {
+		return fmt.Errorf("settle job %s whose environment did not build: %w", exp.ID, err)
+	}
+	written, err := l.store.EndQueuedSettled(ctx, exp.ID, to, reason)
+	if err != nil || !written {
 		return err
 	}
-	if outcome == domain.TerminationWritten {
-		exp.Status, exp.EvictionReason = to, reason
-		if err := l.settler.Settle(ctx, exp); err != nil {
-			l.logger.Warn("settle a job whose environment did not build", zap.String("id", exp.ID), zap.Error(err))
-		}
-	}
+	*exp = ended
 	return nil
 }
