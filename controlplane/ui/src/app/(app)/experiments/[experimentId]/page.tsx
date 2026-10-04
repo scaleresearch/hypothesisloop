@@ -49,7 +49,7 @@ import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { LinkTr, Table, num } from '@/components/ui/table'
 import { Pill, Text } from '@/components/ui/text'
 import { semantic } from '@/lib/colors'
-import { formatAccH, runClock, shortId } from '@/lib/format'
+import { formatAccH, headline, runClock, shortId } from '@/lib/format'
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
 import { JobReason } from '@/components/job-reason'
 import { filedAfterVerdict, hypothesisActivity, settings, variedEnvByHypothesis, variedEnvSettings, variedKeys } from '@/lib/hypothesis-progress'
@@ -403,7 +403,7 @@ function PlatformExperimentDetail({ id }: { id: string }) {
               <Text>
                 Best {primaryStandings?.metric}: <span className="font-medium tabular-nums">{bestOf(primaryStandings!.metric, leader.agent_id)?.best.toFixed(4) ?? '—'}</span>
                 {' '}by <AgentLabel id={leader.agent_id} />
-                {leader.hypothesis_id && <>, testing <TextLink inline href={hypothesisPath(id, leader.hypothesis_id)}>{hypothesisText.get(leader.hypothesis_id) ?? 'its hypothesis'}</TextLink></>}.
+                {leader.hypothesis_id && <>, testing <TextLink inline href={hypothesisPath(id, leader.hypothesis_id)}>{headline(hypothesisText.get(leader.hypothesis_id) ?? 'its hypothesis')}</TextLink></>}.
               </Text>
             )}
             {pe.summary && (

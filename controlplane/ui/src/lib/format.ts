@@ -59,3 +59,13 @@ export function formatDuration(ms: number): string {
   if (s < 3600) return `${Math.floor(s / 60)} min ${s % 60} s`
   return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`
 }
+
+// A long text as a label: its first sentence, cut at a word near max characters. A sentence's
+// closing full stop goes, so the label can sit inside a sentence of its own.
+export function headline(text: string, max = 120): string {
+  const t = text.trim()
+  const first = (/^[\s\S]*?[.!?](?=\s|$)/.exec(t)?.[0] ?? t).replace(/\.$/, '')
+  if (first.length <= max) return first
+  const space = first.lastIndexOf(' ', max)
+  return `${first.slice(0, space > max / 2 ? space : max).replace(/[\s,;:(–-]+$/, '')}…`
+}
