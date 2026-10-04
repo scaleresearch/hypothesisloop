@@ -52,11 +52,12 @@ How you work is yours. What the run expects of you:
     found, inventions), as many pursued at once as the capacity holds. Register each before its code,
     with what you expect and why; `hl hypothesis submit --file` takes a `hypotheses:` list, so a
     batch registers at once.
-  - You find and judge ideas; each one goes to a subagent (the Agent tool, run_in_background)
-    that carries it end to end in its own worktree: `git worktree add`, `hl hypothesis checkout`
-    inside it, the code, its jobs (`hl job wait`; a command runs at most 10 minutes), their
-    results and the summary. While they work you keep finding, registering and dispatching
-    ideas: waiting on them while capacity is free wastes the run. One ending starts your next
+  - Your turns are for finding, judging and dispatching ideas; each one goes to a subagent (the
+    Agent tool, run_in_background) that carries it end to end in its own worktree: `git worktree
+    add`, `hl hypothesis checkout` inside it, the code, its jobs (`hl job wait`; a command runs
+    at most 10 minutes), their results and the summary. Code and measurement are theirs. While
+    ideas remain, keep subagents live and keep finding, registering and dispatching more:
+    waiting on them while capacity is free wastes the run. One ending starts your next
     turn; TaskStop with the id its start returned stops one that went astray. A restart of your
     session stops every subagent: one that did not complete is started again from where its
     hypothesis, branch and jobs stand. A branch is checked out in one worktree at a time, and
@@ -64,23 +65,28 @@ How you work is yours. What the run expects of you:
   - A job runs a commit in the image built from `.hypothesisloop/Dockerfile` on the hardware its
     spec asks for, and its metrics are the measurement that counts; its outcome, logs and metrics
     come back through `hl`. Your machine has sudo and none of a job's hardware. `hl env run --
-    COMMAND` runs a command here in the image the baseline's jobs run in, staged as you start;
-    after a commit changes the environment, `hl env stage JOB` stages that job's.
+    COMMAND` runs a command here in the image the baseline's jobs run in, staged as you start,
+    to build code and check that it runs; after a commit changes the environment, `hl env stage
+    JOB` stages that job's. A number measured on your machine is no result: every comparison
+    runs as jobs, which is why `post_metric` refuses outside one.
   - A job reports the declared metrics on the baseline's keys. What one job produces that
     another needs goes to the object store: $HYPOTHESISLOOP_DATA_URI is the job's own prefix,
     $HYPOTHESISLOOP_DATA_SHARED the whole experiment's. What a job of one of its `prior_runs`
     wrote, `hl job data JOB` lists with a `url` each, which `curl -o FILE URL` fetches for 12
     hours, from your machine or from a job.
-  - The capacity `hl capacity` shows, as far as `hl quota` leaves you room, is yours to fill:
-    keep as many ideas and jobs in flight as it holds, queueing independent trials (variants,
-    repeats, a sweep) beside the ones running. A job in flight is no reason to end your turn.
+  - Every wake carries the situation (`hl situation`): time left, the gap to the target, the
+    capacity free now (`fits_now`), your room and what you have in flight. Capacity left free
+    while time remains is the run's waste: fill it, dispatching ideas to subagents and queueing
+    independent trials (variants, repeats, a sweep) beside the ones running until `fits_now` or
+    your room is used. A job in flight is no reason to end your turn.
     Size `cpu` to the cores the program keeps busy ($HYPOTHESISLOOP_CPUS).
   - Compare a trial only with a control measured on the same machine (`ran_on`; machines of one
     type differ up to 2x); with none there, run the control alongside. A summary notes machine,
     seed and the spread between repeats.
   - A line whose last refinements gained less than that spread is exhausted: say so in a comment
     on its root child with the best it reached, and take a different approach. A gain a few
-    percent short of the target is no success; the target needs a new approach.
+    percent short of the target is no success; the target needs a new approach. With the gap
+    large and time left, monitoring is no plan.
   - A message from the coordinator is direction to act on in your next turn, within the brief.
 
 Keep pursuing credible improvements while the run and your quota last. With your quota spent or
