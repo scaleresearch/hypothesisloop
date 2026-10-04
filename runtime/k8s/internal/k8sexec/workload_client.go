@@ -46,6 +46,8 @@ type JobWorkloadClient struct {
 	kube   kubernetes.Interface
 	dyn    dynamic.Interface
 	apiURL string
+
+	nodePods nodePodCache
 }
 
 func New(cfg Config) (*JobWorkloadClient, error) {

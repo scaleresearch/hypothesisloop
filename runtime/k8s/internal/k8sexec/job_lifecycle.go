@@ -389,9 +389,9 @@ func (c *JobWorkloadClient) GetLiveStorageCapacity(ctx context.Context) (availab
 	return avail, totalBytes, nil
 }
 
-// listSchedulableNodesAndPods is the shared node/pod fetch behind every live capacity
-// collector, so they all read the same consistent-enough snapshot per call — and apply one
-// definition of "schedulable", rather than each collector deciding for itself.
+// listSchedulableNodesAndPods is the shared node/pod read behind every live capacity
+// collector, from the watched cache (cluster_cache.go), so they all apply one definition of
+// "schedulable", rather than each collector deciding for itself.
 //
 // A node counts only when it is both uncordoned and Ready. Ready matters as much as the cordon
 // flag: a node whose machine is powered off (or whose kubelet has died, or that lost its network)
@@ -399,21 +399,21 @@ func (c *JobWorkloadClient) GetLiveStorageCapacity(ctx context.Context) (availab
 // unfiltered, that hardware keeps being reported as live capacity long after it stopped existing,
 // and jobs admitted against it queue forever with nothing to run them.
 func (c *JobWorkloadClient) listSchedulableNodesAndPods(ctx context.Context) ([]corev1.Node, []corev1.Pod, error) {
-	nodeList, err := c.kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	allNodes, allPods, err := c.cachedNodesAndPods(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("workload: list nodes: %w", err)
+		return nil, nil, err
 	}
-	podList, err := c.kube.CoreV1().Pods(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, nil, fmt.Errorf("workload: list pods: %w", err)
-	}
-	nodes := make([]corev1.Node, 0, len(nodeList.Items))
-	for _, n := range nodeList.Items {
-		if schedulableNode(n) {
-			nodes = append(nodes, n)
+	nodes := make([]corev1.Node, 0, len(allNodes))
+	for _, n := range allNodes {
+		if schedulableNode(*n) {
+			nodes = append(nodes, *n)
 		}
 	}
-	return nodes, podList.Items, nil
+	pods := make([]corev1.Pod, 0, len(allPods))
+	for _, p := range allPods {
+		pods = append(pods, *p)
+	}
+	return nodes, pods, nil
 }
 
 // schedulableNode reports whether n can actually accept work right now — see

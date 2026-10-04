@@ -141,7 +141,7 @@ func TestANodesCoresAreUnitsOfTheCPUTypeWithNothingWrittenToTheCluster(t *testin
 		t.Errorf("box's cores for platform jobs = %v, %v; want the 15 its units add up to", totals["box"], err)
 	}
 	for _, action := range kube.Actions() {
-		if verb := action.GetVerb(); verb != "list" && verb != "get" {
+		if verb := action.GetVerb(); verb != "list" && verb != "get" && verb != "watch" {
 			t.Errorf("reading capacity made a %s on %s", verb, action.GetResource().Resource)
 		}
 	}
