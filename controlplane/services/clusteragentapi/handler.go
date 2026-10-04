@@ -559,6 +559,11 @@ type reconcileBody struct {
 	// coming, never the fault class or the rule that produced it. How long each window is was
 	// declared on the job's own spec and compiled into the workload when the runtime created it.
 	CheckpointWindow []string `json:"checkpoint_window"`
+	// Builds are the environment builds assigned to this cluster now.
+	Builds []domain.EnvironmentBuild `json:"builds"`
+	// RegistryPull pulls the environment images of the experiments listed, sent only when one
+	// of them runs in one.
+	RegistryPull *domain.RegistryLogin `json:"registry_pull,omitempty"`
 }
 
 type reconcileInput struct {
@@ -604,6 +609,9 @@ type capacityReport struct {
 	// (AUTOSCALER_ENABLED), fail-closed: absent (false) means the scheduler never speculatively
 	// submits onto this cluster.
 	AutoscalerEnabled bool `json:"autoscaler_enabled"`
+	// Builds is whether this cluster's runtime builds environments. Absent (false) means it is
+	// assigned none.
+	Builds bool `json:"builds,omitempty"`
 	// ClusterID is a stable fingerprint the runtime derives live and never persists itself: the
 	// kube-system namespace UID on k8s, /etc/machine-id on bare metal. Unlike ClusterName (an
 	// operator-typed label that can be renamed or duplicated), this identifies the cluster across
