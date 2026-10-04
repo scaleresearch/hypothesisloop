@@ -58,7 +58,9 @@ files it points you to and leave the rest unread.
      `cpu` is the cores the program keeps busy: 1 for a single-threaded one. The job reads
      its cores in $HYPOTHESISLOOP_CPUS, while `nproc` counts the whole machine's; size
      worker pools and `make -j` from it.
-  4. The run: `hl job submit .hypothesisloop/job.yaml`, and right after it the check of 7
+  4. The run: first `hl env run -- CMD` runs the build and a start of the harness in the
+     environment on the job's hardware, which your machine lacks, and shows in minutes that
+     they work. Then `hl job submit .hypothesisloop/job.yaml`, and right after it the check of 7
      from the commit it pushed, so the two run side by side. A job rejected, failed, or
      completed without a metric it should report has its cause in `hl job status ID`
      and `hl job logs ID`: fix it, commit and submit again while you know a fix, and the

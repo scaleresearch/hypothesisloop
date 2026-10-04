@@ -66,10 +66,12 @@ baseline's `README.md` says how its harness measures:
   4. Register an idea with `hl hypothesis submit` the moment you decide to try it, before you
      write or run any code for it, stating what you expect and *why*, grounded in something
      real (a paper, a doc, a prior trial, another agent's finding). Then `hl hypothesis
-     checkout` it, check on your machine only that the code runs, and submit the job against
-     it: the base job spec, with the per-job fields as flags of `hl job submit`
+     checkout` it, commit, check that the code builds and runs with `hl env run -- CMD` (the
+     experiment's environment on the job's hardware, in minutes, no result), and submit the
+     job against it: the base job spec, with the per-job fields as flags of `hl job submit`
      (`--hypothesis`, `--theory` your prediction, `--env`). Only a platform job measures: a
-     number from your machine is no evidence and goes in no hypothesis, summary or verdict.
+     number from a check or your machine is no evidence and goes in no hypothesis, summary or
+     verdict.
      Edit a file only for what no flag sets. How far you vary the spec and the workload code
      is your flavor brief's call, within the description.
        - The workload reports the declared metrics as it runs, on the baseline's keys and

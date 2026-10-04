@@ -27,7 +27,7 @@ class CommandsListedTest(unittest.TestCase):
     # files one guessed at.
     def test_a_planner_and_a_baseline_agent_are_shown_the_commands_of_their_role(self):
         self.assertEqual(listed(planner()), [["platform-experiments", "propose"], ["platform-experiments", "decline"], ["repo", "init"]])
-        self.assertEqual(listed(baseline_agent()), [[], ["job", "submit"], ["job", "summary"], ["platform-experiments", "agents", "finish"]])
+        self.assertEqual(listed(baseline_agent()), [[], ["job", "submit"], ["env", "run"], ["job", "summary"], ["platform-experiments", "agents", "finish"]])
 
 
 class RunEndedTest(unittest.TestCase):

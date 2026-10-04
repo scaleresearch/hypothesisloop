@@ -81,7 +81,7 @@ class BriefingTest(unittest.TestCase):
             self.assertIn(["platform-experiments", "close"], asked)
             asked.clear()
             core.hl_commands(SimpleNamespace(flavor="generalist", role="competitor"))
-        self.assertEqual(asked, [[], ["hypothesis", "submit"]])
+        self.assertEqual(asked, [[], ["hypothesis", "submit"], ["env", "run"]])
 
 
 
