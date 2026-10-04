@@ -186,16 +186,24 @@ func dockerfileState(dockerfile string) llb.State {
 	return llb.Scratch().File(llb.Mkfile("Dockerfile", 0o644, []byte(dockerfile)))
 }
 
-// fileFault tells an instruction of the file failing from every other error, which is the
-// platform's: a RUN that exited with a code of its own, or the frontend refusing a line of the
-// file before anything ran (a parse error, a FROM it cannot resolve), which carries the line and
-// no vertex. An operation that failed otherwise, a pull, the push, the daemon, carries no exit
-// code or a vertex beside its line. The base itself was pulled before the build, so a FROM that
-// does not resolve is a later stage of the file's own.
+// fileFault tells an error the file's content caused from every other error, which is the
+// platform's: a RUN that exited with a code of its own; a COPY or ADD whose source is not there,
+// which fails computing its content's checksum or in its file operation; or the frontend refusing
+// a line of the file before anything ran (a parse error, a FROM it cannot resolve), which carries
+// the line and no vertex. An operation that failed otherwise, a pull, the push, the daemon,
+// carries no exit code, no such subject, or a vertex beside its line. The base itself was pulled
+// before the build, so a FROM that does not resolve is a later stage of the file's own.
 func fileFault(err error) bool {
 	var exit *gatewaypb.ExitError
 	if errors.As(err, &exit) {
 		return exit.ExitCode != gatewaypb.UnknownExitStatus
+	}
+	var solve *errdefs.SolveError
+	if errors.As(err, &solve) {
+		switch solve.Subject.(type) {
+		case *errdefs.Solve_Cache, *errdefs.Solve_File:
+			return true
+		}
 	}
 	var line *errdefs.SourceError
 	var vertex *errdefs.VertexError

@@ -84,7 +84,12 @@ func (a *Agent) runBuild(ctx context.Context, running *runningBuild, b domain.En
 	report.Attempt = b.Attempt
 	err := a.postJSON(ctx, "/builds/"+url.PathEscape(b.Key), report, nil)
 	if err == nil {
-		a.Log("build %s attempt %d: %s %s", b.Key, b.Attempt, report.Outcome, report.Digest)
+		detail := report.Digest
+		if report.Outcome != domain.EnvironmentBuildPushed {
+			lines := strings.Split(strings.TrimSpace(report.LogTail), "\n")
+			detail = lines[len(lines)-1]
+		}
+		a.Log("build %s attempt %d: %s %s", b.Key, b.Attempt, report.Outcome, detail)
 		return
 	}
 	a.Log("build %s attempt %d: report %s: %v", b.Key, b.Attempt, report.Outcome, err)

@@ -66,9 +66,13 @@ func TestOnlyAnInstructionOfTheFileFailingIsTheFiles(t *testing.T) {
 		daemon error
 		file   bool
 	}{
-		"a RUN exiting non-zero":   {errdefs.WithSource(errdefs.WrapVertex(&gatewaypb.ExitError{ExitCode: 100, Err: errors.New(`process "/bin/sh -c apt-get install -y nonexistent" did not complete successfully: exit code: 100`)}, vertex), line), true},
-		"a parse error":            {errdefs.WithSource(errors.New("dockerfile parse error on line 3: unknown instruction: RUNN"), line), true},
-		"a FROM not found":         {errdefs.WithSource(errors.New("docker.io/library/nonexistent:1: not found"), line), true},
+		"a RUN exiting non-zero": {errdefs.WithSource(errdefs.WrapVertex(&gatewaypb.ExitError{ExitCode: 100, Err: errors.New(`process "/bin/sh -c apt-get install -y nonexistent" did not complete successfully: exit code: 100`)}, vertex), line), true},
+		"a parse error":          {errdefs.WithSource(errors.New("dockerfile parse error on line 3: unknown instruction: RUNN"), line), true},
+		"a FROM not found":       {errdefs.WithSource(errors.New("docker.io/library/nonexistent:1: not found"), line), true},
+		"a COPY of a path not there": {errdefs.WithSource(errdefs.WithSolveError(errdefs.WrapVertex(errors.New(`failed to compute cache key: failed to calculate checksum of ref x::y: "/vendor/codec": not found`), vertex),
+			&errdefs.Solve_Cache{Cache: &errdefs.ContentCache{Index: 0}}, nil, nil), line), true},
+		"a COPY --from of a path not there": {errdefs.WithSource(errdefs.WithSolveError(errdefs.WrapVertex(errors.New(`lstat /var/lib/buildkit/x/opt/missing: no such file or directory`), vertex),
+			&errdefs.Solve_File{File: &errdefs.FileAction{Index: 0}}, nil, nil), line), true},
 		"a RUN that never started": {errdefs.WithSource(errdefs.WrapVertex(&gatewaypb.ExitError{ExitCode: gatewaypb.UnknownExitStatus, Err: errors.New("failed to create shim task")}, vertex), line), false},
 		"a pull of a layer":        {errdefs.WithSource(errdefs.WrapVertex(errors.New("failed to copy: httpReadSeeker: failed open: unexpected EOF"), vertex), line), false},
 		"the empty context":        {status.Error(codes.Unknown, "failed to get frontend inputs: invalid nil input definition to definition op"), false},
@@ -131,15 +135,18 @@ func TestWhoseFaultABuildThatPushedNothingIs(t *testing.T) {
 	line := &errdefs.Source{Info: &pb.SourceInfo{Filename: "Dockerfile", Data: []byte("ARG BASE\nFROM ${BASE}\nRUN false\n")},
 		Ranges: []*pb.Range{{Start: &pb.Position{Line: 3}, End: &pb.Position{Line: 3}}}}
 	runFailed := errdefs.WithSource(errdefs.WrapVertex(&gatewaypb.ExitError{ExitCode: 1, Err: errors.New("exit code: 1")}, digest.FromString("v")), line)
+	copyMissing := errdefs.WithSource(errdefs.WithSolveError(errdefs.WrapVertex(errors.New(`failed to compute cache key: "/vendor/codec": not found`), digest.FromString("c")),
+		&errdefs.Solve_Cache{Cache: &errdefs.ContentCache{}}, nil, nil), line)
 	for name, c := range map[string]struct {
 		daemon *fakeDaemon
 		fault  domain.EnvironmentBuildOutcomeKind
 		log    string
 	}{
-		"the base does not pull":  {&fakeDaemon{pull: errors.New("registry.test/hl/job:1: 503 Service Unavailable")}, domain.EnvironmentBuildPlatformFault, "503 Service Unavailable"},
-		"a RUN of the file fails": {&fakeDaemon{build: runFailed, output: "installing nonexistent\n"}, domain.EnvironmentBuildFileFault, "installing nonexistent"},
-		"the push fails":          {&fakeDaemon{build: errors.New("failed to push: failed to authorize")}, domain.EnvironmentBuildPlatformFault, "failed to authorize"},
-		"no digest is named":      {&fakeDaemon{}, domain.EnvironmentBuildPlatformFault, "no digest"},
+		"the base does not pull":   {&fakeDaemon{pull: errors.New("registry.test/hl/job:1: 503 Service Unavailable")}, domain.EnvironmentBuildPlatformFault, "503 Service Unavailable"},
+		"a RUN of the file fails":  {&fakeDaemon{build: runFailed, output: "installing nonexistent\n"}, domain.EnvironmentBuildFileFault, "installing nonexistent"},
+		"a COPY source is missing": {&fakeDaemon{build: copyMissing, output: "[4/6] COPY vendor/codec /opt/codec\n"}, domain.EnvironmentBuildFileFault, `"/vendor/codec": not found`},
+		"the push fails":           {&fakeDaemon{build: errors.New("failed to push: failed to authorize")}, domain.EnvironmentBuildPlatformFault, "failed to authorize"},
+		"no digest is named":       {&fakeDaemon{}, domain.EnvironmentBuildPlatformFault, "no digest"},
 	} {
 		got := (&Daemon{solver: c.daemon}).Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil, ignoreProgress)
 		if got.Outcome != c.fault || got.Digest != "" || !strings.Contains(got.LogTail, c.log) {
