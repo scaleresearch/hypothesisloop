@@ -57,6 +57,7 @@ func NewLoop(store Store, builder Builder, logger *zap.Logger) *Loop {
 
 // Start runs passes until ctx ends and waits for the builds it started.
 func (l *Loop) Start(ctx context.Context) {
+	l.logger.Info("environments: building on this replica, the leader")
 	var builds sync.WaitGroup
 	defer builds.Wait()
 	ticker := time.NewTicker(passInterval)
