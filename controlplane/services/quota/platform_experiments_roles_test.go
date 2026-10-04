@@ -16,6 +16,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
 // signupStore fakes only the reads and the write Signup makes; every other
@@ -211,15 +212,38 @@ func TestResultsListEveryAgentsBestOnEveryDeclaredMetric(t *testing.T) {
 }
 
 // A reference is shown beside the standings with the machine each value was measured on, so a
-// result compares with it on the same machine, and it ranks nobody. One nobody measured is listed
-// with no values.
+// result compares with it on the same machine, and it ranks nobody. Every completed job that
+// reported it is listed with whether it met the constraints, and only one that met them counts
+// toward best: a reference measured without the goal's constraint was invisible, and so read as
+// never measured.
 func TestResultsShowEachReferenceWithWhereItRanAndRankNoneOfIt(t *testing.T) {
-	srv := bestPerAgentMetricServer(t, map[string]float64{"baseline": 99, "c1": 50})
+	vector := func(values map[string]float64) string {
+		var samples []string
+		for agentID, v := range values {
+			samples = append(samples, fmt.Sprintf(`{"metric":{"agent_id":%q,"metric_basis":"raw","job_id":"job-%s"},"value":[1,"%v"]}`, agentID, agentID, v))
+		}
+		return `{"status":"success","data":{"resultType":"vector","result":[` + strings.Join(samples, ",") + `]}}`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = r.ParseForm()
+		switch {
+		case r.URL.Path == "/v1/sql":
+			_, _ = w.Write([]byte(`{"output":[{"records":{"schema":{"column_schemas":[{"name":"experiment_id"},{"name":"node"},{"name":"greptime_timestamp"},{"name":"greptime_value"}]},"rows":[["job-c1","node-a",1700000000000,1]]}}]}`))
+		case strings.Contains(r.Form.Get("query"), `metric_name="gate"`):
+			// c1 broke the gate and c2 never reported it.
+			_, _ = w.Write([]byte(vector(map[string]float64{"baseline": 1, "c1": 0, "c3": 1})))
+		default:
+			_, _ = w.Write([]byte(vector(map[string]float64{"baseline": 99, "c1": 120, "c2": 130, "c3": 50})))
+		}
+	}))
 	defer srv.Close()
-	store := &standingsStore{competitors: []string{"c1"}}
+	bound := 1.0
+	store := &standingsStore{competitors: []string{"c1", "c2", "c3"}}
 	store.pe = &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().UTC().Add(-time.Hour), Metrics: []domain.MetricDefinition{
 		{Key: "score", Direction: "maximize", Role: domain.MetricRoleRanking},
 		{Key: "other_score", Direction: "maximize", Role: domain.MetricRoleReference},
+		{Key: "gate", Direction: "maximize", Role: domain.MetricRoleConstraint, Bound: &bound},
 	}}
 	svc := newSignupTestService(t, store)
 	svc.metricsDBURL = srv.URL
@@ -231,13 +255,19 @@ func TestResultsShowEachReferenceWithWhereItRanAndRankNoneOfIt(t *testing.T) {
 	if len(results.Metrics) != 1 || results.Metrics[0].Metric != "score" {
 		t.Fatalf("metrics = %+v, want standings on score alone", results.Metrics)
 	}
-	if st := results.Metrics[0].Standings; len(st) != 1 || st[0].RanOn == nil || st[0].RanOn.Node != "node-a" {
-		t.Errorf("standings = %+v, want c1 with the node its job ran on", st)
+	if st := results.Metrics[0].Standings; len(st) != 1 || st[0].AgentID != "c3" {
+		t.Errorf("standings = %+v, want c3 alone, the one competitor that held the gate", st)
 	}
-	want := []ReferenceValue{{"baseline", 99, "job-baseline", nil}, {"c1", 50, "job-c1", &domain.RanOn{Node: "node-a"}}}
+	want := []ReferenceValue{
+		{"baseline", 99, "job-baseline", nil, "true"},
+		{"c1", 120, "job-c1", &domain.RanOn{Node: "node-a"}, "false"},
+		{"c2", 130, "job-c2", nil, "unknown"},
+		{"c3", 50, "job-c3", nil, "true"},
+	}
 	if len(results.References) != 1 || results.References[0].Metric != "other_score" || !reflect.DeepEqual(results.References[0].Values, want) {
 		t.Errorf("references = %+v, want other_score with %+v", results.References, want)
-	} // The baseline measured the reference at 99 and the leader is c1 at 50: the goal is not met.
+	}
+	// The best that met the gate is 99 and the leader is c3 at 50: the goal is not met.
 	if r := results.References[0]; r.Best == nil || *r.Best != 99 || r.LeaderMetric != "score" || r.Leader == nil || *r.Leader != 50 || r.Beaten == nil || *r.Beaten {
 		t.Errorf("reference = %+v, want best 99, leader 50 on score, not beaten", r)
 	}
@@ -256,7 +286,7 @@ func TestAReferenceIsBeatenOnlyByALeaderStrictlyBetterInItsDirection(t *testing.
 	reference := func(direction string, values ...float64) MetricReference {
 		r := MetricReference{Metric: "ref", Direction: direction}
 		for _, v := range values {
-			r.Values = append(r.Values, ReferenceValue{Value: v})
+			r.Values = append(r.Values, ReferenceValue{Value: v, ConstraintsMet: metricsdb.ConstraintsHeld})
 		}
 		return r
 	}
@@ -275,6 +305,8 @@ func TestAReferenceIsBeatenOnlyByALeaderStrictlyBetterInItsDirection(t *testing.
 		{"nobody ranks", []MetricStandings{ranked("maximize")}, reference("maximize", 3), "3", "-", "-"},
 		{"not measured", []MetricStandings{ranked("maximize", 5)}, reference("maximize"), "-", "-", "-"},
 		{"no ranking metric", nil, reference("maximize", 3), "3", "-", "-"},
+		{"constraints not met", []MetricStandings{ranked("maximize", 5)}, MetricReference{Metric: "ref", Direction: "maximize", Values: []ReferenceValue{
+			{Value: 9, ConstraintsMet: metricsdb.ConstraintsBroken}, {Value: 8, ConstraintsMet: metricsdb.ConstraintsUnknown}}}, "-", "-", "-"},
 	} {
 		out := &PlatformExperimentResults{Metrics: c.metrics, References: []MetricReference{c.reference}}
 		setAgainstLeader(out)

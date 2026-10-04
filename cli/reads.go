@@ -83,11 +83,13 @@ Only COMPLETED jobs that hold every constraint metric rank (rankable in hl job s
 one line per agent of the platform experiment and metric, so there is nothing to page or limit.
 A metric nobody has a result on yet prints no line, says so on stderr, and exits 0.
 Then each reference metric, an outside system the goal compares against and never ranked: one
-line per agent that measured it, its best value, the job and ran_on, or one line saying it was
-not measured. Then a line setting the reference's best against the leader on the first ranking
-metric when both run in the same direction: beaten false means no result has met the goal yet,
-whatever the standings against the control say. Compare a result with a reference measured on
-the same machine.`, stderr)
+line per COMPLETED job that reported it, its value, the job, ran_on and constraints_met (false
+when the job broke a constraint metric, unknown when it did not report one), or one line saying
+it was not measured. A reference job reports the constraint metrics too: only a value whose
+constraints_met is true counts. Then a line setting the best of those against the leader on the
+first ranking metric when both run in the same direction: beaten false means no result has met
+the goal yet, whatever the standings against the control say. Compare a result with a reference
+measured on the same machine.`, stderr)
 	named := experimentFlag(fs)
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)

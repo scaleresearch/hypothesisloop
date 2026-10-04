@@ -40,7 +40,43 @@ func RankableJobs(ctx context.Context, dbURL string, pe *domain.PlatformExperime
 // a harness had to fail such a job to keep it out, and a trial that found the gate broken was
 // no completed trial.
 func UnrankableJobs(ctx context.Context, dbURL string, pe *domain.PlatformExperiment, completed map[string]bool) (map[string]string, error) {
-	unrankable := map[string]string{}
+	unrankable, _, err := judgeConstraints(ctx, dbURL, pe, completed)
+	return unrankable, err
+}
+
+// Whether a job held every constraint metric of its platform experiment (ConstraintsMet).
+const (
+	ConstraintsHeld    = "true"
+	ConstraintsBroken  = "false"
+	ConstraintsUnknown = "unknown"
+)
+
+// ConstraintsMet says of each job of completed whether it held every constraint metric of pe:
+// ConstraintsBroken when one is violated, ConstraintsUnknown when none is and one was not
+// reported, ConstraintsHeld otherwise.
+func ConstraintsMet(ctx context.Context, dbURL string, pe *domain.PlatformExperiment, completed map[string]bool) (map[string]string, error) {
+	unrankable, broken, err := judgeConstraints(ctx, dbURL, pe, completed)
+	if err != nil {
+		return nil, err
+	}
+	met := make(map[string]string, len(completed))
+	for job := range completed {
+		switch {
+		case broken[job]:
+			met[job] = ConstraintsBroken
+		case unrankable[job] != "":
+			met[job] = ConstraintsUnknown
+		default:
+			met[job] = ConstraintsHeld
+		}
+	}
+	return met, nil
+}
+
+// judgeConstraints gives UnrankableJobs' reasons, and the jobs of completed that violate a
+// constraint whatever their first reason is.
+func judgeConstraints(ctx context.Context, dbURL string, pe *domain.PlatformExperiment, completed map[string]bool) (map[string]string, map[string]bool, error) {
+	unrankable, broken := map[string]string{}, map[string]bool{}
 	for _, metric := range pe.Metrics {
 		if metric.EffectiveRole() != domain.MetricRoleConstraint {
 			continue
@@ -49,7 +85,7 @@ func UnrankableJobs(ctx context.Context, dbURL string, pe *domain.PlatformExperi
 			ExperimentMetricValue, pe.ID, metric.Key, ObservedLookback(pe.CreatedAt))
 		samples, err := QueryVector(ctx, dbURL, promQL)
 		if err != nil {
-			return nil, fmt.Errorf("metricsdb.UnrankableJobs: %s: %w", metric.Key, err)
+			return nil, nil, fmt.Errorf("metricsdb.UnrankableJobs: %s: %w", metric.Key, err)
 		}
 		reported, violated := map[string]bool{}, map[string]float64{}
 		for _, sm := range samples {
@@ -67,17 +103,57 @@ func UnrankableJobs(ctx context.Context, dbURL string, pe *domain.PlatformExperi
 			bound = "at most"
 		}
 		for job := range completed {
+			value, broke := violated[job]
+			if broke {
+				broken[job] = true
+			}
 			if _, judged := unrankable[job]; judged {
 				continue
 			}
-			if value, broke := violated[job]; broke {
+			if broke {
 				unrankable[job] = fmt.Sprintf("constraint %s is %g, and must be %s %g", metric.Key, value, bound, *metric.Bound)
 			} else if !reported[job] {
 				unrankable[job] = fmt.Sprintf("constraint %s was not reported, and must be %s %g", metric.Key, bound, *metric.Bound)
 			}
 		}
 	}
-	return unrankable, nil
+	return unrankable, broken, nil
+}
+
+// JobValue is one job's last "raw"-basis value on one metric.
+type JobValue struct {
+	AgentID      string
+	ExperimentID string
+	Value        float64
+}
+
+// LastPerJobOnMetric is the last "raw"-basis value on metric of every job of completed that
+// reported it, whatever constraints the job held, ordered by agent and job.
+func LastPerJobOnMetric(ctx context.Context, dbURL string, pe *domain.PlatformExperiment, metric domain.MetricDefinition, completed map[string]bool) ([]JobValue, error) {
+	promQL := fmt.Sprintf(`max by (agent_id, metric_basis, job_id) (last_over_time(%s{platform_experiment_id=%q, metric_name=%q}[%s]))`,
+		ExperimentMetricValue, pe.ID, metric.Key, ObservedLookback(pe.CreatedAt))
+	samples, err := QueryVector(ctx, dbURL, promQL)
+	if err != nil {
+		return nil, fmt.Errorf("metricsdb.LastPerJobOnMetric: %s: %w", metric.Key, err)
+	}
+	var out []JobValue
+	seen := map[string]bool{}
+	for _, sm := range samples {
+		job := sm.Labels["job_id"]
+		// A job's samples from before metric_basis existed carry none: one value per job stands.
+		if basis := sm.Labels["metric_basis"]; !completed[job] || seen[job] || (basis != "" && basis != "raw") {
+			continue
+		}
+		seen[job] = true
+		out = append(out, JobValue{AgentID: sm.Labels["agent_id"], ExperimentID: job, Value: sm.Value})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].AgentID != out[j].AgentID {
+			return out[i].AgentID < out[j].AgentID
+		}
+		return out[i].ExperimentID < out[j].ExperimentID
+	})
+	return out, nil
 }
 
 // BestPerAgentOnMetric returns, for every agent in platformExpID, its best "raw"-basis value on

@@ -34,23 +34,24 @@ type AgentStanding struct {
 	RanOn        *domain.RanOn     `json:"ran_on,omitempty" doc:"Where the job ran, on results only: a reference compares with it on the same machine."`
 }
 
-// ReferenceValue is one agent's value on a reference metric, the job that measured it and where.
+// ReferenceValue is one COMPLETED job's value on a reference metric, its agent and where it ran.
 type ReferenceValue struct {
-	AgentID      string        `json:"agent_id"`
-	Value        float64       `json:"value"`
-	ExperimentID string        `json:"experiment_id,omitempty"`
-	RanOn        *domain.RanOn `json:"ran_on,omitempty"`
+	AgentID        string        `json:"agent_id"`
+	Value          float64       `json:"value"`
+	ExperimentID   string        `json:"experiment_id,omitempty"`
+	RanOn          *domain.RanOn `json:"ran_on,omitempty"`
+	ConstraintsMet string        `json:"constraints_met" enum:"true,false,unknown" doc:"Whether the job held every constraint metric: false when it broke one, unknown when it did not report one. Only a value whose constraints are met counts toward best."`
 }
 
 // MetricReference is what was measured of one outside system the goal compares against. Values
-// is empty while nobody has measured it. Best, Leader and Beaten set the leader against it: a run
+// is empty while no completed job has reported it. Best, Leader and Beaten set the leader against it: a run
 // whose leader is short of a reference the goal asks to beat has not met the goal, whatever the
 // standings against the control say.
 type MetricReference struct {
 	Metric       string           `json:"metric"`
 	Direction    string           `json:"direction"`
 	Values       []ReferenceValue `json:"values"`
-	Best         *float64         `json:"best,omitempty" doc:"The best of values in the reference's direction, absent while nobody measured it."`
+	Best         *float64         `json:"best,omitempty" doc:"The best of values whose constraints are met, in the reference's direction, absent while there is none."`
 	LeaderMetric string           `json:"leader_metric,omitempty" doc:"The first ranking metric, whose leader is set against this reference when both run in the same direction."`
 	Leader       *float64         `json:"leader,omitempty" doc:"The best ranked value on leader_metric, absent while nobody ranks."`
 	Beaten       *bool            `json:"beaten,omitempty" doc:"Whether leader is strictly better than best, present when both are."`
@@ -95,7 +96,7 @@ type PlatformExperimentResults struct {
 	Status               string            `json:"status"`
 	Summary              string            `json:"summary,omitempty"`
 	Metrics              []MetricStandings `json:"metrics"`
-	References           []MetricReference `json:"references" doc:"Each reference metric with every agent's best value on it and the machine it ran on, never ranked."`
+	References           []MetricReference `json:"references" doc:"Each reference metric with the value of every completed job that reported it, whether that job met the constraints, and the machine it ran on, never ranked."`
 	Bests                []MetricBests     `json:"bests"`
 }
 
@@ -129,13 +130,6 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 		}
 		sort.Slice(bests.Agents, func(i, j int) bool { return bests.Agents[i].AgentID < bests.Agents[j].AgentID })
 		out.Bests = append(out.Bests, bests)
-		if metric.EffectiveRole() == domain.MetricRoleReference {
-			reference := MetricReference{Metric: metric.Key, Direction: metric.Direction, Values: make([]ReferenceValue, 0, len(bests.Agents))}
-			for _, b := range bests.Agents {
-				reference.Values = append(reference.Values, ReferenceValue{AgentID: b.AgentID, Value: b.Best, ExperimentID: b.ExperimentID})
-			}
-			out.References = append(out.References, reference)
-		}
 		if metric.EffectiveRole() != domain.MetricRoleRanking {
 			continue
 		}
@@ -149,6 +143,9 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 			Standings:         standings,
 			NonRawBasisAgents: nonRawAgents,
 		})
+	}
+	if out.References, err = s.references(ctx, pe); err != nil {
+		return nil, fmt.Errorf("results: %w", err)
 	}
 	// One read for every best job, whatever the number of metrics and agents.
 	jobs := map[string]*domain.Experiment{}
@@ -192,6 +189,9 @@ func setAgainstLeader(out *PlatformExperimentResults) {
 			return a > b
 		}
 		for _, v := range reference.Values {
+			if v.ConstraintsMet != metricsdb.ConstraintsHeld {
+				continue
+			}
 			if reference.Best == nil || better(v.Value, *reference.Best) {
 				reference.Best = &v.Value
 			}
@@ -208,6 +208,39 @@ func setAgainstLeader(out *PlatformExperimentResults) {
 		beaten := better(leader, *reference.Best)
 		reference.Leader, reference.Beaten = &leader, &beaten
 	}
+}
+
+// references is each reference metric of pe with the value of every COMPLETED job that reported
+// it, whether or not the job held the constraints: a reference a job measured is listed, and only
+// best weighs whether it counts.
+func (s *PlatformExperimentsService) references(ctx context.Context, pe *domain.PlatformExperiment) ([]MetricReference, error) {
+	out := []MetricReference{}
+	if !slices.ContainsFunc(pe.Metrics, func(m domain.MetricDefinition) bool { return m.EffectiveRole() == domain.MetricRoleReference }) {
+		return out, nil
+	}
+	completed, err := s.store.CompletedJobIDs(ctx, pe.ID)
+	if err != nil {
+		return nil, err
+	}
+	met, err := metricsdb.ConstraintsMet(ctx, s.metricsDBURL, pe, completed)
+	if err != nil {
+		return nil, err
+	}
+	for _, metric := range pe.Metrics {
+		if metric.EffectiveRole() != domain.MetricRoleReference {
+			continue
+		}
+		values, err := metricsdb.LastPerJobOnMetric(ctx, s.metricsDBURL, pe, metric, completed)
+		if err != nil {
+			return nil, err
+		}
+		reference := MetricReference{Metric: metric.Key, Direction: metric.Direction, Values: make([]ReferenceValue, 0, len(values))}
+		for _, v := range values {
+			reference.Values = append(reference.Values, ReferenceValue{AgentID: v.AgentID, Value: v.Value, ExperimentID: v.ExperimentID, ConstraintsMet: met[v.ExperimentID]})
+		}
+		out = append(out, reference)
+	}
+	return out, nil
 }
 
 // mergeRanOn sets where each standing's and each reference value's job ran, in one read of the

@@ -5,6 +5,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -195,6 +196,24 @@ func TestAJobThatBreaksAConstraintOrReportsNoneRanksNowhere(t *testing.T) {
 		"job-rescaled": "constraint fp32_agreement was not reported, and must be at least 0.99",
 	}; !maps.Equal(why, want) {
 		t.Errorf("unrankable = %v, want %v", why, want)
+	}
+	met, err := ConstraintsMet(context.Background(), server.URL, pe, completed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]string{
+		"job-fp16": "true", "job-ok": "true", "job-bf16": "false", "job-broken": "false", "job-silent": "unknown", "job-rescaled": "unknown",
+	}; !maps.Equal(met, want) {
+		t.Errorf("constraints met = %v, want %v", met, want)
+	}
+	// Every completed job's value stands, whatever it held: a reference is listed even where it
+	// broke a constraint, so nobody reads it as never measured.
+	values, err := LastPerJobOnMetric(context.Background(), server.URL, pe, pe.Metrics[0], map[string]bool{"job-bf16": true, "job-silent": true, "job-broken": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []JobValue{{"a1", "job-bf16", 15000}, {"a2", "job-silent", 20000}, {"a3", "job-broken", 99999}}; !reflect.DeepEqual(values, want) {
+		t.Errorf("values = %+v, want %+v", values, want)
 	}
 }
 

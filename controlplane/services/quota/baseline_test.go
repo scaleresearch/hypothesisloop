@@ -18,6 +18,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
 func openExperiment() *domain.PlatformExperiment {
@@ -134,16 +135,30 @@ func TestABaselineIsDeclaredOnAnOpenExperimentAndCheckedAgainstTheJob(t *testing
 }
 
 // A reference is an outside system the goal compares against, which a baseline may be unable to
-// run. Leaving it out does not hold the run, and the brief says it was not measured.
+// run. Leaving it out does not hold the run, and the brief says it was not measured. A reference
+// is measured by the baseline's follow-up jobs, and the brief lists every value a completed job
+// reported and whether that job met the constraints: one that did not still shows, so nobody
+// takes it for unmeasured, and says it does not count.
 func TestABaselineThatLeftAReferenceOutIsDeclaredAndTheBriefSaysSo(t *testing.T) {
 	pe := openExperiment()
 	pe.Metrics = append(pe.Metrics,
 		domain.MetricDefinition{Key: "other_loss", Direction: "minimize", Role: domain.MetricRoleReference},
 		domain.MetricDefinition{Key: "third_loss", Direction: "minimize", Role: domain.MetricRoleReference})
 	baseline := measuredBaseline()
-	baseline.Reported["other_loss"] = 2.1
+	baseline.References = []MetricReference{
+		{Metric: "other_loss", Values: []ReferenceValue{
+			{AgentID: "ag-baseline", Value: 2.1, ExperimentID: "job-2", ConstraintsMet: metricsdb.ConstraintsHeld},
+			{AgentID: "ag-baseline", Value: 1.9, ExperimentID: "job-3", ConstraintsMet: metricsdb.ConstraintsBroken},
+			{AgentID: "ag-baseline", Value: 2.0, ExperimentID: "job-4", ConstraintsMet: metricsdb.ConstraintsUnknown},
+		}},
+		{Metric: "third_loss", Values: []ReferenceValue{}},
+	}
 	store, patch := declareAPI(t, pe, baseline, theCoordinator)
-	want := openExperiment().Description + theMeasuredBlock + ", other_loss = 2.1\nreferences not measured: third_loss"
+	want := openExperiment().Description + theMeasuredBlock +
+		"\nreference other_loss = 2.1 (job job-2, constraints met)" +
+		"\nreference other_loss = 1.9 (job job-3, a constraint broken, so it does not count)" +
+		"\nreference other_loss = 2 (job job-4, a constraint not reported, so it does not count)" +
+		"\nreferences not measured: third_loss"
 	if code, out := patch(map[string]any{"baseline_job_id": "job-1"}); code != http.StatusOK || store.created[0].Description != want {
 		t.Fatalf("got = %d %v, brief %q, want the baseline declared and the brief %q", code, out, store.created[0].Description, want)
 	}

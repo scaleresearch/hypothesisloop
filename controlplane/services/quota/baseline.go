@@ -30,6 +30,9 @@ type Baseline struct {
 	// Declared is the environment file at the head of the baseline branch, nil when it holds
 	// none: what a job of the default branch runs in.
 	Declared *string
+	// References is what the experiment's COMPLETED jobs measured of each reference metric,
+	// the baseline's follow-up jobs among them.
+	References []MetricReference
 }
 
 // baselineHeadroom is how far over the baseline's observed hours the estimate of a job that
@@ -81,6 +84,9 @@ func (s *PlatformExperimentsService) readBaseline(ctx context.Context, pe *domai
 		}
 	}
 	if out.Declared, err = s.environments.Read(ctx, pe.ProjectID, pe.Repository, domain.BaselineBranch(pe.ID)); err != nil {
+		return nil, err
+	}
+	if out.References, err = s.references(ctx, pe); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -147,19 +153,33 @@ func checkBaselineEnvironment(pe *domain.PlatformExperiment, baseline *Baseline)
 const measuredBaselineHeader = "MEASURED BASELINE (written by the platform from the declared job)"
 
 // baselineBlock is the block for baseline, with the last value it reported on each of metrics
-// in declared order, and the references it left out, which the baseline need not measure.
+// in declared order but the references, then each value a completed job reported on a reference
+// and whether that job met the constraints, and the references no job reported.
 func baselineBlock(baseline *Baseline, metrics []domain.MetricDefinition) string {
 	measured := make([]string, 0, len(metrics))
-	var unmeasured []string
 	for _, metric := range metrics {
-		if value, reported := baseline.Reported[metric.Key]; reported {
+		if value, reported := baseline.Reported[metric.Key]; reported && metric.EffectiveRole() != domain.MetricRoleReference {
 			measured = append(measured, fmt.Sprintf("%s = %g", metric.Key, value))
-		} else if metric.EffectiveRole() == domain.MetricRoleReference {
-			unmeasured = append(unmeasured, metric.Key)
 		}
 	}
 	lines := []string{measuredBaselineHeader, "job: " + baseline.Job.ID, "code_ref: " + baseline.Job.CodeRef,
 		"measured: " + strings.Join(measured, ", ")}
+	var unmeasured []string
+	for _, reference := range baseline.References {
+		if len(reference.Values) == 0 {
+			unmeasured = append(unmeasured, reference.Metric)
+		}
+		for _, v := range reference.Values {
+			held := map[string]string{
+				metricsdb.ConstraintsHeld:   "constraints met",
+				metricsdb.ConstraintsBroken: "a constraint broken, so it does not count",
+			}[v.ConstraintsMet]
+			if held == "" {
+				held = "a constraint not reported, so it does not count"
+			}
+			lines = append(lines, fmt.Sprintf("reference %s = %g (job %s, %s)", reference.Metric, v.Value, v.ExperimentID, held))
+		}
+	}
 	if len(unmeasured) > 0 {
 		lines = append(lines, "references not measured: "+strings.Join(unmeasured, ", "))
 	}

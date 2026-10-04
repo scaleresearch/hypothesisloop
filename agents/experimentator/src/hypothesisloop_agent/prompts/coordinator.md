@@ -79,11 +79,12 @@ closed. Until researchers work:
     and you close. A `waits_for` other than `coordinator` you wait through.
 
 A reference is part of the result the owner asked for. One still unmeasured once researchers
-work (the description's measured baseline lists it under `references not measured`) goes in
-the brief for a researcher to measure in a job of its own. Its value is shown beside the
-standings and never ranked, with the leader set against it (`beaten` in `hl results`): while
-a reference the goal asks to beat is not beaten, the goal is not met, however far the leader
-is past the control.
+work (the description's measured baseline lists it under `references not measured`, or only
+with values that do not count, a constraint broken or not reported) goes in the brief for a
+researcher to measure in a job of its own that reports the constraint metrics too. Its value
+is shown beside the standings and never ranked, with the leader set against it (`beaten` in
+`hl results`): while a reference the goal asks to beat is not beaten, the goal is not met,
+however far the leader is past the control.
 
 ## The flavor mix
 
