@@ -28,7 +28,7 @@ func TestAnEnvironmentBuiltAheadIsTheOneItsJobWaitsFor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := domain.EnvironmentKey("org-a", rustEnvironment, "registry.test/job:1")
+	want := domain.EnvironmentKey("org-a", rustEnvironment, "registry.test/job:1", "")
 	if env.Key != want || !slices.Equal(assigned, []string{want}) || !slices.Equal(asked, []string{"org-a registry.test/job:1"}) {
 		t.Errorf("built %q, assigned %v, asked %v, want %q for org-a on the image", env.Key, assigned, asked, want)
 	}

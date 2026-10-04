@@ -343,6 +343,9 @@ func (c *Config) build() error {
 		if i.Carries == "" {
 			return fmt.Errorf("job_images %s: carries is required, since what is installed is what an agent chooses the image by", i.Name)
 		}
+		if i.EnvironmentBase != "" && (i.Repository == "" || strings.ContainsAny(i.EnvironmentBase, " \t:@")) {
+			return fmt.Errorf("job_images %s: environment_base is a name under runtimes.registry, beside repository, of the image an environment is built on", i.Name)
+		}
 	}
 	if e := c.Environments; e != nil {
 		if _, path, ok := strings.Cut(e.Repository, "/"); !ok || path == "" || strings.ContainsAny(e.Repository, " \t@") || strings.Contains(e.Repository, "://") {

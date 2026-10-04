@@ -61,7 +61,9 @@ const (
 )
 
 // Environment is one image the platform builds for an org from an environment file on one base
-// image. Key names the three, so the same file on the same base is built once per org. A building
+// image, with the platform's tools from the image Tools added last, none when Tools is empty.
+// Base and Tools are each repository@digest, and Key names the four, so the same file on the
+// same images is built once per org however the images are tagged. A building
 // one is assigned to ClusterName at AssignedAt for its Attempt-th time, or to none while
 // ClusterName is empty. Image is the pushed build, repository@digest, and runs once State is
 // ready. LogTail is the end of the output of a build that failed, and FailedLog that of the file's
@@ -73,6 +75,7 @@ type Environment struct {
 	Key         string
 	OrgID       string
 	Base        string
+	Tools       string
 	Dockerfile  string
 	Image       string
 	LoadedImage string
@@ -93,11 +96,17 @@ type Environment struct {
 // NodeHostnameLabel is the label that names one node, which a job is pinned to its node by.
 const NodeHostnameLabel = "kubernetes.io/hostname"
 
-// EnvironmentKey names the build of dockerfile on base for orgID.
-func EnvironmentKey(orgID, dockerfile, base string) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%s%d:%s%d:%s", len(orgID), orgID, len(base), base, len(dockerfile), dockerfile)))
+// EnvironmentKey names the build of dockerfile on base with the tools of tools for orgID.
+func EnvironmentKey(orgID, dockerfile, base, tools string) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%s%d:%s%d:%s%d:%s", len(orgID), orgID, len(base), base, len(dockerfile), dockerfile, len(tools), tools)))
 	return hex.EncodeToString(sum[:])
 }
+
+// PlatformTools are the files of a job image a job needs from the platform: its client, and
+// hl-clone, which fetches the job's commit. An environment built on a job image's base gets them
+// from the job image as its last layer, so what the file installs stays cached across releases of
+// the platform that change only them.
+var PlatformTools = []string{"/usr/local/bin/hl", "/usr/local/bin/hl-clone"}
 
 // EnvironmentBuildOutcome is what the cluster a build was assigned to reports of it.
 type EnvironmentBuildOutcome struct {
@@ -130,14 +139,27 @@ const (
 // ErrNoEnvironmentBuilder is an environment declared while no cluster the org may use builds.
 var ErrNoEnvironmentBuilder = errors.New("no registered cluster the org may use builds environments")
 
+// ImageUnresolvedError is an image an environment is built from whose registry did not name the
+// digest of what it holds.
+type ImageUnresolvedError struct {
+	Image string
+	Err   error
+}
+
+func (e *ImageUnresolvedError) Error() string {
+	return "the registry of " + e.Image + " did not say which image it is: " + e.Err.Error()
+}
+
+func (e *ImageUnresolvedError) Unwrap() error { return e.Err }
+
 // EnvironmentFileError is an environment file the platform does not build, with why.
 type EnvironmentFileError struct{ Why string }
 
 func (e *EnvironmentFileError) Error() string { return e.Why }
 
 // ValidateEnvironmentFile accepts a file whose first two instructions are ARG BASE and FROM
-// ${BASE}, so whatever it adds sits on the image the platform runs (hl inside), and that reads
-// nothing from a build context. Comments and blank lines may come before them.
+// ${BASE}, so whatever it adds sits on the image the platform runs, and that reads nothing from a
+// build context. Comments and blank lines may come before them.
 func ValidateEnvironmentFile(dockerfile string) error {
 	if len(dockerfile) > MaxEnvironmentFileBytes || !utf8.ValidString(dockerfile) {
 		return &EnvironmentFileError{Why: fmt.Sprintf("%s must be UTF-8 text of at most %d bytes", EnvironmentFile, MaxEnvironmentFileBytes)}
@@ -158,7 +180,7 @@ func ValidateEnvironmentFile(dockerfile string) error {
 		(instructions[1][1] == "${BASE}" || instructions[1][1] == "$BASE") &&
 		(len(instructions[1]) == 2 || len(instructions[1]) == 4 && strings.EqualFold(instructions[1][2], "AS"))
 	if !arg || !from {
-		return &EnvironmentFileError{Why: EnvironmentFile + " begins with the two lines ARG BASE and FROM ${BASE}: the platform passes as BASE the image the job names, and builds what follows on it"}
+		return &EnvironmentFileError{Why: EnvironmentFile + " begins with the two lines ARG BASE and FROM ${BASE}: the platform passes as BASE the image the job names, without hl and hl-clone, which it adds last, and builds what follows on it"}
 	}
 	return refuseBuildContext(dockerfile)
 }

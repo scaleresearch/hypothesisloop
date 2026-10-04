@@ -11,7 +11,7 @@ const branchEnvironment = "ARG BASE\nFROM ${BASE}\nRUN apt-get install -y rustc\
 
 // ranIn is the baseline job run in the environment of file, as admission places it.
 func ranIn(b *Baseline, file string) {
-	env := &domain.Environment{Key: domain.EnvironmentKey("org", file, "registry.test/job:1"), OrgID: "org", Dockerfile: file, Image: "registry.test/env@sha256:job", State: domain.EnvironmentReady}
+	env := &domain.Environment{Key: domain.EnvironmentKey("org", file, "registry.test/job:1", ""), OrgID: "org", Dockerfile: file, Image: "registry.test/env@sha256:job", State: domain.EnvironmentReady}
 	b.Job.EnvironmentKey, b.Job.ResolvedJob, b.Environment = env.Key, &domain.JobSpec{Image: env.Image}, env
 }
 

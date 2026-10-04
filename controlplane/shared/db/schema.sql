@@ -1429,3 +1429,7 @@ CREATE INDEX IF NOT EXISTS platform_experiments_accepts_at ON platform_experimen
 -- before it is ready. Empty otherwise, and cleared by every new assignment and every outcome.
 ALTER TABLE environments ADD COLUMN IF NOT EXISTS loaded_image TEXT NOT NULL DEFAULT '';
 ALTER TABLE environments ADD COLUMN IF NOT EXISTS loaded_node  TEXT NOT NULL DEFAULT '';
+-- The image an environment's last layer takes the platform's tools from (domain.PlatformTools),
+-- repository@digest, empty for one built on its job's image itself. base is then that image
+-- without them, so a release that changes only the tools keeps the layers the file built.
+ALTER TABLE environments ADD COLUMN IF NOT EXISTS tools TEXT NOT NULL DEFAULT '';

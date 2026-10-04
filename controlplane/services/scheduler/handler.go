@@ -449,6 +449,8 @@ func admissionHTTPStatus(reason string) int {
 		return http.StatusBadRequest
 	case ReasonRateLimited:
 		return http.StatusTooManyRequests
+	case ReasonImageUnresolved:
+		return http.StatusServiceUnavailable
 	default:
 		return http.StatusUnprocessableEntity
 	}

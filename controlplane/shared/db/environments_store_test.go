@@ -29,7 +29,7 @@ func newEnvironments(t *testing.T) *environments {
 func (w *environments) ensure(t *testing.T, org, what string) *domain.Environment {
 	t.Helper()
 	dockerfile := "ARG BASE\nFROM ${BASE}\nRUN echo " + w.suffix + " " + what + "\n"
-	env, err := w.envs.EnsureEnvironment(context.Background(), &domain.Environment{Key: domain.EnvironmentKey(org, dockerfile, "registry.test/job:1"), OrgID: org, Base: "registry.test/job:1", Dockerfile: dockerfile})
+	env, err := w.envs.EnsureEnvironment(context.Background(), &domain.Environment{Key: domain.EnvironmentKey(org, dockerfile, "registry.test/job:1", ""), OrgID: org, Base: "registry.test/job:1", Dockerfile: dockerfile})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,5 +394,29 @@ func TestABuildLoadedOnANodePlacesAJobOnlyInThatImageOnItsCluster(t *testing.T) 
 	}
 	if got, _ := w.envs.GetEnvironment(ctx, again.Key); got.LoadedImage != "" || got.LoadedNode != "" {
 		t.Errorf("after the platform's fault: %+v, want nothing held", got)
+	}
+}
+
+func TestAnEnvironmentKeepsTheImageItsToolsComeFrom(t *testing.T) {
+	w := newEnvironments(t)
+	ctx := context.Background()
+	dockerfile := "ARG BASE\nFROM ${BASE}\nRUN echo " + w.suffix + " tools\n"
+	base, tools := "registry.test/job-base@sha256:"+w.suffix, "registry.test/job@sha256:"+w.suffix
+	made, err := w.envs.EnsureEnvironment(ctx, &domain.Environment{Key: domain.EnvironmentKey(w.orgA, dockerfile, base, tools), OrgID: w.orgA, Base: base, Tools: tools, Dockerfile: dockerfile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assigned := w.assign(t, made.Key, w.ofA)
+	builds, err := w.envs.AssignedEnvironmentBuilds(ctx, w.ofA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range builds {
+		if b.Key == assigned.Key && (b.Base != base || b.Tools != tools) {
+			t.Errorf("assigned build on %q with tools of %q, want %q and %q", b.Base, b.Tools, base, tools)
+		}
+	}
+	if made.Tools != tools || assigned.Tools != tools {
+		t.Errorf("made %+v and assigned %+v, want both with the tools' image", made, assigned)
 	}
 }

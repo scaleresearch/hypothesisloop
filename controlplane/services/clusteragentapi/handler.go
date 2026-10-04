@@ -753,7 +753,7 @@ func (h *Handler) environmentWork(ctx context.Context, cluster string, exps []*d
 		return nil, nil, err
 	}
 	for _, env := range assigned {
-		builds = append(builds, domain.EnvironmentBuild{Key: env.Key, Attempt: env.Attempt, Base: env.Base, Dockerfile: env.Dockerfile, Repository: h.environments.Repository})
+		builds = append(builds, domain.EnvironmentBuild{Key: env.Key, Attempt: env.Attempt, Base: env.Base, Tools: env.Tools, Dockerfile: env.Dockerfile, Repository: h.environments.Repository})
 	}
 	if !slices.ContainsFunc(exps, func(exp *domain.Experiment) bool { return exp.EnvironmentKey != "" }) {
 		return builds, nil, nil

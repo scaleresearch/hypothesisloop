@@ -103,7 +103,7 @@ type CodeHost interface {
 // it declares none, a *domain.EnvironmentFileError for a file the platform does not build and
 // domain.ErrNoEnvironmentBuilder while no cluster builds for the org.
 type Environments interface {
-	Declared(ctx context.Context, orgID, projectID, repository, ref, base string) (*domain.Environment, error)
+	Declared(ctx context.Context, orgID, projectID, repository, ref, image string) (*domain.Environment, error)
 }
 
 // InstalledCapacity is what each connected cluster and each of its nodes has installed, whether

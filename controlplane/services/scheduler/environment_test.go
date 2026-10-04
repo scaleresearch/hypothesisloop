@@ -41,7 +41,7 @@ func (d declared) Declared(_ context.Context, orgID, _, _, ref, base string) (*d
 	if d.noBuilder {
 		return nil, domain.ErrNoEnvironmentBuilder
 	}
-	return &domain.Environment{Key: domain.EnvironmentKey(orgID, file, base), OrgID: orgID, Base: base, Dockerfile: file, State: domain.EnvironmentBuilding}, nil
+	return &domain.Environment{Key: domain.EnvironmentKey(orgID, file, base, ""), OrgID: orgID, Base: base, Dockerfile: file, State: domain.EnvironmentBuilding}, nil
 }
 
 const rustEnvironment = "ARG BASE\nFROM ${BASE}\nRUN apt-get install -y rustc\n"
@@ -57,7 +57,7 @@ func TestASubmitKeepsTheEnvironmentItsCommitDeclaresForItsOrgOnItsImage(t *testi
 	if err := s.Submit(context.Background(), exp); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if want := domain.EnvironmentKey("org-a", rustEnvironment, "registry.test/job:1"); exp.EnvironmentKey != want || !slices.Equal(asked, []string{"org-a registry.test/job:1"}) {
+	if want := domain.EnvironmentKey("org-a", rustEnvironment, "registry.test/job:1", ""); exp.EnvironmentKey != want || !slices.Equal(asked, []string{"org-a registry.test/job:1"}) {
 		t.Errorf("environment %q asked as %v, want %q for org-a on the job's image", exp.EnvironmentKey, asked, want)
 	}
 

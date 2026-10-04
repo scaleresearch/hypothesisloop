@@ -333,24 +333,30 @@ type EnvironmentsConfig struct {
 
 // JobImageConfig is one image the deployment offers a job to run in. It is named by image, a
 // whole reference, or by repository, a name under runtimes.registry at runtimes.image_tag: one
-// this deployment built and pushed with its own.
+// this deployment built and pushed with its own. EnvironmentBase, beside repository alone, is
+// the name under runtimes.registry, at the same tag, of the same image without the platform's
+// tools (domain.JobImage.EnvironmentBase).
 type JobImageConfig struct {
-	Name       string   `yaml:"name"`
-	Image      string   `yaml:"image"`
-	Repository string   `yaml:"repository"`
-	Carries    string   `yaml:"carries"`
-	Suits      []string `yaml:"suits"`
+	Name            string   `yaml:"name"`
+	Image           string   `yaml:"image"`
+	Repository      string   `yaml:"repository"`
+	EnvironmentBase string   `yaml:"environment_base"`
+	Carries         string   `yaml:"carries"`
+	Suits           []string `yaml:"suits"`
 }
 
 // OfferedJobImages is the configured job images with their references resolved.
 func (c *Config) OfferedJobImages() []domain.JobImage {
 	images := make([]domain.JobImage, 0, len(c.JobImages))
 	for _, i := range c.JobImages {
-		reference := i.Image
+		reference, base := i.Image, ""
 		if i.Repository != "" {
 			reference = c.Runtimes.Registry + "/" + i.Repository + ":" + c.Runtimes.ImageTag
 		}
-		images = append(images, domain.JobImage{Name: i.Name, Image: reference, Carries: i.Carries, Suits: i.Suits})
+		if i.EnvironmentBase != "" {
+			base = c.Runtimes.Registry + "/" + i.EnvironmentBase + ":" + c.Runtimes.ImageTag
+		}
+		images = append(images, domain.JobImage{Name: i.Name, Image: reference, Carries: i.Carries, Suits: i.Suits, EnvironmentBase: base})
 	}
 	return images
 }

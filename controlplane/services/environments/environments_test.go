@@ -3,6 +3,7 @@ package environments
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -76,5 +77,57 @@ func TestAnEnvironmentIsRefusedToAnOrgNoClusterBuildsFor(t *testing.T) {
 	svc := NewService(store, &fileHost{files: map[string]string{"c1": rust}})
 	if _, err := svc.Declared(context.Background(), "org-b", "prj", "acme/model", "c1", "registry.test/hl/job:1"); !errors.Is(err, domain.ErrNoEnvironmentBuilder) || len(store.envs) != 0 {
 		t.Fatalf("got %v with %d stored, want ErrNoEnvironmentBuilder and nothing stored", err, len(store.envs))
+	}
+}
+
+// digests names each reference by the digest its registry holds it under, and none it lacks.
+type digests map[string]string
+
+func (d digests) Pinned(_ context.Context, ref string) (string, error) {
+	repository, _, _ := strings.Cut(ref, ":")
+	if sum, ok := d[ref]; ok {
+		return repository + "@" + sum, nil
+	}
+	return "", errors.New("manifest unknown")
+}
+
+// An environment of an offered job image is built on its base and takes the tools from the image,
+// each named by its digest: a release under a new tag whose images are the same is the same
+// environment, and one whose tools alone changed keeps the base its layers were built on.
+func TestAnEnvironmentIsKeyedOnTheDigestsOfItsBaseAndToolsNotOnTheirTags(t *testing.T) {
+	store := &memoryStore{envs: map[string]*domain.Environment{}, builders: map[string]bool{"org-a": true}}
+	host := &fileHost{files: map[string]string{"c1": rust}}
+	registry := digests{"registry.test/hl/job-base:7": "sha256:base", "registry.test/hl/job-base:8": "sha256:base", "registry.test/hl/job-base:9": "sha256:base",
+		"registry.test/hl/job:7": "sha256:tools-1", "registry.test/hl/job:8": "sha256:tools-1", "registry.test/hl/job:9": "sha256:tools-2"}
+	release := func(tag string) *Service {
+		offered := []domain.JobImage{{Name: "python", Image: "registry.test/hl/job:" + tag, EnvironmentBase: "registry.test/hl/job-base:" + tag}}
+		return NewService(store, host).WithJobImages(offered, registry)
+	}
+	ctx := context.Background()
+	first, err := release("7").Declared(ctx, "org-a", "prj", "acme/model", "c1", "registry.test/hl/job:7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Base != "registry.test/hl/job-base@sha256:base" || first.Tools != "registry.test/hl/job@sha256:tools-1" {
+		t.Errorf("built on %q with tools of %q, want the base and the image by digest", first.Base, first.Tools)
+	}
+	retagged, _ := release("8").Declared(ctx, "org-a", "prj", "acme/model", "c1", "registry.test/hl/job:8")
+	newTools, _ := release("9").Declared(ctx, "org-a", "prj", "acme/model", "c1", "registry.test/hl/job:9")
+	if retagged.Key != first.Key || newTools.Key == first.Key || newTools.Base != first.Base {
+		t.Errorf("keys %s, %s, %s on bases %s and %s, want a retag the same and new tools another on the same base", first.Key, retagged.Key, newTools.Key, first.Base, newTools.Base)
+	}
+
+	other, err := release("7").Declared(ctx, "org-a", "prj", "acme/model", "c1", "registry.test/team/own:1")
+	if err == nil || other != nil {
+		t.Fatalf("an image its registry does not name: %+v, %v", other, err)
+	}
+	var unresolved *domain.ImageUnresolvedError
+	if !errors.As(err, &unresolved) || unresolved.Image != "registry.test/team/own:1" || len(store.envs) != 2 {
+		t.Errorf("got %v with %d stored, want an ImageUnresolvedError naming the image and nothing more stored", err, len(store.envs))
+	}
+	registry["registry.test/team/own:1"] = "sha256:own"
+	own, err := release("7").Declared(ctx, "org-a", "prj", "acme/model", "c1", "registry.test/team/own:1")
+	if err != nil || own.Base != "registry.test/team/own@sha256:own" || own.Tools != "" {
+		t.Errorf("an image offered by nobody: %+v, %v, want it built on itself by digest with no tools", own, err)
 	}
 }

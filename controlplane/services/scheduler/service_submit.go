@@ -97,6 +97,10 @@ func (s *Service) resolveImage(job *domain.JobSpec) error {
 // ReasonEnvironmentUnreadable refuses a job whose environment file the git host did not hand over.
 const ReasonEnvironmentUnreadable = "environment_unreadable"
 
+// ReasonImageUnresolved refuses, for now, a job whose environment is built from an image its
+// registry did not name: the environment is keyed on what the image holds.
+const ReasonImageUnresolved = "image_unresolved"
+
 // declaredEnvironment keeps on exp the environment its commit declares, built on its image, which
 // admission waits for. The file is read at the commit itself, so the environment is the one the
 // code was pushed with.
@@ -105,6 +109,7 @@ func (s *Service) declaredEnvironment(ctx context.Context, pe *domain.PlatformEx
 	env, err := s.environments.Declared(ctx, exp.OrgID, pe.ProjectID, pe.Repository, commit, exp.Job.Image)
 	var invalid *domain.EnvironmentFileError
 	var refused *api.Refusal
+	var unresolved *domain.ImageUnresolvedError
 	switch {
 	case errors.As(err, &invalid):
 		return &AdmissionError{Reason: domain.ReasonInvalidEnvironmentFile, Message: invalid.Why + ". Fix it, commit and submit again"}
@@ -112,6 +117,8 @@ func (s *Service) declaredEnvironment(ctx context.Context, pe *domain.PlatformEx
 		return &AdmissionError{Reason: domain.ReasonNoEnvironmentBuilder, Message: fmt.Sprintf("commit %s declares %s, and no cluster your org may use builds environments: submit from a commit without the file, or attach a cluster that builds", commit, domain.EnvironmentFile)}
 	case errors.As(err, &refused):
 		return &AdmissionError{Reason: ReasonEnvironmentUnreadable, Message: fmt.Sprintf("the platform could not read %s at commit %s: %s", domain.EnvironmentFile, commit, refused.Message)}
+	case errors.As(err, &unresolved):
+		return &AdmissionError{Reason: ReasonImageUnresolved, Message: fmt.Sprintf("commit %s declares %s, and %s. Nothing was stored: submit again in a minute", commit, domain.EnvironmentFile, unresolved.Error())}
 	case err != nil:
 		return fmt.Errorf("scheduler: environment of %s: %w", commit, err)
 	case env != nil:

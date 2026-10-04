@@ -33,6 +33,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/github"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/imagedigest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/leaderelection"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
@@ -210,7 +211,9 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	// or the same job's cost depends on which of them is asked.
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
-	environmentsSvc := environments.NewService(store.EnvironmentsStore, gitHost)
+	// An environment is keyed on the digests of the images it is built from, asked of their
+	// registry at most once a minute per tag.
+	environmentsSvc := environments.NewService(store.EnvironmentsStore, gitHost).WithJobImages(pcfg.OfferedJobImages(), imagedigest.New(time.Minute))
 
 	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap).WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent).WithRepositories(gitHost).
 		WithEnvironments(environmentsSvc)

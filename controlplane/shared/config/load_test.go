@@ -228,23 +228,25 @@ func TestLoadRequiresTheControlPlanesOwnAddressOfTheDataStore(t *testing.T) {
 func TestLoadRejectsRuntimeAddressesARuntimeCannotReach(t *testing.T) {
 	const api, metrics = "  public_api_url: http://host.example.invalid:8081", "  metrics_url: http://host.example.invalid:8084"
 	for name, edit := range map[string][2]string{
-		"no section":             {"runtimes:\n" + metrics + "\n  registry: host.example.invalid:5000\n  image_tag: abc1234", ""},
-		"no api url":             {api + "\n", ""},
-		"api url with no host":   {api, "  public_api_url: /api"},
-		"api url not http":       {api, "  public_api_url: ftp://example.invalid"},
-		"api url under agents":   {"  launcher: main", "  launcher: main\n  api_url: http://host.example.invalid:8081"},
-		"api url under runtimes": {metrics, metrics + "\n  api_url: http://host.example.invalid:8081"},
-		"no metrics url":         {metrics, `  metrics_url: ""`},
-		"metrics url no host":    {metrics, "  metrics_url: /metrics"},
-		"metrics url not http":   {metrics, "  metrics_url: grpc://metrics.example.invalid"},
-		"metrics url localhost":  {metrics, "  metrics_url: http://localhost:8084"},
-		"metrics url loopback":   {metrics, "  metrics_url: http://127.0.0.1:8084"},
-		"metrics url any":        {metrics, "  metrics_url: http://0.0.0.0:8084"},
-		"metrics url any v6":     {metrics, "  metrics_url: http://[::]:8084"},
-		"api url loopback":       {api, "  public_api_url: http://[::1]:8081"},
-		"misspelled key":         {metrics, "  metrics_url: http://metrics.example.invalid\n  metric_url: http://metrics.example.invalid"},
-		"job image named twice":  {"  - name: tenstorrent", "  - name: python"},
-		"job image with no ref":  {"    repository: hypothesisloop-job-tenstorrent\n", ""},
+		"no section":                            {"runtimes:\n" + metrics + "\n  registry: host.example.invalid:5000\n  image_tag: abc1234", ""},
+		"no api url":                            {api + "\n", ""},
+		"api url with no host":                  {api, "  public_api_url: /api"},
+		"api url not http":                      {api, "  public_api_url: ftp://example.invalid"},
+		"api url under agents":                  {"  launcher: main", "  launcher: main\n  api_url: http://host.example.invalid:8081"},
+		"api url under runtimes":                {metrics, metrics + "\n  api_url: http://host.example.invalid:8081"},
+		"no metrics url":                        {metrics, `  metrics_url: ""`},
+		"metrics url no host":                   {metrics, "  metrics_url: /metrics"},
+		"metrics url not http":                  {metrics, "  metrics_url: grpc://metrics.example.invalid"},
+		"metrics url localhost":                 {metrics, "  metrics_url: http://localhost:8084"},
+		"metrics url loopback":                  {metrics, "  metrics_url: http://127.0.0.1:8084"},
+		"metrics url any":                       {metrics, "  metrics_url: http://0.0.0.0:8084"},
+		"metrics url any v6":                    {metrics, "  metrics_url: http://[::]:8084"},
+		"api url loopback":                      {api, "  public_api_url: http://[::1]:8081"},
+		"misspelled key":                        {metrics, "  metrics_url: http://metrics.example.invalid\n  metric_url: http://metrics.example.invalid"},
+		"job image named twice":                 {"  - name: tenstorrent", "  - name: python"},
+		"job image with no ref":                 {"    repository: hypothesisloop-job-tenstorrent\n", ""},
+		"environment base of a whole reference": {"    repository: hypothesisloop-job-tenstorrent\n", "    image: registry.example.invalid/tt:1\n"},
+		"environment base with a tag":           {"    environment_base: hypothesisloop-job-base\n", "    environment_base: hypothesisloop-job-base:1\n"},
 	} {
 		text := productionConfig(t)
 		if !strings.Contains(text, edit[0]) {
@@ -560,5 +562,18 @@ func TestEnvironmentsAreLeftOutOrStatedWhole(t *testing.T) {
 		if err := loadText(t, productionConfig(t)+strings.Replace(environmentsSection, replace[0], replace[1], 1)); err == nil {
 			t.Errorf("%s: loaded, want it refused", name)
 		}
+	}
+}
+
+// An offered image this deployment builds names its environment base under the same registry and
+// tag, and one built elsewhere has none.
+func TestAnOfferedJobImageNamesItsEnvironmentBaseAtTheRuntimesTag(t *testing.T) {
+	c := &Config{Runtimes: RuntimesConfig{Registry: "registry.example.invalid/hl", ImageTag: "abc1234"}, JobImages: []JobImageConfig{
+		{Name: "python", Repository: "hypothesisloop-job", EnvironmentBase: "hypothesisloop-job-base"},
+		{Name: "theirs", Image: "registry.example.invalid/team/theirs:1"},
+	}}
+	offered := c.OfferedJobImages()
+	if offered[0].Image != "registry.example.invalid/hl/hypothesisloop-job:abc1234" || offered[0].EnvironmentBase != "registry.example.invalid/hl/hypothesisloop-job-base:abc1234" || offered[1].EnvironmentBase != "" {
+		t.Errorf("offered %+v", offered)
 	}
 }

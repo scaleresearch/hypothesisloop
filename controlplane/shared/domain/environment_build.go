@@ -4,12 +4,14 @@ import "time"
 
 // EnvironmentBuild is a build the control plane assigned to a cluster, as its reconcile answer
 // lists it under builds. The cluster builds Dockerfile with the build argument BASE set to Base,
-// pushes the image by digest with no tag to Repository, and reports the outcome under Key and
-// Attempt. A build that leaves the list is no longer the cluster's to run.
+// copies PlatformTools from the image Tools into what it built when Tools is set, pushes the
+// image by digest with no tag to Repository, and reports the outcome under Key and Attempt. A
+// build that leaves the list is no longer the cluster's to run.
 type EnvironmentBuild struct {
 	Key        string `json:"key"`
 	Attempt    int    `json:"attempt"`
 	Base       string `json:"base"`
+	Tools      string `json:"tools,omitempty"`
 	Dockerfile string `json:"dockerfile"`
 	Repository string `json:"repository"`
 }

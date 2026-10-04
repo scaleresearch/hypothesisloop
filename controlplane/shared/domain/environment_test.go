@@ -39,9 +39,10 @@ func TestAFileThatCopiesFromABuildContextIsToldItIsBuiltAlone(t *testing.T) {
 }
 
 func TestAnEnvironmentKeyNamesTheOrgTheFileAndTheBaseApart(t *testing.T) {
-	if EnvironmentKey("o", "ab", "c") == EnvironmentKey("o", "a", "bc") || EnvironmentKey("o", "x", "base:1") == EnvironmentKey("o", "x", "base:2") ||
-		EnvironmentKey("o1", "x", "base:1") == EnvironmentKey("o", "1x", "base:1") || EnvironmentKey("a", "x", "b") == EnvironmentKey("b", "x", "b") ||
-		EnvironmentKey("o", "x", "base:1") != EnvironmentKey("o", "x", "base:1") {
+	if EnvironmentKey("o", "ab", "c", "") == EnvironmentKey("o", "a", "bc", "") || EnvironmentKey("o", "x", "base:1", "") == EnvironmentKey("o", "x", "base:2", "") ||
+		EnvironmentKey("o1", "x", "base:1", "") == EnvironmentKey("o", "1x", "base:1", "") || EnvironmentKey("a", "x", "b", "") == EnvironmentKey("b", "x", "b", "") ||
+		EnvironmentKey("o", "x", "base:1", "t") == EnvironmentKey("o", "x", "base:1", "") || EnvironmentKey("o", "x", "base:1", "t:1") == EnvironmentKey("o", "x", "base:1", "t:2") ||
+		EnvironmentKey("o", "x", "base:1", "t") != EnvironmentKey("o", "x", "base:1", "t") {
 		t.Error("a key must change with the org, the file and the base, and only with them")
 	}
 }
