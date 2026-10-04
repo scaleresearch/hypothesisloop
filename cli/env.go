@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
+	"github.com/scaleresearch/hypothesisloop/cli/repotemplate"
 )
 
 var envCommands = []subcommand{
@@ -22,7 +25,8 @@ commit is pushed as hl job submit pushes it. Run it as soon as the file is commi
 the rest of the job while it builds. Asking again is safe and builds again a file that failed.
 
 FILE is the job spec the job will be submitted with: its job.image, and metadata.hypothesis_id
-for any agent but the baseline. --image and --hypothesis set them without one. Prints the
+for any agent but the baseline. It defaults to the repository's .hypothesisloop/job.yaml when
+that exists. --image and --hypothesis set them, and override the file's. Prints the
 environment: its key, state (building, ready, failed) and a message saying where the build is,
 or the end of its output once the file failed.
 
@@ -37,6 +41,14 @@ invalid_environment_file; no_environment_builder; unknown_job_image; code_ref_no
 	}
 	if len(operands) > 1 {
 		return parseExit(misuse(fs, "want at most one FILE, got %d", len(operands)))
+	}
+	if len(operands) == 0 {
+		if root, err := git(".", "rev-parse", "--show-toplevel"); err == nil {
+			spec := filepath.Join(root, repotemplate.JobSpec)
+			if _, err := os.Stat(spec); err == nil {
+				operands = []string{spec}
+			}
+		}
 	}
 	metadata := map[string]any{}
 	if len(operands) == 1 {

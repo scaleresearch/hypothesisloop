@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -37,6 +38,31 @@ func TestEnvBuildSendsTheCommitAndTheImageOfTheJobSpec(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"state":"building"`) {
 		t.Errorf("stdout %q, want the environment", stdout.String())
+	}
+}
+
+// Run 8's baseline ran hl env build with no FILE and was refused for want of an image that its
+// repository's job spec names.
+func TestEnvBuildReadsTheRepositorysJobSpecWhenNoFileIsNamed(t *testing.T) {
+	clone, _ := pushedClone(t)
+	if err := os.MkdirAll(filepath.Join(clone, ".hypothesisloop"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeJob(t, filepath.Join(clone, ".hypothesisloop", "job.yaml"), "job:\n  image: from-the-spec\n")
+	mustGit(t, clone, "add", ".")
+	mustGit(t, clone, "commit", "-q", "-m", "the job spec")
+	if err := os.MkdirAll(filepath.Join(clone, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(filepath.Join(clone, "sub"))
+	var sent map[string]any
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&sent)
+		_ = json.NewEncoder(w).Encode(map[string]string{"key": "k1", "state": "building"})
+	}))
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"env", "build", "--platform-experiment", "pe-1", "--hypothesis", "h1"}, &stdout, &stderr); code != 0 || sent["image"] != "from-the-spec" {
+		t.Fatalf("exit %d, sent %v, stderr %s, want the image of .hypothesisloop/job.yaml", code, sent, stderr.String())
 	}
 }
 
