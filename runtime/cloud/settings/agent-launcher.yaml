@@ -44,7 +44,7 @@ create_pause_milliseconds: 1000
 # this config changes. The launcher destroys the pool when it stops and when this is 0; one that
 # was killed leaves it to the next process under the same launcher_name. Left out, it is 2 on a
 # provider that can warm instances (Fly) and 0 on another (E2B).
-warm_pool_size: 2
+warm_pool_size: 4
 
 provider:
   # One of the adapters the binary was built with.
