@@ -696,15 +696,18 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
 
     # A researcher whose last job ended waited 10 minutes for agent.idle, or 30 for the harness's
     # nudge, for an update nothing of its own would send, and a lead told once rested for hours.
-    # It is told at every end of a turn with nothing in flight.
-    async def test_a_turn_ended_with_no_job_in_flight_is_told_so_every_time(self):
+    # It is told at every end of a turn with nothing in flight but the end of the turn that
+    # answered the statement: that one waits, and the platform's recurring agent.idle bounds
+    # what the statement costs, where saying it again would be a model call after each answer.
+    async def test_a_turn_ended_with_no_job_in_flight_is_told_so_unless_it_answered_that(self):
         from types import SimpleNamespace
         cfg = SimpleNamespace(agent_id="agent-a", flavor="generalist", role="competitor", api_url="http://x",
                               token=ENV["HL_TOKEN"], platform_experiment_id="pe-1")
-        update = [{"kind": "comment.new", "subject": "hyp-1", "value": "agent", "agent_id": "agent-b"}]
-        sent, _ = await self._turn_ends(cfg, [0, 0, 1, 0, 1], [update, []])
+        idle = [{"kind": "agent.idle", "subject": "agent-a", "value": "continues", "agent_id": "agent-a"}]
+        sent, reads = await self._turn_ends(cfg, [0, 0], [idle, []])
         nothing = updates.NOTHING_IN_FLIGHT + S
-        self.assertEqual(sent, ["Begin." + S, nothing, nothing, "Platform updates:\ncomment.new hyp-1 agent by agent-b" + S, nothing])
+        self.assertEqual(sent, ["Begin." + S, nothing, "Platform updates:\nagent.idle agent-a continues" + S, nothing])
+        self.assertEqual(reads, 2, "the end of an answer to the statement reads no jobs")
 
     async def test_a_job_in_flight_and_a_failed_read_say_nothing(self):
         from types import SimpleNamespace

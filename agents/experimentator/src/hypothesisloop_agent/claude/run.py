@@ -935,6 +935,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     # An agent waits for an update with no limit, a coordinator until its review.
     idle_s = updates.REVIEW_S if config.coordinates(cfg) else math.inf
     background: set[str] = set()
+    told_nothing = False
     _progress.subagents(0)
     async with ClaudeSDKClient(options=options) as client:
         log.info("model CLI connected in %.1fs", time.monotonic() - connecting)
@@ -1028,12 +1029,15 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 return True
 
             # The agent ended its turn. With no job of its own queued or running and no subagent
-            # live its wait waits for nothing: it is told so at every such end, and a read that
-            # failed says nothing.
-            if config.submits_jobs(cfg) and not background and await updates.jobs_in_flight(watch_env) == 0:
+            # live its wait waits for nothing: it is told so at every such end but the one of the
+            # turn that answered the statement, after which it waits and the platform's recurring
+            # agent.idle is its timer. A read that failed says nothing.
+            answered, told_nothing = told_nothing, False
+            if config.submits_jobs(cfg) and not background and not answered and await updates.jobs_in_flight(watch_env) == 0:
                 log.info("nothing in flight at the end of the turn, saying so")
                 _forget_job_reads()
                 await client.query(await _with_situation(setup, watch_env, updates.NOTHING_IN_FLIGHT))
+                told_nothing = True
                 continue
             # Wait for the next batch of updates about its own jobs and hypotheses and hand it
             # over on the same connection. A turn the CLI starts by itself ends the wait and is
