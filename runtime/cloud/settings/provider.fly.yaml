@@ -20,7 +20,7 @@ provider:
     # and memory: shared has 1, 2, 4, 6 or 8 cores with 256 MB to 2 GB each, performance 1 to 16
     # cores with 2 to 8 GB each. A spec that fits none of them, asks for more than 50 GB of
     # disk, or asks for an accelerator is refused.
-    cpu_kind: shared
+    cpu_kind: performance
 
 # A machine ends when its command does. What the command left running with its output open is
 # given five seconds to finish writing and is then stopped with the machine.

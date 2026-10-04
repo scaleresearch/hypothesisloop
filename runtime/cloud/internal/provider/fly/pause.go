@@ -18,7 +18,7 @@ var _ provider.Pauser = (*Provider)(nil)
 // What real Machines taught:
 //
 //   - The vendor's documentation gives 2 GiB of memory as the most it suspends. A shared Machine
-//     of 2 CPUs and 4 GiB, the size an agent runs in, suspended in 7 seconds and resumed the same
+//     of 2 CPUs and 4 GiB, the size agents ran in then, suspended in 7 seconds and resumed the same
 //     process. A refusal, should the limit be enforced, is returned as it came.
 //   - The snapshot is the vendor's to drop (a host migration, maintenance). A Machine that lost
 //     it starts cold on Resume: the supervisor and the command run again from the start, on the

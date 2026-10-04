@@ -145,7 +145,7 @@ render_runtime_configs() {
   # else: the control plane, the harness and the launcher's own loop are the same for both.
   local sandbox_settings
   case "${sandbox_provider}" in
-    fly) sandbox_settings="{api_token_env: FLY_API_TOKEN, app: $(lib_env_value FLY_APP), region: ams, cpu_kind: shared}" ;;
+    fly) sandbox_settings="{api_token_env: FLY_API_TOKEN, app: $(lib_env_value FLY_APP), region: ams, cpu_kind: performance}" ;;
     e2b) sandbox_settings="{api_key_env: E2B_API_KEY, lifetime_seconds: 3600}" ;;
   esac
   sed -e "s|^api_url: .*$|api_url: http://localhost:8081|" \

@@ -40,8 +40,9 @@ provider:
 # environment of each agent are the control plane's to say. The size is bound by the provider:
 # its section (settings/provider.<name>.yaml) states what it can rent, and a size above that
 # fails the create of every agent on every pass, which the log reports as NO AGENT COULD BE
-# STARTED. The storage here is under the smallest disk among the providers shipped, about
-# 11 GiB; check cpu and memory against the section of the one you configure.
+# STARTED. An agent compiles and benchmarks its code here before a job runs it, so the size is a
+# Fly performance machine of 8 cores and 16 GiB with its largest disk. E2B rents at most 8 GiB of
+# memory and 10 or 20 GiB of disk (settings/provider.e2b.yaml), so a launcher on it needs less.
 #
 # How long an instance may run is the control plane's to say as well: each one is rented to end
 # by itself at the latest moment its platform experiment can still be running, so a launcher
@@ -51,9 +52,9 @@ provider:
 instance:
   # The whole argv, in place of the image's entrypoint.
   command: ["uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"]
-  cpu: "2"
-  memory: 4Gi
-  storage: 10Gi
+  cpu: "8"
+  memory: 16Gi
+  storage: 50Gi
 
 # Whose models the agents run on, and what that provider's harness needs in every instance. Each
 # env entry is a variable of the instance (name) and the variable of this process that holds its
