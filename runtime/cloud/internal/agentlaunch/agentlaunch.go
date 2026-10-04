@@ -70,7 +70,15 @@ type Launcher struct {
 	// ProgressInterval, and an exited instance's end for as long as it is listed. Losing it
 	// costs a read and nothing else.
 	outputs map[string]outputRead
+	// stopped is when each ending instance was last told to stop, by instance id.
+	stopped map[string]time.Time
+	now     func() time.Time
 }
+
+// stopRetry is how long an ending instance that is still running waits before it is told to stop
+// again: one stop starts the agent's last turn, and run 7 sent one to the same machine every pass
+// for a minute.
+const stopRetry = 2 * time.Minute
 
 type outputRead struct {
 	at time.Time
@@ -94,6 +102,7 @@ func New(cfg Config) (*Launcher, error) {
 	l := &Launcher{
 		cfg: cfg, prefix: provider.AgentPrefix(cfg.Name), provider: provider.Bounded(cfg.Provider),
 		launchDigest: digest, maxAnswer: maxAnswerBytes, outputs: map[string]outputRead{},
+		stopped: map[string]time.Time{}, now: time.Now,
 	}
 	l.poolPrefix = l.prefix + poolSegment
 	l.warmer, _ = l.provider.(provider.Warmer)
@@ -226,11 +235,15 @@ func (l *Launcher) Pass(ctx context.Context) error {
 		}
 	}
 
-	// An ending instance is told to stop on every pass until its command has exited: the signal
-	// is what starts the agent's last turn, and the provider takes it any number of times.
+	// An ending instance is told to stop once, and again every stopRetry until its command has
+	// exited: the signal is what starts the agent's last turn. A stop that failed is sent again
+	// on the next pass.
 	for _, name := range sortedKeys(want.ending) {
 		for _, i := range byName[name] {
 			if i.State == provider.StateExited {
+				continue
+			}
+			if at, told := l.stopped[i.ID]; told && l.now().Sub(at) < stopRetry {
 				continue
 			}
 			if err := l.provider.Stop(ctx, i.ID); err != nil {
@@ -238,6 +251,7 @@ func (l *Launcher) Pass(ctx context.Context) error {
 				p.failures = append(p.failures, fmt.Errorf("stop %s: %w", i.Name, err))
 				continue
 			}
+			l.stopped[i.ID] = l.now()
 			l.cfg.Log("told %s to stop (ending), instance %s", i.Name, i.ID)
 		}
 	}
@@ -487,7 +501,8 @@ func (l *Launcher) exitLogOf(ctx context.Context, i provider.Instance) string {
 	return log
 }
 
-// forgetUnlisted drops what was read of instances that are no longer listed.
+// forgetUnlisted drops what is kept of instances that are no longer listed: what was read of
+// them and when they were told to stop.
 func (l *Launcher) forgetUnlisted(listed []provider.Instance) {
 	ids := make(map[string]bool, len(listed))
 	for _, i := range listed {
@@ -496,6 +511,11 @@ func (l *Launcher) forgetUnlisted(listed []provider.Instance) {
 	for id := range l.outputs {
 		if !ids[id] {
 			delete(l.outputs, id)
+		}
+	}
+	for id := range l.stopped {
+		if !ids[id] {
+			delete(l.stopped, id)
 		}
 	}
 }

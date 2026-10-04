@@ -255,7 +255,7 @@ func TestAnAgentWhoseRunIsOverIsToldToStopAndItsNormalExitIsNoCrash(t *testing.T
 	c.store.ByLauncher["main"][0].Ended = domain.RunEndClosed
 	c.pass()
 	c.pass()
-	if c.rented.Stops(name) != 2 || !reflect.DeepEqual(c.rented.IDs(name), ids) {
+	if c.rented.Stops(name) != 1 || !reflect.DeepEqual(c.rented.IDs(name), ids) {
 		t.Fatalf("stops %d, instances %v (was %v)", c.rented.Stops(name), c.rented.IDs(name), ids)
 	}
 	c.rented.Exit(name, "last turn done")
@@ -597,7 +597,7 @@ func TestARefusedLauncherEndsWhatItHoldsByTheControlPlanesListsAndRentsNothing(t
 		if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "pass_does_not_fit") || !strings.Contains(err.Error(), "create_pause 4s") || !strings.Contains(err.Error(), "agents.boot_limit_seconds 5m0s") {
 			t.Fatalf("refused pass %d = %v, want the control plane's refusal in its own words", pass, err)
 		}
-		if !reflect.DeepEqual(c.rented.Names(), []string{kept, windingDown}) || c.rented.Stops(windingDown) != pass || !reflect.DeepEqual(c.rented.IDs(kept), keptIDs) {
+		if !reflect.DeepEqual(c.rented.Names(), []string{kept, windingDown}) || c.rented.Stops(windingDown) != 1 || !reflect.DeepEqual(c.rented.IDs(kept), keptIDs) {
 			t.Fatalf("refused pass %d: rented %v with %d stops of the ending one, want %q destroyed, %q told to stop and %q untouched",
 				pass, c.rented.Names(), c.rented.Stops(windingDown), over, windingDown, kept)
 		}

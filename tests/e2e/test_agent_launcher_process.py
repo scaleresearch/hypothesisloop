@@ -120,17 +120,19 @@ def test_a_launcher_process_follows_its_agents_from_joining_to_the_end_of_their_
         api.declare_baseline_and_wait_running(pe_id)
         researcher_name = created(researcher)
 
-        # Closed: it is told to stop on every pass, kept for its wind-down, then taken down.
+        # Closed: it is told to stop once (again only every two minutes while it runs), kept for
+        # its wind-down, then taken down.
         api.close_platform_experiment(pe_id)
         closed_at = time.monotonic()
         stop_line = f"told {launcher.prefix}{researcher_name} to stop (ending)"
         eventually("the stop that starts the last turn", lambda: launcher.said(stop_line),
-                   accept=lambda count: count >= 2, deadline=deadline)
+                   accept=lambda count: count == 1, deadline=deadline)
         gone_line = f"destroyed {launcher.prefix}{researcher_name} (no longer desired)"
         assert launcher.said(gone_line) == 0, "an ending instance was destroyed at once"
         eventually("the instance going after its wind-down", lambda: launcher.said(gone_line),
                    accept=lambda count: count == 1, deadline=deadline, interval=5)
         assert time.monotonic() - closed_at >= WIND_DOWN_SECONDS - 10, "the instance did not get its wind-down"
+        assert launcher.said(stop_line) <= 2, "an ending instance was told to stop on every pass"
         assert launcher.said("created ") == 2, "an instance was rented for an agent whose run was over"
 
         # Nothing it logged holds a secret, and no pass failed.
