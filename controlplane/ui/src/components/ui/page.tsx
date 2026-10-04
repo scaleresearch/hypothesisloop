@@ -1,7 +1,14 @@
-import type { ReactNode } from 'react'
+'use client'
+
+import { createContext, useContext, type ReactNode } from 'react'
 import { clsx } from 'clsx'
 import { Button } from '@/components/ui/button'
 import { Heading } from '@/components/ui/text'
+
+const Nav = createContext<ReactNode>(null)
+
+/** Navigation that every page under it shows beneath its header, as a layout's tabs. */
+export const PageNav = Nav.Provider
 
 interface PageProps {
   title: ReactNode
@@ -16,6 +23,7 @@ interface PageProps {
 
 /** A page: its title with an optional right-aligned action row, then its sections, evenly spaced. */
 export function Page({ title, description, actions, back, fill, children }: PageProps) {
+  const nav = useContext(Nav)
   return (
     <div className={clsx('flex flex-col gap-5', fill && 'min-h-workspace')}>
       <header className="mb-3 flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
@@ -26,6 +34,7 @@ export function Page({ title, description, actions, back, fill, children }: Page
         </div>
         {actions && <div className="flex flex-none items-center gap-2">{actions}</div>}
       </header>
+      {nav}
       {children}
     </div>
   )
