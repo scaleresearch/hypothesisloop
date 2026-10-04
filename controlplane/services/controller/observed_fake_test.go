@@ -128,6 +128,6 @@ func (f fakeObserved) BestPerAgentOnMetric(_ context.Context, _ *domain.Platform
 	return f.best, f.nonRaw, f.fail("BestPerAgentOnMetric")
 }
 
-func (fakeObserved) RecordRunHealth(context.Context, string, time.Time, []domain.AgentHealth) error {
+func (fakeObserved) RecordRunHealth(context.Context, time.Time, []domain.AgentHealth) error {
 	return nil
 }

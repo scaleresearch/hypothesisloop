@@ -29,8 +29,9 @@ type StagesStore interface {
 	// reviewer holds quota and runs jobs like anyone else; it is simply not one of the things
 	// the ladder is comparing.
 	ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error)
-	// RunHealth is where each agent of a platform experiment stands, for the run's health series.
-	RunHealth(ctx context.Context, platformExpID string) ([]domain.AgentHealth, error)
+	// RunHealth is where each agent of every open or running platform experiment stands, for the
+	// runs' health series.
+	RunHealth(ctx context.Context) ([]domain.AgentHealth, error)
 	// CompletedJobIDs is the jobs that ran to a successful end: of them, the ones that hold every
 	// constraint rank.
 	CompletedJobIDs(ctx context.Context, platformExpID string) (map[string]bool, error)

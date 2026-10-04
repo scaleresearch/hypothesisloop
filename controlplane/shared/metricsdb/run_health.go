@@ -18,12 +18,12 @@ const (
 	agentCoordinatorMessagesMetric      = "agent_coordinator_messages"
 )
 
-// RecordRunHealth writes where each agent of a platform experiment stands at at, in one request.
-// A first-job series starts once there is a first job.
-func RecordRunHealth(ctx context.Context, dbURL, platformExpID string, at time.Time, agents []domain.AgentHealth) error {
+// RecordRunHealth writes where each agent stands at at, in one request. A first-job series
+// starts once there is a first job.
+func RecordRunHealth(ctx context.Context, dbURL string, at time.Time, agents []domain.AgentHealth) error {
 	var samples []GaugeSample
 	for _, a := range agents {
-		labels := map[string]string{"platform_experiment_id": platformExpID, "agent_id": a.AgentID, "role": string(a.Role)}
+		labels := map[string]string{"platform_experiment_id": a.PlatformExperimentID, "agent_id": a.AgentID, "role": string(a.Role)}
 		gauge := func(name string, value float64) {
 			samples = append(samples, GaugeSample{MetricName: name, Labels: labels, Value: value, At: at})
 		}

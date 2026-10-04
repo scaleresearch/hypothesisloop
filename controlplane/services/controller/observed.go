@@ -38,7 +38,7 @@ type ObservedState interface {
 	PopulateUsage(ctx context.Context, platformExpStart time.Time, platformExpID string, quotas []*domain.AgentQuota) error
 	BestPerAgentOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, completed map[string]bool) (map[string]metricsdb.AgentBest, []string, error)
 	// RecordRunHealth is the one write: the run's health series, see recordRunHealth.
-	RecordRunHealth(ctx context.Context, platformExpID string, at time.Time, agents []domain.AgentHealth) error
+	RecordRunHealth(ctx context.Context, at time.Time, agents []domain.AgentHealth) error
 }
 
 // metricsDBObserver is the only production ObservedState: metricsdb answers in real time.
@@ -88,8 +88,8 @@ func (o metricsDBObserver) BestPerAgentOnMetric(ctx context.Context, pe *domain.
 	return metricsdb.BestPerAgentOnMetric(ctx, o.url, pe, metric, completed)
 }
 
-func (o metricsDBObserver) RecordRunHealth(ctx context.Context, platformExpID string, at time.Time, agents []domain.AgentHealth) error {
-	return metricsdb.RecordRunHealth(ctx, o.url, platformExpID, at, agents)
+func (o metricsDBObserver) RecordRunHealth(ctx context.Context, at time.Time, agents []domain.AgentHealth) error {
+	return metricsdb.RecordRunHealth(ctx, o.url, at, agents)
 }
 
 // observedGapCap is the longest gap between two real observations that still counts as
