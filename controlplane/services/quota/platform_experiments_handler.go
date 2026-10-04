@@ -92,8 +92,21 @@ type ClusterCapacity struct {
 	OnDemand bool `json:"on_demand,omitempty"`
 	// Resources is the cluster's cores and memory, which is all a job that asks for no
 	// accelerator needs to know. Absent for a cluster that reported none in the window.
-	Resources    *ResourceCapacity     `json:"resources,omitempty"`
+	Resources *ResourceCapacity `json:"resources,omitempty"`
+	// PerNode is what one node of the cluster offers, which bounds what one job gets: a job's
+	// cpu, memory and accelerator_count are per node. Absent for a cluster that reported no nodes.
+	PerNode      *NodeCapacity         `json:"per_node,omitempty"`
 	Accelerators []AcceleratorCapacity `json:"accelerators"`
+}
+
+// NodeCapacity holds, each figure on its own, the most any one node of a cluster has: installed
+// cores and memory, and what running jobs leave free of them. A job asking for more cores or
+// memory than CPUCores or MemoryBytes fits no node and never runs there.
+type NodeCapacity struct {
+	CPUCores             float64 `json:"cpu_cores_max"`
+	MemoryBytes          int64   `json:"memory_bytes_max"`
+	CPUCoresAvailable    float64 `json:"cpu_cores_available_max"`
+	MemoryBytesAvailable int64   `json:"memory_bytes_available_max"`
 }
 
 // ResourceCapacity is a cluster's cores and memory as its runtime last reported them: what its
@@ -117,6 +130,9 @@ type AcceleratorCapacity struct {
 	Kind      domain.TypeKind `json:"kind"`
 	Available int64           `json:"available"`
 	Total     int64           `json:"total"`
+	// PerNodeAvailable is the most of the type free on any one node now: what a job's
+	// accelerator_count can be and start without waiting for other jobs to end.
+	PerNodeAvailable int64 `json:"per_node_available"`
 	// AccHPerHour is what one accelerator of this type costs per hour of run, in accelerator
 	// hours: the factor between a job's run time and its cost.
 	AccHPerHour float64 `json:"acch_per_hour,omitempty"`
@@ -174,6 +190,19 @@ func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context, orgID str
 		return nil, err
 	}
 	withOnDemand(clusters, nodeLabels)
+	nodeTotal, err := metricsdb.LiveClusterNodeTotalCapacity(ctx, h.metricsDBURL, h.capacityFreshness)
+	if err != nil {
+		return nil, err
+	}
+	nodeFree, err := metricsdb.LiveClusterNodeResourceCapacity(ctx, h.metricsDBURL, h.capacityFreshness)
+	if err != nil {
+		return nil, err
+	}
+	nodeAcceleratorsFree, err := metricsdb.LiveClusterNodeAcceleratorCapacity(ctx, h.metricsDBURL, h.capacityFreshness)
+	if err != nil {
+		return nil, err
+	}
+	withPerNode(clusters, nodeTotal, nodeFree, nodeAcceleratorsFree)
 	// Staff see every name that reports, registered or not: a runtime started under a name
 	// nobody registered is theirs to notice.
 	if every {
@@ -269,6 +298,33 @@ func withOnDemand(clusters []ClusterCapacity, nodeLabels map[string]map[string]m
 			if labels[domain.NodeSlotLabel] != "" {
 				clusters[i].OnDemand = true
 				break
+			}
+		}
+	}
+}
+
+// withPerNode says of each cluster the most one node has, in total and free, of cores and memory,
+// and on each type's line the most of it free on one node. The maps are cluster -> node -> key.
+func withPerNode(clusters []ClusterCapacity, nodeTotal, nodeFree, nodeAcceleratorsFree map[string]map[string]map[string]int64) {
+	for i := range clusters {
+		cluster := &clusters[i]
+		total, free := nodeTotal[cluster.ClusterName], nodeFree[cluster.ClusterName]
+		if len(total) > 0 || len(free) > 0 {
+			perNode := NodeCapacity{}
+			for _, resources := range total {
+				perNode.CPUCores = max(perNode.CPUCores, float64(resources[domain.NodeResourceCPUMillicores])/1000)
+				perNode.MemoryBytes = max(perNode.MemoryBytes, resources[domain.NodeResourceMemoryBytes])
+			}
+			for _, resources := range free {
+				perNode.CPUCoresAvailable = max(perNode.CPUCoresAvailable, float64(resources[domain.NodeResourceCPUMillicores])/1000)
+				perNode.MemoryBytesAvailable = max(perNode.MemoryBytesAvailable, resources[domain.NodeResourceMemoryBytes])
+			}
+			cluster.PerNode = &perNode
+		}
+		for a := range cluster.Accelerators {
+			line := &cluster.Accelerators[a]
+			for _, byType := range nodeAcceleratorsFree[cluster.ClusterName] {
+				line.PerNodeAvailable = max(line.PerNodeAvailable, byType[line.AcceleratorType])
 			}
 		}
 	}

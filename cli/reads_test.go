@@ -89,7 +89,7 @@ func TestCapacityOneLinePerAcceleratorType(t *testing.T) {
 func TestCapacitySaysCoresForTheCPUType(t *testing.T) {
 	recordingServer(t, func(int, recorded) any {
 		return map[string]any{"clusters": []any{map[string]any{"cluster_name": "box", "accelerators": []any{
-			map[string]any{"accelerator_type": "hypothesisloop.dev/cpu=core", "kind": "cpu", "available": 12, "total": 16, "acch_per_hour": 1},
+			map[string]any{"accelerator_type": "hypothesisloop.dev/cpu=core", "kind": "cpu", "available": 12, "total": 16, "per_node_available": 8, "acch_per_hour": 1},
 			map[string]any{"accelerator_type": "tenstorrent.com/chipArch=blackhole", "kind": "accelerator", "available": 3, "total": 4, "acch_per_hour": 0.5},
 		}}}}
 	})
@@ -98,7 +98,7 @@ func TestCapacitySaysCoresForTheCPUType(t *testing.T) {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
 	}
 	want := []string{
-		`{"cluster":"box","accelerator_type":"hypothesisloop.dev/cpu=core","acch_per_core_hour":1,"cores_available":12,"kind":"cpu","cores_total":16}`,
+		`{"cluster":"box","accelerator_type":"hypothesisloop.dev/cpu=core","acch_per_core_hour":1,"cores_available":12,"kind":"cpu","per_node_cores_available":8,"cores_total":16}`,
 		`{"cluster":"box","accelerator_type":"tenstorrent.com/chipArch=blackhole","acch_per_hour":0.5,"available":3,"kind":"accelerator","total":4}`,
 	}
 	if !reflect.DeepEqual(lines(stdout.String()), want) {
@@ -115,7 +115,9 @@ func TestCapacitySaysWhichClusterRunsEveryJobInItsOwnImage(t *testing.T) {
 			map[string]any{"cluster_name": "k8s", "accelerators": []any{map[string]any{"accelerator_type": "L40", "available": 8, "total": 8}}},
 			map[string]any{"cluster_name": "own",
 				"resources":    map[string]any{"cpu_cores_available": 28, "cpu_cores_total": 32, "memory_bytes_available": 1 << 36, "memory_bytes_total": 1 << 37},
+				"per_node":     map[string]any{"cpu_cores_max": 16, "memory_bytes_max": 1 << 36},
 				"accelerators": []any{map[string]any{"accelerator_type": "L40", "available": 1, "total": 1}}},
+			map[string]any{"cluster_name": "nodes-only", "per_node": map[string]any{"cpu_cores_max": 8}, "accelerators": []any{}},
 		}, "job_images": []any{map[string]any{"name": "pytorch-cuda", "image": "registry.test/job-pytorch-cuda:7", "carries": "PyTorch"}}}
 	})
 	var stdout, stderr bytes.Buffer
@@ -125,8 +127,9 @@ func TestCapacitySaysWhichClusterRunsEveryJobInItsOwnImage(t *testing.T) {
 	want := []string{
 		`{"cluster":"rented","only_job_image":"registry.test/platform-job:7","job_image_carries":"PyTorch","on_demand":"true","accelerator_type":"RTX","available":2,"total":2}`,
 		`{"cluster":"k8s","accelerator_type":"L40","available":8,"total":8}`,
-		`{"cluster":"own","cpu_cores_available":28,"cpu_cores_total":32,"memory_bytes_available":68719476736,"memory_bytes_total":137438953472}`,
+		`{"cluster":"own","cpu_cores_available":28,"cpu_cores_total":32,"memory_bytes_available":68719476736,"memory_bytes_total":137438953472,"per_node":{"cpu_cores_max":16,"memory_bytes_max":68719476736}}`,
 		`{"cluster":"own","accelerator_type":"L40","available":1,"total":1}`,
+		`{"cluster":"nodes-only","per_node":{"cpu_cores_max":8}}`,
 		`{"carries":"PyTorch","image":"registry.test/job-pytorch-cuda:7","job_image":"pytorch-cuda"}`,
 	}
 	if !reflect.DeepEqual(lines(stdout.String()), want) {

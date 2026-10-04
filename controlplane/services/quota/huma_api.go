@@ -658,7 +658,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"and is answered 400 without it. An org you do not reach is not found. Staff read one org with org_id and every " +
 			"cluster that reports without it. accelerator_type is the exact " +
 			"driver-published string a job spec takes, so what you read here is what you submit. pod_resources on a type " +
-			"is what the platform adds to every node of a job on it, which the job does not state itself. Check before " +
+			"is what the platform adds to every node of a job on it, which the job does not state itself. A job's cpu, memory " +
+			"and accelerator_count are per node, so per_node on a cluster says the most cores and memory one node has, installed " +
+			"and free now, and per_node_available on a type the most of it free on one node now. Check before " +
 			"choosing: a type with no live capacity anywhere QUEUES FOREVER and never errors. Only " +
 			"currently-schedulable nodes count — powered-off hardware never appears."}, func(ctx context.Context, in *struct {
 		OrgID string `query:"org_id" doc:"The org whose clusters to read. Required only when your token reaches more than one org."`

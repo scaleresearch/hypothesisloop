@@ -127,13 +127,19 @@ nobody has a result on yet prints no line, says so on stderr, and exits 0.`, std
 func cmdCapacity(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("capacity", `usage: hl capacity [--org ORG]
 
-Live capacity per cluster. First one line of its cores and memory, in total and not asked for
-by running jobs, summed over its nodes: what a job with no accelerator needs to know. Then
-its priced types, one line per type. For an accelerator: available, total and acch_per_hour,
+Live capacity per cluster, of the clusters your org's jobs can be placed on now: enabled for
+the org and reporting. First one line of its cores and memory, in total and not asked for
+by running jobs, summed over its nodes, and in per_node the most one node has of each:
+cpu_cores_max and memory_bytes_max installed, cpu_cores_available_max and
+memory_bytes_available_max free now. A job's cpu, memory and accelerator_count are per node, so
+per_node bounds one job: asking for more than the max fits no node and never runs. Then
+its priced types, one line per type. For an accelerator: available, total, per_node_available
+(the most free on one node now) and acch_per_hour,
 what an hour on one of them costs in accelerator hours, and pod_resources where the platform
 adds something to every job on the type (the hugepages of a Tenstorrent Blackhole chip): a job
 states none of it. For CPU cores (kind cpu, the one type
-hypothesisloop.dev/cpu=core): cores_available, cores_total and acch_per_core_hour, which is 1, so
+hypothesisloop.dev/cpu=core): cores_available, cores_total, per_node_cores_available and
+acch_per_core_hour, which is 1, so
 a budget spent on cores reads as CPU core-hours. A job that needs no accelerator states cpu, a
 whole number, and no accelerator_type, and holds that many cores. accelerator_type is the exact
 string a job spec takes; a type with none available queues and never errors. Last, one line per
@@ -167,6 +173,7 @@ key and an agent token have one org and need no --org. A person in several orgs 
 			Carries      string            `json:"job_image_carries"`
 			OnDemand     bool              `json:"on_demand"`
 			Resources    json.RawMessage   `json:"resources"`
+			PerNode      json.RawMessage   `json:"per_node"`
 			Accelerators []json.RawMessage `json:"accelerators"`
 		} `json:"clusters"`
 	}
@@ -188,8 +195,12 @@ key and an agent token have one org and need no --org. A person in several orgs 
 		if cl.OnDemand {
 			prefix = append(prefix, "on_demand", "true")
 		}
-		if len(cl.Resources) > 0 && string(cl.Resources) != "null" {
-			if err := printPrefixed(stdout, cl.Resources, prefix...); err != nil {
+		if present(cl.Resources) || present(cl.PerNode) {
+			line, err := withPerNode(cl.Resources, cl.PerNode)
+			if err != nil {
+				return fail(stderr, err)
+			}
+			if err := printPrefixed(stdout, line, prefix...); err != nil {
 				return fail(stderr, err)
 			}
 		}
@@ -216,6 +227,38 @@ key and an agent token have one org and need no --org. A person in several orgs 
 	return 0
 }
 
+func present(raw json.RawMessage) bool {
+	return len(raw) > 0 && string(raw) != "null"
+}
+
+// withPerNode is a cluster's resources object with its per_node object inside it, so one line
+// says both what the cluster has and what one job on it can get.
+func withPerNode(resources, perNode json.RawMessage) (json.RawMessage, error) {
+	if !present(resources) {
+		resources = json.RawMessage("{}")
+	}
+	line, err := compactJSON(resources)
+	if err != nil {
+		return nil, fmt.Errorf("response is not JSON: %w", err)
+	}
+	if !present(perNode) {
+		return line, nil
+	}
+	node, err := compactJSON(perNode)
+	if err != nil {
+		return nil, fmt.Errorf("response is not JSON: %w", err)
+	}
+	var b bytes.Buffer
+	b.Write(line[:len(line)-1])
+	if len(line) > 2 {
+		b.WriteByte(',')
+	}
+	b.WriteString(`"per_node":`)
+	b.Write(node)
+	b.WriteByte('}')
+	return b.Bytes(), nil
+}
+
 // inCores renames the counts and the rate of a capacity line of kind cpu, so that the line says
 // they are cores. A line of any other kind is returned as it came.
 func inCores(raw json.RawMessage) (json.RawMessage, error) {
@@ -229,7 +272,7 @@ func inCores(raw json.RawMessage) (json.RawMessage, error) {
 		return raw, nil
 	}
 	out := string(raw)
-	for from, to := range map[string]string{`"available":`: `"cores_available":`, `"total":`: `"cores_total":`, `"acch_per_hour":`: `"acch_per_core_hour":`} {
+	for from, to := range map[string]string{`"available":`: `"cores_available":`, `"total":`: `"cores_total":`, `"acch_per_hour":`: `"acch_per_core_hour":`, `"per_node_available":`: `"per_node_cores_available":`} {
 		out = strings.Replace(out, from, to, 1)
 	}
 	return json.RawMessage(out), nil

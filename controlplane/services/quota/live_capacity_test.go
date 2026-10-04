@@ -193,6 +193,28 @@ func TestCapacityCarriesEachClustersCoresAndMemory(t *testing.T) {
 		t.Errorf("cpu-only accelerators = %#v, want an empty list", clusters[1].Accelerators)
 	}
 
+	// A job's cores, memory and accelerators are per node, so a cluster's sums overstate what one
+	// job gets: per node is the most any one node has.
+	withPerNode(clusters,
+		map[string]map[string]map[string]int64{"chips": {
+			"a": {domain.NodeResourceCPUMillicores: 8000, domain.NodeResourceMemoryBytes: 1 << 30},
+			"b": {domain.NodeResourceCPUMillicores: 4000, domain.NodeResourceMemoryBytes: 3 << 30},
+		}},
+		map[string]map[string]map[string]int64{"chips": {
+			"a": {domain.NodeResourceCPUMillicores: 2500, domain.NodeResourceMemoryBytes: 1 << 29},
+			"b": {domain.NodeResourceCPUMillicores: 1000, domain.NodeResourceMemoryBytes: 1 << 30},
+		}},
+		map[string]map[string]map[string]int64{"chips": {"a": {"chip": 1}, "b": {}}})
+	if want := (NodeCapacity{CPUCores: 8, MemoryBytes: 3 << 30, CPUCoresAvailable: 2.5, MemoryBytesAvailable: 1 << 30}); clusters[0].PerNode == nil || *clusters[0].PerNode != want {
+		t.Errorf("chips per node: %+v, want %+v", clusters[0].PerNode, want)
+	}
+	if got := clusters[0].Accelerators[0].PerNodeAvailable; got != 1 {
+		t.Errorf("chips per node available = %d, want 1 of the 4", got)
+	}
+	if clusters[1].PerNode != nil {
+		t.Errorf("cpu-only reported no nodes, per node = %+v", clusters[1].PerNode)
+	}
+
 	// A cluster that reported accelerators and no cores in the window has no resources to show.
 	silent := withResources(buildClusterCapacity(map[string]map[string]int64{"old": {"chip": 1}}, nil), nil, nil, nil, nil)
 	if len(silent) != 1 || silent[0].Resources != nil {
