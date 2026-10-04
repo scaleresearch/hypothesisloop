@@ -183,8 +183,8 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         assert len(_researcher_instances(api, pe_id, researchers)) == len(researchers), "a running experiment's researchers have no machine asked for"
         shares = {q["agent_id"]: q["guaranteed_accelerator_hours"] for q in api.platform_experiment_quotas(pe_id)}
         assert planner_id not in shares, "a planner holds a quota"
-        # The first stage's share of the budget over the researchers' places.
-        assert shares[baseline.agent] == pytest.approx(pe["stages"][0]["length_pct"] / 100 * 1 / 2), shares
+        # Half the budget.
+        assert shares[baseline.agent] == pytest.approx(1 / 2), shares
         # Two researchers are too few for a cut, so the run has one stage and each holds its whole
         # share of what the baseline left of the budget.
         assert [(s["length_pct"], s["evict_pct"]) for s in api.stages(pe_id)["stages"]] == [(100, 0)]

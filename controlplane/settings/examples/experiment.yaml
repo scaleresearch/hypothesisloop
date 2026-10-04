@@ -51,10 +51,9 @@ metrics:
   #   direction: maximize
   #   role: attribute
 
-# How long the run lasts, in hours from the moment it starts. Required, and at most 30 days
-# (quota.max_platform_experiment_days). The time it is open before, while its baseline is
-# measured, takes nothing from it. The run closes at its end (ends_at in the answer once it runs),
-# and the elimination ladder advances on the clock between its start and its end or on budget
+# The whole wall clock in hours from starts_at (the create, or a later starts_at), the baseline
+# included. Required, and at most 30 days (quota.max_platform_experiment_days). It closes at its
+# end (ends_at in the answer), and the elimination ladder advances on the clock between its start and its end or on budget
 # spent, whichever is ahead.
 duration_hours: 24
 

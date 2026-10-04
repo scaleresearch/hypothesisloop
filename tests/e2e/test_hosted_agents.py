@@ -99,12 +99,6 @@ def _at(moment: str) -> datetime:
     return datetime.fromisoformat(moment.replace("Z", "+00:00"))
 
 
-def _kept(instance: dict) -> dict:
-    """What a machine is: its name, image and environment. ends_at is no part of it, and moves
-    when the run's clock starts."""
-    return {key: value for key, value in instance.items() if key != "ends_at"}
-
-
 def test_agents_and_a_coordinator_are_hosted_in_the_experiments_repository(api: API, run_id: str):
     project = api
     r = _hosted_run(project, f"hosted-either-stack-{run_id}", coordinator_hosted=True)
@@ -231,7 +225,7 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     assert r.status_code == 409 and r.json()["reason"] == "signup_closed", f"join after start: {r.status_code} {r.text}"
     r = api.remove_agent(pe_id, kept)
     assert r.status_code == 409 and r.json()["reason"] == "experiment_started", f"remove after start: {r.status_code} {r.text}"
-    # A researcher its owner runs is at work from the start, so the run's clock started there.
+    # A researcher its owner runs is at work from the start, so started_at is the start.
     started = api.get_json(f"/platform-experiments/{pe_id}")
     assert (started["status_reason"]["reason"], started["status_reason"]["waits_for"]) == ("running", "platform"), started["status_reason"]
     assert started["started_at"] and started["ends_at"] and "agents_due_at" not in started, started
@@ -301,13 +295,13 @@ def test_an_exited_machine_is_recorded_restarted_a_few_times_and_then_stops_its_
     pe_id = hosted_pe("hosted-agents-exit", 1.0, 5)
     crashing, steady = (a["agent_id"] for a in api.add_agents(pe_id, count=2, hosted=True))
     api.declare_baseline_and_wait_running(pe_id)
-    # Every researcher is one the platform runs, so none of the run's duration counts until the
-    # first one's machine is running.
+    # Every researcher is one the platform runs, so none is at work until the first one's machine
+    # is running. The wall clock ran from starts_at all along.
     waiting = api.get_json(f"/platform-experiments/{pe_id}")
     assert (waiting["status_reason"]["reason"], waiting["status_reason"]["waits_for"]) == ("agents_starting", "platform"), waiting["status_reason"]
-    assert waiting["agents_due_at"] and "started_at" not in waiting and "ends_at" not in waiting, waiting
+    assert "started_at" not in waiting and _at(waiting["agents_due_at"]) <= _at(waiting["ends_at"]), waiting
     instances, _ = desired_for(api, pe_id)
-    assert "started_at" not in api.get_json(f"/platform-experiments/{pe_id}"), "a machine asked for and not running started the run's clock"
+    assert "started_at" not in api.get_json(f"/platform-experiments/{pe_id}"), "a machine asked for and not running set started_at"
     steady_name = instances[steady]["name"]
     seen = set()
 
@@ -321,10 +315,10 @@ def test_an_exited_machine_is_recorded_restarted_a_few_times_and_then_stops_its_
         assert instances[steady]["name"] == steady_name, "the agent that never exited was renamed"
         assert name not in ending and name not in {i["name"] for i in instances.values()}, "the exited machine is still wanted"
         if exit_number == 1:
-            # The first report of a researcher's machine running started the clock.
+            # The first report of a researcher's machine running set started_at and moved no end.
             clocked = api.get_json(f"/platform-experiments/{pe_id}")
             assert clocked["status_reason"]["reason"] == "running" and "agents_due_at" not in clocked, clocked
-            assert _at(clocked["ends_at"]) > _at(clocked["started_at"]) > _at(waiting["updated_at"]), clocked
+            assert clocked["ends_at"] == waiting["ends_at"] and _at(clocked["started_at"]) > _at(waiting["updated_at"]), clocked
 
         recorded = roster(api, pe_id)[crashing]["instance"]
         assert recorded["exit_log"] == log and recorded["exited_at"], recorded
@@ -374,16 +368,15 @@ def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_rep
     for agent in cut:
         assert before[agent]["name"] in ending, f"cut agent {agent} is not left to end"
     for agent in survivors:
-        assert _kept(instances[agent]) == _kept(before[agent]), f"the survivor {agent} would be replaced by the cut"
-    # That report was the first of a researcher's machine running: the clock started with it. The
-    # next answer names the same machines, each to end with the run that clock gave, which is
-    # sooner than the latest end a run still waiting for its machines could have had.
+        assert instances[agent] == before[agent], f"the survivor {agent} would be replaced by the cut"
+    # That report was the first of a researcher's machine running and set started_at. The next
+    # answer names the same machines, each still ending after the wall clock.
     clocked = api.get_json(f"/platform-experiments/{pe_id}")
     assert clocked["status_reason"]["reason"] == "running" and clocked["started_at"], clocked
     later, _ = desired_for(api, pe_id, up)
     for agent in survivors:
-        assert _kept(later[agent]) == _kept(before[agent]), f"the start of the clock renamed the machine of {agent}"
-        assert _at(clocked["ends_at"]) < _at(later[agent]["ends_at"]) < _at(before[agent]["ends_at"]), (later[agent], before[agent])
+        assert later[agent] == before[agent], f"a researcher at work changed the machine of {agent}"
+        assert _at(clocked["ends_at"]) < _at(later[agent]["ends_at"]), later[agent]
 
     # A survivor with nothing left to do says so. It cannot while a job of its own is in flight
     # or owes its summary; after that its machine is left to end and whoever steers the run is told.
@@ -457,17 +450,14 @@ def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_
         assert sorted(a["role"] for a in agents.values()) == ["baseline", "competitor", "competitor"], agents
         assert {q["agent_id"] for q in with_repo.platform_experiment_quotas(pe_id)} <= set(agents), "the coordinator holds a quota"
 
-        # Open: the coordinator and the baseline agent have their machines, and no researcher has one.
+        # Open: only the baseline agent has a machine. The coordinator has no work while the
+        # baseline is measured.
         assert set(desired_for(with_repo, pe_id)[0]) == {measurer}, "a researcher's machine is asked for before there is a baseline"
-        coordinator, _ = coordinator_for(with_repo, pe_id)
-        assert coordinator is not None, "the launcher is not asked for the coordinator of an open platform experiment"
-        env = coordinator["env"]
-        assert set(env) == {"API_URL", "HL_TOKEN"} and pe["coordinator"]["model"], set(env)
-        assert env["HL_TOKEN"] not in coordinator["name"] and coordinator["name"].count("-") == 2, coordinator["name"]
-        assert with_repo.get_json(f"/platform-experiments/{pe_id}")["coordinator"]["instance"]["name"] == coordinator["name"]
+        assert coordinator_for(with_repo, pe_id)[0] is None, "the coordinator's machine is asked for while the baseline is measured"
+        assert pe["coordinator"]["instance"]["state"] == "waiting", pe["coordinator"]
 
         # Its token coordinates this platform experiment: it reads the roster and changes the brief.
-        as_coordinator = with_repo.as_caller(env["HL_TOKEN"], with_repo.org_id, with_repo.project_id)
+        as_coordinator = with_repo.as_caller(admin.token(f"coordinator:{pe_id}"), with_repo.org_id, with_repo.project_id)
         assert len(as_coordinator.get_json(f"/platform-experiments/{pe_id}/agents")["agents"]) == 3
         changed = {"description": "the coordinator's brief"}
         put = as_coordinator.patch(f"/platform-experiments/{pe_id}", changed)
@@ -482,6 +472,15 @@ def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_
         note = json.loads(as_coordinator.hl("hypothesis", "comment", idea["id"], "--text", "the coordinator's note"))
         assert "agent_id" not in note and note["actor"] == {"kind": "coordinator", "id": pe_id, "name": "coordinator"}, note
 
+        # Started, the coordinator's machine is asked for with that token.
+        with_repo.declare_baseline_and_wait_running(pe_id)
+        coordinator, _ = coordinator_for(with_repo, pe_id)
+        assert coordinator is not None, "the launcher is not asked for the coordinator of a running platform experiment"
+        env = coordinator["env"]
+        assert set(env) == {"API_URL", "HL_TOKEN"} and env["HL_TOKEN"] == as_coordinator.token, set(env)
+        assert env["HL_TOKEN"] not in coordinator["name"] and coordinator["name"].count("-") == 2, coordinator["name"]
+        assert with_repo.get_json(f"/platform-experiments/{pe_id}")["coordinator"]["instance"]["name"] == coordinator["name"]
+
         # Its machine exits: recorded on the platform experiment, asked for again under a new name.
         first = coordinator["name"]
         again, _ = coordinator_for(with_repo, pe_id, [{"name": first, "state": "exited", "log": "boom\nSystemExit: the reason"}])
@@ -489,8 +488,7 @@ def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_
         instance = with_repo.get_json(f"/platform-experiments/{pe_id}")["coordinator"]["instance"]
         assert instance["restarts"] == 1 and "SystemExit: the reason" in instance["exit_log"] and not instance["stopped"], instance
 
-        # Started, it is kept and each agent gets its machine. Closed, it is told to end and is asked for no more.
-        with_repo.declare_baseline_and_wait_running(pe_id)
+        # It is kept and each agent gets its machine. Closed, it is told to end and is asked for no more.
         kept, _ = coordinator_for(with_repo, pe_id, [{"name": again["name"], "state": "running"}])
         assert kept is not None and kept["name"] == again["name"], f"after the start: {kept}"
         own, _ = desired_for(with_repo, pe_id, [{"name": again["name"], "state": "running"}])
@@ -513,6 +511,8 @@ def test_a_coordinators_machine_that_keeps_exiting_is_stopped_and_shown(with_rep
     assert r.status_code == 201, f"create: {r.status_code} {r.text}"
     pe_id = r.json()["id"]
     try:
+        with_repo.add_agents(pe_id)
+        with_repo.declare_baseline_and_wait_running(pe_id)
         seen: set[str] = set()
         coordinator, _ = coordinator_for(with_repo, pe_id)
         for exit_number in range(1, MAX_RESTARTS + 2):
@@ -531,9 +531,7 @@ def test_a_coordinator_closes_its_platform_experiment_through_hl(with_repo: API,
     assert r.status_code == 201, f"create: {r.status_code} {r.text}"
     pe_id = r.json()["id"]
     try:
-        coordinator, _ = coordinator_for(with_repo, pe_id)
-        assert coordinator is not None
-        as_coordinator = with_repo.as_caller(coordinator["env"]["HL_TOKEN"], with_repo.org_id, with_repo.project_id)
+        as_coordinator = with_repo.as_caller(admin.token(f"coordinator:{pe_id}"), with_repo.org_id, with_repo.project_id)
         # A platform experiment starts with at least one researcher in it.
         researcher = with_repo.add_agents(pe_id)[0]
         with_repo.declare_baseline_and_wait_running(pe_id)
@@ -673,9 +671,8 @@ def _sessions_are_their_owners(api: API, pe_id: str) -> None:
     # Of role baseline, so that each has its machine and its token while the experiment is open.
     first, second = (api.add_agents(pe_id, hosted=True, role="baseline")[0]["agent_id"] for _ in range(2))
     instances, _ = desired_for(api, pe_id)
-    coordinator, _ = coordinator_for(api, pe_id)
     tokens = {first: instances[first]["env"]["HL_TOKEN"], second: instances[second]["env"]["HL_TOKEN"],
-              "coordinator": coordinator["env"]["HL_TOKEN"]}
+              "coordinator": admin.token(f"coordinator:{pe_id}")}
     paths = {first: f"/platform-experiments/{pe_id}/agents/{first}/session",
              second: f"/platform-experiments/{pe_id}/agents/{second}/session",
              "coordinator": f"/platform-experiments/{pe_id}/coordinator/session"}
@@ -778,9 +775,8 @@ def test_a_coordinators_token_changes_the_description_only_and_acts_as_no_agent(
     pe_id = pe["id"]
     try:
         with_repo.add_agents(pe_id, hosted=True)
-        coordinator, _ = coordinator_for(with_repo, pe_id)
         agent_id = next(iter(roster(with_repo, pe_id)))
-        as_coordinator = with_repo.as_caller(coordinator["env"]["HL_TOKEN"], with_repo.org_id, with_repo.project_id)
+        as_coordinator = with_repo.as_caller(admin.token(f"coordinator:{pe_id}"), with_repo.org_id, with_repo.project_id)
         live = {key: pe[key] for key in ("name", "description", "budget_accelerator_hours", "max_agents", "metrics",
                                          "report_interval_seconds", "starts_at", "duration_hours")}
         for field, value in (("budget_accelerator_hours", 1000.0), ("max_agents", 50), ("duration_hours", 48)):

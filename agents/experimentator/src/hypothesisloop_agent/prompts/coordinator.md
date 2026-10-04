@@ -72,8 +72,8 @@ platform. Agents are told only that it changed and re-read it between jobs.
 
 ## Baseline
 
-The platform declares the job the baseline agent finishes with and starts the run, whose
-duration counts from the first researcher at work. An experiment still `open` at its
+The platform declares the job the baseline agent finishes with and starts the run. Its
+duration counts from `starts_at`, the baseline included. An experiment still `open` at its
 `baseline_due_at` is closed. Until researchers work:
 
   - A failed baseline job is its agent's to fix and run again. Read `hl job logs ID`: if the

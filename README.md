@@ -265,8 +265,8 @@ A platform experiment begins one of two ways, and both end in the same run:
 
 Either way it is `open` after that and no researcher runs. The baseline agent measures the
 control, and when it finishes the platform declares its job as the baseline and starts the run
-in the same request. Nobody starts it by hand. The run's clock starts when the first
-researcher is at work. An agent the platform does not run is started by whoever added it, with
+in the same request. Nobody starts it by hand. Its `duration_hours` counts from `starts_at`,
+the baseline included. An agent the platform does not run is started by whoever added it, with
 the id and token `agents add` printed: the harness registers nothing. `max_agents` is how
 many researchers may join over the whole run: one that finished or was cut still counts, and
 baseline agents, the planner and the coordinator never do. Lowering it below the researchers
@@ -337,8 +337,8 @@ quota admits.
 
 The declaration starts the run in the same request once a researcher has joined and
 `starts_at`, when the experiment states one, has passed; otherwise the request that adds the
-researcher starts it, or `starts_at` does. The run lasts
-`duration_hours` from `started_at`, and `ends_at` is the two added, absent until then.
+researcher starts it, or `starts_at` does. `starts_at` is when the experiment was created or
+accepted, or a later moment it states, and `ends_at` is `duration_hours` after it.
 `started_at` is the moment the first researcher is at work: the start itself when its owner
 runs one, and otherwise the moment the first researcher's machine is reported running. Until
 then the experiment is `running` with `status_reason` `agents_starting`, and the platform
@@ -358,13 +358,12 @@ start. From the start an instance reads `requested` once its machine is asked fo
 `starting`, `running` and `stopped`. `hl quota` answers 404 `quota_not_granted` with that message until then. The experiment
 says in `baseline_due_at`
 when the platform closes it if it is not running by then, with
-`close_reason: baseline_limit_reached`. That is `planning.baseline_limit_minutes` (90) after it
-was created or accepted, or after its `starts_at`. A read of one experiment also carries
+`close_reason: baseline_limit_reached`. That is `planning.baseline_limit_minutes` (90) after
+`starts_at`, or half of `duration_hours` when that is sooner. A read of one experiment also carries
 `consumed_accelerator_hours`, what it spent of its budget, and a list carries `close_reason`
 and `closed_at` of each closed one.
 
-The baseline agent holds a quota from the moment it joins: what one researcher holds in the
-first declared stage. What it spent is real spend under the experiment's id and is taken from
+The baseline agent holds a quota from the moment it joins: half the budget. What it spent is real spend under the experiment's id and is taken from
 the budget before the researchers' shares are carved: a run with a budget of 6 after a baseline
 that cost 0.2 shares 5.8.
 

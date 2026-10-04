@@ -102,7 +102,7 @@ def test_a_hosted_experiment_runs_end_to_end_on_rented_machines_and_survives_a_l
     researchers = [org.add_agents(pe_id, hosted=True, flavor=flavor)[0]["agent_id"] for flavor in ("hyperparameter-search", "architecture-search")]
     # Its start time is now. The create made its agent of role baseline, and when that agent
     # finishes with one completed job the platform declares it and starts the run: no researcher's
-    # machine is rented before, and the run's clock starts with the first of them running.
+    # machine is rented before, and duration_hours counts from starts_at, the baseline included.
     org.patch(f"/platform-experiments/{pe_id}", {"starts_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}).raise_for_status()
     eventually("the baseline to be measured and declared and the platform to start the run", lambda: org.get_json(f"/platform-experiments/{pe_id}"),
                accept=lambda pe: pe["status"] == "running" and pe.get("baseline_job_id"), reject=lambda pe: pe["status"] == "closed",

@@ -655,7 +655,7 @@ Minimal shape:
   budget_accelerator_hours: 10
   max_agents: 2               # researchers only: a finished one still counts, baseline agents
                               # and the coordinator never do
-  duration_hours: 24          # how long the run lasts, counted from the moment it starts
+  duration_hours: 24          # the whole wall clock from creation, baseline included
   coordinator_hosted: true    # optional: the platform runs the coordinator
   metrics:
     - key: val_accuracy
@@ -949,7 +949,7 @@ consumed_accelerator_hours what it spent of its budget. While it is open, stages
 declared. From the start they are the ones the run has: a single stage of its whole length
 where fewer than 5 researchers joined, since a boundary cuts nobody from so few. One moment says when the platform
 closes it if nobody does: planning_ends_at on a draft being planned, proposal_expires_at once
-its planner answered, baseline_due_at while it is open, and ends_at, which is started_at plus
+its planner answered, baseline_due_at while it is open, and ends_at, which is starts_at plus
 duration_hours, once it runs. status_reason says where one that is not closed stands: reason
 is the code, message the sentence, and waits_for whose move it is: owner, coordinator, or
 platform when it is nobody's and the platform, an agent at work or the clock brings the next
