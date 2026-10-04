@@ -24,8 +24,8 @@ Each starts with no memory but the platform's.
   1. `hl platform-experiments get`: the `description`, `status`, `status_reason` (where
      `waits_for` reads `coordinator`, your next step) and `summary`, your findings so far.
   2. `hl platform-experiments agents list`, and the lineup against the objective: each researcher
-     a distinct new method that could reach the target. A seat that tunes, repeats another or
-     cannot reach it gets a new direction by message; before the run starts it is replaced
+     a distinct area where a new method could reach the target. A seat that tunes, repeats
+     another or cannot reach it gets a new direction by message; before the run starts it is replaced
      instead (`agents remove`, then `agents add`).
 {start_code}
 
