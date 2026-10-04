@@ -2,10 +2,13 @@ package infra
 
 import (
 	"bytes"
+	"crypto/tls"
+	"crypto/x509"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,13 +21,20 @@ import (
 const secretToken = "hls_dGhlLXNlY3JldA.c2lnbmF0dXJl"
 
 // fakeBin puts a helm that records its arguments and its stdin, and a kubectl that names a
-// context, ahead of the real ones.
+// context, reaches its API at box.example and gives the builder's Service node port 31234, ahead
+// of the real ones.
 func fakeBin(t *testing.T) (dir, argsFile, stdinFile string) {
 	t.Helper()
 	dir = t.TempDir()
 	argsFile, stdinFile = filepath.Join(dir, "helm.args"), filepath.Join(dir, "helm.stdin")
 	helm := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argsFile + "\ncat > " + stdinFile + "\n"
-	kubectl := "#!/bin/sh\necho test-context\n"
+	kubectl := `#!/bin/sh
+case "$*" in
+  *"config view"*) echo https://box.example:6443 ;;
+  *"get service"*) echo 31234 ;;
+  *) echo test-context ;;
+esac
+`
 	for name, script := range map[string]string{"helm": helm, "kubectl": kubectl} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
 			t.Fatal(err)
@@ -57,11 +67,82 @@ func TestInstallHandsHelmTheRuntimeTokenOnStdinAndNeverAsAnArgument(t *testing.T
 	if !strings.Contains(string(args), "clusterName=edge") {
 		t.Errorf("helm arguments = %q, want the other values still set", args)
 	}
+	if strings.Contains(string(args), "builder.") {
+		t.Errorf("helm arguments = %q, want no builder unasked", args)
+	}
 	// A cluster that ran the runtime before the chart owned the jobs namespace has one no release
 	// owns, and helm refuses to install over it unless told to take it.
 	if !strings.Contains(string(args), "--take-ownership\n") {
 		t.Errorf("helm arguments = %q, want an older install's jobs namespace taken over", args)
 	}
+}
+
+// The control plane reaches the builder at the host the attach reached the cluster's API at, and
+// only with the client certificate the attach left it.
+func TestInstallWithABuilderLeavesTheControlPlaneItsAddressAndCredentials(t *testing.T) {
+	if _, err := exec.LookPath("openssl"); err != nil {
+		t.Skip("openssl is not installed")
+	}
+	bin, argsFile, _ := fakeBin(t)
+	client := filepath.Join(t.TempDir(), "builder")
+	cmd := exec.Command("bash", "install.sh")
+	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "BUILDER_CLIENT_DIR="+client,
+		"CLUSTER_NAME=edge", "API_URL=http://api", "METRICS_URL=http://metrics", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("install.sh: %v\n%s", err, out)
+	}
+	args, _ := os.ReadFile(argsFile)
+	if !strings.Contains(string(args), "builder.enabled=true\n") || !strings.Contains(string(args), "builder.tls.key=") {
+		t.Errorf("helm arguments = %q, want the builder enabled with its certificate", args)
+	}
+	if addr, _ := os.ReadFile(filepath.Join(client, "addr")); string(addr) != "tcp://box.example:31234\n" {
+		t.Errorf("addr = %q", addr)
+	}
+	if info, err := os.Stat(filepath.Join(client, "key.pem")); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("key.pem: %v, %v; want it readable by its owner only", info, err)
+	}
+	pair, err := tls.LoadX509KeyPair(filepath.Join(client, "cert.pem"), filepath.Join(client, "key.pem"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caPEM, _ := os.ReadFile(filepath.Join(client, "ca.pem"))
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(caPEM) {
+		t.Fatal("ca.pem holds no certificate")
+	}
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); err != nil {
+		t.Errorf("the client certificate is not one the builder accepts: %v", err)
+	}
+}
+
+func TestTheBuilderIsReachedOnANodePortOnlyWhenEnabled(t *testing.T) {
+	if services := ofKind(render(t), "Service"); len(services) != 0 {
+		t.Fatalf("unasked, the chart rendered Services %v", services)
+	}
+	objects := render(t, "builder.enabled=true", "builder.tls.ca=c", "builder.tls.cert=c", "builder.tls.key=k")
+	services := ofKind(objects, "Service")
+	if len(services) != 1 {
+		t.Fatalf("the chart rendered %d Services, want the builder's", len(services))
+	}
+	spec := services[0]["spec"].(map[string]any)
+	if spec["type"] != "NodePort" || spec["ports"].([]any)[0].(map[string]any)["nodePort"] != float64(31234) {
+		t.Errorf("builder Service spec = %v", spec)
+	}
+	for _, deployment := range ofKind(objects, "Deployment") {
+		if metadata(deployment, "name") != "hypothesisloop-builder" {
+			continue
+		}
+		args := podSpec(deployment)["containers"].([]any)[0].(map[string]any)["args"].([]any)
+		if !slices.Contains(args, any("--tlscacert=/etc/buildkit/tls/ca.pem")) {
+			t.Errorf("buildkitd args = %v, want client certificates required", args)
+		}
+		return
+	}
+	t.Fatal("the chart rendered no builder Deployment")
 }
 
 // make echoes a recipe before running it, so the token must not be spelled into one.

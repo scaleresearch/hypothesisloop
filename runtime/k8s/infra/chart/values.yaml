@@ -29,6 +29,18 @@ nodeAgent:
   # jobs. Empty runs it on every node.
   nodeSelector: {}
 
+builder:
+  # true runs the platform's image builder (BuildKit) in this cluster, reached by the control plane
+  # on nodePort of every node with a client certificate tls.ca signed. install.sh sets all of it
+  # when BUILDER_CLIENT_DIR is given.
+  enabled: false
+  image: docker.io/moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+  nodePort: 31234
+  tls:
+    ca: ""
+    cert: ""
+    key: ""
+
 images:
   # Registry every node in this cluster can already pull from.
   registry: ""

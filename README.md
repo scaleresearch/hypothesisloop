@@ -666,8 +666,13 @@ RUNTIME_TOKEN="$(hl cluster token 'my-cluster' --org "$HL_ORG")" make cluster-ag
 ```
 
 Left out, `REGISTRY` and `TAG` are the local development registry and the tag of this checkout,
-which only the local cluster pulls. A cluster that holds the runtime's objects from before the
-chart existed (applied as plain manifests, no helm release) refuses the install: delete the old
+which only the local cluster pulls. `BUILDER=true` also runs the platform's image builder
+(BuildKit) there, on node port 31234 of the host `KUBE_CONTEXT` reaches the cluster's API at,
+accepting only the client certificate the same install writes, with that address, to
+`localdev/.run/environment-builder` (`addr`, `ca.pem`, `cert.pem`, `key.pem`). Each install
+makes new certificates. An install without it removes the builder.
+
+A cluster that holds the runtime's objects from before the chart existed (applied as plain manifests, no helm release) refuses the install: delete the old
 `hypothesisloop-cluster-agent` Deployment and `hypothesisloop-node-agent` DaemonSet first.
 The cluster-agent tolerates the `hypothesisloop.io/no-workload` taint and the control-plane
 role and no other taint, so it needs one node free of other taints.
