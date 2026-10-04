@@ -95,15 +95,27 @@ async function findSandbox(token) {
 }
 
 const creates = url => url.href === `${API}/platform-experiments` || url.href === `${API}/platform-experiments/drafts`
+const addsAgent = url => url.origin === API && /^\/platform-experiments\/[^/]+\/agents$/.test(url.pathname)
 
 // Every context reports its uncaught page errors and every URL it asked for.
 async function newContext(browser) {
   const context = await browser.newContext(VIEW)
+  // The form creates every experiment for the platform to run: a hosted coordinator, then one
+  // hosted agent a call, each a machine a launcher would rent. The stack rents nothing, so the
+  // coordinator is taken out of the create and a hosted agent is answered without reaching the
+  // API. A scenario that asserts on these writes routes them on its page, which comes first.
   await context.route(creates, route => {
     const request = route.request()
     const body = request.method() === 'POST' ? request.postDataJSON() : null
-    if (!body || body.repository || body.repository_account) return route.fallback()
-    return route.continue({ postData: JSON.stringify({ ...body, repository: sandbox.repository }) })
+    if (!body) return route.fallback()
+    const { coordinator_hosted: _hosted, ...rest } = body
+    const repository = rest.repository || rest.repository_account ? {} : { repository: sandbox.repository }
+    return route.continue({ postData: JSON.stringify({ ...rest, ...repository }) })
+  })
+  await context.route(addsAgent, route => {
+    const request = route.request()
+    if (request.method() !== 'POST' || request.postDataJSON()?.hosted !== true) return route.fallback()
+    return route.fulfill({ status: 201, headers: { 'access-control-allow-origin': UI }, json: { agents: [] } })
   })
   context.on('weberror', webError => crashes.push(`${webError.page()?.url()}: ${webError.error().message}`))
   context.on('request', request => {
@@ -247,6 +259,20 @@ async function confirmWith(page, button) {
 async function choose(page, field, option) {
   await field.click()
   await page.getByRole('option', { name: option, exact: true }).click()
+}
+
+// Walks a new experiment's form from What to its last step, Budget and rules: the name and the
+// brief, then on Measure one metric from Add a metric. `form` is where the form is shown.
+async function fillNewExperiment(page, form, name) {
+  await form.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(name)
+  await form.getByPlaceholder(/^Goals, evaluation protocol/).fill(`The brief of ${name}.`)
+  await form.getByRole('button', { name: 'Next', exact: true }).click()
+  const metric = form.getByLabel('Add a metric')
+  await metric.click()
+  await metric.fill('val_acc')
+  await page.getByRole('option', { name: /^Val Accuracy/ }).click()
+  await form.getByRole('button', { name: 'Next', exact: true }).click()
+  await form.getByLabel('Researchers').waitFor()
 }
 
 // Clicks the GitHub sign-in button and follows the redirects back into the app.
@@ -449,15 +475,14 @@ async function scenarios(browser) {
   section('creating a platform experiment in the selected project')
   await page.getByRole('button', { name: 'Configure it myself', exact: true }).click()
   const experimentName = `ui-e2e-${run}`
-  await page.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(experimentName)
-  await choose(page, page.getByLabel('Common metric'), 'Val Accuracy (↑ max)')
-  await page.getByRole('button', { name: 'Add', exact: true }).click()
-  await page.getByRole('button', { name: 'Next: budget and rules' }).click()
+  await fillNewExperiment(page, page.getByRole('dialog'), experimentName)
   const created = page.waitForRequest(r => r.url() === `${API}/platform-experiments` && r.method() === 'POST')
   await page.getByRole('button', { name: 'Create experiment' }).click()
   const createBody = (await created).postDataJSON()
   const adaMe = await (await api((await created).headers().authorization.slice(7), '/me')).json()
   assert.equal(createBody.project_id, adaMe.projects[0].id, 'the new experiment is sent with the project')
+  assert.deepEqual(createBody.metrics, [{ key: 'val_accuracy', direction: 'maximize' }], 'the metric picked from Add a metric, in its own direction')
+  assert.equal(createBody.coordinator_hosted, true, 'a new experiment is run by the platform')
   await page.getByText(experimentName).first().waitFor()
 
   section('adding and removing agents on the experiment page')
@@ -566,10 +591,7 @@ async function scenarios(browser) {
   await page.getByRole('button', { name: 'Configure it myself', exact: true }).click()
   const homeDialog = page.getByRole('dialog')
   const homeExperimentName = `ui-e2e-home-${run}`
-  await homeDialog.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(homeExperimentName)
-  await choose(page, homeDialog.getByLabel('Common metric'), 'Val Accuracy (↑ max)')
-  await homeDialog.getByRole('button', { name: 'Add', exact: true }).click()
-  await homeDialog.getByRole('button', { name: 'Next: budget and rules' }).click()
+  await fillNewExperiment(page, homeDialog, homeExperimentName)
   const homeCreated = page.waitForResponse(r => r.url() === `${API}/platform-experiments` && r.request().method() === 'POST')
   await homeDialog.getByRole('button', { name: 'Create experiment' }).click()
   assert.equal((await homeCreated).status(), 201)
@@ -589,7 +611,7 @@ async function scenarios(browser) {
   assert.equal(await page.getByRole('button', { name: 'Start now' }).count(), 0, 'no button starts a run')
   assert.equal((await (await api(await tokenOf(ada), `/platform-experiments/${homeExperimentID}`)).json()).status, 'open', 'it waits for its baseline')
 
-  section('home: Create and run composes create, one call an agent, and a start time, and nothing is rented')
+  section('home: Create experiment composes create and one call an agent, and nothing is rented')
   // The stack has no GitHub account connected, and an agent the platform really hosts has a
   // launcher rent for it. So the repository list is stood in for, and each write goes to
   // the real API with what would rent taken out of it: the repository and the hosted coordinator
@@ -630,24 +652,17 @@ async function scenarios(browser) {
     return route.continue()
   })
 
-  // Fills the form in the home dialog for hosted agents and presses Create and run.
+  // Fills the form in the home dialog with a repository and the researchers, and creates it.
   async function createAndRunFromHome(name, researchers) {
     await page.goto(`${UI}/platform-experiments`)
     await page.getByRole('button', { name: 'Configure it myself', exact: true }).click()
     const dialog = page.getByRole('dialog')
-    await dialog.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(name)
-    await choose(page, dialog.getByLabel('Common metric'), 'Val Accuracy (↑ max)')
-    await dialog.getByRole('button', { name: 'Add', exact: true }).click()
-    await dialog.getByRole('button', { name: 'Next: budget and rules' }).click()
-    await dialog.getByRole('button', { name: 'Hosted agents' }).click()
-    assert.ok(await dialog.getByRole('button', { name: 'Create and run' }).isEnabled(), 'hosted agents need no repository chosen')
-    await dialog.getByRole('tab', { name: '1. Essentials' }).click()
     await dialog.getByLabel('Repository').click()
     await page.getByRole('option', { name: 'acme/widgets' }).click()
-    await dialog.getByRole('tab', { name: '2. Budget and rules' }).click()
+    await fillNewExperiment(page, dialog, name)
     await dialog.getByLabel('Researchers').fill(String(researchers))
     runWrites.length = 0
-    await dialog.getByRole('button', { name: 'Create and run' }).click()
+    await dialog.getByRole('button', { name: 'Create experiment' }).click()
     await page.waitForURL(u => /^\/platform-experiments\/[^/]+$/.test(u.pathname))
     await page.getByRole('heading', { name }).waitFor()
     return new URL(page.url()).pathname.split('/').pop()
@@ -656,17 +671,17 @@ async function scenarios(browser) {
   const ranID = await createAndRunFromHome(`ui-e2e-run-${run}`, 2)
   await page.getByText('Preparing the baseline.').waitFor()
   assert.deepEqual(runWrites.map(w => w.path), [
-    '/platform-experiments', `/platform-experiments/${ranID}/agents`, `/platform-experiments/${ranID}/agents`, `/platform-experiments/${ranID}`,
-  ], 'create, then one call an agent, then the start time, and no start: the platform starts it once its baseline is declared')
+    '/platform-experiments', `/platform-experiments/${ranID}/agents`, `/platform-experiments/${ranID}/agents`,
+  ], 'create, then one call an agent, and no start: the platform starts it once its baseline is declared')
   assert.equal(runWrites[0].body.repository, 'acme/widgets')
   assert.equal(runWrites[0].body.coordinator_hosted, true)
+  assert.equal(runWrites[0].body.max_agents, 2, 'the researchers are sent as max_agents')
+  assert.deepEqual(runWrites[0].body.metrics, [{ key: 'val_accuracy', direction: 'maximize' }])
   assert.ok(!('starts_at' in runWrites[0].body), 'no start time is sent, so nothing starts it between two agents')
-  assert.deepEqual(runWrites.slice(1, 3).map(w => w.body), [{ hosted: true }, { hosted: true }], 'each agent is asked for hosted, with no count')
+  assert.deepEqual(runWrites.slice(1).map(w => w.body), [{ hosted: true }, { hosted: true }], 'each agent is asked for hosted, with no count')
   const ranToken = await tokenOf(ada)
-  assert.deepEqual(Object.keys(runWrites[3].body), ['starts_at'], 'the last call sets the start time and nothing else')
   const ran = await (await api(ranToken, `/platform-experiments/${ranID}`)).json()
   assert.equal(ran.status, 'open', 'the API holds it open until its baseline is declared')
-  assert.equal(Date.parse(ran.starts_at), Date.parse(runWrites[3].body.starts_at), 'with the start time the page sent')
   assert.equal((await (await api(ranToken, `/platform-experiments/${ranID}/agents`)).json()).agents.length, 2, 'and holds the two agents')
   assert.equal(await page.locator('.error-banner').count(), 0)
 
@@ -1104,7 +1119,7 @@ async function scenarios(browser) {
   await page.getByRole('option', { name: /ada-personal\/widgets/ }).click()
   assert.equal(await repositoryField.inputValue(), 'ada-personal/widgets')
   assert.equal(await page.getByLabel('Agent image').count(), 0, 'the agent image is folded away')
-  await page.getByRole('tab', { name: '2. Budget and rules' }).click()
+  await page.getByRole('tab', { name: '3. Budget and rules' }).click()
   await page.getByRole('button', { name: 'More settings' }).click()
   await page.getByLabel('Agent image').fill('ghcr.io/ada/agent:1')
   await page.keyboard.press('Escape')
@@ -1170,7 +1185,10 @@ async function scenarios(browser) {
   await page.goto(`${UI}/platform-experiments`)
   await page.locator('[role="link"]').filter({ has: page.getByText(experimentName, { exact: true }) }).getByRole('button', { name: 'Edit' }).click()
   await page.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(`${experimentName}-edited`)
-  await page.getByRole('button', { name: 'Next: budget and rules' }).click()
+  await page.getByRole('button', { name: 'Next', exact: true }).click()
+  await page.getByLabel('Duration (hours)').waitFor()
+  await page.getByRole('button', { name: 'Next', exact: true }).click()
+  await page.getByLabel('Researchers').waitFor()
   await page.getByRole('button', { name: 'Save changes' }).click()
   await page.getByText(`${experimentName}-edited`).first().waitFor()
 
