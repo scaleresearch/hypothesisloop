@@ -106,3 +106,26 @@ func TestJobCarriesTheSecretEnvironment(t *testing.T) {
 		t.Errorf("Job = %v, want the secret beside the job's and the group's own", got)
 	}
 }
+
+// A container sees all of its node's cores, so the job is told the whole cores its cpu holds,
+// and a thread pool it sizes itself still wins.
+func TestPlatformTellsTheJobTheCoresItHolds(t *testing.T) {
+	exp := &domain.Experiment{ID: "exp-1", Data: &domain.DataAccess{}, Token: "job-token"}
+	same := func(url string) string { return url }
+	for cpu, want := range map[string]string{"4": "4", "500m": "1", "2.5": "3", "": ""} {
+		env, err := Merged(exp, domain.JobSpec{}, domain.JobGroup{CPU: cpu}, "http://api", same)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if env["HYPOTHESISLOOP_CPUS"] != want || env["OMP_NUM_THREADS"] != want {
+			t.Errorf("cpu %q: HYPOTHESISLOOP_CPUS %q, OMP_NUM_THREADS %q; want %q", cpu, env["HYPOTHESISLOOP_CPUS"], env["OMP_NUM_THREADS"], want)
+		}
+	}
+	env, err := Merged(exp, domain.JobSpec{Env: map[string]string{"OMP_NUM_THREADS": "1"}}, domain.JobGroup{CPU: "8"}, "http://api", same)
+	if err != nil || env["OMP_NUM_THREADS"] != "1" || env["HYPOTHESISLOOP_CPUS"] != "8" {
+		t.Errorf("env %v, %v; want the job's own OMP_NUM_THREADS kept beside 8 cores", env, err)
+	}
+	if _, err := Platform(exp, domain.JobGroup{CPU: "four"}, "http://api", same); err == nil {
+		t.Error("Platform for cpu \"four\": got nil, want an error")
+	}
+}

@@ -39,6 +39,9 @@ files it points you to and leave the rest unread.
      builds while you write the rest.
   3. The job spec, `.hypothesisloop/job.yaml`: a command that finishes in minutes, and the
      `cpu`, `memory` and `storage` it uses, whatever your quota: every trial runs it.
+     `cpu` is the cores the program keeps busy: 1 for a single-threaded one. The job reads
+     its cores in $HYPOTHESISLOOP_CPUS, while `nproc` counts the whole machine's; size
+     worker pools and `make -j` from it.
   4. The run: `hl job submit .hypothesisloop/job.yaml`. A job rejected, failed, or
      completed without a metric it should report has its cause in `hl job status ID`
      and `hl job logs ID`: fix it, commit and submit again while you know a fix.

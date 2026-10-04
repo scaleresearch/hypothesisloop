@@ -5,6 +5,9 @@ package workloadenv
 import (
 	"crypto/sha256"
 	"fmt"
+	"strconv"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -32,9 +35,13 @@ func Platform(exp *domain.Experiment, group domain.JobGroup, apiURL string, reac
 	if exp.Token == "" {
 		return nil, fmt.Errorf("experiment %s has no job token in desired state", exp.ID)
 	}
+	cpus, err := allottedCPUs(group.CPU)
+	if err != nil {
+		return nil, err
+	}
 	dataEndpoint := reach(exp.Data.Endpoint)
 	traceID := sha256.Sum256([]byte(exp.ID))
-	return []Var{
+	vars := []Var{
 		{"AWS_ACCESS_KEY_ID", exp.Data.AccessKeyID},
 		{"AWS_ENDPOINT_URL", dataEndpoint},
 		{"AWS_ENDPOINT_URL_S3", dataEndpoint},
@@ -53,9 +60,28 @@ func Platform(exp *domain.Experiment, group domain.JobGroup, apiURL string, reac
 		{"HYPOTHESISLOOP_ACCELERATOR_COUNT", fmt.Sprintf("%d", group.AcceleratorCount)},
 		{"HYPOTHESISLOOP_DURATION_SECONDS", fmt.Sprintf("%d", int(exp.EstimatedDurationHours*3600))},
 		{"HYPOTHESISLOOP_ATTEMPT", fmt.Sprintf("%d", exp.AttemptCount)},
-		{"TRACEPARENT", fmt.Sprintf("00-%x-%x-01", traceID[:16], traceID[16:24])},
-		{"HYPOTHESISLOOP_TOKEN", exp.Token},
-	}, nil
+	}
+	if cpus != "" {
+		// A container sees every core of its node (nproc, os.cpu_count) while its cpu limit lets
+		// it use only these, so a thread pool sized from the node is throttled.
+		vars = append(vars, Var{"HYPOTHESISLOOP_CPUS", cpus}, Var{"OMP_NUM_THREADS", cpus})
+	}
+	return append(vars,
+		Var{"TRACEPARENT", fmt.Sprintf("00-%x-%x-01", traceID[:16], traceID[16:24])},
+		Var{"HYPOTHESISLOOP_TOKEN", exp.Token},
+	), nil
+}
+
+// allottedCPUs is a node's cpu quantity as whole cores, rounded up, or empty when none is stated.
+func allottedCPUs(cpu string) (string, error) {
+	if cpu == "" {
+		return "", nil
+	}
+	q, err := resource.ParseQuantity(cpu)
+	if err != nil {
+		return "", fmt.Errorf("job cpu %q: %w", cpu, err)
+	}
+	return strconv.FormatInt(max((q.MilliValue()+999)/1000, 1), 10), nil
 }
 
 // Job returns the job's own environment with the group's entries over it: the job-level map says
