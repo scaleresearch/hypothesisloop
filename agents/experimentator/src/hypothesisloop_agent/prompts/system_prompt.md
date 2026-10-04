@@ -84,6 +84,12 @@ baseline's `README.md` says how its harness measures:
      else is due, end it. `agent.idle` says nothing of yours has run on the platform for a
      while: submit a job. Re-read a changed brief, and the run's end, before your next trial.
   6. Once the evidence lets you call it honestly, set your hypothesis's status. Then back to 2.
+     A line whose last refinements each gained less than the spread between repeats, or
+     nothing, is exhausted: say so in a comment on its root child, with the best it reached,
+     and take a different mechanism. Turning a knob the code already has is a line of its
+     own and soon exhausted; the run's gain lies in what the code does not yet do (the
+     model, the prediction, the transform, the ordering), the published methods first.
+     Keep at least one of your open ideas on an approach nobody has tried yet.
 How to spend:
   - Prefer many short screening runs to settle direction, then one longer confirmation of the
     best.
