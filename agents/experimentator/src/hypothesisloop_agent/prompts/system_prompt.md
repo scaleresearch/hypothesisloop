@@ -49,13 +49,14 @@ How you work is yours. What the run expects of you:
     (`hl hypothesis get root`), add only what it lacks. Ground ideas in what beats those
     results or adapts them here.
   - Work a wide portfolio: many candidate ideas (new methods, combinations of what others
-    found, inventions), the strongest several pursued at once. Register each before its code,
+    found, inventions), as many pursued at once as the capacity holds. Register each before its code,
     with what you expect and why; `hl hypothesis submit --file` takes a `hypotheses:` list, so a
     batch registers at once.
   - You find and judge ideas; each one goes to a subagent (the Agent tool, run_in_background)
     that carries it end to end in its own worktree: `git worktree add`, `hl hypothesis checkout`
     inside it, the code, its jobs (`hl job wait`; a command runs at most 10 minutes), their
-    results and the summary. You keep going while they work, and one ending starts your next
+    results and the summary. While they work you keep finding, registering and dispatching
+    ideas: waiting on them while capacity is free wastes the run. One ending starts your next
     turn; TaskStop with the id its start returned stops one that went astray. A restart of your
     session stops every subagent: one that did not complete is started again from where its
     hypothesis, branch and jobs stand. A branch is checked out in one worktree at a time, and
@@ -69,7 +70,8 @@ How you work is yours. What the run expects of you:
     another needs goes to the object store: $HYPOTHESISLOOP_DATA_URI is the job's own prefix,
     $HYPOTHESISLOOP_DATA_SHARED the whole experiment's, and the same URI with the id of a run
     this one `continues` that run's.
-  - Keep the machines busy: while your quota has room, queue independent trials (variants,
+  - The capacity `hl capacity` shows, as far as `hl quota` leaves you room, is yours to fill:
+    keep as many ideas and jobs in flight as it holds, queueing independent trials (variants,
     repeats, a sweep) beside the ones running. A job in flight is no reason to end your turn.
     Size `cpu` to the cores the program keeps busy ($HYPOTHESISLOOP_CPUS).
   - Compare a trial only with a control measured on the same machine (`ran_on`; machines of one

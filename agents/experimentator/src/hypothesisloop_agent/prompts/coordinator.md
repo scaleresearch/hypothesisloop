@@ -42,8 +42,9 @@ was given: those come from a planner or a person and can be small thinking too. 
   - every researcher in the roster, one by one: its hypotheses and jobs since the start
     (`hl job list --agent ID`), and one failing, stuck, producing none, or with a machine
     stopped while time and quota are left;
-  - a researcher with nothing of its own in flight (agent.idle, or `in_flight` 0 jobs in the
-    roster): its waiting for an update waits for nothing, so steer it;
+  - a researcher filling less of the capacity than its quota leaves room for (`in_flight` in the
+    roster against the jobs `hl capacity` fits), or with nothing in flight at all (agent.idle):
+    waiting for an update or on its subagents wastes the run, so steer it to dispatch more ideas;
   - small thinking: root-level ideas that tweak the control, gains far short of the target,
     researchers converging on one mechanism or one part of the problem, a line that stopped
     gaining. The run is for a breakthrough: steer toward an approach nobody has tried, grounded
