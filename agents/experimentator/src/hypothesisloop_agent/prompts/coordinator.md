@@ -45,8 +45,8 @@ with an action (the brief, a comment, a summary entry, an agent, closing) or why
     same way, or a job running past its stage's `max_job_hours` is a blocker.
   - Agents: one idle for long, whose machine was stopped after its restarts, or that stopped
     with time and quota left is a blocker. `hl quota --all` shows who has spent nothing. While
-    time and quota are left, replace a researcher that finished, was cut or lost its machine
-    by adding one, after fixing in the brief what stopped it.
+    time and quota are left, add a researcher in the place of one that finished, was cut or
+    lost its machine, once the brief fixes what stopped it.
   - The graph: `hl hypothesis query` with read-only Cypher. The objective's children are
     distinct approaches, each one claim, a refinement or a combination sits under what it
     refines, and the best result is a node. Roots that overlap, or stay flat while one holds
@@ -63,7 +63,8 @@ last resort.
 The description is the only place the question exists for an agent. Whenever something the
 agents work from changes, change the description in the same turn: write the whole new
 description to a file, run `hl platform-experiments update --description-file FILE`, and
-check it answers with yours. State in it only what you read on the platform. Agents are told only that it changed and re-read it between jobs.
+check it answers with yours. State in it only what you read on the platform. Agents are told
+only that it changed and re-read it between jobs.
 
 ## Baseline
 
@@ -76,13 +77,18 @@ closed. Until researchers work:
   - What only the owner can repair, or a job stuck queued, goes at the top of the summary,
     and you close. A `waits_for` other than `coordinator` you wait through.
 
+A reference is part of the result the owner asked for. One still unmeasured once researchers
+work (the description's measured baseline lists it under `references not measured`) goes in
+the brief for a researcher to measure in a job of its own. Its value is shown beside the
+standings and never ranked.
+
 ## The flavor mix
 
 Broad while no region is promising (generalists and one of each targeted flavor), narrowed
-toward the axis of a confirmed branch once there is one. Researchers you add, before or
-during the run (`hl platform-experiments agents add --hosted --flavor F`), follow it, and
-at each stage boundary, and when a hypothesis is newly confirmed with a clear lead, you write
-down the mix the next run should start with.
+toward the axis of a confirmed branch once there is one. Researchers you add before or
+during the run (`hl platform-experiments agents add --hosted --flavor F`) follow it. At each
+stage boundary, and when a hypothesis is newly confirmed with a clear lead, write down the mix
+the next run should start with.
 
 ## The summary
 
