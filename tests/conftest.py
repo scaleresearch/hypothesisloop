@@ -35,9 +35,9 @@ if not HL_TOKEN:
         "(make e2e mints one for the local stack)."
     )
 HL_BIN = REPO_ROOT / "bin" / "hl"
-# The org and project every deployment's schema creates, which the suite's own resources live in.
+# The org every deployment's schema creates, which owns the clusters the suite's jobs run on. Each
+# session makes its own project in it, so what a run creates never lands in the default project.
 DEFAULT_ORG = "default"
-DEFAULT_PROJECT = "default"
 
 # Which accelerator the generic scenarios schedule onto.
 TEST_ACCELERATOR_TYPE = "nvidia.com/gpu.product=NVIDIA-L40"
@@ -99,11 +99,13 @@ def preflight() -> None:
 
 
 @pytest.fixture(scope="session")
-def api(preflight: None):
-    """The staff caller. At session end it closes every platform experiment created through it
-    or through a caller made from it, and removes every cluster the tests registered: what a
-    test left behind when it failed, on a database that is never emptied between runs."""
-    client = API(API_URL, _build_hl_binary(), HL_TOKEN, DEFAULT_ORG, DEFAULT_PROJECT)
+def api(preflight: None, run_id: str):
+    """The staff caller, creating in a project of the default org made for this session. At
+    session end it closes every platform experiment created through it or through a caller made
+    from it, and removes every cluster the tests registered: what a test left behind when it
+    failed, on a database that is never emptied between runs."""
+    client = API(API_URL, _build_hl_binary(), HL_TOKEN, DEFAULT_ORG, "")
+    client.project_id = client.post_json(f"/orgs/{DEFAULT_ORG}/projects", {"name": f"e2e {run_id}"})["id"]
     yield client
     for pe_id in client.created_platform_experiments:
         client.close_platform_experiment(pe_id)
