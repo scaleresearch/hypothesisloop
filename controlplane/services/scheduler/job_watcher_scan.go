@@ -3,7 +3,11 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"go.uber.org/zap"
 
@@ -167,7 +171,12 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 			w.evictNotYetRunning(ctx, exp, eviction)
 			return nil
 		}
-		return w.onFinished(ctx, exp, domain.StatusFailed, domain.PhaseDetail{Reason: reason, Message: message}.FailureCause())
+		// The runtime pushes a job's log tail before the phase that ends it, so it is stored by now.
+		tail, err := w.backend.LogTail(ctx, exp, failureOutputLines)
+		if err != nil {
+			return fmt.Errorf("read log tail: %w", err)
+		}
+		return w.onFinished(ctx, exp, domain.StatusFailed, withLastOutput(domain.PhaseDetail{Reason: reason, Message: message}.FailureCause(), tail))
 	case workload.JobPhaseRunning:
 		if exp.Status == domain.StatusRunning {
 			// The cluster agent continuously writes actual accelerator type into the metrics store.
@@ -219,4 +228,42 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 	default:
 		return fmt.Errorf("unknown actual phase %q", phase)
 	}
+}
+
+const (
+	failureOutputLines     = 20
+	failureOutputBytes     = 2048
+	failureOutputLineBytes = 256
+)
+
+// withLastOutput is cause followed by the last lines of tail, the most recent last, so a failed
+// job's agent reads why without fetching its logs. Blank lines are left out, a line is cut at
+// failureOutputLineBytes so one long line does not crowd out the ones before it, and the most
+// recent lines are kept that fit in failureOutputBytes.
+func withLastOutput(cause string, tail []string) string {
+	var kept []string
+	size := 0
+	for i := len(tail) - 1; i >= 0; i-- {
+		line := strings.TrimRightFunc(tail[i], unicode.IsSpace)
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if len(line) > failureOutputLineBytes {
+			cut := failureOutputLineBytes - len("…")
+			for cut > 0 && !utf8.RuneStart(line[cut]) {
+				cut--
+			}
+			line = line[:cut] + "…"
+		}
+		if size+len(line)+1 > failureOutputBytes {
+			break
+		}
+		size += len(line) + 1
+		kept = append(kept, line)
+	}
+	if len(kept) == 0 {
+		return cause
+	}
+	slices.Reverse(kept)
+	return cause + "\nlast output:\n" + strings.Join(kept, "\n")
 }

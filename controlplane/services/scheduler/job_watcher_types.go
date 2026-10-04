@@ -76,6 +76,9 @@ type JobBackendClient interface {
 	// PhaseReportedSince is when exp's current attempt first reported reason. found=false means
 	// it never did.
 	PhaseReportedSince(ctx context.Context, exp *domain.Experiment, reason string) (since time.Time, found bool, err error)
+	// LogTail is up to the last n lines of output exp's runtime last reported, empty when it
+	// reported none.
+	LogTail(ctx context.Context, exp *domain.Experiment, n int) ([]string, error)
 	// GetAutoscalerCapability reports, per cluster (by cluster_name), whether it sits behind a
 	// native autoscaler — see queuebackend.Backend.GetAutoscalerCapability.
 	GetAutoscalerCapability(ctx context.Context) (map[string]bool, error)

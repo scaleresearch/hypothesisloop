@@ -35,6 +35,10 @@ type Backend interface {
 	// found=false means it never did.
 	PhaseReportedSince(ctx context.Context, exp *domain.Experiment, reason string) (since time.Time, found bool, err error)
 
+	// LogTail is up to the last n lines of output exp's runtime last reported, empty when it
+	// reported none.
+	LogTail(ctx context.Context, exp *domain.Experiment, n int) ([]string, error)
+
 	// GetAdmittedAcceleratorType reports which accelerator type the job actually ran on. Backends that can
 	// substitute a different flavor than requested should read that back here. found=false means
 	// no sample of this admission names a type yet, as in the first moments of a started job.

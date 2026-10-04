@@ -34,6 +34,11 @@ type scaleUpBackend struct {
 	reason        string
 	message       string
 	firstReported map[string]time.Time
+	logTail       []string
+}
+
+func (b *scaleUpBackend) LogTail(_ context.Context, _ *domain.Experiment, n int) ([]string, error) {
+	return b.logTail[max(0, len(b.logTail)-n):], nil
 }
 
 func (b *scaleUpBackend) PollJobPhase(context.Context, *domain.Experiment) (workload.JobPhase, bool, error) {

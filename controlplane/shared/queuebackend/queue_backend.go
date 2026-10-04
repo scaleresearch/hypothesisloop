@@ -94,6 +94,11 @@ func (b *Backend) PhaseReportedSince(ctx context.Context, exp *domain.Experiment
 	return metricsdb.PhaseReportedSince(ctx, b.metricsDBURL, exp.ID, exp.ClusterName, exp.AttemptCount, reason)
 }
 
+// LogTail reads up to the last n lines of exp's most recently reported output.
+func (b *Backend) LogTail(ctx context.Context, exp *domain.Experiment, n int) ([]string, error) {
+	return metricsdb.GetLatestLogTail(ctx, b.metricsDBURL, exp.ID, n)
+}
+
 // GetAdmittedAcceleratorType reads the latest observed type metric for exp's current admission.
 //
 // The lookback is clamped to the time since submitted_at, which Postgres rewrites on every
