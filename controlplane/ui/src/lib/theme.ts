@@ -1,63 +1,49 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { DARK_QUERY, THEME_KEY } from '@/lib/theme-script'
-import type { Theme, ThemeChoice } from '@/lib/theme-script'
+import { THEME_KEY } from '@/lib/theme-script'
+import type { Theme } from '@/lib/theme-script'
 
-export type { Theme, ThemeChoice }
+export type { Theme }
 
-/** The choice this browser remembers; Light when there is none. */
-export function storedChoice(): ThemeChoice {
+/** The theme this browser remembers; Light when there is none, or one no longer offered. */
+export function storedTheme(): Theme {
   try {
-    const value = localStorage.getItem(THEME_KEY)
-    return value === 'dark' || value === 'system' ? value : 'light'
+    return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light'
   } catch {
     return 'light'
   }
 }
 
-export function resolveTheme(choice: ThemeChoice): Theme {
-  if (choice === 'system') return matchMedia(DARK_QUERY).matches ? 'dark' : 'light'
-  return choice
+function applyTheme(theme: Theme) {
+  document.documentElement.dataset.theme = theme
 }
 
-export function applyTheme(choice: ThemeChoice) {
-  document.documentElement.dataset.theme = resolveTheme(choice)
-}
-
-/** The theme choice of this browser, remembered, applied to <html>, and followed live while it is System. */
-export function useThemeChoice(): [ThemeChoice, (choice: ThemeChoice) => void] {
-  const [choice, setChoice] = useState<ThemeChoice>('light')
+/** The theme of this browser, remembered and applied to <html>. */
+export function useTheme(): [Theme, (theme: Theme) => void] {
+  const [theme, setTheme] = useState<Theme>('light')
 
   useEffect(() => {
-    setChoice(storedChoice())
+    setTheme(storedTheme())
     const onStorage = (e: StorageEvent) => {
       if (e.key !== THEME_KEY) return
-      const next = storedChoice()
-      setChoice(next)
+      const next = storedTheme()
+      setTheme(next)
       applyTheme(next)
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
   }, [])
 
-  useEffect(() => {
-    if (choice !== 'system') return
-    const query = matchMedia(DARK_QUERY)
-    const follow = () => applyTheme('system')
-    query.addEventListener('change', follow)
-    return () => query.removeEventListener('change', follow)
-  }, [choice])
-
-  const choose = useCallback((next: ThemeChoice) => {
+  const choose = useCallback((next: Theme) => {
     try {
       localStorage.setItem(THEME_KEY, next)
     } catch {
       // A browser that keeps no storage still switches for this page.
     }
-    setChoice(next)
+    setTheme(next)
     applyTheme(next)
   }, [])
 
-  return [choice, choose]
+  return [theme, choose]
 }
