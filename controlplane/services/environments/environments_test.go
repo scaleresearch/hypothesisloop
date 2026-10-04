@@ -67,7 +67,7 @@ func TestTheSameFileOnTheSameBaseIsOneEnvironmentOfAnOrgAndAnotherBaseOrOrgAnoth
 		t.Errorf("a commit without the file: %+v, %v, want none", none, err)
 	}
 	var invalid *domain.EnvironmentFileError
-	if _, err := svc.ensure(ctx, "org-a", "FROM ubuntu:24.04\n", "registry.test/hl/job:1"); !errors.As(err, &invalid) {
+	if _, err := svc.ensure(ctx, "org-a", "project-a", "owner/repo", "FROM ubuntu:24.04\n", "registry.test/hl/job:1"); !errors.As(err, &invalid) {
 		t.Errorf("a file on its own base: %v, want an EnvironmentFileError", err)
 	}
 }

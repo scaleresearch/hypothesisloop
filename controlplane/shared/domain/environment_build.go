@@ -27,10 +27,21 @@ type RegistryLogin struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-// EnvironmentBuildCredentialRequest asks for the push login of the build of a key the cluster
-// was assigned at Attempt.
+// EnvironmentBuildCredentialRequest asks for the push login, or the git credential, of the build
+// of a key the cluster was assigned at Attempt.
 type EnvironmentBuildCredentialRequest struct {
 	Attempt int `json:"attempt"`
+}
+
+// EnvironmentGitCredential reads the repository that declared an environment, at URL, as git
+// sends it, good until ExpiresAt, zero for one that does not run out. It is handed out to one
+// build (POST /internal/clusters/{name}/builds/{key}/git-credential), which mounts it as the
+// secret EnvironmentGitSecret, and is never written to disk or a layer.
+type EnvironmentGitCredential struct {
+	URL       string    `json:"url"`
+	Username  string    `json:"username"`
+	Password  string    `json:"password"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 // EnvironmentBuildOutcomeKind is how a build ended, as the cluster that ran it reports it.

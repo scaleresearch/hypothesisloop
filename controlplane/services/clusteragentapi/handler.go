@@ -5,6 +5,7 @@
 //	POST /internal/clusters/{name}/reconcile — actual capacity in, desired workloads out
 //	POST /internal/clusters/{name}/status        — push job phase observations
 //	POST /internal/clusters/{name}/builds/{key}/credential — the push login of an assigned build
+//	POST /internal/clusters/{name}/builds/{key}/git-credential — a read of the repository an assigned build is of
 //	POST /internal/clusters/{name}/builds/{key}  — the outcome of an assigned build
 //	POST /internal/clusters/{name}/builds/{key}/progress — the step an assigned build is at
 //	POST /internal/clusters/{name}/builds/{key}/loaded — an assigned build held on one node
@@ -38,6 +39,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
@@ -83,10 +85,18 @@ type RegistryLogins interface {
 	Pull(ctx context.Context) (domain.RegistryLogin, error)
 }
 
-// EnvironmentRegistry is where assigned builds push to, and the logins to it.
+// RepositoryCredentials mints what git reads a repository of a project with (githost.Provider).
+type RepositoryCredentials interface {
+	URL(repository string) string
+	Credential(ctx context.Context, projectID, repository string, write bool) (*githost.Credential, error)
+}
+
+// EnvironmentRegistry is where assigned builds push to, and the logins to it. Git reads the
+// repository an environment file is of, for its build.
 type EnvironmentRegistry struct {
 	Repository string
 	Logins     RegistryLogins
+	Git        RepositoryCredentials
 }
 
 // Handler serves the cluster-agent-facing API.
@@ -485,6 +495,45 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return &struct {
 			Body domain.RegistryLogin
 		}{Body: login}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{
+		OperationID: "cluster-build-git-credential", Method: "POST", Path: "/{name}/builds/{key}/git-credential",
+		Summary: "A read of the repository an assigned environment build is of", Tags: []string{"cluster-agent"},
+		Description: "What git reads the repository whose environment file this is with, minted for this call and for that repository alone, read-only. " +
+			"The build mounts it as the secret " + domain.EnvironmentGitSecret + " of a RUN that asks for it, never into a layer. Handed out only while the " +
+			"build of key is assigned to this cluster at attempt and still building; otherwise 409. 404 for an environment of no repository.",
+	}, func(ctx context.Context, in *struct {
+		Name string `path:"name"`
+		Key  string `path:"key"`
+		Body domain.EnvironmentBuildCredentialRequest
+	}) (*struct {
+		Body domain.EnvironmentGitCredential
+	}, error) {
+		if h.environments == nil {
+			return nil, huma.Error409Conflict("this deployment builds no environments")
+		}
+		env, err := h.store.AssignedEnvironmentBuild(ctx, in.Name, in.Key, in.Body.Attempt)
+		if err != nil {
+			return nil, auth.Internal(h.logger, "environment git credential", err, zap.String("cluster", in.Name), zap.String("key", in.Key))
+		}
+		if env == nil {
+			return nil, huma.Error409Conflict("the build of " + in.Key + " is not assigned to cluster " + in.Name + " at attempt " + strconv.Itoa(in.Body.Attempt))
+		}
+		if env.GitRepository == "" {
+			return nil, huma.Error404NotFound("the environment " + in.Key + " is of no repository")
+		}
+		minted, err := h.environments.Git.Credential(ctx, env.ProjectID, env.GitRepository, false)
+		var refused huma.StatusError
+		if errors.As(err, &refused) {
+			return nil, err
+		}
+		if err != nil {
+			return nil, auth.Internal(h.logger, "environment git credential", err, zap.String("cluster", in.Name), zap.String("key", in.Key))
+		}
+		return &struct {
+			Body domain.EnvironmentGitCredential
+		}{Body: domain.EnvironmentGitCredential{URL: h.environments.Git.URL(env.GitRepository), Username: minted.Username, Password: minted.Password, ExpiresAt: minted.ExpiresAt}}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{

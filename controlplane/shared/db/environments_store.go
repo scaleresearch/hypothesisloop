@@ -21,12 +21,12 @@ func NewEnvironmentsStore(pool *Pool) *EnvironmentsStore {
 	return &EnvironmentsStore{pool: pool}
 }
 
-const environmentColumns = ` key, org_id, base, tools, dockerfile, image, loaded_image, loaded_node, loaded_cluster, state, fault, log_tail, failed_log, cluster_name, attempt, assigned_at, progress, progress_at, created_at, updated_at `
+const environmentColumns = ` key, org_id, project_id, git_repository, base, tools, dockerfile, image, loaded_image, loaded_node, loaded_cluster, state, fault, log_tail, failed_log, cluster_name, attempt, assigned_at, progress, progress_at, created_at, updated_at `
 
 func scanEnvironment(row rowScanner) (*domain.Environment, error) {
 	env := &domain.Environment{}
 	var state, fault string
-	if err := row.Scan(&env.Key, &env.OrgID, &env.Base, &env.Tools, &env.Dockerfile, &env.Image, &env.LoadedImage, &env.LoadedNode, &env.LoadedCluster, &state, &fault, &env.LogTail, &env.FailedLog,
+	if err := row.Scan(&env.Key, &env.OrgID, &env.ProjectID, &env.GitRepository, &env.Base, &env.Tools, &env.Dockerfile, &env.Image, &env.LoadedImage, &env.LoadedNode, &env.LoadedCluster, &state, &fault, &env.LogTail, &env.FailedLog,
 		&env.ClusterName, &env.Attempt, &env.AssignedAt, &env.Progress, &env.ProgressAt, &env.CreatedAt, &env.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func (s *EnvironmentsStore) OrgHasEnvironmentBuilder(ctx context.Context, orgID 
 // lets the agent tell from an error of the file.
 func (s *EnvironmentsStore) EnsureEnvironment(ctx context.Context, env *domain.Environment) (*domain.Environment, error) {
 	const q = `WITH made AS (
-	INSERT INTO environments (key, org_id, base, tools, dockerfile, image, state) VALUES ($1, $2, $3, $5, $4, '', 'building')
+	INSERT INTO environments (key, org_id, project_id, git_repository, base, tools, dockerfile, image, state) VALUES ($1, $2, $6, $7, $3, $5, $4, '', 'building')
 	ON CONFLICT (key) DO UPDATE SET state = 'building', fault = '', log_tail = '', image = '', cluster_name = '', attempt = 0, assigned_at = NULL, updated_at = now(),
 		loaded_image = '', loaded_node = '', loaded_cluster = '',
 		failed_log = CASE WHEN environments.fault = 'file' THEN environments.log_tail ELSE environments.failed_log END
@@ -66,7 +66,7 @@ func (s *EnvironmentsStore) EnsureEnvironment(ctx context.Context, env *domain.E
 SELECT` + environmentColumns + `FROM made
 UNION ALL
 SELECT` + environmentColumns + `FROM environments WHERE key = $1 AND NOT EXISTS (SELECT 1 FROM made)`
-	stored, err := scanEnvironment(s.pool.pool.QueryRow(ctx, q, env.Key, env.OrgID, env.Base, env.Dockerfile, env.Tools))
+	stored, err := scanEnvironment(s.pool.pool.QueryRow(ctx, q, env.Key, env.OrgID, env.Base, env.Dockerfile, env.Tools, env.ProjectID, env.GitRepository))
 	if err != nil {
 		return nil, fmt.Errorf("environments_store.Ensure: %w", err)
 	}

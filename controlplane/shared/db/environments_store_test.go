@@ -31,7 +31,7 @@ func newEnvironments(t *testing.T) *environments {
 func (w *environments) ensure(t *testing.T, org, what string) *domain.Environment {
 	t.Helper()
 	dockerfile := "ARG BASE\nFROM ${BASE}\nRUN echo " + w.suffix + " " + what + "\n"
-	env, err := w.envs.EnsureEnvironment(context.Background(), &domain.Environment{Key: domain.EnvironmentKey(org, dockerfile, "registry.test/job:1", ""), OrgID: org, Base: "registry.test/job:1", Dockerfile: dockerfile})
+	env, err := w.envs.EnsureEnvironment(context.Background(), &domain.Environment{Key: domain.EnvironmentKey(org, "", dockerfile, "registry.test/job:1", ""), OrgID: org, Base: "registry.test/job:1", Dockerfile: dockerfile})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +490,7 @@ func TestAnEnvironmentKeepsTheImageItsToolsComeFrom(t *testing.T) {
 	ctx := context.Background()
 	dockerfile := "ARG BASE\nFROM ${BASE}\nRUN echo " + w.suffix + " tools\n"
 	base, tools := "registry.test/job-base@sha256:"+w.suffix, "registry.test/job@sha256:"+w.suffix
-	made, err := w.envs.EnsureEnvironment(ctx, &domain.Environment{Key: domain.EnvironmentKey(w.orgA, dockerfile, base, tools), OrgID: w.orgA, Base: base, Tools: tools, Dockerfile: dockerfile})
+	made, err := w.envs.EnsureEnvironment(ctx, &domain.Environment{Key: domain.EnvironmentKey(w.orgA, "", dockerfile, base, tools), OrgID: w.orgA, Base: base, Tools: tools, Dockerfile: dockerfile})
 	if err != nil {
 		t.Fatal(err)
 	}

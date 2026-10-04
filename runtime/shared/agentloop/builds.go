@@ -86,6 +86,10 @@ func (a *Agent) runBuild(ctx context.Context, running *runningBuild, b domain.En
 		var login domain.RegistryLogin
 		err := a.postJSON(ctx, "/builds/"+url.PathEscape(b.Key)+"/credential", domain.EnvironmentBuildCredentialRequest{Attempt: b.Attempt}, &login)
 		return login.Username, login.Password, err
+	}, func(ctx context.Context) (domain.EnvironmentGitCredential, error) {
+		var credential domain.EnvironmentGitCredential
+		err := a.postJSON(ctx, "/builds/"+url.PathEscape(b.Key)+"/git-credential", domain.EnvironmentBuildCredentialRequest{Attempt: b.Attempt}, &credential)
+		return credential, err
 	}, func(format string, args ...any) {
 		line := fmt.Sprintf(format, args...)
 		a.Log("build %s attempt %d: %s", b.Key, b.Attempt, line)

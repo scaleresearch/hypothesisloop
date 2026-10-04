@@ -1464,6 +1464,11 @@ UPDATE environments SET loaded_cluster = cluster_name WHERE loaded_image <> '' A
 -- repository@digest, empty for one built on its job's image itself. base is then that image
 -- without them, so a release that changes only the tools keeps the layers the file built.
 ALTER TABLE environments ADD COLUMN IF NOT EXISTS tools TEXT NOT NULL DEFAULT '';
+-- The repository whose environment file this is, of project project_id: its build reads it
+-- (domain.EnvironmentGitSecret), and the key names it. Empty on rows from before, whose keys no
+-- submit reaches again.
+ALTER TABLE environments ADD COLUMN IF NOT EXISTS project_id     TEXT NOT NULL DEFAULT '';
+ALTER TABLE environments ADD COLUMN IF NOT EXISTS git_repository TEXT NOT NULL DEFAULT '';
 -- Each re-declaration of a running platform experiment's baseline to a stronger job that measured
 -- the control: the experiment's history of its baseline, answered on its read and in the record of
 -- its close. created_xid is the transaction that raised it, which platform_experiment.baseline

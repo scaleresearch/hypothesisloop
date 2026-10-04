@@ -59,11 +59,11 @@ func (s *Service) Read(ctx context.Context, projectID, repository, ref string) (
 	return &file, nil
 }
 
-// ensure returns the environment of dockerfile for a job of orgID naming image, to be built when
-// it is new or failed. A file the platform does not build is a *domain.EnvironmentFileError, an
-// org no cluster builds for domain.ErrNoEnvironmentBuilder, and an image whose registry does not
-// name its digest a *domain.ImageUnresolvedError.
-func (s *Service) ensure(ctx context.Context, orgID, dockerfile, image string) (*domain.Environment, error) {
+// ensure returns the environment of dockerfile of the project's repository for a job of orgID
+// naming image, to be built when it is new or failed. A file the platform does not build is a
+// *domain.EnvironmentFileError, an org no cluster builds for domain.ErrNoEnvironmentBuilder, and
+// an image whose registry does not name its digest a *domain.ImageUnresolvedError.
+func (s *Service) ensure(ctx context.Context, orgID, projectID, repository, dockerfile, image string) (*domain.Environment, error) {
 	if err := domain.ValidateEnvironmentFile(dockerfile); err != nil {
 		return nil, err
 	}
@@ -78,7 +78,8 @@ func (s *Service) ensure(ctx context.Context, orgID, dockerfile, image string) (
 	if err != nil {
 		return nil, err
 	}
-	env, err := s.store.EnsureEnvironment(ctx, &domain.Environment{Key: domain.EnvironmentKey(orgID, dockerfile, base, tools), OrgID: orgID, Base: base, Tools: tools, Dockerfile: dockerfile})
+	env, err := s.store.EnsureEnvironment(ctx, &domain.Environment{Key: domain.EnvironmentKey(orgID, repository, dockerfile, base, tools), OrgID: orgID,
+		ProjectID: projectID, GitRepository: repository, Base: base, Tools: tools, Dockerfile: dockerfile})
 	if err != nil {
 		return nil, fmt.Errorf("environments: %w", err)
 	}
@@ -123,7 +124,7 @@ func (s *Service) Declared(ctx context.Context, orgID, projectID, repository, re
 	if err != nil || file == nil {
 		return nil, err
 	}
-	return s.ensure(ctx, orgID, *file, image)
+	return s.ensure(ctx, orgID, projectID, repository, *file, image)
 }
 
 // Find returns the environment the repository's commit ref declares for a job of orgID naming
@@ -141,7 +142,7 @@ func (s *Service) Find(ctx context.Context, orgID, projectID, repository, ref, i
 	if err != nil {
 		return nil, true, err
 	}
-	env, err = s.store.GetEnvironment(ctx, domain.EnvironmentKey(orgID, *file, base, tools))
+	env, err = s.store.GetEnvironment(ctx, domain.EnvironmentKey(orgID, repository, *file, base, tools))
 	if err != nil {
 		return nil, true, fmt.Errorf("environments: %w", err)
 	}

@@ -18,6 +18,12 @@ import (
 // it: a job clones its commit at start, as without one.
 const EnvironmentFile = ".hypothesisloop/Dockerfile"
 
+// EnvironmentGitSecret is the id of the BuildKit secret a RUN of an environment file mounts to
+// read the repository that declared it, at /run/secrets/git-credentials by default: one line of
+// git's credential store, read-only, so a step can fetch a commit it pins and prefetch from it.
+// A secret mount is never part of a layer.
+const EnvironmentGitSecret = "git-credentials"
+
 // MaxEnvironmentFileBytes bounds an environment file.
 const MaxEnvironmentFileBytes = 64 << 10
 
@@ -65,10 +71,12 @@ const (
 	MaxEnvironmentBuildTime = MaxEnvironmentAttempts * EnvironmentBuildLease
 )
 
-// Environment is one image the platform builds for an org from an environment file on one base
-// image, with the platform's tools from the image Tools added last, none when Tools is empty.
-// Base and Tools are each repository@digest, and Key names the four, so the same file on the
-// same images is built once per org however the images are tagged. A building
+// Environment is one image the platform builds for an org from the environment file of
+// GitRepository, a repository of project ProjectID, on one base image, with the platform's tools
+// from the image Tools added last, none when Tools is empty. Its build reads GitRepository through
+// EnvironmentGitSecret. Base and Tools are each repository@digest, and Key names the org, the
+// repository, the file and the images, so the same file of a repository on the same images is
+// built once however the images are tagged. A building
 // one is assigned to ClusterName at AssignedAt for its Attempt-th time, or to none while
 // ClusterName is empty. Image is the pushed build, repository@digest, and runs once State is
 // ready. LogTail is the end of the output of a build that failed, and FailedLog that of the file's
@@ -80,6 +88,8 @@ const (
 type Environment struct {
 	Key           string
 	OrgID         string
+	ProjectID     string
+	GitRepository string
 	Base          string
 	Tools         string
 	Dockerfile    string
@@ -103,9 +113,10 @@ type Environment struct {
 // NodeHostnameLabel is the label that names one node, which a job is pinned to its node by.
 const NodeHostnameLabel = "kubernetes.io/hostname"
 
-// EnvironmentKey names the build of dockerfile on base with the tools of tools for orgID.
-func EnvironmentKey(orgID, dockerfile, base, tools string) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%s%d:%s%d:%s%d:%s", len(orgID), orgID, len(base), base, len(dockerfile), dockerfile, len(tools), tools)))
+// EnvironmentKey names the build of dockerfile of gitRepository on base with the tools of tools
+// for orgID. The repository is in it because the build reads that repository.
+func EnvironmentKey(orgID, gitRepository, dockerfile, base, tools string) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%s%d:%s%d:%s%d:%s%d:%s", len(orgID), orgID, len(gitRepository), gitRepository, len(base), base, len(dockerfile), dockerfile, len(tools), tools)))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -215,8 +226,8 @@ func refuseBuildContext(dockerfile string) error {
 			if strings.HasPrefix(source, "<<") || instruction == "add" && remoteSource(source) {
 				continue
 			}
-			return &EnvironmentFileError{Why: fmt.Sprintf("%s line %d, %s, reads %s from a build context the build does not have: the environment is built from this file alone, and a job gets the repository's code by its clone at start. Install what the code needs with RUN or COPY --from an image, and build the code itself in the job",
-				EnvironmentFile, node.StartLine, strings.TrimSpace(node.Original), source)}
+			return &EnvironmentFileError{Why: fmt.Sprintf("%s line %d, %s, reads %s from a build context the build does not have: the environment is built from this file alone, and a job gets the repository's code by its clone at start. Install what the code needs with RUN or COPY --from an image; a RUN with --mount=type=secret,id=%s reads the repository at a commit it pins through git's credential store at /run/secrets/%s",
+				EnvironmentFile, node.StartLine, strings.TrimSpace(node.Original), source, EnvironmentGitSecret, EnvironmentGitSecret)}
 		}
 	}
 	return nil

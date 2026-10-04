@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,8 @@ import (
 	gatewaypb "github.com/moby/buildkit/frontend/gateway/pb"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/session/auth"
+	"github.com/moby/buildkit/session/secrets"
+	"github.com/moby/buildkit/session/secrets/secretsprovider"
 	"github.com/moby/buildkit/solver/errdefs"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -29,6 +32,10 @@ const buildPlatform = "linux/amd64"
 // Credential returns the username and password the registry of the build's repository takes,
 // asked each time the daemon needs them.
 type Credential = func(ctx context.Context) (username, password string, err error)
+
+// GitCredential returns what reads the repository the build's file is of, asked each time a RUN
+// mounts domain.EnvironmentGitSecret.
+type GitCredential = func(ctx context.Context) (domain.EnvironmentGitCredential, error)
 
 // solver is the part of a BuildKit client a build uses.
 type solver interface {
@@ -75,7 +82,8 @@ type Progress = func(format string, args ...any)
 // digest, and reports how it ended under no attempt. An image of the platform's that does not
 // pull is the platform's fault, whatever the reason, so a registry outage never fails a file. Once ctx is done the report is meaningless and the caller sends
 // none. loaded, which may be nil, is told the image once it is in its node, before the push ends.
-func (d *Daemon) Run(ctx context.Context, b domain.EnvironmentBuild, credential Credential, progress Progress, loaded Loaded) domain.EnvironmentBuildReport {
+// gitCredential is what a RUN that mounts domain.EnvironmentGitSecret reads the repository with.
+func (d *Daemon) Run(ctx context.Context, b domain.EnvironmentBuild, credential Credential, gitCredential GitCredential, progress Progress, loaded Loaded) domain.EnvironmentBuildReport {
 	steps := newSteps(progress)
 	for _, image := range []string{b.Base, b.Tools} {
 		if image == "" {
@@ -86,7 +94,8 @@ func (d *Daemon) Run(ctx context.Context, b domain.EnvironmentBuild, credential 
 		}
 	}
 	host, _, _ := strings.Cut(b.Repository, "/")
-	attachables := []session.Attachable{&registryAuth{host: host, credential: credential}}
+	attachables := []session.Attachable{&registryAuth{host: host, credential: credential},
+		secretsprovider.NewSecretProvider(repositorySecret(gitCredential))}
 	digest, err := d.build(ctx, attachables, b, steps, loaded)
 	var failed *buildFailed
 	switch {
@@ -340,6 +349,30 @@ func (a *registryAuth) Credentials(ctx context.Context, req *auth.CredentialsReq
 		return nil, err
 	}
 	return &auth.CredentialsResponse{Username: username, Secret: password}, nil
+}
+
+// repositorySecret answers domain.EnvironmentGitSecret, and no other secret, with git's credential
+// store for the repository the build's file is of: a line of its host alone, which a git that
+// sends no path matches, then a line of its path with and without .git, which a git with
+// credential.useHttpPath (the job images set it) matches as cloned. The credential reads that one
+// repository alone.
+type repositorySecret GitCredential
+
+func (r repositorySecret) GetSecret(ctx context.Context, id string) ([]byte, error) {
+	if id != domain.EnvironmentGitSecret || r == nil {
+		return nil, secrets.ErrNotFound
+	}
+	credential, err := r(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("the credential of the repository: %w", err)
+	}
+	address, err := url.Parse(credential.URL)
+	if err != nil || address.Scheme == "" || address.Host == "" {
+		return nil, fmt.Errorf("the repository's address %q names no scheme and host", credential.URL)
+	}
+	origin := address.Scheme + "://" + url.UserPassword(credential.Username, credential.Password).String() + "@" + address.Host
+	path := strings.TrimSuffix(strings.Trim(address.Path, "/"), ".git")
+	return []byte(origin + "\n" + origin + "/" + path + "\n" + origin + "/" + path + ".git\n"), nil
 }
 
 // withTools is dockerfile with domain.PlatformTools copied from the image tools into the stage

@@ -41,7 +41,7 @@ func TestAnEnvironmentBuiltAheadIsTheOneItsJobWaitsFor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := domain.EnvironmentKey("org-a", rustEnvironment, "registry.test/job:1", "")
+	want := domain.EnvironmentKey("org-a", "", rustEnvironment, "registry.test/job:1", "")
 	if env.Key != want || !slices.Equal(assigned, []string{want}) || !slices.Equal(asked, []string{"org-a registry.test/job:1"}) {
 		t.Errorf("built %q, assigned %v, asked %v, want %q for org-a on the image", env.Key, assigned, asked, want)
 	}
@@ -86,7 +86,7 @@ func TestAnEnvironmentIsNotBuiltAheadForACommitWithoutOneOrOutsideTheRepository(
 // asked for, or a commit without the file, is told so.
 func TestAnEnvironmentIsReadWithoutBuildingIt(t *testing.T) {
 	commit := strings.Repeat("a", 40)
-	key := domain.EnvironmentKey("org-a", rustEnvironment, "registry.test/job:1", "")
+	key := domain.EnvironmentKey("org-a", "", rustEnvironment, "registry.test/job:1", "")
 	failed := &domain.Environment{Key: key, Base: "registry.test/job:1", State: domain.EnvironmentFailed, Fault: domain.EnvironmentFaultFile, LogTail: "error: unexpected argument '--locked=false'"}
 	var assigned []string
 	s := &Service{store: poolOnlyStore{}, codeHost: testCodeHost{}, builds: assigning{&assigned},
@@ -120,7 +120,7 @@ func TestAnEnvironmentIsReadWithoutBuildingIt(t *testing.T) {
 func TestAnAgentThatReadsABuildingEnvironmentIsToldItEnded(t *testing.T) {
 	commit := strings.Repeat("a", 40)
 	codeRef := "https://example.com/repo.git@" + commit
-	key := domain.EnvironmentKey("org-a", rustEnvironment, "registry.test/job:1", "")
+	key := domain.EnvironmentKey("org-a", "", rustEnvironment, "registry.test/job:1", "")
 	for name, c := range map[string]struct {
 		agent string
 		state domain.EnvironmentState

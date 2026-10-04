@@ -117,7 +117,7 @@ func newFakeBuilder() *fakeBuilder {
 	return &fakeBuilder{runs: map[string]int{}, cancelled: map[string]int{}, release: make(chan struct{})}
 }
 
-func (b *fakeBuilder) Run(ctx context.Context, build domain.EnvironmentBuild, credential func(context.Context) (string, string, error), progress func(string, ...any), loaded func(node, digest string)) domain.EnvironmentBuildReport {
+func (b *fakeBuilder) Run(ctx context.Context, build domain.EnvironmentBuild, credential func(context.Context) (string, string, error), _ func(context.Context) (domain.EnvironmentGitCredential, error), progress func(string, ...any), loaded func(node, digest string)) domain.EnvironmentBuildReport {
 	if b.loadedOn != "" {
 		loaded(b.loadedOn, "sha256:abc")
 	}

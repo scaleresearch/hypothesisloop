@@ -397,7 +397,7 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 	clusterAgentHandler := clusteragentapi.NewHandler(store,
 		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metricsDBURL, pcfg.Scheduler.ObservationCadence(), dataStore,
 		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second,
-		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.Auth.SigningSecret, newEnvironmentRegistry(runCtx, pcfg, logger), logger).
+		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.Auth.SigningSecret, newEnvironmentRegistry(runCtx, pcfg, gitHost, logger), logger).
 		WithBuildReported(schedulerLoop.Trigger)
 	clusterAgentRouter := chi.NewRouter()
 	caDoc := apidocs.New(clusterAgentRouter, "hypothesisloop cluster-agent API", "1.0.0", "", gate.authenticator, gate.access, logger)
@@ -407,9 +407,10 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 	return schedulerHandler, clusterAgentRouter
 }
 
-// newEnvironmentRegistry is where assigned environment builds push to and the logins to it, nil
-// on a deployment whose settings have no environments section.
-func newEnvironmentRegistry(ctx context.Context, pcfg *hypothesisloopcfg.Config, logger *zap.Logger) *clusteragentapi.EnvironmentRegistry {
+// newEnvironmentRegistry is where assigned environment builds push to and the logins to it, and
+// the git host their files' repositories are read from, nil on a deployment whose settings have no
+// environments section.
+func newEnvironmentRegistry(ctx context.Context, pcfg *hypothesisloopcfg.Config, gitHost githost.Provider, logger *zap.Logger) *clusteragentapi.EnvironmentRegistry {
 	e := pcfg.Environments
 	if e == nil {
 		return nil
@@ -418,7 +419,7 @@ func newEnvironmentRegistry(ctx context.Context, pcfg *hypothesisloopcfg.Config,
 	if err != nil {
 		logger.Fatal("control-service: the registry logins of environment builds", zap.Error(err))
 	}
-	return &clusteragentapi.EnvironmentRegistry{Repository: e.Repository, Logins: logins}
+	return &clusteragentapi.EnvironmentRegistry{Repository: e.Repository, Logins: logins, Git: gitHost}
 }
 
 // openGraph connects to the hypothesis graph, makes sure its schema exists, moves any hypotheses
