@@ -36,6 +36,11 @@ builder:
   enabled: false
   image: docker.io/moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
   nodePort: 31234
+  # What the builder holds of its node. The cluster reports its capacity without it, so jobs are
+  # never placed on it, and a build has that share when jobs compete with it.
+  requests:
+    cpu: "4"
+    memory: 8Gi
   tls:
     ca: ""
     cert: ""

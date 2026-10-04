@@ -46,6 +46,10 @@ spec:
           ports:
             - name: buildkit
               containerPort: 1234
+          resources:
+            requests:
+              cpu: {{ required "builder.requests.cpu is required" .Values.builder.requests.cpu | quote }}
+              memory: {{ required "builder.requests.memory is required" .Values.builder.requests.memory | quote }}
           readinessProbe:
             exec:
               command: ["buildctl", "debug", "workers"]

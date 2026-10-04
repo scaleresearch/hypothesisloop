@@ -136,9 +136,15 @@ func TestTheBuilderIsReachedOnANodePortOnlyWhenEnabled(t *testing.T) {
 		if metadata(deployment, "name") != "hypothesisloop-builder" {
 			continue
 		}
-		args := podSpec(deployment)["containers"].([]any)[0].(map[string]any)["args"].([]any)
+		container := podSpec(deployment)["containers"].([]any)[0].(map[string]any)
+		args := container["args"].([]any)
 		if !slices.Contains(args, any("--tlscacert=/etc/buildkit/tls/ca.pem")) {
 			t.Errorf("buildkitd args = %v, want client certificates required", args)
+		}
+		// Requested, the builder's share is left out of the capacity the cluster reports.
+		requests, _ := container["resources"].(map[string]any)["requests"].(map[string]any)
+		if requests["cpu"] != "4" || requests["memory"] != "8Gi" {
+			t.Errorf("buildkitd requests = %v, want builder.requests", requests)
 		}
 		return
 	}
