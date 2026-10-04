@@ -1325,27 +1325,54 @@ func resolveClusterAndFootprint(avail map[string]domain.Footprint, registered ma
 	return clusterWithBestFit(avail, registered, fallback), fallback
 }
 
-// placeAtFlavor names the first cluster in placement order that can host exp at the accelerator
-// type it currently carries, judged on footprint and node layout alike. ok=false means no cluster
-// can — the caller decides what to do with a job that does not fit anywhere, rather than being
+// placeAtFlavor names the cluster that can host exp at the accelerator type it currently carries,
+// judged on footprint and node layout alike: in the highest priority tier that has one, the one
+// with room for the most jobs like exp (roomFor), so jobs spread over the clusters an org ranked
+// alike and keep each busy. Run 8 placed 7 of 9 researcher jobs on the first name that fit, a box
+// of 12 cores, while one of 28 sat mostly idle. Among those with equal room the cluster that built
+// exp's environment, which holds its image, goes first, then the name. ok=false means no cluster
+// can: the caller decides what to do with a job that does not fit anywhere, rather than being
 // handed a cluster that only looks big enough in the scalar.
 func placeAtFlavor(avail map[string]domain.Footprint, registered map[string]domain.Cluster, nodeAvail, nodeResources map[string]map[string]map[string]int64, nodeLabels map[string]map[string]map[string]string, exp *domain.Experiment) (string, bool) {
-	fp := exp.Footprint()
-	for _, candidate := range placementOrder(avail, registered) {
-		// The job is not resolved yet, and on a cluster of slots it only fits as the slot it
-		// would be resolved to.
-		probe, ok := onSlots(exp, candidate, nodeResources[candidate], nodeLabels[candidate])
-		if !ok {
-			continue
+	for _, tier := range placementTiers(avail, registered) {
+		best, bestRoom := "", int64(0)
+		for _, candidate := range tier {
+			// The job is not resolved yet, and on a cluster of slots it only fits as the slot it
+			// would be resolved to.
+			probe, ok := onSlots(exp, candidate, nodeResources[candidate], nodeLabels[candidate])
+			if !ok {
+				continue
+			}
+			fp := probe.Footprint()
+			if !domain.Fits(avail[candidate], fp) || !topologyFits(nodeAvail[candidate], nodeResources[candidate], nodeLabels[candidate], probe) {
+				continue
+			}
+			room := roomFor(avail[candidate], fp)
+			loaded := exp.EnvironmentCluster != "" && candidate == exp.EnvironmentCluster && best != exp.EnvironmentCluster
+			if best == "" || room > bestRoom || room == bestRoom && loaded {
+				best, bestRoom = candidate, room
+			}
 		}
-		if probe != exp {
-			fp = probe.Footprint()
-		}
-		if domain.Fits(avail[candidate], fp) && topologyFits(nodeAvail[candidate], nodeResources[candidate], nodeLabels[candidate], probe) {
-			return candidate, true
+		if best != "" {
+			return best, true
 		}
 	}
 	return "", false
+}
+
+// roomFor is how many jobs of footprint fit in free capacity: the fewest of any dimension it asks
+// for.
+func roomFor(free, footprint domain.Footprint) int64 {
+	room := int64(-1)
+	for key, need := range footprint {
+		if need <= 0 {
+			continue
+		}
+		if n := free[key] / need; room < 0 || n < room {
+			room = n
+		}
+	}
+	return max(room, 0)
 }
 
 func requiresDistinctHosts(exp *domain.Experiment) bool {
@@ -1975,6 +2002,7 @@ func (l *Loop) heldForEnvironment(ctx context.Context, pass *environmentPass, ex
 	}
 	switch {
 	case env.State == domain.EnvironmentReady:
+		exp.EnvironmentCluster = env.ClusterName
 		return false, nil
 	case env.State == domain.EnvironmentBuilding:
 		if pinToLoadedNode(exp, env, registered, nodeLabels) {

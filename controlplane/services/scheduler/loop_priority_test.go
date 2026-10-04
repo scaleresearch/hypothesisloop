@@ -423,3 +423,45 @@ func TestWithoutFailedKeepsAFailedClusterOnlyWhenNothingElseCouldHostTheJob(t *t
 		})
 	}
 }
+
+// Run 8 placed 7 of 9 researcher jobs on the first name that fit, a box of 12 cores, while one
+// of 28 of the same priority sat mostly idle. Within a tier a job goes where the most jobs like
+// it still fit, and the cluster that built its environment wins only a tie.
+func TestAJobGoesToTheClusterOfItsTierWithTheMostRoom(t *testing.T) {
+	registered := rankedClusters()
+	registered["b-second"] = domain.Cluster{Name: "b-second", OrgID: "org-a", Priority: 100}
+	place := func(byCluster map[string]map[string]int64, built string) string {
+		t.Helper()
+		exp := holdJob("a1", domain.CapacityBurst, h100, 1, "1")
+		exp.EnvironmentCluster = built
+		avail, nodes, resources := free(byCluster)
+		cluster, _ := resolveClusterAndFootprint(avail, registered, nodes, resources, nil, exp)
+		return cluster
+	}
+	if got := place(map[string]map[string]int64{"b-second": {h100: 1}, "m-second": {h100: 3}}, ""); got != "m-second" {
+		t.Errorf("one h100 free on b-second and three on m-second: placed on %q, want m-second", got)
+	}
+	if got := place(map[string]map[string]int64{"b-second": {h100: 1}, "m-second": {h100: 3}}, "b-second"); got != "m-second" {
+		t.Errorf("the environment built on the cluster with less room: placed on %q, want m-second", got)
+	}
+	if got := place(map[string]map[string]int64{"b-second": {h100: 2}, "m-second": {h100: 2}}, "m-second"); got != "m-second" {
+		t.Errorf("equal room, the environment built on m-second: placed on %q, want m-second", got)
+	}
+	if got := place(map[string]map[string]int64{"b-second": {h100: 2}, "m-second": {h100: 2}}, ""); got != "b-second" {
+		t.Errorf("equal room and no environment: placed on %q, want b-second by name", got)
+	}
+	if got := place(map[string]map[string]int64{"z-first": {h100: 1}, "m-second": {h100: 3}}, ""); got != "z-first" {
+		t.Errorf("room on a higher priority: placed on %q, want z-first", got)
+	}
+}
+
+func TestRoomForIsTheFewestOfAnyDimension(t *testing.T) {
+	cpu, memory, h100s := domain.ResourceKey{Kind: domain.ResourceKindCPU}, domain.ResourceKey{Kind: domain.ResourceKindMemory}, domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: "h100"}
+	free := domain.Footprint{cpu: 27800, memory: 64}
+	if got := roomFor(free, domain.Footprint{cpu: 4000, memory: 8, h100s: 0}); got != 6 {
+		t.Errorf("roomFor = %d, want 6 (cpu)", got)
+	}
+	if got := roomFor(free, domain.Footprint{cpu: 1000, memory: 16}); got != 4 {
+		t.Errorf("roomFor = %d, want 4 (memory)", got)
+	}
+}

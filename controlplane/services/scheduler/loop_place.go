@@ -9,9 +9,9 @@ import (
 
 // placementTiers is the one order every placement tries a job's candidate clusters in: the
 // clusters of the highest priority first, then the next, each tier by name. Within a tier the
-// accelerator type a job prefers decides before the name does, which is why this returns tiers
-// and not one list: the search is tier, then type, then cluster. A name nobody registered ranks
-// with the shared clusters, last.
+// accelerator type a job prefers decides first, then the room left (placeAtFlavor), which is why
+// this returns tiers and not one list: the search is tier, then type, then cluster. A name nobody
+// registered ranks with the shared clusters, last.
 //
 // The order is read off the tick's snapshot of capacity. The claim that follows locks the chosen
 // cluster alone, so room freed on a higher cluster after the snapshot does not move the job.
