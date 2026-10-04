@@ -45,7 +45,7 @@ func newRegistryAs(t *testing.T, caller auth.Principal) *registryAs {
 	svc := poolService(store)
 	ctx := context.Background()
 	seed := func(agent, pe, text string) *domain.Hypothesis {
-		hyp, _, _, err := svc.RegisterHypothesis(ctx, agent, agentActor(agent), pe, text, []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: pe}}, nil)
+		hyp, _, _, _, err := svc.RegisterHypothesis(ctx, agent, agentActor(agent), pe, text, []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: pe}}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -53,7 +53,7 @@ func newRegistryAs(t *testing.T, caller auth.Principal) *registryAs {
 	}
 	fixture := &registryAs{store: store, graph: svc.graph.(*fakeGraph), events: svc.events.(*recordedEvents), router: chi.NewRouter(),
 		own: seed("agent-1", "pe-1", "warmup helps"), rivals: seed("agent-2", "pe-1", "dropout hurts"), elsewhere: seed("agent-9", "pe-other", "decay hurts")}
-	unowned, _, _, err := svc.RegisterHypothesis(ctx, "", adaActor, "pe-1", "label smoothing is neutral", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: "pe-1"}}, nil)
+	unowned, _, _, _, err := svc.RegisterHypothesis(ctx, "", adaActor, "pe-1", "label smoothing is neutral", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: "pe-1"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

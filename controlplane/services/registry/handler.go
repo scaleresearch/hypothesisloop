@@ -37,6 +37,9 @@ type hypothesisResponse struct {
 	*domain.Hypothesis
 	AlreadyExisted bool          `json:"already_existed"`
 	Links          []domain.Link `json:"links"`
+	// Similar is what a person's registration reads close to, given to them as a hint where an
+	// agent's would be refused with 409 similar_hypotheses.
+	Similar []domain.SimilarHypothesis `json:"similar" doc:"The hypotheses a signed-in person's new one reads close to, each with reason close_text or refuted_parent, as on a 409 similar_hypotheses. Empty for every other caller, who is refused instead."`
 }
 
 // hypothesisWithJobs bundles a hypothesis with its links, the jobs submitted against it and the
@@ -374,7 +377,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"already_existed=true and your links are not applied; a new one returns 201. While the text reads close to " +
 			"hypotheses of the platform experiment it does not build on (word overlap), or a builds_on target is refuted, it answers 409 similar_hypotheses " +
 			"with them in `similar` and registers nothing until each is named in distinct_from or in a contradicts or " +
-			"related link. The returned id is " +
+			"related link. A signed-in person is not refused: their hypothesis is registered with 201 and the ones it reads close to come back in similar, as a hint. The returned id is " +
 			"metadata.hypothesis_id for the job testing it; every job must reference a hypothesis from its own platform " +
 			"experiment. " +
 			"Who registered it is the caller, answered as actor, and no field of the body names it: author is refused. " +
@@ -417,7 +420,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err := referencesInScope(ctx, referenced...); err != nil {
 			return nil, err
 		}
-		hyp, links, existed, err := h.svc.RegisterHypothesis(ctx, owner, actor, b.PlatformExperimentID, b.Text, b.Links, b.DistinctFrom)
+		hyp, links, existed, similar, err := h.svc.RegisterHypothesis(ctx, owner, actor, b.PlatformExperimentID, b.Text, b.Links, b.DistinctFrom)
 		if err != nil {
 			h.logger.Info("register hypothesis", zap.Error(err))
 			return nil, h.hypothesisWriteError(err)
@@ -429,7 +432,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return &struct {
 			Status int
 			Body   hypothesisResponse
-		}{Status: status, Body: hypothesisResponse{Hypothesis: hyp, AlreadyExisted: existed, Links: links}}, nil
+		}{Status: status, Body: hypothesisResponse{Hypothesis: hyp, AlreadyExisted: existed, Links: links, Similar: append([]domain.SimilarHypothesis{}, similar...)}}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, apidocs.AfterClose(huma.Operation{

@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
 )
 
 // Who may change an idea, by who wrote it and who asks. Only a person changes one, only a
@@ -56,7 +58,7 @@ func TestOnlyTheAuthorEditsAPersonsIdeaAndTheAuthorOrAnOrgOwnerRemovesIt(t *test
 
 func registerAdas(t *testing.T, svc *Service, text string) *domain.Hypothesis {
 	t.Helper()
-	h, _, _, err := svc.RegisterHypothesis(context.Background(), "", adaActor, "pe-1", text, buildOnRoot, nil)
+	h, _, _, _, err := svc.RegisterHypothesis(context.Background(), "", adaActor, "pe-1", text, buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
@@ -110,7 +112,7 @@ func TestAnIdeaAJobTestedOrAnotherLinksToIsNeitherEditedNorRemoved(t *testing.T)
 	}
 
 	parent := registerAdas(t, svc, "batch size matters")
-	child, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", agentActor("agent-1"), "pe-1", "a larger batch helps", buildOnRoot, nil)
+	child, _, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", agentActor("agent-1"), "pe-1", "a larger batch helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis (child): got = %v, want nil", err)
 	}
@@ -158,5 +160,41 @@ func TestAClosedExperimentKeepsItsIdeas(t *testing.T) {
 	}
 	if err := svc.RemoveHypothesis(context.Background(), h.ID); !errors.Is(err, db.ErrPlatformExperimentClosed) {
 		t.Errorf("RemoveHypothesis on a closed experiment: got = %v, want %v", err, db.ErrPlatformExperimentClosed)
+	}
+}
+
+// similarGraph is fakeGraph finding every new hypothesis close to one an agent wrote, and holding
+// it back as the graph does for anyone but a signed-in person.
+type similarGraph struct{ *fakeGraph }
+
+func (g similarGraph) Register(ctx context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, bool, []domain.SimilarHypothesis, error) {
+	similar := []domain.SimilarHypothesis{{ID: "h-close", AgentID: "agent-1", Actor: agentActor("agent-1"), Status: domain.HypothesisOpen, Text: "warmup helps", Reason: "close_text"}}
+	if n.Actor.Kind != domain.ActorUser {
+		return nil, nil, false, false, similar, &graphdb.SimilarError{Similar: similar}
+	}
+	h, links, existed, announce, _, err := g.fakeGraph.Register(ctx, n)
+	return h, links, existed, announce, similar, err
+}
+
+func TestAPersonsCloseIdeaIsRegisteredWithItsSimilarOnesAsAHint(t *testing.T) {
+	svc := poolService(newPoolStore())
+	svc.graph = similarGraph{newFakeGraph()}
+
+	h, _, _, similar, err := svc.RegisterHypothesis(context.Background(), "", adaActor, "pe-1", "a longer warmup helps", buildOnRoot, nil)
+	if err != nil || h == nil {
+		t.Fatalf("RegisterHypothesis by a person: got = (%+v, %v), want it registered", h, err)
+	}
+	if len(similar) != 1 || similar[0].ID != "h-close" || similar[0].Actor.Name != "agent-1" {
+		t.Errorf("similar: got = %+v, want h-close with its actor named", similar)
+	}
+	body, err := json.Marshal(hypothesisResponse{Hypothesis: h, Links: []domain.Link{}, Similar: similar})
+	if err != nil || !strings.Contains(string(body), `"similar":[{"id":"h-close"`) {
+		t.Errorf("the response: got = %s (%v), want similar beside the hypothesis", body, err)
+	}
+
+	_, _, _, _, err = svc.RegisterHypothesis(context.Background(), "agent-2", agentActor("agent-2"), "pe-1", "a longer warmup helps a lot", buildOnRoot, nil)
+	held, ok := (&Handler{}).hypothesisWriteError(err).(*similarHypothesesError)
+	if !ok || held.GetStatus() != http.StatusConflict || held.Reason != "similar_hypotheses" || len(held.Similar) != 1 {
+		t.Errorf("an agent's close claim: got = %v, want 409 similar_hypotheses with the close one", err)
 	}
 }

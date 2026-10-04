@@ -10,7 +10,7 @@ import (
 
 func registerAs(t *testing.T, s *Store, pe, text string, links []domain.LinkSpec) *domain.Hypothesis {
 	t.Helper()
-	h, _, _, _, err := s.Register(context.Background(), NewHypothesis{Actor: userActor("user-ada"), PlatformExperimentID: pe, Text: text, Links: links})
+	h, _, _, _, _, err := s.Register(context.Background(), NewHypothesis{Actor: userActor("user-ada"), PlatformExperimentID: pe, Text: text, Links: links})
 	if err != nil {
 		t.Fatalf("Register %q: got = %v, want nil", text, err)
 	}
@@ -31,7 +31,7 @@ func TestEditTextReplacesTheTextOfAnIdeaNothingLinksTo(t *testing.T) {
 	if edited.Text != "a longer warmup helps" || edited.Actor != userActor("user-ada") || !edited.CreatedAt.Equal(h.CreatedAt) {
 		t.Errorf("edited: got = %+v, want the new text and everything else as it was", edited)
 	}
-	again, _, existed, _, err := s.Register(ctx, NewHypothesis{Actor: userActor("user-bob"), PlatformExperimentID: pe, Text: "A longer  warmup helps", Links: onRoot(pe)})
+	again, _, existed, _, _, err := s.Register(ctx, NewHypothesis{Actor: userActor("user-bob"), PlatformExperimentID: pe, Text: "A longer  warmup helps", Links: onRoot(pe)})
 	if err != nil || !existed || again.ID != h.ID {
 		t.Errorf("registering the new text: got = (%+v, existed=%v, %v), want the edited hypothesis", again, existed, err)
 	}
@@ -76,5 +76,34 @@ func TestRemoveDeletesAnIdeaWithItsOwnLinksAndRefusesOneOthersLinkTo(t *testing.
 	}
 	if err := s.Remove(ctx, h.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("removing it again: got = %v, want %v", err, ErrNotFound)
+	}
+}
+
+// A person's idea is never held back: what an agent would be refused for comes back as a hint
+// beside the idea, which is registered.
+func TestRegisterTakesAPersonsCloseIdeaAndListsWhatItReadsCloseTo(t *testing.T) {
+	s := testStore(t)
+	pe := testExperiment(t, s)
+	ctx := context.Background()
+	bs8 := register(t, s, pe, "agent-1", "batch size 8 beats batch size 32 at the same epoch budget", onRoot(pe))
+	register(t, s, pe, "agent-1", "label noise caps validation accuracy", onRoot(pe))
+	text := "batch size 8 does not beat batch size 32 at the same epoch budget"
+
+	_, _, _, _, _, err := s.Register(ctx, NewHypothesis{AgentID: "agent-2", Actor: agentActor("agent-2"), PlatformExperimentID: pe, Text: text, Links: onRoot(pe)})
+	if got := similarIDs(t, err); len(got) != 1 || got[bs8.ID] != "close_text" {
+		t.Fatalf("an agent's close claim: got = %v, want refused naming %s", got, bs8.ID)
+	}
+
+	h, _, existed, _, similar, err := s.Register(ctx, NewHypothesis{Actor: userActor("user-ada"), PlatformExperimentID: pe, Text: text, Links: onRoot(pe)})
+	if err != nil || existed || h == nil {
+		t.Fatalf("a person's close idea: got = (%+v, existed=%v, %v), want it registered", h, existed, err)
+	}
+	if len(similar) != 1 || similar[0].ID != bs8.ID || similar[0].Reason != "close_text" {
+		t.Errorf("similar beside a person's idea: got = %+v, want %s as close_text", similar, bs8.ID)
+	}
+
+	_, _, _, _, similar, err = s.Register(ctx, NewHypothesis{Actor: userActor("user-ada"), PlatformExperimentID: pe, Text: "dropout helps", Links: onRoot(pe)})
+	if err != nil || len(similar) != 0 {
+		t.Errorf("a person's idea close to nothing: got = (%+v, %v), want no similar", similar, err)
 	}
 }

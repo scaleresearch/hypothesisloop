@@ -32,31 +32,32 @@ var (
 // applied) if an equivalent one by normalized text is already registered in that platform
 // experiment. The returned links are the hypothesis's outgoing links. While it reads close to
 // hypotheses not named in distinctFrom or a contradicts/related link, nothing is created and the
-// error wraps a *graphdb.SimilarError listing them.
+// error wraps a *graphdb.SimilarError listing them, unless actor is a signed-in person: theirs is
+// registered and similar lists them.
 //
 // agentID is the agent whose hypothesis it is, empty for one no agent owns. actor is the
 // credential registering it.
-func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor domain.Actor, platformExperimentID, text string, links []domain.LinkSpec, distinctFrom []string) (h *domain.Hypothesis, out []domain.Link, alreadyExisted bool, err error) {
+func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor domain.Actor, platformExperimentID, text string, links []domain.LinkSpec, distinctFrom []string) (h *domain.Hypothesis, out []domain.Link, alreadyExisted bool, similar []domain.SimilarHypothesis, err error) {
 	found, err := s.store.PlatformExperimentExists(ctx, platformExperimentID)
 	if err != nil {
-		return nil, nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
+		return nil, nil, false, nil, fmt.Errorf("registry.RegisterHypothesis: %w", err)
 	}
 	if !found {
-		return nil, nil, false, fmt.Errorf("%w: %s", ErrUnknownPlatformExperiment, platformExperimentID)
+		return nil, nil, false, nil, fmt.Errorf("%w: %s", ErrUnknownPlatformExperiment, platformExperimentID)
 	}
 	if agentID != "" {
 		if err := s.requireAgent(ctx, agentID); err != nil {
-			return nil, nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
+			return nil, nil, false, nil, fmt.Errorf("registry.RegisterHypothesis: %w", err)
 		}
 		signup, err := s.store.GetAgentSignup(ctx, platformExperimentID, agentID)
 		if err != nil {
-			return nil, nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
+			return nil, nil, false, nil, fmt.Errorf("registry.RegisterHypothesis: %w", err)
 		}
 		if signup == nil {
-			return nil, nil, false, db.ErrNotSignedUp
+			return nil, nil, false, nil, db.ErrNotSignedUp
 		}
 		if signup.Role == domain.SignupRoleBaseline {
-			return nil, nil, false, ErrBaselineRegistersNoHypothesis
+			return nil, nil, false, nil, ErrBaselineRegistersNoHypothesis
 		}
 	}
 
@@ -65,7 +66,7 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor 
 			return nil, err
 		}
 		var announce bool
-		h, out, alreadyExisted, announce, err = s.graph.Register(ctx, graphdb.NewHypothesis{
+		h, out, alreadyExisted, announce, similar, err = s.graph.Register(ctx, graphdb.NewHypothesis{
 			AgentID: agentID, Actor: actor,
 			PlatformExperimentID: platformExperimentID, Text: text, Links: links, DistinctFrom: distinctFrom,
 			Stamp: stamp,
@@ -76,26 +77,27 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor 
 		return []db.Event{{Kind: db.EventHypothesisNew, Subject: h.ID,
 			PlatformExperimentID: h.PlatformExperimentID, AgentID: h.AgentID}}, nil
 	})
-	var similar *graphdb.SimilarError
-	if errors.As(err, &similar) {
-		named := make([]*domain.Actor, len(similar.Similar))
-		for i := range similar.Similar {
-			named[i] = &similar.Similar[i].Actor
-		}
-		if nameErr := s.store.NameActors(ctx, named); nameErr != nil {
-			return nil, nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", nameErr)
-		}
+	var held *graphdb.SimilarError
+	if errors.As(err, &held) {
+		similar = held.Similar
+	}
+	named := make([]*domain.Actor, len(similar))
+	for i := range similar {
+		named[i] = &similar[i].Actor
+	}
+	if nameErr := s.store.NameActors(ctx, named); nameErr != nil {
+		return nil, nil, false, nil, fmt.Errorf("registry.RegisterHypothesis: %w", nameErr)
 	}
 	if err != nil {
-		return nil, nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
+		return nil, nil, false, nil, fmt.Errorf("registry.RegisterHypothesis: %w", err)
 	}
 	if err := s.store.NameActors(ctx, append(linkActors(out), hypothesisActors(h)...)); err != nil {
-		return nil, nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
+		return nil, nil, false, nil, fmt.Errorf("registry.RegisterHypothesis: %w", err)
 	}
 	s.logger.Info("hypothesis registered",
 		zap.String("id", h.ID), zap.String("agent", agentID), zap.String("actor_kind", string(actor.Kind)), zap.String("actor_id", actor.ID),
 		zap.String("platform_experiment_id", platformExperimentID), zap.Bool("already_existed", alreadyExisted))
-	return h, out, alreadyExisted, nil
+	return h, out, alreadyExisted, similar, nil
 }
 
 // hypothesisActors and linkActors are the actors a hypothesis and its links carry, for naming.

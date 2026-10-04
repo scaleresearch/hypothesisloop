@@ -54,25 +54,27 @@ type NewHypothesis struct {
 // announce is true when the caller emits hypothesis.new: the hypothesis is new, or its earlier
 // registration's event was never sent (see restamp). It creates nothing and returns a
 // *SimilarError while other hypotheses read close to the new one and the caller has not told it
-// apart from them.
-func (s *Store) Register(ctx context.Context, n NewHypothesis) (h *domain.Hypothesis, links []domain.Link, alreadyExisted, announce bool, err error) {
+// apart from them. A signed-in person is never held back: their hypothesis is created and the
+// ones it reads close to come back as similar.
+func (s *Store) Register(ctx context.Context, n NewHypothesis) (h *domain.Hypothesis, links []domain.Link, alreadyExisted, announce bool, similar []domain.SimilarHypothesis, err error) {
 	normalized := domain.NormalizeHypothesisText(n.Text)
 	if normalized == "" {
-		return nil, nil, false, false, fmt.Errorf("graphdb.Register: text is empty")
+		return nil, nil, false, false, nil, fmt.Errorf("graphdb.Register: text is empty")
 	}
 	if err := validateLinks(n.PlatformExperimentID, n.Links, true); err != nil {
-		return nil, nil, false, false, err
+		return nil, nil, false, false, nil, err
 	}
 	if err := s.ensureObjective(ctx, n.PlatformExperimentID); err != nil {
-		return nil, nil, false, false, err
+		return nil, nil, false, false, nil, err
 	}
 	id, err := uuid.NewV7()
 	if err != nil {
-		return nil, nil, false, false, fmt.Errorf("graphdb.Register: %w", err)
+		return nil, nil, false, false, nil, fmt.Errorf("graphdb.Register: %w", err)
 	}
 	at := now()
 
 	out, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		similar = nil
 		if err := lockExperiment(ctx, tx, n.PlatformExperimentID); err != nil {
 			return nil, err
 		}
@@ -86,11 +88,11 @@ func (s *Store) Register(ctx context.Context, n NewHypothesis) (h *domain.Hypoth
 		if err := checkTargets(ctx, tx, n.PlatformExperimentID, "", n.Links); err != nil {
 			return nil, err
 		}
-		similar, err := untoldSimilar(ctx, tx, n)
+		similar, err = untoldSimilar(ctx, tx, n)
 		if err != nil {
 			return nil, err
 		}
-		if len(similar) > 0 {
+		if len(similar) > 0 && n.Actor.Kind != domain.ActorUser {
 			return nil, &SimilarError{Similar: similar}
 		}
 		records, err := collect(ctx, tx, `CREATE (h:Hypothesis {id: $id, platform_experiment_id: $pe, agent_id: $agent_id,
@@ -112,15 +114,15 @@ RETURN h`, map[string]any{
 		return hypothesisFromNode(records[0].Values[0].(neo4j.Node))
 	})
 	if err != nil {
-		return nil, nil, false, false, wrap("graphdb.Register", err)
+		return nil, nil, false, false, nil, wrap("graphdb.Register", err)
 	}
 	h = out.(*domain.Hypothesis)
 	alreadyExisted = h.ID != id.String()
 	links, err = s.outLinks(ctx, h.ID)
 	if err != nil {
-		return nil, nil, false, false, err
+		return nil, nil, false, false, nil, err
 	}
-	return h, links, alreadyExisted, announce, nil
+	return h, links, alreadyExisted, announce, similar, nil
 }
 
 // LinkResult is the outcome of AddLink. Created is false when the link already existed, which is a

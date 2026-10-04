@@ -215,11 +215,11 @@ func TestAnOpenWatchStreamClosesOnceItsTokenIsRefused(t *testing.T) {
 func TestAWriteNamingAHypothesisOutOfScopeIsNotFound(t *testing.T) {
 	svc := poolService(newPoolStore())
 	ctx := context.Background()
-	own, _, _, err := svc.RegisterHypothesis(ctx, "agent-1", agentActor("agent-1"), "pe-1", "warmup helps", buildOnRoot, nil)
+	own, _, _, _, err := svc.RegisterHypothesis(ctx, "agent-1", agentActor("agent-1"), "pe-1", "warmup helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	foreign, _, _, err := svc.RegisterHypothesis(ctx, "agent-9", agentActor("agent-9"), "pe-other", "decay hurts",
+	foreign, _, _, _, err := svc.RegisterHypothesis(ctx, "agent-9", agentActor("agent-9"), "pe-other", "decay hurts",
 		[]domain.LinkSpec{{Type: domain.LinkBuildsOn, To: "pe-other"}}, nil)
 	if err != nil {
 		t.Fatal(err)

@@ -25,7 +25,7 @@ func TestAConfirmedOrRefutedVerdictNeedsARepeatedRunAndACompletedControl(t *test
 	for _, status := range []domain.HypothesisStatus{domain.HypothesisConfirmed, domain.HypothesisRefuted} {
 		store := newPoolStore()
 		svc := poolService(store)
-		h, _, _, err := svc.RegisterHypothesis(ctx, "agent-1", agentActor("agent-1"), "pe-1", "a wider layer helps "+string(status), buildOnRoot, nil)
+		h, _, _, _, err := svc.RegisterHypothesis(ctx, "agent-1", agentActor("agent-1"), "pe-1", "a wider layer helps "+string(status), buildOnRoot, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -88,7 +88,7 @@ func TestAVerdictWithoutTheEvidenceStandsOnAStatedReasonWhichIsKept(t *testing.T
 	ctx := context.Background()
 	store := newPoolStore()
 	svc := poolService(store)
-	h, _, _, err := svc.RegisterHypothesis(ctx, "agent-1", agentActor("agent-1"), "pe-1", "lr 10 trains", buildOnRoot, nil)
+	h, _, _, _, err := svc.RegisterHypothesis(ctx, "agent-1", agentActor("agent-1"), "pe-1", "lr 10 trains", buildOnRoot, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestAVerdictWhoseBasisWasNotWrittenGetsItOnTheRepeat(t *testing.T) {
 	ctx := context.Background()
 	store := newPoolStore()
 	svc := poolService(store)
-	h, _, _, err := svc.RegisterHypothesis(ctx, "agent-1", agentActor("agent-1"), "pe-1", "lr 10 trains", buildOnRoot, nil)
+	h, _, _, _, err := svc.RegisterHypothesis(ctx, "agent-1", agentActor("agent-1"), "pe-1", "lr 10 trains", buildOnRoot, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestOpenAndInconclusiveNeedNoEvidence(t *testing.T) {
 	ctx := context.Background()
 	store := newPoolStore()
 	svc := poolService(store)
-	h, _, _, err := svc.RegisterHypothesis(ctx, "agent-1", agentActor("agent-1"), "pe-1", "dropout helps", buildOnRoot, nil)
+	h, _, _, _, err := svc.RegisterHypothesis(ctx, "agent-1", agentActor("agent-1"), "pe-1", "dropout helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -52,7 +52,7 @@ type Store interface {
 // Graph is the hypothesis graph: every hypothesis and link, and the native read query over them.
 // Implemented by graphdb.Store.
 type Graph interface {
-	Register(ctx context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, bool, error)
+	Register(ctx context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, bool, []domain.SimilarHypothesis, error)
 	AddLink(ctx context.Context, fromID, agentID string, actor domain.Actor, spec domain.LinkSpec, stamp db.Stamp) (*graphdb.LinkResult, error)
 	UpdateStatus(ctx context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus, stamp db.Stamp) (*domain.Hypothesis, bool, error)
 	EditText(ctx context.Context, id, text string) (*domain.Hypothesis, error)

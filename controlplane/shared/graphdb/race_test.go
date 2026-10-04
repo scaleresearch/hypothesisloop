@@ -68,7 +68,7 @@ func TestConcurrentNearDuplicateRegistrationsCreateOne(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _, _, _, errs[i] = s.Register(context.Background(), NewHypothesis{
+			_, _, _, _, _, errs[i] = s.Register(context.Background(), NewHypothesis{
 				AgentID: fmt.Sprintf("agent-%d", i), PlatformExperimentID: pe,
 				Text: text, Links: onRoot(pe),
 			})
