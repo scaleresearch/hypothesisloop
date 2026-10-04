@@ -23,24 +23,9 @@ import (
 // buildPlatform is the platform every environment is built for: the job images are amd64.
 const buildPlatform = "linux/amd64"
 
-// Build is one environment to build: Dockerfile with BASE set to Base, pushed by digest to
-// Repository.
-type Build struct {
-	Base       string
-	Dockerfile string
-	Repository string
-}
-
-// Result is what one build came to. Fault is empty for a build that pushed Digest.
-type Result struct {
-	Fault   domain.EnvironmentFault
-	Digest  string
-	LogTail string
-}
-
 // Credential returns the username and password the registry of the build's repository takes,
 // asked each time the daemon needs them.
-type Credential func(ctx context.Context) (username, password string, err error)
+type Credential = func(ctx context.Context) (username, password string, err error)
 
 // solver is the part of a BuildKit client a build uses.
 type solver interface {
@@ -59,12 +44,13 @@ func Dial(ctx context.Context, address string) (*Daemon, error) {
 	return &Daemon{solver: c}, nil
 }
 
-// Run pulls the base, then builds and pushes b. A base that does not pull is the platform's
-// fault, whatever the reason, so a registry outage never fails a file. Once ctx is done the
-// result is meaningless and the caller reports nothing.
-func (d *Daemon) Run(ctx context.Context, b Build, credential Credential) Result {
+// Run pulls the base, then builds b and pushes it by digest, and reports how it ended under no
+// attempt. A base that does not pull is the platform's fault, whatever the reason, so a registry
+// outage never fails a file. Once ctx is done the report is meaningless and the caller sends
+// none.
+func (d *Daemon) Run(ctx context.Context, b domain.EnvironmentBuild, credential Credential) domain.EnvironmentBuildReport {
 	if err := d.pull(ctx, b.Base); err != nil {
-		return Result{Fault: domain.EnvironmentFaultPlatform, LogTail: lastBytes(err.Error(), domain.MaxEnvironmentLogBytes)}
+		return platformFault(err)
 	}
 	host, _, _ := strings.Cut(b.Repository, "/")
 	attachables := []session.Attachable{&registryAuth{host: host, credential: credential}}
@@ -72,11 +58,15 @@ func (d *Daemon) Run(ctx context.Context, b Build, credential Credential) Result
 	var failed *buildFailed
 	switch {
 	case errors.As(err, &failed):
-		return Result{Fault: domain.EnvironmentFaultFile, LogTail: failed.log}
+		return domain.EnvironmentBuildReport{Outcome: domain.EnvironmentBuildFileFault, LogTail: failed.log}
 	case err != nil:
-		return Result{Fault: domain.EnvironmentFaultPlatform, LogTail: lastBytes(err.Error(), domain.MaxEnvironmentLogBytes)}
+		return platformFault(err)
 	}
-	return Result{Digest: digest}
+	return domain.EnvironmentBuildReport{Outcome: domain.EnvironmentBuildPushed, Digest: digest}
+}
+
+func platformFault(err error) domain.EnvironmentBuildReport {
+	return domain.EnvironmentBuildReport{Outcome: domain.EnvironmentBuildPlatformFault, LogTail: lastBytes(err.Error(), domain.MaxEnvironmentLogBytes)}
 }
 
 // pull runs a command on image, which pulls and unpacks it into the daemon's cache.
@@ -100,7 +90,7 @@ func (e *buildFailed) Error() string { return "the build failed" }
 // build builds the file on a context holding only the file and pushes the result by digest,
 // with no tag, which it returns. A *buildFailed is an instruction of the file failing; any other
 // error is the platform's.
-func (d *Daemon) build(ctx context.Context, attachables []session.Attachable, b Build) (string, error) {
+func (d *Daemon) build(ctx context.Context, attachables []session.Attachable, b domain.EnvironmentBuild) (string, error) {
 	file := dockerfileState(b.Dockerfile)
 	opt := client.SolveOpt{
 		Frontend:       "dockerfile.v0",

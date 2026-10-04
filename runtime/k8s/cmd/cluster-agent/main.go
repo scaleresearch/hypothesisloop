@@ -8,8 +8,10 @@
 // cluster from the control plane and stays until every job object it created here is gone. The
 // chart runs it before the release is uninstalled.
 //
-//	CLUSTER_NAME        — this cluster's stable identity
-//	API_URL             — base URL of the control-plane API
+//	CLUSTER_NAME          — this cluster's stable identity
+//	API_URL               — base URL of the control-plane API
+//	HYPOTHESISLOOP_BUILDS — the BuildKit daemon this cluster builds environments on, a unix
+//	                        socket in the pod. Unset, the cluster builds none.
 package main
 
 import (
@@ -22,6 +24,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/runtime/k8s/internal/k8sexec"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentloop"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/envbuild"
 )
 
 const (
@@ -54,6 +57,15 @@ func main() {
 	// Optional: whether this cluster sits behind a native autoscaler. Fail-closed default false —
 	// see autoscaler.md's "Cluster capability".
 	autoscalerEnabled := agentloop.OptionalBoolEnv(binaryName, "AUTOSCALER_ENABLED")
+	var builder agentloop.Builder
+	if address := os.Getenv("HYPOTHESISLOOP_BUILDS"); address != "" {
+		daemon, err := envbuild.Dial(context.Background(), address)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cluster-agent: %v\n", err)
+			os.Exit(1)
+		}
+		builder = daemon
+	}
 
 	jwc, err := k8sexec.New(k8sexec.Config{APIURL: apiURL})
 	if err != nil {
@@ -90,6 +102,7 @@ func main() {
 		StatusInterval:    statusInterval,
 		LogTailLines:      logTailLines,
 		AutoscalerEnabled: autoscalerEnabled,
+		Builder:           builder,
 		Log:               log,
 	}
 	// After a detach the control plane refuses this cluster's token, and the same loop that

@@ -24,7 +24,7 @@ func TestBothCallsToTheControlPlaneCarryTheRuntimeToken(t *testing.T) {
 
 	agent := newTestAgent(server, &captureExecutor{})
 	agent.Token = "runtime-token"
-	if _, _, err := agent.fetchDesiredState(context.Background(), agent.Executor); err != nil {
+	if _, err := agent.fetchDesiredState(context.Background(), agent.Executor); err != nil {
 		t.Fatalf("fetch desired state: %v", err)
 	}
 	agent.pushStatus(context.Background(), nil)

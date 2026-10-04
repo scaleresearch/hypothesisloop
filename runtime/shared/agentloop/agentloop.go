@@ -55,7 +55,10 @@ type Agent struct {
 	// env var, default false (fail-closed: a false positive costs a job a wasted scale-up
 	// deadline, so this is never heuristically detected). See autoscaler.md.
 	AutoscalerEnabled bool
-	Log               func(format string, args ...any)
+	// Builder builds the environments the control plane assigns this cluster, which reports
+	// that it builds. Nil builds none.
+	Builder Builder
+	Log     func(format string, args ...any)
 
 	// unrunnable is what the last reconcile pass found it can never create, by experiment, with
 	// the attempt and the runtime's words. It is that pass's observation and nothing more: every
@@ -66,6 +69,24 @@ type Agent struct {
 	// removed is set once the control plane said this cluster is no longer registered. From
 	// then on there is nobody to report to.
 	removed atomic.Bool
+
+	// builds is what runs of the builds the last reconcile answer listed, by key: started when
+	// listed, cancelled when no longer listed at that attempt, and kept once reported until then
+	// so a finished build is not run again.
+	buildsMu sync.Mutex
+	builds   map[string]*runningBuild
+	building sync.WaitGroup
+}
+
+// Builder builds one environment (envbuild.Daemon) and says how the build ended. credential is
+// the registry login of the push, asked of the control plane each time the daemon needs it.
+type Builder interface {
+	Run(ctx context.Context, b domain.EnvironmentBuild, credential func(ctx context.Context) (username, password string, err error)) domain.EnvironmentBuildReport
+}
+
+type runningBuild struct {
+	attempt int
+	cancel  context.CancelFunc
 }
 
 // ErrClusterRemoved is what Run returns once the control plane no longer knows this cluster
@@ -91,6 +112,8 @@ func (a *Agent) Run(ctx context.Context) error {
 	go func() { defer wg.Done(); a.statusReportLoop(statusCtx) }()
 	go func() { defer wg.Done(); defer stopStatus(); err = a.reconcileLoop(ctx) }()
 	wg.Wait()
+	a.reconcileBuilds(ctx, nil)
+	a.building.Wait()
 	return err
 }
 
@@ -128,7 +151,7 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("read actual state: %w", err)
 	}
-	desired, checkpointWindow, err := a.fetchDesiredState(ctx, exec)
+	answer, err := a.fetchDesiredState(ctx, exec)
 	// A removed cluster desires nothing: its jobs went back to the queue with the removal, so
 	// the pass runs on as one whose every workload is no longer desired, until none is left.
 	removed := errors.Is(err, ErrClusterRemoved)
@@ -137,6 +160,12 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 	}
 	if removed {
 		a.removed.Store(true)
+	}
+	a.reconcileBuilds(ctx, answer.Builds)
+	desired := answer.Experiments
+	checkpointWindow := make(map[string]bool, len(answer.CheckpointWindow))
+	for _, id := range answer.CheckpointWindow {
+		checkpointWindow[id] = true
 	}
 	actual, err := exec.ListManagedJobs(ctx)
 	if err != nil {
@@ -298,37 +327,46 @@ func orphanAuxiliaryIDs(desired map[string]*domain.Experiment, actualJobs map[st
 	return orphans
 }
 
-// fetchDesiredState returns this cluster's desired workloads and the set of experiment ids whose
-// termination the control plane granted a checkpoint window — the two halves of one pass's view:
-// what should exist, and which of the things that should not may still exist for a moment.
-func (a *Agent) fetchDesiredState(ctx context.Context, exec agentexec.Executor) ([]*domain.Experiment, map[string]bool, error) {
+// reconcileAnswer is one pass's view of desired state: the workloads that should exist, the
+// experiment ids whose termination the control plane granted a checkpoint window, which of the
+// things that should not exist may still exist for a moment, and the builds this cluster runs.
+type reconcileAnswer struct {
+	Experiments []*domain.Experiment `json:"experiments"`
+	// CheckpointWindow is a plain grant list, not a class or a rule: this loop hands each id
+	// straight to DeleteWorkload and interprets nothing.
+	CheckpointWindow []string                  `json:"checkpoint_window"`
+	Builds           []domain.EnvironmentBuild `json:"builds"`
+}
+
+// fetchDesiredState returns this cluster's desired state. A removed cluster's is empty.
+func (a *Agent) fetchDesiredState(ctx context.Context, exec agentexec.Executor) (reconcileAnswer, error) {
 	cpuAvail, cpuTotal, err := exec.GetLiveCPUCapacity(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("get live CPU capacity: %w", err)
+		return reconcileAnswer{}, fmt.Errorf("get live CPU capacity: %w", err)
 	}
 	acceleratorAvail, acceleratorTotal, acceleratorByNode, nodeLabels, err := exec.GetLiveAcceleratorCapacitySnapshot(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("get live accelerator capacity: %w", err)
+		return reconcileAnswer{}, fmt.Errorf("get live accelerator capacity: %w", err)
 	}
 	ramAvail, ramTotal, err := exec.GetLiveRAMCapacity(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("get live RAM capacity: %w", err)
+		return reconcileAnswer{}, fmt.Errorf("get live RAM capacity: %w", err)
 	}
 	storageAvail, storageTotal, err := exec.GetLiveStorageCapacity(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("get live storage capacity: %w", err)
+		return reconcileAnswer{}, fmt.Errorf("get live storage capacity: %w", err)
 	}
 	nodeResources, err := exec.GetLiveNodeResourceCapacity(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("get live per-node resource capacity: %w", err)
+		return reconcileAnswer{}, fmt.Errorf("get live per-node resource capacity: %w", err)
 	}
 	nodeResourcesTotal, err := exec.GetNodeTotalCapacity(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("get per-node total resource capacity: %w", err)
+		return reconcileAnswer{}, fmt.Errorf("get per-node total resource capacity: %w", err)
 	}
 	clusterID, err := exec.GetClusterID(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("get cluster id: %w", err)
+		return reconcileAnswer{}, fmt.Errorf("get cluster id: %w", err)
 	}
 	payload, err := json.Marshal(map[string]any{
 		"cpu_available_cores": cpuAvail, "cpu_total_cores": cpuTotal,
@@ -340,43 +378,34 @@ func (a *Agent) fetchDesiredState(ctx context.Context, exec agentexec.Executor) 
 		"multi_node_capable":            exec.SupportsMultiNodeJobs(),
 		"job_image":                     exec.OnlyImage(),
 		"autoscaler_enabled":            a.AutoscalerEnabled,
+		"builds":                        a.Builder != nil,
 		"cluster_id":                    clusterID,
 		"ram_available_bytes":           ramAvail, "ram_total_bytes": ramTotal,
 		"storage_available_bytes": storageAvail, "storage_total_bytes": storageTotal,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("encode reconcile snapshot: %w", err)
+		return reconcileAnswer{}, fmt.Errorf("encode reconcile snapshot: %w", err)
 	}
 	url := fmt.Sprintf("%s/internal/clusters/%s/reconcile", a.APIURL, a.ClusterName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
-		return nil, nil, err
+		return reconcileAnswer{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+a.Token)
 	resp, err := a.HTTPClient.Do(req)
 	if err != nil {
-		return nil, nil, err
+		return reconcileAnswer{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, nil, refusal(resp)
+		return reconcileAnswer{}, refusal(resp)
 	}
-	var body struct {
-		Experiments []*domain.Experiment `json:"experiments"`
-		// CheckpointWindow is the ids the control plane decided are entitled to their declared
-		// checkpoint window on the way out. A plain grant list, not a class or a rule: this loop
-		// hands each id straight to DeleteWorkload and interprets nothing.
-		CheckpointWindow []string `json:"checkpoint_window"`
+	var answer reconcileAnswer
+	if err := json.NewDecoder(resp.Body).Decode(&answer); err != nil {
+		return reconcileAnswer{}, err
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, nil, err
-	}
-	granted := make(map[string]bool, len(body.CheckpointWindow))
-	for _, id := range body.CheckpointWindow {
-		granted[id] = true
-	}
-	return body.Experiments, granted, nil
+	return answer, nil
 }
 
 type statusReportWire struct {
@@ -723,7 +752,7 @@ func (a *Agent) logTailLines() int {
 // installer learns that the control plane refuses this cluster's token before it starts an
 // agent that would only log the refusal.
 func (a *Agent) CheckAccess(ctx context.Context) error {
-	_, _, err := a.fetchDesiredState(ctx, a.Executor)
+	_, err := a.fetchDesiredState(ctx, a.Executor)
 	return err
 }
 

@@ -114,8 +114,8 @@ func (d *fakeDaemon) Solve(_ context.Context, def *llb.Definition, opt client.So
 
 func TestABuildIsReadyWithTheDigestItPushedUntagged(t *testing.T) {
 	daemon := &fakeDaemon{digest: "sha256:abc"}
-	got := (&Daemon{solver: daemon}).Run(context.Background(), Build{Base: "registry.test/hl/job:1", Dockerfile: "ARG BASE\nFROM ${BASE}\n", Repository: "registry.test/envs/env"}, nil)
-	if got.Fault != "" || got.Digest != "sha256:abc" {
+	got := (&Daemon{solver: daemon}).Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Dockerfile: "ARG BASE\nFROM ${BASE}\n", Repository: "registry.test/envs/env"}, nil)
+	if got.Outcome != domain.EnvironmentBuildPushed || got.Digest != "sha256:abc" {
 		t.Fatalf("result %+v, want ready with the digest", got)
 	}
 	attrs := daemon.builds[0].Exports[0].Attrs
@@ -133,16 +133,16 @@ func TestWhoseFaultABuildThatPushedNothingIs(t *testing.T) {
 	runFailed := errdefs.WithSource(errdefs.WrapVertex(&gatewaypb.ExitError{ExitCode: 1, Err: errors.New("exit code: 1")}, digest.FromString("v")), line)
 	for name, c := range map[string]struct {
 		daemon *fakeDaemon
-		fault  domain.EnvironmentFault
+		fault  domain.EnvironmentBuildOutcomeKind
 		log    string
 	}{
-		"the base does not pull":  {&fakeDaemon{pull: errors.New("registry.test/hl/job:1: 503 Service Unavailable")}, domain.EnvironmentFaultPlatform, "503 Service Unavailable"},
-		"a RUN of the file fails": {&fakeDaemon{build: runFailed, output: "installing nonexistent\n"}, domain.EnvironmentFaultFile, "installing nonexistent"},
-		"the push fails":          {&fakeDaemon{build: errors.New("failed to push: failed to authorize")}, domain.EnvironmentFaultPlatform, "failed to authorize"},
-		"no digest is named":      {&fakeDaemon{}, domain.EnvironmentFaultPlatform, "no digest"},
+		"the base does not pull":  {&fakeDaemon{pull: errors.New("registry.test/hl/job:1: 503 Service Unavailable")}, domain.EnvironmentBuildPlatformFault, "503 Service Unavailable"},
+		"a RUN of the file fails": {&fakeDaemon{build: runFailed, output: "installing nonexistent\n"}, domain.EnvironmentBuildFileFault, "installing nonexistent"},
+		"the push fails":          {&fakeDaemon{build: errors.New("failed to push: failed to authorize")}, domain.EnvironmentBuildPlatformFault, "failed to authorize"},
+		"no digest is named":      {&fakeDaemon{}, domain.EnvironmentBuildPlatformFault, "no digest"},
 	} {
-		got := (&Daemon{solver: c.daemon}).Run(context.Background(), Build{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil)
-		if got.Fault != c.fault || got.Digest != "" || !strings.Contains(got.LogTail, c.log) {
+		got := (&Daemon{solver: c.daemon}).Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil)
+		if got.Outcome != c.fault || got.Digest != "" || !strings.Contains(got.LogTail, c.log) {
 			t.Errorf("%s: %+v, want fault %q with %q in its log", name, got, c.fault, c.log)
 		}
 		if c.daemon.pull != nil && len(c.daemon.builds) != 0 {
@@ -155,8 +155,8 @@ func TestARunACancelStoppedIsNotTheFiles(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	killed := &gatewaypb.ExitError{ExitCode: 137, Err: errors.New("exit code: 137")}
-	got := (&Daemon{solver: &fakeDaemon{build: killed}}).Run(ctx, Build{Repository: "registry.test/envs/env"}, nil)
-	if got.Fault == domain.EnvironmentFaultFile {
+	got := (&Daemon{solver: &fakeDaemon{build: killed}}).Run(ctx, domain.EnvironmentBuild{Repository: "registry.test/envs/env"}, nil)
+	if got.Outcome == domain.EnvironmentBuildFileFault {
 		t.Errorf("a cancelled build is %+v, the file's fault", got)
 	}
 }
