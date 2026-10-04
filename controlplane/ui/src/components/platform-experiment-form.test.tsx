@@ -108,28 +108,6 @@ describe('a new platform experiment', () => {
     expect(sent().metrics).toEqual([{ key: 'val_loss', direction: 'minimize' }, { key: 'widget_score', direction: 'maximize' }])
   })
 
-  // GitHub may refuse the platform a new repository. The form returns to where one is chosen
-  // and says so beside the way on: create it on GitHub, refresh, choose it.
-  it('returns to the repository when GitHub would not let the platform create one, and creates with the one then chosen', async () => {
-    vi.mocked(createPlatformExperiment).mockRejectedValueOnce(new ApiError(422, 'the owner connects the account again, or creates a private repository on it', 'repository_authorization_required'))
-    show()
-    await essentials()
-    await create()
-    expect((await screen.findByRole('alert')).textContent).toBe('The platform could not create the repository: the owner connects the account again, or creates a private repository on it')
-    expect(screen.getByRole('link', { name: 'create it on GitHub' }).getAttribute('href')).toBe('https://github.test/new?owner=acme&visibility=private')
-    expect(name()).toHaveProperty('value', 'Run')
-    expect(onSaved).not.toHaveBeenCalled()
-
-    await userEvent.click(screen.getByRole('button', { name: 'refresh this list' }))
-    await chooseRepository('acme/widgets')
-    expect(screen.queryByRole('alert')).toBeNull()
-    await next()
-    await next()
-    await create()
-    await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created, { failure: undefined }))
-    expect(sent(1).repository).toBe('acme/widgets')
-  })
-
   it('shows a refused create in the API\'s words and stays on the form, with nothing else called', async () => {
     vi.mocked(createPlatformExperiment).mockRejectedValue(new Error('the installation does not cover acme/widgets'))
     show()

@@ -27,22 +27,22 @@ const repositories: GitHubRepository[] = [
 
 const organisation: GitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: 'u9', name: 'Una' }, connected_at: at }
 
-function Picker({ initial = '', notCreated }: { initial?: string; notCreated?: string }) {
+function Picker({ initial = '' }: { initial?: string }) {
   const [value, setValue] = useState(initial)
   return (
     <>
-      <RepositorySelect value={value} onChange={setValue} notCreated={notCreated} />
+      <RepositorySelect value={value} onChange={setValue} />
       <output>{value}</output>
     </>
   )
 }
 
-function show(initial?: string, notCreated?: string) {
+function show(initial?: string) {
   const resolved = resolveTenant(me, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
     <SWRConfig value={{ provider: () => new Map() }}>
-      <TenantContext.Provider value={resolved.tenant}><Picker initial={initial} notCreated={notCreated} /></TenantContext.Provider>
+      <TenantContext.Provider value={resolved.tenant}><Picker initial={initial} /></TenantContext.Provider>
     </SWRConfig>,
   )
 }
@@ -135,13 +135,6 @@ describe('the repository of a new platform experiment', () => {
     vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [organisation, { ...organisation, installation_id: 8, account_login: 'ada', account_type: 'User' }], total: 2 })
     show()
     expect((await screen.findByRole('link', { name: 'create it on GitHub' })).getAttribute('href')).toBe('https://github.test/new?visibility=private')
-  })
-
-  it('says what the API said when GitHub would not let the platform create one, beside the way on', async () => {
-    show('', 'the owner connects the account again')
-    expect((await screen.findByRole('alert')).textContent).toBe('The platform could not create the repository: the owner connects the account again')
-    expect(await screen.findByRole('link', { name: 'create it on GitHub' })).toBeTruthy()
-    expect(screen.getAllByRole('combobox')).toHaveLength(1)
   })
 
   it('is searched on the server once typing pauses', async () => {

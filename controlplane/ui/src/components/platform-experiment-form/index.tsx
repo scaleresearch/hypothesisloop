@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ApiError, NO_EXPERIMENT_FILE, fetchExperimentFile, repositoryNotProvided, updatePlatformExperiment } from '@/lib/api'
+import { ApiError, NO_EXPERIMENT_FILE, fetchExperimentFile, updatePlatformExperiment } from '@/lib/api'
 import type { CreatePlatformExperimentRequest, PlatformExperimentPatch } from '@/lib/api'
 import type { TypeKind } from '@/lib/units'
 import { isZeroDate } from '@/lib/format'
@@ -71,7 +71,6 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // What the API said of a new repository GitHub would not give it, shown where one is chosen.
-  const [notCreated, setNotCreated] = useState<string | null>(null)
 
   function set<K extends keyof FormState>(field: K, value: FormState[K]) {
     setForm(f => ({ ...f, [field]: value }))
@@ -87,7 +86,6 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
   // is created. A name or a description already typed stays.
   async function chooseRepository(repository: string) {
     set('repository', repository)
-    setNotCreated(null)
     if (!repository) return setFromFile(null)
     setFromFile({ repository, state: 'reading' })
     try {
@@ -154,7 +152,6 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
     if (err) { setError(err); return }
     setSubmitting(true)
     setError(null)
-    setNotCreated(null)
     try {
       if (isEdit && initial) {
         const patch = changes()
@@ -177,12 +174,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
       const { experiment, failure } = await createAndRun(project.id, payload, Number(form.max_agents))
       onSaved(experiment, { failure })
     } catch (err: unknown) {
-      if (repositoryNotProvided(err)) {
-        setNotCreated(err.message)
-        setStep('1')
-      } else {
-        setError(err instanceof Error ? err.message : String(err))
-      }
+      setError(err instanceof Error ? err.message : String(err))
     } finally {
       setSubmitting(false)
     }
@@ -200,7 +192,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
 
       <Stack as="form" gap="xl" onSubmit={handleSubmit}>
         {step === '1' && (
-          <StepWhat {...stepProps} fileNote={fileNote} notCreated={notCreated} onRepository={r => void chooseRepository(r)} />
+          <StepWhat {...stepProps} fileNote={fileNote} onRepository={r => void chooseRepository(r)} />
         )}
         {step === '2' && <StepMeasure {...stepProps} />}
         {step === '3' && <StepBudget {...stepProps} budgetKind={budgetKind} />}

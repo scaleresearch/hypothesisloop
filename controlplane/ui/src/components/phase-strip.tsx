@@ -119,7 +119,7 @@ export function PhaseStrip({ pe, jobs = [], stages, readOnly = false, children }
   const phase = phaseOf(pe)
   const why = (
     <Text role="status">
-      {phase === 'baseline' && !pe.baseline_job_id && 'Preparing the baseline. No researcher starts and none of their machines is rented until it is measured. '}
+      {phase === 'baseline' && !pe.baseline_job_id && reasonOf(pe).reason !== 'repository_creating' && 'Preparing the baseline. No researcher starts and none of their machines is rented until it is measured. '}
       {phase === 'closed' && pe.closed_at && `Closed ${formatDate(pe.closed_at)}. `}
       {sentenceOf(pe)}
     </Text>

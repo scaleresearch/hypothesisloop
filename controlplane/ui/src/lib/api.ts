@@ -720,16 +720,6 @@ export const APP_NOT_INSTALLED = 'app_not_installed'
 /** The person reaches several installations; the refusal's body lists them as `installations`. */
 export const INSTALLATION_CHOICE_REQUIRED = 'installation_choice_required'
 
-// The reasons of a create that GitHub would not give its new repository.
-const REPOSITORY_NOT_PROVIDED = [
-  'repository_authorization_required', 'repository_creation_not_permitted', 'repository_not_added', 'repository_exists', 'repository_not_created',
-]
-
-/** Whether a create failed because the platform could not have a new repository on GitHub. */
-export function repositoryNotProvided(error: unknown): error is ApiError {
-  return error instanceof ApiError && REPOSITORY_NOT_PROVIDED.includes(error.reason ?? '')
-}
-
 // Answered 503 github_not_configured on a deployment whose git host is not GitHub.
 export function fetchGitHubApp(): Promise<GitHubApp> {
   return apiFetch<GitHubApp>('/github/app')

@@ -12,10 +12,8 @@ export type FileNote = { repository: string; state: 'reading' | 'filled' | 'none
 const FILE = '.hypothesisloop/experiment.yaml'
 
 /** Step 1: the code, the name and the brief. */
-export function StepWhat({ form, set, isEdit, fileNote, notCreated, onRepository }: StepProps & {
+export function StepWhat({ form, set, isEdit, fileNote, onRepository }: StepProps & {
   fileNote: FileNote | null
-  /** What the API said of a new repository GitHub would not give it. */
-  notCreated: string | null
   onRepository: (repository: string) => void
 }) {
   return (
@@ -29,7 +27,7 @@ export function StepWhat({ form, set, isEdit, fileNote, notCreated, onRepository
           label="Repository"
           hint={<>The code agents work on. Fixed once created.<InfoTip>{`A repository with ${FILE} fills in the rest of this form.`}</InfoTip></>}
         >
-          <RepositorySelect value={form.repository} onChange={onRepository} notCreated={notCreated ?? undefined} />
+          <RepositorySelect value={form.repository} onChange={onRepository} />
           {fileNote?.state === 'reading' && <Text variant="hint">Reading {FILE} of {fileNote.repository}…</Text>}
           {fileNote?.state === 'filled' && <Text variant="note">Filled in from {FILE} of {fileNote.repository}.</Text>}
           {fileNote?.state === 'none' && <Text variant="note">{fileNote.repository} has no {FILE}.</Text>}

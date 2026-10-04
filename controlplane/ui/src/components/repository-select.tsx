@@ -35,13 +35,12 @@ function newRepositoryURL(form: string, accounts: GitHubInstallation[]): string 
 /**
  * Picks the repository a platform experiment works on, from those the org's connected GitHub
  * accounts cover. Typing searches all of them on the server, which reads GitHub on each call.
- * With none chosen the platform creates one on a connected account. `notCreated` is what the API
- * said when GitHub would not let it: it is shown with the way on, offered always unless `compact`. The
- * person creates the repository on GitHub, lets the App reach it, and refreshes this list to
- * choose it. With no account connected it says where one is connected. On a deployment whose
+ * With none chosen the platform creates one on a connected account. Unless `compact`, the way on
+ * is offered: the person creates the repository on GitHub, lets the App reach it, and refreshes
+ * this list to choose it. With no account connected it says where one is connected. On a deployment whose
  * git host is not GitHub the repository is typed: the platform creates none there.
  */
-export function RepositorySelect({ value, onChange, notCreated, compact = false }: { value: string; onChange: (repository: string) => void; notCreated?: string; compact?: boolean }) {
+export function RepositorySelect({ value, onChange, compact = false }: { value: string; onChange: (repository: string) => void; compact?: boolean }) {
   const { org } = useTenant()
   const [q, setQ] = useState('')
   const app = useGitHubApp()
@@ -109,8 +108,7 @@ export function RepositorySelect({ value, onChange, notCreated, compact = false 
         options={options}
         hint={more > 0 ? `${more} more, type to search` : undefined}
       />
-      {notCreated && <InlineError>The platform could not create the repository: {notCreated}</InlineError>}
-      {app.data && (!compact || notCreated) && (
+      {app.data && !compact && (
         <Text variant="hint">
           Not listed?{' '}
           <a href={newRepositoryURL(app.data.new_repository_url, accounts)} target="_blank" rel="noreferrer" className={inlineLinkClass}>create it on GitHub</a> or{' '}
