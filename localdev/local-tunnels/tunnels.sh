@@ -35,25 +35,33 @@ read_services() {
   fi
 }
 
+# Stops one tunnel's process and forgets its pid; succeeds only when a process was running.
+stop() {
+  local name="$1" pid_file="$PID_DIR/$1.pid" pid running=1
+  [[ -f "$pid_file" ]] || return 1
+  pid="$(cat "$pid_file")"
+  if kill -0 "$pid" 2>/dev/null; then
+    kill "$pid"
+    for _ in $(seq 1 20); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.2
+    done
+    kill -9 "$pid" 2>/dev/null || true
+    running=0
+    echo "tunnels: stopped $name (pid=$pid)"
+  fi
+  rm -f "$pid_file"
+  return "$running"
+}
+
 down() {
   local stopped=0
   if [[ -d "$PID_DIR" ]]; then
     for pid_file in "$PID_DIR"/*.pid; do
       [[ -e "$pid_file" ]] || continue
-      local name pid
-      name="$(basename "$pid_file" .pid)"
-      pid="$(cat "$pid_file")"
-      if kill -0 "$pid" 2>/dev/null; then
-        kill "$pid"
-        for _ in $(seq 1 20); do
-          kill -0 "$pid" 2>/dev/null || break
-          sleep 0.2
-        done
-        kill -9 "$pid" 2>/dev/null || true
+      if stop "$(basename "$pid_file" .pid)"; then
         stopped=1
-        echo "tunnels: stopped $name (pid=$pid)"
       fi
-      rm -f "$pid_file"
     done
   fi
   if [[ "$stopped" -eq 0 ]]; then
@@ -61,13 +69,18 @@ down() {
   fi
 }
 
+# Starts only the tunnels that are down: restarting one re-randomizes its URL, and a new api URL
+# means reinstalling every attached cluster.
 up() {
   require_cloudflared
   [[ -f "$CONF_FILE" ]] || { echo "tunnels: no config at $CONF_FILE" >&2; exit 1; }
-  down
   mkdir -p "$PID_DIR" "$LOG_DIR"
 
   while read -r name port; do
+    if url_of "$name" >/dev/null; then
+      continue
+    fi
+    stop "$name" || true
     local log_file="$LOG_DIR/$name.log"
     : >"$log_file"
     nohup cloudflared tunnel --url "http://localhost:$port" >"$log_file" 2>&1 &
