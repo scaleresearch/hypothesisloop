@@ -40,7 +40,7 @@ export function Select<T extends string>({
       <ListboxButton
         className={clsx(
           fieldClass(fieldSize, mono),
-          'inline-flex cursor-pointer items-center justify-between gap-2 text-left data-[open]:border-accent',
+          'inline-flex cursor-pointer items-center justify-between gap-2 text-left data-open:border-accent',
           className,
         )}
       >

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { clsx } from 'clsx'
 import { statusTone } from '@/lib/colors'
 import type { Tone } from '@/lib/colors'
+import { Dot } from '@/components/ui/dot'
 import { toneText } from '@/components/ui/tone'
 
 const toneClass: Record<Tone, string> = {
@@ -33,23 +34,18 @@ export function Badge({ children, status, tone, className, title }: BadgeProps) 
         className,
       )}
     >
-      <span aria-hidden="true" className="h-1.5 w-1.5 flex-none rounded-full bg-current" />
+      <Dot size="sm" />
       {/* States come as RUNNING or closed; every badge reads in sentence case. */}
       <span className="inline-block lowercase first-letter:uppercase">{children ?? status}</span>
     </span>
   )
 }
 
-/** A dot in a colour of lib/colors, for a legend entry or a status beside its name. */
-export function Dot({ color, className }: { color: string; className?: string }) {
-  return <span aria-hidden="true" className={clsx('inline-block h-2 w-2 flex-none rounded-full', className)} style={{ background: color }} />
-}
-
 /** A state in words with its dot, where a pill would be too heavy: connected, enabled. */
-export function StatusLabel({ tone, children }: { tone: Tone; children: ReactNode }) {
+export function StatusLabel({ tone, pulse, title, children, className }: { tone: Tone; pulse?: boolean; title?: string; children: ReactNode; className?: string }) {
   return (
-    <span className={clsx('inline-flex items-center gap-1.5 text-xs font-medium', toneText[tone])}>
-      <span aria-hidden="true" className="h-1.5 w-1.5 flex-none rounded-full bg-current" />
+    <span title={title} className={clsx('inline-flex items-center gap-1.5 text-xs font-medium', toneText[tone], className)}>
+      <Dot size="sm" pulse={pulse} />
       {children}
     </span>
   )
@@ -63,7 +59,7 @@ export function TierBadge({ tier }: { tier?: string }) {
 /** Marks a completed job whose agent filed no summary of it. */
 export function NoSummary({ className }: { className?: string }) {
   return (
-    <span title="This job completed and its agent filed no summary of it" className={clsx('whitespace-nowrap text-2xs font-normal text-warning', className)}>
+    <span title="This job completed and its agent filed no summary of it" className={clsx('whitespace-nowrap text-2xs text-warning', className)}>
       no summary
     </span>
   )

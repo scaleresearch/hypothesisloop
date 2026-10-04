@@ -21,8 +21,8 @@ export function Dialog({ open, onClose, title, size = 'default', children }: Dia
       <div className="fixed inset-0 flex items-center justify-center p-4">
         <DialogPanel
           className={clsx(
-            'max-h-[calc(100vh-2rem)] w-full animate-rise overflow-y-auto rounded-lg border bg-surface-raised p-6 shadow-lg',
-            size === 'sm' ? 'max-w-md' : size === 'wide' ? 'max-w-[90vw]' : 'max-w-2xl',
+            'max-h-full w-full animate-rise overflow-y-auto rounded-lg border bg-surface-raised p-6 shadow-lg',
+            size === 'sm' ? 'max-w-md' : size === 'wide' ? 'max-w-7xl' : 'max-w-2xl',
           )}
         >
           <DialogTitle className="mb-4 text-xl font-normal">{title}</DialogTitle>

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { Description, Field, Label } from '@headlessui/react'
 import { clsx } from 'clsx'
 import { InlineError } from '@/components/ui/status-message'
-import { Eyebrow, captionClass } from '@/components/ui/text'
+import { Eyebrow, Text, captionClass } from '@/components/ui/text'
 
 interface FormFieldProps {
   label: ReactNode
@@ -32,7 +32,7 @@ export function FieldGroup({ label, hint, className, children }: { label: ReactN
     <div role="group" aria-label={typeof label === 'string' ? label : undefined} className={clsx('grid content-start gap-1.5', className)}>
       <Eyebrow>{label}</Eyebrow>
       <div>{children}</div>
-      {hint && <p className="text-xs text-subtle">{hint}</p>}
+      {hint && <Text variant="hint">{hint}</Text>}
     </div>
   )
 }

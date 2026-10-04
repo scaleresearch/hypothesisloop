@@ -1,4 +1,6 @@
 import type { Config } from 'tailwindcss'
+import plugin from 'tailwindcss/plugin'
+import { fontSize, fontWeight, opacity } from './src/lib/scale'
 
 const token = (name: string) => `rgb(var(--${name}) / <alpha-value>)`
 const state = (name: string, alpha: string) => `rgb(var(--${name}) / var(--alpha-${alpha}))`
@@ -12,8 +14,24 @@ const tone = (name: string) => ({
   edge: state(name, 'edge'),
 })
 
-// The whole palette: every colour class resolves to a token in globals.css. There is no opacity
-// modifier in the components: a hover, a selection or a tint is one of the named states below.
+// The named widths of a measure, a panel or a page. min-w takes them too, so a wide table names
+// the same step a page does.
+const measures = {
+  xs: '20rem',
+  sm: '24rem',
+  md: '28rem',
+  lg: '32rem',
+  xl: '36rem',
+  '2xl': '42rem',
+  '3xl': '48rem',
+  '4xl': '56rem',
+  '5xl': '64rem',
+  '6xl': '72rem',
+  '7xl': '80rem',
+}
+
+// The whole theme. Every colour class resolves to a token in globals.css, and type, weight,
+// opacity, radius and shadow are closed scales: a component names a step, never a value.
 const config: Config = {
   content: [
     './src/app/**/*.{js,ts,jsx,tsx,mdx}',
@@ -65,28 +83,14 @@ const config: Config = {
     },
     opacity: {
       0: '0',
-      // A control that cannot be used now.
-      disabled: '0.5',
-      // A thing set aside: filtered out, or not a choice in the current step.
-      dimmed: '0.25',
+      disabled: String(opacity.disabled),
+      dimmed: String(opacity.dimmed),
       100: '1',
     },
-    // Line heights of xs and sm are whole pixels, so a control of either holds the height of field.ts.
-    // Display sizes close up as they grow, the way a set headline does.
-    fontSize: {
-      '2xs': ['11.5px', { lineHeight: '16px', letterSpacing: '0.01em' }],
-      xs: ['12.5px', { lineHeight: '18px' }],
-      sm: ['13.5px', { lineHeight: '20px' }],
-      base: ['14.5px', { lineHeight: '1.55' }],
-      lg: ['16px', { lineHeight: '1.5' }],
-      xl: ['19px', { lineHeight: '1.35', letterSpacing: '-0.01em' }],
-      '2xl': ['27px', { lineHeight: '1.2', letterSpacing: '-0.02em' }],
-      '3xl': ['44px', { lineHeight: '1.08', letterSpacing: '-0.03em' }],
-    },
-    // Two weights: regular for reading and headings, medium to mark a name, a label or a choice.
+    fontSize,
     fontWeight: {
-      normal: '400',
-      medium: '500',
+      normal: String(fontWeight.normal),
+      medium: String(fontWeight.medium),
     },
     borderRadius: {
       none: '0',
@@ -101,10 +105,63 @@ const config: Config = {
       md: 'var(--shadow-md)',
       lg: 'var(--shadow-lg)',
     },
+    fontFamily: {
+      sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
+      mono: ['var(--font-mono)', 'ui-monospace', 'monospace'],
+    },
+    maxWidth: ({ theme }) => ({ ...theme('spacing'), none: 'none', full: '100%', ...measures }),
+    // The states Headless UI marks with a data attribute, so a class reads data-open: and so on.
+    data: {
+      open: 'open',
+      focus: 'focus',
+      selected: 'selected',
+      checked: 'checked',
+      disabled: 'disabled',
+      invalid: 'invalid',
+    },
     extend: {
-      fontFamily: {
-        sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
-        mono: ['var(--font-mono)', 'ui-monospace', 'monospace'],
+      spacing: {
+        // The vertical padding of a 36px control around a 20px line.
+        1.75: '0.4375rem',
+        // A mark sized by the text around it.
+        em: '1em',
+        // How far a lone column (sign-in, the palette) sits below the top of the window.
+        drop: '16vh',
+      },
+      minWidth: {
+        ...measures,
+        // Headless UI measures a dropdown's field into these.
+        listbox: 'var(--button-width)',
+        combobox: 'var(--input-width)',
+      },
+      width: {
+        // The side panel of the hypothesis graph, and the idea editor that opens in it.
+        aside: '340px',
+      },
+      minHeight: {
+        // The hypothesis workspace fills the window under the page's own padding.
+        workspace: 'calc(100vh - 3.5rem)',
+        canvas: '420px',
+      },
+      flex: {
+        // Grows from nothing, so a flex column hands it the space left over.
+        fill: '1 0 0',
+      },
+      gridTemplateColumns: {
+        'with-aside': 'minmax(0, 1fr) 340px',
+        tiles: 'repeat(auto-fit, minmax(11rem, 1fr))',
+        'tiles-sm': 'repeat(auto-fit, minmax(7.5rem, 1fr))',
+        panels: 'repeat(auto-fill, minmax(30rem, 1fr))',
+        // A numbered row of three fields with a control at its end.
+        ladder: '1.25rem repeat(3, minmax(0, 1fr)) 1.25rem',
+      },
+      borderWidth: {
+        // The status edge down the side of a graph node.
+        3: '3px',
+      },
+      scale: {
+        // A pressed button.
+        98: '.98',
       },
       keyframes: {
         rise: {
@@ -123,7 +180,17 @@ const config: Config = {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    plugin(({ addVariant }) => {
+      // A control that can be used now. Written as not-disabled so it also holds for a link,
+      // which is never :enabled.
+      addVariant('usable', '&:not(:disabled)')
+      // Disabled while waiting for input, not busy with its own action (aria-busy).
+      addVariant('waiting', '&:disabled:not([aria-busy])')
+      // A label whose checkbox is ticked.
+      addVariant('ticked', '&:has(:checked)')
+    }),
+  ],
 }
 
 export default config

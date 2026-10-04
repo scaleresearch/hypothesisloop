@@ -1,3 +1,5 @@
+import { fontWeight, textPx } from '@/lib/scale'
+
 const token = (name: string) => `rgb(var(--${name}))`
 
 /** The theme tokens of globals.css as colour values, for charts, graph strokes and inline status colours. */
@@ -72,9 +74,6 @@ export function statusColor(status?: string | null): string {
 /** The ordered series palette for charts. Assign in order; the order keeps neighbours apart for colour-blind readers. */
 export const seriesPalette = [1, 2, 3, 4, 5, 6, 7, 8].map(n => token(`chart-${n}`))
 
-/** Per-agent series in charts (recharts Line/Cell colors). */
-export const agentPalette = seriesPalette
-
 export const hypothesisStatuses = ['open', 'confirmed', 'refuted', 'inconclusive'] as const
 
 /**
@@ -90,21 +89,23 @@ export const hypothesisLinkStyles = {
   related: { color: semantic.info, text: semantic.info, label: 'related' },
 } as const
 
-/** Props every recharts chart shares, so axes, grid and tooltip look the same on each. */
+/** Props every recharts chart shares, so axes, grid, labels and tooltip look the same on each. */
 export const chart = {
   grid: semantic.border,
-  tick: { fontSize: 11, fill: semantic.muted },
+  tick: { fontSize: textPx['2xs'], fill: semantic.muted },
   tooltip: {
     contentStyle: {
       background: semantic.surfaceRaised,
       border: `1px solid ${semantic.border}`,
       borderRadius: 'var(--radius)',
       boxShadow: 'var(--shadow-md)',
-      padding: '8px 12px',
-      fontSize: 12,
+      padding: '0.5rem 0.75rem',
+      fontSize: textPx.xs,
     },
-    labelStyle: { color: semantic.text, fontWeight: 500 },
+    labelStyle: { color: semantic.text, fontWeight: fontWeight.medium },
     cursor: { fill: tint(semantic.text, 'hover') },
   },
-  legend: { fontSize: 11 },
+  legend: { fontSize: textPx['2xs'] },
+  /** A label drawn on a line or an edge. */
+  label: { fontSize: textPx['2xs'], fontWeight: fontWeight.medium },
 } as const

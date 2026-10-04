@@ -10,8 +10,8 @@
    rules are sand. Primary actions are the warm ink; one petrol accent marks links, focus and
    selection. Status tones only say how a thing is going, each a little warm. chart-1..8 is the
    ordered series palette, checked for colour-blind separation on surface in both schemes. */
-/* Light is the default. lib/theme.ts sets data-theme="dark" on <html> before first paint when a
-   person chose Dark, or chose System on a machine in dark mode. */
+/* Light is the default. lib/theme-script.ts sets data-theme="dark" on <html> before first paint
+   when a person chose Dark. */
 :root {
   --background: 250 248 243;
   --surface: 255 254 251;
@@ -130,6 +130,26 @@
   --xy-edge-label-color: rgb(var(--text-muted));
 }
 
+/* The cells of ui/table.tsx. :where() keeps each rule at the weight of one element, so a class on a
+   cell wins over it. */
+@layer components {
+  :where(.data-table) th {
+    @apply overflow-hidden text-ellipsis whitespace-nowrap border-b px-3 pb-2.5 pt-1 text-left text-xs font-medium text-muted;
+  }
+
+  :where(.data-table) td {
+    @apply border-b px-3 py-3 align-middle transition-colors;
+  }
+
+  :where(.data-table) tbody > tr:last-child > td {
+    @apply border-b-0;
+  }
+
+  :where(.data-table) tbody > tr:hover > td {
+    @apply bg-hover;
+  }
+}
+
 @layer base {
   * {
     border-color: rgb(var(--border));
@@ -143,9 +163,7 @@
   body {
     background: rgb(var(--background));
     color: rgb(var(--text));
-    font-family: var(--font-sans), system-ui, sans-serif;
-    font-size: 14.5px;
-    line-height: 1.55;
+    @apply font-sans text-base;
     text-rendering: optimizeLegibility;
   }
 
@@ -174,7 +192,7 @@
 
   ::-webkit-scrollbar-thumb {
     background: rgb(var(--border-strong));
-    border-radius: 8px;
+    border-radius: 9999px;
   }
 
   @media (prefers-reduced-motion: reduce) {

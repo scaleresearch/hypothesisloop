@@ -15,7 +15,7 @@ export function Checkbox({ label, pill, color, className, ...props }: CheckboxPr
     <label
       className={clsx(
         'inline-flex cursor-pointer items-center gap-1.5 text-xs',
-        pill && 'rounded-full border bg-surface px-2.5 py-1 text-muted transition-colors has-[:checked]:border-accent has-[:checked]:bg-selected has-[:checked]:text-foreground',
+        pill && 'rounded-full border bg-surface px-2.5 py-1 text-muted transition-colors ticked:border-accent ticked:bg-selected ticked:text-foreground',
         className,
       )}
       style={pill && color && props.checked ? { borderColor: color, background: tint(color, 'tint') } : undefined}

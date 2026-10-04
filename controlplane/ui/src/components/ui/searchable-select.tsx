@@ -20,7 +20,7 @@ interface SearchableSelectProps {
   onChange: (value: string) => void
   placeholder?: string
   allLabel?: string
-  /** Sizes the field; it is at least 180px wide without one. */
+  /** Sizes the field; it is at least min-w-44 wide without one. */
   className?: string
   /** Omit the leading "All" row — for pickers where one option must always be selected. */
   hideAllOption?: boolean
@@ -59,7 +59,7 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
       onChange={(v: string | null) => onChange(v ?? '')}
       onClose={() => setQuery('')}
       as="div"
-      className={clsx('relative', className ?? 'min-w-[180px]')}
+      className={clsx('relative', className ?? 'min-w-44')}
     >
       {({ open }) => (
         <>
@@ -69,7 +69,7 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
             onClick={e => {
               if (!open) e.currentTarget.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
             }}
-            className={clsx(fieldClass(fieldSize, mono), 'w-full truncate pr-7 data-[open]:border-accent')}
+            className={clsx(fieldClass(fieldSize, mono), 'w-full truncate pr-7 data-open:border-accent')}
             placeholder={placeholder ?? allLabel}
             displayValue={() => selected?.label ?? value}
             onChange={e => setQuery(e.target.value)}

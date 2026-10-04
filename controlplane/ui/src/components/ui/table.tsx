@@ -5,18 +5,9 @@ import type { Header } from '@tanstack/react-table'
 import { clsx } from 'clsx'
 import { useProjectRouter } from '@/lib/query-state'
 
-// The :where() keeps these at the weight of a plain utility, so a class on a cell wins.
-const tableClass = clsx(
-  'w-full border-collapse text-sm',
-  '[:where(&)_th]:overflow-hidden [:where(&)_th]:text-ellipsis [:where(&)_th]:whitespace-nowrap [:where(&)_th]:border-b [:where(&)_th]:px-3 [:where(&)_th]:pb-2.5 [:where(&)_th]:pt-1 [:where(&)_th]:text-left',
-  '[:where(&)_th]:text-xs [:where(&)_th]:font-medium [:where(&)_th]:text-muted',
-  '[:where(&)_td]:border-b [:where(&)_td]:px-3 [:where(&)_td]:py-3 [:where(&)_td]:align-middle [:where(&)_td]:transition-colors',
-  '[:where(&)_tbody>tr:last-child>td]:border-b-0 [:where(&)_tbody>tr:hover>td]:bg-hover',
-)
-
-/** The data table. Rows and cells inside are plain thead, tbody, tr, th and td. */
+/** The data table. Rows and cells inside are plain thead, tbody, tr, th and td, styled by .data-table in globals.css. */
 export function Table({ className, ...props }: TableHTMLAttributes<HTMLTableElement>) {
-  return <table className={clsx(tableClass, className)} {...props} />
+  return <table className={clsx('data-table w-full border-collapse text-sm', className)} {...props} />
 }
 
 /** A cell or header of figures: right-aligned, digits of one width so a column lines up. */
