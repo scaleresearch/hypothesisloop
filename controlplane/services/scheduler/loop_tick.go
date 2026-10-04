@@ -177,7 +177,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	clusters := tickClusters{
 		start: start, registered: registeredClusters, multiNode: multiNodeCapable, clusterIDs: clusterIDs,
 		nodeAvail: nodeAvail, nodeResources: nodeResources, nodeResourcesTotal: nodeResourcesTotal, nodeAvailAtTickStart: nodeAvailAtTickStart,
-		nodeLabels: nodeLabels, resolveCache: resolveCache,
+		nodeLabels: nodeLabels, resolveCache: resolveCache, whenIdle: whenIdle,
 	}
 
 	// 2. GetFlavorCapacity already subtracts the complete desired footprint (SUBMITTED/
@@ -204,6 +204,16 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	// experiment is dropped from this tick's consideration; the pass finishes, and the joined
 	// error surfaces at the end so the failure is still loud.
 	maxJobHours := map[string]float64{} // key: platformExpID; 0 = unlimited
+	// Read once per agent of a platform experiment, as quota is (quotaKey). What the agent owes for
+	// its latest job it owes for every earlier one, so one read clears all of them in the usual
+	// case of nothing owed.
+	cut, owing := map[string]bool{}, map[string]bool{}
+	latest := map[string]time.Time{}
+	for _, exp := range queued {
+		if key := quotaKey(exp.AgentID, exp.PlatformExperimentID); exp.CreatedAt.After(latest[key]) {
+			latest[key] = exp.CreatedAt
+		}
+	}
 	filtered := queued[:0]
 	environments := newEnvironmentPass()
 	for _, exp := range queued {
@@ -234,32 +244,49 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 			maxJobHours[exp.PlatformExperimentID] = limit
 		}
 		if limit > 0 && exp.EstimatedDurationHours > limit {
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, jobTooLongReason(exp.EstimatedDurationHours, limit)); err != nil {
+			if err := l.markNotAdmitted(ctx, exp, jobTooLongReason(exp.EstimatedDurationHours, limit)); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark job too long: %w", err))
 			}
 			continue
 		}
-		cut, err := l.store.IsAgentCut(ctx, exp.PlatformExperimentID, exp.AgentID)
-		if err != nil {
-			l.skipExperiment(&tickErrs, exp, fmt.Errorf("stage cut: %w", err))
-			continue
+		key := quotaKey(exp.AgentID, exp.PlatformExperimentID)
+		isCut, read := cut[key]
+		if !read {
+			isCut, err = l.store.IsAgentCut(ctx, exp.PlatformExperimentID, exp.AgentID)
+			if err != nil {
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("stage cut: %w", err))
+				continue
+			}
+			cut[key] = isCut
 		}
-		if cut {
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, stageCutReason()); err != nil {
+		if isCut {
+			if err := l.markNotAdmitted(ctx, exp, stageCutReason()); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark stage cut: %w", err))
 			}
 			continue
 		}
-		owed, err := l.store.UnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID, exp.CreatedAt)
-		if err != nil {
-			l.skipExperiment(&tickErrs, exp, fmt.Errorf("summary gate: %w", err))
-			continue
+		owes, read := owing[key]
+		if !read {
+			owedByLatest, err := l.store.UnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID, latest[key])
+			if err != nil {
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("summary gate: %w", err))
+				continue
+			}
+			owes = len(owedByLatest) > 0
+			owing[key] = owes
+		}
+		var owed []string
+		if owes {
+			if owed, err = l.store.UnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID, exp.CreatedAt); err != nil {
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("summary gate: %w", err))
+				continue
+			}
 		}
 		if len(owed) == 0 {
 			filtered = append(filtered, exp)
 			continue
 		}
-		if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, summaryGateReason(owed)); err != nil {
+		if err := l.markNotAdmitted(ctx, exp, summaryGateReason(owed)); err != nil {
 			l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark summary gate: %w", err))
 		}
 	}
@@ -270,6 +297,9 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	guaranteed := filterTier(queued, domain.CapacityGuaranteed)
 	guaranteed, guaranteedQuotas := l.fetchQuotaMap(ctx, guaranteed, &tickErrs)
 	sortGuaranteed(guaranteed, guaranteedQuotas, completion, l.guaranteedFairnessWindow)
+	// A backlog one agent queued at once is older than every job the others queue after it, and
+	// by age alone it took each core that freed until it drained.
+	guaranteed = interleaveByAgent(guaranteed)
 	// Both snapshots are taken here, before either pass claims anything. Taking the burst one
 	// after the guaranteed pass told a burst job displaced by a guaranteed one that the cluster
 	// had no room for it, when what happened is that a higher tier outranked it.
@@ -284,6 +314,8 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	runningLoaded := false
 	// Per cluster of slots, the slots being left that no waiting job has been promised yet.
 	vacating := map[string]map[string]map[string]int64{}
+	// The clusters a job that waited long holds this tick, in both passes (holdRoom).
+	held := map[string]bool{}
 
 	// Snapshot pre-tick availability so a skip can be classified: capacity_unavailable (no
 	// capacity existed before this tick) vs outranked (capacity existed, but other guaranteed
@@ -360,7 +392,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 						// This job's own request is above its share on the speculative target or
 						// no slot there takes it. Nothing else to try this tick.
 						obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
-						if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, specMisfit); err != nil {
+						if err := l.markNotAdmitted(ctx, exp, specMisfit); err != nil {
 							l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 						}
 						continue
@@ -371,7 +403,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 					l.logger.Log(submitErrorLevel(err), "speculative submit", zap.String("exp", exp.ID), zap.String("cluster", specCluster), zap.Error(err))
 					obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
 					reason := notAdmittedReasonForSubmitError(err)
-					if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
+					if err := l.markNotAdmitted(ctx, exp, reason); err != nil {
 						l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 					}
 					continue
@@ -519,8 +551,9 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 					continue
 				}
 				reason = notAdmittedReasonFor(fitAtTickStart, totalCovers, promised, shortage, cluster, holdersOf(claimed, cluster, shortage, exp))
+				l.holdRoom(exp, cluster, fp, clusters, held, gAvail, bAvail)
 			}
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
+			if err := l.markNotAdmitted(ctx, exp, reason); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 			}
 			continue
@@ -529,7 +562,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 			l.logger.Log(submitErrorLevel(err), "submit guaranteed job", zap.String("exp", exp.ID), zap.Error(err))
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
 			reason := notAdmittedReasonForSubmitError(err)
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
+			if err := l.markNotAdmitted(ctx, exp, reason); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 			}
 			continue
@@ -618,8 +651,9 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 				scalarFits := domain.Fits(bAvail[cluster], fp)
 				freed := !scalarFits && !hasSlots(nodeLabels[cluster]) && domain.Fits(desiredFree[cluster], fp)
 				reason = notAdmittedReasonFor(fitAtTickStart, scalarFits, freed, shortage, cluster, holdersOf(claimed, cluster, shortage, exp))
+				l.holdRoom(exp, cluster, fp, clusters, held, bAvail)
 			}
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
+			if err := l.markNotAdmitted(ctx, exp, reason); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 			}
 			continue
@@ -628,7 +662,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 			l.logger.Log(submitErrorLevel(err), "submit burst job", zap.String("exp", exp.ID), zap.Error(err))
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
 			reason := notAdmittedReasonForSubmitError(err)
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
+			if err := l.markNotAdmitted(ctx, exp, reason); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 			}
 			continue
@@ -657,6 +691,7 @@ type tickClusters struct {
 	clusterIDs   map[string]string
 	nodeLabels   map[string]map[string]map[string]string
 	resolveCache *resolutionCache
+	whenIdle     installed
 
 	nodeAvail, nodeResources, nodeResourcesTotal, nodeAvailAtTickStart map[string]map[string]map[string]int64
 }
@@ -683,7 +718,7 @@ type placement struct {
 func (l *Loop) placeQueued(ctx context.Context, pass string, exp *domain.Experiment, avail map[string]domain.Footprint, quota *domain.AgentQuota, c tickClusters, tickErrs *[]error) (placement, bool) {
 	skip := func(reason string) (placement, bool) {
 		obsmetrics.AdmissionTickResultsTotal.WithLabelValues(pass, "skipped").Inc()
-		if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
+		if err := l.markNotAdmitted(ctx, exp, reason); err != nil {
 			l.skipExperiment(tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 		}
 		return placement{}, false
@@ -694,6 +729,7 @@ func (l *Loop) placeQueued(ctx context.Context, pass string, exp *domain.Experim
 		return skip(ineligible)
 	}
 	candidates = withoutFailed(candidates, c.clusterIDs, exp, l.triedClusterTTL, c.start)
+	candidates = c.whenIdle.couldHold(candidates, exp)
 	pinned := placed.cluster != ""
 	if pinned {
 		placed.fp = exp.Footprint()
@@ -752,6 +788,40 @@ func (l *Loop) placeQueued(ctx context.Context, pass string, exp *domain.Experim
 		placed.misfit = joinMisfits(misfits)
 	}
 	return placed, true
+}
+
+// holdRoom keeps what cluster has free from every job after exp in this tick, once exp is held
+// (MarkHeldJobs): it has waited longer than heldJobNotice and than its own estimate. Smaller jobs
+// behind it otherwise take each core as it frees and exp never starts. One job holds a cluster per
+// tick, and only a cluster that holds it when idle, so the room left idle is one waiting job's.
+func (l *Loop) holdRoom(exp *domain.Experiment, cluster string, fp domain.Footprint, c tickClusters, held map[string]bool, views ...map[string]domain.Footprint) {
+	if l.heldJobNotice <= 0 || exp.QueuedAt == nil || held[cluster] || hasSlots(c.nodeLabels[cluster]) {
+		return
+	}
+	if waited := c.start.Sub(*exp.QueuedAt); waited < l.heldJobNotice || waited.Hours() < exp.EstimatedDurationHours {
+		return
+	}
+	if total, ok := c.whenIdle.totals[cluster]; !ok || !fitsWhenIdle(total, c.whenIdle.nodeTotals[cluster], exp) {
+		return
+	}
+	held[cluster] = true
+	for _, view := range views {
+		subtractFootprint(view[cluster], fp)
+	}
+}
+
+// markNotAdmitted writes why exp waits, and nothing when its row already says so: a full queue
+// otherwise rewrote every waiting row on every tick.
+func (l *Loop) markNotAdmitted(ctx context.Context, exp *domain.Experiment, reason string) error {
+	code, message := domain.SplitQueueReason(reason)
+	if code == exp.NotAdmittedReason && message == exp.NotAdmittedMessage {
+		return nil
+	}
+	if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
+		return err
+	}
+	exp.NotAdmittedReason, exp.NotAdmittedMessage = code, message
+	return nil
 }
 
 // skipExperiment drops one experiment from this tick and records why, so a pass over many
@@ -926,6 +996,22 @@ func (in installed) neverFitsReason(exp *domain.Experiment) string {
 	}
 	return fmt.Sprintf("%s: the job names image %s, and no connected cluster that runs it has what the job asks for, %s, when idle: %s. A cluster with one job image has it (%s): %s",
 		domain.NotAdmittedNoClusterForImage, exp.Job.Image, asks, has, strings.Join(holding, "; "), nameThatImage)
+}
+
+// couldHold narrows candidates to the clusters that hold exp when idle, so a job that fits nowhere
+// now waits on, and is held room on, a cluster it can run on. A cluster that reports no totals is
+// kept, and all of candidates when none is left.
+func (in installed) couldHold(candidates map[string]domain.Footprint, exp *domain.Experiment) map[string]domain.Footprint {
+	kept := make(map[string]domain.Footprint, len(candidates))
+	for cluster, free := range candidates {
+		if total, ok := in.totals[cluster]; !ok || fitsWhenIdle(total, in.nodeTotals[cluster], exp) {
+			kept[cluster] = free
+		}
+	}
+	if len(kept) == 0 {
+		return candidates
+	}
+	return kept
 }
 
 // nameThatImage is how a job gets onto a cluster that runs one image: every job names its image.
@@ -2009,7 +2095,7 @@ func (l *Loop) heldForEnvironment(ctx context.Context, pass *environmentPass, ex
 			return false, nil
 		}
 		reason := domain.NotAdmittedEnvironmentBuilding + ": " + buildingMessage(env, false)
-		return true, l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason)
+		return true, l.markNotAdmitted(ctx, exp, reason)
 	case env.State == domain.EnvironmentFailed && env.Fault == domain.EnvironmentFaultFile:
 		return true, l.endForEnvironment(ctx, exp, domain.StatusRejected, string(domain.EvictionEnvironmentFailed.WithDetail(fileFailed(env))))
 	case env.State == domain.EnvironmentFailed && env.Fault == domain.EnvironmentFaultPlatform:
@@ -2051,7 +2137,7 @@ func pinToLoadedNode(exp *domain.Experiment, env *domain.Environment, registered
 func (l *Loop) waitForPush(ctx context.Context, pass string, environments *environmentPass, exp *domain.Experiment, tickErrs *[]error) {
 	obsmetrics.AdmissionTickResultsTotal.WithLabelValues(pass, "skipped").Inc()
 	reason := domain.NotAdmittedEnvironmentBuilding + ": " + buildingMessage(environments.seen[exp.EnvironmentKey], false)
-	if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
+	if err := l.markNotAdmitted(ctx, exp, reason); err != nil {
 		l.skipExperiment(tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 	}
 }

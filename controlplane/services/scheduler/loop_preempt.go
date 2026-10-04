@@ -303,7 +303,9 @@ func (l *Loop) completionFractions(ctx context.Context, exps []*domain.Experimen
 	out := make(map[string]float64, len(exps))
 	now := time.Now().UTC()
 	for _, exp := range exps {
-		if exp.EstimatedDurationHours <= 0 {
+		// A job that never started has nothing observed, and asking for each of a long queue
+		// every tick was a read per job.
+		if exp.EstimatedDurationHours <= 0 || exp.RanOnAcceleratorType == "" {
 			continue
 		}
 		hours, err := l.observed.ObservedElapsedHours(ctx, exp.ID, exp.CreatedAt, now)

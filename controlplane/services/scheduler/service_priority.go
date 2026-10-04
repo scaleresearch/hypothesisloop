@@ -17,8 +17,10 @@ func (s *Service) RePrioritize(ctx context.Context) error {
 		return fmt.Errorf("scheduler: list queued for reprioritize: %w", err)
 	}
 
-	// Read once per platform experiment with a queued job, for every job of it in this pass.
+	// Read once per platform experiment with a queued job, for every job of it in this pass, and
+	// the quota once per agent of it.
 	active := map[string][]*domain.Experiment{}
+	quotas := map[string]*domain.AgentQuota{}
 	for _, exp := range queued {
 		activeExps, read := active[exp.PlatformExperimentID]
 		if !read {
@@ -41,10 +43,18 @@ func (s *Service) RePrioritize(ctx context.Context) error {
 				zap.String("exp", exp.ID), zap.Error(err))
 			continue
 		}
-		score, err := s.computePriority(ctx, exp, noveltyScore)
-		if err != nil {
-			s.logger.Warn("reprioritize: compute priority failed; leaving stale priority",
-				zap.String("exp", exp.ID), zap.Error(err))
+		key := quotaKey(exp.AgentID, exp.PlatformExperimentID)
+		aq, read := quotas[key]
+		if !read {
+			if aq, err = s.agentQuota(ctx, exp); err != nil {
+				s.logger.Warn("reprioritize: compute priority failed; leaving stale priority",
+					zap.String("exp", exp.ID), zap.Error(err))
+				continue
+			}
+			quotas[key] = aq
+		}
+		score := s.priority(exp, noveltyScore, aq)
+		if score == exp.PriorityScore {
 			continue
 		}
 		if err := s.store.UpdateExperimentPriority(ctx, exp.ID, score); err != nil {
@@ -78,24 +88,35 @@ func (s *Service) RePrioritize(ctx context.Context) error {
 // Note: SchedulingWeights has no W2/abuse-penalty field — abuse is handled by the controller's
 // eviction guards, not by suppressing admission priority.
 func (s *Service) computePriority(ctx context.Context, exp *domain.Experiment, novelty float64) (float64, error) {
+	aq, err := s.agentQuota(ctx, exp)
+	if err != nil {
+		return 0, err
+	}
+	return s.priority(exp, novelty, aq), nil
+}
+
+// agentQuota is the quota computePriority scores exp against, nil when it has none.
+func (s *Service) agentQuota(ctx context.Context, exp *domain.Experiment) (*domain.AgentQuota, error) {
+	if exp.PlatformExperimentID == "" {
+		return nil, nil
+	}
+	aq, err := s.quota.GetAgentQuota(ctx, exp.AgentID, exp.PlatformExperimentID)
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: get agent quota for %s: %w", exp.ID, err)
+	}
+	return aq, nil
+}
+
+func (s *Service) priority(exp *domain.Experiment, novelty float64, aq *domain.AgentQuota) float64 {
 	w := s.weights
 
 	costFraction := 0.0
-	if exp.PlatformExperimentID != "" {
-		aq, err := s.quota.GetAgentQuota(ctx, exp.AgentID, exp.PlatformExperimentID)
-		if err != nil {
-			return 0, fmt.Errorf("scheduler: get agent quota for %s: %w", exp.ID, err)
-		}
-		if aq != nil {
-			costFraction = aq.DominantCostFraction(exp)
-		}
+	if aq != nil {
+		costFraction = aq.DominantCostFraction(exp)
 	}
 	costEfficiency := 1.0 / (1.0 + costFraction)
 
-	score := w.W1Novelty*novelty +
-		w.W3CostEfficiency*costEfficiency
-
-	return score, nil
+	return w.W1Novelty*novelty + w.W3CostEfficiency*costEfficiency
 }
 
 // excludeExperiment returns exps without the row for id. Novelty is "how unlike everything else
