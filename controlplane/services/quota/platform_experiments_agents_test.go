@@ -914,7 +914,7 @@ func TestAResearcherFinishingEarlyNamesItsBlockerAndTheTimeAndQuotaItLeavesAreTo
 	}
 
 	for name, store := range map[string]*rosterStore{
-		"little time left": newStore(domain.SignupRoleCompetitor, 5*time.Minute, 0.2),
+		"little time left":  newStore(domain.SignupRoleCompetitor, 5*time.Minute, 0.2),
 		"little quota left": newStore(domain.SignupRoleCompetitor, 30*time.Minute, 2.8),
 	} {
 		finished, err := finish(store, "")
