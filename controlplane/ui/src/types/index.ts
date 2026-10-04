@@ -257,6 +257,8 @@ export interface PlatformExperiment {
   // The baseline no experiment starts without: the completed job that measured it, absent until
   // one is declared.
   baseline_job_id?: string
+  // Each raise of the baseline while the run went on, oldest first. On a read of one experiment.
+  baseline_raises?: BaselineRaise[]
   // The commit the baseline stands for, repository_url@sha.
   baseline_code_ref?: string
   // Staff shared it with every account: listed in every project, read by all, written by its own org alone.
@@ -407,6 +409,16 @@ export type HypothesisStatus = 'open' | 'confirmed' | 'refuted' | 'inconclusive'
 // Whose credential made a record, as the platform authenticated it. Nothing a request says sets
 // it. `unverified` is a record from before actors were kept: its name is the one stated then.
 export type ActorKind = 'user' | 'key' | 'agent' | 'coordinator' | 'staff' | 'unverified'
+
+/** A re-declaration of a running experiment's baseline to a job that measured the control stronger. */
+export interface BaselineRaise {
+  from: string
+  to: string
+  reason: string
+  detail: string
+  actor: Actor
+  at: string
+}
 
 export interface Actor {
   kind: ActorKind

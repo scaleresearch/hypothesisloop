@@ -81,6 +81,9 @@ const (
 	// EventPlatformExperimentRevision says a person asked a draft's planner to change its answer.
 	// A pointer like the description event: what was asked is read from the draft.
 	EventPlatformExperimentRevision = "platform_experiment.revision"
+	// EventPlatformExperimentBaseline says the baseline of a running platform experiment was
+	// raised to a stronger job, with the sentence every agent is told.
+	EventPlatformExperimentBaseline = "platform_experiment.baseline"
 	// EventMetricPoint is a pointer, never a value: experiment id, metric name, fraction
 	// complete. Metrics live solely in the metrics store, and this event says only that one
 	// arrived — a subscriber that wants the number reads it from there. It is the one kind
@@ -151,6 +154,8 @@ var EventKinds = []EventKindDoc{
 		Description: "The brief or the run's length (duration_hours) changed. A description is unbounded and is never copied into an event: re-read both with GET /platform-experiments/{id}."},
 	{Kind: EventPlatformExperimentRevision, Subject: "platform experiment id", Value: "empty by design",
 		Description: "A person asked the planner of a draft to change its answer (POST /platform-experiments/{id}/revise). What was asked is the last of revisions on GET /platform-experiments/{id}, whose status_reason reads revising until the planner answers again. A planner whose machine is still there after its answer is told by this event, and one whose machine was released is started again."},
+	{Kind: EventPlatformExperimentBaseline, Subject: "platform experiment id", Value: "the job that is the baseline from now on",
+		Description: "The baseline of the running run was raised to a stronger job that measured the control (PATCH /platform-experiments/{id} with baseline_job_id and baseline_reason). detail says by whom, from which value to which on the ranking metric, and why. The brief's measured baseline changed with it, and standings are set against the new bar: re-read the brief with GET /platform-experiments/{id}."},
 	{Kind: EventMetricPoint, Subject: "experiment id", Value: "metric name and fraction complete",
 		Description: "A sample arrived. The number lives only in the metrics store — read it with GET /experiments/{id}/metrics. The one kind replay cannot return."},
 	{Kind: EventJobHeld, Subject: "experiment id", Value: "the code of the queue reason (not_admitted_reason), or baseline_late",
@@ -542,6 +547,7 @@ FROM pg_current_snapshot() s`).Scan(&horizon, &next); err != nil {
 		replayAgentsIdle,
 		replayPlatformExperiment,
 		replayRevisions,
+		replayBaselineRaises,
 	} {
 		part, err := derive(ctx, tx, filter.PlatformExperimentID, since)
 		if err != nil {
@@ -878,6 +884,24 @@ func replayRevisions(ctx context.Context, tx pgx.Tx, peID string, since int64) (
 	events := make([]Event, len(positions))
 	for i, position := range positions {
 		events[i] = Event{Kind: EventPlatformExperimentRevision, Subject: peID, PlatformExperimentID: peID, Position: position}
+	}
+	return events, nil
+}
+
+// replayBaselineRaises derives platform_experiment.baseline from the raises a running platform
+// experiment keeps, one row each.
+func replayBaselineRaises(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]Event, error) {
+	rows, err := tx.Query(ctx, `SELECT to_job_id, detail, created_xid FROM baseline_raises WHERE platform_experiment_id = $1 AND created_xid >= $2`, peID, since)
+	if err != nil {
+		return nil, fmt.Errorf("events_store.replayBaselineRaises: %w", err)
+	}
+	events, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Event, error) {
+		event := Event{Kind: EventPlatformExperimentBaseline, Subject: peID, PlatformExperimentID: peID}
+		err := row.Scan(&event.Value, &event.Detail, &event.Position)
+		return event, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("events_store.replayBaselineRaises: %w", err)
 	}
 	return events, nil
 }

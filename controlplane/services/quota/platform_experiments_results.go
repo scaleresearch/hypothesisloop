@@ -28,10 +28,11 @@ type AgentStanding struct {
 	// HypothesisID and Env say what that experiment tested and with which settings. A job on the
 	// objective tested no hypothesis: Objective says so, as the job's own answer does
 	// (domain.Experiment.OnObjective).
-	HypothesisID string            `json:"hypothesis_id,omitempty"`
-	Objective    bool              `json:"objective,omitempty" doc:"True when the job measured the platform experiment's objective and tested no hypothesis: it has no hypothesis_id."`
-	Env          map[string]string `json:"env,omitempty"`
-	RanOn        *domain.RanOn     `json:"ran_on,omitempty" doc:"Where the job ran, on results only: a reference compares with it on the same machine."`
+	HypothesisID  string            `json:"hypothesis_id,omitempty"`
+	Objective     bool              `json:"objective,omitempty" doc:"True when the job measured the platform experiment's objective and tested no hypothesis: it has no hypothesis_id."`
+	Env           map[string]string `json:"env,omitempty"`
+	RanOn         *domain.RanOn     `json:"ran_on,omitempty" doc:"Where the job ran, on results only: a reference compares with it on the same machine."`
+	BeatsBaseline *bool             `json:"beats_baseline,omitempty" doc:"Whether best is strictly better than the declared baseline's value on the metric, present when the baseline reported it."`
 }
 
 // ReferenceValue is one COMPLETED job's value on a reference metric, its agent and where it ran.
@@ -62,6 +63,10 @@ type MetricStandings struct {
 	Metric    string          `json:"metric"`
 	Direction string          `json:"direction"`
 	Standings []AgentStanding `json:"standings"`
+	// Baseline is the declared baseline job's last value on the metric: the bar the standings
+	// are set against. A raise of the baseline moves it.
+	Baseline      *float64 `json:"baseline,omitempty" doc:"The last value the declared baseline job reported on the metric, absent while none is declared or it reported none. Raised with the baseline."`
+	BaselineJobID string   `json:"baseline_job_id,omitempty" doc:"The declared baseline job, as baseline_job_id of the platform experiment."`
 	// NonRawBasisAgents lists agents that reported at least one non-"raw"-basis value for this
 	// metric (e.g. a rescaled loss target). That value is never blended into Standings — if the
 	// same agent also reported a "raw" value it is ranked on that alone. Surfaced so the UI can
@@ -137,12 +142,16 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 		if err != nil {
 			return nil, err
 		}
-		out.Metrics = append(out.Metrics, MetricStandings{
+		ranked := MetricStandings{
 			Metric:            metric.Key,
 			Direction:         metric.Direction,
 			Standings:         standings,
 			NonRawBasisAgents: nonRawAgents,
-		})
+		}
+		if err := s.setAgainstBaseline(ctx, pe, metric, &ranked); err != nil {
+			return nil, fmt.Errorf("results: %w", err)
+		}
+		out.Metrics = append(out.Metrics, ranked)
 	}
 	if out.References, err = s.references(ctx, pe); err != nil {
 		return nil, fmt.Errorf("results: %w", err)
@@ -175,6 +184,26 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 	}
 	setAgainstLeader(out)
 	return out, nil
+}
+
+// setAgainstBaseline sets on ranked the declared baseline's value on metric, and on each standing
+// whether it beats it.
+func (s *PlatformExperimentsService) setAgainstBaseline(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, ranked *MetricStandings) error {
+	if pe.BaselineJobID == "" {
+		return nil
+	}
+	ranked.BaselineJobID = pe.BaselineJobID
+	values, err := metricsdb.LastPerJobOnMetric(ctx, s.metricsDBURL, pe, metric, map[string]bool{pe.BaselineJobID: true})
+	if err != nil || len(values) == 0 {
+		return err
+	}
+	bar := values[0].Value
+	ranked.Baseline = &bar
+	for i := range ranked.Standings {
+		beats := metric.Better(ranked.Standings[i].Best, bar)
+		ranked.Standings[i].BeatsBaseline = &beats
+	}
+	return nil
 }
 
 // setAgainstLeader sets each measured reference beside rank 1 on the first ranking metric, the

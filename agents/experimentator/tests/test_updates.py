@@ -81,6 +81,9 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("job.held", updates.WAKES["coordinator"])
         self.assertFalse([wake for wake in updates.WAKES["coordinator"] if wake.startswith("experiment.status")])
         self.assertNotIn("finding.new", updates.WAKES["coordinator"] + updates.WAKES["agent"])
+        # A baseline raised mid-run moves the bar every researcher is ranked against.
+        for role in ("agent", "coordinator"):
+            self.assertIn("platform_experiment.baseline", updates.WAKES[role])
 
     # Three baseline jobs failed, one of them for the image the brief named, and the coordinator
     # heard of none until the agent gave up. Woken by every job that ended, it was woken by the

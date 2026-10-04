@@ -657,3 +657,9 @@ func TestTheExperimentFileOfARepositoryIsReadWithoutCreatingAnything(t *testing.
 		t.Fatalf("a file with an unknown key: %d %s", rec.Code, rec.Body)
 	}
 }
+
+func (s *createdStore) RaiseBaseline(ctx context.Context, pe *domain.PlatformExperiment, raise domain.BaselineRaise) error {
+	raise.At = time.Now().UTC()
+	pe.BaselineRaises = append(pe.BaselineRaises, raise)
+	return s.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpRunning)
+}

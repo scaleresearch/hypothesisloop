@@ -32,7 +32,8 @@ _DRAIN_S = 5
 # within seconds that an agent finished or has gone idle (agent.idle: no job of its own in flight
 # for the platform's notice, sent to that agent too), that a job is held by what waiting will not clear or has
 # waited past its own estimate (job.held, sent once, to the job's agent too), that a stage
-# advanced, that someone wrote a comment, that the brief changed, that the run closed or that its
+# advanced, that someone wrote a comment, that the brief or the baseline changed (a raised
+# baseline is the bar every researcher is set against from then on), that the run closed or that its
 # status_reason began to wait for the coordinator (platform_experiment.status, sent again with
 # the reason as its detail, as when the last researcher's machine stops for good). An agent has
 # to learn the same of its own jobs ending. Everything else is read when next acting. A kind
@@ -40,10 +41,10 @@ _DRAIN_S = 5
 # alone, so it wakes no coordinator.
 WAKES = {
     "coordinator": ("agent.finished", "agent.idle", "experiment.blocked", "job.held!=summary_gate", "stage.boundary", "comment.new",
-                    "platform_experiment.status", "platform_experiment.description"),
+                    "platform_experiment.status", "platform_experiment.description", "platform_experiment.baseline"),
     "agent": ("experiment.status", "experiment.blocked", "job.held", "job.underperforming", "agent.cut", "agent.idle",
               "stage.boundary", "comment.new", "platform_experiment.status", "platform_experiment.description",
-              "platform_experiment.revision"),
+              "platform_experiment.baseline", "platform_experiment.revision"),
 }
 # A person asked a draft's planner to change its answer. The event is a pointer: what was asked is
 # read from the draft (core.revising), and whoever hands a batch over says it in place of the event.

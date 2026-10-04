@@ -207,6 +207,11 @@ WHERE id = $1`
 			return nil, err
 		}
 	}
+	if pe.BaselineJobID != "" {
+		if pe.BaselineRaises, err = s.baselineRaises(ctx, id); err != nil {
+			return nil, err
+		}
+	}
 	if err := json.Unmarshal(metricsRaw, &pe.Metrics); err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.Get: unmarshal metrics: %w", err)
 	}
@@ -587,22 +592,8 @@ func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context,
 		return fmt.Errorf("platform_experiments_store.Update: begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	const q = `UPDATE platform_experiments
-SET name=$2, description=$3, budget_accelerator_hours=$4, max_agents=$5, metrics=$6,
-    report_interval_seconds=$7, starts_at=$8, ends_at=$9, updated_at=NOW(),
-    max_concurrent_accelerators=$11, baseline_job_id=$12, job_estimated_duration_hours=$13, duration_hours=$14
-WHERE id=$1 AND status=$10`
-	tag, err := tx.Exec(ctx, q,
-		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
-		metrics, pe.ReportIntervalSeconds, pe.StartsAt, pe.ClosesAt(),
-		expectedStatus,
-		pe.MaxConcurrentAccelerators, pe.BaselineJobID, pe.JobEstimatedDurationHours, pe.DurationHours,
-	)
-	if err != nil {
+	if err := writePlatformExperiment(ctx, tx, pe, metrics, expectedStatus, ""); err != nil {
 		return fmt.Errorf("platform_experiments_store.Update: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("platform_experiments_store.Update: status changed concurrently, retry")
 	}
 	if expectedStatus == domain.PlatformExpOpen {
 		if err := reallocateBaselineQuotas(ctx, tx, pe); err != nil {
@@ -613,6 +604,73 @@ WHERE id=$1 AND status=$10`
 		return fmt.Errorf("platform_experiments_store.Update: commit: %w", err)
 	}
 	return nil
+}
+
+// writePlatformExperiment writes the patchable fields of pe while it is still in expectedStatus
+// and, when baseline is not empty, still has that baseline.
+func writePlatformExperiment(ctx context.Context, tx pgx.Tx, pe *domain.PlatformExperiment, metrics []byte, expectedStatus domain.PlatformExperimentStatus, baseline string) error {
+	const q = `UPDATE platform_experiments
+SET name=$2, description=$3, budget_accelerator_hours=$4, max_agents=$5, metrics=$6,
+    report_interval_seconds=$7, starts_at=$8, ends_at=$9, updated_at=NOW(),
+    max_concurrent_accelerators=$11, baseline_job_id=$12, job_estimated_duration_hours=$13, duration_hours=$14
+WHERE id=$1 AND status=$10 AND ($15 = '' OR baseline_job_id = $15)`
+	tag, err := tx.Exec(ctx, q,
+		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
+		metrics, pe.ReportIntervalSeconds, pe.StartsAt, pe.ClosesAt(),
+		expectedStatus,
+		pe.MaxConcurrentAccelerators, pe.BaselineJobID, pe.JobEstimatedDurationHours, pe.DurationHours, baseline,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("status or baseline changed concurrently, retry")
+	}
+	return nil
+}
+
+// RaiseBaseline writes the running pe as patched, its baseline raised from raise.From to
+// raise.To, and records the raise, or does neither: one whose status or baseline moved since it
+// was read is an error.
+func (s *PlatformExperimentsStore) RaiseBaseline(ctx context.Context, pe *domain.PlatformExperiment, raise domain.BaselineRaise) error {
+	metrics, err := json.Marshal(pe.Metrics)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.RaiseBaseline: marshal metrics: %w", err)
+	}
+	tx, err := s.pool.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.RaiseBaseline: begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := writePlatformExperiment(ctx, tx, pe, metrics, domain.PlatformExpRunning, raise.From); err != nil {
+		return fmt.Errorf("platform_experiments_store.RaiseBaseline: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO baseline_raises (platform_experiment_id, from_job_id, to_job_id, reason, detail, actor_kind, actor_id, created_xid)
+VALUES ($1, $2, $3, $4, $5, $6, $7, pg_current_xact_id()::text::bigint)`,
+		pe.ID, raise.From, raise.To, raise.Reason, raise.Detail, string(raise.Actor.Kind), raise.Actor.ID); err != nil {
+		return fmt.Errorf("platform_experiments_store.RaiseBaseline: record: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("platform_experiments_store.RaiseBaseline: commit: %w", err)
+	}
+	return nil
+}
+
+func (s *PlatformExperimentsStore) baselineRaises(ctx context.Context, id string) ([]domain.BaselineRaise, error) {
+	rows, err := s.pool.pool.Query(ctx, `SELECT from_job_id, to_job_id, reason, detail, actor_kind, actor_id, created_at FROM baseline_raises WHERE platform_experiment_id = $1 ORDER BY id`, id)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.baselineRaises: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.BaselineRaise, error) {
+		var raise domain.BaselineRaise
+		err := row.Scan(&raise.From, &raise.To, &raise.Reason, &raise.Detail, &raise.Actor.Kind, &raise.Actor.ID, &raise.At)
+		raise.At = raise.At.UTC()
+		return raise, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.baselineRaises: %w", err)
+	}
+	return out, nil
 }
 
 // reallocateBaselineQuotas writes the quota of every agent of role baseline of pe again, from

@@ -3,6 +3,7 @@ package quota
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -104,11 +105,18 @@ func checkBaseline(pe *domain.PlatformExperiment, baseline *Baseline) error {
 	if baseline == nil || baseline.Job == nil || baseline.Job.PlatformExperimentID != pe.ID || baseline.OwnerRole != domain.SignupRoleBaseline {
 		return refusedBaseline("no_baseline", "baseline_job_id %q is no job of a baseline agent of this platform experiment: an agent added with role baseline runs it with `hl job submit`, and that job is the one to name", pe.BaselineJobID)
 	}
-	if baseline.Job.Status != domain.StatusCompleted {
-		return refusedBaseline("baseline_not_completed", "baseline job %s is %s: a run rests on a baseline that ran to the end. Wait for it, or have it fixed and run again", baseline.Job.ID, baseline.Job.Status)
-	}
 	if branch := domain.BaselineBranch(pe.ID); baseline.Job.Branch != branch {
 		return refusedBaseline("baseline_not_on_branch", "baseline job %s ran branch %q, and the baseline is measured on %s alone: name the control's job of that branch", baseline.Job.ID, baseline.Job.Branch, branch)
+	}
+	return checkMeasurement(pe, baseline)
+}
+
+// checkMeasurement holds a job named as the baseline, whoever ran it on whichever branch, to what
+// a baseline measures: it completed, filed its finding, reported every metric but the references,
+// held every constraint and ran in the environment of the baseline branch.
+func checkMeasurement(pe *domain.PlatformExperiment, baseline *Baseline) error {
+	if baseline.Job.Status != domain.StatusCompleted {
+		return refusedBaseline("baseline_not_completed", "baseline job %s is %s: a run rests on a baseline that ran to the end. Wait for it, or have it fixed and run again", baseline.Job.ID, baseline.Job.Status)
 	}
 	if !baseline.Finding {
 		return refusedBaseline("baseline_without_finding", "baseline job %s has no finding: its agent files what it measured with `hl job summary`, so the researchers start from it", baseline.Job.ID)
@@ -135,19 +143,87 @@ func checkBaseline(pe *domain.PlatformExperiment, baseline *Baseline) error {
 }
 
 // checkBaselineEnvironment holds the baseline job to the environment the baseline branch
-// declares: every researcher's job inherits it, so the baseline is measured in it too.
+// declares: every researcher's job inherits it, so the baseline is measured in it too. The
+// environment is the file's content, so a job of another branch that declares the same file ran
+// in it.
 func checkBaselineEnvironment(pe *domain.PlatformExperiment, baseline *Baseline) error {
 	ran, declared := baseline.Environment, baseline.Declared
 	branch := domain.BaselineBranch(pe.ID)
 	switch {
 	case declared != nil && (ran == nil || ran.Dockerfile != *declared):
-		return refusedBaseline("baseline_environment_differs", "branch %s declares in %s an environment that baseline job %s did not run in: every researcher's job runs in it, so the baseline is measured in it too. Submit the baseline again from the head of the branch and declare that job", branch, domain.EnvironmentFile, baseline.Job.ID)
+		return refusedBaseline("baseline_environment_differs", "branch %s declares in %s an environment that baseline job %s did not run in: every researcher's job runs in it, so the baseline is measured in it too. Name a job submitted from a commit that declares the same file, as the head of the branch does", branch, domain.EnvironmentFile, baseline.Job.ID)
 	case declared == nil && ran != nil:
-		return refusedBaseline("baseline_environment_differs", "baseline job %s ran in the environment its commit declares in %s, and the head of branch %s declares none: commit the file there again, or submit the baseline again from the head and declare that job", baseline.Job.ID, domain.EnvironmentFile, branch)
+		return refusedBaseline("baseline_environment_differs", "baseline job %s ran in the environment its commit declares in %s, and the head of branch %s declares none: commit the file there again, or name a job submitted from a commit that declares none", baseline.Job.ID, domain.EnvironmentFile, branch)
 	case ran != nil && (baseline.Job.ResolvedJob == nil || !inEnvironment(ran, baseline.Job.ResolvedJob.Image)):
-		return refusedBaseline("baseline_not_in_environment", "baseline job %s did not run in the image of the environment its commit declares (%s): submit the baseline again and declare that job", baseline.Job.ID, ran.Image)
+		return refusedBaseline("baseline_not_in_environment", "baseline job %s did not run in the image of the environment its commit declares (%s): submit it again and name that job", baseline.Job.ID, ran.Image)
 	}
 	return nil
+}
+
+// checkRaiseRequest refuses a raise of the baseline outside a running platform experiment, and
+// one with no reason: while it is open the baseline agent's job is declared, and once it is
+// closed nothing changes.
+func checkRaiseRequest(pe *domain.PlatformExperiment, patch PlatformExperimentPatch) error {
+	switch {
+	case patch.BaselineReason != nil && pe.Status != domain.PlatformExpRunning:
+		return refuseUpdate(409, "baseline_not_running", "baseline_reason raises the baseline of a running platform experiment, and %s is %s: while it is open its baseline agent measures the baseline and the job it finishes with is declared. Leave baseline_reason out", pe.ID, pe.Status)
+	case pe.Status != domain.PlatformExpRunning:
+		return nil
+	case patch.BaselineJobID == nil && patch.BaselineReason != nil:
+		return refuseUpdate(422, "baseline_job_required", "baseline_reason says why the baseline is raised, and the body names no job to raise it to: add baseline_job_id")
+	case patch.BaselineJobID != nil && (patch.BaselineReason == nil || strings.TrimSpace(*patch.BaselineReason) == ""):
+		return refuseUpdate(422, "baseline_reason_required", "the baseline of a running platform experiment is raised with a reason: say in baseline_reason which configuration of the control job %s measured that the declared baseline did not", *patch.BaselineJobID)
+	case patch.BaselineJobID != nil && *patch.BaselineJobID == pe.BaselineJobID:
+		return refuseUpdate(422, "baseline_unchanged", "job %s is the baseline already", pe.BaselineJobID)
+	}
+	return nil
+}
+
+// raisedBaseline holds a raise of the running pe's baseline to the job patched names: a completed
+// job of the experiment, whoever ran it on whichever branch, measured as a baseline is
+// (checkMeasurement) and strictly better than the baseline it replaces on the first ranking
+// metric. Whether the job measured the control in another configuration, and not a new idea, the
+// platform cannot tell: reason says it. It answers the raise to record and the block the brief is
+// given. The estimate of a job that states none stays the declared baseline's.
+func (s *PlatformExperimentsService) raisedBaseline(ctx context.Context, pe, patched *domain.PlatformExperiment, reason string, by *domain.Actor) (domain.BaselineRaise, string, error) {
+	current, err := s.baseline(ctx, pe, pe.BaselineJobID)
+	if err != nil {
+		return domain.BaselineRaise{}, "", fmt.Errorf("platform_experiments: read baseline %s: %w", pe.BaselineJobID, err)
+	}
+	candidate, err := s.baseline(ctx, patched, patched.BaselineJobID)
+	if err != nil {
+		return domain.BaselineRaise{}, "", fmt.Errorf("platform_experiments: read job %s: %w", patched.BaselineJobID, err)
+	}
+	if candidate == nil || candidate.Job == nil || candidate.Job.PlatformExperimentID != pe.ID {
+		return domain.BaselineRaise{}, "", refusedBaseline("no_baseline", "baseline_job_id %q is no job of this platform experiment: name a COMPLETED job of it that measured the control in a stronger configuration", patched.BaselineJobID)
+	}
+	if err := checkMeasurement(patched, candidate); err != nil {
+		return domain.BaselineRaise{}, "", err
+	}
+	ranked, _ := domain.PrimaryRankingMetric(patched.Metrics)
+	to := candidate.Reported[ranked.Key]
+	from, measured := 0.0, current != nil
+	if measured {
+		from, measured = current.Reported[ranked.Key]
+	}
+	if measured && !ranked.Better(to, from) {
+		return domain.BaselineRaise{}, "", refuseUpdate(422, "baseline_not_stronger", "job %s measured %s = %g, and the baseline, job %s, %g: a raised baseline is strictly better on the ranking metric (%s)", candidate.Job.ID, ranked.Key, to, pe.BaselineJobID, from, ranked.Direction)
+	}
+	actor := domain.Actor{Kind: domain.ActorUnverified}
+	if by != nil {
+		actor = *by
+	}
+	who := "its owner"
+	if actor.Kind == domain.ActorCoordinator {
+		who = "its coordinator"
+	}
+	detail := fmt.Sprintf("the baseline was raised to %s = %g by job %s", ranked.Key, to, candidate.Job.ID)
+	if measured {
+		detail += fmt.Sprintf(" (from %g, job %s)", from, pe.BaselineJobID)
+	}
+	detail += fmt.Sprintf(", by %s: %s. Re-read the brief: standings are set against the new baseline", who, reason)
+	raise := domain.BaselineRaise{From: pe.BaselineJobID, To: candidate.Job.ID, Reason: reason, Detail: detail, Actor: actor}
+	return raise, baselineBlock(candidate, patched.Metrics), nil
 }
 
 // inEnvironment is whether image is the environment's: the pushed one, or before its push ends the one
@@ -171,8 +247,15 @@ func baselineBlock(baseline *Baseline, metrics []domain.MetricDefinition) string
 			measured = append(measured, fmt.Sprintf("%s = %g", metric.Key, value))
 		}
 	}
-	lines := []string{measuredBaselineHeader, "job: " + baseline.Job.ID, "code_ref: " + baseline.Job.CodeRef,
-		"measured: " + strings.Join(measured, ", ")}
+	lines := []string{measuredBaselineHeader, "job: " + baseline.Job.ID, "code_ref: " + baseline.Job.CodeRef}
+	if env := baseline.Job.Job.Env; len(env) > 0 {
+		settings := make([]string, 0, len(env))
+		for _, key := range slices.Sorted(maps.Keys(env)) {
+			settings = append(settings, key+"="+env[key])
+		}
+		lines = append(lines, "env: "+strings.Join(settings, " "))
+	}
+	lines = append(lines, "measured: "+strings.Join(measured, ", "))
 	var unmeasured []string
 	for _, reference := range baseline.References {
 		if len(reference.Values) == 0 {

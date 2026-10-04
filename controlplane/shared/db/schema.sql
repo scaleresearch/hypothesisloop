@@ -1459,3 +1459,32 @@ ALTER TABLE environments ADD COLUMN IF NOT EXISTS loaded_node  TEXT NOT NULL DEF
 -- repository@digest, empty for one built on its job's image itself. base is then that image
 -- without them, so a release that changes only the tools keeps the layers the file built.
 ALTER TABLE environments ADD COLUMN IF NOT EXISTS tools TEXT NOT NULL DEFAULT '';
+-- Each re-declaration of a running platform experiment's baseline to a stronger job that measured
+-- the control: the experiment's history of its baseline, answered on its read and in the record of
+-- its close. created_xid is the transaction that raised it, which platform_experiment.baseline
+-- replays from.
+CREATE TABLE IF NOT EXISTS baseline_raises (
+    id                     BIGSERIAL   PRIMARY KEY,
+    platform_experiment_id TEXT        NOT NULL REFERENCES platform_experiments(id) ON DELETE CASCADE,
+    from_job_id            TEXT        NOT NULL,
+    to_job_id              TEXT        NOT NULL,
+    reason                 TEXT        NOT NULL,
+    detail                 TEXT        NOT NULL,
+    actor_kind             TEXT        NOT NULL,
+    actor_id               TEXT        NOT NULL DEFAULT '',
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_xid            BIGINT      NOT NULL
+);
+CREATE INDEX IF NOT EXISTS baseline_raises_by_experiment ON baseline_raises (platform_experiment_id, id);
+
+CREATE OR REPLACE FUNCTION hypothesisloop_baseline_raise_notify() RETURNS trigger AS $$
+BEGIN
+    PERFORM hypothesisloop_notify_event('platform_experiment.baseline', NEW.platform_experiment_id,
+        NEW.to_job_id, NEW.detail, NEW.platform_experiment_id, '');
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS baseline_raises_notify ON baseline_raises;
+CREATE TRIGGER baseline_raises_notify AFTER INSERT ON baseline_raises
+    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_baseline_raise_notify();

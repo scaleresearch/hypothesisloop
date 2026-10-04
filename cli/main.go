@@ -591,7 +591,7 @@ var platformExperimentCommands = []subcommand{
 	{"list", "the platform experiments this token reaches, one line each", cmdPlatformExperimentsList, everyone},
 	{"get", "the platform experiment: its status, what it waits for, its brief and its stages", cmdPlatformExperimentsGet, everyone},
 	{"create", "create a platform experiment from a YAML file", cmdPlatformExperimentsCreate, ofPeople},
-	{"update", "change the brief or other fields, or declare the baseline", cmdPlatformExperimentsUpdate, ofTheRun},
+	{"update", "change the brief or other fields, or declare or raise the baseline", cmdPlatformExperimentsUpdate, ofTheRun},
 	{"propose", "a draft's planner: propose the experiment the draft becomes", cmdPlatformExperimentsPropose, asAgent},
 	{"decline", "a draft's planner: say why no experiment is proposed", cmdPlatformExperimentsDecline, asAgent},
 	{"close", "end the platform experiment for good", cmdPlatformExperimentsClose, ofTheRun},
@@ -718,12 +718,12 @@ See controlplane/settings/examples/experiment.yaml for the full DSL reference.`,
 // cmdPlatformExperimentsUpdate handles `hl platform-experiments update [FIELDS.yaml]`. FILE is a
 // YAML file shaped exactly like the create body (see controlplane/settings/examples/
 // experiment.yaml) — while the platform experiment is still open, every field including metrics
-// is editable; once running, only name, description and duration_hours are.
+// is editable; once running, only name, description, duration_hours and the baseline are.
 func cmdPlatformExperimentsUpdate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments update", `usage: hl platform-experiments update [--platform-experiment PE] [--description-file FILE] [--description TEXT] [--baseline-job JOB] [--name NAME] [FIELDS.yaml]
+	fs := newFlags("platform-experiments update", `usage: hl platform-experiments update [--platform-experiment PE] [--description-file FILE] [--description TEXT] [--baseline-job JOB [--reason TEXT]] [--name NAME] [FIELDS.yaml]
 
 Changes the fields you name and no other. A coordinator's token changes the description and
-declares the baseline, nothing else.
+declares or raises the baseline, nothing else.
 
 --baseline-job JOB declares the baseline while the platform experiment is open. The platform
 writes JOB, its code_ref and what it measured into a block of the description it keeps through
@@ -737,6 +737,17 @@ estimate); the last two are the owner's to change. baseline_environment_differs 
 baseline_not_in_environment: JOB did not run in the environment the head of the baseline branch
 declares in .hypothesisloop/Dockerfile.
 
+--baseline-job JOB --reason TEXT raises the baseline while the run goes on, to a stronger
+COMPLETED job of the experiment that measured the control in a better configuration (a setting
+the control already has, not a new idea), whoever ran it on whichever branch. TEXT says which
+configuration. JOB is held to the checks above but the agent's role and the branch, and must be
+strictly better than the baseline on the first ranking metric (baseline_not_stronger). The
+description's measured block is rewritten from JOB, the raise is kept in baseline_raises and the
+record of the close, every agent is told (platform_experiment.baseline), and hl results sets the
+standings against JOB from then on. Verdicts already given stay as recorded. Refused without
+--reason (baseline_reason_required), with --reason while the experiment is open
+(baseline_not_running: the baseline agent's job is declared then) and once it is closed.
+
 FIELDS.yaml maps the other fields that change (budget_accelerator_hours, max_agents,
 duration_hours, metrics, report_interval_seconds): any while it is open, only name,
 description and duration_hours once it runs. The result is checked like a create, so name and description stay
@@ -746,6 +757,7 @@ non-empty; max_agents below the researchers that joined is 409 max_agents_below_
 	description := fs.String("description", "", "the new description")
 	descriptionFile := fs.String("description-file", "", "read the new description from this file, - for stdin")
 	baselineJob := fs.String("baseline-job", "", "the completed `job` that measured the baseline")
+	reason := fs.String("reason", "", "with --baseline-job on a running experiment: why the baseline is raised to it")
 	operands, err := parseArgs(fs, args)
 	if err != nil {
 		return parseExit(err)
@@ -776,6 +788,9 @@ non-empty; max_agents below the researchers that joined is 409 max_agents_below_
 	if *baselineJob != "" {
 		body["baseline_job_id"] = *baselineJob
 	}
+	if *reason != "" {
+		body["baseline_reason"] = *reason
+	}
 	if *descriptionFile != "" {
 		var raw []byte
 		if *descriptionFile == "-" {
@@ -797,7 +812,10 @@ non-empty; max_agents below the researchers that joined is 409 max_agents_below_
 		return fail(stderr, err)
 	}
 	printJSON(stdout, out)
-	if *baselineJob != "" {
+	switch {
+	case *reason != "":
+		fmt.Fprintf(stderr, "hl: platform-experiments update: the baseline is raised to job %v, every agent is told (platform_experiment.baseline), and results set the standings against it\n", out["baseline_job_id"])
+	case *baselineJob != "":
 		fmt.Fprintln(stderr, "hl: platform-experiments update: "+baselineDeclared(out))
 	}
 	return 0

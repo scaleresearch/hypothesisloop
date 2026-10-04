@@ -481,7 +481,8 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	return accepted, nil
 }
 
-// nameActors names whoever created pe and whoever asked for its revisions, when it carries them.
+// nameActors names whoever created pe, whoever asked for its revisions and whoever raised its
+// baseline, when it carries them.
 func (h *PlatformExperimentsHandler) nameActors(ctx context.Context, pe *domain.PlatformExperiment) error {
 	var actors []*domain.Actor
 	if pe.Actor != nil {
@@ -492,6 +493,9 @@ func (h *PlatformExperimentsHandler) nameActors(ctx context.Context, pe *domain.
 	}
 	for i := range pe.Revisions {
 		actors = append(actors, &pe.Revisions[i].Actor)
+	}
+	for i := range pe.BaselineRaises {
+		actors = append(actors, &pe.BaselineRaises[i].Actor)
 	}
 	if len(actors) == 0 {
 		return nil

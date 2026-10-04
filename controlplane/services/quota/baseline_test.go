@@ -44,13 +44,21 @@ func measuredBaseline() *Baseline {
 // baseline of whichever job is named.
 func declareAPI(t *testing.T, pe *domain.PlatformExperiment, baseline *Baseline, caller auth.Principal) (*createdStore, func(body map[string]any) (int, map[string]any)) {
 	t.Helper()
+	return jobsAPI(t, pe, []*Baseline{baseline}, caller)
+}
+
+// jobsAPI is declareAPI with the platform's records of each of jobs.
+func jobsAPI(t *testing.T, pe *domain.PlatformExperiment, jobs []*Baseline, caller auth.Principal) (*createdStore, func(body map[string]any) (int, map[string]any)) {
+	t.Helper()
 	store := &createdStore{created: []*domain.PlatformExperiment{pe}}
 	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)
 	svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) {
-		if baseline == nil || baseline.Job.ID != jobID {
-			return nil, nil
+		for _, job := range jobs {
+			if job != nil && job.Job.ID == jobID {
+				return job, nil
+			}
 		}
-		return baseline, nil
+		return nil, nil
 	}
 	placement := authtest.Placement{
 		Projects:            map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}},
@@ -232,8 +240,8 @@ func TestAnOpenExperimentIsHeldToItsDeclaredBaselineAndStartsOnceNothingIsMissin
 	running := declared()
 	running.Status = domain.PlatformExpRunning
 	store, patch = declareAPI(t, running, measuredBaseline(), theCoordinator)
-	if code, out := patch(map[string]any{"baseline_job_id": "job-1"}); code != http.StatusConflict || out["reason"] != "experiment_running" {
-		t.Errorf("declaring on a running experiment: got = %d %v, want 409 experiment_running", code, out)
+	if code, out := patch(map[string]any{"baseline_job_id": "job-1"}); code != http.StatusUnprocessableEntity || out["reason"] != "baseline_reason_required" {
+		t.Errorf("declaring on a running experiment: got = %d %v, want 422 baseline_reason_required", code, out)
 	}
 	if code, out := patch(map[string]any{"description": "The brief, redirected."}); code != http.StatusOK || store.created[0].BaselineJobID != "job-1" || store.created[0].JobEstimatedDurationHours != 0.3 ||
 		store.created[0].Description != "The brief, redirected."+theMeasuredBlock {

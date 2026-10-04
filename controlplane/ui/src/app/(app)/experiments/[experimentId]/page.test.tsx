@@ -114,6 +114,17 @@ describe('the baseline of a platform experiment', () => {
     await waitFor(() => expect(link.parentElement!.textContent).toBe('Baseline measured by job job-base: val_loss 1.8, exact_match 1.'))
     expect(screen.queryByText(/Preparing the baseline/)).toBeNull()
   })
+
+  it('says who raised it while the run went on, from which job and why', async () => {
+    vi.mocked(api.fetchPlatformExperimentTimeseries).mockResolvedValue({ series: [] })
+    vi.mocked(api.fetchExperimentMetrics).mockResolvedValue([{ experiment_id: 'job-2', fraction_complete: 1, metric_name: 'val_loss', metric_value: 1.6, metric_basis: 'raw' }] as never)
+    show('', {
+      status: PlatformExperimentStatus.RUNNING, baseline_job_id: 'job-2', metrics: [{ key: 'val_loss', direction: 'minimize' }],
+      baseline_raises: [{ from: 'job-1', to: 'job-2', reason: "the control's other coder", detail: '', actor: { kind: 'coordinator', id: 'pe-x', name: 'Coordinator' }, at: '2026-10-08T19:00:00Z' }],
+    })
+    const link = await screen.findByRole('link', { name: 'job job-2' })
+    await waitFor(() => expect(link.parentElement!.textContent).toBe("Baseline measured by job job-2: val_loss 1.6. Raised from job job-1 by Coordinator: the control's other coder."))
+  })
 })
 
 describe('the references of a platform experiment', () => {

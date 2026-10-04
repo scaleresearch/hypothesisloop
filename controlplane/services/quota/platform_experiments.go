@@ -31,6 +31,9 @@ type PlatformExperimentsStore interface {
 	// UpdatePlatformExperiment writes pe only if it is still in expectedStatus — see the db
 	// implementation's comment for why the compare-and-swap matters here.
 	UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus) error
+	// RaiseBaseline writes the running pe as patched with its baseline raised and records the
+	// raise, or does neither.
+	RaiseBaseline(ctx context.Context, pe *domain.PlatformExperiment, raise domain.BaselineRaise) error
 	SetPlatformExperimentSummary(ctx context.Context, id, summary string) error
 	// RecordClose writes the platform's record of the close beside the summary, once.
 	RecordClose(ctx context.Context, id, record string) error
@@ -318,7 +321,11 @@ type PlatformExperimentPatch struct {
 	ReportIntervalSeconds     *int                       `json:"report_interval_seconds,omitempty"`
 	StartsAt                  *time.Time                 `json:"starts_at,omitempty" doc:"When its baseline begins to be measured, now when past. Stated, baseline_due_at moves with it."`
 	DurationHours             *float64                   `json:"duration_hours,omitempty" doc:"How long the run lasts from the moment it starts."`
-	BaselineJobID             *string                    `json:"baseline_job_id,omitempty" doc:"Declares the baseline: the completed job of an agent of role baseline that measured it, with its finding filed. Taken while the platform experiment is open."`
+	BaselineJobID             *string                    `json:"baseline_job_id,omitempty" doc:"While the platform experiment is open, declares the baseline: the completed job of an agent of role baseline that measured it, with its finding filed. While it runs, raises the baseline to a stronger completed job of the experiment that measured the control in a better configuration, with baseline_reason."`
+	BaselineReason            *string                    `json:"baseline_reason,omitempty" doc:"Why the baseline of a running platform experiment is raised to baseline_job_id: the configuration of the control that job measured. Required with baseline_job_id while it runs, and taken then only."`
+
+	// by is whose credential sent the patch, recorded with a raise of the baseline.
+	by *domain.Actor
 }
 
 // carried names the fields the patch carries, without those in except.
@@ -338,6 +345,7 @@ func (p PlatformExperimentPatch) carried(except ...string) []string {
 		{"starts_at", p.StartsAt != nil},
 		{"duration_hours", p.DurationHours != nil},
 		{"baseline_job_id", p.BaselineJobID != nil},
+		{"baseline_reason", p.BaselineReason != nil},
 	} {
 		if field.set && !slices.Contains(except, field.name) {
 			out = append(out, field.name)

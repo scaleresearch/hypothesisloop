@@ -220,9 +220,11 @@ func refuseUpdate(status int, reason, format string, args ...any) error {
 // Update changes the fields the patch carries and no others, and the experiment as patched has
 // to pass validate. While the experiment is open every
 // field of the patch can change. Once it runs, only the name, the description and duration_hours
-// can: admission and the stage ladder have already acted on the rest. A new duration_hours moves
-// the end of the run, counted from its start as before. A closed one, and a draft, which its
+// can, and the baseline be raised: admission and the stage ladder have already acted on the
+// rest. A new duration_hours moves the end of the run, counted from its start as before. A closed one, and a draft, which its
 // planner's proposal fills, take no patch.
+//
+// While it runs, baseline_job_id with baseline_reason raises the baseline (raisedBaseline).
 //
 // baseline_job_id declares the baseline. An open experiment that has one, or is given one, is
 // held as patched to what that job did (checkBaseline), so its metrics and its budget cannot
@@ -243,8 +245,12 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	if pe.Status != domain.PlatformExpOpen && pe.Status != domain.PlatformExpRunning {
 		return nil, refuseUpdate(409, "experiment_not_editable", "platform experiment %s is %s: only an open or running one is changed", id, pe.Status)
 	}
-	if locked := patch.carried("name", "description", "duration_hours"); pe.Status == domain.PlatformExpRunning && len(locked) > 0 {
-		return nil, refuseUpdate(409, "experiment_running", "only name, description and duration_hours change once a platform experiment runs, and the body also carries: %s. Leave them out", strings.Join(locked, ", "))
+	if locked := patch.carried("name", "description", "duration_hours", "baseline_job_id", "baseline_reason"); pe.Status == domain.PlatformExpRunning && len(locked) > 0 {
+		return nil, refuseUpdate(409, "experiment_running", "only name, description, duration_hours and the baseline (baseline_job_id with baseline_reason) change once a platform experiment runs, and the body also carries: %s. Leave them out", strings.Join(locked, ", "))
+	}
+	raising := pe.Status == domain.PlatformExpRunning && patch.BaselineJobID != nil
+	if err := checkRaiseRequest(pe, patch); err != nil {
+		return nil, err
 	}
 	expectedStatus := pe.Status
 	patched := *pe
@@ -321,7 +327,20 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 			return nil, err
 		}
 	}
+	var raise domain.BaselineRaise
+	if raising {
+		if raise, measured, err = s.raisedBaseline(ctx, pe, &patched, strings.TrimSpace(*patch.BaselineReason), patch.by); err != nil {
+			return nil, err
+		}
+	}
 	patched.Description = withMeasuredBaseline(patched.Description, measured)
+	if raising {
+		if err := s.store.RaiseBaseline(ctx, &patched, raise); err != nil {
+			return nil, fmt.Errorf("platform_experiments.Update: %w", err)
+		}
+		s.logger.Info("baseline raised", zap.String("platform_experiment_id", pe.ID), zap.String("from", raise.From), zap.String("to", raise.To))
+		return s.stored(ctx, pe.ID)
+	}
 	pe = &patched
 	if err := s.store.UpdatePlatformExperiment(ctx, pe, expectedStatus); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Update: %w", err)
@@ -1156,6 +1175,16 @@ func (s *PlatformExperimentsService) recordClose(ctx context.Context, pe *domain
 		}
 		fmt.Fprintf(&record, "- %s (%s): %d jobs submitted; %s; %s.\n", signup.Name, signup.Role, jobs[signup.AgentID].Submitted,
 			lastActivity(signup.Activity), runEnded(signup.Instance, signup.FinishedAt, signup.FinishedReason))
+	}
+	if len(pe.BaselineRaises) > 0 {
+		fmt.Fprintf(&record, "\nBaseline raised while it ran:\n")
+		for _, raise := range pe.BaselineRaises {
+			by := string(raise.Actor.Kind)
+			if raise.Actor.ID != "" {
+				by += " " + raise.Actor.ID
+			}
+			fmt.Fprintf(&record, "- at %s, from job %s to job %s, by %s: %s.\n", raise.At.UTC().Format(time.RFC3339), raise.From, raise.To, by, raise.Reason)
+		}
 	}
 	if pe.CloseReason == domain.CloseBaselineLimitReached {
 		if err := s.baselineLeft(ctx, pe, &record); err != nil {

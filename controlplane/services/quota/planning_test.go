@@ -399,7 +399,9 @@ func TestTheRecordOfACloseFollowsASummaryWrittenBefore(t *testing.T) {
 	now := time.Now().UTC()
 	pe := &domain.PlatformExperiment{ID: "pe-ended", ProjectID: "prj-a", Status: domain.PlatformExpRunning, CreatedAt: now.Add(-2 * time.Hour),
 		StartedAt: now.Add(-time.Hour), EndsAt: now.Add(-time.Second), DurationHours: 1, BudgetAcceleratorHours: 6,
-		Stages: []domain.Stage{{LengthPct: 100}}, Summary: "Status: running. Researchers are at work."}
+		Stages: []domain.Stage{{LengthPct: 100}}, Summary: "Status: running. Researchers are at work.",
+		BaselineJobID: "job-2", BaselineRaises: []domain.BaselineRaise{{From: "job-1", To: "job-2", Reason: "job-2 measured the control's other coder",
+			Actor: domain.Actor{Kind: domain.ActorCoordinator, ID: "pe-ended"}, At: time.Date(2026, 10, 8, 19, 0, 0, 0, time.UTC)}}}
 	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}}}
 	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute)
 	if err := svc.SweepExpired(context.Background()); err != nil {
@@ -407,6 +409,10 @@ func TestTheRecordOfACloseFollowsASummaryWrittenBefore(t *testing.T) {
 	}
 	if pe.Status != domain.PlatformExpClosed || !strings.HasPrefix(pe.Summary, "Status: running. Researchers are at work.\n\nRecorded by the platform: it closed at ") {
 		t.Fatalf("status %s, summary %q, want closed with the record after the summary written before", pe.Status, pe.Summary)
+	}
+	// The record says who raised the baseline while it ran, and why.
+	if want := "Baseline raised while it ran:\n- at 2026-10-08T19:00:00Z, from job job-1 to job job-2, by coordinator pe-ended: job-2 measured the control's other coder.\n"; !strings.Contains(pe.Summary, want) {
+		t.Errorf("summary = %q, want it to say %q", pe.Summary, want)
 	}
 }
 

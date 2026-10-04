@@ -77,8 +77,9 @@ answered planner_has_no_quota, printed the same way, with where the run's budget
 func cmdResults(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("results", `usage: hl results [--platform-experiment PE]
 
-The standings on each ranking metric, one line per agent and metric in rank order: its best
-value and the job that set it (experiment_id, code_ref, hypothesis_id and its settings under
+The standings on each ranking metric, first the declared baseline's value on it (baseline, with
+baseline_job_id: the bar, which moves when the baseline is raised), then one line per agent in
+rank order: its best value, beats_baseline (strictly better than that bar) and the job that set it (experiment_id, code_ref, hypothesis_id and its settings under
 job.env, where every hl command that prints a job has them) and ran_on, the machine it ran on.
 Only COMPLETED jobs that hold every constraint metric rank (rankable in hl job status). At most
 one line per agent of the platform experiment and metric, so there is nothing to page or limit.
@@ -101,9 +102,11 @@ measured on the same machine.`, stderr)
 	}
 	var out struct {
 		Metrics []struct {
-			Metric    string            `json:"metric"`
-			Direction string            `json:"direction"`
-			Standings []json.RawMessage `json:"standings"`
+			Metric        string            `json:"metric"`
+			Direction     string            `json:"direction"`
+			Standings     []json.RawMessage `json:"standings"`
+			Baseline      *float64          `json:"baseline"`
+			BaselineJobID string            `json:"baseline_job_id"`
 		} `json:"metrics"`
 		References []json.RawMessage `json:"references"`
 	}
@@ -111,6 +114,10 @@ measured on the same machine.`, stderr)
 		return fail(stderr, err)
 	}
 	for _, m := range out.Metrics {
+		if m.Baseline != nil {
+			bar, _ := json.Marshal(map[string]any{"baseline": *m.Baseline, "baseline_job_id": m.BaselineJobID})
+			fmt.Fprintf(stdout, "%s\n", prefixed(bar, "metric", m.Metric, "direction", m.Direction))
+		}
 		for _, s := range m.Standings {
 			var standing struct {
 				Env map[string]string `json:"env"`

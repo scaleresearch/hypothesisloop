@@ -211,6 +211,38 @@ func TestResultsListEveryAgentsBestOnEveryDeclaredMetric(t *testing.T) {
 	}
 }
 
+// The standings are set against the declared baseline: each ranking metric says its value and
+// each standing whether it beats it. Raised to a stronger job, the bar moves with it.
+func TestResultsSetEachStandingAgainstTheDeclaredBaseline(t *testing.T) {
+	srv := bestPerAgentMetricServer(t, map[string]float64{"baseline": 45, "raised": 55, "c1": 50, "c2": 40})
+	defer srv.Close()
+	store := &standingsStore{competitors: []string{"c1", "c2"}}
+	store.pe = &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().UTC().Add(-time.Hour), BaselineJobID: "job-baseline", Metrics: []domain.MetricDefinition{
+		{Key: "score", Direction: "maximize", Role: domain.MetricRoleRanking},
+	}}
+	svc := newSignupTestService(t, store)
+	svc.metricsDBURL = srv.URL
+	beats := func() string {
+		results, err := svc.Results(context.Background(), "pe-1")
+		if err != nil {
+			t.Fatalf("Results err = %v, want nil", err)
+		}
+		m := results.Metrics[0]
+		out := fmt.Sprintf("%s %v:", m.BaselineJobID, *m.Baseline)
+		for _, st := range m.Standings {
+			out += fmt.Sprintf(" %s=%v", st.AgentID, *st.BeatsBaseline)
+		}
+		return out
+	}
+	if got, want := beats(), "job-baseline 45: c1=true c2=false"; got != want {
+		t.Errorf("against the declared baseline: got %q, want %q", got, want)
+	}
+	store.pe.BaselineJobID = "job-raised"
+	if got, want := beats(), "job-raised 55: c1=false c2=false"; got != want {
+		t.Errorf("against the raised baseline: got %q, want %q", got, want)
+	}
+}
+
 // A reference is shown beside the standings with the machine each value was measured on, so a
 // result compares with it on the same machine, and it ranks nobody. Every completed job that
 // reported it is listed with whether it met the constraints, and only one that met them counts

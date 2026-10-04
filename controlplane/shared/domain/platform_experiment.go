@@ -95,6 +95,14 @@ func (d MetricDefinition) Holds(value float64) bool {
 	return value >= *d.Bound
 }
 
+// Better reports whether a is strictly better than b in the metric's direction.
+func (d MetricDefinition) Better(a, b float64) bool {
+	if d.Direction == "minimize" {
+		return a < b
+	}
+	return a > b
+}
+
 // ValidateMetricDefinitions enforces the metric contract at creation, so nothing downstream
 // (stage cuts, standings) needs to defend against a malformed one. Fail-fast per important.md #1.
 func ValidateMetricDefinitions(defs []MetricDefinition) error {
@@ -265,8 +273,11 @@ type PlatformExperiment struct {
 	// when it was declared, and JobEstimatedDurationHours the estimate of a job that states
 	// none: the hours that job was observed running, with headroom. A platform experiment
 	// starts only with a baseline.
-	BaselineJobID             string  `json:"baseline_job_id,omitempty" doc:"The completed job that measured the baseline. Absent until one is declared with PATCH /platform-experiments/{id}."`
+	BaselineJobID             string  `json:"baseline_job_id,omitempty" doc:"The completed job that measured the baseline. Absent until one is declared with PATCH /platform-experiments/{id}. Raised while the run goes on to a stronger job that measured the control (baseline_raises)."`
 	JobEstimatedDurationHours float64 `json:"job_estimated_duration_hours,omitzero" doc:"The estimated_duration_hours of a job that states none: one and a half times the hours the baseline job was observed running. Absent without a baseline, and for one too short to be observed alive."`
+	// BaselineRaises is every time the baseline was raised while the run went on, oldest first.
+	// Carried by a read of one platform experiment and left out of a list.
+	BaselineRaises []BaselineRaise `json:"baseline_raises,omitempty" doc:"Each raise of the baseline while the run went on, oldest first: the job declared before and the one after, who raised it and why."`
 
 	// Goal is the sentence a draft was created from, fixed from then on. Empty for a platform
 	// experiment that was created whole.
@@ -420,6 +431,17 @@ type PlanningRequest struct {
 	Message string    `json:"message"`
 	Actor   Actor     `json:"actor"`
 	At      time.Time `json:"at"`
+}
+
+// BaselineRaise is one re-declaration of a running platform experiment's baseline to a job that
+// measured the control in a stronger configuration.
+type BaselineRaise struct {
+	From   string    `json:"from" doc:"The job that was the baseline before."`
+	To     string    `json:"to" doc:"The job that is the baseline from then on."`
+	Reason string    `json:"reason" doc:"Why, as whoever raised it said."`
+	Detail string    `json:"detail" doc:"What every agent was told (platform_experiment.baseline): the value on the ranking metric before and after."`
+	Actor  Actor     `json:"actor"`
+	At     time.Time `json:"at"`
 }
 
 // MaxGoalBytes bounds the sentence a draft is created from.

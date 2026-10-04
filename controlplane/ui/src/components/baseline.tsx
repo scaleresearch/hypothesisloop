@@ -26,9 +26,11 @@ export function Baseline({ pe }: { pe: PlatformExperiment }) {
   if (!job) return null
   const reported = points && lastReported(points)
   const values = (pe.metrics ?? []).filter(m => reported?.has(m.key)).map(m => `${m.key} ${reported!.get(m.key)}`).join(', ')
+  const raised = pe.baseline_raises?.at(-1)
   return (
     <Callout tone="info">
       Baseline measured by <TextLink href={jobPath(pe.id, job)}>job {job}</TextLink>{values && `: ${values}`}.
+      {raised && ` Raised from job ${raised.from} by ${raised.actor.name || raised.actor.kind}: ${raised.reason}.`}
     </Callout>
   )
 }

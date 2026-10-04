@@ -53,6 +53,26 @@ func TestResultsFlattensStandings(t *testing.T) {
 	}
 }
 
+// The bar the standings are set against prints first, and each standing says whether it beats it.
+func TestResultsPrintTheBaselineBeforeTheStandings(t *testing.T) {
+	recordingServer(t, func(int, recorded) any {
+		return map[string]any{"status": "running", "metrics": []any{map[string]any{"metric": "acc", "direction": "maximize", "baseline": 0.85, "baseline_job_id": "job-b",
+			"standings": []any{map[string]any{"rank": 1, "agent_id": "a", "best": 0.9, "beats_baseline": true}}}}}
+	})
+	t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"results"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := []string{
+		`{"metric":"acc","direction":"maximize","baseline":0.85,"baseline_job_id":"job-b"}`,
+		`{"metric":"acc","direction":"maximize","agent_id":"a","beats_baseline":true,"best":0.9,"rank":1,"job":{"env":{}}}`,
+	}
+	if !reflect.DeepEqual(lines(stdout.String()), want) {
+		t.Fatalf("stdout %q, want %q", stdout.String(), want)
+	}
+}
+
 // A reference prints after the standings with where it was measured, then set against the
 // leader, and one nobody measured says so.
 func TestResultsPrintEachReferenceOrThatItWasNotMeasured(t *testing.T) {
