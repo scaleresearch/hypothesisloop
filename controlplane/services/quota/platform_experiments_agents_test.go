@@ -910,7 +910,7 @@ func TestAResearcherFinishingEarlyNamesItsBlockerAndTheTimeAndQuotaItLeavesAreTo
 	_, err := finish(store, "")
 	var refused *api.Refusal
 	if !errors.As(err, &refused) || refused.Reason != "time_and_quota_left" || refused.GetStatus() != http.StatusConflict ||
-		!strings.Contains(refused.Message, "16 of the run's 60 minutes and 2.8 of the agent's 3 AccH were left") || !strings.Contains(refused.Message, "blocker") ||
+		!strings.Contains(refused.Message, "16 of the run's 60 minutes and 2.8 of the agent's 3 AccH were left") || !strings.Contains(refused.Message, "--blocker") ||
 		store.signups[0].FinishedAt != nil {
 		t.Fatalf("an early finish with no blocker: got %v, want 409 time_and_quota_left saying what is left, and no finish", err)
 	}

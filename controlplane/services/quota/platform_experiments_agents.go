@@ -614,7 +614,8 @@ func (s *PlatformExperimentsService) finishReason(ctx context.Context, platformE
 	enough := max(time.Duration(finishEarlyShare*float64(run)), typical)
 	if blocker == "" && timeLeft > enough && room > finishEarlyShare*quota.Share() {
 		return "", refuseSignup(409, "time_and_quota_left", "%s. Keep pursuing credible improvements while both last. "+
-			"If something stops you that this time and quota cannot fix, finish again with blocker saying what it is", left)
+			"If something stops you that this time and quota cannot fix, finish again with --blocker saying what it is "+
+			"(the request's blocker field): a blocker written into --reason is not read as one", left)
 	}
 	return sentence(reason) + " When it finished, " + left + ".", nil
 }
