@@ -28,6 +28,7 @@ from claude_agent_sdk import (
     ResultMessage,
     StreamEvent,
     SystemMessage,
+    UserMessage,
 )
 
 from hypothesisloop_agent import config, core, progress, proposal, seed, session, updates
@@ -831,6 +832,8 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
         strict_mcp_config=True,
         disallowed_tools=DISALLOWED_TOOLS,
         env={**CLI_ENV, **core.git_identity(cfg)},
+        # The CLI says each prompt again as the turn that takes it up starts, see _answer.
+        extra_args={"replay-user-messages": None},
         hooks={"PreToolUse": [HookMatcher(matcher="Bash", hooks=[_wait_hook])],
                "PostToolUse": [HookMatcher(hooks=[_updates_hook(setup, watch_env, handing)]), _UNDELIVERED_MATCHER],
                "PostToolUseFailure": [_UNDELIVERED_MATCHER]},
@@ -935,11 +938,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 log.info("context reached ~%d tokens, transcript %d bytes: creating handoff before fresh session",
                          context_tokens, transcript_bytes)
                 await client.query(_COMPACTION_PROMPT)
-                handoff_result = None
-                async for message in _receive_turn(client):
-                    _log_message(message, setup.cfg.agent_id)
-                    if isinstance(message, ResultMessage):
-                        handoff_result = message
+                handoff_result = await _answer(client, setup, _COMPACTION_PROMPT)
                 if not handoff_result or handoff_result.is_error:
                     log.warning("context handoff failed — preserving old session for retry")
                     return None, False
@@ -1011,6 +1010,21 @@ async def _next_told(setup: core.RunSetup, watch_env: dict[str, str], ended, idl
             return events, told, taken
         async with handing:
             updates.delivered(taken)
+
+
+async def _answer(client, setup: core.RunSetup, prompt: str) -> ResultMessage | None:
+    """The result of the turn that took up prompt, None for a stream that ended first. A subagent
+    that ends as prompt is sent starts a turn of its own that can come first: it is read and passed."""
+    while True:
+        took = False
+        result = None
+        async for message in _receive_turn(client):
+            _log_message(message, setup.cfg.agent_id)
+            took = took or (isinstance(message, UserMessage) and message.content == prompt)
+            if isinstance(message, ResultMessage):
+                result = message
+        if took or result is None:
+            return result
 
 
 def _note_background(message, background: set[str]) -> None:

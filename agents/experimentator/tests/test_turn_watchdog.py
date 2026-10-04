@@ -8,7 +8,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from claude_agent_sdk import AssistantMessage, ResultMessage, StreamEvent, SystemMessage, TextBlock
+from claude_agent_sdk import AssistantMessage, ResultMessage, StreamEvent, SystemMessage, TextBlock, UserMessage
 
 from hypothesisloop_agent.claude import run
 from test_require_joined import AGENT_TOKEN
@@ -293,6 +293,29 @@ class ContextOverflowTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(run._transcript_files("s-1"), ["projects/p/s-1.jsonl"], "a subagent's transcript is stored with no session")
             run._delete_retired_transcripts()
         self.assertEqual(os.listdir(os.path.join(home, "projects/p")), [])
+
+    # Measured on the bundled CLI: a subagent that ends as the handoff's prompt is sent starts a
+    # turn of its own first, and the handoff is the result of the turn after, which says its prompt.
+    async def test_the_handoff_is_read_from_the_turn_that_took_its_prompt(self):
+        def result(text):
+            return ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
+                                 session_id="s-1", result=text)
+
+        turns = [[AssistantMessage(content=[TextBlock(text="worked")], model="m", usage={"input_tokens": 10_000_000}),
+                  result("worked")],
+                 [SystemMessage("task_notification", {"task_id": "sub-1", "status": "completed"}), result("sub-1 done")],
+                 [UserMessage(content=run._COMPACTION_PROMPT), result("where things stand")]]
+
+        class RotatingClient(StoppableClient):
+            async def receive_response(self):
+                for message in turns.pop(0):
+                    yield message
+
+        setup = _setup()
+        with mock.patch.object(run, "ClaudeSDKClient", RotatingClient), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertLogs("llm_agent"):
+            self.assertEqual(await asyncio.wait_for(run._run_one_session(setup, "m", None, [False]), timeout=5), (None, True))
+        self.assertEqual(run._load_handoff(setup), "where things stand")
 
     def test_the_rotation_point_follows_a_smaller_context_window(self):
         def result(model_usage):
