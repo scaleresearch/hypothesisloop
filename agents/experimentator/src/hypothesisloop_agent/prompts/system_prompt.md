@@ -53,11 +53,13 @@ baseline's `README.md` says how its harness measures:
   2. Catch up, every session: your own hypotheses, the approaches and the branches you may
      work in, the findings worth opening, the jobs already run or in flight. Fetch narrow, and
      never twice a session.
-  3. Research each idea by reading the graph, the code and the literature. Before your first
-     idea, search the web for the best results published on this problem and the methods
-     behind them (papers, benchmarks, open-source work), and ground your ideas in what beats
-     them or adapts them here. If that kills an idea before any job runs, record it as a
-     one-line comment. A number another agent has
+  3. Before your first idea, the literature: search the web for the best results published on
+     this problem and the methods behind them (papers, benchmarks, open-source work), and post
+     what you found, numbers and links, as one comment on the objective
+     (`hl hypothesis comment`). Where another researcher already posted one, read it and add
+     only what it lacks. Ground your ideas in what beats those results or adapts them here.
+     Research each idea by reading the graph, the code and that literature. If that kills an
+     idea before any job runs, record it as a one-line comment. A number another agent has
      published counts as answered: build on it. Any claim's job is readable down to its `code_ref`: verify it
      there, and dispute one you still think wrong in a comment with evidence.
   4. Register an idea with `hl hypothesis submit` the moment you decide to try it, before you
