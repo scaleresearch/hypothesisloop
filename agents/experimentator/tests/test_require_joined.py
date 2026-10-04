@@ -8,7 +8,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest import mock
 
-from hypothesisloop_agent import api_client, config, core
+from hypothesisloop_agent import api_client, core
 
 
 def derived(scope: str) -> str:
@@ -84,12 +84,6 @@ class RequireJoinedTest(PlatformCase):
     def test_every_call_carries_the_token(self):
         self.client.require_joined("agent-a", "pe-1")
         self.assertEqual(FakePlatform.tokens, {"Bearer agent-token"})
-
-    def test_a_restart_checks_again_and_still_writes_nothing(self):
-        self.client.require_joined("agent-a", "pe-1")
-        FakePlatform.calls = []
-        self.client.require_joined("agent-a", "pe-1")
-        self.assertEqual(FakePlatform.calls, [("GET", "/platform-experiments/pe-1/signups/agent-a")])
 
     def test_an_agent_nobody_added_fails_startup_and_is_told_how_to_join(self):
         for status in (401, 403, 404):

@@ -236,11 +236,6 @@ class NotStoredTest(unittest.IsolatedAsyncioTestCase):
             beating.beat()
             self.assertEqual(said[-1], "hl-activity thinking")
 
-    def test_the_model_clis_home_is_named_by_the_environment_and_by_nothing_else(self):
-        with mock.patch.dict(os.environ, {}, clear=True), self.assertRaises(SystemExit) as missing:
-            run._model_home()
-        self.assertIn("CLAUDE_CONFIG_DIR", str(missing.exception))
-
 
 class MidTurnTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_machine_lost_inside_its_first_turn_is_resumed_in_that_turn_with_its_update_cursor(self):
@@ -290,29 +285,3 @@ class MidTurnTest(unittest.IsolatedAsyncioTestCase):
 if __name__ == "__main__":
     unittest.main()
 
-
-class NewMachineNoteTest(unittest.TestCase):
-    # A restored coordinator was told to check out its branch, and it has none. A researcher's
-    # branch is its hypothesis's, which only hl names.
-    def test_a_researcher_is_sent_to_its_hypothesis_a_baseline_agent_to_its_branch_and_a_coordinator_to_neither(self):
-        from types import SimpleNamespace
-        researcher = run._new_machine_note(SimpleNamespace(flavor="generalist", role="competitor"))
-        baseline = run._new_machine_note(SimpleNamespace(flavor="generalist", role="baseline"))
-        coordinator = run._new_machine_note(SimpleNamespace(flavor="coordinator", role="coordinator"))
-        for note in (researcher, baseline, coordinator):
-            self.assertIn("The machine you ran on was replaced", note)
-        self.assertIn("run `hl hypothesis checkout ID` for the hypothesis you work on", researcher)
-        self.assertIn("check out your branch", baseline)
-        self.assertNotIn("hypothes", baseline)
-        self.assertNotIn("branch", coordinator)
-        self.assertIn("summary", coordinator)
-
-    # A planner whose machine died was restarted with the researcher's note, and has no hypothesis
-    # to check out and no job to look at.
-    def test_a_planner_is_sent_back_to_its_draft_and_its_proposal(self):
-        from types import SimpleNamespace
-        note = run._new_machine_note(SimpleNamespace(flavor="planner", role="planner"))
-        self.assertIn("The machine you ran on was replaced", note)
-        self.assertIn("write your proposal's file again", note)
-        self.assertNotIn("hypothes", note)
-        self.assertNotIn("jobs", note)

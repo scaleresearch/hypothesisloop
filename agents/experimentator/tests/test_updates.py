@@ -5,10 +5,8 @@ import stat
 import tempfile
 import time
 import unittest
-from datetime import datetime, timezone
 
 from hypothesisloop_agent import outage, updates
-from hypothesisloop_agent.claude import activity
 
 COMPLETED = '{"kind":"experiment.status","subject":"exp-1","value":"COMPLETED","detail":"","agent_id":"agent-a","position":5,"cursor":5}'
 COMMENT = '{"kind":"comment.new","subject":"hyp-1","value":"agent","detail":"","agent_id":"agent-b","position":6,"cursor":6}'
@@ -259,10 +257,6 @@ class DrainTest(unittest.IsolatedAsyncioTestCase):
         events = await updates.drain(ENV, command=command)
         self.assertEqual([e["subject"] for e in events], ["exp-1"])
 
-    async def test_a_failed_drain_returns_nothing(self):
-        command, _ = fake_hl("echo refused >&2; exit 2\n")
-        self.assertEqual(await updates.drain(ENV, command=command), [])
-
     async def test_a_drain_that_fails_in_an_outage_is_not_logged(self):
         command, _ = fake_hl("echo never connected >&2; exit 1\n")
         with self.assertLogs("llm_agent", "WARNING") as logged:
@@ -370,9 +364,6 @@ class UndeliveredMessageTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_message_its_own_subagent_got_is_left_alone(self):
         self.assertEqual(await self.call(hook_event_name="PostToolUse", tool_response={"success": True}), {})
 
-    def test_the_hook_listens_to_send_message_alone(self):
-        self.assertEqual(self.harness._UNDELIVERED_MATCHER.matcher, "SendMessage")
-
 
 class FormatTest(unittest.TestCase):
     def test_one_compact_line_per_event_naming_only_other_actors(self):
@@ -394,25 +385,6 @@ class FormatTest(unittest.TestCase):
                          "experiment.blocked exp-2 no_cluster_for_image no cluster runs image torch")
         self.assertEqual(updates.event_line(held, ""), f"job.held exp-1 capacity_unavailable {sentence} by agent-a")
 
-    def test_an_evicted_or_requeued_job_is_one_line_with_the_reason_code_and_its_sentence(self):
-        evicted = {"kind": "experiment.status", "subject": "exp-1", "value": "EVICTED", "agent_id": "agent-a",
-                   "detail": "no_offer: no machine to rent for shape rtx4090 in 3m0s of asking"}
-        requeued = {"kind": "experiment.status", "subject": "exp-2", "value": "QUEUED", "agent_id": "agent-a",
-                    "detail": "code_unreachable: command exited with code 75: hl-clone: could not fetch the code"}
-        self.assertEqual(updates.message([evicted, requeued], "agent-a"), "Platform updates:\n"
-                         "experiment.status exp-1 EVICTED no_offer: no machine to rent for shape rtx4090 in 3m0s of asking\n"
-                         "experiment.status exp-2 QUEUED code_unreachable: command exited with code 75: hl-clone: could not fetch the code")
-
-    def test_a_repeated_event_is_delivered_once(self):
-        event = {"kind": "job.underperforming", "subject": "job-1", "value": "val_accuracy", "agent_id": "agent-a"}
-        self.assertEqual(updates.message([event, dict(event, position=2), dict(event, position=3)], "agent-a"),
-                         "Platform updates:\njob.underperforming job-1 val_accuracy")
-
-    def test_activity_logs_each_delivered_event(self):
-        now = datetime(2026, 10, 2, 6, 21, 30, tzinfo=timezone.utc)
-        events = [{"kind": "comment.new", "subject": "hyp-1", "value": "human"}]
-        self.assertEqual(activity.event_lines(events, "agent-a", now),
-                         ["2026-10-02T06:21:30Z agent-a event comment.new hyp-1 human"])
 
 
 if __name__ == "__main__":

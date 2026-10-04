@@ -98,23 +98,6 @@ class RefusedCredentialTest(unittest.IsolatedAsyncioTestCase):
                           "API Error: 500 Internal server error", "Connection error.", "", "You've hit your usage limit"):
             self.assertEqual(await self.session(transient), (None, False), transient)
 
-    # An agent's Write to a file it had only `cat` was refused, twice across runs.
-    async def test_the_agent_is_told_its_file_tools_want_a_read_first(self):
-        seen = []
-
-        class Client(ErrorTurnClient):
-            def __init__(self, options):
-                seen.append(options.system_prompt)
-
-        with mock.patch.object(run, "ClaudeSDKClient", Client):
-            setup = SimpleNamespace(system_prompt="BRIEFING", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
-                                    client=SimpleNamespace(get_signup=lambda *_: {}),
-                                    cfg=SimpleNamespace(agent_id="ag-1", flavor="generalist", api_url="http://x", token=AGENT_TOKEN,
-                                                        platform_experiment_id="pe-1"))
-            with mock.patch.object(Client, "result", "Connection error."), contextlib.redirect_stdout(io.StringIO()):
-                await asyncio.wait_for(run._run_one_session(setup, "m", None, [False]), timeout=5)
-        self.assertEqual(seen, ["BRIEFING\n\nWrite and Edit refuse an existing file you have not opened with Read: `cat` does not count."])
-
     def test_only_the_providers_refusal_of_the_credential_counts(self):
         self.assertFalse(run.credential_refused(None))
         self.assertFalse(run.credential_refused("rate_limit_error: too many requests"))

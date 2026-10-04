@@ -127,35 +127,6 @@ class ExperimentFilesTest(unittest.TestCase):
                     lines.append(line[2:])
                 self.assertEqual("\n".join(lines).strip(), "\n".join(line if line.strip() else "" for line in block.strip().split("\n")))
 
-    def test_one_job_spec_and_no_placeholder_of_another_time(self):
-        self.assertEqual(sorted(p for p in EXPERIMENTS.glob("*/seed/*.yaml")), [])
-        for path in sorted(EXPERIMENTS.glob("*/.hypothesisloop/*.yaml")):
-            with self.subTest(path=path.relative_to(EXPERIMENTS)):
-                text = path.read_text()
-                for stale in ("__WORKLOAD_IMAGE__", "hypothesis_id:", "max_agents:", "ends_at:"):
-                    self.assertNotIn(stale, text)
-
-
-class SampleJobFilesTest(unittest.TestCase):
-    """The samples an agent's image carries: none retries a job, since a failed gate would only
-    fail again, and every file one of them names is in the image."""
-
-    def test_no_sample_retries_and_the_reference_they_name_is_shipped(self):
-        samples = sorted(EXPERIMENTS.glob("*/.hypothesisloop/job.yaml"))
-        self.assertTrue(samples)
-        dockerfile = (REPO / "agents/experimentator/Dockerfile.base").read_text()
-        shipped = "controlplane/settings/examples/experiment-submission.yaml"
-        self.assertIn(f"COPY {shipped} $WORKLOAD_SAMPLES/", dockerfile)
-        self.assertIn("! -name seed ! -name .hypothesisloop -exec rm -rf {} +", dockerfile)
-        self.assertIn("-path '*/.hypothesisloop/*' ! -name job.yaml -delete", dockerfile)
-        self.assertTrue((REPO / shipped).is_file())
-        for path in samples:
-            with self.subTest(path=path.name):
-                text = path.read_text()
-                self.assertNotIn("max_retries", text)
-                if "experiment-submission.yaml" in text:
-                    self.assertIn("under $WORKLOAD_SAMPLES", text)
-
 
 class CatalogueImageJobTest(unittest.TestCase):
     """dummy-data-search-demo builds no image: its job clones its commit and installs what

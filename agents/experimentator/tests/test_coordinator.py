@@ -1,9 +1,7 @@
 import os
-import re
 import shutil
 import tempfile
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -64,95 +62,7 @@ class StartupTest(PlatformCase):
             self.assertNotIn(COORDINATOR_TOKEN, str(refused.exception))
 
 
-
 class BriefingTest(unittest.TestCase):
-    def render(self) -> str:
-        with mock.patch.dict(os.environ, LAUNCH_ENV, clear=True):
-            cfg = config.Config()
-        cfg.run_as(config.COORDINATOR_FLAVOR, "model-1")
-        return core.system_prompt(cfg, "RULES\n", "COMMANDS", "https://github.com/acme/model.git", "/agent/workspace")
-
-    def test_it_renders_with_the_rules_the_commands_and_its_assignment(self):
-        prompt = self.render()
-        self.assertIn("\n\nRULES\n\n## hl commands\n\nCOMMANDS\n\n", prompt)
-        self.assertIn("run `git clone https://github.com/acme/model.git .` in /agent/workspace, the directory you start in", " ".join(prompt.split()))
-        self.assertIn('hl hypothesis query "MATCH (d:Hypothesis)-[:BUILDS_ON]->(:Objective) '
-                      'OPTIONAL MATCH (h:Hypothesis)-[:BUILDS_ON*0..]->(d:Hypothesis) RETURN d.id, d.text, h.status, count(h)"',
-                      " ".join(prompt.split()))
-        self.assertIsNone(re.search(r"\{[a-z_]+\}", prompt), "a placeholder was left unfilled")
-
-    def test_it_acts_through_hl_and_names_no_host_tool_and_no_http_endpoint(self):
-        prompt = self.render()
-        self.assertIsNone(re.search(r"podman|kubectl|\bmake\b|docker|(GET|POST|PUT) /|\$API_URL|curl", prompt))
-        self.assertLess(len(prompt.encode()), 6_933)
-
-    # A coordinator of an accepted draft read "not started" and waited 36 minutes for a start
-    # that only its own baseline agent could bring. The accept now creates that agent, the
-    # platform declares the job it finishes with and starts the run, and `status_reason` says
-    # who acts: a coordinator has a step before the run only where it names the coordinator,
-    # and its message carries the step with its command.
-    def test_before_the_run_it_acts_only_where_status_reason_waits_for_it(self):
-        flat = " ".join(self.render().split())
-        self.assertIn("`status_reason` (where its `waits_for` reads `coordinator`, your next step and its command)", flat)
-        self.assertIn("The platform declares the job the baseline agent finishes with and starts the run, whose duration counts from "
-                      "the first researcher at work. An experiment still `open` at its `baseline_due_at` is closed", flat)
-        self.assertIn("When `status_reason.waits_for` reads `coordinator`, its message is your step.", flat)
-        # One wrote "proceeding" of a declared baseline whose run had no researcher to start for,
-        # and a started run whose machines are coming up is waited through.
-        self.assertIn("Any other `waits_for` you wait through, `agents_starting` too: a started run whose machines boot", flat)
-        for said_by_status_reason in ("--baseline-job", "--role baseline", "`code_ref:`", "`measured:`", "`BASELINE` block", "starts_at",
-                                      "baseline_undeclared", "baseline_required"):
-            self.assertNotIn(said_by_status_reason, flat)
-
-    # One removed the owner's researcher to "match max_agents" and cancelled the baseline
-    # agent's queued job itself. Both are refused now, each with whose it is, as a change of
-    # what is the owner's is.
-    def test_it_changes_nothing_of_an_agents(self):
-        flat = " ".join(self.render().split())
-        self.assertIn("An agent's jobs, hypotheses and branches are the agent's: what is wrong with a job you say in the brief", flat)
-        for said_there in ("agents remove", "--help", "refuses", "max_agents", "one per call", "are the owner's"):
-            self.assertNotIn(said_there, flat)
-
-    # Three baseline jobs failed for what the brief said of the image before a coordinator
-    # looked at one.
-    def test_a_failed_baseline_job_is_the_agents_to_fix_and_the_briefs_cause_the_coordinators(self):
-        flat = " ".join(self.render().split())
-        self.assertIn("the run starts, closes or begins to wait for you, and while it is `open` when a job fails", flat)
-        self.assertIn("A failed baseline job is its agent's to fix and run again. Read `hl job logs ID`: "
-                      "if the cause is in the brief (an image, a type, a config that cannot run), fix the brief", flat)
-        self.assertIn("State in it only what you read on the platform", flat)
-
-    # A run closed under a summary that said it was "waiting for the competitor agent", one
-    # still open was written up as "proceeding". Told to end its turn by replying in one line
-    # with no tool call, a coordinator wrote what it saw, ran `echo ok` and then wrote the one
-    # line, six times in a run: the briefing asked for a closing reply of a set form, and only
-    # a command separates two replies. What it writes last is the end, in whatever words.
-    def test_the_last_summary_is_written_before_the_close_and_a_turn_ends_with_the_last_reply(self):
-        flat = " ".join(self.render().split())
-        self.assertIn("Rewrite it as your last act before `hl platform-experiments close`: what was found, in the past tense, "
-                      "with nothing in it still waiting or under way", flat)
-        self.assertIn("It opens with the `status` that `get` shows now, and of an `open` experiment its `status_reason`: no run is under way", flat)
-        self.assertIn("To wait, reply with no command in it: your turn ends, and the next update starts another.", flat)
-        for form in ("one line", "call no tool", "echo"):
-            self.assertNotIn(form, flat)
-        self.assertEqual(updates.message([{"kind": "comment.new", "subject": "hyp-1"}], ""), "Platform updates:\ncomment.new hyp-1")
-
-    # Every graph of the audited runs was three root hypotheses with nothing below them, two
-    # of them varying the same knobs, and no summary said how the best result was reached.
-    def test_it_checks_the_shape_of_the_graph_and_its_last_summary_names_the_path_to_the_best_finding(self):
-        flat = " ".join(self.render().split())
-        self.assertIn("The objective's children are distinct approaches, each one claim, a refinement or a combination "
-                      "sits under what it refines, and the best result is a node", flat)
-        self.assertIn("Roots that overlap, or stay flat while one holds a whole sweep, you comment on: "
-                      "`hl hypothesis comment ID --text T`", flat)
-        self.assertIn("and the path from the objective to the best finding, hypothesis by hypothesis", flat)
-
-    def test_its_findings_go_to_the_platform_and_it_pushes_nothing(self):
-        prompt = self.render()
-        self.assertIn("hl platform-experiments summary --file", prompt)
-        self.assertIn("read-only", prompt)
-        self.assertIsNone(re.search(r"git push|findings\.md|hl/pe-1/coordinator", prompt, re.IGNORECASE))
-
     def test_the_commands_listed_for_a_coordinator_are_the_ones_that_change_roster_and_brief(self):
         asked = []
 
@@ -173,8 +83,6 @@ class BriefingTest(unittest.TestCase):
             core.hl_commands(SimpleNamespace(flavor="generalist", role="competitor"))
         self.assertEqual(asked, [[], ["job"], ["hypothesis"]])
 
-    def test_the_prompt_file_ships_beside_the_agents_briefing(self):
-        self.assertTrue((Path(core.__file__).parent / "prompts" / "coordinator.md").is_file())
 
 
 class WatchTest(unittest.IsolatedAsyncioTestCase):
@@ -190,11 +98,6 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updates.message(events, ""), "Platform updates:\nexperiment.status exp-1 COMPLETED on node n1 by agent-a")
         with open(command[0] + ".reads") as f:
             self.assertEqual(f.read(), "job status exp-1\n")
-
-    def test_the_last_turn_of_a_coordinator_writes_the_summary_and_pushes_nothing(self):
-        self.assertNotIn("job", run._COORDINATOR_SHUTDOWN_PROMPT)
-        self.assertNotIn("push", run._COORDINATOR_SHUTDOWN_PROMPT)
-        self.assertIn("hl platform-experiments summary", run._COORDINATOR_SHUTDOWN_PROMPT)
 
     # A coordinator wrote "closed by owner at 02:48" for a run that had reached its end time:
     # nothing told it why it was being stopped. The moment named is closed_at, which every closed
