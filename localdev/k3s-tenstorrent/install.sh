@@ -182,15 +182,6 @@ wait_for 40 3 "Tenstorrent ResourceSlice" sh -c \
   "kubectl --context '${CONTEXT_NAME}' get resourceslices -o json | python3 -c 'import json,sys; assert any(x.get(\"spec\",{}).get(\"driver\")==\"tenstorrent.com\" for x in json.load(sys.stdin)[\"items\"])'"
 echo "==> tt-operator stage: $(( $(date +%s) - STAGE_T0 ))s"
 
-# Donates zero capacity to workloads by default, same as localdev/k3s-macos/install.sh — applied
-# only now, after tt-operator's own management pods (fabric-manager, NFD master/gc, coredns,
-# metrics-server) have already landed on this one node while it was still schedulable. Tainting
-# any earlier leaves those pods Pending forever (no toleration, no other node to land on),
-# which is exactly what made this hang against helm's own --wait --timeout 8m. node-agent's
-# DaemonSet still monitors this node afterward (tolerates every taint). The real-hardware e2e
-# attaches it as a worker while it runs.
-lib_detach_node "${CONTEXT_NAME}" box-a
-
 echo "==> Cluster ready. Context: ${CONTEXT_NAME}"
 echo "    Attach it from the control plane's host with make cluster-agent-up CLUSTER=box-a (see README)."
 echo

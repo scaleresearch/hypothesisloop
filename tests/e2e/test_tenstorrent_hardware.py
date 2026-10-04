@@ -4,14 +4,11 @@ submission path reaches real hardware: submit a job, verify a genuine DRA Resour
 allocated a real /dev/tenstorrent device, not just that the platform reports success. Then proves
 the same physical device is independently reachable via the bare-node agent (no k3s/DRA involved).
 
-Ported 1:1 from tests/scenarios/tenstorrent-hardware.sh -- attaches/detaches box-a from its
-k3s context via localdev/lib/node.sh's lib_attach_node/lib_detach_node for the duration of the
-test only, same care as the k8s-mutating scenarios (test_node_and_daemonset_faults.py): detach
-happens in a `finally` so it runs on pass, fail, or timeout.
+For the bare-node leg box-a is tainted no-workload so the scheduler cannot place the job
+there; the taint is lifted in a `finally`, so the box takes jobs again on pass, fail, or timeout.
 
-The k3s leg's job runs the image `make tt-hardware-image` pushed, as the cluster's nodes pull it:
-TT_WORKLOAD_IMAGE names it when the registry is not the local one (a control plane on another
-machine). The bare-node leg builds the same image on this host and runs that.
+The k3s leg's job runs TT_WORKLOAD_IMAGE, the image `make tt-e2e` pushed to the registry the box
+pulls from. The bare-node leg builds the same image on this host and runs that.
 """
 from __future__ import annotations
 
@@ -42,12 +39,7 @@ BARE_IMAGE = "localhost/hypothesisloop-tenstorrent-workload:latest"
 
 
 def _k3s_image() -> str:
-    named = os.environ.get("TT_WORKLOAD_IMAGE")
-    if named:
-        return named
-    host = (REPO_ROOT / "localdev" / ".host-address").read_text().strip()
-    tag = (REPO_ROOT / "localdev" / ".image-tag").read_text().strip()
-    return f"{host}:5000/hypothesisloop-tenstorrent-workload:{tag}"
+    return os.environ["TT_WORKLOAD_IMAGE"]
 
 
 TT_JOB_OVERRIDES = {
@@ -145,12 +137,11 @@ def _resourceclaim_device_results(experiment_id: str) -> list:
 
 
 @pytest.fixture(autouse=True)
-def _attach_tt_quietbox():
-    _lib_attach_node()
+def _tt_quietbox_takes_jobs_after():
     try:
         yield
     finally:
-        _lib_detach_node()
+        _lib_attach_node()
 
 
 @pytest.mark.timeout(480)
@@ -236,9 +227,8 @@ def _run(api, pe_id: str, agent: str, run_id: str, deadline, tmp_path: Path) -> 
     api.file_finding(job, "Tenstorrent e2e: real DRA allocation on box-a confirmed.")
 
     # -- same physical hardware, reached via this host's bare-node agent (no k3s/DRA at all) --
-    # Detach box-a from k3s now: it stays a schedulable, guaranteed-capacity node until the
-    # fixture's own teardown, and the scheduler would place the next job there. Detached, the
-    # bare-node cluster is the only one that reports the device.
+    # Untainted, box-a is a schedulable, guaranteed-capacity node and the scheduler would
+    # place the next job there. Tainted, the bare-node cluster is the only one that reports the device.
     _lib_detach_node()
     bare_cluster = f"tt-bare-e2e-{run_id}"
     agent_bin = tmp_path / "bare-agent"

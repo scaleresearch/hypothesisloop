@@ -257,8 +257,7 @@ stack-not-held:
 
 # ---- Real Tenstorrent hardware: k3s + tt-operator device stack --------------
 # Counterpart to k3s-up, for an actual Tenstorrent host instead of simulated
-# fake-accelerator nodes. Also control-plane-only by default (tainted no-workload) — see
-# tt-dev-nodes-up below. Run on the box; the control plane's host then attaches it with
+# fake-accelerator nodes. Run on the box; the control plane's host then attaches it with
 # cluster-agent-up.
 tt-up:
 	bash localdev/k3s-tenstorrent/install.sh
@@ -269,8 +268,7 @@ tt-up:
 tt-down:
 	bash localdev/k3s-tenstorrent/destroy.sh
 
-# Provisions fake-accelerator container nodes. box-a itself stays detached; the hardware
-# e2e test attaches it while it runs. Idempotent.
+# Provisions fake-accelerator container nodes. Idempotent.
 tt-dev-nodes-up:
 	bash localdev/k3s-tenstorrent/dev-nodes-up.sh
 
@@ -283,8 +281,9 @@ locked-tt-hardware-image: check-tag
 	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG)
 	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) $(REGISTRY)/hypothesisloop-tenstorrent-workload:latest
 
+# Run on the box with the REGISTRY and TAG it was attached with, so its nodes pull the image just pushed.
 tt-e2e: render-settings tt-hardware-image
-	bash -c '$(E2E_ENV) bash localdev/k3s-tenstorrent/run-e2e.sh'
+	bash -c '$(E2E_ENV) TT_WORKLOAD_IMAGE="$(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG)" bash localdev/k3s-tenstorrent/run-e2e.sh'
 
 # Removes the fake nodes; box-a itself is left as it is.
 tt-dev-nodes-down:
