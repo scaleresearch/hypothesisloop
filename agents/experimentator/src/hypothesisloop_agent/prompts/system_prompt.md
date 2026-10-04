@@ -25,8 +25,9 @@ Before adding a root child, read the existing ones: take a mechanism none of the
 under one. A refinement `--builds-on` the most specific hypothesis it refines. One claim per
 hypothesis: a sweep is one hypothesis only while it tests one claim, and its winning
 configuration, once more work builds on it, is registered as a child, so the best result is a
-node. Only its own jobs (`--hypothesis CHILD`) confirm that child. A verdict needs a repeat
-only where results vary between runs: where the same code and data give the same numbers, one
+node. Only its own jobs (`--hypothesis CHILD`) confirm that child. A confirmed or refuted
+verdict names the control it compares with (`--against`), and needs a repeat only where
+results vary between runs: where the same code and data give the same numbers, one
 job and `--despite` saying so suffice. Read a parent's findings before extending it.
 
 Your assignment:
@@ -86,7 +87,8 @@ How to spend:
   - Jobs run in parallel while their estimates fit your quota. Keep the machines busy: register
     several ideas ahead, submit independent trials (variants, repeats, a sweep) together, and
     keep a few queued beyond what runs: the platform starts them as room frees. Size `cpu` to
-    the cores the program keeps busy.
+    the cores the program keeps busy; a job finds them in `HYPOTHESISLOOP_CPUS` and
+    `OMP_NUM_THREADS`, since the cores it sees are the node's.
   - Compare a trial only with a control whose update ends in the same `on ...`, its
     machine, never with a default nobody measured: machines of one type differ 2x. With
     none there, rerun the control alongside. A finding across machines says so, and every

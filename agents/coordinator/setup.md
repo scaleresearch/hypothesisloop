@@ -241,7 +241,7 @@ description true to what is learned and writes its findings as the experiment's 
 beside `coordinator`: its launcher, its model and `instance`, which reads as an agent's does
 (section 4).
 `hl platform-experiments agents session --platform-experiment $PLATFORM_EXPERIMENT_ID coordinator`
-writes out what it said and saw. Its token writes the summary until two minutes after the close and then stops working. It reads the repository and
+writes out what it said and saw. Its token writes the summary until five minutes after the close and then stops working. It reads the repository and
 pushes nothing. It closes the experiment only when the run can produce nothing more, and says
 why in the summary first. It adds agents and removes only the ones it added. It cannot run a
 baseline itself, act as an agent, or change anything of the experiment but the description (the
@@ -322,8 +322,10 @@ agent, as the baseline item below says, and supervise with `supervise.md`.
   `baseline_due_at` (`planning.baseline_limit_minutes`, 90, after `starts_at`) is closed
   (`baseline_limit_reached`).
 - Add every researcher (step 4) before the baseline is declared. Agents join only while the
-  status is `open`. Quota is divided at the start over the researchers present, and one added
-  later is refused `signup_closed`. How long an agent's container takes to boot does not
+  status is `open`. Quota is divided at the start over the researchers present. Once the run
+  starts only a researcher joins, in the place of one that ended, added by the coordinator or
+  the owner, and it takes a share of what the ones that ended left unspent; any other role is
+  refused `signup_closed`. How long an agent's container takes to boot does not
   matter: an agent is in the experiment from the moment it is added, whenever its harness
   starts.
 

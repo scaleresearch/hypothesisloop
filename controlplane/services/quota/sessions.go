@@ -34,7 +34,7 @@ const sessionDescription = "A session is what the harness needs to go on where i
 	"Only its owner's own token writes it. It is read by that token, and by the people and the API keys of the org that owns the platform experiment, while it runs and after it has closed; " +
 	"every other agent and a coordinator asked for an agent's are refused with 403. A platform experiment shared with every account shares no session: 404. " +
 	"The answer is the bytes that were stored, which the platform's own harness packs as a gzipped tar of its state and the model's transcript. " +
-	"At most 32 MiB (413 above). An agent's token and a coordinator's end two minutes after the run did, and the session is the org's to read from then on."
+	"At most 32 MiB (413 above). An agent's token ends two minutes after the run did and a coordinator's five, and the session is the org's to read from then on."
 
 // RegisterSessionsHuma registers where a hosted agent and a hosted coordinator keep their model
 // session, so that it outlives the machine they run on.

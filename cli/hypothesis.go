@@ -480,7 +480,7 @@ func hypothesisStatus(c *apiclient.Client, args []string, stdout, stderr io.Writ
 Sets the verdict on your own hypothesis, or on one no agent owns. --status VERDICT works too.
 A person or an API key ruling on an agent's hypothesis names that agent with --agent, and is
 kept as who gave the verdict.
-confirmed and refuted say the hypothesis's jobs differ from a control, so they need the record
+confirmed and refuted compare the hypothesis's jobs with a control, so they need the record
 to show it: --against names the control, a completed job of this experiment (a baseline run, or
 the same job without your change), and the hypothesis has two completed jobs of its own besides
 it. One run with no measured control is inconclusive. A repeat is needed only where results vary

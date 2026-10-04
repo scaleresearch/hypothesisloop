@@ -62,14 +62,16 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
     the baseline chooses and records in the repository's README.
   - The size: a budget or count the goal states, as stated; a time it states is
     `duration_hours`, never a trial length. Else the smallest plan: count the trials the goal
-    needs (the levers worth trying, a control and a repeat). Budget = the trial length the
-    repository states, else one you assume, its job's build of the code it varies included,
-    x `acch_per_hour` of the type x its count x those trials, with a fifth to spare.
+    needs (the levers worth trying, a control, and a repeat where results vary between runs).
+    Budget = the trial length the repository states, else one you assume, its job's build of
+    the code it varies included, x `acch_per_hour` of the type x its count x those trials,
+    with a fifth to spare.
     Duration = the rounds those trials take side by side.
     `baseline_minutes`: from the accept until the control and each reference are measured,
     the sum of writing the harness (none when it runs unchanged), building the job's
     environment from nothing (toolchains, dependencies, the references), moving that image to
-    the cluster, the jobs themselves, and one failed try fixed and rerun.
+    the cluster, the jobs themselves, and one failed try fixed and rerun, never under the
+    planning.min_baseline_minutes the propose help names.
     Researchers: 2 unless stated, never above `max_agents`. With 2 or more, mix flavors
     unless the goal says otherwise: a generalist and the targeted flavors whose axis the
     levers leave open, each direction on its flavor's axis.

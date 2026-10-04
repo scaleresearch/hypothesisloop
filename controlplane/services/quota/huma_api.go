@@ -507,7 +507,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Summary: "Record the operator's narrative verdict on a run", Tags: []string{"platform-experiments"},
 		Description: "Replaces the summary and answers the platform experiment with it. Writable after the experiment closes: it is the one field whose whole point " +
 			"is to be written once the run is over and the results are in. A person or an API key writes it at any time. " +
-			"A coordinator's token writes it until two minutes after the close, when the token ends (401). 422 summary_too_long past 32768 bytes.",
+			"A coordinator's token writes it until five minutes after the close (domain.CoordinatorWindDown), when the token ends (401). 422 summary_too_long past 32768 bytes.",
 	}), func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
