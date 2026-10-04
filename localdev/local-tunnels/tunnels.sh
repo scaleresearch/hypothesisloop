@@ -87,23 +87,36 @@ up() {
   exit 1
 }
 
-# The URL cloudflared printed for one running tunnel, or nothing.
+# The URL of one tunnel the edge has registered, or why it is down and a failure. A quick tunnel's
+# process outlives its tunnel (the edge forgets it and every reconnect answers "Tunnel not found"),
+# so the only up is cloudflared's own /ready on the metrics server it logs.
 url_of() {
-  local name="$1" pid_file="$PID_DIR/$1.pid"
-  if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
-    grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$LOG_DIR/$name.log" 2>/dev/null | head -1 || true
+  local name="$1" pid_file="$PID_DIR/$1.pid" log_file="$LOG_DIR/$1.log" url metrics
+  if [[ ! -f "$pid_file" ]] || ! kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+    echo "not running"
+    return 1
   fi
+  url="$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$log_file" | head -1 || true)"
+  metrics="$(grep -oE 'Starting metrics server on [0-9.:]+' "$log_file" | head -1 | awk '{ print $NF }' || true)"
+  if [[ -z "$url" || -z "$metrics" ]]; then
+    echo "starting, see $log_file"
+    return 1
+  fi
+  if ! curl -fsS --max-time 2 -o /dev/null "http://$metrics/ready" 2>/dev/null; then
+    echo "$url has no registered connection, see $log_file"
+    return 1
+  fi
+  echo "$url"
 }
 
 # One line per service, "<name> <url>", read from the running tunnels: what `make dev-hosted`
-# renders into the settings. Fails when a tunnel is down or has no URL yet, so a caller never
-# takes an address nothing answers at.
+# renders into the settings. Fails when a tunnel is down, so a caller never takes an address
+# nothing answers at.
 addresses() {
   local name port url
   while read -r name port; do
-    url="$(url_of "$name")"
-    if [[ -z "$url" ]]; then
-      echo "tunnels: $name has no running tunnel; run make tunnels" >&2
+    if ! url="$(url_of "$name")"; then
+      echo "tunnels: $name is down ($url); run make tunnels" >&2
       return 1
     fi
     echo "$name $url"
@@ -111,21 +124,14 @@ addresses() {
 }
 
 status() {
-  [[ -d "$PID_DIR" ]] || { echo "tunnels: not running"; return; }
-  local any=0
+  local name port url
   while read -r name port; do
-    local pid_file="$PID_DIR/$name.pid"
-    local log_file="$LOG_DIR/$name.log"
-    if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
-      any=1
-      local url
-      url="$(url_of "$name")"
-      echo "  $name (:$port) -> ${url:-<not ready yet, check $log_file>}"
+    if url="$(url_of "$name")"; then
+      echo "  $name (:$port) -> $url"
     else
-      echo "  $name (:$port) -> not running"
+      echo "  $name (:$port) -> down: $url"
     fi
   done < <(read_services)
-  [[ "$any" -eq 1 ]] || echo "tunnels: none running"
 }
 
 case "$ACTION" in
