@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
 type Store interface {
@@ -27,6 +29,18 @@ type Store interface {
 	ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity string) error
 	EndInstance(ctx context.Context, platformExpID, agentID, name string, how db.InstanceEnd, exitLog string, limit time.Duration, maxRestarts int) (after domain.AgentInstance, recorded bool, err error)
 	SetLauncherHolds(ctx context.Context, launcher string, holds bool) error
+}
+
+// Metrics is where the rate limits the launchers report are kept: the run's health series.
+type Metrics interface {
+	RecordRateLimits(ctx context.Context, at time.Time, readings []domain.RateLimitReading) error
+}
+
+// MetricsDB is Metrics in the metrics store at URL.
+type MetricsDB struct{ URL string }
+
+func (m MetricsDB) RecordRateLimits(ctx context.Context, at time.Time, readings []domain.RateLimitReading) error {
+	return metricsdb.RecordRateLimits(ctx, m.URL, at, readings)
 }
 
 // Settings is what the platform's config decides about hosted machines.
@@ -49,16 +63,17 @@ type Settings struct {
 }
 
 type Handler struct {
-	store  Store
-	cfg    Settings
-	logger *zap.Logger
+	store   Store
+	metrics Metrics
+	cfg     Settings
+	logger  *zap.Logger
 }
 
-func NewHandler(store Store, cfg Settings, logger *zap.Logger) *Handler {
-	if store == nil || cfg.Image == "" || cfg.APIURL == "" || cfg.SigningSecret == "" || cfg.BootLimit <= 0 || cfg.ProgressLimit <= 0 || cfg.MaxNewPerAnswer <= 0 || logger == nil {
-		panic("launcherapi.NewHandler: store, logger and every setting are required")
+func NewHandler(store Store, metrics Metrics, cfg Settings, logger *zap.Logger) *Handler {
+	if store == nil || metrics == nil || cfg.Image == "" || cfg.APIURL == "" || cfg.SigningSecret == "" || cfg.BootLimit <= 0 || cfg.ProgressLimit <= 0 || cfg.MaxNewPerAnswer <= 0 || logger == nil {
+		panic("launcherapi.NewHandler: store, metrics, logger and every setting are required")
 	}
-	return &Handler{store: store, cfg: cfg, logger: logger}
+	return &Handler{store: store, metrics: metrics, cfg: cfg, logger: logger}
 }
 
 // Observed is what a launcher found on its provider account before it asked: every instance
@@ -80,8 +95,9 @@ type ObservedInstance struct {
 	// command ended.
 	Expired bool `json:"expired,omitempty" doc:"For an exited instance, true when its provider ended it at the provider's own limit on how long it rents one. Its end is recorded as expired, spends no restart and never stops the agent, which is asked for again under a new name."`
 	// Progress is a pointer so that "could not be read" differs from "read, and none printed".
-	Progress *string `json:"progress,omitempty" maxLength:"64" doc:"For a running instance, the progress marker its command last printed: what follows hl-progress on the newest such line of its output, empty when it has printed none. Left out when the launcher could not read the output: an instance with no progress recorded for the platform's progress limit is then replaced with no restart spent. The platform compares it with the one before and reads nothing else from it."`
-	Activity string  `json:"activity,omitempty" maxLength:"120" doc:"For a running instance, what its agent last said it is doing: what follows hl-activity on the newest such line of the output the progress marker is read from, left out when it has printed none. It rides on the report the launcher already makes. The platform keeps the latest with the time it first read it and answers it as activity on the agent, the coordinator or the draft."`
+	Progress  *string `json:"progress,omitempty" maxLength:"64" doc:"For a running instance, the progress marker its command last printed: what follows hl-progress on the newest such line of its output, empty when it has printed none. Left out when the launcher could not read the output: an instance with no progress recorded for the platform's progress limit is then replaced with no restart spent. The platform compares it with the one before and reads nothing else from it."`
+	Activity  string  `json:"activity,omitempty" maxLength:"120" doc:"For a running instance, what its agent last said it is doing: what follows hl-activity on the newest such line of the output the progress marker is read from, left out when it has printed none. It rides on the report the launcher already makes. The platform keeps the latest with the time it first read it and answers it as activity on the agent, the coordinator or the draft."`
+	RateLimit string  `json:"rate_limit,omitempty" maxLength:"200" doc:"For a running instance, the model provider's rate limit as its agent last read it: what follows hl-rate-limit on the newest such line of the same output, space-separated key=value fields: status (allowed, allowed_warning or rejected), and when known type, utilization (0 to 1) and resets_at (Unix seconds). Left out when it has printed none. The platform writes it to the run's health series and reads nothing else from it."`
 }
 
 const (
@@ -125,8 +141,10 @@ const refusalPassDoesNotFit = "pass_does_not_fit"
 // coordinator, whose agentID is empty. Both are evaluated by the same steps.
 type kept struct {
 	platformExperimentID, agentID string
-	instance                      domain.AgentInstance
-	ending                        bool
+	// role is its role in the run's health series.
+	role     string
+	instance domain.AgentInstance
+	ending   bool
 	// endsBy is the latest moment a machine rented for it now may still run.
 	endsBy time.Time
 	// launch is launchOf the image this one boots and the launcher's digest.
@@ -187,7 +205,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		}
 		signup, image := agent.AgentSignup, h.imageOf(agent.AgentImage)
 		all = append(all, kept{
-			platformExperimentID: agent.PlatformExperimentID, agentID: agent.AgentID, instance: *agent.Instance, ending: agent.Ended != "", endsBy: agent.EndsBy,
+			platformExperimentID: agent.PlatformExperimentID, agentID: agent.AgentID, role: string(agent.Role), instance: *agent.Instance, ending: agent.Ended != "", endsBy: agent.EndsBy,
 			launch: launchOf(image, observed.LaunchDigest),
 			describe: func(ended int) (Instance, error) {
 				return instanceFor(signup, ended, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
@@ -197,7 +215,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 	for _, coordinator := range coordinators {
 		pe, model, image := coordinator.PlatformExperimentID, coordinator.Model, h.imageOf(coordinator.AgentImage)
 		all = append(all, kept{
-			platformExperimentID: pe, instance: coordinator.Instance, ending: coordinator.Ending, endsBy: coordinator.EndsBy,
+			platformExperimentID: pe, role: domain.CoordinatorHealthRole, instance: coordinator.Instance, ending: coordinator.Ending, endsBy: coordinator.EndsBy,
 			launch: launchOf(image, observed.LaunchDigest),
 			describe: func(ended int) (Instance, error) {
 				return coordinatorInstanceFor(pe, model, ended, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
@@ -207,6 +225,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 
 	out := &Desired{Instances: []Instance{}, Ending: []string{}, Image: h.cfg.Image, Refusal: refusal}
 	asked := 0
+	var readings []domain.RateLimitReading
 	for _, one := range all {
 		log := h.logger.With(zap.String("launcher", launcher), zap.String("platformExpID", one.platformExperimentID), zap.String("agentID", one.agentID))
 		current := one.instance
@@ -239,6 +258,15 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		// What the launcher reports counts only for the machine that is still the one wanted. A
 		// name that config has since changed is replaced and its end is nobody's fault.
 		if current.Name == instance.Name {
+			if reported := seen[current.Name]; reported.State == stateRunning && reported.RateLimit != "" {
+				reading, err := parseRateLimit(reported.RateLimit)
+				if err != nil {
+					log.Warn("hosted instance reported a rate limit that cannot be read", zap.String("instance", current.Name), zap.Error(err))
+				} else {
+					reading.PlatformExperimentID, reading.AgentID, reading.Role = one.platformExperimentID, one.agentID, one.role
+					readings = append(readings, reading)
+				}
+			}
 			after, ended, err := h.observe(ctx, one, seen, instance.Env["HL_TOKEN"])
 			if err != nil {
 				log.Error("record instance outcome failed", zap.Error(err))
@@ -271,6 +299,13 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 			}
 		}
 		out.Instances = append(out.Instances, instance)
+	}
+	// The readings are health, which an answer does not wait for: one that is not written is
+	// followed by the next pass's.
+	if len(readings) > 0 {
+		if err := h.metrics.RecordRateLimits(ctx, time.Now().UTC(), readings); err != nil {
+			h.logger.Error("record rate limits failed", zap.String("launcher", launcher), zap.Error(err))
+		}
 	}
 	// Written before the answer leaves: a launcher is removed only once a question of it listed
 	// no machine and was answered with none, and an answer it never got asked for nothing.
@@ -363,6 +398,41 @@ func said(activity, token string) string {
 	return strings.Join(strings.Fields(strings.ToValidUTF8(activity, "")), " ")
 }
 
+// parseRateLimit reads the rate limit a harness printed (agents/experimentator, progress.py
+// rate_limit_line): key=value fields, status required, other keys passed over.
+func parseRateLimit(line string) (domain.RateLimitReading, error) {
+	var reading domain.RateLimitReading
+	status := ""
+	for _, field := range strings.Fields(line) {
+		key, value, _ := strings.Cut(field, "=")
+		switch key {
+		case "status":
+			status = value
+		case "utilization":
+			u, err := strconv.ParseFloat(value, 64)
+			if err != nil || u < 0 || u > 1 {
+				return reading, fmt.Errorf("utilization %q is no number from 0 to 1", value)
+			}
+			reading.Utilization = &u
+		case "resets_at":
+			seconds, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || seconds <= 0 {
+				return reading, fmt.Errorf("resets_at %q is no Unix time", value)
+			}
+			at := time.Unix(seconds, 0).UTC()
+			reading.ResetsAt = &at
+		}
+	}
+	switch status {
+	case "allowed", "allowed_warning":
+	case "rejected":
+		reading.Rejected = true
+	default:
+		return reading, fmt.Errorf("status %q is none of allowed, allowed_warning and rejected", status)
+	}
+	return reading, nil
+}
+
 // lastBytes keeps the end of text, cut at a line where one starts inside the limit.
 func lastBytes(text string, limit int) string {
 	if len(text) <= limit {
@@ -388,6 +458,9 @@ func (o Observed) validate() error {
 		}
 		if instance.Progress != nil && instance.State != stateRunning {
 			return fmt.Errorf("progress is reported of a running instance, and %s is %s", instance.Name, instance.State)
+		}
+		if instance.RateLimit != "" && instance.State != stateRunning {
+			return fmt.Errorf("rate_limit is reported of a running instance, and %s is %s", instance.Name, instance.State)
 		}
 		if instance.Expired && instance.State != stateExited {
 			return fmt.Errorf("expired is reported of an exited instance, and %s is %s", instance.Name, instance.State)
@@ -431,7 +504,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "launcher-reconcile", Method: "POST", Path: "/{name}/reconcile",
 		Summary: "Report a launcher's instances and receive the ones it should keep", Tags: []string{"agent-launcher"},
 		MaxBodyBytes: maxRequestBytes,
-		Description: "The launcher sends what its provider lists, for an exited instance the end of its output, for a running one its progress marker and what its agent says it is doing (activity), and how it paces its passes. The answer is its complete desired state. " +
+		Description: "The launcher sends what its provider lists, for an exited instance the end of its output, for a running one its progress marker, what its agent says it is doing (activity) and the model provider's rate limit it last read (rate_limit), and how it paces its passes. The answer is its complete desired state. " +
 			"instances: each {name, image, env, ends_at} should exist and be running: one per hosted agent, and one per platform experiment whose coordinator the platform runs. " +
 			"ends_at is the latest moment its platform experiment can still have a machine, wind-down included, and the launcher rents the instance so that it ends by itself then, reachable or not. It decides nothing about an instance already rented. " +
 			"ending: names whose agent's run is over; each is told to stop and is otherwise left to finish, neither created nor replaced, and destroyed once its command has exited. " +

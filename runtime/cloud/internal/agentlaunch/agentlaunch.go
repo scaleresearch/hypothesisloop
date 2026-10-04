@@ -83,9 +83,9 @@ const stopRetry = 2 * time.Minute
 type outputRead struct {
 	at time.Time
 	// exited says that log is the end of the output of an instance that exited.
-	exited             bool
-	progress, activity string
-	log                string
+	exited                        bool
+	progress, activity, rateLimit string
+	log                           string
 }
 
 func New(cfg Config) (*Launcher, error) {
@@ -418,6 +418,20 @@ func lastActivity(lines []string) string {
 	return ""
 }
 
+// rateLimitPattern is the line an agent's harness prints with its progress to say the model
+// provider's rate limit it last read, which only the control plane gives a meaning to.
+var rateLimitPattern = regexp.MustCompile(`^hl-rate-limit (.{1,200})$`)
+
+// lastRateLimit is what follows the word on the newest rate-limit line among lines, or "".
+func lastRateLimit(lines []string) string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if found := rateLimitPattern.FindStringSubmatch(strings.TrimRight(lines[i], "\r")); found != nil {
+			return found[1]
+		}
+	}
+	return ""
+}
+
 // activityOf is what the control plane is told the agent whose output ends in lines is doing: its
 // newest sentence without this launcher's own environment, which may make it longer, cut to what
 // the control plane takes.
@@ -461,6 +475,7 @@ func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Ins
 			if seen, ok := l.progressOf(ctx, *running); ok {
 				entry.Progress = &seen.progress
 				entry.Activity = seen.activity
+				entry.RateLimit = seen.rateLimit
 			}
 		}
 		if state == provider.StateExited {
@@ -483,7 +498,7 @@ func (l *Launcher) progressOf(ctx context.Context, i provider.Instance) (outputR
 		l.cfg.Log("read the progress of running %s: %v", i.Name, err)
 		return outputRead{}, false
 	}
-	seen := outputRead{at: time.Now(), progress: lastProgress(lines), activity: l.activityOf(lines)}
+	seen := outputRead{at: time.Now(), progress: lastProgress(lines), activity: l.activityOf(lines), rateLimit: lastRateLimit(lines)}
 	l.outputs[i.ID] = seen
 	return seen, true
 }

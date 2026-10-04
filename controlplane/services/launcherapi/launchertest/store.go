@@ -244,3 +244,16 @@ func (s *Store) SetLauncherHolds(_ context.Context, launcher string, holds bool)
 	s.Holds[launcher] = holds
 	return nil
 }
+
+// Metrics is the handler's health series in memory: the rate limits written, in order.
+type Metrics struct {
+	mu         sync.Mutex
+	RateLimits []domain.RateLimitReading
+}
+
+func (m *Metrics) RecordRateLimits(_ context.Context, _ time.Time, readings []domain.RateLimitReading) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.RateLimits = append(m.RateLimits, readings...)
+	return nil
+}

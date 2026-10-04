@@ -77,7 +77,7 @@ func reconcileWith(t *testing.T, store Store, caller auth.Principal, launcher st
 	t.Helper()
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	RegisterHuma(doc, NewHandler(store, testSettings, logger))
+	RegisterHuma(doc, NewHandler(store, &launchertest.Metrics{}, testSettings, logger))
 	raw, err := json.Marshal(body)
 	if err != nil {
 		t.Fatal(err)
@@ -359,7 +359,7 @@ func TestAChangeOfConfigOrOfTheLaunchersInputsRenamesRunningInstancesAndLeavesEn
 	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(mainLauncher), auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	moved := testSettings
 	moved.Image, moved.APIURL = "registry.example.invalid/agent:2", "https://moved.example.invalid"
-	RegisterHuma(doc, NewHandler(store, moved, zap.NewNop()))
+	RegisterHuma(doc, NewHandler(store, &launchertest.Metrics{}, moved, zap.NewNop()))
 	raw, _ := json.Marshal(rotated)
 	req := httptest.NewRequest(http.MethodPost, "/main/reconcile", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
@@ -446,7 +446,7 @@ func TestARequestWithNoTokenIsRefused(t *testing.T) {
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(mainLauncher), auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	store := &launcherStore{}
-	RegisterHuma(doc, NewHandler(store, testSettings, zap.NewNop()))
+	RegisterHuma(doc, NewHandler(store, &launchertest.Metrics{}, testSettings, zap.NewNop()))
 	rec := httptest.NewRecorder()
 	raw, _ := json.Marshal(observed())
 	req := httptest.NewRequest(http.MethodPost, "/main/reconcile", bytes.NewReader(raw))
@@ -639,9 +639,14 @@ func TestAnAgentWhoseIDIsTheCoordinatorsNameGetsAnotherInstanceName(t *testing.T
 
 func reconcileUnder(t *testing.T, store Store, cfg Settings, body Observed) (int, []byte) {
 	t.Helper()
+	return reconcileRecording(t, store, &launchertest.Metrics{}, cfg, body)
+}
+
+func reconcileRecording(t *testing.T, store Store, metrics Metrics, cfg Settings, body Observed) (int, []byte) {
+	t.Helper()
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(mainLauncher), auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	RegisterHuma(doc, NewHandler(store, cfg, zap.NewNop()))
+	RegisterHuma(doc, NewHandler(store, metrics, cfg, zap.NewNop()))
 	raw, err := json.Marshal(body)
 	if err != nil {
 		t.Fatal(err)
@@ -651,6 +656,41 @@ func reconcileUnder(t *testing.T, store Store, cfg Settings, body Observed) (int
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, authtest.Authorize(req))
 	return rec.Code, rec.Body.Bytes()
+}
+
+// The rate limit a hosted agent's harness last read lived only in its machine's log. The launcher
+// reports it with the progress, and it goes to the run's health series under the agent's role,
+// the coordinator's under its own; a line that cannot be read is passed over.
+func TestARunningMachinesRateLimitGoesToTheRunsHealth(t *testing.T) {
+	store := oneAgentAndACoordinator()
+	store.ByLauncher["main"][0].Role = domain.SignupRoleCompetitor
+	first := mustReconcile(t, store, observed())
+	agent, coordinator := first.Instances[0].Name, first.Instances[1].Name
+	metrics := &launchertest.Metrics{}
+	body := observed(
+		ObservedInstance{Name: agent, State: "running", Progress: marker("1"), RateLimit: "status=rejected type=seven_day utilization=1.0 resets_at=1760000000"},
+		ObservedInstance{Name: coordinator, State: "running", Progress: marker("1"), RateLimit: "status=allowed_warning utilization=0.95"})
+	if code, raw := reconcileRecording(t, store, metrics, testSettings, body); code != http.StatusOK {
+		t.Fatalf("status = %d: %s", code, raw)
+	}
+	full, warned, resets := 1.0, 0.95, time.Unix(1760000000, 0).UTC()
+	want := []domain.RateLimitReading{
+		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "competitor", Rejected: true, Utilization: &full, ResetsAt: &resets},
+		{PlatformExperimentID: "pe-1", Role: domain.CoordinatorHealthRole, Utilization: &warned},
+	}
+	if !reflect.DeepEqual(metrics.RateLimits, want) {
+		t.Fatalf("written %+v, want %+v", metrics.RateLimits, want)
+	}
+
+	metrics = &launchertest.Metrics{}
+	body.Instances[0].RateLimit, body.Instances[1].RateLimit = "status=exhausted", "status=rejected utilization=7"
+	if code, raw := reconcileRecording(t, store, metrics, testSettings, body); code != http.StatusOK || len(metrics.RateLimits) != 0 {
+		t.Fatalf("lines that cannot be read: status = %d, written %+v: %s", code, metrics.RateLimits, raw)
+	}
+	body = observed(ObservedInstance{Name: agent, State: "starting", RateLimit: "status=allowed"})
+	if code, raw := reconcileUnder(t, store, testSettings, body); code != http.StatusBadRequest || !strings.Contains(string(raw), "rate_limit is reported of a running instance") {
+		t.Fatalf("a rate limit of a machine that is starting: status = %d: %s", code, raw)
+	}
 }
 
 func oneAgentAndACoordinator() *launcherStore {

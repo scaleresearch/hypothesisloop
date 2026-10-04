@@ -19,6 +19,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/launcherapi"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/launcherapi/launchertest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
@@ -278,7 +279,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 
 	launchers := chi.NewRouter()
 	api.docs["/internal/launchers"] = apidocs.New(launchers, "launcher", "1.0.0", "", authenticator, access, logger)
-	launcherapi.RegisterHuma(api.docs["/internal/launchers"], launcherapi.NewHandler(noLauncherAgents{}, launcherapi.Settings{Image: "image", APIURL: "http://api", SigningSecret: worldSecret, BootLimit: time.Minute, ProgressLimit: time.Hour, MaxNewPerAnswer: 1}, logger))
+	launcherapi.RegisterHuma(api.docs["/internal/launchers"], launcherapi.NewHandler(noLauncherAgents{}, &launchertest.Metrics{}, launcherapi.Settings{Image: "image", APIURL: "http://api", SigningSecret: worldSecret, BootLimit: time.Minute, ProgressLimit: time.Hour, MaxNewPerAnswer: 1}, logger))
 	api.router.Mount("/internal/launchers", launchers)
 
 	doc := apidocs.New(api.router, "hypothesisloop API", "1.0.0", "", authenticator, access, logger)

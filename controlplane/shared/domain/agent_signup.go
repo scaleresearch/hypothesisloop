@@ -68,6 +68,20 @@ type AgentHealth struct {
 	JobsInFlight          int      `json:"jobs_in_flight" doc:"Its jobs queued, submitted or running."`
 	Restarts              int      `json:"restarts" doc:"Every machine of its that exited and was asked for again, over the run, whatever image it ran."`
 	CoordinatorMessages   int      `json:"coordinator_messages" doc:"Messages the coordinator sent it."`
+	// The two below are of a hosted agent or coordinator, from the rate limit its harness last
+	// read from the model provider (RateLimitReading).
+	RateLimitUtilization *float64   `json:"rate_limit_utilization,omitempty" doc:"The share of its model account's rate limit used, 0 to 1, at the last reading of its machine. Absent before a reading that says it."`
+	RateLimitedUntil     *time.Time `json:"rate_limited_until,omitempty" doc:"Present while the model provider refuses its model calls: when the provider said its limit resets. It waits until then and resumes, spending no restart."`
+}
+
+// RateLimitReading is the model provider's rate limit as the harness of a hosted agent, or of a
+// hosted coordinator (Role CoordinatorHealthRole, no AgentID), last read it from its model CLI.
+type RateLimitReading struct {
+	PlatformExperimentID, AgentID, Role string
+	// Rejected: the provider refuses the account's calls until ResetsAt.
+	Rejected    bool
+	Utilization *float64
+	ResetsAt    *time.Time
 }
 
 // CoordinatorHealthRole is the role the run's health series give its hosted coordinator.

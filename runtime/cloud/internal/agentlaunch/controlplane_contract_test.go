@@ -82,7 +82,7 @@ func newContractUnder(t *testing.T, settings launcherapi.Settings, agents ...db.
 	}
 	launchers := chi.NewRouter()
 	doc := apidocs.New(launchers, "launcher", "1.0.0", "", authenticator, auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	launcherapi.RegisterHuma(doc, launcherapi.NewHandler(c.store, settings, zap.NewNop()))
+	launcherapi.RegisterHuma(doc, launcherapi.NewHandler(c.store, &launchertest.Metrics{}, settings, zap.NewNop()))
 	root := chi.NewRouter()
 	root.Mount("/internal/launchers", launchers)
 	server := httptest.NewServer(root)

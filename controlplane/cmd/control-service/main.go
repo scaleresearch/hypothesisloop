@@ -267,7 +267,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	// registration and docs, like the cluster-agents above.
 	launcherRouter := chi.NewRouter()
 	launcherDoc := apidocs.New(launcherRouter, "hypothesisloop agent-launcher API", "1.0.0", "", gate.authenticator, gate.access, logger)
-	launcherapi.RegisterHuma(launcherDoc, launcherapi.NewHandler(store, launcherapi.Settings{
+	launcherapi.RegisterHuma(launcherDoc, launcherapi.NewHandler(store, launcherapi.MetricsDB{URL: metricsDBURL}, launcherapi.Settings{
 		Image: pcfg.Agents.Image, APIURL: pcfg.Services.PublicAPIURL, SigningSecret: pcfg.Auth.SigningSecret,
 		BootLimit:       time.Duration(pcfg.Agents.BootLimitSeconds) * time.Second,
 		ProgressLimit:   time.Duration(pcfg.Agents.ProgressLimitSeconds) * time.Second,

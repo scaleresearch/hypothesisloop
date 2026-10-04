@@ -1060,8 +1060,11 @@ func cmdPlatformExperimentsHealth(c *apiclient.Client, args []string, stdout, st
 Where each agent of the platform experiment, and its hosted coordinator, last stood, one line
 each as compact JSON, as the metrics store recorded it while the run was open or running:
 first_job_seconds and first_completed_job_seconds from when it could first submit (absent
-before there is one), jobs_in_flight, restarts of its machine over the whole run and
-coordinator_messages sent to it. The coordinator's line has role coordinator and no agent_id.`, stderr)
+before there is one), jobs_in_flight, restarts of its machine over the whole run,
+coordinator_messages sent to it, and for a hosted agent rate_limit_utilization, the share of
+its model account's rate limit used, and while the model provider refuses its calls
+rate_limited_until, when the limit resets: it waits until then and resumes. The coordinator's
+line has role coordinator and no agent_id.`, stderr)
 	pe := experimentFlag(fs)
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)

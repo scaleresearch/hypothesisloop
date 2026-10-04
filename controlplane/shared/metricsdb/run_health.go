@@ -19,17 +19,27 @@ const (
 	agentJobsInFlightMetric             = "agent_jobs_in_flight"
 	agentRestartsMetric                 = "agent_restarts"
 	agentCoordinatorMessagesMetric      = "agent_coordinator_messages"
+	// The rate-limit series are written from the launchers' reports (RecordRateLimits) and carry
+	// the same labels.
+	agentRateLimitUtilizationMetric = "agent_rate_limit_utilization"
+	agentRateLimitRejectedMetric    = "agent_rate_limit_rejected"
+	agentRateLimitResetsAtMetric    = "agent_rate_limit_resets_at_seconds"
 )
+
+func healthLabels(platformExperimentID, agentID, role string) map[string]string {
+	labels := map[string]string{"platform_experiment_id": platformExperimentID, "role": role}
+	if agentID != "" {
+		labels["agent_id"] = agentID
+	}
+	return labels
+}
 
 // RecordRunHealth writes where each agent stands at at, in one request. A first-job series
 // starts once there is a first job.
 func RecordRunHealth(ctx context.Context, dbURL string, at time.Time, agents []domain.AgentHealth) error {
 	var samples []GaugeSample
 	for _, a := range agents {
-		labels := map[string]string{"platform_experiment_id": a.PlatformExperimentID, "role": a.Role}
-		if a.AgentID != "" {
-			labels["agent_id"] = a.AgentID
-		}
+		labels := healthLabels(a.PlatformExperimentID, a.AgentID, a.Role)
 		gauge := func(name string, value float64) {
 			samples = append(samples, GaugeSample{MetricName: name, Labels: labels, Value: value, At: at})
 		}
@@ -49,6 +59,34 @@ func RecordRunHealth(ctx context.Context, dbURL string, at time.Time, agents []d
 	return nil
 }
 
+// RecordRateLimits writes the rate limit each hosted agent's harness last read, at at, in one
+// request: whether the provider refuses its calls, and the utilization and reset time a reading
+// holds.
+func RecordRateLimits(ctx context.Context, dbURL string, at time.Time, readings []domain.RateLimitReading) error {
+	var samples []GaugeSample
+	for _, r := range readings {
+		labels := healthLabels(r.PlatformExperimentID, r.AgentID, r.Role)
+		gauge := func(name string, value float64) {
+			samples = append(samples, GaugeSample{MetricName: name, Labels: labels, Value: value, At: at})
+		}
+		rejected := 0.0
+		if r.Rejected {
+			rejected = 1
+		}
+		gauge(agentRateLimitRejectedMetric, rejected)
+		if r.Utilization != nil {
+			gauge(agentRateLimitUtilizationMetric, *r.Utilization)
+		}
+		if r.ResetsAt != nil {
+			gauge(agentRateLimitResetsAtMetric, float64(r.ResetsAt.Unix()))
+		}
+	}
+	if err := WriteGaugesAt(ctx, dbURL, samples); err != nil {
+		return fmt.Errorf("metricsdb.RecordRateLimits: %w", err)
+	}
+	return nil
+}
+
 // LatestRunHealth reads where each agent of platformExperimentID, and its hosted coordinator,
 // last stood: the latest value of each of its health series since the run's row came into being
 // at createdAt. A first-job value is nil until there is a first job. Sorted by role, then agent.
@@ -56,7 +94,9 @@ func LatestRunHealth(ctx context.Context, dbURL, platformExperimentID string, cr
 	window := promSeconds(time.Since(ObservationWindowStart(createdAt)))
 	type series struct{ role, agentID string }
 	agents := map[series]*domain.AgentHealth{}
-	for _, metric := range []string{agentFirstJobSecondsMetric, agentFirstCompletedJobSecondsMetric, agentJobsInFlightMetric, agentRestartsMetric, agentCoordinatorMessagesMetric} {
+	rejected, resetsAt := map[series]bool{}, map[series]time.Time{}
+	for _, metric := range []string{agentFirstJobSecondsMetric, agentFirstCompletedJobSecondsMetric, agentJobsInFlightMetric, agentRestartsMetric, agentCoordinatorMessagesMetric,
+		agentRateLimitUtilizationMetric, agentRateLimitRejectedMetric, agentRateLimitResetsAtMetric} {
 		samples, err := QueryVector(ctx, dbURL, fmt.Sprintf(`last_over_time(%s{platform_experiment_id=%q}[%s])`, metric, platformExperimentID, window))
 		if err != nil {
 			return nil, fmt.Errorf("metricsdb.LatestRunHealth: %s: %w", metric, err)
@@ -79,7 +119,19 @@ func LatestRunHealth(ctx context.Context, dbURL, platformExperimentID string, cr
 				a.Restarts = int(value)
 			case agentCoordinatorMessagesMetric:
 				a.CoordinatorMessages = int(value)
+			case agentRateLimitUtilizationMetric:
+				a.RateLimitUtilization = &value
+			case agentRateLimitRejectedMetric:
+				rejected[key] = value == 1
+			case agentRateLimitResetsAtMetric:
+				resetsAt[key] = time.Unix(int64(value), 0).UTC()
 			}
+		}
+	}
+	// A refusal whose reset has passed is over, whether or not a reading has said so since.
+	for key, a := range agents {
+		if until, ok := resetsAt[key]; rejected[key] && ok && until.After(time.Now()) {
+			a.RateLimitedUntil = &until
 		}
 	}
 	out := make([]domain.AgentHealth, 0, len(agents))
