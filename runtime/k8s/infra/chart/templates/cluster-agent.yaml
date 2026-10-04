@@ -105,8 +105,14 @@ spec:
   # deployments, and the only count with the builder, whose cache one daemon owns.
   replicas: 1
   {{- if .Values.builder.enabled }}
+  # The old pod goes before the new one starts. Recreate would do the same, and an upgrade to it
+  # from an install without the builder is refused: server-side apply keeps the rollingUpdate
+  # the API server defaulted, which Recreate forbids.
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   {{- end }}
   selector:
     matchLabels:

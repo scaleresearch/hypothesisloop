@@ -2,6 +2,7 @@ package infra
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -148,8 +149,10 @@ func TestTheBuilderIsARootlessSidecarOfTheAgentOnlyWhenEnabled(t *testing.T) {
 	if builds := envValue(spec["containers"].([]any)[0], "HYPOTHESISLOOP_BUILDS"); builds != "unix:///run/buildkit/buildkitd.sock" {
 		t.Errorf("HYPOTHESISLOOP_BUILDS = %v, want the sidecar's socket", builds)
 	}
-	if deployments[0]["spec"].(map[string]any)["strategy"].(map[string]any)["type"] != "Recreate" {
-		t.Error("two daemons would share the cache during a rollout")
+	strategy := deployments[0]["spec"].(map[string]any)["strategy"].(map[string]any)
+	rolling, _ := strategy["rollingUpdate"].(map[string]any)
+	if strategy["type"] != "RollingUpdate" || fmt.Sprint(rolling["maxSurge"]) != "0" || fmt.Sprint(rolling["maxUnavailable"]) != "1" {
+		t.Errorf("strategy = %v, two daemons would share the cache during a rollout", strategy)
 	}
 }
 
