@@ -52,7 +52,7 @@ def _proposal(accelerator_type: str, image: str, **more) -> dict:
             "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "report_interval_seconds": 10,
         },
         "accelerator_type": accelerator_type, "image": image,
-        "budget_accelerator_hours": 2, "duration_hours": 3, "baseline_minutes": 30, "agents": [{"flavor": "hyperparameter-search"}, {}],
+        "budget_accelerator_hours": 2, "duration_hours": 3, "baseline_minutes": 45, "agents": [{"flavor": "hyperparameter-search"}, {}],
         "metric_reason": "Validation accuracy is what the goal asks about.",
         "measurement": "The sample workload scores a split it does not train on.",
         "sizing_reason": "An estimate, nothing has run: a trial is assumed to take a minute, and two researchers with a few trials each fit in 2 hours of budget.",
@@ -90,7 +90,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         cluster, line = next((c, a) for c in api.capacity()["clusters"] for a in c["accelerators"] if a["kind"] != "cpu" and a["available"] > 0)
         on, image = line["accelerator_type"], cluster.get("job_image") or line["job_images"][0]
         assert api.put(f"/platform-experiments/{pe_id}/proposal", _proposal(on, image)).status_code == 403
-        early = api.post(f"/platform-experiments/{pe_id}/accept", {"budget_accelerator_hours": 1, "duration_hours": 1, "baseline_minutes": 30, "agents": [{}]})
+        early = api.post(f"/platform-experiments/{pe_id}/accept", {"budget_accelerator_hours": 1, "duration_hours": 1, "baseline_minutes": 45, "agents": [{}]})
         assert (early.status_code, early.json()["reason"]) == (409, "invalid_transition"), early.text
 
         # A planner runs nothing: a draft takes no job, and a proposal names none. It states the
@@ -157,7 +157,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         # Accepted at the cost the person states, whatever was proposed, and under the name the
         # person gives it.
         accepted = api.post(f"/platform-experiments/{pe_id}/accept", {
-            "budget_accelerator_hours": 1, "duration_hours": 2, "baseline_minutes": 30, "agents": [{"flavor": "data-search"}, {}], "name": "Hidden layer width, accepted"})
+            "budget_accelerator_hours": 1, "duration_hours": 2, "baseline_minutes": 45, "agents": [{"flavor": "data-search"}, {}], "name": "Hidden layer width, accepted"})
         assert accepted.status_code == 200, accepted.text
         pe = accepted.json()
         assert (pe["status"], pe["name"], pe["budget_accelerator_hours"], pe["max_agents"]) == ("open", "Hidden layer width, accepted", 1, 2), pe
@@ -170,7 +170,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         assert sorted(a["flavor"] for a in researchers) == ["data-search", "generalist"], researchers
         measurers = [a for a in joined if a["role"] == "baseline"]
         assert [a["name"] for a in measurers] == ["Baseline 1"] and len(joined) == 3, joined
-        again = api.post(f"/platform-experiments/{pe_id}/accept", {"budget_accelerator_hours": 1, "duration_hours": 2, "baseline_minutes": 30, "agents": [{}]})
+        again = api.post(f"/platform-experiments/{pe_id}/accept", {"budget_accelerator_hours": 1, "duration_hours": 2, "baseline_minutes": 45, "agents": [{}]})
         assert (again.status_code, again.json()["reason"]) == (409, "invalid_transition"), again.text
 
         # Accepted, nothing has run and nothing starts: the baseline agent's machine is asked for
@@ -235,7 +235,7 @@ def test_a_goal_the_planner_declines_shows_why_and_can_be_answered(api: API):
         assert _at(draft["planner_ends_at"]) > _at(draft["declined_at"]), draft
         kept, _ = _planner_instance(api, pe_id)
         assert kept is not None and kept["name"] == instance["name"], "the machine of a planner that declined was released at once"
-        accept = api.post(f"/platform-experiments/{pe_id}/accept", {"budget_accelerator_hours": 1, "duration_hours": 1, "baseline_minutes": 30, "agents": [{}]})
+        accept = api.post(f"/platform-experiments/{pe_id}/accept", {"budget_accelerator_hours": 1, "duration_hours": 1, "baseline_minutes": 45, "agents": [{}]})
         assert (accept.status_code, accept.json()["reason"]) == (409, "invalid_transition") and "declined" in accept.json()["message"], accept.text
 
         # The person says what was missing: the planner is back, and the reason is still readable.

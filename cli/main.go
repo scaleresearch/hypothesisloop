@@ -848,8 +848,9 @@ a leading quote.
   storage: 100Gi                       # hl repo init writes them into job.yaml, so no brief repeats them
   budget_accelerator_hours: 6          # proposed; the person states the real ones at accept
   duration_hours: 4                    # the run, from its start: a time the goal states is this
-  baseline_minutes: 30                 # what measuring the baseline needs from the accept, at
-                                       # most planning.baseline_limit_minutes
+  baseline_minutes: 60                 # what measuring the baseline needs from the accept, from
+                                       # planning.min_baseline_minutes (45) to
+                                       # planning.baseline_limit_minutes
   agents:                              # one entry per researcher
     - flavor: hyperparameter-search    # optional: generalist (the default), architecture-search,
       hyperparameters:                 #   data-search or hyperparameter-search. The direction you
