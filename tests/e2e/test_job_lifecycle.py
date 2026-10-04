@@ -153,7 +153,8 @@ def test_closing_experiment_evicts_running_job_and_blocks_submission(api, experi
 
     api.close_platform_experiment(pe_id)
 
-    code, _ = api.submit_job_expect(pe_id, agent, hours=0.02)
+    # A closed platform experiment takes no new hypothesis either, so the job names the live one's.
+    code, _ = api.submit_job_expect(pe_id, agent, hours=0.02, hyp_id=running["hypothesis_id"])
     assert code >= 400, f"submission against a closed platform experiment was accepted (HTTP {code})"
 
     # reconcile_interval_seconds (30s default) is a self-healing sweep, not synchronous with the
