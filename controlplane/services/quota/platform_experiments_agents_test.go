@@ -53,6 +53,15 @@ type rosterStore struct {
 	quota *domain.AgentQuota
 }
 
+// MessageAllowance answers every agent the whole hour's messages.
+func (s *rosterStore) MessageAllowance(context.Context, string) (map[string]domain.MessageAllowance, error) {
+	out := map[string]domain.MessageAllowance{}
+	for _, signup := range s.signups {
+		out[signup.AgentID] = domain.MessageAllowance{LeftThisHour: domain.MaxAgentMessagesPerHour}
+	}
+	return out, nil
+}
+
 func (s *rosterStore) AgentJobsByAgent(context.Context, string) (map[string]db.AgentJobs, error) {
 	jobs := map[string]db.AgentJobs{}
 	for agentID, submitted := range s.submitted {

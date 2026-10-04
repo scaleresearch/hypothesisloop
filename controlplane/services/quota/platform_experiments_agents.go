@@ -54,6 +54,13 @@ type JoinedAgent struct {
 	// not started, or its machine is asked for and not running.
 	StatusReason *domain.StatusReason `json:"status_reason,omitempty" doc:"Why the agent is not at work yet. On an agent that waits for its open platform experiment to start, every one but those of role baseline: reason is the platform experiment's own (baseline_measuring, baseline_required and the others of its status_reason), and message says the agent takes no turn and, when the platform runs it, has no machine asked for until the start. Its instance reads waiting until then. On a hosted agent whose machine is asked for and not running yet, its instance reading requested or starting: instance_starting, and message says how long ago the machine was asked for. That is a start in progress and no failure. Such an agent whose launcher has not asked for its machines for a minute: launcher_unreachable, and message names the launcher and how long ago it last asked. On an agent that waited for the start of a platform experiment that closed before its run started, and had no machine asked for it: never_launched, with no waits_for, and message gives the close_reason and why it closed. Its instance reads stopped with no end_reason."`
 	Token        string               `json:"token,omitempty"`
+	// The fields below say what an agent of an open or running platform experiment has going,
+	// absent once its run ended (withWork).
+	Subagents                 *int                     `json:"subagents,omitempty" doc:"How many subagents its harness last reported running, of the machine it holds now. Absent with no such report, as for an agent the platform does not run."`
+	Turn                      *domain.AgentTurn        `json:"turn,omitempty" doc:"Whether its harness last reported its model in a turn or waiting for platform updates, and since when, of the machine it holds now."`
+	Messages                  *domain.MessageAllowance `json:"messages,omitempty" doc:"How many more messages it may be sent this hour, and when that next grows."`
+	ModelAllowance            *domain.ModelAllowance   `json:"model_allowance,omitempty" doc:"Its model account's rate limit as its harness last read it, of the machine it holds now."`
+	MinutesWithoutJobInFlight *int                     `json:"minutes_without_job_in_flight,omitempty" doc:"Whole minutes since it last had a job of its own created or running, 0 while one is in flight. In a running platform experiment that started."`
 }
 
 // roster is signups as the API answers them. In an open platform experiment a researcher's
@@ -89,6 +96,11 @@ func (s *PlatformExperimentsService) roster(ctx context.Context, platformExpID s
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.roster: %w", err)
+	}
+	if pe != nil && (pe.Status == domain.PlatformExpOpen || pe.Status == domain.PlatformExpRunning) {
+		if err := s.withWork(ctx, pe, out, now); err != nil {
+			return nil, fmt.Errorf("platform_experiments.roster: %w", err)
+		}
 	}
 	if pe != nil && pe.Status == domain.PlatformExpClosed && pe.StartedAt.IsZero() {
 		why, err := s.closedReason(ctx, pe)
@@ -796,7 +808,9 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler, graph H
 			"A hosted agent carries instance: the name its machine was last asked for under, how many times it exited and was started again, " +
 			"and once it exited with no restart left, stopped=true with exited_at and exit_log, the end of what its command wrote. " +
 			"A hosted agent whose machine is up carries activity {text, at}: what the agent is doing now, in a short sentence its harness writes from the tool call in flight (\"thinking\", \"running hl job submit\", \"waiting for platform updates\"), and when the platform first read that sentence. Only the latest is kept, it is read from the machine about every 15 seconds, and it is absent while no machine is up. The coordinator's is coordinator.activity on GET /platform-experiments/{id}, and a draft's planner's is activity there. " +
-			"Every agent carries in_flight {jobs}: how many of its jobs are queued or running now. 0 is an agent with nothing of its own on the platform, whatever its activity says. " +
+			"Every agent carries in_flight {jobs, queued, running}: how many of its jobs are queued or running now. 0 is an agent with nothing of its own on the platform, whatever its activity says. " +
+			"While the platform experiment is open or running, an agent whose run goes on carries messages {left_this_hour, next_at}, how many more messages it may be sent, and in a running one minutes_without_job_in_flight. " +
+			"A hosted one whose machine reports carries what its harness last said of that machine: subagents, the subagents running, turn {state working or waiting, since}, and model_allowance {utilization, refused_until}. GET /platform-experiments/{id}/situation reads the same in one answer with the run's clock, objective, capacity and budget. " +
 			"While the platform experiment is open, every agent but those of role baseline waits for the start and carries status_reason: the reason the platform experiment is not running yet, and that no machine is asked for the agent before it is. Its instance reads waiting until then. One that closed before its run started leaves each of them status_reason never_launched, whose message gives the close_reason and why it closed.A hosted agent whose machine is asked for and not running yet, its instance reading requested or starting, carries status_reason instance_starting with how long ago the machine was asked for: a start in progress, and a failed one reads stopped with end_reason.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`

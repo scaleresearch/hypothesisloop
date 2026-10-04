@@ -75,6 +75,7 @@ func (h *PlatformExperimentsHandler) WithLiveCapacity(metricsDBURL string, fresh
 	h.capacityFreshness = freshness
 	h.clusters = clusters
 	h.svc.reachable = h.reachableTypes
+	h.svc.placement = h.placementOf
 	return h
 }
 

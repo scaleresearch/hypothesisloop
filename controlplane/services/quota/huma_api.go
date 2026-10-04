@@ -524,6 +524,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		return &struct{ Body *PlatformExperimentResults }{Body: results}, nil
 	})
 
+	registerSituationHuma(doc, peh)
+
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment-health", Method: "GET", Path: "/platform-experiments/{id}/health",
 		Summary: "Where each agent of a run last stood", Tags: []string{"platform-experiments"},

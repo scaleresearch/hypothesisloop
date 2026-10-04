@@ -71,7 +71,8 @@ const (
 	EventAgentFinished = "agent.finished"
 	// EventAgentIdle says no job of a researcher of a running platform experiment ran on
 	// the platform for a while, and it has none queued or running: its machines are idle. It is the agent's own, so it
-	// reaches that agent and whoever steers the run, and no rival.
+	// reaches that agent and whoever steers the run, and no rival. Its value is IdleNew on the
+	// first notice of a stretch and IdleContinues on each after it.
 	EventAgentIdle = "agent.idle"
 	// EventAgentMessage is a direct message from the coordinator or the owner to one agent, with
 	// its text: the one kind that carries what was said, since it is said to its reader alone.
@@ -144,8 +145,10 @@ var EventKinds = []EventKindDoc{
 		Description: "This agent was cut at a stage boundary. Its own stop condition, without a GET to find out whether the cut was its."},
 	{Kind: EventAgentFinished, Subject: "agent id", Value: "empty by design",
 		Description: "This agent said it has nothing left to do, and its machine stops. detail is the reason it gave, and for a researcher the blocker it named and the time and quota it left. When every agent is finished or cut the run has nobody left to wait for."},
-	{Kind: EventAgentIdle, Subject: "agent id", Value: "empty by design",
-		Description: "No job of this researcher of a running platform experiment ran on the platform for the platform's agents.idle_notice_minutes, and it has none queued or running: nothing of its own is in flight. detail says for how long. Sent once for each such stretch: a job it starts ends the stretch. Nothing is done to the agent."},
+	{Kind: EventAgentIdle, Subject: "agent id", Value: "new or continues",
+		Description: "No job of this researcher of a running platform experiment ran on the platform for the platform's agents.idle_notice_minutes, and it has none queued or running: nothing of its own is in flight. " +
+			"Sent again every agents.idle_notice_minutes while the stretch lasts: new on the first notice of a stretch, continues on each after it, and a job it starts ends the stretch. " +
+			"detail says, as the platform knows them at the notice: for how long, the subagents and turn its harness last reported, how many jobs shaped like the run's baseline job the free capacity places now, the minutes left in the run and what is left of its share. Nothing is done to the agent."},
 	{Kind: EventAgentMessage, Subject: "agent id, the one it was sent to", Value: "coordinator or owner: who it is from",
 		Description: "A direct message to this agent from its platform experiment's coordinator or owner (POST /platform-experiments/{id}/messages). detail is the text, direction to act on. GET /platform-experiments/{id}/messages reads every one sent."},
 	{Kind: EventHypothesisNew, Subject: "hypothesis id", Value: "empty by design",
@@ -827,16 +830,23 @@ WHERE platform_experiment_id = $1 AND finished_xid >= $2`, peID, since)
 	return events, nil
 }
 
+// IdleNew and IdleContinues are the values of agent.idle: the first notice of a stretch, and
+// each after it.
+const (
+	IdleNew       = "new"
+	IdleContinues = "continues"
+)
+
 // replayAgentsIdle derives agent.idle from the signup, which records the last one told.
 func replayAgentsIdle(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]Event, error) {
-	rows, err := tx.Query(ctx, `SELECT agent_id, idle_detail, idle_xid FROM experiment_signups
-WHERE platform_experiment_id = $1 AND idle_xid >= $2`, peID, since)
+	rows, err := tx.Query(ctx, `SELECT agent_id, CASE WHEN idle_repeat = 0 THEN $3 ELSE $4 END, idle_detail, idle_xid FROM experiment_signups
+WHERE platform_experiment_id = $1 AND idle_xid >= $2`, peID, since, IdleNew, IdleContinues)
 	if err != nil {
 		return nil, fmt.Errorf("events_store.replayAgentsIdle: %w", err)
 	}
 	events, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Event, error) {
 		event := Event{Kind: EventAgentIdle, PlatformExperimentID: peID}
-		err := row.Scan(&event.AgentID, &event.Detail, &event.Position)
+		err := row.Scan(&event.AgentID, &event.Value, &event.Detail, &event.Position)
 		event.Subject = event.AgentID
 		return event, err
 	})

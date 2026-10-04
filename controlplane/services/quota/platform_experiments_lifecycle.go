@@ -1174,6 +1174,15 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, by *d
 			}
 		}
 	}
+	if pe.Status != domain.PlatformExpDraft {
+		lines, err := s.closeAgents(ctx, pe, time.Now())
+		if err != nil {
+			return nil, fmt.Errorf("close: %w", err)
+		}
+		if err := s.store.SetCloseAgents(ctx, id, lines); err != nil {
+			return nil, fmt.Errorf("close: %w", err)
+		}
+	}
 	if err := s.store.ClosePlatformExperiment(ctx, id, by, message); err != nil {
 		return nil, fmt.Errorf("close: %w", err)
 	}
@@ -1237,6 +1246,13 @@ func (s *PlatformExperimentsService) recordClose(ctx context.Context, pe *domain
 	if err != nil {
 		return fmt.Errorf("recordClose: %w", err)
 	}
+	agents, err := s.store.CloseAgents(ctx, pe.ID)
+	if err != nil {
+		return fmt.Errorf("recordClose: %w", err)
+	}
+	if agents == "" {
+		return fmt.Errorf("recordClose: %s has no agent lines taken at its close", pe.ID)
+	}
 	if err := s.Spend(ctx, pe); err != nil {
 		return err
 	}
@@ -1248,21 +1264,7 @@ func (s *PlatformExperimentsService) recordClose(ctx context.Context, pe *domain
 	fmt.Fprintf(&record, "%s it closed at %s.\n\n", closeRecordHeading, pe.ClosedAt.UTC().Format(time.RFC3339))
 	fmt.Fprintf(&record, "Close reason: %s: %s.\n", why.Reason, why.Message)
 	fmt.Fprintf(&record, "Jobs submitted: %d.\n", submitted)
-	fmt.Fprintf(&record, "Spent: %g of the budget of %g accelerator hours.\n\nAgents:\n", *pe.ConsumedAcceleratorHours, pe.BudgetAcceleratorHours)
-	if pe.Coordinator != nil {
-		ended := runEnded(&pe.Coordinator.Instance, nil, "")
-		if pe.Coordinator.Instance.AskedAt == nil {
-			ended += ": the platform launches a coordinator once the run starts or the experiment waits for it, and this one closed before either, so this record is its summary"
-		}
-		fmt.Fprintf(&record, "- coordinator: %s; %s.\n", lastActivity(pe.Coordinator.Activity), ended)
-	}
-	for _, signup := range signups {
-		if signup.Role == domain.SignupRolePlanner {
-			continue
-		}
-		fmt.Fprintf(&record, "- %s (%s): %d jobs submitted; %s; %s.\n", signup.Name, signup.Role, jobs[signup.AgentID].Submitted,
-			lastActivity(signup.Activity), runEnded(signup.Instance, signup.FinishedAt, signup.FinishedReason))
-	}
+	fmt.Fprintf(&record, "Spent: %g of the budget of %g accelerator hours.\n\n%s", *pe.ConsumedAcceleratorHours, pe.BudgetAcceleratorHours, agents)
 	if len(pe.BaselineRaises) > 0 {
 		fmt.Fprintf(&record, "\nBaseline raised while it ran:\n")
 		for _, raise := range pe.BaselineRaises {
@@ -1353,6 +1355,37 @@ func (s *PlatformExperimentsService) baselineLeft(ctx context.Context, pe *domai
 	return nil
 }
 
+// closeAgents is the agent lines of the record of the close of pe, as its agents stand at
+// closedAt, the moment just before the close is written: once the record is written, after every
+// job settled, their machines are released and what their agents last said is gone.
+func (s *PlatformExperimentsService) closeAgents(ctx context.Context, pe *domain.PlatformExperiment, closedAt time.Time) (string, error) {
+	jobs, err := s.store.AgentJobsByAgent(ctx, pe.ID)
+	if err != nil {
+		return "", err
+	}
+	signups, err := s.store.ListAgentSignups(ctx, pe.ID)
+	if err != nil {
+		return "", err
+	}
+	var lines strings.Builder
+	lines.WriteString("Agents:\n")
+	if pe.Coordinator != nil {
+		ended := runEnded(&pe.Coordinator.Instance, nil, "", closedAt)
+		if pe.Coordinator.Instance.AskedAt == nil {
+			ended += ": the platform launches a coordinator once the run starts or the experiment waits for it, and this one closed before either, so this record is its summary"
+		}
+		fmt.Fprintf(&lines, "- coordinator: %s; %s.\n", lastActivity(pe.Coordinator.Activity), ended)
+	}
+	for _, signup := range signups {
+		if signup.Role == domain.SignupRolePlanner {
+			continue
+		}
+		fmt.Fprintf(&lines, "- %s (%s): %d jobs submitted; %s; %s.\n", signup.Name, signup.Role, jobs[signup.AgentID].Submitted,
+			lastActivity(signup.Activity), runEnded(signup.Instance, signup.FinishedAt, signup.FinishedReason, closedAt))
+	}
+	return lines.String(), nil
+}
+
 // lastActivity is what an agent last said it was doing, as a close record states it.
 func lastActivity(activity *domain.AgentActivity) string {
 	if activity == nil {
@@ -1361,16 +1394,29 @@ func lastActivity(activity *domain.AgentActivity) string {
 	return fmt.Sprintf("last activity %q since %s", activity.Text, activity.At.UTC().Format(time.RFC3339))
 }
 
-// runEnded is how an agent's run stood at the close: finished for its reason, never launched
-// when no machine was asked for it, or what its machine was doing.
-func runEnded(instance *domain.AgentInstance, finishedAt *time.Time, finishedReason string) string {
+// runEnded is how an agent's run stood at closedAt, the close: finished for its reason, never
+// launched when no machine was asked for it, at work when it held a running machine or one that
+// ended only with the close, and otherwise what its machine was doing. An end is reported only of
+// a machine that ended before the close and was not replaced: EndReason is why the last machine
+// ended, which a healthy replacement leaves standing.
+func runEnded(instance *domain.AgentInstance, finishedAt *time.Time, finishedReason string, closedAt time.Time) string {
 	switch {
 	case finishedAt != nil:
 		return fmt.Sprintf("finished at %s: %q", finishedAt.UTC().Format(time.RFC3339), finishedReason)
 	case instance == nil || instance.AskedAt == nil:
 		return "never launched"
-	case instance.EndReason != "":
-		return "did not finish: its machine ended (" + instance.EndReason + ")"
+	case instance.Name == "" && instance.ExitedAt != nil && !instance.ExitedAt.Before(closedAt),
+		instance.Name != "" && instance.Shown() == domain.InstanceRunning:
+		return "did not finish: at work at the close"
+	case instance.Name == "" && instance.EndReason != "":
+		ended := fmt.Sprintf("did not finish: its machine ended (%s)", instance.EndReason)
+		if instance.ExitedAt != nil {
+			ended += " at " + instance.ExitedAt.UTC().Format(time.RFC3339)
+		}
+		if instance.Stopped {
+			ended += " with no restart left"
+		}
+		return ended + ", and none ran after it"
 	}
 	return "did not finish: its machine was " + instance.Shown() + " at the close"
 }
@@ -1561,12 +1607,110 @@ func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, inter
 				s.logger.Error("tell_coordinators: scan", zap.Error(err))
 			}
 			if s.idle != nil {
-				if err := s.idle.NoticeIdleResearchers(ctx, s.idleAfter); err != nil {
+				if err := s.NoticeIdleResearchers(ctx); err != nil {
 					s.logger.Error("notice_idle_researchers: scan", zap.Error(err))
 				}
 			}
 		}
 	}
+}
+
+// NoticeIdleResearchers tells every researcher due an idle notice that it is idle (agent.idle),
+// every idleAfter while its stretch lasts, with what the platform knows at the notice. A platform
+// experiment whose numbers cannot be read now is skipped, and its researchers are told at a
+// later pass.
+func (s *PlatformExperimentsService) NoticeIdleResearchers(ctx context.Context) error {
+	due, err := s.idle.IdleResearchers(ctx, s.idleAfter)
+	if err != nil {
+		return err
+	}
+	byRun := map[string][]db.IdleResearcher{}
+	for _, r := range due {
+		byRun[r.PlatformExperimentID] = append(byRun[r.PlatformExperimentID], r)
+	}
+	for _, id := range slices.Sorted(maps.Keys(byRun)) {
+		if err := s.noticeIdle(ctx, id, byRun[id]); err != nil {
+			s.logger.Error("notice_idle_researchers: failed", zap.String("platform_experiment_id", id), zap.Error(err))
+		}
+	}
+	return nil
+}
+
+// noticeIdle tells each researcher of due, of platform experiment id, that it is idle.
+func (s *PlatformExperimentsService) noticeIdle(ctx context.Context, id string, due []db.IdleResearcher) error {
+	pe, err := s.store.GetPlatformExperiment(ctx, id)
+	if err != nil {
+		return err
+	}
+	if pe == nil {
+		return ErrPlatformExperimentNotFound
+	}
+	signups, err := s.store.ListAgentSignups(ctx, id)
+	if err != nil {
+		return err
+	}
+	rows, err := s.roster(ctx, id, signups)
+	if err != nil {
+		return err
+	}
+	capacity, err := s.runCapacity(ctx, pe)
+	if err != nil {
+		return err
+	}
+	quotas, err := s.ListQuotas(ctx, id)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	for _, r := range due {
+		notice := idleNotice{minutes: int(now.Sub(r.Since).Minutes()), fitsNow: capacity.FitsNow, minutesLeft: minutesUntil(pe.EndsAt, now)}
+		for _, row := range rows {
+			if row.AgentID == r.AgentID {
+				notice.subagents, notice.turn = row.Subagents, row.Turn
+			}
+		}
+		for _, q := range quotas {
+			if q.AgentID == r.AgentID {
+				notice.quota = q
+			}
+		}
+		if err := s.idle.NoticeIdle(ctx, r, notice.detail()); err != nil {
+			s.logger.Error("notice_idle_researchers: notice", zap.String("platform_experiment_id", id), zap.String("agent_id", r.AgentID), zap.Error(err))
+		}
+	}
+	return nil
+}
+
+// idleNotice is what the platform knows of an idle researcher at its notice.
+type idleNotice struct {
+	minutes     int
+	subagents   *int
+	turn        *domain.AgentTurn
+	fitsNow     *int
+	minutesLeft *int
+	quota       *AgentQuotaView
+}
+
+// detail is the notice as agent.idle carries it.
+func (n idleNotice) detail() string {
+	parts := []string{fmt.Sprintf("no job of its own ran on the platform for %d minutes, and it has none queued or running", n.minutes)}
+	switch {
+	case n.subagents != nil && n.turn != nil:
+		parts = append(parts, fmt.Sprintf("its harness reports %d subagents running and its turn %s since %s", *n.subagents, n.turn.State, n.turn.Since.UTC().Format(time.RFC3339)))
+	default:
+		parts = append(parts, "its harness reports no state")
+	}
+	if n.fitsNow != nil {
+		parts = append(parts, fmt.Sprintf("the free capacity places %d jobs shaped like the baseline job now", *n.fitsNow))
+	}
+	if n.minutesLeft != nil {
+		parts = append(parts, fmt.Sprintf("%d minutes of the run are left", *n.minutesLeft))
+	}
+	if n.quota != nil {
+		left := domain.RoundHours(max(0, n.quota.ShareAcceleratorHours-n.quota.UsedGuaranteedAccH-n.quota.UsedBurstAccH))
+		parts = append(parts, fmt.Sprintf("%g of its share of %g accelerator hours are left", left, n.quota.ShareAcceleratorHours))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // StartEndSweep runs SweepEnded on a ticker until ctx is cancelled: StartExpirySweep's interval

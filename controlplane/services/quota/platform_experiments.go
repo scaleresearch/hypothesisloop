@@ -41,6 +41,14 @@ type PlatformExperimentsStore interface {
 	SetPlatformExperimentSummary(ctx context.Context, id, summary string) error
 	// RecordClose writes the platform's record of the close beside the summary, once.
 	RecordClose(ctx context.Context, id, record string) error
+	// SetCloseAgents keeps how each agent's run stands just before the close, for its record, and
+	// CloseAgents reads it back.
+	SetCloseAgents(ctx context.Context, id, lines string) error
+	CloseAgents(ctx context.Context, id string) (string, error)
+	// SummaryWrittenAt is when the summary was last written, nil while it never was.
+	SummaryWrittenAt(ctx context.Context, id string) (*time.Time, error)
+	// MessageAllowance is how many more messages each agent may be sent now.
+	MessageAllowance(ctx context.Context, platformExpID string) (map[string]domain.MessageAllowance, error)
 	// JobsSettled says every job of a platform experiment ended and its cost was written.
 	JobsSettled(ctx context.Context, id string) (bool, error)
 	// ClosesToRecord is the platform experiments closed in the last within, after they were open,
@@ -182,12 +190,16 @@ type PlatformExperimentsService struct {
 	// idle tells researchers with no job for idleAfter that they are idle (WithIdleNotice).
 	idle      IdleNotices
 	idleAfter time.Duration
+	// placement reads the live capacity jobs of a project's org can be placed on, node by node.
+	// The handler's WithLiveCapacity sets it, and until then it answers ErrLiveCapacityUnconfigured.
+	placement func(ctx context.Context, projectID string) (*Placement, error)
 }
 
-// IdleNotices tells researchers of running platform experiments that had no job of their
-// own on the platform for after, once per such stretch (db.PlatformExperimentsStore.NoticeIdleResearchers).
+// IdleNotices reads the researchers of running platform experiments due an idle notice, and
+// tells each (db.PlatformExperimentsStore.IdleResearchers, NoticeIdle).
 type IdleNotices interface {
-	NoticeIdleResearchers(ctx context.Context, after time.Duration) error
+	IdleResearchers(ctx context.Context, after time.Duration) ([]db.IdleResearcher, error)
+	NoticeIdle(ctx context.Context, r db.IdleResearcher, detail string) error
 }
 
 // WithIdleNotice wires the idle notice the expiry sweep sends (agent.idle).
@@ -240,6 +252,9 @@ func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.Qu
 	}
 	s.baseline = s.readBaseline
 	s.reachable = func(context.Context, string) (map[string][]domain.Cluster, error) {
+		return nil, ErrLiveCapacityUnconfigured
+	}
+	s.placement = func(context.Context, string) (*Placement, error) {
 		return nil, ErrLiveCapacityUnconfigured
 	}
 	return s

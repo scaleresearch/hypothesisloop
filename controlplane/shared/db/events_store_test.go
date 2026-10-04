@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -1333,10 +1334,45 @@ VALUES ('agent', 'late-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-acceler
 	}
 }
 
+// dueOf is the researchers of peID due an idle notice: other tests leave runs of their own.
+func dueOf(t *testing.T, store *PlatformExperimentsStore, peID string, after time.Duration) ([]IdleResearcher, error) {
+	t.Helper()
+	all, err := store.IdleResearchers(context.Background(), after)
+	var due []IdleResearcher
+	for _, r := range all {
+		if r.PlatformExperimentID == peID {
+			due = append(due, r)
+		}
+	}
+	return due, err
+}
+
+// noticeIdle tells every researcher of peID due an idle notice, as the service does, with a
+// detail that says the minutes of its stretch, and answers how many were told.
+func noticeIdle(t *testing.T, store *PlatformExperimentsStore, peID string, after time.Duration) int {
+	t.Helper()
+	due, err := store.IdleResearchers(context.Background(), after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	told := 0
+	for _, r := range due {
+		if r.PlatformExperimentID != peID {
+			continue
+		}
+		if err := store.NoticeIdle(context.Background(), r, fmt.Sprintf("idle %d minutes, notice %d", int(time.Since(r.Since).Minutes()), r.Repeat)); err != nil {
+			t.Fatal(err)
+		}
+		told++
+	}
+	return told
+}
+
 // Run 6: a researcher worked 28 minutes on its own machine with nothing on the platform, and
-// neither it nor the coordinator was told. A researcher with no job submitted for the notice and
-// none in flight is told so once for each such stretch, live and on replay.
-func TestAResearcherWithNoJobForTheNoticeIsToldOnceForEachStretch(t *testing.T) {
+// neither it nor the coordinator was told. Round 14: a lead told once rested from mid-run to the
+// close. A researcher with no job submitted for the notice and none in flight is told so, new, and
+// again every notice while the stretch lasts, continues, live and on replay.
+func TestAResearcherWithNoJobForTheNoticeIsToldAgainWhileTheStretchLasts(t *testing.T) {
 	pool := eventsTestDB(t)
 	before := cursorNow(t, pool)
 	agentID, peID, hypothesisID := seedRun(t, pool, "idle", true)
@@ -1344,13 +1380,13 @@ func TestAResearcherWithNoJobForTheNoticeIsToldOnceForEachStretch(t *testing.T) 
 	ctx := context.Background()
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running', started_at = now() - interval '20 minutes' WHERE id = $1`, peID)
 	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at) VALUES ($1, $2, now() - interval '30 minutes')`, peID, agentID)
-	told := func() int {
+	replayed := func() []Event {
 		t.Helper()
 		events, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, EventFilter{PlatformExperimentID: peID, AgentID: agentID, Kinds: map[string]bool{EventAgentIdle: true}}, before)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return len(events)
+		return events
 	}
 	job := func(id, status string) {
 		t.Helper()
@@ -1359,52 +1395,95 @@ func TestAResearcherWithNoJobForTheNoticeIsToldOnceForEachStretch(t *testing.T) 
  hypothesis_id, hypothesis, accelerator_type, status, estimated_duration_hours, data_access_key_id, data_secret_access_key)
 VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $5, 1, 'AK', 'SK')`, agentID, peID, hypothesisID, id, status)
 	}
+	// The notice before this one is moved back by ago, as the clock would move it.
+	noticedAgo := func(ago string) {
+		t.Helper()
+		exec(t, pool, `UPDATE experiment_signups SET idle_noticed_at = idle_noticed_at - $3::interval WHERE platform_experiment_id = $1 AND agent_id = $2`, peID, agentID, ago)
+	}
 
-	if err := store.NoticeIdleResearchers(ctx, 30*time.Minute); err != nil || told() != 0 {
-		t.Fatalf("idle 20 minutes, notice at 30: told %d, %v, want none", told(), err)
+	if told := noticeIdle(t, store, peID, 30*time.Minute); told != 0 {
+		t.Fatalf("idle 20 minutes, notice at 30: told %d, want none", told)
 	}
 	events, stop := listenForEvents(t, pool)
-	if err := store.NoticeIdleResearchers(ctx, 10*time.Minute); err != nil {
-		t.Fatal(err)
+	if told := noticeIdle(t, store, peID, 10*time.Minute); told != 1 {
+		t.Fatalf("idle 20 minutes, notice at 10: told %d, want once", told)
 	}
 	live := awaitEvent(t, events, EventAgentIdle, agentID)
 	stop()
-	if live.Detail != "no job of its own ran on the platform for 20 minutes, and it has none queued or running" || live.PlatformExperimentID != peID {
-		t.Fatalf("live: got = %+v, want the 20 minutes since the run started", live)
+	if live.Value != IdleNew || live.Detail != "idle 20 minutes, notice 0" || live.PlatformExperimentID != peID {
+		t.Fatalf("live: got = %+v, want new with the 20 minutes since the run started", live)
 	}
-	if err := store.NoticeIdleResearchers(ctx, 10*time.Minute); err != nil || told() != 1 {
-		t.Fatalf("the same stretch again: told %d, %v, want once", told(), err)
+	if told := noticeIdle(t, store, peID, 10*time.Minute); told != 0 {
+		t.Fatalf("the same stretch within the notice: told %d, want nothing more", told)
+	}
+	noticedAgo("11 minutes")
+	events, stop = listenForEvents(t, pool)
+	if told := noticeIdle(t, store, peID, 10*time.Minute); told != 1 {
+		t.Fatalf("the same stretch a notice later: told %d, want once more", told)
+	}
+	live = awaitEvent(t, events, EventAgentIdle, agentID)
+	stop()
+	if live.Value != IdleContinues || live.Detail != "idle 20 minutes, notice 1" {
+		t.Fatalf("live repeat: got = %+v, want continues, the second notice of the stretch", live)
+	}
+	if got := replayed(); len(got) != 1 || got[0].Value != IdleContinues {
+		t.Fatalf("replay: %+v, want the last notice, continues", got)
+	}
+	noticedAgo("11 minutes")
+	if told := noticeIdle(t, store, peID, 10*time.Minute); told != 1 {
+		t.Fatalf("a third notice: told %d, want once more", told)
 	}
 
 	job("idle-job-1", "RUNNING")
-	if err := store.NoticeIdleResearchers(ctx, 0); err != nil || told() != 1 {
-		t.Fatalf("a job running: told %d, %v, want nothing more", told(), err)
+	noticedAgo("11 minutes")
+	if told := noticeIdle(t, store, peID, 0); told != 0 {
+		t.Fatalf("a job running: told %d, want nothing", told)
 	}
 	exec(t, pool, `UPDATE experiments SET status = 'COMPLETED' WHERE id = 'idle-job-1'`)
-	if err := store.NoticeIdleResearchers(ctx, 10*time.Minute); err != nil || told() != 1 {
-		t.Fatalf("its job just ended: told %d, %v, want nothing more", told(), err)
+	if told := noticeIdle(t, store, peID, 10*time.Minute); told != 0 {
+		t.Fatalf("its job just ended: told %d, want nothing", told)
 	}
-	if err := store.NoticeIdleResearchers(ctx, 0); err != nil || told() != 1 {
-		t.Fatalf("a new stretch: told %d, %v, want the last notice replayed alone", told(), err)
+	if told := noticeIdle(t, store, peID, 0); told != 1 {
+		t.Fatalf("a new stretch: told %d, want once", told)
 	}
-	var detail string
-	if err := pool.pool.QueryRow(ctx, `SELECT idle_detail FROM experiment_signups WHERE platform_experiment_id = $1 AND agent_id = $2`, peID, agentID).Scan(&detail); err != nil || detail != "no job of its own ran on the platform for 0 minutes, and it has none queued or running" {
-		t.Fatalf("a new stretch: detail %q, %v, want it told again", detail, err)
+	if got := replayed(); len(got) != 1 || got[0].Value != IdleNew || got[0].Detail != "idle 0 minutes, notice 0" {
+		t.Fatalf("a new stretch: replay %+v, want its first notice, new", got)
 	}
 
 	exec(t, pool, `UPDATE experiment_signups SET finished_at = now() WHERE platform_experiment_id = $1`, peID)
 	exec(t, pool, `UPDATE experiment_signups SET idle_noticed_at = NULL WHERE platform_experiment_id = $1`, peID)
-	if err := store.NoticeIdleResearchers(ctx, 0); err != nil {
+	if told := noticeIdle(t, store, peID, 0); told != 0 {
+		t.Fatalf("a finished researcher: told %d, want none", told)
+	}
+}
+
+// Two passes that read the same due researcher tell it once: the second write finds the notice
+// the first one wrote.
+func TestAnIdleNoticeToldSinceItWasReadStands(t *testing.T) {
+	pool := eventsTestDB(t)
+	agentID, peID, _ := seedRun(t, pool, "idle-race", true)
+	store := NewPlatformExperimentsStore(pool)
+	ctx := context.Background()
+	exec(t, pool, `UPDATE platform_experiments SET status = 'running', started_at = now() - interval '20 minutes' WHERE id = $1`, peID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at) VALUES ($1, $2, now() - interval '30 minutes')`, peID, agentID)
+	due, err := dueOf(t, store, peID, 10*time.Minute)
+	if err != nil || len(due) != 1 {
+		t.Fatalf("due %+v, %v, want the one researcher", due, err)
+	}
+	if err := store.NoticeIdle(ctx, due[0], "first"); err != nil {
 		t.Fatal(err)
 	}
-	var untold bool
-	if err := pool.pool.QueryRow(ctx, `SELECT idle_noticed_at IS NULL FROM experiment_signups WHERE platform_experiment_id = $1`, peID).Scan(&untold); err != nil || !untold {
-		t.Fatalf("a finished researcher: told %v, want not", !untold)
+	if err := store.NoticeIdle(ctx, due[0], "second"); err != nil {
+		t.Fatal(err)
+	}
+	var detail string
+	if err := pool.pool.QueryRow(ctx, `SELECT idle_detail FROM experiment_signups WHERE platform_experiment_id = $1 AND agent_id = $2`, peID, agentID).Scan(&detail); err != nil || detail != "first" {
+		t.Fatalf("detail %q, %v, want the first notice kept", detail, err)
 	}
 }
 
 // A job running is activity, and the stretch starts when the last one ended. The roster says
-// what the researcher has in flight.
+// what the researcher has in flight, and for how long it had none.
 func TestAResearcherWithAJobRunningIsNotIdle(t *testing.T) {
 	pool := eventsTestDB(t)
 	agentID, peID, hypothesisID := seedRun(t, pool, "running", true)
@@ -1421,15 +1500,6 @@ func TestAResearcherWithAJobRunningIsNotIdle(t *testing.T) {
 VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $5, 1, 'AK', 'SK',
         now() - $6::interval, now() - $7::interval)`, agentID, peID, hypothesisID, id, status, created, reported)
 	}
-	detail := func() string {
-		t.Helper()
-		var detail string
-		if err := pool.pool.QueryRow(ctx, `SELECT idle_detail FROM experiment_signups WHERE platform_experiment_id = $1 AND agent_id = $2`, peID, agentID).Scan(&detail); err != nil {
-			t.Fatal(err)
-		}
-		return detail
-	}
-
 	inFlight := func() domain.InFlight {
 		t.Helper()
 		signups, err := store.ListAgentSignups(ctx, peID)
@@ -1440,20 +1510,24 @@ VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $
 	}
 
 	job("job-running", "RUNNING", "30 minutes", "30 minutes")
-	if err := store.NoticeIdleResearchers(ctx, 0); err != nil || detail() != "" {
-		t.Fatalf("a job running: detail %q, %v, want no notice", detail(), err)
+	job("job-queued", "SUBMITTED", "5 minutes", "5 minutes")
+	if told := noticeIdle(t, store, peID, 0); told != 0 {
+		t.Fatalf("a job running: told %d, want no notice", told)
 	}
-	if got := inFlight(); got != (domain.InFlight{Jobs: 1}) {
-		t.Fatalf("a job running: in_flight %+v, want the job", got)
+	if got := inFlight(); got.Jobs != 2 || got.Running != 1 || got.Queued != 1 || got.IdleSince != nil || *got.MinutesWithoutJob(time.Now()) != 0 {
+		t.Fatalf("jobs in flight: in_flight %+v, want one running and one queued, and 0 minutes without", got)
 	}
 	exec(t, pool, `UPDATE experiments SET status = 'COMPLETED', run_reported_at = now() - interval '3 minutes' WHERE id = 'job-running'`)
-	if err := store.NoticeIdleResearchers(ctx, 10*time.Minute); err != nil || detail() != "" {
-		t.Fatalf("a job that ended 3 minutes ago, notice at 10: detail %q, %v, want no notice", detail(), err)
+	exec(t, pool, `UPDATE experiments SET status = 'FAILED', created_at = now() - interval '30 minutes', run_reported_at = NULL WHERE id = 'job-queued'`)
+	if told := noticeIdle(t, store, peID, 10*time.Minute); told != 0 {
+		t.Fatalf("a job that ended 3 minutes ago, notice at 10: told %d, want no notice", told)
 	}
-	if err := store.NoticeIdleResearchers(ctx, 2*time.Minute); err != nil || detail() != "no job of its own ran on the platform for 3 minutes, and it has none queued or running" {
-		t.Fatalf("notice at 2: detail %q, %v, want the 3 minutes since the job ended", detail(), err)
+	due, err := dueOf(t, store, peID, 2*time.Minute)
+	if err != nil || len(due) != 1 || int(time.Since(due[0].Since).Minutes()) != 3 || due[0].Repeat != 0 {
+		t.Fatalf("notice at 2: due %+v, %v, want the 3 minutes since the job ended, a first notice", due, err)
 	}
-	if got := inFlight(); got != (domain.InFlight{}) {
-		t.Fatalf("idle: in_flight %+v, want nothing", got)
+	got := inFlight()
+	if got.Jobs != 0 || got.IdleSince == nil || *got.MinutesWithoutJob(time.Now()) != 3 {
+		t.Fatalf("idle: in_flight %+v, want nothing in flight for 3 minutes", got)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -84,5 +85,78 @@ func TestAMessageIsToldToItsAgentAloneAndKept(t *testing.T) {
 	exec(t, pool, `UPDATE platform_experiments SET status = 'closed' WHERE id = $1`, peID)
 	if _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "hello", coordinator); !errors.Is(err, ErrPlatformExperimentClosed) {
 		t.Errorf("once closed: got = %v, want = %v", err, ErrPlatformExperimentClosed)
+	}
+}
+
+// What an agent may still be sent this hour is counted as a send refuses: the messages of the
+// last hour, by everyone together, and it grows again when the oldest of them leaves the hour.
+func TestTheMessageAllowanceCountsTheLastHour(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	agentID, peID, _ := seedRun(t, pool, "allowance", true)
+	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id) VALUES ($1, $2)`, peID, agentID)
+	allowance := func() domain.MessageAllowance {
+		t.Helper()
+		all, err := pes.MessageAllowance(ctx, peID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, ok := all[agentID]
+		if !ok || len(all) != 1 {
+			t.Fatalf("allowance %+v, want the one agent", all)
+		}
+		return a
+	}
+	if got := allowance(); got.LeftThisHour != domain.MaxAgentMessagesPerHour || got.NextAt != nil {
+		t.Fatalf("none sent: %+v, want the whole hour's and no next_at", got)
+	}
+	coordinator := domain.Actor{Kind: domain.ActorCoordinator, ID: peID}
+	for range 2 {
+		if _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "direction", coordinator); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(t, pool, `UPDATE agent_messages SET created_at = now() - interval '50 minutes' WHERE id = (SELECT min(id) FROM agent_messages WHERE platform_experiment_id = $1)`, peID)
+	got := allowance()
+	if got.LeftThisHour != domain.MaxAgentMessagesPerHour-2 || got.NextAt == nil || time.Until(*got.NextAt) < 9*time.Minute || time.Until(*got.NextAt) > 11*time.Minute {
+		t.Fatalf("two sent, the oldest 50 minutes ago: %+v, want %d left and the next in 10 minutes", got, domain.MaxAgentMessagesPerHour-2)
+	}
+	exec(t, pool, `UPDATE agent_messages SET created_at = now() - interval '61 minutes' WHERE platform_experiment_id = $1`, peID)
+	if got := allowance(); got.LeftThisHour != domain.MaxAgentMessagesPerHour || got.NextAt != nil {
+		t.Fatalf("both older than an hour: %+v, want the whole hour's", got)
+	}
+}
+
+// The agent lines of a close record are kept as taken before the close, and one closed keeps
+// them; the summary's time moves with each write of it.
+func TestCloseAgentsAreKeptAsTakenBeforeTheClose(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	_, peID, _ := seedRun(t, pool, "close-agents", true)
+	if lines, err := pes.CloseAgents(ctx, peID); err != nil || lines != "" {
+		t.Fatalf("none taken: %q, %v", lines, err)
+	}
+	if err := pes.SetCloseAgents(ctx, peID, "Agents:\n- a: at work.\n"); err != nil {
+		t.Fatal(err)
+	}
+	exec(t, pool, `UPDATE platform_experiments SET status = 'closed', closed_at = now() WHERE id = $1`, peID)
+	if err := pes.SetCloseAgents(ctx, peID, "Agents:\n- a: released.\n"); err != nil {
+		t.Fatal(err)
+	}
+	if lines, err := pes.CloseAgents(ctx, peID); err != nil || lines != "Agents:\n- a: at work.\n" {
+		t.Fatalf("after the close: %q, %v, want the lines taken before it", lines, err)
+	}
+
+	if at, err := pes.SummaryWrittenAt(ctx, peID); err != nil || at != nil {
+		t.Fatalf("no summary: %v, %v", at, err)
+	}
+	if err := pes.SetPlatformExperimentSummary(ctx, peID, "what the run found"); err != nil {
+		t.Fatal(err)
+	}
+	if at, err := pes.SummaryWrittenAt(ctx, peID); err != nil || at == nil || time.Since(*at) > time.Minute {
+		t.Fatalf("summary written: %v, %v, want now", at, err)
 	}
 }

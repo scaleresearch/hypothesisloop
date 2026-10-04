@@ -494,17 +494,34 @@ WHERE platform_experiment_id = $1 AND agent_id = $2`, platformExpID, agentID, re
 	return nil
 }
 
-// NoticeIdleResearchers tells every researcher of a running platform experiment that had no job
-// of its own created or running for after, since the run started or it joined, and
-// has none queued or running, that it is idle: agent.idle, once for each such stretch. A
-// researcher that finished or was cut is told nothing.
-func (s *PlatformExperimentsStore) NoticeIdleResearchers(ctx context.Context, after time.Duration) error {
-	if _, err := s.pool.pool.Exec(ctx, `
-WITH idle AS (
-    SELECT s.platform_experiment_id, s.agent_id,
-           GREATEST(pe.started_at, s.signed_up_at,
+// idleSinceSQL is when the stretch of signup s of platform experiment pe with nothing of its own
+// on the platform began: the start of the run, its joining, or the last moment a job of its was
+// created or seen running, whichever is latest. It says nothing of whether a job is in flight now.
+const idleSinceSQL = `GREATEST(pe.started_at, s.signed_up_at,
                     (SELECT max(GREATEST(e.created_at, e.run_reported_at)) FROM experiments e
-                     WHERE e.platform_experiment_id = s.platform_experiment_id AND e.agent_id = s.agent_id)) AS since
+                     WHERE e.platform_experiment_id = s.platform_experiment_id AND e.agent_id = s.agent_id))`
+
+// IdleResearcher is a researcher of a running platform experiment with nothing of its own on the
+// platform for at least the notice, and due to be told so (agent.idle).
+type IdleResearcher struct {
+	PlatformExperimentID string
+	AgentID              string
+	// Since is when the stretch began (idleSinceSQL).
+	Since time.Time
+	// Repeat is 0 for the first notice of the stretch, and counts the notices of it told before.
+	Repeat int
+	// NoticedAt is when it was last told, nil for never. The notice stands only while it still is.
+	NoticedAt *time.Time
+}
+
+// IdleResearchers is every researcher of a running platform experiment that had no job of its
+// own created or running for after, since the run started or it joined, has none queued or
+// running, and was not told so in the last after of the stretch: due a notice. A researcher that
+// finished or was cut is never due one.
+func (s *PlatformExperimentsStore) IdleResearchers(ctx context.Context, after time.Duration) ([]IdleResearcher, error) {
+	rows, err := s.pool.pool.Query(ctx, `
+WITH idle AS (
+    SELECT s.platform_experiment_id, s.agent_id, s.idle_noticed_at, s.idle_repeat, `+idleSinceSQL+` AS since
     FROM experiment_signups s JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
     WHERE pe.status = 'running' AND pe.started_at IS NOT NULL AND s.role = $2 AND s.finished_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM platform_experiment_cuts c
@@ -513,17 +530,67 @@ WITH idle AS (
                       WHERE e.platform_experiment_id = s.platform_experiment_id AND e.agent_id = s.agent_id
                         AND e.status IN ('QUEUED', 'SUBMITTED', 'RUNNING'))
 )
-UPDATE experiment_signups s
-SET idle_noticed_at = now(), idle_xid = pg_current_xact_id()::text::bigint,
-    idle_detail = format('no job of its own ran on the platform for %s minutes, and it has none queued or running',
-                         floor(extract(epoch FROM now() - idle.since) / 60)::int)
+SELECT platform_experiment_id, agent_id, since,
+       CASE WHEN idle_noticed_at IS NULL OR idle_noticed_at < since THEN 0 ELSE idle_repeat + 1 END,
+       idle_noticed_at
 FROM idle
-WHERE s.platform_experiment_id = idle.platform_experiment_id AND s.agent_id = idle.agent_id
-  AND idle.since <= now() - make_interval(secs => $1)
-  AND (s.idle_noticed_at IS NULL OR s.idle_noticed_at < idle.since)`, after.Seconds(), string(domain.SignupRoleCompetitor)); err != nil {
-		return fmt.Errorf("platform_experiments_store.NoticeIdleResearchers: %w", err)
+WHERE since <= now() - make_interval(secs => $1)
+  AND (idle_noticed_at IS NULL OR idle_noticed_at < GREATEST(since, now() - make_interval(secs => $1)))
+ORDER BY platform_experiment_id, agent_id`, after.Seconds(), string(domain.SignupRoleCompetitor))
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.IdleResearchers: %w", err)
+	}
+	idle, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (IdleResearcher, error) {
+		var r IdleResearcher
+		err := row.Scan(&r.PlatformExperimentID, &r.AgentID, &r.Since, &r.Repeat, &r.NoticedAt)
+		return r, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.IdleResearchers: %w", err)
+	}
+	return idle, nil
+}
+
+// NoticeIdle tells r that it is idle, with detail: agent.idle, new for its first notice of the
+// stretch and continues after. A notice told since r was read stands, and this one writes nothing.
+func (s *PlatformExperimentsStore) NoticeIdle(ctx context.Context, r IdleResearcher, detail string) error {
+	if _, err := s.pool.pool.Exec(ctx, `
+UPDATE experiment_signups
+SET idle_noticed_at = now(), idle_xid = pg_current_xact_id()::text::bigint, idle_repeat = $3, idle_detail = $4
+WHERE platform_experiment_id = $1 AND agent_id = $2 AND idle_noticed_at IS NOT DISTINCT FROM $5`,
+		r.PlatformExperimentID, r.AgentID, r.Repeat, detail, r.NoticedAt); err != nil {
+		return fmt.Errorf("platform_experiments_store.NoticeIdle: %w", err)
 	}
 	return nil
+}
+
+// SetCloseAgents keeps lines as how each agent's run of the platform experiment id stands at its
+// close, for its record of the close. It is taken just before the close is written, and one that
+// is closed keeps what it has.
+func (s *PlatformExperimentsStore) SetCloseAgents(ctx context.Context, id, lines string) error {
+	if _, err := s.pool.pool.Exec(ctx, `UPDATE platform_experiments SET close_agents = $2 WHERE id = $1 AND status <> 'closed'`, id, lines); err != nil {
+		return fmt.Errorf("platform_experiments_store.SetCloseAgents: %w", err)
+	}
+	return nil
+}
+
+// CloseAgents is what SetCloseAgents kept of the platform experiment id, empty when nothing was.
+func (s *PlatformExperimentsStore) CloseAgents(ctx context.Context, id string) (string, error) {
+	var lines string
+	if err := s.pool.pool.QueryRow(ctx, `SELECT close_agents FROM platform_experiments WHERE id = $1`, id).Scan(&lines); err != nil {
+		return "", fmt.Errorf("platform_experiments_store.CloseAgents: %w", err)
+	}
+	return lines, nil
+}
+
+// SummaryWrittenAt is when the summary of the platform experiment id was last written, nil while
+// it never was.
+func (s *PlatformExperimentsStore) SummaryWrittenAt(ctx context.Context, id string) (*time.Time, error) {
+	var at *time.Time
+	if err := s.pool.pool.QueryRow(ctx, `SELECT summary_at FROM platform_experiments WHERE id = $1`, id).Scan(&at); err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.SummaryWrittenAt: %w", err)
+	}
+	return at, nil
 }
 
 // IsAgentFinished says the agent finished in the platform experiment.
@@ -606,9 +673,11 @@ func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 // with what of its own is in flight.
 func (s *PlatformExperimentsStore) ListAgentSignups(ctx context.Context, platformExpID string) ([]domain.AgentSignup, error) {
 	rows, err := s.pool.pool.Query(ctx, `
-SELECT `+agentSignupColumns+`, f.jobs
+SELECT `+agentSignupColumns+`, f.jobs, f.running,
+       CASE WHEN pe.status = 'running' AND pe.started_at IS NOT NULL AND f.jobs = 0 THEN `+idleSinceSQL+` END
 FROM experiment_signups s LEFT JOIN agents a ON a.id = s.agent_id
-CROSS JOIN LATERAL (SELECT count(*) AS jobs
+JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
+CROSS JOIN LATERAL (SELECT count(*) AS jobs, count(*) FILTER (WHERE e.status = 'RUNNING') AS running
                     FROM experiments e
                     WHERE e.platform_experiment_id = s.platform_experiment_id AND e.agent_id = s.agent_id
                       AND e.status IN ('QUEUED', 'SUBMITTED', 'RUNNING')) f
@@ -621,10 +690,11 @@ ORDER BY s.signed_up_at, s.agent_id`, platformExpID)
 	signups := []domain.AgentSignup{}
 	for rows.Next() {
 		var inFlight domain.InFlight
-		signup, err := scanAgentSignup(rows, &inFlight.Jobs)
+		signup, err := scanAgentSignup(rows, &inFlight.Jobs, &inFlight.Running, &inFlight.IdleSince)
 		if err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.ListAgentSignups: %w", err)
 		}
+		inFlight.Queued = inFlight.Jobs - inFlight.Running
 		signup.InFlight = &inFlight
 		signups = append(signups, signup)
 	}

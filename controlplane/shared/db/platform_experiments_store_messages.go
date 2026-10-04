@@ -121,6 +121,38 @@ VALUES ($1, $2, $3, $4, $5, $6, pg_current_xact_id()::text::bigint) RETURNING cr
 	return messages, nil
 }
 
+// MessageAllowance is, for every agent of a platform experiment but its planner, how many more
+// messages it may be sent now and when that next grows, counted as SendAgentMessages refuses.
+func (s *PlatformExperimentsStore) MessageAllowance(ctx context.Context, platformExpID string) (map[string]domain.MessageAllowance, error) {
+	rows, err := s.pool.pool.Query(ctx, `
+SELECT s.agent_id, count(m.id), min(m.created_at)
+FROM experiment_signups s
+LEFT JOIN agent_messages m ON m.platform_experiment_id = s.platform_experiment_id AND m.agent_id = s.agent_id
+                          AND m.created_at > now() - interval '1 hour'
+WHERE s.platform_experiment_id = $1 AND s.role <> $2
+GROUP BY s.agent_id`, platformExpID, string(domain.SignupRolePlanner))
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.MessageAllowance: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]domain.MessageAllowance{}
+	for rows.Next() {
+		var agentID string
+		var sent int
+		var oldest *time.Time
+		if err := rows.Scan(&agentID, &sent, &oldest); err != nil {
+			return nil, fmt.Errorf("platform_experiments_store.MessageAllowance: %w", err)
+		}
+		allowance := domain.MessageAllowance{LeftThisHour: max(0, domain.MaxAgentMessagesPerHour-sent)}
+		if oldest != nil {
+			next := oldest.Add(time.Hour).UTC()
+			allowance.NextAt = &next
+		}
+		out[agentID] = allowance
+	}
+	return out, rows.Err()
+}
+
 // ListAgentMessages is every message sent in a platform experiment, to agentID alone when it is
 // not empty, oldest first.
 func (s *PlatformExperimentsStore) ListAgentMessages(ctx context.Context, platformExpID, agentID string) ([]domain.AgentMessage, error) {

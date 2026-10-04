@@ -58,7 +58,7 @@ func (f *signupStore) IsSignedUp(ctx context.Context, platformExpID, agentID str
 
 func newSignupTestService(t *testing.T, store PlatformExperimentsStore) *PlatformExperimentsService {
 	t.Helper()
-	return reaching(NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", 3*time.Minute), domain.CPUType)
+	return reaching(NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), 3*time.Minute), domain.CPUType)
 }
 
 // max_agents sizes the field being ranked. If a baseline or a reviewer counted against it, adding

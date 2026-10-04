@@ -150,6 +150,12 @@ ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS declined_reason TEXT N
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS close_record TEXT NOT NULL DEFAULT '';
 UPDATE platform_experiments SET close_record = summary, summary = ''
 WHERE close_record = '' AND summary LIKE 'Recorded by the platform:%';
+-- How each agent's run stood at the moment of the close, the agent lines of its record, taken by
+-- quota.Close before the close is written. The record waits for every job to settle, and by then
+-- the machines are released and what their agents last said is gone. Empty until taken.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS close_agents TEXT NOT NULL DEFAULT '';
+-- When the summary was last written, NULL while it never was.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS summary_at TIMESTAMPTZ;
 -- The completed job that measured the baseline, and the estimate of a job that states none: the
 -- hours that job was observed running, with headroom (0 when it was too short to be observed).
 -- Both are written when the baseline is declared, and a platform experiment starts only with
@@ -525,10 +531,12 @@ ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS finished_xid    BIGINT;
 -- A researcher of a running platform experiment told it has gone idle (agent.idle): no job or
 -- check of its own ran for the platform's agents.idle_notice_minutes and none is queued or
 -- running. When it was told, the transaction that told it for the replay, and what it was told.
--- Told again only after a job or check of its own ran since.
+-- Told again every idle_notice_minutes while the stretch lasts: idle_repeat is 0 on the first
+-- notice of a stretch and counts the ones after it.
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS idle_noticed_at TIMESTAMPTZ;
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS idle_xid        BIGINT;
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS idle_detail     TEXT NOT NULL DEFAULT '';
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS idle_repeat     INT  NOT NULL DEFAULT 0;
 
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS role       TEXT NOT NULL DEFAULT 'competitor';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS quota_tier TEXT NOT NULL DEFAULT '';
@@ -890,6 +898,9 @@ BEGIN
         NEW.description_changed_at := now();
         NEW.description_changed_xid := pg_current_xact_id()::text::bigint;
     END IF;
+    IF NEW.summary IS DISTINCT FROM OLD.summary THEN
+        NEW.summary_at := now();
+    END IF;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -1002,7 +1013,7 @@ CREATE TRIGGER signup_finished_notify AFTER UPDATE OF finished_at ON experiment_
 CREATE OR REPLACE FUNCTION hypothesisloop_agent_idle_notify() RETURNS trigger AS $$
 BEGIN
     PERFORM hypothesisloop_notify_event('agent.idle', NEW.agent_id,
-        '', NEW.idle_detail, NEW.platform_experiment_id, NEW.agent_id);
+        CASE WHEN NEW.idle_repeat = 0 THEN 'new' ELSE 'continues' END, NEW.idle_detail, NEW.platform_experiment_id, NEW.agent_id);
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;

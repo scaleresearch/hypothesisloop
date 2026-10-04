@@ -52,7 +52,73 @@ type AgentSignup struct {
 
 // InFlight counts what of an agent's own is queued or running on the platform now.
 type InFlight struct {
-	Jobs int `json:"jobs" doc:"Its jobs queued or running, those waiting for their environment's build included. 0: nothing of its own is on the platform, and an agent waiting then waits for nothing it started."`
+	Jobs    int `json:"jobs" doc:"Its jobs queued or running, those waiting for their environment's build included. 0: nothing of its own is on the platform, and an agent waiting then waits for nothing it started."`
+	Queued  int `json:"queued" doc:"Of jobs, those not running yet: queued, placed, or waiting for their environment's build."`
+	Running int `json:"running" doc:"Of jobs, those running."`
+	// IdleSince is when the agent's stretch with nothing of its own on the platform began, in a
+	// running platform experiment that started: the start, its joining, or the last moment a job
+	// of its was created or seen running. Nil while a job of its is in flight, and outside a run.
+	IdleSince *time.Time `json:"-"`
+}
+
+// MinutesWithoutJob is how long, at now, the agent has had nothing of its own on the platform:
+// 0 while a job of its is in flight, nil outside a running platform experiment that started.
+func (f InFlight) MinutesWithoutJob(now time.Time) *int {
+	switch {
+	case f.Jobs > 0:
+		zero := 0
+		return &zero
+	case f.IdleSince == nil:
+		return nil
+	}
+	minutes := max(0, int(now.Sub(*f.IdleSince).Minutes()))
+	return &minutes
+}
+
+// AgentTurn is whether a hosted agent's harness is in a turn of its model or waits for platform
+// updates between turns, as the harness last said it.
+type AgentTurn struct {
+	State string    `json:"state" enum:"working,waiting" doc:"working: the model is in a turn. waiting: the turn ended and the harness waits for the platform's next update to the agent."`
+	Since time.Time `json:"since" doc:"When the harness entered that state."`
+}
+
+const (
+	TurnWorking = "working"
+	TurnWaiting = "waiting"
+)
+
+// MessageAllowance is how many more direct messages an agent may be sent in the hour, by
+// everyone together (MaxAgentMessagesPerHour).
+type MessageAllowance struct {
+	LeftThisHour int        `json:"left_this_hour" doc:"How many more messages it may be sent now, by the coordinator and the owner together."`
+	NextAt       *time.Time `json:"next_at,omitempty" doc:"When left_this_hour next grows: the oldest message of the last hour leaves it then. Absent while it was sent none in the last hour."`
+}
+
+// ModelAllowance is what a hosted agent's or coordinator's model account has left of the model
+// provider's rate limit, as its harness last read it.
+type ModelAllowance struct {
+	Utilization  *float64   `json:"utilization,omitempty" doc:"The share of the account's rate limit used, 0 to 1. Absent before a reading that says it."`
+	RefusedUntil *time.Time `json:"refused_until,omitempty" doc:"Present while the provider refuses the account's calls: when the provider said its limit resets."`
+}
+
+// ModelAllowanceOf is what limit says the account has left, at now: a refusal whose reset has
+// passed is over.
+func ModelAllowanceOf(limit RateLimit, now time.Time) *ModelAllowance {
+	out := &ModelAllowance{Utilization: limit.Utilization}
+	if limit.Rejected && limit.ResetsAt != nil && limit.ResetsAt.After(now) {
+		until := *limit.ResetsAt
+		out.RefusedUntil = &until
+	}
+	return out
+}
+
+// TurnOf is the turn state says.
+func TurnOf(state HarnessState) *AgentTurn {
+	turn := &AgentTurn{State: TurnWorking, Since: state.TurnSince}
+	if state.TurnWaiting {
+		turn.State = TurnWaiting
+	}
+	return turn
 }
 
 // AgentHealth is how one agent of a platform experiment, or its hosted coordinator, is getting on,
@@ -69,19 +135,9 @@ type AgentHealth struct {
 	Restarts              int      `json:"restarts" doc:"Every machine of its that exited and was asked for again, over the run, whatever image it ran."`
 	CoordinatorMessages   int      `json:"coordinator_messages" doc:"Messages the coordinator sent it."`
 	// The two below are of a hosted agent or coordinator, from the rate limit its harness last
-	// read from the model provider (RateLimitReading).
+	// read from the model provider (HarnessState).
 	RateLimitUtilization *float64   `json:"rate_limit_utilization,omitempty" doc:"The share of its model account's rate limit used, 0 to 1, at the last reading of its machine. Absent before a reading that says it."`
 	RateLimitedUntil     *time.Time `json:"rate_limited_until,omitempty" doc:"Present while the model provider refuses its model calls: when the provider said its limit resets. It waits until then and resumes, spending no restart."`
-}
-
-// RateLimitReading is the model provider's rate limit as the harness of a hosted agent, or of a
-// hosted coordinator (Role CoordinatorHealthRole, no AgentID), last read it from its model CLI.
-type RateLimitReading struct {
-	PlatformExperimentID, AgentID, Role string
-	// Rejected: the provider refuses the account's calls until ResetsAt.
-	Rejected    bool
-	Utilization *float64
-	ResetsAt    *time.Time
 }
 
 // CoordinatorHealthRole is the role the run's health series give its hosted coordinator.

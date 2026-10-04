@@ -80,7 +80,8 @@ auth:
 #   idle_notice_minutes  how long a researcher of a running platform experiment may go with no
 #              job of its own created or running since the run started or the last one
 #              ended, and none queued or running, before it and the coordinator are told so
-#              (agent.idle), once for each such stretch.
+#              (agent.idle new), and again every idle_notice_minutes while the stretch lasts
+#              (agent.idle continues).
 agents:
   launcher: main
   image: registry.example.invalid/hypothesisloop-experimentator-base:latest

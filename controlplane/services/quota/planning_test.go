@@ -389,7 +389,7 @@ func TestAnExperimentThatClosesWithNoSummaryIsGivenTheRecordOfItsClose(t *testin
 		t.Fatal(err)
 	}
 	for _, want := range []string{"baseline_limit_reached", "no job was ever submitted", "Jobs submitted: 0.", "Spent: 0 of the budget of 18",
-		"- coordinator: no activity reported; never launched: the platform launches a coordinator once the run starts or the experiment waits for it, and this one closed before either, so this record is its summary.", `- baseline (baseline): 0 jobs submitted; last activity "writing harness/run_trial.py"`, "did not finish: its machine was running at the close", "(competitor): 0 jobs submitted; no activity reported; never launched.", "No job."} {
+		"- coordinator: no activity reported; never launched: the platform launches a coordinator once the run starts or the experiment waits for it, and this one closed before either, so this record is its summary.", `- baseline (baseline): 0 jobs submitted; last activity "writing harness/run_trial.py"`, "did not finish: at work at the close", "(competitor): 0 jobs submitted; no activity reported; never launched.", "No job."} {
 		if !strings.Contains(pe.Summary, want) {
 			t.Errorf("summary = %q, want it to say %q", pe.Summary, want)
 		}
@@ -533,6 +533,24 @@ type statusStore struct {
 	createdStore
 	unsettled map[string]bool
 	records   map[string]string
+	// closeAgents are the agent lines each took before its close.
+	closeAgents map[string]string
+}
+
+func (s *statusStore) SetCloseAgents(_ context.Context, id, lines string) error {
+	for _, pe := range s.created {
+		if pe.ID == id && pe.Status != domain.PlatformExpClosed {
+			if s.closeAgents == nil {
+				s.closeAgents = map[string]string{}
+			}
+			s.closeAgents[id] = lines
+		}
+	}
+	return nil
+}
+
+func (s *statusStore) CloseAgents(_ context.Context, id string) (string, error) {
+	return s.closeAgents[id], nil
 }
 
 func (s *statusStore) JobsSettled(_ context.Context, id string) (bool, error) {
