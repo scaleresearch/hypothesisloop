@@ -343,7 +343,7 @@ func TestAnExperimentThatClosesWithNoSummaryIsGivenTheRecordOfItsClose(t *testin
 		t.Fatal(err)
 	}
 	for _, want := range []string{"baseline_limit_reached", "no job was ever submitted", "Jobs submitted: 0.", "Spent: 0 of the budget of 18",
-		"- coordinator: no activity reported; never launched.", `- baseline (baseline): 0 jobs submitted; last activity "writing harness/run_trial.py"`, "did not finish: its machine was running at the close", "(competitor): 0 jobs submitted; no activity reported; never launched.", "No job."} {
+		"- coordinator: no activity reported; never launched: the platform launches a coordinator once the run starts or the experiment waits for it, and this one closed before either, so this record is its summary.", `- baseline (baseline): 0 jobs submitted; last activity "writing harness/run_trial.py"`, "did not finish: its machine was running at the close", "(competitor): 0 jobs submitted; no activity reported; never launched.", "No job."} {
 		if !strings.Contains(pe.Summary, want) {
 			t.Errorf("summary = %q, want it to say %q", pe.Summary, want)
 		}
@@ -352,6 +352,38 @@ func TestAnExperimentThatClosesWithNoSummaryIsGivenTheRecordOfItsClose(t *testin
 	pe.Summary = "the coordinator's own"
 	if err := store.RecordClose(context.Background(), pe.ID, written); err != nil || pe.Summary != "the coordinator's own" {
 		t.Errorf("a record over a summary written meanwhile: got = %q, %v, want the summary kept", pe.Summary, err)
+	}
+}
+
+// Run 5's record said "Spent: 0 of the budget" while consumed_accelerator_hours read 0.0645: the
+// record was written at the close, before the job its cluster was still starting ended and was
+// billed. The record of a close waits for every job to be settled, and states the spend whole.
+func TestTheRecordOfACloseWaitsForItsJobsToBeBilled(t *testing.T) {
+	now := time.Now().UTC()
+	pe := &domain.PlatformExperiment{ID: "pe-late", ProjectID: "prj-a", Status: domain.PlatformExpOpen, CreatedAt: now.Add(-time.Hour),
+		DurationHours: 1, BudgetAcceleratorHours: 6, BaselineDueAt: now.Add(-time.Minute), Stages: []domain.Stage{{LengthPct: 100}}}
+	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}}, unsettled: map[string]bool{pe.ID: true}}
+	metrics := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[0,"0.0645"]}]}}`))
+	}))
+	t.Cleanup(metrics.Close)
+	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), metrics.URL, time.Minute)
+	if err := svc.SweepExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RecordCloses(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if pe.Status != domain.PlatformExpClosed || pe.Summary != "" {
+		t.Fatalf("closed with a job still live: status %s, summary %q, want closed with no record yet", pe.Status, pe.Summary)
+	}
+	store.unsettled[pe.ID] = false
+	if err := svc.RecordCloses(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pe.Summary, "Spent: 0.0645 of the budget of 6 accelerator hours.") {
+		t.Errorf("summary = %q, want the spend once the job was billed", pe.Summary)
 	}
 }
 
@@ -402,8 +434,26 @@ func noUsage(t *testing.T) string {
 	return metrics.URL
 }
 
-// statusStore is createdStore with the reads and the write a close and a sweep make.
-type statusStore struct{ createdStore }
+// statusStore is createdStore with the reads and the write a close and a sweep make. unsettled
+// are the platform experiments a job of which is live or not yet settled.
+type statusStore struct {
+	createdStore
+	unsettled map[string]bool
+}
+
+func (s *statusStore) JobsSettled(_ context.Context, id string) (bool, error) {
+	return !s.unsettled[id], nil
+}
+
+func (s *statusStore) ClosesToRecord(context.Context, time.Duration) ([]string, error) {
+	var ids []string
+	for _, pe := range s.created {
+		if pe.Status == domain.PlatformExpClosed && pe.Summary == "" && !s.unsettled[pe.ID] {
+			ids = append(ids, pe.ID)
+		}
+	}
+	return ids, nil
+}
 
 func (s *statusStore) ListPlatformExperimentsByStatus(_ context.Context, status domain.PlatformExperimentStatus) ([]*domain.PlatformExperiment, error) {
 	var out []*domain.PlatformExperiment

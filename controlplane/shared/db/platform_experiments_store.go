@@ -479,6 +479,40 @@ func (s *PlatformExperimentsStore) RecordClose(ctx context.Context, id, record s
 	return nil
 }
 
+// unsettledJobsSQL says a job of pe still runs, waits to, or ended and its cost is not yet
+// written to the metrics store (quota_settled_at): what pe spent is not yet whole.
+const unsettledJobsSQL = `EXISTS (SELECT 1 FROM experiments e WHERE e.platform_experiment_id = pe.id
+    AND (e.status IN ('QUEUED', 'SUBMITTED', 'RUNNING') OR e.quota_settled_at IS NULL))`
+
+// JobsSettled says every job of the platform experiment id ended and its cost was written, so
+// what it spent is whole.
+func (s *PlatformExperimentsStore) JobsSettled(ctx context.Context, id string) (bool, error) {
+	var settled bool
+	if err := s.pool.pool.QueryRow(ctx, `SELECT NOT `+unsettledJobsSQL+` FROM platform_experiments pe WHERE pe.id = $1`, id).Scan(&settled); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.JobsSettled: %w", err)
+	}
+	return settled, nil
+}
+
+// ClosesToRecord is the platform experiments closed in the last within, after they were open,
+// that have no summary yet and whose every job ended and was settled (JobsSettled): those whose
+// record of the close waited for what they spent to be whole.
+func (s *PlatformExperimentsStore) ClosesToRecord(ctx context.Context, within time.Duration) ([]string, error) {
+	rows, err := s.pool.pool.Query(ctx, `SELECT pe.id FROM platform_experiments pe
+WHERE pe.status = 'closed' AND COALESCE(pe.summary, '') = '' AND pe.closed_at > now() - make_interval(secs => $1)
+  AND pe.close_reason IN ($2, $3, $4, $5) AND (pe.goal = '' OR pe.starts_at >= '0001-01-02')
+  AND NOT `+unsettledJobsSQL+`
+ORDER BY pe.closed_at`, within.Seconds(), string(domain.CloseEndTimeReached), string(domain.CloseByRequest), string(domain.CloseBaselineLimitReached), string(domain.CloseAgentsNotStarted))
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.ClosesToRecord: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.ClosesToRecord: %w", err)
+	}
+	return ids, nil
+}
+
 // SetPlatformExperimentSummary records the operator's narrative verdict on a run. Separate from
 // UpdatePlatformExperiment because it is the one field that is written *after* the experiment
 // closes, when everything else is frozen. ErrPlatformExperimentNotFound for an id none has.

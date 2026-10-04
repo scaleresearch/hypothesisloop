@@ -229,8 +229,9 @@ type PlatformExperiment struct {
 	// CurrentStage is the 1-based index into Stages of the stage currently running.
 	CurrentStage int `json:"current_stage"`
 	// Summary is the operator's narrative verdict on the finished run, or the platform's record
-	// of the close where none was written by then. Prose only: the standings are derived from
-	// the metrics store on read, never copied here.
+	// of the close where none was written by then, written once every job of it ended and was
+	// billed. Prose only: the standings are derived from the metrics store on read, never copied
+	// here.
 	Summary        string   `json:"summary,omitempty"`
 	SignedUpAgents []string `json:"signed_up_agents,omitempty"`
 	SignupCount    int      `json:"signup_count"`

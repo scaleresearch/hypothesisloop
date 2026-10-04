@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -304,5 +305,58 @@ func TestTheTimeABaselineWaitsOnThePlatformMovesItsDeadline(t *testing.T) {
 	seen(time.Hour)
 	if got := hold(true, 3*time.Hour); !got.Equal(before) {
 		t.Errorf("declared baseline: due moved from %v to %v", before, got)
+	}
+}
+
+// The record of a close states what the experiment spent, and a job still live at the close is
+// billed only when it ends: the record waits for every job to end and be settled.
+func TestACloseIsToRecordOnceEveryJobOfItIsSettled(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	agentID, peID, hypothesisID := seedRun(t, pool, "record", true)
+	exec(t, pool, `UPDATE platform_experiments SET status = 'open' WHERE id = $1`, peID)
+	exec(t, pool, `INSERT INTO experiments
+(actor_kind, id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
+ hypothesis_id, hypothesis, accelerator_type, status, estimated_duration_hours, data_access_key_id, data_secret_access_key)
+VALUES ('agent', 'record-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', 'SUBMITTED', 1, 'AK', 'SK')`, agentID, peID, hypothesisID)
+	if err := pes.ClosePlatformExperiment(ctx, peID, nil); err != nil {
+		t.Fatal(err)
+	}
+	toRecord := func() bool {
+		t.Helper()
+		ids, err := pes.ClosesToRecord(ctx, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		settled, err := pes.JobsSettled(ctx, peID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		listed := false
+		for _, id := range ids {
+			listed = listed || id == peID
+		}
+		if listed != settled {
+			t.Fatalf("listed to record %v, every job settled %v: want the two to agree", listed, settled)
+		}
+		return listed
+	}
+	if toRecord() {
+		t.Fatal("a close whose job is still placed is to record")
+	}
+	exec(t, pool, `UPDATE experiments SET status = 'REJECTED' WHERE id = 'record-job'`)
+	if toRecord() {
+		t.Fatal("a close whose job ended and is not yet settled is to record")
+	}
+	exec(t, pool, `UPDATE experiments SET quota_settled_at = now() WHERE id = 'record-job'`)
+	if !toRecord() {
+		t.Fatal("a close whose every job is settled is not to record")
+	}
+	if err := pes.RecordClose(ctx, peID, "the record"); err != nil {
+		t.Fatal(err)
+	}
+	if ids, err := pes.ClosesToRecord(ctx, time.Hour); err != nil || slices.Contains(ids, peID) {
+		t.Errorf("a close with its record written: to record = %v, %v, want it left out", ids, err)
 	}
 }

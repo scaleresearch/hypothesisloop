@@ -1049,15 +1049,45 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, by *d
 	if err != nil || pe.Status == domain.PlatformExpDraft || closed.Summary != "" {
 		return closed, err
 	}
+	// A job still live at the close is billed when it ends, and a record written before would
+	// state less than consumed_accelerator_hours: RecordCloses writes it once every job settled.
+	settled, err := s.store.JobsSettled(ctx, id)
+	if err != nil || !settled {
+		return closed, err
+	}
 	if err := s.recordClose(ctx, closed); err != nil {
 		return nil, fmt.Errorf("close: %w", err)
 	}
 	return s.stored(ctx, id)
 }
 
-// recordClose writes as the summary of pe, which closed with none after it was open, what the
-// platform knows of it: why it closed, the jobs submitted, each agent's last activity and how
-// its run ended, and the spend. A coordinator still on its last turn writes over it.
+// closeRecordWindow is how long after its close a platform experiment whose jobs have not all
+// settled waits for its record of the close.
+const closeRecordWindow = 24 * time.Hour
+
+// RecordCloses writes the record of the close of every platform experiment Close left without
+// one, because a job of it was still live, once its every job ended and was settled.
+func (s *PlatformExperimentsService) RecordCloses(ctx context.Context) error {
+	ids, err := s.store.ClosesToRecord(ctx, closeRecordWindow)
+	if err != nil {
+		return fmt.Errorf("closes to record: %w", err)
+	}
+	for _, id := range ids {
+		pe, err := s.stored(ctx, id)
+		if err == nil {
+			err = s.recordClose(ctx, pe)
+		}
+		if err != nil {
+			s.logger.Error("record_closes: failed", zap.String("platform_experiment_id", id), zap.Error(err))
+		}
+	}
+	return nil
+}
+
+// recordClose writes as the summary of pe, which closed with none after it was open and whose
+// every job ended and was settled, what the platform knows of it: why it closed, the jobs
+// submitted, each agent's last activity and how its run ended, and the spend, which is then
+// consumed_accelerator_hours whole. A coordinator still on its last turn writes over it.
 func (s *PlatformExperimentsService) recordClose(ctx context.Context, pe *domain.PlatformExperiment) error {
 	why, err := s.closedReason(ctx, pe)
 	if err != nil {
@@ -1084,7 +1114,11 @@ func (s *PlatformExperimentsService) recordClose(ctx context.Context, pe *domain
 	fmt.Fprintf(&record, "Jobs submitted: %d.\n", submitted)
 	fmt.Fprintf(&record, "Spent: %g of the budget of %g accelerator hours.\n\nAgents:\n", *pe.ConsumedAcceleratorHours, pe.BudgetAcceleratorHours)
 	if pe.Coordinator != nil {
-		fmt.Fprintf(&record, "- coordinator: %s; %s.\n", lastActivity(pe.Coordinator.Activity), runEnded(&pe.Coordinator.Instance, nil, ""))
+		ended := runEnded(&pe.Coordinator.Instance, nil, "")
+		if pe.Coordinator.Instance.AskedAt == nil {
+			ended += ": the platform launches a coordinator once the run starts or the experiment waits for it, and this one closed before either, so this record is its summary"
+		}
+		fmt.Fprintf(&record, "- coordinator: %s; %s.\n", lastActivity(pe.Coordinator.Activity), ended)
 	}
 	for _, signup := range signups {
 		if signup.Role == domain.SignupRolePlanner {
@@ -1320,8 +1354,8 @@ func (s *PlatformExperimentsService) tellCoordinator(ctx context.Context, pe *do
 	return s.store.TellCoordinator(ctx, pe.ID, reason)
 }
 
-// StartExpirySweep runs SweepAutoStart, TendBaselines, SweepExpired and TellCoordinators on a
-// ticker until ctx is cancelled. TendBaselines runs before SweepExpired, so a baseline that waited
+// StartExpirySweep runs SweepAutoStart, TendBaselines, SweepExpired, RecordCloses and
+// TellCoordinators on a ticker until ctx is cancelled. TendBaselines runs before SweepExpired, so a baseline that waited
 // on the platform until its deadline is given that time before it is closed.
 func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
@@ -1339,6 +1373,9 @@ func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, inter
 			}
 			if err := s.SweepExpired(ctx); err != nil {
 				s.logger.Error("sweep_expired: scan", zap.Error(err))
+			}
+			if err := s.RecordCloses(ctx); err != nil {
+				s.logger.Error("record_closes: scan", zap.Error(err))
 			}
 			if err := s.TellCoordinators(ctx); err != nil {
 				s.logger.Error("tell_coordinators: scan", zap.Error(err))

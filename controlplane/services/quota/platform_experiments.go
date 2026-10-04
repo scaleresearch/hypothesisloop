@@ -34,6 +34,11 @@ type PlatformExperimentsStore interface {
 	SetPlatformExperimentSummary(ctx context.Context, id, summary string) error
 	// RecordClose writes the summary of a closed platform experiment that has none.
 	RecordClose(ctx context.Context, id, record string) error
+	// JobsSettled says every job of a platform experiment ended and its cost was written.
+	JobsSettled(ctx context.Context, id string) (bool, error)
+	// ClosesToRecord is the platform experiments closed in the last within, after they were open,
+	// with no summary and every job settled.
+	ClosesToRecord(ctx context.Context, within time.Duration) ([]string, error)
 	// TellCoordinator records the status_reason the experiment waits for its coordinator with,
 	// "" for none, and announces one that changed.
 	TellCoordinator(ctx context.Context, id, reason string) error
