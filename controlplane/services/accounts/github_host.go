@@ -2,6 +2,7 @@ package accounts
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -124,6 +125,22 @@ func (h *GitHubHost) File(ctx context.Context, projectID, repository, path strin
 		return nil, refusal(h.logger, op, err, http.StatusUnprocessableEntity)
 	}
 	return data, nil
+}
+
+func (h *GitHubHost) Head(ctx context.Context, projectID, repository string) (string, error) {
+	const op = "read-repository-head"
+	token, err := h.token(ctx, projectID, repository, github.Read)
+	if err != nil {
+		return "", refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+	}
+	sha, err := h.github.Head(ctx, token)
+	if errors.Is(err, github.ErrEmptyRepository) {
+		return "", githost.EmptyRepository(repository)
+	}
+	if err != nil {
+		return "", refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+	}
+	return sha, nil
 }
 
 // Credential mints an installation token for the one repository. The repository is one a

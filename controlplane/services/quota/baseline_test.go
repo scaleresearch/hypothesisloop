@@ -35,7 +35,7 @@ func measuredBaseline() *Baseline {
 	return &Baseline{
 		Job: &domain.Experiment{ID: "job-1", AgentID: "ag-baseline", PlatformExperimentID: "pe-1", Status: domain.StatusCompleted, CodeRef: "git://seed@abc",
 			AcceleratorType: "h100", AcceleratorCount: 2, EstimatedDurationHours: 5},
-		OwnerRole: domain.SignupRoleBaseline, Finding: true, Reported: map[string]float64{"val_loss": 1.8, "exact_match": 1}, ObservedHours: 0.2,
+		OwnerRole: domain.SignupRoleBaseline, Finding: true, Values: map[string]float64{"val_loss": 1.8, "exact_match": 1}, ObservedHours: 0.2,
 	}
 }
 
@@ -78,7 +78,7 @@ var theCoordinator = auth.Principal{Kind: auth.KindCoordinator, OrgIDs: []string
 
 // theMeasuredBlock is what the platform writes into the brief of an experiment whose baseline is
 // measuredBaseline.
-const theMeasuredBlock = "\n\n" + measuredBaselineHeader + "\njob: job-1\ncode_ref: git://seed@abc\nmeasured: val_loss = 1.8, exact_match = 1"
+const theMeasuredBlock = "\n\n" + baselineHeader + "\njob: job-1\ncode_ref: git://seed@abc\nmeasured: val_loss = 1.8, exact_match = 1"
 
 // A baseline was something only a draft's planner could give an experiment, inside its proposal.
 // It is declared on the open experiment, by its coordinator or its owner, and the platform reads
@@ -115,8 +115,8 @@ func TestABaselineIsDeclaredOnAnOpenExperimentAndCheckedAgainstTheJob(t *testing
 		"a job of another experiment":     {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Job.PlatformExperimentID = "pe-other" }, "no_baseline"},
 		"a job that failed":               {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Job.Status = domain.StatusFailed }, "baseline_not_completed"},
 		"nothing filed":                   {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Finding = false }, "baseline_without_finding"},
-		"a metric the job never reported": {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { delete(b.Reported, "val_loss") }, "baseline_missing_metric"},
-		"a gate the baseline fails":       {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Reported["exact_match"] = 0.97 }, "baseline_breaks_constraint"},
+		"a metric the job never reported": {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { delete(b.Values, "val_loss") }, "baseline_missing_metric"},
+		"a gate the baseline fails":       {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Values["exact_match"] = 0.97 }, "baseline_breaks_constraint"},
 		// The baseline cost 0.4 and a trial holds 0.6, its estimate: a budget of 1 covered the
 		// cost twice and neither researcher's first job.
 		"a budget below one trial apiece": {declaration, func(_ *Baseline, pe *domain.PlatformExperiment) { pe.BudgetAcceleratorHours = 1 }, "budget_below_baseline"},

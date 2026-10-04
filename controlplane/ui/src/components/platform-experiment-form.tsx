@@ -45,6 +45,8 @@ interface FormState {
   starts_at: string
   duration_hours: string
   metrics: MetricDefinition[]
+  // null has an agent measure the baseline. Otherwise the value typed for each ranking metric.
+  baseline: Record<string, string> | null
   // Empty is the platform's default.
   report_interval_seconds: string
   // null is the platform's default ladder.
@@ -68,6 +70,9 @@ function toDrafts(stages: Stage[]): StageDraft[] {
     max_job_hours: s.max_job_hours ? String(s.max_job_hours) : '',
   }))
 }
+
+// The metrics a stated baseline gives a value of, as the API requires them.
+const ranked = (metrics: MetricDefinition[]) => metrics.filter(m => !m.role || m.role === 'ranking')
 
 // An empty max_job_hours means "no limit" and parses to 0; an empty length/evict is a genuine
 // gap that stagesError reports.
@@ -300,6 +305,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
     starts_at: !isZeroDate(initial?.starts_at) ? new Date(initial!.starts_at!).toISOString().slice(0, 16) : '',
     duration_hours: String(initial?.duration_hours ?? NEW_EXPERIMENT.duration_hours),
     metrics: initial?.metrics ?? [],
+    baseline: null,
     report_interval_seconds: initial?.report_interval_seconds ? String(initial.report_interval_seconds) : '',
     stages: initial?.stages?.length ? toDrafts(initial.stages) : null,
     repository: initial?.repository ?? '',
@@ -358,6 +364,8 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
     if (Number(form.duration_hours) <= 0) return 'Duration must be greater than 0.'
     if (Number(form.budget_accelerator_hours) <= 0) return 'Budget must be greater than 0.'
     if (!isEdit && Number(form.max_agents) < 1) return 'At least one researcher.'
+    const baseline = form.baseline
+    if (!isEdit && baseline && ranked(form.metrics).some(m => (baseline[m.key] ?? '').trim() === '' || !Number.isFinite(Number(baseline[m.key])))) return 'Give the baseline as a number for every metric.'
     return null
   }
 
@@ -415,6 +423,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
         ...(form.stages ? { stages: toStages(form.stages) } : {}),
         ...repositoryFields(form.repository),
         ...(form.agent_image.trim() ? { agent_image: form.agent_image.trim() } : {}),
+        ...(form.baseline ? { stated_baseline: Object.fromEntries(ranked(form.metrics).map(m => [m.key, Number(form.baseline![m.key])])) } : {}),
         duration_hours: Number(form.duration_hours),
       }
       const { experiment, failure } = await createAndRun(project.id, payload, Number(form.max_agents))
@@ -491,6 +500,30 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
                   <MetricsEditor metrics={form.metrics} onChange={m => set('metrics', m)} />
                 )}
               </FieldGroup>
+              {!isEdit && (
+                <FieldGroup
+                  label="Baseline"
+                  hint={<>What researchers are ranked against.<More>An agent measures it on the repository before the run starts. Given here, no agent is created and the run starts once its researchers join, each job stating its own expected length.</More></>}
+                >
+                  <div className="grid gap-3">
+                    <Segmented
+                      label="Baseline"
+                      size="sm"
+                      options={[{ value: 'measured', label: 'Measured by an agent' }, { value: 'stated', label: 'I\'ll give it' }]}
+                      value={form.baseline ? 'stated' : 'measured'}
+                      onChange={v => set('baseline', v === 'stated' ? {} : null)}
+                    />
+                    {form.baseline && ranked(form.metrics).map(m => (
+                      <FormField key={m.key} label={m.key}>
+                        <Input
+                          type="number" className="w-40" step="any" value={form.baseline![m.key] ?? ''}
+                          onChange={e => set('baseline', { ...form.baseline, [m.key]: e.target.value })}
+                        />
+                      </FormField>
+                    ))}
+                  </div>
+                </FieldGroup>
+              )}
               <FormField label="Duration (hours)" hint={lockedWhileRunning ? LOCKED : 'Counted from the start.'}>
                 <Input type="number" className="w-40" min={0} step="any" value={form.duration_hours} disabled={lockedWhileRunning} onChange={e => set('duration_hours', e.target.value)} />
               </FormField>

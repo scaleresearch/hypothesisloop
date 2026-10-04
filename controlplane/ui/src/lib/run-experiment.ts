@@ -29,7 +29,7 @@ const said = (error: unknown) => (error instanceof Error ? error.message : Strin
 /**
  * Creates a platform experiment the platform runs: the experiment with a hosted coordinator and
  * no start time, then one hosted agent a call. The platform starts it by itself once its
- * coordinator has had the baseline measured and declared it. The calls are made in order and one
+ * baseline is declared: stated in the request, or measured and declared. The calls are made in order and one
  * at a time. A refused create rejects and nothing exists. Any later refusal ends the run where it
  * is: nothing is undone or tried again, and the outcome names the step, for the experiment's page
  * to finish from.

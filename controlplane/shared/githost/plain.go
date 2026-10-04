@@ -3,9 +3,11 @@ package githost
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,29 +49,82 @@ func (p *Plain) Reachable(ctx context.Context, _, repository string) (string, er
 	if !plainRepository.MatchString(repository) || len(repository) > 200 {
 		return "", api.Refuse(http.StatusUnprocessableEntity, "invalid_repository", "repository must be the name of a repository under "+p.base.String()+": path segments of letters, digits, '.', '_' and '-'")
 	}
+	if _, err := p.refs(ctx, repository); err != nil {
+		return "", err
+	}
+	return repository, nil
+}
+
+// Head reads the commit HEAD names in the repository's refs, the first one git advertises.
+func (p *Plain) Head(ctx context.Context, _, repository string) (string, error) {
+	advertised, err := p.refs(ctx, repository)
+	if err != nil {
+		return "", err
+	}
+	if sha, ok := advertisedHead(advertised); ok {
+		return sha, nil
+	}
+	return "", EmptyRepository(repository)
+}
+
+// maxAdvertisedHead is how much of the refs Head reads: HEAD comes first.
+const maxAdvertisedHead = 64 << 10
+
+// refs is the start of the host's answer to git's request for the repository's refs.
+func (p *Plain) refs(ctx context.Context, repository string) ([]byte, error) {
 	address := p.URL(repository)
 	notReachable := func(why string) error {
 		return api.Refuse(http.StatusUnprocessableEntity, "repository_not_reachable", "no repository answers git at "+address+" ("+why+"): it is created on the git host before a platform experiment names it")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address+"/info/refs?service=git-upload-pack", nil)
 	if err != nil {
-		return "", notReachable("the address is not one")
+		return nil, notReachable("the address is not one")
 	}
 	if p.username != "" {
 		req.SetBasicAuth(p.username, p.password)
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return "", notReachable("the host did not answer")
+		return nil, notReachable("the host did not answer")
 	}
 	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != http.StatusOK {
-		return "", notReachable(fmt.Sprintf("HTTP %d", resp.StatusCode))
+		return nil, notReachable(fmt.Sprintf("HTTP %d", resp.StatusCode))
 	}
 	if resp.Header.Get("Content-Type") != "application/x-git-upload-pack-advertisement" {
-		return "", notReachable("the answer is not git's")
+		return nil, notReachable("the answer is not git's")
 	}
-	return repository, nil
+	advertised, err := io.ReadAll(io.LimitReader(resp.Body, maxAdvertisedHead))
+	if err != nil {
+		return nil, notReachable("the answer could not be read")
+	}
+	return advertised, nil
+}
+
+// advertisedHead is the commit of the HEAD line of a smart HTTP ref advertisement: pkt-lines, each
+// four hex digits of length and then "<sha> <ref>", the first ref followed by NUL and the
+// capabilities. A repository with no commit advertises no HEAD.
+func advertisedHead(advertised []byte) (string, bool) {
+	for len(advertised) >= 4 {
+		length, err := strconv.ParseUint(string(advertised[:4]), 16, 16)
+		if err != nil {
+			return "", false
+		}
+		if length < 4 {
+			advertised = advertised[4:]
+			continue
+		}
+		if int(length) > len(advertised) {
+			return "", false
+		}
+		line := strings.TrimSuffix(string(advertised[4:length]), "\n")
+		advertised = advertised[length:]
+		line, _, _ = strings.Cut(line, "\x00")
+		if sha, ref, ok := strings.Cut(line, " "); ok && ref == "HEAD" {
+			return sha, true
+		}
+	}
+	return "", false
 }
 
 func (p *Plain) Create(context.Context, string, string, string, string, map[string]string) (string, error) {

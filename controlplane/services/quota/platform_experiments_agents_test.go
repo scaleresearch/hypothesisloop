@@ -70,6 +70,10 @@ func (f *rosterStore) File(context.Context, string, string, string) ([]byte, err
 	return nil, nil
 }
 
+func (f *rosterStore) Head(context.Context, string, string) (string, error) {
+	panic("the handler read the head of a repository")
+}
+
 func (f *rosterStore) Credential(context.Context, string, string, bool) (*githost.Credential, error) {
 	return nil, nil
 }

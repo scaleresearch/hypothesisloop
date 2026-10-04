@@ -456,6 +456,8 @@ export interface CreatePlatformExperimentRequest {
   agent_image?: string
   /** true has the platform run the coordinator. It needs `repository`. Read at creation only. */
   coordinator_hosted?: boolean
+  /** The baseline by metric key, a value of every ranking metric, in place of an agent measuring it. */
+  stated_baseline?: Record<string, number>
 }
 
 /** What a repository's .hypothesisloop/experiment.yaml states of a platform experiment. */

@@ -22,6 +22,10 @@ func (worldRepositories) File(context.Context, string, string, string) ([]byte, 
 	panic("the handler read a file from the git host")
 }
 
+func (worldRepositories) Head(context.Context, string, string) (string, error) {
+	panic("the handler read the head of a repository")
+}
+
 func (worldRepositories) Credential(context.Context, string, string, bool) (*githost.Credential, error) {
 	panic("the handler asked for a git credential")
 }
