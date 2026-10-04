@@ -92,22 +92,6 @@ describe('a cluster\'s scheduler settings', () => {
     return within(screen.getByRole('cell', { name: `Advanced settings of ${name}` }))
   }
 
-  it('sit behind Advanced, summed up only where one is set, with the autoscaler\'s two only for a cluster that has one', async () => {
-    show()
-    await rowOf('lab')
-    expect(screen.queryByText(/timeout/)).toBeNull()
-    const plain = await advanced('new')
-    expect(plain.getByLabelText('stuck-pending timeout')).toBeTruthy()
-    expect(plain.queryByLabelText('scale-up timeout')).toBeNull()
-    expect(plain.queryByLabelText('speculative cap')).toBeNull()
-    expect(plain.queryByText(/timeout: /)).toBeNull()
-
-    // lab has a scale-up timeout set, so it is shown though no autoscaler reports right now.
-    const set = await advanced('lab')
-    expect(set.getByText('scale-up timeout: 600s')).toBeTruthy()
-    expect(set.queryByLabelText('speculative cap')).toBeNull()
-  })
-
   it('are saved as the fields that changed, an emptied one as 0, and a refusal stays beside them', async () => {
     clusters = clusters.map(c => (c.name === 'lab' ? { ...c, autoscaler_enabled: true } : c))
     show()

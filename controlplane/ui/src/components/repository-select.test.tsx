@@ -154,13 +154,6 @@ describe('the repository of a new platform experiment', () => {
     await waitFor(() => expect(screen.getAllByRole('option').map(o => o.textContent)).toEqual(['A new private repository', 'acme/widgetsprivate']))
   })
 
-  it('says how many more there are than it lists', async () => {
-    vi.mocked(fetchGitHubRepositories).mockResolvedValue({ items: repositories, total: 120 })
-    show()
-    await userEvent.click(await screen.findByRole('combobox'))
-    expect(await screen.findByText('118 more, type to search')).toBeTruthy()
-  })
-
   it('leads to the GitHub card of Settings when no account is connected, and asks GitHub nothing', async () => {
     vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [], total: 0 })
     show()

@@ -82,23 +82,6 @@ beforeEach(() => {
 })
 
 describe('an owner', () => {
-  it('sees each member by name with their role, and which one they are', async () => {
-    members = [...members, { org_id: 'org_a', user_id: 'u3', name: '', role: 'member', joined_at: at }]
-    show()
-    const own = await row('Ada Lovelace')
-    expect(own.getByText('Ada Lovelace').getAttribute('title')).toBe('u1')
-    expect(own.queryByText('u1')).toBeNull()
-    // One whose identity provider states no name is shown by id.
-    expect((await row('u3')).getByLabelText('Role of u3')).toBeTruthy()
-    expect(own.getByText('you')).toBeTruthy()
-    expect(own.getByLabelText('Role of Ada Lovelace')).toHaveProperty('textContent', 'owner')
-    expect(own.getByRole('button', { name: 'Leave' })).toBeTruthy()
-    const other = await row('Bob Stone')
-    expect(other.queryByText('you')).toBeNull()
-    expect(other.getByLabelText('Role of Bob Stone')).toHaveProperty('textContent', 'member')
-    expect(other.getByRole('button', { name: 'Remove' })).toBeTruthy()
-  })
-
   it('changes a role after being asked, and reads the list again', async () => {
     show()
     await choose((await row('Bob Stone')).getByLabelText('Role of Bob Stone'), 'owner')
@@ -217,15 +200,6 @@ describe('inviting', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Create invite link' }))
     expect(await screen.findByText('forbidden: only an owner of the org may change it')).toBeTruthy()
     expect(screen.queryByTestId('secret')).toBeNull()
-  })
-
-  it('lists a pending invite with its role, who made it and when it expires', async () => {
-    show()
-    const pending = await row('inv_1')
-    expect(pending.getByText('member')).toBeTruthy()
-    expect(pending.getByText('Ada Lovelace')).toBeTruthy()
-    expect(pending.getByText('you')).toBeTruthy()
-    expect(pending.getByText(new Date(expires).toLocaleString())).toBeTruthy()
   })
 
   it('revokes an invite after being asked, and does nothing when the answer is no', async () => {

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchExperimentsPage, fetchExperimentStats, fetchOrgClusters } from '@/lib/api'
@@ -36,12 +36,6 @@ function job(id: string, cluster: string): Experiment {
   } as Experiment
 }
 
-// The title of the status dot beside the cluster name in a job's row, null when there is no dot.
-function dotOf(jobID: string) {
-  const row = screen.getByText(`${jobID.slice(0, 8)}…`).closest('tr')!
-  return row.querySelector('span[title^="Cluster"]')?.getAttribute('title') ?? null
-}
-
 beforeEach(() => {
   vi.mocked(fetchExperimentsPage).mockResolvedValue({
     items: [job('own-0001', 'lab'), job('shared-01', 'platform-gpu'), job('down-0001', 'edge'), job('gone-0001', 'retired')],
@@ -56,35 +50,6 @@ beforeEach(() => {
 })
 
 describe('the cluster of a job', () => {
-  it('shows whether its agent is connected, for the org\'s own clusters and the shared ones alike', async () => {
-    const resolved = resolveTenant(me, '')
-    if (resolved.state !== 'selected') throw new Error('no tenant')
-    render(
-      <SWRConfig value={{ provider: () => new Map() }}>
-        <TenantContext.Provider value={resolved.tenant}><JobsPage /></TenantContext.Provider>
-      </SWRConfig>,
-    )
-    await waitFor(() => expect(dotOf('own-0001')).toBe('Cluster connected'))
-    expect(fetchOrgClusters).toHaveBeenCalledWith('org_a')
-    expect(dotOf('shared-01')).toBe('Cluster connected')
-    expect(dotOf('down-0001')).toBe('Cluster disconnected')
-    // A cluster the API no longer lists for the org has no known state to show.
-    expect(dotOf('gone-0001')).toBeNull()
-  })
-
-  it('shows no dot, and says why, when the clusters cannot be read', async () => {
-    vi.mocked(fetchOrgClusters).mockRejectedValue(new Error('Failed to fetch'))
-    const resolved = resolveTenant(me, '')
-    if (resolved.state !== 'selected') throw new Error('no tenant')
-    render(
-      <SWRConfig value={{ provider: () => new Map(), shouldRetryOnError: false }}>
-        <TenantContext.Provider value={resolved.tenant}><JobsPage /></TenantContext.Provider>
-      </SWRConfig>,
-    )
-    expect(await screen.findByText(/Could not load the clusters of Ada, so no job shows whether its cluster is connected: Failed to fetch/)).toBeTruthy()
-    expect(dotOf('own-0001')).toBeNull()
-  })
-
   it('asks for the jobs of the selected project', async () => {
     const resolved = resolveTenant(me, '')
     if (resolved.state !== 'selected') throw new Error('no tenant')

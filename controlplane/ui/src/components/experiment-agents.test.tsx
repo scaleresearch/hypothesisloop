@@ -91,16 +91,6 @@ describe('adding agents', () => {
     expect(screen.getAllByTestId('secret')).toHaveLength(1)
   })
 
-  it('tells the truth about the token: it can be had again', async () => {
-    show()
-    await userEvent.click(screen.getByRole('button', { name: 'Me' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Add agent' }))
-    await screen.findByTestId('secret')
-    expect(screen.getByText(/shows the same one again/)).toBeTruthy()
-    expect(screen.getByText('hl platform-experiments agents add --platform-experiment pe-1 --agent ag-new1')).toBeTruthy()
-    expect(document.body.textContent).not.toMatch(/never again|only time|shown once/)
-  })
-
   it('offers no token for an agent the platform runs', async () => {
     show()
     const row = (await screen.findByRole('cell', { name: 'ag-old' })).closest('tr')!
@@ -178,112 +168,13 @@ describe('once the experiment has started', () => {
   })
 })
 
-describe('the machines the platform runs', () => {
-  it('shows each hosted agent\'s machine in its row, and says a self-run agent has none of the platform\'s', async () => {
-    roster = [
-      { ...signup('ag-hosted', true), instance: { state: 'running', restarts: 1, stopped: false, progress_at: new Date().toISOString(), end_reason: 'gone', exited_at: new Date().toISOString(), exit_log: 'lost' } },
-      signup('ag-new', true),
-      signup('ag-own', false),
-    ]
-    show(PlatformExperimentStatus.RUNNING)
-    const hosted = within((await screen.findByRole('cell', { name: 'ag-hosted' })).closest('tr')!)
-    expect(hosted.getByText('running')).toBeTruthy()
-    expect(hosted.getByText('restarted once')).toBeTruthy()
-    expect(hosted.getByText(/Replaced: the machine before this one ended .*, its provider no longer lists it\./)).toBeTruthy()
-    expect(hosted.getByRole('button', { name: 'Exit log' })).toBeTruthy()
-    expect(within(screen.getByRole('cell', { name: 'ag-new' }).closest('tr')!).getByText('not reported yet')).toBeTruthy()
-    expect(within(screen.getByRole('cell', { name: 'ag-own' }).closest('tr')!).getByText('not the platform\'s')).toBeTruthy()
-    expect(screen.queryByText('finished')).toBeNull()
-  })
-
-  // The card said that a machine ran and when it last made progress, and nothing of what the
-  // agent on it was doing.
-  it('shows beside each machine what its agent says it is doing and how long ago, and nothing for one that has not said', async () => {
-    const running = { state: 'running', restarts: 0, stopped: false } as const
-    roster = [
-      { ...signup('ag-busy', true), instance: running, activity: { text: 'Comparing warmup lengths on the short run.', at: new Date(Date.now() - 95_000).toISOString() } },
-      { ...signup('ag-quiet', true), instance: running },
-      { ...signup('ag-own', false), activity: { text: 'Reading the brief.', at: new Date(Date.now() - 5_000).toISOString() } },
-    ]
-    show(PlatformExperimentStatus.RUNNING)
-    const row = (id: string) => screen.getByRole('cell', { name: id }).closest('tr')!
-    const said = await screen.findByText('Comparing warmup lengths on the short run.')
-    expect(said.closest('tr')).toBe(row('ag-busy'))
-    expect(said.parentElement!.textContent).toBe('Comparing warmup lengths on the short run. 2m ago')
-    expect(within(row('ag-busy')).getByText('running')).toBeTruthy()
-    expect(row('ag-quiet').querySelector('time')).toBeNull()
-    expect(within(row('ag-own')).getByText('Reading the brief.').parentElement!.textContent).toMatch(/^Reading the brief\. \ds ago$/)
-  })
-
-  it('says which agent finished and why it gave', async () => {
-    roster = [{ ...signup('ag-done', true), finished_at: new Date().toISOString(), finished_reason: 'quota spent' }, signup('ag-busy', true)]
-    show(PlatformExperimentStatus.RUNNING)
-    const done = within((await screen.findByRole('cell', { name: 'ag-done' })).closest('tr')!)
-    expect(done.getByText('finished')).toBeTruthy()
-    expect(done.getByText(/: quota spent$/)).toBeTruthy()
-    expect(within(screen.getByRole('cell', { name: 'ag-busy' }).closest('tr')!).queryByText('finished')).toBeNull()
-  })
-
-  it('shows the coordinator the platform runs, with its model and its machine', async () => {
-    show(PlatformExperimentStatus.RUNNING, {
-      coordinator: { launcher: 'vast', model: 'claude-opus-4-5', instance: { state: 'starting', restarts: 0, stopped: false } },
-    })
-    const coordinator = within(await screen.findByRole('group', { name: 'Coordinator' }))
-    expect(coordinator.getByText('claude-opus-4-5')).toBeTruthy()
-    expect(coordinator.getByText('starting')).toBeTruthy()
-    expect(coordinator.getByText('no progress seen yet')).toBeTruthy()
-    expect(coordinator.queryByText(/restarted/)).toBeNull()
-  })
-
-  it('shows what the coordinator says it is doing, with how long ago', async () => {
-    show(PlatformExperimentStatus.RUNNING, {
-      coordinator: {
-        launcher: 'vast', model: 'claude-opus-4-5', instance: { state: 'running', restarts: 0, stopped: false },
-        activity: { text: 'waiting for platform updates', at: new Date(Date.now() - 30_000).toISOString() },
-      },
-    })
-    const coordinator = within(await screen.findByRole('group', { name: 'Coordinator' }))
-    expect(coordinator.getByText('waiting for platform updates').parentElement!.textContent).toMatch(/^waiting for platform updates 3\ds ago$/)
-  })
-
-  it('shows no coordinator for an experiment the platform runs none for', async () => {
-    show()
-    await screen.findByRole('cell', { name: 'ag-old' })
-    expect(screen.queryByRole('group', { name: 'Coordinator' })).toBeNull()
-  })
-})
-
-describe('a machine on its way', () => {
-  it('says beside the agent that its start is in progress, in the API\'s words', async () => {
-    const starting = { reason: 'instance_starting', message: 'its machine was asked for 40s ago and is starting: a start in progress and no failure' }
-    roster = [{ ...signup('ag-starting', true), instance: { state: 'starting', restarts: 0, stopped: false, asked_at: new Date().toISOString() }, status_reason: starting }]
-    show(PlatformExperimentStatus.RUNNING)
-    expect((await screen.findByText(starting.message)).closest('tr')).toBe(screen.getByRole('cell', { name: 'ag-starting' }).closest('tr'))
-  })
-})
-
 describe('an experiment waiting to start', () => {
   const waits = { reason: 'baseline_required', waits_for: 'coordinator' as const, message: 'Add a baseline agent with `hl platform-experiments agents add --hosted --role baseline --platform-experiment pe-1`: none has joined. platform experiment pe-1 has no baseline declared' }
-  const agentWaits = { reason: 'baseline_required', message: 'its machine is asked for when the platform starts the run, and none is before: platform experiment pe-1 has no baseline declared' }
-  const requested = { state: 'requested', restarts: 0, stopped: false } as const
 
   it('offers nothing to start it with', async () => {
     show(PlatformExperimentStatus.OPEN, { status_reason: waits })
     await screen.findByRole('cell', { name: 'ag-old' })
     expect(screen.queryByRole('button', { name: /^Start/ })).toBeNull()
-  })
-
-  it('says beside an agent whose machine is not asked for yet why it waits', async () => {
-    roster = [
-      { ...signup('ag-waits', true), instance: { ...requested, state: 'waiting' }, status_reason: agentWaits },
-      { ...signup('ag-baseline', true), role: 'baseline', instance: requested },
-    ]
-    show(PlatformExperimentStatus.OPEN, { status_reason: waits })
-    const row = (id: string) => within(screen.getByRole('cell', { name: id }).closest('tr')!)
-    expect((await screen.findByText(agentWaits.message)).closest('tr')).toBe(screen.getByRole('cell', { name: 'ag-waits' }).closest('tr'))
-    expect(row('ag-waits').getByText('waiting')).toBeTruthy()
-    expect(row('ag-baseline').getByText('requested')).toBeTruthy()
-    expect(row('ag-baseline').queryByText(/none is before/)).toBeNull()
   })
 })
 

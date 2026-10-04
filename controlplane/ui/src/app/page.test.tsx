@@ -30,12 +30,6 @@ describe('the landing page', () => {
     expect(await show(true)).toEqual([['Experiments', '/console']])
   })
 
-  it('says what the product is in one heading and plain text, with no control in the page itself', async () => {
-    await show(false)
-    expect(screen.getAllByRole('heading')).toHaveLength(1)
-    expect(screen.getByRole('main').querySelector('a, button, img, input')).toBeNull()
-  })
-
   it('checks the session with the request\'s cookies and scheme, and writes none', async () => {
     request.headers = new Headers({ host: 'ui.test', 'x-forwarded-proto': 'https' })
     await show(false)

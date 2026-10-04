@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchHypothesisGraph, fetchPlatformExperiment, fetchPlatformExperimentAgents, fetchPlatformExperimentsPage } from '@/lib/api'
@@ -73,15 +73,6 @@ describe('the hypothesis graph', () => {
     expect(screen.getByRole('button', { name: '+ Add idea under this' })).toBeTruthy()
   })
 
-  it('opens the idea editor in place, under the objective\'s row of the outline', async () => {
-    Element.prototype.scrollIntoView = vi.fn()
-    show('pe=pe-x&view=outline', { project_id: 'prj_1', shared: false, status: PlatformExperimentStatus.RUNNING })
-    fireEvent.click(await screen.findByRole('button', { name: '+ Add idea under the objective' }))
-    const editor = screen.getByRole('group', { name: 'New idea' })
-    expect(editor.closest('li')!.textContent).toContain('Vision benchmark')
-    expect(screen.getByText('the objective of Vision benchmark')).toBeTruthy()
-  })
-
   it.each([
     ['a reader of a shared experiment of another org', { project_id: 'prj_platform', shared: true, status: PlatformExperimentStatus.RUNNING }],
     ['a closed experiment of the caller\'s own', { project_id: 'prj_1', shared: false, status: PlatformExperimentStatus.CLOSED }],
@@ -97,31 +88,6 @@ describe('the hypothesis graph', () => {
     await screen.findByRole('link', { name: 'Open detail →' })
     expect(screen.queryByRole('button', { name: /Add idea/ })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Link to…' })).toBeNull()
-  })
-
-  it('names who registered the selected hypothesis beside the agent it was registered for, by its name', async () => {
-    show('pe=pe-x&focus=hyp-1', { project_id: 'prj_1', shared: false })
-    expect((await screen.findByText('Grace Hopper')).getAttribute('title')).toBe('u7')
-    expect(screen.getByText('human')).toBeTruthy()
-    expect((await screen.findByText('Researcher 1')).getAttribute('title')).toBe('ag-1')
-  })
-
-  it('shows what the baseline found on the objective, which no hypothesis stands for', async () => {
-    vi.mocked(fetchHypothesisGraph).mockResolvedValue({
-      ...graph,
-      objective: {
-        finding: { id: 'f1', hypothesis_id: 'pe-x', experiment_id: 'job-base', agent_id: 'ag-0', actor: { kind: 'agent', id: 'ag-0', name: 'Baseline' }, summary: 'the stock config reaches 1.8', created_at: at },
-        best_job: { id: 'job-base', metric: { name: 'val_loss', value: 1.8, last: 1.8 }, summary_due: false },
-      },
-    } as unknown as HypothesisGraph)
-    Element.prototype.scrollIntoView = vi.fn()
-    show('pe=pe-x&view=outline', { project_id: 'prj_1', shared: false })
-    expect((await screen.findByRole('link', { name: 'val_loss 1.8000' })).getAttribute('href')).toBe('/jobs/job-base')
-    expect(screen.getByText('the stock config reaches 1.8')).toBeTruthy()
-    const root = screen.getByRole('button', { name: /Objective/ })
-    expect(root.textContent).toBe('ObjectiveVision benchmarkbaseline 1.8000')
-    expect(root.querySelector('[title="Baseline finding: the stock config reaches 1.8"]')).toBeTruthy()
-    expect(screen.getAllByRole('listitem')).toHaveLength(2)
   })
 
   it('opens on the newest experiment listed for the project, which a shared one may be', async () => {

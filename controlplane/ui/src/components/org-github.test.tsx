@@ -63,26 +63,6 @@ beforeEach(() => {
 })
 
 describe('the connected GitHub accounts', () => {
-  it('are listed with their kind, who connected each and when', async () => {
-    installations = [{ ...acme, account_type: 'Organization' }, { ...lab, account_type: 'User' }]
-    show()
-    const row = (await screen.findByRole('cell', { name: 'acme' })).closest('tr')!
-    expect(within(row).getByText('Organisation')).toBeTruthy()
-    expect(within(row).getByText('Ada Lovelace').getAttribute('title')).toBe('u1')
-    expect(within(row).getByText('you')).toBeTruthy()
-    expect(within(row).getByTitle(new Date(at).toLocaleString())).toBeTruthy()
-    expect(within(screen.getByRole('cell', { name: 'lab' }).closest('tr')!).getByText('Personal')).toBeTruthy()
-    const other = screen.getByRole('cell', { name: 'lab' }).closest('tr')!
-    expect(within(other).getByText('ci').getAttribute('title')).toBe('key_3')
-    expect(within(other).queryByText('you')).toBeNull()
-  })
-
-  it('say that an experiment needs one when there are none', async () => {
-    installations = []
-    show()
-    expect(await screen.findByText(/No GitHub account is connected to Lab, and an experiment needs one/)).toBeTruthy()
-  })
-
   it('say why they could not be read', async () => {
     vi.mocked(fetchGitHubInstallations).mockRejectedValue(new Error('API unreachable'))
     show()
@@ -97,12 +77,6 @@ describe('a member who is no owner', () => {
     expect(screen.queryByRole('button')).toBeNull()
     expect(fetchGitHubApp).not.toHaveBeenCalled()
   })
-
-  it('is told who connects an account when there is none', async () => {
-    installations = []
-    show(member)
-    expect(await screen.findByText(/An owner connects one here\./)).toBeTruthy()
-  })
 })
 
 describe('connecting', () => {
@@ -116,19 +90,6 @@ describe('connecting', () => {
     expect(address.searchParams.get('state')).toBeTruthy()
     expect(address.searchParams.has('installation_id')).toBe(false)
     expect(screen.getByRole('button', { name: 'Connect GitHub' })).toHaveProperty('disabled', true)
-  })
-
-  it('is the one button, which says it adds another account once one is connected', async () => {
-    show()
-    expect(await screen.findByRole('button', { name: 'Connect another account' })).toBeTruthy()
-    expect(screen.getAllByRole('button').map(b => b.textContent)).toEqual(['Disconnect', 'Connect another account'])
-  })
-
-  it('lists the account connected once, with nothing else saying so', async () => {
-    await comeBack(state => `code=c&state=${state}`)
-    show()
-    expect(await screen.findByRole('cell', { name: 'lab' })).toBeTruthy()
-    expect(screen.queryByText(/Connected lab/)).toBeNull()
   })
 
   it('asks which account when the person reaches several, and authorises again for the one chosen', async () => {

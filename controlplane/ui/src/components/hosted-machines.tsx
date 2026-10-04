@@ -12,7 +12,7 @@ const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`
  * first minutes after an experiment starts show no hypothesis, no job and no metric, and this
  * is what says that something is happening.
  */
-export function machinesStatus(instances: AgentInstance[], jobs: number): { now: string; next: string } | null {
+function machinesStatus(instances: AgentInstance[], jobs: number): { now: string; next: string } | null {
   if (instances.length === 0) return null
   const count = (state: AgentInstance['state']) => instances.filter(i => i.state === state).length
   const parts = [

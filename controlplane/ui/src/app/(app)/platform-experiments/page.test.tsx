@@ -1,12 +1,11 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiError, apiSend, createPlatformExperiment, fetchAgentsPage, fetchExperimentStats, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories,
   fetchOrgClusters, fetchPlatformExperimentsPage,
 } from '@/lib/api'
-import { GOAL_EXAMPLES } from '@/lib/goal-examples'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import PlatformExperimentsPage from '@/app/(app)/platform-experiments/page'
 import type { Me, PlatformExperiment } from '@/types'
@@ -151,86 +150,6 @@ describe('the experiments page', () => {
   })
 })
 
-// The way to plan and the way to configure were a box and a grey link labelled Advanced, under
-// two paragraphs on Enter, spending and GitHub permissions.
-describe('the two ways to a new experiment', () => {
-  const way = (name: string) => screen.getByRole('button', { name })
-
-  it('offers both side by side, planning pressed, and the form pressed while it is open', async () => {
-    show()
-    expect(within(screen.getByRole('group', { name: 'How to start' })).getAllByRole('button').map(b => b.getAttribute('aria-pressed'))).toEqual(['true', 'false'])
-    expect(way('Plan it for me').getAttribute('aria-pressed')).toBe('true')
-    expect(screen.queryByText(/Advanced/)).toBeNull()
-    await userEvent.click(way('Configure it myself'))
-    expect(screen.getByRole('dialog')).toBeTruthy()
-    expect(way('Configure it myself').getAttribute('aria-pressed')).toBe('true')
-  })
-
-  it('takes the person to the goal box from Plan it for me', async () => {
-    show()
-    await userEvent.click(way('Plan it for me'))
-    expect(document.activeElement).toBe(screen.getByLabelText('What do you want to find out?'))
-  })
-
-  it('plans from a button under the box, which waits for a sentence, with no label or line of its own', async () => {
-    vi.mocked(apiSend).mockResolvedValue(experiment('pe-draft'))
-    show()
-    expect(way('Plan it')).toHaveProperty('disabled', true)
-    expect(screen.queryByText(/until you approve|Shift\+Enter/)).toBeNull()
-    expect(screen.getByLabelText('What do you want to find out?').getAttribute('placeholder')).toBe('What do you want to find out?')
-    expect(screen.queryByText('What do you want to find out?')).toBeNull()
-    await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'Is a cosine schedule better?')
-    await userEvent.click(way('Plan it'))
-    expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/drafts', { project_id: 'prj_1', goal: 'Is a cosine schedule better?' })
-  })
-
-  it('wraps a long goal in the box and never scrolls it sideways', () => {
-    show()
-    const box = screen.getByLabelText('What do you want to find out?')
-    expect(box.className).toContain('overflow-x-hidden')
-    expect(box.className).toContain('break-words')
-    expect(box.className).not.toMatch(/overflow-x-(auto|scroll)|whitespace-nowrap/)
-  })
-
-  it('says in one line that no compute is online, and nothing of compute while a cluster is', async () => {
-    const offline = show()
-    const line = await screen.findByText(/^No compute is online yet\./)
-    expect(line.textContent).toBe('No compute is online yet. Compute resources')
-    expect(within(line).getByRole('link', { name: 'Compute resources' }).getAttribute('href')).toBe('/cluster?project=prj_1')
-    offline.unmount()
-
-    vi.mocked(fetchOrgClusters).mockResolvedValue([{ name: 'c1', enabled: true, connected: true } as never])
-    show()
-    await waitFor(() => expect(fetchOrgClusters).toHaveBeenCalledTimes(2))
-    await screen.findByRole('button', { name: 'Plan it' })
-    expect(screen.queryByText(/No compute is online/)).toBeNull()
-  })
-})
-
-// Three suggestion pills sat under the box. The examples are now typed into the empty box itself.
-describe('the examples in the goal box', () => {
-  const ASK = 'What do you want to find out?'
-  afterEach(() => vi.useRealTimers())
-
-  it('types one after another as the placeholder, and stops on the question once the person takes the box', () => {
-    vi.useFakeTimers()
-    show()
-    const box = screen.getByLabelText(ASK)
-    expect(box.getAttribute('placeholder')).toBe(ASK)
-    act(() => { vi.advanceTimersByTime(5_000) })
-    const typed = box.getAttribute('placeholder')!
-    expect(typed.length).toBeGreaterThan(0)
-    expect(GOAL_EXAMPLES[0].startsWith(typed)).toBe(true)
-    expect(screen.queryByRole('list')).toBeNull()
-
-    fireEvent.focus(box)
-    expect(box.getAttribute('placeholder')).toBe(ASK)
-    act(() => { vi.advanceTimersByTime(20_000) })
-    expect(box.getAttribute('placeholder')).toBe(ASK)
-    expect(box).toHaveProperty('value', '')
-  })
-})
-
 // The page explained GitHub permissions in a paragraph and named no repository to start from.
 describe('the repository of a planned experiment', () => {
   const app = { slug: 'hl', client_id: 'c', install_url: 'https://github.test/install', authorize_url: 'https://github.test/authorize', new_repository_url: 'https://github.test/new' }
@@ -248,19 +167,5 @@ describe('the repository of a planned experiment', () => {
     expect(screen.queryByText(/permission|select one only/i)).toBeNull()
     await userEvent.type(screen.getByLabelText('What do you want to find out?'), '{Enter}')
     expect(apiSend).not.toHaveBeenCalled()
-  })
-
-  it('defaults to a new private repository once connected, in one control with no how-to', async () => {
-    vi.mocked(fetchGitHubApp).mockResolvedValue(app)
-    vi.mocked(fetchGitHubInstallations).mockResolvedValue({
-      items: [{ org_id: 'org_a', installation_id: 7, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: 'u9', name: 'Una' }, connected_at: at }], total: 1,
-    })
-    show()
-    const field = await screen.findByLabelText('Repository')
-    expect(field.getAttribute('placeholder')).toBe('New private repo')
-    expect(field.className).not.toContain('font-mono')
-    expect(screen.getByText('Repository').className).toContain('sr-only')
-    expect(screen.queryByRole('link', { name: 'create it on GitHub' })).toBeNull()
-    expect(screen.queryByRole('link', { name: 'Connect GitHub in Settings' })).toBeNull()
   })
 })

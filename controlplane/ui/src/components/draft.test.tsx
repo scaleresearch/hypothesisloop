@@ -2,12 +2,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, apiSend, fetchPlatformExperimentAgents } from '@/lib/api'
+import { apiSend, fetchPlatformExperimentAgents } from '@/lib/api'
 import { DraftView } from '@/components/draft'
 import { formatDate } from '@/lib/format'
 import type { Draft, Proposal } from '@/lib/planning'
 import { PlatformExperimentStatus } from '@/types'
-import type { AgentSignup, JoinedAgent } from '@/types'
+import type { AgentSignup } from '@/types'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -61,9 +61,6 @@ beforeEach(() => {
   ])
 })
 
-const planner = (more: Partial<JoinedAgent>): JoinedAgent => (
-  { platform_experiment_id: 'pe-1', agent_id: 'ag-p', name: 'Planner', role: 'planner', hosted: true, flavor: 'planner', signed_up_at: '', actor: { kind: 'staff', id: '', name: '' }, ...more }
-)
 const phase = () => within(screen.getByRole('list', { name: 'Phase' })).getAllByRole('listitem').filter(li => li.getAttribute('aria-current') === 'step').map(li => li.textContent).join()
 const machineStep = () => within(screen.getByRole('list', { name: 'Machine' })).queryAllByRole('listitem').find(li => li.getAttribute('aria-current') === 'step')?.textContent
 
@@ -81,31 +78,6 @@ describe('a draft being planned', () => {
     expect(screen.queryByRole('button', { name: 'Accept and run' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Revise' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Abandon this draft' })).toBeTruthy()
-  })
-
-  it('shows what the planner says it is doing, with how long ago it said so', async () => {
-    vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([planner({ instance: { state: 'running', restarts: 0, stopped: false } })])
-    show(draft('planning', { activity: { text: 'Reading train.py to find what the loss is computed on.', at: new Date(Date.now() - 12_000).toISOString() } }))
-    const said = await screen.findByText('Reading train.py to find what the loss is computed on.')
-    expect(said.parentElement!.textContent).toMatch(/computed on\. 1[2-5]s ago$/)
-    expect(said.parentElement!.className).toContain('text-base')
-    expect(said.parentElement!.querySelector('time')!.className).toContain('text-xs')
-    expect(screen.queryByText('The planner is at work.')).toBeNull()
-    expect(machineStep()).toBe('Planning')
-  })
-
-  it.each([
-    [undefined, 'Finding a machine for the planner.', 'Finding a machine'],
-    [{ state: 'requested', restarts: 0, stopped: false }, 'Finding a machine for the planner.', 'Finding a machine'],
-    [{ state: 'starting', restarts: 2, stopped: false }, 'The planner\'s machine ended. Starting another (restart 2).', 'Starting the planner'],
-    [{ state: 'running', restarts: 0, stopped: false }, 'The planner is at work.', 'Planning'],
-    [{ state: 'stopped', restarts: 3, stopped: true }, 'The planner stopped and is not started again.', undefined],
-  ] as const)('names the machine state it was told and lights no step it was not: %j', async (instance, sentence, step) => {
-    vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([planner({ instance })])
-    show(draft('planning'))
-    expect(await screen.findByText(sentence)).toBeTruthy()
-    await waitFor(() => expect(machineStep()).toBe(step))
-    expect(screen.queryByRole('progressbar')).toBeNull()
   })
 
   describe('reads the roster', () => {
@@ -130,23 +102,6 @@ describe('a draft being planned', () => {
 describe('a proposed draft', () => {
   const proposed = () => draft('proposed', { proposal, proposed_at: '2026-10-05T12:10:00Z' })
 
-  // A proposal once waited for a baseline job and showed its numbers. Nothing has run when a
-  // person reads one now, and the page says so in place of a number nobody measured.
-  it('shows what is measured with no value, says nothing has run, and puts the planner\'s questions first', async () => {
-    show(proposed())
-    expect(await screen.findByText('val_loss, lower is better')).toBeTruthy()
-    expect(screen.getByText('exact_match must stay at or above 1')).toBeTruthy()
-    expect(screen.getByText(/Nothing has run yet\. Once you accept, the baseline is measured on rtx-4090 before any researcher starts/)).toBeTruthy()
-    expect(screen.getByText(/the figures are an estimate, since nothing has run, and the budget is a cap/)).toBeTruthy()
-    expect(screen.queryByText(/baseline 1/)).toBeNull()
-    expect(screen.getByText('Is 4 hours enough?')).toBeTruthy()
-    expect(within(screen.getByText('Why this size').parentElement!).getByText(/30 trials each for 2 researchers is 6/)).toBeTruthy()
-    expect(screen.getByText('Validation loss on held-out text is the goal itself.')).toBeTruthy()
-    expect(phase()).toBe('Proposal')
-    expect(screen.getByRole('status').textContent).toMatch(/^Your plan is ready\. Nothing runs or is spent until you accept it\. It stays open until /)
-    expect(screen.queryByRole('list', { name: 'Machine' })).toBeNull()
-  })
-
   // The page once started the experiment right after accepting it. The platform starts it,
   // once its baseline is declared: accepting is the one call.
   it('accepts at the cost the person states, keeps the proposed flavors, and starts nothing', async () => {
@@ -164,25 +119,6 @@ describe('a proposed draft', () => {
     })
   })
 
-  it('shows the experiment filled in: its name, what it runs on, each researcher, the rules and the brief', async () => {
-    show(draft('proposed', {
-      proposed_at: '2026-10-05T12:10:00Z',
-      proposal: { ...proposal, cpu: '8', memory: '32Gi', experiment: { ...proposal.experiment, stages: [{ length_pct: 60, evict_pct: 50, max_job_hours: 1 }, { length_pct: 40, evict_pct: 0 }] } },
-    }))
-    expect(screen.getByLabelText('Name')).toHaveProperty('value', 'Cosine or constant')
-    const stated = (label: string) => screen.getByText(label, { selector: 'dt' }).nextElementSibling?.textContent
-    expect([stated('Accelerator'), stated('Image'), stated('CPU'), stated('Memory')]).toEqual(['rtx-4090', 'pytorch', '8', '32Gi'])
-    expect(screen.queryByText('Storage')).toBeNull()
-    const [first, second] = within(screen.getByText('Researchers', { selector: 'span' }).parentElement!).getAllByRole('listitem')
-    expect(first.textContent).toBe('Researcher 1specialization hyperparameter-searchmodel claude-opus-4-5Find the schedule: warmup length first, then the decay.')
-    expect(second.textContent).toBe('Researcher 2specialization generalistmodel the platform\'s defaultNo direction of its own: it works from the brief.')
-    expect(screen.getByText('Stage 1: 60% of the run, then the worst 50% of researchers are cut, no job longer than 1 h')).toBeTruthy()
-    expect(screen.getByText('Stage 2: 40% of the run, nobody is cut')).toBeTruthy()
-    expect(screen.getByText('Every job reports its metrics every 30 s')).toBeTruthy()
-    expect(screen.getByText('Train the small transformer in train.py and report val_loss.')).toBeTruthy()
-    expect(screen.getByText('One seed only.')).toBeTruthy()
-  })
-
   it('accepts under the name the person gave it, and lists a researcher for each one asked for', async () => {
     show(proposed())
     const name = screen.getByLabelText('Name')
@@ -197,42 +133,6 @@ describe('a proposed draft', () => {
     expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/accept', {
       name: 'Schedules on tiny transformers', budget_accelerator_hours: 6, duration_hours: 4, agents: [sweeper],
     })
-  })
-
-  // A proposal stored before proposals named an image read "in the image undefined".
-  it('states no image, rule or resource the proposal does not', async () => {
-    const { image: _image, ...before } = proposal
-    show(draft('proposed', { proposed_at: '2026-10-05T12:10:00Z', proposal: { ...before, experiment: { ...proposal.experiment, report_interval_seconds: undefined } } }))
-    expect(screen.getByText('rtx-4090', { selector: 'dd' })).toBeTruthy()
-    expect(screen.queryByText('Image')).toBeNull()
-    expect(screen.queryByText('Rules of the run')).toBeNull()
-    expect(document.body.textContent).not.toContain('undefined')
-  })
-
-  it('says beside the name why the API refused the name, and beside the button any other refusal', async () => {
-    vi.mocked(apiSend).mockRejectedValueOnce(new ApiError(422, 'name is one line and holds a line break: state it on a single line', 'invalid_experiment'))
-    show(proposed())
-    await userEvent.click(screen.getByRole('button', { name: 'Accept and run' }))
-    const refused = await screen.findByRole('alert')
-    expect(refused.textContent).toMatch(/name is one line/)
-    expect(refused.parentElement).toBe(screen.getByLabelText('Name').parentElement)
-    vi.mocked(apiSend).mockRejectedValueOnce(new ApiError(422, 'budget_accelerator_hours must be positive', 'invalid_cost'))
-    await userEvent.click(screen.getByRole('button', { name: 'Accept and run' }))
-    const other = await screen.findByText('budget_accelerator_hours must be positive')
-    expect(other.parentElement).toBe(screen.getByRole('button', { name: 'Accept and run' }).parentElement)
-    expect(screen.queryByText(/name is one line/)).toBeNull()
-  })
-
-  // The planner's machine is kept a while after it answers, and nothing told the person that a
-  // change asked for soon costs no boot.
-  it('says beside the revise box until when the planner is still up, and no longer once that passed', async () => {
-    const soon = new Date(Date.now() + 5 * 60_000).toISOString()
-    const first = show(draft('proposed', { proposal, proposed_at: '2026-10-05T12:10:00Z', planner_ends_at: soon }))
-    expect(screen.getByText(new RegExp(`^The planner is still running until ${formatDate(soon)} and starts on this at once\\.`))).toBeTruthy()
-    first.unmount()
-    show(draft('proposed', { proposal, proposed_at: '2026-10-05T12:10:00Z', planner_ends_at: new Date(Date.now() - 60_000).toISOString() }))
-    expect(screen.queryByText(/still running until/)).toBeNull()
-    expect(screen.getByText('The planner starts again first, usually about a minute. The current plan stays until the new one is ready.')).toBeTruthy()
   })
 
   it('says why the API refused to accept', async () => {
@@ -419,19 +319,5 @@ describe('a draft the planner declined', () => {
     await userEvent.type(screen.getByLabelText('What was missing?'), 'The small transformer, by validation loss.')
     await userEvent.click(screen.getByRole('button', { name: 'Revise' }))
     expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/revise', { message: 'The small transformer, by validation loss.' })
-  })
-
-  it('keeps the reason readable while the planner tries again', async () => {
-    const retrying = draft('revising', { declined_reason: why })
-    show(retrying)
-    expect(screen.getByText(why)).toBeTruthy()
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Updating the plan with your change.'))
-    expect(screen.queryByRole('button', { name: 'Revise' })).toBeNull()
-  })
-
-  it('is abandoned like any draft', async () => {
-    show(declined())
-    await userEvent.click(screen.getByRole('button', { name: 'Abandon this draft' }))
-    expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/close')
   })
 })

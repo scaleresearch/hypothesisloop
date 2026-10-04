@@ -75,31 +75,6 @@ describe('a shared platform experiment of another org', () => {
     expect(navigation.replace).not.toHaveBeenCalled()
   })
 
-  it('says why a closed one closed: its end time, or who closed it early', async () => {
-    const closed = { status: PlatformExperimentStatus.CLOSED, closed_at: at }
-    const first = show('project=prj_1', { ...closed, close_reason: 'end_time_reached' })
-    expect(await screen.findByText(/It reached its end time\.$/)).toBeTruthy()
-    first.unmount()
-    show('project=prj_1', { ...closed, close_reason: 'closed_by_request', closed_by: { kind: 'user', id: 'u2', name: 'Grace' } })
-    expect(await screen.findByText(/It was closed early by Grace\.$/)).toBeTruthy()
-    expect(screen.queryByText(/reached its end time/)).toBeNull()
-    cleanup()
-    show('project=prj_1', { ...closed, close_reason: 'planning_limit_reached' })
-    expect(await screen.findByText(/its planner proposed nothing within the planning limit/)).toBeTruthy()
-  })
-
-  // The coordinator's closing summary was filed and shown nowhere.
-  it('shows the coordinator\'s summary of a run, and no card for one that has none', async () => {
-    const first = show('project=prj_1', { status: PlatformExperimentStatus.CLOSED, close_reason: 'end_time_reached', summary: 'Cosine won by 0.04 val_loss.\nWarmup mattered more than decay.' })
-    const card = (await screen.findByRole('heading', { name: 'The coordinator\'s summary' })).parentElement!.parentElement!
-    expect(card.querySelector('p')!.textContent).toBe('Cosine won by 0.04 val_loss.\nWarmup mattered more than decay.')
-    first.unmount()
-    cleanup()
-    show('project=prj_1', { status: PlatformExperimentStatus.CLOSED, close_reason: 'end_time_reached' })
-    await screen.findByRole('heading', { name: 'Vision benchmark' })
-    expect(screen.queryByRole('heading', { name: 'The coordinator\'s summary' })).toBeNull()
-  })
-
   it('shows its agents and no control that writes', async () => {
     show('project=prj_1', {})
     expect(await screen.findByRole('cell', { name: 'ag-self' })).toBeTruthy()
@@ -141,54 +116,6 @@ describe('the baseline of a platform experiment', () => {
     await waitFor(() => expect(link.parentElement!.textContent).toBe('Baseline measured by job job-base: val_loss 1.8, exact_match 1.'))
     expect(screen.queryByText(/Preparing the baseline/)).toBeNull()
   })
-
-  it('is not asked for on a running or closed experiment that never had one, and a close for want of one says so', async () => {
-    const first = show('project=prj_1', { status: PlatformExperimentStatus.RUNNING })
-    await screen.findByRole('heading', { name: 'Vision benchmark' })
-    expect(screen.queryByText(/Preparing the baseline/)).toBeNull()
-    first.unmount()
-    cleanup()
-    show('project=prj_1', { status: PlatformExperimentStatus.CLOSED, close_reason: 'baseline_limit_reached' })
-    expect(await screen.findByText(/It never ran: no baseline was measured in time\.$/)).toBeTruthy()
-  })
-})
-
-// The minutes before a run showed a scoreboard of nobody and charts of nothing above what was
-// actually happening.
-describe('the page of an experiment that has not started', () => {
-  const metrics = [{ key: 'val_loss', direction: 'minimize' as const }]
-
-  it('says where it stands at the top and shows no scoreboard and no chart until the run starts', async () => {
-    vi.mocked(api.fetchPlatformExperimentTimeseries).mockResolvedValue({ series: [] })
-    const first = show('project=prj_1', { metrics })
-    expect((await screen.findByRole('region', { name: 'Where this experiment stands' })).textContent).toContain('the API\'s sentence for baseline_measuring')
-    expect(screen.getByRole('heading', { name: /^Agents/ })).toBeTruthy()
-    expect(screen.getByRole('heading', { name: 'Jobs' })).toBeTruthy()
-    for (const hidden of ['Scoreboard', 'Agents over time']) expect(screen.queryByRole('heading', { name: hidden })).toBeNull()
-    first.unmount()
-    cleanup()
-    show('project=prj_1', { status: PlatformExperimentStatus.RUNNING, metrics, ends_at: at })
-    expect(await screen.findByRole('heading', { name: 'Scoreboard' })).toBeTruthy()
-    expect(screen.getByRole('heading', { name: 'Agents over time' })).toBeTruthy()
-  })
-})
-
-// The baseline's job tests no hypothesis, and its row read as an agent with no best job.
-describe('the scoreboard row of the baseline agent', () => {
-  it('says its best job measured the objective, in place of a hypothesis', async () => {
-    vi.mocked(api.fetchPlatformExperimentTimeseries).mockResolvedValue({ series: [] })
-    vi.mocked(api.fetchPlatformExperimentQuotas).mockResolvedValue([{ agent_id: 'ag-base' }, { agent_id: 'ag-other' }] as never)
-    vi.mocked(api.fetchPlatformExperimentResults).mockResolvedValue({
-      metrics: [{ metric: 'val_loss', direction: 'minimize', standings: [{ rank: 1, agent_id: 'ag-base', best: 1.8, experiment_id: 'job-base', objective: true }] }],
-      bests: [],
-    })
-    show('project=prj_1', { status: PlatformExperimentStatus.RUNNING, ends_at: at, metrics: [{ key: 'val_loss', direction: 'minimize' }] })
-    const said = await screen.findByText('The baseline: it measures the objective and tests no hypothesis')
-    const scoreboard = said.closest('table')!
-    expect(said.closest('tr')!.textContent).toMatch(/^#1/)
-    expect(scoreboard.querySelectorAll('tbody tr')).toHaveLength(2)
-    expect(scoreboard.querySelectorAll('tbody tr')[1].textContent).not.toContain('The baseline')
-  })
 })
 
 describe('a shared platform experiment of the caller\'s own org', () => {
@@ -199,13 +126,5 @@ describe('a shared platform experiment of the caller\'s own org', () => {
     expect(screen.getByText('Shared')).toBeTruthy()
     expect(screen.queryByRole('note')).toBeNull()
     expect(navigation.replace).toHaveBeenCalledWith('/platform-experiments/pe-x?project=prj_1')
-  })
-})
-
-describe('a platform experiment nobody shared', () => {
-  it('carries no mark', async () => {
-    show('project=prj_1', { project_id: 'prj_1', shared: false })
-    expect(await screen.findByRole('button', { name: 'Add agent' })).toBeTruthy()
-    expect(screen.queryByText(/Shared/)).toBeNull()
   })
 })

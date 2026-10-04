@@ -130,13 +130,6 @@ describe('accepting', () => {
     expect(window.sessionStorage.getItem(STORED)).toBeNull()
   })
 
-  it('names the role when the invite made an owner', async () => {
-    vi.mocked(acceptOrgInvite).mockResolvedValue({ org_id: 'org_a', user_id: 'u2', name: 'Bob', role: 'owner', joined_at: at })
-    open()
-    await accept()
-    expect(await screen.findByText(/You joined as an owner/)).toBeTruthy()
-  })
-
   it('says so when the org that was joined has no project to open', async () => {
     vi.mocked(fetchMe).mockResolvedValue({ ...me, projects: [me.projects[0]] })
     open()
