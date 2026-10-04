@@ -50,10 +50,9 @@ type AgentSignup struct {
 	InFlight *InFlight `json:"in_flight,omitempty"`
 }
 
-// InFlight counts an agent's jobs and checks queued or running on the platform now.
+// InFlight counts what of an agent's own is queued or running on the platform now.
 type InFlight struct {
-	Jobs   int `json:"jobs" doc:"Its jobs (hl job submit) queued or running."`
-	Checks int `json:"checks" doc:"Its checks (hl env run) queued or running. Both 0: nothing of its own is on the platform, and an agent waiting then waits for nothing it started."`
+	Jobs int `json:"jobs" doc:"Its jobs queued or running, those waiting for their environment's build included. 0: nothing of its own is on the platform, and an agent waiting then waits for nothing it started."`
 }
 
 // AgentActivity is what a hosted agent or coordinator is doing now, as its harness last said it

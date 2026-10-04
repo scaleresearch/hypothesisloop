@@ -457,5 +457,4 @@ type ExperimentMeta struct {
 	// guaranteed.
 	CapacityTier           CapacityTier `json:"capacity_tier,omitempty" yaml:"capacity_tier,omitempty"`
 	EstimatedDurationHours float64      `json:"estimated_duration_hours,omitempty" yaml:"estimated_duration_hours,omitempty" required:"false" doc:"The hours the job is expected to run, which it holds of its agent's quota until it ends. Left out, it is the one the platform measured on the platform experiment's baseline job, and the submit is refused where there is none."`
-	Check                  bool         `json:"check,omitempty" yaml:"check,omitempty" required:"false" doc:"True for a check (hl env run): the code run in the experiment's environment to see it build and run before a job that measures. A check names no hypothesis and no theory, runs on any branch of the platform experiment, is never held by the summary gate, owes no summary, records no metric and ranks nowhere. Its estimate is at most check_job_hours (10 minutes) and defaults to it, and it is ended as job_too_long past it."`
 }

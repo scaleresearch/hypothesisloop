@@ -515,7 +515,7 @@ WITH idle AS (
 )
 UPDATE experiment_signups s
 SET idle_noticed_at = now(), idle_xid = pg_current_xact_id()::text::bigint,
-    idle_detail = format('no job or check of its own ran on the platform for %s minutes, and it has none queued or running',
+    idle_detail = format('no job of its own ran on the platform for %s minutes, and it has none queued or running',
                          floor(extract(epoch FROM now() - idle.since) / 60)::int)
 FROM idle
 WHERE s.platform_experiment_id = idle.platform_experiment_id AND s.agent_id = idle.agent_id
@@ -606,9 +606,9 @@ func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 // with what of its own is in flight.
 func (s *PlatformExperimentsStore) ListAgentSignups(ctx context.Context, platformExpID string) ([]domain.AgentSignup, error) {
 	rows, err := s.pool.pool.Query(ctx, `
-SELECT `+agentSignupColumns+`, f.jobs, f.checks
+SELECT `+agentSignupColumns+`, f.jobs
 FROM experiment_signups s LEFT JOIN agents a ON a.id = s.agent_id
-CROSS JOIN LATERAL (SELECT count(*) FILTER (WHERE NOT e.is_check) AS jobs, count(*) FILTER (WHERE e.is_check) AS checks
+CROSS JOIN LATERAL (SELECT count(*) AS jobs
                     FROM experiments e
                     WHERE e.platform_experiment_id = s.platform_experiment_id AND e.agent_id = s.agent_id
                       AND e.status IN ('QUEUED', 'SUBMITTED', 'RUNNING')) f
@@ -621,7 +621,7 @@ ORDER BY s.signed_up_at, s.agent_id`, platformExpID)
 	signups := []domain.AgentSignup{}
 	for rows.Next() {
 		var inFlight domain.InFlight
-		signup, err := scanAgentSignup(rows, &inFlight.Jobs, &inFlight.Checks)
+		signup, err := scanAgentSignup(rows, &inFlight.Jobs)
 		if err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.ListAgentSignups: %w", err)
 		}

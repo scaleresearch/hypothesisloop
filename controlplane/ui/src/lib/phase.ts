@@ -47,7 +47,6 @@ export const OWNER_ACTIONS: Record<string, OwnerAction | null> = {
   baseline_undeclared: null,
   no_baseline: null,
   baseline_not_completed: null,
-  baseline_is_check: null,
   baseline_without_finding: null,
   baseline_missing_metric: null,
   baseline_breaks_constraint: null,

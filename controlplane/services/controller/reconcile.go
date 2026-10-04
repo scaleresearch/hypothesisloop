@@ -216,11 +216,7 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 // cap. Quality is the agent's own call: it reads its metrics and cancels a bad run itself, and
 // quota exhaustion bounds the damage if it doesn't.
 func (c *Controller) reconcileOne(ctx context.Context, exp *domain.Experiment, now time.Time, obs *tickObservations, reportIntervalByPE map[string]time.Duration, maxJobHoursByPE map[string]float64, declaredMetricKeysByPE map[string][]string) error {
-	maxHours, ok := maxJobHoursByPE[exp.PlatformExperimentID]
-	if exp.Check && (!ok || maxHours > domain.CheckJobHours) {
-		maxHours, ok = domain.CheckJobHours, true
-	}
-	if ok {
+	if maxHours, ok := maxJobHoursByPE[exp.PlatformExperimentID]; ok {
 		// The pass's own reading. A job this pass could not measure is left alone rather than
 		// evicted on a number nobody has.
 		hours, measured := obs.hours(exp.ID)
@@ -234,12 +230,7 @@ func (c *Controller) reconcileOne(ctx context.Context, exp *domain.Experiment, n
 		}
 	}
 
-	declared := declaredMetricKeysByPE[exp.PlatformExperimentID]
-	// A check records no metric, so only its liveness says it runs.
-	if exp.Check {
-		declared = nil
-	}
-	evict, reason, err := c.checkSilence(ctx, exp, now, reportIntervalByPE, declared)
+	evict, reason, err := c.checkSilence(ctx, exp, now, reportIntervalByPE, declaredMetricKeysByPE[exp.PlatformExperimentID])
 	if err != nil {
 		return err
 	}

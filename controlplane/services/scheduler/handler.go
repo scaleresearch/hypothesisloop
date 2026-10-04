@@ -78,7 +78,6 @@ func newJob(req submitRequest, meta submitMeta, actor domain.Actor) (*domain.Exp
 		AcceleratorCount:       req.Job.TotalAccelerators(),
 		EstimatedDurationHours: meta.EstimatedDurationHours,
 		CapacityTier:           meta.CapacityTier,
-		Check:                  meta.Check,
 	}, nil
 }
 
@@ -113,7 +112,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"422 exceeds_cluster_capacity where the job asks for more than every cluster that runs it has with nothing else on it, with what it asks for and what each cluster has: no wait admits such a job. A cluster that scales up may yet hold it. One that reports nothing now is named and not judged, and where none is judged the job is queued. " +
 			"metadata.hypothesis_id and metadata.theory are required of every job but that of an agent of role baseline. The baseline is the objective's own measurement: that job states neither, 422 baseline_tests_no_hypothesis when it names a hypothesis, its branch is hl/<platform_experiment_id>/baseline, and it is answered with objective true and no hypothesis_id: it belongs to the objective, which is no hypothesis to look up. " +
 			"Any agent may run its own implementation of any hypothesis of the platform experiment, whoever registered it. " +
-			"metadata.check true makes the job a check (hl env run): the code run in the environment before a job that measures. It states no hypothesis and no theory (422 check_tests_no_hypothesis), runs on any branch of the platform experiment, has an estimate of at most 10 minutes that defaults to that (422 check_too_long), is never held by the summary gate, sends no event, records no metric (each post answered 422), owes no summary and ranks nowhere. It holds and is billed quota like any job and goes ahead of its agent's other queued jobs. " +
 			"Two fields have a default, answered on the job as applied: metadata.capacity_tier left out is guaranteed, and job.max_retries left out is 0. " +
 			"503 object_store_unavailable while the platform's object store does not answer: a submit measures the agent's durable data there and creates the job's data key in it, so nothing was stored and the same submit is repeated later. " +
 			"Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits, " +

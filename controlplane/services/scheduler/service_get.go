@@ -56,11 +56,6 @@ func (s *Service) judgeRankable(ctx context.Context, exp *domain.Experiment) err
 	if exp.Status != domain.StatusCompleted {
 		return nil
 	}
-	if exp.Check {
-		rankable := false
-		exp.Rankable, exp.NotRankableReason = &rankable, "a check (hl env run) records no metric and ranks nowhere"
-		return nil
-	}
 	pe, err := s.store.GetPlatformExperiment(ctx, exp.PlatformExperimentID)
 	if err != nil {
 		return err

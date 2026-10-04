@@ -174,9 +174,7 @@ func sortBurst(exps []*domain.Experiment, quotaMap map[string]*domain.AgentQuota
 // capacity that frees up in a tick, ahead of another agent that only has one job waiting.
 // Interleaving bounds that to roughly a one-job lead per round, with no preemption or new
 // tracked state — agent order (and each agent's own job order) is exactly the input order, so
-// existing fairness/priority signals inside one agent's jobs are preserved untouched, but for
-// its checks, which go ahead of its other jobs: a check is minutes long and its agent waits on
-// it before the jobs it would submit next.
+// existing fairness/priority signals inside one agent's jobs are preserved untouched.
 func interleaveByAgent(exps []*domain.Experiment) []*domain.Experiment {
 	if len(exps) == 0 {
 		return exps
@@ -188,9 +186,6 @@ func interleaveByAgent(exps []*domain.Experiment) []*domain.Experiment {
 			agentOrder = append(agentOrder, e.AgentID)
 		}
 		byAgent[e.AgentID] = append(byAgent[e.AgentID], e)
-	}
-	for _, own := range byAgent {
-		sort.SliceStable(own, func(i, j int) bool { return own[i].Check && !own[j].Check })
 	}
 	// Exhausted agents leave the rotation instead of being re-scanned every round: with one
 	// agent holding a deep queue and many holding one job each, keeping them all in made this

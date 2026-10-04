@@ -44,7 +44,7 @@ const experimentStoredColumns = `
 	queued_at, submitted_at, eviction_reason, not_admitted_reason,
 	quota_settled_at, attempt_count, infra_requeue_count, infra_requeue_reason, tried_clusters, ran_on_accelerator_type,
 	data_access_key_id, data_secret_access_key, secret_env,
-	created_at, updated_at, COALESCE(environment_key, ''), is_check`
+	created_at, updated_at, COALESCE(environment_key, '')`
 
 // pgUniqueViolation is PostgreSQL's SQLSTATE for a unique-constraint violation.
 const pgUniqueViolation = "23505"
@@ -77,7 +77,7 @@ INSERT INTO experiments (
 	priority_score, novelty_score, capacity_tier, status,
 	queued_at, not_admitted_reason,
 	data_access_key_id, data_secret_access_key, secret_env,
-	created_at, updated_at, actor_kind, actor_id, branch, submission_key, environment_key, is_check
+	created_at, updated_at, actor_kind, actor_id, branch, submission_key, environment_key
 ) VALUES (
 	$1, $2, $3, $4, $5,
 	$6, $7, $8, $9,
@@ -87,7 +87,7 @@ INSERT INTO experiments (
 	$17, $18, $19, $20,
 	$21, NULLIF($22, ''),
 	$23, $24, $25,
-	$26, $27, $28, $29, $30, $31, NULLIF($32, ''), $33
+	$26, $27, $28, $29, $30, $31, NULLIF($32, '')
 )`
 
 	// Accelerator type and total count are canonical columns used by quota/capacity SQL. Do not
@@ -116,7 +116,7 @@ INSERT INTO experiments (
 		exp.PriorityScore, exp.NoveltyScore, string(exp.CapacityTier), string(exp.Status),
 		exp.CreatedAt, exp.NotAdmittedReason,
 		exp.DataKey.AccessKeyID, exp.DataKey.SecretAccessKey, secretEnv,
-		exp.CreatedAt, exp.UpdatedAt, string(exp.Actor.Kind), exp.Actor.ID, exp.Branch, exp.SubmissionKey, exp.EnvironmentKey, exp.Check,
+		exp.CreatedAt, exp.UpdatedAt, string(exp.Actor.Kind), exp.Actor.ID, exp.Branch, exp.SubmissionKey, exp.EnvironmentKey,
 	)
 	if err != nil {
 		// A submission key is looked up under its agent's admission lock before this insert, so

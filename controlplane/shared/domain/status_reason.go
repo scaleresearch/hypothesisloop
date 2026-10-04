@@ -39,7 +39,6 @@ var statusWaiters = map[string]Waiter{
 	// agent repairs a job that measured too little, and only the owner changes a bound or pays.
 	"no_baseline":                  WaitsForCoordinator,
 	"baseline_not_completed":       WaitsForCoordinator,
-	"baseline_is_check":            WaitsForCoordinator,
 	"baseline_not_on_branch":       WaitsForCoordinator,
 	"baseline_without_finding":     WaitsForCoordinator,
 	"baseline_missing_metric":      WaitsForCoordinator,

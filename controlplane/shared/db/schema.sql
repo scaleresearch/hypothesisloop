@@ -805,10 +805,6 @@ CREATE TRIGGER experiments_touch BEFORE INSERT OR UPDATE ON experiments
 
 CREATE OR REPLACE FUNCTION hypothesisloop_experiments_notify() RETURNS trigger AS $$
 BEGIN
-    -- A check's agent follows it in hl env run, and nobody else is told of it.
-    IF NEW.is_check THEN
-        RETURN NULL;
-    END IF;
     IF TG_OP = 'INSERT' OR NEW.status IS DISTINCT FROM OLD.status THEN
         PERFORM hypothesisloop_notify_event('experiment.status', NEW.id, NEW.status::text,
             COALESCE(NEW.eviction_reason, ''), NEW.platform_experiment_id, NEW.agent_id);
@@ -1439,9 +1435,6 @@ ALTER TABLE clusters ADD COLUMN IF NOT EXISTS builds BOOLEAN NOT NULL DEFAULT fa
 -- The environment a job's commit declares: admission claims the job only once it is ready, in
 -- its image. NULL for a commit that declares none.
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS environment_key TEXT REFERENCES environments (key);
--- A check (domain.Experiment.Check): a job its agent ran to see its code run in the environment.
--- It has no hypothesis, sends no job event, owes no summary and is no research result.
-ALTER TABLE experiments ADD COLUMN IF NOT EXISTS is_check BOOLEAN NOT NULL DEFAULT false;
 -- Agent machines run the platform's agent image and build nothing: only jobs run in an
 -- environment.
 ALTER TABLE platform_experiments DROP COLUMN IF EXISTS agent_environment_key;
@@ -1531,7 +1524,7 @@ DROP TRIGGER IF EXISTS agent_messages_notify ON agent_messages;
 CREATE TRIGGER agent_messages_notify AFTER INSERT ON agent_messages
     FOR EACH ROW EXECUTE FUNCTION hypothesisloop_agent_message_notify();
 
--- Each agent that asked for the build of an environment (hl env build, hl env run) while it was
+-- Each agent that asked for the build of an environment (hl env build) while it was
 -- building, told environment.status once that build ends, ready or failed, with what to do next:
 -- a job waiting for it is told by its own status, and an agent that asked ahead had no job to be
 -- told by. code_ref and image are what it last asked with. ended_xid is the transaction that
@@ -1607,3 +1600,13 @@ DROP TRIGGER IF EXISTS environments_loaded_notify ON environments;
 CREATE TRIGGER environments_loaded_notify AFTER UPDATE OF loaded_image ON environments
     FOR EACH ROW WHEN (NEW.state = 'building' AND NEW.loaded_image <> '' AND OLD.loaded_image IS DISTINCT FROM NEW.loaded_image)
     EXECUTE FUNCTION hypothesisloop_environment_loaded_notify();
+
+-- Checks (jobs that tested no hypothesis, to see code run) are gone: an agent runs its code on
+-- its own machine, and every job tests a hypothesis.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'experiments' AND column_name = 'is_check') THEN
+        DELETE FROM experiments WHERE is_check;
+    END IF;
+END $$;
+ALTER TABLE experiments DROP COLUMN IF EXISTS is_check;

@@ -32,8 +32,8 @@ Updates arrive as messages. Look at what the update points to, then at the run a
 (`hl results`, `hl job list`, `hl quota --all`, `hl hypothesis query`). Look for:
 
   - a researcher failing, stuck, or with a machine stopped while time and quota are left;
-  - a researcher with nothing of its own in flight (agent.idle, or `in_flight` 0 jobs and 0
-    checks in the roster): its waiting for an update waits for nothing, so steer it;
+  - a researcher with nothing of its own in flight (agent.idle, or `in_flight` 0 jobs in the
+    roster): its waiting for an update waits for nothing, so steer it;
   - small thinking: root-level ideas that tweak the control, gains far short of the target,
     researchers converging on one mechanism or one part of the problem, a line that stopped
     gaining;

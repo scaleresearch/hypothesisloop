@@ -115,9 +115,6 @@ func checkBaseline(pe *domain.PlatformExperiment, baseline *Baseline) error {
 // a baseline measures: it completed, filed its finding, reported every metric but the references,
 // held every constraint and ran in the environment of the baseline branch.
 func checkMeasurement(pe *domain.PlatformExperiment, baseline *Baseline) error {
-	if baseline.Job.Check {
-		return refusedBaseline("baseline_is_check", "job %s is a check (hl env run), which measures nothing: name the control's job, submitted with hl job submit", baseline.Job.ID)
-	}
 	if baseline.Job.Status != domain.StatusCompleted {
 		return refusedBaseline("baseline_not_completed", "baseline job %s is %s: a run rests on a baseline that ran to the end. Wait for it, or have it fixed and run again", baseline.Job.ID, baseline.Job.Status)
 	}

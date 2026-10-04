@@ -24,9 +24,9 @@ _PROMPTS_DIR = Path(__file__).parent / "prompts"
 # commands it acts with; it reads the help of any other when it runs one. A planner runs nothing,
 # so the listing is not for it: it is shown its two commands and what hl repo init will write
 # from its proposal.
-_HL_HELP = ([], ["hypothesis", "submit"], ["env", "run"])
+_HL_HELP = ([], ["hypothesis", "submit"])
 _HL_HELP_PLANNER = (["platform-experiments", "propose"], ["platform-experiments", "decline"], ["repo", "init"])
-_HL_HELP_BASELINE = ([], ["job", "submit"], ["env", "run"], ["job", "summary"], ["platform-experiments", "agents", "finish"])
+_HL_HELP_BASELINE = ([], ["job", "submit"], ["job", "summary"], ["platform-experiments", "agents", "finish"])
 _HL_HELP_COORDINATOR = ([], ["platform-experiments", "update"], ["platform-experiments", "summary"],
                         ["platform-experiments", "close"], ["platform-experiments", "agents", "add"],
                         ["hypothesis", "comment"])

@@ -29,7 +29,7 @@ _DRAIN_S = 5
 # The kinds that wake whoever ended its turn, per role, and the one place that says so. An event
 # of another kind stays on the platform (hl watch --wake) and is handed over with the next that
 # wakes, after the next tool call, or once IDLE_NUDGE_S has passed. A coordinator has to learn
-# within seconds that an agent finished or has gone idle (agent.idle: no job or check of its own
+# within seconds that an agent finished or has gone idle (agent.idle: no job of its own
 # in flight for the platform's notice, sent to that agent too), that a job is held by what waiting will not clear or has
 # waited past its own estimate (job.held, sent once, to the job's agent too), that a stage
 # advanced, that someone wrote a comment, that the brief or the baseline changed (a raised

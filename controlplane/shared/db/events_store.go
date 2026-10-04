@@ -69,7 +69,7 @@ const (
 	// EventAgentFinished says an agent told the platform it has nothing left to do. It is the
 	// agent's own, so no rival is woken by it; whoever steers the run sees every one.
 	EventAgentFinished = "agent.finished"
-	// EventAgentIdle says no job or check of a researcher of a running platform experiment ran on
+	// EventAgentIdle says no job of a researcher of a running platform experiment ran on
 	// the platform for a while, and it has none queued or running: its machines are idle. It is the agent's own, so it
 	// reaches that agent and whoever steers the run, and no rival.
 	EventAgentIdle = "agent.idle"
@@ -145,7 +145,7 @@ var EventKinds = []EventKindDoc{
 	{Kind: EventAgentFinished, Subject: "agent id", Value: "empty by design",
 		Description: "This agent said it has nothing left to do, and its machine stops. detail is the reason it gave, and for a researcher the blocker it named and the time and quota it left. When every agent is finished or cut the run has nobody left to wait for."},
 	{Kind: EventAgentIdle, Subject: "agent id", Value: "empty by design",
-		Description: "No job and no check (hl env run) of this researcher of a running platform experiment ran on the platform for the platform's agents.idle_notice_minutes, and it has none queued or running: nothing of its own is in flight. detail says for how long. Sent once for each such stretch: a job or check it starts ends the stretch. Nothing is done to the agent."},
+		Description: "No job of this researcher of a running platform experiment ran on the platform for the platform's agents.idle_notice_minutes, and it has none queued or running: nothing of its own is in flight. detail says for how long. Sent once for each such stretch: a job it starts ends the stretch. Nothing is done to the agent."},
 	{Kind: EventAgentMessage, Subject: "agent id, the one it was sent to", Value: "coordinator or owner: who it is from",
 		Description: "A direct message to this agent from its platform experiment's coordinator or owner (POST /platform-experiments/{id}/messages). detail is the text, direction to act on. GET /platform-experiments/{id}/messages reads every one sent."},
 	{Kind: EventHypothesisNew, Subject: "hypothesis id", Value: "empty by design",
@@ -174,7 +174,7 @@ var EventKinds = []EventKindDoc{
 	{Kind: EventJobUnderperforming, Subject: "experiment id", Value: "the metric name it trails on",
 		Description: "This job trails its cohort on the ranking metric by a real margin. An opinion, not a command: nothing stops it but you. Consider POST /experiments/{id}/cancel if it is not worth its allocation. Sent once per job, and not for a job that has already ended."},
 	{Kind: EventEnvironmentStatus, Subject: "environment key", Value: "loaded, ready or failed",
-		Description: "The build of an environment this agent asked for while it was building (POST /environments: hl env build, hl env run) was loaded on a cluster, or ended. loaded: the cluster runs its jobs now, while the image is pushed, and any job that cannot run there starts once the push ends, by itself, so a build told loaded is not told ready. detail names the commit and image it asked with and says what to do: once the file failed, GET /environments (hl env status) has the end of its output. Sent once per build and value, to each agent that asked."},
+		Description: "The build of an environment this agent asked for while it was building (POST /environments: hl env build) was loaded on a cluster, or ended. loaded: the cluster runs its jobs now, while the image is pushed, and any job that cannot run there starts once the push ends, by itself, so a build told loaded is not told ready. detail names the commit and image it asked with and says what to do: once the file failed, GET /environments (hl env status) has the end of its output. Sent once per build and value, to each agent that asked."},
 }
 
 func init() {
@@ -624,7 +624,7 @@ func replayExperiments(ctx context.Context, tx pgx.Tx, peID string, since int64)
 	queued_xid, submitted_xid, status_xid, not_admitted_xid, COALESCE(underperforming_metric, ''), underperforming_xid,
 	COALESCE(held_reason, ''), held_xid
 FROM experiments
-WHERE platform_experiment_id = $1 AND NOT is_check
+WHERE platform_experiment_id = $1
   AND (status_xid >= $2 OR not_admitted_xid >= $2 OR queued_xid >= $2 OR submitted_xid >= $2 OR underperforming_xid >= $2 OR held_xid >= $2)`
 	rows, err := tx.Query(ctx, q, peID, since)
 	if err != nil {

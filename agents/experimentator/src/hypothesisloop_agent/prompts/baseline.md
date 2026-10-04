@@ -42,9 +42,9 @@ What it takes:
   - The job spec: a command that finishes in minutes, and the `cpu`, `memory` and `storage` it
     uses. `cpu` is the cores the program keeps busy; the job reads them in
     $HYPOTHESISLOOP_CPUS, since `nproc` counts the whole machine.
-  - Check code with `hl env run -- CMD` before a job: it runs on the job's hardware in the
-    experiment's environment, in minutes. A failed job has its cause in `hl job status` and
-    `hl job logs`.
+  - Build and run the code on your own machine before a job, with what the Dockerfile installs
+    installed there too (you have sudo); only a job has the job's hardware. A failed job has its
+    cause in `hl job status` and `hl job logs`.
   - The control's job, and a summary on it once COMPLETED: the configuration that ran, every
     metric's value, duration and cost (`hl job cost`).
   - Each reference the brief names, in a job of its own in the same environment, reporting its
@@ -57,7 +57,7 @@ What it takes:
     and submitted beside the control's job. Delete the branch once its job has ended; the
     baseline branch keeps none of it.
   - `hl platform-experiments agents finish --baseline ID --reason "..."`, ID the control's job,
-    the reason naming each reference job and the check's job.
+    the reason naming each reference job and the proof's job.
 
 If no baseline is possible (one failure came back three times through your fixes, or
 `baseline_due_at` cannot be met), finish with what you built, why, and the job ids: the

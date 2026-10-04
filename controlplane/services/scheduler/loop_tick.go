@@ -265,10 +265,6 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 			}
 			continue
 		}
-		if exp.Check {
-			filtered = append(filtered, exp)
-			continue
-		}
 		owes, read := owing[key]
 		if !read {
 			owedByLatest, err := l.store.UnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID, latest[key])

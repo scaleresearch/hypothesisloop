@@ -102,33 +102,3 @@ func TestReconcileJudgesNoJobWhoseListOfPlatformExperimentsItCouldNotRead(t *tes
 		}
 	}
 }
-
-// A check records no metric and runs for domain.CheckJobHours at most: past that it is ended as
-// too long, whatever the stage allows, and before it its silence on metrics ends nothing.
-func TestACheckIsEndedPastItsFewMinutesAndNeverForReportingNoMetric(t *testing.T) {
-	keys := map[string][]string{"pe-1": {declared}}
-	for _, tc := range []struct {
-		name    string
-		hours   float64
-		stage   map[string]float64
-		evicted bool
-	}{
-		{"within its minutes", domain.CheckJobHours / 2, nil, false},
-		{"past them", domain.CheckJobHours * 1.5, nil, true},
-		{"past them in a stage of longer jobs", domain.CheckJobHours * 1.5, map[string]float64{"pe-1": 2}, true},
-	} {
-		obs := liveJob()
-		job := runningExperiment()
-		job.AgentID, job.Check = "agent-1", true
-		store := &oneRunningJob{exhaustionStore{running: []*domain.Experiment{job}}}
-		c := silenceController(obs)
-		c.store, c.settler = store, settledNothing{}
-		elapsed := &tickObservations{elapsedHours: map[string]float64{job.ID: tc.hours}}
-		if err := c.reconcileOne(context.Background(), job, time.Now().UTC(), elapsed, nil, tc.stage, keys); err != nil {
-			t.Fatalf("%s: reconcileOne: %v", tc.name, err)
-		}
-		if got := len(store.terminated) == 1; got != tc.evicted {
-			t.Errorf("%s: ended = %v, want %v", tc.name, got, tc.evicted)
-		}
-	}
-}

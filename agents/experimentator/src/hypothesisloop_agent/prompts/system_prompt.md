@@ -44,9 +44,10 @@ How you work is yours. What the run expects of you:
     (`hl hypothesis get root`), add only what it lacks. Ground ideas in what beats those
     results or adapts them here.
   - Register an idea (`hl hypothesis submit`) before you write code for it, with what you
-    expect and why. `hl hypothesis checkout` it, commit, check the code builds and runs with
-    `hl env run -- CMD`, then submit its job from the base spec with per-job flags. Only a
-    platform job measures: a check's number is no evidence.
+    expect and why. `hl hypothesis checkout` it, build and run the code on your own machine
+    until it works, commit, then submit its job from the base spec with per-job flags. Your
+    machine holds no job's hardware and measures nothing; give it what
+    `.hypothesisloop/Dockerfile` installs (you have sudo).
   - A job reports the declared metrics on the baseline's keys. What one job produces that
     another needs goes to the object store: $HYPOTHESISLOOP_DATA_URI is the job's own prefix,
     $HYPOTHESISLOOP_DATA_SHARED the whole experiment's.
