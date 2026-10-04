@@ -954,7 +954,7 @@ duration_hours, once it runs. status_reason says where one that is not closed st
 is the code, message the sentence, and waits_for whose move it is: owner, coordinator, or
 platform when it is nobody's and the platform, an agent at work or the clock brings the next
 state. The reasons:
-  a draft: planning, revising, proposed, declined
+  a draft: repository_creating, planning, revising, proposed, declined
   open, its baseline not declared: baseline_measuring, baseline_declaring, baseline_required,
     baseline_undeclared
   open, the declaration of the measured job refused: no_baseline, baseline_not_completed,
@@ -963,7 +963,9 @@ state. The reasons:
   open, its baseline declared: starts_at_ahead, no_researchers, budget_spent, starting
   running: agents_starting while no researcher's machine is up yet, then running
   running, every researcher finished, cut or stopped for good: researchers_done
-An agent of the roster adds instance_starting (hl platform-experiments agents list).
+  any, while a machine it wants is on a launcher that stopped asking: launcher_unreachable
+An agent of the roster adds instance_starting, or launcher_unreachable while its launcher is
+silent (hl platform-experiments agents list).
 On an open one the message begins with your own next step, worded for your token: the command
 a coordinator or a person runs, what a baseline agent measures, or that a researcher's jobs
 are refused until the start. status_reason is printed ahead of the record with id and status,

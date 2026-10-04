@@ -243,13 +243,33 @@ func (s *PlatformExperimentsStore) RegisterLauncher(ctx context.Context, name st
 	return nil
 }
 
-// SetLauncherHolds records whether a launcher holds machines after one question of it: holds is
-// true when it listed any, or its answer asks for any. One that changes nothing writes nothing.
+// SetLauncherHolds records that a launcher was answered, now, and whether it holds machines after
+// that question: holds is true when it listed any, or its answer asks for any.
 func (s *PlatformExperimentsStore) SetLauncherHolds(ctx context.Context, name string, holds bool) error {
-	if _, err := s.pool.pool.Exec(ctx, `UPDATE launchers SET holds_machines = $2 WHERE name = $1 AND holds_machines <> $2`, name, holds); err != nil {
+	if _, err := s.pool.pool.Exec(ctx, `UPDATE launchers SET holds_machines = $2, answered_at = now() WHERE name = $1`, name, holds); err != nil {
 		return fmt.Errorf("platform_experiments_store.SetLauncherHolds: %w", err)
 	}
 	return nil
+}
+
+// LauncherAnsweredAt is when each launcher named was last answered: nil for one never answered,
+// and absent for a name no launcher is registered under.
+func (s *PlatformExperimentsStore) LauncherAnsweredAt(ctx context.Context, names []string) (map[string]*time.Time, error) {
+	rows, err := s.pool.pool.Query(ctx, `SELECT name, answered_at FROM launchers WHERE name = ANY($1)`, names)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.LauncherAnsweredAt: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]*time.Time{}
+	for rows.Next() {
+		var name string
+		var at *time.Time
+		if err := rows.Scan(&name, &at); err != nil {
+			return nil, fmt.Errorf("platform_experiments_store.LauncherAnsweredAt: %w", err)
+		}
+		out[name] = at
+	}
+	return out, rows.Err()
 }
 
 // LauncherInUseError is a launcher that cannot be removed: its token is what takes its machines

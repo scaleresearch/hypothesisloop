@@ -149,6 +149,20 @@ type createdStore struct {
 	left      []*domain.Experiment
 	// started counts the starts that reached the store.
 	started int
+	// answered is when a launcher last asked for its machines, by name. One not in it asked now.
+	answered map[string]*time.Time
+}
+
+func (s *createdStore) LauncherAnsweredAt(_ context.Context, names []string) (map[string]*time.Time, error) {
+	now := time.Now()
+	out := map[string]*time.Time{}
+	for _, name := range names {
+		out[name] = &now
+		if at, ok := s.answered[name]; ok {
+			out[name] = at
+		}
+	}
+	return out, nil
 }
 
 func (s *createdStore) FinishedBaselineJobs(context.Context, string) ([]*domain.Experiment, error) {

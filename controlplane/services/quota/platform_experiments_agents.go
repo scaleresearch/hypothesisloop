@@ -52,7 +52,7 @@ type JoinedAgent struct {
 	domain.AgentSignup
 	// StatusReason is why the agent is not at work yet: its platform experiment is open and has
 	// not started, or its machine is asked for and not running.
-	StatusReason *domain.StatusReason `json:"status_reason,omitempty" doc:"Why the agent is not at work yet. On an agent that waits for its open platform experiment to start, every one but those of role baseline: reason is the platform experiment's own (baseline_measuring, baseline_required and the others of its status_reason), and message says the agent takes no turn and, when the platform runs it, has no machine asked for until the start. Its instance reads waiting until then. On a hosted agent whose machine is asked for and not running yet, its instance reading requested or starting: instance_starting, and message says how long ago the machine was asked for. That is a start in progress and no failure."`
+	StatusReason *domain.StatusReason `json:"status_reason,omitempty" doc:"Why the agent is not at work yet. On an agent that waits for its open platform experiment to start, every one but those of role baseline: reason is the platform experiment's own (baseline_measuring, baseline_required and the others of its status_reason), and message says the agent takes no turn and, when the platform runs it, has no machine asked for until the start. Its instance reads waiting until then. On a hosted agent whose machine is asked for and not running yet, its instance reading requested or starting: instance_starting, and message says how long ago the machine was asked for. That is a start in progress and no failure. Such an agent whose launcher has not asked for its machines for a minute: launcher_unreachable, and message names the launcher and how long ago it last asked."`
 	Token        string               `json:"token,omitempty"`
 }
 
@@ -63,8 +63,21 @@ type JoinedAgent struct {
 func (s *PlatformExperimentsService) roster(ctx context.Context, platformExpID string, signups []domain.AgentSignup) ([]JoinedAgent, error) {
 	out := make([]JoinedAgent, len(signups))
 	now := time.Now()
+	var starting []string
+	for _, signup := range signups {
+		if instanceStarting(signup, now) != nil {
+			starting = append(starting, signup.Launcher)
+		}
+	}
+	silent, err := s.silentLaunchers(ctx, starting, now)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.roster: %w", err)
+	}
 	for i, signup := range signups {
 		out[i] = JoinedAgent{AgentSignup: signup, StatusReason: instanceStarting(signup, now)}
+		if sentence, ok := silent[signup.Launcher]; ok && out[i].StatusReason != nil {
+			out[i].StatusReason = &domain.StatusReason{Reason: reasonLauncherUnreachable, Message: launcherUnreachableMessage(sentence)}
+		}
 		if why := out[i].StatusReason; why != nil {
 			var err error
 			if why.WaitsFor, err = domain.WaitsFor(why.Reason, false); err != nil {

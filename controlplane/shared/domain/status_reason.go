@@ -56,6 +56,9 @@ var statusWaiters = map[string]Waiter{
 	"researchers_done": WaitsForCoordinator,
 
 	"instance_starting": WaitsForPlatform,
+	// A launcher that is to run a machine the platform wants has not asked for its machines
+	// lately. The platform's operator starts it; nothing an owner or agent does changes it.
+	"launcher_unreachable": WaitsForPlatform,
 }
 
 // StatusReasons is every reason of the table, sorted: what a text that lists them is checked

@@ -337,8 +337,14 @@ func TestALaunchersTokenFollowsItsRow(t *testing.T) {
 	setPEStatus(t, pool, pe, domain.PlatformExpClosed, domain.AgentWindDown/2)
 	refused("inside the wind-down of its last platform experiment", pe)
 	setPEStatus(t, pool, pe, domain.PlatformExpClosed, domain.AgentWindDown+time.Minute)
+	if answered, err := pes.LauncherAnsweredAt(ctx, []string{name}); err != nil || answered[name] != nil {
+		t.Fatalf("a launcher never answered: got = %v, %v, want no moment", answered, err)
+	}
 	if err := pes.SetLauncherHolds(ctx, name, true); err != nil {
 		t.Fatal(err)
+	}
+	if answered, err := pes.LauncherAnsweredAt(ctx, []string{name}); err != nil || answered[name] == nil || time.Since(*answered[name]) > time.Minute {
+		t.Fatalf("a launcher just answered: got = %v, %v, want now", answered, err)
 	}
 	refused("while its last question listed machines")
 	if err := pes.SetLauncherHolds(ctx, name, false); err != nil {

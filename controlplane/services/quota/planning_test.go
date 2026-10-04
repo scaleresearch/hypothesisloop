@@ -179,6 +179,45 @@ func TestADraftIsAnsweredBeforeItsRepositoryAndARefusedOneClosesIt(t *testing.T)
 	}
 }
 
+// A draft read "being planned" for half an hour while no launcher ran to start its planner. A
+// machine the platform wants of a launcher that has stopped asking says so, until it asks again.
+func TestADraftWhosePlannersLauncherIsSilentSaysItWaitsForTheLauncher(t *testing.T) {
+	store := draftWithPlanner()
+	store.created[0].Repository = "acme/model"
+	planner := store.signups["pe-draft"]
+	planner.Launcher = "main"
+	store.signups["pe-draft"] = planner
+	svc, _ := planningAPI(t, plannerListed{store}, thePlanner)
+	pe := store.created[0]
+
+	if err := svc.Describe(context.Background(), pe, auth.Principal{Kind: auth.KindUser}); err != nil || pe.StatusReason.Reason != "planning" {
+		t.Fatalf("with its launcher asking: %+v, %v, want planning", pe.StatusReason, err)
+	}
+	long := time.Now().Add(-10 * time.Minute)
+	store.answered = map[string]*time.Time{"main": &long}
+	if err := svc.Describe(context.Background(), pe, auth.Principal{Kind: auth.KindUser}); err != nil || pe.StatusReason.Reason != "launcher_unreachable" ||
+		pe.StatusReason.WaitsFor != domain.WaitsForPlatform || !strings.Contains(pe.StatusReason.Message, "launcher main last asked for its machines 10m0s ago") {
+		t.Fatalf("with its launcher silent: %+v, %v, want launcher_unreachable naming main and how long", pe.StatusReason, err)
+	}
+	store.answered = map[string]*time.Time{"main": nil}
+	if err := svc.Describe(context.Background(), pe, auth.Principal{Kind: auth.KindUser}); err != nil || !strings.Contains(pe.StatusReason.Message, "launcher main has not asked") {
+		t.Fatalf("with a launcher that never asked: %+v, %v", pe.StatusReason, err)
+	}
+	// A proposal waits for a person, and no machine is wanted for it.
+	now := time.Now()
+	pe.SetAnswered(&now, true)
+	if err := svc.Describe(context.Background(), pe, auth.Principal{Kind: auth.KindUser}); err != nil || pe.StatusReason.Reason != "proposed" {
+		t.Fatalf("a proposed draft with its launcher silent: %+v, %v, want proposed", pe.StatusReason, err)
+	}
+}
+
+// plannerListed is a draftStore whose roster is the draft's planner.
+type plannerListed struct{ *draftStore }
+
+func (s plannerListed) ListAgentSignups(_ context.Context, id string) ([]domain.AgentSignup, error) {
+	return []domain.AgentSignup{s.signups[id]}, nil
+}
+
 // draftRepositories answers the git credential service from the drafts a store holds.
 type draftRepositories struct{ store *draftStore }
 

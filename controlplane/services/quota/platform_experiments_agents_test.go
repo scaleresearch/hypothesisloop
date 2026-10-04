@@ -82,6 +82,16 @@ func (f *rosterStore) Create(context.Context, string, string, string, string, ma
 
 func (f *rosterStore) CreatesOn(context.Context, string, string) (string, error) { return "", nil }
 
+// LauncherAnsweredAt answers every launcher as asking now.
+func (f *rosterStore) LauncherAnsweredAt(_ context.Context, names []string) (map[string]*time.Time, error) {
+	now := time.Now()
+	out := map[string]*time.Time{}
+	for _, name := range names {
+		out[name] = &now
+	}
+	return out, nil
+}
+
 const rosterMaxHosted = 6
 
 func (f *rosterStore) ListSignups(context.Context, string) ([]string, error) {

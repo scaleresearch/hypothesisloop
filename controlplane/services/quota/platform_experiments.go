@@ -40,6 +40,8 @@ type PlatformExperimentsStore interface {
 	// decided inside the insert's own transaction.
 	Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) (bool, error)
 	LauncherKnown(ctx context.Context, name string) (bool, error)
+	// LauncherAnsweredAt is when each launcher named last asked for its machines, nil for never.
+	LauncherAnsweredAt(ctx context.Context, names []string) (map[string]*time.Time, error)
 	// SetProposal stores a draft's proposal, until when it waits for a person and how long its
 	// planner's machine is kept for a revision; db.ErrNotDraft for anything but a draft.
 	SetProposal(ctx context.Context, id string, proposal []byte, waitUntil time.Time, keepPlanner time.Duration) error

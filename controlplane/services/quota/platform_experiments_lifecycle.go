@@ -727,29 +727,40 @@ func closedReason(pe *domain.PlatformExperiment) *domain.StatusReason {
 // Describe sets on pe why it is in its status (StatusReason): on a draft where it stands with its
 // planner, on an open one why it is not running yet and what reader does about it, on a running
 // one whether its clock runs and whether a researcher is left to work, and on a closed one why it closed. It is the one place that says so.
+// Before any of those, one that wants a machine of a launcher that is silent waits for that
+// launcher (launcherUnreachable).
 func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.PlatformExperiment, reader auth.Principal) error {
 	var why *domain.StatusReason
-	switch pe.Status {
-	case domain.PlatformExpClosed:
+	var signups []domain.AgentSignup
+	var err error
+	if pe.Status == domain.PlatformExpClosed {
 		pe.StatusReason = closedReason(pe)
 		return nil
-	case domain.PlatformExpDraft:
-		why = draftReason(pe)
-	default:
-		signups, err := s.store.ListAgentSignups(ctx, pe.ID)
-		if err != nil {
+	}
+	// A draft's planner has a machine only while it plans in its repository.
+	if pe.Status != domain.PlatformExpDraft || pe.Repository != "" && !pe.Answered() {
+		if signups, err = s.store.ListAgentSignups(ctx, pe.ID); err != nil {
 			return fmt.Errorf("platform_experiments.Describe: %w", err)
 		}
-		if pe.Status == domain.PlatformExpRunning {
-			why = runningReason(pe, signups)
-			break
-		}
+	}
+	switch pe.Status {
+	case domain.PlatformExpDraft:
+		why = draftReason(pe)
+	case domain.PlatformExpRunning:
+		why = runningReason(pe, signups)
+	default:
 		if why, err = s.waiting(ctx, pe, signups); err != nil {
 			return err
 		}
 		why.Message = nextStep(why.Reason, signups, reader) + why.Message
 	}
-	var err error
+	silent, err := s.launcherUnreachable(ctx, pe, signups)
+	if err != nil {
+		return fmt.Errorf("platform_experiments.Describe: %w", err)
+	}
+	if silent != nil {
+		why = silent
+	}
 	if why.WaitsFor, err = domain.WaitsFor(why.Reason, pe.CoordinatorHosted); err != nil {
 		return fmt.Errorf("platform_experiments.Describe: %w", err)
 	}
