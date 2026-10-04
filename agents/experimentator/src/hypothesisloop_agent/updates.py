@@ -29,7 +29,8 @@ _DRAIN_S = 5
 # The kinds that wake whoever ended its turn, per role, and the one place that says so. An event
 # of another kind stays on the platform (hl watch --wake) and is handed over with the next that
 # wakes, after the next tool call, or once IDLE_NUDGE_S has passed. A coordinator has to learn
-# within seconds that an agent finished, that a job is held by what waiting will not clear or has
+# within seconds that an agent finished or has gone idle (agent.idle: no job of its own in flight
+# for the platform's notice, sent to that agent too), that a job is held by what waiting will not clear or has
 # waited past its own estimate (job.held, sent once, to the job's agent too), that a stage
 # advanced, that someone wrote a comment, that the brief changed, that the run closed or that its
 # status_reason began to wait for the coordinator (platform_experiment.status, sent again with
@@ -38,9 +39,9 @@ _DRAIN_S = 5
 # wakes only for what its reader can act on: a job held for a summary is cleared by its agent
 # alone, so it wakes no coordinator.
 WAKES = {
-    "coordinator": ("agent.finished", "experiment.blocked", "job.held!=summary_gate", "stage.boundary", "comment.new",
+    "coordinator": ("agent.finished", "agent.idle", "experiment.blocked", "job.held!=summary_gate", "stage.boundary", "comment.new",
                     "platform_experiment.status", "platform_experiment.description"),
-    "agent": ("experiment.status", "experiment.blocked", "job.held", "job.underperforming", "agent.cut",
+    "agent": ("experiment.status", "experiment.blocked", "job.held", "job.underperforming", "agent.cut", "agent.idle",
               "stage.boundary", "comment.new", "platform_experiment.status", "platform_experiment.description",
               "platform_experiment.revision"),
 }

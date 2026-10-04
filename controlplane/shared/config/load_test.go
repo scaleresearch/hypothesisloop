@@ -309,6 +309,8 @@ func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 		"no answer size":           {"  max_new_instances_per_answer: 10\n", ""},
 		"no hosted bound":          {"  max_hosted_per_platform_experiment: 25\n", ""},
 		"zero hosted bound":        {"  max_hosted_per_platform_experiment: 25", "  max_hosted_per_platform_experiment: 0"},
+		"no idle notice":           {"  idle_notice_minutes: 10\n", ""},
+		"zero idle notice":         {"  idle_notice_minutes: 10", "  idle_notice_minutes: 0"},
 		"launcher with a dash":     {"  launcher: main", "  launcher: main-2"},
 		"default model unsafe":     {"  default_model: claude-sonnet-5", "  default_model: $(id)"},
 	} {

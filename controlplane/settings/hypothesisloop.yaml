@@ -77,6 +77,9 @@ auth:
 #   max_hosted_per_platform_experiment  how many machines the platform runs for one platform
 #              experiment: its hosted agents of every role and its coordinator. Written onto the
 #              platform experiment when it is created, so a change bounds new ones only.
+#   idle_notice_minutes  how long a researcher of a running platform experiment may go with no
+#              job submitted since the run started or its last one, and none queued or running,
+#              before it and the coordinator are told so (agent.idle), once for each such stretch.
 agents:
   launcher: main
   image: registry.example.invalid/hypothesisloop-experimentator-base:latest
@@ -85,6 +88,7 @@ agents:
   progress_limit_seconds: 300
   max_new_instances_per_answer: 10
   max_hosted_per_platform_experiment: 25
+  idle_notice_minutes: 10
 
 # What bounds a draft: a platform experiment a person started from one sentence, which an agent
 # the platform runs plans (it works out the metric, the brief and the size and proposes the

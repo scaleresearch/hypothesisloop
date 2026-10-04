@@ -1362,3 +1362,73 @@ VALUES ('agent', 'late-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-acceler
 		t.Error("a reason with no sentence was taken")
 	}
 }
+
+// Run 6: a researcher worked 28 minutes on its own machine with nothing on the platform, and
+// neither it nor the coordinator was told. A researcher with no job submitted for the notice and
+// none in flight is told so once for each such stretch, live and on replay.
+func TestAResearcherWithNoJobForTheNoticeIsToldOnceForEachStretch(t *testing.T) {
+	pool := eventsTestDB(t)
+	before := cursorNow(t, pool)
+	agentID, peID, hypothesisID := seedRun(t, pool, "idle", true)
+	store := NewPlatformExperimentsStore(pool)
+	ctx := context.Background()
+	exec(t, pool, `UPDATE platform_experiments SET status = 'running', started_at = now() - interval '20 minutes' WHERE id = $1`, peID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at) VALUES ($1, $2, now() - interval '30 minutes')`, peID, agentID)
+	told := func() int {
+		t.Helper()
+		events, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, EventFilter{PlatformExperimentID: peID, AgentID: agentID, Kinds: map[string]bool{EventAgentIdle: true}}, before)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(events)
+	}
+	job := func(id, status string) {
+		t.Helper()
+		exec(t, pool, `INSERT INTO experiments
+(actor_kind, id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
+ hypothesis_id, hypothesis, accelerator_type, status, estimated_duration_hours, data_access_key_id, data_secret_access_key)
+VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $5, 1, 'AK', 'SK')`, agentID, peID, hypothesisID, id, status)
+	}
+
+	if err := store.NoticeIdleResearchers(ctx, 30*time.Minute); err != nil || told() != 0 {
+		t.Fatalf("idle 20 minutes, notice at 30: told %d, %v, want none", told(), err)
+	}
+	events, stop := listenForEvents(t, pool)
+	if err := store.NoticeIdleResearchers(ctx, 10*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	live := awaitEvent(t, events, EventAgentIdle, agentID)
+	stop()
+	if live.Detail != "submitted no job for 20 minutes and has none queued or running" || live.PlatformExperimentID != peID {
+		t.Fatalf("live: got = %+v, want the 20 minutes since the run started", live)
+	}
+	if err := store.NoticeIdleResearchers(ctx, 10*time.Minute); err != nil || told() != 1 {
+		t.Fatalf("the same stretch again: told %d, %v, want once", told(), err)
+	}
+
+	job("idle-job-1", "RUNNING")
+	if err := store.NoticeIdleResearchers(ctx, 0); err != nil || told() != 1 {
+		t.Fatalf("a job running: told %d, %v, want nothing more", told(), err)
+	}
+	exec(t, pool, `UPDATE experiments SET status = 'COMPLETED' WHERE id = 'idle-job-1'`)
+	if err := store.NoticeIdleResearchers(ctx, 10*time.Minute); err != nil || told() != 1 {
+		t.Fatalf("its job just ended: told %d, %v, want nothing more", told(), err)
+	}
+	if err := store.NoticeIdleResearchers(ctx, 0); err != nil || told() != 1 {
+		t.Fatalf("a new stretch: told %d, %v, want the last notice replayed alone", told(), err)
+	}
+	var detail string
+	if err := pool.pool.QueryRow(ctx, `SELECT idle_detail FROM experiment_signups WHERE platform_experiment_id = $1 AND agent_id = $2`, peID, agentID).Scan(&detail); err != nil || detail != "submitted no job for 0 minutes and has none queued or running" {
+		t.Fatalf("a new stretch: detail %q, %v, want it told again", detail, err)
+	}
+
+	exec(t, pool, `UPDATE experiment_signups SET finished_at = now() WHERE platform_experiment_id = $1`, peID)
+	exec(t, pool, `UPDATE experiment_signups SET idle_noticed_at = NULL WHERE platform_experiment_id = $1`, peID)
+	if err := store.NoticeIdleResearchers(ctx, 0); err != nil {
+		t.Fatal(err)
+	}
+	var untold bool
+	if err := pool.pool.QueryRow(ctx, `SELECT idle_noticed_at IS NULL FROM experiment_signups WHERE platform_experiment_id = $1`, peID).Scan(&untold); err != nil || !untold {
+		t.Fatalf("a finished researcher: told %v, want not", !untold)
+	}
+}

@@ -1386,8 +1386,8 @@ func (s *PlatformExperimentsService) tellCoordinator(ctx context.Context, pe *do
 	return s.store.TellCoordinator(ctx, pe.ID, reason)
 }
 
-// StartExpirySweep runs SweepAutoStart, TendBaselines, SweepExpired, RecordCloses and
-// TellCoordinators on a ticker until ctx is cancelled. TendBaselines runs before SweepExpired, so a baseline that waited
+// StartExpirySweep runs SweepAutoStart, TendBaselines, SweepExpired, RecordCloses,
+// TellCoordinators and the idle notice on a ticker until ctx is cancelled. TendBaselines runs before SweepExpired, so a baseline that waited
 // on the platform until its deadline is given that time before it is closed.
 func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
@@ -1411,6 +1411,11 @@ func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, inter
 			}
 			if err := s.TellCoordinators(ctx); err != nil {
 				s.logger.Error("tell_coordinators: scan", zap.Error(err))
+			}
+			if s.idle != nil {
+				if err := s.idle.NoticeIdleResearchers(ctx, s.idleAfter); err != nil {
+					s.logger.Error("notice_idle_researchers: scan", zap.Error(err))
+				}
 			}
 		}
 	}

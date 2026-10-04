@@ -32,12 +32,12 @@ type PlatformExperimentsStore interface {
 	// implementation's comment for why the compare-and-swap matters here.
 	UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus) error
 	SetPlatformExperimentSummary(ctx context.Context, id, summary string) error
-	// RecordClose writes the summary of a closed platform experiment that has none.
+	// RecordClose writes the platform's record of the close beside the summary, once.
 	RecordClose(ctx context.Context, id, record string) error
 	// JobsSettled says every job of a platform experiment ended and its cost was written.
 	JobsSettled(ctx context.Context, id string) (bool, error)
 	// ClosesToRecord is the platform experiments closed in the last within, after they were open,
-	// with no summary and every job settled.
+	// with no record of the close and every job settled.
 	ClosesToRecord(ctx context.Context, within time.Duration) ([]string, error)
 	// TellCoordinator records the status_reason the experiment waits for its coordinator with,
 	// "" for none, and announces one that changed.
@@ -166,6 +166,21 @@ type PlatformExperimentsService struct {
 	repositoryWake chan struct{}
 	// environments reads what the baseline branch declares and the environment a job ran in.
 	environments Environments
+	// idle tells researchers with no job for idleAfter that they are idle (WithIdleNotice).
+	idle      IdleNotices
+	idleAfter time.Duration
+}
+
+// IdleNotices tells researchers of running platform experiments that submitted no job for after
+// and have none in flight, once per such stretch (db.PlatformExperimentsStore.NoticeIdleResearchers).
+type IdleNotices interface {
+	NoticeIdleResearchers(ctx context.Context, after time.Duration) error
+}
+
+// WithIdleNotice wires the idle notice the expiry sweep sends (agent.idle).
+func (s *PlatformExperimentsService) WithIdleNotice(notices IdleNotices, after time.Duration) *PlatformExperimentsService {
+	s.idle, s.idleAfter = notices, after
+	return s
 }
 
 // Environments is what the baseline gate asks of the environments (environments.Service).

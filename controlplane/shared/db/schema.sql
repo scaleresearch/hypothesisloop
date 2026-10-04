@@ -522,6 +522,13 @@ CREATE TABLE IF NOT EXISTS experiment_signups (
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS finished_at     TIMESTAMPTZ;
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS finished_reason TEXT NOT NULL DEFAULT '';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS finished_xid    BIGINT;
+-- A researcher of a running platform experiment told it has gone idle (agent.idle): no job
+-- submitted for the platform's agents.idle_notice_minutes and none queued or running. When it
+-- was told, the transaction that told it for the replay, and what it was told. Told again only
+-- after a job of its own submitted since.
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS idle_noticed_at TIMESTAMPTZ;
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS idle_xid        BIGINT;
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS idle_detail     TEXT NOT NULL DEFAULT '';
 
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS role       TEXT NOT NULL DEFAULT 'competitor';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS quota_tier TEXT NOT NULL DEFAULT '';
@@ -988,6 +995,19 @@ DROP TRIGGER IF EXISTS signup_finished_notify ON experiment_signups;
 CREATE TRIGGER signup_finished_notify AFTER UPDATE OF finished_at ON experiment_signups
     FOR EACH ROW WHEN (OLD.finished_at IS NULL AND NEW.finished_at IS NOT NULL)
     EXECUTE FUNCTION hypothesisloop_agent_finished_notify();
+
+CREATE OR REPLACE FUNCTION hypothesisloop_agent_idle_notify() RETURNS trigger AS $$
+BEGIN
+    PERFORM hypothesisloop_notify_event('agent.idle', NEW.agent_id,
+        '', NEW.idle_detail, NEW.platform_experiment_id, NEW.agent_id);
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS signup_idle_notify ON experiment_signups;
+CREATE TRIGGER signup_idle_notify AFTER UPDATE OF idle_xid ON experiment_signups
+    FOR EACH ROW WHEN (NEW.idle_xid IS DISTINCT FROM OLD.idle_xid)
+    EXECUTE FUNCTION hypothesisloop_agent_idle_notify();
 
 -- A revision asked of a draft's planner. A pointer: what was asked is read from the draft.
 CREATE OR REPLACE FUNCTION hypothesisloop_planning_request_notify() RETURNS trigger AS $$

@@ -288,6 +288,9 @@ func (c *Config) build() error {
 	if c.Agents.MaxHostedPerPlatformExperiment <= 0 {
 		return fmt.Errorf("agents max_hosted_per_platform_experiment is required and positive: how many machines the platform runs for one platform experiment, its coordinator included")
 	}
+	if c.Agents.IdleNoticeMinutes <= 0 {
+		return fmt.Errorf("agents idle_notice_minutes is required and positive: how long a researcher may go with no job in flight before it and the coordinator are told")
+	}
 	if c.Planning.LimitMinutes <= 0 {
 		return fmt.Errorf("planning limit_minutes is required and positive: how long a draft's planner has to propose")
 	}

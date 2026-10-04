@@ -69,6 +69,10 @@ const (
 	// EventAgentFinished says an agent told the platform it has nothing left to do. It is the
 	// agent's own, so no rival is woken by it; whoever steers the run sees every one.
 	EventAgentFinished = "agent.finished"
+	// EventAgentIdle says a researcher of a running platform experiment submitted no job for a
+	// while and has none queued or running: its machines are idle. It is the agent's own, so it
+	// reaches that agent and whoever steers the run, and no rival.
+	EventAgentIdle = "agent.idle"
 	// EventPlatformExperimentStatus and EventPlatformExperimentDescription describe the run
 	// itself: whether it is still open, and whether the brief still says what it said. The
 	// description event deliberately carries no text — see EventKinds.
@@ -129,6 +133,8 @@ var EventKinds = []EventKindDoc{
 		Description: "This agent was cut at a stage boundary. Its own stop condition, without a GET to find out whether the cut was its."},
 	{Kind: EventAgentFinished, Subject: "agent id", Value: "empty by design",
 		Description: "This agent said it has nothing left to do, and its machine stops. detail is the reason it gave, and for a researcher the blocker it named and the time and quota it left. When every agent is finished or cut the run has nobody left to wait for."},
+	{Kind: EventAgentIdle, Subject: "agent id", Value: "empty by design",
+		Description: "This researcher of a running platform experiment has submitted no job for the platform's agents.idle_notice_minutes and has none queued or running, so nothing of its runs on the platform. detail says for how long. Sent once for each such stretch: a job it submits ends the stretch. Nothing is done to the agent."},
 	{Kind: EventHypothesisNew, Subject: "hypothesis id", Value: "empty by design",
 		Description: "An idea entered the shared pool. agent_id is whose it is, empty on one no agent owns. The claim itself and who registered it come from GET /hypotheses/{id}."},
 	{Kind: EventHypothesisStatus, Subject: "hypothesis id", Value: "open, confirmed, refuted, inconclusive",
@@ -220,7 +226,7 @@ func isExperimentSubject(kind string) bool {
 // one agent's stop condition, the boundary is about the ladder.
 func isAgentOwned(kind string) bool {
 	switch kind {
-	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventQuotaChanged, EventAgentCut, EventAgentFinished, EventJobUnderperforming, EventJobHeld:
+	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventQuotaChanged, EventAgentCut, EventAgentFinished, EventAgentIdle, EventJobUnderperforming, EventJobHeld:
 		return true
 	default:
 		return false
@@ -533,6 +539,7 @@ FROM pg_current_snapshot() s`).Scan(&horizon, &next); err != nil {
 		replayStageBoundaries,
 		replayAgentCuts,
 		replayAgentsFinished,
+		replayAgentsIdle,
 		replayPlatformExperiment,
 		replayRevisions,
 	} {
@@ -791,6 +798,25 @@ WHERE platform_experiment_id = $1 AND finished_xid >= $2`, peID, since)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("events_store.replayAgentsFinished: %w", err)
+	}
+	return events, nil
+}
+
+// replayAgentsIdle derives agent.idle from the signup, which records the last one told.
+func replayAgentsIdle(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]Event, error) {
+	rows, err := tx.Query(ctx, `SELECT agent_id, idle_detail, idle_xid FROM experiment_signups
+WHERE platform_experiment_id = $1 AND idle_xid >= $2`, peID, since)
+	if err != nil {
+		return nil, fmt.Errorf("events_store.replayAgentsIdle: %w", err)
+	}
+	events, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Event, error) {
+		event := Event{Kind: EventAgentIdle, PlatformExperimentID: peID}
+		err := row.Scan(&event.AgentID, &event.Detail, &event.Position)
+		event.Subject = event.AgentID
+		return event, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("events_store.replayAgentsIdle: %w", err)
 	}
 	return events, nil
 }

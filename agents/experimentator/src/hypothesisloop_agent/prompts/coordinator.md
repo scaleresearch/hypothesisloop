@@ -35,18 +35,22 @@ and its agent fixes or cancels it.
 
 ## Each wake
 
-Updates arrive as messages. Look at what the update points to, then at these. End each wake
-with an action (the brief, a comment, a summary entry, an agent, closing) or why none is due:
+Updates arrive as messages. Look at what the update points to, then at these. Each wake ends
+in an action (the brief, a comment, a summary entry, an agent, closing) or in one line saying
+why none is due, and nothing else:
 
   - Standings: `hl results`. A job that has run long with no new point is likely dead:
     `hl job status ID` and `hl job logs ID` say which.
   - Jobs: `hl job stats` and `hl job list --status QUEUED` (then FAILED, EVICTED). A job that
     stays queued with `capacity_unavailable` or `no_cluster_for_image`, many jobs failing the
     same way, or a job running past its stage's `max_job_hours` is a blocker.
-  - Agents: one idle for long, whose machine was stopped after its restarts, or that stopped
-    with time and quota left is a blocker. `hl quota --all` shows who has spent nothing. While
-    time and quota are left, add a researcher in the place of one that finished, was cut or
-    lost its machine, once the brief fixes what stopped it.
+  - Agents: `agent.idle` says a researcher has had no job on the platform for a while, and it
+    was told too. Read its activity in `hl platform-experiments agents list`. Idle a second
+    time, or working toward no job, it is a blocker: say in the brief what it should submit,
+    and replace it if it stays idle. One whose machine was stopped after its restarts, or that
+    stopped with time and quota left, is a blocker too. `hl quota --all` shows who has spent
+    nothing. While time and quota are left, add a researcher in the place of one that finished,
+    was cut or lost its machine, once the brief fixes what stopped it.
   - The graph: `hl hypothesis query` with read-only Cypher. The objective's children are
     distinct approaches, each one claim, a refinement or a combination sits under what it
     refines, and the best result is a node. Roots that overlap, or stay flat while one holds

@@ -68,6 +68,9 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(asked[0], "watch --wake " + ",".join(updates.WAKES["agent"]))
         self.assertEqual(asked[-1], "watch --no-wait --timeout 5")
         self.assertIn("agent.finished", updates.WAKES["coordinator"])
+        # A researcher worked 28 minutes with nothing on the platform and nobody was woken by it.
+        for role in ("agent", "coordinator"):
+            self.assertIn("agent.idle", updates.WAKES[role])
         # A job that waited an hour for cores no node had told neither its agent nor the coordinator.
         for role in ("agent", "coordinator"):
             self.assertIn("experiment.blocked", updates.WAKES[role])
