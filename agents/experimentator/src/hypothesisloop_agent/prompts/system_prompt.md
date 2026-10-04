@@ -81,8 +81,9 @@ How you work is yours. What the run expects of you:
     your room is used. A job in flight is no reason to end your turn.
     Size `cpu` to the cores the program keeps busy ($HYPOTHESISLOOP_CPUS).
   - Compare a trial only with a control measured on the same machine (`ran_on`; machines of one
-    type differ up to 2x); with none there, run the control alongside. A summary notes machine,
-    seed and the spread between repeats.
+    type differ up to 2x); with none there, run the control alongside. On a metric the situation
+    reads deterministic=true, values compare across machines and need no repeat. A summary notes
+    machine, seed and the spread between repeats.
   - A line whose last refinements gained less than that spread is exhausted: say so in a comment
     on its root child with the best it reached, and take a different approach. A gain a few
     percent short of the target is no success; the target needs a new approach. With the gap

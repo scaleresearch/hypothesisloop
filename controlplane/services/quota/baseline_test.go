@@ -263,3 +263,17 @@ func TestTheBriefStatesTheTargetAMetricSetsAgainstTheBaseline(t *testing.T) {
 		t.Fatalf("block %q states a target no metric declares", block)
 	}
 }
+
+// A metric declared deterministic reaches the brief, so no agent repeats a run of it or looks for
+// a control on its own machine.
+func TestTheBriefNamesTheMetricsDeclaredDeterministic(t *testing.T) {
+	pe := openExperiment()
+	pe.Metrics[0].Deterministic = true
+	block := baselineBlock(measuredBaseline(), pe.Metrics)
+	if want := "\ndeterministic: " + pe.Metrics[0].Key + " ("; !strings.Contains(block, want) {
+		t.Fatalf("block %q, want it to hold %q", block, want)
+	}
+	if block := baselineBlock(measuredBaseline(), openExperiment().Metrics); strings.Contains(block, "deterministic:") {
+		t.Fatalf("block %q names a metric nobody declared deterministic", block)
+	}
+}

@@ -78,6 +78,7 @@ type SituationStage struct {
 type SituationMetric struct {
 	Metric         string   `json:"metric"`
 	Direction      string   `json:"direction"`
+	Deterministic  bool     `json:"deterministic,omitempty" doc:"The metric is declared deterministic: its values compare across machines and need no repeat."`
 	BaselineValue  *float64 `json:"baseline_value,omitempty" doc:"The declared baseline job's value."`
 	BestValue      *float64 `json:"best_value,omitempty" doc:"The best value of a researcher's completed job that holds every constraint, as the standings rank it."`
 	BestJob        string   `json:"best_job,omitempty"`
@@ -309,7 +310,7 @@ type standing struct {
 // rankable completed jobs: the best, and the best of the jobs completed an hour and three hours
 // before.
 func metricStanding(metric domain.MetricDefinition, values []standing, now time.Time) SituationMetric {
-	out := SituationMetric{Metric: metric.Key, Direction: metric.Direction}
+	out := SituationMetric{Metric: metric.Key, Direction: metric.Direction, Deterministic: metric.Deterministic}
 	better := func(best *float64, value float64) bool { return best == nil || metric.Better(value, *best) }
 	for _, v := range values {
 		if better(out.BestValue, v.value) {

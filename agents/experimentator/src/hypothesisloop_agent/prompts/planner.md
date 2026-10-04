@@ -34,7 +34,9 @@ The proposal, in the shape `hl platform-experiments propose` shows:
     repository holds for the goal that measures as below is the experiment: keep it and its
     metric keys as they are. Success stated as a change against the control goes on that
     metric as `target_vs_baseline`, signed in its direction; a target stated otherwise, or none,
-    is left out of it and stays in the brief.
+    is left out of it and stays in the brief. A metric the same code and data give exactly on
+    any machine (an exact count, size or check, never a timing or a sampled estimate) is
+    declared `deterministic: true`.
   - The control: the existing system the goal asks to beat, as it ships (its recommended
     configuration, else its default), measured and left untouched. Each other system the goal
     names is a `reference` metric of its own, measured the same way, never merged into the

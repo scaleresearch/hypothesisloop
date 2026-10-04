@@ -885,7 +885,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"(confidently established as not working) / inconclusive (noisy or not worth drilling " +
 			"into). confirmed and refuted are given with the evidence: against names the control, a " +
 			"completed job of the same platform experiment, and the hypothesis has two completed " +
-			"jobs of its own besides it. Without that the answer is 409 with what is missing, " +
+			"jobs of its own besides it, or one where every ranking metric of the platform experiment is declared deterministic. Without that the answer is 409 with what is missing, " +
 			"unless despite carries a sentence of why the verdict holds anyway: a repeat is needed only where results " +
 			"vary between runs, so for a deterministic job one job and despite saying so suffice. What a verdict " +
 			"rests on is kept as a comment on the hypothesis. " +

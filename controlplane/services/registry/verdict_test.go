@@ -168,3 +168,30 @@ func TestOpenAndInconclusiveNeedNoEvidence(t *testing.T) {
 		t.Fatalf("notes written for verdicts that claim nothing: %v", store.comments)
 	}
 }
+
+// Round 14's agents wrote a reason with every verdict on a compression ratio, a value the same
+// code and data give exactly on any machine. Declared deterministic, one run and the control are
+// the evidence, and a run is still needed.
+func TestAVerdictOnDeterministicMetricsNeedsNoRepeat(t *testing.T) {
+	ctx := context.Background()
+	bound := 1.0
+	store := newPoolStore()
+	store.metrics = []domain.MetricDefinition{
+		{Key: "ratio", Direction: "maximize", Deterministic: true},
+		{Key: "exact", Direction: "maximize", Role: domain.MetricRoleConstraint, Bound: &bound},
+	}
+	svc := poolService(store)
+	h, _, _, _, err := svc.RegisterHypothesis(ctx, "agent-1", agentActor("agent-1"), "pe-1", "a joint context helps", buildOnRoot, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.jobs = []*domain.Experiment{jobOn("job-control", "", domain.StatusCompleted)}
+	var unsupported *UnsupportedVerdictError
+	if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Against: "job-control"}); !errors.As(err, &unsupported) || !strings.Contains(unsupported.Detail, "it has none") {
+		t.Fatalf("a verdict with no run of its own: got = %v, want it refused", err)
+	}
+	store.jobs = append(store.jobs, jobOn("job-1", h.ID, domain.StatusCompleted))
+	if settled, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Against: "job-control"}); err != nil || settled.Status != domain.HypothesisRefuted {
+		t.Fatalf("one completed run and a control on a deterministic metric: %v, %+v", err, settled)
+	}
+}

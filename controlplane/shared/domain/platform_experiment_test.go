@@ -103,3 +103,24 @@ func TestNoRequestAsksForAPlanner(t *testing.T) {
 		t.Fatal("role planner was taken from a request: the platform alone signs a planner up")
 	}
 }
+
+func TestAllRankingDeterministic(t *testing.T) {
+	bound := 1.0
+	gate := MetricDefinition{Key: "exact", Direction: "maximize", Role: MetricRoleConstraint, Bound: &bound}
+	cases := []struct {
+		name string
+		defs []MetricDefinition
+		want bool
+	}{
+		{"no metric", nil, false},
+		{"the ranking metric deterministic", []MetricDefinition{{Key: "ratio", Direction: "maximize", Deterministic: true}, gate}, true},
+		{"the ranking metric not", []MetricDefinition{{Key: "ratio", Direction: "maximize"}, {Key: "exact", Direction: "maximize", Role: MetricRoleConstraint, Bound: &bound, Deterministic: true}}, false},
+		{"one of two ranking metrics not", []MetricDefinition{{Key: "ratio", Direction: "maximize", Deterministic: true}, {Key: "time", Direction: "minimize"}}, false},
+		{"only a constraint deterministic", []MetricDefinition{{Key: "exact", Direction: "maximize", Role: MetricRoleConstraint, Bound: &bound, Deterministic: true}}, false},
+	}
+	for _, tc := range cases {
+		if got := AllRankingDeterministic(tc.defs); got != tc.want {
+			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

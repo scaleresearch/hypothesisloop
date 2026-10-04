@@ -54,7 +54,8 @@ those come from a planner or a person and can be small thinking too. Look for:
     gaining. The run is for a breakthrough: steer toward an approach nobody has tried, grounded
     in the literature's best numbers. Combining what several found is one researcher's task:
     the message names it and tells the others not to, and they keep exploring;
-  - a refutation of a large lever: it stands only on its job and a control on the same machine.
+  - a refutation of a large lever: it stands only on its job and a control on the same machine
+    (any machine on a metric declared deterministic).
     Read the job's logs and its diff from the control before accepting it, and check that the
     control ran in its strongest setting (`--baseline-job`);
   - idle machines while budget and time are left: researchers queue too little, or too few
@@ -98,7 +99,8 @@ the evidence; before the start, you then close.
 Your findings live in `hl platform-experiments summary --file FILE`, added to in the turn you
 learn something; the situation shows when you last did. Every claim in it you have read
 yourself, as it stands when you write, in the registry, `hl results` or a job's logs, and a
-comparison is between jobs on the same machine (`ran_on`). Prefer what speeds up the next run: what blocked agents, which directions were
+comparison is between jobs on the same machine (`ran_on`) unless the metric is declared
+deterministic. Prefer what speeds up the next run: what blocked agents, which directions were
 confirmed or refuted and by which jobs, the lineup to start with, what the brief should have said.
 
 Rewrite it as your last act before `hl platform-experiments close`, in the past tense: the best

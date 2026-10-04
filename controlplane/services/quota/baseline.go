@@ -298,7 +298,8 @@ func inEnvironment(env *domain.Environment, image string) bool {
 const measuredBaselineHeader = "MEASURED BASELINE (written by the platform from the declared job)"
 
 // baselineBlock is the block for baseline, with the last value it reported on each of metrics
-// in declared order but the references, the target of each metric that declares one, then each value a completed job reported on a reference
+// in declared order but the references, the target of each metric that declares one, the
+// metrics declared deterministic, then each value a completed job reported on a reference
 // and whether that job met the constraints, and the references no job reported.
 func baselineBlock(baseline *Baseline, metrics []domain.MetricDefinition) string {
 	measured := make([]string, 0, len(metrics))
@@ -322,6 +323,15 @@ func baselineBlock(baseline *Baseline, metrics []domain.MetricDefinition) string
 				lines = append(lines, fmt.Sprintf("target: %s = %g (%+g%% of the baseline's %g)", metric.Key, *target, *metric.TargetVsBaseline*100, value))
 			}
 		}
+	}
+	var deterministic []string
+	for _, metric := range metrics {
+		if metric.Deterministic {
+			deterministic = append(deterministic, metric.Key)
+		}
+	}
+	if len(deterministic) > 0 {
+		lines = append(lines, "deterministic: "+strings.Join(deterministic, ", ")+" (the same code and data give the same value on any machine: compared across machines, with no repeat)")
 	}
 	var unmeasured []string
 	for _, reference := range baseline.References {

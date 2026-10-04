@@ -382,3 +382,14 @@ func TestAHarnessReadingCountsOnlyForTheMachineHeldNow(t *testing.T) {
 		t.Errorf("a refusal past its reset: %+v", allowance)
 	}
 }
+
+// The situation says which metric is declared deterministic, the one place every wake reads.
+func TestTheSituationSaysAMetricIsDeterministic(t *testing.T) {
+	now := time.Now()
+	if !metricStanding(domain.MetricDefinition{Key: "ratio", Direction: "maximize", Deterministic: true}, nil, now).Deterministic {
+		t.Fatal("a metric declared deterministic reads as not")
+	}
+	if metricStanding(domain.MetricDefinition{Key: "acc", Direction: "maximize"}, nil, now).Deterministic {
+		t.Fatal("a metric not declared deterministic reads as one")
+	}
+}

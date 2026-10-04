@@ -667,8 +667,10 @@ Minimal shape:
       direction: maximize
       target_vs_baseline: 0.5 # optional: the goal, +50% over the baseline's value
                               # (negative for a metric to minimize)
+      deterministic: true     # optional: the same code and data give the same value on
+                              # any machine, so results compare across machines unrepeated
 
-Every field shown is required but coordinator_hosted and target_vs_baseline. report_interval_seconds may be left out:
+Every field shown is required but coordinator_hosted, target_vs_baseline and deterministic. report_interval_seconds may be left out:
 the platform's default applies.
 
 It is created open and no run has started. Add the researchers while it is open
@@ -867,6 +869,9 @@ a leading quote.
         target_vs_baseline: 0.5        # optional: a goal the person stated as a change against
                                        # the baseline, 0.5 for +50%, -0.3 for 30% lower on a
                                        # metric to minimize. Left out when none was stated
+        deterministic: true            # optional: the same code and data give the same value
+                                       # on any machine and in every run (an exact count, size
+                                       # or check, never a timing or a sampled estimate)
       - key: exact_match               # optional gate
         direction: maximize
         role: constraint

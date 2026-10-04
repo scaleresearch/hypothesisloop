@@ -42,6 +42,12 @@ type poolStore struct {
 	failNextComment bool
 	// closed holds the platform experiments that are closed.
 	closed map[string]bool
+	// metrics is what every platform experiment declares.
+	metrics []domain.MetricDefinition
+}
+
+func (s *poolStore) GetPlatformExperimentMetrics(context.Context, string) ([]domain.MetricDefinition, bool, error) {
+	return s.metrics, true, nil
 }
 
 func (s *poolStore) ListExperimentsTesting(_ context.Context, ids []string) ([]*domain.Experiment, error) {

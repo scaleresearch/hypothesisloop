@@ -81,13 +81,31 @@ func (d MetricDefinition) EffectiveRole() MetricRole {
 // ValidateMetricDefinitions); Bound is required and only meaningful for MetricRoleConstraint,
 // expressed in the same direction as Direction (maximize: value must be >= Bound; minimize:
 // value must be <= Bound). TargetVsBaseline, optional and only on a ranking metric, is the goal
-// as a signed change against the baseline's value, in fractions of its magnitude.
+// as a signed change against the baseline's value, in fractions of its magnitude. Deterministic
+// declares that the same code and data give the same value on any machine and in every run.
 type MetricDefinition struct {
 	Key              string     `json:"key"`
 	Direction        string     `json:"direction"` // "maximize" | "minimize"
 	Role             MetricRole `json:"role,omitempty"`
 	Bound            *float64   `json:"bound,omitempty"`
 	TargetVsBaseline *float64   `json:"target_vs_baseline,omitempty" doc:"Optional, on a ranking metric: the goal as a change against the declared baseline's value, in fractions of its magnitude. 0.5 is 50% above the baseline, -0.3 is 30% below it. Positive for a metric to maximize, negative for one to minimize."`
+	Deterministic    bool       `json:"deterministic,omitempty" doc:"Optional: the same code and data give the same value on any machine and in every run, as an exact count or check does and a timing never does. Its values compare across machines and need no repeat."`
+}
+
+// AllRankingDeterministic reports whether defs declare a ranking metric and every one of them is
+// deterministic: then a job's result needs neither a repeat nor a control on its own machine.
+func AllRankingDeterministic(defs []MetricDefinition) bool {
+	ranking := false
+	for _, d := range defs {
+		if d.EffectiveRole() != MetricRoleRanking {
+			continue
+		}
+		if !d.Deterministic {
+			return false
+		}
+		ranking = true
+	}
+	return ranking
 }
 
 // Target is the value TargetVsBaseline sets against baseline: nil without one, or with a baseline

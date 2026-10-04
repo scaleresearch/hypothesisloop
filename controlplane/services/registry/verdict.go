@@ -20,7 +20,8 @@ type Verdict struct {
 
 // minJobsForAVerdict is how many completed jobs of its own a hypothesis needs, besides the
 // control, before it is confirmed or refuted: one measurement and one repeat of it. A single
-// run does not tell an effect from the spread between two runs of the same thing.
+// run does not tell an effect from the spread between two runs of the same thing, unless every
+// ranking metric is declared deterministic, where a repeat gives the same numbers.
 const minJobsForAVerdict = 2
 
 // minDespiteLength keeps a reason from being a word.
@@ -34,9 +35,9 @@ func (e *UnsupportedVerdictError) Error() string { return e.Detail }
 
 // supported checks a confirmed or refuted verdict against the jobs on record. The rule knows
 // nothing of the task: it asks for a repeated measurement and a named control, both finished,
-// both of this platform experiment. What it cannot see (a deterministic job, whose repeat gives
-// the same numbers, a failure that needs no repeat, a control measured elsewhere) the agent
-// states in Despite, which is kept beside the verdict.
+// both of this platform experiment, and no repeat where every ranking metric is declared
+// deterministic. What it cannot see (a failure that needs no repeat, a control measured
+// elsewhere) the agent states in Despite, which is kept beside the verdict.
 func (s *Service) supported(ctx context.Context, h *domain.Hypothesis, v Verdict) error {
 	if v.Status != domain.HypothesisConfirmed && v.Status != domain.HypothesisRefuted {
 		return nil
@@ -74,12 +75,26 @@ func (s *Service) supported(ctx context.Context, h *domain.Hypothesis, v Verdict
 	if control.Status != domain.StatusCompleted {
 		return &UnsupportedVerdictError{Detail: fmt.Sprintf("the control %s is %s, and a control is a job that completed. %s", v.Against, control.Status, otherwise)}
 	}
-	if len(own) < minJobsForAVerdict {
+	metrics, found, err := s.store.GetPlatformExperimentMetrics(ctx, h.PlatformExperimentID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("%w: %s", ErrUnknownPlatformExperiment, h.PlatformExperimentID)
+	}
+	needed := minJobsForAVerdict
+	if domain.AllRankingDeterministic(metrics) {
+		needed = 1
+	}
+	if len(own) < needed {
 		have := "none"
 		if len(own) > 0 {
 			have = strings.Join(own, ", ")
 		}
-		return &UnsupportedVerdictError{Detail: fmt.Sprintf("%s needs %d completed jobs on the hypothesis besides the control %s, and it has %d (%s): where results vary between runs, one run does not tell an effect from that spread, so run it again (hl job submit FILE --hypothesis %s, the same submit as before with --repeat 2 for a second run of it) and set the verdict once it completed. %s", v.Status, minJobsForAVerdict, v.Against, len(own), have, h.ID, otherwise)}
+		if needed == 1 {
+			return &UnsupportedVerdictError{Detail: fmt.Sprintf("%s needs a completed job on the hypothesis besides the control %s, and it has none: run it (hl job submit FILE --hypothesis %s) and set the verdict once it completed. %s", v.Status, v.Against, h.ID, otherwise)}
+		}
+		return &UnsupportedVerdictError{Detail: fmt.Sprintf("%s needs %d completed jobs on the hypothesis besides the control %s, and it has %d (%s): where results vary between runs, one run does not tell an effect from that spread, so run it again (hl job submit FILE --hypothesis %s, the same submit as before with --repeat 2 for a second run of it) and set the verdict once it completed. %s", v.Status, needed, v.Against, len(own), have, h.ID, otherwise)}
 	}
 	return nil
 }

@@ -436,6 +436,7 @@ type declaredMetric struct {
 	Role             string   `json:"role" yaml:"role,omitempty"`
 	Bound            *float64 `json:"bound" yaml:"bound,omitempty"`
 	TargetVsBaseline *float64 `json:"target_vs_baseline" yaml:"target_vs_baseline,omitempty"`
+	Deterministic    bool     `json:"deterministic" yaml:"deterministic,omitempty"`
 }
 
 // statedExperiment is what the experiment file of a clone states.
@@ -472,6 +473,9 @@ func (m declaredMetric) String() string {
 	}
 	if m.TargetVsBaseline != nil {
 		stated += fmt.Sprintf(" target_vs_baseline %g", *m.TargetVsBaseline)
+	}
+	if m.Deterministic {
+		stated += " deterministic"
 	}
 	return stated
 }
