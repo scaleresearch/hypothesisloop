@@ -8,7 +8,21 @@ import (
 	"testing"
 
 	"go.yaml.in/yaml/v4"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
+
+// Run 4's baseline COPYed a vendored crate into its environment, which the platform builds with
+// no build context. The template says so and is a file the platform builds.
+func TestTheEnvironmentFileSaysItIsBuiltAloneAndTheCodeComesByTheClone(t *testing.T) {
+	file := Files()[Environment]
+	if err := domain.ValidateEnvironmentFile(file); err != nil {
+		t.Fatalf("the template: %v", err)
+	}
+	if !strings.Contains(file, "from this file alone") || !strings.Contains(file, "clones the code") {
+		t.Errorf("the template says nothing of how it is built:\n%s", file)
+	}
+}
 
 // The helper read its job's id at import, so a harness that imported it could not even be
 // started on an agent's machine: a baseline agent built a stand-in module to get past it.
