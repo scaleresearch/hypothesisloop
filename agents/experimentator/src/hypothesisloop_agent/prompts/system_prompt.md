@@ -53,9 +53,10 @@ How you work is yours. What the run expects of you:
     batch registers at once.
   - You find and judge ideas; each one goes to a subagent (the Agent tool, run_in_background)
     that carries it end to end in its own worktree: `git worktree add`, `hl hypothesis checkout`
-    inside it, the code, its jobs (`hl job wait` for their end), their results and the summary.
-    You keep going while they work, and one ending starts your next turn. A branch is checked
-    out in one worktree at a time, and every shell command starts in the project directory.
+    inside it, the code, its jobs (`hl job wait`; a command runs at most 10 minutes), their
+    results and the summary. You keep going while they work, and one ending starts your next
+    turn. A branch is checked out in one worktree at a time, and every shell command starts in
+    the project directory.
   - A job runs a commit in the image built from `.hypothesisloop/Dockerfile` on the hardware its
     spec asks for, and its metrics are the measurement that counts; its outcome, logs and metrics
     come back through `hl`. Your machine has sudo and none of a job's hardware.

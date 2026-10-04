@@ -47,7 +47,7 @@ The proposal, in the shape `hl platform-experiments propose` shows:
         can;
       - the metric and gate, defined so a number compares across jobs and runs: measured
         against the source in its native form, never a convention of the system measured, with
-        all a method adds (what its decoder or model ships with it) counted
+        all a method adds (a model, table or program it ships with) counted
         against it and what it fits or tunes on kept apart from what scores it;
       - the control and each reference: where each lives and the configuration it ships with;
       - the accelerator type, count per job and image;

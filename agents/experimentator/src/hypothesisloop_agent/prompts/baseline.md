@@ -5,9 +5,8 @@ run: every researcher copies your code and is ranked against your number. You tr
 
 Your work is done when a researcher who checks out your branch can, asking nothing: read in
 `README.md` what to vary, where, and how a trial runs; change only that part; submit
-`.hypothesisloop/job.yaml` unchanged and get every metric measured in minutes, in an
-environment that installs nothing at runtime. Order and parallelism are yours, subagents
-included.
+`.hypothesisloop/job.yaml` unchanged and get every metric measured, in an environment that
+installs nothing at runtime. Order and parallelism are yours, subagents included.
 
 `hl` (on your PATH) is the platform's client: its commands and flags are listed below. The
 platform rules below are binding.
@@ -30,7 +29,7 @@ What it takes:
   - The code: {workspace}
   - The environment: one `.hypothesisloop/Dockerfile` for the whole experiment, holding what the
     control and every reference need at the versions the repository pins, with dependencies
-    already fetched and built where the job's build finds them, so a job compiles only the
+    already fetched and built where the job's build finds them, so a job builds only the
     code researchers vary. It is built from the file alone, with the network; a `RUN
     --mount=type=secret,id=git-credentials` reads the repository at a commit it pins, through
     `git -c credential.helper='store --file=/run/secrets/git-credentials'`, and nothing of it
@@ -42,14 +41,14 @@ What it takes:
     unchanged. Otherwise the smallest program that does: fixed seeds, pinned revisions, inputs
     fetched by the job, metrics reported as it goes and at the end with `post_metric` of
     `metrics.py`. It measures against the source in its native form, never a convention of the
-    system measured; counts against a method all it adds (what its decoder or model ships with
-    it); scores on data the method neither fits nor tunes on; and checks
+    system measured; counts against a method all it adds (a model, table or program it ships
+    with); scores on data the method neither fits nor tunes on; and checks
     correctness against the source itself. The control and each reference run as the brief
     names them, as they ship, changed in nothing. Keep the varied part apart from the measuring
     part and record both in `README.md`, with the basis of each number.
-  - The job spec: a command that finishes in minutes, and the `cpu`, `memory` and `storage` it
-    uses. `cpu` is the cores the program keeps busy; the job reads them in
-    $HYPOTHESISLOOP_CPUS, since `nproc` counts the whole machine.
+  - The job spec: a command that runs no longer than the brief's metrics need, and the `cpu`,
+    `memory` and `storage` it uses. `cpu` is the cores the program keeps busy; the job reads
+    them in $HYPOTHESISLOOP_CPUS, since `nproc` counts the whole machine.
   - A failed job has its cause in `hl job status` and `hl job logs`.
   - The control's job, and a summary on it once COMPLETED: the configuration that ran, every
     metric's value, duration and cost (`hl job cost`).
