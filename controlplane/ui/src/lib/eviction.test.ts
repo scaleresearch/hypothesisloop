@@ -30,8 +30,8 @@ describe('a reason a job was requeued or evicted for', () => {
 
 describe('evictionDetailLines', () => {
   it('gives the last lines a failed job said one per row', () => {
-    expect(evictionDetailLines('container_failed: command exited with code 1: Traceback | ValueError: bad shape | see the docs'))
-      .toEqual(['command exited with code 1: Traceback', 'ValueError: bad shape', 'see the docs'])
+    expect(evictionDetailLines('container_failed: container exited with code 1\nlast output:\nTraceback\nValueError: bad shape'))
+      .toEqual(['container exited with code 1', 'last output:', 'Traceback', 'ValueError: bad shape'])
   })
 
   it('is empty for a reason that is a code alone', () => {

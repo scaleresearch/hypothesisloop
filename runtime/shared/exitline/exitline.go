@@ -5,12 +5,9 @@
 package exitline
 
 import (
-	"slices"
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 )
 
 const prefix = "hl-exec: exit-code="
@@ -68,53 +65,4 @@ func FindRun(lines []string) (startedAt, endedAt time.Time, found bool) {
 		return startedAt, endedAt, true
 	}
 	return time.Time{}, time.Time{}, false
-}
-
-// lastOutputBytes bounds what LastOutput returns: it travels in a job's failure reason, behind
-// the runtime's own words and inside domain's failureCauseDetailRunes.
-const lastOutputBytes = 300
-
-// lastOutputLines is how many lines LastOutput carries: an error is often followed by a few lines
-// of advice, and the last line alone is then the advice.
-const lastOutputLines = 5
-
-// lastOutputSeparator stands between the lines of LastOutput, which is itself one line.
-const lastOutputSeparator = " | "
-
-// LastOutput is the last things a job said among lines, as one printable line of at most
-// lastOutputBytes bytes: its last lastOutputLines lines that are neither blank nor the wrapper's
-// exit line, the most recent last, as many of them as fit whole. The last line alone is cut where
-// it does not fit. Empty when the job said nothing.
-func LastOutput(lines []string) string {
-	var said []string
-	size := 0
-	for i := len(lines) - 1; i >= 0 && len(said) < lastOutputLines; i-- {
-		if own := strings.TrimSpace(lines[i]); strings.HasPrefix(own, prefix) || strings.HasPrefix(own, runPrefix) {
-			continue
-		}
-		printable := strings.Map(func(r rune) rune {
-			if r == utf8.RuneError || !unicode.IsPrint(r) {
-				return ' '
-			}
-			return r
-		}, lines[i])
-		line := strings.Join(strings.Fields(printable), " ")
-		if line == "" {
-			continue
-		}
-		if len(said) == 0 {
-			for len(line) > lastOutputBytes {
-				_, last := utf8.DecodeLastRuneInString(line)
-				line = line[:len(line)-last]
-			}
-		} else if size+len(lastOutputSeparator)+len(line) > lastOutputBytes {
-			break
-		} else {
-			size += len(lastOutputSeparator)
-		}
-		size += len(line)
-		said = append(said, line)
-	}
-	slices.Reverse(said)
-	return strings.Join(said, lastOutputSeparator)
 }

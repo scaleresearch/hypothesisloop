@@ -25,7 +25,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
-	"github.com/scaleresearch/hypothesisloop/runtime/shared/exitline"
 )
 
 // DefaultLogTailLines is how many trailing lines FetchLogTail is asked for when the agent
@@ -543,9 +542,6 @@ func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id
 		if err != nil {
 			a.Log("poll phase detail %s: %v", id, err)
 			reason, message, restartCount, scheduledNodes, schedulingReason = "", "", 0, 0, ""
-		}
-		if said := exitline.LastOutput(logTail); (reason == domain.PhaseReasonContainerFailed || reason == domain.PhaseReasonCodeUnreachable) && said != "" {
-			message += ": " + said
 		}
 	}
 

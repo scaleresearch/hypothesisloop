@@ -25,7 +25,7 @@ import { Callout, Loading, ErrorMessage } from '@/components/ui/status-message'
 import { semantic, seriesPalette, chart } from '@/lib/colors'
 import { formatAccH, formatDuration } from '@/lib/format'
 import { budgetUnit, kindOf } from '@/lib/units'
-import { notAdmittedLabel, saidLines } from '@/lib/eviction'
+import { notAdmittedLabel } from '@/lib/eviction'
 import { JobReason } from '@/components/job-reason'
 import { graphHref } from '@/lib/hypothesis-graph'
 
@@ -138,11 +138,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
         <Callout tone="danger">
           <span className="font-medium text-danger">Reported by the cluster:</span>{' '}
           {j.phase_detail.reason && <Code className="text-danger">{j.phase_detail.reason}</Code>}
-          {j.phase_detail.message && saidLines(j.phase_detail.message).map((line, i) => (
-            i === 0
-              ? <Text key={i} as="span" tone="muted" className="ml-2">{line}</Text>
-              : <Text key={i} as="span" variant="code" tone="muted" className="block">{line}</Text>
-          ))}
+          {j.phase_detail.message && <Text as="span" tone="muted" className="ml-2">{j.phase_detail.message}</Text>}
           {j.phase_detail.restart_count ? (
             <Text as="span" variant="code" tone="muted" className="ml-3">
               restarts: {j.phase_detail.restart_count}

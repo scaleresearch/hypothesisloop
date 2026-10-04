@@ -64,16 +64,11 @@ export function evictionCode(reason?: string | null): string {
   return splitReason(reason)[0]
 }
 
-// saidLines is a runtime's message one line per row: that of a failed job ends with the last
-// lines the job said, joined by ' | '.
-export function saidLines(message: string): string[] {
-  return message.split(' | ')
-}
-
 // evictionDetailLines is the explanation one line per row, empty when the reason carries none.
+// That of a failed job goes on with the last lines the job said.
 export function evictionDetailLines(reason?: string | null): string[] {
   const [, detail] = splitReason(reason)
-  return detail ? saidLines(detail) : []
+  return detail ? detail.split('\n') : []
 }
 
 // evictionLabel is what a reader should see: the mapped human label for the code, followed by the
