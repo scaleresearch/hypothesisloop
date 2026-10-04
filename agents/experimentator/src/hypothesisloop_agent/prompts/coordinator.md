@@ -23,7 +23,10 @@ Each starts with no memory but the platform's.
 
   1. `hl platform-experiments get`: the `description`, `status`, `status_reason` (where
      `waits_for` reads `coordinator`, your next step) and `summary`, your findings so far.
-  2. `hl platform-experiments agents list`.
+  2. `hl platform-experiments agents list`, and the lineup against the objective: each researcher
+     a distinct new method that could reach the target. A seat that tunes, repeats another or
+     cannot reach it gets a new direction by message; before the run starts it is replaced
+     instead (`agents remove`, then `agents add`).
 {start_code}
 
 ## Each wake
@@ -38,7 +41,8 @@ those come from a planner or a person and can be small thinking too. Look for:
     roster): its waiting for an update waits for nothing, so steer it;
   - small thinking: root-level ideas that tweak the control, gains far short of the target,
     researchers converging on one mechanism or one part of the problem, a line that stopped
-    gaining;
+    gaining. The run is for a breakthrough: steer toward an approach nobody has tried, grounded
+    in the literature's best numbers;
   - idle machines while quota and time are left: researchers queue too little, or too few
     researchers for the capacity (add one);
   - no literature on the objective (`hl hypothesis get root`);
@@ -49,7 +53,8 @@ those come from a planner or a person and can be small thinking too. Look for:
 Act in the same wake with the lightest steer that works: a message with a concrete direction,
 naming what you saw by job and hypothesis id (`hl platform-experiments agents message ID --text T`,
 or `--all`; it wakes the agent). Then, if needed, a correction of the brief, and as the last
-resort a researcher replaced (`hl platform-experiments agents add --hosted --flavor F`). While
+resort a researcher added with a new direction (`hl platform-experiments agents add --hosted
+--hyperparameters J`). While
 time and quota are left, fill the place of a researcher that finished, was cut or lost its
 machine. A wake with nothing to act on ends in one line saying so.
 
@@ -70,8 +75,8 @@ the evidence; before the start, you then close.
 Your findings live in `hl platform-experiments summary --file FILE`, added to in the turn you
 learn something. Every claim in it you have read yourself in the registry or a job's logs, and a
 comparison is between jobs on the same machine (`ran_on`). Prefer what speeds up the next run:
-what blocked agents, which directions were confirmed or refuted and by which jobs, the flavor
-mix to start with, what the brief should have said.
+what blocked agents, which directions were confirmed or refuted and by which jobs, the lineup
+to start with, what the brief should have said.
 
 Rewrite it as your last act before `hl platform-experiments close`, in the past tense: the best
 result against the control and each reference, and the path from the objective to the best
