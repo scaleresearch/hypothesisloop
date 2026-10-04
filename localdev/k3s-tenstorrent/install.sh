@@ -66,32 +66,35 @@ if [[ "$(uname)" != "Linux" ]]; then
   exit 1
 fi
 
-# ---- Preflight: make sure there's actually Tenstorrent hardware here --------
+# ---- Preflight: what Tenstorrent hardware is here -------------------------
+# A host with no card installs as a CPU-only cluster: k3s alone, no tt-operator stage.
 echo "==> Checking for Tenstorrent hardware..."
-if ! command -v lspci &>/dev/null || ! lspci -d 1e52: &>/dev/null; then
-  echo "ERROR: no Tenstorrent PCIe device found (lspci -d 1e52:). This script is"
-  echo "       for real Tenstorrent hosts — use localdev/k3s-macos/install.sh for simulated nodes."
-  exit 1
+TT_CARD_COUNT=0
+if command -v lspci &>/dev/null; then
+  TT_CARD_COUNT="$(lspci -d 1e52: | wc -l)"
 fi
-TT_CARD_COUNT="$(lspci -d 1e52: | wc -l)"
-echo "    Found ${TT_CARD_COUNT} Tenstorrent PCIe device(s):"
-lspci -d 1e52: | sed 's/^/      /'
+if (( TT_CARD_COUNT == 0 )); then
+  echo "    No Tenstorrent PCIe device found (lspci -d 1e52:); installing a CPU-only cluster."
+else
+  echo "    Found ${TT_CARD_COUNT} Tenstorrent PCIe device(s):"
+  lspci -d 1e52: | sed 's/^/      /'
 
-# Checked via /sys rather than `lsmod | grep` — under `set -o pipefail`, grep -q
-# exits as soon as it finds a match, SIGPIPE-ing lsmod, which pipefail then
-# reports as a pipeline failure even though the module *is* loaded.
-if [[ ! -d /sys/module/tenstorrent ]]; then
-  echo "ERROR: tt-kmd (tenstorrent kernel module) is not loaded. Install it first:"
-  echo "         sudo apt install tenstorrent-dkms tenstorrent-tools"
-  echo "       then reboot or 'sudo modprobe tenstorrent'."
-  exit 1
-fi
-echo "    tt-kmd loaded ($(cat /sys/module/tenstorrent/version 2>/dev/null || echo unknown) )"
+  # Checked via /sys rather than `lsmod | grep` — under `set -o pipefail`, grep -q
+  # exits as soon as it finds a match, SIGPIPE-ing lsmod, which pipefail then
+  # reports as a pipeline failure even though the module *is* loaded.
+  if [[ ! -d /sys/module/tenstorrent ]]; then
+    echo "ERROR: tt-kmd (tenstorrent kernel module) is not loaded. Install it first:"
+    echo "         sudo apt install tenstorrent-dkms tenstorrent-tools"
+    echo "       then reboot or 'sudo modprobe tenstorrent'."
+    exit 1
+  fi
+  echo "    tt-kmd loaded ($(cat /sys/module/tenstorrent/version 2>/dev/null || echo unknown) )"
 
-if [[ ! -e /dev/tenstorrent/0 ]]; then
-  echo "ERROR: tt-kmd is loaded but /dev/tenstorrent/0 doesn't exist. Check dmesg"
-  echo "       for probe failures and that the 50-tenstorrent.rules udev rule ran."
-  exit 1
+  if [[ ! -e /dev/tenstorrent/0 ]]; then
+    echo "ERROR: tt-kmd is loaded but /dev/tenstorrent/0 doesn't exist. Check dmesg"
+    echo "       for probe failures and that the 50-tenstorrent.rules udev rule ran."
+    exit 1
+  fi
 fi
 
 # ---- k3s: native systemd service, same version pin as localdev --------------
@@ -128,6 +131,8 @@ KUBECONFIG="${HOME}/.kube/config:/etc/rancher/k3s/k3s.yaml" \
   kubectl config view --flatten > /tmp/kube-merged.yaml
 mv /tmp/kube-merged.yaml "${HOME}/.kube/config"
 chmod 600 "${HOME}/.kube/config"
+# The kubectl k3s installs reads /etc/rancher/k3s/k3s.yaml when KUBECONFIG is unset.
+export KUBECONFIG="${HOME}/.kube/config"
 kubectl config rename-context default "${CONTEXT_NAME}" 2>/dev/null || true
 kubectl config use-context "${CONTEXT_NAME}"
 
@@ -136,6 +141,7 @@ wait_for 40 3 "node to register" kubectl --context "${CONTEXT_NAME}" get nodes
 kubectl --context "${CONTEXT_NAME}" wait node --all --for=condition=Ready --timeout=120s
 echo "==> k3s stage: $(( $(date +%s) - STAGE_T0 ))s"
 
+if (( TT_CARD_COUNT > 0 )); then
 # ---- helm ---------------------------------------------------------------
 STAGE_T0=$(date +%s)
 lib_ensure_helm
@@ -181,6 +187,7 @@ wait_for 40 3 "NFD pci-1200_1e52 label" \
 wait_for 40 3 "Tenstorrent ResourceSlice" sh -c \
   "kubectl --context '${CONTEXT_NAME}' get resourceslices -o json | python3 -c 'import json,sys; assert any(x.get(\"spec\",{}).get(\"driver\")==\"tenstorrent.com\" for x in json.load(sys.stdin)[\"items\"])'"
 echo "==> tt-operator stage: $(( $(date +%s) - STAGE_T0 ))s"
+fi
 
 echo "==> Cluster ready. Context: ${CONTEXT_NAME}"
 echo "    Attach it from the control plane's host with make cluster-agent-up CLUSTER=box-a (see README)."
