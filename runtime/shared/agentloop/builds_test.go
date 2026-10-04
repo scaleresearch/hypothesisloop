@@ -240,7 +240,10 @@ func TestABuildNoLongerListedAtItsAttemptIsCancelledAndNotReported(t *testing.T)
 	}
 }
 
-func TestABuildWhoseReportWasRefusedRunsAgain(t *testing.T) {
+// Run 10: a build ran while the control plane was out of reach. The outcome of a build whose
+// report was not taken is posted again by the next pass that lists it, and the build is never run
+// again: a file that failed fails the same way.
+func TestABuildWhoseReportWasRefusedIsReportedAgainNotRunAgain(t *testing.T) {
 	api := &buildsAPI{reports: map[string][]domain.EnvironmentBuildReport{}, refuse: true}
 	server := api.serve(t)
 	builder := newFakeBuilder()
@@ -248,20 +251,35 @@ func TestABuildWhoseReportWasRefusedRunsAgain(t *testing.T) {
 	agent := buildAgent(server, builder)
 	api.list(k1)
 
-	if err := agent.reconcileOnce(context.Background()); err != nil {
-		t.Fatal(err)
+	for range 2 {
+		if err := agent.reconcileOnce(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		agent.building.Wait()
 	}
-	agent.building.Wait()
 	api.mu.Lock()
 	api.refuse = false
 	api.mu.Unlock()
-	if err := agent.reconcileOnce(context.Background()); err != nil {
-		t.Fatal(err)
+	for range 2 {
+		if err := agent.reconcileOnce(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		agent.building.Wait()
 	}
-	agent.building.Wait()
 
-	if runs := builder.count(builder.runs, "k1"); runs != 2 || len(api.reported("k1")) != 1 {
-		t.Errorf("ran %d times with %d reports taken, want it run again and reported", runs, len(api.reported("k1")))
+	if runs, got := builder.count(builder.runs, "k1"), api.reported("k1"); runs != 1 || len(got) != 1 || got[0].Attempt != 1 || got[0].Outcome != domain.EnvironmentBuildPushed {
+		t.Errorf("ran %d times with reports %+v taken, want it run once and its outcome reported once", runs, got)
+	}
+	api.mu.Lock()
+	outcomes := 0
+	for _, o := range api.order {
+		if o == "outcome" {
+			outcomes++
+		}
+	}
+	api.mu.Unlock()
+	if outcomes != 3 {
+		t.Errorf("%d outcome posts, want the refused one, one again while still refused, and the one taken", outcomes)
 	}
 }
 
@@ -355,6 +373,7 @@ func TestABuildPostsTheStepItIsAtAndARefusedPostCostsItNothing(t *testing.T) {
 			t.Fatal(err)
 		}
 		waitFor(t, "the report", func() bool { return len(api.reported("k1")) == 1 })
+		agent.building.Wait()
 		if got := api.reported("k1")[0]; got.Outcome != domain.EnvironmentBuildPushed {
 			t.Fatalf("refuse=%v: reported %+v, want the build pushed", refuse, got)
 		}

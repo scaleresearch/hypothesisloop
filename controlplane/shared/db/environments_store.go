@@ -160,9 +160,12 @@ WHERE key = $1 AND attempt = $2 AND cluster_name = $3 AND state = 'building'`, k
 // FinishEnvironmentBuild records what cluster reports of the build of key it was assigned at
 // attempt, and says whether it was still that build's to report. Built, the environment is ready
 // in outcome.Image; the file's fault fails it with the end of its output; the platform's frees it,
-// so the next assignment builds it again.
+// so the next assignment builds it again. The file is the key's, so its fault fails the build
+// whatever attempt, on whatever cluster, it is at now: an attempt taken from a cluster that went
+// silent and then reported the file failing ends the build there, and is never run again.
 func (s *EnvironmentsStore) FinishEnvironmentBuild(ctx context.Context, cluster, key string, attempt int, outcome domain.EnvironmentBuildOutcome) (bool, error) {
 	var set string
+	fence := `key = $1 AND attempt = $2 AND cluster_name = $3 AND state = 'building'`
 	args := []any{key, attempt, cluster}
 	switch outcome.Fault {
 	case "":
@@ -171,14 +174,13 @@ func (s *EnvironmentsStore) FinishEnvironmentBuild(ctx context.Context, cluster,
 		}
 		set, args = `state = 'ready', image = $4, failed_log = ''`, append(args, outcome.Image)
 	case domain.EnvironmentFaultFile:
-		set, args = `state = 'failed', fault = 'file', log_tail = $4`, append(args, outcome.LogTail)
+		set, fence, args = `state = 'failed', fault = 'file', log_tail = $3`, `key = $1 AND attempt >= $2 AND state = 'building'`, []any{key, attempt, outcome.LogTail}
 	case domain.EnvironmentFaultPlatform:
 		set, args = `cluster_name = '', assigned_at = NULL, log_tail = $4`, append(args, outcome.LogTail)
 	default:
 		return false, fmt.Errorf("environments_store.FinishBuild: %q is no fault of a build", outcome.Fault)
 	}
-	tag, err := s.pool.pool.Exec(ctx, `UPDATE environments SET `+set+`, loaded_image = '', loaded_node = '', updated_at = now()
-WHERE key = $1 AND attempt = $2 AND cluster_name = $3 AND state = 'building'`, args...)
+	tag, err := s.pool.pool.Exec(ctx, `UPDATE environments SET `+set+`, loaded_image = '', loaded_node = '', updated_at = now() WHERE `+fence, args...)
 	if err != nil {
 		return false, fmt.Errorf("environments_store.FinishBuild: %w", err)
 	}

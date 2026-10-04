@@ -89,6 +89,10 @@ type Builder interface {
 type runningBuild struct {
 	attempt int
 	cancel  context.CancelFunc
+	// unsent is the outcome of a build that ended and whose report the control plane did not
+	// take; posting is set while it is posted again.
+	unsent  *domain.EnvironmentBuildReport
+	posting bool
 }
 
 // ErrClusterRemoved is what Run returns once the control plane no longer knows this cluster

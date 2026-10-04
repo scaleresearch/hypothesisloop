@@ -491,7 +491,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "cluster-build-report", Method: "POST", Path: "/{name}/builds/{key}",
 		Summary: "Report the outcome of an assigned environment build", Tags: []string{"cluster-agent"},
 		Description: "outcome pushed makes the environment ready in the image the repository holds under digest; file fails it with log_tail as the file's fault; " +
-			"platform frees the build to be assigned again. Recorded only while the build of key is assigned to this cluster at attempt and still building; otherwise 409.",
+			"platform frees the build to be assigned again. Recorded only while the build of key is assigned to this cluster at attempt and still building; otherwise 409. " +
+			"file is the exception: the file is the key's, so it fails a build still building at attempt or a later one, wherever it was assigned again.",
 	}, func(ctx context.Context, in *struct {
 		Name string `path:"name"`
 		Key  string `path:"key"`

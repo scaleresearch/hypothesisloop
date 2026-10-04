@@ -15,8 +15,10 @@ import (
 )
 
 // reconcileBuilds starts every listed build not running at its attempt and cancels every running
-// one no longer listed at it. An agent that restarts starts its builds again, and the daemon's
-// cache makes that cheap.
+// one no longer listed at it. A listed build that ended with its report not taken is not run
+// again: its report is posted again, so a file that failed, whose next run fails the same way,
+// runs once however long the control plane is out of reach. An agent that restarts starts its
+// builds again, and the daemon's cache makes that cheap.
 func (a *Agent) reconcileBuilds(ctx context.Context, listed []domain.EnvironmentBuild) {
 	if a.Builder == nil {
 		return
@@ -37,7 +39,15 @@ func (a *Agent) reconcileBuilds(ctx context.Context, listed []domain.Environment
 		}
 	}
 	for _, b := range listed {
-		if _, running := a.builds[b.Key]; running {
+		if running, ok := a.builds[b.Key]; ok {
+			if running.unsent != nil && !running.posting {
+				running.posting = true
+				a.building.Add(1)
+				go func() {
+					defer a.building.Done()
+					a.postReport(ctx, running, b)
+				}()
+			}
 			continue
 		}
 		buildCtx, cancel := context.WithCancel(ctx)
@@ -49,8 +59,9 @@ func (a *Agent) reconcileBuilds(ctx context.Context, listed []domain.Environment
 }
 
 // runBuild runs b and reports how it ended, unless it was cancelled. A report the control plane
-// did not take forgets the build, so the next pass that still lists it runs it again. A reported
-// build is cancelled too once the list drops it, which stops nothing, so the cancel is told here.
+// did not take is kept, and the next pass that still lists b posts it again (postReport). A
+// reported build is cancelled too once the list drops it, which stops nothing, so the cancel is
+// told here.
 func (a *Agent) runBuild(ctx context.Context, running *runningBuild, b domain.EnvironmentBuild) {
 	defer a.building.Done()
 	defer running.cancel()
@@ -97,7 +108,25 @@ func (a *Agent) runBuild(ctx context.Context, running *runningBuild, b domain.En
 		return
 	}
 	report.Attempt = b.Attempt
+	a.buildsMu.Lock()
+	running.unsent, running.posting = &report, true
+	a.buildsMu.Unlock()
+	a.postReport(ctx, running, b)
+}
+
+// postReport posts the unsent report of b. Taken, it is sent; not taken, it waits for the next
+// pass that still lists b at its attempt, which posts it again.
+func (a *Agent) postReport(ctx context.Context, running *runningBuild, b domain.EnvironmentBuild) {
+	a.buildsMu.Lock()
+	report := *running.unsent
+	a.buildsMu.Unlock()
 	err := a.postJSON(ctx, "/builds/"+url.PathEscape(b.Key), report, nil)
+	a.buildsMu.Lock()
+	running.posting = false
+	if err == nil {
+		running.unsent = nil
+	}
+	a.buildsMu.Unlock()
 	if err == nil {
 		detail := report.Digest
 		if report.Outcome != domain.EnvironmentBuildPushed {
@@ -107,12 +136,7 @@ func (a *Agent) runBuild(ctx context.Context, running *runningBuild, b domain.En
 		a.Log("build %s attempt %d: %s %s", b.Key, b.Attempt, report.Outcome, detail)
 		return
 	}
-	a.Log("build %s attempt %d: report %s: %v", b.Key, b.Attempt, report.Outcome, err)
-	a.buildsMu.Lock()
-	defer a.buildsMu.Unlock()
-	if a.builds[b.Key] == running {
-		delete(a.builds, b.Key)
-	}
+	a.Log("build %s attempt %d: report %s: %v; posted again while it is listed", b.Key, b.Attempt, report.Outcome, err)
 }
 
 // postProgress posts each step it receives as the step b is at, until steps closes, then closes

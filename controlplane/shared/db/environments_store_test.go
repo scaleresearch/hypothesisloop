@@ -217,6 +217,37 @@ func TestABuildIsReassignedOffADeadClusterOrAPassedLeaseUntilItsAttemptsAreSpent
 	}
 }
 
+// Run 10: a build was taken from a cluster that went silent and assigned again elsewhere. The
+// file is the key's, so the old attempt's report of the file failing fails the build at once and
+// the new attempt does not run it again; a later attempt's report is no earlier attempt's.
+func TestAFileFaultOfAnEarlierAttemptFailsTheBuildWhereverItIsNow(t *testing.T) {
+	w := newEnvironments(t)
+	ctx := context.Background()
+	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofB, sharedAs(true), domain.ClusterSettings{}); err != nil {
+		t.Fatal(err)
+	}
+	env := w.ensure(t, w.orgA, "moved")
+	first := w.assign(t, env.Key, w.ofA)
+	w.assign(t, env.Key)
+	second := w.assign(t, env.Key, w.ofB)
+	if second.ClusterName != w.ofB || second.Attempt != 2 {
+		t.Fatalf("second: %+v", second)
+	}
+	if took, err := w.envs.FinishEnvironmentBuild(ctx, w.ofB, env.Key, 3, domain.EnvironmentBuildOutcome{Fault: domain.EnvironmentFaultFile, LogTail: "x"}); err != nil || took {
+		t.Fatalf("a report of an attempt not yet made: took %v, %v", took, err)
+	}
+	if !w.finish(t, w.ofA, first, domain.EnvironmentBuildOutcome{Fault: domain.EnvironmentFaultFile, LogTail: "error: unexpected argument '--locked=false'"}) {
+		t.Fatal("the file's fault reported by the earlier attempt was refused")
+	}
+	failed, _ := w.envs.GetEnvironment(ctx, env.Key)
+	if failed.State != domain.EnvironmentFailed || failed.Fault != domain.EnvironmentFaultFile || failed.Attempt != 2 {
+		t.Fatalf("after the earlier attempt's file fault: %+v, want it failed as the file's", failed)
+	}
+	if listed, err := w.envs.AssignedEnvironmentBuilds(ctx, w.ofB); err != nil || len(listed) != 0 {
+		t.Fatalf("builds of %s: %v, %v, want none left to run", w.ofB, listed, err)
+	}
+}
+
 // Only the cluster a build is assigned to, at its attempt, reports it, once. A file's fault fails
 // it, and the next submit builds it again with that build's output kept until it is built; a ready
 // environment stays ready.
