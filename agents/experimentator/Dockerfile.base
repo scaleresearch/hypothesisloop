@@ -45,10 +45,13 @@ FROM python:3.13-slim
 # build-essential, pkg-config, cmake: an agent compiles and tests a harness here before a job runs
 # it. Twice a baseline agent found no C compiler or linker.
 # sudo: what else its .hypothesisloop/Dockerfile installs, the agent installs here itself.
-# bubblewrap: hl env run runs a command inside the image a job runs in, staged by hl env stage.
+# bubblewrap: hl env run runs a command inside the image a job runs in, staged by hl env stage,
+# and fuse-overlayfs gives each working tree a copy-on-write view of it. fusermount3 unmounts
+# through /etc/mtab, which the base image lacks.
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git \
-    build-essential pkg-config cmake sudo bubblewrap \
-    && rm -rf /var/lib/apt/lists/*
+    build-essential pkg-config cmake sudo bubblewrap fuse-overlayfs \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /proc/self/mounts /etc/mtab
 COPY --from=uv /uv /uvx /usr/local/bin/
 
 # Non-interactive git auth, baked so the agent never handles credentials: git asks `hl

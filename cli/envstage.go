@@ -3,6 +3,8 @@ package main
 import (
 	"archive/tar"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -436,7 +438,8 @@ func regularBytes(root string) (int64, error) {
 	return total, err
 }
 
-// removeUnused removes every root under roots but current that no hl env run holds.
+// removeUnused removes every root under roots but current that no hl env run holds, with the
+// views of it each working tree had.
 func removeUnused(roots, current string) error {
 	entries, err := os.ReadDir(roots)
 	if err != nil {
@@ -453,7 +456,10 @@ func removeUnused(roots, current string) error {
 		}
 		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
-			err = os.RemoveAll(p)
+			err = removeOverlays(filepath.Join(filepath.Dir(roots), "overlays", e.Name()))
+			if err == nil {
+				err = os.RemoveAll(p)
+			}
 		} else if errors.Is(err, syscall.EWOULDBLOCK) {
 			err = nil
 		}
@@ -466,15 +472,15 @@ func removeUnused(roots, current string) error {
 }
 
 // holdStaged answers what is staged, its root held from removal by a shared lock on a descriptor
-// of the root. syscall.Open leaves the descriptor open across exec, so the lock lasts as long as
-// the command run in the root.
+// of the root. The descriptor is closed on exec, so that the views of the root hl env run mounts
+// do not hold it; keepAcrossExec makes the lock last as long as the command run in the root.
 func holdStaged(dir string) (*staged, int, error) {
 	s, err := readStaged(dir)
 	for {
 		if err != nil {
 			return nil, 0, err
 		}
-		fd, openErr := syscall.Open(s.Root, syscall.O_RDONLY, 0)
+		fd, openErr := syscall.Open(s.Root, syscall.O_RDONLY|syscall.O_CLOEXEC, 0)
 		if openErr == nil {
 			if err := syscall.Flock(fd, syscall.LOCK_SH); err != nil {
 				return nil, 0, err
@@ -493,6 +499,13 @@ func holdStaged(dir string) (*staged, int, error) {
 		}
 		s = now
 	}
+}
+
+func keepAcrossExec(fd int) error {
+	if _, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_SETFD, 0); errno != 0 {
+		return errno
+	}
+	return nil
 }
 
 func readStaged(dir string) (*staged, error) {
@@ -531,8 +544,10 @@ func envRun(_ *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 Runs COMMAND on this machine inside the image hl env stage staged, the image a job runs in, as
 root of that image, with its environment variables. Your home and /tmp are the machine's own,
 so a working tree and what it builds are shared, and the command starts in the current
-directory, which must be under one of them. What it installs into the image stays there until
-the next stage replaces it. The machine has none of a job's accelerators: code builds and
+directory, which must be under one of them. Each working tree, the git worktree of the current
+directory or the directory itself outside one, has a copy-on-write view of the image of its
+own: what a command writes into the image stays for the next command in that tree and no other
+tree sees it, until the tree is removed or the next stage replaces the image. The machine has none of a job's accelerators: code builds and
 imports, and what needs the device fails. With nothing staged yet it waits for the hl env stage
 running now, and says why when none is. Exits with COMMAND's status.`, stderr)
 	if err := flags.Parse(args); err != nil {
@@ -546,9 +561,9 @@ running now, and says why when none is. Exits with COMMAND's status.`, stderr)
 	if err != nil {
 		return fail(stderr, fmt.Errorf("env run: %w", err))
 	}
-	s, _, err := holdStaged(dir)
+	s, held, err := holdStaged(dir)
 	if errors.Is(err, fs.ErrNotExist) && awaitStage(dir, stderr) {
-		s, _, err = holdStaged(dir)
+		s, held, err = holdStaged(dir)
 	}
 	if errors.Is(err, fs.ErrNotExist) {
 		why := "no hl env stage has run here"
@@ -564,8 +579,20 @@ running now, and says why when none is. Exits with COMMAND's status.`, stderr)
 	if err != nil {
 		return fail(stderr, errors.New("env run: needs bubblewrap (bwrap) on PATH, on Linux"))
 	}
-	argv, err := sandboxArgs(s)
+	wd, err := sharedWorkingDirectory()
 	if err != nil {
+		return fail(stderr, fmt.Errorf("env run: %w", err))
+	}
+	sweepOverlays(dir, s.Root, stderr)
+	view, err := mountOverlay(dir, s.Root, worktreeOf(wd))
+	if err != nil {
+		return fail(stderr, fmt.Errorf("env run: %w", err))
+	}
+	argv, err := sandboxArgs(s, view, wd)
+	if err != nil {
+		return fail(stderr, fmt.Errorf("env run: %w", err))
+	}
+	if err := keepAcrossExec(held); err != nil {
 		return fail(stderr, fmt.Errorf("env run: %w", err))
 	}
 	if err := syscall.Exec(bwrap, append(append([]string{"bwrap"}, argv...), command...), nil); err != nil {
@@ -574,23 +601,214 @@ running now, and says why when none is. Exits with COMMAND's status.`, stderr)
 	return 0
 }
 
-// sandboxArgs are bwrap's arguments that run a command in the staged root as its root user, in
-// namespaces of its own, with the caller's home, /tmp and network.
-func sandboxArgs(s *staged) ([]string, error) {
+// sharedWorkingDirectory is the current directory, which must be one a staged image shares with
+// this machine.
+func sharedWorkingDirectory() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	if !within(wd, home) && !within(wd, "/tmp") {
+		return "", fmt.Errorf("the current directory %s is outside %s and /tmp, which are all a staged image shares with this machine", wd, home)
+	}
+	return wd, nil
+}
+
+// worktreeOf is the top of the git working tree holding wd, wd itself outside one.
+func worktreeOf(wd string) string {
+	for p := wd; ; p = filepath.Dir(p) {
+		if _, err := os.Lstat(filepath.Join(p, ".git")); err == nil {
+			return p
+		}
+		if p == filepath.Dir(p) {
+			return wd
+		}
+	}
+}
+
+// overlayOf is where the view of root for the working tree tree lives: upper/ holds what its
+// commands wrote over root, merged/ is the view, and the file tree names the tree.
+func overlayOf(dir, root, tree string) string {
+	key := sha256.Sum256([]byte(tree))
+	return filepath.Join(dir, "overlays", filepath.Base(root), hex.EncodeToString(key[:8]))
+}
+
+// lockOverlay holds the view at ov while it is mounted or removed. The lock file is beside it and
+// stays, so that every holder locks the same file.
+func lockOverlay(ov string, how int) (func(), error) {
+	if err := os.MkdirAll(filepath.Dir(ov), 0o755); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(ov+".lock", os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), how); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return func() { f.Close() }, nil
+}
+
+// mountOverlay mounts the view of root for the working tree tree with fuse-overlayfs, unless it
+// is mounted already, and answers where it is. The view stays mounted for the next command in
+// the tree, until sweepOverlays or removeUnused removes it. The kernel's own overlay is not used:
+// its upper directory cannot be on an overlay, which a machine's root often is.
+func mountOverlay(dir, root, tree string) (string, error) {
+	fuseOverlay, err := exec.LookPath("fuse-overlayfs")
+	if err != nil {
+		return "", errors.New("needs fuse-overlayfs on PATH, which gives each working tree a view of the image of its own")
+	}
+	ov := overlayOf(dir, root, tree)
+	unlock, err := lockOverlay(ov, syscall.LOCK_EX)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+	merged := filepath.Join(ov, "merged")
+	for _, d := range []string{"upper", "work", "merged"} {
+		if err := os.MkdirAll(filepath.Join(ov, d), 0o755); err != nil {
+			return "", err
+		}
+	}
+	if err := os.WriteFile(filepath.Join(ov, "tree"), []byte(tree), 0o644); err != nil {
+		return "", err
+	}
+	mounted, serving, err := mountOf(ov)
+	if err != nil {
+		return "", err
+	}
+	if serving {
+		return merged, nil
+	}
+	if mounted {
+		if err := unmount(merged); err != nil {
+			return "", err
+		}
+	}
+	// The daemon outlives hl, so it writes to a file and never to a pipe of the caller's.
+	log, err := os.Create(filepath.Join(ov, "mount.log"))
+	if err != nil {
+		return "", err
+	}
+	defer log.Close()
+	cmd := exec.Command(fuseOverlay, "-o", "lowerdir="+root+",upperdir="+filepath.Join(ov, "upper")+",workdir="+filepath.Join(ov, "work"), merged)
+	cmd.Stdout, cmd.Stderr = log, log
+	if err := cmd.Run(); err != nil {
+		said, _ := os.ReadFile(log.Name())
+		return "", fmt.Errorf("mounting the view of the staged image for %s: %v: %s", tree, err, strings.TrimSpace(string(said)))
+	}
+	return merged, nil
+}
+
+// mountOf reports whether a view is mounted at ov/merged and whether its daemon still serves it.
+func mountOf(ov string) (mounted, serving bool, err error) {
+	var view, parent syscall.Stat_t
+	if err := syscall.Stat(ov, &parent); err != nil {
+		return false, false, err
+	}
+	err = syscall.Stat(filepath.Join(ov, "merged"), &view)
+	switch {
+	case errors.Is(err, syscall.ENOTCONN):
+		return true, false, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return false, false, nil
+	case err != nil:
+		return false, false, err
+	}
+	mounted = view.Dev != parent.Dev
+	return mounted, mounted, nil
+}
+
+func unmount(merged string) error {
+	if out, err := exec.Command("fusermount3", "-u", merged).CombinedOutput(); err != nil {
+		return fmt.Errorf("unmounting %s: %v: %s", merged, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// removeOverlay unmounts the view at ov and removes it.
+func removeOverlay(ov string) error {
+	mounted, _, err := mountOf(ov)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if mounted {
+		if err := unmount(filepath.Join(ov, "merged")); err != nil {
+			return err
+		}
+	}
+	return os.RemoveAll(ov)
+}
+
+// removeOverlays removes the views of a root no command runs in, and the directory holding them.
+func removeOverlays(overlays string) error {
+	entries, err := os.ReadDir(overlays)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			if err := removeOverlay(filepath.Join(overlays, e.Name())); err != nil {
+				return err
+			}
+		}
+	}
+	return os.RemoveAll(overlays)
+}
+
+// sweepOverlays removes the views of root whose working tree is gone. One a command still runs in
+// stays until a later sweep.
+func sweepOverlays(dir, root string, stderr io.Writer) {
+	overlays := filepath.Join(dir, "overlays", filepath.Base(root))
+	entries, err := os.ReadDir(overlays)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		ov := filepath.Join(overlays, e.Name())
+		tree, err := os.ReadFile(filepath.Join(ov, "tree"))
+		if err != nil {
+			continue
+		}
+		if _, err := os.Stat(string(tree)); !errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		unlock, err := lockOverlay(ov, syscall.LOCK_EX|syscall.LOCK_NB)
+		if err != nil {
+			continue
+		}
+		if err := removeOverlay(ov); err != nil {
+			fmt.Fprintf(stderr, "hl: env run: keeping the view of the removed working tree %s: %v\n", tree, err)
+		}
+		unlock()
+	}
+}
+
+// sandboxArgs are bwrap's arguments that run a command in view, the staged root as a working tree
+// sees it, as its root user, in namespaces of its own, with the caller's home, /tmp and network,
+// starting in wd.
+func sandboxArgs(s *staged, view, wd string) ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
 	}
-	wd, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
-	if !within(wd, home) && !within(wd, "/tmp") {
-		return nil, fmt.Errorf("the current directory %s is outside %s and /tmp, which are all a staged image shares with this machine", wd, home)
-	}
 	args := []string{
 		"--unshare-user", "--uid", "0", "--gid", "0", "--unshare-pid", "--die-with-parent",
-		"--bind", s.Root, "/",
+		"--bind", view, "/",
 		"--dev", "/dev", "--proc", "/proc", "--ro-bind", "/sys", "/sys",
 		"--bind", "/tmp", "/tmp",
 		"--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf",

@@ -830,8 +830,12 @@ environment, a puller login. `hl env stage [JOB]`, which the harness starts in t
 for the baseline's job when a session starts, pulls it and extracts it under `~/.cache/hl/env`,
 one image per machine. `hl env run -- COMMAND` runs a command in it with bubblewrap, as the
 image's root in a user namespace, with the image's variables and the agent's home and `/tmp`
-shared. A CUDA image builds and imports there; what needs the device fails. A new stage
-extracts beside the old one and removes it once no `hl env run` runs in it. The machine needs
+shared. Each working tree (the git worktree of the current directory, or the directory outside
+one) sees the image through a fuse-overlayfs view of its own, so parallel ideas building into the
+same path of the image never meet, and a tree's writes stay for its next command until the tree
+is removed or a new stage replaces the image. A CUDA image builds and imports there; what needs
+the device fails. A new stage extracts beside the old one and removes it, with its views, once
+no `hl env run` runs in it. The machine needs
 disk for the image uncompressed, twice that while a new stage replaces the old one, beside the
 agent's own work: a hosted agent's 50 GiB holds an image of up to about 20 GiB.
 

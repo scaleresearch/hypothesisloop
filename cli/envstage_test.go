@@ -232,8 +232,9 @@ func TestEnvRunWithNothingStagedSaysHowToStage(t *testing.T) {
 	}
 }
 
-// The command runs as root of the image, with the image's variables and the caller's home, in the
-// current directory, which must be one the image shares with the machine.
+// The command runs as root of the image, seen through its working tree's view, with the image's
+// variables and the caller's home, in the current directory, which must be one the image shares
+// with the machine.
 func TestEnvRunSharesHomeAndTmpAndKeepsTheImagesVariables(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -243,23 +244,58 @@ func TestEnvRunSharesHomeAndTmpAndKeepsTheImagesVariables(t *testing.T) {
 	}
 	t.Chdir(work)
 	s := &staged{Root: "/stage/root", Env: []string{"PATH=/opt/conda/bin:/usr/bin"}}
-	args, err := sandboxArgs(s)
+	wd, err := sharedWorkingDirectory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, err := sandboxArgs(s, "/stage/view", wd)
 	if err != nil {
 		t.Fatal(err)
 	}
 	line := strings.Join(args, " ")
-	for _, want := range []string{"--uid 0", "--bind /stage/root /", "--bind /tmp /tmp", "--bind " + home + " " + home, "--setenv PATH /opt/conda/bin:/usr/bin", "--setenv HOME " + home, "--clearenv"} {
+	for _, want := range []string{"--uid 0", "--bind /stage/view /", "--bind /tmp /tmp", "--bind " + home + " " + home, "--setenv PATH /opt/conda/bin:/usr/bin", "--setenv HOME " + home, "--clearenv"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("args %q, want %q", line, want)
 		}
 	}
-	if wd, _ := os.Getwd(); !strings.Contains(line, "--chdir "+wd) {
+	if !strings.Contains(line, "--chdir "+wd) {
 		t.Errorf("args %q, want the current directory", line)
 	}
 
 	t.Chdir("/")
-	if _, err := sandboxArgs(s); err == nil {
+	if _, err := sharedWorkingDirectory(); err == nil {
 		t.Errorf("a directory outside home and /tmp was accepted")
+	}
+}
+
+// Parallel work in two worktrees built into the same path of the image and one measured the
+// other's binary: each working tree has a view of the image of its own, the same from anywhere
+// in it, and a new root has new views.
+func TestEnvRunGivesEachWorkingTreeAViewOfItsOwn(t *testing.T) {
+	home := t.TempDir()
+	repo, linked, loose := filepath.Join(home, "repo"), filepath.Join(home, "wt", "idea"), filepath.Join(home, "scratch")
+	for _, d := range []string{filepath.Join(repo, ".git"), filepath.Join(repo, "src", "deep"), linked, loose} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(linked, ".git"), []byte("gitdir: "+repo+"/.git/worktrees/idea\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for wd, want := range map[string]string{repo: repo, filepath.Join(repo, "src", "deep"): repo, linked: linked, loose: loose} {
+		if got := worktreeOf(wd); got != want {
+			t.Errorf("worktreeOf(%s) = %s, want %s", wd, got, want)
+		}
+	}
+	dir := "/cache/hl/env"
+	views := map[string]bool{}
+	for _, root := range []string{"/cache/hl/env/roots/a", "/cache/hl/env/roots/b"} {
+		for _, tree := range []string{repo, linked, loose} {
+			views[overlayOf(dir, root, tree)] = true
+		}
+	}
+	if len(views) != 6 {
+		t.Errorf("views %v, want one for each root and working tree", views)
 	}
 }
 

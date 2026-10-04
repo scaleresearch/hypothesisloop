@@ -137,9 +137,13 @@ def start_staging(setup: RunSetup) -> None:
     """Starts `hl env stage` in the background for an agent with jobs, so that `hl env run` has the
     image its jobs run in without the agent waiting for it. It waits for an environment still being
     built or pushed for as long as a session can last, and `hl env run` waits for it in turn and
-    says why when it failed. Its output is in env-stage.log of the state directory."""
+    says why when it failed. Its output is in env-stage.log of the state directory.
+    A Fly machine's /dev/fuse is root's alone, and `hl env run` mounts its views of the image
+    through it as a user, which a distribution's default allows."""
     if not config.submits_jobs(setup.cfg):
         return
+    if os.path.exists("/dev/fuse"):
+        subprocess.run(["sudo", "chmod", "0666", "/dev/fuse"], check=True)
     with open(os.path.join(setup.statedir, "env-stage.log"), "ab") as out:
         _staging.append(subprocess.Popen(["hl", "env", "stage", "--timeout", str(_STAGE_TIMEOUT_S)], stdin=subprocess.DEVNULL, stdout=out,
                                          stderr=subprocess.STDOUT, cwd=setup.statedir, start_new_session=True))

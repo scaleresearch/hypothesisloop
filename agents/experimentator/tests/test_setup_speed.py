@@ -176,7 +176,7 @@ class StagingTest(unittest.TestCase):
     # Agents installed a job's toolchain by hand, 4 to 10 minutes per machine: an agent with jobs
     # has the image they run in staged from the start, without waiting for it.
     def test_an_agent_with_jobs_stages_in_the_background_and_a_planner_does_not(self):
-        with tempfile.TemporaryDirectory() as statedir, mock.patch("subprocess.Popen") as popen:
+        with tempfile.TemporaryDirectory() as statedir, mock.patch("subprocess.Popen") as popen, mock.patch("subprocess.run"):
             core.start_staging(SimpleNamespace(cfg=planner(), statedir=statedir))
             popen.assert_not_called()
             core.start_staging(SimpleNamespace(cfg=baseline_agent(), statedir=statedir))
