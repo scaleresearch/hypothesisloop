@@ -36,7 +36,7 @@ The proposal, in the shape `hl platform-experiments propose` shows:
     names is a `reference` metric of its own, measured the same way, never merged into the
     control. A goal to beat one is met only past its value.
   - The gate: what makes a result wrong rather than worse is a `constraint` metric checked
-    against a fixed outside reference. A bound on a number nobody has measured goes in
+    against a fixed outside reference, an exact one on bytes, never on values parsed from them. A bound on a number nobody has measured goes in
     `questions`; a bound the person stated stays as stated.
   - `accelerator_type`: one with available > 0 in `hl capacity`; a type with none queues
     forever.
@@ -46,9 +46,10 @@ The proposal, in the shape `hl platform-experiments propose` shows:
         target far enough past the control that tuning cannot reach it and only a new approach
         can;
       - the metric and gate, defined so a number compares across jobs and runs: measured
-        against the source in its native form, never a convention of the system measured, with
-        all a method adds (a model, table or program it ships with) counted
-        against it and what it fits or tunes on kept apart from what scores it;
+        against the source in its native form, never a convention of the system measured, both
+        sides of a ratio on that one basis, with all a method adds (a model, table or program it
+        ships with) counted against it and what it fits or tunes on kept apart from what scores
+        it;
       - the control and each reference: where each lives and the configuration it ships with;
       - the accelerator type, count per job and image;
       - the levers open and fixed, and when to stop: the target reached (and past each

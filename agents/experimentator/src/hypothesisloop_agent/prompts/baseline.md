@@ -41,9 +41,11 @@ What it takes:
     unchanged. Otherwise the smallest program that does: fixed seeds, pinned revisions, inputs
     fetched by the job, metrics reported as it goes and at the end with `post_metric` of
     `metrics.py`. It measures against the source in its native form, never a convention of the
-    system measured; counts against a method all it adds (a model, table or program it ships
-    with); scores on data the method neither fits nor tunes on; and checks
-    correctness against the source itself. The control and each reference run as the brief
+    system measured, with both sides of a ratio on that one basis; counts against a method all
+    it adds (a model, table or program it ships with); scores on data the method neither fits
+    nor tunes on; and checks correctness against the source itself, an exact check comparing
+    bytes where correctness is exact, never values parsed from them. Each gate is seen to fail
+    once, on an output one element off. The control and each reference run as the brief
     names them, as they ship, changed in nothing. Keep the varied part apart from the measuring
     part and record both in `README.md`, with the basis of each number.
   - The job spec: a command that runs no longer than the brief's metrics need, and the `cpu`,
