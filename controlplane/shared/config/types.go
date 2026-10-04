@@ -2,6 +2,7 @@
 package config
 
 import (
+	"strings"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -309,6 +310,32 @@ type RuntimesConfig struct {
 	ImageTag   string `yaml:"image_tag"`
 }
 
+// EnvironmentsConfig is where the images a repository's .hypothesisloop/Dockerfile declares are
+// pushed (services/environments). The builder they are built on is the control service's
+// environment: HYPOTHESISLOOP_ENVIRONMENT_BUILDER_ADDR and the paths of its PEM files.
+type EnvironmentsConfig struct {
+	// Repository is the name under runtimes.registry every environment image is pushed to,
+	// tagged with its key.
+	Repository string `yaml:"repository"`
+	// RegistryCredential is what the push authenticates as: google, the process's Google
+	// application default credentials.
+	RegistryCredential string `yaml:"registry_credential"`
+}
+
+// RegistryCredentialGoogle pushes with the Google application default credentials.
+const RegistryCredentialGoogle = "google"
+
+// EnvironmentImages is the repository every environment image is pushed to.
+func (c *Config) EnvironmentImages() string {
+	return c.Runtimes.Registry + "/" + c.Environments.Repository
+}
+
+// RegistryHost is the host of runtimes.registry.
+func (c *Config) RegistryHost() string {
+	host, _, _ := strings.Cut(c.Runtimes.Registry, "/")
+	return host
+}
+
 // JobImageConfig is one image the deployment offers a job to run in. It is named by image, a
 // whole reference, or by repository, a name under runtimes.registry at runtimes.image_tag: one
 // this deployment built and pushed with its own.
@@ -390,6 +417,7 @@ type Config struct {
 	JobImages        []JobImageConfig        `yaml:"job_images"`
 	GitHub           GitHubConfig            `yaml:"github"`
 	Git              GitConfig               `yaml:"git"`
+	Environments     EnvironmentsConfig      `yaml:"environments"`
 
 	// Derived maps built by Load() for fast lookup — not in YAML.
 	RateByName         map[string]float64           // accelerator name → AccH rate

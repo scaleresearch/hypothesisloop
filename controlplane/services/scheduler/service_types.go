@@ -97,6 +97,12 @@ type CodeHost interface {
 	Serves(repository, protocol, host, path string) bool
 }
 
+// Environments finds the environment a commit declares (environments.Service.Declared): nil when
+// it declares none, a *domain.EnvironmentFileError for a file the platform does not build.
+type Environments interface {
+	Declared(ctx context.Context, projectID, repository, ref, base string) (*domain.Environment, error)
+}
+
 // InstalledCapacity is what each connected cluster and each of its nodes has installed, whether
 // it scales up and whether it runs a job over several nodes, as the admission loop reads them
 // (LoopWorkloadClient).
@@ -109,12 +115,13 @@ type InstalledCapacity interface {
 
 // Service is the Scheduler Service that gates, scores, and queues experiments.
 type Service struct {
-	store      Store
-	quota      QuotaService
-	novelty    NoveltyDetector
-	hypotheses HypothesisStore
-	codeHost   CodeHost
-	clusters   InstalledCapacity
+	store        Store
+	quota        QuotaService
+	novelty      NoveltyDetector
+	hypotheses   HypothesisStore
+	codeHost     CodeHost
+	environments Environments
+	clusters     InstalledCapacity
 	// jobImages is the images the deployment offers a job to run in, which a job names by name.
 	jobImages    []domain.JobImage
 	weights      domain.SchedulingWeights
@@ -180,6 +187,12 @@ func (s *Service) WithJobImages(images []domain.JobImage) *Service {
 func (s *Service) WithDataStore(client *objectstore.Client, maxBytesPerAgent int64) *Service {
 	s.dataStore = client
 	s.maxDataBytesPerAgent = maxBytesPerAgent
+	return s
+}
+
+// WithEnvironments wires what finds the environment a job's commit declares.
+func (s *Service) WithEnvironments(environments Environments) *Service {
+	s.environments = environments
 	return s
 }
 

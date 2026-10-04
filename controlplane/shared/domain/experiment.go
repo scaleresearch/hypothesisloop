@@ -58,6 +58,9 @@ type Experiment struct {
 	// estimation, BuildJobs, Footprint, NodeShapes) must call EffectiveJob() instead of reading
 	// Job directly.
 	ResolvedJob *JobSpec `json:"resolved_job,omitempty"`
+	// EnvironmentKey names the environment the job's commit declares (EnvironmentFile), built on
+	// Job.Image. Admission waits for it to be ready and runs the job in its image.
+	EnvironmentKey string `json:"environment_key,omitempty" doc:"The environment the job's commit declares in .hypothesisloop/Dockerfile, built on job.image. The job waits (environment_building) until it is built and runs in it. Absent when the commit declares none."`
 	// HypothesisID is the hypothesis the job tests, registered via POST /hypotheses. The job of a
 	// baseline agent tests none and is kept on the objective, which the platform experiment's id
 	// names here as it does in a builds_on link. That id is no hypothesis a reader can fetch, so

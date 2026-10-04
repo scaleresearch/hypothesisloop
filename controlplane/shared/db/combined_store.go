@@ -23,6 +23,7 @@ type Store struct {
 	*ClusterQueueStore
 	*HypothesesStore
 	*ClustersStore
+	*EnvironmentsStore
 
 	// usage is the sole read/write path for agent quota consumption (used_guaranteed_*/
 	// used_burst_*), backed by the metrics DB rather than Postgres — see metricsdb.UsageTracker.
@@ -50,6 +51,7 @@ func NewStore(pool *Pool, metricsDBURL string, maxInfraRequeues int) *Store {
 		ClusterQueueStore:        NewClusterQueueStore(pool),
 		HypothesesStore:          NewHypothesesStore(pool),
 		ClustersStore:            NewClustersStore(pool),
+		EnvironmentsStore:        NewEnvironmentsStore(pool),
 		usage:                    metricsdb.NewUsageTracker(metricsDBURL),
 	}
 }

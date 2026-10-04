@@ -204,7 +204,16 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	// error surfaces at the end so the failure is still loud.
 	maxJobHours := map[string]float64{} // key: platformExpID; 0 = unlimited
 	filtered := queued[:0]
+	environments := map[string]*domain.Environment{}
 	for _, exp := range queued {
+		if exp.EnvironmentKey != "" {
+			if held, err := l.heldForEnvironment(ctx, environments, exp); err != nil {
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("environment: %w", err))
+				continue
+			} else if held {
+				continue
+			}
+		}
 		if exp.PlatformExperimentID == "" {
 			filtered = append(filtered, exp)
 			continue
@@ -1896,4 +1905,41 @@ func cloneNodeAvailByCluster(byCluster map[string]map[string]map[string]int64) m
 		cloned[cluster] = cloneNodeCapacity(byNode)
 	}
 	return cloned
+}
+
+// heldForEnvironment says whether exp waits for the environment its commit declares: while it is
+// built it says so, and once it failed exp ends with the end of the build's output, so its agent
+// fixes the file and submits again. seen holds the environments this tick read.
+func (l *Loop) heldForEnvironment(ctx context.Context, seen map[string]*domain.Environment, exp *domain.Experiment) (bool, error) {
+	env, ok := seen[exp.EnvironmentKey]
+	if !ok {
+		var err error
+		if env, err = l.store.GetEnvironment(ctx, exp.EnvironmentKey); err != nil {
+			return false, err
+		}
+		if env == nil {
+			return false, fmt.Errorf("job %s names environment %s, which does not exist", exp.ID, exp.EnvironmentKey)
+		}
+		seen[exp.EnvironmentKey] = env
+	}
+	switch env.State {
+	case domain.EnvironmentReady:
+		return false, nil
+	case domain.EnvironmentBuilding:
+		reason := domain.NotAdmittedEnvironmentBuilding + ": the platform is building the environment " + domain.EnvironmentFile + " of its commit declares, on " + env.Base + ", since " + env.CreatedAt.UTC().Format(time.RFC3339) + ". The job runs in it once it is built"
+		return true, l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason)
+	}
+	reason := string(domain.EvictionEnvironmentFailed.WithDetail(domain.EnvironmentFile + " of its commit did not build on " + env.Base +
+		". Fix it, commit and submit again. The end of the build's output:\n" + env.LogTail))
+	outcome, err := l.store.ResolveTermination(ctx, exp.ID, domain.StatusQueued, domain.StatusRejected, reason)
+	if err != nil {
+		return true, err
+	}
+	if outcome == domain.TerminationWritten {
+		exp.Status, exp.EvictionReason = domain.StatusRejected, reason
+		if err := l.settler.Settle(ctx, exp); err != nil {
+			l.logger.Warn("settle a job whose environment failed", zap.String("id", exp.ID), zap.Error(err))
+		}
+	}
+	return true, nil
 }

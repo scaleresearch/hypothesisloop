@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 )
 
@@ -22,6 +23,10 @@ func (worldRepositories) File(context.Context, string, string, string) ([]byte, 
 	panic("the handler read a file from the git host")
 }
 
+func (worldRepositories) FileAt(context.Context, string, string, string, string) ([]byte, error) {
+	return nil, githost.ErrFileNotFound
+}
+
 func (worldRepositories) Credential(context.Context, string, string, bool) (*githost.Credential, error) {
 	panic("the handler asked for a git credential")
 }
@@ -36,4 +41,11 @@ func (worldRepositories) CreatesOn(context.Context, string, string) (string, err
 
 func (worldRepositories) Create(_ context.Context, _, _, name, _ string, _ map[string]string) (string, error) {
 	return name, nil
+}
+
+// noEnvironments is a git host whose commits declare no environment.
+type noEnvironments struct{}
+
+func (noEnvironments) Declared(context.Context, string, string, string, string) (*domain.Environment, error) {
+	return nil, nil
 }

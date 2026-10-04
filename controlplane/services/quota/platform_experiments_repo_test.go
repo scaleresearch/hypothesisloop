@@ -136,6 +136,10 @@ func (f *fakeRepositories) Credential(context.Context, string, string, bool) (*g
 
 func (f *fakeRepositories) Serves(string, string, string, string) bool { return false }
 
+func (f *fakeRepositories) FileAt(context.Context, string, string, string, string) ([]byte, error) {
+	return nil, githost.ErrFileNotFound
+}
+
 func (f *fakeRepositories) File(_ context.Context, projectID, repository, _ string) ([]byte, error) {
 	f.asked = append(f.asked, projectID+" "+repository)
 	if f.refusal != nil {

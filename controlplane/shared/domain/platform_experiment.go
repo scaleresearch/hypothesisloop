@@ -257,6 +257,10 @@ type PlatformExperiment struct {
 	// starts only with a baseline.
 	BaselineJobID             string  `json:"baseline_job_id,omitempty" doc:"The completed job that measured the baseline. Absent until one is declared with PATCH /platform-experiments/{id}."`
 	JobEstimatedDurationHours float64 `json:"job_estimated_duration_hours,omitzero" doc:"The estimated_duration_hours of a job that states none: one and a half times the hours the baseline job was observed running. Absent without a baseline, and for one too short to be observed alive."`
+	// AgentEnvironmentKey is the environment its agent machines start in from the declaration of
+	// the baseline on: the baseline branch's EnvironmentFile built on the agent image, ready when
+	// it was written. Empty when the branch declares none.
+	AgentEnvironmentKey string `json:"agent_environment_key,omitempty" doc:"The environment its agent machines start in once the baseline is declared: the baseline branch's .hypothesisloop/Dockerfile built on the agent image. Absent when the branch has none."`
 
 	// Goal is the sentence a draft was created from, fixed from then on. Empty for a platform
 	// experiment that was created whole.

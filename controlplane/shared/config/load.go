@@ -336,6 +336,12 @@ func (c *Config) build() error {
 			return fmt.Errorf("job_images %s: carries is required, since what is installed is what an agent chooses the image by", i.Name)
 		}
 	}
+	if r := c.Environments.Repository; r == "" || strings.ContainsAny(r, " \t:") {
+		return fmt.Errorf("environments repository %q must be the name under runtimes.registry environment images are pushed to", r)
+	}
+	if c.Environments.RegistryCredential != RegistryCredentialGoogle {
+		return fmt.Errorf("environments registry_credential %q is not %s", c.Environments.RegistryCredential, RegistryCredentialGoogle)
+	}
 	if c.Auth.UIOrigin == "" {
 		return fmt.Errorf("auth ui_origin is required: the one browser origin allowed to call the API")
 	}

@@ -64,6 +64,9 @@ type LoopStore interface {
 	// attempt on within ttl — the cross-job half of the tried-cluster backoff (autoscaler.md line
 	// 109): a job never speculates onto a node group another job just watched fail to deliver.
 	RecentlyTriedClusters(ctx context.Context, ttl time.Duration) (map[string]bool, error)
+	// GetEnvironment is the environment a job's commit declares, which it waits for.
+	GetEnvironment(ctx context.Context, key string) (*domain.Environment, error)
+	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
 }
 
 // LoopQuotaStore handles quota bookkeeping for the loop. Preemption requeues the victim without

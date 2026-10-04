@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -90,6 +91,30 @@ func (s *Service) resolveImage(job *domain.JobSpec) error {
 		return &AdmissionError{Reason: domain.ReasonUnknownJobImage, Message: domain.UnknownJobImage(s.jobImages, "job.image", job.Image)}
 	}
 	job.Image = address
+	return nil
+}
+
+// ReasonEnvironmentUnreadable refuses a job whose environment file the git host did not hand over.
+const ReasonEnvironmentUnreadable = "environment_unreadable"
+
+// declaredEnvironment keeps on exp the environment its commit declares, built on its image, which
+// admission waits for. The file is read at the commit itself, so the environment is the one the
+// code was pushed with.
+func (s *Service) declaredEnvironment(ctx context.Context, pe *domain.PlatformExperiment, exp *domain.Experiment) error {
+	commit := exp.CodeRef[strings.LastIndex(exp.CodeRef, "@")+1:]
+	env, err := s.environments.Declared(ctx, pe.ProjectID, pe.Repository, commit, exp.Job.Image)
+	var invalid *domain.EnvironmentFileError
+	var refused *api.Refusal
+	switch {
+	case errors.As(err, &invalid):
+		return &AdmissionError{Reason: domain.ReasonInvalidEnvironmentFile, Message: invalid.Why + ". Fix it, commit and submit again"}
+	case errors.As(err, &refused):
+		return &AdmissionError{Reason: ReasonEnvironmentUnreadable, Message: fmt.Sprintf("the platform could not read %s at commit %s: %s", domain.EnvironmentFile, commit, refused.Message)}
+	case err != nil:
+		return fmt.Errorf("scheduler: environment of %s: %w", commit, err)
+	case env != nil:
+		exp.EnvironmentKey = env.Key
+	}
 	return nil
 }
 
@@ -256,6 +281,10 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 			Reason:  "agent_finished",
 			Message: "agent finished in this platform experiment (POST /platform-experiments/{id}/agents/{agent_id}/finish), which is final: it submits no further job. Its token reads for two more minutes and then stops working",
 		}
+	}
+
+	if err := s.declaredEnvironment(ctx, pe, exp); err != nil {
+		return err
 	}
 
 	// 3ab. Durable-data ceiling.

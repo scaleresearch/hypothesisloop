@@ -344,6 +344,14 @@ func (s *PlatformExperimentsService) heldToBaseline(ctx context.Context, pe *dom
 	if err := checkBaseline(pe, baseline); err != nil {
 		return "", err
 	}
+	env, err := s.agentEnvironment(ctx, pe, baseline.Declared)
+	if err != nil {
+		return "", err
+	}
+	pe.AgentEnvironmentKey = ""
+	if env != nil {
+		pe.AgentEnvironmentKey = env.Key
+	}
 	pe.JobEstimatedDurationHours = baselineHeadroom * baseline.ObservedHours
 	if err := budgetCoversTrials(pe, baseline.Job); err != nil {
 		return "", err

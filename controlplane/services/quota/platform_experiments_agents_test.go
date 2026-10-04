@@ -76,6 +76,10 @@ func (f *rosterStore) Credential(context.Context, string, string, bool) (*githos
 
 func (f *rosterStore) Serves(string, string, string, string) bool { return false }
 
+func (f *rosterStore) FileAt(context.Context, string, string, string, string) ([]byte, error) {
+	return nil, githost.ErrFileNotFound
+}
+
 func (f *rosterStore) Create(context.Context, string, string, string, string, map[string]string) (string, error) {
 	return "", nil
 }

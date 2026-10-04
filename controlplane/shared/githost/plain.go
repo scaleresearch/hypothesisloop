@@ -88,6 +88,12 @@ func (p *Plain) File(_ context.Context, _, _, path string) ([]byte, error) {
 	return nil, api.Refuse(http.StatusUnprocessableEntity, "experiment_file_unsupported", "this deployment's git host hands the platform no file, so "+path+" cannot be read from the repository: state its fields in the request")
 }
 
+// FileAt finds no file: the platform reads none from a plain host, so to it every repository
+// there declares nothing, an environment included.
+func (p *Plain) FileAt(context.Context, string, string, string, string) ([]byte, error) {
+	return nil, ErrFileNotFound
+}
+
 func (p *Plain) Credential(context.Context, string, string, bool) (*Credential, error) {
 	if p.username == "" {
 		return nil, api.Refuse(http.StatusNotFound, "not_found", "this deployment's git host takes no credential")

@@ -138,6 +138,23 @@ type PlatformExperimentsService struct {
 	// repositoryWake wakes the pass for a draft just created.
 	repos          githost.Provider
 	repositoryWake chan struct{}
+	// environments reads what the baseline branch declares and builds it for the agent machines,
+	// on agentImage unless a platform experiment names its own.
+	environments Environments
+	agentImage   string
+}
+
+// Environments is what the baseline gate asks of the environments (environments.Service).
+type Environments interface {
+	Read(ctx context.Context, projectID, repository, ref string) (*string, error)
+	Ensure(ctx context.Context, dockerfile, base string) (*domain.Environment, error)
+	Get(ctx context.Context, key string) (*domain.Environment, error)
+}
+
+// WithEnvironments wires the environments and the image agent machines boot by default.
+func (s *PlatformExperimentsService) WithEnvironments(environments Environments, agentImage string) *PlatformExperimentsService {
+	s.environments, s.agentImage = environments, agentImage
+	return s
 }
 
 // WithRepositories wires the git host the repository pass creates drafts' repositories on.

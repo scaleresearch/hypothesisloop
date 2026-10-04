@@ -265,7 +265,7 @@ func TestThePlatformStartsARunOnceItsBaselineIsDeclaredAndSaysWhatItWaitsFor(t *
 
 // A closed platform experiment answered close_reason and no status_reason, and a running one
 // neither: "why is it in this state" is one field in every status. A run that waits for its first
-// researcher's machine says that none of its duration counts yet and when the wait ends.
+// researcher's machine says so and when the wait ends.
 func TestEveryStatusSaysWhyInItsStatusReason(t *testing.T) {
 	svc := newSignupTestService(t, &startStore{participants: []db.StartParticipant{{AgentID: "ag-r"}}})
 	now := time.Now().UTC()

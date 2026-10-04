@@ -113,12 +113,16 @@ ORDER BY submitted_at ASC, id ASC`, clusterName)
 	// What admission filtered in memory only chose the candidate. Un-sharing,
 	// removing or turning off a cluster takes the admission lock held above, so it either finds
 	// this job already placed or is committed when this statement reads the cluster. The image
-	// is decided from the same read of the cluster as the rule that lets the job onto it.
+	// is decided from the same read of the cluster as the rule that lets the job onto it. A job
+	// whose commit declares an environment is placed only once it is ready, in its image, which
+	// is built on the image the cluster runs.
 	const q = `UPDATE experiments e
 SET status = 'SUBMITTED', submitted_at = NOW(), cluster_name = $2, last_cluster = $2, eviction_reason = NULL, not_admitted_reason = NULL, updated_at = NOW(),
-	resolved_job_spec = $3::jsonb || jsonb_build_object('image', (
-		SELECT CASE WHEN c.job_image = '' THEN e.job_spec ->> 'image' ELSE c.job_image END FROM clusters c WHERE c.name = $2))
+	resolved_job_spec = $3::jsonb || jsonb_build_object('image', COALESCE(
+		(SELECT v.image FROM environments v WHERE v.key = e.environment_key),
+		(SELECT CASE WHEN c.job_image = '' THEN e.job_spec ->> 'image' ELSE c.job_image END FROM clusters c WHERE c.name = $2)))
 WHERE e.id = $1 AND e.status = 'QUEUED' AND ` + clusterHostsJob + `
+  AND (e.environment_key IS NULL OR EXISTS (SELECT 1 FROM environments v WHERE v.key = e.environment_key AND v.state = 'ready'))
 RETURNING e.resolved_job_spec ->> 'image'`
 	var image string
 	switch err := tx.QueryRow(ctx, q, id, clusterName, resolvedJobSpec).Scan(&image); {

@@ -41,7 +41,7 @@ func measuredBaseline() *Baseline {
 
 // declareAPI is PATCH /platform-experiments/pe-1 over pe, with the platform's records saying
 // baseline of whichever job is named.
-func declareAPI(t *testing.T, pe *domain.PlatformExperiment, baseline *Baseline, caller auth.Principal) (*createdStore, func(body map[string]any) (int, map[string]any)) {
+func declareAPI(t *testing.T, pe *domain.PlatformExperiment, baseline *Baseline, caller auth.Principal, wire ...func(*PlatformExperimentsService)) (*createdStore, func(body map[string]any) (int, map[string]any)) {
 	t.Helper()
 	store := &createdStore{created: []*domain.PlatformExperiment{pe}}
 	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)
@@ -50,6 +50,9 @@ func declareAPI(t *testing.T, pe *domain.PlatformExperiment, baseline *Baseline,
 			return nil, nil
 		}
 		return baseline, nil
+	}
+	for _, w := range wire {
+		w(svc)
 	}
 	placement := authtest.Placement{
 		Projects:            map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}},

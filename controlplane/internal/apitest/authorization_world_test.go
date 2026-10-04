@@ -290,7 +290,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	quota.RegisterSessionsHuma(doc, nil, logger)
 	accounts.RegisterHuma(doc, accounts.NewHandler(nil, nil, nil, nil, worldSecret, accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, logger))
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
-		scheduler.NewService(nil, nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", logger).WithLoop(noopLoop{})))
+		scheduler.NewService(nil, nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", logger).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{})))
 	registry.RegisterHuma(doc, registry.NewHandler(registry.New(nil, worldGraph{world: w}, nil, logger, "http://metrics.invalid", nil), logger))
 	registry.RegisterWatchHuma(doc)
 

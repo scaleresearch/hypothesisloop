@@ -164,6 +164,22 @@ job_images:
     carries: tt-metal and ttnn v0.77.0 with device firmware, PyTorch 2.11.0 (CPU build) and numpy 1.26, Python 3.10 in /opt/venv, uv, git, hl, hl-clone. python3 is that venv, so import torch and ttnn work as is. Do not install torch again or run in a new venv, either downloads it at every job start. Add other packages with uv pip install.
     suits: ["tenstorrent.com/"]
 
+# Environments: a repository's .hypothesisloop/Dockerfile, beginning ARG BASE and FROM ${BASE}, is
+# built once per content and base on a BuildKit daemon and pushed here. A job runs in the one its
+# commit declares, built on its job image, and agent machines in the one the baseline branch
+# declares, built on agents.image. The daemon is the control service's environment, not this file:
+# HYPOTHESISLOOP_ENVIRONMENT_BUILDER_ADDR (tcp://host:port) and the paths of its mutual TLS files,
+# HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CA, _CERT and _KEY, read at each build.
+#
+#   repository           the name under runtimes.registry every environment image is pushed to,
+#                        tagged with its key.
+#   registry_credential  what the push authenticates as: google, the control service's Google
+#                        application default credentials (GOOGLE_APPLICATION_CREDENTIALS or the
+#                        service account it runs as), with write on the repository.
+environments:
+  repository: hypothesisloop-environment
+  registry_credential: google
+
 # The GitHub App a project's repository is reached through (infra/github). A person installs the
 # App on repositories they choose and attaches one to a project; agents and jobs then clone it
 # with tokens minted per repository, each good for about an hour and stored nowhere.

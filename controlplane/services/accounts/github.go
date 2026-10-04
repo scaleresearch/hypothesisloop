@@ -116,6 +116,7 @@ const (
 	ReasonRepositoryNotAdded              = "repository_not_added"
 	ReasonRepositoryAccountRequired       = "repository_account_required"
 	ReasonNoExperimentFile                = "no_experiment_file"
+	ReasonUnreadableFile                  = "unreadable_file"
 	ReasonRunOver                         = "run_over"
 	ReasonForbidden                       = "forbidden"
 	ReasonUnavailable                     = "unavailable"

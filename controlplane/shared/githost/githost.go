@@ -2,8 +2,12 @@ package githost
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+// ErrFileNotFound is FileAt's answer for a path the repository does not hold at that ref.
+var ErrFileNotFound = errors.New("githost: no such file")
 
 // Provider is the git host the platform experiments of a deployment keep their code on. A
 // repository is the name the host knows it by. What a call refuses is returned as the API
@@ -26,6 +30,9 @@ type Provider interface {
 	// File reads a file at the head of the repository's default branch. A host that serves no
 	// file to the platform refuses.
 	File(ctx context.Context, projectID, repository, path string) ([]byte, error)
+	// FileAt reads a file of the repository at ref, a branch or a commit: ErrFileNotFound when
+	// it holds none there.
+	FileAt(ctx context.Context, projectID, repository, ref, path string) ([]byte, error)
 	// Credential mints what git authenticates to that one repository with. write says whether
 	// it may push.
 	Credential(ctx context.Context, projectID, repository string, write bool) (*Credential, error)

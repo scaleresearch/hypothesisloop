@@ -177,6 +177,26 @@ func (h *GitHubHost) File(ctx context.Context, projectID, repository, path strin
 	return data, nil
 }
 
+func (h *GitHubHost) FileAt(ctx context.Context, projectID, repository, ref, path string) ([]byte, error) {
+	const op = "read-repository-file"
+	token, err := h.token(ctx, projectID, repository, github.Read)
+	if err != nil {
+		return nil, refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+	}
+	data, err := h.github.File(ctx, token, ref, path)
+	switch {
+	case errors.Is(err, github.ErrFileNotFound):
+		return nil, githost.ErrFileNotFound
+	case errors.Is(err, github.ErrNotAFile):
+		return nil, invalid(ReasonUnreadableFile, path+" at "+ref+" is not a file")
+	case errors.Is(err, github.ErrFileTooLarge):
+		return nil, invalid(ReasonUnreadableFile, path+" at "+ref+" is larger than the platform reads from a repository")
+	case err != nil:
+		return nil, refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+	}
+	return data, nil
+}
+
 // Credential mints an installation token for the one repository. The repository is one a
 // platform experiment already names, so one the org no longer reaches is a conflict.
 func (h *GitHubHost) Credential(ctx context.Context, projectID, repository string, write bool) (*githost.Credential, error) {

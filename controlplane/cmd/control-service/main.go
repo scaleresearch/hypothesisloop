@@ -18,6 +18,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/dedup"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/environments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/launcherapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
@@ -207,7 +208,11 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	// or the same job's cost depends on which of them is asked.
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
-	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap).WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent).WithRepositories(gitHost)
+	environmentsSvc := environments.NewService(store.EnvironmentsStore, gitHost, pcfg.EnvironmentImages())
+	environmentBuilds := newEnvironmentBuilds(runCtx, store, pcfg, logger)
+
+	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap).WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent).WithRepositories(gitHost).
+		WithEnvironments(environmentsSvc, pcfg.Agents.Image)
 	peHandler := quota.NewPlatformExperimentsHandler(peSvc, gitHost, quota.Planning{
 		Limit:       time.Duration(pcfg.Planning.LimitMinutes) * time.Minute,
 		ProposedFor: time.Duration(pcfg.Planning.ProposedForDays) * 24 * time.Hour,
@@ -220,7 +225,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 			SigningSecret: pcfg.Auth.SigningSecret, MaxHosted: pcfg.Agents.MaxHostedPerPlatformExperiment,
 		})
 
-	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, gate, gitHost, pool, store, graph, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
+	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, gate, gitHost, environmentsSvc, environmentBuilds, pool, store, graph, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
 	// The change stream: one LISTEN connection for this process, fanned out to whatever /watch
 	// connections are open. Nothing is persisted for it and nothing is held between connections
 	// — see services/registry/watch.go.
@@ -308,7 +313,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 // newSchedulerParts builds the scheduler's handler and starts its background loops, returning
 // the pieces newAPIServer mounts: the handler goes on the shared API doc, the cluster-agent
 // router under its own prefix.
-func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Provider, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *quota.PlatformExperimentsService, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Handler, chi.Router) {
+func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Provider, environmentsSvc *environments.Service, environmentBuilds *environments.Loop, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *quota.PlatformExperimentsService, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Handler, chi.Router) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
 	// jwc is workload.Backend; swap this line to plug in a different scheduling mechanism
@@ -341,6 +346,7 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 	schedulerSvc := scheduler.NewService(store, expQuotaSvc, noveltyDetector, graph, gitHost, queueBackend, settler, metricsDBURL, logger).
 		WithQuotaConfig(quotaCfg).
 		WithJobImages(pcfg.OfferedJobImages()).
+		WithEnvironments(environmentsSvc).
 		WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent)
 
 	schedulerLoop := scheduler.NewLoop(store, expQuotaSvc, jwc, grace, logger).
@@ -370,6 +376,7 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 			// A draft's create wakes this pass on the leader; the interval covers one created on
 			// another replica and one left by a restart.
 			go expQuotaSvc.StartRepositoryPass(leaderCtx, 5*time.Second)
+			go environmentBuilds.Start(leaderCtx)
 			schedulerLoop.Start(leaderCtx)
 			watcher.Start(leaderCtx)
 		})
@@ -388,6 +395,25 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 	caDoc.MountExplore(clusterAgentRouter)
 
 	return schedulerHandler, clusterAgentRouter
+}
+
+// newEnvironmentBuilds is the builder of environments, on the BuildKit daemon the control
+// service's environment names, pushing with the Google credentials of the process.
+func newEnvironmentBuilds(ctx context.Context, store *db.Store, pcfg *hypothesisloopcfg.Config, logger *zap.Logger) *environments.Loop {
+	credential, err := environments.GoogleCredential(ctx)
+	if err != nil {
+		logger.Fatal("control-service: the registry credential of environment builds", zap.Error(err))
+	}
+	builder, err := environments.NewBuildKit(
+		requiredEnv("HYPOTHESISLOOP_ENVIRONMENT_BUILDER_ADDR", logger),
+		requiredEnv("HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CA", logger),
+		requiredEnv("HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CERT", logger),
+		requiredEnv("HYPOTHESISLOOP_ENVIRONMENT_BUILDER_KEY", logger),
+		pcfg.RegistryHost(), credential)
+	if err != nil {
+		logger.Fatal("control-service: configure the environment builder", zap.Error(err))
+	}
+	return environments.NewLoop(store.EnvironmentsStore, builder, logger)
 }
 
 // openGraph connects to the hypothesis graph, makes sure its schema exists, moves any hypotheses

@@ -67,7 +67,7 @@ func (s storedJobStore) GetExperiment(_ context.Context, id string) (*domain.Exp
 func TestASubmitRepeatedWithItsKeyIsAnsweredWithTheJobTheFirstCreated(t *testing.T) {
 	stored := humanIdeaSubmission()
 	stored.ID, stored.Status, stored.EstimatedCostAccH = "job-first", domain.StatusRunning, 1
-	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: storedJobStore{job: stored}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
+	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: storedJobStore{job: stored}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
 		quota: repeatedQuota{stored: stored.ID}}
 	again := humanIdeaSubmission()
 	again.SubmissionKey = "k1"
@@ -98,7 +98,7 @@ func (l wokenLoop) Trigger() { *l.woken++ }
 // answer states the code and the sentence apart, as every read of the job does.
 func TestTheAnswerToASubmitStatesWhyTheJobWaitsAsACodeAndASentence(t *testing.T) {
 	woken := 0
-	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: owingStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
+	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: owingStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
 		quota: insertingQuota{}, loop: wokenLoop{&woken}}
 	exp := humanIdeaSubmission()
 	if err := s.Submit(context.Background(), exp); err != nil || woken != 1 {
@@ -121,7 +121,7 @@ func TestEachRefusalOfTheAdmissionTransactionIsAnsweredWithItsOwnReason(t *testi
 		db.RefusedAgentFinished:     http.StatusUnprocessableEntity,
 		db.RefusedNoQuota:           http.StatusUnprocessableEntity,
 	} {
-		s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: admittingStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
+		s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: admittingStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
 			quota: refusingQuota{err: &db.AdmitRefusal{Reason: reason, Message: "the sentence of " + reason}}}
 		var refused *AdmissionError
 		if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &refused) || refused.Reason != reason || admissionHTTPStatus(refused.Reason) != status {
@@ -132,7 +132,7 @@ func TestEachRefusalOfTheAdmissionTransactionIsAnsweredWithItsOwnReason(t *testi
 		}
 	}
 
-	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: admittingStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
+	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: admittingStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
 		quota: refusingQuota{err: errors.New("connection reset")}}
 	var refused *AdmissionError
 	if err := s.Submit(context.Background(), humanIdeaSubmission()); err == nil || errors.As(err, &refused) {

@@ -1296,11 +1296,11 @@ UPDATE experiment_signups SET role = 'planner' WHERE flavor = 'planner' AND role
 -- before this was kept.
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS added_by_kind TEXT NOT NULL DEFAULT '';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS added_by_id   TEXT NOT NULL DEFAULT '';
--- The run's clock. duration_hours is how long the run lasts and started_at when its clock
--- started: the moment a researcher was first at work in the running platform experiment, which
--- writes started_at and moves ends_at to duration_hours later. Until then ends_at holds what
--- closes it before the clock runs: a draft's planning or proposal limit, an open one's baseline
--- deadline, or a running one's deadline for a researcher's machine to be running. A row from
+-- The run's clock. duration_hours is the whole wall clock, counted from starts_at with measuring
+-- the baseline inside it, and started_at the moment a researcher was first at work in the running
+-- platform experiment. ends_at is what closes it: a draft's planning or proposal limit, an open
+-- one's baseline deadline, a running one's deadline for a researcher's machine to be running, and
+-- once started_at is written, starts_at plus duration_hours. A row from
 -- before the two columns, which has no duration_hours, counted its length from its start time or
 -- its creation: it keeps that length and that end, and one that ran started then.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS duration_hours DOUBLE PRECISION NOT NULL DEFAULT 0;
@@ -1333,5 +1333,26 @@ WHERE description LIKE '%BASELINE (written by the platform)%';
 -- time, and its clock started at its creation, or at started_at where a researcher already works.
 UPDATE platform_experiments SET starts_at = COALESCE(started_at, created_at)
 WHERE status IN ('open', 'running') AND starts_at < '0001-01-02';
+
+-- An environment is an image the platform builds from a repository's .hypothesisloop/Dockerfile
+-- on one base image (domain.Environment). key names the pair, so one pair is built once. A row
+-- is made building, and the builder (services/environments) moves it to ready or failed once.
+CREATE TABLE IF NOT EXISTS environments (
+    key        TEXT        PRIMARY KEY,
+    base       TEXT        NOT NULL,
+    dockerfile TEXT        NOT NULL,
+    image      TEXT        NOT NULL,
+    state      TEXT        NOT NULL CHECK (state IN ('building', 'ready', 'failed')),
+    log_tail   TEXT        NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS environments_building ON environments (created_at) WHERE state = 'building';
+-- The environment a job's commit declares: admission claims the job only once it is ready, in
+-- its image. NULL for a commit that declares none.
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS environment_key TEXT REFERENCES environments (key);
+-- The environment a platform experiment's agent machines start in from the declaration of its
+-- baseline on, ready when it is written.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS agent_environment_key TEXT REFERENCES environments (key);
 
 COMMIT;

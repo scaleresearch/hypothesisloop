@@ -49,6 +49,8 @@ var faultClasses = map[EvictionReason]FaultClass{
 	EvictionResourceDisbalance: FaultWorkload,
 	// A bad image reference or a malformed container config: NeverSelfHealsPhaseReasons.
 	EvictionUnschedulable: FaultWorkload,
+	// The environment file of the job's commit did not build.
+	EvictionEnvironmentFailed: FaultWorkload,
 
 	// --- infrastructure: the environment failed the job --------------------------------------
 	EvictionClusterUnreachable:          FaultInfrastructure,
