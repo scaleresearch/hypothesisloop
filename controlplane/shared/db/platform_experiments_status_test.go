@@ -255,7 +255,9 @@ func TestTheTimeABaselineWaitsOnThePlatformMovesItsDeadline(t *testing.T) {
 	if err := pes.CreatePlatformExperiment(ctx, pe, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = pool.pool.Exec(context.Background(), `DELETE FROM platform_experiments WHERE id = $1`, pe.ID) })
+	t.Cleanup(func() {
+		_, _ = pool.pool.Exec(context.Background(), `DELETE FROM platform_experiments WHERE id = $1`, pe.ID)
+	})
 	hold := func(held bool, most time.Duration) time.Time {
 		t.Helper()
 		if err := pes.HoldBaselineClock(ctx, pe.ID, held, most); err != nil {
