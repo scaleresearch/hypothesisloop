@@ -10,15 +10,15 @@ import (
 	"strings"
 
 	"github.com/containerd/platforms"
-	"github.com/docker/cli/cli/config/types"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/client/llb/sourceresolver"
 	gateway "github.com/moby/buildkit/frontend/gateway/client"
 	"github.com/moby/buildkit/session"
-	"github.com/moby/buildkit/session/auth/authprovider"
+	"github.com/moby/buildkit/session/auth"
 	"github.com/moby/buildkit/solver/pb"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -66,18 +66,9 @@ func (b *BuildKit) Build(ctx context.Context, dockerfile, base, image string) er
 	}
 	defer c.Close() //nolint:errcheck
 
-	registry := b.RegistryHost
-	auth := authprovider.NewDockerAuthProvider(authprovider.DockerAuthProviderConfig{
-		AuthConfigProvider: func(_ context.Context, host string, _ []string, _ authprovider.ExpireCachedAuthCheck) (types.AuthConfig, error) {
-			if host != registry {
-				return types.AuthConfig{}, nil
-			}
-			return types.AuthConfig{ServerAddress: host, Username: username, Password: password}, nil
-		},
-	})
 	opt := client.SolveOpt{
 		Exports: []client.ExportEntry{{Type: client.ExporterImage, Attrs: map[string]string{"name": image, "push": "true"}}},
-		Session: []session.Attachable{auth},
+		Session: []session.Attachable{&registryAuth{host: b.RegistryHost, username: username, password: password}},
 	}
 	build := func(ctx context.Context, gw gateway.Client) (*gateway.Result, error) {
 		platform := platforms.MustParse(buildPlatform)
@@ -137,6 +128,24 @@ func (b *BuildKit) Build(ctx context.Context, dockerfile, base, image string) er
 		return fmt.Errorf("environments: build: %w", err)
 	}
 	return &BuildFailed{Log: log.String() + "\n" + err.Error()}
+}
+
+// registryAuth hands the daemon the credential of the one registry it pushes to and is no token
+// authority, so the daemon fetches the registry's token itself. With the client as the authority
+// (authprovider's default), every push to Artifact Registry through a v0.33 daemon waited out the
+// daemon's 60 s session timeout and failed to authorize.
+type registryAuth struct {
+	auth.UnimplementedAuthServer
+	host, username, password string
+}
+
+func (a *registryAuth) Register(server *grpc.Server) { auth.RegisterAuthServer(server, a) }
+
+func (a *registryAuth) Credentials(_ context.Context, req *auth.CredentialsRequest) (*auth.CredentialsResponse, error) {
+	if req.Host != a.host {
+		return &auth.CredentialsResponse{}, nil
+	}
+	return &auth.CredentialsResponse{Username: a.username, Secret: a.password}, nil
 }
 
 // frontendInputs is the Dockerfile and the build context the frontend reads it from: the same
