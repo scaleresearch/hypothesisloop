@@ -99,6 +99,7 @@ func TestOnlyTheEndOfALongBuildOutputIsKept(t *testing.T) {
 // fakeDaemon answers the base pull with pull and the build with build, after streaming output.
 // Once a build has exported, pushes answers its push in turn, after exported is called.
 type fakeDaemon struct {
+	pulls    int
 	pull     error
 	build    error
 	output   string
@@ -112,6 +113,7 @@ type fakeDaemon struct {
 func (d *fakeDaemon) Solve(_ context.Context, def *llb.Definition, opt client.SolveOpt, statuses chan *client.SolveStatus) (*client.SolveResponse, error) {
 	defer close(statuses)
 	if def != nil {
+		d.pulls++
 		return &client.SolveResponse{}, d.pull
 	}
 	d.builds = append(d.builds, opt)
@@ -404,5 +406,26 @@ func TestAPushThatFailsBeforeTheImageIsInItsNodeIsNotTriedAgain(t *testing.T) {
 	got := d.Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil, ignoreProgress, nil)
 	if got.Outcome != domain.EnvironmentBuildPlatformFault || len(daemon.builds) != 1 {
 		t.Errorf("%+v after %d solves, want the platform's fault at once", got, len(daemon.builds))
+	}
+}
+
+// An environment on a job image's base gets the platform's tools from the job image as the last
+// instruction of the stage it builds, below every line of the file, whose numbers stay.
+func TestTheToolsAreCopiedLastFromTheirImage(t *testing.T) {
+	got := withTools("ARG BASE\nFROM ${BASE}\nRUN make", "registry.test/hl/job@sha256:abc")
+	if want := "ARG BASE\nFROM ${BASE}\nRUN make\nCOPY --from=registry.test/hl/job@sha256:abc /usr/local/bin/hl /usr/local/bin/hl-clone /usr/local/bin/\n"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if file := "ARG BASE\nFROM ${BASE}\n"; withTools(file, "") != file {
+		t.Error("a build with no tools image changed its file")
+	}
+	daemon := &fakeDaemon{digest: "sha256:abc"}
+	report := (&Daemon{solver: daemon}).Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job-base@sha256:1111111111111111111111111111111111111111111111111111111111111111", Tools: "registry.test/hl/job@sha256:2222222222222222222222222222222222222222222222222222222222222222", Repository: "registry.test/envs/env"}, nil, ignoreProgress, nil)
+	if report.Outcome != domain.EnvironmentBuildPushed || daemon.pulls != 2 {
+		t.Errorf("%+v after %d pulls, want pushed after pulling the base and the tools", report, daemon.pulls)
+	}
+	failing := &fakeDaemon{pull: errors.New("registry.test/hl/job@sha256:2: not found")}
+	if report := (&Daemon{solver: failing}).Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job-base@sha256:1111111111111111111111111111111111111111111111111111111111111111", Tools: "registry.test/hl/job@sha256:2222222222222222222222222222222222222222222222222222222222222222", Repository: "registry.test/envs/env"}, nil, ignoreProgress, nil); report.Outcome != domain.EnvironmentBuildPlatformFault || len(failing.builds) != 0 {
+		t.Errorf("%+v, want the platform's fault and nothing built", report)
 	}
 }

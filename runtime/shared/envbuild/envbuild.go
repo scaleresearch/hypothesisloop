@@ -71,14 +71,19 @@ func Dial(ctx context.Context, address string) (*Daemon, error) {
 // Progress is told each step of a build as it starts and ends, and how far its transfers are.
 type Progress = func(format string, args ...any)
 
-// Run pulls the base, then builds b and pushes it by digest, and reports how it ended under no
-// attempt. A base that does not pull is the platform's fault, whatever the reason, so a registry
-// outage never fails a file. Once ctx is done the report is meaningless and the caller sends
+// Run pulls the base and the image of the platform's tools, then builds b and pushes it by
+// digest, and reports how it ended under no attempt. An image of the platform's that does not
+// pull is the platform's fault, whatever the reason, so a registry outage never fails a file. Once ctx is done the report is meaningless and the caller sends
 // none. loaded, which may be nil, is told the image once it is in its node, before the push ends.
 func (d *Daemon) Run(ctx context.Context, b domain.EnvironmentBuild, credential Credential, progress Progress, loaded Loaded) domain.EnvironmentBuildReport {
 	steps := newSteps(progress)
-	if err := d.pull(ctx, b.Base, steps); err != nil {
-		return platformFault(err)
+	for _, image := range []string{b.Base, b.Tools} {
+		if image == "" {
+			continue
+		}
+		if err := d.pull(ctx, image, steps); err != nil {
+			return platformFault(err)
+		}
 	}
 	host, _, _ := strings.Cut(b.Repository, "/")
 	attachables := []session.Attachable{&registryAuth{host: host, credential: credential}}
@@ -144,7 +149,7 @@ var pushRetries = []time.Duration{15 * time.Second, 30 * time.Second, time.Minut
 // error is the platform's. A push that fails once the image is loaded into its node is tried
 // again (pushRetries): a job there may already run it.
 func (d *Daemon) build(ctx context.Context, attachables []session.Attachable, b domain.EnvironmentBuild, steps *steps, onLoaded Loaded) (string, error) {
-	file := dockerfileState(b.Dockerfile)
+	file := dockerfileState(withTools(b.Dockerfile, b.Tools))
 	// Media types are set, never the daemon's default, so the pushed manifest and the loaded one
 	// are the same bytes and so the same digest.
 	push := client.ExportEntry{Type: client.ExporterImage, Attrs: map[string]string{
@@ -335,6 +340,19 @@ func (a *registryAuth) Credentials(ctx context.Context, req *auth.CredentialsReq
 		return nil, err
 	}
 	return &auth.CredentialsResponse{Username: username, Secret: password}, nil
+}
+
+// withTools is dockerfile with domain.PlatformTools copied from the image tools into the stage
+// it builds, its last, as its last instruction, so they are the image's last layer and a new
+// release of them leaves every layer before cached. The file's own lines keep their numbers.
+func withTools(dockerfile, tools string) string {
+	if tools == "" {
+		return dockerfile
+	}
+	if dockerfile != "" && !strings.HasSuffix(dockerfile, "\n") {
+		dockerfile += "\n"
+	}
+	return dockerfile + "COPY --from=" + tools + " " + strings.Join(domain.PlatformTools, " ") + " /usr/local/bin/\n"
 }
 
 // dockerfileState is the Dockerfile and the build context the frontend reads it from: one state
