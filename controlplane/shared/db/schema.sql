@@ -904,8 +904,8 @@ BEGIN
     -- The run opening, closing or moving to running is a stop condition for every agent in it,
     -- and nothing told them: a closed platform experiment looked exactly like a quiet one.
     IF NEW.status IS DISTINCT FROM OLD.status THEN
-        PERFORM hypothesisloop_notify_event('platform_experiment.status', NEW.id, NEW.status::text, '',
-            NEW.id, '');
+        PERFORM hypothesisloop_notify_event('platform_experiment.status', NEW.id, NEW.status::text,
+            CASE WHEN NEW.status = 'closed' THEN NEW.close_message ELSE '' END, NEW.id, '');
     END IF;
     -- The status stayed and what it waits for became its coordinator's move. The machine of the
     -- last researcher stopped for good, and no event told the coordinator the run was its to close.
@@ -1218,6 +1218,8 @@ ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS close_reason   TEXT NOT NULL DEFAULT '';
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS closed_by_kind TEXT NOT NULL DEFAULT '';
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS closed_by_id   TEXT NOT NULL DEFAULT '';
+-- What the caller who closed it said of why, empty when it said nothing.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS close_message  TEXT NOT NULL DEFAULT '';
 -- A coordinator the platform runs: one more machine of coordinator_launcher beside the agents',
 -- on coordinator_model. Fixed at creation. The coordinator_instance_* columns say what became
 -- of its machine, exactly as the instance_* columns of experiment_signups do for an agent's.

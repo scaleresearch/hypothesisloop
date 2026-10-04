@@ -305,6 +305,8 @@ type PlatformExperiment struct {
 	ClosedAt    *time.Time  `json:"closed_at,omitempty"`
 	CloseReason CloseReason `json:"close_reason,omitempty" enum:"end_time_reached,closed_by_request,planning_limit_reached,proposal_expired,baseline_limit_reached,agents_not_started,planner_stopped,repository_not_created" doc:"Absent while it is not closed, and on one closed before reasons were kept. status_reason says the same with a sentence. planner_stopped is a draft whose planner's machine ended with every restart spent before it answered: the platform restarts a planner that dies, with its session, as it does any agent, and closes the draft in the write that gives the machine up. repository_not_created is a draft or an experiment whose repository the platform could not create after the create answered, and its status_reason message says what the git host answered."`
 	ClosedBy    *Actor      `json:"closed_by,omitempty"`
+	// CloseMessage is what whoever closed it said of why, which closed_by alone does not say.
+	CloseMessage string `json:"close_message,omitempty" doc:"What whoever closed it gave as the reason with POST /platform-experiments/{id}/close, absent when they gave none. status_reason's message and the platform's record of the close in summary repeat it."`
 	// RepositoryError is what the git host answered when it did not create the repository of one
 	// closed repository_not_created. status_reason carries it.
 	RepositoryError string `json:"-"`

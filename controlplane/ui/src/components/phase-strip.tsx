@@ -37,7 +37,7 @@ const SENTENCE: Record<string, (pe: Draft) => string> = {
   running: pe => `The researchers are at work until ${formatDate(pe.ends_at)}.`,
   researchers_done: pe => `No researcher is left to submit a job: each one finished, was cut or lost its machine. Its coordinator adds researchers in their place while time and quota are left with \`hl platform-experiments agents add --hosted --platform-experiment ${pe.id}\`. The platform closes the experiment on ${formatDate(pe.ends_at)}. Before then its summary is written with \`hl platform-experiments summary --file FILE --platform-experiment ${pe.id}\` and it is closed with \`hl platform-experiments close --platform-experiment ${pe.id}\`.`,
   end_time_reached: () => 'It reached its end time.',
-  closed_by_request: pe => `It was closed early by ${actorLabel(pe.closed_by!)}.`,
+  closed_by_request: pe => `It was closed early by ${actorLabel(pe.closed_by!)}${pe.close_message ? `, who said: ${pe.close_message}` : '.'}`,
   planning_limit_reached: () => 'It never ran: its planner proposed nothing within the planning limit.',
   proposal_expired: () => 'It never ran: nobody took up its planner\'s answer in time.',
   baseline_limit_reached: () => 'It never ran: no baseline was measured in time.',

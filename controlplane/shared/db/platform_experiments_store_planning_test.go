@@ -412,7 +412,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		if err := pes.Decline(ctx, id, "late", time.Now().Add(time.Hour), 0); err != ErrPlanningOver {
 			t.Fatalf("declining past the limit: got = %v, want ErrPlanningOver", err)
 		}
-		if err := pes.ClosePlatformExperiment(ctx, id, nil); err != nil {
+		if err := pes.ClosePlatformExperiment(ctx, id, nil, ""); err != nil {
 			t.Fatal(err)
 		}
 		if late, _ := pes.GetPlatformExperiment(ctx, id); late.CloseReason != domain.ClosePlanningLimitReached || late.ProposedAt != nil {
@@ -693,7 +693,7 @@ func TestAnOpenExperimentClosedWithoutABaselineSaysTheBaselineLimitEndedIt(t *te
 				t.Fatal(err)
 			}
 		}
-		if err := pes.ClosePlatformExperiment(ctx, id, by); err != nil {
+		if err := pes.ClosePlatformExperiment(ctx, id, by, ""); err != nil {
 			t.Fatal(err)
 		}
 		pe, err := pes.GetPlatformExperiment(ctx, id)
@@ -829,7 +829,7 @@ func TestADeclinedDraftSaysSoAndExpiresAsAProposalDoes(t *testing.T) {
 	if draft := listed(); draft.ClosesAt().After(time.Now()) {
 		t.Fatalf("a declined draft past its limit closes at %v, want a moment the sweep acts on", draft.ClosesAt())
 	}
-	if err := pes.ClosePlatformExperiment(ctx, id, nil); err != nil {
+	if err := pes.ClosePlatformExperiment(ctx, id, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	closed, err := pes.GetPlatformExperiment(ctx, id)

@@ -154,7 +154,7 @@ var EventKinds = []EventKindDoc{
 	{Kind: EventCommentNew, Subject: "hypothesis id, or the platform experiment id for the objective", Value: "empty by design",
 		Description: "Someone said something on a claim, or on the objective, people included. agent_id is whose note it is, empty on one no agent owns. GET /hypotheses/{id}/comments reads it."},
 	{Kind: EventPlatformExperimentStatus, Subject: "platform experiment id", Value: "draft, open, running, closed",
-		Description: "The run itself moved. 'closed' is a stop condition for every agent in it. With a detail the status stayed and its status_reason changed to one that waits for its coordinator, where the platform hosts one: detail is that reason, such as researchers_done once no researcher is left to work, sent within a minute of the change and once for each. GET /platform-experiments/{id} has its message."},
+		Description: "The run itself moved. 'closed' is a stop condition for every agent in it, and its detail is what whoever closed it said of why, empty when they said nothing. With a detail on any other status the status stayed and its status_reason changed to one that waits for its coordinator, where the platform hosts one: detail is that reason, such as researchers_done once no researcher is left to work, sent within a minute of the change and once for each. GET /platform-experiments/{id} has its message."},
 	{Kind: EventPlatformExperimentDescription, Subject: "platform experiment id", Value: "empty by design",
 		Description: "The brief or the run's length (duration_hours) changed. A description is unbounded and is never copied into an event: re-read both with GET /platform-experiments/{id}."},
 	{Kind: EventPlatformExperimentRevision, Subject: "platform experiment id", Value: "empty by design",
@@ -843,7 +843,7 @@ WHERE platform_experiment_id = $1 AND idle_xid >= $2`, peID, since)
 //
 // A NULL column is a field that has never moved since the row was created, and produces nothing.
 func replayPlatformExperiment(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]Event, error) {
-	const q = `SELECT status::text, status_changed_xid, description_changed_xid, coordinator_reason, coordinator_reason_xid
+	const q = `SELECT status::text, close_message, status_changed_xid, description_changed_xid, coordinator_reason, coordinator_reason_xid
 FROM platform_experiments WHERE id = $1 AND (status_changed_xid >= $2 OR description_changed_xid >= $2 OR coordinator_reason_xid >= $2)`
 	rows, err := tx.Query(ctx, q, peID, since)
 	if err != nil {
@@ -853,15 +853,19 @@ FROM platform_experiments WHERE id = $1 AND (status_changed_xid >= $2 OR descrip
 
 	var events []Event
 	for rows.Next() {
-		var status string
+		var status, closeMessage string
 		var coordinatorReason *string
 		var statusXid, descriptionXid, coordinatorReasonXid *int64
-		if err := rows.Scan(&status, &statusXid, &descriptionXid, &coordinatorReason, &coordinatorReasonXid); err != nil {
+		if err := rows.Scan(&status, &closeMessage, &statusXid, &descriptionXid, &coordinatorReason, &coordinatorReasonXid); err != nil {
 			return nil, fmt.Errorf("events_store.replayPlatformExperiment: scan: %w", err)
 		}
 		if statusXid != nil {
+			detail := ""
+			if status == string(domain.PlatformExpClosed) {
+				detail = closeMessage
+			}
 			events = append(events, Event{Kind: EventPlatformExperimentStatus, Subject: peID,
-				Value: status, PlatformExperimentID: peID, Position: *statusXid})
+				Value: status, Detail: detail, PlatformExperimentID: peID, Position: *statusXid})
 		}
 		if coordinatorReason != nil {
 			events = append(events, Event{Kind: EventPlatformExperimentStatus, Subject: peID,

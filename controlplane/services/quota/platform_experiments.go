@@ -27,7 +27,7 @@ type PlatformExperimentsStore interface {
 	CountPlatformExperiments(ctx context.Context, filter db.PlatformExperimentsFilter) (int, error)
 	// ClosePlatformExperiment closes it and records why: by is whose credential asked, nil for
 	// the platform at the end time.
-	ClosePlatformExperiment(ctx context.Context, id string, by *domain.Actor) error
+	ClosePlatformExperiment(ctx context.Context, id string, by *domain.Actor, message string) error
 	// UpdatePlatformExperiment writes pe only if it is still in expectedStatus — see the db
 	// implementation's comment for why the compare-and-swap matters here.
 	UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus) error

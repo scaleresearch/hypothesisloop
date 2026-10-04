@@ -268,8 +268,9 @@ def _closed_because(setup: RunSetup) -> str | None:
         closed_by = pe.get("closed_by")
         if config.coordinates(cfg) and (closed_by or {}).get("kind") == "coordinator":
             return None
+        said = f" Their reason: {pe['close_message']}" if pe.get("close_message") else " They gave no reason."
         return (f"You are being stopped because the platform experiment was closed before its end time: "
-                f"{_closer(closed_by)} at {closed_at}.")
+                f"{_closer(closed_by)} at {closed_at}.{said}")
     return f"You are being stopped because the platform experiment closed at {closed_at}. The platform recorded no reason."
 
 

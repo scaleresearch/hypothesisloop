@@ -40,7 +40,7 @@ func setPEStatus(t *testing.T, pool *Pool, pe string, status domain.PlatformExpe
 	ctx := context.Background()
 	var err error
 	if status == domain.PlatformExpClosed {
-		err = NewPlatformExperimentsStore(pool).ClosePlatformExperiment(ctx, pe, nil)
+		err = NewPlatformExperimentsStore(pool).ClosePlatformExperiment(ctx, pe, nil, "")
 	} else {
 		_, err = pool.pool.Exec(ctx, `
 UPDATE platform_experiments

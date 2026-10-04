@@ -366,7 +366,7 @@ func TestTenancyIsDerivedThroughTheProject(t *testing.T) {
 		t.Fatalf("tenancy of a running platform experiment: got closed at %v, want nil", closedAt)
 	}
 	before := time.Now().Add(-time.Second)
-	if err := pes.ClosePlatformExperiment(ctx, peID, nil); err != nil {
+	if err := pes.ClosePlatformExperiment(ctx, peID, nil, ""); err != nil {
 		t.Fatalf("close platform experiment: %v", err)
 	}
 	_, closedAt, _ = accounts.PlatformExperimentTenancy(ctx, peID)
@@ -378,7 +378,7 @@ func TestTenancyIsDerivedThroughTheProject(t *testing.T) {
 	if err := pes.SetPlatformExperimentSummary(ctx, peID, "done"); err != nil {
 		t.Fatalf("file summary: %v", err)
 	}
-	if err := pes.ClosePlatformExperiment(ctx, peID, &domain.Actor{Kind: domain.ActorStaff}); err != nil {
+	if err := pes.ClosePlatformExperiment(ctx, peID, &domain.Actor{Kind: domain.ActorStaff}, ""); err != nil {
 		t.Fatalf("close again: %v", err)
 	}
 	if _, again, _ := accounts.PlatformExperimentTenancy(ctx, peID); again == nil || !again.Equal(*closedAt) {

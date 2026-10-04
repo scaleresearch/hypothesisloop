@@ -271,6 +271,8 @@ export interface PlatformExperiment {
   closed_at?: string
   close_reason?: 'end_time_reached' | 'closed_by_request' | 'planning_limit_reached' | 'proposal_expired' | 'baseline_limit_reached' | 'agents_not_started' | 'planner_stopped' | 'repository_not_created'
   closed_by?: Actor
+  // The reason whoever closed it gave, absent when they gave none.
+  close_message?: string
   // The coordinator's closing summary of the run. Absent until one is filed.
   summary?: string
   created_at: string

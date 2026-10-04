@@ -1042,11 +1042,13 @@ and nothing is written beside the JSON, so the output parses whole.`, stderr)
 }
 
 func cmdPlatformExperimentsClose(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments close", `usage: hl platform-experiments close [--platform-experiment PE]
+	fs := newFlags("platform-experiments close", `usage: hl platform-experiments close [--reason TEXT] [--platform-experiment PE]
 
 Ends the platform experiment for good: every job still running
 is evicted, nothing more is accepted, and the standings are taken from the metrics reported. Its
-summary can still be written afterwards.`, stderr)
+summary can still be written afterwards. --reason says why: it is kept as close_message, written
+in the platform's record of the close, and told to the coordinator and the agents with the close.`, stderr)
+	reason := fs.String("reason", "", "why it is closed, in a sentence or two")
 	pe := experimentFlag(fs)
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
@@ -1055,8 +1057,12 @@ summary can still be written afterwards.`, stderr)
 	if err != nil {
 		return parseExit(err)
 	}
+	body := map[string]any{}
+	if *reason != "" {
+		body["reason"] = *reason
+	}
 	var out any
-	if err := c.Do("POST", "/platform-experiments/"+url.PathEscape(id)+"/close", map[string]any{}, &out); err != nil {
+	if err := c.Do("POST", "/platform-experiments/"+url.PathEscape(id)+"/close", body, &out); err != nil {
 		return fail(stderr, err)
 	}
 	printJSON(stdout, out)

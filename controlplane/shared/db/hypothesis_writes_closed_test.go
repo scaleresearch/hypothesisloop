@@ -29,7 +29,7 @@ func TestAHypothesisWriteHoldsOffACloseAndNoneIsTakenAfterIt(t *testing.T) {
 	passed, closed := make(chan struct{}), make(chan error, 1)
 	go func() {
 		<-passed
-		closed <- NewPlatformExperimentsStore(pool).ClosePlatformExperiment(ctx, pe, &person)
+		closed <- NewPlatformExperimentsStore(pool).ClosePlatformExperiment(ctx, pe, &person, "")
 	}()
 	err := events.Emit(ctx, func(stamp Stamp) ([]Event, error) {
 		if err := stamp.RequireOpen(pe); err != nil {

@@ -67,6 +67,15 @@ describe('the phase strip', () => {
     expect(current()).toEqual([phase])
   })
 
+  it('says who closed it early and the reason they gave', () => {
+    const closer = { kind: 'user' as const, id: 'u-1', name: 'Ada' }
+    const one = show(experiment('closed', 'closed_by_request', { closed_by: closer }))
+    expect(sentence()).toBe('It was closed early by Ada.')
+    one.unmount()
+    show(experiment('closed', 'closed_by_request', { closed_by: closer, close_message: 'the baseline measured the old split' }))
+    expect(sentence()).toBe('It was closed early by Ada, who said: the baseline measured the old split')
+  })
+
   it('refuses an experiment that came without the reason every read of one carries', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     expect(() => show({ ...experiment('draft', 'planning'), status_reason: undefined })).toThrow(/came without a status_reason/)

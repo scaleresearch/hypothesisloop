@@ -42,7 +42,7 @@ func TestClosingAPlatformExperimentExecutesAgainstARealDatabase(t *testing.T) {
 	// The close records who asked, and a second close leaves it as it is.
 	owner := domain.Actor{Kind: domain.ActorUser, ID: "user-1"}
 	for _, by := range []*domain.Actor{&owner, nil} {
-		if err := store.ClosePlatformExperiment(ctx, id, by); err != nil {
+		if err := store.ClosePlatformExperiment(ctx, id, by, ""); err != nil {
 			t.Fatalf("ClosePlatformExperiment: %v", err)
 		}
 	}
@@ -93,7 +93,7 @@ func TestTheRunLastsItsDurationFromItsStart(t *testing.T) {
 			t.Fatalf("listed: closes at %v, want the run's end %v", one.ClosesAt(), running.EndsAt)
 		}
 	}
-	if err := pes.ClosePlatformExperiment(ctx, pe.ID, nil); err != nil {
+	if err := pes.ClosePlatformExperiment(ctx, pe.ID, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if closed, err := pes.GetPlatformExperiment(ctx, pe.ID); err != nil || !closed.EndsAt.Equal(running.EndsAt) || closed.CloseReason != domain.CloseEndTimeReached {
@@ -171,7 +171,7 @@ func TestARunWaitsForItsFirstResearchersMachineWithinItsRun(t *testing.T) {
 
 	pe, _, _ = start()
 	due := read(pe).AgentsDueAt
-	if err := pes.ClosePlatformExperiment(ctx, pe, nil); err != nil {
+	if err := pes.ClosePlatformExperiment(ctx, pe, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if closed := read(pe); closed.CloseReason != domain.CloseAgentsNotStarted || !closed.AgentsDueAt.Equal(due) || !closed.StartedAt.IsZero() || !closed.EndsAt.IsZero() {
@@ -223,7 +223,7 @@ func TestTheRecordOfACloseIsKeptBesideTheSummary(t *testing.T) {
 	if err := pes.SetPlatformExperimentSummary(ctx, pe, "Status: running."); err != nil {
 		t.Fatal(err)
 	}
-	if err := pes.ClosePlatformExperiment(ctx, pe, nil); err != nil {
+	if err := pes.ClosePlatformExperiment(ctx, pe, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	for _, record := range []string{"the record", "a second record"} {
@@ -262,7 +262,7 @@ func TestAListSaysWhyAPlatformExperimentClosed(t *testing.T) {
 	pes := NewPlatformExperimentsStore(pool)
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
-	if err := pes.ClosePlatformExperiment(ctx, pe, &domain.Actor{Kind: domain.ActorUser, ID: "u-1"}); err != nil {
+	if err := pes.ClosePlatformExperiment(ctx, pe, &domain.Actor{Kind: domain.ActorUser, ID: "u-1"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	listed, err := pes.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpClosed)
@@ -362,7 +362,7 @@ func TestACloseIsToRecordOnceEveryJobOfItIsSettled(t *testing.T) {
 (actor_kind, id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
  hypothesis_id, hypothesis, accelerator_type, status, estimated_duration_hours, data_access_key_id, data_secret_access_key)
 VALUES ('agent', 'record-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', 'SUBMITTED', 1, 'AK', 'SK')`, agentID, peID, hypothesisID)
-	if err := pes.ClosePlatformExperiment(ctx, peID, nil); err != nil {
+	if err := pes.ClosePlatformExperiment(ctx, peID, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	toRecord := func() bool {

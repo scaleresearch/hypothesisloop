@@ -277,7 +277,7 @@ func TestADraftIsAbandonedByClosingItAndByItsPlanningLimit(t *testing.T) {
 	svc, _ := planningAPI(t, store, planner)
 	// Closing a draft derives no standings: it never ran and has no metric to rank on.
 	owner := domain.Actor{Kind: domain.ActorUser, ID: "user-1"}
-	if _, err := svc.Close(context.Background(), "pe-dropped", &owner, nil); err != nil {
+	if _, err := svc.Close(context.Background(), "pe-dropped", &owner, "", nil); err != nil {
 		t.Fatalf("closing a draft: %v", err)
 	}
 	if err := svc.SweepExpired(context.Background()); err != nil {
@@ -421,6 +421,29 @@ func TestTheRecordOfACloseFollowsASummaryWrittenBefore(t *testing.T) {
 	}
 }
 
+// An owner who closes a run early says why, and the record of the close and its status_reason,
+// which a coordinator on its last turn reads, say it too.
+func TestAnOwnersReasonToCloseIsRecorded(t *testing.T) {
+	now := time.Now().UTC()
+	pe := &domain.PlatformExperiment{ID: "pe-early", ProjectID: "prj-a", Status: domain.PlatformExpRunning, CreatedAt: now.Add(-2 * time.Hour),
+		StartedAt: now.Add(-time.Hour), EndsAt: now.Add(time.Hour), DurationHours: 2, BudgetAcceleratorHours: 6, Stages: []domain.Stage{{LengthPct: 100}}}
+	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}}}
+	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute)
+	owner := domain.Actor{Kind: domain.ActorUser, ID: "user-1"}
+	closed, err := svc.Close(context.Background(), pe.ID, &owner, "the baseline is wrong:\nit measured the old split", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	said := `closed_by asked for it to be closed, saying "the baseline is wrong: it measured the old split"`
+	if want := "Close reason: closed_by_request: " + said + ".\n"; !strings.Contains(closed.Summary, want) {
+		t.Errorf("summary = %q, want it to say %q", closed.Summary, want)
+	}
+	why, err := svc.closedReason(context.Background(), closed)
+	if err != nil || why.Message != said {
+		t.Errorf("status_reason = %+v, %v, want the message %q", why, err, said)
+	}
+}
+
 // Run 5's record said "Spent: 0 of the budget" while consumed_accelerator_hours read 0.0645: the
 // record was written at the close, before the job its cluster was still starting ended and was
 // billed. The record of a close waits for every job to be settled, and states the spend whole.
@@ -532,7 +555,7 @@ func (s *statusStore) ListPlatformExperimentsByStatus(_ context.Context, status 
 	return out, nil
 }
 
-func (s *statusStore) ClosePlatformExperiment(_ context.Context, id string, by *domain.Actor) error {
+func (s *statusStore) ClosePlatformExperiment(_ context.Context, id string, by *domain.Actor, message string) error {
 	for _, pe := range s.created {
 		if pe.ID == id {
 			closedAt := time.Now().UTC()
@@ -540,7 +563,7 @@ func (s *statusStore) ClosePlatformExperiment(_ context.Context, id string, by *
 			if by == nil && pe.Status == domain.PlatformExpOpen {
 				pe.CloseReason = domain.CloseBaselineLimitReached
 			}
-			pe.Status, pe.ClosedBy, pe.ClosedAt = domain.PlatformExpClosed, by, &closedAt
+			pe.Status, pe.ClosedBy, pe.ClosedAt, pe.CloseMessage = domain.PlatformExpClosed, by, &closedAt, message
 		}
 	}
 	return nil

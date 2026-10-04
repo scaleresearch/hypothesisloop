@@ -456,12 +456,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Description: "Terminal: every still-running job is evicted (reason experiment_closed) and " +
 			"no further submission is accepted. Optional top_results records the final standings; " +
 			"omitted, standings are derived from observed metrics. The answer is the platform experiment as closed: close_reason closed_by_request with closed_by, " +
-			"where a run the platform closed at its ends_at reads end_time_reached, an open one it closed at its baseline_due_at baseline_limit_reached and a running one it closed at its agents_due_at agents_not_started. status_reason carries the same reason with a sentence. " +
+			"and close_message, the optional reason, which status_reason's message, the record of the close in summary and the detail of the platform_experiment.status event of the close repeat. " +
+			"A run the platform closed at its ends_at reads end_time_reached, an open one it closed at its baseline_due_at baseline_limit_reached and a running one it closed at its agents_due_at agents_not_started. status_reason carries the same reason with a sentence. " +
 			"One that was open or ran and has no summary is given one by the platform in the same write: the close_reason, the jobs submitted, what each agent last did and how its run ended, and the spend. Its coordinator, on its last turn, writes over it. " +
 			"409 invalid_transition for one already closed, which changes nothing.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body *struct {
+			Reason     string        `json:"reason,omitempty" maxLength:"2000" doc:"Why it is closed, in a sentence or two. Kept as close_message and told to its coordinator and agents with the close."`
 			TopResults []AgentResult `json:"top_results,omitempty" doc:"Best-first final standings (up to 3). Omit to derive standings from the metrics store."`
 		}
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
@@ -469,15 +471,16 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			return nil, err
 		}
 		var topResults []AgentResult
+		message := ""
 		if in.Body != nil {
-			topResults = in.Body.TopResults
+			topResults, message = in.Body.TopResults, strings.TrimSpace(in.Body.Reason)
 		}
 		caller, err := peh.caller(ctx)
 		if err != nil {
 			return nil, err
 		}
 		by := caller.Actor()
-		pe, err := peh.svc.Close(ctx, in.ID, &by, topResults)
+		pe, err := peh.svc.Close(ctx, in.ID, &by, message, topResults)
 		if err != nil {
 			return nil, peh.refusal("close platform experiment", err)
 		}

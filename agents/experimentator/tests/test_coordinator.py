@@ -107,7 +107,9 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
         person = {"kind": "user", "id": "u-1", "name": "Ada"}
         for experiment, signup, flavor, want in (
             ({**ended, "close_reason": "end_time_reached"}, {}, "coordinator", "reached its end time and the platform closed it at 2026-01-01T02:48:05Z"),
-            ({**ended, "close_reason": "closed_by_request", "closed_by": person}, {}, "coordinator", "a person closed it (Ada) at 2026-01-01T02:48:05Z"),
+            ({**ended, "close_reason": "closed_by_request", "closed_by": person}, {}, "coordinator", "a person closed it (Ada) at 2026-01-01T02:48:05Z. They gave no reason."),
+            ({**ended, "close_reason": "closed_by_request", "closed_by": person, "close_message": "the baseline measured the old split"}, {}, "coordinator",
+             "a person closed it (Ada) at 2026-01-01T02:48:05Z. Their reason: the baseline measured the old split"),
             ({**ended, "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}, {"ended": "closed"}, "generalist", "its coordinator closed it"),
             (ended, {}, "coordinator", "The platform recorded no reason"),
             ({**ended, "close_reason": "planning_limit_reached"}, {"ended": "closed"}, "planner", "the planning limit passed with nothing proposed, and the platform closed the draft at 2026-01-01T02:48:05Z"),

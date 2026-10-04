@@ -463,6 +463,35 @@ func TestClosingThePlatformExperimentAnnouncesItsNewStatus(t *testing.T) {
 	}
 }
 
+// The reason an owner gave to close the run is its close event's detail, live and replayed, and
+// the platform experiment carries it.
+func TestTheCloseEventCarriesTheReasonGiven(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	_, peID, _ := seedRun(t, pool, "closed-for", true)
+	before := cursorNow(t, pool)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+	store := NewPlatformExperimentsStore(pool)
+
+	if err := store.ClosePlatformExperiment(ctx, peID, &domain.Actor{Kind: domain.ActorUser, ID: "u-1"}, "the baseline measured the old split"); err != nil {
+		t.Fatal(err)
+	}
+	live := awaitEvent(t, events, EventPlatformExperimentStatus, peID)
+	if live.Value != "closed" || live.Detail != "the baseline measured the old split" {
+		t.Fatalf("live event: got = %q %q, want = closed with the reason", live.Value, live.Detail)
+	}
+	filter := EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventPlatformExperimentStatus: true}}
+	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, filter, before)
+	if err != nil || len(replayed) != 1 || replayed[0].Identity() != live.Identity() || replayed[0].Detail != live.Detail {
+		t.Fatalf("replay: got = %+v, %v, want = the live event %+v alone", replayed, err, live)
+	}
+	pe, err := store.GetPlatformExperiment(ctx, peID)
+	if err != nil || pe.CloseMessage != "the baseline measured the old split" {
+		t.Fatalf("close_message: got = %+v, %v", pe, err)
+	}
+}
+
 // A status_reason is derived on every read, so a run whose last researcher's machine stopped for
 // good read researchers_done and wrote no row: nothing woke the coordinator that was to close it.
 // The reason that waits for the coordinator is recorded, and that write is the status event, sent

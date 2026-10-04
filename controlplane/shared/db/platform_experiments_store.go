@@ -143,7 +143,7 @@ func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id
 	q := `
 SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, ` + summarySQL + `, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, pe.shared,
        ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.repository_url, pe.agent_image, pe.goal, pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason,
-       pe.baseline_job_id, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id, pe.repository_error, pe.repository_account,
+       pe.baseline_job_id, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id, pe.close_message, pe.repository_error, pe.repository_account,
        pe.duration_hours, pe.started_at, pe.planner_ends_at, pe.accepts_at, pe.coordinator_instance_activity, pe.coordinator_instance_activity_at,
        pe.status = 'open' AND NOT ` + coordinatorWantedSQL + `,
        (SELECT planner.instance_activity FROM experiment_signups planner WHERE ` + plannerOfDraft + `),
@@ -171,7 +171,7 @@ WHERE id = $1`
 		&coordinator.Instance.Renewals, &coordinator.Instance.Stopped, &coordinator.Instance.ExitedAt, &coordinator.Instance.ExitLog,
 		&coordinator.Instance.SeenAt, &coordinator.Instance.AskedAt, &coordinator.Instance.Launch, &coordinator.Instance.Reported, &coordinator.Instance.ProgressAt, &coordinator.Instance.EndReason, &coordinator.Instance.Released, &pe.MaxHosted, &pe.Repository, &pe.RepositoryURL, &pe.AgentImage,
 		&pe.Goal, &createdBy.Kind, &createdBy.ID, &proposal, &answeredAt, &pe.DeclinedReason,
-		&pe.BaselineJobID, &pe.JobEstimatedDurationHours, &pe.ClosedAt, &pe.CloseReason, &closedBy.Kind, &closedBy.ID, &pe.RepositoryError, &pe.RepositoryAccount,
+		&pe.BaselineJobID, &pe.JobEstimatedDurationHours, &pe.ClosedAt, &pe.CloseReason, &closedBy.Kind, &closedBy.ID, &pe.CloseMessage, &pe.RepositoryError, &pe.RepositoryAccount,
 		&pe.DurationHours, &startedAt, &plannerEndsAt, &acceptsAt, &coordinatorActivity, &coordinatorActivityAt,
 		&coordinator.Instance.Waiting, &plannerActivity, &plannerActivityAt,
 	)
@@ -452,8 +452,9 @@ func (s *PlatformExperimentsStore) CountPlatformExperiments(ctx context.Context,
 }
 
 // ClosePlatformExperiment closes a platform experiment and records why: by is whose credential
-// asked, nil when the platform closes it at its end time. One already closed keeps what it has.
-func (s *PlatformExperimentsStore) ClosePlatformExperiment(ctx context.Context, id string, by *domain.Actor) error {
+// asked, nil when the platform closes it at its end time, and message what that caller said of
+// why. One already closed keeps what it has.
+func (s *PlatformExperimentsStore) ClosePlatformExperiment(ctx context.Context, id string, by *domain.Actor, message string) error {
 	reason, actor := "", domain.Actor{}
 	if by != nil {
 		reason, actor = string(domain.CloseByRequest), *by
@@ -470,9 +471,9 @@ SET status = 'closed', updated_at = NOW(), closed_at = NOW(),
                         WHEN status = 'open' THEN '` + string(domain.CloseBaselineLimitReached) + `'
                         WHEN started_at IS NULL THEN '` + string(domain.CloseAgentsNotStarted) + `'
                         ELSE '` + string(domain.CloseEndTimeReached) + `' END,
-    closed_by_kind = $3, closed_by_id = $4
+    closed_by_kind = $3, closed_by_id = $4, close_message = $5
 WHERE id = $1 AND status <> 'closed'`
-	if _, err := s.pool.pool.Exec(ctx, q, id, reason, string(actor.Kind), actor.ID); err != nil {
+	if _, err := s.pool.pool.Exec(ctx, q, id, reason, string(actor.Kind), actor.ID, message); err != nil {
 		return fmt.Errorf("platform_experiments_store.Close: %w", err)
 	}
 	return nil
