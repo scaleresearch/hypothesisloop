@@ -496,7 +496,7 @@ async function scenarios(browser) {
   await page.getByText('same one again').first().waitFor()
   await page.getByRole('button', { name: 'Hide' }).click()
   assert.equal(await page.getByTestId('secret').count(), 0)
-  const agentRows = page.locator('table', { hasText: 'Run by' }).locator('tbody tr')
+  const agentRows = page.getByRole('table', { name: 'Agents' }).locator('tbody tr')
   assert.equal(await agentRows.count(), 2)
 
   section('a hosted agent the platform refuses is not listed, and the page says why')
@@ -543,12 +543,14 @@ async function scenarios(browser) {
     : route.fallback())
   await page.reload()
   const runningRow = agentRows.filter({ hasText: 'ag-hosted-running' })
+  await runningRow.getByRole('button', { name: 'Details of ag-hosted-running' }).click()
   await runningRow.getByText('running', { exact: true }).waitFor()
   await runningRow.getByText('restarted once').waitFor()
   await runningRow.getByText(/^last progress /).waitFor()
   await runningRow.getByText(/^Replaced: the machine before this one ended .*, its command ended\.$/).waitFor()
   assert.equal(await runningRow.getByRole('button', { name: 'Show token' }).count(), 0, 'a hosted agent has no token to show')
   const stoppedRow = agentRows.filter({ hasText: 'ag-hosted-stopped' })
+  await stoppedRow.getByRole('button', { name: 'Details of ag-hosted-stopped' }).click()
   await stoppedRow.getByText('stopped', { exact: true }).waitFor()
   await stoppedRow.getByText(/^Stopped for good: its last machine ended .*, it ran and made no progress\.$/).waitFor()
   await stoppedRow.getByRole('button', { name: 'Exit log' }).click()
@@ -1230,7 +1232,7 @@ async function scenarios(browser) {
     assert.equal(await otherPage.getByRole('note').count(), 1, 'one note says it is shared and read only')
     assert.equal(await otherPage.locator('.wa-nav-tenant').getByRole('combobox').first().inputValue(), 'Default org', 'the switcher still names the reader\'s own org')
     // The owner's page shows Add agent, and Show token and Remove in the row of its one agent.
-    const sharedAgents = otherPage.locator('table', { hasText: 'Run by' }).locator('tbody tr')
+    const sharedAgents = otherPage.getByRole('table', { name: 'Agents' }).locator('tbody tr')
     await sharedAgents.first().waitFor()
     assert.equal(await sharedAgents.count(), 1)
     for (const control of ['Add agent', 'Show token', 'Remove', 'Edit']) {
@@ -1239,7 +1241,7 @@ async function scenarios(browser) {
     assert.equal(await otherPage.locator('.error-banner').count(), 0, 'every read of the page is answered')
     assert.ok([null, ...bobProjects].includes(new URL(otherPage.url()).searchParams.get('project')), 'the URL names no project of the other org')
 
-    await otherPage.getByRole('link', { name: /Hypotheses →/ }).click()
+    await otherPage.getByRole('list', { name: 'This experiment in figures' }).getByRole('link', { name: /^Hypotheses/ }).click()
     await otherPage.waitForURL(u => u.pathname === '/hypotheses' && u.searchParams.get('pe') === experimentID)
     await otherPage.getByRole('link', { name: 'Experiment →' }).waitFor()
     assert.equal(await otherPage.getByRole('button', { name: /Add idea/ }).count(), 0, 'its graph takes no idea')

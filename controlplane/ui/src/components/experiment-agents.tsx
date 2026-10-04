@@ -1,25 +1,32 @@
 'use client'
 
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
+import { clsx } from 'clsx'
+import { ChevronRight } from 'lucide-react'
 import { addPlatformExperimentAgents, apiURL, fetchPlatformExperimentAgentToken, removePlatformExperimentAgent } from '@/lib/api'
 import { useRoster } from '@/lib/roster'
 import { PlatformExperimentStatus } from '@/types'
 import type { AgentSignup, JoinedAgent, PlatformExperiment } from '@/types'
-import { Badge } from '@/components/ui/badge'
+import { StatusLabel } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
-import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
+import { InsetCard } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'
 import { Table } from '@/components/ui/table'
-import { Eyebrow } from '@/components/ui/text'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Facts } from '@/components/ui/facts'
+import { Section } from '@/components/ui/section'
+import { Inline, Stack } from '@/components/ui/stack'
+import { Code, Eyebrow, Text } from '@/components/ui/text'
 import { Secret } from '@/components/ui/secret'
 import { Activity } from '@/components/agent-at-work'
 import { InstanceHealth } from '@/components/instance-health'
 import { clearRunFailure, runFailure } from '@/lib/run-experiment'
 import { relTime } from '@/lib/format'
-import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
+import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { useReadOnly } from '@/lib/read-only'
+import type { Tone } from '@/lib/colors'
 
 // The specializations the agent harness ships: see agents/coordinator/setup.md. Another name is
 // accepted when the harness image carries a prompt for it.
@@ -55,8 +62,8 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
   }
 
   return (
-    <div className="grid gap-2.5">
-      <form className="flex flex-wrap items-end gap-2" onSubmit={submit}>
+    <Stack>
+      <Inline as="form" align="end" onSubmit={submit}>
         <FormField label="Specialization">
           <Input
             fieldSize="sm"
@@ -79,22 +86,64 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
             onChange={e => setModel(e.target.value)}
           />
         </FormField>
-        <div className="grid gap-1" role="group" aria-label="Run by">
+        <Stack gap="xs" role="group" aria-label="Run by">
           <Eyebrow>Run by</Eyebrow>
-          <div className="flex gap-1.5">
+          <Inline gap="xs" nowrap>
             <Chip type="button" active={hosted} onClick={() => setHosted(true)}>The platform</Chip>
             <Chip type="button" active={!hosted} onClick={() => setHosted(false)}>Me</Chip>
-          </div>
-        </div>
+          </Inline>
+        </Stack>
         <Button size="sm" variant="primary" type="submit" loading={busy}>Add agent</Button>
-      </form>
-      <p className="text-xs text-subtle">
+      </Inline>
+      <Text variant="hint">
         {hosted
           ? 'The platform starts a machine for the agent and keeps it until the experiment closes or the agent finishes or is cut.'
           : 'The agent comes back with a token. You start the agent yourself with it, and can show the token again from the agent\'s row.'}
-      </p>
+      </Text>
       {error && <ErrorMessage>{error}</ErrorMessage>}
-    </div>
+    </Stack>
+  )
+}
+
+// One short word on where an agent is, and the longer story behind it for its title.
+function statusOf(agent: JoinedAgent, closed: boolean): { label: string; tone: Tone; detail?: string } {
+  const detail = [agent.finished_reason, agent.activity?.text, agent.status_reason?.message].filter(Boolean).join(' ') || undefined
+  if (agent.finished_at) return { label: `Finished ${relTime(agent.finished_at)}`, tone: 'neutral', detail }
+  if (closed) return { label: 'Stopped, experiment closed', tone: 'neutral', detail }
+  if (!agent.instance) return { label: agent.hosted ? 'Not reported yet' : 'Run by its operator', tone: 'neutral', detail }
+  switch (agent.instance.state) {
+    case 'running': return { label: 'Running', tone: 'success', detail }
+    case 'starting': return { label: 'Starting', tone: 'warning', detail }
+    case 'requested': return { label: 'Machine asked for', tone: 'neutral', detail }
+    case 'waiting': return { label: 'Waiting for the start', tone: 'neutral', detail }
+    case 'stopped': return agent.instance.end_reason === 'released'
+      ? { label: 'Stopped, run over', tone: 'neutral', detail }
+      : { label: 'Stopped', tone: 'danger', detail }
+  }
+}
+
+/** Everything about one agent that its row has no room for. */
+function AgentDetails({ agent }: { agent: JoinedAgent }) {
+  return (
+    <Stack gap="sm">
+      <Facts facts={[
+        ['Id', agent.agent_id],
+        ['Run by', agent.hosted ? 'the platform' : 'its operator'],
+        ['Specialization', agent.flavor ?? 'default'],
+        ['Model', agent.model ?? 'default'],
+        ['Joined', new Date(agent.signed_up_at).toLocaleString()],
+      ]} />
+      {agent.finished_at && (
+        <Text variant="note" title={new Date(agent.finished_at).toLocaleString()}>
+          Finished {relTime(agent.finished_at)}: {agent.finished_reason}
+        </Text>
+      )}
+      {agent.instance && <InstanceHealth instance={agent.instance} />}
+      {agent.activity && <Activity activity={agent.activity} className="max-w-md" />}
+      {agent.status_reason && agent.instance && (
+        <Text variant="hint" className="max-w-md">{agent.status_reason.message}</Text>
+      )}
+    </Stack>
   )
 }
 
@@ -108,6 +157,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   // Self-run agents whose token is on screen: the ones just added, and any asked for again.
   const [shown, setShown] = useState<JoinedAgent[]>([])
   const [removing, setRemoving] = useState<AgentSignup | null>(null)
+  const [open, setOpen] = useState<string | null>(null)
   // Set when the create form went on to run this experiment and the API stopped it part way.
   const [stopped, setStopped] = useState(() => runFailure(pe.id))
   function forgetStopped() {
@@ -149,10 +199,8 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   }
 
   return (
-    <Card id={AGENTS_CARD}>
-      <CardHeader><CardTitle note={agents && `(${agents.length})`}>Agents</CardTitle></CardHeader>
-      <CardContent scrollX>
-        <div className="grid gap-3.5">
+    <Section id={AGENTS_CARD} title="Agents" note={agents && `(${agents.length})`} scrollX>
+        <Stack>
           {stopped && (
             <ErrorMessage>
               This experiment was created, but it is not running as asked: {stopped.step} failed. {stopped.message}{' '}
@@ -160,9 +208,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
               <Button variant="link" size="sm" onClick={forgetStopped}>Dismiss</Button>
             </ErrorMessage>
           )}
-          {readOnly ? null : started
-            ? <p className="text-xs text-subtle">The experiment is {pe.status}: from its start an agent leaves only by finishing, by being cut or by the experiment closing.</p>
-            : <AddAgents pe={pe} onAdded={joined => { show(joined); return mutate() }} />}
+          {!readOnly && !started && <AddAgents pe={pe} onAdded={joined => { show(joined); return mutate() }} />}
           {shown.map(agent => (
             <Secret
               key={agent.agent_id}
@@ -172,7 +218,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
                 Save it as an env file readable by you alone and start the agent with it. The token
                 works for this agent in this experiment and nowhere else. It never changes:{' '}
                 <span className="font-medium">Show token</span> in the agent&apos;s row shows the same one again, as does{' '}
-                <span className="font-mono">hl platform-experiments agents add --platform-experiment {pe.id} --agent {agent.agent_id}</span>.
+                <Code>hl platform-experiments agents add --platform-experiment {pe.id} --agent {agent.agent_id}</Code>.
                 Removing the agent is what stops it working.
               </>}
               dismiss="Hide"
@@ -180,14 +226,14 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
             />
           ))}
           {pe.coordinator && (
-            <div role="group" aria-label="Coordinator" className="grid gap-1.5 rounded border bg-surface-inset px-3 py-2.5">
-              <div className="flex flex-wrap items-baseline gap-x-2.5">
+            <InsetCard role="group" aria-label="Coordinator">
+              <Inline align="baseline">
                 <Eyebrow>Coordinator</Eyebrow>
-                <span className="text-xs text-muted">run by the platform · model <span className="font-mono">{pe.coordinator.model}</span></span>
-              </div>
+                <Text as="span" variant="note">run by the platform · model <Code>{pe.coordinator.model}</Code></Text>
+              </Inline>
               <InstanceHealth instance={pe.coordinator.instance} />
               {pe.coordinator.activity && <Activity activity={pe.coordinator.activity} />}
-            </div>
+            </InsetCard>
           )}
           {error && <ErrorMessage>Could not load agents: {error.message}</ErrorMessage>}
           {rowError && <ErrorMessage>{rowError}</ErrorMessage>}
@@ -196,50 +242,54 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
             <EmptyState>No agents yet.{!readOnly && ' Nothing runs in this experiment until at least one joins.'}</EmptyState>
           )}
           {agents && agents.length > 0 && (
-            <Table>
+            <Table aria-label="Agents">
               <thead>
-                <tr><th>Agent</th><th>Role</th><th>Run by</th><th>Machine · doing now</th><th>Specialization</th><th>Model</th><th>Joined</th><th /></tr>
+                <tr><th className="w-8" /><th>Agent</th><th>Role</th><th>Status</th><th /></tr>
               </thead>
               <tbody>
-                {agents.map(agent => (
-                  <tr key={agent.agent_id}>
-                    <td className="whitespace-nowrap font-mono text-xs font-medium">
-                      {agent.name}
-                      {agent.name !== agent.agent_id && <div className="text-2xs font-normal text-muted">{agent.agent_id}</div>}
-                    </td>
-                    <td className="text-xs">{agent.role}</td>
-                    <td className="whitespace-nowrap text-xs">{agent.hosted ? 'the platform' : 'its operator'}</td>
-                    <td>
-                      {agent.finished_at && (
-                        <p className="mb-1 text-xs text-muted" title={new Date(agent.finished_at).toLocaleString()}>
-                          <Badge tone="neutral">finished</Badge> {relTime(agent.finished_at)}: {agent.finished_reason}
-                        </p>
+                {agents.map(agent => {
+                  const status = statusOf(agent, pe.status === PlatformExperimentStatus.CLOSED)
+                  const expanded = open === agent.agent_id
+                  return (
+                    <Fragment key={agent.agent_id}>
+                      <tr>
+                        <td>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-expanded={expanded}
+                            aria-label={`Details of ${agent.name}`}
+                            onClick={() => setOpen(expanded ? null : agent.agent_id)}
+                          >
+                            <ChevronRight aria-hidden="true" size={13} className={clsx('transition-transform', expanded && 'rotate-90')} />
+                          </Button>
+                        </td>
+                        <td className="whitespace-nowrap text-xs font-medium" title={agent.agent_id}>{agent.name}</td>
+                        <td className="text-xs">{agent.role}</td>
+                        <td><StatusLabel tone={status.tone} title={status.detail}>{status.label}</StatusLabel></td>
+                        <td>
+                          {!readOnly && (
+                            <Inline gap="xs" nowrap className="justify-end">
+                              {!agent.hosted && <Button size="sm" onClick={() => showToken(agent)}>Show token</Button>}
+                              {!started && <Button size="sm" variant="danger" onClick={() => setRemoving(agent)}>Remove</Button>}
+                            </Inline>
+                          )}
+                        </td>
+                      </tr>
+                      {expanded && (
+                        <tr>
+                          <td colSpan={5} className="bg-surface-inset">
+                            <AgentDetails agent={agent} />
+                          </td>
+                        </tr>
                       )}
-                      {agent.instance
-                        ? <InstanceHealth instance={agent.instance} />
-                        : <span className="text-xs text-subtle">{agent.hosted ? 'not reported yet' : 'not the platform\'s'}</span>}
-                      {agent.activity && <Activity activity={agent.activity} className="mt-1 max-w-[420px]" />}
-                      {agent.status_reason && agent.instance && (
-                        <p className="mt-1 max-w-[420px] text-xs text-subtle">{agent.status_reason.message}</p>
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap font-mono text-xs">{agent.flavor ?? 'default'}</td>
-                    <td className="whitespace-nowrap font-mono text-xs">{agent.model ?? 'default'}</td>
-                    <td className="whitespace-nowrap text-xs text-muted">{new Date(agent.signed_up_at).toLocaleString()}</td>
-                    <td>
-                      {!readOnly && (
-                        <div className="flex justify-end gap-1.5">
-                          {!agent.hosted && <Button size="sm" onClick={() => showToken(agent)}>Show token</Button>}
-                          {!started && <Button size="sm" variant="danger" onClick={() => setRemoving(agent)}>Remove</Button>}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                    </Fragment>
+                  )
+                })}
               </tbody>
             </Table>
           )}
-        </div>
+        </Stack>
         {removing && (
           <ConfirmDialog
             open
@@ -251,7 +301,6 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
             Its token stops working{removing.hosted ? ' and its machine is taken down' : ''}.
           </ConfirmDialog>
         )}
-      </CardContent>
-    </Card>
+    </Section>
   )
 }

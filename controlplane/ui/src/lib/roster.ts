@@ -16,8 +16,9 @@ export function pollEvery(pe: Pick<PlatformExperiment, 'id' | 'status' | 'status
 
 /**
  * The agents of a platform experiment with what each is doing, the one read of the roster on
- * its page: every part that shows an agent reads this key. SWR asks only while the page is visible.
+ * its page: every part that shows an agent reads this key. SWR asks only while the page is visible,
+ * and not before the experiment itself is read.
  */
-export function useRoster(pe: Pick<PlatformExperiment, 'id' | 'status' | 'status_reason'>) {
-  return useSWR(['pe-agents', pe.id], () => fetchPlatformExperimentAgents(pe.id), { refreshInterval: pollEvery(pe) })
+export function useRoster(pe: Pick<PlatformExperiment, 'id' | 'status' | 'status_reason'> | undefined) {
+  return useSWR(pe ? ['pe-agents', pe.id] : null, () => fetchPlatformExperimentAgents(pe!.id), { refreshInterval: pollEvery(pe) })
 }

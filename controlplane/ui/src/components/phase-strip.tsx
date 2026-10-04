@@ -1,7 +1,9 @@
 'use client'
 
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { useSWRConfig } from 'swr'
+import type { StagesStatus } from '@/lib/api'
 import { formatDate } from '@/lib/format'
 import { OWNER_ACTIONS, PHASES, phaseOf, reasonOf, waitsFor } from '@/lib/phase'
 import type { Draft } from '@/lib/planning'
@@ -13,12 +15,13 @@ import { AgentAtWork, PlannerAtWork } from '@/components/agent-at-work'
 import { AGENTS_CARD } from '@/components/experiment-agents'
 import { JobReason } from '@/components/job-reason'
 import { PlatformExperimentDialog } from '@/components/platform-experiment-form'
+import { RunProgress } from '@/components/run-progress'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, InsetCard } from '@/components/ui/card'
 import { TextLink, textLinkClass } from '@/components/ui/link'
 import { Callout } from '@/components/ui/status-message'
 import { Steps } from '@/components/ui/steps'
-import { Eyebrow } from '@/components/ui/text'
+import { Eyebrow, Text } from '@/components/ui/text'
 
 // The states this page has words of its own for, by status_reason.reason. Any other is said in
 // the API's message, which is worded for whoever reads it.
@@ -68,25 +71,25 @@ const NEXT_IS: Record<Exclude<StatusReason['waits_for'], 'owner' | undefined>, s
 
 /** Where the baseline agent's job stands, in a line of its own. */
 function BaselineJob({ job }: { job: Experiment | undefined }) {
-  if (!job) return <p className="text-xs text-muted">It has submitted no job yet.</p>
+  if (!job) return <Text variant="note">It has submitted no job yet.</Text>
   const link = <TextLink inline href={`/jobs/${job.id}`}>Its job</TextLink>
   const value = job.metric ? `: ${job.metric.name} ${job.metric.value}` : ''
   switch (job.status) {
     case ExperimentStatus.SUBMITTED:
     case ExperimentStatus.QUEUED: {
       const why = job.not_admitted_message ?? job.not_admitted_reason
-      return <p className="text-xs">{link} is queued{why ? `: ${why}` : '.'}</p>
+      return <Text variant="note" tone="default">{link} is queued{why ? `: ${why}` : '.'}</Text>
     }
     case ExperimentStatus.RUNNING:
-      return <p className="text-xs">{link} is running{value}.</p>
+      return <Text variant="note" tone="default">{link} is running{value}.</Text>
     case ExperimentStatus.COMPLETED:
-      return <p className="text-xs">{link} is done{value}. The platform declares it the baseline and starts the run once the agent finishes.</p>
+      return <Text variant="note" tone="default">{link} is done{value}. The platform declares it the baseline and starts the run once the agent finishes.</Text>
     default:
       return (
-        <div className="text-xs">
+        <Text as="div" variant="note" tone="default">
           {link} ended {job.status.toLowerCase()}.
           {job.eviction_reason && <JobReason reason={job.eviction_reason} />}
-        </div>
+        </Text>
       )
   }
 }
@@ -101,16 +104,24 @@ function baselineAgent(agents: JoinedAgent[] | undefined): JoinedAgent | undefin
  * Where an experiment stands on its way from a sentence to its close, at the top of its page in
  * every state: the phase, why it is in it, whose move it is, and what the one agent that phase
  * waits for is doing. `jobs` are the experiment's newest, among which the baseline agent's is
- * looked for. A reader of a shared experiment is told neither that a move is theirs nor that none is.
+ * looked for. `stages` puts how far the run is under the phases while it runs, and `children`
+ * say what its machines are doing. A reader of a shared experiment is told neither that a move is
+ * theirs nor that none is.
  */
-export function PhaseStrip({ pe, jobs = [], readOnly = false }: { pe: Draft; jobs?: Experiment[]; readOnly?: boolean }) {
+export function PhaseStrip({ pe, jobs = [], stages, readOnly = false, children }: {
+  pe: Draft
+  jobs?: Experiment[]
+  stages?: StagesStatus
+  readOnly?: boolean
+  children?: ReactNode
+}) {
   const phase = phaseOf(pe)
   const why = (
-    <p role="status" className="text-sm">
+    <Text role="status">
       {phase === 'baseline' && !pe.baseline_job_id && !pe.stated_baseline && 'Preparing the baseline. No researcher starts and none of their machines is rented until it is measured. '}
       {phase === 'closed' && pe.closed_at && `Closed ${formatDate(pe.closed_at)}. `}
       {sentenceOf(pe)}
-    </p>
+    </Text>
   )
   // A closed experiment waits for nobody, and a reader is told neither whose move it is.
   const who = readOnly || phase === 'closed' ? undefined : waitsFor(pe)
@@ -119,10 +130,11 @@ export function PhaseStrip({ pe, jobs = [], readOnly = false }: { pe: Draft; job
   const baseline = baselineAgent(agents)
   return (
     <Card role="region" aria-label="Where this experiment stands">
-      <CardContent className="grid gap-2.5">
+      <CardContent className="grid gap-3">
         <Steps label="Phase" steps={PHASES} current={phase} live={phase !== 'closed'} />
+        {phase === 'running' && pe.started_at && stages && stages.stages.length > 0 && <RunProgress status={stages} />}
         {!who ? why : who === 'owner' ? (
-          <Callout tone="warning" className="mb-0 grid justify-items-start gap-1.5">
+          <Callout tone="warning" className="grid justify-items-start gap-1.5">
             <Eyebrow tone="warning">Your move</Eyebrow>
             {why}
             <OwnerMove pe={pe} />
@@ -130,16 +142,17 @@ export function PhaseStrip({ pe, jobs = [], readOnly = false }: { pe: Draft; job
         ) : (
           <div>
             {why}
-            {phase !== 'planning' && <p className="text-xs text-muted">Nothing is needed from you: {NEXT_IS[who]}.</p>}
+            {phase !== 'planning' && <Text variant="note">Nothing is needed from you: {NEXT_IS[who]}.</Text>}
           </div>
         )}
+        {children}
         {phase === 'planning' && <PlannerAtWork agent={planner} activity={pe.activity} />}
         {phase === 'baseline' && baseline && (
-          <div role="group" aria-label="Baseline agent" className="grid gap-1.5 rounded border bg-surface-inset px-3 py-2.5">
+          <InsetCard role="group" aria-label="Baseline agent">
             <Eyebrow>Baseline agent {baseline.name}</Eyebrow>
             <AgentAtWork agent={baseline} />
             <BaselineJob job={jobs.find(job => job.agent_id === baseline.agent_id)} />
-          </div>
+          </InsetCard>
         )}
       </CardContent>
     </Card>

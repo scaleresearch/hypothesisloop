@@ -4,6 +4,7 @@ import { relTime } from '@/lib/format'
 import { useRoster } from '@/lib/roster'
 import { PlatformExperimentStatus } from '@/types'
 import type { AgentInstance, PlatformExperiment } from '@/types'
+import { Text } from '@/components/ui/text'
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`
 
@@ -38,8 +39,8 @@ export function HostedMachines({ pe, jobs }: { pe: PlatformExperiment; jobs: num
   const status = machinesStatus(instances, jobs)
   if (!status) return null
   return (
-    <p role="status" className="-mt-3 mb-4 text-xs text-muted">
+    <Text variant="note" role="status">
       {status.now} {status.next}
-    </p>
+    </Text>
   )
 }

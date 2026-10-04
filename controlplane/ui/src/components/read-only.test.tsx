@@ -81,7 +81,7 @@ describe('a shared platform experiment of another org shows no control that writ
 
     show(<ExperimentAgents pe={pe} />, true)
     await screen.findByRole('cell', { name: 'ag-self' })
-    expect(names('button')).toEqual([])
+    expect(names('button')).toEqual(['Details of ag-self'])
     expect(names('textbox')).toEqual([])
   })
 
