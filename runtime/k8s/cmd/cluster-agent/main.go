@@ -12,6 +12,10 @@
 //	API_URL               — base URL of the control-plane API
 //	HYPOTHESISLOOP_BUILDS — the BuildKit daemon this cluster builds environments on, a unix
 //	                        socket in the pod. Unset, the cluster builds none.
+//	HYPOTHESISLOOP_NODE_IMAGES — the containerd socket of this pod's node. Set, each environment
+//	                        built is also loaded there, so a job on this node does not pull it.
+//	HYPOTHESISLOOP_NODE_SNAPSHOTTER — the snapshotter the node's kubelet uses, when not
+//	                        containerd's default.
 package main
 
 import (
@@ -23,6 +27,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/k8s/internal/k8sexec"
+	"github.com/scaleresearch/hypothesisloop/runtime/k8s/internal/nodeimages"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentloop"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/envbuild"
 )
@@ -63,6 +68,17 @@ func main() {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "cluster-agent: %v\n", err)
 			os.Exit(1)
+		}
+		if socket := os.Getenv("HYPOTHESISLOOP_NODE_IMAGES"); socket != "" {
+			dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			node, err := nodeimages.Dial(dialCtx, socket, os.Getenv("HYPOTHESISLOOP_NODE_SNAPSHOTTER"))
+			dialCancel()
+			if err != nil {
+				// Loading only spares a pull, so the cluster still builds without it.
+				fmt.Fprintf(os.Stderr, "cluster-agent: builds are not loaded into this node: %v\n", err)
+			} else {
+				daemon.LoadInto(node)
+			}
 		}
 		builder = daemon
 	}

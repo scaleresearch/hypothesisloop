@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/containerd/platforms"
 	"github.com/moby/buildkit/client"
@@ -33,7 +36,22 @@ type solver interface {
 }
 
 // Daemon is the BuildKit daemon environments are built on.
-type Daemon struct{ solver solver }
+type Daemon struct {
+	solver solver
+	loader Loader
+}
+
+// Loader puts each image a build pushes into the image store of a node that runs its jobs, so a
+// job there starts without pulling back what was just pushed. It reads the image as an OCI layout
+// tar while the daemon exports it, names it repository@digest, and returns that digest. The
+// daemon pushes only once the tar is read to its end, so Load reads it all before anything slow.
+type Loader interface {
+	Load(ctx context.Context, repository string, image io.Reader) (digest string, err error)
+}
+
+// LoadInto has every build after it also load its image with loader. A load that fails costs the
+// job a pull and never fails the build.
+func (d *Daemon) LoadInto(loader Loader) { d.loader = loader }
 
 // Dial reaches the daemon at address, a unix socket in the pod.
 func Dial(ctx context.Context, address string) (*Daemon, error) {
@@ -115,14 +133,26 @@ func (e *buildFailed) Error() string { return "the build failed" }
 // error is the platform's.
 func (d *Daemon) build(ctx context.Context, attachables []session.Attachable, b domain.EnvironmentBuild, steps *steps) (string, error) {
 	file := dockerfileState(b.Dockerfile)
+	// Media types are set, never the daemon's default, so the pushed manifest and the loaded one
+	// are the same bytes and so the same digest.
+	push := client.ExportEntry{Type: client.ExporterImage, Attrs: map[string]string{
+		string(exptypes.OptKeyName): b.Repository, string(exptypes.OptKeyPush): "true", string(exptypes.OptKeyPushByDigest): "true",
+		string(exptypes.OptKeyOCITypes): "true",
+	}}
 	opt := client.SolveOpt{
 		Frontend:       "dockerfile.v0",
 		FrontendAttrs:  map[string]string{"build-arg:BASE": b.Base, "platform": buildPlatform},
 		FrontendInputs: map[string]llb.State{"dockerfile": file, "context": file},
-		Exports: []client.ExportEntry{{Type: client.ExporterImage, Attrs: map[string]string{
-			string(exptypes.OptKeyName): b.Repository, string(exptypes.OptKeyPush): "true", string(exptypes.OptKeyPushByDigest): "true",
-		}}},
-		Session: attachables,
+		Exports:        []client.ExportEntry{push},
+		Session:        attachables,
+	}
+	var load *loading
+	if d.loader != nil {
+		load = newLoading(ctx, d.loader, b.Repository)
+		// The push last: both exporters answer a digest, and the last one's is the answer.
+		opt.Exports = []client.ExportEntry{{Type: client.ExporterOCI, Attrs: map[string]string{
+			string(exptypes.OptKeyOCITypes): "true",
+		}, Output: load.output}, push}
 	}
 
 	var log strings.Builder
@@ -142,6 +172,11 @@ func (d *Daemon) build(ctx context.Context, attachables []session.Attachable, b 
 			log.WriteString(tail)
 		}
 	})
+	var loaded string
+	var loadErr error
+	if load != nil {
+		loaded, loadErr = load.wait()
+	}
 	if err != nil {
 		// A RUN a cancel stopped exits with a code it did not choose.
 		if ctx.Err() == nil && fileFault(err) {
@@ -153,7 +188,80 @@ func (d *Daemon) build(ctx context.Context, attachables []session.Attachable, b 
 	if digest == "" {
 		return "", errors.New("build: the daemon pushed and named no digest")
 	}
+	if load != nil {
+		switch {
+		case loadErr != nil && loaded == digest:
+			steps.progress("loading into the node: imported, then %v", loadErr)
+		case loadErr != nil:
+			steps.progress("loading into the node: %v; its jobs pull it", loadErr)
+		case loaded != digest:
+			steps.progress("loading into the node: it holds %s, the push is %s; its jobs pull it", loaded, digest)
+		default:
+			steps.progress("loading into the node: done, its jobs start without a pull")
+		}
+	}
 	return digest, nil
+}
+
+// loadGrace is how long a build that has pushed waits for its load to finish. The load is the
+// node's to unpack; a job that starts before it ends unpacks the rest itself.
+const loadGrace = 2 * time.Minute
+
+// loading streams the OCI exporter's tar into a Loader. Its writer never fails, whatever the
+// loader does, so a load that breaks never fails the build: what the loader leaves unread is
+// drained.
+type loading struct {
+	ctx        context.Context
+	cancel     context.CancelFunc
+	loader     Loader
+	repository string
+	once       sync.Once
+	writer     *io.PipeWriter
+	done       chan struct{}
+	digest     string
+	err        error
+}
+
+func newLoading(ctx context.Context, loader Loader, repository string) *loading {
+	ctx, cancel := context.WithCancel(ctx)
+	return &loading{ctx: ctx, cancel: cancel, loader: loader, repository: repository, done: make(chan struct{})}
+}
+
+func (l *loading) output(map[string]string) (io.WriteCloser, error) {
+	started := false
+	l.once.Do(func() {
+		started = true
+		reader, writer := io.Pipe()
+		l.writer = writer
+		go func() {
+			defer close(l.done)
+			l.digest, l.err = l.loader.Load(l.ctx, l.repository, reader)
+			_, _ = io.Copy(io.Discard, reader)
+		}()
+	})
+	if !started {
+		return nil, errors.New("the image is loaded once")
+	}
+	return l.writer, nil
+}
+
+// wait ends the stream, if the export left it open, and waits up to loadGrace for the loader.
+func (l *loading) wait() (string, error) {
+	defer l.cancel()
+	started := true
+	l.once.Do(func() { started = false })
+	if !started {
+		return "", errors.New("the daemon exported no image to load")
+	}
+	_ = l.writer.CloseWithError(errors.New("the build ended before the image was sent"))
+	select {
+	case <-l.done:
+		return l.digest, l.err
+	case <-time.After(loadGrace):
+		l.cancel()
+		<-l.done
+		return "", fmt.Errorf("not done %s after the push", loadGrace)
+	}
 }
 
 // registryAuth hands the daemon the credential of the one registry it pushes to and is no token

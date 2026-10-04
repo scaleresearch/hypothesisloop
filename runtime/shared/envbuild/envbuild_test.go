@@ -1,9 +1,11 @@
 package envbuild
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -100,6 +102,7 @@ type fakeDaemon struct {
 	build  error
 	output string
 	digest string
+	image  []byte
 	builds []client.SolveOpt
 }
 
@@ -112,6 +115,21 @@ func (d *fakeDaemon) Solve(_ context.Context, def *llb.Definition, opt client.So
 	statuses <- &client.SolveStatus{Logs: []*client.VertexLog{{Data: []byte(d.output)}}}
 	if d.build != nil {
 		return nil, d.build
+	}
+	for _, export := range opt.Exports {
+		if export.Output == nil {
+			continue
+		}
+		w, err := export.Output(nil)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := w.Write(d.image); err != nil {
+			return nil, err
+		}
+		if err := w.Close(); err != nil {
+			return nil, err
+		}
 	}
 	return &client.SolveResponse{ExporterResponse: map[string]string{exptypes.ExporterImageDigestKey: d.digest}}, nil
 }
@@ -169,6 +187,83 @@ func TestARunACancelStoppedIsNotTheFiles(t *testing.T) {
 }
 
 func ignoreProgress(string, ...any) {}
+
+// fakeLoader reads read bytes of the image, then answers digest and err.
+type fakeLoader struct {
+	read       int
+	digest     string
+	err        error
+	repository string
+	got        []byte
+}
+
+func (l *fakeLoader) Load(_ context.Context, repository string, image io.Reader) (string, error) {
+	l.repository = repository
+	l.got, _ = io.ReadAll(io.LimitReader(image, int64(l.read)))
+	return l.digest, l.err
+}
+
+// The image is loaded from the same solve that pushes it, both as OCI media types, and the push
+// is the last export so its digest is the one reported.
+func TestABuildThatLoadsSendsTheImageToTheLoaderAndPushesItLast(t *testing.T) {
+	image := bytes.Repeat([]byte("layer"), 1<<20)
+	daemon := &fakeDaemon{digest: "sha256:abc", image: image}
+	loader := &fakeLoader{read: len(image), digest: "sha256:abc"}
+	var told []string
+	d := &Daemon{solver: daemon}
+	d.LoadInto(loader)
+	got := d.Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil,
+		func(format string, args ...any) { told = append(told, fmt.Sprintf(format, args...)) })
+	if got.Outcome != domain.EnvironmentBuildPushed || got.Digest != "sha256:abc" {
+		t.Fatalf("result %+v, want pushed with the digest", got)
+	}
+	exports := daemon.builds[0].Exports
+	if len(exports) != 2 || exports[0].Type != client.ExporterOCI || exports[1].Type != client.ExporterImage || exports[1].Attrs["push"] != "true" {
+		t.Fatalf("exports %+v, want the OCI tar then the push", exports)
+	}
+	for _, export := range exports {
+		if export.Attrs["oci-mediatypes"] != "true" {
+			t.Errorf("export %s attrs %v, want OCI media types set", export.Type, export.Attrs)
+		}
+	}
+	if loader.repository != "registry.test/envs/env" || !bytes.Equal(loader.got, image) {
+		t.Errorf("the loader got %d bytes for %q, want the image for the repository", len(loader.got), loader.repository)
+	}
+	if !slices.Contains(told, "loading into the node: done, its jobs start without a pull") {
+		t.Errorf("told %q, want the load reported", told)
+	}
+}
+
+// A loader that fails, stops reading, or holds another image costs the job a pull, never the build.
+func TestALoadThatGoesWrongNeverFailsTheBuild(t *testing.T) {
+	for name, loader := range map[string]*fakeLoader{
+		"the loader fails before reading": {err: errors.New("dial unix /run/containerd/containerd.sock: connect: permission denied")},
+		"the loader stops halfway":        {read: 1 << 10, err: errors.New("unexpected EOF")},
+		"the loaded image is another":     {read: 5 << 20, digest: "sha256:other"},
+	} {
+		d := &Daemon{solver: &fakeDaemon{digest: "sha256:abc", image: bytes.Repeat([]byte("layer"), 1<<20)}}
+		d.LoadInto(loader)
+		var told []string
+		got := d.Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil,
+			func(format string, args ...any) { told = append(told, fmt.Sprintf(format, args...)) })
+		if got.Outcome != domain.EnvironmentBuildPushed || got.Digest != "sha256:abc" {
+			t.Errorf("%s: %+v, want pushed with the digest", name, got)
+		}
+		if last := told[len(told)-1]; !strings.HasSuffix(last, "its jobs pull it") {
+			t.Errorf("%s: told %q last, want the pull it costs", name, last)
+		}
+	}
+}
+
+func TestABuildThatFailsBeforeItsExportLoadsNothing(t *testing.T) {
+	loader := &fakeLoader{}
+	d := &Daemon{solver: &fakeDaemon{build: errors.New("failed to push: failed to authorize")}}
+	d.LoadInto(loader)
+	got := d.Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil, ignoreProgress)
+	if got.Outcome != domain.EnvironmentBuildPlatformFault || loader.repository != "" {
+		t.Errorf("%+v, loader asked for %q, want the platform's fault and nothing loaded", got, loader.repository)
+	}
+}
 
 // A build is followed in the agent's log step by step: each step once as it starts and once as it
 // ends, and its transfers no more often than every transferInterval however fast they stream.
