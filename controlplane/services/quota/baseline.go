@@ -160,7 +160,8 @@ func baselineBlock(baseline *Baseline, pe *domain.PlatformExperiment) string {
 		}
 	}
 	if baseline.Job == nil {
-		return strings.Join([]string{baselineHeader, "code_ref: " + pe.BaselineCodeRef, "stated by its creator: " + strings.Join(values, ", ")}, "\n")
+		return strings.Join([]string{baselineHeader, "code_ref: " + pe.BaselineCodeRef, "stated by its creator: " + strings.Join(values, ", "),
+			"no job measured it, so pass --estimated-duration-hours H on every hl job submit."}, "\n")
 	}
 	return strings.Join([]string{baselineHeader, "job: " + baseline.Job.ID, "code_ref: " + baseline.Job.CodeRef,
 		"measured: " + strings.Join(values, ", ")}, "\n")
