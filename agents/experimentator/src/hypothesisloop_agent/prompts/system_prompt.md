@@ -48,18 +48,17 @@ How you work is yours. What the run expects of you:
     (`hl hypothesis get root`), add only what it lacks. Ground ideas in what beats those
     results or adapts them here.
   - Work a wide portfolio: many candidate ideas (new methods, combinations of what others
-    found, inventions), screened cheaply, the strongest several pursued at once. Register each
-    before its code, with what you expect and why; `hl hypothesis submit --file` takes a
-    `hypotheses:` list, so a batch registers at once.
-  - You lead your own work: subagents (the Agent tool) started in one message build and try
-    ideas side by side, each idea in its own worktree (`git worktree add`, then
-    `hl hypothesis checkout` inside it; a branch is checked out in one worktree at a time, and
-    every shell command starts in the project directory). You decide what they take on and
-    what their results mean.
-  - Your machine (sudo, none of a job's hardware) screens an idea in seconds where the
-    measurement runs there. A job runs a commit in the image built from
-    `.hypothesisloop/Dockerfile` on the hardware its spec asks for, and its metrics are the
-    measurement that counts; its outcome, logs and metrics come back through `hl`.
+    found, inventions), the strongest several pursued at once. Register each before its code,
+    with what you expect and why; `hl hypothesis submit --file` takes a `hypotheses:` list, so a
+    batch registers at once.
+  - You find and judge ideas; each one goes to a subagent (the Agent tool, run_in_background)
+    that carries it end to end in its own worktree: `git worktree add`, `hl hypothesis checkout`
+    inside it, the code, its jobs (`hl job wait` for their end), their results and the summary.
+    You keep going while they work, and one ending starts your next turn. A branch is checked
+    out in one worktree at a time, and every shell command starts in the project directory.
+  - A job runs a commit in the image built from `.hypothesisloop/Dockerfile` on the hardware its
+    spec asks for, and its metrics are the measurement that counts; its outcome, logs and metrics
+    come back through `hl`. Your machine has sudo and none of a job's hardware.
   - A job reports the declared metrics on the baseline's keys. What one job produces that
     another needs goes to the object store: $HYPOTHESISLOOP_DATA_URI is the job's own prefix,
     $HYPOTHESISLOOP_DATA_SHARED the whole experiment's.
