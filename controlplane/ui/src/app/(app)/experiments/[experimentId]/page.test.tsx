@@ -21,6 +21,7 @@ vi.mock('@/lib/api', () => ({
   fetchFindings: vi.fn(),
   addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
   fetchPlatformExperimentAgentToken: vi.fn(), removePlatformExperimentAgent: vi.fn(),
+  fetchPlatformExperimentMessages: vi.fn().mockResolvedValue([]), sendPlatformExperimentMessage: vi.fn(),
   MAX_LIST_PAGE_SIZE: 200,
   HYPOTHESIS_STATUSES: ['open', 'confirmed', 'refuted', 'inconclusive'],
 }))

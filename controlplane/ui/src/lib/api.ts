@@ -1,4 +1,5 @@
 import type {
+  AgentMessage,
   AgentSignup,
   APIKey,
   ClustersResponse,
@@ -646,6 +647,17 @@ export async function fetchPlatformExperimentAgentToken(platformExpID: string, a
   const { agents } = await apiSend<{ agents: JoinedAgent[] }>('POST', `/platform-experiments/${platformExpID}/agents`, { agent_id: agentID })
   if (agents.length !== 1) throw new Error(`asked for the token of agent ${agentID} and was answered ${agents.length} agents`)
   return agents[0]
+}
+
+// Every message the coordinator and the owner sent to an agent of the experiment, oldest first.
+export function fetchPlatformExperimentMessages(platformExpID: string): Promise<AgentMessage[]> {
+  return apiFetch<{ messages: AgentMessage[] }>(`/platform-experiments/${platformExpID}/messages`).then(r => r.messages)
+}
+
+// The agent is woken with it at once. Answered 429 past the agent's hourly limit.
+export async function sendPlatformExperimentMessage(platformExpID: string, agentID: string, text: string): Promise<AgentMessage[]> {
+  const { messages } = await apiSend<{ messages: AgentMessage[] }>('POST', `/platform-experiments/${platformExpID}/messages`, { agent_id: agentID, text })
+  return messages
 }
 
 // Answered 409 once the platform experiment has started.

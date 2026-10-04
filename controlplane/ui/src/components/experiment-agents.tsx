@@ -1,18 +1,22 @@
 'use client'
 
 import { Fragment, useState } from 'react'
+import useSWR from 'swr'
 import { clsx } from 'clsx'
-import { ChevronRight } from 'lucide-react'
-import { addPlatformExperimentAgents, apiURL, fetchPlatformExperimentAgentToken, removePlatformExperimentAgent } from '@/lib/api'
-import { useRoster } from '@/lib/roster'
+import { ChevronRight, MessageSquare } from 'lucide-react'
+import {
+  addPlatformExperimentAgents, apiURL, fetchPlatformExperimentAgentToken, fetchPlatformExperimentMessages,
+  removePlatformExperimentAgent, sendPlatformExperimentMessage,
+} from '@/lib/api'
+import { pollEvery, useRoster } from '@/lib/roster'
 import { PlatformExperimentStatus } from '@/types'
-import type { AgentSignup, JoinedAgent, PlatformExperiment } from '@/types'
+import type { AgentMessage, AgentSignup, JoinedAgent, PlatformExperiment } from '@/types'
 import { StatusLabel } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
 import { InsetCard } from '@/components/ui/card'
-import { ConfirmDialog } from '@/components/ui/dialog'
+import { ConfirmDialog, Dialog } from '@/components/ui/dialog'
 import { FormField } from '@/components/ui/form-field'
-import { Input } from '@/components/ui/input'
+import { Input, Textarea } from '@/components/ui/input'
 import { Table } from '@/components/ui/table'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Facts } from '@/components/ui/facts'
@@ -122,8 +126,60 @@ function statusOf(agent: JoinedAgent, closed: boolean): { label: string; tone: T
   }
 }
 
+/** Writes a message to one agent, which wakes it at once. */
+function MessageAgent({ pe, agent, onSent, onClose }: {
+  pe: PlatformExperiment; agent: AgentSignup; onSent: () => Promise<unknown>; onClose: () => void
+}) {
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function send(e: React.FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      await sendPlatformExperimentMessage(pe.id, agent.agent_id, text.trim())
+      await onSent()
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open onClose={onClose} title={`Message ${agent.name}`} size="sm">
+      <Stack as="form" onSubmit={send}>
+        <Textarea aria-label="Message" rows={4} value={text} onChange={e => setText(e.target.value)} autoFocus />
+        <Text variant="hint">It wakes the agent at once, as a message from the owner.</Text>
+        {error && <ErrorMessage>{error}</ErrorMessage>}
+        <Inline gap="xs" className="justify-end">
+          <Button type="button" onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" loading={busy} disabled={!text.trim()}>Send</Button>
+        </Inline>
+      </Stack>
+    </Dialog>
+  )
+}
+
+/** The messages an agent was sent, oldest first. */
+function Messages({ messages }: { messages: AgentMessage[] }) {
+  return (
+    <Stack gap="xs" aria-label="Messages">
+      <Eyebrow>Messages</Eyebrow>
+      {messages.map((m, i) => (
+        <Text key={i} variant="note" className="max-w-md" title={new Date(m.at).toLocaleString()}>
+          From the {m.from}, {relTime(m.at)}: {m.text}
+        </Text>
+      ))}
+    </Stack>
+  )
+}
+
 /** Everything about one agent that its row has no room for. */
-function AgentDetails({ agent }: { agent: JoinedAgent }) {
+function AgentDetails({ agent, messages }: { agent: JoinedAgent; messages: AgentMessage[] }) {
   return (
     <Stack gap="sm">
       <Facts facts={[
@@ -143,6 +199,7 @@ function AgentDetails({ agent }: { agent: JoinedAgent }) {
       {agent.status_reason && agent.instance && (
         <Text variant="hint" className="max-w-md">{agent.status_reason.message}</Text>
       )}
+      {messages.length > 0 && <Messages messages={messages} />}
     </Stack>
   )
 }
@@ -157,6 +214,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   // Self-run agents whose token is on screen: the ones just added, and any asked for again.
   const [shown, setShown] = useState<JoinedAgent[]>([])
   const [removing, setRemoving] = useState<AgentSignup | null>(null)
+  const [messaging, setMessaging] = useState<AgentSignup | null>(null)
   const [open, setOpen] = useState<string | null>(null)
   // Set when the create form went on to run this experiment and the API stopped it part way.
   const [stopped, setStopped] = useState(() => runFailure(pe.id))
@@ -167,6 +225,13 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   const readOnly = useReadOnly()
   // Quota is divided at the start over the agents present, so the roster is fixed from then on.
   const started = pe.status === PlatformExperimentStatus.RUNNING || pe.status === PlatformExperimentStatus.CLOSED
+  const { data: messages, mutate: mutateMessages } = useSWR(
+    pe.status === PlatformExperimentStatus.DRAFT ? null : ['pe-messages', pe.id],
+    () => fetchPlatformExperimentMessages(pe.id),
+    { refreshInterval: pollEvery(pe) },
+  )
+  const at = pe.status === PlatformExperimentStatus.OPEN || pe.status === PlatformExperimentStatus.RUNNING
+  const messagesTo = (agent: AgentSignup) => messages?.filter(m => m.agent_id === agent.agent_id) ?? []
 
   async function remove(agent: AgentSignup) {
     setRemoving(null)
@@ -250,6 +315,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
                 {agents.map(agent => {
                   const status = statusOf(agent, pe.status === PlatformExperimentStatus.CLOSED)
                   const expanded = open === agent.agent_id
+                  const sent = messagesTo(agent)
                   return (
                     <Fragment key={agent.agent_id}>
                       <tr>
@@ -264,12 +330,22 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
                             <ChevronRight aria-hidden="true" size={13} className={clsx('transition-transform', expanded && 'rotate-90')} />
                           </Button>
                         </td>
-                        <td className="whitespace-nowrap text-xs font-medium" title={agent.agent_id}>{agent.name}</td>
+                        <td className="whitespace-nowrap text-xs font-medium" title={agent.agent_id}>
+                          {agent.name}
+                          {sent.length > 0 && (
+                            <Text as="span" variant="hint" className="ml-2 inline-flex items-center gap-0.5 font-normal" title={`Last message: ${sent.at(-1)!.text}`}>
+                              <MessageSquare aria-hidden="true" size={11} />{sent.length}
+                            </Text>
+                          )}
+                        </td>
                         <td className="text-xs">{agent.role}</td>
                         <td><StatusLabel tone={status.tone} title={status.detail}>{status.label}</StatusLabel></td>
                         <td>
                           {!readOnly && (
                             <Inline gap="xs" nowrap className="justify-end">
+                              {at && !agent.finished_at && agent.role !== 'planner' && (
+                                <Button size="sm" onClick={() => setMessaging(agent)}>Message</Button>
+                              )}
                               {!agent.hosted && <Button size="sm" onClick={() => showToken(agent)}>Show token</Button>}
                               {!started && <Button size="sm" variant="danger" onClick={() => setRemoving(agent)}>Remove</Button>}
                             </Inline>
@@ -279,7 +355,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
                       {expanded && (
                         <tr>
                           <td colSpan={5} className="bg-surface-inset">
-                            <AgentDetails agent={agent} />
+                            <AgentDetails agent={agent} messages={sent} />
                           </td>
                         </tr>
                       )}
@@ -290,6 +366,9 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
             </Table>
           )}
         </Stack>
+        {messaging && (
+          <MessageAgent pe={pe} agent={messaging} onSent={() => mutateMessages()} onClose={() => setMessaging(null)} />
+        )}
         {removing && (
           <ConfirmDialog
             open

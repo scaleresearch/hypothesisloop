@@ -4,12 +4,12 @@ import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   addPlatformExperimentAgents, fetchPlatformExperimentAgents, fetchPlatformExperimentAgentToken, removePlatformExperimentAgent,
-  createPlatformExperiment,
+  createPlatformExperiment, fetchPlatformExperimentMessages, sendPlatformExperimentMessage,
 } from '@/lib/api'
 import { ExperimentAgents } from '@/components/experiment-agents'
 import { clearRunFailure, createAndRun, runFailure } from '@/lib/run-experiment'
 import { PlatformExperimentStatus } from '@/types'
-import type { AgentSignup, JoinedAgent, PlatformExperiment } from '@/types'
+import type { AgentMessage, AgentSignup, JoinedAgent, PlatformExperiment } from '@/types'
 
 class ApiError extends Error {
   constructor(readonly status: number, message: string, readonly reason?: string) { super(message) }
@@ -20,6 +20,7 @@ vi.mock('@/lib/api', () => ({
   createPlatformExperiment: vi.fn(),
   addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
   fetchPlatformExperimentAgentToken: vi.fn(), removePlatformExperimentAgent: vi.fn(),
+  fetchPlatformExperimentMessages: vi.fn(), sendPlatformExperimentMessage: vi.fn(),
 }))
 
 const at = '2026-01-01T00:00:00Z'
@@ -49,6 +50,37 @@ beforeEach(() => {
   ))
   vi.mocked(removePlatformExperimentAgent).mockImplementation(async (_pe, id) => {
     roster = roster.filter(a => a.agent_id !== id)
+  })
+  vi.mocked(fetchPlatformExperimentMessages).mockResolvedValue([])
+})
+
+describe('messaging an agent', () => {
+  it('sends the owner\'s message and shows the messages the agent was sent', async () => {
+    const sent: AgentMessage[] = [{ agent_id: 'ag-old', from: 'coordinator', text: 'leave the lr line', actor: { kind: 'coordinator', id: 'pe-1', name: 'pe-1' }, at }]
+    vi.mocked(fetchPlatformExperimentMessages).mockResolvedValue(sent)
+    vi.mocked(sendPlatformExperimentMessage).mockImplementation(async (_pe, agent, text) => {
+      const one: AgentMessage = { ...sent[0], agent_id: agent, from: 'owner', text }
+      sent.push(one)
+      return [one]
+    })
+    show(PlatformExperimentStatus.RUNNING)
+    await userEvent.click(await screen.findByRole('button', { name: 'Message' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'try warmup')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(sendPlatformExperimentMessage).toHaveBeenCalledExactlyOnceWith('pe-1', 'ag-old', 'try warmup')
+    await userEvent.click(screen.getByRole('button', { name: 'Details of ag-old' }))
+    expect(await screen.findByText(/From the owner, .*: try warmup/)).toBeTruthy()
+    expect(screen.getByText(/From the coordinator, .*: leave the lr line/)).toBeTruthy()
+  })
+
+  it('offers no message to an agent that finished or in a closed experiment', async () => {
+    roster = [{ ...signup('ag-old', true), finished_at: at, finished_reason: 'quota spent' }, signup('ag-2', true)]
+    const { unmount } = show(PlatformExperimentStatus.RUNNING)
+    expect(await screen.findAllByRole('button', { name: 'Message' })).toHaveLength(1)
+    unmount()
+    show(PlatformExperimentStatus.CLOSED)
+    await screen.findByRole('cell', { name: 'ag-2' })
+    expect(screen.queryByRole('button', { name: 'Message' })).toBeNull()
   })
 })
 

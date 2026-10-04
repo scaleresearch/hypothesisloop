@@ -423,6 +423,15 @@ export interface BaselineRaise {
   at: string
 }
 
+/** A direct message to an agent from its experiment's coordinator or owner, which woke it. */
+export interface AgentMessage {
+  agent_id: string
+  from: 'coordinator' | 'owner'
+  text: string
+  actor: Actor
+  at: string
+}
+
 export interface Actor {
   kind: ActorKind
   /** The user, key, agent or platform experiment (for a coordinator); empty for staff and unverified. */
