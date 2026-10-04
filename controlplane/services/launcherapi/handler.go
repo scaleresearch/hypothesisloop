@@ -98,7 +98,7 @@ const maxRequestBytes = 16 << 20
 
 // Desired is one launcher's complete desired state. Instances should exist and be running.
 // Ending names instances whose run is over: they are told to stop and are otherwise left
-// alone for a last turn, neither created nor replaced nor destroyed. An
+// alone for a last turn, neither created nor replaced, and destroyed once it has exited. An
 // instance in neither list should not exist.
 //
 // Refusal is set while the platform refuses the launcher's own configuration. The lists stand
@@ -436,7 +436,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "The launcher sends what its provider lists, for an exited instance the end of its output, for a running one its progress marker and what its agent says it is doing (activity), and how it paces its passes. The answer is its complete desired state. " +
 			"instances: each {name, image, env, ends_at} should exist and be running: one per hosted agent, and one per platform experiment whose coordinator the platform runs. " +
 			"ends_at is the latest moment its platform experiment can still have a machine, wind-down included, and the launcher rents the instance so that it ends by itself then, reachable or not. It decides nothing about an instance already rented. " +
-			"ending: names whose agent's run is over; each is told to stop and is otherwise left to finish, neither created nor replaced nor destroyed. " +
+			"ending: names whose agent's run is over; each is told to stop and is otherwise left to finish, neither created nor replaced, and destroyed once its command has exited. " +
 			"image: the image an instance boots unless its platform experiment names its own, which a launcher with a warm pool warms while no instance is asked for. " +
 			"Any other instance of the launcher should not exist, and an answer asks for a bounded number of instances that do not exist yet: the rest follow in the next. " +
 			"The platform gives up on an instance that exited, that the provider listed and no longer does, that was not listed within the platform's boot limit of being asked for, " +

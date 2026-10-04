@@ -237,10 +237,13 @@ func (l *Launcher) Pass(ctx context.Context) error {
 
 	// An ending instance is told to stop once, and again every stopRetry until its command has
 	// exited: the signal is what starts the agent's last turn. A stop that failed is sent again
-	// on the next pass.
+	// on the next pass. Once its command has exited its last turn is over and it is destroyed,
+	// its end already reported with this pass's question: run 9's coordinator was kept four
+	// minutes after it, to the end of the control plane's wind-down.
 	for _, name := range sortedKeys(want.ending) {
 		for _, i := range byName[name] {
 			if i.State == provider.StateExited {
+				p.destroy(ctx, i, "its last turn ended")
 				continue
 			}
 			if at, told := l.stopped[i.ID]; told && l.now().Sub(at) < stopRetry {

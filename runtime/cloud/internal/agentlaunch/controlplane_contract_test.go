@@ -263,8 +263,14 @@ func TestAnAgentWhoseRunIsOverIsToldToStopAndItsNormalExitIsNoCrash(t *testing.T
 	if recorded := c.instance("ag-one"); recorded.Restarts != 0 || recorded.ExitedAt != nil || recorded.Name == "" {
 		t.Fatalf("an ending agent's exit was recorded as a crash: %+v", recorded)
 	}
-	if !reflect.DeepEqual(c.rented.IDs(name), ids) || c.rented.Calls("Create") != 1 {
-		t.Fatal("an ending instance was destroyed or rented again")
+	// Its last turn is over, so its machine goes before the wind-down ends, and nothing is
+	// rented for it while the control plane still names it ending.
+	if len(c.rented.Names()) != 0 || c.rented.Calls("Create") != 1 {
+		t.Fatalf("after its exit: rented %v with %d creates, want it destroyed and none rented again", c.rented.Names(), c.rented.Calls("Create"))
+	}
+	c.pass()
+	if recorded := c.instance("ag-one"); len(c.rented.Names()) != 0 || recorded.Restarts != 0 || recorded.ExitedAt != nil {
+		t.Fatalf("a pass after it was destroyed: rented %v, recorded %+v", c.rented.Names(), recorded)
 	}
 
 	// Its wind-down has passed: the control plane no longer lists it.

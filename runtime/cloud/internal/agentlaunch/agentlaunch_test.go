@@ -296,31 +296,34 @@ func TestAnEndingInstanceIsToldToStopOnceAndAgainOnlyWhileItKeepsRunning(t *test
 	h.cp.want(nil, []string{"a", "b", "c", "never-rented"})
 	h.mustPass()
 	h.mustPass()
-	h.names(full("a"), full("b"), full("c"))
-	if !reflect.DeepEqual(h.rented.IDs(full("a")), idsA) || !reflect.DeepEqual(h.rented.IDs(full("b")), idsB) || !reflect.DeepEqual(h.rented.IDs(full("c")), idsC) {
+	// One whose command already exited has had its last turn and goes at once, needing no
+	// signal. Run 9's coordinator was kept four minutes after it.
+	h.names(full("a"), full("c"))
+	if !reflect.DeepEqual(h.rented.IDs(full("a")), idsA) || !reflect.DeepEqual(h.rented.IDs(full("c")), idsC) || len(idsB) != 1 {
 		t.Fatal("an ending instance was replaced")
 	}
-	if h.rented.Calls("Create") != 3 || h.rented.Calls("Destroy") != 0 {
-		t.Fatalf("creates %d destroys %d", h.rented.Calls("Create"), h.rented.Calls("Destroy"))
+	if h.rented.Calls("Create") != 3 || h.rented.Calls("Destroy") != 1 {
+		t.Fatalf("creates %d destroys %d, want 3 and the exited one", h.rented.Calls("Create"), h.rented.Calls("Destroy"))
 	}
 	// The signal is what starts the agent's last turn. Running or still starting, an ending
-	// instance gets it once, and one whose command already exited needs none. Run 7's launcher
-	// sent it to one machine on every pass, 33 times in a minute.
-	if a, b, c := h.rented.Stops(full("a")), h.rented.Stops(full("b")), h.rented.Stops(full("c")); a != 1 || b != 0 || c != 1 {
-		t.Fatalf("stops: running %d, exited %d, starting %d, want 1, 0, 1", a, b, c)
+	// instance gets it once. Run 7's launcher sent it to one machine on every pass, 33 times in
+	// a minute.
+	if a, c := h.rented.Stops(full("a")), h.rented.Stops(full("c")); a != 1 || c != 1 || h.rented.Calls("Stop") != 2 {
+		t.Fatalf("stops: running %d, starting %d, all %d, want 1, 1 and none to the exited one", a, c, h.rented.Calls("Stop"))
 	}
 	now = now.Add(stopRetry - time.Second)
 	h.mustPass()
 	if a, c := h.rented.Stops(full("a")), h.rented.Stops(full("c")); a != 1 || c != 1 {
 		t.Fatalf("stops before the retry: running %d, starting %d, want 1 each", a, c)
 	}
-	// One still running after the retry interval is told again; one that exited is not.
+	// One still running after the retry interval is told again; one that exited is destroyed.
 	h.rented.Exit(full("c"))
 	now = now.Add(time.Second)
 	h.mustPass()
-	if a, c := h.rented.Stops(full("a")), h.rented.Stops(full("c")); a != 2 || c != 1 {
-		t.Fatalf("stops after the retry: running %d, exited %d, want 2 and 1", a, c)
+	if a := h.rented.Stops(full("a")); a != 2 || h.rented.Calls("Stop") != 3 {
+		t.Fatalf("stops after the retry: running %d, all %d, want 2 and none to the exited one", a, h.rented.Calls("Stop"))
 	}
+	h.names(full("a"))
 
 	h.cp.want(nil, nil)
 	h.mustPass()

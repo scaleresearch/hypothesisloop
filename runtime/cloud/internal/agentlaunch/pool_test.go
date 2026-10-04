@@ -110,6 +110,25 @@ func TestAMissingAgentIsStartedOnAWarmInstanceAndThePoolToppedUp(t *testing.T) {
 	h.names(full("a"), full("b"), pool)
 }
 
+func TestAnEndingAgentThatExitedGoesAndThePoolStaysFull(t *testing.T) {
+	h := newPoolHarness(t, 1)
+	h.cp.want([]entry{agent("a")}, nil)
+	pool := h.warmPool(image1)
+	h.cp.want([]entry{agent("a"), agent("b")}, nil)
+	h.mustPass()
+	h.rented.Ready(pool)
+	h.rented.Start(full("b"))
+	h.names(full("a"), full("b"), pool)
+
+	h.cp.want([]entry{agent("a")}, []string{"b"})
+	h.mustPass()
+	h.rented.Exit(full("b"))
+	h.mustPass()
+	h.names(full("a"), pool)
+	h.mustPass()
+	h.names(full("a"), pool)
+}
+
 func TestAWarmInstanceThatFailsToStartIsDestroyedAndTheAgentCreated(t *testing.T) {
 	h := newPoolHarness(t, 1)
 	h.cp.want([]entry{agent("a")}, nil)
