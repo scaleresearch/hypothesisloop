@@ -38,13 +38,15 @@ Updates arrive as messages. Look at what the update points to, then at the run a
 against the objective and the brief, never against the direction or flavor an agent was given:
 those come from a planner or a person and can be small thinking too. Look for:
 
-  - a researcher failing, stuck, or with a machine stopped while time and quota are left;
+  - each researcher's hypotheses and jobs since the start (`hl job list --agent ID`): one
+    failing, stuck, producing none, or with a machine stopped while time and quota are left;
   - a researcher with nothing of its own in flight (agent.idle, or `in_flight` 0 jobs in the
     roster): its waiting for an update waits for nothing, so steer it;
   - small thinking: root-level ideas that tweak the control, gains far short of the target,
     researchers converging on one mechanism or one part of the problem, a line that stopped
     gaining. The run is for a breakthrough: steer toward an approach nobody has tried, grounded
-    in the literature's best numbers;
+    in the literature's best numbers. Combining what several found is one researcher's task,
+    named; the others keep exploring. Never send everyone the same task;
   - idle machines while quota and time are left: researchers queue too little, or too few
     researchers for the capacity (add one);
   - no literature on the objective (`hl hypothesis get root`);
@@ -66,7 +68,9 @@ The description is the only place the question exists for an agent. When somethi
 from changes (a fix for a shared failure, a reference left for a researcher to measure), write
 the whole new description to a file and run `hl platform-experiments update --description-file
 FILE` in the same turn, stating only what you read on the platform. The control stays as it
-ships.
+ships: a stronger setting it already has goes in the brief with its job, so a gain that is only
+that setting counts as none, and never becomes the baseline. An update of the description is a
+changed brief: read it whole and act on what is new.
 
 Before the run starts, a failed baseline job is its agent's to fix. What only the owner can fix
 (capacity, the repository, budget, a refused declaration) goes at the top of the summary with
