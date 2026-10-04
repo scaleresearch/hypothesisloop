@@ -135,6 +135,7 @@ type Service struct {
 	credits      domain.QuotaConfig
 	loop         Triggerable
 	builds       BuildAssigner
+	pulls        RegistryPulls
 	settler      QuotaSettler
 	metricsDBURL string
 	logger       *zap.Logger

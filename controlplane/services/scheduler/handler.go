@@ -401,6 +401,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return &struct{ Body summaryReply }{Body: reply}, nil
 	})
 	registerEnvironments(doc, h)
+	registerImageCredentials(doc, h)
 }
 
 func primaryAcceleratorType(job domain.JobSpec) domain.AcceleratorType {
