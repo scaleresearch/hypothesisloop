@@ -101,6 +101,21 @@ func (a *Access) administers(ctx context.Context, p Principal, orgID string) err
 	}
 }
 
+// OwnsOrgOf reports whether the caller is a signed-in owner of the org a platform experiment
+// belongs to.
+func (a *Access) OwnsOrgOf(ctx context.Context, platformExperimentID string) (bool, error) {
+	p, err := principal(ctx)
+	if err != nil || p.UserID == "" {
+		return false, err
+	}
+	tenancy, _, err := a.placement.PlatformExperimentTenancy(ctx, platformExperimentID)
+	if err != nil || tenancy == nil || !p.Scope().AdmitsOrg(tenancy.OrgID) {
+		return false, err
+	}
+	role, found, err := a.placement.OrgRole(ctx, tenancy.OrgID, p.UserID)
+	return found && role == domain.OrgRoleOwner, err
+}
+
 // HeldToLimits reports whether what the caller creates counts against the bounds on what one
 // account may create.
 func (a *Access) HeldToLimits(ctx context.Context) (bool, error) {

@@ -230,6 +230,73 @@ func (s *Store) UpdateStatus(ctx context.Context, id, callerAgentID string, acto
 	return out.(*domain.Hypothesis), announce, nil
 }
 
+// EditText replaces a hypothesis's text while no other hypothesis links to it. Who may edit is
+// the caller's to decide. It is refused with a *LinkedError once one does, and with
+// ErrDuplicateText when another hypothesis of the platform experiment states the new text.
+func (s *Store) EditText(ctx context.Context, id, text string) (*domain.Hypothesis, error) {
+	normalized := domain.NormalizeHypothesisText(text)
+	if normalized == "" {
+		return nil, fmt.Errorf("graphdb.EditText: text is empty")
+	}
+	out, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		h, err := unlinked(ctx, tx, id)
+		if err != nil {
+			return nil, err
+		}
+		existing, err := findByNormalizedText(ctx, tx, h.PlatformExperimentID, normalized)
+		if err != nil {
+			return nil, err
+		}
+		if existing != nil && existing.ID != id {
+			return nil, fmt.Errorf("%w: %s", ErrDuplicateText, existing.ID)
+		}
+		return oneHypothesis(ctx, tx, `MATCH (h:Hypothesis {id: $id}) SET h.text = $text, h.normalized_text = $normalized RETURN h`,
+			map[string]any{"id": id, "text": text, "normalized": normalized})
+	})
+	if err != nil {
+		return nil, wrap("graphdb.EditText", err)
+	}
+	return out.(*domain.Hypothesis), nil
+}
+
+// Remove deletes a hypothesis and its outgoing links while no other hypothesis links to it, and
+// refuses with a *LinkedError once one does. Who may remove is the caller's to decide.
+func (s *Store) Remove(ctx context.Context, id string) error {
+	_, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		if _, err := unlinked(ctx, tx, id); err != nil {
+			return nil, err
+		}
+		return collect(ctx, tx, `MATCH (h:Hypothesis {id: $id}) DETACH DELETE h`, map[string]any{"id": id})
+	})
+	if err != nil {
+		return wrap("graphdb.Remove", err)
+	}
+	return nil
+}
+
+// unlinked returns the hypothesis id within tx, holding its platform experiment's lock, while
+// nothing links to it.
+func unlinked(ctx context.Context, tx neo4j.ManagedTransaction, id string) (*domain.Hypothesis, error) {
+	h, err := getHypothesis(ctx, tx, id)
+	if err != nil {
+		return nil, err
+	}
+	if h == nil {
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, id)
+	}
+	if err := lockExperiment(ctx, tx, h.PlatformExperimentID); err != nil {
+		return nil, err
+	}
+	in, err := linksTx(ctx, tx, incomingLinks, id)
+	if err != nil {
+		return nil, err
+	}
+	if len(in) > 0 {
+		return nil, &LinkedError{In: in}
+	}
+	return h, nil
+}
+
 // GetHypothesis returns one hypothesis, or nil when there is none with that id.
 func (s *Store) GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error) {
 	out, err := s.read(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
@@ -249,7 +316,7 @@ func (s *Store) Links(ctx context.Context, id string) (domain.HypothesisLinks, e
 		if err != nil {
 			return nil, err
 		}
-		incoming, err := linksTx(ctx, tx, `MATCH (:Hypothesis {id: $id})<-[r]-(t:Hypothesis) RETURN type(r), t, r ORDER BY r.created_at, t.id LIMIT $limit`, id)
+		incoming, err := linksTx(ctx, tx, incomingLinks, id)
 		if err != nil {
 			return nil, err
 		}
@@ -260,6 +327,8 @@ func (s *Store) Links(ctx context.Context, id string) (domain.HypothesisLinks, e
 	}
 	return out.(domain.HypothesisLinks), nil
 }
+
+const incomingLinks = `MATCH (:Hypothesis {id: $id})<-[r]-(t:Hypothesis) RETURN type(r), t, r ORDER BY r.created_at, t.id LIMIT $limit`
 
 // linkOrder is the order of a hypothesis's outgoing links r to t: oldest first, and those one
 // write stated in the order it stated them. A link from before that order was kept has no
@@ -770,7 +839,7 @@ func storedActor(d *decoder, props map[string]any, kindProp, idProp, agentID str
 // wrap prefixes err with op unless it is one of this package's own sentinel errors, whose message
 // is already written for the caller to act on.
 func wrap(op string, err error) error {
-	for _, sentinel := range []error{ErrNotFound, ErrNotOwner, ErrInvalidLink, ErrSimilar} {
+	for _, sentinel := range []error{ErrNotFound, ErrNotOwner, ErrInvalidLink, ErrSimilar, ErrDuplicateText} {
 		if errors.Is(err, sentinel) {
 			return err
 		}

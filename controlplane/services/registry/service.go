@@ -41,6 +41,7 @@ type Store interface {
 	DescribeJobs(ctx context.Context, jobs []*domain.Experiment) error
 	ListCommentsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, error)
 	CountCommentsByHypothesis(ctx context.Context, hypothesisID string) (int, error)
+	DeleteHypothesisComments(ctx context.Context, hypothesisID string) error
 	CountHypothesisActivity(ctx context.Context, ids []string) (map[string]db.HypothesisActivity, error)
 	Evidence(ctx context.Context, platformExperimentID string) (map[string]any, error)
 	Implementations(ctx context.Context, hypothesisID string) ([]domain.Implementation, error)
@@ -54,6 +55,8 @@ type Graph interface {
 	Register(ctx context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, bool, error)
 	AddLink(ctx context.Context, fromID, agentID string, actor domain.Actor, spec domain.LinkSpec, stamp db.Stamp) (*graphdb.LinkResult, error)
 	UpdateStatus(ctx context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus, stamp db.Stamp) (*domain.Hypothesis, bool, error)
+	EditText(ctx context.Context, id, text string) (*domain.Hypothesis, error)
+	Remove(ctx context.Context, id string) error
 	GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error)
 	Links(ctx context.Context, id string) (domain.HypothesisLinks, error)
 	FirstParent(ctx context.Context, id string) (string, error)

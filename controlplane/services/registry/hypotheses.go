@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/http"
+	"strings"
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
@@ -554,6 +557,169 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 		return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", err)
 	}
 	return h, nil
+}
+
+// Changer is who asks to edit or remove a hypothesis: the signed-in person behind the request,
+// empty when none is, and whether they own the org the hypothesis lives in.
+type Changer struct {
+	UserID   string
+	OrgOwner bool
+}
+
+// ChangeRefusal says why caller may not edit, or with remove set remove, h, nil when they may. A
+// hypothesis a person wrote for no agent is theirs to change, and also an owner's of its org to
+// remove. An agent's hypothesis, and one written with a credential no person signed in with, is
+// nobody's to change.
+func ChangeRefusal(h *domain.Hypothesis, caller Changer, remove bool) *api.Refusal {
+	verb := "edit"
+	if remove {
+		verb = "remove"
+	}
+	switch {
+	case caller.UserID == "":
+		return api.Refuse(http.StatusForbidden, "person_only", "only the signed-in person who wrote an idea may "+verb+" it, and this request carries no person")
+	case h.AgentID != "":
+		return api.Refuse(http.StatusForbidden, "agent_hypothesis", fmt.Sprintf("hypothesis %s is agent %s's, and an agent's hypotheses are its record: nobody may %s one. Add a comment to it instead", h.ID, h.AgentID, verb))
+	case h.Actor.Kind != domain.ActorUser:
+		return api.Refuse(http.StatusForbidden, "not_a_persons_idea", fmt.Sprintf("hypothesis %s was registered with a %s credential and no person wrote it, so nobody may %s it. Add a comment to it instead", h.ID, h.Actor.Kind, verb))
+	case h.Actor.ID == caller.UserID, remove && caller.OrgOwner:
+		return nil
+	case remove:
+		return api.Refuse(http.StatusForbidden, "not_the_author", "only the person who wrote this idea, or an owner of its org, may remove it. Add a comment to it instead")
+	default:
+		return api.Refuse(http.StatusForbidden, "not_the_author", "only the person who wrote this idea may edit it. Add a comment to it instead")
+	}
+}
+
+// InRecordError refuses a change to a hypothesis an agent has acted on: Jobs tested it, or Linked
+// hypotheses link to it.
+type InRecordError struct {
+	Verb   string
+	Jobs   []string
+	Linked []domain.Link
+}
+
+// maxNamed bounds how many jobs and links an InRecordError names.
+const maxNamed = 10
+
+func (e *InRecordError) Error() string {
+	var why []string
+	if len(e.Jobs) > 0 {
+		why = append(why, named("job", e.Jobs)+" tested it")
+	}
+	if len(e.Linked) > 0 {
+		links := make([]string, len(e.Linked))
+		for i, l := range e.Linked {
+			links[i] = fmt.Sprintf("%s (%s)", l.HypothesisID, l.Type)
+		}
+		why = append(why, named("hypothesis", links)+" link to it")
+	}
+	return fmt.Sprintf("this idea is part of the record and can no longer be %s: %s. Add a comment to it instead",
+		e.Verb, strings.Join(why, ", and "))
+}
+
+func named(what string, ids []string) string {
+	shown := ids[:min(len(ids), maxNamed)]
+	out := what + " " + strings.Join(shown, ", ")
+	if len(ids) > 1 {
+		out = what + "s " + strings.Join(shown, ", ")
+	}
+	if more := len(ids) - len(shown); more > 0 {
+		out += fmt.Sprintf(" and %d more", more)
+	}
+	return out
+}
+
+// untouched refuses with an *InRecordError while a job tests h or another hypothesis links to
+// it. The graph checks the links again in the write that changes h.
+func (s *Service) untouched(ctx context.Context, h *domain.Hypothesis, verb string) error {
+	jobs, err := s.store.ListExperimentsTesting(ctx, []string{h.ID})
+	if err != nil {
+		return err
+	}
+	links, err := s.graph.Links(ctx, h.ID)
+	if err != nil {
+		return err
+	}
+	if len(jobs) == 0 && len(links.In) == 0 {
+		return nil
+	}
+	ids := make([]string, len(jobs))
+	for i, job := range jobs {
+		ids[i] = job.ID
+	}
+	return &InRecordError{Verb: verb, Jobs: ids, Linked: links.In}
+}
+
+// inRecord turns the graph's refusal of a linked hypothesis into an *InRecordError.
+func inRecord(err error, verb string) error {
+	var linked *graphdb.LinkedError
+	if errors.As(err, &linked) {
+		return &InRecordError{Verb: verb, Linked: linked.In}
+	}
+	return err
+}
+
+// EditHypothesis replaces the text of hypothesis id while no job tests it and no other hypothesis
+// links to it. Whether the caller may is ChangeRefusal's. No event announces it: an agent reads
+// the new text wherever it reads the hypothesis.
+func (s *Service) EditHypothesis(ctx context.Context, id, text string) (*domain.Hypothesis, error) {
+	current, err := s.graph.GetHypothesis(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("registry.EditHypothesis: %w", err)
+	}
+	if current == nil {
+		return nil, fmt.Errorf("registry.EditHypothesis: %w: %s", ErrHypothesisNotFound, id)
+	}
+	var h *domain.Hypothesis
+	err = s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
+		if err := stamp.RequireOpen(current.PlatformExperimentID); err != nil {
+			return nil, err
+		}
+		if err := s.untouched(ctx, current, "edited"); err != nil {
+			return nil, err
+		}
+		var err error
+		h, err = s.graph.EditText(ctx, id, text)
+		return nil, inRecord(err, "edited")
+	})
+	if err != nil {
+		return nil, fmt.Errorf("registry.EditHypothesis: %w", err)
+	}
+	if err := s.store.NameActors(ctx, hypothesisActors(h)); err != nil {
+		return nil, fmt.Errorf("registry.EditHypothesis: %w", err)
+	}
+	s.logger.Info("hypothesis edited", zap.String("id", id))
+	return h, nil
+}
+
+// RemoveHypothesis deletes hypothesis id, its outgoing links and its comments while no job tests
+// it and no other hypothesis links to it. Whether the caller may is ChangeRefusal's.
+func (s *Service) RemoveHypothesis(ctx context.Context, id string) error {
+	current, err := s.graph.GetHypothesis(ctx, id)
+	if err != nil {
+		return fmt.Errorf("registry.RemoveHypothesis: %w", err)
+	}
+	if current == nil {
+		return fmt.Errorf("registry.RemoveHypothesis: %w: %s", ErrHypothesisNotFound, id)
+	}
+	err = s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
+		if err := stamp.RequireOpen(current.PlatformExperimentID); err != nil {
+			return nil, err
+		}
+		if err := s.untouched(ctx, current, "removed"); err != nil {
+			return nil, err
+		}
+		return nil, inRecord(s.graph.Remove(ctx, id), "removed")
+	})
+	if err != nil {
+		return fmt.Errorf("registry.RemoveHypothesis: %w", err)
+	}
+	if err := s.store.DeleteHypothesisComments(ctx, id); err != nil {
+		return fmt.Errorf("registry.RemoveHypothesis: the hypothesis is removed and its comments are not: %w", err)
+	}
+	s.logger.Info("hypothesis removed", zap.String("id", id), zap.String("platform_experiment_id", current.PlatformExperimentID))
+	return nil
 }
 
 // ListHypothesisFindings returns one page of the findings filed against a hypothesis, oldest

@@ -86,7 +86,14 @@ func (h *Handler) hypothesisWriteError(err error) error {
 	if errors.As(err, &unsupported) {
 		return huma.Error409Conflict(unsupported.Detail)
 	}
+	var inRecord *InRecordError
+	if errors.As(err, &inRecord) {
+		return api.Refuse(http.StatusConflict, "hypothesis_in_record", inRecord.Error())
+	}
 	switch {
+	case errors.Is(err, graphdb.ErrDuplicateText):
+		return api.Refuse(http.StatusConflict, "duplicate_hypothesis", "another hypothesis of this platform experiment already states this text: "+
+			"nothing was changed. Test or comment on that one instead")
 	case errors.Is(err, graphdb.ErrInvalidLink),
 		errors.Is(err, ErrUnknownPlatformExperiment), errors.Is(err, db.ErrUnknownAgent):
 		return huma.Error400BadRequest(err.Error())
@@ -682,6 +689,87 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Findings: findings, FindingCount: findingCount,
 			Comments: comments, CommentCount: commentCount,
 		}}, nil
+	})
+
+	// changer is who asks to change hyp, as ChangeRefusal reads them. Whether they own its org is
+	// read only for a removal they did not write.
+	changer := func(ctx context.Context, hyp *domain.Hypothesis, remove bool) (Changer, error) {
+		p, _ := auth.FromContext(ctx)
+		c := Changer{UserID: p.UserID}
+		if remove && c.UserID != "" && hyp.Actor.ID != c.UserID {
+			var err error
+			if c.OrgOwner, err = access.OwnsOrgOf(ctx, hyp.PlatformExperimentID); err != nil {
+				return Changer{}, auth.Internal(h.logger, "read the caller's org role", err)
+			}
+		}
+		return c, nil
+	}
+
+	const changeRule = "Only for an idea a person wrote for no agent, and only while no agent has acted on it: no job tests it " +
+		"and no other hypothesis links to it. Once one has, it is part of the record and the answer is 409 hypothesis_in_record " +
+		"naming the jobs and the links; add a comment instead. 403 person_only for a request no signed-in person makes, " +
+		"agent_hypothesis for an agent's hypothesis, not_a_persons_idea for one registered with an API key, a coordinator's or " +
+		"staff's token, and not_the_author for anyone else. 409 experiment_closed once the platform experiment is closed."
+
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "edit-hypothesis", Method: "PATCH", Path: "/hypotheses/{id}",
+		Summary: "Edit the text of an idea you wrote", Tags: []string{"hypotheses"},
+		Description: "Replaces text, by the person who wrote the idea. " + changeRule + " 409 duplicate_hypothesis when another " +
+			"hypothesis of the platform experiment already states the new text. No event announces an edit: an agent reads the " +
+			"new text wherever it reads the hypothesis. Returns the hypothesis.",
+	}, func(ctx context.Context, in *struct {
+		ID   string `path:"id"`
+		Body struct {
+			Text string `json:"text"`
+		}
+	}) (*struct{ Body *domain.Hypothesis }, error) {
+		if strings.TrimSpace(in.Body.Text) == "" {
+			return nil, huma.Error400BadRequest("text is required")
+		}
+		hyp, err := loadHypothesis(ctx, in.ID)
+		if err != nil {
+			return nil, err
+		}
+		caller, err := changer(ctx, hyp, false)
+		if err != nil {
+			return nil, err
+		}
+		if refusal := ChangeRefusal(hyp, caller, false); refusal != nil {
+			return nil, refusal
+		}
+		edited, err := h.svc.EditHypothesis(ctx, in.ID, in.Body.Text)
+		if err != nil {
+			h.logger.Info("edit hypothesis", zap.Error(err))
+			return nil, h.hypothesisWriteError(err)
+		}
+		return &struct{ Body *domain.Hypothesis }{Body: edited}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "remove-hypothesis", Method: "DELETE", Path: "/hypotheses/{id}",
+		Summary: "Remove an idea you wrote", Tags: []string{"hypotheses"},
+		DefaultStatus: 204,
+		Description: "Deletes the idea with its outgoing links and its comments, by the person who wrote it or an owner of its org. " +
+			changeRule,
+	}, func(ctx context.Context, in *struct {
+		ID string `path:"id"`
+	}) (*struct{}, error) {
+		hyp, err := loadHypothesis(ctx, in.ID)
+		if err != nil {
+			return nil, err
+		}
+		caller, err := changer(ctx, hyp, true)
+		if err != nil {
+			return nil, err
+		}
+		if refusal := ChangeRefusal(hyp, caller, true); refusal != nil {
+			return nil, refusal
+		}
+		if err := h.svc.RemoveHypothesis(ctx, in.ID); err != nil {
+			h.logger.Info("remove hypothesis", zap.Error(err))
+			return nil, h.hypothesisWriteError(err)
+		}
+		return nil, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, apidocs.AfterClose(huma.Operation{

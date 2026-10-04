@@ -306,6 +306,14 @@ func (s *HypothesesStore) CountCommentsByHypothesis(ctx context.Context, hypothe
 	return n, nil
 }
 
+// DeleteHypothesisComments removes the comments filed against a hypothesis that was removed.
+func (s *HypothesesStore) DeleteHypothesisComments(ctx context.Context, hypothesisID string) error {
+	if _, err := s.pool.pool.Exec(ctx, `DELETE FROM hypothesis_comments WHERE hypothesis_id = $1`, hypothesisID); err != nil {
+		return fmt.Errorf("hypotheses_store.DeleteHypothesisComments: %w", err)
+	}
+	return nil
+}
+
 // CountHypothesisActivity returns the finding and comment counts of every hypothesis in ids, in
 // one query. A hypothesis with neither is present with zero counts.
 func (s *HypothesesStore) CountHypothesisActivity(ctx context.Context, ids []string) (map[string]HypothesisActivity, error) {

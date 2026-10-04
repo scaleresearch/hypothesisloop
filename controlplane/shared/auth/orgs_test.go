@@ -218,3 +218,23 @@ func TestAnInviteIsAnsweredForByAPerson(t *testing.T) {
 		t.Errorf("inviter as staff signed in: got = %q, %v, want = u-staff", got, err)
 	}
 }
+
+// Removing a person's idea is also an owner's of the org it lives in: a signed-in owner of that
+// org, and nobody else, owns it in this sense.
+func TestOnlyASignedInOwnerOfItsOrgOwnsTheOrgOfAPlatformExperiment(t *testing.T) {
+	access := auth.NewAccess(authtest.Placement{
+		PlatformExperiments: map[string]domain.Tenancy{"pe-a": {PlatformExperimentID: "pe-a", ProjectID: "prj-a", OrgID: "org-a"}},
+		Members:             map[string]bool{"org-a/u-member": true},
+	})
+	want := map[string]bool{"owner": true, "member": false, "outsider": false, "org key": false, "agent": false, "coordinator": false, "staff": false}
+	for name, owns := range want {
+		got, err := access.OwnsOrgOf(auth.WithPrincipal(context.Background(), accountCallers[name]), "pe-a")
+		if err != nil || got != owns {
+			t.Errorf("%s owns the org of pe-a: got = (%v, %v), want (%v, nil)", name, got, err, owns)
+		}
+	}
+	got, err := access.OwnsOrgOf(auth.WithPrincipal(context.Background(), accountCallers["owner"]), "pe-missing")
+	if err != nil || got {
+		t.Errorf("owner of a platform experiment with no row: got = (%v, %v), want (false, nil)", got, err)
+	}
+}

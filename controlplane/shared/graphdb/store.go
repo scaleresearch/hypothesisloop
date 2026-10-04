@@ -12,6 +12,8 @@ import (
 	_ "time/tzdata"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 var (
@@ -25,7 +27,19 @@ var (
 	ErrInvalidLink = errors.New("invalid link")
 	// ErrInvalidQuery is a read query Memgraph or the read-only guard refused, carrying the reason.
 	ErrInvalidQuery = errors.New("invalid query")
+	// ErrDuplicateText is an edit to the text another hypothesis of the platform experiment states.
+	ErrDuplicateText = errors.New("another hypothesis of this platform experiment states the same text")
 )
+
+// LinkedError refuses an edit or removal of a hypothesis other hypotheses link to. In is those
+// links, at most maxLinksPerDirection.
+type LinkedError struct {
+	In []domain.Link
+}
+
+func (e *LinkedError) Error() string {
+	return fmt.Sprintf("%d hypotheses link to this one", len(e.In))
+}
 
 // Store is the only code that speaks Cypher: every hypothesis and link lives in Memgraph and is
 // read and written through here.

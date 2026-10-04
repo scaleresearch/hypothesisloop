@@ -173,6 +173,11 @@ func (s *poolStore) NameActors(_ context.Context, actors []*domain.Actor) error 
 
 func (s *poolStore) DescribeJobs(context.Context, []*domain.Experiment) error { return nil }
 
+func (s *poolStore) DeleteHypothesisComments(_ context.Context, hypothesisID string) error {
+	s.commentRows = slices.DeleteFunc(s.commentRows, func(c *domain.HypothesisComment) bool { return c.HypothesisID == hypothesisID })
+	return nil
+}
+
 func agentActor(id string) domain.Actor { return domain.Actor{Kind: domain.ActorAgent, ID: id} }
 
 var adaActor = domain.Actor{Kind: domain.ActorUser, ID: "user-ada"}
@@ -184,6 +189,8 @@ type fakeGraph struct {
 	Graph
 	rows  map[string]*domain.Hypothesis
 	links map[string]bool
+	// in is the links into each hypothesis, by its id.
+	in    map[string][]domain.Link
 	clock time.Time
 	// positions is the watch stream position each write was stamped with, by hypothesis id.
 	positions map[string][]int64
@@ -192,7 +199,7 @@ type fakeGraph struct {
 }
 
 func newFakeGraph() *fakeGraph {
-	return &fakeGraph{rows: map[string]*domain.Hypothesis{}, links: map[string]bool{},
+	return &fakeGraph{rows: map[string]*domain.Hypothesis{}, links: map[string]bool{}, in: map[string][]domain.Link{},
 		clock: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), positions: map[string][]int64{}, stamps: map[string]int64{}}
 }
 
@@ -274,7 +281,36 @@ func (g *fakeGraph) AddLink(_ context.Context, fromID, agentID string, actor dom
 	}
 	result.CreatedAt = g.tick()
 	g.stamp(fromID, "link"+key, stamp.Position)
+	g.in[spec.To] = append(g.in[spec.To], domain.Link{Type: spec.Type, HypothesisID: fromID, AgentID: agentID, Actor: actor})
 	return result, nil
+}
+
+func (g *fakeGraph) Links(_ context.Context, id string) (domain.HypothesisLinks, error) {
+	return domain.HypothesisLinks{Out: []domain.Link{}, In: g.in[id]}, nil
+}
+
+// EditText and Remove hold the graph's own check: nothing may link to the hypothesis.
+func (g *fakeGraph) EditText(_ context.Context, id, text string) (*domain.Hypothesis, error) {
+	h, ok := g.rows[id]
+	if !ok {
+		return nil, graphdb.ErrNotFound
+	}
+	if in := g.in[id]; len(in) > 0 {
+		return nil, &graphdb.LinkedError{In: in}
+	}
+	h.Text = text
+	return h, nil
+}
+
+func (g *fakeGraph) Remove(_ context.Context, id string) error {
+	if _, ok := g.rows[id]; !ok {
+		return graphdb.ErrNotFound
+	}
+	if in := g.in[id]; len(in) > 0 {
+		return &graphdb.LinkedError{In: in}
+	}
+	delete(g.rows, id)
+	return nil
 }
 
 // recordedEvents is the watch stream as the registry sees it. Emit hands out positions 1, 2, ...
