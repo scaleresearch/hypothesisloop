@@ -97,13 +97,16 @@ func TestOnlyTheEndOfALongBuildOutputIsKept(t *testing.T) {
 }
 
 // fakeDaemon answers the base pull with pull and the build with build, after streaming output.
+// Once a build has exported, pushes answers its push in turn, after exported is called.
 type fakeDaemon struct {
-	pull   error
-	build  error
-	output string
-	digest string
-	image  []byte
-	builds []client.SolveOpt
+	pull     error
+	build    error
+	output   string
+	digest   string
+	image    []byte
+	builds   []client.SolveOpt
+	pushes   []error
+	exported func()
 }
 
 func (d *fakeDaemon) Solve(_ context.Context, def *llb.Definition, opt client.SolveOpt, statuses chan *client.SolveStatus) (*client.SolveResponse, error) {
@@ -131,12 +134,22 @@ func (d *fakeDaemon) Solve(_ context.Context, def *llb.Definition, opt client.So
 			return nil, err
 		}
 	}
+	if d.exported != nil {
+		d.exported()
+	}
+	if len(d.pushes) > 0 {
+		push := d.pushes[0]
+		d.pushes = d.pushes[1:]
+		if push != nil {
+			return nil, push
+		}
+	}
 	return &client.SolveResponse{ExporterResponse: map[string]string{exptypes.ExporterImageDigestKey: d.digest}}, nil
 }
 
 func TestABuildIsReadyWithTheDigestItPushedUntagged(t *testing.T) {
 	daemon := &fakeDaemon{digest: "sha256:abc"}
-	got := (&Daemon{solver: daemon}).Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Dockerfile: "ARG BASE\nFROM ${BASE}\n", Repository: "registry.test/envs/env"}, nil, ignoreProgress)
+	got := (&Daemon{solver: daemon}).Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Dockerfile: "ARG BASE\nFROM ${BASE}\n", Repository: "registry.test/envs/env"}, nil, ignoreProgress, nil)
 	if got.Outcome != domain.EnvironmentBuildPushed || got.Digest != "sha256:abc" {
 		t.Fatalf("result %+v, want ready with the digest", got)
 	}
@@ -166,7 +179,7 @@ func TestWhoseFaultABuildThatPushedNothingIs(t *testing.T) {
 		"the push fails":           {&fakeDaemon{build: errors.New("failed to push: failed to authorize")}, domain.EnvironmentBuildPlatformFault, "failed to authorize"},
 		"no digest is named":       {&fakeDaemon{}, domain.EnvironmentBuildPlatformFault, "no digest"},
 	} {
-		got := (&Daemon{solver: c.daemon}).Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil, ignoreProgress)
+		got := (&Daemon{solver: c.daemon}).Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil, ignoreProgress, nil)
 		if got.Outcome != c.fault || got.Digest != "" || !strings.Contains(got.LogTail, c.log) {
 			t.Errorf("%s: %+v, want fault %q with %q in its log", name, got, c.fault, c.log)
 		}
@@ -180,7 +193,7 @@ func TestARunACancelStoppedIsNotTheFiles(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	killed := &gatewaypb.ExitError{ExitCode: 137, Err: errors.New("exit code: 137")}
-	got := (&Daemon{solver: &fakeDaemon{build: killed}}).Run(ctx, domain.EnvironmentBuild{Repository: "registry.test/envs/env"}, nil, ignoreProgress)
+	got := (&Daemon{solver: &fakeDaemon{build: killed}}).Run(ctx, domain.EnvironmentBuild{Repository: "registry.test/envs/env"}, nil, ignoreProgress, nil)
 	if got.Outcome == domain.EnvironmentBuildFileFault {
 		t.Errorf("a cancelled build is %+v, the file's fault", got)
 	}
@@ -211,9 +224,9 @@ func TestABuildThatLoadsSendsTheImageToTheLoaderAndPushesItLast(t *testing.T) {
 	loader := &fakeLoader{read: len(image), digest: "sha256:abc"}
 	var told []string
 	d := &Daemon{solver: daemon}
-	d.LoadInto(loader)
+	d.LoadInto(loader, "")
 	got := d.Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil,
-		func(format string, args ...any) { told = append(told, fmt.Sprintf(format, args...)) })
+		func(format string, args ...any) { told = append(told, fmt.Sprintf(format, args...)) }, nil)
 	if got.Outcome != domain.EnvironmentBuildPushed || got.Digest != "sha256:abc" {
 		t.Fatalf("result %+v, want pushed with the digest", got)
 	}
@@ -242,10 +255,10 @@ func TestALoadThatGoesWrongNeverFailsTheBuild(t *testing.T) {
 		"the loaded image is another":     {read: 5 << 20, digest: "sha256:other"},
 	} {
 		d := &Daemon{solver: &fakeDaemon{digest: "sha256:abc", image: bytes.Repeat([]byte("layer"), 1<<20)}}
-		d.LoadInto(loader)
+		d.LoadInto(loader, "")
 		var told []string
 		got := d.Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil,
-			func(format string, args ...any) { told = append(told, fmt.Sprintf(format, args...)) })
+			func(format string, args ...any) { told = append(told, fmt.Sprintf(format, args...)) }, nil)
 		if got.Outcome != domain.EnvironmentBuildPushed || got.Digest != "sha256:abc" {
 			t.Errorf("%s: %+v, want pushed with the digest", name, got)
 		}
@@ -258,8 +271,8 @@ func TestALoadThatGoesWrongNeverFailsTheBuild(t *testing.T) {
 func TestABuildThatFailsBeforeItsExportLoadsNothing(t *testing.T) {
 	loader := &fakeLoader{}
 	d := &Daemon{solver: &fakeDaemon{build: errors.New("failed to push: failed to authorize")}}
-	d.LoadInto(loader)
-	got := d.Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil, ignoreProgress)
+	d.LoadInto(loader, "")
+	got := d.Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil, ignoreProgress, nil)
 	if got.Outcome != domain.EnvironmentBuildPlatformFault || loader.repository != "" {
 		t.Errorf("%+v, loader asked for %q, want the platform's fault and nothing loaded", got, loader.repository)
 	}
@@ -297,5 +310,99 @@ func TestABuildTellsEachStepOnceAsItStartsAndEndsAndItsTransfersSparingly(t *tes
 	}
 	if !slices.Equal(told, want) {
 		t.Errorf("told\n%s\nwant\n%s", strings.Join(told, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// A build loaded into a named node tells so while its push goes on, so a job there starts before
+// the push ends.
+func TestABuildLoadedIntoItsNodeTellsSoBeforeItsPushEnds(t *testing.T) {
+	image := bytes.Repeat([]byte("layer"), 1<<10)
+	told := make(chan string, 1)
+	daemon := &fakeDaemon{digest: "sha256:abc", image: image}
+	daemon.exported = func() {
+		select {
+		case got := <-told:
+			told <- got
+		case <-time.After(5 * time.Second):
+			t.Error("the push ended before the load was told")
+		}
+	}
+	d := &Daemon{solver: daemon}
+	d.LoadInto(&fakeLoader{read: len(image), digest: "sha256:abc"}, "node-1")
+	got := d.Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil, ignoreProgress,
+		func(node, digest string) { told <- node + " " + digest })
+	if got.Outcome != domain.EnvironmentBuildPushed || got.Digest != "sha256:abc" {
+		t.Fatalf("result %+v, want pushed with the digest", got)
+	}
+	if loaded := <-told; loaded != "node-1 sha256:abc" {
+		t.Errorf("told %q, want the node and the digest", loaded)
+	}
+}
+
+// A load that failed, or a node that is not named, tells nothing.
+func TestALoadThatFailedOrIntoNoNamedNodeTellsNothing(t *testing.T) {
+	for name, c := range map[string]struct {
+		loader *fakeLoader
+		node   string
+	}{
+		"failed":     {&fakeLoader{read: 5 << 20, err: errors.New("unpack: no space left on device"), digest: "sha256:abc"}, "node-1"},
+		"node unset": {&fakeLoader{read: 5 << 20, digest: "sha256:abc"}, ""},
+	} {
+		d := &Daemon{solver: &fakeDaemon{digest: "sha256:abc", image: bytes.Repeat([]byte("layer"), 1<<20)}}
+		d.LoadInto(c.loader, c.node)
+		told := 0
+		got := d.Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil, ignoreProgress, func(string, string) { told++ })
+		if got.Outcome != domain.EnvironmentBuildPushed || told != 0 {
+			t.Errorf("%s: %+v told %d times, want pushed and nothing told", name, got, told)
+		}
+	}
+}
+
+// A push that fails once the image is in its node is pushed again, alone, so a job already running
+// it there is not failed for a registry that went away a moment. One that fails every time is the
+// platform's fault.
+func TestAPushThatFailsOnceTheImageIsInItsNodeIsTriedAgain(t *testing.T) {
+	waits := pushRetries
+	pushRetries = []time.Duration{0, 0}
+	t.Cleanup(func() { pushRetries = waits })
+	image := bytes.Repeat([]byte("layer"), 1<<10)
+	for name, c := range map[string]struct {
+		pushes  []error
+		outcome domain.EnvironmentBuildOutcomeKind
+		solves  int
+	}{
+		"pushed the second time": {[]error{errors.New("failed to push: 503"), nil}, domain.EnvironmentBuildPushed, 2},
+		"never pushed":           {[]error{errors.New("failed to push: 503"), errors.New("failed to push: 503"), errors.New("failed to push: broken pipe")}, domain.EnvironmentBuildPlatformFault, 3},
+	} {
+		daemon := &fakeDaemon{digest: "sha256:abc", image: image, pushes: c.pushes}
+		d := &Daemon{solver: daemon}
+		d.LoadInto(&fakeLoader{read: len(image), digest: "sha256:abc"}, "node-1")
+		told := 0
+		got := d.Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil, ignoreProgress, func(string, string) { told++ })
+		if got.Outcome != c.outcome || len(daemon.builds) != c.solves || told != 1 {
+			t.Errorf("%s: %+v after %d solves, told %d times, want %s after %d, told once", name, got, len(daemon.builds), told, c.outcome, c.solves)
+		}
+		if c.outcome == domain.EnvironmentBuildPushed && got.Digest != "sha256:abc" {
+			t.Errorf("%s: digest %q", name, got.Digest)
+		}
+		if c.outcome == domain.EnvironmentBuildPlatformFault && !strings.Contains(got.LogTail, "broken pipe") {
+			t.Errorf("%s: log %q, want the last push's error", name, got.LogTail)
+		}
+		for _, again := range daemon.builds[1:] {
+			if len(again.Exports) != 1 || again.Exports[0].Type != client.ExporterImage || again.Exports[0].Attrs["push"] != "true" {
+				t.Errorf("%s: pushed again with exports %+v, want the push alone", name, again.Exports)
+			}
+		}
+	}
+}
+
+func TestAPushThatFailsBeforeTheImageIsInItsNodeIsNotTriedAgain(t *testing.T) {
+	image := bytes.Repeat([]byte("layer"), 1<<10)
+	daemon := &fakeDaemon{digest: "sha256:abc", image: image, pushes: []error{errors.New("failed to push: 503"), nil}}
+	d := &Daemon{solver: daemon}
+	d.LoadInto(&fakeLoader{read: len(image), err: errors.New("import: permission denied")}, "node-1")
+	got := d.Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil, ignoreProgress, nil)
+	if got.Outcome != domain.EnvironmentBuildPlatformFault || len(daemon.builds) != 1 {
+		t.Errorf("%+v after %d solves, want the platform's fault at once", got, len(daemon.builds))
 	}
 }

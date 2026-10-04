@@ -16,6 +16,9 @@
 //	                        built is also loaded there, so a job on this node does not pull it.
 //	HYPOTHESISLOOP_NODE_SNAPSHOTTER — the snapshotter the node's kubelet uses, when not
 //	                        containerd's default.
+//	HYPOTHESISLOOP_NODE_NAME — the name of this pod's node. Set beside HYPOTHESISLOOP_NODE_IMAGES,
+//	                        each build loaded there is reported as it is loaded, so a job that
+//	                        waits for it is placed on this node before the push ends.
 package main
 
 import (
@@ -77,7 +80,7 @@ func main() {
 				// Loading only spares a pull, so the cluster still builds without it.
 				fmt.Fprintf(os.Stderr, "cluster-agent: builds are not loaded into this node: %v\n", err)
 			} else {
-				daemon.LoadInto(node)
+				daemon.LoadInto(node, os.Getenv("HYPOTHESISLOOP_NODE_NAME"))
 			}
 		}
 		builder = daemon

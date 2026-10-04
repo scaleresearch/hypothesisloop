@@ -79,10 +79,11 @@ type Agent struct {
 }
 
 // Builder builds one environment (envbuild.Daemon) and says how the build ended. credential is
-// the registry login of the push, asked of the control plane each time the daemon needs it, and
-// progress is told each step of the build as it starts and ends.
+// the registry login of the push, asked of the control plane each time the daemon needs it,
+// progress is told each step of the build as it starts and ends, and loaded the node its image is
+// held on and its digest once it is there, before the push ends.
 type Builder interface {
-	Run(ctx context.Context, b domain.EnvironmentBuild, credential func(ctx context.Context) (username, password string, err error), progress func(format string, args ...any)) domain.EnvironmentBuildReport
+	Run(ctx context.Context, b domain.EnvironmentBuild, credential func(ctx context.Context) (username, password string, err error), progress func(format string, args ...any), loaded func(node, digest string)) domain.EnvironmentBuildReport
 }
 
 type runningBuild struct {

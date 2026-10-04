@@ -2,6 +2,7 @@ package envbuild
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/moby/buildkit/client"
@@ -13,7 +14,8 @@ import (
 const transferInterval = 15 * time.Second
 
 // steps follows the statuses of a build's solves and tells progress each step once as it starts
-// and once as it ends, and the latest transfer at most every transferInterval.
+// and once as it ends, and the latest transfer at most every transferInterval. progress is told
+// one line at a time, the load's among the solve's.
 type steps struct {
 	progress     Progress
 	names        map[digest.Digest]string
@@ -23,7 +25,13 @@ type steps struct {
 }
 
 func newSteps(progress Progress) *steps {
-	return &steps{progress: progress, names: map[digest.Digest]string{}, started: map[digest.Digest]bool{}, ended: map[digest.Digest]bool{}}
+	var told sync.Mutex
+	one := func(format string, args ...any) {
+		told.Lock()
+		defer told.Unlock()
+		progress(format, args...)
+	}
+	return &steps{progress: one, names: map[digest.Digest]string{}, started: map[digest.Digest]bool{}, ended: map[digest.Digest]bool{}}
 }
 
 func (s *steps) follow(status *client.SolveStatus) {

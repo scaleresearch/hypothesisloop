@@ -27,6 +27,9 @@ type buildsAPI struct {
 	progress      map[string][]domain.EnvironmentBuildProgress
 	// refuseProgress answers every progress report 503.
 	refuseProgress bool
+	// loaded is each loaded report, and order every loaded report and outcome as they came.
+	loaded []domain.EnvironmentBuildLoaded
+	order  []string
 }
 
 func (api *buildsAPI) serve(t *testing.T) *httptest.Server {
@@ -59,7 +62,14 @@ func (api *buildsAPI) serve(t *testing.T) *httptest.Server {
 			}
 			api.progress[key] = append(api.progress[key], progress)
 			w.WriteHeader(http.StatusNoContent)
+		case "/internal/clusters/test/builds/k1/loaded":
+			var loaded domain.EnvironmentBuildLoaded
+			_ = json.NewDecoder(r.Body).Decode(&loaded)
+			api.loaded = append(api.loaded, loaded)
+			api.order = append(api.order, "loaded")
+			w.WriteHeader(http.StatusNoContent)
 		case "/internal/clusters/test/builds/k1", "/internal/clusters/test/builds/k2":
+			api.order = append(api.order, "outcome")
 			if api.refuse {
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
@@ -99,13 +109,18 @@ type fakeBuilder struct {
 	release   chan struct{}
 	// steps is what each run tells as its progress. Nil tells one step.
 	steps []string
+	// loadedOn, when set, is the node each run tells its image is loaded on.
+	loadedOn string
 }
 
 func newFakeBuilder() *fakeBuilder {
 	return &fakeBuilder{runs: map[string]int{}, cancelled: map[string]int{}, release: make(chan struct{})}
 }
 
-func (b *fakeBuilder) Run(ctx context.Context, build domain.EnvironmentBuild, credential func(context.Context) (string, string, error), progress func(string, ...any)) domain.EnvironmentBuildReport {
+func (b *fakeBuilder) Run(ctx context.Context, build domain.EnvironmentBuild, credential func(context.Context) (string, string, error), progress func(string, ...any), loaded func(node, digest string)) domain.EnvironmentBuildReport {
+	if b.loadedOn != "" {
+		loaded(b.loadedOn, "sha256:abc")
+	}
 	steps := b.steps
 	if steps == nil {
 		steps = []string{"[1/1] RUN make: started"}
@@ -376,5 +391,26 @@ func TestAProgressStepIsTheFirstLineCutOnARuneBoundary(t *testing.T) {
 		if got := progressStep(line); got != want {
 			t.Errorf("progressStep(%q) = %q, want %q", line, got, want)
 		}
+	}
+}
+
+// The node a build's image is loaded on is reported at its attempt as soon as the builder tells it,
+// and before the outcome.
+func TestABuildLoadedOnItsNodeIsReportedBeforeItsOutcome(t *testing.T) {
+	api := &buildsAPI{reports: map[string][]domain.EnvironmentBuildReport{}}
+	server := api.serve(t)
+	builder := newFakeBuilder()
+	builder.loadedOn = "node-1"
+	agent := buildAgent(server, builder)
+	api.list(k1)
+	if err := agent.reconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	close(builder.release)
+	waitFor(t, "the report", func() bool { return len(api.reported("k1")) == 1 })
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.loaded) != 1 || api.loaded[0] != (domain.EnvironmentBuildLoaded{Attempt: 1, Node: "node-1", Digest: "sha256:abc"}) || !slices.Equal(api.order, []string{"loaded", "outcome"}) {
+		t.Errorf("loaded %+v in order %v, want node-1 at attempt 1 before the outcome", api.loaded, api.order)
 	}
 }

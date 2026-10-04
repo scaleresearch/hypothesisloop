@@ -196,6 +196,16 @@ func TestTheAgentHoldsTheNodesContainerdOnlyWhenAskedToLoadBuilds(t *testing.T) 
 	if loads := envValue(agent, "HYPOTHESISLOOP_NODE_IMAGES"); !mounted || loads != "/run/node-containerd/containerd.sock" {
 		t.Errorf("mounted %v, HYPOTHESISLOOP_NODE_IMAGES = %v, want the mounted socket", mounted, loads)
 	}
+	// The node is named, so a build loaded there places the jobs waiting for it on it.
+	var node any
+	for _, env := range agent["env"].([]any) {
+		if env.(map[string]any)["name"] == "HYPOTHESISLOOP_NODE_NAME" {
+			node = env.(map[string]any)["valueFrom"]
+		}
+	}
+	if field, _ := node.(map[string]any)["fieldRef"].(map[string]any); field["fieldPath"] != "spec.nodeName" {
+		t.Errorf("HYPOTHESISLOOP_NODE_NAME from %v, want the pod's node", node)
+	}
 }
 
 func TestTheAgentHasTheMemoryALoadNeedsOnlyWhenItLoads(t *testing.T) {

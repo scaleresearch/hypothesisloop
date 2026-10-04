@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -57,6 +58,19 @@ func (a *Agent) runBuild(ctx context.Context, running *runningBuild, b domain.En
 	steps := make(chan string, 1)
 	posted := make(chan struct{})
 	go a.postProgress(ctx, b, steps, posted)
+	// The loaded report goes out while the push goes on, and before the outcome, which a control
+	// plane that took it no longer fences on the build.
+	var loadedPosted sync.WaitGroup
+	loaded := func(node, digest string) {
+		loadedPosted.Add(1)
+		go func() {
+			defer loadedPosted.Done()
+			err := a.postJSON(ctx, "/builds/"+url.PathEscape(b.Key)+"/loaded", domain.EnvironmentBuildLoaded{Attempt: b.Attempt, Node: node, Digest: digest}, nil)
+			if err != nil && ctx.Err() == nil {
+				a.Log("build %s attempt %d: loaded on %s: %v", b.Key, b.Attempt, node, err)
+			}
+		}()
+	}
 	report := a.Builder.Run(ctx, b, func(ctx context.Context) (string, string, error) {
 		var login domain.RegistryLogin
 		err := a.postJSON(ctx, "/builds/"+url.PathEscape(b.Key)+"/credential", domain.EnvironmentBuildCredentialRequest{Attempt: b.Attempt}, &login)
@@ -74,9 +88,10 @@ func (a *Agent) runBuild(ctx context.Context, running *runningBuild, b domain.En
 		default:
 		}
 		steps <- step
-	})
+	}, loaded)
 	close(steps)
 	<-posted
+	loadedPosted.Wait()
 	if ctx.Err() != nil {
 		a.Log("build %s attempt %d: no longer this cluster's, cancelled", b.Key, b.Attempt)
 		return

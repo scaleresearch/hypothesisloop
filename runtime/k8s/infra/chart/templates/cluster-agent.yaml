@@ -190,6 +190,12 @@ spec:
             # Where each environment built is loaded, so a job on this node does not pull it.
             - name: HYPOTHESISLOOP_NODE_IMAGES
               value: /run/node-containerd/containerd.sock
+            # The node loaded into, reported as soon as a build is there, so a job is placed on it
+            # while the push goes on.
+            - name: HYPOTHESISLOOP_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
             # Under the memory limit below, so the Go runtime collects before the kernel kills.
             - name: GOMEMLIMIT
               value: "900MiB"
