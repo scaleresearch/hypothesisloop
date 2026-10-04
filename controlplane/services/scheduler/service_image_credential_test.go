@@ -57,10 +57,10 @@ func TestAJobsImageIsItsReadyEnvironmentOrItsJobImage(t *testing.T) {
 	if err != nil || got.Image != "registry.test/job:1" || got.Login != nil || asked != 1 {
 		t.Errorf("no environment: got %+v, %v, want the job image and no login", got, err)
 	}
-	for _, key := range []string{"building", "failed"} {
+	for key, reason := range map[string]string{"building": ReasonEnvironmentNotReady, "failed": ReasonEnvironmentFailed} {
 		var refused *AdmissionError
-		if _, err := of(key).ImageCredential(context.Background(), "job-1"); !errors.As(err, &refused) || refused.Reason != ReasonEnvironmentNotReady {
-			t.Errorf("%s: got %v, want %s", key, err, ReasonEnvironmentNotReady)
+		if _, err := of(key).ImageCredential(context.Background(), "job-1"); !errors.As(err, &refused) || refused.Reason != reason {
+			t.Errorf("%s: got %v, want %s", key, err, reason)
 		}
 	}
 	if got, err := of("ready").ImageCredential(context.Background(), "job-2"); got != nil || err != nil {

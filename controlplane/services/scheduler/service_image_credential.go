@@ -26,8 +26,13 @@ func (s *Service) WithRegistryPulls(pulls RegistryPulls) *Service {
 	return s
 }
 
-// ReasonEnvironmentNotReady refuses the image of a job whose environment is still building or failed.
-const ReasonEnvironmentNotReady = "environment_not_ready"
+// ReasonEnvironmentNotReady refuses the image of a job whose environment is still building, and
+// ReasonEnvironmentFailed one whose environment failed: the first is worth waiting on, the second
+// is not.
+const (
+	ReasonEnvironmentNotReady = "environment_not_ready"
+	ReasonEnvironmentFailed   = "environment_failed"
+)
 
 // ImageCredential is the image job id runs in, and a login that pulls it when it is an
 // environment the platform built. A job whose commit declares no environment runs in its job
@@ -52,7 +57,11 @@ func (s *Service) ImageCredential(ctx context.Context, id string) (*ImageCredent
 	}
 	if env.State != domain.EnvironmentReady {
 		answer := answerEnvironment(env)
-		return nil, &AdmissionError{Reason: ReasonEnvironmentNotReady, Message: fmt.Sprintf("job %s runs in environment %s, which is %s: %s", id, env.Key, answer.State, answer.Message)}
+		reason := ReasonEnvironmentNotReady
+		if env.State == domain.EnvironmentFailed {
+			reason = ReasonEnvironmentFailed
+		}
+		return nil, &AdmissionError{Reason: reason, Message: fmt.Sprintf("job %s runs in environment %s, which is %s: %s", id, env.Key, answer.State, answer.Message)}
 	}
 	if s.pulls == nil {
 		return nil, errors.New("scheduler: an environment is ready and no registry logins are wired (WithRegistryPulls)")
@@ -77,7 +86,7 @@ func registerImageCredentials(doc *apidocs.Doc, h *Handler) {
 		OperationID: "create-job-image-credential", Method: "POST", Path: "/experiments/{id}/image-credentials", DefaultStatus: http.StatusCreated,
 		Summary: "The image a job runs in, with a login that pulls it", Tags: []string{"experiments"},
 		Description: "Answers the image job {id} runs in, so a machine without its hardware can run code in it (hl env stage): the environment its commit declares, with a short-lived login to the registry that holds it, or its job image, pulled without one. " +
-			"409 environment_not_ready while that environment builds or after it failed; 403 run_over once the caller's run has ended.",
+			"409 environment_not_ready while that environment builds or is pushed, environment_failed once it failed; 403 run_over once the caller's run has ended.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body *ImageCredential }, error) {

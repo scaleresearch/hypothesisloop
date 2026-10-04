@@ -181,7 +181,7 @@ class StagingTest(unittest.TestCase):
             popen.assert_not_called()
             core.start_staging(SimpleNamespace(cfg=baseline_agent(), statedir=statedir))
             popen.assert_called_once()
-            self.assertEqual(popen.call_args.args[0], ["hl", "env", "stage"])
+            self.assertEqual(popen.call_args.args[0][:3], ["hl", "env", "stage"])
             self.assertTrue(os.path.exists(os.path.join(statedir, "env-stage.log")))
 
 

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -162,6 +163,52 @@ func TestEnvStageExtractsTheBaselineJobsImage(t *testing.T) {
 	stdout.Reset()
 	if code := run([]string{"env", "stage", "job-b"}, &stdout, &stderr); code != 0 || strings.Count(stderr.String(), "staged in") != 1 {
 		t.Errorf("exit %d, stderr %q, want the staged image kept as it is", code, stderr.String())
+	}
+}
+
+// A session staged while its environment was still being pushed, was refused once and failed
+// silently: staging waits for the environment as long as it is being built or pushed.
+func TestEnvStageWaitsForTheEnvironmentToBeReady(t *testing.T) {
+	image := pushedImage(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	defer func(wait time.Duration) { stageWait = wait }(stageWait)
+	stageWait = time.Millisecond
+	asks := 0
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if asks++; asks < 3 {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{"reason": "environment_not_ready", "message": "job job-b runs in environment k1, which is loaded: pushed"})
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]string{"image": image, "environment_key": "k1"})
+	}))
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"env", "stage", "job-b"}, &stdout, &stderr); code != 0 || asks != 3 || strings.Count(stderr.String(), "waiting until the environment is ready") != 1 {
+		t.Errorf("exit %d after %d asks, stderr %q, want it staged once the environment is ready, said once", code, asks, stderr.String())
+	}
+}
+
+// A failed environment fails the stage at once, and hl env run says that is why nothing is staged.
+func TestEnvStageFailsAtOnceForAFailedEnvironmentAndEnvRunSaysSo(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	asks := 0
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		asks++
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]string{"reason": "environment_failed", "message": "the file failed: pip: no such package"})
+	}))
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"env", "stage", "job-b"}, &stdout, &stderr); code == 0 || asks != 1 || !strings.Contains(stderr.String(), "no such package") {
+		t.Errorf("exit %d after %d asks, stderr %q, want it failed at once with the build's output", code, asks, stderr.String())
+	}
+	stderr.Reset()
+	if code := run([]string{"env", "run", "--", "make"}, &stdout, &stderr); code == 0 || !strings.Contains(stderr.String(), "the last hl env stage failed") || !strings.Contains(stderr.String(), "no such package") {
+		t.Errorf("exit %d, stderr %q, want it told why nothing is staged", code, stderr.String())
 	}
 }
 

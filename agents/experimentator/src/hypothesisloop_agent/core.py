@@ -130,16 +130,18 @@ def own_python() -> None:
 
 
 _staging: list[subprocess.Popen] = []
+_STAGE_TIMEOUT_S = 24 * 3600
 
 
 def start_staging(setup: RunSetup) -> None:
     """Starts `hl env stage` in the background for an agent with jobs, so that `hl env run` has the
-    image its jobs run in without the agent waiting for it. Its output is in env-stage.log of the
-    state directory; an agent that runs it again is told the same."""
+    image its jobs run in without the agent waiting for it. It waits for an environment still being
+    built or pushed for as long as a session can last, and `hl env run` waits for it in turn and
+    says why when it failed. Its output is in env-stage.log of the state directory."""
     if not config.submits_jobs(setup.cfg):
         return
     with open(os.path.join(setup.statedir, "env-stage.log"), "ab") as out:
-        _staging.append(subprocess.Popen(["hl", "env", "stage"], stdin=subprocess.DEVNULL, stdout=out,
+        _staging.append(subprocess.Popen(["hl", "env", "stage", "--timeout", str(_STAGE_TIMEOUT_S)], stdin=subprocess.DEVNULL, stdout=out,
                                          stderr=subprocess.STDOUT, cwd=setup.statedir, start_new_session=True))
 
 

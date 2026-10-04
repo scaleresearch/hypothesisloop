@@ -24,6 +24,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
+	"github.com/scaleresearch/hypothesisloop/cli/internal/watchclient"
 )
 
 // staged is what hl env stage leaves beside the root it extracted, and hl env run reads.
@@ -47,20 +48,27 @@ func stageDir() (string, error) {
 	return filepath.Join(cache, "hl", "env"), nil
 }
 
+// stageWait is how long hl env stage waits before it asks again for an image whose environment is
+// still being built or pushed.
+var stageWait = 5 * time.Second
+
 func envStage(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("env stage", `usage: hl env stage [JOB] [--platform-experiment PE]
+	fs := newFlags("env stage", `usage: hl env stage [JOB] [--platform-experiment PE] [--timeout SECONDS]
 
 Pulls the image job JOB runs in, its environment once built, and extracts it on this machine,
 where hl env run runs commands in it. JOB defaults to the platform experiment's baseline job, so
 with no JOB this is the image every job built on the baseline runs in; the harness stages it in
 the background when a session starts. Stage a job of yours after its commit changed the
-environment, once the environment is built. The machine holds one staged image: a new one
-replaces it once it is whole, until then hl env run uses the old one, and a command already
-running in the old one keeps it until it ends. Staging an image already staged does nothing.
-Prints what it staged as one JSON line.
+environment. While the job's environment is being built or pushed it waits for it, as hl job
+wait waits for a job, and exits 124 at --timeout; it fails at once when the environment failed.
+The machine holds one staged image: a new one replaces it once it is whole, until then hl env
+run uses the old one, and a command already running in the old one keeps it until it ends.
+Staging an image already staged does nothing. Prints what it staged as one JSON line.
 
-Refusals: environment_not_ready (the job's environment is building or failed); run_over.`, stderr)
+Refusals: environment_failed (the job's environment did not build: its message says why);
+run_over.`, stderr)
 	pe := experimentFlag(fs)
+	timeout := fs.Float64("timeout", 540, "give up waiting for the environment after this many `seconds`")
 	operands, err := parseOperands(fs, args)
 	if err != nil {
 		return parseExit(err)
@@ -68,14 +76,8 @@ Refusals: environment_not_ready (the job's environment is building or failed); r
 	if len(operands) > 1 {
 		return parseExit(misuse(fs, "want at most one JOB, got %d", len(operands)))
 	}
-	job := ""
-	if len(operands) == 1 {
-		job = operands[0]
-	} else {
-		var err error
-		if job, err = baselineJob(c, experimentOf(c, *pe)); err != nil {
-			return fail(stderr, fmt.Errorf("env stage: %w", err))
-		}
+	if *timeout <= 0 {
+		return parseExit(misuse(fs, "--timeout wants a positive number of seconds"))
 	}
 	dir, err := stageDir()
 	if err != nil {
@@ -89,7 +91,43 @@ Refusals: environment_not_ready (the job's environment is building or failed); r
 		return fail(stderr, fmt.Errorf("env stage: %w", err))
 	}
 	defer unlock()
+	deadline := time.Now().Add(time.Duration(*timeout * float64(time.Second)))
+	out, err := stageJob(c, dir, operands, *pe, deadline, stderr)
+	if err != nil {
+		code := 1
+		var waited *stageTimeout
+		if errors.As(err, &waited) {
+			code = watchclient.TimeoutExitCode
+		}
+		_ = os.WriteFile(filepath.Join(dir, "stage.failed"), []byte(err.Error()), 0o644)
+		fail(stderr, fmt.Errorf("env stage: %w", err))
+		return code
+	}
+	if err := os.Remove(filepath.Join(dir, "stage.failed")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fail(stderr, fmt.Errorf("env stage: %w", err))
+	}
+	return printStaged(stdout, out)
+}
 
+// stageTimeout is a stage that gave up waiting for its environment, message saying where it is.
+type stageTimeout struct{ message string }
+
+func (e *stageTimeout) Error() string {
+	return "timed out waiting for the environment, which is not ready yet: " + e.message
+}
+
+// stageJob stages the image of the one job of operands, the baseline of pe without one, once its
+// environment is ready, unless it is staged already.
+func stageJob(c *apiclient.Client, dir string, operands []string, pe string, deadline time.Time, stderr io.Writer) (*staged, error) {
+	var job string
+	if len(operands) == 1 {
+		job = operands[0]
+	} else {
+		var err error
+		if job, err = baselineJob(c, experimentOf(c, pe)); err != nil {
+			return nil, err
+		}
+	}
 	var credential struct {
 		Image          string `json:"image"`
 		EnvironmentKey string `json:"environment_key"`
@@ -99,12 +137,26 @@ Refusals: environment_not_ready (the job's environment is building or failed); r
 			Password string `json:"password"`
 		} `json:"login"`
 	}
-	if err := c.Do("POST", "/experiments/"+url.PathEscape(job)+"/image-credentials", nil, &credential); err != nil {
-		return fail(stderr, err)
+	for said := false; ; said = true {
+		err := c.Do("POST", "/experiments/"+url.PathEscape(job)+"/image-credentials", nil, &credential)
+		reason, message := refusalOf(err)
+		if reason != "environment_not_ready" {
+			if err != nil {
+				return nil, err
+			}
+			break
+		}
+		if time.Now().Add(stageWait).After(deadline) {
+			return nil, &stageTimeout{message}
+		}
+		if !said {
+			fmt.Fprintf(stderr, "hl: env stage: waiting until the environment is ready: %s\n", message)
+		}
+		time.Sleep(stageWait)
 	}
 	if current, err := readStaged(dir); err == nil && current.Image == credential.Image {
 		if _, err := os.Stat(current.Root); err == nil {
-			return printStaged(stdout, current)
+			return current, nil
 		}
 	}
 	auth := authn.Anonymous
@@ -114,17 +166,17 @@ Refusals: environment_not_ready (the job's environment is building or failed); r
 	started := time.Now()
 	out, err := stage(context.Background(), dir, credential.Image, auth)
 	if err != nil {
-		return fail(stderr, fmt.Errorf("env stage: %s: %w", credential.Image, err))
+		return nil, fmt.Errorf("%s: %w", credential.Image, err)
 	}
 	out.Job, out.EnvironmentKey = job, credential.EnvironmentKey
 	if err := writeStaged(dir, out); err != nil {
-		return fail(stderr, fmt.Errorf("env stage: %w", err))
+		return nil, err
 	}
 	if err := removeUnused(filepath.Dir(out.Root), out.Root); err != nil {
-		return fail(stderr, fmt.Errorf("env stage: %w", err))
+		return nil, err
 	}
 	fmt.Fprintf(stderr, "hl: env stage: %s staged in %s\n", credential.Image, time.Since(started).Round(time.Second))
-	return printStaged(stdout, out)
+	return out, nil
 }
 
 // baselineJob is the job the platform experiment declared its baseline.
@@ -160,16 +212,18 @@ func lockStage(dir string) (func(), error) {
 	return func() { f.Close() }, nil
 }
 
-func stagingNow(dir string) bool {
+// awaitStage waits for the hl env stage running now on dir to end, reporting whether one was.
+func awaitStage(dir string, stderr io.Writer) bool {
 	f, err := os.OpenFile(filepath.Join(dir, "stage.lock"), os.O_RDWR, 0)
 	if err != nil {
 		return false
 	}
 	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		return true
+	if syscall.Flock(int(f.Fd()), syscall.LOCK_SH|syscall.LOCK_NB) == nil {
+		return false
 	}
-	return false
+	fmt.Fprintln(stderr, "hl: env run: nothing is staged yet and hl env stage is staging now: waiting for it to end")
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_SH) == nil
 }
 
 // stage extracts image into a root of its own under dir/roots, applying its layers in order.
@@ -479,7 +533,8 @@ root of that image, with its environment variables. Your home and /tmp are the m
 so a working tree and what it builds are shared, and the command starts in the current
 directory, which must be under one of them. What it installs into the image stays there until
 the next stage replaces it. The machine has none of a job's accelerators: code builds and
-imports, and what needs the device fails. Exits with COMMAND's status.`, stderr)
+imports, and what needs the device fails. With nothing staged yet it waits for the hl env stage
+running now, and says why when none is. Exits with COMMAND's status.`, stderr)
 	if err := flags.Parse(args); err != nil {
 		return parseExit(err)
 	}
@@ -492,11 +547,15 @@ imports, and what needs the device fails. Exits with COMMAND's status.`, stderr)
 		return fail(stderr, fmt.Errorf("env run: %w", err))
 	}
 	s, _, err := holdStaged(dir)
+	if errors.Is(err, fs.ErrNotExist) && awaitStage(dir, stderr) {
+		s, _, err = holdStaged(dir)
+	}
 	if errors.Is(err, fs.ErrNotExist) {
-		if stagingNow(dir) {
-			return fail(stderr, errors.New("env run: the image is being staged now and nothing was staged before it: run this again once hl env stage ends"))
+		why := "no hl env stage has run here"
+		if failed, readErr := os.ReadFile(filepath.Join(dir, "stage.failed")); readErr == nil {
+			why = "the last hl env stage failed: " + string(failed)
 		}
-		return fail(stderr, errors.New("env run: nothing is staged on this machine: hl env stage stages the image a job runs in, and says why it cannot"))
+		return fail(stderr, fmt.Errorf("env run: nothing is staged on this machine, as %s. Run hl env stage for the baseline's image, or hl env stage JOB for a job of yours, then this again", why))
 	}
 	if err != nil {
 		return fail(stderr, fmt.Errorf("env run: %w", err))
