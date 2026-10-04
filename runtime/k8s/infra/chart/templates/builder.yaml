@@ -1,89 +1,15 @@
 {{- if .Values.builder.enabled }}
 apiVersion: v1
-kind: Secret
+kind: PersistentVolumeClaim
 metadata:
-  name: hypothesisloop-builder-tls
-  namespace: {{ .Release.Namespace }}
-type: Opaque
-stringData:
-  ca.pem: {{ required "builder.tls.ca is required" .Values.builder.tls.ca | quote }}
-  cert.pem: {{ required "builder.tls.cert is required" .Values.builder.tls.cert | quote }}
-  key.pem: {{ required "builder.tls.key is required" .Values.builder.tls.key | quote }}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: hypothesisloop-builder
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app: hypothesisloop-builder
-spec:
-  replicas: 1
-  # Two daemons never share one state directory.
-  strategy:
-    type: Recreate
-  selector:
-    matchLabels:
-      app: hypothesisloop-builder
-  template:
-    metadata:
-      labels:
-        app: hypothesisloop-builder
-      annotations:
-        checksum/tls: {{ print .Values.builder.tls.ca .Values.builder.tls.cert .Values.builder.tls.key | sha256sum }}
-    spec:
-      containers:
-        - name: buildkitd
-          image: {{ .Values.builder.image }}
-          # With a CA named, buildkitd accepts only a client whose certificate that CA signed. The
-          # unix socket, inside the pod only, is what the readiness probe asks.
-          args:
-            - --addr=tcp://0.0.0.0:1234
-            - --addr=unix:///run/buildkit/buildkitd.sock
-            - --tlscacert=/etc/buildkit/tls/ca.pem
-            - --tlscert=/etc/buildkit/tls/cert.pem
-            - --tlskey=/etc/buildkit/tls/key.pem
-          ports:
-            - name: buildkit
-              containerPort: 1234
-          resources:
-            requests:
-              cpu: {{ required "builder.requests.cpu is required" .Values.builder.requests.cpu | quote }}
-              memory: {{ required "builder.requests.memory is required" .Values.builder.requests.memory | quote }}
-          readinessProbe:
-            exec:
-              command: ["buildctl", "debug", "workers"]
-            periodSeconds: 5
-          securityContext:
-            privileged: true
-          volumeMounts:
-            - name: tls
-              mountPath: /etc/buildkit/tls
-              readOnly: true
-            - name: state
-              mountPath: /var/lib/buildkit
-      volumes:
-        - name: tls
-          secret:
-            secretName: hypothesisloop-builder-tls
-        # The layer cache outlives the pod, so a rebuild on the same base pulls nothing again.
-        - name: state
-          hostPath:
-            path: /var/lib/hypothesisloop-builder
-            type: DirectoryOrCreate
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: hypothesisloop-builder
+  name: hypothesisloop-builder-cache
   namespace: {{ .Release.Namespace }}
 spec:
-  type: NodePort
-  selector:
-    app: hypothesisloop-builder
-  ports:
-    - name: buildkit
-      port: 1234
-      targetPort: buildkit
-      nodePort: {{ required "builder.nodePort is required" .Values.builder.nodePort }}
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.builder.cache.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ required "builder.cache.size is required" .Values.builder.cache.size | quote }}
 {{- end }}

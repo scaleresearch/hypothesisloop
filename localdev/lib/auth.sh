@@ -83,42 +83,6 @@ if [[ "$(lib_git_provider)" == "plain" ]]; then
   export HYPOTHESISLOOP_GIT_PASSWORD
 fi
 
-# What the control service builds environments with: the builder box-a runs when attached
-# with BUILDER=true (make cluster-agent-up), whose PEM files it reads at each build from the
-# directory the attach writes, and the Google credentials it pushes with. Those are the ones gcloud
-# keeps for GCP_ACCOUNT, so the push is that account's and no gcloud setting changes. They are
-# linked from a fixed path, which compose mounts whether or not this ran.
-HL_ENVIRONMENT_BUILDER_DIR="${LIB_AUTH_REPO}/localdev/.run/environment-builder"
-HL_GOOGLE_CREDENTIALS="${LIB_AUTH_REPO}/localdev/.run/google-credentials.json"
-lib_environment_builder() {
-  local file account gcloud_file
-  for file in addr cluster ca.pem cert.pem key.pem; do
-    if [[ ! -s "${HL_ENVIRONMENT_BUILDER_DIR}/${file}" ]]; then
-      echo "auth: no ${HL_ENVIRONMENT_BUILDER_DIR}/${file}: attach box-a with its builder, make cluster-agent-up CLUSTER=box-a ... BUILDER=true" >&2
-      return 1
-    fi
-  done
-  account="$(lib_env_value GCP_ACCOUNT)"
-  if [[ -z "${account}" ]]; then
-    echo "auth: .env does not set GCP_ACCOUNT, the Google account environment images are pushed as" >&2
-    return 1
-  fi
-  gcloud_file="${CLOUDSDK_CONFIG:-${HOME}/.config/gcloud}/legacy_credentials/${account}/adc.json"
-  if [[ ! -s "${gcloud_file}" ]]; then
-    echo "auth: gcloud holds no credentials for ${account}; run: CLOUDSDK_CORE_ACCOUNT=${account} CLOUDSDK_CORE_PROJECT=$(lib_env_value GCP_PROJECT) gcloud auth login ${account} --no-activate" >&2
-    return 1
-  fi
-  ln -sfn "${gcloud_file}" "${HL_GOOGLE_CREDENTIALS}"
-  GOOGLE_APPLICATION_CREDENTIALS="${HL_GOOGLE_CREDENTIALS}"
-  HYPOTHESISLOOP_ENVIRONMENT_BUILDER_ADDR="$(<"${HL_ENVIRONMENT_BUILDER_DIR}/addr")"
-  HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CLUSTER="$(<"${HL_ENVIRONMENT_BUILDER_DIR}/cluster")"
-  HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CA="${HL_ENVIRONMENT_BUILDER_DIR}/ca.pem"
-  HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CERT="${HL_ENVIRONMENT_BUILDER_DIR}/cert.pem"
-  HYPOTHESISLOOP_ENVIRONMENT_BUILDER_KEY="${HL_ENVIRONMENT_BUILDER_DIR}/key.pem"
-  export GOOGLE_APPLICATION_CREDENTIALS HYPOTHESISLOOP_ENVIRONMENT_BUILDER_ADDR HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CLUSTER \
-    HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CA HYPOTHESISLOOP_ENVIRONMENT_BUILDER_CERT HYPOTHESISLOOP_ENVIRONMENT_BUILDER_KEY
-}
-
 # lib_render_settings <host address> <output>: the settings the local control plane runs with,
 # which are the committed ones with this host's address and the local identity providers filled
 # in, and the git host: the GitHub App's section when there is one, the local git server otherwise.

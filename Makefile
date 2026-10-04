@@ -2,7 +2,7 @@
 .PHONY: dev reset build test agent-test lint check images job-images sparse-sdpa-workload-image \
 	experimentator-base-image experimentator-image check-tag ui-image check-ui-build-args registry-up prune-images \
 	helm-prepare helm-lint chart-push \
-	controlplane-up controlplane-down controlplane-destroy render-settings environment-builder \
+	controlplane-up controlplane-down controlplane-destroy render-settings \
 	cluster-agent-up cluster-agent-down staff-token token runtime-token \
 	k3s-up k3s-down full-up k3s-dev-nodes-up k3s-dev-nodes-down e2e \
 	full-stop full-start reload stack-not-held \
@@ -85,15 +85,10 @@ BUILDS := images ui-image tt-hardware-image sparse-sdpa-workload-image
 $(BUILDS):
 	@python3 localdev/images-lock.py $(MAKE) locked-$@ TAG="$(TAG)"
 
-# The control service does not start without its environment builder and Google credentials
-# (localdev/lib/auth.sh's lib_environment_builder), so that is checked before any image is built.
-environment-builder:
-	@bash -c '. localdev/lib/auth.sh && lib_environment_builder'
-
 # compose is started under auth.sh, which exports the GitHub App's secrets when .env has an App:
 # a PEM does not survive being a make variable.
-controlplane-up: environment-builder registry-up render-settings images
-	bash -c '. localdev/lib/auth.sh && lib_environment_builder && podman compose -f $(COMPOSE_FILE) up -d'
+controlplane-up: registry-up render-settings images
+	bash -c '. localdev/lib/auth.sh && podman compose -f $(COMPOSE_FILE) up -d'
 	@until curl -fsS -o /dev/null http://localhost:$${API_HOST_PORT:-8081}/health; do sleep 1; done
 	@until curl -fsS -o /dev/null http://localhost:8084/health; do sleep 1; done
 	bash -c '. localdev/lib/auth.sh && lib_register_clusters && lib_register_local_cluster'
@@ -177,10 +172,8 @@ reset:
 # make images pushed to REGISTRY under TAG.
 # RUNTIME_TOKEN comes from the environment and is passed on by name, so neither this recipe's
 # echo nor a process list shows it.
-# BUILDER=true also runs the platform's image builder there and writes what this machine's
-# control plane reaches it with to BUILDER_CLIENT_DIR (install.sh's BUILDER_CLIENT_DIR).
+# BUILDER=true also builds environments there (install.sh's BUILDER).
 # Usage: RUNTIME_TOKEN="$$(make -s runtime-token CLUSTER=<name>)" make cluster-agent-up CLUSTER=<name> API_URL=... METRICS_URL=... [REGISTRY=...] [TAG=...] [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...] [BUILDER=true]
-BUILDER_CLIENT_DIR := $(CURDIR)/localdev/.run/environment-builder
 cluster-agent-up:
 	@test -n "$(CLUSTER)" || { echo "make cluster-agent-up: CLUSTER=<name> is required, the name the cluster was registered under" >&2; exit 1; }
 	@test -n "$(API_URL)" || { echo "make cluster-agent-up: API_URL is required, the control-plane API as a pod in that cluster reaches it" >&2; exit 1; }
@@ -189,7 +182,7 @@ cluster-agent-up:
 	@test -n "$$RUNTIME_TOKEN" || { echo "make cluster-agent-up: RUNTIME_TOKEN must be in the environment, the token make -s runtime-token CLUSTER=$(CLUSTER) printed" >&2; exit 1; }
 	CLUSTER_NAME="$(CLUSTER)" API_URL="$(API_URL)" METRICS_URL="$(METRICS_URL)" REGISTRY_URL="$(REGISTRY)" TAG="$(TAG)" \
 	  RUNTIME_TOKEN="$$RUNTIME_TOKEN" KUBECONFIG_PATH="$(KUBECONFIG_PATH)" KUBE_CONTEXT="$(KUBE_CONTEXT)" \
-	  BUILDER_CLIENT_DIR="$(if $(filter true,$(BUILDER)),$(BUILDER_CLIENT_DIR))" bash runtime/k8s/infra/install.sh
+	  BUILDER="$(BUILDER)" bash runtime/k8s/infra/install.sh
 
 cluster-agent-down:
 	bash runtime/k8s/infra/destroy.sh

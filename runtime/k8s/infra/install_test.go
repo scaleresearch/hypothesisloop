@@ -2,8 +2,6 @@ package infra
 
 import (
 	"bytes"
-	"crypto/tls"
-	"crypto/x509"
 	"io"
 	"os"
 	"os/exec"
@@ -21,20 +19,13 @@ import (
 const secretToken = "hls_dGhlLXNlY3JldA.c2lnbmF0dXJl"
 
 // fakeBin puts a helm that records its arguments and its stdin, and a kubectl that names a
-// context, reaches its API at box.example and gives the builder's Service node port 31234, ahead
-// of the real ones.
+// context, ahead of the real ones.
 func fakeBin(t *testing.T) (dir, argsFile, stdinFile string) {
 	t.Helper()
 	dir = t.TempDir()
 	argsFile, stdinFile = filepath.Join(dir, "helm.args"), filepath.Join(dir, "helm.stdin")
 	helm := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argsFile + "\ncat > " + stdinFile + "\n"
-	kubectl := `#!/bin/sh
-case "$*" in
-  *"config view"*) echo https://box.example:6443 ;;
-  *"get service"*) echo 31234 ;;
-  *) echo test-context ;;
-esac
-`
+	kubectl := "#!/bin/sh\necho test-context\n"
 	for name, script := range map[string]string{"helm": helm, "kubectl": kubectl} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
 			t.Fatal(err)
@@ -67,7 +58,7 @@ func TestInstallHandsHelmTheRuntimeTokenOnStdinAndNeverAsAnArgument(t *testing.T
 	if !strings.Contains(string(args), "clusterName=edge") {
 		t.Errorf("helm arguments = %q, want the other values still set", args)
 	}
-	if strings.Contains(string(args), "builder.") {
+	if !strings.Contains(string(args), "builder.enabled=false\n") {
 		t.Errorf("helm arguments = %q, want no builder unasked", args)
 	}
 	// A cluster that ran the runtime before the chart owned the jobs namespace has one no release
@@ -77,81 +68,98 @@ func TestInstallHandsHelmTheRuntimeTokenOnStdinAndNeverAsAnArgument(t *testing.T
 	}
 }
 
-// The control plane reaches the builder at the host the attach reached the cluster's API at, and
-// only with the client certificate the attach left it.
-func TestInstallWithABuilderLeavesTheControlPlaneItsAddressAndCredentials(t *testing.T) {
-	if _, err := exec.LookPath("openssl"); err != nil {
-		t.Skip("openssl is not installed")
-	}
+func TestInstallWithBuilderTrueEnablesTheBuilder(t *testing.T) {
 	bin, argsFile, _ := fakeBin(t)
-	client := filepath.Join(t.TempDir(), "builder")
-	cmd := exec.Command("bash", "install.sh")
-	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "BUILDER_CLIENT_DIR="+client,
-		"CLUSTER_NAME=edge", "API_URL=http://api", "METRICS_URL=http://metrics", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("install.sh: %v\n%s", err, out)
-	}
-	args, _ := os.ReadFile(argsFile)
-	if !strings.Contains(string(args), "builder.enabled=true\n") || !strings.Contains(string(args), "builder.tls.key=") {
-		t.Errorf("helm arguments = %q, want the builder enabled with its certificate", args)
-	}
-	if addr, _ := os.ReadFile(filepath.Join(client, "addr")); string(addr) != "tcp://box.example:31234\n" {
-		t.Errorf("addr = %q", addr)
-	}
-	if cluster, _ := os.ReadFile(filepath.Join(client, "cluster")); string(cluster) != "edge\n" {
-		t.Errorf("cluster = %q, want the cluster the builder runs on", cluster)
-	}
-	if info, err := os.Stat(filepath.Join(client, "key.pem")); err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("key.pem: %v, %v; want it readable by its owner only", info, err)
-	}
-	pair, err := tls.LoadX509KeyPair(filepath.Join(client, "cert.pem"), filepath.Join(client, "key.pem"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	caPEM, _ := os.ReadFile(filepath.Join(client, "ca.pem"))
-	roots := x509.NewCertPool()
-	if !roots.AppendCertsFromPEM(caPEM) {
-		t.Fatal("ca.pem holds no certificate")
-	}
-	leaf, err := x509.ParseCertificate(pair.Certificate[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); err != nil {
-		t.Errorf("the client certificate is not one the builder accepts: %v", err)
+	for builder, want := range map[string]string{"true": "builder.enabled=true\n", "yes": ""} {
+		cmd := exec.Command("bash", "install.sh")
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "BUILDER="+builder,
+			"CLUSTER_NAME=edge", "API_URL=http://api", "METRICS_URL=http://metrics", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
+		out, err := cmd.CombinedOutput()
+		if want == "" {
+			if err == nil {
+				t.Errorf("BUILDER=%s installed, want it refused", builder)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("install.sh: %v\n%s", err, out)
+		}
+		if args, _ := os.ReadFile(argsFile); !strings.Contains(string(args), want) {
+			t.Errorf("helm arguments = %q, want %q", args, want)
+		}
 	}
 }
 
-func TestTheBuilderIsReachedOnANodePortOnlyWhenEnabled(t *testing.T) {
-	if services := ofKind(render(t), "Service"); len(services) != 0 {
+// The builder is a rootless sidecar of the cluster-agent reached over a socket in the pod: no
+// port, no certificate, nothing privileged, and its cache on a volume of its own.
+func TestTheBuilderIsARootlessSidecarOfTheAgentOnlyWhenEnabled(t *testing.T) {
+	plain := render(t)
+	if services := ofKind(plain, "Service"); len(services) != 0 {
 		t.Fatalf("unasked, the chart rendered Services %v", services)
 	}
-	objects := render(t, "builder.enabled=true", "builder.tls.ca=c", "builder.tls.cert=c", "builder.tls.key=k")
-	services := ofKind(objects, "Service")
-	if len(services) != 1 {
-		t.Fatalf("the chart rendered %d Services, want the builder's", len(services))
+	if claims := ofKind(plain, "PersistentVolumeClaim"); len(claims) != 0 {
+		t.Fatalf("unasked, the chart rendered claims %v", claims)
 	}
-	spec := services[0]["spec"].(map[string]any)
-	if spec["type"] != "NodePort" || spec["ports"].([]any)[0].(map[string]any)["nodePort"] != float64(31234) {
-		t.Errorf("builder Service spec = %v", spec)
+	for _, deployment := range ofKind(plain, "Deployment") {
+		spec := podSpec(deployment)
+		if _, sidecar := spec["initContainers"]; sidecar || envValue(spec["containers"].([]any)[0], "HYPOTHESISLOOP_BUILDS") != nil {
+			t.Errorf("unasked, %s builds", metadata(deployment, "name"))
+		}
 	}
-	for _, deployment := range ofKind(objects, "Deployment") {
-		if metadata(deployment, "name") != "hypothesisloop-builder" {
-			continue
-		}
-		container := podSpec(deployment)["containers"].([]any)[0].(map[string]any)
-		args := container["args"].([]any)
-		if !slices.Contains(args, any("--tlscacert=/etc/buildkit/tls/ca.pem")) {
-			t.Errorf("buildkitd args = %v, want client certificates required", args)
-		}
-		// Requested, the builder's share is left out of the capacity the cluster reports.
-		requests, _ := container["resources"].(map[string]any)["requests"].(map[string]any)
-		if requests["cpu"] != "4" || requests["memory"] != "8Gi" {
-			t.Errorf("buildkitd requests = %v, want builder.requests", requests)
-		}
-		return
+
+	objects := render(t, "builder.enabled=true")
+	if services := ofKind(objects, "Service"); len(services) != 0 {
+		t.Errorf("the builder is reached through Services %v", services)
 	}
-	t.Fatal("the chart rendered no builder Deployment")
+	if secrets := ofKind(objects, "Secret"); len(secrets) != 1 || metadata(secrets[0], "name") != "hypothesisloop-runtime-token" {
+		t.Errorf("the chart rendered Secrets %v, want the runtime token's alone", secrets)
+	}
+	if claims := ofKind(objects, "PersistentVolumeClaim"); len(claims) != 1 {
+		t.Errorf("the chart rendered %d claims, want the builder's cache", len(claims))
+	}
+	deployments := ofKind(objects, "Deployment")
+	if len(deployments) != 1 || metadata(deployments[0], "name") != "hypothesisloop-cluster-agent" {
+		t.Fatalf("the chart rendered Deployments %v, want the cluster-agent's alone", deployments)
+	}
+	spec := podSpec(deployments[0])
+	sidecars := spec["initContainers"].([]any)
+	if len(sidecars) != 1 {
+		t.Fatalf("init containers %v, want the builder", sidecars)
+	}
+	buildkitd := sidecars[0].(map[string]any)
+	if buildkitd["restartPolicy"] != "Always" || !strings.Contains(buildkitd["image"].(string), "-rootless@sha256:") {
+		t.Errorf("buildkitd %v, want a rootless sidecar", buildkitd)
+	}
+	if _, ports := buildkitd["ports"]; ports {
+		t.Errorf("buildkitd listens on ports %v", buildkitd["ports"])
+	}
+	security := buildkitd["securityContext"].(map[string]any)
+	if security["privileged"] == true || security["runAsUser"] != float64(1000) {
+		t.Errorf("buildkitd security %v, want unprivileged as the rootless user", security)
+	}
+	if args := buildkitd["args"].([]any); !slices.Contains(args, any("--addr=unix:///run/buildkit/buildkitd.sock")) || len(args) != 2 {
+		t.Errorf("buildkitd args %v, want the pod's socket alone", args)
+	}
+	// Requested, the builder's share is left out of the capacity the cluster reports.
+	requests, _ := buildkitd["resources"].(map[string]any)["requests"].(map[string]any)
+	if requests["cpu"] != "4" || requests["memory"] != "8Gi" {
+		t.Errorf("buildkitd requests = %v, want builder.requests", requests)
+	}
+	if builds := envValue(spec["containers"].([]any)[0], "HYPOTHESISLOOP_BUILDS"); builds != "unix:///run/buildkit/buildkitd.sock" {
+		t.Errorf("HYPOTHESISLOOP_BUILDS = %v, want the sidecar's socket", builds)
+	}
+	if deployments[0]["spec"].(map[string]any)["strategy"].(map[string]any)["type"] != "Recreate" {
+		t.Error("two daemons would share the cache during a rollout")
+	}
+}
+
+func envValue(container any, name string) any {
+	for _, env := range container.(map[string]any)["env"].([]any) {
+		if env.(map[string]any)["name"] == name {
+			return env.(map[string]any)["value"]
+		}
+	}
+	return nil
 }
 
 // make echoes a recipe before running it, so the token must not be spelled into one.

@@ -96,9 +96,13 @@ metadata:
     app: hypothesisloop-cluster-agent
 spec:
   # Every replica independently reconciles (the reconcile exchange is idempotent, and
-  # Job create/delete are idempotent), so no leader election is needed — safe to scale this
-  # up for availability without any coordination. One is enough for most deployments.
+  # Job create/delete are idempotent), so no leader election is needed. One is enough for most
+  # deployments, and the only count with the builder, whose cache one daemon owns.
   replicas: 1
+  {{- if .Values.builder.enabled }}
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       app: hypothesisloop-cluster-agent
@@ -108,6 +112,45 @@ spec:
         app: hypothesisloop-cluster-agent
     spec:
       serviceAccountName: hypothesisloop-cluster-agent
+      {{- if .Values.builder.enabled }}
+      # The cache volume and the socket are the rootless daemon's user's, and that group reaches
+      # them.
+      securityContext:
+        fsGroup: 1000
+      # A sidecar: started, and ready, before the agent, which reports this cluster as one that
+      # builds as soon as it runs.
+      initContainers:
+        - name: buildkitd
+          image: {{ .Values.builder.image }}
+          restartPolicy: Always
+          args:
+            - --addr=unix:///run/buildkit/buildkitd.sock
+            # Unprivileged, the daemon cannot mount a /proc of its own for a RUN, so a RUN shares
+            # the daemon's process namespace.
+            - --oci-worker-no-process-sandbox
+          resources:
+            requests:
+              cpu: {{ required "builder.requests.cpu is required" .Values.builder.requests.cpu | quote }}
+              memory: {{ required "builder.requests.memory is required" .Values.builder.requests.memory | quote }}
+          startupProbe:
+            exec:
+              command: ["buildctl", "--addr=unix:///run/buildkit/buildkitd.sock", "debug", "workers"]
+            periodSeconds: 2
+            failureThreshold: 60
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            # rootlesskit makes the user namespace the daemon and every RUN live in.
+            seccompProfile:
+              type: Unconfined
+            appArmorProfile:
+              type: Unconfined
+          volumeMounts:
+            - name: buildkit-socket
+              mountPath: /run/buildkit
+            - name: buildkit-cache
+              mountPath: /home/user/.local/share/buildkit
+      {{- end }}
       containers:
         - name: cluster-agent
           image: {{ required "images.registry is required" .Values.images.registry }}/hypothesisloop-cluster-agent:{{ required "images.tag is required" .Values.images.tag }}
@@ -128,15 +171,26 @@ spec:
             # never heuristically detected. See autoscaler.md.
             - name: AUTOSCALER_ENABLED
               value: {{ .Values.autoscalerEnabled | quote }}
+            {{- if .Values.builder.enabled }}
+            # The daemon this cluster builds environments on. Set, the agent reports that it builds.
+            - name: HYPOTHESISLOOP_BUILDS
+              value: unix:///run/buildkit/buildkitd.sock
+            {{- end }}
           resources:
             requests:
               cpu: "10m"
               memory: "32Mi"
             # See node-agent.yaml's resources comment: a tight cpu limit starves
-            # the container's own startup handshake, not just its steady-state work.
+            # the container's own startup handshake, not just its steady-state work. A build's
+            # session and output stream are the agent's to hold.
             limits:
               cpu: "300m"
-              memory: "64Mi"
+              memory: {{ if .Values.builder.enabled }}"128Mi"{{ else }}"64Mi"{{ end }}
+          {{- if .Values.builder.enabled }}
+          volumeMounts:
+            - name: buildkit-socket
+              mountPath: /run/buildkit
+          {{- end }}
       # Runs on a node kept free of workloads (local development's no-workload taint) or on a
       # control-plane node, so it has somewhere to run before any workload node is attached.
       # Never a toleration of every taint, as node-agent.yaml has: that covers
@@ -147,3 +201,11 @@ spec:
           operator: Exists
         - key: node-role.kubernetes.io/control-plane
           operator: Exists
+      {{- if .Values.builder.enabled }}
+      volumes:
+        - name: buildkit-socket
+          emptyDir: {}
+        - name: buildkit-cache
+          persistentVolumeClaim:
+            claimName: hypothesisloop-builder-cache
+      {{- end }}

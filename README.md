@@ -666,13 +666,13 @@ RUNTIME_TOKEN="$(hl cluster token 'my-cluster' --org "$HL_ORG")" make cluster-ag
 ```
 
 Left out, `REGISTRY` and `TAG` are the local development registry and the tag of this checkout,
-which only the local cluster pulls. `BUILDER=true` also runs the platform's image builder
-(BuildKit) there, on node port 31234 of the host `KUBE_CONTEXT` reaches the cluster's API at,
-accepting only the client certificate the same install writes, with that address, to
-`localdev/.run/environment-builder` (`addr`, `cluster`, `ca.pem`, `cert.pem`, `key.pem`). Each install
-makes new certificates. An install without it removes the builder. The builder requests
-`builder.requests` of the chart (4 cores and 8 GiB), which the cluster leaves out of the capacity
-it reports for jobs.
+which only the local cluster pulls. `BUILDER=true` also makes the cluster build environments
+for the orgs whose jobs it may run: a rootless BuildKit runs as a sidecar of the cluster-agent,
+reached over a unix socket inside the pod, with its layer cache on a volume
+(`builder.cache`). The agent builds what the control plane assigns it and fetches each push's
+registry login from the control plane at push time. An install without it removes the builder.
+The builder requests `builder.requests` of the chart (4 cores and 8 GiB), which the cluster
+leaves out of the capacity it reports for jobs.
 
 A cluster that holds the runtime's objects from before the chart existed (applied as plain manifests, no helm release) refuses the install: delete the old
 `hypothesisloop-cluster-agent` Deployment and `hypothesisloop-node-agent` DaemonSet first.
@@ -775,10 +775,10 @@ The signing secret is the deployment's own: control-service and metrics-service 
 the variable. Local development's is made by the first render (`localdev/.run/signing-secret`)
 and supplied by `make`. Whoever holds the secret can derive every token, so rotating it ends them all.
 
-control-service does not start without the builder it builds environment images on and the Google
-credentials it pushes them with either. Locally `make` takes the builder from
-`localdev/.run/environment-builder`, which attaching box-a with `BUILDER=true` writes, and the
-credentials gcloud holds for `GCP_ACCOUNT` of `.env`.
+control-service mints the environment registry's logins with its own Google identity, read as
+application default credentials. Locally that is the file `gcloud auth application-default login`
+writes to its well-known path, `~/.config/gcloud/application_default_credentials.json`, which
+`make dev` finds there and the compose stack mounts.
 
 A cluster runs the jobs of its own org and no other. Admission places a job on a cluster of
 the job's org or on a shared cluster, and a job whose org has neither waits with

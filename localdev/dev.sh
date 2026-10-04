@@ -201,7 +201,6 @@ start_control_plane() {
     echo "dev: ${settings} does not load with this tree; render it again with make dev or make dev-hosted" >&2
     exit 1
   fi
-  lib_environment_builder || exit 1
   stop control-service
   stop metrics-service
   require_port 8081
