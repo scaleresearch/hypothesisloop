@@ -40,11 +40,21 @@ builder:
   requests:
     cpu: "4"
     memory: 8Gi
+  # The most memory the daemon and every RUN it runs hold together. A RUN past it is killed and
+  # its build fails as the file's, with the kill in its output; the node's jobs keep theirs.
+  limits:
+    memory: 8Gi
   # The layer cache, a volume that outlives the pod, so a build again on the same base pulls
-  # nothing again. An empty storageClassName takes the cluster's default class.
+  # nothing again. An empty storageClassName takes the cluster's default class. The daemon prunes
+  # the least recently used layers once the cache holds more than maxUsedGB or its disk has less
+  # than minFreeGB free, never below reservedGB. A local-path volume does not hold the cache to
+  # size, so these are what bound it: maxUsedGB stays under size.
   cache:
     size: 100Gi
     storageClassName: ""
+    reservedGB: 10
+    minFreeGB: 20
+    maxUsedGB: 80
   # The containerd socket of the node the cluster-agent runs on, as a path on that node (k3s:
   # /run/k3s/containerd/containerd.sock). Set, each environment built is also loaded into that
   # node's images, so a job placed there starts without pulling back what was just pushed; a job

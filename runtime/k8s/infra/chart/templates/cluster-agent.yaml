@@ -139,10 +139,14 @@ spec:
             # Unprivileged, the daemon cannot mount a /proc of its own for a RUN, so a RUN shares
             # the daemon's process namespace.
             - --oci-worker-no-process-sandbox
+            # Reserved, free and most used, in MB (values.yaml builder.cache).
+            - --oci-worker-gc-keepstorage={{ mul (required "builder.cache.reservedGB is required" .Values.builder.cache.reservedGB) 1000 }},{{ mul (required "builder.cache.minFreeGB is required" .Values.builder.cache.minFreeGB) 1000 }},{{ mul (required "builder.cache.maxUsedGB is required" .Values.builder.cache.maxUsedGB) 1000 }}
           resources:
             requests:
               cpu: {{ required "builder.requests.cpu is required" .Values.builder.requests.cpu | quote }}
               memory: {{ required "builder.requests.memory is required" .Values.builder.requests.memory | quote }}
+            limits:
+              memory: {{ required "builder.limits.memory is required" .Values.builder.limits.memory | quote }}
           startupProbe:
             exec:
               command: ["buildctl", "--addr=unix:///run/buildkit/buildkitd.sock", "debug", "workers"]

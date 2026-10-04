@@ -138,13 +138,17 @@ func TestTheBuilderIsARootlessSidecarOfTheAgentOnlyWhenEnabled(t *testing.T) {
 	if security["privileged"] == true || security["runAsUser"] != float64(1000) {
 		t.Errorf("buildkitd security %v, want unprivileged as the rootless user", security)
 	}
-	if args := buildkitd["args"].([]any); !slices.Contains(args, any("--addr=unix:///run/buildkit/buildkitd.sock")) || len(args) != 2 {
-		t.Errorf("buildkitd args %v, want the pod's socket alone", args)
+	if args := buildkitd["args"].([]any); !slices.Contains(args, any("--addr=unix:///run/buildkit/buildkitd.sock")) || !slices.Contains(args, any("--oci-worker-gc-keepstorage=10000,20000,80000")) || len(args) != 3 {
+		t.Errorf("buildkitd args %v, want the pod's socket alone and its cache pruned past builder.cache", args)
 	}
 	// Requested, the builder's share is left out of the capacity the cluster reports.
 	requests, _ := buildkitd["resources"].(map[string]any)["requests"].(map[string]any)
 	if requests["cpu"] != "4" || requests["memory"] != "8Gi" {
 		t.Errorf("buildkitd requests = %v, want builder.requests", requests)
+	}
+	// Bounded, a RUN that grows past the limit is killed, not the node's jobs.
+	if limits, _ := buildkitd["resources"].(map[string]any)["limits"].(map[string]any); limits["memory"] != "8Gi" {
+		t.Errorf("buildkitd limits = %v, want builder.limits", limits)
 	}
 	if builds := envValue(spec["containers"].([]any)[0], "HYPOTHESISLOOP_BUILDS"); builds != "unix:///run/buildkit/buildkitd.sock" {
 		t.Errorf("HYPOTHESISLOOP_BUILDS = %v, want the sidecar's socket", builds)
