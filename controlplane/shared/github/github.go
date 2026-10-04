@@ -145,6 +145,34 @@ func (e *CreationFailedError) Error() string {
 	return fmt.Sprintf("github: the repository was not created: GitHub answered %d: %s", e.Status, e.Message)
 }
 
+// FailedError is GitHub failing a call the platform made for an installation: it answered 5xx,
+// with Status and its Message, often empty, or did not answer, with Status 0.
+type FailedError struct {
+	Installation int64
+	Status       int
+	Message      string
+	Err          error
+}
+
+func (e *FailedError) Error() string {
+	return fmt.Sprintf("github: installation %d: %v", e.Installation, e.Err)
+}
+
+func (e *FailedError) Unwrap() error { return e.Err }
+
+// failedFor names the installation a call GitHub failed was made for.
+func failedFor(installationID int64, err error) error {
+	if !errors.Is(err, errFailed) {
+		return err
+	}
+	failed := &FailedError{Installation: installationID, Err: err}
+	var refused *refusal
+	if errors.As(err, &refused) {
+		failed.Status, failed.Message = refused.status, refused.message
+	}
+	return failed
+}
+
 // Access is what an installation token may do to the repository's contents.
 type Access string
 
@@ -445,7 +473,7 @@ func (c *Client) Installation(ctx context.Context, installationID int64) (*Insta
 	case errors.Is(err, errUnauthorized):
 		return nil, ErrAppCredentials
 	case err != nil:
-		return nil, err
+		return nil, failedFor(installationID, err)
 	}
 	if out.SuspendedAt != nil {
 		return nil, ErrInstallationGone
@@ -474,7 +502,7 @@ func (c *Client) Repositories(ctx context.Context, installationID int64) ([]Repo
 		}
 		path := fmt.Sprintf("/installation/repositories?per_page=%d&page=%d", pageSize, page)
 		if err := c.call(ctx, http.MethodGet, path, token.Token, nil, &out); err != nil {
-			return nil, err
+			return nil, failedFor(installationID, err)
 		}
 		for _, one := range out.Repositories {
 			if ValidRepository(one.FullName) != nil {
@@ -544,7 +572,7 @@ func (c *Client) CreateRepository(ctx context.Context, installationID int64, use
 	case errors.As(err, &refused):
 		return nil, &CreationFailedError{Status: refused.status, Message: refused.message}
 	case err != nil:
-		return nil, err
+		return nil, failedFor(installationID, err)
 	}
 	// The name is also what says the person behind userToken owns the installation's account.
 	if out.ID <= 0 || ValidRepository(out.FullName) != nil {
@@ -695,7 +723,7 @@ func (c *Client) mint(ctx context.Context, installationID int64, body map[string
 	case errors.Is(err, errUnauthorized):
 		return nil, ErrAppCredentials
 	case err != nil:
-		return nil, err
+		return nil, failedFor(installationID, err)
 	}
 	if out.Token == "" || out.ExpiresAt.IsZero() {
 		return nil, fmt.Errorf("github: POST %s answered without a token or its expiry", routeOf(path))
@@ -823,6 +851,8 @@ var (
 	errUnauthorized  = errors.New("unauthorized")
 	errForbidden     = errors.New("forbidden")
 	errUnprocessable = errors.New("unprocessable")
+	// errFailed is GitHub answering 5xx or not answering at all.
+	errFailed = errors.New("github failed the call")
 )
 
 // refusal is an answer of GitHub that is not a success: one of the kinds above, or nil for any
@@ -875,7 +905,7 @@ func (c *Client) request(ctx context.Context, method, path, authorization string
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("github: %s %s did not complete: %w", method, routeOf(path), transportError(err))
+		return fmt.Errorf("%w (github: %s %s did not complete: %w)", errFailed, method, routeOf(path), transportError(err))
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
@@ -924,6 +954,8 @@ func (c *Client) request(ctx context.Context, method, path, authorization string
 		refused.kind = errForbidden
 	case resp.StatusCode == http.StatusUnprocessableEntity:
 		refused.kind = errUnprocessable
+	case resp.StatusCode >= 500:
+		refused.kind = errFailed
 	}
 	return refused
 }

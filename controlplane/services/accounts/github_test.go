@@ -680,6 +680,16 @@ func TestRepositoriesAreReadFromGitHubOnEveryCallAcrossTheOrgsInstallations(t *t
 	if message := w.refused("member", "GET", path, nil, http.StatusServiceUnavailable, ReasonUnavailable); strings.Contains(message, leak) {
 		t.Fatalf("the answer repeats the failure's text: %s", message)
 	}
+	// GitHub failing is told apart from the platform failing, and names the installation.
+	w.app.listErr[200] = &github.FailedError{Installation: 200, Status: 500, Err: errors.New(leak)}
+	message := w.refused("member", "GET", path, nil, http.StatusBadGateway, ReasonGitHubFailed)
+	if !strings.Contains(message, "GitHub") || !strings.Contains(message, "installation 200") || !strings.Contains(message, "answered 500") || strings.Contains(message, leak) {
+		t.Fatalf("GitHub failing: %s, want GitHub, the installation and its status named and nothing else", message)
+	}
+	w.app.listErr[200] = &github.FailedError{Installation: 200, Err: errors.New(leak)}
+	if message := w.refused("member", "GET", path, nil, http.StatusBadGateway, ReasonGitHubFailed); !strings.Contains(message, "did not answer") {
+		t.Fatalf("GitHub not answering: %s", message)
+	}
 	w.app.listErr[200] = errors.New("unexpected " + leak)
 	w.refused("member", "GET", path, nil, http.StatusInternalServerError, "")
 }
@@ -862,7 +872,8 @@ func TestACredentialIsRefusedOnceTheRepositoryCanNoLongerBeReached(t *testing.T)
 		"the installation withholds the access":            {func(w *githubWorld) { w.app.tokenErr = github.ErrPermissionNotGranted }, 409, ReasonPermissionNotGranted},
 		"github rate limits":                               {func(w *githubWorld) { w.app.tokenErr = github.ErrRateLimited }, 503, ReasonUnavailable},
 		"the app key expired":                              {func(w *githubWorld) { w.app.tokenErr = fmt.Errorf("%w (%s)", github.ErrAppCredentials, leak) }, 502, ReasonUnavailable},
-		"something else":                                   {func(w *githubWorld) { w.app.tokenErr = errors.New("unexpected " + leak) }, 500, ""},
+		"github fails":                                     {func(w *githubWorld) { w.app.tokenErr = &github.FailedError{Installation: 100, Status: 500, Err: errors.New(leak)} }, 502, ReasonGitHubFailed},
+		"something else":                                 {func(w *githubWorld) { w.app.tokenErr = errors.New("unexpected " + leak) }, 500, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := newGitHubWorld(t, true)

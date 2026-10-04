@@ -119,6 +119,7 @@ const (
 	ReasonRunOver                         = "run_over"
 	ReasonForbidden                       = "forbidden"
 	ReasonUnavailable                     = "unavailable"
+	ReasonGitHubFailed                    = "github_failed"
 )
 
 // choiceRequired is the refusal of a connect that named no installation while the person
@@ -139,9 +140,10 @@ var errNoInstallation = errors.New("the org has connected no GitHub account")
 
 // refusal turns what GitHub or the store refused into what the caller is told. gone is the
 // status of a repository the org's installations do not reach: 422 where a request names it,
-// 409 where a platform experiment already does. Anything else is the platform's or GitHub's
-// failure: it is logged and answered without its text, but for a create GitHub refused, whose
-// answer is GitHub's own message.
+// 409 where a platform experiment already does. GitHub failing a call for an installation is
+// 502 github_failed, naming the installation and what GitHub answered. Anything else is the
+// platform's failure or GitHub's: it is logged and answered without its text, but for a create
+// GitHub refused, whose answer is GitHub's own message.
 func refusal(logger *zap.Logger, op string, err error, gone int) error {
 	var status huma.StatusError
 	var uncommitted *github.FirstCommitError
@@ -149,6 +151,7 @@ func refusal(logger *zap.Logger, op string, err error, gone int) error {
 	var notPermitted *github.CreationNotPermittedError
 	var failed *github.CreationFailedError
 	var notAsAsked *github.NotAsAskedError
+	var githubFailed *github.FailedError
 	switch {
 	case errors.As(err, &status):
 		return err
@@ -209,6 +212,13 @@ func refusal(logger *zap.Logger, op string, err error, gone int) error {
 	case errors.Is(err, github.ErrAppCredentials):
 		logger.Error("github refused the App's credentials", zap.String("operation", op), zap.Error(err))
 		return api.Refuse(http.StatusBadGateway, ReasonUnavailable, "the platform could not authenticate to GitHub")
+	case errors.As(err, &githubFailed):
+		logger.Error("github failed a call for an installation", zap.String("operation", op), zap.Int64("installationID", githubFailed.Installation), zap.Error(err))
+		answered := "did not answer"
+		if githubFailed.Status != 0 {
+			answered = "answered " + strconv.Itoa(githubFailed.Status) + " " + strconv.Quote(githubFailed.Message)
+		}
+		return api.Refuse(http.StatusBadGateway, ReasonGitHubFailed, "GitHub failed the platform's call for GitHub App installation "+strconv.FormatInt(githubFailed.Installation, 10)+": it "+answered+". Try again later, and if GitHub keeps failing, the owner of the GitHub App reports it to GitHub Support with the installation id")
 	default:
 		return auth.Internal(logger, "github request failed", err, zap.String("operation", op))
 	}
@@ -541,6 +551,7 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 			"repositories whose owner/name contains it, whatever the casing. Nothing is kept between calls: each one asks GitHub for every " +
 			"repository of every connected installation, a hundred to a request, and pages the result here, so X-Total-Count is exact and a call " +
 			"costs as many GitHub requests as the installations hold hundreds of repositories. An installation removed on GitHub is left out. " +
+			"502 github_failed when GitHub answers 5xx or not at all for an installation, the message naming it and GitHub's answer. " +
 			"503 github_not_configured.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
@@ -577,6 +588,7 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 			"403 forbidden for any other kind of token. 404 no_repository when the platform experiment names none, 404 not_found for another address. " +
 			"409 installation_not_connected when the org disconnected the installation, repository_not_reachable when the repository left it, " +
 			"installation_gone when the App was removed on GitHub, permission_not_granted when its owner has yet to accept the App's permissions. " +
+			"502 github_failed when GitHub answers 5xx or not at all for the installation, the message naming it and GitHub's answer. " +
 			"On a deployment whose git host is plain the credential is the deployment's one, the same for every caller and with no expires_at, " +
 			"and 404 not_found when that host takes none.",
 	}, func(ctx context.Context, in *struct {

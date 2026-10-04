@@ -1296,6 +1296,37 @@ func TestTokenRefusals(t *testing.T) {
 	}
 }
 
+// GitHub has answered a scoped installation token with a bare 500: that reads as GitHub failing,
+// for the installation the call was made for.
+func TestGitHubFailingACallNamesTheInstallation(t *testing.T) {
+	_, client := newFakeGitHub(t)
+	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(broken.Close)
+	calls := map[string]func() error{
+		"Installation": func() error { _, err := client.Installation(ctx, 100); return err },
+		"Repositories": func() error { _, err := client.Repositories(ctx, 100); return err },
+		"Token":        func() error { _, err := client.Token(ctx, 100, "acme/model", Write); return err },
+		"CreateRepository": func() error {
+			_, err := client.CreateRepository(ctx, 100, "", "fresh", "", firstFiles)
+			return err
+		},
+	}
+	for _, server := range []struct {
+		url    string
+		status int
+	}{{broken.URL, http.StatusInternalServerError}, {"http://127.0.0.1:1", 0}} {
+		client.apiURL = server.url
+		for name, call := range calls {
+			var failed *FailedError
+			if err := call(); !errors.As(err, &failed) || failed.Installation != 100 || failed.Status != server.status || failed.Message != "" {
+				t.Errorf("%s with GitHub answering %d: got = %v, want a FailedError of installation 100", name, server.status, err)
+			}
+		}
+	}
+}
+
 // A clock a little ahead of GitHub's must still produce a JWT GitHub takes as already issued.
 func TestTheAppJWTToleratesAClockThatRunsAhead(t *testing.T) {
 	_, client := newFakeGitHub(t)
