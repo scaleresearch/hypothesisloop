@@ -33,7 +33,7 @@ export interface StepProps {
   form: FormState
   set: SetField
   isEdit: boolean
-  /** Running: everything but the name and the description is locked. */
+  /** Running: everything but the name, the description and the duration is locked. */
   locked: boolean
 }
 

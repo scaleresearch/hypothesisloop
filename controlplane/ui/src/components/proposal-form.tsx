@@ -3,9 +3,9 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { ApiError } from '@/lib/api'
-import { useAutoAccept } from '@/lib/auto-accept'
+import { useSecondsUntil } from '@/lib/auto-accept'
 import { acceleratorLabel, formatAccH } from '@/lib/format'
-import { acceptDraft } from '@/lib/planning'
+import { abandonDraft, acceptDraft, holdDraft } from '@/lib/planning'
 import type { Draft, Proposal, ProposedAgent } from '@/lib/planning'
 import { budgetUnit, kindOf } from '@/lib/units'
 import type { MetricDefinition } from '@/types'
@@ -68,21 +68,54 @@ function Researcher({ n, agent }: { n: number; agent: ProposedAgent }) {
   )
 }
 
+/** The countdown to the platform accepting the proposal by itself, with the three ways to act first. */
+function Countdown({ draft, accept, sending, onDone }: { draft: Draft; accept: () => void; sending: boolean; onDone: () => void }) {
+  const secondsLeft = useSecondsUntil(draft.accepts_at)
+  const [acting, setActing] = useState<'edit' | 'reject' | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function act(which: 'edit' | 'reject') {
+    setActing(which)
+    setError(null)
+    try {
+      await (which === 'edit' ? holdDraft(draft.id) : abandonDraft(draft.id))
+      onDone()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setActing(null)
+    }
+  }
+
+  return (
+    <Callout tone="accent" className="flex flex-wrap items-center justify-between gap-3">
+      <span>
+        <span role="timer" className="font-medium">{secondsLeft ? `Starting in ${secondsLeft} s` : 'Starting now'}</span> as proposed. The baseline machine is already starting.
+      </span>
+      <Inline gap="sm">
+        <Button size="sm" variant="primary" loading={sending} disabled={!!acting} onClick={accept}>Accept now</Button>
+        <Button size="sm" loading={acting === 'edit'} disabled={sending || !!acting} onClick={() => act('edit')}>Edit</Button>
+        <Button size="sm" variant="ghost" loading={acting === 'reject'} disabled={sending || !!acting} onClick={() => act('reject')}>Reject</Button>
+        {error && <InlineError>{error}</InlineError>}
+      </Inline>
+    </Callout>
+  )
+}
+
 /**
  * What the planner proposed, as the experiment filled in: what is measured, how and on what,
  * who runs it, and what it may spend. The name, the budget, the duration, the minutes the baseline
  * has and the number of researchers are the person's to change, and accepting sends them as shown.
  * Nothing has run.
- * `editable` is off for a reader and while the planner revises, when it is only read. A proposal
- * that `arrived` while the person watched it being planned is accepted by itself after a
- * countdown, unless they do anything in the form or in `children`, the box that asks the planner
- * for a change.
+ * `editable` is off for a reader, while the planner revises and while the platform counts down
+ * to accepting it by itself, when it is only read. `accepting` shows that countdown, with Accept
+ * now, Edit, which stops the countdown and makes the form editable, and Reject, which closes the
+ * draft. `children` is the box that asks the planner for a change.
  */
-export function ProposalForm({ draft, proposal, editable, arrived, onDone, children }: {
+export function ProposalForm({ draft, proposal, editable, accepting, onDone, children }: {
   draft: Draft
   proposal: Proposal
   editable: boolean
-  arrived: boolean
+  accepting: boolean
   onDone: () => void
   children?: ReactNode
 }) {
@@ -119,22 +152,12 @@ export function ProposalForm({ draft, proposal, editable, arrived, onDone, child
     }
   }
 
-  const auto = useAutoAccept(editable && arrived, accept)
-
   return (
-    // Any sign of a person at work in here ends the countdown: they are deciding for themselves.
-    <div onFocus={auto.stop} onKeyDown={auto.stop} onPointerDown={auto.stop} onPointerMove={auto.stop} onWheel={auto.stop}>
     <Stack gap="xl">
     <Section title="Proposed experiment">
       <Stack gap="lg">
-        {auto.secondsLeft !== null && (
-          <Callout tone="accent" className="flex flex-wrap items-center justify-between gap-3">
-            <span>
-              <span role="timer" className="font-medium">Starting in {auto.secondsLeft} s</span> as proposed. Touch anything here to decide yourself.
-            </span>
-            <Button size="sm" onClick={auto.stop}>Wait, let me edit</Button>
-          </Callout>
-        )}
+        {accepting && <Countdown draft={draft} accept={accept} sending={sending} onDone={onDone} />}
+        {accepting && error && <InlineError>{error}</InlineError>}
         <Sentences title="Before you start, the planner asks" items={proposal.questions} />
         <FormField label="Name" error={nameError}>
           <Input value={name} disabled={!editable} onChange={e => setName(e.target.value)} />
@@ -212,6 +235,5 @@ export function ProposalForm({ draft, proposal, editable, arrived, onDone, child
     </Section>
     {children}
     </Stack>
-    </div>
   )
 }

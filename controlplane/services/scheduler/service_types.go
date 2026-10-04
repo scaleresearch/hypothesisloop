@@ -130,6 +130,7 @@ type Service struct {
 	weights      domain.SchedulingWeights
 	credits      domain.QuotaConfig
 	loop         Triggerable
+	builds       BuildAssigner
 	settler      QuotaSettler
 	metricsDBURL string
 	logger       *zap.Logger

@@ -257,6 +257,7 @@ var routes = []route{
 	{method: "POST", path: "/experiments/{id}/metrics", request: "/experiments/<job>/metrics", body: `{"metric_name":"loss","fraction_complete":0.5,"metric_value":1}`, rule: ownedOrTheJob(reached)},
 	{method: "GET", path: "/experiments/{id}/logs", request: "/experiments/<job>/logs", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "GET", path: "/experiments/{id}/cost", request: "/experiments/<job>/cost", rule: scoped(agentAudience, reached), sharedRead: true},
+	{method: "POST", path: "/environments", body: `{"platform_experiment_id":"<pe>","code_ref":"r@0","image":"i"}`, rule: scoped(agentAudience, reached)},
 
 	// ---- cluster settings ----
 

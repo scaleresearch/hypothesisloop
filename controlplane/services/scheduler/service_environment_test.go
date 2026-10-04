@@ -1,0 +1,67 @@
+package scheduler
+
+import (
+	"context"
+	"errors"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+)
+
+// assigning records the keys it was asked to assign and answers each building.
+type assigning struct{ keys *[]string }
+
+func (a assigning) AssignBuild(_ context.Context, key string) (*domain.Environment, error) {
+	*a.keys = append(*a.keys, key)
+	return &domain.Environment{Key: key, Base: "registry.test/job:1", State: domain.EnvironmentBuilding, ClusterName: "builder-a", Attempt: 1}, nil
+}
+
+// An environment asked for ahead of its job is the one a job of that commit on that image waits
+// for, under the same key, and its build is assigned at once.
+func TestAnEnvironmentBuiltAheadIsTheOneItsJobWaitsFor(t *testing.T) {
+	commit := strings.Repeat("a", 40)
+	var asked, assigned []string
+	s := &Service{store: poolOnlyStore{}, codeHost: testCodeHost{}, environments: declared{files: map[string]string{commit: rustEnvironment}, asked: &asked}, builds: assigning{&assigned}}
+	env, err := s.BuildEnvironment(context.Background(), "pe-1", "https://example.com/repo.git@"+commit, "registry.test/job:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := domain.EnvironmentKey("org-a", rustEnvironment, "registry.test/job:1")
+	if env.Key != want || !slices.Equal(assigned, []string{want}) || !slices.Equal(asked, []string{"org-a registry.test/job:1"}) {
+		t.Errorf("built %q, assigned %v, asked %v, want %q for org-a on the image", env.Key, assigned, asked, want)
+	}
+
+	job := humanIdeaSubmission()
+	if err := (&Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: admittingStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
+		quota: insertingQuota{}, loop: wokenLoop{new(int)}, environments: declared{files: map[string]string{commit: rustEnvironment}}}).Submit(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	if job.EnvironmentKey != env.Key {
+		t.Errorf("the job of that commit waits for %q, want the one built ahead, %q", job.EnvironmentKey, env.Key)
+	}
+	if got := answerEnvironment(env); got.State != domain.EnvironmentBuilding || !strings.Contains(got.Message, "It builds on cluster builder-a, attempt 1") {
+		t.Errorf("answered %+v, want it building on builder-a", got)
+	}
+}
+
+func TestAnEnvironmentIsNotBuiltAheadForACommitWithoutOneOrOutsideTheRepository(t *testing.T) {
+	commit := strings.Repeat("a", 40)
+	for name, c := range map[string]struct {
+		codeRef, image string
+		reason         string
+	}{
+		"no file":              {"https://example.com/repo.git@" + strings.Repeat("b", 40), "registry.test/job:1", ReasonNoEnvironmentFile},
+		"another repository":   {"https://example.com/other.git@" + commit, "registry.test/job:1", ReasonCodeRefNotInRepository},
+		"a branch":             {"https://example.com/repo.git@main", "registry.test/job:1", ReasonMalformed},
+		"an image of no place": {"https://example.com/repo.git@" + commit, "python", domain.ReasonUnknownJobImage},
+	} {
+		var assigned []string
+		s := &Service{store: poolOnlyStore{}, codeHost: testCodeHost{}, environments: declared{files: map[string]string{commit: rustEnvironment}}, builds: assigning{&assigned}}
+		var refused *AdmissionError
+		if _, err := s.BuildEnvironment(context.Background(), "pe-1", c.codeRef, c.image); !errors.As(err, &refused) || refused.Reason != c.reason || len(assigned) != 0 {
+			t.Errorf("%s: got = %v with %v assigned, want %s and nothing assigned", name, err, assigned, c.reason)
+		}
+	}
+}

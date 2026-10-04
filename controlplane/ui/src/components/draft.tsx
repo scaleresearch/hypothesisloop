@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { useSWRConfig } from 'swr'
 import { formatDate, relTime } from '@/lib/format'
 import { abandonDraft, reviseDraft } from '@/lib/planning'
@@ -70,8 +70,9 @@ function Revise({ draft, declined, onDone }: { draft: Draft; declined: boolean; 
 
 /**
  * The page of an experiment that is still a draft: the sentence it came from, what its
- * planner is doing or proposed, and the two things a person does with a proposal, accepting it
- * at a cost they state or asking for a change. A reader of a shared draft is shown neither.
+ * planner is doing or proposed, and what a person does with a proposal: let the platform accept
+ * it as proposed, accept it now, edit it and accept it at a cost they state, ask for a change, or
+ * reject it. A reader of a shared draft is shown none of these.
  */
 export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?: boolean }) {
   const router = useRouter()
@@ -79,12 +80,8 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
   const { mutate } = useSWRConfig()
   const [abandonError, setAbandonError] = useState<string | null>(null)
   const state = reasonOf(draft).reason
-  // Whether this page, since it loaded, saw the planner at work: a proposal that follows arrived
-  // in front of the person, and one already there on load did not.
-  const watchedPlanning = useRef(false)
-  if (state === 'planning' || state === 'revising') watchedPlanning.current = true
   const reread = () => void mutate(['pe', draft.id])
-  const revise = !readOnly && (state === 'proposed' || state === 'declined') && <Revise draft={draft} declined={state === 'declined'} onDone={reread} />
+  const revise = !readOnly && (state === 'proposed' || state === 'accepting' || state === 'declined') && <Revise draft={draft} declined={state === 'declined'} onDone={reread} />
 
   async function abandon() {
     setAbandonError(null)
@@ -100,7 +97,7 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
     <Page
       back={{ label: 'Experiments', onClick: () => router.push(projectPath(project.id, 'experiments')) }}
       title={draft.name}
-      description={<Text as="span" variant="hint">Draft, {state === 'proposed' || state === 'declined' ? 'waiting for you' : 'being planned'}</Text>}
+      description={<Text as="span" variant="hint">Draft, {state === 'proposed' || state === 'declined' ? 'waiting for you' : state === 'accepting' ? 'starting in a moment' : 'being planned'}</Text>}
     >
       <PhaseStrip pe={draft} readOnly={readOnly} />
       <Section title="What you asked">
@@ -127,7 +124,7 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
         </Section>
       )}
       {draft.proposal ? (
-        <ProposalForm key={draft.proposed_at} draft={draft} proposal={draft.proposal} editable={!readOnly && state === 'proposed'} arrived={watchedPlanning.current} onDone={reread}>
+        <ProposalForm key={draft.proposed_at} draft={draft} proposal={draft.proposal} editable={!readOnly && state === 'proposed'} accepting={!readOnly && state === 'accepting'} onDone={reread}>
           {revise}
         </ProposalForm>
       ) : revise}

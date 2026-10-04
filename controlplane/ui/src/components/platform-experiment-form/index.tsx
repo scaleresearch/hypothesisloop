@@ -47,8 +47,8 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
   const { project } = useTenant()
   const needsGitHub = useNeedsGitHub()
   const isEdit = !!initial
-  // Once running, admission and the stage ladder have acted on everything but the name and the
-  // description, and the API takes no other field, so the rest is locked here.
+  // Once running, admission and the stage ladder have acted on everything but the name, the
+  // description and the duration, and the API takes no other field, so the rest is locked here.
   const lockedWhileRunning = isEdit && initial?.status === PlatformExperimentStatus.RUNNING
   const [form, setForm] = useState<FormState>({
     name: initial?.name ?? '',
@@ -122,6 +122,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
     const patch: PlatformExperimentPatch = {}
     if (form.name.trim() !== opened.name) patch.name = form.name.trim()
     if (form.description.trim() !== opened.description) patch.description = form.description.trim()
+    if (Number(form.duration_hours) !== Number(opened.duration_hours)) patch.duration_hours = Number(form.duration_hours)
     if (lockedWhileRunning) return patch
     if (Number(form.budget_accelerator_hours) !== Number(opened.budget_accelerator_hours)) patch.budget_accelerator_hours = Number(form.budget_accelerator_hours)
     if (Number(form.max_agents) !== Number(opened.max_agents)) patch.max_agents = Number(form.max_agents)
@@ -129,7 +130,6 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
     if (JSON.stringify(form.metrics) !== JSON.stringify(opened.metrics)) patch.metrics = form.metrics
     if (form.report_interval_seconds !== opened.report_interval_seconds) patch.report_interval_seconds = Number(form.report_interval_seconds)
     if (form.starts_at !== opened.starts_at) patch.starts_at = new Date(form.starts_at).toISOString()
-    if (Number(form.duration_hours) !== Number(opened.duration_hours)) patch.duration_hours = Number(form.duration_hours)
     return patch
   }
 

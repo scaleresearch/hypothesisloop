@@ -30,6 +30,7 @@ const SENTENCE: Record<string, (pe: Draft) => string> = {
   repository_creating: () => 'Creating your experiment\'s repository.',
   planning: () => 'Planning your experiment.',
   revising: () => 'Updating the plan with your change.',
+  accepting: () => 'Your plan is ready and starts by itself in a moment, as proposed. Accept it now, edit it or reject it below.',
   proposed: pe => `Your plan is ready. Nothing runs or is spent until you accept it. It stays open until ${formatDate(pe.proposal_expires_at)}.`,
   declined: () => 'The planner needs more from you. Its reason is below.',
   agents_starting: pe => `The researchers' machines are starting. The platform closes the experiment if none is running by ${formatDate(pe.agents_due_at)}.`,

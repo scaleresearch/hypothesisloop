@@ -8,10 +8,11 @@ const OTHERWISE_MS = 15_000
 
 /**
  * How often an experiment's page asks the API again: often while its planner works, when what
- * the planner says it is doing is all there is to watch, and at the page's usual pace otherwise.
+ * the planner says it is doing is all there is to watch, and while its proposal counts down to
+ * being accepted, and at the page's usual pace otherwise.
  */
 export function pollEvery(pe: Pick<PlatformExperiment, 'id' | 'status' | 'status_reason'> | undefined): number {
-  return pe && phaseOf(pe) === 'planning' ? WHILE_PLANNING_MS : OTHERWISE_MS
+  return pe && (phaseOf(pe) === 'planning' || pe.status_reason?.reason === 'accepting') ? WHILE_PLANNING_MS : OTHERWISE_MS
 }
 
 /**

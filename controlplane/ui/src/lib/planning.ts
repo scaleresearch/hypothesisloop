@@ -67,6 +67,9 @@ export type Draft = PlatformExperiment & {
   // Set while a proposal stands. Absent while the planner works, on the first plan or on a
   // revision, and on a draft it declined.
   proposed_at?: string
+  // When the platform accepts the proposal as proposed, unless the person accepts it sooner,
+  // holds it to edit it, revises it or closes it. Absent on a draft that waits for the person.
+  accepts_at?: string
   // When and why the planner proposed nothing. The reason stays while a revision is planned.
   declined_at?: string
   declined_reason?: string
@@ -100,7 +103,12 @@ export async function acceptDraft(id: string, acceptance: Acceptance): Promise<v
   await apiSend<Draft>('POST', `/platform-experiments/${id}/accept`, acceptance)
 }
 
-/** Abandons a draft: it is closed and its planner's machine released. */
+/** Keeps the platform from accepting a proposal by itself, so that the person can edit it. */
+export async function holdDraft(id: string): Promise<void> {
+  await apiSend<Draft>('POST', `/platform-experiments/${id}/hold`)
+}
+
+/** Abandons a draft: it is closed and its planner's and baseline agent's machines released. */
 export async function abandonDraft(id: string): Promise<void> {
   await apiSend('POST', `/platform-experiments/${id}/close`)
 }

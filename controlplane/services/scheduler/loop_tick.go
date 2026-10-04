@@ -1930,6 +1930,31 @@ func newEnvironmentPass() *environmentPass {
 	return &environmentPass{seen: map[string]*domain.Environment{}}
 }
 
+// assignBuild assigns the build of the environment of key to one of the live clusters the pass
+// read, reading them first if it has not (db.EnvironmentsStore.AssignEnvironment).
+func (l *Loop) assignBuild(ctx context.Context, pass *environmentPass, key string) (*domain.Environment, error) {
+	if !pass.read {
+		live, err := l.workload.GetLiveClusters(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("live clusters: %w", err)
+		}
+		for name, connected := range live {
+			if connected {
+				pass.live = append(pass.live, name)
+			}
+		}
+		pass.read = true
+	}
+	return l.store.AssignEnvironment(ctx, key, pass.live, domain.EnvironmentBuildLease)
+}
+
+// AssignBuild assigns the build of the environment of key to a live cluster now, as a tick does
+// for a job waiting for it, and returns the environment as it is then, nil when there is none.
+// It is one statement, so it races with no tick.
+func (l *Loop) AssignBuild(ctx context.Context, key string) (*domain.Environment, error) {
+	return l.assignBuild(ctx, newEnvironmentPass(), key)
+}
+
 // heldForEnvironment says whether exp waits for the environment its commit declares, whose build
 // it assigns to a live cluster first (db.EnvironmentsStore.AssignEnvironment): while it is built
 // it says so, once the file failed exp ends with the end of the build's output, so its agent fixes
@@ -1939,20 +1964,8 @@ func newEnvironmentPass() *environmentPass {
 func (l *Loop) heldForEnvironment(ctx context.Context, pass *environmentPass, exp *domain.Experiment, registered map[string]domain.Cluster, nodeLabels map[string]map[string]map[string]string) (bool, error) {
 	env, ok := pass.seen[exp.EnvironmentKey]
 	if !ok {
-		if !pass.read {
-			live, err := l.workload.GetLiveClusters(ctx)
-			if err != nil {
-				return false, fmt.Errorf("live clusters: %w", err)
-			}
-			for name, connected := range live {
-				if connected {
-					pass.live = append(pass.live, name)
-				}
-			}
-			pass.read = true
-		}
 		var err error
-		if env, err = l.store.AssignEnvironment(ctx, exp.EnvironmentKey, pass.live, domain.EnvironmentBuildLease); err != nil {
+		if env, err = l.assignBuild(ctx, pass, exp.EnvironmentKey); err != nil {
 			return false, err
 		}
 		if env == nil {
