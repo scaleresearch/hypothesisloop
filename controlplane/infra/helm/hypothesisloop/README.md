@@ -41,7 +41,7 @@ install. No value of the chart is a secret, and nothing secret is rendered into 
 | `POSTGRES_PASSWORD` | Postgres | `postgres.enabled` |
 | `HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET`, `HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY` | control-service, metrics-service | `github.appId` |
 | `HYPOTHESISLOOP_GIT_PASSWORD` | control-service, metrics-service | `git.username` |
-| `GOOGLE_CREDENTIALS` | control-service, as its Google application default credentials file | always. Write on the environments repository |
+| `GOOGLE_CREDENTIALS` | control-service, as its Google application default credentials file | `environments.repository`. Its identity may mint the tokens of `environments.pusher` and `environments.puller` |
 | any key in `cloudAgent.secretEnv`, `agentLauncher.secretEnv` | that process only, under the same name | when it is enabled |
 
 The rendered `hypothesisloop.yaml` holds `${NAME}` where a secret belongs, and the services

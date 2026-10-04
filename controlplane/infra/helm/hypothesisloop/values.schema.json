@@ -472,6 +472,21 @@
           "type": "string"
         }
       }
+    },
+    "environments": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "pusher": {
+          "type": "string"
+        },
+        "puller": {
+          "type": "string"
+        }
+      }
     }
   }
 }

@@ -75,6 +75,8 @@ func unreachableFromElsewhere(host string) bool {
 
 var envReference = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
+var serviceAccountEmail = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z0-9.-]+\.gserviceaccount\.com$`)
+
 // ExpandEnv replaces every ${NAME} inside a YAML value with that environment variable, so a
 // config file kept in plain sight can name a secret without holding it. It works on the parsed
 // values and writes the document back out, which keeps a secret holding YAML syntax (a colon, a
@@ -336,11 +338,15 @@ func (c *Config) build() error {
 			return fmt.Errorf("job_images %s: carries is required, since what is installed is what an agent chooses the image by", i.Name)
 		}
 	}
-	if r := c.Environments.Repository; r == "" || strings.ContainsAny(r, " \t:") {
-		return fmt.Errorf("environments repository %q must be the name under runtimes.registry environment images are pushed to", r)
-	}
-	if c.Environments.RegistryCredential != RegistryCredentialGoogle {
-		return fmt.Errorf("environments registry_credential %q is not %s", c.Environments.RegistryCredential, RegistryCredentialGoogle)
+	if e := c.Environments; e != nil {
+		if _, path, ok := strings.Cut(e.Repository, "/"); !ok || path == "" || strings.ContainsAny(e.Repository, " \t@") || strings.Contains(e.Repository, "://") {
+			return fmt.Errorf("environments repository %q must be the whole address environment images are pushed to, host/path", e.Repository)
+		}
+		for key, account := range map[string]string{"pusher": e.Pusher, "puller": e.Puller} {
+			if !serviceAccountEmail.MatchString(account) {
+				return fmt.Errorf("environments %s %q must be the email of a Google service account", key, account)
+			}
+		}
 	}
 	if c.Auth.UIOrigin == "" {
 		return fmt.Errorf("auth ui_origin is required: the one browser origin allowed to call the API")

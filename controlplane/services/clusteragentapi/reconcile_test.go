@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -37,6 +38,54 @@ type reconcileStore struct {
 	// each status push asked it of.
 	runReportedAt map[string]time.Time
 	runsAsked     [][]string
+	// builds is what each cluster's runtime last said of building, assigned the builds of each
+	// cluster, and finished the outcomes recorded.
+	builds   map[string]bool
+	assigned map[string][]*domain.Environment
+	finished []string
+}
+
+func (s *reconcileStore) RecordBuilds(_ context.Context, name string, builds bool) error {
+	s.builds[name] = builds
+	return nil
+}
+
+func (s *reconcileStore) AssignedEnvironmentBuilds(_ context.Context, cluster string) ([]*domain.Environment, error) {
+	return s.assigned[cluster], nil
+}
+
+func (s *reconcileStore) AssignedEnvironmentBuild(_ context.Context, cluster, key string, attempt int) (*domain.Environment, error) {
+	for _, env := range s.assigned[cluster] {
+		if env.Key == key && env.Attempt == attempt {
+			return env, nil
+		}
+	}
+	return nil, nil
+}
+
+func (s *reconcileStore) FinishEnvironmentBuild(ctx context.Context, cluster, key string, attempt int, outcome domain.EnvironmentBuildOutcome) (bool, error) {
+	env, _ := s.AssignedEnvironmentBuild(ctx, cluster, key, attempt)
+	if env == nil {
+		return false, nil
+	}
+	s.finished = append(s.finished, fmt.Sprintf("%s fault=%q image=%q log=%q", key, outcome.Fault, outcome.Image, outcome.LogTail))
+	return true, nil
+}
+
+// testRepository is where the builds of the tests push to.
+const testRepository = "registry.test/environments/environment"
+
+// logins hands out numbered logins and counts them.
+type logins struct{ pushes, pulls int }
+
+func (l *logins) Push(context.Context) (domain.RegistryLogin, error) {
+	l.pushes++
+	return domain.RegistryLogin{Registry: "registry.test", Username: "oauth2accesstoken", Password: fmt.Sprintf("push-%d", l.pushes)}, nil
+}
+
+func (l *logins) Pull(context.Context) (domain.RegistryLogin, error) {
+	l.pulls++
+	return domain.RegistryLogin{Registry: "registry.test", Username: "oauth2accesstoken", Password: fmt.Sprintf("pull-%d", l.pulls)}, nil
 }
 
 func (s *reconcileStore) RunFirstReportedAt(_ context.Context, ids []string) (map[string]time.Time, error) {
@@ -68,6 +117,7 @@ func (s *reconcileStore) BindReportedID(_ context.Context, name, id string) erro
 
 type reconcileWorld struct {
 	store  *reconcileStore
+	logins *logins
 	router http.Handler
 	// metricsWrites counts the series written, and sqlDown fails the statements that write a
 	// job's log tail and phase detail.
@@ -83,7 +133,18 @@ func newReconcileWorld(t *testing.T, cluster string) *reconcileWorld {
 // newReconcileWorldWith serves the handler over the store wrap makes of the world's own.
 func newReconcileWorldWith(t *testing.T, cluster string, wrap func(*reconcileStore) Store) *reconcileWorld {
 	t.Helper()
-	w := &reconcileWorld{store: &reconcileStore{desired: map[string][]*domain.Experiment{}, undesired: map[string][]*domain.Experiment{}, boundTo: map[string]string{}}}
+	return newWorld(t, cluster, wrap, true)
+}
+
+// newWorld is a world on a deployment that builds environments, or one that builds none.
+func newWorld(t *testing.T, cluster string, wrap func(*reconcileStore) Store, buildsEnvironments bool) *reconcileWorld {
+	t.Helper()
+	w := &reconcileWorld{logins: &logins{}, store: &reconcileStore{desired: map[string][]*domain.Experiment{}, undesired: map[string][]*domain.Experiment{}, boundTo: map[string]string{},
+		builds: map[string]bool{}, assigned: map[string][]*domain.Environment{}}}
+	var environments *EnvironmentRegistry
+	if buildsEnvironments {
+		environments = &EnvironmentRegistry{Repository: testRepository, Logins: w.logins}
+	}
 	metrics := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/sql" {
 			answer := `{"output":[{"affectedrows":1}]}`
@@ -101,7 +162,7 @@ func newReconcileWorldWith(t *testing.T, cluster string, wrap func(*reconcileSto
 	router := chi.NewRouter()
 	caller := authtest.As{Kind: auth.KindRuntime, ClusterName: cluster, OrgIDs: []string{"org-a"}}
 	doc := apidocs.New(router, "test", "1.0.0", "", caller, auth.NewAccess(authtest.Placement{Clusters: map[string]string{cluster: "org-a"}}), zap.NewNop())
-	RegisterHuma(doc, NewHandler(wrap(w.store), time.Minute, metrics.URL, 90*time.Second, data, time.Minute, nil, 100, "test-signing-secret-of-enough-length", zap.NewNop()))
+	RegisterHuma(doc, NewHandler(wrap(w.store), time.Minute, metrics.URL, 90*time.Second, data, time.Minute, nil, 100, "test-signing-secret-of-enough-length", environments, zap.NewNop()))
 	w.router = router
 	return w
 }

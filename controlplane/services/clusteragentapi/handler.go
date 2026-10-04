@@ -4,6 +4,8 @@
 //
 //	POST /internal/clusters/{name}/reconcile — actual capacity in, desired workloads out
 //	POST /internal/clusters/{name}/status        — push job phase observations
+//	POST /internal/clusters/{name}/builds/{key}/credential — the push login of an assigned build
+//	POST /internal/clusters/{name}/builds/{key}  — the outcome of an assigned build
 //
 // There is no command/ack protocol: an experiment's own status (SUBMITTED/RUNNING)
 // is the single source of truth for "should a Job exist" — the agent fetches that view and
@@ -20,12 +22,14 @@ package clusteragentapi
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/opencontainers/go-digest"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
@@ -60,6 +64,25 @@ type Store interface {
 	RecordJobImage(ctx context.Context, name, image string) error
 	// RemoveCluster ends a cluster and returns its jobs to the queue (db.ClustersStore).
 	RemoveCluster(ctx context.Context, name string) (requeued []string, err error)
+	// RecordBuilds keeps whether the cluster's runtime builds environments.
+	RecordBuilds(ctx context.Context, name string, builds bool) error
+	// AssignedEnvironmentBuilds, AssignedEnvironmentBuild and FinishEnvironmentBuild are the
+	// builds the scheduler assigned to a cluster (db.EnvironmentsStore).
+	AssignedEnvironmentBuilds(ctx context.Context, cluster string) ([]*domain.Environment, error)
+	AssignedEnvironmentBuild(ctx context.Context, cluster, key string, attempt int) (*domain.Environment, error)
+	FinishEnvironmentBuild(ctx context.Context, cluster, key string, attempt int, outcome domain.EnvironmentBuildOutcome) (bool, error)
+}
+
+// RegistryLogins hands out logins to the registry of environment images (registrycred.Source).
+type RegistryLogins interface {
+	Push(ctx context.Context) (domain.RegistryLogin, error)
+	Pull(ctx context.Context) (domain.RegistryLogin, error)
+}
+
+// EnvironmentRegistry is where assigned builds push to, and the logins to it.
+type EnvironmentRegistry struct {
+	Repository string
+	Logins     RegistryLogins
 }
 
 // Handler serves the cluster-agent-facing API.
@@ -90,18 +113,21 @@ type Handler struct {
 	maxLogLineChars int
 	// signingSecret derives each job's own token, handed out beside its data key.
 	signingSecret string
+	// environments is nil on a deployment that builds no environments, which counts no cluster
+	// as building.
+	environments *EnvironmentRegistry
 }
 
 // NewHandler constructs a Handler. connectedWithin is how recent a cluster's heartbeat must be
 // to count as reachable/connected.
-func NewHandler(store Store, connectedWithin time.Duration, metricsDBURL string, observationCadence time.Duration, dataStore *objectstore.Client, maxCheckpointGrace time.Duration, pricedAcceleratorTypes []string, maxLogLineChars int, signingSecret string, logger *zap.Logger) *Handler {
+func NewHandler(store Store, connectedWithin time.Duration, metricsDBURL string, observationCadence time.Duration, dataStore *objectstore.Client, maxCheckpointGrace time.Duration, pricedAcceleratorTypes []string, maxLogLineChars int, signingSecret string, environments *EnvironmentRegistry, logger *zap.Logger) *Handler {
 	priced := make(map[string]bool, len(pricedAcceleratorTypes))
 	for _, name := range pricedAcceleratorTypes {
 		priced[strings.ToLower(name)] = true
 	}
 	return &Handler{store: store, connectedWithin: connectedWithin, metricsDBURL: metricsDBURL, observationCadence: observationCadence,
 		dataStore: dataStore, maxCheckpointGrace: maxCheckpointGrace,
-		pricedAcceleratorTypes: priced, maxLogLineChars: maxLogLineChars, signingSecret: signingSecret, logger: logger}
+		pricedAcceleratorTypes: priced, maxLogLineChars: maxLogLineChars, signingSecret: signingSecret, environments: environments, logger: logger}
 }
 
 // keepPricedAccelerators drops every accelerator type outside the priced catalog from report.
@@ -234,7 +260,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{
 		OperationID: "cluster-reconcile", Method: "POST", Path: "/{name}/reconcile",
 		Summary: "Exchange actual capacity for desired workloads", Tags: []string{"cluster-agent"},
-		Description: "Atomically records one complete actual-capacity snapshot in metrics storage, keeping only priced accelerator types, then returns the complete PostgreSQL desired workload set for this cluster, plus the ids of workloads whose termination earns them their declared checkpoint window.",
+		Description: "Atomically records one complete actual-capacity snapshot in metrics storage, keeping only priced accelerator types, then returns the complete PostgreSQL desired workload set for this cluster, plus the ids of workloads whose termination earns them their declared checkpoint window, " +
+			"the environment builds assigned to this cluster (builds, recorded as building only for a runtime that reports builds true), and registry_pull, a login that reads environment images, when a listed workload runs in one.",
 	}, func(ctx context.Context, in *reconcileInput) (*struct {
 		Body reconcileBody
 	}, error) {
@@ -352,6 +379,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err := h.store.RecordJobImage(ctx, clusterName, onlyImage); err != nil {
 			return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
 		}
+		if err := h.store.RecordBuilds(ctx, clusterName, report.Builds && h.environments != nil); err != nil {
+			return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
+		}
 
 		if err := metricsdb.RecordClusterCapacitySnapshot(ctx, h.metricsDBURL, metricsdb.ClusterCapacitySnapshot{
 			ClusterName: clusterName, At: time.Now().UTC(),
@@ -402,7 +432,87 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			resp.Body.Experiments[i] = exp.ForRuntime()
 		}
 		resp.Body.CheckpointWindow = domain.CheckpointWindowGrants(undesired)
+		if resp.Body.Builds, resp.Body.RegistryPull, err = h.environmentWork(ctx, clusterName, exps); err != nil {
+			return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
+		}
 		return resp, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{
+		OperationID: "cluster-build-credential", Method: "POST", Path: "/{name}/builds/{key}/credential",
+		Summary: "The push login of an assigned environment build", Tags: []string{"cluster-agent"},
+		Description: "A login that writes to the environment repository for at least 25 minutes, handed out only while the build of key is assigned to this cluster at attempt and still building; otherwise 409.",
+	}, func(ctx context.Context, in *struct {
+		Name string `path:"name"`
+		Key  string `path:"key"`
+		Body domain.EnvironmentBuildCredentialRequest
+	}) (*struct {
+		Body domain.RegistryLogin
+	}, error) {
+		if h.environments == nil {
+			return nil, huma.Error409Conflict("this deployment builds no environments")
+		}
+		env, err := h.store.AssignedEnvironmentBuild(ctx, in.Name, in.Key, in.Body.Attempt)
+		if err != nil {
+			return nil, auth.Internal(h.logger, "environment build credential", err, zap.String("cluster", in.Name), zap.String("key", in.Key))
+		}
+		if env == nil {
+			return nil, huma.Error409Conflict("the build of " + in.Key + " is not assigned to cluster " + in.Name + " at attempt " + strconv.Itoa(in.Body.Attempt))
+		}
+		login, err := h.environments.Logins.Push(ctx)
+		if err != nil {
+			return nil, auth.Internal(h.logger, "environment build credential", err, zap.String("cluster", in.Name), zap.String("key", in.Key))
+		}
+		return &struct {
+			Body domain.RegistryLogin
+		}{Body: login}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{
+		OperationID: "cluster-build-report", Method: "POST", Path: "/{name}/builds/{key}",
+		Summary: "Report the outcome of an assigned environment build", Tags: []string{"cluster-agent"},
+		Description: "outcome pushed makes the environment ready in the image the repository holds under digest; file fails it with log_tail as the file's fault; " +
+			"platform frees the build to be assigned again. Recorded only while the build of key is assigned to this cluster at attempt and still building; otherwise 409.",
+	}, func(ctx context.Context, in *struct {
+		Name string `path:"name"`
+		Key  string `path:"key"`
+		Body domain.EnvironmentBuildReport
+	}) (*struct{}, error) {
+		if h.environments == nil {
+			return nil, huma.Error409Conflict("this deployment builds no environments")
+		}
+		report := in.Body
+		if len(report.LogTail) > domain.MaxEnvironmentLogBytes {
+			return nil, huma.Error400BadRequest("log_tail is longer than " + strconv.Itoa(domain.MaxEnvironmentLogBytes) + " bytes")
+		}
+		outcome := domain.EnvironmentBuildOutcome{LogTail: report.LogTail}
+		switch report.Outcome {
+		case domain.EnvironmentBuildPushed:
+			parsed, err := digest.Parse(report.Digest)
+			if err != nil || parsed.Algorithm() != digest.SHA256 {
+				return nil, huma.Error400BadRequest("a pushed build names its digest, sha256:<hex>")
+			}
+			outcome.Image = h.environments.Repository + "@" + report.Digest
+		case domain.EnvironmentBuildFileFault:
+			outcome.Fault = domain.EnvironmentFaultFile
+		case domain.EnvironmentBuildPlatformFault:
+			outcome.Fault = domain.EnvironmentFaultPlatform
+		default:
+			return nil, huma.Error400BadRequest("outcome is pushed, file or platform")
+		}
+		if report.Outcome != domain.EnvironmentBuildPushed && report.Digest != "" {
+			return nil, huma.Error400BadRequest("only a pushed build names a digest")
+		}
+		current, err := h.store.FinishEnvironmentBuild(ctx, in.Name, in.Key, report.Attempt, outcome)
+		if err != nil {
+			return nil, auth.Internal(h.logger, "environment build report", err, zap.String("cluster", in.Name), zap.String("key", in.Key))
+		}
+		if !current {
+			return nil, huma.Error409Conflict("the build of " + in.Key + " is not assigned to cluster " + in.Name + " at attempt " + strconv.Itoa(report.Attempt))
+		}
+		h.logger.Info("environment build reported", zap.String("cluster", in.Name), zap.String("key", in.Key),
+			zap.Int("attempt", report.Attempt), zap.String("outcome", string(report.Outcome)))
+		return nil, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{
@@ -548,6 +658,30 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		resp.Body.Status = "ok"
 		return resp, nil
 	})
+}
+
+// environmentWork is the builds assigned to cluster, and the pull login when one of exps, the
+// workloads desired on it, runs in an environment.
+func (h *Handler) environmentWork(ctx context.Context, cluster string, exps []*domain.Experiment) ([]domain.EnvironmentBuild, *domain.RegistryLogin, error) {
+	builds := []domain.EnvironmentBuild{}
+	if h.environments == nil {
+		return builds, nil, nil
+	}
+	assigned, err := h.store.AssignedEnvironmentBuilds(ctx, cluster)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, env := range assigned {
+		builds = append(builds, domain.EnvironmentBuild{Key: env.Key, Attempt: env.Attempt, Base: env.Base, Dockerfile: env.Dockerfile, Repository: h.environments.Repository})
+	}
+	if !slices.ContainsFunc(exps, func(exp *domain.Experiment) bool { return exp.EnvironmentKey != "" }) {
+		return builds, nil, nil
+	}
+	login, err := h.environments.Logins.Pull(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return builds, &login, nil
 }
 
 // reconcileBody is one reconcile pass's whole answer: what should exist here, and which of the

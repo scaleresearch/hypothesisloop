@@ -165,14 +165,24 @@ job_images:
 # built on its job image. Agents run agents.image and build nothing. While no such cluster is
 # registered, a job that declares an environment is refused with no_environment_builder.
 #
-#   repository           the name under runtimes.registry every environment image is pushed to,
-#                        tagged with its key.
-#   registry_credential  what the push authenticates as: google, the control service's Google
-#                        application default credentials (GOOGLE_APPLICATION_CREDENTIALS or the
-#                        service account it runs as), with write on the repository.
-environments:
-  repository: hypothesisloop-environment
-  registry_credential: google
+#
+# Left out, as here, the deployment builds no environments: no cluster counts as building, so every
+# such job is refused. To switch it on, add the section with all three values:
+#
+#   environments:
+#     repository: europe-west1-docker.pkg.dev/my-project/hypothesisloop-environments/environment
+#     pusher: env-pusher@my-project.iam.gserviceaccount.com
+#     puller: env-puller@my-project.iam.gserviceaccount.com
+#
+#   repository  the whole address every environment image is pushed to, by digest and with no
+#               tag, in an Artifact Registry repository that no one reads without a token.
+#   pusher      the service account with write on that repository, and puller the one with read.
+#               The control service mints their tokens as its own Google identity: its
+#               application default credentials (GOOGLE_APPLICATION_CREDENTIALS, the service
+#               account it runs as, or gcloud auth application-default login), which holds
+#               roles/iam.serviceAccountTokenCreator on both. It does not start without them.
+#               A cluster is handed a pusher token for each build it is assigned, and a puller
+#               token in each reconcile answer that lists a job running in an environment.
 
 # The GitHub App a project's repository is reached through (infra/github). A person installs the
 # App on repositories they choose and attaches one to a project; agents and jobs then clone it

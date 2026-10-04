@@ -775,10 +775,14 @@ The signing secret is the deployment's own: control-service and metrics-service 
 the variable. Local development's is made by the first render (`localdev/.run/signing-secret`)
 and supplied by `make`. Whoever holds the secret can derive every token, so rotating it ends them all.
 
-control-service mints the environment registry's logins with its own Google identity, read as
-application default credentials. Locally that is the file `gcloud auth application-default login`
-writes to its well-known path, `~/.config/gcloud/application_default_credentials.json`, which
-`make dev` finds there and the compose stack mounts.
+Environments are built only on a deployment whose settings have an `environments` section: the
+repository they are pushed to by digest and the two service accounts, a pusher and a puller,
+whose tokens control-service hands to clusters (`controlplane/settings/hypothesisloop.yaml`).
+Without it no cluster counts as building, and a job whose commit declares an environment is
+refused with `no_environment_builder`. control-service mints those tokens with its own Google
+identity, read as application default credentials, and does not start without them. Locally
+that is the file `gcloud auth application-default login` writes to its well-known path,
+`~/.config/gcloud/application_default_credentials.json`, which the compose stack mounts.
 
 A cluster runs the jobs of its own org and no other. Admission places a job on a cluster of
 the job's org or on a shared cluster, and a job whose org has neither waits with

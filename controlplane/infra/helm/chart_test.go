@@ -92,11 +92,9 @@ func TestEveryPodReadsTheOneNamedSecret(t *testing.T) {
 	}
 }
 
-// control-service reads the Google credentials as a file of the Secret in a mounted directory, and
-// reaches no environment builder.
-func TestControlServiceReadsTheGoogleCredentialsAsAFileOfTheSecretAndNoBuilder(t *testing.T) {
-	release := charttest.Render(t, charttest.External)
-	env := release.Env(t, "hypothesisloop-control-service", secretNames[charttest.External])
+// googleCredentialFiles is each file control-service has mounted from the Secret, by path, and
+// the key it holds.
+func googleCredentialFiles(release *charttest.Release, secretName string) map[string]string {
 	pod := release.Deployments["hypothesisloop-control-service"].Spec.Template.Spec
 	var mount string
 	for _, m := range pod.Containers[0].VolumeMounts {
@@ -106,22 +104,51 @@ func TestControlServiceReadsTheGoogleCredentialsAsAFileOfTheSecretAndNoBuilder(t
 	}
 	files := map[string]string{}
 	for _, volume := range pod.Volumes {
-		if volume.Name == "credentials" && volume.Secret != nil && volume.Secret.SecretName == secretNames[charttest.External] {
+		if volume.Name == "credentials" && volume.Secret != nil && volume.Secret.SecretName == secretName {
 			for _, item := range volume.Secret.Items {
 				files[mount+"/"+item.Path] = item.Key
 			}
 		}
 	}
+	return files
+}
+
+// A deployment that builds environments names their repository and the two service accounts in
+// the config, and control-service reads its own Google identity, which mints their tokens, as a
+// file of the Secret in a mounted directory. One that builds none reads no Google credential.
+func TestEnvironmentsOfTheValuesReachTheConfigWithTheGoogleIdentityThatMintsTheirTokens(t *testing.T) {
+	release := charttest.Render(t, charttest.External)
+	env := release.Env(t, "hypothesisloop-control-service", secretNames[charttest.External])
 	for name := range env {
 		if strings.HasPrefix(name, "HYPOTHESISLOOP_ENVIRONMENT_BUILDER") {
 			t.Errorf("control-service is handed %s", name)
 		}
 	}
+	files := googleCredentialFiles(release, secretNames[charttest.External])
 	if len(files) != 1 || files[env["GOOGLE_APPLICATION_CREDENTIALS"]] != "GOOGLE_CREDENTIALS" {
 		t.Errorf("GOOGLE_APPLICATION_CREDENTIALS = %q among the mounted files %v, want the one file of Secret key GOOGLE_CREDENTIALS", env["GOOGLE_APPLICATION_CREDENTIALS"], files)
 	}
 	if _, known := charttest.Secret["GOOGLE_CREDENTIALS"]; !known {
 		t.Error("charttest.Secret has no GOOGLE_CREDENTIALS")
+	}
+	for _, deployment := range configLoaders {
+		cfg := loadRendered(t, release, charttest.External, deployment)
+		want := config.EnvironmentsConfig{Repository: "europe-west1-docker.pkg.dev/made-up-project/hypothesisloop-environments/environment",
+			Pusher: "env-pusher@made-up-project.iam.gserviceaccount.com", Puller: "env-puller@made-up-project.iam.gserviceaccount.com"}
+		if cfg.Environments == nil || *cfg.Environments != want {
+			t.Errorf("%s: environments = %+v, want the values'", deployment, cfg.Environments)
+		}
+	}
+
+	inCluster := charttest.Render(t, charttest.InCluster)
+	if env := inCluster.Env(t, "hypothesisloop-control-service", secretNames[charttest.InCluster]); env["GOOGLE_APPLICATION_CREDENTIALS"] != "" {
+		t.Errorf("GOOGLE_APPLICATION_CREDENTIALS = %q on a deployment that builds no environments", env["GOOGLE_APPLICATION_CREDENTIALS"])
+	}
+	if files := googleCredentialFiles(inCluster, secretNames[charttest.InCluster]); len(files) != 0 {
+		t.Errorf("mounted %v on a deployment that builds no environments", files)
+	}
+	if cfg := loadRendered(t, inCluster, charttest.InCluster, "hypothesisloop-control-service"); cfg.Environments != nil {
+		t.Errorf("environments = %+v, want none", cfg.Environments)
 	}
 }
 
@@ -200,6 +227,9 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		"no agent image":              {charttest.InCluster, `agents.image=""`, "agents.image is required"},
 		"no API address":              {charttest.InCluster, `publicAPIURL=""`, "publicAPIURL is required"},
 		"an environment builder":      {charttest.InCluster, `environmentBuilder.address=tcp://builder.example.invalid:31234`, "environmentBuilder"},
+		"environments with no pusher": {charttest.External, `environments.pusher=""`, "environments.pusher is required"},
+		"environments with no puller": {charttest.External, `environments.puller=""`, "environments.puller is required"},
+		"accounts with no repository": {charttest.External, `environments.repository=""`, "without environments.repository"},
 		"the API address per reader":  {charttest.InCluster, `agents.apiURL=http://api.example.invalid`, "apiURL"},
 		"no runtime metrics address":  {charttest.InCluster, `runtimes.metricsURL=""`, "runtimes.metricsURL is required"},
 		"no object store address":     {charttest.InCluster, `objectStore.endpoint=""`, "objectStore.endpoint is required"},

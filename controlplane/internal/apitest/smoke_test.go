@@ -44,7 +44,7 @@ func TestSmoke(t *testing.T) {
 	// Cluster-agent traffic is a separate audience on its own prefix, so it keeps its own doc.
 	rc := chi.NewRouter()
 	dc := apidocs.New(rc, "cluster-agent", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	clusteragentapi.RegisterHuma(dc, clusteragentapi.NewHandler(nil, 0, "", 0, nil, 0, nil, 0, "", nil))
+	clusteragentapi.RegisterHuma(dc, clusteragentapi.NewHandler(nil, 0, "", 0, nil, 0, nil, 0, "", nil, nil))
 	dc.MountExplore(rc)
 
 	for _, tc := range []struct {

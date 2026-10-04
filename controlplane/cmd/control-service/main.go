@@ -37,6 +37,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/queuebackend"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/registrycred"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
@@ -386,13 +387,27 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 	clusterAgentHandler := clusteragentapi.NewHandler(store,
 		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metricsDBURL, pcfg.Scheduler.ObservationCadence(), dataStore,
 		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second,
-		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.Auth.SigningSecret, logger)
+		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.Auth.SigningSecret, newEnvironmentRegistry(runCtx, pcfg, logger), logger)
 	clusterAgentRouter := chi.NewRouter()
 	caDoc := apidocs.New(clusterAgentRouter, "hypothesisloop cluster-agent API", "1.0.0", "", gate.authenticator, gate.access, logger)
 	clusteragentapi.RegisterHuma(caDoc, clusterAgentHandler)
 	caDoc.MountExplore(clusterAgentRouter)
 
 	return schedulerHandler, clusterAgentRouter
+}
+
+// newEnvironmentRegistry is where assigned environment builds push to and the logins to it, nil
+// on a deployment whose settings have no environments section.
+func newEnvironmentRegistry(ctx context.Context, pcfg *hypothesisloopcfg.Config, logger *zap.Logger) *clusteragentapi.EnvironmentRegistry {
+	e := pcfg.Environments
+	if e == nil {
+		return nil
+	}
+	logins, err := registrycred.New(ctx, e.Repository, e.Pusher, e.Puller)
+	if err != nil {
+		logger.Fatal("control-service: the registry logins of environment builds", zap.Error(err))
+	}
+	return &clusteragentapi.EnvironmentRegistry{Repository: e.Repository, Logins: logins}
 }
 
 // openGraph connects to the hypothesis graph, makes sure its schema exists, moves any hypotheses

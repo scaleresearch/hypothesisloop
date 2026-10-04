@@ -31,9 +31,11 @@ images:
 #   HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET   only with github.appId: the App's OAuth client
 #   HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY     secret and the PEM GitHub issued for it
 #   HYPOTHESISLOOP_GIT_PASSWORD      only with git.username: that account's password
-#   GOOGLE_CREDENTIALS               the Google application default credentials file control-service
-#                                    pushes environment images with, with write on the
-#                                    environments repository
+#   GOOGLE_CREDENTIALS               only with environments.repository: control-service's own Google
+#                                    identity, as an application default credentials file (a
+#                                    service account key or a workload identity federation
+#                                    config), which may mint the tokens of environments.pusher
+#                                    and environments.puller
 #
 # plus whatever cloudAgent.secretEnv and agentLauncher.secretEnv name.
 secretName: ""
@@ -69,6 +71,15 @@ github:
   appId: 0
   appSlug: ""
   clientId: ""
+
+# Where environment images are pushed and the two service accounts whose tokens control-service
+# hands out for them: the environments section of hypothesisloop.yaml, which explains each value.
+# With repository empty the deployment builds no environments, and the Secret needs no
+# GOOGLE_CREDENTIALS. With it set, pusher and puller are required.
+environments:
+  repository: ""
+  pusher: ""
+  puller: ""
 
 # Any git host that serves repositories under one root: the git section of hypothesisloop.yaml
 # with provider plain. Read only without github.appId, and then baseURL is required.

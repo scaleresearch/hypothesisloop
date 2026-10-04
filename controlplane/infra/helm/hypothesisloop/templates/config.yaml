@@ -48,6 +48,22 @@ and otherwise the plain host the values name.
 {{- $raw = printf "%s  username: %s\n  password: %s\n" $raw (toJson .Values.git.username) (toJson "${HYPOTHESISLOOP_GIT_PASSWORD}") }}
 {{- end }}
 {{- end }}
+{{- /*
+The staged file has no environments section: the chart adds the one the values name.
+*/ -}}
+{{- if regexMatch "(?m)^environments:" $raw }}
+{{- fail "files/hypothesisloop.yaml has an environments section, and the chart would add a second one" }}
+{{- end }}
+{{- with .Values.environments }}
+{{- if .repository }}
+{{- $raw = printf "%s\nenvironments:\n  repository: %s\n  pusher: %s\n  puller: %s\n" (trimSuffix "\n" $raw)
+  (toJson .repository)
+  (toJson (required "environments.pusher is required with environments.repository: the service account that writes to it" .pusher))
+  (toJson (required "environments.puller is required with environments.repository: the service account that reads it" .puller)) }}
+{{- else if or .pusher .puller }}
+{{- fail "environments.pusher and environments.puller are set without environments.repository, the repository they push to and pull from" }}
+{{- end }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

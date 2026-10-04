@@ -520,3 +520,42 @@ func TestAnAcceleratorTypeDeclaresWhatEveryJobOnItNeeds(t *testing.T) {
 		}
 	}
 }
+
+const environmentsSection = `
+environments:
+  repository: europe-west1-docker.pkg.dev/project/hypothesisloop-environments/environment
+  pusher: env-pusher@project.iam.gserviceaccount.com
+  puller: env-puller@project.iam.gserviceaccount.com
+`
+
+func TestEnvironmentsAreLeftOutOrStatedWhole(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
+	if err := os.WriteFile(path, []byte(productionConfig(t)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err := Load(path); err != nil || cfg.Environments != nil {
+		t.Fatalf("Load without the section: %v, environments %+v, want it loaded with none", err, cfg.Environments)
+	}
+	if err := os.WriteFile(path, []byte(productionConfig(t)+environmentsSection), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load with the section: %v", err)
+	}
+	if want := (EnvironmentsConfig{Repository: "europe-west1-docker.pkg.dev/project/hypothesisloop-environments/environment",
+		Pusher: "env-pusher@project.iam.gserviceaccount.com", Puller: "env-puller@project.iam.gserviceaccount.com"}); *cfg.Environments != want {
+		t.Fatalf("environments = %+v, want %+v", *cfg.Environments, want)
+	}
+	for name, replace := range map[string][2]string{
+		"no pusher":                   {"  pusher: env-pusher@project.iam.gserviceaccount.com\n", ""},
+		"a puller that is no account": {"env-puller@project.iam.gserviceaccount.com", "someone@example.com"},
+		"a repository with no path":   {"europe-west1-docker.pkg.dev/project/hypothesisloop-environments/environment", "europe-west1-docker.pkg.dev"},
+		"a repository with a scheme":  {"europe-west1-docker.pkg.dev/project", "https://europe-west1-docker.pkg.dev/project"},
+		"a repository with a digest":  {"/environment\n", "/environment@sha256:abc\n"},
+	} {
+		if err := loadText(t, productionConfig(t)+strings.Replace(environmentsSection, replace[0], replace[1], 1)); err == nil {
+			t.Errorf("%s: loaded, want it refused", name)
+		}
+	}
+}

@@ -347,6 +347,8 @@ var routes = []route{
 	{method: "POST", path: "/internal/clusters/{name}/reconcile", request: "/internal/clusters/<cluster>/reconcile", body: capacity1, rule: ofCluster(reached)},
 	{method: "DELETE", path: "/internal/clusters/{name}", request: "/internal/clusters/<cluster>", rule: ofCluster(reached)},
 	{method: "POST", path: "/internal/clusters/{name}/status", request: "/internal/clusters/<cluster>/status", body: `{"reports":[]}`, rule: ofCluster(reached)},
+	{method: "POST", path: "/internal/clusters/{name}/builds/{key}/credential", request: "/internal/clusters/<cluster>/builds/key-1/credential", body: `{"attempt":1}`, rule: ofCluster(reached)},
+	{method: "POST", path: "/internal/clusters/{name}/builds/{key}", request: "/internal/clusters/<cluster>/builds/key-1", body: `{"attempt":1,"outcome":"pushed","digest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}`, rule: ofCluster(reached)},
 	{method: "POST", path: "/internal/launchers/{name}/reconcile", request: "/internal/launchers/main/reconcile", body: `{"launch_digest":"0123456789abcdef0123456789abcdef","instances":[],"reconcile_interval_seconds":15,"create_pause_milliseconds":1000}`, rule: only([]string{"launcher"}, reached)},
 	{method: "GET", path: "/metrics", rule: staffOnly},
 }
