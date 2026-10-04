@@ -46,7 +46,7 @@ func TestTheMetricsHelperImportsOutsideAJobAndSaysWhyItReportsNothingThere(t *te
 		t.Fatalf("import metrics outside a job: %v\n%s", err, out)
 	}
 	out, err := run("import metrics\nmetrics.post_metric(1.0, 0.5, 'acc')")
-	if err == nil || !strings.Contains(out, "RuntimeError: post_metric: $HYPOTHESISLOOP_API_URL, $HYPOTHESISLOOP_EXPERIMENT_ID, $HYPOTHESISLOOP_TOKEN not set, so this process is no job of the platform") {
+	if err == nil || !strings.Contains(out, "RuntimeError: post_metric: $HYPOTHESISLOOP_API_URL, $HYPOTHESISLOOP_EXPERIMENT_ID, $HYPOTHESISLOOP_TOKEN not set, so this process is no job of the platform") || !strings.Contains(out, "hl job submit") {
 		t.Fatalf("post_metric outside a job = %v\n%s", err, out)
 	}
 }

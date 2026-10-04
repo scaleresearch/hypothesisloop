@@ -5,7 +5,8 @@
 
 Report every declared metric as the run goes and once more at the end: a job that reports
 nothing is taken for stuck and evicted, and its final report on a metric is its result. Metrics are all a job sends. Its logs are read from
-its output. Outside a job this module imports and post_metric raises: only a job reports.
+its output. Outside a job this module imports and post_metric raises: only a job reports, so a
+measurement is a job (hl job submit), and hl env run only checks that the code runs.
 
 A report the platform could not take for now (no answer, 429, 5xx) is kept in a file and sent
 before the next one, and once more, with a few retries, when the process exits.
@@ -30,7 +31,8 @@ def post_metric(fraction: float, value: float, metric_name: str) -> None:
     if not all(job.values()):
         unset = ", ".join("$" + name for name, value in job.items() if not value)
         raise RuntimeError(f"post_metric: {unset} not set, so this process is no job of the platform and has "
-                           "nowhere to report: the platform sets them in a job, and hl job submit runs one")
+                           "nowhere to report: the platform sets them in a job. A result is measured by a job: "
+                           "run it with hl job submit. hl env run checks that the code runs")
     url = f"{job['HYPOTHESISLOOP_API_URL']}/experiments/{job['HYPOTHESISLOOP_EXPERIMENT_ID']}/metrics"
     payload = json.dumps({"metric_name": metric_name, "fraction_complete": fraction, "metric_value": value})
     try:

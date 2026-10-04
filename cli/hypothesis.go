@@ -643,7 +643,6 @@ func objectiveGet(c *apiclient.Client, pe string, full bool, limit int, stdout, 
 		return fail(stderr, err)
 	}
 	total, _ := strconv.Atoi(header.Get("X-Total-Count"))
-	cut := 0
 	if !full {
 		for _, comment := range comments {
 			for _, key := range []string{"id", "hypothesis_id", "platform_experiment_id", "actor"} {
@@ -651,7 +650,7 @@ func objectiveGet(c *apiclient.Client, pe string, full bool, limit int, stdout, 
 			}
 			if text, _ := comment["text"].(string); len([]rune(text)) > commentCut {
 				comment["text"] = string([]rune(text)[:commentCut]) + "…"
-				cut++
+				comment["cut"] = true
 			}
 		}
 	}
@@ -659,22 +658,16 @@ func objectiveGet(c *apiclient.Client, pe string, full bool, limit int, stdout, 
 		comments = []map[string]any{}
 	}
 	line, err := json.Marshal(struct {
-		ID           string           `json:"id"`
-		Objective    bool             `json:"objective"`
-		CommentCount int              `json:"comment_count"`
-		Comments     []map[string]any `json:"comments"`
-	}{pe, true, total, comments})
+		ID              string           `json:"id"`
+		Objective       bool             `json:"objective"`
+		CommentCount    int              `json:"comment_count"`
+		CommentsOmitted int              `json:"comments_omitted,omitempty"`
+		Comments        []map[string]any `json:"comments"`
+	}{pe, true, total, max(total-len(comments), 0), comments})
 	if err != nil {
 		return fail(stderr, err)
 	}
 	fmt.Fprintf(stdout, "%s\n", line)
-	if cut > 0 {
-		fmt.Fprintf(stderr, "hl: hypothesis get: %d comments cut at %d characters; --full prints them whole\n", cut, commentCut)
-	}
-	if total > len(comments) {
-		fmt.Fprintf(stderr, "hl: hypothesis get: %d more comments; --limit N (max 200) shows them\n", total-len(comments))
-	}
-	fmt.Fprintln(stderr, "hl: hypothesis get: the objective is the platform experiment's: hl platform-experiments get has its description and baseline, and its approaches are the hypotheses that build on root")
 	return 0
 }
 
@@ -708,6 +701,7 @@ type hypothesisBrief struct {
 	Comments []struct {
 		AgentID   string `json:"agent_id"`
 		Text      string `json:"text"`
+		Cut       bool   `json:"cut,omitempty"`
 		CreatedAt string `json:"created_at"`
 	} `json:"comments"`
 }
@@ -722,13 +716,16 @@ func hypothesisGet(c *apiclient.Client, args []string, stdout, stderr io.Writer)
 	fs := newFlags("hypothesis get", `usage: hl hypothesis get ID|root [--full] [--limit N]
 
 root, or the platform experiment's id, prints the objective: the comments on it, oldest first,
-cut like a hypothesis's, with comment_count.
+cut like a hypothesis's, with comment_count. The objective is the platform experiment's: hl
+platform-experiments get has its description and baseline, and its approaches are the
+hypotheses that build on root.
 One hypothesis on one line, short enough to read whole: its text and status, its links in and
 out (type, hypothesis_id and status of each), its findings in full (experiment_id is the job
-one is of), its comments cut to their first 160 characters, and its jobs, oldest first, each
-as id, agent_id, status, metrics and, under job.env, the settings that differ between its jobs
-(all of them for an only job). job_count, finding_count and comment_count say how many there
-are. implementations lists the branches it was run on, one per agent that ran it, each with
+one is of), its comments cut to their first 160 characters ("cut": true on each one cut), and
+its jobs, oldest first, each as id, agent_id, status, metrics and, under job.env, the settings
+that differ between its jobs (all of them for an only job). job_count, finding_count and
+comment_count say how many there are; comments_omitted and jobs_omitted, how many the page left
+out (--limit shows more). implementations lists the branches it was run on, one per agent that ran it, each with
 agent_id, branch and code_ref, the commit its newest job there ran: a hypothesis is an idea and
 any agent may run its own code for it. base_ref is the commit a new implementation starts from
 (hl hypothesis checkout ID).
@@ -761,14 +758,14 @@ wrote each, and a job as hl job list prints it. hl job status ID prints a job's 
 	}
 	var h struct {
 		hypothesisBrief
-		Jobs     []json.RawMessage `json:"jobs"`
-		JobCount int               `json:"job_count"`
+		Jobs         []json.RawMessage `json:"jobs"`
+		JobCount     int               `json:"job_count"`
+		CommentCount int               `json:"comment_count"`
 	}
 	if err := json.Unmarshal(out, &h); err != nil {
 		return fail(stderr, fmt.Errorf("response is not JSON: %w", err))
 	}
 	drop, render := []string{"jobs"}, briefJobs[jobBrief]
-	cut := 0
 	var lists []byte
 	if !*full {
 		drop = append(drop, "links", "findings", "comments", "actor", "status_actor", "platform_experiment_id")
@@ -776,7 +773,7 @@ wrote each, and a job as hl job list prints it. hl job status ID prints a job's 
 		for i, comment := range h.Comments {
 			if text := []rune(comment.Text); len(text) > commentCut {
 				h.Comments[i].Text = string(text[:commentCut]) + "…"
-				cut++
+				h.Comments[i].Cut = true
 			}
 		}
 		brief, _ := json.Marshal(h.hypothesisBrief)
@@ -792,13 +789,13 @@ wrote each, and a job as hl job list prints it. hl job status ID prints a job's 
 	if err != nil {
 		return fail(stderr, fmt.Errorf("response is not JSON: %w", err))
 	}
+	if n := h.CommentCount - len(h.Comments); n > 0 {
+		lists = fmt.Appendf(lists, "\"comments_omitted\":%d,", n)
+	}
+	if n := h.JobCount - len(jobs); n > 0 {
+		lists = fmt.Appendf(lists, "\"jobs_omitted\":%d,", n)
+	}
 	fmt.Fprintf(stdout, "%s,%s\"jobs\":[%s]}\n", line[:len(line)-1], lists, bytes.Join(jobs, []byte(",")))
-	if cut > 0 {
-		fmt.Fprintf(stderr, "hl: hypothesis get: %d comments cut at %d characters; --full prints them whole\n", cut, commentCut)
-	}
-	if h.JobCount > len(jobs) {
-		fmt.Fprintf(stderr, "hl: hypothesis get: %d more jobs; --limit N (max 200) shows them\n", h.JobCount-len(jobs))
-	}
 	return 0
 }
 

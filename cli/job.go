@@ -41,7 +41,9 @@ func jobSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 
 FILE is a YAML job spec (metadata, job). The flags override it for this submission, so one
 committed spec serves every job that differs in hypothesis, env, estimate or tier. Prints the
-job's id, status, code_ref, branch and estimates; hl job status ID has the rest.
+job's id, status, code_ref, branch and estimates; hl job status ID has the rest. The result
+arrives as an update with its metrics, unasked: while your quota has room, submit the next
+independent trial beside it.
 A submit the same in every part (agent, hypothesis, commit, FILE, flags) is one job however
 often it is sent, so one that timed out is safe to resend; --repeat N makes it the Nth job of
 that request.
@@ -184,10 +186,8 @@ whole jobs to read first: each sample's seed/ reports its metrics and its
 			fmt.Fprintf(stderr, "hl: job submit: nothing was submitted: an identical submit already created %s, which ended %s. %s\n", out.ID, out.Status, again)
 			return 1
 		}
-		fmt.Fprintf(stderr, "hl: job submit: an identical submit already created %s, which is %s, and nothing more was submitted: %s. %s\n", out.ID, out.Status, resultArrives, again)
-		return 0
+		fmt.Fprintf(stderr, "hl: job submit: an identical submit already created %s, which is %s, and nothing more was submitted. %s\n", out.ID, out.Status, again)
 	}
-	fmt.Fprintln(stderr, "hl: job submit: "+resultArrives)
 	return 0
 }
 
@@ -203,10 +203,6 @@ func submissionKey(body map[string]any, repeat int) (string, error) {
 	}
 	return fmt.Sprintf("%x", sha256.Sum256(request)), nil
 }
-
-// resultArrives is what a submit says of the job's result. An agent told only that it arrives once
-// it ends its turn ended its turn after every submit, and ran one job at a time on idle machines.
-const resultArrives = "the result arrives as an update with its metrics, unasked: while your quota has room, submit the next independent trial beside it, and end your turn once nothing else is worth a job"
 
 // setJobEnv applies K=V pairs onto body's job.env.
 func setJobEnv(body map[string]any, pairs []string) error {

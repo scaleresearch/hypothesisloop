@@ -325,12 +325,12 @@ func TestJobListAndHypothesisGetPrintBriefJobsWithTheirMetricsAndTheEnvTheyVarie
 		t.Fatalf("job list: exit %d, stdout %q, stderr %s", code, stdout.String(), stderr.String())
 	}
 	stdout.Reset()
-	want := `{"id":"hyp-1","job_count":5,"jobs":[` + strings.Join(both, ",") + "]}\n"
+	want := `{"id":"hyp-1","job_count":5,"jobs_omitted":3,"jobs":[` + strings.Join(both, ",") + "]}\n"
 	if code := run([]string{"hypothesis", "get", "hyp-1", "--full"}, &stdout, &stderr); code != 0 || stdout.String() != want {
 		t.Fatalf("hypothesis get: exit %d, stdout %q, stderr %s", code, stdout.String(), stderr.String())
 	}
-	if got := stderr.String(); got != "hl: hypothesis get: 3 more jobs; --limit N (max 200) shows them\n" {
-		t.Fatalf("hypothesis get stderr = %q", got)
+	if stderr.Len() != 0 {
+		t.Fatalf("hypothesis get stderr = %q, want nothing: jobs_omitted says what the page left out", stderr.String())
 	}
 }
 

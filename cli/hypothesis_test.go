@@ -641,13 +641,13 @@ func TestHypothesisGetIsShortUnlessToldFull(t *testing.T) {
 		`"implementations":[{"agent_id":"a","branch":"hl/pe-1/r1/bf16","code_ref":"u@sha"}],"job_count":1,"status":"open","text":"bf16 is faster",` +
 		`"links":{"out":[{"type":"builds_on","hypothesis_id":"hyp-0","status":"confirmed"}],"in":[]},` +
 		`"findings":[{"experiment_id":"job-1","agent_id":"a","summary":"bf16 won","created_at":"2026-10-06T00:01:00Z"}],` +
-		`"comments":[{"agent_id":"b","text":"` + strings.Repeat("ö", commentCut) + `…","created_at":"2026-10-06T00:02:00Z"},{"agent_id":"b","text":"short","created_at":"2026-10-06T00:03:00Z"}],` +
+		`"comments":[{"agent_id":"b","text":"` + strings.Repeat("ö", commentCut) + `…","cut":true,"created_at":"2026-10-06T00:02:00Z"},{"agent_id":"b","text":"short","created_at":"2026-10-06T00:03:00Z"}],` +
 		`"jobs":[{"id":"job-1","agent_id":"a","status":"COMPLETED","metrics":{"ips":{"value":1203.68}},"job":{"env":{"P":"bf16"}}}]}` + "\n"
 	if stdout.String() != want {
 		t.Errorf("stdout = %s\nwant     %s", stdout.String(), want)
 	}
-	if got := stderr.String(); got != "hl: hypothesis get: 1 comments cut at 160 characters; --full prints them whole\n" {
-		t.Errorf("stderr = %q", got)
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want nothing: what qualifies the record is in it", stderr.String())
 	}
 	stdout.Reset()
 	stderr.Reset()
@@ -699,12 +699,12 @@ func TestCommentsOnTheObjective(t *testing.T) {
 	if code := run([]string{"hypothesis", "get", "root"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("get root: exit %d, stderr %s", code, stderr.String())
 	}
-	want := `{"id":"pe-env","objective":true,"comment_count":2,"comments":[{"agent_id":"ag-2","created_at":"t1","text":"` + strings.Repeat("x", commentCut) + `…"}]}` + "\n"
+	want := `{"id":"pe-env","objective":true,"comment_count":2,"comments_omitted":1,"comments":[{"agent_id":"ag-2","created_at":"t1","cut":true,"text":"` + strings.Repeat("x", commentCut) + `…"}]}` + "\n"
 	if stdout.String() != want {
 		t.Errorf("get root = %s, want %s", stdout.String(), want)
 	}
-	if !strings.Contains(stderr.String(), "1 more comments") || !strings.Contains(stderr.String(), "1 comments cut") {
-		t.Errorf("get root stderr = %q, want the cut and the comment not shown", stderr.String())
+	if stderr.Len() != 0 {
+		t.Errorf("get root stderr = %q, want nothing: the cut and the comment not shown are in the record", stderr.String())
 	}
 
 	stdout.Reset()
