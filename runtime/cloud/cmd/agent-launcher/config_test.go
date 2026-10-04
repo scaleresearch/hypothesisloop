@@ -56,24 +56,24 @@ func TestTheShippedConfigLoadsIntoWhatTheLauncherRuns(t *testing.T) {
 	if cfg.Provider.Name != "example" {
 		t.Fatalf("provider = %q", cfg.Provider.Name)
 	}
-	if got := cfg.warmPool(fake.New()); got != 2 {
-		t.Fatalf("warm pool = %d, want the file's 2", got)
+	if got := cfg.warmPool(fake.New()); got != 4 {
+		t.Fatalf("warm pool = %d, want the file's 4", got)
 	}
 }
 
 func TestTheWarmPoolLeftOutIsTwoOnAProviderThatWarmsAndNoneOnAnother(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-secret-value")
-	cfg, err := loadText(t, strings.Replace(shipped(t), "warm_pool_size: 2\n", "", 1))
+	cfg, err := loadText(t, strings.Replace(shipped(t), "warm_pool_size: 4\n", "", 1))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.warmPool(fake.New()); got != 2 {
+	if got := cfg.warmPool(fake.New()); got != 4 {
 		t.Errorf("on a provider that warms: %d", got)
 	}
 	if got := cfg.warmPool(struct{ provider.Provider }{fake.New()}); got != 0 {
 		t.Errorf("on a provider that cannot warm: %d", got)
 	}
-	cfg, err = loadText(t, strings.Replace(shipped(t), "warm_pool_size: 2", "warm_pool_size: 0", 1))
+	cfg, err = loadText(t, strings.Replace(shipped(t), "warm_pool_size: 4", "warm_pool_size: 0", 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestAConfigThatIsIncompleteOrMisspelledIsRefused(t *testing.T) {
 		"launcher name with dash": {"launcher_name: main", "launcher_name: team-a"},
 		"no interval":             {"reconcile_interval_seconds: 2\n", ""},
 		"negative interval":       {"reconcile_interval_seconds: 2", "reconcile_interval_seconds: -1"},
-		"negative warm pool":      {"warm_pool_size: 2", "warm_pool_size: -1"},
+		"negative warm pool":      {"warm_pool_size: 4", "warm_pool_size: -1"},
 		"a boot limit of its own": {"create_pause_milliseconds: 1000", "create_pause_milliseconds: 1000\nboot_limit_seconds: 120"},
 		"no create pause":         {"create_pause_milliseconds: 1000\n", ""},
 		"negative create pause":   {"create_pause_milliseconds: 1000", "create_pause_milliseconds: -1"},
