@@ -84,7 +84,10 @@ one line per agent of the platform experiment and metric, so there is nothing to
 A metric nobody has a result on yet prints no line, says so on stderr, and exits 0.
 Then each reference metric, an outside system the goal compares against and never ranked: one
 line per agent that measured it, its best value, the job and ran_on, or one line saying it was
-not measured. Compare a result with a reference measured on the same machine.`, stderr)
+not measured. Then a line setting the reference's best against the leader on the first ranking
+metric when both run in the same direction: beaten false means no result has met the goal yet,
+whatever the standings against the control say. Compare a result with a reference measured on
+the same machine.`, stderr)
 	named := experimentFlag(fs)
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
@@ -99,11 +102,7 @@ not measured. Compare a result with a reference measured on the same machine.`, 
 			Direction string            `json:"direction"`
 			Standings []json.RawMessage `json:"standings"`
 		} `json:"metrics"`
-		References []struct {
-			Metric    string            `json:"metric"`
-			Direction string            `json:"direction"`
-			Values    []json.RawMessage `json:"values"`
-		} `json:"references"`
+		References []json.RawMessage `json:"references"`
 	}
 	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(pe)+"/results", nil, &out); err != nil {
 		return fail(stderr, err)
@@ -130,7 +129,15 @@ not measured. Compare a result with a reference measured on the same machine.`, 
 			fmt.Fprintf(stderr, "hl: no results yet on %s\n", m.Metric)
 		}
 	}
-	for _, r := range out.References {
+	for _, raw := range out.References {
+		var r struct {
+			Metric    string            `json:"metric"`
+			Direction string            `json:"direction"`
+			Values    []json.RawMessage `json:"values"`
+		}
+		if err := json.Unmarshal(raw, &r); err != nil {
+			return fail(stderr, fmt.Errorf("response is not a reference: %w", err))
+		}
 		for _, v := range r.Values {
 			rest, err := compactJSON(v)
 			if err != nil {
@@ -140,7 +147,13 @@ not measured. Compare a result with a reference measured on the same machine.`, 
 		}
 		if len(r.Values) == 0 {
 			fmt.Fprintf(stdout, "%s\n", prefixed(nil, "reference", r.Metric, "direction", r.Direction, "measured", "not measured"))
+			continue
 		}
+		against, err := compactJSON(raw, "metric", "direction", "values")
+		if err != nil {
+			return fail(stderr, fmt.Errorf("response is not JSON: %w", err))
+		}
+		fmt.Fprintf(stdout, "%s\n", prefixed(against, "reference", r.Metric, "direction", r.Direction))
 	}
 	return 0
 }

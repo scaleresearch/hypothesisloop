@@ -237,6 +237,64 @@ func TestResultsShowEachReferenceWithWhereItRanAndRankNoneOfIt(t *testing.T) {
 	want := []ReferenceValue{{"baseline", 99, "job-baseline", nil}, {"c1", 50, "job-c1", &domain.RanOn{Node: "node-a"}}}
 	if len(results.References) != 1 || results.References[0].Metric != "other_score" || !reflect.DeepEqual(results.References[0].Values, want) {
 		t.Errorf("references = %+v, want other_score with %+v", results.References, want)
+	} // The baseline measured the reference at 99 and the leader is c1 at 50: the goal is not met.
+	if r := results.References[0]; r.Best == nil || *r.Best != 99 || r.LeaderMetric != "score" || r.Leader == nil || *r.Leader != 50 || r.Beaten == nil || *r.Beaten {
+		t.Errorf("reference = %+v, want best 99, leader 50 on score, not beaten", r)
+	}
+}
+
+// Each reference is set against the leader only where the comparison means something: the
+// same direction, and both measured.
+func TestAReferenceIsBeatenOnlyByALeaderStrictlyBetterInItsDirection(t *testing.T) {
+	ranked := func(direction string, best ...float64) MetricStandings {
+		m := MetricStandings{Metric: "score", Direction: direction}
+		for _, b := range best {
+			m.Standings = append(m.Standings, AgentStanding{Best: b})
+		}
+		return m
+	}
+	reference := func(direction string, values ...float64) MetricReference {
+		r := MetricReference{Metric: "ref", Direction: direction}
+		for _, v := range values {
+			r.Values = append(r.Values, ReferenceValue{Value: v})
+		}
+		return r
+	}
+	for _, c := range []struct {
+		name      string
+		metrics   []MetricStandings
+		reference MetricReference
+		best      string
+		leader    string
+		beaten    string
+	}{
+		{"leader above", []MetricStandings{ranked("maximize", 5, 2)}, reference("maximize", 3, 4), "4", "5", "true"},
+		{"tie", []MetricStandings{ranked("maximize", 4)}, reference("maximize", 4), "4", "4", "false"},
+		{"minimize", []MetricStandings{ranked("minimize", 2)}, reference("minimize", 3, 1), "1", "2", "false"},
+		{"other direction", []MetricStandings{ranked("minimize", 2)}, reference("maximize", 3), "3", "-", "-"},
+		{"nobody ranks", []MetricStandings{ranked("maximize")}, reference("maximize", 3), "3", "-", "-"},
+		{"not measured", []MetricStandings{ranked("maximize", 5)}, reference("maximize"), "-", "-", "-"},
+		{"no ranking metric", nil, reference("maximize", 3), "3", "-", "-"},
+	} {
+		out := &PlatformExperimentResults{Metrics: c.metrics, References: []MetricReference{c.reference}}
+		setAgainstLeader(out)
+		r := out.References[0]
+		show := func(v any) string {
+			switch p := v.(type) {
+			case *float64:
+				if p != nil {
+					return fmt.Sprint(*p)
+				}
+			case *bool:
+				if p != nil {
+					return fmt.Sprint(*p)
+				}
+			}
+			return "-"
+		}
+		if got := []string{show(r.Best), show(r.Leader), show(r.Beaten)}; !reflect.DeepEqual(got, []string{c.best, c.leader, c.beaten}) {
+			t.Errorf("%s: best, leader, beaten = %v, want %v", c.name, got, []string{c.best, c.leader, c.beaten})
+		}
 	}
 }
 

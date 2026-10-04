@@ -36,6 +36,11 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
 
   - The metric: one, ranked, the goal itself. An easy number that stands in poorly for the
     goal (training loss for held-out quality) wastes the run.
+  - The control: the strongest existing system the goal asks to beat that researchers can
+    start from and vary, usually what the repository already has. Ranking against a weaker
+    stand-in measures nothing the person asked. Each other system the goal names is a
+    reference: a `reference` metric of its own, measured as the ranked metric is so the two
+    compare, never merged into the control. A goal to beat it is met only past its value.
   - The gate: what makes a result wrong and not merely worse (wrong output, a changed test
     set) is a `constraint` metric checked against a fixed outside reference. A bound on a
     number nobody has measured is no gate yet: put it in `questions`. A bound the person
@@ -46,11 +51,10 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
     why, never how, read in a minute:
       - first the objective, in a sentence or two of the person's terms, and what is success;
       - the metric, defined just enough that every job's number compares, and why; the gate;
-      - the control, and each outside reference with where it lives, each a
-        `reference` metric, never merged into the control;
+      - the control and where it lives, and each reference with where it lives;
       - the accelerator type, its count per job and the `image`;
-      - the levers open and fixed, and when to stop: the target reached, no gain after
-        several honest tries, or the quota.
+      - the levers open and fixed, and when to stop: the target reached (past each
+        reference the goal asks to beat), no gain after several honest tries, or the quota.
     Name each part by its file or directory and the behaviour you mean, in the control and
     the levers too: no function, type or API names, commands, flags, field layouts or
     conventions of yours. How the harness measures (data splits, seeds, repeats, conventions)

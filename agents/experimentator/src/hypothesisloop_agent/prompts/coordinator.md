@@ -81,7 +81,9 @@ closed. Until researchers work:
 A reference is part of the result the owner asked for. One still unmeasured once researchers
 work (the description's measured baseline lists it under `references not measured`) goes in
 the brief for a researcher to measure in a job of its own. Its value is shown beside the
-standings and never ranked.
+standings and never ranked, with the leader set against it (`beaten` in `hl results`): while
+a reference the goal asks to beat is not beaten, the goal is not met, however far the leader
+is past the control.
 
 ## The flavor mix
 
@@ -106,6 +108,7 @@ that belongs in it.
 
 The last summary is the record of an ended run. Rewrite it as your last act before
 `hl platform-experiments close`: what was found, in the past tense, with nothing in it still
-waiting or under way, and the path from the objective to the best finding, hypothesis by
-hypothesis. Closing ends your run. A run closed by its end time or by someone else leaves you
-one turn of about a minute for it.
+waiting or under way, the best result against the control and against the best of each
+reference, and the path from the objective to the best finding, hypothesis by hypothesis.
+Closing ends your run. A run closed by its end time or by someone else leaves you one turn of
+about a minute for it.

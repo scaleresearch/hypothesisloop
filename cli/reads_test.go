@@ -53,12 +53,13 @@ func TestResultsFlattensStandings(t *testing.T) {
 	}
 }
 
-// A reference prints after the standings with where it was measured, and one nobody measured
-// says so.
+// A reference prints after the standings with where it was measured, then set against the
+// leader, and one nobody measured says so.
 func TestResultsPrintEachReferenceOrThatItWasNotMeasured(t *testing.T) {
 	recordingServer(t, func(int, recorded) any {
 		return map[string]any{"status": "running", "metrics": []any{}, "references": []any{
-			map[string]any{"metric": "other_acc", "direction": "maximize", "values": []any{map[string]any{"agent_id": "base", "value": 0.7, "experiment_id": "job-1", "ran_on": map[string]any{"node": "n1"}}}},
+			map[string]any{"metric": "other_acc", "direction": "maximize", "values": []any{map[string]any{"agent_id": "base", "value": 0.7, "experiment_id": "job-1", "ran_on": map[string]any{"node": "n1"}}},
+				"best": 0.7, "leader_metric": "acc", "leader": 0.6, "beaten": false},
 			map[string]any{"metric": "third_acc", "direction": "maximize", "values": []any{}},
 		}}
 	})
@@ -69,6 +70,7 @@ func TestResultsPrintEachReferenceOrThatItWasNotMeasured(t *testing.T) {
 	}
 	want := []string{
 		`{"reference":"other_acc","direction":"maximize","agent_id":"base","experiment_id":"job-1","ran_on":{"node":"n1"},"value":0.7}`,
+		`{"reference":"other_acc","direction":"maximize","beaten":false,"best":0.7,"leader":0.6,"leader_metric":"acc"}`,
 		`{"reference":"third_acc","direction":"maximize","measured":"not measured"}`,
 	}
 	if !reflect.DeepEqual(lines(stdout.String()), want) {

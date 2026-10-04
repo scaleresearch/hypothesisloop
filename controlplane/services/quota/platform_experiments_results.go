@@ -43,11 +43,17 @@ type ReferenceValue struct {
 }
 
 // MetricReference is what was measured of one outside system the goal compares against. Values
-// is empty while nobody has measured it.
+// is empty while nobody has measured it. Best, Leader and Beaten set the leader against it: a run
+// whose leader is short of a reference the goal asks to beat has not met the goal, whatever the
+// standings against the control say.
 type MetricReference struct {
-	Metric    string           `json:"metric"`
-	Direction string           `json:"direction"`
-	Values    []ReferenceValue `json:"values"`
+	Metric       string           `json:"metric"`
+	Direction    string           `json:"direction"`
+	Values       []ReferenceValue `json:"values"`
+	Best         *float64         `json:"best,omitempty" doc:"The best of values in the reference's direction, absent while nobody measured it."`
+	LeaderMetric string           `json:"leader_metric,omitempty" doc:"The first ranking metric, whose leader is set against this reference when both run in the same direction."`
+	Leader       *float64         `json:"leader,omitempty" doc:"The best ranked value on leader_metric, absent while nobody ranks."`
+	Beaten       *bool            `json:"beaten,omitempty" doc:"Whether leader is strictly better than best, present when both are."`
 }
 
 // MetricStandings is the full ranking on a single declared metric, best-first.
@@ -170,7 +176,38 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 	if err := s.mergeRanOn(ctx, out); err != nil {
 		return nil, fmt.Errorf("results: %w", err)
 	}
+	setAgainstLeader(out)
 	return out, nil
+}
+
+// setAgainstLeader sets each measured reference beside rank 1 on the first ranking metric, the
+// primary one by convention, when the two run in the same direction.
+func setAgainstLeader(out *PlatformExperimentResults) {
+	for i := range out.References {
+		reference := &out.References[i]
+		better := func(a, b float64) bool {
+			if reference.Direction == "minimize" {
+				return a < b
+			}
+			return a > b
+		}
+		for _, v := range reference.Values {
+			if reference.Best == nil || better(v.Value, *reference.Best) {
+				reference.Best = &v.Value
+			}
+		}
+		if len(out.Metrics) == 0 || out.Metrics[0].Direction != reference.Direction {
+			continue
+		}
+		primary := out.Metrics[0]
+		reference.LeaderMetric = primary.Metric
+		if len(primary.Standings) == 0 || reference.Best == nil {
+			continue
+		}
+		leader := primary.Standings[0].Best
+		beaten := better(leader, *reference.Best)
+		reference.Leader, reference.Beaten = &leader, &beaten
+	}
 }
 
 // mergeRanOn sets where each standing's and each reference value's job ran, in one read of the
