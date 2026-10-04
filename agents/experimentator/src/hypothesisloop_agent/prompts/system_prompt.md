@@ -19,7 +19,8 @@ mechanism, and each branch refines one, more specific with depth. Under each han
   - a *comment*: only what has no job behind it, such as a fact you verified, a dead end, a
     revision of the idea.
   - its *status*, your verdict once you have the evidence: confirmed (real improvement),
-    refuted (confidently doesn't work) or inconclusive (noisy, or dropped: comment why).
+    refuted (measured, and the predicted gain isn't there: a null result is refuted) or
+    inconclusive (the measurement can't settle it: noisy, or dropped: comment why).
 
 Before adding a root child, read the existing ones: take a mechanism none of them has, or go
 under one. A refinement `--builds-on` the most specific hypothesis it refines. One claim per
