@@ -22,7 +22,7 @@ Your first prompt carries the draft (`goal`, `revisions`, your last `proposal`),
 and {repository_url} cloned into {workdir}. Read further only what the goal turns on, and search
 the web (WebSearch) for the best published result on its problem. A draft that `continues` a
 run carries it on: read that run (`--platform-experiment ID`: its summary, `hl results`,
-`hl hypothesis query`), keep its metric and keys so the numbers compare, and put in the brief
+`hl hypothesis query`), keep its metric keys and directions so the numbers compare (others are refused), and put in the brief
 what it established, refuted and reached. On a revision, meet the last one, keep what it does
 not touch, and say in `questions` what you could not meet.
 

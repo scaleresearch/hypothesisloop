@@ -84,12 +84,12 @@ func maxProposedResearchers(maxHosted int) int {
 // proposal and the platform's config. It returns the experiment the proposal states, as validate
 // answers it: with its cost, its length and one place for each researcher. It leaves p as it is
 // stored: every text of it without the whitespace around it.
-func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p *Proposal, projectID string, maxHosted int) (CreatePlatformExperimentRequest, error) {
+func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p *Proposal, draft *domain.PlatformExperiment) (CreatePlatformExperimentRequest, error) {
 	experiment, err := decodeExperimentBase(p.Experiment)
 	if err != nil {
 		return experiment, refusedProposal("invalid_experiment", "experiment: %s", err)
 	}
-	if most := maxProposedResearchers(maxHosted); len(p.Agents) == 0 || len(p.Agents) > most {
+	if most := maxProposedResearchers(draft.MaxHosted); len(p.Agents) == 0 || len(p.Agents) > most {
 		return experiment, refusedProposal("invalid_agents", "agents: propose between 1 and %d researchers (the draft's max_agents), got %d", most, len(p.Agents))
 	}
 	least, limit := max(1, int(h.svc.cfg.MinBaseline.Minutes())), int(h.svc.cfg.BaselineLimit.Minutes())
@@ -104,10 +104,13 @@ func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p *Propo
 	if experiment, err = h.svc.validate(experiment); err != nil {
 		return experiment, err
 	}
+	if err := h.svc.requireContinuedMetrics(ctx, draft.Continues, experiment.Metrics); err != nil {
+		return experiment, err
+	}
 	if p.Experiment, err = withTexts(p.Experiment, experiment); err != nil {
 		return experiment, refusedProposal("invalid_experiment", "experiment: %s", err)
 	}
-	clusters, err := h.svc.requireReachable(ctx, projectID, &p.AcceleratorType)
+	clusters, err := h.svc.requireReachable(ctx, draft.ProjectID, &p.AcceleratorType)
 	if err != nil {
 		return experiment, err
 	}
@@ -318,7 +321,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if pe.Status != domain.PlatformExpDraft {
 			return nil, notADraft(pe)
 		}
-		if _, err := h.checkProposal(ctx, &in.Body, pe.ProjectID, pe.MaxHosted); err != nil {
+		if _, err := h.checkProposal(ctx, &in.Body, pe); err != nil {
 			return nil, h.refusal("check proposal", err)
 		}
 		stored, err := json.Marshal(in.Body)
@@ -433,7 +436,7 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 		}
 	}
 	now := time.Now().UTC()
-	experiment, err := h.checkProposal(ctx, &proposal, pe.ProjectID, pe.MaxHosted)
+	experiment, err := h.checkProposal(ctx, &proposal, pe)
 	if err != nil {
 		return nil, h.refusal("check proposal", err)
 	}

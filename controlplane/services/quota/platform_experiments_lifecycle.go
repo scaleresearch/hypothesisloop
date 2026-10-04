@@ -171,6 +171,9 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	if err := s.requireContinuable(ctx, req.ProjectID, req.repository.Named, req.Continues); err != nil {
 		return nil, err
 	}
+	if err := s.requireContinuedMetrics(ctx, req.Continues, req.Metrics); err != nil {
+		return nil, err
+	}
 	id, err := domain.NewID(domain.PlatformExperimentIDPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
@@ -235,6 +238,40 @@ func (s *PlatformExperimentsService) requireContinuable(ctx context.Context, pro
 		return refuseUpdate(422, "invalid_continues", "continues %s, which declared no baseline: there is no harness to carry on", continues)
 	}
 	return nil
+}
+
+// requireContinuedMetrics refuses metrics that measure otherwise than the run continues names:
+// a run that carries on another keeps its metric keys and their directions, or the two rank
+// different things. Empty continues starts fresh and declares any.
+func (s *PlatformExperimentsService) requireContinuedMetrics(ctx context.Context, continues string, metrics []domain.MetricDefinition) error {
+	if continues == "" {
+		return nil
+	}
+	prior, err := s.store.GetPlatformExperiment(ctx, continues)
+	if err != nil {
+		return fmt.Errorf("platform_experiments: reading the run continued: %w", err)
+	}
+	if prior == nil {
+		return fmt.Errorf("platform_experiments: the run continued, %s, is gone", continues)
+	}
+	declared, continued := metricGoals(metrics), metricGoals(prior.Metrics)
+	if declared != continued {
+		return refuseUpdate(422, "invalid_metrics", "metrics: this run declares %s and continues %s, which measured %s: a run that continues another keeps its metric keys and their directions", declared, continues, continued)
+	}
+	return nil
+}
+
+// metricGoals names each metric's key and direction, sorted by key.
+func metricGoals(metrics []domain.MetricDefinition) string {
+	goals := make([]string, 0, len(metrics))
+	for _, metric := range metrics {
+		goals = append(goals, metric.Key+" ("+metric.Direction+")")
+	}
+	if len(goals) == 0 {
+		return "no metric"
+	}
+	slices.Sort(goals)
+	return strings.Join(goals, ", ")
 }
 
 // coordinatorWanted says when the platform runs a hosted coordinator's machine (db.launcherCoordinatorsWhere).
@@ -350,6 +387,11 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 		return nil, err
 	}
 	patched.Name, patched.Description, patched.Metrics = checked.Name, checked.Description, checked.Metrics
+	if patch.Metrics != nil {
+		if err := s.requireContinuedMetrics(ctx, pe.Continues, patched.Metrics); err != nil {
+			return nil, err
+		}
+	}
 	if pe.Status == domain.PlatformExpOpen && (patch.BaselineJobID != nil || pe.BaselineJobID != "") {
 		// The platform declares what its baseline agent measured, held to the agent's own
 		// stronger jobs; a person or coordinator that declares chose among them.

@@ -179,3 +179,33 @@ func TestTheExamplePlatformExperimentIsAccepted(t *testing.T) {
 		t.Fatalf("Create from the example: %v", err)
 	}
 }
+
+// A run that continues another ranks what that one ranked: its metric keys and their directions,
+// in any order, with constraint bounds free to move.
+func TestARunThatContinuesAnotherKeepsItsMetric(t *testing.T) {
+	bound, looser := 2.0, 3.0
+	prior := &domain.PlatformExperiment{ID: "pe-prior", Metrics: []domain.MetricDefinition{
+		{Key: "val_loss", Direction: "minimize"}, {Key: "latency_ms", Direction: "minimize", Role: domain.MetricRoleConstraint, Bound: &bound},
+	}}
+	svc := NewPlatformExperimentsService(&createStore{created: prior}, testSettings, zap.NewNop(), "", time.Minute)
+	if err := svc.requireContinuedMetrics(context.Background(), "pe-prior", []domain.MetricDefinition{
+		{Key: "latency_ms", Direction: "minimize", Role: domain.MetricRoleConstraint, Bound: &looser}, {Key: "val_loss", Direction: "minimize"},
+	}); err != nil {
+		t.Errorf("the same keys and directions: %v", err)
+	}
+	if err := svc.requireContinuedMetrics(context.Background(), "", []domain.MetricDefinition{{Key: "accuracy", Direction: "maximize"}}); err != nil {
+		t.Errorf("a fresh run declares any metric: %v", err)
+	}
+	for name, metrics := range map[string][]domain.MetricDefinition{
+		"another key":       {{Key: "val_loss", Direction: "minimize"}, {Key: "throughput", Direction: "maximize"}},
+		"another direction": {{Key: "val_loss", Direction: "maximize"}, {Key: "latency_ms", Direction: "minimize"}},
+		"a metric left out": {{Key: "val_loss", Direction: "minimize"}},
+	} {
+		err := svc.requireContinuedMetrics(context.Background(), "pe-prior", metrics)
+		var refused *api.Refusal
+		if !errors.As(err, &refused) || refused.GetStatus() != 422 || refused.Reason != "invalid_metrics" ||
+			!strings.Contains(refused.Error(), "latency_ms (minimize), val_loss (minimize)") {
+			t.Errorf("%s: got %v, want 422 invalid_metrics naming both runs' metrics", name, err)
+		}
+	}
+}
