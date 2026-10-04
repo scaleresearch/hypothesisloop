@@ -186,6 +186,15 @@ spec:
             # The daemon this cluster builds environments on. Set, the agent reports that it builds.
             - name: HYPOTHESISLOOP_BUILDS
               value: unix:///run/buildkit/buildkitd.sock
+            {{- with .Values.builder.nodeImages.containerdSocket }}
+            # Where each environment built is loaded, so a job on this node does not pull it.
+            - name: HYPOTHESISLOOP_NODE_IMAGES
+              value: /run/node-containerd/containerd.sock
+            {{- end }}
+            {{- with .Values.builder.nodeImages.snapshotter }}
+            - name: HYPOTHESISLOOP_NODE_SNAPSHOTTER
+              value: {{ . | quote }}
+            {{- end }}
             {{- end }}
           resources:
             requests:
@@ -193,14 +202,19 @@ spec:
               memory: "32Mi"
             # See node-agent.yaml's resources comment: a tight cpu limit starves
             # the container's own startup handshake, not just its steady-state work. A build's
-            # session and output stream are the agent's to hold.
+            # session and output stream are the agent's to hold, and a load streams the whole image
+            # through it before the push starts.
             limits:
-              cpu: "300m"
+              cpu: {{ if and .Values.builder.enabled .Values.builder.nodeImages.containerdSocket }}"1"{{ else }}"300m"{{ end }}
               memory: {{ if .Values.builder.enabled }}"128Mi"{{ else }}"64Mi"{{ end }}
           {{- if .Values.builder.enabled }}
           volumeMounts:
             - name: buildkit-socket
               mountPath: /run/buildkit
+            {{- if .Values.builder.nodeImages.containerdSocket }}
+            - name: node-containerd
+              mountPath: /run/node-containerd/containerd.sock
+            {{- end }}
           {{- end }}
       # Runs on a node kept free of workloads (local development's no-workload taint) or on a
       # control-plane node, so it has somewhere to run before any workload node is attached.
@@ -219,4 +233,10 @@ spec:
         - name: buildkit-cache
           persistentVolumeClaim:
             claimName: hypothesisloop-builder-cache
+        {{- with .Values.builder.nodeImages.containerdSocket }}
+        - name: node-containerd
+          hostPath:
+            path: {{ . | quote }}
+            type: Socket
+        {{- end }}
       {{- end }}

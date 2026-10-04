@@ -20,6 +20,9 @@
 #   KUBE_CONTEXT       kubectl context to target (default: current-context)
 #   BUILDER            -> builder.enabled. true also builds environments in this cluster, on a
 #                         rootless BuildKit beside the cluster-agent (default: false)
+#   BUILDER_NODE_IMAGES -> builder.nodeImages.containerdSocket. The containerd socket of the
+#                         builder's node (k3s: /run/k3s/containerd/containerd.sock): each build is
+#                         loaded there too, so a job on that node does not pull it (default: none)
 set -euo pipefail
 
 CLUSTER_NAME="${CLUSTER_NAME:?CLUSTER_NAME must name this cluster (make cluster-agent-up CLUSTER=<name>)}"
@@ -33,6 +36,8 @@ KUBECONFIG_PATH="${KUBECONFIG_PATH:-${HOME}/.kube/config}"
 KUBE_CONTEXT="${KUBE_CONTEXT:-}"
 BUILDER="${BUILDER:-false}"
 [[ "${BUILDER}" == true || "${BUILDER}" == false ]] || { echo "ERROR: BUILDER must be true or false, not '${BUILDER}'" >&2; exit 1; }
+BUILDER_NODE_IMAGES="${BUILDER_NODE_IMAGES:-}"
+[[ -z "${BUILDER_NODE_IMAGES}" || "${BUILDER}" == true ]] || { echo "ERROR: BUILDER_NODE_IMAGES loads what the builder builds, and BUILDER is not true" >&2; exit 1; }
 
 command -v helm >/dev/null || { echo "ERROR: helm is required (https://helm.sh/docs/intro/install/)" >&2; exit 1; }
 
@@ -52,6 +57,7 @@ helm upgrade --install hypothesisloop-cluster-agent "${SCRIPT_DIR}/chart" \
   --set-string images.registry="${REGISTRY_URL}" \
   --set-string images.tag="${TAG}" \
   --set builder.enabled="${BUILDER}" \
+  --set-string builder.nodeImages.containerdSocket="${BUILDER_NODE_IMAGES}" \
   --values - <<VALUES
 runtimeToken: "${RUNTIME_TOKEN}"
 VALUES

@@ -45,6 +45,14 @@ builder:
   cache:
     size: 100Gi
     storageClassName: ""
+  # The containerd socket of the node the cluster-agent runs on, as a path on that node (k3s:
+  # /run/k3s/containerd/containerd.sock). Set, each environment built is also loaded into that
+  # node's images, so a job placed there starts without pulling back what was just pushed; a job
+  # on any other node pulls it as before. That socket is root on its node. Empty loads nothing.
+  nodeImages:
+    containerdSocket: ""
+    # The snapshotter the node's kubelet makes containers with, when not containerd's default.
+    snapshotter: ""
 
 images:
   # Registry every node in this cluster can already pull from.

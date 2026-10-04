@@ -173,7 +173,8 @@ reset:
 # RUNTIME_TOKEN comes from the environment and is passed on by name, so neither this recipe's
 # echo nor a process list shows it.
 # BUILDER=true also builds environments there (install.sh's BUILDER).
-# Usage: RUNTIME_TOKEN="$$(make -s runtime-token CLUSTER=<name>)" make cluster-agent-up CLUSTER=<name> API_URL=... METRICS_URL=... [REGISTRY=...] [TAG=...] [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...] [BUILDER=true]
+# BUILDER_NODE_IMAGES, the builder node's containerd socket, also loads each build into that node.
+# Usage: RUNTIME_TOKEN="$$(make -s runtime-token CLUSTER=<name>)" make cluster-agent-up CLUSTER=<name> API_URL=... METRICS_URL=... [REGISTRY=...] [TAG=...] [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...] [BUILDER=true [BUILDER_NODE_IMAGES=<containerd socket>]]
 cluster-agent-up:
 	@test -n "$(CLUSTER)" || { echo "make cluster-agent-up: CLUSTER=<name> is required, the name the cluster was registered under" >&2; exit 1; }
 	@test -n "$(API_URL)" || { echo "make cluster-agent-up: API_URL is required, the control-plane API as a pod in that cluster reaches it" >&2; exit 1; }
@@ -182,7 +183,7 @@ cluster-agent-up:
 	@test -n "$$RUNTIME_TOKEN" || { echo "make cluster-agent-up: RUNTIME_TOKEN must be in the environment, the token make -s runtime-token CLUSTER=$(CLUSTER) printed" >&2; exit 1; }
 	CLUSTER_NAME="$(CLUSTER)" API_URL="$(API_URL)" METRICS_URL="$(METRICS_URL)" REGISTRY_URL="$(REGISTRY)" TAG="$(TAG)" \
 	  RUNTIME_TOKEN="$$RUNTIME_TOKEN" KUBECONFIG_PATH="$(KUBECONFIG_PATH)" KUBE_CONTEXT="$(KUBE_CONTEXT)" \
-	  BUILDER="$(BUILDER)" bash runtime/k8s/infra/install.sh
+	  BUILDER="$(BUILDER)" BUILDER_NODE_IMAGES="$(BUILDER_NODE_IMAGES)" bash runtime/k8s/infra/install.sh
 
 cluster-agent-down:
 	bash runtime/k8s/infra/destroy.sh

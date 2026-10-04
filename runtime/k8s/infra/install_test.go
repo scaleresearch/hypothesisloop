@@ -156,6 +156,70 @@ func TestTheBuilderIsARootlessSidecarOfTheAgentOnlyWhenEnabled(t *testing.T) {
 	}
 }
 
+// The node's containerd socket is root on that node, so the agent holds it only when asked, and
+// only beside a builder, whose builds are what it loads.
+func TestTheAgentHoldsTheNodesContainerdOnlyWhenAskedToLoadBuilds(t *testing.T) {
+	const socket = "/run/k3s/containerd/containerd.sock"
+	for name, set := range map[string][]string{
+		"no builder":                   nil,
+		"a builder that loads nothing": {"builder.enabled=true"},
+		"loading without a builder":    {"builder.nodeImages.containerdSocket=" + socket},
+	} {
+		spec := podSpec(ofKind(render(t, set...), "Deployment")[0])
+		volumes, _ := spec["volumes"].([]any)
+		for _, volume := range volumes {
+			if _, host := volume.(map[string]any)["hostPath"]; host {
+				t.Errorf("%s: the agent mounts %v from its node", name, volume)
+			}
+		}
+		if loads := envValue(spec["containers"].([]any)[0], "HYPOTHESISLOOP_NODE_IMAGES"); loads != nil {
+			t.Errorf("%s: HYPOTHESISLOOP_NODE_IMAGES = %v", name, loads)
+		}
+	}
+
+	spec := podSpec(ofKind(render(t, "builder.enabled=true", "builder.nodeImages.containerdSocket="+socket), "Deployment")[0])
+	var hostPath map[string]any
+	for _, volume := range spec["volumes"].([]any) {
+		if volume.(map[string]any)["name"] == "node-containerd" {
+			hostPath = volume.(map[string]any)["hostPath"].(map[string]any)
+		}
+	}
+	if hostPath["path"] != socket || hostPath["type"] != "Socket" {
+		t.Fatalf("node-containerd %v, want the socket asked for", hostPath)
+	}
+	agent := spec["containers"].([]any)[0].(map[string]any)
+	mounted := false
+	for _, mount := range agent["volumeMounts"].([]any) {
+		mount := mount.(map[string]any)
+		mounted = mounted || mount["name"] == "node-containerd" && mount["mountPath"] == "/run/node-containerd/containerd.sock"
+	}
+	if loads := envValue(agent, "HYPOTHESISLOOP_NODE_IMAGES"); !mounted || loads != "/run/node-containerd/containerd.sock" {
+		t.Errorf("mounted %v, HYPOTHESISLOOP_NODE_IMAGES = %v, want the mounted socket", mounted, loads)
+	}
+}
+
+func TestInstallLoadsBuildsIntoTheNodeOnlyWithABuilder(t *testing.T) {
+	bin, argsFile, _ := fakeBin(t)
+	for builder, ok := range map[string]bool{"true": true, "false": false} {
+		cmd := exec.Command("bash", "install.sh")
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "BUILDER="+builder, "BUILDER_NODE_IMAGES=/run/k3s/containerd/containerd.sock",
+			"CLUSTER_NAME=edge", "API_URL=http://api", "METRICS_URL=http://metrics", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
+		out, err := cmd.CombinedOutput()
+		if !ok {
+			if err == nil {
+				t.Errorf("BUILDER=%s with BUILDER_NODE_IMAGES installed, want it refused", builder)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("install.sh: %v\n%s", err, out)
+		}
+		if args, _ := os.ReadFile(argsFile); !strings.Contains(string(args), "builder.nodeImages.containerdSocket=/run/k3s/containerd/containerd.sock\n") {
+			t.Errorf("helm arguments = %q, want the socket", args)
+		}
+	}
+}
+
 func envValue(container any, name string) any {
 	for _, env := range container.(map[string]any)["env"].([]any) {
 		if env.(map[string]any)["name"] == name {
