@@ -17,11 +17,14 @@ func cmdSituation(c *apiclient.Client, args []string, stdout, stderr io.Writer) 
 	fs := newFlags("situation", `usage: hl situation [--json] [--platform-experiment PE]
 
 The platform experiment as it stands now, one line per block, each field as key=value:
-  run         now, ends_at, minutes_left and the stage: its index and name, next_boundary_at and
-              next_share_acch, the share that boundary brings
+  run         now, status, ends_at, minutes_left and the stage: its index and name,
+              next_boundary_at and next_share_acch, the share that boundary brings. A closed run
+              reads minutes_left=0 with closed_at and close_reason; one not started reads
+              not_started=true and its duration_hours
   objective   one line per declared metric: direction, baseline_value, best_value with the
-              best_job and best_agent that set it, target, gap_to_target_pct, and best_1h_ago and
-              best_3h_ago, the best as it stood then
+              best_job and best_agent that set it, target, the value the metric's
+              target_vs_baseline sets against baseline_value, gap_to_target_pct, and best_1h_ago
+              and best_3h_ago, the best as it stood then
   capacity    fits_now, how many more jobs shaped like the baseline's job would be placed now, and
               jobs_in_flight_run, the run's jobs queued and running; then one line per cluster
               and resource the run's jobs use, free and total

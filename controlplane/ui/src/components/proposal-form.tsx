@@ -25,7 +25,10 @@ function metricLine(metric: MetricDefinition): string {
   if (metric.role === 'constraint') {
     return `${metric.key} must stay ${metric.direction === 'minimize' ? 'at or below' : 'at or above'} ${metric.bound}`
   }
-  return `${metric.key}, ${metric.direction === 'minimize' ? 'lower is better' : 'higher is better'}`
+  const line = `${metric.key}, ${metric.direction === 'minimize' ? 'lower is better' : 'higher is better'}`
+  if (metric.target_vs_baseline === undefined) return line
+  const pct = Math.round(metric.target_vs_baseline * 1000) / 10
+  return `${line}, target ${pct > 0 ? '+' : ''}${pct}% against the baseline`
 }
 
 const BULLETS = 'list-disc pl-5 text-sm'

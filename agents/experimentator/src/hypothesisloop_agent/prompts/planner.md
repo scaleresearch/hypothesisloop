@@ -32,7 +32,9 @@ The proposal, in the shape `hl platform-experiments propose` shows:
 
   - The metric: one, ranked, the goal itself, never an easy stand-in for it. A harness the
     repository holds for the goal that measures as below is the experiment: keep it and its
-    metric keys as they are.
+    metric keys as they are. Success stated as a change against the control goes on that
+    metric as `target_vs_baseline`, signed in its direction; a target stated otherwise, or none,
+    is left out of it and stays in the brief.
   - The control: the existing system the goal asks to beat, as it ships (its recommended
     configuration, else its default), measured and left untouched. Each other system the goal
     names is a `reference` metric of its own, measured the same way, never merged into the

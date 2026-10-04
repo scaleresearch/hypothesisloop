@@ -1,12 +1,13 @@
 package domain
 
 import (
+	"math"
 	"testing"
 	"time"
 )
 
 func TestValidateMetricDefinitions(t *testing.T) {
-	bound := 0.99
+	bound, up, down, nan := 0.99, 0.5, -0.3, math.NaN()
 	cases := []struct {
 		name    string
 		defs    []MetricDefinition
@@ -25,6 +26,14 @@ func TestValidateMetricDefinitions(t *testing.T) {
 		{"duplicate key", []MetricDefinition{{Key: "loss", Direction: "minimize"}, {Key: "loss", Direction: "maximize"}}, true},
 		{"constraint missing bound", []MetricDefinition{{Key: "pcc", Direction: "maximize", Role: MetricRoleConstraint}}, true},
 		{"bound on non-constraint", []MetricDefinition{{Key: "loss", Direction: "minimize", Bound: &bound}}, true},
+		{"target above the baseline of a maximized metric", []MetricDefinition{{Key: "acc", Direction: "maximize", TargetVsBaseline: &up}}, false},
+		{"target below the baseline of a minimized metric", []MetricDefinition{{Key: "loss", Direction: "minimize", TargetVsBaseline: &down}}, false},
+		{"target below the baseline of a maximized metric", []MetricDefinition{{Key: "acc", Direction: "maximize", TargetVsBaseline: &down}}, true},
+		{"target above the baseline of a minimized metric", []MetricDefinition{{Key: "loss", Direction: "minimize", TargetVsBaseline: &up}}, true},
+		{"target at the baseline", []MetricDefinition{{Key: "acc", Direction: "maximize", TargetVsBaseline: new(float64)}}, true},
+		{"target not a number", []MetricDefinition{{Key: "acc", Direction: "maximize", TargetVsBaseline: &nan}}, true},
+		{"target on a constraint", []MetricDefinition{{Key: "pcc", Direction: "maximize", Role: MetricRoleConstraint, Bound: &bound, TargetVsBaseline: &up}}, true},
+		{"target on a reference", []MetricDefinition{{Key: "other_ratio", Direction: "maximize", Role: MetricRoleReference, TargetVsBaseline: &up}}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

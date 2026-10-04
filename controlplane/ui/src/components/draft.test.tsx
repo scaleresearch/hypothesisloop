@@ -26,7 +26,7 @@ const proposal: Proposal = {
     name: 'Cosine or constant',
     description: 'Train the small transformer in train.py and report val_loss.',
     metrics: [
-      { key: 'val_loss', direction: 'minimize' },
+      { key: 'val_loss', direction: 'minimize', target_vs_baseline: -0.2 },
       { key: 'exact_match', direction: 'maximize', role: 'constraint', bound: 1 },
     ],
     report_interval_seconds: 30,
@@ -181,6 +181,7 @@ describe('a proposed draft', () => {
     render(<SWRConfig value={{ provider: () => new Map() }}><TenantContext.Provider value={tenant}><DraftView draft={proposed()} readOnly /></TenantContext.Provider></SWRConfig>)
     expect(screen.getByLabelText('Name')).toMatchObject({ value: 'Cosine or constant', disabled: true })
     expect(screen.getByLabelText('Budget (accelerator-hours)')).toHaveProperty('disabled', true)
+    expect(screen.getByText('val_loss, lower is better, target -20% against the baseline')).toBeTruthy()
     for (const name of ['Accept and run', 'Revise', 'Abandon this draft']) expect(screen.queryByRole('button', { name })).toBeNull()
   })
 

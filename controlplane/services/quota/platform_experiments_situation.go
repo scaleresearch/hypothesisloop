@@ -32,11 +32,39 @@ type Situation struct {
 
 // SituationRun is the run's clock.
 type SituationRun struct {
-	Now         time.Time       `json:"now"`
-	Status      string          `json:"status"`
-	EndsAt      *time.Time      `json:"ends_at,omitempty" doc:"When the run ends and the platform closes it. Absent until the run starts."`
-	MinutesLeft *int            `json:"minutes_left,omitempty" doc:"Whole minutes until ends_at."`
-	Stage       *SituationStage `json:"stage,omitempty" doc:"The stage the run is in, while it runs."`
+	Now           time.Time          `json:"now"`
+	Status        string             `json:"status"`
+	ClosedAt      *time.Time         `json:"closed_at,omitempty" doc:"When the run closed. Present on a closed run alone."`
+	CloseReason   domain.CloseReason `json:"close_reason,omitempty" doc:"Why the run closed, on a closed run."`
+	NotStarted    bool               `json:"not_started,omitempty" doc:"True while the run has not started: a draft, or open while its baseline is measured. Its clock starts once the baseline is declared."`
+	DurationHours *float64           `json:"duration_hours,omitempty" doc:"On a run not started: how long it runs once it starts."`
+	EndsAt        *time.Time         `json:"ends_at,omitempty" doc:"When the run ends and the platform closes it. Absent until the run starts and once it closed."`
+	MinutesLeft   *int               `json:"minutes_left,omitempty" doc:"Whole minutes until ends_at, 0 on a closed run. Absent on a run not started."`
+	Stage         *SituationStage    `json:"stage,omitempty" doc:"The stage the run is in, while it runs."`
+}
+
+// clockOf is the clock of pe at now: a closed run has no time left whatever its ends_at, and one
+// not started counts no minutes.
+func clockOf(pe *domain.PlatformExperiment, now time.Time) SituationRun {
+	out := SituationRun{Now: now, Status: string(pe.Status)}
+	switch pe.Status {
+	case domain.PlatformExpClosed:
+		zero := 0
+		out.ClosedAt, out.CloseReason, out.MinutesLeft = pe.ClosedAt, pe.CloseReason, &zero
+	case domain.PlatformExpDraft, domain.PlatformExpOpen:
+		out.NotStarted = true
+		if pe.DurationHours > 0 {
+			hours := pe.DurationHours
+			out.DurationHours = &hours
+		}
+	default:
+		out.MinutesLeft = minutesUntil(pe.EndsAt, now)
+		if !pe.EndsAt.IsZero() {
+			endsAt := pe.EndsAt.UTC()
+			out.EndsAt = &endsAt
+		}
+	}
+	return out
 }
 
 // SituationStage is the stage a running run is in.
@@ -54,7 +82,7 @@ type SituationMetric struct {
 	BestValue      *float64 `json:"best_value,omitempty" doc:"The best value of a researcher's completed job that holds every constraint, as the standings rank it."`
 	BestJob        string   `json:"best_job,omitempty"`
 	BestAgent      string   `json:"best_agent,omitempty" doc:"The agent id of best_job."`
-	Target         *float64 `json:"target,omitempty" doc:"On the primary metric: the best measured value of a reference metric the goal compares against, in the same direction. Absent while none is measured."`
+	Target         *float64 `json:"target,omitempty" doc:"The value the metric's target_vs_baseline sets against baseline_value. Absent where the metric declares none or no baseline value is measured."`
 	GapToTargetPct *float64 `json:"gap_to_target_pct,omitempty" doc:"How far best_value is short of target, in percent of target: positive while short of it, negative past it."`
 	Best1hAgo      *float64 `json:"best_1h_ago,omitempty" doc:"best_value as it stood an hour ago, of the jobs that had completed by then."`
 	Best3hAgo      *float64 `json:"best_3h_ago,omitempty" doc:"The same three hours ago."`
@@ -338,10 +366,6 @@ func (s *PlatformExperimentsService) objective(ctx context.Context, pe *domain.P
 	if err != nil {
 		return nil, fmt.Errorf("objective: %w", err)
 	}
-	references, err := s.references(ctx, pe)
-	if err != nil {
-		return nil, fmt.Errorf("objective: %w", err)
-	}
 	for _, metric := range pe.Metrics {
 		if metric.EffectiveRole() != domain.MetricRoleRanking {
 			continue
@@ -366,31 +390,13 @@ func (s *PlatformExperimentsService) objective(ctx context.Context, pe *domain.P
 				m.BaselineValue = &baseline[0].Value
 			}
 		}
-		if len(out) == 0 {
-			m.Target = strongestReference(metric, references)
+		if m.BaselineValue != nil {
+			m.Target = metric.Target(*m.BaselineValue)
 			m.GapToTargetPct = gapToTarget(metric.Direction, m.BestValue, m.Target)
 		}
 		out = append(out, m)
 	}
 	return out, nil
-}
-
-// strongestReference is the best measured value, holding every constraint, of the references in
-// metric's direction: the bar the goal sets the run's leader against.
-func strongestReference(metric domain.MetricDefinition, references []MetricReference) *float64 {
-	var target *float64
-	for _, reference := range references {
-		if reference.Direction != metric.Direction {
-			continue
-		}
-		for _, v := range reference.Values {
-			if v.ConstraintsMet == metricsdb.ConstraintsHeld && (target == nil || metric.Better(v.Value, *target)) {
-				value := v.Value
-				target = &value
-			}
-		}
-	}
-	return target
 }
 
 // minutesUntil is the whole minutes from now to at, 0 once it passed, nil for no time.
@@ -413,11 +419,7 @@ func (s *PlatformExperimentsService) Situation(ctx context.Context, id, agentID 
 		return nil, ErrPlatformExperimentNotFound
 	}
 	now := time.Now().UTC()
-	out := &Situation{Run: SituationRun{Now: now, Status: string(pe.Status), MinutesLeft: minutesUntil(pe.EndsAt, now)}}
-	if !pe.EndsAt.IsZero() {
-		endsAt := pe.EndsAt.UTC()
-		out.Run.EndsAt = &endsAt
-	}
+	out := &Situation{Run: clockOf(pe, now)}
 	if pe.Status == domain.PlatformExpRunning {
 		out.Run.Stage = &SituationStage{Index: pe.CurrentStage, Of: len(pe.Stages)}
 		next, err := s.nextStage(ctx, pe)
@@ -555,9 +557,9 @@ func registerSituationHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment-situation", Method: "GET", Path: "/platform-experiments/{id}/situation",
 		Summary: "Where the run stands now, in one read", Tags: []string{"platform-experiments"},
-		Description: "Computed on every read: the run's clock (ends_at, minutes_left, the stage and when the next starts), " +
+		Description: "Computed on every read: the run's clock (ends_at, minutes_left, the stage and when the next starts; on a closed run minutes_left 0 with closed_at and close_reason, on one not started how long it will run once it starts), " +
 			"the objective on each ranking metric (the declared baseline's value, the best a researcher's completed job holding every constraint reached, by which job and agent, " +
-			"on the primary metric the strongest measured reference as target and the gap to it, and the best an hour and three hours ago), " +
+			"the target its target_vs_baseline sets against the baseline's value and the gap to it, and the best an hour and three hours ago), " +
 			"the capacity the run's jobs could use (free and total of its baseline job's type on each cluster its jobs can be placed on, fits_now: how many jobs shaped like the baseline job place now, node by node, and the run's jobs queued and running), " +
 			"the run's budget and spend, and for each agent its jobs queued and running, the subagents and turn its harness last reported, its activity, minutes without a job in flight, " +
 			"the messages it may still be sent this hour, its model account's allowance, and its share and the room left in it. " +

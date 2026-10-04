@@ -16,6 +16,7 @@
 #   - key: the_ranked_metric
 #     direction: maximize   # or minimize
 #     role: ranking
+#     target_vs_baseline: 0.5   # optional: the goal, +50% over the baseline (negative to minimize)
 #   - key: the_gate         # what makes a result wrong and not merely worse
 #     direction: minimize
 #     role: constraint      # a job that breaks the bound or reports no value ranks nowhere

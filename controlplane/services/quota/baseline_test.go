@@ -248,3 +248,18 @@ func TestAnOpenExperimentIsHeldToItsDeclaredBaselineAndStartsOnceNothingIsMissin
 		t.Errorf("a running experiment's brief: got = %d %v, brief %q, want 200 with the baseline, the estimate and what the platform wrote of the job as they were", code, out, store.created[0].Description)
 	}
 }
+
+// A metric's target_vs_baseline reaches the brief as the value it sets against what the
+// baseline measured, so every agent reads the goal as a number.
+func TestTheBriefStatesTheTargetAMetricSetsAgainstTheBaseline(t *testing.T) {
+	pe := openExperiment()
+	lower := -0.25
+	pe.Metrics[0].TargetVsBaseline = &lower
+	block := baselineBlock(measuredBaseline(), pe.Metrics)
+	if want := "\ntarget: val_loss = 1.35 (-25% of the baseline's 1.8)"; !strings.Contains(block, want) {
+		t.Fatalf("block %q, want it to hold %q", block, want)
+	}
+	if block := baselineBlock(measuredBaseline(), openExperiment().Metrics); strings.Contains(block, "target:") {
+		t.Fatalf("block %q states a target no metric declares", block)
+	}
+}

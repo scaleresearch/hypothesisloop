@@ -65,3 +65,17 @@ func TestSituationSaysAnEmptyListIsEmpty(t *testing.T) {
 		t.Errorf("exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 }
+
+// A closed run reads no minutes left and when and why it closed, and one not started says so.
+func TestSituationStatesAClosedOrNotStartedRun(t *testing.T) {
+	for record, want := range map[string]string{
+		`{"run":{"now":"2026-10-09T14:00:00Z","status":"closed","closed_at":"2026-10-09T13:00:00Z","close_reason":"closed_by_request","minutes_left":0}}`: "run: now=2026-10-09T14:00:00Z status=closed closed_at=2026-10-09T13:00:00Z close_reason=closed_by_request minutes_left=0\n",
+		`{"run":{"now":"2026-10-09T14:00:00Z","status":"open","not_started":true,"duration_hours":4}}`:                                                    "run: now=2026-10-09T14:00:00Z status=open not_started=true duration_hours=4\n",
+	} {
+		setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, record) }))
+		code, stdout, stderr := hl(t, "situation", "--platform-experiment", "pe-1")
+		if code != 0 || stdout != want {
+			t.Errorf("exit %d, stdout %q, want %q, stderr %q", code, stdout, want, stderr)
+		}
+	}
+}

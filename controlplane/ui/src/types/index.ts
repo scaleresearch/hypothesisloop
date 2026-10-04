@@ -192,6 +192,8 @@ export interface MetricDefinition {
   // (shown, never ranked). See docs/stages.md.
   role?: 'ranking' | 'constraint' | 'attribute'
   bound?: number
+  // On a ranking metric: the goal as a signed change against the baseline's value, 0.5 for +50%.
+  target_vs_baseline?: number
 }
 
 // Why a platform experiment is in its status, and whose move it waits for: a person of its

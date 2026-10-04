@@ -431,10 +431,11 @@ type declaredExperiment struct {
 }
 
 type declaredMetric struct {
-	Key       string   `json:"key" yaml:"key"`
-	Direction string   `json:"direction" yaml:"direction"`
-	Role      string   `json:"role" yaml:"role,omitempty"`
-	Bound     *float64 `json:"bound" yaml:"bound,omitempty"`
+	Key              string   `json:"key" yaml:"key"`
+	Direction        string   `json:"direction" yaml:"direction"`
+	Role             string   `json:"role" yaml:"role,omitempty"`
+	Bound            *float64 `json:"bound" yaml:"bound,omitempty"`
+	TargetVsBaseline *float64 `json:"target_vs_baseline" yaml:"target_vs_baseline,omitempty"`
 }
 
 // statedExperiment is what the experiment file of a clone states.
@@ -468,6 +469,9 @@ func (m declaredMetric) String() string {
 	stated := m.Key + " " + m.Direction + " " + role
 	if m.Bound != nil {
 		stated += fmt.Sprintf(" bound %g", *m.Bound)
+	}
+	if m.TargetVsBaseline != nil {
+		stated += fmt.Sprintf(" target_vs_baseline %g", *m.TargetVsBaseline)
 	}
 	return stated
 }

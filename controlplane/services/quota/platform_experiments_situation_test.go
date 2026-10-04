@@ -49,7 +49,8 @@ func TestFitsNowCountsJobsShapedLikeTheBaselineNodeByNode(t *testing.T) {
 }
 
 // The objective reads the best of the researchers' completed jobs and where it stood an hour
-// and three hours before, and the gap to the target in percent of it, short being positive.
+// and three hours before, the gap to the target in percent of it, short being positive, and the
+// target a metric's target_vs_baseline sets against the baseline's value in either direction.
 func TestTheObjectiveReadsTheBestAndWhereItStoodBefore(t *testing.T) {
 	now := time.Now()
 	values := []standing{
@@ -87,13 +88,44 @@ func TestTheObjectiveReadsTheBestAndWhereItStoodBefore(t *testing.T) {
 			t.Errorf("%s best %v target %v: gap %v, want %v", c.direction, c.best, c.target, got, c.want)
 		}
 	}
-	references := []MetricReference{
-		{Metric: "ref-a", Direction: "maximize", Values: []ReferenceValue{{Value: 0.95, ConstraintsMet: "true"}, {Value: 0.99, ConstraintsMet: "false"}}},
-		{Metric: "ref-b", Direction: "maximize", Values: []ReferenceValue{{Value: 0.97, ConstraintsMet: "true"}}},
-		{Metric: "ref-c", Direction: "minimize", Values: []ReferenceValue{{Value: 5, ConstraintsMet: "true"}}},
+	cases := []struct {
+		metric   domain.MetricDefinition
+		baseline float64
+		want     *float64
+	}{
+		{domain.MetricDefinition{Direction: "maximize", TargetVsBaseline: f(0.5)}, 2, f(3)},
+		{domain.MetricDefinition{Direction: "maximize", TargetVsBaseline: f(0.5)}, -2, f(-1)},
+		{domain.MetricDefinition{Direction: "minimize", TargetVsBaseline: f(-0.25)}, 4, f(3)},
+		{domain.MetricDefinition{Direction: "minimize", TargetVsBaseline: f(-0.25)}, -4, f(-5)},
+		{domain.MetricDefinition{Direction: "maximize", TargetVsBaseline: f(0.5)}, 0, nil},
+		{domain.MetricDefinition{Direction: "maximize"}, 2, nil},
 	}
-	if got := strongestReference(domain.MetricDefinition{Key: "acc", Direction: "maximize"}, references); got == nil || *got != 0.97 {
-		t.Fatalf("target: %v, want the strongest reference holding its constraints in the metric's direction", got)
+	for _, c := range cases {
+		got := c.metric.Target(c.baseline)
+		if (got == nil) != (c.want == nil) || got != nil && *got != *c.want {
+			t.Errorf("%s by %v against %g: target %v, want %v", c.metric.Direction, c.metric.TargetVsBaseline, c.baseline, got, c.want)
+		}
+	}
+}
+
+// A closed run has no minutes left whatever ends_at it kept, and says when and why it closed. A
+// run not started counts no minutes and says it has not started.
+func TestTheClockOfAClosedOrNotStartedRunCountsNoTimeLeft(t *testing.T) {
+	now := time.Now().UTC()
+	closedAt := now.Add(-time.Hour)
+	closed := clockOf(&domain.PlatformExperiment{Status: domain.PlatformExpClosed, EndsAt: now.Add(3 * time.Hour), ClosedAt: &closedAt, CloseReason: domain.CloseByRequest}, now)
+	if closed.MinutesLeft == nil || *closed.MinutesLeft != 0 || closed.EndsAt != nil || closed.ClosedAt == nil || closed.CloseReason != "closed_by_request" || closed.NotStarted {
+		t.Fatalf("closed: %+v, want minutes_left 0, closed_at and close_reason, no ends_at", closed)
+	}
+	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpOpen, domain.PlatformExpDraft} {
+		open := clockOf(&domain.PlatformExperiment{Status: status, DurationHours: 4}, now)
+		if !open.NotStarted || open.MinutesLeft != nil || open.EndsAt != nil || open.DurationHours == nil || *open.DurationHours != 4 {
+			t.Fatalf("%s: %+v, want not_started with its duration and no minutes counted", status, open)
+		}
+	}
+	running := clockOf(&domain.PlatformExperiment{Status: domain.PlatformExpRunning, EndsAt: now.Add(30 * time.Minute)}, now)
+	if running.MinutesLeft == nil || *running.MinutesLeft < 29 || running.EndsAt == nil || running.NotStarted || running.ClosedAt != nil {
+		t.Fatalf("running: %+v", running)
 	}
 }
 

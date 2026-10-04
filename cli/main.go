@@ -665,8 +665,10 @@ Minimal shape:
   metrics:
     - key: val_accuracy
       direction: maximize
+      target_vs_baseline: 0.5 # optional: the goal, +50% over the baseline's value
+                              # (negative for a metric to minimize)
 
-Every field shown is required but coordinator_hosted. report_interval_seconds may be left out:
+Every field shown is required but coordinator_hosted and target_vs_baseline. report_interval_seconds may be left out:
 the platform's default applies.
 
 It is created open and no run has started. Add the researchers while it is open
@@ -862,6 +864,9 @@ a leading quote.
       - key: val_accuracy              # one metric ranks: role ranking is the default. A job ranks
         direction: maximize            # by the last value it reports on it (or minimize), so a
                                        # harness's final report there is its result
+        target_vs_baseline: 0.5        # optional: a goal the person stated as a change against
+                                       # the baseline, 0.5 for +50%, -0.3 for 30% lower on a
+                                       # metric to minimize. Left out when none was stated
       - key: exact_match               # optional gate
         direction: maximize
         role: constraint
