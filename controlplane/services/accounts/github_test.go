@@ -890,8 +890,10 @@ func TestACredentialIsRefusedOnceTheRepositoryCanNoLongerBeReached(t *testing.T)
 		"the installation withholds the access":            {func(w *githubWorld) { w.app.tokenErr = github.ErrPermissionNotGranted }, 409, ReasonPermissionNotGranted},
 		"github rate limits":                               {func(w *githubWorld) { w.app.tokenErr = github.ErrRateLimited }, 503, ReasonUnavailable},
 		"the app key expired":                              {func(w *githubWorld) { w.app.tokenErr = fmt.Errorf("%w (%s)", github.ErrAppCredentials, leak) }, 502, ReasonUnavailable},
-		"github fails":                                     {func(w *githubWorld) { w.app.tokenErr = &github.FailedError{Installation: 100, Status: 500, Err: errors.New(leak)} }, 502, ReasonGitHubFailed},
-		"something else":                                 {func(w *githubWorld) { w.app.tokenErr = errors.New("unexpected " + leak) }, 500, ""},
+		"github fails": {func(w *githubWorld) {
+			w.app.tokenErr = &github.FailedError{Installation: 100, Status: 500, Err: errors.New(leak)}
+		}, 502, ReasonGitHubFailed},
+		"something else": {func(w *githubWorld) { w.app.tokenErr = errors.New("unexpected " + leak) }, 500, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := newGitHubWorld(t, true)

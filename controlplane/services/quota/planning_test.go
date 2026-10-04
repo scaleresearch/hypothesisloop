@@ -1235,7 +1235,9 @@ func TestABaselineAgentNamesTheJobItsFinishDeclares(t *testing.T) {
 	}
 	// Run 8's check ran from a branch beside the baseline's, and only the baseline's is declared.
 	jobs["job-check"].Job.Branch = "hl/pe-draft/baseline-check"
-	svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) { return jobs[jobID], nil }
+	svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) {
+		return jobs[jobID], nil
+	}
 	store.left = []*domain.Experiment{jobs["job-first"].Job, jobs["job-control"].Job, jobs["job-check"].Job}
 	ctx := context.Background()
 
@@ -1298,7 +1300,9 @@ func TestABaselineAgentDeclaresNoJobItsOwnJobsBeat(t *testing.T) {
 	job("job-tie", measures, "baseline", 1.8)
 	job("job-check", measures, "baseline-check", 1.7)
 	job("job-other", "ag-other", "baseline", 1.2)
-	svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) { return jobs[jobID], nil }
+	svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) {
+		return jobs[jobID], nil
+	}
 	ctx := context.Background()
 
 	_, err := svc.FinishAgent(ctx, "pe-draft", measures, "the baseline is measured", "", "job-default")
@@ -1336,7 +1340,9 @@ func TestOnlyAJobHoldingTheConstraintsMakesADeclarationWeak(t *testing.T) {
 			store.completed = append(store.completed, b.Job)
 		}
 		svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)
-		svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) { return jobs[jobID], nil }
+		svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) {
+			return jobs[jobID], nil
+		}
 		return svc, store
 	}
 	p := *pe

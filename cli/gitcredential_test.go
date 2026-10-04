@@ -132,7 +132,7 @@ func TestGitCredentialReportsARefusalAndPrintsNoCredential(t *testing.T) {
 		status int
 		body   string
 	}{
-		"token refused":   {http.StatusUnauthorized, `{"error":"unauthenticated: job job-1 is not running"}`},
+		"token refused": {http.StatusUnauthorized, `{"error":"unauthenticated: job job-1 is not running"}`},
 	} {
 		setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(tc.status)
