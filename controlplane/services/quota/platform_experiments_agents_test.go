@@ -35,6 +35,8 @@ type rosterStore struct {
 	unregistered bool
 	// left is the COMPLETED jobs on the objective its baseline agents that finished left.
 	left []*domain.Experiment
+	// objective is every job on the objective, oldest first.
+	objective []*domain.Experiment
 	// inFlight is the agents that have a job queued or running.
 	inFlight map[string]bool
 	// submitted is how many jobs each agent submitted.
@@ -64,6 +66,10 @@ func (f *rosterStore) ListHypotheses(_ context.Context, filter graphdb.ListFilte
 		}
 	}
 	return out, nil
+}
+
+func (f *rosterStore) ListExperimentsTesting(context.Context, []string) ([]*domain.Experiment, error) {
+	return f.objective, nil
 }
 
 func (f *rosterStore) FinishedBaselineJobs(context.Context, string) ([]*domain.Experiment, error) {

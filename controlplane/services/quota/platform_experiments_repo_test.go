@@ -157,6 +157,8 @@ type createdStore struct {
 	// objective of those of them that finished.
 	baselines []domain.AgentSignup
 	left      []*domain.Experiment
+	// objective are the jobs on the objective, oldest first.
+	objective []*domain.Experiment
 	// started counts the starts that reached the store.
 	started int
 	// answered is when a launcher last asked for its machines, by name. One not in it asked now.
@@ -206,6 +208,10 @@ func (s *createdStore) LauncherAnsweredAt(_ context.Context, names []string) (ma
 		}
 	}
 	return out, nil
+}
+
+func (s *createdStore) ListExperimentsTesting(context.Context, []string) ([]*domain.Experiment, error) {
+	return s.objective, nil
 }
 
 func (s *createdStore) FinishedBaselineJobs(context.Context, string) ([]*domain.Experiment, error) {

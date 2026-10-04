@@ -89,6 +89,9 @@ type PlatformExperimentsStore interface {
 	// FinishedBaselineJobs is the COMPLETED jobs on the objective that the baseline agents of a
 	// platform experiment that finished left, oldest first.
 	FinishedBaselineJobs(ctx context.Context, platformExpID string) ([]*domain.Experiment, error)
+	// ListExperimentsTesting is every job that tests one of the hypotheses, oldest first: of a
+	// platform experiment's own id, the jobs that measure its objective.
+	ListExperimentsTesting(ctx context.Context, hypothesisIDs []string) ([]*domain.Experiment, error)
 	// CompletedJobIDs is the jobs that ran to a successful end: of them, the ones that hold every
 	// constraint rank.
 	CompletedJobIDs(ctx context.Context, platformExpID string) (map[string]bool, error)

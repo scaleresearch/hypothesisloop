@@ -337,13 +337,13 @@ func TestAnExperimentThatClosesWithNoSummaryIsGivenTheRecordOfItsClose(t *testin
 		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Instance: domain.AgentInstance{State: domain.InstanceWaiting}}}
 	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, researchers: []string{"ag-researcher"},
 		baselines: []domain.AgentSignup{{AgentID: "ag-baseline", Name: "baseline", Role: domain.SignupRoleBaseline,
-			Instance: &domain.AgentInstance{AskedAt: &asked, State: domain.InstanceRunning}, Activity: &domain.AgentActivity{Text: "writing harness/run_trial.py", At: asked}}}}}
+			Instance: &domain.AgentInstance{AskedAt: &asked, Name: "m-1", Reported: domain.InstanceRunning}, Activity: &domain.AgentActivity{Text: "writing harness/run_trial.py", At: asked}}}}}
 	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute)
 	if err := svc.SweepExpired(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"baseline_limit_reached", "no job was ever submitted", "Jobs submitted: 0.", "Spent: 0 of the budget of 18",
-		"- coordinator: no activity reported; never launched.", `- baseline (baseline): 0 jobs submitted; last activity "writing harness/run_trial.py"`, "did not finish", "(competitor): 0 jobs submitted; no activity reported; never launched."} {
+		"- coordinator: no activity reported; never launched.", `- baseline (baseline): 0 jobs submitted; last activity "writing harness/run_trial.py"`, "did not finish: its machine was running at the close", "(competitor): 0 jobs submitted; no activity reported; never launched.", "No job."} {
 		if !strings.Contains(pe.Summary, want) {
 			t.Errorf("summary = %q, want it to say %q", pe.Summary, want)
 		}
@@ -353,6 +353,43 @@ func TestAnExperimentThatClosesWithNoSummaryIsGivenTheRecordOfItsClose(t *testin
 	if err := store.RecordClose(context.Background(), pe.ID, written); err != nil || pe.Summary != "the coordinator's own" {
 		t.Errorf("a record over a summary written meanwhile: got = %q, %v, want the summary kept", pe.Summary, err)
 	}
+}
+
+// Run 3 closed at its baseline deadline with a job its cluster could not start, an environment
+// built for it and a commit on the baseline branch, and its record named none of them: the next
+// run started from nothing. The record of such a close says what the baseline left.
+func TestTheRecordOfABaselineDeadlineCloseSaysWhatTheBaselineLeft(t *testing.T) {
+	now := time.Now().UTC()
+	pe := &domain.PlatformExperiment{ID: "pe-late", ProjectID: "prj-a", Status: domain.PlatformExpOpen, CreatedAt: now.Add(-time.Hour),
+		DurationHours: 1, BudgetAcceleratorHours: 9, BaselineDueAt: now.Add(-time.Minute), Stages: []domain.Stage{{LengthPct: 100}}}
+	branch := domain.BaselineBranch(pe.ID)
+	job := &domain.Experiment{ID: "job-1", Status: domain.StatusRejected, EvictionReason: string(domain.EvictionExperimentClosed),
+		InfraRequeueCount: 2, InfraRequeueReason: "stuck_pending: admitted and not running within 5m0s, its runtime reporting create_failed: secrets is forbidden",
+		CodeRef: "https://github.com/acme/codec.git@4c6e96", Branch: branch, EnvironmentKey: "env-1"}
+	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, objective: []*domain.Experiment{job}}}
+	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute).
+		WithEnvironments(builtEnvironments{"env-1": {Key: "env-1", State: domain.EnvironmentReady, Image: "registry.test/environment@sha256:ce7a"}})
+	if err := svc.SweepExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"What the baseline left, on branch " + branch,
+		"- job job-1: REJECTED (experiment_closed); requeued 2 times for faults of the platform's, the last stuck_pending: admitted and not running within 5m0s, its runtime reporting create_failed: secrets is forbidden; code https://github.com/acme/codec.git@4c6e96; its environment .hypothesisloop/Dockerfile built as registry.test/environment@sha256:ce7a.",
+		"The last commit of " + branch + " a job was submitted from: https://github.com/acme/codec.git@4c6e96."} {
+		if !strings.Contains(pe.Summary, want) {
+			t.Errorf("summary = %q, want it to say %q", pe.Summary, want)
+		}
+	}
+}
+
+// builtEnvironments are the environments by key.
+type builtEnvironments map[string]*domain.Environment
+
+func (e builtEnvironments) Read(context.Context, string, string, string) (*string, error) {
+	return nil, nil
+}
+
+func (e builtEnvironments) Get(_ context.Context, key string) (*domain.Environment, error) {
+	return e[key], nil
 }
 
 // noUsage is a metrics store that holds no usage.
