@@ -530,6 +530,18 @@ export interface PlatformExperimentResults {
     agents: { agent_id: string; best: number; experiment_id?: string; summary_due: boolean }[]
     non_raw_basis_agents?: string[]
   }[]
+  references?: MetricReference[]
+}
+
+// A value on a reference metric counts toward best only where its job met every constraint.
+export interface MetricReference {
+  metric: string
+  direction: 'maximize' | 'minimize'
+  values: { agent_id: string; value: number; experiment_id?: string; constraints_met: 'true' | 'false' | 'unknown' }[]
+  best?: number
+  leader_metric?: string
+  leader?: number
+  beaten?: boolean
 }
 
 export function fetchPlatformExperimentResults(id: string): Promise<PlatformExperimentResults> {

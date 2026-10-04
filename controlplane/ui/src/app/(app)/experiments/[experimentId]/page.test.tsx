@@ -116,6 +116,32 @@ describe('the baseline of a platform experiment', () => {
   })
 })
 
+describe('the references of a platform experiment', () => {
+  it('lists every measured value with whether its job met the constraints, and the leader against the best that counts', async () => {
+    vi.mocked(api.fetchPlatformExperimentResults).mockResolvedValue({
+      metrics: [], bests: [],
+      references: [
+        {
+          metric: 'other_val_accuracy', direction: 'maximize', best: 0.81, leader_metric: 'val_accuracy', leader: 0.84, beaten: true,
+          values: [
+            { agent_id: 'ag-self', value: 0.81, experiment_id: 'job-ref', constraints_met: 'true' },
+            { agent_id: 'ag-self', value: 0.9, experiment_id: 'job-fast', constraints_met: 'false' },
+          ],
+        },
+        { metric: 'unmeasured', direction: 'maximize', values: [] },
+      ],
+    })
+    show('', { status: PlatformExperimentStatus.RUNNING })
+    expect(await screen.findByRole('heading', { name: /^References/ })).toBeTruthy()
+    expect(screen.getByText(/best that counts 0\.8100/)).toBeTruthy()
+    expect(screen.getByText(/beaten by the leader's val_accuracy 0\.8400/)).toBeTruthy()
+    expect(screen.getByRole('link', { name: '0.8100' }).getAttribute('href')).toBe('/experiments/pe-x/jobs/job-ref')
+    expect(screen.getByText('counts')).toBeTruthy()
+    expect(screen.getByText('broke a constraint')).toBeTruthy()
+    expect(screen.queryByText(/unmeasured/)).toBeNull()
+  })
+})
+
 describe('a shared platform experiment of the caller\'s own org', () => {
   it('is theirs to change, marked shared, with no read-only note', async () => {
     show('', { project_id: 'prj_1' })

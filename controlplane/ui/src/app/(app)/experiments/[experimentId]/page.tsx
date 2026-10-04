@@ -52,6 +52,7 @@ import { semantic } from '@/lib/colors'
 import { formatAccH, headline, runClock, shortId } from '@/lib/format'
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
 import { JobReason } from '@/components/job-reason'
+import { ReferenceValues } from '@/components/reference-values'
 import { filedAfterVerdict, hypothesisActivity, settings, variedEnvByHypothesis, variedEnvSettings, variedKeys } from '@/lib/hypothesis-progress'
 import { graphHref } from '@/lib/hypothesis-graph'
 import { budgetKind, budgetUnit, inFlight, kindOf } from '@/lib/units'
@@ -542,6 +543,8 @@ function PlatformExperimentDetail({ id }: { id: string }) {
             </Table>
           )}
       </Section>}
+
+      {results?.references && <ReferenceValues experimentId={id} references={results.references} />}
 
       {phase === 'running' && findingsSection}
       {chartSection}
