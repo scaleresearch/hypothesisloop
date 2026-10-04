@@ -56,6 +56,11 @@ CLI_ENV = {"ENABLE_TOOL_SEARCH": "false",
            "BASH_DEFAULT_TIMEOUT_MS": "600000", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
            "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1"}
 
+# The CLI writes each message as one line, and the SDK ends the session on a line past its bound,
+# 1 MB by default: a run 12 researcher whose six subagents read papers lost its session to one.
+# A request to the model is at most 32 MB, so no message of a session is longer.
+MAX_MESSAGE_BYTES = 32 * 1024 * 1024
+
 
 # The CLI's Write refuses an existing file the session has not opened with its Read, and no
 # setting lifts that: an agent that had only `cat` a file was refused its Write.
@@ -780,6 +785,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
         effort=_effort(cfg),
         # The stream events of a model call say what it writes while it writes, see activity.Composing.
         include_partial_messages=True,
+        max_buffer_size=MAX_MESSAGE_BYTES,
         permission_mode="bypassPermissions",
         # No max_turns cap: this session is meant to run for the platform experiment's whole
         # lifetime (hours to days), not a bounded number of turns. The only real stop conditions
@@ -957,9 +963,12 @@ def _restart_state(setup: core.RunSetup) -> tuple[str | None, str | None]:
     """The session to resume and the prompt that opens the next connection, as persisted.
 
     A session id beside a handoff means the replacement session already produced a result, so it
-    is resumed and the bridge is not injected twice.
+    is resumed and the bridge is not injected twice. A connection lost before a session's first
+    result resumes the session in flight once its transcript holds what the turn did: a run 12
+    researcher began again from nothing after losing its first turn.
     """
-    resume_id = _load_resume_id(setup)
+    in_flight = _live_session_id if _transcript_files(_live_session_id) else None
+    resume_id = _load_resume_id(setup) or in_flight
     handoff = _load_handoff(setup)
     if resume_id or not handoff:
         return resume_id, None
