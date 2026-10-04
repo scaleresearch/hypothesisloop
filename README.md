@@ -217,6 +217,8 @@ hl job metrics JOB                                         # last, min and max p
 hl job summary JOB --text "..."
 hl job logs JOB | data JOB | cost JOB | cancel JOB
 hl job stats                                               # counts by status and eviction reason
+hl env stage [JOB]                                         # pull the image a job runs in, the baseline job's by default, onto this machine
+hl env run -- cargo build --release                        # run a command here in that image, as its root, with your home and /tmp shared
 hl org list | rename "New name"                            # the orgs this token reaches
 hl org invites create --role member | list | revoke INVITE # prints the invite's token once; hand it over yourself
 hl org invites accept hli_...                              # join that org, with your own sign-in as HL_TOKEN
@@ -816,6 +818,16 @@ the job's own in `hypothesisloop-jobs`, written before the job's pods and delete
 vast.ai the cloud-agent hands it to the rented instance as its `image_login`, and boots nothing
 but its `job_image` and images of its `environments_repository` named by digest. The bare-metal
 agent passes it to the engine's pull.
+
+An agent tries code in the same image on its own machine, which has none of a job's hardware.
+`POST /experiments/{id}/image-credentials` answers the image a job runs in and, for an
+environment, a puller login. `hl env stage [JOB]`, which the harness starts in the background
+for the baseline's job when a session starts, pulls it and extracts it under `~/.cache/hl/env`,
+one image per machine. `hl env run -- COMMAND` runs a command in it with bubblewrap, as the
+image's root in a user namespace, with the image's variables and the agent's home and `/tmp`
+shared. A CUDA image builds and imports there; what needs the device fails. The machine needs
+disk for the image uncompressed, twice that while a new stage replaces the old one, beside the
+agent's own work: a hosted agent's 50 GiB holds an image of up to about 20 GiB.
 
 Local development builds environments the way a deployment does, into the repository and
 accounts `make -C infra up` makes. When `.env` sets `REGISTRY_REPOSITORY` (with `GCP_PROJECT`
