@@ -24,6 +24,11 @@ const EnvironmentFile = ".hypothesisloop/Dockerfile"
 // A secret mount is never part of a layer.
 const EnvironmentGitSecret = "git-credentials"
 
+// ErrNoEnvironmentGitCredential is a build whose repository is read with no credential: the
+// environment names no repository, or its git host takes none. Its EnvironmentGitSecret is
+// absent then, so a RUN that mounts it reads the repository anonymously.
+var ErrNoEnvironmentGitCredential = errors.New("the repository of the build takes no credential")
+
 // MaxEnvironmentFileBytes bounds an environment file.
 const MaxEnvironmentFileBytes = 64 << 10
 
@@ -118,6 +123,15 @@ const NodeHostnameLabel = "kubernetes.io/hostname"
 func EnvironmentKey(orgID, gitRepository, dockerfile, base, tools string) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%s%d:%s%d:%s%d:%s%d:%s", len(orgID), orgID, len(gitRepository), gitRepository, len(base), base, len(dockerfile), dockerfile, len(tools), tools)))
 	return hex.EncodeToString(sum[:])
+}
+
+// EnvironmentCacheScope names the builds that share their build cache, layers and cache mounts:
+// those of gitRepository for orgID, which read what its EnvironmentGitSecret reads. BuildKit
+// caches a step by its text and never by a secret it mounted, so a build of another repository
+// that wrote the same step would otherwise reuse what that step fetched. A valid host name.
+func EnvironmentCacheScope(orgID, gitRepository string) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%s%d:%s", len(orgID), orgID, len(gitRepository), gitRepository)))
+	return "hl-" + hex.EncodeToString(sum[:12])
 }
 
 // PlatformTools are the files of a job image a job needs from the platform: its client, and

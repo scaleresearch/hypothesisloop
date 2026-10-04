@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -89,6 +90,10 @@ func (a *Agent) runBuild(ctx context.Context, running *runningBuild, b domain.En
 	}, func(ctx context.Context) (domain.EnvironmentGitCredential, error) {
 		var credential domain.EnvironmentGitCredential
 		err := a.postJSON(ctx, "/builds/"+url.PathEscape(b.Key)+"/git-credential", domain.EnvironmentBuildCredentialRequest{Attempt: b.Attempt}, &credential)
+		var refused *refusedError
+		if errors.As(err, &refused) && refused.status == http.StatusNotFound {
+			return credential, fmt.Errorf("%w: %w", domain.ErrNoEnvironmentGitCredential, err)
+		}
 		return credential, err
 	}, func(format string, args ...any) {
 		line := fmt.Sprintf(format, args...)

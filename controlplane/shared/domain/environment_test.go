@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -45,5 +46,16 @@ func TestAnEnvironmentKeyNamesTheOrgTheRepositoryTheFileAndTheBaseApart(t *testi
 		EnvironmentKey("o", "r", "x", "base:1", "t") == EnvironmentKey("o", "r", "x", "base:1", "") || EnvironmentKey("o", "r", "x", "base:1", "t:1") == EnvironmentKey("o", "r", "x", "base:1", "t:2") ||
 		EnvironmentKey("o", "r", "x", "base:1", "t") != EnvironmentKey("o", "r", "x", "base:1", "t") {
 		t.Error("a key must change with the org, the repository, the file and the base, and only with them")
+	}
+}
+
+func TestACacheScopeIsAHostNameOfOneRepositoryOfOneOrg(t *testing.T) {
+	scope := EnvironmentCacheScope("o", "acme/model")
+	if scope != EnvironmentCacheScope("o", "acme/model") || scope == EnvironmentCacheScope("o", "acme/other") ||
+		scope == EnvironmentCacheScope("p", "acme/model") || EnvironmentCacheScope("o1", "r") == EnvironmentCacheScope("o", "1r") {
+		t.Error("a cache scope must change with the org and the repository, and only with them")
+	}
+	if !regexp.MustCompile(`^[a-z0-9-]{1,63}$`).MatchString(scope) {
+		t.Errorf("cache scope %q is not a host name", scope)
 	}
 }

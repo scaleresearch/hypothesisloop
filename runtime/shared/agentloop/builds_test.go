@@ -3,6 +3,7 @@ package agentloop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -172,7 +173,7 @@ func buildAgent(server *httptest.Server, builder Builder) *Agent {
 	return agent
 }
 
-var k1 = domain.EnvironmentBuild{Key: "k1", Attempt: 1, Base: "registry.test/hl/job:1", Dockerfile: "ARG BASE\nFROM ${BASE}\n", Repository: "registry.test/envs/env"}
+var k1 = domain.EnvironmentBuild{Key: "k1", Attempt: 1, Base: "registry.test/hl/job:1", Dockerfile: "ARG BASE\nFROM ${BASE}\n", Repository: "registry.test/envs/env", CacheScope: "hl-test"}
 
 func TestAListedBuildRunsOnceFetchesItsLoginAtItsAttemptAndIsReported(t *testing.T) {
 	api := &buildsAPI{reports: map[string][]domain.EnvironmentBuildReport{}}
@@ -431,5 +432,43 @@ func TestABuildLoadedOnItsNodeIsReportedBeforeItsOutcome(t *testing.T) {
 	defer api.mu.Unlock()
 	if len(api.loaded) != 1 || api.loaded[0] != (domain.EnvironmentBuildLoaded{Attempt: 1, Node: "node-1", Digest: "sha256:abc"}) || !slices.Equal(api.order, []string{"loaded", "outcome"}) {
 		t.Errorf("loaded %+v in order %v, want node-1 at attempt 1 before the outcome", api.loaded, api.order)
+	}
+}
+
+// gitCredentialBuilder asks for the git credential once and hands on what it was answered.
+type gitCredentialBuilder struct{ answered chan error }
+
+func (b *gitCredentialBuilder) Run(ctx context.Context, _ domain.EnvironmentBuild, _ func(context.Context) (string, string, error), git func(context.Context) (domain.EnvironmentGitCredential, error), _ func(string, ...any), _ func(node, digest string)) domain.EnvironmentBuildReport {
+	_, err := git(ctx)
+	b.answered <- err
+	return domain.EnvironmentBuildReport{Outcome: domain.EnvironmentBuildPushed, Digest: "sha256:abc"}
+}
+
+func TestAGitCredentialTheControlPlaneHasNoneOfIsNoCredentialAndARefusalAnError(t *testing.T) {
+	for _, c := range []struct {
+		status int
+		none   bool
+	}{{http.StatusNotFound, true}, {http.StatusConflict, false}} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/internal/clusters/test/reconcile":
+				_ = json.NewEncoder(w).Encode(map[string]any{"experiments": []any{}, "builds": []domain.EnvironmentBuild{k1}})
+			case "/internal/clusters/test/builds/k1/git-credential":
+				w.WriteHeader(c.status)
+			default:
+				w.WriteHeader(http.StatusNoContent)
+			}
+		}))
+		builder := &gitCredentialBuilder{answered: make(chan error, 1)}
+		agent := buildAgent(server, builder)
+		if err := agent.reconcileOnce(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		err := <-builder.answered
+		agent.building.Wait()
+		server.Close()
+		if err == nil || errors.Is(err, domain.ErrNoEnvironmentGitCredential) != c.none {
+			t.Errorf("answered %d: %v, want no credential %v", c.status, err, c.none)
+		}
 	}
 }

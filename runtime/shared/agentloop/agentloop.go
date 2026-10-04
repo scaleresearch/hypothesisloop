@@ -636,7 +636,17 @@ func refusal(resp *http.Response) error {
 	if resp.StatusCode == http.StatusUnauthorized && json.Unmarshal(body, &said) == nil && said.Reason == domain.ReasonClusterNotRegistered {
 		return ErrClusterRemoved
 	}
-	return fmt.Errorf("control plane answered %d: %s", resp.StatusCode, bytes.TrimSpace(body))
+	return &refusedError{status: resp.StatusCode, body: string(bytes.TrimSpace(body))}
+}
+
+// refusedError is a request the control plane answered with status, in its own words.
+type refusedError struct {
+	status int
+	body   string
+}
+
+func (e *refusedError) Error() string {
+	return fmt.Sprintf("control plane answered %d: %s", e.status, e.body)
 }
 
 // Detach ends this cluster on the control plane, as its owner would by removing it: its jobs go

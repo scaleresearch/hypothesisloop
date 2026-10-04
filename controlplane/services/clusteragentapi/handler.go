@@ -502,7 +502,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "A read of the repository an assigned environment build is of", Tags: []string{"cluster-agent"},
 		Description: "What git reads the repository whose environment file this is with, minted for this call and for that repository alone, read-only. " +
 			"The build mounts it as the secret " + domain.EnvironmentGitSecret + " of a RUN that asks for it, never into a layer. Handed out only while the " +
-			"build of key is assigned to this cluster at attempt and still building; otherwise 409. 404 for an environment of no repository.",
+			"build of key is assigned to this cluster at attempt and still building; otherwise 409. 404 for an environment of no repository or a git host " +
+			"that takes no credential: the build then mounts no secret and reads the repository anonymously.",
 	}, func(ctx context.Context, in *struct {
 		Name string `path:"name"`
 		Key  string `path:"key"`
@@ -803,7 +804,8 @@ func (h *Handler) environmentWork(ctx context.Context, cluster string, exps []*d
 		return nil, nil, err
 	}
 	for _, env := range assigned {
-		builds = append(builds, domain.EnvironmentBuild{Key: env.Key, Attempt: env.Attempt, Base: env.Base, Tools: env.Tools, Dockerfile: env.Dockerfile, Repository: h.environments.Repository})
+		builds = append(builds, domain.EnvironmentBuild{Key: env.Key, Attempt: env.Attempt, Base: env.Base, Tools: env.Tools, Dockerfile: env.Dockerfile, Repository: h.environments.Repository,
+			CacheScope: domain.EnvironmentCacheScope(env.OrgID, env.GitRepository)})
 	}
 	if !slices.ContainsFunc(exps, func(exp *domain.Experiment) bool { return exp.EnvironmentKey != "" }) {
 		return builds, nil, nil

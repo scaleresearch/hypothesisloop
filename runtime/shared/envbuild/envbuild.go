@@ -158,6 +158,9 @@ var pushRetries = []time.Duration{15 * time.Second, 30 * time.Second, time.Minut
 // error is the platform's. A push that fails once the image is loaded into its node is tried
 // again (pushRetries): a job there may already run it.
 func (d *Daemon) build(ctx context.Context, attachables []session.Attachable, b domain.EnvironmentBuild, steps *steps, onLoaded Loaded) (string, error) {
+	if b.CacheScope == "" {
+		return "", errors.New("build: the build names no cache scope")
+	}
 	file := dockerfileState(withTools(b.Dockerfile, b.Tools))
 	// Media types are set, never the daemon's default, so the pushed manifest and the loaded one
 	// are the same bytes and so the same digest.
@@ -165,9 +168,12 @@ func (d *Daemon) build(ctx context.Context, attachables []session.Attachable, b 
 		string(exptypes.OptKeyName): b.Repository, string(exptypes.OptKeyPush): "true", string(exptypes.OptKeyPushByDigest): "true",
 		string(exptypes.OptKeyOCITypes): "true",
 	}}
+	// Every RUN's cache key holds its sandbox's host name, and every cache mount's id the
+	// namespace, so the scope keeps both to the builds that may read what they read.
 	opt := client.SolveOpt{
-		Frontend:       "dockerfile.v0",
-		FrontendAttrs:  map[string]string{"build-arg:BASE": b.Base, "platform": buildPlatform},
+		Frontend: "dockerfile.v0",
+		FrontendAttrs: map[string]string{"build-arg:BASE": b.Base, "platform": buildPlatform,
+			"hostname": b.CacheScope, "build-arg:BUILDKIT_CACHE_MOUNT_NS": b.CacheScope},
 		FrontendInputs: map[string]llb.State{"dockerfile": file, "context": file},
 		Exports:        []client.ExportEntry{push},
 		Session:        attachables,
@@ -355,7 +361,8 @@ func (a *registryAuth) Credentials(ctx context.Context, req *auth.CredentialsReq
 // store for the repository the build's file is of: a line of its host alone, which a git that
 // sends no path matches, then a line of its path with and without .git, which a git with
 // credential.useHttpPath (the job images set it) matches as cloned. The credential reads that one
-// repository alone.
+// repository alone. A repository read with no credential has no secret, which a RUN mounts as
+// nothing and reads it anonymously.
 type repositorySecret GitCredential
 
 func (r repositorySecret) GetSecret(ctx context.Context, id string) ([]byte, error) {
@@ -363,6 +370,9 @@ func (r repositorySecret) GetSecret(ctx context.Context, id string) ([]byte, err
 		return nil, secrets.ErrNotFound
 	}
 	credential, err := r(ctx)
+	if errors.Is(err, domain.ErrNoEnvironmentGitCredential) {
+		return nil, secrets.ErrNotFound
+	}
 	if err != nil {
 		return nil, fmt.Errorf("the credential of the repository: %w", err)
 	}

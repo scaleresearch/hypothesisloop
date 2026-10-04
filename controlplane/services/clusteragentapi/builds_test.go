@@ -68,8 +68,8 @@ func TestReconcileRecordsWhetherTheRuntimeBuildsAndAnswersItsAssignedBuilds(t *t
 		t.Error("a runtime that reports builds is not recorded as building")
 	}
 	want := []domain.EnvironmentBuild{
-		{Key: "key-1", Attempt: 1, Base: "registry.test/job:7", Dockerfile: "ARG BASE\nFROM ${BASE}\nRUN true\n", Repository: testRepository},
-		{Key: "key-2", Attempt: 3, Base: "registry.test/job:7", Dockerfile: "ARG BASE\nFROM ${BASE}\nRUN true\n", Repository: testRepository},
+		{Key: "key-1", Attempt: 1, Base: "registry.test/job:7", Dockerfile: "ARG BASE\nFROM ${BASE}\nRUN true\n", Repository: testRepository, CacheScope: domain.EnvironmentCacheScope("org-a", "")},
+		{Key: "key-2", Attempt: 3, Base: "registry.test/job:7", Dockerfile: "ARG BASE\nFROM ${BASE}\nRUN true\n", Repository: testRepository, CacheScope: domain.EnvironmentCacheScope("org-a", "")},
 	}
 	if !slices.Equal(answer.Builds, want) {
 		t.Errorf("builds = %+v, want %+v", answer.Builds, want)
