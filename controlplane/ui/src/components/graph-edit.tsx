@@ -49,6 +49,9 @@ export interface GraphEditor {
   show: (id: string) => void
   /** Selects the node and keeps the idea being written. */
   select: (id: string) => void
+  /** What the idea just added reads close to, as the platform answered when it registered it. */
+  addedSimilar: SimilarHypothesis[]
+  dismissSimilar: () => void
   /** Reads the graph again after an idea changed. */
   refresh: () => Promise<unknown>
   cancel: () => void
@@ -63,6 +66,7 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
   onSelect: (id: string) => void
 }): GraphEditor {
   const [composing, setComposing] = useState(false)
+  const [addedSimilar, setAddedSimilar] = useState<SimilarHypothesis[]>([])
   const [links, setLinks] = useState<HypothesisLinkInput[]>([])
   const [findingTarget, setFindingTarget] = useState(false)
   const [linking, setLinking] = useState<{ from: string; kind: HypothesisLinkType } | null>(null)
@@ -143,12 +147,13 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
     setLinking(null)
     setLinkError('')
     setFindingTarget(false)
+    setAddedSimilar([])
     setComposing(true)
     const first: HypothesisLinkInput = { type: 'builds_on', to: target }
     setLinks(ls => (composing ? [first, ...ls.slice(1).filter(l => l.to !== target)] : [first]))
   }, [composing])
 
-  async function added(h: RegisteredHypothesis) {
+  async function added({ similar, ...h }: RegisteredHypothesis) {
     const links = h.links ?? []
     const node = {
       ...h,
@@ -158,6 +163,7 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
     const edges = links.map(l => ({ from: h.id, to: l.hypothesis_id, type: l.type, agent_id: l.agent_id, actor: l.actor, created_at: l.created_at }))
     const drawn = mutate(g => g && withHypothesis(g, node, edges), { revalidate: true })
     cancel()
+    setAddedSimilar(similar ?? [])
     onSelect(h.id)
     await drawn
   }
@@ -196,6 +202,8 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
       onSelect(id)
     },
     select: onSelect,
+    addedSimilar,
+    dismissSimilar: () => setAddedSimilar([]),
     refresh: () => mutate(),
     cancel,
   }
@@ -325,18 +333,23 @@ export function LinkBar() {
   )
 }
 
-// What the API asks of a person adding an idea that reads close to ideas already there, or that
-// refines a refuted one: their ids in distinct_from, once the person chose to add it anyway.
-function SimilarIdeas({ similar, onSelect }: { similar: SimilarHypothesis[]; onSelect: (id: string) => void }) {
+/** After an idea is added: the ones already there it reads close to, or the refuted ones it refines. */
+export function AddedNote() {
+  const editor = useEditor()
+  if (!editor || editor.addedSimilar.length === 0) return null
+  const similar = editor.addedSimilar
   return (
     <Callout tone="warning">
-      <Stack gap="xs" className="text-xs">
-        <span>Similar ideas already on the graph:</span>
+      <Stack gap="xs" className="text-xs" role="note" aria-label="Similar ideas">
+        <Inline nowrap>
+          <span className="flex-1">Similar ideas already on the graph:</span>
+          <Button variant="ghost" size="icon" aria-label="Dismiss" onClick={editor.dismissSimilar}><X size={12} /></Button>
+        </Inline>
         <Stack as="ul" gap="2xs" className="list-none">
           {similar.map(h => (
             <Inline as="li" gap="xs" nowrap key={h.id}>
               <Badge status={h.status}>{h.status}</Badge>
-              <Button variant="link" size="sm" className="min-w-0 flex-1 justify-start truncate" title={h.text} onClick={() => onSelect(h.id)}>
+              <Button variant="link" size="sm" className="min-w-0 flex-1 justify-start truncate" title={h.text} onClick={() => editor.select(h.id)}>
                 {h.text}
               </Button>
             </Inline>
@@ -349,9 +362,8 @@ function SimilarIdeas({ similar, onSelect }: { similar: SimilarHypothesis[]; onS
 }
 
 /**
- * Writing a new idea, the same beside the graph and the outline: its text, its links (builds_on to
- * the node it was opened for to start with), and the choice the API asks for when it reads close to
- * ideas already there.
+ * Writing a new idea, the same beside the graph and the outline: its text and its links, builds_on
+ * to the node it was opened for to start with.
  */
 export function IdeaEditor() {
   const editor = useEditor()
@@ -359,19 +371,16 @@ export function IdeaEditor() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [existingID, setExistingID] = useState('')
-  const [similar, setSimilar] = useState<SimilarHypothesis[]>([])
   if (!editor?.composing) return null
   const ed = editor
 
-  async function submit(distinctFrom: string[]) {
+  async function submit() {
     setBusy(true)
     setError('')
     setExistingID('')
     try {
-      const h = await registerHumanHypothesis(ed.graph.root, text.trim(), ed.links, distinctFrom)
-      if ('similar' in h) {
-        setSimilar(h.similar)
-      } else if (h.already_existed) {
+      const h = await registerHumanHypothesis(ed.graph.root, text.trim(), ed.links)
+      if (h.already_existed) {
         setExistingID(h.id)
       } else {
         await ed.added(h)
@@ -443,7 +452,6 @@ export function IdeaEditor() {
       <Text variant="meta" tone="subtle">
         It joins the graph under your name. Agents read it, and one that tests it registers its own idea refining yours.
       </Text>
-      {similar.length > 0 && <SimilarIdeas similar={similar} onSelect={ed.select} />}
       {existingID && (
         <Text as="span" variant="note">
           An equivalent idea already exists, so nothing was added.{' '}
@@ -451,21 +459,12 @@ export function IdeaEditor() {
         </Text>
       )}
       {error && <InlineError>{error}</InlineError>}
-      {similar.length > 0 ? (
-        <Inline>
-          <Button size="sm" variant="primary" loading={busy} disabled={text.trim() === '' || !buildsOn} onClick={() => submit(similar.map(h => h.id))}>
-            Add anyway
-          </Button>
-          <Button variant="link" size="sm" className="ml-auto" onClick={() => setSimilar([])}>Cancel</Button>
-        </Inline>
-      ) : (
-        <Inline>
-          <Button size="sm" variant="primary" loading={busy} disabled={text.trim() === '' || !buildsOn} onClick={() => submit([])}>
-            Add idea
-          </Button>
-          <Button variant="link" size="sm" className="ml-auto" onClick={ed.cancel}>Cancel</Button>
-        </Inline>
-      )}
+      <Inline>
+        <Button size="sm" variant="primary" loading={busy} disabled={text.trim() === '' || !buildsOn} onClick={submit}>
+          Add idea
+        </Button>
+        <Button variant="link" size="sm" className="ml-auto" onClick={ed.cancel}>Cancel</Button>
+      </Inline>
     </Stack>
   )
 }

@@ -21,7 +21,7 @@ import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
 import { AgentNames, useAgentName } from '@/components/agent-label'
-import { AddIdeaButton, GraphEditorProvider, IdeaEditor, LinkBar, useGraphEditor } from '@/components/graph-edit'
+import { AddIdeaButton, AddedNote, GraphEditorProvider, IdeaEditor, LinkBar, useGraphEditor } from '@/components/graph-edit'
 import { HypothesisGraphCanvas } from '@/components/hypothesis-graph'
 import { HypothesisOutline } from '@/components/hypothesis-outline'
 import { HypothesisPanel, ObjectiveBar } from '@/components/hypothesis-panel'
@@ -247,6 +247,7 @@ function Workspace({ graph, pe, mutate, canWrite, closed, view, q, setQ, search,
         </Card>
         {showSide && <Stack as="aside" gap="xl" className="overflow-y-auto">
           <IdeaEditor />
+          <AddedNote />
           {q && (
             <Section title="Search results" actions={<Button variant="link" size="sm" onClick={() => setQ('')}>Clear</Button>}>
               <SearchHits hits={search.data} onPick={h => setFocus(h.id)} isLoading={search.isLoading} error={search.error} />

@@ -4,8 +4,8 @@ import type { KeyedMutator } from 'swr'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { addHumanHypothesisLink, editHumanHypothesis, registerHumanHypothesis, removeHumanHypothesis } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
-import type { RegisteredHypothesis } from '@/lib/api'
-import { AddIdeaButton, GraphEditorProvider, IdeaEditor, LinkBar, useGraphEditor } from '@/components/graph-edit'
+import type { RegisteredHypothesis, SimilarHypothesis } from '@/lib/api'
+import { AddIdeaButton, AddedNote, GraphEditorProvider, IdeaEditor, LinkBar, useGraphEditor } from '@/components/graph-edit'
 import { HypothesisPanel } from '@/components/hypothesis-panel'
 import { HypothesisGraphCanvas } from '@/components/hypothesis-graph'
 import { HypothesisOutline } from '@/components/hypothesis-outline'
@@ -37,9 +37,9 @@ const initial: HypothesisGraph = {
   ],
 }
 
-function registered(id: string, text: string, links: Array<{ type: 'builds_on' | 'related' | 'contradicts'; to: string }>): RegisteredHypothesis {
+function registered(id: string, text: string, links: Array<{ type: 'builds_on' | 'related' | 'contradicts'; to: string }>, similar: SimilarHypothesis[] = []): RegisteredHypothesis {
   return {
-    ...idea(id, text, []), already_existed: false,
+    ...idea(id, text, []), already_existed: false, similar,
     links: links.map(l => ({ type: l.type, hypothesis_id: l.to, text: '', status: '', agent_id: '', actor: ada, created_at: at })),
   }
 }
@@ -70,6 +70,7 @@ function Harness({ view, role = 'member', graph: start = initial }: { view: 'gra
       <AddIdeaButton />
       <LinkBar />
       <IdeaEditor />
+      <AddedNote />
       <output aria-label="selected">{selected}</output>
       <output aria-label="links">{graph.edges.map(e => `${e.from} ${e.type} ${e.to}`).join(', ')}</output>
       {view === 'graph'
@@ -116,7 +117,7 @@ describe('on the graph', () => {
     await write('label smoothing helps')
     fireEvent.click(within(editor).getByRole('button', { name: 'Add idea' }))
     await waitFor(() => expect(screen.getByLabelText('selected').textContent).toBe('hyp-3'))
-    expect(registerHumanHypothesis).toHaveBeenCalledExactlyOnceWith('pe-x', 'label smoothing helps', [{ type: 'builds_on', to: 'pe-x' }], [])
+    expect(registerHumanHypothesis).toHaveBeenCalledExactlyOnceWith('pe-x', 'label smoothing helps', [{ type: 'builds_on', to: 'pe-x' }])
     expect(node('label smoothing helps')).toBeTruthy()
     expect(screen.queryByRole('group', { name: 'New idea' })).toBeNull()
   })
@@ -143,7 +144,7 @@ describe('on the graph', () => {
     await waitFor(() => expect(screen.getByLabelText('selected').textContent).toBe('hyp-3'))
     expect(registerHumanHypothesis).toHaveBeenCalledExactlyOnceWith('pe-x', 'a longer warmup', [
       { type: 'builds_on', to: 'hyp-1' }, { type: 'contradicts', to: 'hyp-2' },
-    ], [])
+    ])
     expect(node('a longer warmup')).toBeTruthy()
   })
 
@@ -196,7 +197,7 @@ describe('on the graph', () => {
     fireEvent.click(within(other).getByRole('button', { name: 'refines' }))
     expect(add.disabled).toBe(false)
     fireEvent.click(add)
-    await waitFor(() => expect(registerHumanHypothesis).toHaveBeenCalledExactlyOnceWith('pe-x', 'label smoothing helps', [{ type: 'builds_on', to: 'hyp-1' }], []))
+    await waitFor(() => expect(registerHumanHypothesis).toHaveBeenCalledExactlyOnceWith('pe-x', 'label smoothing helps', [{ type: 'builds_on', to: 'hyp-1' }]))
   })
 
   it('shows the refusal of the platform', async () => {
@@ -236,43 +237,39 @@ describe('on the graph', () => {
 })
 
 describe('an idea that reads close to others', () => {
-  const similar = [
-    { id: 'hyp-1', status: 'open' as const, text: 'warmup helps', reason: 'close_text' as const },
-    { id: 'hyp-2', status: 'open' as const, text: 'a cosine schedule helps', reason: 'close_text' as const },
-  ]
+  const close = (id: string, text: string, status: 'open' | 'refuted', reason: 'close_text' | 'refuted_parent') =>
+    ({ id, actor: ada, builds_on: ['pe-x'], status, text, reason })
 
-  it('is added anyway, told apart from every one listed', async () => {
-    vi.mocked(registerHumanHypothesis)
-      .mockResolvedValueOnce({ similar: [...similar, { id: 'hyp-0', status: 'refuted' as const, text: 'warmup hurts', reason: 'refuted_parent' as const }] })
-      .mockResolvedValueOnce(registered('hyp-3', 'warmup helps a lot', [{ type: 'builds_on', to: 'pe-x' }]))
+  it('is added at once, then names the ones it reads close to', async () => {
+    vi.mocked(registerHumanHypothesis).mockResolvedValue(registered('hyp-3', 'warmup helps a lot', [{ type: 'builds_on', to: 'pe-x' }], [
+      close('hyp-1', 'warmup helps', 'open', 'close_text'),
+      close('hyp-0', 'warmup hurts', 'refuted', 'refuted_parent'),
+    ]))
     render(<Harness view="outline" />)
     fireEvent.click(screen.getByRole('button', { name: 'Add idea' }))
     await write('warmup helps a lot')
-    const editor = screen.getByRole('group', { name: 'New idea' })
-    fireEvent.click(within(editor).getByRole('button', { name: 'Add idea' }))
-    expect(await within(editor).findByText('Similar ideas already on the graph:')).toBeTruthy()
-    expect(within(editor).getByText('Yours refines a refuted idea.')).toBeTruthy()
-    expect(within(editor).getAllByRole('button').map(b => b.textContent)).toEqual(expect.arrayContaining(['Add anyway', 'Cancel']))
-    expect(within(editor).queryByRole('button', { name: 'Add idea' })).toBeNull()
-    fireEvent.click(within(editor).getByRole('button', { name: 'Add anyway' }))
+    fireEvent.click(within(screen.getByRole('group', { name: 'New idea' })).getByRole('button', { name: 'Add idea' }))
     await waitFor(() => expect(screen.getByLabelText('selected').textContent).toBe('hyp-3'))
-    expect(vi.mocked(registerHumanHypothesis).mock.calls[1]).toEqual(['pe-x', 'warmup helps a lot', [{ type: 'builds_on', to: 'pe-x' }], ['hyp-1', 'hyp-2', 'hyp-0']])
+    expect(registerHumanHypothesis).toHaveBeenCalledExactlyOnceWith('pe-x', 'warmup helps a lot', [{ type: 'builds_on', to: 'pe-x' }])
+    expect(screen.queryByRole('group', { name: 'New idea' })).toBeNull()
+
+    const note = screen.getByRole('note', { name: 'Similar ideas' })
+    expect(within(note).getByText('Similar ideas already on the graph:')).toBeTruthy()
+    expect(within(note).getByText('Yours refines a refuted idea.')).toBeTruthy()
+    fireEvent.click(within(note).getByRole('button', { name: 'warmup helps' }))
+    expect(screen.getByLabelText('selected').textContent).toBe('hyp-1')
+    fireEvent.click(within(note).getByRole('button', { name: 'Dismiss' }))
+    expect(screen.queryByRole('note', { name: 'Similar ideas' })).toBeNull()
   })
 
-  it('shows one listed without losing the idea, and goes back to editing on cancel', async () => {
-    vi.mocked(registerHumanHypothesis).mockResolvedValue({ similar })
+  it('says nothing when it reads close to none', async () => {
+    vi.mocked(registerHumanHypothesis).mockResolvedValue(registered('hyp-3', 'mixup helps', [{ type: 'builds_on', to: 'pe-x' }]))
     render(<Harness view="outline" />)
     fireEvent.click(screen.getByRole('button', { name: 'Add idea' }))
-    await write('warmup helps a lot')
-    const editor = screen.getByRole('group', { name: 'New idea' })
-    fireEvent.click(within(editor).getByRole('button', { name: 'Add idea' }))
-    fireEvent.click(await within(editor).findByRole('button', { name: 'a cosine schedule helps' }))
-    expect(screen.getByLabelText('selected').textContent).toBe('hyp-2')
-    expect((within(editor).getByRole('textbox', { name: 'Your idea' }) as HTMLTextAreaElement).value).toBe('warmup helps a lot')
-    fireEvent.click(within(editor).getByRole('button', { name: 'Cancel' }))
-    expect(within(editor).queryByText('Similar ideas already on the graph:')).toBeNull()
-    expect(within(editor).getByRole('button', { name: 'Add idea' })).toBeTruthy()
-    expect(registerHumanHypothesis).toHaveBeenCalledTimes(1)
+    await write('mixup helps')
+    fireEvent.click(within(screen.getByRole('group', { name: 'New idea' })).getByRole('button', { name: 'Add idea' }))
+    await waitFor(() => expect(screen.getByLabelText('selected').textContent).toBe('hyp-3'))
+    expect(screen.queryByRole('note', { name: 'Similar ideas' })).toBeNull()
   })
 })
 
@@ -286,7 +283,7 @@ describe('in the outline', () => {
     await write('a longer warmup')
     fireEvent.click(within(editor).getByRole('button', { name: 'Add idea' }))
     await waitFor(() => expect(screen.getByLabelText('selected').textContent).toBe('hyp-3'))
-    expect(registerHumanHypothesis).toHaveBeenCalledExactlyOnceWith('pe-x', 'a longer warmup', [{ type: 'builds_on', to: 'hyp-1' }], [])
+    expect(registerHumanHypothesis).toHaveBeenCalledExactlyOnceWith('pe-x', 'a longer warmup', [{ type: 'builds_on', to: 'hyp-1' }])
     const rows = screen.getAllByRole('listitem').map(li => li.textContent)
     expect(rows.findIndex(r => r?.includes('a longer warmup'))).toBe(rows.findIndex(r => r?.includes('warmup helps')) + 1)
   })

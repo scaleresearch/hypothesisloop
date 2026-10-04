@@ -21,6 +21,7 @@ import type {
   AgentQuota,
   MetricDefinition,
   AgentMetricSeries,
+  Actor,
   Hypothesis,
   HypothesisComment,
   HypothesisFinding,
@@ -384,32 +385,29 @@ export interface RegisteredHypothesis extends Hypothesis {
   already_existed: boolean
   /** Its outgoing links as stored. */
   links: HypothesisLink[]
+  /** The hypotheses it reads close to, or the refuted ones it builds on, as a hint to the person. */
+  similar: SimilarHypothesis[]
 }
 
 export interface SimilarHypothesis {
   id: string
+  agent_id?: string
+  actor: Actor
+  builds_on: string[]
   status: HypothesisStatus
   text: string
   reason: 'close_text' | 'refuted_parent'
-}
-
-/** A registration held back by a 409 until each listed hypothesis is told apart from it. */
-export interface HeldBack {
-  similar: SimilarHypothesis[]
 }
 
 // Registers a human's idea, placed in the graph by `links` (at least one builds_on; `to` is a
 // hypothesis id, or the platform_experiment_id for the objective root). Who registered it is the
 // signed-in person, read by the API from their session. Text equivalent to an existing claim returns
 // that row with already_existed set, and the supplied links are not applied. Text close to other
-// hypotheses registers nothing and returns them until their ids are passed in distinctFrom.
-export async function registerHumanHypothesis(
-  platformExperimentID: string, text: string, links: HypothesisLinkInput[], distinctFrom: string[] = [],
-): Promise<RegisteredHypothesis | HeldBack> {
-  const res = await request('POST', '/hypotheses', { platform_experiment_id: platformExperimentID, text, links, distinct_from: distinctFrom })
-  if (res.status === 409) return { similar: (await res.json()).similar }
-  if (!res.ok) throw await failure(res)
-  return res.json()
+// hypotheses is registered all the same, and those come back in similar.
+export function registerHumanHypothesis(
+  platformExperimentID: string, text: string, links: HypothesisLinkInput[],
+): Promise<RegisteredHypothesis> {
+  return apiSend<RegisteredHypothesis>('POST', '/hypotheses', { platform_experiment_id: platformExperimentID, text, links })
 }
 
 // Links are append-only. Only a hypothesis no agent owns accepts links from a person as themselves.

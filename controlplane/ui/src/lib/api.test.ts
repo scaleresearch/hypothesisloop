@@ -206,7 +206,7 @@ describe('what a person writes is theirs by their session: no body names who wro
     fetchMock().mockResolvedValue(answer(201, { id: 'h1', already_existed: false }))
     await registerHumanHypothesis('pe-1', 'an idea', [{ type: 'builds_on', to: 'pe-1' }])
     expect(sent().body).toEqual({
-      platform_experiment_id: 'pe-1', text: 'an idea', links: [{ type: 'builds_on', to: 'pe-1' }], distinct_from: [],
+      platform_experiment_id: 'pe-1', text: 'an idea', links: [{ type: 'builds_on', to: 'pe-1' }],
     })
   })
 
@@ -216,11 +216,10 @@ describe('what a person writes is theirs by their session: no body names who wro
     expect(sent().body).toEqual({ text: 'a note' })
   })
 
-  it('returns the hypotheses an idea was held back for', async () => {
-    fetchMock().mockResolvedValue(answer(409, { similar: [{ id: 'h2', status: 'open', text: 't', reason: 'close_text' }] }))
-    await expect(registerHumanHypothesis('pe-1', 'an idea', [])).resolves.toEqual({
-      similar: [{ id: 'h2', status: 'open', text: 't', reason: 'close_text' }],
-    })
+  it('returns the idea it registered with the ones it reads close to', async () => {
+    const similar = [{ id: 'h2', actor: { kind: 'user', id: 'u1', name: 'Ada' }, builds_on: ['pe-1'], status: 'open', text: 't', reason: 'close_text' }]
+    fetchMock().mockResolvedValue(answer(201, { id: 'h1', already_existed: false, links: [], similar }))
+    await expect(registerHumanHypothesis('pe-1', 'an idea', [])).resolves.toMatchObject({ id: 'h1', similar })
   })
 })
 
