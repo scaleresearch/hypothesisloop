@@ -145,7 +145,6 @@ SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, 
        ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.repository_url, pe.agent_image, pe.goal, pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason,
        pe.baseline_job_id, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id, pe.close_message, pe.repository_error, pe.repository_account,
        pe.duration_hours, pe.started_at, pe.planner_ends_at, pe.accepts_at, pe.coordinator_instance_activity, pe.coordinator_instance_activity_at,
-       pe.status = 'open' AND NOT ` + coordinatorWantedSQL + `,
        (SELECT planner.instance_activity FROM experiment_signups planner WHERE ` + plannerOfDraft + `),
        (SELECT planner.instance_activity_at FROM experiment_signups planner WHERE ` + plannerOfDraft + `)
 FROM platform_experiments pe
@@ -173,7 +172,7 @@ WHERE id = $1`
 		&pe.Goal, &createdBy.Kind, &createdBy.ID, &proposal, &answeredAt, &pe.DeclinedReason,
 		&pe.BaselineJobID, &pe.JobEstimatedDurationHours, &pe.ClosedAt, &pe.CloseReason, &closedBy.Kind, &closedBy.ID, &pe.CloseMessage, &pe.RepositoryError, &pe.RepositoryAccount,
 		&pe.DurationHours, &startedAt, &plannerEndsAt, &acceptsAt, &coordinatorActivity, &coordinatorActivityAt,
-		&coordinator.Instance.Waiting, &plannerActivity, &plannerActivityAt,
+		&plannerActivity, &plannerActivityAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {

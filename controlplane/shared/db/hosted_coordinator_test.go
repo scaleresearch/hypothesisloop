@@ -111,17 +111,8 @@ func TestAHostedCoordinatorIsStoredReadAndListedOnlyWhereItIsOne(t *testing.T) {
 		}
 		return out
 	}
-	if out := listed(); len(out) != 0 {
-		t.Fatalf("open, its baseline measured with nothing for the coordinator: listed = %+v, want none", out)
-	}
-	if got, err := pes.GetPlatformExperiment(ctx, pe); err != nil || got.Coordinator.Instance.Shown() != domain.InstanceWaiting {
-		t.Fatalf("open, not wanted yet: coordinator = %+v, %v, want its instance waiting", got.Coordinator, err)
-	}
-	if err := pes.TellCoordinator(ctx, pe, "baseline_required"); err != nil {
-		t.Fatal(err)
-	}
 	if out := listed(); len(out) != 1 || out[0].PlatformExperimentID != pe || out[0].Model != "model-1" || out[0].Ending {
-		t.Fatalf("open, waiting for its coordinator: listed = %+v", out)
+		t.Fatalf("open, its baseline measured under the coordinator: listed = %+v", out)
 	}
 	if err := pes.AskInstance(ctx, pe, "", "c", "launch-1"); err != nil {
 		t.Fatal(err)

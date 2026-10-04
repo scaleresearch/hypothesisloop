@@ -209,8 +209,8 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	return pe, nil
 }
 
-// coordinatorWanted says when the platform runs a hosted coordinator's machine (db.coordinatorWantedSQL).
-const coordinatorWanted = "The coordinator's machine is asked for once the experiment runs or its status_reason waits for the coordinator (a baseline agent that gave up, several jobs to choose from), and is kept from then until the experiment closes: while the baseline is measured with nothing for it to do, coordinator.instance reads waiting."
+// coordinatorWanted says when the platform runs a hosted coordinator's machine (db.launcherCoordinatorsWhere).
+const coordinatorWanted = "The coordinator's machine is asked for once the plan is accepted and the experiment is open, so it supervises the baseline and can change the lineup before the start, and is kept until the experiment closes."
 
 // refuseUpdate is a create or a patch the caller can fix.
 func refuseUpdate(status int, reason, format string, args ...any) error {

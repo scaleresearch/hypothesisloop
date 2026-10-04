@@ -450,11 +450,10 @@ def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_
         assert sorted(a["role"] for a in agents.values()) == ["baseline", "competitor", "competitor"], agents
         assert {q["agent_id"] for q in with_repo.platform_experiment_quotas(pe_id)} <= set(agents), "the coordinator holds a quota"
 
-        # Open: only the baseline agent has a machine. The coordinator has no work while the
-        # baseline is measured.
+        # Open: the baseline agent has a machine and the coordinator supervises it; no researcher
+        # has one before there is a baseline.
         assert set(desired_for(with_repo, pe_id)[0]) == {measurer}, "a researcher's machine is asked for before there is a baseline"
-        assert coordinator_for(with_repo, pe_id)[0] is None, "the coordinator's machine is asked for while the baseline is measured"
-        assert pe["coordinator"]["instance"]["state"] == "waiting", pe["coordinator"]
+        assert coordinator_for(with_repo, pe_id)[0] is not None, "the coordinator's machine is not asked for while the baseline is measured"
 
         # Its token coordinates this platform experiment: it reads the roster and changes the brief.
         as_coordinator = with_repo.as_caller(admin.token(f"coordinator:{pe_id}"), with_repo.org_id, with_repo.project_id)

@@ -494,9 +494,8 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	}
 
 	// Accepted, nothing has run. The agent that measures the baseline joined with the accept, so
-	// the launcher is asked for its machine, for no researcher's yet, no longer for the planner's,
-	// and not for the coordinator's, which nothing waits for yet. It was named by its role, and
-	// holds half the budget of 6.
+	// the launcher is asked for its machine, for no researcher's yet and no longer for the
+	// planner's. It was named by its role, and holds half the budget of 6.
 	baseline := agents[3]
 	if baseline.Name != "Baseline 1" {
 		t.Fatalf("the baseline agent is named %q, want Baseline 1", baseline.Name)
@@ -504,10 +503,6 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	wanted, err := pes.ListLauncherAgents(ctx, launcher, time.Minute)
 	if err != nil || len(wanted) != 1 || wanted[0].AgentID != baseline.ID || wanted[0].Ended != "" {
 		t.Fatalf("the launcher is asked for %+v, %v, want the baseline agent alone", wanted, err)
-	}
-	coordinators, err := pes.ListLauncherCoordinators(ctx, launcher, time.Minute)
-	if err != nil || len(coordinators) != 0 {
-		t.Fatalf("coordinators = %+v, %v, want none while the baseline is measured", coordinators, err)
 	}
 	if quota, err := pes.GetAgentQuota(ctx, baseline.ID, id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 3 || quota.BurstAcceleratorHours != 0 {
 		t.Fatalf("the baseline agent's quota = %+v, %v, want 3 guaranteed accelerator-hours", quota, err)
