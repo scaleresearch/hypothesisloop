@@ -43,9 +43,10 @@ FROM python:3.13-slim
 # (system prompt step 5), so every experiment's code_ref resolves to a real, cloneable commit —
 # that is the trace from a submitted job back to its source.
 # build-essential, pkg-config, cmake: an agent compiles and tests a harness here before a job runs
-# it, and installs nothing as root. Twice a baseline agent found no C compiler or linker.
+# it. Twice a baseline agent found no C compiler or linker.
+# sudo: what else its .hypothesisloop/Dockerfile installs, the agent installs here itself.
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git \
-    build-essential pkg-config cmake \
+    build-essential pkg-config cmake sudo \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=uv /uv /uvx /usr/local/bin/
 
@@ -70,7 +71,11 @@ RUN git config --system credential.helper '!hl git-credential' \
 # which holds the directory it works in and beside it only dotfiles: agents ran `cd ~` first and
 # cloned in a home that held nothing, and the CLI put their shell back in the working directory,
 # away from the clone.
-RUN useradd --home-dir /agent --shell /bin/bash agent
+# Passwordless sudo for all of it: apt-get or dpkg alone already run any script as root, so a
+# narrower rule keeps nothing safe in a VM that holds one agent and is thrown away after it.
+RUN useradd --home-dir /agent --shell /bin/bash agent \
+ && echo 'agent ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/agent \
+ && chmod 0440 /etc/sudoers.d/agent
 
 # WORKLOAD_SAMPLES is the agent's starting point for what a job workload looks like: every
 # experiment's seed/ (not tests/workloads/, which is test-only fixture code) with the
