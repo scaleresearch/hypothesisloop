@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -165,7 +166,9 @@ func (s *Service) WriteExperimentSummary(ctx context.Context, id string, actor d
 	}
 	if _, err := s.store.CreateHypothesisFinding(ctx, exp.HypothesisID, exp.PlatformExperimentID, id, exp.AgentID, actor, summary); err != nil {
 		if errors.Is(err, db.ErrFindingExists) {
-			return nil, &AdmissionError{Reason: ReasonSummaryExists, Message: "this job already has a summary, and a filed summary is not replaced"}
+			on := cmp.Or(exp.HypothesisID, "root")
+			return nil, &AdmissionError{Reason: ReasonSummaryExists, Message: fmt.Sprintf("job %s already has its summary, which is not replaced: it owes nothing more. "+
+				"Add what you learned since as a comment (hl hypothesis comment %s --text T); hl job summary %s prints the one filed", id, on, id)}
 		}
 		return nil, fmt.Errorf("summary: create finding: %w", err)
 	}

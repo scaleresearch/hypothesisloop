@@ -79,7 +79,7 @@ func (s *Service) supported(ctx context.Context, h *domain.Hypothesis, v Verdict
 		if len(own) > 0 {
 			have = strings.Join(own, ", ")
 		}
-		return &UnsupportedVerdictError{Detail: fmt.Sprintf("%s needs %d completed jobs on the hypothesis besides the control %s, and it has %d (%s): where results vary between runs, one run does not tell an effect from that spread, so run it again. %s", v.Status, minJobsForAVerdict, v.Against, len(own), have, otherwise)}
+		return &UnsupportedVerdictError{Detail: fmt.Sprintf("%s needs %d completed jobs on the hypothesis besides the control %s, and it has %d (%s): where results vary between runs, one run does not tell an effect from that spread, so run it again (hl job submit FILE --hypothesis %s, the same submit as before with --repeat 2 for a second run of it) and set the verdict once it completed. %s", v.Status, minJobsForAVerdict, v.Against, len(own), have, h.ID, otherwise)}
 	}
 	return nil
 }
