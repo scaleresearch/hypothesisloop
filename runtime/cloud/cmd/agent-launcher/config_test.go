@@ -67,7 +67,7 @@ func TestTheWarmPoolLeftOutIsTwoOnAProviderThatWarmsAndNoneOnAnother(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.warmPool(fake.New()); got != 4 {
+	if got := cfg.warmPool(fake.New()); got != 2 {
 		t.Errorf("on a provider that warms: %d", got)
 	}
 	if got := cfg.warmPool(struct{ provider.Provider }{fake.New()}); got != 0 {
