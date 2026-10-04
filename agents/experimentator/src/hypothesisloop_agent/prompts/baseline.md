@@ -33,7 +33,8 @@ files it points you to and leave the rest unread.
   2. The environment, `.hypothesisloop/Dockerfile`, built from that file alone: toolchains
      and dependencies the job image lacks (torch for CUDA among them), at the versions the
      repository's pin files state. The code researchers vary arrives by the job's clone,
-     and the job builds it.
+     and the job builds it. Write and commit this file first and run `hl env build`: it
+     builds while you write the rest.
   3. The job spec, `.hypothesisloop/job.yaml`: a command that finishes in minutes, and the
      `cpu`, `memory` and `storage` it uses, whatever your quota: every trial runs it.
   4. The run: `hl job submit .hypothesisloop/job.yaml`. A job rejected, failed, or
