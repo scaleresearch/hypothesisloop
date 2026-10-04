@@ -84,6 +84,7 @@ def _updates_hook(setup: core.RunSetup, watch_env: dict[str, str]):
         told = await _told(setup, events)
         if not told:
             return {}
+        _forget_job_reads()
         for line in activity.event_lines(events, agent_id):
             print(line, flush=True)
         return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": told}}
@@ -126,11 +127,42 @@ def _waits(command: str) -> bool:
                for n, unit in re.findall(r"(\d+(?:\.\d+)?)([smhd]?)", args)) >= _WAIT_LIMIT_S
 
 
+# Refused sleeps, a baseline agent read `hl job status` and `metrics` of its running job every 3-5 s,
+# each read a model call, saying it would end its turn. A read of a job repeated within
+# _REREAD_S with no update delivered since is refused the same way: what changes arrives as one.
+_REREAD_S = 120
+_JOB_READ = re.compile(r"\bhl\s+job\s+(status|metrics|logs)((?:\s+[^\s|;&<>()]+(?=$|[\s|;&)]))*)")
+_job_reads: dict[str, float] = {}
+
+
+def _forget_job_reads() -> None:
+    """An update was delivered: every job may be read again."""
+    _job_reads.clear()
+
+
+def _repeated_read(command: str, now: float) -> str | None:
+    """The read command repeats when every job read in it was read within _REREAD_S, else None,
+    and the reads are noted."""
+    reads = [" ".join(["hl job", sub, *args.split()]) for sub, args in _JOB_READ.findall(command)]
+    if not reads:
+        return None
+    if all(read in _job_reads and now - _job_reads[read] < _REREAD_S for read in reads):
+        return reads[0]
+    _job_reads.update(dict.fromkeys(reads, now))
+    return None
+
+
 async def _wait_hook(hook_input, tool_use_id, context) -> dict:
-    if not _waits(hook_input["tool_input"].get("command", "")):
+    command = hook_input["tool_input"].get("command", "")
+    if _waits(command):
+        reason = core.WAIT
+    elif read := _repeated_read(command, time.monotonic()):
+        reason = (f"`{read}` was read under {_REREAD_S // 60} minutes ago and no update has come since: "
+                  f"a change to the job arrives as one. {core.WAIT}")
+    else:
         return {}
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                   "permissionDecisionReason": core.WAIT}}
+                                   "permissionDecisionReason": reason}}
 
 
 def _session_file(setup: core.RunSetup) -> str:
@@ -875,10 +907,12 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             if told:
                 for line in activity.event_lines(events, cfg.agent_id):
                     print(line, flush=True)
+                _forget_job_reads()
                 await client.query(told)
                 idle_s = updates.IDLE_NUDGE_S
                 continue
             log.info("no platform updates for %ds, nudging", idle_s)
+            _forget_job_reads()
             await client.query(updates.IDLE_PROMPT.format(minutes=round(idle_s / 60)))
             idle_s = min(idle_s * 2, updates.IDLE_NUDGE_MAX_S)
 

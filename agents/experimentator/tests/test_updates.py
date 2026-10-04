@@ -310,6 +310,17 @@ class HookTest(unittest.IsolatedAsyncioTestCase):
             "additionalContext": "Platform updates:\njob.underperforming job-1 val_accuracy"}})
         self.assertEqual(await self.call(), {})
 
+    async def test_an_update_handed_over_lets_every_job_be_read_again(self):
+        from hypothesisloop_agent.claude import run
+
+        run._forget_job_reads()
+        self.assertIsNone(run._repeated_read("hl job status job-1", 0))
+        await self.call()
+        self.assertIsNotNone(run._repeated_read("hl job status job-1", 1))
+        self.waiting = [{"kind": "experiment.status", "subject": "job-1", "value": "RUNNING", "agent_id": "agent-a"}]
+        await self.call()
+        self.assertIsNone(run._repeated_read("hl job status job-1", 2))
+
     async def test_parallel_tool_calls_share_one_drain(self):
         self.waiting = [{"kind": "comment.new", "subject": "hyp-1", "value": "human"}]
         outputs = await asyncio.gather(self.call(), self.call(), self.call())
@@ -381,8 +392,49 @@ class WaitTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("To wait, reply with no command in it", told["permissionDecisionReason"])
 
     async def test_a_short_pause_and_a_command_that_only_names_sleep_run(self):
+        from hypothesisloop_agent.claude import run
+
+        run._forget_job_reads()
         for command in ("sleep 5 && curl -s localhost:8000", "grep -n sleep src/train.py", "hl job status job-1"):
             self.assertEqual(await self.call(command), {}, command)
+
+
+# Refused sleeps, a baseline agent read its running job's status and metrics every 3-5 s, each
+# a model call, in commands that changed between reads.
+class RereadTest(unittest.TestCase):
+    def setUp(self):
+        from hypothesisloop_agent.claude import run
+
+        self.run = run
+        run._forget_job_reads()
+
+    def test_a_job_read_again_soon_with_nothing_delivered_between_is_refused_however_the_command_dresses_it(self):
+        self.assertIsNone(self.run._repeated_read("hl job status job-1 2>&1; echo ---; hl job metrics job-1 2>&1", 0))
+        for command in ("hl job status job-1", "date -u; hl job status job-1 2>&1 | python3 -c 'import json'",
+                        "hl job metrics job-1 2>&1; hl job status job-1 2>&1 | tail -3"):
+            self.assertIsNotNone(self.run._repeated_read(command, 5), command)
+        self.assertEqual(self.run._repeated_read("hl job status job-1", 5), "hl job status job-1")
+
+    def test_a_new_read_an_old_one_or_one_after_an_update_runs(self):
+        self.assertIsNone(self.run._repeated_read("hl job status job-1", 0))
+        self.assertIsNone(self.run._repeated_read("hl job logs job-1 | tail -40", 5))
+        self.assertIsNone(self.run._repeated_read("hl job status job-2", 5))
+        self.assertIsNone(self.run._repeated_read("hl job status job-1; hl job status job-3", 6))
+        self.assertIsNone(self.run._repeated_read("hl job status job-1", 6 + self.run._REREAD_S))
+        self.run._forget_job_reads()
+        self.assertIsNone(self.run._repeated_read("hl job status job-1", 7 + self.run._REREAD_S))
+        self.assertIsNone(self.run._repeated_read("hl job list --status RUNNING", 8 + self.run._REREAD_S))
+        self.assertIsNone(self.run._repeated_read("hl job list --status RUNNING", 9 + self.run._REREAD_S))
+
+    def test_the_refusal_says_how_to_wait(self):
+        import asyncio
+
+        call = lambda: asyncio.run(self.run._wait_hook({"tool_name": "Bash", "tool_input": {"command": "hl job status job-1"}}, "t", {}))
+        self.assertEqual(call(), {})
+        told = call()["hookSpecificOutput"]
+        self.assertEqual(told["permissionDecision"], "deny")
+        self.assertIn("`hl job status job-1` was read under 2 minutes ago and no update has come since", told["permissionDecisionReason"])
+        self.assertIn("To wait, reply with no command in it", told["permissionDecisionReason"])
 
 
 class FormatTest(unittest.TestCase):
