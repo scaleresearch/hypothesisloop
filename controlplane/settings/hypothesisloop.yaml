@@ -106,7 +106,9 @@ agents:
 #              and the person accepted, at most this. The platform starts the run once a
 #              baseline is declared (PATCH baseline_job_id), and its duration_hours count from
 #              then. One not running by its baseline_due_at is closed with close_reason
-#              baseline_limit_reached and its machines are released.
+#              baseline_limit_reached and its machines are released. baseline_due_at moves out
+#              by the time a job of the baseline waits for the platform to build its
+#              environment or to start it, at most 90 minutes in all.
 #   min_baseline_minutes  the fewest baseline_minutes a proposal or an accept may state: a
 #              baseline written from nothing writes its harness, waits for its environment to
 #              build and measures once, and a shorter window closes the run before it starts.

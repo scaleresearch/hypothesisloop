@@ -1411,3 +1411,9 @@ ALTER TABLE experiments ADD COLUMN IF NOT EXISTS environment_key TEXT REFERENCES
 ALTER TABLE platform_experiments DROP COLUMN IF EXISTS agent_environment_key;
 
 COMMIT;
+-- The time an open platform experiment's baseline waited on the platform, building the
+-- environment of one of its jobs or starting one on its cluster, which moved its baseline_due_at
+-- (ends_at) out by as much: baseline_held_seconds credited so far, and baseline_held_at the last
+-- sweep that saw it waiting, NULL when the last one did not.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS baseline_held_seconds DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS baseline_held_at      TIMESTAMPTZ;

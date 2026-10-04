@@ -37,6 +37,11 @@ type PlatformExperimentsStore interface {
 	// TellCoordinator records the status_reason the experiment waits for its coordinator with,
 	// "" for none, and announces one that changed.
 	TellCoordinator(ctx context.Context, id, reason string) error
+	// HoldBaselineClock moves baseline_due_at of an open platform experiment with no baseline out
+	// by the time its baseline waits on the platform, at most most in all: held says it waits now.
+	HoldBaselineClock(ctx context.Context, id string, held bool, most time.Duration) error
+	// MarkBaselineLate tells the owner of a job not running yet, once, as job.held, why it is late.
+	MarkBaselineLate(ctx context.Context, id, reason string) error
 	// Signup inserts only while the experiment is still open; inserted=false means it is closed
 	// or the agent was already signed up. A researcher past max_agents is db.ErrMaxAgentsReached,
 	// decided inside the insert's own transaction.

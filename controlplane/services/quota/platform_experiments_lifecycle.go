@@ -700,32 +700,48 @@ func endsClock(pe *domain.PlatformExperiment, now time.Time) string {
 }
 
 // lateBaselineJobs says of each of jobs, the jobs of an open platform experiment's baseline
-// agents, that has not started running and, run from now for the estimated_duration_hours its
-// agent stated, would end after due: what its agent finishes on. Nothing when there is none.
+// agents, that is late (lateBaselineJob): what its agent finishes on. Nothing when there is none.
 func lateBaselineJobs(jobs []*domain.Experiment, due, now time.Time) string {
 	var late []string
 	for _, job := range jobs {
-		if (job.Status != domain.StatusQueued && job.Status != domain.StatusSubmitted) || job.EstimatedDurationHours <= 0 {
-			continue
+		if sentence := lateBaselineJob(job, due, now); sentence != "" {
+			late = append(late, sentence)
 		}
-		runs := time.Duration(job.EstimatedDurationHours * float64(time.Hour))
-		if ends := now.Add(runs); !ends.After(due) {
-			continue
-		}
-		state := string(job.Status) + ", not running yet"
-		if job.NotAdmittedReason != "" {
-			state = string(job.Status) + " (" + job.NotAdmittedReason + ")"
-		}
-		late = append(late, fmt.Sprintf("job %s is %s and its estimated_duration_hours is %g: started now it ends after baseline_due_at, %d minutes from now, so baseline_due_at cannot be met by it",
-			job.ID, state, job.EstimatedDurationHours, max(0, int(due.Sub(now).Minutes()))))
 	}
 	return strings.Join(late, "; ")
 }
 
-// baselineClock says when an open platform experiment whose baseline is due at due closes, and
-// how long that is from now.
+// lateBaselineJob says that job, a job of an open platform experiment's baseline agents, has not
+// started running and, run from now for the estimated_duration_hours its agent stated, would end
+// after due. Nothing when it would not.
+func lateBaselineJob(job *domain.Experiment, due, now time.Time) string {
+	if (job.Status != domain.StatusQueued && job.Status != domain.StatusSubmitted) || job.EstimatedDurationHours <= 0 {
+		return ""
+	}
+	runs := time.Duration(job.EstimatedDurationHours * float64(time.Hour))
+	if ends := now.Add(runs); !ends.After(due) {
+		return ""
+	}
+	state := string(job.Status) + ", not running yet"
+	if job.NotAdmittedReason != "" {
+		state = string(job.Status) + " (" + job.NotAdmittedReason + ")"
+	}
+	return fmt.Sprintf("job %s is %s and its estimated_duration_hours is %g: started now it ends after baseline_due_at, %d minutes from now, so baseline_due_at cannot be met by it",
+		job.ID, state, job.EstimatedDurationHours, max(0, int(due.Sub(now).Minutes())))
+}
+
+// waitsOnPlatform says job, a job of an open platform experiment's baseline, waits on the
+// platform: for the environment its commit declares to be built, or placed on its cluster and
+// not running yet, which includes pulling its image.
+func waitsOnPlatform(job *domain.Experiment) bool {
+	return job.Status == domain.StatusSubmitted || job.Status == domain.StatusQueued && job.NotAdmittedReason == domain.NotAdmittedEnvironmentBuilding
+}
+
+// baselineClock says when an open platform experiment whose baseline is due at due closes, how
+// long that is from now, and what moves it.
 func baselineClock(due, now time.Time) string {
-	return fmt.Sprintf("baseline_due_at is %s, %d minutes from now: the platform closes it then if the run has not started. ", due.UTC().Format(time.RFC3339), max(0, int(due.Sub(now).Minutes())))
+	return fmt.Sprintf("baseline_due_at is %s, %d minutes from now: the platform closes it then if the run has not started. While a job of the baseline waits for the platform to build its environment or to start it on its cluster, baseline_due_at moves out by that time, at most %d minutes in all. ",
+		due.UTC().Format(time.RFC3339), max(0, int(due.Sub(now).Minutes())), int(domain.MaxEnvironmentBuildTime.Minutes()))
 }
 
 // researcherLeft says a researcher of signups may still work: one that neither finished nor was
@@ -1219,6 +1235,56 @@ func (s *PlatformExperimentsService) SweepAutoStart(ctx context.Context) error {
 	return nil
 }
 
+// TendBaselines keeps the clock of every open platform experiment with no baseline declared.
+// Time the platform spends on a job of its baseline, building its environment or starting it on
+// its cluster, is the platform's and not the baseline agent's: baseline_due_at moves out by it,
+// at most domain.MaxEnvironmentBuildTime in all (db.HoldBaselineClock). And the agent of a job
+// that, started now, ends after baseline_due_at is told so once, as job.held, which wakes it to
+// act on it where status_reason alone would wait to be read.
+func (s *PlatformExperimentsService) TendBaselines(ctx context.Context) error {
+	pes, err := s.store.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpOpen)
+	if err != nil {
+		return fmt.Errorf("list open platform experiments: %w", err)
+	}
+	for _, pe := range pes {
+		if pe.BaselineJobID != "" {
+			continue
+		}
+		if err := s.tendBaseline(ctx, pe); err != nil {
+			s.logger.Error("tend_baselines: failed", zap.String("platform_experiment_id", pe.ID), zap.Error(err))
+		}
+	}
+	return nil
+}
+
+func (s *PlatformExperimentsService) tendBaseline(ctx context.Context, pe *domain.PlatformExperiment) error {
+	jobs, err := s.store.ListExperimentsTesting(ctx, []string{pe.ID})
+	if err != nil {
+		return err
+	}
+	held := slices.ContainsFunc(jobs, waitsOnPlatform)
+	if err := s.store.HoldBaselineClock(ctx, pe.ID, held, domain.MaxEnvironmentBuildTime); err != nil {
+		return err
+	}
+	if held {
+		if pe, err = s.stored(ctx, pe.ID); err != nil {
+			return err
+		}
+	}
+	now := time.Now().UTC()
+	for _, job := range jobs {
+		late := lateBaselineJob(job, pe.BaselineDueAt, now)
+		if late == "" {
+			continue
+		}
+		reason := domain.HeldBaselineLate + ": " + late + ". " + strings.TrimSpace(baselineClock(pe.BaselineDueAt, now))
+		if err := s.store.MarkBaselineLate(ctx, job.ID, reason); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // TellCoordinators records, for every open or running platform experiment whose coordinator the
 // platform hosts, the status_reason it waits for that coordinator with, and none where it waits
 // for someone else. A status_reason is derived from the roster and the clock and stored nowhere,
@@ -1254,8 +1320,9 @@ func (s *PlatformExperimentsService) tellCoordinator(ctx context.Context, pe *do
 	return s.store.TellCoordinator(ctx, pe.ID, reason)
 }
 
-// StartExpirySweep runs SweepAutoStart, SweepExpired and TellCoordinators on a ticker until ctx
-// is cancelled.
+// StartExpirySweep runs SweepAutoStart, TendBaselines, SweepExpired and TellCoordinators on a
+// ticker until ctx is cancelled. TendBaselines runs before SweepExpired, so a baseline that waited
+// on the platform until its deadline is given that time before it is closed.
 func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -1266,6 +1333,9 @@ func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, inter
 		case <-ticker.C:
 			if err := s.SweepAutoStart(ctx); err != nil {
 				s.logger.Error("sweep_auto_start: scan", zap.Error(err))
+			}
+			if err := s.TendBaselines(ctx); err != nil {
+				s.logger.Error("tend_baselines: scan", zap.Error(err))
 			}
 			if err := s.SweepExpired(ctx); err != nil {
 				s.logger.Error("sweep_expired: scan", zap.Error(err))

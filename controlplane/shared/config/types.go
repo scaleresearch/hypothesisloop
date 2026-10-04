@@ -283,7 +283,8 @@ type PlanningConfig struct {
 	LimitMinutes int `yaml:"limit_minutes"`
 	// BaselineLimitMinutes is how long a platform experiment, accepted from a draft or created
 	// whole, may stay open: one not running by then is closed. The run's length counts from its
-	// start, so this alone bounds the time before.
+	// start, so this alone bounds the time before, with the time a job of its baseline waits on
+	// the platform added (domain.MaxEnvironmentBuildTime at most).
 	BaselineLimitMinutes int `yaml:"baseline_limit_minutes"`
 	// MinBaselineMinutes is the fewest minutes an accepted draft may give its baseline: what
 	// writing a harness, building its environment and measuring once take at the least.

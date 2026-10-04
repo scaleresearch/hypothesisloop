@@ -507,6 +507,28 @@ WHERE id = $1 AND status <> 'closed' AND coordinator_reason IS DISTINCT FROM NUL
 	return nil
 }
 
+// HoldBaselineClock moves baseline_due_at of the open platform experiment id, which has no
+// baseline declared, out by the time its baseline waits on the platform: held says it waits now.
+// The time since the last call that saw it waiting is credited, up to most in all, so a wait is
+// counted from the first call that sees it and is short by at most the interval between calls.
+func (s *PlatformExperimentsStore) HoldBaselineClock(ctx context.Context, id string, held bool, most time.Duration) error {
+	const q = `
+UPDATE platform_experiments pe
+SET ends_at = pe.ends_at + make_interval(secs => c.credit),
+    baseline_held_seconds = pe.baseline_held_seconds + c.credit,
+    baseline_held_at = CASE WHEN $2::boolean THEN now() END
+FROM (SELECT id, CASE WHEN $2::boolean AND baseline_held_at IS NOT NULL
+                      THEN LEAST(GREATEST(EXTRACT(EPOCH FROM now() - baseline_held_at)::double precision, 0),
+                                 GREATEST($3::double precision - baseline_held_seconds, 0))
+                      ELSE 0 END AS credit
+      FROM platform_experiments WHERE id = $1) c
+WHERE pe.id = c.id AND pe.status = 'open' AND pe.baseline_job_id = '' AND ($2::boolean OR pe.baseline_held_at IS NOT NULL)`
+	if _, err := s.pool.pool.Exec(ctx, q, id, held, most.Seconds()); err != nil {
+		return fmt.Errorf("platform_experiments_store.HoldBaselineClock: %w", err)
+	}
+	return nil
+}
+
 // UpdatePlatformExperiment writes pe's editable fields, but only if the row is still in
 // expectedStatus — the service reads status, decides which fields are safe to change for that
 // status, then calls here; without this compare-and-swap, a concurrent Start() could flip the row

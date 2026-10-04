@@ -1306,3 +1306,37 @@ VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'test-accelerator',
 		t.Errorf("replay once the job left the queue: got = %+v, %v, want = no held event", replayed, err)
 	}
 }
+
+// Run 5's baseline job sat building its environment past the point it could end by
+// baseline_due_at, and its agent, whose stream leaves out a queue reason that waiting clears,
+// slept through it. Such a job is announced to its agent once, as job.held baseline_late.
+func TestABaselineJobThatCannotEndByItsDeadlineIsAnnouncedOnce(t *testing.T) {
+	pool := eventsTestDB(t)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+	agentID, peID, hypothesisID := seedRun(t, pool, "late", true)
+	experiments := NewExperimentsStore(pool)
+	exec(t, pool, `INSERT INTO experiments
+(actor_kind, id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
+ hypothesis_id, hypothesis, accelerator_type, status, not_admitted_reason,
+ estimated_duration_hours, queued_at, data_access_key_id, data_secret_access_key)
+VALUES ('agent', 'late-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator',
+        'QUEUED', 'environment_building: the platform builds it', 1, now(), 'AK', 'SK')`, agentID, peID, hypothesisID)
+	const first = "job late-job is QUEUED (environment_building): it cannot end by baseline_due_at"
+	if err := experiments.MarkBaselineLate(context.Background(), "late-job", domain.HeldBaselineLate+": "+first); err != nil {
+		t.Fatal(err)
+	}
+	if got := awaitEvent(t, events, EventJobHeld, "late-job"); got.Value != domain.HeldBaselineLate || got.Detail != first || got.AgentID != agentID {
+		t.Fatalf("held event of a late baseline job: got = %+v, want baseline_late with its sentence to its agent", got)
+	}
+	if err := experiments.MarkBaselineLate(context.Background(), "late-job", domain.HeldBaselineLate+": a minute later, still late"); err != nil {
+		t.Fatal(err)
+	}
+	var reason string
+	if err := pool.pool.QueryRow(context.Background(), `SELECT held_reason FROM experiments WHERE id = 'late-job'`).Scan(&reason); err != nil || reason != domain.HeldBaselineLate+": "+first {
+		t.Errorf("held_reason after a second notice = %q, %v, want the first one kept", reason, err)
+	}
+	if err := experiments.MarkBaselineLate(context.Background(), "late-job", "no sentence"); err == nil {
+		t.Error("a reason with no sentence was taken")
+	}
+}

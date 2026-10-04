@@ -3,6 +3,7 @@ package quota
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -380,5 +381,77 @@ func TestTheRosterAnswersWhatEachHostedAgentIsDoing(t *testing.T) {
 	}
 	if _, says := roster[1]["activity"]; says {
 		t.Errorf("an agent whose machine said nothing: activity %v, want none", roster[1]["activity"])
+	}
+}
+
+// tendedStore records what the baseline sweep asks of the store: whether each pass saw the
+// baseline wait on the platform, and the jobs it told their agent were late, with why. A held
+// pass moves baseline_due_at by moveBy.
+type tendedStore struct {
+	*toldStore
+	held   []bool
+	late   map[string]string
+	moveBy time.Duration
+}
+
+func (f *tendedStore) HoldBaselineClock(_ context.Context, _ string, held bool, most time.Duration) error {
+	if most != domain.MaxEnvironmentBuildTime {
+		return fmt.Errorf("bound %v, want the longest the platform spends on a build", most)
+	}
+	f.held = append(f.held, held)
+	if held {
+		f.pe.BaselineDueAt = f.pe.BaselineDueAt.Add(f.moveBy)
+	}
+	return nil
+}
+
+func (f *tendedStore) MarkBaselineLate(_ context.Context, id, reason string) error {
+	f.late[id] = reason
+	return nil
+}
+
+// Run 5's baseline job waited 17 minutes for its environment and the platform closed the
+// experiment while the job pulled its image: the platform's time was counted against the
+// baseline, and its agent, never told its job could not end in time, slept until the close. The
+// sweep moves baseline_due_at by the time a job waits on the platform, and tells the agent of a
+// job that cannot end by it.
+func TestTheBaselineSweepCountsThePlatformsTimeAsThePlatformsAndWakesALateBaseline(t *testing.T) {
+	due := time.Now().UTC().Add(10 * time.Minute)
+	building := &domain.Experiment{ID: "job-building", Status: domain.StatusQueued, NotAdmittedReason: domain.NotAdmittedEnvironmentBuilding, EstimatedDurationHours: 0.75}
+	pulling := &domain.Experiment{ID: "job-pulling", Status: domain.StatusSubmitted, EstimatedDurationHours: 0.1}
+	capacity := &domain.Experiment{ID: "job-capacity", Status: domain.StatusQueued, NotAdmittedReason: "capacity_unavailable", EstimatedDurationHours: 0.1}
+	running := &domain.Experiment{ID: "job-running", Status: domain.StatusRunning, EstimatedDurationHours: 2}
+	for name, c := range map[string]struct {
+		jobs     []*domain.Experiment
+		declared string
+		held     []bool
+		late     []string
+		due      time.Time
+	}{
+		"a job whose environment is built": {[]*domain.Experiment{building}, "", []bool{true}, []string{"job-building"}, due.Add(time.Minute)},
+		"a job its cluster is starting":    {[]*domain.Experiment{pulling, running}, "", []bool{true}, nil, due.Add(time.Minute)},
+		"a job that waits for room":        {[]*domain.Experiment{capacity}, "", []bool{false}, nil, due},
+		"a baseline declared":              {[]*domain.Experiment{building}, "job-1", nil, nil, due},
+	} {
+		store := &tendedStore{toldStore: &toldStore{rosterStore: newRosterStore(domain.PlatformExpOpen, 2)}, late: map[string]string{}, moveBy: time.Minute}
+		store.pe.BaselineDueAt, store.pe.BaselineJobID, store.objective = due, c.declared, c.jobs
+		if err := newSignupTestService(t, store).TendBaselines(context.Background()); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if fmt.Sprint(store.held) != fmt.Sprint(c.held) || !store.pe.BaselineDueAt.Equal(c.due) {
+			t.Errorf("%s: held = %v, due = %v, want %v, %v", name, store.held, store.pe.BaselineDueAt, c.held, c.due)
+		}
+		if len(store.late) != len(c.late) {
+			t.Errorf("%s: told late = %v, want %v", name, store.late, c.late)
+		}
+		for _, id := range c.late {
+			reason := store.late[id]
+			for _, want := range []string{domain.HeldBaselineLate + ": job " + id + " is QUEUED (environment_building)", "baseline_due_at cannot be met by it",
+				"baseline_due_at is " + c.due.Format(time.RFC3339), "moves out by that time, at most 90 minutes in all."} {
+				if !strings.Contains(reason, want) {
+					t.Errorf("%s: told %s %q, want it to say %q", name, id, reason, want)
+				}
+			}
+		}
 	}
 }

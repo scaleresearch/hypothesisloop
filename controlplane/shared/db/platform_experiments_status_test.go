@@ -236,3 +236,71 @@ func TestAListSaysWhyAPlatformExperimentClosed(t *testing.T) {
 	}
 	t.Fatalf("%s is not among the closed ones listed", pe)
 }
+
+// Run 5's baseline lost 17 of its 25 minutes to the platform building its environment. The time
+// a baseline waits on the platform moves its baseline_due_at out, up to the bound given, and
+// only while it is open with no baseline declared.
+func TestTheTimeABaselineWaitsOnThePlatformMovesItsDeadline(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	created := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Microsecond)
+	due := created.Add(25 * time.Minute)
+	pe := &domain.PlatformExperiment{
+		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "a held baseline", BudgetAcceleratorHours: 10, MaxAgents: 2,
+		StartsAt: created, BaselineDueAt: due, DurationHours: 1, Status: domain.PlatformExpOpen,
+		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
+		Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: created, UpdatedAt: created,
+	}
+	if err := pes.CreatePlatformExperiment(ctx, pe, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.pool.Exec(context.Background(), `DELETE FROM platform_experiments WHERE id = $1`, pe.ID) })
+	hold := func(held bool, most time.Duration) time.Time {
+		t.Helper()
+		if err := pes.HoldBaselineClock(ctx, pe.ID, held, most); err != nil {
+			t.Fatal(err)
+		}
+		read, err := pes.GetPlatformExperiment(ctx, pe.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return read.BaselineDueAt
+	}
+	seen := func(ago time.Duration) {
+		t.Helper()
+		exec(t, pool, `UPDATE platform_experiments SET baseline_held_at = now() - $2 * interval '1 second' WHERE id = $1`, pe.ID, ago.Seconds())
+	}
+
+	// The first sweep that sees the wait credits nothing: it starts counting.
+	if got := hold(true, time.Hour); !got.Equal(due) {
+		t.Fatalf("first sight of a wait: due = %v, want %v", got, due)
+	}
+	// A minute later it is still waiting: a minute is credited.
+	seen(time.Minute)
+	if got := hold(true, time.Hour); got.Sub(due) < time.Minute-time.Second || got.Sub(due) > time.Minute+5*time.Second {
+		t.Fatalf("a minute of waiting: due moved %v, want a minute", got.Sub(due))
+	}
+	// The wait ended: nothing more is credited, and the next one starts counting afresh.
+	seen(10 * time.Minute)
+	moved := hold(false, time.Hour)
+	if moved.Sub(due) > time.Minute+5*time.Second {
+		t.Fatalf("a wait that ended: due moved %v, want only the minute seen", moved.Sub(due))
+	}
+	if got := hold(true, time.Hour); !got.Equal(moved) {
+		t.Fatalf("a new wait first seen: due = %v, want %v", got, moved)
+	}
+	// Never more than the bound in all.
+	seen(3 * time.Hour)
+	if got := hold(true, 2*time.Minute); got.Sub(due) < 2*time.Minute-time.Second || got.Sub(due) > 2*time.Minute+time.Second {
+		t.Fatalf("a wait past the bound: due moved %v, want the bound, 2m", got.Sub(due))
+	}
+
+	// One with its baseline declared keeps its deadline.
+	exec(t, pool, `UPDATE platform_experiments SET baseline_job_id = 'job-1' WHERE id = $1`, pe.ID)
+	before := hold(true, 3*time.Hour)
+	seen(time.Hour)
+	if got := hold(true, 3*time.Hour); !got.Equal(before) {
+		t.Errorf("declared baseline: due moved from %v to %v", before, got)
+	}
+}

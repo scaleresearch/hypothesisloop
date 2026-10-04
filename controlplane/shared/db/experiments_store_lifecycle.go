@@ -196,6 +196,21 @@ WHERE status = 'QUEUED' AND split_part(not_admitted_reason, ': ', 1) <> 'awaitin
 	return nil
 }
 
+// MarkBaselineLate records reason, domain.HeldBaselineLate and its sentence, on the job id while
+// it is queued or placed and not running, and that write emits job.held to its owner. A job is
+// told so once.
+func (s *ExperimentsStore) MarkBaselineLate(ctx context.Context, id, reason string) error {
+	if err := sentenced(reason); err != nil {
+		return fmt.Errorf("experiments_store.MarkBaselineLate: %w", err)
+	}
+	const q = `UPDATE experiments SET held_reason = $2
+WHERE id = $1 AND status IN ('QUEUED', 'SUBMITTED') AND split_part(COALESCE(held_reason, ''), ': ', 1) <> $3`
+	if _, err := s.pool.pool.Exec(ctx, q, id, reason, domain.HeldBaselineLate); err != nil {
+		return fmt.Errorf("experiments_store.MarkBaselineLate: %w", err)
+	}
+	return nil
+}
+
 // UpdateNotAdmittedReason replaces the explanation only while the job is still QUEUED.
 // ClaimSubmitted clears it in the same statement that changes the lifecycle, so a stale
 // scheduler decision can never attach a queue reason to an admitted job.

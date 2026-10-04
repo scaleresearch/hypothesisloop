@@ -55,6 +55,9 @@ const (
 	// EnvironmentBuildLease is how long a cluster holds an assigned build before it is assigned
 	// again.
 	EnvironmentBuildLease = 30 * time.Minute
+	// MaxEnvironmentBuildTime is the longest the platform spends on one build before it fails it
+	// as its own fault: every attempt, each for its lease.
+	MaxEnvironmentBuildTime = MaxEnvironmentAttempts * EnvironmentBuildLease
 )
 
 // Environment is one image the platform builds for an org from an environment file on one base
@@ -101,6 +104,9 @@ const (
 	// NotAdmittedEnvironmentBuilding holds a job whose commit declares an environment that is
 	// being built.
 	NotAdmittedEnvironmentBuilding = "environment_building"
+	// HeldBaselineLate is the job.held reason of a job of an open platform experiment's baseline
+	// that, started now, ends after its baseline_due_at.
+	HeldBaselineLate = "baseline_late"
 	// EvictionEnvironmentFailed ends a job whose environment file did not build.
 	EvictionEnvironmentFailed EvictionReason = "environment_failed"
 	// EvictionEnvironmentUnbuilt ends a job whose environment the platform did not build, no
