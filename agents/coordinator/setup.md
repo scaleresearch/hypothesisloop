@@ -154,7 +154,8 @@ silently improvise.
    that no cluster could run with the image it names with 422 `no_cluster_for_image`. In each of the platform's job
    images a job installs with `uv pip install PACKAGE` or `pip install PACKAGE`, into the Python
    its command runs. `uv run --with PACKAGE script.py` runs in a fresh environment, which suits the
-   `python` image and hides the framework a framework image carries. `make images` builds and
+   `python` image and hides the framework a framework image carries. CUDA jobs run in the
+   `python` image and declare torch in `.hypothesisloop/Dockerfile`. `make images` builds and
    pushes the offered image with no framework, `make job-images` the others. An experiment
    whose job spec runs in an offered image states its name (`dummy-data-search-demo` states
    `image: python`).

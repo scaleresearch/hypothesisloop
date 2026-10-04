@@ -30,8 +30,9 @@ job:
   # (job_images, each with what it carries and the accelerator types it suits), or any other
   # image by its full registry address, host first. Anything else is refused with 422
   # unknown_job_image, and an image no cluster could run with no_cluster_for_image. Name an
-  # offered image before installing a framework yourself.
-  image: pytorch-cuda
+  # offered image and declare a framework it does not carry, torch for CUDA included, in
+  # .hypothesisloop/Dockerfile.
+  image: python
   # hl-clone checks out the commit the job was submitted from and prints its directory.
   command: ["bash", "-lc", "dir=$(hl-clone) && cd \"$dir\" && exec python train.py"]
   env:

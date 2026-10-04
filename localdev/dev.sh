@@ -137,7 +137,7 @@ render_runtime_configs() {
   local value
   sed -e "s|^cluster_name: .*$|cluster_name: ${cloud_cluster}|" \
       -e "s|^api_url: .*$|api_url: ${public_api}|" \
-      -e "s|^job_image: .*$|job_image: ${registry}/$(lib_env_value VAST_JOB_IMAGE):${tag}|" \
+      -e "s|^job_image: .*$|job_image: ${registry}/hypothesisloop-job:${tag}|" \
       -e "s|^  account_id: .*$|  account_id: \"$(lib_env_value VAST_ACCOUNT_ID)\"|" \
       runtime/cloud/settings/cloud-agent.vast.yaml > "${bin}/cloud-agent.yaml"
   # Which vendor runs hosted agents is this one section of the launcher's config and nothing
@@ -151,7 +151,7 @@ render_runtime_configs() {
       -e "s|^  name: example$|  name: ${sandbox_provider}|" \
       -e "s|^  settings: {}$|  settings: ${sandbox_settings}|" \
       runtime/cloud/settings/agent-launcher.yaml > "${bin}/agent-launcher.yaml"
-  for value in "cluster_name: ${cloud_cluster}" "api_url: ${public_api}" "job_image: ${registry}/$(lib_env_value VAST_JOB_IMAGE):${tag}" "account_id: \"$(lib_env_value VAST_ACCOUNT_ID)\""; do
+  for value in "cluster_name: ${cloud_cluster}" "api_url: ${public_api}" "job_image: ${registry}/hypothesisloop-job:${tag}" "account_id: \"$(lib_env_value VAST_ACCOUNT_ID)\""; do
     grep -qF -- "${value}" "${bin}/cloud-agent.yaml" || { echo "dev: runtime/cloud/settings/cloud-agent.vast.yaml changed shape, '${value}' was not rendered" >&2; exit 1; }
   done
   for value in "api_url: http://localhost:8081" "  name: ${sandbox_provider}" "  settings: ${sandbox_settings}"; do
@@ -171,7 +171,7 @@ hosted_inputs() {
       exit 1
       ;;
   esac
-  for key in IMAGE_TAG GCP_PROJECT REGISTRY_LOCATION REGISTRY_REPOSITORY ${sandbox_keys} VAST_API_KEY VAST_ACCOUNT_ID VAST_JOB_IMAGE CLAUDE_CODE_OAUTH_TOKEN; do
+  for key in IMAGE_TAG GCP_PROJECT REGISTRY_LOCATION REGISTRY_REPOSITORY ${sandbox_keys} VAST_API_KEY VAST_ACCOUNT_ID CLAUDE_CODE_OAUTH_TOKEN; do
     [[ -n "$(lib_env_value "${key}")" ]] || missing+=("${key}")
   done
   if [[ ${#missing[@]} -gt 0 ]]; then

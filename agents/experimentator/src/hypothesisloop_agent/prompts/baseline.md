@@ -28,8 +28,9 @@ and the experiment is closed if not running by its `baseline_due_at`.
      reported as the run goes and once more at the end with the `post_metric` of the
      repository's `metrics.py`. Researchers copy and change this code, so keep the part they
      vary apart from the part that measures, and say which is which.
-  2. The environment: system packages and toolchains go in `.hypothesisloop/Dockerfile`, so
-     that a job of the code you leave runs with no long setup step.
+  2. The environment: system packages, toolchains and frameworks the job image does not carry
+     (torch for CUDA among them) go in `.hypothesisloop/Dockerfile`, so that a job of the code
+     you leave runs with no long setup step.
   3. The job spec, `.hypothesisloop/job.yaml`: a command that finishes in minutes, and the
      `cpu`, `memory` and `storage` it uses, whatever your quota: every trial runs it.
   4. The run: `hl job submit .hypothesisloop/job.yaml`. A job that failed, or completed

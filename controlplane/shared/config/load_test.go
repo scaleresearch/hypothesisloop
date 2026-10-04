@@ -243,7 +243,7 @@ func TestLoadRejectsRuntimeAddressesARuntimeCannotReach(t *testing.T) {
 		"metrics url any v6":     {metrics, "  metrics_url: http://[::]:8084"},
 		"api url loopback":       {api, "  public_api_url: http://[::1]:8081"},
 		"misspelled key":         {metrics, "  metrics_url: http://metrics.example.invalid\n  metric_url: http://metrics.example.invalid"},
-		"job image named twice":  {"  - name: pytorch-cuda", "  - name: python"},
+		"job image named twice":  {"  - name: tenstorrent", "  - name: python"},
 		"job image with no ref":  {"    repository: hypothesisloop-job-tenstorrent\n", ""},
 	} {
 		text := productionConfig(t)

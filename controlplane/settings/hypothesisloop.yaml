@@ -151,12 +151,7 @@ runtimes:
 job_images:
   - name: python
     repository: hypothesisloop-job
-    carries: Python 3.13, uv, git, hl, hl-clone. No framework.
-  # From pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime, pinned by digest in the Makefile.
-  - name: pytorch-cuda
-    repository: hypothesisloop-job-pytorch-cuda
-    carries: PyTorch 2.4.0 built for CUDA 12.1 with cuDNN 9, Python 3.11, uv, git, hl, hl-clone. Runs on an NVIDIA host driver 530 or newer.
-    suits: ["nvidia.com/"]
+    carries: Python 3.13, uv, git, hl, hl-clone. No framework. On NVIDIA, torch from PyPI declared in .hypothesisloop/Dockerfile brings its own CUDA and cuDNN; the host provides the driver.
   # From ghcr.io/tenstorrent/tt-metal/tt-metalium-ubuntu-22.04-release-amd64:v0.77.0, which ships
   # no torch: the Makefile adds the CPU build at the version named here.
   - name: tenstorrent
