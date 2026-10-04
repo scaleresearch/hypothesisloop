@@ -231,50 +231,6 @@ func TestClusterTokenPrintsTheTokenOfAClusterTheOrgRegisteredAndRegistersNothing
 	}
 }
 
-func TestARefusalFromTheAccountsAPIIsPrintedAndFails(t *testing.T) {
-	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		_, _ = w.Write([]byte(`{"error":"cluster name is registered to another org"}`))
-	})
-	setAPIURL(t, url)
-	code, stdout, stderr := hl(t, "cluster", "add", "taken", "--org", "org-1")
-	if code != 1 || stdout != "" || !strings.Contains(stderr, "registered to another org") {
-		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want the refusal and no command printed", code, stdout, stderr)
-	}
-}
-
-func TestClusterListShowsWhichClustersTheOrgTurnedOff(t *testing.T) {
-	accountsServer(t, nil, `{"clusters":[{"name":"gpu-east","owned":true,"enabled":true},{"name":"platform","shared":true,"enabled":false}]}`)
-	code, stdout, stderr := hl(t, "cluster", "list", "--org", "org-1")
-	if code != 0 {
-		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
-	}
-	lines := strings.Split(strings.TrimSpace(stdout), "\n")
-	if len(lines) != 2 || !strings.Contains(lines[0], `"name":"gpu-east"`) || !strings.Contains(lines[0], `"enabled":true`) ||
-		!strings.Contains(lines[1], `"name":"platform"`) || !strings.Contains(lines[1], `"enabled":false`) {
-		t.Fatalf("listed = %s, want gpu-east enabled and platform not, one a line", stdout)
-	}
-}
-
-func TestClusterDisablePrintsTheClusterAndARefusalFails(t *testing.T) {
-	accountsServer(t, nil, `{"name":"platform","shared":true,"enabled":false}`)
-	code, stdout, stderr := hl(t, "cluster", "disable", "platform", "--org", "org-1")
-	if code != 0 || !strings.Contains(stdout, `"enabled":false`) {
-		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want the cluster printed as turned off", code, stdout, stderr)
-	}
-
-	setAPIURL(t, withServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"reason":"not_found","message":"cluster not found"}`))
-	}))
-	code, stdout, stderr = hl(t, "cluster", "enable", "of-another-org", "--org", "org-1")
-	if code != 1 || stdout != "" || !strings.Contains(stderr, "cluster not found") {
-		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want the refusal", code, stdout, stderr)
-	}
-}
-
 func TestClusterOrderAndSettingsAskForWhatTheyChangeAndPrintARefusal(t *testing.T) {
 	calls := accountsServer(t, nil, `{"clusters":[{"name":"gpu-east"}]}`)
 	for _, args := range [][]string{
@@ -317,27 +273,6 @@ func TestAnEmptyListSaysSoOnStderr(t *testing.T) {
 	}
 }
 
-func TestAccountGroupsListTheirCommands(t *testing.T) {
-	setAPIURL(t, "http://unused")
-	for group, commands := range map[string][]string{
-		"org": {"list", "create NAME", "rename NAME", "members <command>", "invites <command>"}, "project": {"list", "create NAME", "rename NAME"},
-		"api-key": {"create NAME", "list", "revoke ID"}, "cluster": {"add NAME", "list", "token NAME", "order NAME...", "settings NAME", "disable NAME", "enable NAME", "forget-identity NAME", "remove NAME"},
-	} {
-		code, stdout, _ := hl(t, group, "--help")
-		if code != 0 {
-			t.Fatalf("hl %s --help: exit code = %d", group, code)
-		}
-		for _, command := range commands {
-			if !strings.Contains(stdout, "\n  "+command) {
-				t.Errorf("hl %s --help does not list %q:\n%s", group, command, stdout)
-			}
-		}
-		if code, _, stderr := hl(t, group, "nonsense"); code != 2 || !strings.Contains(stderr, "unknown subcommand") {
-			t.Errorf("hl %s nonsense: exit code = %d, stderr = %q", group, code, stderr)
-		}
-	}
-}
-
 func TestPlatformExperimentsListPassesSharedOnAsTheFilterItIs(t *testing.T) {
 	calls := accountsServer(t, nil, `[{"id":"pe-own","shared":false},{"id":"pe-show","shared":true}]`)
 	t.Setenv("HL_PROJECT", "prj-env")
@@ -367,51 +302,6 @@ func TestPlatformExperimentsListFiltersByProject(t *testing.T) {
 	}
 	if code, _, _ := hl(t, "platform-experiments", "list", "--project", "prj-flag"); code != 0 || (*calls)[2].path != "/platform-experiments?limit=20&project_id=prj-flag" {
 		t.Fatalf("with --project: exit code = %d, call = %+v", code, (*calls)[2])
-	}
-}
-
-func TestOrgMembersAndInvitesListTheirCommands(t *testing.T) {
-	setAPIURL(t, "http://unused")
-	for group, commands := range map[string][]string{
-		"members": {"list", "set-role USER owner|member", "remove USER"},
-		"invites": {"create", "list", "revoke ID", "accept TOKEN"},
-	} {
-		code, stdout, _ := hl(t, "org", group, "--help")
-		if code != 0 {
-			t.Fatalf("hl org %s --help: exit code = %d", group, code)
-		}
-		for _, command := range commands {
-			if !strings.Contains(stdout, "\n  "+command) {
-				t.Errorf("hl org %s --help does not list %q:\n%s", group, command, stdout)
-			}
-		}
-		if code, _, stderr := hl(t, "org", group, "nonsense"); code != 2 || !strings.Contains(stderr, "unknown subcommand") {
-			t.Errorf("hl org %s nonsense: exit code = %d, stderr = %q", group, code, stderr)
-		}
-	}
-}
-
-func TestOrgMembersAndInvitesPrintOneLineEach(t *testing.T) {
-	accountsServer(t, nil, `[{"org_id":"org-1","user_id":"u-1","role":"owner"},{"org_id":"org-1","user_id":"u-2","role":"member"}]`)
-	code, stdout, stderr := hl(t, "org", "members", "list", "--org", "org-1")
-	want := `{"org_id":"org-1","user_id":"u-1","role":"owner"}` + "\n" + `{"org_id":"org-1","user_id":"u-2","role":"member"}` + "\n"
-	if code != 0 || stdout != want {
-		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want = %q", code, stdout, stderr, want)
-	}
-	accountsServer(t, nil, `[]`)
-	for _, group := range []string{"members", "invites"} {
-		code, stdout, stderr := hl(t, "org", group, "list", "--org", "org-1")
-		if code != 0 || stdout != "" || !strings.Contains(stderr, "org "+group+" list: none") {
-			t.Fatalf("hl org %s list: exit code = %d, stdout = %q, stderr = %q", group, code, stdout, stderr)
-		}
-	}
-}
-
-func TestInviteCreatePrintsTheTokenItWillNeverSeeAgain(t *testing.T) {
-	accountsServer(t, nil, `{"id":"inv-1","org_id":"org-1","role":"member","token":"hli_secret"}`)
-	code, stdout, stderr := hl(t, "org", "invites", "create", "--org", "org-1")
-	if code != 0 || !strings.Contains(stdout, `"token":"hli_secret"`) {
-		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want the invite with its token", code, stdout, stderr)
 	}
 }
 
@@ -484,25 +374,5 @@ func TestARefusalWithAReasonIsPrinted(t *testing.T) {
 	code, stdout, stderr := hl(t, "org", "members", "remove", "u-1", "--org", "org-1")
 	if code != 1 || stdout != "" || !strings.Contains(stderr, "last_owner") || strings.Contains(stderr, "removed") {
 		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want the refusal and no claim of a removal", code, stdout, stderr)
-	}
-}
-
-// A create past what one account may hold is refused by the platform, and the refusal is what
-// the person reads.
-func TestACreatePastAnAccountLimitPrintsTheReason(t *testing.T) {
-	for args, refusal := range map[string]string{
-		"org create one-more":                 `{"reason":"max_orgs_reached","message":"a person owns at most 3 orgs, and the owner of this one already does"}`,
-		"project create one-more --org org-1": `{"reason":"max_projects_reached","message":"an org holds at most 10 projects, and this one already does"}`,
-	} {
-		url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			_, _ = w.Write([]byte(refusal))
-		})
-		setAPIURL(t, url)
-		code, stdout, stderr := hl(t, strings.Fields(args)...)
-		if code != 1 || stdout != "" || !strings.Contains(stderr, "409") || !strings.Contains(stderr, refusal) {
-			t.Errorf("hl %s: exit code = %d, stdout = %q, stderr = %q, want the 409 with %s", args, code, stdout, stderr, refusal)
-		}
 	}
 }

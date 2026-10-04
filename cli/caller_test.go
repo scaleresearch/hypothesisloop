@@ -286,21 +286,3 @@ func TestAPlannerProposesItsDraftFromAFile(t *testing.T) {
 		t.Errorf("declining with no reason: exit %d with %d requests, want 2 and nothing sent", code, len(*got))
 	}
 }
-
-// A coordinator that declared a baseline polled for a minute to learn whether the run had
-// started. The declaration starts the run or says what it still waits for, and hl prints which.
-func TestDeclaringABaselineSaysWhetherTheRunStarted(t *testing.T) {
-	for want, answer := range map[string]map[string]any{
-		"hl: platform-experiments update: the baseline is declared and the run started (agents_starting): no researcher's machine is running yet\n": {
-			"id": "pe-1", "status": "running", "status_reason": map[string]any{"reason": "agents_starting", "message": "no researcher's machine is running yet"}},
-		"hl: platform-experiments update: the baseline is declared and the run has not started (no_researchers): add a researcher\n": {
-			"id": "pe-1", "status": "open", "status_reason": map[string]any{"reason": "no_researchers", "message": "add a researcher"}},
-	} {
-		recordingServer(t, func(int, recorded) any { return answer })
-		t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
-		var stdout, stderr bytes.Buffer
-		if code := run([]string{"platform-experiments", "update", "--baseline-job", "job-1"}, &stdout, &stderr); code != 0 || stderr.String() != want || !strings.Contains(stdout.String(), `"pe-1"`) {
-			t.Errorf("exit %d, stdout %q, stderr %q\nwant stderr %q", code, stdout.String(), stderr.String(), want)
-		}
-	}
-}

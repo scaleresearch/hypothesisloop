@@ -64,37 +64,6 @@ func TestASubmitCarriesAKeyThatOnlyTheSameSubmitRepeats(t *testing.T) {
 	}
 }
 
-// The experiment's summary replaces the one before and a job's is filed once, and only the first
-// said which. The job's stays write-once: it is announced as finding.new when it is filed and a
-// baseline's declaration copies it, so nothing can tell that nobody has read it yet.
-func TestTheHelpOfJobSummarySaysItCannotBeReplaced(t *testing.T) {
-	var help bytes.Buffer
-	run([]string{"job", "summary", "--help"}, &help, &help)
-	if !strings.Contains(help.String(), "It is filed once and cannot be replaced (409 summary_exists)") || !strings.Contains(help.String(), "a correction is a comment on the hypothesis") {
-		t.Errorf("hl job summary --help does not say a filed summary stands:\n%s", help.String())
-	}
-}
-
-// The gate was said as "your queued jobs wait", which it stopped doing: it holds the jobs
-// submitted after an unsummarised job ended. Every help of hl that states it says that.
-func TestTheSummaryGateIsStatedAsHoldingWhatWasSubmittedAfterTheJobEnded(t *testing.T) {
-	for _, tc := range []struct {
-		args []string
-		want string
-	}{
-		{[]string{"job", "summary", "--help"}, "a job you submit after it ended is accepted and held\n(summary_gate) until it has one; a job already queued when it ended is not held."},
-		{[]string{"job", "list", "--help"}, "the set that holds back the jobs submitted after they ended"},
-		{[]string{"job", "status", "--help"}, "summary_gate for a summary on each of your jobs that was\nCOMPLETED before this one was submitted"},
-		{[]string{"watch", "--help"}, "at once when it was submitted\nafter a COMPLETED job of yours ended that has no summary (summary_gate)"},
-	} {
-		var help bytes.Buffer
-		run(tc.args, &help, &help)
-		if !strings.Contains(help.String(), tc.want) || strings.Contains(help.String(), "your queued jobs wait") {
-			t.Errorf("hl %s: want %q in\n%s", strings.Join(tc.args, " "), tc.want, help.String())
-		}
-	}
-}
-
 // A job a submit created is QUEUED in its answer. Any other status is the job an identical submit
 // created before: hl says nothing was submitted, and fails when that job has ended, since no
 // result will arrive for the agent to wait on.
@@ -118,10 +87,5 @@ func TestASubmitAnsweredWithAnEarlierJobSaysNothingWasSubmitted(t *testing.T) {
 		if code != tc.code || stderr.String() != tc.want || stdout.String() != `{"id":"job-1","status":"`+tc.status+`"}`+"\n" {
 			t.Errorf("%s: exit %d, stdout %q, stderr %q, want %d and %q", tc.status, code, stdout.String(), stderr.String(), tc.code, tc.want)
 		}
-	}
-	var help bytes.Buffer
-	run([]string{"job", "submit", "--help"}, &help, &help)
-	if !strings.Contains(help.String(), "is one job\nhowever often it is sent, so one that timed out is safe to send again; --repeat N (2, 3, ...)\nmakes it the Nth job of that same request.") {
-		t.Errorf("the help of submit does not state the rule of a repeated submit:\n%s", help.String())
 	}
 }

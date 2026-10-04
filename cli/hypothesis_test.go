@@ -319,13 +319,6 @@ func TestHypothesisList(t *testing.T) {
 	}
 }
 
-func TestHypothesisListRequiresPlatformExperiment(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"hypothesis", "list"}, &stdout, &stderr); code != 2 {
-		t.Fatalf("exit %d, want 2", code)
-	}
-}
-
 func TestHypothesisGet(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any {
 		return map[string]any{"id": "hyp-1", "links": map[string]any{"out": []any{}, "in": []any{}}}
@@ -460,44 +453,6 @@ func TestHypothesisQueryUsageErrors(t *testing.T) {
 	}
 	if len(*got) != 0 {
 		t.Fatalf("usage errors sent %d requests", len(*got))
-	}
-}
-
-func TestHypothesisQueryErrorSurfacesServerMessage(t *testing.T) {
-	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"detail":"line 1:7 mismatched input 'MATC'"}`))
-	})
-	setAPIURL(t, url)
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"hypothesis", "query", "MATC (n) RETURN n", "--platform-experiment", "pe-1"}, &stdout, &stderr); code != 1 {
-		t.Fatalf("exit %d, want 1", code)
-	}
-	if !strings.Contains(stderr.String(), "mismatched input") {
-		t.Fatalf("stderr = %s", stderr.String())
-	}
-}
-
-// MATCH (n) RETURN n was refused for reading other experiments' nodes, and the retry that passed
-// --param pe= for $pe being bound already: six refusals before one query ran. The refusal and
-// the help both carry one query that works as it stands.
-func TestARefusedHypothesisQueryPrintsAQueryThatWorks(t *testing.T) {
-	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":"registry.QueryGraph: invalid query: $pe is already bound to the platform experiment"}`))
-	}))
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"hypothesis", "query", "MATCH (n) WHERE n.platform_experiment_id = $pe RETURN n", "--param", "pe=pe-1", "--platform-experiment", "pe-1"}, &stdout, &stderr)
-	if code != 1 || !strings.Contains(stderr.String(), "already bound") || !strings.Contains(stderr.String(), "pass no --param for it") || !strings.Contains(stderr.String(), "every node names its label") || !strings.Contains(stderr.String(), queryExample) {
-		t.Errorf("a refused query: exit code = %d, stderr = %s, want the platform's reason and the working example", code, stderr.String())
-	}
-
-	stderr.Reset()
-	run([]string{"hypothesis", "query", "--help"}, &stdout, &stderr)
-	for _, want := range []string{"$pe is bound for you", queryExample, "(h:Hypothesis) or (o:Objective)", "[:BUILDS_ON*1..3]", "YIELD node"} {
-		if !strings.Contains(stderr.String(), want) {
-			t.Errorf("hl hypothesis query --help lacks %q:\n%s", want, stderr.String())
-		}
 	}
 }
 

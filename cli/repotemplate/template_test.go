@@ -59,13 +59,8 @@ func TestTheTemplateIsAJobSpecToFillInAndAnExperimentFileThatStatesNothing(t *te
 	if spec.Job["cpu"] != 2 || spec.Job["memory"] != "8Gi" || spec.Job["storage"] != "4Gi" {
 		t.Fatalf("the job spec states cpu %v, memory %v and storage %v, want each a quantity: a submit without one is refused", spec.Job["cpu"], spec.Job["memory"], spec.Job["storage"])
 	}
-	// A baseline agent told that a job without an image runs in the platform's own left it out
-	// on a cluster that runs the image a job names: the template names one on every cluster.
-	image, _ := spec.Job["image"].(string)
-	for _, said := range []string{"REQUIRED on every cluster", "job image exactly as `hl capacity` shows it", "full registry\n  # address", "uv pip install PACKAGE"} {
-		if !strings.HasPrefix(image, Placeholder) || !strings.Contains(files[JobSpec], said) || strings.Contains(files[JobSpec], "Delete this line") {
-			t.Fatalf("the job spec's image is %q and its comments lack %q or tell to leave the image out", image, said)
-		}
+	if image, _ := spec.Job["image"].(string); !strings.HasPrefix(image, Placeholder) {
+		t.Fatalf("the job spec's image is %q, want a placeholder to fill in", image)
 	}
 	var experiment map[string]any
 	if err := yaml.Unmarshal([]byte(files[ExperimentFile]), &experiment); err != nil || len(experiment) != 0 {

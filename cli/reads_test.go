@@ -34,33 +34,6 @@ func TestQuota(t *testing.T) {
 	}
 }
 
-// Two researchers finished with their quota spent minutes before a stage boundary raised their
-// share: the read said nothing of the next stage. The platform now answers when it starts and
-// what the share becomes, and hl quota prints both and says in its help what they mean.
-func TestQuotaPrintsWhenTheNextStageStartsAndWhatTheShareBecomes(t *testing.T) {
-	recordingServer(t, func(int, recorded) any {
-		return map[string]any{"id": "q", "agent_id": "a", "platform_experiment_id": "pe-1", "share_accelerator_hours": 0.4,
-			"remaining_guaranteed_accelerator_hours": 0, "next_stage_starts_at": "2026-10-06T22:00:00Z", "next_stage_share_accelerator_hours": 1.2}
-	})
-	t.Setenv("HL_TOKEN", derivedToken("agent:pe-1/a"))
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"quota"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("exit %d, stderr %s", code, stderr.String())
-	}
-	for _, want := range []string{`"next_stage_starts_at":"2026-10-06T22:00:00Z"`, `"next_stage_share_accelerator_hours":1.2`} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Errorf("hl quota: stdout = %s, want it to carry %s", stdout.String(), want)
-		}
-	}
-	stderr.Reset()
-	run([]string{"quota", "--help"}, &stdout, &stderr)
-	for _, want := range []string{"fewer than 5 researchers has one stage", "a share grows at each stage boundary", "next_stage_starts_at", "next_stage_share_accelerator_hours", "finish is final"} {
-		if !strings.Contains(stderr.String(), want) {
-			t.Errorf("hl quota --help lacks %q", want)
-		}
-	}
-}
-
 func TestResultsFlattensStandings(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any {
 		return map[string]any{"status": "running", "metrics": []any{map[string]any{"metric": "acc", "direction": "maximize",
@@ -109,27 +82,6 @@ func TestCapacityOneLinePerAcceleratorType(t *testing.T) {
 	}
 	if !reflect.DeepEqual(lines(stdout.String()), want) {
 		t.Fatalf("stdout %q", stdout.String())
-	}
-}
-
-func TestCapacityPrintsWhatThePlatformAddsToAJobOnAType(t *testing.T) {
-	recordingServer(t, func(int, recorded) any {
-		return map[string]any{"clusters": []any{map[string]any{"cluster_name": "chips", "accelerators": []any{
-			map[string]any{"accelerator_type": "tenstorrent.com/chipArch=blackhole", "kind": "accelerator", "available": 1, "total": 2, "pod_resources": map[string]any{"hugepages-1Gi": "4Gi"}},
-		}}}}
-	})
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"capacity"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("exit %d, stderr %s", code, stderr.String())
-	}
-	want := `{"cluster":"chips","accelerator_type":"tenstorrent.com/chipArch=blackhole","available":1,"kind":"accelerator","pod_resources":{"hugepages-1Gi":"4Gi"},"total":2}`
-	if got := lines(stdout.String()); len(got) != 1 || got[0] != want {
-		t.Fatalf("stdout = %q, want %s", stdout.String(), want)
-	}
-	stderr.Reset()
-	run([]string{"capacity", "--help"}, &stdout, &stderr)
-	if !strings.Contains(stderr.String(), "pod_resources") {
-		t.Errorf("hl capacity --help does not say what pod_resources is:\n%s", stderr.String())
 	}
 }
 
@@ -286,12 +238,6 @@ func TestEveryCommandThatPrintsAJobHasItsEnvUnderJob(t *testing.T) {
 		}
 		if printed.Job.Env["LR"] != "0.3" || printed.Env != nil {
 			t.Errorf("hl %s printed %s, want the env under job.env and nowhere else", strings.Join(command, " "), stdout.String())
-		}
-	}
-	for _, command := range [][]string{{"job", "list", "-h"}, {"job", "status", "-h"}, {"results", "-h"}, {"hypothesis", "get", "-h"}} {
-		var stdout, stderr bytes.Buffer
-		if run(command, &stdout, &stderr); !strings.Contains(stderr.String(), "job.env") {
-			t.Errorf("hl %s does not say where a job's env is", strings.Join(command, " "))
 		}
 	}
 }

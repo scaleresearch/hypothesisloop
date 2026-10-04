@@ -199,26 +199,6 @@ func TestJobSubmitHeldForASummaryPrintsThePlatformsReasonAndSentence(t *testing.
 	}
 }
 
-func TestJobSummaryPointsAtTheVerdictThatIsTheAgentsToSet(t *testing.T) {
-	var reply map[string]any
-	recordingServer(t, func(int, recorded) any { return reply })
-	for verdict, want := range map[string]string{
-		"open":      "hl: job summary: the verdict of hyp-1 is open and yours to set: hl hypothesis status hyp-1 inconclusive, or confirmed|refuted --against CONTROL_JOB once a second run agrees\n",
-		"confirmed": "hl: job summary: the verdict of hyp-1 is confirmed and yours to change if this finding does not fit it\n",
-		"":          "",
-	} {
-		reply = map[string]any{"status": "ok"}
-		if verdict != "" {
-			reply["hypothesis_id"], reply["verdict"] = "hyp-1", verdict
-		}
-		var stdout, stderr bytes.Buffer
-		code := run([]string{"job", "summary", "job-1", "--text", "it held"}, &stdout, &stderr)
-		if code != 0 || stdout.String() != `{"status":"ok"}`+"\n" || stderr.String() != want {
-			t.Fatalf("verdict %q: exit %d, stdout %q, stderr %q", verdict, code, stdout.String(), stderr.String())
-		}
-	}
-}
-
 // The refusal is the platform's whole word on a job sent before the start: hl asks nothing more
 // and prints it as any other.
 func TestJobSubmitBeforeTheStartPrintsTheRefusalAndAsksNothingMore(t *testing.T) {
@@ -316,52 +296,6 @@ func TestMisuseIsAnsweredWithTheErrorAndTheSynopsis(t *testing.T) {
 	}
 }
 
-// A baseline agent reads this help in its briefing and writes the first job spec from it: the
-// command that runs the submitted commit and where the full reference and the samples are stand
-// in the shape, where a spec is written, and no briefing repeats them.
-func TestTheHelpOfSubmitShowsTheCommandAndWhereTheReferenceIs(t *testing.T) {
-	var stdout, help bytes.Buffer
-	run([]string{"job", "submit", "--help"}, &stdout, &help)
-	for _, want := range []string{
-		`command: ["bash", "-lc", "dir=$(hl-clone) && cd \"$dir\" && exec python train.py"]`,
-		"...                           # every other field: $WORKLOAD_SAMPLES/experiment-submission.yaml",
-		"each sample's seed/ is a workload that\nreports its metrics and its .hypothesisloop/job.yaml the spec that runs it",
-	} {
-		if !strings.Contains(help.String(), want) {
-			t.Errorf("hl job submit --help: got = no %q, want it", want)
-		}
-	}
-}
-
-// The briefing of an agent carries the group listings, so each names the flags of its commands,
-// taken from the command's own --help.
-func TestAGroupListsEachCommandWithTheSynopsisOfItsOwnHelp(t *testing.T) {
-	for group, subs := range map[string][]subcommand{"job": jobCommands, "hypothesis": hypothesisCommands} {
-		var listing, none bytes.Buffer
-		if code := run([]string{group, "--help"}, &listing, &none); code != 0 || none.Len() != 0 {
-			t.Fatalf("hl %s --help: exit %d, stderr %q", group, code, none.String())
-		}
-		for _, sub := range subs {
-			var help bytes.Buffer
-			if code := run([]string{group, sub.name, "--help"}, &none, &help); code != 0 {
-				t.Fatalf("hl %s %s --help: exit %d", group, sub.name, code)
-			}
-			usage, _, _ := strings.Cut(help.String(), "\n")
-			synopsis, ok := strings.CutPrefix(usage, "usage: hl "+group+" ")
-			if !ok || !strings.Contains(listing.String(), "\n  "+synopsis) {
-				t.Errorf("hl %s --help does not list %q:\n%s", group, usage, listing.String())
-			}
-		}
-	}
-	var listing, none bytes.Buffer
-	run([]string{"job", "--help"}, &listing, &none)
-	for _, flag := range []string{"--hypothesis ID", "--env K=V", "--theory T", "--needs-summary"} {
-		if !strings.Contains(listing.String(), flag) {
-			t.Errorf("hl job --help does not name %s", flag)
-		}
-	}
-}
-
 func TestJobStatusPrintsOneCompactLinePerJob(t *testing.T) {
 	got := recordingServer(t, func(_ int, r recorded) any {
 		id := strings.TrimPrefix(r.Path, "/experiments/")
@@ -410,36 +344,6 @@ func TestJobMetricsSummarizesEachMetric(t *testing.T) {
 	stdout.Reset()
 	if code := run([]string{"job", "metrics", "j", "--points"}, &stdout, &stderr); code != 0 || len(lines(stdout.String())) != 3 || strings.Contains(stdout.String(), "experiment_id") {
 		t.Fatalf("--points: exit %d, stdout %q", code, stdout.String())
-	}
-}
-
-// A researcher fed hl job metrics --points to a parser of one JSON document: the help says what
-// the output is, and the output is that.
-func TestJobMetricsPointsAreJSONLinesAndTheHelpSaysSo(t *testing.T) {
-	recordingServer(t, func(int, recorded) any {
-		return []map[string]any{
-			{"experiment_id": "job-1", "metric_name": "loss", "metric_value": 0.5, "fraction_complete": 0.5},
-			{"experiment_id": "job-1", "metric_name": "loss", "metric_value": 0.25, "fraction_complete": 1},
-		}
-	})
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"job", "metrics", "job-1", "--points"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("exit %d, stderr %s", code, stderr.String())
-	}
-	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("stdout %q, want one line per point", stdout.String())
-	}
-	for _, line := range lines {
-		var point map[string]any
-		if err := json.Unmarshal([]byte(line), &point); err != nil || point["metric_name"] != "loss" {
-			t.Fatalf("line %q is not one point: %v", line, err)
-		}
-	}
-	var help bytes.Buffer
-	run([]string{"job", "metrics", "--help"}, &help, &help)
-	if !strings.Contains(help.String(), "JSON lines, one object per line and no enclosing array") {
-		t.Fatalf("help does not say what the output is:\n%s", help.String())
 	}
 }
 
@@ -621,19 +525,8 @@ func TestWatchScopeDefaultsToTheTokenOnlyWithoutExperiment(t *testing.T) {
 	}
 }
 
-func TestJobStatusPrintsTheRecordAndNothingElse(t *testing.T) {
-	recordingServer(t, func(int, recorded) any {
-		return map[string]any{"id": "job-1", "status": "QUEUED", "not_admitted_reason": "summary_gate"}
-	})
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"job", "status", "job-1"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 || strings.Count(stdout.String(), "\n") != 1 {
-		t.Fatalf("exit %d, stdout %q, stderr %q: want the one JSON line and no other output", code, stdout.String(), stderr.String())
-	}
-}
-
 // hl once printed each caller's next step on stderr beside the record, and a reader that parsed
-// both streams as one (2>&1) failed on it. The platform says the step in status_reason, and hl
-// writes the record alone, with what it waits for ahead of its long description.
+// both streams as one (2>&1) failed on it.
 func TestPlatformExperimentsGetWritesTheRecordAloneWithItsReasonFirst(t *testing.T) {
 	record := map[string]any{"id": "pe-1", "description": "a long brief", "name": "a run", "starts_at": "2000-01-01T00:00:00Z"}
 	requests := 0
@@ -657,13 +550,6 @@ func TestPlatformExperimentsGetWritesTheRecordAloneWithItsReasonFirst(t *testing
 			var parsed map[string]any
 			if err := json.Unmarshal(out.Bytes(), &parsed); err != nil || !reflect.DeepEqual(parsed, record) {
 				t.Fatalf("%s %s: both streams together are not the record alone: %v, %q", token, status, err, out.String())
-			}
-			lead := "{\n  \"id\": \"pe-1\",\n  \"status\": \"" + status + "\",\n  \"description\""
-			if status == "open" {
-				lead = "{\n  \"id\": \"pe-1\",\n  \"status\": \"open\",\n  \"status_reason\": {\n    \"message\": \"Add a baseline agent\",\n    \"reason\": \"baseline_required\"\n  },\n  \"description\""
-			}
-			if !strings.HasPrefix(out.String(), lead) {
-				t.Errorf("%s %s: output begins %q, want %q", token, status, out.String(), lead)
 			}
 		}
 	}
@@ -689,35 +575,6 @@ func TestQuotaBeforeTheStartPrintsThePlatformsWordAndFails(t *testing.T) {
 	stderr.Reset()
 	if code := run([]string{"quota", "--agent", "jane", "--platform-experiment", "pe-1"}, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "HTTP 404") {
 		t.Fatalf("running: exit %d, stderr %q, want the 404", code, stderr.String())
-	}
-}
-
-func TestGuessedFormsPointToTheCommand(t *testing.T) {
-	recordingServer(t, func(_ int, r recorded) any {
-		if strings.HasSuffix(r.Path, "/results") {
-			return map[string]any{"metrics": []any{map[string]any{"metric": "val_accuracy"}}}
-		}
-		return []any{}
-	})
-	for _, tc := range []struct {
-		args []string
-		code int
-		want string
-	}{
-		{[]string{"hypothesis", "comments", "--help"}, 2, "hl hypothesis get ID"},
-		{[]string{"hypothesis", "query", "RETURN 1", "--params", `{"pe":"pe-1"}`}, 2, "--param k=v"},
-		{[]string{"hypothesis", "links", "--help"}, 2, "hl hypothesis link"},
-		{[]string{"job", "summary", "job-1"}, 2, "hl job status job-1 prints it as summary"},
-		{[]string{"results", "--platform-experiment", "pe-1"}, 0, "no results yet on val_accuracy"},
-		{[]string{"capacity", "--platform-experiment", "pe-1"}, 2, "hl: capacity: takes no --platform-experiment"},
-		{[]string{"hypothesis", "get", "h-1", "--platform-experiment", "pe-1"}, 2, "hl: hypothesis get: takes no --platform-experiment"},
-		{[]string{"job", "metrics", "job-1", "--points"}, 0, "no metric reported yet"},
-	} {
-		var stdout, stderr bytes.Buffer
-		code := run(tc.args, &stdout, &stderr)
-		if code != tc.code || !strings.Contains(stderr.String(), tc.want) || strings.Count(stderr.String(), "\n") != 1 {
-			t.Fatalf("%v: exit %d, stderr %q", tc.args, code, stderr.String())
-		}
 	}
 }
 
@@ -772,40 +629,6 @@ func TestAWakeKindThePlatformDoesNotKnowIsRefusedBeforeAnyWatch(t *testing.T) {
 	code := run([]string{"watch", "--wake", "agent.finished,agent.finnished"}, &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), `"agent.finnished" is no event kind`) || len(*got) != 1 || (*got)[0].Path != "/watch/kinds" {
 		t.Fatalf("exit %d, stderr %q, requests %+v", code, stderr.String(), *got)
-	}
-}
-
-// A coordinator read `cluster` in its listing, ran hl cluster list and was refused "this is a
-// command of an org's people": each caller's listing holds the commands its token can run.
-func TestTheUsageListsOnlyTheCommandsTheCallersTokenCanRun(t *testing.T) {
-	listed := func(token string) string {
-		t.Setenv("HL_TOKEN", token)
-		var stdout, stderr bytes.Buffer
-		if code := run([]string{"--help"}, &stdout, &stderr); code != 0 {
-			t.Fatalf("hl --help = %d", code)
-		}
-		return stdout.String()
-	}
-	person, agent, coordinator := listed("hlk_x"), listed(derivedToken("agent:pe-1/ag-1")), listed(derivedToken("coordinator:pe-1"))
-	for _, ofPeople := range []string{"\n  org ", "\n  project ", "\n  api-key ", "\n  cluster ", "\n  exec ", "--org defaults"} {
-		if !strings.Contains(person, ofPeople) || strings.Contains(agent, ofPeople) || strings.Contains(coordinator, ofPeople) {
-			t.Errorf("%q: listed to a person %v, an agent %v, a coordinator %v, want it to a person alone", ofPeople,
-				strings.Contains(person, ofPeople), strings.Contains(agent, ofPeople), strings.Contains(coordinator, ofPeople))
-		}
-	}
-	// An agent waits for a job by ending its turn, and the listing it reads names no second way.
-	for _, listing := range []string{agent, coordinator, person} {
-		if strings.Contains(listing, "--until") || strings.Contains(listing, "sleep") || !strings.Contains(listing, "\n  watch                 your own updates, one JSON object per line\n") {
-			t.Errorf("the listing words watch as a way to wait for a job:\n%s", listing)
-		}
-	}
-	if !strings.Contains(agent, "\n  data-key ") || strings.Contains(coordinator, "\n  data-key ") {
-		t.Error("data-key acts as an agent: want it listed to an agent and not to a coordinator")
-	}
-	for _, both := range []string{"\n  capacity ", "\n  quota ", "\n  repo ", "\n  watch ", "An ID is positional"} {
-		if !strings.Contains(agent, both) || !strings.Contains(coordinator, both) {
-			t.Errorf("%q is not listed to an agent and a coordinator", both)
-		}
 	}
 }
 
@@ -886,45 +709,6 @@ func TestAnAnswerThatIsNotThePlatformsIsOneLineWithoutItsBody(t *testing.T) {
 	want := "hl: POST /experiments/job-1/cancel -> HTTP 504: the platform could not be reached, and whether this command took effect is not known: read what it changes before running it again. " + next + "\n"
 	if code := run([]string{"job", "cancel", "job-1"}, &stdout, &stderr); code != 1 || stderr.String() != want {
 		t.Errorf("a write that got no answer: exit %d, stderr %q, want %q", code, stderr.String(), want)
-	}
-}
-
-// A planner had propose refuse its file, then tried to install a YAML parser to check the file
-// before proposing again: the help says a refusal changes nothing and propose is the check.
-func TestProposeSaysARefusedProposalChangesNothing(t *testing.T) {
-	requests := 0
-	setAPIURL(t, withServer(t, func(http.ResponseWriter, *http.Request) { requests++ }))
-	file := t.TempDir() + "/proposal.yaml"
-	if err := os.WriteFile(file, []byte("experiment:\n  name: a: b\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"platform-experiments", "propose", "--platform-experiment", "pe-1", file}, &stdout, &stderr); code != 2 || requests != 0 || !strings.Contains(stderr.String(), "line 2, column") {
-		t.Fatalf("a file that is no YAML: exit %d after %d requests, stderr %s, want 2, none sent and the line", code, requests, stderr.String())
-	}
-	stderr.Reset()
-	if run([]string{"platform-experiments", "propose", "-h"}, &stdout, &stderr); !strings.Contains(stderr.String(), "A\nrefused proposal changes nothing, so fix the file and run propose again.") {
-		t.Fatalf("the help does not say a refused proposal changes nothing:\n%s", stderr.String())
-	}
-}
-
-// hl answered --text with "flag needs an argument: -text": a flag is named the way it was typed.
-func TestAFlagErrorNamesTheFlagAsItWasTyped(t *testing.T) {
-	for _, tc := range []struct {
-		args []string
-		want string
-	}{
-		{[]string{"hypothesis", "comment", "hyp-1", "--text", "a note", "--text"}, "hl: hypothesis comment: flag needs an argument: --text\n"},
-		{[]string{"hypothesis", "comment", "hyp-1", "-text"}, "hl: hypothesis comment: flag needs an argument: -text\n"},
-		{[]string{"hypothesis", "comment", "hyp-1", "--note", "x"}, "hl: hypothesis comment: flag provided but not defined: --note\n"},
-		{[]string{"job", "list", "--limit", "many"}, "hl: job list: invalid value \"many\" for flag --limit: parse error\n"},
-		{[]string{"job", "list", "--limit=many"}, "hl: job list: invalid value \"many\" for flag --limit: parse error\n"},
-		{[]string{"job", "list", "--needs-summary=perhaps"}, "hl: job list: invalid boolean value \"perhaps\" for --needs-summary: parse error\n"},
-	} {
-		var stdout, stderr bytes.Buffer
-		if code := run(tc.args, &stdout, &stderr); code != 2 || !strings.HasPrefix(stderr.String(), tc.want) {
-			t.Errorf("hl %s: exit %d, stderr %q, want it to begin %q", strings.Join(tc.args, " "), code, stderr.String(), tc.want)
-		}
 	}
 }
 

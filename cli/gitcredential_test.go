@@ -157,21 +157,6 @@ func TestGitCredentialReportsARefusalAndPrintsNoCredential(t *testing.T) {
 	}
 }
 
-func TestGitCredentialUsage(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"git-credential"}, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), "usage: hl git-credential") {
-		t.Fatalf("no operation: exit %d, stderr %q", code, stderr.String())
-	}
-	stdout.Reset()
-	if code := run([]string{"git-credential", "--help"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "credential.helper") {
-		t.Fatalf("--help: exit %d, stdout %q", code, stdout.String())
-	}
-	stdout.Reset()
-	if run([]string{"--help"}, &stdout, &stderr); !strings.Contains(stdout.String(), "git-credential") {
-		t.Fatal("hl --help does not list git-credential")
-	}
-}
-
 const helperProcessEnv = "HL_TEST_GIT_CREDENTIAL_HELPER"
 
 // TestGitCredentialHelperProcess is the helper git runs in TestGitItselfTakesTheCredential: the

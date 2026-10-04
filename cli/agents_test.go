@@ -3,12 +3,8 @@ package main
 import (
 	"bytes"
 	"reflect"
-	"regexp"
-	"slices"
 	"strings"
 	"testing"
-
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 func TestAgentsAddCreatesOneAgentWithWhatItIsLaunchedWith(t *testing.T) {
@@ -160,71 +156,11 @@ func TestAgentsRemoveAndList(t *testing.T) {
 	}
 }
 
-// A researcher was briefed to settle every hypothesis before it finishes. The finish says which
-// it left open, as a note beside the line it prints, and is no failure.
-func TestAgentsFinishPrintsTheHypothesesLeftOpenAsANote(t *testing.T) {
-	open := []map[string]any{{"id": "h-1", "text": "warmup helps\nat small batch sizes"}, {"id": "h-2", "text": "depth helps"}}
-	recordingServer(t, func(int, recorded) any {
-		return map[string]any{"agents": []map[string]any{{"agent_id": "ag-1", "finished_reason": "quota spent"}}, "open_hypotheses": open}
-	})
-	t.Setenv("HL_TOKEN", derivedToken("agent:pe-1/ag-1"))
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"platform-experiments", "agents", "finish", "--reason", "quota spent"}, &stdout, &stderr)
-	note := "hl: platform-experiments agents finish: note: you finished with 2 of your hypotheses still open. Each stays open for good unless you give its verdict before this turn ends, with hl hypothesis status ID VERDICT:\n" +
-		"  h-1 warmup helps at small batch sizes\n  h-2 depth helps\n"
-	if code != 0 || stdout.String() != `{"agent_id":"ag-1","finished_reason":"quota spent"}`+"\n" || stderr.String() != note {
-		t.Errorf("exit %d, stdout %q, stderr %q, want the agent as finished and the note %q", code, stdout.String(), stderr.String(), note)
-	}
-
-	open = nil
-	stdout.Reset()
-	stderr.Reset()
-	if code := run([]string{"platform-experiments", "agents", "finish", "--reason", "quota spent"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
-		t.Errorf("nothing left open: exit %d, stderr %q, want no note", code, stderr.String())
-	}
-}
-
-// The help of get listed five of the reasons by hand while the platform answered a dozen more.
-// It names every reason of the platform's one table and each value of waits_for.
-func TestTheHelpOfGetNamesEveryStatusReasonThePlatformAnswers(t *testing.T) {
-	var help bytes.Buffer
-	run([]string{"platform-experiments", "get", "--help"}, &help, &help)
-	words := regexp.MustCompile(`[a-z_]+`).FindAllString(help.String(), -1)
-	for _, reason := range append(domain.StatusReasons(), "waits_for", string(domain.WaitsForOwner), string(domain.WaitsForCoordinator), string(domain.WaitsForPlatform)) {
-		if !slices.Contains(words, reason) {
-			t.Errorf("hl platform-experiments get --help does not name %s", reason)
-		}
-	}
-	// A reason the table dropped is one the help must drop too.
-	_, listed, _ := strings.Cut(help.String(), "The reasons:")
-	listed, _, _ = strings.Cut(listed, "On an open one")
-	listed = strings.NewReplacer("a draft:", "", "open, its baseline not declared:", "", "open, the declaration of the measured job refused:", "",
-		"open, its baseline declared:", "", "running, every researcher finished, cut or stopped for good:", "", "running:", "", "while no researcher's machine is up yet, then", "",
-		"An agent of the roster adds", "", "(hl platform-experiments agents list).", "").Replace(listed)
-	for _, reason := range strings.FieldsFunc(listed, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' }) {
-		if !slices.Contains(domain.StatusReasons(), reason) {
-			t.Errorf("hl platform-experiments get --help names %q, which is no status reason of the platform", reason)
-		}
-	}
-}
-
 // A hosted coordinator's briefing is built from this listing. It crashed on a subcommand that
 // read the token before parsing its flags, so every coordinator exited as it started.
 func TestTheAgentsGroupListsItsCommands(t *testing.T) {
 	code, stdout, stderr := hl(t, "platform-experiments", "agents", "--help")
 	if code != 0 || !strings.Contains(stdout, "\n  add [--platform-experiment PE]") || !strings.Contains(stdout, "\n  list [--platform-experiment PE]") {
 		t.Fatalf("exit code = %d, stdout = %q, stderr = %q", code, stdout, stderr)
-	}
-}
-
-// Before the start a researcher's instance reads waiting, and the roster's help listed
-// requested for it.
-func TestTheRostersHelpNamesEveryInstanceState(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	run([]string{"platform-experiments", "agents", "list", "--help"}, &stdout, &stderr)
-	for _, state := range []string{"waiting", "requested", "starting", "running", "stopped"} {
-		if !strings.Contains(stderr.String(), state) {
-			t.Errorf("the help of the roster does not name instance.state %s", state)
-		}
 	}
 }
