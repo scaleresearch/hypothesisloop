@@ -96,17 +96,18 @@ def _log_message(message, agent: str) -> None:
         )
 
 
-def _updates_hook(setup: core.RunSetup, watch_env: dict[str, str]):
-    """A PostToolUse hook that hands the agent the updates that arrived while it worked."""
-    draining = asyncio.Lock()
+def _updates_hook(setup: core.RunSetup, watch_env: dict[str, str], handing: asyncio.Lock):
+    """A PostToolUse hook that hands the agent the updates that arrived while it worked. Every
+    handover holds handing, so that each batch is handed over once."""
     agent_id = setup.cfg.agent_id
 
     async def hook(hook_input, tool_use_id, context) -> dict:
         # One drain per step: parallel tool calls share it, and a subagent's calls leave the
-        # updates for the agent itself.
-        if draining.locked() or hook_input.get("agent_id"):
+        # updates for the agent itself. One that finds a handover under way leaves its batch to
+        # the next step.
+        if handing.locked() or hook_input.get("agent_id"):
             return {}
-        async with draining:
+        async with handing:
             env = updates.taking(watch_env, "draining")
             events = await updates.drain(env)
             told = await _told(setup, events)
@@ -582,7 +583,7 @@ async def _interrupt_on_stop(client, setup: core.RunSetup, stopped) -> None:
         log.warning("could not interrupt the turn (%s): it runs to its own end", e)
 
 
-async def _last_turn(client, setup: core.RunSetup, watch_env: dict[str, str]) -> None:
+async def _last_turn(client, setup: core.RunSetup, watch_env: dict[str, str], handing: asyncio.Lock) -> None:
     """The shutdown turn, opened with whatever finished since the last delivery. An agent whose
     own action ended its run gets none."""
     prompt = _shutdown_prompt(setup)
@@ -591,12 +592,13 @@ async def _last_turn(client, setup: core.RunSetup, watch_env: dict[str, str]) ->
         return
     log.info("stopping: one last turn to file what is owed")
     agent = setup.cfg.agent_id
-    env = updates.taking(watch_env, "closing")
-    events = await updates.drain(env)
-    for line in activity.event_lines(events, agent):
-        print(line, flush=True)
-    await client.query(prompt + ("\n\n" + updates.message(events, agent) if events else ""))
-    updates.delivered(env)
+    async with handing:
+        env = updates.taking(watch_env, "closing")
+        events = await updates.drain(env)
+        for line in activity.event_lines(events, agent):
+            print(line, flush=True)
+        await client.query(prompt + ("\n\n" + updates.message(events, agent) if events else ""))
+        updates.delivered(env)
     limit = _shutdown_turn_s(setup)
     try:
         async with asyncio.timeout(limit):
@@ -803,6 +805,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     """
     cfg = setup.cfg
     watch_env = updates.watch_env(cfg.api_url, cfg.token, setup.statedir)
+    handing = asyncio.Lock()
     options = ClaudeAgentOptions(
         system_prompt=setup.system_prompt + _FILE_TOOLS_NOTE,
         model=model,
@@ -829,7 +832,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
         disallowed_tools=DISALLOWED_TOOLS,
         env={**CLI_ENV, **core.git_identity(cfg)},
         hooks={"PreToolUse": [HookMatcher(matcher="Bash", hooks=[_wait_hook])],
-               "PostToolUse": [HookMatcher(hooks=[_updates_hook(setup, watch_env)]), _UNDELIVERED_MATCHER],
+               "PostToolUse": [HookMatcher(hooks=[_updates_hook(setup, watch_env, handing)]), _UNDELIVERED_MATCHER],
                "PostToolUseFailure": [_UNDELIVERED_MATCHER]},
     )
 
@@ -847,7 +850,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             return False
         log.info("stopping: %s", lost or "received signal")
         if not core.lost_platform(lost):
-            await _last_turn(client, setup, watch_env)
+            await _last_turn(client, setup, watch_env, handing)
             await _store_session(setup)
         return True
 
@@ -965,7 +968,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             # read first: one starts when a subagent ends, and on a resume to say which stopped.
             # The batch the wait took is then read again, as its cursor moves only once handed over.
             own = asyncio.ensure_future(_own_turn(client, setup, background))
-            events, told, taken = await _next_told(setup, watch_env, lambda: stopped() or own.done(), idle_s)
+            events, told, taken = await _next_told(setup, watch_env, lambda: stopped() or own.done(), idle_s, handing)
             came = own.done()
             own.cancel()
             await asyncio.gather(own, return_exceptions=True)
@@ -977,11 +980,16 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             if await over():
                 return None, False
             if told:
-                for line in activity.event_lines(events, cfg.agent_id):
-                    print(line, flush=True)
-                _forget_job_reads()
-                await client.query(told)
-                updates.delivered(taken)
+                async with handing:
+                    # A drain since the batch was taken belongs to a turn under way, which is
+                    # read next, and handed the batch over or reads it again.
+                    if updates.superseded(taken):
+                        continue
+                    for line in activity.event_lines(events, cfg.agent_id):
+                        print(line, flush=True)
+                    _forget_job_reads()
+                    await client.query(told)
+                    updates.delivered(taken)
                 idle_s, told_nothing_in_flight = updates.IDLE_NUDGE_S, False
                 continue
             log.info("no platform updates for %ds, nudging", idle_s)
@@ -990,8 +998,8 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             idle_s = min(idle_s * 2, updates.IDLE_NUDGE_MAX_S)
 
 
-async def _next_told(setup: core.RunSetup, watch_env: dict[str, str], ended,
-                     idle_s: float) -> tuple[list[dict], str, dict[str, str]]:
+async def _next_told(setup: core.RunSetup, watch_env: dict[str, str], ended, idle_s: float,
+                     handing: asyncio.Lock) -> tuple[list[dict], str, dict[str, str]]:
     """The next batch of updates, what the agent is told of it, "" once ended(), and the env that
     took it, for updates.delivered. A batch that tells nothing held only a revision answered
     since: it is passed and the wait goes on."""
@@ -1001,7 +1009,8 @@ async def _next_told(setup: core.RunSetup, watch_env: dict[str, str], ended,
         told = await _told(setup, events) if events and not ended() else ""
         if told or not events or ended():
             return events, told, taken
-        updates.delivered(taken)
+        async with handing:
+            updates.delivered(taken)
 
 
 def _note_background(message, background: set[str]) -> None:

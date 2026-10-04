@@ -85,6 +85,18 @@ def watch_env(api_url: str, token: str, statedir: str) -> dict[str, str]:
 
 
 _DELIVERED_TO = "HL_STATE_DIR_DELIVERED"
+_TAKEN_AT = "HL_STATE_TAKEN_AT"
+
+
+def _cursors(state: str) -> str:
+    if not os.path.isdir(state):
+        return "{}"
+    found = {}
+    for name in sorted(os.listdir(state)):
+        if name.endswith(".json"):
+            with open(os.path.join(state, name)) as f:
+                found[name] = f.read()
+    return json.dumps(found)
 
 
 def taking(env: dict[str, str], reader: str) -> dict[str, str]:
@@ -98,15 +110,25 @@ def taking(env: dict[str, str], reader: str) -> dict[str, str]:
         shutil.copytree(state, copy)
     else:
         os.makedirs(copy)
-    return {**env, "HL_STATE_DIR": copy, _DELIVERED_TO: state}
+    return {**env, "HL_STATE_DIR": copy, _DELIVERED_TO: state, _TAKEN_AT: _cursors(state)}
 
 
-def delivered(env: dict[str, str]) -> None:
-    """Moves the cursor that the watches with env, from taking(), advanced into place."""
+def superseded(env: dict[str, str]) -> bool:
+    """Whether another reader delivered since env was taken: what env read was handed over
+    by that reader, or is read again from where it left the cursor."""
+    return _cursors(env[_DELIVERED_TO]) != env[_TAKEN_AT]
+
+
+def delivered(env: dict[str, str]) -> bool:
+    """Moves the cursor that the watches with env, from taking(), advanced into place, unless
+    superseded: a cursor never moves back. Whether it moved."""
+    if superseded(env):
+        return False
     os.makedirs(env[_DELIVERED_TO], exist_ok=True)
     for name in os.listdir(env["HL_STATE_DIR"]):
         if name.endswith(".json"):
             os.replace(os.path.join(env["HL_STATE_DIR"], name), os.path.join(env[_DELIVERED_TO], name))
+    return True
 
 
 def _agent(env: dict[str, str]) -> str:

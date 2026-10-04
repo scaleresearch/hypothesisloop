@@ -305,6 +305,25 @@ class DrainTest(unittest.IsolatedAsyncioTestCase):
         with open(os.path.join(taken["HL_STATE_DIR"], "watch-pe-1-agent-a.json")) as f:
             self.assertEqual(f.read().strip(), "2", "a read starts from the cursor delivered")
 
+    # A turn the CLI starts by itself can drain while the wait holds a batch it took before: the
+    # batch is the drain's to hand over, and the wait's cursor, now behind, never moves back.
+    async def test_a_cursor_never_moves_back_over_a_batch_another_reader_delivered(self):
+        command, _ = fake_hl(f"echo \"$RUNS\" > \"$HL_STATE_DIR/watch-pe-1-agent-a.json\"\necho '{COMPLETED}'\n")
+        state = os.path.join(tempfile.mkdtemp(), ".hl-state")
+        env = {**ENV, "HL_STATE_DIR": state}
+
+        waiting = updates.taking(env, "waiting")
+        await updates.drain(waiting, command=command)
+        draining = updates.taking(env, "draining")
+        await updates.drain(draining, command=command)
+        await updates.drain(draining, command=command)
+        self.assertFalse(updates.superseded(waiting))
+        self.assertTrue(updates.delivered(draining))
+        self.assertTrue(updates.superseded(waiting))
+        self.assertFalse(updates.delivered(waiting))
+        with open(os.path.join(state, "watch-pe-1-agent-a.json")) as f:
+            self.assertEqual(f.read().strip(), "3")
+
 
 class HookTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -331,7 +350,8 @@ class HookTest(unittest.IsolatedAsyncioTestCase):
         self.setup = SimpleNamespace(cfg=self.cfg, client=SimpleNamespace(get_platform_experiment=lambda _id: self.draft),
                                      workdir=tempfile.mkdtemp())
         self.cfg.platform_experiment_id = "pe-1"
-        self.hook = run._updates_hook(self.setup, {"HL_STATE_DIR": os.path.join(tempfile.mkdtemp(), ".hl-state")})
+        self.handing = asyncio.Lock()
+        self.hook = run._updates_hook(self.setup, {"HL_STATE_DIR": os.path.join(tempfile.mkdtemp(), ".hl-state")}, self.handing)
 
     async def call(self, **hook_input):
         from contextlib import redirect_stdout
@@ -364,6 +384,12 @@ class HookTest(unittest.IsolatedAsyncioTestCase):
         outputs = await asyncio.gather(self.call(), self.call(), self.call())
         self.assertEqual(self.drains, 1)
         self.assertEqual([bool(o) for o in outputs], [True, False, False])
+
+    async def test_a_step_during_another_handover_leaves_the_updates_waiting(self):
+        self.waiting = [{"kind": "comment.new", "subject": "hyp-1", "value": "human"}]
+        async with self.handing:
+            self.assertEqual(await self.call(), {})
+        self.assertEqual(self.drains, 0)
 
     async def test_a_subagents_tool_call_leaves_the_updates_waiting(self):
         self.waiting = [{"kind": "comment.new", "subject": "hyp-1", "value": "human"}]
@@ -794,6 +820,69 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(read_turns), 3, "the opening's turn, the CLI's own and the last")
         self.assertEqual(sent[1:], [run._shutdown_prompt(setup) + "\n\nPlatform updates:\ncomment.new hyp-1 agent by agent-b"])
         self.assertEqual([call.args[0]["HL_STATE_DIR"].rsplit(".", 1)[1] for call in delivered.call_args_list], ["closing"])
+
+    # A turn under way, whose start the wait missed by an instant, drained and handed over what
+    # the wait had taken meanwhile: the wait hands it over no second time and reads that turn.
+    async def test_a_batch_a_turn_under_way_handed_over_first_is_not_handed_over_again(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from claude_agent_sdk import ResultMessage
+
+        from hypothesisloop_agent.claude import run
+
+        stop_flag = [False]
+        sent, read_turns = [], []
+        result = ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1, session_id="s")
+
+        class Client:
+            def __init__(self, options):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def query(self, prompt):
+                sent.append(prompt)
+
+            async def receive_response(self):
+                read_turns.append(1)
+                yield result
+
+            async def receive_messages(self):
+                await asyncio.Event().wait()
+                yield
+
+        setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
+                                client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
+                                cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", role="competitor", api_url="http://x",
+                                                    token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
+        waits = []
+
+        async def next_batch(env, stopped, idle_s):
+            waits.append(env)
+            if len(waits) == 1:
+                state = os.path.join(setup.statedir, ".hl-state")
+                os.makedirs(state)
+                with open(os.path.join(state, "watch-pe-1-agent-a.json"), "w") as f:
+                    f.write("2")
+                return [{"kind": "comment.new", "subject": "hyp-1", "value": "agent", "agent_id": "agent-b"}]
+            stop_flag[0] = True
+            return []
+
+        with mock.patch.object(run, "ClaudeSDKClient", Client), \
+                mock.patch.object(updates, "next_batch", next_batch), \
+                mock.patch.object(updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \
+                mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
+                redirect_stdout(StringIO()):
+            await asyncio.wait_for(run._run_one_session(setup, "m", None, stop_flag), timeout=5)
+        self.assertEqual(len(read_turns), 3, "the opening's turn, the one under way and the last")
+        self.assertEqual(sent, ["Begin.", run._shutdown_prompt(setup)])
 
     async def test_a_coordinator_has_no_jobs_of_its_own_to_be_told_of(self):
         from types import SimpleNamespace
