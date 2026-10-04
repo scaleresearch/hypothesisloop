@@ -62,6 +62,37 @@ class PlannerOpeningTest(unittest.TestCase):
         self.assertIn("=== Not read, do it yourself\n`hl` exited 1: refused", opening)
         self.assertIn("the repository was not read", opening)
 
+    # Run 8's planner read /home/user/<repo>/... and ran `find /` before it used its working
+    # directory. The opening says that directory's absolute path first, and the model CLI starts
+    # in it.
+    def test_the_opening_says_the_absolute_working_directory_the_cli_starts_in(self):
+        def fake(command, cwd=None):
+            raise RuntimeError(f"`{command[0]}` exited 1: refused")
+
+        with tempfile.TemporaryDirectory() as root:
+            os.makedirs(os.path.join(root, "workspace"))
+            here = os.getcwd()
+            os.chdir(root)
+            try:
+                with mock.patch.object(seed, "_run", fake):
+                    opening = seed.planner("workspace")
+            finally:
+                os.chdir(here)
+            workdir = os.path.join(os.path.realpath(root), "workspace")
+            self.assertTrue(opening.startswith(f"Your working directory is {workdir}, the root of the repository's clone"), opening[:200])
+
+            class Started(Exception):
+                pass
+
+            def options(**kwargs):
+                raise Started(kwargs["cwd"])
+
+            setup = SimpleNamespace(cfg=SimpleNamespace(**vars(planner()), api_url="http://api", token="t"),
+                                    system_prompt="", workdir=workdir, statedir=root)
+            with mock.patch.object(run, "ClaudeAgentOptions", options), self.assertRaises(Started) as started:
+                asyncio.run(run._run_one_session(setup, "model", None, [False]))
+            self.assertEqual(started.exception.args[0], workdir)
+
     # Only a session that starts fresh is opened with them: a resumed one has read them.
     def test_only_a_fresh_session_is_opened_with_its_roles_reads(self):
         pe = {"status": "draft", "status_reason": {"reason": "planning"}, "proposal": {"repo_map": "bench.py: the harness"}}

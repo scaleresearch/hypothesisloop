@@ -145,7 +145,7 @@ def prepare() -> RunSetup:
         cfg.run_as(signup.get("flavor"), signup.get("model"), signup.get("hyperparameters"), signup.get("role"))
         platform_experiment = client.get_platform_experiment(cfg.platform_experiment_id)
 
-    workdir = config.required("AGENT_WORKDIR", "the directory the agent clones into and works in")
+    workdir = os.path.abspath(config.required("AGENT_WORKDIR", "the directory the agent clones into and works in"))
     statedir = config.required("AGENT_STATE_DIR", "the directory the harness keeps its own state in, outside AGENT_WORKDIR")
     os.makedirs(workdir, exist_ok=True)
     os.makedirs(statedir, exist_ok=True)
@@ -157,7 +157,7 @@ def prepare() -> RunSetup:
         raise SystemExit(f"agent: platform experiment {cfg.platform_experiment_id} names no repository, and an agent works in its clone of one")
 
     commands = hl_commands(cfg)
-    system_prompt_text = system_prompt(cfg, client.fetch_rules(), commands, repository_url, os.path.abspath(workdir))
+    system_prompt_text = system_prompt(cfg, client.fetch_rules(), commands, repository_url, workdir)
     return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt_text, workdir=workdir, statedir=statedir)
 
 

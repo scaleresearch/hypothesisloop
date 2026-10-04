@@ -19,11 +19,15 @@ TREE_LINES = 300
 FILE_CHARS = 12_000
 _TIMEOUT_S = 120
 
+# Run 8's planner read /home/user/<repo>/... and ran `find /` before it used its working
+# directory: nothing said where that was.
 _OPENING = (
+    "Your working directory is {workdir}, the root of the repository's clone: every path below is "
+    "relative to it, and a file tool takes {workdir}/<path>. "
     "Read for you before this turn, as you would have read them yourself: the draft, the capacity, "
-    "and the repository, cloned into your working directory (its default branch, depth 1) unless "
-    "said below, with its file list, README and .hypothesisloop/. Start from them, and read again "
-    "only what a revision changes or a file not shown here.")
+    "and the repository, cloned into {workdir} (its default branch, depth 1) unless said below, "
+    "with its file list, README and .hypothesisloop/. Start from them, and read again only what a "
+    "revision changes or a file not shown here.")
 
 
 def _run(command: list[str], cwd: str | None = None) -> str:
@@ -59,6 +63,7 @@ def _readme(workdir: str, files: list[str]) -> str | None:
 
 def planner(workdir: str) -> str:
     """The opening reads of a planner whose session starts fresh, in workdir, as one prompt."""
+    workdir = os.path.abspath(workdir)
     sections, failed = [], []
     draft = ""
     for title, command in (("hl platform-experiments get", ["hl", "platform-experiments", "get"]),
@@ -97,4 +102,4 @@ def planner(workdir: str) -> str:
     if failed:
         log.warning("planner opening reads failed: %s", "; ".join(failed))
         sections.append(_section("Not read, do it yourself", "\n".join(failed)))
-    return "\n\n".join([_OPENING, *sections])
+    return "\n\n".join([_OPENING.format(workdir=workdir), *sections])

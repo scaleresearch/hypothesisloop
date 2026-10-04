@@ -24,7 +24,7 @@ Your assignment:
 Your first prompt carries `hl platform-experiments get` (`goal` is the sentence, `revisions`
 what the person asked to change since, `proposal` what you proposed, `planning_ends_at` your
 deadline), `hl capacity`, and {repository_url} cloned with its file list, README and
-`.hypothesisloop/`: your working directory is the clone's root. Where it says a read failed, make it yourself. When
+`.hypothesisloop/`: your working directory, {workdir}, is the clone's root. Where it says a read failed, make it yourself. When
 the goal names a branch, fetch and check it out. Read further only the files the goal turns
 on, to judge what is feasible and how big. A harness the repository holds for the goal is the
 experiment: name it and its metric keys as they are. Name each outside system the goal names
