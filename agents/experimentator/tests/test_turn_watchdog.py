@@ -290,6 +290,7 @@ class ContextOverflowTest(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(resume_id)
             self.assertIn("job exp-7 runs lr 3e-4", prompt)
             self.assertNotIn("a subagent's", prompt)
+            self.assertEqual(run._transcript_files("s-1"), ["projects/p/s-1.jsonl"], "a subagent's transcript is stored with no session")
             run._delete_retired_transcripts()
         self.assertEqual(os.listdir(os.path.join(home, "projects/p")), [])
 

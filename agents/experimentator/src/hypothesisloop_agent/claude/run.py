@@ -54,11 +54,17 @@ CLI_ENV = {"ENABLE_TOOL_SEARCH": "false",
            # agents polled their output files; the 10 min timeout keeps long commands in the
            # foreground. The briefings say every command starts in the working directory: the CLI
            # keeps a `cd` otherwise, and an agent that repeated one failed.
-           "BASH_DEFAULT_TIMEOUT_MS": "600000", "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1"}
+           "BASH_DEFAULT_TIMEOUT_MS": "600000", "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
+           # The CLI caches a subagent's context for 5 min, and the lead's too on an API key or in
+           # overage: a subagent whose `hl job wait` returns every 9 min would write its whole
+           # context again on each wake. Every call is cached for an hour.
+           "ENABLE_PROMPT_CACHING_1H": "1"}
 
 # Refused for a Bash call with run_in_background: work that outlasts a command goes to a subagent.
 BACKGROUND_COMMAND = ("Commands run in the foreground here. Work that should go on while you do something "
                       "else goes to a subagent started with run_in_background; its end starts your next turn.")
+# A subagent starts none, and the CLI refuses it a leading `sleep` too.
+SUBAGENT_BACKGROUND_COMMAND = "Commands run in the foreground here: wait for your jobs with `hl job wait ID`."
 
 # The CLI writes each message as one line, and the SDK ends the session on a line past its bound,
 # 1 MB by default: a run 12 researcher whose six subagents read papers lost its session to one.
@@ -178,7 +184,7 @@ def _repeated_read(command: str, now: float) -> str | None:
 async def _wait_hook(hook_input, tool_use_id, context) -> dict:
     command = hook_input["tool_input"].get("command", "")
     if hook_input["tool_input"].get("run_in_background"):
-        reason = BACKGROUND_COMMAND
+        reason = SUBAGENT_BACKGROUND_COMMAND if hook_input.get("agent_id") else BACKGROUND_COMMAND
     elif hook_input.get("agent_id"):
         # A subagent carries one idea to its jobs' results: waiting for them keeps nothing else
         # from the agent, which gets its updates meanwhile.
@@ -260,7 +266,8 @@ _COMPACTION_PROMPT = (
     "Produce a concise but complete handoff for the next instance of yourself: current platform "
     "experiment state, hypotheses and evidence, actions/results so far, important files or jobs, "
     "decisions and rejected paths, any message from the coordinator or the owner not yet acted on, "
-    "word for word, and the exact next useful steps. Do not do more research or "
+    "word for word, each subagent still at work, which stops with this session, with its hypothesis, "
+    "worktree, branch, jobs and how far it got, and the exact next useful steps. Do not do more research or "
     "use tools; output only the handoff."
 )
 
@@ -385,14 +392,17 @@ def _model_home() -> str:
 
 def _transcript_files(session_id: str | None) -> list[str]:
     """The model CLI's own record of the session, relative to its home: the transcript and
-    whatever it keeps in a directory of the session's name beside it."""
+    whatever it keeps in a directory of the session's name beside it, but its subagents'
+    transcripts. A resumed session stops every subagent, the lead's transcript holds what each
+    reported, and a run's worth of them would rotate the session, which stops those at work."""
     if not session_id:
         return []
     home = Path(_model_home())
     found = []
     for transcript in home.glob(f"projects/*/{session_id}.jsonl"):
         found.append(transcript)
-        found.extend(path for path in transcript.with_suffix("").rglob("*") if path.is_file())
+        kept = transcript.with_suffix("")
+        found.extend(path for path in kept.rglob("*") if path.is_file() and path.relative_to(kept).parts[0] != "subagents")
     return [str(path.relative_to(home)) for path in found]
 
 

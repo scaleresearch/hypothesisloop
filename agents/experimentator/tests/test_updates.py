@@ -435,6 +435,9 @@ class WaitTest(unittest.IsolatedAsyncioTestCase):
         told = (await run._wait_hook({"tool_name": "Bash", "tool_input": {"command": "make", "run_in_background": True}},
                                      "tool-1", {}))["hookSpecificOutput"]
         self.assertEqual((told["permissionDecision"], told["permissionDecisionReason"]), ("deny", run.BACKGROUND_COMMAND))
+        told = (await run._wait_hook({"tool_name": "Bash", "agent_id": "sub-1", "tool_input": {"command": "make", "run_in_background": True}},
+                                     "tool-1", {}))["hookSpecificOutput"]
+        self.assertEqual((told["permissionDecision"], told["permissionDecisionReason"]), ("deny", run.SUBAGENT_BACKGROUND_COMMAND))
         for command in ("hl job wait job-1", "sleep 90; hl job status job-1"):
             self.assertEqual(await run._wait_hook({"tool_name": "Bash", "agent_id": "sub-1", "tool_input": {"command": command}},
                                                   "tool-1", {}), {}, command)
