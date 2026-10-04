@@ -34,21 +34,23 @@ What it takes:
     code researchers vary. It is built from the file alone, with the network; a `RUN
     --mount=type=secret,id=git-credentials` reads the repository at a commit it pins, through
     `git -c credential.helper='store --file=/run/secrets/git-credentials'`, and nothing of it
-    stays in the image. A job clones its commit when it starts. `hl env build` takes minutes
-    and jobs wait for it; an update says once its jobs can run, often before its upload ends, or
-    that it failed.
-  - The harness: a harness that already measures these metrics runs unchanged. Otherwise the
-    smallest program that does: fixed seeds, pinned revisions, inputs fetched by the job,
-    metrics reported as it goes and at the end with `post_metric` of `metrics.py`. The control
-    and each reference run as the brief names them, as they ship, changed in nothing. Keep the
-    varied part apart from the measuring part and record both in `README.md`, with the
-    conventions you chose.
+    stays in the image. A job runs its commit, cloned when it starts, in that image on the
+    hardware its spec asks for; your own machine has none of that hardware, and you have sudo
+    on it. `hl env build` takes minutes and jobs wait for it; an update says once its jobs can
+    run, often before its upload ends, or that it failed.
+  - The harness: one that already measures these metrics as the brief defines them runs
+    unchanged. Otherwise the smallest program that does: fixed seeds, pinned revisions, inputs
+    fetched by the job, metrics reported as it goes and at the end with `post_metric` of
+    `metrics.py`. It measures against the source in its native form, never a convention of the
+    system measured; counts against a method all it adds (what its decoder or model ships with
+    it); scores on data the method neither fits nor tunes on; and checks
+    correctness against the source itself. The control and each reference run as the brief
+    names them, as they ship, changed in nothing. Keep the varied part apart from the measuring
+    part and record both in `README.md`, with the basis of each number.
   - The job spec: a command that finishes in minutes, and the `cpu`, `memory` and `storage` it
     uses. `cpu` is the cores the program keeps busy; the job reads them in
     $HYPOTHESISLOOP_CPUS, since `nproc` counts the whole machine.
-  - A job runs a commit in the image the Dockerfile builds, on the hardware its spec asks for.
-    Your own machine has none of that hardware, and you have sudo on it. A failed job has its
-    cause in `hl job status` and `hl job logs`.
+  - A failed job has its cause in `hl job status` and `hl job logs`.
   - The control's job, and a summary on it once COMPLETED: the configuration that ran, every
     metric's value, duration and cost (`hl job cost`).
   - Each reference the brief names, in a job of its own in the same environment, reporting its

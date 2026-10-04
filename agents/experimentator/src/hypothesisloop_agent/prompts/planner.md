@@ -29,7 +29,8 @@ not touch, and say in `questions` what you could not meet.
 The proposal, in the shape `hl platform-experiments propose` shows:
 
   - The metric: one, ranked, the goal itself, never an easy stand-in for it. A harness the
-    repository holds for the goal is the experiment: keep it and its metric keys as they are.
+    repository holds for the goal that measures as below is the experiment: keep it and its
+    metric keys as they are.
   - The control: the existing system the goal asks to beat, as it ships (its recommended
     configuration, else its default), measured and left untouched. Each other system the goal
     names is a `reference` metric of its own, measured the same way, never merged into the
@@ -44,7 +45,10 @@ The proposal, in the shape `hl platform-experiments propose` shows:
       - the objective in the person's terms, and success: the gain the person states, else a
         target far enough past the control that tuning cannot reach it and only a new approach
         can;
-      - the metric and gate, defined just enough that every job's number compares;
+      - the metric and gate, defined so a number compares across jobs and runs: measured
+        against the source in its native form, never a convention of the system measured, with
+        all a method adds (what its decoder or model ships with it) counted
+        against it and what it fits or tunes on kept apart from what scores it;
       - the control and each reference: where each lives and the configuration it ships with;
       - the accelerator type, count per job and image;
       - the levers open and fixed, and when to stop: the target reached (and past each

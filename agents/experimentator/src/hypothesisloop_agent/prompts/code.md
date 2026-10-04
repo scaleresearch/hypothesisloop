@@ -8,7 +8,8 @@ run `git clone {repository_url} .` in {workdir}, the directory every command sta
 ==== start_baseline
 Work on branch `hl/{platform_experiment_id}/baseline`; `hl job submit` pushes it. A run that
     `continues` another starts that branch from the other's `baseline_code_ref` and measures
-    the control with its harness as it is, so the numbers of both compare. Run
+    the control with its harness, changed only where it breaks the brief's definition of a
+    metric (say so in `README.md`), so the numbers of both compare. Run
     `hl repo init` in the clone before you write anything: it writes the experiment's files
     from what the platform holds. `hl repo check` says what is left.
 ==== start_researcher
