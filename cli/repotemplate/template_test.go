@@ -92,3 +92,19 @@ func TestTheTemplateIsAJobSpecToFillInAndAnExperimentFileThatStatesNothing(t *te
 		t.Error("the README does not name the other two files")
 	}
 }
+
+// Run 8's control job ran under bash -lc: the login shell's /etc/profile reset the PATH the
+// environment's Dockerfile set with ENV, and cargo was not found.
+func TestTheJobSpecRunsItsCommandInAShellThatKeepsTheImagesPath(t *testing.T) {
+	var spec struct {
+		Job struct {
+			Command []string `yaml:"command"`
+		} `yaml:"job"`
+	}
+	if err := yaml.Unmarshal([]byte(Files()[JobSpec]), &spec); err != nil {
+		t.Fatal(err)
+	}
+	if len(spec.Job.Command) != 3 || spec.Job.Command[0] != "bash" || spec.Job.Command[1] != "-c" {
+		t.Fatalf("the job spec's command is %q, want bash -c and a script", spec.Job.Command)
+	}
+}

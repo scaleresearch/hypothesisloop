@@ -34,7 +34,7 @@ job:
   # .hypothesisloop/Dockerfile.
   image: python
   # hl-clone checks out the commit the job was submitted from and prints its directory.
-  command: ["bash", "-lc", "dir=$(hl-clone) && cd \"$dir\" && exec python train.py"]
+  command: ["bash", "-c", "dir=$(hl-clone) && cd \"$dir\" && exec python train.py"]
   env:
     MY_APP_CONFIG: "whatever-your-training-code-needs"
   # secret_env: environment variables the job needs and nobody may read back, such as a token for

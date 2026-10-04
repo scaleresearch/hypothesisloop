@@ -204,7 +204,7 @@ class CatalogueImageJobTest(unittest.TestCase):
         spec = (demo / ".hypothesisloop/job.yaml").read_text()
         line = next(line for line in spec.splitlines() if line.strip().startswith("command:"))
         shell, flag, script = json.loads(line.split("command:", 1)[1])
-        self.assertEqual((shell, flag), ("bash", "-lc"))
+        self.assertEqual((shell, flag), ("bash", "-c"))
         clone, enter, run = script.split(" && ")
         self.assertEqual((clone, enter), ("dir=$(hl-clone)", 'cd "$dir"'))
         words = run.split()

@@ -80,7 +80,7 @@ of hl platform-experiments get); experiment_closed.
     hypothesis_id: hyp-456        # from 'hl hypothesis submit'
   job:
     image: python                 # a job_image name from 'hl capacity', or a full address, host first
-    command: ["bash", "-lc", "dir=$(hl-clone) && cd \"$dir\" && exec python train.py"]
+    command: ["bash", "-c", "dir=$(hl-clone) && cd \"$dir\" && exec python train.py"]
                                   # hl-clone checks out the commit you submit from and prints where
     accelerator_type: ...         # a job on CPU leaves these two out and holds its cpu, whole cores
     accelerator_count: 1

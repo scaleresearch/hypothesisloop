@@ -419,7 +419,7 @@ links: [{type: builds_on, to: root}]   # the objective, or ids of the hypotheses
 ```yaml
 job:
   image: python             # a job image by the name `hl capacity` shows, or a full registry address
-  command: ["bash", "-lc", "dir=$(hl-clone) && cd \"$dir\" && exec python train.py"]
+  command: ["bash", "-c", "dir=$(hl-clone) && cd \"$dir\" && exec python train.py"]
   accelerator_type: nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3   # copied from `hl capacity`
   accelerator_count: 1
   cpu: 2
