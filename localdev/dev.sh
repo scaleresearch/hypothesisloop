@@ -138,6 +138,7 @@ render_runtime_configs() {
   sed -e "s|^cluster_name: .*$|cluster_name: ${cloud_cluster}|" \
       -e "s|^api_url: .*$|api_url: ${public_api}|" \
       -e "s|^job_image: .*$|job_image: ${registry}/hypothesisloop-job:${tag}|" \
+      -e "s|^environments_repository: .*$|environments_repository: ${HL_ENVIRONMENTS_REPOSITORY}|" \
       -e "s|^  account_id: .*$|  account_id: \"$(lib_env_value VAST_ACCOUNT_ID)\"|" \
       runtime/cloud/settings/cloud-agent.vast.yaml > "${bin}/cloud-agent.yaml"
   # Which vendor runs hosted agents is this one section of the launcher's config and nothing
@@ -151,7 +152,7 @@ render_runtime_configs() {
       -e "s|^  name: example$|  name: ${sandbox_provider}|" \
       -e "s|^  settings: {}$|  settings: ${sandbox_settings}|" \
       runtime/cloud/settings/agent-launcher.yaml > "${bin}/agent-launcher.yaml"
-  for value in "cluster_name: ${cloud_cluster}" "api_url: ${public_api}" "job_image: ${registry}/hypothesisloop-job:${tag}" "account_id: \"$(lib_env_value VAST_ACCOUNT_ID)\""; do
+  for value in "cluster_name: ${cloud_cluster}" "api_url: ${public_api}" "job_image: ${registry}/hypothesisloop-job:${tag}" "environments_repository: ${HL_ENVIRONMENTS_REPOSITORY}" "account_id: \"$(lib_env_value VAST_ACCOUNT_ID)\""; do
     grep -qF -- "${value}" "${bin}/cloud-agent.yaml" || { echo "dev: runtime/cloud/settings/cloud-agent.vast.yaml changed shape, '${value}' was not rendered" >&2; exit 1; }
   done
   for value in "api_url: http://localhost:8081" "  name: ${sandbox_provider}" "  settings: ${sandbox_settings}"; do

@@ -64,6 +64,24 @@ if [[ -n "${HL_GITHUB_APP_ID}" ]]; then
   export HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY
 fi
 
+# Where local development's environments are built to, as infra/pulumi makes it from the same
+# keys of .env: the private repository <REGISTRY_REPOSITORY>-environments and its env-pusher and
+# env-puller service accounts. The control plane mints their tokens with this machine's
+# application default credentials (gcloud auth application-default login), whose account
+# REGISTRY_TOKEN_MINTERS names. With no REGISTRY_REPOSITORY the local control plane builds none.
+HL_ENVIRONMENTS_REPOSITORY=""
+if [[ -f "${LIB_AUTH_REPO}/.env" && -n "$(lib_env_value REGISTRY_REPOSITORY)" ]]; then
+  for lib_auth_key in GCP_PROJECT REGISTRY_LOCATION; do
+    if [[ -z "$(lib_env_value "${lib_auth_key}")" ]]; then
+      echo "auth: .env sets REGISTRY_REPOSITORY and not ${lib_auth_key} (.env.example says what it is)" >&2
+      return 1 2>/dev/null || exit 1
+    fi
+  done
+  unset lib_auth_key
+  HL_ENVIRONMENTS_PROJECT="$(lib_env_value GCP_PROJECT)"
+  HL_ENVIRONMENTS_REPOSITORY="$(lib_env_value REGISTRY_LOCATION)-docker.pkg.dev/${HL_ENVIRONMENTS_PROJECT}/$(lib_env_value REGISTRY_REPOSITORY)-environments/environment"
+fi
+
 # The git host local platform experiments keep their code on: GitHub through the App when .env
 # names one, and otherwise the git server `make dev` runs on this machine (localdev/local-git).
 # That one serves the bare repositories under HL_GIT_ROOT (make git-repository) to its one
@@ -85,7 +103,8 @@ fi
 
 # lib_render_settings <host address> <output>: the settings the local control plane runs with,
 # which are the committed ones with this host's address and the local identity providers filled
-# in, and the git host: the GitHub App's section when there is one, the local git server otherwise.
+# in, the git host: the GitHub App's section when there is one, the local git server otherwise,
+# and the environments section when .env names a registry.
 lib_render_settings() {
   local host_address="$1" output="$2" coordinate providers project issuer keys rendered
   if [[ ! -e "${HL_SIGNING_SECRET_FILE}" ]]; then
@@ -132,9 +151,13 @@ lib_render_settings() {
   for rendered in "issuer: \"${HL_DEV_JWT_ISSUER}\"" ${issuer:+"issuer: \"${issuer}\""}; do
     grep -qF -- "${rendered}" "${output}" || { echo "render-settings: the auth section of the settings file changed shape, '${rendered}' was not rendered" >&2; return 1; }
   done
-  if grep -qE '^(github|git):' "${output}"; then
-    echo "render-settings: the settings file has a github or git section, and the render would add a second one" >&2
+  if grep -qE '^(github|git|environments):' "${output}"; then
+    echo "render-settings: the settings file has a github, git or environments section, and the render would add a second one" >&2
     return 1
+  fi
+  if [[ -n "${HL_ENVIRONMENTS_REPOSITORY}" ]]; then
+    printf '\nenvironments:\n  repository: %s\n  pusher: env-pusher@%s.iam.gserviceaccount.com\n  puller: env-puller@%s.iam.gserviceaccount.com\n' \
+      "${HL_ENVIRONMENTS_REPOSITORY}" "${HL_ENVIRONMENTS_PROJECT}" "${HL_ENVIRONMENTS_PROJECT}" >> "${output}"
   fi
   if [[ "$(lib_git_provider)" == "github" ]]; then
     # The values are JSON strings, which YAML reads as they are.

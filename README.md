@@ -784,6 +784,22 @@ identity, read as application default credentials, and does not start without th
 that is the file `gcloud auth application-default login` writes to its well-known path,
 `~/.config/gcloud/application_default_credentials.json`, which the compose stack mounts.
 
+A job that runs in an environment pulls its image with the puller token the reconcile answer
+carries as `registry_pull`. On Kubernetes the cluster-agent writes it into an image pull Secret of
+the job's own in `hypothesisloop-jobs`, written before the job's pods and deleted with them. On
+vast.ai the cloud-agent hands it to the rented instance as its `image_login`, and boots nothing
+but its `job_image` and images of its `environments_repository` named by digest. The bare-metal
+agent passes it to the engine's pull.
+
+Local development builds environments the way a deployment does, into the repository and
+accounts `make -C infra up` makes. When `.env` sets `REGISTRY_REPOSITORY` (with `GCP_PROJECT`
+and `REGISTRY_LOCATION`), `make render-settings`, and so `make dev` and `make dev-hosted`, writes
+the `environments` section naming `<REGISTRY_LOCATION>-docker.pkg.dev/<GCP_PROJECT>/<REGISTRY_REPOSITORY>-environments/environment`,
+`env-pusher@<GCP_PROJECT>.iam.gserviceaccount.com` and `env-puller@<GCP_PROJECT>.iam.gserviceaccount.com`,
+and `make dev-hosted` gives the cloud-agent the same repository. The account of this machine's
+application default credentials must be in `REGISTRY_TOKEN_MINTERS` (`user:<GCP_ACCOUNT>`) when
+`make -C infra up` runs, and a cluster attached with `BUILDER=true` builds what is assigned.
+
 A cluster runs the jobs of its own org and no other. Admission places a job on a cluster of
 the job's org or on a shared cluster, and a job whose org has neither waits with
 `not_admitted_reason: no_cluster_for_org`. Sharing is the platform's decision, set by staff:
