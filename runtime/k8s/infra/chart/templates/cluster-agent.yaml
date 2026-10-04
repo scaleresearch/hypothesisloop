@@ -190,6 +190,9 @@ spec:
             # Where each environment built is loaded, so a job on this node does not pull it.
             - name: HYPOTHESISLOOP_NODE_IMAGES
               value: /run/node-containerd/containerd.sock
+            # Under the memory limit below, so the Go runtime collects before the kernel kills.
+            - name: GOMEMLIMIT
+              value: "900MiB"
             {{- end }}
             {{- with .Values.builder.nodeImages.snapshotter }}
             - name: HYPOTHESISLOOP_NODE_SNAPSHOTTER
@@ -204,9 +207,10 @@ spec:
             # the container's own startup handshake, not just its steady-state work. A build's
             # session and output stream are the agent's to hold, and a load streams the whole image
             # through it before the push starts.
+            # A load holds the export stream and containerd's import at once, which 128Mi cannot.
             limits:
               cpu: {{ if and .Values.builder.enabled .Values.builder.nodeImages.containerdSocket }}"1"{{ else }}"300m"{{ end }}
-              memory: {{ if .Values.builder.enabled }}"128Mi"{{ else }}"64Mi"{{ end }}
+              memory: {{ if and .Values.builder.enabled .Values.builder.nodeImages.containerdSocket }}"1Gi"{{ else if .Values.builder.enabled }}"128Mi"{{ else }}"64Mi"{{ end }}
           {{- if .Values.builder.enabled }}
           volumeMounts:
             - name: buildkit-socket

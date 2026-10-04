@@ -198,6 +198,27 @@ func TestTheAgentHoldsTheNodesContainerdOnlyWhenAskedToLoadBuilds(t *testing.T) 
 	}
 }
 
+func TestTheAgentHasTheMemoryALoadNeedsOnlyWhenItLoads(t *testing.T) {
+	const socket = "/run/k3s/containerd/containerd.sock"
+	for name, want := range map[string]struct {
+		set              []string
+		memory, memLimit string
+	}{
+		"no builder":                   {nil, "64Mi", ""},
+		"a builder that loads nothing": {[]string{"builder.enabled=true"}, "128Mi", ""},
+		"a builder that loads":         {[]string{"builder.enabled=true", "builder.nodeImages.containerdSocket=" + socket}, "1Gi", "900MiB"},
+	} {
+		agent := podSpec(ofKind(render(t, want.set...), "Deployment")[0])["containers"].([]any)[0]
+		limits := agent.(map[string]any)["resources"].(map[string]any)["limits"].(map[string]any)
+		if limits["memory"] != want.memory {
+			t.Errorf("%s: memory limit %v, want %s", name, limits["memory"], want.memory)
+		}
+		if got, _ := envValue(agent, "GOMEMLIMIT").(string); got != want.memLimit {
+			t.Errorf("%s: GOMEMLIMIT %q, want %q", name, got, want.memLimit)
+		}
+	}
+}
+
 func TestInstallLoadsBuildsIntoTheNodeOnlyWithABuilder(t *testing.T) {
 	bin, argsFile, _ := fakeBin(t)
 	for builder, ok := range map[string]bool{"true": true, "false": false} {
