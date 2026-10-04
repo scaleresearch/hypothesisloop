@@ -349,3 +349,94 @@ func TestAnAcceleratorWorkloadIsDecidedTheSameBesideJobsOnCPU(t *testing.T) {
 }
 
 func (*mixedStore) MarkHeldJobs(context.Context, time.Duration) error { return nil }
+
+// coreBoxes is one idle node per cluster offering its cores as units of the CPU type, with the
+// cores and memory named here.
+type coreBoxes struct {
+	LoopWorkloadClient
+	cores  map[string]int64
+	memory map[string]int64
+}
+
+func (w coreBoxes) node(cluster string) map[string]int64 {
+	return map[string]int64{
+		domain.NodeResourceCPUMillicores: w.cores[cluster] * 1000,
+		domain.NodeResourceMemoryBytes:   w.memory[cluster],
+		domain.NodeResourceStorageBytes:  64 << 30,
+	}
+}
+func (w coreBoxes) footprints() map[string]domain.Footprint {
+	out := map[string]domain.Footprint{}
+	for c, n := range w.cores {
+		out[c] = domain.CapacityFootprint(float64(n), map[string]int64{string(cpuType): n}, w.memory[c], 64<<30)
+	}
+	return out
+}
+func (w coreBoxes) perNode(value func(string) map[string]int64) map[string]map[string]map[string]int64 {
+	out := map[string]map[string]map[string]int64{}
+	for c := range w.cores {
+		out[c] = map[string]map[string]int64{"node-" + c: value(c)}
+	}
+	return out
+}
+func (w coreBoxes) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+	return w.footprints(), w.footprints(), nil
+}
+func (w coreBoxes) GetTotalCapacity(context.Context) (map[string]domain.Footprint, error) {
+	return w.footprints(), nil
+}
+func (w coreBoxes) GetAcceleratorCapacityByNode(context.Context) (map[string]map[string]map[string]int64, error) {
+	return w.perNode(func(c string) map[string]int64 { return map[string]int64{string(cpuType): w.cores[c]} }), nil
+}
+func (w coreBoxes) GetNodeResourceCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
+	return w.perNode(w.node), nil
+}
+func (w coreBoxes) GetNodeTotalCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
+	return w.perNode(w.node), nil
+}
+func (w coreBoxes) GetNodeLabels(context.Context) (map[string]map[string]map[string]string, error) {
+	out := map[string]map[string]map[string]string{}
+	for c := range w.cores {
+		out[c] = map[string]map[string]string{"node-" + c: {}}
+	}
+	return out, nil
+}
+func (coreBoxes) GetMultiNodeCapability(context.Context) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+func (coreBoxes) CreateWorkload(context.Context, *domain.Experiment) error { return nil }
+
+// A job above its cores' part of one cluster's nodes goes to another cluster whose nodes hold it,
+// and is refused only when no cluster's do, in cores and Gi, naming every cluster tried.
+func TestAJobOnCPUAboveItsShareOfOneClusterIsPlacedOnAnotherThatHoldsIt(t *testing.T) {
+	withCPUType(t)
+	const small = 16471307056 // 2 of its 8 cores get 4117826764 bytes, 3.83Gi
+	for _, tier := range []domain.CapacityTier{domain.CapacityGuaranteed, domain.CapacityBurst} {
+		t.Run(string(tier), func(t *testing.T) {
+			for name, tc := range map[string]struct {
+				bigMemory int64
+				placed    string
+				reason    string
+			}{
+				"another cluster holds it": {bigMemory: 250 << 30, placed: "cluster-b"},
+				"no cluster holds it": {bigMemory: small, reason: domain.NotAdmittedExceedsAcceleratorShare +
+					": memory 8Gi is above the 3.8Gi that 2 core(s) get on cluster cluster-a (each node's memory split evenly across its installed cores); request at most 3.8Gi" +
+					"; memory 8Gi is above the 3.8Gi that 2 core(s) get on cluster cluster-b (each node's memory split evenly across its installed cores); request at most 3.8Gi"},
+			} {
+				job := coresJob("j", tier, 2)
+				job.Job.Memory = "8Gi"
+				store := &mixedStore{holdStore: holdStore{noRunningListStore: noRunningListStore{t: t, queued: []*domain.Experiment{job}}}}
+				l, _, _ := mixedLoop(store, coreBoxes{cores: map[string]int64{"cluster-a": 8, "cluster-b": 8}, memory: map[string]int64{"cluster-a": small, "cluster-b": tc.bigMemory}}, nil)
+
+				tickOnce(t, l)
+
+				if got := store.submitted["j"]; got != tc.placed {
+					t.Errorf("%s: submitted on %q, want %q (reason %q)", name, got, tc.placed, store.notAdmitted["j"])
+				}
+				if got := store.notAdmitted["j"]; tc.reason != "" && got != tc.reason {
+					t.Errorf("%s: reason\n %q, want\n %q", name, got, tc.reason)
+				}
+			}
+		})
+	}
+}

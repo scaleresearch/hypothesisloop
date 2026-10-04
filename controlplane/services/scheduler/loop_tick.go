@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -674,44 +675,62 @@ func (l *Loop) placeQueued(ctx context.Context, pass string, exp *domain.Experim
 		return skip(ineligible)
 	}
 	candidates = withoutFailed(candidates, c.clusterIDs, exp, l.triedClusterTTL, c.start)
-	if placed.cluster != "" {
+	pinned := placed.cluster != ""
+	if pinned {
 		placed.fp = exp.Footprint()
-	} else {
-		placed.cluster, placed.fp = resolveClusterAndFootprint(candidates, c.registered, c.nodeAvail, c.nodeResources, c.nodeLabels, exp)
 	}
-	if exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType && !quotaCanCoverFlavor(quota, exp) {
-		if !slices.Contains(candidateAcceleratorTypes(exp), exp.Job.AcceleratorType) {
-			return skip(ranOnTypeUncoveredReason(exp))
+	// Check the job's cpu, memory and storage against the picked cluster's own fair share (or size
+	// it to a slot), once cluster and accelerator flavor are settled: see loop_resolve.go. An
+	// unpinned job whose own resources the cluster cannot fit is placed again among the rest, and
+	// is told it misfits only when every candidate misfits: preemption cannot fix a job whose own
+	// request is oversized for every node.
+	var misfits []string
+	queuedAt := exp.AcceleratorType
+	for {
+		if !pinned {
+			exp.AcceleratorType, placed.betFlavor = queuedAt, queuedAt
+			placed.cluster, placed.fp = resolveClusterAndFootprint(candidates, c.registered, c.nodeAvail, c.nodeResources, c.nodeLabels, exp)
 		}
-		// Reverting to the requested flavor re-places the job, layout included: picking on
-		// scalar fit alone could point a spread job at a cluster whose nodes cannot hold it,
-		// and charge it a failed placement there.
-		exp.AcceleratorType = exp.Job.AcceleratorType
-		placed.betFlavor = exp.AcceleratorType
-		placed.fp = exp.Footprint()
-		if cluster, ok := placeAtFlavor(candidates, c.registered, c.nodeAvail, c.nodeResources, c.nodeLabels, exp); ok {
-			placed.cluster = cluster
-		} else {
-			placed.cluster = clusterWithBestFit(candidates, c.registered, placed.fp)
+		if exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType && !quotaCanCoverFlavor(quota, exp) {
+			if !slices.Contains(candidateAcceleratorTypes(exp), exp.Job.AcceleratorType) {
+				return skip(ranOnTypeUncoveredReason(exp))
+			}
+			// Reverting to the requested flavor re-places the job, layout included: picking on
+			// scalar fit alone could point a spread job at a cluster whose nodes cannot hold it,
+			// and charge it a failed placement there.
+			exp.AcceleratorType = exp.Job.AcceleratorType
+			placed.betFlavor = exp.AcceleratorType
+			placed.fp = exp.Footprint()
+			if cluster, ok := placeAtFlavor(candidates, c.registered, c.nodeAvail, c.nodeResources, c.nodeLabels, exp); ok {
+				placed.cluster = cluster
+			} else {
+				placed.cluster = clusterWithBestFit(candidates, c.registered, placed.fp)
+			}
 		}
-	}
-	// Check the job's cpu, memory and storage against THIS cluster's own fair share (or size it to
-	// a slot), now that cluster and accelerator flavor are settled for this attempt: see
-	// loop_resolve.go. A cluster this job's own resources cannot fit is folded into the ordinary
-	// not-admitted path by un-picking the cluster, like a scalar or topology miss: preemption
-	// cannot fix a job whose own request is oversized for every node.
-	if cluster := placed.cluster; cluster != "" {
+		cluster := placed.cluster
+		if cluster == "" {
+			break
+		}
 		resolvedJob, misfit, err := l.resolveClusterLocalResources(ctx, c.resolveCache, exp, cluster, c.nodeResourcesTotal[cluster], c.nodeAvailAtTickStart[cluster], c.nodeResources[cluster], c.nodeLabels[cluster])
-		switch {
-		case err != nil:
+		if err != nil {
 			l.skipExperiment(tickErrs, exp, fmt.Errorf("resolve cluster-local resources: %w", err))
 			return placement{}, false
-		case misfit != "":
-			placed.cluster, placed.misfit = "", misfit
-		default:
+		}
+		if misfit == "" {
 			exp.ResolvedJob = resolvedJob
 			placed.fp = exp.Footprint()
+			return placed, true
 		}
+		misfits = append(misfits, misfit)
+		placed.cluster = ""
+		if pinned {
+			break
+		}
+		candidates = maps.Clone(candidates)
+		delete(candidates, cluster)
+	}
+	if len(misfits) > 0 {
+		placed.misfit = joinMisfits(misfits)
 	}
 	return placed, true
 }

@@ -3,7 +3,10 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -227,17 +230,46 @@ func (l *Loop) resolveClusterLocalResources(ctx context.Context, cache *resoluti
 				return nil, "", fmt.Errorf("job %s %q: %w", dimension.name, dimension.requested, err)
 			}
 			if requested > float64(share) {
-				return nil, shareMisfit(dimension.name, dimension.requested, canonicalQuantityString(dimension.key, float64(share)), g.AcceleratorCount, cluster), nil
+				unit := "accelerator"
+				if exp.AcceleratorType.Kind() == domain.TypeKindCPU {
+					unit = "core"
+				}
+				return nil, shareMisfit(dimension.name, dimension.requested, shareQuantityString(dimension.key, share), g.AcceleratorCount, unit, cluster), nil
 			}
 		}
 	}
 	return &out, "", nil
 }
 
-// shareMisfit is the not_admitted_reason for a request above the per-accelerator share.
-func shareMisfit(dimension, requested, share string, accelerators int, cluster string) string {
-	return fmt.Sprintf("%s: %s %s is above the %s that %d accelerator(s) get on cluster %s (each node's %s split evenly across its installed accelerators); request at most %s",
-		domain.NotAdmittedExceedsAcceleratorShare, dimension, requested, share, accelerators, cluster, dimension, share)
+// shareMisfit is the not_admitted_reason for a request above the share that count units (an
+// accelerator, or a core for a CPU job) get of a node.
+func shareMisfit(dimension, requested, share string, count int, unit, cluster string) string {
+	return fmt.Sprintf("%s: %s %s is above the %s that %d %s(s) get on cluster %s (each node's %s split evenly across its installed %ss); request at most %s",
+		domain.NotAdmittedExceedsAcceleratorShare, dimension, requested, share, count, unit, cluster, dimension, unit, share)
+}
+
+// shareQuantityString renders a share in canonical units as a JobSpec quantity no larger than it:
+// memory and storage in Gi to one decimal, or Mi below 1Gi, rounded down so requesting it fits.
+// Below 1Mi it is exact.
+func shareQuantityString(key string, value int64) string {
+	switch {
+	case key == domain.NodeResourceCPUMillicores || value < 1<<20:
+		return canonicalQuantityString(key, float64(value))
+	case value >= 1<<30:
+		return strconv.FormatFloat(math.Floor(float64(value)*10/(1<<30))/10, 'f', -1, 64) + "Gi"
+	}
+	return strconv.FormatInt(value>>20, 10) + "Mi"
+}
+
+// joinMisfits is one not_admitted_reason for misfits, one per cluster tried, under the code of
+// the first.
+func joinMisfits(misfits []string) string {
+	code, _ := domain.SplitQueueReason(misfits[0])
+	sentences := make([]string, len(misfits))
+	for i, m := range misfits {
+		_, sentences[i] = domain.SplitQueueReason(m)
+	}
+	return code + ": " + strings.Join(sentences, "; ")
 }
 
 // canonicalQuantityValue parses a JobSpec-style quantity string into the canonical unit

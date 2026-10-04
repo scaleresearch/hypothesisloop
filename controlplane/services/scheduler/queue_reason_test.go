@@ -89,7 +89,7 @@ func TestEveryNotAdmittedReasonIsStoredWithASentence(t *testing.T) {
 		domain.NotAdmittedWaitingForScaleUp:       {waitingForScaleUpReason("cluster-a")},
 		domain.NotAdmittedNoScalableCapacity:      {noScalableCapacityReason()},
 		domain.NotAdmittedConcurrencyCap:          {concurrencyCapReason(), notAdmittedReasonForSubmitError(capExceeded{errors.New("cap")})},
-		domain.NotAdmittedExceedsAcceleratorShare: {shareMisfit("cpu", "9", "2", 1, "cluster-a")},
+		domain.NotAdmittedExceedsAcceleratorShare: {shareMisfit("cpu", "9", "2", 1, "accelerator", "cluster-a")},
 		domain.NotAdmittedExceedsClusterCapacity:  {installed{registered: imageChoice, totals: map[string]domain.Footprint{"metal": {}}}.neverFitsReason(exp)},
 	}
 	for code, name := range notAdmittedCodes(t) {
