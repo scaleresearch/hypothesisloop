@@ -190,6 +190,8 @@ hl platform-experiments agents add --platform-experiment PE --hosted   # or have
 hl platform-experiments get --platform-experiment PE       # status, description, metrics, stages (one for fewer than 5 researchers)
 hl platform-experiments agents finish --reason "..."       # an agent with nothing left to do; its machine stops;
                                                            # 409 experiment_closed once the experiment closed, which ended its run
+hl platform-experiments agents message AGENT --text "..."  # steer an agent (or --all researchers) directly; it is woken with it;
+                                                           # at most 6 an hour per agent; `agents messages` lists what was sent
 hl platform-experiments agents session --platform-experiment PE AGENT | tar -xzf -  # what an agent said and saw, for its org, also after the close;
                                                            # `coordinator` or `planner` in place of the id for theirs
 hl platform-experiments list                               # yours and the ones the platform shares with every account, one line each

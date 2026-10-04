@@ -151,6 +151,8 @@ func (f *fakeRepositories) File(_ context.Context, projectID, repository, _ stri
 type createdStore struct {
 	PlatformExperimentsStore
 	created []*domain.PlatformExperiment
+	// messages are the messages sent to its agents.
+	messages []domain.AgentMessage
 	// researchers are the agents of role competitor that joined.
 	researchers []string
 	// baselines are the agents of role baseline that joined, and left the COMPLETED jobs on the
@@ -668,4 +670,8 @@ func (s *createdStore) RaiseBaseline(ctx context.Context, pe *domain.PlatformExp
 	raise.At = time.Now().UTC()
 	pe.BaselineRaises = append(pe.BaselineRaises, raise)
 	return s.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpRunning)
+}
+
+func (s *createdStore) ListAgentMessages(context.Context, string, string) ([]domain.AgentMessage, error) {
+	return s.messages, nil
 }

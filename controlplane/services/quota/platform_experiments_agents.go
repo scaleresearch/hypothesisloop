@@ -727,6 +727,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler, graph H
 		panic("quota.RegisterAgentsHuma: the handler needs its repositories, WithAgentLaunch with every field set and the hypothesis graph")
 	}
 	access := doc.Access
+	registerMessagesHuma(doc, h)
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "add-platform-experiment-agent", Method: "POST", Path: "/platform-experiments/{id}/agents",

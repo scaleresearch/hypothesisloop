@@ -1195,12 +1195,36 @@ func (s *PlatformExperimentsService) recordClose(ctx context.Context, pe *domain
 			fmt.Fprintf(&record, "- at %s, from job %s to job %s, by %s: %s.\n", raise.At.UTC().Format(time.RFC3339), raise.From, raise.To, by, raise.Reason)
 		}
 	}
+	if err := s.messagesSent(ctx, pe.ID, signups, &record); err != nil {
+		return fmt.Errorf("recordClose: %w", err)
+	}
 	if pe.CloseReason == domain.CloseBaselineLimitReached {
 		if err := s.baselineLeft(ctx, pe, &record); err != nil {
 			return fmt.Errorf("recordClose: %w", err)
 		}
 	}
 	return s.store.RecordClose(ctx, pe.ID, record.String())
+}
+
+// messagesSent writes to record every message sent to an agent of the platform experiment.
+func (s *PlatformExperimentsService) messagesSent(ctx context.Context, id string, signups []domain.AgentSignup, record *strings.Builder) error {
+	messages, err := s.store.ListAgentMessages(ctx, id, "")
+	if err != nil || len(messages) == 0 {
+		return err
+	}
+	names := make(map[string]string, len(signups))
+	for _, signup := range signups {
+		names[signup.AgentID] = signup.Name
+	}
+	fmt.Fprintf(record, "\nMessages to agents:\n")
+	for _, m := range messages {
+		to := names[m.AgentID]
+		if to == "" {
+			to = m.AgentID
+		}
+		fmt.Fprintf(record, "- at %s, from the %s to %s: %s\n", m.At.UTC().Format(time.RFC3339), m.From, to, strings.Join(strings.Fields(m.Text), " "))
+	}
+	return nil
 }
 
 // baselineLeft writes to record what the baseline agents of pe, closed before its run started,

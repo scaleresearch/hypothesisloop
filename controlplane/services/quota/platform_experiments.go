@@ -97,6 +97,12 @@ type PlatformExperimentsStore interface {
 	// FinishAgent records that an agent has nothing left to do: db.ErrNotSignedUp,
 	// db.ErrSignupClosed where the agent has no work to finish, db.ErrWorkUnfinished.
 	FinishAgent(ctx context.Context, platformExpID, agentID, reason string) error
+	// SendAgentMessages stores a message to each agent named, or with none to every researcher at
+	// work, or stores none (see the db implementation for its refusals).
+	SendAgentMessages(ctx context.Context, platformExpID string, to []string, text string, sender domain.Actor) ([]domain.AgentMessage, error)
+	// ListAgentMessages is the messages sent in a platform experiment, to agentID alone unless it
+	// is empty, oldest first.
+	ListAgentMessages(ctx context.Context, platformExpID, agentID string) ([]domain.AgentMessage, error)
 	ListAgentSignups(ctx context.Context, platformExpID string) ([]domain.AgentSignup, error)
 	GetAgentSignup(ctx context.Context, platformExpID, agentID string) (*domain.AgentSignup, error)
 	GetAgent(ctx context.Context, id string) (*domain.Agent, error)

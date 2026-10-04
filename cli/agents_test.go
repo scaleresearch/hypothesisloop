@@ -191,3 +191,39 @@ func TestTheAgentsGroupListsItsCommands(t *testing.T) {
 		t.Fatalf("exit code = %d, stdout = %q, stderr = %q", code, stdout, stderr)
 	}
 }
+
+// The coordinator and the owner message one agent or every researcher; hl refuses an agent's
+// token and a message that names neither before anything is sent.
+func TestAgentsMessageSendsToOneAgentOrEveryResearcher(t *testing.T) {
+	got := recordingServer(t, func(_ int, r recorded) any {
+		return map[string]any{"messages": []map[string]any{{"agent_id": "ag-1", "from": "coordinator", "text": "try warmup"}}}
+	})
+	var stdout, stderr bytes.Buffer
+	t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-env"))
+	if code := run([]string{"platform-experiments", "agents", "message", "ag-1", "--text", "try warmup"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("message: exit %d, stderr %s", code, stderr.String())
+	}
+	if r := (*got)[0]; r.Method != "POST" || r.Path != "/platform-experiments/pe-env/messages" || !reflect.DeepEqual(r.Body, map[string]any{"agent_id": "ag-1", "text": "try warmup"}) {
+		t.Fatalf("message request = %+v", r)
+	}
+	if want := `{"agent_id":"ag-1","from":"coordinator","text":"try warmup"}` + "\n"; stdout.String() != want {
+		t.Errorf("message printed %q, want %q", stdout.String(), want)
+	}
+	if code := run([]string{"platform-experiments", "agents", "message", "--all", "--text", "queue more"}, &stdout, &stderr); code != 0 ||
+		!reflect.DeepEqual((*got)[1].Body, map[string]any{"all": true, "text": "queue more"}) {
+		t.Fatalf("message --all: exit %d, request %+v", code, (*got)[1])
+	}
+	if code := run([]string{"platform-experiments", "agents", "messages", "--agent", "ag-1"}, &stdout, &stderr); code != 0 ||
+		(*got)[2].Method != "GET" || (*got)[2].Path != "/platform-experiments/pe-env/messages" || (*got)[2].Query != "agent_id=ag-1" {
+		t.Fatalf("messages: exit %d, request %+v", code, (*got)[2])
+	}
+	for _, args := range [][]string{{"message", "--text", "x"}, {"message", "ag-1", "--all", "--text", "x"}, {"message", "ag-1"}} {
+		if code := run(append([]string{"platform-experiments", "agents"}, args...), &stdout, &stderr); code != 2 {
+			t.Errorf("%v: exit %d, want 2", args, code)
+		}
+	}
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/ag-1"))
+	if code := run([]string{"platform-experiments", "agents", "message", "ag-2", "--text", "x"}, &stdout, &stderr); code != 1 || len(*got) != 3 {
+		t.Errorf("message by an agent: exit %d with %d requests, want 1 and no further request", code, len(*got))
+	}
+}

@@ -318,6 +318,8 @@ var routes = []route{
 	{method: "POST", path: "/platform-experiments/{id}/unshare", request: "/platform-experiments/<pe>/unshare", rule: staffOnly},
 	{method: "DELETE", path: "/platform-experiments/{id}/agents/{agent_id}", request: "/platform-experiments/<pe>/agents/<agent>", rule: scoped(coordinatorAudience, reached)},
 	{method: "POST", path: "/platform-experiments/{id}/agents/{agent_id}/finish", request: "/platform-experiments/<pe>/agents/<agent>/finish", body: `{"reason":"nothing left"}`, rule: ownSession(agentAudience, "agent")},
+	{method: "POST", path: "/platform-experiments/{id}/messages", request: "/platform-experiments/<pe>/messages", body: `{"agent_id":"<agent>","text":"try the untried mechanism"}`, rule: scoped(coordinatorAudience, reached)},
+	{method: "GET", path: "/platform-experiments/{id}/messages", request: "/platform-experiments/<pe>/messages", rule: scoped(agentAudience, reached), sharedRead: true},
 
 	// ---- catalog ----
 	{method: "GET", path: "/resource-catalog/capacity", rule: listed(agentAudience, metricsUnreachable)},

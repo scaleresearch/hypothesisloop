@@ -444,6 +444,31 @@ type BaselineRaise struct {
 	At     time.Time `json:"at"`
 }
 
+// AgentMessage is one direct message from the coordinator or the owner to an agent of a platform
+// experiment, told to that agent as agent.message.
+type AgentMessage struct {
+	AgentID string    `json:"agent_id" doc:"The agent it was sent to."`
+	From    string    `json:"from" enum:"coordinator,owner" doc:"coordinator for the platform experiment's coordinator, owner for a person or an API key of its org."`
+	Text    string    `json:"text"`
+	Actor   Actor     `json:"actor"`
+	At      time.Time `json:"at"`
+}
+
+// MessageFrom is who an actor's message is from, as its recipient is told.
+func MessageFrom(actor Actor) string {
+	if actor.Kind == ActorCoordinator {
+		return "coordinator"
+	}
+	return "owner"
+}
+
+const (
+	// MaxAgentMessageBytes bounds a message's text, which travels whole in its event.
+	MaxAgentMessageBytes = 1500
+	// MaxAgentMessagesPerHour is how many messages one agent is sent in any hour, from everyone.
+	MaxAgentMessagesPerHour = 6
+)
+
 // MaxGoalBytes bounds the sentence a draft is created from.
 const MaxGoalBytes = 2000
 

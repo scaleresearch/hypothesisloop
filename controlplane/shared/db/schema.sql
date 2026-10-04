@@ -1495,3 +1495,32 @@ $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS baseline_raises_notify ON baseline_raises;
 CREATE TRIGGER baseline_raises_notify AFTER INSERT ON baseline_raises
     FOR EACH ROW EXECUTE FUNCTION hypothesisloop_baseline_raise_notify();
+
+-- Each direct message from a platform experiment's coordinator or owner to one of its agents,
+-- told to that agent as agent.message, with its text, live and replayed from created_xid. sender
+-- is coordinator or owner, what the agent is told it is from; actor_kind and actor_id say whose
+-- credential sent it.
+CREATE TABLE IF NOT EXISTS agent_messages (
+    id                     BIGSERIAL   PRIMARY KEY,
+    platform_experiment_id TEXT        NOT NULL REFERENCES platform_experiments(id) ON DELETE CASCADE,
+    agent_id               TEXT        NOT NULL,
+    sender                 TEXT        NOT NULL,
+    text                   TEXT        NOT NULL,
+    actor_kind             TEXT        NOT NULL,
+    actor_id               TEXT        NOT NULL DEFAULT '',
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_xid            BIGINT      NOT NULL
+);
+CREATE INDEX IF NOT EXISTS agent_messages_by_agent ON agent_messages (platform_experiment_id, agent_id, created_at);
+
+CREATE OR REPLACE FUNCTION hypothesisloop_agent_message_notify() RETURNS trigger AS $$
+BEGIN
+    PERFORM hypothesisloop_notify_event('agent.message', NEW.agent_id,
+        NEW.sender, NEW.text, NEW.platform_experiment_id, NEW.agent_id);
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS agent_messages_notify ON agent_messages;
+CREATE TRIGGER agent_messages_notify AFTER INSERT ON agent_messages
+    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_agent_message_notify();

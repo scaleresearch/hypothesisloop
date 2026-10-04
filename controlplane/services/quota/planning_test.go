@@ -402,7 +402,8 @@ func TestTheRecordOfACloseFollowsASummaryWrittenBefore(t *testing.T) {
 		Stages: []domain.Stage{{LengthPct: 100}}, Summary: "Status: running. Researchers are at work.",
 		BaselineJobID: "job-2", BaselineRaises: []domain.BaselineRaise{{From: "job-1", To: "job-2", Reason: "job-2 measured the control's other coder",
 			Actor: domain.Actor{Kind: domain.ActorCoordinator, ID: "pe-ended"}, At: time.Date(2026, 10, 8, 19, 0, 0, 0, time.UTC)}}}
-	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}}}
+	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, messages: []domain.AgentMessage{{AgentID: "ag-1", From: "coordinator",
+		Text: "leave the lr line,\ntry warmup", At: time.Date(2026, 10, 8, 19, 30, 0, 0, time.UTC)}}}}
 	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute)
 	if err := svc.SweepExpired(context.Background()); err != nil {
 		t.Fatal(err)
@@ -412,6 +413,10 @@ func TestTheRecordOfACloseFollowsASummaryWrittenBefore(t *testing.T) {
 	}
 	// The record says who raised the baseline while it ran, and why.
 	if want := "Baseline raised while it ran:\n- at 2026-10-08T19:00:00Z, from job job-1 to job job-2, by coordinator pe-ended: job-2 measured the control's other coder.\n"; !strings.Contains(pe.Summary, want) {
+		t.Errorf("summary = %q, want it to say %q", pe.Summary, want)
+	}
+	// And every message an agent was sent.
+	if want := "Messages to agents:\n- at 2026-10-08T19:30:00Z, from the coordinator to ag-1: leave the lr line, try warmup\n"; !strings.Contains(pe.Summary, want) {
 		t.Errorf("summary = %q, want it to say %q", pe.Summary, want)
 	}
 }

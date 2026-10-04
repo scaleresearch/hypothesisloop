@@ -73,6 +73,9 @@ const (
 	// while and has none queued or running: its machines are idle. It is the agent's own, so it
 	// reaches that agent and whoever steers the run, and no rival.
 	EventAgentIdle = "agent.idle"
+	// EventAgentMessage is a direct message from the coordinator or the owner to one agent, with
+	// its text: the one kind that carries what was said, since it is said to its reader alone.
+	EventAgentMessage = "agent.message"
 	// EventPlatformExperimentStatus and EventPlatformExperimentDescription describe the run
 	// itself: whether it is still open, and whether the brief still says what it said. The
 	// description event deliberately carries no text — see EventKinds.
@@ -138,6 +141,8 @@ var EventKinds = []EventKindDoc{
 		Description: "This agent said it has nothing left to do, and its machine stops. detail is the reason it gave, and for a researcher the blocker it named and the time and quota it left. When every agent is finished or cut the run has nobody left to wait for."},
 	{Kind: EventAgentIdle, Subject: "agent id", Value: "empty by design",
 		Description: "This researcher of a running platform experiment has submitted no job for the platform's agents.idle_notice_minutes and has none queued or running, so nothing of its runs on the platform. detail says for how long. Sent once for each such stretch: a job it submits ends the stretch. Nothing is done to the agent."},
+	{Kind: EventAgentMessage, Subject: "agent id, the one it was sent to", Value: "coordinator or owner: who it is from",
+		Description: "A direct message to this agent from its platform experiment's coordinator or owner (POST /platform-experiments/{id}/messages). detail is the text, direction to act on. GET /platform-experiments/{id}/messages reads every one sent."},
 	{Kind: EventHypothesisNew, Subject: "hypothesis id", Value: "empty by design",
 		Description: "An idea entered the shared pool. agent_id is whose it is, empty on one no agent owns. The claim itself and who registered it come from GET /hypotheses/{id}."},
 	{Kind: EventHypothesisStatus, Subject: "hypothesis id", Value: "open, confirmed, refuted, inconclusive",
@@ -231,7 +236,7 @@ func isExperimentSubject(kind string) bool {
 // one agent's stop condition, the boundary is about the ladder.
 func isAgentOwned(kind string) bool {
 	switch kind {
-	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventQuotaChanged, EventAgentCut, EventAgentFinished, EventAgentIdle, EventJobUnderperforming, EventJobHeld:
+	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventQuotaChanged, EventAgentCut, EventAgentFinished, EventAgentIdle, EventAgentMessage, EventJobUnderperforming, EventJobHeld:
 		return true
 	default:
 		return false
@@ -550,6 +555,7 @@ FROM pg_current_snapshot() s`).Scan(&horizon, &next); err != nil {
 		replayPlatformExperiment,
 		replayRevisions,
 		replayBaselineRaises,
+		replayAgentMessages,
 	} {
 		part, err := derive(ctx, tx, filter.PlatformExperimentID, since)
 		if err != nil {
@@ -904,6 +910,25 @@ func replayBaselineRaises(ctx context.Context, tx pgx.Tx, peID string, since int
 	})
 	if err != nil {
 		return nil, fmt.Errorf("events_store.replayBaselineRaises: %w", err)
+	}
+	return events, nil
+}
+
+// replayAgentMessages derives agent.message from the messages a platform experiment keeps, one row
+// each.
+func replayAgentMessages(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]Event, error) {
+	rows, err := tx.Query(ctx, `SELECT agent_id, sender, text, created_xid FROM agent_messages WHERE platform_experiment_id = $1 AND created_xid >= $2`, peID, since)
+	if err != nil {
+		return nil, fmt.Errorf("events_store.replayAgentMessages: %w", err)
+	}
+	events, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Event, error) {
+		event := Event{Kind: EventAgentMessage, PlatformExperimentID: peID}
+		err := row.Scan(&event.AgentID, &event.Value, &event.Detail, &event.Position)
+		event.Subject = event.AgentID
+		return event, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("events_store.replayAgentMessages: %w", err)
 	}
 	return events, nil
 }
