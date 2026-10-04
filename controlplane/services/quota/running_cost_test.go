@@ -282,6 +282,11 @@ func TestTheQuotaViewLeavesWhatASubmitWouldAndShowsNoBurstHoursBeyondTheShare(t 
 	if view.ShareAcceleratorHours != 0.028608 || view.BurstAcceleratorHours != 0.028608 {
 		t.Errorf("share %g, burst %g, want both 0.028608: burst hours are part of the share", view.ShareAcceleratorHours, view.BurstAcceleratorHours)
 	}
+	// A baseline read 0.00016 remaining beside a small used figure: what a running job holds
+	// beyond its spend is said, so used, held and remaining add up to the share.
+	if want := domain.RoundHours(0.015 - view.UsedGuaranteedAccH); view.HeldAccH != want {
+		t.Errorf("held = %g, want %g: the running job's estimate less what it has spent", view.HeldAccH, want)
+	}
 }
 
 type grantedStore struct {

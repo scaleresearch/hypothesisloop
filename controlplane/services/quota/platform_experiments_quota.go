@@ -113,6 +113,7 @@ type AgentQuotaView struct {
 	BurstAcceleratorHours      float64    `json:"burst_accelerator_hours" doc:"How much of the share may run at burst priority, on idle capacity. Burst hours are part of the share and never on top of it."`
 	UsedGuaranteedAccH         float64    `json:"used_guaranteed_acch" doc:"Spent at guaranteed priority, with a job that has not started at its estimate and a running one at what it has spent so far."`
 	UsedBurstAccH              float64    `json:"used_burst_acch" doc:"The same at burst priority."`
+	HeldAccH                   float64    `json:"held_acch" doc:"What the jobs running now hold of the share beyond what they have spent: each holds its whole estimate until it ends, so the remaining figures leave out held as well as used."`
 	RemainingGuaranteed        float64    `json:"remaining_guaranteed_accelerator_hours" doc:"The largest estimated_cost_acch a guaranteed job submitted now is admitted with. A submit holds the whole estimate of every job that has not ended, so this is less than the share minus what is used while jobs run."`
 	RemainingBurst             float64    `json:"remaining_burst_accelerator_hours" doc:"The same for a burst job."`
 	NextStageStartsAt          *time.Time `json:"next_stage_starts_at,omitempty" doc:"When the next stage of the platform experiment starts by the clock, which raises the share. It starts earlier once the same part of the budget is spent, and waits for a first ranking value while a job that can give one is in flight. Absent in the last stage, outside a running platform experiment and for an agent that is no researcher or was cut."`
@@ -205,11 +206,16 @@ func (s *PlatformExperimentsService) quotaViews(ctx context.Context, pe *domain.
 			views[i].NextStageStartsAt, views[i].NextStageShare = &next.startsAt, &share
 		}
 	}
+	reserved := make([]float64, len(quotas))
+	for i, q := range quotas {
+		reserved[i] = q.Used()
+	}
 	if err := s.correctRunningCosts(ctx, pe, quotas); err != nil {
 		return nil, fmt.Errorf("running cost correction: %w", err)
 	}
 	for i, q := range quotas {
 		views[i].UsedGuaranteedAccH, views[i].UsedBurstAccH = q.UsedGuaranteedAccH, q.UsedBurstAccH
+		views[i].HeldAccH = domain.RoundHours(max(0, reserved[i]-q.Used()))
 	}
 	return views, nil
 }
