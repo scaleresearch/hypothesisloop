@@ -89,11 +89,7 @@ func (b *BuildKit) Build(ctx context.Context, dockerfile, base, image string) er
 		if err := json.Unmarshal(config, &baseImage); err != nil {
 			return nil, fmt.Errorf("the configuration of %s: %w", base, err)
 		}
-		file, err := llb.Scratch().File(llb.Mkfile("Dockerfile", 0o644, []byte(dockerfile))).Marshal(ctx)
-		if err != nil {
-			return nil, err
-		}
-		empty, err := llb.Scratch().Marshal(ctx)
+		inputs, err := frontendInputs(ctx, dockerfile)
 		if err != nil {
 			return nil, err
 		}
@@ -104,7 +100,7 @@ func (b *BuildKit) Build(ctx context.Context, dockerfile, base, image string) er
 				"build-arg:" + baseUserArg: baseImage.Config.User,
 				"platform":                 buildPlatform,
 			},
-			FrontendInputs: map[string]*pb.Definition{"dockerfile": file.ToPB(), "context": empty.ToPB()},
+			FrontendInputs: inputs,
 		})
 	}
 
@@ -141,6 +137,17 @@ func (b *BuildKit) Build(ctx context.Context, dockerfile, base, image string) er
 		return fmt.Errorf("environments: build: %w", err)
 	}
 	return &BuildFailed{Log: log.String() + "\n" + err.Error()}
+}
+
+// frontendInputs is the Dockerfile and the build context the frontend reads it from: the same
+// state, holding the file alone. The daemon refuses an input with no operation, which an empty
+// llb.Scratch() is.
+func frontendInputs(ctx context.Context, dockerfile string) (map[string]*pb.Definition, error) {
+	file, err := llb.Scratch().File(llb.Mkfile("Dockerfile", 0o644, []byte(dockerfile))).Marshal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]*pb.Definition{"dockerfile": file.ToPB(), "context": file.ToPB()}, nil
 }
 
 const maxLogBytes = 64 << 10

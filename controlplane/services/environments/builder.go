@@ -14,7 +14,7 @@ import (
 )
 
 // Builder builds a Dockerfile with BASE set to base and baseUserArg to the user of base's image, on
-// an empty context, and pushes the result as image. A *BuildFailed is the file failing to build. Any other error is the builder's own, and
+// a context holding only the file, and pushes the result as image. A *BuildFailed is the file failing to build. Any other error is the builder's own, and
 // the build is tried again.
 type Builder interface {
 	Build(ctx context.Context, dockerfile, base, image string) error
