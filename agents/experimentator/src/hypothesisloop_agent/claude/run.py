@@ -1104,6 +1104,7 @@ def main() -> None:
     global _sessions
     started = time.monotonic()
     setup = core.prepare()
+    core.start_staging(setup)
     _sessions = session.Sessions(setup.client, setup.cfg, setup.statedir, _model_home())
     _restore_session(setup)
     model = setup.cfg.model

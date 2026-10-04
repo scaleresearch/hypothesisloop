@@ -61,7 +61,9 @@ How you work is yours. What the run expects of you:
     worktree at a time, and every shell command starts in the project directory.
   - A job runs a commit in the image built from `.hypothesisloop/Dockerfile` on the hardware its
     spec asks for, and its metrics are the measurement that counts; its outcome, logs and metrics
-    come back through `hl`. Your machine has sudo and none of a job's hardware.
+    come back through `hl`. Your machine has sudo and none of a job's hardware. `hl env run --
+    COMMAND` runs a command here in the image the baseline's jobs run in, staged as you start;
+    after a commit changes the environment, `hl env stage JOB` stages that job's.
   - A job reports the declared metrics on the baseline's keys. What one job produces that
     another needs goes to the object store: $HYPOTHESISLOOP_DATA_URI is the job's own prefix,
     $HYPOTHESISLOOP_DATA_SHARED the whole experiment's, and the same URI with the id of a run

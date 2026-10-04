@@ -36,7 +36,8 @@ What it takes:
     stays in the image. A job runs its commit, cloned when it starts, in that image on the
     hardware its spec asks for; your own machine has none of that hardware, and you have sudo
     on it. `hl env build` takes minutes and jobs wait for it; an update says once its jobs can
-    run, often before its upload ends, or that it failed.
+    run, often before its upload ends, or that it failed. Once it is built, `hl env stage JOB`
+    puts a job's image on your machine and `hl env run -- COMMAND` runs a command in it.
   - The harness: one that already measures these metrics as the brief defines them runs
     unchanged. Otherwise the smallest program that does: fixed seeds, pinned revisions, inputs
     fetched by the job, metrics reported as it goes and at the end with `post_metric` of

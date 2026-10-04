@@ -129,6 +129,20 @@ def own_python() -> None:
     os.environ["PATH"] = os.path.join(venv, "bin") + os.pathsep + os.environ["PATH"]
 
 
+_staging: list[subprocess.Popen] = []
+
+
+def start_staging(setup: RunSetup) -> None:
+    """Starts `hl env stage` in the background for an agent with jobs, so that `hl env run` has the
+    image its jobs run in without the agent waiting for it. Its output is in env-stage.log of the
+    state directory; an agent that runs it again is told the same."""
+    if not config.submits_jobs(setup.cfg):
+        return
+    with open(os.path.join(setup.statedir, "env-stage.log"), "ab") as out:
+        _staging.append(subprocess.Popen(["hl", "env", "stage"], stdin=subprocess.DEVNULL, stdout=out,
+                                         stderr=subprocess.STDOUT, cwd=setup.statedir, start_new_session=True))
+
+
 def prepare() -> RunSetup:
     """Shared startup: logging, config, the agent's Python, workdir, platform client, prompt."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
