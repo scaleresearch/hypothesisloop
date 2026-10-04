@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Provisions fake-accelerator container nodes (same as localdev/k3s-macos/dev-nodes-up.sh).
-# Does NOT attach box-a as a general worker — it hosts the control plane and cluster-agent,
-# and sharing it with test workloads starves those under load. box-a stays reserved for
+# Does NOT attach box-a as a general worker — it hosts the cluster-agent, and sharing it
+# with test workloads starves it under load. box-a stays reserved for
 # tests/e2e/test_tenstorrent_hardware.py, which attaches/detaches it itself.
 # NODE_PODMAN=sudo podman: rootless podman can't create nested containerd cgroups for pods on
 # these nodes; see lib_create_node's comment in node.sh.
@@ -9,7 +9,7 @@ set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${DIR}/../lib/node.sh"
 export NODE_PODMAN="sudo podman"
-HOST_ADDRESS="$(cat "${DIR}/../.host-address")"
+HOST_ADDRESS="$(lib_host_address)"
 export HOST_ADDRESS
 
 CONTEXT="${TT_CONTEXT:-k3s-tt}"

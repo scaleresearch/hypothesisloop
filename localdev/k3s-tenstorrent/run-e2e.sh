@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Attaches this host as a worker, runs the portable pytest e2e suite, then detaches it again —
-# whether the suite passes or fails — so the box reverts to donating zero capacity to workloads
-# and is fully available for real training work. The pytest suite itself stays
+# Provisions the fake nodes, runs the portable pytest e2e suite, then removes them again —
+# whether the suite passes or fails — so the box is fully available for real training work.
+# The pytest suite itself stays
 # environment-agnostic; this wrapper is the one place that knows "on box-a, provisioning
 # means dev-nodes-up.sh."
 set -euo pipefail

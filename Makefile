@@ -6,7 +6,7 @@
 	cluster-agent-up cluster-agent-down staff-token token runtime-token \
 	k3s-up k3s-down full-up k3s-dev-nodes-up k3s-dev-nodes-down e2e \
 	full-stop full-start reload stack-not-held \
-	tt-up tt-down tt-status tt-stop tt-start tt-dev-nodes-up tt-dev-nodes-down tt-hardware-image tt-e2e tt-reload \
+	tt-up tt-down tt-status tt-stop tt-start tt-dev-nodes-up tt-dev-nodes-down tt-hardware-image tt-e2e \
 	git-repository
 
 # ---- Control plane: one instance, runs anywhere (the brain) -----------------
@@ -168,12 +168,19 @@ reset:
 # ---- Cluster agent: one per target Kubernetes cluster running jobs ----------
 # Installs/removes the runtime/k8s/infra/chart helm release (node-agent DaemonSet + cluster-agent
 # Deployment, the only component with real k8s credentials) on the cluster KUBE_CONTEXT/
-# KUBECONFIG_PATH point at (or current kubectl context).
-# RUNTIME_TOKEN comes from the environment and is passed on through it, so neither this recipe's
+# KUBECONFIG_PATH point at (left empty: the current context of ~/.kube/config), pulling the images
+# make images pushed to REGISTRY under TAG.
+# RUNTIME_TOKEN comes from the environment and is passed on by name, so neither this recipe's
 # echo nor a process list shows it.
-# Usage: RUNTIME_TOKEN="$$(make -s runtime-token CLUSTER=<name>)" make cluster-agent-up CLUSTER=<name> API_URL=... METRICS_URL=... [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...]
+# Usage: RUNTIME_TOKEN="$$(make -s runtime-token CLUSTER=<name>)" make cluster-agent-up CLUSTER=<name> API_URL=... METRICS_URL=... [REGISTRY=...] [TAG=...] [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...]
 cluster-agent-up:
-	CLUSTER_NAME="$(CLUSTER)" API_URL="$(API_URL)" METRICS_URL="$(METRICS_URL)" REGISTRY_URL="$(REGISTRY)" \
+	@test -n "$(CLUSTER)" || { echo "make cluster-agent-up: CLUSTER=<name> is required, the name the cluster was registered under" >&2; exit 1; }
+	@test -n "$(API_URL)" || { echo "make cluster-agent-up: API_URL is required, the control-plane API as a pod in that cluster reaches it" >&2; exit 1; }
+	@test -n "$(METRICS_URL)" || { echo "make cluster-agent-up: METRICS_URL is required, the metrics service as every node in that cluster reaches it" >&2; exit 1; }
+	@test -n "$(TAG)" || { echo "make cluster-agent-up: TAG is required, the image tag make images pushed" >&2; exit 1; }
+	@test -n "$$RUNTIME_TOKEN" || { echo "make cluster-agent-up: RUNTIME_TOKEN must be in the environment, the token make -s runtime-token CLUSTER=$(CLUSTER) printed" >&2; exit 1; }
+	CLUSTER_NAME="$(CLUSTER)" API_URL="$(API_URL)" METRICS_URL="$(METRICS_URL)" REGISTRY_URL="$(REGISTRY)" TAG="$(TAG)" \
+	  RUNTIME_TOKEN="$$RUNTIME_TOKEN" KUBECONFIG_PATH="$(KUBECONFIG_PATH)" KUBE_CONTEXT="$(KUBE_CONTEXT)" \
 	  bash runtime/k8s/infra/install.sh
 
 cluster-agent-down:
@@ -251,8 +258,9 @@ stack-not-held:
 # ---- Real Tenstorrent hardware: k3s + tt-operator device stack --------------
 # Counterpart to k3s-up, for an actual Tenstorrent host instead of simulated
 # fake-accelerator nodes. Also control-plane-only by default (tainted no-workload) — see
-# tt-dev-nodes-up below.
-tt-up: render-settings images
+# tt-dev-nodes-up below. Run on the box; the control plane's host then attaches it with
+# cluster-agent-up.
+tt-up:
 	bash localdev/k3s-tenstorrent/install.sh
 
 # Destructive the same way k3s-down is (see its comment) — tears down the whole k3s cluster on
@@ -278,11 +286,7 @@ locked-tt-hardware-image: check-tag
 tt-e2e: render-settings tt-hardware-image
 	bash -c '$(E2E_ENV) bash localdev/k3s-tenstorrent/run-e2e.sh'
 
-# Counterpart to `reload` for the real Tenstorrent host.
-tt-reload: render-settings images
-	bash localdev/k3s-tenstorrent/reload.sh
-
-# Removes the fake nodes and detaches box-a, returning the cluster to control-plane-only.
+# Removes the fake nodes; box-a itself is left as it is.
 tt-dev-nodes-down:
 	bash localdev/k3s-tenstorrent/dev-nodes-down.sh
 

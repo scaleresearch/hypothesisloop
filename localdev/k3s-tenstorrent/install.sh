@@ -40,11 +40,6 @@ set -euo pipefail
 CONTEXT_NAME="k3s-tt"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/node.sh"
-source "${SCRIPT_DIR}/../lib/auth.sh"
-
-# k3s's containerd pulls images from the local registry (docker-compose.yml) over this address,
-# never localhost.
-HOST_ADDRESS="$(lib_host_address)"
 
 # Matches localdev/k3s-macos/install.sh's pin so both profiles track the same tested k8s
 # minor version. DRA (resource.k8s.io/v1) is GA from k8s 1.34; this is comfortably past
@@ -101,11 +96,6 @@ fi
 
 # ---- k3s: native systemd service, same version pin as localdev --------------
 STAGE_T0=$(date +%s)
-echo "==> Writing registries.yaml (registry at ${HOST_ADDRESS}:5000)..."
-sudo mkdir -p /etc/rancher/k3s
-lib_registries_yaml "${HOST_ADDRESS}" | sudo tee /etc/rancher/k3s/registries.yaml >/dev/null
-sudo systemctl is-active k3s >/dev/null 2>&1 && sudo systemctl restart k3s || true
-
 echo "==> Ensuring k3s ${K3S_VERSION} is installed and running..."
 if ! command -v k3s &>/dev/null || ! k3s --version | grep -q "${K3S_VERSION}"; then
   echo "    Installing/upgrading k3s..."
@@ -192,35 +182,16 @@ wait_for 40 3 "Tenstorrent ResourceSlice" sh -c \
   "kubectl --context '${CONTEXT_NAME}' get resourceslices -o json | python3 -c 'import json,sys; assert any(x.get(\"spec\",{}).get(\"driver\")==\"tenstorrent.com\" for x in json.load(sys.stdin)[\"items\"])'"
 echo "==> tt-operator stage: $(( $(date +%s) - STAGE_T0 ))s"
 
-# ---- cluster-agent bundle -------------------------------------------------
-# `make images` (Makefile's `tt-up: images` prerequisite) already pushed the images this cluster
-# needs to the local registry; this node pulls them normally via the registries.yaml written
-# above. Install the node-agent DaemonSet + cluster-agent Deployment so something is actually
-# polling the control plane for work -- without this, jobs submitted to it stay QUEUED forever.
-STAGE_T0=$(date +%s)
-# host.containers.internal is a podman-machine hostname and is not available to native k3s pods
-# convenience hostname that doesn't exist on native Linux — nothing on this host maps it to
-# anything, so cluster-agent would poll a name that never resolves. The control plane's containers
-# publish on 0.0.0.0 (confirmed via `docker port`), so the host's own real IP reaches them from
-# any pod on this node.
-CLUSTER_NAME="box-a" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
-  API_URL="http://${HOST_ADDRESS}:8081" METRICS_URL="http://${HOST_ADDRESS}:8084" \
-  REGISTRY_URL="${HOST_ADDRESS}:5000" RUNTIME_TOKEN="$(lib_runtime_token box-a)" \
-  bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
-echo "${HOST_ADDRESS}" > "${SCRIPT_DIR}/../.host-address"
-echo "==> cluster-agent stage: $(( $(date +%s) - STAGE_T0 ))s"
-
 # Donates zero capacity to workloads by default, same as localdev/k3s-macos/install.sh — applied
 # only now, after tt-operator's own management pods (fabric-manager, NFD master/gc, coredns,
 # metrics-server) have already landed on this one node while it was still schedulable. Tainting
 # any earlier leaves those pods Pending forever (no toleration, no other node to land on),
 # which is exactly what made this hang against helm's own --wait --timeout 8m. node-agent's
-# DaemonSet still monitors this node afterward (tolerates every taint). dev-nodes-up.sh attaches
-# it as a full worker when actually needed (dev work, the portable suite, or the real-hardware
-# e2e); dev-nodes-down.sh detaches it so real training work sharing this box isn't competing with
-# anything k3s scheduled onto it.
+# DaemonSet still monitors this node afterward (tolerates every taint). The real-hardware e2e
+# attaches it as a worker while it runs.
 lib_detach_node "${CONTEXT_NAME}" box-a
 
 echo "==> Cluster ready. Context: ${CONTEXT_NAME}"
+echo "    Attach it from the control plane's host with make cluster-agent-up CLUSTER=box-a (see README)."
 echo
 bash "${SCRIPT_DIR}/status.sh"

@@ -50,3 +50,16 @@ helm upgrade --install hypothesisloop-cluster-agent "${SCRIPT_DIR}/chart" \
   --values - <<VALUES
 runtimeToken: "${RUNTIME_TOKEN}"
 VALUES
+
+# helm reports success once the objects exist; a DaemonSet whose pods never start on a NotReady
+# node is only caught by waiting for the rollout itself.
+ROLLOUT_TIMEOUT=5m
+for workload in deployment/hypothesisloop-cluster-agent daemonset/hypothesisloop-node-agent; do
+  echo "==> Waiting for ${workload} to roll out (timeout ${ROLLOUT_TIMEOUT})"
+  if ! kubectl --context "${KUBE_CONTEXT}" -n hypothesisloop rollout status "${workload}" --timeout="${ROLLOUT_TIMEOUT}"; then
+    echo "ERROR: ${workload} did not finish rolling out within ${ROLLOUT_TIMEOUT}; its pods and the nodes they are on:" >&2
+    kubectl --context "${KUBE_CONTEXT}" -n hypothesisloop get pods -l "app=${workload#*/}" -o wide >&2
+    exit 1
+  fi
+done
+echo "==> Cluster agent on '${CLUSTER_NAME}' is rolled out"
