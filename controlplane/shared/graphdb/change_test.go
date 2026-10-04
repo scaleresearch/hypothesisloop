@@ -107,3 +107,36 @@ func TestRegisterTakesAPersonsCloseIdeaAndListsWhatItReadsCloseTo(t *testing.T) 
 		t.Errorf("a person's idea close to nothing: got = (%+v, %v), want no similar", similar, err)
 	}
 }
+
+// Building on a refuted idea is research when the new claim changes what refuted it: naming the
+// parent in distinct_from is all it takes, and the parent stays the parent.
+func TestARefutedParentNamedInDistinctFromStaysTheParent(t *testing.T) {
+	s := testStore(t)
+	pe := testExperiment(t, s)
+	ctx := context.Background()
+	parent := register(t, s, pe, "agent-1", "learning rate 0.2 overshoots", onRoot(pe))
+	other := register(t, s, pe, "agent-2", "gradient clipping steadies training", onRoot(pe))
+	if _, _, err := s.UpdateStatus(ctx, parent.ID, "agent-1", agentActor("agent-1"), domain.HypothesisRefuted, stampAt(1)); err != nil {
+		t.Fatal(err)
+	}
+	combo := NewHypothesis{AgentID: "agent-1", Actor: agentActor("agent-1"), PlatformExperimentID: pe,
+		Text:  "with clipping at norm 1, a step of 0.2 converges within forty epochs",
+		Links: []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: parent.ID}, {Type: domain.LinkBuildsOn, To: other.ID}}}
+	if _, _, _, _, _, err := s.Register(ctx, combo); similarIDs(t, err)[parent.ID] != "refuted_parent" {
+		t.Fatalf("building on a refuted parent unnamed: got = %v, want it held for %s", err, parent.ID)
+	}
+	combo.DistinctFrom = []string{parent.ID}
+	h, links, existed, _, _, err := s.Register(ctx, combo)
+	if err != nil || existed {
+		t.Fatalf("with the refuted parent in distinct_from: got = (%v, existed=%v), want it registered", err, existed)
+	}
+	parents := map[string]bool{}
+	for _, l := range links {
+		if l.Type == domain.LinkBuildsOn {
+			parents[l.HypothesisID] = true
+		}
+	}
+	if !parents[parent.ID] || !parents[other.ID] || len(parents) != 2 {
+		t.Errorf("%s builds on: got = %v, want %s and %s", h.ID, parents, parent.ID, other.ID)
+	}
+}

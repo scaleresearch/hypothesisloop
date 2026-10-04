@@ -217,7 +217,9 @@ func reportHold(stderr io.Writer, item string, err error) bool {
 	}
 	fmt.Fprintf(stderr, "hl: hypothesis submit: judge each. The same claim as yours: register nothing and test it with "+
 		"hl job submit FILE --hypothesis ID; its verdict stays its owner's. A different claim, narrower and broader ones "+
-		"included: rerun adding --distinct-from %s, with --contradicts ID instead for one that cannot hold together with yours.\n",
+		"included: rerun adding --distinct-from %s, with --contradicts ID instead for one that cannot hold together with yours. "+
+		"A refuted parent you build on stays your parent: keep its --builds-on and add it to --distinct-from when your claim "+
+		"changes what refuted it.\n",
 		strings.Join(ids, ","))
 	return true
 }

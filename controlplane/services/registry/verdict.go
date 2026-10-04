@@ -42,7 +42,7 @@ func (s *Service) supported(ctx context.Context, h *domain.Hypothesis, v Verdict
 	}
 	if reason := strings.TrimSpace(v.Despite); reason != "" {
 		if len(reason) < minDespiteLength {
-			return &UnsupportedVerdictError{Detail: fmt.Sprintf("the reason given with despite is %d characters: say in a sentence why this verdict holds without a repeated run and a control", len(reason))}
+			return &UnsupportedVerdictError{Detail: fmt.Sprintf("the reason given with despite is %d characters, and it takes at least %d characters: say in a sentence why this verdict holds without a repeated run and a control (hl hypothesis status %s %s --despite \"<why>\")", len(reason), minDespiteLength, h.ID, v.Status)}
 		}
 		return nil
 	}
@@ -56,7 +56,9 @@ func (s *Service) supported(ctx context.Context, h *domain.Hypothesis, v Verdict
 			own = append(own, job.ID)
 		}
 	}
-	otherwise := ("Until then the verdict is inconclusive. If the record cannot show what you know (a failure that needs no repeat, a control measured outside this experiment), give the verdict with despite and a sentence of why.")
+	otherwise := fmt.Sprintf("Until then the verdict is inconclusive. If the record cannot show what you know (a failure that needs "+
+		"no repeat, a control measured outside this experiment), give the verdict with despite, a sentence of at least %d "+
+		"characters saying why it holds without them: hl hypothesis status %s %s --despite \"<why>\"", minDespiteLength, h.ID, v.Status)
 	if v.Against == "" {
 		return &UnsupportedVerdictError{Detail: fmt.Sprintf("%s says the hypothesis's jobs differ from a control, and no control is named: give the completed job you compare with as against (a baseline run, or the same job without your change; run one if there is none). %s", v.Status, otherwise)}
 	}

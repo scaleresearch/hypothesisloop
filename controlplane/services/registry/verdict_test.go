@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -43,9 +44,12 @@ func TestAConfirmedOrRefutedVerdictNeedsARepeatedRunAndACompletedControl(t *test
 			"a control still running":   {Verdict{Status: status, Against: "job-control-running"}, []string{"is RUNNING"}},
 			"a control of another one":  {Verdict{Status: status, Against: "job-elsewhere"}, []string{"no job of this platform experiment"}},
 			"a control that is no job":  {Verdict{Status: status, Against: "job-nowhere"}, []string{"no job of this platform experiment"}},
-			"a reason that is one word": {Verdict{Status: status, Despite: "obvious"}, []string{"say in a sentence"}},
+			"a reason that is one word": {Verdict{Status: status, Despite: "obvious"}, []string{"say in a sentence", "is 7 characters"}},
 		}
+		// Every refusal names the way past it: the command with --despite and what it takes.
+		wayOn := fmt.Sprintf("hl hypothesis status %s %s --despite", h.ID, status)
 		for name, c := range refusals {
+			c.says = append(c.says, wayOn, "at least 20 characters")
 			_, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), c.verdict)
 			var unsupported *UnsupportedVerdictError
 			if !errors.As(err, &unsupported) {

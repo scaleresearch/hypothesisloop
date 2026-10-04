@@ -198,3 +198,12 @@ func TestAPersonsCloseIdeaIsRegisteredWithItsSimilarOnesAsAHint(t *testing.T) {
 		t.Errorf("an agent's close claim: got = %v, want 409 similar_hypotheses with the close one", err)
 	}
 }
+
+// An agent held back for a refuted parent reads how to keep building on it.
+func TestTheHoldSaysHowToKeepBuildingOnARefutedParent(t *testing.T) {
+	for _, says := range []string{"distinct_from (hl: --distinct-from ID)", "keep the builds_on link", "changes what refuted it"} {
+		if !strings.Contains(similarDetail, says) {
+			t.Errorf("the 409 similar_hypotheses message does not say %q", says)
+		}
+	}
+}

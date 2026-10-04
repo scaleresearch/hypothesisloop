@@ -71,7 +71,9 @@ const similarDetail = "Nothing was registered: your hypothesis reads close to th
 	"(reason close_text), or builds on a refuted one (refuted_parent). Read each. If one states the same claim as " +
 	"yours, register nothing and test it under its id; only its owner sets its status. A narrower, broader or " +
 	"otherwise different claim is yours to register: resubmit naming each one, as a contradicts link when yours " +
-	"cannot hold together with it, else in distinct_from (hl: --distinct-from), also when you build on it."
+	"cannot hold together with it, else in distinct_from (hl: --distinct-from ID). A refuted_parent stays your " +
+	"parent: keep the builds_on link and name it in distinct_from when your claim changes what refuted it; do not " +
+	"move your hypothesis onto the objective to get past this."
 
 const closedDetail = "the platform experiment is closed, and its hypothesis graph takes no more hypotheses, links, verdicts or comments from anyone"
 
