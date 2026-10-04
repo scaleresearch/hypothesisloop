@@ -61,7 +61,6 @@ func (c *runningCostCalc) costOf(ctx context.Context, exp *domain.Experiment) (r
 	if !found {
 		return runningCost{}, nil
 	}
-	rc := runningCost{found: true, hours: hours}
 	// accH uses the same rate source as settlement (domain.Experiment.RatedCost — the
 	// admission-time estimate's implied per-hour rate), not a live catalog lookup
 	// (AcceleratorType.LookupCost). That used to make live accounting and settlement price the
@@ -69,10 +68,8 @@ func (c *runningCostCalc) costOf(ctx context.Context, exp *domain.Experiment) (r
 	// entry entirely, e.g. #19) after the job was admitted, while settlement always bills at the
 	// rate implied by the estimate the job was actually admitted with. RatedCost needs no catalog
 	// lookup and so can't be knocked out by a retired flavor either.
-	if exp.AcceleratorCount > 0 && exp.AcceleratorType != "" {
-		rc.accH = exp.RatedCost(exp.EstimatedCostAccH, hours)
-	}
-	return rc, nil
+	// A CPU job is billed at that rate too: settlement charges every job that reserved an estimate.
+	return runningCost{found: true, hours: hours, accH: exp.RatedCost(exp.EstimatedCostAccH, hours)}, nil
 }
 
 // correctRunningCosts adjusts quotas in place: for every currently-RUNNING experiment owned by
@@ -94,9 +91,6 @@ func (s *PlatformExperimentsService) correctRunningCosts(ctx context.Context, pe
 			return fmt.Errorf("quota.correctRunningCosts: %w", err)
 		}
 		for _, exp := range running {
-			if exp.AcceleratorCount <= 0 || exp.AcceleratorType == "" {
-				continue
-			}
 			rc, err := calc.costOf(ctx, exp)
 			if err != nil {
 				return fmt.Errorf("quota.correctRunningCosts: %w", err)

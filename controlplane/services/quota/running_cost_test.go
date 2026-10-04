@@ -146,6 +146,26 @@ func TestCorrectRunningCostsBillsNormallyOnRetiredRate(t *testing.T) {
 	}
 }
 
+// A running CPU job was skipped by the correction and kept its whole estimate as used, though
+// settlement bills it by the same rate as any job.
+func TestCorrectRunningCostsCountsARunningCPUJobAtItsCostSoFar(t *testing.T) {
+	now := time.Now().UTC()
+	server := aliveServer(t, now, time.Minute, 10*time.Minute)
+	defer server.Close()
+	exp := &domain.Experiment{
+		ID: "exp-cpu", CreatedAt: now.Add(-30 * time.Minute),
+		EstimatedDurationHours: 1, EstimatedCostAccH: 5, CapacityTier: domain.CapacityGuaranteed,
+	}
+	svc, _ := newObservedTestService(t, server.URL, []*domain.Experiment{exp})
+	q := &domain.AgentQuota{AgentID: "agent-1", PlatformExperimentID: "pe-1", UsedGuaranteedAccH: 5}
+	if err := svc.correctRunningCosts(context.Background(), testPE, []*domain.AgentQuota{q}); err != nil {
+		t.Fatalf("correctRunningCosts: %v", err)
+	}
+	if q.UsedGuaranteedAccH <= 0 || q.UsedGuaranteedAccH >= 5 {
+		t.Fatalf("used_guaranteed_acch = %v, want the half hour it ran, below its estimate of 5", q.UsedGuaranteedAccH)
+	}
+}
+
 // A job that has never posted an observation must not warn or otherwise short-circuit ahead of
 // the !found check.
 func TestCorrectRunningCostsNeverObservedIsNotTreatedAsRetiredRate(t *testing.T) {
