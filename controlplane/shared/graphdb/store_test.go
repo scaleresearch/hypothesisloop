@@ -178,6 +178,30 @@ func TestRegisterTakesTheSecondClaimOfAnExperimentWhenItMovesAnotherLever(t *tes
 	}
 }
 
+// A new line is held at newLineThreshold, a refinement at similarThreshold: the same restatement,
+// scoring between the two, is held as one and taken as the other.
+func TestRegisterHoldsANewLineAtTheLowerBar(t *testing.T) {
+	s := testStore(t)
+	pe := testExperiment(t, s)
+	ctx := context.Background()
+	text := "Separate per-field streams coded with lzma raise the ratio over interleaved records, as each field keeps its own statistics."
+	other := "Storing each field contiguously, instead of interleaved per record, raises the compression ratio because the coder sees each field's own regularity."
+	sibling := "a larger dictionary helps"
+	if score := similarities(text, []string{other, sibling})[0]; score < newLineThreshold || score >= similarThreshold {
+		t.Fatalf("score %.3f, want in [%v, %v)", score, newLineThreshold, similarThreshold)
+	}
+	line := register(t, s, pe, "agent-1", other, onRoot(pe))
+	parent := register(t, s, pe, "agent-1", sibling, onRoot(pe))
+	_, _, _, _, _, err := s.Register(ctx, NewHypothesis{AgentID: "agent-2", PlatformExperimentID: pe, Text: text, Links: onRoot(pe)})
+	if got := similarIDs(t, err); len(got) != 1 || got[line.ID] != "close_text" {
+		t.Fatalf("new line: got = %v, want %s as close_text", got, line.ID)
+	}
+	if _, _, _, _, _, err := s.Register(ctx, NewHypothesis{AgentID: "agent-2", PlatformExperimentID: pe, Text: text,
+		Links: []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: parent.ID}}}); err != nil {
+		t.Fatalf("refinement: got %v, want it registered", err)
+	}
+}
+
 func TestRegisterHoldsBackAClaimBuildingOnARefutedOne(t *testing.T) {
 	s := testStore(t)
 	pe := testExperiment(t, s)

@@ -35,6 +35,13 @@ const (
 	// the dummy demo agent runs: reworded duplicates scored 0.069 and 0.107, the closest other
 	// hypothesis 0.021.
 	similarThreshold = 0.05
+	// newLineThreshold is that score for a hypothesis that builds on the objective alone: a new
+	// line, placed under nothing its agent had to read first. Agents state a claim at length, with
+	// its rationale and numbers, which dilutes the score: on a hosted run a new line restating
+	// another agent's confirmed one in other words scored 0.027 against it. No bar tells that apart
+	// from a new line that moves another lever and explains how (0.036 in the tests), so this one
+	// holds both: a distinct line passes with one distinct_from, a duplicated one costs a line of work.
+	newLineThreshold = 0.02
 	maxSimilar       = 5
 	// pairReach is how many following words a word is paired with.
 	pairReach = 2
@@ -111,9 +118,20 @@ func similarities(text string, docs []string) []float64 {
 	return out
 }
 
+// closeAt is the score at which n reads close to another hypothesis: newLineThreshold when n
+// builds on the objective alone, else similarThreshold.
+func closeAt(n NewHypothesis) float64 {
+	for _, l := range n.Links {
+		if l.Type == domain.LinkBuildsOn && l.To != n.PlatformExperimentID {
+			return similarThreshold
+		}
+	}
+	return newLineThreshold
+}
+
 // untoldSimilar returns the hypotheses of n's platform experiment that n must be told apart from:
-// those whose text reads close to n's, except the ones n builds on, which a refinement is expected
-// to read close to, and those n builds on that are refuted, minus every one n names in
+// those whose text reads close to n's (closeAt), except the ones n builds on, which a refinement is
+// expected to read close to, and those n builds on that are refuted, minus every one n names in
 // DistinctFrom or in a contradicts or related link. Refuted parents first, then closest first, at
 // most maxSimilar.
 func untoldSimilar(ctx context.Context, tx neo4j.ManagedTransaction, n NewHypothesis) ([]domain.SimilarHypothesis, error) {
@@ -141,6 +159,7 @@ RETURN h.id, h.agent_id, coalesce(h.actor_kind, 'unverified'), coalesce(h.actor_
 		texts[i] = d.str(r.Values[6])
 	}
 	scores := similarities(n.Text, texts)
+	threshold := closeAt(n)
 	type scored struct {
 		h     domain.SimilarHypothesis
 		score float64
@@ -156,7 +175,7 @@ RETURN h.id, h.agent_id, coalesce(h.actor_kind, 'unverified'), coalesce(h.actor_
 		switch {
 		case parents[h.ID] && h.Status == domain.HypothesisRefuted:
 			h.Reason = "refuted_parent"
-		case scores[i] >= similarThreshold && !parents[h.ID]:
+		case scores[i] >= threshold && !parents[h.ID]:
 			h.Reason = "close_text"
 		default:
 			continue

@@ -377,7 +377,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"Find where your idea belongs first with POST /hypotheses/query. Idempotent within a platform_experiment_id: " +
 			"text equivalent to an existing hypothesis (modulo case/whitespace) returns that row with 200 and " +
 			"already_existed=true and your links are not applied; a new one returns 201. While the text reads close to " +
-			"hypotheses of the platform experiment it does not build on (word overlap), or a builds_on target is refuted, it answers 409 similar_hypotheses " +
+			"hypotheses of the platform experiment it does not build on (word overlap, at a lower bar for one that builds on the objective alone), or a builds_on target is refuted, it answers 409 similar_hypotheses " +
 			"with them in `similar` and registers nothing until each is named in distinct_from or in a contradicts or " +
 			"related link. A signed-in person is not refused: their hypothesis is registered with 201 and the ones it reads close to come back in similar, as a hint. The returned id is " +
 			"metadata.hypothesis_id for the job testing it; every job must reference a hypothesis from its own platform " +
