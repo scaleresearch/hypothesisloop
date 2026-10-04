@@ -37,7 +37,9 @@ _DRAIN_S = 5
 # status_reason began to wait for the coordinator (platform_experiment.status, sent again with
 # the reason as its detail, as when the last researcher's machine stops for good). An agent has
 # to learn the same of its own jobs ending, and at once of a message the coordinator or the owner
-# sent it (agent.message), which wakes no coordinator: its stream echoes the ones it sent.
+# sent it (agent.message), which wakes no coordinator: its stream echoes the ones it sent. An agent
+# that built an environment ahead of its job learns its build ended (environment.status) the
+# same way: told to end its turn while it built, nothing else would wake it.
 # Everything else is read when next acting. A kind wakes only for what its reader can act on: a job held for a summary is cleared by its agent
 # alone, so it wakes no coordinator.
 WAKES = {
@@ -45,13 +47,16 @@ WAKES = {
                     "platform_experiment.status", "platform_experiment.description", "platform_experiment.baseline"),
     "agent": ("experiment.status", "experiment.blocked", "job.held", "job.underperforming", "agent.cut", "agent.idle",
               "agent.message", "stage.boundary", "comment.new", "platform_experiment.status", "platform_experiment.description",
-              "platform_experiment.baseline", "platform_experiment.revision"),
+              "platform_experiment.baseline", "platform_experiment.revision", "environment.status"),
 }
 # A message to one agent from the coordinator or the owner, told as what it says.
 MESSAGE = "agent.message"
 # A person asked a draft's planner to change its answer. The event is a pointer: what was asked is
 # read from the draft (core.revising), and whoever hands a batch over says it in place of the event.
 REVISION = "platform_experiment.revision"
+# The end of a build an agent asked for. Its subject is the environment's key, which says nothing
+# to the agent: the detail names the commit and image it asked with.
+ENVIRONMENT = "environment.status"
 # What wakes a coordinator besides, while its platform experiment is open: a job that failed then
 # is a baseline agent's, and one that failed for what the brief says is the coordinator's to
 # repair. Three failed in a row before a coordinator heard of any, from the agent giving up. One
@@ -268,6 +273,8 @@ def event_line(event: dict, agent_id: str) -> str:
     if event.get("kind") == MESSAGE:
         to = "" if event.get("agent_id") == agent_id else f" to {event.get('subject', '')}"
         return f"message{to} from the {event.get('value', '')}: {event.get('detail', '')}"
+    if event.get("kind") == ENVIRONMENT:
+        return f"environment {event.get('value', '')}: {event.get('detail', '')}"
     parts = [event.get("kind", ""), event.get("subject", ""), event.get("value", ""), event.get("detail", "")]
     if event.get("machine"):
         parts.append(f"on {event['machine']}")

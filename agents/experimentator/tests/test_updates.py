@@ -473,6 +473,16 @@ class FormatTest(unittest.TestCase):
         self.assertIn("agent.message", updates.WAKES["agent"])
         self.assertNotIn("agent.message", updates.WAKES["coordinator"])
 
+    # A baseline agent told to end its turn while its environment built sat idle until the idle
+    # nudge: the build failed 8 minutes in and nothing woke it.
+    def test_the_end_of_a_build_wakes_its_agent_and_says_the_outcome(self):
+        detail = ("the environment commit cccccccccccc declares in .hypothesisloop/Dockerfile did not build on pytorch: "
+                  "`hl env status` at that commit prints the end of its output. Fix the file, commit and build again")
+        ended = {"kind": "environment.status", "subject": "90aa96c4" * 8, "value": "failed", "detail": detail,
+                 "agent_id": "agent-a", "position": 10, "cursor": 10}
+        self.assertEqual(updates.event_line(ended, "agent-a"), f"environment failed: {detail}")
+        self.assertIn("environment.status", updates.WAKES["agent"])
+
 
 
 if __name__ == "__main__":
