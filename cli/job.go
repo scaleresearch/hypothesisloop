@@ -27,7 +27,7 @@ var jobCommands = []subcommand{
 	{"wait", "block until jobs end, then print each as list does", jobWait, everyone},
 	{"logs", "the last log lines its cluster reported", jobLogs, everyone},
 	{"data", "what the job wrote to the object store", func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-		return jobRead(c, "data", "/data", "What the job wrote under its data prefix, one object per line", args, stdout, stderr)
+		return jobRead(c, "data", "/data", "What the job wrote under its data prefix, one object per line, each with a url a plain GET reads it by for 12 hours: how a job of a prior run is read", args, stdout, stderr)
 	}, everyone},
 	{"cost", "what it cost so far, against the estimate", func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 		return jobRead(c, "cost", "/cost", "Actual consumption so far (settled once final) beside the admission-time estimate", args, stdout, stderr)

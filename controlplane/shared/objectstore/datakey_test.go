@@ -84,7 +84,7 @@ func TestCreateDataKeySendsTheKeyAndItsPolicyEncryptedToTheAdminAPI(t *testing.T
 		t.Fatal(err)
 	}
 	key := domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"}
-	if err := client.CreateDataKey(context.Background(), key, testPE, nil, testAgent, testJob); err != nil {
+	if err := client.CreateDataKey(context.Background(), key, testPE, testAgent, testJob); err != nil {
 		t.Fatalf("CreateDataKey: %v", err)
 	}
 	if got.AccessKey != "AK" || got.SecretKey != "SK" {
@@ -113,7 +113,7 @@ func TestCreateAgentDataKeyAsksForTheAgentsWriteScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := client.CreateAgentDataKey(context.Background(), domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"}, testPE, nil, testAgent); err != nil {
+	if err := client.CreateAgentDataKey(context.Background(), domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"}, testPE, testAgent); err != nil {
 		t.Fatalf("CreateAgentDataKey: %v", err)
 	}
 	if got.AccessKey != "AK" || got.SecretKey != "SK" || got.Description != "agent pe-1/agent-a/" {
@@ -141,7 +141,7 @@ func TestCreateDataKeyReportsAStoreRefusal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = client.CreateDataKey(context.Background(), domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"}, testPE, nil, testAgent, testJob)
+	err = client.CreateDataKey(context.Background(), domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"}, testPE, testAgent, testJob)
 	if err == nil || !strings.Contains(err.Error(), "XMinioIAMServiceAccountNotAllowed") {
 		t.Fatalf("CreateDataKey = %v, want the store's refusal", err)
 	}

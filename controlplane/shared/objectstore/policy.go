@@ -39,33 +39,26 @@ type Policy struct {
 // function decides what a job may touch, so it must not be reachable with input that changes the
 // meaning of what it emits, whatever a future caller does upstream.
 //
-// prior is the prior runs of the platform experiment (domain.Tenancy.PriorRuns), whose prefixes
-// it reads as its own.
-func JobPolicy(bucket, platformExperimentID string, prior []string, agentID, experimentID string) (Policy, error) {
-	return prefixPolicy(bucket, platformExperimentID, prior, JobPrefix(platformExperimentID, agentID, experimentID),
+// The grant is fixed when the key is created and never names another run: a prior run's data is
+// read through the API (Client.ListReadable), which decides at each request who reaches it.
+func JobPolicy(bucket, platformExperimentID, agentID, experimentID string) (Policy, error) {
+	return prefixPolicy(bucket, platformExperimentID, JobPrefix(platformExperimentID, agentID, experimentID),
 		policyID{"agent_id", agentID}, policyID{"experiment_id", experimentID})
 }
 
 // AgentPolicy is the grant an agent holds outside its jobs: the same read span, and write
 // confined to the prefix its own jobs write under.
-func AgentPolicy(bucket, platformExperimentID string, prior []string, agentID string) (Policy, error) {
-	return prefixPolicy(bucket, platformExperimentID, prior, AgentPrefix(platformExperimentID, agentID),
+func AgentPolicy(bucket, platformExperimentID, agentID string) (Policy, error) {
+	return prefixPolicy(bucket, platformExperimentID, AgentPrefix(platformExperimentID, agentID),
 		policyID{"agent_id", agentID})
 }
 
 type policyID struct{ kind, value string }
 
-// prefixPolicy grants list and read across the platform experiment and its prior runs,
-// and write under writePrefix.
-func prefixPolicy(bucket, platformExperimentID string, prior []string, writePrefix string, ids ...policyID) (Policy, error) {
-	ids = append([]policyID{{"bucket", bucket}}, ids...)
+// prefixPolicy grants list and read across the platform experiment, and write under writePrefix.
+func prefixPolicy(bucket, platformExperimentID, writePrefix string, ids ...policyID) (Policy, error) {
+	ids = append([]policyID{{"bucket", bucket}, {"platform_experiment_id", platformExperimentID}}, ids...)
 	bucketARN := "arn:aws:s3:::" + bucket
-	var readable, objects []string
-	for _, id := range append([]string{platformExperimentID}, prior...) {
-		ids = append(ids, policyID{"platform_experiment_id", id})
-		readable = append(readable, PlatformExperimentPrefix(id)+"*")
-		objects = append(objects, bucketARN+"/"+PlatformExperimentPrefix(id)+"*")
-	}
 	for _, part := range ids {
 		if strings.ContainsAny(part.value, "*?") {
 			return Policy{}, fmt.Errorf(
@@ -86,7 +79,7 @@ func prefixPolicy(bucket, platformExperimentID string, prior []string, writePref
 				Resource: []string{bucketARN},
 				Condition: map[string]any{
 					"StringLike": map[string]any{
-						"s3:prefix": readable,
+						"s3:prefix": []string{PlatformExperimentPrefix(platformExperimentID) + "*"},
 					},
 				},
 			},
@@ -94,7 +87,7 @@ func prefixPolicy(bucket, platformExperimentID string, prior []string, writePref
 				Sid:      "ReadAcrossPlatformExperiment",
 				Effect:   "Allow",
 				Action:   []string{"s3:GetObject"},
-				Resource: objects,
+				Resource: []string{bucketARN + "/" + PlatformExperimentPrefix(platformExperimentID) + "*"},
 			},
 			{
 				Sid:      "WriteOwnPrefixOnly",

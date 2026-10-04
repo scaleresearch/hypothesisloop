@@ -322,11 +322,14 @@ accepting replaces it with the number accepted.
 
 ### Carrying a run on
 
-Every closed platform experiment of the same project and repository is a prior run of a new
-one, listed on it as `prior_runs` with each one's best on its primary metric. Nothing is copied:
-its agents and its coordinator read each prior run as their own, passing its id as
-`--platform-experiment` (its summary, standings, jobs and their logs, hypotheses and findings),
-and their data keys read its data prefix; they write nothing to it.
+Every closed platform experiment of the same project and repository that ran (its researchers
+started or it declared a baseline) is a prior run of a new one, listed on it as `prior_runs`
+with each one's best on its primary metric. Nothing is copied: its agents and its coordinator
+read each prior run as their own, passing its id as `--platform-experiment` (its summary,
+standings, jobs and their logs, hypotheses and findings), and the data its jobs wrote by the
+`url` of each object `hl job data` lists, which reads it for 12 hours with no key. They write
+nothing to it. A data key opens its own run alone, so it stays one prefix however many runs
+came before.
 
 A new run, a draft or one created whole, names with `continues` the prior run it carries on.
 Only a run that declared a baseline can be continued. Its

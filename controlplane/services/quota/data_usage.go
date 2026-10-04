@@ -36,8 +36,6 @@ type AgentDataCost struct {
 // AgentDataKeyStore keeps one object-store key per signup; see db.PlatformExperimentsStore.AgentDataKey.
 type AgentDataKeyStore interface {
 	AgentDataKey(ctx context.Context, platformExperimentID, agentID string, create func(context.Context) (domain.DataKey, error)) (domain.DataKey, error)
-	// PriorRuns is the prior runs of a platform experiment, whose data its agents read.
-	PriorRuns(ctx context.Context, platformExperimentID string) ([]string, error)
 }
 
 // ActiveGate is PlatformExperimentsService.RequireActive.
@@ -130,11 +128,7 @@ func (h *DataUsageHandler) AgentDataAccess(ctx context.Context, platformExperime
 		if err != nil {
 			return domain.DataKey{}, err
 		}
-		prior, err := h.keys.PriorRuns(ctx, platformExperimentID)
-		if err != nil {
-			return domain.DataKey{}, err
-		}
-		return key, h.dataStore.CreateAgentDataKey(ctx, key, platformExperimentID, prior, agentID)
+		return key, h.dataStore.CreateAgentDataKey(ctx, key, platformExperimentID, agentID)
 	})
 	if err != nil {
 		return nil, err

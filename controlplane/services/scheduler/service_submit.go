@@ -402,12 +402,8 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		return fmt.Errorf("scheduler: %w", err)
 	}
 	exp.DataKey = dataKey
-	prior, err := s.store.PriorRuns(ctx, pe.ID)
-	if err != nil {
-		return fmt.Errorf("scheduler: %w", err)
-	}
 	decision, err := s.quota.AdmitExperiment(ctx, exp, rateLimit, func(ctx context.Context) error {
-		return s.dataStore.CreateDataKey(ctx, dataKey, exp.PlatformExperimentID, prior, exp.AgentID, exp.ID)
+		return s.dataStore.CreateDataKey(ctx, dataKey, exp.PlatformExperimentID, exp.AgentID, exp.ID)
 	})
 	var refusal *db.AdmitRefusal
 	switch {

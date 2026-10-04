@@ -2,8 +2,10 @@ package objectstore
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -62,7 +64,7 @@ func TestLiveStoreEnforcesTheJobKeyPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := root.CreateDataKey(context.Background(), key, pe, nil, "agent", "job"); err != nil {
+	if err := root.CreateDataKey(context.Background(), key, pe, "agent", "job"); err != nil {
 		t.Fatalf("CreateDataKey: %v", err)
 	}
 	own := JobPrefix(pe, "agent", "job") + "ckpt"
@@ -98,6 +100,37 @@ func TestLiveStoreEnforcesTheJobKeyPolicy(t *testing.T) {
 	}
 }
 
+// The store reads an object through the URL ListReadable hands out with no key at all, and
+// refuses the same URL with its signature altered.
+func TestLiveStoreServesAListedObjectByItsReadURL(t *testing.T) {
+	root := liveStore(t)
+	object := JobPrefix("pe-"+uuid.New().String()[:8], "agent", "job") + "ckpt.pt"
+	t.Cleanup(func() { storeStatus(t, root, http.MethodDelete, object, nil) })
+	if got := putStatus(t, root, object); got != http.StatusOK {
+		t.Fatalf("seed %s: status %d", object, got)
+	}
+	objects, err := root.ListReadable(context.Background(), object)
+	if err != nil || len(objects) != 1 {
+		t.Fatalf("ListReadable = %+v, %v, want the one object", objects, err)
+	}
+	get := func(url string) (int, string) {
+		resp, err := http.Get(url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(body)
+	}
+	if status, body := get(objects[0].URL); status != http.StatusOK || body != "evidence" {
+		t.Fatalf("GET the read URL: status %d, %q, want 200 and the object", status, body)
+	}
+	tampered := objects[0].URL[:len(objects[0].URL)-1] + map[bool]string{true: "1", false: "0"}[strings.HasSuffix(objects[0].URL, "0")]
+	if status, _ := get(tampered); status != http.StatusForbidden {
+		t.Fatalf("GET with an altered signature: status %d, want 403", status)
+	}
+}
+
 func TestLiveStoreRefusesADeletedKey(t *testing.T) {
 	root := liveStore(t)
 	pe := "pe-" + uuid.New().String()[:8]
@@ -105,7 +138,7 @@ func TestLiveStoreRefusesADeletedKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := root.CreateAgentDataKey(context.Background(), key, pe, nil, "agent"); err != nil {
+	if err := root.CreateAgentDataKey(context.Background(), key, pe, "agent"); err != nil {
 		t.Fatalf("CreateAgentDataKey: %v", err)
 	}
 	agent, err := New(root.Endpoint, root.Endpoint, root.Region, root.Bucket, key.AccessKeyID, key.SecretAccessKey)

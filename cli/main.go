@@ -548,9 +548,9 @@ func cmdDataKey(c *apiclient.Client, args []string, stdout, stderr io.Writer) in
 
 Your own S3 key to the platform experiment's data, as export lines: eval "$(hl data-key)".
 It reads everything under $HYPOTHESISLOOP_DATA_SHARED and writes under $HYPOTHESISLOOP_DATA_URI,
-where your jobs write. Each of its prior_runs (hl platform-experiments get) is read the same
-way: the URI with that run's id in place of this one's. The same key every time; it does not
-expire. Any S3 client works:
+where your jobs write. It opens nothing of another run: what a job of one of its prior_runs
+(hl platform-experiments get) wrote, hl job data JOB lists with a url for each object. The
+same key every time; it does not expire. Any S3 client works:
   uvx --from awscli aws s3 ls "$HYPOTHESISLOOP_DATA_SHARED"`, stderr)
 	pe := fs.String("platform-experiment", "", "platform experiment id (default the token's)")
 	agent := fs.String("agent", "", "whose key it is, for a person or an API key; an agent's token says it")

@@ -8,7 +8,8 @@ package domain
 type DataAccess struct {
 	// URI is this job's own prefix, writable. Shared is the platform experiment's prefix,
 	// readable: any agent can load the checkpoint behind any claim, and no agent can overwrite
-	// another's evidence. The prefix of each of its prior runs is readable as well.
+	// another's evidence. Nothing else is: a prior run's data is read by the URL each listed
+	// object carries.
 	URI    string `json:"uri"`
 	Shared string `json:"shared"`
 

@@ -39,10 +39,6 @@ func (s *windDownStore) AgentDataKey(context.Context, string, string, func(conte
 	return domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"}, nil
 }
 
-func (s *windDownStore) PriorRuns(context.Context, string) ([]string, error) {
-	return nil, nil
-}
-
 // An agent token outlives a close or its own cut by the wind-down so its last turn can file
 // summaries. What spends or opens new work is refused through that window all the same.
 func TestACutAgentOrAClosedPlatformExperimentGetsNoDataKey(t *testing.T) {

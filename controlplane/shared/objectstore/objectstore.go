@@ -1,7 +1,7 @@
 // Package objectstore is the only place the durable-data object store is queried from. It speaks
 // S3's ListObjectsV2 over net/http with a hand-rolled SigV4 signer rather than pulling in an SDK:
-// the control plane never moves a byte of job data — it lists and measures prefixes and creates
-// one key per job — and a vendored SDK is a large dependency for two request shapes.
+// the control plane never moves a byte of job data — it lists and measures prefixes, creates one
+// key per job and signs read URLs — and a vendored SDK is a large dependency for those.
 package objectstore
 
 import (
@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -27,6 +28,7 @@ const unreachableAfter = 5 * time.Second
 type Object struct {
 	Key          string    `json:"key"`
 	URI          string    `json:"uri" doc:"s3:// address of the object, as a job's own S3 client resolves it."`
+	URL          string    `json:"url,omitempty" doc:"A plain GET of it reads the object, with no key, for 12 hours from the listing (curl -o FILE URL): how a prior run's data is read, its URI being outside every data key. List again for a fresh one."`
 	SizeBytes    int64     `json:"size_bytes"`
 	LastModified time.Time `json:"last_modified"`
 }
@@ -213,16 +215,74 @@ func (c *Client) signedRequest(ctx context.Context, method, path string, query m
 		"AWS4-HMAC-SHA256", amzDate, scope, sha256Hex(canonicalRequest),
 	}, "\n")
 
-	key := hmacSHA256([]byte("AWS4"+c.SecretAccessKey), dateStamp)
-	key = hmacSHA256(key, c.Region)
-	key = hmacSHA256(key, "s3")
-	key = hmacSHA256(key, "aws4_request")
-	signature := hex.EncodeToString(hmacSHA256(key, stringToSign))
+	signature := hex.EncodeToString(hmacSHA256(c.signingKey(dateStamp), stringToSign))
 
 	req.Header.Set("Authorization", fmt.Sprintf(
 		"AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
 		c.AccessKeyID, scope, signedHeaders, signature))
 	return req, nil
+}
+
+func (c *Client) signingKey(dateStamp string) []byte {
+	key := hmacSHA256([]byte("AWS4"+c.SecretAccessKey), dateStamp)
+	key = hmacSHA256(key, c.Region)
+	key = hmacSHA256(key, "s3")
+	return hmacSHA256(key, "aws4_request")
+}
+
+// ReadURLLifetime is how long a URL ListReadable hands out opens its object.
+const ReadURLLifetime = 12 * time.Hour
+
+// ListReadable is List with each object's URL: a plain GET of it, from anywhere that reaches
+// Endpoint, reads that one object until ReadURLLifetime has passed. It is how a run reads a prior
+// run's data: no data key names another run, so whoever the API lets list a prefix reads it this
+// way, decided at each request and never written into a key.
+func (c *Client) ListReadable(ctx context.Context, prefix string) ([]Object, error) {
+	objects, err := c.List(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+	endpoint, err := url.Parse(c.Endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("objectstore: parse endpoint %q: %w", c.Endpoint, err)
+	}
+	now := time.Now()
+	for i := range objects {
+		path := endpoint.Path + "/" + c.Bucket + "/" + escapePath(objects[i].Key)
+		objects[i].URL = endpoint.Scheme + "://" + endpoint.Host + path + "?" + c.presignedQuery(endpoint.Host, path, now, ReadURLLifetime)
+	}
+	return objects, nil
+}
+
+// presignedQuery is the SigV4 query that signs a GET of path on host from now for lifetime.
+func (c *Client) presignedQuery(host, path string, now time.Time, lifetime time.Duration) string {
+	now = now.UTC()
+	amzDate := now.Format("20060102T150405Z")
+	dateStamp := now.Format("20060102")
+	scope := dateStamp + "/" + c.Region + "/s3/aws4_request"
+	query := encodeCanonicalQuery(map[string]string{
+		"X-Amz-Algorithm":     "AWS4-HMAC-SHA256",
+		"X-Amz-Credential":    c.AccessKeyID + "/" + scope,
+		"X-Amz-Date":          amzDate,
+		"X-Amz-Expires":       strconv.Itoa(int(lifetime.Seconds())),
+		"X-Amz-SignedHeaders": "host",
+	})
+	canonicalRequest := strings.Join([]string{
+		http.MethodGet, path, query, "host:" + host + "\n", "host", "UNSIGNED-PAYLOAD",
+	}, "\n")
+	stringToSign := strings.Join([]string{
+		"AWS4-HMAC-SHA256", amzDate, scope, sha256Hex(canonicalRequest),
+	}, "\n")
+	return query + "&X-Amz-Signature=" + hex.EncodeToString(hmacSHA256(c.signingKey(dateStamp), stringToSign))
+}
+
+// escapePath escapes each segment of an object key as SigV4 and a URL both read it.
+func escapePath(key string) string {
+	segments := strings.Split(key, "/")
+	for i, s := range segments {
+		segments[i] = uriEscape(s)
+	}
+	return strings.Join(segments, "/")
 }
 
 // encodeCanonicalQuery renders the query the way SigV4 requires: keys sorted, every character

@@ -22,7 +22,7 @@ func (s *Service) ListData(ctx context.Context, experimentID string) ([]objectst
 	if exp == nil {
 		return nil, fmt.Errorf("%w: %s", ErrExperimentNotFound, experimentID)
 	}
-	objects, err := s.dataStore.List(ctx, objectstore.JobPrefix(exp.PlatformExperimentID, exp.AgentID, exp.ID))
+	objects, err := s.dataStore.ListReadable(ctx, objectstore.JobPrefix(exp.PlatformExperimentID, exp.AgentID, exp.ID))
 	if err != nil {
 		return nil, fmt.Errorf("registry.ListData: %w", err)
 	}

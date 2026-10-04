@@ -63,8 +63,8 @@ func TestASessionIsKeptOutsideEveryPrefixAnAgentOrAJobKeyReads(t *testing.T) {
 	}
 	// What an agent's and a job's key open is the platform experiment's own prefix.
 	for _, policy := range []func() (Policy, error){
-		func() (Policy, error) { return AgentPolicy("bucket", "pe-1", nil, "ag-1") },
-		func() (Policy, error) { return JobPolicy("bucket", "pe-1", nil, "ag-1", "job-1") },
+		func() (Policy, error) { return AgentPolicy("bucket", "pe-1", "ag-1") },
+		func() (Policy, error) { return JobPolicy("bucket", "pe-1", "ag-1", "job-1") },
 	} {
 		granted, err := policy()
 		if err != nil {

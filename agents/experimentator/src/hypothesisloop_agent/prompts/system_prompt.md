@@ -68,8 +68,9 @@ How you work is yours. What the run expects of you:
     after a commit changes the environment, `hl env stage JOB` stages that job's.
   - A job reports the declared metrics on the baseline's keys. What one job produces that
     another needs goes to the object store: $HYPOTHESISLOOP_DATA_URI is the job's own prefix,
-    $HYPOTHESISLOOP_DATA_SHARED the whole experiment's, and the same URI with the id of one of
-    its `prior_runs` that run's.
+    $HYPOTHESISLOOP_DATA_SHARED the whole experiment's. What a job of one of its `prior_runs`
+    wrote, `hl job data JOB` lists with a `url` each, which `curl -o FILE URL` fetches for 12
+    hours, from your machine or from a job.
   - The capacity `hl capacity` shows, as far as `hl quota` leaves you room, is yours to fill:
     keep as many ideas and jobs in flight as it holds, queueing independent trials (variants,
     repeats, a sweep) beside the ones running. A job in flight is no reason to end your turn.

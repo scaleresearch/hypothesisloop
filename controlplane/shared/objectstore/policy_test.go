@@ -80,7 +80,7 @@ func TestJobPolicyScopesListingToThePlatformExperimentPrefix(t *testing.T) {
 
 func mustJobPolicy(t *testing.T) Policy {
 	t.Helper()
-	policy, err := JobPolicy(testBucket, testPE, nil, testAgent, testJob)
+	policy, err := JobPolicy(testBucket, testPE, testAgent, testJob)
 	if err != nil {
 		t.Fatalf("JobPolicy: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestJobPolicyRefusesAnIdentifierCarryingAnIAMWildcard(t *testing.T) {
 		{"job id", testPE, testAgent, "job-?"},
 		{"platform experiment id", "pe-*", testAgent, testJob},
 	} {
-		if _, err := JobPolicy(testBucket, bad.pe, nil, bad.agent, bad.job); err == nil {
+		if _, err := JobPolicy(testBucket, bad.pe, bad.agent, bad.job); err == nil {
 			t.Errorf("JobPolicy accepted a wildcard in the %s — the generated policy would grant more than the job's own prefix", bad.what)
 		}
 	}
@@ -108,13 +108,13 @@ func TestJobPolicyRefusesAnIdentifierCarryingAnIAMWildcard(t *testing.T) {
 // An empty segment collapses the prefix, so "<pe>//<job>/*" would not name the job's prefix at
 // all. Refusing beats emitting a policy whose scope nobody can read off it.
 func TestJobPolicyRefusesAnEmptyIdentifier(t *testing.T) {
-	if _, err := JobPolicy(testBucket, testPE, nil, "", testJob); err == nil {
+	if _, err := JobPolicy(testBucket, testPE, "", testJob); err == nil {
 		t.Error("JobPolicy accepted an empty agent id")
 	}
 }
 
 func TestAgentPolicyWritesTheAgentsPrefixAndReadsThePlatformExperiment(t *testing.T) {
-	policy, err := AgentPolicy(testBucket, testPE, nil, testAgent)
+	policy, err := AgentPolicy(testBucket, testPE, testAgent)
 	if err != nil {
 		t.Fatalf("AgentPolicy: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestAgentPolicyWritesTheAgentsPrefixAndReadsThePlatformExperiment(t *testin
 
 func TestAgentPolicyRefusesAWildcardOrEmptyIdentifier(t *testing.T) {
 	for _, bad := range []struct{ pe, agent string }{{testPE, "agent-*"}, {"pe-?", testAgent}, {testPE, ""}} {
-		if _, err := AgentPolicy(testBucket, bad.pe, nil, bad.agent); err == nil {
+		if _, err := AgentPolicy(testBucket, bad.pe, bad.agent); err == nil {
 			t.Errorf("AgentPolicy accepted platform experiment %q, agent %q", bad.pe, bad.agent)
 		}
 	}
