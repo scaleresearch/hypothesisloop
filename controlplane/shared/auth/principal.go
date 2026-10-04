@@ -39,6 +39,9 @@ type Principal struct {
 	ProjectID string
 
 	PlatformExperimentID string
+	// Continues is the run an agent's or a coordinator's platform experiment carries on, which
+	// it reads as its own (readsContinued).
+	Continues string
 	// PlatformExperimentClosed is set on a coordinator token whose platform experiment has
 	// closed: until its wind-down is over it reads and files the summary, and does nothing else.
 	PlatformExperimentClosed bool

@@ -1614,3 +1614,7 @@ BEGIN
     END IF;
 END $$;
 ALTER TABLE experiments DROP COLUMN IF EXISTS is_check;
+
+-- The closed run of the same project and repository a platform experiment continues, NULL for one
+-- that starts fresh. Its agents read that run, and start from its baseline's commit.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS continues TEXT REFERENCES platform_experiments (id);

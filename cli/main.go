@@ -684,6 +684,10 @@ which account when the org connected several. With no account connected the answ
 github_not_connected: an owner connects GitHub in Settings first. On any other git host,
 repository names one created there beforehand, and leaving it out is 422 repository_required.
 
+continues: ID carries on a closed platform experiment of the project that keeps its code in the
+same repository: its agents read that run as their own, and its baseline starts from the commit
+of that run's baseline job, so the numbers of both compare.
+
 One file is one platform experiment: for several, run the command once for each.
 
 See controlplane/settings/examples/experiment.yaml for the full DSL reference.`, stderr)
@@ -1010,6 +1014,9 @@ An agent of the roster adds instance_starting, or launcher_unreachable while its
 silent (hl platform-experiments agents list).
 Once the baseline is declared, baseline_branch and baseline_code_ref name the branch and commit
 of its job, where its harness is: the default branch may hold none of it.
+continues names the closed run this one carries on, read as your own with
+--platform-experiment ID on any read: its summary, results, jobs and hypotheses. Its
+baseline_code_ref is the commit this one's baseline starts from.
 On an open one the message begins with your own next step, worded for your token: the command
 a coordinator or a person runs, what a baseline agent measures, or that a researcher's jobs
 are refused until the start. status_reason is printed ahead of the record with id and status,

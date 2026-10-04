@@ -45,7 +45,8 @@ holds, with what the platform holds of the experiment filled in, so none of it i
 The experiment file is always the platform's. Of the others a file that is there is kept, unless
 it is still the unfilled template or the clone's experiment file stated another experiment (a
 name or metrics that are not this one's, the test hl repo check applies): those belong to no
-work of yours and are replaced, and the old ones stay in git.
+work of yours and are replaced, and the old ones stay in git. A clone of the baseline of the run
+this one continues keeps its files: of that run only other metrics would be another experiment.
 What is left to write is marked REPLACE-WITH: the command of one trial and the README's account
 of the harness. On a repository with no branch yet it first pushes an empty commit as main, so
 that the default branch is main and no experiment's. Nothing else is committed: git add and
@@ -416,7 +417,9 @@ type declaredExperiment struct {
 	Name        string           `json:"name"`
 	Description string           `json:"description"`
 	Metrics     []declaredMetric `json:"metrics"`
-	Proposal    struct {
+	// Continues is the run this one carries on, whose files a clone of its baseline holds.
+	Continues string `json:"continues"`
+	Proposal  struct {
 		AcceleratorType string `json:"accelerator_type"`
 		Image           string `json:"image"`
 		CPU             string `json:"cpu"`
@@ -444,9 +447,10 @@ type statedExperiment struct {
 // notOf is how the file differs from experiment in what names an experiment, its name and its
 // metrics, "" when both are experiment's. It is the one test of a file left by another
 // experiment of the repository: hl repo check fails on it and hl repo init replaces by it. The
-// description is the brief, which changes as the run learns.
+// description is the brief, which changes as the run learns. A run that continues another starts
+// from that one's files under a name of its own, so only the metrics tell it apart.
 func (file statedExperiment) notOf(experiment declaredExperiment) string {
-	if name, declared := strings.TrimSpace(file.Name), strings.TrimSpace(experiment.Name); name != declared {
+	if name, declared := strings.TrimSpace(file.Name), strings.TrimSpace(experiment.Name); name != declared && experiment.Continues == "" {
 		return fmt.Sprintf("states name %q, and platform experiment %s is %q", name, experiment.ID, declared)
 	}
 	if own, declared := stated(file.Metrics), stated(experiment.Metrics); own != declared {

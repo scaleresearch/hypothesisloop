@@ -82,10 +82,18 @@ func holdsAccount(p Principal) bool {
 	return p.Kind == KindUser || p.Kind == KindKey || p.Kind == KindStaff
 }
 
-// reaches is the one statement of what a caller reaches: what its scope admits, and for a read
-// by an account a platform experiment staff shared, with everything placed in it.
+// readsContinued reports whether the request reads the run the caller's own platform experiment
+// continues: an agent or a coordinator reads that run as its own, and writes nothing to it.
+func readsContinued(ctx context.Context, p Principal, platformExperimentID string) bool {
+	_, reading := ctx.Value(readKey{}).(read)
+	return reading && (p.Kind == KindAgent || p.Kind == KindCoordinator) && p.Continues != "" && p.Continues == platformExperimentID
+}
+
+// reaches is the one statement of what a caller reaches: what its scope admits, for a read by an
+// account a platform experiment staff shared, and for a read by an agent or a coordinator the run
+// its own continues, with everything placed in them.
 func reaches(ctx context.Context, p Principal, t domain.Tenancy) bool {
-	return p.Scope().Admits(t) || (t.Shared && readsShared(ctx, p))
+	return p.Scope().Admits(t) || (t.Shared && readsShared(ctx, p)) || readsContinued(ctx, p, t.PlatformExperimentID)
 }
 
 func principal(ctx context.Context) (Principal, error) {
@@ -350,14 +358,18 @@ func (a *Access) Org(ctx context.Context, requested string) (string, error) {
 }
 
 // ListScope is the principal's scope for a listing, narrowed to one project when asked. A
-// listing is the caller's own, with one exception: narrowed by platform_experiment_id to a
-// platform experiment staff shared, it is that platform experiment's for an account that reads.
+// listing is the caller's own, with two exceptions: narrowed by platform_experiment_id to a
+// platform experiment staff shared, it is that platform experiment's for an account that reads,
+// and narrowed to the run an agent's or a coordinator's own continues, it is that run's.
 func (a *Access) ListScope(ctx context.Context, projectID string) (domain.TenantScope, error) {
 	p, err := principal(ctx)
 	if err != nil {
 		return domain.TenantScope{}, err
 	}
 	scope := p.Scope()
+	if named, _ := ctx.Value(readKey{}).(read); readsContinued(ctx, p, named.platformExperimentID) {
+		scope.PlatformExperimentID = p.Continues
+	}
 	if named, _ := ctx.Value(readKey{}).(read); named.platformExperimentID != "" && !scope.Unrestricted() && readsShared(ctx, p) &&
 		domain.IdentifierShaped(named.platformExperimentID) {
 		tenancy, _, err := a.placement.PlatformExperimentTenancy(ctx, named.platformExperimentID)

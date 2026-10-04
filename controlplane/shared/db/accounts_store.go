@@ -509,9 +509,9 @@ func (s *AccountsStore) PlatformExperimentTenancy(ctx context.Context, platformE
 	t := &domain.Tenancy{PlatformExperimentID: platformExperimentID}
 	var closedAt *time.Time
 	err := s.pool.pool.QueryRow(ctx, `
-SELECT pe.project_id, p.org_id, pe.shared, pe.closed_at
+SELECT pe.project_id, p.org_id, pe.shared, COALESCE(pe.continues, ''), pe.closed_at
 FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
-WHERE pe.id = $1`, platformExperimentID).Scan(&t.ProjectID, &t.OrgID, &t.Shared, &closedAt)
+WHERE pe.id = $1`, platformExperimentID).Scan(&t.ProjectID, &t.OrgID, &t.Shared, &t.Continues, &closedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, nil
 	}

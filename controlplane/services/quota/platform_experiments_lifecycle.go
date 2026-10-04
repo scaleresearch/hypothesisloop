@@ -168,6 +168,9 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	if req.CoordinatorHosted != (req.coordinator != nil) {
 		return nil, fmt.Errorf("platform_experiments.Create: coordinator_hosted is %v and its launcher and model are resolved: %v", req.CoordinatorHosted, req.coordinator != nil)
 	}
+	if err := s.requireContinuable(ctx, req.ProjectID, req.repository.Named, req.Continues); err != nil {
+		return nil, err
+	}
 	id, err := domain.NewID(domain.PlatformExperimentIDPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
@@ -197,6 +200,7 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		RepositoryURL:             req.repository.URL,
 		RepositoryAccount:         req.repository.CreateOn,
 		AgentImage:                req.AgentImage,
+		Continues:                 req.Continues,
 		Actor:                     req.createdBy,
 	}
 	pe.BaselineDueAt = pe.StartsAt.Add(s.cfg.BaselineLimit)
@@ -207,6 +211,27 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	pe.SignupCount = len(req.signups)
 	s.wakeRepositories(pe)
 	return pe, nil
+}
+
+// requireContinuable refuses a run to continue that is not one: continues names a closed platform
+// experiment of the project that keeps its code in repository. Empty continues starts fresh.
+func (s *PlatformExperimentsService) requireContinuable(ctx context.Context, projectID, repository, continues string) error {
+	if continues == "" {
+		return nil
+	}
+	prior, err := s.store.GetPlatformExperiment(ctx, continues)
+	if err != nil {
+		return fmt.Errorf("platform_experiments: reading the run to continue: %w", err)
+	}
+	switch {
+	case prior == nil || prior.ProjectID != projectID:
+		return refuseUpdate(422, "invalid_continues", "continues %q names no platform experiment of project %s", continues, projectID)
+	case prior.Status != domain.PlatformExpClosed:
+		return refuseUpdate(422, "invalid_continues", "continues %s, which is %s: a run carries on one that closed", continues, prior.Status)
+	case prior.Repository == "" || prior.Repository != repository:
+		return refuseUpdate(422, "invalid_continues", "continues %s, which keeps its code in %q: name that repository", continues, prior.Repository)
+	}
+	return nil
 }
 
 // coordinatorWanted says when the platform runs a hosted coordinator's machine (db.launcherCoordinatorsWhere).
