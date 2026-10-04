@@ -27,10 +27,11 @@ func (e *Executor) buildSpec(exp *domain.Experiment) (provider.Spec, error) {
 	if spec.Nodes() > 1 {
 		return provider.Spec{}, &agentexec.Unrunnable{Why: fmt.Sprintf("the job asks for %d nodes, and a job on this cluster is one rented instance", spec.Nodes())}
 	}
-	// An instance boots the image desired state names. This cluster runs the one that carries
-	// the wrapper and reports it (OnlyImage), so any other is a job it cannot run.
-	if spec.Image != e.jobImage {
-		return provider.Spec{}, &agentexec.Unrunnable{Why: fmt.Sprintf("the job is to run in image %q, and this cluster runs only %q", spec.Image, e.jobImage)}
+	// An instance boots the image desired state names: the job image this cluster reports
+	// (OnlyImage), or the environment the control plane built on it, which carries the wrapper
+	// as well.
+	if spec.Image == "" {
+		return provider.Spec{}, &agentexec.Unrunnable{Why: "the job's desired state names no image to boot"}
 	}
 	group := spec.NodeGroups()[0]
 	for name, quantity := range map[string]string{"cpu": group.CPU, "memory": group.Memory, "storage": group.Storage} {

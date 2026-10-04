@@ -44,8 +44,8 @@ type Config struct {
 	// APIURL is handed to every job as HYPOTHESISLOOP_API_URL, so it must be reachable from a
 	// rented instance.
 	APIURL string
-	// JobImage is the one image this cluster runs. It carries hl, which the job's command runs
-	// under, so a job that is to run in another image is refused.
+	// JobImage is the image this cluster's jobs name. It carries hl, which the job's command runs
+	// under. A job may run in an environment the control plane built on it.
 	JobImage string
 	// LogTailLines is how much of an instance's output one pass reads.
 	LogTailLines int
@@ -191,6 +191,6 @@ func (e *Executor) GetClusterID(context.Context) (string, error) { return e.clus
 // network a distributed job could rendezvous over.
 func (e *Executor) SupportsMultiNodeJobs() bool { return false }
 
-// OnlyImage is the job image, which carries the wrapper a job's command runs under: an instance
-// boots no other (buildSpec).
+// OnlyImage is the job image, which carries the wrapper a job's command runs under: the control
+// plane places here only jobs that name it, and runs each in it or in its environment built on it.
 func (e *Executor) OnlyImage() string { return e.jobImage }

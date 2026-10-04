@@ -213,9 +213,7 @@ func TestAJobThatCannotRunAsOneWrappedInstanceIsRefused(t *testing.T) {
 	twoNodes.ResolvedJob.NumNodes = 2
 	hostMount := job(t, "exp-3", 0, 0)
 	hostMount.ResolvedJob.HostMounts = map[string]string{"/data": "/mnt/data"}
-	ownImage := job(t, "exp-4", 0, 0)
-	ownImage.ResolvedJob.Image = "docker.io/library/python:3.12"
-	for _, exp := range []*domain.Experiment{noCommand, twoNodes, hostMount, ownImage} {
+	for _, exp := range []*domain.Experiment{noCommand, twoNodes, hostMount} {
 		if err := e.CreateWorkload(context.Background(), exp); err == nil {
 			t.Errorf("%s was rented", exp.ID)
 		}
@@ -225,23 +223,32 @@ func TestAJobThatCannotRunAsOneWrappedInstanceIsRefused(t *testing.T) {
 	}
 }
 
-// An instance boots the image desired state names, which is the one image this cluster runs.
-// Any other, and none, is a job it does not rent for.
+// An instance boots the image desired state names: the job image, or the environment the
+// control plane built on it. A job that names none is one it does not rent for.
 func TestAnInstanceBootsExactlyTheImageDesiredStateNames(t *testing.T) {
 	e, p := newTestExecutor(t)
 	mustCreate(t, e, job(t, "exp-1", 0, 0))
-	for _, name := range p.Names() {
-		if p.Spec(name).Image != testImage {
-			t.Errorf("%s boots %q", name, p.Spec(name).Image)
+	environment := on(job(t, "exp-2", 0, 0), "h100-1")
+	environment.ResolvedJob.Image = "registry.test/hypothesisloop-environment:abc"
+	mustCreate(t, e, environment)
+	names := p.Names()
+	if len(names) != 2 {
+		t.Fatalf("rented %v, want both jobs", names)
+	}
+	for _, name := range names {
+		want := testImage
+		if strings.Contains(name, "-exp-2-") {
+			want = environment.ResolvedJob.Image
+		}
+		if got := p.Spec(name).Image; got != want {
+			t.Errorf("%s boots %q, want %q", name, got, want)
 		}
 	}
-	for _, image := range []string{"docker.io/library/python:3.12", ""} {
-		other := on(job(t, "exp-3", 0, 0), "h100-1")
-		other.ResolvedJob.Image = image
-		err := e.CreateWorkload(context.Background(), other)
-		if err == nil || !strings.Contains(err.Error(), `"`+image+`"`) || !strings.Contains(err.Error(), testImage) {
-			t.Fatalf("image %q: err = %v, want both images named", image, err)
-		}
+	none := on(job(t, "exp-3", 0, 0), "cpu-0")
+	none.ResolvedJob.Image = ""
+	var unrunnable *agentexec.Unrunnable
+	if err := e.CreateWorkload(context.Background(), none); !errors.As(err, &unrunnable) {
+		t.Fatalf("no image: err = %v, want it unrunnable", err)
 	}
 }
 
@@ -605,10 +612,9 @@ func TestAJobARentedInstanceCanNeverRunIsUnrunnableAndAFailedRentIsNot(t *testin
 		spoil func(*domain.JobSpec)
 		says  string
 	}{
-		"another image": {func(s *domain.JobSpec) { s.Image = "registry.test/mine:1" }, `to run in image "registry.test/mine:1"`},
-		"host mounts":   {func(s *domain.JobSpec) { s.HostMounts = map[string]string{"/data": "/data"} }, "host_mounts"},
-		"no command":    {func(s *domain.JobSpec) { s.Command, s.Args = nil, nil }, "no command"},
-		"two nodes":     {func(s *domain.JobSpec) { s.NumNodes = 2 }, "2 nodes"},
+		"host mounts": {func(s *domain.JobSpec) { s.HostMounts = map[string]string{"/data": "/data"} }, "host_mounts"},
+		"no command":  {func(s *domain.JobSpec) { s.Command, s.Args = nil, nil }, "no command"},
+		"two nodes":   {func(s *domain.JobSpec) { s.NumNodes = 2 }, "2 nodes"},
 	} {
 		exp := job(t, "exp-"+strings.ReplaceAll(name, " ", "-"), 0, 0)
 		c.spoil(exp.ResolvedJob)
