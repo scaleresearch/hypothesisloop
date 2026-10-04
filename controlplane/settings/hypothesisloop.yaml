@@ -56,8 +56,8 @@ auth:
 #              agent when it joins, so a change moves new agents only.
 #   boot_limit_seconds  how long a hosted machine may go unreported by its launcher after it was
 #              asked for, or stay starting after it was first reported, before it is given up on
-#              and one of its three restarts is spent. A first boot pulls the agent image (about
-#              11 seconds on the slowest provider measured). Too low spends every restart on slow
+#              and a restart is spent: three in any six hours, the fourth stops the agent. A
+#              first boot pulls the agent image (about 11 seconds on the slowest provider measured). Too low spends every restart on slow
 #              pulls. Restarts are spent under one image and one launcher config: a change of
 #              either gives every agent its restarts back and starts a stopped one again.
 #   progress_limit_seconds  how long a running hosted machine may go without its agent reporting

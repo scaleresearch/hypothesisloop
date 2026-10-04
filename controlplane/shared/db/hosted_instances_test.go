@@ -131,6 +131,44 @@ func TestAnExitedMachineIsRecordedRestartedAndFinallyStopsWhatItRan(t *testing.T
 	}
 }
 
+// Restarts are a rate: those spent longer ago than the window no longer count, so a long run
+// that exits now and then keeps being restarted, and only a burst of exits stops it.
+func TestRestartsOlderThanTheWindowNoLongerCount(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	const maxRestarts = 2
+	for kind, thing := range hostedThings(t, pool) {
+		exit := func(name string) domain.AgentInstance {
+			t.Helper()
+			if err := pes.AskInstance(ctx, thing.pe, thing.agentID, name, "launch-1"); err != nil {
+				t.Fatal(err)
+			}
+			after, recorded, err := pes.EndInstance(ctx, thing.pe, thing.agentID, name, InstanceExited, "boom", time.Minute, maxRestarts)
+			if err != nil || !recorded {
+				t.Fatalf("%s: exit of %s: got = %v, %v, want = true", kind, name, recorded, err)
+			}
+			return after
+		}
+		for i := range maxRestarts {
+			exit(fmt.Sprintf("early-%d", i))
+		}
+		if _, err := pool.pool.Exec(ctx, `UPDATE `+map[bool]string{true: "platform_experiments", false: "experiment_signups"}[thing.agentID == ""]+`
+SET `+thing.column("restarted_at")+` = ARRAY(SELECT t - make_interval(secs => $1) FROM unnest(`+thing.column("restarted_at")+`) t)
+WHERE `+map[bool]string{true: "id = $2", false: "platform_experiment_id = $2"}[thing.agentID == ""], (domain.AgentInstanceRestartWindow + time.Minute).Seconds(), thing.pe); err != nil {
+			t.Fatal(err)
+		}
+		for i := range maxRestarts {
+			if got := exit(fmt.Sprintf("late-%d", i)); got.Stopped || got.Restarts != maxRestarts+i+1 {
+				t.Fatalf("%s: exit %d after the window: got = %+v, want restarted, %d restarts ever", kind, i, got, maxRestarts+i+1)
+			}
+		}
+		if got := exit("burst"); !got.Stopped || got.Restarts != 2*maxRestarts {
+			t.Fatalf("%s: one exit past the rate: got = %+v, want stopped", kind, got)
+		}
+	}
+}
+
 // A machine its provider ended at the provider's own lifetime is no fault of what it ran: it is
 // counted as a renewal, however many came before, and neither spends a restart nor stops anything.
 func TestAnExpiredMachineSpendsNoRestartAndNeverStopsWhatItRan(t *testing.T) {

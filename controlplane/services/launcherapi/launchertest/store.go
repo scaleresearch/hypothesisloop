@@ -37,9 +37,10 @@ type Store struct {
 	Activity       map[string]domain.AgentActivity
 	ActivityWrites int
 
-	clock    time.Duration
-	askedAt  map[string]time.Duration
-	progress map[string]string
+	clock       time.Duration
+	askedAt     map[string]time.Duration
+	progress    map[string]string
+	restartedAt map[string][]time.Duration
 }
 
 var epoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -130,6 +131,7 @@ func (s *Store) AskInstance(_ context.Context, platformExpID, agentID, name, lau
 	instance := s.Find(platformExpID, agentID)
 	if instance.Launch != launch {
 		instance.Restarts, instance.Stopped = 0, false
+		delete(s.restartedAt, platformExpID+"/"+agentID)
 	}
 	instance.Name, instance.Launch, instance.SeenAt, instance.Reported, instance.ProgressAt = name, launch, nil, "", nil
 	delete(s.progress, platformExpID+"/"+agentID)
@@ -207,14 +209,26 @@ func (s *Store) EndInstance(_ context.Context, platformExpID, agentID, name stri
 	}
 	instance.Name, instance.ExitedAt, instance.ExitLog, instance.EndReason, instance.Reported = "", &now, exitLog, string(how), ""
 	delete(s.Activity, platformExpID+"/"+agentID)
+	key := platformExpID + "/" + agentID
+	var recent []time.Duration
+	for _, at := range s.restartedAt[key] {
+		if s.clock-at < domain.AgentInstanceRestartWindow {
+			recent = append(recent, at)
+		}
+	}
 	switch {
 	case !how.SpendsRestart():
 		instance.Renewals++
-	case instance.Restarts >= maxRestarts:
+	case len(recent) >= maxRestarts:
 		instance.Stopped = true
 	default:
 		instance.Restarts++
+		recent = append(recent, s.clock)
 	}
+	if s.restartedAt == nil {
+		s.restartedAt = map[string][]time.Duration{}
+	}
+	s.restartedAt[key] = recent
 	return *instance, true, nil
 }
 

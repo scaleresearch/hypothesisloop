@@ -258,6 +258,22 @@ func TestAnExitedInstanceIsRecordedAndItsAgentAskedForUnderANewNameUntilItsResta
 	}
 }
 
+// An agent of a long run that exits now and then is restarted whenever its exits are spread
+// wider than the restart window, however many there are in all.
+func TestExitsSpreadOverTheRestartWindowNeverStopTheAgent(t *testing.T) {
+	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}}}
+	name := mustReconcile(t, store, observed()).Instances[0].Name
+	spacing := domain.AgentInstanceRestartWindow / time.Duration(domain.MaxAgentInstanceRestarts)
+	for exit := 1; exit <= 3*domain.MaxAgentInstanceRestarts; exit++ {
+		store.Advance(spacing)
+		answer := mustReconcile(t, store, observed(ObservedInstance{Name: name, State: "exited", Log: "boom"}))
+		if recorded := store.Find("pe-1", "ag-1"); recorded.Stopped || recorded.Restarts != exit || len(answer.Instances) != 1 {
+			t.Fatalf("exit %d, one every %s: recorded %+v, want it restarted", exit, spacing, recorded)
+		}
+		name = answer.Instances[0].Name
+	}
+}
+
 // A provider that ends every instance at its own lifetime would otherwise stop a healthy agent
 // at its fourth hour.
 func TestAnInstanceItsProviderExpiredIsAskedForUnderANewNameEveryTimeAndSpendsNoRestart(t *testing.T) {

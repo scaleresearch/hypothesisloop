@@ -536,6 +536,8 @@ ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS model           TEXT    
 -- agent is no longer asked for, and instance_exited_at and instance_exit_log say how it ended.
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_name      TEXT        NOT NULL DEFAULT '';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_restarts  INTEGER     NOT NULL DEFAULT 0;
+-- When each restart counted in the current domain.AgentInstanceRestartWindow was spent.
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_restarted_at TIMESTAMPTZ[] NOT NULL DEFAULT '{}';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_stopped   BOOLEAN     NOT NULL DEFAULT false;
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_exited_at TIMESTAMPTZ;
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_exit_log  TEXT        NOT NULL DEFAULT '';
@@ -1192,6 +1194,7 @@ ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_model     
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_name      TEXT        NOT NULL DEFAULT '';
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_asked_at  TIMESTAMPTZ;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_restarts  INTEGER     NOT NULL DEFAULT 0;
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_restarted_at TIMESTAMPTZ[] NOT NULL DEFAULT '{}';
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_stopped   BOOLEAN     NOT NULL DEFAULT false;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_exited_at TIMESTAMPTZ;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_exit_log  TEXT        NOT NULL DEFAULT '';

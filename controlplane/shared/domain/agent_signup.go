@@ -97,12 +97,13 @@ type AgentInstance struct {
 	// Name is the name the machine was last asked for under, without the launcher's prefix.
 	// Empty until the launcher first asked, and after an exit until it asks again.
 	Name string `json:"name,omitempty"`
-	// Restarts counts the machines that exited and were asked for again.
+	// Restarts counts the machines that exited and were asked for again, ever. Only those of the
+	// last AgentInstanceRestartWindow count towards MaxAgentInstanceRestarts.
 	Restarts int `json:"restarts"`
 	// Renewals counts the machines that ended through no fault of their command and were asked
 	// for again with no restart spent: EndReason "expired" or "progress_unreadable".
 	Renewals int `json:"-"`
-	// Stopped means the last machine exited with no restart left: the platform no longer asks
+	// Stopped means the last machine exited with no restart left in the window: the platform no longer asks
 	// for one, and the agent takes no further turn.
 	Stopped  bool       `json:"stopped"`
 	ExitedAt *time.Time `json:"exited_at,omitempty"`
@@ -219,8 +220,12 @@ func InstanceReleasedSQL(endedAt string) string {
 }
 
 // MaxAgentInstanceRestarts is how many times an exited machine of one hosted agent is asked for
-// again. The next exit stops the agent.
+// again within AgentInstanceRestartWindow. The next exit inside that window stops the agent, and
+// restarts older than the window are no longer counted, so a long run survives occasional exits.
 const MaxAgentInstanceRestarts = 3
+
+// AgentInstanceRestartWindow is the rolling window MaxAgentInstanceRestarts is counted over.
+const AgentInstanceRestartWindow = 6 * time.Hour
 
 // AgentProgressIntervalSeconds is how often a healthy agent's harness prints its progress
 // marker (agents/experimentator, progress.py), and MinAgentProgressLimitSeconds the shortest

@@ -87,6 +87,7 @@ SET `+c.prefix+`name = $3, `+c.prefix+`asked_at = now(), `+c.prefix+`seen_at = N
     `+c.prefix+`state = '', `+c.prefix+`progress = '', `+c.prefix+`progress_at = NULL,
     `+c.prefix+`activity = '', `+c.prefix+`activity_at = NULL,
     `+c.prefix+`restarts = CASE WHEN `+c.prefix+`launch = $4 THEN `+c.prefix+`restarts ELSE 0 END,
+    `+c.prefix+`restarted_at = CASE WHEN `+c.prefix+`launch = $4 THEN `+c.prefix+`restarted_at ELSE '{}' END,
     `+c.prefix+`stopped = `+c.prefix+`stopped AND `+c.prefix+`launch = $4
 WHERE `+c.key, platformExpID, agentID, name, launch)
 	if err != nil {
@@ -129,7 +130,8 @@ WHERE `+c.key+` AND `+c.prefix+`name = $3 AND `+c.prefix+`name <> ''
 
 // EndInstance records that the machine asked for under name is given up on, with exitLog as the
 // end of what it wrote or the reason there is nothing. A restart is counted while fewer than
-// maxRestarts were, and the agent or coordinator is stopped otherwise. An end that spends no
+// maxRestarts were within the last domain.AgentInstanceRestartWindow, and the agent or
+// coordinator is stopped otherwise. An end that spends no
 // restart (InstanceEnd.SpendsRestart) counts a renewal and stops nothing. The name is cleared, so
 // the same end reported again records nothing: recorded is false, as it is for a name that is
 // not the one asked for and for an end whose limit has not passed on the database's clock. limit
@@ -158,16 +160,19 @@ func (s *PlatformExperimentsStore) EndInstance(ctx context.Context, platformExpI
 		return after, false, fmt.Errorf("platform_experiments_store.EndInstance: begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	recent := `ARRAY(SELECT t FROM unnest(` + c.prefix + `restarted_at) t WHERE t > now() - make_interval(secs => $9))`
+	restart := `$8::boolean AND cardinality(` + recent + `) < $5`
 	err = tx.QueryRow(ctx, `
 UPDATE `+c.table+`
 SET `+c.prefix+`name = '', `+c.prefix+`exited_at = now(), `+c.prefix+`exit_log = $4, `+c.prefix+`end_reason = $7, `+c.prefix+`state = '',
     `+c.prefix+`activity = '', `+c.prefix+`activity_at = NULL,
-    `+c.prefix+`stopped = $8::boolean AND `+c.prefix+`restarts >= $5,
-    `+c.prefix+`restarts = `+c.prefix+`restarts + CASE WHEN $8::boolean AND `+c.prefix+`restarts < $5 THEN 1 ELSE 0 END,
+    `+c.prefix+`stopped = $8::boolean AND cardinality(`+recent+`) >= $5,
+    `+c.prefix+`restarts = `+c.prefix+`restarts + CASE WHEN `+restart+` THEN 1 ELSE 0 END,
+    `+c.prefix+`restarted_at = CASE WHEN `+restart+` THEN `+recent+` || now() ELSE `+recent+` END,
     `+c.prefix+`renewals = `+c.prefix+`renewals + CASE WHEN $8::boolean THEN 0 ELSE 1 END
 WHERE `+c.key+` AND NOT `+c.prefix+`stopped AND `+c.prefix+`name = $3 AND `+c.prefix+`name <> '' AND `+when+`
 RETURNING `+c.prefix+`restarts, `+c.prefix+`renewals, `+c.prefix+`stopped, `+c.prefix+`exited_at, `+c.prefix+`exit_log, `+c.prefix+`launch, `+c.prefix+`end_reason`,
-		platformExpID, agentID, name, exitLog, maxRestarts, limit.Seconds(), string(how), how.SpendsRestart()).
+		platformExpID, agentID, name, exitLog, maxRestarts, limit.Seconds(), string(how), how.SpendsRestart(), domain.AgentInstanceRestartWindow.Seconds()).
 		Scan(&after.Restarts, &after.Renewals, &after.Stopped, &after.ExitedAt, &after.ExitLog, &after.Launch, &after.EndReason)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return after, false, nil
