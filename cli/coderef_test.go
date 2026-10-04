@@ -277,8 +277,10 @@ func TestHLCloneGivesUpNamingTheCauseAfterItsTries(t *testing.T) {
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err = cmd.Run()
 	lines := strings.Split(strings.TrimSpace(stderr.String()), "\n")
-	if err == nil || stdout.Len() != 0 || len(lines) != 4 || !strings.HasPrefix(lines[0], "hl-clone: try 1 of 4") ||
-		!strings.HasPrefix(lines[3], "hl-clone: could not fetch the code: 4 tries") || !strings.Contains(lines[3], "no-such-repository") {
+	if err == nil || stdout.Len() != 0 || len(lines) != 7 || !strings.HasPrefix(lines[0], "hl-clone: try 1 of 7") ||
+		!strings.HasPrefix(lines[1], "hl-clone: try 2 of 7") || !strings.Contains(lines[1], "the next is in 10s") ||
+		!strings.Contains(lines[5], "the next is in 60s") ||
+		!strings.HasPrefix(lines[6], "hl-clone: could not fetch the code: 7 tries") || !strings.Contains(lines[6], "no-such-repository") {
 		t.Fatalf("hl-clone: %v, stdout %q, stderr:\n%s", err, stdout.String(), stderr.String())
 	}
 }
