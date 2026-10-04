@@ -77,8 +77,8 @@ func instanceOf(agentID string) instanceColumns {
 
 // AskInstance records the name a hosted agent's machine, or with no agentID a hosted
 // coordinator's, is asked for under, and when. launch identifies what the machine is started
-// with: under the launch the restarts were spent under they stand, and under another none is
-// spent and a stopped one is asked for again.
+// with: under the launch the restart budget was spent under it stands, and under another the
+// budget is whole and a stopped one is asked for again. restarts counts every one, ever.
 func (s *PlatformExperimentsStore) AskInstance(ctx context.Context, platformExpID, agentID, name, launch string) error {
 	c := instanceOf(agentID)
 	_, err := s.pool.pool.Exec(ctx, `
@@ -86,7 +86,6 @@ UPDATE `+c.table+`
 SET `+c.prefix+`name = $3, `+c.prefix+`asked_at = now(), `+c.prefix+`seen_at = NULL, `+c.prefix+`launch = $4,
     `+c.prefix+`state = '', `+c.prefix+`progress = '', `+c.prefix+`progress_at = NULL,
     `+c.prefix+`activity = '', `+c.prefix+`activity_at = NULL,
-    `+c.prefix+`restarts = CASE WHEN `+c.prefix+`launch = $4 THEN `+c.prefix+`restarts ELSE 0 END,
     `+c.prefix+`restarted_at = CASE WHEN `+c.prefix+`launch = $4 THEN `+c.prefix+`restarted_at ELSE '{}' END,
     `+c.prefix+`stopped = `+c.prefix+`stopped AND `+c.prefix+`launch = $4
 WHERE `+c.key, platformExpID, agentID, name, launch)

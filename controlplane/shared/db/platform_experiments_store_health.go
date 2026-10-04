@@ -7,11 +7,12 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// RunHealth returns how each agent of every open or running platform experiment is getting on,
-// one statement so every agent is described at the same moment. An agent is timed from when it
-// could first submit: a researcher from the run's start or, joining later, its own signup; any
-// other agent from its signup. A job ended at the transaction that set its status, whose time
-// event_times holds.
+// RunHealth returns how each agent and hosted coordinator of every open or running platform
+// experiment is getting on, one statement so every one is described at the same moment. An agent
+// is timed from when it could first submit: a researcher from the run's start or, joining later,
+// its own signup; any other agent from its signup. A job ended at the transaction that set its
+// status, whose time event_times holds. Restarts are the instance counters, which count every
+// machine asked for again over the run, whatever launch it was under.
 func (s *PlatformExperimentsStore) RunHealth(ctx context.Context) ([]domain.AgentHealth, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT s.platform_experiment_id, s.agent_id, s.role,
@@ -27,7 +28,11 @@ CROSS JOIN LATERAL (SELECT CASE WHEN s.role = 'competitor' THEN GREATEST(p.start
 LEFT JOIN experiments e ON e.platform_experiment_id = s.platform_experiment_id AND e.agent_id = s.agent_id
 LEFT JOIN event_times t ON t.xid = e.status_xid AND e.status = 'COMPLETED'
 WHERE p.status IN ('open', 'running')
-GROUP BY s.platform_experiment_id, s.agent_id, s.role, st.start, s.instance_restarts`)
+GROUP BY s.platform_experiment_id, s.agent_id, s.role, st.start, s.instance_restarts
+UNION ALL
+SELECT p.id, '', $1::text, NULL, NULL, 0, p.coordinator_instance_restarts, 0
+FROM platform_experiments p
+WHERE p.status IN ('open', 'running') AND p.coordinator_hosted`, domain.CoordinatorHealthRole)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.RunHealth: %w", err)
 	}

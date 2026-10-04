@@ -884,8 +884,8 @@ func TestAStoppedAgentIsAskedForAgainOnceTheImageOrTheLaunchersInputsChange(t *t
 		t.Fatalf("after the launcher's inputs changed: %+v, want the agent and the coordinator", answer.Instances)
 	}
 	for _, agent := range []string{"ag-1", ""} {
-		if recorded := store.Find("pe-1", agent); recorded.Stopped || recorded.Restarts != 0 || recorded.Launch == launch || recorded.Name == "" {
-			t.Fatalf("%q: recorded %+v, want a fresh budget under the new launch", agent, recorded)
+		if recorded := store.Find("pe-1", agent); recorded.Stopped || recorded.Restarts != domain.MaxAgentInstanceRestarts || recorded.Launch == launch || recorded.Name == "" {
+			t.Fatalf("%q: recorded %+v, want a fresh budget under the new launch and the restarts counted still", agent, recorded)
 		}
 	}
 	// The budget is whole again, and no more than whole.
@@ -894,8 +894,8 @@ func TestAStoppedAgentIsAskedForAgainOnceTheImageOrTheLaunchersInputsChange(t *t
 		body.Instances = []ObservedInstance{{Name: answer.Instances[0].Name, State: "exited"}, {Name: answer.Instances[len(answer.Instances)-1].Name, State: "running"}}
 		answer = mustReconcile(t, store, body)
 	}
-	if recorded := store.Find("pe-1", "ag-1"); !recorded.Stopped || recorded.Restarts != domain.MaxAgentInstanceRestarts {
-		t.Fatalf("after the new budget was spent: %+v", recorded)
+	if recorded := store.Find("pe-1", "ag-1"); !recorded.Stopped || recorded.Restarts != 2*domain.MaxAgentInstanceRestarts {
+		t.Fatalf("after the new budget was spent: %+v, want every restart of both launches counted", recorded)
 	}
 
 	store, _ = stopped()

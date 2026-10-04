@@ -115,7 +115,7 @@ func TestAnExitedMachineIsRecordedRestartedAndFinallyStopsWhatItRan(t *testing.T
 			}
 		}
 
-		// Stopped under one launch, it is asked for again under another with nothing spent.
+		// Stopped under one launch, it is asked for again under another with its budget whole.
 		if err := pes.AskInstance(ctx, thing.pe, thing.agentID, "same-launch", "launch-1"); err != nil {
 			t.Fatal(err)
 		}
@@ -125,8 +125,8 @@ func TestAnExitedMachineIsRecordedRestartedAndFinallyStopsWhatItRan(t *testing.T
 		if err := pes.AskInstance(ctx, thing.pe, thing.agentID, "new-launch", "launch-2"); err != nil {
 			t.Fatal(err)
 		}
-		if got := thing.instance(); got.Stopped || got.Restarts != 0 || got.Name != "new-launch" || got.Launch != "launch-2" {
-			t.Fatalf("%s: asked for under another launch: got = %+v, want a fresh budget", kind, got)
+		if got := thing.instance(); got.Stopped || got.Restarts != maxRestarts || got.Name != "new-launch" || got.Launch != "launch-2" {
+			t.Fatalf("%s: asked for under another launch: got = %+v, want a fresh budget and the restarts counted still", kind, got)
 		}
 	}
 }

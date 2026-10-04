@@ -55,20 +55,23 @@ type InFlight struct {
 	Jobs int `json:"jobs" doc:"Its jobs queued or running, those waiting for their environment's build included. 0: nothing of its own is on the platform, and an agent waiting then waits for nothing it started."`
 }
 
-// AgentHealth is how one agent of a platform experiment is getting on, as the run's health series
-// in the metrics store record it.
+// AgentHealth is how one agent of a platform experiment, or its hosted coordinator, is getting on,
+// as the run's health series in the metrics store record it.
 type AgentHealth struct {
-	PlatformExperimentID string
-	AgentID              string
-	Role                 SignupRole
+	PlatformExperimentID string `json:"-"`
+	AgentID              string `json:"agent_id,omitempty" doc:"The agent. Absent for the coordinator."`
+	Role                 string `json:"role" doc:"The agent's role in the run (competitor, baseline, reviewer, planner), or coordinator."`
 	// FirstJobSeconds and FirstCompletedSeconds run from when the agent could first submit to its
 	// first job submitted and its first job completed; nil before there is one.
-	FirstJobSeconds       *float64
-	FirstCompletedSeconds *float64
-	JobsInFlight          int
-	Restarts              int
-	CoordinatorMessages   int
+	FirstJobSeconds       *float64 `json:"first_job_seconds,omitempty" doc:"Seconds from when it could first submit to its first job. Absent before it submitted one."`
+	FirstCompletedSeconds *float64 `json:"first_completed_job_seconds,omitempty" doc:"Seconds from when it could first submit to its first completed job. Absent before one completed."`
+	JobsInFlight          int      `json:"jobs_in_flight" doc:"Its jobs queued, submitted or running."`
+	Restarts              int      `json:"restarts" doc:"Every machine of its that exited and was asked for again, over the run, whatever image it ran."`
+	CoordinatorMessages   int      `json:"coordinator_messages" doc:"Messages the coordinator sent it."`
 }
+
+// CoordinatorHealthRole is the role the run's health series give its hosted coordinator.
+const CoordinatorHealthRole = "coordinator"
 
 // AgentActivity is what a hosted agent or coordinator is doing now, as its harness last said it
 // beside its progress marker. The platform keeps the latest sentence only.
@@ -133,8 +136,9 @@ type AgentInstance struct {
 	ExitLog string `json:"exit_log,omitempty"`
 	// SeenAt is when the launcher first reported the machine asked for under Name.
 	SeenAt *time.Time `json:"seen_at,omitempty"`
-	// Launch identifies what Restarts were spent under: the image and the launcher's own launch
-	// inputs. A machine asked for under another starts with none spent.
+	// Launch identifies what the restart budget was spent under: the image and the launcher's own
+	// launch inputs. A machine asked for under another starts with the whole budget, and Restarts
+	// keeps counting.
 	Launch string `json:"-"`
 	// State is what the machine is now: "waiting" while none is asked for because the platform
 	// experiment has not started, or of a coordinator because its open platform experiment has

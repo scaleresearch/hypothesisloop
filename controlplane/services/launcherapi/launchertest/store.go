@@ -133,7 +133,7 @@ func (s *Store) AskInstance(_ context.Context, platformExpID, agentID, name, lau
 	}
 	instance := s.Find(platformExpID, agentID)
 	if instance.Launch != launch {
-		instance.Restarts, instance.Stopped = 0, false
+		instance.Stopped = false
 		delete(s.restartedAt, platformExpID+"/"+agentID)
 	}
 	instance.Name, instance.Launch, instance.SeenAt, instance.Reported, instance.ProgressAt = name, launch, nil, "", nil

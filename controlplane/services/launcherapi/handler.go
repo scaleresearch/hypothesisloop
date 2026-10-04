@@ -131,7 +131,7 @@ type kept struct {
 	endsBy time.Time
 	// launch is launchOf the image this one boots and the launcher's digest.
 	launch string
-	// describe takes how many machines of this one ended before, under its launch.
+	// describe takes how many machines of this one ended before.
 	describe func(ended int) (Instance, error)
 }
 
@@ -225,15 +225,13 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 			}
 			continue
 		}
-		// Restarts were spent under one launch. Under another none is, and one that was stopped
-		// is asked for again: what stopped it may have been the image or the launcher's config.
-		restarts := current.Restarts
-		if current.Launch != one.launch {
-			restarts = 0
-		} else if current.Stopped {
+		// The restart budget is spent under one launch. Under another it is whole, and one that
+		// was stopped is asked for again: what stopped it may have been the image or the
+		// launcher's config.
+		if current.Launch == one.launch && current.Stopped {
 			continue
 		}
-		instance, err := describe(restarts, current.Renewals)
+		instance, err := describe(current.Restarts, current.Renewals)
 		if err != nil {
 			log.Error("hosted instance cannot be described", zap.Error(err))
 			continue
