@@ -468,6 +468,16 @@ class WaitTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await run._wait_hook({"tool_name": "Bash", "agent_id": "sub-1", "tool_input": {"command": command}},
                                                   "tool-1", {}), {}, command)
 
+    # Measured on the bundled CLI: a subagent is given TaskStop too, and its call reaches the hook with its agent_id.
+    async def test_the_agent_stops_a_subagent_and_a_subagent_stops_nothing(self):
+        from hypothesisloop_agent.claude import run
+
+        self.assertNotIn("TaskStop", run.DISALLOWED_TOOLS)
+        stop = {"tool_name": "TaskStop", "tool_input": {"task_id": "a1"}}
+        self.assertEqual(await run._task_stop_hook(stop, "tool-1", {}), {})
+        told = (await run._task_stop_hook({**stop, "agent_id": "sub-1"}, "tool-1", {}))["hookSpecificOutput"]
+        self.assertEqual((told["permissionDecision"], told["permissionDecisionReason"]), ("deny", run.SUBAGENT_TASK_STOP))
+
     async def test_a_short_pause_and_a_command_that_only_names_sleep_run(self):
         from hypothesisloop_agent.claude import run
 

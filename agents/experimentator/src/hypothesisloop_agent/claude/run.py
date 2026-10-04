@@ -41,9 +41,10 @@ log = logging.getLogger("llm_agent")
 # still advertises them — and the model, seeing them, reasonably tries to use them to "wait" for a
 # background job. Confirmed live: an agent called ScheduleWakeup expecting to be resumed later and
 # just ended its turn instead, because nothing here ever fires that wakeup. Strip them so the model
-# never reaches for a tool that can't do what its name promises in this environment.
+# never reaches for a tool that can't do what its name promises in this environment. TaskStop
+# stays, for the agent to stop a subagent that went astray (_task_stop_hook).
 DISALLOWED_TOOLS = ["ScheduleWakeup", "Monitor", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList",
-                     "TaskOutput", "TaskStop", "CronCreate", "CronDelete", "CronList", "PushNotification",
+                     "TaskOutput", "CronCreate", "CronDelete", "CronList", "PushNotification",
                      "RemoteTrigger", "DesignSync"]
 
 # The CLI defers WebSearch and WebFetch behind ToolSearch by default: a run 8 planner had to call
@@ -66,6 +67,8 @@ BACKGROUND_COMMAND = ("Commands run in the foreground here. Work that should go 
                       "else goes to a subagent started with run_in_background; its end starts your next turn.")
 # A subagent starts none, and the CLI refuses it a leading `sleep` too.
 SUBAGENT_BACKGROUND_COMMAND = "Commands run in the foreground here: wait for your jobs with `hl job wait ID`."
+# A subagent is given TaskStop too, and could stop its siblings with it.
+SUBAGENT_TASK_STOP = "Only the agent that started you stops a task."
 
 # The CLI writes each message as one line, and the SDK ends the session on a line past its bound,
 # 1 MB by default: a run 12 researcher whose six subagents read papers lost its session to one.
@@ -200,6 +203,13 @@ async def _wait_hook(hook_input, tool_use_id, context) -> dict:
         return {}
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                    "permissionDecisionReason": reason}}
+
+
+async def _task_stop_hook(hook_input, tool_use_id, context) -> dict:
+    if not hook_input.get("agent_id"):
+        return {}
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                   "permissionDecisionReason": SUBAGENT_TASK_STOP}}
 
 
 def _session_file(setup: core.RunSetup) -> str:
@@ -834,7 +844,8 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
         env={**CLI_ENV, **core.git_identity(cfg)},
         # The CLI says each prompt again as the turn that takes it up starts, see _answer.
         extra_args={"replay-user-messages": None},
-        hooks={"PreToolUse": [HookMatcher(matcher="Bash", hooks=[_wait_hook])],
+        hooks={"PreToolUse": [HookMatcher(matcher="Bash", hooks=[_wait_hook]),
+                              HookMatcher(matcher="TaskStop", hooks=[_task_stop_hook])],
                "PostToolUse": [HookMatcher(hooks=[_updates_hook(setup, watch_env, handing)]), _UNDELIVERED_MATCHER],
                "PostToolUseFailure": [_UNDELIVERED_MATCHER]},
     )
