@@ -489,7 +489,9 @@ kept as who gave the verdict.
 confirmed and refuted compare the hypothesis's jobs with a control, so they need the record
 to show it: --against names the control, a completed job of this experiment (a baseline run, or
 the same job without your change), and the hypothesis has two completed jobs of its own besides
-it. One run with no measured control is inconclusive. A repeat is needed only where results vary
+it. confirmed is the gain the hypothesis expected, reached: one far below it, or too small to
+matter against the spread or the target, is no confirmation. One run with no measured control
+is inconclusive. A repeat is needed only where results vary
 between runs. When the record cannot show what you know (a deterministic job, whose repeat gives
 the same numbers; a failure that needs no repeat; a control measured outside this experiment),
 --despite takes a sentence of why the verdict holds anyway. What a verdict rests on is kept as a
