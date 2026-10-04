@@ -3,7 +3,9 @@ import contextlib
 import io
 import json
 import os
+import runpy
 import sys
+import tempfile
 import threading
 import unittest
 import urllib.request
@@ -31,8 +33,14 @@ METRIC_HELPERS = [
 ]
 
 
+TEMPLATE_HELPER = "cli/repotemplate/files/metrics.py"
+
+
 def load_post_metric(path, api_url):
-    """The file's post_metric alone, without importing torch or opening a device."""
+    """The file's post_metric alone, without importing torch or opening a device. The template's
+    imports nothing but the standard library and is loaded whole."""
+    if path == TEMPLATE_HELPER:
+        return runpy.run_path(str(REPO / path))["post_metric"]
     tree = ast.parse((REPO / path).read_text())
     function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "post_metric")
     for default in function.args.defaults:
@@ -48,13 +56,15 @@ class Answering:
 
     def __init__(self, status, body):
         answering = self
+        self.status = status
         self.requests = []
+        self.bodies = []
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
                 answering.requests.append((self.path, self.headers.get("Authorization")))
-                self.rfile.read(int(self.headers.get("Content-Length", 0)))
-                self.send_response(status)
+                answering.bodies.append(json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)))))
+                self.send_response(answering.status)
                 self.end_headers()
                 self.wfile.write(body.encode())
 
@@ -71,6 +81,13 @@ class Answering:
 
 
 class MetricHelperTest(unittest.TestCase):
+    def setUp(self):
+        spool = tempfile.TemporaryDirectory()
+        self.addCleanup(spool.cleanup)
+        patch = mock.patch.object(tempfile, "tempdir", spool.name)
+        patch.start()
+        self.addCleanup(patch.stop)
+
     def post_three(self, path, status, body):
         control_plane = Answering(status, body)
         self.addCleanup(control_plane.close)
@@ -108,6 +125,56 @@ class MetricHelperTest(unittest.TestCase):
                 requests, stderr = self.post_three(path, 204, "")
                 self.assertEqual(len(requests), 3)
                 self.assertEqual(stderr, "")
+
+
+class TemplateSpoolTest(unittest.TestCase):
+    """The template's helper keeps a report the platform could not take and sends it later."""
+
+    def setUp(self):
+        spool = tempfile.TemporaryDirectory()
+        self.addCleanup(spool.cleanup)
+        self.control_plane = Answering(503, "")
+        self.addCleanup(self.control_plane.close)
+        env = {"HYPOTHESISLOOP_TOKEN": "job-token", "HYPOTHESISLOOP_API_URL": self.control_plane.url, "HYPOTHESISLOOP_EXPERIMENT_ID": "job-1"}
+        self.at_exit = []
+        for patch in (mock.patch.object(tempfile, "tempdir", spool.name), mock.patch.dict(os.environ, env),
+                      mock.patch("atexit.register", lambda *args: self.at_exit.append(args)),
+                      contextlib.redirect_stderr(io.StringIO())):
+            patch.__enter__()
+            self.addCleanup(patch.__exit__, None, None, None)
+        self.module = runpy.run_path(str(REPO / TEMPLATE_HELPER))
+        self.spool = self.module["_spool_path"]("job-1")
+
+    def test_a_report_not_taken_is_sent_before_the_next(self):
+        self.module["post_metric"](0.1, 1.0, "loss")
+        self.module["post_metric"](0.2, 2.0, "loss")
+        self.assertEqual(len(Path(self.spool).read_text().splitlines()), 2)
+        self.assertEqual(len(self.at_exit), 1)
+        self.control_plane.status = 204
+        self.module["post_metric"](0.3, 3.0, "loss")
+        self.assertEqual([b["metric_value"] for b in self.control_plane.bodies], [1.0, 1.0, 1.0, 2.0, 3.0])
+        self.assertEqual(Path(self.spool).read_text(), "")
+
+    def test_a_refusal_that_sending_again_cannot_change_is_not_kept(self):
+        self.control_plane.status = 422
+        self.module["post_metric"](0.1, 1.0, "loss")
+        self.assertEqual(Path(self.spool).read_text(), "")
+
+    def test_what_is_kept_is_sent_at_exit_with_retries(self):
+        self.module["post_metric"](0.1, 1.0, "loss")
+        url = f"{self.control_plane.url}/experiments/job-1/metrics"
+        sleeps = []
+
+        def sleep(s):
+            sleeps.append(s)
+            if len(sleeps) == 2:
+                self.control_plane.status = 204
+
+        with mock.patch("time.sleep", sleep):
+            self.module["_flush_at_exit"](url, "job-token", self.spool)
+        self.assertEqual(sleeps, [1, 2])
+        self.assertEqual(len(self.control_plane.bodies), 4)
+        self.assertEqual(Path(self.spool).read_text(), "")
 
 
 class ExperimentFilesTest(unittest.TestCase):
