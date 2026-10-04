@@ -138,22 +138,21 @@ const summarySQL = `concat_ws(E'\n\n', NULLIF(pe.summary, ''), NULLIF(pe.close_r
 // plannerOfDraft selects, of experiment_signups as planner, the planner of pe while pe is a draft.
 const plannerOfDraft = `planner.platform_experiment_id = pe.id AND planner.role = '` + string(domain.SignupRolePlanner) + `' AND pe.status = 'draft'`
 
-// continuedRuns selects the ids of every run platform experiment $1 carries on: the one its
-// continues names, the one that one continues, and so on. A run continues one that closed
-// before it was created, so the chain ends.
-const continuedRuns = `
-WITH RECURSIVE continued (id) AS (
-    SELECT continues FROM platform_experiments WHERE id = $1 AND continues IS NOT NULL
-    UNION
-    SELECT pe.continues FROM platform_experiments pe JOIN continued c ON pe.id = c.id WHERE pe.continues IS NOT NULL
-)
-SELECT id FROM continued`
+// priorRuns selects, latest close first, the ids of the prior runs of platform experiment $1:
+// every other closed one of its project that works on the same repository. The run its
+// continues names, and each one that run carried on, is among them, since only such a run can
+// be continued.
+const priorRuns = `
+SELECT prior.id FROM platform_experiments run
+JOIN platform_experiments prior ON prior.project_id = run.project_id AND prior.repository = run.repository
+WHERE run.id = $1 AND run.repository <> '' AND prior.id <> run.id AND prior.status = '` + string(domain.PlatformExpClosed) + `'
+ORDER BY prior.closed_at DESC, prior.id`
 
-// ContinuedRuns is every run platform experiment id carries on, empty for one that starts fresh.
-func (s *PlatformExperimentsStore) ContinuedRuns(ctx context.Context, id string) ([]string, error) {
+// PriorRuns is the ids of the prior runs of platform experiment id, empty when it has none.
+func (s *PlatformExperimentsStore) PriorRuns(ctx context.Context, id string) ([]string, error) {
 	var ids []string
-	if err := s.pool.pool.QueryRow(ctx, `SELECT ARRAY(`+continuedRuns+`)`, id).Scan(&ids); err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.ContinuedRuns: %w", err)
+	if err := s.pool.pool.QueryRow(ctx, `SELECT ARRAY(`+priorRuns+`)`, id).Scan(&ids); err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.PriorRuns: %w", err)
 	}
 	return ids, nil
 }

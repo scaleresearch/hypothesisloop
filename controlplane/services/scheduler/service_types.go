@@ -30,8 +30,8 @@ type Store interface {
 	GetRunningAndQueued(ctx context.Context, platformExpID string) ([]*domain.Experiment, error)
 	// Platform experiment lookups for admission validation.
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
-	// ContinuedRuns is every run a platform experiment carries on, whose data its jobs read.
-	ContinuedRuns(ctx context.Context, id string) ([]string, error)
+	// PriorRuns is the prior runs of a platform experiment, whose data its jobs read.
+	PriorRuns(ctx context.Context, id string) ([]string, error)
 	// GetAgentSignup is the agent's place in the platform experiment, nil when it has none: its
 	// role says whether its job is the baseline's.
 	GetAgentSignup(ctx context.Context, platformExpID, agentID string) (*domain.AgentSignup, error)

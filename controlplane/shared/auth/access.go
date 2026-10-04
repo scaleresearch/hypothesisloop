@@ -83,19 +83,18 @@ func holdsAccount(p Principal) bool {
 	return p.Kind == KindUser || p.Kind == KindKey || p.Kind == KindStaff
 }
 
-// readsContinued reports whether the request reads a run the caller's own platform experiment
-// carries on: an agent or a coordinator reads each run of its chain as its own, and writes
-// nothing to them.
-func readsContinued(ctx context.Context, p Principal, platformExperimentID string) bool {
+// readsPriorRun reports whether the request reads a prior run of the caller's own platform
+// experiment: an agent or a coordinator reads each as its own, and writes nothing to them.
+func readsPriorRun(ctx context.Context, p Principal, platformExperimentID string) bool {
 	_, reading := ctx.Value(readKey{}).(read)
-	return reading && (p.Kind == KindAgent || p.Kind == KindCoordinator) && slices.Contains(p.Continued, platformExperimentID)
+	return reading && (p.Kind == KindAgent || p.Kind == KindCoordinator) && slices.Contains(p.PriorRuns, platformExperimentID)
 }
 
 // reaches is the one statement of what a caller reaches: what its scope admits, for a read by an
-// account a platform experiment staff shared, and for a read by an agent or a coordinator the runs
-// its own carries on, with everything placed in them.
+// account a platform experiment staff shared, and for a read by an agent or a coordinator the
+// prior runs of its own, with everything placed in them.
 func reaches(ctx context.Context, p Principal, t domain.Tenancy) bool {
-	return p.Scope().Admits(t) || (t.Shared && readsShared(ctx, p)) || readsContinued(ctx, p, t.PlatformExperimentID)
+	return p.Scope().Admits(t) || (t.Shared && readsShared(ctx, p)) || readsPriorRun(ctx, p, t.PlatformExperimentID)
 }
 
 func principal(ctx context.Context) (Principal, error) {
@@ -362,14 +361,14 @@ func (a *Access) Org(ctx context.Context, requested string) (string, error) {
 // ListScope is the principal's scope for a listing, narrowed to one project when asked. A
 // listing is the caller's own, with two exceptions: narrowed by platform_experiment_id to a
 // platform experiment staff shared, it is that platform experiment's for an account that reads,
-// and narrowed to a run an agent's or a coordinator's own carries on, it is that run's.
+// and narrowed to a prior run of an agent's or a coordinator's own, it is that run's.
 func (a *Access) ListScope(ctx context.Context, projectID string) (domain.TenantScope, error) {
 	p, err := principal(ctx)
 	if err != nil {
 		return domain.TenantScope{}, err
 	}
 	scope := p.Scope()
-	if named, _ := ctx.Value(readKey{}).(read); readsContinued(ctx, p, named.platformExperimentID) {
+	if named, _ := ctx.Value(readKey{}).(read); readsPriorRun(ctx, p, named.platformExperimentID) {
 		scope.PlatformExperimentID = named.platformExperimentID
 	}
 	if named, _ := ctx.Value(readKey{}).(read); named.platformExperimentID != "" && !scope.Unrestricted() && readsShared(ctx, p) &&

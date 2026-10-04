@@ -39,9 +39,9 @@ type Principal struct {
 	ProjectID string
 
 	PlatformExperimentID string
-	// Continued is every run an agent's or a coordinator's platform experiment carries on, which
-	// it reads as its own (readsContinued).
-	Continued []string
+	// PriorRuns are the prior runs of an agent's or a coordinator's platform experiment
+	// (domain.Tenancy.PriorRuns), which it reads as its own (readsPriorRun).
+	PriorRuns []string
 	// PlatformExperimentClosed is set on a coordinator token whose platform experiment has
 	// closed: until its wind-down is over it reads and files the summary, and does nothing else.
 	PlatformExperimentClosed bool

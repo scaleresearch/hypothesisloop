@@ -341,13 +341,13 @@ func TestTenancyIsDerivedThroughTheProject(t *testing.T) {
 	createTestAgent(t, pool, agentID)
 	seedExperimentForCapTest(t, pool, jobID, agentID, peID, 1, domain.StatusQueued)
 
-	want := domain.Tenancy{PlatformExperimentID: peID, ProjectID: project.ID, OrgID: orgID, Continued: []string{}}
+	want := domain.Tenancy{PlatformExperimentID: peID, ProjectID: project.ID, OrgID: orgID, PriorRuns: []string{}}
 	got, closedAt, err := accounts.PlatformExperimentTenancy(ctx, peID)
 	if err != nil || got == nil || !reflect.DeepEqual(*got, want) || closedAt != nil {
 		t.Fatalf("platform experiment tenancy: got = %+v closed at %v, %v, want %+v open", got, closedAt, err, want)
 	}
 	ofAgent := want
-	ofAgent.AgentID, ofAgent.Continued = agentID, nil
+	ofAgent.AgentID, ofAgent.PriorRuns = agentID, nil
 	job, ended, err := accounts.ExperimentTenancy(ctx, jobID)
 	if err != nil || job == nil || !reflect.DeepEqual(*job, ofAgent) || ended {
 		t.Fatalf("job tenancy: got = %+v ended=%v, %v, want %+v running", job, ended, err, ofAgent)
@@ -407,6 +407,58 @@ func TestTenancyIsDerivedThroughTheProject(t *testing.T) {
 	}
 	if _, found, err := accounts.AgentOrg(ctx, "agent-missing-"+suffix); err != nil || found {
 		t.Fatalf("org of a missing agent: got found = %v, %v, want false", found, err)
+	}
+}
+
+// The prior runs of a run are every other closed run of its project on its repository, whatever
+// it continues, latest close first: a sibling run nothing continued is read as its chain is.
+func TestPriorRunsAreTheClosedRunsOfTheProjectOnTheSameRepository(t *testing.T) {
+	pool := eventsTestDB(t)
+	accounts := NewAccountsStore(pool)
+	pes := NewPlatformExperimentsStore(pool)
+	ctx := context.Background()
+	_, orgID := newTestUserHome(t, accounts)
+	project := defaultProjectOf(t, accounts, orgID)
+	_, otherOrg := newTestUserHome(t, accounts)
+	otherProject := defaultProjectOf(t, accounts, otherOrg)
+	suffix := uuid.New().String()[:8]
+	now := time.Now().UTC()
+	seed := func(name, projectID, repository string, status domain.PlatformExperimentStatus, closedAgo time.Duration, continues string) string {
+		id := "pe-prior-" + name + "-" + suffix
+		createTestPEIn(t, pool, id, projectID)
+		var closedAt *time.Time
+		if status == domain.PlatformExpClosed {
+			at := now.Add(-closedAgo)
+			closedAt = &at
+		}
+		if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET repository = $2, status = $3, closed_at = $4, continues = NULLIF($5, '') WHERE id = $1`,
+			id, repository, string(status), closedAt, continues); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+		return id
+	}
+	first := seed("first", project.ID, "o/r", domain.PlatformExpClosed, 3*time.Hour, "")
+	sibling := seed("sibling", project.ID, "o/r", domain.PlatformExpClosed, 2*time.Hour, "")
+	continued := seed("continued", project.ID, "o/r", domain.PlatformExpClosed, time.Hour, first)
+	seed("other-repository", project.ID, "o/x", domain.PlatformExpClosed, time.Hour, "")
+	seed("still-running", project.ID, "o/r", domain.PlatformExpRunning, 0, "")
+	seed("other-project", otherProject.ID, "o/r", domain.PlatformExpClosed, time.Hour, "")
+	run := seed("run", project.ID, "o/r", domain.PlatformExpRunning, 0, continued)
+	unnamed := seed("unnamed", project.ID, "", domain.PlatformExpOpen, 0, "")
+
+	for id, want := range map[string][]string{
+		run:       {continued, sibling, first},
+		continued: {sibling, first},
+		unnamed:   {},
+	} {
+		got, err := pes.PriorRuns(ctx, id)
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("prior runs of %s: got = %v, %v, want %v", id, got, err, want)
+		}
+		tenancy, _, err := accounts.PlatformExperimentTenancy(ctx, id)
+		if err != nil || tenancy == nil || !reflect.DeepEqual(tenancy.PriorRuns, want) {
+			t.Errorf("tenancy of %s: got = %+v, %v, want prior runs %v", id, tenancy, err, want)
+		}
 	}
 }
 

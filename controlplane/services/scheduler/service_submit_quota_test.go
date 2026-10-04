@@ -17,7 +17,7 @@ func (admittingStore) GetRunningAndQueued(context.Context, string) ([]*domain.Ex
 	return nil, nil
 }
 
-func (admittingStore) ContinuedRuns(context.Context, string) ([]string, error) {
+func (admittingStore) PriorRuns(context.Context, string) ([]string, error) {
 	return nil, nil
 }
 

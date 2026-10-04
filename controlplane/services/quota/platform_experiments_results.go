@@ -298,21 +298,50 @@ func (s *PlatformExperimentsService) derivedTopResults(ctx context.Context, id s
 	if pe == nil {
 		return nil, nil
 	}
-	primary, ok := domain.PrimaryRankingMetric(pe.Metrics)
-	if !ok {
-		return nil, nil
-	}
-	best, _, err := s.bestPerAgent(ctx, pe, primary)
-	if err != nil {
-		return nil, fmt.Errorf("results: %w", err)
-	}
-	standings, err := s.rank(ctx, pe, primary, best)
+	_, standings, err := s.primaryStandings(ctx, pe)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]AgentResult, 0, len(standings))
 	for _, st := range standings {
 		out = append(out, AgentResult{AgentID: st.AgentID, FinalMetric: st.Best})
+	}
+	return out, nil
+}
+
+// primaryStandings ranks agents on pe's primary ranking metric, which is false when pe declares
+// none.
+func (s *PlatformExperimentsService) primaryStandings(ctx context.Context, pe *domain.PlatformExperiment) (domain.MetricDefinition, []AgentStanding, error) {
+	primary, ok := domain.PrimaryRankingMetric(pe.Metrics)
+	if !ok {
+		return primary, nil, nil
+	}
+	best, _, err := s.bestPerAgent(ctx, pe, primary)
+	if err != nil {
+		return primary, nil, fmt.Errorf("results: %w", err)
+	}
+	standings, err := s.rank(ctx, pe, primary, best)
+	return primary, standings, err
+}
+
+// PriorRuns describes each of ids, prior runs of one platform experiment, in their order, with
+// the leading standing on its primary ranking metric.
+func (s *PlatformExperimentsService) PriorRuns(ctx context.Context, ids []string) ([]domain.PriorRun, error) {
+	out := make([]domain.PriorRun, 0, len(ids))
+	for _, id := range ids {
+		pe, err := s.stored(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("prior runs: %w", err)
+		}
+		primary, standings, err := s.primaryStandings(ctx, pe)
+		if err != nil {
+			return nil, fmt.Errorf("prior runs: %w", err)
+		}
+		run := domain.PriorRun{ID: pe.ID, Name: pe.Name, Status: pe.Status, ClosedAt: pe.ClosedAt, CloseReason: pe.CloseReason, Metric: primary.Key}
+		if len(standings) > 0 {
+			run.Best, run.BestJobID = &standings[0].Best, standings[0].ExperimentID
+		}
+		out = append(out, run)
 	}
 	return out, nil
 }

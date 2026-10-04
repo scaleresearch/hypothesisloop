@@ -233,9 +233,10 @@ type Tenancy struct {
 	AgentID              string
 	// Shared is the platform's decision that every account may read the platform experiment.
 	Shared bool
-	// Continued is every run the platform experiment carries on: the one its continues names,
-	// the one that one continues, and so on. Set when what was placed is a platform experiment.
-	Continued []string
+	// PriorRuns are every other closed platform experiment of the project that works on the same
+	// repository, the runs its continues chain carries on among them. Its agents and its
+	// coordinator read them as their own. Set when what was placed is a platform experiment.
+	PriorRuns []string
 }
 
 // TenantScope is what one caller may see. AllOrgs lifts the org restriction; ProjectID and

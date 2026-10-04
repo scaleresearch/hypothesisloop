@@ -312,3 +312,46 @@ func TestWhoseRecordAWriteIsAndWhoseCredentialMadeIt(t *testing.T) {
 		t.Errorf("no caller: got = %d (%v), want = 401", status(err), err)
 	}
 }
+
+// An agent or a coordinator reads each prior run of its own platform experiment, and what is
+// placed in it, as its own, and writes nothing to it. A job reads no prior run, and a run of the
+// project that is no prior run stays out of reach.
+func TestAnAgentOrACoordinatorReadsThePriorRunsOfItsOwn(t *testing.T) {
+	prior := domain.Tenancy{PlatformExperimentID: "pe-prior", ProjectID: "prj-a", OrgID: "org-a"}
+	other := domain.Tenancy{PlatformExperimentID: "pe-other", ProjectID: "prj-a", OrgID: "org-a"}
+	access := auth.NewAccess(authtest.Placement{
+		PlatformExperiments: map[string]domain.Tenancy{"pe-a": inA, "pe-prior": prior, "pe-other": other},
+		Experiments:         map[string]domain.Tenancy{"job-prior": by(prior, "agent-prior")},
+		Projects:            map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}},
+	})
+	for _, tc := range []struct {
+		caller          string
+		reads, readsJob int
+	}{
+		{"agent in pe-a", 200, 200}, {"coordinator of pe-a", 200, 200}, {"job job-a", 404, 403},
+	} {
+		caller, reads := tc.caller, tc.reads
+		p := callers[caller]
+		p.PriorRuns = []string{"pe-prior"}
+		write := auth.WithPrincipal(context.Background(), p)
+		read := auth.WithRead(write, "pe-prior")
+		for _, c := range []struct {
+			what string
+			err  error
+			want int
+		}{
+			{"the prior run", access.PlatformExperiment(read, "pe-prior"), reads},
+			{"its hypotheses", access.Within(read, "hypothesis", "pe-prior"), reads},
+			{"a job of it", access.Experiment(read, "job-prior"), tc.readsJob},
+			{"the prior run, to write", access.PlatformExperiment(write, "pe-prior"), 404},
+			{"a run that is no prior run", access.PlatformExperiment(read, "pe-other"), 404},
+		} {
+			if got := status(c.err); got != c.want {
+				t.Errorf("%s, %s: got = %d, want = %d", caller, c.what, got, c.want)
+			}
+		}
+		if scope, err := access.ListScope(read, ""); reads == 200 && (err != nil || scope.PlatformExperimentID != "pe-prior") {
+			t.Errorf("%s listing the prior run: got scope %+v, %v, want it narrowed to pe-prior", caller, scope, err)
+		}
+	}
+}

@@ -242,6 +242,9 @@ type PlatformExperiment struct {
 	Summary        string   `json:"summary,omitempty"`
 	SignedUpAgents []string `json:"signed_up_agents,omitempty"`
 	SignupCount    int      `json:"signup_count"`
+	// PriorRuns are its prior runs (Tenancy.PriorRuns) the reader reaches, latest close first.
+	// Carried by a read of one platform experiment and left out of a list.
+	PriorRuns []PriorRun `json:"prior_runs,omitempty" doc:"Every other closed platform experiment of the same project that works on the same repository, latest close first. Its agents and its coordinator read each as they read their own, passing its id as platform_experiment_id or --platform-experiment: its summary, standings, jobs and their logs, its hypotheses and findings, and with their data keys the data under its prefix. They write nothing to it. Absent when there is none, and on a list."`
 	// DefaultQuotaTier is used when a signup does not choose its own tier. Empty means this row
 	// predates the policy and ResolveQuotaTier must use the legacy kind-based default.
 	DefaultQuotaTier QuotaTier `json:"default_quota_tier,omitempty"`
@@ -283,9 +286,8 @@ type PlatformExperiment struct {
 	// experiment that was created whole.
 	Goal string `json:"goal,omitempty"`
 	// Continues is the closed run it carries on, fixed at creation, empty for one that starts
-	// fresh. Its agents read that run and the ones it carried on as they read their own, and do
-	// nothing else to them.
-	Continues string `json:"continues,omitempty" doc:"The closed platform experiment of the same project and repository this one carries on, fixed at creation. Absent on one that starts fresh. Its agents and its coordinator read that run, and each run that one carried on, as they read their own, passing its id as platform_experiment_id or --platform-experiment: its summary, standings, jobs and their logs, its hypotheses and findings, and with their data keys the data under its prefix. Its baseline starts from the commit of that run's baseline job (that run's baseline_job_id), so the two are measured by the same harness."`
+	// fresh. Its baseline starts from that run's; like every prior run, it is read as its own.
+	Continues string `json:"continues,omitempty" doc:"The closed platform experiment of the same project and repository this one carries on, fixed at creation. Absent on one that starts fresh. Its baseline starts from the commit of that run's baseline job (that run's baseline_job_id), so the two are measured by the same harness. It is one of prior_runs, read as every prior run is."`
 	// Actor is whose credential created it, unverified with no id on one created before this
 	// was kept. Carried by a read of one platform experiment and left out of a list.
 	Actor *Actor `json:"actor,omitempty"`
@@ -339,6 +341,19 @@ func (p *PlatformExperiment) ClosesAt() time.Time {
 // AwaitsAgents says the platform experiment runs and no researcher is at work yet.
 func (p *PlatformExperiment) AwaitsAgents() bool {
 	return p.Status == PlatformExpRunning && p.StartedAt.IsZero()
+}
+
+// PriorRun is a closed platform experiment of the same project and repository as the one it is
+// listed on, with the leading standing on its primary ranking metric.
+type PriorRun struct {
+	ID          string                   `json:"id"`
+	Name        string                   `json:"name"`
+	Status      PlatformExperimentStatus `json:"status"`
+	ClosedAt    *time.Time               `json:"closed_at,omitempty"`
+	CloseReason CloseReason              `json:"close_reason,omitempty"`
+	Metric      string                   `json:"metric,omitempty" doc:"Its primary ranking metric, absent when it declared none."`
+	Best        *float64                 `json:"best,omitempty" doc:"The leading researcher's best on metric, from the metrics store as GET /platform-experiments/{id}/results ranks it. Absent when nobody ranked."`
+	BestJobID   string                   `json:"best_job_id,omitempty" doc:"The job that set best."`
 }
 
 // AwaitsRepository says the platform has yet to create the repository it keeps its code in. No

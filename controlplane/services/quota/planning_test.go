@@ -32,8 +32,12 @@ func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Princ
 	t.Helper()
 	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)
 	placement := authtest.Placement{
-		Projects:            map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}, "prj-b": {ID: "prj-b", OrgID: "org-b"}},
-		PlatformExperiments: map[string]domain.Tenancy{"pe-draft": {PlatformExperimentID: "pe-draft", ProjectID: "prj-a", OrgID: "org-a"}},
+		Projects: map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}, "prj-b": {ID: "prj-b", OrgID: "org-b"}},
+		PlatformExperiments: map[string]domain.Tenancy{
+			"pe-draft":   {PlatformExperimentID: "pe-draft", ProjectID: "prj-a", OrgID: "org-a"},
+			"pe-prior":   {PlatformExperimentID: "pe-prior", ProjectID: "prj-a", OrgID: "org-a"},
+			"pe-foreign": {PlatformExperimentID: "pe-foreign", ProjectID: "prj-b", OrgID: "org-b"},
+		},
 	}
 	router := chi.NewRouter()
 	doc := apidocs.New(router, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(placement), zap.NewNop())
@@ -1546,5 +1550,29 @@ func TestAProposalIsAcceptedAsProposedUnlessAPersonActsFirst(t *testing.T) {
 	}
 	if pe := store.created[0]; pe.Status != domain.PlatformExpDraft || pe.AcceptsAt != nil {
 		t.Fatalf("a proposal the check refuses: status %s, accepts_at %v, want a draft held for a person", pe.Status, pe.AcceptsAt)
+	}
+}
+
+// A planner chose a lever a closed sibling run had refuted, because it read only the run its
+// draft continues. The read of a platform experiment lists every prior run its caller reaches.
+func TestTheReadOfAPlatformExperimentListsThePriorRunsItsCallerReaches(t *testing.T) {
+	store := draftWithPlanner()
+	closedAt := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	store.created = append(store.created,
+		&domain.PlatformExperiment{ID: "pe-prior", ProjectID: "prj-a", Name: "round 13", Status: domain.PlatformExpClosed, ClosedAt: &closedAt, CloseReason: domain.CloseByRequest},
+		&domain.PlatformExperiment{ID: "pe-foreign", ProjectID: "prj-b", Name: "theirs", Status: domain.PlatformExpClosed, ClosedAt: &closedAt})
+	store.prior = []string{"pe-prior", "pe-foreign"}
+	reader := thePlanner
+	reader.PriorRuns = []string{"pe-prior"}
+	_, call := planningAPI(t, store, reader)
+	code, out := call("GET", "/platform-experiments/pe-draft", nil)
+	prior, _ := out["prior_runs"].([]any)
+	if code != http.StatusOK || len(prior) != 1 {
+		t.Fatalf("got = %d with prior_runs %v, want 200 and the one prior run the planner reaches", code, out["prior_runs"])
+	}
+	run := prior[0].(map[string]any)
+	if run["id"] != "pe-prior" || run["name"] != "round 13" || run["status"] != "closed" || run["close_reason"] != "closed_by_request" ||
+		run["closed_at"] != closedAt.Format(time.RFC3339) || run["best"] != nil {
+		t.Errorf("prior run = %v, want pe-prior as stored, with no best where it ranked nothing", run)
 	}
 }

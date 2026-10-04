@@ -241,7 +241,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "Checkpoints and datasets the job left under its own prefix, listed live from the object store. " +
 			"A job that kept nothing lists as an empty array — that is the ordinary case, not an error. " +
 			"Read any of them from a job, or from your own shell after `eval \"$(hl data-key)\"`: " +
-			"HYPOTHESISLOOP_DATA_SHARED spans the whole platform experiment, and the same URI with the id of a run it continues spans that run.",
+			"HYPOTHESISLOOP_DATA_SHARED spans the whole platform experiment, and the same URI with the id of one of its prior_runs spans that run.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body []objectstore.Object }, error) {

@@ -151,6 +151,8 @@ func (f *fakeRepositories) File(_ context.Context, projectID, repository, _ stri
 type createdStore struct {
 	PlatformExperimentsStore
 	created []*domain.PlatformExperiment
+	// prior are the prior runs of every platform experiment it holds.
+	prior []string
 	// messages are the messages sent to its agents.
 	messages []domain.AgentMessage
 	// researchers are the agents of role competitor that joined.
@@ -171,6 +173,10 @@ type createdStore struct {
 
 func (s *createdStore) awaiting(pe *domain.PlatformExperiment) bool {
 	return pe.Status != domain.PlatformExpClosed && pe.AwaitsRepository()
+}
+
+func (s *createdStore) PriorRuns(context.Context, string) ([]string, error) {
+	return s.prior, nil
 }
 
 func (s *createdStore) RepositoriesToCreate(context.Context) ([]db.RepositoryToCreate, error) {

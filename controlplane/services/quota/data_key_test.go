@@ -40,7 +40,7 @@ func (s *signupKeys) AgentDataKey(ctx context.Context, _, agentID string, create
 	return key, nil
 }
 
-func (s *signupKeys) ContinuedRuns(context.Context, string) ([]string, error) {
+func (s *signupKeys) PriorRuns(context.Context, string) ([]string, error) {
 	return nil, nil
 }
 

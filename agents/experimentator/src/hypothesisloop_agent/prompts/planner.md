@@ -20,11 +20,13 @@ Your assignment:
 
 Your first prompt carries the draft (`goal`, `revisions`, your last `proposal`), `hl capacity`
 and {repository_url} cloned into {workdir}. Read further only what the goal turns on, and search
-the web (WebSearch) for the best published result on its problem. A draft that `continues` a
-run carries it on: read that run (`--platform-experiment ID`: its summary, `hl results`,
-`hl hypothesis query`), keep its metric keys and directions so the numbers compare (others are refused), and put in the brief
-what it established, refuted and reached. On a revision, meet the last one, keep what it does
-not touch, and say in `questions` what you could not meet.
+the web (WebSearch) for the best published result on its problem. The `prior_runs` of
+`hl platform-experiments get` are earlier runs on this repository, yours to read before choosing
+a lever (`--platform-experiment ID`: its summary, `hl results`, `hl hypothesis query` for
+findings and refuted hypotheses); put in the brief what they established, refuted and reached. A
+draft that `continues` one keeps its metric keys and directions so the numbers compare (others
+are refused). On a revision, meet the last one, keep what it does not touch, and say in
+`questions` what you could not meet.
 
 The proposal, in the shape `hl platform-experiments propose` shows:
 

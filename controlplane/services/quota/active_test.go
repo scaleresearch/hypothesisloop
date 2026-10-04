@@ -39,7 +39,7 @@ func (s *windDownStore) AgentDataKey(context.Context, string, string, func(conte
 	return domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"}, nil
 }
 
-func (s *windDownStore) ContinuedRuns(context.Context, string) ([]string, error) {
+func (s *windDownStore) PriorRuns(context.Context, string) ([]string, error) {
 	return nil, nil
 }
 
