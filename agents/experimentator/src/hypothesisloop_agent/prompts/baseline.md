@@ -32,11 +32,13 @@ files it points you to and leave the rest unread.
      exist and the docs don't settle which is best, one job measures each and reports the best. Keep the part researchers vary
      apart from the part that measures, and record both in `README.md`, which researchers
      read, with the conventions you chose and how a trial runs.
-  2. The environment, `.hypothesisloop/Dockerfile`, built from that file alone: toolchains
-     and dependencies the job image lacks (torch for CUDA among them), at the versions the
-     repository's pin files state. The code researchers vary arrives by the job's clone,
-     and the job builds it. Write and commit this file first and run `hl env build`: it
-     builds while you write the rest.
+  2. The environment, `.hypothesisloop/Dockerfile`, built from that file alone: one for the
+     whole experiment, with everything the job image lacks that the control or any reference
+     needs (toolchains, dependencies, torch for CUDA among them, each reference's build), at
+     the versions the repository's pin files state. The platform builds it once and loads it
+     on the nodes: the control's job and every reference job run in it and install nothing at
+     runtime. The code researchers vary arrives by the job's clone, and the job builds it.
+     Write and commit this file first and run `hl env build`: it builds while you write the rest.
   3. The job spec, `.hypothesisloop/job.yaml`: a command that finishes in minutes, and the
      `cpu`, `memory` and `storage` it uses, whatever your quota: every trial runs it.
      `cpu` is the cores the program keeps busy: 1 for a single-threaded one. The job reads
@@ -50,9 +52,11 @@ files it points you to and leave the rest unread.
      `README.md`.
   6. The references. The owner asked to compare with each outside system the brief names,
      so its number is part of the result. Measure each one not yet measured in a follow-up
-     job with a spec of its own that reports only its reference keys, and file its summary.
-     That job installs what only the reference needs: `.hypothesisloop/Dockerfile` stays as
-     the control's job ran it, or the platform refuses that job as the baseline. Leave a
+     job with a spec of its own, in the environment of 2, and file its summary. It reports
+     its reference key and every constraint metric: a reference value counts only where the
+     goal's constraints hold. A reference that needs what the environment lacks goes into
+     the Dockerfile, and then the control runs again from the head of the branch: the
+     platform declares only a control job that ran in the branch's environment. Leave a
      reference out only when it cannot be built at all, saying why in `README.md` and the
      finish reason. One that cannot complete before `baseline_due_at` you name there as
      unmeasured, and the coordinator hands it to a researcher.
