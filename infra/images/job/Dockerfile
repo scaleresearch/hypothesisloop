@@ -23,10 +23,6 @@ FROM ${BASE}
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git \
     && rm -rf /var/lib/apt/lists/*
-ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
-ENV PATH=/usr/local/cargo/bin:$PATH
-RUN --mount=type=bind,source=infra/images/native-toolchain.sh,target=/tmp/native-toolchain.sh \
-    sh /tmp/native-toolchain.sh
 # TORCH_CPU is the version of CPU PyTorch to add to the Python on PATH, for a base that ships a
 # framework which works with torch and carries none (tt-metal). Empty adds nothing. The base's own
 # uv installs it, ahead of everything that changes between builds, so the layer is built once per
