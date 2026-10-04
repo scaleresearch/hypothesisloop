@@ -314,6 +314,7 @@ func (s *ExperimentsStore) RequeueInfrastructureFault(ctx context.Context, id st
 		eviction_reason = $3,
 		attempt_count = attempt_count + 1,
 		infra_requeue_count = infra_requeue_count + 1,
+		infra_requeue_reason = $3,
 		submitted_at = NULL,
 		-- clear cluster_name: the failed attempt holds no capacity, and the next admission tick
 		-- must be free to place this somewhere other than the cluster that just failed it.

@@ -321,6 +321,11 @@ const (
 	// PhaseReasonInstanceUnknown: the job's rented machine is listed and its provider does not
 	// say whether the job runs on it, as when the host is unreachable. It ends nothing.
 	PhaseReasonInstanceUnknown = "instance_unknown"
+	// PhaseReasonCreateFailed: the runtime tried to create the job's workload and its platform
+	// refused, as when the runtime lacks a permission. Message is the refusal. It ends nothing:
+	// the runtime tries again each pass, and the stuck-pending deadline bounds the wait, its
+	// eviction carrying this message.
+	PhaseReasonCreateFailed = "create_failed"
 )
 
 // ExitCodeCodeUnreachable is the one exit code with a meaning to the platform: hl-clone ends with
@@ -388,17 +393,26 @@ func (d PhaseDetail) EvictionOfFailure() (EvictionReason, bool) {
 // why: "no_offer: <sentence>" where the runtime found no machine, and for a job whose own image
 // or configuration cannot start "unschedulable: <the runtime's reason>: <sentence>".
 func (d PhaseDetail) EvictionOfNeverStarting() EvictionReason {
-	code, said := EvictionUnschedulable, d.Reason
+	code, said := EvictionUnschedulable, d.Said()
 	if d.Reason == PhaseReasonNoOffer {
-		code, said = EvictionNoOffer, ""
-	}
-	if message := d.detail(); message != "" {
-		said = strings.TrimPrefix(said+": "+message, ": ")
+		code, said = EvictionNoOffer, d.detail()
 	}
 	if said == "" {
 		return code
 	}
 	return code.WithDetail(said)
+}
+
+// Said is what the runtime reported: its reason, then the first line of its message.
+func (d PhaseDetail) Said() string {
+	message := d.detail()
+	switch {
+	case message == "":
+		return d.Reason
+	case d.Reason == "":
+		return message
+	}
+	return d.Reason + ": " + message
 }
 
 // NeverSelfHealsPhaseReasons is the set of PhaseDetail.Reason values that will not resolve on

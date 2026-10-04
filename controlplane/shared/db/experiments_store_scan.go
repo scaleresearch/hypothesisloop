@@ -29,7 +29,7 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 		&exp.EstimatedDurationHours, &exp.EstimatedCostAccH,
 		&exp.PriorityScore, &exp.NoveltyScore, &capacityTier, &status,
 		&exp.QueuedAt, &exp.SubmittedAt, &evictionReason, &notAdmittedReason,
-		&exp.QuotaSettledAt, &exp.AttemptCount, &exp.InfraRequeueCount, &triedClusters, &ranOnAcceleratorType,
+		&exp.QuotaSettledAt, &exp.AttemptCount, &exp.InfraRequeueCount, &exp.InfraRequeueReason, &triedClusters, &ranOnAcceleratorType,
 		&exp.DataKey.AccessKeyID, &exp.DataKey.SecretAccessKey, &exp.SecretEnv,
 		&exp.CreatedAt, &exp.UpdatedAt, &exp.EnvironmentKey,
 		&exp.ProjectID, &exp.OrgID,

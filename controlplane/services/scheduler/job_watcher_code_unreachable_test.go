@@ -134,10 +134,14 @@ func TestAnEvictionSaysWhatTheRuntimeSaid(t *testing.T) {
 		t.Fatalf("terminal %q", store.terminalReasons)
 	}
 
-	if got := notRunningInTime(5*time.Minute, domain.PhaseReasonInstanceStarting); got != "admitted and not running within 5m0s, its runtime reporting instance_starting" {
+	if got := notRunningInTime(5*time.Minute, domain.PhaseDetail{Reason: domain.PhaseReasonInstanceStarting}); got != "admitted and not running within 5m0s, its runtime reporting instance_starting" {
 		t.Fatalf("got %q", got)
 	}
-	if got := notRunningInTime(5*time.Minute, ""); got != "admitted and not running within 5m0s" {
+	createFailed := domain.PhaseDetail{Reason: domain.PhaseReasonCreateFailed, Message: `secrets "exp-job-1-pull" is forbidden`}
+	if got := notRunningInTime(5*time.Minute, createFailed); got != `admitted and not running within 5m0s, its runtime reporting create_failed: secrets "exp-job-1-pull" is forbidden` {
+		t.Fatalf("got %q", got)
+	}
+	if got := notRunningInTime(5*time.Minute, domain.PhaseDetail{}); got != "admitted and not running within 5m0s" {
 		t.Fatalf("got %q", got)
 	}
 }

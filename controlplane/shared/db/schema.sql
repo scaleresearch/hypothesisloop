@@ -270,6 +270,9 @@ CREATE TABLE IF NOT EXISTS experiments (
     -- hardware never spends the budget meant for its own bugs — while attempt_count still
     -- advances, which is what makes each requeue a distinct desired state the runtime rebuilds.
     infra_requeue_count      INTEGER           NOT NULL DEFAULT 0,
+    -- The eviction reason of the last of those requeues, written with the count and never
+    -- cleared: eviction_reason explains only the attempt that ended, and goes with the next claim.
+    infra_requeue_reason     TEXT              NOT NULL DEFAULT '',
     -- tried_clusters: the placements of this job the environment failed, as a JSON array of
     -- {"cluster_id": ..., "at": <RFC3339>, "reason": <eviction reason code>}. Appended by
     -- RequeueInfrastructureFault in the write that spends infra_requeue_count; read at candidate
@@ -297,6 +300,7 @@ CREATE TABLE IF NOT EXISTS experiments (
 -- database from the ALTER, and both land on the same 0 backfill from the one DEFAULT clause.
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS infra_requeue_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS infra_requeue_reason TEXT NOT NULL DEFAULT '';
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS resolved_job_spec JSONB;
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS tried_clusters JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS ran_on_accelerator_type TEXT NOT NULL DEFAULT '';

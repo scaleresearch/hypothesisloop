@@ -48,6 +48,7 @@ UPDATE experiments e SET
 	eviction_reason = '` + string(domain.EvictionClusterWithdrawn) + `',
 	attempt_count = attempt_count + 1,
 	infra_requeue_count = infra_requeue_count + 1,
+	infra_requeue_reason = '` + string(domain.EvictionClusterWithdrawn) + `',
 	submitted_at = NULL,
 	cluster_name = '',
 	resolved_job_spec = NULL,

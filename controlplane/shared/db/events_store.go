@@ -239,7 +239,7 @@ func isHypothesisActivity(kind string) bool {
 func agentScope(kind string) string {
 	switch {
 	case kind == EventExperimentStatus:
-		return "terminal statuses of your own jobs"
+		return "terminal statuses of your own jobs, and their returns to the queue, which carry why"
 	case kind == EventExperimentBlocked:
 		return "your own jobs, and only a reason that waiting will not clear"
 	case isAgentOwned(kind):
@@ -260,7 +260,7 @@ func agentScope(kind string) string {
 // receiving before the connection broke.
 //
 // An agent filter scopes the stream to what that agent has to act on, so it never needs to poll
-// its own resources: its jobs' terminal statuses and the queue reasons waiting will not clear,
+// its own resources: its jobs' terminal statuses, their requeues and the queue reasons waiting will not clear,
 // its allocation and cut, ladder advances, the run's status and brief, and other people's
 // activity on hypotheses it registered. A job waiting its turn for capacity is no news.
 // Whether a hypothesis event concerns one of the agent's hypotheses is a graph question, answered
@@ -291,7 +291,7 @@ func (f EventFilter) Matches(e Event) bool {
 	}
 	switch {
 	case e.Kind == EventExperimentStatus:
-		return e.AgentID == f.AgentID && domain.ExperimentStatus(e.Value).IsTerminal()
+		return e.AgentID == f.AgentID && (domain.ExperimentStatus(e.Value).IsTerminal() || requeued(e))
 	case e.Kind == EventExperimentBlocked:
 		return e.AgentID == f.AgentID && !domain.QueueReasonClearsByWaiting(e.Value)
 	case isAgentOwned(e.Kind):
@@ -303,6 +303,12 @@ func (f EventFilter) Matches(e Event) bool {
 	default:
 		return true
 	}
+}
+
+// requeued says the job of a status event went back to the queue after an attempt, which a
+// first queueing does not say: only a requeue carries the reason the attempt ended.
+func requeued(e Event) bool {
+	return e.Value == string(domain.StatusQueued) && e.Detail != ""
 }
 
 // EventsStore is the only path to the change stream: it listens for live events and derives the

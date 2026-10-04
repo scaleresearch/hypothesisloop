@@ -158,6 +158,9 @@ type Experiment struct {
 	// (RetriesUsed): AttemptCount is the generation counter that makes each attempt a distinct
 	// desired state, so it must advance on every requeue, while the budget must not.
 	InfraRequeueCount int `json:"infra_requeue_count"`
+	// InfraRequeueReason is the reason of the last of those requeues, kept while later attempts
+	// run, which EvictionReason is not.
+	InfraRequeueReason string `json:"infra_requeue_reason,omitempty" doc:"Why the platform last requeued the job for a fault of its own, as code or code: detail, kept while its next attempts are queued and run: stuck_pending: admitted and not running within 5m0s, its runtime reporting create_failed: and what the cluster refused. Absent on a job never requeued so."`
 	// TriedClusters is this job's own history of placements the environment failed: every
 	// cluster (by runtime-derived cluster_id) it was requeued from for an infrastructure fault, a
 	// scale-up that timed out or was refused included, with the time it was appended. Placement

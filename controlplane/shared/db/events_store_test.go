@@ -855,6 +855,7 @@ func TestAnAgentScopeAdmitsItsOwnOutcomesAndNoRivalsOrIntermediateStatuses(t *te
 	admitted := []Event{
 		{Kind: EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-a"},
 		{Kind: EventExperimentStatus, Value: "EVICTED", AgentID: "agent-a"},
+		{Kind: EventExperimentStatus, Value: "QUEUED", Detail: "stuck_pending: admitted and not running within 5m0s", AgentID: "agent-a"},
 		{Kind: EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-a"},
 		{Kind: EventExperimentBlocked, Value: "exceeds_accelerator_share: cpu 64 above 8", AgentID: "agent-a"},
 		{Kind: EventExperimentBlocked, Value: "exceeds_cluster_capacity: needs {accelerator:h200=3}, more than any connected cluster has installed", AgentID: "agent-a"},

@@ -184,8 +184,8 @@ func TestAReasonEndsWithTheAttemptItExplains(t *testing.T) {
 		t.Fatal("the requeued job was not placed again")
 	}
 	got := w.get(t, id)
-	if got.EvictionReason != "" || got.InfraRequeueCount != 1 || len(got.TriedClusters) != 1 {
-		t.Fatalf("placed again: reason %q, infra %d, tried %+v, want no reason and the history kept", got.EvictionReason, got.InfraRequeueCount, got.TriedClusters)
+	if got.EvictionReason != "" || got.InfraRequeueCount != 1 || got.InfraRequeueReason != string(domain.EvictionStuckPending) || len(got.TriedClusters) != 1 {
+		t.Fatalf("placed again: reason %q, infra %d (%q), tried %+v, want no reason and the history kept", got.EvictionReason, got.InfraRequeueCount, got.InfraRequeueReason, got.TriedClusters)
 	}
 	_, err := w.pool.pool.Exec(ctx, `UPDATE experiments SET eviction_reason = 'stuck_pending' WHERE id = $1`, id)
 	if err == nil || !strings.Contains(err.Error(), "experiments_reason_of_attempt") {

@@ -92,7 +92,7 @@ func TestScaleUpDeadlinePastTimeoutRequeuesOnTheInfrastructureAllowance(t *testi
 	if err := w.reconcileOne(context.Background(), exp, backend.autoscalerEnabled, backend.clusterIDs); err != nil {
 		t.Fatal(err)
 	}
-	if len(store.requeuedReasons) != 1 || store.requeuedReasons[0] != string(domain.EvictionScaleUpTimeout) {
+	if len(store.requeuedReasons) != 1 || domain.EvictionReason(store.requeuedReasons[0]).Code() != domain.EvictionScaleUpTimeout {
 		t.Fatalf("requeuedReasons = %v, want [scale_up_timeout]", store.requeuedReasons)
 	}
 	if store.infraRequeues != 1 || len(store.terminalReasons) != 0 {
@@ -117,7 +117,7 @@ func TestScaleUpDeadlineWithTheAllowanceSpentEndsTheJob(t *testing.T) {
 	if err := w.reconcileOne(context.Background(), exp, backend.autoscalerEnabled, backend.clusterIDs); err != nil {
 		t.Fatal(err)
 	}
-	if len(store.requeuedReasons) != 0 || len(store.terminalReasons) != 1 || store.terminalReasons[0] != string(domain.EvictionScaleUpTimeout) {
+	if len(store.requeuedReasons) != 0 || len(store.terminalReasons) != 1 || domain.EvictionReason(store.terminalReasons[0]).Code() != domain.EvictionScaleUpTimeout {
 		t.Fatalf("requeued %v, terminal %v, want the job ended as scale_up_timeout", store.requeuedReasons, store.terminalReasons)
 	}
 }
@@ -158,7 +158,7 @@ func TestScaleUpEarlyExitOnTerminalSchedulingReason(t *testing.T) {
 	if err := w.reconcileOne(context.Background(), exp, backend.autoscalerEnabled, backend.clusterIDs); err != nil {
 		t.Fatal(err)
 	}
-	if len(store.requeuedReasons) != 1 || store.requeuedReasons[0] != string(domain.EvictionScaleUpTimeout) {
+	if len(store.requeuedReasons) != 1 || domain.EvictionReason(store.requeuedReasons[0]).Code() != domain.EvictionScaleUpTimeout {
 		t.Fatalf("requeuedReasons = %v, want early exit with scale_up_timeout", store.requeuedReasons)
 	}
 }
@@ -179,7 +179,7 @@ func TestScaleUpDeadlinePhaseIndependentPartialGangWhileRunning(t *testing.T) {
 	if err := w.reconcileOne(context.Background(), exp, backend.autoscalerEnabled, backend.clusterIDs); err != nil {
 		t.Fatal(err)
 	}
-	if len(store.requeuedReasons) != 1 || store.requeuedReasons[0] != string(domain.EvictionScaleUpTimeout) {
+	if len(store.requeuedReasons) != 1 || domain.EvictionReason(store.requeuedReasons[0]).Code() != domain.EvictionScaleUpTimeout {
 		t.Fatalf("requeuedReasons = %v, want a partial-gang eviction even though phase is Running", store.requeuedReasons)
 	}
 }
@@ -241,7 +241,7 @@ func TestScaleUpDeadlineNonAutoscalerClusterFallsBackToStuckPending(t *testing.T
 	if err := w.reconcileOne(context.Background(), exp, backend.autoscalerEnabled, backend.clusterIDs); err != nil {
 		t.Fatal(err)
 	}
-	if len(store.terminalReasons) != 1 || store.terminalReasons[0] != string(domain.EvictionStuckPending) {
+	if len(store.terminalReasons) != 1 || domain.EvictionReason(store.terminalReasons[0]).Code() != domain.EvictionStuckPending {
 		t.Fatalf("terminalReasons = %v, want [stuck_pending] on a non-autoscaler cluster", store.terminalReasons)
 	}
 }
@@ -287,7 +287,7 @@ func TestScaleUpDeadlineAppliesWhenPhaseDetailNeverFound(t *testing.T) {
 	if err := w.reconcileOne(context.Background(), exp, backend.autoscalerEnabled, backend.clusterIDs); err != nil {
 		t.Fatal(err)
 	}
-	if len(store.requeuedReasons) != 1 || store.requeuedReasons[0] != string(domain.EvictionScaleUpTimeout) {
+	if len(store.requeuedReasons) != 1 || domain.EvictionReason(store.requeuedReasons[0]).Code() != domain.EvictionScaleUpTimeout {
 		t.Fatalf("requeuedReasons = %v, want [scale_up_timeout] — a never-reported job must still hit the deadline", store.requeuedReasons)
 	}
 }

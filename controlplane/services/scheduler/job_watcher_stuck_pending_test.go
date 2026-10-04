@@ -148,7 +148,7 @@ func TestAStuckPendingOverrideLeavesTheScaleUpDeadlineAlone(t *testing.T) {
 	if err := w.reconcileOne(context.Background(), scaleUpExperiment(1, 2*time.Minute), backend.autoscalerEnabled, backend.clusterIDs); err != nil {
 		t.Fatal(err)
 	}
-	if len(store.requeuedReasons) != 1 || store.requeuedReasons[0] != string(domain.EvictionScaleUpTimeout) {
+	if len(store.requeuedReasons) != 1 || domain.EvictionReason(store.requeuedReasons[0]).Code() != domain.EvictionScaleUpTimeout {
 		t.Fatalf("requeued = %v, terminal = %v, want one scale_up_timeout failover", store.requeuedReasons, store.terminalReasons)
 	}
 }
