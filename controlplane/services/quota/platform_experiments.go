@@ -276,7 +276,7 @@ func (r *CreatePlatformExperimentRequest) UnmarshalJSON(data []byte) error {
 // quota tier are fixed at creation and are no fields of it.
 type PlatformExperimentPatch struct {
 	Name                      *string                    `json:"name,omitempty" doc:"Not empty."`
-	Description               *string                    `json:"description,omitempty" doc:"The brief every agent works from, not empty."`
+	Description               *string                    `json:"description,omitempty" doc:"The brief every agent works from, not empty and at most 32768 bytes."`
 	BudgetAcceleratorHours    *float64                   `json:"budget_accelerator_hours,omitempty"`
 	MaxAgents                 *int                       `json:"max_agents,omitempty" doc:"How many researchers may join over its whole life: the agents of role competitor, whatever their flavor. One that finished or was cut still counts. Agents of role baseline, reviewers and the coordinator never count. At least the researchers that already joined."`
 	MaxConcurrentAccelerators *int                       `json:"max_concurrent_accelerators,omitempty"`

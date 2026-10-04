@@ -81,6 +81,9 @@ func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentReque
 	if spec.Name == "" || spec.Description == "" {
 		return spec, refuseUpdate(422, "invalid_experiment", "name and description are required: the description is the brief every agent works from")
 	}
+	if len(spec.Description) > domain.MaxProseBytes {
+		return spec, refuseUpdate(422, "invalid_experiment", "%s", tooLong("description", len(spec.Description)))
+	}
 	if err := domain.ValidateMetricDefinitions(spec.Metrics); err != nil {
 		return spec, refuseUpdate(422, "invalid_metrics", "metrics: %s", err)
 	}
@@ -964,6 +967,11 @@ func (s *PlatformExperimentsService) stored(ctx context.Context, id string) (*do
 	return pe, nil
 }
 
+// tooLong says why a description or a summary of size bytes is refused.
+func tooLong(field string, size int) string {
+	return fmt.Sprintf("%s is %d bytes and at most %d are kept, since every read of the platform experiment answers it whole: shorten it, and keep the detail in the repository and name the path", field, size, domain.MaxProseBytes)
+}
+
 func noPlatformExperiment(id string) error {
 	return api.Refuse(http.StatusNotFound, "not_found", "no platform experiment "+id)
 }
@@ -972,6 +980,9 @@ func noPlatformExperiment(id string) error {
 // experiment with it. Unlike every other field, this is writable after the experiment closes: a
 // summary only exists once the run is over.
 func (s *PlatformExperimentsService) SetSummary(ctx context.Context, id, summary string) (*domain.PlatformExperiment, error) {
+	if len(summary) > domain.MaxProseBytes {
+		return nil, refuseUpdate(422, "summary_too_long", "%s", tooLong("summary", len(summary)))
+	}
 	err := s.store.SetPlatformExperimentSummary(ctx, id, summary)
 	if errors.Is(err, db.ErrPlatformExperimentNotFound) {
 		return nil, noPlatformExperiment(id)

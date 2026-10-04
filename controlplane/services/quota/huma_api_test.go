@@ -191,6 +191,11 @@ func TestCloseAndSummaryAnswerThePlatformExperimentAndRefuseByReason(t *testing.
 			t.Errorf("%s: got = %v, want 404 not_found", name, err)
 		}
 	}
+	_, err := svc.SetSummary(context.Background(), "pe-none", strings.Repeat("x", domain.MaxProseBytes+1))
+	var refused *api.Refusal
+	if !errors.As(err, &refused) || refused.GetStatus() != http.StatusUnprocessableEntity || refused.Reason != "summary_too_long" {
+		t.Errorf("a summary too long: got = %v, want 422 summary_too_long", err)
+	}
 }
 
 type constraintResultsStore struct{ PlatformExperimentsStore }

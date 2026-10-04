@@ -172,6 +172,10 @@ func ValidateAgentImage(image string) error {
 // read at the head of its default branch when one is created with from_repo.
 const ExperimentFile = ".hypothesisloop/experiment.yaml"
 
+// MaxProseBytes caps the description and the summary: every read of the platform experiment
+// answers both whole, and every agent reads it often.
+const MaxProseBytes = 32 << 10
+
 // PlatformExperiment is the operator-defined compute envelope agents compete within.
 type PlatformExperiment struct {
 	ID                     string  `json:"id"`
