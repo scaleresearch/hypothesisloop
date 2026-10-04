@@ -276,7 +276,7 @@ func TestAPoolInstanceThatNeverBecomesWarmIsReplaced(t *testing.T) {
 	}
 }
 
-func TestAReplacementIsStartedBeforeTheInstanceItReplacesIsDestroyed(t *testing.T) {
+func TestTheInstanceAReplacementReplacesIsDestroyedBeforeItStarts(t *testing.T) {
 	h := newPoolHarness(t, 1)
 	h.cp.want([]entry{agent("a-v1")}, nil)
 	pool := h.warmPool(image1)
@@ -285,7 +285,7 @@ func TestAReplacementIsStartedBeforeTheInstanceItReplacesIsDestroyed(t *testing.
 	h.cp.want([]entry{agent("a-v2")}, nil)
 	order := h.calls()
 	h.mustPass()
-	want := []string{"StartWarm " + full("a-v2"), "Destroy " + full("a-v1"), "Warm " + pool}
+	want := []string{"Destroy " + full("a-v1"), "StartWarm " + full("a-v2"), "Warm " + pool}
 	if got := order(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("calls = %v, want %v", got, want)
 	}

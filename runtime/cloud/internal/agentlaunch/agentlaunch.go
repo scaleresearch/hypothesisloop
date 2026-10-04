@@ -195,10 +195,10 @@ func (l *Launcher) Run(ctx context.Context) error {
 // instance is handled by itself: one that cannot be created, stopped or destroyed is reported in
 // the returned error and the rest of the pass still runs.
 //
-// What is missing is created first, from the warm pool where it has an instance ready, and what
-// goes is destroyed after, so a replacement waits for no destroy. An agent whose instance is
-// replaced under a new name still does not run twice: the old instance is destroyed in the same
-// pass, seconds before the new one's command starts.
+// What is no longer desired is destroyed first, and what is missing is created after, from the
+// warm pool where it has an instance ready: an agent whose instance is replaced under a new name
+// never runs twice, as its old instance is gone before the new one's command starts. One whose
+// destroy failed is destroyed again on the next pass.
 //
 // An answer that states a refusal is acted on like any other, except that nothing is created,
 // and the pass returns ErrRefused with the control plane's words.
@@ -225,8 +225,6 @@ func (l *Launcher) Pass(ctx context.Context) error {
 	}
 
 	p := &pass{l: l, ready: l.readyPool(pool), started: map[string]bool{}}
-	p.create(ctx, want, byName)
-
 	for _, name := range sortedKeys(byName) {
 		if _, wanted := want.instances[name]; !wanted && !want.ending[name] {
 			for _, i := range byName[name] {
@@ -234,6 +232,7 @@ func (l *Launcher) Pass(ctx context.Context) error {
 			}
 		}
 	}
+	p.create(ctx, want, byName)
 
 	// An ending instance is told to stop once, and again every stopRetry until its command has
 	// exited: the signal is what starts the agent's last turn. A stop that failed is sent again
