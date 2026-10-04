@@ -507,7 +507,7 @@ func TestACreateThatFailsOnEveryPassSpendsTheAgentsRestartsAndStopsIt(t *testing
 	}
 
 	// The operator fixes the size, which changes the launcher's digest: the agent is asked for
-	// again, with every restart back.
+	// again with a whole restart budget, and the restarts spent under the old launch still counted.
 	cfg := c.launcher.cfg
 	cfg.Size.CPUMillis = 500
 	c.rented.Fail = nil
@@ -518,7 +518,7 @@ func TestACreateThatFailsOnEveryPassSpendsTheAgentsRestartsAndStopsIt(t *testing
 	if err := fixed.Pass(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if recorded := c.instance("ag-unrentable"); recorded.Stopped || recorded.Restarts != 0 || len(c.rented.Names()) != 2 {
+	if recorded := c.instance("ag-unrentable"); recorded.Stopped || recorded.Restarts != domain.MaxAgentInstanceRestarts || len(c.rented.Names()) != 2 {
 		t.Fatalf("after the launcher's config changed: recorded %+v, rented %v", recorded, c.rented.Names())
 	}
 }
