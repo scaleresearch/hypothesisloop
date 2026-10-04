@@ -305,3 +305,29 @@ func TestAssigningAnEnvironmentNoRowNamesIsNothing(t *testing.T) {
 		t.Fatalf("got %+v, %v", env, err)
 	}
 }
+
+// A build's progress is the assigned cluster's to report, at its attempt, while it builds, and an
+// assignment of the next attempt starts it over.
+func TestABuildsProgressIsTheAssignedAttemptsAndANewAssignmentClearsIt(t *testing.T) {
+	w := newEnvironments(t)
+	ctx := context.Background()
+	env := w.assign(t, w.ensure(t, w.orgA, "progress").Key, w.ofA)
+	for name, c := range map[string]struct {
+		cluster string
+		attempt int
+	}{"another cluster": {w.ofB, env.Attempt}, "another attempt": {w.ofA, env.Attempt + 1}} {
+		if took, err := w.envs.RecordEnvironmentProgress(ctx, c.cluster, env.Key, c.attempt, "[1/3] FROM base: started"); err != nil || took {
+			t.Fatalf("%s: took %v, %v", name, took, err)
+		}
+	}
+	if took, err := w.envs.RecordEnvironmentProgress(ctx, w.ofA, env.Key, env.Attempt, "[2/3] RUN apt-get install gcc: started"); err != nil || !took {
+		t.Fatalf("the assigned attempt: took %v, %v", took, err)
+	}
+	got, _ := w.envs.GetEnvironment(ctx, env.Key)
+	if got.Progress != "[2/3] RUN apt-get install gcc: started" || got.ProgressAt == nil {
+		t.Fatalf("progress = %q at %v", got.Progress, got.ProgressAt)
+	}
+	if again := w.assign(t, env.Key); again.Progress != "" || again.ProgressAt != nil {
+		t.Fatalf("taken from its cluster: progress %q at %v, want none", again.Progress, again.ProgressAt)
+	}
+}

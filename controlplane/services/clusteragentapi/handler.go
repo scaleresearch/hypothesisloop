@@ -6,6 +6,7 @@
 //	POST /internal/clusters/{name}/status        — push job phase observations
 //	POST /internal/clusters/{name}/builds/{key}/credential — the push login of an assigned build
 //	POST /internal/clusters/{name}/builds/{key}  — the outcome of an assigned build
+//	POST /internal/clusters/{name}/builds/{key}/progress — the step an assigned build is at
 //
 // There is no command/ack protocol: an experiment's own status (SUBMITTED/RUNNING)
 // is the single source of truth for "should a Job exist" — the agent fetches that view and
@@ -71,6 +72,7 @@ type Store interface {
 	AssignedEnvironmentBuilds(ctx context.Context, cluster string) ([]*domain.Environment, error)
 	AssignedEnvironmentBuild(ctx context.Context, cluster, key string, attempt int) (*domain.Environment, error)
 	FinishEnvironmentBuild(ctx context.Context, cluster, key string, attempt int, outcome domain.EnvironmentBuildOutcome) (bool, error)
+	RecordEnvironmentProgress(ctx context.Context, cluster, key string, attempt int, step string) (bool, error)
 }
 
 // RegistryLogins hands out logins to the registry of environment images (registrycred.Source).
@@ -512,6 +514,33 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		h.logger.Info("environment build reported", zap.String("cluster", in.Name), zap.String("key", in.Key),
 			zap.Int("attempt", report.Attempt), zap.String("outcome", string(report.Outcome)))
+		return nil, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{
+		OperationID: "cluster-build-progress", Method: "POST", Path: "/{name}/builds/{key}/progress",
+		Summary: "Report the step an assigned environment build is at", Tags: []string{"cluster-agent"},
+		Description: "step, one line of at most " + strconv.Itoa(domain.MaxEnvironmentProgressBytes) + " bytes, replaces the last one reported, and the jobs waiting for the environment show it. " +
+			"Recorded only while the build of key is assigned to this cluster at attempt and still building; otherwise 409.",
+	}, func(ctx context.Context, in *struct {
+		Name string `path:"name"`
+		Key  string `path:"key"`
+		Body domain.EnvironmentBuildProgress
+	}) (*struct{}, error) {
+		if h.environments == nil {
+			return nil, huma.Error409Conflict("this deployment builds no environments")
+		}
+		step := in.Body.Step
+		if step == "" || len(step) > domain.MaxEnvironmentProgressBytes || strings.ContainsAny(step, "\r\n") {
+			return nil, huma.Error400BadRequest("step is one line of 1 to " + strconv.Itoa(domain.MaxEnvironmentProgressBytes) + " bytes")
+		}
+		current, err := h.store.RecordEnvironmentProgress(ctx, in.Name, in.Key, in.Body.Attempt, step)
+		if err != nil {
+			return nil, auth.Internal(h.logger, "environment build progress", err, zap.String("cluster", in.Name), zap.String("key", in.Key))
+		}
+		if !current {
+			return nil, huma.Error409Conflict("the build of " + in.Key + " is not assigned to cluster " + in.Name + " at attempt " + strconv.Itoa(in.Body.Attempt))
+		}
 		return nil, nil
 	})
 

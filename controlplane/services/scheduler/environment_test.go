@@ -171,7 +171,7 @@ func TestAJobWaitsForItsAssignedEnvironmentAndEndsByWhoseFaultItFailed(t *testin
 		reason, ended := store.reasons["job-1"], store.terminated["job-1"]
 		switch c.want {
 		case "held":
-			if !held || !strings.HasPrefix(reason, domain.NotAdmittedEnvironmentBuilding+": ") || !strings.Contains(reason, "builder-a, attempt 2 of 3") || len(store.terminated) > 0 {
+			if !held || reason != domain.NotAdmittedEnvironmentBuilding+": the platform builds the environment its commit declares in .hypothesisloop/Dockerfile, on registry.test/job:1, on cluster builder-a, attempt 2 of 3. The job runs in it once it is built" || len(store.terminated) > 0 {
 				t.Errorf("%s: held %v, reason %q, want held naming the cluster and the attempt", name, held, reason)
 			}
 		case "waiting":
@@ -192,5 +192,42 @@ func TestAJobWaitsForItsAssignedEnvironmentAndEndsByWhoseFaultItFailed(t *testin
 				t.Errorf("%s: held %v, want it left to placement", name, held)
 			}
 		}
+	}
+}
+
+// builtStore is a Store holding environments by key.
+type builtStore struct {
+	Store
+	envs map[string]*domain.Environment
+}
+
+func (s builtStore) GetEnvironment(_ context.Context, key string) (*domain.Environment, error) {
+	return s.envs[key], nil
+}
+
+// Run 3's agent read environment_building for 19 minutes while its build pulled, installed and
+// pushed. A job waiting for its environment says the step its build last reported, read with the
+// job: a step changes no queue reason and wakes nobody.
+func TestAJobWaitingForItsEnvironmentSaysTheStepItsBuildReported(t *testing.T) {
+	at := time.Date(2026, 10, 8, 9, 14, 10, 0, time.UTC)
+	svc := &Service{store: builtStore{envs: map[string]*domain.Environment{
+		"k1": {Key: "k1", State: domain.EnvironmentBuilding, ClusterName: "builder-a", Attempt: 1, Progress: "[2/3] RUN apt-get install gcc: started", ProgressAt: &at},
+		"k2": {Key: "k2", State: domain.EnvironmentBuilding, Attempt: 1, Progress: "stale"},
+	}}}
+	waiting := func(id, key string) *domain.Experiment {
+		return &domain.Experiment{ID: id, Status: domain.StatusQueued, EnvironmentKey: key, NotAdmittedReason: domain.NotAdmittedEnvironmentBuilding, NotAdmittedMessage: "the platform builds it"}
+	}
+	building, unassigned, placed := waiting("job-1", "k1"), waiting("job-2", "k2"), &domain.Experiment{ID: "job-3", Status: domain.StatusSubmitted, EnvironmentKey: "k1"}
+	if err := svc.mergeBuildProgress(context.Background(), []*domain.Experiment{building, unassigned, placed}); err != nil {
+		t.Fatal(err)
+	}
+	if want := "the platform builds it. Its build reported at 2026-10-08T09:14:10Z: [2/3] RUN apt-get install gcc: started"; building.NotAdmittedMessage != want {
+		t.Errorf("building: %q, want %q", building.NotAdmittedMessage, want)
+	}
+	if unassigned.NotAdmittedMessage != "the platform builds it" || placed.NotAdmittedMessage != "" {
+		t.Errorf("a build no cluster runs said %q and a placed job %q, want nothing added", unassigned.NotAdmittedMessage, placed.NotAdmittedMessage)
+	}
+	if err := svc.mergeBuildProgress(context.Background(), []*domain.Experiment{waiting("job-4", "gone")}); err == nil {
+		t.Error("a job naming no environment that exists: no error")
 	}
 }

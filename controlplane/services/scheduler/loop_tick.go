@@ -1958,15 +1958,15 @@ func (l *Loop) heldForEnvironment(ctx context.Context, pass *environmentPass, ex
 		if env.ClusterName == "" {
 			where = "once a live cluster that builds for its org has room"
 		}
-		reason := domain.NotAdmittedEnvironmentBuilding + ": the platform builds the environment " + domain.EnvironmentFile + " of its commit declares, on " + env.Base + ", " + where +
+		reason := domain.NotAdmittedEnvironmentBuilding + ": the platform builds the environment its commit declares in " + domain.EnvironmentFile + ", on " + env.Base + ", " + where +
 			". The job runs in it once it is built"
 		return true, l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason)
 	case env.State == domain.EnvironmentFailed && env.Fault == domain.EnvironmentFaultFile:
 		return true, l.endForEnvironment(ctx, exp, domain.StatusRejected, string(domain.EvictionEnvironmentFailed.WithDetail(domain.EnvironmentFile+" of its commit did not build on "+env.Base+
 			". Fix it, commit and submit again. The end of the build's output:\n"+env.LogTail)))
 	case env.State == domain.EnvironmentFailed && env.Fault == domain.EnvironmentFaultPlatform:
-		return true, l.endForEnvironment(ctx, exp, domain.StatusEvicted, string(domain.EvictionEnvironmentUnbuilt.WithDetail("the platform could not build the environment "+domain.EnvironmentFile+
-			" of its commit declares on "+env.Base+" in "+strconv.Itoa(domain.MaxEnvironmentAttempts)+" attempts, no fault of the file's. It costs nothing: submit again and the platform builds it again")))
+		return true, l.endForEnvironment(ctx, exp, domain.StatusEvicted, string(domain.EvictionEnvironmentUnbuilt.WithDetail("the platform could not build the environment its commit declares in "+domain.EnvironmentFile+
+			" on "+env.Base+" in "+strconv.Itoa(domain.MaxEnvironmentAttempts)+" attempts, no fault of the file's. It costs nothing: submit again and the platform builds it again")))
 	}
 	return false, fmt.Errorf("environment %s of job %s is %s with fault %q", env.Key, exp.ID, env.State, env.Fault)
 }

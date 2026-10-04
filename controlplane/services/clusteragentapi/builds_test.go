@@ -198,3 +198,24 @@ func TestABuildReportThatSaysTooLittleOrTooMuchIsRefused(t *testing.T) {
 		t.Errorf("finished = %q, want nothing recorded", w.store.finished)
 	}
 }
+
+// The cluster that builds an environment tells the step it is at, which the job waiting for it
+// shows: run 3 waited 19 minutes on a build that said nothing.
+func TestABuildsProgressIsRecordedFencedOnItsAttemptAndOneLine(t *testing.T) {
+	w := newReconcileWorld(t, "of-a")
+	w.store.assigned["of-a"] = []*domain.Environment{assignedBuild("key-1", 1)}
+	if rec := w.post(t, "/of-a/builds/key-1/progress", domain.EnvironmentBuildProgress{Attempt: 1, Step: "[2/3] RUN apt-get install gcc: started"}); rec.Code != http.StatusNoContent {
+		t.Fatalf("got = %d %s, want = 204", rec.Code, rec.Body)
+	}
+	if rec := w.post(t, "/of-a/builds/key-1/progress", domain.EnvironmentBuildProgress{Attempt: 2, Step: "late"}); rec.Code != http.StatusConflict {
+		t.Errorf("an attempt not assigned: got = %d %s, want = 409", rec.Code, rec.Body)
+	}
+	for name, step := range map[string]string{"empty": "", "two lines": "a\nb", "past the boundary": strings.Repeat("x", domain.MaxEnvironmentProgressBytes+1)} {
+		if rec := w.post(t, "/of-a/builds/key-1/progress", domain.EnvironmentBuildProgress{Attempt: 1, Step: step}); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: got = %d %s, want = 400", name, rec.Code, rec.Body)
+		}
+	}
+	if want := []string{"key-1 [2/3] RUN apt-get install gcc: started"}; !slices.Equal(w.store.progress, want) {
+		t.Errorf("progress = %q, want %q", w.store.progress, want)
+	}
+}

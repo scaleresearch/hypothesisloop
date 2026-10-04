@@ -58,7 +58,8 @@ const (
 // image. Key names the three, so the same file on the same base is built once per org. A building
 // one is assigned to ClusterName at AssignedAt for its Attempt-th time, or to none while
 // ClusterName is empty. Image is the pushed build, repository@digest, and runs once State is
-// ready. LogTail is the end of the output of a build that failed.
+// ready. LogTail is the end of the output of a build that failed. Progress is the step its
+// assigned cluster last reported of the attempt it builds, at ProgressAt.
 type Environment struct {
 	Key         string
 	OrgID       string
@@ -71,6 +72,8 @@ type Environment struct {
 	ClusterName string
 	Attempt     int
 	AssignedAt  *time.Time
+	Progress    string
+	ProgressAt  *time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }

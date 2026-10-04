@@ -50,6 +50,8 @@ type Store interface {
 	DescribeJobs(ctx context.Context, jobs []*domain.Experiment) error
 	// FindingSummary returns the summary filed for a job, empty when none was.
 	FindingSummary(ctx context.Context, experimentID string) (string, error)
+	// GetEnvironment is the environment of key, nil when there is none.
+	GetEnvironment(ctx context.Context, key string) (*domain.Environment, error)
 	// ProjectOrg and RegisteredClusters say which clusters take a job's org's jobs, and which
 	// image each runs.
 	ProjectOrg(ctx context.Context, projectID string) (string, error)

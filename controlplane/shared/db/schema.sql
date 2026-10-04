@@ -1368,6 +1368,10 @@ ALTER TABLE environments ADD COLUMN IF NOT EXISTS fault TEXT NOT NULL DEFAULT ''
 ALTER TABLE environments ADD COLUMN IF NOT EXISTS cluster_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE environments ADD COLUMN IF NOT EXISTS attempt INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE environments ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMPTZ;
+-- The step the assigned cluster last reported of the attempt it builds, at progress_at. A new
+-- assignment clears it.
+ALTER TABLE environments ADD COLUMN IF NOT EXISTS progress TEXT NOT NULL DEFAULT '';
+ALTER TABLE environments ADD COLUMN IF NOT EXISTS progress_at TIMESTAMPTZ;
 ALTER TABLE environments DROP CONSTRAINT IF EXISTS environments_state_check;
 DO $$ BEGIN
     IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'environments' AND column_name = 'attempts') THEN

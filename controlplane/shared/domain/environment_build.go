@@ -54,3 +54,15 @@ type EnvironmentBuildReport struct {
 	Digest  string                      `json:"digest,omitempty"`
 	LogTail string                      `json:"log_tail,omitempty"`
 }
+
+// MaxEnvironmentProgressBytes bounds the step of a build's progress report.
+const MaxEnvironmentProgressBytes = 512
+
+// EnvironmentBuildProgress is what a cluster reports of a build it was assigned at Attempt while
+// it runs (POST /internal/clusters/{name}/builds/{key}/progress): Step, the build's latest step
+// in one line of at most MaxEnvironmentProgressBytes, such as "[3/5] RUN apt-get install gcc:
+// started". The job waiting for the build shows it.
+type EnvironmentBuildProgress struct {
+	Attempt int    `json:"attempt"`
+	Step    string `json:"step"`
+}

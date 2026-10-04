@@ -38,6 +38,9 @@ func (s *Service) GetExperiment(ctx context.Context, id string) (*domain.Experim
 	if err := s.mergeRanOn(ctx, []*domain.Experiment{exp}); err != nil {
 		return nil, fmt.Errorf("scheduler.GetExperiment: %w", err)
 	}
+	if err := s.mergeBuildProgress(ctx, []*domain.Experiment{exp}); err != nil {
+		return nil, fmt.Errorf("scheduler.GetExperiment: %w", err)
+	}
 	if err := s.mergeMetrics(ctx, []*domain.Experiment{exp}); err != nil {
 		return nil, fmt.Errorf("scheduler.GetExperiment: %w", err)
 	}
@@ -100,6 +103,33 @@ func (s *Service) mergePhaseDetails(ctx context.Context, exps []*domain.Experime
 	for _, exp := range exps {
 		if d, found := details[exp.ID]; found {
 			exp.PhaseDetail = &domain.PhaseDetail{Reason: d.Reason, Message: d.Message, RestartCount: d.RestartCount}
+		}
+	}
+	return nil
+}
+
+// mergeBuildProgress adds to the not_admitted_message of each job that waits for its environment
+// the step its build last reported. It is read with the job and never stored in the job's queue
+// reason, whose every change is an update that wakes the job's agent: a build's steps are not.
+func (s *Service) mergeBuildProgress(ctx context.Context, exps []*domain.Experiment) error {
+	envs := map[string]*domain.Environment{}
+	for _, exp := range exps {
+		if exp.NotAdmittedReason != domain.NotAdmittedEnvironmentBuilding {
+			continue
+		}
+		env, read := envs[exp.EnvironmentKey]
+		if !read {
+			var err error
+			if env, err = s.store.GetEnvironment(ctx, exp.EnvironmentKey); err != nil {
+				return fmt.Errorf("scheduler.mergeBuildProgress: %w", err)
+			}
+			if env == nil {
+				return fmt.Errorf("scheduler.mergeBuildProgress: job %s names environment %s, which does not exist", exp.ID, exp.EnvironmentKey)
+			}
+			envs[exp.EnvironmentKey] = env
+		}
+		if env.State == domain.EnvironmentBuilding && env.ClusterName != "" && env.Progress != "" {
+			exp.NotAdmittedMessage += ". Its build reported at " + env.ProgressAt.UTC().Format(time.RFC3339) + ": " + env.Progress
 		}
 	}
 	return nil

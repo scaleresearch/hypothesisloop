@@ -21,13 +21,13 @@ func NewEnvironmentsStore(pool *Pool) *EnvironmentsStore {
 	return &EnvironmentsStore{pool: pool}
 }
 
-const environmentColumns = ` key, org_id, base, dockerfile, image, state, fault, log_tail, cluster_name, attempt, assigned_at, created_at, updated_at `
+const environmentColumns = ` key, org_id, base, dockerfile, image, state, fault, log_tail, cluster_name, attempt, assigned_at, progress, progress_at, created_at, updated_at `
 
 func scanEnvironment(row rowScanner) (*domain.Environment, error) {
 	env := &domain.Environment{}
 	var state, fault string
 	if err := row.Scan(&env.Key, &env.OrgID, &env.Base, &env.Dockerfile, &env.Image, &state, &fault, &env.LogTail,
-		&env.ClusterName, &env.Attempt, &env.AssignedAt, &env.CreatedAt, &env.UpdatedAt); err != nil {
+		&env.ClusterName, &env.Attempt, &env.AssignedAt, &env.Progress, &env.ProgressAt, &env.CreatedAt, &env.UpdatedAt); err != nil {
 		return nil, err
 	}
 	env.State, env.Fault = domain.EnvironmentState(state), domain.EnvironmentFault(fault)
@@ -101,6 +101,7 @@ func (s *EnvironmentsStore) AssignEnvironment(ctx context.Context, key string, l
 		cluster_name = CASE WHEN e.attempt >= $4 THEN '' ELSE COALESCE(pick.name, '') END,
 		attempt = CASE WHEN e.attempt < $4 AND pick.name IS NOT NULL THEN e.attempt + 1 ELSE e.attempt END,
 		assigned_at = CASE WHEN e.attempt < $4 AND pick.name IS NOT NULL THEN now() END,
+		progress = '', progress_at = NULL,
 		updated_at = now()
 	FROM (SELECT 1) one LEFT JOIN pick ON true
 	WHERE e.key = $1 AND e.state = 'building'
@@ -176,6 +177,17 @@ func (s *EnvironmentsStore) FinishEnvironmentBuild(ctx context.Context, cluster,
 WHERE key = $1 AND attempt = $2 AND cluster_name = $3 AND state = 'building'`, args...)
 	if err != nil {
 		return false, fmt.Errorf("environments_store.FinishBuild: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// RecordEnvironmentProgress keeps step as the progress of the build of key that cluster runs at
+// attempt, and says whether it was still that build's to report.
+func (s *EnvironmentsStore) RecordEnvironmentProgress(ctx context.Context, cluster, key string, attempt int, step string) (bool, error) {
+	tag, err := s.pool.pool.Exec(ctx, `UPDATE environments SET progress = $4, progress_at = now()
+WHERE key = $1 AND attempt = $2 AND cluster_name = $3 AND state = 'building'`, key, attempt, cluster, step)
+	if err != nil {
+		return false, fmt.Errorf("environments_store.RecordProgress: %w", err)
 	}
 	return tag.RowsAffected() == 1, nil
 }
