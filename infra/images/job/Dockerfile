@@ -1,10 +1,11 @@
-# BASE is the image the job's own tools are added to: Python alone for the bare job image, or an
-# upstream framework image (Debian or Ubuntu) for one of the others `make job-images` builds.
-ARG BASE=python:3.13-slim
+# BASE is the job image without the platform's tools (Dockerfile.base), built first.
+ARG BASE
 
 # The image a job's command runs in on rented compute. It carries the platform's client and git
 # and nothing of any experiment: the job's code comes from its repository through hl-clone and
-# its dependencies install when the job starts. Build context is the repo root.
+# its dependencies install when the job starts. Build context is the repo root. The tools are its
+# last layers, as they are an environment's (domain.PlatformTools), so a release that changes
+# them rebuilds only these.
 
 FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS hl-builder
 ARG TARGETOS TARGETARCH
@@ -14,38 +15,6 @@ COPY cli/ cli/
 COPY runtime/shared/exitline/ runtime/shared/exitline/
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/hl ./cli
 
-# A stage of its own: a pull that fails here says why, and one that fails inside COPY --from
-# reads as "no stage or image found with that name".
-FROM ghcr.io/astral-sh/uv:latest AS uv
-
 FROM ${BASE}
-# An upstream image may leave another user set; the tools are installed as root.
-USER root
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git \
-    && rm -rf /var/lib/apt/lists/*
-# TORCH_CPU is the version of CPU PyTorch to add to the Python on PATH, for a base that ships a
-# framework which works with torch and carries none (tt-metal). Empty adds nothing. The base's own
-# uv installs it, ahead of everything that changes between builds, so the layer is built once per
-# base and version.
-ARG TORCH_CPU=
-RUN if [ -n "$TORCH_CPU" ]; then \
-      uv pip install --no-cache --python "$(command -v python3)" \
-        --index-url https://download.pytorch.org/whl/cpu "torch==$TORCH_CPU"; \
-    fi
-COPY --from=uv /uv /uvx /usr/local/bin/
-# A job adds a package with plain `uv pip install X` or `pip install X`, into the python3 on PATH
-# whether that is a system Python, conda or a virtualenv. uv is told which Python that is, since
-# without a virtualenv it refuses and with UV_SYSTEM_PYTHON it skips one; pip is added beside that
-# Python where the pip on PATH belongs to another.
-RUN py="$(command -v python3)" \
- && mkdir -p /etc/uv && printf '[pip]\npython = "%s"\n' "$py" > /etc/uv/uv.toml \
- && if [ "$(dirname "$(command -v pip)")" != "${py%/*}" ]; then uv pip install --no-cache pip; fi
 COPY --from=hl-builder /out/hl /usr/local/bin/hl
 COPY agents/coordinator/experiments/hl-clone /usr/local/bin/hl-clone
-# hl-clone fetches the job's commit from the platform experiment's repository. git asks hl for the
-# credential on whichever host it talks to, and hl asks the platform as the job: a read credential
-# for that one repository, and nothing for any other address.
-RUN git config --system credential.helper \
-      '!API_URL="$HYPOTHESISLOOP_API_URL" HL_TOKEN="$HYPOTHESISLOOP_TOKEN" hl git-credential' \
- && git config --system credential.useHttpPath true
-WORKDIR /workspace

@@ -320,7 +320,8 @@ tt-start:
 # written only by a push to the dev registry: the tests pull from there, and a publish to another
 # registry would otherwise pin them to a tag the dev registry may not hold.
 # job is the bare image the deployment offers a job to run in (job_images) and the one a cloud
-# runtime boots, at the tag of the agents' images, so it is pushed wherever they are.
+# runtime boots, at the tag of the agents' images, so it is pushed wherever they are. It is
+# job-base, which environments are built on, with the platform's tools, so job-base comes first.
 IMAGE_TARGETS := control-service:controlplane/build/Dockerfile.control-service:. \
 	metrics-service:controlplane/build/Dockerfile.metrics-service:. \
 	node-agent:runtime/k8s/build/Dockerfile.node-agent:. \
@@ -328,6 +329,7 @@ IMAGE_TARGETS := control-service:controlplane/build/Dockerfile.control-service:.
 	bare-agent:runtime/bare-metal/build/Dockerfile.bare-agent:. \
 	cloud-agent:runtime/cloud/build/Dockerfile.cloud-agent:. \
 	agent-launcher:runtime/cloud/build/Dockerfile.agent-launcher:. \
+	job-base:infra/images/job/Dockerfile.base:. \
 	job:infra/images/job/Dockerfile:. \
 	workload:tests/workloads/generic/Dockerfile.train:tests/workloads/generic
 
@@ -340,7 +342,8 @@ locked-images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-u
 	for entry in $(IMAGE_TARGETS); do \
 		name="$${entry%%:*}"; rest="$${entry#*:}"; dockerfile="$${rest%%:*}"; ctx="$${rest#*:}"; \
 		echo "==> building hypothesisloop-$$name:$(TAG)"; \
-		podman build --platform $(IMAGE_PLATFORM) -f "$$dockerfile" -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$$ctx" || exit 1; \
+		base=""; [ "$$name" = job ] && base="--build-arg BASE=$(REGISTRY)/hypothesisloop-job-base:$(TAG)"; \
+		podman build --platform $(IMAGE_PLATFORM) $$base -f "$$dockerfile" -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$$ctx" || exit 1; \
 		podman tag "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$(REGISTRY)/hypothesisloop-$$name:latest"; \
 		$(REGISTRY_LOGIN) || exit 1; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" || exit 1; \
@@ -360,8 +363,10 @@ job-images: check-tag
 		name="$${entry%%=*}"; rest="$${entry#*=}"; base="$${rest%%=*}"; torch=""; \
 		case "$$rest" in *=*) torch="$${rest#*=}";; esac; \
 		echo "==> building hypothesisloop-$$name:$(TAG) from $$base$${torch:+ with CPU torch $$torch}"; \
-		podman build --platform $(IMAGE_PLATFORM) --build-arg BASE="$$base" --build-arg TORCH_CPU="$$torch" -f infra/images/job/Dockerfile -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" . || exit 1; \
+		podman build --platform $(IMAGE_PLATFORM) --build-arg BASE="$$base" --build-arg TORCH_CPU="$$torch" -f infra/images/job/Dockerfile.base -t "$(REGISTRY)/hypothesisloop-$$name-base:$(TAG)" . || exit 1; \
+		podman build --platform $(IMAGE_PLATFORM) --build-arg BASE="$(REGISTRY)/hypothesisloop-$$name-base:$(TAG)" -f infra/images/job/Dockerfile -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" . || exit 1; \
 		$(REGISTRY_LOGIN) || exit 1; \
+		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name-base:$(TAG)" || exit 1; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" || exit 1; \
 	done
 
