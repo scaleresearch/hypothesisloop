@@ -46,8 +46,10 @@ files it points you to and leave the rest unread.
      The first job measures the control; the references follow at 6. The control and each
      reference run in their strongest configuration that meets the goal's constraints, even
      where the brief calls the control unchanged or lists an option as a lever. A default is
-     not that: list the options the code offers (profiles, modes, coders, levels), and unless
-     the docs settle which is best, one job measures each and reports the best, naming it.
+     not that: list the options the code offers (profiles, modes, coders, levels), those its
+     source holds as constants or defaults (levels, sizes, thresholds) as well as those its
+     API names, and unless the docs settle which is best, one job measures each and reports
+     the best, naming it.
      Researchers' levers start from that best. Keep the part researchers vary apart from the
      part that measures, and record both in `README.md`, which researchers read, with the
      conventions you chose and how a trial runs.

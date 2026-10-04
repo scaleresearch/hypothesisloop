@@ -39,8 +39,9 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
     goal (training loss for held-out quality) wastes the run.
   - The control: the strongest existing system the goal asks to beat that researchers can
     start from and vary, usually what the repository already has, in its strongest
-    configuration. Where the code offers options (profiles, modes, coders, levels) and its
-    docs do not settle which is best, the brief says the baseline measures each and the best
+    configuration. Where the code offers options (profiles, modes, coders, levels), those its
+    source holds as constants or defaults (levels, sizes, thresholds) as well as those its API
+    names, and its docs do not settle which is best, the brief says the baseline measures each and the best
     is the control. Levers are what researchers change beyond that. Ranking against a weaker
     stand-in measures nothing the person asked. Each other system the goal names is a
     reference: a `reference` metric of its own, measured as the ranked metric is so the two
