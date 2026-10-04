@@ -45,8 +45,9 @@ FROM python:3.13-slim
 # build-essential, pkg-config, cmake: an agent compiles and tests a harness here before a job runs
 # it. Twice a baseline agent found no C compiler or linker.
 # sudo: what else its .hypothesisloop/Dockerfile installs, the agent installs here itself.
+# bubblewrap: hl env run runs a command inside the image a job runs in, staged by hl env stage.
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git \
-    build-essential pkg-config cmake sudo \
+    build-essential pkg-config cmake sudo bubblewrap \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=uv /uv /uvx /usr/local/bin/
 

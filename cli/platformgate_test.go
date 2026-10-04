@@ -130,6 +130,7 @@ func admittedCommands(kind callerKind) []string {
 // unsent is each listed command no test below sends to the platform's check, with why.
 var unsent = map[string]string{
 	"git-credential": "git runs it, with a request on standard input",
+	"env run":        "it runs a command on this machine and asks the platform nothing",
 }
 
 // requireEveryListedCommandSent fails for a command the tables list to kind that ran holds no
@@ -291,6 +292,7 @@ func TestNoCommandAnAgentRunsCallsARouteAnAgentMayNot(t *testing.T) {
 	})))
 	t.Setenv("HL_TOKEN", token)
 	t.Setenv("HL_STATE_DIR", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 
 	sent := [][]string{
 		{"platform-experiments", "list"},
@@ -304,6 +306,7 @@ func TestNoCommandAnAgentRunsCallsARouteAnAgentMayNot(t *testing.T) {
 		{"job", "submit", "job.yaml", "--hypothesis", "h1", "--theory", "t"},
 		{"env", "build", "job.yaml"},
 		{"env", "status", "job.yaml"},
+		{"env", "stage", "job-1"},
 		{"job", "list"},
 		{"job", "status", "job-1"},
 		{"job", "metrics", "job-1"},
