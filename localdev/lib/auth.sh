@@ -213,6 +213,9 @@ lib_register_clusters() {
   for name in box-a k3s-nvidia; do
     lib_hl_admin cluster add "${name}" default >/dev/null
   done
+  # box-a's link to the control plane drops for longer than the platform's default ceiling
+  # while its bare-metal jobs keep running, and a job evicted then is deleted on reconnect.
+  lib_hl_admin cluster settings box-a '{"status_silence_ceiling_seconds":21600}'
   lib_hl_admin launcher add main >/dev/null
 }
 

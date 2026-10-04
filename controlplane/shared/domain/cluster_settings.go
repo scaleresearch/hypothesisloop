@@ -18,6 +18,11 @@ type ClusterSettings struct {
 	// evicted as stuck_pending, in place of scheduler.stuck_pending_timeout_seconds. A cluster
 	// whose nodes are rented when a job arrives boots slowly and sets it longer.
 	StuckPendingTimeoutSeconds *int `json:"stuck_pending_timeout_seconds,omitempty" doc:"How long a job admitted to this cluster may stay unplaced before it is evicted as stuck_pending. Absent, the platform's default."`
+	// StatusSilenceCeilingSeconds is how long the cluster may push no job status at all before
+	// the jobs it holds are evicted as cluster_unreachable, in place of
+	// scheduler.cluster_status_silence_ceiling_seconds. A cluster whose link drops for longer
+	// than the default while its jobs run on sets it longer.
+	StatusSilenceCeilingSeconds *int `json:"status_silence_ceiling_seconds,omitempty" doc:"How long this cluster may report no job status at all before the jobs it holds are evicted as cluster_unreachable and queued again. Absent, the platform's default."`
 }
 
 // MaxScaleUpTimeoutSeconds is the hard ceiling ScaleUpTimeoutSeconds (and the global
@@ -31,7 +36,7 @@ const MaxScaleUpTimeoutSeconds = 1800
 
 // Empty reports whether no field is set.
 func (cs *ClusterSettings) Empty() bool {
-	return cs.ScaleUpTimeoutSeconds == nil && cs.MaxSpeculativeAccelerators == nil && cs.StuckPendingTimeoutSeconds == nil
+	return cs.ScaleUpTimeoutSeconds == nil && cs.MaxSpeculativeAccelerators == nil && cs.StuckPendingTimeoutSeconds == nil && cs.StatusSilenceCeilingSeconds == nil
 }
 
 // ValidateClusterSettings checks a change to a cluster's settings: each field it names is a
@@ -45,6 +50,9 @@ func ValidateClusterSettings(cs ClusterSettings) error {
 	}
 	if cs.StuckPendingTimeoutSeconds != nil && *cs.StuckPendingTimeoutSeconds < 0 {
 		return fmt.Errorf("stuck_pending_timeout_seconds must be positive, or 0 for the platform's default")
+	}
+	if cs.StatusSilenceCeilingSeconds != nil && *cs.StatusSilenceCeilingSeconds < 0 {
+		return fmt.Errorf("status_silence_ceiling_seconds must be positive, or 0 for the platform's default")
 	}
 	return nil
 }

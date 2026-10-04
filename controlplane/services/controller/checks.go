@@ -60,7 +60,11 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 		if err != nil {
 			return false, "", fmt.Errorf("silence snapshot presence: %w", err)
 		}
-		if !presence.Reported || presence.SnapshotAge > c.clusterSilenceCeiling {
+		ceiling, err := c.statusSilenceCeiling(ctx, exp.ClusterName)
+		if err != nil {
+			return false, "", err
+		}
+		if !presence.Reported || presence.SnapshotAge > ceiling {
 			// The cluster itself has gone quiet. Whether this job is alive is genuinely unknown
 			// and stays unknown until reporting resumes, so waiting produces no better evidence —
 			// only an ever-growing pile of reservations held against a cluster nobody can see.
@@ -179,4 +183,18 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 		return true, domain.EvictionNeverReportedMetrics, nil
 	}
 	return true, domain.EvictionSilent, nil
+}
+
+// statusSilenceCeiling is how long the cluster named name may push no status snapshot before
+// the jobs it holds are evicted as cluster_unreachable: its own setting, or the controller's.
+// Read only once a cluster has gone quiet, so a failed read waits for the next pass.
+func (c *Controller) statusSilenceCeiling(ctx context.Context, name string) (time.Duration, error) {
+	seconds, err := c.store.StatusSilenceCeiling(ctx, name)
+	if err != nil {
+		return 0, fmt.Errorf("silence ceiling of cluster %s: %w", name, err)
+	}
+	if seconds != nil {
+		return time.Duration(*seconds) * time.Second, nil
+	}
+	return c.clusterSilenceCeiling, nil
 }

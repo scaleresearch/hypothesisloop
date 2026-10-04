@@ -622,7 +622,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"go back to the queue in the same step and are placed elsewhere: the cluster's runtime stops them, giving each its checkpoint window, " +
 			"and none of them spends a retry. requeued names them. The cluster then comes last among its org's own until the org orders them. " +
 			"scale_up_timeout_seconds, max_speculative_accelerators and stuck_pending_timeout_seconds are the cluster's own values in place of the scheduler's defaults, " +
-			"for a cluster whose nodes appear when a job asks for them: each takes a value, or 0 to go back to the default.",
+			"for a cluster whose nodes appear when a job asks for them, and status_silence_ceiling_seconds how long the cluster may report no job status before the jobs it holds are evicted as cluster_unreachable: " +
+			"each takes a value, or 0 to go back to the default.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Name string `path:"name"`
@@ -640,7 +641,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, err
 		}
 		if in.Body.Shared == nil && in.Body.ClusterSettings.Empty() {
-			return nil, huma.Error422UnprocessableEntity("name what changes: shared, scale_up_timeout_seconds, max_speculative_accelerators or stuck_pending_timeout_seconds")
+			return nil, huma.Error422UnprocessableEntity("name what changes: shared, scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds or status_silence_ceiling_seconds")
 		}
 		if err := domain.ValidateClusterSettings(in.Body.ClusterSettings); err != nil {
 			return nil, huma.Error422UnprocessableEntity(err.Error())

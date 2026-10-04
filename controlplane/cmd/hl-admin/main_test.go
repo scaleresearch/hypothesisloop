@@ -58,6 +58,7 @@ func TestAMalformedScopeOrCommandIsAnError(t *testing.T) {
 		{"user", "staff", "subject"}, {"user", "staff", "subject", "yes"}, {"cluster", "share", "name"}, {"cluster", "share", "name", "true"},
 		{"platform-experiment", "share"}, {"platform-experiment", "share", "pe-1", "on"}, {"platform-experiment", "show", "pe-1"},
 		{"launcher", "add"}, {"launcher", "remove"}, {"launcher", "add", "main", "default"}, {"launcher", "list", "main"},
+		{"cluster", "settings", "name"}, {"cluster", "settings", "name", "{}"}, {"cluster", "settings", "name", `{"silence":1}`},
 	} {
 		var stdout bytes.Buffer
 		if err := run(args, &stdout); err == nil || stdout.Len() != 0 {
@@ -72,7 +73,7 @@ func TestDatabaseCommandsNeedADatabase(t *testing.T) {
 	var stdout bytes.Buffer
 	for _, args := range [][]string{
 		{"cluster", "add", "name", "default"}, {"cluster", "share", "name", "on"}, {"user", "staff", "subject", "off"},
-		{"launcher", "add", "main"}, {"launcher", "remove", "main"},
+		{"cluster", "settings", "name", `{"status_silence_ceiling_seconds":21600}`}, {"launcher", "add", "main"}, {"launcher", "remove", "main"},
 		{"platform-experiment", "share", "pe-1"}, {"platform-experiment", "unshare", "pe-1"},
 	} {
 		if err := run(args, &stdout); err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {

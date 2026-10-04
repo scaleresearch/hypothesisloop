@@ -372,9 +372,10 @@ class API:
 
     def set_cluster_settings(self, cluster_name: str, *, org_id: str = "default", **settings: int | None) -> None:
         """Changes the settings named on a cluster of org_id; None puts one back on the scheduler's
-        default, and naming none puts all three back."""
+        default, and naming none puts them all back."""
         names = settings or dict.fromkeys(
-            ("scale_up_timeout_seconds", "max_speculative_accelerators", "stuck_pending_timeout_seconds"))
+            ("scale_up_timeout_seconds", "max_speculative_accelerators", "stuck_pending_timeout_seconds",
+             "status_silence_ceiling_seconds"))
         body = {name: settings.get(name) or 0 for name in names}
         self.patch(f"/orgs/{org_id}/clusters/{cluster_name}", body).raise_for_status()
 

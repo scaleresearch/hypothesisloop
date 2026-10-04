@@ -81,6 +81,7 @@ func TestAccountCommandsCallTheirEndpoints(t *testing.T) {
 		{[]string{"cluster", "forget-identity", "gpu-east", "--org", "org-1"}, "DELETE", "/orgs/org-1/clusters/gpu-east/identity", nil},
 		{[]string{"cluster", "order", "gpu-east", "gpu-west", "--org", "org-1"}, "PUT", "/orgs/org-1/clusters/order", map[string]any{"names": []string{"gpu-east", "gpu-west"}}},
 		{[]string{"cluster", "settings", "gpu-east", "--stuck-pending-timeout", "900", "--speculative-cap", "0", "--org", "org-1"}, "PATCH", "/orgs/org-1/clusters/gpu-east", map[string]any{"max_speculative_accelerators": 0, "stuck_pending_timeout_seconds": 900}},
+		{[]string{"cluster", "settings", "tt-box", "--status-silence-ceiling", "21600", "--org", "org-1"}, "PATCH", "/orgs/org-1/clusters/tt-box", map[string]any{"status_silence_ceiling_seconds": 21600}},
 		{[]string{"cluster", "disable", "gpu-east", "--org", "org-1"}, "POST", "/orgs/org-1/clusters/gpu-east/disable", nil},
 		{[]string{"cluster", "enable", "gpu-east", "--org", "org-1"}, "POST", "/orgs/org-1/clusters/gpu-east/enable", nil},
 	} {

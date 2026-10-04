@@ -512,17 +512,19 @@ the new order, as hl cluster list does.`, stderr)
 }
 
 func clusterSettings(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster settings", `usage: hl cluster settings NAME [--scale-up-timeout SECONDS] [--speculative-cap N] [--stuck-pending-timeout SECONDS] [--org ORG]
+	fs := newFlags("cluster settings", `usage: hl cluster settings NAME [--scale-up-timeout SECONDS] [--speculative-cap N] [--stuck-pending-timeout SECONDS] [--status-silence-ceiling SECONDS] [--org ORG]
 
-Sets what a cluster the org registered uses in place of the scheduler's defaults. They matter for a
-cluster whose nodes appear when a job asks for them. Only the flags given change, and 0 puts one
-back on the default. hl cluster list shows the ones that are set.`, stderr)
+Sets what a cluster the org registered uses in place of the scheduler's defaults. Most matter for a
+cluster whose nodes appear when a job asks for them, --status-silence-ceiling for one whose link to
+the platform drops while its jobs run on. Only the flags given change, and 0 puts one back on the
+default. hl cluster list shows the ones that are set.`, stderr)
 	org := fs.String("org", "", orgFlagHelp)
 	body := map[string]int{}
 	for flag, field := range map[string]string{
-		"scale-up-timeout":      "scale_up_timeout_seconds",
-		"speculative-cap":       "max_speculative_accelerators",
-		"stuck-pending-timeout": "stuck_pending_timeout_seconds",
+		"scale-up-timeout":       "scale_up_timeout_seconds",
+		"speculative-cap":        "max_speculative_accelerators",
+		"stuck-pending-timeout":  "stuck_pending_timeout_seconds",
+		"status-silence-ceiling": "status_silence_ceiling_seconds",
 	} {
 		fs.Func(flag, clusterSettingHelp[flag], func(text string) error {
 			n, err := strconv.Atoi(text)
@@ -548,9 +550,10 @@ back on the default. hl cluster list shows the ones that are set.`, stderr)
 }
 
 var clusterSettingHelp = map[string]string{
-	"scale-up-timeout":      "seconds a job placed ahead of capacity waits for the cluster's autoscaler to bring a node, under 1800",
-	"speculative-cap":       "the most accelerators that jobs placed ahead of capacity hold on the cluster at once",
-	"stuck-pending-timeout": "seconds a job admitted to the cluster may stay unplaced before it is evicted as stuck_pending",
+	"scale-up-timeout":       "seconds a job placed ahead of capacity waits for the cluster's autoscaler to bring a node, under 1800",
+	"speculative-cap":        "the most accelerators that jobs placed ahead of capacity hold on the cluster at once",
+	"stuck-pending-timeout":  "seconds a job admitted to the cluster may stay unplaced before it is evicted as stuck_pending",
+	"status-silence-ceiling": "seconds the cluster may report no job status before the jobs it holds are evicted as cluster_unreachable",
 }
 
 func clusterDisable(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {

@@ -17,6 +17,7 @@ import (
 // nothing at all.
 func silenceController(observed ObservedState) *Controller {
 	return &Controller{
+		store:                 ceilingStore{},
 		observed:              observed,
 		logger:                zap.NewNop(),
 		silenceMultiplier:     3,
@@ -27,6 +28,38 @@ func silenceController(observed ObservedState) *Controller {
 		reconcileInterval:     5 * time.Second,
 	}
 }
+
+// ceilingStore holds the status_silence_ceiling_seconds each cluster sets of its own.
+type ceilingStore map[string]int
+
+func (s ceilingStore) StatusSilenceCeiling(_ context.Context, name string) (*int, error) {
+	if seconds, ok := s[name]; ok {
+		return &seconds, nil
+	}
+	return nil, nil
+}
+
+func (ceilingStore) ListRunningExperiments(context.Context) ([]*domain.Experiment, error) {
+	return nil, nil
+}
+
+func (ceilingStore) GetAgentRunningExperiments(context.Context, string, string) ([]*domain.Experiment, error) {
+	return nil, nil
+}
+
+func (ceilingStore) GetAgentQueuedExperiments(context.Context, string, string) ([]*domain.Experiment, error) {
+	return nil, nil
+}
+
+func (ceilingStore) ListActiveByPlatformExperiment(context.Context, string) ([]*domain.Experiment, error) {
+	return nil, nil
+}
+
+func (ceilingStore) ResolveTermination(context.Context, string, domain.ExperimentStatus, domain.ExperimentStatus, string) (domain.Termination, error) {
+	return domain.TerminationSkipped, nil
+}
+
+func (ceilingStore) MarkQuotaSettled(context.Context, string) error { return nil }
 
 // liveJob is the common starting point: a job seen 30 minutes ago, still alive, confirmed Running
 // by a cluster that is reporting freshly and lists it in its newest snapshot. Every check before
@@ -226,6 +259,26 @@ func TestCheckSilenceEvictsWhenTheClustersNewestSnapshotIsPastTheCeiling(t *test
 	if !evict || reason != domain.EvictionClusterUnreachable {
 		t.Fatalf("evict = %v reason = %q, want an eviction as %q past the cluster silence ceiling",
 			evict, reason, domain.EvictionClusterUnreachable)
+	}
+}
+
+// A cluster whose settings give a longer ceiling keeps its jobs through the silence that evicts
+// them on any other cluster.
+func TestCheckSilenceHoldsJobsThroughTheClustersOwnLongerCeiling(t *testing.T) {
+	obs := liveJob()
+	obs.phaseFound = false
+	obs.presence = metricsdb.SnapshotPresence{Reported: true, SnapshotAge: 6 * time.Minute}
+	c := silenceController(obs)
+	c.store = ceilingStore{"cluster-a": int((2 * time.Hour).Seconds())}
+
+	evict, reason, err := c.checkSilence(context.Background(), runningExperiment(), time.Now().UTC(), nil, []string{declared})
+	if err != nil || evict {
+		t.Fatalf("evict = %v reason = %q err = %v, want the job kept inside its cluster's own two-hour ceiling", evict, reason, err)
+	}
+	obs.presence.SnapshotAge = 3 * time.Hour
+	c.observed = obs
+	if evict, reason, err := c.checkSilence(context.Background(), runningExperiment(), time.Now().UTC(), nil, []string{declared}); err != nil || !evict || reason != domain.EvictionClusterUnreachable {
+		t.Fatalf("evict = %v reason = %q err = %v, want an eviction as %q past the cluster's own ceiling", evict, reason, err, domain.EvictionClusterUnreachable)
 	}
 }
 

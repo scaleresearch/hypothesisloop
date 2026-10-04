@@ -31,6 +31,9 @@ type Store interface {
 	// MarkQuotaSettled records that a terminal experiment's final observed usage has been
 	// durably written — see services/settlement. Only called after that write succeeds.
 	MarkQuotaSettled(ctx context.Context, id string) error
+	// StatusSilenceCeiling is the status_silence_ceiling_seconds the cluster named name sets in
+	// place of the controller's own, nil where it sets none.
+	StatusSilenceCeiling(ctx context.Context, name string) (*int, error)
 }
 
 // QuotaService reads agent quota state. Refunds no longer go through here — every
@@ -67,7 +70,8 @@ type Controller struct {
 	// startTimeout is how long a job that ran may read pending with no sign of life.
 	startTimeout time.Duration
 	// clusterSilenceCeiling bounds how long a job may be held by a cluster that has stopped
-	// pushing status snapshots entirely before it is evicted as EvictionClusterUnreachable.
+	// pushing status snapshots entirely before it is evicted as EvictionClusterUnreachable, for a
+	// cluster whose settings give no status_silence_ceiling_seconds of its own.
 	// A policy decision about how long an outage is tolerated, not a protocol timing value —
 	// it cannot be derived from a cluster's push cadence, which this side does not configure.
 	clusterSilenceCeiling time.Duration

@@ -368,6 +368,20 @@ func TestAClusterIdentityIsBoundOnceAndOnlyClearingReleasesIt(t *testing.T) {
 	if got, err := w.clusters.GetClusterSettings(ctx, idA); err != nil || got == nil || *got.StuckPendingTimeoutSeconds != timeout || got.MaxSpeculativeAccelerators != nil {
 		t.Fatalf("settings under the bound identity: got = %+v, %v, want the timeout alone", got, err)
 	}
+	// The silence ceiling is read by name: a cluster that stopped reporting has no fresh identity.
+	ceiling := 21600
+	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofA, nil, domain.ClusterSettings{StatusSilenceCeilingSeconds: &ceiling}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := w.clusters.StatusSilenceCeiling(ctx, w.ofA); err != nil || got == nil || *got != ceiling {
+		t.Fatalf("silence ceiling by name: got = %v, %v, want %d", got, err, ceiling)
+	}
+	if got, err := w.clusters.StatusSilenceCeiling(ctx, w.unregisteredName); err != nil || got != nil {
+		t.Fatalf("silence ceiling of an unregistered name: got = %v, %v, want none", got, err)
+	}
+	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofA, nil, domain.ClusterSettings{StatusSilenceCeilingSeconds: &zero}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := w.clusters.ClearReportedID(ctx, w.unregisteredName); !errors.Is(err, ErrClusterNotFound) {
 		t.Fatalf("clear for an unregistered name: got = %v, want = %v", err, ErrClusterNotFound)
 	}

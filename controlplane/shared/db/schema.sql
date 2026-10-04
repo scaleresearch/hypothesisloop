@@ -1117,6 +1117,8 @@ ALTER TABLE clusters ADD COLUMN IF NOT EXISTS max_speculative_accelerators INTEG
     CHECK (max_speculative_accelerators > 0);
 ALTER TABLE clusters ADD COLUMN IF NOT EXISTS stuck_pending_timeout_seconds INTEGER
     CHECK (stuck_pending_timeout_seconds > 0);
+ALTER TABLE clusters ADD COLUMN IF NOT EXISTS status_silence_ceiling_seconds INTEGER
+    CHECK (status_silence_ceiling_seconds > 0);
 DO $$ BEGIN
     IF to_regclass('cluster_settings') IS NOT NULL THEN
         UPDATE clusters c SET scale_up_timeout_seconds = s.scale_up_timeout_seconds,

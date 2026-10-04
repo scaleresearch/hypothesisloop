@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
@@ -32,6 +33,8 @@ const usage = `usage: hl-admin <command>
   api-key add SUBJECT ORG [PROJECT]  create an API key of ORG, bound to PROJECT when given
   cluster add NAME ORG             register a cluster for ORG and print its runtime token
   cluster share NAME on|off        place every org's jobs on a cluster, or only its own org's
+  cluster settings NAME JSON       change a cluster's settings, as PATCH /orgs/{id}/clusters/{name} does,
+                                   e.g. '{"status_silence_ceiling_seconds":21600}'. 0 puts one back on the default
   platform-experiment share ID     let every account read a platform experiment and what is in it
   platform-experiment unshare ID   take that back: its own org alone reads it again
   launcher add NAME                register an agent-launcher and print its token
@@ -100,6 +103,17 @@ func run(args []string, stdout io.Writer) error {
 			return json.NewEncoder(stdout).Encode(struct {
 				Requeued []string `json:"requeued"`
 			}{append([]string{}, requeued...)})
+		})
+	case len(args) == 4 && args[0] == "cluster" && args[1] == "settings":
+		var change domain.ClusterSettings
+		decoder := json.NewDecoder(strings.NewReader(args[3]))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&change); err != nil || change.Empty() {
+			return fmt.Errorf("cluster settings: want a JSON object naming at least one setting: %v", err)
+		}
+		return withPool(func(ctx context.Context, pool *db.Pool) error {
+			_, _, err := db.NewClustersStore(pool).UpdateCluster(ctx, args[2], nil, change)
+			return err
 		})
 	case len(args) == 3 && args[0] == "platform-experiment" && (args[1] == "share" || args[1] == "unshare"):
 		return withPool(func(ctx context.Context, pool *db.Pool) error {

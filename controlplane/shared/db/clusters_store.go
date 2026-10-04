@@ -73,13 +73,13 @@ func NewClustersStore(pool *Pool) *ClustersStore {
 }
 
 const clusterColumns = `name, org_id, shared, priority, COALESCE(reported_id, ''), job_image, created_at,
-	scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds,
+	scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds, status_silence_ceiling_seconds,
 	ARRAY(SELECT d.org_id FROM org_disabled_clusters d WHERE d.cluster_name = clusters.name ORDER BY d.org_id)`
 
 func scanCluster(row rowScanner) (*domain.Cluster, error) {
 	c := &domain.Cluster{}
 	if err := row.Scan(&c.Name, &c.OrgID, &c.Shared, &c.Priority, &c.ReportedID, &c.JobImage, &c.CreatedAt,
-		&c.ScaleUpTimeoutSeconds, &c.MaxSpeculativeAccelerators, &c.StuckPendingTimeoutSeconds, &c.DisabledOrgs); err != nil {
+		&c.ScaleUpTimeoutSeconds, &c.MaxSpeculativeAccelerators, &c.StuckPendingTimeoutSeconds, &c.StatusSilenceCeilingSeconds, &c.DisabledOrgs); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -225,9 +225,10 @@ UPDATE clusters SET shared = COALESCE($2::boolean, shared),
 	priority = CASE WHEN $2::boolean THEN $3 WHEN NOT $2::boolean AND shared THEN $4 ELSE priority END,
 	scale_up_timeout_seconds = CASE WHEN $5::int IS NULL THEN scale_up_timeout_seconds ELSE NULLIF($5::int, 0) END,
 	max_speculative_accelerators = CASE WHEN $6::int IS NULL THEN max_speculative_accelerators ELSE NULLIF($6::int, 0) END,
-	stuck_pending_timeout_seconds = CASE WHEN $7::int IS NULL THEN stuck_pending_timeout_seconds ELSE NULLIF($7::int, 0) END
+	stuck_pending_timeout_seconds = CASE WHEN $7::int IS NULL THEN stuck_pending_timeout_seconds ELSE NULLIF($7::int, 0) END,
+	status_silence_ceiling_seconds = CASE WHEN $8::int IS NULL THEN status_silence_ceiling_seconds ELSE NULLIF($8::int, 0) END
 WHERE name = $1 RETURNING `+clusterColumns, name, shared, domain.SharedClusterPriority, domain.DefaultClusterPriority,
-		change.ScaleUpTimeoutSeconds, change.MaxSpeculativeAccelerators, change.StuckPendingTimeoutSeconds))
+		change.ScaleUpTimeoutSeconds, change.MaxSpeculativeAccelerators, change.StuckPendingTimeoutSeconds, change.StatusSilenceCeilingSeconds))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, ErrClusterNotFound
 	}
@@ -325,8 +326,8 @@ FROM unnest($1::text[]) WITH ORDINALITY AS o(name, place) WHERE c.name = o.name`
 func (s *ClustersStore) GetClusterSettings(ctx context.Context, reportedID string) (*domain.ClusterSettings, error) {
 	cs := &domain.ClusterSettings{}
 	err := s.pool.pool.QueryRow(ctx, `
-SELECT scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds FROM clusters WHERE reported_id = $1`, reportedID).
-		Scan(&cs.ScaleUpTimeoutSeconds, &cs.MaxSpeculativeAccelerators, &cs.StuckPendingTimeoutSeconds)
+SELECT scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds, status_silence_ceiling_seconds FROM clusters WHERE reported_id = $1`, reportedID).
+		Scan(&cs.ScaleUpTimeoutSeconds, &cs.MaxSpeculativeAccelerators, &cs.StuckPendingTimeoutSeconds, &cs.StatusSilenceCeilingSeconds)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && cs.Empty()) {
 		return nil, nil
 	}
@@ -334,6 +335,21 @@ SELECT scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_tim
 		return nil, fmt.Errorf("clusters_store.GetClusterSettings: %w", err)
 	}
 	return cs, nil
+}
+
+// StatusSilenceCeiling is the status_silence_ceiling_seconds the cluster named name sets, nil
+// where it sets none or no cluster has the name. Read by name, since a cluster that stopped
+// reporting has no fresh reported id to look it up by.
+func (s *ClustersStore) StatusSilenceCeiling(ctx context.Context, name string) (*int, error) {
+	var seconds *int
+	err := s.pool.pool.QueryRow(ctx, `SELECT status_silence_ceiling_seconds FROM clusters WHERE name = $1`, name).Scan(&seconds)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("clusters_store.StatusSilenceCeiling: %w", err)
+	}
+	return seconds, nil
 }
 
 func withdraw(ctx context.Context, tx pgx.Tx, name, keepOrg string) ([]string, error) {
