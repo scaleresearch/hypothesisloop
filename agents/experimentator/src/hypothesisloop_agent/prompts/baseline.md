@@ -34,9 +34,11 @@ files it points you to and leave the rest unread.
      (toolchains, dependencies, torch for CUDA among them, each reference's build), at the
      versions the repository's pin files state. The platform builds it once and loads it on
      the nodes: the control's job and every reference job run in it and install nothing at
-     runtime. The code researchers vary arrives by the job's clone, and the job builds it.
-     Commit it and run `hl env build` before you write anything else: it builds while you
-     write the rest.
+     runtime. It holds the dependencies already fetched and built where the job's build finds
+     them (pip or uv install of the lock, cargo fetch and build of the dependencies, maven
+     go-offline), so every job, each researcher's too, compiles only the code researchers vary,
+     which arrives by the job's clone. Commit it and run `hl env build` before you write
+     anything else: it builds while you write the rest.
   2. The code. Only a harness that already measures these metrics on the control runs
      unchanged: go to 3. Otherwise write the smallest program that measures them and submit
      it (3 to 4) before refining it: fixed seeds, pinned revisions, every input fetched by the
@@ -54,9 +56,11 @@ files it points you to and leave the rest unread.
      `cpu` is the cores the program keeps busy: 1 for a single-threaded one. The job reads
      its cores in $HYPOTHESISLOOP_CPUS, while `nproc` counts the whole machine's; size
      worker pools and `make -j` from it.
-  4. The run: `hl job submit .hypothesisloop/job.yaml`. A job rejected, failed, or
+  4. The run: `hl job submit .hypothesisloop/job.yaml`, and right after it the check of 7
+     from the commit it pushed, so the two run side by side. A job rejected, failed, or
      completed without a metric it should report has its cause in `hl job status ID`
-     and `hl job logs ID`: fix it, commit and submit again while you know a fix.
+     and `hl job logs ID`: fix it, commit and submit again while you know a fix, and the
+     check again from that head where the fix touched what it ran.
   5. The finding. When it has COMPLETED, file `hl job summary`: the config that ran, the
      value of every metric, how long it took, what it cost (`hl job cost`), and a pointer to
      `README.md`.
@@ -70,11 +74,13 @@ files it points you to and leave the rest unread.
      reference out only when it cannot be built at all, saying why in `README.md` and the
      finish reason. One that cannot complete before `baseline_due_at` you name there as
      unmeasured, and the coordinator hands it to a researcher.
-  7. The check above, on branch `hl/{platform_experiment_id}/baseline-check`: a fresh clone,
-     `git checkout -b` it from the baseline branch, one trivial change in the varied part,
-     commit, submit, run. Then delete it (`git push origin --delete` it). The baseline branch
-     keeps no part of the check, and only a job of the baseline branch is declared: the
-     control stays the job that ran its head.
+  7. The check above, submitted at 4, on branch `hl/{platform_experiment_id}/baseline-check`:
+     a fresh clone, `git checkout -b` it from the baseline branch, one trivial change in the
+     varied part that leaves every metric as it was (a comment in a varied source file), so it
+     cannot beat the control, commit, submit. Once its job has ended, delete the branch
+     (`git push origin --delete` it). The baseline branch keeps no part of the check, and
+     only a job of the baseline branch is declared: the control stays the job that ran its
+     head.
   8. `hl platform-experiments agents finish --baseline ID --reason "baseline measured by job ID"`,
      ID the control's job in its strongest configuration, which the platform declares as the
      baseline: it refuses a job that another of your completed jobs, the check's among them,

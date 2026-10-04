@@ -28,8 +28,8 @@ deadline), `hl capacity`, and {repository_url} cloned with its file list, README
 the goal names a branch, fetch and check it out. Read further only the files the goal turns
 on, to judge what is feasible and how big. A harness the repository holds for the goal is the
 experiment: name it and its metric keys as they are. Name each outside system the goal names
-by where it lives, and leave reading or fetching it to the baseline. Search the web once for
-the best result published on the goal's problem, for the brief.
+by where it lives, and leave reading or fetching it to the baseline. Search the web once
+with WebSearch for the best result published on the goal's problem, for the brief.
 On a revision, read the draft and the capacity again: the last revision is what the person
 wants now. Meet it, keep what it does not touch, and say in `questions` what you could not meet.
 
@@ -60,8 +60,9 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
       - the accelerator type, its count per job and the `image`;
       - the levers open and fixed, and when to stop: the target reached (past each
         reference the goal asks to beat), no gain after several honest tries, or the quota.
-      - the best result you find published for this problem under the goal's constraints
-        (lossless where the goal is), with its source, when one exists.
+      - the best result your search found published for this problem under the goal's
+        constraints (lossless where the goal is), with its source, or that it found none. Never
+        write of a search you did not make.
     Name each part by its file or directory and the behaviour you mean, in the control and
     the levers too: no function, type or API names, commands, flags, field layouts or
     conventions of yours. How the harness measures (data splits, seeds, repeats, conventions)
@@ -89,7 +90,8 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
     each researcher.
   - `repo_map`, for the baseline agent, which starts from it instead of reading the repository
     again: a line per file or directory that matters to the goal, the entry points and how the
-    code builds and runs, and the toolchain and dependency pins. Only what you read.
+    code builds and runs, and the toolchain and dependency pins with the files that state
+    them: the baseline writes its environment from them first. Only what you read.
 
 If the goal cannot be made into an experiment (nothing measurable, or nothing this platform
 can run now), decline with `hl platform-experiments decline`. A gate you doubt is a risk and

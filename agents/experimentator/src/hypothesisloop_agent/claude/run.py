@@ -42,7 +42,19 @@ log = logging.getLogger("llm_agent")
 # just ended its turn instead, because nothing here ever fires that wakeup. Strip them so the model
 # never reaches for a tool that can't do what its name promises in this environment.
 DISALLOWED_TOOLS = ["ScheduleWakeup", "Monitor", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList",
-                     "TaskOutput", "TaskStop"]
+                     "TaskOutput", "TaskStop", "CronCreate", "CronDelete", "CronList", "PushNotification",
+                     "RemoteTrigger", "DesignSync"]
+
+# The CLI defers WebSearch and WebFetch behind ToolSearch by default: a run 8 planner had to call
+# ToolSearch "select:WebSearch" first, and no researcher of run 8 or planner of run 9 searched at
+# all. With tool search off every allowed tool is sent whole, so these two are directly callable.
+CLI_ENV = {"ENABLE_TOOL_SEARCH": "false",
+           # The 2 min default backgrounds long commands, and agents then poll their output files.
+           # Without background tasks Bash has no run_in_background to wait in. The briefings say
+           # every command starts in the working directory: the CLI keeps a `cd` otherwise, and an
+           # agent that repeated one failed.
+           "BASH_DEFAULT_TIMEOUT_MS": "600000", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
+           "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1"}
 
 
 # The CLI's Write refuses an existing file the session has not opened with its Read, and no
@@ -493,12 +505,14 @@ def _first_prompt(setup: core.RunSetup, resume_id: str | None, initial_prompt: s
 
 def _opening(setup: core.RunSetup, resume_id: str | None, initial_prompt: str | None) -> str:
     """_first_prompt, and for a session that starts fresh what its role reads first: a planner's
-    opening reads, a baseline agent's map of the repository from the planner."""
-    prompt = _first_prompt(setup, resume_id, initial_prompt)
+    opening reads, a baseline agent's first action with the planner's map of the repository."""
     if resume_id or initial_prompt:
-        return prompt
-    extra = seed.planner(setup.workdir) if config.plans(setup.cfg) else core.repo_map(setup)
-    return prompt + "\n\n" + extra if extra else prompt
+        return _first_prompt(setup, resume_id, initial_prompt)
+    if config.measures_baseline(setup.cfg):
+        return _first_prompt(setup, None, seed.baseline(setup.workdir, core.repo_map(setup)))
+    prompt = _first_prompt(setup, None, None)
+    reads = seed.planner(setup.workdir) if config.plans(setup.cfg) else ""
+    return prompt + "\n\n" + reads if reads else prompt
 
 
 _on_new_machine = False
@@ -782,12 +796,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
         setting_sources=[],
         strict_mcp_config=True,
         disallowed_tools=DISALLOWED_TOOLS,
-        # The 2 min default backgrounds long commands, and agents then poll their output files.
-        # Without background tasks Bash has no run_in_background to wait in. The briefings say
-        # every command starts in the working directory: the CLI keeps a `cd` otherwise, and an
-        # agent that repeated one failed.
-        env={"BASH_DEFAULT_TIMEOUT_MS": "600000", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
-             "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1", **core.git_identity(cfg)},
+        env={**CLI_ENV, **core.git_identity(cfg)},
         hooks={"PreToolUse": [HookMatcher(matcher="Bash", hooks=[_wait_hook])],
                "PostToolUse": [HookMatcher(hooks=[_updates_hook(setup, watch_env)]), _UNDELIVERED_MATCHER],
                "PostToolUseFailure": [_UNDELIVERED_MATCHER]},

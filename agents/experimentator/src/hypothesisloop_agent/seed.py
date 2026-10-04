@@ -1,5 +1,6 @@
 """What a planner reads first in every plan, read by the harness and handed over in its first
-prompt: the draft, the capacity, and the repository's tree, README and .hypothesisloop/.
+prompt: the draft, the capacity, and the repository's tree, README and .hypothesisloop/. And what
+a baseline agent does first: its environment.
 
 Run 5's planner took 3m41s to propose, and its first turns were these reads, each a model call
 over a growing context. Every step that fails is said in the prompt, and the planner does it
@@ -103,3 +104,25 @@ def planner(workdir: str) -> str:
         log.warning("planner opening reads failed: %s", "; ".join(failed))
         sections.append(_section("Not read, do it yourself", "\n".join(failed)))
     return "\n\n".join([_OPENING.format(workdir=workdir), *sections])
+
+
+# Run 8's and run 9's baseline agents read the code and wrote the harness before the Dockerfile,
+# though their briefing said environment first: run 9 ran `hl env build` 9.5 min in, and its
+# control waited out the 4 min build. The opening asks for that one action before anything else.
+_BASELINE_OPENING = (
+    "Your first action, before you read the code: the environment, step 1. In {workdir}, clone, "
+    "check out your branch and run `hl repo init`, then write `.hypothesisloop/Dockerfile` from "
+    "the toolchain and dependency pins {source}, opening only the pin files that needs. Commit it "
+    "and run `hl env build`. Then read and write the rest while it builds, and add to the "
+    "Dockerfile what the harness turns out to need.")
+_FROM_MAP = "the planner's map below names"
+_FROM_REPOSITORY = "the repository's pin files state (its toolchain file, lockfile or requirements)"
+
+
+def baseline(workdir: str, repo_map: str) -> str:
+    """The opening of a baseline agent whose session starts fresh: its first action, and the
+    planner's map of the repository where it left one."""
+    opening = _BASELINE_OPENING.format(workdir=os.path.abspath(workdir), source=_FROM_MAP if repo_map else _FROM_REPOSITORY)
+    if not repo_map:
+        return opening
+    return "\n\n".join([opening, _section("The planner's map of the repository", repo_map)])

@@ -101,8 +101,44 @@ class PlannerOpeningTest(unittest.TestCase):
             self.assertEqual(run._opening(SimpleNamespace(cfg=planner(), client=client, workdir="/w"), None, None), "Begin.\n\nREADS")
             self.assertEqual(run._opening(SimpleNamespace(cfg=planner(), client=client, workdir="/w"), "s-1", None), "Continue where you left off.")
         opened = run._opening(SimpleNamespace(cfg=baseline_agent(), client=client, workdir="/w"), None, None)
-        self.assertTrue(opened.startswith("Begin.\n\nThe planner read the repository") and opened.endswith("\n\nbench.py: the harness"), opened)
-        self.assertEqual(run._opening(SimpleNamespace(cfg=baseline_agent(), client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "open"}), workdir="/w"), None, None), "Begin.")
+        self.assertTrue(opened.startswith("Your first action, before you read the code: the environment") and opened.endswith("\n\n=== The planner's map of the repository\nbench.py: the harness"), opened)
+        self.assertEqual(run._opening(SimpleNamespace(cfg=baseline_agent(), client=client, workdir="/w"), "s-1", None), "Continue where you left off.")
+
+    # Run 8's and run 9's baseline agents wrote the harness before the Dockerfile, and run 9's
+    # control waited out a build started 9.5 min in. A fresh baseline session opens with the
+    # Dockerfile from the planner's pins, its commit and `hl env build`, whatever the map says.
+    def test_a_baseline_agent_opens_with_its_environment(self):
+        opened = seed.baseline("/w", "src/: the code. rust-toolchain.toml pins 1.95.0.")
+        first, _, rest = opened.partition("\n\n")
+        for said in ("In /w, clone", "`hl repo init`", "`.hypothesisloop/Dockerfile`", "the planner's map below names", "Commit it and run `hl env build`"):
+            self.assertIn(said, first)
+        self.assertLess(first.index("Dockerfile"), first.index("read and write the rest"))
+        self.assertTrue(rest.endswith("rust-toolchain.toml pins 1.95.0."), rest)
+        bare = seed.baseline("/w", "")
+        self.assertNotIn("map", bare)
+        self.assertIn("the repository's pin files state", bare)
+        open_pe = SimpleNamespace(get_platform_experiment=lambda _id: {"status": "open", "baseline_due_at": None})
+        self.assertEqual(run._opening(SimpleNamespace(cfg=baseline_agent(), client=open_pe, workdir="/w"), None, None), bare)
+
+
+class ToolsTest(unittest.TestCase):
+    # The CLI deferred WebSearch and WebFetch behind ToolSearch: run 9's planner never searched
+    # and run 8's researchers neither. Tool search is off, so both are sent to the model whole.
+    def test_web_search_and_fetch_are_sent_with_the_other_tools(self):
+        class Started(Exception):
+            pass
+
+        def options(**kwargs):
+            raise Started(kwargs)
+
+        with tempfile.TemporaryDirectory() as root:
+            setup = SimpleNamespace(cfg=SimpleNamespace(**vars(planner()), api_url="http://api", token="t"),
+                                    system_prompt="", workdir=root, statedir=root)
+            with mock.patch.object(run, "ClaudeAgentOptions", options), self.assertRaises(Started) as started:
+                asyncio.run(run._run_one_session(setup, "model", None, [False]))
+        given = started.exception.args[0]
+        self.assertEqual(given["env"]["ENABLE_TOOL_SEARCH"], "false")
+        self.assertFalse({"WebSearch", "WebFetch"} & set(given["disallowed_tools"]))
 
 
 class UntilAcceptedTest(unittest.TestCase):

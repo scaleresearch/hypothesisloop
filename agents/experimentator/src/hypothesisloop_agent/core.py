@@ -218,20 +218,14 @@ async def until_accepted(setup: RunSetup, stop_flag: list, poll_s: float = ACCEP
 
 
 def repo_map(setup: RunSetup) -> str:
-    """What the planner recorded of the repository, said to a baseline agent whose session starts
-    fresh, "" for any other agent and where it recorded nothing."""
-    if not config.measures_baseline(setup.cfg):
-        return ""
+    """What the planner recorded of the repository, "" where it recorded nothing or it could not
+    be read."""
     try:
         proposal = setup.client.get_platform_experiment(setup.cfg.platform_experiment_id).get("proposal") or {}
     except api_client.APIError as e:
         log.warning("could not read the planner's map of the repository (%s)", e)
         return ""
-    text = (proposal.get("repo_map") or "").strip()
-    if not text:
-        return ""
-    return ("The planner read the repository and left this map of it. Start from it: open the files "
-            "you need, and leave the rest unread.\n\n" + text)
+    return (proposal.get("repo_map") or "").strip()
 
 
 def _closer(actor: dict | None) -> str:
