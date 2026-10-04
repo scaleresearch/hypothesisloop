@@ -141,10 +141,16 @@ func checkBaselineEnvironment(pe *domain.PlatformExperiment, baseline *Baseline)
 		return refusedBaseline("baseline_environment_differs", "branch %s declares in %s an environment that baseline job %s did not run in: every researcher's job runs in it, so the baseline is measured in it too. Submit the baseline again from the head of the branch and declare that job", branch, domain.EnvironmentFile, baseline.Job.ID)
 	case declared == nil && ran != nil:
 		return refusedBaseline("baseline_environment_differs", "baseline job %s ran in the environment its commit declares in %s, and the head of branch %s declares none: commit the file there again, or submit the baseline again from the head and declare that job", baseline.Job.ID, domain.EnvironmentFile, branch)
-	case ran != nil && (baseline.Job.ResolvedJob == nil || baseline.Job.ResolvedJob.Image != ran.Image):
+	case ran != nil && (baseline.Job.ResolvedJob == nil || !inEnvironment(ran, baseline.Job.ResolvedJob.Image)):
 		return refusedBaseline("baseline_not_in_environment", "baseline job %s did not run in the image of the environment its commit declares (%s): submit the baseline again and declare that job", baseline.Job.ID, ran.Image)
 	}
 	return nil
+}
+
+// inEnvironment is whether image is the environment's: the pushed one, or before its push ends the one
+// loaded into the builder's node, which a job placed there runs.
+func inEnvironment(env *domain.Environment, image string) bool {
+	return image != "" && (image == env.Image || image == env.LoadedImage)
 }
 
 // measuredBaselineHeader opens the block of the description the platform writes: what the

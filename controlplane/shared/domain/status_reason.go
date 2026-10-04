@@ -37,12 +37,14 @@ var statusWaiters = map[string]Waiter{
 	"baseline_undeclared": WaitsForCoordinator,
 	// What the platform's own declaration of the measured job is refused for. Another baseline
 	// agent repairs a job that measured too little, and only the owner changes a bound or pays.
-	"no_baseline":                WaitsForCoordinator,
-	"baseline_not_completed":     WaitsForCoordinator,
-	"baseline_without_finding":   WaitsForCoordinator,
-	"baseline_missing_metric":    WaitsForCoordinator,
-	"baseline_breaks_constraint": WaitsForOwner,
-	"budget_below_baseline":      WaitsForOwner,
+	"no_baseline":                  WaitsForCoordinator,
+	"baseline_not_completed":       WaitsForCoordinator,
+	"baseline_without_finding":     WaitsForCoordinator,
+	"baseline_missing_metric":      WaitsForCoordinator,
+	"baseline_environment_differs": WaitsForCoordinator,
+	"baseline_not_in_environment":  WaitsForCoordinator,
+	"baseline_breaks_constraint":   WaitsForOwner,
+	"budget_below_baseline":        WaitsForOwner,
 
 	// It starts by itself when starts_at arrives. Its owner may move starts_at and need not.
 	"starts_at_ahead": WaitsForPlatform,

@@ -2,6 +2,9 @@ package quota
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -52,5 +55,36 @@ func TestTheBaselineIsHeldToTheEnvironmentItsBranchDeclares(t *testing.T) {
 	store, patch = declareAPI(t, openExperiment(), measuredBaseline(), theCoordinator)
 	if code, out := patch(declaration); code != http.StatusOK {
 		t.Errorf("no environment: got = %d %v, want declared", code, out)
+	}
+}
+
+// A job placed on the builder's node runs the image loaded there before the push ends: that is
+// the environment's image, and the baseline it measured is declared.
+func TestABaselineRunInTheImageLoadedBeforeItsPushIsDeclared(t *testing.T) {
+	baseline := measuredBaseline()
+	ranIn(baseline, branchEnvironment)
+	baseline.Declared = &[]string{branchEnvironment}[0]
+	baseline.Environment.LoadedImage, baseline.Environment.Image, baseline.Environment.State = baseline.Environment.Image, "", domain.EnvironmentBuilding
+	store, patch := declareAPI(t, openExperiment(), baseline, theCoordinator)
+	if code, out := patch(map[string]any{"baseline_job_id": "job-1"}); code != http.StatusOK || store.created[0].BaselineJobID != "job-1" {
+		t.Fatalf("got = %d %v, want the baseline declared", code, out)
+	}
+}
+
+// Every reason a baseline is refused for becomes the experiment's status_reason, and reading an
+// experiment whose reason names nobody it waits for fails.
+func TestEveryBaselineRefusalNamesWhoActsOnIt(t *testing.T) {
+	files, _ := filepath.Glob("*.go")
+	refusal := regexp.MustCompile(`refusedBaseline\("([a-z_]+)"`)
+	for _, file := range files {
+		source, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range refusal.FindAllStringSubmatch(string(source), -1) {
+			if _, err := domain.WaitsFor(m[1], true); err != nil {
+				t.Errorf("%s: %v", file, err)
+			}
+		}
 	}
 }
