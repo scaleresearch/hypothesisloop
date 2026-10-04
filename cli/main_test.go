@@ -590,6 +590,11 @@ func TestQuotaBeforeTheStartPrintsThePlatformsWordAndFails(t *testing.T) {
 	if code != 1 || requests != 1 || stdout.Len() != 0 || stderr.String() != "hl: quota: quota_not_granted: agent jane holds no quota yet: prepare, then end your turn\n" {
 		t.Fatalf("open: exit %d after %d requests, stdout %q, stderr %q", code, requests, stdout.String(), stderr.String())
 	}
+	reason = "planner_has_no_quota"
+	stderr.Reset()
+	if code := run([]string{"quota", "--agent", "jane", "--platform-experiment", "pe-1"}, &stdout, &stderr); code != 1 || !strings.HasPrefix(stderr.String(), "hl: quota: planner_has_no_quota: ") {
+		t.Fatalf("planner: exit %d, stderr %q, want the reason and the platform's word", code, stderr.String())
+	}
 	reason = "not_found"
 	stderr.Reset()
 	if code := run([]string{"quota", "--agent", "jane", "--platform-experiment", "pe-1"}, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "HTTP 404") {

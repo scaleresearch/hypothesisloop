@@ -550,7 +550,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Description: "One row of what GET /platform-experiments/{id}/quotas returns for every agent, and with it data_bytes and max_data_bytes: " +
 			"what the agent holds in the object store and the ceiling a submit is refused on with data_quota_exceeded, where the platform sets one. " +
 			"503 object_store_unavailable while the object store does not answer. " +
-			"404 planner_has_no_quota for a draft's planner, which submits no job and needs none. " +
+			"404 planner_has_no_quota for a draft's planner, which submits no job and needs none: the message says where the run's budget comes from instead. " +
 			"404 quota_not_granted while the platform experiment is open and the agent holds none yet: quota is granted at the start, and the message is the platform experiment's status_reason, what the caller does next.",
 	}, func(ctx context.Context, in *struct {
 		ID      string `path:"id"`
@@ -573,7 +573,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 				return nil, auth.Internal(peh.logger, "get agent quota", err, zap.String("id", in.ID))
 			}
 			if signup != nil && signup.Role == domain.SignupRolePlanner {
-				return nil, api.Refuse(http.StatusNotFound, "planner_has_no_quota", "agent "+in.AgentID+" is the planner of platform experiment "+in.ID+": a planner submits no job, so it has no quota and needs none")
+				return nil, api.Refuse(http.StatusNotFound, "planner_has_no_quota", "agent "+in.AgentID+" is the planner of platform experiment "+in.ID+": a planner submits no job, so it has no quota and needs none. The run's budget is the budget_accelerator_hours its proposal states (hl platform-experiments propose --help), sized against hl capacity, and it is shared among the researchers when the run starts")
 			}
 			if pe == nil || pe.Status != domain.PlatformExpOpen {
 				return nil, huma.Error404NotFound("agent " + in.AgentID + " has no quota in platform experiment " + in.ID)

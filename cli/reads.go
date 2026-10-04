@@ -36,7 +36,8 @@ data_quota_exceeded until some is deleted.
 Quota is granted when the platform experiment starts. Before that an agent that holds none
 is answered 404 quota_not_granted: hl prints that reason and the platform's word for what the
 start waits for and what you do until then, the same as status_reason of
-hl platform-experiments get, and exits 1.`, stderr)
+hl platform-experiments get, and exits 1. A draft's planner holds no quota and needs none: it is
+answered planner_has_no_quota, printed the same way, with where the run's budget comes from.`, stderr)
 	agent := fs.String("agent", "", "agent (default the token's agent)")
 	all := fs.Bool("all", false, "every agent signed up to the platform experiment")
 	pe := fs.String("platform-experiment", "", "platform experiment (default the token's)")
@@ -61,7 +62,7 @@ hl platform-experiments get, and exits 1.`, stderr)
 	var out json.RawMessage
 	if err := c.Do("GET", path, nil, &out); err != nil {
 		// An agent's harness tells this refusal from a read that failed by the reason in the line.
-		if reason, message := refusalOf(err); reason == "quota_not_granted" {
+		if reason, message := refusalOf(err); reason == "quota_not_granted" || reason == "planner_has_no_quota" {
 			fmt.Fprintf(stderr, "hl: quota: %s: %s\n", reason, message)
 			return 1
 		}

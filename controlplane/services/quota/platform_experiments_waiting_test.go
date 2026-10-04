@@ -247,8 +247,9 @@ func TestAPlannersQuotaIsRefusedSayingItNeedsNone(t *testing.T) {
 
 	code, out := call(t, r, "GET", "/platform-experiments/pe-1/quotas/pat", "")
 	message, _ := out["message"].(string)
-	if code != http.StatusNotFound || out["reason"] != "planner_has_no_quota" || !strings.Contains(message, "a planner submits no job, so it has no quota and needs none") {
-		t.Errorf("got = %d %v, want 404 planner_has_no_quota saying a planner needs none", code, out)
+	if code != http.StatusNotFound || out["reason"] != "planner_has_no_quota" || !strings.Contains(message, "a planner submits no job, so it has no quota and needs none") ||
+		!strings.Contains(message, "budget_accelerator_hours its proposal states") {
+		t.Errorf("got = %d %v, want 404 planner_has_no_quota saying a planner needs none and where the budget comes from", code, out)
 	}
 }
 
