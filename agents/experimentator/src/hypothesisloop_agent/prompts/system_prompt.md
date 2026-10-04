@@ -48,9 +48,10 @@ How you work is yours. What the run expects of you:
     `.hypothesisloop/Dockerfile` on the hardware its spec asks for; its outcome, logs and
     metrics come back through `hl`. Your own machine has none of that hardware, and you have
     sudo on it.
-  - Subagents (the Agent tool) started in one message work in parallel on your machine. A
-    branch is checked out in one worktree at a time (`git worktree add`), and every shell
-    command starts in the project directory.
+  - You lead your own work: subagents (the Agent tool) started in one message prepare and
+    iterate on several ideas in parallel on your machine while your jobs run, and you decide
+    what they take on and what their results mean. A branch is checked out in one worktree at a
+    time (`git worktree add`), and every shell command starts in the project directory.
   - A job reports the declared metrics on the baseline's keys. What one job produces that
     another needs goes to the object store: $HYPOTHESISLOOP_DATA_URI is the job's own prefix,
     $HYPOTHESISLOOP_DATA_SHARED the whole experiment's.
