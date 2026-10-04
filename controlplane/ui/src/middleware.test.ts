@@ -1,12 +1,13 @@
 // @vitest-environment node
 import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { hasSession } from '@/lib/auth'
+import { hasSession, sessionToken } from '@/lib/auth'
 import { config, middleware } from '@/middleware'
 
 vi.mock('@/lib/auth', async importActual => ({
   ...(await importActual<typeof import('@/lib/auth')>()),
   hasSession: vi.fn(),
+  sessionToken: vi.fn(),
 }))
 
 function visit(path: string, cookie?: string) {
@@ -60,8 +61,27 @@ describe('a signed-in visitor', () => {
     expect(response.headers.get('location')).toBeNull()
   })
 
+  it('is moved for good from an old page to its new one', async () => {
+    const response = await visit('/hypotheses?pe=pe-1&view=outline')
+    expect(response.status).toBe(308)
+    expect(response.headers.get('location')).toBe('http://ui.test/experiments/pe-1/hypotheses?view=outline')
+  })
+
+  it('is moved from an old job page to the job in its experiment, read with their own token', async () => {
+    vi.mocked(sessionToken).mockResolvedValue('tok')
+    const fetched = vi.fn(async () => Response.json({ id: 'j1', platform_experiment_id: 'pe-1' }))
+    vi.stubGlobal('fetch', fetched)
+    const response = await visit('/jobs/j1')
+    expect(response.status).toBe(308)
+    expect(response.headers.get('location')).toBe('http://ui.test/experiments/pe-1/jobs/j1')
+    expect(fetched).toHaveBeenCalledWith('http://api.test/experiments/j1', { headers: { Authorization: 'Bearer tok' }, cache: 'no-store' })
+
+    fetched.mockResolvedValue(new Response('not found', { status: 404 }))
+    expect((await visit('/hypotheses/h9')).headers.get('x-middleware-next')).toBe('1')
+  })
+
   it('reaches the page', async () => {
-    const response = await visit('/jobs')
+    const response = await visit('/projects/prj_1/jobs')
     expect(response.status).toBe(200)
     expect(response.headers.get('x-middleware-next')).toBe('1')
   })
@@ -91,7 +111,7 @@ describe('the scheme the visitor came over', () => {
   it('reaches the session check, which marks its cookies Secure over https', async () => {
     await middleware(new NextRequest('http://ui.internal/jobs', { headers: { 'x-forwarded-proto': 'https' } }))
     expect(vi.mocked(hasSession).mock.lastCall![0].https).toBe(true)
-    await visit('/jobs')
+    await visit('/projects/prj_1/jobs')
     expect(vi.mocked(hasSession).mock.lastCall![0].https).toBe(false)
   })
 })
@@ -105,7 +125,7 @@ describe('cookies the session check writes', () => {
       await cookies.setAll!(refreshed, cacheHeaders)
       return true
     })
-    const response = await visit('/jobs', 'sb-auth-token=stale')
+    const response = await visit('/projects/prj_1/jobs', 'sb-auth-token=stale')
     expect(response.cookies.get('sb-auth-token')?.value).toBe('fresh')
     expect(response.headers.get('cache-control')).toBe('private, no-store')
     // The page being rendered sees the refreshed cookie too.
@@ -117,8 +137,8 @@ describe('cookies the session check writes', () => {
       await cookies.setAll!([{ name: 'sb-auth-token', value: '', options: { path: '/', maxAge: 0 } }], cacheHeaders)
       return false
     })
-    const response = await visit('/jobs', 'sb-auth-token=dead')
-    expect(response.headers.get('location')).toBe('http://ui.test/login?next=%2Fjobs')
+    const response = await visit('/projects/prj_1/jobs', 'sb-auth-token=dead')
+    expect(response.headers.get('location')).toBe('http://ui.test/login?next=%2Fprojects%2Fprj_1%2Fjobs')
     expect(response.headers.get('set-cookie')).toMatch(/sb-auth-token=;.*Max-Age=0/)
   })
 
@@ -128,7 +148,7 @@ describe('cookies the session check writes', () => {
       seen = await cookies.getAll()
       return true
     })
-    await visit('/jobs', 'sb-auth-token=abc')
+    await visit('/projects/prj_1/jobs', 'sb-auth-token=abc')
     expect(seen).toEqual([{ name: 'sb-auth-token', value: 'abc' }])
   })
 })
@@ -136,7 +156,7 @@ describe('cookies the session check writes', () => {
 describe('an identity provider that cannot be reached', () => {
   it('is an error, never a silent sign-out', async () => {
     vi.mocked(hasSession).mockRejectedValue(new Error('fetch failed'))
-    await expect(visit('/jobs')).rejects.toThrow('fetch failed')
+    await expect(visit('/projects/prj_1/jobs')).rejects.toThrow('fetch failed')
   })
 })
 

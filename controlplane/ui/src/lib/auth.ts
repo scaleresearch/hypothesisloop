@@ -176,6 +176,12 @@ export async function hasSession(session: ServerSession): Promise<boolean> {
   return data != null
 }
 
+/** The access token of the request's session, read after hasSession has verified and refreshed it. */
+export async function sessionToken(session: ServerSession): Promise<string | null> {
+  const { data } = await serverAuth(session).getSession()
+  return data.session?.access_token ?? null
+}
+
 /** Trades the code the provider sent back for a session, written through its cookie methods. */
 export async function completeSignIn(session: ServerSession, code: string): Promise<boolean> {
   const { error } = await serverAuth(session).exchangeCodeForSession(code)
