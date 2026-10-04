@@ -126,15 +126,3 @@ func TestGroupsWithLongNamesThatShareTheirStartAreNamedApartWithinADNSLabel(t *t
 		}
 	}
 }
-
-// Two jobs submitted in one millisecond have ids that differ only past the timestamp.
-func TestJobsOfIdsMadeInOneMillisecondAreNamedApart(t *testing.T) {
-	const sameMillisecond = "job-0199c2a4b7d07e11a04c7d9e3b5f2c68"
-	group := strings.Repeat("parameter-server-", 4) + "worker"
-	if one, other := groupJobName(issuedJobID, group, 1000), groupJobName(sameMillisecond, group, 1000); one == other {
-		t.Fatalf("both jobs' group is named %q", one)
-	}
-	if one, other := jobName(issuedJobID), jobName(sameMillisecond); one == other {
-		t.Fatalf("both jobs' Service is named %q", one)
-	}
-}

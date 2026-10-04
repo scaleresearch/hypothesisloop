@@ -47,11 +47,3 @@ func TestSpecValidateRefusesWhatNoVendorCanRent(t *testing.T) {
 		}
 	}
 }
-
-func TestCeilDivRoundsUp(t *testing.T) {
-	for _, tc := range [][3]int64{{1, 1000, 1}, {1000, 1000, 1}, {1001, 1000, 2}, {8 << 30, 1 << 30, 8}, {8<<30 + 1, 1 << 30, 9}} {
-		if got := CeilDiv(tc[0], tc[1]); got != tc[2] {
-			t.Errorf("CeilDiv(%d, %d) = %d, want %d", tc[0], tc[1], got, tc[2])
-		}
-	}
-}

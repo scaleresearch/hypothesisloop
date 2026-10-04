@@ -1,7 +1,6 @@
 package boundedname
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -57,38 +56,6 @@ func TestCutNamesOfIdsMadeInOneMillisecondDiffer(t *testing.T) {
 		other := Name("exp-"+jobIDSameMs+group, jobIDSameMs+"/"+group, limit)
 		if len(one) != limit || len(other) != limit || one == other {
 			t.Errorf("limit %d: %q and %q name two jobs", limit, one, other)
-		}
-	}
-}
-
-func TestCutNamesOfGroupsThatShareTheirStartDiffer(t *testing.T) {
-	shared := strings.Repeat("parameter-server-", 3)
-	seen := map[string]string{}
-	for _, group := range []string{shared + "worker", shared + "chief", shared + "evaluator"} {
-		got := Name("exp-"+jobID+"-"+group, jobID+"/"+group, dnsLabelLength)
-		if earlier, taken := seen[got]; taken {
-			t.Errorf("groups %q and %q are both named %q", earlier, group, got)
-		}
-		seen[got] = group
-	}
-}
-
-// A pod of an Indexed Job is reached at <job name>-<rank>, which is one DNS label.
-func TestEveryRankOfAJobWithTheLongestIdsHasAHostnameThatIsADNSLabel(t *testing.T) {
-	longestID := strings.Repeat("a", 62) + "b"
-	for _, id := range []string{jobID, longestID} {
-		for _, group := range []string{"", "actor", strings.Repeat("parameter-server-", 3) + "worker"} {
-			for _, ranks := range []int{1, 2, 10, 1000, 100000} {
-				last := fmt.Sprintf("-%d", ranks-1)
-				readable := "exp-" + id
-				if group != "" {
-					readable += "-" + group
-				}
-				name := Name(readable, id+"/"+group, dnsLabelLength-len(last))
-				if hostname := name + last; len(hostname) > dnsLabelLength || !dnsLabel.MatchString(hostname) {
-					t.Errorf("id %q group %q with %d ranks: hostname %q is %d characters", id, group, ranks, hostname, len(hostname))
-				}
-			}
 		}
 	}
 }

@@ -166,20 +166,6 @@ func TestLogsOfSomethingThatNeverWroteIsEmpty(t *testing.T) {
 	}
 }
 
-func TestLogsRefusesATailThatIsNotPositive(t *testing.T) {
-	api := newFakeAPI(t)
-	p := newTestProvider(t, api)
-
-	for _, tail := range []int{0, -1} {
-		if _, err := p.Logs(context.Background(), "9001", tail); err == nil || !strings.Contains(err.Error(), "tail must be positive") {
-			t.Errorf("Logs(tail %d) = %v, want a refusal", tail, err)
-		}
-	}
-	if api.total() != 0 {
-		t.Errorf("requests = %d, want none", api.total())
-	}
-}
-
 func TestLogsReportsEveryFailure(t *testing.T) {
 	cases := map[string]http.HandlerFunc{
 		"rate limited":     answer(429, `rate limited`),

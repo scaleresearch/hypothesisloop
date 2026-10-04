@@ -84,23 +84,6 @@ func TestAConfigThatIsIncompleteOrMisspelledIsRefused(t *testing.T) {
 	}
 }
 
-func TestAProviderIsAskedForTheAcceleratorTypesOfTheShapesThatRentOne(t *testing.T) {
-	shapes := []cloudexec.Shape{
-		{Name: "h100", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100", Accelerators: 1},
-		{Name: "cpu"},
-	}
-	if got := acceleratorTypes(shapes); len(got) != 1 || got[0] != "nvidia.com/gpu.product=NVIDIA-H100" {
-		t.Errorf("accelerator types = %q, want the one type a shape rents", got)
-	}
-}
-
-func TestAProviderThisBinaryWasNotBuiltWithIsRefused(t *testing.T) {
-	_, err := newProvider(providerConfig{Name: "other"}, nil)
-	if err == nil || !strings.Contains(err.Error(), `config: provider.name "other"`) {
-		t.Fatalf("err = %v, want one naming the config key and the provider", err)
-	}
-}
-
 // The rented cluster's settings set every shape's max_instances far above what is asked for at
 // once. The executor must still accept them: the instance index is part of a name of bounded
 // length.

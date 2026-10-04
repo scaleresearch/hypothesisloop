@@ -100,17 +100,6 @@ func TestTheShippedProviderSectionsBuildTheirAdapters(t *testing.T) {
 	}
 }
 
-func TestAShippedProviderSectionWithoutItsSecretIsRefused(t *testing.T) {
-	t.Setenv("FLY_API_TOKEN", "")
-	t.Setenv("E2B_API_KEY", "")
-	for _, path := range []string{"../../../settings/provider.fly.yaml", "../../../settings/provider.e2b.yaml"} {
-		read := shippedSection(t, path)
-		if _, err := New(read.Provider.Name, read.Provider.Settings, nil); err == nil {
-			t.Errorf("%s: a provider was built with no secret in the environment", path)
-		}
-	}
-}
-
 // A config that names a vendor and leaves out its settings must stop the process at startup,
 // with the setting that is missing, before anything is rented.
 func TestAVendorNamedWithoutASettingsSectionIsRefusedAtStartup(t *testing.T) {

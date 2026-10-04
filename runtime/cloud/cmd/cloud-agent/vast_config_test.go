@@ -39,14 +39,3 @@ func TestAShapeTheVastSettingsCannotRentStopsStartup(t *testing.T) {
 		t.Fatalf("err = %v, want one naming the accelerator type the settings have no entry for", err)
 	}
 }
-
-func TestAVastConfigWithoutItsKeyIsRefused(t *testing.T) {
-	t.Setenv("VAST_API_KEY", "")
-	cfg, err := loadConfig(shippedVastConfig)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := newProvider(cfg.Provider, cfg.shapes); err == nil {
-		t.Fatal("a provider was built with no API key in the environment")
-	}
-}

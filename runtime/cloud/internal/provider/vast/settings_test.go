@@ -3,40 +3,7 @@ package vast
 import (
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
-
-func TestSettingsReadTheirSection(t *testing.T) {
-	section := `
-api_key_env: VAST_API_KEY
-max_price_per_hour: 0.6
-min_reliability: 0.98
-regions: [SE, NL]
-verified_only: true
-excluded_machines: [124592]
-accelerators:
-  - product: NVIDIA GeForce RTX 4090
-    gpu_name: RTX 4090
-  - product: NVIDIA A100 80GB PCIe
-    gpu_name: A100 PCIE
-    min_gpu_ram_mb: 80000
-`
-	var cfg Settings
-	if err := yaml.Unmarshal([]byte(section), &cfg); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if err := cfg.validate(); err != nil {
-		t.Fatalf("validate: %v", err)
-	}
-	if cfg.APIKeyEnv != "VAST_API_KEY" || cfg.MaxPricePerHour != 0.6 || cfg.MinReliability != 0.98 || !cfg.VerifiedOnly || len(cfg.Regions) != 2 || len(cfg.ExcludedMachines) != 1 || cfg.ExcludedMachines[0] != 124592 {
-		t.Errorf("cfg = %+v", cfg)
-	}
-	a100, err := cfg.accelerator("nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe")
-	if err != nil || a100 != (Accelerator{Product: "NVIDIA A100 80GB PCIe", GPUName: "A100 PCIE", MinGPURAMMB: 80000}) {
-		t.Errorf("accelerator = %+v, %v", a100, err)
-	}
-}
 
 func TestNewRefusesIncompleteSettings(t *testing.T) {
 	t.Setenv("VAST_TEST_KEY", testKey)

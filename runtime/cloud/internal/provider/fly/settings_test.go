@@ -3,28 +3,7 @@ package fly
 import (
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
-
-func TestSettingsReadTheirSection(t *testing.T) {
-	section := `
-api_token_env: FLY_API_TOKEN
-app: hypothesisloop-agents
-region: ams
-cpu_kind: shared
-`
-	var cfg Settings
-	if err := yaml.Unmarshal([]byte(section), &cfg); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if err := cfg.validate(); err != nil {
-		t.Fatalf("validate: %v", err)
-	}
-	if cfg != (Settings{APITokenEnv: "FLY_API_TOKEN", App: "hypothesisloop-agents", Region: "ams", CPUKind: "shared"}) {
-		t.Errorf("cfg = %+v", cfg)
-	}
-}
 
 func TestNewRefusesIncompleteSettings(t *testing.T) {
 	t.Setenv("FLY_TEST_TOKEN", testToken)

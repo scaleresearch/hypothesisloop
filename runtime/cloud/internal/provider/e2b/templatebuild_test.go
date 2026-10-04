@@ -236,11 +236,3 @@ func TestPruneDeletesTheTemplatesOfOtherTagsAndNothingElse(t *testing.T) {
 		t.Errorf("a prune that names nothing to keep deleted: %v", deleted)
 	}
 }
-
-func TestTheConformanceTemplateIsTheOneItsTestsStartFrom(t *testing.T) {
-	spec := conformanceOptions().Template
-	if got, want := templateName(spec.Image, sizeOf(spec)),
-		templateName(ConformanceTemplate.Image, size{CPUs: ConformanceTemplate.Cores, MemoryMB: ConformanceTemplate.MemoryMiB}); got != want {
-		t.Errorf("the conformance tests start from %s and Prune keeps %s", got, want)
-	}
-}

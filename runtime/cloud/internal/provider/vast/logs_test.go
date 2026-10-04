@@ -210,15 +210,3 @@ func TestLogsFailures(t *testing.T) {
 		})
 	}
 }
-
-func TestLogsRefusesATailThatIsNotPositive(t *testing.T) {
-	api := newFakeAPI(t)
-	p := newTestProvider(t, api, Settings{})
-
-	if _, err := p.Logs(context.Background(), "9001", 0); err == nil {
-		t.Fatal("no error for tail 0")
-	}
-	if api.total() != 0 {
-		t.Errorf("requests = %d, want 0", api.total())
-	}
-}

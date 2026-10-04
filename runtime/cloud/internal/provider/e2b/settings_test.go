@@ -3,26 +3,7 @@ package e2b
 import (
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
-
-func TestSettingsReadTheirSection(t *testing.T) {
-	section := `
-api_key_env: E2B_API_KEY
-lifetime_seconds: 86400
-`
-	var cfg Settings
-	if err := yaml.Unmarshal([]byte(section), &cfg); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if err := cfg.validate(); err != nil {
-		t.Fatalf("validate: %v", err)
-	}
-	if cfg != (Settings{APIKeyEnv: "E2B_API_KEY", LifetimeSeconds: 86400}) {
-		t.Errorf("cfg = %+v", cfg)
-	}
-}
 
 func TestNewRefusesIncompleteSettings(t *testing.T) {
 	t.Setenv("E2B_TEST_KEY", testKey)

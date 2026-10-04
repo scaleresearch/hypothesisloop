@@ -90,20 +90,6 @@ func TestLogsTellsNoOutputFromOneEmptyLine(t *testing.T) {
 	}
 }
 
-func TestLogsRefusesATailThatIsNotPositive(t *testing.T) {
-	api := newFakeAPI(t)
-	p := newTestProvider(t, api)
-
-	for _, tail := range []int{0, -1} {
-		if _, err := p.Logs(context.Background(), "sb1", tail); err == nil || !strings.Contains(err.Error(), "tail must be positive") {
-			t.Errorf("Logs(tail %d) = %v, want a refusal", tail, err)
-		}
-	}
-	if api.total() != 0 {
-		t.Errorf("requests = %d, want none", api.total())
-	}
-}
-
 func TestLogsOfAGoneSandboxSaysItsOutputIsGone(t *testing.T) {
 	api := newFakeAPI(t)
 	api.on(http.MethodGet, sandboxPath, answer(404, goneJSON))

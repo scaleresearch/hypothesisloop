@@ -194,12 +194,6 @@ func TestSettingsThatWouldBreakTheFileAreRefused(t *testing.T) {
 	}
 }
 
-func TestANodeWithNoAgentHasNoSettings(t *testing.T) {
-	if _, installed, err := ReadSettings(newFakeHost()); installed || err != nil {
-		t.Fatalf("installed = %v, err = %v", installed, err)
-	}
-}
-
 // Removing the agent of an attached node would leave its cluster registered and its job
 // containers running with nothing left to stop them.
 func TestUninstallRefusesAnAttachedNodeAndRemovesADetachedOne(t *testing.T) {

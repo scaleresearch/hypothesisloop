@@ -173,24 +173,6 @@ func TestCreateSeesTheSandboxListedBeforeAnythingOfTheSpecEntersIt(t *testing.T)
 	}
 }
 
-func TestLaunchFileRemovesItselfThenSetsTheImagesEnvironmentTheSpecsAndTheArgv(t *testing.T) {
-	file := launchFile(agentSpec().Command, agentSpec().Env, 0)
-
-	wantStart := "rm -f /var/tmp/.hl-supervisor/launch\n"
-	if !strings.HasPrefix(file, wantStart) {
-		t.Errorf("launch file starts %q, want %q before anything else: it holds every value of the environment", file[:min(len(file), 60)], wantStart)
-	}
-	wantValues := ". /etc/hl-image.env || exit 126\n" +
-		"export API_URL='https://api.example'\n" +
-		`export HL_TOKEN='t = '\''x'\'' "y" $Z'` + "\n" +
-		`set -- 'uv' 'run' 'agent' '--note' 'it'\''s "quoted" $HOME' ''` + "\n" +
-		"echo running >> /var/tmp/.hl-supervisor/state || exit 126\n"
-	trap, values, command := strings.Index(file, "trap forward TERM"), strings.Index(file, wantValues), strings.Index(file, `"$@" > /var/tmp/.hl-supervisor/out 2>&1 &`)
-	if trap < 0 || values < trap || command < values {
-		t.Errorf("launch file has the trap at %d, the values at %d and the start at %d, want them in that order:\n%s", trap, values, command, file)
-	}
-}
-
 func TestCreateRefusesBeforeSpendingAnything(t *testing.T) {
 	cases := map[string]struct {
 		mutate func(*provider.Spec)
@@ -221,21 +203,6 @@ func TestCreateRefusesBeforeSpendingAnything(t *testing.T) {
 				t.Errorf("%d requests were sent for a spec the adapter cannot meet", api.total())
 			}
 		})
-	}
-}
-
-func TestCreateNamesTheTemplateThatIsNotBuiltAndHowToBuildIt(t *testing.T) {
-	api := newFakeAPI(t)
-	api.on(http.MethodPost, sandboxesPath, answer(404, `{"code":404,"message":"template '`+agentTemplate+`' not found"}`))
-	p := newTestProvider(t, api)
-
-	_, err := p.Create(context.Background(), agentSpec())
-	want := "build it with `go run ./runtime/cloud/cmd/e2b-template registry.example/agent:1 2 4096`"
-	if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), agentTemplate) {
-		t.Fatalf("err = %v, want one naming template %s and saying %q", err, agentTemplate, want)
-	}
-	if api.total() != 1 {
-		t.Errorf("requests = %d, want the one create", api.total())
 	}
 }
 

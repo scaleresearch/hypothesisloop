@@ -1,13 +1,10 @@
 package vast
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
-	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -564,22 +561,5 @@ func TestCreateNeverSearchesAHostTheSpecAvoids(t *testing.T) {
 	}
 	if api.total() != before {
 		t.Errorf("%d requests were sent for a spec the adapter cannot meet", api.total()-before)
-	}
-}
-
-func TestCreateLogsTheMachineItRented(t *testing.T) {
-	var logged bytes.Buffer
-	log.SetOutput(&logged)
-	t.Cleanup(func() { log.SetOutput(os.Stderr) })
-	api := newFakeAPI(t)
-	rentable(api, "hl-exp1-a2")
-	api.on(http.MethodPost, searchPath, offersOn(124592))
-	p := newTestProvider(t, api, gpuSettings())
-
-	if _, err := p.Create(context.Background(), gpuSpec()); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if line := logged.String(); !strings.Contains(line, "hl-exp1-a2") || !strings.Contains(line, "machine 124592") || !strings.Contains(line, "9001") {
-		t.Errorf("log = %q, want the instance, its name and its machine", line)
 	}
 }

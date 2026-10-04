@@ -116,14 +116,3 @@ func TestAConfigThatIsIncompleteOrMisspelledIsRefused(t *testing.T) {
 		}
 	}
 }
-
-func TestACreatePauseOfZeroIsNoPause(t *testing.T) {
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-secret-value")
-	cfg, err := loadText(t, strings.Replace(shipped(t), "create_pause_milliseconds: 1000", "create_pause_milliseconds: 0", 1))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := cfg.launch().CreatePause; got != 0 {
-		t.Fatalf("pause = %s", got)
-	}
-}

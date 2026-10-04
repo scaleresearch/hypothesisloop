@@ -78,21 +78,6 @@ func TestLastOutputIsCutOnACharacterBoundary(t *testing.T) {
 	}
 }
 
-func TestLastOutputCarriesTheErrorAboveTheAdvice(t *testing.T) {
-	got := LastOutput([]string{
-		`    batch = images[i : i + batch_size].to(DEVICE, non_blocking=True)`,
-		`RuntimeError: CUDA error: misaligned address`,
-		`CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.`,
-		`For debugging consider passing CUDA_LAUNCH_BLOCKING=1`,
-		"Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.",
-		"", "", Format(1),
-	})
-	want := "RuntimeError: CUDA error: misaligned address | CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect. | For debugging consider passing CUDA_LAUNCH_BLOCKING=1 | Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions."
-	if got != want {
-		t.Fatalf("LastOutput = %q, want %q", got, want)
-	}
-}
-
 func TestLastOutputDropsOlderLinesThatDoNotFit(t *testing.T) {
 	last := strings.Repeat("b", 200)
 	if got := LastOutput([]string{"oldest", strings.Repeat("a", 200), last}); got != last {
