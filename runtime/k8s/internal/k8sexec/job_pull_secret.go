@@ -1,11 +1,13 @@
 package k8sexec
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -22,8 +24,8 @@ func pullSecretName(experimentID string) string {
 	return boundedname.Name("exp-"+experimentID+"-pull", experimentID+"/pull", dnsLabelLength)
 }
 
-// ensurePullSecret writes pull as the experiment's pull Secret, replacing what an earlier
-// generation left, so its pods pull with the login the control plane handed out last.
+// ensurePullSecret writes pull as the experiment's pull Secret when it holds anything else, so
+// its pods pull with the login the control plane handed out last.
 func (c *JobWorkloadClient) ensurePullSecret(ctx context.Context, exp *domain.Experiment, pull *domain.RegistryLogin) error {
 	if pull == nil {
 		return fmt.Errorf("workload: experiment %s runs in an environment and the reconcile answer has no registry_pull", exp.ID)
@@ -49,14 +51,28 @@ func (c *JobWorkloadClient) ensurePullSecret(ctx context.Context, exp *domain.Ex
 		Data: map[string][]byte{corev1.DockerConfigJsonKey: config},
 	}
 	secrets := c.kube.CoreV1().Secrets(HypothesisLoopNamespace)
-	_, err = secrets.Create(ctx, secret, metav1.CreateOptions{})
-	if errors.IsAlreadyExists(err) {
+	current, err := secrets.Get(ctx, secret.Name, metav1.GetOptions{})
+	switch {
+	case errors.IsNotFound(err):
+		_, err = secrets.Create(ctx, secret, metav1.CreateOptions{})
+	case err != nil:
+	case current.Type == secret.Type && maps.Equal(current.Labels, secret.Labels) &&
+		bytes.Equal(current.Data[corev1.DockerConfigJsonKey], config) && len(current.Data) == 1:
+		return nil
+	default:
+		secret.ResourceVersion = current.ResourceVersion
 		_, err = secrets.Update(ctx, secret, metav1.UpdateOptions{})
 	}
 	if err != nil {
 		return fmt.Errorf("workload: write the pull secret of %s: %w", exp.ID, err)
 	}
 	return nil
+}
+
+// RefreshPull rewrites the pull Secret of exp's live workload with the current login: a pod that
+// is rescheduled after the login it was created with expired pulls with this one.
+func (c *JobWorkloadClient) RefreshPull(ctx context.Context, exp *domain.Experiment, pull *domain.RegistryLogin) error {
+	return c.ensurePullSecret(ctx, exp, pull)
 }
 
 // deletePullSecret removes the experiment's pull Secret. Most experiments have none.

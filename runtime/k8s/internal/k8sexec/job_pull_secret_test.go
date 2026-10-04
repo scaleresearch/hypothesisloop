@@ -158,3 +158,45 @@ func TestOnlyAJobInAnEnvironmentHasAPullSecretAndItNeedsALogin(t *testing.T) {
 		t.Fatalf("secrets = %v, %v, want none", secrets, err)
 	}
 }
+
+// Each pass rewrites the pull Secret of a live job with the current login when it holds another,
+// and leaves it alone when it holds that one already.
+func TestALiveJobsPullSecretFollowsTheCurrentLogin(t *testing.T) {
+	ctx := context.Background()
+	c := pullTestClient()
+	exp := pullTestExperiment("exp-env", "key-1", environmentImage)
+	if err := c.CreateWorkload(ctx, exp, pullLogin("first-token")); err != nil {
+		t.Fatal(err)
+	}
+	kube := c.kube.(*fake.Clientset)
+	writes := func() int {
+		n := 0
+		for _, action := range kube.Actions() {
+			if action.GetResource().Resource == "secrets" && (action.GetVerb() == "create" || action.GetVerb() == "update") {
+				n++
+			}
+		}
+		return n
+	}
+
+	if err := c.RefreshPull(ctx, exp, pullLogin("first-token")); err != nil {
+		t.Fatal(err)
+	}
+	if got := writes(); got != 1 {
+		t.Fatalf("%d secret writes after a refresh with the same login, want only the create", got)
+	}
+
+	if err := c.RefreshPull(ctx, exp, pullLogin("second-token")); err != nil {
+		t.Fatal(err)
+	}
+	if got := writes(); got != 2 {
+		t.Fatalf("%d secret writes after a refresh with a new login, want 2", got)
+	}
+	secret, err := c.kube.CoreV1().Secrets(HypothesisLoopNamespace).Get(ctx, pullSecretName(exp.ID), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, password, _ := secretLogin(t, secret, "europe-west1-docker.pkg.dev"); password != "second-token" {
+		t.Fatal("the pull secret does not hold the current login")
+	}
+}

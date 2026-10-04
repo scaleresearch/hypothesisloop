@@ -229,6 +229,13 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 					continue
 				}
 				a.Log("deleted drifted workload %s; next pass recreates desired spec", id)
+				continue
+			}
+			if refresher, ok := exec.(agentexec.PullRefresher); ok && exp.EnvironmentKey != "" {
+				if err := refresher.RefreshPull(ctx, exp, answer.RegistryPull); err != nil {
+					a.Log("refresh the pull login of %s: %v", id, err)
+					reconcileErrors = append(reconcileErrors, fmt.Errorf("refresh the pull login of %s: %w", id, err))
+				}
 			}
 			continue
 		}

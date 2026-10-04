@@ -135,6 +135,14 @@ type PassScoped interface {
 	ForPass(ctx context.Context) (Executor, error)
 }
 
+// PullRefresher is implemented by an executor whose live workloads pull their image again after
+// creation, as a k8s pod rescheduled to another node does. Every reconcile pass hands it the
+// current registry_pull for each live workload of a job that runs in an environment, since the
+// login it was created with expires.
+type PullRefresher interface {
+	RefreshPull(ctx context.Context, exp *domain.Experiment, pull *domain.RegistryLogin) error
+}
+
 // JobStatus is what one poll of a managed workload observed.
 type JobStatus struct {
 	Phase workload.JobPhase

@@ -171,3 +171,34 @@ func TestEveryJobCreatedIsHandedTheAnswersPullLogin(t *testing.T) {
 		t.Fatalf("exp-next was handed %+v, want no login from an answer that has none", pull)
 	}
 }
+
+type refreshingExecutor struct {
+	*captureExecutor
+	refreshed map[string]string
+}
+
+func (e *refreshingExecutor) RefreshPull(_ context.Context, exp *domain.Experiment, pull *domain.RegistryLogin) error {
+	e.refreshed[exp.ID] = pull.Password
+	return nil
+}
+
+// Every pass hands the answer's registry_pull to each live job that runs in an environment, so a
+// pod that pulls again after its first login expired pulls with the current one.
+func TestEveryLiveJobInAnEnvironmentIsHandedTheCurrentPullLogin(t *testing.T) {
+	exec := &refreshingExecutor{captureExecutor: &captureExecutor{managed: []string{"exp-env", "exp-plain"}}, refreshed: map[string]string{}}
+	cp := &controlPlane{
+		desired:      `[{"id":"exp-env","environment_key":"k1"},{"id":"exp-plain"}]`,
+		registryPull: `{"registry":"europe-west1-docker.pkg.dev","username":"oauth2accesstoken","password":"pull-token","expires_at":"2030-01-01T00:00:00Z"}`,
+	}
+	agent := newTestAgent(cp.serve(t), nil)
+	agent.Executor = exec
+	if err := agent.reconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(exec.refreshed) != 1 || exec.refreshed["exp-env"] != "pull-token" {
+		t.Fatalf("refreshed %v, want exp-env alone with the answer's login", exec.refreshed)
+	}
+	if exec.created != 0 {
+		t.Fatalf("created %d live jobs again", exec.created)
+	}
+}
