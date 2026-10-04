@@ -91,7 +91,7 @@ describe('on the graph', () => {
     render(<Harness view="graph" />)
     fireEvent.click(await screen.findByRole('button', { name: 'Add idea here' }))
     const editor = screen.getByRole('group', { name: 'New idea' })
-    expect(within(editor).getByText('the objective of Vision benchmark')).toBeTruthy()
+    expect(within(editor).getByText('Objective: Vision benchmark')).toBeTruthy()
     await write('label smoothing helps')
     fireEvent.click(within(editor).getByRole('button', { name: 'Add idea' }))
     await waitFor(() => expect(screen.getByLabelText('selected').textContent).toBe('hyp-3'))
@@ -110,16 +110,48 @@ describe('on the graph', () => {
     const editor = screen.getByRole('group', { name: 'New idea' })
     expect(within(editor).getByText('warmup helps')).toBeTruthy()
     await write('a longer warmup')
-    fireEvent.click(within(editor).getByRole('button', { name: '+ Link it to another idea' }))
-    fireEvent.click(within(editor).getByRole('button', { name: 'contradicts' }))
+    fireEvent.click(within(editor).getByRole('button', { name: '+ Add a link' }))
     fireEvent.click(node('a cosine schedule helps'))
-    expect(within(editor).getByText('also contradicts')).toBeTruthy()
+    const added = within(editor).getByRole('listitem', { name: 'Link to a cosine schedule helps' })
+    fireEvent.click(within(added).getByRole('button', { name: 'contradicts' }))
+    expect(within(added).getByRole('button', { name: 'contradicts' }).getAttribute('aria-pressed')).toBe('true')
     fireEvent.click(within(editor).getByRole('button', { name: 'Add idea' }))
     await waitFor(() => expect(screen.getByLabelText('selected').textContent).toBe('hyp-3'))
     expect(registerHumanHypothesis).toHaveBeenCalledExactlyOnceWith('pe-x', 'a longer warmup', [
       { type: 'builds_on', to: 'hyp-1' }, { type: 'contradicts', to: 'hyp-2' },
     ], [])
     expect(node('a longer warmup')).toBeTruthy()
+  })
+
+  it('links the objective only by builds on, and needs a builds on link to add the idea', async () => {
+    render(<Harness view="graph" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Add idea here' }))
+    const editor = screen.getByRole('group', { name: 'New idea' })
+    await write('label smoothing helps')
+    const objective = within(editor).getByRole('listitem', { name: 'Link to Objective: Vision benchmark' })
+    expect(within(objective).getAllByRole('button').map(b => b.textContent)).toEqual(['', 'builds on'])
+
+    fireEvent.click(within(editor).getByRole('button', { name: '+ Add a link' }))
+    fireEvent.click(node('warmup helps'))
+    const other = within(editor).getByRole('listitem', { name: 'Link to warmup helps' })
+    expect(within(other).getAllByRole('button').map(b => b.textContent)).toEqual(['', 'builds on', 'related to', 'contradicts'])
+    fireEvent.click(within(other).getByRole('button', { name: 'related to' }))
+    fireEvent.click(within(objective).getByRole('button', { name: 'Remove link to Objective: Vision benchmark' }))
+    const add = within(editor).getByRole('button', { name: 'Add idea' }) as HTMLButtonElement
+    expect(add.disabled).toBe(true)
+    expect(within(editor).getByText('It needs a builds on link, to the objective or to an earlier idea.')).toBeTruthy()
+
+    fireEvent.click(within(other).getByRole('button', { name: 'builds on' }))
+    expect(add.disabled).toBe(false)
+  })
+
+  it('shows the refusal of the platform', async () => {
+    vi.mocked(registerHumanHypothesis).mockRejectedValue(new Error('invalid link: at least one builds_on link is required'))
+    render(<Harness view="graph" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Add idea here' }))
+    await write('label smoothing helps')
+    fireEvent.click(screen.getByRole('button', { name: 'Add idea' }))
+    expect(await screen.findByText('invalid link: at least one builds_on link is required')).toBeTruthy()
   })
 
   it('links two nodes by clicking the second', async () => {

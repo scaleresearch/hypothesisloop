@@ -12,7 +12,7 @@ import { Input, Textarea } from '@/components/ui/input'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, InlineError } from '@/components/ui/status-message'
 import { Eyebrow, Text } from '@/components/ui/text'
-import { LINK_KINDS, LINK_KIND_LABELS, findIdeas, linkPlanner, withEdge, withHypothesis } from '@/lib/hypothesis-graph'
+import { LINK_KINDS, LINK_KIND_LABELS, allowedLinkKinds, findIdeas, linkPlanner, withEdge, withHypothesis } from '@/lib/hypothesis-graph'
 
 export interface GraphEditor {
   graph: HypothesisGraph
@@ -24,12 +24,13 @@ export interface GraphEditor {
   /** The node the idea being written builds on. */
   adding: string | null
   startAdding: (parent: string) => void
-  /** The extra links of the idea being written. */
-  extras: HypothesisLinkInput[]
-  removeExtra: (to: string) => void
-  /** The kind of extra link whose target is being picked. */
-  extraKind: HypothesisLinkType | null
-  setExtraKind: (kind: HypothesisLinkType | null) => void
+  /** The links of the idea being written, starting with builds_on to the node it was opened under. */
+  links: HypothesisLinkInput[]
+  setLinkType: (to: string, type: HypothesisLinkType) => void
+  removeLink: (to: string) => void
+  /** A target for another link of the idea being written is being picked. */
+  findingTarget: boolean
+  setFindingTarget: (finding: boolean) => void
   linking: { from: string; kind: HypothesisLinkType } | null
   startLinking: (from: string) => void
   setLinkKind: (kind: HypothesisLinkType) => void
@@ -54,8 +55,8 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
   onSelect: (id: string) => void
 }): GraphEditor {
   const [adding, setAdding] = useState<string | null>(null)
-  const [extras, setExtras] = useState<HypothesisLinkInput[]>([])
-  const [extraKind, setExtraKind] = useState<HypothesisLinkType | null>(null)
+  const [links, setLinks] = useState<HypothesisLinkInput[]>([])
+  const [findingTarget, setFindingTarget] = useState(false)
   const [linking, setLinking] = useState<{ from: string; kind: HypothesisLinkType } | null>(null)
   const [linkBusy, setLinkBusy] = useState(false)
   const [linkError, setLinkError] = useState('')
@@ -63,34 +64,32 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
 
   const cancel = useCallback(() => {
     setAdding(null)
-    setExtras([])
-    setExtraKind(null)
+    setLinks([])
+    setFindingTarget(false)
     setLinking(null)
     setLinkError('')
   }, [])
 
-  const picking = linking !== null || (adding !== null && extraKind !== null)
+  const picking = linking !== null || (adding !== null && findingTarget)
 
   useEffect(() => {
     if (adding === null && linking === null) return
     function onKey(e: KeyboardEvent) {
       if (e.key !== 'Escape') return
-      if (extraKind !== null) setExtraKind(null)
+      if (findingTarget) setFindingTarget(false)
       else cancel()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [adding, linking, extraKind, cancel])
+  }, [adding, linking, findingTarget, cancel])
 
-  function extraAllowed(id: string): boolean {
-    if (extraKind === null || adding === null) return false
-    if (id === graph.root) return extraKind === 'builds_on' && adding !== graph.root && !extras.some(l => l.to === id)
-    return id !== adding && !extras.some(l => l.to === id)
+  function targetAllowed(id: string): boolean {
+    return adding !== null && findingTarget && !links.some(l => l.to === id)
   }
 
   function canPick(id: string): boolean {
     if (linking) return !('refused' in plan(linking.from, id, linking.kind))
-    return extraAllowed(id)
+    return targetAllowed(id)
   }
 
   async function link(to: string) {
@@ -126,9 +125,9 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
       void link(id)
       return
     }
-    if (!extraAllowed(id)) return
-    setExtras([...extras, { type: extraKind!, to: id }])
-    setExtraKind(null)
+    if (!targetAllowed(id)) return
+    setLinks([...links, { type: 'builds_on', to: id }])
+    setFindingTarget(false)
   }
 
   async function added(h: RegisteredHypothesis) {
@@ -154,11 +153,15 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
     startAdding: parent => {
       cancel()
       setAdding(parent)
+      setLinks([{ type: 'builds_on', to: parent }])
     },
-    extras,
-    removeExtra: to => setExtras(extras.filter(l => l.to !== to)),
-    extraKind,
-    setExtraKind,
+    links,
+    setLinkType: (to, type) => {
+      if (allowedLinkKinds(graph, to).includes(type)) setLinks(links.map(l => (l.to === to ? { ...l, type } : l)))
+    },
+    removeLink: to => setLinks(links.filter(l => l.to !== to)),
+    findingTarget,
+    setFindingTarget,
     linking: canWrite ? linking : null,
     startLinking: from => {
       cancel()
@@ -191,7 +194,7 @@ export function useEditor(): GraphEditor | null {
 }
 
 function nodeLabel(editor: GraphEditor, id: string): string {
-  if (id === editor.graph.root) return `the objective of ${editor.rootLabel}`
+  if (id === editor.graph.root) return `Objective: ${editor.rootLabel}`
   return editor.graph.nodes.find(n => n.id === id)?.text ?? id
 }
 
@@ -332,10 +335,10 @@ function SimilarIdeas({ similar, choices, onChoose, onShow }: {
 }
 
 /**
- * Writing a new idea in place, under the node it builds on: its text, extra links picked from the
- * view, and the choice the API asks for when it reads close to ideas already there.
+ * Writing a new idea in place, under the node it was opened at: its text, its links (builds_on to
+ * that node to start with), and the choice the API asks for when it reads close to ideas already there.
  */
-export function IdeaEditor() {
+export function IdeaEditor({ maxHeight }: { maxHeight?: number }) {
   const editor = useEditor()
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -345,7 +348,6 @@ export function IdeaEditor() {
   const [choices, setChoices] = useState<Record<string, Choice>>({})
   if (!editor || editor.adding === null) return null
   const ed = editor
-  const parent = ed.adding!
 
   async function submit(chosen: Record<string, Choice>) {
     setBusy(true)
@@ -354,8 +356,7 @@ export function IdeaEditor() {
     try {
       const told = Object.entries(chosen)
       const h = await registerHumanHypothesis(ed.graph.root, text.trim(), [
-        { type: 'builds_on', to: parent },
-        ...ed.extras,
+        ...ed.links,
         ...told.filter(([, c]) => c !== 'distinct').map(([to, c]) => ({ type: c as HypothesisLinkType, to })),
       ], told.filter(([, c]) => c === 'distinct').map(([id]) => id))
       if ('similar' in h) {
@@ -380,49 +381,58 @@ export function IdeaEditor() {
     void submit(all)
   }
 
+  const buildsOn = ed.links.some(l => l.type === 'builds_on')
+
   return (
-    <Stack gap="sm" className="w-aside rounded-lg border border-primary bg-surface-raised p-3 shadow-lg" role="group" aria-label="New idea">
-      <div className="text-xs">
-        <Eyebrow>Builds on</Eyebrow>{' '}
-        <span className="line-clamp-2" title={nodeLabel(ed, parent)}>{nodeLabel(ed, parent)}</span>
-      </div>
+    <Stack
+      gap="sm"
+      className="w-aside overflow-y-auto rounded-lg border border-primary bg-surface-raised p-3 shadow-lg"
+      style={{ maxHeight }}
+      role="group"
+      aria-label="New idea"
+    >
       <Textarea
-        className="min-h-16 w-full"
+        className="min-h-16 w-full overflow-x-hidden whitespace-pre-wrap break-words"
+        rows={3}
         value={text}
         onChange={e => setText(e.target.value)}
-        placeholder="e.g. the retry loop is masking a bad learning-rate schedule; try a linear warmup instead"
+        placeholder="What to try, and why you expect it to help"
         aria-label="Your idea"
         autoFocus
       />
+      <Stack gap="xs" className="text-xs">
+        <Eyebrow>Links</Eyebrow>
+        {ed.links.length > 0 && (
+          <Stack as="ul" gap="sm" className="list-none">
+            {ed.links.map(l => (
+              <Stack as="li" gap="2xs" key={l.to} aria-label={`Link to ${nodeLabel(ed, l.to)}`}>
+                <Inline gap="xs" nowrap>
+                  <span className="line-clamp-2 min-w-0 flex-1" title={nodeLabel(ed, l.to)}>{nodeLabel(ed, l.to)}</span>
+                  <Button variant="ghost" size="icon" aria-label={`Remove link to ${nodeLabel(ed, l.to)}`} onClick={() => ed.removeLink(l.to)}><X size={12} /></Button>
+                </Inline>
+                <KindChips value={l.type} onChange={k => ed.setLinkType(l.to, k)} kinds={allowedLinkKinds(ed.graph, l.to)} />
+              </Stack>
+            ))}
+          </Stack>
+        )}
+        {ed.findingTarget ? (
+          <Stack gap="xs">
+            <IdeaSearch />
+            <Inline>
+              <span className="text-subtle">or click it in the view.</span>
+              <Button variant="link" size="sm" className="ml-auto" onClick={() => ed.setFindingTarget(false)}>Stop</Button>
+            </Inline>
+          </Stack>
+        ) : (
+          <div>
+            <Button variant="link" size="sm" onClick={() => ed.setFindingTarget(true)}>+ Add a link</Button>
+          </div>
+        )}
+        {!buildsOn && <Text variant="hint">It needs a builds on link, to the objective or to an earlier idea.</Text>}
+      </Stack>
       <Text variant="meta" tone="subtle">
         It joins the graph under your name. Agents read it, and one that tests it registers its own idea building on yours.
       </Text>
-      {ed.extras.length > 0 && (
-        <Stack as="ul" gap="2xs" className="list-none text-xs">
-          {ed.extras.map(l => (
-            <Inline as="li" gap="xs" nowrap key={l.to}>
-              <span className="whitespace-nowrap text-muted">also {LINK_KIND_LABELS[l.type]}</span>
-              <span className="min-w-0 flex-1 truncate" title={nodeLabel(ed, l.to)}>{nodeLabel(ed, l.to)}</span>
-              <Button variant="ghost" size="icon" aria-label={`Remove link to ${nodeLabel(ed, l.to)}`} onClick={() => ed.removeExtra(l.to)}><X size={12} /></Button>
-            </Inline>
-          ))}
-        </Stack>
-      )}
-      {ed.extraKind === null ? (
-        <div>
-          <Button variant="link" size="sm" onClick={() => ed.setExtraKind('related')}>+ Link it to another idea</Button>
-        </div>
-      ) : (
-        <Stack gap="xs" className="text-xs">
-          <Inline nowrap>
-            <span className="text-muted">It</span>
-            <KindChips value={ed.extraKind} onChange={ed.setExtraKind} />
-            <Button variant="link" size="sm" className="ml-auto" onClick={() => ed.setExtraKind(null)}>Done</Button>
-          </Inline>
-          <span className="text-subtle">Click the idea in the view, or find it:</span>
-          <IdeaSearch />
-        </Stack>
-      )}
       {similar.length > 0 && (
         <SimilarIdeas
           similar={similar}
@@ -443,7 +453,7 @@ export function IdeaEditor() {
           size="sm"
           variant="primary"
           loading={busy}
-          disabled={text.trim() === '' || undecided.length > 0}
+          disabled={text.trim() === '' || !buildsOn || undecided.length > 0}
           onClick={() => submit(choices)}
         >
           Add idea

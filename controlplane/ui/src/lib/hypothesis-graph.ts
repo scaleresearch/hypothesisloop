@@ -144,6 +144,11 @@ export const LINK_KIND_LABELS: Record<HypothesisLinkType, string> = {
   contradicts: 'contradicts',
 }
 
+/** The kinds of link a hypothesis may take to `to`: the objective is only built on. */
+export function allowedLinkKinds(graph: HypothesisGraph, to: string): HypothesisLinkType[] {
+  return to === graph.root ? ['builds_on'] : LINK_KINDS
+}
+
 export type LinkPlan = { from: string; to: string } | { refused: string }
 
 // What the API takes from a person linking `from` to `to`: a link is stored on the idea it leaves,

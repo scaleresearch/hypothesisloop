@@ -8,7 +8,7 @@ import {
 import type { Edge, Node, NodeProps, NodeTypes } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { clsx } from 'clsx'
-import type { ReactNode } from 'react'
+import type { ReactNode, Ref } from 'react'
 import { FileText, MessageSquare } from 'lucide-react'
 import type { Evidence, HypothesisGraph, HypothesisGraphNode, HypothesisLinkType } from '@/types'
 import { chart, hypothesisLinkStyles, hypothesisStatuses, semantic, statusColor, tint } from '@/lib/colors'
@@ -173,11 +173,14 @@ function Legend({ onTidy }: { onTidy?: () => void }) {
 }
 
 /** Content pinned to a point of the graph, drawn at screen size whatever the zoom. */
-function Anchored({ at, children }: { at: Position; children: ReactNode }) {
+const EDGE = 12
+
+function Anchored({ at, children, innerRef }: { at: Position; children: ReactNode; innerRef?: Ref<HTMLDivElement> }) {
   const zoom = useStore(s => s.transform[2])
   return (
     <ViewportPortal>
       <div
+        ref={innerRef}
         className="nodrag nopan nowheel absolute left-0 top-0 z-10"
         style={{ transform: `translate(${at.x}px, ${at.y}px) scale(${1 / zoom})`, transformOrigin: '0 0', pointerEvents: 'all' }}
       >
@@ -212,7 +215,7 @@ export function HypothesisGraphCanvas(props: HypothesisGraphCanvasProps) {
 }
 
 function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, minimap, onSelect, onTidy }: HypothesisGraphCanvasProps) {
-  const { setCenter, setViewport, getZoom } = useReactFlow()
+  const { setCenter, setViewport, getViewport, getZoom } = useReactFlow()
   const editor = useEditor()
   const picking = editor?.picking ?? false
   const adding = editor?.adding ?? null
@@ -319,17 +322,30 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
     }
   }, [ready, focus, graph.root, positions, width, height, setCenter, setViewport, getZoom])
 
-  // The editor opens under its node: bring both into view, at a zoom the node can be read at.
-  const opened = useRef<string | null>(null)
+  // The editor opens under its node, drawn at screen size whatever the zoom, and no taller than the
+  // view. Whenever it opens or changes size the view pans the least that shows all of it, and its
+  // node above it when both fit, at a zoom the node can be read at.
+  const composer = useRef<HTMLDivElement>(null)
   useEffect(() => {
+    const el = composer.current
     const p = adding === null ? undefined : positions.get(adding)
-    if (!ready || !p || opened.current === adding) return
-    opened.current = adding
-    setCenter(p.x + NODE_WIDTH / 2, p.y + NODE_HEIGHT + 60, { zoom: Math.max(getZoom(), 0.7), duration: 300 })
-  }, [ready, adding, positions, setCenter, getZoom])
-  useEffect(() => {
-    if (adding === null) opened.current = null
-  }, [adding])
+    if (!ready || !el || !p || width === 0) return
+    function reveal() {
+      const v = getViewport()
+      const zoom = Math.max(v.zoom, 0.7)
+      const left = p!.x * zoom
+      const right = Math.max((p!.x + NODE_WIDTH) * zoom, left + el!.offsetWidth)
+      const top = p!.y * zoom
+      const bottom = (p!.y + NODE_HEIGHT + 8) * zoom + el!.offsetHeight
+      const x = Math.min(Math.max(v.x, EDGE - left), width - EDGE - right)
+      const y = Math.min(Math.max(v.y, EDGE - top), height - EDGE - bottom)
+      if (x !== v.x || y !== v.y || zoom !== v.zoom) void setViewport({ x, y, zoom }, { duration: 300 })
+    }
+    // It reports the editor's size once on observing, and again on every change.
+    const observer = new ResizeObserver(reveal)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [ready, adding, positions, width, height, getViewport, setViewport])
 
   const at = positions.get(adding ?? selected)
   const below = at && { x: at.x, y: at.y + NODE_HEIGHT + 8 }
@@ -356,16 +372,16 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
         <Background gap={24} color={tint(semantic.text, 'track')} />
         <Controls showInteractive={false} position="top-left" />
         {below && (adding !== null ? (
-          <Anchored at={below}><IdeaEditor key={adding} /></Anchored>
+          <Anchored at={below} innerRef={composer}><IdeaEditor key={adding} maxHeight={Math.max(height - 2 * EDGE, 200)} /></Anchored>
         ) : (
           <Anchored at={below}><NodeActions id={selected} /></Anchored>
         ))}
-        {graph.nodes.length === 0 && (
+        {graph.nodes.length === 0 && adding === null && (
           <Panel position="bottom-center" className="text-xs text-muted">
             No hypotheses yet. Agents place each idea under the objective or an earlier one.
           </Panel>
         )}
-        {minimap && (
+        {minimap && graph.nodes.length > 0 && (
           <MiniMap
             position="top-right"
             pannable
