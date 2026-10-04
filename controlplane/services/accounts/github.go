@@ -32,7 +32,6 @@ type GitHubApp interface {
 	Repositories(ctx context.Context, installationID int64) ([]github.Repository, error)
 	Token(ctx context.Context, installationID int64, fullName string, access github.Access) (*github.Token, error)
 	File(ctx context.Context, token *github.Token, ref, path string) ([]byte, error)
-	Head(ctx context.Context, token *github.Token) (string, error)
 	CreateRepository(ctx context.Context, installationID int64, userToken, name, description string, files map[string]string) (*github.Repository, error)
 }
 

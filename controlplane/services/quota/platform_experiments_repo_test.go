@@ -130,10 +130,6 @@ func (f *fakeRepositories) File(_ context.Context, projectID, repository, _ stri
 	return []byte(f.files[projectID]), nil
 }
 
-func (f *fakeRepositories) Head(context.Context, string, string) (string, error) {
-	return "c0ffee", nil
-}
-
 type createdStore struct {
 	PlatformExperimentsStore
 	created []*domain.PlatformExperiment

@@ -85,18 +85,12 @@ type execer interface {
 
 func insertPlatformExperiment(ctx context.Context, db execer, pe *domain.PlatformExperiment) error {
 	const q = `
-INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_launcher, coordinator_model, max_hosted, repository, repository_url, agent_image, goal, created_by_kind, created_by_id, duration_hours, stated_baseline, baseline_code_ref)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)`
+INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_launcher, coordinator_model, max_hosted, repository, repository_url, agent_image, goal, created_by_kind, created_by_id, duration_hours)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)`
 
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Create: marshal metrics: %w", err)
-	}
-	var stated []byte
-	if pe.StatedBaseline != nil {
-		if stated, err = json.Marshal(pe.StatedBaseline); err != nil {
-			return fmt.Errorf("platform_experiments_store.Create: marshal stated baseline: %w", err)
-		}
 	}
 	// The ladder is fixed at creation, so it is validated here rather than defended against
 	// on every read.
@@ -127,7 +121,6 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 		pe.CoordinatorHosted, coordinator.Launcher, coordinator.Model, pe.MaxHosted,
 		pe.Repository, pe.RepositoryURL, pe.AgentImage,
 		pe.Goal, string(createdBy.Kind), createdBy.ID, pe.DurationHours,
-		stated, pe.BaselineCodeRef,
 	)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Create: %w", err)
@@ -143,7 +136,7 @@ func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id
 	q := `
 SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, pe.shared,
        ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.repository_url, pe.agent_image, pe.goal, pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason,
-       pe.baseline_job_id, pe.stated_baseline, pe.baseline_code_ref, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id,
+       pe.baseline_job_id, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id,
        pe.duration_hours, pe.started_at, pe.planner_ends_at, pe.coordinator_instance_activity, pe.coordinator_instance_activity_at,
        (SELECT planner.instance_activity FROM experiment_signups planner WHERE ` + plannerOfDraft + `),
        (SELECT planner.instance_activity_at FROM experiment_signups planner WHERE ` + plannerOfDraft + `)
@@ -152,7 +145,7 @@ WHERE id = $1`
 
 	pe := &domain.PlatformExperiment{}
 	var status string
-	var metricsRaw, stagesRaw, statedRaw []byte
+	var metricsRaw, stagesRaw []byte
 	var coordinator domain.HostedCoordinator
 	var createdBy, closedBy domain.Actor
 	var proposal []byte
@@ -170,7 +163,7 @@ WHERE id = $1`
 		&coordinator.Instance.Renewals, &coordinator.Instance.Stopped, &coordinator.Instance.ExitedAt, &coordinator.Instance.ExitLog,
 		&coordinator.Instance.SeenAt, &coordinator.Instance.AskedAt, &coordinator.Instance.Launch, &coordinator.Instance.Reported, &coordinator.Instance.ProgressAt, &coordinator.Instance.EndReason, &coordinator.Instance.Released, &pe.MaxHosted, &pe.Repository, &pe.RepositoryURL, &pe.AgentImage,
 		&pe.Goal, &createdBy.Kind, &createdBy.ID, &proposal, &answeredAt, &pe.DeclinedReason,
-		&pe.BaselineJobID, &statedRaw, &pe.BaselineCodeRef, &pe.JobEstimatedDurationHours, &pe.ClosedAt, &pe.CloseReason, &closedBy.Kind, &closedBy.ID,
+		&pe.BaselineJobID, &pe.JobEstimatedDurationHours, &pe.ClosedAt, &pe.CloseReason, &closedBy.Kind, &closedBy.ID,
 		&pe.DurationHours, &startedAt, &plannerEndsAt, &coordinatorActivity, &coordinatorActivityAt,
 		&plannerActivity, &plannerActivityAt,
 	)
@@ -212,26 +205,12 @@ WHERE id = $1`
 	if err := json.Unmarshal(stagesRaw, &pe.Stages); err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.Get: unmarshal stages: %w", err)
 	}
-	if err := unmarshalStatedBaseline(statedRaw, pe); err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.Get: %w", err)
-	}
 	pe.Status = domain.PlatformExperimentStatus(status)
 	if startedAt != nil {
 		pe.StartedAt = *startedAt
 	}
 	pe.SetClosesAt(closesAt)
 	return pe, nil
-}
-
-// unmarshalStatedBaseline sets on pe the stated baseline raw holds, none for SQL NULL.
-func unmarshalStatedBaseline(raw []byte, pe *domain.PlatformExperiment) error {
-	if raw == nil {
-		return nil
-	}
-	if err := json.Unmarshal(raw, &pe.StatedBaseline); err != nil {
-		return fmt.Errorf("unmarshal stated baseline: %w", err)
-	}
-	return nil
 }
 
 // PlatformExperimentExists says whether there is a platform experiment of that id, for a
@@ -393,7 +372,7 @@ SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hour
        pe.starts_at, pe.ends_at, pe.status,
        pe.stages, pe.current_stage, pe.summary,
        pe.created_at, pe.updated_at, pe.max_concurrent_accelerators, pe.default_quota_tier, pe.shared,
-       pe.coordinator_hosted, pe.max_hosted, pe.repository, pe.repository_url, pe.agent_image, pe.goal, pe.proposed_at, pe.proposal IS NOT NULL, pe.declined_reason, pe.baseline_job_id, pe.stated_baseline,
+       pe.coordinator_hosted, pe.max_hosted, pe.repository, pe.repository_url, pe.agent_image, pe.goal, pe.proposed_at, pe.proposal IS NOT NULL, pe.declined_reason, pe.baseline_job_id,
        pe.duration_hours, pe.started_at, pe.closed_at, pe.close_reason,
        COUNT(es.agent_id) AS signup_count
 FROM platform_experiments pe
@@ -414,7 +393,7 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 	for rows.Next() {
 		pe := &domain.PlatformExperiment{}
 		var status string
-		var metricsRaw, stagesRaw, statedRaw []byte
+		var metricsRaw, stagesRaw []byte
 		var closesAt time.Time
 		var startedAt, answeredAt *time.Time
 		var proposed bool
@@ -424,7 +403,7 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 			&pe.StartsAt, &closesAt, &status,
 			&stagesRaw, &pe.CurrentStage, &pe.Summary,
 			&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier, &pe.Shared,
-			&pe.CoordinatorHosted, &pe.MaxHosted, &pe.Repository, &pe.RepositoryURL, &pe.AgentImage, &pe.Goal, &answeredAt, &proposed, &pe.DeclinedReason, &pe.BaselineJobID, &statedRaw,
+			&pe.CoordinatorHosted, &pe.MaxHosted, &pe.Repository, &pe.RepositoryURL, &pe.AgentImage, &pe.Goal, &answeredAt, &proposed, &pe.DeclinedReason, &pe.BaselineJobID,
 			&pe.DurationHours, &startedAt, &pe.ClosedAt, &pe.CloseReason,
 			&pe.SignupCount,
 		); err != nil {
@@ -435,9 +414,6 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 		}
 		if err := json.Unmarshal(stagesRaw, &pe.Stages); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.List: unmarshal stages: %w", err)
-		}
-		if err := unmarshalStatedBaseline(statedRaw, pe); err != nil {
-			return nil, fmt.Errorf("platform_experiments_store.List: %w", err)
 		}
 		pe.Status = domain.PlatformExperimentStatus(status)
 		if startedAt != nil {
@@ -540,13 +516,13 @@ func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context,
 	const q = `UPDATE platform_experiments
 SET name=$2, description=$3, budget_accelerator_hours=$4, max_agents=$5, metrics=$6,
     report_interval_seconds=$7, starts_at=$8, ends_at=$9, updated_at=NOW(),
-    max_concurrent_accelerators=$11, baseline_job_id=$12, job_estimated_duration_hours=$13, duration_hours=$14, baseline_code_ref=$15
+    max_concurrent_accelerators=$11, baseline_job_id=$12, job_estimated_duration_hours=$13, duration_hours=$14
 WHERE id=$1 AND status=$10`
 	tag, err := tx.Exec(ctx, q,
 		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
 		metrics, pe.ReportIntervalSeconds, pe.StartsAt, pe.ClosesAt(),
 		expectedStatus,
-		pe.MaxConcurrentAccelerators, pe.BaselineJobID, pe.JobEstimatedDurationHours, pe.DurationHours, pe.BaselineCodeRef,
+		pe.MaxConcurrentAccelerators, pe.BaselineJobID, pe.JobEstimatedDurationHours, pe.DurationHours,
 	)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Update: %w", err)

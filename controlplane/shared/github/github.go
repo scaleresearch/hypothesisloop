@@ -58,8 +58,6 @@ var (
 	ErrFileNotFound = errors.New("the repository has no such file")
 	// ErrNotAFile reports a path that holds a directory, a symlink or a submodule.
 	ErrNotAFile = errors.New("the path in the repository is not a file")
-	// ErrEmptyRepository reports a repository with no commit on its default branch.
-	ErrEmptyRepository = errors.New("the repository has no commit")
 	// ErrFileTooLarge reports a file over MaxFileBytes.
 	ErrFileTooLarge = errors.New("the file is larger than the platform reads from a repository")
 	// ErrCodeRejected reports a user authorisation code GitHub did not accept: used, expired or
@@ -720,26 +718,6 @@ func (c *Client) File(ctx context.Context, token *Token, ref, path string) ([]by
 		return nil, fmt.Errorf("github: the contents of %s are not base64", path)
 	}
 	return data, nil
-}
-
-// Head returns the commit at the head of the repository's default branch, with a token minted
-// for it. GitHub answers 409 for a repository that has no commit.
-func (c *Client) Head(ctx context.Context, token *Token) (string, error) {
-	var commits []struct {
-		SHA string `json:"sha"`
-	}
-	err := c.call(ctx, http.MethodGet, "/repos/"+token.Repository+"/commits?per_page=1", token.Value, nil, &commits)
-	var refused *refusal
-	if errors.As(err, &refused) && refused.status == http.StatusConflict {
-		return "", ErrEmptyRepository
-	}
-	if err != nil {
-		return "", err
-	}
-	if len(commits) == 0 || commits[0].SHA == "" {
-		return "", ErrEmptyRepository
-	}
-	return commits[0].SHA, nil
 }
 
 type userTokens struct {

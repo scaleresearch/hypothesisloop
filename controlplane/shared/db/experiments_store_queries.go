@@ -407,12 +407,12 @@ func (s *ExperimentsStore) RecentlyTriedClusters(ctx context.Context, ttl time.D
 	return out, nil
 }
 
-// BaselineCodeRef returns the commit the baseline of a platform experiment stands for, empty
-// while it has none.
+// BaselineCodeRef returns the commit the declared baseline job of a platform experiment ran,
+// empty while none is declared.
 func (s *ExperimentsStore) BaselineCodeRef(ctx context.Context, platformExpID string) (string, error) {
 	var codeRef string
 	err := s.pool.pool.QueryRow(ctx,
-		`SELECT baseline_code_ref FROM platform_experiments WHERE id = $1`, platformExpID).Scan(&codeRef)
+		`SELECT e.code_ref FROM platform_experiments pe JOIN experiments e ON e.id = pe.baseline_job_id WHERE pe.id = $1`, platformExpID).Scan(&codeRef)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return "", fmt.Errorf("experiments_store.BaselineCodeRef: %w", err)
 	}

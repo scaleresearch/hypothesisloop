@@ -298,10 +298,6 @@ func (a *fakeApp) Token(_ context.Context, installationID int64, fullName string
 	return nil, github.ErrRepositoryNotInstalled
 }
 
-func (a *fakeApp) Head(context.Context, *github.Token) (string, error) {
-	panic("the handler read the head of a repository")
-}
-
 func (a *fakeApp) File(_ context.Context, token *github.Token, ref, path string) ([]byte, error) {
 	a.files = append(a.files, token.Value+"@"+token.Repository+":"+ref+":"+path)
 	if a.fileErr != nil {

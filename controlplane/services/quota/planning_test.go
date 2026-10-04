@@ -808,7 +808,7 @@ func TestAnAcceptedDraftRunsOnceItsBaselineAgentFinishesWithNoCoordinatorAction(
 	}
 	measures := store.baselines[0].AgentID
 	measured := measuredBaseline()
-	measured.Job.AgentID, measured.Job.PlatformExperimentID, measured.Values = measures, "pe-draft", map[string]float64{"val_loss": 1.8}
+	measured.Job.AgentID, measured.Job.PlatformExperimentID, measured.Reported = measures, "pe-draft", map[string]float64{"val_loss": 1.8}
 	svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) {
 		if jobID != measured.Job.ID {
 			return nil, nil
@@ -839,7 +839,7 @@ func TestAnAcceptedDraftRunsOnceItsBaselineAgentFinishesWithNoCoordinatorAction(
 	}
 	pe := store.created[0]
 	if pe.BaselineJobID != "job-1" || pe.Status != domain.PlatformExpRunning || store.started != 1 || pe.JobEstimatedDurationHours != baselineHeadroom*measured.ObservedHours ||
-		!strings.Contains(pe.Description, baselineHeader+"\njob: job-1") {
+		!strings.Contains(pe.Description, measuredBaselineHeader+"\njob: job-1") {
 		t.Fatalf("after the finish: baseline %q, status %s, %d starts, estimate %v, brief %q: want job-1 declared as a coordinator's PATCH declares it and the run started",
 			pe.BaselineJobID, pe.Status, store.started, pe.JobEstimatedDurationHours, pe.Description)
 	}

@@ -119,36 +119,6 @@ func TestCreateWithAHostedCoordinatorGivesItToTheConfiguredLauncher(t *testing.T
 	}
 }
 
-// A creator who knows the baseline states it in place of an agent measuring it: no baseline agent
-// is created, the baseline stands for the head of the default branch, and the run starts once a
-// researcher joins. One that leaves a ranking metric out is refused and nothing is created.
-func TestAStatedBaselineStartsTheRunWithoutABaselineAgent(t *testing.T) {
-	store, create := hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
-	code, out := create(run(map[string]any{"coordinator_hosted": true, "stated_baseline": map[string]any{"val_accuracy": 0.71}}))
-	if code != http.StatusCreated || len(store.baselines) != 0 || out["signup_count"] != float64(0) {
-		t.Fatalf("got = %d %v with baseline agents %+v, want 201 and none", code, out, store.baselines)
-	}
-	pe := store.created[0]
-	if pe.StatedBaseline["val_accuracy"] != 0.71 || pe.BaselineCodeRef != "https://github.com/Acme/Model.git@c0ffee" {
-		t.Errorf("stored baseline %v at %q, want the stated value at the head of the default branch", pe.StatedBaseline, pe.BaselineCodeRef)
-	}
-	if why, _ := out["status_reason"].(map[string]any); why["reason"] != "no_researchers" {
-		t.Errorf("status_reason = %v, want no_researchers: the baseline is declared", out["status_reason"])
-	}
-	store.researchers = []string{"ag-1"}
-	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)
-	if err := svc.StartIfReady(context.Background(), pe.ID); err != nil || store.started != 1 || store.created[0].Status != domain.PlatformExpRunning {
-		t.Errorf("a researcher joined: err %v, %d starts, status %s, want the run started", err, store.started, store.created[0].Status)
-	}
-
-	store, create = hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
-	metrics := []map[string]any{{"key": "val_accuracy", "direction": "maximize"}, {"key": "val_loss", "direction": "minimize"}}
-	code, out = create(run(map[string]any{"coordinator_hosted": true, "metrics": metrics, "stated_baseline": map[string]any{"val_accuracy": 0.71}}))
-	if code != http.StatusUnprocessableEntity || out["reason"] != "baseline_missing_metric" || len(store.created) != 0 {
-		t.Errorf("a ranking metric without a value: got = %d %v, created %d, want 422 baseline_missing_metric and nothing", code, out, len(store.created))
-	}
-}
-
 // The file is pushed to by any agent's token, and a coordinator rents a machine.
 func TestWhatThePlatformRunsIsNeverReadFromTheExperimentFile(t *testing.T) {
 	file := experimentBase + "coordinator_hosted: true\ncoordinator_model: model-of-the-file\n"

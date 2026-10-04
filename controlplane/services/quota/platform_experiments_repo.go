@@ -39,7 +39,7 @@ func RepositoryName(pe *domain.PlatformExperiment) string {
 
 // provideRepository gives a platform experiment the repository the request named, as it is, or
 // with none named one the platform creates for it from the template, on account when the
-// request says which. A stated baseline stands for the head of its default branch, read here.
+// request says which.
 func (h *PlatformExperimentsHandler) provideRepository(named, account string) func(context.Context, *domain.PlatformExperiment) error {
 	return func(ctx context.Context, pe *domain.PlatformExperiment) error {
 		if named == "" {
@@ -50,13 +50,6 @@ func (h *PlatformExperimentsHandler) provideRepository(named, account string) fu
 			named = created
 		}
 		pe.Repository, pe.RepositoryURL = named, h.repos.URL(named)
-		if pe.StatedBaseline != nil {
-			head, err := h.repos.Head(ctx, pe.ProjectID, named)
-			if err != nil {
-				return err
-			}
-			pe.BaselineCodeRef = pe.RepositoryURL + "@" + head
-		}
 		return nil
 	}
 }
@@ -73,10 +66,9 @@ func (h *PlatformExperimentsHandler) repositoryOf(ctx context.Context, projectID
 	return h.repos.Reachable(ctx, projectID, repository)
 }
 
-// neverFromTheFile are what one run costs, how long it lasts and what it is ranked against. Any
-// agent's token can push to the branch the file is read from, so these come from the request and
-// from nowhere else.
-var neverFromTheFile = []string{"budget_accelerator_hours", "max_agents", "duration_hours", "coordinator_hosted", "coordinator_model", "agent_image", "stated_baseline"}
+// neverFromTheFile are what one run costs and how long it lasts. Any agent's token can push to
+// the branch the file is read from, so these come from the request and from nowhere else.
+var neverFromTheFile = []string{"budget_accelerator_hours", "max_agents", "duration_hours", "coordinator_hosted", "coordinator_model", "agent_image"}
 
 // fromRepo returns req laid over the experiment file of the repository it names: every field the
 // body carried is the request's, every other one the file's.

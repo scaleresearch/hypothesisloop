@@ -61,7 +61,7 @@ func TestImplementationsAndTheLastCompletedCommitAreReadOffTheJobs(t *testing.T)
 	if declared, err := store.BaselineCodeRef(ctx, first.PlatformExperimentID); err != nil || declared != "" {
 		t.Errorf("BaselineCodeRef before a baseline is declared = %q, %v, want none", declared, err)
 	}
-	if _, err := store.ExperimentsStore.pool.pool.Exec(ctx, `UPDATE platform_experiments SET baseline_job_id = $2, baseline_code_ref = $3 WHERE id = $1`, first.PlatformExperimentID, first.ID+"-a", ref("a")); err != nil {
+	if _, err := store.ExperimentsStore.pool.pool.Exec(ctx, `UPDATE platform_experiments SET baseline_job_id = $2 WHERE id = $1`, first.PlatformExperimentID, first.ID+"-a"); err != nil {
 		t.Fatal(err)
 	}
 	if declared, err := store.BaselineCodeRef(ctx, first.PlatformExperimentID); err != nil || declared != ref("a") {

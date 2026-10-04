@@ -193,21 +193,12 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		Repository:                req.Repository,
 		AgentImage:                req.AgentImage,
 		Actor:                     req.createdBy,
-		StatedBaseline:            req.StatedBaseline,
 	}
 	pe.BaselineDueAt = pe.OpenUntil(now, s.cfg.BaselineLimit)
-	if pe.StatedBaseline != nil {
-		if err := checkStatedBaseline(pe); err != nil {
-			return nil, err
-		}
-	}
 	if req.prepare != nil {
 		if err := req.prepare(ctx, pe); err != nil {
 			return nil, err
 		}
-	}
-	if pe.StatedBaseline != nil {
-		pe.Description = withBaselineBlock(pe.Description, baselineBlock(statedBaseline(pe), pe))
 	}
 	if err := s.store.CreatePlatformExperiment(ctx, pe, req.agents, req.signups); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
@@ -292,15 +283,12 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 		patched.MaxConcurrentAccelerators = patch.MaxConcurrentAccelerators
 	}
 	if patch.BaselineJobID != nil {
-		if pe.StatedBaseline != nil {
-			return nil, refuseUpdate(409, "baseline_stated", "platform experiment %s was created with stated_baseline, which is its baseline: no job is declared in its place", id)
-		}
 		patched.BaselineJobID = *patch.BaselineJobID
 	}
 	// The block that hands the baseline over is the platform's: a patch of the description
 	// neither writes it nor loses it.
-	authored, _ := splitBaselineBlock(patched.Description)
-	_, measured := splitBaselineBlock(pe.Description)
+	authored, _ := splitMeasuredBaseline(patched.Description)
+	_, measured := splitMeasuredBaseline(pe.Description)
 	checked, err := s.validate(CreatePlatformExperimentRequest{
 		Name: patched.Name, Description: authored,
 		BudgetAcceleratorHours: patched.BudgetAcceleratorHours, MaxAgents: patched.MaxAgents,
@@ -312,12 +300,12 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 		return nil, err
 	}
 	patched.Name, patched.Description, patched.Metrics = checked.Name, checked.Description, checked.Metrics
-	if pe.Status == domain.PlatformExpOpen && (patch.BaselineJobID != nil || pe.HasBaseline()) {
+	if pe.Status == domain.PlatformExpOpen && (patch.BaselineJobID != nil || pe.BaselineJobID != "") {
 		if measured, err = s.heldToBaseline(ctx, &patched); err != nil {
 			return nil, err
 		}
 	}
-	patched.Description = withBaselineBlock(patched.Description, measured)
+	patched.Description = withMeasuredBaseline(patched.Description, measured)
 	pe = &patched
 	if err := s.store.UpdatePlatformExperiment(ctx, pe, expectedStatus); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Update: %w", err)
@@ -325,7 +313,7 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	if pe.Status != domain.PlatformExpOpen {
 		return pe, nil
 	}
-	if !pe.HasBaseline() {
+	if pe.BaselineJobID == "" {
 		// The change may be what a job its baseline agent left was refused for: a budget raised
 		// to hold a trial apiece, a metric taken out.
 		if err := s.DeclareMeasured(ctx, pe.ID); err != nil {
@@ -341,36 +329,23 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	return s.stored(ctx, pe.ID)
 }
 
-// heldToBaseline holds pe, as it would be stored, to its baseline: the job it names must have
-// done what a baseline does (checkBaselineJob), the baseline must give what pe's metrics ask of it
-// (checkBaselineValues), and the budget must hold a trial of the job for each researcher
-// (budgetCoversTrials). It sets on pe what it takes from the job, the commit and the estimate of a
-// job that states none, and answers the block the brief is given. It is the one check of a
-// baseline, whoever declares or patches.
+// heldToBaseline holds pe, as it would be stored, to the job it names as its baseline: the job
+// must have done what a baseline does (checkBaseline) and the budget must hold a trial of it for
+// each researcher (budgetCoversTrials). It sets on pe the estimate of a job that states none and
+// answers the block the brief is given. It is the one check of a declaration, whoever declares.
 func (s *PlatformExperimentsService) heldToBaseline(ctx context.Context, pe *domain.PlatformExperiment) (string, error) {
-	if pe.StatedBaseline != nil {
-		baseline := statedBaseline(pe)
-		if err := checkBaselineValues(pe, baseline); err != nil {
-			return "", err
-		}
-		return baselineBlock(baseline, pe), nil
-	}
 	baseline, err := s.baseline(ctx, pe, pe.BaselineJobID)
 	if err != nil {
 		return "", fmt.Errorf("platform_experiments: read baseline %s: %w", pe.BaselineJobID, err)
 	}
-	if err := checkBaselineJob(pe, baseline); err != nil {
+	if err := checkBaseline(pe, baseline); err != nil {
 		return "", err
 	}
-	if err := checkBaselineValues(pe, baseline); err != nil {
-		return "", err
-	}
-	pe.BaselineCodeRef = baseline.Job.CodeRef
 	pe.JobEstimatedDurationHours = baselineHeadroom * baseline.ObservedHours
 	if err := budgetCoversTrials(pe, baseline.Job); err != nil {
 		return "", err
 	}
-	return baselineBlock(baseline, pe), nil
+	return baselineBlock(baseline, pe.Metrics), nil
 }
 
 // measuredJob is the job the platform declares as the baseline of the open pe by itself: the one
@@ -410,7 +385,7 @@ func (s *PlatformExperimentsService) measuredJob(ctx context.Context, pe *domain
 			if baseline == nil {
 				continue
 			}
-			if _, reported := baseline.Values[ranked.Key]; reported {
+			if _, reported := baseline.Reported[ranked.Key]; reported {
 				measured = append(measured, job.ID)
 			}
 		}
@@ -443,7 +418,7 @@ func (s *PlatformExperimentsService) DeclareMeasured(ctx context.Context, id str
 	if err != nil {
 		return err
 	}
-	if pe.Status != domain.PlatformExpOpen || pe.HasBaseline() {
+	if pe.Status != domain.PlatformExpOpen || pe.BaselineJobID != "" {
 		return nil
 	}
 	signups, err := s.store.ListAgentSignups(ctx, id)
@@ -610,7 +585,7 @@ func (s *PlatformExperimentsService) RequireActive(ctx context.Context, platform
 func (s *PlatformExperimentsService) notStartable(ctx context.Context, pe *domain.PlatformExperiment, signups []domain.AgentSignup, now time.Time) (float64, error) {
 	// Every researcher starts from the baseline and is ranked against it, so none starts, and
 	// no machine is rented for one, before it is measured and declared.
-	if !pe.HasBaseline() {
+	if pe.BaselineJobID == "" {
 		return 0, api.Refuse(http.StatusConflict, "baseline_required", fmt.Sprintf("platform experiment %s has no baseline declared, and the platform starts the run only once it has", pe.ID))
 	}
 	if pe.StartsAt.After(now) {
@@ -676,7 +651,7 @@ func (s *PlatformExperimentsService) waiting(ctx context.Context, pe *domain.Pla
 	_, err := s.notStartable(ctx, pe, signups, time.Now().UTC())
 	var refused *api.Refusal
 	switch {
-	case errors.As(err, &refused) && !pe.HasBaseline():
+	case errors.As(err, &refused) && pe.BaselineJobID == "":
 		// Without a baseline the reason is where the measuring stands and whose move it is.
 		if refused, err = s.undeclared(ctx, pe, signups); err != nil {
 			return nil, err
@@ -986,7 +961,7 @@ func (s *PlatformExperimentsService) SweepAutoStart(ctx context.Context) error {
 		return fmt.Errorf("list open platform experiments: %w", err)
 	}
 	for _, pe := range pes {
-		if !pe.HasBaseline() {
+		if pe.BaselineJobID == "" {
 			if err := s.DeclareMeasured(ctx, pe.ID); err != nil {
 				s.logger.Error("sweep_auto_start: declare the measured baseline failed",
 					zap.String("platform_experiment_id", pe.ID), zap.Error(err))

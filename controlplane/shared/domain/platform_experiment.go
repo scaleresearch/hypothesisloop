@@ -247,15 +247,12 @@ type PlatformExperiment struct {
 	RepositoryURL string `json:"repository_url,omitempty" doc:"The HTTPS address agents and jobs clone."`
 	AgentImage    string `json:"agent_image,omitempty"`
 
-	// A platform experiment starts only with a baseline (HasBaseline): a completed job that
-	// measured it, as the platform checked it when it was declared, or the values its creator
-	// stated. BaselineCodeRef is the commit it stands for, and JobEstimatedDurationHours the
-	// estimate of a job that states none: the hours the baseline job was observed running, with
-	// headroom.
-	BaselineJobID             string             `json:"baseline_job_id,omitempty" doc:"The completed job that measured the baseline. Absent until one is declared with PATCH /platform-experiments/{id}, and on one created with stated_baseline."`
-	StatedBaseline            map[string]float64 `json:"stated_baseline,omitempty" doc:"The baseline its creator stated on create, by metric key, in place of one an agent measures. Absent on one whose baseline is measured."`
-	BaselineCodeRef           string             `json:"baseline_code_ref,omitempty" doc:"The commit the baseline stands for, repository_url@sha: the declared job's, or for a stated baseline the head of the repository's default branch when it was created. A new implementation that builds on the objective starts from it."`
-	JobEstimatedDurationHours float64            `json:"job_estimated_duration_hours,omitzero" doc:"The estimated_duration_hours of a job that states none: one and a half times the hours the baseline job was observed running. Absent without a baseline job, and for one too short to be observed alive."`
+	// BaselineJobID is the completed job that measured the baseline, as the platform checked it
+	// when it was declared, and JobEstimatedDurationHours the estimate of a job that states
+	// none: the hours that job was observed running, with headroom. A platform experiment
+	// starts only with a baseline.
+	BaselineJobID             string  `json:"baseline_job_id,omitempty" doc:"The completed job that measured the baseline. Absent until one is declared with PATCH /platform-experiments/{id}."`
+	JobEstimatedDurationHours float64 `json:"job_estimated_duration_hours,omitzero" doc:"The estimated_duration_hours of a job that states none: one and a half times the hours the baseline job was observed running. Absent without a baseline, and for one too short to be observed alive."`
 
 	// Goal is the sentence a draft was created from, fixed from then on. Empty for a platform
 	// experiment that was created whole.
@@ -301,11 +298,6 @@ func (p *PlatformExperiment) ClosesAt() time.Time {
 		return p.AgentsDueAt
 	}
 	return p.EndsAt
-}
-
-// HasBaseline says the run has the baseline it starts from: a declared job or a stated one.
-func (p *PlatformExperiment) HasBaseline() bool {
-	return p.BaselineJobID != "" || p.StatedBaseline != nil
 }
 
 // AwaitsAgents says the platform experiment runs and its clock has not started: no researcher is

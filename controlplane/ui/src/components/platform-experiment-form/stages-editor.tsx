@@ -18,10 +18,10 @@ export function StagesEditor({ stages, onChange }: { stages: StageDraft[]; onCha
   return (
     <Stack gap="sm">
       <div className="grid grid-cols-ladder items-center gap-2">
-        <span />
+        <Eyebrow>#</Eyebrow>
         <Eyebrow>Length %</Eyebrow>
         <Eyebrow>Evict %</Eyebrow>
-        <Eyebrow>Max job hours</Eyebrow>
+        <Eyebrow title="Max job hours">Max job h</Eyebrow>
         <span />
         {stages.map((s, i) => {
           const last = i === stages.length - 1
