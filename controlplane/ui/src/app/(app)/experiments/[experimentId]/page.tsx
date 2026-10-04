@@ -43,6 +43,8 @@ import { Disclosure } from '@/components/ui/disclosure'
 import { Figures } from '@/components/ui/figures'
 import type { Figure } from '@/components/ui/figures'
 import { Page } from '@/components/ui/page'
+import { Button } from '@/components/ui/button'
+import { PlatformExperimentDialog } from '@/components/platform-experiment-form'
 import { EmptyState } from '@/components/ui/empty-state'
 import { ExperimentCode } from '@/components/experiment-code'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
@@ -76,7 +78,8 @@ function PlatformExperimentDetail({ id }: { id: string }) {
   const [selectedMetricKeys, setSelectedMetricKeys] = useState<Set<string> | null>(null)
   const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null)
 
-  const { data: pe, error: peError, isLoading: peLoading } = useSWR<PlatformExperiment>(
+  const [editing, setEditing] = useState(false)
+  const { data: pe, error: peError, isLoading: peLoading, mutate: mutatePE } = useSWR<PlatformExperiment>(
     ['pe', id],
     () => fetchPlatformExperiment(id),
     { refreshInterval: pollEvery },
@@ -375,6 +378,7 @@ function PlatformExperimentDetail({ id }: { id: string }) {
     <Page
       back={{ label: 'Experiments', onClick: () => router.push(projectPath(project.id, 'experiments')) }}
       title={pe.name}
+      actions={!readOnly && pe.status !== PlatformExperimentStatus.CLOSED && <Button size="sm" onClick={() => setEditing(true)}>Edit</Button>}
       description={
         <Inline gap="md">
           <Badge status={pe.status}>{pe.status}</Badge>
@@ -384,6 +388,7 @@ function PlatformExperimentDetail({ id }: { id: string }) {
         </Inline>
       }
     >
+      {editing && <PlatformExperimentDialog initial={pe} onClose={() => setEditing(false)} onSaved={() => void mutatePE()} />}
       <PhaseStrip pe={pe} jobs={jobRows} stages={stagesStatus} readOnly={readOnly}>
         <HostedMachines pe={pe} jobs={stats?.total ?? 0} />
       </PhaseStrip>
