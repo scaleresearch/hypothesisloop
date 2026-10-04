@@ -91,7 +91,7 @@ controlplane-up: registry-up render-settings images
 	bash -c '. localdev/lib/auth.sh && podman compose -f $(COMPOSE_FILE) up -d'
 	@until curl -fsS -o /dev/null http://localhost:$${API_HOST_PORT:-8081}/health; do sleep 1; done
 	@until curl -fsS -o /dev/null http://localhost:8084/health; do sleep 1; done
-	bash -c '. localdev/lib/auth.sh && lib_register_local_clusters'
+	bash -c '. localdev/lib/auth.sh && lib_register_clusters && lib_register_local_cluster'
 
 # The control plane and the UI as host processes against the compose datastores: starts in
 # seconds, and a code change needs no image build. Every process runs detached with its log in

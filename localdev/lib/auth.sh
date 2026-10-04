@@ -177,18 +177,24 @@ lib_hl_admin() {
 }
 
 # lib_runtime_token <cluster>: the token a cluster's agents present. It is accepted once the
-# cluster is registered (lib_register_local_clusters).
+# cluster is registered (lib_register_clusters, or lib_register_local_cluster for local).
 lib_runtime_token() {
   lib_hl_admin token "runtime:$1"
 }
 
-# The cluster names the local setups run under, registered for the org every schema starts with,
-# and the launcher the committed settings give hosted agents to (agents.launcher).
-# Needs the control plane to have started once, since it creates the tables.
-lib_register_local_clusters() {
+# The clusters on machines of their own (a Tenstorrent box, an NVIDIA host), registered for the
+# org every schema starts with, and the launcher the committed settings give hosted agents to
+# (agents.launcher). Needs the control plane to have started once, since it creates the tables.
+lib_register_clusters() {
   local name
-  for name in local box-a k3s-nvidia; do
+  for name in box-a k3s-nvidia; do
     lib_hl_admin cluster add "${name}" default >/dev/null
   done
   lib_hl_admin launcher add main >/dev/null
+}
+
+# The k3s cluster on this machine (localdev/k3s-macos), whose nodes fake their accelerators and
+# run x86_64 images under emulation. Only a stack that rents nothing (the e2e suite's) has it.
+lib_register_local_cluster() {
+  lib_hl_admin cluster add local default >/dev/null
 }

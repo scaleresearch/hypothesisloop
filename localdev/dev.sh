@@ -209,7 +209,21 @@ start_control_plane() {
   start metrics-service "${bin}/metrics-service"
   wait_for control-service http://localhost:8081/health
   wait_for metrics-service http://localhost:8084/health
-  lib_register_local_clusters
+  lib_register_clusters
+}
+
+# local_cluster enable|disable: whether org default places jobs on the cluster on this machine
+# (lib_register_local_cluster). A database an earlier make dev used has it registered, so a hosted
+# stack turns it off; one that never registered it answers 404 and has nothing to turn off.
+local_cluster() {
+  local code
+  code="$(printf 'Authorization: Bearer %s\n' "$(lib_hl_admin token staff)" |
+    curl -sS -o /dev/null -w '%{http_code}' -X POST -H @- "http://localhost:8081/orgs/default/clusters/local/$1")"
+  if [[ "${code}" == "200" || ( "$1" == "disable" && "${code}" == "404" ) ]]; then
+    return
+  fi
+  echo "dev: could not $1 cluster local for org default: HTTP ${code}" >&2
+  exit 1
 }
 
 # The git host of a stack with no GitHub App. A stack with one runs none.
@@ -269,6 +283,8 @@ case "${action}" in
     stop cloud-agent
     stop agent-launcher
     start_control_plane
+    lib_register_local_cluster
+    local_cluster enable
     # Nor is the cloud cluster offered to every org while nothing can rent for it: hosted mode
     # shares it again. A job placed on it goes back to the queue.
     lib_hl_admin cluster add "${cloud_cluster}" default >/dev/null
@@ -285,6 +301,7 @@ case "${action}" in
     start_datastores
     start_git_server
     start_control_plane
+    local_cluster disable
     # The cloud cluster belongs to the org every schema starts with and is shared, so every org's
     # jobs are placed on it. Registering again changes nothing and prints the same token.
     runtime_token="$(lib_hl_admin cluster add "${cloud_cluster}" default)"
