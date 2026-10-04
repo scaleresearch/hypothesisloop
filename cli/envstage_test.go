@@ -12,8 +12,10 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/registry"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
@@ -76,6 +78,12 @@ func pushedImage(t *testing.T) string {
 	if img, err = mutate.Config(img, v1.Config{Env: []string{"PATH=/opt/tools/bin:/usr/bin", "CUDA_HOME=/usr/local/cuda"}}); err != nil {
 		t.Fatal(err)
 	}
+	return pushed(t, img)
+}
+
+// pushed is img in a registry of its own, by digest.
+func pushed(t *testing.T, img v1.Image) string {
+	t.Helper()
 	srv := httptest.NewServer(registry.New(registry.Logger(log.New(io.Discard, "", 0))))
 	t.Cleanup(srv.Close)
 	ref, err := name.ParseReference(strings.TrimPrefix(srv.URL, "http://") + "/environment:1")
@@ -125,7 +133,11 @@ func TestEnvStageExtractsTheBaselineJobsImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := filepath.Join(dir, "root")
+	s, err := readStaged(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := s.Root
 	if body, err := os.ReadFile(filepath.Join(root, "usr/bin/same")); err != nil || string(body) != "new" {
 		t.Errorf("usr/bin/same holds %q, %v, want the upper tool through its link", body, err)
 	}
@@ -140,9 +152,8 @@ func TestEnvStageExtractsTheBaselineJobsImage(t *testing.T) {
 			t.Errorf("%s: %v, want it absent", absent, err)
 		}
 	}
-	s, err := readStaged(dir)
-	if err != nil || s.Image != image || s.Job != "job-b" || !slices.Contains(s.Env, "CUDA_HOME=/usr/local/cuda") {
-		t.Errorf("staged %+v, %v, want the image of job-b with its environment", s, err)
+	if s.Image != image || s.Job != "job-b" || !slices.Contains(s.Env, "CUDA_HOME=/usr/local/cuda") {
+		t.Errorf("staged %+v, want the image of job-b with its environment", s)
 	}
 	if !strings.Contains(stdout.String(), `"image":"`+image+`"`) {
 		t.Errorf("stdout %q, want what it staged", stdout.String())
@@ -202,5 +213,93 @@ func TestEnvRunSharesHomeAndTmpAndKeepsTheImagesVariables(t *testing.T) {
 	t.Chdir("/")
 	if _, err := sandboxArgs(s); err == nil {
 		t.Errorf("a directory outside home and /tmp was accepted")
+	}
+}
+
+// Layers merge as the job's overlay engine merges them: an opaque directory hides what the layers
+// below put in it but keeps what its own layer wrote there, whatever their order, a whiteout
+// removes a file of a layer below, and a path under a symlink of a layer below makes a directory
+// that hides the symlink.
+func TestEnvStageAppliesLayersAsTheJobsEngineDoes(t *testing.T) {
+	lower := layerOf(t,
+		entry{name: "opt/a/", kind: tar.TypeDir, mode: 0o755},
+		entry{name: "opt/a/old", kind: tar.TypeReg, mode: 0o644, body: "lower"},
+		entry{name: "opt/a/sub/", kind: tar.TypeDir, mode: 0o755},
+		entry{name: "opt/a/sub/deep", kind: tar.TypeReg, mode: 0o644, body: "lower"},
+		entry{name: "usr/lib/", kind: tar.TypeDir, mode: 0o755},
+		entry{name: "usr/lib/lower.so", kind: tar.TypeReg, mode: 0o644, body: "lower"},
+		entry{name: "usr/bin/", kind: tar.TypeDir, mode: 0o755},
+		entry{name: "usr/bin/python3", kind: tar.TypeReg, mode: 0o755, body: "py"},
+		entry{name: "lib", kind: tar.TypeSymlink, link: "/usr/lib"},
+		entry{name: "data/x", kind: tar.TypeReg, mode: 0o644, body: "lower"},
+	)
+	middle := layerOf(t,
+		entry{name: "opt/a/", kind: tar.TypeDir, mode: 0o755},
+		entry{name: "opt/a/new", kind: tar.TypeReg, mode: 0o644, body: "middle"},
+		entry{name: "opt/a/sub/", kind: tar.TypeDir, mode: 0o755},
+		entry{name: "opt/a/sub/fresh", kind: tar.TypeReg, mode: 0o644, body: "middle"},
+		entry{name: "opt/a/.wh..wh..opq", kind: tar.TypeReg},
+		entry{name: "lib/upper.so", kind: tar.TypeReg, mode: 0o644, body: "beside the link"},
+		entry{name: "usr/bin/python3.12", kind: tar.TypeReg, mode: 0o755, body: "py"},
+		entry{name: "usr/bin/python", kind: tar.TypeLink, link: "/usr/bin/python3.12"},
+		entry{name: "data/.wh.x", kind: tar.TypeReg},
+	)
+	upper := layerOf(t, entry{name: "opt/a/.wh.new", kind: tar.TypeReg})
+	img, err := mutate.AppendLayers(empty.Image, lower, middle, upper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := stage(t.Context(), t.TempDir(), pushed(t, img), authn.Anonymous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for file, want := range map[string]string{"opt/a/sub/fresh": "middle", "lib/upper.so": "beside the link", "usr/lib/lower.so": "lower", "usr/bin/python": "py"} {
+		if body, err := os.ReadFile(filepath.Join(s.Root, file)); err != nil || string(body) != want {
+			t.Errorf("%s holds %q, %v, want %q", file, body, err, want)
+		}
+	}
+	for _, absent := range []string{"opt/a/old", "opt/a/sub/deep", "opt/a/new", "data/x", "usr/lib/upper.so"} {
+		if _, err := os.Lstat(filepath.Join(s.Root, absent)); !os.IsNotExist(err) {
+			t.Errorf("%s: %v, want it absent", absent, err)
+		}
+	}
+	if info, err := os.Lstat(filepath.Join(s.Root, "lib")); err != nil || !info.IsDir() {
+		t.Errorf("lib: %v, %v, want a directory in place of the link", info, err)
+	}
+}
+
+// A new stage removes the roots before it, except one a command still runs in, which goes with
+// the stage after that command ended.
+func TestEnvStageKeepsARootACommandRunsIn(t *testing.T) {
+	image := pushedImage(t)
+	dir := t.TempDir()
+	stageOnce := func() *staged {
+		t.Helper()
+		s, err := stage(t.Context(), dir, image, authn.Anonymous)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := writeStaged(dir, s); err != nil {
+			t.Fatal(err)
+		}
+		if err := removeUnused(filepath.Dir(s.Root), s.Root); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	first := stageOnce()
+	held, fd, err := holdStaged(dir)
+	if err != nil || held.Root != first.Root {
+		t.Fatalf("held %+v, %v, want the first root", held, err)
+	}
+	second := stageOnce()
+	if _, err := os.Stat(filepath.Join(first.Root, "usr/bin/tool")); err != nil {
+		t.Errorf("the held root was removed: %v", err)
+	}
+	syscall.Close(fd)
+	third := stageOnce()
+	entries, err := os.ReadDir(filepath.Dir(third.Root))
+	if err != nil || len(entries) != 1 || filepath.Join(filepath.Dir(third.Root), entries[0].Name()) != third.Root {
+		t.Errorf("roots %v, %v, want only %s once %s and %s are unused", entries, err, third.Root, first.Root, second.Root)
 	}
 }

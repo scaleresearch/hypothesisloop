@@ -21,7 +21,6 @@ import (
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
-	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
@@ -38,8 +37,8 @@ type staged struct {
 	StagedAt       time.Time `json:"staged_at"`
 }
 
-// stageDir holds the one staged image of this machine: root/, staged.json and stage.lock. It is
-// under the user's cache, outside every repository.
+// stageDir holds what is staged on this machine: roots/, staged.json naming the current one, and
+// stage.lock. It is under the user's cache, outside every repository.
 func stageDir() (string, error) {
 	cache, err := os.UserCacheDir()
 	if err != nil {
@@ -56,8 +55,9 @@ where hl env run runs commands in it. JOB defaults to the platform experiment's 
 with no JOB this is the image every job built on the baseline runs in; the harness stages it in
 the background when a session starts. Stage a job of yours after its commit changed the
 environment, once the environment is built. The machine holds one staged image: a new one
-replaces it once it is whole, and until then hl env run uses the old one. Staging an image
-already staged does nothing. Prints what it staged as one JSON line.
+replaces it once it is whole, until then hl env run uses the old one, and a command already
+running in the old one keeps it until it ends. Staging an image already staged does nothing.
+Prints what it staged as one JSON line.
 
 Refusals: environment_not_ready (the job's environment is building or failed); run_over.`, stderr)
 	pe := experimentFlag(fs)
@@ -103,7 +103,9 @@ Refusals: environment_not_ready (the job's environment is building or failed); r
 		return fail(stderr, err)
 	}
 	if current, err := readStaged(dir); err == nil && current.Image == credential.Image {
-		return printStaged(stdout, current)
+		if _, err := os.Stat(current.Root); err == nil {
+			return printStaged(stdout, current)
+		}
 	}
 	auth := authn.Anonymous
 	if credential.Login != nil {
@@ -116,6 +118,9 @@ Refusals: environment_not_ready (the job's environment is building or failed); r
 	}
 	out.Job, out.EnvironmentKey = job, credential.EnvironmentKey
 	if err := writeStaged(dir, out); err != nil {
+		return fail(stderr, fmt.Errorf("env stage: %w", err))
+	}
+	if err := removeUnused(filepath.Dir(out.Root), out.Root); err != nil {
 		return fail(stderr, fmt.Errorf("env stage: %w", err))
 	}
 	fmt.Fprintf(stderr, "hl: env stage: %s staged in %s\n", credential.Image, time.Since(started).Round(time.Second))
@@ -167,8 +172,7 @@ func stagingNow(dir string) bool {
 	return false
 }
 
-// stage extracts image into dir/root, in place of what was staged there once the new root is
-// whole.
+// stage extracts image into a root of its own under dir/roots, applying its layers in order.
 func stage(ctx context.Context, dir, image string, auth authn.Authenticator) (*staged, error) {
 	ref, err := name.ParseReference(image)
 	if err != nil {
@@ -183,93 +187,257 @@ func stage(ctx context.Context, dir, image string, auth authn.Authenticator) (*s
 	if err != nil {
 		return nil, err
 	}
-	next := filepath.Join(dir, "root.next")
-	if err := os.RemoveAll(next); err != nil {
-		return nil, err
-	}
-	if err := os.Mkdir(next, 0o755); err != nil {
-		return nil, err
-	}
-	flat := mutate.Extract(img)
-	bytes, err := extractTar(flat, next)
-	flat.Close()
+	digest, err := img.Digest()
 	if err != nil {
-		os.RemoveAll(next)
 		return nil, err
 	}
-	root := filepath.Join(dir, "root")
-	old := filepath.Join(dir, "root.old")
-	if err := os.RemoveAll(old); err != nil {
+	layers, err := img.Layers()
+	if err != nil {
 		return nil, err
 	}
-	if err := os.Rename(root, old); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	roots := filepath.Join(dir, "roots")
+	if err := os.MkdirAll(roots, 0o755); err != nil {
 		return nil, err
 	}
-	if err := os.Rename(next, root); err != nil {
+	root, err := os.MkdirTemp(roots, digest.Hex[:12]+"-")
+	if err != nil {
 		return nil, err
 	}
-	if err := os.RemoveAll(old); err != nil {
+	for _, layer := range layers {
+		if err := applyLayerOf(layer, root); err != nil {
+			os.RemoveAll(root)
+			return nil, err
+		}
+	}
+	bytes, err := regularBytes(root)
+	if err != nil {
 		return nil, err
 	}
 	return &staged{Image: image, Env: config.Config.Env, Root: root, Bytes: bytes, StagedAt: time.Now().UTC()}, nil
 }
 
-// extractTar writes the flattened filesystem r into dir and returns the bytes of its files. Owners
-// are not kept: every file is the caller's, which hl env run maps to root. Device files are left
-// out, as hl env run gives the command a /dev of its own.
-func extractTar(r io.Reader, dir string) (int64, error) {
-	root, err := os.OpenRoot(dir)
+func applyLayerOf(layer v1.Layer, root string) error {
+	r, err := layer.Uncompressed()
 	if err != nil {
-		return 0, err
+		return err
 	}
-	defer root.Close()
-	var total int64
+	defer r.Close()
+	return applyLayer(r, root)
+}
+
+// applyLayer writes the layer r over root, which holds the layers below it, as an overlay engine
+// merges them: a whiteout removes what the layers below hold, and a path is taken as it is named,
+// never through a symlink. Owners are not kept: every file is the caller's, which hl env run maps
+// to root. Device files are left out, as hl env run gives the command a /dev of its own.
+func applyLayer(r io.Reader, root string) error {
+	written := map[string]bool{}
 	tr := tar.NewReader(r)
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
-			return total, nil
+			return nil
 		}
 		if err != nil {
-			return total, err
+			return err
 		}
-		name := path.Clean(strings.TrimPrefix(h.Name, "/"))
-		if name == "." {
+		dir, base := path.Split(path.Clean("/" + h.Name))
+		if base == "" {
 			continue
 		}
-		if err := root.MkdirAll(path.Dir(name), 0o755); err != nil {
-			return total, err
+		parent, err := directoryAt(root, dir)
+		if err != nil {
+			return fmt.Errorf("%s: %w", h.Name, err)
 		}
-		mode := h.FileInfo().Mode().Perm()
-		switch h.Typeflag {
-		case tar.TypeDir:
-			// Owner-writable, so that the root can be replaced and removed.
-			if err := root.Mkdir(name, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
-				return total, err
-			}
-			err = root.Chmod(name, mode|0o700)
-		case tar.TypeReg:
-			var f *os.File
-			if f, err = root.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600); err != nil {
-				return total, err
-			}
-			var n int64
-			n, err = io.Copy(f, tr)
-			total += n
-			if err == nil {
-				err = f.Chmod(mode)
-			}
-			if closeErr := f.Close(); err == nil {
-				err = closeErr
-			}
-		case tar.TypeSymlink:
-			err = root.Symlink(h.Linkname, name)
-		case tar.TypeLink:
-			err = root.Link(path.Clean(strings.TrimPrefix(h.Linkname, "/")), name)
+		target := filepath.Join(parent, base)
+		switch {
+		case base == ".wh..wh..opq":
+			err = pruneChildren(parent, written)
+		case strings.HasPrefix(base, ".wh."):
+			err = prune(filepath.Join(parent, strings.TrimPrefix(base, ".wh.")), written)
+		default:
+			written[target] = true
+			err = writeEntry(h, tr, root, target)
 		}
 		if err != nil {
-			return total, fmt.Errorf("%s: %w", name, err)
+			return fmt.Errorf("%s: %w", h.Name, err)
 		}
+	}
+}
+
+// prune removes what the layers below left at p, keeping what the current layer wrote.
+func prune(p string, written map[string]bool) error {
+	info, err := os.Lstat(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !written[p] {
+		return os.RemoveAll(p)
+	}
+	if info.IsDir() {
+		return pruneChildren(p, written)
+	}
+	return nil
+}
+
+func pruneChildren(dir string, written map[string]bool) error {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if err := prune(filepath.Join(dir, e.Name()), written); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// directoryAt makes each component of dir under root a directory, in place of a file or symlink a
+// layer below left there, as a directory of an upper layer hides what is beneath it.
+func directoryAt(root, dir string) (string, error) {
+	p := root
+	for _, part := range strings.Split(dir, "/") {
+		if part == "" {
+			continue
+		}
+		p = filepath.Join(p, part)
+		info, err := os.Lstat(p)
+		switch {
+		case err == nil && info.IsDir():
+			continue
+		case err == nil:
+			err = os.Remove(p)
+		case errors.Is(err, fs.ErrNotExist):
+			err = nil
+		}
+		if err == nil {
+			err = os.Mkdir(p, 0o755)
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+	return p, nil
+}
+
+func writeEntry(h *tar.Header, r io.Reader, root, target string) error {
+	if info, err := os.Lstat(target); err == nil && !(info.IsDir() && h.Typeflag == tar.TypeDir) {
+		if err := os.RemoveAll(target); err != nil {
+			return err
+		}
+	}
+	mode := h.FileInfo().Mode().Perm()
+	switch h.Typeflag {
+	case tar.TypeDir:
+		// Owner-writable, so that the root can be removed.
+		if err := os.Mkdir(target, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+			return err
+		}
+		return os.Chmod(target, mode|0o700)
+	case tar.TypeReg:
+		f, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(f, r)
+		if err == nil {
+			err = f.Chmod(mode)
+		}
+		if closeErr := f.Close(); err == nil {
+			err = closeErr
+		}
+		return err
+	case tar.TypeSymlink:
+		return os.Symlink(h.Linkname, target)
+	case tar.TypeLink:
+		dir, base := path.Split(path.Clean("/" + h.Linkname))
+		linkParent, err := directoryAt(root, dir)
+		if err != nil {
+			return err
+		}
+		return os.Link(filepath.Join(linkParent, base), target)
+	}
+	return nil
+}
+
+func regularBytes(root string) (int64, error) {
+	var total int64
+	err := filepath.WalkDir(root, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		total += info.Size()
+		return nil
+	})
+	return total, err
+}
+
+// removeUnused removes every root under roots but current that no hl env run holds.
+func removeUnused(roots, current string) error {
+	entries, err := os.ReadDir(roots)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		p := filepath.Join(roots, e.Name())
+		if p == current {
+			continue
+		}
+		f, err := os.Open(p)
+		if err != nil {
+			return err
+		}
+		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			err = os.RemoveAll(p)
+		} else if errors.Is(err, syscall.EWOULDBLOCK) {
+			err = nil
+		}
+		f.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// holdStaged answers what is staged, its root held from removal by a shared lock on a descriptor
+// of the root. syscall.Open leaves the descriptor open across exec, so the lock lasts as long as
+// the command run in the root.
+func holdStaged(dir string) (*staged, int, error) {
+	s, err := readStaged(dir)
+	for {
+		if err != nil {
+			return nil, 0, err
+		}
+		fd, openErr := syscall.Open(s.Root, syscall.O_RDONLY, 0)
+		if openErr == nil {
+			if err := syscall.Flock(fd, syscall.LOCK_SH); err != nil {
+				return nil, 0, err
+			}
+		}
+		var now *staged
+		now, err = readStaged(dir)
+		if err == nil && now.Root == s.Root {
+			if openErr != nil {
+				return nil, 0, fmt.Errorf("the staged root %s: %v: hl env stage stages it again", s.Root, openErr)
+			}
+			return s, fd, nil
+		}
+		if openErr == nil {
+			syscall.Close(fd)
+		}
+		s = now
 	}
 }
 
@@ -323,7 +491,7 @@ imports, and what needs the device fails. Exits with COMMAND's status.`, stderr)
 	if err != nil {
 		return fail(stderr, fmt.Errorf("env run: %w", err))
 	}
-	s, err := readStaged(dir)
+	s, _, err := holdStaged(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		if stagingNow(dir) {
 			return fail(stderr, errors.New("env run: the image is being staged now and nothing was staged before it: run this again once hl env stage ends"))
