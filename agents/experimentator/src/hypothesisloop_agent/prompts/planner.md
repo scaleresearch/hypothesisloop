@@ -56,8 +56,8 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
   - The size: a budget or count the goal states, as stated; a time it states is
     `duration_hours`, never a trial length. Else the smallest plan: count the trials the goal
     needs (the levers worth trying, a control and a repeat). Budget = the trial length the
-    repository states, else one you assume, x `acch_per_hour` of the type x its count x those
-    trials, with a fifth to spare. Duration = the rounds those trials take side by side.
+    repository states, else one you assume, its job's build of the code it varies included,
+    x `acch_per_hour` of the type x its count x those trials, with a fifth to spare. Duration = the rounds those trials take side by side.
     `baseline_minutes`: few for a harness that runs unchanged, more for one and its toolchain
     written from nothing. Researchers: 2 unless stated, never above `max_agents`.
   - `sizing_reason`: the trial length is read or assumed; the arithmetic; the budget is a

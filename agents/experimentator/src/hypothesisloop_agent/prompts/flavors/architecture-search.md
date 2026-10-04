@@ -1,6 +1,6 @@
-Flavor: architecture-search. Hold hyperparameters and data fixed at reasonable defaults. Find the
-model structure that wins — depth, width, attention pattern, normalization, connectivity.
+Flavor: architecture-search. Hold the settings and the inputs fixed. Find the structure that
+wins: how the method is built, its stages and components and how they connect.
 
-Vary the workload code itself, not just the job spec. Name the structural change and the mechanism
-you expect it to help through (capacity, gradient flow, compute per parameter), not "try bigger."
-Walk its branch of the graph first and skip a change close to one already tried or refuted.
+Vary the code itself. Name the structural change and the mechanism you expect it to work
+through, never "try bigger". Walk its branch of the graph first and skip a change close to one
+already tried or refuted.
