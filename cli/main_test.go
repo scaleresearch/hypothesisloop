@@ -258,6 +258,29 @@ func TestIDIsPositionalOrFlag(t *testing.T) {
 	}
 }
 
+// Health prints each agent's line, the coordinator's among them, as the platform answers it.
+func TestPlatformExperimentsHealthPrintsALinePerAgent(t *testing.T) {
+	got := recordingServer(t, func(int, recorded) any {
+		return map[string]any{"platform_experiment_id": "pe-1", "agents": []map[string]any{
+			{"agent_id": "ag-1", "role": "competitor", "first_job_seconds": 42, "jobs_in_flight": 2, "restarts": 3, "coordinator_messages": 1},
+			{"role": "coordinator", "jobs_in_flight": 0, "restarts": 1, "coordinator_messages": 0},
+		}}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"platform-experiments", "health", "--platform-experiment", "pe-1"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if len(*got) != 1 || (*got)[0].Path != "/platform-experiments/pe-1/health" {
+		t.Fatalf("requests %+v, want one to /platform-experiments/pe-1/health", *got)
+	}
+	want := `{"agent_id":"ag-1","coordinator_messages":1,"first_job_seconds":42,"jobs_in_flight":2,"restarts":3,"role":"competitor"}
+{"coordinator_messages":0,"jobs_in_flight":0,"restarts":1,"role":"coordinator"}
+`
+	if stdout.String() != want {
+		t.Errorf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
 func TestMisuseIsAnsweredWithTheErrorAndTheSynopsis(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any { return nil })
 	for _, tc := range []struct {

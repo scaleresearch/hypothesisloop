@@ -1,8 +1,10 @@
 package metricsdb
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -45,4 +47,47 @@ func RecordRunHealth(ctx context.Context, dbURL string, at time.Time, agents []d
 		return fmt.Errorf("metricsdb.RecordRunHealth: %w", err)
 	}
 	return nil
+}
+
+// LatestRunHealth reads where each agent of platformExperimentID, and its hosted coordinator,
+// last stood: the latest value of each of its health series since the run's row came into being
+// at createdAt. A first-job value is nil until there is a first job. Sorted by role, then agent.
+func LatestRunHealth(ctx context.Context, dbURL, platformExperimentID string, createdAt time.Time) ([]domain.AgentHealth, error) {
+	window := promSeconds(time.Since(ObservationWindowStart(createdAt)))
+	type series struct{ role, agentID string }
+	agents := map[series]*domain.AgentHealth{}
+	for _, metric := range []string{agentFirstJobSecondsMetric, agentFirstCompletedJobSecondsMetric, agentJobsInFlightMetric, agentRestartsMetric, agentCoordinatorMessagesMetric} {
+		samples, err := QueryVector(ctx, dbURL, fmt.Sprintf(`last_over_time(%s{platform_experiment_id=%q}[%s])`, metric, platformExperimentID, window))
+		if err != nil {
+			return nil, fmt.Errorf("metricsdb.LatestRunHealth: %s: %w", metric, err)
+		}
+		for _, sample := range samples {
+			key := series{sample.Labels["role"], sample.Labels["agent_id"]}
+			a := agents[key]
+			if a == nil {
+				a = &domain.AgentHealth{PlatformExperimentID: platformExperimentID, Role: key.role, AgentID: key.agentID}
+				agents[key] = a
+			}
+			switch value := sample.Value; metric {
+			case agentFirstJobSecondsMetric:
+				a.FirstJobSeconds = &value
+			case agentFirstCompletedJobSecondsMetric:
+				a.FirstCompletedSeconds = &value
+			case agentJobsInFlightMetric:
+				a.JobsInFlight = int(value)
+			case agentRestartsMetric:
+				a.Restarts = int(value)
+			case agentCoordinatorMessagesMetric:
+				a.CoordinatorMessages = int(value)
+			}
+		}
+	}
+	out := make([]domain.AgentHealth, 0, len(agents))
+	for _, a := range agents {
+		out = append(out, *a)
+	}
+	slices.SortFunc(out, func(a, b domain.AgentHealth) int {
+		return cmp.Or(cmp.Compare(a.Role, b.Role), cmp.Compare(a.AgentID, b.AgentID))
+	})
+	return out, nil
 }

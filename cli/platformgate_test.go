@@ -194,10 +194,10 @@ func TestACallerIsListedTheCommandsItRunsAndRefusedTheOthersBeforeAnyRequest(t *
 			return listing.String()
 		}()
 		wantJobs := "submit | list | status | metrics | summary | wait | logs | data | cost | cancel | stats"
-		wantRun := "list | get | propose | decline | agents"
+		wantRun := "list | get | health | propose | decline | agents"
 		if kind == callerCoordinator {
 			wantJobs = "list | status | metrics | summary | wait | logs | data | cost | cancel | stats"
-			wantRun = "list | get | update | close | summary | agents"
+			wantRun = "list | get | health | update | close | summary | agents"
 		}
 		for _, line := range []string{"\n  job                   " + wantJobs + "\n", "\n  platform-experiments  " + wantRun + "\n"} {
 			if !strings.Contains(top, line) {
@@ -226,6 +226,7 @@ func TestNoCommandACoordinatorRunsCallsARouteACoordinatorMayNot(t *testing.T) {
 	sent := [][]string{
 		{"platform-experiments", "list"},
 		{"platform-experiments", "get"},
+		{"platform-experiments", "health"},
 		{"platform-experiments", "agents", "list"},
 		{"platform-experiments", "agents", "session", "coordinator"},
 		{"platform-experiments", "agents", "add", "--hosted", "--flavor", "generalist"},
@@ -294,6 +295,7 @@ func TestNoCommandAnAgentRunsCallsARouteAnAgentMayNot(t *testing.T) {
 	sent := [][]string{
 		{"platform-experiments", "list"},
 		{"platform-experiments", "get"},
+		{"platform-experiments", "health"},
 		{"platform-experiments", "agents", "session", "ag-1"},
 		{"platform-experiments", "agents", "finish", "--reason", "nothing left"},
 		{"platform-experiments", "agents", "messages"},

@@ -592,6 +592,7 @@ expire. Any S3 client works:
 var platformExperimentCommands = []subcommand{
 	{"list", "the platform experiments this token reaches, one line each", cmdPlatformExperimentsList, everyone},
 	{"get", "the platform experiment: its status, what it waits for, its brief and its stages", cmdPlatformExperimentsGet, everyone},
+	{"health", "where each agent and the coordinator last stood: first job, jobs in flight, restarts, messages", cmdPlatformExperimentsHealth, everyone},
 	{"create", "create a platform experiment from a YAML file", cmdPlatformExperimentsCreate, ofPeople},
 	{"update", "change the brief or other fields, or declare or raise the baseline", cmdPlatformExperimentsUpdate, ofTheRun},
 	{"propose", "a draft's planner: propose the experiment the draft becomes", cmdPlatformExperimentsPropose, asAgent},
@@ -1049,6 +1050,34 @@ and nothing is written beside the JSON, so the output parses whole.`, stderr)
 		out["baseline_branch"], out["baseline_code_ref"] = baseline.Branch, baseline.CodeRef
 	}
 	printLeading(stdout, out, "id", "status", "status_reason")
+	return 0
+}
+
+func cmdPlatformExperimentsHealth(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("platform-experiments health", `usage: hl platform-experiments health [--platform-experiment PE]
+
+Where each agent of the platform experiment, and its hosted coordinator, last stood, one line
+each as compact JSON, as the metrics store recorded it while the run was open or running:
+first_job_seconds and first_completed_job_seconds from when it could first submit (absent
+before there is one), jobs_in_flight, restarts of its machine over the whole run and
+coordinator_messages sent to it. The coordinator's line has role coordinator and no agent_id.`, stderr)
+	pe := experimentFlag(fs)
+	if err := parseNone(fs, args); err != nil {
+		return parseExit(err)
+	}
+	id, err := namedExperiment(fs, c, *pe)
+	if err != nil {
+		return parseExit(err)
+	}
+	var out struct {
+		Agents json.RawMessage `json:"agents"`
+	}
+	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(id)+"/health", nil, &out); err != nil {
+		return fail(stderr, err)
+	}
+	if err := printLines(stdout, stderr, "platform-experiments health: nothing recorded yet", out.Agents); err != nil {
+		return fail(stderr, err)
+	}
 	return 0
 }
 

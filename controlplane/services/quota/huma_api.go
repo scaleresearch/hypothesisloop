@@ -511,6 +511,28 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		return &struct{ Body *PlatformExperimentResults }{Body: results}, nil
 	})
 
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+		OperationID: "get-platform-experiment-health", Method: "GET", Path: "/platform-experiments/{id}/health",
+		Summary: "Where each agent of a run last stood", Tags: []string{"platform-experiments"},
+		Description: "For each agent and the hosted coordinator, the latest values of the run's health series, read from the metrics store, which records them while the run is open or running: " +
+			"seconds to its first job and its first completed job, jobs in flight, restarts of its machine over the whole run and messages the coordinator sent it. " +
+			"agents is empty for a run that never opened.",
+	}, func(ctx context.Context, in *struct {
+		ID string `path:"id"`
+	}) (*struct{ Body *RunHealth }, error) {
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
+		health, err := peh.svc.Health(ctx, in.ID)
+		if errors.Is(err, ErrPlatformExperimentNotFound) {
+			return nil, huma.Error404NotFound(err.Error())
+		}
+		if err != nil {
+			return nil, auth.Internal(peh.logger, "get platform experiment health", err, zap.String("id", in.ID))
+		}
+		return &struct{ Body *RunHealth }{Body: health}, nil
+	})
+
 	apidocs.Register(doc, apidocs.AudienceCoordinator, apidocs.AfterClose(huma.Operation{
 		OperationID: "set-platform-experiment-summary", Method: "PUT", Path: "/platform-experiments/{id}/summary",
 		Summary: "Record the operator's narrative verdict on a run", Tags: []string{"platform-experiments"},
