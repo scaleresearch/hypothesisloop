@@ -76,8 +76,12 @@ func cmdGitCredential(c *apiclient.Client, args []string, stdin io.Reader, stdou
 	if errors.As(err, &refused) && refused.Status == http.StatusNotFound {
 		return 0
 	}
-	if reason, message := refusalOf(err); reason == "run_over" {
+	switch reason, message := refusalOf(err); {
+	case reason == "run_over":
 		fmt.Fprintf(stderr, "hl: git-credential: %s\n", message)
+		return 1
+	case reason != "":
+		fmt.Fprintf(stderr, "hl: git-credential: the platform handed out no credential for %s/%s, HTTP %d %s: %s\n", asked["host"], asked["path"], refused.Status, reason, message)
 		return 1
 	}
 	if err != nil {

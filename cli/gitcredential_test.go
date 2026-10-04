@@ -143,6 +143,16 @@ func TestGitCredentialReportsARefusalAndPrintsNoCredential(t *testing.T) {
 			t.Errorf("%s: exit %d, stdout %q, stderr %q, want exit 1 with the platform's reason", name, code, stdout, stderr)
 		}
 	}
+	// GitHub failing the mint is told as the platform's refusal of this one credential, with its
+	// status and reason, and never as the platform being down.
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write([]byte(`{"reason":"github_failed","message":"GitHub failed the platform's call for GitHub App installation 7: it answered 500 \"\""}`)) //nolint:errcheck
+	}))
+	if code, stdout, stderr := gitCredential(t, "get", "protocol=https\nhost=github.com\npath=Acme/Model.git\n\n"); code != 1 || stdout != "" ||
+		stderr != "hl: git-credential: the platform handed out no credential for github.com/Acme/Model.git, HTTP 502 github_failed: GitHub failed the platform's call for GitHub App installation 7: it answered 500 \"\"\n" {
+		t.Errorf("GitHub failing the mint: exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
 	// An agent's last turn pushes after the close: git shows the platform's one line, no HTTP dump.
 	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)

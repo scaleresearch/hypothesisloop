@@ -155,8 +155,8 @@ func TestRepoInitWritesWhatThePlatformHoldsOfTheExperiment(t *testing.T) {
 	if code, out := repo(t, "check"); code != 0 {
 		t.Fatalf("hl repo check on the files hl repo init wrote = %d\n%s", code, out)
 	}
-	// A second init keeps the agent's work and the experiment file it wrote.
-	if code, out := repo(t, "init"); code != 0 || strings.Count(out, "kept     ") != 6 {
+	// A second init keeps the agent's work and the experiment file it wrote, and says it changed nothing.
+	if code, out := repo(t, "init"); code != 0 || strings.Count(out, "kept     ") != 6 || !strings.Contains(out, "already initialised for platform experiment pe-1: every file is there") {
 		t.Fatalf("a second hl repo init = %d\n%s", code, out)
 	}
 }
@@ -238,8 +238,24 @@ func TestRepoInitGivesAnEmptyRepositoryItsDefaultBranchFirst(t *testing.T) {
 	if parent, main := mustGit(t, clone, "rev-parse", "HEAD~1"), mustGit(t, origin, "rev-parse", "refs/heads/main"); parent != main {
 		t.Fatalf("the baseline's branch starts from %s, want origin's main %s", parent, main)
 	}
-	if code, out := repo(t, "init"); code != 0 || strings.Contains(out, "pushed") {
+	if code, out := repo(t, "init"); code != 0 || strings.Contains(out, "pushed") || !strings.Contains(out, "already initialised for platform experiment pe-1") {
 		t.Fatalf("a second hl repo init = %d\n%s", code, out)
+	}
+}
+
+// A baseline's first hl repo init exited 1 when git could not read origin's branches, and the
+// agent took it for the platform being down. The failure says which step failed and what git
+// answered, and writes nothing, so running it again once origin answers is all there is to do.
+func TestRepoInitThatCannotReachOriginSaysWhyAndWritesNothing(t *testing.T) {
+	clone := cloneOf(t, proposed)
+	mustGit(t, clone, "remote", "add", "origin", filepath.Join(t.TempDir(), "missing.git"))
+	code, out := repo(t, "init")
+	if code != 1 || !strings.Contains(out, "hl: repo init: reading the branches of origin failed: git ls-remote --heads origin: exit status") ||
+		!strings.Contains(out, "does not appear to be a git repository") || !strings.Contains(out, "Nothing was written, and hl repo init can be run again") {
+		t.Fatalf("hl repo init with origin unreachable = %d\n%s", code, out)
+	}
+	if entries, err := os.ReadDir(clone); err != nil || len(entries) != 1 {
+		t.Errorf("the clone holds %v, %v, want nothing written besides .git", entries, err)
 	}
 }
 

@@ -50,6 +50,8 @@ What is left to write is marked REPLACE-WITH: the command of one trial and the R
 of the harness. On a repository with no branch yet it first pushes an empty commit as main, so
 that the default branch is main and no experiment's. Nothing else is committed: git add and
 commit on your branch, and hl job submit pushes it. hl repo check says what is left.
+Run again it changes nothing that is already written and says so, so it is safe to repeat. A
+failure says which step failed and what the platform or git answered, and writes nothing.
 Of the agents only the baseline runs it: every other one gets the files with the baseline's
 commit (hl hypothesis checkout ID).`, stderr)
 	pe := experimentFlag(fs)
@@ -72,24 +74,25 @@ commit (hl hypothesis checkout ID).`, stderr)
 	}
 	var experiment declaredExperiment
 	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(id), nil, &experiment); err != nil {
-		return fail(stderr, err)
+		return fail(stderr, fmt.Errorf("repo init: reading platform experiment %s: %w", id, err))
 	}
 	started, err := startDefaultBranch(root)
 	if err != nil {
-		return fail(stderr, err)
+		return fail(stderr, fmt.Errorf("repo init: %w. Nothing was written, and hl repo init can be run again", err))
 	}
 	if started {
 		fmt.Fprintf(stdout, "pushed %s: the repository had no branch, and its default branch is no experiment's\n", defaultBranch)
 	}
 	another, err := anotherExperiment(root, experiment)
 	if err != nil {
-		return fail(stderr, err)
+		return fail(stderr, fmt.Errorf("repo init: %w", err))
 	}
 	template := repotemplate.Files()
 	files, err := experimentFiles(template, experiment)
 	if err != nil {
-		return fail(stderr, err)
+		return fail(stderr, fmt.Errorf("repo init: %w", err))
 	}
+	written := started
 	for _, path := range sortedPaths(files) {
 		target := filepath.Join(root, filepath.FromSlash(path))
 		existing, err := os.ReadFile(target)
@@ -121,7 +124,13 @@ commit (hl hypothesis checkout ID).`, stderr)
 			return fail(stderr, err)
 		}
 		fmt.Fprintln(stdout, did)
+		written = true
 	}
+	if !written {
+		fmt.Fprintf(stdout, "already initialised for platform experiment %s: every file is there, as written before or as your work left it, and nothing was changed. hl repo check says what is left\n", id)
+		return 0
+	}
+	fmt.Fprintf(stdout, "initialised for platform experiment %s: git add and commit on your branch, and hl repo check says what is left\n", id)
 	return 0
 }
 
@@ -175,8 +184,11 @@ func startDefaultBranch(root string) (bool, error) {
 		return false, err
 	}
 	heads, err := git(root, "ls-remote", "--heads", "origin")
-	if err != nil || heads != "" {
-		return false, err
+	if err != nil {
+		return false, originUnreached("reading the branches of origin", err)
+	}
+	if heads != "" {
+		return false, nil
 	}
 	tree, err := git(root, "mktree")
 	if err != nil {
@@ -187,7 +199,11 @@ func startDefaultBranch(root string) (bool, error) {
 		return false, err
 	}
 	if _, err := git(root, "push", "--quiet", "origin", commit+":refs/heads/"+defaultBranch); err != nil {
-		return false, err
+		// Another init, or the platform, gave origin its first branch since it was read.
+		if heads, again := git(root, "ls-remote", "--heads", "origin"); again == nil && heads != "" {
+			return false, nil
+		}
+		return false, originUnreached("pushing an empty "+defaultBranch+" to origin", err)
 	}
 	if _, err := git(root, "rev-parse", "--verify", "--quiet", "HEAD"); err != nil {
 		if _, err := git(root, "update-ref", "HEAD", commit); err != nil {
@@ -195,6 +211,17 @@ func startDefaultBranch(root string) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// originUnreached says which step of reaching origin failed, with what git answered. Where git
+// got no credential its last line blames a username prompt, and the reason is the platform's
+// answer to hl git-credential above it.
+func originUnreached(step string, err error) error {
+	said := err.Error()
+	if strings.Contains(said, "/git-credentials") || strings.Contains(said, "git-credential") {
+		return fmt.Errorf("%s failed: git got no credential for origin, as the platform's answer to hl git-credential says: %w", step, err)
+	}
+	return fmt.Errorf("%s failed: %w", step, err)
 }
 
 // anotherExperiment is how the experiment file of the clone at root states an experiment that
