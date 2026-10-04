@@ -1459,11 +1459,15 @@ ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS baseline_held_at      
 -- set, the baseline agent the proposal signed up has its machine.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS accepts_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS platform_experiments_accepts_at ON platform_experiments (accepts_at) WHERE accepts_at IS NOT NULL;
--- The image of an environment's assigned attempt once its cluster holds it in the image store of
--- node loaded_node, repository@digest, while the push goes on: a job pinned to that node runs it
--- before it is ready. Empty otherwise, and cleared by every new assignment and every outcome.
-ALTER TABLE environments ADD COLUMN IF NOT EXISTS loaded_image TEXT NOT NULL DEFAULT '';
-ALTER TABLE environments ADD COLUMN IF NOT EXISTS loaded_node  TEXT NOT NULL DEFAULT '';
+-- The image of a building environment, repository@digest, once cluster loaded_cluster holds it in
+-- the image store of its node loaded_node while the push goes on: a job pinned to that node runs it
+-- before it is ready. A push that failed keeps it, so the node runs the build's jobs while it is
+-- built again; the last attempt that loaded it names it. Empty otherwise, and cleared once the
+-- build is ready or failed.
+ALTER TABLE environments ADD COLUMN IF NOT EXISTS loaded_image   TEXT NOT NULL DEFAULT '';
+ALTER TABLE environments ADD COLUMN IF NOT EXISTS loaded_node    TEXT NOT NULL DEFAULT '';
+ALTER TABLE environments ADD COLUMN IF NOT EXISTS loaded_cluster TEXT NOT NULL DEFAULT '';
+UPDATE environments SET loaded_cluster = cluster_name WHERE loaded_image <> '' AND loaded_cluster = '';
 -- The image an environment's last layer takes the platform's tools from (domain.PlatformTools),
 -- repository@digest, empty for one built on its job's image itself. base is then that image
 -- without them, so a release that changes only the tools keeps the layers the file built.
@@ -1545,6 +1549,13 @@ CREATE TABLE IF NOT EXISTS environment_waiters (
     PRIMARY KEY (environment_key, platform_experiment_id, agent_id)
 );
 CREATE INDEX IF NOT EXISTS environment_waiters_ended ON environment_waiters (platform_experiment_id, ended_xid) WHERE ended_xid IS NOT NULL;
+-- loaded_xid is the transaction that first loaded the build into a node of one cluster while it
+-- builds, which told the agent environment.status loaded with loaded_detail: its jobs run there
+-- from then on, and wait for the push by themselves elsewhere, so a build that then ends ready
+-- tells that agent nothing more. A build that fails still tells it.
+ALTER TABLE environment_waiters ADD COLUMN IF NOT EXISTS loaded_xid    BIGINT;
+ALTER TABLE environment_waiters ADD COLUMN IF NOT EXISTS loaded_detail TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS environment_waiters_loaded ON environment_waiters (platform_experiment_id, loaded_xid) WHERE loaded_xid IS NOT NULL;
 
 CREATE OR REPLACE FUNCTION hypothesisloop_environment_ended_notify() RETURNS trigger AS $$
 DECLARE
@@ -1559,8 +1570,10 @@ BEGIN
         WHERE environment_key = NEW.key AND ended_xid IS NULL
         RETURNING *
     LOOP
-        PERFORM hypothesisloop_notify_event('environment.status', w.environment_key, w.state, w.detail,
-            w.platform_experiment_id, w.agent_id);
+        IF NOT (w.state = 'ready' AND w.loaded_xid IS NOT NULL) THEN
+            PERFORM hypothesisloop_notify_event('environment.status', w.environment_key, w.state, w.detail,
+                w.platform_experiment_id, w.agent_id);
+        END IF;
     END LOOP;
     RETURN NULL;
 END;
@@ -1570,3 +1583,27 @@ DROP TRIGGER IF EXISTS environments_ended_notify ON environments;
 CREATE TRIGGER environments_ended_notify AFTER UPDATE OF state ON environments
     FOR EACH ROW WHEN (OLD.state = 'building' AND NEW.state <> 'building')
     EXECUTE FUNCTION hypothesisloop_environment_ended_notify();
+
+CREATE OR REPLACE FUNCTION hypothesisloop_environment_loaded_notify() RETURNS trigger AS $$
+DECLARE
+    w environment_waiters;
+BEGIN
+    FOR w IN
+        UPDATE environment_waiters SET loaded_xid = pg_current_xact_id()::text::bigint,
+            loaded_detail = 'the environment commit ' || left(right(code_ref, 40), 12) || ' declares in .hypothesisloop/Dockerfile is built on ' || image
+                || ' and loaded on cluster ' || NEW.loaded_cluster || ' while it is pushed to the registry: submit its jobs now. One that fits on that cluster''s node starts there at once, '
+                || 'any other starts once the push ends, by itself. A failed push or build is told as an update'
+        WHERE environment_key = NEW.key AND ended_xid IS NULL AND loaded_xid IS NULL
+        RETURNING *
+    LOOP
+        PERFORM hypothesisloop_notify_event('environment.status', w.environment_key, 'loaded', w.loaded_detail,
+            w.platform_experiment_id, w.agent_id);
+    END LOOP;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS environments_loaded_notify ON environments;
+CREATE TRIGGER environments_loaded_notify AFTER UPDATE OF loaded_image ON environments
+    FOR EACH ROW WHEN (NEW.state = 'building' AND NEW.loaded_image <> '' AND OLD.loaded_image IS DISTINCT FROM NEW.loaded_image)
+    EXECUTE FUNCTION hypothesisloop_environment_loaded_notify();

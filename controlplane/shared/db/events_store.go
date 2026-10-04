@@ -104,9 +104,10 @@ const (
 	// this an agent whose job never starts learns nothing. The job's row records the reason its
 	// owner was told, once, and that write is the event, live and replayed.
 	EventJobHeld = "job.held"
-	// EventEnvironmentStatus says the build of an environment an agent asked for ended, ready or
-	// failed, to that agent. A job waiting for it is told by its own status; an agent that built
-	// ahead of its job had nothing else to tell it.
+	// EventEnvironmentStatus says the build of an environment an agent asked for was loaded on a
+	// cluster, which runs its jobs before the push ends, or ended, ready or failed, to that agent.
+	// A job waiting for it is told by its own status; an agent that built ahead of its job had
+	// nothing else to tell it.
 	EventEnvironmentStatus = "environment.status"
 )
 
@@ -172,8 +173,8 @@ var EventKinds = []EventKindDoc{
 			"baseline_late is a job of an open platform experiment's baseline, queued or placed and not running yet, that started now would end after baseline_due_at: detail says so with baseline_due_at, sent once per job."},
 	{Kind: EventJobUnderperforming, Subject: "experiment id", Value: "the metric name it trails on",
 		Description: "This job trails its cohort on the ranking metric by a real margin. An opinion, not a command: nothing stops it but you. Consider POST /experiments/{id}/cancel if it is not worth its allocation. Sent once per job, and not for a job that has already ended."},
-	{Kind: EventEnvironmentStatus, Subject: "environment key", Value: "ready or failed",
-		Description: "The build of an environment this agent asked for while it was building (POST /environments: hl env build, hl env run) ended. detail names the commit and image it asked with and says what to do: once the file failed, GET /environments (hl env status) has the end of its output. Sent once per build, to each agent that asked."},
+	{Kind: EventEnvironmentStatus, Subject: "environment key", Value: "loaded, ready or failed",
+		Description: "The build of an environment this agent asked for while it was building (POST /environments: hl env build, hl env run) was loaded on a cluster, or ended. loaded: the cluster runs its jobs now, while the image is pushed, and any job that cannot run there starts once the push ends, by itself, so a build told loaded is not told ready. detail names the commit and image it asked with and says what to do: once the file failed, GET /environments (hl env status) has the end of its output. Sent once per build and value, to each agent that asked."},
 }
 
 func init() {
@@ -948,10 +949,13 @@ func replayAgentMessages(ctx context.Context, tx pgx.Tx, peID string, since int6
 }
 
 // replayEnvironmentBuilds derives environment.status from the agents that waited for a build,
-// one row each, which keeps what each was told.
+// one row each, which keeps what each was told: loaded, then how it ended unless it was ready.
 func replayEnvironmentBuilds(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]Event, error) {
-	rows, err := tx.Query(ctx, `SELECT environment_key, agent_id, state, detail, ended_xid FROM environment_waiters
-WHERE platform_experiment_id = $1 AND ended_xid >= $2`, peID, since)
+	rows, err := tx.Query(ctx, `SELECT environment_key, agent_id, 'loaded', loaded_detail, loaded_xid FROM environment_waiters
+WHERE platform_experiment_id = $1 AND loaded_xid >= $2
+UNION ALL
+SELECT environment_key, agent_id, state, detail, ended_xid FROM environment_waiters
+WHERE platform_experiment_id = $1 AND ended_xid >= $2 AND NOT (state = 'ready' AND loaded_xid IS NOT NULL)`, peID, since)
 	if err != nil {
 		return nil, fmt.Errorf("events_store.replayEnvironmentBuilds: %w", err)
 	}

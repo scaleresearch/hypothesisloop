@@ -38,9 +38,11 @@ the rest of the job while it builds. Asking again is safe and builds again a fil
 FILE is the job spec the job will be submitted with: its job.image, and metadata.hypothesis_id
 for any agent but the baseline. It defaults to the repository's .hypothesisloop/job.yaml when
 that exists. --image and --hypothesis set them, and override the file's. Prints the
-environment: its key, state (building, ready, failed) and a message saying where the build is,
-or the end of its output once the file failed. An agent that asks while it builds is told when
-the build ends, ready or failed, as environment.status on hl watch.
+environment: its key, state (building, loaded, ready, failed) and a message saying where the
+build is, or the end of its output once the file failed. loaded is built and held on a node of
+loaded_cluster while it is pushed: submit its jobs then, and one that does not run there starts
+once the push ends. An agent that asks while it builds is told as environment.status on hl
+watch once it is loaded, or else once it ends, ready or failed; a failure is told either way.
 
 Refusals: no_environment_file (the commit has no .hypothesisloop/Dockerfile);
 invalid_environment_file; no_environment_builder; unknown_job_image; code_ref_not_in_repository.`, stderr)
@@ -62,10 +64,10 @@ func envStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 	fs := newFlags("env status", `usage: hl env status [FILE] [--image IMAGE] [--hypothesis ID] [--platform-experiment PE]
 
 Prints the environment HEAD's commit declares in .hypothesisloop/Dockerfile, on the image its
-job will name, as it is: its key, state (building, ready, failed) and a message saying where the
-build is, or the end of its output once the file failed. It builds nothing: a failed file stays
-failed, and a job is never made. FILE, --image and --hypothesis are those of hl env build.
-Exits 0 while building or once ready, 1 once failed.
+job will name, as it is: its key, state (building, loaded, ready, failed) and a message saying
+where the build is, or the end of its output once the file failed. It builds nothing: a failed
+file stays failed, and a job is never made. FILE, --image and --hypothesis are those of hl env
+build. Exits 0 while building, once loaded or ready, 1 once failed.
 
 Refusals: environment_not_requested (nothing asked for its build: hl env build starts it);
 no_environment_file; invalid_environment_file.`, stderr)
@@ -85,12 +87,14 @@ no_environment_file; invalid_environment_file.`, stderr)
 
 // environmentState is an environment as the platform answers it.
 type environmentState struct {
-	Key     string `json:"key"`
-	State   string `json:"state"`
-	Base    string `json:"base"`
-	Image   string `json:"image,omitempty"`
-	Fault   string `json:"fault,omitempty"`
-	Message string `json:"message"`
+	Key           string `json:"key"`
+	State         string `json:"state"`
+	Base          string `json:"base"`
+	Image         string `json:"image,omitempty"`
+	LoadedCluster string `json:"loaded_cluster,omitempty"`
+	LoadedNode    string `json:"loaded_node,omitempty"`
+	Fault         string `json:"fault,omitempty"`
+	Message       string `json:"message"`
 }
 
 func printEnvironment(stdout io.Writer, out environmentState) int {
@@ -168,8 +172,8 @@ const environmentReadTries = 10
 
 // awaitEnvironment starts the build of the environment the check's commit declares on its image,
 // as its submit would, and waits for it, so no check is made while it builds or once its file
-// failed. It returns -1 once the check may be made: the environment is ready, or the commit
-// declares none. Otherwise it returns the exit of hl env run, and no check was made.
+// failed. It returns -1 once the check may be made: the environment is loaded on a cluster, where
+// the check runs at once if it fits, or ready, or the commit declares none. Otherwise it returns the exit of hl env run, and no check was made.
 func awaitEnvironment(c *apiclient.Client, request map[string]any, stdout, stderr io.Writer, signals <-chan os.Signal) int {
 	var env environmentState
 	if err := c.Do("POST", "/environments", request, &env); err != nil {
@@ -244,8 +248,9 @@ from the clone's root. One COMMAND argument is run as a shell line ('cargo build
 several are run as one command with their arguments quoted.
 
 A commit that declares .hypothesisloop/Dockerfile is built first, as hl env build builds it, and
-no check is made until it is built: hl env run says on stderr where the build is while it waits,
-and once the file failed it prints the environment with the end of its output and exits 1.
+no check is made until it is built and loaded on a cluster: hl env run says on stderr where the
+build is while it waits, and once the file failed it prints the environment with the end of its
+output and exits 1.
 
 Prints the check's id, then its output as it arrives, and its status on stderr while it waits
 or runs. Exits with COMMAND's exit code, 0 once COMPLETED, 1 for an end that has no code.

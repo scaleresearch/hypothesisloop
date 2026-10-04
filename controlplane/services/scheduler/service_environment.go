@@ -35,7 +35,7 @@ func (s *Service) WithBuildAssigner(builds BuildAssigner) *Service {
 // or building. It returns the environment as it is then: ready, or building, assigned to a live
 // cluster that builds for the org and has room, or else by the first tick a job waits for it. A
 // failed one is built again, as a submit would. An agent that asks, agentID, is told once the
-// build ends (environment.status): it may have no job yet that would be.
+// build is loaded on a cluster or ends (environment.status): it may have no job yet that would be.
 func (s *Service) BuildEnvironment(ctx context.Context, peID, agentID, codeRef, image string) (*domain.Environment, error) {
 	pe, exp, err := s.environmentJob(ctx, peID, codeRef, image)
 	if err != nil {
@@ -144,14 +144,20 @@ type environmentRequest struct {
 	Image                string `json:"image" doc:"The image it is built on: job.image of the job that is to run in it, a job image name or a whole address."`
 }
 
+// environmentLoaded answers a building environment whose image one cluster holds on a node before
+// it is pushed: its jobs run there now. It is never stored.
+const environmentLoaded domain.EnvironmentState = "loaded"
+
 // environmentAnswer is an environment as POST /environments answers it.
 type environmentAnswer struct {
-	Key     string                  `json:"key" doc:"The environment, as environment_key of every job of the commit that names the image."`
-	State   domain.EnvironmentState `json:"state" doc:"building, ready or failed."`
-	Base    string                  `json:"base" doc:"The image it is built on."`
-	Image   string                  `json:"image,omitempty" doc:"Once ready, the image its jobs run in."`
-	Fault   domain.EnvironmentFault `json:"fault,omitempty" doc:"Once failed: file, an instruction of the file failed, or platform."`
-	Message string                  `json:"message" doc:"Where the build is, in a sentence, and once the file failed the end of its output."`
+	Key           string                  `json:"key" doc:"The environment, as environment_key of every job of the commit that names the image."`
+	State         domain.EnvironmentState `json:"state" doc:"building; loaded, built and held on a node of loaded_cluster while it is pushed, so a job that fits there runs there now and any other once the push ends; ready, pushed, so a job runs in it on any cluster; or failed."`
+	Base          string                  `json:"base" doc:"The image it is built on."`
+	Image         string                  `json:"image,omitempty" doc:"Once ready, the image its jobs run in."`
+	LoadedCluster string                  `json:"loaded_cluster,omitempty" doc:"Once loaded, the cluster that runs its jobs before the push ends."`
+	LoadedNode    string                  `json:"loaded_node,omitempty" doc:"Once loaded, the node of loaded_cluster that holds it."`
+	Fault         domain.EnvironmentFault `json:"fault,omitempty" doc:"Once failed: file, an instruction of the file failed, or platform."`
+	Message       string                  `json:"message" doc:"Where the build is, in a sentence, and once the file failed the end of its output."`
 }
 
 func answerEnvironment(env *domain.Environment) environmentAnswer {
@@ -160,6 +166,9 @@ func answerEnvironment(env *domain.Environment) environmentAnswer {
 	case env.State == domain.EnvironmentReady:
 		answer.Image = env.Image
 		answer.Message = "built: a job of this commit on this image runs in " + env.Image
+	case env.State == domain.EnvironmentBuilding && env.LoadedImage != "":
+		answer.State, answer.LoadedCluster, answer.LoadedNode = environmentLoaded, env.LoadedCluster, env.LoadedNode
+		answer.Message = buildingMessage(env, true)
 	case env.State == domain.EnvironmentBuilding:
 		answer.Message = buildingMessage(env, true)
 	case env.Fault == domain.EnvironmentFaultFile:
@@ -177,7 +186,7 @@ func registerEnvironments(doc *apidocs.Doc, h *Handler) {
 		Summary: "Build the environment a commit declares, ahead of its job", Tags: []string{"experiments"},
 		Description: "Starts building the .hypothesisloop/Dockerfile of commit code_ref on image, the build a job of that commit naming that image waits for (environment_key), so the job finds it built or building when it is submitted. " +
 			"Asking again is safe: it answers the one environment as it is then, and builds again one that failed. " +
-			"An agent that asks while it builds is told once the build ends, ready or failed, as environment.status on its event stream. " +
+			"An agent that asks while it builds is told as environment.status on its event stream once a cluster loaded it (loaded: submit its jobs then), or else once the build ends, ready or failed; a failure is told either way. " +
 			"422 no_environment_file for a commit without the file, invalid_environment_file for one the platform does not build, no_environment_builder while no cluster the org may use builds, " +
 			"unknown_job_image and code_ref_not_in_repository as a submit answers them.",
 	}, func(ctx context.Context, in *struct{ Body environmentRequest }) (*struct{ Body environmentAnswer }, error) {
@@ -209,7 +218,7 @@ func registerEnvironments(doc *apidocs.Doc, h *Handler) {
 		OperationID: "get-environment", Method: "GET", Path: "/environments",
 		Summary: "Read the environment a commit declares, building nothing", Tags: []string{"experiments"},
 		Description: "Answers the environment the .hypothesisloop/Dockerfile of commit code_ref on image is, as POST /environments answers it, and starts no build: one that failed stays failed. " +
-			"An agent that reads it building is told once the build ends, as environment.status. " +
+			"An agent that reads it building is told as environment.status once it is loaded or ends, as POST /environments says. " +
 			"404 environment_not_requested while nothing asked for its build; 422 no_environment_file and invalid_environment_file as POST /environments answers them.",
 	}, func(ctx context.Context, in *struct {
 		PlatformExperimentID string `query:"platform_experiment_id" required:"false" doc:"The platform experiment whose repository holds the commit. Absent with an agent's token, it is that agent's."`

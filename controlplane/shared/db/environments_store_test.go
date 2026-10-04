@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -403,7 +404,7 @@ func TestABuildLoadedOnANodePlacesAJobOnlyInThatImageOnItsCluster(t *testing.T) 
 	if took, err := w.envs.RecordEnvironmentLoaded(ctx, w.ofA, env.Key, env.Attempt, "node-1", image); err != nil || !took {
 		t.Fatalf("the assigned attempt: took %v, %v", took, err)
 	}
-	if got, _ := w.envs.GetEnvironment(ctx, env.Key); got.State != domain.EnvironmentBuilding || got.LoadedImage != image || got.LoadedNode != "node-1" || got.Image != "" {
+	if got, _ := w.envs.GetEnvironment(ctx, env.Key); got.State != domain.EnvironmentBuilding || got.LoadedImage != image || got.LoadedNode != "node-1" || got.LoadedCluster != w.ofA || got.Image != "" {
 		t.Fatalf("loaded: %+v, want it building, held on node-1 in %s", got, image)
 	}
 
@@ -417,25 +418,70 @@ func TestABuildLoadedOnANodePlacesAJobOnlyInThatImageOnItsCluster(t *testing.T) 
 	if stored := w.get(t, id); stored.ResolvedJob == nil || stored.ResolvedJob.Image != image || stored.ResolvedJob.NodeSelector[domain.NodeHostnameLabel] != "node-1" {
 		t.Errorf("stored %+v, want the loaded image pinned to its node", stored.ResolvedJob)
 	}
+}
 
-	again := w.assign(t, w.ensure(t, w.orgA, "reassigned").Key, w.ofA)
-	if took, err := w.envs.RecordEnvironmentLoaded(ctx, w.ofA, again.Key, again.Attempt, "node-1", image); err != nil || !took {
+// A push that failed after the build was loaded into a node leaves that node running the build's
+// jobs while it is built again, on whatever cluster, and a later attempt that loads it elsewhere
+// names that node instead. Once the build ends nothing is held.
+func TestALoadedBuildWhosePushFailedStillRunsItsJobsOnItsNode(t *testing.T) {
+	w := newEnvironments(t)
+	ctx := context.Background()
+	image := "registry.test/env@sha256:" + w.suffix
+	env := w.assign(t, w.ensure(t, w.orgA, "push failed").Key, w.ofA)
+	if took, err := w.envs.RecordEnvironmentLoaded(ctx, w.ofA, env.Key, env.Attempt, "node-1", image); err != nil || !took {
 		t.Fatalf("loaded: took %v, %v", took, err)
 	}
-	if _, err := w.pool.pool.Exec(ctx, `UPDATE environments SET assigned_at = now() - interval '1 hour' WHERE key = $1`, again.Key); err != nil {
-		t.Fatal(err)
-	}
-	if next := w.assign(t, again.Key, w.ofA); next.Attempt != again.Attempt+1 || next.LoadedImage != "" || next.LoadedNode != "" {
-		t.Errorf("reassigned: %+v, want the next attempt holding nothing", next)
-	}
-	if took, err := w.envs.RecordEnvironmentLoaded(ctx, w.ofA, again.Key, again.Attempt+1, "node-1", image); err != nil || !took {
-		t.Fatalf("loaded again: took %v, %v", took, err)
-	}
-	if !w.finish(t, w.ofA, &domain.Environment{Key: again.Key, Attempt: again.Attempt + 1}, domain.EnvironmentBuildOutcome{Fault: domain.EnvironmentFaultPlatform, LogTail: "push: 503"}) {
+	if !w.finish(t, w.ofA, env, domain.EnvironmentBuildOutcome{Fault: domain.EnvironmentFaultPlatform, LogTail: "push: 503"}) {
 		t.Fatal("the platform's fault was refused")
 	}
-	if got, _ := w.envs.GetEnvironment(ctx, again.Key); got.LoadedImage != "" || got.LoadedNode != "" {
-		t.Errorf("after the platform's fault: %+v, want nothing held", got)
+	if got, _ := w.envs.GetEnvironment(ctx, env.Key); got.State != domain.EnvironmentBuilding || got.ClusterName != "" || got.LoadedImage != image || got.LoadedCluster != w.ofA || got.LoadedNode != "node-1" {
+		t.Fatalf("after the failed push: %+v, want it building on none and still held on node-1 of %s", got, w.ofA)
+	}
+	if _, err := w.pool.pool.Exec(ctx, `UPDATE clusters SET shared = true, priority = 0 WHERE name = $1`, w.ofB); err != nil {
+		t.Fatal(err)
+	}
+	next := w.assign(t, env.Key, w.ofB)
+	if next.ClusterName != w.ofB || next.Attempt != env.Attempt+1 || next.LoadedImage != image || next.LoadedCluster != w.ofA {
+		t.Fatalf("built again: %+v, want it on %s, still held on %s", next, w.ofB, w.ofA)
+	}
+	id := w.queued(t, "push-failed-job", w.peA)
+	if _, err := w.pool.pool.Exec(ctx, `UPDATE experiments SET environment_key = $2 WHERE id = $1`, id, env.Key); err != nil {
+		t.Fatal(err)
+	}
+	if w.claim(t, id, w.ofB) {
+		t.Fatal("a job was placed on the cluster that builds it again before it is pushed or loaded there")
+	}
+	pinned := &domain.JobSpec{Image: image, AcceleratorCount: 1, NodeSelector: map[string]string{domain.NodeHostnameLabel: "node-1"}}
+	if claimed, err := w.exps.ClaimSubmitted(ctx, id, w.ofA, pinned, nil); err != nil || !claimed {
+		t.Fatalf("claim on the node that holds it: %v, %v", claimed, err)
+	}
+
+	elsewhere := image + "0"
+	if took, err := w.envs.RecordEnvironmentLoaded(ctx, w.ofB, env.Key, next.Attempt, "node-2", elsewhere); err != nil || !took {
+		t.Fatalf("loaded again: took %v, %v", took, err)
+	}
+	if got, _ := w.envs.GetEnvironment(ctx, env.Key); got.LoadedImage != elsewhere || got.LoadedCluster != w.ofB || got.LoadedNode != "node-2" {
+		t.Fatalf("loaded again: %+v, want node-2 of %s", got, w.ofB)
+	}
+	if !w.finish(t, w.ofB, next, domain.EnvironmentBuildOutcome{Image: elsewhere}) {
+		t.Fatal("the push was refused")
+	}
+	if got, _ := w.envs.GetEnvironment(ctx, env.Key); got.State != domain.EnvironmentReady || got.LoadedImage != "" || got.LoadedCluster != "" || got.LoadedNode != "" {
+		t.Errorf("ready: %+v, want nothing held", got)
+	}
+
+	spent := w.assign(t, w.ensure(t, w.orgA, "push failed every time").Key, w.ofA)
+	for attempt := spent.Attempt; attempt <= domain.MaxEnvironmentAttempts; attempt++ {
+		if took, err := w.envs.RecordEnvironmentLoaded(ctx, w.ofA, spent.Key, attempt, "node-1", image); err != nil || !took {
+			t.Fatalf("attempt %d loaded: took %v, %v", attempt, took, err)
+		}
+		if !w.finish(t, w.ofA, &domain.Environment{Key: spent.Key, Attempt: attempt}, domain.EnvironmentBuildOutcome{Fault: domain.EnvironmentFaultPlatform}) {
+			t.Fatalf("attempt %d: the platform's fault was refused", attempt)
+		}
+		spent = w.assign(t, spent.Key, w.ofA)
+	}
+	if spent.State != domain.EnvironmentFailed || spent.LoadedImage != "" || spent.LoadedCluster != "" {
+		t.Errorf("every attempt spent: %+v, want it failed holding nothing", spent)
 	}
 }
 
@@ -541,5 +587,79 @@ func TestAnAgentThatAskedForABuildIsToldItEnded(t *testing.T) {
 		if e.Kind == EventEnvironmentStatus && e.Subject == again.Key {
 			t.Errorf("asked again once it failed: still told %+v, want it waiting for the next build", e)
 		}
+	}
+}
+
+// An agent waiting for a build is told once a cluster loaded it, naming that cluster, live and
+// replayed. Its jobs run from then on, by themselves once the push ends, so the build ending ready
+// tells it nothing more; a build that fails after still does.
+func TestAnAgentIsToldItsBuildLoadedAndThenOnlyOfAFailure(t *testing.T) {
+	w := newEnvironments(t)
+	ctx := context.Background()
+	codeRef := "https://example.com/repo.git@" + strings.Repeat("d", 40)
+	image := "registry.test/env@sha256:" + w.suffix
+	before := cursorNow(t, w.pool)
+	events, stop := listenForEvents(t, w.pool)
+	defer stop()
+
+	pushed := w.ensure(t, w.orgA, "told loaded then pushed")
+	failing := w.ensure(t, w.orgA, "told loaded then failed")
+	var loaded []Event
+	for _, made := range []*domain.Environment{pushed, failing} {
+		if err := w.envs.AwaitEnvironmentBuild(ctx, made.Key, w.peA, w.agent, codeRef, "pytorch"); err != nil {
+			t.Fatal(err)
+		}
+		env := w.assign(t, made.Key, w.ofA)
+		for range 2 {
+			if took, err := w.envs.RecordEnvironmentLoaded(ctx, w.ofA, env.Key, env.Attempt, "node-1", image); err != nil || !took {
+				t.Fatalf("loaded: took %v, %v", took, err)
+			}
+		}
+		told := awaitEvent(t, events, EventEnvironmentStatus, made.Key)
+		if told.Value != "loaded" || told.AgentID != w.agent || !strings.Contains(told.Detail, "commit dddddddddddd ") ||
+			!strings.Contains(told.Detail, "loaded on cluster "+w.ofA+" ") || !strings.Contains(told.Detail, "submit its jobs now") {
+			t.Fatalf("loaded: got = %+v, want it loaded on %s, saying to submit", told, w.ofA)
+		}
+		loaded = append(loaded, told)
+	}
+
+	env, _ := w.envs.GetEnvironment(ctx, pushed.Key)
+	if !w.finish(t, w.ofA, env, domain.EnvironmentBuildOutcome{Image: image}) {
+		t.Fatal("the push was refused")
+	}
+	env, _ = w.envs.GetEnvironment(ctx, failing.Key)
+	if !w.finish(t, w.ofA, env, domain.EnvironmentBuildOutcome{Fault: domain.EnvironmentFaultFile, LogTail: "E: no package"}) {
+		t.Fatal("the file's fault was refused")
+	}
+	var failed Event
+	for failed.Kind == "" {
+		select {
+		case e := <-events:
+			switch {
+			case e.Kind == EventEnvironmentStatus && e.Subject == pushed.Key:
+				t.Fatalf("told %+v, want nothing more of a build told loaded that ended ready", e)
+			case e.Kind == EventEnvironmentStatus && e.Subject == failing.Key:
+				failed = e
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("the build that failed after it was loaded told nothing")
+		}
+	}
+	if failed.Value != "failed" {
+		t.Fatalf("failed: got = %+v", failed)
+	}
+
+	replayed, err := NewEventsStore(w.pool, noHypothesisEvents{}).Replay(ctx, EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent}, before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var told []Event
+	for _, e := range replayed {
+		if e.Kind == EventEnvironmentStatus {
+			told = append(told, e.Identity())
+		}
+	}
+	if want := []Event{loaded[0].Identity(), loaded[1].Identity(), failed.Identity()}; !slices.Equal(told, want) {
+		t.Errorf("replayed: got = %v, want the live events %v", told, want)
 	}
 }

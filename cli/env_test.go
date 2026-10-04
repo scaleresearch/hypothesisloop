@@ -237,6 +237,7 @@ func TestEnvRunWaitsForItsEnvironmentAndMakesNoCheckOfAFailedOne(t *testing.T) {
 	for name, final := range map[string]map[string]string{
 		"failed": {"key": "k1", "state": "failed", "fault": "file", "message": "error: unexpected argument '--locked=false'"},
 		"ready":  {"key": "k1", "state": "ready", "image": "registry.test/env@sha256:1", "message": "built"},
+		"loaded": {"key": "k1", "state": "loaded", "loaded_cluster": "quietbox", "message": "It is built and loaded on node n1 of cluster quietbox"},
 	} {
 		pushedClone(t)
 		fastCheckPoll(t)
@@ -278,9 +279,9 @@ func TestEnvRunWaitsForItsEnvironmentAndMakesNoCheckOfAFailedOne(t *testing.T) {
 			if code != 1 || checks != 0 || !strings.Contains(stdout.String(), "--locked=false") {
 				t.Errorf("failed: exit %d with %d checks, stdout %q, want 1, no check and the build's output", code, checks, stdout.String())
 			}
-		case "ready":
+		case "ready", "loaded":
 			if code != 0 || checks != 1 {
-				t.Errorf("ready: exit %d with %d checks, want the check made once built", code, checks)
+				t.Errorf("%s: exit %d with %d checks, want the check made once built", name, code, checks)
 			}
 		}
 	}

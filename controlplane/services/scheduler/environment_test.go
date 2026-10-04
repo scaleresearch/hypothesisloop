@@ -224,7 +224,7 @@ func TestAJobWaitsForItsAssignedEnvironmentAndEndsByWhoseFaultItFailed(t *testin
 func TestAJobWhoseEnvironmentIsLoadedOnANodeIsPinnedThereInThatImage(t *testing.T) {
 	assignedAt := time.Now()
 	loaded := domain.Environment{Key: "k1", Base: "registry.test/job:1", State: domain.EnvironmentBuilding, ClusterName: "builder-a", Attempt: 1, AssignedAt: &assignedAt,
-		LoadedImage: "registry.test/env@sha256:1", LoadedNode: "node-1"}
+		LoadedImage: "registry.test/env@sha256:1", LoadedNode: "node-1", LoadedCluster: "builder-a"}
 	registered := map[string]domain.Cluster{"builder-a": {Name: "builder-a", OrgID: "org-a"}}
 	labels := map[string]map[string]map[string]string{"builder-a": {"node-1": {domain.NodeHostnameLabel: "host-1"}, "node-2": {domain.NodeHostnameLabel: "host-2"}}}
 	job := func(mutate func(*domain.Experiment)) *domain.Experiment {
@@ -257,6 +257,17 @@ func TestAJobWhoseEnvironmentIsLoadedOnANodeIsPinnedThereInThatImage(t *testing.
 	}
 	if len(selector) != 1 {
 		t.Errorf("the job's own selector became %v", selector)
+	}
+
+	pushFailed := loaded
+	pushFailed.ClusterName, pushFailed.Attempt = "", 1
+	rebuilt := loaded
+	rebuilt.ClusterName, rebuilt.Attempt = "builder-b", 2
+	for name, env := range map[string]domain.Environment{"its push failed": pushFailed, "built again elsewhere": rebuilt} {
+		exp := job(nil)
+		if waits, reasons := held(env, exp); waits || len(reasons) != 0 || exp.ClusterName != "builder-a" || exp.Job.NodeSelector[domain.NodeHostnameLabel] != "host-1" {
+			t.Errorf("%s: held %v with %v on %q, want it pinned to builder-a's node-1", name, waits, reasons, exp.ClusterName)
+		}
 	}
 
 	unloaded := loaded
@@ -315,5 +326,28 @@ func TestAJobWaitingForItsEnvironmentSaysWhereItsBuildIs(t *testing.T) {
 	}
 	if err := svc.mergeBuildProgress(context.Background(), []*domain.Experiment{waiting("job-4", "gone")}); err == nil {
 		t.Error("a job naming no environment that exists: no error")
+	}
+}
+
+// Run 11's build was loaded on its builder 7.5 minutes before its push to the registry ended. A
+// job waiting for it says where it is loaded and that it runs there now, or that it waits for the
+// push, and so after a push that failed.
+func TestAJobWaitingForALoadedEnvironmentSaysWhereItRunsNow(t *testing.T) {
+	loaded := &domain.Environment{Key: "k1", Base: "registry.test/job:1", State: domain.EnvironmentBuilding, ClusterName: "builder-a", Attempt: 1,
+		LoadedImage: "registry.test/env@sha256:1", LoadedNode: "node-1", LoadedCluster: "builder-a"}
+	if got := buildProgress(loaded); !strings.HasPrefix(got, "It is built and loaded on node node-1 of cluster builder-a, which pushes it to the registry now: "+
+		"a job of one node that fits there runs there at once, any other once the push ends. It builds on cluster builder-a, attempt 1 of 3") {
+		t.Errorf("loaded: %q", got)
+	}
+	failed := *loaded
+	failed.ClusterName = ""
+	if got := buildProgress(&failed); !strings.Contains(got, "of cluster builder-a, whose push to the registry failed: ") ||
+		!strings.HasSuffix(got, "It waits for a live cluster that builds for its org to have room") {
+		t.Errorf("after a failed push: %q", got)
+	}
+	answer := answerEnvironment(loaded)
+	if answer.State != "loaded" || answer.LoadedCluster != "builder-a" || answer.LoadedNode != "node-1" || answer.Image != "" ||
+		!strings.Contains(answer.Message, "loaded on node node-1 of cluster builder-a") {
+		t.Errorf("answered %+v, want it loaded on builder-a's node-1", answer)
 	}
 }

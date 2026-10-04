@@ -73,29 +73,31 @@ const (
 // ClusterName is empty. Image is the pushed build, repository@digest, and runs once State is
 // ready. LogTail is the end of the output of a build that failed, and FailedLog that of the file's
 // last failed build while a later submit builds the same file once more. Progress is the step its
-// assigned cluster last reported of the attempt it builds, at ProgressAt. LoadedImage is that
-// attempt's image, repository@digest, once it is in the image store of node LoadedNode of
-// ClusterName and not yet pushed: a job pinned to that node runs it before it is ready.
+// assigned cluster last reported of the attempt it builds, at ProgressAt. LoadedImage is the
+// image of the last attempt that loaded one, repository@digest, once it is in the image store of
+// node LoadedNode of LoadedCluster and while the build is not ready: a job pinned to that node runs
+// it before the push ends, and still after a push that failed, while the build is tried again.
 type Environment struct {
-	Key         string
-	OrgID       string
-	Base        string
-	Tools       string
-	Dockerfile  string
-	Image       string
-	LoadedImage string
-	LoadedNode  string
-	State       EnvironmentState
-	Fault       EnvironmentFault
-	LogTail     string
-	FailedLog   string
-	ClusterName string
-	Attempt     int
-	AssignedAt  *time.Time
-	Progress    string
-	ProgressAt  *time.Time
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	Key           string
+	OrgID         string
+	Base          string
+	Tools         string
+	Dockerfile    string
+	Image         string
+	LoadedImage   string
+	LoadedNode    string
+	LoadedCluster string
+	State         EnvironmentState
+	Fault         EnvironmentFault
+	LogTail       string
+	FailedLog     string
+	ClusterName   string
+	Attempt       int
+	AssignedAt    *time.Time
+	Progress      string
+	ProgressAt    *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // NodeHostnameLabel is the label that names one node, which a job is pinned to its node by.

@@ -115,8 +115,8 @@ ORDER BY submitted_at ASC, id ASC`, clusterName)
 	// this job already placed or is committed when this statement reads the cluster. The image
 	// is decided from the same read of the cluster as the rule that lets the job onto it. A job
 	// whose commit declares an environment is placed once it is ready, in its image, which is
-	// built on the image the cluster runs. Before, it is placed only in the image its building
-	// cluster holds on one node and not yet pushed, which resolvedJob names and pins it to (see
+	// built on the image the cluster runs. Before, it is placed only in the image a cluster that
+	// built it holds on one node and has not pushed, which resolvedJob names and pins it to (see
 	// domain.Experiment.EnvironmentImage).
 	const q = `UPDATE experiments e
 SET status = 'SUBMITTED', submitted_at = NOW(), cluster_name = $2, last_cluster = $2, eviction_reason = NULL, not_admitted_reason = NULL, updated_at = NOW(),
@@ -125,7 +125,7 @@ SET status = 'SUBMITTED', submitted_at = NOW(), cluster_name = $2, last_cluster 
 		ELSE (SELECT CASE WHEN v.state = 'ready' THEN v.image ELSE v.loaded_image END FROM environments v WHERE v.key = e.environment_key) END)
 WHERE e.id = $1 AND e.status = 'QUEUED' AND ` + clusterHostsJob + `
   AND (e.environment_key IS NULL OR EXISTS (SELECT 1 FROM environments v WHERE v.key = e.environment_key
-    AND (v.state = 'ready' OR (v.state = 'building' AND v.loaded_image <> '' AND v.cluster_name = $2 AND v.loaded_image = $3::jsonb ->> 'image'))))
+    AND (v.state = 'ready' OR (v.state = 'building' AND v.loaded_image <> '' AND v.loaded_cluster = $2 AND v.loaded_image = $3::jsonb ->> 'image'))))
 RETURNING e.resolved_job_spec ->> 'image'`
 	var image string
 	switch err := tx.QueryRow(ctx, q, id, clusterName, resolvedJobSpec).Scan(&image); {

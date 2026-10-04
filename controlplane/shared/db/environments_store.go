@@ -21,12 +21,12 @@ func NewEnvironmentsStore(pool *Pool) *EnvironmentsStore {
 	return &EnvironmentsStore{pool: pool}
 }
 
-const environmentColumns = ` key, org_id, base, tools, dockerfile, image, loaded_image, loaded_node, state, fault, log_tail, failed_log, cluster_name, attempt, assigned_at, progress, progress_at, created_at, updated_at `
+const environmentColumns = ` key, org_id, base, tools, dockerfile, image, loaded_image, loaded_node, loaded_cluster, state, fault, log_tail, failed_log, cluster_name, attempt, assigned_at, progress, progress_at, created_at, updated_at `
 
 func scanEnvironment(row rowScanner) (*domain.Environment, error) {
 	env := &domain.Environment{}
 	var state, fault string
-	if err := row.Scan(&env.Key, &env.OrgID, &env.Base, &env.Tools, &env.Dockerfile, &env.Image, &env.LoadedImage, &env.LoadedNode, &state, &fault, &env.LogTail, &env.FailedLog,
+	if err := row.Scan(&env.Key, &env.OrgID, &env.Base, &env.Tools, &env.Dockerfile, &env.Image, &env.LoadedImage, &env.LoadedNode, &env.LoadedCluster, &state, &fault, &env.LogTail, &env.FailedLog,
 		&env.ClusterName, &env.Attempt, &env.AssignedAt, &env.Progress, &env.ProgressAt, &env.CreatedAt, &env.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -59,6 +59,7 @@ func (s *EnvironmentsStore) EnsureEnvironment(ctx context.Context, env *domain.E
 	const q = `WITH made AS (
 	INSERT INTO environments (key, org_id, base, tools, dockerfile, image, state) VALUES ($1, $2, $3, $5, $4, '', 'building')
 	ON CONFLICT (key) DO UPDATE SET state = 'building', fault = '', log_tail = '', image = '', cluster_name = '', attempt = 0, assigned_at = NULL, updated_at = now(),
+		loaded_image = '', loaded_node = '', loaded_cluster = '',
 		failed_log = CASE WHEN environments.fault = 'file' THEN environments.log_tail ELSE environments.failed_log END
 	WHERE environments.state = 'failed'
 	RETURNING` + environmentColumns + `)
@@ -85,7 +86,7 @@ func (s *EnvironmentsStore) GetEnvironment(ctx context.Context, key string) (*do
 }
 
 // AwaitEnvironmentBuild has agentID of platform experiment peID told environment.status once the
-// build of key ends, when it is building now; codeRef and image are what the agent first asked
+// build of key is loaded on a cluster or ends, when it is building now; codeRef and image are what the agent first asked
 // with while it builds, so asking again writes nothing until the build ended. The
 // environment's row is held while it is read, so a build that ends at once tells the agent or was
 // over before it asked.
@@ -93,7 +94,7 @@ func (s *EnvironmentsStore) AwaitEnvironmentBuild(ctx context.Context, key, peID
 	if _, err := s.pool.pool.Exec(ctx, `INSERT INTO environment_waiters (environment_key, platform_experiment_id, agent_id, code_ref, image)
 SELECT key, $2, $3, $4, $5 FROM environments WHERE key = $1 AND state = 'building' FOR SHARE
 ON CONFLICT (environment_key, platform_experiment_id, agent_id) DO UPDATE SET code_ref = EXCLUDED.code_ref, image = EXCLUDED.image,
-	state = '', detail = '', ended_xid = NULL
+	state = '', detail = '', ended_xid = NULL, loaded_xid = NULL, loaded_detail = ''
 WHERE environment_waiters.ended_xid IS NOT NULL`, key, peID, agentID, codeRef, image); err != nil {
 		return fmt.Errorf("environments_store.AwaitBuild: %w", err)
 	}
@@ -106,7 +107,8 @@ WHERE environment_waiters.ended_xid IS NOT NULL`, key, peID, agentID, codeRef, i
 // builds, below domain.MaxEnvironmentBuildsPerCluster, as its next attempt. One assigned
 // domain.MaxEnvironmentAttempts times already fails as the platform's fault instead, and one no
 // cluster takes waits assigned to none. Anything else is returned unchanged. holding holds live
-// and the clusters heard from within domain.EnvironmentBuildHold, which keep their builds.
+// and the clusters heard from within domain.EnvironmentBuildHold, which keep their builds. The
+// image an earlier attempt loaded into a node is kept until the build ends: that node runs it.
 func (s *EnvironmentsStore) AssignEnvironment(ctx context.Context, key string, live, holding []string, lease time.Duration) (*domain.Environment, error) {
 	q := `WITH pick AS (
 	SELECT c.name FROM clusters c, environments v
@@ -121,7 +123,10 @@ func (s *EnvironmentsStore) AssignEnvironment(ctx context.Context, key string, l
 		cluster_name = CASE WHEN e.attempt >= $4 THEN '' ELSE COALESCE(pick.name, '') END,
 		attempt = CASE WHEN e.attempt < $4 AND pick.name IS NOT NULL THEN e.attempt + 1 ELSE e.attempt END,
 		assigned_at = CASE WHEN e.attempt < $4 AND pick.name IS NOT NULL THEN now() END,
-		progress = '', progress_at = NULL, loaded_image = '', loaded_node = '',
+		progress = '', progress_at = NULL,
+		loaded_image = CASE WHEN e.attempt >= $4 THEN '' ELSE e.loaded_image END,
+		loaded_node = CASE WHEN e.attempt >= $4 THEN '' ELSE e.loaded_node END,
+		loaded_cluster = CASE WHEN e.attempt >= $4 THEN '' ELSE e.loaded_cluster END,
 		updated_at = now()
 	FROM (SELECT 1) one LEFT JOIN pick ON true
 	WHERE e.key = $1 AND e.state = 'building'
@@ -176,11 +181,13 @@ WHERE key = $1 AND attempt = $2 AND cluster_name = $3 AND state = 'building'`, k
 // FinishEnvironmentBuild records what cluster reports of the build of key it was assigned at
 // attempt, and says whether it was still that build's to report. Built, the environment is ready
 // in outcome.Image; the file's fault fails it with the end of its output; the platform's frees it,
-// so the next assignment builds it again. The file is the key's, so its fault fails the build
+// so the next assignment builds it again, and keeps the image it loaded into a node, which runs
+// it meanwhile: a push that failed leaves that node's image whole. The file is the key's, so its fault fails the build
 // whatever attempt, on whatever cluster, it is at now: an attempt taken from a cluster that went
 // silent and then reported the file failing ends the build there, and is never run again.
 func (s *EnvironmentsStore) FinishEnvironmentBuild(ctx context.Context, cluster, key string, attempt int, outcome domain.EnvironmentBuildOutcome) (bool, error) {
 	var set string
+	const held = `, loaded_image = '', loaded_node = '', loaded_cluster = ''`
 	fence := `key = $1 AND attempt = $2 AND cluster_name = $3 AND state = 'building'`
 	args := []any{key, attempt, cluster}
 	switch outcome.Fault {
@@ -188,15 +195,15 @@ func (s *EnvironmentsStore) FinishEnvironmentBuild(ctx context.Context, cluster,
 		if outcome.Image == "" {
 			return false, errors.New("environments_store.FinishBuild: a built environment names its image")
 		}
-		set, args = `state = 'ready', image = $4, failed_log = ''`, append(args, outcome.Image)
+		set, args = `state = 'ready', image = $4, failed_log = ''`+held, append(args, outcome.Image)
 	case domain.EnvironmentFaultFile:
-		set, fence, args = `state = 'failed', fault = 'file', log_tail = $3`, `key = $1 AND attempt >= $2 AND state = 'building'`, []any{key, attempt, outcome.LogTail}
+		set, fence, args = `state = 'failed', fault = 'file', log_tail = $3`+held, `key = $1 AND attempt >= $2 AND state = 'building'`, []any{key, attempt, outcome.LogTail}
 	case domain.EnvironmentFaultPlatform:
 		set, args = `cluster_name = '', assigned_at = NULL, log_tail = $4`, append(args, outcome.LogTail)
 	default:
 		return false, fmt.Errorf("environments_store.FinishBuild: %q is no fault of a build", outcome.Fault)
 	}
-	tag, err := s.pool.pool.Exec(ctx, `UPDATE environments SET `+set+`, loaded_image = '', loaded_node = '', updated_at = now() WHERE `+fence, args...)
+	tag, err := s.pool.pool.Exec(ctx, `UPDATE environments SET `+set+`, updated_at = now() WHERE `+fence, args...)
 	if err != nil {
 		return false, fmt.Errorf("environments_store.FinishBuild: %w", err)
 	}
@@ -204,13 +211,13 @@ func (s *EnvironmentsStore) FinishEnvironmentBuild(ctx context.Context, cluster,
 }
 
 // RecordEnvironmentLoaded keeps image, repository@digest, as the image of the build of key that
-// cluster runs at attempt, held on its node node while it is pushed, and says whether it was still
-// that build's to report.
+// cluster runs at attempt, held on its node node while it is pushed, in place of any an earlier
+// attempt loaded, and says whether it was still that build's to report.
 func (s *EnvironmentsStore) RecordEnvironmentLoaded(ctx context.Context, cluster, key string, attempt int, node, image string) (bool, error) {
 	if node == "" || image == "" {
 		return false, errors.New("environments_store.RecordLoaded: a loaded build names its node and its image")
 	}
-	tag, err := s.pool.pool.Exec(ctx, `UPDATE environments SET loaded_image = $5, loaded_node = $4, updated_at = now()
+	tag, err := s.pool.pool.Exec(ctx, `UPDATE environments SET loaded_image = $5, loaded_node = $4, loaded_cluster = $3, updated_at = now()
 WHERE key = $1 AND attempt = $2 AND cluster_name = $3 AND state = 'building'`, key, attempt, cluster, node, image)
 	if err != nil {
 		return false, fmt.Errorf("environments_store.RecordLoaded: %w", err)

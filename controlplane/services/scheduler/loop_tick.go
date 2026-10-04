@@ -2111,17 +2111,17 @@ func (l *Loop) heldForEnvironment(ctx context.Context, pass *environmentPass, ex
 	return false, fmt.Errorf("environment %s of job %s is %s with fault %q", env.Key, exp.ID, env.State, env.Fault)
 }
 
-// pinToLoadedNode pins exp, for this pass, to the node of the cluster building its environment
-// that holds the build's image before it is pushed, and to that image (domain.Experiment.
+// pinToLoadedNode pins exp, for this pass, to the node of the cluster that built its environment
+// and holds the build's image before it is pushed, and to that image (domain.Experiment.
 // EnvironmentImage), and says whether it did. The pin is the node's hostname label in exp's node
 // selector, which placement honours as any other and the runtime is handed with the resolved job:
 // a job placed so starts there without a pull while the push goes on. A job on more than one node,
 // one whose own selector names another node, and one that cluster does not host wait for the push.
 func pinToLoadedNode(exp *domain.Experiment, env *domain.Environment, registered map[string]domain.Cluster, nodeLabels map[string]map[string]map[string]string) bool {
-	if env.LoadedImage == "" || env.ClusterName == "" || exp.Job.Nodes() > 1 || !hostsJob(registered, env.ClusterName, exp) {
+	if env.LoadedImage == "" || env.LoadedCluster == "" || exp.Job.Nodes() > 1 || !hostsJob(registered, env.LoadedCluster, exp) {
 		return false
 	}
-	hostname := nodeLabels[env.ClusterName][env.LoadedNode][domain.NodeHostnameLabel]
+	hostname := nodeLabels[env.LoadedCluster][env.LoadedNode][domain.NodeHostnameLabel]
 	if hostname == "" {
 		return false
 	}
@@ -2132,7 +2132,7 @@ func pinToLoadedNode(exp *domain.Experiment, env *domain.Environment, registered
 	maps.Copy(selector, exp.Job.NodeSelector)
 	selector[domain.NodeHostnameLabel] = hostname
 	exp.Job.NodeSelector = selector
-	exp.ClusterName = env.ClusterName
+	exp.ClusterName = env.LoadedCluster
 	exp.EnvironmentImage = env.LoadedImage
 	return true
 }
@@ -2163,10 +2163,19 @@ func buildingMessage(env *domain.Environment, live bool) string {
 }
 
 func buildProgress(env *domain.Environment) string {
-	if env.ClusterName == "" {
-		return "It waits for a live cluster that builds for its org to have room"
+	var progress string
+	switch {
+	case env.LoadedImage != "" && env.LoadedCluster == env.ClusterName:
+		progress = "It is built and loaded on node " + env.LoadedNode + " of cluster " + env.LoadedCluster + ", which pushes it to the registry now: " +
+			"a job of one node that fits there runs there at once, any other once the push ends. "
+	case env.LoadedImage != "":
+		progress = "It is built and loaded on node " + env.LoadedNode + " of cluster " + env.LoadedCluster + ", whose push to the registry failed: " +
+			"a job of one node that fits there runs there at once, any other once the platform has built and pushed it again. "
 	}
-	progress := "It builds on cluster " + env.ClusterName + ", attempt " + strconv.Itoa(env.Attempt) + " of " + strconv.Itoa(domain.MaxEnvironmentAttempts)
+	if env.ClusterName == "" {
+		return progress + "It waits for a live cluster that builds for its org to have room"
+	}
+	progress += "It builds on cluster " + env.ClusterName + ", attempt " + strconv.Itoa(env.Attempt) + " of " + strconv.Itoa(domain.MaxEnvironmentAttempts)
 	if env.Attempt > 1 {
 		progress += " (the platform builds a file again only after a failure of its own)"
 	}
