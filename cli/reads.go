@@ -194,8 +194,8 @@ such a name or the full registry address of an image of your own, host first, an
 else is refused at submit (unknown_job_image), as is a job no cluster could run with its image
 (no_cluster_for_image). Every job names one: a line without only_job_image is of a cluster that runs the
 image a job names, and a line with it is of a cluster that runs that image and no other, so a
-job meant for it names that image; job_image_carries says what is installed in it. A job adds a
-package with uv pip install or pip install, into the Python it runs. A line with
+job meant for it names that image; job_image_carries says what is installed in it. A package a
+job needs goes into the environment, .hypothesisloop/Dockerfile, and installs nothing at runtime. A line with
 on_demand is of a cluster that rents a machine when a job needs one: nothing stands by, total is
 the most it rents at once and available is what it may still rent, so a job there starts after
 its machine is rented.

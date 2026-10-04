@@ -19,9 +19,9 @@ job:
   # its image (no_cluster_for_image). Where `hl capacity` shows the cluster with
   # only_job_image, name that image.
   image: REPLACE-WITH-A-JOB-IMAGE-NAME-HL-CAPACITY-LISTS
-  # hl-clone checks out the commit the job was submitted from and prints its directory. Install
-  # what a trial needs ahead of its command with `uv pip install PACKAGE` or
-  # `pip install PACKAGE`, into the Python the job runs. bash -c keeps the PATH the
+  # hl-clone checks out the commit the job was submitted from and prints its directory. What a
+  # trial needs, its dependencies fetched and built among it, is in the environment's
+  # Dockerfile, so the command builds only the code it cloned. bash -c keeps the PATH the
   # environment's Dockerfile sets with ENV; a login shell (-l) resets it from /etc/profile.
   command: ["bash", "-c", "dir=$(hl-clone) && cd \"$dir\" && exec REPLACE-WITH-THE-COMMAND-OF-ONE-TRIAL"]
   # Copied verbatim from `hl capacity`. Work that needs no accelerator deletes both lines, and
