@@ -102,7 +102,7 @@ export function HypothesisPanel({ graph, nodeByID, selected, onSelect, onAddIdea
           {node.status_changed_at && <> · <Verdict hypothesis={node} /></>}
         </Text>
         <Text as="div" variant="meta" mono>
-          {node.finding_count} findings · {node.comment_count} comments · built on by {node.child_count}
+          {node.finding_count} findings · {node.comment_count} comments · refined by {node.child_count}
         </Text>
         {bestJob && (
           <Text as="div" variant="code">

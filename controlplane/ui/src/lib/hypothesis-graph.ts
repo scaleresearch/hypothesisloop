@@ -137,11 +137,18 @@ export function extendLayout(graph: HypothesisGraph, previous: Map<string, Posit
 
 export const LINK_KINDS: HypothesisLinkType[] = ['builds_on', 'related', 'contradicts']
 
-/** Each kind of link in plain words, read as "this idea <label> that one". */
+/** Each kind of link in plain words, read as "this idea <label> that one", the same in every view. */
 export const LINK_KIND_LABELS: Record<HypothesisLinkType, string> = {
-  builds_on: 'builds on',
-  related: 'related to',
+  builds_on: 'refines',
+  related: 'related',
   contradicts: 'contradicts',
+}
+
+/** What each kind of link says about the idea it leaves. */
+export const LINK_KIND_HINTS: Record<HypothesisLinkType, string> = {
+  builds_on: 'extends or narrows that idea',
+  related: 'touches the same thing',
+  contradicts: 'expects the opposite outcome',
 }
 
 /** The kinds of link a hypothesis may take to `to`: the objective is only built on. */
@@ -179,12 +186,12 @@ export function linkPlanner(graph: HypothesisGraph): (from: string, to: string, 
     const source = byID.get(from)
     if (!source) return { refused: 'Links start at an idea.' }
     if (from === to) return { refused: 'An idea does not link to itself.' }
-    if (to === graph.root && kind !== 'builds_on') return { refused: 'Ideas only build on the objective.' }
+    if (to === graph.root && kind !== 'builds_on') return { refused: 'An idea links to the objective only as a new approach to it.' }
     if (to !== graph.root && !byID.has(to)) return { refused: 'That idea is not in this graph.' }
     if (edges.has(`${kind}:${from}:${to}`) || (kind !== 'builds_on' && edges.has(`${kind}:${to}:${from}`))) {
       return { refused: 'These two ideas are already linked this way.' }
     }
-    if (kind === 'builds_on' && descendants(from).has(to)) return { refused: 'That idea already builds on this one.' }
+    if (kind === 'builds_on' && descendants(from).has(to)) return { refused: 'That idea already refines this one.' }
     if (!source.agent_id) return { from, to }
     if (kind !== 'builds_on' && to !== graph.root && !byID.get(to)!.agent_id) return { from: to, to: from }
     return { refused: 'Only the agent that owns this idea links from it.' }
@@ -259,8 +266,8 @@ export interface LinkGroup<T> {
 // Contradiction and relatedness are symmetric claims, so their two directions share a group.
 export function linkGroups<T extends { type: HypothesisLinkType }>(out: T[], incoming: T[]): LinkGroup<T>[] {
   return [
-    { label: 'Builds on', items: out.filter(l => l.type === 'builds_on') },
-    { label: 'Built on by', items: incoming.filter(l => l.type === 'builds_on') },
+    { label: 'Refines', items: out.filter(l => l.type === 'builds_on') },
+    { label: 'Refined by', items: incoming.filter(l => l.type === 'builds_on') },
     { label: 'Contradicts', items: [...out, ...incoming].filter(l => l.type === 'contradicts') },
     { label: 'Related', items: [...out, ...incoming].filter(l => l.type === 'related') },
   ].filter(g => g.items.length > 0)

@@ -40,9 +40,9 @@ describe('a link a person makes', () => {
   })
 
   it('makes no cycle, no second copy, and nothing but builds on to the objective', () => {
-    expect(plan('a', 'b', 'builds_on')).toEqual({ refused: 'That idea already builds on this one.' })
+    expect(plan('a', 'b', 'builds_on')).toEqual({ refused: 'That idea already refines this one.' })
     expect(plan('d', 'a', 'related')).toEqual({ refused: 'These two ideas are already linked this way.' })
-    expect(plan('a', 'pe', 'related')).toEqual({ refused: 'Ideas only build on the objective.' })
+    expect(plan('a', 'pe', 'related')).toEqual({ refused: 'An idea links to the objective only as a new approach to it.' })
     expect(plan('a', 'a', 'related')).toEqual({ refused: 'An idea does not link to itself.' })
   })
 })

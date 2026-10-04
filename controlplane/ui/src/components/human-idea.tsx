@@ -12,12 +12,7 @@ import { Eyebrow, Text } from '@/components/ui/text'
 import { HypothesisPicker } from '@/components/hypothesis-search'
 import { AgentLabel } from '@/components/agent-label'
 import { useReadOnly } from '@/lib/read-only'
-
-const LINK_TYPE_LABELS: Record<HypothesisLinkType, string> = {
-  builds_on: 'Builds on',
-  contradicts: 'Contradicts',
-  related: 'Related',
-}
+import { LINK_KINDS, LINK_KIND_HINTS, LINK_KIND_LABELS } from '@/lib/hypothesis-graph'
 
 // From an agent's hypothesis only that agent links; one no agent owns is anyone's.
 export function AddLinkForm({ hypothesis, onAdded }: { hypothesis: HypothesisWithJobs; onAdded: () => void }) {
@@ -32,7 +27,7 @@ export function AddLinkForm({ hypothesis, onAdded }: { hypothesis: HypothesisWit
     return (
       <Text variant="hint" className="mt-3">
         Only <AgentLabel id={hypothesis.agent_id} /> can add links from this hypothesis.
-        To connect your own idea, add it from the graph, building on this one.
+        To connect your own idea, add it from the graph, refining this one.
       </Text>
     )
   }
@@ -55,15 +50,15 @@ export function AddLinkForm({ hypothesis, onAdded }: { hypothesis: HypothesisWit
     <Stack gap="sm" className="mt-3 max-w-3xl">
       <Eyebrow>Add link</Eyebrow>
       <Inline gap="xs">
-        {(Object.keys(LINK_TYPE_LABELS) as HypothesisLinkType[]).map(t => (
-          <Chip key={t} active={type === t} onClick={() => setType(t)}>{LINK_TYPE_LABELS[t]}</Chip>
+        {LINK_KINDS.map(t => (
+          <Chip key={t} active={type === t} title={LINK_KIND_HINTS[t]} onClick={() => setType(t)}>{LINK_KIND_LABELS[t]}</Chip>
         ))}
       </Inline>
       {target ? (
         <Inline nowrap className="text-xs">
           <span className="min-w-0 flex-1 truncate" title={target.text}>{target.text}</span>
           <Button size="sm" variant="primary" disabled={busy} onClick={() => submit(target.id)}>
-            {busy ? 'Linking…' : `Add ${LINK_TYPE_LABELS[type].toLowerCase()} link`}
+            {busy ? 'Linking…' : 'Link'}
           </Button>
           <Button variant="link" size="sm" onClick={() => setTarget(null)}>Change</Button>
         </Inline>

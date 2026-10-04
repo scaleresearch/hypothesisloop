@@ -20,7 +20,7 @@ import { Eyebrow, Text } from '@/components/ui/text'
 import { filedAfterVerdict } from '@/lib/hypothesis-progress'
 import { Actor, verdictBy } from '@/components/actor'
 import { IdeaEditor, NodeActions, useEditor } from '@/components/graph-edit'
-import { NODE_HEIGHT, NODE_WIDTH, ROW, matchesFilters } from '@/lib/hypothesis-graph'
+import { LINK_KIND_LABELS, NODE_HEIGHT, NODE_WIDTH, ROW, matchesFilters } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
 
 // Kinds read apart by line as well as colour: a related link is dotted, the others solid.
@@ -153,7 +153,7 @@ function Legend({ onTidy }: { onTidy?: () => void }) {
             <svg width="26" height="8" aria-hidden="true">
               <line x1="0" y1="4" x2="26" y2="4" stroke={s.color} strokeWidth="2" strokeDasharray={LINK_DASH[type]} />
             </svg>
-            {s.label}
+            {LINK_KIND_LABELS[type]}
           </span>
         )
       })}
@@ -289,7 +289,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
       targetHandle,
       type: further || rows > 1 ? 'default' : 'smoothstep',
       pathOptions: hierarchy ? undefined : { stepPosition: 1, offset: e.type === 'related' ? 12 : 20 },
-      label: hierarchy && !further ? undefined : s.label,
+      label: hierarchy && !further ? undefined : LINK_KIND_LABELS[e.type],
       zIndex: hierarchy && !further ? 0 : 1,
       labelStyle: { ...chart.label, fill: s.text, opacity },
       labelBgStyle: { fill: semantic.surface },

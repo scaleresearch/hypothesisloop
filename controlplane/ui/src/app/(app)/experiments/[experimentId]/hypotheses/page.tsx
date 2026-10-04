@@ -114,7 +114,7 @@ function HypothesesPageContent({ peID }: { peID: string }) {
     <Page
       fill
       title="Hypotheses"
-      description="Each experiment grows a graph of research claims. Every hypothesis builds on the experiment's objective or on earlier hypotheses, and may contradict or relate to others."
+      description="Each experiment grows a graph of research claims. Every hypothesis is a new approach to the experiment's objective or refines earlier hypotheses, and may contradict or relate to others."
     >
       <Stack>
       <Inline gap="md">

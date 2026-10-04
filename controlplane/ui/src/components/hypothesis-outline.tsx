@@ -74,7 +74,7 @@ export function HypothesisOutline({ graph, rootLabel, selected, hits, filters, o
 
   const common = { selectedRef, onSelect }
   return (
-    <ul className="h-full list-none overflow-y-auto p-1.5" aria-label="Hypotheses by what they build on">
+    <ul className="h-full list-none overflow-y-auto p-1.5" aria-label="Hypotheses by what they refine">
       <Row id={graph.root} depth={0} selected={selected === graph.root} hit={false} {...common}>
         <Eyebrow>Objective</Eyebrow>
         <span className="min-w-0 flex-1 truncate">{rootLabel}</span>
@@ -94,7 +94,7 @@ export function HypothesisOutline({ graph, rootLabel, selected, hits, filters, o
           <span className="min-w-0 flex-1 truncate" title={node.text}>{node.text}</span>
           {alsoBuildsOn.length > 0 && (
             <Text as="span" variant="meta" tone="subtle" className="whitespace-nowrap">
-              also builds on {alsoBuildsOn.length}
+              also refines {alsoBuildsOn.length}
             </Text>
           )}
           <NodeMeta item={node} />

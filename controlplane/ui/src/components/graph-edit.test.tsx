@@ -123,7 +123,7 @@ describe('on the graph', () => {
     expect(node('a longer warmup')).toBeTruthy()
   })
 
-  it('links the objective as a new approach, a hypothesis by a chosen kind, and needs a builds on link', async () => {
+  it('links the objective as a new approach, a hypothesis by a chosen kind, and needs one it refines', async () => {
     vi.mocked(registerHumanHypothesis).mockResolvedValue(registered('hyp-3', 'label smoothing helps', [{ type: 'builds_on', to: 'hyp-1' }]))
     render(<Harness view="graph" />)
     fireEvent.click(await screen.findByRole('button', { name: 'Add idea here' }))
@@ -143,7 +143,7 @@ describe('on the graph', () => {
     fireEvent.click(within(objective).getByRole('button', { name: 'Remove link to Objective: Vision benchmark' }))
     const add = within(editor).getByRole('button', { name: 'Add idea' }) as HTMLButtonElement
     expect(add.disabled).toBe(true)
-    expect(within(editor).getByText('It needs a builds on link, to the objective or to an earlier idea.')).toBeTruthy()
+    expect(within(editor).getByText('It needs a link to the objective or to an idea it refines.')).toBeTruthy()
 
     fireEvent.click(within(other).getByRole('button', { name: 'refines' }))
     expect(add.disabled).toBe(false)
@@ -168,11 +168,11 @@ describe('on the graph', () => {
     render(<Harness view="graph" />)
     fireEvent.click(node('warmup helps'))
     fireEvent.click(await screen.findByRole('button', { name: 'Link to…' }))
-    expect(screen.getByRole('button', { name: 'related to' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: 'related' }).getAttribute('aria-pressed')).toBe('true')
     fireEvent.click(node('a cosine schedule helps'))
     await waitFor(() => expect(screen.getByLabelText('links').textContent).toContain('hyp-1 related hyp-2'))
     expect(addHumanHypothesisLink).toHaveBeenCalledExactlyOnceWith('hyp-1', 'related', 'hyp-2')
-    expect(screen.queryByRole('button', { name: 'related to' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'related' })).toBeNull()
     expect(screen.getByLabelText('selected').textContent).toBe('hyp-1')
   })
 
@@ -180,7 +180,7 @@ describe('on the graph', () => {
     render(<Harness view="graph" />)
     fireEvent.click(node('a cosine schedule helps'))
     fireEvent.click(await screen.findByRole('button', { name: 'Link to…' }))
-    fireEvent.click(screen.getByRole('button', { name: 'builds on' }))
+    fireEvent.click(screen.getByRole('button', { name: 'refines' }))
     fireEvent.click(node('warmup helps'))
     expect(await screen.findByText('Only the agent that owns this idea links from it.')).toBeTruthy()
     expect(addHumanHypothesisLink).not.toHaveBeenCalled()

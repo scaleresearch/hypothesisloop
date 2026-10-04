@@ -84,9 +84,9 @@ export const hypothesisStatuses = ['open', 'confirmed', 'refuted', 'inconclusive
  * and labelled in muted text, as no border grey can carry text.
  */
 export const hypothesisLinkStyles = {
-  builds_on: { color: semantic.borderControl, text: semantic.muted, label: 'builds on' },
-  contradicts: { color: semantic.danger, text: semantic.danger, label: 'contradicts' },
-  related: { color: semantic.info, text: semantic.info, label: 'related' },
+  builds_on: { color: semantic.borderControl, text: semantic.muted },
+  contradicts: { color: semantic.danger, text: semantic.danger },
+  related: { color: semantic.info, text: semantic.info },
 } as const
 
 /** Props every recharts chart shares, so axes, grid, labels and tooltip look the same on each. */

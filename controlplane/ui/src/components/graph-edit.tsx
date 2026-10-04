@@ -12,7 +12,7 @@ import { Input, Textarea } from '@/components/ui/input'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, InlineError } from '@/components/ui/status-message'
 import { Eyebrow, Text } from '@/components/ui/text'
-import { LINK_KINDS, LINK_KIND_LABELS, allowedLinkKinds, findIdeas, linkPlanner, withEdge, withHypothesis } from '@/lib/hypothesis-graph'
+import { LINK_KINDS, LINK_KIND_HINTS, LINK_KIND_LABELS, allowedLinkKinds, findIdeas, linkPlanner, withEdge, withHypothesis } from '@/lib/hypothesis-graph'
 
 export interface GraphEditor {
   graph: HypothesisGraph
@@ -214,7 +214,7 @@ export function NodeActions({ id }: { id: string }) {
       <Button
         size="sm"
         variant="primary"
-        title={root ? 'A foundational idea, building on the objective' : 'An idea that builds on this one'}
+        title={root ? 'A new approach to the objective' : 'An idea that refines this one'}
         onClick={() => editor.startAdding(id)}
       >
         Add idea here
@@ -262,7 +262,7 @@ function KindChips({ value, onChange, kinds = LINK_KINDS }: {
 }) {
   return (
     <Inline gap="xs" role="group" aria-label="Kind of link">
-      {kinds.map(k => <Chip key={k} active={value === k} onClick={() => onChange(k)}>{LINK_KIND_LABELS[k]}</Chip>)}
+      {kinds.map(k => <Chip key={k} active={value === k} title={LINK_KIND_HINTS[k]} onClick={() => onChange(k)}>{LINK_KIND_LABELS[k]}</Chip>)}
     </Inline>
   )
 }
@@ -288,13 +288,6 @@ export function LinkBar() {
   )
 }
 
-// How a new idea reads against one already there, in a person's words; sent as the link kinds.
-const NEW_IDEA_LINKS: Record<HypothesisLinkType, { label: string; hint: string }> = {
-  builds_on: { label: 'refines', hint: 'extends or narrows that idea' },
-  contradicts: { label: 'contradicts', hint: 'expects the opposite outcome' },
-  related: { label: 'related', hint: 'touches the same thing' },
-}
-
 type Choice = 'related' | 'contradicts' | 'distinct'
 
 const CHOICES: Array<{ value: Choice; label: string }> = [
@@ -313,7 +306,7 @@ function SimilarIdeas({ similar, choices, onChoose, onShow }: {
     <Callout tone="warning">
       <Stack gap="sm" className="text-xs">
       <span className="text-muted">
-        Not added yet: these read close to your idea, or it builds on a refuted one. Link yours to each, or keep it distinct.
+        Not added yet: these read close to your idea, or it refines a refuted one. Link yours to each, or keep it distinct.
       </span>
       <Stack as="ul" gap="sm" className="list-none">
         {similar.map(h => (
@@ -325,8 +318,8 @@ function SimilarIdeas({ similar, choices, onChoose, onShow }: {
             </Inline>
             {h.reason === 'refuted_parent' ? (
               <Inline gap="xs" nowrap>
-                <span className="text-subtle">Yours builds on this refuted idea.</span>
-                <Chip active={choices[h.id] === 'distinct'} onClick={() => onChoose(h.id, 'distinct')}>Build on it anyway</Chip>
+                <span className="text-subtle">Yours refines this refuted idea.</span>
+                <Chip active={choices[h.id] === 'distinct'} onClick={() => onChoose(h.id, 'distinct')}>Refine it anyway</Chip>
               </Inline>
             ) : (
               <Inline gap="xs" role="group" aria-label={`Choice for ${h.text}`}>
@@ -424,10 +417,10 @@ export function IdeaEditor({ maxHeight }: { maxHeight?: number }) {
                     <>
                       <Inline gap="xs" role="group" aria-label="Mine">
                         {LINK_KINDS.map(k => (
-                          <Chip key={k} active={l.type === k} title={NEW_IDEA_LINKS[k].hint} onClick={() => ed.setLinkType(l.to, k)}>{NEW_IDEA_LINKS[k].label}</Chip>
+                          <Chip key={k} active={l.type === k} title={LINK_KIND_HINTS[k]} onClick={() => ed.setLinkType(l.to, k)}>{LINK_KIND_LABELS[k]}</Chip>
                         ))}
                       </Inline>
-                      <span className="text-subtle">Mine {NEW_IDEA_LINKS[l.type].hint}.</span>
+                      <span className="text-subtle">Mine {LINK_KIND_HINTS[l.type]}.</span>
                     </>
                   )}
                 </Stack>
@@ -448,10 +441,10 @@ export function IdeaEditor({ maxHeight }: { maxHeight?: number }) {
             <Button variant="link" size="sm" onClick={() => ed.setFindingTarget(true)}>+ Add a link</Button>
           </div>
         )}
-        {!buildsOn && <Text variant="hint">It needs a builds on link, to the objective or to an earlier idea.</Text>}
+        {!buildsOn && <Text variant="hint">It needs a link to the objective or to an idea it refines.</Text>}
       </Stack>
       <Text variant="meta" tone="subtle">
-        It joins the graph under your name. Agents read it, and one that tests it registers its own idea building on yours.
+        It joins the graph under your name. Agents read it, and one that tests it registers its own idea refining yours.
       </Text>
       {similar.length > 0 && (
         <SimilarIdeas
