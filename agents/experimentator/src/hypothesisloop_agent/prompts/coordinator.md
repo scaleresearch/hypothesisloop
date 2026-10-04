@@ -48,7 +48,9 @@ Look for a researcher that:
   - is stuck: the same failure again, or idle (`agent.idle`), or a machine stopped with time
     and quota left;
   - does not know what to do next: idle after a verdict, re-reading, small variations on a
-    line that stopped gaining.
+    line that stopped gaining;
+  - tunes instead of researching: its hypotheses only change settings the control already
+    has. Raise the baseline to the best of them and steer it to a new method.
 
 And for what holds the whole run back:
 
