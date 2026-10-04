@@ -154,6 +154,8 @@ type fakeApp struct {
 	created   []string
 	committed map[string]string
 	createErr error
+	// fresh says a repository asked to StartFresh holds only GitHub's first commit.
+	fresh bool
 	// revoked holds each person's token ended, refreshed each refresh token traded, and unexpiring
 	// is an App whose user tokens do not expire, which issues no refresh token. revokeErr fails
 	// every revocation.
@@ -182,6 +184,14 @@ func (a *fakeApp) CreateRepository(_ context.Context, installationID int64, user
 	a.created = append(a.created, fmt.Sprintf("%d %s", installationID, name))
 	a.committed = files
 	return &github.Repository{FullName: owner + "/" + name, Private: true}, nil
+}
+
+func (a *fakeApp) StartFresh(_ context.Context, token *github.Token, files map[string]string) error {
+	if !a.fresh || token.Value == "" {
+		return github.ErrNotFresh
+	}
+	a.committed = files
+	return nil
 }
 
 func (a *fakeApp) RevokeUser(_ context.Context, accessToken string) error {
@@ -984,7 +994,16 @@ func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 	}
 	w.app.fileErr = github.ErrFileNotFound
 	if named, err := w.host.Create(ctx, w.projectA, "acme", "model", "", template); named != "" || statusOf(err) != 409 {
-		t.Errorf("a repository of the name with no experiment file: Create = %q, %v, want 409 repository_exists", named, err)
+		t.Errorf("a repository of the name with commits of its own and no experiment file: Create = %q, %v, want 409 repository_exists", named, err)
+	}
+	// Cut off between GitHub's create and the first commit, it holds GitHub's commit alone: it is
+	// taken, and the template written into it.
+	w.app.fresh, w.app.committed = true, nil
+	if named, err := w.host.Create(ctx, w.projectA, "acme", "model", "", template); err != nil || named != "Acme/Model" || !maps.Equal(w.app.committed, template) {
+		t.Errorf("a repository of the name holding GitHub's first commit alone: Create = %q, %v, committed %v, want Acme/Model with the template written", named, err, w.app.committed)
+	}
+	if last := w.app.mints[len(w.app.mints)-1]; last.access != github.Write {
+		t.Errorf("the template was written with a %s token, want write", last.access)
 	}
 }
 

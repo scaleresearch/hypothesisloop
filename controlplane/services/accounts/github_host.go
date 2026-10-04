@@ -97,19 +97,28 @@ func (h *GitHubHost) Create(ctx context.Context, projectID, account, name, descr
 }
 
 // madeHere says the repository of that name on the chosen account is the one an earlier Create
-// with the same files made, which a restart left unrecorded: the installation reaches it and its
-// experiment file is the template's. The name carries the platform experiment's id, so a
-// repository that passes both is no one else's. It returns the repository as GitHub names it.
+// with the same files made, which a restart left unrecorded, and returns it as GitHub names it.
+// The installation reaches it, and it holds the template's experiment file or nothing but the
+// commit GitHub made at its creation, the first commit not written yet: then files are written
+// into it now. The name carries the platform experiment's id, so such a repository is no one
+// else's.
 func (h *GitHubHost) madeHere(ctx context.Context, chosen *domain.OrgGitHubInstallation, name string, files map[string]string) (string, bool) {
-	token, err := h.github.Token(ctx, chosen.InstallationID, chosen.AccountLogin+"/"+name, github.Read)
+	token, err := h.github.Token(ctx, chosen.InstallationID, chosen.AccountLogin+"/"+name, github.Write)
 	if err != nil {
 		return "", false
 	}
 	data, err := h.github.File(ctx, token, "", domain.ExperimentFile)
-	if err != nil || string(data) != files[domain.ExperimentFile] {
-		return "", false
+	switch {
+	case err == nil:
+		return token.Repository, string(data) == files[domain.ExperimentFile]
+	case errors.Is(err, github.ErrFileNotFound):
+		if err := h.github.StartFresh(ctx, token, files); err != nil {
+			h.logger.Warn("a repository of the experiment's name is not the one created for it", zap.String("repository", token.Repository), zap.Error(err))
+			return "", false
+		}
+		return token.Repository, true
 	}
-	return token.Repository, true
+	return "", false
 }
 
 func (h *GitHubHost) CreatesOn(ctx context.Context, projectID, account string) (string, error) {

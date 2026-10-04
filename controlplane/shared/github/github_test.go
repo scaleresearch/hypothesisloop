@@ -37,6 +37,8 @@ type fakeRepo struct {
 	defaultBranch string
 	files         map[string]string
 	directories   map[string]bool
+	// history is how many commits its default branch holds.
+	history int
 }
 
 type fakeInstallation struct {
@@ -476,7 +478,7 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			f.t.Errorf("a repository was asked for with private %v and auto_init %v", body.Private, body.AutoInit)
 		default:
 			f.sequence++
-			repo := &fakeRepo{id: int64(1000 + f.sequence), fullName: installation.account + "/" + body.Name, defaultBranch: "main", files: map[string]string{"README.md": "# " + body.Name + "\n"}}
+			repo := &fakeRepo{id: int64(1000 + f.sequence), fullName: installation.account + "/" + body.Name, defaultBranch: "main", files: map[string]string{"README.md": "# " + body.Name + "\n"}, history: 1}
 			f.repos[strings.ToLower(repo.fullName)] = repo
 			installation.repos[repo.id] = true
 			f.answer(w, http.StatusCreated, map[string]any{"id": repo.id, "full_name": repo.fullName, "private": true, "default_branch": repo.defaultBranch})
@@ -520,6 +522,29 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			"id": repo.id, "full_name": repo.fullName, "default_branch": repo.defaultBranch, "private": true,
 			"permissions": map[string]bool{"pull": true, "push": push},
 		})
+	case len(segments) == 4 && segments[0] == "repos" && segments[3] == "commits" && r.Method == http.MethodGet:
+		repo := f.repos[strings.ToLower(segments[1]+"/"+segments[2])]
+		if repo == nil {
+			f.refuse(w, http.StatusNotFound, "Not Found")
+			return
+		}
+		if read, _ := f.visible(bearer, repo); !read {
+			f.refuse(w, http.StatusNotFound, "Not Found")
+			return
+		}
+		if repo.history == 0 {
+			f.refuse(w, http.StatusConflict, "Git Repository is empty.")
+			return
+		}
+		commits := []map[string]any{}
+		for i := repo.history; i > 0 && len(commits) < 2; i-- {
+			parents := []map[string]string{}
+			if i > 1 {
+				parents = append(parents, map[string]string{"sha": fmt.Sprintf("%040d", i-1)})
+			}
+			commits = append(commits, map[string]any{"sha": fmt.Sprintf("%040d", i), "parents": parents})
+		}
+		f.answer(w, http.StatusOK, commits)
 	case len(segments) >= 5 && segments[0] == "repos" && segments[3] == "contents":
 		repo := f.repos[strings.ToLower(segments[1]+"/"+segments[2])]
 		if repo == nil {
@@ -619,7 +644,7 @@ func (f *fakeGitHub) git(w http.ResponseWriter, r *http.Request, bearer string, 
 		case !body.Force:
 			f.refuse(w, http.StatusUnprocessableEntity, "Update is not a fast forward")
 		default:
-			repo.files = f.trees[tree]
+			repo.files, repo.history = f.trees[tree], 1
 			f.answer(w, http.StatusOK, map[string]any{"ref": "refs/heads/" + repo.defaultBranch})
 		}
 	default:
@@ -1147,6 +1172,28 @@ func TestACreateWhoseFirstCommitIsRefusedFailsAndNamesTheRepositoryLeftBehind(t 
 		if left == nil || left.files[".hypothesisloop/job.yaml"] != "" || left.files["README.md"] == firstFiles["README.md"] {
 			t.Fatalf("%s refused: the repository left behind holds %+v, want GitHub's own first commit", step, left)
 		}
+	}
+}
+
+// A create cut off before its first commit leaves GitHub's commit alone on the default branch.
+// StartFresh writes the files there, and into a repository with commits of its own nothing.
+func TestStartFreshWritesTheFilesOnlyIntoARepositoryHoldingGitHubsFirstCommit(t *testing.T) {
+	f, client := newFakeGitHub(t)
+	f.gitRefuses = "trees"
+	if _, err := client.CreateRepository(ctx, 100, "", "sweep", "", firstFiles); err == nil {
+		t.Fatal("the first commit was not refused")
+	}
+	f.gitRefuses = ""
+	token, err := client.Token(ctx, 100, "Acme/sweep", Write)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.StartFresh(ctx, token, firstFiles); err != nil || !maps.Equal(f.repos["acme/sweep"].files, firstFiles) {
+		t.Fatalf("StartFresh on GitHub's first commit alone: %v, holds %v, want %v", err, f.repos["acme/sweep"].files, firstFiles)
+	}
+	f.repos["acme/sweep"].history = 2
+	if err := client.StartFresh(ctx, token, map[string]string{"README.md": "x\n"}); !errors.Is(err, ErrNotFresh) || !maps.Equal(f.repos["acme/sweep"].files, firstFiles) {
+		t.Fatalf("StartFresh on a repository with commits of its own: %v, want ErrNotFresh and nothing written", err)
 	}
 }
 

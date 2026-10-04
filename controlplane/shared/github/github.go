@@ -77,6 +77,9 @@ var (
 	ErrUserAuthorization = errors.New("the person's authorisation of the GitHub App is missing, expired or revoked")
 	// ErrRepositoryExists reports that the account already holds a repository of that name.
 	ErrRepositoryExists = errors.New("the GitHub account already has a repository of that name")
+	// ErrNotFresh reports a repository that holds more than the one commit GitHub makes for a
+	// repository it creates.
+	ErrNotFresh = errors.New("the repository holds commits beyond the one GitHub made at its creation")
 )
 
 // NotCoveredError reports a repository that was created on a person's own account and that the
@@ -564,6 +567,31 @@ func (c *Client) CreateRepository(ctx context.Context, installationID int64, use
 		return nil, &FirstCommitError{Repository: out.FullName, Cause: err}
 	}
 	return &Repository{FullName: out.FullName, Private: true}, nil
+}
+
+// StartFresh makes files the only commit of the token's repository, a write token's, when it
+// holds nothing but the commit GitHub made when it was created: what a CreateRepository cut off
+// before its first commit leaves. ErrNotFresh for one that holds anything more.
+func (c *Client) StartFresh(ctx context.Context, token *Token, files map[string]string) error {
+	var repository struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	if err := c.call(ctx, http.MethodGet, "/repos/"+token.Repository, token.Value, nil, &repository); err != nil {
+		return err
+	}
+	var commits []struct {
+		Parents []struct {
+			SHA string `json:"sha"`
+		} `json:"parents"`
+	}
+	path := "/repos/" + token.Repository + "/commits?per_page=2&sha=" + url.QueryEscape(repository.DefaultBranch)
+	if err := c.call(ctx, http.MethodGet, path, token.Value, nil, &commits); err != nil {
+		return err
+	}
+	if len(commits) != 1 || len(commits[0].Parents) != 0 {
+		return ErrNotFresh
+	}
+	return c.firstCommit(ctx, token, repository.DefaultBranch, files)
 }
 
 // firstCommit makes files the only commit of a branch the token's repository has: a tree, a

@@ -33,6 +33,7 @@ type GitHubApp interface {
 	Token(ctx context.Context, installationID int64, fullName string, access github.Access) (*github.Token, error)
 	File(ctx context.Context, token *github.Token, ref, path string) ([]byte, error)
 	CreateRepository(ctx context.Context, installationID int64, userToken, name, description string, files map[string]string) (*github.Repository, error)
+	StartFresh(ctx context.Context, token *github.Token, files map[string]string) error
 }
 
 // InstallationStore is the persistence of the installations orgs connected.
