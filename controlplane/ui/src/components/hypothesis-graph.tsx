@@ -227,7 +227,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
   const editor = useEditor()
   const picking = editor?.picking ?? false
   // The "+" of each node, while one can be added; the nodes stay memoized as the editor changes.
-  const onAdd = editor?.canWrite && !editor.composing && !picking ? editor.startAdding : null
+  const onAdd = editor?.canWrite && !picking ? editor.startAdding : null
   const width = useStore(s => s.width)
   const height = useStore(s => s.height)
   const [ready, setReady] = useState(false)

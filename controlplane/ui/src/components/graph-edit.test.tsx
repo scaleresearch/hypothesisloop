@@ -116,7 +116,6 @@ describe('on the graph', () => {
     fireEvent.click(plus)
     const editor = screen.getByRole('group', { name: 'New idea' })
     expect(editor.closest('.react-flow')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Add an idea refining this one' })).toBeNull()
     expect(within(editor).getByText('warmup helps')).toBeTruthy()
     await write('a longer warmup')
     fireEvent.click(within(editor).getByRole('button', { name: '+ Add a link' }))
@@ -130,6 +129,30 @@ describe('on the graph', () => {
       { type: 'builds_on', to: 'hyp-1' }, { type: 'contradicts', to: 'hyp-2' },
     ], [])
     expect(node('a longer warmup')).toBeTruthy()
+  })
+
+  it('moves the target to the node whose + is clicked, keeping the text, and back to the objective from the toolbar', async () => {
+    render(<Harness view="graph" />)
+    fireEvent.click(within(nodeBox('warmup helps')).getByRole('button', { name: 'Add an idea refining this one' }))
+    const editor = screen.getByRole('group', { name: 'New idea' })
+    await write('a longer warmup')
+    fireEvent.click(within(editor).getByRole('button', { name: '+ Add a link' }))
+    fireEvent.click(node('a cosine schedule helps'))
+    const links = () => within(editor).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))
+    expect(links()).toEqual(['Link to warmup helps', 'Link to a cosine schedule helps'])
+
+    fireEvent.click(within(nodeBox('a cosine schedule helps')).getByRole('button', { name: 'Add an idea refining this one' }))
+    expect(links()).toEqual(['Link to a cosine schedule helps'])
+    expect(within(editor).getByRole('button', { name: 'refines' }).getAttribute('aria-pressed')).toBe('true')
+    expect((within(editor).getByRole('textbox', { name: 'Your idea' }) as HTMLTextAreaElement).value).toBe('a longer warmup')
+
+    fireEvent.click(within(nodeBox('warmup helps')).getByRole('button', { name: 'Add an idea refining this one' }))
+    expect(links()).toEqual(['Link to warmup helps'])
+
+    const toolbar = screen.getAllByRole('button', { name: 'Add idea' }).find(b => !editor.contains(b))!
+    fireEvent.click(toolbar)
+    expect(links()).toEqual(['Link to Objective: Vision benchmark'])
+    expect((within(editor).getByRole('textbox', { name: 'Your idea' }) as HTMLTextAreaElement).value).toBe('a longer warmup')
   })
 
   it('links the objective as a new approach, a hypothesis by a chosen kind, and needs one it refines', async () => {
@@ -165,7 +188,7 @@ describe('on the graph', () => {
     render(<Harness view="graph" />)
     fireEvent.click(await screen.findByRole('button', { name: 'Add idea' }))
     await write('label smoothing helps')
-    fireEvent.click(screen.getByRole('button', { name: 'Add idea' }))
+    fireEvent.click(within(screen.getByRole('group', { name: 'New idea' })).getByRole('button', { name: 'Add idea' }))
     expect(await screen.findByText('invalid link: at least one builds_on link is required')).toBeTruthy()
   })
 
@@ -202,39 +225,38 @@ describe('an idea that reads close to others', () => {
     { id: 'hyp-2', status: 'open' as const, text: 'a cosine schedule helps', reason: 'close_text' as const },
   ]
 
-  it('is linked to one and kept distinct from the other', async () => {
+  it('is added anyway, told apart from every one listed', async () => {
     vi.mocked(registerHumanHypothesis)
-      .mockResolvedValueOnce({ similar })
-      .mockResolvedValueOnce(registered('hyp-3', 'warmup helps a lot', [{ type: 'builds_on', to: 'pe-x' }, { type: 'related', to: 'hyp-1' }]))
+      .mockResolvedValueOnce({ similar: [...similar, { id: 'hyp-0', status: 'refuted' as const, text: 'warmup hurts', reason: 'refuted_parent' as const }] })
+      .mockResolvedValueOnce(registered('hyp-3', 'warmup helps a lot', [{ type: 'builds_on', to: 'pe-x' }]))
     render(<Harness view="outline" />)
     fireEvent.click(screen.getByRole('button', { name: 'Add idea' }))
     await write('warmup helps a lot')
     const editor = screen.getByRole('group', { name: 'New idea' })
     fireEvent.click(within(editor).getByRole('button', { name: 'Add idea' }))
-    const first = await within(editor).findByRole('group', { name: 'Choice for warmup helps' })
-    expect((within(editor).getByRole('button', { name: 'Add idea' }) as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.click(within(first).getByRole('button', { name: 'Link to it' }))
-    fireEvent.click(within(within(editor).getByRole('group', { name: 'Choice for a cosine schedule helps' })).getByRole('button', { name: 'Keep mine distinct' }))
-    fireEvent.click(within(editor).getByRole('button', { name: 'Add idea' }))
+    expect(await within(editor).findByText('Similar ideas already on the graph:')).toBeTruthy()
+    expect(within(editor).getByText('Yours refines a refuted idea.')).toBeTruthy()
+    expect(within(editor).getAllByRole('button').map(b => b.textContent)).toEqual(expect.arrayContaining(['Add anyway', 'Cancel']))
+    expect(within(editor).queryByRole('button', { name: 'Add idea' })).toBeNull()
+    fireEvent.click(within(editor).getByRole('button', { name: 'Add anyway' }))
     await waitFor(() => expect(screen.getByLabelText('selected').textContent).toBe('hyp-3'))
-    expect(vi.mocked(registerHumanHypothesis).mock.calls[1]).toEqual(['pe-x', 'warmup helps a lot', [
-      { type: 'builds_on', to: 'pe-x' }, { type: 'related', to: 'hyp-1' },
-    ], ['hyp-2']])
+    expect(vi.mocked(registerHumanHypothesis).mock.calls[1]).toEqual(['pe-x', 'warmup helps a lot', [{ type: 'builds_on', to: 'pe-x' }], ['hyp-1', 'hyp-2', 'hyp-0']])
   })
 
-  it('is kept distinct from all in one step, or dropped for the one already there', async () => {
+  it('shows one listed without losing the idea, and goes back to editing on cancel', async () => {
     vi.mocked(registerHumanHypothesis).mockResolvedValue({ similar })
     render(<Harness view="outline" />)
     fireEvent.click(screen.getByRole('button', { name: 'Add idea' }))
     await write('warmup helps a lot')
-    fireEvent.click(screen.getByRole('button', { name: 'Add idea' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Keep mine distinct from all' }))
-    await waitFor(() => expect(registerHumanHypothesis).toHaveBeenCalledTimes(2))
-    expect(vi.mocked(registerHumanHypothesis).mock.calls[1][3]).toEqual(['hyp-1', 'hyp-2'])
-
-    fireEvent.click(screen.getAllByRole('button', { name: 'Show it' })[1])
+    const editor = screen.getByRole('group', { name: 'New idea' })
+    fireEvent.click(within(editor).getByRole('button', { name: 'Add idea' }))
+    fireEvent.click(await within(editor).findByRole('button', { name: 'a cosine schedule helps' }))
     expect(screen.getByLabelText('selected').textContent).toBe('hyp-2')
-    expect(screen.queryByRole('group', { name: 'New idea' })).toBeNull()
+    expect((within(editor).getByRole('textbox', { name: 'Your idea' }) as HTMLTextAreaElement).value).toBe('warmup helps a lot')
+    fireEvent.click(within(editor).getByRole('button', { name: 'Cancel' }))
+    expect(within(editor).queryByText('Similar ideas already on the graph:')).toBeNull()
+    expect(within(editor).getByRole('button', { name: 'Add idea' })).toBeTruthy()
+    expect(registerHumanHypothesis).toHaveBeenCalledTimes(1)
   })
 })
 

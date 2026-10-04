@@ -46,6 +46,8 @@ export interface GraphEditor {
   added: (h: RegisteredHypothesis) => Promise<void>
   /** Stops adding or linking and selects the node. */
   show: (id: string) => void
+  /** Selects the node and keeps the idea being written. */
+  select: (id: string) => void
   cancel: () => void
 }
 
@@ -133,11 +135,15 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
     setFindingTarget(false)
   }
 
+  // While an idea is being written its text stays, and its first link becomes refining the target.
   const startAdding = useCallback((target: string) => {
-    cancel()
+    setLinking(null)
+    setLinkError('')
+    setFindingTarget(false)
     setComposing(true)
-    setLinks([{ type: 'builds_on', to: target }])
-  }, [cancel])
+    const first: HypothesisLinkInput = { type: 'builds_on', to: target }
+    setLinks(ls => (composing ? [first, ...ls.slice(1).filter(l => l.to !== target)] : [first]))
+  }, [composing])
 
   async function added(h: RegisteredHypothesis) {
     const links = h.links ?? []
@@ -186,6 +192,7 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
       cancel()
       onSelect(id)
     },
+    select: onSelect,
     cancel,
   }
 }
@@ -208,12 +215,11 @@ export function ClosedNote() {
   return <Text as="span" variant="hint">Closed. New ideas go into a new experiment.</Text>
 }
 
-/** The one way to start writing an idea, opened as a new approach to the objective. */
+/** The one way to start writing an idea, as a new approach to the objective; while writing, it turns the idea back to the objective. */
 export function AddIdeaButton() {
   const editor = useEditor()
   if (!editor) return null
   if (!editor.canWrite) return editor.closed ? <ClosedNote /> : null
-  if (editor.composing) return null
   return <Button size="sm" variant="primary" onClick={() => editor.startAdding(editor.graph.root)}>Add idea</Button>
 }
 
@@ -224,7 +230,7 @@ export function addHereLabel(objective: boolean): string {
 /** The small "+" that opens the composer for one node, shown while the pointer or focus is on its row. */
 export function AddHereButton({ id, className, style }: { id: string; className?: string; style?: CSSProperties }) {
   const editor = useEditor()
-  if (!editor?.canWrite || editor.composing || editor.picking) return null
+  if (!editor?.canWrite || editor.picking) return null
   const label = addHereLabel(id === editor.graph.root)
   return (
     <Button
@@ -315,47 +321,24 @@ export function LinkBar() {
   )
 }
 
-type Choice = 'related' | 'contradicts' | 'distinct'
-
-const CHOICES: Array<{ value: Choice; label: string }> = [
-  { value: 'related', label: 'Link to it' },
-  { value: 'contradicts', label: 'Mine contradicts it' },
-  { value: 'distinct', label: 'Keep mine distinct' },
-]
-
-function SimilarIdeas({ similar, choices, onChoose, onShow }: {
-  similar: SimilarHypothesis[]
-  choices: Record<string, Choice>
-  onChoose: (id: string, choice: Choice) => void
-  onShow: (id: string) => void
-}) {
+// What the API asks of a person adding an idea that reads close to ideas already there, or that
+// refines a refuted one: their ids in distinct_from, once the person chose to add it anyway.
+function SimilarIdeas({ similar, onSelect }: { similar: SimilarHypothesis[]; onSelect: (id: string) => void }) {
   return (
     <Callout tone="warning">
-      <Stack gap="sm" className="text-xs">
-      <span className="text-muted">
-        Not added yet: these read close to your idea, or it refines a refuted one. Link yours to each, or keep it distinct.
-      </span>
-      <Stack as="ul" gap="sm" className="list-none">
-        {similar.map(h => (
-          <Stack as="li" gap="xs" key={h.id}>
-            <Inline nowrap>
+      <Stack gap="xs" className="text-xs">
+        <span>Similar ideas already on the graph:</span>
+        <Stack as="ul" gap="2xs" className="list-none">
+          {similar.map(h => (
+            <Inline as="li" gap="xs" nowrap key={h.id}>
               <Badge status={h.status}>{h.status}</Badge>
-              <span className="min-w-0 flex-1 truncate" title={h.text}>{h.text}</span>
-              <Button variant="link" size="sm" onClick={() => onShow(h.id)} title="It is my idea: show it and add nothing">Show it</Button>
+              <Button variant="link" size="sm" className="min-w-0 flex-1 justify-start truncate" title={h.text} onClick={() => onSelect(h.id)}>
+                {h.text}
+              </Button>
             </Inline>
-            {h.reason === 'refuted_parent' ? (
-              <Inline gap="xs" nowrap>
-                <span className="text-subtle">Yours refines this refuted idea.</span>
-                <Chip active={choices[h.id] === 'distinct'} onClick={() => onChoose(h.id, 'distinct')}>Refine it anyway</Chip>
-              </Inline>
-            ) : (
-              <Inline gap="xs" role="group" aria-label={`Choice for ${h.text}`}>
-                {CHOICES.map(c => <Chip key={c.value} active={choices[h.id] === c.value} onClick={() => onChoose(h.id, c.value)}>{c.label}</Chip>)}
-              </Inline>
-            )}
-          </Stack>
-        ))}
-      </Stack>
+          ))}
+        </Stack>
+        {similar.some(h => h.reason === 'refuted_parent') && <span className="text-subtle">Yours refines a refuted idea.</span>}
       </Stack>
     </Callout>
   )
@@ -373,23 +356,17 @@ export function IdeaEditor() {
   const [error, setError] = useState('')
   const [existingID, setExistingID] = useState('')
   const [similar, setSimilar] = useState<SimilarHypothesis[]>([])
-  const [choices, setChoices] = useState<Record<string, Choice>>({})
   if (!editor?.composing) return null
   const ed = editor
 
-  async function submit(chosen: Record<string, Choice>) {
+  async function submit(distinctFrom: string[]) {
     setBusy(true)
     setError('')
     setExistingID('')
     try {
-      const told = Object.entries(chosen)
-      const h = await registerHumanHypothesis(ed.graph.root, text.trim(), [
-        ...ed.links,
-        ...told.filter(([, c]) => c !== 'distinct').map(([to, c]) => ({ type: c as HypothesisLinkType, to })),
-      ], told.filter(([, c]) => c === 'distinct').map(([id]) => id))
+      const h = await registerHumanHypothesis(ed.graph.root, text.trim(), ed.links, distinctFrom)
       if ('similar' in h) {
         setSimilar(h.similar)
-        setChoices(Object.fromEntries(told.filter(([id]) => h.similar.some(s => s.id === id))))
       } else if (h.already_existed) {
         setExistingID(h.id)
       } else {
@@ -400,13 +377,6 @@ export function IdeaEditor() {
     } finally {
       setBusy(false)
     }
-  }
-
-  const undecided = similar.filter(h => !choices[h.id])
-  const keepAll = () => {
-    const all = { ...choices, ...Object.fromEntries(undecided.map(h => [h.id, 'distinct' as Choice])) }
-    setChoices(all)
-    void submit(all)
   }
 
   const buildsOn = ed.links.some(l => l.type === 'builds_on')
@@ -469,14 +439,7 @@ export function IdeaEditor() {
       <Text variant="meta" tone="subtle">
         It joins the graph under your name. Agents read it, and one that tests it registers its own idea refining yours.
       </Text>
-      {similar.length > 0 && (
-        <SimilarIdeas
-          similar={similar}
-          choices={choices}
-          onChoose={(id, c) => setChoices({ ...choices, [id]: c })}
-          onShow={ed.show}
-        />
-      )}
+      {similar.length > 0 && <SimilarIdeas similar={similar} onSelect={ed.select} />}
       {existingID && (
         <Text as="span" variant="note">
           An equivalent idea already exists, so nothing was added.{' '}
@@ -484,21 +447,21 @@ export function IdeaEditor() {
         </Text>
       )}
       {error && <InlineError>{error}</InlineError>}
-      <Inline>
-        <Button
-          size="sm"
-          variant="primary"
-          loading={busy}
-          disabled={text.trim() === '' || !buildsOn || undecided.length > 0}
-          onClick={() => submit(choices)}
-        >
-          Add idea
-        </Button>
-        {undecided.length > 0 && (
-          <Button size="sm" disabled={busy} onClick={keepAll}>Keep mine distinct from all</Button>
-        )}
-        <Button variant="link" size="sm" className="ml-auto" onClick={ed.cancel}>Cancel</Button>
-      </Inline>
+      {similar.length > 0 ? (
+        <Inline>
+          <Button size="sm" variant="primary" loading={busy} disabled={text.trim() === '' || !buildsOn} onClick={() => submit(similar.map(h => h.id))}>
+            Add anyway
+          </Button>
+          <Button variant="link" size="sm" className="ml-auto" onClick={() => setSimilar([])}>Cancel</Button>
+        </Inline>
+      ) : (
+        <Inline>
+          <Button size="sm" variant="primary" loading={busy} disabled={text.trim() === '' || !buildsOn} onClick={() => submit([])}>
+            Add idea
+          </Button>
+          <Button variant="link" size="sm" className="ml-auto" onClick={ed.cancel}>Cancel</Button>
+        </Inline>
+      )}
     </Stack>
   )
 }
