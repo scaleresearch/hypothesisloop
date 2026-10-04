@@ -31,8 +31,10 @@ What it takes:
   - The environment: one `.hypothesisloop/Dockerfile` for the whole experiment, holding what the
     control and every reference need at the versions the repository pins, with dependencies
     already fetched and built where the job's build finds them, so a job compiles only the
-    code researchers vary. `hl env build` takes minutes and jobs wait for it; an update says
-    once its jobs can run, often before its upload ends, or that it failed.
+    code researchers vary. It is built from the file alone, with the network and no credential
+    of the repository, and a job clones its commit when it starts. `hl env build` takes minutes
+    and jobs wait for it; an update says once its jobs can run, often before its upload ends, or
+    that it failed.
   - The harness: a harness that already measures these metrics runs unchanged. Otherwise the
     smallest program that does: fixed seeds, pinned revisions, inputs fetched by the job,
     metrics reported as it goes and at the end with `post_metric` of `metrics.py`. The control
