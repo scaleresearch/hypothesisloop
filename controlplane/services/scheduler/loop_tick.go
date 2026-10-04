@@ -1963,6 +1963,9 @@ func (l *Loop) heldForEnvironment(ctx context.Context, pass *environmentPass, ex
 		}
 		reason := domain.NotAdmittedEnvironmentBuilding + ": the platform builds the environment its commit declares in " + domain.EnvironmentFile + ", on " + env.Base + ", " + where +
 			". The job runs in it once it is built"
+		if env.FailedLog != "" {
+			reason += ". This file failed to build before, and the platform builds it once more. The end of that build's output:\n" + env.FailedLog
+		}
 		return true, l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason)
 	case env.State == domain.EnvironmentFailed && env.Fault == domain.EnvironmentFaultFile:
 		return true, l.endForEnvironment(ctx, exp, domain.StatusRejected, string(domain.EvictionEnvironmentFailed.WithDetail(fileFailed(env))))
@@ -1975,7 +1978,7 @@ func (l *Loop) heldForEnvironment(ctx context.Context, pass *environmentPass, ex
 
 // fileFailed says that the environment file of env did not build, with the end of its output.
 func fileFailed(env *domain.Environment) string {
-	return domain.EnvironmentFile + " of its commit did not build on " + env.Base + ", and the platform does not build the same file again. Fix it, commit and submit again. The end of the build's output:\n" + env.LogTail
+	return domain.EnvironmentFile + " of its commit did not build on " + env.Base + ". Fix it, commit and submit again; the same file submitted again is built once more. The end of the build's output:\n" + env.LogTail
 }
 
 // endForEnvironment ends exp, queued for its environment, as to with reason, settled: its usage

@@ -31,8 +31,7 @@ const (
 	EnvironmentBuilding EnvironmentState = "building"
 	EnvironmentReady    EnvironmentState = "ready"
 	// EnvironmentFailed is a build that ended without an image, for the EnvironmentFault it
-	// carries. The next submit that names one the platform failed builds it again; one the file
-	// failed is never built again.
+	// carries. The next submit that names it builds it again.
 	EnvironmentFailed EnvironmentState = "failed"
 )
 
@@ -62,7 +61,8 @@ const (
 // image. Key names the three, so the same file on the same base is built once per org. A building
 // one is assigned to ClusterName at AssignedAt for its Attempt-th time, or to none while
 // ClusterName is empty. Image is the pushed build, repository@digest, and runs once State is
-// ready. LogTail is the end of the output of a build that failed. Progress is the step its
+// ready. LogTail is the end of the output of a build that failed, and FailedLog that of the file's
+// last failed build while a later submit builds the same file once more. Progress is the step its
 // assigned cluster last reported of the attempt it builds, at ProgressAt.
 type Environment struct {
 	Key         string
@@ -73,6 +73,7 @@ type Environment struct {
 	State       EnvironmentState
 	Fault       EnvironmentFault
 	LogTail     string
+	FailedLog   string
 	ClusterName string
 	Attempt     int
 	AssignedAt  *time.Time

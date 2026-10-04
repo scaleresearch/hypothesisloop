@@ -208,8 +208,9 @@ func TestABuildIsReassignedOffADeadClusterOrAPassedLeaseUntilItsAttemptsAreSpent
 }
 
 // Only the cluster a build is assigned to, at its attempt, reports it, once. A file's fault fails
-// it for good, since the key names the file; a ready environment stays ready.
-func TestOnlyTheAssignedAttemptReportsABuildAndOneTheFileFailedIsNotBuiltAgain(t *testing.T) {
+// it, and the next submit builds it again with that build's output kept until it is built; a ready
+// environment stays ready.
+func TestOnlyTheAssignedAttemptReportsABuildAndAFailedOneIsBuiltAgainWithItsLastOutput(t *testing.T) {
 	w := newEnvironments(t)
 	ctx := context.Background()
 	env := w.assign(t, w.ensure(t, w.orgA, "fenced").Key, w.ofA)
@@ -235,16 +236,15 @@ func TestOnlyTheAssignedAttemptReportsABuildAndOneTheFileFailedIsNotBuiltAgain(t
 		t.Fatalf("a failed environment was assigned: %+v", assigned)
 	}
 	again, err := w.envs.EnsureEnvironment(ctx, env)
-	if err != nil || again.State != domain.EnvironmentFailed || again.Fault != domain.EnvironmentFaultFile || again.LogTail != "E: Unable to locate package" {
-		t.Fatalf("ensured again: %+v, %v, want it failed by the file with its output", again, err)
+	if err != nil || again.State != domain.EnvironmentBuilding || again.Attempt != 0 || again.Fault != "" || again.LogTail != "" || again.FailedLog != "E: Unable to locate package" {
+		t.Fatalf("ensured again: %+v, %v, want it building from its first attempt with the file's last output", again, err)
 	}
 
-	env = w.assign(t, w.ensure(t, w.orgA, "builds").Key, w.ofA)
-	ready := env
+	ready := w.assign(t, env.Key, w.ofA)
 	if !w.finish(t, w.ofA, ready, domain.EnvironmentBuildOutcome{Image: "registry.test/env@sha256:ok"}) {
 		t.Fatal("the build was refused")
 	}
-	if kept, err := w.envs.EnsureEnvironment(ctx, env); err != nil || kept.State != domain.EnvironmentReady || kept.Image != "registry.test/env@sha256:ok" {
+	if kept, err := w.envs.EnsureEnvironment(ctx, env); err != nil || kept.State != domain.EnvironmentReady || kept.Image != "registry.test/env@sha256:ok" || kept.FailedLog != "" {
 		t.Fatalf("a ready environment ensured: %+v, %v, want it kept", kept, err)
 	}
 }

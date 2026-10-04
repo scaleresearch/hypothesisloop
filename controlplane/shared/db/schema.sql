@@ -1372,6 +1372,9 @@ ALTER TABLE environments ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMPTZ;
 -- assignment clears it.
 ALTER TABLE environments ADD COLUMN IF NOT EXISTS progress TEXT NOT NULL DEFAULT '';
 ALTER TABLE environments ADD COLUMN IF NOT EXISTS progress_at TIMESTAMPTZ;
+-- The end of the output of the file's last failed build, kept while a later submit builds the
+-- same file once more, so the job waiting for it says so. Cleared once it is built.
+ALTER TABLE environments ADD COLUMN IF NOT EXISTS failed_log TEXT NOT NULL DEFAULT '';
 ALTER TABLE environments DROP CONSTRAINT IF EXISTS environments_state_check;
 DO $$ BEGIN
     IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'environments' AND column_name = 'attempts') THEN

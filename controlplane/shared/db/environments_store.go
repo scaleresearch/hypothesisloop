@@ -21,12 +21,12 @@ func NewEnvironmentsStore(pool *Pool) *EnvironmentsStore {
 	return &EnvironmentsStore{pool: pool}
 }
 
-const environmentColumns = ` key, org_id, base, dockerfile, image, state, fault, log_tail, cluster_name, attempt, assigned_at, progress, progress_at, created_at, updated_at `
+const environmentColumns = ` key, org_id, base, dockerfile, image, state, fault, log_tail, failed_log, cluster_name, attempt, assigned_at, progress, progress_at, created_at, updated_at `
 
 func scanEnvironment(row rowScanner) (*domain.Environment, error) {
 	env := &domain.Environment{}
 	var state, fault string
-	if err := row.Scan(&env.Key, &env.OrgID, &env.Base, &env.Dockerfile, &env.Image, &state, &fault, &env.LogTail,
+	if err := row.Scan(&env.Key, &env.OrgID, &env.Base, &env.Dockerfile, &env.Image, &state, &fault, &env.LogTail, &env.FailedLog,
 		&env.ClusterName, &env.Attempt, &env.AssignedAt, &env.Progress, &env.ProgressAt, &env.CreatedAt, &env.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -52,13 +52,15 @@ func (s *EnvironmentsStore) OrgHasEnvironmentBuilder(ctx context.Context, orgID 
 }
 
 // EnsureEnvironment returns the environment of env's key as it is stored, writing env as building
-// when there is none and making one the platform failed building again from its first attempt.
-// One the file failed stays failed: the key names the file, which fails the same way again.
+// when there is none and making a failed one building again from its first attempt. One the file
+// failed keeps the end of that build's output as FailedLog, which a fetch that failed by chance
+// lets the agent tell from an error of the file.
 func (s *EnvironmentsStore) EnsureEnvironment(ctx context.Context, env *domain.Environment) (*domain.Environment, error) {
 	const q = `WITH made AS (
 	INSERT INTO environments (key, org_id, base, dockerfile, image, state) VALUES ($1, $2, $3, $4, '', 'building')
-	ON CONFLICT (key) DO UPDATE SET state = 'building', fault = '', log_tail = '', image = '', cluster_name = '', attempt = 0, assigned_at = NULL, updated_at = now()
-	WHERE environments.state = 'failed' AND environments.fault = 'platform'
+	ON CONFLICT (key) DO UPDATE SET state = 'building', fault = '', log_tail = '', image = '', cluster_name = '', attempt = 0, assigned_at = NULL, updated_at = now(),
+		failed_log = CASE WHEN environments.fault = 'file' THEN environments.log_tail ELSE environments.failed_log END
+	WHERE environments.state = 'failed'
 	RETURNING` + environmentColumns + `)
 SELECT` + environmentColumns + `FROM made
 UNION ALL
@@ -166,7 +168,7 @@ func (s *EnvironmentsStore) FinishEnvironmentBuild(ctx context.Context, cluster,
 		if outcome.Image == "" {
 			return false, errors.New("environments_store.FinishBuild: a built environment names its image")
 		}
-		set, args = `state = 'ready', image = $4`, append(args, outcome.Image)
+		set, args = `state = 'ready', image = $4, failed_log = ''`, append(args, outcome.Image)
 	case domain.EnvironmentFaultFile:
 		set, args = `state = 'failed', fault = 'file', log_tail = $4`, append(args, outcome.LogTail)
 	case domain.EnvironmentFaultPlatform:

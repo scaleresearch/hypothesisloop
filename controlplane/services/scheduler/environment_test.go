@@ -22,7 +22,6 @@ type declared struct {
 	err       error
 	asked     *[]string
 	noBuilder bool
-	failed    bool
 }
 
 func (d declared) Declared(_ context.Context, orgID, _, _, ref, base string) (*domain.Environment, error) {
@@ -41,9 +40,6 @@ func (d declared) Declared(_ context.Context, orgID, _, _, ref, base string) (*d
 	}
 	if d.noBuilder {
 		return nil, domain.ErrNoEnvironmentBuilder
-	}
-	if d.failed {
-		return &domain.Environment{Key: domain.EnvironmentKey(orgID, file, base), Base: base, State: domain.EnvironmentFailed, Fault: domain.EnvironmentFaultFile, LogTail: "E: Unable to locate package rustc"}, nil
 	}
 	return &domain.Environment{Key: domain.EnvironmentKey(orgID, file, base), OrgID: orgID, Base: base, Dockerfile: file, State: domain.EnvironmentBuilding}, nil
 }
@@ -83,16 +79,12 @@ func TestASubmitIsRefusedAnEnvironmentFileNotBuiltOnBaseUnreadableOrWithNoBuilde
 		"unreadable":          {declared{err: api.Refuse(http.StatusServiceUnavailable, "unavailable", "GitHub is rate limiting the platform")}, ReasonEnvironmentUnreadable},
 		"no builder":          {declared{files: map[string]string{commit: rustEnvironment}, noBuilder: true}, domain.ReasonNoEnvironmentBuilder},
 		"a build context":     {declared{files: map[string]string{commit: "ARG BASE\nFROM ${BASE}\nCOPY vendor/codec /opt/codec\n"}}, domain.ReasonInvalidEnvironmentFile},
-		"the file failed":     {declared{files: map[string]string{commit: rustEnvironment}, failed: true}, string(domain.EvictionEnvironmentFailed)},
 	} {
 		s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: admittingStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
 			quota: insertingQuota{}, loop: wokenLoop{new(int)}, environments: c.environments}
 		var refused *AdmissionError
 		if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &refused) || refused.Reason != c.reason || !strings.Contains(refused.Message, domain.EnvironmentFile) {
 			t.Errorf("%s: got = %v, want %s naming the file", name, err, c.reason)
-		}
-		if c.environments.failed && !strings.HasSuffix(refused.Message, "E: Unable to locate package rustc") {
-			t.Errorf("%s: %q, want the end of the build's output", name, refused.Message)
 		}
 	}
 }
@@ -156,6 +148,7 @@ func TestAJobWaitsForItsAssignedEnvironmentAndEndsByWhoseFaultItFailed(t *testin
 	}{
 		"assigned":   {domain.Environment{State: domain.EnvironmentBuilding, ClusterName: "builder-a", Attempt: 2, AssignedAt: &assignedAt}, "held"},
 		"unassigned": {domain.Environment{State: domain.EnvironmentBuilding}, "waiting"},
+		"again":      {domain.Environment{State: domain.EnvironmentBuilding, ClusterName: "builder-a", Attempt: 1, AssignedAt: &assignedAt, FailedLog: "curl: (6) Could not resolve host"}, "again"},
 		"file":       {domain.Environment{State: domain.EnvironmentFailed, Fault: domain.EnvironmentFaultFile}, "rejected"},
 		"platform":   {domain.Environment{State: domain.EnvironmentFailed, Fault: domain.EnvironmentFaultPlatform}, "unbuilt"},
 		"ready":      {domain.Environment{State: domain.EnvironmentReady, Image: "registry.test/env@sha256:1"}, "placed"},
@@ -183,6 +176,11 @@ func TestAJobWaitsForItsAssignedEnvironmentAndEndsByWhoseFaultItFailed(t *testin
 		case "held":
 			if !held || reason != domain.NotAdmittedEnvironmentBuilding+": the platform builds the environment its commit declares in .hypothesisloop/Dockerfile, on registry.test/job:1, on cluster builder-a, attempt 2 of 3 (the platform builds a file again only after a failure of its own). The job runs in it once it is built" || len(store.terminated) > 0 {
 				t.Errorf("%s: held %v, reason %q, want held naming the cluster and the attempt", name, held, reason)
+			}
+		case "again":
+			if !held || !strings.Contains(reason, "attempt 1 of 3. The job runs in it once it is built. This file failed to build before, and the platform builds it once more") ||
+				!strings.HasSuffix(reason, "\ncurl: (6) Could not resolve host") || len(store.terminated) > 0 {
+				t.Errorf("%s: held %v, reason %q, want it held saying the file failed before, with that output", name, held, reason)
 			}
 		case "waiting":
 			if !held || !strings.HasPrefix(reason, domain.NotAdmittedEnvironmentBuilding+": ") || !strings.Contains(reason, "has room") || len(store.terminated) > 0 {
