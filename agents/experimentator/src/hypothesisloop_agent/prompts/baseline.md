@@ -32,7 +32,7 @@ What it takes:
     already fetched and built where the job's build finds them, so a job builds only the
     code researchers vary. It is built from the file alone, with the network; a `RUN
     --mount=type=secret,id=git-credentials` reads the repository at a commit it pins, through
-    `git -c credential.helper='store --file=/run/secrets/git-credentials'`, and nothing of it
+    `git -c credential.helper= -c credential.helper='store --file=/run/secrets/git-credentials'`, and nothing of it
     stays in the image. A job runs its commit, cloned when it starts, in that image on the
     hardware its spec asks for; your own machine has none of that hardware, and you have sudo
     on it. `hl env build` takes minutes and jobs wait for it; an update says once its jobs can
