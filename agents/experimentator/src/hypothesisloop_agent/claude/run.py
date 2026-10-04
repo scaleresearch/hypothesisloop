@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -102,7 +103,7 @@ def _log_message(message, agent: str) -> None:
             "rate_limit: status=%s type=%s utilization=%s resets_at=%s",
             info.status, info.rate_limit_type, info.utilization, info.resets_at,
         )
-        _progress.rate_limit(progress.rate_limit_line(info.status, info.rate_limit_type, info.utilization, info.resets_at))
+        _progress.model(info.status, info.rate_limit_type, info.utilization, info.resets_at)
 
 
 # The model provider's rate limit as the CLI last said it, for the whole account: a subagent's
@@ -133,7 +134,7 @@ def _updates_hook(setup: core.RunSetup, watch_env: dict[str, str], handing: asyn
         async with handing:
             env = updates.taking(watch_env, "draining")
             events = await updates.drain(env)
-            told = await _told(setup, events)
+            told = await _told(setup, watch_env, events)
             updates.delivered(env)
         if not told:
             return {}
@@ -145,12 +146,14 @@ def _updates_hook(setup: core.RunSetup, watch_env: dict[str, str], handing: asyn
     return hook
 
 
-# SendMessage reaches this session's own subagents and no agent of the platform experiment. The
-# CLI answers one it could not deliver with "use the agent ID", and an agent then tries each id.
+# The CLI answers a SendMessage it could not deliver with "use the agent ID", and an agent then
+# tries each id. Its target was a subagent that a restart stopped, or another agent of the
+# platform experiment, which SendMessage never reaches.
 _UNDELIVERED = (
-    "No message reaches another agent of the platform experiment, under any name or id: send none again. "
-    "Write it with `hl hypothesis comment ID --text T` on a hypothesis of that agent: its owner and the "
-    "coordinator get it as `comment.new` in their next update.")
+    "SendMessage reaches only the subagents running in this session: send none again. A subagent started "
+    "before a restart was stopped with it: start it again with Agent, from its hypothesis, branch and jobs. "
+    "Another agent of the platform experiment is reached with `hl hypothesis comment ID --text T` on one of "
+    "its hypotheses: its owner and the coordinator get it as `comment.new` in their next update.")
 
 
 async def _undelivered_hook(hook_input, tool_use_id, context) -> dict:
@@ -165,8 +168,8 @@ async def _undelivered_hook(hook_input, tool_use_id, context) -> dict:
 _UNDELIVERED_MATCHER = HookMatcher(matcher="SendMessage", hooks=[_undelivered_hook])
 
 
-# A baseline agent slept 23 times around `hl job status` for a job being built, though hl job
-# submit had said the result arrives as an update: each wake was a model call over its whole
+# A baseline agent slept 23 times around `hl job status` for a job being built, though the
+# result arrives as an update: each wake was a model call over its whole
 # context, 44% of what it spent. A command that waits is refused with how to wait.
 _WAIT_LIMIT_S = 30
 _SLEEP = re.compile(r"\bsleep((?:\s+\d+(?:\.\d+)?[smhd]?\b)+)")
@@ -317,6 +320,11 @@ _CONTEXT_COMPACTION_THRESHOLD_TOKENS = 400_000
 _CONTEXT_WINDOW_SHARE = 0.75
 # A transcript this large rotates too, so that the session still fits what the platform stores.
 _TRANSCRIPT_ROTATION_BYTES = session.MAX_BYTES * 3 // 4
+# A rotation ends the CLI and with it every subagent at work, which a lead then starts again. While
+# one is live the session goes on past the points above, up to this part of the window or of what
+# the platform stores.
+_HARD_SHARE = 0.9
+_TRANSCRIPT_HARD_BYTES = int(session.MAX_BYTES * _HARD_SHARE)
 _COMPACTION_PROMPT = (
     "We must rotate to a fresh session because this session has reached its context budget. "
     "Produce a concise but complete handoff for the next instance of yourself: current platform "
@@ -559,20 +567,29 @@ def _revision_prompt(setup: core.RunSetup, draft: dict) -> str:
     return prompt + _REVISION_PROPOSAL.format(path=path)
 
 
-async def _told(setup: core.RunSetup, events: list[dict]) -> str:
+async def _with_situation(setup: core.RunSetup, watch_env: dict[str, str], prompt: str) -> str:
+    """prompt with the situation at its end, read now, for every role in a run: a planner has
+    none yet."""
+    if config.plans(setup.cfg):
+        return prompt
+    return f"{prompt}\n\n{await updates.situation(watch_env)}"
+
+
+async def _told(setup: core.RunSetup, watch_env: dict[str, str], events: list[dict]) -> str:
     """What the agent is told of a batch of updates, "" for nothing. A revision asked of a planner
     is an event that points at the draft: it is told as the revision itself, and one that the
     planner has answered since, which a restored cursor replays, is told as nothing. A baseline
-    agent is told its clock with the updates."""
+    agent is told its clock with the updates, and everyone the situation."""
     rest = [e for e in events if e["kind"] != updates.REVISION]
     parts = [updates.message(rest, setup.cfg.agent_id)] if rest else []
     if len(rest) < len(events):
         draft = await asyncio.to_thread(core.revising, setup)
         if draft:
             parts.insert(0, _revision_prompt(setup, draft))
-    if parts:
-        parts.append(await asyncio.to_thread(core.baseline_clock, setup))
-    return "\n\n".join(part for part in parts if part)
+    if not parts:
+        return ""
+    parts.append(await asyncio.to_thread(core.baseline_clock, setup))
+    return await _with_situation(setup, watch_env, "\n\n".join(part for part in parts if part))
 
 
 def _first_prompt(setup: core.RunSetup, resume_id: str | None, initial_prompt: str | None) -> str:
@@ -654,7 +671,7 @@ async def _last_turn(client, setup: core.RunSetup, watch_env: dict[str, str], ha
         events = await updates.drain(env)
         for line in activity.event_lines(events, agent):
             print(line, flush=True)
-        await client.query(prompt + ("\n\n" + updates.message(events, agent) if events else ""))
+        await client.query(await _with_situation(setup, watch_env, prompt + ("\n\n" + updates.message(events, agent) if events else "")))
         updates.delivered(env)
     limit = _shutdown_turn_s(setup)
     try:
@@ -773,15 +790,16 @@ def context_overflowed(message: ResultMessage) -> bool:
     return any(marker in text for marker in _CONTEXT_OVERFLOWS)
 
 
-def _rotation_threshold(message: ResultMessage, model: str) -> int:
-    """The context at which the session rotates: the fixed ceiling, or less for a model whose
-    window, as the CLI reports it in the turn's result, is smaller."""
+def _rotation_limits(message: ResultMessage, model: str) -> tuple[int, int]:
+    """The context at which the session rotates with no subagent live, the fixed ceiling or less
+    for a model whose window, as the CLI reports it in the turn's result, is smaller, and the
+    context at which it rotates whatever is live. Without a window reported the two are one."""
     windows = {name: int(usage.get("contextWindow") or 0) for name, usage in (message.model_usage or {}).items()
                if isinstance(usage, dict)}
     window = next((w for name, w in windows.items() if name.startswith(model) and w), max(windows.values(), default=0))
     if not window:
-        return _CONTEXT_COMPACTION_THRESHOLD_TOKENS
-    return min(_CONTEXT_COMPACTION_THRESHOLD_TOKENS, int(window * _CONTEXT_WINDOW_SHARE))
+        return _CONTEXT_COMPACTION_THRESHOLD_TOKENS, _CONTEXT_COMPACTION_THRESHOLD_TOKENS
+    return min(_CONTEXT_COMPACTION_THRESHOLD_TOKENS, int(window * _CONTEXT_WINDOW_SHARE)), int(window * _HARD_SHARE)
 
 
 def _transcript_bytes(session_id: str | None) -> int:
@@ -912,10 +930,12 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             await _store_session(setup)
         return True
 
-    opening = await asyncio.to_thread(_opening, setup, resume_id, initial_prompt)
+    opening = await _with_situation(setup, watch_env, await asyncio.to_thread(_opening, setup, resume_id, initial_prompt))
     connecting = time.monotonic()
-    idle_s, told_nothing_in_flight = updates.IDLE_NUDGE_S, False
+    # An agent waits for an update with no limit, a coordinator until its review.
+    idle_s = updates.REVIEW_S if config.coordinates(cfg) else math.inf
     background: set[str] = set()
+    _progress.subagents(0)
     async with ClaudeSDKClient(options=options) as client:
         log.info("model CLI connected in %.1fs", time.monotonic() - connecting)
         await client.query(opening)
@@ -923,7 +943,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             got_result = False
             turn_is_error = overflowed = False
             context_tokens = 0
-            rotate_at = _CONTEXT_COMPACTION_THRESHOLD_TOKENS
+            rotate_at = hard_at = _CONTEXT_COMPACTION_THRESHOLD_TOKENS
             interrupter = asyncio.ensure_future(_interrupt_on_stop(client, setup, stopped))
             try:
                 async for message in _receive_turn(client):
@@ -936,7 +956,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                         got_result = True
                         turn_is_error = message.is_error
                         overflowed = message.is_error and context_overflowed(message)
-                        rotate_at = _rotation_threshold(message, model)
+                        rotate_at, hard_at = _rotation_limits(message, model)
                         if message.is_error and credential_refused(message.result):
                             # Backing off cannot fix a credential the provider refuses. Exiting
                             # is what tells whoever started this agent, and with what words.
@@ -988,7 +1008,11 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 return False
 
             transcript_bytes = _transcript_bytes(resume_id)
-            if context_tokens >= rotate_at or transcript_bytes >= _TRANSCRIPT_ROTATION_BYTES:
+            due = context_tokens >= rotate_at or transcript_bytes >= _TRANSCRIPT_ROTATION_BYTES
+            if due and background and context_tokens < hard_at and transcript_bytes < _TRANSCRIPT_HARD_BYTES:
+                log.info("rotation deferred: %d subagents live (context ~%d tokens, transcript %d bytes)",
+                         len(background), context_tokens, transcript_bytes)
+            elif due:
                 log.info("context reached ~%d tokens, transcript %d bytes: creating handoff before fresh session",
                          context_tokens, transcript_bytes)
                 await client.query(_COMPACTION_PROMPT)
@@ -1003,19 +1027,14 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 await _rotate(setup, handoff, resume_id)
                 return True
 
-            # The agent ended its turn. With no job of its own queued or running and nothing in the
-            # background its wait waits for nothing: it is told so at once, and not again until an
-            # update or a job of its own comes.
-            if config.submits_jobs(cfg) and not background:
-                in_flight = await updates.jobs_in_flight(watch_env)
-                if in_flight:
-                    told_nothing_in_flight = False
-                elif in_flight == 0 and not told_nothing_in_flight:
-                    told_nothing_in_flight = True
-                    log.info("no job in flight at the end of the turn, saying so")
-                    _forget_job_reads()
-                    await client.query(updates.NOTHING_IN_FLIGHT)
-                    continue
+            # The agent ended its turn. With no job of its own queued or running and no subagent
+            # live its wait waits for nothing: it is told so at every such end, and a read that
+            # failed says nothing.
+            if config.submits_jobs(cfg) and not background and await updates.jobs_in_flight(watch_env) == 0:
+                log.info("nothing in flight at the end of the turn, saying so")
+                _forget_job_reads()
+                await client.query(await _with_situation(setup, watch_env, updates.NOTHING_IN_FLIGHT))
+                continue
             # Wait for the next batch of updates about its own jobs and hypotheses and hand it
             # over on the same connection. A turn the CLI starts by itself ends the wait and is
             # read first: one starts when a subagent ends, and on a resume to say which stopped.
@@ -1043,12 +1062,10 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                     _forget_job_reads()
                     await client.query(told)
                     updates.delivered(taken)
-                idle_s, told_nothing_in_flight = updates.IDLE_NUDGE_S, False
                 continue
-            log.info("no platform updates for %ds, nudging", idle_s)
+            log.info("nothing woke the session for %ds: its review", idle_s)
             _forget_job_reads()
-            await client.query(updates.IDLE_PROMPT.format(minutes=round(idle_s / 60)))
-            idle_s = min(idle_s * 2, updates.IDLE_NUDGE_MAX_S)
+            await client.query(await _with_situation(setup, watch_env, updates.REVIEW_PROMPT.format(minutes=round(idle_s / 60))))
 
 
 async def _next_told(setup: core.RunSetup, watch_env: dict[str, str], ended, idle_s: float,
@@ -1059,7 +1076,7 @@ async def _next_told(setup: core.RunSetup, watch_env: dict[str, str], ended, idl
     while True:
         taken = updates.taking(watch_env, "waiting")
         events = await updates.next_batch(taken, ended, idle_s)
-        told = await _told(setup, events) if events and not ended() else ""
+        told = await _told(setup, watch_env, events) if events and not ended() else ""
         if told or not events or ended():
             return events, told, taken
         async with handing:
@@ -1087,6 +1104,7 @@ def _note_background(message, background: set[str]) -> None:
     if isinstance(message, SystemMessage) and message.subtype == "background_tasks_changed":
         background.clear()
         background.update(task["task_id"] for task in message.data.get("tasks", []))
+        _progress.subagents(len(background))
 
 
 async def _own_turn(client, setup: core.RunSetup, background: set[str]) -> None:
@@ -1158,6 +1176,7 @@ async def _run_until_stopped(setup: core.RunSetup, model: str, stop_flag: list) 
                 raise
             log.warning("session lost its connection to the CLI (%s): reconnecting after backoff", e)
             rotated = False
+        _progress.subagents(0)
         # The CLI has exited here and written all of its transcript. The store at the end of a
         # turn can come before the CLI wrote the turn's last reply, and after a planner's
         # answer or an agent's finish no turn follows to store it.

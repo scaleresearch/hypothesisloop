@@ -24,8 +24,11 @@ class Clock:
 
 class ProgressTest(unittest.TestCase):
     def setUp(self):
-        self.clock, self.lines = Clock(), []
-        self.progress = progress.Progress(quiet_limit_s=100, clock=self.clock, emit=self.lines.append)
+        self.clock, self.lines, self.states = Clock(), [], []
+        self.wall = Clock()
+        self.wall.now = 1760000000.0
+        self.progress = progress.Progress(quiet_limit_s=100, clock=self.clock, wall=self.wall, emit=lambda line: (
+            self.states if line.startswith(progress.STATE_PREFIX + " ") else self.lines).append(line))
 
     def test_every_beat_prints_a_marker_the_launcher_reads_and_no_two_are_the_same(self):
         for _ in range(3):
@@ -88,17 +91,29 @@ class ProgressTest(unittest.TestCase):
         self.assertRegex(line, r"^hl-activity .+$")
         self.assertNotIn("\n", line)
 
-    # The launcher hands the newest rate-limit line to the platform's run health, so it goes out
-    # with every beat once there is a reading. launcherapi.parseRateLimit reads this format.
-    def test_the_rate_limit_last_read_is_said_with_every_beat(self):
+    # Nothing outside the harness knew whether a lead had subagents at work or a turn in flight,
+    # so a lead with neither looked like one at work. The launcher hands the newest state line to
+    # the platform with every beat; launcherapi.parseHarnessState reads this format.
+    def test_the_state_is_said_with_every_beat(self):
         self.progress.beat()
-        line = progress.rate_limit_line("allowed_warning", "seven_day", 0.95, 1760000000)
-        self.assertEqual(line, "hl-rate-limit status=allowed_warning type=seven_day utilization=0.95 resets_at=1760000000")
-        self.assertEqual(progress.rate_limit_line("rejected", None, None, None), "hl-rate-limit status=rejected")
-        self.progress.rate_limit(line)
+        self.assertEqual(self.states, ["hl-state subagents=0 turn=waiting since=1760000000"])
+        self.wall.now += 30
+        self.progress.awaiting()
+        self.progress.subagents(3)
+        self.wall.now += 30
+        self.progress.awaiting()
+        self.progress.model("allowed_warning", "seven_day", 0.95, 1760090000)
         self.progress.beat()
+        self.assertEqual(self.states[-1], "hl-state subagents=3 turn=working since=1760000030 model_status=allowed_warning "
+                                          "model_type=seven_day model_utilization=0.95 model_resets_at=1760090000")
+        self.wall.now += 30
+        self.progress.resting()
+        self.progress.model("rejected", None, None, None)
         self.progress.beat()
-        self.assertEqual(self.lines, ["hl-progress 1", "hl-progress 2", line, "hl-progress 3", line])
+        self.assertEqual(self.states[-1], "hl-state subagents=3 turn=waiting since=1760000090 model_status=rejected")
+        self.assertEqual(len(self.states), 3)
+        for line in self.states:
+            self.assertLessEqual(len(line.removeprefix("hl-state ")), 200)
 
     def test_a_harness_that_has_said_nothing_prints_no_activity(self):
         self.progress.beat()
@@ -157,7 +172,10 @@ class BeatInTheRunLoopTest(unittest.IsolatedAsyncioTestCase):
         markers = [line for line in printed if line.startswith(progress.PREFIX + " ")]
         self.assertEqual(len(set(markers)), len(markers))
         # Beside each marker the loop says what the agent is at: a turn in flight is thinking.
-        self.assertEqual({line for line in printed if line not in markers}, {"hl-activity thinking"})
+        self.assertEqual({line for line in printed if line not in markers and not line.startswith(progress.STATE_PREFIX)},
+                         {"hl-activity thinking"})
+        self.assertRegex([line for line in printed if line.startswith(progress.STATE_PREFIX)][-1],
+                         r"^hl-state subagents=0 turn=working since=\d+$")
 
 
 class StreamingClient:

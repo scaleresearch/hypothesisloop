@@ -4,6 +4,7 @@ import unittest
 from unittest import mock
 from types import SimpleNamespace
 
+from conftest import SITUATION
 from hypothesisloop_agent import core
 
 
@@ -82,9 +83,11 @@ class RunEndedTest(unittest.TestCase):
         measuring = setup(baseline_agent(), {"status": "open", "baseline_due_at": due})
         self.assertEqual(run._first_prompt(measuring, None, None), "Begin.\n\n" + clock)
         job = [{"kind": "experiment.status", "subject": "job-1", "value": "FAILED"}]
-        self.assertTrue(asyncio.run(run._told(measuring, job)).endswith("\n\n" + clock))
-        self.assertEqual(asyncio.run(run._told(measuring, [])), "")
-        self.assertEqual(asyncio.run(run._told(setup(baseline_agent(), {"status": "running"}), job)), asyncio.run(run._told(setup(planner(), {}), job)))
+        self.assertTrue(asyncio.run(run._told(measuring, {}, job)).endswith("\n\n" + clock + "\n\n" + SITUATION))
+        self.assertEqual(asyncio.run(run._told(measuring, {}, [])), "")
+        told = "Platform updates:\nexperiment.status job-1 FAILED"
+        self.assertEqual(asyncio.run(run._told(setup(baseline_agent(), {"status": "running"}), {}, job)), told + "\n\n" + SITUATION)
+        self.assertEqual(asyncio.run(run._told(setup(planner(), {}), {}, job)), told, "a planner has no run to read the situation of")
         self.assertEqual(run._first_prompt(setup(planner(), {"status": "draft", "baseline_due_at": due}), None, None), "Begin.")
 
     # A planner woken for a revision found its proposal's file gone with its machine and wrote

@@ -63,7 +63,8 @@ def _code_sections() -> dict[str, str]:
 # sleep loops around `hl job status`: ending the turn is the one way to wait.
 WAIT = "To wait, reply with no command in it: your turn ends, and the next update starts another."
 _EVERY_ROLE = (f"\n{WAIT} A job's change arrives as an update, so reading its status, metrics or logs "
-               "again before one comes is refused. An error from `hl` is signal: do what it says.")
+               "again before one comes is refused. An error from `hl` is signal: do what it says. "
+               "`hl` prints its answer on stdout and its hints on stderr: parse stdout alone.")
 
 
 def system_prompt(cfg: config.Config, rules: str, commands: str, repository_url: str, workdir: str) -> str:

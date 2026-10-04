@@ -6,7 +6,12 @@ import tempfile
 import time
 import unittest
 
+from conftest import SITUATION
 from hypothesisloop_agent import outage, updates
+
+# The read itself, which conftest stubs for every test.
+REAL_SITUATION = updates.situation
+S = "\n\n" + SITUATION
 
 COMPLETED = '{"kind":"experiment.status","subject":"exp-1","value":"COMPLETED","detail":"","agent_id":"agent-a","position":5,"cursor":5}'
 COMMENT = '{"kind":"comment.new","subject":"hyp-1","value":"agent","detail":"","agent_id":"agent-b","position":6,"cursor":6}'
@@ -69,8 +74,11 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(asked[-1], "watch --no-wait --timeout 5")
         self.assertIn("agent.finished", updates.WAKES["coordinator"])
         # A researcher worked 28 minutes with nothing on the platform and nobody was woken by it.
-        for role in ("agent", "coordinator"):
-            self.assertIn("agent.idle", updates.WAKES[role])
+        # The notice repeats while the stretch lasts: it wakes the agent each time, and the
+        # coordinator for the first, the repeats riding along with its next batch.
+        self.assertIn("agent.idle", updates.WAKES["agent"])
+        self.assertIn("agent.idle=new", updates.WAKES["coordinator"])
+        self.assertNotIn("agent.idle", updates.WAKES["coordinator"])
         # A job that waited an hour for cores no node had told neither its agent nor the coordinator.
         for role in ("agent", "coordinator"):
             self.assertIn("experiment.blocked", updates.WAKES[role])
@@ -90,7 +98,7 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
         for status, wakes in (("open", updates.WAKES["coordinator"] + ("experiment.status=FAILED",)), ("running", updates.WAKES["coordinator"])):
             command, counter = fake_hl('[ "$1" = platform-experiments ] && { echo \'{\n "status": "%s"\n}\'; exit 0; }\n'
                                        'echo "$*" >> "$0.args"\nexit 0\n' % status)
-            await updates.next_batch(coordinator, lambda: False, 0.2, command=command)
+            await updates.next_batch(coordinator, lambda: False, 0.2, command=command, coalesce_s=0)
             with open(counter.replace(".runs", ".args")) as f:
                 self.assertEqual(f.read().splitlines()[0], "watch --wake " + ",".join(wakes))
 
@@ -103,10 +111,29 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
                 '"agent_id":"","position":9,"cursor":9}')
         command, counter = fake_hl('[ "$1" = platform-experiments ] && { echo \'{"status": "running"}\'; exit 0; }\n'
                                    f'echo "$*" >> "$0.args"\necho \'{done}\'\n')
-        events = await updates.next_batch(coordinator, lambda: False, 10, command=command)
+        events = await updates.next_batch(coordinator, lambda: False, 10, command=command, coalesce_s=0)
         self.assertEqual(updates.message(events, ""), "Platform updates:\nplatform_experiment.status pe-1 running researchers_done")
         with open(counter.replace(".runs", ".args")) as f:
             self.assertIn("platform_experiment.status", f.read().splitlines()[0].split(" ")[-1].split(","))
+
+    # A coordinator was woken about 11 times an hour, often for one event of several that came
+    # within a minute. What follows the waking event closely comes in the same wake; an agent's
+    # batch, a message among it, comes at once.
+    async def test_a_coordinators_batch_holds_what_arrives_soon_after_the_event_that_woke_it(self):
+        coordinator = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"coordinator:pe-1").decode().rstrip("=") + ".mac"}
+        finished = COMMENT.replace("comment.new", "agent.finished")
+        script = ('[ "$1" = platform-experiments ] && { echo \'{"status": "running"}\'; exit 0; }\n'
+                  f'echo "$*" >> "$0.args"\n[ "$2" = --no-wait ] && {{ echo \'{finished}\'; exit 0; }}\necho \'{COMMENT}\'\n')
+        command, _ = fake_hl(script)
+        started = time.monotonic()
+        events = await updates.next_batch(coordinator, lambda: False, 10, command=command, coalesce_s=0.3)
+        self.assertGreaterEqual(time.monotonic() - started, 0.3)
+        self.assertEqual([e["kind"] for e in events], ["comment.new", "agent.finished"])
+        command, counter = fake_hl(script)
+        events = await updates.next_batch(ENV, lambda: False, 10, command=command, coalesce_s=30)
+        self.assertEqual([e["kind"] for e in events], ["comment.new"])
+        with open(counter.replace(".runs", ".args")) as f:
+            self.assertEqual(len(f.read().splitlines()), 1)
 
     # A platform experiment that could not be read was taken as running, so a coordinator of an
     # open one waited without the wake for a failed job and nothing said so.
@@ -114,10 +141,11 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
         coordinator = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"coordinator:pe-1").decode().rstrip("=") + ".mac"}
         refused, counter = fake_hl('[ "$1" = platform-experiments ] && { [ -e "$0.asked" ] || { touch "$0.asked"; exit 1; }; echo \'{"status": "open"}\'; exit 0; }\n'
                                    f'echo "$*" >> "$0.args"\necho \'{COMMENT}\'\n')
-        events = await updates.next_batch(coordinator, lambda: False, 10, command=refused, retry_s=0.1)
-        self.assertEqual([e["kind"] for e in events], ["comment.new"])
+        events = await updates.next_batch(coordinator, lambda: False, 10, command=refused, retry_s=0.1, coalesce_s=0)
+        self.assertEqual([e["kind"] for e in events], ["comment.new", "comment.new"])
         with open(counter.replace(".runs", ".args")) as f:
-            self.assertEqual(f.read().splitlines(), ["watch --wake " + ",".join(updates.WAKES["coordinator"] + updates.OPEN_WAKES)])
+            self.assertEqual(f.read().splitlines(), ["watch --wake " + ",".join(updates.WAKES["coordinator"] + updates.OPEN_WAKES),
+                                                     "watch --no-wait --timeout 5"])
 
     # hl exits 1 for a refusal as for a platform that is down, so a failed watch starts no outage:
     # it is retried, and the read that keeps the outage clock is asked for at once.
@@ -179,7 +207,7 @@ class JobStateTest(unittest.IsolatedAsyncioTestCase):
              '"guaranteed_accelerator_hours":2,"burst_accelerator_hours":4,'
              '"used_guaranteed_acch":0.11336604166666665,"used_burst_acch":0}\n')
 
-    async def test_ended_jobs_arrive_with_their_metrics_and_what_is_unfinished_from_one_read_each(self):
+    async def test_ended_jobs_arrive_with_their_metrics_from_one_read(self):
         second = COMPLETED.replace("exp-1", "exp-2").replace(":5", ":7")
         evicted = COMPLETED.replace("exp-1", "exp-3").replace("COMPLETED", "EVICTED").replace('"detail":""', '"detail":"oom"')
         command, counter = fake_hl("\n".join(f"echo '{e}'" for e in (COMPLETED, COMMENT, second, evicted, COMPLETED)) + "\n",
@@ -191,25 +219,9 @@ class JobStateTest(unittest.IsolatedAsyncioTestCase):
                          "comment.new hyp-1 agent by agent-b\n"
                          "experiment.status exp-2 COMPLETED acc 0.95, "
                          "ranks nowhere: constraint exact_match is 0.5, and must be at least 1\n"
-                         "experiment.status exp-3 EVICTED oom on node blackhole-1\n"
-                         "unfinished_jobs 1 QUEUED, 2 RUNNING\n"
-                         "quota_used 0.113 of 2 AccH, room for jobs holding 1.85 guaranteed or 1.85 burst at once")
+                         "experiment.status exp-3 EVICTED oom on node blackhole-1")
         with open(counter.replace(".runs", ".reads")) as f:
-            self.assertEqual(f.read(), "job status exp-1 exp-2 exp-3\njob stats --agent agent-a\nquota\n")
-
-    async def test_the_last_job_ending_says_none_is_unfinished(self):
-        command, _ = fake_hl(f"echo '{COMPLETED}'\n", self.JOBS, '{"total":1,"by_status":{"COMPLETED":1}}\n')
-        events = await updates.drain(ENV, command=command)
-        self.assertEqual(updates.message(events, "agent-a").splitlines()[-1], "unfinished_jobs none")
-
-    async def test_a_share_that_a_later_stage_raises_says_to_what_and_when(self):
-        quota = self.QUOTA.replace('"used_burst_acch":0', '"used_burst_acch":0,"next_stage_starts_at":"2026-10-06T21:43:44Z",'
-                                                          '"next_stage_share_accelerator_hours":2.829331')
-        command, _ = fake_hl(f"echo '{COMPLETED}'\n", self.JOBS, self.STATS, quota)
-        events = await updates.drain(ENV, command=command)
-        self.assertEqual(updates.message(events, "agent-a").splitlines()[-1],
-                         "quota_used 0.113 of 2 AccH, room for jobs holding 1.85 guaranteed or 1.85 burst at once, "
-                         "and the share rises to 2.83 AccH by 2026-10-06T21:43:44Z")
+            self.assertEqual(f.read(), "job status exp-1 exp-2 exp-3\n", "what stands around the batch comes with the situation")
 
     async def test_a_batch_without_an_ended_job_reads_no_job(self):
         command, counter = fake_hl(f"echo '{COMMENT}'\n", self.JOBS, self.STATS)
@@ -230,28 +242,29 @@ class JobStateTest(unittest.IsolatedAsyncioTestCase):
         with self.assertLogs("llm_agent", "WARNING") as logged:
             events = await updates.drain(ENV, command=command)
         self.assertEqual(updates.message(events, "agent-a"), "Platform updates:\nexperiment.status exp-1 COMPLETED\n"
-                         "not_read the metrics and machine of the jobs that ended: `hl job status exp-1` reads it\n"
-                         "not_read your unfinished jobs: `hl job stats --agent agent-a` reads it\n"
-                         "not_read your quota: `hl quota` reads it")
-        self.assertEqual(len(logged.records), 3)
-
-    # Quota is granted at the start. Before it `hl quota` exits 1 with the reason quota_not_granted,
-    # which is an answer and no failed read: a warning was logged for it with every batch.
-    async def test_quota_not_granted_yet_is_no_read_that_failed(self):
-        command, _ = fake_hl(f"echo '{COMPLETED}'\n", self.JOBS, self.STATS,
-                             quota_refusal="hl: quota: quota_not_granted: agent agent-a holds no quota yet: it is granted when the platform experiment starts.\n")
-        with self.assertNoLogs("llm_agent", "WARNING"):
-            events = await updates.drain(ENV, command=command)
-        self.assertEqual(updates.message(events, "agent-a").splitlines()[2:], ["unfinished_jobs 1 QUEUED, 2 RUNNING"])
-
-    async def test_a_quota_read_refused_for_another_reason_is_a_read_that_failed(self):
-        command, _ = fake_hl(f"echo '{COMPLETED}'\n", self.JOBS, self.STATS,
-                             quota_refusal="hl: quota: not_found: no quota_not_granted here\n")
-        with self.assertLogs("llm_agent", "WARNING") as logged:
-            events = await updates.drain(ENV, command=command)
-        self.assertEqual(updates.message(events, "agent-a").splitlines()[2:],
-                         ["unfinished_jobs 1 QUEUED, 2 RUNNING", "not_read your quota: `hl quota` reads it"])
+                         "not_read the metrics and machine of the jobs that ended: `hl job status exp-1` reads it")
         self.assertEqual(len(logged.records), 1)
+
+
+# Capacity, budget, time, standings and allowances were each a separate read the agents had to
+# think of. `hl situation` closes every prompt as it prints it; a read that failed says so.
+class SituationTest(unittest.IsolatedAsyncioTestCase):
+    async def read(self, script: str) -> str:
+        directory = tempfile.mkdtemp()
+        path = os.path.join(directory, "hl")
+        with open(path, "w") as f:
+            f.write("#!/bin/sh\n[ \"$1\" = situation ] || exit 9\n" + script)
+        os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC)
+        return await REAL_SITUATION(ENV, hl=path)
+
+    async def test_the_situation_is_pasted_as_hl_prints_it(self):
+        self.assertEqual(await self.read("printf 'run: 90 minutes left\\ncapacity: fits_now 3\\n'\necho hint >&2\n"),
+                         "Situation:\nrun: 90 minutes left\ncapacity: fits_now 3")
+
+    async def test_a_read_that_failed_is_said_in_its_place(self):
+        with self.assertLogs("llm_agent", "WARNING"):
+            said = await self.read("echo 'hl: situation: unavailable: the platform did not answer' >&2\nexit 1\n")
+        self.assertEqual(said, "Situation: not read, `hl situation` failed: hl: situation: unavailable: the platform did not answer")
 
 
 class JobsInFlightTest(unittest.IsolatedAsyncioTestCase):
@@ -365,7 +378,7 @@ class HookTest(unittest.IsolatedAsyncioTestCase):
         self.waiting = [event, dict(event, position=2)]
         self.assertEqual(await self.call(), {"hookSpecificOutput": {
             "hookEventName": "PostToolUse",
-            "additionalContext": "Platform updates:\njob.underperforming job-1 val_accuracy"}})
+            "additionalContext": "Platform updates:\njob.underperforming job-1 val_accuracy" + S}})
         self.assertEqual(await self.call(), {})
 
     async def test_an_update_handed_over_lets_every_job_be_read_again(self):
@@ -411,7 +424,7 @@ class HookTest(unittest.IsolatedAsyncioTestCase):
         self.waiting = [revision, {"kind": "comment.new", "subject": "hyp-1", "value": "human"}]
         told = (await self.call())["hookSpecificOutput"]["additionalContext"]
         self.assertTrue(told.startswith("The person read your answer and asks for this revision:\n\nMake it fit one accelerator.\n\n"), told)
-        self.assertTrue(told.endswith("Platform updates:\ncomment.new hyp-1 human"), told)
+        self.assertTrue(told.endswith("Platform updates:\ncomment.new hyp-1 human"), told)  # a planner has no situation
         self.assertNotIn("platform_experiment.revision", told)
         self.assertNotIn("gone", told)
 
@@ -433,7 +446,10 @@ class UndeliveredMessageTest(unittest.IsolatedAsyncioTestCase):
             told = (await self.call(hook_event_name=event, **said))["hookSpecificOutput"]
             self.assertEqual(told["hookEventName"], event)
             self.assertIn("send none again", told["additionalContext"])
-            self.assertIn("`hl hypothesis comment ID --text T` on a hypothesis of that agent: its owner and the "
+            # SendMessage reaches a subagent of this session only, and a restart stopped those
+            # started before it: a lead sent its stopped subagents messages nobody read.
+            self.assertIn("start it again with Agent, from its hypothesis, branch and jobs", told["additionalContext"])
+            self.assertIn("`hl hypothesis comment ID --text T` on one of its hypotheses: its owner and the "
                           "coordinator get it as `comment.new` in their next update", told["additionalContext"])
 
     async def test_a_message_its_own_subagent_got_is_left_alone(self):
@@ -619,7 +635,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
                 mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 redirect_stdout(StringIO()) as out:
             await asyncio.wait_for(run._run_one_session(setup, "m", None, stop_flag), timeout=5)
-        self.assertEqual(sent, ["Begin.", "Platform updates:\nexperiment.status exp-1 COMPLETED", run._shutdown_prompt(setup)])
+        self.assertEqual(sent, ["Begin." + S, "Platform updates:\nexperiment.status exp-1 COMPLETED" + S, run._shutdown_prompt(setup) + S])
         self.assertIn("agent-a event experiment.status exp-1 COMPLETED", out.getvalue())
         self.assertEqual(os.listdir(setup.workdir), [], "the harness wrote into the directory the agent clones into")
         self.assertIn(".claude_session_id", os.listdir(setup.statedir))
@@ -679,24 +695,25 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
         return sent[:-1], read.await_count
 
     # A researcher whose last job ended waited 10 minutes for agent.idle, or 30 for the harness's
-    # nudge, for an update nothing of its own would send. It is told at once, once a stretch.
-    async def test_a_turn_ended_with_no_job_in_flight_is_told_at_once_and_again_only_after_an_update(self):
+    # nudge, for an update nothing of its own would send, and a lead told once rested for hours.
+    # It is told at every end of a turn with nothing in flight.
+    async def test_a_turn_ended_with_no_job_in_flight_is_told_so_every_time(self):
         from types import SimpleNamespace
         cfg = SimpleNamespace(agent_id="agent-a", flavor="generalist", role="competitor", api_url="http://x",
                               token=ENV["HL_TOKEN"], platform_experiment_id="pe-1")
         update = [{"kind": "comment.new", "subject": "hyp-1", "value": "agent", "agent_id": "agent-b"}]
-        sent, _ = await self._turn_ends(cfg, [0, 0, 0, 0], [update, []])
-        self.assertEqual(sent, ["Begin.", updates.NOTHING_IN_FLIGHT, "Platform updates:\ncomment.new hyp-1 agent by agent-b",
-                                updates.NOTHING_IN_FLIGHT])
+        sent, _ = await self._turn_ends(cfg, [0, 0, 1, 0, 1], [update, []])
+        nothing = updates.NOTHING_IN_FLIGHT + S
+        self.assertEqual(sent, ["Begin." + S, nothing, nothing, "Platform updates:\ncomment.new hyp-1 agent by agent-b" + S, nothing])
 
-    async def test_a_job_seen_in_flight_starts_a_new_stretch_and_a_failed_read_says_nothing(self):
+    async def test_a_job_in_flight_and_a_failed_read_say_nothing(self):
         from types import SimpleNamespace
         cfg = SimpleNamespace(agent_id="agent-a", flavor="generalist", role="baseline", api_url="http://x",
                               token=ENV["HL_TOKEN"], platform_experiment_id="pe-1")
         update = [{"kind": "comment.new", "subject": "hyp-1", "value": "agent", "agent_id": "agent-b"}]
-        sent, _ = await self._turn_ends(cfg, [None, 2, 0, 0], [update, update, []])
-        self.assertEqual(sent[1:], ["Platform updates:\ncomment.new hyp-1 agent by agent-b",
-                                    "Platform updates:\ncomment.new hyp-1 agent by agent-b", updates.NOTHING_IN_FLIGHT])
+        sent, _ = await self._turn_ends(cfg, [None, 2, 0, 1], [update, update, []])
+        self.assertEqual(sent[1:], ["Platform updates:\ncomment.new hyp-1 agent by agent-b" + S,
+                                    "Platform updates:\ncomment.new hyp-1 agent by agent-b" + S, updates.NOTHING_IN_FLIGHT + S])
 
     # A lead whose subagents work in the background gets the turn the CLI starts when one ends,
     # without waiting for a platform update, and is not told it has nothing in flight meanwhile.
@@ -762,7 +779,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
                 mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 redirect_stdout(StringIO()):
             await asyncio.wait_for(run._run_one_session(setup, "m", None, stop_flag), timeout=5)
-        self.assertEqual((sent[:-1], len(waits), read.await_count), (["Begin."], 2, 1))
+        self.assertEqual((sent[:-1], len(waits), read.await_count), (["Begin." + S], 2, 1))
 
     # A resumed session whose subagents stopped with the last process answers the opening with an
     # empty turn and then the opening's own, nothing in the background. The second is read as a
@@ -828,7 +845,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
                 redirect_stdout(StringIO()):
             await asyncio.wait_for(run._run_one_session(setup, "m", "s", stop_flag), timeout=5)
         self.assertEqual(len(read_turns), 3, "the opening's turn, the CLI's own and the last")
-        self.assertEqual(sent[1:], [run._shutdown_prompt(setup) + "\n\nPlatform updates:\ncomment.new hyp-1 agent by agent-b"])
+        self.assertEqual(sent[1:], [run._shutdown_prompt(setup) + "\n\nPlatform updates:\ncomment.new hyp-1 agent by agent-b" + S])
         self.assertEqual([call.args[0]["HL_STATE_DIR"].rsplit(".", 1)[1] for call in delivered.call_args_list], ["closing"])
 
     # A turn under way, whose start the wait missed by an instant, drained and handed over what
@@ -892,7 +909,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
                 redirect_stdout(StringIO()):
             await asyncio.wait_for(run._run_one_session(setup, "m", None, stop_flag), timeout=5)
         self.assertEqual(len(read_turns), 3, "the opening's turn, the one under way and the last")
-        self.assertEqual(sent, ["Begin.", run._shutdown_prompt(setup)])
+        self.assertEqual(sent, ["Begin." + S, run._shutdown_prompt(setup) + S])
 
     async def test_a_coordinator_has_no_jobs_of_its_own_to_be_told_of(self):
         from types import SimpleNamespace

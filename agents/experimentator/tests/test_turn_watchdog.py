@@ -13,7 +13,11 @@ from claude_agent_sdk import (AssistantMessage, RateLimitEvent, RateLimitInfo, R
                               TextBlock, UserMessage)
 
 from hypothesisloop_agent.claude import run
+from conftest import SITUATION
 from test_require_joined import AGENT_TOKEN
+
+# What closes every prompt of a role in a run.
+S = "\n\n" + SITUATION
 
 
 class HangingClient:
@@ -52,7 +56,7 @@ def _setup():
 
 # A machine stopped while its agent's run goes on is told exactly that, ahead of what to do with its turn.
 LAST = ("You are being stopped while your run on the platform goes on: the platform ended nothing of yours. "
-        "Only this machine is being stopped, and the platform does not say why. " + run._SHUTDOWN_PROMPT)
+        "Only this machine is being stopped, and the platform does not say why. " + run._SHUTDOWN_PROMPT + S)
 
 
 def _result():
@@ -99,12 +103,12 @@ class StopTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_stop_interrupts_the_turn_and_gives_one_last_turn(self):
         client = await self.stop_mid_turn(hangs=False)
         self.assertTrue(client.interrupted.is_set())
-        self.assertEqual(client.queries, ["Begin.", LAST])
+        self.assertEqual(client.queries, ["Begin." + S, LAST])
         self.assertTrue(client.disconnected)
 
     async def test_the_last_turn_is_cut_off_at_its_deadline(self):
         client = await self.stop_mid_turn(hangs=True)
-        self.assertEqual(client.queries, ["Begin.", LAST])
+        self.assertEqual(client.queries, ["Begin." + S, LAST])
         self.assertTrue(client.disconnected)
 
     # A researcher that had just finished was interrupted in its closing message and given a
@@ -136,14 +140,14 @@ class StopTest(unittest.IsolatedAsyncioTestCase):
 
         client = await self.stop_after_finishing(FinishingClient, sleep)
         self.assertFalse(client.interrupted.is_set())
-        self.assertEqual(client.queries, ["Begin."])
+        self.assertEqual(client.queries, ["Begin." + S])
         self.assertTrue(client.disconnected)
 
     async def test_a_finished_agent_that_works_on_is_interrupted_at_the_deadline_and_gets_no_other_turn(self):
         self.stop_flag = [False]
         client = await self.stop_after_finishing(StoppableClient, mock.AsyncMock(side_effect=lambda _: self.stop_flag.__setitem__(0, True)))
         self.assertTrue(client.interrupted.is_set())
-        self.assertEqual(client.queries, ["Begin."])
+        self.assertEqual(client.queries, ["Begin." + S])
 
 
 class IdleClient(StoppableClient):
@@ -171,7 +175,7 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
         return HangingClient.instances[-1].queries
 
     async def test_a_stop_between_turns_gives_one_last_turn(self):
-        self.assertEqual(await self.stop_while_idle([], []), ["Begin.", LAST])
+        self.assertEqual(await self.stop_while_idle([], []), ["Begin." + S, LAST])
 
     # A run that reached its end with no signal yet ended the process at the turn boundary, so
     # a coordinator never wrote the summary its briefing promises a turn for. A token the
@@ -198,10 +202,10 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_run_the_platform_ended_gets_its_last_turn_with_no_signal(self):
         closed = {"status": "closed", "closed_at": "2026-01-01T02:48:05Z", "close_reason": "end_time_reached"}
         self.assertEqual(await self.run_ends_while_idle("coordinator", {}, closed), [
-            "Begin.", "You are being stopped because the platform experiment reached its end time and the platform closed it at "
-                      "2026-01-01T02:48:05Z. " + run._COORDINATOR_SHUTDOWN_PROMPT])
+            "Begin." + S, "You are being stopped because the platform experiment reached its end time and the platform closed it at "
+                      "2026-01-01T02:48:05Z. " + run._COORDINATOR_SHUTDOWN_PROMPT + S])
         self.assertEqual(await self.run_ends_while_idle("generalist", {"ended": "cut"}, {"status": "running"}), [
-            "Begin.", "You are being stopped because you were cut from the platform experiment at a stage boundary. " + run._SHUTDOWN_PROMPT])
+            "Begin." + S, "You are being stopped because you were cut from the platform experiment at a stage boundary. " + run._SHUTDOWN_PROMPT + S])
 
     # Run 6: the close arrived as an update, was handed over as a turn of its own and cut by the
     # stop four seconds later, and only then did the last turn start. A batch that comes with the
@@ -223,27 +227,26 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
                 contextlib.redirect_stdout(io.StringIO()):
             await asyncio.wait_for(run._run_one_session(setup, "m", None, [False]), timeout=5)
         self.assertEqual(HangingClient.instances[-1].queries, [
-            "Begin.", "You are being stopped because the platform experiment reached its end time and the platform closed it at "
+            "Begin." + S, "You are being stopped because the platform experiment reached its end time and the platform closed it at "
                       "2026-01-01T02:48:05Z. " + run._COORDINATOR_SHUTDOWN_PROMPT + "\n\nPlatform updates:\n"
-                      "platform_experiment.status pe-1 closed"])
+                      "platform_experiment.status pe-1 closed" + S])
 
     async def test_a_refused_token_gets_no_last_turn(self):
         refused = run.core.api_client.APIError("GET", "http://api/x", 401, "unauthenticated")
-        self.assertEqual(await self.run_ends_while_idle("generalist", refused, {"status": "running"}), ["Begin."])
+        self.assertEqual(await self.run_ends_while_idle("generalist", refused, {"status": "running"}), ["Begin." + S])
 
     async def test_the_last_turn_opens_with_what_finished_since_the_last_delivery(self):
         done = {"kind": "experiment.status", "subject": "exp-1", "value": "COMPLETED", "detail": "acc 0.9"}
         comment = {"kind": "comment.new", "subject": "hyp-1", "value": "human"}
         self.assertEqual(await self.stop_while_idle([comment], [comment, done]), [
-            "Begin.", LAST + "\n\nPlatform updates:\ncomment.new hyp-1 human\n"
-                           "experiment.status exp-1 COMPLETED acc 0.9"])
+            "Begin." + S, LAST.removesuffix(S) + "\n\nPlatform updates:\ncomment.new hyp-1 human\n"
+                           "experiment.status exp-1 COMPLETED acc 0.9" + S])
 
 
-class IdleNudgeTest(unittest.IsolatedAsyncioTestCase):
-    async def test_the_wait_before_a_nudge_doubles_while_nothing_comes_and_an_update_resets_it(self):
+class ReviewTest(unittest.IsolatedAsyncioTestCase):
+    async def waits(self, flavor: str, batches: list) -> tuple[list, list]:
         stop_flag = [False]
         waits = []
-        batches = [[], [], [], [{"kind": "comment.new", "subject": "hyp-1", "value": "human"}], [], []]
 
         async def next_batch(env, stopped, idle_s):
             waits.append(idle_s)
@@ -251,17 +254,31 @@ class IdleNudgeTest(unittest.IsolatedAsyncioTestCase):
                 stop_flag[0] = True
             return batches[len(waits) - 1]
 
+        setup = _setup()
+        setup.cfg.flavor = flavor
         with mock.patch.object(run, "ClaudeSDKClient", IdleClient), \
                 mock.patch.object(run.updates, "next_batch", next_batch), \
                 mock.patch.object(run.updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \
                 mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=[])), \
-                contextlib.redirect_stdout(io.StringIO()), self.assertLogs("llm_agent"):
-            await asyncio.wait_for(run._run_one_session(_setup(), "m", None, stop_flag), timeout=5)
-        nudge = run.updates.IDLE_NUDGE_S
-        self.assertEqual(waits, [nudge, 2 * nudge, 4 * nudge, 4 * nudge, nudge, 2 * nudge])
-        queries = HangingClient.instances[-1].queries
-        self.assertEqual(queries[1:4], [run.updates.IDLE_PROMPT.format(minutes=m) for m in (30, 60, 120)])
-        self.assertEqual(queries[5], run.updates.IDLE_PROMPT.format(minutes=30))
+                contextlib.redirect_stdout(io.StringIO()):
+            await asyncio.wait_for(run._run_one_session(setup, "m", None, stop_flag), timeout=5)
+        return waits, HangingClient.instances[-1].queries
+
+    # A lead rested from 16:00 to the close while a nudge that doubled waited. A coordinator
+    # reviews the run at a fixed interval that nothing woke it, with the situation.
+    async def test_a_coordinator_is_reviewed_at_a_fixed_interval_and_an_update_is_its_wake(self):
+        comment = {"kind": "comment.new", "subject": "hyp-1", "value": "human"}
+        waits, queries = await self.waits("coordinator", [[], [], [comment], [], []])
+        self.assertEqual(waits, [run.updates.REVIEW_S] * 5)
+        review = run.updates.REVIEW_PROMPT.format(minutes=20) + S
+        self.assertEqual(queries[1:5], [review, review, "Platform updates:\ncomment.new hyp-1 human" + S, review])
+
+    # The platform's agent.idle, kept in its store, is the one timer of an agent.
+    async def test_an_agent_waits_for_an_update_with_no_limit_of_its_own(self):
+        comment = {"kind": "comment.new", "subject": "hyp-1", "value": "human"}
+        waits, queries = await self.waits("generalist", [[comment], [comment]])
+        self.assertEqual(waits, [float("inf")] * 2)
+        self.assertEqual(queries[1], "Platform updates:\ncomment.new hyp-1 human" + S)
 
 
 class ContextOverflowTest(unittest.IsolatedAsyncioTestCase):
@@ -319,16 +336,46 @@ class ContextOverflowTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await asyncio.wait_for(run._run_one_session(setup, "m", None, [False]), timeout=5), True)
         self.assertEqual(run._load_handoff(setup), "where things stand")
 
+    # A rotation ends the CLI and every subagent at work with it, whose ideas the lead then
+    # started again. Past the rotation point it waits for them, up to the hard limit.
+    async def test_a_rotation_waits_for_live_subagents_until_the_hard_limit(self):
+        def result(text):
+            return ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
+                                 session_id="s-1", result=text, model_usage={"m-1": {"contextWindow": 1_000_000}})
+
+        def turn(tokens):
+            return [SystemMessage("background_tasks_changed", {"tasks": [{"task_id": "sub-1"}]}),
+                    AssistantMessage(content=[TextBlock(text="worked")], model="m", usage={"input_tokens": tokens}),
+                    result("worked")]
+
+        turns = [turn(500_000), turn(950_000), [UserMessage(content=run._COMPACTION_PROMPT), result("where things stand")]]
+
+        class RotatingClient(StoppableClient):
+            async def receive_response(self):
+                for message in turns.pop(0):
+                    yield message
+
+        comment = [{"kind": "comment.new", "subject": "hyp-1", "value": "human"}]
+        setup = _setup()
+        with mock.patch.object(run, "ClaudeSDKClient", RotatingClient), \
+                mock.patch.object(run.updates, "next_batch", mock.AsyncMock(return_value=comment)), \
+                mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=[])), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertLogs("llm_agent") as logged:
+            self.assertEqual(await asyncio.wait_for(run._run_one_session(setup, "m", None, [False]), timeout=5), True)
+        self.assertIn("rotation deferred: 1 subagents live", "\n".join(logged.output))
+        self.assertEqual(HangingClient.instances[-1].queries[1:], ["Platform updates:\ncomment.new hyp-1 human" + S, run._COMPACTION_PROMPT])
+        self.assertEqual(run._load_handoff(setup), "where things stand")
+
     def test_the_rotation_point_follows_a_smaller_context_window(self):
         def result(model_usage):
             return ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
                                  session_id="s-1", model_usage=model_usage)
 
-        self.assertEqual(run._rotation_threshold(result(None), "claude-x"), run._CONTEXT_COMPACTION_THRESHOLD_TOKENS)
-        self.assertEqual(run._rotation_threshold(result({"claude-x-2026": {"contextWindow": 1_000_000},
-                                                         "claude-h": {"contextWindow": 200_000}}), "claude-x"),
-                         run._CONTEXT_COMPACTION_THRESHOLD_TOKENS)
-        self.assertEqual(run._rotation_threshold(result({"claude-x-2026": {"contextWindow": 200_000}}), "claude-x"), 150_000)
+        ceiling = run._CONTEXT_COMPACTION_THRESHOLD_TOKENS
+        self.assertEqual(run._rotation_limits(result(None), "claude-x"), (ceiling, ceiling))
+        self.assertEqual(run._rotation_limits(result({"claude-x-2026": {"contextWindow": 1_000_000},
+                                                      "claude-h": {"contextWindow": 200_000}}), "claude-x"), (ceiling, 900_000))
+        self.assertEqual(run._rotation_limits(result({"claude-x-2026": {"contextWindow": 200_000}}), "claude-x"), (150_000, 180_000))
 
 
 class TurnWatchdogTest(unittest.IsolatedAsyncioTestCase):
@@ -530,7 +577,7 @@ class RefusedClient(HangingClient):
 class RateLimitTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         for patcher in (mock.patch.object(run, "_rate_limit", None), mock.patch.object(run, "_limit_since", None),
-                        mock.patch.object(run._progress, "_rate_limit", ""),
+                        mock.patch.object(run._progress, "_model", {}),
                         mock.patch.object(run, "_live_session_id", None),
                         mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": tempfile.mkdtemp()})):
             patcher.start()

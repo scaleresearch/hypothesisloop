@@ -17,20 +17,22 @@ ACTIVITY_PREFIX = "hl-activity"
 ACTIVITY_INTERVAL_S = 3
 # maxLength of domain.AgentActivity.Text on the platform's side.
 MAX_ACTIVITY_LENGTH = 120
-# The line that carries the model provider's rate limit as the harness last read it, printed with
-# every beat once there is a reading. The launcher hands the newest to the platform, which keeps
-# it in the run's health series (launcherapi.parseRateLimit reads it).
-RATE_LIMIT_PREFIX = "hl-rate-limit"
+# The line that carries what the harness observes of its agent, printed with every beat: how many
+# subagents are live, whether a turn is in flight (working) or the agent waits for an update, since
+# when (Unix seconds), and the model provider's rate limit as the CLI last said it, once there is a
+# reading. The launcher hands the newest to the platform, which keeps it in the run's metrics
+# (launcherapi.parseHarnessState reads it).
+STATE_PREFIX = "hl-state"
 
 THINKING = "thinking"
 WAITING = "waiting for platform updates"
 
 
-def rate_limit_line(status: str, kind: str | None, utilization: float | None, resets_at: int | None) -> str:
-    """The rate-limit line of a reading: its status, and what of its type, utilization and reset
-    time (Unix seconds) it holds."""
-    fields = {"status": status, "type": kind, "utilization": utilization, "resets_at": resets_at}
-    return " ".join([RATE_LIMIT_PREFIX] + [f"{k}={v}" for k, v in fields.items() if v is not None])
+def state_line(subagents: int, working: bool, since: float, model: dict[str, object]) -> str:
+    """The state line: subagents, turn and since, then the model_ fields of model that are known."""
+    fields = {"subagents": subagents, "turn": "working" if working else "waiting", "since": int(since),
+              **{f"model_{k}": v for k, v in model.items() if v is not None}}
+    return " ".join([STATE_PREFIX] + [f"{k}={v}" for k, v in fields.items()])
 
 
 def sentence(text: str) -> str:
@@ -49,9 +51,10 @@ class Progress:
     and a harness whose watchdog did not is hung. Waiting between turns is no silence.
     """
 
-    def __init__(self, quiet_limit_s: float, clock=time.monotonic, emit=None):
+    def __init__(self, quiet_limit_s: float, clock=time.monotonic, emit=None, wall=time.time):
         self._quiet_limit_s = quiet_limit_s
         self._clock = clock
+        self._wall = wall
         self._emit = emit or (lambda line: print(line, flush=True))
         self._awaiting_since: float | None = None
         self._count = 0
@@ -59,14 +62,20 @@ class Progress:
         self._trouble = ""
         self._said = ""
         self._said_at: float | None = None
-        self._rate_limit = ""
+        self._subagents = 0
+        self._turn_since = wall()
+        self._model: dict[str, object] = {}
 
     def awaiting(self) -> None:
         """A turn is in flight and the next message from the model session is awaited from now."""
+        if self._awaiting_since is None:
+            self._turn_since = self._wall()
         self._awaiting_since = self._clock()
 
     def resting(self) -> None:
         """No turn is in flight."""
+        if self._awaiting_since is not None:
+            self._turn_since = self._wall()
         self._awaiting_since = None
 
     def waited(self) -> float:
@@ -89,9 +98,13 @@ class Progress:
         may hold."""
         self._trouble = text
 
-    def rate_limit(self, line: str) -> None:
-        """The rate-limit line printed with every beat from now on, see rate_limit_line."""
-        self._rate_limit = line
+    def subagents(self, live: int) -> None:
+        """How many subagents of the agent are live from now on."""
+        self._subagents = live
+
+    def model(self, status: str, kind: str | None, utilization: float | None, resets_at: int | None) -> None:
+        """The model provider's rate limit as the CLI said it last."""
+        self._model = {"status": status, "type": kind, "utilization": utilization, "resets_at": resets_at}
 
     def _sentence(self) -> str:
         return sentence(f"{self._trouble}. {self._activity}") if self._trouble else self._activity
@@ -107,8 +120,7 @@ class Progress:
             self._count += 1
             self._emit(f"{PREFIX} {self._count}")
             self._say()
-            if self._rate_limit:
-                self._emit(self._rate_limit)
+            self._emit(state_line(self._subagents, self._awaiting_since is not None, self._turn_since, self._model))
 
     async def run(self) -> None:
         while True:

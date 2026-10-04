@@ -208,7 +208,7 @@ class NotStoredTest(unittest.IsolatedAsyncioTestCase):
         machine.write(machine.workdir, ".claude_session_id", "s-1")
         setup = SimpleNamespace(statedir=str(machine.workdir))
         said = []
-        beating = progress.Progress(quiet_limit_s=60, emit=said.append)
+        beating = progress.Progress(quiet_limit_s=60, emit=lambda line: line.startswith(progress.STATE_PREFIX) or said.append(line))
         beating.doing("thinking")
         platform.fail = api_client.APIError("PUT", "http://x", 413, "too large")
         with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(machine.home)}), \
