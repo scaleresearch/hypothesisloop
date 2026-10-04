@@ -36,6 +36,8 @@ type QuotaConfig struct {
 	// closes it: the time it has to get its baseline declared and its run started. One created
 	// whole has all of it, and an accepted draft the minutes accepted, at most this.
 	BaselineLimit time.Duration `json:"baseline_limit,omitempty"`
+	// MinBaseline is the least an accepted draft may give its baseline.
+	MinBaseline time.Duration `json:"min_baseline,omitempty"`
 	// AgentsDue is how long a started platform experiment whose researchers the platform runs
 	// waits for the first one's machine to be running before the platform closes it: the time
 	// one machine and every restart of it may take to come up, and never past its end.

@@ -107,11 +107,15 @@ agents:
 #              baseline is declared (PATCH baseline_job_id), and its duration_hours count from
 #              then. One not running by its baseline_due_at is closed with close_reason
 #              baseline_limit_reached and its machines are released.
+#   min_baseline_minutes  the fewest baseline_minutes a proposal or an accept may state: a
+#              baseline written from nothing writes its harness, waits for its environment to
+#              build and measures once, and a shorter window closes the run before it starts.
 planning:
   limit_minutes: 30
   proposed_for_days: 7
   planner_kept_minutes: 10
   baseline_limit_minutes: 90
+  min_baseline_minutes: 45
 
 # What one account may create. Staff, the platform's operators, are held to neither.
 #

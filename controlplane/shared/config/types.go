@@ -285,6 +285,9 @@ type PlanningConfig struct {
 	// whole, may stay open: one not running by then is closed. The run's length counts from its
 	// start, so this alone bounds the time before.
 	BaselineLimitMinutes int `yaml:"baseline_limit_minutes"`
+	// MinBaselineMinutes is the fewest minutes an accepted draft may give its baseline: what
+	// writing a harness, building its environment and measuring once take at the least.
+	MinBaselineMinutes int `yaml:"min_baseline_minutes"`
 	// ProposedForDays is how long a proposal waits for a person before the draft is closed.
 	ProposedForDays int `yaml:"proposed_for_days"`
 	// PlannerKeptMinutes is how long a planner's machine is kept after its answer, so that a

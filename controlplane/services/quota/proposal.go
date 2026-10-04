@@ -34,7 +34,7 @@ type Proposal struct {
 
 	BudgetAcceleratorHours float64         `json:"budget_accelerator_hours" doc:"Proposed budget of the run: a cap, estimated before anything ran."`
 	DurationHours          float64         `json:"duration_hours" doc:"Proposed length of the run, counted from the moment it starts, once its baseline is declared: a time the goal states is this."`
-	BaselineMinutes        int             `json:"baseline_minutes" doc:"The minutes the baseline agent needs, from the accept, to measure the baseline and leave its job: few where the repository holds a harness that runs unchanged, more where the harness and its environment are written from nothing. At most planning.baseline_limit_minutes."`
+	BaselineMinutes        int             `json:"baseline_minutes" doc:"The minutes the baseline agent needs, from the accept, to measure the baseline and leave its job: few where the repository holds a harness that runs unchanged, more where the harness and its environment are written from nothing. At least planning.min_baseline_minutes and at most planning.baseline_limit_minutes."`
 	Agents                 []ProposedAgent `json:"agents" doc:"The researchers proposed, one entry each."`
 
 	AcceleratorType domain.AcceleratorType `json:"accelerator_type" doc:"The type the run's jobs are sized for, as GET /resource-catalog/capacity lists it for a cluster this org's jobs can be placed on: an accelerator, or the CPU type for work that needs none, whose budget is then CPU core-hours."`
@@ -87,8 +87,11 @@ func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p *Propo
 	if most := maxProposedResearchers(maxHosted); len(p.Agents) == 0 || len(p.Agents) > most {
 		return experiment, refusedProposal("invalid_agents", "agents: propose between 1 and %d researchers (the draft's max_agents), got %d", most, len(p.Agents))
 	}
-	if limit := int(h.svc.cfg.BaselineLimit.Minutes()); p.BaselineMinutes <= 0 || p.BaselineMinutes > limit {
-		return experiment, refusedProposal("invalid_baseline_minutes", "baseline_minutes is %d: state the minutes measuring the baseline needs, from 1 to %d (planning.baseline_limit_minutes)", p.BaselineMinutes, limit)
+	least, limit := max(1, int(h.svc.cfg.MinBaseline.Minutes())), int(h.svc.cfg.BaselineLimit.Minutes())
+	if p.BaselineMinutes < least || p.BaselineMinutes > limit {
+		return experiment, refusedProposal("invalid_baseline_minutes", "baseline_minutes is %d: state the minutes measuring the baseline needs, from %d (planning.min_baseline_minutes) to %d (planning.baseline_limit_minutes). "+
+			"The platform gives a baseline at least %d minutes because one written from nothing writes its harness, waits for the platform to build its environment and measures once in that time, and a shorter window closes the experiment before its run starts",
+			p.BaselineMinutes, least, limit, least)
 	}
 	// An accepted draft starts when it is accepted, whatever its experiment says of a start.
 	experiment.StartsAt = time.Time{}
@@ -252,7 +255,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"A proposal defines the experiment and runs nothing: its brief states the objective and the measure and nothing measured yet, its numbers are estimates, " +
 			"and the baseline is measured once a person accepted, before any researcher starts, by the baseline agent the accept creates. " +
 			"The proposal is checked before it is stored, its experiment and its cost by the rules of POST /platform-experiments, and refused with 422 and a reason the planner can act on: invalid_experiment, invalid_metrics, invalid_stages, " +
-			"invalid_cost, invalid_agents, invalid_length, run_too_long (duration_hours over the platform's quota.max_platform_experiment_days), invalid_baseline_minutes (none, or over planning.baseline_limit_minutes), missing_explanation, too_long, " +
+			"invalid_cost, invalid_agents, invalid_length, run_too_long (duration_hours over the platform's quota.max_platform_experiment_days), invalid_baseline_minutes (under planning.min_baseline_minutes, or over planning.baseline_limit_minutes), missing_explanation, too_long, " +
 			"accelerator_unreachable for an accelerator_type no cluster this org's jobs can be placed on has now, and for image the two refusals a job submit gives: " +
 			"unknown_job_image for one that is neither a job image the platform offers nor a whole registry address, and no_cluster_for_image for one no cluster that has the type runs. Stored, it replaces the one before, marks the draft proposed " +
 			"(proposed_at), and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the draft waits for a person to accept it.",
@@ -308,7 +311,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 type AcceptRequest struct {
 	BudgetAcceleratorHours float64         `json:"budget_accelerator_hours" doc:"The budget of the run: a cap on everything it spends, with what measuring the baseline costs and burst hours included."`
 	DurationHours          float64         `json:"duration_hours" doc:"How long the run lasts from the moment it starts, once its baseline is declared."`
-	BaselineMinutes        int             `json:"baseline_minutes" doc:"The minutes measuring the baseline has from this accept, at most planning.baseline_limit_minutes: baseline_due_at is that much later."`
+	BaselineMinutes        int             `json:"baseline_minutes" doc:"The minutes measuring the baseline has from this accept, at least planning.min_baseline_minutes and at most planning.baseline_limit_minutes: baseline_due_at is that much later, and moves out by the time the platform spends building and starting the baseline's jobs."`
 	Agents                 []ProposedAgent `json:"agents" doc:"The researchers the platform runs, one entry each."`
 	Name                   string          `json:"name,omitempty" doc:"The name of the platform experiment, when the person changed the one proposed. One line, held to the rule of name on POST /platform-experiments. Left out, the proposal's name stands. Nothing else of the proposal's experiment is changed here: its metrics and its brief change by a revision."`
 }

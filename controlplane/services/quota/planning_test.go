@@ -594,6 +594,7 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 		"no length":                               {map[string]any{"duration_hours": 0}, "invalid_length"},
 		"longer than the platform runs one":       {map[string]any{"duration_hours": 31 * 24}, "run_too_long"},
 		"no time for the baseline":                {map[string]any{"baseline_minutes": 0}, "invalid_baseline_minutes"},
+		"less time than the platform's floor":     {map[string]any{"baseline_minutes": 19}, "invalid_baseline_minutes"},
 		"more time for the baseline than allowed": {map[string]any{"baseline_minutes": 91}, "invalid_baseline_minutes"},
 		"nobody to run it":                        {map[string]any{"agents": []map[string]any{}}, "invalid_agents"},
 		"more machines than it gets":              {map[string]any{"agents": []map[string]any{{}, {}, {}, {}}}, "invalid_agents"},
@@ -765,6 +766,7 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 		"too long":          {map[string]any{"budget_accelerator_hours": 3, "duration_hours": 31 * 24, "baseline_minutes": 30, "agents": []map[string]any{{}}}, "run_too_long"},
 		"nobody":            {map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{}}, "invalid_agents"},
 		"too many machines": {map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}, {}, {}, {}}}, "invalid_agents"},
+		"under the floor":   {map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 19, "agents": []map[string]any{{}}}, "invalid_baseline_minutes"},
 	} {
 		store := draftWithPlanner()
 		_, propose := planningAPI(t, store, thePlanner)
@@ -773,6 +775,17 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 		if code, out := call("POST", "/platform-experiments/pe-draft/accept", c.body); code != http.StatusUnprocessableEntity || out["reason"] != c.reason || store.created[0].Status != domain.PlatformExpDraft {
 			t.Errorf("%s: got = %d %v, want 422 %s and still a draft", name, code, out, c.reason)
 		}
+	}
+
+	// Run 5's planner gave its baseline 25 minutes, and building its environment alone took 17.
+	// A window under the platform's floor is refused with the floor and why it is there.
+	short := draftWithPlanner()
+	_, propose = planningAPI(t, short, thePlanner)
+	propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
+	_, accept := planningAPI(t, short, planner)
+	code, out = accept("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 19, "agents": []map[string]any{{}}})
+	if message, _ := out["message"].(string); code != http.StatusUnprocessableEntity || !strings.Contains(message, "from 20 (planning.min_baseline_minutes) to 90") || !strings.Contains(message, "build its environment") {
+		t.Errorf("a window under the floor: got = %d %v, want 422 naming the floor and why", code, out)
 	}
 
 	// The planner proposes and a person accepts: its own token is of no kind that may.

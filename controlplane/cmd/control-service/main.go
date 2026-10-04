@@ -114,6 +114,7 @@ func main() {
 		DefaultQuotaTier:                 domain.QuotaTier(pcfg.Quota.DefaultQuotaTier),
 		MaxRunLength:                     time.Duration(pcfg.Quota.MaxPlatformExperimentDays) * 24 * time.Hour,
 		BaselineLimit:                    time.Duration(pcfg.Planning.BaselineLimitMinutes) * time.Minute,
+		MinBaseline:                      time.Duration(pcfg.Planning.MinBaselineMinutes) * time.Minute,
 		AgentsDue:                        time.Duration((domain.MaxAgentInstanceRestarts+1)*pcfg.Agents.BootLimitSeconds) * time.Second,
 		MaxSubmissionsPerHour:            pcfg.Quota.MaxSubmissionsPerHour,
 		MaxAcceleratorCountPerJob:        pcfg.Quota.MaxAcceleratorCountPerJob,

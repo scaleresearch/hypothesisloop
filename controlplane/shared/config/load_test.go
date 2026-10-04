@@ -324,6 +324,8 @@ func TestLoadRejectsAnIncompletePlanningSection(t *testing.T) {
 	for name, edit := range map[string][2]string{
 		"no limit":          {"  limit_minutes: 30\n", ""},
 		"no baseline limit": {"  baseline_limit_minutes: 90\n", ""},
+		"no baseline floor": {"  min_baseline_minutes: 45\n", ""},
+		"floor over limit":  {"  min_baseline_minutes: 45", "  min_baseline_minutes: 91"},
 		"no wait":           {"  proposed_for_days: 7\n", ""},
 		"misspelled wait":   {"  proposed_for_days: 7", "  proposed_for_day: 7"},
 		"no planner kept":   {"  planner_kept_minutes: 10\n", ""},
