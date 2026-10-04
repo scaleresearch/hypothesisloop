@@ -146,14 +146,14 @@ func TestTheBuilderMakesAnEnvironmentReadyOrFailedAndRetriesWhatItCouldNotReach(
 	builder.down = false
 	loop.pass(ctx, &wg)
 	wg.Wait()
-	if builder.asked[rust] != 1 || store.state(good.Key) != domain.EnvironmentBuilding {
-		t.Fatalf("asked %d times, %s, want the build the builder failed held back", builder.asked[rust], store.state(good.Key))
+	if builder.asked[asRoot(rust)] != 1 || store.state(good.Key) != domain.EnvironmentBuilding {
+		t.Fatalf("asked %d times, %s, want the build the builder failed held back", builder.asked[asRoot(rust)], store.state(good.Key))
 	}
 	loop.notBefore[good.Key] = time.Now().Add(-time.Second)
 	loop.pass(ctx, &wg)
 	wg.Wait()
-	if store.state(good.Key) != domain.EnvironmentReady || builder.asked[rust] != 2 {
-		t.Errorf("after the hold: %s after %d builds, want ready after a second build", store.state(good.Key), builder.asked[rust])
+	if store.state(good.Key) != domain.EnvironmentReady || builder.asked[asRoot(rust)] != 2 {
+		t.Errorf("after the hold: %s after %d builds, want ready after a second build", store.state(good.Key), builder.asked[asRoot(rust)])
 	}
 }
 

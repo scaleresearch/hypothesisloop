@@ -13,8 +13,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// Builder builds a Dockerfile with BASE set to base on an empty context and pushes the result as
-// image. A *BuildFailed is the file failing to build. Any other error is the builder's own, and
+// Builder builds a Dockerfile with BASE set to base and baseUserArg to the user of base's image, on
+// an empty context, and pushes the result as image. A *BuildFailed is the file failing to build. Any other error is the builder's own, and
 // the build is tried again.
 type Builder interface {
 	Build(ctx context.Context, dockerfile, base, image string) error
@@ -102,7 +102,7 @@ func (l *Loop) pass(ctx context.Context, builds *sync.WaitGroup) {
 func (l *Loop) build(ctx context.Context, env *domain.Environment) {
 	log := l.logger.With(zap.String("environment", env.Key), zap.String("base", env.Base))
 	buildCtx, cancel := context.WithTimeout(ctx, buildLimit)
-	err := l.builder.Build(buildCtx, env.Dockerfile, env.Base, env.Image)
+	err := l.builder.Build(buildCtx, asRoot(env.Dockerfile), env.Base, env.Image)
 	overrun := errors.Is(buildCtx.Err(), context.DeadlineExceeded)
 	cancel()
 	var failed *BuildFailed

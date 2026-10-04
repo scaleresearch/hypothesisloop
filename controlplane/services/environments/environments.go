@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
@@ -51,7 +52,7 @@ func (s *Service) Ensure(ctx context.Context, dockerfile, base string) (*domain.
 	if err := domain.ValidateEnvironmentFile(dockerfile); err != nil {
 		return nil, err
 	}
-	key := domain.EnvironmentKey(dockerfile, base)
+	key := domain.EnvironmentKey(asRoot(dockerfile), base)
 	env, err := s.store.EnsureEnvironment(ctx, &domain.Environment{Key: key, Base: base, Dockerfile: dockerfile, Image: s.repository + ":" + key})
 	if err != nil {
 		return nil, fmt.Errorf("environments: %w", err)
@@ -67,6 +68,30 @@ func (s *Service) Declared(ctx context.Context, projectID, repository, ref, base
 		return nil, err
 	}
 	return s.Ensure(ctx, *file, base)
+}
+
+// baseUserArg is the build argument that carries the user of the base image.
+const baseUserArg = "HL_BASE_USER"
+
+// asRoot is what is built of a valid environment file: its instructions run as root and the user
+// of the base image, passed as baseUserArg, is restored after them. The job images run as root and
+// the agent image as agent, and one file installs system packages on both.
+func asRoot(dockerfile string) string {
+	lines := strings.SplitAfter(dockerfile, "\n")
+	instructions := 0
+	for i, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || strings.HasPrefix(fields[0], "#") {
+			continue
+		}
+		if instructions++; instructions < 2 {
+			continue
+		}
+		from := strings.TrimSuffix(strings.Join(lines[:i+1], ""), "\n")
+		rest := strings.TrimSuffix(strings.Join(lines[i+1:], ""), "\n")
+		return from + "\nUSER root\n" + rest + "\nARG " + baseUserArg + "\nUSER ${" + baseUserArg + "}\n"
+	}
+	panic("environments.asRoot: a file domain.ValidateEnvironmentFile refuses")
 }
 
 // Get returns the environment of key, nil when there is none.

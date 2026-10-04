@@ -2,19 +2,22 @@ package environments
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 
+	"github.com/containerd/platforms"
 	"github.com/docker/cli/cli/config/types"
 	"github.com/moby/buildkit/client"
+	"github.com/moby/buildkit/client/llb"
+	"github.com/moby/buildkit/client/llb/sourceresolver"
+	gateway "github.com/moby/buildkit/frontend/gateway/client"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/session/auth/authprovider"
-	"github.com/tonistiigi/fsutil"
+	"github.com/moby/buildkit/solver/pb"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -63,27 +66,6 @@ func (b *BuildKit) Build(ctx context.Context, dockerfile, base, image string) er
 	}
 	defer c.Close() //nolint:errcheck
 
-	dir, err := os.MkdirTemp("", "environment-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(dir) //nolint:errcheck
-	empty := filepath.Join(dir, "context")
-	if err := os.Mkdir(empty, 0o700); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(dockerfile), 0o600); err != nil {
-		return err
-	}
-	contextFS, err := fsutil.NewFS(empty)
-	if err != nil {
-		return err
-	}
-	dockerfileFS, err := fsutil.NewFS(dir)
-	if err != nil {
-		return err
-	}
-
 	registry := b.RegistryHost
 	auth := authprovider.NewDockerAuthProvider(authprovider.DockerAuthProviderConfig{
 		AuthConfigProvider: func(_ context.Context, host string, _ []string, _ authprovider.ExpireCachedAuthCheck) (types.AuthConfig, error) {
@@ -94,22 +76,43 @@ func (b *BuildKit) Build(ctx context.Context, dockerfile, base, image string) er
 		},
 	})
 	opt := client.SolveOpt{
-		Frontend: "dockerfile.v0",
-		FrontendAttrs: map[string]string{
-			"filename":       "Dockerfile",
-			"build-arg:BASE": base,
-			"platform":       buildPlatform,
-		},
-		LocalMounts: map[string]fsutil.FS{"context": contextFS, "dockerfile": dockerfileFS},
-		Exports:     []client.ExportEntry{{Type: client.ExporterImage, Attrs: map[string]string{"name": image, "push": "true"}}},
-		Session:     []session.Attachable{auth},
+		Exports: []client.ExportEntry{{Type: client.ExporterImage, Attrs: map[string]string{"name": image, "push": "true"}}},
+		Session: []session.Attachable{auth},
+	}
+	build := func(ctx context.Context, gw gateway.Client) (*gateway.Result, error) {
+		platform := platforms.MustParse(buildPlatform)
+		_, _, config, err := gw.ResolveImageConfig(ctx, base, sourceresolver.Opt{ImageOpt: &sourceresolver.ResolveImageOpt{Platform: &platform}})
+		if err != nil {
+			return nil, err
+		}
+		var baseImage struct{ Config struct{ User string } }
+		if err := json.Unmarshal(config, &baseImage); err != nil {
+			return nil, fmt.Errorf("the configuration of %s: %w", base, err)
+		}
+		file, err := llb.Scratch().File(llb.Mkfile("Dockerfile", 0o644, []byte(dockerfile))).Marshal(ctx)
+		if err != nil {
+			return nil, err
+		}
+		empty, err := llb.Scratch().Marshal(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return gw.Solve(ctx, gateway.SolveRequest{
+			Frontend: "dockerfile.v0",
+			FrontendOpt: map[string]string{
+				"build-arg:BASE":           base,
+				"build-arg:" + baseUserArg: baseImage.Config.User,
+				"platform":                 buildPlatform,
+			},
+			FrontendInputs: map[string]*pb.Definition{"dockerfile": file.ToPB(), "context": empty.ToPB()},
+		})
 	}
 
 	var log strings.Builder
 	statuses := make(chan *client.SolveStatus)
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.Go(func() error {
-		_, err := c.Solve(groupCtx, nil, opt, statuses)
+		_, err := c.Build(groupCtx, opt, "", build, statuses)
 		return err
 	})
 	group.Go(func() error {
