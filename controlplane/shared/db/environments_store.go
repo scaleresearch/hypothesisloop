@@ -86,11 +86,12 @@ func (s *EnvironmentsStore) GetEnvironment(ctx context.Context, key string) (*do
 
 // AssignEnvironment decides which cluster builds the environment of key and returns it as it is
 // then. A building environment is assigned when it is assigned to none, its lease has passed, or
-// its cluster is not among live: to the live cluster that builds for its org with the fewest
+// its cluster is not among holding: to the live cluster that builds for its org with the fewest
 // builds, below domain.MaxEnvironmentBuildsPerCluster, as its next attempt. One assigned
 // domain.MaxEnvironmentAttempts times already fails as the platform's fault instead, and one no
-// cluster takes waits assigned to none. Anything else is returned unchanged.
-func (s *EnvironmentsStore) AssignEnvironment(ctx context.Context, key string, live []string, lease time.Duration) (*domain.Environment, error) {
+// cluster takes waits assigned to none. Anything else is returned unchanged. holding holds live
+// and the clusters heard from within domain.EnvironmentBuildHold, which keep their builds.
+func (s *EnvironmentsStore) AssignEnvironment(ctx context.Context, key string, live, holding []string, lease time.Duration) (*domain.Environment, error) {
 	q := `WITH pick AS (
 	SELECT c.name FROM clusters c, environments v
 	WHERE v.key = $1 AND c.name = ANY(COALESCE($2::text[], '{}')) AND ` + clusterBuildsFor(`v.org_id`) + `
@@ -108,13 +109,13 @@ func (s *EnvironmentsStore) AssignEnvironment(ctx context.Context, key string, l
 		updated_at = now()
 	FROM (SELECT 1) one LEFT JOIN pick ON true
 	WHERE e.key = $1 AND e.state = 'building'
-	  AND (e.cluster_name = '' OR e.assigned_at <= now() - make_interval(secs => $3) OR NOT e.cluster_name = ANY(COALESCE($2::text[], '{}')))
+	  AND (e.cluster_name = '' OR e.assigned_at <= now() - make_interval(secs => $3) OR NOT e.cluster_name = ANY(COALESCE($6::text[], '{}')))
 	  AND (e.cluster_name <> '' OR e.attempt >= $4 OR pick.name IS NOT NULL)
 	RETURNING` + environmentColumns + `)
 SELECT` + environmentColumns + `FROM made
 UNION ALL
 SELECT` + environmentColumns + `FROM environments WHERE key = $1 AND NOT EXISTS (SELECT 1 FROM made)`
-	env, err := scanEnvironment(s.pool.pool.QueryRow(ctx, q, key, live, lease.Seconds(), domain.MaxEnvironmentAttempts, domain.MaxEnvironmentBuildsPerCluster))
+	env, err := scanEnvironment(s.pool.pool.QueryRow(ctx, q, key, live, lease.Seconds(), domain.MaxEnvironmentAttempts, domain.MaxEnvironmentBuildsPerCluster, holding))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

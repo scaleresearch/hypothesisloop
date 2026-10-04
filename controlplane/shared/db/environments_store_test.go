@@ -38,7 +38,14 @@ func (w *environments) ensure(t *testing.T, org, what string) *domain.Environmen
 
 func (w *environments) assign(t *testing.T, key string, live ...string) *domain.Environment {
 	t.Helper()
-	env, err := w.envs.AssignEnvironment(context.Background(), key, live, domain.EnvironmentBuildLease)
+	return w.assignHeld(t, key, live, live)
+}
+
+// assignHeld assigns the build of key with live the clusters it may go to and holding those that
+// keep the builds they hold.
+func (w *environments) assignHeld(t *testing.T, key string, live, holding []string) *domain.Environment {
+	t.Helper()
+	env, err := w.envs.AssignEnvironment(context.Background(), key, live, holding, domain.EnvironmentBuildLease)
 	if err != nil || env == nil {
 		t.Fatalf("assign %s: %+v, %v", key, env, err)
 	}
@@ -147,9 +154,9 @@ func TestABuildIsAssignedToTheLeastLoadedLiveClusterThatBuildsForItsOrg(t *testi
 	}
 }
 
-// A build whose cluster stopped reporting or whose lease passed goes to the next cluster as a new
-// attempt, the report of the old one is refused, and the fourth assignment fails it as the
-// platform's fault.
+// A build whose cluster stopped reporting for longer than the hold or whose lease passed goes to
+// the next cluster as a new attempt, the report of the old one is refused, and the fourth
+// assignment fails it as the platform's fault.
 func TestABuildIsReassignedOffADeadClusterOrAPassedLeaseUntilItsAttemptsAreSpent(t *testing.T) {
 	w := newEnvironments(t)
 	ctx := context.Background()
@@ -160,6 +167,9 @@ func TestABuildIsReassignedOffADeadClusterOrAPassedLeaseUntilItsAttemptsAreSpent
 	first := w.assign(t, env.Key, w.ofA, w.ofB)
 	if first.ClusterName != w.ofA || first.Attempt != 1 {
 		t.Fatalf("first: %+v", first)
+	}
+	if held := w.assignHeld(t, env.Key, []string{w.ofB}, []string{w.ofA, w.ofB}); held.ClusterName != w.ofA || held.Attempt != 1 {
+		t.Fatalf("with %s silent but heard from within the hold: %+v, want it kept at attempt 1", w.ofA, held)
 	}
 	if gone := w.assign(t, env.Key); gone.ClusterName != "" || gone.Attempt != 1 || gone.State != domain.EnvironmentBuilding {
 		t.Fatalf("with no cluster live: %+v, want it taken from %s and waiting at attempt 1", gone, w.ofA)
@@ -307,7 +317,7 @@ func TestTheSchemaGivesAnEnvironmentTheOrgOfItsJobAndFailsAnAbandonedOne(t *test
 
 func TestAssigningAnEnvironmentNoRowNamesIsNothing(t *testing.T) {
 	w := newEnvironments(t)
-	if env, err := w.envs.AssignEnvironment(context.Background(), "no-such-"+w.suffix, []string{w.ofA}, time.Minute); err != nil || env != nil {
+	if env, err := w.envs.AssignEnvironment(context.Background(), "no-such-"+w.suffix, []string{w.ofA}, []string{w.ofA}, time.Minute); err != nil || env != nil {
 		t.Fatalf("got %+v, %v", env, err)
 	}
 }

@@ -95,12 +95,13 @@ type environmentStore struct {
 	LoopStore
 	env        *domain.Environment
 	assigned   [][]string
+	holding    [][]string
 	reasons    map[string]string
 	terminated map[string]string
 	settler    *recordingSettler
 }
 
-func (s *environmentStore) AssignEnvironment(_ context.Context, key string, live []string, lease time.Duration) (*domain.Environment, error) {
+func (s *environmentStore) AssignEnvironment(_ context.Context, key string, live, holding []string, lease time.Duration) (*domain.Environment, error) {
 	if s.env.Key != key {
 		return nil, nil
 	}
@@ -108,6 +109,7 @@ func (s *environmentStore) AssignEnvironment(_ context.Context, key string, live
 		return nil, errors.New("assigned with another lease")
 	}
 	s.assigned = append(s.assigned, slices.Sorted(slices.Values(live)))
+	s.holding = append(s.holding, slices.Sorted(slices.Values(holding)))
 	return s.env, nil
 }
 
@@ -168,8 +170,9 @@ func TestAJobWaitsForItsAssignedEnvironmentAndEndsByWhoseFaultItFailed(t *testin
 				t.Fatalf("%s: %v", name, err)
 			}
 		}
-		if reads != 1 || len(store.assigned) != 1 || !slices.Equal(store.assigned[0], []string{"builder-a", "builder-b"}) {
-			t.Errorf("%s: %d live reads and assignments %v, want one of each against the live clusters", name, reads, store.assigned)
+		if reads != 1 || len(store.assigned) != 1 || !slices.Equal(store.assigned[0], []string{"builder-a", "builder-b"}) ||
+			!slices.Equal(store.holding[0], []string{"builder-a", "builder-b", "gone"}) {
+			t.Errorf("%s: %d live reads, assignments %v held by %v, want one of each against the live clusters, held by every one heard from", name, reads, store.assigned, store.holding)
 		}
 		reason, ended := store.reasons["job-1"], store.terminated["job-1"]
 		switch c.want {

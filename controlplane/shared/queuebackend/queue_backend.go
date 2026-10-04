@@ -386,7 +386,18 @@ func (b *Backend) GetClusterIDs(ctx context.Context) (map[string]string, error) 
 }
 
 func (b *Backend) GetLiveClusters(ctx context.Context) (map[string]bool, error) {
-	return metricsdb.LiveClusterHeartbeats(ctx, b.metricsDBURL, b.connectedWithin)
+	live, err := metricsdb.LiveClusterHeartbeats(ctx, b.metricsDBURL, b.connectedWithin)
+	if err != nil || domain.EnvironmentBuildHold <= b.connectedWithin {
+		return live, err
+	}
+	heard, err := metricsdb.LiveClusterHeartbeats(ctx, b.metricsDBURL, domain.EnvironmentBuildHold)
+	if err != nil {
+		return nil, err
+	}
+	for name := range heard {
+		live[name] = live[name]
+	}
+	return live, nil
 }
 
 func minimumFootprint(a, b domain.Footprint) domain.Footprint {

@@ -2038,9 +2038,10 @@ func cloneNodeAvailByCluster(byCluster map[string]map[string]map[string]int64) m
 // environment once, after its build was assigned, and the live clusters once, when a first
 // environment is assigned.
 type environmentPass struct {
-	seen map[string]*domain.Environment
-	live []string
-	read bool
+	seen    map[string]*domain.Environment
+	live    []string
+	holding []string
+	read    bool
 }
 
 func newEnvironmentPass() *environmentPass {
@@ -2059,10 +2060,11 @@ func (l *Loop) assignBuild(ctx context.Context, pass *environmentPass, key strin
 			if connected {
 				pass.live = append(pass.live, name)
 			}
+			pass.holding = append(pass.holding, name)
 		}
 		pass.read = true
 	}
-	return l.store.AssignEnvironment(ctx, key, pass.live, domain.EnvironmentBuildLease)
+	return l.store.AssignEnvironment(ctx, key, pass.live, pass.holding, domain.EnvironmentBuildLease)
 }
 
 // AssignBuild assigns the build of the environment of key to a live cluster now, as a tick does

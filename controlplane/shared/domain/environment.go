@@ -55,6 +55,11 @@ const (
 	// EnvironmentBuildLease is how long a cluster holds an assigned build before it is assigned
 	// again.
 	EnvironmentBuildLease = 30 * time.Minute
+	// EnvironmentBuildHold is how long a cluster that stopped reporting keeps the build it was
+	// assigned. Its build goes on while the control plane is out of its reach, so a short gap
+	// (a DNS or tunnel blip, an agent restart) neither cancels it nor spends an attempt on a cold
+	// cluster; a cluster silent for longer is lost and the build is assigned again.
+	EnvironmentBuildHold = 5 * time.Minute
 	// MaxEnvironmentBuildTime is the longest the platform spends on one build before it fails it
 	// as its own fault: every attempt, each for its lease.
 	MaxEnvironmentBuildTime = MaxEnvironmentAttempts * EnvironmentBuildLease
