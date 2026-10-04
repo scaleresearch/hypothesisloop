@@ -84,7 +84,7 @@ agentLauncher:
   config: |
     launcher_name: main
     api_url: http://control-service:8081
-    reconcile_interval_seconds: 15
+    reconcile_interval_seconds: 2
     create_pause_milliseconds: 1000
     provider:
       name: fly
@@ -94,7 +94,7 @@ agentLauncher:
         region: ams
         cpu_kind: shared
     instance:
-      command: ["uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"]
+      command: ["/opt/hypothesisloop-agent/.venv/bin/python3", "-m", "hypothesisloop_agent.claude.run"]
       cpu: "2"
       memory: 4Gi
       storage: 10Gi
