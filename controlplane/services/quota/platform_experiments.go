@@ -71,6 +71,9 @@ type PlatformExperimentsStore interface {
 	FailRepository(ctx context.Context, id, answer string) error
 	// SpawnAgent creates an agent in the experiment's org and signs it up, or does neither.
 	SpawnAgent(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup) error
+	// JoinRunning gives a researcher a place in a running platform experiment and its quota,
+	// creating agent first when it is not nil, or does neither.
+	JoinRunning(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup, late db.LateJoin) error
 	RemoveAgent(ctx context.Context, platformExpID, agentID string, deleteDataKey func(ctx context.Context, accessKeyID string) error) error
 	// FinishAgent records that an agent has nothing left to do: db.ErrNotSignedUp,
 	// db.ErrSignupClosed where the agent has no work to finish, db.ErrWorkUnfinished.
@@ -212,7 +215,7 @@ type CreatePlatformExperimentRequest struct {
 	Name                   string  `json:"name" required:"false"`
 	Description            string  `json:"description" required:"false"`
 	BudgetAcceleratorHours float64 `json:"budget_accelerator_hours"`
-	MaxAgents              int     `json:"max_agents" doc:"How many researchers may join over its whole life: the agents of role competitor, whatever their flavor. One that finished or was cut still counts. Agents of role baseline, reviewers and the coordinator never count."`
+	MaxAgents              int     `json:"max_agents" doc:"How many researchers may be at work at once: the agents of role competitor, whatever their flavor, that have not finished, were not cut and still have a machine. One that ended leaves its place to another. Agents of role baseline, reviewers and the coordinator never count."`
 	// MaxConcurrentAccelerators bounds accelerators-in-flight for this experiment. Nil means
 	// "leave unset" on create (defers to quota.default_max_concurrent_accelerators) and "no
 	// change" on update; a present zero is rejected by domain validation, not treated as unset.
@@ -278,7 +281,7 @@ type PlatformExperimentPatch struct {
 	Name                      *string                    `json:"name,omitempty" doc:"Not empty."`
 	Description               *string                    `json:"description,omitempty" doc:"The brief every agent works from, not empty and at most 32768 bytes."`
 	BudgetAcceleratorHours    *float64                   `json:"budget_accelerator_hours,omitempty"`
-	MaxAgents                 *int                       `json:"max_agents,omitempty" doc:"How many researchers may join over its whole life: the agents of role competitor, whatever their flavor. One that finished or was cut still counts. Agents of role baseline, reviewers and the coordinator never count. At least the researchers that already joined."`
+	MaxAgents                 *int                       `json:"max_agents,omitempty" doc:"How many researchers may be at work at once: the agents of role competitor, whatever their flavor, that have not finished, were not cut and still have a machine. One that ended leaves its place to another. Agents of role baseline, reviewers and the coordinator never count. At least the researchers that already joined."`
 	MaxConcurrentAccelerators *int                       `json:"max_concurrent_accelerators,omitempty"`
 	Metrics                   *[]domain.MetricDefinition `json:"metrics,omitempty"`
 	ReportIntervalSeconds     *int                       `json:"report_interval_seconds,omitempty"`

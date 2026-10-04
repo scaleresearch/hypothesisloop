@@ -55,7 +55,7 @@ func (s *PlatformExperimentsStore) CreatePlatformExperiment(ctx context.Context,
 		return err
 	}
 	if len(signups) > 0 {
-		if _, err := enrolTx(ctx, tx, pe.ID, create, signups); err != nil {
+		if _, err := enrolTx(ctx, tx, pe.ID, create, signups, nil); err != nil {
 			return err
 		}
 	}

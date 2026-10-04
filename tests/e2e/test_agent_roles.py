@@ -248,7 +248,7 @@ def test_baseline_survives_stage_cut_drawn_only_from_competitors(api, run_id, ex
 
 
 def test_repeat_signup_of_a_member_succeeds_once_running_and_full(api, experiment, run_id):
-    # An agent restarting signs up again after the run started and filled; a newcomer is still refused.
+    # An agent restarting signs up again after the run started and filled; a newcomer is refused while the member is at work.
     member = make_agent(api, run_id, "repeat-member")
     pe_id = experiment("repeat-signup", [member], budget=0.05, max_agents=1)
 
@@ -258,4 +258,4 @@ def test_repeat_signup_of_a_member_succeeds_once_running_and_full(api, experimen
     api.hl("platform-experiments", "agents", "add", "--platform-experiment", pe_id, "--agent", member)
 
     r = api.signup(pe_id, make_agent(api, run_id, "repeat-newcomer"))
-    assert r.status_code == 409 and r.json()["reason"] == "signup_closed", f"newcomer after start: HTTP {r.status_code} {r.text}"
+    assert r.status_code == 409 and r.json()["reason"] == "max_agents_reached", f"newcomer after start: HTTP {r.status_code} {r.text}"

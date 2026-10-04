@@ -653,8 +653,8 @@ Minimal shape:
   name: my-platform-experiment
   description: what this research program is testing
   budget_accelerator_hours: 10
-  max_agents: 2               # researchers only: a finished one still counts, baseline agents
-                              # and the coordinator never do
+  max_agents: 2               # researchers at work at once: baseline agents and the
+                              # coordinator never count
   duration_hours: 24          # the run, from its start once the baseline is declared
   coordinator_hosted: true    # optional: the platform runs the coordinator
   metrics:

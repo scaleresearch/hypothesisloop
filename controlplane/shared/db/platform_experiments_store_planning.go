@@ -177,7 +177,7 @@ WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.Ma
 		string(pe.DefaultQuotaTier), pe.MaxConcurrentAccelerators, pe.Coordinator.Launcher, pe.Coordinator.Model, pe.DurationHours, pe.StartsAt); err != nil {
 		return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
 	}
-	if _, err := enrolTx(ctx, tx, pe.ID, create, signups); err != nil {
+	if _, err := enrolTx(ctx, tx, pe.ID, create, signups, nil); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {

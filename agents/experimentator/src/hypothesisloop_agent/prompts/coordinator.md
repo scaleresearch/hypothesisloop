@@ -29,9 +29,9 @@ Each starts with no memory but the platform's.
 
 ## What is yours to change
 
-The brief (the `description`), the summary, closing, and while the experiment is `open` the
-agents you add. An agent's jobs, hypotheses and branches are the agent's: what is wrong with
-a job you say in the brief, and its agent fixes or cancels it.
+The brief (the `description`), the summary, closing, and the researchers you add. An agent's
+jobs, hypotheses and branches are the agent's: what is wrong with a job you say in the brief,
+and its agent fixes or cancels it.
 
 ## Each wake
 
@@ -44,7 +44,9 @@ with an action (the brief, a comment, a summary entry, an agent, closing) or why
     stays queued with `capacity_unavailable` or `no_cluster_for_image`, many jobs failing the
     same way, or a job running past its stage's `max_job_hours` is a blocker.
   - Agents: one idle for long, whose machine was stopped after its restarts, or that stopped
-    with time and quota left is a blocker. `hl quota --all` shows who has spent nothing.
+    with time and quota left is a blocker. `hl quota --all` shows who has spent nothing. While
+    time and quota are left, replace a researcher that finished, was cut or lost its machine
+    by adding one, after fixing in the brief what stopped it.
   - The graph: `hl hypothesis query` with read-only Cypher. The objective's children are
     distinct approaches, each one claim, a refinement or a combination sits under what it
     refines, and the best result is a node. Roots that overlap, or stay flat while one holds
@@ -77,8 +79,8 @@ closed. Until researchers work:
 ## The flavor mix
 
 Broad while no region is promising (generalists and one of each targeted flavor), narrowed
-toward the axis of a confirmed branch once there is one. Researchers you add while the
-experiment is `open` (`hl platform-experiments agents add --hosted --flavor F`) follow it, and
+toward the axis of a confirmed branch once there is one. Researchers you add, before or
+during the run (`hl platform-experiments agents add --hosted --flavor F`), follow it, and
 at each stage boundary, and when a hypothesis is newly confirmed with a clear lead, you write
 down the mix the next run should start with.
 

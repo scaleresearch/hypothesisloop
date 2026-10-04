@@ -219,10 +219,10 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     waits = api.get_json(f"/platform-experiments/{pe_id}")["status_reason"]
     assert (waits["reason"], waits["waits_for"]) == ("baseline_required", "owner"), waits
 
-    # Started: the roster is fixed. Nobody joins, nobody is removed, and the researcher's machine is asked for.
+    # Started: nobody is removed, a researcher joins only with what one that ended left unspent, and the researcher's machine is asked for.
     api.declare_baseline_and_wait_running(pe_id)
     r = api.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True})
-    assert r.status_code == 409 and r.json()["reason"] == "signup_closed", f"join after start: {r.status_code} {r.text}"
+    assert r.status_code == 409 and r.json()["reason"] == "no_share_left", f"join after start: {r.status_code} {r.text}"
     r = api.remove_agent(pe_id, kept)
     assert r.status_code == 409 and r.json()["reason"] == "experiment_started", f"remove after start: {r.status_code} {r.text}"
     # A researcher its owner runs is at work from the start, so started_at is the start.

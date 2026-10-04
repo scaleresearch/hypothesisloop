@@ -344,8 +344,10 @@ runs one, and otherwise the moment the first researcher's machine is reported ru
 then the experiment is `running` with `status_reason` `agents_starting`, and the platform
 closes it at `agents_due_at` (`close_reason: agents_not_started`) if no machine is running by
 then. A running experiment whose researchers have all finished, been cut or lost their machine
-with no restart left reads `researchers_done`: whoever coordinates writes the summary and
-closes it, and the platform closes it at `ends_at` otherwise. A hosted coordinator is told
+with no restart left reads `researchers_done`: whoever coordinates adds researchers in their
+place while time and quota are left (each takes a share of what the ones that ended left
+unspent, and `max_agents` counts only researchers at work), or writes the summary and closes
+it, and the platform closes it at `ends_at` otherwise. A hosted coordinator is told
 within a minute of any `status_reason` that begins to wait for it, by a
 `platform_experiment.status` event whose `detail` is the reason. While it
 is `open` the experiment says in `status_reason` what the start waits for (`baseline_required`,

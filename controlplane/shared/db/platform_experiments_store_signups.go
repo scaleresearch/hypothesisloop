@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -26,8 +27,12 @@ var ErrMaxHostedReached = errors.New("max_hosted reached")
 var ErrAgentNameTaken = errors.New("another agent of the platform experiment has this name")
 
 // ErrSignupClosed is a signup or a removal refused because the platform experiment is no longer
-// open, or does not exist: the roster is fixed when the experiment starts.
+// open, or does not exist. Once it runs only a researcher joins it (JoinRunning).
 var ErrSignupClosed = errors.New("platform experiment is not open")
+
+// ErrNoShareLeft is a researcher refused a place in a running platform experiment because the
+// researchers that ended left nothing unspent to give it.
+var ErrNoShareLeft = errors.New("no unspent share left to give a researcher")
 
 // ErrAgentOutsideOrg is a signup refused because the agent is not one of the platform
 // experiment's org, or does not exist.
@@ -43,7 +48,7 @@ var ErrAgentOutsideOrg = errors.New("agent is not of the platform experiment's o
 // makes the max_agents count below exact: a count taken outside this lock let concurrent
 // competitors each see room and all commit.
 func (s *PlatformExperimentsStore) Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) (bool, error) {
-	inserted, err := s.enrol(ctx, platformExpID, nil, []domain.AgentSignup{signup})
+	inserted, err := s.enrol(ctx, platformExpID, nil, []domain.AgentSignup{signup}, nil)
 	if errors.Is(err, ErrSignupClosed) {
 		return false, nil
 	}
@@ -55,19 +60,45 @@ func (s *PlatformExperimentsStore) Signup(ctx context.Context, platformExpID str
 // ErrAgentNameTaken when its name is another agent's in the experiment. ErrSignupClosed when the experiment is not open, ErrMaxAgentsReached when it is a competitor
 // with no place left, ErrMaxHostedReached when it is one machine too many.
 func (s *PlatformExperimentsStore) SpawnAgent(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup) error {
-	_, err := s.enrol(ctx, platformExpID, []*domain.Agent{agent}, []domain.AgentSignup{signup})
+	_, err := s.enrol(ctx, platformExpID, []*domain.Agent{agent}, []domain.AgentSignup{signup}, nil)
+	return err
+}
+
+// LateJoin is what a researcher that joins a running platform experiment is given its quota
+// from (domain.LateShare).
+type LateJoin struct {
+	// Used is what each researcher of the platform experiment has used of its quota, the jobs
+	// that have not ended at their estimate.
+	Used map[string]float64
+	// BurstFraction sizes the newcomer's burst hours from its share, as at the start.
+	BurstFraction float64
+}
+
+// JoinRunning gives a researcher a place in a running platform experiment, and its quota: a fair
+// part of what the researchers left unspent, taken from the ones that ended (domain.LateShare).
+// agent is created first when not nil. The errors are SpawnAgent's, ErrSignupClosed for any
+// other role or a platform experiment that is not running, and ErrNoShareLeft.
+func (s *PlatformExperimentsStore) JoinRunning(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup, late LateJoin) error {
+	var create []*domain.Agent
+	if agent != nil {
+		create = []*domain.Agent{agent}
+	}
+	inserted, err := s.enrol(ctx, platformExpID, create, []domain.AgentSignup{signup}, &late)
+	if err == nil && inserted == 0 {
+		return ErrSignupClosed
+	}
 	return err
 }
 
 // enrol is the one transaction a signup row is written in. create is inserted first, into the org
 // the platform experiment belongs to.
-func (s *PlatformExperimentsStore) enrol(ctx context.Context, platformExpID string, create []*domain.Agent, signups []domain.AgentSignup) (int, error) {
+func (s *PlatformExperimentsStore) enrol(ctx context.Context, platformExpID string, create []*domain.Agent, signups []domain.AgentSignup, late *LateJoin) (int, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("platform_experiments_store.Signup: begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	inserted, err := enrolTx(ctx, tx, platformExpID, create, signups)
+	inserted, err := enrolTx(ctx, tx, platformExpID, create, signups, late)
 	if err != nil {
 		return 0, err
 	}
@@ -96,11 +127,13 @@ func allocateBaselineQuota(ctx context.Context, tx pgx.Tx, platformExpID, agentI
 	return nil
 }
 
-// enrolTx is enrol inside the caller's transaction.
+// enrolTx is enrol inside the caller's transaction. With late it adds researchers to a running
+// platform experiment, and to nothing else.
 //
 // An agent of role baseline is given its quota here, with its place: its job runs while the
-// platform experiment is open, before the start divides the budget (allocateBaselineQuota).
-func enrolTx(ctx context.Context, tx pgx.Tx, platformExpID string, create []*domain.Agent, signups []domain.AgentSignup) (int, error) {
+// platform experiment is open, before the start divides the budget (allocateBaselineQuota). So
+// is a researcher that joins a running one (allocateLateQuota).
+func enrolTx(ctx context.Context, tx pgx.Tx, platformExpID string, create []*domain.Agent, signups []domain.AgentSignup, late *LateJoin) (int, error) {
 	var status, orgID string
 	var maxAgents, maxHosted int
 	var coordinatorHosted bool
@@ -115,7 +148,11 @@ WHERE pe.id=$1 FOR UPDATE OF pe`, platformExpID).Scan(&status, &maxAgents, &maxH
 		}
 		return 0, fmt.Errorf("platform_experiments_store.Signup: lock experiment: %w", err)
 	}
-	if status != string(domain.PlatformExpOpen) {
+	running := late != nil
+	if running && (status != string(domain.PlatformExpRunning) || slices.ContainsFunc(signups, func(signup domain.AgentSignup) bool { return signup.Role != domain.SignupRoleCompetitor })) {
+		return 0, ErrSignupClosed
+	}
+	if !running && status != string(domain.PlatformExpOpen) {
 		return 0, ErrSignupClosed
 	}
 	// Names are unique in a platform experiment, among the agents in it and those that left a
@@ -154,6 +191,7 @@ VALUES ($1, $2, $3, $4, $5)`, agent.ID, agent.Name, agent.OrgID, agent.Performan
 		created[agent.ID] = true
 	}
 	inserted, competitors, hosted := 0, false, false
+	var joined []domain.AgentSignup
 	for _, signup := range signups {
 		if !created[signup.AgentID] {
 			var agentOrg, agentName string
@@ -190,6 +228,10 @@ ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signu
 		inserted++
 		competitors = competitors || signup.Role == domain.SignupRoleCompetitor
 		hosted = hosted || signup.Hosted
+		if running {
+			joined = append(joined, signup)
+			continue
+		}
 		if signup.Role != domain.SignupRoleBaseline {
 			continue
 		}
@@ -221,11 +263,15 @@ WHERE platform_experiment_id = $1 AND hosted AND finished_at IS NULL AND NOT ins
 	if inserted == 0 {
 		return 0, nil
 	}
-	// max_agents sizes the field being ranked: it counts the researchers that joined, one that
-	// finished or was cut among them, and nobody of another role.
+	// max_agents bounds the researchers at work at once: one that finished, was cut or whose
+	// machine stopped with no restart left leaves its place to another, and nobody of another
+	// role takes one.
 	if competitors {
 		var count int
-		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM experiment_signups WHERE platform_experiment_id = $1 AND role = $2`,
+		if err := tx.QueryRow(ctx, `
+SELECT COUNT(*) FROM experiment_signups s
+WHERE s.platform_experiment_id = $1 AND s.role = $2 AND s.finished_at IS NULL AND NOT (s.hosted AND s.instance_stopped)
+  AND NOT EXISTS (SELECT 1 FROM platform_experiment_cuts c WHERE c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id)`,
 			platformExpID, string(domain.SignupRoleCompetitor)).Scan(&count); err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: count competitors: %w", err)
 		}
@@ -233,7 +279,69 @@ WHERE platform_experiment_id = $1 AND hosted AND finished_at IS NULL AND NOT ins
 			return 0, ErrMaxAgentsReached
 		}
 	}
+	for _, signup := range joined {
+		if err := allocateLateQuota(ctx, tx, platformExpID, signup, *late, defaultTier); err != nil {
+			return 0, err
+		}
+	}
 	return inserted, nil
+}
+
+// allocateLateQuota gives signup, a researcher joining the running platform experiment, its share
+// of what the researchers left unspent (domain.LateShare), and takes that share from the quotas of
+// the ones that ended. The experiment row is locked, so two researchers joining at once do not
+// take the same hours.
+func allocateLateQuota(ctx context.Context, tx pgx.Tx, platformExpID string, signup domain.AgentSignup, late LateJoin, defaultTier domain.QuotaTier) error {
+	rows, err := tx.Query(ctx, `
+SELECT q.agent_id, q.guaranteed_accelerator_hours, q.burst_accelerator_hours,
+       s.finished_at IS NOT NULL OR (s.hosted AND s.instance_stopped)
+FROM agent_quotas q
+JOIN experiment_signups s ON s.platform_experiment_id = q.platform_experiment_id AND s.agent_id = q.agent_id
+WHERE q.platform_experiment_id = $1 AND s.role = $2 AND s.agent_id <> $3
+  AND NOT EXISTS (SELECT 1 FROM platform_experiment_cuts c WHERE c.platform_experiment_id = q.platform_experiment_id AND c.agent_id = q.agent_id)
+ORDER BY s.signed_up_at, s.agent_id`, platformExpID, string(domain.SignupRoleCompetitor), signup.AgentID)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.JoinRunning: read quotas: %w", err)
+	}
+	var quotas []domain.ResearcherQuota
+	for rows.Next() {
+		var q domain.ResearcherQuota
+		if err := rows.Scan(&q.AgentID, &q.Guaranteed, &q.Burst, &q.Ended); err != nil {
+			rows.Close()
+			return fmt.Errorf("platform_experiments_store.JoinRunning: read quotas: %w", err)
+		}
+		q.Used = late.Used[q.AgentID]
+		quotas = append(quotas, q)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("platform_experiments_store.JoinRunning: read quotas: %w", err)
+	}
+	share, taken := domain.LateShare(quotas)
+	if share <= 0 {
+		return ErrNoShareLeft
+	}
+	for agentID, take := range taken {
+		if _, err := tx.Exec(ctx, `
+UPDATE agent_quotas SET
+    guaranteed_accelerator_hours = CASE WHEN guaranteed_accelerator_hours > 0 THEN GREATEST(0, guaranteed_accelerator_hours - $3) ELSE 0 END,
+    burst_accelerator_hours = CASE WHEN guaranteed_accelerator_hours > 0 THEN burst_accelerator_hours ELSE GREATEST(0, burst_accelerator_hours - $3) END
+WHERE platform_experiment_id = $1 AND agent_id = $2`, platformExpID, agentID, take); err != nil {
+			return fmt.Errorf("platform_experiments_store.JoinRunning: take from %s: %w", agentID, err)
+		}
+	}
+	guaranteed, burst := domain.ApplyQuotaTier(domain.ResolveQuotaTier(signup.QuotaTier, defaultTier), share, domain.RoundHours(share*late.BurstFraction))
+	id, err := domain.NewID(domain.AgentQuotaIDPrefix)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, upsertAgentQuotaSQL, agentQuotaUpsertArgs(&domain.AgentQuota{
+		ID: id, AgentID: signup.AgentID, PlatformExperimentID: platformExpID,
+		GuaranteedAcceleratorHours: guaranteed, BurstAcceleratorHours: burst, CreatedAt: time.Now().UTC(),
+	})...); err != nil {
+		return fmt.Errorf("platform_experiments_store.JoinRunning: allocate the quota of %s: %w", signup.AgentID, err)
+	}
+	return nil
 }
 
 // agentNamesTx returns the names carried in a platform experiment, each with its agent: of the

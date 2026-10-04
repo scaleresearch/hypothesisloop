@@ -40,6 +40,8 @@ type rosterStore struct {
 	objective []*domain.Experiment
 	// inFlight is the agents that have a job queued or running.
 	inFlight map[string]bool
+	// lateShare is what the researchers that ended left unspent, for one joining the run.
+	lateShare float64
 	// submitted is how many jobs each agent submitted.
 	submitted map[string]int
 	// hypotheses is the graph, and graphErr what reading it fails with.
@@ -182,7 +184,7 @@ func (f *rosterStore) GetAgent(_ context.Context, id string) (*domain.Agent, err
 func (f *rosterStore) competitors() int {
 	n := 0
 	for _, s := range f.signups {
-		if s.Role == domain.SignupRoleCompetitor {
+		if s.Role == domain.SignupRoleCompetitor && s.FinishedAt == nil && (s.Instance == nil || !s.Instance.Stopped) {
 			n++
 		}
 	}
@@ -240,6 +242,34 @@ func (f *rosterStore) SpawnAgent(_ context.Context, _ string, agent *domain.Agen
 	signup.PlatformExperimentID, signup.Name = f.pe.ID, agent.Name
 	f.signups = append(f.signups, signup)
 	return nil
+}
+
+func (f *rosterStore) ListSignupsByRole(_ context.Context, _ string, role domain.SignupRole) ([]string, error) {
+	var ids []string
+	for _, s := range f.signups {
+		if s.Role == role {
+			ids = append(ids, s.AgentID)
+		}
+	}
+	return ids, nil
+}
+
+// JoinRunning joins as an open experiment would, while the researchers that ended left
+// lateShare unspent.
+func (f *rosterStore) JoinRunning(ctx context.Context, id string, agent *domain.Agent, signup domain.AgentSignup, _ db.LateJoin) error {
+	if f.pe.Status != domain.PlatformExpRunning || signup.Role != domain.SignupRoleCompetitor {
+		return db.ErrSignupClosed
+	}
+	if f.lateShare <= 0 {
+		return db.ErrNoShareLeft
+	}
+	f.pe.Status = domain.PlatformExpOpen
+	defer func() { f.pe.Status = domain.PlatformExpRunning }()
+	if agent != nil {
+		return f.SpawnAgent(ctx, id, agent, signup)
+	}
+	_, err := f.Signup(ctx, id, signup)
+	return err
 }
 
 func (f *rosterStore) ListAgentSignups(context.Context, string) ([]domain.AgentSignup, error) {
@@ -454,9 +484,10 @@ func TestJoiningIsRefusedWithAReasonTheCallerCanActOn(t *testing.T) {
 		wantCode   int
 		wantReason string
 	}{
-		"running":                {domain.PlatformExpRunning, "pe-1", `{}`, 409, "signup_closed"},
+		"running, nothing left":  {domain.PlatformExpRunning, "pe-1", `{}`, 409, "no_share_left"},
+		"running, a reviewer":    {domain.PlatformExpRunning, "pe-1", `{"role":"reviewer"}`, 409, "signup_closed"},
 		"closed":                 {domain.PlatformExpClosed, "pe-1", `{"hosted":true}`, 409, "signup_closed"},
-		"registered, running":    {domain.PlatformExpRunning, "pe-1", `{"agent_id":"dana"}`, 409, "signup_closed"},
+		"registered, running":    {domain.PlatformExpRunning, "pe-1", `{"agent_id":"dana"}`, 409, "no_share_left"},
 		"field full":             {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{}`, 409, "max_agents_reached"},
 		"registered, full":       {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{"agent_id":"dana"}`, 409, "max_agents_reached"},
 		"no such experiment":     {domain.PlatformExpOpen, "pe-none", `{}`, 404, "experiment_not_found"},
@@ -577,20 +608,43 @@ func TestHostingIsRefusedWhileTheLauncherConfigNamesIsNotRegistered(t *testing.T
 }
 
 // A coordinator's token outlives the close by its wind-down, and adds nothing in it.
-func TestACoordinatorAddsNoAgentOnceItsExperimentHasStartedOrClosed(t *testing.T) {
+func TestACoordinatorAddsNoAgentOnceItsExperimentClosed(t *testing.T) {
 	coordinator := auth.Principal{Kind: auth.KindCoordinator, OrgIDs: []string{"org-a"}, ProjectID: "project-a", PlatformExperimentID: "pe-1"}
-	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpRunning, domain.PlatformExpClosed} {
-		store := newRosterStore(status, 5)
-		r := agentsRouter(t, store, coordinator)
-		for _, body := range []string{`{"hosted":true}`, `{"hosted":true,"role":"reviewer"}`, `{}`} {
-			code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
-			if code != http.StatusConflict || out["reason"] != "signup_closed" {
-				t.Fatalf("%s, %s: got = %d %v, want = 409 signup_closed", status, body, code, out)
-			}
+	store := newRosterStore(domain.PlatformExpClosed, 5)
+	store.lateShare = 1
+	r := agentsRouter(t, store, coordinator)
+	for _, body := range []string{`{"hosted":true}`, `{"hosted":true,"role":"reviewer"}`, `{}`} {
+		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
+		if code != http.StatusConflict || out["reason"] != "signup_closed" {
+			t.Fatalf("%s: got = %d %v, want = 409 signup_closed", body, code, out)
 		}
-		if len(store.signups) != 0 || len(store.agents) != 0 {
-			t.Fatalf("%s: a coordinator added %d agents", status, len(store.signups))
-		}
+	}
+	if len(store.signups) != 0 || len(store.agents) != 0 {
+		t.Fatalf("a coordinator added %d agents", len(store.signups))
+	}
+}
+
+// A run whose researchers ended while time and quota are left goes on with new ones: its
+// coordinator adds a researcher, and nothing of another role, and an agent adds none.
+func TestACoordinatorReplacesAResearcherWhileTheRunGoesOn(t *testing.T) {
+	coordinator := auth.Principal{Kind: auth.KindCoordinator, OrgIDs: []string{"org-a"}, ProjectID: "project-a", PlatformExperimentID: "pe-1"}
+	store := newRosterStore(domain.PlatformExpRunning, 1)
+	store.lateShare = 1
+	finished := time.Now()
+	store.signups = []domain.AgentSignup{{AgentID: "ended", Role: domain.SignupRoleCompetitor, FinishedAt: &finished}}
+	r := agentsRouter(t, store, coordinator)
+	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"hosted":true,"role":"reviewer"}`); code != http.StatusConflict || out["reason"] != "signup_closed" {
+		t.Fatalf("a reviewer: got = %d %v, want = 409 signup_closed", code, out)
+	}
+	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"hosted":true}`); code != http.StatusCreated {
+		t.Fatalf("a researcher: got = %d %v, want = 201", code, out)
+	}
+	if len(store.signups) != 2 {
+		t.Fatalf("signups = %d, want the one that ended and its replacement", len(store.signups))
+	}
+	agent := agentsRouter(t, store, auth.Principal{Kind: auth.KindAgent, OrgIDs: []string{"org-a"}, ProjectID: "project-a", PlatformExperimentID: "pe-1", AgentID: "ended"})
+	if code, out := call(t, agent, "POST", "/platform-experiments/pe-1/agents", `{"hosted":true}`); code == http.StatusCreated {
+		t.Fatalf("an agent's token: got = %d %v, want a refusal", code, out)
 	}
 }
 

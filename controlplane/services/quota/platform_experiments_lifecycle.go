@@ -492,9 +492,10 @@ func (s *PlatformExperimentsService) StartIfReady(ctx context.Context, id string
 	return nil
 }
 
-// maxAgentsReached refuses a researcher past max_agents, which counts researchers and nothing else.
+// maxAgentsReached refuses a researcher past max_agents, which counts the researchers at work and
+// nothing else.
 func maxAgentsReached(limit int) error {
-	return refuseSignup(409, "max_agents_reached", "max_agents is %d and that many researchers (agents of role competitor) have joined. One that finished or was cut still counts, and agents of role baseline, reviewers and the coordinator never do: the owner raises max_agents, or the agent joins with another role", limit)
+	return refuseSignup(409, "max_agents_reached", "max_agents is %d and that many researchers (agents of role competitor) are at work. One that finished, was cut or lost its machine with no restart left no longer counts, and agents of role baseline, reviewers and the coordinator never do: the owner raises max_agents, or the agent joins with another role", limit)
 }
 
 func maxHostedReached(limit int) string {
@@ -743,8 +744,8 @@ func runningReason(pe *domain.PlatformExperiment, signups []domain.AgentSignup, 
 	case pe.AwaitsAgents():
 		return &domain.StatusReason{Reason: "agents_starting", Message: "the run started at starts_at, " + pe.StartsAt.UTC().Format(time.RFC3339) + ", and its researchers' machines are starting: the first one running sets started_at. The platform closes it at agents_due_at, with close_reason " + string(domain.CloseAgentsNotStarted) + ", if none is running by then, and at " + endsClock(pe, now) + ", in any case"}
 	case !researcherLeft(signups):
-		return &domain.StatusReason{Reason: "researchers_done", Message: fmt.Sprintf("every researcher of platform experiment %s has finished, was cut or lost its machine with no restart left, so nobody is left to submit a job and the run only waits for its %s, when the platform closes it: its coordinator writes the summary with `hl platform-experiments summary --file FILE --platform-experiment %s` and closes it with `hl platform-experiments close --platform-experiment %s`",
-			pe.ID, endsClock(pe, now), pe.ID, pe.ID)}
+		return &domain.StatusReason{Reason: "researchers_done", Message: fmt.Sprintf("every researcher of platform experiment %s has finished, was cut or lost its machine with no restart left, so nobody is left to submit a job until its coordinator adds a researcher in their place with `hl platform-experiments agents add --hosted --platform-experiment %s`, which it does while time and quota are left. The platform closes it at its %s, and its coordinator may write the summary with `hl platform-experiments summary --file FILE --platform-experiment %s` and close it sooner with `hl platform-experiments close --platform-experiment %s`",
+			pe.ID, pe.ID, endsClock(pe, now), pe.ID, pe.ID)}
 	}
 	return &domain.StatusReason{Reason: "running", Message: "its researchers are at work and the platform closes it at " + endsClock(pe, now)}
 }

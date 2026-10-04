@@ -198,11 +198,30 @@ func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID
 			return nil, err
 		}
 	}
+	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
+	}
+	if pe == nil {
+		return nil, refuseSignup(404, "experiment_not_found", "no platform experiment %s", platformExpID)
+	}
+	member := false
+	if req.AgentID != "" {
+		if member, err = s.store.IsSignedUp(ctx, platformExpID, req.AgentID); err != nil {
+			return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
+		}
+	}
+	var late *db.LateJoin
+	if pe.Status == domain.PlatformExpRunning && !member {
+		if late, err = s.lateJoin(ctx, pe, role, by); err != nil {
+			return nil, err
+		}
+	}
 	join := s.spawn
 	if req.AgentID != "" {
 		join = s.joinRegistered
 	}
-	joined, err := join(ctx, platformExpID, req, signup)
+	joined, err := join(ctx, pe, req, signup, late)
 	if err != nil || !signup.SharesBudget() {
 		return joined, err
 	}
@@ -211,6 +230,52 @@ func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID
 		return nil, err
 	}
 	return joined, nil
+}
+
+// lateJoin is what a researcher joining the running pe takes its quota from. Once the run started
+// only a researcher joins, in the place of one that ended, and its coordinator or a person adds it.
+func (s *PlatformExperimentsService) lateJoin(ctx context.Context, pe *domain.PlatformExperiment, role domain.SignupRole, by domain.Actor) (*db.LateJoin, error) {
+	if role != domain.SignupRoleCompetitor {
+		return nil, refuseSignup(409, "signup_closed", "platform experiment %s is running, and only a researcher (role competitor) joins it then", pe.ID)
+	}
+	if by.Kind == domain.ActorAgent {
+		return nil, refuseSignup(403, "not_coordinator", "an agent adds no agent to a running platform experiment: its coordinator or its owner does")
+	}
+	researchers, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleCompetitor)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.lateJoin: %w", err)
+	}
+	used := make(map[string]float64, len(researchers))
+	for _, agentID := range researchers {
+		quota, err := s.GetAgentQuota(ctx, agentID, pe.ID)
+		if err != nil {
+			return nil, fmt.Errorf("platform_experiments.lateJoin: %w", err)
+		}
+		if quota != nil {
+			used[agentID] = quota.Used()
+		}
+	}
+	return &db.LateJoin{Used: used, BurstFraction: s.cfg.BurstFraction}, nil
+}
+
+// enrolRefused answers what a signup to pe was refused for in the store, name being the agent's,
+// and nil for anything else.
+func enrolRefused(err error, pe *domain.PlatformExperiment, name string) error {
+	switch {
+	case errors.Is(err, db.ErrSignupClosed) && pe.Status == domain.PlatformExpRunning:
+		return refuseSignup(409, "signup_closed", "platform experiment %s is running, and only a researcher (role competitor) joins it then", pe.ID)
+	case errors.Is(err, db.ErrSignupClosed):
+		return refuseSignup(409, "signup_closed", "experiment is %s", pe.Status)
+	case errors.Is(err, db.ErrAgentNameTaken):
+		return agentNameTaken(name)
+	case errors.Is(err, db.ErrMaxAgentsReached):
+		return maxAgentsReached(pe.MaxAgents)
+	case errors.Is(err, db.ErrMaxHostedReached):
+		return refuseSignup(409, "max_hosted_reached", "%s", maxHostedReached(pe.MaxHosted))
+	case errors.Is(err, db.ErrNoShareLeft):
+		return refuseSignup(409, "no_share_left", "the researchers of platform experiment %s that finished, were cut or lost their machine left none of their quota unspent, and a researcher that joins a running one is given its share from that: nothing is left to give one", pe.ID)
+	}
+	return nil
 }
 
 // agentNameTaken refuses an agent whose name another agent of the platform experiment carries.
@@ -290,7 +355,8 @@ func (h *PlatformExperimentsHandler) hostedAgents(researchers []ProposedAgent, b
 	return agents, signups, nil
 }
 
-func (s *PlatformExperimentsService) joinRegistered(ctx context.Context, platformExpID string, req AddAgentRequest, signup domain.AgentSignup) ([]domain.AgentSignup, error) {
+func (s *PlatformExperimentsService) joinRegistered(ctx context.Context, pe *domain.PlatformExperiment, req AddAgentRequest, signup domain.AgentSignup, late *db.LateJoin) ([]domain.AgentSignup, error) {
+	platformExpID := pe.ID
 	if req.Name != "" {
 		return nil, refuseSignup(400, "invalid_request", "name describes an agent to create and cannot be set with agent_id")
 	}
@@ -301,10 +367,31 @@ func (s *PlatformExperimentsService) joinRegistered(ctx context.Context, platfor
 	if agent == nil {
 		return nil, refuseSignup(404, "agent_not_found", "no agent %s is registered", req.AgentID)
 	}
-	if err := s.Signup(ctx, platformExpID, signup); err != nil {
-		return nil, err
-	}
 	joined, err := s.store.GetAgentSignup(ctx, platformExpID, req.AgentID)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
+	}
+	switch {
+	case joined != nil:
+		// A member joining again has what it asked for.
+		return []domain.AgentSignup{*joined}, nil
+	case late != nil:
+		err := s.store.JoinRunning(ctx, platformExpID, nil, signup, *late)
+		if refused := enrolRefused(err, pe, agent.Name); refused != nil {
+			return nil, refused
+		}
+		if errors.Is(err, db.ErrAgentOutsideOrg) {
+			return nil, refuseSignup(404, "agent_not_found", "no agent %s is registered", req.AgentID)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
+		}
+	default:
+		if err := s.Signup(ctx, platformExpID, signup); err != nil {
+			return nil, err
+		}
+	}
+	joined, err = s.store.GetAgentSignup(ctx, platformExpID, req.AgentID)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}
@@ -314,31 +401,23 @@ func (s *PlatformExperimentsService) joinRegistered(ctx context.Context, platfor
 	return []domain.AgentSignup{*joined}, nil
 }
 
-func (s *PlatformExperimentsService) spawn(ctx context.Context, platformExpID string, req AddAgentRequest, signup domain.AgentSignup) ([]domain.AgentSignup, error) {
-	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
-	if err != nil {
-		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
-	}
-	if pe == nil {
-		return nil, refuseSignup(404, "experiment_not_found", "no platform experiment %s", platformExpID)
-	}
+func (s *PlatformExperimentsService) spawn(ctx context.Context, pe *domain.PlatformExperiment, req AddAgentRequest, signup domain.AgentSignup, late *db.LateJoin) ([]domain.AgentSignup, error) {
+	platformExpID := pe.ID
 	id, err := domain.NewID(domain.AgentIDPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}
 	signup.AgentID = id
 	agent := &domain.Agent{ID: id, Name: strings.TrimSpace(req.Name), PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
-	err = s.store.SpawnAgent(ctx, platformExpID, agent, signup)
-	switch {
-	case errors.Is(err, db.ErrSignupClosed):
-		return nil, refuseSignup(409, "signup_closed", "experiment is %s", pe.Status)
-	case errors.Is(err, db.ErrAgentNameTaken):
-		return nil, agentNameTaken(agent.Name)
-	case errors.Is(err, db.ErrMaxAgentsReached):
-		return nil, maxAgentsReached(pe.MaxAgents)
-	case errors.Is(err, db.ErrMaxHostedReached):
-		return nil, refuseSignup(409, "max_hosted_reached", "%s", maxHostedReached(pe.MaxHosted))
-	case err != nil:
+	if late != nil {
+		err = s.store.JoinRunning(ctx, platformExpID, agent, signup, *late)
+	} else {
+		err = s.store.SpawnAgent(ctx, platformExpID, agent, signup)
+	}
+	if refused := enrolRefused(err, pe, agent.Name); refused != nil {
+		return nil, refused
+	}
+	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}
 	joined, err := s.store.GetAgentSignup(ctx, platformExpID, id)
@@ -569,7 +648,8 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler, graph H
 		OperationID: "add-platform-experiment-agent", Method: "POST", Path: "/platform-experiments/{id}/agents",
 		Summary: "Add one agent to a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
-		Description: "The only way an agent joins, and only while the experiment is open: the platform starts the run once its baseline is declared, and quota is divided then over the agents present, those of role baseline apart. Adding the researcher a declared baseline still waited for starts the run in this request. " +
+		Description: "The only way an agent joins, while the experiment is open: the platform starts the run once its baseline is declared, and quota is divided then over the agents present, those of role baseline apart. " +
+			"While it runs, its coordinator or a person adds a researcher (role competitor, and no other role) in the place of one that finished, was cut or lost its machine: it is given an even part, with the researchers at work, of what all researchers left unspent, taken from what the ones that ended left, and 409 no_share_left when they left nothing. An agent's token adds no agent then (403). Adding the researcher a declared baseline still waited for starts the run in this request. " +
 			"Creates one agent with a generated id and signs it up; or, with agent_id, signs up that registered agent. For several agents, call once for each. " +
 			"An agent's name is unique in the platform experiment and, when the platform gives it, says its role: 409 agent_name_taken for a stated name, or a registered agent's, that another agent of it carries. " +
 			"The answer is agents, a list holding that one agent. " +
@@ -581,7 +661,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler, graph H
 			"The token acts as that agent in that platform experiment and nowhere else, and asking again with agent_id returns it again. " +
 			"role decides ranking: \"competitor\" (default) is a researcher, whatever its flavor: ranked, cut-eligible and counted against max_agents; \"baseline\" and " +
 			"\"reviewer\" are none of the three, though their jobs are billed and gated identically. " +
-			"409 max_agents_reached for a researcher past max_agents, which counts every researcher that joined, one that finished or was cut included, and no agent of another role and no coordinator. 409 signup_closed once the experiment is no longer open. " +
+			"409 max_agents_reached for a researcher past max_agents, which counts the researchers at work, none that finished, was cut or lost its machine with no restart left, and no agent of another role and no coordinator. 409 signup_closed for any role but researcher once the run started, and for every one once it closed. " +
 			"An agent of role baseline measures the baseline before the start: its machine, when hosted, starts at once, it holds a quota from the moment it joins (half the budget, which no researcher can spend before the start, so a failed measurement can be run again; it follows a later change of the budget while the experiment is open)," +
 			"and its job is the only one an open experiment accepts. It takes no share at the start, and what it spent is taken from the budget before the others' shares are carved.",
 	}, func(ctx context.Context, in *struct {

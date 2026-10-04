@@ -33,3 +33,51 @@ func AllocateQuota(budgetAccH float64, signedUpCount int, myBonusFraction float6
 	guaranteed = RoundHours(adjustedBase + baseShare*myBonusFraction)
 	return guaranteed, RoundHours(guaranteed * cfg.BurstFraction)
 }
+
+// ResearcherQuota is a researcher's allocation and what it used of it, as a researcher that
+// joins a running platform experiment is given its share from. Ended is a researcher that
+// finished or whose machine stopped with no restart left.
+type ResearcherQuota struct {
+	AgentID    string
+	Guaranteed float64
+	Burst      float64
+	Used       float64
+	Ended      bool
+}
+
+func (q ResearcherQuota) unspent() float64 {
+	share := q.Guaranteed
+	if share <= 0 {
+		share = q.Burst
+	}
+	return max(0, share-q.Used)
+}
+
+// LateShare is the share of a researcher that joins a running platform experiment whose other
+// researchers hold quotas: an even part, with the researchers still at work, of what all of them
+// left unspent, and never more than the researchers that ended left. taken is what that share
+// takes from each researcher that ended, in the order given.
+func LateShare(quotas []ResearcherQuota) (share float64, taken map[string]float64) {
+	unspent, leftByEnded, atWork := 0.0, 0.0, 0
+	for _, q := range quotas {
+		unspent += q.unspent()
+		if q.Ended {
+			leftByEnded += q.unspent()
+		} else {
+			atWork++
+		}
+	}
+	share = RoundHours(min(leftByEnded, unspent/float64(atWork+1)))
+	taken = map[string]float64{}
+	need := share
+	for _, q := range quotas {
+		if !q.Ended || need <= 0 {
+			continue
+		}
+		if take := min(need, q.unspent()); take > 0 {
+			taken[q.AgentID] = take
+			need -= take
+		}
+	}
+	return share, taken
+}

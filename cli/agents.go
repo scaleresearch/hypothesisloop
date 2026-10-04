@@ -50,10 +50,11 @@ func agentsAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 	fs := newFlags("platform-experiments agents add", `usage: hl platform-experiments agents add [--platform-experiment PE] [--hosted] [--flavor F] [--hyperparameters JSON] [--model M] [--name NAME] [--role ROLE] [--quota-tier TIER]
    or: hl platform-experiments agents add [--platform-experiment PE] --agent ID [--role ROLE] [--quota-tier TIER]
 
-The only way an agent joins a platform experiment, while it is open; once per agent. The first
-form creates one; the second joins a registered one again under its id (a removed agent), or
-prints a self-run agent's token again. max_agents counts researchers (role competitor),
-finished ones too. A reviewer re-checks others' claims and records agreement or dispute; like a
+The only way an agent joins a platform experiment, while it is open; once per agent. While it
+runs, the coordinator or the owner adds a researcher in the place of one that finished, was cut
+or lost its machine, with a share of what those left unspent. The first form creates one; the
+second joins a registered one again under its id (a removed agent), or prints a self-run agent's
+token again. max_agents counts the researchers (role competitor) at work. A reviewer re-checks others' claims and records agreement or dispute; like a
 baseline agent it is not ranked, cut or counted.
 --hosted: the platform runs the agent, starting a baseline agent's machine at once and any
 other's at the start of the run (its status_reason says what the start waits for). Without --hosted the line printed
