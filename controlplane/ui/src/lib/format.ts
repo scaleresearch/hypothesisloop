@@ -20,6 +20,11 @@ export function runClock(pe: { started_at?: string; ends_at?: string; baseline_d
   return null
 }
 
+// The start of a long id, enough to tell records apart in a list; the full id goes in a title.
+export function shortId(id: string): string {
+  return `${id.slice(0, 8)}…`
+}
+
 // Formats a AccH (Accelerator-hour) quantity for display. Values ≥ 1 round to the nearest
 // half-hour (readable at normal scale); smaller values keep 3 decimals instead of
 // being rounded away to "0" — small demo/test workloads consume fractions of an hour.

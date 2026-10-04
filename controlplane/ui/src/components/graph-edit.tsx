@@ -9,8 +9,9 @@ import type { HypothesisGraph, HypothesisLinkInput, HypothesisLinkType } from '@
 import { Badge } from '@/components/ui/badge'
 import { Button, Chip, RowButton } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
-import { InlineError } from '@/components/ui/status-message'
-import { Eyebrow } from '@/components/ui/text'
+import { Inline, Stack } from '@/components/ui/stack'
+import { Callout, InlineError } from '@/components/ui/status-message'
+import { Eyebrow, Text } from '@/components/ui/text'
 import { LINK_KINDS, LINK_KIND_LABELS, findIdeas, linkPlanner, withEdge, withHypothesis } from '@/lib/hypothesis-graph'
 
 export interface GraphEditor {
@@ -18,6 +19,8 @@ export interface GraphEditor {
   rootLabel: string
   /** A person of the experiment's org, while it is not closed. */
   canWrite: boolean
+  /** The experiment is closed: the platform refuses new ideas, and the views say so where they would be added. */
+  closed: boolean
   /** The node the idea being written builds on. */
   adding: string | null
   startAdding: (parent: string) => void
@@ -42,10 +45,11 @@ export interface GraphEditor {
   cancel: () => void
 }
 
-export function useGraphEditor({ graph, rootLabel, canWrite, mutate, onSelect }: {
+export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mutate, onSelect }: {
   graph: HypothesisGraph
   rootLabel: string
   canWrite: boolean
+  closed?: boolean
   mutate: KeyedMutator<HypothesisGraph>
   onSelect: (id: string) => void
 }): GraphEditor {
@@ -145,6 +149,7 @@ export function useGraphEditor({ graph, rootLabel, canWrite, mutate, onSelect }:
     graph,
     rootLabel,
     canWrite,
+    closed,
     adding: canWrite ? adding : null,
     startAdding: parent => {
       cancel()
@@ -190,13 +195,19 @@ function nodeLabel(editor: GraphEditor, id: string): string {
   return editor.graph.nodes.find(n => n.id === id)?.text ?? id
 }
 
+/** Stands where an idea would be added to a closed experiment. */
+export function ClosedNote() {
+  return <Text as="span" variant="hint">Closed. New ideas go into a new experiment.</Text>
+}
+
 /** The two things a person does at a node: add an idea that builds on it, and link it to another. */
 export function NodeActions({ id }: { id: string }) {
   const editor = useEditor()
-  if (!editor?.canWrite || editor.picking || editor.adding !== null) return null
+  if (!editor || editor.picking || editor.adding !== null) return null
+  if (!editor.canWrite) return editor.closed ? <ClosedNote /> : null
   const root = id === editor.graph.root
   return (
-    <div className="flex items-center gap-1.5">
+    <Inline gap="xs" nowrap>
       <Button
         size="sm"
         variant="primary"
@@ -206,7 +217,7 @@ export function NodeActions({ id }: { id: string }) {
         Add idea here
       </Button>
       {!root && <Button size="sm" onClick={() => editor.startLinking(id)}>Link to…</Button>}
-    </div>
+    </Inline>
   )
 }
 
@@ -221,12 +232,12 @@ export function IdeaSearch({ placeholder = 'Find an idea by its text' }: { place
     ...findIdeas(graph, q),
   ].filter(n => editor.canPick(n.id)).slice(0, 8)
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
+    <Stack gap="xs">
       <Input fieldSize="sm" type="search" value={q} onChange={e => setQ(e.target.value)} placeholder={placeholder} aria-label={placeholder} autoFocus />
       {matches.length === 0 ? (
-        <p className="text-xs text-subtle">No idea to link here matches.</p>
+        <Text variant="hint">No idea to link here matches.</Text>
       ) : (
-        <ul className="grid max-h-48 list-none grid-cols-[minmax(0,1fr)] gap-0.5 overflow-y-auto">
+        <Stack as="ul" gap="2xs" className="max-h-48 list-none overflow-y-auto">
           {matches.map(n => (
             <li key={n.id}>
               <RowButton className="text-xs" onClick={() => editor.pick(n.id)} title={n.text}>
@@ -235,9 +246,9 @@ export function IdeaSearch({ placeholder = 'Find an idea by its text' }: { place
               </RowButton>
             </li>
           ))}
-        </ul>
+        </Stack>
       )}
-    </div>
+    </Stack>
   )
 }
 
@@ -247,9 +258,9 @@ function KindChips({ value, onChange, kinds = LINK_KINDS }: {
   kinds?: HypothesisLinkType[]
 }) {
   return (
-    <div className="flex flex-wrap gap-1.5" role="group" aria-label="Kind of link">
+    <Inline gap="xs" role="group" aria-label="Kind of link">
       {kinds.map(k => <Chip key={k} active={value === k} onClick={() => onChange(k)}>{LINK_KIND_LABELS[k]}</Chip>)}
-    </div>
+    </Inline>
   )
 }
 
@@ -259,18 +270,18 @@ export function LinkBar() {
   if (!editor?.linking) return null
   const { linking } = editor
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-2 border-b bg-surface-raised px-3 py-2.5 text-xs">
-      <div className="flex flex-wrap items-center gap-2">
+    <Stack gap="sm" className="border-b bg-surface-raised px-3 py-2.5 text-xs">
+      <Inline>
         <Eyebrow>Link</Eyebrow>
-        <span className="min-w-0 max-w-[420px] truncate" title={nodeLabel(editor, linking.from)}>{nodeLabel(editor, linking.from)}</span>
+        <span className="min-w-0 max-w-md truncate" title={nodeLabel(editor, linking.from)}>{nodeLabel(editor, linking.from)}</span>
         <KindChips value={linking.kind} onChange={editor.setLinkKind} />
         <span className="text-muted">then click the other idea, or find it below.</span>
         <Button variant="link" size="sm" className="ml-auto" onClick={editor.cancel}>Cancel</Button>
-      </div>
-      <div className="max-w-[560px]"><IdeaSearch /></div>
+      </Inline>
+      <div className="max-w-xl"><IdeaSearch /></div>
       {editor.linkBusy && <span className="text-muted">Linking…</span>}
       {editor.linkError && <InlineError>{editor.linkError}</InlineError>}
-    </div>
+    </Stack>
   )
 }
 
@@ -289,32 +300,34 @@ function SimilarIdeas({ similar, choices, onChoose, onShow }: {
   onShow: (id: string) => void
 }) {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-2 rounded border border-warning-edge p-2 text-xs">
+    <Callout tone="warning">
+      <Stack gap="sm" className="text-xs">
       <span className="text-muted">
         Not added yet: these read close to your idea, or it builds on a refuted one. Link yours to each, or keep it distinct.
       </span>
-      <ul className="grid list-none grid-cols-[minmax(0,1fr)] gap-2">
+      <Stack as="ul" gap="sm" className="list-none">
         {similar.map(h => (
-          <li key={h.id} className="grid grid-cols-[minmax(0,1fr)] gap-1">
-            <div className="flex items-center gap-2">
+          <Stack as="li" gap="xs" key={h.id}>
+            <Inline nowrap>
               <Badge status={h.status}>{h.status}</Badge>
               <span className="min-w-0 flex-1 truncate" title={h.text}>{h.text}</span>
               <Button variant="link" size="sm" onClick={() => onShow(h.id)} title="It is my idea: show it and add nothing">Show it</Button>
-            </div>
+            </Inline>
             {h.reason === 'refuted_parent' ? (
-              <div className="flex items-center gap-1.5">
+              <Inline gap="xs" nowrap>
                 <span className="text-subtle">Yours builds on this refuted idea.</span>
                 <Chip active={choices[h.id] === 'distinct'} onClick={() => onChoose(h.id, 'distinct')}>Build on it anyway</Chip>
-              </div>
+              </Inline>
             ) : (
-              <div className="flex flex-wrap gap-1.5" role="group" aria-label={`Choice for ${h.text}`}>
+              <Inline gap="xs" role="group" aria-label={`Choice for ${h.text}`}>
                 {CHOICES.map(c => <Chip key={c.value} active={choices[h.id] === c.value} onClick={() => onChoose(h.id, c.value)}>{c.label}</Chip>)}
-              </div>
+              </Inline>
             )}
-          </li>
+          </Stack>
         ))}
-      </ul>
-    </div>
+      </Stack>
+      </Stack>
+    </Callout>
   )
 }
 
@@ -368,47 +381,47 @@ export function IdeaEditor() {
   }
 
   return (
-    <div className="grid w-[340px] grid-cols-[minmax(0,1fr)] gap-2 rounded-lg border border-primary bg-surface-raised p-3 shadow-lg" role="group" aria-label="New idea">
+    <Stack gap="sm" className="w-aside rounded-lg border border-primary bg-surface-raised p-3 shadow-lg" role="group" aria-label="New idea">
       <div className="text-xs">
         <Eyebrow>Builds on</Eyebrow>{' '}
         <span className="line-clamp-2" title={nodeLabel(ed, parent)}>{nodeLabel(ed, parent)}</span>
       </div>
       <Textarea
-        className="min-h-[70px] w-full text-sm"
+        className="min-h-16 w-full"
         value={text}
         onChange={e => setText(e.target.value)}
         placeholder="e.g. the retry loop is masking a bad learning-rate schedule; try a linear warmup instead"
         aria-label="Your idea"
         autoFocus
       />
-      <p className="text-2xs text-subtle">
+      <Text variant="meta" tone="subtle">
         It joins the graph under your name. Agents read it, and one that tests it registers its own idea building on yours.
-      </p>
+      </Text>
       {ed.extras.length > 0 && (
-        <ul className="grid list-none grid-cols-[minmax(0,1fr)] gap-0.5 text-xs">
+        <Stack as="ul" gap="2xs" className="list-none text-xs">
           {ed.extras.map(l => (
-            <li key={l.to} className="flex items-center gap-1.5">
+            <Inline as="li" gap="xs" nowrap key={l.to}>
               <span className="whitespace-nowrap text-muted">also {LINK_KIND_LABELS[l.type]}</span>
               <span className="min-w-0 flex-1 truncate" title={nodeLabel(ed, l.to)}>{nodeLabel(ed, l.to)}</span>
               <Button variant="ghost" size="icon" aria-label={`Remove link to ${nodeLabel(ed, l.to)}`} onClick={() => ed.removeExtra(l.to)}><X size={12} /></Button>
-            </li>
+            </Inline>
           ))}
-        </ul>
+        </Stack>
       )}
       {ed.extraKind === null ? (
         <div>
           <Button variant="link" size="sm" onClick={() => ed.setExtraKind('related')}>+ Link it to another idea</Button>
         </div>
       ) : (
-        <div className="grid grid-cols-[minmax(0,1fr)] gap-1.5 text-xs">
-          <div className="flex items-center gap-2">
+        <Stack gap="xs" className="text-xs">
+          <Inline nowrap>
             <span className="text-muted">It</span>
             <KindChips value={ed.extraKind} onChange={ed.setExtraKind} />
             <Button variant="link" size="sm" className="ml-auto" onClick={() => ed.setExtraKind(null)}>Done</Button>
-          </div>
+          </Inline>
           <span className="text-subtle">Click the idea in the view, or find it:</span>
           <IdeaSearch />
-        </div>
+        </Stack>
       )}
       {similar.length > 0 && (
         <SimilarIdeas
@@ -419,13 +432,13 @@ export function IdeaEditor() {
         />
       )}
       {existingID && (
-        <span className="text-xs text-muted">
+        <Text as="span" variant="note">
           An equivalent idea already exists, so nothing was added.{' '}
           <Button variant="link" size="sm" onClick={() => ed.show(existingID)}>Show it</Button>
-        </span>
+        </Text>
       )}
       {error && <InlineError>{error}</InlineError>}
-      <div className="flex flex-wrap items-center gap-2">
+      <Inline>
         <Button
           size="sm"
           variant="primary"
@@ -439,7 +452,7 @@ export function IdeaEditor() {
           <Button size="sm" disabled={busy} onClick={keepAll}>Keep mine distinct from all</Button>
         )}
         <Button variant="link" size="sm" className="ml-auto" onClick={ed.cancel}>Cancel</Button>
-      </div>
-    </div>
+      </Inline>
+    </Stack>
   )
 }

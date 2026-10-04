@@ -1,4 +1,5 @@
 import { evictionCode, evictionCodeLabel, evictionDetailLines } from '@/lib/eviction'
+import { Code } from '@/components/ui/text'
 
 /**
  * Why a job's last attempt ended (eviction_reason): the label of its code and the platform's
@@ -10,7 +11,7 @@ export function JobReason({ reason }: { reason: string }) {
   return (
     <>
       <span className="block">{sentence ? `${label}: ${sentence}` : label}</span>
-      {said.map((line, i) => <span key={i} className="block font-mono">{line}</span>)}
+      {said.map((line, i) => <Code key={i} className="block">{line}</Code>)}
     </>
   )
 }

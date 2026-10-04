@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import { TextLink, inlineLinkClass } from '@/components/ui/link'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { InlineError } from '@/components/ui/status-message'
+import { Text } from '@/components/ui/text'
 
 const LISTED = 50
 
@@ -57,7 +58,7 @@ export function RepositorySelect({ value, onChange, notCreated, compact = false 
     return (
       <>
         <Input className="w-full" aria-label="Repository" value={value} onChange={e => onChange(e.target.value)} />
-        <p className="text-xs text-subtle">A repository on this deployment&apos;s git host, created there first.</p>
+        <Text variant="hint">A repository on this deployment&apos;s git host, created there first.</Text>
       </>
     )
   }
@@ -65,10 +66,10 @@ export function RepositorySelect({ value, onChange, notCreated, compact = false 
   if (installations.error) return <InlineError>Could not load the GitHub accounts of {org.name}: {installations.error.message}</InlineError>
   if (installations.data && !connected) {
     return (
-      <p className="text-xs text-muted">
+      <Text variant="note">
         No GitHub account is connected to {org.name}.{' '}
         <TextLink inline href={`/settings#${GITHUB_CARD}`}>Connect GitHub in Settings</TextLink>
-      </p>
+      </Text>
     )
   }
 
@@ -110,12 +111,12 @@ export function RepositorySelect({ value, onChange, notCreated, compact = false 
       />
       {notCreated && <InlineError>The platform could not create the repository: {notCreated}</InlineError>}
       {app.data && (!compact || notCreated) && (
-        <p className="text-xs text-subtle">
+        <Text variant="hint">
           Not listed?{' '}
           <a href={newRepositoryURL(app.data.new_repository_url, accounts)} target="_blank" rel="noreferrer" className={inlineLinkClass}>create it on GitHub</a> or{' '}
           <a href={app.data.install_url} target="_blank" rel="noreferrer" className={inlineLinkClass}>give the App access</a>, then{' '}
           <Button type="button" variant="link" size="sm" loading={refreshing} onClick={() => void refresh()}>refresh this list</Button>.
-        </p>
+        </Text>
       )}
       {error && <InlineError>Could not list the repositories: {error.message}</InlineError>}
     </>

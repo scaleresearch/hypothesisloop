@@ -10,7 +10,11 @@ import { Actor } from '@/components/actor'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { Table } from '@/components/ui/table'
-import { Callout, EmptyState, ErrorMessage, Loading } from '@/components/ui/status-message'
+import { InsetCard } from '@/components/ui/card'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Inline, Stack } from '@/components/ui/stack'
+import { Callout, ErrorMessage, Loading } from '@/components/ui/status-message'
+import { Text } from '@/components/ui/text'
 
 const KIND = { User: 'Personal', Organization: 'Organisation' } as const
 
@@ -59,18 +63,18 @@ export function OrgGitHub() {
   const installations = data?.items
 
   return (
-    <div className="grid gap-3.5">
-      <p className="text-sm text-muted">
+    <Stack>
+      <Text tone="muted">
         An experiment of {org.name} keeps its code in a repository of a GitHub account connected here, and that
         account&apos;s owner chooses on GitHub which repositories the App reaches.
-      </p>
+      </Text>
 
       {outcome?.state === 'refused' && <ErrorMessage>{outcome.message}</ErrorMessage>}
       {outcome?.state === 'failed' && <ErrorMessage>{outcome.message}</ErrorMessage>}
       {outcome?.state === 'choice' && github && (
-        <div role="group" aria-label="GitHub account to connect" className="grid justify-items-start gap-2 rounded border border-border-strong bg-surface-inset px-3.5 py-3">
-          <p className="text-sm">Which GitHub account do you connect to {org.name}?</p>
-          <div className="flex flex-wrap gap-2">
+        <InsetCard edge="strong" start role="group" aria-label="GitHub account to connect">
+          <Text>Which GitHub account do you connect to {org.name}?</Text>
+          <Inline>
             {outcome.installations.map(i => (
               <Button key={i.installation_id} size="sm" disabled={leaving} onClick={() => leave(beginConnect(github.authorize_url, origin, i.installation_id))}>
                 {i.account_login}
@@ -78,12 +82,12 @@ export function OrgGitHub() {
             ))}
             <Button size="sm" disabled={leaving} onClick={() => leave(beginInstall(github.install_url, origin))}>Another account</Button>
             <Button size="sm" variant="ghost" disabled={leaving} onClick={resetConnect}>Cancel</Button>
-          </div>
-        </div>
+          </Inline>
+        </InsetCard>
       )}
 
       {administers && unconfigured && (
-        <Callout tone="neutral" className="mb-0">This deployment has no GitHub App configured, so no GitHub account can be connected.</Callout>
+        <Callout tone="neutral">This deployment has no GitHub App configured, so no GitHub account can be connected.</Callout>
       )}
       {administers && app.error && !unconfigured && <ErrorMessage>GitHub cannot be connected right now: {app.error.message}</ErrorMessage>}
       {actionError && <ErrorMessage>{actionError}</ErrorMessage>}
@@ -118,16 +122,16 @@ export function OrgGitHub() {
         </Table>
       )}
       {data && data.total > data.items.length && (
-        <p className="text-xs text-subtle">Showing the first {data.items.length} of {data.total} connected accounts.</p>
+        <Text variant="hint">Showing the first {data.items.length} of {data.total} connected accounts.</Text>
       )}
 
       {administers && github && (
-        <div className="flex flex-wrap items-center gap-2">
+        <Inline>
           <Button size="sm" variant="primary" loading={leaving} onClick={() => leave(beginConnect(github.authorize_url, origin))}>
             {installations && installations.length > 0 ? 'Connect another account' : 'Connect GitHub'}
           </Button>
-          <span className="text-xs text-subtle">Where the App is not installed yet, GitHub asks you to install it first.</span>
-        </div>
+          <Text as="span" variant="hint">Where the App is not installed yet, GitHub asks you to install it first.</Text>
+        </Inline>
       )}
       {disconnecting && (
         <ConfirmDialog
@@ -141,6 +145,6 @@ export function OrgGitHub() {
           clone, fetch or push within the hour. The App stays installed on GitHub.
         </ConfirmDialog>
       )}
-    </div>
+    </Stack>
   )
 }

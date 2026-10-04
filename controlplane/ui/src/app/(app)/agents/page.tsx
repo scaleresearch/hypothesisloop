@@ -11,13 +11,16 @@ import {
 } from '@/lib/api'
 import type { Draft } from '@/lib/planning'
 import type { PlatformExperiment } from '@/types'
-import { PageHeader } from '@/components/ui/page-header'
-import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
+import { Page } from '@/components/ui/page'
+import { Section } from '@/components/ui/section'
+import { Inline, Stack } from '@/components/ui/stack'
+import { Code, Text } from '@/components/ui/text'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Badge } from '@/components/ui/badge'
 import { FormField } from '@/components/ui/form-field'
 import { StatTile } from '@/components/ui/stat-tile'
 import { ColumnTh, Table, num } from '@/components/ui/table'
-import { Loading, ErrorMessage, EmptyState, InlineError } from '@/components/ui/status-message'
+import { Loading, ErrorMessage, InlineError } from '@/components/ui/status-message'
 import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
 import { Pagination } from '@/components/ui/pagination'
 import { formatAccH } from '@/lib/format'
@@ -49,21 +52,21 @@ function AgentExperimentQuota({ agentId, pe, colSpan }: { agentId: string; pe: P
   return (
     <tr className="bg-surface-inset">
       <td colSpan={colSpan} className="pl-7 text-2xs">
-        <div className="flex flex-wrap items-center gap-6">
+        <Inline gap="xl">
           <TextLink href={`/platform-experiments/${pe.id}`} className="text-xs">{pe.name}</TextLink>
           <span>
             <Badge status="guaranteed" className="mr-1">Guaranteed</Badge>
-            <span className="font-mono">{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)}</span> {unit} used
+            <Code>{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)}</Code> {unit} used
           </span>
           <span>
             <Badge status="burst" className="mr-1">Burst</Badge>
-            <span className="font-mono">{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)}</span> {unit} used
+            <Code>{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)}</Code> {unit} used
           </span>
           <span className={room ? 'text-success' : 'text-danger'} title="The largest job a submit is admitted with now: every job that has not ended holds its whole estimate">
-            room for a job of <span className="font-mono">{formatAccH(q.remaining_guaranteed_accelerator_hours)}</span> guaranteed
-            or <span className="font-mono">{formatAccH(q.remaining_burst_accelerator_hours)}</span> burst {unit}
+            room for a job of <Code>{formatAccH(q.remaining_guaranteed_accelerator_hours)}</Code> guaranteed
+            or <Code>{formatAccH(q.remaining_burst_accelerator_hours)}</Code> burst {unit}
           </span>
-        </div>
+        </Inline>
       </td>
     </tr>
   )
@@ -159,19 +162,17 @@ function AgentsPageContent() {
   const sortedAgents = agentTable.getRowModel().rows.map(r => r.original)
 
   return (
-    <div>
-      <PageHeader
-        title="Research Agents"
-        description="The agents of this project, how they have placed, and the compute each holds in running experiments."
-      />
-
-      <div className="mb-4 grid grid-cols-3 gap-2.5">
+    <Page
+      title="Research Agents"
+      description="The agents of this project, how they have placed, and the compute each holds in running experiments."
+    >
+      <div className="grid grid-cols-3 gap-3">
         <StatTile label="Agents" value={total || '—'} />
         <StatTile label="With the top-3 bonus" value={stats?.top3_eligible ?? '—'} tone="success" sub="25% more guaranteed compute" />
         <StatTile label="Average performance score" value={stats?.total ? stats.avg_performance_score.toFixed(3) : '—'} />
       </div>
 
-      <div className="mb-4 grid gap-2">
+      <Stack gap="sm">
         <FormField inline label="Experiment">
           <PlatformExperimentSelect
             value={experimentFilter}
@@ -179,19 +180,17 @@ function AgentsPageContent() {
             allLabel="All experiments"
           />
         </FormField>
-        <p className="max-w-[860px] text-xs text-muted">
+        <Text variant="note" className="max-w-4xl">
           What an experiment&apos;s baseline leaves of its budget is split equally among its agents when it starts, the baseline agent apart,
           and each stage releases its part of it. An agent that placed in the top three of an earlier experiment is guaranteed 25% more. Beyond what is guaranteed, an agent may use up to
           twice that amount as burst compute, which can be preempted.
-        </p>
-      </div>
+        </Text>
+      </Stack>
 
       {isLoading && <Loading />}
-      {error && <ErrorMessage className="mb-4">Could not load the agents of {project.name}: {error.message}</ErrorMessage>}
+      {error && <ErrorMessage>Could not load the agents of {project.name}: {error.message}</ErrorMessage>}
 
-      <Card>
-        <CardHeader><CardTitle note={agents ? total : undefined}>Agents</CardTitle></CardHeader>
-        <CardContent scrollX>
+      <Section title="Agents" note={agents ? total : undefined} scrollX>
           <Table>
             <thead>
               <tr>
@@ -275,8 +274,7 @@ function AgentsPageContent() {
             </tbody>
           </Table>
           <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
-        </CardContent>
-      </Card>
-    </div>
+      </Section>
+    </Page>
   )
 }

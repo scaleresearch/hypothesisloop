@@ -1,5 +1,6 @@
 'use client'
 
+import { shortId } from '@/lib/format'
 import { Fragment, useMemo, useState } from 'react'
 import { TextLink } from '@/components/ui/link'
 import useSWR from 'swr'
@@ -22,14 +23,18 @@ import type { StagesStatus } from '@/lib/api'
 import type { Experiment, MetricDataPoint, AgentMetricSeries } from '@/types'
 import { AgentLabel, useAgentName } from '@/components/agent-label'
 import { InsetCard } from '@/components/ui/card'
-import { Badge, Dot } from '@/components/ui/badge'
+import { Badge } from '@/components/ui/badge'
+import { Dot } from '@/components/ui/dot'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Captioned } from '@/components/ui/captioned'
+import { Inline, Stack } from '@/components/ui/stack'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog } from '@/components/ui/dialog'
 import { SearchableSelect } from '@/components/ui/searchable-select'
-import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
-import { Eyebrow } from '@/components/ui/text'
-import { semantic, agentPalette, chart } from '@/lib/colors'
+import { Loading, ErrorMessage } from '@/components/ui/status-message'
+import { Code, Eyebrow, Pill, Text } from '@/components/ui/text'
+import { semantic, seriesPalette, chart } from '@/lib/colors'
 
 // Bounded-score metrics (roughly 0-1) get their own axis so they aren't flattened to a
 // hairline by unbounded metrics like seconds_per_subject/cv_seconds sitting in the tens+.
@@ -39,8 +44,6 @@ const BOUNDED_METRIC_RE = /auroc|accuracy|precision|recall|f1|auc/i
 function isBoundedMetric(name: string): boolean {
   return BOUNDED_METRIC_RE.test(name)
 }
-
-const METRIC_COLORS = agentPalette
 
 // Shared chart body for both the mini card and the expanded dialog view. `trackedMetrics`
 // scopes the plot to the experiment's official tracked/ranking metrics rather than every
@@ -79,7 +82,7 @@ function MetricLineChart({ points, trackedMetrics, height }: { points: MetricDat
             yAxisId={axisOf(name)}
             dataKey={name}
             name={hasBounded && hasUnbounded ? `${name} (${axisOf(name)} axis)` : name}
-            stroke={METRIC_COLORS[i % METRIC_COLORS.length]}
+            stroke={seriesPalette[i % seriesPalette.length]}
             dot={{ r: 2 }}
             strokeWidth={1.5}
             type="monotone"
@@ -111,12 +114,12 @@ function JobMetricMini({ jobId, trackedMetrics }: { jobId: string; trackedMetric
         onClick={() => setExpanded(true)}
         title="Expand chart"
         aria-label="Expand chart"
-        className="absolute right-0 top-0 z-[1] text-muted"
+        className="absolute right-0 top-0 z-10 text-muted"
       >
         ⤢
       </Button>
       <MetricLineChart points={points} trackedMetrics={trackedMetrics} height={400} />
-      <Dialog open={expanded} onClose={() => setExpanded(false)} size="wide" title={<span className="font-mono">{jobId}</span>}>
+      <Dialog open={expanded} onClose={() => setExpanded(false)} size="wide" title={<Code>{jobId}</Code>}>
         <MetricLineChart points={points} trackedMetrics={trackedMetrics} height={640} />
       </Dialog>
     </div>
@@ -164,25 +167,23 @@ export function LiveMetricsPicker({ jobs }: { jobs: Experiment[] }) {
   if (!selectedJob) return null
 
   return (
-    <div>
-      <div className="mb-3 flex flex-wrap items-start gap-3">
-        <div>
-          <Eyebrow className="mb-1.5 block">Job</Eyebrow>
+    <Stack>
+      <Inline gap="md" align="start">
+        <Captioned caption="Job">
           <SearchableSelect
-            options={sorted.map(j => ({ value: j.id, label: `${j.id.slice(0, 8)}… · ${j.status} · ${agentName(j.agent_id)}` }))}
+            options={sorted.map(j => ({ value: j.id, label: `${shortId(j.id)} · ${j.status} · ${agentName(j.agent_id)}` }))}
             value={selectedJob.id}
             onChange={v => { if (v) setJobId(v) }}
             placeholder="Search jobs…"
-            className="min-w-[320px]"
+            className="min-w-80"
             hideAllOption
           />
-        </div>
-        <div className="min-w-[200px] flex-1">
-          <Eyebrow className="mb-1.5 block">Metrics</Eyebrow>
+        </Captioned>
+        <Captioned caption="Metrics" className="min-w-52 flex-1">
           {availableMetrics.length === 0 ? (
-            <span className="text-xs text-subtle">No metrics reported yet</span>
+            <Text as="span" variant="hint">No metrics reported yet</Text>
           ) : (
-            <div className="flex flex-wrap gap-1.5">
+            <Inline gap="xs">
               {availableMetrics.map(name => {
                 const isOn = selected.has(name)
                 return (
@@ -199,24 +200,21 @@ export function LiveMetricsPicker({ jobs }: { jobs: Experiment[] }) {
                   />
                 )
               })}
-            </div>
+            </Inline>
           )}
-        </div>
-      </div>
+        </Captioned>
+      </Inline>
       <MetricLineChart points={points} trackedMetrics={Array.from(selected)} height={420} />
-    </div>
+    </Stack>
   )
 }
-
-// Distinct colors per agent so competing lines are visually separable on one chart.
-const AGENT_COLORS = agentPalette
 
 // Colors are assigned once per full (unfiltered) agent roster, keyed by a sorted id list, so a
 // given agent keeps the same color even as the user toggles which agents/metrics are visible.
 export function useAgentColorMap(agentIds: string[]): Map<string, string> {
   const roster = [...agentIds].sort().join(',')
   return useMemo(
-    () => new Map(roster.split(',').map((id, i) => [id, AGENT_COLORS[i % AGENT_COLORS.length]])),
+    () => new Map(roster.split(',').map((id, i) => [id, seriesPalette[i % seriesPalette.length]])),
     [roster],
   )
 }
@@ -231,14 +229,14 @@ export function AgentSelector({
 }) {
   const allSelected = agentIds.length > 0 && agentIds.every(id => selected.has(id))
   return (
-    <div>
-      <div className="mb-2 flex items-center justify-between">
+    <Stack gap="sm">
+      <Inline nowrap className="justify-between">
         <Eyebrow>Agents</Eyebrow>
         <Button type="button" variant="link" size="sm" onClick={() => onChange(allSelected ? new Set() : new Set(agentIds))}>
           {allSelected ? 'Clear' : 'Select all'}
         </Button>
-      </div>
-      <div className="flex flex-wrap gap-1.5">
+      </Inline>
+      <Inline gap="xs">
         {agentIds.map((id) => {
           const isOn = selected.has(id)
           return (
@@ -256,8 +254,8 @@ export function AgentSelector({
             />
           )
         })}
-      </div>
-    </div>
+      </Inline>
+    </Stack>
   )
 }
 
@@ -270,14 +268,14 @@ export function MetricSelector({
 }) {
   const allSelected = metrics.length > 0 && metrics.every(m => selected.has(m.key))
   return (
-    <div>
-      <div className="mb-2 flex items-center justify-between">
+    <Stack gap="sm">
+      <Inline nowrap className="justify-between">
         <Eyebrow>Metrics</Eyebrow>
         <Button type="button" variant="link" size="sm" onClick={() => onChange(allSelected ? new Set() : new Set(metrics.map(m => m.key)))}>
           {allSelected ? 'Clear' : 'Select all'}
         </Button>
-      </div>
-      <div className="flex flex-wrap gap-1.5">
+      </Inline>
+      <Inline gap="xs">
         {metrics.map((m, i) => {
           const isOn = selected.has(m.key)
           return (
@@ -298,8 +296,8 @@ export function MetricSelector({
             />
           )
         })}
-      </div>
-    </div>
+      </Inline>
+    </Stack>
   )
 }
 
@@ -386,12 +384,13 @@ export function CompetingAgentsChart({
   return (
     <>
       {nonRawAgentIds.size > 0 && (
-        <div
-          className="mb-2 inline-block px-2 py-0.5 rounded-sm border border-danger bg-danger-tint font-mono text-2xs text-danger"
+        <Pill
+          tone="danger"
+          className="mb-2"
           title="These agents also reported this metric on a non-&quot;raw&quot; basis (a rescaled/transformed value); that data is excluded from this chart and never compared to raw-basis agents."
         >
           Non-raw basis data excluded for: {Array.from(nonRawAgentIds).sort().map((agentID, i) => <Fragment key={agentID}>{i > 0 && ', '}<AgentLabel id={agentID} /></Fragment>)}
-        </div>
+        </Pill>
       )}
     <ResponsiveContainer width="100%" height={300}>
       <LineChart data={rows} margin={{ top: 8, right: 24, left: 0, bottom: 0 }}>
@@ -405,7 +404,7 @@ export function CompetingAgentsChart({
             x={new Date(b.advanced_at).getTime()}
             stroke={semantic.warning}
             strokeDasharray="4 4"
-            label={{ value: `End of stage ${b.stage_index}`, position: 'insideTopLeft', fill: semantic.warning, fontSize: 10 }}
+            label={{ value: `End of stage ${b.stage_index}`, position: 'insideTopLeft', fill: semantic.warning, ...chart.label }}
           />
         ))}
         {/* One <Line> per unique agent, plotting its running-best trace computed above. The only
@@ -443,13 +442,13 @@ export function AgentJobsPanel({ projectId, platformExperimentId, agentId, track
     return <EmptyState>No jobs from <AgentLabel id={agentId} /> yet.</EmptyState>
   }
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(480px,1fr))] gap-2.5 pb-1 pt-2.5">
+    <div className="grid grid-cols-panels gap-3 pb-1 pt-2.5">
       {jobs.map(job => (
-        <InsetCard key={job.id}>
-          <div className="mb-1 flex items-center justify-between text-2xs">
-            <TextLink href={`/jobs/${job.id}`} className="font-mono font-medium">{job.id.slice(0, 8)}…</TextLink>
+        <InsetCard key={job.id} gap="xs">
+          <Inline nowrap className="justify-between text-2xs">
+            <TextLink href={`/jobs/${job.id}`} className="font-mono font-medium">{shortId(job.id)}</TextLink>
             <Badge status={job.status} />
-          </div>
+          </Inline>
           <JobMetricMini jobId={job.id} trackedMetrics={trackedMetrics} />
         </InsetCard>
       ))}

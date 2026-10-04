@@ -14,8 +14,10 @@ import { ConfirmDialog } from '@/components/ui/dialog'
 import { Select } from '@/components/ui/select'
 import { Secret } from '@/components/ui/secret'
 import { Table } from '@/components/ui/table'
-import { Eyebrow } from '@/components/ui/text'
-import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
+import { Eyebrow, Text } from '@/components/ui/text'
+import { Inline, Stack } from '@/components/ui/stack'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Loading, ErrorMessage } from '@/components/ui/status-message'
 
 const ROLES: OrgRole[] = ['owner', 'member']
 
@@ -71,12 +73,12 @@ function Invites({ onError }: { onError: (message: string) => void }) {
 
   const invites = data?.items
   return (
-    <div className="grid gap-3 border-t pt-3">
+    <Stack className="border-t pt-3">
       <Eyebrow>Invites</Eyebrow>
-      <form className="flex flex-wrap items-center gap-2" onSubmit={create}>
+      <Inline as="form" onSubmit={create}>
         <Select fieldSize="sm" aria-label="Role of the invited person" value={role} onChange={setRole} options={INVITE_ROLES} />
         <Button size="sm" variant="primary" type="submit" loading={busy}>Create invite link</Button>
-      </form>
+      </Inline>
 
       {created && (
         <Secret
@@ -94,7 +96,7 @@ function Invites({ onError }: { onError: (message: string) => void }) {
 
       {listError && <ErrorMessage>Could not load invites: {listError.message}</ErrorMessage>}
       {!invites && !listError && <Loading />}
-      {invites && invites.length === 0 && <p className="text-xs text-subtle">No pending invites.</p>}
+      {invites && invites.length === 0 && <Text variant="hint">No pending invites.</Text>}
       {invites && invites.length > 0 && (
         <Table aria-label="Pending invites">
           <thead>
@@ -114,7 +116,7 @@ function Invites({ onError }: { onError: (message: string) => void }) {
         </Table>
       )}
       {data && data.total > data.items.length && (
-        <p className="text-xs text-subtle">Showing the {data.items.length} newest of {data.total} pending invites.</p>
+        <Text variant="hint">Showing the {data.items.length} newest of {data.total} pending invites.</Text>
       )}
       {revoking && (
         <ConfirmDialog
@@ -127,7 +129,7 @@ function Invites({ onError }: { onError: (message: string) => void }) {
           Its link stops working at once. This cannot be undone.
         </ConfirmDialog>
       )}
-    </div>
+    </Stack>
   )
 }
 
@@ -168,11 +170,11 @@ export function OrgMembers() {
 
   const members = data?.items
   return (
-    <div className="grid gap-3">
-      <p className="text-sm text-muted">
+    <Stack>
+      <Text tone="muted">
         An owner changes everything in {org.name}. A member reads everything in it and runs experiments.
         {!administers && ' Only an owner can invite people, change a role or remove someone.'}
-      </p>
+      </Text>
       {error && <ErrorMessage>{error}</ErrorMessage>}
       {listError && <ErrorMessage>Could not load members: {listError.message}</ErrorMessage>}
       {!members && !listError && <Loading />}
@@ -214,11 +216,11 @@ export function OrgMembers() {
         </Table>
       )}
       {data && data.total > data.items.length && (
-        <p className="text-xs text-subtle">Showing the first {data.items.length} of {data.total} members.</p>
+        <Text variant="hint">Showing the first {data.items.length} of {data.total} members.</Text>
       )}
       {change && <Question change={change} onConfirm={() => apply(change)} onCancel={() => setChange(null)} />}
       {administers && <Invites onError={setError} />}
-    </div>
+    </Stack>
   )
 }
 

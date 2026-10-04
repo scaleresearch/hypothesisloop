@@ -15,8 +15,11 @@ import { Input } from '@/components/ui/input'
 import { Table } from '@/components/ui/table'
 import { Secret } from '@/components/ui/secret'
 import { Switch } from '@/components/ui/switch'
-import { Segmented } from '@/components/ui/tabs'
-import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Segmented } from '@/components/ui/segmented'
+import { Inline, Stack } from '@/components/ui/stack'
+import { Loading, ErrorMessage } from '@/components/ui/status-message'
+import { Code, Text } from '@/components/ui/text'
 
 // What runs the jobs. The API records no kind: a cluster is a name, and its kind is whichever agent
 // connects under it. Registering answers the command for each, and the choice here shows one.
@@ -29,7 +32,7 @@ const KINDS: { value: Kind; label: string }[] = [
 function StartCommand({ registered, onHide }: { registered: RegisteredCluster; onHide: () => void }) {
   const [kind, setKind] = useState<Kind>('kubernetes')
   return (
-    <div className="grid justify-items-start gap-2">
+    <Stack gap="sm" start>
       <Segmented label="Kind of cluster" options={KINDS} value={kind} onChange={setKind} />
       <div className="w-full">
         <Secret
@@ -38,29 +41,29 @@ function StartCommand({ registered, onHide }: { registered: RegisteredCluster; o
           note={<>
             {kind === 'kubernetes' ? (
               <>
-                Run it with <span className="font-mono">helm</span> 3.17 or newer and{' '}
-                <span className="font-mono">kubectl</span> pointed at the cluster. It installs one agent,
+                Run it with <Code>helm</Code> 3.17 or newer and{' '}
+                <Code>kubectl</Code> pointed at the cluster. It installs one agent,
                 which schedules jobs as pods on the cluster&apos;s nodes, or upgrades it, and asks for the
-                runtime token below; the machine needs neither <span className="font-mono">hl</span> nor
+                runtime token below; the machine needs neither <Code>hl</Code> nor
                 an API key. To detach the
-                cluster: <span className="font-mono">helm uninstall hypothesisloop-cluster-agent -n hypothesisloop</span>
+                cluster: <Code>helm uninstall hypothesisloop-cluster-agent -n hypothesisloop</Code>
               </>
             ) : (
               <>
                 Run it on the node, which needs docker or podman, systemd and root. It installs the agent
                 as a unit that starts at boot and starts jobs as containers, and asks for the runtime token
-                below; the node needs neither <span className="font-mono">hl</span> nor an API key. Each
+                below; the node needs neither <Code>hl</Code> nor an API key. Each
                 node is added as a cluster of its own. The command of a newer image tag upgrades the
-                agent. To detach the node, run on it <span className="font-mono">sudo bare-agent detach</span>,
-                then <span className="font-mono">sudo bare-agent uninstall</span> to remove the agent.
+                agent. To detach the node, run on it <Code>sudo bare-agent detach</Code>,
+                then <Code>sudo bare-agent uninstall</Code> to remove the agent.
               </>
             )}{' '}
-            The command holds no token, and <span className="font-mono">Show start command</span> in
+            The command holds no token, and <Code>Show start command</Code> in
             the cluster&apos;s row brings it back.
             <span className="mt-2 grid gap-1">
               <span>Runtime token of {registered.name}, which the command asks for:</span>
               <span className="flex flex-wrap items-center gap-2">
-                <span className="select-all break-all font-mono text-foreground" data-testid="runtime-token">{registered.runtime_token}</span>
+                <Code className="select-all break-all text-foreground" data-testid="runtime-token">{registered.runtime_token}</Code>
                 <CopyButton value={registered.runtime_token} />
               </span>
             </span>
@@ -69,7 +72,7 @@ function StartCommand({ registered, onHide }: { registered: RegisteredCluster; o
           onDismiss={onHide}
         />
       </div>
-    </div>
+    </Stack>
   )
 }
 
@@ -81,7 +84,7 @@ function ClusterOrder({ cluster, place, of, onMove, disabled }: { cluster: OrgCl
   return (
     <span className="flex items-center gap-1">
       <GripVertical aria-hidden="true" size={14} className="cursor-grab text-subtle" />
-      <span className="w-4 font-mono">{place + 1}</span>
+      <Code className="w-4">{place + 1}</Code>
       <Button size="icon" variant="ghost" aria-label={`Move ${cluster.name} up`} disabled={disabled || place === 0} onClick={() => onMove(place - 1)}>
         <ChevronUp aria-hidden="true" size={14} />
       </Button>
@@ -163,9 +166,9 @@ export function OrgClusters() {
   }
 
   return (
-    <div className="grid gap-3.5">
+    <Stack>
       {administers && (
-        <form className="flex flex-wrap items-center gap-2" onSubmit={add}>
+        <Inline as="form" onSubmit={add}>
           <Input
             fieldSize="sm"
             mono
@@ -176,8 +179,8 @@ export function OrgClusters() {
             onChange={e => setName(e.target.value)}
           />
           <Button size="sm" variant="primary" type="submit" loading={busy} disabled={name.trim() === ''}>Add cluster</Button>
-          <span className="text-xs text-subtle">A Kubernetes cluster, or one bare-metal node.</span>
-        </form>
+          <Text as="span" variant="hint">A Kubernetes cluster, or one bare-metal node.</Text>
+        </Inline>
       )}
       {actionError && <ErrorMessage>{actionError}</ErrorMessage>}
       {registered && <StartCommand key={registered.name} registered={registered} onHide={() => setRegistered(null)} />}
@@ -218,14 +221,14 @@ export function OrgClusters() {
                 <td><StatusLabel tone={c.connected ? 'success' : 'danger'}>{c.connected ? 'Connected' : 'Disconnected'}</StatusLabel></td>
                 <td className="text-xs">
                   {c.owned ? org.name : <Badge tone="neutral">Platform</Badge>}
-                  {c.shared && <div className="mt-0.5 text-2xs text-muted">shared with every org</div>}
+                  {c.shared && <Text as="div" variant="meta">shared with every org</Text>}
                 </td>
                 <td className="text-xs">
                   {place >= shownOwn.length
                     ? <span className="text-muted">used last, after {org.name}&apos;s own</span>
                     : orders
                       ? <ClusterOrder cluster={c} place={place} of={shownOwn.length} onMove={to => move(c.name, to)} disabled={switching !== ''} />
-                      : <span className="font-mono">{place + 1}</span>}
+                      : <Code>{place + 1}</Code>}
                 </td>
                 <td>
                   <Switch
@@ -235,18 +238,18 @@ export function OrgClusters() {
                     onChange={enabled => change(c.name, () => setClusterEnabled(org.id, c.name, enabled))}
                   />
                   {!c.enabled && (
-                    <div className="mt-0.5 max-w-[220px] text-2xs text-muted">
+                    <Text as="div" variant="meta" className="max-w-56">
                       Turned off: no job of {org.name} is placed here. Jobs already running finish.
-                    </div>
+                    </Text>
                   )}
                 </td>
                 {administers && (
                   <td>
                     {c.owned && (
-                      <div className="flex flex-wrap items-center gap-2">
+                      <Inline>
                         <Button size="sm" disabled={busy} onClick={() => register(c.name)}>Show start command</Button>
                         <Button size="sm" variant="ghost" aria-expanded={advanced === c.name} onClick={() => setAdvanced(advanced === c.name ? '' : c.name)}>Advanced</Button>
-                      </div>
+                      </Inline>
                     )}
                   </td>
                 )}
@@ -254,9 +257,9 @@ export function OrgClusters() {
               {administers && c.owned && advanced === c.name && (
                 <tr>
                   <td colSpan={columns} aria-label={`Advanced settings of ${c.name}`}>
-                    <div className="grid justify-items-start gap-3 py-1">
+                    <Stack start className="py-1">
                       <ClusterSettingsEditor key={c.name} orgID={org.id} cluster={c} onSaved={mutate} />
-                      <div className="flex flex-wrap items-center gap-3">
+                      <Inline gap="md">
                         {staff && (
                           <label className="flex items-center gap-2 text-xs">
                             <Switch
@@ -269,8 +272,8 @@ export function OrgClusters() {
                           </label>
                         )}
                         <Button size="sm" variant="danger" disabled={switching !== ''} onClick={() => setRemoving(c.name)}>Remove cluster</Button>
-                      </div>
-                    </div>
+                      </Inline>
+                    </Stack>
                   </td>
                 </tr>
               )}
@@ -296,6 +299,6 @@ export function OrgClusters() {
         retries. Its runtime token is refused from then on, so stop its agent. The name is free to
         register again.
       </ConfirmDialog>
-    </div>
+    </Stack>
   )
 }

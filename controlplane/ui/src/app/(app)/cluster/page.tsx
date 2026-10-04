@@ -1,23 +1,25 @@
 'use client'
 
 import useSWR from 'swr'
-import { clsx } from 'clsx'
 import { fetchAllClusters, fetchResourceCapacity } from '@/lib/api'
 import type { ClustersResponse, ClusterInfo } from '@/types'
 import { useTenant } from '@/lib/tenant'
 import { budgetUnit, unitCount, unitRate } from '@/lib/units'
 import { OrgClusters } from '@/components/org-clusters'
-import { PageHeader } from '@/components/ui/page-header'
-import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
+import { Page } from '@/components/ui/page'
+import { Section } from '@/components/ui/section'
 import { StatTile } from '@/components/ui/stat-tile'
 import { StatusLabel } from '@/components/ui/badge'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Stack } from '@/components/ui/stack'
 import { Table, num } from '@/components/ui/table'
-import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
+import { Code, Heading, Text } from '@/components/ui/text'
+import { Loading, ErrorMessage } from '@/components/ui/status-message'
 
 function AllClustersCounts({ clusters }: { clusters: ClusterInfo[] }) {
   const connected = clusters.filter(c => c.connected).length
   return (
-    <div className="mb-4 grid grid-cols-3 gap-2.5">
+    <div className="grid grid-cols-3 gap-3">
       <StatTile label="Clusters, every org" value={clusters.length} />
       <StatTile
         label="Connected"
@@ -45,14 +47,12 @@ function AllClusters() {
     <>
       {data && !error && <AllClustersCounts clusters={data.clusters} />}
 
-      <Card>
-        <CardHeader>All Clusters · every org · staff only</CardHeader>
-        <CardContent>
+      <Section title="All Clusters" note="every org · staff only">
           {isLoading && <Loading />}
           {error && <ErrorMessage>Could not load the clusters of every org: {error.message}</ErrorMessage>}
           {data && data.clusters.length === 0 && (
             <EmptyState>
-              No cluster has ever connected. Install a cluster-agent (<code className="font-mono text-xs">make cluster-agent-up CLUSTER=&lt;name&gt; API_URL=&lt;control-service-url&gt; METRICS_URL=&lt;metrics-service-url&gt;</code>)
+              No cluster has ever connected. Install a cluster-agent (<Code>make cluster-agent-up CLUSTER=&lt;name&gt; API_URL=&lt;control-service-url&gt; METRICS_URL=&lt;metrics-service-url&gt;</Code>)
               pointed at this control plane.
             </EmptyState>
           )}
@@ -73,17 +73,14 @@ function AllClusters() {
                     <td><StatusLabel tone={c.connected ? 'success' : 'danger'}>{c.connected ? 'Connected' : 'Disconnected'}</StatusLabel></td>
                     <td className="font-mono text-xs text-muted">{new Date(c.last_seen_at).toLocaleString()}</td>
                     <td>
-                      <span className={clsx('text-xs font-medium', c.autoscaler_enabled && 'text-success')}>
-                        {c.autoscaler_enabled ? 'Enabled' : 'Off'}
-                      </span>
+                      {c.autoscaler_enabled ? <StatusLabel tone="success">Enabled</StatusLabel> : <Text as="span" variant="note">Off</Text>}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </Table>
           )}
-        </CardContent>
-      </Card>
+      </Section>
     </>
   )
 }
@@ -103,9 +100,7 @@ function LiveCapacity() {
   const clusters = data?.clusters ?? []
 
   return (
-    <Card>
-      <CardHeader><CardTitle>What {org.name} can run on right now</CardTitle></CardHeader>
-      <CardContent>
+    <Section title={`What ${org.name} can run on right now`}>
         {isLoading && <Loading />}
         {error && <ErrorMessage>Could not load live capacity: {error.message}</ErrorMessage>}
         {data && clusters.length === 0 && (
@@ -115,15 +110,15 @@ function LiveCapacity() {
           </EmptyState>
         )}
         {clusters.map(cluster => (
-          <section key={cluster.cluster_name} aria-label={cluster.cluster_name} className="border-t py-3 first:border-t-0 first:pt-0 last:pb-0">
-            <h3 className="mb-1.5 font-mono text-sm font-medium">{cluster.cluster_name}</h3>
+          <Stack as="section" gap="sm" key={cluster.cluster_name} aria-label={cluster.cluster_name} className="border-t py-3 first:border-t-0 first:pt-0 last:pb-0">
+            <Heading level={3} className="font-mono">{cluster.cluster_name}</Heading>
             {!cluster.on_demand && cluster.resources && (
-              <p className="mb-1.5 text-xs text-muted">
+              <Text variant="note">
                 {cluster.resources.cpu_cores_available} of {unitCount('cpu', cluster.resources.cpu_cores_total)} free
                 {' · '}{gib(cluster.resources.memory_bytes_available)} of {gib(cluster.resources.memory_bytes_total)} GiB memory free
-              </p>
+              </Text>
             )}
-            {cluster.accelerators.length === 0 && <p className="text-xs text-muted">Reports nothing a job can ask for right now.</p>}
+            {cluster.accelerators.length === 0 && <Text variant="note">Reports nothing a job can ask for right now.</Text>}
             {cluster.accelerators.length > 0 && (
               <Table>
                 <thead>
@@ -153,32 +148,26 @@ function LiveCapacity() {
                 </tbody>
               </Table>
             )}
-          </section>
+          </Stack>
         ))}
-      </CardContent>
-    </Card>
+    </Section>
   )
 }
 
 export default function ClusterPage() {
   const { org, staff } = useTenant()
   return (
-    <div>
-      <PageHeader
+    <Page
         title="Compute Resources"
         description="The clusters your jobs can run on, which an owner adds, orders and removes here.
           The control plane never connects to a cluster directly: each cluster runs its own
           cluster-agent, which polls here for work and reports its own presence via heartbeat."
-      />
-
-      <Card>
-        <CardHeader>Clusters {org.name} can run on</CardHeader>
-        <CardContent scrollX>
-          <OrgClusters />
-        </CardContent>
-      </Card>
+    >
+      <Section title={`Clusters ${org.name} can run on`} scrollX>
+        <OrgClusters />
+      </Section>
       <LiveCapacity />
       {staff && <AllClusters />}
-    </div>
+    </Page>
   )
 }

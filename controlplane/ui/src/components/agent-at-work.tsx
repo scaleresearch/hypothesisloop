@@ -4,7 +4,9 @@ import { clsx } from 'clsx'
 import { relTime } from '@/lib/format'
 import { useTick } from '@/lib/tick'
 import type { AgentActivity, AgentInstance, JoinedAgent } from '@/types'
+import { Stack } from '@/components/ui/stack'
 import { Steps } from '@/components/ui/steps'
+import { Text } from '@/components/ui/text'
 
 const MACHINE_STEPS = [
   { key: 'requested', label: 'Machine asked for' },
@@ -60,11 +62,11 @@ export function PlannerAtWork({ agent, activity }: { agent: JoinedAgent | undefi
   const instance = agent?.instance
   const sentence = agent?.finished_at ? `${agent.name} finished: ${agent.finished_reason}` : plannerSentence(instance, !!activity)
   return (
-    <div className="grid gap-1.5">
+    <Stack gap="sm">
       {activity && <Activity activity={activity} prominent />}
       <Steps label="Machine" steps={PLANNER_STEPS} current={instance?.state ?? 'requested'} live />
-      {sentence && <p aria-live="polite" className="text-xs text-muted">{sentence}</p>}
-    </div>
+      {sentence && <Text variant="note" aria-live="polite">{sentence}</Text>}
+    </Stack>
   )
 }
 
@@ -77,12 +79,12 @@ export function AgentAtWork({ agent, activity = agent?.activity }: { agent: Join
   const instance = agent?.instance
   const at = instance?.state ?? 'requested'
   return (
-    <div className="grid gap-1.5">
+    <Stack gap="sm">
       <Steps label="Machine" steps={MACHINE_STEPS} current={at} live />
-      <p aria-live="polite" className="text-xs text-muted">
+      <Text variant="note" aria-live="polite">
         {agent?.finished_at ? `${agent.name} finished: ${agent.finished_reason}` : machineSentence(instance)}
-      </p>
+      </Text>
       {activity && <Activity activity={activity} />}
-    </div>
+    </Stack>
   )
 }

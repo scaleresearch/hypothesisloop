@@ -9,16 +9,20 @@ import {
 import { fetchExperiment, fetchExperimentMetrics, fetchExperimentLogs } from '@/lib/api'
 import type { MetricDataPoint } from '@/types'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
-import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
+import { Section } from '@/components/ui/section'
+import { CodeBlock } from '@/components/ui/code-block'
 import { CopyButton } from '@/components/ui/copy-button'
-import { PageHeader } from '@/components/ui/page-header'
+import { Detail, DetailList } from '@/components/ui/detail-list'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Page } from '@/components/ui/page'
+import { Inline, Stack } from '@/components/ui/stack'
+import { Code, Pill, Text } from '@/components/ui/text'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Actor } from '@/components/actor'
 import { Branch } from '@/components/code-ref'
 import { BASELINE_JOB, measuresBaseline } from '@/components/job-hypothesis'
-import { Callout, Loading, EmptyState, ErrorMessage } from '@/components/ui/status-message'
-import { Table } from '@/components/ui/table'
-import { semantic, agentPalette, chart } from '@/lib/colors'
+import { Callout, Loading, ErrorMessage } from '@/components/ui/status-message'
+import { semantic, seriesPalette, chart } from '@/lib/colors'
 import { formatAccH, formatDuration } from '@/lib/format'
 import { budgetUnit, kindOf } from '@/lib/units'
 import { notAdmittedLabel, saidLines } from '@/lib/eviction'
@@ -32,15 +36,6 @@ const LAST_ATTEMPT: Record<string, string> = {
   FAILED: 'Failed',
   REJECTED: 'Rejected',
   QUEUED: 'Requeued, runs again',
-}
-
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <tr>
-      <td className="w-[180px] whitespace-nowrap pr-3 align-top text-xs text-muted">{label}</td>
-      <td className="font-mono text-xs">{value ?? '—'}</td>
-    </tr>
-  )
 }
 
 export default function JobDetailPage({ params }: { params: { id: string } }) {
@@ -59,11 +54,10 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
     { refreshInterval: 10_000 },
   )
   if (error) return (
-    <div>
-      <PageHeader title="Job" />
-      <ErrorMessage className="mb-3">Could not load job {id}: {error.message}</ErrorMessage>
+    <Page title="Job">
+      <ErrorMessage>Could not load job {id}: {error.message}</ErrorMessage>
       <TextLink href="/jobs" className="text-sm">← Back to jobs</TextLink>
-    </div>
+    </Page>
   )
 
   if (!job) return <Loading />
@@ -108,32 +102,30 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   const baseline = measuresBaseline(j)
 
   return (
-    <div>
-      <PageHeader
+    <Page
         title={
           <>
-            <span className="line-clamp-3 min-w-0 text-lg font-medium leading-snug" title={j.hypothesis}>{baseline ? BASELINE_JOB : j.hypothesis}</span>
+            <span className="line-clamp-3 min-w-0 text-lg leading-snug" title={j.hypothesis}>{baseline ? BASELINE_JOB : j.hypothesis}</span>
             <Badge status={j.status ?? 'UNKNOWN'} />
           </>
         }
         description={
-          <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-            <span className="font-mono text-2xs">Job {j.id}</span>
+          <Inline gap="md" className="text-xs">
+            <Text as="span" variant="meta" mono tone="default">Job {j.id}</Text>
             <CopyButton value={j.id} />
             {!baseline && <TextLink href={`/hypotheses/${j.hypothesis_id}`} className="whitespace-nowrap">View hypothesis →</TextLink>}
             <TextLink href={graphHref(j.platform_experiment_id, j.hypothesis_id)} className="whitespace-nowrap">In graph →</TextLink>
-          </span>
+          </Inline>
         }
         actions={
           <TextLink href={`/jobs?platform_experiment_id=${j.platform_experiment_id}`} className="whitespace-nowrap text-xs">
             ← This experiment&apos;s jobs
           </TextLink>
         }
-      />
-
+    >
       {lastAttempt && j.eviction_reason && (
         <Callout tone="warning">
-          <strong className="text-warning">{lastAttempt}</strong>
+          <span className="font-medium text-warning">{lastAttempt}</span>
           <JobReason reason={j.eviction_reason} />
         </Callout>
       )}
@@ -144,19 +136,17 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
           knowing what broke. */}
       {j.phase_detail && (j.phase_detail.reason || j.phase_detail.message) && (
         <Callout tone="danger">
-          <strong className="text-danger">Reported by the cluster:</strong>{' '}
-          {j.phase_detail.reason && (
-            <span className="font-mono text-danger">
-              {j.phase_detail.reason}
-            </span>
-          )}
+          <span className="font-medium text-danger">Reported by the cluster:</span>{' '}
+          {j.phase_detail.reason && <Code className="text-danger">{j.phase_detail.reason}</Code>}
           {j.phase_detail.message && saidLines(j.phase_detail.message).map((line, i) => (
-            <span key={i} className={i === 0 ? 'ml-2 text-muted' : 'block font-mono text-xs text-muted'}>{line}</span>
+            i === 0
+              ? <Text key={i} as="span" tone="muted" className="ml-2">{line}</Text>
+              : <Text key={i} as="span" variant="code" tone="muted" className="block">{line}</Text>
           ))}
           {j.phase_detail.restart_count ? (
-            <span className="ml-3 font-mono text-xs text-muted">
+            <Text as="span" variant="code" tone="muted" className="ml-3">
               restarts: {j.phase_detail.restart_count}
-            </span>
+            </Text>
           ) : null}
         </Callout>
       )}
@@ -164,75 +154,65 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
       {/* A queued job never errors on its own; this is the scheduler's current reason. */}
       {j.status === 'QUEUED' && j.not_admitted_reason && (
         <Callout tone="warning">
-          <strong className="text-warning">Not admitted:</strong>{' '}
-          <span className="font-mono text-xs text-muted">{notAdmittedLabel(j.not_admitted_reason, j.not_admitted_message)}</span>
+          <span className="font-medium text-warning">Not admitted:</span>{' '}
+          <Text as="span" variant="code" tone="muted">{notAdmittedLabel(j.not_admitted_reason, j.not_admitted_message)}</Text>
         </Callout>
       )}
 
       {(j.metrics || j.summary || j.status === 'COMPLETED') && (
-        <Card>
-          <CardHeader><CardTitle>Result</CardTitle></CardHeader>
-          <CardContent>
+        <Section title="Result">
+          <Stack>
             {(j.metrics ?? []).map(m => (
-              <div key={m.name} className="mb-2.5 font-mono">
+              <Inline key={m.name} align="baseline" className="font-mono">
                 <span className={m.name === primaryMetricName ? 'text-2xl font-medium text-success' : 'text-lg font-medium'}>
                   {m.value.toFixed(4)}
                 </span>
-                <span className="ml-2 text-xs text-muted">
+                <Text as="span" variant="note">
                   {m.name}{m.basis !== 'raw' && ` · basis ${m.basis}`}
-                </span>
-              </div>
+                </Text>
+              </Inline>
             ))}
-            {j.summary && <p className="max-w-[900px] whitespace-pre-wrap text-sm leading-[1.6]">{j.summary}</p>}
+            {j.summary && <Text pre className="max-w-4xl leading-relaxed">{j.summary}</Text>}
             {!j.summary && j.status === 'COMPLETED' && (
-              <p className="text-sm text-warning">No summary: the agent did not write up what this job found.</p>
+              <Text tone="warning">No summary: the agent did not write up what this job found.</Text>
             )}
-          </CardContent>
-        </Card>
+          </Stack>
+        </Section>
       )}
 
       {/* Job metadata */}
-      <Card>
-        <CardHeader><CardTitle>Job details</CardTitle></CardHeader>
-        <CardContent>
-          <Table>
-            <tbody>
-              <Row label="Agent" value={<span title={j.agent_id}>{j.agent_name}</span>} />
-              <Row label="Submitted by" value={<Actor actor={j.actor} />} />
-              <Row label="Experiment" value={
-                <TextLink href={`/platform-experiments/${j.platform_experiment_id}`}><PlatformExperimentName id={j.platform_experiment_id} /></TextLink>
-              } />
-              <Row label="Capacity tier" value={<TierBadge tier={j.capacity_tier} />} />
-              <Row label="Accelerator" value={`${j.accelerator_count}× ${j.accelerator_type}`} />
-              <Row label="Est. duration" value={j.estimated_duration_hours != null ? formatDuration(j.estimated_duration_hours * 3_600_000) : '—'} />
-              <Row label="Est. cost" value={costEstimate != null ? `${costEstimate} ${budgetUnit(kindOf(j.accelerator_type))}` : '—'} />
-              <Row label="Submitted" value={new Date(j.created_at).toLocaleString()} />
-              {j.submitted_at && <Row label="Sent to cluster" value={new Date(j.submitted_at).toLocaleString()} />}
-              {j.finished_at && (
-                <Row label="Finished" value={
-                  <>
-                    {new Date(j.finished_at).toLocaleString()}
-                    {j.submitted_at && <span className="text-muted"> · {formatDuration(new Date(j.finished_at).getTime() - new Date(j.submitted_at).getTime())} after it was sent</span>}
-                  </>
-                } />
-              )}
-              {j.theory && <Row label="Rationale" value={j.theory} />}
-              {j.job?.env && Object.keys(j.job.env).length > 0 && (
-                <Row label="Environment" value={
-                  <div className="flex flex-wrap gap-x-4 gap-y-1">
-                    {Object.entries(j.job.env).sort().map(([k, v]) => <span key={k}>{k}={v}</span>)}
-                  </div>
-                } />
-              )}
-            </tbody>
-          </Table>
-        </CardContent>
-      </Card>
+      <Section title="Job details">
+        <DetailList>
+          <Detail label="Agent"><span title={j.agent_id}>{j.agent_name}</span></Detail>
+          <Detail label="Submitted by"><Actor actor={j.actor} /></Detail>
+          <Detail label="Experiment">
+            <TextLink href={`/platform-experiments/${j.platform_experiment_id}`}><PlatformExperimentName id={j.platform_experiment_id} /></TextLink>
+          </Detail>
+          <Detail label="Capacity tier"><TierBadge tier={j.capacity_tier} /></Detail>
+          <Detail label="Accelerator">{`${j.accelerator_count}× ${j.accelerator_type}`}</Detail>
+          <Detail label="Est. duration">{j.estimated_duration_hours != null ? formatDuration(j.estimated_duration_hours * 3_600_000) : '—'}</Detail>
+          <Detail label="Est. cost">{costEstimate != null ? `${costEstimate} ${budgetUnit(kindOf(j.accelerator_type))}` : '—'}</Detail>
+          <Detail label="Submitted">{new Date(j.created_at).toLocaleString()}</Detail>
+          {j.submitted_at && <Detail label="Sent to cluster">{new Date(j.submitted_at).toLocaleString()}</Detail>}
+          {j.finished_at && (
+            <Detail label="Finished">
+              {new Date(j.finished_at).toLocaleString()}
+              {j.submitted_at && <span className="text-muted"> · {formatDuration(new Date(j.finished_at).getTime() - new Date(j.submitted_at).getTime())} after it was sent</span>}
+            </Detail>
+          )}
+          {j.theory && <Detail label="Rationale">{j.theory}</Detail>}
+          {j.job?.env && Object.keys(j.job.env).length > 0 && (
+            <Detail label="Environment">
+              <Inline gap="lg" className="gap-y-1">
+                {Object.entries(j.job.env).sort().map(([k, v]) => <span key={k}>{k}={v}</span>)}
+              </Inline>
+            </Detail>
+          )}
+        </DetailList>
+      </Section>
 
       {/* Metric trajectories — one chart per reported metric, the ranking metric first */}
-      <Card>
-        <CardHeader><CardTitle>Metrics over the run</CardTitle></CardHeader>
-        <CardContent>
+      <Section title="Metrics over the run">
           {metricsError ? (
             <ErrorMessage>Could not read this job&apos;s metrics: {metricsError.message}</ErrorMessage>
           ) : metricNames.length > 0 ? (
@@ -248,17 +228,18 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
                 const showDots = points.length < 2
                 return (
                 <div key={name}>
-                  <div className="mb-1 font-mono text-2xs text-muted">
+                  <Text as="div" variant="meta" mono className="mb-1">
                     {name}{name === primaryMetricName ? ' (ranking metric)' : ''}
                     {nonRaw.length > 0 && (
-                      <span
-                        className="ml-2 rounded-sm border border-danger bg-danger-tint px-1.5 py-px font-mono text-2xs text-danger"
+                      <Pill
+                        tone="danger"
+                        className="ml-2"
                         title="One or more values on this chart are not on the metric's normal ('raw') scale — do not compare them to a raw-basis run."
                       >
                         basis: {bases.join(', ')}
-                      </span>
+                      </Pill>
                     )}
-                  </div>
+                  </Text>
                   <ResponsiveContainer width="100%" height={metricNames.length > 1 ? 200 : 260}>
                     <LineChart data={seriesByMetric.get(name)} margin={{ top: 8, right: 16, left: 0, bottom: 14 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
@@ -281,7 +262,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
                       <Line
                         dataKey="value"
                         name={name}
-                        stroke={name === primaryMetricName ? semantic.primary : agentPalette[i % agentPalette.length]}
+                        stroke={name === primaryMetricName ? semantic.primary : seriesPalette[i % seriesPalette.length]}
                         dot={showDots ? { r: 3 } : false}
                         strokeWidth={2}
                         type="monotone"
@@ -294,56 +275,42 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
           ) : (
             <EmptyState>No metric data yet — waiting for job to start reporting.</EmptyState>
           )}
-        </CardContent>
-      </Card>
+      </Section>
 
       {/* Lineage */}
       {(j.job?.image || j.code_ref || j.config_hash || j.data_ref) && (
-        <Card>
-          <CardHeader><CardTitle>What it ran</CardTitle></CardHeader>
-          <CardContent>
-            <Table>
-              <tbody>
-                {j.job?.image && <Row label="Image" value={j.job.image} />}
-                {j.branch && <Row label="Branch" value={<Branch branch={j.branch} codeRef={j.code_ref} platformExperimentID={j.platform_experiment_id} />} />}
-                {j.code_ref && <Row label="Code (git commit)" value={j.code_ref} />}
-                {j.config_hash && <Row label="Configuration checksum" value={j.config_hash} />}
-                {j.data_ref && <Row label="Data" value={j.data_ref} />}
-              </tbody>
-            </Table>
-          </CardContent>
-        </Card>
+        <Section title="What it ran">
+          <DetailList>
+            {j.job?.image && <Detail label="Image">{j.job.image}</Detail>}
+            {j.branch && <Detail label="Branch"><Branch branch={j.branch} codeRef={j.code_ref} platformExperimentID={j.platform_experiment_id} /></Detail>}
+            {j.code_ref && <Detail label="Code (git commit)">{j.code_ref}</Detail>}
+            {j.config_hash && <Detail label="Configuration checksum">{j.config_hash}</Detail>}
+            {j.data_ref && <Detail label="Data">{j.data_ref}</Detail>}
+          </DetailList>
+        </Section>
       )}
 
       {/* Parent lineage */}
       {j.parent_id && (
-        <Card>
-          <CardHeader><CardTitle>Derived from</CardTitle></CardHeader>
-          <CardContent>
-            <p className="text-xs">
-              Parent job: <TextLink inline href={`/jobs/${j.parent_id}`} className="font-mono">{j.parent_id}</TextLink>
-            </p>
-          </CardContent>
-        </Card>
+        <Section title="Derived from">
+          <Text variant="note" tone="default">
+            Parent job: <TextLink inline href={`/jobs/${j.parent_id}`} className="font-mono">{j.parent_id}</TextLink>
+          </Text>
+        </Section>
       )}
     
       {/* The job's own output. For a failed job the traceback usually lives only here — the
           record carries a reason code, not the error. Includes the crashed instance's output
           when a container restarted, which is otherwise unreachable. */}
-      <Card>
-        <CardHeader><CardTitle>Logs</CardTitle></CardHeader>
-        <CardContent>
+      <Section title="Logs">
           {logsError ? (
             <ErrorMessage>Could not read this job&apos;s logs: {logsError.message}</ErrorMessage>
           ) : logs && logs.length > 0 ? (
-            <pre className="m-0 max-h-[420px] overflow-auto whitespace-pre-wrap break-words font-mono text-xs">
-              {logs.join('\n')}
-            </pre>
+            <CodeBlock height="lg">{logs.join('\n')}</CodeBlock>
           ) : (
             <EmptyState>No log output reported yet.</EmptyState>
           )}
-        </CardContent>
-      </Card>
-</div>
+      </Section>
+    </Page>
   )
 }

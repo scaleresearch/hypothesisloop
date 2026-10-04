@@ -11,7 +11,9 @@ import { fetchExperiment, fetchPlatformExperiment } from '@/lib/api'
 import { useTenant } from '@/lib/tenant'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Kbd } from '@/components/ui/text'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Inline } from '@/components/ui/stack'
+import { Kbd, Text } from '@/components/ui/text'
 
 type CommandItem = {
   id: string
@@ -150,7 +152,7 @@ export function CommandPalette() {
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-scrim pt-[14vh] backdrop-blur-sm" onClick={close}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-scrim pt-drop backdrop-blur-sm" onClick={close}>
       <div
         role="dialog"
         aria-modal="true"
@@ -170,12 +172,12 @@ export function CommandPalette() {
             onChange={e => setQuery(e.target.value)}
             onKeyDown={onKeyDownInList}
           />
-          {resolving && <span className="whitespace-nowrap font-mono text-2xs text-accent">resolving…</span>}
+          {resolving && <Text as="span" variant="meta" mono tone="accent" className="whitespace-nowrap">resolving…</Text>}
           <Kbd>ESC</Kbd>
         </div>
-        <div className="max-h-[340px] overflow-y-auto p-1.5" role="listbox" aria-label="Results">
+        <div className="max-h-80 overflow-y-auto p-1.5" role="listbox" aria-label="Results">
           {items.length === 0 && (
-            <div className="px-3 py-6 text-center text-sm text-subtle">No matches. Try a page name or paste a full job/experiment ID.</div>
+            <EmptyState>No matches. Try a page name or paste a full job/experiment ID.</EmptyState>
           )}
           {items.map((item, i) => {
             const Icon = item.icon
@@ -192,18 +194,18 @@ export function CommandPalette() {
                 <Icon size={15} strokeWidth={2} className={clsx('flex-none', active && 'text-accent')} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{item.label}</div>
-                  {item.sub && <div className="text-xs text-subtle">{item.sub}</div>}
+                  {item.sub && <Text as="div" variant="hint">{item.sub}</Text>}
                 </div>
                 {active && <CornerDownLeft size={13} strokeWidth={2} className="flex-none text-accent" />}
               </div>
             )
           })}
         </div>
-        <div className="flex items-center gap-4 border-t bg-surface-inset px-4 py-2 text-2xs text-subtle">
-          <span className="inline-flex items-center gap-1"><ArrowUp size={11} /><ArrowDown size={11} /> navigate</span>
-          <span className="inline-flex items-center gap-1"><CornerDownLeft size={11} /> select</span>
-          <span className="ml-auto inline-flex items-center gap-1 text-subtle"><Zap size={11} /> agent- and human-readable IDs both work</span>
-        </div>
+        <Inline gap="lg" nowrap className="border-t bg-surface-inset px-4 py-2 text-2xs text-subtle">
+          <Inline gap="xs" nowrap><ArrowUp size={11} /><ArrowDown size={11} /> navigate</Inline>
+          <Inline gap="xs" nowrap><CornerDownLeft size={11} /> select</Inline>
+          <Inline gap="xs" nowrap className="ml-auto"><Zap size={11} /> agent- and human-readable IDs both work</Inline>
+        </Inline>
       </div>
     </div>
   )

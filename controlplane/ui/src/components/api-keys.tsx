@@ -12,7 +12,10 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Table } from '@/components/ui/table'
 import { Secret } from '@/components/ui/secret'
-import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
+import { Loading, ErrorMessage } from '@/components/ui/status-message'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Inline, Stack } from '@/components/ui/stack'
+import { Code, Text } from '@/components/ui/text'
 
 const WHOLE_ORG = ''
 
@@ -59,8 +62,8 @@ export function APIKeys() {
   }
 
   return (
-    <div className="grid gap-3">
-      <form className="flex flex-wrap items-center gap-2" onSubmit={create}>
+    <Stack>
+      <Inline as="form" onSubmit={create}>
         <Input
           fieldSize="sm"
           className="w-56"
@@ -80,7 +83,7 @@ export function APIKeys() {
           ]}
         />
         <Button size="sm" variant="primary" type="submit" loading={busy} disabled={name.trim() === ''}>Create API key</Button>
-      </form>
+      </Inline>
       {error && <ErrorMessage>{error}</ErrorMessage>}
 
       {created && (
@@ -88,7 +91,7 @@ export function APIKeys() {
           label={`Token of "${created.name}"`}
           value={created.token}
           note={<>
-            Set it as <span className="font-mono">HL_TOKEN</span> for the <span className="font-mono">hl</span> command
+            Set it as <Code>HL_TOKEN</Code> for the <Code>hl</Code> command
             line or an outside agent. This is the only time it is shown: the platform keeps its
             hash. If you lose it, revoke the key and create another.
           </>}
@@ -111,7 +114,7 @@ export function APIKeys() {
                 <td>
                   <span className="font-medium">{key.name}</span>
                   {key.minted_by && (
-                    <div className="text-xs text-subtle">minted from {keys.find(k => k.id === key.minted_by)?.name ?? 'a key no longer listed'}</div>
+                    <Text as="div" variant="hint">minted from {keys.find(k => k.id === key.minted_by)?.name ?? 'a key no longer listed'}</Text>
                   )}
                 </td>
                 <td className="text-xs">{scopeLabel(key)}</td>
@@ -140,6 +143,6 @@ export function APIKeys() {
           It stops working at once, with every key minted from it. This cannot be undone.
         </ConfirmDialog>
       )}
-    </div>
+    </Stack>
   )
 }

@@ -6,7 +6,8 @@ import { clsx } from 'clsx'
 import type { HypothesisGraph } from '@/types'
 import { Badge } from '@/components/ui/badge'
 import { RowButton } from '@/components/ui/button'
-import { Eyebrow } from '@/components/ui/text'
+import { Inline } from '@/components/ui/stack'
+import { Eyebrow, Text } from '@/components/ui/text'
 import { NodeMeta, ObjectiveMeta } from '@/components/hypothesis-graph'
 import { IdeaEditor, NodeActions, useEditor } from '@/components/graph-edit'
 import { matchesFilters, outlineRows } from '@/lib/hypothesis-graph'
@@ -39,7 +40,7 @@ function Row({ id, depth, selected, selectedRef, hit, className, onSelect, child
   const pickable = picking && editor!.canPick(id)
   return (
     <li>
-      <div className="flex items-center gap-2">
+      <Inline nowrap>
         <RowButton
           ref={selected ? selectedRef : undefined}
           selected={selected || editor?.adding === id}
@@ -52,7 +53,7 @@ function Row({ id, depth, selected, selectedRef, hit, className, onSelect, child
           {children}
         </RowButton>
         {selected && <NodeActions id={id} />}
-      </div>
+      </Inline>
       {editor?.adding === id && (
         <div className="py-1.5" style={{ paddingLeft: indent(depth + 1) }}>
           <IdeaEditor />
@@ -92,9 +93,9 @@ export function HypothesisOutline({ graph, rootLabel, selected, hits, filters, o
           <span title={verdictBy(node) && `${node.status} ${verdictBy(node)}`}><Badge status={node.status}>{node.status}</Badge></span>
           <span className="min-w-0 flex-1 truncate" title={node.text}>{node.text}</span>
           {alsoBuildsOn.length > 0 && (
-            <span className="whitespace-nowrap text-2xs text-subtle">
+            <Text as="span" variant="meta" tone="subtle" className="whitespace-nowrap">
               also builds on {alsoBuildsOn.length}
-            </span>
+            </Text>
           )}
           <NodeMeta item={node} />
         </Row>

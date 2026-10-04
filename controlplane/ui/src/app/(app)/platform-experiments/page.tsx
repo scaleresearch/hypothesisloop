@@ -4,23 +4,25 @@ import { Suspense, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import useSWR from 'swr'
 import { clustersInUse } from '@/lib/clusters'
-import { semantic } from '@/lib/colors'
 import { useProjectRouter, useQueryParam } from '@/lib/query-state'
 import { useTenant } from '@/lib/tenant'
 import { fetchAgentsPage, fetchExperimentStats, fetchOrgClusters, fetchPlatformExperimentsPage } from '@/lib/api'
 import type { PlatformExperiment } from '@/types'
 import { GoalInput } from '@/components/goal-input'
-import { PageHeader } from '@/components/ui/page-header'
+import { Page } from '@/components/ui/page'
 import { PlatformExperimentDialog } from '@/components/platform-experiment-form'
 import { PlatformExperimentCard } from '@/components/platform-experiment-card'
-import { Dot } from '@/components/ui/badge'
+import { Dot } from '@/components/ui/dot'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Inline, Stack } from '@/components/ui/stack'
+import { Text } from '@/components/ui/text'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { TextLink } from '@/components/ui/link'
 import { Select } from '@/components/ui/select'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Pagination } from '@/components/ui/pagination'
-import { Segmented } from '@/components/ui/tabs'
+import { Segmented } from '@/components/ui/segmented'
 
 const PAGE_SIZE = 10
 
@@ -45,22 +47,22 @@ function useLiveCounts(): ReactNode {
   // A status no job holds is absent from the answer.
   const running = stats?.by_status?.RUNNING ?? 0
   const items = [
-    statsError ? { key: 'jobs', text: 'Jobs running unknown', color: semantic.danger, title: statsError.message }
-      : running > 0 && { key: 'jobs', text: `${running} ${running === 1 ? 'job' : 'jobs'} running`, color: semantic.success, title: undefined },
-    agentsError ? { key: 'agents', text: 'Agents unknown', color: semantic.danger, title: agentsError.message }
-      : (agents?.total ?? 0) > 0 && { key: 'agents', text: `${agents!.total} ${agents!.total === 1 ? 'agent' : 'agents'}`, color: semantic.neutral, title: undefined },
+    statsError ? { key: 'jobs', text: 'Jobs running unknown', tone: 'danger' as const, title: statsError.message }
+      : running > 0 && { key: 'jobs', text: `${running} ${running === 1 ? 'job' : 'jobs'} running`, tone: 'success' as const, title: undefined },
+    agentsError ? { key: 'agents', text: 'Agents unknown', tone: 'danger' as const, title: agentsError.message }
+      : (agents?.total ?? 0) > 0 && { key: 'agents', text: `${agents!.total} ${agents!.total === 1 ? 'agent' : 'agents'}`, tone: 'neutral' as const, title: undefined },
   ].filter(item => !!item)
   if (items.length === 0) return null
 
   return (
-    <span className="flex flex-wrap gap-5 tabular-nums">
+    <Inline gap="xl" className="tabular-nums">
       {items.map(item => (
         <span key={item.key} title={item.title} className="flex items-center gap-2">
-          <Dot color={item.color} />
+          <Dot tone={item.tone} />
           {item.text}
         </span>
       ))}
-    </span>
+    </Inline>
   )
 }
 
@@ -113,7 +115,18 @@ function PlatformExperimentsPageContent() {
   const live = useLiveCounts()
 
   return (
-    <div>
+    <Page
+      title="Experiments"
+      description={live}
+      actions={(
+        <Segmented
+          label="How to start"
+          options={[{ value: 'plan', label: PLAN }, { value: 'configure', label: CONFIGURE }]}
+          value={configuring ? 'configure' : 'plan'}
+          onChange={way => way === 'configure' ? setDialog({ editing: null }) : planning.current?.querySelector('textarea')?.focus()}
+        />
+      )}
+    >
       {dialog && (
         <PlatformExperimentDialog
           initial={dialog.editing}
@@ -123,32 +136,19 @@ function PlatformExperimentsPageContent() {
         />
       )}
 
-      <PageHeader
-        title="Experiments"
-        description={live}
-        actions={(
-          <Segmented
-            label="How to start"
-            options={[{ value: 'plan', label: PLAN }, { value: 'configure', label: CONFIGURE }]}
-            value={configuring ? 'configure' : 'plan'}
-            onChange={way => way === 'configure' ? setDialog({ editing: null }) : planning.current?.querySelector('textarea')?.focus()}
-          />
-        )}
-      />
-
       {/* The box draws no edge of its own; the card is its edge, and darkens while the box has focus. */}
-      <Card className="mb-12 transition-colors focus-within:border-border-control">
+      <Card className="mb-7 transition-colors focus-within:border-border-control">
         <div ref={planning}>
           <GoalInput projectID={project.id} onCreated={open} />
         </div>
         {clusters && clustersInUse(clusters).online === 0 && (
-          <p className="border-t px-6 py-3 text-xs text-muted">
+          <Text variant="note" className="border-t px-6 py-3">
             No compute is online yet. <TextLink inline href="/cluster">Compute resources</TextLink>
-          </p>
+          </Text>
         )}
       </Card>
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <Inline gap="md">
         <Segmented
           label="Status"
           size="sm"
@@ -165,22 +165,26 @@ function PlatformExperimentsPageContent() {
           placeholder="Search"
         />
         <Select fieldSize="sm" aria-label="Sort" value={sort} onChange={v => { setSort(v); setPage(0) }} options={SORT_OPTIONS} />
-      </div>
+      </Inline>
 
       {isLoading && <Loading />}
       {error && <ErrorMessage>Could not load the experiments of {project.name}: {error.message}</ErrorMessage>}
 
       {data && experiments.length === 0 && (
-        <p className="rounded-lg border border-dashed px-6 py-10 text-center text-sm text-muted">
+        <EmptyState framed>
           {statusFilter || search
             ? `No experiments match${search ? ` "${search}"` : ' this filter'}.`
             : 'No experiments yet.'}
-        </p>
+        </EmptyState>
       )}
 
-      {experiments.map(pe => <PlatformExperimentCard key={pe.id} pe={pe} onEdit={editing => setDialog({ editing })} />)}
+      {experiments.length > 0 && (
+        <Stack gap="sm">
+          {experiments.map(pe => <PlatformExperimentCard key={pe.id} pe={pe} onEdit={editing => setDialog({ editing })} />)}
+        </Stack>
+      )}
 
       <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
-    </div>
+    </Page>
   )
 }

@@ -7,9 +7,12 @@ import { LANDING_PATH, LOGIN_PATH, PROVIDER_NAMES, ProviderRefused, safeNext, si
 import type { SignInProvider } from '@/lib/auth'
 import { BrandMark } from '@/components/ui/brand-mark'
 import { Button } from '@/components/ui/button'
+import { Centered } from '@/components/ui/centered'
 import { inlineLinkClass } from '@/components/ui/link'
 import { Logo } from '@/components/ui/logo'
+import { Stack } from '@/components/ui/stack'
 import { ErrorMessage } from '@/components/ui/status-message'
+import { Text } from '@/components/ui/text'
 
 // Why the visitor is here again, as the redirect that brought them says it.
 const NOTICES = new Map([
@@ -72,18 +75,15 @@ function SignIn() {
   const otherHref = other.toString() ? `${LOGIN_PATH}?${other}` : LOGIN_PATH
 
   return (
-    <main className="mx-auto mt-[18vh] grid w-full max-w-sm content-start gap-4 px-5">
-      <NextLink href={LANDING_PATH} className="justify-self-start rounded"><Logo /></NextLink>
-      <h1 className="text-2xl font-medium tracking-tight">{wording.title}</h1>
-      <p className="text-sm text-muted">{wording.lead}</p>
+    <Centered head={<NextLink href={LANDING_PATH} className="justify-self-start rounded"><Logo /></NextLink>} title={wording.title}>
+      <Text tone="muted">{wording.lead}</Text>
       {notice && <ErrorMessage>{notice}</ErrorMessage>}
       {problem && <ErrorMessage>Sign-in is not configured. {problem}</ErrorMessage>}
       {error && <ErrorMessage>{error}</ErrorMessage>}
-      <div className="grid gap-2">
+      <Stack gap="sm">
         {providers.map(provider => (
           <Button
             key={provider}
-            className="py-2"
             disabled={pending !== '' || refused.includes(provider)}
             loading={pending === provider}
             onClick={() => start(provider)}
@@ -92,12 +92,12 @@ function SignIn() {
             Continue with {PROVIDER_NAMES[provider]}
           </Button>
         ))}
-      </div>
-      <p className="text-xs text-subtle">
+      </Stack>
+      <Text variant="hint">
         {wording.other.question}{' '}
         <NextLink href={otherHref} className={inlineLinkClass}>{wording.other.label}</NextLink>
-      </p>
-    </main>
+      </Text>
+    </Centered>
   )
 }
 

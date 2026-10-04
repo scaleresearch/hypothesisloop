@@ -8,6 +8,7 @@ import type { Me, Project } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { InlineError } from '@/components/ui/status-message'
+import { Inline, Stack } from '@/components/ui/stack'
 import { Eyebrow } from '@/components/ui/text'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 
@@ -45,7 +46,7 @@ function CreateByName({ what, create }: { what: string; create: (name: string) =
   }
 
   return (
-    <form className="wa-nav-create grid gap-1.5" onSubmit={submit}>
+    <Stack as="form" gap="xs" className="wa-nav-create" onSubmit={submit}>
       <Input
         fieldSize="sm"
         autoFocus
@@ -54,14 +55,14 @@ function CreateByName({ what, create }: { what: string; create: (name: string) =
         value={name}
         onChange={e => setName(e.target.value)}
       />
-      <div className="flex gap-1.5">
+      <Inline gap="xs" nowrap>
         <Button size="sm" variant="primary" type="submit" disabled={busy || name.trim() === ''}>
           {busy ? 'Creating…' : 'Create'}
         </Button>
         <Button size="sm" type="button" disabled={busy} onClick={() => { setOpen(false); setError('') }}>Cancel</Button>
-      </div>
+      </Inline>
       {error && <InlineError>{error}</InlineError>}
-    </form>
+    </Stack>
   )
 }
 
@@ -94,8 +95,8 @@ export function ProjectSwitcher() {
 
   return (
     // wa-nav-tenant, wa-nav-create and the labels around the pickers are what the browser suite finds them by.
-    <div className="wa-nav-tenant grid gap-2 px-3 pt-3">
-      <label className="grid gap-1.5">
+    <Stack gap="sm" className="wa-nav-tenant px-3 pt-3">
+      <Stack as="label" gap="xs">
         <Eyebrow>Organization</Eyebrow>
         <SearchableSelect
           hideAllOption
@@ -104,9 +105,9 @@ export function ProjectSwitcher() {
           // Clearing the field picks nothing; switching org lands on its first project.
           onChange={id => { if (id && id !== org.id) selectProject(projectsOf(id)[0].id) }}
         />
-      </label>
+      </Stack>
       <CreateByName what="organization" create={newOrg} />
-      <label className="grid gap-1.5">
+      <Stack as="label" gap="xs">
         <Eyebrow>Project</Eyebrow>
         <SearchableSelect
           hideAllOption
@@ -114,8 +115,8 @@ export function ProjectSwitcher() {
           options={projectsOf(org.id).map(p => ({ value: p.id, label: p.name }))}
           onChange={id => { if (id && id !== project.id) selectProject(id) }}
         />
-      </label>
+      </Stack>
       {administers && <CreateByName what="project" create={newProject} />}
-    </div>
+    </Stack>
   )
 }

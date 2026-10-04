@@ -15,6 +15,7 @@ import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { SharedBadge } from '@/components/shared-badge'
 import { Button } from '@/components/ui/button'
+import { Inline } from '@/components/ui/stack'
 
 const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' })
 
@@ -77,7 +78,7 @@ export function PlatformExperimentCard({
     : !live && !isZeroDate(pe.created_at) ? day(pe.created_at) : null
 
   return (
-    <Card className="mb-2.5 cursor-pointer transition hover:border-border-strong hover:shadow-md">
+    <Card interactive>
       <div
         className="flex min-h-14 items-center gap-4 px-5 py-2.5"
         onClick={() => router.push(href)}
@@ -88,14 +89,14 @@ export function PlatformExperimentCard({
         <span className="w-20 flex-none"><Badge status={pe.status}>{pe.status}</Badge></span>
         <span className="min-w-0 truncate text-base text-foreground">{pe.name}</span>
         <SharedBadge pe={pe} />
-        <span className="ml-auto flex shrink-0 items-center gap-4 text-xs tabular-nums text-muted">
+        <Inline gap="lg" nowrap className="ml-auto shrink-0 text-xs tabular-nums text-muted">
           {figures.map(f => <span key={f}>{f}</span>)}
           {daysLeft != null && daysLeft > 0 && <span className={clsx(daysLeft < 2 && 'text-danger')}>{daysLeft}d left</span>}
           {when && <span>{when}</span>}
           {!readOnly && EDITABLE.includes(pe.status) && (
             <Button size="sm" onClick={e => { e.stopPropagation(); onEdit(pe) }}>Edit</Button>
           )}
-        </span>
+        </Inline>
       </div>
     </Card>
   )

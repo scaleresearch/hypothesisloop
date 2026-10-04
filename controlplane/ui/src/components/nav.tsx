@@ -16,32 +16,29 @@ import { ThemeSwitch } from '@/components/theme-switch'
 import { Button } from '@/components/ui/button'
 import { Link } from '@/components/ui/link'
 import { Logo } from '@/components/ui/logo'
+import { StatusLabel } from '@/components/ui/badge'
+import { Inline, Stack } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
+import { Eyebrow, Text } from '@/components/ui/text'
+import type { Tone } from '@/lib/colors'
 
 const navItems = [
-  { href: '/platform-experiments', label: 'Experiments',          icon: FlaskConical },
-  { href: '/hypotheses',           label: 'Hypotheses',           icon: Lightbulb    },
-  { href: '/jobs',                 label: 'Jobs',                 icon: ListTree     },
-  { href: '/cluster',              label: 'Compute Resources',    icon: Server       },
-  { href: '/statistics',           label: 'Statistics',           icon: LineChart,   staffOnly: true },
-  { href: '/settings',             label: 'Settings',             icon: Settings     },
+  { href: '/platform-experiments', label: 'Experiments', icon: FlaskConical },
+  { href: '/hypotheses', label: 'Hypotheses', icon: Lightbulb },
+  { href: '/jobs', label: 'Jobs', icon: ListTree },
+  { href: '/cluster', label: 'Compute Resources', icon: Server },
+  { href: '/statistics', label: 'Statistics', icon: LineChart, staffOnly: true },
+  { href: '/settings', label: 'Settings', icon: Settings },
 ]
 
-const statusTone = {
-  idle: 'text-subtle',
-  success: 'text-success',
-  warning: 'text-warning',
-  danger: 'text-danger',
-}
-
-function StatusLine({ tone, label, sub }: { tone: keyof typeof statusTone; label: string; sub?: string }) {
+// Checking is no state of the clusters yet: it pulses in the quiet colour until one is known.
+function StatusLine({ tone, label, sub }: { tone: Tone | 'idle'; label: string; sub?: string }) {
   return (
-    <div className={clsx('mb-3 flex items-center gap-2.5 rounded border bg-surface px-3 py-2', statusTone[tone])}>
-      <span aria-hidden="true" className={clsx('h-1.5 w-1.5 flex-none rounded-full bg-current', tone === 'idle' && 'animate-pulse')} />
-      <div className="min-w-0">
-        <div className="truncate text-xs font-medium">{label}</div>
-        {sub && <div className="truncate text-2xs text-subtle" title={sub}>{sub}</div>}
-      </div>
+    <div className="rounded border bg-surface px-3 py-2">
+      <StatusLabel tone={tone === 'idle' ? 'neutral' : tone} pulse={tone === 'idle'} className="w-full">
+        <span className="truncate">{label}</span>
+      </StatusLabel>
+      {sub && <Text variant="meta" tone="subtle" className="truncate pl-3" title={sub}>{sub}</Text>}
     </div>
   )
 }
@@ -78,11 +75,11 @@ function Account() {
   }
 
   return (
-    <div className="mb-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs">
+    <Inline className="justify-between text-xs">
       <span className="min-w-0 truncate font-medium" title={me.name}>{me.name || 'Signed in'}</span>
       <Button variant="link" size="sm" onClick={leave}>Sign out</Button>
       {error && <InlineError>Sign-out failed: {error}</InlineError>}
-    </div>
+    </Inline>
   )
 }
 
@@ -120,17 +117,17 @@ export function Nav() {
           )
         })}
       </ul>
-      <div className="mt-auto px-3 pb-5 pt-6">
+      <Stack className="mt-auto px-3 pb-5 pt-6">
         <SystemStatus />
         <Account />
-        <div className="border-t pt-3">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-medium text-muted">HypothesisLoop v2.0</p>
+        <Stack gap="2xs" className="border-t pt-3">
+          <Inline nowrap className="justify-between">
+            <Eyebrow>HypothesisLoop v2.0</Eyebrow>
             <ThemeSwitch />
-          </div>
-          <p className="mt-0.5 text-2xs text-subtle">Budgets are counted in {budgetUnit('accelerator', 'long')}, or {budgetUnit('cpu', 'long')} for jobs on CPU.</p>
-        </div>
-      </div>
+          </Inline>
+          <Text variant="meta" tone="subtle">Budgets are counted in {budgetUnit('accelerator', 'long')}, or {budgetUnit('cpu', 'long')} for jobs on CPU.</Text>
+        </Stack>
+      </Stack>
     </nav>
   )
 }

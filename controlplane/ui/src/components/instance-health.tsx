@@ -5,7 +5,10 @@ import type { Tone } from '@/lib/colors'
 import { relTime } from '@/lib/format'
 import { useTick } from '@/lib/tick'
 import { Badge } from '@/components/ui/badge'
+import { CodeBlock } from '@/components/ui/code-block'
 import { Disclosure } from '@/components/ui/disclosure'
+import { Inline, Stack } from '@/components/ui/stack'
+import { Text } from '@/components/ui/text'
 
 const STATE_TONE: Record<AgentInstance['state'], Tone> = {
   waiting: 'neutral',
@@ -40,30 +43,30 @@ export function InstanceHealth({ instance }: { instance: AgentInstance }) {
     : instance.stopped ? 'Stopped for good: its last machine ended'
     : 'Replaced: the machine before this one ended'
   return (
-    <div className="grid justify-items-start gap-1">
-      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+    <Stack gap="xs" start>
+      <Inline>
         <Badge tone={released && instance.state === 'stopped' ? 'neutral' : STATE_TONE[instance.state]}>{instance.state}</Badge>
         {instance.state !== 'stopped' && instance.state !== 'waiting' && (
-          <span className="text-xs text-muted">
+          <Text as="span" variant="note">
             {instance.progress_at ? `last progress ${relTime(instance.progress_at)}` : 'no progress seen yet'}
-          </span>
+          </Text>
         )}
         {instance.restarts > 0 && (
-          <span className="text-xs text-subtle">restarted {instance.restarts === 1 ? 'once' : `${instance.restarts} times`}</span>
+          <Text as="span" variant="hint">restarted {instance.restarts === 1 ? 'once' : `${instance.restarts} times`}</Text>
         )}
-      </div>
+      </Inline>
       {ended && (
-        <p className="text-xs text-subtle">
+        <Text variant="hint">
           {how}
           {instance.exited_at ? ` ${relTime(instance.exited_at)}` : ''}, {END_REASON[ended] ?? ended}.
-        </p>
+        </Text>
       )}
-      {instance.exit_log && released && <p className="text-xs text-subtle">{instance.exit_log}</p>}
+      {instance.exit_log && released && <Text variant="hint">{instance.exit_log}</Text>}
       {instance.exit_log && !released && (
         <Disclosure label="Exit log">
-          <pre className="max-h-48 max-w-[560px] overflow-auto whitespace-pre-wrap break-words rounded border bg-surface-inset px-2.5 py-2 font-mono text-2xs text-muted">{instance.exit_log}</pre>
+          <CodeBlock framed height="sm" className="max-w-xl">{instance.exit_log}</CodeBlock>
         </Disclosure>
       )}
-    </div>
+    </Stack>
   )
 }

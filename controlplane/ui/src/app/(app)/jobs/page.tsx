@@ -7,20 +7,24 @@ import { clsx } from 'clsx'
 import { TextLink } from '@/components/ui/link'
 import { fetchExperimentsPage, fetchExperimentStats, cancelExperiment, fetchOrgClusters } from '@/lib/api'
 import type { Experiment } from '@/types'
-import { PageHeader } from '@/components/ui/page-header'
+import { Page } from '@/components/ui/page'
 import { AgentSelect } from '@/components/agent-select'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
-import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
+import { Section } from '@/components/ui/section'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Badge, NoSummary } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
-import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
+import { Loading, ErrorMessage } from '@/components/ui/status-message'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Dot } from '@/components/ui/dot'
+import { Inline, Stack } from '@/components/ui/stack'
+import { Code, Text } from '@/components/ui/text'
 import { FormField } from '@/components/ui/form-field'
 import { LinkTr, SortableTh, Table, num, quiet } from '@/components/ui/table'
 import { Pagination } from '@/components/ui/pagination'
-import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
+import { acceleratorLabel, formatAccH, relTime, shortId } from '@/lib/format'
 import { budgetUnit, kindOf } from '@/lib/units'
 import { statusTone } from '@/lib/colors'
 import { evictionCodeLabel, faultBreakdown, notAdmittedLabel } from '@/lib/eviction'
@@ -154,14 +158,12 @@ function JobsPageContent() {
   const shownLabel = STATUSES.find(s => s.status === statusFilter)?.label
 
   return (
-    <div>
-      <PageHeader
-        title="Jobs"
-        description="What agents ran for their experiments, with status and the compute each used. Choose a status to list its jobs."
-      />
-
+    <Page
+      title="Jobs"
+      description="What agents ran for their experiments, with status and the compute each used. Choose a status to list its jobs."
+    >
       {/* One tile per status: its count, and the filter that lists those jobs. */}
-      <div className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(118px,1fr))] gap-2.5">
+      <div className="grid grid-cols-tiles-sm gap-3">
         <StatTile label="All" value={stats?.total ?? '—'} href={statusHref('')} active={statusFilter === ''} />
         {STATUSES.map(({ status, label }) => (
           <StatTile
@@ -175,7 +177,7 @@ function JobsPageContent() {
         ))}
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-4">
+      <Inline gap="lg">
         <FormField inline label="Agent">
           <AgentSelect
             value={agentFilter}
@@ -190,11 +192,11 @@ function JobsPageContent() {
             allLabel="All experiments"
           />
         </FormField>
-      </div>
+      </Inline>
 
       {isLoading && <Loading />}
-      {error && <ErrorMessage className="mb-4">Could not load the jobs: {error.message}</ErrorMessage>}
-      {cancelError && <ErrorMessage className="mb-4">{cancelError}</ErrorMessage>}
+      {error && <ErrorMessage>Could not load the jobs: {error.message}</ErrorMessage>}
+      {cancelError && <ErrorMessage>{cancelError}</ErrorMessage>}
       {clustersError && (
         <ErrorMessage>
           Could not load the clusters of {org.name}, so no job shows whether its cluster is connected: {clustersError.message}
@@ -202,38 +204,33 @@ function JobsPageContent() {
       )}
 
       {statusFilter === 'EVICTED' && evictionReasons.length > 0 && (
-        <Card>
-          <CardHeader><CardTitle note={faultSummary}>Why jobs were evicted</CardTitle></CardHeader>
-          <CardContent>
-            <ul className="grid max-w-[640px] gap-1 text-xs">
-              {evictionReasons.map(([code, n]) => (
-                <li key={code} className="flex items-baseline justify-between gap-4">
-                  <span>{evictionCodeLabel(code)}</span>
-                  <span className="font-mono tabular-nums text-muted">{n}</span>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
+        <Section title="Why jobs were evicted" note={faultSummary}>
+          <Stack as="ul" gap="xs" className="max-w-2xl text-xs">
+            {evictionReasons.map(([code, n]) => (
+              <li key={code} className="flex items-baseline justify-between gap-4">
+                <span>{evictionCodeLabel(code)}</span>
+                <Code className="tabular-nums text-muted">{n}</Code>
+              </li>
+            ))}
+          </Stack>
+        </Section>
       )}
 
-      <Card>
-        <CardHeader><CardTitle note={data ? total : undefined}>{shownLabel ? `${shownLabel} jobs` : 'Jobs'}</CardTitle></CardHeader>
-        <CardContent scrollX>
+      <Section title={shownLabel ? `${shownLabel} jobs` : 'Jobs'} note={data ? total : undefined} scrollX>
           {/* Fixed widths for the short columns; experiment and hypothesis share what is left. An
               experiment filter makes the experiment column the same on every row, so it goes. */}
-          <Table className="min-w-[1040px] table-fixed">
+          <Table className="min-w-5xl table-fixed">
             <thead>
               <tr>
-                <th className="w-[84px]">Job ID</th>
-                <th className="w-[150px]">Agent</th>
+                <th className="w-24">Job ID</th>
+                <th className="w-36">Agent</th>
                 {!peFilter && <th>Experiment</th>}
-                <SortableTh className="w-[140px]" sorted={sortKey === 'status' && sortDir} onSort={() => toggleSort('status')}>Status</SortableTh>
-                <th className="w-[130px]">Accelerator</th>
-                <th className="w-[120px] text-right" title="The last value the job reported on the ranking metric, which it is ranked by">Last metric</th>
-                <th className="w-[92px] text-right">Est. cost</th>
+                <SortableTh className="w-36" sorted={sortKey === 'status' && sortDir} onSort={() => toggleSort('status')}>Status</SortableTh>
+                <th className="w-32">Accelerator</th>
+                <th className="w-28 text-right" title="The last value the job reported on the ranking metric, which it is ranked by">Last metric</th>
+                <th className="w-24 text-right">Est. cost</th>
                 <th title="Under each hypothesis: the branch the job ran on, and the settings that differ between this page's jobs of it">Hypothesis · branch · varied settings</th>
-                <SortableTh className="w-[104px]" sorted={sortKey === 'created_at' && sortDir} onSort={() => toggleSort('created_at')}>Submitted</SortableTh>
+                <SortableTh className="w-28" sorted={sortKey === 'created_at' && sortDir} onSort={() => toggleSort('created_at')}>Submitted</SortableTh>
                 <th className="w-20"></th>
               </tr>
             </thead>
@@ -253,10 +250,10 @@ function JobsPageContent() {
                 const cost = j.estimated_cost_acch != null ? formatAccH(j.estimated_cost_acch) : null
                 return (
                   <LinkTr key={job.id} href={`/jobs/${job.id}`}>
-                    <td className={quiet}>{job.id.slice(0, 8)}…</td>
+                    <td className={quiet}>{shortId(job.id)}</td>
                     <td className="truncate text-xs" title={job.agent_id}>{job.agent_name}</td>
                     {!peFilter && (
-                      <td className="text-xs [overflow-wrap:anywhere]">
+                      <td className="break-words text-xs">
                         <TextLink href={`/platform-experiments/${j.platform_experiment_id}`} onClick={e => e.stopPropagation()}>
                           <PlatformExperimentName id={j.platform_experiment_id} />
                         </TextLink>
@@ -264,31 +261,28 @@ function JobsPageContent() {
                     )}
                     <td>
                       <Badge status={status} />
-                      {j.summary_due && <div className="mt-0.5"><NoSummary /></div>}
+                      {j.summary_due && <div><NoSummary /></div>}
                       {status === 'QUEUED' && j.not_admitted_reason && (
-                        <div className="mt-0.5 text-2xs text-muted">
+                        <Text as="div" variant="meta">
                           {notAdmittedLabel(j.not_admitted_reason, j.not_admitted_message)}
-                        </div>
+                        </Text>
                       )}
                       {j.eviction_reason && (
-                        <div className="mt-0.5 text-2xs text-muted"><JobReason reason={j.eviction_reason} /></div>
+                        <Text as="div" variant="meta"><JobReason reason={j.eviction_reason} /></Text>
                       )}
                       {j.capacity_tier === 'burst' && CANCELABLE.has(status) && (
-                        <div className="mt-0.5 text-2xs text-muted">Burst compute, can be preempted</div>
+                        <Text as="div" variant="meta">Burst compute, can be preempted</Text>
                       )}
                       {j.cluster_name && (
-                        <div className="mt-0.5 whitespace-nowrap font-mono text-2xs text-muted">
+                        <Text as="div" variant="meta" mono className="whitespace-nowrap">
                           {connectedByCluster.has(j.cluster_name) && (
-                            <>
-                              <span
-                                className={clsx('mr-1 inline-block h-1.5 w-1.5 rounded-full', connectedByCluster.get(j.cluster_name) ? 'bg-success' : 'bg-danger')}
-                                title={connectedByCluster.get(j.cluster_name) ? 'Cluster connected' : 'Cluster disconnected'}
-                              />
+                            <span title={connectedByCluster.get(j.cluster_name) ? 'Cluster connected' : 'Cluster disconnected'}>
+                              <Dot tone={connectedByCluster.get(j.cluster_name) ? 'success' : 'danger'} size="sm" className="mr-1" />
                               <span className="sr-only">{connectedByCluster.get(j.cluster_name) ? 'Connected: ' : 'Disconnected: '}</span>
-                            </>
+                            </span>
                           )}
                           {j.cluster_name}
-                        </div>
+                        </Text>
                       )}
                     </td>
                     <td className="truncate font-mono text-2xs" title={j.accelerator_type}>
@@ -296,17 +290,17 @@ function JobsPageContent() {
                     </td>
                     <td className={num}>
                       {j.metric ? j.metric.value.toFixed(4) : '—'}
-                      {j.metric && <div className="mt-0.5 truncate text-2xs text-muted" title={j.metric.name}>{j.metric.name}</div>}
+                      {j.metric && <Text as="div" variant="meta" className="truncate" title={j.metric.name}>{j.metric.name}</Text>}
                     </td>
                     <td className={clsx(num, 'whitespace-nowrap')}>
                       {cost != null ? `${cost} ${budgetUnit(kindOf(j.accelerator_type))}` : '—'}
                     </td>
                     <td className="truncate text-xs" title={j.hypothesis}>
                       <JobHypothesis job={j} />
-                      <div className="mt-0.5 whitespace-normal font-mono text-2xs text-muted">
+                      <Text as="div" variant="meta" mono className="whitespace-normal">
                         {j.branch && <><Branch branch={j.branch} codeRef={j.code_ref} platformExperimentID={j.platform_experiment_id} />{' '}</>}
                         {variedEnvSettings(j, variedByHypothesis)}
-                      </div>
+                      </Text>
                     </td>
                     <td className={quiet}>{relTime(j.created_at)}</td>
                     <td onClick={e => e.stopPropagation()}>
@@ -328,8 +322,7 @@ function JobsPageContent() {
             </tbody>
           </Table>
           <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
-        </CardContent>
-      </Card>
+      </Section>
 
       <ConfirmDialog
         open={confirming !== null}
@@ -341,6 +334,6 @@ function JobsPageContent() {
       >
         The job stops and the compute it holds is released.
       </ConfirmDialog>
-    </div>
+    </Page>
   )
 }

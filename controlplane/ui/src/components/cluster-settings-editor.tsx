@@ -6,7 +6,9 @@ import type { ClusterSettings, OrgCluster } from '@/types'
 import { Button } from '@/components/ui/button'
 import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'
+import { Inline, Stack } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
+import { Text } from '@/components/ui/text'
 
 type Field = keyof ClusterSettings
 
@@ -59,13 +61,13 @@ export function ClusterSettingsEditor({ orgID, cluster, onSaved }: { orgID: stri
   }
 
   return (
-    <form className="grid gap-1.5" onSubmit={save}>
+    <Stack as="form" gap="sm" onSubmit={save}>
       {overridden.length > 0 && (
-        <span className="font-mono text-xs text-muted">
+        <Text as="span" variant="code" tone="muted">
           {overridden.map(f => `${f.label}: ${cluster[f.key]}${f.unit}`).join(' · ')}
-        </span>
+        </Text>
       )}
-      <div className="flex flex-wrap items-end gap-2">
+      <Inline align="end">
         {fields.map(f => (
           <FormField key={f.key} label={f.label}>
             <Input
@@ -79,9 +81,9 @@ export function ClusterSettingsEditor({ orgID, cluster, onSaved }: { orgID: stri
           </FormField>
         ))}
         <Button size="sm" variant="primary" type="submit" loading={saving} disabled={fields.every(f => value(f.key).trim() === saved(f.key))}>Save</Button>
-      </div>
-      <span className="text-xs text-subtle">Leave a field empty to use the scheduler default.</span>
+      </Inline>
+      <Text as="span" variant="hint">Leave a field empty to use the scheduler default.</Text>
       {error && <InlineError>{error}</InlineError>}
-    </form>
+    </Stack>
   )
 }

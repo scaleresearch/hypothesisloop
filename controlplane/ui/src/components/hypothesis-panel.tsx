@@ -2,11 +2,15 @@
 
 import { TextLink } from '@/components/ui/link'
 import type { HypothesisGraph, HypothesisGraphNode, HypothesisLinkType, PlatformExperiment } from '@/types'
-import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
-import { Badge, Dot } from '@/components/ui/badge'
+import { Card, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 import { Button, RowButton } from '@/components/ui/button'
-import { Eyebrow } from '@/components/ui/text'
-import { EmptyState } from '@/components/ui/status-message'
+import { Dot } from '@/components/ui/dot'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Section } from '@/components/ui/section'
+import { Inline, Stack } from '@/components/ui/stack'
+import { Eyebrow, Text } from '@/components/ui/text'
+import { ClosedNote, useEditor } from '@/components/graph-edit'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { Actor, Verdict } from '@/components/actor'
 import { linkGroups } from '@/lib/hypothesis-graph'
@@ -29,36 +33,39 @@ export function ObjectiveBar({ graph, pe, onAddIdea }: {
   onAddIdea: (parentID: string) => void
 }) {
   const readOnly = useReadOnly()
+  const closed = useEditor()?.closed ?? false
   const { finding, best_job: bestJob } = graph.objective
   return (
     <Card>
-      <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-2">
-        <div className="flex flex-wrap items-baseline gap-3">
+      <CardContent>
+        <Stack gap="sm">
+        <Inline gap="md" align="baseline">
           <Eyebrow>Objective</Eyebrow>
           <span className="font-medium">{pe.name}</span>
-          <span className="text-xs text-muted">
+          <Text as="span" variant="note">
             {graph.nodes.length} hypotheses, {graph.nodes.filter(n => n.builds_on.includes(graph.root)).length} building directly on the objective
-          </span>
+          </Text>
           <span className="ml-auto flex items-center gap-3">
-            {!readOnly && <Button size="sm" variant="primary" onClick={() => onAddIdea(graph.root)}>+ Add idea under the objective</Button>}
+            {!readOnly ? <Button size="sm" variant="primary" onClick={() => onAddIdea(graph.root)}>+ Add idea under the objective</Button> : closed && <ClosedNote />}
             <TextLink href={`/platform-experiments/${graph.root}`} className="text-xs">Experiment →</TextLink>
           </span>
-        </div>
+        </Inline>
         {pe.description && <CollapsibleDescription text={pe.description} collapseLength={140} />}
         {bestJob && (
-          <div className="font-mono text-xs">
+          <Text as="div" variant="code">
             <span className="text-muted">Baseline job </span>
             <TextLink href={`/jobs/${bestJob.id}`}>{bestJob.metric.name} {bestJob.metric.value.toFixed(4)}</TextLink>
-          </div>
+          </Text>
         )}
         {finding && (
-          <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
+          <Stack gap="xs">
             <Eyebrow>
               Baseline finding · <TextLink href={`/jobs/${finding.experiment_id}`} className="font-mono normal-case">{finding.experiment_id}</TextLink>
             </Eyebrow>
             <CollapsibleDescription text={finding.summary} collapseLength={140} />
-          </div>
+          </Stack>
         )}
+        </Stack>
       </CardContent>
     </Card>
   )
@@ -66,18 +73,16 @@ export function ObjectiveBar({ graph, pe, onAddIdea }: {
 
 export function HypothesisPanel({ graph, nodeByID, selected, onSelect, onAddIdea }: HypothesisPanelProps) {
   const readOnly = useReadOnly()
+  const closed = useEditor()?.closed ?? false
   const node = nodeByID.get(selected)
   if (!node) {
     return (
-      <Card>
-        <CardHeader><CardTitle>Hypothesis</CardTitle></CardHeader>
-        <CardContent>
-          <EmptyState>
-            <span className="font-mono text-xs">{selected}</span> is not in this experiment&apos;s graph.{' '}
-            <Button variant="link" onClick={() => onSelect('')}>Show the objective</Button>
-          </EmptyState>
-        </CardContent>
-      </Card>
+      <Section title="Hypothesis">
+        <EmptyState>
+          <Text as="span" variant="code">{selected}</Text> is not in this experiment&apos;s graph.{' '}
+          <Button variant="link" onClick={() => onSelect('')}>Show the objective</Button>
+        </EmptyState>
+      </Section>
     )
   }
 
@@ -86,53 +91,49 @@ export function HypothesisPanel({ graph, nodeByID, selected, onSelect, onAddIdea
   const incoming = graph.edges.filter(e => e.to === node.id).map(e => ({ type: e.type, id: e.from }))
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Hypothesis</CardTitle>
-        <Badge status={node.status}>{node.status}</Badge>
-      </CardHeader>
-      <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-3">
-        <p className="max-h-60 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-relaxed">
+    <Section title="Hypothesis" actions={<Badge status={node.status}>{node.status}</Badge>}>
+      <Stack>
+        <Text pre className="max-h-60 overflow-y-auto leading-relaxed">
           {node.text}
-        </p>
-        <div className="text-2xs text-muted">
+        </Text>
+        <Text as="div" variant="meta">
           <Actor actor={node.actor} agentID={node.agent_id} /> · {relTime(node.created_at)}
           {node.status_changed_at && <> · <Verdict hypothesis={node} /></>}
-        </div>
-        <div className="font-mono text-2xs text-muted">
+        </Text>
+        <Text as="div" variant="meta" mono>
           {node.finding_count} findings · {node.comment_count} comments · built on by {node.child_count}
-        </div>
+        </Text>
         {bestJob && (
-          <div className="font-mono text-xs">
+          <Text as="div" variant="code">
             <span className="text-muted">Best job </span>
             <TextLink href={`/jobs/${bestJob.id}`}>{bestJob.metric.name} {bestJob.metric.value.toFixed(4)}</TextLink>
-          </div>
+          </Text>
         )}
         {finding && (
-          <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
+          <Stack gap="xs">
             <Eyebrow>
               Newest finding · <TextLink href={`/jobs/${finding.experiment_id}`} className="font-mono normal-case">{finding.experiment_id}</TextLink>
               {filedAfterVerdict(node, finding.created_at) && <span className="text-warning"> · filed after the verdict</span>}
             </Eyebrow>
-            <p className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-xs">
+            <Text variant="note" tone="default" pre className="max-h-40 overflow-y-auto">
               {finding.summary}
-            </p>
-          </div>
+            </Text>
+          </Stack>
         )}
         {linkGroups(out, incoming).map(group => (
-          <div key={group.label} className="grid grid-cols-[minmax(0,1fr)] gap-1">
+          <Stack gap="xs" key={group.label}>
             <Eyebrow>{group.label}</Eyebrow>
             {group.items.map(l => (
               <PanelLink key={`${l.type}:${l.id}`} id={l.id} type={l.type} graph={graph} nodeByID={nodeByID} onSelect={onSelect} />
             ))}
-          </div>
+          </Stack>
         ))}
-        <div className="flex flex-wrap items-center gap-3">
-          {!readOnly && <Button size="sm" variant="primary" onClick={() => onAddIdea(node.id)}>+ Add idea under this</Button>}
+        <Inline gap="md">
+          {!readOnly ? <Button size="sm" variant="primary" onClick={() => onAddIdea(node.id)}>+ Add idea under this</Button> : closed && <ClosedNote />}
           <TextLink href={`/hypotheses/${node.id}`} className="text-xs">Open detail →</TextLink>
-        </div>
-      </CardContent>
-    </Card>
+        </Inline>
+      </Stack>
+    </Section>
   )
 }
 

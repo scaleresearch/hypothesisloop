@@ -3,7 +3,7 @@
 import useSWR from 'swr'
 import { fetchExperimentMetrics } from '@/lib/api'
 import type { MetricDataPoint, PlatformExperiment } from '@/types'
-import { Link } from '@/components/ui/link'
+import { TextLink } from '@/components/ui/link'
 import { Callout } from '@/components/ui/status-message'
 
 /** The last raw value a job reported for each metric key. */
@@ -33,7 +33,7 @@ export function Baseline({ pe }: { pe: PlatformExperiment }) {
   const values = (pe.metrics ?? []).filter(m => reported?.has(m.key)).map(m => `${m.key} ${reported!.get(m.key)}`).join(', ')
   return (
     <Callout tone="info">
-      Baseline measured by <Link href={`/jobs/${job}`} className="text-accent hover:underline">job {job}</Link>{values && `: ${values}`}.
+      Baseline measured by <TextLink href={`/jobs/${job}`}>job {job}</TextLink>{values && `: ${values}`}.
     </Callout>
   )
 }

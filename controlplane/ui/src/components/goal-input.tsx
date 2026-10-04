@@ -10,12 +10,14 @@ import type { Draft } from '@/lib/planning'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/input'
 import { TextLink } from '@/components/ui/link'
+import { Inline } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
+import { Text } from '@/components/ui/text'
 import { useGitHub } from '@/components/connect-github-step'
 import { RepositorySelect, repositoryFields } from '@/components/repository-select'
 
 const CONNECT_FIRST = 'Connect GitHub in Settings to start'
-const ASK ='What do you want to find out?'
+const ASK = 'What do you want to find out?'
 
 // The rhythm of the examples typed in the empty box, in milliseconds.
 const FIRST = 1500
@@ -112,17 +114,17 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
           void plan()
         }}
       />
-      <div className="flex flex-wrap items-center gap-3 px-4 pb-4">
+      <Inline gap="md" className="px-4 pb-4">
         {github === 'connected' && (
-          <Field className="grid gap-1">
+          <Field>
             <Label className="sr-only">Repository</Label>
             <RepositorySelect compact value={repository} onChange={r => { setRepository(r); setNotCreated(null) }} notCreated={notCreated ?? undefined} />
           </Field>
         )}
         {github === 'unconnected' && (
-          <p className="px-2 text-xs text-muted">
+          <Text variant="note" className="px-2">
             <TextLink inline href={`/settings#${GITHUB_CARD}`}>Connect GitHub in Settings</TextLink> to start.
-          </p>
+          </Text>
         )}
         {error && <InlineError className="px-2">{error}</InlineError>}
         {/* A disabled button shows no tooltip in every browser, so the reason sits on its wrapper. */}
@@ -131,7 +133,7 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
             Plan it
           </Button>
         </span>
-      </div>
+      </Inline>
     </div>
   )
 }

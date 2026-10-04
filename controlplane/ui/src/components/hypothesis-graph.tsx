@@ -11,10 +11,12 @@ import { clsx } from 'clsx'
 import type { ReactNode } from 'react'
 import { FileText, MessageSquare } from 'lucide-react'
 import type { Evidence, HypothesisGraph, HypothesisGraphNode, HypothesisLinkType } from '@/types'
-import { hypothesisLinkStyles, hypothesisStatuses, semantic, statusColor, tint } from '@/lib/colors'
-import { Dot } from '@/components/ui/badge'
+import { chart, hypothesisLinkStyles, hypothesisStatuses, semantic, statusColor, tint } from '@/lib/colors'
+import { opacity as scale } from '@/lib/scale'
 import { Button } from '@/components/ui/button'
-import { Eyebrow } from '@/components/ui/text'
+import { Dot } from '@/components/ui/dot'
+import { Inline } from '@/components/ui/stack'
+import { Eyebrow, Text } from '@/components/ui/text'
 import { filedAfterVerdict } from '@/lib/hypothesis-progress'
 import { Actor, verdictBy } from '@/components/actor'
 import { IdeaEditor, NodeActions, useEditor } from '@/components/graph-edit'
@@ -30,7 +32,7 @@ const COUNT = 'inline-flex items-center gap-0.5'
 export function NodeMeta({ item }: { item: HypothesisGraphNode }) {
   const newer = item.finding !== undefined && filedAfterVerdict(item, item.finding.created_at)
   return (
-    <span className="inline-flex min-w-0 items-center gap-2 whitespace-nowrap font-mono text-2xs text-muted">
+    <Text as="span" variant="meta" mono className="inline-flex min-w-0 items-center gap-2 whitespace-nowrap">
       <Actor actor={item.actor} agentID={item.agent_id} compact />
       <span
         className={clsx(COUNT, newer && 'text-warning')}
@@ -44,14 +46,14 @@ export function NodeMeta({ item }: { item: HypothesisGraphNode }) {
           {item.best_job.metric.value.toFixed(4)}
         </span>
       )}
-    </span>
+    </Text>
   )
 }
 
 /** What the baseline found, on the objective its jobs hang on: shared by the graph's root node and the outline's root row. */
 export function ObjectiveMeta({ objective }: { objective: Evidence }) {
   return (
-    <span className="inline-flex items-center gap-2 whitespace-nowrap font-mono text-2xs text-muted">
+    <Text as="span" variant="meta" mono className="inline-flex items-center gap-2 whitespace-nowrap">
       {objective.finding && (
         <span className={COUNT} title={`Baseline finding: ${objective.finding.summary}`}><FileText size={11} aria-label="Baseline finding" /></span>
       )}
@@ -60,7 +62,7 @@ export function ObjectiveMeta({ objective }: { objective: Evidence }) {
           baseline {objective.best_job.metric.value.toFixed(4)}
         </span>
       )}
-    </span>
+    </Text>
   )
 }
 
@@ -82,9 +84,10 @@ function pickClass(pickable: Set<string> | null, id: string) {
 
 const HANDLE = 'pointer-events-none opacity-0'
 
+const NODE = 'flex cursor-pointer flex-col gap-1.5 rounded border border-l-3 py-2 pl-3 pr-2.5 text-foreground transition hover:bg-surface-raised'
 // The box is NODE_WIDTH by NODE_HEIGHT: the layout places nodes by those.
-const NODE = 'flex h-[92px] w-[240px] cursor-pointer flex-col gap-1.5 rounded border border-l-[3px] py-2 pl-3 pr-2.5 text-foreground transition-[opacity,box-shadow,background-color] hover:bg-surface-raised'
-const NODE_TEXT = 'line-clamp-3 text-xs leading-snug [overflow-wrap:anywhere]'
+const NODE_BOX = { width: NODE_WIDTH, height: NODE_HEIGHT }
+const NODE_TEXT = 'line-clamp-3 break-words text-xs leading-snug'
 
 function HiddenHandles() {
   return (
@@ -111,7 +114,7 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
         dimmed.has(item.id) && 'opacity-dimmed',
         pickClass(pickable, item.id),
       )}
-      style={{ borderLeftColor: color }}
+      style={{ ...NODE_BOX, borderLeftColor: color }}
       title={item.text}
     >
       <HiddenHandles />
@@ -127,7 +130,7 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
 const ObjectiveNode = memo(function ObjectiveNode({ id, data }: NodeProps<Node<ObjectiveNodeData>>) {
   const { selected, pickable } = useContext(Highlight)
   return (
-    <div className={clsx(NODE, 'justify-center border-primary', selected === id ? 'bg-surface-raised shadow-md ring-1 ring-accent' : 'bg-surface-inset', pickClass(pickable, id))}>
+    <div className={clsx(NODE, 'justify-center border-primary', selected === id ? 'bg-surface-raised shadow-md ring-1 ring-accent' : 'bg-surface-inset', pickClass(pickable, id))} style={NODE_BOX}>
       <HiddenHandles />
       <div className="flex items-center justify-between gap-2">
         <Eyebrow>Objective</Eyebrow>
@@ -142,7 +145,7 @@ const nodeTypes: NodeTypes = { hypothesis: HypothesisNode, objective: ObjectiveN
 
 function Legend({ onTidy }: { onTidy?: () => void }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-1.5 text-2xs text-muted">
+    <Inline gap="md" className="border-b px-3 py-1.5 text-2xs text-muted">
       {(Object.keys(hypothesisLinkStyles) as Array<keyof typeof hypothesisLinkStyles>).map(type => {
         const s = hypothesisLinkStyles[type]
         return (
@@ -165,7 +168,7 @@ function Legend({ onTidy }: { onTidy?: () => void }) {
           Tidy layout
         </Button>
       )}
-    </div>
+    </Inline>
   )
 }
 
@@ -256,7 +259,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
     return graph.edges.filter(e => positions.has(e.from) && positions.has(e.to)).map(e => {
     const s = hypothesisLinkStyles[e.type]
     const hierarchy = e.type === 'builds_on'
-    const opacity = dimmed.has(e.from) || dimmed.has(e.to) ? 0.15 : 1
+    const opacity = dimmed.has(e.from) || dimmed.has(e.to) ? scale.dimmed : 1
     // builds_on points from child to parent and is drawn parent to child, so the tree reads top
     // down. A cross link has no direction to show and is drawn from its upper end.
     const [source, target] = positions.get(e.from)!.y > positions.get(e.to)!.y ? [e.to, e.from] : [e.from, e.to]
@@ -285,7 +288,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
       pathOptions: hierarchy ? undefined : { stepPosition: 1, offset: e.type === 'related' ? 12 : 20 },
       label: hierarchy && !further ? undefined : s.label,
       zIndex: hierarchy && !further ? 0 : 1,
-      labelStyle: { fill: s.text, fontSize: 10, fontWeight: 600, opacity },
+      labelStyle: { ...chart.label, fill: s.text, opacity },
       labelBgStyle: { fill: semantic.surface },
       labelBgPadding: [4, 2] as [number, number],
       style: {

@@ -9,11 +9,15 @@ import { fetchHypothesisGraph, fetchPlatformExperiment, fetchPlatformExperiments
 import type { HypothesisSearchHit } from '@/lib/api'
 import { PlatformExperimentStatus } from '@/types'
 import type { HypothesisGraph, PlatformExperiment } from '@/types'
-import { PageHeader } from '@/components/ui/page-header'
-import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
+import { Page } from '@/components/ui/page'
+import { Card } from '@/components/ui/card'
 import { Button, Chip } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
 import { FormField } from '@/components/ui/form-field'
-import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
+import { Section } from '@/components/ui/section'
+import { Inline, Stack } from '@/components/ui/stack'
+import { Text } from '@/components/ui/text'
+import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
 import { AgentNames, useAgentName } from '@/components/agent-label'
@@ -117,33 +121,34 @@ function HypothesesPageContent() {
   }
 
   // Nothing is added to a graph whose experiment has not been read yet, nor to a closed one.
-  const readOnly = pe ? isReadOnly(me, pe) || pe.status === PlatformExperimentStatus.CLOSED : true
+  const closed = pe?.status === PlatformExperimentStatus.CLOSED
+  const readOnly = pe ? isReadOnly(me, pe) || closed : true
 
   const page = (
     <ReadOnlyProvider value={readOnly}>
-    <div className="flex min-h-[calc(100vh-56px)] flex-col">
-      <PageHeader
-        title="Hypotheses"
-        description="Each experiment grows a graph of research claims. Every hypothesis builds on the experiment's objective or on earlier hypotheses, and may contradict or relate to others."
-      />
-
-      <div className="mb-2.5 flex flex-wrap items-center gap-2.5">
+    <Page
+      fill
+      title="Hypotheses"
+      description="Each experiment grows a graph of research claims. Every hypothesis builds on the experiment's objective or on earlier hypotheses, and may contradict or relate to others."
+    >
+      <Stack>
+      <Inline gap="md">
         <FormField inline label="Experiment">
           <PlatformExperimentSelect
             value={peID}
             onChange={selectExperiment}
             hideAllOption
             placeholder="Select an experiment"
-            className="min-w-[260px]"
+            className="min-w-64"
           />
         </FormField>
-        <div className="ml-auto flex gap-1.5" role="group" aria-label="View">
+        <Inline gap="xs" nowrap className="ml-auto" role="group" aria-label="View">
           <Chip active={view === 'graph'} onClick={() => setView('graph')}>Graph</Chip>
           <Chip active={view === 'outline'} onClick={() => setView('outline')}>Outline</Chip>
-        </div>
-      </div>
+        </Inline>
+      </Inline>
 
-      <div className="mb-3 flex flex-wrap items-center gap-2.5">
+      <Inline gap="md">
         <SearchBox key={peID} initial={q} placeholder="Search hypotheses by text" onSearch={setQ} />
         <FormField inline label="Status" className="ml-2">
           <SearchableSelect
@@ -157,9 +162,10 @@ function HypothesesPageContent() {
           <OwnerFilter graph={graph} value={ownerFilter} onChange={setOwnerFilter} />
         </FormField>
         {filtering && graph && (
-          <span className="text-xs text-subtle">{matching} of {graph.nodes.length} match</span>
+          <Text as="span" variant="hint">{matching} of {graph.nodes.length} match</Text>
         )}
-      </div>
+      </Inline>
+      </Stack>
 
       {peError && <ErrorMessage>Could not load the experiments of {project.name}: {peError.message}</ErrorMessage>}
       {platformExperiments && platformExperiments.length === 0 && (
@@ -176,6 +182,7 @@ function HypothesesPageContent() {
           pe={pe}
           mutate={mutate}
           canWrite={!readOnly}
+          closed={closed}
           view={view}
           q={q}
           setQ={setQ}
@@ -183,18 +190,19 @@ function HypothesesPageContent() {
           filters={filters}
         />
       )}
-    </div>
+    </Page>
     </ReadOnlyProvider>
   )
   // The names of an experiment's agents are read once there is an experiment to read them of.
   return peID ? <AgentNames platformExperimentID={peID}>{page}</AgentNames> : page
 }
 
-function Workspace({ graph, pe, mutate, canWrite, view, q, setQ, search, filters }: {
+function Workspace({ graph, pe, mutate, canWrite, closed, view, q, setQ, search, filters }: {
   graph: HypothesisGraph
   pe: PlatformExperiment
   mutate: KeyedMutator<HypothesisGraph>
   canWrite: boolean
+  closed: boolean
   view: string
   q: string
   setQ: (q: string) => void
@@ -203,7 +211,7 @@ function Workspace({ graph, pe, mutate, canWrite, view, q, setQ, search, filters
 }) {
   const [focus, setFocus] = useQueryParam('focus')
   const layout = useStableLayout(graph)
-  const editor = useGraphEditor({ graph, rootLabel: pe.name, canWrite, mutate, onSelect: setFocus })
+  const editor = useGraphEditor({ graph, rootLabel: pe.name, canWrite, closed, mutate, onSelect: setFocus })
   const nodeByID = useMemo(() => new Map(graph.nodes.map(n => [n.id, n])), [graph])
   const hits = useMemo(() => new Set((search.data ?? []).map(h => h.id)), [search.data])
 
@@ -213,13 +221,13 @@ function Workspace({ graph, pe, mutate, canWrite, view, q, setQ, search, filters
   return (
     <GraphEditorProvider value={editor}>
       <ObjectiveBar graph={graph} pe={pe} onAddIdea={editor.startAdding} />
-      <div className={clsx('grid min-h-[420px] flex-[1_0_0] grid-rows-[minmax(0,1fr)] gap-4', showSide ? 'grid-cols-[minmax(0,1fr)_340px]' : 'grid-cols-[minmax(0,1fr)]')}>
-        <div className="flex flex-col overflow-hidden rounded-lg border bg-surface">
+      <div className={clsx('grid min-h-canvas flex-fill grid-rows-1 gap-4', showSide ? 'grid-cols-with-aside' : 'grid-cols-1')}>
+        <Card className="flex flex-col">
           <LinkBar />
           {view === 'outline' ? (
             <>
               {graph.nodes.length === 0 && (
-                <p className="px-3 pt-2.5 text-xs text-muted">No hypotheses yet. Agents place each idea under the objective or an earlier one.</p>
+                <Text variant="note" className="px-3 pt-2.5">No hypotheses yet. Agents place each idea under the objective or an earlier one.</Text>
               )}
               <HypothesisOutline
                 graph={graph}
@@ -244,18 +252,12 @@ function Workspace({ graph, pe, mutate, canWrite, view, q, setQ, search, filters
               onTidy={layout.extended ? layout.tidy : undefined}
             />
           )}
-        </div>
-        {showSide && <aside className="overflow-y-auto">
+        </Card>
+        {showSide && <Stack as="aside" gap="xl" className="overflow-y-auto">
           {q && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Search results</CardTitle>
-                <Button variant="link" size="sm" className="ml-auto" onClick={() => setQ('')}>Clear</Button>
-              </CardHeader>
-              <CardContent>
-                <SearchHits hits={search.data} onPick={h => setFocus(h.id)} isLoading={search.isLoading} error={search.error} />
-              </CardContent>
-            </Card>
+            <Section title="Search results" actions={<Button variant="link" size="sm" onClick={() => setQ('')}>Clear</Button>}>
+              <SearchHits hits={search.data} onPick={h => setFocus(h.id)} isLoading={search.isLoading} error={search.error} />
+            </Section>
           )}
           {selected !== graph.root && (
             <HypothesisPanel
@@ -266,7 +268,7 @@ function Workspace({ graph, pe, mutate, canWrite, view, q, setQ, search, filters
               onAddIdea={editor.startAdding}
             />
           )}
-        </aside>}
+        </Stack>}
       </div>
     </GraphEditorProvider>
   )

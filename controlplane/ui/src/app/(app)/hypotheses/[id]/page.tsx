@@ -8,15 +8,18 @@ import { useProjectRouter } from '@/lib/query-state'
 import { ReadOnlyProvider, useExperimentAccess, useRecordScope } from '@/lib/read-only'
 import { fetchHypothesis } from '@/lib/api'
 import type { PlatformExperiment, HypothesisLink } from '@/types'
-import { Card, CardHeader, CardContent, CardTitle, InsetCard, RowLink } from '@/components/ui/card'
+import { InsetCard, RowLink } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { CopyButton } from '@/components/ui/copy-button'
-import { PageHeader } from '@/components/ui/page-header'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Page } from '@/components/ui/page'
+import { Section } from '@/components/ui/section'
+import { Inline, Stack } from '@/components/ui/stack'
 import { LinkTr, Table, num, quiet } from '@/components/ui/table'
-import { Eyebrow } from '@/components/ui/text'
+import { Code, Eyebrow, Text } from '@/components/ui/text'
 import { Badge, NoSummary } from '@/components/ui/badge'
-import { Loading, EmptyState, InlineError } from '@/components/ui/status-message'
-import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
+import { Loading, InlineError } from '@/components/ui/status-message'
+import { acceleratorLabel, formatAccH, relTime, shortId } from '@/lib/format'
 import { budgetUnit, kindOf } from '@/lib/units'
 import { AddCommentForm, AddLinkForm } from '@/components/human-idea'
 import { Actor, Verdict } from '@/components/actor'
@@ -42,9 +45,9 @@ function LinkRow({ link, platformExperimentID, pe }: {
     <RowLink href={`/hypotheses/${link.hypothesis_id}`} title={link.text}>
       <Badge status={link.status}>{link.status}</Badge>
       <span className="min-w-0 flex-1 truncate">{link.text}</span>
-      <span className="whitespace-nowrap text-2xs text-subtle">
+      <Text as="span" variant="meta" tone="subtle" className="whitespace-nowrap">
         linked by <Actor actor={link.actor} agentID={link.agent_id} />
-      </span>
+      </Text>
     </RowLink>
   )
 }
@@ -58,7 +61,7 @@ function HypothesisText({ text }: { text: string }) {
   const long = text.length > LONG_TEXT
   return (
     <span className="min-w-0">
-      <span className={clsx('block whitespace-pre-wrap text-lg font-medium leading-snug', long && !open && 'line-clamp-3')}>{text}</span>
+      <span className={clsx('block whitespace-pre-wrap text-lg leading-snug', long && !open && 'line-clamp-3')}>{text}</span>
       {long && <Button variant="link" size="sm" onClick={() => setOpen(!open)}>{open ? 'Show less' : 'Show all of it'}</Button>}
     </span>
   )
@@ -75,11 +78,10 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
   useRecordScope(pe?.project_id)
 
   if (error) return (
-    <div>
-      <PageHeader title="Hypothesis" />
+    <Page title="Hypothesis">
       <p><InlineError>Could not load hypothesis {id}: {error.message}</InlineError></p>
       <TextLink href="/hypotheses" className="text-sm">← Hypothesis graph</TextLink>
-    </div>
+    </Page>
   )
 
   if (!data) return <Loading />
@@ -97,8 +99,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
   return (
     <ReadOnlyProvider value={access.readOnly}>
     <AgentNames platformExperimentID={data.platform_experiment_id}>
-    <div>
-      <PageHeader
+    <Page
         back={{
           label: pe?.name ?? data.platform_experiment_id.slice(0, 12) + '…',
           onClick: () => router.push(`/platform-experiments/${data.platform_experiment_id}`),
@@ -110,7 +111,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
           </>
         }
         description={
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs">
+          <Inline className="text-2xs">
             <span>
               Registered by <Actor actor={data.actor} agentID={data.agent_id} /> · {relTime(data.created_at)}
               {data.status_changed_at && <> · <Verdict hypothesis={data} /></>}
@@ -118,23 +119,20 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                 <span className="text-warning"> · {sinceVerdict} {sinceVerdict === 1 ? 'finding' : 'findings'} filed since</span>
               )}
             </span>
-            <span className="font-mono">· {data.id}</span>
+            <Code>· {data.id}</Code>
             <CopyButton value={data.id} />
-          </span>
+          </Inline>
         }
         actions={
           <TextLink href={graphHref(data.platform_experiment_id, data.id)} className="text-xs">
             View in graph →
           </TextLink>
         }
-      />
-
-      <Card>
-        <CardHeader><CardTitle>Links</CardTitle></CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-[minmax(0,1fr)] max-w-[760px] gap-3">
+    >
+      <Section title="Links">
+          <Stack className="max-w-3xl">
             {linkGroups(data.links.out, data.links.in).map(group => (
-              <div key={group.label} className="grid grid-cols-[minmax(0,1fr)] gap-0.5">
+              <Stack key={group.label} gap="2xs">
                 <Eyebrow>{group.label}</Eyebrow>
                 {group.items.map(l => (
                   <LinkRow
@@ -144,18 +142,13 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                     pe={pe}
                   />
                 ))}
-              </div>
+              </Stack>
             ))}
-          </div>
+          </Stack>
           <AddLinkForm hypothesis={data} onAdded={() => mutate()} />
-        </CardContent>
-      </Card>
+      </Section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle note={data.base_ref && <>a new one starts from <span className="font-mono"><Commit codeRef={data.base_ref} /></span></>}>Implementations</CardTitle>
-        </CardHeader>
-        <CardContent scrollX>
+      <Section title="Implementations" note={data.base_ref && <>a new one starts from <Code><Commit codeRef={data.base_ref} /></Code></>} scrollX>
           {data.implementations.length === 0 ? (
             <EmptyState>No agent has run this hypothesis yet. Each one that does works on a branch of its own.</EmptyState>
           ) : (
@@ -178,75 +171,60 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
               </tbody>
             </Table>
           )}
-        </CardContent>
-      </Card>
+      </Section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle note={data.finding_count > 0 && `${data.finding_count}${data.finding_count > findings.length ? `, showing ${findings.length}` : ''}`}>Findings</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <Section title="Findings" note={data.finding_count > 0 && `${data.finding_count}${data.finding_count > findings.length ? `, showing ${findings.length}` : ''}`}>
           {findings.length === 0 ? (
             <EmptyState>
               No findings yet. An agent files one as the summary of a job that tested this hypothesis, once the job
               has ended.
             </EmptyState>
           ) : (
-            <div className="grid gap-2.5">
+            <Stack>
               {findings.map(f => {
                 const job = jobByID.get(f.experiment_id)
                 return (
                   <InsetCard key={f.id}>
-                    <div className="mb-1.5 flex items-center justify-between text-2xs">
+                    <div className="flex items-center justify-between text-2xs">
                       <span className="flex items-center gap-2 font-mono">
                         <span className="font-medium"><Actor actor={f.actor} agentID={f.agent_id} /></span>
-                        <TextLink href={`/jobs/${f.experiment_id}`}>{f.experiment_id.slice(0, 8)}…</TextLink>
+                        <TextLink href={`/jobs/${f.experiment_id}`}>{shortId(f.experiment_id)}</TextLink>
                         {job && <Badge status={job.status}>{job.status}</Badge>}
                         {job?.metric && <span title={`The last ${job.metric.name} this job reported`}>{job.metric.value.toFixed(4)}</span>}
                       </span>
-                      <span className="font-mono text-subtle">
+                      <Code className="text-subtle">
                         {filedAfterVerdict(data, f.created_at) && <span className="text-warning">after the verdict · </span>}
                         {relTime(f.created_at)}
-                      </span>
+                      </Code>
                     </div>
-                    <p className="whitespace-pre-wrap text-sm">{f.summary}</p>
+                    <Text pre>{f.summary}</Text>
                   </InsetCard>
                 )
               })}
-            </div>
+            </Stack>
           )}
-        </CardContent>
-      </Card>
+      </Section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle note={data.comment_count > 0 && `${data.comment_count}${data.comment_count > comments.length ? `, showing ${comments.length}` : ''}`}>Comments</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <Section title="Comments" note={data.comment_count > 0 && `${data.comment_count}${data.comment_count > comments.length ? `, showing ${comments.length}` : ''}`}>
           {comments.length === 0 ? (
             <EmptyState>No comments yet. A note here needs no job behind it.</EmptyState>
           ) : (
-            <div className="grid gap-2.5">
+            <Stack>
               {comments.map(c => (
                 <InsetCard key={c.id}>
-                  <div className="mb-1.5 flex items-center justify-between text-2xs">
+                  <div className="flex items-center justify-between text-2xs">
                     <Actor actor={c.actor} agentID={c.agent_id} />
-                    <span className="font-mono text-subtle">{relTime(c.created_at)}</span>
+                    <Code className="text-subtle">{relTime(c.created_at)}</Code>
                   </div>
-                  <p className="whitespace-pre-wrap text-sm">{c.text}</p>
+                  <Text pre>{c.text}</Text>
                 </InsetCard>
               ))}
-            </div>
+            </Stack>
           )}
           <AddCommentForm hypothesisID={data.id} onAdded={() => mutate()} />
-        </CardContent>
-      </Card>
+      </Section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle note={data.job_count > 0 && `${data.job_count}${data.job_count > jobs.length ? `, showing ${jobs.length}` : ''}`}>Jobs testing this hypothesis</CardTitle>
-        </CardHeader>
-        <CardContent scrollX>
+      <Section title="Jobs testing this hypothesis" note={data.job_count > 0 && `${data.job_count}${data.job_count > jobs.length ? `, showing ${jobs.length}` : ''}`} scrollX>
           <Table>
             <thead>
               <tr>
@@ -273,7 +251,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                 const cost = j.estimated_cost_acch != null ? formatAccH(j.estimated_cost_acch) : null
                 return (
                   <LinkTr key={job.id} href={`/jobs/${job.id}`}>
-                    <td className={quiet}>{job.id.slice(0, 8)}…</td>
+                    <td className={quiet}>{shortId(job.id)}</td>
                     <td className="text-xs" title={job.agent_id}>{job.agent_name}</td>
                     <td className="whitespace-nowrap">
                       <Badge status={status}>{status}</Badge>
@@ -295,9 +273,8 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
               })}
             </tbody>
           </Table>
-        </CardContent>
-      </Card>
-    </div>
+      </Section>
+    </Page>
     </AgentNames>
     </ReadOnlyProvider>
   )

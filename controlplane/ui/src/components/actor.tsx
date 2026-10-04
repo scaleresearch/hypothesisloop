@@ -4,6 +4,7 @@ import { clsx } from 'clsx'
 import type { Actor as ActorRecord } from '@/types'
 import { relTime } from '@/lib/format'
 import { Badge } from '@/components/ui/badge'
+import { Text } from '@/components/ui/text'
 import { useAgentName } from '@/components/agent-label'
 
 const UNVERIFIED = 'Written before the platform kept who wrote a record. The name is the one stated then, and no account stands behind it.'
@@ -61,7 +62,7 @@ function Credential({ actor }: { actor: ActorRecord }) {
     case 'unverified':
       return <>{actor.name && <span>{actor.name}</span>}<Badge tone="neutral" title={UNVERIFIED}>unverified</Badge></>
     case 'agent':
-      return <span className="font-mono text-xs" title={actor.id}>{actor.name}</span>
+      return <Text as="span" variant="code" title={actor.id}>{actor.name}</Text>
   }
 }
 
@@ -74,9 +75,9 @@ export function Actor({ actor, agentID = '', compact = false, self = false }: { 
   const agentName = useAgentName()(agentID)
   if (compact) {
     const label = actorLabel(actor, agentID, agentName)
-    return <span className={clsx('max-w-[110px] truncate', !agentID && 'text-warning')} title={label}>{label}</span>
+    return <span className={clsx('max-w-28 truncate', !agentID && 'text-warning')} title={label}>{label}</span>
   }
-  const agent = agentID && <span className="font-mono text-xs" title={agentName === agentID ? undefined : agentID}>{agentName}</span>
+  const agent = agentID && <Text as="span" variant="code" title={agentName === agentID ? undefined : agentID}>{agentName}</Text>
   if (ownersOwn(actor, agentID)) return agent
   return (
     <span className="inline-flex items-center gap-1.5">
@@ -91,7 +92,7 @@ export function Actor({ actor, agentID = '', compact = false, self = false }: { 
 export function Person({ id, name, self }: { id: string; name: string; self: boolean }) {
   return (
     <span className="inline-flex items-center gap-2">
-      {name ? <span className="text-xs" title={id}>{name}</span> : <span className="font-mono text-xs">{id}</span>}
+      {name ? <span className="text-xs" title={id}>{name}</span> : <Text as="span" variant="code">{id}</Text>}
       {self && <Badge tone="accent">you</Badge>}
     </span>
   )

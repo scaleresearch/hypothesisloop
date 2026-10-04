@@ -10,12 +10,16 @@ import type { Draft, Proposal, ProposedAgent } from '@/lib/planning'
 import { budgetUnit, kindOf } from '@/lib/units'
 import type { MetricDefinition } from '@/types'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Captioned } from '@/components/ui/captioned'
+import { InsetCard } from '@/components/ui/card'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
+import { Facts } from '@/components/ui/facts'
 import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'
+import { Section } from '@/components/ui/section'
+import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, InlineError } from '@/components/ui/status-message'
-import { Eyebrow, Pill } from '@/components/ui/text'
+import { Code, Pill, Text } from '@/components/ui/text'
 
 function metricLine(metric: MetricDefinition): string {
   if (metric.role === 'constraint') {
@@ -24,24 +28,17 @@ function metricLine(metric: MetricDefinition): string {
   return `${metric.key}, ${metric.direction === 'minimize' ? 'lower is better' : 'higher is better'}`
 }
 
+const BULLETS = 'list-disc pl-5 text-sm'
+
+/** A captioned list of the planner's sentences; nothing when it said none. */
 function Sentences({ title, items }: { title: string; items?: string[] }) {
   if (!items || items.length === 0) return null
   return (
-    <div>
-      <Eyebrow className="mb-1 block">{title}</Eyebrow>
-      <ul className="list-disc pl-5 text-sm">
+    <Captioned caption={title}>
+      <ul className={BULLETS}>
         {items.map(item => <li key={item}>{item}</li>)}
       </ul>
-    </div>
-  )
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div>
-      <Eyebrow className="mb-1 block">{title}</Eyebrow>
-      {children}
-    </div>
+    </Captioned>
   )
 }
 
@@ -60,14 +57,14 @@ function runsOn(proposal: Proposal): [string, string][] {
 function Researcher({ n, agent }: { n: number; agent: ProposedAgent }) {
   const direction = agent.hyperparameters?.direction
   return (
-    <li className="rounded border bg-surface-inset px-3 py-2">
-      <div className="flex flex-wrap items-baseline gap-x-2.5 text-xs">
+    <InsetCard as="li" gap="xs">
+      <Inline gap="md" align="baseline" className="text-xs">
         <span className="font-medium">Researcher {n}</span>
-        <span className="text-muted">specialization <span className="font-mono text-foreground">{agent.flavor ?? 'generalist'}</span></span>
-        <span className="text-muted">model <span className="font-mono text-foreground">{agent.model ?? 'the platform\'s default'}</span></span>
-      </div>
-      <p className="mt-1 whitespace-pre-wrap text-sm">{direction ?? 'No direction of its own: it works from the brief.'}</p>
-    </li>
+        <span className="text-muted">specialization <Code className="text-foreground">{agent.flavor ?? 'generalist'}</Code></span>
+        <span className="text-muted">model <Code className="text-foreground">{agent.model ?? 'the platform\'s default'}</Code></span>
+      </Inline>
+      <Text pre>{direction ?? 'No direction of its own: it works from the brief.'}</Text>
+    </InsetCard>
   )
 }
 
@@ -125,11 +122,11 @@ export function ProposalForm({ draft, proposal, editable, arrived, onDone, child
   return (
     // Any sign of a person at work in here ends the countdown: they are deciding for themselves.
     <div onFocus={auto.stop} onKeyDown={auto.stop} onPointerDown={auto.stop} onPointerMove={auto.stop} onWheel={auto.stop}>
-    <Card>
-      <CardHeader><CardTitle>Proposed experiment</CardTitle></CardHeader>
-      <CardContent className="grid gap-4">
+    <Stack gap="xl">
+    <Section title="Proposed experiment">
+      <Stack gap="lg">
         {auto.secondsLeft !== null && (
-          <Callout tone="accent" className="mb-0 flex flex-wrap items-center justify-between gap-3">
+          <Callout tone="accent" className="flex flex-wrap items-center justify-between gap-3">
             <span>
               <span role="timer" className="font-medium">Starting in {auto.secondsLeft} s</span> as proposed. Touch anything here to decide yourself.
             </span>
@@ -140,41 +137,36 @@ export function ProposalForm({ draft, proposal, editable, arrived, onDone, child
         <FormField label="Name" error={nameError}>
           <Input value={name} disabled={!editable} onChange={e => setName(e.target.value)} />
         </FormField>
-        <Section title="What is measured">
-          <ul className="mb-2 grid gap-1.5">
+        <Captioned caption="What is measured">
+          <Stack as="ul" gap="xs" className="mb-2">
             {metrics.map(metric => (
-              <li key={metric.key} className="flex flex-wrap items-baseline gap-2">
+              <Inline as="li" align="baseline" key={metric.key}>
                 <Pill tone={metric.role === 'constraint' ? 'warning' : 'success'} active={metric.role !== 'constraint' && metric.role !== 'attribute'}>
                   {metricLine(metric)}
                 </Pill>
-                {metric.description && <span className="text-xs text-muted">{metric.description}</span>}
-              </li>
+                {metric.description && <Text as="span" variant="note">{metric.description}</Text>}
+              </Inline>
             ))}
-          </ul>
-          <p className="text-sm">{proposal.metric_reason}</p>
-        </Section>
-        <Section title="How it is measured">
-          <p className="text-sm">{proposal.measurement}</p>
-          <dl className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs">
-            {runsOn(proposal).map(([label, value]) => (
-              <div key={label} className="flex items-baseline gap-1.5">
-                <dt className="text-muted">{label}</dt>
-                <dd className="font-mono">{value}</dd>
-              </div>
-            ))}
-          </dl>
-          <p className="mt-1 text-xs text-muted">
-            Nothing has run yet. Once you accept, the baseline is measured on {acceleratorLabel(proposal.accelerator_type)} before any researcher starts.
-          </p>
-        </Section>
-        <Section title="Researchers">
+          </Stack>
+          <Text>{proposal.metric_reason}</Text>
+        </Captioned>
+        <Captioned caption="How it is measured">
+          <Stack gap="sm">
+            <Text>{proposal.measurement}</Text>
+            <Facts facts={runsOn(proposal)} />
+            <Text variant="note">
+              Nothing has run yet. Once you accept, the baseline is measured on {acceleratorLabel(proposal.accelerator_type)} before any researcher starts.
+            </Text>
+          </Stack>
+        </Captioned>
+        <Captioned caption="Researchers">
           <ol className="grid gap-1.5">
             {agents.map((agent, i) => <Researcher key={i} n={i + 1} agent={agent} />)}
           </ol>
-        </Section>
+        </Captioned>
         {(!!stages?.length || !!reportEvery) && (
-          <Section title="Rules of the run">
-            <ul className="list-disc pl-5 text-sm">
+          <Captioned caption="Rules of the run">
+            <ul className={BULLETS}>
               {stages?.map((stage, i) => (
                 <li key={i}>
                   Stage {i + 1}: {stage.length_pct}% of the run
@@ -184,38 +176,39 @@ export function ProposalForm({ draft, proposal, editable, arrived, onDone, child
               ))}
               {!!reportEvery && <li>Every job reports its metrics every {reportEvery} s</li>}
             </ul>
-          </Section>
+          </Captioned>
         )}
         {proposal.sizing_reason && (
-          <Section title="Why this size">
-            <p className="text-sm">{proposal.sizing_reason}</p>
-          </Section>
+          <Captioned caption="Why this size">
+            <Text>{proposal.sizing_reason}</Text>
+          </Captioned>
         )}
-        <Section title="What it may spend">
-          <p className="mb-2 text-sm text-muted">
+        <Captioned caption="What it may spend">
+          <Text tone="muted" className="mb-2">
             These three are yours to state. The planner proposed {formatAccH(proposal.budget_accelerator_hours)} {unit} over {proposal.duration_hours} hours
             for {proposal.agents.length} {proposal.agents.length === 1 ? 'researcher' : 'researchers'}; the figures are an estimate, since nothing has run, and the budget is a cap on everything the run spends, the baseline and burst hours included.
-          </p>
+          </Text>
           <div className="grid gap-3 sm:grid-cols-3">
             <FormField label={`Budget (${unit})`}><Input type="number" min={0} step="any" value={budget} disabled={!editable} onChange={e => setBudget(e.target.value)} /></FormField>
             <FormField label="Duration (hours)"><Input type="number" min={0} step="any" value={hours} disabled={!editable} onChange={e => setHours(e.target.value)} /></FormField>
             <FormField label="Researchers"><Input type="number" min={1} step={1} value={researchers} disabled={!editable} onChange={e => setResearchers(e.target.value)} /></FormField>
           </div>
-        </Section>
+        </Captioned>
         <Sentences title="What could mislead" items={proposal.risks} />
         <Sentences title="Left out on purpose" items={proposal.out_of_scope} />
-        <Section title="The brief every researcher works from">
+        <Captioned caption="The brief every researcher works from">
           <CollapsibleDescription text={proposal.experiment.description} />
-        </Section>
+        </Captioned>
         {editable && (
-          <div className="flex items-center gap-3">
+          <Inline gap="md">
             <Button variant="primary" loading={sending} disabled={!valid} onClick={accept}>Accept and run</Button>
             {error && <InlineError>{error}</InlineError>}
-          </div>
+          </Inline>
         )}
-      </CardContent>
-    </Card>
+      </Stack>
+    </Section>
     {children}
+    </Stack>
     </div>
   )
 }

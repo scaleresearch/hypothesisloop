@@ -11,11 +11,13 @@ import { actorLabel } from '@/components/actor'
 import { PhaseStrip } from '@/components/phase-strip'
 import { ProposalForm } from '@/components/proposal-form'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { FormField } from '@/components/ui/form-field'
 import { Textarea } from '@/components/ui/input'
-import { PageHeader } from '@/components/ui/page-header'
+import { Page } from '@/components/ui/page'
+import { Section } from '@/components/ui/section'
+import { Inline, Stack } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
+import { Text } from '@/components/ui/text'
 
 const said = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
@@ -40,9 +42,8 @@ function Revise({ draft, declined, onDone }: { draft: Draft; declined: boolean; 
   }
 
   return (
-    <Card>
-      <CardHeader>{declined ? 'Answer the planner' : 'Ask for a change'}</CardHeader>
-      <CardContent className="grid gap-2">
+    <Section title={declined ? 'Answer the planner' : 'Ask for a change'}>
+      <Stack gap="sm">
         <FormField
           label={declined ? 'What was missing?' : 'What should be different?'}
           hint={`${waiting
@@ -56,12 +57,12 @@ function Revise({ draft, declined, onDone }: { draft: Draft; declined: boolean; 
             placeholder={declined ? 'e.g. The small transformer in train.py, judged by validation loss.' : 'e.g. It must fit a single RTX 4090. Measure latency too.'}
           />
         </FormField>
-        <div className="flex items-center gap-3">
+        <Inline gap="md">
           <Button loading={sending} disabled={message.trim() === ''} onClick={revise}>Revise</Button>
           {error && <InlineError>{error}</InlineError>}
-        </div>
-      </CardContent>
-    </Card>
+        </Inline>
+      </Stack>
+    </Section>
   )
 }
 
@@ -93,37 +94,34 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
   }
 
   return (
-    <div>
-      <PageHeader
-        back={{ label: 'Experiments', onClick: () => router.push('/platform-experiments') }}
-        title={draft.name}
-        description={<span className="text-xs text-subtle">Draft, {state === 'proposed' || state === 'declined' ? 'waiting for you' : 'being planned'}</span>}
-      />
+    <Page
+      back={{ label: 'Experiments', onClick: () => router.push('/platform-experiments') }}
+      title={draft.name}
+      description={<Text as="span" variant="hint">Draft, {state === 'proposed' || state === 'declined' ? 'waiting for you' : 'being planned'}</Text>}
+    >
       <PhaseStrip pe={draft} readOnly={readOnly} />
-      <Card>
-        <CardHeader>What you asked</CardHeader>
-        <CardContent className="grid gap-2">
-          <p className="text-sm">{draft.goal}</p>
+      <Section title="What you asked">
+        <Stack gap="sm">
+          <Text>{draft.goal}</Text>
           {(draft.revisions ?? []).map(revision => (
-            <p key={revision.at} className="text-sm">
-              <span className="text-xs text-muted">{actorLabel(revision.actor)} asked {relTime(revision.at)}: </span>
+            <Text key={revision.at}>
+              <Text as="span" variant="note">{actorLabel(revision.actor)} asked {relTime(revision.at)}: </Text>
               {revision.message}
-            </p>
+            </Text>
           ))}
-        </CardContent>
-      </Card>
+        </Stack>
+      </Section>
       {draft.declined_reason && (
-        <Card>
-          <CardHeader>What the planner needs</CardHeader>
-          <CardContent className="grid gap-2">
-            <p className="text-sm">{draft.declined_reason}</p>
+        <Section title="What the planner needs">
+          <Stack gap="sm">
+            <Text>{draft.declined_reason}</Text>
             {state === 'declined' && (
-              <p className="text-xs text-muted">
+              <Text variant="note">
                 Answer below and it tries again. Otherwise the draft closes on {formatDate(draft.proposal_expires_at)}.
-              </p>
+              </Text>
             )}
-          </CardContent>
-        </Card>
+          </Stack>
+        </Section>
       )}
       {draft.proposal ? (
         <ProposalForm key={draft.proposed_at} draft={draft} proposal={draft.proposal} editable={!readOnly && state === 'proposed'} arrived={watchedPlanning.current} onDone={reread}>
@@ -131,11 +129,11 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
         </ProposalForm>
       ) : revise}
       {!readOnly && (
-        <div className="mt-2 flex items-center gap-3">
+        <Inline gap="md">
           <Button variant="ghost" onClick={abandon}>Abandon this draft</Button>
           {abandonError && <InlineError>{abandonError}</InlineError>}
-        </div>
+        </Inline>
       )}
-    </div>
+    </Page>
   )
 }

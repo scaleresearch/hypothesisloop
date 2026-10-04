@@ -7,7 +7,9 @@ import type { HypothesisSearchHit } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button, RowButton } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Inline, Stack } from '@/components/ui/stack'
 import { InlineError, Loading } from '@/components/ui/status-message'
+import { Text } from '@/components/ui/text'
 
 export function useHypothesisSearch(platformExperimentID: string, q: string) {
   return useSWR(
@@ -24,9 +26,12 @@ export function SearchBox({ initial, placeholder, onSearch }: {
 }) {
   const [input, setInput] = useState(initial)
   return (
-    <form
+    <Inline
+      as="form"
       role="search"
-      className="flex min-w-[200px] flex-1 gap-1.5"
+      gap="xs"
+      nowrap
+      className="min-w-52 flex-1"
       onSubmit={e => { e.preventDefault(); onSearch(input.trim()) }}
     >
       <Input
@@ -38,7 +43,7 @@ export function SearchBox({ initial, placeholder, onSearch }: {
         aria-label={placeholder}
       />
       <Button size="sm" type="submit">Search</Button>
-    </form>
+    </Inline>
   )
 }
 
@@ -51,9 +56,9 @@ export function SearchHits({ hits, onPick, isLoading, error }: {
   if (isLoading) return <Loading rows={2} />
   if (error) return <InlineError>Search failed: {error.message}</InlineError>
   if (!hits) return null
-  if (hits.length === 0) return <p className="text-xs text-subtle">No matching hypotheses.</p>
+  if (hits.length === 0) return <Text variant="hint">No matching hypotheses.</Text>
   return (
-    <ul className="grid list-none grid-cols-[minmax(0,1fr)] gap-0.5">
+    <Stack as="ul" gap="2xs" className="list-none">
       {hits.map(h => (
         <li key={h.id}>
           <RowButton className="text-xs" onClick={() => onPick(h)} title={h.text}>
@@ -62,7 +67,7 @@ export function SearchHits({ hits, onPick, isLoading, error }: {
           </RowButton>
         </li>
       ))}
-    </ul>
+    </Stack>
   )
 }
 
@@ -75,7 +80,7 @@ export function HypothesisPicker({ platformExperimentID, exclude, onPick }: {
   const [q, setQ] = useState('')
   const { data, error, isLoading } = useHypothesisSearch(platformExperimentID, q)
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-1.5">
+    <Stack gap="sm">
       <SearchBox initial="" placeholder="Search hypotheses by text" onSearch={setQ} />
       <SearchHits
         hits={data?.filter(h => !exclude.includes(h.id))}
@@ -83,6 +88,6 @@ export function HypothesisPicker({ platformExperimentID, exclude, onPick }: {
         isLoading={isLoading}
         error={error}
       />
-    </div>
+    </Stack>
   )
 }

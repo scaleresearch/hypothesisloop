@@ -9,13 +9,15 @@ import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { Nav } from '@/components/nav'
 import { CommandPalette } from '@/components/command-palette'
 import { Button } from '@/components/ui/button'
+import { Centered } from '@/components/ui/centered'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
+import { Text } from '@/components/ui/text'
 
 // The pages that open one record by its id.
 const RECORD_PAGE = /^\/(platform-experiments|jobs|hypotheses)\/[^/]+$/
 
 function Standalone({ children }: { children: ReactNode }) {
-  return <main className="mx-auto mt-24 grid w-full max-w-xl content-start gap-4 px-8">{children}</main>
+  return <Centered wide>{children}</Centered>
 }
 
 /**
@@ -55,7 +57,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     return (
       <Standalone>
         <ErrorMessage>
-          Project <span className="font-mono text-xs">{resolution.projectID}</span> is not available to you: it was removed, or your access to its organization ended.
+          Project <Text as="span" variant="code">{resolution.projectID}</Text> is not available to you: it was removed, or your access to its organization ended.
         </ErrorMessage>
         {home.state === 'selected' && (
           <Button variant="primary" onClick={() => selectProject(home.tenant.project.id)}>
@@ -73,7 +75,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <TenantContext.Provider value={resolution.tenant}>
       <Nav />
       <main key={project.id} className="min-w-0 flex-1 overflow-auto">
-        <div className="mx-auto w-full max-w-[1160px] px-10 pb-16 pt-10">
+        <div className="mx-auto w-full max-w-6xl px-10 pb-16 pt-10">
           {error && (
             <ErrorMessage className="mb-4">
               Could not reread your account: {error.message}. Your organizations, projects and role are as last read. Retrying.

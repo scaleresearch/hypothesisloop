@@ -9,8 +9,10 @@ import { INVITE_PATH, dropInvite, heldInvite } from '@/lib/invite'
 import { useRefreshMe } from '@/lib/tenant'
 import type { OrgMember } from '@/types'
 import { Button } from '@/components/ui/button'
+import { Centered } from '@/components/ui/centered'
 import { Logo } from '@/components/ui/logo'
 import { ErrorMessage, Loading } from '@/components/ui/status-message'
+import { Text } from '@/components/ui/text'
 
 const NEW_INVITE = 'Ask an owner of the organization for a new one.'
 
@@ -33,13 +35,7 @@ type Step =
   | { at: 'joined'; member: OrgMember; stranded?: string }
 
 function Frame({ children }: { children: ReactNode }) {
-  return (
-    <main className="mx-auto mt-[18vh] grid w-full max-w-sm content-start gap-4 px-5">
-      <Logo />
-      <h1 className="text-2xl font-medium tracking-tight">Join an organization</h1>
-      {children}
-    </main>
-  )
+  return <Centered head={<Logo />} title="Join an organization">{children}</Centered>
 }
 
 /** The page an invite link opens: signs the person in if need be, then accepts the invite once. */
@@ -115,7 +111,7 @@ export function AcceptInvite() {
     case 'signed-out':
       return (
         <Frame>
-          <p className="text-sm text-muted">You were invited to an organization on HypothesisLoop. Sign in to accept: you come back here afterwards.</p>
+          <Text tone="muted">You were invited to an organization on HypothesisLoop. Sign in to accept: you come back here afterwards.</Text>
           <Button variant="primary" onClick={() => router.push(`${LOGIN_PATH}?${new URLSearchParams({ next: INVITE_PATH })}`)}>
             Sign in to accept
           </Button>
@@ -124,10 +120,10 @@ export function AcceptInvite() {
     case 'offered':
       return (
         <Frame>
-          <p className="text-sm text-muted">
+          <Text tone="muted">
             You were invited to an organization on HypothesisLoop. Accepting adds you to it with the role its owner chose
             for this invite, which you see once you have joined.
-          </p>
+          </Text>
           {step.failure && <ErrorMessage>{step.failure}</ErrorMessage>}
           <Button variant="primary" onClick={() => accept(step.token)}>{step.failure ? 'Try again' : 'Accept invite'}</Button>
         </Frame>
@@ -144,9 +140,9 @@ export function AcceptInvite() {
     case 'joined':
       return (
         <Frame>
-          <p className="text-sm text-muted" role="status">
+          <Text tone="muted" role="status">
             You joined as {step.member.role === 'owner' ? 'an owner' : 'a member'}.{!step.stranded && ' Opening the organization…'}
-          </p>
+          </Text>
           {step.stranded && (
             <>
               <ErrorMessage>{step.stranded}</ErrorMessage>
