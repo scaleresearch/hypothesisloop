@@ -17,6 +17,8 @@ func TestValidateMetricDefinitions(t *testing.T) {
 		{"explicit ranking ok", []MetricDefinition{{Key: "loss", Direction: "minimize", Role: MetricRoleRanking}}, false},
 		{"constraint with bound ok", []MetricDefinition{{Key: "pcc", Direction: "maximize", Role: MetricRoleConstraint, Bound: &bound}}, false},
 		{"attribute ok", []MetricDefinition{{Key: "precision_class", Direction: "maximize", Role: MetricRoleAttribute}}, false},
+		{"reference ok", []MetricDefinition{{Key: "other_ratio", Direction: "maximize", Role: MetricRoleReference}}, false},
+		{"bound on reference", []MetricDefinition{{Key: "other_ratio", Direction: "maximize", Role: MetricRoleReference, Bound: &bound}}, true},
 		{"missing key", []MetricDefinition{{Direction: "minimize"}}, true},
 		{"bad direction", []MetricDefinition{{Key: "loss", Direction: "up"}}, true},
 		{"bad role", []MetricDefinition{{Key: "loss", Direction: "minimize", Role: "nonsense"}}, true},

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -209,6 +210,36 @@ func TestResultsListEveryAgentsBestOnEveryDeclaredMetric(t *testing.T) {
 	}
 }
 
+// A reference is shown beside the standings with the machine each value was measured on, so a
+// result compares with it on the same machine, and it ranks nobody. One nobody measured is listed
+// with no values.
+func TestResultsShowEachReferenceWithWhereItRanAndRankNoneOfIt(t *testing.T) {
+	srv := bestPerAgentMetricServer(t, map[string]float64{"baseline": 99, "c1": 50})
+	defer srv.Close()
+	store := &standingsStore{competitors: []string{"c1"}}
+	store.pe = &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().UTC().Add(-time.Hour), Metrics: []domain.MetricDefinition{
+		{Key: "score", Direction: "maximize", Role: domain.MetricRoleRanking},
+		{Key: "other_score", Direction: "maximize", Role: domain.MetricRoleReference},
+	}}
+	svc := newSignupTestService(t, store)
+	svc.metricsDBURL = srv.URL
+
+	results, err := svc.Results(context.Background(), "pe-1")
+	if err != nil {
+		t.Fatalf("Results err = %v, want nil", err)
+	}
+	if len(results.Metrics) != 1 || results.Metrics[0].Metric != "score" {
+		t.Fatalf("metrics = %+v, want standings on score alone", results.Metrics)
+	}
+	if st := results.Metrics[0].Standings; len(st) != 1 || st[0].RanOn == nil || st[0].RanOn.Node != "node-a" {
+		t.Errorf("standings = %+v, want c1 with the node its job ran on", st)
+	}
+	want := []ReferenceValue{{"baseline", 99, "job-baseline", nil}, {"c1", 50, "job-c1", &domain.RanOn{Node: "node-a"}}}
+	if len(results.References) != 1 || results.References[0].Metric != "other_score" || !reflect.DeepEqual(results.References[0].Values, want) {
+		t.Errorf("references = %+v, want other_score with %+v", results.References, want)
+	}
+}
+
 func (f *standingsStore) DescribeJobs(_ context.Context, jobs []*domain.Experiment) error {
 	for _, job := range jobs {
 		job.SummaryDue = job.ID == "job-c1"
@@ -254,8 +285,14 @@ func bestPerAgentMetricServer(t *testing.T, values map[string]float64) *httptest
 			`{"metric":{"agent_id":%q,"metric_basis":"raw","job_id":"job-%s"},"value":[1,"%v"]}`, agentID, agentID, v))
 	}
 	body := fmt.Sprintf(`{"status":"success","data":{"resultType":"vector","result":[%s]}}`, strings.Join(results, ","))
+	// Where a job ran: job-c1 on node-a, every other job nowhere recorded.
+	nodes := `{"output":[{"records":{"schema":{"column_schemas":[{"name":"experiment_id"},{"name":"node"},{"name":"greptime_timestamp"},{"name":"greptime_value"}]},"rows":[["job-c1","node-a",1700000000000,1]]}}]}`
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/v1/sql" {
+			_, _ = w.Write([]byte(nodes))
+			return
+		}
 		_, _ = w.Write([]byte(body))
 	}))
 }

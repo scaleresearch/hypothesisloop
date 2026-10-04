@@ -53,6 +53,29 @@ func TestResultsFlattensStandings(t *testing.T) {
 	}
 }
 
+// A reference prints after the standings with where it was measured, and one nobody measured
+// says so.
+func TestResultsPrintEachReferenceOrThatItWasNotMeasured(t *testing.T) {
+	recordingServer(t, func(int, recorded) any {
+		return map[string]any{"status": "running", "metrics": []any{}, "references": []any{
+			map[string]any{"metric": "other_acc", "direction": "maximize", "values": []any{map[string]any{"agent_id": "base", "value": 0.7, "experiment_id": "job-1", "ran_on": map[string]any{"node": "n1"}}}},
+			map[string]any{"metric": "third_acc", "direction": "maximize", "values": []any{}},
+		}}
+	})
+	t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"results"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := []string{
+		`{"reference":"other_acc","direction":"maximize","agent_id":"base","experiment_id":"job-1","ran_on":{"node":"n1"},"value":0.7}`,
+		`{"reference":"third_acc","direction":"maximize","measured":"not measured"}`,
+	}
+	if !reflect.DeepEqual(lines(stdout.String()), want) {
+		t.Fatalf("stdout %q, want %q", stdout.String(), want)
+	}
+}
+
 // A metric nobody has a result on yet is an answer: no line, a notice that is no error, exit 0.
 func TestResultsWithNoStandingYetIsAnAnswer(t *testing.T) {
 	recordingServer(t, func(int, recorded) any {

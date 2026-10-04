@@ -3,7 +3,10 @@ package quota
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
@@ -28,6 +31,23 @@ type AgentStanding struct {
 	HypothesisID string            `json:"hypothesis_id,omitempty"`
 	Objective    bool              `json:"objective,omitempty" doc:"True when the job measured the platform experiment's objective and tested no hypothesis: it has no hypothesis_id."`
 	Env          map[string]string `json:"env,omitempty"`
+	RanOn        *domain.RanOn     `json:"ran_on,omitempty" doc:"Where the job ran, on results only: a reference compares with it on the same machine."`
+}
+
+// ReferenceValue is one agent's value on a reference metric, the job that measured it and where.
+type ReferenceValue struct {
+	AgentID      string        `json:"agent_id"`
+	Value        float64       `json:"value"`
+	ExperimentID string        `json:"experiment_id,omitempty"`
+	RanOn        *domain.RanOn `json:"ran_on,omitempty"`
+}
+
+// MetricReference is what was measured of one outside system the goal compares against. Values
+// is empty while nobody has measured it.
+type MetricReference struct {
+	Metric    string           `json:"metric"`
+	Direction string           `json:"direction"`
+	Values    []ReferenceValue `json:"values"`
 }
 
 // MetricStandings is the full ranking on a single declared metric, best-first.
@@ -69,6 +89,7 @@ type PlatformExperimentResults struct {
 	Status               string            `json:"status"`
 	Summary              string            `json:"summary,omitempty"`
 	Metrics              []MetricStandings `json:"metrics"`
+	References           []MetricReference `json:"references" doc:"Each reference metric with every agent's best value on it and the machine it ran on, never ranked."`
 	Bests                []MetricBests     `json:"bests"`
 }
 
@@ -88,6 +109,7 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 		Status:               string(pe.Status),
 		Summary:              pe.Summary,
 		Metrics:              make([]MetricStandings, 0, len(pe.Metrics)),
+		References:           []MetricReference{},
 		Bests:                make([]MetricBests, 0, len(pe.Metrics)),
 	}
 	for _, metric := range pe.Metrics {
@@ -101,6 +123,13 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 		}
 		sort.Slice(bests.Agents, func(i, j int) bool { return bests.Agents[i].AgentID < bests.Agents[j].AgentID })
 		out.Bests = append(out.Bests, bests)
+		if metric.EffectiveRole() == domain.MetricRoleReference {
+			reference := MetricReference{Metric: metric.Key, Direction: metric.Direction, Values: make([]ReferenceValue, 0, len(bests.Agents))}
+			for _, b := range bests.Agents {
+				reference.Values = append(reference.Values, ReferenceValue{AgentID: b.AgentID, Value: b.Best, ExperimentID: b.ExperimentID})
+			}
+			out.References = append(out.References, reference)
+		}
 		if metric.EffectiveRole() != domain.MetricRoleRanking {
 			continue
 		}
@@ -138,7 +167,51 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 			}
 		}
 	}
+	if err := s.mergeRanOn(ctx, out); err != nil {
+		return nil, fmt.Errorf("results: %w", err)
+	}
 	return out, nil
+}
+
+// mergeRanOn sets where each standing's and each reference value's job ran, in one read of the
+// metrics store.
+func (s *PlatformExperimentsService) mergeRanOn(ctx context.Context, out *PlatformExperimentResults) error {
+	var ranOn []**domain.RanOn
+	var ids []string
+	for _, metric := range out.Metrics {
+		for i := range metric.Standings {
+			ranOn, ids = append(ranOn, &metric.Standings[i].RanOn), append(ids, metric.Standings[i].ExperimentID)
+		}
+	}
+	for _, reference := range out.References {
+		for i := range reference.Values {
+			ranOn, ids = append(ranOn, &reference.Values[i].RanOn), append(ids, reference.Values[i].ExperimentID)
+		}
+	}
+	jobs := map[string]*domain.Experiment{}
+	for _, id := range ids {
+		if id == "" || jobs[id] != nil {
+			continue
+		}
+		job, err := s.store.GetExperiment(ctx, id)
+		if err != nil {
+			return err
+		}
+		if job != nil {
+			jobs[id] = job
+		}
+	}
+	if len(jobs) == 0 {
+		return nil
+	}
+	where, err := metricsdb.LatestRanOn(ctx, s.metricsDBURL, slices.Collect(maps.Values(jobs)), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	for i, id := range ids {
+		*ranOn[i] = where[id]
+	}
+	return nil
 }
 
 // derivedTopResults ranks agents on the experiment's first declared ranking metric — the primary

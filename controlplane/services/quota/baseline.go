@@ -107,7 +107,7 @@ func checkBaseline(pe *domain.PlatformExperiment, baseline *Baseline) error {
 	var missing []string
 	for _, metric := range pe.Metrics {
 		value, reported := baseline.Reported[metric.Key]
-		if !reported {
+		if !reported && metric.EffectiveRole() != domain.MetricRoleReference {
 			missing = append(missing, metric.Key)
 			continue
 		}
@@ -147,16 +147,23 @@ func checkBaselineEnvironment(pe *domain.PlatformExperiment, baseline *Baseline)
 const measuredBaselineHeader = "MEASURED BASELINE (written by the platform from the declared job)"
 
 // baselineBlock is the block for baseline, with the last value it reported on each of metrics
-// in declared order.
+// in declared order, and the references it left out, which the baseline need not measure.
 func baselineBlock(baseline *Baseline, metrics []domain.MetricDefinition) string {
 	measured := make([]string, 0, len(metrics))
+	var unmeasured []string
 	for _, metric := range metrics {
 		if value, reported := baseline.Reported[metric.Key]; reported {
 			measured = append(measured, fmt.Sprintf("%s = %g", metric.Key, value))
+		} else if metric.EffectiveRole() == domain.MetricRoleReference {
+			unmeasured = append(unmeasured, metric.Key)
 		}
 	}
-	return strings.Join([]string{measuredBaselineHeader, "job: " + baseline.Job.ID, "code_ref: " + baseline.Job.CodeRef,
-		"measured: " + strings.Join(measured, ", ")}, "\n")
+	lines := []string{measuredBaselineHeader, "job: " + baseline.Job.ID, "code_ref: " + baseline.Job.CodeRef,
+		"measured: " + strings.Join(measured, ", ")}
+	if len(unmeasured) > 0 {
+		lines = append(lines, "references not measured: "+strings.Join(unmeasured, ", "))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // splitMeasuredBaseline parts description into what its author wrote and the block the platform

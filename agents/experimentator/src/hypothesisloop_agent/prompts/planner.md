@@ -45,8 +45,8 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
     why, never how, read in a minute:
       - first the objective, in a sentence or two of the person's terms, and what is success;
       - the metric, defined just enough that every job's number compares, and why; the gate;
-      - the control, and each reference to compare against with where it lives: each its own
-        number, never merged into the control;
+      - the control, and each outside reference with where it lives, each a
+        `reference` metric, never merged into the control;
       - the accelerator type, its count per job and the `image`;
       - the levers open and fixed, and when to stop: the target reached, no gain after
         several honest tries, or the quota.

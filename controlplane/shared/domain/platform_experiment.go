@@ -49,13 +49,17 @@ const (
 	// standings eligibility — "which kind of result is this" facts (precision class, result
 	// category, ...) that the objective may care about but that have no single order.
 	MetricRoleAttribute MetricRole = "attribute"
+	// MetricRoleReference is an outside system the goal compares against, measured under a key
+	// of its own: reported and shown beside the standings with the machine it ran on, never
+	// ranked, cut on or gating, and not required of the baseline, which says why it left one out.
+	MetricRoleReference MetricRole = "reference"
 )
 
-// ValidMetricRole reports whether role is one of the three declared roles, or empty (which
+// ValidMetricRole reports whether role is one of the declared roles, or empty (which
 // PlatformExperiment.Metrics' consumers treat as MetricRoleRanking for backward compatibility).
 func ValidMetricRole(role MetricRole) bool {
 	switch role {
-	case "", MetricRoleRanking, MetricRoleConstraint, MetricRoleAttribute:
+	case "", MetricRoleRanking, MetricRoleConstraint, MetricRoleAttribute, MetricRoleReference:
 		return true
 	default:
 		return false
@@ -107,7 +111,7 @@ func ValidateMetricDefinitions(defs []MetricDefinition) error {
 			return fmt.Errorf("metric %q: direction must be \"maximize\" or \"minimize\", got %q", d.Key, d.Direction)
 		}
 		if !ValidMetricRole(d.Role) {
-			return fmt.Errorf("metric %q: role must be one of ranking, constraint, attribute (or empty), got %q", d.Key, d.Role)
+			return fmt.Errorf("metric %q: role must be one of ranking, constraint, attribute, reference (or empty), got %q", d.Key, d.Role)
 		}
 		if d.EffectiveRole() == MetricRoleConstraint && d.Bound == nil {
 			return fmt.Errorf("metric %q: constraint role requires bound", d.Key)

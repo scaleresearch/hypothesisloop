@@ -133,6 +133,22 @@ func TestABaselineIsDeclaredOnAnOpenExperimentAndCheckedAgainstTheJob(t *testing
 	}
 }
 
+// A reference is an outside system the goal compares against, which a baseline may be unable to
+// run. Leaving it out does not hold the run, and the brief says it was not measured.
+func TestABaselineThatLeftAReferenceOutIsDeclaredAndTheBriefSaysSo(t *testing.T) {
+	pe := openExperiment()
+	pe.Metrics = append(pe.Metrics,
+		domain.MetricDefinition{Key: "other_loss", Direction: "minimize", Role: domain.MetricRoleReference},
+		domain.MetricDefinition{Key: "third_loss", Direction: "minimize", Role: domain.MetricRoleReference})
+	baseline := measuredBaseline()
+	baseline.Reported["other_loss"] = 2.1
+	store, patch := declareAPI(t, pe, baseline, theCoordinator)
+	want := openExperiment().Description + theMeasuredBlock + ", other_loss = 2.1\nreferences not measured: third_loss"
+	if code, out := patch(map[string]any{"baseline_job_id": "job-1"}); code != http.StatusOK || store.created[0].Description != want {
+		t.Fatalf("got = %d %v, brief %q, want the baseline declared and the brief %q", code, out, store.created[0].Description, want)
+	}
+}
+
 // Its metrics and its budget are what the baseline was checked against. An owner who changes one
 // after the declaration is held to the same job, so no experiment starts on a baseline its
 // definition has left behind. Its brief keeps what the platform wrote of the job whatever a

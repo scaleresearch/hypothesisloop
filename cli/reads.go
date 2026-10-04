@@ -78,10 +78,13 @@ func cmdResults(c *apiclient.Client, args []string, stdout, stderr io.Writer) in
 
 The standings on each ranking metric, one line per agent and metric in rank order: its best
 value and the job that set it (experiment_id, code_ref, hypothesis_id and its settings under
-job.env, where every hl command that prints a job has them). Only COMPLETED jobs
-that hold every constraint metric rank (rankable in hl job status). At most one line
-per agent of the platform experiment and metric, so there is nothing to page or limit. A metric
-nobody has a result on yet prints no line, says so on stderr, and exits 0.`, stderr)
+job.env, where every hl command that prints a job has them) and ran_on, the machine it ran on.
+Only COMPLETED jobs that hold every constraint metric rank (rankable in hl job status). At most
+one line per agent of the platform experiment and metric, so there is nothing to page or limit.
+A metric nobody has a result on yet prints no line, says so on stderr, and exits 0.
+Then each reference metric, an outside system the goal compares against and never ranked: one
+line per agent that measured it, its best value, the job and ran_on, or one line saying it was
+not measured. Compare a result with a reference measured on the same machine.`, stderr)
 	named := experimentFlag(fs)
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
@@ -96,6 +99,11 @@ nobody has a result on yet prints no line, says so on stderr, and exits 0.`, std
 			Direction string            `json:"direction"`
 			Standings []json.RawMessage `json:"standings"`
 		} `json:"metrics"`
+		References []struct {
+			Metric    string            `json:"metric"`
+			Direction string            `json:"direction"`
+			Values    []json.RawMessage `json:"values"`
+		} `json:"references"`
 	}
 	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(pe)+"/results", nil, &out); err != nil {
 		return fail(stderr, err)
@@ -120,6 +128,18 @@ nobody has a result on yet prints no line, says so on stderr, and exits 0.`, std
 		}
 		if len(m.Standings) == 0 {
 			fmt.Fprintf(stderr, "hl: no results yet on %s\n", m.Metric)
+		}
+	}
+	for _, r := range out.References {
+		for _, v := range r.Values {
+			rest, err := compactJSON(v)
+			if err != nil {
+				return fail(stderr, fmt.Errorf("response is not JSON: %w", err))
+			}
+			fmt.Fprintf(stdout, "%s\n", prefixed(rest, "reference", r.Metric, "direction", r.Direction))
+		}
+		if len(r.Values) == 0 {
+			fmt.Fprintf(stdout, "%s\n", prefixed(nil, "reference", r.Metric, "direction", r.Direction, "measured", "not measured"))
 		}
 	}
 	return 0

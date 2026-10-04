@@ -836,6 +836,9 @@ a leading quote.
         direction: maximize
         role: constraint
         bound: 1                       # a value the unchanged control holds by construction
+      - key: other_val_accuracy        # optional: one per outside system the goal names, its own
+        direction: maximize            # number apart from the control. Shown beside the standings,
+        role: reference                # never ranked or gating
   accelerator_type: ...                # copied verbatim from 'hl capacity', the CPU type for work on cores
   image: ...                           # the job image the brief names, from the same line of 'hl capacity':
                                        # one of its job_images, or its only_job_image where it shows one
