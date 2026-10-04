@@ -243,7 +243,10 @@ start_ui() {
     echo "dev: something already serves port 3000 and is left as it is"
     return
   fi
-  start ui npm --prefix controlplane/ui run dev
+  # Node 22.18+ can load tailwind.config.ts natively as ESM, a module Tailwind cannot evict to
+  # reload it, and then config edits stop reaching the served CSS until a restart. Without type
+  # stripping Tailwind always loads it through jiti, which it does reload.
+  start ui env NODE_OPTIONS=--no-experimental-strip-types npm --prefix controlplane/ui run dev
 }
 
 status() {
