@@ -26,9 +26,10 @@ type Store interface {
 	ReleaseInstances(ctx context.Context, launcher string, windDown, coordinatorWindDown time.Duration) error
 	// The three writes take a hosted agent's id, or none for a platform experiment's coordinator.
 	AskInstance(ctx context.Context, platformExpID, agentID, name, launch string) error
-	ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity string) error
+	ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity, machine string) error
 	EndInstance(ctx context.Context, platformExpID, agentID, name string, how db.InstanceEnd, exitLog string, limit time.Duration, maxRestarts int) (after domain.AgentInstance, recorded bool, err error)
 	SetLauncherHolds(ctx context.Context, launcher string, holds bool) error
+	ListLauncherMachines(ctx context.Context, launcher string) ([]db.LauncherMachine, error)
 }
 
 // Metrics is where the rate limits the launchers report are kept: the run's health series.
@@ -88,9 +89,10 @@ type Observed struct {
 }
 
 type ObservedInstance struct {
-	Name  string `json:"name" doc:"The name from an earlier answer, without the launcher's own prefix."`
-	State string `json:"state" enum:"starting,running,exited,unknown" doc:"unknown: the provider lists the instance and does not say whether its command runs, as when its host is unreachable."`
-	Log   string `json:"log,omitempty" doc:"For an exited instance, the end of what its command wrote."`
+	Name    string `json:"name" doc:"The name from an earlier answer, without the launcher's own prefix."`
+	Machine string `json:"machine" minLength:"1" maxLength:"128" doc:"The provider's id of the machine the name is reported by. The platform keeps it while it holds the name and answers it from GET /{name}/machines."`
+	State   string `json:"state" enum:"starting,running,exited,unknown" doc:"unknown: the provider lists the instance and does not say whether its command runs, as when its host is unreachable."`
+	Log     string `json:"log,omitempty" doc:"For an exited instance, the end of what its command wrote."`
 	// Expired tells an instance its provider ended at the provider's own lifetime from one whose
 	// command ended.
 	Expired bool `json:"expired,omitempty" doc:"For an exited instance, true when its provider ended it at the provider's own limit on how long it rents one. Its end is recorded as expired, spends no restart and never stops the agent, which is asked for again under a new name."`
@@ -374,7 +376,7 @@ func (h *Handler) observe(ctx context.Context, one kept, seen map[string]Observe
 	if reported.State == stateRunning {
 		activity = said(reported.Activity, token)
 	}
-	if err := h.store.ObserveInstance(ctx, one.platformExperimentID, one.agentID, name, state, reported.Progress, h.cfg.ProgressLimit, activity); err != nil {
+	if err := h.store.ObserveInstance(ctx, one.platformExperimentID, one.agentID, name, state, reported.Progress, h.cfg.ProgressLimit, activity, reported.Machine); err != nil {
 		return domain.AgentInstance{}, false, err
 	}
 	switch {
@@ -497,9 +499,38 @@ func (h *Handler) fits(o Observed) *Refusal {
 	return nil
 }
 
-// RegisterHuma registers the launcher-facing operation on doc. Paths are relative to the
+// HeldMachine is a machine the platform holds for a launcher.
+type HeldMachine struct {
+	Name    string `json:"name" doc:"The name it is asked for under, without the launcher's own prefix."`
+	Machine string `json:"machine" doc:"The provider's id the launcher last reported the name by."`
+}
+
+type Held struct {
+	Machines []HeldMachine `json:"machines"`
+}
+
+// RegisterHuma registers the launcher-facing operations on doc. Paths are relative to the
 // /internal/launchers mount.
 func RegisterHuma(doc *apidocs.Doc, h *Handler) {
+	apidocs.Register(doc, apidocs.AudienceLauncher, huma.Operation{
+		OperationID: "launcher-machines", Method: "GET", Path: "/{name}/machines",
+		Summary: "List the machines the platform holds for a launcher", Tags: []string{"agent-launcher"},
+		Description: "Every machine the platform holds for the launcher, an agent's or a coordinator's: the name it is asked for under and the provider's id the launcher last reported it by. It changes nothing. " +
+			"The platform gives up on a machine it saw that the launcher no longer reports, so a launcher whose provider's list leaves one of these out reads it by its id before it reports, and leaves it out only when the provider says it is gone.",
+	}, func(ctx context.Context, in *struct {
+		Name string `path:"name"`
+	}) (*struct{ Body *Held }, error) {
+		machines, err := h.store.ListLauncherMachines(ctx, in.Name)
+		if err != nil {
+			return nil, auth.Internal(h.logger, "list launcher machines failed", err, zap.String("launcher", in.Name))
+		}
+		out := &Held{Machines: make([]HeldMachine, 0, len(machines))}
+		for _, m := range machines {
+			out.Machines = append(out.Machines, HeldMachine{Name: m.Name, Machine: m.Machine})
+		}
+		return &struct{ Body *Held }{Body: out}, nil
+	})
+
 	apidocs.Register(doc, apidocs.AudienceLauncher, huma.Operation{
 		OperationID: "launcher-reconcile", Method: "POST", Path: "/{name}/reconcile",
 		Summary: "Report a launcher's instances and receive the ones it should keep", Tags: []string{"agent-launcher"},

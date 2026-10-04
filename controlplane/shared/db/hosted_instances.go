@@ -83,7 +83,7 @@ func (s *PlatformExperimentsStore) AskInstance(ctx context.Context, platformExpI
 	c := instanceOf(agentID)
 	_, err := s.pool.pool.Exec(ctx, `
 UPDATE `+c.table+`
-SET `+c.prefix+`name = $3, `+c.prefix+`asked_at = now(), `+c.prefix+`seen_at = NULL, `+c.prefix+`launch = $4,
+SET `+c.prefix+`name = $3, `+c.prefix+`asked_at = now(), `+c.prefix+`seen_at = NULL, `+c.prefix+`launch = $4, `+c.prefix+`machine = '',
     `+c.prefix+`state = '', `+c.prefix+`progress = '', `+c.prefix+`progress_at = NULL,
     `+c.prefix+`activity = '', `+c.prefix+`activity_at = NULL,
     `+c.prefix+`restarted_at = CASE WHEN `+c.prefix+`launch = $4 THEN `+c.prefix+`restarted_at ELSE '{}' END,
@@ -102,22 +102,26 @@ WHERE `+c.key, platformExpID, agentID, name, launch)
 // from the one stored, and at most progressStampsPerLimit times per progressLimit. activity is
 // the sentence the command last printed of what its agent does, empty when it printed none or
 // could not be read, which leaves the one stored: it is kept with the time it was first read,
-// the latest only. A report that changes nothing writes nothing. An agent's machine reported
-// running starts the clock of a run that waited for it (startClock).
-func (s *PlatformExperimentsStore) ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity string) error {
+// the latest only. machine is the provider's id of the machine the name was reported by, which
+// ListLauncherMachines answers. A report that changes nothing writes nothing. An agent's machine
+// reported running starts the clock of a run that waited for it (startClock).
+func (s *PlatformExperimentsStore) ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity, machine string) error {
+	if machine == "" {
+		return fmt.Errorf("platform_experiments_store.ObserveInstance: %s is reported with no machine id", name)
+	}
 	c := instanceOf(agentID)
 	stamp := `($5::text IS NOT NULL AND $5 <> ` + c.prefix + `progress AND (` + c.prefix + `progress_at IS NULL OR ` + c.prefix + `progress_at <= now() - make_interval(secs => $6)))`
 	said := `($7 <> '' AND $7 <> ` + c.prefix + `activity)`
 	_, err := s.pool.pool.Exec(ctx, `
 UPDATE `+c.table+`
-SET `+c.prefix+`seen_at = COALESCE(`+c.prefix+`seen_at, now()), `+c.prefix+`state = $4,
+SET `+c.prefix+`seen_at = COALESCE(`+c.prefix+`seen_at, now()), `+c.prefix+`state = $4, `+c.prefix+`machine = $8,
     `+c.prefix+`progress = CASE WHEN `+stamp+` THEN $5 ELSE `+c.prefix+`progress END,
     `+c.prefix+`progress_at = CASE WHEN `+stamp+` THEN now() ELSE `+c.prefix+`progress_at END,
     `+c.prefix+`activity_at = CASE WHEN `+said+` THEN now() ELSE `+c.prefix+`activity_at END,
     `+c.prefix+`activity = CASE WHEN `+said+` THEN $7 ELSE `+c.prefix+`activity END
 WHERE `+c.key+` AND `+c.prefix+`name = $3 AND `+c.prefix+`name <> ''
-  AND (`+c.prefix+`seen_at IS NULL OR `+c.prefix+`state <> $4 OR `+stamp+` OR `+said+`)`,
-		platformExpID, agentID, name, state, progress, progressLimit.Seconds()/progressStampsPerLimit, activity)
+  AND (`+c.prefix+`seen_at IS NULL OR `+c.prefix+`state <> $4 OR `+c.prefix+`machine <> $8 OR `+stamp+` OR `+said+`)`,
+		platformExpID, agentID, name, state, progress, progressLimit.Seconds()/progressStampsPerLimit, activity, machine)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.ObserveInstance: %w", err)
 	}
@@ -163,7 +167,7 @@ func (s *PlatformExperimentsStore) EndInstance(ctx context.Context, platformExpI
 	restart := `$8::boolean AND cardinality(` + recent + `) < $5`
 	err = tx.QueryRow(ctx, `
 UPDATE `+c.table+`
-SET `+c.prefix+`name = '', `+c.prefix+`exited_at = now(), `+c.prefix+`exit_log = $4, `+c.prefix+`end_reason = $7, `+c.prefix+`state = '',
+SET `+c.prefix+`name = '', `+c.prefix+`machine = '', `+c.prefix+`exited_at = now(), `+c.prefix+`exit_log = $4, `+c.prefix+`end_reason = $7, `+c.prefix+`state = '',
     `+c.prefix+`activity = '', `+c.prefix+`activity_at = NULL,
     `+c.prefix+`stopped = $8::boolean AND cardinality(`+recent+`) >= $5,
     `+c.prefix+`restarts = `+c.prefix+`restarts + CASE WHEN `+restart+` THEN 1 ELSE 0 END,
@@ -216,7 +220,7 @@ func (s *PlatformExperimentsStore) ReleaseInstances(ctx context.Context, launche
 	}
 	if _, err := s.pool.pool.Exec(ctx, `
 UPDATE experiment_signups s
-SET instance_name = '', instance_state = '', instance_exited_at = now(), instance_end_reason = '`+string(InstanceReleased)+`',
+SET instance_name = '', instance_machine = '', instance_state = '', instance_exited_at = now(), instance_end_reason = '`+string(InstanceReleased)+`',
     instance_activity = '', instance_activity_at = NULL,
     instance_exit_log = $3::jsonb ->> (`+runEndSQL+`)
 WHERE s.hosted AND s.launcher = $1 AND s.instance_name <> ''
@@ -226,7 +230,7 @@ WHERE s.hosted AND s.launcher = $1 AND s.instance_name <> ''
 	}
 	if _, err := s.pool.pool.Exec(ctx, `
 UPDATE platform_experiments pe
-SET coordinator_instance_name = '', coordinator_instance_state = '', coordinator_instance_exited_at = now(),
+SET coordinator_instance_name = '', coordinator_instance_machine = '', coordinator_instance_state = '', coordinator_instance_exited_at = now(),
     coordinator_instance_activity = '', coordinator_instance_activity_at = NULL,
     coordinator_instance_end_reason = '`+string(InstanceReleased)+`', coordinator_instance_exit_log = $3
 WHERE pe.coordinator_hosted AND pe.coordinator_launcher = $1 AND pe.coordinator_instance_name <> ''
@@ -235,6 +239,37 @@ WHERE pe.coordinator_hosted AND pe.coordinator_launcher = $1 AND pe.coordinator_
 		return fmt.Errorf("platform_experiments_store.ReleaseInstances: coordinators: %w", err)
 	}
 	return nil
+}
+
+// LauncherMachine is a machine the platform holds for a launcher: the name it is asked for under
+// and the provider's id the launcher last reported that name by.
+type LauncherMachine struct {
+	Name    string
+	Machine string
+}
+
+// ListLauncherMachines returns every machine of launcher, an agent's or a coordinator's, whose
+// name is still held and was reported with a machine id, by name. It writes nothing.
+func (s *PlatformExperimentsStore) ListLauncherMachines(ctx context.Context, launcher string) ([]LauncherMachine, error) {
+	rows, err := s.pool.pool.Query(ctx, `
+SELECT instance_name, instance_machine FROM experiment_signups
+WHERE hosted AND launcher = $1 AND instance_name <> '' AND instance_machine <> ''
+UNION ALL
+SELECT coordinator_instance_name, coordinator_instance_machine FROM platform_experiments
+WHERE coordinator_hosted AND coordinator_launcher = $1 AND coordinator_instance_name <> '' AND coordinator_instance_machine <> ''
+ORDER BY 1`, launcher)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.ListLauncherMachines: %w", err)
+	}
+	machines, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (LauncherMachine, error) {
+		var m LauncherMachine
+		err := row.Scan(&m.Name, &m.Machine)
+		return m, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.ListLauncherMachines: %w", err)
+	}
+	return machines, nil
 }
 
 // RegisterLauncher makes an agent-launcher's token work. Registering one again changes nothing.

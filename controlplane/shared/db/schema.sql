@@ -581,6 +581,10 @@ ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_renewals INTEGE
 -- only: there is no history. Empty while no machine is asked for and until one says something.
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_activity TEXT NOT NULL DEFAULT '';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_activity_at TIMESTAMPTZ;
+-- The provider's id of the machine the launcher last reported instance_name by, empty until it
+-- reports one and after the name is cleared. The launcher reads it by id when its provider's list
+-- leaves it out, so a list that trails its machines is never taken for one that lost them.
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_machine TEXT NOT NULL DEFAULT '';
 
 -- The inline CONSTRAINT runs only where the table does not exist yet, so an existing database
 -- gets the check here.
@@ -1237,6 +1241,7 @@ ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_e
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_renewals INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_activity TEXT NOT NULL DEFAULT '';
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_activity_at TIMESTAMPTZ;
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_machine TEXT NOT NULL DEFAULT '';
 -- How many machines the platform may run for this platform experiment, its coordinator included.
 -- Fixed at creation from config agents.max_hosted_per_platform_experiment.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS max_hosted INTEGER NOT NULL DEFAULT 0;

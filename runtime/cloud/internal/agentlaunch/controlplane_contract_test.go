@@ -541,6 +541,37 @@ func TestAMachineThatRanAndIsNoLongerListedIsRentedAgainAndCountedAsARestart(t *
 	}
 }
 
+// Round 14: the provider's list left out two running machines for over a minute, and both
+// agents were replaced while their machines ran on. A machine the platform holds is read by its
+// id before it is reported missing.
+func TestARunningMachineTheProvidersListLeavesOutIsKeptAndRunsOnce(t *testing.T) {
+	c := newContract(t, hostedAgent("pe-1", "ag-one"))
+	c.pass()
+	name := c.rented.Names()[0]
+	c.rented.Start(name)
+	c.pass()
+	c.rented.Hide(name)
+	for range 3 {
+		c.pass()
+	}
+	recorded := c.instance("ag-one")
+	if names := c.rented.Names(); len(names) != 1 || names[0] != name || recorded.Restarts != 0 || recorded.Name != name[len("hl-agent-main-"):] {
+		t.Fatalf("rented %v (was %q), recorded %+v, want the one machine kept", names, name, recorded)
+	}
+	if c.rented.Calls("Create") != 1 || c.rented.Calls("Destroy") != 0 {
+		t.Fatalf("creates %d destroys %d", c.rented.Calls("Create"), c.rented.Calls("Destroy"))
+	}
+	// Gone for real, which the read by id says: replaced as any machine the provider lost.
+	c.rented.Show(name)
+	if err := c.rented.Destroy(context.Background(), c.rented.IDs(name)[0]); err != nil {
+		t.Fatal(err)
+	}
+	c.pass()
+	if recorded := c.instance("ag-one"); recorded.Restarts != 1 || !strings.Contains(recorded.ExitLog, "no longer lists it") {
+		t.Fatalf("recorded %+v, want the gone machine counted", recorded)
+	}
+}
+
 // Creates are serial and paused, so a long list takes a pass longer than the boot limit. The
 // control plane asks for a few new machines per answer, and none spends a restart waiting.
 func TestAListLongerThanOnePassCanCreateIsRentedOverSeveralPassesAndSpendsNoRestart(t *testing.T) {

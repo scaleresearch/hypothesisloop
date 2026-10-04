@@ -191,7 +191,8 @@ func (l *Launcher) Run(ctx context.Context) error {
 
 // Pass is one convergence. The provider is listed and the control plane told what was found
 // before anything is touched, so a provider that cannot be listed, or a control plane that cannot
-// be reached or answers with anything but a complete list, changes nothing. After that every
+// be reached or answers with anything but a complete list, changes nothing. A machine the
+// platform holds that the list leaves out is read by its id first (confirmUnlisted). After that every
 // instance is handled by itself: one that cannot be created, stopped or destroyed is reported in
 // the returned error and the rest of the pass still runs.
 //
@@ -203,12 +204,19 @@ func (l *Launcher) Run(ctx context.Context) error {
 // An answer that states a refusal is acted on like any other, except that nothing is created,
 // and the pass returns ErrRefused with the control plane's words.
 func (l *Launcher) Pass(ctx context.Context) error {
+	held, err := l.fetchHeld(ctx)
+	if err != nil {
+		return fmt.Errorf("fetch the machines the platform holds: %w", err)
+	}
 	rented, err := l.provider.List(ctx, l.prefix)
-	// The launcher pauses nothing yet (see the provider package's comment on capabilities).
-	rented = provider.PausedAsStarting(rented)
 	if err != nil {
 		return fmt.Errorf("list instances: %w", err)
 	}
+	if rented, err = l.confirmUnlisted(ctx, rented, held); err != nil {
+		return err
+	}
+	// The launcher pauses nothing yet (see the provider package's comment on capabilities).
+	rented = provider.PausedAsStarting(rented)
 	byName := map[string][]provider.Instance{}
 	var pool []provider.Instance
 	for _, i := range rented {
@@ -263,6 +271,45 @@ func (l *Launcher) Pass(ctx context.Context) error {
 		p.failures = append(p.failures, fmt.Errorf("%w, so nothing is created: %s", ErrRefused, want.refusal))
 	}
 	return errors.Join(p.failures...)
+}
+
+// confirmUnlisted is rented with every machine the platform holds that the list leaves out
+// under its name read by its id: the provider's list can trail its instances, and the platform
+// takes a machine it saw and is no longer told of for gone and runs its agent on another. Only
+// a read that says the machine is gone leaves it out, and a read that fails fails the pass, so
+// nothing is reported from a list that may be missing a machine. A read that finds the machine
+// replaces whatever the list says of that id.
+func (l *Launcher) confirmUnlisted(ctx context.Context, rented []provider.Instance, held []heldMachine) ([]provider.Instance, error) {
+	for _, h := range held {
+		name := l.prefix + h.Name
+		listed := false
+		for _, i := range rented {
+			listed = listed || i.ID == h.Machine && i.Name == name
+		}
+		if listed {
+			continue
+		}
+		found, exists, err := l.provider.Get(ctx, h.Machine)
+		if err != nil {
+			return nil, fmt.Errorf("instance %s of %s is not listed and could not be read: %w", h.Machine, name, err)
+		}
+		kept := []provider.Instance{}
+		for _, i := range rented {
+			if i.ID != h.Machine {
+				kept = append(kept, i)
+			}
+		}
+		rented = kept
+		if !exists {
+			continue
+		}
+		if !strings.HasPrefix(found.Name, l.prefix) {
+			return nil, fmt.Errorf("instance %s of %s is not listed, and read by its id it is named %q, outside this launcher's names", h.Machine, name, found.Name)
+		}
+		l.cfg.Log("instance %s of %s is %s and the provider's list left it out", h.Machine, name, found.State)
+		rented = append(rented, found)
+	}
+	return rented, nil
 }
 
 // pass is what one Pass keeps while it acts on an answer.
@@ -460,16 +507,18 @@ func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Ins
 		instances := byName[name]
 		sort.SliceStable(instances, func(a, b int) bool { return instances[a].ID < instances[b].ID })
 		state, last := provider.StateExited, instances[len(instances)-1]
+		// The name is reported by the machine its state is taken from.
+		reportedBy := last
 		var running *provider.Instance
 		for _, i := range instances {
 			if liveness[i.State] > liveness[state] {
-				state = i.State
+				state, reportedBy = i.State, i
 			}
 			if i.State == provider.StateRunning && running == nil {
 				running = &i
 			}
 		}
-		entry := observedInstance{Name: name[len(l.prefix):], State: string(state)}
+		entry := observedInstance{Name: name[len(l.prefix):], Machine: reportedBy.ID, State: string(state)}
 		if running != nil {
 			if seen, ok := l.progressOf(ctx, *running); ok {
 				entry.Progress = &seen.progress

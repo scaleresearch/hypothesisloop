@@ -2,6 +2,8 @@ package launchertest
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -43,6 +45,9 @@ type Store struct {
 	askedAt     map[string]time.Duration
 	progress    map[string]string
 	restartedAt map[string][]time.Duration
+	// machine is the provider id each held name was last reported by, by platform experiment
+	// and agent id joined with a slash.
+	machine map[string]string
 }
 
 var epoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -101,6 +106,7 @@ func (s *Store) ReleaseInstances(_ context.Context, launcher string, _, _ time.D
 		}
 		agent.Instance.Name, agent.Instance.Reported, agent.Instance.ExitedAt = "", "", &now
 		agent.Instance.EndReason, agent.Instance.ExitLog = string(db.InstanceReleased), end.ReleasedBecause()
+		delete(s.machine, agent.PlatformExperimentID+"/"+agent.AgentID)
 		delete(s.Activity, agent.PlatformExperimentID+"/"+agent.AgentID)
 	}
 	return nil
@@ -137,6 +143,7 @@ func (s *Store) AskInstance(_ context.Context, platformExpID, agentID, name, lau
 		delete(s.restartedAt, platformExpID+"/"+agentID)
 	}
 	instance.Name, instance.Launch, instance.SeenAt, instance.Reported, instance.ProgressAt = name, launch, nil, "", nil
+	delete(s.machine, platformExpID+"/"+agentID)
 	delete(s.progress, platformExpID+"/"+agentID)
 	delete(s.Activity, platformExpID+"/"+agentID)
 	if s.askedAt == nil {
@@ -146,7 +153,10 @@ func (s *Store) AskInstance(_ context.Context, platformExpID, agentID, name, lau
 	return nil
 }
 
-func (s *Store) ObserveInstance(_ context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity string) error {
+func (s *Store) ObserveInstance(_ context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity, machine string) error {
+	if machine == "" {
+		return fmt.Errorf("launchertest: %s is reported with no machine id", name)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.WriteErr[agentID]; err != nil {
@@ -156,6 +166,10 @@ func (s *Store) ObserveInstance(_ context.Context, platformExpID, agentID, name,
 	if name == "" || instance.Name != name {
 		return nil
 	}
+	if s.machine == nil {
+		s.machine = map[string]string{}
+	}
+	s.machine[platformExpID+"/"+agentID] = machine
 	at := epoch.Add(s.clock)
 	if instance.SeenAt == nil {
 		instance.SeenAt = &at
@@ -211,6 +225,7 @@ func (s *Store) EndInstance(_ context.Context, platformExpID, agentID, name stri
 		return domain.AgentInstance{}, false, nil
 	}
 	instance.Name, instance.ExitedAt, instance.ExitLog, instance.EndReason, instance.Reported = "", &now, exitLog, string(how), ""
+	delete(s.machine, platformExpID+"/"+agentID)
 	delete(s.Activity, platformExpID+"/"+agentID)
 	key := platformExpID + "/" + agentID
 	var recent []time.Duration
@@ -233,6 +248,30 @@ func (s *Store) EndInstance(_ context.Context, platformExpID, agentID, name stri
 	}
 	s.restartedAt[key] = recent
 	return *instance, true, nil
+}
+
+func (s *Store) ListLauncherMachines(_ context.Context, launcher string) ([]db.LauncherMachine, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Err != nil {
+		return nil, s.Err
+	}
+	held := []db.LauncherMachine{}
+	add := func(key string, instance *domain.AgentInstance) {
+		if machine := s.machine[key]; instance != nil && instance.Name != "" && machine != "" {
+			held = append(held, db.LauncherMachine{Name: instance.Name, Machine: machine})
+		}
+	}
+	for _, agent := range s.ByLauncher[launcher] {
+		add(agent.PlatformExperimentID+"/"+agent.AgentID, agent.Instance)
+	}
+	for i := range s.Coordinators {
+		if s.Coordinators[i].Launcher == launcher {
+			add(s.Coordinators[i].PlatformExperimentID+"/", &s.Coordinators[i].Instance)
+		}
+	}
+	sort.Slice(held, func(a, b int) bool { return held[a].Name < held[b].Name })
+	return held, nil
 }
 
 func (s *Store) SetLauncherHolds(_ context.Context, launcher string, holds bool) error {

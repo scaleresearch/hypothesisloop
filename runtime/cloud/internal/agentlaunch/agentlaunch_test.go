@@ -32,6 +32,18 @@ type controlPlane struct {
 	// asked holds the body of every call, as the launcher sent it.
 	asked  []reconcileQuestion
 	server *httptest.Server
+	// held is what the machines call answers, heldStatus a failure in its place, and heldReads
+	// the calls made to it, which calls leaves out.
+	held       []heldMachine
+	heldStatus int
+	heldReads  []*http.Request
+}
+
+// holds sets the machines the platform holds, as the machines call answers them.
+func (cp *controlPlane) holds(machines ...heldMachine) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	cp.held = machines
 }
 
 func (cp *controlPlane) lastQuestion() reconcileQuestion {
@@ -46,6 +58,16 @@ func newControlPlane(t *testing.T) *controlPlane {
 	cp.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cp.mu.Lock()
 		defer cp.mu.Unlock()
+		if r.Method == http.MethodGet && r.URL.Path == "/internal/launchers/main/machines" {
+			cp.heldReads = append(cp.heldReads, r)
+			if cp.heldStatus != 0 {
+				w.WriteHeader(cp.heldStatus)
+				return
+			}
+			raw, _ := json.Marshal(map[string]any{"machines": append([]heldMachine{}, cp.held...)})
+			_, _ = w.Write(raw)
+			return
+		}
 		cp.calls = append(cp.calls, r)
 		var question reconcileQuestion
 		if err := json.NewDecoder(r.Body).Decode(&question); err != nil {
@@ -384,8 +406,8 @@ func TestAnExitedInstanceIsReportedWithTheEndOfItsOutputAndNeverRentedAgainFromH
 		h.mustPass()
 		question := h.cp.lastQuestion()
 		want := []observedInstance{
-			{Name: "a", State: "exited", Log: "starting\nTraceback (most recent call last):\nSystemExit: agent: the reason"},
-			{Name: "b", State: "running", Progress: new(string)},
+			{Name: "a", Machine: crashed[0], State: "exited", Log: "starting\nTraceback (most recent call last):\nSystemExit: agent: the reason"},
+			{Name: "b", Machine: h.rented.IDs(full("b"))[0], State: "running", Progress: new(string)},
 		}
 		if !reflect.DeepEqual(question.Instances, want) {
 			t.Fatalf("pass %d told the control plane %+v\nwant %+v", pass, question.Instances, want)
@@ -445,7 +467,7 @@ func TestAnExitWhoseOutputCannotBeReadIsStillReported(t *testing.T) {
 		return nil
 	}
 	h.mustPass()
-	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []observedInstance{{Name: "a", State: "exited"}}) {
+	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []observedInstance{{Name: "a", Machine: "fake-0001", State: "exited"}}) {
 		t.Fatalf("told the control plane %+v", got)
 	}
 	if h.logged("read the output of exited "+full("a")) != 1 {
@@ -464,7 +486,7 @@ func TestANameIsReportedOnceAndAsLiveWhileAnyInstanceOfItIs(t *testing.T) {
 	rent(t, h.rented, full("b"))
 	rent(t, h.rented, "hl-agent-other-zzz")
 	h.mustPass()
-	want := []observedInstance{{Name: "a", State: "starting"}, {Name: "b", State: "running", Progress: new(string)}}
+	want := []observedInstance{{Name: "a", Machine: "fake-0002", State: "starting"}, {Name: "b", Machine: "fake-0003", State: "running", Progress: new(string)}}
 	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, want) {
 		t.Fatalf("told the control plane %+v\nwant %+v", got, want)
 	}
@@ -1018,7 +1040,7 @@ func TestAnInstanceTheProviderCannotPlaceIsReportedAsUnknownAndLeftAlone(t *test
 	h.rented.Lose(full("a"))
 
 	h.mustPass()
-	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []observedInstance{{Name: "a", State: "unknown"}}) {
+	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []observedInstance{{Name: "a", Machine: "fake-0001", State: "unknown"}}) {
 		t.Fatalf("told the control plane %+v", got)
 	}
 	if h.rented.Calls("Create") != 1 || h.rented.Calls("Destroy") != 0 || h.rented.Calls("Logs") != 0 {
@@ -1033,7 +1055,7 @@ func TestAnInstanceThatStaysStartingIsReportedAndNeverReplacedFromHere(t *testin
 	ids := h.rented.IDs(full("a"))
 	for range 5 {
 		h.mustPass()
-		if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []observedInstance{{Name: "a", State: "starting"}}) {
+		if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []observedInstance{{Name: "a", Machine: "fake-0001", State: "starting"}}) {
 			t.Fatalf("told the control plane %+v", got)
 		}
 	}
@@ -1222,10 +1244,10 @@ func TestTheNewestProgressMarkerOfEachRunningInstanceIsReported(t *testing.T) {
 	h.mustPass()
 	four, none := "4", ""
 	want := []observedInstance{
-		{Name: "a", State: "running", Progress: &four},
-		{Name: "b", State: "running", Progress: &none},
-		{Name: "c", State: "starting"},
-		{Name: "d", State: "running"},
+		{Name: "a", Machine: "fake-0001", State: "running", Progress: &four},
+		{Name: "b", Machine: "fake-0002", State: "running", Progress: &none},
+		{Name: "c", Machine: "fake-0003", State: "starting"},
+		{Name: "d", Machine: "fake-0004", State: "running"},
 	}
 	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, want) {
 		t.Fatalf("told the control plane %+v\nwant %+v", got, want)
@@ -1303,5 +1325,78 @@ func TestAMarkerFurtherBackThanTheLinesReadIsNotReported(t *testing.T) {
 	h.mustPass()
 	if got := h.cp.lastQuestion().Instances[0].Progress; got == nil || *got != "" {
 		t.Fatalf("progress = %v, want read and none found", got)
+	}
+}
+
+// A machine the platform holds that the provider's list leaves out is read by its id, and
+// reported as that read finds it: running, so nothing is created.
+func TestAHeldMachineTheListLeavesOutIsReadByItsIDAndReportedAsFound(t *testing.T) {
+	h := newHarness(t)
+	h.cp.want([]entry{agent("a")}, nil)
+	h.mustPass()
+	h.rented.Start(full("a"))
+	id := h.rented.IDs(full("a"))[0]
+	h.cp.holds(heldMachine{Name: "a", Machine: id})
+	h.rented.Hide(full("a"))
+	h.mustPass()
+	want := []observedInstance{{Name: "a", Machine: id, State: "running", Progress: new(string)}}
+	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, want) {
+		t.Fatalf("told the control plane %+v\nwant %+v", got, want)
+	}
+	if h.rented.Calls("Get") != 1 || h.rented.Calls("Create") != 1 || h.rented.Calls("Destroy") != 0 {
+		t.Fatalf("gets %d creates %d destroys %d", h.rented.Calls("Get"), h.rented.Calls("Create"), h.rented.Calls("Destroy"))
+	}
+	if h.logged("instance "+id+" of "+full("a")+" is running and the provider's list left it out") != 1 {
+		t.Fatalf("log = %q", h.log)
+	}
+	// Listed again, it is not read.
+	h.rented.Show(full("a"))
+	h.mustPass()
+	if h.rented.Calls("Get") != 1 {
+		t.Fatalf("gets = %d, want no read of a listed machine", h.rented.Calls("Get"))
+	}
+}
+
+// Only a read that says the machine is gone leaves it out of the report.
+func TestAHeldMachineThatIsGoneIsLeftOut(t *testing.T) {
+	h := newHarness(t)
+	h.cp.holds(heldMachine{Name: "a", Machine: "fake-9999"})
+	h.mustPass()
+	if got := h.cp.lastQuestion().Instances; len(got) != 0 {
+		t.Fatalf("told the control plane %+v, want nothing", got)
+	}
+	if h.rented.Calls("Get") != 1 {
+		t.Fatalf("gets = %d", h.rented.Calls("Get"))
+	}
+}
+
+// A read that fails, or a control plane that cannot say what it holds, fails the pass before
+// anything is reported or changed.
+func TestAPassThatCannotTellWhetherAHeldMachineIsGoneReportsNothing(t *testing.T) {
+	h := newHarness(t)
+	h.cp.want([]entry{agent("a")}, nil)
+	h.mustPass()
+	h.rented.Start(full("a"))
+	h.cp.holds(heldMachine{Name: "a", Machine: h.rented.IDs(full("a"))[0]})
+	h.rented.Hide(full("a"))
+	h.rented.Fail = func(method, _ string) error {
+		if method == "Get" {
+			return errors.New("vendor: 503")
+		}
+		return nil
+	}
+	questions := len(h.cp.asked)
+	if err := h.pass(); err == nil || !strings.Contains(err.Error(), "is not listed and could not be read") {
+		t.Fatalf("pass = %v, want the failed read", err)
+	}
+	h.rented.Fail = nil
+	h.cp.mu.Lock()
+	h.cp.heldStatus = http.StatusInternalServerError
+	h.cp.mu.Unlock()
+	if err := h.pass(); err == nil || !strings.Contains(err.Error(), "fetch the machines the platform holds") {
+		t.Fatalf("pass = %v, want the failed fetch", err)
+	}
+	if len(h.cp.asked) != questions || h.rented.Calls("Create") != 1 || h.rented.Calls("Destroy") != 0 {
+		t.Fatalf("questions %d (was %d), creates %d, destroys %d: nothing may be reported or changed", len(h.cp.asked), questions, h.rented.Calls("Create"), h.rented.Calls("Destroy"))
 	}
 }

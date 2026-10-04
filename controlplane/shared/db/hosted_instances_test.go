@@ -255,20 +255,20 @@ func TestAMachineIsGivenUpOnWhenItIsNeverSeenStaysStartingOrIsGone(t *testing.T)
 		// ago it was asked for.
 		ask("starting")
 		thing.age(thing.column("asked_at"), 10*bootLimit)
-		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "another-name", "starting", nil, time.Hour, ""); err != nil {
+		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "another-name", "starting", nil, time.Hour, "", "machine-1"); err != nil {
 			t.Fatal(err)
 		}
 		if thing.instance().SeenAt != nil {
 			t.Fatalf("%s: seeing another name marked this one seen", kind)
 		}
-		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "starting", "starting", nil, time.Hour, ""); err != nil {
+		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "starting", "starting", nil, time.Hour, "", "machine-1"); err != nil {
 			t.Fatal(err)
 		}
 		first := thing.instance().SeenAt
 		if first == nil || end("starting", InstanceNeverSeen) || end("starting", InstanceStillStarting) {
 			t.Fatalf("%s: a machine just seen: got = %+v, want it kept", kind, thing.instance())
 		}
-		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "starting", "starting", nil, time.Hour, ""); err != nil || !thing.instance().SeenAt.Equal(*first) {
+		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "starting", "starting", nil, time.Hour, "", "machine-1"); err != nil || !thing.instance().SeenAt.Equal(*first) {
 			t.Fatalf("%s: seen again moved the first sight: %v", kind, err)
 		}
 		thing.age(thing.column("seen_at"), bootLimit+time.Second)
@@ -284,11 +284,74 @@ func TestAMachineIsGivenUpOnWhenItIsNeverSeenStaysStartingOrIsGone(t *testing.T)
 		if end("gone", InstanceGone) {
 			t.Fatalf("%s: a machine never seen was recorded as gone", kind)
 		}
-		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "gone", "starting", nil, time.Hour, ""); err != nil {
+		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "gone", "starting", nil, time.Hour, "", "machine-1"); err != nil {
 			t.Fatal(err)
 		}
 		if !end("gone", InstanceGone) || thing.instance().Restarts != 3 || thing.instance().ExitLog != "why" {
 			t.Fatalf("%s: seen and gone: got = %+v, want a third restart spent", kind, thing.instance())
+		}
+	}
+}
+
+// The machine a held name was last reported by is answered until the name is given up on or
+// asked for anew, and a report without one is refused.
+func TestALauncherIsToldTheMachineOfEveryNameItHolds(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	for kind, thing := range hostedThings(t, pool) {
+		name := "held-" + uuid.New().String()[:8]
+		machineOf := func(names ...string) string {
+			t.Helper()
+			if names == nil {
+				names = []string{name}
+			}
+			held, err := pes.ListLauncherMachines(ctx, "main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range held {
+				if m.Name == names[0] {
+					return m.Machine
+				}
+			}
+			return ""
+		}
+		observe := func(machine string) error {
+			return pes.ObserveInstance(ctx, thing.pe, thing.agentID, name, domain.InstanceRunning, nil, time.Hour, "", machine)
+		}
+		if err := pes.AskInstance(ctx, thing.pe, thing.agentID, name, "launch-1"); err != nil {
+			t.Fatal(err)
+		}
+		if got := machineOf(); got != "" {
+			t.Fatalf("%s: a name never reported is held by %q", kind, got)
+		}
+		if err := observe(""); err == nil {
+			t.Fatalf("%s: a report with no machine id was taken", kind)
+		}
+		if err := observe("m-1"); err != nil || machineOf() != "m-1" {
+			t.Fatalf("%s: reported by m-1: %v, held by %q", kind, err, machineOf())
+		}
+		if err := observe("m-2"); err != nil || machineOf() != "m-2" {
+			t.Fatalf("%s: reported again by m-2, same state: %v, held by %q", kind, err, machineOf())
+		}
+		if _, recorded, err := pes.EndInstance(ctx, thing.pe, thing.agentID, name, InstanceGone, "why", time.Minute, 3); err != nil || !recorded {
+			t.Fatalf("%s: end: %v %v", kind, recorded, err)
+		}
+		if got := machineOf(); got != "" {
+			t.Fatalf("%s: a name given up on is still held by %q", kind, got)
+		}
+		if err := pes.AskInstance(ctx, thing.pe, thing.agentID, name, "launch-1"); err != nil {
+			t.Fatal(err)
+		}
+		if err := observe("m-3"); err != nil {
+			t.Fatal(err)
+		}
+		if err := pes.AskInstance(ctx, thing.pe, thing.agentID, name+"-next", "launch-1"); err != nil {
+			t.Fatal(err)
+		}
+		if got := machineOf(name + "-next"); got != "" {
+			t.Fatalf("%s: a name asked for anew answers the last one's machine %q", kind, got)
 		}
 	}
 }
@@ -515,7 +578,7 @@ func TestARunningMachinesProgressIsStampedOnThisClockAndItsSilenceEndsIt(t *test
 	for kind, thing := range hostedThings(t, pool) {
 		observe := func(state string, progress *string) {
 			t.Helper()
-			if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "name-1", state, progress, limit, ""); err != nil {
+			if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "name-1", state, progress, limit, "", "machine-1"); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -615,7 +678,7 @@ func TestARunningMachineWhoseProgressIsUnreadableIsEndedByTheSilentClockAndSpend
 	for kind, thing := range hostedThings(t, pool) {
 		observe := func(name, state string, progress *string) {
 			t.Helper()
-			if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, name, state, progress, limit, ""); err != nil {
+			if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, name, state, progress, limit, "", "machine-1"); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -701,7 +764,7 @@ func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t 
 		if err := pes.AskInstance(ctx, pe, agent, name, "launch-1"); err != nil {
 			t.Fatal(err)
 		}
-		if err := pes.ObserveInstance(ctx, pe, agent, name, domain.InstanceRunning, &running, time.Hour, ""); err != nil {
+		if err := pes.ObserveInstance(ctx, pe, agent, name, domain.InstanceRunning, &running, time.Hour, "", "machine-1"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -879,7 +942,7 @@ func TestWhatAHostedAgentIsDoingIsKeptOnItsRowAndAnsweredWhereItIsRead(t *testin
 		}
 		observe := func(name, activity string) {
 			t.Helper()
-			if err := pes.ObserveInstance(ctx, one.pe, one.agent, name, domain.InstanceRunning, nil, time.Hour, activity); err != nil {
+			if err := pes.ObserveInstance(ctx, one.pe, one.agent, name, domain.InstanceRunning, nil, time.Hour, activity, "machine-1"); err != nil {
 				t.Fatal(err)
 			}
 		}

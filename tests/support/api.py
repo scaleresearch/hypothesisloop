@@ -427,8 +427,10 @@ class API:
         return self.post_json(f"/internal/launchers/{launcher}/reconcile", self.launcher_question(observed))
 
     def launcher_question(self, observed: list[dict] | None = None) -> dict:
-        """What a launcher sends: what it observed, its launch digest and how it paces its passes."""
-        return {"launch_digest": self.LAUNCH_DIGEST, "instances": observed or [],
+        """What a launcher sends: what it observed, its launch digest and how it paces its passes.
+        An instance observed with no machine id gets one of its own name."""
+        instances = [{"machine": f"m-{o['name']}", **o} for o in observed or []]
+        return {"launch_digest": self.LAUNCH_DIGEST, "instances": instances,
                 "reconcile_interval_seconds": 2, "create_pause_milliseconds": 0}
 
     def signup_role(self, pe_id: str, agent_id: str) -> tuple[int, str | None]:

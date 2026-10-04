@@ -61,9 +61,11 @@ const maxAnswerBytes = 64 << 20
 // observedInstance is one name of this launcher's namespace as its provider lists it, without
 // the launcher's prefix.
 type observedInstance struct {
-	Name  string `json:"name"`
-	State string `json:"state"`
-	Log   string `json:"log,omitempty"`
+	Name string `json:"name"`
+	// Machine is the provider's id of the instance the name is reported by.
+	Machine string `json:"machine"`
+	State   string `json:"state"`
+	Log     string `json:"log,omitempty"`
 	// Expired is provider.Instance.Expired of an exited instance.
 	Expired bool `json:"expired,omitempty"`
 	// Progress is nil when the output of a running instance could not be read.
@@ -88,6 +90,54 @@ type reconcileQuestion struct {
 // ErrRefused is the control plane refusing this launcher's own configuration. A pass returns it
 // after it stopped and destroyed by the answer's lists, having created nothing.
 var ErrRefused = errors.New("the control plane refuses this launcher's configuration")
+
+// heldMachine is a machine the platform holds for this launcher: the name it was asked for
+// under, without the launcher's prefix, and the provider's id it was last reported by.
+type heldMachine struct {
+	Name    string `json:"name"`
+	Machine string `json:"machine"`
+}
+
+// fetchHeld asks the control plane which machines it holds for this launcher, which changes
+// nothing there.
+func (l *Launcher) fetchHeld(ctx context.Context) ([]heldMachine, error) {
+	endpoint := fmt.Sprintf("%s/internal/launchers/%s/machines", l.cfg.APIURL, url.PathEscape(l.cfg.Name))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+l.cfg.Token)
+	resp, err := l.cfg.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, int64(l.maxAnswer)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > l.maxAnswer {
+		return nil, fmt.Errorf("answer is larger than %d bytes", l.maxAnswer)
+	}
+	var answer struct {
+		Machines *[]heldMachine `json:"machines"`
+	}
+	if err := json.Unmarshal(raw, &answer); err != nil {
+		return nil, fmt.Errorf("decode answer: %w", err)
+	}
+	if answer.Machines == nil {
+		return nil, errors.New("answer carries no machines list")
+	}
+	for _, held := range *answer.Machines {
+		if held.Name == "" || held.Machine == "" {
+			return nil, fmt.Errorf("a held machine has no name or no id: %+v", held)
+		}
+	}
+	return *answer.Machines, nil
+}
 
 func (l *Launcher) fetchDesired(ctx context.Context, observed []observedInstance) (*desired, error) {
 	question, err := json.Marshal(reconcileQuestion{

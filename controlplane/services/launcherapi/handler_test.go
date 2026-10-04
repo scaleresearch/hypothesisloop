@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -65,7 +66,24 @@ func observed(instances ...ObservedInstance) Observed {
 	if instances == nil {
 		instances = []ObservedInstance{}
 	}
-	return Observed{LaunchDigest: testDigest, Instances: instances, ReconcileIntervalSeconds: 15, CreatePauseMilliseconds: 1000}
+	return withMachines(Observed{LaunchDigest: testDigest, Instances: instances, ReconcileIntervalSeconds: 15, CreatePauseMilliseconds: 1000})
+}
+
+// withMachines gives every instance reported with no machine id one of its own name: a test that
+// does not care which machine a name is reported by.
+func withMachines(o Observed) Observed {
+	if o.Instances == nil {
+		return o
+	}
+	instances := make([]ObservedInstance, len(o.Instances))
+	copy(instances, o.Instances)
+	for i := range instances {
+		if instances[i].Machine == "" {
+			instances[i].Machine = "m-" + instances[i].Name
+		}
+	}
+	o.Instances = instances
+	return o
 }
 
 func reconcile(t *testing.T, store Store, caller auth.Principal, launcher string, logger *zap.Logger) (int, []byte) {
@@ -78,6 +96,9 @@ func reconcileWith(t *testing.T, store Store, caller auth.Principal, launcher st
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	RegisterHuma(doc, NewHandler(store, &launchertest.Metrics{}, testSettings, logger))
+	if o, ok := body.(Observed); ok {
+		body = withMachines(o)
+	}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		t.Fatal(err)
@@ -841,6 +862,55 @@ func TestAMachineReportedUnknownIsHeldToTheProgressLimitOnceItRanAndToTheBootLim
 	recorded := store.Find("pe-1", "ag-1")
 	if answer.Instances[0].Name == agent || recorded.Restarts != 1 || recorded.EndReason != string(db.InstanceSilent) || !strings.Contains(recorded.ExitLog, "stopped saying whether it still does") {
 		t.Fatalf("unknown for a whole progress limit: %+v, recorded %+v, want it replaced as silent", answer.Instances, recorded)
+	}
+}
+
+// held is the launcher's GET of the machines the platform holds for it.
+func held(t *testing.T, store Store) (int, Held) {
+	t.Helper()
+	r := chi.NewRouter()
+	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(mainLauncher), auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	RegisterHuma(doc, NewHandler(store, &launchertest.Metrics{}, testSettings, zap.NewNop()))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest(http.MethodGet, "/main/machines", nil)))
+	var out Held
+	if rec.Code == http.StatusOK {
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.Machines == nil {
+			t.Fatalf("answer %s: %v, want a machines list", rec.Body.String(), err)
+		}
+	}
+	return rec.Code, out
+}
+
+func TestALauncherIsToldTheMachineEachNameItHoldsWasReportedByUntilItIsGivenUpOn(t *testing.T) {
+	store := oneAgentAndACoordinator()
+	first := mustReconcile(t, store, observed())
+	agent, coordinator := first.Instances[0].Name, first.Instances[1].Name
+	if code, got := held(t, store); code != http.StatusOK || len(got.Machines) != 0 {
+		t.Fatalf("before any report: %d %+v, want none held", code, got)
+	}
+	mustReconcile(t, store, observed(ObservedInstance{Name: agent, Machine: "m-agent", State: "running"}, ObservedInstance{Name: coordinator, Machine: "m-coordinator", State: "running"}))
+	want := []HeldMachine{{Name: agent, Machine: "m-agent"}, {Name: coordinator, Machine: "m-coordinator"}}
+	sort.Slice(want, func(a, b int) bool { return want[a].Name < want[b].Name })
+	if code, got := held(t, store); code != http.StatusOK || !reflect.DeepEqual(got.Machines, want) {
+		t.Fatalf("held = %d %+v, want %+v", code, got.Machines, want)
+	}
+	mustReconcile(t, store, observed(ObservedInstance{Name: coordinator, Machine: "m-coordinator", State: "running"}))
+	if code, got := held(t, store); code != http.StatusOK || !reflect.DeepEqual(got.Machines, []HeldMachine{{Name: coordinator, Machine: "m-coordinator"}}) {
+		t.Fatalf("after the agent's machine was given up on: %d %+v, want the coordinator's alone", code, got.Machines)
+	}
+}
+
+func TestAReportOfAMachineWithoutItsIDIsRefused(t *testing.T) {
+	store := oneAgentAndACoordinator()
+	name := mustReconcile(t, store, observed()).Instances[0].Name
+	body := map[string]any{"launch_digest": testDigest, "reconcile_interval_seconds": 15, "create_pause_milliseconds": 1000,
+		"instances": []any{map[string]any{"name": name, "state": "running"}}}
+	if code, raw := reconcileWith(t, store, mainLauncher, "main", zap.NewNop(), body); code/100 != 4 {
+		t.Fatalf("status = %d %s, want a refusal", code, raw)
+	}
+	if recorded := store.Find("pe-1", "ag-1"); recorded.SeenAt != nil {
+		t.Fatalf("recorded %+v from a refused report", recorded)
 	}
 }
 
