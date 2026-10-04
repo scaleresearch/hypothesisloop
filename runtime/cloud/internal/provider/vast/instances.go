@@ -69,29 +69,10 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 		}
 		for _, found := range page.Instances {
 			onAccount[strconv.FormatInt(found.ID, 10)] = true
-			if found.Label == nil {
+			if found.Label == nil || !strings.HasPrefix(strings.TrimSuffix(*found.Label, stopMark), namePrefix) {
 				continue
 			}
-			name := strings.TrimSuffix(*found.Label, stopMark)
-			if !strings.HasPrefix(name, namePrefix) {
-				continue
-			}
-			state, known := stateOf(found.ActualStatus)
-			if !known {
-				log.Printf("vast: instance %d (%s) has status %q, which this adapter does not know; reporting it as unknown", found.ID, name, *found.ActualStatus)
-			}
-			startedAt := time.Unix(0, int64(found.StartDate*float64(time.Second)))
-			if state == provider.StateStarting && time.Since(startedAt) > slowStart {
-				logSlowStart(found, name, startedAt)
-			}
-			listed = append(listed, provider.Instance{
-				ID:        strconv.FormatInt(found.ID, 10),
-				Name:      name,
-				State:     state,
-				StartedAt: startedAt,
-				Host:      found.host(), AcceleratorModel: text(found.GPUName), CPUModel: text(found.CPUName),
-				PricePerHour: found.PricePerHour,
-			})
+			listed = append(listed, found.instance())
 		}
 		if page.NextToken == nil || *page.NextToken == "" {
 			p.held.keep(onAccount)
@@ -99,6 +80,49 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 		}
 		token = *page.NextToken
 	}
+}
+
+// instance is found as a caller sees it, under the name it was created with.
+func (found instance) instance() provider.Instance {
+	name := ""
+	if found.Label != nil {
+		name = strings.TrimSuffix(*found.Label, stopMark)
+	}
+	state, known := stateOf(found.ActualStatus)
+	if !known {
+		log.Printf("vast: instance %d (%s) has status %q, which this adapter does not know; reporting it as unknown", found.ID, name, *found.ActualStatus)
+	}
+	startedAt := time.Unix(0, int64(found.StartDate*float64(time.Second)))
+	if state == provider.StateStarting && time.Since(startedAt) > slowStart {
+		logSlowStart(found, name, startedAt)
+	}
+	return provider.Instance{
+		ID:        strconv.FormatInt(found.ID, 10),
+		Name:      name,
+		State:     state,
+		StartedAt: startedAt,
+		Host:      found.host(), AcceleratorModel: text(found.GPUName), CPUModel: text(found.CPUName),
+		PricePerHour: found.PricePerHour,
+	}
+}
+
+// Get reads the instance by its id. The API answers an id it does not have, or no longer has,
+// with no instance and 200.
+func (p *Provider) Get(ctx context.Context, id string) (provider.Instance, bool, error) {
+	var shown struct {
+		Instances *instance `json:"instances"`
+	}
+	_, err := p.call(ctx, http.MethodGet, "/api/v0/instances/"+url.PathEscape(id)+"/", nil, &shown)
+	if isGone(err) {
+		return provider.Instance{}, false, nil
+	}
+	if err != nil {
+		return provider.Instance{}, false, err
+	}
+	if shown.Instances == nil {
+		return provider.Instance{}, false, nil
+	}
+	return shown.Instances.instance(), true, nil
 }
 
 // logSlowStart puts the host's own account of an instance that is not coming up where an

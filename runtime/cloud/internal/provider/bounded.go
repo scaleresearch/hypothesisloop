@@ -110,6 +110,12 @@ func (b bounded) List(ctx context.Context, namePrefix string) ([]Instance, error
 	return b.Provider.List(ctx, namePrefix)
 }
 
+func (b bounded) Get(ctx context.Context, id string) (Instance, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
+	defer cancel()
+	return b.Provider.Get(ctx, id)
+}
+
 func (b bounded) Logs(ctx context.Context, id string, tail int) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
 	defer cancel()

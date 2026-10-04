@@ -21,6 +21,9 @@ type instance struct {
 	stops int
 	// warm is an instance Warm rented and StartWarm has not started.
 	warm bool
+	// hidden is an instance List leaves out while Get still finds it, as a vendor whose list
+	// trails its instances does.
+	hidden bool
 }
 
 type Provider struct {
@@ -30,8 +33,9 @@ type Provider struct {
 	calls     map[string]int
 
 	// Fail, when set, is asked before every call and its error returned in place of the call.
-	// method is "Create", "List", "Logs", "Stop", "Destroy", "Pause", "Resume", "Rentable", "Warm"
-	// or "StartWarm"; name is the instance's, empty for List and Rentable, and for StartWarm the
+	// method is "Create", "List", "Logs", "Stop", "Destroy", "Pause", "Resume", "Rentable", "Warm",
+	// "StartWarm" or "Get"; name is the instance's, empty for List, Rentable and an id Get does not
+	// find, and for StartWarm the
 	// name it is started under.
 	Fail func(method, name string) error
 
@@ -139,12 +143,39 @@ func (p *Provider) List(_ context.Context, namePrefix string) ([]provider.Instan
 	}
 	var out []provider.Instance
 	for _, i := range p.instances {
-		if strings.HasPrefix(i.Name, namePrefix) {
+		if strings.HasPrefix(i.Name, namePrefix) && !i.hidden {
 			out = append(out, i.Instance)
 		}
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].ID < out[b].ID })
 	return out, nil
+}
+
+func (p *Provider) Get(_ context.Context, id string) (provider.Instance, bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	i, ok := p.instances[id]
+	name := ""
+	if ok {
+		name = i.Name
+	}
+	if err := p.fail("Get", name); err != nil {
+		return provider.Instance{}, false, err
+	}
+	if !ok {
+		return provider.Instance{}, false, nil
+	}
+	return i.Instance, true, nil
+}
+
+// Hide leaves every instance of the name out of List, and Show puts it back. Get finds it
+// either way.
+func (p *Provider) Hide(name string) {
+	p.each(name, func(i *instance) { i.hidden = true })
+}
+
+func (p *Provider) Show(name string) {
+	p.each(name, func(i *instance) { i.hidden = false })
 }
 
 func (p *Provider) Logs(_ context.Context, id string, tail int) ([]string, error) {

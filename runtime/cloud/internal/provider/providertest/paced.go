@@ -46,6 +46,11 @@ func (p *paced) List(ctx context.Context, namePrefix string) ([]provider.Instanc
 	return p.Provider.List(ctx, namePrefix)
 }
 
+func (p *paced) Get(ctx context.Context, id string) (provider.Instance, bool, error) {
+	defer p.turn()()
+	return p.Provider.Get(ctx, id)
+}
+
 func (p *paced) Logs(ctx context.Context, id string, tail int) ([]string, error) {
 	defer p.turn()()
 	return p.Provider.Logs(ctx, id, tail)

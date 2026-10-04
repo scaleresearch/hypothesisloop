@@ -70,6 +70,21 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 	return listed, nil
 }
 
+// Get reads the sandbox by its id, which the API answers 404 for once it is gone, and its state
+// as List does.
+func (p *Provider) Get(ctx context.Context, id string) (provider.Instance, bool, error) {
+	var found sandbox
+	_, err := p.call(ctx, http.MethodGet, "/sandboxes/"+url.PathEscape(id), nil, &found)
+	if hasStatus(err, http.StatusNotFound) {
+		return provider.Instance{}, false, nil
+	}
+	if err != nil {
+		return provider.Instance{}, false, err
+	}
+	state, expired := p.stateOf(ctx, found)
+	return provider.Instance{ID: found.SandboxID, Name: found.Metadata[nameKey], State: state, Expired: expired, StartedAt: found.StartedAt}, true, nil
+}
+
 // sandboxes returns the team's sandboxes whose name starts with namePrefix. The API filters on a
 // whole metadata value and has no prefix match, so every page is read.
 func (p *Provider) sandboxes(ctx context.Context, namePrefix string) ([]sandbox, error) {

@@ -52,6 +52,29 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 	return listed, nil
 }
 
+// Get reads the Machine from its host's own record. The list is a copy that trails it: on
+// 2026-10-09 it left out running Machines for over a minute. The API answers 404 for an id it
+// never had, and a destroyed Machine for a while after.
+func (p *Provider) Get(ctx context.Context, id string) (provider.Instance, bool, error) {
+	var found machine
+	header, err := p.call(ctx, http.MethodGet, p.machinesPath("/"+url.PathEscape(id)), nil, &found)
+	if hasStatus(err, http.StatusNotFound) {
+		return provider.Instance{}, false, nil
+	}
+	if err != nil {
+		return provider.Instance{}, false, err
+	}
+	now, err := http.ParseTime(header.Get("Date"))
+	if err != nil {
+		return provider.Instance{}, false, fmt.Errorf("fly: the machine read carries no usable Date: %w", err)
+	}
+	state, exists := p.stateOf(ctx, found, now)
+	if !exists {
+		return provider.Instance{}, false, nil
+	}
+	return provider.Instance{ID: found.ID, Name: found.Config.Metadata[nameKey], State: state, StartedAt: found.CreatedAt}, true, nil
+}
+
 // stateOf maps a Machine's state. A Machine being destroyed is gone to a caller. One the vendor
 // restarts, updates or replaces has run its command and is not known to run it now, and a state
 // this adapter does not know says nothing either: both are unknown, and the Machine stays

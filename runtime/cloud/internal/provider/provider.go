@@ -165,6 +165,10 @@ type Provider interface {
 	Create(ctx context.Context, spec Spec) (id string, err error)
 	// List returns every instance whose name starts with namePrefix, and no others on the account.
 	List(ctx context.Context, namePrefix string) ([]Instance, error)
+	// Get reads the instance id itself, as List would show it, and exists is false when the
+	// vendor says it is gone. A vendor's list can trail its instances and leave out one that
+	// runs; Get is what tells such an instance from one that is gone. An error says neither.
+	Get(ctx context.Context, id string) (instance Instance, exists bool, err error)
 	// Logs returns the last tail lines the instance's command wrote to stdout and stderr, oldest
 	// first. It must work for an instance in StateExited.
 	Logs(ctx context.Context, id string, tail int) ([]string, error)
