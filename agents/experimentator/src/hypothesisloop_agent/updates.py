@@ -54,9 +54,12 @@ REVISION = "platform_experiment.revision"
 OPEN_WAKES = ("experiment.status=FAILED",)
 
 # How long an agent that ended its turn waits without any update before it is nudged: one that
-# ended its turn with nothing in flight would otherwise wait for an update that never comes.
+# ended its turn with nothing in flight would otherwise wait for an update that never comes. Each
+# nudge is a model call over the whole context, so the wait doubles with every nudge in a row, up
+# to IDLE_NUDGE_MAX_S, and an update brings it back.
 IDLE_NUDGE_S = 1800
-IDLE_PROMPT = "No platform updates for 30 minutes. Continue with the most useful work available, if there is any."
+IDLE_NUDGE_MAX_S = 4 * IDLE_NUDGE_S
+IDLE_PROMPT = "No platform updates for {minutes} minutes. Continue with the most useful work available, if there is any."
 
 
 def watch_env(api_url: str, token: str, statedir: str) -> dict[str, str]:

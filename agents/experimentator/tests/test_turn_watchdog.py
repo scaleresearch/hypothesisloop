@@ -1,6 +1,8 @@
 import asyncio
 import contextlib
 import io
+import json
+import os
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -204,6 +206,73 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.stop_while_idle([comment], [done]), [
             "Begin.", LAST + "\n\nPlatform updates:\ncomment.new hyp-1 human\n"
                            "experiment.status exp-1 COMPLETED acc 0.9"])
+
+
+class IdleNudgeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_the_wait_before_a_nudge_doubles_while_nothing_comes_and_an_update_resets_it(self):
+        stop_flag = [False]
+        waits = []
+        batches = [[], [], [], [{"kind": "comment.new", "subject": "hyp-1", "value": "human"}], [], []]
+
+        async def next_batch(env, stopped, idle_s):
+            waits.append(idle_s)
+            if len(waits) == len(batches):
+                stop_flag[0] = True
+            return batches[len(waits) - 1]
+
+        with mock.patch.object(run, "ClaudeSDKClient", IdleClient), \
+                mock.patch.object(run.updates, "next_batch", next_batch), \
+                mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=[])), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertLogs("llm_agent"):
+            await asyncio.wait_for(run._run_one_session(_setup(), "m", None, stop_flag), timeout=5)
+        nudge = run.updates.IDLE_NUDGE_S
+        self.assertEqual(waits, [nudge, 2 * nudge, 4 * nudge, 4 * nudge, nudge, 2 * nudge])
+        queries = HangingClient.instances[-1].queries
+        self.assertEqual(queries[1:4], [run.updates.IDLE_PROMPT.format(minutes=m) for m in (30, 60, 120)])
+        self.assertEqual(queries[5], run.updates.IDLE_PROMPT.format(minutes=30))
+
+
+class ContextOverflowTest(unittest.IsolatedAsyncioTestCase):
+    async def test_a_session_that_overflows_is_replaced_by_a_fresh_one_from_its_last_words(self):
+        home = tempfile.mkdtemp()
+        os.makedirs(os.path.join(home, "projects/p/s-1/subagents"))
+        with open(os.path.join(home, "projects/p/s-1/subagents/a.jsonl"), "w") as f:
+            f.write("{}\n")
+        with open(os.path.join(home, "projects/p/s-1.jsonl"), "w") as f:
+            for record in ({"type": "user", "message": {"content": "Begin."}},
+                           {"type": "assistant", "message": {"content": [{"type": "text", "text": "job exp-7 runs lr 3e-4"}]}},
+                           {"type": "assistant", "isSidechain": True, "message": {"content": [{"type": "text", "text": "a subagent's"}]}},
+                           {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash"}]}}):
+                f.write(json.dumps(record) + "\n")
+            f.write("not json\n")
+
+        class OverflowingClient(StoppableClient):
+            async def receive_response(self):
+                yield ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=True, num_turns=1,
+                                    session_id="s-1", result="Prompt is too long")
+
+        setup = _setup()
+        with mock.patch.object(run, "ClaudeSDKClient", OverflowingClient), \
+                mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": home}), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertLogs("llm_agent"):
+            self.assertEqual(await asyncio.wait_for(run._run_one_session(setup, "m", "s-1", [False]), timeout=5), (None, False))
+            resume_id, prompt = run._restart_state(setup)
+            self.assertIsNone(resume_id)
+            self.assertIn("job exp-7 runs lr 3e-4", prompt)
+            self.assertNotIn("a subagent's", prompt)
+            run._delete_retired_transcripts()
+        self.assertEqual(os.listdir(os.path.join(home, "projects/p")), [])
+
+    def test_the_rotation_point_follows_a_smaller_context_window(self):
+        def result(model_usage):
+            return ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
+                                 session_id="s-1", model_usage=model_usage)
+
+        self.assertEqual(run._rotation_threshold(result(None), "claude-x"), run._CONTEXT_COMPACTION_THRESHOLD_TOKENS)
+        self.assertEqual(run._rotation_threshold(result({"claude-x-2026": {"contextWindow": 1_000_000},
+                                                         "claude-h": {"contextWindow": 200_000}}), "claude-x"),
+                         run._CONTEXT_COMPACTION_THRESHOLD_TOKENS)
+        self.assertEqual(run._rotation_threshold(result({"claude-x-2026": {"contextWindow": 200_000}}), "claude-x"), 150_000)
 
 
 class TurnWatchdogTest(unittest.IsolatedAsyncioTestCase):

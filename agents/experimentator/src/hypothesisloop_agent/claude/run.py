@@ -9,9 +9,11 @@ machine resumes the conversation.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
+import shutil
 import time
 from pathlib import Path
 
@@ -188,6 +190,10 @@ _MAX_SINGLE_SLEEP_S = 3600
 # session at a fixed ceiling. The last assistant message's usage measures the context of the latest
 # model call; ResultMessage usage sums every call in the turn and overstates it many times over.
 _CONTEXT_COMPACTION_THRESHOLD_TOKENS = 400_000
+# Below a smaller window than that, the session rotates at this part of the window the CLI reports.
+_CONTEXT_WINDOW_SHARE = 0.75
+# A transcript this large rotates too, so that the session still fits what the platform stores.
+_TRANSCRIPT_ROTATION_BYTES = session.MAX_BYTES * 3 // 4
 _COMPACTION_PROMPT = (
     "We must rotate to a fresh session because this session has reached its context budget. "
     "Produce a concise but complete handoff for the next instance of yourself: current platform "
@@ -597,6 +603,96 @@ def credential_refused(result: str | None) -> bool:
     return any(marker in text for marker in _CREDENTIAL_REFUSALS)
 
 
+# What the CLI or the API answers a turn with when the session no longer fits the model's context.
+# Resuming that session fails the same way every time.
+_CONTEXT_OVERFLOWS = (
+    "prompt is too long", "exceed context limit", "exceeds the context window", "context_length_exceeded",
+    "maximum context length",
+)
+
+
+def context_overflowed(message: ResultMessage) -> bool:
+    text = " ".join([message.result or "", *(message.errors or [])]).lower()
+    return any(marker in text for marker in _CONTEXT_OVERFLOWS)
+
+
+def _rotation_threshold(message: ResultMessage, model: str) -> int:
+    """The context at which the session rotates: the fixed ceiling, or less for a model whose
+    window, as the CLI reports it in the turn's result, is smaller."""
+    windows = {name: int(usage.get("contextWindow") or 0) for name, usage in (message.model_usage or {}).items()
+               if isinstance(usage, dict)}
+    window = next((w for name, w in windows.items() if name.startswith(model) and w), max(windows.values(), default=0))
+    if not window:
+        return _CONTEXT_COMPACTION_THRESHOLD_TOKENS
+    return min(_CONTEXT_COMPACTION_THRESHOLD_TOKENS, int(window * _CONTEXT_WINDOW_SHARE))
+
+
+def _transcript_bytes(session_id: str | None) -> int:
+    """The size of the session's transcript, 0 for a session that is not stored."""
+    if _sessions is None:
+        return 0
+    home = Path(_model_home())
+    return sum((home / name).stat().st_size for name in _transcript_files(session_id))
+
+
+# How much of what the agent last wrote opens the session that replaces one that overflowed.
+_OVERFLOW_HANDOFF_CHARS = 20_000
+_OVERFLOW_HANDOFF = (
+    "Your last session ran out of context before it could write a handoff. These are the last "
+    "things you wrote in it, oldest first:\n\n{tail}\n\n"
+    "Look at the state of your jobs and hypotheses with hl before you go on.")
+
+
+def _overflow_handoff(session_id: str | None) -> str:
+    """The handoff for a session that overflowed, from the agent's own last words in its transcript."""
+    texts: list[str] = []
+    home = Path(_model_home())
+    for transcript in home.glob(f"projects/*/{session_id}.jsonl") if session_id else ():
+        for line in transcript.read_text(errors="replace").splitlines():
+            try:
+                record = json.loads(line)
+                if record.get("type") != "assistant" or record.get("isSidechain"):
+                    continue
+                texts += [block["text"] for block in record["message"]["content"]
+                          if isinstance(block, dict) and block.get("type") == "text" and block.get("text", "").strip()]
+            except (ValueError, KeyError, TypeError, AttributeError):
+                continue
+    tail, size = [], 0
+    for text in reversed(texts):
+        if size + len(text) > _OVERFLOW_HANDOFF_CHARS:
+            if not tail:
+                tail.append(text.strip()[-_OVERFLOW_HANDOFF_CHARS:])
+            break
+        tail.insert(0, text.strip())
+        size += len(text)
+    return _OVERFLOW_HANDOFF.format(tail="\n\n".join(tail) or "(nothing)")
+
+
+# Sessions rotated away, whose transcripts are deleted once the CLI has exited.
+_retired_sessions: set[str] = set()
+
+
+async def _rotate(setup: core.RunSetup, handoff: str, old_session_id: str | None) -> None:
+    """Makes handoff open the next session, which starts fresh. The handoff is persisted before
+    the old id is removed: if the worker dies before the fresh session returns its first
+    ResultMessage, startup retries this handoff, and only that successful result removes it."""
+    with open(_handoff_file(setup), "w") as f:
+        f.write(handoff)
+    _remove_file(_session_file(setup))
+    _forget_live_session(setup)
+    if old_session_id:
+        _retired_sessions.add(old_session_id)
+    await _store_session(setup)
+
+
+def _delete_retired_transcripts() -> None:
+    for session_id in list(_retired_sessions):
+        for transcript in Path(_model_home()).glob(f"projects/*/{session_id}.jsonl"):
+            shutil.rmtree(transcript.with_suffix(""), ignore_errors=True)
+            _remove_file(str(transcript))
+        _retired_sessions.discard(session_id)
+
+
 async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | None,
                             stop_flag: list,
                             initial_prompt: str | None = None,
@@ -662,13 +758,15 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
         return True
 
     connecting = time.monotonic()
+    idle_s = updates.IDLE_NUDGE_S
     async with ClaudeSDKClient(options=options) as client:
         log.info("model CLI connected in %.1fs", time.monotonic() - connecting)
         await client.query(_first_prompt(setup, resume_id, initial_prompt))
         while True:
             got_result = False
-            turn_is_error = False
+            turn_is_error = overflowed = False
             context_tokens = 0
+            rotate_at = _CONTEXT_COMPACTION_THRESHOLD_TOKENS
             interrupter = asyncio.ensure_future(_interrupt_on_stop(client, setup, stopped))
             try:
                 async for message in _receive_turn(client):
@@ -681,6 +779,8 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                     if isinstance(message, ResultMessage):
                         got_result = True
                         turn_is_error = message.is_error
+                        overflowed = message.is_error and context_overflowed(message)
+                        rotate_at = _rotation_threshold(message, model)
                         if message.is_error and credential_refused(message.result):
                             # Backing off cannot fix a credential the provider refuses. Exiting
                             # is what tells whoever started this agent, and with what words.
@@ -713,6 +813,13 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 log.warning("stream ended without a ResultMessage — treating as transient")
                 return None, False
 
+            if overflowed:
+                # The session no longer fits and cannot write its own handoff: the next one starts
+                # fresh from what the agent last wrote, after the usual reconnect backoff.
+                log.warning("the session overflowed its context: starting a fresh one from its last messages")
+                await _rotate(setup, _overflow_handoff(resume_id), resume_id)
+                return None, False
+
             if turn_is_error:
                 # is_error=True with subtype="success" is the CLI's signal for an underlying
                 # failure it couldn't otherwise surface (auth not set up, a bad API response,
@@ -723,8 +830,10 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 log.warning("turn completed with an underlying error (is_error) — treating as transient")
                 return None, False
 
-            if context_tokens >= _CONTEXT_COMPACTION_THRESHOLD_TOKENS:
-                log.info("context reached ~%d tokens — creating handoff before fresh session", context_tokens)
+            transcript_bytes = _transcript_bytes(resume_id)
+            if context_tokens >= rotate_at or transcript_bytes >= _TRANSCRIPT_ROTATION_BYTES:
+                log.info("context reached ~%d tokens, transcript %d bytes: creating handoff before fresh session",
+                         context_tokens, transcript_bytes)
                 await client.query(_COMPACTION_PROMPT)
                 handoff_result = None
                 async for message in _receive_turn(client):
@@ -738,20 +847,13 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 if not handoff:
                     log.warning("context handoff was empty — preserving old session for retry")
                     return None, False
-                # Persist the bridge before removing the old id. If the worker dies before the
-                # fresh session returns its first ResultMessage, startup retries this handoff;
-                # only that successful result removes the file.
-                with open(_handoff_file(setup), "w") as f:
-                    f.write(handoff)
-                _remove_file(_session_file(setup))
-                _forget_live_session(setup)
-                await _store_session(setup)
+                await _rotate(setup, handoff, resume_id)
                 return None, True
 
             # The agent ended its turn: wait for the next batch of updates about its own jobs and
             # hypotheses and hand it over on the same connection.
             while True:
-                events = await updates.next_batch(watch_env, stopped, updates.IDLE_NUDGE_S)
+                events = await updates.next_batch(watch_env, stopped, idle_s)
                 told = "" if stopped() else await _told(setup, events)
                 # A batch that tells nothing held only a revision answered since: the wait goes on.
                 if told or not events or stopped():
@@ -762,9 +864,11 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 for line in activity.event_lines(events, cfg.agent_id):
                     print(line, flush=True)
                 await client.query(told)
+                idle_s = updates.IDLE_NUDGE_S
                 continue
-            log.info("no platform updates for %ds, nudging", updates.IDLE_NUDGE_S)
-            await client.query(updates.IDLE_PROMPT)
+            log.info("no platform updates for %ds, nudging", idle_s)
+            await client.query(updates.IDLE_PROMPT.format(minutes=round(idle_s / 60)))
+            idle_s = min(idle_s * 2, updates.IDLE_NUDGE_MAX_S)
 
 
 def _restart_state(setup: core.RunSetup) -> tuple[str | None, str | None]:
@@ -822,6 +926,7 @@ async def _run_until_stopped(setup: core.RunSetup, model: str, stop_flag: list) 
         # turn can come before the CLI wrote the turn's last reply, and after a planner's
         # answer or an agent's finish no turn follows to store it.
         await _store_session(setup)
+        _delete_retired_transcripts()
         if rotated or core.stop_reason(setup, stop_flag):
             continue
 
