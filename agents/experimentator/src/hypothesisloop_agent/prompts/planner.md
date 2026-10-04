@@ -60,7 +60,8 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
       - the accelerator type, its count per job and the `image`;
       - the levers open and fixed, and when to stop: the target reached (past each
         reference the goal asks to beat), no gain after several honest tries, or the quota.
-      - the best result you find published for this problem, with its source, when one exists.
+      - the best result you find published for this problem under the goal's constraints
+        (lossless where the goal is), with its source, when one exists.
     Name each part by its file or directory and the behaviour you mean, in the control and
     the levers too: no function, type or API names, commands, flags, field layouts or
     conventions of yours. How the harness measures (data splits, seeds, repeats, conventions)
