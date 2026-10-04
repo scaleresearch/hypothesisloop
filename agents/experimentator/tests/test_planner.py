@@ -67,6 +67,26 @@ class RunEndedTest(unittest.TestCase):
             self.assertTrue(run._first_prompt(setup(baseline_agent(), draft), "s-1", None).endswith("Continue where you left off."))
         self.assertNotIn("gone", run._first_prompt(setup(planner(), draft), "s-1", None))
 
+    # A baseline agent read baseline_due_at once, ten minutes ahead, and never again: it wrote a
+    # careful harness and the experiment closed with no job submitted.
+    def test_a_baseline_agent_is_told_its_clock_with_every_prompt(self):
+        import asyncio
+        from datetime import datetime, timedelta, timezone
+        from hypothesisloop_agent.claude import run
+        due = (datetime.now(timezone.utc) + timedelta(minutes=9, seconds=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        def setup(cfg, platform_experiment):
+            return SimpleNamespace(cfg=cfg, client=SimpleNamespace(get_platform_experiment=lambda _id: platform_experiment))
+
+        clock = f"baseline_due_at is {due}, 9 minutes from now."
+        measuring = setup(baseline_agent(), {"status": "open", "baseline_due_at": due})
+        self.assertEqual(run._first_prompt(measuring, None, None), "Begin.\n\n" + clock)
+        job = [{"kind": "experiment.status", "subject": "job-1", "value": "FAILED"}]
+        self.assertTrue(asyncio.run(run._told(measuring, job)).endswith("\n\n" + clock))
+        self.assertEqual(asyncio.run(run._told(measuring, [])), "")
+        self.assertEqual(asyncio.run(run._told(setup(baseline_agent(), {"status": "running"}), job)), asyncio.run(run._told(setup(planner(), {}), job)))
+        self.assertEqual(run._first_prompt(setup(planner(), {"status": "draft", "baseline_due_at": due}), None, None), "Begin.")
+
     # A planner woken for a revision found its proposal's file gone with its machine and wrote
     # the whole proposal again.
     def test_a_revision_puts_the_stored_proposal_back_as_a_file(self):

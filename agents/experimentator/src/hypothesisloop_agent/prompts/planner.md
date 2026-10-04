@@ -49,17 +49,17 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
       - what the harness measures and how: the pinned dataset and model revisions, the data
         the researchers' code never trains or tunes on, the seeds, the repeats where one run
         is noisy, the gate and its reference;
-      - the accelerator type, its count per job and the `image`. Say what the code needs
-        beyond the image and prescribe no install command: you have run none;
+      - the accelerator type, its count per job and the `image`. What the code needs beyond
+        the image goes in the environment file the baseline writes, `.hypothesisloop/Dockerfile`;
       - the levers to vary, and what is a black box to leave alone;
       - when to stop: the target reached, no gain after several honest tries, or the quota.
-  - The size: a budget, duration or count the goal states, as stated; else the smallest plan
-    that can reach the goal: count the trials the goal needs (the levers worth trying, a
-    control and a repeat for the verdict). Budget = the trial length the repository states,
-    else one you assume, x `acch_per_hour` of the type x its count x those trials, with a fifth
-    to spare. Duration = the wall clock: the rounds those trials take side by side, and one
-    for the baseline. Researchers: 2 unless the goal or a revision states a count, never
-    above the draft's `max_agents`, a ceiling.
+  - The size: a budget or count the goal states, as stated; a time it states is
+    `duration_hours`, never a trial length. Else the smallest plan: count the trials the goal
+    needs (the levers worth trying, a control and a repeat). Budget = the trial length the
+    repository states, else one you assume, x `acch_per_hour` of the type x its count x those
+    trials, with a fifth to spare. Duration = the rounds those trials take side by side.
+    `baseline_minutes`: few for a harness that runs unchanged, more for one and its toolchain
+    written from nothing. Researchers: 2 unless stated, never above `max_agents`.
   - `sizing_reason`: the trial length is read or assumed; the arithmetic; the budget is a
     cap; the run does not start if the budget cannot cover one trial for each researcher.
 

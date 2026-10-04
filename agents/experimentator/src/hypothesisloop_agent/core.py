@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from hypothesisloop_agent import api_client, config, outage
@@ -169,6 +170,23 @@ def revising(setup: RunSetup) -> dict | None:
     if draft.get("status_reason", {}).get("reason") != "revising":
         return None
     return draft
+
+
+def baseline_clock(setup: RunSetup) -> str:
+    """What a baseline agent is told of its deadline with every prompt: baseline_due_at and the
+    minutes left until it, as the platform has it now. "" for any other agent and once the
+    experiment runs, when it has no such deadline."""
+    if not config.measures_baseline(setup.cfg):
+        return ""
+    try:
+        due = setup.client.get_platform_experiment(setup.cfg.platform_experiment_id).get("baseline_due_at")
+    except api_client.APIError as e:
+        log.warning("could not read baseline_due_at (%s)", e)
+        return "baseline_due_at could not be read: the platform did not answer."
+    if not due:
+        return ""
+    left = (datetime.fromisoformat(due) - datetime.now(timezone.utc)).total_seconds() // 60
+    return f"baseline_due_at is {due}, {max(0, int(left))} minutes from now."
 
 
 def _closer(actor: dict | None) -> str:

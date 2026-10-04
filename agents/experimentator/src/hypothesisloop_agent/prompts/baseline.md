@@ -18,16 +18,16 @@ Your assignment:
   platform_experiment_id: {platform_experiment_id}
 
 Read the `description` of `hl platform-experiments get` completely (the brief, with BASELINE
-`config`), its `metrics` and `status_reason`, your next step. `hl quota` is all you may spend,
-and the experiment is closed if not running by its `baseline_due_at`.
+`config`), its `metrics` and `status_reason`, your next step and the minutes left until
+`baseline_due_at`, when the experiment is closed. `hl quota` is all you may spend.
 
   1. The code. Where it is kept: {workspace}
      Only a harness that already measures these metrics on this config runs unchanged: go
-     to 4. Otherwise write the smallest working program that measures them: fixed seeds,
-     pinned dataset and model revisions, every input fetched by the job itself, the metrics
-     reported as the run goes and once more at the end with the `post_metric` of the
-     repository's `metrics.py`. Researchers copy and change this code, so keep the part they
-     vary apart from the part that measures, and say which is which.
+     to 4. Otherwise write the smallest program that measures them and submit it (2 to 4)
+     before refining it: fixed seeds, pinned dataset and model revisions, every input fetched
+     by the job, the metrics reported as it goes and at the end with `post_metric` of
+     `metrics.py`. Keep the part researchers vary apart from the part that measures, and say
+     which is which.
   2. The environment: system packages, toolchains and frameworks the job image does not carry
      (torch for CUDA among them) go in `.hypothesisloop/Dockerfile`, so that a job of the code
      you leave runs with no long setup step.
@@ -42,6 +42,5 @@ and the experiment is closed if not running by its `baseline_due_at`.
   6. `hl platform-experiments agents finish --reason "baseline measured by job ID"`.
 
 You finish at 6, or once you can say why no baseline is possible: one failure came back three
-times through your fixes, or a job stays queued with `capacity_unavailable` or
-`no_cluster_for_image`. Finish then with that reason, the job ids and what you tried: the
-coordinator is sent it and acts on it.
+times through your fixes, or `baseline_due_at` cannot be met. Finish then with what you built,
+why, and the job ids: the coordinator is sent it and acts on it.

@@ -380,23 +380,28 @@ def _revision_prompt(setup: core.RunSetup, draft: dict) -> str:
 async def _told(setup: core.RunSetup, events: list[dict]) -> str:
     """What the agent is told of a batch of updates, "" for nothing. A revision asked of a planner
     is an event that points at the draft: it is told as the revision itself, and one that the
-    planner has answered since, which a restored cursor replays, is told as nothing."""
+    planner has answered since, which a restored cursor replays, is told as nothing. A baseline
+    agent is told its clock with the updates."""
     rest = [e for e in events if e["kind"] != updates.REVISION]
     parts = [updates.message(rest, setup.cfg.agent_id)] if rest else []
     if len(rest) < len(events):
         draft = await asyncio.to_thread(core.revising, setup)
         if draft:
             parts.insert(0, _revision_prompt(setup, draft))
-    return "\n\n".join(parts)
+    if parts:
+        parts.append(await asyncio.to_thread(core.baseline_clock, setup))
+    return "\n\n".join(part for part in parts if part)
 
 
 def _first_prompt(setup: core.RunSetup, resume_id: str | None, initial_prompt: str | None) -> str:
     """What opens a connection: a handoff, the start, or for a resumed session the revision that
-    brought a planner back, else that it goes on. A new machine is said in each."""
+    brought a planner back, else that it goes on, with a baseline agent's clock. A new machine is
+    said in each."""
     draft = core.revising(setup) if resume_id and not initial_prompt else None
     if draft:
         return _revision_prompt(setup, draft)
-    prompt = initial_prompt or ("Continue where you left off." if resume_id else "Begin.")
+    prompt = "\n\n".join(part for part in (initial_prompt or ("Continue where you left off." if resume_id else "Begin."),
+                                             core.baseline_clock(setup)) if part)
     return _new_machine_note(setup.cfg) + "\n\n" + prompt if _on_new_machine else prompt
 
 

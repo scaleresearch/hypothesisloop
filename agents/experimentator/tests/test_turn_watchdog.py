@@ -39,7 +39,7 @@ class HangingClient:
 def _setup():
     return SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                            client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
-                           cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", api_url="http://x", token=AGENT_TOKEN, platform_experiment_id="pe-1"))
+                           cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", role="competitor", api_url="http://x", token=AGENT_TOKEN, platform_experiment_id="pe-1"))
 
 
 # A machine stopped while its agent's run goes on is told exactly that, ahead of what to do with its turn.
