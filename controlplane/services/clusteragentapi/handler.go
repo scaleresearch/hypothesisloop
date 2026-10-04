@@ -706,9 +706,12 @@ func (h *Handler) environmentWork(ctx context.Context, cluster string, exps []*d
 	if !slices.ContainsFunc(exps, func(exp *domain.Experiment) bool { return exp.EnvironmentKey != "" }) {
 		return builds, nil, nil
 	}
+	// Without a login only a pull fails, and a desired state that is refused instead has the
+	// runtime act on none of it.
 	login, err := h.environments.Logins.Pull(ctx)
 	if err != nil {
-		return nil, nil, err
+		h.logger.Error("cluster reconcile: mint registry pull login", zap.String("cluster", cluster), zap.Error(err))
+		return builds, nil, nil
 	}
 	return builds, &login, nil
 }

@@ -3,6 +3,7 @@ package clusteragentapi
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -98,6 +99,30 @@ func TestReconcileHandsAPullLoginOnlyWhenAListedJobRunsInAnEnvironment(t *testin
 	}
 	if answer.Builds == nil {
 		t.Error("builds is absent, want an empty list")
+	}
+}
+
+// A pull login that cannot be minted fails only the pulls: the runtime is still answered what
+// should run, and keeps every workload that does.
+func TestReconcileAnswersWithoutAPullLoginWhenNoneCanBeMinted(t *testing.T) {
+	w := newReconcileWorld(t, "of-a")
+	w.logins.pullErr = errors.New("token endpoint down")
+	inEnvironment := placedJob("job-env", "org-a")
+	inEnvironment.EnvironmentKey = "key-1"
+	w.store.desired["of-a"] = []*domain.Experiment{placedJob("job-plain", "org-a"), inEnvironment}
+	rec := w.reconcile(t, "of-a", idleReport("id-of-a"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reconcile: got = %d %s, want = 200", rec.Code, rec.Body)
+	}
+	var answer struct {
+		buildsAnswer
+		Experiments []*domain.Experiment `json:"experiments"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &answer); err != nil {
+		t.Fatal(err)
+	}
+	if answer.RegistryPull != nil || len(answer.Experiments) != 2 {
+		t.Errorf("registry_pull = %+v with %d experiments, want none with both", answer.RegistryPull, len(answer.Experiments))
 	}
 }
 

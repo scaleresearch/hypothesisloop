@@ -86,7 +86,10 @@ func (s *reconcileStore) FinishEnvironmentBuild(ctx context.Context, cluster, ke
 const testRepository = "registry.test/environments/environment"
 
 // logins hands out numbered logins and counts them.
-type logins struct{ pushes, pulls int }
+type logins struct {
+	pushes, pulls int
+	pullErr       error
+}
 
 func (l *logins) Push(context.Context) (domain.RegistryLogin, error) {
 	l.pushes++
@@ -95,6 +98,9 @@ func (l *logins) Push(context.Context) (domain.RegistryLogin, error) {
 
 func (l *logins) Pull(context.Context) (domain.RegistryLogin, error) {
 	l.pulls++
+	if l.pullErr != nil {
+		return domain.RegistryLogin{}, l.pullErr
+	}
 	return domain.RegistryLogin{Registry: "registry.test", Username: "oauth2accesstoken", Password: fmt.Sprintf("pull-%d", l.pulls)}, nil
 }
 
