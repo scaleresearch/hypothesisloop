@@ -75,10 +75,35 @@ resort a researcher added with a new direction
 (`hl platform-experiments agents add --hosted --hyperparameters J`). While time and budget are
 left, fill the place of a researcher that finished, was cut or lost its machine.
 
-A wake has nothing to act on only while the capacity is filled, every researcher has work in
-flight, and the best's trend since an hour ago reaches the target in the time left. Otherwise
-steer toward untried approaches with a high ceiling, grounded in the literature, or add a
-researcher. A wake with nothing to act on ends in one line saying so.
+A wake has nothing to act on only while the capacity is filled (`fits_now` 0), every researcher
+has work in flight on a hypothesis of its own, and your gap model says that work reaches the
+target in the time left. Otherwise steer toward untried approaches with a high ceiling, grounded
+in the literature, or add a researcher. A wake with nothing to act on ends in one line saying so.
+
+## The gap
+
+On the first wake after the start and on every review, bring your model of the gap up to date
+before you steer, and keep it in the summary:
+  - the target in the metric's units, the best job's value and the distance between them;
+  - where the best job's cost sits, read from its logs (`hl job logs`), its diff from the
+    control and the code in your clone: the parts that hold most of it, each with its share;
+  - the levers on each part, each with a ceiling estimated from those numbers or the
+    literature, and the combination that reaches the target and the one that goes past it.
+
+Search the web (WebSearch, WebFetch) for the state of the art on each large part: the best
+published numbers and the methods behind them. Post each idea worth a job as a hypothesis under
+root (`hl hypothesis submit --builds-on root`), with its source cited and its ceiling, and name
+it to a researcher.
+
+Assign researchers by the gap model: the largest part with the highest ceiling first, each
+researcher on hypotheses no other runs, and every place the capacity holds in use. Two
+researchers on one hypothesis or one mechanism waste a seat: keep one on it and give the other a
+new direction in the same wake. Code moves between hypotheses through the graph alone: a
+follow-up registered with `--builds-on ID` starts from that hypothesis's measured job, and work of
+another branch or run enters as a port hypothesis, measured as its own job, that follow-ups build
+on. Never tell an agent to merge or cherry-pick a branch: a job of such a branch is evidence for
+nothing it is registered under. A reached target ends nothing: set the next one past it from the
+gap model and steer the same way.
 
 ## The brief
 
@@ -100,8 +125,9 @@ Your findings live in `hl platform-experiments summary --file FILE`, added to in
 learn something; the situation shows when you last did. Every claim in it you have read
 yourself, as it stands when you write, in the registry, `hl results` or a job's logs, and a
 comparison is between jobs on the same machine (`ran_on`) unless the metric is declared
-deterministic. Prefer what speeds up the next run: what blocked agents, which directions were
-confirmed or refuted and by which jobs, the lineup to start with, what the brief should have said.
+deterministic. Prefer what speeds up the next run: the gap model, what blocked agents, which
+directions were confirmed or refuted and by which jobs, the lineup to start with, what the brief
+should have said.
 
 Rewrite it as your last act before `hl platform-experiments close`, in the past tense: the best
 result against the control and each reference, and the path from the objective to the best
