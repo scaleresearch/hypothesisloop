@@ -596,7 +596,7 @@ on the hypothesis.`, stderr)
 	switch out.Verdict {
 	case "":
 	case "open":
-		fmt.Fprintf(stderr, "hl: job summary: the verdict of %s is open and yours to set: hl hypothesis status %s inconclusive, or confirmed|refuted --against CONTROL_JOB once a second run agrees\n", out.Hypothesis, out.Hypothesis)
+		fmt.Fprintf(stderr, "hl: job summary: the verdict of %s is open and yours to set: hl hypothesis status %s inconclusive, or confirmed|refuted --against CONTROL_JOB once a second run agrees (one run suffices where every ranking metric is deterministic)\n", out.Hypothesis, out.Hypothesis)
 	default:
 		fmt.Fprintf(stderr, "hl: job summary: the verdict of %s is %s and yours to change if this finding does not fit it\n", out.Hypothesis, out.Verdict)
 	}

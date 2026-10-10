@@ -195,3 +195,75 @@ func TestAVerdictOnDeterministicMetricsNeedsNoRepeat(t *testing.T) {
 		t.Fatalf("one completed run and a control on a deterministic metric: %v, %+v", err, settled)
 	}
 }
+
+// Agents in a live run on a declared-deterministic compression ratio gave each verdict with a
+// reason, though a job of the hypothesis and a control were on record, so each was noted as given
+// without a repeated run and a control. There a control is all the job needs, and the reason is
+// left for what no job of the hypothesis shows.
+func TestOnDeterministicMetricsAJobAndAControlSettleTheVerdictInPlaceOfAReason(t *testing.T) {
+	ctx := context.Background()
+	store := newPoolStore()
+	store.metrics = []domain.MetricDefinition{{Key: "ratio", Direction: "maximize", Deterministic: true}}
+	svc := poolService(store)
+	offline, _, _, _, err := svc.RegisterHypothesis(ctx, "agent-1", agentActor("agent-1"), "pe-1", "an entropy bound rules this out", buildOnRoot, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran, _, _, _, err := svc.RegisterHypothesis(ctx, "agent-1", agentActor("agent-1"), "pe-1", "a joint context helps", buildOnRoot, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.jobs = []*domain.Experiment{jobOn("job-control", "", domain.StatusCompleted), jobOn("job-control-running", "", domain.StatusRunning),
+		jobOn("job-1", ran.ID, domain.StatusCompleted)}
+
+	if _, err := svc.SetHypothesisStatus(ctx, offline.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid}); err != nil {
+		t.Fatalf("a reason for a hypothesis no job tested: got = %v, want it to stand", err)
+	}
+	if len(store.comments) != 1 || !strings.Contains(store.comments[0], "given without a repeated run and a control: "+enoughSaid) {
+		t.Fatalf("the basis of a verdict with no job: %v", store.comments)
+	}
+
+	var unsupported *UnsupportedVerdictError
+	_, err = svc.SetHypothesisStatus(ctx, ran.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid})
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("a reason in place of the control for a hypothesis with a completed job: got = %v, want it refused", err)
+	}
+	for _, want := range []string{"declared deterministic", "job-1", "baseline_job_id", fmt.Sprintf("hl hypothesis status %s refuted --against CONTROL_JOB", ran.ID)} {
+		if !strings.Contains(unsupported.Detail, want) {
+			t.Errorf("refusal %q does not say %q", unsupported.Detail, want)
+		}
+	}
+	if _, err := svc.SetHypothesisStatus(ctx, ran.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Against: "job-control-running", Despite: enoughSaid}); !errors.As(err, &unsupported) {
+		t.Fatalf("a reason beside a control that is no completed job: got = %v, want it refused", err)
+	}
+
+	settled, err := svc.SetHypothesisStatus(ctx, ran.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Against: "job-control", Despite: enoughSaid})
+	if err != nil || settled.Status != domain.HypothesisRefuted {
+		t.Fatalf("one job and a control with a reason beside them: %v, %+v", err, settled)
+	}
+	if len(store.comments) != 2 || store.comments[1] != "Verdict refuted against control job-control." {
+		t.Fatalf("the basis of a verdict with its control: %v", store.comments)
+	}
+}
+
+// Where results vary between runs, a reason still stands in for the repeat a control alone lacks.
+func TestOnVaryingMetricsAReasonStandsBesideAControlWithoutARepeat(t *testing.T) {
+	ctx := context.Background()
+	store := newPoolStore()
+	svc := poolService(store)
+	h, _, _, _, err := svc.RegisterHypothesis(ctx, "agent-1", agentActor("agent-1"), "pe-1", "a larger batch helps", buildOnRoot, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.jobs = []*domain.Experiment{jobOn("job-control", "", domain.StatusCompleted), jobOn("job-1", h.ID, domain.StatusCompleted)}
+	var unsupported *UnsupportedVerdictError
+	if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisConfirmed, Against: "job-control"}); !errors.As(err, &unsupported) {
+		t.Fatalf("one run and a control: got = %v, want a repeat asked for", err)
+	}
+	if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisConfirmed, Against: "job-control", Despite: enoughSaid}); err != nil {
+		t.Fatalf("one run, a control and a reason: got = %v, want it to stand", err)
+	}
+	if len(store.comments) != 1 || !strings.Contains(store.comments[0], "given without a repeated run and a control: "+enoughSaid) {
+		t.Fatalf("the basis: %v", store.comments)
+	}
+}

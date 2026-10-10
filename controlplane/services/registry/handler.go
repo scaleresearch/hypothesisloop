@@ -889,7 +889,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"completed job of the same platform experiment, and the hypothesis has two completed " +
 			"jobs of its own besides it, or one where every ranking metric of the platform experiment is declared deterministic. Without that the answer is 409 with what is missing, " +
 			"unless despite carries a sentence of why the verdict holds anyway: a repeat is needed only where results " +
-			"vary between runs, so for a deterministic job one job and despite saying so suffice. What a verdict " +
+			"vary between runs. Where every ranking metric is declared deterministic and the hypothesis has a completed job of its own, " +
+			"the control is named and despite stands in for nothing (409). A control that holds is the basis even with despite beside it. What a verdict " +
 			"rests on is kept as a comment on the hypothesis. " +
 			"Only the agent whose hypothesis it is may set it; anyone else gets 403. A " +
 			"hypothesis no agent owns may be settled by anyone who reaches it — an idea " +

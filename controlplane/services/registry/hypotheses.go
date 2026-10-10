@@ -535,6 +535,7 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 	note := mayJudge && (status == domain.HypothesisConfirmed || status == domain.HypothesisRefuted)
 	var h *domain.Hypothesis
 	var announced bool
+	var basis string
 	err = s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
 		if err := stamp.RequireOpen(current.PlatformExperimentID); err != nil {
 			return nil, err
@@ -547,7 +548,8 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 			note = !noted
 		}
 		if mayJudge && (current.Status != status || note) {
-			if err := s.supported(ctx, current, verdict); err != nil {
+			var err error
+			if basis, err = s.supported(ctx, current, verdict); err != nil {
 				return nil, err
 			}
 		}
@@ -565,7 +567,7 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 	s.logger.Info("hypothesis status updated",
 		zap.String("id", id), zap.String("agent", callerAgentID), zap.String("status", string(status)), zap.Bool("announced", announced))
 	if note {
-		if _, err := s.AddHypothesisComment(ctx, h.ID, callerAgentID, actor, basis(verdict)); err != nil {
+		if _, err := s.AddHypothesisComment(ctx, h.ID, callerAgentID, actor, basis); err != nil {
 			return nil, fmt.Errorf("registry.SetHypothesisStatus: the verdict is set and its basis could not be noted: %w", err)
 		}
 	}

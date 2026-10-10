@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -33,24 +34,25 @@ type UnsupportedVerdictError struct{ Detail string }
 
 func (e *UnsupportedVerdictError) Error() string { return e.Detail }
 
-// supported checks a confirmed or refuted verdict against the jobs on record. The rule knows
-// nothing of the task: it asks for a repeated measurement and a named control, both finished,
-// both of this platform experiment, and no repeat where every ranking metric is declared
-// deterministic. What it cannot see (a failure that needs no repeat, a control measured
-// elsewhere) the agent states in Despite, which is kept beside the verdict.
-func (s *Service) supported(ctx context.Context, h *domain.Hypothesis, v Verdict) error {
+// supported checks a confirmed or refuted verdict against the jobs on record and returns the
+// basis to note with it. The rule knows nothing of the task: it asks for a repeated measurement
+// and a named control, both finished, both of this platform experiment, and no repeat where every
+// ranking metric is declared deterministic. What it cannot see (a failure that needs no repeat, a
+// control measured elsewhere) the agent states in Despite, which is kept beside the verdict. A
+// control that holds is the basis even when a reason comes with it. Where every ranking metric is
+// deterministic, a hypothesis with a completed job of its own has all the record needs but the
+// control, so a reason does not stand in for naming it.
+func (s *Service) supported(ctx context.Context, h *domain.Hypothesis, v Verdict) (string, error) {
 	if v.Status != domain.HypothesisConfirmed && v.Status != domain.HypothesisRefuted {
-		return nil
+		return "", nil
 	}
-	if reason := strings.TrimSpace(v.Despite); reason != "" {
-		if len(reason) < minDespiteLength {
-			return &UnsupportedVerdictError{Detail: fmt.Sprintf("the reason given with despite is %d characters, and it takes at least %d characters: say in a sentence why this verdict holds without a repeated run and a control (hl hypothesis status %s %s --despite \"<why>\")", len(reason), minDespiteLength, h.ID, v.Status)}
-		}
-		return nil
+	reason := strings.TrimSpace(v.Despite)
+	if reason != "" && len(reason) < minDespiteLength {
+		return "", &UnsupportedVerdictError{Detail: fmt.Sprintf("the reason given with despite is %d characters, and it takes at least %d characters: say in a sentence why this verdict holds without a repeated run and a control (hl hypothesis status %s %s --despite \"<why>\")", len(reason), minDespiteLength, h.ID, v.Status)}
 	}
 	tested, err := s.store.ListExperimentsTesting(ctx, []string{h.ID})
 	if err != nil {
-		return err
+		return "", err
 	}
 	var own []string
 	for _, job := range tested {
@@ -58,56 +60,73 @@ func (s *Service) supported(ctx context.Context, h *domain.Hypothesis, v Verdict
 			own = append(own, job.ID)
 		}
 	}
-	otherwise := fmt.Sprintf("Until then the verdict is inconclusive. A repeat is needed only where results vary between runs: "+
-		"for a deterministic job (the same code and data give the same numbers), a failure that needs no repeat, or a control "+
-		"measured outside this experiment, give the verdict with despite, a sentence of at least %d characters saying why it "+
-		"holds without them: hl hypothesis status %s %s --despite \"<why>\"", minDespiteLength, h.ID, v.Status)
-	if v.Against == "" {
-		return &UnsupportedVerdictError{Detail: fmt.Sprintf("%s says the hypothesis's jobs differ from a control, and no control is named: give the completed job you compare with as against (a baseline run, or the same job without your change; run one if there is none). %s", v.Status, otherwise)}
+	metrics, found, err := s.store.GetPlatformExperimentMetrics(ctx, h.PlatformExperimentID)
+	if err != nil {
+		return "", err
 	}
+	if !found {
+		return "", fmt.Errorf("%w: %s", ErrUnknownPlatformExperiment, h.PlatformExperimentID)
+	}
+	deterministic := domain.AllRankingDeterministic(metrics)
+	if v.Against != "" {
+		err := s.controlled(ctx, h, v, own, deterministic)
+		var unsupported *UnsupportedVerdictError
+		switch {
+		case err == nil:
+			return fmt.Sprintf("%sagainst control %s.", basisPrefix(v.Status), v.Against), nil
+		case reason == "" || !errors.As(err, &unsupported):
+			return "", err
+		}
+	} else if reason == "" {
+		return "", &UnsupportedVerdictError{Detail: fmt.Sprintf("%s says the hypothesis's jobs differ from a control, and no control is named: give the completed job you compare with as against (a baseline run, or the same job without your change; run one if there is none). %s", v.Status, otherwise(h, v, deterministic))}
+	}
+	if deterministic && len(own) > 0 {
+		return "", &UnsupportedVerdictError{Detail: fmt.Sprintf("every ranking metric of this platform experiment is declared deterministic, so %s with a completed control settles the verdict, with no repeat and no reason in its place: name the control (the baseline's job, baseline_job_id in hl platform-experiments get, or the same job without your change) with hl hypothesis status %s %s --against CONTROL_JOB", strings.Join(own, ", "), h.ID, v.Status)}
+	}
+	return fmt.Sprintf("%sgiven without a repeated run and a control: %s", basisPrefix(v.Status), reason), nil
+}
+
+// controlled checks the control v names and the completed jobs own the hypothesis has besides it.
+func (s *Service) controlled(ctx context.Context, h *domain.Hypothesis, v Verdict, own []string, deterministic bool) error {
 	control, err := s.store.GetExperiment(ctx, v.Against)
 	if err != nil {
 		return err
 	}
 	if control == nil || control.PlatformExperimentID != h.PlatformExperimentID {
-		return &UnsupportedVerdictError{Detail: fmt.Sprintf("the control %s is no job of this platform experiment. %s", v.Against, otherwise)}
+		return &UnsupportedVerdictError{Detail: fmt.Sprintf("the control %s is no job of this platform experiment. %s", v.Against, otherwise(h, v, deterministic))}
 	}
 	if control.Status != domain.StatusCompleted {
-		return &UnsupportedVerdictError{Detail: fmt.Sprintf("the control %s is %s, and a control is a job that completed. %s", v.Against, control.Status, otherwise)}
-	}
-	metrics, found, err := s.store.GetPlatformExperimentMetrics(ctx, h.PlatformExperimentID)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return fmt.Errorf("%w: %s", ErrUnknownPlatformExperiment, h.PlatformExperimentID)
+		return &UnsupportedVerdictError{Detail: fmt.Sprintf("the control %s is %s, and a control is a job that completed. %s", v.Against, control.Status, otherwise(h, v, deterministic))}
 	}
 	needed := minJobsForAVerdict
-	if domain.AllRankingDeterministic(metrics) {
+	if deterministic {
 		needed = 1
 	}
-	if len(own) < needed {
-		have := "none"
-		if len(own) > 0 {
-			have = strings.Join(own, ", ")
-		}
-		if needed == 1 {
-			return &UnsupportedVerdictError{Detail: fmt.Sprintf("%s needs a completed job on the hypothesis besides the control %s, and it has none: run it (hl job submit FILE --hypothesis %s) and set the verdict once it completed. %s", v.Status, v.Against, h.ID, otherwise)}
-		}
-		return &UnsupportedVerdictError{Detail: fmt.Sprintf("%s needs %d completed jobs on the hypothesis besides the control %s, and it has %d (%s): where results vary between runs, one run does not tell an effect from that spread, so run it again (hl job submit FILE --hypothesis %s, the same submit as before with --repeat 2 for a second run of it) and set the verdict once it completed. %s", v.Status, needed, v.Against, len(own), have, h.ID, otherwise)}
+	if len(own) >= needed {
+		return nil
 	}
-	return nil
+	if needed == 1 {
+		return &UnsupportedVerdictError{Detail: fmt.Sprintf("%s needs a completed job on the hypothesis besides the control %s, and it has none: run it (hl job submit FILE --hypothesis %s) and set the verdict once it completed. %s", v.Status, v.Against, h.ID, otherwise(h, v, deterministic))}
+	}
+	have := "none"
+	if len(own) > 0 {
+		have = strings.Join(own, ", ")
+	}
+	return &UnsupportedVerdictError{Detail: fmt.Sprintf("%s needs %d completed jobs on the hypothesis besides the control %s, and it has %d (%s): where results vary between runs, one run does not tell an effect from that spread, so run it again (hl job submit FILE --hypothesis %s, the same submit as before with --repeat 2 for a second run of it) and set the verdict once it completed. %s", v.Status, needed, v.Against, len(own), have, h.ID, otherwise(h, v, deterministic))}
 }
 
-// basis is the note kept on the hypothesis with a confirmed or refuted verdict, so that whoever
-// repeats the claim can read what it rests on.
-func basis(v Verdict) string {
-	if reason := strings.TrimSpace(v.Despite); reason != "" {
-		return fmt.Sprintf("%sgiven without a repeated run and a control: %s", basisPrefix(v.Status), reason)
+// otherwise ends a refusal with what the verdict is until the record holds it, and when a reason
+// may stand in for what the record lacks.
+func otherwise(h *domain.Hypothesis, v Verdict, deterministic bool) string {
+	without := "A repeat is needed only where results vary between runs: for a deterministic job on a metric not declared so (the same code and data give the same numbers), a failure that needs no repeat, or a control measured outside this experiment"
+	if deterministic {
+		without = "Every ranking metric here is declared deterministic, so one completed job and a control settle it with no repeat. For a verdict no job of the hypothesis can show (a failure that needs no repeat, a check made without a job)"
 	}
-	return fmt.Sprintf("%sagainst control %s.", basisPrefix(v.Status), v.Against)
+	return fmt.Sprintf("Until then the verdict is inconclusive. %s, give the verdict with despite, a sentence of at least %d characters saying why it holds without them: hl hypothesis status %s %s --despite \"<why>\"", without, minDespiteLength, h.ID, v.Status)
 }
 
+// basisPrefix starts the note kept on the hypothesis with a confirmed or refuted verdict, so that
+// whoever repeats the claim can read what it rests on.
 func basisPrefix(status domain.HypothesisStatus) string {
 	return fmt.Sprintf("Verdict %s ", status)
 }
