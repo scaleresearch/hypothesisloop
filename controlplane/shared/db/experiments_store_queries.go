@@ -416,16 +416,18 @@ func (s *ExperimentsStore) LastCompletedCodeRef(ctx context.Context, hypothesisI
 	return codeRef, nil
 }
 
-// Implementations returns the branches the jobs testing a hypothesis ran on, each with its
-// agent and the commit its newest job ran, oldest branch first. It is read off the jobs: a
-// branch no job ran on is unknown here, and so is a job from before branches were kept.
+// Implementations returns the branches agents checked a hypothesis out on or its jobs ran on,
+// each with its agent, the commit its newest job ran and when it was last checked out, the
+// earliest begun first. A job from before branches were kept has none.
 func (s *ExperimentsStore) Implementations(ctx context.Context, hypothesisID string) ([]domain.Implementation, error) {
 	const q = `
-SELECT agent_id, branch, code_ref FROM (
+SELECT COALESCE(ran.agent_id, c.agent_id), COALESCE(ran.branch, c.branch), COALESCE(ran.code_ref, ''), c.checked_out_at
+FROM (
 	SELECT DISTINCT ON (agent_id, branch) agent_id, branch, code_ref, MIN(created_at) OVER (PARTITION BY agent_id, branch) AS started_at
 	FROM experiments WHERE hypothesis_id = $1 AND branch <> ''
 	ORDER BY agent_id, branch, created_at DESC, id DESC
-) newest ORDER BY started_at, agent_id, branch`
+) ran FULL JOIN (SELECT * FROM hypothesis_checkouts WHERE hypothesis_id = $1) c ON c.agent_id = ran.agent_id AND c.branch = ran.branch
+ORDER BY LEAST(ran.started_at, c.checked_out_at), 1, 2`
 	rows, err := s.pool.pool.Query(ctx, q, hypothesisID)
 	if err != nil {
 		return nil, fmt.Errorf("experiments_store.Implementations: %w", err)
@@ -434,7 +436,7 @@ SELECT agent_id, branch, code_ref FROM (
 	out := []domain.Implementation{}
 	for rows.Next() {
 		var i domain.Implementation
-		if err := rows.Scan(&i.AgentID, &i.Branch, &i.CodeRef); err != nil {
+		if err := rows.Scan(&i.AgentID, &i.Branch, &i.CodeRef, &i.CheckedOutAt); err != nil {
 			return nil, fmt.Errorf("experiments_store.Implementations: scan: %w", err)
 		}
 		out = append(out, i)

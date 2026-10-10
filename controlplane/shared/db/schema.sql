@@ -479,6 +479,19 @@ ALTER TABLE hypothesis_comments ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DE
 ALTER TABLE hypothesis_comments ADD COLUMN IF NOT EXISTS author TEXT NOT NULL DEFAULT '';
 ALTER TABLE hypothesis_comments ADD COLUMN IF NOT EXISTS platform_experiment_id TEXT REFERENCES platform_experiments(id);
 
+-- Each agent's last hl hypothesis checkout of a hypothesis: who works on an idea is seen from the
+-- checkout, before a job of theirs shows it (domain.CheckoutClaim).
+CREATE TABLE IF NOT EXISTS hypothesis_checkouts (
+    hypothesis_id          TEXT        NOT NULL,
+    agent_id               TEXT        NOT NULL REFERENCES agents(id),
+    platform_experiment_id TEXT        NOT NULL REFERENCES platform_experiments(id),
+    branch                 TEXT        NOT NULL,
+    checked_out_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (hypothesis_id, agent_id)
+);
+CREATE INDEX IF NOT EXISTS idx_hypothesis_checkouts_platform_experiment
+    ON hypothesis_checkouts(platform_experiment_id, checked_out_at);
+
 -- Whose credential submitted the job and filed the finding, beside agent_id, which is whose job
 -- and finding they are. A row from before the credential was kept is 'unverified' with no id.
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS actor_kind TEXT NOT NULL DEFAULT 'unverified';

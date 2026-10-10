@@ -45,6 +45,10 @@ type Store interface {
 	CountHypothesisActivity(ctx context.Context, ids []string) (map[string]db.HypothesisActivity, error)
 	Evidence(ctx context.Context, platformExperimentID string) (map[string]any, error)
 	Implementations(ctx context.Context, hypothesisID string) ([]domain.Implementation, error)
+	// CheckOutHypothesis records a checkout and answers the other agents working on the hypothesis.
+	CheckOutHypothesis(ctx context.Context, platformExpID, hypothesisID, agentID, branch string) ([]domain.HypothesisWorker, error)
+	// Working is, for each of ids with any, the agents working on it now.
+	Working(ctx context.Context, ids []string) (map[string][]domain.HypothesisWorker, error)
 	LastCompletedCodeRef(ctx context.Context, hypothesisID string) (string, error)
 	BaselineCodeRef(ctx context.Context, platformExpID string) (string, error)
 }

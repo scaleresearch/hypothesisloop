@@ -30,14 +30,33 @@ func TestAnImplementationBranchIsNamedByItsAgentAndItsHypothesis(t *testing.T) {
 const checkoutHypothesis = "0198c2d4-aaaa-7bbb-8ccc-000000a1b2c3"
 const checkoutBranchName = "hl/pe-1/researcher-1/fp16-at-batch-32-a1b2c3"
 
+// checkouts is what the platform was told of checkouts, and the agents it answers work on the
+// hypothesis besides.
+type checkouts struct {
+	recorded []map[string]string
+	others   []map[string]string
+}
+
 // checkoutServer answers the reads hl hypothesis checkout makes as agent ag-1 of pe-1 behind the
 // platform's own check of what an agent's token may call: the hypothesis with baseRef, the
-// agent's signup naming it Researcher 1, and job-other with otherRef.
-func checkoutServer(t *testing.T, baseRef, otherRef string) {
+// agent's signup naming it Researcher 1, and job-other with otherRef. It records each checkout.
+func checkoutServer(t *testing.T, baseRef, otherRef string) *checkouts {
 	t.Helper()
 	token := derivedToken("agent:pe-1/ag-1")
+	seen := &checkouts{}
 	setAPIURL(t, withServer(t, asThePlatformAdmits(t, token, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/hypotheses/" + checkoutHypothesis + "/checkouts":
+			var body map[string]string
+			if r.Method != http.MethodPost || json.NewDecoder(r.Body).Decode(&body) != nil {
+				t.Errorf("checkout record: %s with an unreadable body", r.Method)
+			}
+			seen.recorded = append(seen.recorded, body)
+			answer := map[string]any{"hypothesis_id": checkoutHypothesis, "agent_id": "ag-1", "branch": body["branch"], "working": append([]map[string]string{}, seen.others...)}
+			if len(seen.others) > 0 {
+				answer["warning"] = "Researcher 2 already works on hypothesis " + checkoutHypothesis
+			}
+			_ = json.NewEncoder(w).Encode(answer)
 		case "/hypotheses/" + checkoutHypothesis:
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": checkoutHypothesis, "platform_experiment_id": "pe-1", "text": "FP16 at batch 32", "base_ref": baseRef})
 		case "/platform-experiments/pe-1/signups/ag-1":
@@ -52,6 +71,7 @@ func checkoutServer(t *testing.T, baseRef, otherRef string) {
 		}
 	})))
 	t.Setenv("HL_TOKEN", token)
+	return seen
 }
 
 func checkout(args ...string) (int, string, string) {
@@ -68,7 +88,7 @@ func TestHypothesisCheckoutCreatesTheBranchFromTheBaseAndThenReturnsToIt(t *test
 	base := mustGit(t, clone, "rev-parse", "HEAD")
 	mustGit(t, clone, "push", "-q", "origin", "HEAD:refs/heads/hl/pe-1/researcher-2/parent-ffffff")
 	mustGit(t, clone, "commit", "-q", "--allow-empty", "-m", "unrelated work")
-	checkoutServer(t, origin+"@"+base, "")
+	seen := checkoutServer(t, origin+"@"+base, "")
 
 	code, stdout, stderr := checkout(checkoutHypothesis)
 	if want := `{"branch":"` + checkoutBranchName + `","base":"` + base + `"}`; code != 0 || stdout != want {
@@ -95,6 +115,17 @@ func TestHypothesisCheckoutCreatesTheBranchFromTheBaseAndThenReturnsToIt(t *test
 	mustGit(t, clone, "branch", "-q", "-D", checkoutBranchName)
 	if code, stdout, stderr := checkout(checkoutHypothesis); code != 0 || stdout != `{"branch":"`+checkoutBranchName+`"}` || mustGit(t, clone, "rev-parse", "HEAD") != mine {
 		t.Fatalf("checkout of a branch origin has: exit code = %d, stdout = %s, stderr = %s, want my pushed change", code, stdout, stderr)
+	}
+
+	// Each checkout that put the clone on the branch was recorded as ag-1 working on it, and
+	// one of a hypothesis another agent works on says who, and still checks out.
+	if len(seen.recorded) != 3 || seen.recorded[0]["agent_id"] != "ag-1" || seen.recorded[0]["branch"] != checkoutBranchName {
+		t.Fatalf("checkouts recorded = %v, want the three that checked out, as ag-1 on %s", seen.recorded, checkoutBranchName)
+	}
+	seen.others = []map[string]string{{"agent_id": "ag-2", "name": "Researcher 2"}}
+	code, stdout, stderr = checkout(checkoutHypothesis)
+	if want := `{"branch":"` + checkoutBranchName + `","working":[{"agent_id":"ag-2","name":"Researcher 2"}],"warning":"Researcher 2 already works on hypothesis ` + checkoutHypothesis + `"}`; code != 0 || stdout != want {
+		t.Fatalf("checkout of a hypothesis another agent works on: exit code = %d, stdout = %s, stderr = %s, want %s", code, stdout, stderr, want)
 	}
 }
 

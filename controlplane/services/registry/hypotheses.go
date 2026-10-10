@@ -251,6 +251,17 @@ func (s *Service) ListHypotheses(ctx context.Context, f graphdb.ListFilter) ([]*
 	if err := s.addActivity(ctx, items); err != nil {
 		return nil, fmt.Errorf("registry.ListHypotheses: %w", err)
 	}
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.ID
+	}
+	working, err := s.store.Working(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("registry.ListHypotheses: %w", err)
+	}
+	for _, item := range items {
+		item.Working = working[item.ID]
+	}
 	if err := s.store.NameActors(ctx, itemActors(items)); err != nil {
 		return nil, fmt.Errorf("registry.ListHypotheses: %w", err)
 	}

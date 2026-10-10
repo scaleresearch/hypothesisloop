@@ -47,7 +47,8 @@ type PlatformExperimentsStore interface {
 	CloseAgents(ctx context.Context, id string) (string, error)
 	// SummaryWrittenAt is when the summary was last written, nil while it never was.
 	SummaryWrittenAt(ctx context.Context, id string) (*time.Time, error)
-	// HypothesesInFlight is each hypothesis with jobs queued or running, and whose they are.
+	// HypothesesInFlight is each hypothesis with jobs queued or running or claimed by a checkout,
+	// and who is on it.
 	HypothesesInFlight(ctx context.Context, id string) ([]domain.HypothesisInFlight, error)
 	// MessageAllowance is how many more messages each agent may be sent now.
 	MessageAllowance(ctx context.Context, platformExpID string) (map[string]domain.MessageAllowance, error)

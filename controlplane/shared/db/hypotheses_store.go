@@ -306,10 +306,14 @@ func (s *HypothesesStore) CountCommentsByHypothesis(ctx context.Context, hypothe
 	return n, nil
 }
 
-// DeleteHypothesisComments removes the comments filed against a hypothesis that was removed.
+// DeleteHypothesisComments removes the comments filed against a hypothesis that was removed, and
+// its checkouts.
 func (s *HypothesesStore) DeleteHypothesisComments(ctx context.Context, hypothesisID string) error {
 	if _, err := s.pool.pool.Exec(ctx, `DELETE FROM hypothesis_comments WHERE hypothesis_id = $1`, hypothesisID); err != nil {
 		return fmt.Errorf("hypotheses_store.DeleteHypothesisComments: %w", err)
+	}
+	if _, err := s.pool.pool.Exec(ctx, `DELETE FROM hypothesis_checkouts WHERE hypothesis_id = $1`, hypothesisID); err != nil {
+		return fmt.Errorf("hypotheses_store.DeleteHypothesisComments: checkouts: %w", err)
 	}
 	return nil
 }
@@ -397,4 +401,64 @@ WHERE platform_experiment_id = $1 GROUP BY 1`
 		return nil, fmt.Errorf("hypotheses_store.Evidence: %w", err)
 	}
 	return out, nil
+}
+
+// checkoutClaims is the condition on a hypothesis_checkouts row c that it still claims its
+// hypothesis: checked out within $2 seconds by an agent that has not finished.
+const checkoutClaims = `c.checked_out_at > now() - make_interval(secs => $2)
+	AND NOT EXISTS (SELECT 1 FROM experiment_signups s
+	                WHERE s.platform_experiment_id = c.platform_experiment_id AND s.agent_id = c.agent_id AND s.finished_at IS NOT NULL)`
+
+// CheckOutHypothesis records that agentID checked hypothesisID of platformExpID out on branch
+// now, and answers the other agents working on it.
+func (s *HypothesesStore) CheckOutHypothesis(ctx context.Context, platformExpID, hypothesisID, agentID, branch string) ([]domain.HypothesisWorker, error) {
+	if _, err := s.pool.pool.Exec(ctx, `
+INSERT INTO hypothesis_checkouts (hypothesis_id, agent_id, platform_experiment_id, branch) VALUES ($1, $2, $3, $4)
+ON CONFLICT (hypothesis_id, agent_id) DO UPDATE SET branch = EXCLUDED.branch, checked_out_at = now()`,
+		hypothesisID, agentID, platformExpID, branch); err != nil {
+		return nil, fmt.Errorf("hypotheses_store.CheckOutHypothesis: %w", err)
+	}
+	working, err := s.Working(ctx, []string{hypothesisID})
+	if err != nil {
+		return nil, fmt.Errorf("hypotheses_store.CheckOutHypothesis: %w", err)
+	}
+	others := []domain.HypothesisWorker{}
+	for _, w := range working[hypothesisID] {
+		if w.AgentID != agentID {
+			others = append(others, w)
+		}
+	}
+	return others, nil
+}
+
+// Working is, for each of ids with any, the agents working on it now (domain.HypothesisWorker),
+// by agent id.
+func (s *HypothesesStore) Working(ctx context.Context, ids []string) (map[string][]domain.HypothesisWorker, error) {
+	out := map[string][]domain.HypothesisWorker{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.pool.Query(ctx, `
+SELECT on_it.hypothesis_id, on_it.agent_id, COALESCE(NULLIF(a.name, ''), on_it.agent_id)
+FROM (
+	SELECT hypothesis_id, agent_id FROM experiments
+	WHERE hypothesis_id = ANY($1) AND status IN ('QUEUED', 'SUBMITTED', 'RUNNING')
+	UNION
+	SELECT c.hypothesis_id, c.agent_id FROM hypothesis_checkouts c
+	WHERE c.hypothesis_id = ANY($1) AND `+checkoutClaims+`
+) on_it LEFT JOIN agents a ON a.id = on_it.agent_id
+ORDER BY on_it.hypothesis_id, on_it.agent_id`, ids, domain.CheckoutClaim.Seconds())
+	if err != nil {
+		return nil, fmt.Errorf("hypotheses_store.Working: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var w domain.HypothesisWorker
+		if err := rows.Scan(&id, &w.AgentID, &w.Name); err != nil {
+			return nil, fmt.Errorf("hypotheses_store.Working: scan: %w", err)
+		}
+		out[id] = append(out[id], w)
+	}
+	return out, rows.Err()
 }

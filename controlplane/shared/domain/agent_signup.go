@@ -61,8 +61,8 @@ type InFlight struct {
 	IdleSince *time.Time `json:"-"`
 }
 
-// HypothesisInFlight is one hypothesis of a platform experiment with jobs queued or running, and
-// the agents whose jobs they are.
+// HypothesisInFlight is one hypothesis of a platform experiment with jobs queued or running or a
+// checkout within CheckoutClaim, and the agents whose jobs or checkouts they are.
 type HypothesisInFlight struct {
 	HypothesisID string   `json:"hypothesis_id"`
 	Queued       int      `json:"queued" doc:"Its jobs not running yet: queued, placed, or waiting for their environment's build."`

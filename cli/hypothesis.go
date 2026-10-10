@@ -79,7 +79,7 @@ per item. Full reference: controlplane/settings/examples/hypothesis.yaml`
 
 var hypothesisCommands = []subcommand{
 	{"submit", "register an idea under the objective or the hypotheses it builds on", hypothesisSubmit, everyone},
-	{"checkout", "put the clone on your branch for a hypothesis, made from what the hypothesis builds on", hypothesisCheckout, asAgent},
+	{"checkout", "put the clone on your branch for a hypothesis, made from what the hypothesis builds on, and record you as working on it", hypothesisCheckout, asAgent},
 	{"link", "add a link from your own hypothesis", hypothesisLink, everyone},
 	{"comment", "add a note to a hypothesis, or to the objective as root", hypothesisComment, everyone},
 	{"status", "set the verdict of your hypothesis or of a person's idea you tested; confirmed and refuted name the control (--against) and need two completed jobs of its own besides it, one where every ranking metric is deterministic, or --despite with why it holds without", hypothesisStatus, everyone},
@@ -567,8 +567,10 @@ func hypothesisList(c *apiclient.Client, args []string, stdout, stderr io.Writer
 	fs := newFlags("hypothesis list", `usage: hl hypothesis list [--agent A] [--status S] [--by people] [--limit N] [--offset N]
 
 The open ideas of people first, those no agent has settled or built on yet, then the most recent,
-one JSON object per line with builds_on, child_count, finding_count and comment_count. For structure or text search use 'hl hypothesis query'. The branches a
-hypothesis was run on are in hl hypothesis get ID, as implementations.`, stderr)
+one JSON object per line with builds_on, child_count, finding_count, comment_count and working:
+the agents on it now, a job of theirs queued or running or a checkout within two hours. For
+structure or text search use 'hl hypothesis query'. The branches a hypothesis was checked out
+or run on are in hl hypothesis get ID, as implementations.`, stderr)
 	pe := fs.String("platform-experiment", "", "platform experiment id (default the token's)")
 	agent := fs.String("agent", "", "only this agent's hypotheses")
 	status := fs.String("status", "", "open, confirmed, refuted or inconclusive")
@@ -736,10 +738,11 @@ one is of), its comments cut to their first 160 characters ("cut": true on each 
 its jobs, oldest first, each as id, agent_id, status, metrics and, under job.env, the settings
 that differ between its jobs (all of them for an only job). job_count, finding_count and
 comment_count say how many there are; comments_omitted and jobs_omitted, how many the page left
-out (--limit shows more). implementations lists the branches it was run on, one per agent that ran it, each with
-agent_id, branch and code_ref, the commit its newest job there ran: a hypothesis is an idea and
-any agent may run its own code for it. base_ref is the commit a new implementation starts from
-(hl hypothesis checkout ID).
+out (--limit shows more). implementations lists the branches it was checked out or run on, one per
+agent, each with agent_id, branch, code_ref, the commit its newest job there ran, and
+checked_out_at: a hypothesis is an idea and any agent may run its own code for it. working is
+the agents on it now: a job of theirs queued or running, or a checkout within two hours.
+base_ref is the commit a new implementation starts from (hl hypothesis checkout ID).
 --full prints the whole record: the text of every linked hypothesis, every comment whole, who
 wrote each, and a job as hl job list prints it. hl job status ID prints a job's whole record.`, stderr)
 	full := fs.Bool("full", false, "the whole record: comments uncut, linked hypotheses with their text, jobs as in hl job list")
@@ -1012,9 +1015,15 @@ commit for one that builds on the objective. To drop an idea and start again fro
 baseline, register a hypothesis that builds on root and check it out; to improve an idea,
 register one that builds on it.
 
-Prints one JSON object: branch, and base, the commit a branch it created starts from. Refused
-with the reason when there is nothing to start from (no baseline is declared yet), and when
---from is given for a branch that exists. hl job submit pushes the branch.`, stderr)
+The checkout is recorded as you working on the hypothesis: hl hypothesis get and list show you
+in working and the coordinator sees it, for two hours or until a job of yours shows it.
+Checking out again renews it. Another agent already on it is no refusal: two approaches to one
+idea can both be worth running. Read what they do before you repeat it.
+
+Prints one JSON object: branch; base, the commit a branch it created starts from; and, when
+other agents are on the hypothesis now, working, who, and warning. Refused with the reason
+when there is nothing to start from (no baseline is declared yet), and when --from is given for
+a branch that exists. hl job submit pushes the branch.`, stderr)
 	agent := fs.String("agent", "", "whose branch it is, for a person or an API key; an agent's token says it")
 	from := fs.String("from", "", "create the branch from the commit this `job` ran")
 	id, err := parseOne(fs, args, "ID", "", "id")
@@ -1065,9 +1074,14 @@ with the reason when there is nothing to start from (no baseline is declared yet
 		return fail(stderr, fmt.Errorf("hypothesis checkout: %w", err))
 	}
 	out := struct {
-		Branch string `json:"branch"`
-		Base   string `json:"base,omitempty"`
-	}{branch, created}
+		Branch  string            `json:"branch"`
+		Base    string            `json:"base,omitempty"`
+		Working []json.RawMessage `json:"working,omitempty"`
+		Warning string            `json:"warning,omitempty"`
+	}{Branch: branch, Base: created}
+	if err := c.Do("POST", "/hypotheses/"+url.PathEscape(h.ID)+"/checkouts", map[string]string{"agent_id": *agent, "branch": branch}, &out); err != nil {
+		fmt.Fprintf(stderr, "hl: hypothesis checkout: the branch is checked out and the platform did not record it: %v\n", err)
+	}
 	line, _ := json.Marshal(out)
 	fmt.Fprintf(stdout, "%s\n", line)
 	return 0

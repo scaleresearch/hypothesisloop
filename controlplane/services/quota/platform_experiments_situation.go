@@ -28,17 +28,17 @@ type Situation struct {
 	Capacity    SituationCapacity     `json:"capacity"`
 	Budget      SituationBudget       `json:"budget"`
 	Agents      []SituationAgent      `json:"agents" doc:"Every agent but a draft's planner. An agent's token reads its own row only."`
-	InFlight    []SituationHypothesis `json:"hypotheses_in_flight,omitempty" doc:"Each hypothesis with jobs queued or running, and whose they are: two agents on one is one idea run twice. Absent on an agent's token."`
+	InFlight    []SituationHypothesis `json:"hypotheses_in_flight,omitempty" doc:"Each hypothesis with jobs queued or running or checked out within two hours, and who is on it: two agents on one is one idea worked twice. Absent on an agent's token."`
 	Ideas       SituationIdeas        `json:"ideas_from_people"`
 	Coordinator *SituationCoordinator `json:"coordinator,omitempty" doc:"The hosted coordinator, absent on an agent's token and where the platform hosts none."`
 }
 
-// SituationHypothesis is one hypothesis with jobs in flight.
+// SituationHypothesis is one hypothesis with jobs in flight or a checkout that claims it.
 type SituationHypothesis struct {
 	HypothesisID string   `json:"hypothesis_id"`
 	Queued       int      `json:"queued"`
 	Running      int      `json:"running"`
-	Agents       []string `json:"agents" doc:"The names of the agents whose jobs these are."`
+	Agents       []string `json:"agents" doc:"The names of the agents whose jobs these are or who checked it out within two hours."`
 }
 
 // SituationIdeas counts the open ideas of people: hypotheses a person registered that no agent
@@ -517,8 +517,8 @@ func (s *PlatformExperimentsService) Situation(ctx context.Context, id, agentID 
 	return out, nil
 }
 
-// hypothesesInFlight is each hypothesis of platform experiment id with jobs in flight, its agents
-// named as rows name them.
+// hypothesesInFlight is each hypothesis of platform experiment id with jobs in flight or claimed by
+// a checkout, its agents named as rows name them.
 func (s *PlatformExperimentsService) hypothesesInFlight(ctx context.Context, id string, rows []JoinedAgent) ([]SituationHypothesis, error) {
 	inFlight, err := s.store.HypothesesInFlight(ctx, id)
 	if err != nil {
@@ -633,7 +633,7 @@ func registerSituationHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"the objective on each ranking metric (the declared baseline's value, the best a researcher's completed job holding every constraint reached, by which job and agent, " +
 			"the target its target_vs_baseline sets against the baseline's value and the gap to it, and the best an hour and three hours ago), " +
 			"the capacity the run's jobs could use (free and total of its baseline job's type on each cluster its jobs can be placed on, fits_now: how many jobs shaped like the baseline job place now, node by node, and the run's jobs queued and running), " +
-			"the run's budget and spend, for a coordinator, a person or a key each hypothesis with jobs queued or running and whose they are, and for each agent its jobs queued and running, the subagents and turn its harness last reported, its activity, minutes without a job in flight, " +
+			"the run's budget and spend, for a coordinator, a person or a key each hypothesis with jobs queued or running or checked out within two hours and who is on it, and for each agent its jobs queued and running, the subagents and turn its harness last reported, its activity, minutes without a job in flight, " +
 			"the messages it may still be sent this hour, its model account's allowance, and its share and the room left in it, " +
 			"and ideas_from_people: how many open ideas people registered, those no agent has settled or built on yet, and the command that lists them. " +
 			"An agent's token reads the run and its own row. A coordinator, a person or a key reads every row and the hosted coordinator: when its summary was last written, how many jobs completed since, and its model allowance.",

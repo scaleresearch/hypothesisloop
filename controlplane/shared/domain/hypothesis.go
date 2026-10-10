@@ -54,13 +54,25 @@ func IsBaselineAgentBranch(platformExperimentID, branch string) bool {
 	return beside && name != "" && !strings.ContainsAny(name, "/ \t\n")
 }
 
-// Implementation is one agent's code for a hypothesis: the branch its jobs ran on and the commit
-// the newest of them ran. A hypothesis has as many as there are agents that ran it, and none is
-// stored: they are read off the jobs.
+// Implementation is one agent's code for a hypothesis: the branch it checked out or its jobs ran
+// on, and the commit the newest of them ran. A hypothesis has as many as there are agents that
+// checked it out or ran it.
 type Implementation struct {
+	AgentID      string     `json:"agent_id"`
+	Branch       string     `json:"branch"`
+	CodeRef      string     `json:"code_ref" doc:"The commit the newest job on this branch ran, repository_url@sha; empty while no job ran on it."`
+	CheckedOutAt *time.Time `json:"checked_out_at,omitempty" doc:"When its agent last checked the branch out with hl hypothesis checkout."`
+}
+
+// CheckoutClaim is how long a checkout says its agent works on the hypothesis, before any job of
+// its shows it. Checking out again renews it.
+const CheckoutClaim = 2 * time.Hour
+
+// HypothesisWorker is an agent working on a hypothesis now: a job of its is queued or running on
+// it, or it checked it out within CheckoutClaim and has not finished.
+type HypothesisWorker struct {
 	AgentID string `json:"agent_id"`
-	Branch  string `json:"branch"`
-	CodeRef string `json:"code_ref" doc:"The commit the newest job on this branch ran, repository_url@sha."`
+	Name    string `json:"name"`
 }
 
 // HypothesisStatus is the owning agent's own verdict on its claim — mirrors what agents already
@@ -155,6 +167,8 @@ type HypothesisListItem struct {
 	ChildCount   int      `json:"child_count"`
 	FindingCount int      `json:"finding_count"`
 	CommentCount int      `json:"comment_count"`
+	// Working is filled by the list read only.
+	Working []HypothesisWorker `json:"working,omitempty" doc:"The agents working on it now: a job of theirs queued or running, or a checkout within two hours. Absent when none is."`
 }
 
 // HypothesisStats counts a set of hypotheses by status. A status with no hypothesis is absent.

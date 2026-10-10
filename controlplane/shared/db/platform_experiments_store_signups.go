@@ -595,15 +595,21 @@ func (s *PlatformExperimentsStore) SummaryWrittenAt(ctx context.Context, id stri
 	return at, nil
 }
 
-// HypothesesInFlight is each hypothesis of the platform experiment id with jobs queued or running,
-// the baseline's left out, by hypothesis id, with the agents whose jobs they are.
+// HypothesesInFlight is each hypothesis of the platform experiment id with jobs queued or running
+// or a checkout that claims it (domain.CheckoutClaim), the baseline's left out, by hypothesis id,
+// with the agents on it.
 func (s *PlatformExperimentsStore) HypothesesInFlight(ctx context.Context, id string) ([]domain.HypothesisInFlight, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT hypothesis_id, count(*) FILTER (WHERE status <> 'RUNNING'), count(*) FILTER (WHERE status = 'RUNNING'),
        array_agg(DISTINCT agent_id ORDER BY agent_id)
-FROM experiments
-WHERE platform_experiment_id = $1 AND status IN ('QUEUED', 'SUBMITTED', 'RUNNING') AND hypothesis_id <> platform_experiment_id
-GROUP BY hypothesis_id ORDER BY hypothesis_id`, id)
+FROM (
+	SELECT hypothesis_id, agent_id, status::text AS status FROM experiments
+	WHERE platform_experiment_id = $1 AND status IN ('QUEUED', 'SUBMITTED', 'RUNNING') AND hypothesis_id <> platform_experiment_id
+	UNION ALL
+	SELECT c.hypothesis_id, c.agent_id, NULL FROM hypothesis_checkouts c
+	WHERE c.platform_experiment_id = $1 AND `+checkoutClaims+`
+) on_it
+GROUP BY hypothesis_id ORDER BY hypothesis_id`, id, domain.CheckoutClaim.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.HypothesesInFlight: %w", err)
 	}
