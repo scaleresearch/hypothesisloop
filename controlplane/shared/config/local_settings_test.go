@@ -43,7 +43,7 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 		t.Errorf("environments = %+v, want none without a registry in .env", cfg.Environments)
 	}
 
-	// With a registry in .env the environments are the ones infra/pulumi makes beside it.
+	// With a registry in .env the environments are the ones beside it.
 	render(t, repo, dir, rendered, `HL_ENVIRONMENTS_PROJECT=my-project HL_ENVIRONMENTS_REPOSITORY=europe-west1-docker.pkg.dev/my-project/images-environments/environment`)
 	if cfg, err = Load(rendered); err != nil {
 		t.Fatalf("the rendered local settings with environments do not load: %v", err)

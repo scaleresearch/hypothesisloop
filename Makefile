@@ -41,7 +41,7 @@ export HOST_ADDRESS REGISTRY_PUBLISH_IP REGISTRY TAG
 # reaches compose, the scripts and the tests from here.
 export HYPOTHESISLOOP_SIGNING_SECRET ?= $(shell bash -c '. localdev/lib/auth.sh && printf %s "$$HYPOTHESISLOOP_SIGNING_SECRET"')
 REGISTRY_TLS_VERIFY ?= false
-# Run before every push. A registry whose login expires (infra/Makefile's publish) logs in here; the
+# Run before every push. A registry whose login expires logs in here (set by the deployment tooling); the
 # dev registry takes none.
 REGISTRY_LOGIN ?= true
 # The platform every image is built for: the container engine's own unless set (linux/amd64 for
@@ -121,8 +121,8 @@ tunnels-down:
 	bash localdev/local-tunnels/tunnels.sh down
 
 # make dev, plus agent-launcher (Fly.io) and cloud-agent (vast.ai) as host processes, with the
-# settings naming the running tunnels and the images under IMAGE_TAG, which
-# `make -C infra run-images` pushes after a change to the agent image or a job image. Needs
+# settings naming the running tunnels and the images under IMAGE_TAG, which the maintainers'
+# deployment tooling (not in this repository) pushes after a change to them. Needs
 # `make tunnels` first. From here hosted agents and jobs placed on the cloud cluster rent
 # machines, which cost money.
 dev-hosted: render-settings
@@ -355,7 +355,7 @@ locked-images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-u
 
 # The job images that carry a framework, built and pushed to $(REGISTRY), which a local cluster
 # pulls them from. Apart from `images` because each pulls gigabytes. The deployment's registry
-# gets them from `make -C infra run-images`.
+# gets them from the maintainers' deployment tooling.
 include infra/images/job/bases.mk
 
 job-images: check-tag

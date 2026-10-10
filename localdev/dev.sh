@@ -10,7 +10,7 @@
 #   hosted   the same with what rents compute elsewhere: agent-launcher (Fly.io or E2B, whichever
 #            HOSTED_SANDBOX_PROVIDER in .env names) and cloud-agent
 #            (vast.ai) as two more processes, and settings that name the running tunnels (make
-#            tunnels) and the images `make -C infra run-images` pushed. Its inputs are keys of .env,
+#            tunnels) and the images under IMAGE_TAG in the deployment's registry. Its inputs are keys of .env,
 #            and every missing one is named before anything is touched
 #   api      rebuild and restart the API and metrics-service with the settings as they were last
 #            rendered. Everything else keeps running
@@ -184,7 +184,7 @@ hosted_inputs() {
   public_metrics="$(awk '$1 == "metric-controller" { print $2 }' <<<"${tunnels}")"
   public_store="$(awk '$1 == "object-store" { print $2 }' <<<"${tunnels}")"
   public_git="$(awk '$1 == "git" { print $2 }' <<<"${tunnels}")"
-  # The registry's address as infra/pulumi composes it from the same three keys.
+  # The registry's address, composed from the three keys of .env that name it.
   registry="$(lib_env_value REGISTRY_LOCATION)-docker.pkg.dev/$(lib_env_value GCP_PROJECT)/$(lib_env_value REGISTRY_REPOSITORY)"
   tag="$(lib_env_value IMAGE_TAG)"
 }

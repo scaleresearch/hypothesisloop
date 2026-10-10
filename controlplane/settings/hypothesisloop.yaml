@@ -191,7 +191,7 @@ job_images:
 #
 # Left out, as here, the deployment builds no environments: no cluster counts as building, so every
 # such job is refused. To switch it on, add the section with all three values. A deployment's chart
-# gets them from infra/pulumi, and local development's render from .env (localdev/lib/auth.sh):
+# gets them from its values, and local development's render from .env (localdev/lib/auth.sh):
 #
 #   environments:
 #     repository: europe-west1-docker.pkg.dev/my-project/hypothesisloop-environments/environment
@@ -209,7 +209,7 @@ job_images:
 #               token in each reconcile answer that lists a job running in an environment, which
 #               the job's image is pulled with.
 
-# The GitHub App a project's repository is reached through (infra/github). A person installs the
+# The GitHub App a project's repository is reached through. A person installs the
 # App on repositories they choose and attaches one to a project; agents and jobs then clone it
 # with tokens minted per repository, each good for about an hour and stored nowhere.
 #

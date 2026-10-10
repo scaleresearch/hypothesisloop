@@ -2,7 +2,7 @@
 # it as it is; cloud-agent.yaml explains name and settings.
 #
 # E2B boots a sandbox from a template. Before an image can be rented at a size, build its
-# template: `make -C infra e2b-template IMAGE=<image> CORES=<n> MEMORY_MIB=<n>`. A Create whose
+# template: `go run ./runtime/cloud/cmd/e2b-template <image> <cores> <memory-mib>`. A Create whose
 # template is missing fails with that command.
 
 provider:

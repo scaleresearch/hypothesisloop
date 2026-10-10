@@ -64,8 +64,7 @@ if [[ -n "${HL_GITHUB_APP_ID}" ]]; then
   export HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY
 fi
 
-# Where local development's environments are built to, as infra/pulumi makes it from the same
-# keys of .env: the private repository <REGISTRY_REPOSITORY>-environments and its env-pusher and
+# Where local development's environments are built to, from the registry keys of .env: the private repository <REGISTRY_REPOSITORY>-environments and its env-pusher and
 # env-puller service accounts. The control plane mints their tokens with this machine's
 # application default credentials (gcloud auth application-default login), whose account
 # REGISTRY_TOKEN_MINTERS names. With no REGISTRY_REPOSITORY the local control plane builds none.

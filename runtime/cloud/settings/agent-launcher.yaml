@@ -12,8 +12,7 @@
 #
 # The launcher keeps nothing between passes and sees only this prefix on the account of the
 # provider section below. Changing provider.name, the account in provider.settings or this name
-# leaves the machines rented before where it no longer looks, running and billing: drain first
-# (infra/README.md).
+# leaves the machines rented before where it no longer looks, running and billing: drain first.
 launcher_name: main
 
 # Where this process reaches the control plane. The address the agents reach it at is the control
