@@ -51,9 +51,9 @@ DISALLOWED_TOOLS = ["ScheduleWakeup", "Monitor", "TaskCreate", "TaskUpdate", "Ta
                      # called EnterWorktree instead and it failed.
                      "EnterWorktree", "ExitWorktree"]
 
-# The CLI defers WebSearch and WebFetch behind ToolSearch by default: a run 8 planner had to call
-# ToolSearch "select:WebSearch" first, and no researcher of run 8 or planner of run 9 searched at
-# all. With tool search off every allowed tool is sent whole, so these two are directly callable.
+# The CLI defers WebSearch and WebFetch behind ToolSearch by default: a planner had to call
+# ToolSearch "select:WebSearch" first, and in live runs most researchers and planners never
+# searched at all. With tool search off every allowed tool is sent whole, so these two are directly callable.
 CLI_ENV = {"ENABLE_TOOL_SEARCH": "false",
            # Background tasks stay on so subagents can run in the background: the CLI starts the
            # lead's next turn when one ends. A backgrounded command is refused (_wait_hook), since
@@ -75,7 +75,7 @@ SUBAGENT_BACKGROUND_COMMAND = "Commands run in the foreground here: wait for you
 SUBAGENT_TASK_STOP = "Only the agent that started you stops a task."
 
 # The CLI writes each message as one line, and the SDK ends the session on a line past its bound,
-# 1 MB by default: a run 12 researcher whose six subagents read papers lost its session to one.
+# 1 MB by default: a researcher whose six subagents read papers lost its session to one.
 # A request to the model is at most 32 MB, so no message of a session is longer.
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
 
@@ -1128,7 +1128,7 @@ def _restart_state(setup: core.RunSetup) -> tuple[str | None, str | None]:
     """The session to resume and the prompt that opens the next connection, as persisted.
 
     The session resumed is the newest one stored: the one in flight once its transcript holds
-    what the turn did, else the one saved at the last result. A run 12 researcher that lost its
+    what the turn did, else the one saved at the last result. A researcher that lost its
     first turn began again from nothing, and the session in flight holds more than the saved one.
     A session id beside a handoff means the replacement session already produced a result, so it
     is resumed and the bridge is not injected twice.

@@ -319,7 +319,7 @@ func TestAnEndingInstanceIsToldToStopOnceAndAgainOnlyWhileItKeepsRunning(t *test
 	h.mustPass()
 	h.mustPass()
 	// One whose command already exited has had its last turn and goes at once, needing no
-	// signal. Run 9's coordinator was kept four minutes after it.
+	// signal. A coordinator was once kept four minutes after it.
 	h.names(full("a"), full("c"))
 	if !reflect.DeepEqual(h.rented.IDs(full("a")), idsA) || !reflect.DeepEqual(h.rented.IDs(full("c")), idsC) || len(idsB) != 1 {
 		t.Fatal("an ending instance was replaced")
@@ -328,7 +328,7 @@ func TestAnEndingInstanceIsToldToStopOnceAndAgainOnlyWhileItKeepsRunning(t *test
 		t.Fatalf("creates %d destroys %d, want 3 and the exited one", h.rented.Calls("Create"), h.rented.Calls("Destroy"))
 	}
 	// The signal is what starts the agent's last turn. Running or still starting, an ending
-	// instance gets it once. Run 7's launcher sent it to one machine on every pass, 33 times in
+	// instance gets it once. A launcher once sent it to one machine on every pass, 33 times in
 	// a minute.
 	if a, c := h.rented.Stops(full("a")), h.rented.Stops(full("c")); a != 1 || c != 1 || h.rented.Calls("Stop") != 2 {
 		t.Fatalf("stops: running %d, starting %d, all %d, want 1, 1 and none to the exited one", a, c, h.rented.Calls("Stop"))

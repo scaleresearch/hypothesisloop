@@ -1,4 +1,4 @@
-"""Org members, invites and what each role may do (plan 15.1).
+"""Org members, invites and what each role may do.
 
 A person exists once they sign in, so every person here signs in with a JWT of the local identity
 provider and gets a home org on their first request. Everything else goes through the API and

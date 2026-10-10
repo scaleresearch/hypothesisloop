@@ -123,7 +123,7 @@ func TestHypothesisCheckoutStartsFromAJobOrSaysThereIsNoBase(t *testing.T) {
 	}
 }
 
-// In run 4 researchers wrote files in their clone before they checked out a hypothesis, and git's
+// Researchers wrote files in their clone before they checked out a hypothesis, and git's
 // own refusal sent them into a stash dance that failed too. The refusal says what to do.
 func TestHypothesisCheckoutOverChangesSaysToCommitOrStashThem(t *testing.T) {
 	clone, origin := pushedClone(t)

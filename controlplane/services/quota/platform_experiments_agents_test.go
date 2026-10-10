@@ -897,7 +897,7 @@ func (f *rosterStore) GetAgentRunningExperiments(context.Context, string, string
 	return nil, nil
 }
 
-// In run 4 both researchers finished with 11 to 16 minutes of an hour and most of their quota
+// In a live run both researchers finished with 11 to 16 minutes of an hour and most of their quota
 // left, and the coordinator heard only their reasons. A researcher with more than a tenth of
 // both left names its blocker or is told what is left, and every researcher's finish records
 // the time and quota it left, which agent.finished carries. No other role is asked.
@@ -943,7 +943,7 @@ func TestAResearcherFinishingEarlyNamesItsBlockerAndTheTimeAndQuotaItLeavesAreTo
 	}
 }
 
-// Run 8's researcher was refused a finish with 4 minutes of 30 left, more than a tenth, when its
+// A researcher was refused a finish with 4 minutes of 30 left, more than a tenth, when its
 // jobs took 2 to 7 minutes, and sat idle until the close. Less time left than the agent's jobs
 // typically take, or with none of its own the experiment's, is too little to ask a blocker for.
 func TestAResearcherFinishesWithoutABlockerWhenNoJobOfItFitsInTheTimeLeft(t *testing.T) {

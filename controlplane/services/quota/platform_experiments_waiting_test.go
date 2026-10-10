@@ -414,7 +414,7 @@ func (f *tendedStore) MarkBaselineLate(_ context.Context, id, reason string) err
 	return nil
 }
 
-// Run 5's baseline job waited 17 minutes for its environment and the platform closed the
+// A baseline job waited 17 minutes for its environment and the platform closed the
 // experiment while the job pulled its image: the platform's time was counted against the
 // baseline, and its agent, never told its job could not end in time, slept until the close. The
 // sweep moves baseline_due_at by the time a job waits on the platform, and tells the agent of a

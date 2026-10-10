@@ -280,7 +280,7 @@ func TestAListSaysWhyAPlatformExperimentClosed(t *testing.T) {
 	t.Fatalf("%s is not among the closed ones listed", pe)
 }
 
-// Run 5's baseline lost 17 of its 25 minutes to the platform building its environment. The time
+// A baseline lost 17 of its 25 minutes to the platform building its environment. The time
 // a baseline waits on the platform moves its baseline_due_at out, up to the bound given, and
 // only while it is open with no baseline declared.
 func TestTheTimeABaselineWaitsOnThePlatformMovesItsDeadline(t *testing.T) {

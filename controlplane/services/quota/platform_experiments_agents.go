@@ -617,7 +617,7 @@ func (s *PlatformExperimentsService) finishReason(ctx context.Context, platformE
 	room := max(quota.Remaining(domain.CapacityGuaranteed), quota.Remaining(domain.CapacityBurst))
 	left := fmt.Sprintf("%d of the run's %d minutes and %.3g of the agent's %.3g AccH were left, room for a job of %.3g AccH",
 		int(timeLeft.Minutes()), int(run.Minutes()), max(0, quota.Share()-quota.Used()), quota.Share(), room)
-	// Run 8's researcher was refused with 4 minutes left, when its jobs took 2 to 7, and sat idle
+	// A researcher was refused with 4 minutes left, when its jobs took 2 to 7, and sat idle
 	// until the close: time no job of it fits in is no time left.
 	typical, err := s.typicalJobTime(ctx, platformExpID, agentID)
 	if err != nil {

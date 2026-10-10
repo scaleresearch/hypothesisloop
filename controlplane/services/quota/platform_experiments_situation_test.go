@@ -129,7 +129,7 @@ func TestTheClockOfAClosedOrNotStartedRunCountsNoTimeLeft(t *testing.T) {
 	}
 }
 
-// Round 14: a run's record said its lead "did not finish: its machine ended (gone)" though a
+// A run's record said its lead "did not finish: its machine ended (gone)" though a
 // replacement worked to the close, and "released" with "no activity reported" for machines the
 // close itself stopped. An end is reported only of a machine that ended before the close and
 // was not replaced.
@@ -330,7 +330,7 @@ func (n *idleNotices) NoticeIdle(_ context.Context, r db.IdleResearcher, detail 
 	return nil
 }
 
-// Round 14: a lead told once that it was idle rested from mid-run to the close, and the notice
+// A lead told once that it was idle rested from mid-run to the close, and the notice
 // said nothing of what was free. Each notice carries what the platform knows then, and a run
 // whose numbers cannot be read is skipped without keeping the others from being told.
 func TestAnIdleNoticeSaysWhatThePlatformKnowsAtTheNotice(t *testing.T) {

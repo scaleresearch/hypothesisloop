@@ -76,8 +76,8 @@ type Launcher struct {
 }
 
 // stopRetry is how long an ending instance that is still running waits before it is told to stop
-// again: one stop starts the agent's last turn, and run 7 sent one to the same machine every pass
-// for a minute.
+// again: one stop starts the agent's last turn, and a launcher once sent one to the same machine
+// every pass for a minute.
 const stopRetry = 2 * time.Minute
 
 type outputRead struct {
@@ -245,7 +245,7 @@ func (l *Launcher) Pass(ctx context.Context) error {
 	// An ending instance is told to stop once, and again every stopRetry until its command has
 	// exited: the signal is what starts the agent's last turn. A stop that failed is sent again
 	// on the next pass. Once its command has exited its last turn is over and it is destroyed,
-	// its end already reported with this pass's question: run 9's coordinator was kept four
+	// its end already reported with this pass's question: a coordinator was once kept four
 	// minutes after it, to the end of the control plane's wind-down.
 	for _, name := range sortedKeys(want.ending) {
 		for _, i := range byName[name] {

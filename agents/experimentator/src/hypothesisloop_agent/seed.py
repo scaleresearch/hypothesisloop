@@ -2,7 +2,7 @@
 prompt: the draft, the capacity, and the repository's tree, README and .hypothesisloop/. And what
 a baseline agent is told first: how soon its work is due.
 
-Run 5's planner took 3m41s to propose, and its first turns were these reads, each a model call
+A planner took 3m41s to propose, and its first turns were these reads, each a model call
 over a growing context. Every step that fails is said in the prompt, and the planner does it
 itself.
 """
@@ -20,7 +20,7 @@ TREE_LINES = 300
 FILE_CHARS = 12_000
 _TIMEOUT_S = 120
 
-# Run 8's planner read /home/user/<repo>/... and ran `find /` before it used its working
+# A planner read /home/user/<repo>/... and ran `find /` before it used its working
 # directory: nothing said where that was.
 _OPENING = (
     "Your working directory is {workdir}, the root of the repository's clone: every path below is "
@@ -106,7 +106,7 @@ def planner(workdir: str) -> str:
     return "\n\n".join([_OPENING.format(workdir=workdir), *sections])
 
 
-# Runs 8 to 10's baseline agents built the environment 9.5 to 14.5 min in, and the control
+# Baseline agents built the environment 9.5 to 14.5 min in, and the control
 # waited for it. The opening says the run waits on the goal and what usually takes longest.
 _BASELINE_OPENING = (
     "Your goal is the control and each reference measured and your branch ready for researchers, "

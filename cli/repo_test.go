@@ -84,7 +84,7 @@ func read(t *testing.T, clone, path string) string {
 	return string(data)
 }
 
-// In run 4 a researcher ran hl repo init on main before it had a branch, and the files it wrote
+// A researcher ran hl repo init on main before it had a branch, and the files it wrote
 // stopped hl hypothesis checkout. The baseline writes the files; every other agent gets them with
 // the baseline's commit.
 func TestRepoInitIsRefusedToAnAgentOtherThanTheBaseline(t *testing.T) {

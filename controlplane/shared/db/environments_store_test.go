@@ -219,7 +219,7 @@ func TestABuildIsReassignedOffADeadClusterOrAPassedLeaseUntilItsAttemptsAreSpent
 	}
 }
 
-// Run 10: a build was taken from a cluster that went silent and assigned again elsewhere. The
+// A build was taken from a cluster that went silent and assigned again elsewhere. The
 // file is the key's, so the old attempt's report of the file failing fails the build at once and
 // the new attempt does not run it again; a later attempt's report is no earlier attempt's.
 func TestAFileFaultOfAnEarlierAttemptFailsTheBuildWhereverItIsNow(t *testing.T) {

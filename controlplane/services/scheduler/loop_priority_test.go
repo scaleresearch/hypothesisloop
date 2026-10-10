@@ -424,7 +424,7 @@ func TestWithoutFailedKeepsAFailedClusterOnlyWhenNothingElseCouldHostTheJob(t *t
 	}
 }
 
-// Run 8 placed 7 of 9 researcher jobs on the first name that fit, a box of 12 cores, while one
+// The scheduler once placed 7 of 9 researcher jobs on the first name that fit, a box of 12 cores, while one
 // of 28 of the same priority sat mostly idle. Within a tier a job goes where the most jobs like
 // it still fit, and the cluster that built its environment wins only a tie.
 func TestAJobGoesToTheClusterOfItsTierWithTheMostRoom(t *testing.T) {

@@ -301,8 +301,8 @@ func (s builtStore) GetEnvironment(_ context.Context, key string) (*domain.Envir
 	return s.envs[key], nil
 }
 
-// Run 3's agent read environment_building for 19 minutes while its build pulled, installed and
-// pushed, and run 4's was woken for a turn by each new attempt. A job waiting for its environment
+// An agent read environment_building for 19 minutes while its build pulled, installed and
+// pushed, and another was woken for a turn by each new attempt. A job waiting for its environment
 // says where the build runs, its attempt and the step it last reported, read with the job.
 func TestAJobWaitingForItsEnvironmentSaysWhereItsBuildIs(t *testing.T) {
 	at := time.Date(2026, 10, 8, 9, 14, 10, 0, time.UTC)
@@ -329,7 +329,7 @@ func TestAJobWaitingForItsEnvironmentSaysWhereItsBuildIs(t *testing.T) {
 	}
 }
 
-// Run 11's build was loaded on its builder 7.5 minutes before its push to the registry ended. A
+// A build was loaded on its builder 7.5 minutes before its push to the registry ended. A
 // job waiting for it says where it is loaded and that it runs there now, or that it waits for the
 // push, and so after a push that failed.
 func TestAJobWaitingForALoadedEnvironmentSaysWhereItRunsNow(t *testing.T) {

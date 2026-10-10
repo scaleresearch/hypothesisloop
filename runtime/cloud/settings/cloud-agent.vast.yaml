@@ -68,7 +68,7 @@ provider:
         min_gpu_ram_mb: 80000
 
 # max_instances is set far above what the platform's experiments ask for at once, so it is no
-# limit on how much is rented (owner's decision: no account-wide cap on rented machines). What
+# limit on how much is rented: there is no account-wide cap on rented machines. What
 # bounds the spend is each experiment's budget, each agent's quota, the experiment's concurrency
 # limit and max_price_per_hour. Every instance of the maximum is reported as a node on every
 # poll, which is the one reason the number is not larger. A node is reported free only while an

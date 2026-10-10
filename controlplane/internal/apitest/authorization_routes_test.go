@@ -17,7 +17,7 @@ var (
 	persons             = []string{"user", "member"}
 )
 
-// The member is a person of org-a who does not own it (plan 15.1). In everything that goes on
+// The member is a person of org-a who does not own it. In everything that goes on
 // inside a platform experiment the member is answered as the owner is, so the rules below tell
 // the two apart only where an org and what it owns is changed: orgLevel and ofProject refuse the
 // member, orgRead admits them.

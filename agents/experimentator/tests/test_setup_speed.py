@@ -25,7 +25,7 @@ def git(*args, cwd):
 
 
 class PlannerOpeningTest(unittest.TestCase):
-    # Run 5's planner spent its first turns on the same reads every plan makes: the draft, the
+    # A planner spent its first turns on the same reads every plan makes: the draft, the
     # capacity, the clone, its README and .hypothesisloop/. The harness makes them.
     def test_the_draft_the_capacity_and_the_repository_open_a_fresh_plan(self):
         with tempfile.TemporaryDirectory() as origin, tempfile.TemporaryDirectory() as workdir:
@@ -62,7 +62,7 @@ class PlannerOpeningTest(unittest.TestCase):
         self.assertIn("=== Not read, do it yourself\n`hl` exited 1: refused", opening)
         self.assertIn("the repository was not read", opening)
 
-    # Run 8's planner read /home/user/<repo>/... and ran `find /` before it used its working
+    # A planner read /home/user/<repo>/... and ran `find /` before it used its working
     # directory. The opening says that directory's absolute path first, and the model CLI starts
     # in it.
     def test_the_opening_says_the_absolute_working_directory_the_cli_starts_in(self):
@@ -104,7 +104,7 @@ class PlannerOpeningTest(unittest.TestCase):
         self.assertTrue(opened.startswith("Your goal is the control") and opened.endswith("\n\n=== The planner's map of the repository\nbench.py: the harness"), opened)
         self.assertEqual(run._opening(SimpleNamespace(cfg=baseline_agent(), client=client, workdir="/w"), "s-1", None), "Continue where you left off.")
 
-    # Runs 8 to 10's baseline agents built the environment 9.5 to 14.5 min in. A fresh baseline
+    # Baseline agents built the environment 9.5 to 14.5 min in. A fresh baseline
     # session opens with its goal, the slowest part first, and the planner's pins.
     def test_a_baseline_agent_opens_with_its_goal(self):
         opened = seed.baseline("src/: the code. rust-toolchain.toml pins 1.95.0.")
@@ -120,8 +120,8 @@ class PlannerOpeningTest(unittest.TestCase):
 
 
 class ToolsTest(unittest.TestCase):
-    # The CLI deferred WebSearch and WebFetch behind ToolSearch: run 9's planner never searched
-    # and run 8's researchers neither. Tool search is off, so both are sent to the model whole.
+    # The CLI deferred WebSearch and WebFetch behind ToolSearch: planners and researchers
+    # never searched. Tool search is off, so both are sent to the model whole.
     def test_web_search_and_fetch_are_sent_with_the_other_tools(self):
         class Started(Exception):
             pass

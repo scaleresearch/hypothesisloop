@@ -12,7 +12,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// Run 4's baseline COPYed a vendored crate into its environment, which the platform builds with
+// A baseline agent COPYed a vendored crate into its environment, which the platform builds with
 // no build context. The template says so and is a file the platform builds.
 func TestTheEnvironmentFileSaysItIsBuiltAloneAndTheCodeComesByTheClone(t *testing.T) {
 	file := Files()[Environment]
@@ -93,7 +93,7 @@ func TestTheTemplateIsAJobSpecToFillInAndAnExperimentFileThatStatesNothing(t *te
 	}
 }
 
-// Run 8's control job ran under bash -lc: the login shell's /etc/profile reset the PATH the
+// A control job ran under bash -lc: the login shell's /etc/profile reset the PATH the
 // environment's Dockerfile set with ENV, and cargo was not found.
 func TestTheJobSpecRunsItsCommandInAShellThatKeepsTheImagesPath(t *testing.T) {
 	var spec struct {

@@ -241,7 +241,7 @@ func TestABuildNoLongerListedAtItsAttemptIsCancelledAndNotReported(t *testing.T)
 	}
 }
 
-// Run 10: a build ran while the control plane was out of reach. The outcome of a build whose
+// A build ran while the control plane was out of reach. The outcome of a build whose
 // report was not taken is posted again by the next pass that lists it, and the build is never run
 // again: a file that failed fails the same way.
 func TestABuildWhoseReportWasRefusedIsReportedAgainNotRunAgain(t *testing.T) {

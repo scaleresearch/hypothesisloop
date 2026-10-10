@@ -262,7 +262,7 @@ func TestABuildReportThatSaysTooLittleOrTooMuchIsRefused(t *testing.T) {
 }
 
 // The cluster that builds an environment tells the step it is at, which the job waiting for it
-// shows: run 3 waited 19 minutes on a build that said nothing.
+// shows: a job once waited 19 minutes on a build that said nothing.
 func TestABuildsProgressIsRecordedFencedOnItsAttemptAndOneLine(t *testing.T) {
 	w := newReconcileWorld(t, "of-a")
 	w.store.assigned["of-a"] = []*domain.Environment{assignedBuild("key-1", 1)}

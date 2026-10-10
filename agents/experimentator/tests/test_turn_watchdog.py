@@ -207,7 +207,7 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.run_ends_while_idle("generalist", {"ended": "cut"}, {"status": "running"}), [
             "Begin." + S, "You are being stopped because you were cut from the platform experiment at a stage boundary. " + run._SHUTDOWN_PROMPT + S])
 
-    # Run 6: the close arrived as an update, was handed over as a turn of its own and cut by the
+    # In a live run the close arrived as an update, was handed over as a turn of its own and cut by the
     # stop four seconds later, and only then did the last turn start. A batch that comes with the
     # end of the run opens the last turn, with the batch in it: not handed over, it is read again.
     async def test_a_batch_that_comes_with_the_close_opens_the_last_turn(self):
@@ -572,7 +572,7 @@ class RefusedClient(HangingClient):
                             session_id="s-1", result="You've hit your weekly limit")
 
 
-# Round 14's account neared its 7-day allowance. A refused agent must wait for the reset the
+# An account neared its 7-day allowance. A refused agent must wait for the reset the
 # provider states, spend no restart and no reconnect on the way, and resume.
 class RateLimitTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

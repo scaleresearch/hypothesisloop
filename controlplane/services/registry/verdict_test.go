@@ -169,7 +169,7 @@ func TestOpenAndInconclusiveNeedNoEvidence(t *testing.T) {
 	}
 }
 
-// Round 14's agents wrote a reason with every verdict on a compression ratio, a value the same
+// Agents in a live run wrote a reason with every verdict on a compression ratio, a value the same
 // code and data give exactly on any machine. Declared deterministic, one run and the control are
 // the evidence, and a run is still needed.
 func TestAVerdictOnDeterministicMetricsNeedsNoRepeat(t *testing.T) {

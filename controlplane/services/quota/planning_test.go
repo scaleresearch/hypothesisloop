@@ -333,7 +333,7 @@ func TestAnOpenExperimentNotRunningByItsBaselineDeadlineIsClosed(t *testing.T) {
 	}
 }
 
-// Run 6 closed 59 s after its ends_at, on the minute tick of the expiry sweep. SweepEnded, on
+// A run closed 59 s after its ends_at, on the minute tick of the expiry sweep. SweepEnded, on
 // its own short tick, closes a running one past its end and leaves what the minute tick tends.
 func TestSweepEndedClosesARunPastItsEndAndNothingElse(t *testing.T) {
 	now := time.Now().UTC()
@@ -373,7 +373,7 @@ func TestASummaryWrittenWithTheRecordInItKeepsTheRecordOnce(t *testing.T) {
 	}
 }
 
-// Run 2 closed at its baseline deadline with no coordinator ever started: its summary stayed
+// A run closed at its baseline deadline with no coordinator ever started: its summary stayed
 // empty and the close message did not say that no job was ever submitted.
 func TestAnExperimentThatClosesWithNoSummaryIsGivenTheRecordOfItsClose(t *testing.T) {
 	now := time.Now().UTC()
@@ -396,7 +396,7 @@ func TestAnExperimentThatClosesWithNoSummaryIsGivenTheRecordOfItsClose(t *testin
 	}
 }
 
-// Run 6's coordinator wrote a summary mid-run ("Status: running") and its rewrite at the close
+// A coordinator wrote a summary mid-run ("Status: running") and its rewrite at the close
 // was cut off: the close record was skipped because a summary existed, so the stale one stood
 // alone. The platform writes its record of every close, after whatever summary there is.
 func TestTheRecordOfACloseFollowsASummaryWrittenBefore(t *testing.T) {
@@ -448,7 +448,7 @@ func TestAnOwnersReasonToCloseIsRecorded(t *testing.T) {
 	}
 }
 
-// Run 5's record said "Spent: 0 of the budget" while consumed_accelerator_hours read 0.0645: the
+// A close record said "Spent: 0 of the budget" while consumed_accelerator_hours read 0.0645: the
 // record was written at the close, before the job its cluster was still starting ended and was
 // billed. The record of a close waits for every job to be settled, and states the spend whole.
 func TestTheRecordOfACloseWaitsForItsJobsToBeBilled(t *testing.T) {
@@ -480,7 +480,7 @@ func TestTheRecordOfACloseWaitsForItsJobsToBeBilled(t *testing.T) {
 	}
 }
 
-// Run 3 closed at its baseline deadline with a job its cluster could not start, an environment
+// A run closed at its baseline deadline with a job its cluster could not start, an environment
 // built for it and a commit on the baseline branch, and its record named none of them: the next
 // run started from nothing. The record of such a close says what the baseline left.
 func TestTheRecordOfABaselineDeadlineCloseSaysWhatTheBaselineLeft(t *testing.T) {
@@ -973,7 +973,7 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 		}
 	}
 
-	// Run 5's planner gave its baseline 25 minutes, and building its environment alone took 17.
+	// A planner gave its baseline 25 minutes, and building its environment alone took 17.
 	// A window under the platform's floor is refused with the floor and why it is there.
 	short := draftWithPlanner()
 	_, propose = planningAPI(t, short, thePlanner)
@@ -1225,7 +1225,7 @@ func TestAnAcceptedDraftRunsOnceItsBaselineAgentFinishesWithNoCoordinatorAction(
 	}
 }
 
-// Run 7's baseline agent reran the control after changing its environment and ran a check from a
+// A baseline agent reran the control after changing its environment and ran a check from a
 // fresh checkout, so it left three jobs that report the ranking metric and nothing was declared.
 // Its finish names the control, which is declared as a PATCH declares it; a job that could not
 // be is refused before the finish is recorded, so the agent fixes it and finishes again.
@@ -1251,7 +1251,7 @@ func TestABaselineAgentNamesTheJobItsFinishDeclares(t *testing.T) {
 		"job-check": job("job-check", measures, domain.StatusCompleted), "job-failed": job("job-failed", measures, domain.StatusFailed),
 		"job-other": job("job-other", "ag-other", domain.StatusCompleted),
 	}
-	// Run 8's check ran from a branch beside the baseline's, and only the baseline's is declared.
+	// A baseline agent's check ran from a branch beside the baseline's, and only the baseline's is declared.
 	jobs["job-check"].Job.Branch = "hl/pe-draft/baseline-check"
 	svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) {
 		return jobs[jobID], nil
@@ -1290,7 +1290,7 @@ func TestABaselineAgentNamesTheJobItsFinishDeclares(t *testing.T) {
 	}
 }
 
-// Run 8's baseline agent declared the default configuration of the control while its own check,
+// A baseline agent declared the default configuration of the control while its own check,
 // on the branch beside the baseline's, had measured a better one. A finish naming a job that
 // another completed job of the same agent beat on the ranking metric, holding every constraint,
 // is refused naming that job and its value. A job that broke a constraint, another agent's job and
@@ -1379,7 +1379,7 @@ func TestOnlyAJobHoldingTheConstraintsMakesADeclarationWeak(t *testing.T) {
 	}
 }
 
-// Run 7 recorded a baseline agent's finish and answered it 500, when declaring its job failed
+// The platform recorded a baseline agent's finish and answered it 500, when declaring its job failed
 // after the finish was stored. A stored finish is answered as one.
 func TestAStoredFinishIsAnsweredAsOneWhenItsDeclarationFails(t *testing.T) {
 	store := draftWithPlanner()
@@ -1483,7 +1483,7 @@ func TestAcceptingADraftTakesTheNameThePersonGaveIt(t *testing.T) {
 	}
 }
 
-// Run 5's owner accepted 10 s after the proposal and its set-up still took 30 minutes, and an
+// An owner accepted 10 s after the proposal and its set-up still took 30 minutes, and an
 // owner away from the page held the run up for as long as they were away. A proposal is accepted
 // as proposed by itself unless a person acts first: accepts it, holds it to edit it, revises it
 // or closes it.

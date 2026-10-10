@@ -1,4 +1,4 @@
-"""Showcase platform experiments (plan 16.7): staff share one, and every account then reads it
+"""Showcase platform experiments: staff share one, and every account then reads it
 and what is in it through the read routes it uses for its own, and through nothing else.
 
 Two orgs, each a distinct person with an API key. Org A runs a platform experiment with an agent

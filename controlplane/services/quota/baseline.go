@@ -162,7 +162,7 @@ func checkBaselineEnvironment(pe *domain.PlatformExperiment, baseline *Baseline)
 
 // strongerOwnJob refuses baseline, as its agent's declaration, when another COMPLETED job of the
 // same agent in pe, of the baseline branch or one beside it, held every constraint, reported the
-// first ranking metric and beat baseline on it. Run 8's baseline agent declared a default its own
+// first ranking metric and beat baseline on it. A baseline agent declared a default its own
 // check had beaten, and the researchers were ranked against the weaker control. It names the
 // strongest such job.
 func (s *PlatformExperimentsService) strongerOwnJob(ctx context.Context, pe *domain.PlatformExperiment, baseline *Baseline) error {

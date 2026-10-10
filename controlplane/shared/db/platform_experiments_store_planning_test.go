@@ -874,7 +874,7 @@ func TestARevisionIsAnEventOnThePlannersStreamLiveAndReplayed(t *testing.T) {
 	}
 }
 
-// Run 5's baseline machine came up 50 s after the accept that created its agent. The proposal
+// A baseline machine came up 50 s after the accept that created its agent. The proposal
 // signs the baseline agent up, and its machine is wanted while the platform is to accept the
 // proposal by itself, so it is up by then. A person who holds the proposal to edit it lets the
 // machine go, and the accept gives the agent its quota and its machine again.

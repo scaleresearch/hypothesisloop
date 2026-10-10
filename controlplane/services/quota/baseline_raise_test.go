@@ -29,7 +29,7 @@ func strongerControl() *Baseline {
 
 const raiseReason = "job-2 is the control with its other coder, which the control already has"
 
-// Run 8 declared the control at its default configuration, and a researcher's job that only
+// A baseline agent declared the control at its default configuration, and a researcher's job that only
 // switched a setting the control already had beat it: every researcher beat the baseline by that
 // switch, and the ranking measured nothing. While the run goes on, its coordinator or its owner
 // raises the baseline to the job that measured the stronger configuration, whoever ran it, with

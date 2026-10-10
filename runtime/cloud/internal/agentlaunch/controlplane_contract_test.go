@@ -543,7 +543,7 @@ func TestAMachineThatRanAndIsNoLongerListedIsRentedAgainAndCountedAsARestart(t *
 	}
 }
 
-// Round 14: the provider's list left out two running machines for over a minute, and both
+// The provider's list once left out two running machines for over a minute, and both
 // agents were replaced while their machines ran on. A machine the platform holds is read by its
 // id before it is reported missing.
 func TestARunningMachineTheProvidersListLeavesOutIsKeptAndRunsOnce(t *testing.T) {

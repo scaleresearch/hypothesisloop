@@ -41,7 +41,7 @@ func TestEnvBuildSendsTheCommitAndTheImageOfTheJobSpec(t *testing.T) {
 	}
 }
 
-// Run 8's baseline ran hl env build with no FILE and was refused for want of an image that its
+// A baseline agent ran hl env build with no FILE and was refused for want of an image that its
 // repository's job spec names.
 func TestEnvBuildReadsTheRepositorysJobSpecWhenNoFileIsNamed(t *testing.T) {
 	clone, _ := pushedClone(t)
