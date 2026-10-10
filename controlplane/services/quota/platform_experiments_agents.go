@@ -245,7 +245,8 @@ func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID
 }
 
 // lateJoin is what a researcher joining the running pe takes its quota from. Once the run started
-// only a researcher joins, in the place of one that ended, and its coordinator or a person adds it.
+// only a researcher joins, in the place of one that ended or one a raised max_agents gave, and its
+// coordinator or a person adds it.
 func (s *PlatformExperimentsService) lateJoin(ctx context.Context, pe *domain.PlatformExperiment, role domain.SignupRole, by domain.Actor) (*db.LateJoin, error) {
 	if role != domain.SignupRoleCompetitor {
 		return nil, refuseSignup(409, "signup_closed", "platform experiment %s is running, and only a researcher (role competitor) joins it then", pe.ID)
@@ -253,21 +254,48 @@ func (s *PlatformExperimentsService) lateJoin(ctx context.Context, pe *domain.Pl
 	if by.Kind == domain.ActorAgent {
 		return nil, refuseSignup(403, "not_coordinator", "an agent adds no agent to a running platform experiment: its coordinator or its owner does")
 	}
-	researchers, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleCompetitor)
+	quotas, err := s.researcherQuotas(ctx, pe)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.lateJoin: %w", err)
 	}
-	used := make(map[string]float64, len(researchers))
+	used := make(map[string]float64, len(quotas))
+	for _, quota := range quotas {
+		used[quota.AgentID] = quota.Used
+	}
+	held, err := s.runningTrialHeld(ctx, pe)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.lateJoin: %w", err)
+	}
+	return &db.LateJoin{Used: used, BurstFraction: s.cfg.BurstFraction, MinShare: held}, nil
+}
+
+// researcherQuotas is the quota and use of each researcher of pe that holds one and was not cut.
+// Ended is left unset.
+func (s *PlatformExperimentsService) researcherQuotas(ctx context.Context, pe *domain.PlatformExperiment) ([]domain.ResearcherQuota, error) {
+	researchers, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleCompetitor)
+	if err != nil {
+		return nil, err
+	}
+	var quotas []domain.ResearcherQuota
 	for _, agentID := range researchers {
+		cut, err := s.store.IsAgentCut(ctx, pe.ID, agentID)
+		if err != nil {
+			return nil, err
+		}
+		if cut {
+			continue
+		}
 		quota, err := s.GetAgentQuota(ctx, agentID, pe.ID)
 		if err != nil {
-			return nil, fmt.Errorf("platform_experiments.lateJoin: %w", err)
+			return nil, err
 		}
 		if quota != nil {
-			used[agentID] = quota.Used()
+			quotas = append(quotas, domain.ResearcherQuota{
+				AgentID: agentID, Guaranteed: quota.GuaranteedAcceleratorHours, Burst: quota.BurstAcceleratorHours, Used: quota.Used(),
+			})
 		}
 	}
-	return &db.LateJoin{Used: used, BurstFraction: s.cfg.BurstFraction}, nil
+	return quotas, nil
 }
 
 // enrolRefused answers what a signup to pe was refused for in the store, name being the agent's,
@@ -285,7 +313,7 @@ func enrolRefused(err error, pe *domain.PlatformExperiment, name string) error {
 	case errors.Is(err, db.ErrMaxHostedReached):
 		return refuseSignup(409, "max_hosted_reached", "%s", maxHostedReached(pe.MaxHosted))
 	case errors.Is(err, db.ErrNoShareLeft):
-		return refuseSignup(409, "no_share_left", "the researchers of platform experiment %s that finished, were cut or lost their machine left none of their quota unspent, and a researcher that joins a running one is given its share from that: nothing is left to give one", pe.ID)
+		return refuseSignup(409, "no_share_left", "a researcher that joins running platform experiment %s is given an even part, with the researchers at work, of what all researchers left unspent, and that part would not hold one trial of the baseline: one joins when a researcher at work finishes", pe.ID)
 	}
 	return nil
 }
@@ -746,7 +774,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler, graph H
 		Summary: "Add one agent to a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
 		Description: "The only way an agent joins, while the experiment is open: the platform starts the run once its baseline is declared, and quota is divided then over the agents present, those of role baseline apart. " +
-			"While it runs, its coordinator or a person adds a researcher (role competitor, and no other role) in the place of one that finished, was cut or lost its machine: it is given an even part, with the researchers at work, of what all researchers left unspent, taken from what the ones that ended left, and 409 no_share_left when they left nothing. An agent's token adds no agent then (403). Adding the researcher a declared baseline still waited for starts the run in this request. " +
+			"While it runs, its coordinator or a person adds a researcher (role competitor, and no other role) in the place of one that finished, was cut or lost its machine, or in one its owner gained by raising max_agents: it is given an even part, with the researchers at work, of what all researchers left unspent, taken first from what the ones that ended left and then from the researchers at work that hold more unspent than that part, in proportion to what they hold above it, so none keeps less than the newcomer and none gives back what it used, and 409 no_share_left when that part would not hold one trial of the baseline (the job again at job_estimated_duration_hours). An agent's token adds no agent then (403). Adding the researcher a declared baseline still waited for starts the run in this request. " +
 			"Creates one agent with a generated id and signs it up; or, with agent_id, signs up that registered agent. For several agents, call once for each. " +
 			"An agent's name is unique in the platform experiment and, when the platform gives it, says its role: 409 agent_name_taken for a stated name, or a registered agent's, that another agent of it carries. " +
 			"The answer is agents, a list holding that one agent. " +

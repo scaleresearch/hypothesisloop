@@ -289,9 +289,11 @@ func refuseUpdate(status int, reason, format string, args ...any) error {
 
 // Update changes the fields the patch carries and no others, and the experiment as patched has
 // to pass validate. While the experiment is open every
-// field of the patch can change. Once it runs, only the name, the description and duration_hours
-// can, and the baseline be raised: admission and the stage ladder have already acted on the
-// rest. A new duration_hours moves the end of the run, counted from its start as before. A closed one, and a draft, which its
+// field of the patch can change. Once it runs, only the name, the description, duration_hours and
+// max_agents can, and the baseline be raised: admission and the stage ladder have already acted on
+// the rest. A new duration_hours moves the end of the run, counted from its start as before. A
+// max_agents of a running one changes only the places not taken, and is held to the unspent hours
+// of its researchers (seatsHoldTrials). A closed one, and a draft, which its
 // planner's proposal fills, take no patch.
 //
 // While it runs, baseline_job_id with baseline_reason raises the baseline (raisedBaseline).
@@ -315,8 +317,8 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	if pe.Status != domain.PlatformExpOpen && pe.Status != domain.PlatformExpRunning {
 		return nil, refuseUpdate(409, "experiment_not_editable", "platform experiment %s is %s: only an open or running one is changed", id, pe.Status)
 	}
-	if locked := patch.carried("name", "description", "duration_hours", "baseline_job_id", "baseline_reason"); pe.Status == domain.PlatformExpRunning && len(locked) > 0 {
-		return nil, refuseUpdate(409, "experiment_running", "only name, description, duration_hours and the baseline (baseline_job_id with baseline_reason) change once a platform experiment runs, and the body also carries: %s. Leave them out", strings.Join(locked, ", "))
+	if locked := patch.carried("name", "description", "duration_hours", "max_agents", "baseline_job_id", "baseline_reason"); pe.Status == domain.PlatformExpRunning && len(locked) > 0 {
+		return nil, refuseUpdate(409, "experiment_running", "only name, description, duration_hours, max_agents and the baseline (baseline_job_id with baseline_reason) change once a platform experiment runs, and the body also carries: %s. Leave them out", strings.Join(locked, ", "))
 	}
 	raising := pe.Status == domain.PlatformExpRunning && patch.BaselineJobID != nil
 	if err := checkRaiseRequest(pe, patch); err != nil {
@@ -342,6 +344,11 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 			return nil, refuseUpdate(409, "max_agents_below_researchers", "max_agents %d is below the %d researchers (agents of role competitor) that joined: remove one first, or state at least %d", *patch.MaxAgents, len(researchers), len(researchers))
 		}
 		patched.MaxAgents = *patch.MaxAgents
+		if pe.Status == domain.PlatformExpRunning && patched.MaxAgents > pe.MaxAgents {
+			if err := s.seatsHoldTrials(ctx, &patched); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if patch.Metrics != nil {
 		patched.Metrics = *patch.Metrics
@@ -440,6 +447,28 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 		return nil, err
 	}
 	return s.stored(ctx, pe.ID)
+}
+
+// seatsHoldTrials refuses a max_agents raised on the running pe when what its researchers left
+// unspent, split evenly over max_agents researchers, would not hold one trial of the baseline
+// each: the share a researcher that joins is given (domain.LateShare) would not run one.
+func (s *PlatformExperimentsService) seatsHoldTrials(ctx context.Context, pe *domain.PlatformExperiment) error {
+	held, err := s.runningTrialHeld(ctx, pe)
+	if err != nil || held == 0 {
+		return err
+	}
+	quotas, err := s.researcherQuotas(ctx, pe)
+	if err != nil {
+		return fmt.Errorf("platform_experiments.Update: %w", err)
+	}
+	unspent := 0.0
+	for _, quota := range quotas {
+		unspent += quota.Unspent()
+	}
+	if each := unspent / float64(pe.MaxAgents); each < held {
+		return refuseUpdate(422, "budget_below_baseline", "a trial holds %.3f accelerator-hours of its researcher's share (%g h, the estimate measured on the baseline job), and the researchers left %.3f unspent, %.3f for each of %d: state a max_agents that leaves each at least one trial", held, pe.JobEstimatedDurationHours, unspent, each, pe.MaxAgents)
+	}
+	return nil
 }
 
 // heldToBaseline holds pe, as it would be stored, to the job it names as its baseline: the job

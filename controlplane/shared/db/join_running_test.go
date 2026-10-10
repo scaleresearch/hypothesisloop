@@ -12,8 +12,9 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// A researcher that joins a running platform experiment takes the place of one that ended and
-// its share from what that one left unspent, and max_agents counts the researchers at work.
+// A researcher that joins a running platform experiment takes the place of one that ended, or one
+// max_agents gained, and its share first from what the ones that ended left unspent, then from the
+// researchers at work, and max_agents counts the researchers at work.
 func TestAResearcherJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
@@ -77,7 +78,21 @@ func TestAResearcherJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *t
 		t.Fatal(err)
 	}
 	late.Used[ended] = 1.5
+	late.MinShare = 2.5
 	if _, err := join(domain.SignupRoleCompetitor); !errors.Is(err, ErrNoShareLeft) {
-		t.Fatalf("nothing left by the ones that ended: got = %v, want = ErrNoShareLeft", err)
+		t.Fatalf("an even part below one trial: got = %v, want = ErrNoShareLeft", err)
+	}
+	late.MinShare = 2
+	added, err := join(domain.SignupRoleCompetitor)
+	if err != nil {
+		t.Fatalf("a researcher in a place max_agents gained: got = %v, want = nil", err)
+	}
+	// Nothing left by the one that ended: 3 + 3.5 unspent over three, given by the two at work
+	// above it, each keeping what it used.
+	for id, want := range map[string]float64{added: 6.5 / 3, atWork: 2 + 6.5/3, newcomer: 6.5 / 3, ended: 1.5} {
+		q, err := pes.GetAgentQuota(ctx, id, pe)
+		if err != nil || q == nil || math.Abs(q.GuaranteedAcceleratorHours-want) > 1e-5 {
+			t.Errorf("quota of %s: got = %+v %v, want = %g guaranteed", id, q, err, want)
+		}
 	}
 }

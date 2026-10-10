@@ -389,17 +389,42 @@ func withMeasuredBaseline(description, block string) string {
 // the floor is what the first job of each researcher will hold. A baseline too short to be
 // observed leaves no estimate and no floor.
 func budgetCoversTrials(pe *domain.PlatformExperiment, baseline *domain.Experiment) error {
+	held, err := trialHeld(pe, baseline)
+	if err != nil {
+		return err
+	}
+	if floor := held * float64(pe.MaxAgents); pe.BudgetAcceleratorHours < floor {
+		return refusedBaseline("budget_below_baseline", "a trial holds %.3f accelerator-hours of its researcher's share (%g h, the estimate measured on the baseline job), so %d researchers each running one need %.3f, and the budget is %.3f: its owner raises budget_accelerator_hours or lowers max_agents", held, pe.JobEstimatedDurationHours, pe.MaxAgents, floor, pe.BudgetAcceleratorHours)
+	}
+	return nil
+}
+
+// trialHeld is what one trial of baseline holds of a researcher's share (budgetCoversTrials), 0
+// when the baseline left no estimate.
+func trialHeld(pe *domain.PlatformExperiment, baseline *domain.Experiment) (float64, error) {
 	trial := *baseline
 	trial.EstimatedDurationHours = 0
 	if !trial.TakeEstimate(pe) {
-		return nil
+		return 0, nil
 	}
 	held, err := trial.EstimateHeld()
 	if err != nil {
-		return fmt.Errorf("platform_experiments.Update: size a trial of the baseline: %w", err)
+		return 0, fmt.Errorf("platform_experiments: size a trial of the baseline: %w", err)
 	}
-	if floor := held * float64(pe.MaxAgents); pe.BudgetAcceleratorHours < floor {
-		return refusedBaseline("budget_below_baseline", "a trial holds %.3f accelerator-hours of its researcher's share (%g h, the estimate measured on the baseline job), so %d researchers each running one need %.3f, and the budget is %.3f: its owner raises budget_accelerator_hours or lowers max_agents", held, trial.EstimatedDurationHours, pe.MaxAgents, floor, pe.BudgetAcceleratorHours)
+	return held, nil
+}
+
+// runningTrialHeld is what one trial of the running pe's baseline job holds, 0 without one.
+func (s *PlatformExperimentsService) runningTrialHeld(ctx context.Context, pe *domain.PlatformExperiment) (float64, error) {
+	if pe.BaselineJobID == "" {
+		return 0, nil
 	}
-	return nil
+	baseline, err := s.baseline(ctx, pe, pe.BaselineJobID)
+	if err != nil {
+		return 0, fmt.Errorf("platform_experiments: read baseline %s: %w", pe.BaselineJobID, err)
+	}
+	if baseline == nil {
+		return 0, nil
+	}
+	return trialHeld(pe, baseline.Job)
 }

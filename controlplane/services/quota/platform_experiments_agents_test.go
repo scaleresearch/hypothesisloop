@@ -893,6 +893,8 @@ func (f *rosterStore) FinishAgent(_ context.Context, _, agentID, reason string) 
 
 func (f *rosterStore) AddDesiredQuotaUsageOne(context.Context, *domain.AgentQuota) error { return nil }
 
+func (f *rosterStore) IsAgentCut(context.Context, string, string) (bool, error) { return false, nil }
+
 func (f *rosterStore) GetAgentRunningExperiments(context.Context, string, string) ([]*domain.Experiment, error) {
 	return nil, nil
 }

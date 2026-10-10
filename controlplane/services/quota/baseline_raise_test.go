@@ -91,7 +91,7 @@ func TestARunningExperimentsBaselineIsRaisedToAStrongerJobOfTheControl(t *testin
 		"a gate it fails":                {raise, func(_, b *Baseline) { b.Reported["exact_match"] = 0.9 }, 422, "baseline_breaks_constraint"},
 		"a metric it never reported":     {raise, func(_, b *Baseline) { delete(b.Reported, "exact_match") }, 422, "baseline_missing_metric"},
 		"another environment than ran":   {raise, func(_, b *Baseline) { b.Declared = &[]string{branchEnvironment}[0] }, 422, "baseline_environment_differs"},
-		"another field of a running one": {map[string]any{"baseline_job_id": "job-2", "baseline_reason": raiseReason, "max_agents": 3}, nil, 409, "experiment_running"},
+		"another field of a running one": {map[string]any{"baseline_job_id": "job-2", "baseline_reason": raiseReason, "budget_accelerator_hours": 9}, nil, 409, "experiment_running"},
 	} {
 		current, candidate := measuredBaseline(), strongerControl()
 		if c.change != nil {

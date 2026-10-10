@@ -588,7 +588,7 @@ func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
 		reason, says string
 	}{
 		"nothing":                       {domain.PlatformExpOpen, map[string]any{}, 422, "nothing_to_change", ""},
-		"a budget once it runs":         {domain.PlatformExpRunning, map[string]any{"description": "d", "budget_accelerator_hours": 9, "max_agents": 9, "duration_hours": 9}, 409, "experiment_running", "budget_accelerator_hours, max_agents"},
+		"a budget once it runs":         {domain.PlatformExpRunning, map[string]any{"description": "d", "budget_accelerator_hours": 9, "starts_at": "2030-01-02T00:00:00Z", "max_agents": 9, "duration_hours": 9}, 409, "experiment_running", "carries: budget_accelerator_hours, starts_at."},
 		"a closed one":                  {domain.PlatformExpClosed, map[string]any{"description": "d"}, 409, "experiment_not_editable", ""},
 		"a draft":                       {domain.PlatformExpDraft, map[string]any{"description": "d"}, 409, "experiment_not_editable", ""},
 		"no name":                       {domain.PlatformExpOpen, map[string]any{"name": " "}, 422, "invalid_experiment", "name"},

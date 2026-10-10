@@ -349,7 +349,7 @@ type PlatformExperimentPatch struct {
 	Name                      *string                    `json:"name,omitempty" doc:"Not empty."`
 	Description               *string                    `json:"description,omitempty" doc:"The brief every agent works from, not empty and at most 32768 bytes."`
 	BudgetAcceleratorHours    *float64                   `json:"budget_accelerator_hours,omitempty"`
-	MaxAgents                 *int                       `json:"max_agents,omitempty" doc:"How many researchers may be at work at once: the agents of role competitor, whatever their flavor, that have not finished, were not cut and still have a machine. One that ended leaves its place to another. Agents of role baseline, reviewers and the coordinator never count. At least the researchers that already joined."`
+	MaxAgents                 *int                       `json:"max_agents,omitempty" doc:"How many researchers may be at work at once: the agents of role competitor, whatever their flavor, that have not finished, were not cut and still have a machine. One that ended leaves its place to another. Agents of role baseline, reviewers and the coordinator never count. At least the researchers that already joined. While it runs, held to the hours its researchers left unspent: one trial of the baseline for each."`
 	MaxConcurrentAccelerators *int                       `json:"max_concurrent_accelerators,omitempty"`
 	Metrics                   *[]domain.MetricDefinition `json:"metrics,omitempty"`
 	ReportIntervalSeconds     *int                       `json:"report_interval_seconds,omitempty"`

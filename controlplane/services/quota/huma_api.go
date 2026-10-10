@@ -390,7 +390,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Summary: "Change fields of a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "Takes only the fields that change; a field left out keeps its value, and a body with none answers 422 nothing_to_change. " +
 			"While the experiment is open every field of the body can change, `metrics` among them, so a mis-specified ranking metric is fixed in place. " +
-			"Once it runs only `name`, `description`, `duration_hours` and the baseline (`baseline_job_id` with `baseline_reason`) do, because admission and the stage ladder have acted on the rest: a body that carries another field answers 409 experiment_running and names it. " +
+			"Once it runs only `name`, `description`, `duration_hours`, `max_agents` and the baseline (`baseline_job_id` with `baseline_reason`) do, because admission and the stage ladder have acted on the rest: a body that carries another field answers 409 experiment_running and names it. " +
+			"A max_agents of a running one changes the places nobody took: a researcher added in one is given an even part, with the researchers at work, of what all researchers left unspent, and a max_agents raised so far that the hours its researchers left unspent, split over max_agents, would not hold one trial of the baseline each (the job again at job_estimated_duration_hours) is 422 budget_below_baseline. " +
 			"A duration_hours of a running one moves the end of its run, still counted from its start, and one that ends it before now is 422 invalid_length. A new description or duration_hours reaches every agent of it as platform_experiment.description. " +
 			"409 experiment_not_editable for a draft or a closed one. The experiment as patched is checked like a create and refused with the same 422: " +
 			"invalid_experiment (an empty name or description among them), invalid_metrics, invalid_cost, invalid_agents, invalid_length, " +
@@ -407,7 +408,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"A raise rewrites the measured baseline block of the description from the new job, keeps job_estimated_duration_hours, and is recorded in baseline_raises (from, to, reason, who, when), in the record of the close and as platform_experiment.baseline to every agent, whose detail says the values before and after. Standings in results are set against the new baseline from then on, and a verdict already given against the old one stays as recorded. " +
 			"422 invalid_experiment for a report_interval_seconds of 0 or less. " +
 			"A change of budget_accelerator_hours writes the quota of every agent of role baseline again, as half the budget. " +
-			"A coordinator's token changes `description`, `baseline_job_id` and `baseline_reason` only: a body that carries any other field answers 403 coordinator_changes_description_only. " +
+			"A coordinator's token changes `description`, `baseline_job_id` and `baseline_reason` only: a body that carries any other field answers 403 coordinator_changes_description_only. Its owner raises max_agents, and the coordinator then adds researchers in the places that gives. " +
 			"The project, the repository, the agent image, the stages and the default quota tier are fixed at creation and are no fields of this body.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`

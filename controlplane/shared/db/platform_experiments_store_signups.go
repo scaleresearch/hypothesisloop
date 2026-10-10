@@ -30,8 +30,8 @@ var ErrAgentNameTaken = errors.New("another agent of the platform experiment has
 // open, or does not exist. Once it runs only a researcher joins it (JoinRunning).
 var ErrSignupClosed = errors.New("platform experiment is not open")
 
-// ErrNoShareLeft is a researcher refused a place in a running platform experiment because the
-// researchers that ended left nothing unspent to give it.
+// ErrNoShareLeft is a researcher refused a place in a running platform experiment because its
+// even part of what the researchers left unspent would not hold one trial (LateJoin.MinShare).
 var ErrNoShareLeft = errors.New("no unspent share left to give a researcher")
 
 // ErrAgentOutsideOrg is a signup refused because the agent is not one of the platform
@@ -72,10 +72,12 @@ type LateJoin struct {
 	Used map[string]float64
 	// BurstFraction sizes the newcomer's burst hours from its share, as at the start.
 	BurstFraction float64
+	// MinShare is the least share worth giving: what one trial of the baseline holds.
+	MinShare float64
 }
 
 // JoinRunning gives a researcher a place in a running platform experiment, and its quota: a fair
-// part of what the researchers left unspent, taken from the ones that ended (domain.LateShare).
+// part of what the researchers left unspent, taken first from the ones that ended (domain.LateShare).
 // agent is created first when not nil. The errors are SpawnAgent's, ErrSignupClosed for any
 // other role or a platform experiment that is not running, and ErrNoShareLeft.
 func (s *PlatformExperimentsStore) JoinRunning(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup, late LateJoin) error {
@@ -289,7 +291,7 @@ WHERE s.platform_experiment_id = $1 AND s.role = $2 AND s.finished_at IS NULL AN
 
 // allocateLateQuota gives signup, a researcher joining the running platform experiment, its share
 // of what the researchers left unspent (domain.LateShare), and takes that share from the quotas of
-// the ones that ended. The experiment row is locked, so two researchers joining at once do not
+// the others, never below it nor below what they used. The experiment row is locked, so two researchers joining at once do not
 // take the same hours.
 func allocateLateQuota(ctx context.Context, tx pgx.Tx, platformExpID string, signup domain.AgentSignup, late LateJoin, defaultTier domain.QuotaTier) error {
 	rows, err := tx.Query(ctx, `
@@ -318,7 +320,7 @@ ORDER BY s.signed_up_at, s.agent_id`, platformExpID, string(domain.SignupRoleCom
 		return fmt.Errorf("platform_experiments_store.JoinRunning: read quotas: %w", err)
 	}
 	share, taken := domain.LateShare(quotas)
-	if share <= 0 {
+	if share <= 0 || share < late.MinShare {
 		return ErrNoShareLeft
 	}
 	for agentID, take := range taken {

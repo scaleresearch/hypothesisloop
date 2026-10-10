@@ -45,7 +45,8 @@ type ResearcherQuota struct {
 	Ended      bool
 }
 
-func (q ResearcherQuota) unspent() float64 {
+// Unspent is what is left of the researcher's share past what it used.
+func (q ResearcherQuota) Unspent() float64 {
 	share := q.Guaranteed
 	if share <= 0 {
 		share = q.Burst
@@ -55,28 +56,42 @@ func (q ResearcherQuota) unspent() float64 {
 
 // LateShare is the share of a researcher that joins a running platform experiment whose other
 // researchers hold quotas: an even part, with the researchers still at work, of what all of them
-// left unspent, and never more than the researchers that ended left. taken is what that share
-// takes from each researcher that ended, in the order given.
+// left unspent. taken is what that share takes from each: first what the researchers that ended
+// left, in the order given, then the rest from the researchers at work that hold more unspent
+// than the share, in proportion to what they hold above it. None is left with less unspent than
+// the newcomer is given, and none gives back what it used.
 func LateShare(quotas []ResearcherQuota) (share float64, taken map[string]float64) {
-	unspent, leftByEnded, atWork := 0.0, 0.0, 0
+	unspent, atWork := 0.0, 0
 	for _, q := range quotas {
-		unspent += q.unspent()
-		if q.Ended {
-			leftByEnded += q.unspent()
-		} else {
+		unspent += q.Unspent()
+		if !q.Ended {
 			atWork++
 		}
 	}
-	share = RoundHours(min(leftByEnded, unspent/float64(atWork+1)))
+	share = RoundHours(unspent / float64(atWork+1))
 	taken = map[string]float64{}
 	need := share
 	for _, q := range quotas {
 		if !q.Ended || need <= 0 {
 			continue
 		}
-		if take := min(need, q.unspent()); take > 0 {
+		if take := min(need, q.Unspent()); take > 0 {
 			taken[q.AgentID] = take
 			need -= take
+		}
+	}
+	above := 0.0
+	for _, q := range quotas {
+		if !q.Ended {
+			above += max(0, q.Unspent()-share)
+		}
+	}
+	if need <= 0 || above <= 0 {
+		return share, taken
+	}
+	for _, q := range quotas {
+		if excess := q.Unspent() - share; !q.Ended && excess > 0 {
+			taken[q.AgentID] = RoundHours(excess * min(1, need/above))
 		}
 	}
 	return share, taken
