@@ -543,8 +543,9 @@ func envRun(_ *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 
 Runs COMMAND on this machine inside the image hl env stage staged, the image a job runs in, as
 root of that image, with its environment variables. Your home and /tmp are the machine's own,
-so a working tree and what it builds are shared, and the command starts in the current
-directory, which must be under one of them. Each working tree, the git worktree of the current
+so a working tree is shared, and the command starts in the current directory, which must be
+under one of them. A build writes its outputs where those variables say, which can be a
+directory inside the image (hl env run -- env lists them). Each working tree, the git worktree of the current
 directory or the directory itself outside one, has a copy-on-write view of the image of its
 own: what a command writes into the image stays for the next command in that tree and no other
 tree sees it, until the tree is removed or the next stage replaces the image. The machine has none of a job's accelerators: code builds and
