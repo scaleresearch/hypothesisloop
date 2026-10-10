@@ -19,19 +19,18 @@ EXPERIMENTS = REPO / "agents/coordinator/experiments"
 
 # Every script that carries its own copy of post_metric: the template's and the seeds' are
 # copied into an experiment's repository and workloads into an image, so none of them can import
-# a shared one.
+# a shared one. Of the experiments, those on disk whose seed defines post_metric.
 METRIC_HELPERS = [path for path in [
     "cli/repotemplate/files/metrics.py",
-    "agents/coordinator/experiments/shampoo-family-optimizers/seed/metrics.py",
-    "agents/coordinator/experiments/sparse-sdpa/seed/harness.py",
-    "agents/coordinator/experiments/dummy-data-search-demo/seed/train.py",
-    "agents/coordinator/experiments/dummy-tt-matmul/seed/train.py",
     "tests/workloads/generic/train.py",
     "tests/workloads/generic/data_stage.py",
     "tests/workloads/generic/train_distributed.py",
     "tests/workloads/nvidia/train.py",
     "tests/workloads/tenstorrent/train.py",
-] if (REPO / path).exists()]
+] if (REPO / path).exists()] + sorted(
+    str(path.relative_to(REPO)) for path in EXPERIMENTS.glob("*/seed/*.py")
+    if "\ndef post_metric(" in "\n" + path.read_text()
+)
 
 
 TEMPLATE_HELPER = "cli/repotemplate/files/metrics.py"
@@ -197,26 +196,37 @@ class ExperimentFilesTest(unittest.TestCase):
                 self.assertEqual("\n".join(lines).strip(), "\n".join(line if line.strip() else "" for line in block.strip().split("\n")))
 
 
-@unittest.skipUnless((EXPERIMENTS / "dummy-data-search-demo").is_dir(), "dummy-data-search-demo is not on disk")
-class CatalogueImageJobTest(unittest.TestCase):
-    """dummy-data-search-demo builds no image: its job clones its commit and installs what
-    train.py imports."""
+def clone_experiments():
+    """The experiments on disk whose job builds no image: it clones its commit and installs what
+    seed/train.py imports."""
+    found = []
+    for spec in sorted(EXPERIMENTS.glob("*/.hypothesisloop/job.yaml")):
+        line = next((line for line in spec.read_text().splitlines() if line.strip().startswith("command:")), "")
+        if "hl-clone" in line:
+            found.append(spec.parents[1])
+    return found
 
+
+class CatalogueImageJobTest(unittest.TestCase):
     def test_the_command_runs_train_py_of_the_clone_with_every_import_installed(self):
-        demo = EXPERIMENTS / "dummy-data-search-demo"
-        spec = (demo / ".hypothesisloop/job.yaml").read_text()
-        line = next(line for line in spec.splitlines() if line.strip().startswith("command:"))
-        shell, flag, script = json.loads(line.split("command:", 1)[1])
-        self.assertEqual((shell, flag), ("bash", "-c"))
-        clone, enter, run = script.split(" && ")
-        self.assertEqual((clone, enter), ("dir=$(hl-clone)", 'cd "$dir"'))
-        words = run.split()
-        self.assertEqual(words[:3] + words[-1:], ["exec", "uv", "run", "seed/train.py"])
-        installed = {words[i + 1].split("==")[0] for i, word in enumerate(words) if word == "--with"}
-        tree = ast.parse((demo / "seed/train.py").read_text())
-        imported = {alias.name.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
-        self.assertEqual(installed, imported - set(sys.stdlib_module_names))
-        self.assertEqual(sorted(path.name for path in (demo / "seed").iterdir() if path.name != "__pycache__"), ["train.py"])
+        experiments = clone_experiments()
+        if not experiments:
+            self.skipTest("no experiment on disk runs from its clone")
+        for demo in experiments:
+            with self.subTest(experiment=demo.name):
+                spec = (demo / ".hypothesisloop/job.yaml").read_text()
+                line = next(line for line in spec.splitlines() if line.strip().startswith("command:"))
+                shell, flag, script = json.loads(line.split("command:", 1)[1])
+                self.assertEqual((shell, flag), ("bash", "-c"))
+                clone, enter, run = script.split(" && ")
+                self.assertEqual((clone, enter), ("dir=$(hl-clone)", 'cd "$dir"'))
+                words = run.split()
+                self.assertEqual(words[:3] + words[-1:], ["exec", "uv", "run", "seed/train.py"])
+                installed = {words[i + 1].split("==")[0] for i, word in enumerate(words) if word == "--with"}
+                tree = ast.parse((demo / "seed/train.py").read_text())
+                imported = {alias.name.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
+                self.assertEqual(installed, imported - set(sys.stdlib_module_names))
+                self.assertEqual(sorted(path.name for path in (demo / "seed").iterdir() if path.name != "__pycache__"), ["train.py"])
 
 
 if __name__ == "__main__":
