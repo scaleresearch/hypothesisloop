@@ -877,21 +877,22 @@ func TestAPropertyOfTheWrongTypeFailsTheRead(t *testing.T) {
 
 // Replay is what turns a dropped /watch connection into a delay rather than a gap. Hypothesis
 // events are derived from the positions each graph write was stamped with, and links given at
-// registration ride on hypothesis.new, so replay must not invent a hypothesis.link for them.
+// registration ride on hypothesis.new, so replay must not invent a hypothesis.link for them. A
+// hypothesis.new says what kind of caller registered it.
 func TestReplayDerivesHypothesisEventsFromThePositionsTheGraphStores(t *testing.T) {
 	s := testStore(t)
 	pe := testExperiment(t, s)
 	ctx := context.Background()
-	registerAt := func(agentID, text string, links []domain.LinkSpec, position int64) *domain.Hypothesis {
-		h, _, _, _, _, err := s.Register(ctx, NewHypothesis{AgentID: agentID,
+	registerAt := func(agentID string, actor domain.Actor, text string, links []domain.LinkSpec, position int64) *domain.Hypothesis {
+		h, _, _, _, _, err := s.Register(ctx, NewHypothesis{AgentID: agentID, Actor: actor,
 			PlatformExperimentID: pe, Text: text, Links: links, Stamp: stampAt(position)})
 		if err != nil {
 			t.Fatalf("Register %q: got = %v, want nil", text, err)
 		}
 		return h
 	}
-	a := registerAt("agent-1", "a", onRoot(pe), 11)
-	b := registerAt("agent-2", "b", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: a.ID}}, 10)
+	a := registerAt("agent-1", domain.Actor{Kind: domain.ActorStaff}, "a", onRoot(pe), 11)
+	b := registerAt("agent-2", agentActor("agent-2"), "b", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: a.ID}}, 10)
 	if _, err := s.AddLink(ctx, b.ID, "agent-2", agentActor("agent-2"), domain.LinkSpec{Type: domain.LinkContradicts, To: a.ID}, stampAt(12)); err != nil {
 		t.Fatalf("AddLink: got = %v, want nil", err)
 	}
@@ -904,8 +905,8 @@ func TestReplayDerivesHypothesisEventsFromThePositionsTheGraphStores(t *testing.
 		t.Fatalf("ReplayEvents: got = %v, want nil", err)
 	}
 	want := map[db.Event]bool{
-		{Kind: db.EventHypothesisNew, Subject: a.ID, PlatformExperimentID: pe, AgentID: "agent-1", Position: 11}:                                      true,
-		{Kind: db.EventHypothesisNew, Subject: b.ID, PlatformExperimentID: pe, AgentID: "agent-2", Position: 10}:                                      true,
+		{Kind: db.EventHypothesisNew, Subject: a.ID, Value: "staff", PlatformExperimentID: pe, AgentID: "agent-1", Position: 11}:                      true,
+		{Kind: db.EventHypothesisNew, Subject: b.ID, Value: "agent", PlatformExperimentID: pe, AgentID: "agent-2", Position: 10}:                      true,
 		{Kind: db.EventHypothesisLink, Subject: b.ID, Value: "contradicts", Detail: a.ID, PlatformExperimentID: pe, AgentID: "agent-2", Position: 12}: true,
 		{Kind: db.EventHypothesisStatus, Subject: a.ID, Value: "confirmed", PlatformExperimentID: pe, AgentID: "agent-1", Position: 13}:               true,
 	}

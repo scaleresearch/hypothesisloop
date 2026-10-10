@@ -74,7 +74,7 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor 
 		if err != nil || !announce {
 			return nil, err
 		}
-		return []db.Event{{Kind: db.EventHypothesisNew, Subject: h.ID,
+		return []db.Event{{Kind: db.EventHypothesisNew, Subject: h.ID, Value: string(h.Actor.Kind),
 			PlatformExperimentID: h.PlatformExperimentID, AgentID: h.AgentID}}, nil
 	})
 	var held *graphdb.SimilarError

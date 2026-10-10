@@ -62,6 +62,9 @@ those come from a planner or a person and can be small thinking too. Look for:
     researchers for the capacity (add one when `fits_now` stays above what they fill). An
     unspent budget is no saving;
   - no literature on the objective (`hl hypothesis get root`);
+  - an open idea from people (`hl hypothesis list --by people`, counted as
+    `ideas_from_people.open`) that no researcher has looked at: each one is assigned to a
+    researcher as places free and tested, or answered with a comment giving the evidence why not;
   - a reference unmeasured or invalid: while one the goal asks to beat is not `beaten` in
     `hl results`, the goal is not met;
   - a failure shared across agents, or a job stuck queued.

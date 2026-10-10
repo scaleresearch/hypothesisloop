@@ -512,7 +512,8 @@ func TestACommentOnTheObjectiveIsKeptUnderThePlatformExperimentsID(t *testing.T)
 
 // The graph has no NOTIFY, so the registry is what tells /watch about a new idea. The graph write
 // has to carry the position its event is emitted at: replay derives the same event from that
-// stored value, and a reconnecting watcher must see one event, not two.
+// stored value, and a reconnecting watcher must see one event, not two. Its value is the kind of
+// who registered it, which replay reads from the node too.
 func TestRegisteringANewHypothesisStampsTheGraphWriteWithItsEventsPosition(t *testing.T) {
 	events := &recordedEvents{}
 	svc := poolService(newPoolStore())
@@ -523,7 +524,7 @@ func TestRegisteringANewHypothesisStampsTheGraphWriteWithItsEventsPosition(t *te
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
-	want := db.Event{Kind: db.EventHypothesisNew, Subject: h.ID, PlatformExperimentID: "pe-1",
+	want := db.Event{Kind: db.EventHypothesisNew, Subject: h.ID, Value: string(domain.ActorAgent), PlatformExperimentID: "pe-1",
 		AgentID: "agent-1", Position: 1}
 	if len(events.events) != 1 || events.events[0] != want {
 		t.Errorf("events: got = %+v, want = [%+v]", events.events, want)

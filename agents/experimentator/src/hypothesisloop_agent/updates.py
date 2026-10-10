@@ -43,11 +43,13 @@ _DRAIN_S = 5
 # sent it (agent.message), which wakes no coordinator: its stream echoes the ones it sent. An agent
 # that built an environment ahead of its job learns its build was loaded on a cluster, where its
 # jobs run before the upload ends, or ended (environment.status) the same way: told to end its
-# turn while it built, nothing else would wake it.
+# turn while it built, nothing else would wake it. A coordinator learns at once of an idea a person
+# posted (hypothesis.new of a user, a key or staff): every one is to be assigned or answered.
 # Everything else is read when next acting. A kind wakes only for what its reader can act on.
 WAKES = {
     "coordinator": ("agent.finished", "agent.idle=new", "experiment.blocked", "job.held", "stage.boundary", "comment.new",
-                    "platform_experiment.status", "platform_experiment.description", "platform_experiment.baseline"),
+                    "platform_experiment.status", "platform_experiment.description", "platform_experiment.baseline",
+                    "hypothesis.new=user", "hypothesis.new=key", "hypothesis.new=staff"),
     "agent": ("experiment.status", "experiment.blocked", "job.held", "job.underperforming", "agent.cut", "agent.idle",
               "agent.message", "stage.boundary", "comment.new", "platform_experiment.status", "platform_experiment.description",
               "platform_experiment.baseline", "platform_experiment.revision", "environment.status"),
@@ -82,6 +84,8 @@ CAPACITY_IDLE = ("{free} more jobs fit now beside the {queued} queued and {runni
                  "the target and {minutes} minutes are left. Bring your gap model up to date and fill the free places: "
                  "steer researchers to distinct hypotheses that close the gap, or add a researcher.")
 SUMMARY_STALE = "{jobs} jobs completed since you last wrote the summary: add what they found."
+IDEAS_OPEN = ("{ideas} ideas from people are still open (`hl hypothesis list --by people`): assign each to a researcher "
+              "as places free, or answer it with a comment that gives the evidence why not.")
 # A coordinator's batch is held this long after the event that woke it, so that what follows it
 # closely comes in the same wake. An agent's comes at once: it has no window for messages.
 COALESCE_S = 90
@@ -324,9 +328,12 @@ def review_s(situation: dict | None) -> int:
 
 
 def review_prompt(minutes: int, situation: dict | None) -> str:
-    """The regular review, with the free places and the findings the summary does not hold yet."""
+    """The regular review, with the free places, the findings the summary does not hold yet and the
+    open ideas of people."""
     jobs = ((situation or {}).get("coordinator") or {}).get("jobs_completed_since_summary", 0)
-    said = [REVIEW_PROMPT.format(minutes=minutes), capacity_idle(situation), SUMMARY_STALE.format(jobs=jobs) if jobs else ""]
+    ideas = ((situation or {}).get("ideas_from_people") or {}).get("open", 0)
+    said = [REVIEW_PROMPT.format(minutes=minutes), capacity_idle(situation), SUMMARY_STALE.format(jobs=jobs) if jobs else "",
+            IDEAS_OPEN.format(ideas=ideas) if ideas else ""]
     return " ".join(part for part in said if part)
 
 

@@ -11,6 +11,7 @@ import (
 
 // ReplayEvents derives the hypothesis events of one platform experiment at a position of at least
 // since, from the positions the graph already holds: hypothesis.new from a node's created_xid,
+// with the kind of who registered it,
 // hypothesis.status from its status_changed_xid, hypothesis.link from an edge's created_xid. Edges
 // created with their hypothesis share its created_at and are skipped, as hypothesis.new announced
 // them. Like every replay it reports the latest status, not each one passed through.
@@ -20,7 +21,7 @@ func (s *Store) ReplayEvents(ctx context.Context, platformExperimentID string, s
 		var events []db.Event
 		for _, q := range []string{
 			`MATCH (h:Hypothesis {platform_experiment_id: $pe}) WHERE h.created_xid >= $since
-RETURN 'hypothesis.new' AS kind, h.id AS subject, '' AS value, '' AS detail, h.agent_id AS agent_id, h.created_xid AS position`,
+RETURN 'hypothesis.new' AS kind, h.id AS subject, coalesce(h.actor_kind, '') AS value, '' AS detail, h.agent_id AS agent_id, h.created_xid AS position`,
 			`MATCH (h:Hypothesis {platform_experiment_id: $pe}) WHERE h.status_changed_xid >= $since
 RETURN 'hypothesis.status' AS kind, h.id AS subject, h.status AS value, '' AS detail, h.agent_id AS agent_id, h.status_changed_xid AS position`,
 			`MATCH (h:Hypothesis {platform_experiment_id: $pe})-[r]->(t) WHERE r.created_xid >= $since AND r.created_at <> h.created_at

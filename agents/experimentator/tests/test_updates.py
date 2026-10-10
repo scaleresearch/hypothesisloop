@@ -87,6 +87,10 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("job.held", updates.WAKES[role])
         self.assertFalse([wake for wake in updates.WAKES["coordinator"] if wake.startswith("experiment.status")])
         self.assertNotIn("finding.new", updates.WAKES["coordinator"] + updates.WAKES["agent"])
+        # An idea a person posted wakes a coordinator; one of an agent or of itself does not.
+        for kind in ("user", "key", "staff"):
+            self.assertIn(f"hypothesis.new={kind}", updates.WAKES["coordinator"])
+        self.assertFalse([wake for wake in updates.WAKES["coordinator"] if wake in ("hypothesis.new", "hypothesis.new=agent", "hypothesis.new=coordinator")])
         # A baseline raised mid-run moves the bar every researcher is ranked against.
         for role in ("agent", "coordinator"):
             self.assertIn("platform_experiment.baseline", updates.WAKES[role])
@@ -274,7 +278,7 @@ class SituationTest(unittest.IsolatedAsyncioTestCase):
 class StandingTest(unittest.IsolatedAsyncioTestCase):
     IDLE = {"run": {"minutes_left": 200}, "objective": [{"metric": "ratio", "gap_to_target_pct": 27.3}],
             "capacity": {"fits_now": 8, "jobs_in_flight_run": {"queued": 1, "running": 0}},
-            "coordinator": {"jobs_completed_since_summary": 3}}
+            "coordinator": {"jobs_completed_since_summary": 3}, "ideas_from_people": {"open": 2}}
 
     async def test_the_situation_is_read_as_json_and_a_failed_read_is_none(self):
         directory = tempfile.mkdtemp()
@@ -307,8 +311,10 @@ class StandingTest(unittest.IsolatedAsyncioTestCase):
 
     def test_the_review_adds_the_free_places_and_the_findings_the_summary_lacks(self):
         self.assertEqual(updates.review_prompt(10, self.IDLE), " ".join([
-            updates.REVIEW_PROMPT.format(minutes=10), updates.capacity_idle(self.IDLE), updates.SUMMARY_STALE.format(jobs=3)]))
-        written = dict(self.IDLE, objective=[{"gap_to_target_pct": -1}], coordinator={"jobs_completed_since_summary": 0})
+            updates.REVIEW_PROMPT.format(minutes=10), updates.capacity_idle(self.IDLE), updates.SUMMARY_STALE.format(jobs=3),
+            updates.IDEAS_OPEN.format(ideas=2)]))
+        written = dict(self.IDLE, objective=[{"gap_to_target_pct": -1}], coordinator={"jobs_completed_since_summary": 0},
+                       ideas_from_people={"open": 0})
         self.assertEqual(updates.review_prompt(20, written), updates.REVIEW_PROMPT.format(minutes=20))
         self.assertEqual(updates.review_prompt(20, None), updates.REVIEW_PROMPT.format(minutes=20))
 
