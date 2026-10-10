@@ -281,7 +281,7 @@ of the experiment carries is refused (409 `agent_name_taken`). The roster shows 
 whose credential added each agent. A coordinator's token adds agents and removes only the ones
 it added (403 `agent_not_added_by_coordinator` for any other).
 
-`agents/coordinator/experiments/` holds our own research experiments run this way, each its own directory laid out as an experiment's repository: an `experiment.md` (the objective, the baseline, the open questions), `.hypothesisloop/experiment.yaml`, the base job spec `.hypothesisloop/job.yaml` and, where it seeds the hypothesis graph, a `hypothesis.yaml`, matching the YAML files below. `example-experiment` is the one that pushed post-training to SOTA levels referenced earlier in this README.
+`agents/coordinator/experiments/` holds our own research experiments run this way, each its own directory laid out as an experiment's repository: an `experiment.md` (the objective, the baseline, the open questions), `.hypothesisloop/experiment.yaml`, the base job spec `.hypothesisloop/job.yaml` and, where it seeds the hypothesis graph, a `hypothesis.yaml`, matching the YAML files below.
 
 Each researcher is added with a **flavor**, the specialization it reads its instructions from: `generalist` (no fixed axis), `hyperparameter-search`, `architecture-search` or `data-search` (dataset composition, size and curriculum), and with optional starting hyperparameters. The mix is broad while no region is promising, generalists and one of each targeted flavor, and narrows toward the axis of a confirmed finding in the next run, since a roster is fixed once its run starts. `agents/coordinator/setup.md` step 3 says how the mix is decided and recorded.
 

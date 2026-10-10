@@ -1,4 +1,4 @@
-# Local-only files (secrets, machine-specific notes) -- suffix with .local
+# Local-only files (secrets, machine-specific notes): suffix with .local
 *.local
 *.local.*
 
@@ -114,3 +114,29 @@ infra/.state/
 infra/pulumi/Pulumi.*.yaml
 # What a plain `go build` in infra/pulumi leaves: the program, named after its directory
 infra/pulumi/pulumi
+
+# Owner's local working notes and scratch
+/fix-later.md
+/feedback.md
+
+# Dependencies and tool caches anywhere in the tree
+node_modules/
+.next/
+*.tsbuildinfo
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Credentials anywhere in the tree
+**/kubeconfig*
+*.secrets.env
+*credentials*.json
+*service-account*.json
+gcp-*.json
+id_rsa*
+id_ed25519*
+*.p12
+*.pfx

@@ -75,9 +75,8 @@ func tenstorrentResourceSlice(name, node string, devices ...string) *unstructure
 // DeviceClass) that returns zero matching ResourceSlices in one List call must not be reported
 // as "this cluster has no such hardware" — that silently zeroed a live 3/4-free blackhole
 // snapshot and made the scheduler deny burst admission with a false capacity_unavailable while
-// real chips sat free. See fix-later.md for the live incident and controlplane/services/
-// scheduler/loop_tick.go's reportsEveryDimension for the scheduler side that consumed the bad
-// snapshot.
+// real chips sat free. See controlplane/services/scheduler/loop_tick.go's reportsEveryDimension
+// for the scheduler side that consumed the bad snapshot.
 func TestLiveDRACapacitySnapshotsRejectsTransientEmptyListing(t *testing.T) {
 	c := newDRATestClient(t, tenstorrentDeviceClass())
 
@@ -201,7 +200,7 @@ func TestLiveDRACapacitySnapshotsUnrelatedDriverUnaffected(t *testing.T) {
 // check only guards drivers DeviceClasses DID discover). Live incident: pe-example,
 // example-experiment-v2 stuck QUEUED ~2026-08-27T17:59-18:05Z with
 // cluster_unresolved=true despite GreptimeDB and kubectl both confirming 3/4 blackhole chips free
-// and no error logged from the first (ResourceSlices-side) fix — see fix-later.md.
+// and no error logged from the first (ResourceSlices-side) fix.
 func TestLiveDRACapacitySnapshotsRejectsMissingDeviceClass(t *testing.T) {
 	c := newDRATestClient(t, tenstorrentResourceSlice("slice-a", "worker-a", "chip-0"))
 

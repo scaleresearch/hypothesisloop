@@ -45,7 +45,7 @@ func (s *Service) RecordMetric(ctx context.Context, experimentID, metricName, ba
 		basis = "raw"
 	}
 	// Both become Prometheus labels, so each is held to a short printable value. How many
-	// distinct names one job may report is not bounded: see fix-later.md.
+	// distinct names one job may report is not bounded.
 	if err := validMetricLabel("metric_name", metricName); err != nil {
 		return err
 	}

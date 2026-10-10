@@ -314,7 +314,7 @@ tt-start:
 # interactive dev, never referenced by a manifest). Every consumer (k3s nodes via
 # registries.yaml, the Helm chart's images.registry) pulls normally instead of the old
 # podman-save-pipe-ctr-import sideload, which is what left an unpinned image ID for kubelet's
-# own image GC to reclaim mid-run (see the fix-later.md incident this replaced).
+# own image GC to reclaim mid-run (the incident this replaced).
 # IMAGE_TAG_FILE hands TAG to the e2e tests, whose jobs must pin it: nodes pull IfNotPresent, so
 # a job naming latest keeps running whatever latest was when that node first pulled it. It is
 # written only by a push to the dev registry: the tests pull from there, and a publish to another

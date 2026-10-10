@@ -90,7 +90,7 @@ func (c *JobWorkloadClient) liveDRACapacitySnapshots(ctx context.Context, schedu
 	// below: `drivers` would then simply not contain that domain, the per-driver loops below
 	// iterate zero times for it, and no error would ever fire — silently reporting zero capacity
 	// for a flavor that is actually fully installed, exactly the incident this whole function
-	// exists to prevent (see fix-later.md). The ResourceSlices listing (fetched separately above,
+	// exists to prevent. The ResourceSlices listing (fetched separately above,
 	// so a glitch has to hit both calls to go undetected) is independent proof of which drivers
 	// are actually installed: any driver publishing a slice must have a matching DeviceClass.
 	slicesDrivers := make(map[string]bool)
