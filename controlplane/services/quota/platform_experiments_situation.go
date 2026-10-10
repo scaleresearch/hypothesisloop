@@ -159,8 +159,9 @@ type AgentBudget struct {
 
 // SituationCoordinator is the hosted coordinator.
 type SituationCoordinator struct {
-	SummaryWrittenAt *time.Time             `json:"summary_written_at,omitempty" doc:"When the summary was last written, absent while it never was."`
-	Model            *domain.ModelAllowance `json:"model,omitempty"`
+	SummaryWrittenAt          *time.Time             `json:"summary_written_at,omitempty" doc:"When the summary was last written, absent while it never was."`
+	JobsCompletedSinceSummary int                    `json:"jobs_completed_since_summary" doc:"How many jobs of the run completed after summary_written_at, every one while it was never written: findings the summary does not hold yet."`
+	Model                     *domain.ModelAllowance `json:"model,omitempty"`
 }
 
 // Placement is the live capacity jobs of one org can be placed on: each cluster's lines, and
@@ -517,6 +518,19 @@ func (s *PlatformExperimentsService) situationCoordinator(ctx context.Context, p
 	if out.SummaryWrittenAt, err = s.store.SummaryWrittenAt(ctx, pe.ID); err != nil {
 		return nil, err
 	}
+	completed, err := s.store.CompletedJobs(ctx, pe.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, job := range completed {
+		finished := job.UpdatedAt
+		if job.FinishedAt != nil {
+			finished = *job.FinishedAt
+		}
+		if out.SummaryWrittenAt == nil || finished.After(*out.SummaryWrittenAt) {
+			out.JobsCompletedSinceSummary++
+		}
+	}
 	states, err := metricsdb.LatestHarnessState(ctx, s.metricsDBURL, pe.ID, pe.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -586,7 +600,7 @@ func registerSituationHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"the run's budget and spend, and for each agent its jobs queued and running, the subagents and turn its harness last reported, its activity, minutes without a job in flight, " +
 			"the messages it may still be sent this hour, its model account's allowance, and its share and the room left in it, " +
 			"and ideas_from_people: how many open ideas people registered, those no agent has settled or built on yet, and the command that lists them. " +
-			"An agent's token reads the run and its own row. A coordinator, a person or a key reads every row and the hosted coordinator: when its summary was last written and its model allowance.",
+			"An agent's token reads the run and its own row. A coordinator, a person or a key reads every row and the hosted coordinator: when its summary was last written, how many jobs completed since, and its model allowance.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body *Situation }, error) {

@@ -73,6 +73,15 @@ OPEN_WAKES = ("experiment.status=FAILED",)
 REVIEW_S = 1200
 REVIEW_PROMPT = ("Nothing woke you for {minutes} minutes: this is your regular review. Judge from the situation "
                  "whether the run reaches its target in the time left, and act where it does not.")
+# While the capacity places jobs nobody queued, a coordinator reviews this much sooner: in a live
+# run eight jobs fit with none in flight across a whole review interval.
+REVIEW_IDLE_S = 600
+# Said to a coordinator that ends its turn while places are free, the target is not reached and
+# time is left, once: the end of the turn that answered it waits.
+CAPACITY_IDLE = ("{free} more jobs fit now beside the {queued} queued and {running} running, the best is {gap:g}% short of "
+                 "the target and {minutes} minutes are left. Bring your gap model up to date and fill the free places: "
+                 "steer researchers to distinct hypotheses that close the gap, or add a researcher.")
+SUMMARY_STALE = "{jobs} jobs completed since you last wrote the summary: add what they found."
 # A coordinator's batch is held this long after the event that woke it, so that what follows it
 # closely comes in the same wake. An agent's comes at once: it has no window for messages.
 COALESCE_S = 90
@@ -270,6 +279,55 @@ async def situation(env: dict[str, str], hl: str = "hl") -> str:
         log.warning("hl situation: %s", said)
     why = (said.splitlines() or [f"it exited {code}"])[-1]
     return f"Situation: not read, `hl situation` failed: {why[-300:]}"
+
+
+async def standing(env: dict[str, str], hl: str = "hl") -> dict | None:
+    """`hl situation --json` as the platform answers it, None when it could not be read."""
+    deadline = time.monotonic() + _SITUATION_S
+    code, stdout, _ = await _run_hl([hl, "situation", "--json"], env, lambda: time.monotonic() > deadline)
+    if code != 0:
+        return None
+    try:
+        return json.loads(stdout)
+    except ValueError:
+        log.warning("hl situation --json: no JSON in the answer")
+        return None
+
+
+def _free_places(situation: dict | None) -> tuple[int, int, int, int] | None:
+    """The places the capacity holds beyond the queued jobs, the jobs queued and running and the
+    minutes left, None while no place is free or no time is left."""
+    if not situation:
+        return None
+    capacity = situation.get("capacity") or {}
+    in_flight = capacity.get("jobs_in_flight_run") or {}
+    queued, running = in_flight.get("queued", 0), in_flight.get("running", 0)
+    fits, minutes = capacity.get("fits_now"), (situation.get("run") or {}).get("minutes_left")
+    if fits is None or fits <= queued or not minutes:
+        return None
+    return fits - queued, queued, running, minutes
+
+
+def capacity_idle(situation: dict | None) -> str:
+    """What a coordinator is told of free places while the primary metric is short of its target
+    and time is left, "" otherwise."""
+    free = _free_places(situation)
+    gap = ((situation or {}).get("objective") or [{}])[0].get("gap_to_target_pct")
+    if free is None or gap is None or gap <= 0:
+        return ""
+    return CAPACITY_IDLE.format(free=free[0], queued=free[1], running=free[2], gap=gap, minutes=free[3])
+
+
+def review_s(situation: dict | None) -> int:
+    """How long a coordinator waits for its next review."""
+    return REVIEW_IDLE_S if _free_places(situation) else REVIEW_S
+
+
+def review_prompt(minutes: int, situation: dict | None) -> str:
+    """The regular review, with the free places and the findings the summary does not hold yet."""
+    jobs = ((situation or {}).get("coordinator") or {}).get("jobs_completed_since_summary", 0)
+    said = [REVIEW_PROMPT.format(minutes=minutes), capacity_idle(situation), SUMMARY_STALE.format(jobs=jobs) if jobs else ""]
+    return " ".join(part for part in said if part)
 
 
 async def drain(env: dict[str, str], command: list[str] | None = None) -> list[dict]:

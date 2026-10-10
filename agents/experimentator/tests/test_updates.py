@@ -11,6 +11,7 @@ from hypothesisloop_agent import outage, updates
 
 # The read itself, which conftest stubs for every test.
 REAL_SITUATION = updates.situation
+REAL_STANDING = updates.standing
 S = "\n\n" + SITUATION
 
 COMPLETED = '{"kind":"experiment.status","subject":"exp-1","value":"COMPLETED","detail":"","agent_id":"agent-a","position":5,"cursor":5}'
@@ -265,6 +266,51 @@ class SituationTest(unittest.IsolatedAsyncioTestCase):
         with self.assertLogs("llm_agent", "WARNING"):
             said = await self.read("echo 'hl: situation: unavailable: the platform did not answer' >&2\nexit 1\n")
         self.assertEqual(said, "Situation: not read, `hl situation` failed: hl: situation: unavailable: the platform did not answer")
+
+
+# In a live run a coordinator ended a review with "nothing to act on" while eight jobs fit, none
+# was in flight and the best was 27% short of the target, and wrote no summary of the results
+# that had come in. Its harness reads the situation as the platform answers it to say so.
+class StandingTest(unittest.IsolatedAsyncioTestCase):
+    IDLE = {"run": {"minutes_left": 200}, "objective": [{"metric": "ratio", "gap_to_target_pct": 27.3}],
+            "capacity": {"fits_now": 8, "jobs_in_flight_run": {"queued": 1, "running": 0}},
+            "coordinator": {"jobs_completed_since_summary": 3}}
+
+    async def test_the_situation_is_read_as_json_and_a_failed_read_is_none(self):
+        directory = tempfile.mkdtemp()
+        path = os.path.join(directory, "hl")
+        with open(path, "w") as f:
+            f.write("#!/bin/sh\n[ \"$*\" = 'situation --json' ] || exit 9\necho '{\"run\": {\"minutes_left\": 5}}'\n")
+        os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC)
+        self.assertEqual(await REAL_STANDING(ENV, hl=path), {"run": {"minutes_left": 5}})
+        with open(path, "w") as f:
+            f.write("#!/bin/sh\necho down >&2\nexit 1\n")
+        with self.assertLogs("llm_agent", "WARNING"):
+            self.assertIsNone(await REAL_STANDING(ENV, hl=path))
+
+    def test_free_places_short_of_the_target_with_time_left_are_said_with_their_numbers(self):
+        said = updates.capacity_idle(self.IDLE)
+        self.assertEqual(said, updates.CAPACITY_IDLE.format(free=7, queued=1, running=0, gap=27.3, minutes=200))
+        self.assertIn("7 more jobs fit now beside the 1 queued and 0 running, the best is 27.3% short", said)
+        self.assertEqual(updates.review_s(self.IDLE), updates.REVIEW_IDLE_S)
+
+    def test_a_full_capacity_a_reached_target_no_time_or_no_read_says_nothing(self):
+        full = dict(self.IDLE, capacity={"fits_now": 1, "jobs_in_flight_run": {"queued": 1, "running": 7}})
+        reached = dict(self.IDLE, objective=[{"gap_to_target_pct": -2}])
+        unmeasured = dict(self.IDLE, objective=[{"metric": "ratio"}])
+        over = dict(self.IDLE, run={"minutes_left": 0, "closed_at": "2026-10-10T23:00:00Z"})
+        for situation in (full, reached, unmeasured, over, None, {}):
+            self.assertEqual(updates.capacity_idle(situation), "", situation)
+        self.assertEqual(updates.review_s(full), updates.REVIEW_S)
+        self.assertEqual(updates.review_s(None), updates.REVIEW_S)
+        self.assertEqual(updates.review_s(reached), updates.REVIEW_IDLE_S, "free places past the target are still reviewed sooner")
+
+    def test_the_review_adds_the_free_places_and_the_findings_the_summary_lacks(self):
+        self.assertEqual(updates.review_prompt(10, self.IDLE), " ".join([
+            updates.REVIEW_PROMPT.format(minutes=10), updates.capacity_idle(self.IDLE), updates.SUMMARY_STALE.format(jobs=3)]))
+        written = dict(self.IDLE, objective=[{"gap_to_target_pct": -1}], coordinator={"jobs_completed_since_summary": 0})
+        self.assertEqual(updates.review_prompt(20, written), updates.REVIEW_PROMPT.format(minutes=20))
+        self.assertEqual(updates.review_prompt(20, None), updates.REVIEW_PROMPT.format(minutes=20))
 
 
 class JobsInFlightTest(unittest.IsolatedAsyncioTestCase):

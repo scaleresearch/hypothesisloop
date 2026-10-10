@@ -932,8 +932,6 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
 
     opening = await _with_situation(setup, watch_env, await asyncio.to_thread(_opening, setup, resume_id, initial_prompt))
     connecting = time.monotonic()
-    # An agent waits for an update with no limit, a coordinator until its review.
-    idle_s = updates.REVIEW_S if config.coordinates(cfg) else math.inf
     background: set[str] = set()
     told_nothing = False
     _progress.subagents(0)
@@ -1039,12 +1037,23 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 await client.query(await _with_situation(setup, watch_env, updates.NOTHING_IN_FLIGHT))
                 told_nothing = True
                 continue
+            # A coordinator that ends its turn with free places, the target not reached and time
+            # left is told so the same way, and reviews sooner while places stay free.
+            standing = await updates.standing(watch_env) if config.coordinates(cfg) else None
+            if not background and not answered and (idle := updates.capacity_idle(standing)):
+                log.info("free places at the end of the coordinator's turn, saying so")
+                _forget_job_reads()
+                await client.query(await _with_situation(setup, watch_env, idle))
+                told_nothing = True
+                continue
+            # An agent waits for an update with no limit, a coordinator until its review.
+            wait_s = updates.review_s(standing) if config.coordinates(cfg) else math.inf
             # Wait for the next batch of updates about its own jobs and hypotheses and hand it
             # over on the same connection. A turn the CLI starts by itself ends the wait and is
             # read first: one starts when a subagent ends, and on a resume to say which stopped.
             # The batch the wait took is then read again, as its cursor moves only once handed over.
             own = asyncio.ensure_future(_own_turn(client, setup, background))
-            events, told, taken = await _next_told(setup, watch_env, lambda: stopped() or own.done(), idle_s, handing)
+            events, told, taken = await _next_told(setup, watch_env, lambda: stopped() or own.done(), wait_s, handing)
             came = own.done()
             own.cancel()
             await asyncio.gather(own, return_exceptions=True)
@@ -1067,9 +1076,11 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                     await client.query(told)
                     updates.delivered(taken)
                 continue
-            log.info("nothing woke the session for %ds: its review", idle_s)
+            log.info("nothing woke the session for %ds: its review", wait_s)
             _forget_job_reads()
-            await client.query(await _with_situation(setup, watch_env, updates.REVIEW_PROMPT.format(minutes=round(idle_s / 60))))
+            standing = await updates.standing(watch_env)
+            await client.query(await _with_situation(setup, watch_env, updates.review_prompt(round(wait_s / 60), standing)))
+            told_nothing = bool(updates.capacity_idle(standing))
 
 
 async def _next_told(setup: core.RunSetup, watch_env: dict[str, str], ended, idle_s: float,

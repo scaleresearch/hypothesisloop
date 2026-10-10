@@ -404,3 +404,22 @@ func TestTheSituationSaysAMetricIsDeterministic(t *testing.T) {
 		t.Fatal("a metric not declared deterministic reads as one")
 	}
 }
+
+// A coordinator ended a review with "nothing to act on" while results had come in that its summary
+// did not hold. The situation counts the jobs completed since the summary was last written.
+func TestTheSituationCountsTheJobsCompletedSinceTheSummary(t *testing.T) {
+	svc, store := situationRun(t)
+	before, after := store.summaryAt.Add(-time.Minute), store.summaryAt.Add(time.Minute)
+	store.completed = []*domain.Experiment{{ID: "job-1", AgentID: "ag-1", FinishedAt: &before}, {ID: "job-2", AgentID: "ag-2", FinishedAt: &after}}
+	got, err := svc.Situation(context.Background(), "pe-1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Coordinator == nil || got.Coordinator.JobsCompletedSinceSummary != 1 {
+		t.Fatalf("coordinator %+v, want the one job completed after the summary", got.Coordinator)
+	}
+	store.summaryAt = nil
+	if got, err = svc.Situation(context.Background(), "pe-1", ""); err != nil || got.Coordinator.JobsCompletedSinceSummary != 2 {
+		t.Fatalf("coordinator %+v (%v), want every job while no summary was written", got.Coordinator, err)
+	}
+}

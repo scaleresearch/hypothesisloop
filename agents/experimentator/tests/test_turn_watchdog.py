@@ -273,6 +273,20 @@ class ReviewTest(unittest.IsolatedAsyncioTestCase):
         review = run.updates.REVIEW_PROMPT.format(minutes=20) + S
         self.assertEqual(queries[1:5], [review, review, "Platform updates:\ncomment.new hyp-1 human" + S, review])
 
+    # In a live run a coordinator ended a review with "nothing to act on" while eight jobs fit,
+    # none was in flight and the best was 27% short. It is told so once at the end of such a turn,
+    # a review says it too, and while places are free it is reviewed sooner.
+    async def test_a_coordinator_that_leaves_places_free_is_told_once_and_reviewed_sooner(self):
+        idle = {"run": {"minutes_left": 200}, "objective": [{"gap_to_target_pct": 27.3}],
+                "capacity": {"fits_now": 8, "jobs_in_flight_run": {"queued": 0, "running": 0}}}
+        comment = {"kind": "comment.new", "subject": "hyp-1", "value": "human"}
+        with mock.patch.object(run.updates, "standing", mock.AsyncMock(return_value=idle)):
+            waits, queries = await self.waits("coordinator", [[], [comment], []])
+        told = run.updates.capacity_idle(idle) + S
+        review = run.updates.review_prompt(10, idle) + S
+        self.assertEqual(waits, [run.updates.REVIEW_IDLE_S] * 3)
+        self.assertEqual(queries[1:5], [told, review, "Platform updates:\ncomment.new hyp-1 human" + S, told])
+
     # The platform's agent.idle, kept in its store, is the one timer of an agent.
     async def test_an_agent_waits_for_an_update_with_no_limit_of_its_own(self):
         comment = {"kind": "comment.new", "subject": "hyp-1", "value": "human"}
