@@ -55,14 +55,13 @@ controlplane/settings/.*.yaml
 *.log
 logs/
 
-# Per-experiment heavy/gitignored local state (datasets, tt-metal build trees, checkpoints) --
-# huge (tens of GB for one experiment) and never needed baked into an image: agents/experimentator's
+# Per-experiment heavy/gitignored local state (datasets, tt-metal build trees, checkpoints) can
+# reach tens of GB and is never needed baked into an image: agents/experimentator's
 # Dockerfile.base only needs experiment.md/seed/ text+scripts, and each experiment's own
 # Dockerfile.experimentator clones tt-metal fresh at its own pin rather than reusing this copy.
-# ** rather than a fixed depth: an experiment's heavy state is not all at one level -- one experiment
-# keeps 16GB of checkpoints and 2.3GB of generated kernels under tenstorrent/, which a
-# single-star pattern walks straight past. Together with the run scratch below this is ~50GB
-# that no image needs and every build context was streaming.
+# ** rather than a fixed depth: an experiment's heavy state is not all at one level (checkpoints
+# and generated kernels can sit in nested directories), which a single-star pattern walks
+# straight past.
 agents/coordinator/experiments/**/datasets/
 agents/coordinator/experiments/**/tt-metal/
 agents/coordinator/experiments/**/checkpoints/

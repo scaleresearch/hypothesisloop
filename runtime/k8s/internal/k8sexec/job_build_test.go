@@ -70,8 +70,7 @@ func TestBuildJobReturnsAnErrorForAnUnparseableQuantity(t *testing.T) {
 // parent Job's own ObjectMeta, never on the pod template — so that selector matched zero pods,
 // every tick, for every job. scheduledNodes stayed permanently 0 regardless of true pod health,
 // and a genuinely running, progressing job (real log lines, real embed progress) was evicted as
-// stuck_pending once job_watcher's scale-up deadline passed. Live: pe-example,
-// example-experiment (v1/v2/v4/v5).
+// stuck_pending once job_watcher's scale-up deadline passed.
 func TestBuildJobPodTemplateCarriesTheAttemptLabel(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: testAPIURL}
 	exp := &domain.Experiment{
