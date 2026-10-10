@@ -43,14 +43,17 @@ _DRAIN_S = 5
 # sent it (agent.message), which wakes no coordinator: its stream echoes the ones it sent. An agent
 # that built an environment ahead of its job learns its build was loaded on a cluster, where its
 # jobs run before the upload ends, or ended (environment.status) the same way: told to end its
-# turn while it built, nothing else would wake it.
+# turn while it built, nothing else would wake it. An idea a person registered (hypothesis.new
+# whose value is a person's credential) wakes both, told with its words and its author.
 # Everything else is read when next acting. A kind wakes only for what its reader can act on.
+_PERSON_IDEAS = ("hypothesis.new=user", "hypothesis.new=key", "hypothesis.new=staff")
 WAKES = {
     "coordinator": ("agent.finished", "agent.idle=new", "experiment.blocked", "job.held", "stage.boundary", "comment.new",
-                    "platform_experiment.status", "platform_experiment.description", "platform_experiment.baseline"),
+                    "platform_experiment.status", "platform_experiment.description", "platform_experiment.baseline",
+                    *_PERSON_IDEAS),
     "agent": ("experiment.status", "experiment.blocked", "job.held", "job.underperforming", "agent.cut", "agent.idle",
               "agent.message", "stage.boundary", "comment.new", "platform_experiment.status", "platform_experiment.description",
-              "platform_experiment.baseline", "platform_experiment.revision", "environment.status"),
+              "platform_experiment.baseline", "platform_experiment.revision", "environment.status", *_PERSON_IDEAS),
 }
 # A message to one agent from the coordinator or the owner, told as what it says.
 MESSAGE = "agent.message"
@@ -236,6 +239,46 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
     return [told(e) for e in events]
 
 
+# The kinds of credential a person writes with: what a person says is told with its words.
+PEOPLE = ("user", "key", "staff")
+
+
+def _said(e: dict) -> list[str] | None:
+    """The hl command that reads what a person's idea or comment says, None for any other event."""
+    if e.get("value") not in PEOPLE:
+        return None
+    if e["kind"] == "hypothesis.new":
+        return ["hypothesis", "get", e["subject"], "--full", "--limit", "1"]
+    if e["kind"] == "comment.new" and e.get("detail"):
+        return ["hypothesis", "get", e["subject"], "--comment", e["detail"]]
+    return None
+
+
+async def _with_people(events: list[dict], env: dict[str, str], hl: str) -> list[dict]:
+    """events, a person's new idea and comment told with its words and its author, one hl call
+    each: an idea a person registered reaches every agent, and a pointer alone left it unread. A
+    call that failed tells the event with the command that reads it."""
+    told = []
+    for e in events:
+        command = _said(e)
+        if command is None:
+            told.append(e)
+            continue
+        code, stdout, _ = await _run_hl([hl, *command], env, lambda: False)
+        read = _events(stdout) if code == 0 else []
+        if not read:
+            told.append(dict(e, detail=f"by a person, not read: `hl {' '.join(command)}` reads it"))
+            continue
+        what = "idea" if e["kind"] == "hypothesis.new" else "comment"
+        author = (read[0].get("actor") or {}).get("name") or "a person"
+        told.append(dict(e, value="", detail=f"a person's {what}, by {author}: {read[0].get('text', '')}"))
+    return told
+
+
+async def _told(events: list[dict], env: dict[str, str], hl: str) -> list[dict]:
+    return await _with_people(await _with_job_state(events, env, hl), env, hl)
+
+
 def _unfinished_read(agent: str) -> list[str]:
     return ["job", "stats", "--agent", agent]
 
@@ -280,7 +323,7 @@ async def drain(env: dict[str, str], command: list[str] | None = None) -> list[d
                                     warn=not outage.under_way())
     if code != 0:
         outage.suspect()
-    return await _with_job_state([*_events(stdout), *outage.over()], env, command[0])
+    return await _told([*_events(stdout), *outage.over()], env, command[0])
 
 
 async def _wakes(env: dict[str, str], hl: str) -> tuple[str, ...] | None:
@@ -320,7 +363,7 @@ async def next_batch(env: dict[str, str], stopped: Callable[[], bool], idle_s: f
         if again := outage.over():
             return [*await drain(env, command), *again]
         code, stdout = await _poll(env, command, stopped)
-        events = await _with_job_state(_events(stdout), env, command[0])
+        events = await _told(_events(stdout), env, command[0])
         if events and not _agent(env):
             held_until = time.monotonic() + coalesce_s
             while not stopped() and (left := held_until - time.monotonic()) > 0:

@@ -631,8 +631,8 @@ func objectiveOr(fs *flagSet, c *apiclient.Client, id, flagValue string) (string
 	return pe, true, err
 }
 
-// objectiveGet prints the objective as hl hypothesis get prints a hypothesis: its comments, cut
-// unless full, and how many there are. The rest of the objective is read elsewhere.
+// objectiveGet prints the objective as hl hypothesis get prints a hypothesis: its comments, an
+// agent's cut unless full, and how many there are. The rest of the objective is read elsewhere.
 func objectiveGet(c *apiclient.Client, pe string, full bool, limit int, stdout, stderr io.Writer) int {
 	path := "/hypotheses/" + url.PathEscape(pe) + "/comments"
 	if limit != 0 {
@@ -646,8 +646,13 @@ func objectiveGet(c *apiclient.Client, pe string, full bool, limit int, stdout, 
 	total, _ := strconv.Atoi(header.Get("X-Total-Count"))
 	if !full {
 		for _, comment := range comments {
+			actor, _ := comment["actor"].(map[string]any)
 			for _, key := range []string{"id", "hypothesis_id", "platform_experiment_id", "actor"} {
 				delete(comment, key)
+			}
+			if kind, _ := actor["kind"].(string); personKinds[kind] {
+				comment["by"] = actor["name"]
+				continue
 			}
 			if text, _ := comment["text"].(string); len([]rune(text)) > commentCut {
 				comment["text"] = string([]rune(text)[:commentCut]) + "…"
@@ -700,12 +705,23 @@ type hypothesisBrief struct {
 		CreatedAt string `json:"created_at"`
 	} `json:"findings"`
 	Comments []struct {
-		AgentID   string `json:"agent_id"`
-		Text      string `json:"text"`
-		Cut       bool   `json:"cut,omitempty"`
-		CreatedAt string `json:"created_at"`
+		AgentID   string        `json:"agent_id"`
+		Actor     *commentActor `json:"actor,omitempty"`
+		By        string        `json:"by,omitempty"`
+		Text      string        `json:"text"`
+		Cut       bool          `json:"cut,omitempty"`
+		CreatedAt string        `json:"created_at"`
 	} `json:"comments"`
 }
+
+// commentActor is who wrote a comment, read from the record and printed as by for a person.
+type commentActor struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+}
+
+// personKinds are the kinds of credential a person writes with, whose comments hl prints whole.
+var personKinds = map[string]bool{"user": true, "key": true, "staff": true}
 
 type briefLink struct {
 	Type       string `json:"type"`
@@ -730,9 +746,13 @@ out (--limit shows more). implementations lists the branches it was run on, one 
 agent_id, branch and code_ref, the commit its newest job there ran: a hypothesis is an idea and
 any agent may run its own code for it. base_ref is the commit a new implementation starts from
 (hl hypothesis checkout ID).
+A comment a person wrote is never cut, and says who wrote it under by.
 --full prints the whole record: the text of every linked hypothesis, every comment whole, who
-wrote each, and a job as hl job list prints it. hl job status ID prints a job's whole record.`, stderr)
+wrote each, and a job as hl job list prints it. hl job status ID prints a job's whole record.
+--comment CID prints that one comment of ID or root whole, with who wrote it under actor: the
+detail of a comment.new update is its CID.`, stderr)
 	full := fs.Bool("full", false, "the whole record: comments uncut, linked hypotheses with their text, jobs as in hl job list")
+	comment := fs.String("comment", "", "print only the comment of this `id`, whole")
 	limit := fs.Int("limit", 0, "how many of its jobs, findings and comments each (server default 20, max 200)")
 	pe := fs.String("platform-experiment", "", "the platform experiment whose objective root names (default the token's)")
 	id, err := parseOne(fs, args, "ID", "", "id")
@@ -743,11 +763,25 @@ wrote each, and a job as hl job list prints it. hl job status ID prints a job's 
 	if err != nil {
 		return parseExit(err)
 	}
+	if !objective {
+		if id, err = fullHypothesisID(c, experimentOf(c, *pe), id); err != nil {
+			return fail(stderr, err)
+		}
+	}
+	if *comment != "" {
+		var out json.RawMessage
+		if err := c.Do("GET", "/hypotheses/"+url.PathEscape(id)+"/comments/"+url.PathEscape(*comment), nil, &out); err != nil {
+			return fail(stderr, err)
+		}
+		line, err := compactJSON(out)
+		if err != nil {
+			return fail(stderr, fmt.Errorf("response is not JSON: %w", err))
+		}
+		fmt.Fprintf(stdout, "%s\n", line)
+		return 0
+	}
 	if objective {
 		return objectiveGet(c, id, *full, *limit, stdout, stderr)
-	}
-	if id, err = fullHypothesisID(c, experimentOf(c, *pe), id); err != nil {
-		return fail(stderr, err)
 	}
 	path := "/hypotheses/" + url.PathEscape(id)
 	if *limit != 0 {
@@ -772,6 +806,12 @@ wrote each, and a job as hl job list prints it. hl job status ID prints a job's 
 		drop = append(drop, "links", "findings", "comments", "actor", "status_actor", "platform_experiment_id")
 		render = briefJobs[jobResult]
 		for i, comment := range h.Comments {
+			actor := comment.Actor
+			h.Comments[i].Actor = nil
+			if actor != nil && personKinds[actor.Kind] {
+				h.Comments[i].By = actor.Name
+				continue
+			}
 			if text := []rune(comment.Text); len(text) > commentCut {
 				h.Comments[i].Text = string(text[:commentCut]) + "…"
 				h.Comments[i].Cut = true

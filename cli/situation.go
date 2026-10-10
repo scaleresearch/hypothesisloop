@@ -41,6 +41,9 @@ The platform experiment as it stands now, one line per block, each field as key=
               (left_this_hour it may still be sent, next_at when the next frees up) and model
               (window, utilization of the model allowance, refused_until while it refuses)
   coordinator summary_written_at and model, for the coordinator
+  ideas       one line per open hypothesis a person registered, newest first, at most 10: id,
+              text cut to 300 characters, by (the person) and taken_up_by, the agents that built
+              a hypothesis on it, ran a job testing it or commented on it (empty: nobody yet)
 An agent's token reads its own line of agents, a coordinator's every line. A field with no value
 is left out. Every figure is read when the command runs. --json prints the record as the
 platform answers it.`, stderr)

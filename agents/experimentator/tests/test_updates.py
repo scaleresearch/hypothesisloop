@@ -20,19 +20,21 @@ COMMENT = '{"kind":"comment.new","subject":"hyp-1","value":"agent","detail":"","
 ENV = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"agent:pe-1/agent-a").decode().rstrip("=") + ".mac"}
 
 
-def fake_hl(script: str, status: str = "", stats: str = "", quota: str = "", read_exit: int = 0, quota_refusal: str = "") -> tuple[list[str], str]:
+def fake_hl(script: str, status: str = "", stats: str = "", quota: str = "", read_exit: int = 0, quota_refusal: str = "",
+            said: str = "") -> tuple[list[str], str]:
     """A fake hl. `hl watch` runs script once per call, with $RUNS counting the calls so far;
     `hl job status`, `hl job stats` and `hl quota` print status, stats and quota, record their
     arguments and exit read_exit. With quota_refusal, `hl quota` says it on stderr and exits 1.
-    A new one has had no outage."""
+    `hl hypothesis` prints said and records its arguments. A new one has had no outage."""
     outage._since, outage._over, outage._suspected = None, None, False
     directory = tempfile.mkdtemp()
     path = os.path.join(directory, "hl")
-    for name, text in (("status", status), ("stats", stats), ("quota", quota), ("refusal", quota_refusal)):
+    for name, text in (("status", status), ("stats", stats), ("quota", quota), ("refusal", quota_refusal), ("said", said)):
         with open(f"{path}.{name}", "w") as f:
             f.write(text)
     with open(path, "w") as f:
         f.write("#!/bin/sh\n[ \"$1\" = job ] && { echo \"$*\" >> \"$0.reads\"; cat \"$0.$2\"; exit %d; }\n"
+                "[ \"$1\" = hypothesis ] && { echo \"$*\" >> \"$0.reads\"; cat \"$0.said\"; exit 0; }\n"
                 "[ \"$1\" = quota ] && { echo \"$*\" >> \"$0.reads\"; [ -s \"$0.refusal\" ] && { cat \"$0.refusal\" >&2; exit 1; }; "
                 "cat \"$0.quota\"; exit %d; }\n" % (read_exit, read_exit) +
                 "count=$(cat \"$0.runs\" 2>/dev/null || echo 0)\nRUNS=$((count + 1))\n"
@@ -244,6 +246,41 @@ class JobStateTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updates.message(events, "agent-a"), "Platform updates:\nexperiment.status exp-1 COMPLETED\n"
                          "not_read the metrics and machine of the jobs that ended: `hl job status exp-1` reads it")
         self.assertEqual(len(logged.records), 1)
+
+
+# A person's idea reached only the researcher whose hypothesis it built on, and the coordinator was
+# woken by a bare id: it wakes both, told with its words and its author. An agent's update stays a
+# pointer.
+class PersonIdeaTest(unittest.IsolatedAsyncioTestCase):
+    IDEA = '{"kind":"hypothesis.new","subject":"hyp-9","value":"user","detail":"","agent_id":"","position":8,"cursor":8}'
+    NOTE = '{"kind":"comment.new","subject":"pe-1","value":"user","detail":"c-7","agent_id":"","position":9,"cursor":9}'
+
+    def test_a_persons_idea_wakes_researchers_and_the_coordinator(self):
+        for role in ("agent", "coordinator"):
+            self.assertIn("hypothesis.new=user", updates.WAKES[role])
+            self.assertNotIn("hypothesis.new", updates.WAKES[role], "an agent's idea wakes nobody")
+
+    async def test_a_persons_idea_and_comment_are_told_with_their_words(self):
+        command, counter = fake_hl(f"echo '{self.IDEA}'\necho '{COMMENT}'\n",
+                                   said='{"id":"hyp-9","text":"try a context model","actor":{"kind":"user","name":"Ada"}}\n')
+        events = await updates.drain(ENV, command=command)
+        self.assertEqual(updates.message(events, "agent-a"), "Platform updates:\n"
+                         "hypothesis.new hyp-9 a person's idea, by Ada: try a context model\n"
+                         "comment.new hyp-1 agent by agent-b")
+        with open(counter.replace(".runs", ".reads")) as f:
+            self.assertEqual(f.read(), "hypothesis get hyp-9 --full --limit 1\n")
+
+        command, counter = fake_hl(f"echo '{self.NOTE}'\n", said='{"id":"c-7","text":"keep it lossless","actor":{"kind":"user","name":"Ada"}}\n')
+        events = await updates.drain(ENV, command=command)
+        self.assertEqual(updates.message(events, "agent-a"), "Platform updates:\ncomment.new pe-1 a person's comment, by Ada: keep it lossless")
+        with open(counter.replace(".runs", ".reads")) as f:
+            self.assertEqual(f.read(), "hypothesis get pe-1 --comment c-7\n")
+
+    async def test_an_idea_that_could_not_be_read_says_how_to_read_it(self):
+        command, _ = fake_hl(f"echo '{self.IDEA}'\n")
+        events = await updates.drain(ENV, command=command)
+        self.assertEqual(updates.message(events, "agent-a"), "Platform updates:\n"
+                         "hypothesis.new hyp-9 user by a person, not read: `hl hypothesis get hyp-9 --full --limit 1` reads it")
 
 
 # Capacity, budget, time, standings and allowances were each a separate read the agents had to

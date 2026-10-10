@@ -193,6 +193,9 @@ func TestTheSameChangeCommittedDoesReachAListener(t *testing.T) {
 			if e.Position <= 0 || e.Cursor <= 0 || e.Cursor > e.Position {
 				t.Errorf("event position and cursor: got = %v and %v, want = a transaction id and a cursor at or below it", e.Position, e.Cursor)
 			}
+			if e.Value != string(domain.ActorAgent) || e.Detail == "" {
+				t.Errorf("comment.new value and detail: got = %q and %q, want = the credential's kind and the comment's id", e.Value, e.Detail)
+			}
 			return
 		case <-deadline:
 			t.Fatalf("comment.new after a committed write: got = %v, want = one event", "no event")

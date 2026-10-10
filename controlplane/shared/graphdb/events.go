@@ -7,6 +7,7 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // ReplayEvents derives the hypothesis events of one platform experiment at a position of at least
@@ -20,7 +21,7 @@ func (s *Store) ReplayEvents(ctx context.Context, platformExperimentID string, s
 		var events []db.Event
 		for _, q := range []string{
 			`MATCH (h:Hypothesis {platform_experiment_id: $pe}) WHERE h.created_xid >= $since
-RETURN 'hypothesis.new' AS kind, h.id AS subject, '' AS value, '' AS detail, h.agent_id AS agent_id, h.created_xid AS position`,
+RETURN 'hypothesis.new' AS kind, h.id AS subject, coalesce(h.actor_kind, 'unverified') AS value, '' AS detail, h.agent_id AS agent_id, h.created_xid AS position`,
 			`MATCH (h:Hypothesis {platform_experiment_id: $pe}) WHERE h.status_changed_xid >= $since
 RETURN 'hypothesis.status' AS kind, h.id AS subject, h.status AS value, '' AS detail, h.agent_id AS agent_id, h.status_changed_xid AS position`,
 			`MATCH (h:Hypothesis {platform_experiment_id: $pe})-[r]->(t) WHERE r.created_xid >= $since AND r.created_at <> h.created_at
@@ -57,14 +58,15 @@ RETURN 'hypothesis.link' AS kind, h.id AS subject, toLower(type(r)) AS value, t.
 // ConcernsAgent reports, per event, whether a hypothesis event concerns a hypothesis agentID
 // registered: the subject of a comment, finding or status, the target of a link, or a target of
 // the links a new hypothesis was registered with. A comment on the objective, whose subject is the
-// platform experiment's id, concerns every agent: the objective is everyone's. A link added to a
+// platform experiment's id, concerns every agent: the objective is everyone's. So does a
+// hypothesis a person registered: a person's idea is put to every agent. A link added to a
 // new hypothesis later is its own event, so it does not make the hypothesis.new concern the agent,
 // live or in a replay. It is one read however many events are asked about.
 func (s *Store) ConcernsAgent(ctx context.Context, agentID string, events []db.Event) ([]bool, error) {
 	var targets, created []string
 	for _, e := range events {
 		switch {
-		case onObjective(e):
+		case toEveryAgent(e):
 		case e.Kind == db.EventHypothesisNew:
 			created = append(created, e.Subject)
 		case e.Kind == db.EventHypothesisLink:
@@ -110,12 +112,16 @@ RETURN DISTINCT h.id`, created},
 		if e.Kind == db.EventHypothesisLink {
 			id = e.Detail
 		}
-		result[i] = onObjective(e) || concerned[id]
+		result[i] = toEveryAgent(e) || concerned[id]
 	}
 	return result, nil
 }
 
-// onObjective is a comment on the objective, the root of its platform experiment's graph.
-func onObjective(e db.Event) bool {
+// toEveryAgent is a comment on the objective, the root of its platform experiment's graph, or a
+// hypothesis a person registered.
+func toEveryAgent(e db.Event) bool {
+	if e.Kind == db.EventHypothesisNew && domain.ActorKind(e.Value).Person() {
+		return true
+	}
 	return e.Kind == db.EventCommentNew && e.Subject != "" && e.Subject == e.PlatformExperimentID
 }

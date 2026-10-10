@@ -56,6 +56,12 @@ those come from a planner or a person and can be small thinking too. Look for:
     gaining. The run is for a breakthrough: steer toward an approach nobody has tried, grounded
     in the literature's best numbers. Combining what several found is one researcher's task:
     the message names it and tells the others not to, and they keep exploring;
+  - an idea a person registered (a wake reads `a person's idea, by NAME`; `ideas` in the
+    situation lists the open ones and who took each up): a suggestion from the people who own
+    the run, never an order. See that it is judged on its merit: the researcher whose area it
+    fits takes it up with a hypothesis that builds on it, or someone records on it why it is not
+    worth a trial. One left untaken while capacity is free is yours to place, by message. A
+    person's comment comes in the wake with its words: read it as a note from the owner;
   - a refutation of a large lever: it stands only on its job and a control on the same machine
     (any machine on a metric declared deterministic).
     Read the job's logs and its diff from the control before accepting it, and check that the

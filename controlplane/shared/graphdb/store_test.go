@@ -1222,6 +1222,10 @@ func TestConcernsAgentFindsActivityOnTheAgentsOwnHypotheses(t *testing.T) {
 		{db.Event{Kind: db.EventHypothesisLink, Subject: theirs.ID, Detail: pe}, false},
 		{db.Event{Kind: db.EventHypothesisNew, Subject: child.ID}, true},
 		{db.Event{Kind: db.EventHypothesisNew, Subject: theirs.ID}, false},
+		// A person's idea is put to every agent, and a person's comment on another agent's
+		// hypothesis is that agent's.
+		{db.Event{Kind: db.EventHypothesisNew, Subject: "hyp-a-persons-idea", Value: string(domain.ActorUser)}, true},
+		{db.Event{Kind: db.EventCommentNew, Subject: theirs.ID, Value: string(domain.ActorUser)}, false},
 		{db.Event{Kind: db.EventCommentNew, Subject: pe, PlatformExperimentID: pe}, true},
 		{db.Event{Kind: db.EventFindingNew, Subject: pe, PlatformExperimentID: pe}, false},
 	}
@@ -1263,5 +1267,37 @@ func TestFirstParentIsTheBuildsOnLinkStatedFirst(t *testing.T) {
 	links, err := s.Links(ctx, combined.ID)
 	if err != nil || len(links.Out) != 3 || links.Out[0].HypothesisID != older.ID || links.Out[0].Type != domain.LinkRelated || links.Out[1].HypothesisID != newer.ID {
 		t.Errorf("out links = %+v, %v, want them in the order stated", links.Out, err)
+	}
+}
+
+// The situation lists the open ideas people registered, newest first, each with the agents that
+// built on it.
+func TestPersonIdeasAreTheOpenOnesAPersonRegisteredWithWhoBuiltOnThem(t *testing.T) {
+	s := testStore(t)
+	pe := testExperiment(t, s)
+	ctx := context.Background()
+	person := func(text string) *domain.Hypothesis {
+		h, _, _, _, _, err := s.Register(ctx, NewHypothesis{Actor: userActor("u1"), PlatformExperimentID: pe, Text: text, Links: onRoot(pe)})
+		if err != nil {
+			t.Fatalf("Register %q: %v", text, err)
+		}
+		return h
+	}
+	taken := person("a context model beats the range coder")
+	untouched := person("delta frames against the previous one")
+	settled := person("quantise the depth channel")
+	register(t, s, pe, "agent-1", "an order-2 context model", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: taken.ID}})
+	register(t, s, pe, "agent-2", "the agent's own approach", onRoot(pe))
+	if _, _, err := s.UpdateStatus(ctx, settled.ID, "", userActor("u1"), domain.HypothesisRefuted, stampAt(1)); err != nil {
+		t.Fatalf("UpdateStatus: %v", err)
+	}
+
+	ideas, err := s.PersonIdeas(ctx, pe, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ideas) != 2 || ideas[0].ID != untouched.ID || len(ideas[0].RefinedBy) != 0 || ideas[1].ID != taken.ID ||
+		len(ideas[1].RefinedBy) != 1 || ideas[1].RefinedBy[0] != "agent-1" || ideas[1].Actor != userActor("u1") {
+		t.Fatalf("PersonIdeas = %+v, want the two open ones, newest first, the older built on by agent-1", ideas)
 	}
 }

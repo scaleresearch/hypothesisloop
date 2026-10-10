@@ -675,7 +675,10 @@ func TestCommentsOnTheObjective(t *testing.T) {
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/hypotheses/pe-env/comments":
 			w.Header().Set("X-Total-Count", "2")
-			_, _ = io.WriteString(w, `[{"id":"c-1","hypothesis_id":"pe-env","platform_experiment_id":"pe-env","agent_id":"ag-2","actor":{"kind":"agent"},"text":"`+strings.Repeat("x", commentCut+5)+`","created_at":"t1"}]`)
+			_, _ = io.WriteString(w, `[{"id":"c-1","hypothesis_id":"pe-env","platform_experiment_id":"pe-env","agent_id":"ag-2","actor":{"kind":"agent"},"text":"`+strings.Repeat("x", commentCut+5)+`","created_at":"t1"},`+
+				`{"id":"c-3","hypothesis_id":"pe-env","platform_experiment_id":"pe-env","agent_id":"","actor":{"kind":"user","id":"u1","name":"Ada"},"text":"`+strings.Repeat("y", commentCut+5)+`","created_at":"t2"}]`)
+		case r.Method == "GET" && r.URL.Path == "/hypotheses/pe-env/comments/c-3":
+			_, _ = io.WriteString(w, `{"id":"c-3","hypothesis_id":"pe-env","actor":{"kind":"user","id":"u1","name":"Ada"},"text":"try a context model"}`)
 		case r.URL.Path == "/hypotheses":
 			_, _ = io.WriteString(w, `[]`)
 		default:
@@ -699,12 +702,20 @@ func TestCommentsOnTheObjective(t *testing.T) {
 	if code := run([]string{"hypothesis", "get", "root"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("get root: exit %d, stderr %s", code, stderr.String())
 	}
-	want := `{"id":"pe-env","objective":true,"comment_count":2,"comments_omitted":1,"comments":[{"agent_id":"ag-2","created_at":"t1","cut":true,"text":"` + strings.Repeat("x", commentCut) + `…"}]}` + "\n"
+	// A person's comment is printed whole, with who wrote it.
+	want := `{"id":"pe-env","objective":true,"comment_count":2,"comments":[{"agent_id":"ag-2","created_at":"t1","cut":true,"text":"` + strings.Repeat("x", commentCut) + `…"},` +
+		`{"agent_id":"","by":"Ada","created_at":"t2","text":"` + strings.Repeat("y", commentCut+5) + `"}]}` + "\n"
 	if stdout.String() != want {
 		t.Errorf("get root = %s, want %s", stdout.String(), want)
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("get root stderr = %q, want nothing: the cut and the comment not shown are in the record", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"hypothesis", "get", "root", "--comment", "c-3"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), `"text":"try a context model"`) {
+		t.Fatalf("get root --comment: exit %d, stdout %s, stderr %s", code, stdout.String(), stderr.String())
 	}
 
 	stdout.Reset()

@@ -523,7 +523,7 @@ func TestRegisteringANewHypothesisStampsTheGraphWriteWithItsEventsPosition(t *te
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
-	want := db.Event{Kind: db.EventHypothesisNew, Subject: h.ID, PlatformExperimentID: "pe-1",
+	want := db.Event{Kind: db.EventHypothesisNew, Subject: h.ID, Value: string(domain.ActorAgent), PlatformExperimentID: "pe-1",
 		AgentID: "agent-1", Position: 1}
 	if len(events.events) != 1 || events.events[0] != want {
 		t.Errorf("events: got = %+v, want = [%+v]", events.events, want)
