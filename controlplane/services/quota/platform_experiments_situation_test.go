@@ -3,6 +3,7 @@ package quota
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -200,6 +201,7 @@ type situationStore struct {
 	quotas    []*domain.AgentQuota
 	summaryAt *time.Time
 	allowance map[string]domain.MessageAllowance
+	inFlight  []domain.HypothesisInFlight
 }
 
 func (s *situationStore) GetExperiment(_ context.Context, id string) (*domain.Experiment, error) {
@@ -228,6 +230,10 @@ func (s *situationStore) MessageAllowance(context.Context, string) (map[string]d
 
 func (s *situationStore) SummaryWrittenAt(context.Context, string) (*time.Time, error) {
 	return s.summaryAt, nil
+}
+
+func (s *situationStore) HypothesesInFlight(context.Context, string) ([]domain.HypothesisInFlight, error) {
+	return s.inFlight, nil
 }
 
 func (s *situationStore) CompletedJobIDs(context.Context, string) (map[string]bool, error) {
@@ -262,6 +268,7 @@ func situationRun(t *testing.T) (*PlatformExperimentsService, *situationStore) {
 		},
 		summaryAt: &summaryAt,
 		allowance: map[string]domain.MessageAllowance{"ag-1": {LeftThisHour: 6}, "ag-2": {LeftThisHour: 4}},
+		inFlight:  []domain.HypothesisInFlight{{HypothesisID: "hyp-1", Queued: 1, Running: 1, AgentIDs: []string{"ag-1", "ag-gone"}}},
 	}
 	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute).WithPersonIdeas(personIdeas{"pe-1": 2})
 	svc.placement = func(context.Context, string) (*Placement, error) {
@@ -307,6 +314,10 @@ func TestTheSituationAnswersTheRunAndTheRowsTheCallerMaySee(t *testing.T) {
 	if busy := all.Agents[0]; busy.Jobs != (JobCounts{Queued: 1, Running: 1}) || *busy.MinutesWithoutJobInFlight != 0 {
 		t.Fatalf("busy row: %+v", busy)
 	}
+	if len(all.InFlight) != 1 || all.InFlight[0].HypothesisID != "hyp-1" || all.InFlight[0].Queued != 1 || all.InFlight[0].Running != 1 ||
+		!slices.Equal(all.InFlight[0].Agents, []string{"Researcher 1", "ag-gone"}) {
+		t.Fatalf("hypotheses in flight: %+v, want hyp-1's two jobs by name, an agent without a row by id", all.InFlight)
+	}
 	if want := (SituationIdeas{Open: 2, List: "hl hypothesis list --by people"}); all.Ideas != want {
 		t.Fatalf("ideas from people: %+v, want %+v", all.Ideas, want)
 	}
@@ -315,7 +326,7 @@ func TestTheSituationAnswersTheRunAndTheRowsTheCallerMaySee(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(own.Agents) != 1 || own.Agents[0].AgentID != "ag-2" || own.Coordinator != nil || own.Capacity.JobsInFlightRun != (JobCounts{Queued: 1, Running: 1}) {
+	if len(own.Agents) != 1 || own.Agents[0].AgentID != "ag-2" || own.Coordinator != nil || own.InFlight != nil || own.Capacity.JobsInFlightRun != (JobCounts{Queued: 1, Running: 1}) {
 		t.Fatalf("agent's read: agents %+v, coordinator %+v, capacity %+v", own.Agents, own.Coordinator, own.Capacity)
 	}
 	if own.Ideas.Open != 2 {

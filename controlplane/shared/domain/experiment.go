@@ -78,6 +78,7 @@ type Experiment struct {
 	EstimatedCostAccH      float64          `json:"estimated_cost_acch"` // cost in accelerator-hours (AccH), H100-equivalent
 	CapacityTier           CapacityTier     `json:"capacity_tier"`
 	NoveltyScore           float64          `json:"novelty_score,omitempty"` // computed at admission; advisory only
+	SameHypothesis         string           `json:"same_hypothesis,omitempty" doc:"Set at submit when another agent had a job on the same hypothesis queued, running or completed within the hour: which jobs, whose and what to do. The coordinator is told it as job.duplicate."`
 	PriorityScore          float64          `json:"priority_score"`
 	Status                 ExperimentStatus `json:"status"`
 	QueuedAt               *time.Time       `json:"queued_at,omitempty"`

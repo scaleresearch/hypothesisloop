@@ -370,6 +370,11 @@ ALTER TABLE experiments ADD COLUMN IF NOT EXISTS underperforming_metric TEXT;
 -- longer than it was to run.
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS held_reason TEXT;
 
+-- What its submitter was told at submit of other agents' jobs on the same hypothesis, queued,
+-- running or just completed, written once with the row: the coordinator is told it as
+-- job.duplicate, live and replayed.
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS same_hypothesis TEXT;
+
 -- A job holds a cluster only while it is placed. The column once defaulted to the name
 -- 'default', which is no cluster: a queued row carrying it is cleared.
 ALTER TABLE experiments ALTER COLUMN cluster_name SET DEFAULT '';
@@ -739,6 +744,7 @@ ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS status_xid       BIGI
 ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS not_admitted_xid BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
 ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS underperforming_xid BIGINT;
 ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS held_xid BIGINT;
+ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS same_hypothesis_xid BIGINT;
 ALTER TABLE agent_quotas          ADD COLUMN IF NOT EXISTS updated_xid   BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
 ALTER TABLE hypothesis_findings   ADD COLUMN IF NOT EXISTS created_xid   BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
 ALTER TABLE hypothesis_comments   ADD COLUMN IF NOT EXISTS created_xid   BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
@@ -807,6 +813,9 @@ BEGIN
     IF TG_OP = 'INSERT' OR NEW.held_reason IS DISTINCT FROM OLD.held_reason THEN
         NEW.held_xid := CASE WHEN NEW.held_reason IS NULL THEN NULL ELSE NEW.updated_xid END;
     END IF;
+    IF TG_OP = 'INSERT' OR NEW.same_hypothesis IS DISTINCT FROM OLD.same_hypothesis THEN
+        NEW.same_hypothesis_xid := CASE WHEN NEW.same_hypothesis IS NULL THEN NULL ELSE NEW.updated_xid END;
+    END IF;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -838,6 +847,11 @@ BEGIN
             split_part(NEW.held_reason, ': ', 1),
             CASE WHEN position(': ' in NEW.held_reason) > 0
                  THEN substr(NEW.held_reason, position(': ' in NEW.held_reason) + 2) ELSE '' END,
+            NEW.platform_experiment_id, NEW.agent_id);
+    END IF;
+    IF NEW.same_hypothesis IS NOT NULL
+       AND (TG_OP = 'INSERT' OR NEW.same_hypothesis IS DISTINCT FROM OLD.same_hypothesis) THEN
+        PERFORM hypothesisloop_notify_event('job.duplicate', NEW.id, NEW.hypothesis_id, NEW.same_hypothesis,
             NEW.platform_experiment_id, NEW.agent_id);
     END IF;
     IF NEW.underperforming_metric IS NOT NULL

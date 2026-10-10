@@ -61,6 +61,15 @@ type InFlight struct {
 	IdleSince *time.Time `json:"-"`
 }
 
+// HypothesisInFlight is one hypothesis of a platform experiment with jobs queued or running, and
+// the agents whose jobs they are.
+type HypothesisInFlight struct {
+	HypothesisID string   `json:"hypothesis_id"`
+	Queued       int      `json:"queued" doc:"Its jobs not running yet: queued, placed, or waiting for their environment's build."`
+	Running      int      `json:"running"`
+	AgentIDs     []string `json:"-"`
+}
+
 // MinutesWithoutJob is how long, at now, the agent has had nothing of its own on the platform:
 // 0 while a job of its is in flight, nil outside a running platform experiment that started.
 func (f InFlight) MinutesWithoutJob(now time.Time) *int {

@@ -36,6 +36,8 @@ The platform experiment as it stands now, one line per block, each field as key=
               waiting, and since when), activity, minutes_without_job_in_flight, messages
               (left_this_hour it may still be sent, next_at when the next frees up) and model
               (window, utilization of the model allowance, refused_until while it refuses)
+  hypotheses_in_flight one line per hypothesis with jobs queued or running: queued, running and
+              agents, the names of whose jobs they are; for a coordinator
   ideas_from_people open, how many ideas people registered that no agent has settled or
               built on yet, and list, the command that lists them
   coordinator summary_written_at, jobs_completed_since_summary and model, for the coordinator

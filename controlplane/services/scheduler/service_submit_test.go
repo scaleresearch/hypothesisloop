@@ -104,6 +104,11 @@ func (poolOnlyStore) GetRunningAndQueued(context.Context, string) ([]*domain.Exp
 	return nil, errReachedScoring
 }
 
+// No job completed before: a submit past scoring reads the completed jobs of its hypothesis.
+func (poolOnlyStore) ListExperiments(context.Context, domain.ExperimentFilter) ([]*domain.Experiment, error) {
+	return nil, nil
+}
+
 func (poolOnlyStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
 	return &domain.PlatformExperiment{ID: id, Status: domain.PlatformExpRunning, Repository: "repo.git", RepositoryURL: "https://example.com/repo.git"}, nil
 }

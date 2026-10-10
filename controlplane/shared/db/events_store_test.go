@@ -1530,3 +1530,39 @@ VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $
 		t.Fatalf("idle: in_flight %+v, want nothing in flight for 3 minutes", got)
 	}
 }
+
+// Two researchers ran one hypothesis and nobody noticed. A job submitted with the other agents'
+// jobs on its hypothesis keeps the sentence its submitter was told, and whoever steers the run is
+// told it as job.duplicate, live and replayed, with no other agent.
+func TestAJobOnAnotherAgentsHypothesisIsAnnouncedAsADuplicateOnce(t *testing.T) {
+	pool := eventsTestDB(t)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+	agentID, peID, hypothesisID := seedRun(t, pool, "duplicate", true)
+	before := cursorNow(t, pool)
+	const sentence = "hypothesis h is tested by another agent too: job-a of Researcher 2 (RUNNING)"
+	exec(t, pool, `INSERT INTO experiments
+(actor_kind, id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
+ hypothesis_id, hypothesis, accelerator_type, status, not_admitted_reason,
+ estimated_duration_hours, queued_at, data_access_key_id, data_secret_access_key, same_hypothesis)
+VALUES ('agent', 'duplicate-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator',
+        'QUEUED', 'awaiting_admission', 1, now(), 'AK', 'SK', $4)`, agentID, peID, hypothesisID, sentence)
+
+	live := awaitEvent(t, events, EventJobDuplicate, "duplicate-job")
+	if live.Value != hypothesisID || live.Detail != sentence || live.AgentID != agentID {
+		t.Fatalf("live: got = %+v, want the hypothesis, the sentence and the job's agent", live)
+	}
+	exec(t, pool, `UPDATE experiments SET not_admitted_reason = 'outranked' WHERE id = 'duplicate-job'`)
+	filter := EventFilter{PlatformExperimentID: peID, Decisions: true, Kinds: map[string]bool{EventJobDuplicate: true}}
+	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(), filter, before)
+	if err != nil || len(replayed) != 1 || replayed[0].Identity() != live.Identity() {
+		t.Fatalf("replayed: got = %+v, %v, want the live event %+v once", replayed, err, live)
+	}
+	if (EventFilter{PlatformExperimentID: peID, AgentID: "another-agent"}).Matches(live) {
+		t.Errorf("a duplicate is announced to another agent: %+v", live)
+	}
+	job, err := NewExperimentsStore(pool).GetExperiment(context.Background(), "duplicate-job")
+	if err != nil || job == nil || job.SameHypothesis != sentence {
+		t.Fatalf("the job as read: %+v, %v, want same_hypothesis kept", job, err)
+	}
+}

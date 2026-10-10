@@ -101,8 +101,9 @@ it to a researcher.
 
 Assign researchers by the gap model: the largest part with the highest ceiling first, each
 researcher on hypotheses no other runs, and every place the capacity holds in use. Two
-researchers on one hypothesis or one mechanism waste a seat: keep one on it and give the other a
-new direction in the same wake. Code moves between hypotheses through the graph alone: a
+researchers on one hypothesis or one mechanism waste a seat (`job.duplicate`, or two agents on
+one line of `hypotheses_in_flight`): keep one on it and give the other a new direction in the same
+wake. Code moves between hypotheses through the graph alone: a
 follow-up registered with `--builds-on ID` starts from that hypothesis's measured job, and work of
 another branch or run enters as a port hypothesis, measured as its own job, that follow-ups build
 on. Never tell an agent to merge or cherry-pick a branch: a job of such a branch is evidence for

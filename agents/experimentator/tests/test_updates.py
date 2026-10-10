@@ -623,6 +623,8 @@ class FormatTest(unittest.TestCase):
         self.assertNotIn("agent.message", updates.WAKES["coordinator"])
         # The owner's message, to the coordinator or a researcher, wakes the coordinator; its own do not.
         self.assertIn("agent.message=owner", updates.WAKES["coordinator"])
+        self.assertIn("job.duplicate", updates.WAKES["coordinator"])
+        self.assertNotIn("job.duplicate", updates.WAKES["agent"])
         to_coordinator = dict(sent, subject="coordinator", agent_id="coordinator", value="owner", detail="model the gap")
         self.assertEqual(updates.event_line(to_coordinator, "coordinator"), "message from the owner: model the gap")
 

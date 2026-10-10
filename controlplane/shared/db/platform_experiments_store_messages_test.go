@@ -244,3 +244,37 @@ func TestCloseAgentsAreKeptAsTakenBeforeTheClose(t *testing.T) {
 		t.Fatalf("summary written: %v, %v, want now", at, err)
 	}
 }
+
+// Each hypothesis with jobs in flight is counted with the agents whose jobs they are, and the
+// baseline's job and ended jobs are left out.
+func TestHypothesesInFlightCountsEachHypothesisAndItsAgents(t *testing.T) {
+	pool := eventsTestDB(t)
+	pes := NewPlatformExperimentsStore(pool)
+	other, _, _ := seedRun(t, pool, "in-flight-b", true)
+	agentID, peID, hypothesisID := seedRun(t, pool, "in-flight", true)
+	job := func(id, agent, hypothesis, status string) {
+		t.Helper()
+		reason := "awaiting_admission"
+		if status != "QUEUED" {
+			reason = ""
+		}
+		exec(t, pool, `INSERT INTO experiments
+(actor_kind, id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
+ hypothesis_id, hypothesis, accelerator_type, status, not_admitted_reason,
+ estimated_duration_hours, queued_at, data_access_key_id, data_secret_access_key)
+VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'test-accelerator', $5, NULLIF($6, ''), 1, now(), 'AK', 'SK')`,
+			id, agent, peID, hypothesis, status, reason)
+	}
+	job("in-flight-1", agentID, hypothesisID, "QUEUED")
+	job("in-flight-2", other, hypothesisID, "RUNNING")
+	job("in-flight-3", other, hypothesisID, "COMPLETED")
+	job("in-flight-base", agentID, peID, "RUNNING")
+	got, err := pes.HypothesesInFlight(context.Background(), peID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].HypothesisID != hypothesisID || got[0].Queued != 1 || got[0].Running != 1 ||
+		len(got[0].AgentIDs) != 2 || got[0].AgentIDs[0] != agentID || got[0].AgentIDs[1] != other {
+		t.Fatalf("in flight: %+v, want the hypothesis's queued and running job of both agents", got)
+	}
+}

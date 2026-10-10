@@ -366,6 +366,13 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	// otherwise finds its own row in the active set, scores itself a duplicate of itself, and
 	// persists the depressed priority that follows — reprioritize excludes it for the same
 	// reason.
+	// 5a. Another agent's work on the same hypothesis: the submitter is told in the answer, and
+	// whoever steers the run by job.duplicate, written with the row.
+	if !measuresBaseline {
+		if exp.SameHypothesis, err = s.sameHypothesis(ctx, exp, activeExps); err != nil {
+			return err
+		}
+	}
 	noveltyScore, err := s.novelty.ComputeNovelty(ctx, exp.HypothesisID, excludeExperiment(activeExps, exp.ID))
 	if err != nil {
 		return fmt.Errorf("scheduler: compute novelty: %w", err)
@@ -447,6 +454,45 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	// 8. Wake the scheduler loop.
 	s.loop.Trigger()
 	return nil
+}
+
+// sameHypothesisWindow is how long a completed job of another agent makes a new job on its
+// hypothesis a likely repeat.
+const sameHypothesisWindow = time.Hour
+
+// sameHypothesis says which jobs of other agents test exp's hypothesis: of active, those queued
+// or running, and those completed within sameHypothesisWindow. Empty when there are none.
+func (s *Service) sameHypothesis(ctx context.Context, exp *domain.Experiment, active []*domain.Experiment) (string, error) {
+	var others []*domain.Experiment
+	for _, job := range active {
+		if job.HypothesisID == exp.HypothesisID && job.AgentID != exp.AgentID && job.ID != exp.ID {
+			copied := *job
+			others = append(others, &copied)
+		}
+	}
+	completed, err := s.store.ListExperiments(ctx, domain.ExperimentFilter{PlatformExperimentID: exp.PlatformExperimentID, HypothesisID: exp.HypothesisID,
+		Status: domain.StatusCompleted, Sort: "-updated_at", Limit: 20})
+	if err != nil {
+		return "", fmt.Errorf("scheduler: jobs on the same hypothesis: %w", err)
+	}
+	since := time.Now().Add(-sameHypothesisWindow)
+	for _, job := range completed {
+		if job.AgentID != exp.AgentID && job.FinishedAt != nil && job.FinishedAt.After(since) {
+			others = append(others, job)
+		}
+	}
+	if len(others) == 0 {
+		return "", nil
+	}
+	if err := s.store.DescribeJobs(ctx, others); err != nil {
+		return "", fmt.Errorf("scheduler: jobs on the same hypothesis: %w", err)
+	}
+	named := make([]string, len(others))
+	for i, job := range others {
+		named[i] = fmt.Sprintf("%s of %s (%s)", job.ID, job.AgentName, job.Status)
+	}
+	return fmt.Sprintf("hypothesis %s is tested by another agent too: %s. If this job repeats that work, cancel it (hl job cancel %s) and take a hypothesis no other agent runs; the coordinator is told",
+		exp.HypothesisID, strings.Join(named, ", "), exp.ID), nil
 }
 
 // bindHypothesis checks the hypothesis a job names and keeps its text on the job.

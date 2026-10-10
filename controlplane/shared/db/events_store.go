@@ -106,6 +106,11 @@ const (
 	// this an agent whose job never starts learns nothing. The job's row records the reason its
 	// owner was told, once, and that write is the event, live and replayed.
 	EventJobHeld = "job.held"
+	// EventJobDuplicate says a job was submitted on a hypothesis another agent's job was already
+	// testing: queued, running or completed within the hour. Its submitter is told in the answer
+	// to its submit; the event is for whoever steers the run, so two seats do not run one idea.
+	// The job's row records the sentence, once, and that write is the event, live and replayed.
+	EventJobDuplicate = "job.duplicate"
 	// EventEnvironmentStatus says the build of an environment an agent asked for was loaded on a
 	// cluster, which runs its jobs before the push ends, or ended, ready or failed, to that agent.
 	// A job waiting for it is told by its own status; an agent that built ahead of its job had
@@ -175,6 +180,8 @@ var EventKinds = []EventKindDoc{
 	{Kind: EventJobHeld, Subject: "experiment id", Value: "the code of the queue reason (not_admitted_reason), or baseline_late",
 		Description: "This job is held in the queue. It is sent when the job has waited longer than its estimated duration, and for at least the platform's scheduler.held_job_notice_seconds: detail is the sentence that says why (not_admitted_message), never empty, for capacity_unavailable the cluster, what it is short of and how many jobs hold that. Nothing is done to the job: it stays queued, and its owner decides whether to wait, cancel it or ask for less. Sent once per job, with the reason it had then. " +
 			"baseline_late is a job of an open platform experiment's baseline, queued or placed and not running yet, that started now would end after baseline_due_at: detail says so with baseline_due_at, sent once per job."},
+	{Kind: EventJobDuplicate, Subject: "experiment id", Value: "the hypothesis id it tests",
+		Description: "This job was submitted on a hypothesis that another agent's job was testing then: queued, running or completed within the hour. detail names those jobs, whose they are and their status, as the submitter was told in same_hypothesis. Sent once per job, at its submit."},
 	{Kind: EventJobUnderperforming, Subject: "experiment id", Value: "the metric name it trails on",
 		Description: "This job trails its cohort on the ranking metric by a real margin. An opinion, not a command: nothing stops it but you. Consider POST /experiments/{id}/cancel if it is not worth its allocation. Sent once per job, and not for a job that has already ended."},
 	{Kind: EventEnvironmentStatus, Subject: "environment key", Value: "loaded, ready or failed",
@@ -235,7 +242,7 @@ type EventFilter struct {
 // ones an ExperimentID filter can meaningfully narrow to.
 func isExperimentSubject(kind string) bool {
 	switch kind {
-	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventJobUnderperforming, EventJobHeld:
+	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventJobUnderperforming, EventJobHeld, EventJobDuplicate:
 		return true
 	default:
 		return false
@@ -248,7 +255,7 @@ func isExperimentSubject(kind string) bool {
 func isAgentOwned(kind string) bool {
 	switch kind {
 	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventQuotaChanged, EventAgentCut, EventAgentFinished, EventAgentIdle, EventAgentMessage, EventJobUnderperforming, EventJobHeld,
-		EventEnvironmentStatus:
+		EventJobDuplicate, EventEnvironmentStatus:
 		return true
 	default:
 		return false
@@ -626,10 +633,11 @@ func occurredAt(ctx context.Context, tx pgx.Tx, events []Event) error {
 func replayExperiments(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]Event, error) {
 	const q = `SELECT id, agent_id, status::text, COALESCE(eviction_reason, ''), COALESCE(not_admitted_reason, ''),
 	queued_xid, submitted_xid, status_xid, not_admitted_xid, COALESCE(underperforming_metric, ''), underperforming_xid,
-	COALESCE(held_reason, ''), held_xid
+	COALESCE(held_reason, ''), held_xid, hypothesis_id, COALESCE(same_hypothesis, ''), same_hypothesis_xid
 FROM experiments
 WHERE platform_experiment_id = $1
-  AND (status_xid >= $2 OR not_admitted_xid >= $2 OR queued_xid >= $2 OR submitted_xid >= $2 OR underperforming_xid >= $2 OR held_xid >= $2)`
+  AND (status_xid >= $2 OR not_admitted_xid >= $2 OR queued_xid >= $2 OR submitted_xid >= $2 OR underperforming_xid >= $2 OR held_xid >= $2
+       OR same_hypothesis_xid >= $2)`
 	rows, err := tx.Query(ctx, q, peID, since)
 	if err != nil {
 		return nil, fmt.Errorf("events_store.replayExperiments: %w", err)
@@ -638,10 +646,11 @@ WHERE platform_experiment_id = $1
 
 	var events []Event
 	for rows.Next() {
-		var id, agentID, status, evictionReason, notAdmitted, underperformingMetric, heldReason string
-		var queuedXid, submittedXid, underperformingXid, heldXid *int64
+		var id, agentID, status, evictionReason, notAdmitted, underperformingMetric, heldReason, hypothesisID, sameHypothesis string
+		var queuedXid, submittedXid, underperformingXid, heldXid, sameHypothesisXid *int64
 		var statusXid, notAdmittedXid int64
-		if err := rows.Scan(&id, &agentID, &status, &evictionReason, &notAdmitted, &queuedXid, &submittedXid, &statusXid, &notAdmittedXid, &underperformingMetric, &underperformingXid, &heldReason, &heldXid); err != nil {
+		if err := rows.Scan(&id, &agentID, &status, &evictionReason, &notAdmitted, &queuedXid, &submittedXid, &statusXid, &notAdmittedXid, &underperformingMetric, &underperformingXid, &heldReason, &heldXid,
+			&hypothesisID, &sameHypothesis, &sameHypothesisXid); err != nil {
 			return nil, fmt.Errorf("events_store.replayExperiments: scan: %w", err)
 		}
 		if queuedXid != nil {
@@ -663,6 +672,10 @@ WHERE platform_experiment_id = $1
 			reason, message := domain.SplitQueueReason(heldReason)
 			events = append(events, Event{Kind: EventJobHeld, Subject: id, Value: reason, Detail: message,
 				PlatformExperimentID: peID, AgentID: agentID, Position: *heldXid})
+		}
+		if sameHypothesisXid != nil {
+			events = append(events, Event{Kind: EventJobDuplicate, Subject: id, Value: hypothesisID, Detail: sameHypothesis,
+				PlatformExperimentID: peID, AgentID: agentID, Position: *sameHypothesisXid})
 		}
 		// An advisory to cancel a job that has ended has nothing left to advise.
 		if underperformingXid != nil && !domain.ExperimentStatus(status).IsTerminal() {
