@@ -30,7 +30,7 @@ it changed. The baseline's `README.md` says how its harness measures. The `prior
 a lever: their summary, results and registry (`--platform-experiment ID`) say what was tried,
 what it reached and which hypotheses were refuted. A run whose `history` is `none` has no
 prior_runs: the brief alone carries what earlier runs learned, so judge every idea afresh, and
-of other runs' branches in the repository read only what the brief names. Where the run declares a
+leave the branches of other runs in the repository unread. Where the run declares a
 `start_commit` (`hl situation`), a root child starts from it in place of the baseline's commit,
 while the baseline and the target stay measured on the baseline's.
 
