@@ -24,11 +24,21 @@ COPY cli/ cli/
 COPY runtime/shared/exitline/ runtime/shared/exitline/
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/hl ./cli
 
-# Only each experiment's seed/, its job spec and hl-clone reach the agent: experiment.md carries
-# coordinator notes agents must not read. An experiment that holds neither leaves no directory.
+# Only hl-clone and the experiments EXPERIMENT_SAMPLES names (separated by spaces or commas, or
+# all for every one this checkout holds) reach the agent, and of each only its seed/ and its job
+# spec: experiment.md carries coordinator notes agents must not read. An experiment that holds
+# neither leaves no directory.
 FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS samples
+ARG EXPERIMENT_SAMPLES=""
 COPY agents/coordinator/experiments /samples
-RUN find /samples -mindepth 2 -maxdepth 2 ! -name seed ! -name .hypothesisloop -exec rm -rf {} + \
+RUN keep=" $(printf '%s' "$EXPERIMENT_SAMPLES" | tr ',' ' ') " \
+	&& for name in $keep; do \
+		[ "$name" = all ] || [ -d "/samples/$name" ] || { echo "EXPERIMENT_SAMPLES names $name, which agents/coordinator/experiments does not hold" >&2; exit 1; }; \
+	done \
+	&& for dir in $(find /samples -mindepth 1 -maxdepth 1 -type d); do \
+		case "$keep" in *" all "*|*" ${dir#/samples/} "*) ;; *) rm -rf "$dir" ;; esac; \
+	done \
+	&& find /samples -mindepth 2 -maxdepth 2 ! -name seed ! -name .hypothesisloop -exec rm -rf {} + \
 	&& find /samples -mindepth 3 -maxdepth 3 -path '*/.hypothesisloop/*' ! -name job.yaml -delete \
 	&& find /samples -mindepth 1 -maxdepth 1 -type f ! -name hl-clone -delete \
 	&& find /samples -type d -empty -delete
@@ -81,9 +91,9 @@ RUN useradd --home-dir /agent --shell /bin/bash agent \
  && echo 'agent ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/agent \
  && chmod 0440 /etc/sudoers.d/agent
 
-# WORKLOAD_SAMPLES is the agent's starting point for what a job workload looks like: every
-# experiment's seed/ (not tests/workloads/, which is test-only fixture code) with the
-# .hypothesisloop/job.yaml that runs it, plus hl-clone. Read, copy, adapt into its own repo.
+# WORKLOAD_SAMPLES is the agent's starting point for what a job workload looks like: the seed/ of
+# each experiment EXPERIMENT_SAMPLES names (not tests/workloads/, which is test-only fixture code)
+# with the .hypothesisloop/job.yaml that runs it, plus hl-clone. Read, copy, adapt into its own repo.
 # Deliberately not experiment-specific.
 ENV WORKLOAD_SAMPLES=/opt/workloads-samples
 COPY --from=samples /samples $WORKLOAD_SAMPLES

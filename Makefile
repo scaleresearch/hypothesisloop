@@ -403,9 +403,11 @@ locked-ui-image: check-tag check-ui-build-args $(if $(filter $(LOCAL_REGISTRY),$
 # Shared base every experiment's own Dockerfile.experimentator FROMs (see
 # agents/experimentator/Dockerfile.base's header) -- the agent harness, git/Claude Code plumbing,
 # and WORKLOAD_SAMPLES, none of which is experiment-specific. Root build context (not
-# agents/experimentator/) so it can bake in agents/coordinator/experiments as WORKLOAD_SAMPLES.
+# agents/experimentator/) so it can bake in hl-clone and the local experiments EXPERIMENT_SAMPLES
+# names (the variable, else .env) as WORKLOAD_SAMPLES.
+EXPERIMENT_SAMPLES ?= $(shell test -f .env && bash -c 'set +u; . ./.env; printf %s "$$EXPERIMENT_SAMPLES"')
 experimentator-base-image:
-	podman build -f agents/experimentator/Dockerfile.base -t localhost/hypothesisloop-experimentator-base .
+	podman build --build-arg EXPERIMENT_SAMPLES="$(EXPERIMENT_SAMPLES)" -f agents/experimentator/Dockerfile.base -t localhost/hypothesisloop-experimentator-base .
 
 # Experiments live only on the machines that have them: agents/coordinator/experiments/ is
 # git-ignored apart from hl-clone. $(call require-experiment-file,<path>) fails, naming the file,
