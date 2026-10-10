@@ -1,5 +1,5 @@
 .PHONY: $(addprefix locked-,images ui-image tt-hardware-image sparse-sdpa-workload-image)
-.PHONY: dev reset build test agent-test lint check images job-images sparse-sdpa-workload-image \
+.PHONY: dev reset build test agent-test lint check images job-images sparse-sdpa-workload-image sparse-sdpa-experiment \
 	experimentator-base-image experimentator-image check-tag ui-image check-ui-build-args registry-up prune-images \
 	helm-prepare helm-lint chart-push \
 	controlplane-up controlplane-down controlplane-destroy render-settings \
@@ -407,22 +407,29 @@ locked-ui-image: check-tag check-ui-build-args $(if $(filter $(LOCAL_REGISTRY),$
 experimentator-base-image:
 	podman build -f agents/experimentator/Dockerfile.base -t localhost/hypothesisloop-experimentator-base .
 
-# Builds one experiment's own experimentator image on top of the base -- e.g.
-# `make experimentator-image EXPERIMENT=sparse-sdpa`. Each experiment owns its Dockerfile.experimentator
+# Experiments live only on the machines that have them: agents/coordinator/experiments/ is
+# git-ignored apart from hl-clone. $(call require-experiment-file,<path>) fails, naming the file,
+# before anything is built when this checkout lacks it.
+require-experiment-file = test -f $(1) || { echo "$(1) is missing: the target builds a local experiment that this checkout does not have (agents/coordinator/experiments/ is git-ignored)" >&2; exit 1; }
+
+# Builds one experiment's own experimentator image on top of the base, as
+# `make experimentator-image EXPERIMENT=<name>`. Each experiment owns its Dockerfile.experimentator
 # (agents/coordinator/experiments/<name>/Dockerfile.experimentator) for whatever runtime source/pins
-# its agent needs to read (tt-metal today; nothing here assumes that's the only case).
-experimentator-image: experimentator-base-image
-	test -n "$(EXPERIMENT)" || { echo "usage: make experimentator-image EXPERIMENT=<name>" >&2; exit 1; }
-	test -f agents/coordinator/experiments/$(EXPERIMENT)/Dockerfile.experimentator || \
-		{ echo "no agents/coordinator/experiments/$(EXPERIMENT)/Dockerfile.experimentator" >&2; exit 1; }
+# its agent needs to read.
+experimentator-image:
+	@test -n "$(EXPERIMENT)" || { echo "usage: make experimentator-image EXPERIMENT=<name>" >&2; exit 1; }
+	@$(call require-experiment-file,agents/coordinator/experiments/$(EXPERIMENT)/Dockerfile.experimentator)
+	$(MAKE) experimentator-base-image
 	podman build -f agents/coordinator/experiments/$(EXPERIMENT)/Dockerfile.experimentator \
 		-t localhost/hypothesisloop-experimentator-$(EXPERIMENT) agents/coordinator/experiments/$(EXPERIMENT)
 
-# Pre-builds the sparse-sdpa experiment's own job image (harness.py + torch + pinned upstream
-# sparse_sdpa test-utils baked in -- see agents/coordinator/experiments/sparse-sdpa/seed/Dockerfile.workload)
-# so every job an agent submits starts instantly with zero per-job setup. Run this once before
-# starting a sparse-sdpa platform experiment, same as experimentator-image.
-locked-sparse-sdpa-workload-image: check-tag registry-up
+# Pre-builds a local experiment's own job image from its seed/Dockerfile.workload, so every job
+# an agent submits starts with no per-job setup. Run it once before starting a platform
+# experiment of it, like experimentator-image.
+sparse-sdpa-experiment:
+	@$(call require-experiment-file,agents/coordinator/experiments/sparse-sdpa/seed/Dockerfile.workload)
+
+locked-sparse-sdpa-workload-image: sparse-sdpa-experiment check-tag registry-up
 	podman build -f agents/coordinator/experiments/sparse-sdpa/seed/Dockerfile.workload \
 		-t $(REGISTRY)/hypothesisloop-sparse-sdpa-workload:$(TAG) agents/coordinator/experiments/sparse-sdpa/seed/
 	podman tag $(REGISTRY)/hypothesisloop-sparse-sdpa-workload:$(TAG) $(REGISTRY)/hypothesisloop-sparse-sdpa-workload:latest
