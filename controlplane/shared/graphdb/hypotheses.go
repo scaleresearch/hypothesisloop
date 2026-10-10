@@ -376,9 +376,23 @@ type ListFilter struct {
 	// scope, which this store cannot derive because it holds no orgs or projects.
 	Restricted bool
 	Within     []string
-	Limit      int
-	Offset     int
+	// ByPeople keeps only the hypotheses a person registered.
+	ByPeople bool
+	Limit    int
+	Offset   int
 }
+
+// personIdea and openPersonIdea say, of h, that a person registered it, and that it is a person's
+// idea no agent has settled or built on yet: still open, with no hypothesis an agent registered
+// building on it.
+var (
+	personIdea     = `h.actor_kind IN ['` + string(domain.ActorUser) + `', '` + string(domain.ActorKey) + `', '` + string(domain.ActorStaff) + `']`
+	openPersonIdea = `(` + personIdea + ` AND h.status = '` + string(domain.HypothesisOpen) +
+		`' AND NOT exists((h)<-[:BUILDS_ON]-(:Hypothesis {actor_kind: '` + string(domain.ActorAgent) + `'})))`
+)
+
+// listOrder puts the open ideas of people first, then the newest.
+var listOrder = `ORDER BY ` + openPersonIdea + ` DESC, h.created_at DESC, h.id DESC`
 
 func (f ListFilter) where() (string, map[string]any) {
 	clauses := []string{"true"}
@@ -399,20 +413,24 @@ func (f ListFilter) where() (string, map[string]any) {
 		clauses = append(clauses, "h.status = $status")
 		params["status"] = string(f.Status)
 	}
+	if f.ByPeople {
+		clauses = append(clauses, personIdea)
+	}
 	return strings.Join(clauses, " AND "), params
 }
 
 // itemTail turns a stream of h into list items: outgoing builds_on targets and incoming builds_on
-// count, newest first.
-const itemTail = `
+// count, in listOrder.
+var itemTail = `
 OPTIONAL MATCH (h)-[:BUILDS_ON]->(t)
 WITH h, collect(t.id) AS builds_on
 OPTIONAL MATCH (c:Hypothesis)-[:BUILDS_ON]->(h)
 WITH h, builds_on, count(c) AS child_count
 RETURN h, builds_on, child_count
-ORDER BY h.created_at DESC, h.id DESC`
+` + listOrder
 
-// ListHypotheses returns one page of hypotheses, newest first, as list items without their
+// ListHypotheses returns one page of hypotheses, the open ideas of people first, then newest
+// first, as list items without their
 // finding/comment counts (those live in Postgres). The caller states the page: a limit outside 1
 // to maxListLimit or a negative offset is an error, so a short page is never read as the whole
 // set.
@@ -425,7 +443,7 @@ func (s *Store) ListHypotheses(ctx context.Context, f ListFilter) ([]*domain.Hyp
 	params["offset"] = f.Offset
 	out, err := s.read(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		return listItems(ctx, tx, `MATCH (h:Hypothesis) WHERE `+where+`
-WITH h ORDER BY h.created_at DESC, h.id DESC SKIP $offset LIMIT $limit`+itemTail, params)
+WITH h `+listOrder+` SKIP $offset LIMIT $limit`+itemTail, params)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("graphdb.ListHypotheses: %w", err)
@@ -449,6 +467,24 @@ func (s *Store) HypothesisStats(ctx context.Context, f ListFilter) (*domain.Hypo
 		stats.Total += n
 	}
 	return stats, nil
+}
+
+// OpenPersonIdeas counts the ideas people registered in a platform experiment that no agent has
+// settled or built on yet.
+func (s *Store) OpenPersonIdeas(ctx context.Context, platformExperimentID string) (int, error) {
+	out, err := s.read(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		return collect(ctx, tx, `MATCH (h:Hypothesis {platform_experiment_id: $pe}) WHERE `+openPersonIdea+` RETURN count(h)`,
+			map[string]any{"pe": platformExperimentID})
+	})
+	if err != nil {
+		return 0, fmt.Errorf("graphdb.OpenPersonIdeas: %w", err)
+	}
+	var d decoder
+	n := d.int(out.([]*neo4j.Record)[0].Values[0])
+	if d.err != nil {
+		return 0, fmt.Errorf("graphdb.OpenPersonIdeas: %w", d.err)
+	}
+	return int(n), nil
 }
 
 // ExperimentGraph returns the whole hypothesis graph of one platform experiment: every hypothesis as a list

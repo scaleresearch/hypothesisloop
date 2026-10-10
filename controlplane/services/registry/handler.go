@@ -563,7 +563,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "Optional ?platform_experiment_id restricts to one platform experiment; omitted, every " +
 			"platform experiment's hypotheses are candidates (the operator-facing global view). " +
 			"Optional ?agent_id for one agent's own, ?status (open|confirmed|refuted|inconclusive) " +
-			"for just that status, ?limit (default 20, max 200, 422 invalid_page over it) and ?offset, most recent first. " +
+			"for just that status, ?by=people for the ideas people registered, ?limit (default 20, max 200, 422 invalid_page over it) and ?offset. " +
+			"The open ideas of people come first, those no agent has settled or built on yet, then the most recent. " +
 			"Total match count is returned in the X-Total-Count response header. Rows carry builds_on " +
 			"(what each builds on; the platform_experiment_id stands for the objective), child_count " +
 			"(how many build on it) and finding_count/comment_count. To walk or search the graph use " +
@@ -573,6 +574,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		ProjectID            string                  `query:"project_id" doc:"Only hypotheses of this project's platform experiments."`
 		Agent                string                  `query:"agent_id" doc:"Only hypotheses registered by this agent."`
 		Status               domain.HypothesisStatus `query:"status" doc:"open, confirmed, refuted or inconclusive -- the registering agent's own verdict on the claim, not job progress."`
+		By                   string                  `query:"by" enum:"people" doc:"people: only the hypotheses a person registered, an API key or staff included."`
 		Limit                int                     `query:"limit" doc:"Page size, default 20, maximum 200. A larger one is refused. See X-Total-Count for how much you have not seen."`
 		Offset               int                     `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
 	}) (*struct {
@@ -591,7 +593,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, err
 		}
 		filter := graphdb.ListFilter{PlatformExperimentID: in.PlatformExperimentID, AgentID: in.Agent,
-			Restricted: restricted, Within: within, Status: in.Status, Limit: limit, Offset: offset}
+			Restricted: restricted, Within: within, Status: in.Status, ByPeople: in.By == "people", Limit: limit, Offset: offset}
 		hs, err := h.svc.ListHypotheses(ctx, filter)
 		if err != nil {
 			return nil, auth.Internal(h.logger, "list hypotheses", err)

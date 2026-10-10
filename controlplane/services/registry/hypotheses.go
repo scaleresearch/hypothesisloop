@@ -238,8 +238,8 @@ func (s *Service) BaseRef(ctx context.Context, h *domain.Hypothesis) (string, er
 	}
 }
 
-// ListHypotheses returns one page of hypotheses, most recent first, each carrying its place in the
-// graph and its finding/comment counts. The caller states the page.
+// ListHypotheses returns one page of hypotheses, the open ideas of people first, then the most
+// recent, each carrying its place in the graph and its finding/comment counts. The caller states the page.
 func (s *Service) ListHypotheses(ctx context.Context, f graphdb.ListFilter) ([]*domain.HypothesisListItem, error) {
 	if f.Status != "" && !domain.ValidHypothesisStatus(f.Status) {
 		return nil, fmt.Errorf("registry.ListHypotheses: invalid status %q", f.Status)
@@ -395,9 +395,9 @@ type BestJob struct {
 // maxFindings bounds how many hypotheses Findings reads.
 const maxFindings = 200
 
-// Findings returns what a platform experiment has found: among its newest maxFindings hypotheses,
-// each one that holds a verdict, a finding or a job with a metric, with its newest finding and its
-// best job, which carries its own summary.
+// Findings returns what a platform experiment has found: among its first maxFindings hypotheses
+// as listed, each one that holds a verdict, a finding or a job with a metric, with its newest
+// finding and its best job, which carries its own summary.
 func (s *Service) Findings(ctx context.Context, platformExperimentID string) ([]*HypothesisEvidence, error) {
 	metrics, found, err := s.store.GetPlatformExperimentMetrics(ctx, platformExperimentID)
 	if err != nil {

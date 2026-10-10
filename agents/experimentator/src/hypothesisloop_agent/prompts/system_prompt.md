@@ -52,6 +52,8 @@ How you work is yours. What the run expects of you:
     found, inventions), as many pursued at once as the capacity holds. Register each before its code,
     with what you expect and why; `hl hypothesis submit --file` takes a `hypotheses:` list, so a
     batch registers at once.
+  - When choosing what to try next, look at the open ideas from people (`hl hypothesis list
+    --by people`): they are suggestions, judge them freely.
   - Your turns are for finding, judging and dispatching ideas; each one goes to a subagent (the
     Agent tool, run_in_background) that carries it end to end in its own worktree: `git worktree
     add`, `hl hypothesis checkout` inside it, the code, its jobs (`hl job wait`; a command runs

@@ -83,7 +83,7 @@ var hypothesisCommands = []subcommand{
 	{"link", "add a link from your own hypothesis", hypothesisLink, everyone},
 	{"comment", "add a note to a hypothesis, or to the objective as root", hypothesisComment, everyone},
 	{"status", "set your hypothesis's verdict; confirmed and refuted need two completed jobs of its own besides the control, or --despite with why one suffices (a deterministic job)", hypothesisStatus, everyone},
-	{"list", "hypotheses, most recent first", hypothesisList, everyone},
+	{"list", "hypotheses, open ideas of people first, then most recent", hypothesisList, everyone},
 	{"get", "one hypothesis with its links, findings, implementations, comments and jobs, short unless --full; root: the comments on the objective", hypothesisGet, everyone},
 	{"query", "read-only Cypher over the graph, including its text search", hypothesisQuery, everyone},
 }
@@ -561,14 +561,15 @@ comment.`, stderr)
 }
 
 func hypothesisList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("hypothesis list", `usage: hl hypothesis list [--agent A] [--status S] [--limit N] [--offset N]
+	fs := newFlags("hypothesis list", `usage: hl hypothesis list [--agent A] [--status S] [--by people] [--limit N] [--offset N]
 
-Most recent first, one JSON object per line with builds_on, child_count, finding_count and
-comment_count. For structure or text search use 'hl hypothesis query'. The branches a
+The open ideas of people first, those no agent has settled or built on yet, then the most recent,
+one JSON object per line with builds_on, child_count, finding_count and comment_count. For structure or text search use 'hl hypothesis query'. The branches a
 hypothesis was run on are in hl hypothesis get ID, as implementations.`, stderr)
 	pe := fs.String("platform-experiment", "", "platform experiment id (default the token's)")
 	agent := fs.String("agent", "", "only this agent's hypotheses")
 	status := fs.String("status", "", "open, confirmed, refuted or inconclusive")
+	by := fs.String("by", "", "people: only the hypotheses a person registered")
 	limit := fs.Int("limit", 0, "page size (server default 20, max 200)")
 	offset := fs.Int("offset", 0, "rows to skip")
 	if err := fs.Parse(args); err != nil {
@@ -576,6 +577,9 @@ hypothesis was run on are in hl hypothesis get ID, as implementations.`, stderr)
 	}
 	if fs.NArg() > 0 {
 		return parseExit(misuse(fs, "unexpected argument %q", fs.Arg(0)))
+	}
+	if *by != "" && *by != "people" {
+		return parseExit(misuse(fs, "--by takes people, not %q", *by))
 	}
 	*pe = experimentOf(c, *pe)
 	if *pe == "" {
@@ -587,6 +591,9 @@ hypothesis was run on are in hl hypothesis get ID, as implementations.`, stderr)
 	}
 	if *status != "" {
 		q.Set("status", *status)
+	}
+	if *by != "" {
+		q.Set("by", *by)
 	}
 	if *limit != 0 {
 		q.Set("limit", strconv.Itoa(*limit))

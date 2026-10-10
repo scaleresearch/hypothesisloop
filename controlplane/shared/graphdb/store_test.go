@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1263,5 +1264,61 @@ func TestFirstParentIsTheBuildsOnLinkStatedFirst(t *testing.T) {
 	links, err := s.Links(ctx, combined.ID)
 	if err != nil || len(links.Out) != 3 || links.Out[0].HypothesisID != older.ID || links.Out[0].Type != domain.LinkRelated || links.Out[1].HypothesisID != newer.ID {
 		t.Errorf("out links = %+v, %v, want them in the order stated", links.Out, err)
+	}
+}
+
+// An open idea of a person is one a person registered that no agent settled or built on yet:
+// listings put those first, then the newest, and the situation counts them.
+func TestOpenPersonIdeasListFirstAndAreCounted(t *testing.T) {
+	s := testStore(t)
+	pe := testExperiment(t, s)
+	ctx := context.Background()
+	registerAs := func(agentID string, actor domain.Actor, text string, links []domain.LinkSpec) *domain.Hypothesis {
+		t.Helper()
+		h, _, _, _, _, err := s.Register(ctx, NewHypothesis{AgentID: agentID, Actor: actor, PlatformExperimentID: pe, Text: text, Links: links})
+		if err != nil {
+			t.Fatalf("Register %q: got = %v, want nil", text, err)
+		}
+		return h
+	}
+	open := registerAs("", userActor("u1"), "try a context model", onRoot(pe))
+	refined := registerAs("", userActor("u1"), "try arithmetic coding", onRoot(pe))
+	settled := registerAs("", domain.Actor{Kind: domain.ActorKey, ID: "k1"}, "try a larger dictionary", onRoot(pe))
+	byPerson := registerAs("", userActor("u2"), "try a smaller dictionary", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: open.ID}})
+	child := registerAs("agent-1", agentActor("agent-1"), "arithmetic coding with a static model",
+		[]domain.LinkSpec{{Type: domain.LinkBuildsOn, To: refined.ID}})
+	if _, _, err := s.UpdateStatus(ctx, settled.ID, "", userActor("u1"), domain.HypothesisRefuted, stampAt(1)); err != nil {
+		t.Fatalf("UpdateStatus: got = %v, want nil", err)
+	}
+	agents := registerAs("agent-1", agentActor("agent-1"), "a bigger batch helps", onRoot(pe))
+
+	ids := func(f ListFilter) []string {
+		t.Helper()
+		items, err := s.ListHypotheses(ctx, f)
+		if err != nil {
+			t.Fatalf("ListHypotheses(%+v): got = %v, want nil", f, err)
+		}
+		out := make([]string, len(items))
+		for i, item := range items {
+			out[i] = item.ID
+		}
+		return out
+	}
+	want := []string{byPerson.ID, open.ID, agents.ID, child.ID, settled.ID, refined.ID}
+	if got := ids(ListFilter{PlatformExperimentID: pe, Limit: 10}); !slices.Equal(got, want) {
+		t.Errorf("list: got = %v, want = %v (open ideas of people first, then newest)", got, want)
+	}
+	if got := ids(ListFilter{PlatformExperimentID: pe, Limit: 2, Offset: 1}); !slices.Equal(got, want[1:3]) {
+		t.Errorf("list page 2 of 2: got = %v, want = %v", got, want[1:3])
+	}
+	want = []string{byPerson.ID, open.ID, settled.ID, refined.ID}
+	if got := ids(ListFilter{PlatformExperimentID: pe, ByPeople: true, Limit: 10}); !slices.Equal(got, want) {
+		t.Errorf("list by people: got = %v, want = %v", got, want)
+	}
+	if stats, err := s.HypothesisStats(ctx, ListFilter{PlatformExperimentID: pe, ByPeople: true}); err != nil || stats.Total != 4 {
+		t.Errorf("stats by people: got = (%+v, %v), want total 4", stats, err)
+	}
+	if n, err := s.OpenPersonIdeas(ctx, pe); err != nil || n != 2 {
+		t.Errorf("OpenPersonIdeas: got = (%d, %v), want (2, nil)", n, err)
 	}
 }

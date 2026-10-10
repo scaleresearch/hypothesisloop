@@ -234,6 +234,11 @@ func (s *situationStore) CompletedJobIDs(context.Context, string) (map[string]bo
 	return map[string]bool{}, nil
 }
 
+// personIdeas holds how many open ideas of people each platform experiment has.
+type personIdeas map[string]int
+
+func (p personIdeas) OpenPersonIdeas(_ context.Context, pe string) (int, error) { return p[pe], nil }
+
 // situationRun is a running platform experiment of two researchers, one with a job running and
 // one with none for 25 minutes, whose baseline job takes two devices of typeA on one node.
 func situationRun(t *testing.T) (*PlatformExperimentsService, *situationStore) {
@@ -258,7 +263,7 @@ func situationRun(t *testing.T) (*PlatformExperimentsService, *situationStore) {
 		summaryAt: &summaryAt,
 		allowance: map[string]domain.MessageAllowance{"ag-1": {LeftThisHour: 6}, "ag-2": {LeftThisHour: 4}},
 	}
-	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute)
+	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute).WithPersonIdeas(personIdeas{"pe-1": 2})
 	svc.placement = func(context.Context, string) (*Placement, error) {
 		return &Placement{
 			Clusters: []ClusterCapacity{{ClusterName: "c1", Accelerators: []AcceleratorCapacity{
@@ -302,6 +307,9 @@ func TestTheSituationAnswersTheRunAndTheRowsTheCallerMaySee(t *testing.T) {
 	if busy := all.Agents[0]; busy.Jobs != (JobCounts{Queued: 1, Running: 1}) || *busy.MinutesWithoutJobInFlight != 0 {
 		t.Fatalf("busy row: %+v", busy)
 	}
+	if want := (SituationIdeas{Open: 2, List: "hl hypothesis list --by people"}); all.Ideas != want {
+		t.Fatalf("ideas from people: %+v, want %+v", all.Ideas, want)
+	}
 
 	own, err := svc.Situation(ctx, "pe-1", "ag-2")
 	if err != nil {
@@ -309,6 +317,9 @@ func TestTheSituationAnswersTheRunAndTheRowsTheCallerMaySee(t *testing.T) {
 	}
 	if len(own.Agents) != 1 || own.Agents[0].AgentID != "ag-2" || own.Coordinator != nil || own.Capacity.JobsInFlightRun != (JobCounts{Queued: 1, Running: 1}) {
 		t.Fatalf("agent's read: agents %+v, coordinator %+v, capacity %+v", own.Agents, own.Coordinator, own.Capacity)
+	}
+	if own.Ideas.Open != 2 {
+		t.Fatalf("agent's read: ideas from people %+v, want the run's 2", own.Ideas)
 	}
 	if _, err := svc.Situation(ctx, "pe-none", ""); !errors.Is(err, ErrPlatformExperimentNotFound) {
 		t.Fatalf("no such run: %v", err)

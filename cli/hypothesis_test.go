@@ -307,15 +307,18 @@ func TestHypothesisList(t *testing.T) {
 		return []map[string]any{{"id": "hyp-1", "child_count": 2}, {"id": "hyp-2", "child_count": 0}}
 	})
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"hypothesis", "list", "--platform-experiment", "pe-1", "--agent", "jane", "--status", "open", "--limit", "5", "--offset", "10"}, &stdout, &stderr)
+	code := run([]string{"hypothesis", "list", "--platform-experiment", "pe-1", "--agent", "jane", "--status", "open", "--by", "people", "--limit", "5", "--offset", "10"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
 	}
-	if (*got)[0].Path != "/hypotheses" || (*got)[0].Query != "agent_id=jane&limit=5&offset=10&platform_experiment_id=pe-1&status=open" {
+	if (*got)[0].Path != "/hypotheses" || (*got)[0].Query != "agent_id=jane&by=people&limit=5&offset=10&platform_experiment_id=pe-1&status=open" {
 		t.Fatalf("request = %+v", (*got)[0])
 	}
 	if want := "{\"child_count\":2,\"id\":\"hyp-1\"}\n{\"child_count\":0,\"id\":\"hyp-2\"}\n"; stdout.String() != want {
 		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if code := run([]string{"hypothesis", "list", "--platform-experiment", "pe-1", "--by", "agents"}, &stdout, &stderr); code != 2 {
+		t.Fatalf("--by agents: exit %d, want 2", code)
 	}
 }
 

@@ -190,6 +190,8 @@ type PlatformExperimentsService struct {
 	// idle tells researchers with no job for idleAfter that they are idle (WithIdleNotice).
 	idle      IdleNotices
 	idleAfter time.Duration
+	// personIdeas counts the open ideas of people (WithPersonIdeas).
+	personIdeas PersonIdeas
 	// placement reads the live capacity jobs of a project's org can be placed on, node by node.
 	// The handler's WithLiveCapacity sets it, and until then it answers ErrLiveCapacityUnconfigured.
 	placement func(ctx context.Context, projectID string) (*Placement, error)
@@ -212,6 +214,12 @@ func (s *PlatformExperimentsService) WithIdleNotice(notices IdleNotices, after t
 type Environments interface {
 	Read(ctx context.Context, projectID, repository, ref string) (*string, error)
 	Get(ctx context.Context, key string) (*domain.Environment, error)
+}
+
+// WithPersonIdeas wires the graph the situation counts the open ideas of people in.
+func (s *PlatformExperimentsService) WithPersonIdeas(ideas PersonIdeas) *PlatformExperimentsService {
+	s.personIdeas = ideas
+	return s
 }
 
 // WithEnvironments wires the environments.
