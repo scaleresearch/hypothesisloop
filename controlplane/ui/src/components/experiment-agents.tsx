@@ -32,8 +32,8 @@ import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { useReadOnly } from '@/lib/read-only'
 import type { Tone } from '@/lib/colors'
 
-// The specializations the agent harness ships: see agents/coordinator/setup.md. Another name is
-// accepted when the harness image carries a prompt for it.
+// The specializations the agent harness ships (agents/experimentator/src/hypothesisloop_agent/prompts/flavors/).
+// Another name is accepted when the harness image carries a prompt for it.
 const FLAVORS = ['generalist', 'hyperparameter-search', 'architecture-search', 'data-search']
 
 // What the operator's own `podman run --env-file` takes for one agent, and all an agent is

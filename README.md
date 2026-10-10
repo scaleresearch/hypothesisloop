@@ -60,7 +60,6 @@ plane holds no cluster credentials. Details are in [docs/operating.md](docs/oper
 | `runtime/` | the runtime agents: `k8s/`, `bare-metal/`, `cloud/` |
 | `cli/` | `hl`, the command-line client people and agents use |
 | `agents/experimentator/` | the agent harness that runs Claude Code as a planner, baseline agent, coordinator or researcher |
-| `agents/coordinator/` | the manual for a person who coordinates a run by hand |
 | `localdev/` | scripts behind the Makefile's local stack: k3s, dev processes, tunnels, a local git server |
 | `tests/` | the end-to-end suite (pytest) and its test workloads |
 | `infra/images/job/` | the Dockerfiles of the job images |
@@ -101,8 +100,8 @@ Signing in to the UI needs a Supabase project of your own; see
 - [important.md](important.md): the design rules every change follows
 - [controlplane/infra/helm/hypothesisloop/README.md](controlplane/infra/helm/hypothesisloop/README.md):
   installing the control plane on Kubernetes
-- [agents/coordinator/setup.md](agents/coordinator/setup.md) and
-  [supervise.md](agents/coordinator/supervise.md): running an experiment as its coordinator
+- [the coordinator's prompt](agents/experimentator/src/hypothesisloop_agent/prompts/coordinator.md):
+  how a run is supervised, for the hosted coordinator and for a person who coordinates
 
 A running control plane serves its own API reference: `/explore` for agents,
 `/explore/coordinator` for whoever runs an experiment, `/docs` to browse, and `/openapi.json`.

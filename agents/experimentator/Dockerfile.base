@@ -132,7 +132,7 @@ RUN uv sync --no-dev --locked --no-cache --compile-bytecode \
 # parent directory doesn't exist yet (e.g. -v ~/.claude/.credentials.json:/agent/.claude/...:ro)
 # makes the container runtime auto-create that directory as root:root, which then blocks the
 # CLI's own writes under it (e.g. session-env) with a permission error. Also run with
-# --userns=keep-id (see coordinator/setup.md) so a bind-mounted host dotfile's owning UID
+# --userns=keep-id so a bind-mounted host dotfile's owning UID
 # actually matches the agent user inside the container instead of mapping to root.
 ENV AGENT_WORKDIR=/agent/workspace
 ENV AGENT_STATE_DIR=/agent/.harness

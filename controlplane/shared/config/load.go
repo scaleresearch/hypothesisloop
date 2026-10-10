@@ -245,8 +245,8 @@ func (c *Config) build() error {
 	// A job pod resolves endpoint from inside its own network namespace, which is not the
 	// control plane's. A loopback address works from every container that shares the host's
 	// network and from nothing else, so it fails only once a real job tries to save — hours in,
-	// with nothing to show for the run. Same failure the shared code repo's URL has (see
-	// agents/coordinator/setup.md step 3), caught here instead of in a job's logs.
+	// with nothing to show for the run. Same failure the shared code repo's URL has, caught here
+	// instead of in a job's logs.
 	endpointHost, err := url.Parse(c.DataStore.Endpoint)
 	if err != nil {
 		return fmt.Errorf("data_store endpoint %q is not a URL: %w", c.DataStore.Endpoint, err)
