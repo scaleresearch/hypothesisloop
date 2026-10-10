@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -25,8 +26,14 @@ func start(t *testing.T, shell []string, dir string, parts supervise.Parts, comm
 // startFor is start with a lifetime.
 func startFor(t *testing.T, shell []string, dir string, lifetime time.Duration, parts supervise.Parts, command ...string) supervised {
 	t.Helper()
+	return startOn(t, shell, os.Getenv("PATH"), dir, lifetime, parts, command...)
+}
+
+// startOn is startFor with the commands found on path.
+func startOn(t *testing.T, shell []string, path, dir string, lifetime time.Duration, parts supervise.Parts, command ...string) supervised {
+	t.Helper()
 	cmd := supervisetest.Command(shell, append([]string{"-c", supervise.Script(parts, lifetime), "hl-supervisor"}, command...)...)
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "DIR=" + dir}
+	cmd.Env = []string{"PATH=" + path, "DIR=" + dir}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start supervisor: %v", err)
 	}
@@ -185,4 +192,66 @@ func TestScriptLeavesACommandThatEndsInsideItsLifetimeAlone(t *testing.T) {
 			t.Errorf("order = %q, want the command and the part after it run once, through the lifetime's end, and its own ending not told as the lifetime's", got)
 		}
 	})
+}
+
+// longRunning is a command that neither ends by itself nor heeds SIGTERM, and says when it runs.
+var longRunning = []string{"/bin/sh", "-c", `trap '' TERM; : > "$DIR/ready"; while :; do sleep 0.05 & wait $!; done`}
+
+func TestScriptKeepsItsEndInTheFileAndEndsAtTheOneWrittenThereLater(t *testing.T) {
+	supervisetest.EachShell(t, func(t *testing.T, shell []string) {
+		dir := t.TempDir()
+		file := filepath.Join(dir, "ends at")
+		began := time.Now()
+		run := startFor(t, shell, dir, 2*time.Second, supervise.Parts{After: `echo "expired=$expired" > "$DIR/after"`, EndsAtFile: file}, longRunning...)
+		await(t, filepath.Join(dir, "ready"))
+		written, err := strconv.ParseInt(strings.TrimSpace(read(t, file)), 10, 64)
+		if err != nil || written < began.Unix()+1 || written > time.Now().Unix()+2 {
+			t.Fatalf("the file holds %q, want the end of the lifetime in seconds since the epoch", read(t, file))
+		}
+		if err := os.WriteFile(file, []byte(strconv.FormatInt(began.Unix()+5, 10)+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		run.wait(t)
+		if lived := time.Since(began); lived < 4*time.Second || lived > 9*time.Second {
+			t.Errorf("the supervisor ended after %s, want the five seconds written in place of its lifetime of two", lived.Round(10*time.Millisecond))
+		}
+		if got := read(t, filepath.Join(dir, "after")); got != "expired=1\n" {
+			t.Errorf("the part after the command saw %q, want it told that the lifetime ended", got)
+		}
+	})
+}
+
+func TestScriptIgnoresAnEndThatIsNoNumberAndOneWithNoClockToReadIt(t *testing.T) {
+	sleep, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skip("this host has no sleep")
+	}
+	for name, path := range map[string]string{"garbage written": os.Getenv("PATH"), "no date": "only sleep"} {
+		t.Run(name, func(t *testing.T) {
+			supervisetest.EachShell(t, func(t *testing.T, shell []string) {
+				dir := t.TempDir()
+				file, path := filepath.Join(dir, "ends at"), path
+				if path == "only sleep" {
+					path = filepath.Join(dir, "bin")
+					if err := os.Mkdir(path, 0o755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Symlink(sleep, filepath.Join(path, "sleep")); err != nil {
+						t.Fatal(err)
+					}
+				}
+				began := time.Now()
+				run := startOn(t, shell, path, dir, 2*time.Second, supervise.Parts{After: `echo "expired=$expired" > "$DIR/after"`, EndsAtFile: file}, longRunning...)
+				await(t, filepath.Join(dir, "ready"))
+				_ = os.WriteFile(file, []byte("soon\n"), 0o644)
+				run.wait(t)
+				if lived := time.Since(began); lived < 2*time.Second || lived > 6*time.Second {
+					t.Errorf("the supervisor ended after %s, want its lifetime of two seconds", lived.Round(10*time.Millisecond))
+				}
+				if got := read(t, filepath.Join(dir, "after")); got != "expired=1\n" {
+					t.Errorf("the part after the command saw %q, want it told that the lifetime ended", got)
+				}
+			})
+		})
+	}
 }

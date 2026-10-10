@@ -2,6 +2,7 @@ package supervise
 
 import (
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -15,6 +16,9 @@ type Parts struct {
 	Started string
 	// After runs once the command has ended.
 	After string
+	// EndsAtFile, when set, is the absolute path the end of a lifetime is kept at, in seconds
+	// since the epoch, so that something outside the supervisor can move it (provider.Extender).
+	EndsAtFile string
 }
 
 // Script is the supervisor made of the core and an adapter's parts. It runs its positional
@@ -38,10 +42,21 @@ type Parts struct {
 // killed, or not started when it has not been yet, and After runs as it does after any ending.
 // $expired is set from then on, which is how After tells this ending from the command's own.
 // It needs sleep in the image. Zero is a supervisor with no end of its own.
+//
+// With parts.EndsAtFile the end is written there when the supervisor starts and read from it
+// again at least every movedEndPoll, so writing another moment there moves it, later or
+// earlier. A write that holds no number is ignored. It needs date in the image as well, and
+// without it the lifetime is counted as it is with no file.
 func Script(parts Parts, lifetime time.Duration) string {
 	script := rule
 	if lifetime > 0 {
-		script += expiry + "(sleep " + strconv.FormatInt(int64(lifetime/time.Second), 10) + " && kill -USR1 $$) >/dev/null 2>&1 &\n"
+		seconds := strconv.FormatInt(int64(lifetime/time.Second), 10)
+		script += expiry
+		if parts.EndsAtFile == "" {
+			script += "(sleep " + seconds + " && kill -USR1 $$) >/dev/null 2>&1 &\n"
+		} else {
+			script += strings.NewReplacer("{seconds}", seconds, "{file}", quoted(parts.EndsAtFile), "{poll}", strconv.Itoa(int(movedEndPoll/time.Second))).Replace(movableEnd)
+		}
 	}
 	return script + parts.Before + "\n" +
 		`if [ -z "$terminated" ]; then` + "\n" +
@@ -53,6 +68,32 @@ func Script(parts Parts, lifetime time.Duration) string {
 		"child=\n" +
 		"fi\n" +
 		parts.After + "\n"
+}
+
+// movedEndPoll is the longest the supervisor goes without reading its end again.
+const movedEndPoll = time.Minute
+
+// movableEnd counts the lifetime to the end kept in a file. An end that is no number, and a
+// clock that is none, are never taken as one: arithmetic on them would end the counting shell.
+const movableEnd = `(ends_at=$(date +%s 2>/dev/null)
+case "$ends_at" in ''|*[!0-9]*) sleep {seconds} && kill -USR1 $$; exit ;; esac
+ends_at=$((ends_at + {seconds}))
+echo "$ends_at" > {file}.new && mv -f {file}.new {file}
+while :; do
+  read -r moved < {file} && case "$moved" in ''|*[!0-9]*) ;; *) ends_at=$moved ;; esac
+  now=$(date +%s 2>/dev/null)
+  case "$now" in ''|*[!0-9]*) sleep {poll}; continue ;; esac
+  [ "$now" -lt "$ends_at" ] || break
+  left=$((ends_at - now))
+  [ "$left" -le {poll} ] || left={poll}
+  sleep "$left"
+done
+kill -USR1 $$) >/dev/null 2>&1 &
+`
+
+// quoted is path as one shell word.
+func quoted(path string) string {
+	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
 }
 
 // expiry is what the lifetime's end does. forwarded is set with it: nothing is left to pass a

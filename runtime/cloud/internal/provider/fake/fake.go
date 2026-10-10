@@ -24,6 +24,8 @@ type instance struct {
 	// hidden is an instance List leaves out while Get still finds it, as a vendor whose list
 	// trails its instances does.
 	hidden bool
+	// endsAt is the end Extend last set, zero while the lifetime it was rented with stands.
+	endsAt time.Time
 }
 
 type Provider struct {
@@ -34,7 +36,7 @@ type Provider struct {
 
 	// Fail, when set, is asked before every call and its error returned in place of the call.
 	// method is "Create", "List", "Logs", "Stop", "Destroy", "Pause", "Resume", "Rentable", "Warm",
-	// "StartWarm" or "Get"; name is the instance's, empty for List, Rentable and an id Get does not
+	// "StartWarm", "Extend" or "Get"; name is the instance's, empty for List, Rentable and an id Get does not
 	// find, and for StartWarm the
 	// name it is started under.
 	Fail func(method, name string) error
@@ -53,6 +55,7 @@ var (
 	_ provider.Pauser   = (*Provider)(nil)
 	_ provider.Market   = (*Provider)(nil)
 	_ provider.Warmer   = (*Provider)(nil)
+	_ provider.Extender = (*Provider)(nil)
 )
 
 func (p *Provider) Rentable(_ context.Context, spec provider.Spec, atMost int) (int, error) {
@@ -260,6 +263,25 @@ func (p *Provider) Resume(_ context.Context, id string) error {
 	return nil
 }
 
+// Extend refuses an instance that does not run or was rented with no lifetime, as a vendor
+// would.
+func (p *Provider) Extend(_ context.Context, id string, until time.Time) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	i, ok := p.instances[id]
+	if !ok {
+		return fmt.Errorf("fake: no instance %q to extend", id)
+	}
+	if err := p.fail("Extend", i.Name); err != nil {
+		return err
+	}
+	if i.State != provider.StateRunning || i.spec.Lifetime <= 0 {
+		return fmt.Errorf("fake: instance %q is %s with a lifetime of %s, and only a running instance rented with one is extended", id, i.State, i.spec.Lifetime)
+	}
+	i.endsAt = until
+	return nil
+}
+
 // Start moves every instance of the name to StateRunning.
 func (p *Provider) Start(name string) {
 	p.each(name, func(i *instance) {
@@ -318,6 +340,18 @@ func (p *Provider) Spec(name string) provider.Spec {
 		}
 	})
 	return spec
+}
+
+// EndsAt is the end Extend last set on the first instance of the name, zero when none was set.
+func (p *Provider) EndsAt(name string) time.Time {
+	var endsAt time.Time
+	found := false
+	p.each(name, func(i *instance) {
+		if !found {
+			endsAt, found = i.endsAt, true
+		}
+	})
+	return endsAt
 }
 
 // Stops is how many times instances of the name were sent SIGTERM.

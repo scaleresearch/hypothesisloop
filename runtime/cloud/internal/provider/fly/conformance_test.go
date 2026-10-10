@@ -116,3 +116,7 @@ func TestConformanceHold(t *testing.T) {
 	}
 	providertest.RunHold(t, conformanceProvider(t), conformanceOptions(), 30*time.Minute)
 }
+
+func TestConformanceExtend(t *testing.T) {
+	providertest.RunExtend(t, conformanceProvider(t), conformanceOptions())
+}

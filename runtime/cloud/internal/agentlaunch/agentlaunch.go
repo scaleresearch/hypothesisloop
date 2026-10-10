@@ -63,6 +63,7 @@ type Launcher struct {
 	poolPrefix   string
 	provider     provider.Provider
 	warmer       provider.Warmer
+	extender     provider.Extender
 	launchDigest string
 	maxAnswer    int
 	// outputs is what was last read of each instance's output, by instance id, to spare the
@@ -72,8 +73,24 @@ type Launcher struct {
 	outputs map[string]outputRead
 	// stopped is when each ending instance was last told to stop, by instance id.
 	stopped map[string]time.Time
-	now     func() time.Time
+	// ends is the end each instance was rented with or last moved to, by instance id. One that
+	// is not here, as every one is after the process starts, has its end set once.
+	ends map[string]instanceEnd
+	now  func() time.Time
 }
+
+// instanceEnd is what the launcher knows of one instance's end.
+type instanceEnd struct {
+	// at is the end the instance holds, zero when that is not known.
+	at time.Time
+	// failed is when moving it to wanted last failed.
+	failed time.Time
+	wanted time.Time
+}
+
+// extendRetry is how long a failed move of an instance's end waits before it is tried again: a
+// machine that cannot have its end moved says so on every try.
+const extendRetry = 10 * time.Minute
 
 // stopRetry is how long an ending instance that is still running waits before it is told to stop
 // again: one stop starts the agent's last turn, and a launcher once sent one to the same machine
@@ -102,10 +119,11 @@ func New(cfg Config) (*Launcher, error) {
 	l := &Launcher{
 		cfg: cfg, prefix: provider.AgentPrefix(cfg.Name), provider: provider.Bounded(cfg.Provider),
 		launchDigest: digest, maxAnswer: maxAnswerBytes, outputs: map[string]outputRead{},
-		stopped: map[string]time.Time{}, now: time.Now,
+		stopped: map[string]time.Time{}, ends: map[string]instanceEnd{}, now: time.Now,
 	}
 	l.poolPrefix = l.prefix + poolSegment
 	l.warmer, _ = l.provider.(provider.Warmer)
+	l.extender, _ = l.provider.(provider.Extender)
 	if cfg.WarmPool > 0 && l.warmer == nil {
 		return nil, fmt.Errorf("agentlaunch: a warm pool of %d needs a provider that can warm instances, and this one can %v", cfg.WarmPool, provider.Capabilities(cfg.Provider))
 	}
@@ -374,6 +392,7 @@ func (p *pass) create(ctx context.Context, want *desired, byName map[string][]pr
 			for _, i := range exited {
 				p.destroy(ctx, i, "its command exited beside a live instance of the name")
 			}
+			p.extend(ctx, live[0], want.instances[name].endsAt)
 			continue
 		}
 		if len(exited) > 0 {
@@ -395,6 +414,7 @@ func (p *pass) create(ctx context.Context, want *desired, byName map[string][]pr
 		spec := l.spec(want.instances[name], lifetime)
 		endsAt := want.instances[name].endsAt.UTC().Format(time.RFC3339)
 		if id, ok := p.startWarm(ctx, spec); ok {
+			l.ends[id] = instanceEnd{at: want.instances[name].endsAt}
 			l.cfg.Log("started %s (asked for and not rented) on warm instance %s, which ends itself at %s", name, id, endsAt)
 			continue
 		}
@@ -412,6 +432,7 @@ func (p *pass) create(ctx context.Context, want *desired, byName map[string][]pr
 			lastCreateError = err
 			continue
 		}
+		l.ends[id] = instanceEnd{at: want.instances[name].endsAt}
 		l.cfg.Log("created %s (asked for and not rented), instance %s, which ends itself at %s", name, id, endsAt)
 	}
 	// Every create failing is rarely one agent's fault, so it is said once more in a line of its
@@ -421,6 +442,34 @@ func (p *pass) create(ctx context.Context, want *desired, byName map[string][]pr
 	if creates > 0 && failedCreates == creates {
 		l.cfg.Log("NO INSTANCE COULD BE CREATED: all %d creates of this pass failed, the last with: %v. Look at the provider account and its limits, the image the control plane names, and instance in this launcher's config", creates, lastCreateError)
 	}
+}
+
+// extend moves the end of the running instance i to endsAt, the one the control plane names now,
+// when it holds another: an owner who changes the length of a running platform experiment moves
+// the end of every instance rented for it. A provider that cannot move an end leaves each
+// instance with the one it was rented with, at which it ends and is replaced. A move that fails
+// is logged and fails nothing else of the pass: the instance runs as it did.
+func (p *pass) extend(ctx context.Context, i provider.Instance, endsAt time.Time) {
+	l := p.l
+	if l.extender == nil || i.State != provider.StateRunning {
+		return
+	}
+	known := l.ends[i.ID]
+	if known.at.Equal(endsAt) || known.wanted.Equal(endsAt) && l.now().Sub(known.failed) < extendRetry {
+		return
+	}
+	at := endsAt.UTC().Format(time.RFC3339)
+	if err := l.extender.Extend(ctx, i.ID, endsAt); err != nil {
+		l.ends[i.ID] = instanceEnd{at: known.at, failed: l.now(), wanted: endsAt}
+		l.cfg.Log("move the end of %s, instance %s, to %s: %v", i.Name, i.ID, at, err)
+		return
+	}
+	l.ends[i.ID] = instanceEnd{at: endsAt}
+	if known.at.IsZero() {
+		l.cfg.Log("%s, instance %s, ends itself at %s", i.Name, i.ID, at)
+		return
+	}
+	l.cfg.Log("moved the end of %s, instance %s, from %s to %s", i.Name, i.ID, known.at.UTC().Format(time.RFC3339), at)
 }
 
 const (
@@ -583,6 +632,11 @@ func (l *Launcher) forgetUnlisted(listed []provider.Instance) {
 	for id := range l.stopped {
 		if !ids[id] {
 			delete(l.stopped, id)
+		}
+	}
+	for id := range l.ends {
+		if !ids[id] {
+			delete(l.ends, id)
 		}
 	}
 }

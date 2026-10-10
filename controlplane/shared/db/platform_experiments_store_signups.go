@@ -732,8 +732,9 @@ type LauncherAgent struct {
 // seconds of wind-down included: of a draft the end of its planning, and once its planner
 // answered the moment the planner is kept until, of an open one the end of the longest run it
 // can still have, which starts at its baseline_due_at, and of a running one the end of its run.
-// An open one's moves only when its owner changes starts_at or duration_hours, and a machine
-// rented before that ends at the moment it was rented with.
+// It moves when the owner changes starts_at or duration_hours, of an open one or a running one.
+// The launcher moves the end of a machine rented before that to the new one where its provider
+// can (provider.Extender), and one that cannot ends at the moment it was rented with.
 const launcherEndsBySQL = `(CASE
             WHEN pe.status = 'closed' THEN pe.closed_at
             WHEN pe.status = 'draft' AND pe.planner_ends_at IS NOT NULL THEN pe.planner_ends_at
