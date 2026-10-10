@@ -36,6 +36,15 @@ export HL_DEV_JWT_KID="local-dev"
 export HL_DEV_JWT_ISSUER="http://localhost/hypothesisloop-dev"
 export HL_DEV_JWT_AUDIENCE="hypothesisloop-dev"
 
+# The Google credentials the compose stack's control service mounts (docker-compose.yml): the
+# gcloud application default credentials when this machine has them, else /dev/null, since a
+# bind mount of a missing file fails.
+if [[ -z "${HL_GOOGLE_CREDENTIALS_FILE:-}" ]]; then
+  HL_GOOGLE_CREDENTIALS_FILE="${HOME}/.config/gcloud/application_default_credentials.json"
+  [[ -f "${HL_GOOGLE_CREDENTIALS_FILE}" ]] || HL_GOOGLE_CREDENTIALS_FILE=/dev/null
+fi
+export HL_GOOGLE_CREDENTIALS_FILE
+
 # The GitHub App local development reaches repositories through, when the repository's .env
 # names one by GITHUB_APP_ID (.env.example). The rendered settings then get a github section, and
 # its two secrets reach every process that loads them (the compose services, hl-admin) through
