@@ -760,3 +760,100 @@ func TestABaselineJobPrintsAsOnTheObjective(t *testing.T) {
 		t.Errorf("a researcher's job = %s, want its hypothesis_id and no objective", own)
 	}
 }
+
+// An agent's --text in backticks ran as a command in its shell. Every flag of free text also
+// reads it from a file, or stdin for -, where the shell leaves it alone.
+func TestEveryFreeTextFlagReadsItFromAFileOrStdin(t *testing.T) {
+	const text = "uses `lr=3e-4` and $(not run)"
+	for _, tc := range []struct {
+		token string
+		args  []string
+		flag  string
+		sent  func(map[string]any) any
+	}{
+		{"agent:pe-1/ag-1", []string{"hypothesis", "submit", "--builds-on", "root"}, "text", field("text")},
+		{"agent:pe-1/ag-1", []string{"hypothesis", "comment", "root"}, "text", field("text")},
+		{"agent:pe-1/ag-1", []string{"hypothesis", "status", "hyp-1", "confirmed"}, "despite", field("despite")},
+		{"agent:pe-1/ag-1", []string{"job", "summary", "job-1"}, "text", field("summary")},
+		{"agent:pe-1/ag-1", []string{"job", "submit", writeJobFile(t)}, "theory", func(body map[string]any) any {
+			metadata, _ := body["metadata"].(map[string]any)
+			return metadata["theory"]
+		}},
+		{"agent:pe-1/ag-1", []string{"platform-experiments", "agents", "finish"}, "reason", field("reason")},
+		{"agent:pe-1/ag-1", []string{"platform-experiments", "agents", "finish", "--reason", "spent"}, "blocker", field("blocker")},
+		{"coordinator:pe-1", []string{"platform-experiments", "agents", "message", "ag-1"}, "text", field("text")},
+		{"coordinator:pe-1", []string{"platform-experiments", "summary"}, "text", field("summary")},
+		{"coordinator:pe-1", []string{"platform-experiments", "close"}, "reason", field("reason")},
+		{"coordinator:pe-1", []string{"platform-experiments", "update"}, "description", field("description")},
+		{"coordinator:pe-1", []string{"platform-experiments", "update", "--baseline-job", "job-2"}, "reason", field("baseline_reason")},
+		{"agent:pe-1/ag-1", []string{"platform-experiments", "decline"}, "reason", field("reason")},
+	} {
+		got := recordingServer(t, func(int, recorded) any { return map[string]any{"id": "hyp-1", "status": "QUEUED", "messages": []any{}} })
+		t.Setenv("HL_TOKEN", derivedToken(tc.token))
+		name := strings.Join(tc.args, " ") + " --" + tc.flag
+		file := writeFile(t, text+"\n\n")
+		for how, args := range map[string][]string{
+			"inline": {"--" + tc.flag, text},
+			"file":   {"--" + tc.flag + "-file", file},
+			"stdin":  {"--" + tc.flag + "-file", "-"},
+		} {
+			if how == "stdin" {
+				stdin(t, text+"\n")
+			}
+			*got = nil
+			code, _, stderr := hl(t, append(append([]string{}, tc.args...), args...)...)
+			if code != 0 || len(*got) == 0 {
+				t.Errorf("%s from %s: exit %d with %d requests, stderr %s", name, how, code, len(*got), stderr)
+				continue
+			}
+			if sent := tc.sent((*got)[len(*got)-1].Body); sent != text {
+				t.Errorf("%s from %s: sent %q, want %q", name, how, sent, text)
+			}
+		}
+		*got = nil
+		code, _, stderr := hl(t, append(append([]string{}, tc.args...), "--"+tc.flag, "t", "--"+tc.flag+"-file", file)...)
+		if code != 2 || len(*got) != 0 || !strings.Contains(stderr, "two ways to say one thing") {
+			t.Errorf("%s with both forms: exit %d with %d requests, stderr %q, want 2, none sent and why", name, code, len(*got), stderr)
+		}
+	}
+}
+
+func TestTextFromStdinIsReadOnce(t *testing.T) {
+	got := recordingServer(t, func(int, recorded) any { return map[string]any{} })
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-1/ag-1"))
+	for _, args := range [][]string{
+		{"platform-experiments", "agents", "finish", "--reason-file", "-", "--blocker-file", "-"},
+		{"job", "submit", "--theory-file", "-"},
+		{"hypothesis", "submit", "--text-file", "-", "--file", "-"},
+	} {
+		stdin(t, "text\n")
+		code, _, stderr := hl(t, args...)
+		if code != 2 || !strings.Contains(stderr, "both read stdin") {
+			t.Errorf("%v: exit %d, stderr %q, want 2 and that only one reads stdin", args, code, stderr)
+		}
+	}
+	empty := writeFile(t, "\n")
+	if code, _, stderr := hl(t, "hypothesis", "comment", "root", "--text-file", empty); code != 2 || !strings.Contains(stderr, "holds no text") {
+		t.Errorf("an empty file: exit %d, stderr %q, want 2 and why", code, stderr)
+	}
+	if len(*got) != 0 {
+		t.Errorf("a refused command was sent: %+v", *got)
+	}
+}
+
+func field(key string) func(map[string]any) any {
+	return func(body map[string]any) any { return body[key] }
+}
+
+func stdin(t *testing.T, content string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = old })
+	_, _ = w.WriteString(content)
+	w.Close()
+}

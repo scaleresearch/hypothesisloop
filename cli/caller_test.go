@@ -202,10 +202,10 @@ func TestCloseAndSummaryAreWhatACoordinatorEndsARunWith(t *testing.T) {
 	}
 	want := []recorded{
 		{Method: "PUT", Path: "/platform-experiments/pe-1/summary", Body: map[string]any{"summary": "what was found"}},
-		{Method: "PUT", Path: "/platform-experiments/pe-2/summary", Body: map[string]any{"summary": "from a file\n"}},
+		{Method: "PUT", Path: "/platform-experiments/pe-2/summary", Body: map[string]any{"summary": "from a file"}},
 		{Method: "POST", Path: "/platform-experiments/pe-1/close", Body: map[string]any{}},
 		{Method: "POST", Path: "/platform-experiments/pe-1/close", Body: map[string]any{"reason": "the baseline measured the old split"}},
-		{Method: "PATCH", Path: "/platform-experiments/pe-1", Body: map[string]any{"description": "from a file\n"}},
+		{Method: "PATCH", Path: "/platform-experiments/pe-1", Body: map[string]any{"description": "from a file"}},
 		{Method: "PATCH", Path: "/platform-experiments/pe-2", Body: map[string]any{"name": "renamed", "max_agents": float64(4)}},
 		{Method: "PATCH", Path: "/platform-experiments/pe-1", Body: map[string]any{"baseline_job_id": "job-1"}},
 		{Method: "PATCH", Path: "/platform-experiments/pe-1", Body: map[string]any{"baseline_job_id": "job-2", "baseline_reason": "the control's other coder"}},

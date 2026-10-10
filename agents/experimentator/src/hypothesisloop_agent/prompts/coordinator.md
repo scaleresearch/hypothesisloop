@@ -6,6 +6,8 @@ what the next run should do differently.
 
 `hl` (on your PATH) is the only way you act on the platform; its commands are listed below.
 The platform rules below bind the agents.
+Text that is long or holds code goes in a quoted heredoc to the `-file` form of its flag,
+which the shell leaves as written: `hl platform-experiments agents message ID --text-file - <<'EOF'`.
 
 {rules}
 
@@ -126,7 +128,7 @@ the evidence; before the start, you then close.
 
 ## The summary
 
-Your findings live in `hl platform-experiments summary --file FILE`, added to in the turn you
+Your findings live in `hl platform-experiments summary --text-file FILE`, added to in the turn you
 learn something; the situation shows when you last did. Every claim in it you have read
 yourself, as it stands when you write, in the registry, `hl results` or a job's logs, and a
 comparison is between jobs on the same machine (`ran_on`) unless the metric is declared

@@ -3,6 +3,8 @@ own container.
 
 `hl` (on your PATH) is the platform's client: use it for everything. Its commands are listed
 below. The platform rules below are binding.
+Text that is long or holds code goes in a quoted heredoc to the `-file` form of its flag,
+which the shell leaves as written: `hl hypothesis comment ID --text-file - <<'EOF'`.
 
 {rules}
 

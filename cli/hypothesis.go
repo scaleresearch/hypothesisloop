@@ -51,6 +51,7 @@ type link struct {
 
 const submitUsage = `usage: hl hypothesis submit --text T --builds-on ID|root [--builds-on ID ...]
          [--contradicts ID ...] [--related ID ...] [--distinct-from ID ...]
+   or: hl hypothesis submit --text-file FILE|- --builds-on ID|root [flags above]
    or: hl hypothesis submit --file hypothesis.yaml [flags above override every item]
 
 Every hypothesis builds on the objective (root) or on existing hypotheses; several --builds-on
@@ -100,7 +101,7 @@ func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writ
 	fs := newFlags("hypothesis submit", submitUsage, stderr)
 	agent := fs.String("agent", "", "agent whose hypothesis it is (default the token's agent, else the caller's own)")
 	pe := fs.String("platform-experiment", "", "platform experiment id (default the token's)")
-	text := fs.String("text", "", "hypothesis text")
+	hypothesisText := newTextFlag(fs, "text", "hypothesis text")
 	file := fs.String("file", "", "YAML file of one hypothesis, or a hypotheses: list of them (see --help)")
 	var buildsOn, contradicts, related, distinctFrom idList
 	fs.Var(&buildsOn, "builds-on", "hypothesis id this refines, extends or combines, or root for the objective (repeatable or comma-separated, at least one)")
@@ -113,8 +114,17 @@ func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writ
 	if fs.NArg() > 0 {
 		return parseExit(misuse(fs, "unexpected argument %q", fs.Arg(0)))
 	}
+	text, err := hypothesisText.value(fs)
+	if err != nil {
+		return parseExit(err)
+	}
 
 	items := []map[string]any{{}}
+	if *file == "-" {
+		if err := fs.claimStdin("--file -"); err != nil {
+			return parseExit(err)
+		}
+	}
 	if *file != "" {
 		raw, err := readYAMLItems(*file, "hypotheses")
 		if err != nil {
@@ -138,7 +148,7 @@ func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writ
 		return fail(stderr, err)
 	}
 	bodies, keys, err := buildSubmitBodies(items, flagLinks, distinctFrom, map[string]string{
-		"agent_id": owner, "platform_experiment_id": experimentOf(c, *pe), "text": *text,
+		"agent_id": owner, "platform_experiment_id": experimentOf(c, *pe), "text": text,
 	})
 	if err != nil {
 		return parseExit(misuse(fs, "%s", err))
@@ -457,7 +467,7 @@ an agent's hypothesis names that agent with --agent, and is kept as who made the
 }
 
 func hypothesisComment(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("hypothesis comment", `usage: hl hypothesis comment ID|root --text T
+	fs := newFlags("hypothesis comment", `usage: hl hypothesis comment ID|root --text T | --text-file FILE|-
 
 A note on any hypothesis with no job behind it: a verified fact, a dead end, a revision. root,
 or the platform experiment's id, is the objective: a note for every approach, such as the
@@ -466,13 +476,17 @@ It is written by whoever HL_TOKEN is. An agent's token writes its own agent's no
 an API key writes their own, or an agent's with --agent.`, stderr)
 	agent := fs.String("agent", "", "agent whose note it is (default the token's agent, else the caller's own)")
 	pe := fs.String("platform-experiment", "", "the platform experiment whose objective root names (default the token's)")
-	text := fs.String("text", "", "the note")
+	note := newTextFlag(fs, "text", "the note")
 	id, err := parseOne(fs, args, "ID", "", "id")
 	if err != nil {
 		return parseExit(err)
 	}
-	if *text == "" {
-		return parseExit(misuse(fs, "--text is required"))
+	text, err := note.value(fs)
+	if err != nil {
+		return parseExit(err)
+	}
+	if text == "" {
+		return parseExit(misuse(fs, "--text or --text-file is required"))
 	}
 	id, objective, err := objectiveOr(fs, c, id, *pe)
 	if err != nil {
@@ -487,7 +501,7 @@ an API key writes their own, or an agent's with --agent.`, stderr)
 	if err != nil {
 		return fail(stderr, err)
 	}
-	body := map[string]string{"text": *text}
+	body := map[string]string{"text": text}
 	if owner != "" {
 		body["agent_id"] = owner
 	}
@@ -520,12 +534,17 @@ declared so; a failure that needs no repeat; a control measured outside this exp
 --despite takes a sentence of why the verdict holds anyway. Where every ranking metric is
 declared deterministic, a hypothesis with a completed job of its own needs only the control:
 name it with --against (the baseline's job is one), and keep --despite for a verdict no job of
-the hypothesis shows. What a verdict rests on is kept as a comment.`, stderr)
+the hypothesis shows. What a verdict rests on is kept as a comment. --despite-file FILE, or -
+for stdin, gives REASON in place of --despite REASON.`, stderr)
 	agent := fs.String("agent", "", "agent whose hypothesis ID is (default the token's agent, else the caller's own)")
 	status := fs.String("status", "", "")
 	against := fs.String("against", "", "the control job a confirmed or refuted verdict compares with")
-	despite := fs.String("despite", "", "why a confirmed or refuted verdict holds without a repeated run and a control")
+	despiteFlag := newTextFlag(fs, "despite", "why a confirmed or refuted verdict holds without a repeated run and a control")
 	operands, err := parseOperands(fs, args, "id")
+	if err != nil {
+		return parseExit(err)
+	}
+	despite, err := despiteFlag.value(fs)
 	if err != nil {
 		return parseExit(err)
 	}
@@ -551,8 +570,8 @@ the hypothesis shows. What a verdict rests on is kept as a comment.`, stderr)
 	if *against != "" {
 		body["against"] = *against
 	}
-	if *despite != "" {
-		body["despite"] = *despite
+	if despite != "" {
+		body["despite"] = despite
 	}
 	if err := c.Do("POST", "/hypotheses/"+url.PathEscape(id)+"/status", body, &out); err != nil {
 		return fail(stderr, err)

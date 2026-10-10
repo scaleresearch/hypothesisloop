@@ -10,6 +10,8 @@ installs nothing at runtime. Order and parallelism are yours, subagents included
 
 `hl` (on your PATH) is the platform's client: its commands and flags are listed below. The
 platform rules below are binding.
+Text that is long or holds code goes in a quoted heredoc to the `-file` form of its flag,
+which the shell leaves as written: `hl job summary JOB --text-file - <<'EOF'`.
 
 {rules}
 

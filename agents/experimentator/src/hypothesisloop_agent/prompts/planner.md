@@ -7,6 +7,8 @@ find out, so state a doubt in `risks` and plan what the person asked.
 
 `hl` (on your PATH) is the platform's client: your commands are listed below. The platform
 rules below are binding.
+Text that is long or holds code goes in a quoted heredoc to the `-file` form of its flag,
+which the shell leaves as written: `hl platform-experiments decline --reason-file - <<'EOF'`.
 
 {rules}
 

@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"go.yaml.in/yaml/v4"
 
@@ -294,13 +295,15 @@ type flagSet struct {
 	*flag.FlagSet
 	help   string
 	stderr io.Writer
+	// stdinReader names the flag that read stdin, which only one can.
+	stdinReader string
 }
 
 func newFlags(name, help string, stderr io.Writer) *flagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() {}
-	return &flagSet{fs, help, stderr}
+	return &flagSet{FlagSet: fs, help: help, stderr: stderr}
 }
 
 func (fs *flagSet) Parse(args []string) error {
@@ -354,6 +357,60 @@ func (fs *flagSet) printFlags() {
 		}
 		fmt.Fprintf(fs.stderr, "  --%s%s\n      %s\n", f.Name, name, help)
 	})
+}
+
+// textFlag is free text given inline as --NAME or read by --NAME-file from a file, or stdin for -,
+// where a shell neither expands nor splits it.
+type textFlag struct {
+	name   string
+	inline *string
+	file   *string
+}
+
+func newTextFlag(fs *flagSet, name, usage string) *textFlag {
+	return &textFlag{
+		name:   name,
+		inline: fs.String(name, "", usage),
+		file:   fs.String(name+"-file", "", "read --"+name+" from this `file`, - for stdin (a quoted heredoc: <<'EOF')"),
+	}
+}
+
+// value is the text given by either flag, its trailing whitespace dropped, and empty when neither
+// was. Giving both, or a file that holds no text, is a misuse.
+func (t *textFlag) value(fs *flagSet) (string, error) {
+	if *t.file == "" {
+		return *t.inline, nil
+	}
+	if *t.inline != "" {
+		return "", misuse(fs, "--%s and --%s-file are two ways to say one thing: give one", t.name, t.name)
+	}
+	var raw []byte
+	var err error
+	if *t.file == "-" {
+		if err := fs.claimStdin("--" + t.name + "-file -"); err != nil {
+			return "", err
+		}
+		raw, err = io.ReadAll(os.Stdin)
+	} else {
+		raw, err = os.ReadFile(*t.file)
+	}
+	if err != nil {
+		return "", misuse(fs, "--%s-file: %s", t.name, err)
+	}
+	text := strings.TrimRightFunc(string(raw), unicode.IsSpace)
+	if strings.TrimSpace(text) == "" {
+		return "", misuse(fs, "--%s-file %s holds no text", t.name, *t.file)
+	}
+	return text, nil
+}
+
+// claimStdin records that what reads stdin, a misuse when another argument already does.
+func (fs *flagSet) claimStdin(what string) error {
+	if fs.stdinReader != "" {
+		return misuse(fs, "%s and %s both read stdin: give one of them a file", fs.stdinReader, what)
+	}
+	fs.stdinReader = what
+	return nil
 }
 
 var errUsage = errors.New("usage")
@@ -733,7 +790,7 @@ See controlplane/settings/examples/experiment.yaml for the full DSL reference.`,
 // experiment.yaml) — while the platform experiment is still open, every field including metrics
 // is editable; once running, only name, description, duration_hours and the baseline are.
 func cmdPlatformExperimentsUpdate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments update", `usage: hl platform-experiments update [--platform-experiment PE] [--description-file FILE] [--description TEXT] [--baseline-job JOB [--reason TEXT]] [--name NAME] [FIELDS.yaml]
+	fs := newFlags("platform-experiments update", `usage: hl platform-experiments update [--platform-experiment PE] [--description TEXT | --description-file FILE|-] [--baseline-job JOB [--reason TEXT | --reason-file FILE|-]] [--name NAME] [FIELDS.yaml]
 
 Changes the fields you name and no other. A coordinator's token changes the description and
 declares or raises the baseline, nothing else.
@@ -768,10 +825,9 @@ description and duration_hours once it runs. The result is checked like a create
 non-empty; max_agents below the researchers that joined is 409 max_agents_below_researchers.`, stderr)
 	pe := experimentFlag(fs)
 	name := fs.String("name", "", "the new name")
-	description := fs.String("description", "", "the new description")
-	descriptionFile := fs.String("description-file", "", "read the new description from this file, - for stdin")
+	descriptionFlag := newTextFlag(fs, "description", "the new description")
 	baselineJob := fs.String("baseline-job", "", "the completed `job` that measured the baseline")
-	reason := fs.String("reason", "", "with --baseline-job on a running experiment: why the baseline is raised to it")
+	reasonFlag := newTextFlag(fs, "reason", "with --baseline-job on a running experiment: why the baseline is raised to it")
 	operands, err := parseArgs(fs, args)
 	if err != nil {
 		return parseExit(err)
@@ -783,11 +839,21 @@ non-empty; max_agents below the researchers that joined is 409 max_agents_below_
 	if err != nil {
 		return parseExit(err)
 	}
-	if *description != "" && *descriptionFile != "" {
-		return parseExit(misuse(fs, "--description and --description-file are two ways to say one thing"))
+	description, err := descriptionFlag.value(fs)
+	if err != nil {
+		return parseExit(err)
+	}
+	reason, err := reasonFlag.value(fs)
+	if err != nil {
+		return parseExit(err)
 	}
 	body := map[string]any{}
 	if len(operands) == 1 {
+		if operands[0] == "-" {
+			if err := fs.claimStdin("FIELDS.yaml -"); err != nil {
+				return parseExit(err)
+			}
+		}
 		if body, err = readYAMLBody(operands[0]); err != nil {
 			fmt.Fprintf(stderr, "hl: %s\n", err)
 			return 2
@@ -796,27 +862,14 @@ non-empty; max_agents below the researchers that joined is 409 max_agents_below_
 	if *name != "" {
 		body["name"] = *name
 	}
-	if *description != "" {
-		body["description"] = *description
+	if description != "" {
+		body["description"] = description
 	}
 	if *baselineJob != "" {
 		body["baseline_job_id"] = *baselineJob
 	}
-	if *reason != "" {
-		body["baseline_reason"] = *reason
-	}
-	if *descriptionFile != "" {
-		var raw []byte
-		if *descriptionFile == "-" {
-			raw, err = io.ReadAll(os.Stdin)
-		} else {
-			raw, err = os.ReadFile(*descriptionFile)
-		}
-		if err != nil {
-			fmt.Fprintf(stderr, "hl: %s\n", err)
-			return 2
-		}
-		body["description"] = string(raw)
+	if reason != "" {
+		body["baseline_reason"] = reason
 	}
 	if len(body) == 0 {
 		return parseExit(misuse(fs, "nothing to change: name a field"))
@@ -827,7 +880,7 @@ non-empty; max_agents below the researchers that joined is 409 max_agents_below_
 	}
 	printJSON(stdout, out)
 	switch {
-	case *reason != "":
+	case reason != "":
 		fmt.Fprintf(stderr, "hl: platform-experiments update: the baseline is raised to job %v, every agent is told (platform_experiment.baseline), and results set the standings against it\n", out["baseline_job_id"])
 	case *baselineJob != "":
 		fmt.Fprintln(stderr, "hl: platform-experiments update: "+baselineDeclared(out))
@@ -976,18 +1029,22 @@ func textsAsLists(body map[string]any) {
 }
 
 func cmdPlatformExperimentsDecline(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments decline", `usage: hl platform-experiments decline [--platform-experiment PE] --reason TEXT
+	fs := newFlags("platform-experiments decline", `usage: hl platform-experiments decline [--platform-experiment PE] --reason TEXT | --reason-file FILE|-
 
 For the planner of a draft, when the goal cannot be made into an experiment: nothing measurable,
 or nothing this platform can run. The reason is shown to the person who wrote the goal in place
 of a proposal, so say in plain words why, and what would make it plannable. A proposal you made
 before no longer stands. The person may answer with a revision, which starts you again.`, stderr)
 	pe := experimentFlag(fs)
-	reason := fs.String("reason", "", "why no experiment is proposed")
+	reasonFlag := newTextFlag(fs, "reason", "why no experiment is proposed")
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
 	}
-	if strings.TrimSpace(*reason) == "" {
+	reason, err := reasonFlag.value(fs)
+	if err != nil {
+		return parseExit(err)
+	}
+	if strings.TrimSpace(reason) == "" {
 		return parseExit(misuse(fs, "want --reason"))
 	}
 	id, err := namedExperiment(fs, c, *pe)
@@ -995,7 +1052,7 @@ before no longer stands. The person may answer with a revision, which starts you
 		return parseExit(err)
 	}
 	var out any
-	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(id)+"/decline", map[string]string{"reason": *reason}, &out); err != nil {
+	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(id)+"/decline", map[string]string{"reason": reason}, &out); err != nil {
 		return fail(stderr, err)
 	}
 	printJSON(stdout, out)
@@ -1097,15 +1154,19 @@ line has role coordinator and no agent_id.`, stderr)
 }
 
 func cmdPlatformExperimentsClose(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments close", `usage: hl platform-experiments close [--reason TEXT] [--platform-experiment PE]
+	fs := newFlags("platform-experiments close", `usage: hl platform-experiments close [--reason TEXT | --reason-file FILE|-] [--platform-experiment PE]
 
 Ends the platform experiment for good: every job still running
 is evicted, nothing more is accepted, and the standings are taken from the metrics reported. Its
 summary can still be written afterwards. --reason says why: it is kept as close_message, written
 in the platform's record of the close, and told to the coordinator and the agents with the close.`, stderr)
-	reason := fs.String("reason", "", "why it is closed, in a sentence or two")
+	reasonFlag := newTextFlag(fs, "reason", "why it is closed, in a sentence or two")
 	pe := experimentFlag(fs)
 	if err := parseNone(fs, args); err != nil {
+		return parseExit(err)
+	}
+	reason, err := reasonFlag.value(fs)
+	if err != nil {
 		return parseExit(err)
 	}
 	id, err := namedExperiment(fs, c, *pe)
@@ -1113,8 +1174,8 @@ in the platform's record of the close, and told to the coordinator and the agent
 		return parseExit(err)
 	}
 	body := map[string]any{}
-	if *reason != "" {
-		body["reason"] = *reason
+	if reason != "" {
+		body["reason"] = reason
 	}
 	var out any
 	if err := c.Do("POST", "/platform-experiments/"+url.PathEscape(id)+"/close", body, &out); err != nil {
@@ -1125,14 +1186,14 @@ in the platform's record of the close, and told to the coordinator and the agent
 }
 
 func cmdPlatformExperimentsSummary(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments summary", `usage: hl platform-experiments summary [--platform-experiment PE] --text T | --file FILE|-
+	fs := newFlags("platform-experiments summary", `usage: hl platform-experiments summary [--platform-experiment PE] --text T | --text-file FILE|-
 
 Writes the summary of the platform experiment: what the run
 found and what the next one should do differently. Each write replaces the one before, so write
 the whole text; hl platform-experiments get shows it as summary. It can be written while the
 experiment runs and after it closed.`, stderr)
-	text := fs.String("text", "", "the summary")
-	file := fs.String("file", "", "read the summary from this file, - for stdin")
+	summary := newTextFlag(fs, "text", "the summary")
+	fs.StringVar(summary.file, "file", "", "")
 	pe := experimentFlag(fs)
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
@@ -1141,27 +1202,15 @@ experiment runs and after it closed.`, stderr)
 	if err != nil {
 		return parseExit(err)
 	}
-	if (*text == "") == (*file == "") {
-		return parseExit(misuse(fs, "one of --text and --file is required"))
+	text, err := summary.value(fs)
+	if err != nil {
+		return parseExit(err)
 	}
-	if *file != "" {
-		var raw []byte
-		if *file == "-" {
-			raw, err = io.ReadAll(os.Stdin)
-		} else {
-			raw, err = os.ReadFile(*file)
-		}
-		if err != nil {
-			fmt.Fprintf(stderr, "hl: %s\n", err)
-			return 2
-		}
-		*text = string(raw)
-	}
-	if strings.TrimSpace(*text) == "" {
-		return parseExit(misuse(fs, "the summary is empty"))
+	if strings.TrimSpace(text) == "" {
+		return parseExit(misuse(fs, "want --text or --text-file"))
 	}
 	var out any
-	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(id)+"/summary", map[string]string{"summary": *text}, &out); err != nil {
+	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(id)+"/summary", map[string]string{"summary": text}, &out); err != nil {
 		return fail(stderr, err)
 	}
 	printJSON(stdout, out)

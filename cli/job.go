@@ -37,7 +37,7 @@ var jobCommands = []subcommand{
 }
 
 func jobSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job submit", `usage: hl job submit [FILE|-] [--hypothesis ID] [--theory T] [--env K=V ...] [--estimated-duration-hours H] [--capacity-tier guaranteed|burst] [--secret-env NAME ...] [--repeat N]
+	fs := newFlags("job submit", `usage: hl job submit [FILE|-] [--hypothesis ID] [--theory T | --theory-file FILE|-] [--env K=V ...] [--estimated-duration-hours H] [--capacity-tier guaranteed|burst] [--secret-env NAME ...] [--repeat N]
 
 FILE is a YAML job spec (metadata, job). The flags override it for this submission, so one
 committed spec serves every job that differs in hypothesis, env, estimate or tier. Prints the
@@ -99,10 +99,10 @@ whole jobs to read first: each sample's seed/ reports its metrics and its
 	agent := fs.String("agent", "", "whose job it is, for a person or an API key; an agent's token says it")
 	overrides := map[string]*string{
 		"hypothesis_id":          fs.String("hypothesis", "", "sets metadata.hypothesis_id"),
-		"theory":                 fs.String("theory", "", "sets metadata.theory"),
 		"platform_experiment_id": fs.String("platform-experiment", "", "sets metadata.platform_experiment_id (default the file's, then the token's)"),
 		"capacity_tier":          fs.String("capacity-tier", "", "sets metadata.capacity_tier: guaranteed or burst"),
 	}
+	theoryFlag := newTextFlag(fs, "theory", "sets metadata.theory")
 	estimate := fs.String("estimated-duration-hours", "", "sets metadata.estimated_duration_hours, the `hours` this job is expected to run")
 	repeat := fs.Int("repeat", 1, "which job of this same request it is: 2 for a second run of what was already submitted, `N` for the Nth")
 	var env stringList
@@ -115,6 +115,15 @@ whole jobs to read first: each sample's seed/ reports its metrics and its
 	}
 	if *agent = agentOf(c, *agent); *agent == "" {
 		return parseExit(misuse(fs, "--agent is required: HL_TOKEN is no agent's token, so say whose job this is"))
+	}
+	theory, err := theoryFlag.value(fs)
+	if err != nil {
+		return parseExit(err)
+	}
+	if path == "-" {
+		if err := fs.claimStdin("FILE - (the job spec, read from stdin when no FILE is named)"); err != nil {
+			return parseExit(err)
+		}
 	}
 	body, err := readYAMLBody(path)
 	if err != nil {
@@ -129,6 +138,9 @@ whole jobs to read first: each sample's seed/ reports its metrics and its
 		if *value != "" {
 			metadata[key] = *value
 		}
+	}
+	if theory != "" {
+		metadata["theory"] = theory
 	}
 	if *estimate != "" {
 		hours, err := strconv.ParseFloat(*estimate, 64)
@@ -557,16 +569,19 @@ the output is JSON lines, one object per line and no enclosing array: parse it l
 }
 
 func jobSummary(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job summary", `usage: hl job summary ID [--text T]
+	fs := newFlags("job summary", `usage: hl job summary ID [--text T | --text-file FILE|-]
 
-Prints the job's summary. With --text, files the write-up of a finished job when its result
-says something: what changed, what the metric did, what it means. It is the job's finding on its hypothesis, shown there and announced
+Prints the job's summary. With --text, or --text-file reading it from FILE or stdin for -,
+files the write-up of a finished job when its result says something: what changed, what the metric did, what it means. It is the job's finding on its hypothesis, shown there and announced
 as finding.new, so it needs no comment that repeats it. It is filed once and cannot be replaced
 (409 summary_exists): others read it the moment it is announced, so a correction is a comment
 on the hypothesis.`, stderr)
-	var text string
-	fs.StringVar(&text, "text", "", "the summary to file")
+	summary := newTextFlag(fs, "text", "the summary to file")
 	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
+	if err != nil {
+		return parseExit(err)
+	}
+	text, err := summary.value(fs)
 	if err != nil {
 		return parseExit(err)
 	}

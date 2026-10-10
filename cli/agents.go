@@ -163,26 +163,31 @@ no_coordinator where none is hosted). At most 1500 bytes. A recipient is sent at
 an hour by the coordinator and 6 by the owner, counted apart: past that it is refused (429
 message_rate_limited) with when the next can go, and with --all none is sent. Refused for an
 agent that finished or was cut (409 agent_ended). Prints one line per message sent. hl
-platform-experiments agents messages reads what was sent before.`, stderr)
+platform-experiments agents messages reads what was sent before. --text-file FILE, or - for
+stdin, gives T in place of --text T.`, stderr)
 	named := experimentFlag(fs)
-	text := fs.String("text", "", "what the agent is told")
+	message := newTextFlag(fs, "text", "what the agent is told")
 	all := fs.Bool("all", false, "every researcher at work")
 	coordinator := fs.Bool("coordinator", false, "the hosted coordinator")
 	operands, err := parseOperands(fs, args, "agent")
 	if err != nil {
 		return parseExit(err)
 	}
+	text, err := message.value(fs)
+	if err != nil {
+		return parseExit(err)
+	}
 	switch {
 	case *all && *coordinator, (*all || *coordinator) && len(operands) > 0, !*all && !*coordinator && len(operands) != 1:
 		return parseExit(misuse(fs, "want one AGENT, --all or --coordinator"))
-	case strings.TrimSpace(*text) == "":
-		return parseExit(misuse(fs, "want --text"))
+	case strings.TrimSpace(text) == "":
+		return parseExit(misuse(fs, "want --text or --text-file"))
 	}
 	pe, err := namedExperiment(fs, c, *named)
 	if err != nil {
 		return parseExit(err)
 	}
-	body := map[string]any{"text": *text}
+	body := map[string]any{"text": text}
 	switch {
 	case *all:
 		body["all"] = true
@@ -220,6 +225,9 @@ agent's, --agent coordinator to the coordinator's. An agent's token reads its ow
 func agentsFinish(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("platform-experiments agents finish", `usage: hl platform-experiments agents finish --reason TEXT [--blocker TEXT] [--baseline JOB]
 
+--reason-file and --blocker-file read the text from a FILE, or stdin for -, in place of the
+inline flag.
+
 Says that you have nothing left to do: your quota is spent, or nothing you could still try is
 worth a job. Your machine stops after this turn and the coordinator is told the reason, with the
 time and quota you leave. It cannot be taken back. A researcher with more than a tenth of the
@@ -235,14 +243,22 @@ platform declares as the baseline in this request. It must be your own job and p
 of a declared baseline, or the finish is refused with the reason (422) and nothing is recorded:
 fix what it says and finish again. Without --baseline the platform declares a job only when the
 baseline agents left exactly one that reports the ranking metric.`, stderr)
-	reason := fs.String("reason", "", "why nothing is left to do")
-	blocker := fs.String("blocker", "", "what stops you that the time and quota left cannot fix")
+	reasonFlag := newTextFlag(fs, "reason", "why nothing is left to do")
+	blockerFlag := newTextFlag(fs, "blocker", "what stops you that the time and quota left cannot fix")
 	baseline := fs.String("baseline", "", "an agent of role baseline: the job of the control to declare as the baseline")
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
 	}
-	if strings.TrimSpace(*reason) == "" {
-		return parseExit(misuse(fs, "want --reason"))
+	reason, err := reasonFlag.value(fs)
+	if err != nil {
+		return parseExit(err)
+	}
+	blocker, err := blockerFlag.value(fs)
+	if err != nil {
+		return parseExit(err)
+	}
+	if strings.TrimSpace(reason) == "" {
+		return parseExit(misuse(fs, "want --reason or --reason-file"))
 	}
 	_, pe, agent := scopeOf(c.Token)
 	var out struct {
@@ -252,9 +268,9 @@ baseline agents left exactly one that reports the ranking metric.`, stderr)
 			Text string `json:"text"`
 		} `json:"open_hypotheses"`
 	}
-	body := map[string]string{"reason": *reason}
-	if *blocker != "" {
-		body["blocker"] = *blocker
+	body := map[string]string{"reason": reason}
+	if blocker != "" {
+		body["blocker"] = blocker
 	}
 	if *baseline != "" {
 		body["baseline_job_id"] = *baseline
