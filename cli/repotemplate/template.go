@@ -3,8 +3,7 @@ package repotemplate
 import _ "embed"
 
 // The files every experiment's repository holds, at the paths the platform, hl and the agents'
-// briefings name. agents/coordinator/experiments/template/experiment-checklist.md says what
-// makes them ready.
+// briefings name. hl repo check says what makes them ready.
 const (
 	Readme         = "README.md"
 	ExperimentFile = ".hypothesisloop/experiment.yaml"

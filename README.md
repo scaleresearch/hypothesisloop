@@ -164,7 +164,7 @@ Connecting takes control of the GitHub account: its own user, or an admin of the
 which GitHub shows only to an App granted the organisation permission Members (read).
 GitHub returns to
 `<ui origin>/settings/repository`, so the App's callback URL and its setup URL must be that
-address (`infra/github/app-manifest.json`). The page builds the address from the origin it is
+address. The page builds the address from the origin it is
 served on and takes the App's addresses from `GET /github/app`.
 
 Code lives in git only, and every deployment's settings name its git host (`git.provider`):
@@ -281,7 +281,7 @@ of the experiment carries is refused (409 `agent_name_taken`). The roster shows 
 whose credential added each agent. A coordinator's token adds agents and removes only the ones
 it added (403 `agent_not_added_by_coordinator` for any other).
 
-`agents/coordinator/experiments/` holds our own research experiments run this way, each its own directory laid out as an experiment's repository: an `experiment.md` (the objective, the baseline, the open questions), `.hypothesisloop/experiment.yaml`, the base job spec `.hypothesisloop/job.yaml` and, where it seeds the hypothesis graph, a `hypothesis.yaml`, matching the YAML files below.
+`agents/coordinator/experiments/` is where a coordinator keeps the experiments it runs this way (git-ignored, kept locally), each its own directory laid out as an experiment's repository: an `experiment.md` (the objective, the baseline, the open questions), `.hypothesisloop/experiment.yaml`, the base job spec `.hypothesisloop/job.yaml` and, where it seeds the hypothesis graph, a `hypothesis.yaml`, matching the YAML files below.
 
 Each researcher is added with a **flavor**, the specialization it reads its instructions from: `generalist` (no fixed axis), `hyperparameter-search`, `architecture-search` or `data-search` (dataset composition, size and curriculum), and with optional starting hyperparameters. The mix is broad while no region is promising, generalists and one of each targeted flavor, and narrows toward the axis of a confirmed finding in the next run, since a roster is fixed once its run starts. `agents/coordinator/setup.md` step 3 says how the mix is decided and recorded.
 
@@ -604,7 +604,7 @@ HypothesisLoop is split into two kinds of deployable things:
   - **Rented compute** (`runtime/cloud/`) - a cloud-agent process that rents
     one machine per job from a vendor (vast.ai, Fly.io or E2B) and ends it
     with the job. The agent-launcher beside it rents the machines of the
-    agents the platform runs. `infra/README.md` has their settings.
+    agents the platform runs. `runtime/cloud/settings/` has their settings.
 
   Install one runtime agent per target environment; the control plane
   coordinates all of them through Postgres, never a live connection into any
@@ -1005,7 +1005,7 @@ between.
 | `make dev`                        | The control plane and the UI as host processes against the compose datastores; starts in seconds, nothing rents |
 | `make dev-api`                    | Rebuild and restart the API and metrics-service after a Go change   |
 | `make dev-hosted`                 | `make dev` plus agent-launcher (Fly.io) and cloud-agent (vast.ai), with public tunnels (`make tunnels`); rents compute |
-| `make -C infra run-images`        | For `make dev-hosted`: build and push the agent image and the job images that changed since `IMAGE_TAG`, tag the rest without a build (`infra/README.md`) |
+| `make -C infra run-images`        | For `make dev-hosted`: build and push the agent image and the job images that changed since `IMAGE_TAG`, tag the rest without a build. Needs the deployment tooling under `infra/`, which is kept locally and not part of the repository |
 | `make e2e`                        | The e2e suite against the `make dev` stack and the local k3s cluster |
 | `make controlplane-up`            | Build images + start the control plane                             |
 | `make controlplane-down`          | Stop the control plane                                              |

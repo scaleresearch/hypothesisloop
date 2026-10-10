@@ -90,16 +90,10 @@ vendor/
 # Claude Code session state (worktrees, local agent scratch)
 .claude/
 
-# Experiment working clones: each is its own upstream git repo (source, datasets,
-# vendored toolchains) cloned in place, not content of this repo. Only template,
-# dummy-tt-matmul, dummy-data-search-demo, sparse-sdpa, and shampoo-family-optimizers are
-# tracked as reference/example/active experiments.
-agents/coordinator/experiments/*/
-!agents/coordinator/experiments/template/
-!agents/coordinator/experiments/dummy-tt-matmul/
-!agents/coordinator/experiments/dummy-data-search-demo/
-!agents/coordinator/experiments/sparse-sdpa/
-!agents/coordinator/experiments/shampoo-family-optimizers/
+# A coordinator's experiments are kept locally. hl-clone stays tracked: the job image and the
+# experimentator image install it from here.
+agents/coordinator/experiments/*
+!agents/coordinator/experiments/hl-clone
 controlplane/settings/.hypothesisloop.rendered.yaml
 controlplane/settings/.hypothesisloop.dev.yaml
 localdev/.bin/
@@ -109,11 +103,10 @@ localdev/.image-tag
 controlplane/infra/helm/hypothesisloop/files/hypothesisloop.yaml
 local.secrets.env
 
-# Pulumi local state and stack config (stack config holds secrets)
-infra/.state/
-infra/pulumi/Pulumi.*.yaml
-# What a plain `go build` in infra/pulumi leaves: the program, named after its directory
-infra/pulumi/pulumi
+# Deployment tooling (Pulumi program and stacks, image publishing) is kept locally. The job
+# image's Dockerfiles stay tracked: make images and make job-images build them.
+/infra/*
+!/infra/images/
 
 # Owner's local working notes and scratch
 /fix-later.md
