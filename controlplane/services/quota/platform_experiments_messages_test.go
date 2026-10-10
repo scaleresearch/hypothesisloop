@@ -34,6 +34,14 @@ func (s *messageStore) SendAgentMessages(_ context.Context, _ string, to []strin
 	return []domain.AgentMessage{{AgentID: "veteran", From: domain.MessageFrom(sender), Text: text, Actor: sender, At: time.Now()}}, nil
 }
 
+func (s *messageStore) SendCoordinatorMessage(_ context.Context, _, text string, sender domain.Actor) (*domain.AgentMessage, error) {
+	if s.refuse != nil {
+		return nil, s.refuse
+	}
+	s.to, s.text, s.sender = []string{domain.CoordinatorRecipient}, text, sender
+	return &domain.AgentMessage{AgentID: domain.CoordinatorRecipient, From: domain.MessageFrom(sender), Text: text, Actor: sender, At: time.Now()}, nil
+}
+
 func (s *messageStore) ListAgentMessages(_ context.Context, _, agentID string) ([]domain.AgentMessage, error) {
 	s.readFor = &agentID
 	return nil, nil
@@ -70,17 +78,29 @@ func TestTheCoordinatorAndTheOwnerMessageAgentsAndAnAgentReadsItsOwn(t *testing.
 
 	for body, reason := range map[string]string{
 		`{"agent_id":"veteran","all":true,"text":"x"}`: "invalid_recipient",
-		`{"text":"x"}`:                        "invalid_recipient",
-		`{"agent_id":"veteran","text":"   "}`: "empty_message",
+		`{"all":true,"coordinator":true,"text":"x"}`:   "invalid_recipient",
+		`{"coordinator":true,"text":"x"}`:              "invalid_recipient",
+		`{"text":"x"}`:                                 "invalid_recipient",
+		`{"agent_id":"veteran","text":"   "}`:          "empty_message",
 		`{"agent_id":"veteran","text":"` + strings.Repeat("x", domain.MaxAgentMessageBytes+1) + `"}`: "message_too_long",
 	} {
 		if code, out := call(t, messagesRouter(t, &messageStore{}, coordinator), "POST", "/platform-experiments/pe-1/messages", body); code != http.StatusUnprocessableEntity || out["reason"] != reason {
 			t.Errorf("%.60s: got = %d %v, want 422 %s", body, code, out, reason)
 		}
 	}
-	limited := &messageStore{refuse: &db.MessagesRateLimited{AgentID: "veteran", Next: time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)}}
-	if code, out := call(t, messagesRouter(t, limited, coordinator), "POST", "/platform-experiments/pe-1/messages", `{"agent_id":"veteran","text":"again"}`); code != http.StatusTooManyRequests || out["reason"] != "message_rate_limited" || !strings.Contains(out["message"].(string), "2026-10-09T12:00:00Z") {
+	limited := &messageStore{refuse: &db.MessagesRateLimited{AgentID: "veteran", From: "coordinator", Next: time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)}}
+	if code, out := call(t, messagesRouter(t, limited, coordinator), "POST", "/platform-experiments/pe-1/messages", `{"agent_id":"veteran","text":"again"}`); code != http.StatusTooManyRequests || out["reason"] != "message_rate_limited" || !strings.Contains(out["message"].(string), "2026-10-09T12:00:00Z") || !strings.Contains(out["message"].(string), "by the coordinator") {
 		t.Errorf("past the limit: got = %d %v, want 429 message_rate_limited with when", code, out)
+	}
+
+	// A person steers the coordinator the same way, and is told where none is hosted.
+	store = &messageStore{}
+	if code, out := call(t, messagesRouter(t, store, owner), "POST", "/platform-experiments/pe-1/messages", `{"coordinator":true,"text":"model the gap"}`); code != http.StatusCreated ||
+		len(store.to) != 1 || store.to[0] != domain.CoordinatorRecipient || store.text != "model the gap" || store.sender.Kind != domain.ActorUser {
+		t.Fatalf("owner's message to the coordinator: got = %d %v, to %v %q by %+v", code, out, store.to, store.text, store.sender)
+	}
+	if code, out := call(t, messagesRouter(t, &messageStore{refuse: db.ErrNoCoordinator}, owner), "POST", "/platform-experiments/pe-1/messages", `{"coordinator":true,"text":"x"}`); code != http.StatusConflict || out["reason"] != "no_coordinator" {
+		t.Errorf("to no hosted coordinator: got = %d %v, want 409 no_coordinator", code, out)
 	}
 
 	agent := auth.Principal{Kind: auth.KindAgent, OrgIDs: []string{"org-a"}, ProjectID: "project-a", PlatformExperimentID: "pe-1", AgentID: "veteran"}

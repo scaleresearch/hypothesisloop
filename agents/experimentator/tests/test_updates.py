@@ -621,6 +621,10 @@ class FormatTest(unittest.TestCase):
         self.assertEqual(updates.event_line(dict(sent, value="owner"), ""), "message to agent-a from the owner: leave the lr line, try warmup")
         self.assertIn("agent.message", updates.WAKES["agent"])
         self.assertNotIn("agent.message", updates.WAKES["coordinator"])
+        # The owner's message, to the coordinator or a researcher, wakes the coordinator; its own do not.
+        self.assertIn("agent.message=owner", updates.WAKES["coordinator"])
+        to_coordinator = dict(sent, subject="coordinator", agent_id="coordinator", value="owner", detail="model the gap")
+        self.assertEqual(updates.event_line(to_coordinator, "coordinator"), "message from the owner: model the gap")
 
     # A baseline agent told to end its turn while its environment built sat idle until the idle
     # nudge: the build failed 8 minutes in and nothing woke it.

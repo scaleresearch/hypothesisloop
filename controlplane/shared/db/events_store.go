@@ -74,8 +74,9 @@ const (
 	// reaches that agent and whoever steers the run, and no rival. Its value is IdleNew on the
 	// first notice of a stretch and IdleContinues on each after it.
 	EventAgentIdle = "agent.idle"
-	// EventAgentMessage is a direct message from the coordinator or the owner to one agent, with
-	// its text: the one kind that carries what was said, since it is said to its reader alone.
+	// EventAgentMessage is a direct message from the coordinator or the owner to one agent, or from
+	// the owner to the coordinator (domain.CoordinatorRecipient), with its text: the one kind that
+	// carries what was said, since it is said to its reader alone.
 	EventAgentMessage = "agent.message"
 	// EventPlatformExperimentStatus and EventPlatformExperimentDescription describe the run
 	// itself: whether it is still open, and whether the brief still says what it said. The
@@ -149,8 +150,8 @@ var EventKinds = []EventKindDoc{
 		Description: "No job of this researcher of a running platform experiment ran on the platform for the platform's agents.idle_notice_minutes, and it has none queued or running: nothing of its own is in flight. " +
 			"Sent again every agents.idle_notice_minutes while the stretch lasts: new on the first notice of a stretch, continues on each after it, and a job it starts ends the stretch. " +
 			"detail says, as the platform knows them at the notice: for how long, the subagents and turn its harness last reported, how many jobs shaped like the run's baseline job the free capacity places now, the minutes left in the run and what is left of its share. Nothing is done to the agent."},
-	{Kind: EventAgentMessage, Subject: "agent id, the one it was sent to", Value: "coordinator or owner: who it is from",
-		Description: "A direct message to this agent from its platform experiment's coordinator or owner (POST /platform-experiments/{id}/messages). detail is the text, direction to act on. GET /platform-experiments/{id}/messages reads every one sent."},
+	{Kind: EventAgentMessage, Subject: "agent id, the one it was sent to, or coordinator", Value: "coordinator or owner: who it is from",
+		Description: "A direct message to this agent from its platform experiment's coordinator or owner (POST /platform-experiments/{id}/messages), or from the owner to the hosted coordinator, whose subject and agent_id are coordinator. detail is the text, direction to act on. GET /platform-experiments/{id}/messages reads every one sent."},
 	{Kind: EventHypothesisNew, Subject: "hypothesis id", Value: "the kind of who registered it: agent, coordinator, user, key or staff",
 		Description: "An idea entered the shared pool. agent_id is whose it is, empty on one no agent owns. The value says whether a person (user, key, staff), the coordinator or an agent registered it; the claim itself and who registered it come from GET /hypotheses/{id}."},
 	{Kind: EventHypothesisStatus, Subject: "hypothesis id", Value: "open, confirmed, refuted, inconclusive",

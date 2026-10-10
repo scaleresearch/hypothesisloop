@@ -110,6 +110,9 @@ type PlatformExperimentsStore interface {
 	// SendAgentMessages stores a message to each agent named, or with none to every researcher at
 	// work, or stores none (see the db implementation for its refusals).
 	SendAgentMessages(ctx context.Context, platformExpID string, to []string, text string, sender domain.Actor) ([]domain.AgentMessage, error)
+	// SendCoordinatorMessage stores a message of a person or a key to the hosted coordinator, or
+	// none (see the db implementation for its refusals).
+	SendCoordinatorMessage(ctx context.Context, platformExpID, text string, sender domain.Actor) (*domain.AgentMessage, error)
 	// ListAgentMessages is the messages sent in a platform experiment, to agentID alone unless it
 	// is empty, oldest first.
 	ListAgentMessages(ctx context.Context, platformExpID, agentID string) ([]domain.AgentMessage, error)

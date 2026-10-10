@@ -192,7 +192,8 @@ func TestTheAgentsGroupListsItsCommands(t *testing.T) {
 	}
 }
 
-// The coordinator and the owner message one agent or every researcher; hl refuses an agent's
+// The coordinator and the owner message one agent or every researcher, and the owner the
+// coordinator; hl refuses an agent's
 // token and a message that names neither before anything is sent.
 func TestAgentsMessageSendsToOneAgentOrEveryResearcher(t *testing.T) {
 	got := recordingServer(t, func(_ int, r recorded) any {
@@ -217,13 +218,18 @@ func TestAgentsMessageSendsToOneAgentOrEveryResearcher(t *testing.T) {
 		(*got)[2].Method != "GET" || (*got)[2].Path != "/platform-experiments/pe-env/messages" || (*got)[2].Query != "agent_id=ag-1" {
 		t.Fatalf("messages: exit %d, request %+v", code, (*got)[2])
 	}
-	for _, args := range [][]string{{"message", "--text", "x"}, {"message", "ag-1", "--all", "--text", "x"}, {"message", "ag-1"}} {
+	if code := run([]string{"platform-experiments", "agents", "message", "--coordinator", "--text", "model the gap"}, &stdout, &stderr); code != 0 ||
+		!reflect.DeepEqual((*got)[3].Body, map[string]any{"coordinator": true, "text": "model the gap"}) {
+		t.Fatalf("message --coordinator: exit %d, request %+v", code, (*got)[3])
+	}
+	for _, args := range [][]string{{"message", "--text", "x"}, {"message", "ag-1", "--all", "--text", "x"}, {"message", "ag-1"},
+		{"message", "--all", "--coordinator", "--text", "x"}, {"message", "ag-1", "--coordinator", "--text", "x"}} {
 		if code := run(append([]string{"platform-experiments", "agents"}, args...), &stdout, &stderr); code != 2 {
 			t.Errorf("%v: exit %d, want 2", args, code)
 		}
 	}
 	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/ag-1"))
-	if code := run([]string{"platform-experiments", "agents", "message", "ag-2", "--text", "x"}, &stdout, &stderr); code != 1 || len(*got) != 3 {
+	if code := run([]string{"platform-experiments", "agents", "message", "ag-2", "--text", "x"}, &stdout, &stderr); code != 1 || len(*got) != 4 {
 		t.Errorf("message by an agent: exit %d with %d requests, want 1 and no further request", code, len(*got))
 	}
 }

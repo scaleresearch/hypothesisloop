@@ -15,7 +15,7 @@ var agentsCommands = []subcommand{
 	{"remove", "take an agent out of a platform experiment that has not started", agentsRemove, ofTheRun},
 	{"list", "the agents of a platform experiment and what each was launched with", agentsList, ofTheRun},
 	{"finish", "say that you, an agent, have nothing left to do: your machine stops", agentsFinish, theAgentItself},
-	{"message", "tell an agent, or with --all every researcher, a direction directly: it is woken with it", agentsMessage, ofTheRun},
+	{"message", "tell an agent, with --all every researcher or with --coordinator the coordinator, a direction directly: it is woken with it", agentsMessage, ofTheRun},
 	{"messages", "the messages sent to agents, oldest first; an agent's token reads its own", agentsMessages, everyone},
 	{"session", "the stored model session of an agent, the coordinator or the planner", agentsSession, everyone},
 }
@@ -153,24 +153,28 @@ func messagesPath(platformExperiment string) string {
 func agentsMessage(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("platform-experiments agents message", `usage: hl platform-experiments agents message [--platform-experiment PE] AGENT --text T
    or: hl platform-experiments agents message [--platform-experiment PE] --all --text T
+   or: hl platform-experiments agents message [--platform-experiment PE] --coordinator --text T
 
 Tells the agent, or every researcher at work, something directly: it is woken at once with
 "message from the coordinator: T" (or the owner), as agent.message, and is told it again after a
 restart until it was delivered. Use it to steer; a fact about a hypothesis goes in a comment.
-At most 1500 bytes. An agent is sent at most 6 messages an hour, by everyone together: past
-that it is refused (429 message_rate_limited) with when the next can go, and with --all none is
-sent. Refused for an agent that finished or was cut (409 agent_ended). Prints one line per
-message sent. hl platform-experiments agents messages reads what was sent before.`, stderr)
+--coordinator tells the hosted coordinator, from a person or a key, the same way (409
+no_coordinator where none is hosted). At most 1500 bytes. A recipient is sent at most 6 messages
+an hour by the coordinator and 6 by the owner, counted apart: past that it is refused (429
+message_rate_limited) with when the next can go, and with --all none is sent. Refused for an
+agent that finished or was cut (409 agent_ended). Prints one line per message sent. hl
+platform-experiments agents messages reads what was sent before.`, stderr)
 	named := experimentFlag(fs)
 	text := fs.String("text", "", "what the agent is told")
 	all := fs.Bool("all", false, "every researcher at work")
+	coordinator := fs.Bool("coordinator", false, "the hosted coordinator")
 	operands, err := parseOperands(fs, args, "agent")
 	if err != nil {
 		return parseExit(err)
 	}
 	switch {
-	case *all && len(operands) > 0, !*all && len(operands) != 1:
-		return parseExit(misuse(fs, "want one AGENT or --all"))
+	case *all && *coordinator, (*all || *coordinator) && len(operands) > 0, !*all && !*coordinator && len(operands) != 1:
+		return parseExit(misuse(fs, "want one AGENT, --all or --coordinator"))
 	case strings.TrimSpace(*text) == "":
 		return parseExit(misuse(fs, "want --text"))
 	}
@@ -179,9 +183,12 @@ message sent. hl platform-experiments agents messages reads what was sent before
 		return parseExit(err)
 	}
 	body := map[string]any{"text": *text}
-	if *all {
+	switch {
+	case *all:
 		body["all"] = true
-	} else {
+	case *coordinator:
+		body["coordinator"] = true
+	default:
 		body["agent_id"] = operands[0]
 	}
 	return call(c, "POST", messagesPath(pe), body, "messages", "no message was sent", stdout, stderr)
@@ -190,9 +197,10 @@ message sent. hl platform-experiments agents messages reads what was sent before
 func agentsMessages(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("platform-experiments agents messages", `usage: hl platform-experiments agents messages [--platform-experiment PE] [--agent ID]
 
-Every message the coordinator and the owner sent to an agent of the platform experiment, oldest
-first, one per line: agent_id, from (coordinator or owner), text, actor and at. --agent narrows
-it to one agent's. An agent's token reads its own alone.`, stderr)
+Every message the coordinator and the owner sent to an agent of the platform experiment, and the
+owner to its coordinator, oldest first, one per line: agent_id (coordinator for the
+coordinator's), from (coordinator or owner), text, actor and at. --agent narrows it to one
+agent's, --agent coordinator to the coordinator's. An agent's token reads its own alone.`, stderr)
 	named := experimentFlag(fs)
 	agent := fs.String("agent", "", "only the messages to this agent")
 	if err := parseNone(fs, args); err != nil {

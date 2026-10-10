@@ -87,11 +87,11 @@ const (
 	TurnWaiting = "waiting"
 )
 
-// MessageAllowance is how many more direct messages an agent may be sent in the hour, by
-// everyone together (MaxAgentMessagesPerHour).
+// MessageAllowance is how many more direct messages the coordinator may send an agent in the hour
+// (MaxAgentMessagesPerHour). The owner's messages count apart and spend none of it.
 type MessageAllowance struct {
-	LeftThisHour int        `json:"left_this_hour" doc:"How many more messages it may be sent now, by the coordinator and the owner together."`
-	NextAt       *time.Time `json:"next_at,omitempty" doc:"When left_this_hour next grows: the oldest message of the last hour leaves it then. Absent while it was sent none in the last hour."`
+	LeftThisHour int        `json:"left_this_hour" doc:"How many more messages the coordinator may send it now. The owner's messages count apart."`
+	NextAt       *time.Time `json:"next_at,omitempty" doc:"When left_this_hour next grows: the oldest of the coordinator's messages of the last hour leaves it then. Absent while it sent none in the last hour."`
 }
 
 // ModelAllowance is what a hosted agent's or coordinator's model account has left of the model

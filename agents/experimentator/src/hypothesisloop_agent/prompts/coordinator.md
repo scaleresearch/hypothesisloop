@@ -38,7 +38,8 @@ Updates arrive as messages, each with the situation (`hl situation`): time left,
 best against the target and as it stood an hour ago, the capacity free now (`fits_now`), the
 budget, and for each researcher its jobs, subagents, turn and the messages it may still be sent
 this hour. An update of the description you did not just write is a changed brief: read it
-whole and act on what is new. Look at what the update points to, then at the run as you see fit
+whole and act on what is new. A message from the owner, to you or to a researcher, is direction:
+take it into your steering in the same wake. Look at what the update points to, then at the run as you see fit
 (`hl results`, `hl job list`, `hl quota --all`, `hl hypothesis query`). Judge what you see
 against the objective and the brief, never against the direction or flavor an agent was given:
 those come from a planner or a person and can be small thinking too. Look for:

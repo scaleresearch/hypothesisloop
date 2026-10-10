@@ -54,22 +54,31 @@ func TestAMessageIsToldToItsAgentAloneAndKept(t *testing.T) {
 		t.Fatalf("replayed: got = %+v, want the live event %+v once", told, live)
 	}
 
+	// The owner's messages count apart from the coordinator's: they never spend its steering.
 	owner := domain.Actor{Kind: domain.ActorUser, ID: "user-1"}
-	for range domain.MaxAgentMessagesPerHour - 1 {
+	for range domain.MaxAgentMessagesPerHour {
 		if _, err := pes.SendAgentMessages(ctx, peID, nil, "to every researcher", owner); err != nil {
 			t.Fatal(err)
 		}
 	}
 	var limited *MessagesRateLimited
-	if _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "one too many", coordinator); !errors.As(err, &limited) || limited.AgentID != agentID || limited.Next.IsZero() {
-		t.Fatalf("past the hourly limit: got = %v, want MessagesRateLimited for %s", err, agentID)
+	if _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "one too many", owner); !errors.As(err, &limited) || limited.AgentID != agentID || limited.From != "owner" || limited.Next.IsZero() {
+		t.Fatalf("past the owner's hourly limit: got = %v, want MessagesRateLimited for %s from the owner", err, agentID)
+	}
+	for range domain.MaxAgentMessagesPerHour - 1 {
+		if _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "steer", coordinator); err != nil {
+			t.Fatalf("the coordinator's own allowance after the owner's: %v", err)
+		}
+	}
+	if _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "one too many", coordinator); !errors.As(err, &limited) || limited.From != "coordinator" {
+		t.Fatalf("past the coordinator's hourly limit: got = %v, want MessagesRateLimited from the coordinator", err)
 	}
 	kept, err := pes.ListAgentMessages(ctx, peID, agentID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(kept) != domain.MaxAgentMessagesPerHour || kept[0].Text != "leave the lr line, try warmup" || kept[1].From != "owner" || kept[1].Actor.ID != "user-1" {
-		t.Fatalf("kept: got = %+v, want the %d sent, oldest first", kept, domain.MaxAgentMessagesPerHour)
+	if len(kept) != 2*domain.MaxAgentMessagesPerHour || kept[0].Text != "leave the lr line, try warmup" || kept[1].From != "owner" || kept[1].Actor.ID != "user-1" {
+		t.Fatalf("kept: got = %+v, want the %d sent, oldest first", kept, 2*domain.MaxAgentMessagesPerHour)
 	}
 
 	if _, err := pes.SendAgentMessages(ctx, peID, []string{"nobody"}, "hello", coordinator); !errors.Is(err, ErrNotSignedUp) {
@@ -88,8 +97,9 @@ func TestAMessageIsToldToItsAgentAloneAndKept(t *testing.T) {
 	}
 }
 
-// What an agent may still be sent this hour is counted as a send refuses: the messages of the
-// last hour, by everyone together, and it grows again when the oldest of them leaves the hour.
+// What the coordinator may still send an agent this hour is counted as a send refuses: its
+// messages of the last hour, the owner's left out, and it grows again when the oldest of them
+// leaves the hour.
 func TestTheMessageAllowanceCountsTheLastHour(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
@@ -118,6 +128,9 @@ func TestTheMessageAllowanceCountsTheLastHour(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "from the owner", domain.Actor{Kind: domain.ActorUser, ID: "user-1"}); err != nil {
+		t.Fatal(err)
+	}
 	exec(t, pool, `UPDATE agent_messages SET created_at = now() - interval '50 minutes' WHERE id = (SELECT min(id) FROM agent_messages WHERE platform_experiment_id = $1)`, peID)
 	got := allowance()
 	if got.LeftThisHour != domain.MaxAgentMessagesPerHour-2 || got.NextAt == nil || time.Until(*got.NextAt) < 9*time.Minute || time.Until(*got.NextAt) > 11*time.Minute {
@@ -126,6 +139,77 @@ func TestTheMessageAllowanceCountsTheLastHour(t *testing.T) {
 	exec(t, pool, `UPDATE agent_messages SET created_at = now() - interval '61 minutes' WHERE platform_experiment_id = $1`, peID)
 	if got := allowance(); got.LeftThisHour != domain.MaxAgentMessagesPerHour || got.NextAt != nil {
 		t.Fatalf("both older than an hour: %+v, want the whole hour's", got)
+	}
+}
+
+// A person's message to the hosted coordinator is told to its stream alone, as agent.message to
+// coordinator from the owner, live and replayed, and is refused where no coordinator is hosted,
+// past the hourly limit and once closed.
+func TestAMessageToTheCoordinatorIsToldToItsStreamAlone(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	agentID, peID, _ := seedRun(t, pool, "to-coordinator", true)
+	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id) VALUES ($1, $2)`, peID, agentID)
+	staff := domain.Actor{Kind: domain.ActorStaff}
+	if _, err := pes.SendCoordinatorMessage(ctx, peID, "look at the gap", staff); !errors.Is(err, ErrNoCoordinator) {
+		t.Fatalf("with no hosted coordinator: got = %v, want %v", err, ErrNoCoordinator)
+	}
+	exec(t, pool, `UPDATE platform_experiments SET coordinator_hosted = true WHERE id = $1`, peID)
+	before := cursorNow(t, pool)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+
+	sent, err := pes.SendCoordinatorMessage(ctx, peID, "look at the gap", staff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sent.AgentID != domain.CoordinatorRecipient || sent.From != "owner" || sent.At.IsZero() {
+		t.Fatalf("sent: got = %+v, want a message to the coordinator from the owner", sent)
+	}
+	live := awaitEvent(t, events, EventAgentMessage, domain.CoordinatorRecipient)
+	if live.Value != "owner" || live.Detail != "look at the gap" {
+		t.Fatalf("live: got = %+v, want the text from the owner", live)
+	}
+	if !(EventFilter{PlatformExperimentID: peID, Decisions: true}).Matches(live) {
+		t.Error("the coordinator's stream does not carry the message")
+	}
+	if (EventFilter{PlatformExperimentID: peID, AgentID: agentID}).Matches(live) {
+		t.Error("a researcher's stream carries the coordinator's message")
+	}
+	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, EventFilter{PlatformExperimentID: peID, Decisions: true}, before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var told []Event
+	for _, e := range replayed {
+		if e.Kind == EventAgentMessage {
+			told = append(told, e)
+		}
+	}
+	if len(told) != 1 || told[0].Identity() != live.Identity() {
+		t.Fatalf("replayed: got = %+v, want the live event %+v once", told, live)
+	}
+
+	for range domain.MaxAgentMessagesPerHour - 1 {
+		if _, err := pes.SendCoordinatorMessage(ctx, peID, "more", staff); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var limited *MessagesRateLimited
+	if _, err := pes.SendCoordinatorMessage(ctx, peID, "one too many", staff); !errors.As(err, &limited) || limited.AgentID != domain.CoordinatorRecipient || limited.Next.IsZero() {
+		t.Fatalf("past the hourly limit: got = %v, want MessagesRateLimited for the coordinator", err)
+	}
+	if allowance, err := pes.MessageAllowance(ctx, peID); err != nil || allowance[agentID].LeftThisHour != domain.MaxAgentMessagesPerHour {
+		t.Fatalf("the researcher's allowance: got = (%+v, %v), want it untouched", allowance, err)
+	}
+	if kept, err := pes.ListAgentMessages(ctx, peID, domain.CoordinatorRecipient); err != nil || len(kept) != domain.MaxAgentMessagesPerHour {
+		t.Fatalf("kept: got = (%d, %v), want the %d sent", len(kept), err, domain.MaxAgentMessagesPerHour)
+	}
+	exec(t, pool, `UPDATE platform_experiments SET status = 'closed' WHERE id = $1`, peID)
+	if _, err := pes.SendCoordinatorMessage(ctx, peID, "hello", staff); !errors.Is(err, ErrPlatformExperimentClosed) {
+		t.Errorf("once closed: got = %v, want = %v", err, ErrPlatformExperimentClosed)
 	}
 }
 
