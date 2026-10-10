@@ -457,17 +457,11 @@ func TestPriorRunsAreTheClosedRunsOfTheProjectOnTheSameRepository(t *testing.T) 
 	seed("other-project", otherProject.ID, "o/r", domain.PlatformExpClosed, time.Hour, "")
 	run := seed("run", project.ID, "o/r", domain.PlatformExpRunning, 0, continued)
 	unnamed := seed("unnamed", project.ID, "", domain.PlatformExpOpen, 0, "")
-	alone := seed("alone", project.ID, "o/r", domain.PlatformExpRunning, 0, continued)
-	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET history = $2 WHERE id = $1`, alone, string(domain.HistoryNone)); err != nil {
-		t.Fatal(err)
-	}
 
 	for id, want := range map[string][]string{
 		run:       {continued, sibling, baselineOnly, first},
 		continued: {sibling, baselineOnly, first},
 		unnamed:   {},
-		// A run whose history is none reads no other, the one it continues included.
-		alone: {},
 	} {
 		got, err := pes.PriorRuns(ctx, id)
 		if err != nil || !reflect.DeepEqual(got, want) {

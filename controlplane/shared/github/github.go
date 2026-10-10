@@ -58,10 +58,6 @@ var (
 	ErrFileNotFound = errors.New("the repository has no such file")
 	// ErrNotAFile reports a path that holds a directory, a symlink or a submodule.
 	ErrNotAFile = errors.New("the path in the repository is not a file")
-	// ErrCommitNotFound reports a commit the repository does not hold.
-	ErrCommitNotFound = errors.New("the repository has no such commit")
-	// ErrNotDescendant reports a commit that is not the ancestor named and does not descend from it.
-	ErrNotDescendant = errors.New("the commit does not descend from the ancestor")
 	// ErrFileTooLarge reports a file over MaxFileBytes.
 	ErrFileTooLarge = errors.New("the file is larger than the platform reads from a repository")
 	// ErrCodeRejected reports a user authorisation code GitHub did not accept: used, expired or
@@ -795,35 +791,6 @@ func (c *Client) File(ctx context.Context, token *Token, ref, path string) ([]by
 		return nil, fmt.Errorf("github: the contents of %s are not base64", path)
 	}
 	return data, nil
-}
-
-// Descends returns the full sha of commit when it is ancestor or descends from it. It compares
-// ancestor against commit as the base: where commit descends from it, ancestor is their merge
-// base and the comparison lists no commit and no file, so an answer too large to read is one that
-// lists some, and commit does not descend from it.
-func (c *Client) Descends(ctx context.Context, token *Token, ancestor, commit string) (string, error) {
-	var out struct {
-		Status     string `json:"status"`
-		BaseCommit struct {
-			SHA string `json:"sha"`
-		} `json:"base_commit"`
-	}
-	target := "/repos/" + token.Repository + "/compare/" + url.PathEscape(commit) + "..." + url.PathEscape(ancestor) + "?per_page=1"
-	switch err := c.request(ctx, http.MethodGet, target, "Bearer "+token.Value, maxResponseBytes, nil, &out); {
-	case errors.Is(err, errNotFound):
-		return "", ErrCommitNotFound
-	case errors.Is(err, ErrFileTooLarge):
-		return "", ErrNotDescendant
-	case err != nil:
-		return "", err
-	}
-	if out.Status != "behind" && out.Status != "identical" {
-		return "", ErrNotDescendant
-	}
-	if len(out.BaseCommit.SHA) != 40 {
-		return "", fmt.Errorf("github: the comparison of %s answered no full sha for it", commit)
-	}
-	return out.BaseCommit.SHA, nil
 }
 
 type userTokens struct {

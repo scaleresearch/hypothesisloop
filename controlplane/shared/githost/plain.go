@@ -94,10 +94,6 @@ func (p *Plain) FileAt(context.Context, string, string, string, string) ([]byte,
 	return nil, ErrFileNotFound
 }
 
-func (p *Plain) Descends(context.Context, string, string, string, string) (string, error) {
-	return "", api.Refuse(http.StatusUnprocessableEntity, "start_commit_unsupported", "this deployment's git host hands the platform no history, so no commit can be checked to descend from the baseline's: leave start_commit out")
-}
-
 func (p *Plain) Credential(context.Context, string, string, bool) (*Credential, error) {
 	if p.username == "" {
 		return nil, api.Refuse(http.StatusNotFound, "not_found", "this deployment's git host takes no credential")

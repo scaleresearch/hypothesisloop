@@ -31,8 +31,7 @@ func createTestPE(t *testing.T, pool *Pool, id string, budget float64) {
 	pes := NewPlatformExperimentsStore(pool)
 	now := time.Now().UTC()
 	pe := &domain.PlatformExperiment{
-		History: domain.HistoryPriorRuns,
-		ID:      id, ProjectID: "default", Name: id, Description: "quota tier test", BudgetAcceleratorHours: budget,
+		ID: id, ProjectID: "default", Name: id, Description: "quota tier test", BudgetAcceleratorHours: budget,
 		MaxAgents: 10, StartsAt: now, DurationHours: 24, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
 		Metrics:               []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}},
 		ReportIntervalSeconds: 30,

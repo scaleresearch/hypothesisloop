@@ -997,10 +997,10 @@ It fetches origin first. When your branch exists, here or on origin, it is check
 is. Otherwise it is created: from the commit job JOB ran with --from JOB (any job of the
 platform experiment, to start from one particular implementation), else from base_ref of the
 hypothesis: the commit the newest completed job of the hypothesis it builds on ran, whichever
-agent's, that hypothesis's own base while it has no completed job, and for one that builds on
-the objective the run's start_commit (hl situation), or with none declared the baseline job's
-commit. To drop an idea and start again from there, register a hypothesis that builds on root
-and check it out; to improve an idea, register one that builds on it.
+agent's, that hypothesis's own base while it has no completed job, and the baseline job's
+commit for one that builds on the objective. To drop an idea and start again from the
+baseline, register a hypothesis that builds on root and check it out; to improve an idea,
+register one that builds on it.
 
 Prints one JSON object: branch, and base, the commit a branch it created starts from. Refused
 with the reason when there is nothing to start from (no baseline is declared yet), and when
@@ -1087,7 +1087,7 @@ func checkoutBranch(dir, branch, base, from string) (created string, err error) 
 		return "", switchBranch(dir, args...)
 	}
 	if base == "" {
-		return "", errors.New("there is no commit to start from: the hypothesis builds up to the objective, which declares no start_commit, and no baseline is declared yet. Wait for the baseline, or name a job to start from with --from JOB")
+		return "", errors.New("there is no commit to start from: the hypothesis builds up to the objective and no baseline is declared yet. Wait for the baseline, or name a job to start from with --from JOB")
 	}
 	sha := base[strings.LastIndex(base, "@")+1:]
 	if err := switchBranch(dir, "checkout", "--quiet", "-b", branch, sha); err != nil {

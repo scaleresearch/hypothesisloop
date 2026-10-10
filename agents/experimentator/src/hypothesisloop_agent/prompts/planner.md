@@ -23,8 +23,7 @@ and {repository_url} cloned into {workdir}. Read further only what the goal turn
 the web (WebSearch) for the best published result on its problem. The `prior_runs` of
 `hl platform-experiments get` are earlier runs on this repository, yours to read before choosing
 a lever (`--platform-experiment ID`: its summary, `hl results`, `hl hypothesis query` for
-findings and refuted hypotheses); put in the brief what they established, refuted and reached.
-A draft whose `history` is `none` has none to read, and its agents will read none either. A
+findings and refuted hypotheses); put in the brief what they established, refuted and reached. A
 draft that `continues` one keeps its metric keys and directions so the numbers compare (others
 are refused). On a revision, meet the last one, keep what it does not touch, and say in
 `questions` what you could not meet.

@@ -18,8 +18,7 @@ func createTestDraft(t *testing.T, pool *Pool, launcher string) (peID, plannerID
 	now := time.Now().UTC()
 	by := domain.Actor{Kind: domain.ActorUser, ID: "u-planning"}
 	pe := &domain.PlatformExperiment{
-		History: domain.HistoryPriorRuns,
-		ID:      "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "a goal", Goal: "a goal, in a sentence", Actor: &by,
+		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "a goal", Goal: "a goal, in a sentence", Actor: &by,
 		MaxAgents: 1, PlanningEndsAt: now.Add(30 * time.Minute), Status: domain.PlatformExpDraft,
 		Metrics: []domain.MetricDefinition{}, ReportIntervalSeconds: 30, Stages: []domain.Stage{{LengthPct: 100}},
 		CreatedAt: now, UpdatedAt: now, MaxHosted: 5, Repository: "acme/a-goal", RepositoryURL: "https://github.com/acme/a-goal.git",
@@ -96,7 +95,7 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 
 	// One without a planner, or with something else in its place, is not created.
 	now := time.Now().UTC()
-	bad := &domain.PlatformExperiment{History: domain.HistoryPriorRuns, ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Status: domain.PlatformExpDraft, PlanningEndsAt: now, Stages: []domain.Stage{{LengthPct: 100}}}
+	bad := &domain.PlatformExperiment{ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Status: domain.PlatformExpDraft, PlanningEndsAt: now, Stages: []domain.Stage{{LengthPct: 100}}}
 	agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12]}
 	if err := pes.CreateDraft(ctx, bad, agent, domain.AgentSignup{AgentID: agent.ID, Flavor: "generalist", Hosted: true}); err == nil {
 		t.Fatal("a draft whose agent is no planner was created")
@@ -116,7 +115,7 @@ func TestNoMachineIsWantedBeforeTheRepositoryIsRecorded(t *testing.T) {
 	launcher := "launcher-" + uuid.New().String()[:8]
 	draft := func() (*domain.PlatformExperiment, string) {
 		now := time.Now().UTC()
-		pe := &domain.PlatformExperiment{History: domain.HistoryPriorRuns, ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "a goal", Goal: "a goal",
+		pe := &domain.PlatformExperiment{ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "a goal", Goal: "a goal",
 			MaxAgents: 1, PlanningEndsAt: now.Add(30 * time.Minute), Status: domain.PlatformExpDraft,
 			Metrics: []domain.MetricDefinition{}, ReportIntervalSeconds: 30, Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: now, UpdatedAt: now, MaxHosted: 5, RepositoryAccount: "acme"}
 		planner := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Planner", CreatedAt: now}
@@ -161,7 +160,7 @@ func TestNoMachineIsWantedBeforeTheRepositoryIsRecorded(t *testing.T) {
 
 	// A whole experiment's coordinator waits for the repository the same way.
 	now := time.Now().UTC()
-	whole := &domain.PlatformExperiment{History: domain.HistoryPriorRuns, ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "whole", BudgetAcceleratorHours: 10,
+	whole := &domain.PlatformExperiment{ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "whole", BudgetAcceleratorHours: 10,
 		MaxAgents: 2, Status: domain.PlatformExpOpen, Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}}, ReportIntervalSeconds: 30,
 		Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: now, UpdatedAt: now, BaselineDueAt: now.Add(time.Hour), MaxHosted: 5, RepositoryAccount: "acme",
 		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Launcher: launcher, Model: "model-1"}}

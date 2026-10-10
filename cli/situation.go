@@ -20,11 +20,7 @@ The platform experiment as it stands now, one line per block, each field as key=
   run         now, status, ends_at, minutes_left and the stage: its index and name,
               next_boundary_at and next_share_acch, the share that boundary brings. A closed run
               reads minutes_left=0 with closed_at and close_reason; one not started reads
-              not_started=true and its duration_hours. start_commit, where the run declares
-              one, is the commit a hypothesis that builds on the objective starts from in place
-              of the baseline's (the baseline and every target stay on the baseline's commit),
-              and history which earlier runs its agents read: prior_runs, or none (no other
-              run, so the description alone carries what earlier runs learned)
+              not_started=true and its duration_hours
   objective   one line per declared metric: direction, deterministic=true on one declared so
               (its values compare across machines and need no repeat), baseline_value, best_value with the
               best_job and best_agent that set it, target, the value the metric's

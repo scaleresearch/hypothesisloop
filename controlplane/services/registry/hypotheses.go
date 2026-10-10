@@ -208,9 +208,8 @@ func (s *Service) Implementations(ctx context.Context, hypothesisID string) ([]d
 
 // BaseRef returns the commit a new implementation of h starts from: the one the newest completed
 // job of its first builds_on parent ran, whichever agent's. A parent with no completed job
-// passes the question to its own first parent, and the objective answers with the run's
-// start_commit, or with none declared the commit of the declared baseline job. Empty when the
-// chain ends at an objective with neither.
+// passes the question to its own first parent, and the objective answers with the commit of the
+// declared baseline job. Empty when the chain ends at the objective and no baseline is declared.
 func (s *Service) BaseRef(ctx context.Context, h *domain.Hypothesis) (string, error) {
 	id := h.ID
 	for {
@@ -222,7 +221,7 @@ func (s *Service) BaseRef(ctx context.Context, h *domain.Hypothesis) (string, er
 			return "", fmt.Errorf("registry.BaseRef: hypothesis %s builds on nothing", id)
 		}
 		if parent == h.PlatformExperimentID {
-			ref, err := s.store.ObjectiveCodeRef(ctx, parent)
+			ref, err := s.store.BaselineCodeRef(ctx, parent)
 			if err != nil {
 				return "", fmt.Errorf("registry.BaseRef: %w", err)
 			}

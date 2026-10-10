@@ -75,20 +75,5 @@ duration_hours: 24
 #   - length_pct: 60
 #     evict_pct: 0
 
-# continues: optional, the id of a closed platform experiment of the same project and repository
-# with a declared baseline to carry on: its baseline starts from that run's baseline commit, and
-# it keeps that run's metric keys and directions.
-# continues: pe-0123456789abcdef0123456789abcdef
-#
-# start_commit: optional, needs continues. The commit, full or abbreviated sha, researchers start
-# from in place of the baseline's: it is that baseline commit or descends from it. The baseline
-# and every target_vs_baseline stay measured on the baseline's commit.
-# start_commit: a2cac09
-#
-# history: prior_runs (the default) has the agents read every closed run of the project and
-# repository as their own; none has them read no other run, so the description alone carries
-# what earlier runs learned.
-# history: none
-
 # One file is one platform experiment: hl platform-experiments create refuses a file that holds
 # an experiments: list. Several are several files, each created with a command of its own.

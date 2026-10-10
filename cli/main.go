@@ -694,21 +694,8 @@ repository names one created there beforehand, and leaving it out is 422 reposit
 
 continues: ID carries on a closed platform experiment of the project that keeps its code in the
 same repository and declared a baseline: its baseline starts from the commit of that run's
-baseline job (continues_code_ref in the answer), so the numbers of both compare.
-
-start_commit: SHA (optional, needs continues) is where researchers start in place of the
-baseline's commit, such as the best an earlier run reached: a hypothesis that builds on the
-objective starts from it. It must be that commit or descend from it in the repository (422
-start_commit_not_descendant otherwise, invalid_start_commit for no such commit or no continues),
-and the baseline job declared must run an ancestor of it. The baseline, and so every
-target_vs_baseline, stays measured on the baseline's commit.
-
-history: prior_runs | none (optional, prior_runs left out) is which earlier runs its agents,
-coordinator and planner read as their own. prior_runs: every closed run of the project and
-repository that ran (prior_runs in the answer), with their summaries, results, jobs, data and
-hypotheses, refuted ones included. none: no other run, the one continues names included, so the
-description alone carries what earlier runs learned. Neither start_commit nor history is read
-from the repository's experiment file.
+baseline job, so the numbers of both compare. Its agents read that run, as every closed run of
+the project and repository that ran, as their own.
 
 One file is one platform experiment: for several, run the command once for each.
 
@@ -1044,12 +1031,9 @@ silent (hl platform-experiments agents list).
 Once the baseline is declared, baseline_branch and baseline_code_ref name the branch and commit
 of its job, where its harness is: the default branch may hold none of it.
 prior_runs lists every closed run of the same project and repository that ran, latest first,
-with its best on its primary metric, where history is prior_runs. Each is read as your own with
---platform-experiment ID on any read: its summary, results, jobs and hypotheses. With history
-none there are none: no other run is read, and the description carries what earlier runs
-learned. continues names the run this one carries on, and continues_code_ref the commit of its
-baseline job, where this one's baseline starts. start_commit, where declared, is the commit a
-hypothesis that builds on the objective starts from in place of the baseline's.
+with its best on its primary metric. Each is read as your own with --platform-experiment ID on
+any read: its summary, results, jobs and hypotheses. continues names the one this run carries on, whose
+baseline_code_ref is the commit this one's baseline starts from.
 On an open one the message begins with your own next step, worded for your token: the command
 a coordinator or a person runs, what a baseline agent measures, or that a researcher's jobs
 are refused until the start. status_reason is printed ahead of the record with id and status,

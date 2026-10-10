@@ -392,17 +392,14 @@ func (s *ExperimentsStore) RecentlyTriedClusters(ctx context.Context, ttl time.D
 	return out, nil
 }
 
-// ObjectiveCodeRef returns the commit a hypothesis that builds on the objective of a platform
-// experiment starts from: its start_commit where it declares one, and otherwise the commit its
-// declared baseline job ran, empty while none is declared.
-func (s *ExperimentsStore) ObjectiveCodeRef(ctx context.Context, platformExpID string) (string, error) {
+// BaselineCodeRef returns the commit the declared baseline job of a platform experiment ran,
+// empty while none is declared.
+func (s *ExperimentsStore) BaselineCodeRef(ctx context.Context, platformExpID string) (string, error) {
 	var codeRef string
-	err := s.pool.pool.QueryRow(ctx, `
-SELECT CASE WHEN pe.start_commit <> '' THEN pe.repository_url || '@' || pe.start_commit ELSE COALESCE(e.code_ref, '') END
-FROM platform_experiments pe LEFT JOIN experiments e ON e.id = pe.baseline_job_id
-WHERE pe.id = $1`, platformExpID).Scan(&codeRef)
+	err := s.pool.pool.QueryRow(ctx,
+		`SELECT e.code_ref FROM platform_experiments pe JOIN experiments e ON e.id = pe.baseline_job_id WHERE pe.id = $1`, platformExpID).Scan(&codeRef)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return "", fmt.Errorf("experiments_store.ObjectiveCodeRef: %w", err)
+		return "", fmt.Errorf("experiments_store.BaselineCodeRef: %w", err)
 	}
 	return codeRef, nil
 }

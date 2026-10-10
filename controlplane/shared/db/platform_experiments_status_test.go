@@ -60,8 +60,7 @@ func TestTheRunLastsItsDurationFromItsStart(t *testing.T) {
 	pes := NewPlatformExperimentsStore(pool)
 	created := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Microsecond)
 	pe := &domain.PlatformExperiment{
-		History: domain.HistoryPriorRuns,
-		ID:      "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "an hour's run", BudgetAcceleratorHours: 10, MaxAgents: 2,
+		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "an hour's run", BudgetAcceleratorHours: 10, MaxAgents: 2,
 		StartsAt: created, BaselineDueAt: created.Add(45 * time.Minute), DurationHours: 1, Status: domain.PlatformExpOpen,
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
 		Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: created, UpdatedAt: created,
@@ -291,8 +290,7 @@ func TestTheTimeABaselineWaitsOnThePlatformMovesItsDeadline(t *testing.T) {
 	created := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Microsecond)
 	due := created.Add(25 * time.Minute)
 	pe := &domain.PlatformExperiment{
-		History: domain.HistoryPriorRuns,
-		ID:      "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "a held baseline", BudgetAcceleratorHours: 10, MaxAgents: 2,
+		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "a held baseline", BudgetAcceleratorHours: 10, MaxAgents: 2,
 		StartsAt: created, BaselineDueAt: due, DurationHours: 1, Status: domain.PlatformExpOpen,
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
 		Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: created, UpdatedAt: created,

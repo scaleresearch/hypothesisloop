@@ -220,8 +220,7 @@ func (s *PlatformExperimentsService) WithEnvironments(environments Environments)
 	return s
 }
 
-// WithRepositories wires the git host the repository pass creates drafts' repositories on, and
-// that a start_commit is checked against.
+// WithRepositories wires the git host the repository pass creates drafts' repositories on.
 func (s *PlatformExperimentsService) WithRepositories(repos githost.Provider) *PlatformExperimentsService {
 	s.repos = repos
 	return s
@@ -304,8 +303,6 @@ type CreatePlatformExperimentRequest struct {
 	RepositoryAccount string `json:"repository_account,omitempty" doc:"The GitHub account, one the org connected, on which the platform creates the repository when repository is left out. Required then only when the org connected several."`
 	AgentImage        string `json:"agent_image,omitempty" doc:"The image hosted agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Empty is the platform's own."`
 	Continues         string `json:"continues,omitempty" doc:"The id of a closed platform experiment of the same project to carry on, which keeps its code in the repository this one names. Its baseline starts from the commit of that run's baseline job, so both are measured by the same harness. It keeps the metric keys and directions of that run: 422 invalid_metrics for others. Left out, it starts fresh. 422 invalid_continues for one that is no closed platform experiment of the project, keeps its code in another repository or declared no baseline."`
-	StartCommit       string `json:"start_commit,omitempty" doc:"The commit, a full or abbreviated sha of the repository, that a hypothesis building on the objective starts from in place of the baseline's commit, such as the best configuration an earlier run reached. The baseline is still measured on the baseline's commit, and every target_vs_baseline against it. It needs continues: the commit is, or descends from, the commit of the baseline job of the run continued, which this run's baseline starts from, and the baseline job declared must run an ancestor of it (baseline_not_ancestor_of_start otherwise). Stored as its full sha. 422 invalid_start_commit for one that is no sha, is given without continues or is not in the repository, start_commit_not_descendant for one that does not descend from that commit, and start_commit_unsupported on a git host that hands the platform no history. Left out, researchers start from the baseline's commit."`
-	History           string `json:"history,omitempty" enum:"prior_runs,none" doc:"Which earlier runs its agents, coordinator and planner read as their own: prior_runs, every closed run of the same project and repository that ran, listed as prior_runs, with their summaries, results, jobs, data and hypotheses, refuted ones included; or none, no other run, and the description alone carries what earlier runs learned. Left out, prior_runs. Fixed at creation. 422 invalid_history for any other value."`
 
 	// coordinator is CoordinatorHosted resolved by the handler: which launcher and which model.
 	coordinator *domain.HostedCoordinator

@@ -308,19 +308,8 @@ their own (summary, standings, jobs, logs, hypotheses, findings and data) by pas
 run's id as `--platform-experiment`. They cannot write to them.
 
 A new run names the run it continues with `continues`. Its baseline agent starts from that run's
-baseline commit (`continues_code_ref`) with the same harness, so the numbers compare, and its
-planner keeps the same metric and states what the earlier run established and refuted.
-
-Two more fields of a create, both fixed at creation, shape what a continued run starts from:
-
-- `start_commit` is the commit researchers start from in place of the baseline's, such as the
-  best an earlier run reached. It must be the continued run's baseline commit or descend from it
-  (422 `start_commit_not_descendant` otherwise), and the baseline job declared must run an
-  ancestor of it. The baseline, and every `target_vs_baseline`, stays measured on the baseline's
-  commit.
-- `history` is `prior_runs` (the default: agents read every prior run as above) or `none`: no
-  other run is listed or readable, the continued one included, and the brief alone carries what
-  earlier runs learned.
+`baseline_code_ref` with the same harness, so the numbers compare, and its planner keeps the
+same metric and states what the earlier run established and refuted.
 
 The platform pays for planning, within the time limits of the `planning` settings.
 

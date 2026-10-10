@@ -316,10 +316,6 @@ func (a *fakeApp) File(_ context.Context, token *github.Token, ref, path string)
 	return []byte(a.file), nil
 }
 
-func (a *fakeApp) Descends(context.Context, *github.Token, string, string) (string, error) {
-	panic("the accounts routes read a repository's history")
-}
-
 type githubWorld struct {
 	*world
 	installations *memInstallations
