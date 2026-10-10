@@ -86,8 +86,6 @@ type PlatformExperimentsStore interface {
 	Revise(ctx context.Context, id, message string, by domain.Actor, planUntil time.Time) error
 	// NameActors sets on each actor the name it carries now.
 	NameActors(ctx context.Context, actors []*domain.Actor) error
-	// AgentsOn lists the agents that ran a job testing or commented on each hypothesis.
-	AgentsOn(ctx context.Context, ids []string) (map[string][]string, error)
 	// JobHasFinding says a finding was filed for the job.
 	JobHasFinding(ctx context.Context, experimentID string) (bool, error)
 	// Decline stores why a draft's planner proposes nothing, until when the draft waits for a
@@ -192,8 +190,6 @@ type PlatformExperimentsService struct {
 	// idle tells researchers with no job for idleAfter that they are idle (WithIdleNotice).
 	idle      IdleNotices
 	idleAfter time.Duration
-	// personIdeas reads the open hypotheses people registered (WithPersonIdeas).
-	personIdeas PersonIdeas
 	// placement reads the live capacity jobs of a project's org can be placed on, node by node.
 	// The handler's WithLiveCapacity sets it, and until then it answers ErrLiveCapacityUnconfigured.
 	placement func(ctx context.Context, projectID string) (*Placement, error)
@@ -216,12 +212,6 @@ func (s *PlatformExperimentsService) WithIdleNotice(notices IdleNotices, after t
 type Environments interface {
 	Read(ctx context.Context, projectID, repository, ref string) (*string, error)
 	Get(ctx context.Context, key string) (*domain.Environment, error)
-}
-
-// WithPersonIdeas wires the graph the situation reads the ideas people registered from.
-func (s *PlatformExperimentsService) WithPersonIdeas(ideas PersonIdeas) *PlatformExperimentsService {
-	s.personIdeas = ideas
-	return s
 }
 
 // WithEnvironments wires the environments.

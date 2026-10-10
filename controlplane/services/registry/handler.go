@@ -878,28 +878,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}{Body: comments, TotalCount: total}, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
-		OperationID: "get-hypothesis-comment", Method: "GET", Path: "/hypotheses/{id}/comments/{comment_id}",
-		Summary: "Get one comment on a hypothesis or on the objective", Tags: []string{"hypotheses"},
-		Description: "id is a hypothesis, or the platform_experiment_id for the objective, and comment_id the comment's id, " +
-			"the detail of its comment.new event. The comment whole, with actor naming who wrote it. 404 for a comment it does not hold.",
-	}, func(ctx context.Context, in *struct {
-		ID        string `path:"id"`
-		CommentID string `path:"comment_id"`
-	}) (*struct{ Body *domain.HypothesisComment }, error) {
-		if err := commentsOf(ctx, in.ID); err != nil {
-			return nil, err
-		}
-		comment, err := h.svc.HypothesisComment(ctx, in.ID, in.CommentID)
-		if err != nil {
-			return nil, auth.Internal(h.logger, "get hypothesis comment", err, zap.String("id", in.ID))
-		}
-		if comment == nil {
-			return nil, auth.NotFound("comment")
-		}
-		return &struct{ Body *domain.HypothesisComment }{Body: comment}, nil
-	})
-
 	apidocs.Register(doc, apidocs.AudienceAgent, apidocs.AfterClose(huma.Operation{
 		OperationID: "set-hypothesis-status", Method: "POST", Path: "/hypotheses/{id}/status",
 		Summary: "Set a hypothesis's status", Tags: []string{"hypotheses"},

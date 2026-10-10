@@ -953,11 +953,9 @@ DROP TRIGGER IF EXISTS hypothesis_findings_notify ON hypothesis_findings;
 CREATE TRIGGER hypothesis_findings_notify AFTER INSERT ON hypothesis_findings
     FOR EACH ROW EXECUTE FUNCTION hypothesisloop_findings_notify();
 
--- A comment's value is the kind of credential that wrote it and its detail the comment's id, so
--- a reader tells a person's comment from an agent's and reads that one comment.
 CREATE OR REPLACE FUNCTION hypothesisloop_comments_notify() RETURNS trigger AS $$
 BEGIN
-    PERFORM hypothesisloop_notify_event('comment.new', NEW.hypothesis_id, NEW.actor_kind, NEW.id,
+    PERFORM hypothesisloop_notify_event('comment.new', NEW.hypothesis_id, '', '',
         NEW.platform_experiment_id, COALESCE(NEW.agent_id, ''));
     RETURN NULL;
 END;

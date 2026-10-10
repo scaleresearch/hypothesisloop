@@ -3,7 +3,6 @@ package quota
 import (
 	"context"
 	"errors"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
 )
 
 const typeA = domain.AcceleratorType("example.com/gpu=a")
@@ -236,30 +234,6 @@ func (s *situationStore) CompletedJobIDs(context.Context, string) (map[string]bo
 	return map[string]bool{}, nil
 }
 
-func (s *situationStore) AgentsOn(_ context.Context, ids []string) (map[string][]string, error) {
-	return map[string][]string{"hyp-tried": {"ag-2"}}, nil
-}
-
-func (s *situationStore) NameActors(_ context.Context, actors []*domain.Actor) error {
-	for _, a := range actors {
-		a.Name = "Ada " + a.ID
-	}
-	return nil
-}
-
-// ideaGraph holds two open ideas a person registered: one an agent built on, one nobody touched,
-// and one an agent ran a job on.
-type ideaGraph struct{}
-
-func (ideaGraph) PersonIdeas(context.Context, string, int) ([]graphdb.PersonIdea, error) {
-	person := domain.Actor{Kind: domain.ActorUser, ID: "u1"}
-	return []graphdb.PersonIdea{
-		{ID: "hyp-refined", Text: strings.Repeat("x", 400), Actor: person, RefinedBy: []string{"ag-1"}},
-		{ID: "hyp-untouched", Text: "try a context model", Actor: person},
-		{ID: "hyp-tried", Text: "try arithmetic coding", Actor: person, RefinedBy: []string{"ag-2"}},
-	}, nil
-}
-
 // situationRun is a running platform experiment of two researchers, one with a job running and
 // one with none for 25 minutes, whose baseline job takes two devices of typeA on one node.
 func situationRun(t *testing.T) (*PlatformExperimentsService, *situationStore) {
@@ -284,7 +258,7 @@ func situationRun(t *testing.T) (*PlatformExperimentsService, *situationStore) {
 		summaryAt: &summaryAt,
 		allowance: map[string]domain.MessageAllowance{"ag-1": {LeftThisHour: 6}, "ag-2": {LeftThisHour: 4}},
 	}
-	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute).WithPersonIdeas(ideaGraph{})
+	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute)
 	svc.placement = func(context.Context, string) (*Placement, error) {
 		return &Placement{
 			Clusters: []ClusterCapacity{{ClusterName: "c1", Accelerators: []AcceleratorCapacity{
@@ -327,12 +301,6 @@ func TestTheSituationAnswersTheRunAndTheRowsTheCallerMaySee(t *testing.T) {
 	}
 	if busy := all.Agents[0]; busy.Jobs != (JobCounts{Queued: 1, Running: 1}) || *busy.MinutesWithoutJobInFlight != 0 {
 		t.Fatalf("busy row: %+v", busy)
-	}
-
-	if len(all.Ideas) != 3 || all.Ideas[0].By != "Ada u1" || len([]rune(all.Ideas[0].Text)) != 301 ||
-		!slices.Equal(all.Ideas[0].TakenUpBy, []string{"Researcher 1"}) || len(all.Ideas[1].TakenUpBy) != 0 ||
-		!slices.Equal(all.Ideas[2].TakenUpBy, []string{"Researcher 2"}) {
-		t.Fatalf("ideas: %+v, want each person's idea cut, by its author's name, with who took it up once", all.Ideas)
 	}
 
 	own, err := svc.Situation(ctx, "pe-1", "ag-2")

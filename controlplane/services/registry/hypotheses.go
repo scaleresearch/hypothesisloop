@@ -74,7 +74,7 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor 
 		if err != nil || !announce {
 			return nil, err
 		}
-		return []db.Event{{Kind: db.EventHypothesisNew, Subject: h.ID, Value: string(actor.Kind),
+		return []db.Event{{Kind: db.EventHypothesisNew, Subject: h.ID,
 			PlatformExperimentID: h.PlatformExperimentID, AgentID: h.AgentID}}, nil
 	})
 	var held *graphdb.SimilarError
@@ -823,19 +823,6 @@ func (s *Service) ListHypothesisComments(ctx context.Context, hypothesisID strin
 		return nil, 0, fmt.Errorf("registry.ListHypothesisComments: %w", err)
 	}
 	return cs, total, nil
-}
-
-// HypothesisComment returns one comment on a hypothesis or the objective, with its author named,
-// nil when it has none of that id.
-func (s *Service) HypothesisComment(ctx context.Context, hypothesisID, commentID string) (*domain.HypothesisComment, error) {
-	c, err := s.store.HypothesisComment(ctx, hypothesisID, commentID)
-	if err != nil || c == nil {
-		return nil, err
-	}
-	if err := s.store.NameActors(ctx, []*domain.Actor{&c.Actor}); err != nil {
-		return nil, fmt.Errorf("registry.HypothesisComment: %w", err)
-	}
-	return c, nil
 }
 
 func (s *Service) requireAgent(ctx context.Context, agentID string) error {

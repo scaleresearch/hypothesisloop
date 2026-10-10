@@ -179,30 +179,3 @@ VALUES ($1, $2, $3, $4, 'unverified', 'an old one', now() - interval '1 hour')`,
 		t.Errorf("newest finding: got = %+v, %v, want the one by %+v", newest["hyp-"+peID], err, person)
 	}
 }
-
-// A comment is read by its id, its author with it, and the agents that worked on a hypothesis
-// are those that ran a job testing it or commented on it as themselves.
-func TestACommentIsReadByItsIDAndTheAgentsOnAHypothesisAreListed(t *testing.T) {
-	store, first := admitDataKeyFixture(t)
-	ctx := context.Background()
-	hyps := store.HypothesesStore
-	hypothesis := first.HypothesisID
-	person, err := hyps.CreateHypothesisComment(ctx, hypothesis, first.PlatformExperimentID, "", domain.Actor{Kind: domain.ActorUser, ID: "u-1"}, "try a context model")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := hyps.CreateHypothesisComment(ctx, hypothesis, first.PlatformExperimentID, first.AgentID, domain.Actor{Kind: domain.ActorAgent, ID: first.AgentID}, "on it"); err != nil {
-		t.Fatal(err)
-	}
-	got, err := hyps.HypothesisComment(ctx, hypothesis, person.ID)
-	if err != nil || got == nil || got.Text != "try a context model" || got.Actor.Kind != domain.ActorUser {
-		t.Fatalf("HypothesisComment = %+v, %v, want the person's comment", got, err)
-	}
-	if none, err := hyps.HypothesisComment(ctx, "hyp-elsewhere", person.ID); err != nil || none != nil {
-		t.Errorf("the comment under another hypothesis = %+v, %v, want none", none, err)
-	}
-	on, err := hyps.AgentsOn(ctx, []string{hypothesis, "hyp-untouched"})
-	if err != nil || len(on) != 1 || len(on[hypothesis]) != 1 || on[hypothesis][0] != first.AgentID {
-		t.Errorf("AgentsOn = %v, %v, want only %s on %s", on, err, first.AgentID, hypothesis)
-	}
-}

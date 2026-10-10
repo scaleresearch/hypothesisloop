@@ -1,7 +1,6 @@
 package quota
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -16,7 +15,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
@@ -30,67 +28,6 @@ type Situation struct {
 	Budget      SituationBudget       `json:"budget"`
 	Agents      []SituationAgent      `json:"agents" doc:"Every agent but a draft's planner. An agent's token reads its own row only."`
 	Coordinator *SituationCoordinator `json:"coordinator,omitempty" doc:"The hosted coordinator, absent on an agent's token and where the platform hosts none."`
-	Ideas       []SituationIdea       `json:"ideas" doc:"The open hypotheses a person registered, newest first, at most 10: suggestions put to every agent, each with the agents that took it up. Empty when there is none."`
-}
-
-// SituationIdea is an open hypothesis a person registered, and who took it up.
-type SituationIdea struct {
-	ID        string   `json:"id"`
-	Text      string   `json:"text" doc:"Its text, cut to its first 300 characters: hl hypothesis get ID has it whole."`
-	By        string   `json:"by" doc:"The name of the person who registered it."`
-	TakenUpBy []string `json:"taken_up_by" doc:"The names of the agents that registered a hypothesis building on it, ran a job testing it or commented on it. Empty while nobody took it up."`
-}
-
-// maxSituationIdeas and ideaCut bound the ideas every wake carries.
-const (
-	maxSituationIdeas = 10
-	ideaCut           = 300
-)
-
-// PersonIdeas reads the open hypotheses people registered, through the graph's own package.
-// Implemented by graphdb.Store.
-type PersonIdeas interface {
-	PersonIdeas(ctx context.Context, platformExperimentID string, limit int) ([]graphdb.PersonIdea, error)
-}
-
-// ideas is the open hypotheses people registered in pe, each with the names of the agents of
-// names that took it up.
-func (s *PlatformExperimentsService) ideas(ctx context.Context, pe string, names map[string]string) ([]SituationIdea, error) {
-	if s.personIdeas == nil {
-		return nil, errors.New("ideas: the hypothesis graph is not wired (WithPersonIdeas)")
-	}
-	found, err := s.personIdeas.PersonIdeas(ctx, pe, maxSituationIdeas)
-	if err != nil {
-		return nil, fmt.Errorf("ideas: %w", err)
-	}
-	ids := make([]string, len(found))
-	actors := make([]*domain.Actor, len(found))
-	for i := range found {
-		ids[i], actors[i] = found[i].ID, &found[i].Actor
-	}
-	on, err := s.store.AgentsOn(ctx, ids)
-	if err != nil {
-		return nil, fmt.Errorf("ideas: %w", err)
-	}
-	if err := s.store.NameActors(ctx, actors); err != nil {
-		return nil, fmt.Errorf("ideas: %w", err)
-	}
-	out := make([]SituationIdea, len(found))
-	for i, idea := range found {
-		text := []rune(idea.Text)
-		if len(text) > ideaCut {
-			text = append(text[:ideaCut], '…')
-		}
-		agents := append(slices.Clone(idea.RefinedBy), on[idea.ID]...)
-		slices.Sort(agents)
-		agents = slices.Compact(agents)
-		taken := make([]string, len(agents))
-		for j, agent := range agents {
-			taken[j] = cmp.Or(names[agent], agent)
-		}
-		out[i] = SituationIdea{ID: idea.ID, Text: string(text), By: idea.Actor.Name, TakenUpBy: taken}
-	}
-	return out, nil
 }
 
 // SituationRun is the run's clock.
@@ -537,13 +474,6 @@ func (s *PlatformExperimentsService) Situation(ctx context.Context, id, agentID 
 		}
 		out.Agents = append(out.Agents, situationAgent(row, budgets[row.AgentID]))
 	}
-	names := make(map[string]string, len(rows))
-	for _, row := range rows {
-		names[row.AgentID] = row.Name
-	}
-	if out.Ideas, err = s.ideas(ctx, id, names); err != nil {
-		return nil, fmt.Errorf("situation: %w", err)
-	}
 	if agentID == "" && pe.CoordinatorHosted && pe.Coordinator != nil {
 		if out.Coordinator, err = s.situationCoordinator(ctx, pe); err != nil {
 			return nil, fmt.Errorf("situation: %w", err)
@@ -635,8 +565,7 @@ func registerSituationHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"the target its target_vs_baseline sets against the baseline's value and the gap to it, and the best an hour and three hours ago), " +
 			"the capacity the run's jobs could use (free and total of its baseline job's type on each cluster its jobs can be placed on, fits_now: how many jobs shaped like the baseline job place now, node by node, and the run's jobs queued and running), " +
 			"the run's budget and spend, and for each agent its jobs queued and running, the subagents and turn its harness last reported, its activity, minutes without a job in flight, " +
-			"the messages it may still be sent this hour, its model account's allowance, and its share and the room left in it, " +
-			"and ideas: the open hypotheses a person registered, newest first, at most 10, each with its text cut to 300 characters, who registered it and the agents that took it up (built a hypothesis on it, ran a job testing it or commented on it). " +
+			"the messages it may still be sent this hour, its model account's allowance, and its share and the room left in it. " +
 			"An agent's token reads the run and its own row. A coordinator, a person or a key reads every row and the hosted coordinator: when its summary was last written and its model allowance.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`

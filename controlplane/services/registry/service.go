@@ -40,7 +40,6 @@ type Store interface {
 	// DescribeJobs sets on each job its agent's name.
 	DescribeJobs(ctx context.Context, jobs []*domain.Experiment) error
 	ListCommentsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, error)
-	HypothesisComment(ctx context.Context, hypothesisID, commentID string) (*domain.HypothesisComment, error)
 	CountCommentsByHypothesis(ctx context.Context, hypothesisID string) (int, error)
 	DeleteHypothesisComments(ctx context.Context, hypothesisID string) error
 	CountHypothesisActivity(ctx context.Context, ids []string) (map[string]db.HypothesisActivity, error)

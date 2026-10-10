@@ -14,14 +14,6 @@ const (
 	ActorUnverified ActorKind = "unverified"
 )
 
-// PersonKinds are the kinds of a person's credential: signed in, an API key, or staff.
-var PersonKinds = []ActorKind{ActorUser, ActorKey, ActorStaff}
-
-// Person says the credential is a person's, never an agent's or a coordinator's.
-func (k ActorKind) Person() bool {
-	return k == ActorUser || k == ActorKey || k == ActorStaff
-}
-
 // Actor is whose credential made a request: a signed-in person, an API key, an agent, the
 // coordinator of a platform experiment (ID is the experiment's), or a staff token no person
 // signed in with (ID is empty). It is made from the authenticated caller and never from what a

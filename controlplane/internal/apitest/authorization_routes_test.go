@@ -276,7 +276,6 @@ var routes = []route{
 	{method: "POST", path: "/hypotheses/{id}/links", request: "/hypotheses/<hyp>/links", body: `{"agent_id":"<agent>","type":"related","to":"hyp-own"}`, rule: owned(agentAudience, reached)},
 	{method: "POST", path: "/hypotheses/{id}/comments", request: "/hypotheses/<hyp>/comments", body: `{"agent_id":"<agent>","text":"t"}`, rule: owned(agentAudience, reached)},
 	{method: "GET", path: "/hypotheses/{id}/comments", request: "/hypotheses/<hyp>/comments", rule: scoped(agentAudience, reached), sharedRead: true},
-	{method: "GET", path: "/hypotheses/{id}/comments/{comment_id}", request: "/hypotheses/<hyp>/comments/c-1", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "POST", path: "/hypotheses/{id}/status", request: "/hypotheses/<hyp>/status", body: `{"agent_id":"<agent>","status":"confirmed"}`, rule: owned(agentAudience, reached)},
 	{method: "GET", path: "/platform-experiments/{id}/findings", request: "/platform-experiments/<pe>/findings", rule: scoped(coordinatorAudience, reached), sharedRead: true},
 

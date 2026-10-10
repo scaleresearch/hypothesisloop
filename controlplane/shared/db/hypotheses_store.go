@@ -271,25 +271,6 @@ FROM hypothesis_comments WHERE hypothesis_id = $1 ORDER BY created_at ASC LIMIT 
 	return out, rows.Err()
 }
 
-// HypothesisComment returns the comment of that id filed against hypothesisID, nil when there is
-// none.
-func (s *HypothesesStore) HypothesisComment(ctx context.Context, hypothesisID, commentID string) (*domain.HypothesisComment, error) {
-	c := &domain.HypothesisComment{}
-	var actorKind domain.ActorKind
-	var actorID, author string
-	err := s.pool.pool.QueryRow(ctx, `SELECT id, hypothesis_id, platform_experiment_id, COALESCE(agent_id, ''), actor_kind, actor_id, author, text, created_at
-FROM hypothesis_comments WHERE hypothesis_id = $1 AND id = $2`, hypothesisID, commentID).
-		Scan(&c.ID, &c.HypothesisID, &c.PlatformExperimentID, &c.AgentID, &actorKind, &actorID, &author, &c.Text, &c.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("hypotheses_store.HypothesisComment: %w", err)
-	}
-	c.Actor = domain.StoredActor(actorKind, actorID, author, c.AgentID)
-	return c, nil
-}
-
 // clampHypothesisPage applies the shared list bounds to a hypothesis sub-list page.
 func clampHypothesisPage(limit, offset int) (int, int) {
 	if limit <= 0 {
@@ -416,30 +397,4 @@ WHERE platform_experiment_id = $1 GROUP BY 1`
 		return nil, fmt.Errorf("hypotheses_store.Evidence: %w", err)
 	}
 	return out, nil
-}
-
-// AgentsOn lists, for each of ids, the agents that ran a job testing it or wrote a comment on it,
-// by id, sorted. A hypothesis no agent touched has no entry.
-func (s *HypothesesStore) AgentsOn(ctx context.Context, ids []string) (map[string][]string, error) {
-	out := map[string][]string{}
-	if len(ids) == 0 {
-		return out, nil
-	}
-	rows, err := s.pool.pool.Query(ctx, `
-SELECT hypothesis_id, agent_id FROM experiments WHERE hypothesis_id = ANY($1) AND agent_id <> ''
-UNION
-SELECT hypothesis_id, agent_id FROM hypothesis_comments WHERE hypothesis_id = ANY($1) AND agent_id IS NOT NULL AND actor_kind = $2
-ORDER BY 1, 2`, ids, string(domain.ActorAgent))
-	if err != nil {
-		return nil, fmt.Errorf("hypotheses_store.AgentsOn: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id, agent string
-		if err := rows.Scan(&id, &agent); err != nil {
-			return nil, fmt.Errorf("hypotheses_store.AgentsOn: scan: %w", err)
-		}
-		out[id] = append(out[id], agent)
-	}
-	return out, rows.Err()
 }

@@ -34,14 +34,6 @@ leave the branches of other runs in the repository unread. Where the run declare
 `start_commit` (`hl situation`), a root child starts from it in place of the baseline's commit,
 while the baseline and the target stay measured on the baseline's.
 
-An idea a person registers reaches you as an update that reads `a person's idea, by NAME` with
-its text, and `ideas` in the situation lists the open ones with who took each up. It is a
-suggestion from the people who own the run, never an order, and the brief still outranks it:
-judge it on its merit against what is measured. Where it is worth a trial, register your own
-hypothesis that builds on it, so its author sees who took it up, and test that; where the
-evidence already settles it, say why in a comment on it (`hl hypothesis comment ID`). A
-person's comment comes with its words too: a note from the owner, read whole.
-
 The registry is the lab notebook every agent and each of your restarts reads and writes: the only
 memory that survives them. It is a graph rooted at the objective (`root`). A *hypothesis* is one
 falsifiable claim. The root's children are the distinct approaches: each a whole new way of
