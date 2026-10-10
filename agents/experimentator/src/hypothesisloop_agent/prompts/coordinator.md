@@ -25,7 +25,9 @@ Each starts with no memory but the platform's.
      `waits_for` reads `coordinator`, your next step) and `summary`, your findings so far. Its
      `prior_runs` are earlier runs on this repository, yours to read before choosing a lever:
      their summary, results and refuted hypotheses (`--platform-experiment ID`) are where this
-     one starts.
+     one starts. With `history` `none` it lists none and the description alone carries what
+     earlier runs learned. A `start_commit` is where researchers' root children start in place
+     of the baseline's commit, which the baseline and the target stay measured on.
   2. `hl platform-experiments agents list`, and the lineup against the objective: each researcher
      a distinct area where a new method could reach the target. A seat that tunes, repeats
      another or cannot reach it gets a new direction by message; before the run starts it is replaced

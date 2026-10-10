@@ -51,7 +51,7 @@ type hypothesisWithJobs struct {
 	Links domain.HypothesisLinks `json:"links"`
 	// Implementations and BaseRef are read off the jobs on record: neither is stored.
 	Implementations []domain.Implementation     `json:"implementations" doc:"The branches its jobs ran on, one per agent that ran it: agent_id, branch and code_ref, the commit the newest job on that branch ran."`
-	BaseRef         string                      `json:"base_ref,omitempty" doc:"The commit a new implementation starts from, repository_url@sha: the one the newest completed job of its first builds_on parent ran, whichever agent's. A parent with no completed job passes the question to its own first parent, and the objective answers with the declared baseline job's commit. Absent while that chain ends at the objective and no baseline is declared."`
+	BaseRef         string                      `json:"base_ref,omitempty" doc:"The commit a new implementation starts from, repository_url@sha: the one the newest completed job of its first builds_on parent ran, whichever agent's. A parent with no completed job passes the question to its own first parent, and the objective answers with the platform experiment's start_commit, or with none declared the declared baseline job's commit. Absent while that chain ends at an objective with neither."`
 	Jobs            []*domain.Experiment        `json:"jobs"`
 	JobCount        int                         `json:"job_count"`
 	Findings        []*domain.HypothesisFinding `json:"findings"`
@@ -660,7 +660,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"A hypothesis and a branch are two things: any agent may run its own implementation of any hypothesis, and implementations lists " +
 			"them as the jobs show them, {agent_id, branch, code_ref}, code_ref being the commit the newest job on that branch ran. " +
 			"base_ref is the commit a new implementation starts from: the one the newest completed job of the first builds_on parent ran, " +
-			"that parent's own base_ref while it has no completed job, and the declared baseline job's commit where the chain ends at the objective. ?limit (default 20, max 200, 422 invalid_page over it) and " +
+			"that parent's own base_ref while it has no completed job, and where the chain ends at the objective the platform experiment's start_commit, or with none declared the declared baseline job's commit. ?limit (default 20, max 200, 422 invalid_page over it) and " +
 			"?offset apply to each of jobs, findings and comments alike, oldest first; " +
 			"job_count/finding_count/comment_count report the full size of each set so a caller can page the rest.",
 	}, func(ctx context.Context, in *struct {

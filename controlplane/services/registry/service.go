@@ -46,7 +46,7 @@ type Store interface {
 	Evidence(ctx context.Context, platformExperimentID string) (map[string]any, error)
 	Implementations(ctx context.Context, hypothesisID string) ([]domain.Implementation, error)
 	LastCompletedCodeRef(ctx context.Context, hypothesisID string) (string, error)
-	BaselineCodeRef(ctx context.Context, platformExpID string) (string, error)
+	ObjectiveCodeRef(ctx context.Context, platformExpID string) (string, error)
 }
 
 // Graph is the hypothesis graph: every hypothesis and link, and the native read query over them.

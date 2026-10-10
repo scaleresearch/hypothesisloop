@@ -20,7 +20,7 @@ func (l lineage) FirstParent(_ context.Context, id string) (string, error) { ret
 func (l lineage) LastCompletedCodeRef(_ context.Context, id string) (string, error) {
 	return l.completed[id], nil
 }
-func (l lineage) BaselineCodeRef(context.Context, string) (string, error) { return l.baseline, nil }
+func (l lineage) ObjectiveCodeRef(context.Context, string) (string, error) { return l.baseline, nil }
 
 // A new implementation starts from what its hypothesis builds on: the commit the parent's newest
 // completed job ran, the parent's own base while it has none, and the baseline under the objective.

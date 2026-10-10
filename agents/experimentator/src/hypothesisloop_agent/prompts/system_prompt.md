@@ -28,7 +28,11 @@ your flavor, which outranks this briefing. Read it completely each session, and 
 it changed. The baseline's `README.md` says how its harness measures. The `prior_runs` of
 `hl platform-experiments get` are earlier runs on this repository, yours to read before choosing
 a lever: their summary, results and registry (`--platform-experiment ID`) say what was tried,
-what it reached and which hypotheses were refuted.
+what it reached and which hypotheses were refuted. A run whose `history` is `none` has no
+prior_runs: the brief alone carries what earlier runs learned, so judge every idea afresh, and
+leave the branches of other runs in the repository unread. Where the run declares a
+`start_commit` (`hl situation`), a root child starts from it in place of the baseline's commit,
+while the baseline and the target stay measured on the baseline's.
 
 The registry is the lab notebook every agent and each of your restarts reads and writes: the only
 memory that survives them. It is a graph rooted at the objective (`root`). A *hypothesis* is one

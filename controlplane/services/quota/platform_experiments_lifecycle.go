@@ -14,6 +14,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"go.uber.org/zap"
 )
@@ -179,6 +180,14 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	if err := s.requireContinuedMetrics(ctx, req.Continues, req.Metrics); err != nil {
 		return nil, err
 	}
+	history, err := resolveHistory(req.History)
+	if err != nil {
+		return nil, err
+	}
+	start, err := s.requireStart(ctx, req.ProjectID, req.repository.Named, req.Continues, req.StartCommit)
+	if err != nil {
+		return nil, err
+	}
 	id, err := domain.NewID(domain.PlatformExperimentIDPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
@@ -209,6 +218,8 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		RepositoryAccount:         req.repository.CreateOn,
 		AgentImage:                req.AgentImage,
 		Continues:                 req.Continues,
+		StartCommit:               start,
+		History:                   history,
 		Actor:                     req.createdBy,
 	}
 	pe.BaselineDueAt = pe.StartsAt.Add(s.cfg.BaselineLimit)
@@ -243,6 +254,69 @@ func (s *PlatformExperimentsService) requireContinuable(ctx context.Context, pro
 		return refuseUpdate(422, "invalid_continues", "continues %s, which declared no baseline: there is no harness to carry on", continues)
 	}
 	return nil
+}
+
+// resolveHistory is the history a create or a draft states, refused as invalid_history when it
+// is none of the two.
+func resolveHistory(stated string) (domain.History, error) {
+	history, err := domain.ResolveHistory(stated)
+	if err != nil {
+		return "", refuseUpdate(422, "invalid_history", "%s", err)
+	}
+	return history, nil
+}
+
+// requireStart resolves start, the commit a run's researchers start from, to its full sha in
+// repository, and refuses one that does not descend from the commit of the baseline job of the
+// run continues names: the baseline starts from that commit, so it measures the code researchers
+// change. Empty start is the baseline's commit itself.
+func (s *PlatformExperimentsService) requireStart(ctx context.Context, projectID, repository, continues, start string) (string, error) {
+	if start == "" {
+		return "", nil
+	}
+	if !commitShaped(start) {
+		return "", refuseUpdate(422, "invalid_start_commit", "start_commit %q is no commit: a sha of 7 to 40 hex digits", start)
+	}
+	if continues == "" {
+		return "", refuseUpdate(422, "invalid_start_commit", "start_commit descends from the commit the baseline starts from, and a run that starts fresh has none until its baseline agent measures one: name the run it carries on in continues")
+	}
+	prior, err := s.store.GetPlatformExperiment(ctx, continues)
+	if err != nil || prior == nil {
+		return "", fmt.Errorf("platform_experiments: reading the run continued, %s: %v", continues, err)
+	}
+	baseline, err := s.store.GetExperiment(ctx, prior.BaselineJobID)
+	if err != nil || baseline == nil {
+		return "", fmt.Errorf("platform_experiments: reading baseline job %s of the run continued: %v", prior.BaselineJobID, err)
+	}
+	ancestor := commitOf(baseline.CodeRef)
+	sha, err := s.repos.Descends(ctx, projectID, repository, ancestor, strings.ToLower(start))
+	switch {
+	case errors.Is(err, githost.ErrCommitNotFound):
+		return "", refuseUpdate(422, "invalid_start_commit", "repository %s holds no commit %s", repository, start)
+	case errors.Is(err, githost.ErrNotDescendant):
+		return "", refuseUpdate(422, "start_commit_not_descendant", "start_commit %s does not descend from %s, the commit of baseline job %s of %s that this run's baseline starts from: researchers start from that commit or one that builds on it, so the baseline measures the code they change", start, ancestor, prior.BaselineJobID, continues)
+	case err != nil:
+		return "", err
+	}
+	return sha, nil
+}
+
+// commitShaped says s is a full or abbreviated commit sha.
+func commitShaped(s string) bool {
+	if len(s) < 7 || len(s) > 40 {
+		return false
+	}
+	for _, c := range strings.ToLower(s) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// commitOf is the sha of a code_ref, repository_url@sha.
+func commitOf(codeRef string) string {
+	return codeRef[strings.LastIndex(codeRef, "@")+1:]
 }
 
 // requireContinuedMetrics refuses metrics that measure otherwise than the run continues names:

@@ -44,6 +44,8 @@ var statusWaiters = map[string]Waiter{
 	"baseline_missing_metric":      WaitsForCoordinator,
 	"baseline_environment_differs": WaitsForCoordinator,
 	"baseline_not_in_environment":  WaitsForCoordinator,
+	// Another baseline agent measures the commit start_commit builds on.
+	"baseline_not_ancestor_of_start": WaitsForCoordinator,
 	// The baseline agent declares the job of its strongest configuration: the coordinator
 	// declares one, or adds a baseline agent to measure it.
 	"baseline_weaker_than_own_job": WaitsForCoordinator,

@@ -112,6 +112,10 @@ func (f *rosterStore) Credential(context.Context, string, string, bool) (*githos
 
 func (f *rosterStore) Serves(string, string, string, string) bool { return false }
 
+func (f *rosterStore) Descends(context.Context, string, string, string, string) (string, error) {
+	panic("the roster read a repository's history")
+}
+
 func (f *rosterStore) FileAt(context.Context, string, string, string, string) ([]byte, error) {
 	return nil, githost.ErrFileNotFound
 }

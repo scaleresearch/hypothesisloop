@@ -340,7 +340,15 @@ type PlatformExperiment struct {
 	Goal string `json:"goal,omitempty"`
 	// Continues is the closed run it carries on, fixed at creation, empty for one that starts
 	// fresh. Its baseline starts from that run's; like every prior run, it is read as its own.
-	Continues string `json:"continues,omitempty" doc:"The closed platform experiment of the same project and repository this one carries on, fixed at creation. Absent on one that starts fresh. Its baseline starts from the commit of that run's baseline job (that run's baseline_job_id), so the two are measured by the same harness. It is one of prior_runs, read as every prior run is."`
+	Continues string `json:"continues,omitempty" doc:"The closed platform experiment of the same project and repository this one carries on, fixed at creation. Absent on one that starts fresh. Its baseline starts from the commit of that run's baseline job, continues_code_ref, so the two are measured by the same harness. With history prior_runs it is one of prior_runs, read as every prior run is."`
+	// ContinuesCodeRef is the commit the baseline job of the run it continues ran, read from
+	// that run's records: where its own baseline branch starts.
+	ContinuesCodeRef string `json:"continues_code_ref,omitempty" doc:"The code_ref (repository_url@sha) of the baseline job of the run continues names: the commit this run's baseline branch starts from. Absent on one that starts fresh."`
+	// StartCommit is the commit researchers start from, fixed at creation: a descendant of the
+	// baseline's commit, or empty for the baseline's commit itself.
+	StartCommit string `json:"start_commit,omitempty" doc:"The full sha of the commit a hypothesis that builds on the objective starts from, fixed at creation, in place of the baseline job's commit. It is the baseline's commit or a descendant of it: the baseline, and so every target_vs_baseline, stays measured on the baseline's commit. Absent where researchers start from the baseline's commit."`
+	// History is which earlier runs its agents and coordinator read, fixed at creation.
+	History History `json:"history" enum:"prior_runs,none" doc:"Which earlier runs its agents, coordinator and planner read, fixed at creation. prior_runs: every closed run of the same project and repository that ran, listed as prior_runs and read as their own. none: no other run; the description alone carries what earlier runs learned."`
 	// Actor is whose credential created it, unverified with no id on one created before this
 	// was kept. Carried by a read of one platform experiment and left out of a list.
 	Actor *Actor `json:"actor,omitempty"`
@@ -394,6 +402,29 @@ func (p *PlatformExperiment) ClosesAt() time.Time {
 // AwaitsAgents says the platform experiment runs and no researcher is at work yet.
 func (p *PlatformExperiment) AwaitsAgents() bool {
 	return p.Status == PlatformExpRunning && p.StartedAt.IsZero()
+}
+
+// History is which earlier runs of its project and repository a platform experiment's agents,
+// coordinator and planner read as their own.
+type History string
+
+const (
+	// HistoryPriorRuns reads every prior run: each closed run of the same project and repository
+	// that ran.
+	HistoryPriorRuns History = "prior_runs"
+	// HistoryNone reads no other run.
+	HistoryNone History = "none"
+)
+
+// ResolveHistory is the history a create or a draft states, prior_runs where it states none.
+func ResolveHistory(stated string) (History, error) {
+	switch History(stated) {
+	case "":
+		return HistoryPriorRuns, nil
+	case HistoryPriorRuns, HistoryNone:
+		return History(stated), nil
+	}
+	return "", fmt.Errorf("history is %q, and is prior_runs (its agents read every closed run of the project and repository) or none (they read no other run)", stated)
 }
 
 // PriorRun is a closed platform experiment of the same project and repository as the one it is

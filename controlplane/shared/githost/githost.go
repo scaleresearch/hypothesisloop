@@ -9,6 +9,13 @@ import (
 // ErrFileNotFound is FileAt's answer for a path the repository does not hold at that ref.
 var ErrFileNotFound = errors.New("githost: no such file")
 
+// ErrCommitNotFound is Descends' answer for a commit the repository does not hold.
+var ErrCommitNotFound = errors.New("githost: no such commit")
+
+// ErrNotDescendant is Descends' answer for a commit that is not the ancestor named and does not
+// descend from it.
+var ErrNotDescendant = errors.New("githost: the commit does not descend from the ancestor")
+
 // Provider is the git host the platform experiments of a deployment keep their code on. A
 // repository is the name the host knows it by. What a call refuses is returned as the API
 // answers it.
@@ -33,6 +40,11 @@ type Provider interface {
 	// FileAt reads a file of the repository at ref, a branch or a commit: ErrFileNotFound when
 	// it holds none there.
 	FileAt(ctx context.Context, projectID, repository, ref, path string) ([]byte, error)
+	// Descends returns the full sha of commit, a full or abbreviated sha of the repository, when
+	// it is ancestor or descends from it: ErrCommitNotFound for one the repository does not
+	// hold, ErrNotDescendant for one that does not descend from ancestor. A host that serves the
+	// platform no history refuses.
+	Descends(ctx context.Context, projectID, repository, ancestor, commit string) (string, error)
 	// Credential mints what git authenticates to that one repository with. write says whether
 	// it may push.
 	Credential(ctx context.Context, projectID, repository string, write bool) (*Credential, error)

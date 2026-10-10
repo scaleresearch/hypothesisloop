@@ -1634,3 +1634,10 @@ ALTER TABLE experiments DROP COLUMN IF EXISTS is_check;
 -- The closed run of the same project and repository a platform experiment continues, NULL for one
 -- that starts fresh. Its agents read that run, and start from its baseline's commit.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS continues TEXT REFERENCES platform_experiments (id);
+
+-- The commit researchers start from in place of the baseline's, a descendant of it, and which
+-- earlier runs of the project and repository the agents read: every one, or none.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS start_commit TEXT NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS history TEXT NOT NULL DEFAULT 'prior_runs';
+ALTER TABLE platform_experiments DROP CONSTRAINT IF EXISTS platform_experiments_history_check;
+ALTER TABLE platform_experiments ADD CONSTRAINT platform_experiments_history_check CHECK (history IN ('prior_runs', 'none'));

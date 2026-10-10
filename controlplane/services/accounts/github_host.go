@@ -197,6 +197,24 @@ func (h *GitHubHost) FileAt(ctx context.Context, projectID, repository, ref, pat
 	return data, nil
 }
 
+func (h *GitHubHost) Descends(ctx context.Context, projectID, repository, ancestor, commit string) (string, error) {
+	const op = "compare-commits"
+	token, err := h.token(ctx, projectID, repository, github.Read)
+	if err != nil {
+		return "", refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+	}
+	sha, err := h.github.Descends(ctx, token, ancestor, commit)
+	switch {
+	case errors.Is(err, github.ErrCommitNotFound):
+		return "", githost.ErrCommitNotFound
+	case errors.Is(err, github.ErrNotDescendant):
+		return "", githost.ErrNotDescendant
+	case err != nil:
+		return "", refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+	}
+	return sha, nil
+}
+
 // Credential mints an installation token for the one repository. The repository is one a
 // platform experiment already names, so one the org no longer reaches is a conflict.
 func (h *GitHubHost) Credential(ctx context.Context, projectID, repository string, write bool) (*githost.Credential, error) {

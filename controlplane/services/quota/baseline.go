@@ -2,6 +2,7 @@ package quota
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
@@ -31,6 +33,9 @@ type Baseline struct {
 	// Declared is the environment file at the head of the baseline branch, nil when it holds
 	// none: what a job of the default branch runs in.
 	Declared *string
+	// NotAncestorOfStart says the job ran a commit the platform experiment's start_commit does
+	// not descend from, never so where it declares none.
+	NotAncestorOfStart bool
 	// References is what the experiment's COMPLETED jobs measured of each reference metric,
 	// the baseline's follow-up jobs among them.
 	References []MetricReference
@@ -87,10 +92,28 @@ func (s *PlatformExperimentsService) readBaseline(ctx context.Context, pe *domai
 	if out.Declared, err = s.environments.Read(ctx, pe.ProjectID, pe.Repository, domain.BaselineBranch(pe.ID)); err != nil {
 		return nil, err
 	}
+	if out.NotAncestorOfStart, err = s.notAncestorOfStart(ctx, pe, job.CodeRef); err != nil {
+		return nil, err
+	}
 	if out.References, err = s.references(ctx, pe); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// notAncestorOfStart says pe declares a start_commit that does not descend from codeRef.
+func (s *PlatformExperimentsService) notAncestorOfStart(ctx context.Context, pe *domain.PlatformExperiment, codeRef string) (bool, error) {
+	if pe.StartCommit == "" {
+		return false, nil
+	}
+	_, err := s.repos.Descends(ctx, pe.ProjectID, pe.Repository, commitOf(codeRef), pe.StartCommit)
+	switch {
+	case errors.Is(err, githost.ErrNotDescendant), errors.Is(err, githost.ErrCommitNotFound):
+		return true, nil
+	case err != nil:
+		return false, err
+	}
+	return false, nil
 }
 
 // refusedBaseline is a baseline declaration the caller can fix: reason names what is wrong.
@@ -107,6 +130,9 @@ func checkBaseline(pe *domain.PlatformExperiment, baseline *Baseline) error {
 	}
 	if branch := domain.BaselineBranch(pe.ID); baseline.Job.Branch != branch {
 		return refusedBaseline("baseline_not_on_branch", "baseline job %s ran branch %q, and the baseline is measured on %s alone: name the control's job of that branch", baseline.Job.ID, baseline.Job.Branch, branch)
+	}
+	if baseline.NotAncestorOfStart {
+		return refusedBaseline("baseline_not_ancestor_of_start", "baseline job %s ran %s, and start_commit %s, where researchers start, does not descend from it: the baseline measures the code they change. Name a job of %s that ran an ancestor of start_commit, the commit the branch started from among them", baseline.Job.ID, baseline.Job.CodeRef, pe.StartCommit, domain.BaselineBranch(pe.ID))
 	}
 	return checkMeasurement(pe, baseline)
 }

@@ -7,14 +7,17 @@ run `git clone {repository_url} .` in {workdir}, the directory every command sta
     in. {start}
 ==== start_baseline
 Work on branch `hl/{platform_experiment_id}/baseline`; `hl job submit` pushes it. A run that
-    `continues` another starts that branch from the other's `baseline_code_ref` and measures
-    the control with its harness, changed only where it breaks the brief's definition of a
-    metric (say so in `README.md`), so the numbers of both compare. Run
+    `continues` another starts that branch from `continues_code_ref` of `hl platform-experiments
+    get` and measures the control with its harness, changed only where it breaks the brief's
+    definition of a metric (say so in `README.md`), so the numbers of both compare. Where it
+    declares a `start_commit`, the job you declare runs an ancestor of it, that commit
+    unchanged first of all, or the declaration is refused. Run
     `hl repo init` in the clone before you write anything: it writes the experiment's files
     from what the platform holds. `hl repo check` says what is left.
 ==== start_researcher
 `hl hypothesis checkout ID` puts the clone on your branch of hypothesis ID, made
-    from the code it builds on (the baseline's for a root child), after a restart too. Its
+    from the code it builds on (for a root child the run's `start_commit` where it declares one,
+    else the baseline's), after a restart too. Its
     harness, environment, `metrics.py` and `.hypothesisloop/job.yaml` stay as they are unless
     the idea is about them. Commit there; `hl job submit` pushes it.
 ==== repository_line

@@ -27,6 +27,10 @@ func (worldRepositories) FileAt(context.Context, string, string, string, string)
 	return nil, githost.ErrFileNotFound
 }
 
+func (worldRepositories) Descends(context.Context, string, string, string, string) (string, error) {
+	panic("the handler read a repository's history")
+}
+
 func (worldRepositories) Credential(context.Context, string, string, bool) (*githost.Credential, error) {
 	panic("the handler asked for a git credential")
 }

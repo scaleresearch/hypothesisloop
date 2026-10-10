@@ -290,7 +290,8 @@ func TestARepositorysAddressIsStoredAtCreationAndBackfilledOnceForGitHub(t *test
 	create := func(repository, address string) string {
 		t.Helper()
 		pe := &domain.PlatformExperiment{
-			ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "with code", BudgetAcceleratorHours: 10,
+			History: domain.HistoryPriorRuns,
+			ID:      "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "with code", BudgetAcceleratorHours: 10,
 			MaxAgents: 10, StartsAt: now, EndsAt: now.Add(time.Hour), Status: domain.PlatformExpOpen,
 			Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
 			Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: now, UpdatedAt: now,

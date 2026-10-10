@@ -41,12 +41,14 @@ type SituationRun struct {
 	EndsAt        *time.Time         `json:"ends_at,omitempty" doc:"When the run ends and the platform closes it. Absent until the run starts and once it closed."`
 	MinutesLeft   *int               `json:"minutes_left,omitempty" doc:"Whole minutes until ends_at, 0 on a closed run. Absent on a run not started."`
 	Stage         *SituationStage    `json:"stage,omitempty" doc:"The stage the run is in, while it runs."`
+	StartCommit   string             `json:"start_commit,omitempty" doc:"The commit a hypothesis that builds on the objective starts from, in place of the baseline's commit, which the baseline and every target stay measured on. Absent where researchers start from the baseline's commit."`
+	History       domain.History     `json:"history" doc:"Which earlier runs the agents read as their own: prior_runs (every one hl platform-experiments get lists as prior_runs) or none (no other run: the description alone carries what earlier runs learned)."`
 }
 
 // clockOf is the clock of pe at now: a closed run has no time left whatever its ends_at, and one
 // not started counts no minutes.
 func clockOf(pe *domain.PlatformExperiment, now time.Time) SituationRun {
-	out := SituationRun{Now: now, Status: string(pe.Status)}
+	out := SituationRun{Now: now, Status: string(pe.Status), StartCommit: pe.StartCommit, History: pe.History}
 	switch pe.Status {
 	case domain.PlatformExpClosed:
 		zero := 0

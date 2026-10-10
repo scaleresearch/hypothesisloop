@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -86,6 +87,22 @@ type fakeRepositories struct {
 	notCreated error
 	// notOn is what refuses an account before anything is created.
 	notOn error
+	// commits are the commits of the repository, each with every commit it descends from.
+	commits map[string][]string
+}
+
+// Descends resolves commit as a prefix of one of f.commits.
+func (f *fakeRepositories) Descends(_ context.Context, _, _, ancestor, commit string) (string, error) {
+	for sha, ancestors := range f.commits {
+		if !strings.HasPrefix(sha, commit) {
+			continue
+		}
+		if sha != ancestor && !slices.Contains(ancestors, ancestor) {
+			return "", githost.ErrNotDescendant
+		}
+		return sha, nil
+	}
+	return "", githost.ErrCommitNotFound
 }
 
 func (f *fakeRepositories) Create(_ context.Context, projectID, account, name, _ string, files map[string]string) (string, error) {

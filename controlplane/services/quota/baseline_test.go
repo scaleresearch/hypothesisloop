@@ -118,15 +118,16 @@ func TestABaselineIsDeclaredOnAnOpenExperimentAndCheckedAgainstTheJob(t *testing
 		change func(*Baseline, *domain.PlatformExperiment)
 		reason string
 	}{
-		"a job that does not exist":       {map[string]any{"baseline_job_id": "job-2"}, nil, "no_baseline"},
-		"no job named":                    {map[string]any{"baseline_job_id": ""}, nil, "no_baseline"},
-		"a researcher's job":              {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.OwnerRole = domain.SignupRoleCompetitor }, "no_baseline"},
-		"a job of another experiment":     {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Job.PlatformExperimentID = "pe-other" }, "no_baseline"},
-		"a job that failed":               {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Job.Status = domain.StatusFailed }, "baseline_not_completed"},
-		"nothing filed":                   {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Finding = false }, "baseline_without_finding"},
-		"a job of the check branch":       {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Job.Branch = "hl/pe-1/baseline-check" }, "baseline_not_on_branch"},
-		"a metric the job never reported": {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { delete(b.Reported, "val_loss") }, "baseline_missing_metric"},
-		"a gate the baseline fails":       {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Reported["exact_match"] = 0.97 }, "baseline_breaks_constraint"},
+		"a job that does not exist":               {map[string]any{"baseline_job_id": "job-2"}, nil, "no_baseline"},
+		"no job named":                            {map[string]any{"baseline_job_id": ""}, nil, "no_baseline"},
+		"a researcher's job":                      {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.OwnerRole = domain.SignupRoleCompetitor }, "no_baseline"},
+		"a job of another experiment":             {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Job.PlatformExperimentID = "pe-other" }, "no_baseline"},
+		"a job that failed":                       {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Job.Status = domain.StatusFailed }, "baseline_not_completed"},
+		"nothing filed":                           {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Finding = false }, "baseline_without_finding"},
+		"a job of the check branch":               {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Job.Branch = "hl/pe-1/baseline-check" }, "baseline_not_on_branch"},
+		"a commit start_commit does not build on": {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.NotAncestorOfStart = true }, "baseline_not_ancestor_of_start"},
+		"a metric the job never reported":         {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { delete(b.Reported, "val_loss") }, "baseline_missing_metric"},
+		"a gate the baseline fails":               {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Reported["exact_match"] = 0.97 }, "baseline_breaks_constraint"},
 		// The baseline cost 0.4 and a trial holds 0.6, its estimate: a budget of 1 covered the
 		// cost twice and neither researcher's first job.
 		"a budget below one trial apiece": {declaration, func(_ *Baseline, pe *domain.PlatformExperiment) { pe.BudgetAcceleratorHours = 1 }, "budget_below_baseline"},

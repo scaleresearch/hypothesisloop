@@ -14,7 +14,8 @@ func createTestPEWithCoordinator(t *testing.T, pool *Pool, launcher string) stri
 	t.Helper()
 	now := time.Now().UTC()
 	pe := &domain.PlatformExperiment{
-		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "coordinated", BudgetAcceleratorHours: 10,
+		History: domain.HistoryPriorRuns,
+		ID:      "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "coordinated", BudgetAcceleratorHours: 10,
 		MaxAgents: 10, StartsAt: now, DurationHours: 24, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
 		Stages:    []domain.Stage{{LengthPct: 40, EvictPct: 75}, {LengthPct: 60, EvictPct: 0}},
@@ -148,7 +149,8 @@ func TestAPlatformExperimentIsCreatedWithItsAgentsOrNotAtAll(t *testing.T) {
 	now := time.Now().UTC()
 	experiment := func(maxHosted int) *domain.PlatformExperiment {
 		return &domain.PlatformExperiment{
-			ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "created", BudgetAcceleratorHours: 6,
+			History: domain.HistoryPriorRuns,
+			ID:      "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "created", BudgetAcceleratorHours: 6,
 			MaxAgents: 3, StartsAt: now, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
 			Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
 			Stages:    []domain.Stage{{LengthPct: 40, EvictPct: 75}, {LengthPct: 60, EvictPct: 0}},

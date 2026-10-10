@@ -49,7 +49,7 @@ func draftName(goal string) string {
 // an agent the platform runs, of role planner. The draft has the planning limit for an end and nothing of a run, no budget among it:
 // the planner proposes the rest and a person accepts it. A repository to be created is created
 // after this returns, by the repository pass it wakes (ProvideRepositories).
-func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID, goal, continues string, by domain.Actor, planning Planning, launch AgentLaunch, repository RepositoryChoice) (*domain.PlatformExperiment, error) {
+func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID, goal, continues, start, stated string, by domain.Actor, planning Planning, launch AgentLaunch, repository RepositoryChoice) (*domain.PlatformExperiment, error) {
 	goal = strings.TrimSpace(goal)
 	if goal == "" {
 		return nil, refuseUpdate(422, "invalid_goal", "goal is required: one sentence saying what you want to find out")
@@ -69,6 +69,14 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 	if err := s.requireContinuable(ctx, projectID, repository.Named, continues); err != nil {
 		return nil, err
 	}
+	history, err := resolveHistory(stated)
+	if err != nil {
+		return nil, err
+	}
+	startCommit, err := s.requireStart(ctx, projectID, repository.Named, continues, start)
+	if err != nil {
+		return nil, err
+	}
 	plannerID, err := domain.NewID(domain.AgentIDPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.CreateDraft: %w", err)
@@ -86,6 +94,8 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 		Name:                  draftName(goal),
 		Goal:                  goal,
 		Continues:             continues,
+		StartCommit:           startCommit,
+		History:               history,
 		Actor:                 &by,
 		MaxAgents:             maxProposedResearchers(launch.MaxHosted),
 		Metrics:               []domain.MetricDefinition{},
@@ -138,7 +148,7 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"A repository the platform creates is created after this answers: the draft is answered without repository and with status_reason repository_creating, and its planner starts once the repository is there. " +
 			"When GitHub does not create it the draft is closed with close_reason repository_not_created, and its status_reason message says what GitHub answered. " +
 			"On a deployment whose git host is plain, repository is a name under the host's root and is required: 422 repository_required without it, repository_not_reachable when it does not answer git. " +
-			"422 invalid_goal for a goal that is empty or over the length, invalid_continues for a continues that names no closed platform experiment of the project and repository with a declared baseline. 503 launcher_not_registered when the deployment has no launcher to run the planner.",
+			"422 invalid_goal for a goal that is empty or over the length, invalid_continues for a continues that names no closed platform experiment of the project and repository with a declared baseline, invalid_start_commit, start_commit_not_descendant, start_commit_unsupported and invalid_history as on POST /platform-experiments. 503 launcher_not_registered when the deployment has no launcher to run the planner.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
 			ProjectID         string `json:"project_id"`
@@ -146,6 +156,8 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			Repository        string `json:"repository,omitempty" required:"false" doc:"owner/name on GitHub, covered by an installation the org connected. Left out, the platform creates a private repository on the GitHub account the org connected."`
 			RepositoryAccount string `json:"repository_account,omitempty" required:"false" doc:"The connected GitHub account the new repository is created on. Required only when the org connected several."`
 			Continues         string `json:"continues,omitempty" required:"false" doc:"The id of a closed platform experiment of the same project to carry on, which keeps its code in the repository this one names. Its baseline starts from the commit of that run's baseline job, so both are measured by the same harness. It keeps the metric keys and directions of that run: 422 invalid_metrics for others. Left out, it starts fresh. 422 invalid_continues for one that is no closed platform experiment of the project, keeps its code in another repository or declared no baseline."`
+			StartCommit       string `json:"start_commit,omitempty" required:"false" doc:"The commit, a full or abbreviated sha of the repository, that a hypothesis building on the objective starts from in place of the baseline's commit, such as the best configuration an earlier run reached. The baseline is still measured on the baseline's commit, and every target_vs_baseline against it. It needs continues: the commit is, or descends from, the commit of the baseline job of the run continued, which this run's baseline starts from, and the baseline job declared must run an ancestor of it (baseline_not_ancestor_of_start otherwise). Stored as its full sha. 422 invalid_start_commit for one that is no sha, is given without continues or is not in the repository, start_commit_not_descendant for one that does not descend from that commit, and start_commit_unsupported on a git host that hands the platform no history. Left out, researchers start from the baseline's commit."`
+			History           string `json:"history,omitempty" required:"false" enum:"prior_runs,none" doc:"Which earlier runs its agents, coordinator and planner read as their own: prior_runs, every closed run of the same project and repository that ran, listed as prior_runs, with their summaries, results, jobs, data and hypotheses, refuted ones included; or none, no other run, and the description alone carries what earlier runs learned. Left out, prior_runs. Fixed at creation. 422 invalid_history for any other value."`
 		}
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
 		if in.Body.ProjectID == "" {
@@ -166,7 +178,7 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err != nil {
 			return nil, err
 		}
-		pe, err := h.svc.CreateDraft(ctx, in.Body.ProjectID, in.Body.Goal, in.Body.Continues, caller.Actor(), h.planning, h.launch, repository)
+		pe, err := h.svc.CreateDraft(ctx, in.Body.ProjectID, in.Body.Goal, in.Body.Continues, in.Body.StartCommit, in.Body.History, caller.Actor(), h.planning, h.launch, repository)
 		var answered huma.StatusError
 		if errors.As(err, &answered) {
 			return nil, err

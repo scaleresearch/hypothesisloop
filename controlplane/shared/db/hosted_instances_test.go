@@ -475,7 +475,8 @@ func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExp
 	pes := NewPlatformExperimentsStore(pool)
 	now := time.Now().UTC()
 	pe := &domain.PlatformExperiment{
-		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "bounded", BudgetAcceleratorHours: 10,
+		History: domain.HistoryPriorRuns,
+		ID:      "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "bounded", BudgetAcceleratorHours: 10,
 		MaxAgents: 2, StartsAt: now, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
 		Stages:    []domain.Stage{{LengthPct: 100, EvictPct: 0}},
@@ -523,7 +524,8 @@ func TestOneMachineIsKeptForTheBaselineAndAFinishedAgentHoldsNone(t *testing.T) 
 	pes := NewPlatformExperimentsStore(pool)
 	now := time.Now().UTC()
 	pe := &domain.PlatformExperiment{
-		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "kept", BudgetAcceleratorHours: 10,
+		History: domain.HistoryPriorRuns,
+		ID:      "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "kept", BudgetAcceleratorHours: 10,
 		MaxAgents: 5, StartsAt: now, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
 		Stages:    []domain.Stage{{LengthPct: 100, EvictPct: 0}},

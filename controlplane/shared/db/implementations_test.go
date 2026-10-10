@@ -58,13 +58,21 @@ func TestImplementationsAndTheLastCompletedCommitAreReadOffTheJobs(t *testing.T)
 		t.Errorf("LastCompletedCodeRef of a hypothesis no job ran = %q, %v, want none", last, err)
 	}
 
-	if declared, err := store.BaselineCodeRef(ctx, first.PlatformExperimentID); err != nil || declared != "" {
-		t.Errorf("BaselineCodeRef before a baseline is declared = %q, %v, want none", declared, err)
+	if declared, err := store.ObjectiveCodeRef(ctx, first.PlatformExperimentID); err != nil || declared != "" {
+		t.Errorf("ObjectiveCodeRef before a baseline is declared = %q, %v, want none", declared, err)
 	}
 	if _, err := store.ExperimentsStore.pool.pool.Exec(ctx, `UPDATE platform_experiments SET baseline_job_id = $2 WHERE id = $1`, first.PlatformExperimentID, first.ID+"-a"); err != nil {
 		t.Fatal(err)
 	}
-	if declared, err := store.BaselineCodeRef(ctx, first.PlatformExperimentID); err != nil || declared != ref("a") {
-		t.Errorf("BaselineCodeRef = %q, %v, want %q", declared, err, ref("a"))
+	if declared, err := store.ObjectiveCodeRef(ctx, first.PlatformExperimentID); err != nil || declared != ref("a") {
+		t.Errorf("ObjectiveCodeRef = %q, %v, want %q", declared, err, ref("a"))
+	}
+
+	start := fortyHexChars()
+	if _, err := store.ExperimentsStore.pool.pool.Exec(ctx, `UPDATE platform_experiments SET start_commit = $2, repository_url = 'https://git.example/r.git' WHERE id = $1`, first.PlatformExperimentID, start); err != nil {
+		t.Fatal(err)
+	}
+	if declared, err := store.ObjectiveCodeRef(ctx, first.PlatformExperimentID); err != nil || declared != "https://git.example/r.git@"+start {
+		t.Errorf("ObjectiveCodeRef with a start_commit = %q, %v, want the start commit", declared, err)
 	}
 }
