@@ -1300,7 +1300,7 @@ VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'test-accelerator',
 	}
 }
 
-// Run 5's baseline job sat building its environment past the point it could end by
+// A baseline job sat building its environment past the point it could end by
 // baseline_due_at, and its agent, whose stream leaves out a queue reason that waiting clears,
 // slept through it. Such a job is announced to its agent once, as job.held baseline_late.
 func TestABaselineJobThatCannotEndByItsDeadlineIsAnnouncedOnce(t *testing.T) {
@@ -1368,9 +1368,8 @@ func noticeIdle(t *testing.T, store *PlatformExperimentsStore, peID string, afte
 	return told
 }
 
-// Run 6: a researcher worked 28 minutes on its own machine with nothing on the platform, and
-// neither it nor the coordinator was told. Round 14: a lead told once rested from mid-run to the
-// close. A researcher with no job submitted for the notice and none in flight is told so, new, and
+// A researcher worked 28 minutes on its own machine with nothing on the platform, and neither
+// it nor the coordinator was told. A lead told once rested from mid-run to the close. A researcher with no job submitted for the notice and none in flight is told so, new, and
 // again every notice while the stretch lasts, continues, live and on replay.
 func TestAResearcherWithNoJobForTheNoticeIsToldAgainWhileTheStretchLasts(t *testing.T) {
 	pool := eventsTestDB(t)

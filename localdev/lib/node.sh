@@ -3,9 +3,23 @@
 # scripts.
 #
 #   - lib_create_node / lib_destroy_node: spin up a brand-new container node.
-#   - lib_attach_node / lib_detach_node: taint/untaint an already-existing node (box-a).
+#   - lib_attach_node / lib_detach_node: taint/untaint an already-existing node (a hardware host's).
 
 LIB_NODE_TAINT_KEY="hypothesisloop.io/no-workload"
+LIB_NODE_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# lib_tt_node <context>: the node of the Tenstorrent host: TT_NODE from the environment or the
+# repository's .env, else the cluster's k3s server node, which install.sh makes the host itself.
+lib_tt_node() {
+  local node="${TT_NODE:-}"
+  if [[ -z "${node}" && -f "${LIB_NODE_REPO}/.env" ]]; then
+    node="$(set +u; . "${LIB_NODE_REPO}/.env"; printf '%s' "${TT_NODE:-}")"
+  fi
+  if [[ -z "${node}" ]]; then
+    node="$(kubectl --context "$1" get nodes -l node-role.kubernetes.io/control-plane -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+  fi
+  printf '%s' "${node}"
+}
 
 # Polls until a command succeeds; exits the calling script when the attempts run out.
 # Usage: wait_for <max_attempts> <sleep_secs> <description> <command...>

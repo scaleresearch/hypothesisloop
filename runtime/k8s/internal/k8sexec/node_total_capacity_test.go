@@ -173,7 +173,7 @@ func TestANodesCoresAreUnitsOfTheCPUTypeWithNothingWrittenToTheCluster(t *testin
 }
 
 // The builder's BuildKit is a sidecar of the cluster-agent pod, and the scheduler holds its
-// request on the node. Capacity counted from the containers alone reported box-a's 4 builder
+// request on the node. Capacity counted from the containers alone reported a node's 4 builder
 // cores as free for jobs, and a job sized to them waited Pending.
 func TestASidecarsRequestIsHeldOfItsNodeAsTheSchedulerHoldsIt(t *testing.T) {
 	always := corev1.ContainerRestartPolicyAlways

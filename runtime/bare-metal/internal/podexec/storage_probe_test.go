@@ -80,7 +80,7 @@ func TestStorageIsEnforcedOnlyWhenTheEngineTakesAContainerWithASize(t *testing.T
 	}{
 		"the engine takes a size":   {probedEngine{}, true, "", false},
 		"the engine refuses a size": {probedEngine{refusesSize: true}, false, "supported only for overlay over xfs", false},
-		// Docker 29 on box-b took a 1 GiB size, recorded it, and gave the container the whole disk.
+		// Docker 29 on one host took a 1 GiB size, recorded it, and gave the container the whole disk.
 		"the engine takes a size and ignores it": {probedEngine{containerdStore: true}, false, "containerd snapshots", false},
 		"the engine creates no container":        {probedEngine{refusesAll: true}, false, "", true},
 	} {

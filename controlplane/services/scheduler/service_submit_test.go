@@ -723,8 +723,8 @@ func TestAJobNoIdleClusterHoldsIsRefusedAtSubmit(t *testing.T) {
 	registered := map[string]domain.Cluster{"box-b": {Name: "box-b", OrgID: "org-a"}, "theirs": {Name: "theirs", OrgID: "org-b"}}
 	const disk = 3935709487104
 	installed := map[string]domain.Footprint{
-		"box-b": domain.CapacityFootprint(32, map[string]int64{chip: 1}, 132604628992, disk),
-		"theirs":   domain.CapacityFootprint(512, map[string]int64{chip: 64}, 1<<42, 1<<50),
+		"box-b":  domain.CapacityFootprint(32, map[string]int64{chip: 1}, 132604628992, disk),
+		"theirs": domain.CapacityFootprint(512, map[string]int64{chip: 64}, 1<<42, 1<<50),
 	}
 	oneNode := map[string]map[string]map[string]int64{"box-b": {"box": {
 		domain.NodeResourceCPUMillicores: 32000, domain.NodeResourceMemoryBytes: 132604628992, domain.NodeResourceStorageBytes: disk,

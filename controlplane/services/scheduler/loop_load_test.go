@@ -449,12 +449,12 @@ func (s *sim) loop() *Loop {
 	return l
 }
 
-// The clusters of the deployment the scheduler was tuned against, and a third, larger one.
+// Three clusters of uneven size: a small one, a middle one and a large one.
 func unevenBoxes() map[string]simBox {
 	return map[string]simBox{
 		"box-a": {cores: 11.6, memory: 30 << 30, priority: domain.DefaultClusterPriority},
-		"box-b":    {cores: 27.8, memory: 62 << 30, priority: domain.DefaultClusterPriority},
-		"box-c":     {cores: 47.5, memory: 120 << 30, priority: domain.DefaultClusterPriority},
+		"box-b": {cores: 27.8, memory: 62 << 30, priority: domain.DefaultClusterPriority},
+		"box-c": {cores: 47.5, memory: 120 << 30, priority: domain.DefaultClusterPriority},
 	}
 }
 

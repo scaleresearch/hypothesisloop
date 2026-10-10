@@ -2,7 +2,7 @@
 # Platform-agnostic core of "make a k3s node advertise a fake accelerator": patches the
 # nvidia.com/gpu extended resource onto an *already-registered* node's status and labels it
 # with a model name, via plain kubectl — no assumption about how that node came to exist (a
-# nested container on macOS, or a real hardware node like box-a that just has spare
+# nested container on macOS, or a real hardware node like a Tenstorrent host that just has spare
 # CPU/memory to also carry fake GPU slots for the portable suite alongside its real DRA
 # device). Callers that need a brand-new node (localdev/k3s-macos/dev-nodes-up.sh) create
 # the node first, then call this; callers with an existing node just call this directly.

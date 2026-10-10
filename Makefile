@@ -274,8 +274,8 @@ tt-down:
 tt-dev-nodes-up:
 	bash localdev/k3s-tenstorrent/dev-nodes-up.sh
 
-# Builds and pushes the Tenstorrent hardware workload image to $(REGISTRY) -- the box-a
-# k3s node pulls it normally (registries.yaml, see localdev/lib/node.sh), same as every other
+# Builds and pushes the Tenstorrent hardware workload image to $(REGISTRY) -- the Tenstorrent
+# host's k3s node pulls it normally (registries.yaml, see localdev/lib/node.sh), same as every other
 # image; no more local save/import.
 locked-tt-hardware-image: check-tag
 	podman build --platform $(IMAGE_PLATFORM) -f tests/workloads/tenstorrent/Dockerfile.train -t $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG) tests/workloads/tenstorrent/
@@ -287,7 +287,7 @@ locked-tt-hardware-image: check-tag
 tt-e2e: render-settings tt-hardware-image
 	bash -c '$(E2E_ENV) TT_WORKLOAD_IMAGE="$(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG)" bash localdev/k3s-tenstorrent/run-e2e.sh'
 
-# Removes the fake nodes; box-a itself is left as it is.
+# Removes the fake nodes; the host's own node is left as it is.
 tt-dev-nodes-down:
 	bash localdev/k3s-tenstorrent/dev-nodes-down.sh
 

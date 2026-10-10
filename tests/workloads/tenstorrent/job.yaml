@@ -35,7 +35,7 @@ job:
   # other workload here uses: pre-compiled firmware/kernel JIT loading and dispatch buffers for
   # a 4096x4096 bf16 matmul measurably exceed a few hundred MiB — an under-sized limit gets
   # silently OOMKilled mid-run (confirmed: 256Mi OOMKilled every run; 4Gi comfortably clears it
-  # with room to spare on this QuietBox's 240GiB allocatable).
+  # with room to spare on a QuietBox's 240GiB allocatable).
   cpu: "2"
   memory: "4Gi"
   storage: "1Gi"

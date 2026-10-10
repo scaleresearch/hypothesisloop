@@ -7,7 +7,7 @@ The platform reads the file from GitHub alone, so the module needs the sandbox r
 (HL_E2E_GITHUB_INSTALLATION, HL_E2E_GITHUB_REPO): each test pushes its experiment's baseline
 branch there and deletes it at the end. A build needs a connected cluster that builds for org
 default (install.sh BUILDER=true). The local k3s of make e2e builds nothing, so there the build
-tests skip. Where another cluster builds, such as box-a, localdev/e2e.sh refuses the stack,
+tests skip. Where another cluster builds, such as a Tenstorrent host's, localdev/e2e.sh refuses the stack,
 and the module runs with what make tt-e2e gives the suite, while nothing else uses that cluster:
 
     bash -c '. localdev/lib/auth.sh && export HYPOTHESISLOOP_CONFIG="$PWD/controlplane/settings/.hypothesisloop.dev.yaml" \

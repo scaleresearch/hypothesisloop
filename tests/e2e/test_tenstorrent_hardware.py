@@ -1,10 +1,10 @@
-"""HARDWARE-ONLY: requires real Tenstorrent Blackhole hardware (box-a's `make tt-up`).
+"""HARDWARE-ONLY: requires real Tenstorrent Blackhole hardware (a host set up with `make tt-up`).
 Excluded from a default pytest run -- included only with `-m hardware`. Proves the platform's own
 submission path reaches real hardware: submit a job, verify a genuine DRA ResourceClaim gets
 allocated a real /dev/tenstorrent device, not just that the platform reports success. Then proves
 the same physical device is independently reachable via the bare-node agent (no k3s/DRA involved).
 
-For the bare-node leg box-a is tainted no-workload so the scheduler cannot place the job
+For the bare-node leg the host's node (TT_NODE) is tainted no-workload so the scheduler cannot place the job
 there; the taint is lifted in a `finally`, so the box takes jobs again on pass, fail, or timeout.
 
 The k3s leg's job runs TT_WORKLOAD_IMAGE, the image `make tt-e2e` pushed to the registry the box
@@ -27,6 +27,23 @@ from support.wait import eventually
 pytestmark = [pytest.mark.hardware, pytest.mark.exclusive("tenstorrent")]
 
 TT_CONTEXT = os.environ.get("TT_CONTEXT", "k3s-tt")
+# The host's node, and the cluster it is registered as (named after the node unless TT_CLUSTER
+# says otherwise). localdev/k3s-tenstorrent/run-e2e.sh sets both.
+def _server_node() -> str:
+    if sys.platform != "linux":
+        return ""
+    try:
+        return subprocess.run(
+            ["kubectl", "--context", TT_CONTEXT, "get", "nodes", "-l", "node-role.kubernetes.io/control-plane",
+             "-o", "jsonpath={.items[0].metadata.name}"],
+            capture_output=True, text=True, timeout=15,
+        ).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+TT_NODE = os.environ.get("TT_NODE") or _server_node()
+TT_CLUSTER = os.environ.get("TT_CLUSTER") or TT_NODE
 JOB_NS = "hypothesisloop-jobs"
 ACCEL_TYPE = "tenstorrent.com/chipArch=blackhole"
 
@@ -65,12 +82,12 @@ def _kubectl(*args: str, timeout: float = 15) -> str:
 def _preconditions_met() -> str | None:
     """Returns a skip reason if any real-hardware precondition is missing, else None."""
     if sys.platform != "linux":
-        return "this scenario only runs on the Linux box-a host"
-    if subprocess.run(
-        ["kubectl", "--context", TT_CONTEXT, "get", "node", "box-a"],
+        return "this scenario only runs on a Linux Tenstorrent host"
+    if not TT_NODE or subprocess.run(
+        ["kubectl", "--context", TT_CONTEXT, "get", "node", TT_NODE],
         capture_output=True, timeout=15,
     ).returncode != 0:
-        return f"context {TT_CONTEXT} is not the box-a cluster"
+        return f"context {TT_CONTEXT} has no node {TT_NODE!r} (TT_NODE)"
     if subprocess.run(
         ["kubectl", "--context", TT_CONTEXT, "get", "deviceclass", "tenstorrent.com"],
         capture_output=True, timeout=15,
@@ -98,7 +115,7 @@ if _SKIP_REASON is not None:
 
 def _lib_attach_node() -> None:
     subprocess.run(
-        ["kubectl", "--context", TT_CONTEXT, "taint", "node", "box-a",
+        ["kubectl", "--context", TT_CONTEXT, "taint", "node", TT_NODE,
          "hypothesisloop.io/no-workload:NoSchedule-"],
         capture_output=True, text=True, timeout=15,
     )
@@ -106,7 +123,7 @@ def _lib_attach_node() -> None:
 
 def _lib_detach_node() -> None:
     subprocess.run(
-        ["kubectl", "--context", TT_CONTEXT, "taint", "node", "box-a",
+        ["kubectl", "--context", TT_CONTEXT, "taint", "node", TT_NODE,
          "hypothesisloop.io/no-workload:NoSchedule", "--overwrite"],
         capture_output=True, text=True, timeout=15,
     )
@@ -137,7 +154,7 @@ def _resourceclaim_device_results(experiment_id: str) -> list:
 
 
 @pytest.fixture(autouse=True)
-def _tt_quietbox_takes_jobs_after():
+def _tt_node_takes_jobs_after():
     try:
         yield
     finally:
@@ -181,8 +198,8 @@ def _run(api, pe_id: str, agent: str, run_id: str, deadline, tmp_path: Path) -> 
         accept=lambda e: bool(e.get("cluster_name")),
         deadline=deadline,
     )
-    assert exp.get("cluster_name") == "box-a", (
-        f"job admitted onto cluster_name={exp.get('cluster_name')!r}, expected box-a "
+    assert exp.get("cluster_name") == TT_CLUSTER, (
+        f"job admitted onto cluster_name={exp.get('cluster_name')!r}, expected {TT_CLUSTER} "
         "(real hardware, not a fake/local node)"
     )
 
@@ -224,10 +241,10 @@ def _run(api, pe_id: str, agent: str, run_id: str, deadline, tmp_path: Path) -> 
 
     metrics = api.metrics(job)
     assert len(metrics) >= 1, "0 metric points recorded -- pod may not have actually run/reported"
-    api.file_finding(job, "Tenstorrent e2e: real DRA allocation on box-a confirmed.")
+    api.file_finding(job, f"Tenstorrent e2e: real DRA allocation on {TT_CLUSTER} confirmed.")
 
     # -- same physical hardware, reached via this host's bare-node agent (no k3s/DRA at all) --
-    # Untainted, box-a is a schedulable, guaranteed-capacity node and the scheduler would
+    # Untainted, the host's node is a schedulable, guaranteed-capacity node and the scheduler would
     # place the next job there. Tainted, the bare-node cluster is the only one that reports the device.
     _lib_detach_node()
     bare_cluster = f"tt-bare-e2e-{run_id}"
