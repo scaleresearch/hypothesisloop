@@ -109,3 +109,67 @@ func git(dir string, args ...string) (string, error) {
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+// runBest is the run's best job on its first ranking metric, as a submit's answer names it.
+type runBest struct {
+	JobID   string  `json:"job_id"`
+	Metric  string  `json:"metric"`
+	Value   float64 `json:"value"`
+	CodeRef string  `json:"code_ref"`
+	Branch  string  `json:"branch"`
+}
+
+// notOnBest says when the commit of codeRef, job jobID's, does not contain best's, as the git repository in
+// dir tells, fetching best's branch, or else its commit, from origin when it lacks it. Empty
+// when it does contain it.
+func notOnBest(dir, jobID, codeRef string, best runBest) string {
+	commit, bestCommit := commitOf(codeRef), commitOf(best.CodeRef)
+	contains, err := isAncestor(dir, bestCommit, commit)
+	if err != nil {
+		for _, ref := range []string{best.Branch, bestCommit} {
+			if ref == "" {
+				continue
+			}
+			if _, fetchErr := git(dir, "fetch", "--quiet", "origin", ref); fetchErr != nil {
+				continue
+			}
+			if contains, err = isAncestor(dir, bestCommit, commit); err == nil {
+				break
+			}
+		}
+	}
+	named := fmt.Sprintf("the run's best on %s is %s (%g), commit %s", best.Metric, best.JobID, best.Value, bestCommit)
+	if best.Branch != "" {
+		named += " on " + best.Branch
+	}
+	switch {
+	case err != nil:
+		return fmt.Sprintf("%s; whether this job's commit contains it could not be told here: %s", named, err)
+	case contains:
+		return ""
+	}
+	fetch := cmp.Or(best.Branch, bestCommit)
+	return fmt.Sprintf("%s, and this job's commit does not contain it. The job is queued all the same. If it was meant to build on the best, cancel it (hl job cancel %s), bring that commit in (git fetch origin %s, then git rebase or git merge %s) and submit again", named, jobID, fetch, bestCommit)
+}
+
+// commitOf is the commit of a code_ref, <repository url>@<sha>.
+func commitOf(codeRef string) string {
+	return codeRef[strings.LastIndex(codeRef, "@")+1:]
+}
+
+// isAncestor reports whether ancestor is commit or an ancestor of it in the git repository in
+// dir, an error when git cannot tell, as for a commit it does not have.
+func isAncestor(dir, ancestor, commit string) (bool, error) {
+	if ancestor == "" || commit == "" {
+		return false, errors.New("a code_ref names no commit")
+	}
+	_, err := git(dir, "merge-base", "--is-ancestor", ancestor, commit)
+	var exitErr *exec.ExitError
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.As(err, &exitErr) && exitErr.ExitCode() == 1:
+		return false, nil
+	}
+	return false, err
+}

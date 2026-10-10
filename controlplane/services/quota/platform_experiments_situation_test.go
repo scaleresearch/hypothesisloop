@@ -3,6 +3,8 @@ package quota
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -432,5 +434,35 @@ func TestTheSituationCountsTheJobsCompletedSinceTheSummary(t *testing.T) {
 	store.summaryAt = nil
 	if got, err = svc.Situation(context.Background(), "pe-1", ""); err != nil || got.Coordinator.JobsCompletedSinceSummary != 2 {
 		t.Fatalf("coordinator %+v (%v), want every job while no summary was written", got.Coordinator, err)
+	}
+}
+
+// A researcher's subagents audited and submitted on an obsolete stack, and nothing they read named
+// the commit the best ran. The situation, which every wake carries, names it and its branch.
+func TestTheSituationNamesTheCommitOfTheBest(t *testing.T) {
+	svc, store := situationRun(t)
+	metrics := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.FormValue("query"), `metric_name="acc"`) {
+			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[` +
+				`{"metric":{"agent_id":"ag-1","job_id":"job-7","metric_basis":"raw"},"value":[0,"0.9"]},` +
+				`{"metric":{"agent_id":"ag-2","job_id":"job-8","metric_basis":"raw"},"value":[0,"0.8"]}]}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
+	}))
+	t.Cleanup(metrics.Close)
+	svc.metricsDBURL, store.researchers = metrics.URL, []string{"ag-1", "ag-2"}
+	done := time.Now().Add(-time.Minute)
+	store.completed = []*domain.Experiment{
+		{ID: "job-7", AgentID: "ag-1", FinishedAt: &done, CodeRef: "https://example.com/repo.git@f9a3", Branch: "hl/pe-1/r1-stack"},
+		{ID: "job-8", AgentID: "ag-2", FinishedAt: &done, CodeRef: "https://example.com/repo.git@0ld0", Branch: "hl/pe-1/r2"},
+	}
+	got, err := svc.Situation(context.Background(), "pe-1", "ag-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := got.Objective[0]; m.BestJob != "job-7" || m.BestCodeRef != "https://example.com/repo.git@f9a3" || m.BestBranch != "hl/pe-1/r1-stack" {
+		t.Fatalf("objective %+v, want job-7 with its commit and branch", m)
 	}
 }

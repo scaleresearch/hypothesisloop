@@ -315,3 +315,61 @@ func TestHLCloneChecksOutTheCommitOfACodeRef(t *testing.T) {
 		t.Fatalf("the commit's files are not there: %v", err)
 	}
 }
+
+// A researcher's subagent submitted on a branch made before the run's best and had to redo the
+// job. The submit tells it, from its checkout, when its commit does not contain the best: it
+// fetches the best's branch it never had, and says nothing once the best is merged in.
+func TestJobSubmitSaysWhenTheCommitDoesNotContainTheRunsBest(t *testing.T) {
+	clone, origin := pushedClone(t)
+	other := filepath.Join(filepath.Dir(clone), "other")
+	mustGit(t, clone, "clone", "-q", origin, other)
+	mustGit(t, other, "checkout", "-q", "-b", "hl/pe-1/r2-stack")
+	mustGit(t, other, "commit", "-q", "--allow-empty", "-m", "the best")
+	mustGit(t, other, "push", "-q", "origin", "hl/pe-1/r2-stack")
+	best := mustGit(t, other, "rev-parse", "HEAD")
+	mustGit(t, clone, "commit", "-q", "--allow-empty", "-m", "on the old base")
+
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		metadata := body["metadata"].(map[string]any)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "job-new", "status": "QUEUED", "code_ref": metadata["code_ref"],
+			"run_best": map[string]any{"job_id": "job-best", "metric": "ratio", "value": 9.048, "code_ref": origin + "@" + best, "branch": "hl/pe-1/r2-stack"}})
+	}))
+	submitted := func() map[string]any {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"job", "submit", "--agent", "jane", "--platform-experiment", "pe-1", "job.yaml"}, &stdout, &stderr); code != 0 {
+			t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+		}
+		var out map[string]any
+		if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+			t.Fatalf("stdout %q: %v", stdout.String(), err)
+		}
+		return out
+	}
+
+	said, _ := submitted()["not_on_best"].(string)
+	for _, want := range []string{"job-best (9.048)", "commit " + best + " on hl/pe-1/r2-stack", "does not contain it", "hl job cancel job-new", "git fetch origin hl/pe-1/r2-stack"} {
+		if !strings.Contains(said, want) {
+			t.Fatalf("not_on_best %q, want it to say %q", said, want)
+		}
+	}
+
+	mustGit(t, clone, "merge", "-q", "--no-edit", best)
+	if out := submitted(); out["not_on_best"] != nil || out["run_best"] != nil {
+		t.Fatalf("a commit that contains the best: printed %v, want neither not_on_best nor run_best", out)
+	}
+}
+
+// A best commit neither the checkout nor origin has is named all the same, saying git could not
+// tell.
+func TestNotOnBestNamesABestItCannotFind(t *testing.T) {
+	clone, origin := pushedClone(t)
+	head := mustGit(t, clone, "rev-parse", "HEAD")
+	missing := strings.Repeat("ab", 20)
+	said := notOnBest(clone, "job-new", origin+"@"+head, runBest{JobID: "job-best", Metric: "ratio", Value: 9, CodeRef: origin + "@" + missing})
+	if !strings.Contains(said, "job-best (9), commit "+missing) || !strings.Contains(said, "could not be told") {
+		t.Fatalf("said %q, want the best named and that git could not tell", said)
+	}
+}

@@ -64,7 +64,9 @@ How you work is yours. What the run expects of you:
     add`, `hl hypothesis checkout` inside it, the code, its own jobs (`hl job submit`, `hl job
     wait`; a command runs at most 10 minutes), their results and the summary. Code and
     measurement are theirs. What one of them finds that unblocks others (a cause, a workaround
-    for a test) goes to every subagent it concerns. While ideas remain, keep subagents live and keep finding, registering and dispatching more:
+    for a test) goes to every subagent it concerns, and so does a new best: the situation's
+    `best_job` and `best_code_ref`, the commit work meant to stack on the best starts from. A
+    submit whose commit does not contain the best says so in `not_on_best`. While ideas remain, keep subagents live and keep finding, registering and dispatching more:
     waiting on them while capacity is free wastes the run. One ending starts your next
     turn; TaskStop with the id its start returned stops one that went astray. A restart of your
     session stops every subagent: one that did not complete is started again from where its

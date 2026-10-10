@@ -43,7 +43,10 @@ FILE is a YAML job spec (metadata, job). The flags override it for this submissi
 committed spec serves every job that differs in hypothesis, env, estimate or tier. Prints the
 job's id, status, code_ref, branch and estimates; hl job status ID has the rest. The result
 arrives as an update with its metrics, unasked: while your quota has room, submit the next
-independent trial beside it.
+independent trial beside it. same_hypothesis names other agents' jobs on the same hypothesis.
+not_on_best says the job's commit does not contain the run's best job on its first ranking
+metric, naming that job, its value and its commit, which this checkout fetches from origin to
+tell. Either way the job is queued: stacking on another base may be meant.
 A submit the same in every part (agent, hypothesis, commit, FILE, flags) is one job however
 often it is sent, so one that timed out is safe to resend; --repeat N makes it the Nth job of
 that request.
@@ -175,8 +178,9 @@ whole jobs to read first: each sample's seed/ reports its metrics and its
 	if body["submission_key"], err = submissionKey(body, *repeat); err != nil {
 		return fail(stderr, fmt.Errorf("job submit: %w", err))
 	}
-	// The reply repeats the submitted spec; only what the platform decided is printed.
-	var out struct {
+	// The reply repeats the submitted spec; only what the platform decided is printed, and
+	// whether the job's commit contains the run's best.
+	type submitted struct {
 		ID             string  `json:"id"`
 		Status         string  `json:"status,omitempty"`
 		CodeRef        string  `json:"code_ref,omitempty"`
@@ -184,9 +188,19 @@ whole jobs to read first: each sample's seed/ reports its metrics and its
 		CapacityTier   string  `json:"capacity_tier,omitempty"`
 		EstimatedHours float64 `json:"estimated_duration_hours,omitempty"`
 		EstimatedCost  float64 `json:"estimated_cost_acch,omitempty"`
+		SameHypothesis string  `json:"same_hypothesis,omitempty"`
+		NotOnBest      string  `json:"not_on_best,omitempty"`
 	}
-	if err := c.Do("POST", "/experiments", body, &out); err != nil {
+	var answer struct {
+		submitted
+		RunBest *runBest `json:"run_best"`
+	}
+	if err := c.Do("POST", "/experiments", body, &answer); err != nil {
 		return fail(stderr, err)
+	}
+	out := answer.submitted
+	if answer.RunBest != nil {
+		out.NotOnBest = notOnBest("", out.ID, out.CodeRef, *answer.RunBest)
 	}
 	line, _ := json.Marshal(out)
 	fmt.Fprintf(stdout, "%s\n", line)

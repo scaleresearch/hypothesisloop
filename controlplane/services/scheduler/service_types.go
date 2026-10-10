@@ -9,6 +9,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 )
 
@@ -58,6 +59,22 @@ type Store interface {
 	RegisteredClusters(ctx context.Context) (map[string]domain.Cluster, error)
 	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
 	MarkQuotaSettled(ctx context.Context, id string) error
+	// CompletedJobIDs and ListSignupsByRole are what the standings rank: the completed jobs of a
+	// platform experiment, and its agents of a role.
+	CompletedJobIDs(ctx context.Context, platformExpID string) (map[string]bool, error)
+	ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error)
+}
+
+// Standings reads each agent's best on a metric from the metrics store
+// (metricsdb.BestPerAgentOnMetric), the one definition of who is ahead.
+type Standings interface {
+	BestPerAgentOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, completed map[string]bool) (map[string]metricsdb.AgentBest, []string, error)
+}
+
+type metricsDBStandings struct{ url string }
+
+func (m metricsDBStandings) BestPerAgentOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, completed map[string]bool) (map[string]metricsdb.AgentBest, []string, error) {
+	return metricsdb.BestPerAgentOnMetric(ctx, m.url, pe, metric, completed)
 }
 
 // QuotaService handles experiment-scoped quota checks and debits, across every resource
@@ -136,6 +153,7 @@ type Service struct {
 	pulls        RegistryPulls
 	settler      QuotaSettler
 	metricsDBURL string
+	standings    Standings
 	logger       *zap.Logger
 	// dataStore creates each submitted job's key. With maxDataBytesPerAgent it is also the
 	// durable-data ceiling: how much one agent already holds in this platform experiment is asked
@@ -172,6 +190,7 @@ func NewService(
 		clusters:     clusters,
 		settler:      settler,
 		metricsDBURL: metricsDBURL,
+		standings:    metricsDBStandings{url: metricsDBURL},
 		logger:       logger,
 		weights:      domain.DefaultSchedulingWeights(),
 	}

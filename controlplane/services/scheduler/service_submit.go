@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
@@ -451,9 +454,58 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	// The row keeps why a job waits as "code: sentence", and an answer states the two apart.
 	exp.NotAdmittedReason, exp.NotAdmittedMessage = domain.SplitQueueReason(exp.NotAdmittedReason)
 
+	// 7a. The run's best, where this job runs another commit: the submitter's checkout says
+	// whether its commit contains it, and a failed read leaves it out of the answer and the job
+	// queued.
+	if !measuresBaseline {
+		if exp.RunBest, err = s.runBest(ctx, pe, exp); err != nil {
+			s.logger.Warn("scheduler: the run's best for a submit's answer", zap.String("experiment_id", exp.ID), zap.Error(err))
+		}
+	}
+
 	// 8. Wake the scheduler loop.
 	s.loop.Trigger()
 	return nil
+}
+
+// runBest is the competitors' best job of pe on its first ranking metric, as the standings rank
+// it, ties to the lowest agent id: nil when there is none or it ran exp's commit.
+func (s *Service) runBest(ctx context.Context, pe *domain.PlatformExperiment, exp *domain.Experiment) (*domain.RunBest, error) {
+	metric, ok := domain.PrimaryRankingMetric(pe.Metrics)
+	if !ok {
+		return nil, nil
+	}
+	completed, err := s.store.CompletedJobIDs(ctx, pe.ID)
+	if err != nil {
+		return nil, err
+	}
+	best, _, err := s.standings.BestPerAgentOnMetric(ctx, pe, metric, completed)
+	if err != nil {
+		return nil, err
+	}
+	competitors, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleCompetitor)
+	if err != nil {
+		return nil, err
+	}
+	slices.Sort(competitors)
+	var top *domain.RunBest
+	for _, agentID := range competitors {
+		if b, ok := best[agentID]; ok && (top == nil || metric.Better(b.Value, top.Value)) {
+			top = &domain.RunBest{JobID: b.ExperimentID, AgentID: agentID, Metric: metric.Key, Value: b.Value}
+		}
+	}
+	if top == nil {
+		return nil, nil
+	}
+	job, err := s.store.GetExperiment(ctx, top.JobID)
+	if err != nil {
+		return nil, err
+	}
+	if job == nil || job.CodeRef == "" || job.CodeRef == exp.CodeRef {
+		return nil, nil
+	}
+	top.CodeRef, top.Branch = job.CodeRef, job.Branch
+	return top, nil
 }
 
 // sameHypothesisWindow is how long a completed job of another agent makes a new job on its

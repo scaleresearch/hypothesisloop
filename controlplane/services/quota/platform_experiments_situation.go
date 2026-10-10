@@ -107,6 +107,8 @@ type SituationMetric struct {
 	BestValue      *float64 `json:"best_value,omitempty" doc:"The best value of a researcher's completed job that holds every constraint, as the standings rank it."`
 	BestJob        string   `json:"best_job,omitempty"`
 	BestAgent      string   `json:"best_agent,omitempty" doc:"The agent id of best_job."`
+	BestCodeRef    string   `json:"best_code_ref,omitempty" doc:"The commit best_job ran, repository_url@sha: work meant to build on the best starts from it."`
+	BestBranch     string   `json:"best_branch,omitempty" doc:"The branch best_job's commit was pushed on."`
 	Target         *float64 `json:"target,omitempty" doc:"The value the metric's target_vs_baseline sets against baseline_value. Absent where the metric declares none or no baseline value is measured."`
 	GapToTargetPct *float64 `json:"gap_to_target_pct,omitempty" doc:"How far best_value is short of target, in percent of target: positive while short of it, negative past it."`
 	Best1hAgo      *float64 `json:"best_1h_ago,omitempty" doc:"best_value as it stood an hour ago, of the jobs that had completed by then."`
@@ -375,9 +377,10 @@ func (s *PlatformExperimentsService) objective(ctx context.Context, pe *domain.P
 	if err != nil {
 		return nil, fmt.Errorf("objective: %w", err)
 	}
-	ids, completedAt := map[string]bool{}, map[string]time.Time{}
+	ids, completedAt, byID := map[string]bool{}, map[string]time.Time{}, map[string]*domain.Experiment{}
 	for _, job := range completed {
 		ids[job.ID] = true
+		byID[job.ID] = job
 		if job.FinishedAt != nil {
 			completedAt[job.ID] = *job.FinishedAt
 		} else {
@@ -407,6 +410,9 @@ func (s *PlatformExperimentsService) objective(ctx context.Context, pe *domain.P
 			}
 		}
 		m := metricStanding(metric, standings, now)
+		if best := byID[m.BestJob]; best != nil {
+			m.BestCodeRef, m.BestBranch = best.CodeRef, best.Branch
+		}
 		if pe.BaselineJobID != "" {
 			baseline, err := metricsdb.LastPerJobOnMetric(ctx, s.metricsDBURL, pe, metric, map[string]bool{pe.BaselineJobID: true})
 			if err != nil {

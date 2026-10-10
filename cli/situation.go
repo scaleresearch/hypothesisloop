@@ -23,9 +23,10 @@ The platform experiment as it stands now, one line per block, each field as key=
               not_started=true and its duration_hours
   objective   one line per declared metric: direction, deterministic=true on one declared so
               (its values compare across machines and need no repeat), baseline_value, best_value with the
-              best_job and best_agent that set it, target, the value the metric's
-              target_vs_baseline sets against baseline_value, gap_to_target_pct, and best_1h_ago
-              and best_3h_ago, the best as it stood then
+              best_job and best_agent that set it, best_code_ref, the commit it ran, and
+              best_branch, target, the value the metric's target_vs_baseline sets against
+              baseline_value, gap_to_target_pct, and best_1h_ago and best_3h_ago, the best as it
+              stood then
   capacity    fits_now, how many more jobs shaped like the baseline's job would be placed now, and
               jobs_in_flight_run, the run's jobs queued and running; then one line per cluster
               and resource the run's jobs use, free and total

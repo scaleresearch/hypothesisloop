@@ -79,6 +79,7 @@ type Experiment struct {
 	CapacityTier           CapacityTier     `json:"capacity_tier"`
 	NoveltyScore           float64          `json:"novelty_score,omitempty"` // computed at admission; advisory only
 	SameHypothesis         string           `json:"same_hypothesis,omitempty" doc:"Set at submit when another agent had a job on the same hypothesis queued, running or completed within the hour: which jobs, whose and what to do. The coordinator is told it as job.duplicate."`
+	RunBest                *RunBest         `json:"run_best,omitempty" doc:"In a submit's answer only: the run's best job on its first ranking metric, where it ran another commit than this job. Whether this job's commit contains it is git's to say: hl job submit asks the submitter's checkout and warns when it does not."`
 	PriorityScore          float64          `json:"priority_score"`
 	Status                 ExperimentStatus `json:"status"`
 	QueuedAt               *time.Time       `json:"queued_at,omitempty"`
@@ -210,6 +211,17 @@ func (e Experiment) Answer() *Experiment {
 func (e Experiment) MarshalJSON() ([]byte, error) {
 	type wire Experiment
 	return json.Marshal(wire(*e.Answer()))
+}
+
+// RunBest is a platform experiment's best job on its first ranking metric, as the standings rank
+// it, and the commit it ran.
+type RunBest struct {
+	JobID   string  `json:"job_id"`
+	AgentID string  `json:"agent_id"`
+	Metric  string  `json:"metric"`
+	Value   float64 `json:"value"`
+	CodeRef string  `json:"code_ref"`
+	Branch  string  `json:"branch,omitempty"`
 }
 
 // EffectiveJob returns e.Job as it should actually be run: e's own ResolvedJob if admission has
