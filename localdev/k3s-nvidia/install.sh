@@ -26,7 +26,8 @@
 #   API_URL, METRICS_URL — reachable from this host (see
 #   localdev/local-tunnels/ if the control plane is local and this is a remote rented box).
 #   RUNTIME_TOKEN — the token for cluster k3s-nvidia: `make runtime-token CLUSTER=k3s-nvidia` on
-#   the control-plane host prints it.
+#   the control-plane host prints it once the cluster is registered there (LOCAL_EXTRA_CLUSTERS in
+#   its .env, or hl cluster add).
 #   TAG — image tag the cluster-agent/node-agent images are built and deployed under.
 #
 # Idempotent: safe to re-run.

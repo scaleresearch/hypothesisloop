@@ -204,17 +204,23 @@ lib_runtime_token() {
   lib_hl_admin token "runtime:$1"
 }
 
-# The clusters on machines of their own (a Tenstorrent box, an NVIDIA host), registered for the
-# org every schema starts with, and the launcher the committed settings give hosted agents to
-# (agents.launcher). Needs the control plane to have started once, since it creates the tables.
+# The clusters on machines of their own (a Tenstorrent box, an NVIDIA host) that LOCAL_EXTRA_CLUSTERS
+# in .env names, registered for the org every schema starts with, and the launcher the committed
+# settings give hosted agents to (agents.launcher). Needs the control plane to have started once,
+# since it creates the tables.
 lib_register_clusters() {
-  local name
-  for name in box-a k3s-nvidia; do
+  local entry name ceiling extra=""
+  if [[ -f "${LIB_AUTH_REPO}/.env" ]]; then
+    extra="$(lib_env_value LOCAL_EXTRA_CLUSTERS)"
+  fi
+  for entry in ${extra//,/ }; do
+    name="${entry%%:*}"
     lib_hl_admin cluster add "${name}" default >/dev/null
+    if [[ "${entry}" == *:* ]]; then
+      ceiling="${entry#*:}"
+      lib_hl_admin cluster settings "${name}" "{\"status_silence_ceiling_seconds\":${ceiling}}"
+    fi
   done
-  # box-a's link to the control plane drops for longer than the platform's default ceiling
-  # while its bare-metal jobs keep running, and a job evicted then is deleted on reconnect.
-  lib_hl_admin cluster settings box-a '{"status_silence_ceiling_seconds":21600}'
   lib_hl_admin launcher add main >/dev/null
 }
 

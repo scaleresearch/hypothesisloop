@@ -190,6 +190,6 @@ echo "==> tt-operator stage: $(( $(date +%s) - STAGE_T0 ))s"
 fi
 
 echo "==> Cluster ready. Context: ${CONTEXT_NAME}"
-echo "    Attach it from the control plane's host with make cluster-agent-up CLUSTER=box-a (see README)."
+echo "    Register it there (LOCAL_EXTRA_CLUSTERS in .env, or hl cluster add) and attach it with make cluster-agent-up CLUSTER=box-a."
 echo
 bash "${SCRIPT_DIR}/status.sh"
