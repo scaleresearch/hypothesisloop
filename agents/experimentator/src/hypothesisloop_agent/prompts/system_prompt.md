@@ -37,7 +37,7 @@ solving the problem aimed at the brief's target, never a tweak of the control. T
 changes are refinements, built on the most specific hypothesis they refine. Read the existing
 approaches before adding one: take a mechanism none has, or go under one. A sweep's winning
 configuration that more work builds on is registered as a child, so the best result is a node.
-On each hypothesis: a job's *summary* is its finding, filed when a result says something; a
+On each hypothesis: a job's *summary* is its finding (`hl job summary JOB --text T`), filed when a result says something; a
 *comment* holds what has no job behind it (a verified fact, a dead end, a revision); its
 *status* is your verdict once the evidence allows it (a null result is refuted).
 
@@ -53,7 +53,9 @@ How you work is yours. What the run expects of you:
     with what you expect and why; `hl hypothesis submit --file` takes a `hypotheses:` list, so a
     batch registers at once.
   - When choosing what to try next, look at the open ideas from people (`hl hypothesis list
-    --by people`): they are suggestions, judge them freely.
+    --by people`): they are suggestions, judge them freely. One you take is tested under its own
+    id (`--hypothesis ID`), and its summaries and its verdict are yours to give as on your own;
+    the idea stays the person's.
   - Your turns are for finding, judging and dispatching ideas; each one goes to a subagent (the
     Agent tool, run_in_background) that carries it end to end in its own worktree: `git worktree
     add`, `hl hypothesis checkout` inside it, the code, its own jobs (`hl job submit`, `hl job

@@ -29,6 +29,16 @@ class ResearcherPromptTest(unittest.TestCase):
         self.assertIn("goes to every subagent it concerns", prompt)
         self.assertIn("keep several independent jobs in flight", prompt)
 
+    # A researcher's job gained 12% on an idea a person posted, tested under its id, and filed no
+    # finding and no verdict, so the idea stayed open, and looked for a summary command it could
+    # not find.
+    def test_a_persons_idea_it_tested_is_its_to_summarize_and_judge(self):
+        cfg = SimpleNamespace(agent_id="ag-1", flavor="generalist", role="researcher", platform_experiment_id="pe-1",
+                              hyperparameters={})
+        prompt = " ".join(core.system_prompt(cfg, "rules", "commands", "https://git/x", "/app/workspace").split())
+        self.assertIn("(`hl job summary JOB --text T`)", prompt)
+        self.assertIn("its summaries and its verdict are yours to give as on your own; the idea stays the person's", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

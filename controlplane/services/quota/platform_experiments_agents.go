@@ -733,7 +733,8 @@ type Hypotheses interface {
 	ListHypotheses(ctx context.Context, f graphdb.ListFilter) ([]*domain.HypothesisListItem, error)
 }
 
-// OpenHypothesis is a hypothesis its agent left without a verdict.
+// OpenHypothesis is a hypothesis an agent left without a verdict: its own, or a person's idea its
+// jobs tested.
 type OpenHypothesis struct {
 	ID   string `json:"id"`
 	Text string `json:"text"`
@@ -744,14 +745,33 @@ const maxOpenHypotheses = 200
 
 type finishedAgentBody struct {
 	Agents         []JoinedAgent    `json:"agents"`
-	OpenHypotheses []OpenHypothesis `json:"open_hypotheses" doc:"The hypotheses of the agent that are still open, newest first, at most 200: each stays open for good unless the agent gives its verdict (POST /hypotheses/{id}/status) while its token still works. Empty when it left none. Nothing is refused for them."`
+	OpenHypotheses []OpenHypothesis `json:"open_hypotheses" doc:"The hypotheses still open that are the agent's verdict to give, newest first, at most 200: its own, then the ideas of people no agent owns that a completed job of its tested. Each stays open for good unless the agent gives its verdict (POST /hypotheses/{id}/status) while its token still works. Empty when it left none. Nothing is refused for them."`
 }
 
-// openHypotheses is the hypotheses of the agent in the platform experiment that have no verdict.
-func openHypotheses(ctx context.Context, graph Hypotheses, platformExpID, agentID string) ([]OpenHypothesis, error) {
+// openHypotheses is what the agent leaves without a verdict in the platform experiment: its own
+// hypotheses, then the hypotheses no agent owns that one of its completed jobs tested, whose
+// verdict is as much its to give.
+func openHypotheses(ctx context.Context, graph Hypotheses, completed []*domain.Experiment, platformExpID, agentID string) ([]OpenHypothesis, error) {
 	items, err := graph.ListHypotheses(ctx, graphdb.ListFilter{PlatformExperimentID: platformExpID, AgentID: agentID, Status: domain.HypothesisOpen, Limit: maxOpenHypotheses})
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.openHypotheses: %w", err)
+	}
+	tested := []string{}
+	for _, job := range completed {
+		if job.AgentID == agentID && job.PlatformExperimentID == platformExpID && job.HypothesisID != "" && !slices.Contains(tested, job.HypothesisID) {
+			tested = append(tested, job.HypothesisID)
+		}
+	}
+	if len(tested) > 0 && len(items) < maxOpenHypotheses {
+		others, err := graph.ListHypotheses(ctx, graphdb.ListFilter{PlatformExperimentID: platformExpID, Status: domain.HypothesisOpen, IDs: tested, Limit: maxOpenHypotheses})
+		if err != nil {
+			return nil, fmt.Errorf("platform_experiments.openHypotheses: %w", err)
+		}
+		for _, item := range others {
+			if item.AgentID == "" && len(items) < maxOpenHypotheses {
+				items = append(items, item)
+			}
+		}
 	}
 	open := make([]OpenHypothesis, len(items))
 	for i, item := range items {
@@ -928,7 +948,11 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler, graph H
 		}
 		// Read before the finish is stored: a graph that does not answer leaves nothing changed.
 		out := &struct{ Body finishedAgentBody }{}
-		if out.Body.OpenHypotheses, err = openHypotheses(ctx, graph, in.ID, in.AgentID); err != nil {
+		completed, err := h.svc.store.CompletedJobs(ctx, in.ID)
+		if err != nil {
+			return nil, h.refusal("finish agent", err)
+		}
+		if out.Body.OpenHypotheses, err = openHypotheses(ctx, graph, completed, in.ID, in.AgentID); err != nil {
 			return nil, h.refusal("finish agent", err)
 		}
 		finished, err := h.svc.FinishAgent(ctx, in.ID, in.AgentID, in.Body.Reason, strings.TrimSpace(in.Body.Blocker), strings.TrimSpace(in.Body.BaselineJobID))

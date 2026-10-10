@@ -272,7 +272,7 @@ baseline agents left exactly one that reports the ranking metric.`, stderr)
 		}
 	}
 	if len(out.Open) > 0 {
-		fmt.Fprintf(stderr, "hl: platform-experiments agents finish: note: you finished with %d of your hypotheses still open. Each stays open for good unless you give its verdict before this turn ends, with hl hypothesis status ID VERDICT:\n", len(out.Open))
+		fmt.Fprintf(stderr, "hl: platform-experiments agents finish: note: you finished with %d hypotheses still open whose verdict is yours, your own and the ideas of people your jobs tested. Each stays open for good unless you give its verdict before this turn ends, with hl hypothesis status ID VERDICT:\n", len(out.Open))
 		for _, h := range out.Open {
 			fmt.Fprintf(stderr, "  %s %s\n", h.ID, strings.Join(strings.Fields(h.Text), " "))
 		}

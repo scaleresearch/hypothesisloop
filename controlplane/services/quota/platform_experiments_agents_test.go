@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -77,7 +78,9 @@ func (f *rosterStore) ListHypotheses(_ context.Context, filter graphdb.ListFilte
 	}
 	var out []*domain.HypothesisListItem
 	for _, h := range f.hypotheses {
-		if h.PlatformExperimentID == filter.PlatformExperimentID && h.AgentID == filter.AgentID && h.Status == filter.Status && len(out) < filter.Limit {
+		agent := filter.AgentID == "" || h.AgentID == filter.AgentID
+		listed := filter.IDs == nil || slices.Contains(filter.IDs, h.ID)
+		if h.PlatformExperimentID == filter.PlatformExperimentID && agent && listed && h.Status == filter.Status && len(out) < filter.Limit {
 			out = append(out, &domain.HypothesisListItem{Hypothesis: h})
 		}
 	}
@@ -1040,6 +1043,23 @@ func TestAFinishAnswersTheHypothesesTheAgentLeavesOpen(t *testing.T) {
 	code, out = call(t, agentsRouter(t, store, dana), "POST", finish, `{"reason":"quota spent"}`)
 	if open, listed := out["open_hypotheses"].([]any); code != http.StatusOK || !listed || len(open) != 0 {
 		t.Errorf("nothing left open: got = %d %v, want 200 and an empty list", code, out)
+	}
+
+	// A person's idea is the verdict of the agent whose completed job tested it, and no other's.
+	store = newStore()
+	store.hypotheses = append(store.hypotheses,
+		&domain.Hypothesis{ID: "h-person", PlatformExperimentID: "pe-1", Text: "a ray predictor helps", Status: domain.HypothesisOpen},
+		&domain.Hypothesis{ID: "h-person-untested", PlatformExperimentID: "pe-1", Text: "a lattice helps", Status: domain.HypothesisOpen},
+		&domain.Hypothesis{ID: "h-person-by-eli", PlatformExperimentID: "pe-1", Text: "origin refit helps", Status: domain.HypothesisOpen})
+	store.completed = []*domain.Experiment{
+		{ID: "job-1", AgentID: "dana", PlatformExperimentID: "pe-1", HypothesisID: "h-person", Status: domain.StatusCompleted},
+		{ID: "job-2", AgentID: "dana", PlatformExperimentID: "pe-1", HypothesisID: "h-another's", Status: domain.StatusCompleted},
+		{ID: "job-3", AgentID: "eli", PlatformExperimentID: "pe-1", HypothesisID: "h-person-by-eli", Status: domain.StatusCompleted},
+	}
+	code, out = call(t, agentsRouter(t, store, dana), "POST", finish, `{"reason":"quota spent"}`)
+	want = []any{map[string]any{"id": "h-open", "text": "warmup helps"}, map[string]any{"id": "h-person", "text": "a ray predictor helps"}}
+	if code != http.StatusOK || !reflect.DeepEqual(out["open_hypotheses"], want) {
+		t.Errorf("with a person's idea tested: got = %d %v, want 200 with %v", code, out["open_hypotheses"], want)
 	}
 
 	store = newStore()

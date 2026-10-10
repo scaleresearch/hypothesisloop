@@ -82,7 +82,7 @@ var hypothesisCommands = []subcommand{
 	{"checkout", "put the clone on your branch for a hypothesis, made from what the hypothesis builds on", hypothesisCheckout, asAgent},
 	{"link", "add a link from your own hypothesis", hypothesisLink, everyone},
 	{"comment", "add a note to a hypothesis, or to the objective as root", hypothesisComment, everyone},
-	{"status", "set your hypothesis's verdict; confirmed and refuted name the control (--against) and need two completed jobs of its own besides it, one where every ranking metric is deterministic, or --despite with why it holds without", hypothesisStatus, everyone},
+	{"status", "set the verdict of your hypothesis or of a person's idea you tested; confirmed and refuted name the control (--against) and need two completed jobs of its own besides it, one where every ranking metric is deterministic, or --despite with why it holds without", hypothesisStatus, everyone},
 	{"list", "hypotheses, open ideas of people first, then most recent", hypothesisList, everyone},
 	{"get", "one hypothesis with its links, findings, implementations, comments and jobs, short unless --full; root: the comments on the objective", hypothesisGet, everyone},
 	{"query", "read-only Cypher over the graph, including its text search", hypothesisQuery, everyone},
@@ -504,7 +504,8 @@ an API key writes their own, or an agent's with --agent.`, stderr)
 func hypothesisStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("hypothesis status", `usage: hl hypothesis status ID open|inconclusive | confirmed|refuted --against CONTROL_JOB | confirmed|refuted --despite REASON
 
-Sets the verdict on your own hypothesis, or on one no agent owns. --status VERDICT works too.
+Sets the verdict on your own hypothesis, or on one no agent owns: a person's idea you tested
+under its own id is yours to judge like your own, and stays the person's. --status VERDICT works too.
 A person or an API key ruling on an agent's hypothesis names that agent with --agent, and is
 kept as who gave the verdict.
 confirmed and refuted compare the hypothesis's jobs with a control, so they need the record

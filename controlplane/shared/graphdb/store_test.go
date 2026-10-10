@@ -1316,6 +1316,13 @@ func TestOpenPersonIdeasListFirstAndAreCounted(t *testing.T) {
 	if got := ids(ListFilter{PlatformExperimentID: pe, ByPeople: true, Limit: 10}); !slices.Equal(got, want) {
 		t.Errorf("list by people: got = %v, want = %v", got, want)
 	}
+	want = []string{open.ID, settled.ID}
+	if got := ids(ListFilter{PlatformExperimentID: pe, IDs: []string{settled.ID, open.ID, "elsewhere"}, Limit: 10}); !slices.Equal(got, want) {
+		t.Errorf("list of named ids: got = %v, want = %v", got, want)
+	}
+	if got := ids(ListFilter{PlatformExperimentID: pe, IDs: []string{}, Limit: 10}); len(got) != 0 {
+		t.Errorf("list of no ids: got = %v, want none", got)
+	}
 	if stats, err := s.HypothesisStats(ctx, ListFilter{PlatformExperimentID: pe, ByPeople: true}); err != nil || stats.Total != 4 {
 		t.Errorf("stats by people: got = (%+v, %v), want total 4", stats, err)
 	}
