@@ -189,7 +189,7 @@ export interface MetricDefinition {
   description?: string
   // role decides what this metric is for: ranking (counts for cuts/standings, the default when
   // omitted), constraint (must satisfy bound or the job is excluded from standings), attribute
-  // (shown, never ranked). See docs/stages.md.
+  // (shown, never ranked).
   role?: 'ranking' | 'constraint' | 'attribute'
   bound?: number
   // On a ranking metric: the goal as a signed change against the baseline's value, 0.5 for +50%.

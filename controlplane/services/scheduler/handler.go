@@ -47,7 +47,7 @@ type submitRequest struct {
 	Job           domain.JobSpec `json:"job"`
 }
 
-// jobIDPrefix starts the id of every job the platform issues (docs/api-conventions.md).
+// jobIDPrefix starts the id of every job the platform issues (domain.NewID).
 const jobIDPrefix = "job"
 
 // newJob is the job a request states, under the id the platform issues for it.

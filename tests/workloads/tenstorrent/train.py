@@ -3,10 +3,9 @@
 HypothesisLoop Tenstorrent workload — real hardware, not a stub.
 
 Unlike tests/workloads/generic/train.py (a synthetic-metrics simulator shared by every other
-accelerator type), this one actually opens the Tenstorrent device DRA allocated to this pod
-(see tenstorrent/README.md's "How Tenstorrent devices are scheduled") via ttnn and runs real
-matrix multiplications on it, timing each one for real. Runs inside Tenstorrent's own official
-tt-metal release image (see Dockerfile.train) — verified against this QuietBox's Blackhole
+accelerator type), this one actually opens the Tenstorrent device DRA allocated to this pod via ttnn
+and runs real matrix multiplications on it, timing each one for real. Runs inside Tenstorrent's
+own official tt-metal release image (see Dockerfile.train) — verified against this QuietBox's Blackhole
 cards with a manual `docker run --device /dev/tenstorrent` smoke test before this script was
 written (KMD 2.10.0, firmware 19.11.0, sustained ~106 TFLOPS bf16 at n=2048).
 

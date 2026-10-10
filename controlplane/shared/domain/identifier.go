@@ -40,7 +40,7 @@ func ValidateIdentifier(kind, value string) error {
 	return nil
 }
 
-// The prefixes of the ids the platform issues (docs/api-conventions.md).
+// The prefixes of the ids the platform issues (NewID): <prefix>-<32 hex of a UUIDv7>.
 const (
 	PlatformExperimentIDPrefix = "pe"
 	AgentIDPrefix              = "ag"

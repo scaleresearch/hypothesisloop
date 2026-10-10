@@ -34,7 +34,7 @@ function rules(stages: StagesStatus['stages']): string {
 
 /**
  * How far a started run is, on one bar: the share of its time used and a mark where each stage
- * ends. Which researcher is ahead is not here, as stages publish their boundaries alone (docs/stages.md).
+ * ends. Which researcher is ahead is not here, as stages publish their boundaries alone.
  */
 export function RunProgress({ status }: { status: StagesStatus }) {
   const done = percent(status.progress)

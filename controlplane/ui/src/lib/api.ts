@@ -450,7 +450,7 @@ export interface CreatePlatformExperimentRequest {
   metrics: MetricDefinition[]
   /** Omitted is the platform's default. */
   report_interval_seconds?: number
-  /** Elimination ladder; omitted means the platform default. See docs/stages.md. */
+  /** Elimination ladder; omitted means the platform default. */
   stages?: Stage[]
   /** When its baseline begins to be measured. Omitted, the create. */
   starts_at?: string
@@ -603,7 +603,7 @@ interface StageAdvance {
   advanced_at: string
 }
 
-/** Deliberately carries no per-agent rank or standings — see docs/stages.md. */
+/** Deliberately carries no per-agent rank or standings. */
 export interface StagesStatus {
   stages: Stage[]
   current_stage: number

@@ -29,7 +29,7 @@ import (
 // and evictions. It serves nothing agent- or UI-facing — the whole public API lives on
 // control-service's single listener.
 func main() {
-	// Every time the API answers with is RFC3339 in UTC (docs/api-conventions.md). A time read
+	// Every time the API answers with is RFC3339 in UTC. A time read
 	// from the database or taken from the clock is in the process's zone, which on a host that
 	// is not in UTC put an offset on every answer and turned the zero time into another date.
 	time.Local = time.UTC
