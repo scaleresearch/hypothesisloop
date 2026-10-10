@@ -76,7 +76,7 @@ fi
 # Where local development's environments are built to, from the registry keys of .env: the private repository <REGISTRY_REPOSITORY>-environments and its env-pusher and
 # env-puller service accounts. The control plane mints their tokens with this machine's
 # application default credentials (gcloud auth application-default login), whose account
-# REGISTRY_TOKEN_MINTERS names. With no REGISTRY_REPOSITORY the local control plane builds none.
+# must be allowed to mint them. With no REGISTRY_REPOSITORY the local control plane builds none.
 HL_ENVIRONMENTS_REPOSITORY=""
 if [[ -f "${LIB_AUTH_REPO}/.env" && -n "$(lib_env_value REGISTRY_REPOSITORY)" ]]; then
   for lib_auth_key in GCP_PROJECT REGISTRY_LOCATION; do

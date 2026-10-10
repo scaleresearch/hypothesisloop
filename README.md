@@ -844,8 +844,8 @@ and `REGISTRY_LOCATION`), `make render-settings`, and so `make dev` and `make de
 the `environments` section naming `<REGISTRY_LOCATION>-docker.pkg.dev/<GCP_PROJECT>/<REGISTRY_REPOSITORY>-environments/environment`,
 `env-pusher@<GCP_PROJECT>.iam.gserviceaccount.com` and `env-puller@<GCP_PROJECT>.iam.gserviceaccount.com`,
 and `make dev-hosted` gives the cloud-agent the same repository. The account of this machine's
-application default credentials must be allowed to mint the two accounts' tokens (in `.env` it
-is listed in `REGISTRY_TOKEN_MINTERS` as `user:<GCP_ACCOUNT>`), and a cluster attached with `BUILDER=true` builds what is assigned.
+application default credentials must be allowed to mint the two accounts' tokens (the Service
+Account Token Creator role on both), and a cluster attached with `BUILDER=true` builds what is assigned.
 
 A cluster runs the jobs of its own org and no other. Admission places a job on a cluster of
 the job's org or on a shared cluster, and a job whose org has neither waits with
