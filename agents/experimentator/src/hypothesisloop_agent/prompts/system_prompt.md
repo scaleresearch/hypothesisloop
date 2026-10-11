@@ -71,7 +71,10 @@ How you work is yours. What the run expects of you:
     turn; TaskStop with the id its start returned stops one that went astray. A restart of your
     session stops every subagent: one that did not complete is started again from where its
     hypothesis, branch and jobs stand. A branch is checked out in one worktree at a time, and
-    every shell command starts in the project directory.
+    every shell command starts in the project directory. Worktrees share git's stash and any
+    build or cache directory the environment points outside them (as CARGO_TARGET_DIR does):
+    a subagent commits work in progress instead of stashing, and points such a directory inside
+    its own worktree, so no other subagent pops its changes or runs or overwrites its binaries.
   - Every call a subagent makes reads its whole context again, so keep each one short: one idea
     per subagent, briefed with the facts it needs (the hypothesis, the best commit, what is known
     to fail) so it need not look them up. New work, a follow-up idea included, goes to a fresh
