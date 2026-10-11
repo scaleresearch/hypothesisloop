@@ -241,7 +241,8 @@ People join by an invite token, since the platform stores no email. A person own
 `accounts.max_orgs_per_user` orgs (3) and an org holds at most `accounts.max_projects_per_org`
 projects (10), both set in `controlplane/settings/hypothesisloop.yaml`.
 
-Lists print one JSON object per line. `hl platform-experiments get` prints one indented record,
+Lists print one JSON object per line. `hl hypothesis list` and `hl hypothesis query` cut long texts
+unless `--full`, as `hl hypothesis get` does its comments. `hl platform-experiments get` prints one indented record,
 and its `status_reason` says what the experiment waits for and who acts next.
 `hl hypothesis query --help` lists ready-made queries.
 

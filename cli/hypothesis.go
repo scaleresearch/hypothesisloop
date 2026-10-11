@@ -583,11 +583,13 @@ for stdin, gives REASON in place of --despite REASON.`, stderr)
 }
 
 func hypothesisList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("hypothesis list", `usage: hl hypothesis list [--agent A] [--status S] [--by people] [--limit N] [--offset N]
+	fs := newFlags("hypothesis list", `usage: hl hypothesis list [--agent A] [--status S] [--by people] [--limit N] [--offset N] [--full]
 
 The open ideas of people first, those no agent has settled or built on yet, then the most recent,
 one JSON object per line with builds_on, child_count, finding_count, comment_count and working:
-the agents on it now, a job of theirs queued or running or a checkout within two hours. For
+the agents on it now, a job of theirs queued or running or a checkout within two hours. Each
+text is cut to its first 240 characters ("…" ends one cut) and status_actor and
+platform_experiment_id are left out unless --full; hl hypothesis get ID prints one whole. For
 structure or text search use 'hl hypothesis query'. The branches a hypothesis was checked out
 or run on are in hl hypothesis get ID, as implementations.`, stderr)
 	pe := fs.String("platform-experiment", "", "platform experiment id (default the token's)")
@@ -596,6 +598,7 @@ or run on are in hl hypothesis get ID, as implementations.`, stderr)
 	by := fs.String("by", "", "people: only the hypotheses a person registered")
 	limit := fs.Int("limit", 0, "page size (server default 20, max 200)")
 	offset := fs.Int("offset", 0, "rows to skip")
+	full := fs.Bool("full", false, "every row whole: texts uncut, status_actor and platform_experiment_id")
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
@@ -630,13 +633,26 @@ or run on are in hl hypothesis get ID, as implementations.`, stderr)
 	if err != nil {
 		return fail(stderr, err)
 	}
+	cut := 0
 	for _, h := range out {
-		if err := printLine(stdout, h); err != nil {
+		var drop []string
+		if !*full {
+			n := 0
+			if h, n, err = cutStrings(h, textCut); err != nil {
+				return fail(stderr, fmt.Errorf("response is not JSON: %w", err))
+			}
+			cut += n
+			drop = []string{"status_actor", "platform_experiment_id"}
+		}
+		if err := printLine(stdout, h, drop...); err != nil {
 			return fail(stderr, err)
 		}
 	}
 	if len(out) == 0 {
 		fmt.Fprintln(stderr, "hl: hypothesis list: no hypothesis matches")
+	}
+	if cut > 0 {
+		fmt.Fprintf(stderr, "hl: hypothesis list: %d texts cut to %d characters; hl hypothesis get ID or --full prints them whole\n", cut, textCut)
 	}
 	if total, _ := strconv.Atoi(header.Get("X-Total-Count")); total > *offset+len(out) {
 		fmt.Fprintf(stderr, "hl: hypothesis list: %d more; --limit N (max 200) and --offset N show them\n", total-*offset-len(out))
@@ -840,7 +856,8 @@ func hypothesisQuery(c *apiclient.Client, args []string, stdout, stderr io.Write
 
 Read-only Cypher over one platform experiment's hypothesis graph (default
 the token's), bound as $pe; writes are discarded: use submit/link. Prints a
-JSON object per row keyed by column, 200 rows max.
+JSON object per row keyed by column, 200 rows max, each string value cut to its first
+240 characters ("…" ends one cut) unless --full.
 
 A query reads that platform experiment and nothing else: the platform ties every node,
 every variable-length relationship and every text search to it before the query runs.
@@ -899,6 +916,7 @@ Examples:
 	var params stringList
 	fs.Var(&params, "param", "k=v, bound as $k (string value; repeatable)")
 	paramsJSON := fs.String("params", "", "")
+	full := fs.Bool("full", false, "every value whole, strings uncut")
 	cypher, err := parseOne(fs, args, "query", "", "cypher")
 	if err != nil {
 		return parseExit(err)
@@ -945,23 +963,94 @@ Examples:
 		}
 		return code
 	}
+	limit, cut := textCut, 0
+	if *full {
+		limit = 0
+	}
 	for i, row := range out.Rows {
 		if len(row) != len(out.Columns) {
 			return fail(stderr, fmt.Errorf("row %d has %d values for %d columns", i, len(row), len(out.Columns)))
 		}
-		var b bytes.Buffer
-		if err := json.Compact(&b, rowObject(out.Columns, row)); err != nil {
+		line, n, err := cutStrings(rowObject(out.Columns, row), limit)
+		if err != nil {
 			return fail(stderr, fmt.Errorf("response is not JSON: %w", err))
 		}
-		fmt.Fprintf(stdout, "%s\n", b.Bytes())
+		cut += n
+		fmt.Fprintf(stdout, "%s\n", line)
 	}
 	if len(out.Rows) == 0 {
 		fmt.Fprintln(stderr, "hl: hypothesis query: no rows")
+	}
+	if cut > 0 {
+		fmt.Fprintf(stderr, "hl: hypothesis query: %d values cut to %d characters; --full prints them whole\n", cut, textCut)
 	}
 	if out.Truncated {
 		fmt.Fprintf(stderr, "hl: hypothesis query: truncated at %d rows; narrow the query or add LIMIT/SKIP\n", len(out.Rows))
 	}
 	return 0
+}
+
+// textCut is how many characters of a string hl hypothesis list and query print unless told --full.
+const textCut = 240
+
+// cutStrings re-encodes raw on one line in its own key order, every string longer than limit
+// runes cut to them and "…", none when limit is 0, and says how many it cut.
+func cutStrings(raw []byte, limit int) ([]byte, int, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var b bytes.Buffer
+	cut := 0
+	var value func() error
+	value = func() error {
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		switch t := tok.(type) {
+		case json.Delim:
+			open, end := byte('{'), byte('}')
+			if t == '[' {
+				open, end = '[', ']'
+			}
+			b.WriteByte(open)
+			for i := 0; dec.More(); i++ {
+				if i > 0 {
+					b.WriteByte(',')
+				}
+				if open == '{' {
+					key, err := dec.Token()
+					if err != nil {
+						return err
+					}
+					writeString(&b, key.(string))
+					b.WriteByte(':')
+				}
+				if err := value(); err != nil {
+					return err
+				}
+			}
+			b.WriteByte(end)
+			_, err := dec.Token()
+			return err
+		case string:
+			if r := []rune(t); limit > 0 && len(r) > limit {
+				t = string(r[:limit]) + "…"
+				cut++
+			}
+			writeString(&b, t)
+		case json.Number:
+			b.WriteString(t.String())
+		case bool:
+			b.WriteString(strconv.FormatBool(t))
+		case nil:
+			b.WriteString("null")
+		}
+		return nil
+	}
+	if err := value(); err != nil {
+		return nil, 0, err
+	}
+	return b.Bytes(), cut, nil
 }
 
 // rowObject keeps the query's column order, which a Go map would lose.

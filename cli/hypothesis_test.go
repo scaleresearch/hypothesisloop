@@ -322,6 +322,44 @@ func TestHypothesisList(t *testing.T) {
 	}
 }
 
+// Agents read 20-25K characters from a list or a query, which stayed in their context for every
+// later call. Texts are cut unless --full.
+func TestHypothesisListAndQueryCutLongTextsUnlessFull(t *testing.T) {
+	long := strings.Repeat("ab", 200)
+	recordingServer(t, func(_ int, r recorded) any {
+		if r.Path == "/hypotheses/query" {
+			return map[string]any{"columns": []string{"id", "text"}, "rows": [][]any{{"hyp-1", long}}, "truncated": false}
+		}
+		return []map[string]any{{"id": "hyp-1", "text": long, "platform_experiment_id": "pe-1",
+			"status_actor": map[string]any{"kind": "agent", "id": "a", "name": "a"}}}
+	})
+	cutText := long[:240] + "…"
+	for _, tc := range []struct {
+		args       []string
+		want, note string
+	}{
+		{[]string{"hypothesis", "list", "--platform-experiment", "pe-1"},
+			`{"id":"hyp-1","text":"` + cutText + `"}`, "1 texts cut to 240 characters"},
+		{[]string{"hypothesis", "list", "--platform-experiment", "pe-1", "--full"},
+			`{"id":"hyp-1","platform_experiment_id":"pe-1","status_actor":{"id":"a","kind":"agent","name":"a"},"text":"` + long + `"}`, ""},
+		{[]string{"hypothesis", "query", "MATCH (h:Hypothesis) RETURN h.id AS id, h.text AS text", "--platform-experiment", "pe-1"},
+			`{"id":"hyp-1","text":"` + cutText + `"}`, "1 values cut to 240 characters; --full"},
+		{[]string{"hypothesis", "query", "MATCH (h:Hypothesis) RETURN h.id AS id, h.text AS text", "--platform-experiment", "pe-1", "--full"},
+			`{"id":"hyp-1","text":"` + long + `"}`, ""},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(tc.args, &stdout, &stderr); code != 0 {
+			t.Fatalf("%v: exit %d, stderr %s", tc.args, code, stderr.String())
+		}
+		if stdout.String() != tc.want+"\n" {
+			t.Fatalf("%v: stdout = %q\nwant     %q", tc.args, stdout.String(), tc.want+"\n")
+		}
+		if got := strings.Contains(stderr.String(), "cut to"); got != (tc.note != "") || !strings.Contains(stderr.String(), tc.note) {
+			t.Fatalf("%v: stderr = %q", tc.args, stderr.String())
+		}
+	}
+}
+
 func TestHypothesisGet(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any {
 		return map[string]any{"id": "hyp-1", "links": map[string]any{"out": []any{}, "in": []any{}}}
