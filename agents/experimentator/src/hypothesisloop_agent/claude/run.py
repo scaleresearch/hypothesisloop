@@ -47,7 +47,7 @@ log = logging.getLogger("llm_agent")
 DISALLOWED_TOOLS = ["ScheduleWakeup", "Monitor", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList",
                      "TaskOutput", "CronCreate", "CronDelete", "CronList", "PushNotification",
                      "RemoteTrigger", "DesignSync",
-                     # A subagent works in the clone `hl hypothesis checkout` makes: agents
+                     # A subagent's worktree is `git worktree add`, as the briefing says: agents
                      # called EnterWorktree instead and it failed.
                      "EnterWorktree", "ExitWorktree"]
 
