@@ -287,6 +287,23 @@ class ReviewTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(waits, [run.updates.REVIEW_IDLE_S] * 3)
         self.assertEqual(queries[1:5], [told, review, "Platform updates:\ncomment.new hyp-1 human" + S, told])
 
+    # While the model allowance is paced a coordinator reviews less often, is not told of free
+    # places at the end of a turn, and every wake says how the allowance stands.
+    async def test_a_paced_coordinator_reviews_later_and_is_told_why(self):
+        idle = {"run": {"minutes_left": 200}, "objective": [{"gap_to_target_pct": 27.3}],
+                "capacity": {"fits_now": 8, "jobs_in_flight_run": {"queued": 0, "running": 0}}}
+        allowance = run.pacing.Allowance()
+        allowance.read("five_hour", 0.8, time.time() + 2 * 3600)
+        with mock.patch.object(run.updates, "standing", mock.AsyncMock(return_value=idle)), \
+                mock.patch.object(run, "_allowance", allowance):
+            waits, queries = await self.waits("coordinator", [[], []])
+            note = allowance.note(coordinator=True)
+        self.assertEqual(waits, [run.pacing.REVIEW_S] * 2)
+        self.assertIn("used 80% of its five_hour window with 60% of the window gone", note)
+        self.assertIn(f"Your regular review comes every {run.pacing.REVIEW_S // 60} minutes", note)
+        self.assertEqual(queries[:2], ["Begin.\n\n" + note + S,
+                                       run.updates.review_prompt(run.pacing.REVIEW_S // 60, idle) + "\n\n" + note + S])
+
     # The platform's agent.idle, kept in its store, is the one timer of an agent.
     async def test_an_agent_waits_for_an_update_with_no_limit_of_its_own(self):
         comment = {"kind": "comment.new", "subject": "hyp-1", "value": "human"}
@@ -441,6 +458,21 @@ class SubagentCapTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("deny", str(await self.start("t-5")), "each listed once, a command not counted")
             self.listed("a-1", "a-3")
             self.assertEqual(await self.start("t-6"), {})
+
+    # Three agents on one account spent its five-hour window in three hours. While its use runs
+    # ahead of the window's pace, fewer subagents start and the refusal says why.
+    async def test_fewer_start_while_the_model_allowance_runs_ahead_of_its_pace(self):
+        allowance = run.pacing.Allowance()
+        with mock.patch.object(run, "_MAX_SUBAGENTS", 4), mock.patch.object(run, "_allowance", allowance), \
+                mock.patch.object(run.pacing, "SUBAGENTS", 2):
+            await self.start("t-1")
+            await self.start("t-2")
+            allowance.read("five_hour", 0.65, time.time() + 3 * 3600)
+            told = (await self.start("t-3"))["hookSpecificOutput"]["permissionDecisionReason"]
+            self.assertTrue(told.startswith("2 of your subagents are at work, the most that run at once while the model "
+                                            "allowance runs ahead of its pace (65% of its five_hour window used, 40% of it gone)"), told)
+            allowance.read("five_hour", 0.45, time.time() + 3 * 3600)
+            self.assertEqual(await self.start("t-3"), {})
 
     async def test_a_start_that_failed_or_ran_in_the_foreground_counts_no_more(self):
         with mock.patch.object(run, "_MAX_SUBAGENTS", 2):
@@ -655,6 +687,7 @@ class RefusedClient(HangingClient):
 class RateLimitTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         for patcher in (mock.patch.object(run, "_rate_limit", None), mock.patch.object(run, "_limit_since", None),
+                        mock.patch.object(run, "_allowance", run.pacing.Allowance()),
                         mock.patch.object(run._progress, "_model", {}),
                         mock.patch.object(run, "_live_session_id", None),
                         mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": tempfile.mkdtemp()})):
@@ -691,6 +724,25 @@ class RateLimitTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("refused your calls", openings[0])
         self.assertIn("refused your calls", openings[1])
         self.assertIsNone(run._limit_since, "a good turn after the wait still says it")
+
+    # The CLI says a window's use by itself only near its limit: it is asked at a turn's end, at
+    # most every _USAGE_READ_S, and what it answers is what the platform shows of the agent.
+    async def test_the_accounts_usage_is_asked_of_the_cli_now_and_then(self):
+        resets = time.time() + 3 * 3600
+        asked = []
+
+        async def control(request, timeout):
+            asked.append(request)
+            return {"rate_limits": {"five_hour": {"utilization": 85, "resets_at": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(resets))}}}
+
+        client = SimpleNamespace(_query=SimpleNamespace(_send_control_request=control))
+        with mock.patch.object(run, "_usage_read_at", None):
+            await run._read_usage(client)
+            await run._read_usage(client)
+            await run._read_usage(SimpleNamespace())
+        self.assertEqual(asked, [{"subtype": "get_usage"}])
+        self.assertEqual(run._allowance.pacing().window, "five_hour")
+        self.assertEqual(run._progress._model, {"status": "allowed", "type": "five_hour", "utilization": 0.85, "resets_at": int(resets)})
 
     async def test_a_reset_that_has_passed_refuses_nothing(self):
         run._rate_limit = _refusal(time.time() - 1).rate_limit_info

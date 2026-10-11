@@ -33,7 +33,7 @@ from claude_agent_sdk import (
 )
 
 from hypothesisloop_agent import config, core, progress, proposal, seed, session, updates
-from hypothesisloop_agent.claude import activity
+from hypothesisloop_agent.claude import activity, pacing
 
 log = logging.getLogger("llm_agent")
 
@@ -104,11 +104,38 @@ def _log_message(message, agent: str) -> None:
             info.status, info.rate_limit_type, info.utilization, info.resets_at,
         )
         _progress.model(info.status, info.rate_limit_type, info.utilization, info.resets_at)
+        _allowance.read(info.rate_limit_type, info.utilization, info.resets_at)
 
 
 # The model provider's rate limit as the CLI last said it, for the whole account: a subagent's
 # call that was refused refuses the agent's own, and the CLI says each change once.
 _rate_limit = None
+# The account's use of each of its windows, from the CLI's rate limits and its get_usage.
+_allowance = pacing.Allowance()
+# The CLI says a window's use by itself only close to its limit (five_hour from 90%), so it is
+# asked for it at a turn's end, at most this often. It asks the provider.
+_USAGE_READ_S = 300
+_usage_read_at: float | None = None
+
+
+async def _read_usage(client) -> None:
+    """Reads the account's use of its windows from the CLI's get_usage, for which the SDK has no
+    method. A CLI that answers none, as on a credential without the profile scope, leaves the
+    readings as they were."""
+    global _usage_read_at
+    query = getattr(client, "_query", None)
+    if query is None or (_usage_read_at is not None and time.monotonic() - _usage_read_at < _USAGE_READ_S):
+        return
+    _usage_read_at = time.monotonic()
+    try:
+        usage = await query._send_control_request({"subtype": "get_usage"}, timeout=20)
+    except Exception as e:
+        log.info("the model account's usage was not read: %s", e)
+        return
+    _allowance.read_usage(usage)
+    reading = _allowance.furthest()
+    if reading and not _refused_until():
+        _progress.model("allowed", reading.window, reading.utilization, int(reading.resets_at))
 
 
 def _refused_until() -> float | None:
@@ -277,7 +304,8 @@ class Subagents:
 
 def _subagent_cap() -> tuple[int, str]:
     """How many subagents may run at once now, and why that many when it is fewer than usual."""
-    return _MAX_SUBAGENTS, ""
+    paced = _allowance.cap()
+    return paced if paced and paced[0] < _MAX_SUBAGENTS else (_MAX_SUBAGENTS, "")
 
 
 def _subagent_hooks(subagents: Subagents) -> dict[str, HookMatcher]:
@@ -644,7 +672,9 @@ def _revision_prompt(setup: core.RunSetup, draft: dict) -> str:
 
 async def _with_situation(setup: core.RunSetup, watch_env: dict[str, str], prompt: str) -> str:
     """prompt with the situation at its end, read now, for every role in a run: a planner has
-    none yet."""
+    none yet. While the model allowance is paced it says so before."""
+    if note := _allowance.note(config.coordinates(setup.cfg)):
+        prompt = f"{prompt}\n\n{note}"
     if config.plans(setup.cfg):
         return prompt
     return f"{prompt}\n\n{await updates.situation(watch_env)}"
@@ -1056,6 +1086,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 interrupter.cancel()
             if got_result:
                 await _store_session(setup)
+                await _read_usage(client)
 
             # A refused agent can take no turn, the last one included: the run loop waits.
             if refused_until := _refused_until():
@@ -1123,9 +1154,11 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 told_nothing = True
                 continue
             # A coordinator that ends its turn with free places, the target not reached and time
-            # left is told so the same way, and reviews sooner while places stay free.
+            # left is told so the same way, and reviews sooner while places stay free. While the
+            # model allowance is paced it is neither, and reviews later.
             standing = await updates.standing(watch_env) if config.coordinates(cfg) else None
-            if not background and not answered and (idle := updates.capacity_idle(standing)):
+            paced = _allowance.pacing() is not None
+            if not background and not answered and not paced and (idle := updates.capacity_idle(standing)):
                 log.info("free places at the end of the coordinator's turn, saying so")
                 _forget_job_reads()
                 await client.query(await _with_situation(setup, watch_env, idle))
@@ -1133,6 +1166,8 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 continue
             # An agent waits for an update with no limit, a coordinator until its review.
             wait_s = updates.review_s(standing) if config.coordinates(cfg) else math.inf
+            if paced:
+                wait_s = max(wait_s, pacing.REVIEW_S)
             # Wait for the next batch of updates about its own jobs and hypotheses and hand it
             # over on the same connection. A turn the CLI starts by itself ends the wait and is
             # read first: one starts when a subagent ends, and on a resume to say which stopped.
