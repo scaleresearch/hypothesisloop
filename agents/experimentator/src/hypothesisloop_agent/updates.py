@@ -88,10 +88,10 @@ REVIEW_IDLE_S = 600
 # run both researchers did offline checks for 40 minutes past it with every place free.
 CAPACITY_IDLE = ("{free} more jobs fit now beside the {queued} queued and {running} running, the best is {gap:g}% short of "
                  "the target and {minutes} minutes are left. Bring your gap model up to date and fill the free places: "
-                 "steer researchers to distinct hypotheses that close the gap, or add a researcher.")
+                 "steer researchers to distinct hypotheses that close the gap, send scouts for new ideas, or add a researcher.")
 CAPACITY_IDLE_REACHED = ("{free} more jobs fit now beside the {queued} queued and {running} running, the best is {gap:g}% past "
                          "the target and {minutes} minutes are left. The run goes on raising the best: fill the free places, "
-                         "steer researchers to distinct hypotheses that go further, or add a researcher.")
+                         "steer researchers to distinct hypotheses that go further, send scouts for new ideas, or add a researcher.")
 SUMMARY_STALE = "{jobs} jobs completed since you last wrote the summary: add what they found."
 IDEAS_OPEN = ("{ideas} ideas from people are still open (`hl hypothesis list --by people`): assign each to a researcher "
               "as places free, or answer it with a comment that gives the evidence why not.")
