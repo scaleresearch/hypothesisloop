@@ -298,12 +298,18 @@ class StandingTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("7 more jobs fit now beside the 1 queued and 0 running, the best is 27.3% short", said)
         self.assertEqual(updates.review_s(self.IDLE), updates.REVIEW_IDLE_S)
 
-    def test_a_full_capacity_a_reached_target_no_time_or_no_read_says_nothing(self):
+    def test_free_places_past_the_target_are_said_too(self):
+        reached = dict(self.IDLE, objective=[{"gap_to_target_pct": -53.5}])
+        said = updates.capacity_idle(reached)
+        self.assertEqual(said, updates.CAPACITY_IDLE_REACHED.format(free=7, queued=1, running=0, gap=53.5, minutes=200))
+        self.assertIn("the best is 53.5% past the target", said)
+
+    def test_a_full_capacity_no_measure_no_time_or_no_read_says_nothing(self):
         full = dict(self.IDLE, capacity={"fits_now": 1, "jobs_in_flight_run": {"queued": 1, "running": 7}})
         reached = dict(self.IDLE, objective=[{"gap_to_target_pct": -2}])
         unmeasured = dict(self.IDLE, objective=[{"metric": "ratio"}])
         over = dict(self.IDLE, run={"minutes_left": 0, "closed_at": "2026-10-10T23:00:00Z"})
-        for situation in (full, reached, unmeasured, over, None, {}):
+        for situation in (full, unmeasured, over, None, {}):
             self.assertEqual(updates.capacity_idle(situation), "", situation)
         self.assertEqual(updates.review_s(full), updates.REVIEW_S)
         self.assertEqual(updates.review_s(None), updates.REVIEW_S)
@@ -313,7 +319,8 @@ class StandingTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updates.review_prompt(10, self.IDLE), " ".join([
             updates.REVIEW_PROMPT.format(minutes=10), updates.capacity_idle(self.IDLE), updates.SUMMARY_STALE.format(jobs=3),
             updates.IDEAS_OPEN.format(ideas=2)]))
-        written = dict(self.IDLE, objective=[{"gap_to_target_pct": -1}], coordinator={"jobs_completed_since_summary": 0},
+        written = dict(self.IDLE, capacity={"fits_now": 1, "jobs_in_flight_run": {"queued": 1, "running": 7}},
+                       coordinator={"jobs_completed_since_summary": 0},
                        ideas_from_people={"open": 0})
         self.assertEqual(updates.review_prompt(20, written), updates.REVIEW_PROMPT.format(minutes=20))
         self.assertEqual(updates.review_prompt(20, None), updates.REVIEW_PROMPT.format(minutes=20))
