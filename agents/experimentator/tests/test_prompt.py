@@ -1,3 +1,6 @@
+import os
+import subprocess
+import tempfile
 import unittest
 from types import SimpleNamespace
 
@@ -49,6 +52,34 @@ class ResearcherPromptTest(unittest.TestCase):
         prompt = " ".join(core.system_prompt(cfg, "rules", "commands", "https://git/x", "/app/workspace").split())
         self.assertIn("(`hl job summary JOB --text T`)", prompt)
         self.assertIn("its summaries and its verdict are yours to give as on your own; the idea stays the person's", prompt)
+
+
+class CloneWorkspaceTest(unittest.TestCase):
+    # The CLI caches that its directory is no git repository: a researcher that cloned in its first
+    # turn had every `isolation: "worktree"` subagent refused with "not in a git repository".
+    def test_the_clone_is_there_before_the_cli_starts(self):
+        with tempfile.TemporaryDirectory() as root:
+            origin, workdir = os.path.join(root, "origin"), os.path.join(root, "workspace")
+            os.makedirs(workdir)
+            subprocess.run(["git", "init", "-q", origin], check=True)
+            subprocess.run(["git", "-C", origin, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
+                            "--allow-empty", "-m", "start"], check=True)
+            core.clone_workspace(origin, workdir)
+            self.assertTrue(os.path.isdir(os.path.join(workdir, ".git")))
+
+    def test_a_workdir_in_use_or_a_failed_clone_is_left_as_it_is(self):
+        with tempfile.TemporaryDirectory() as workdir:
+            core.clone_workspace(os.path.join(workdir, "missing"), workdir)
+            self.assertEqual(os.listdir(workdir), [])
+            open(os.path.join(workdir, "work"), "w").close()
+            core.clone_workspace("https://git/x", workdir)
+            self.assertEqual(os.listdir(workdir), ["work"])
+
+    def test_the_briefing_says_the_clone_is_made(self):
+        cfg = SimpleNamespace(agent_id="ag-1", flavor="generalist", role="researcher", platform_experiment_id="pe-1",
+                              hyperparameters={})
+        prompt = " ".join(core.system_prompt(cfg, "rules", "commands", "https://git/x", "/app/workspace").split())
+        self.assertIn("/app/workspace, the directory every command starts in, holds the clone of https://git/x", prompt)
 
 
 if __name__ == "__main__":

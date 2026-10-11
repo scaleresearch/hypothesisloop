@@ -3,8 +3,8 @@ core.system_prompt: a section per placeholder, each opened by a line of ==== and
 {start} the start_ section of the agent's role.
 
 ==== workspace
-run `git clone {repository_url} .` in {workdir}, the directory every command starts
-    in. {start}
+{workdir}, the directory every command starts in, holds the clone of {repository_url}
+    (where it is empty, run `git clone {repository_url} .` there). {start}
 ==== start_baseline
 Work on branch `hl/{platform_experiment_id}/baseline`; `hl job submit` pushes it. A run that
     `continues` another starts that branch from the other's `baseline_code_ref` and measures

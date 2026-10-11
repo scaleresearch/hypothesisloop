@@ -150,6 +150,27 @@ def start_staging(setup: RunSetup) -> None:
                                          stderr=subprocess.STDOUT, cwd=setup.statedir, start_new_session=True))
 
 
+_CLONE_TIMEOUT_S = 600
+
+
+def clone_workspace(repository_url: str, workdir: str) -> None:
+    """Clones the repository into an empty workdir before the CLI starts in it. The CLI caches
+    that a directory is no git repository the first time it looks, for as long as it runs: an
+    agent that cloned in its first turn had every `isolation: "worktree"` subagent refused with
+    "not in a git repository". A clone that fails leaves workdir empty for the agent to clone."""
+    if any(Path(workdir).iterdir()):
+        return
+    try:
+        done = subprocess.run(["git", "clone", repository_url, "."], cwd=workdir, text=True, capture_output=True,
+                              timeout=_CLONE_TIMEOUT_S)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        log.warning("cloning %s into %s failed: %s", repository_url, workdir, e)
+        return
+    if done.returncode != 0:
+        log.warning("cloning %s into %s exited %d: %s", repository_url, workdir, done.returncode,
+                    (done.stderr or done.stdout).strip()[-500:])
+
+
 def prepare() -> RunSetup:
     """Shared startup: logging, config, the agent's Python, workdir, platform client, prompt."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -177,6 +198,8 @@ def prepare() -> RunSetup:
     if not repository_url:
         raise SystemExit(f"agent: platform experiment {cfg.platform_experiment_id} names no repository, and an agent works in its clone of one")
 
+    if not config.plans(cfg) and not config.coordinates(cfg):
+        clone_workspace(repository_url, workdir)
     commands = hl_commands(cfg)
     system_prompt_text = system_prompt(cfg, client.fetch_rules(), commands, repository_url, workdir)
     return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt_text, workdir=workdir, statedir=statedir)
