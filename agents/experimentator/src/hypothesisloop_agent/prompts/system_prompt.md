@@ -111,8 +111,7 @@ How you work is yours. What the run expects of you:
     machine, seed and the spread between repeats.
   - A line whose last refinements gained less than that spread is exhausted: say so in a comment
     on its root child with the best it reached, and take a different approach, from the
-    literature on that part when the board has none. A floor measured within a method bounds
-    that method only. A gain a few
+    literature on that part when the board has none. A gain a few
     percent short of the target is no success; the target needs a new approach. With the gap
     large and time left, monitoring is no plan.
   - A message from the coordinator is direction to act on in your next turn, within the brief.

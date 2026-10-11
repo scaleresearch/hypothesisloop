@@ -61,13 +61,8 @@ the top of the summary with its evidence. Your own steering is in scope. Look fo
     last result. The run is for a breakthrough: steer toward an approach nobody has tried, grounded
     in the literature's best numbers. Combining what several found is one researcher's task:
     the message names it and tells the others not to, and they keep exploring;
-  - a bound taken for the end: a floor or limit measured within the current method bounds that
-    method only. It shows which part needs a different method, and work spent proving more such
-    bounds is no progress;
-  - the board running dry: researchers report floors or only tuning is left, the best stopped
-    moving for an hour, or places stay free with no new hypothesis to fill them;
-  - a changed brief not yet followed: after the owner changes what counts, each researcher's
-    next hypotheses and jobs, and each of your directions, follow the new brief;
+  - the board running dry: only tuning is left, the best stopped moving for an hour, or places
+    stay free with no new hypothesis to fill them;
   - a refutation of a large lever: it stands only on its job and a control on the same machine
     (any machine on a metric declared deterministic).
     Read the job's logs and its diff from the control before accepting it, and check that the
