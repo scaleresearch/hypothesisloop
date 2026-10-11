@@ -25,7 +25,7 @@ export function StepWhat({ form, set, isEdit, fileNote, onRepository }: StepProp
       ) : (
         <FormField
           label="Repository"
-          hint={<>The code agents work on. Fixed once created.<InfoTip>{`A repository with ${FILE} fills in the rest of this form.`}</InfoTip></>}
+          hint={<InfoTip>{`A repository with ${FILE} fills in the rest of this form.`}</InfoTip>}
         >
           <RepositorySelect value={form.repository} onChange={onRepository} />
           {fileNote?.state === 'reading' && <Text variant="hint">Reading {FILE} of {fileNote.repository}…</Text>}

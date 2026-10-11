@@ -8,6 +8,7 @@ import useSWR from 'swr'
 import { FlaskConical, ListTree, Server, LineChart, Lightbulb, Settings } from 'lucide-react'
 import { fetchOrgClusters } from '@/lib/api'
 import { HOME_PATH, LANDING_PATH, signOut } from '@/lib/auth'
+import { sectionOf, sectionPath, type Section } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
 import { budgetUnit } from '@/lib/units'
 import { CommandPaletteTrigger } from '@/components/command-palette'
@@ -22,13 +23,13 @@ import { InlineError } from '@/components/ui/status-message'
 import { Eyebrow, Text } from '@/components/ui/text'
 import type { Tone } from '@/lib/colors'
 
-const navItems = [
-  { href: '/platform-experiments', label: 'Experiments', icon: FlaskConical },
-  { href: '/hypotheses', label: 'Hypotheses', icon: Lightbulb },
-  { href: '/jobs', label: 'Jobs', icon: ListTree },
-  { href: '/cluster', label: 'Compute Resources', icon: Server },
-  { href: '/statistics', label: 'Statistics', icon: LineChart, staffOnly: true },
-  { href: '/settings', label: 'Settings', icon: Settings },
+const navItems: { section: Section; label: string; icon: typeof Settings; staffOnly?: boolean }[] = [
+  { section: 'experiments', label: 'Experiments', icon: FlaskConical },
+  { section: 'hypotheses', label: 'Hypotheses', icon: Lightbulb },
+  { section: 'jobs', label: 'Jobs', icon: ListTree },
+  { section: 'clusters', label: 'Compute Resources', icon: Server },
+  { section: 'statistics', label: 'Statistics', icon: LineChart, staffOnly: true },
+  { section: 'settings', label: 'Settings', icon: Settings },
 ]
 
 // Checking is no state of the clusters yet: it pulses in the quiet colour until one is known.
@@ -84,8 +85,8 @@ function Account() {
 }
 
 export function Nav() {
-  const pathname = usePathname()
-  const { staff } = useTenant()
+  const current = sectionOf(usePathname())
+  const { project, staff } = useTenant()
 
   return (
     // The nav is a sand field beside the paper of the page; the current page is a card lifted out of it.
@@ -98,12 +99,12 @@ export function Nav() {
         <CommandPaletteTrigger />
       </div>
       <ul className="flex flex-col gap-0.5 px-3">
-        {navItems.filter(item => staff || !item.staffOnly).map(({ href, label, icon: Icon }) => {
-          const active = pathname === href || pathname.startsWith(href + '/')
+        {navItems.filter(item => staff || !item.staffOnly).map(({ section, label, icon: Icon }) => {
+          const active = current === section
           return (
-            <li key={href}>
+            <li key={section}>
               <Link
-                href={href}
+                href={sectionPath(section, project)}
                 aria-current={active ? 'page' : undefined}
                 className={clsx(
                   'flex items-center gap-3 rounded border px-3 py-2 text-sm transition-colors',
@@ -122,10 +123,9 @@ export function Nav() {
         <Account />
         <Stack gap="2xs" className="border-t pt-3">
           <Inline nowrap className="justify-between">
-            <Eyebrow>HypothesisLoop v2.0</Eyebrow>
+            <Eyebrow>HypothesisLoop</Eyebrow>
             <ThemeSwitch />
           </Inline>
-          <Text variant="meta" tone="subtle">Budgets are counted in {budgetUnit('accelerator', 'long')}, or {budgetUnit('cpu', 'long')} for jobs on CPU.</Text>
         </Stack>
       </Stack>
     </nav>

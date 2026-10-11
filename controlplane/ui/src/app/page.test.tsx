@@ -27,7 +27,7 @@ describe('the landing page', () => {
   })
 
   it('offers a signed-in visitor the console and nothing else', async () => {
-    expect(await show(true)).toEqual([['Experiments', '/console']])
+    expect(await show(true)).toEqual([['Console', '/console']])
   })
 
   it('checks the session with the request\'s cookies and scheme, and writes none', async () => {
