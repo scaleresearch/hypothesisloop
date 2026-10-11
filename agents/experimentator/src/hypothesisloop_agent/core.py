@@ -218,8 +218,8 @@ ACCEPT_POLL_S = 3
 
 async def until_accepted(setup: RunSetup, stop_flag: list, poll_s: float = ACCEPT_POLL_S, said=lambda: None) -> None:
     """Returns once the platform experiment of a baseline agent is no longer a draft, or a stop is
-    asked for, and at once for any other agent. A platform that does not answer is waited out:
-    until_lost ends the process when that lasts. said() is called once, when it starts waiting."""
+    asked for, and at once for any other agent. A platform that does not answer is waited out.
+    said() is called once, when it starts waiting."""
     if not config.measures_baseline(setup.cfg):
         return
     waiting = False
@@ -317,18 +317,14 @@ def stop_cause(setup: RunSetup) -> str | None:
         return "You are being stopped. The platform could not be asked why."
 
 
-# How long the platform may leave the check below unanswered before the harness ends itself. A
-# rented machine that nothing outside can reach bills until its process exits.
-UNANSWERED_LIMIT_S = 1800
 _RUN_CHECK_INTERVAL_S = 30
 
 
 def run_over(setup: RunSetup) -> str | None:
     """Why this process has no run on the platform to work in, None while it has one: the one
     place the harness asks, and so what starts and ends the outage clock (outage.py). The
-    platform ended the run, it refuses the token, which it does once the wind-down after the end
-    has passed, or it has not answered for UNANSWERED_LIMIT_S. An outage shorter than that is
-    waited out."""
+    platform ended the run, or it refuses the token, which it does once the wind-down after the
+    end has passed. A platform that does not answer is waited out."""
     try:
         # A planner's run ends with its answer and a revision starts it again with its session.
         ended = run_ended(setup)
@@ -336,9 +332,8 @@ def run_over(setup: RunSetup) -> str | None:
         if e.status == 401:
             return f"the platform refuses this token, so its run is over ({e.body.strip()[:200]})"
         if not outage.under_way():
-            log.warning("the platform did not say whether the run goes on (%s): ending after %ds of this", e, UNANSWERED_LIMIT_S)
-        if outage.unanswered() >= UNANSWERED_LIMIT_S:
-            return f"the platform has not said for {UNANSWERED_LIMIT_S}s whether the run goes on ({e})"
+            log.warning("the platform did not say whether the run goes on (%s): waiting", e)
+        outage.unanswered()
         return None
     outage.answered()
     return _ENDED + ended if ended else None
@@ -353,8 +348,7 @@ def lost_platform(reason: str | None) -> bool:
 
 
 async def until_lost(setup: RunSetup, stop_flag: list) -> str:
-    """Returns once the platform refuses this process or has been out of reach for the limit,
-    with the reason. Whoever awaits it ends the process then, whatever turn or wait is in flight.
+    """Returns once the platform refuses this process, with the reason. Whoever awaits it ends the process then, whatever turn or wait is in flight.
     A run the platform ended asks for the stop a signal asks for: its agent may still have a last
     turn to file what it owes, and only the wind-down its token has left to take it in."""
     while True:

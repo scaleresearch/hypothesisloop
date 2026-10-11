@@ -1,5 +1,4 @@
 import asyncio
-import time
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -50,17 +49,10 @@ class RunOverTest(unittest.TestCase):
         self.assertEqual(outage.over(), [])
         self.assertIsNone(core.run_over(agent))
         self.assertFalse(outage.under_way())
-        # The read that counts toward the exit is the one that tells the agent the outage ended.
         self.assertEqual([e["kind"] for e in outage.over()], ["platform.reachable"])
         self.assertEqual(outage.over(), [])
         with self.assertLogs("llm_agent", "WARNING"):
             self.assertIsNone(core.run_over(agent))
-
-    def test_a_platform_unanswered_for_the_limit_ends_the_run(self):
-        outage._since = time.time() - core.UNANSWERED_LIMIT_S
-        reason = core.run_over(setup(lambda: DOWN))
-        self.assertTrue(reason.startswith("the platform has not said for 1800s whether the run goes on ("), reason)
-        self.assertTrue(core.lost_platform(reason))
 
     def test_a_run_the_platform_ended_is_no_lost_platform(self):
         reason = core.run_over(setup(lambda: {"ended": "cut"}))

@@ -14,14 +14,11 @@ _over: tuple[float, float] | None = None
 _suspected = False
 
 
-def unanswered() -> float:
-    """Notes a read the platform left unanswered. Returns for how many seconds it has answered
-    none."""
+def unanswered() -> None:
+    """Notes a read the platform left unanswered."""
     global _since
-    now = time.time()
     if _since is None:
-        _since = now
-    return now - _since
+        _since = time.time()
 
 
 def answered() -> None:

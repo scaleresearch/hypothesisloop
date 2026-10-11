@@ -1056,8 +1056,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
 
     async def over() -> bool:
         """Whether the run loop stops here, after the last turn when there is a platform to file
-        with: a run it ended and a machine told to stop get one, a refused token and a platform
-        out of reach for the limit get none. The one place a last turn is given."""
+        with: a run it ended and a machine told to stop get one, a refused token gets none. The one place a last turn is given."""
         lost = core.run_over(setup)
         if not lost and not stopped():
             return False
