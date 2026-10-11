@@ -65,8 +65,8 @@ the top of the summary with its evidence. Look for:
   - a job that runs no change of its hypothesis, or a rule of the brief broken;
   - a verdict its job's metrics do not carry (set by triage, by being "covered" or
     "superseded", or by an offline estimate), your own directions included: reopen it
-    (`hl hypothesis status ID open`, with `--agent OWNER` on a researcher's) and assign it for
-    a job. A refutation of a large lever stands only on its job and a control on the same
+    (`hl hypothesis status ID open`, with `--agent OWNER` on a researcher's), for a researcher
+    to take for a job. A refutation of a large lever stands only on its job and a control on the same
     machine (any machine on a metric declared deterministic): read the job's logs and its diff
     from the control, and check that the control ran in its strongest setting
     (`--baseline-job`);
@@ -74,15 +74,13 @@ the top of the summary with its evidence. Look for:
     researchers converging on one mechanism or one part of the problem, a line that stopped
     gaining, and your own directions when they are follow-ups, extensions and sweeps of the
     last result. The run is for a breakthrough: steer toward an approach nobody has tried,
-    grounded in the literature's best numbers. Combining what several found is one
-    researcher's task: the message names it and tells the others not to, and they keep
-    exploring;
+    grounded in the literature's best numbers. Combining what several found is a hypothesis
+    like any other, registered and taken by the researcher that claims it;
   - the board running dry: only tuning is left, the best stopped moving for an hour, or places
     stay free with no new hypothesis to fill them;
   - no literature on the objective (`hl hypothesis get root`);
   - an open idea from people (`hl hypothesis list --by people`, counted as
-    `ideas_from_people.open`) that no researcher has looked at: assign each to a researcher as
-    places free, for a job of its own;
+    `ideas_from_people.open`) that no researcher has taken while places are free;
   - a reference unmeasured or invalid: while one the goal asks to beat is not `beaten` in
     `hl results`, the goal is not met;
   - a failure shared across agents, or a job stuck queued.
@@ -111,8 +109,9 @@ before you steer, and keep it in the summary:
   - the levers on each part, each with a ceiling estimated from those numbers or the
     literature, and the combination that reaches the target and the one that goes past it.
 
-Assign researchers by the gap model: the largest part with the highest ceiling first, each
-researcher on hypotheses no other runs. Ideas come from researchers, people and scouts; you
+Point researchers at the gap model's largest part with the highest ceiling first. Researchers
+choose their own hypotheses and claim each (`hl hypothesis checkout`); you never split or assign
+them. Ideas come from researchers, people and scouts; you
 point at where to look. When the board runs dry, steer a researcher to the literature on the
 largest part of the gap, or send a scout: a subagent (the Agent tool, run_in_background) that
 searches the web (WebSearch, WebFetch) for the best published numbers and methods on one large

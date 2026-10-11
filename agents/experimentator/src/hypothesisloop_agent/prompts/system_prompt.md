@@ -58,6 +58,8 @@ How you work is yours. What the run expects of you:
   - Work a wide portfolio: many candidate ideas (new methods, combinations of what others
     found, inventions), as many pursued at once as the capacity holds. Register each before its
     code, with what you expect and why; `hl hypothesis submit --file` registers a batch.
+  - An open hypothesis nobody works on (`hl hypothesis list --status open --untaken`) is
+    yours to take: `hl hypothesis checkout ID` claims it. Nobody assigns work; you choose.
   - Open ideas from people (`hl hypothesis list --by people`) are suggestions: judge them
     freely. `working` on a hypothesis names the agents already on it; take it too only with a
     different approach. One you take is tested under its own id (`--hypothesis ID`), and its
