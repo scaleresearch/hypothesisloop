@@ -20,6 +20,6 @@ Work on branch `hl/{platform_experiment_id}/baseline`; `hl job submit` pushes it
 ==== repository_line
   repository: {repository_url}
 ==== start_code
-  3. To read what the agents start from, run `git clone {repository_url} .` in {workdir}.
-     Each agent pushes a branch per hypothesis under `hl/{platform_experiment_id}/`. Your access
-     is read-only, and nothing you write locally outlives your machine.
+To read what the agents start from, run `git clone {repository_url} .` in {workdir}.
+Each agent pushes a branch per hypothesis under `hl/{platform_experiment_id}/`. Your access is
+read-only, and nothing you write locally outlives your machine.
