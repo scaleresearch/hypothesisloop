@@ -1610,7 +1610,7 @@ func (s *PlatformExperimentsService) tellCoordinator(ctx context.Context, pe *do
 }
 
 // StartExpirySweep runs SweepAutoStart, TendBaselines, SweepExpired, RecordCloses,
-// TellCoordinators and the idle notice on a ticker until ctx is cancelled. TendBaselines runs before SweepExpired, so a baseline that waited
+// TellCoordinators and the idle notices on a ticker until ctx is cancelled. TendBaselines runs before SweepExpired, so a baseline that waited
 // on the platform until its deadline is given that time before it is closed.
 func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
@@ -1638,6 +1638,9 @@ func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, inter
 			if s.idle != nil {
 				if err := s.NoticeIdleResearchers(ctx); err != nil {
 					s.logger.Error("notice_idle_researchers: scan", zap.Error(err))
+				}
+				if err := s.NoticeIdleCapacity(ctx); err != nil {
+					s.logger.Error("notice_idle_capacity: scan", zap.Error(err))
 				}
 			}
 		}
@@ -1738,6 +1741,91 @@ func (n idleNotice) detail() string {
 	if n.quota != nil {
 		left := domain.RoundHours(max(0, n.quota.ShareAcceleratorHours-n.quota.UsedGuaranteedAccH-n.quota.UsedBurstAccH))
 		parts = append(parts, fmt.Sprintf("%g of its share of %g accelerator hours are left", left, n.quota.ShareAcceleratorHours))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// NoticeIdleCapacity tells whoever steers each running platform experiment with time left that
+// its capacity holds places beyond its queued jobs (capacity.idle), every idleAfter while that
+// lasts, whoever has jobs in flight and wherever the best stands against the target. A run whose
+// numbers cannot be read is skipped, and told at a later pass.
+func (s *PlatformExperimentsService) NoticeIdleCapacity(ctx context.Context) error {
+	pes, err := s.store.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpRunning)
+	if err != nil {
+		return fmt.Errorf("list running platform experiments: %w", err)
+	}
+	for _, pe := range pes {
+		if err := s.noticeIdleCapacity(ctx, pe); err != nil {
+			s.logger.Error("notice_idle_capacity: failed", zap.String("platform_experiment_id", pe.ID), zap.Error(err))
+		}
+	}
+	return nil
+}
+
+// noticeIdleCapacity records whether the capacity of pe holds places beyond its queued jobs, and
+// tells it once that is due, with the numbers the situation reads.
+func (s *PlatformExperimentsService) noticeIdleCapacity(ctx context.Context, pe *domain.PlatformExperiment) error {
+	now := time.Now()
+	notice := capacityNotice{minutesLeft: minutesUntil(pe.EndsAt, now)}
+	if notice.minutesLeft != nil && *notice.minutesLeft > 0 {
+		capacity, err := s.runCapacity(ctx, pe)
+		if err != nil {
+			return err
+		}
+		signups, err := s.store.ListAgentSignups(ctx, pe.ID)
+		if err != nil {
+			return err
+		}
+		rows, err := s.roster(ctx, pe.ID, signups)
+		if err != nil {
+			return err
+		}
+		notice.jobs = runJobsInFlight(rows)
+		if capacity.FitsNow != nil {
+			notice.free = *capacity.FitsNow - notice.jobs.Queued
+		}
+	}
+	due, err := s.idle.MarkCapacityFree(ctx, pe.ID, notice.free > 0, s.idleAfter)
+	if err != nil || due == nil {
+		return err
+	}
+	objective, err := s.objective(ctx, pe, now)
+	if err != nil {
+		return err
+	}
+	if len(objective) > 0 {
+		notice.primary = &objective[0]
+	}
+	notice.minutes = int(now.Sub(due.Since).Minutes())
+	return s.idle.NoticeCapacityIdle(ctx, *due, notice.detail())
+}
+
+// capacityNotice is what the platform knows of a run whose capacity holds places free.
+type capacityNotice struct {
+	free        int
+	minutes     int
+	jobs        JobCounts
+	minutesLeft *int
+	primary     *SituationMetric
+}
+
+// detail is the notice as capacity.idle carries it. A target the best passed is said as passed,
+// and the notice stands: the run goes on raising the best.
+func (n capacityNotice) detail() string {
+	parts := []string{fmt.Sprintf("the free capacity places %d more jobs shaped like the baseline job beyond the %d queued, and has for %d minutes", n.free, n.jobs.Queued, n.minutes),
+		fmt.Sprintf("%d jobs of the run are queued and %d running", n.jobs.Queued, n.jobs.Running)}
+	if n.minutesLeft != nil {
+		parts = append(parts, fmt.Sprintf("%d minutes of the run are left", *n.minutesLeft))
+	}
+	switch m := n.primary; {
+	case m == nil || m.BestValue == nil:
+		parts = append(parts, "no best is measured yet")
+	case m.GapToTargetPct == nil || m.Target == nil:
+		parts = append(parts, fmt.Sprintf("the best %s is %g, against no target", m.Metric, *m.BestValue))
+	case *m.GapToTargetPct > 0:
+		parts = append(parts, fmt.Sprintf("the best %s is %g, %g%% short of the target %g", m.Metric, *m.BestValue, *m.GapToTargetPct, *m.Target))
+	default:
+		parts = append(parts, fmt.Sprintf("the best %s is %g, %g%% past the target %g", m.Metric, *m.BestValue, -*m.GapToTargetPct, *m.Target))
 	}
 	return strings.Join(parts, "; ")
 }

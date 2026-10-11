@@ -81,7 +81,8 @@ auth:
 #              job of its own created or running since the run started or the last one
 #              ended, and none queued or running, before it and the coordinator are told so
 #              (agent.idle new), and again every idle_notice_minutes while the stretch lasts
-#              (agent.idle continues).
+#              (agent.idle continues). The same period tells whoever steers a running platform
+#              experiment that its capacity holds places beyond its queued jobs (capacity.idle).
 agents:
   launcher: main
   image: registry.example.invalid/hypothesisloop-experimentator-base:latest

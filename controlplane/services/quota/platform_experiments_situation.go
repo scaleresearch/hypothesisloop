@@ -492,12 +492,9 @@ func (s *PlatformExperimentsService) Situation(ctx context.Context, id, agentID 
 		budgets[q.AgentID] = &AgentBudget{Share: q.ShareAcceleratorHours, Used: domain.RoundHours(q.UsedGuaranteedAccH + q.UsedBurstAccH),
 			RoomGuaranteed: q.RemainingGuaranteed, RoomBurst: q.RemainingBurst, NextShareAccH: q.NextStageShare}
 	}
+	out.Capacity.JobsInFlightRun = runJobsInFlight(rows)
 	out.Agents = []SituationAgent{}
 	for _, row := range rows {
-		if row.InFlight != nil {
-			out.Capacity.JobsInFlightRun.Queued += row.InFlight.Queued
-			out.Capacity.JobsInFlightRun.Running += row.InFlight.Running
-		}
 		if row.Role == domain.SignupRolePlanner || (agentID != "" && row.AgentID != agentID) {
 			continue
 		}
@@ -521,6 +518,18 @@ func (s *PlatformExperimentsService) Situation(ctx context.Context, id, agentID 
 		}
 	}
 	return out, nil
+}
+
+// runJobsInFlight counts the run's jobs queued and running, of every agent of rows.
+func runJobsInFlight(rows []JoinedAgent) JobCounts {
+	var out JobCounts
+	for _, row := range rows {
+		if row.InFlight != nil {
+			out.Queued += row.InFlight.Queued
+			out.Running += row.InFlight.Running
+		}
+	}
+	return out
 }
 
 // hypothesesInFlight is each hypothesis of platform experiment id with jobs in flight or claimed by

@@ -3,6 +3,7 @@ package quota
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -343,6 +344,7 @@ func TestTheSituationAnswersTheRunAndTheRowsTheCallerMaySee(t *testing.T) {
 type idleNotices struct {
 	due  []db.IdleResearcher
 	told map[string]string
+	free []string
 }
 
 func (n *idleNotices) IdleResearchers(context.Context, time.Duration) ([]db.IdleResearcher, error) {
@@ -352,6 +354,74 @@ func (n *idleNotices) IdleResearchers(context.Context, time.Duration) ([]db.Idle
 func (n *idleNotices) NoticeIdle(_ context.Context, r db.IdleResearcher, detail string) error {
 	n.told[r.PlatformExperimentID+"/"+r.AgentID] = detail
 	return nil
+}
+
+func (n *idleNotices) MarkCapacityFree(_ context.Context, id string, free bool, _ time.Duration) (*db.IdleCapacity, error) {
+	n.free = append(n.free, fmt.Sprintf("%s=%t", id, free))
+	if !free {
+		return nil, nil
+	}
+	return &db.IdleCapacity{PlatformExperimentID: id, Since: time.Now().Add(-12*time.Minute - 30*time.Second)}, nil
+}
+
+func (n *idleNotices) NoticeCapacityIdle(_ context.Context, r db.IdleCapacity, detail string) error {
+	n.told[r.PlatformExperimentID] = detail
+	return nil
+}
+
+// A run's places stood free while each researcher had a job in flight, and the coordinator was
+// told nothing: the harness's own check went silent once the target was passed. The sweep tells
+// whoever steers it of the places free beyond the queued jobs, and a run with none free or no
+// time left ends its stretch.
+func TestACapacityIdleNoticeSaysThePlacesFreeBeyondTheQueuedJobs(t *testing.T) {
+	svc, store := situationRun(t)
+	notices := &idleNotices{told: map[string]string{}}
+	svc.WithIdleNotice(notices, 10*time.Minute)
+	if err := svc.NoticeIdleCapacity(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(notices.free, []string{"pe-1=true"}) {
+		t.Fatalf("marked %v, want pe-1 free: 3 places beside 1 queued", notices.free)
+	}
+	detail := notices.told["pe-1"]
+	for _, want := range []string{"the free capacity places 2 more jobs shaped like the baseline job beyond the 1 queued, and has for 12 minutes",
+		"1 jobs of the run are queued and 1 running", "minutes of the run are left", "no best is measured yet"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("detail %q, want it to say %q", detail, want)
+		}
+	}
+
+	store.created[0].EndsAt = time.Now().Add(-time.Minute)
+	notices.free, notices.told = nil, map[string]string{}
+	if err := svc.NoticeIdleCapacity(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(notices.free, []string{"pe-1=false"}) || len(notices.told) != 0 {
+		t.Fatalf("no time left: marked %v, told %v, want the stretch ended and nothing told", notices.free, notices.told)
+	}
+}
+
+// A coordinator was told of free places only while the best was short of the target, and the
+// places stood free for 40 minutes past it. The notice says where the best stands either way.
+func TestACapacityIdleNoticeSaysTheBestShortOfOrPastTheTarget(t *testing.T) {
+	best, target := 0.62, 0.8
+	short, past := 22.5, -12.5
+	left := 200
+	notice := capacityNotice{free: 7, minutes: 15, jobs: JobCounts{Queued: 1, Running: 2}, minutesLeft: &left,
+		primary: &SituationMetric{Metric: "ratio", BestValue: &best, Target: &target, GapToTargetPct: &short}}
+	if got, want := notice.detail(), "the free capacity places 7 more jobs shaped like the baseline job beyond the 1 queued, and has for 15 minutes; "+
+		"1 jobs of the run are queued and 2 running; 200 minutes of the run are left; the best ratio is 0.62, 22.5% short of the target 0.8"; got != want {
+		t.Errorf("short of the target:\n got %q\nwant %q", got, want)
+	}
+	best = 0.9
+	notice.primary.GapToTargetPct = &past
+	if got := notice.detail(); !strings.HasSuffix(got, "the best ratio is 0.9, 12.5% past the target 0.8") {
+		t.Errorf("past the target: %q", got)
+	}
+	notice.primary.GapToTargetPct, notice.primary.Target = nil, nil
+	if got := notice.detail(); !strings.HasSuffix(got, "the best ratio is 0.9, against no target") {
+		t.Errorf("no target: %q", got)
+	}
 }
 
 // A lead told once that it was idle rested from mid-run to the close, and the notice

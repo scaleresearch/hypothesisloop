@@ -566,6 +566,64 @@ WHERE platform_experiment_id = $1 AND agent_id = $2 AND idle_noticed_at IS NOT D
 	return nil
 }
 
+// IdleCapacity is a running platform experiment whose capacity has held places beyond its queued
+// jobs for at least the notice, and due to be told so (capacity.idle).
+type IdleCapacity struct {
+	PlatformExperimentID string
+	// Since is when the sweep first saw places free in this stretch.
+	Since time.Time
+	// Repeat is 0 for the first notice of the stretch, and counts the notices of it told before.
+	Repeat int
+	// NoticedAt is when it was last told, nil for never. The notice stands only while it still is.
+	NoticedAt *time.Time
+}
+
+// MarkCapacityFree records whether the capacity of the running platform experiment id holds
+// places beyond its queued jobs now: the first pass that sees some starts a stretch, and one that
+// sees none ends it. With free it answers the stretch when it lasted after and was not told so in
+// the last after of it: due a notice. Otherwise it answers nil.
+func (s *PlatformExperimentsStore) MarkCapacityFree(ctx context.Context, id string, free bool, after time.Duration) (*IdleCapacity, error) {
+	if !free {
+		if _, err := s.pool.pool.Exec(ctx, `UPDATE platform_experiments SET capacity_free_since = NULL WHERE id = $1 AND capacity_free_since IS NOT NULL`, id); err != nil {
+			return nil, fmt.Errorf("platform_experiments_store.MarkCapacityFree: %w", err)
+		}
+		return nil, nil
+	}
+	if _, err := s.pool.pool.Exec(ctx, `UPDATE platform_experiments SET capacity_free_since = now() WHERE id = $1 AND status = 'running' AND capacity_free_since IS NULL`, id); err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.MarkCapacityFree: %w", err)
+	}
+	r := IdleCapacity{PlatformExperimentID: id}
+	err := s.pool.pool.QueryRow(ctx, `
+SELECT capacity_free_since,
+       CASE WHEN capacity_noticed_at IS NULL OR capacity_noticed_at < capacity_free_since THEN 0 ELSE capacity_repeat + 1 END,
+       capacity_noticed_at
+FROM platform_experiments
+WHERE id = $1 AND status = 'running' AND capacity_free_since <= now() - make_interval(secs => $2)
+  AND (capacity_noticed_at IS NULL OR capacity_noticed_at < GREATEST(capacity_free_since, now() - make_interval(secs => $2)))`,
+		id, after.Seconds()).Scan(&r.Since, &r.Repeat, &r.NoticedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.MarkCapacityFree: %w", err)
+	}
+	return &r, nil
+}
+
+// NoticeCapacityIdle tells whoever steers the platform experiment of r that its capacity holds
+// places beyond its queued jobs, with detail: capacity.idle, new for the first notice of the
+// stretch and continues after. A notice told since r was read stands, and this one writes nothing.
+func (s *PlatformExperimentsStore) NoticeCapacityIdle(ctx context.Context, r IdleCapacity, detail string) error {
+	if _, err := s.pool.pool.Exec(ctx, `
+UPDATE platform_experiments
+SET capacity_noticed_at = now(), capacity_xid = pg_current_xact_id()::text::bigint, capacity_repeat = $2, capacity_detail = $3
+WHERE id = $1 AND capacity_noticed_at IS NOT DISTINCT FROM $4`,
+		r.PlatformExperimentID, r.Repeat, detail, r.NoticedAt); err != nil {
+		return fmt.Errorf("platform_experiments_store.NoticeCapacityIdle: %w", err)
+	}
+	return nil
+}
+
 // SetCloseAgents keeps lines as how each agent's run of the platform experiment id stands at its
 // close, for its record of the close. It is taken just before the close is written, and one that
 // is closed keeps what it has.

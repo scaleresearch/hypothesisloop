@@ -74,6 +74,11 @@ const (
 	// reaches that agent and whoever steers the run, and no rival. Its value is IdleNew on the
 	// first notice of a stretch and IdleContinues on each after it.
 	EventAgentIdle = "agent.idle"
+	// EventCapacityIdle says the capacity of a running platform experiment with time left holds
+	// places beyond its queued jobs, whether or not its researchers have jobs in flight and
+	// whatever the best stands at against the target. It is the run's, so it reaches whoever
+	// steers the run and no agent's own stream. Its values are those of agent.idle.
+	EventCapacityIdle = "capacity.idle"
 	// EventAgentMessage is a direct message from the coordinator or the owner to one agent, or from
 	// the owner to the coordinator (domain.CoordinatorRecipient), with its text: the one kind that
 	// carries what was said, since it is said to its reader alone.
@@ -155,6 +160,10 @@ var EventKinds = []EventKindDoc{
 		Description: "No job of this researcher of a running platform experiment ran on the platform for the platform's agents.idle_notice_minutes, and it has none queued or running: nothing of its own is in flight. " +
 			"Sent again every agents.idle_notice_minutes while the stretch lasts: new on the first notice of a stretch, continues on each after it, and a job it starts ends the stretch. " +
 			"detail says, as the platform knows them at the notice: for how long, the subagents and turn its harness last reported, how many jobs shaped like the run's baseline job the free capacity places now, the minutes left in the run and what is left of its share. Nothing is done to the agent."},
+	{Kind: EventCapacityIdle, Subject: "platform experiment id", Value: "new or continues",
+		Description: "The free capacity of a running platform experiment with time left has placed more jobs shaped like its baseline job than it has queued (fits_now beyond the queued jobs) for the platform's agents.idle_notice_minutes, whoever has jobs in flight. " +
+			"Sent again every agents.idle_notice_minutes while places stay free, a reached target included: new on the first notice of a stretch, continues on each after it, and a pass that sees no place free ends the stretch. " +
+			"detail says, as the platform knows them at the notice: how many places are free and for how long, the run's jobs queued and running, the minutes left in the run, and how far its best is short of or past the target. An agent filter carries none."},
 	{Kind: EventAgentMessage, Subject: "agent id, the one it was sent to, or coordinator", Value: "coordinator or owner: who it is from",
 		Description: "A direct message to this agent from its platform experiment's coordinator or owner (POST /platform-experiments/{id}/messages), or from the owner to the hosted coordinator, whose subject and agent_id are coordinator. detail is the text, direction to act on. GET /platform-experiments/{id}/messages reads every one sent."},
 	{Kind: EventHypothesisNew, Subject: "hypothesis id", Value: "the kind of who registered it: agent, coordinator, user, key or staff",
@@ -288,6 +297,8 @@ func agentScope(kind string) string {
 		return "someone else's, on a hypothesis you registered"
 	case kind == EventStageBoundary:
 		return "advances only; your own cut is agent.cut"
+	case kind == EventCapacityIdle:
+		return "none: it is for whoever steers the run"
 	default:
 		return "every one"
 	}
@@ -340,6 +351,8 @@ func (f EventFilter) Matches(e Event) bool {
 		return e.AgentID != f.AgentID
 	case e.Kind == EventStageBoundary:
 		return e.AgentID == ""
+	case e.Kind == EventCapacityIdle:
+		return false
 	default:
 		return true
 	}
@@ -573,6 +586,7 @@ FROM pg_current_snapshot() s`).Scan(&horizon, &next); err != nil {
 		replayAgentCuts,
 		replayAgentsFinished,
 		replayAgentsIdle,
+		replayCapacityIdle,
 		replayPlatformExperiment,
 		replayRevisions,
 		replayBaselineRaises,
@@ -844,8 +858,8 @@ WHERE platform_experiment_id = $1 AND finished_xid >= $2`, peID, since)
 	return events, nil
 }
 
-// IdleNew and IdleContinues are the values of agent.idle: the first notice of a stretch, and
-// each after it.
+// IdleNew and IdleContinues are the values of agent.idle and capacity.idle: the first notice of a
+// stretch, and each after it.
 const (
 	IdleNew       = "new"
 	IdleContinues = "continues"
@@ -866,6 +880,25 @@ WHERE platform_experiment_id = $1 AND idle_xid >= $2`, peID, since, IdleNew, Idl
 	})
 	if err != nil {
 		return nil, fmt.Errorf("events_store.replayAgentsIdle: %w", err)
+	}
+	return events, nil
+}
+
+// replayCapacityIdle derives capacity.idle from the platform experiment, which records the last
+// one told.
+func replayCapacityIdle(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]Event, error) {
+	rows, err := tx.Query(ctx, `SELECT CASE WHEN capacity_repeat = 0 THEN $3 ELSE $4 END, capacity_detail, capacity_xid FROM platform_experiments
+WHERE id = $1 AND capacity_xid >= $2`, peID, since, IdleNew, IdleContinues)
+	if err != nil {
+		return nil, fmt.Errorf("events_store.replayCapacityIdle: %w", err)
+	}
+	events, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Event, error) {
+		event := Event{Kind: EventCapacityIdle, Subject: peID, PlatformExperimentID: peID}
+		err := row.Scan(&event.Value, &event.Detail, &event.Position)
+		return event, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("events_store.replayCapacityIdle: %w", err)
 	}
 	return events, nil
 }

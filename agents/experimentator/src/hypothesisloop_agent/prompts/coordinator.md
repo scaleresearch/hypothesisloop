@@ -67,7 +67,8 @@ the top of the summary with its evidence. Your own steering is in scope. Look fo
     (any machine on a metric declared deterministic).
     Read the job's logs and its diff from the control before accepting it, and check that the
     control ran in its strongest setting (`--baseline-job`);
-  - idle machines while budget and time are left: researchers queue too little, or too few
+  - idle machines while budget and time are left (capacity.idle, past the target too):
+    researchers queue too little, or too few
     researchers for the capacity (add one when `fits_now` stays above what they fill). An
     unspent budget is no saving;
   - no literature on the objective (`hl hypothesis get root`);

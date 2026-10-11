@@ -33,9 +33,11 @@ _DRAIN_S = 5
 # within its COALESCE_S that an agent finished or has gone idle (agent.idle=new: no job of its own in
 # flight for the platform's notice, sent to that agent too and again, as agent.idle=continues,
 # every notice period the stretch lasts; a repeat rides along with the coordinator's next batch
-# and its minutes show in the situation), that a job is held by what waiting will not clear or has
-# waited past its own estimate (job.held, sent once, to the job's agent too), that a stage
-# advanced, that someone wrote a comment, that the brief or the baseline changed (a raised
+# and its minutes show in the situation), that the capacity holds places beyond the run's queued
+# jobs, whatever the best stands at against the target (capacity.idle=new, again as
+# capacity.idle=continues every notice period it lasts), that a job is held by what waiting will
+# not clear or has waited past its own estimate (job.held, sent once, to the job's agent too),
+# that a stage advanced, that someone wrote a comment, that the brief or the baseline changed (a raised
 # baseline is the bar every researcher is set against from then on), that the run closed or that its
 # status_reason began to wait for the coordinator (platform_experiment.status, sent again with
 # the reason as its detail, as when the last researcher's machine stops for good). An agent has
@@ -51,7 +53,7 @@ _DRAIN_S = 5
 # seats on one idea are one seat wasted until it gives one of them another direction.
 # Everything else is read when next acting. A kind wakes only for what its reader can act on.
 WAKES = {
-    "coordinator": ("agent.finished", "agent.idle=new", "experiment.blocked", "job.held", "stage.boundary", "comment.new",
+    "coordinator": ("agent.finished", "agent.idle=new", "capacity.idle=new", "experiment.blocked", "job.held", "stage.boundary", "comment.new",
                     "platform_experiment.status", "platform_experiment.description", "platform_experiment.baseline",
                     "hypothesis.new=user", "hypothesis.new=key", "hypothesis.new=staff", "agent.message=owner",
                     "job.duplicate"),
@@ -80,18 +82,6 @@ OPEN_WAKES = ("experiment.status=FAILED",)
 REVIEW_S = 1200
 REVIEW_PROMPT = ("Nothing woke you for {minutes} minutes: this is your regular review. Judge from the situation "
                  "whether the run reaches its target in the time left, and act where it does not.")
-# While the capacity places jobs nobody queued, a coordinator reviews this much sooner: in a live
-# run eight jobs fit with none in flight across a whole review interval.
-REVIEW_IDLE_S = 600
-# Said to a coordinator that ends its turn while places are free and time is left, once: the end
-# of the turn that answered it waits. A reached target is no reason to leave them free: in a live
-# run both researchers did offline checks for 40 minutes past it with every place free.
-CAPACITY_IDLE = ("{free} more jobs fit now beside the {queued} queued and {running} running, the best is {gap:g}% short of "
-                 "the target and {minutes} minutes are left. Bring your gap model up to date and fill the free places: "
-                 "steer researchers to distinct hypotheses that close the gap, send scouts for new ideas, or add a researcher.")
-CAPACITY_IDLE_REACHED = ("{free} more jobs fit now beside the {queued} queued and {running} running, the best is {gap:g}% past "
-                         "the target and {minutes} minutes are left. The run goes on raising the best: fill the free places, "
-                         "steer researchers to distinct hypotheses that go further, send scouts for new ideas, or add a researcher.")
 SUMMARY_STALE = "{jobs} jobs completed since you last wrote the summary: add what they found."
 IDEAS_OPEN = ("{ideas} ideas from people are still open (`hl hypothesis list --by people`): assign each to a researcher "
               "as places free, or answer it with a comment that gives the evidence why not.")
@@ -307,42 +297,12 @@ async def standing(env: dict[str, str], hl: str = "hl") -> dict | None:
         return None
 
 
-def _free_places(situation: dict | None) -> tuple[int, int, int, int] | None:
-    """The places the capacity holds beyond the queued jobs, the jobs queued and running and the
-    minutes left, None while no place is free or no time is left."""
-    if not situation:
-        return None
-    capacity = situation.get("capacity") or {}
-    in_flight = capacity.get("jobs_in_flight_run") or {}
-    queued, running = in_flight.get("queued", 0), in_flight.get("running", 0)
-    fits, minutes = capacity.get("fits_now"), (situation.get("run") or {}).get("minutes_left")
-    if fits is None or fits <= queued or not minutes:
-        return None
-    return fits - queued, queued, running, minutes
-
-
-def capacity_idle(situation: dict | None) -> str:
-    """What a coordinator is told of free places while the primary metric is measured and time is
-    left, "" otherwise."""
-    free = _free_places(situation)
-    gap = ((situation or {}).get("objective") or [{}])[0].get("gap_to_target_pct")
-    if free is None or gap is None:
-        return ""
-    said = CAPACITY_IDLE if gap > 0 else CAPACITY_IDLE_REACHED
-    return said.format(free=free[0], queued=free[1], running=free[2], gap=abs(gap), minutes=free[3])
-
-
-def review_s(situation: dict | None) -> int:
-    """How long a coordinator waits for its next review."""
-    return REVIEW_IDLE_S if _free_places(situation) else REVIEW_S
-
-
 def review_prompt(minutes: int, situation: dict | None) -> str:
-    """The regular review, with the free places, the findings the summary does not hold yet and the
-    open ideas of people."""
+    """The regular review, with the findings the summary does not hold yet and the open ideas of
+    people."""
     jobs = ((situation or {}).get("coordinator") or {}).get("jobs_completed_since_summary", 0)
     ideas = ((situation or {}).get("ideas_from_people") or {}).get("open", 0)
-    said = [REVIEW_PROMPT.format(minutes=minutes), capacity_idle(situation), SUMMARY_STALE.format(jobs=jobs) if jobs else "",
+    said = [REVIEW_PROMPT.format(minutes=minutes), SUMMARY_STALE.format(jobs=jobs) if jobs else "",
             IDEAS_OPEN.format(ideas=ideas) if ideas else ""]
     return " ".join(part for part in said if part)
 

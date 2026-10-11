@@ -750,6 +750,16 @@ ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS description_changed_x
 -- job. A change of status clears it, so what it holds is of the status the row has.
 ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS coordinator_reason     TEXT;
 ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS coordinator_reason_xid BIGINT;
+-- A running platform experiment whose capacity holds places beyond its queued jobs, told so
+-- (capacity.idle). capacity_free_since is when the sweep first saw places free, NULL once it saw
+-- none. When it was last told, the transaction that told it for the replay, and what it was told.
+-- Told again every agents.idle_notice_minutes while places stay free: capacity_repeat is 0 on the
+-- first notice of a stretch and counts the ones after it.
+ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS capacity_free_since  TIMESTAMPTZ;
+ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS capacity_noticed_at  TIMESTAMPTZ;
+ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS capacity_xid         BIGINT;
+ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS capacity_detail      TEXT NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS capacity_repeat      INT  NOT NULL DEFAULT 0;
 ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS updated_xid  BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
 ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS queued_xid    BIGINT;
 ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS submitted_xid BIGINT;
@@ -1049,6 +1059,19 @@ DROP TRIGGER IF EXISTS signup_idle_notify ON experiment_signups;
 CREATE TRIGGER signup_idle_notify AFTER UPDATE OF idle_xid ON experiment_signups
     FOR EACH ROW WHEN (NEW.idle_xid IS DISTINCT FROM OLD.idle_xid)
     EXECUTE FUNCTION hypothesisloop_agent_idle_notify();
+
+CREATE OR REPLACE FUNCTION hypothesisloop_capacity_idle_notify() RETURNS trigger AS $$
+BEGIN
+    PERFORM hypothesisloop_notify_event('capacity.idle', NEW.id,
+        CASE WHEN NEW.capacity_repeat = 0 THEN 'new' ELSE 'continues' END, NEW.capacity_detail, NEW.id, '');
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS platform_experiments_capacity_idle_notify ON platform_experiments;
+CREATE TRIGGER platform_experiments_capacity_idle_notify AFTER UPDATE OF capacity_xid ON platform_experiments
+    FOR EACH ROW WHEN (NEW.capacity_xid IS DISTINCT FROM OLD.capacity_xid)
+    EXECUTE FUNCTION hypothesisloop_capacity_idle_notify();
 
 -- A revision asked of a draft's planner. A pointer: what was asked is read from the draft.
 CREATE OR REPLACE FUNCTION hypothesisloop_planning_request_notify() RETURNS trigger AS $$

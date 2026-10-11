@@ -79,6 +79,7 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
         # coordinator for the first, the repeats riding along with its next batch.
         self.assertIn("agent.idle", updates.WAKES["agent"])
         self.assertIn("agent.idle=new", updates.WAKES["coordinator"])
+        self.assertIn("capacity.idle=new", updates.WAKES["coordinator"])
         self.assertNotIn("agent.idle", updates.WAKES["coordinator"])
         # A job that waited an hour for cores no node had told neither its agent nor the coordinator.
         for role in ("agent", "coordinator"):
@@ -272,9 +273,9 @@ class SituationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(said, "Situation: not read, `hl situation` failed: hl: situation: unavailable: the platform did not answer")
 
 
-# In a live run a coordinator ended a review with "nothing to act on" while eight jobs fit, none
-# was in flight and the best was 27% short of the target, and wrote no summary of the results
-# that had come in. Its harness reads the situation as the platform answers it to say so.
+# In a live run a coordinator ended a review with "nothing to act on" and wrote no summary of the
+# results that had come in. Its harness reads the situation as the platform answers it to say so.
+# Free places are the platform's to tell (capacity.idle).
 class StandingTest(unittest.IsolatedAsyncioTestCase):
     IDLE = {"run": {"minutes_left": 200}, "objective": [{"metric": "ratio", "gap_to_target_pct": 27.3}],
             "capacity": {"fits_now": 8, "jobs_in_flight_run": {"queued": 1, "running": 0}},
@@ -292,36 +293,10 @@ class StandingTest(unittest.IsolatedAsyncioTestCase):
         with self.assertLogs("llm_agent", "WARNING"):
             self.assertIsNone(await REAL_STANDING(ENV, hl=path))
 
-    def test_free_places_short_of_the_target_with_time_left_are_said_with_their_numbers(self):
-        said = updates.capacity_idle(self.IDLE)
-        self.assertEqual(said, updates.CAPACITY_IDLE.format(free=7, queued=1, running=0, gap=27.3, minutes=200))
-        self.assertIn("7 more jobs fit now beside the 1 queued and 0 running, the best is 27.3% short", said)
-        self.assertEqual(updates.review_s(self.IDLE), updates.REVIEW_IDLE_S)
-
-    def test_free_places_past_the_target_are_said_too(self):
-        reached = dict(self.IDLE, objective=[{"gap_to_target_pct": -53.5}])
-        said = updates.capacity_idle(reached)
-        self.assertEqual(said, updates.CAPACITY_IDLE_REACHED.format(free=7, queued=1, running=0, gap=53.5, minutes=200))
-        self.assertIn("the best is 53.5% past the target", said)
-
-    def test_a_full_capacity_no_measure_no_time_or_no_read_says_nothing(self):
-        full = dict(self.IDLE, capacity={"fits_now": 1, "jobs_in_flight_run": {"queued": 1, "running": 7}})
-        reached = dict(self.IDLE, objective=[{"gap_to_target_pct": -2}])
-        unmeasured = dict(self.IDLE, objective=[{"metric": "ratio"}])
-        over = dict(self.IDLE, run={"minutes_left": 0, "closed_at": "2026-10-10T23:00:00Z"})
-        for situation in (full, unmeasured, over, None, {}):
-            self.assertEqual(updates.capacity_idle(situation), "", situation)
-        self.assertEqual(updates.review_s(full), updates.REVIEW_S)
-        self.assertEqual(updates.review_s(None), updates.REVIEW_S)
-        self.assertEqual(updates.review_s(reached), updates.REVIEW_IDLE_S, "free places past the target are still reviewed sooner")
-
-    def test_the_review_adds_the_free_places_and_the_findings_the_summary_lacks(self):
+    def test_the_review_adds_the_findings_the_summary_lacks_and_the_open_ideas(self):
         self.assertEqual(updates.review_prompt(10, self.IDLE), " ".join([
-            updates.REVIEW_PROMPT.format(minutes=10), updates.capacity_idle(self.IDLE), updates.SUMMARY_STALE.format(jobs=3),
-            updates.IDEAS_OPEN.format(ideas=2)]))
-        written = dict(self.IDLE, capacity={"fits_now": 1, "jobs_in_flight_run": {"queued": 1, "running": 7}},
-                       coordinator={"jobs_completed_since_summary": 0},
-                       ideas_from_people={"open": 0})
+            updates.REVIEW_PROMPT.format(minutes=10), updates.SUMMARY_STALE.format(jobs=3), updates.IDEAS_OPEN.format(ideas=2)]))
+        written = dict(self.IDLE, coordinator={"jobs_completed_since_summary": 0}, ideas_from_people={"open": 0})
         self.assertEqual(updates.review_prompt(20, written), updates.REVIEW_PROMPT.format(minutes=20))
         self.assertEqual(updates.review_prompt(20, None), updates.REVIEW_PROMPT.format(minutes=20))
 

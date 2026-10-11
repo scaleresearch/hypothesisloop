@@ -1174,20 +1174,10 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 await client.query(await _with_situation(setup, watch_env, updates.NOTHING_IN_FLIGHT))
                 told_nothing = True
                 continue
-            # A coordinator that ends its turn with free places, the target not reached and time
-            # left is told so the same way, and reviews sooner while places stay free. While the
-            # model allowance is paced it is neither, and reviews later.
-            standing = await updates.standing(watch_env) if config.coordinates(cfg) else None
-            paced = _allowance.pacing() is not None
-            if not background and not answered and not paced and (idle := updates.capacity_idle(standing)):
-                log.info("free places at the end of the coordinator's turn, saying so")
-                _forget_job_reads()
-                await client.query(await _with_situation(setup, watch_env, idle))
-                told_nothing = True
-                continue
-            # An agent waits for an update with no limit, a coordinator until its review.
-            wait_s = updates.review_s(standing) if config.coordinates(cfg) else math.inf
-            if paced:
+            # An agent waits for an update with no limit, a coordinator until its review, later
+            # while the model allowance is paced.
+            wait_s = updates.REVIEW_S if config.coordinates(cfg) else math.inf
+            if _allowance.pacing() is not None:
                 wait_s = max(wait_s, pacing.REVIEW_S)
             # Wait for the next batch of updates about its own jobs and hypotheses and hand it
             # over on the same connection. A turn the CLI starts by itself ends the wait and is
@@ -1221,7 +1211,6 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             _forget_job_reads()
             standing = await updates.standing(watch_env)
             await client.query(await _with_situation(setup, watch_env, updates.review_prompt(round(wait_s / 60), standing)))
-            told_nothing = bool(updates.capacity_idle(standing))
 
 
 async def _next_told(setup: core.RunSetup, watch_env: dict[str, str], ended, idle_s: float,

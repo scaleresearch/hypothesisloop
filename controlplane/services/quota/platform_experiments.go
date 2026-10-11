@@ -193,7 +193,8 @@ type PlatformExperimentsService struct {
 	repositoryWake chan struct{}
 	// environments reads what the baseline branch declares and the environment a job ran in.
 	environments Environments
-	// idle tells researchers with no job for idleAfter that they are idle (WithIdleNotice).
+	// idle tells researchers with no job for idleAfter that they are idle, and whoever steers a
+	// run that its capacity has held places free for idleAfter (WithIdleNotice).
 	idle      IdleNotices
 	idleAfter time.Duration
 	// personIdeas counts the open ideas of people (WithPersonIdeas).
@@ -204,13 +205,17 @@ type PlatformExperimentsService struct {
 }
 
 // IdleNotices reads the researchers of running platform experiments due an idle notice, and
-// tells each (db.PlatformExperimentsStore.IdleResearchers, NoticeIdle).
+// tells each (db.PlatformExperimentsStore.IdleResearchers, NoticeIdle). It records whether a
+// run's capacity holds places free and tells whoever steers it once that lasted
+// (MarkCapacityFree, NoticeCapacityIdle).
 type IdleNotices interface {
 	IdleResearchers(ctx context.Context, after time.Duration) ([]db.IdleResearcher, error)
 	NoticeIdle(ctx context.Context, r db.IdleResearcher, detail string) error
+	MarkCapacityFree(ctx context.Context, id string, free bool, after time.Duration) (*db.IdleCapacity, error)
+	NoticeCapacityIdle(ctx context.Context, r db.IdleCapacity, detail string) error
 }
 
-// WithIdleNotice wires the idle notice the expiry sweep sends (agent.idle).
+// WithIdleNotice wires the idle notices the expiry sweep sends (agent.idle, capacity.idle).
 func (s *PlatformExperimentsService) WithIdleNotice(notices IdleNotices, after time.Duration) *PlatformExperimentsService {
 	s.idle, s.idleAfter = notices, after
 	return s

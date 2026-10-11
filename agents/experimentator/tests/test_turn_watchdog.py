@@ -273,22 +273,20 @@ class ReviewTest(unittest.IsolatedAsyncioTestCase):
         review = run.updates.REVIEW_PROMPT.format(minutes=20) + S
         self.assertEqual(queries[1:5], [review, review, "Platform updates:\ncomment.new hyp-1 human" + S, review])
 
-    # In a live run a coordinator ended a review with "nothing to act on" while eight jobs fit,
-    # none was in flight and the best was 27% short. It is told so once at the end of such a turn,
-    # a review says it too, and while places are free it is reviewed sooner.
-    async def test_a_coordinator_that_leaves_places_free_is_told_once_and_reviewed_sooner(self):
+    # Free places are the platform's to tell (capacity.idle): a coordinator that leaves them is
+    # reviewed at the same interval and told nothing of them at the end of its turn.
+    async def test_free_places_change_neither_the_review_nor_the_end_of_a_turn(self):
         idle = {"run": {"minutes_left": 200}, "objective": [{"gap_to_target_pct": 27.3}],
                 "capacity": {"fits_now": 8, "jobs_in_flight_run": {"queued": 0, "running": 0}}}
         comment = {"kind": "comment.new", "subject": "hyp-1", "value": "human"}
         with mock.patch.object(run.updates, "standing", mock.AsyncMock(return_value=idle)):
             waits, queries = await self.waits("coordinator", [[], [comment], []])
-        told = run.updates.capacity_idle(idle) + S
-        review = run.updates.review_prompt(10, idle) + S
-        self.assertEqual(waits, [run.updates.REVIEW_IDLE_S] * 3)
-        self.assertEqual(queries[1:5], [told, review, "Platform updates:\ncomment.new hyp-1 human" + S, told])
+        review = run.updates.review_prompt(20, idle) + S
+        self.assertEqual(waits, [run.updates.REVIEW_S] * 3)
+        self.assertEqual(queries[1:3], [review, "Platform updates:\ncomment.new hyp-1 human" + S])
 
-    # While the model allowance is paced a coordinator reviews less often, is not told of free
-    # places at the end of a turn, and every wake says how the allowance stands.
+    # While the model allowance is paced a coordinator reviews less often, and every wake says how
+    # the allowance stands.
     async def test_a_paced_coordinator_reviews_later_and_is_told_why(self):
         idle = {"run": {"minutes_left": 200}, "objective": [{"gap_to_target_pct": 27.3}],
                 "capacity": {"fits_now": 8, "jobs_in_flight_run": {"queued": 0, "running": 0}}}

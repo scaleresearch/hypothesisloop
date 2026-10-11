@@ -1481,6 +1481,93 @@ func TestAnIdleNoticeToldSinceItWasReadStands(t *testing.T) {
 	}
 }
 
+// A run's places stood free while its researchers had jobs in flight, and its coordinator was not
+// told. Places free for the notice are told, new, and again every notice while they stay free,
+// continues, live and on replay, to whoever steers the run and to no agent. A pass that sees none
+// free ends the stretch, and the next one starts over.
+func TestARunWithPlacesFreeForTheNoticeIsToldAgainWhileTheyStayFree(t *testing.T) {
+	pool := eventsTestDB(t)
+	before := cursorNow(t, pool)
+	agentID, peID, _ := seedRun(t, pool, "capacity-idle", true)
+	store := NewPlatformExperimentsStore(pool)
+	ctx := context.Background()
+	exec(t, pool, `UPDATE platform_experiments SET status = 'running', started_at = now() - interval '1 hour', ends_at = now() + interval '3 hours' WHERE id = $1`, peID)
+	mark := func(free bool, after time.Duration) *IdleCapacity {
+		t.Helper()
+		due, err := store.MarkCapacityFree(ctx, peID, free, after)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return due
+	}
+	replayed := func(filter EventFilter) []Event {
+		t.Helper()
+		filter.PlatformExperimentID, filter.Kinds = peID, map[string]bool{EventCapacityIdle: true}
+		events, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, filter, before)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return events
+	}
+	// The stretch and the notice before this one are moved back by ago, as the clock would move them.
+	ago := func(ago string) {
+		t.Helper()
+		exec(t, pool, `UPDATE platform_experiments SET capacity_free_since = capacity_free_since - $2::interval,
+capacity_noticed_at = capacity_noticed_at - $2::interval WHERE id = $1`, peID, ago)
+	}
+
+	if due := mark(true, 10*time.Minute); due != nil {
+		t.Fatalf("places just seen free: due %+v, want none before the notice", due)
+	}
+	ago("11 minutes")
+	due := mark(true, 10*time.Minute)
+	if due == nil || due.Repeat != 0 || due.NoticedAt != nil || time.Since(due.Since) < 11*time.Minute {
+		t.Fatalf("free 11 minutes: due %+v, want the first notice of a stretch begun 11 minutes ago", due)
+	}
+	events, stop := listenForEvents(t, pool)
+	if err := store.NoticeCapacityIdle(ctx, *due, "first"); err != nil {
+		t.Fatal(err)
+	}
+	live := awaitEvent(t, events, EventCapacityIdle, peID)
+	stop()
+	if live.Value != IdleNew || live.Detail != "first" || live.PlatformExperimentID != peID || live.AgentID != "" {
+		t.Fatalf("live: got = %+v, want new with its detail, of the run", live)
+	}
+	if err := store.NoticeCapacityIdle(ctx, *due, "told twice"); err != nil {
+		t.Fatal(err)
+	}
+	if due := mark(true, 10*time.Minute); due != nil {
+		t.Fatalf("the same stretch within the notice: due %+v, want nothing more", due)
+	}
+	ago("11 minutes")
+	due = mark(true, 10*time.Minute)
+	if due == nil || due.Repeat != 1 {
+		t.Fatalf("the same stretch a notice later: due %+v, want the second notice", due)
+	}
+	if err := store.NoticeCapacityIdle(ctx, *due, "second"); err != nil {
+		t.Fatal(err)
+	}
+	if got := replayed(EventFilter{Decisions: true}); len(got) != 1 || got[0].Value != IdleContinues || got[0].Detail != "second" || got[0].Subject != peID {
+		t.Fatalf("replay: %+v, want the last notice, continues", got)
+	}
+	if got := replayed(EventFilter{AgentID: agentID}); len(got) != 0 {
+		t.Fatalf("an agent's replay: %+v, want none: it is the run's", got)
+	}
+
+	if due := mark(false, 0); due != nil {
+		t.Fatalf("no place free: due %+v", due)
+	}
+	due = mark(true, 0)
+	if due == nil || due.Repeat != 0 {
+		t.Fatalf("places free again: due %+v, want the first notice of a new stretch", due)
+	}
+
+	exec(t, pool, `UPDATE platform_experiments SET status = 'closed' WHERE id = $1`, peID)
+	if due := mark(true, 0); due != nil {
+		t.Fatalf("a closed run: due %+v, want none", due)
+	}
+}
+
 // A job running is activity, and the stretch starts when the last one ended. The roster says
 // what the researcher has in flight, and for how long it had none.
 func TestAResearcherWithAJobRunningIsNotIdle(t *testing.T) {
