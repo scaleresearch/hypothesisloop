@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"strconv"
 
@@ -154,8 +155,32 @@ func orgRename(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 	return call(c, "PATCH", orgPath(id, ""), map[string]string{"name": name}, "", "", stdout, stderr)
 }
 
-// pageFlags are --limit and --offset of a list the platform pages.
-func pageFlags(fs *flagSet) func() string {
+// pageNotice says on stderr that a list was cut: how many of the total this page shows and the
+// --offset of the next one. total is the platform's X-Total-Count.
+func pageNotice(stderr io.Writer, label string, header http.Header, offset, shown int) {
+	if total, _ := strconv.Atoi(header.Get("X-Total-Count")); total > offset+shown {
+		fmt.Fprintf(stderr, "hl: %s: %d of %d shown: --offset %d for the next page\n", label, shown, total, offset+shown)
+	}
+}
+
+// callPage reads a page of a list and prints one line per row, then says if more match.
+func callPage(c *apiclient.Client, path, label string, offset int, stdout, stderr io.Writer) int {
+	var out json.RawMessage
+	header, err := c.DoHeader("GET", path, nil, &out)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if err := printLines(stdout, stderr, label+": none", out); err != nil {
+		return fail(stderr, err)
+	}
+	var rows []json.RawMessage
+	_ = json.Unmarshal(out, &rows)
+	pageNotice(stderr, label, header, offset, len(rows))
+	return 0
+}
+
+// pageFlags are --limit and --offset of a list the platform pages, and the offset asked for.
+func pageFlags(fs *flagSet) (func() string, *int) {
 	limit := fs.Int("limit", 0, "page size (default the platform's 20, at most 200)")
 	offset := fs.Int("offset", 0, "rows to skip")
 	return func() string {
@@ -170,7 +195,7 @@ func pageFlags(fs *flagSet) func() string {
 			return ""
 		}
 		return "?" + query.Encode()
-	}
+	}, offset
 }
 
 func orgMembersList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -181,7 +206,7 @@ and no email for a person, so a member is named by user id. An owner changes eve
 org; a member reads everything, runs platform experiments and creates API keys bound to one
 project.`, stderr)
 	org := fs.String("org", "", orgFlagHelp)
-	query := pageFlags(fs)
+	query, offset := pageFlags(fs)
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
 	}
@@ -189,7 +214,7 @@ project.`, stderr)
 	if err != nil {
 		return fail(stderr, err)
 	}
-	return call(c, "GET", orgPath(id, "/members")+query(), nil, "", "org members list: none", stdout, stderr)
+	return callPage(c, orgPath(id, "/members")+query(), "org members list", *offset, stdout, stderr)
 }
 
 func orgMembersSetRole(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -257,7 +282,7 @@ it joins the org with the invite's role. It works once, for seven days, and unti
 func orgInvitesList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("org invites list", "usage: hl org invites list [--org ORG] [--limit N] [--offset N]\n\nFor an owner. The invites that can still be accepted, newest first.", stderr)
 	org := fs.String("org", "", orgFlagHelp)
-	query := pageFlags(fs)
+	query, offset := pageFlags(fs)
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
 	}
@@ -265,7 +290,7 @@ func orgInvitesList(c *apiclient.Client, args []string, stdout, stderr io.Writer
 	if err != nil {
 		return fail(stderr, err)
 	}
-	return call(c, "GET", orgPath(id, "/invites")+query(), nil, "", "org invites list: none", stdout, stderr)
+	return callPage(c, orgPath(id, "/invites")+query(), "org invites list", *offset, stdout, stderr)
 }
 
 func orgInvitesRevoke(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {

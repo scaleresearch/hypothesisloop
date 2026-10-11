@@ -584,7 +584,7 @@ for stdin, gives REASON in place of --despite REASON.`, stderr)
 }
 
 func hypothesisList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("hypothesis list", `usage: hl hypothesis list [--agent A] [--status S] [--by people] [--limit N] [--offset N] [--full]
+	fs := newFlags("hypothesis list", `usage: hl hypothesis list [--agent A] [--status S] [--by people] [--untaken] [--limit N] [--offset N] [--full]
 
 The open ideas of people first, those no agent has settled or built on yet, then the most recent,
 one JSON object per line with builds_on, child_count, finding_count, comment_count and working:
@@ -592,11 +592,13 @@ the agents on it now, a job of theirs queued or running or a checkout within two
 text is cut to its first 240 characters ("…" ends one cut) and status_actor and
 platform_experiment_id are left out unless --full; hl hypothesis get ID prints one whole. For
 structure or text search use 'hl hypothesis query'. The branches a hypothesis was checked out
-or run on are in hl hypothesis get ID, as implementations.`, stderr)
+or run on are in hl hypothesis get ID, as implementations. A page is at most --limit rows; when more
+match, a line on stderr says how many and the --offset of the next page.`, stderr)
 	pe := fs.String("platform-experiment", "", "platform experiment id (default the token's)")
 	agent := fs.String("agent", "", "only this agent's hypotheses")
 	status := fs.String("status", "", "open, confirmed, refuted or inconclusive")
 	by := fs.String("by", "", "people: only the hypotheses a person registered")
+	untaken := fs.Bool("untaken", false, "only hypotheses no agent is working on")
 	limit := fs.Int("limit", 0, "page size (server default 20, max 200)")
 	offset := fs.Int("offset", 0, "rows to skip")
 	full := fs.Bool("full", false, "every row whole: texts uncut, status_actor and platform_experiment_id")
@@ -622,6 +624,9 @@ or run on are in hl hypothesis get ID, as implementations.`, stderr)
 	}
 	if *by != "" {
 		q.Set("by", *by)
+	}
+	if *untaken {
+		q.Set("untaken", "true")
 	}
 	if *limit != 0 {
 		q.Set("limit", strconv.Itoa(*limit))
@@ -655,9 +660,7 @@ or run on are in hl hypothesis get ID, as implementations.`, stderr)
 	if cut > 0 {
 		fmt.Fprintf(stderr, "hl: hypothesis list: %d texts cut to %d characters; hl hypothesis get ID or --full prints them whole\n", cut, textCut)
 	}
-	if total, _ := strconv.Atoi(header.Get("X-Total-Count")); total > *offset+len(out) {
-		fmt.Fprintf(stderr, "hl: hypothesis list: %d more; --limit N (max 200) and --offset N show them\n", total-*offset-len(out))
-	}
+	pageNotice(stderr, "hypothesis list", header, *offset, len(out))
 	if *offset == 0 {
 		objectiveComments(c, *pe, stderr)
 	}

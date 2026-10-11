@@ -379,9 +379,11 @@ type ListFilter struct {
 	// ByPeople keeps only the hypotheses a person registered.
 	ByPeople bool
 	// IDs, when not nil, keeps only these hypotheses.
-	IDs    []string
-	Limit  int
-	Offset int
+	IDs []string
+	// ExcludeIDs, when not nil, drops these hypotheses.
+	ExcludeIDs []string
+	Limit      int
+	Offset     int
 }
 
 // personIdea and openPersonIdea say, of h, that a person registered it, and that it is a person's
@@ -421,6 +423,10 @@ func (f ListFilter) where() (string, map[string]any) {
 	if f.IDs != nil {
 		clauses = append(clauses, "h.id IN $ids")
 		params["ids"] = f.IDs
+	}
+	if f.ExcludeIDs != nil {
+		clauses = append(clauses, "NOT h.id IN $exclude")
+		params["exclude"] = f.ExcludeIDs
 	}
 	return strings.Join(clauses, " AND "), params
 }

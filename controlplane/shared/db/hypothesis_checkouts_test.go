@@ -55,6 +55,13 @@ VALUES ('agent', 'checkout-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-acc
 		t.Errorf("working = %+v, %v, want %+v alone", working, err, want)
 	}
 
+	if taken, err := store.TakenHypotheses(ctx, peID); err != nil || !reflect.DeepEqual(taken, []string{hypothesisID}) {
+		t.Errorf("taken in the platform experiment = %v, %v, want %s alone", taken, err, hypothesisID)
+	}
+	if taken, err := store.TakenHypotheses(ctx, "pe-elsewhere"); err != nil || len(taken) != 0 {
+		t.Errorf("taken elsewhere = %v, %v, want none", taken, err)
+	}
+
 	implementations, err := experiments.Implementations(ctx, hypothesisID)
 	if err != nil || len(implementations) != 4 {
 		t.Fatalf("implementations = %+v, %v, want the four branches checked out", implementations, err)

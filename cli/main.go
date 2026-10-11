@@ -669,12 +669,13 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 }
 
 func cmdPlatformExperimentsList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments list", `usage: hl platform-experiments list [--limit N] [--project PROJECT] [--shared[=false]]
+	fs := newFlags("platform-experiments list", `usage: hl platform-experiments list [--limit N] [--offset N] [--project PROJECT] [--shared[=false]]
 
 One platform experiment per line as compact JSON, without description and summary
 (hl platform-experiments get prints both). A closed one carries close_reason.
 hl platform-experiments with no command is this list.`, stderr)
 	limit := fs.Int("limit", 20, "page size (max 200)")
+	offset := fs.Int("offset", 0, "rows to skip")
 	project := fs.String("project", "", "only this project's platform experiments (default $HL_PROJECT)")
 	shared := fs.Bool("shared", false, "only the platform experiments the platform shows every account, or with --shared=false none of them. Without it both are listed, the shared ones marked \"shared\": true. Read those like your own, write nothing to them")
 	if err := fs.Parse(args); err != nil {
@@ -684,6 +685,9 @@ hl platform-experiments with no command is this list.`, stderr)
 		return parseExit(misuse(fs, "unexpected argument %q", fs.Arg(0)))
 	}
 	q := url.Values{"limit": {strconv.Itoa(*limit)}}
+	if *offset != 0 {
+		q.Set("offset", strconv.Itoa(*offset))
+	}
 	if p := orEnv(*project, projectEnv); p != "" {
 		q.Set("project_id", p)
 	}
@@ -693,12 +697,16 @@ hl platform-experiments with no command is this list.`, stderr)
 		}
 	})
 	var out json.RawMessage
-	if err := c.Do("GET", "/platform-experiments?"+q.Encode(), nil, &out); err != nil {
+	header, err := c.DoHeader("GET", "/platform-experiments?"+q.Encode(), nil, &out)
+	if err != nil {
 		return fail(stderr, err)
 	}
 	if err := printLines(stdout, stderr, "platform-experiments list: none", out, "description", "summary"); err != nil {
 		return fail(stderr, err)
 	}
+	var shown []json.RawMessage
+	_ = json.Unmarshal(out, &shown)
+	pageNotice(stderr, "platform-experiments list", header, *offset, len(shown))
 	return 0
 }
 

@@ -433,7 +433,7 @@ prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	pe := fs.String("platform-experiment", "", "platform experiment (default the token's)")
 	status := fs.String("status", "", "QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED or CANCELLED")
 	limit := fs.Int("limit", 0, "page size (server default 20, max 50)")
-	offset := fs.Int("offset", 0, "jobs to skip")
+	offset := fs.Int("offset", 0, "rows to skip")
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
@@ -471,9 +471,7 @@ prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	if len(lines) == 0 {
 		fmt.Fprintln(stderr, "hl: job list: no job matches")
 	}
-	if total, _ := strconv.Atoi(header.Get("X-Total-Count")); total > *offset+len(lines) {
-		fmt.Fprintf(stderr, "hl: job list: %d more; --limit N (max 50) and --offset N show them\n", total-*offset-len(lines))
-	}
+	pageNotice(stderr, "job list", header, *offset, len(lines))
 	return 0
 }
 

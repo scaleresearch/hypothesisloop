@@ -431,6 +431,30 @@ ON CONFLICT (hypothesis_id, agent_id) DO UPDATE SET branch = EXCLUDED.branch, ch
 	return others, nil
 }
 
+// TakenHypotheses are the ids of the hypotheses some agent works on now, as Working counts it,
+// within platformExpID or, empty, in every platform experiment.
+func (s *HypothesesStore) TakenHypotheses(ctx context.Context, platformExpID string) ([]string, error) {
+	rows, err := s.pool.pool.Query(ctx, `
+SELECT hypothesis_id FROM experiments
+WHERE hypothesis_id <> '' AND status IN ('QUEUED', 'SUBMITTED', 'RUNNING') AND ($1 = '' OR platform_experiment_id = $1)
+UNION
+SELECT c.hypothesis_id FROM hypothesis_checkouts c
+WHERE ($1 = '' OR c.platform_experiment_id = $1) AND `+checkoutClaims, platformExpID, domain.CheckoutClaim.Seconds())
+	if err != nil {
+		return nil, fmt.Errorf("hypotheses_store.TakenHypotheses: %w", err)
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("hypotheses_store.TakenHypotheses: scan: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // Working is, for each of ids with any, the agents working on it now (domain.HypothesisWorker),
 // by agent id.
 func (s *HypothesesStore) Working(ctx context.Context, ids []string) (map[string][]domain.HypothesisWorker, error) {

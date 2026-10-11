@@ -62,6 +62,16 @@ func (s *Service) Working(ctx context.Context, ids []string) (map[string][]domai
 	return working, nil
 }
 
+// TakenHypotheses are the ids of the hypotheses some agent works on now, within one platform
+// experiment or, empty, all of them.
+func (s *Service) TakenHypotheses(ctx context.Context, platformExpID string) ([]string, error) {
+	ids, err := s.store.TakenHypotheses(ctx, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("registry.TakenHypotheses: %w", err)
+	}
+	return ids, nil
+}
+
 func registerCheckoutHuma(doc *apidocs.Doc, h *Handler) {
 	access := doc.Access
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{

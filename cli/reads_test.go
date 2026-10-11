@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -341,13 +342,52 @@ func TestAListSaysHowManyRowsThePageLeftOut(t *testing.T) {
 	})
 	setAPIURL(t, url)
 	for _, tc := range []struct{ what, want string }{
-		{"job", "hl: job list: 7 more; --limit N (max 50) and --offset N show them\n"},
-		{"hypothesis", "hl: hypothesis list: 7 more; --limit N (max 200) and --offset N show them\n"},
+		{"job", "hl: job list: 2 of 39 shown: --offset 32 for the next page\n"},
+		{"hypothesis", "hl: hypothesis list: 2 of 39 shown: --offset 32 for the next page\n"},
+		{"org-members", "hl: org members list: 2 of 39 shown: --offset 32 for the next page\n"},
+		{"org-invites", "hl: org invites list: 2 of 39 shown: --offset 32 for the next page\n"},
+		{"platform-experiments", "hl: platform-experiments list: 2 of 39 shown: --offset 32 for the next page\n"},
 	} {
+		args := map[string][]string{
+			"org-members":          {"org", "members", "list", "--org", "org-1"},
+			"org-invites":          {"org", "invites", "list", "--org", "org-1"},
+			"platform-experiments": {"platform-experiments", "list"},
+		}[tc.what]
+		if args == nil {
+			args = []string{tc.what, "list", "--platform-experiment", "pe-1"}
+		}
 		var stdout, stderr bytes.Buffer
-		code := run([]string{tc.what, "list", "--platform-experiment", "pe-1", "--offset", "30"}, &stdout, &stderr)
+		code := run(append(args, "--offset", "30"), &stdout, &stderr)
 		if code != 0 || len(lines(stdout.String())) != 2 || stderr.String() != tc.want {
 			t.Fatalf("%s list: exit %d, stdout %q, stderr %q", tc.what, code, stdout.String(), stderr.String())
 		}
+	}
+}
+
+func TestAWholeListSaysNothingOfPaging(t *testing.T) {
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Total-Count", "2")
+		_, _ = w.Write([]byte(`[{"id":"x-1"},{"id":"x-2"}]`))
+	}))
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"job", "list"}, &stdout, &stderr); code != 0 || len(lines(stdout.String())) != 2 || stderr.Len() != 0 {
+		t.Fatalf("job list: exit %d, stdout %q, stderr %q, want two lines and no notice", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestUntakenAsksForTheHypothesesNoAgentWorksOn(t *testing.T) {
+	var query url.Values
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/hypotheses" {
+			query = r.URL.Query()
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"hypothesis", "list", "--platform-experiment", "pe-1", "--untaken", "--by", "people", "--status", "open"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, stderr.String())
+	}
+	if query.Get("untaken") != "true" || query.Get("by") != "people" || query.Get("status") != "open" {
+		t.Errorf("query = %v, want untaken, by and status together", query)
 	}
 }

@@ -49,6 +49,9 @@ type Store interface {
 	CheckOutHypothesis(ctx context.Context, platformExpID, hypothesisID, agentID, branch string) ([]domain.HypothesisWorker, error)
 	// Working is, for each of ids with any, the agents working on it now.
 	Working(ctx context.Context, ids []string) (map[string][]domain.HypothesisWorker, error)
+	// TakenHypotheses are the ids of the hypotheses some agent works on now, within one platform
+	// experiment or, empty, all of them.
+	TakenHypotheses(ctx context.Context, platformExpID string) ([]string, error)
 	LastCompletedCodeRef(ctx context.Context, hypothesisID string) (string, error)
 	BaselineCodeRef(ctx context.Context, platformExpID string) (string, error)
 }
