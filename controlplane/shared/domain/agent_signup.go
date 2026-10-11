@@ -106,17 +106,20 @@ type MessageAllowance struct {
 // ModelAllowance is what a hosted agent's or coordinator's model account has left of the model
 // provider's rate limit, as its harness last read it.
 type ModelAllowance struct {
-	Utilization  *float64   `json:"utilization,omitempty" doc:"The share of the account's rate limit used, 0 to 1. Absent before a reading that says it."`
+	Utilization  *float64   `json:"utilization,omitempty" doc:"The share of the account's rate limit used, 0 to 1. Absent before a reading that says it, and once the window it was read in has reset."`
+	ResetsAt     *time.Time `json:"resets_at,omitempty" doc:"When the window that utilization was read in resets, and its use with it. Absent when the reading said none, and once it has passed."`
 	RefusedUntil *time.Time `json:"refused_until,omitempty" doc:"Present while the provider refuses the account's calls: when the provider said its limit resets."`
 }
 
-// ModelAllowanceOf is what limit says the account has left, at now: a refusal whose reset has
-// passed is over.
+// ModelAllowanceOf is what limit says the account has left, at now: a reading whose window has
+// reset says nothing of it, and a refusal whose reset has passed is over.
 func ModelAllowanceOf(limit RateLimit, now time.Time) *ModelAllowance {
-	out := &ModelAllowance{Utilization: limit.Utilization}
-	if limit.Rejected && limit.ResetsAt != nil && limit.ResetsAt.After(now) {
-		until := *limit.ResetsAt
-		out.RefusedUntil = &until
+	if limit.ResetsAt != nil && !limit.ResetsAt.After(now) {
+		return &ModelAllowance{}
+	}
+	out := &ModelAllowance{Utilization: limit.Utilization, ResetsAt: limit.ResetsAt}
+	if limit.Rejected && limit.ResetsAt != nil {
+		out.RefusedUntil = limit.ResetsAt
 	}
 	return out
 }

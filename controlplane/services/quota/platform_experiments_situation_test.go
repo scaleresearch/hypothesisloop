@@ -405,6 +405,15 @@ func TestAHarnessReadingCountsOnlyForTheMachineHeldNow(t *testing.T) {
 	if allowance := domain.ModelAllowanceOf(domain.RateLimit{Rejected: true, ResetsAt: &resets}, resets.Add(time.Second)); allowance.RefusedUntil != nil {
 		t.Errorf("a refusal past its reset: %+v", allowance)
 	}
+	// A coordinator pacing the run reads how far each account is into its window and when it resets.
+	used := 0.64
+	allowance = domain.ModelAllowanceOf(domain.RateLimit{Utilization: &used, ResetsAt: &resets}, asked)
+	if allowance.RefusedUntil != nil || allowance.Utilization == nil || *allowance.Utilization != used || allowance.ResetsAt == nil || !allowance.ResetsAt.Equal(resets) {
+		t.Errorf("allowed: %+v", allowance)
+	}
+	if allowance := domain.ModelAllowanceOf(domain.RateLimit{Utilization: &used, ResetsAt: &resets}, resets.Add(time.Second)); allowance.Utilization != nil || allowance.ResetsAt != nil {
+		t.Errorf("a reading of a window that reset: %+v", allowance)
+	}
 }
 
 // The situation says which metric is declared deterministic, the one place every wake reads.
