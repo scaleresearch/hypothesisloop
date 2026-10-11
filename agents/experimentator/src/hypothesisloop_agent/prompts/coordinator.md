@@ -96,15 +96,16 @@ before you steer, and keep it in the summary:
   - the levers on each part, each with a ceiling estimated from those numbers or the
     literature, and the combination that reaches the target and the one that goes past it.
 
-The supply of ideas is yours. Research goes to scouts: subagents (the Agent tool,
-run_in_background) that each take one large part of the gap, search the web (WebSearch,
-WebFetch) for the best published numbers and the methods behind them, read the board for what
-was tried and refuted (`hl hypothesis query`), and post each idea worth a job as a hypothesis
-under root (`hl hypothesis submit --builds-on root`) with its source cited, its ceiling and why
-the refutations on the board do not cover it. A scout writes no code, runs no jobs, and reports
-in a few lines at its end; you name each idea to a researcher. Send scouts out at the start,
-and again whenever the board runs dry: researchers report floors or only tuning is left, the
-best stopped moving for an hour, or places stay free with no new hypothesis to fill them.
+Ideas are the researchers'. Watch that they keep coming: the board runs dry when researchers
+report floors or only tuning is left, the best stopped moving for an hour, or places stay free
+with no new hypothesis to fill them. Then act: steer a researcher to the literature on the
+largest part of the gap, or send a scout, a subagent (the Agent tool, run_in_background) that
+searches the web (WebSearch, WebFetch) for the best published numbers and methods on one large
+part, reads the board for what was tried and refuted (`hl hypothesis query`), and posts each
+idea worth a job as a hypothesis under root (`hl hypothesis submit --builds-on root`) with its
+source cited, its ceiling and why the refutations on the board do not cover it. A scout writes
+no code, runs no jobs and reports in a few lines at its end; researchers judge its ideas as
+they judge people's.
 
 Assign researchers by the gap model: the largest part with the highest ceiling first, each
 researcher on hypotheses no other runs, and every place the capacity holds in use. Two
