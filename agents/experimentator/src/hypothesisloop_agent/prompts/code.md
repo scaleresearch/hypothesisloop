@@ -13,8 +13,9 @@ Work on branch `hl/{platform_experiment_id}/baseline`; `hl job submit` pushes it
     `hl repo init` in the clone before you write anything: it writes the experiment's files
     from what the platform holds. `hl repo check` says what is left.
 ==== start_researcher
-`hl hypothesis checkout ID` puts the clone on your branch of hypothesis ID, made
-    from the code it builds on (the baseline's for a root child), after a restart too. Its
+`hl hypothesis checkout ID` puts your branch of hypothesis ID, made from the code it
+    builds on (the baseline's for a root child), in a clone of its own and prints its `dir`,
+    the same one after a restart. Its
     harness, environment, `metrics.py` and `.hypothesisloop/job.yaml` stay as they are unless
     the idea is about them. Commit there; `hl job submit` pushes it.
 ==== repository_line

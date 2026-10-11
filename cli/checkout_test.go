@@ -80,57 +80,82 @@ func checkout(args ...string) (int, string, string) {
 	return code, strings.TrimSpace(stdout.String()), stderr.String()
 }
 
+// checkoutHome makes a home of its own for the test and answers the clone hl hypothesis checkout
+// makes there for checkoutBranchName.
+func checkoutHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	return filepath.Join(home, "hl-checkouts", filepath.FromSlash(checkoutBranchName))
+}
+
 // The first checkout of a hypothesis makes the agent's branch from what the hypothesis builds
-// on, and every later one returns to that branch as it is, here or from origin.
-func TestHypothesisCheckoutCreatesTheBranchFromTheBaseAndThenReturnsToIt(t *testing.T) {
+// on, in a clone of its own, and every later one returns to that clone as it is, or makes it
+// again from origin. The clone it runs in stays as it was.
+func TestHypothesisCheckoutCreatesTheBranchInAClone(t *testing.T) {
 	clone, origin := pushedClone(t)
 	mustGit(t, clone, "commit", "-q", "--allow-empty", "-m", "the parent's commit")
 	base := mustGit(t, clone, "rev-parse", "HEAD")
 	mustGit(t, clone, "push", "-q", "origin", "HEAD:refs/heads/hl/pe-1/researcher-2/parent-ffffff")
 	mustGit(t, clone, "commit", "-q", "--allow-empty", "-m", "unrelated work")
+	before := mustGit(t, clone, "rev-parse", "HEAD")
 	seen := checkoutServer(t, origin+"@"+base, "")
+	dir := checkoutHome(t)
+	answer := func(extra string) string {
+		return `{"branch":"` + checkoutBranchName + `","dir":"` + dir + `"` + extra + `}`
+	}
 
 	code, stdout, stderr := checkout(checkoutHypothesis)
-	if want := `{"branch":"` + checkoutBranchName + `","base":"` + base + `"}`; code != 0 || stdout != want {
+	if want := answer(`,"base":"` + base + `"`); code != 0 || stdout != want {
 		t.Fatalf("first checkout: exit code = %d, stdout = %s, stderr = %s, want %s", code, stdout, stderr, want)
 	}
-	if on, at := mustGit(t, clone, "symbolic-ref", "--short", "HEAD"), mustGit(t, clone, "rev-parse", "HEAD"); on != checkoutBranchName || at != base {
-		t.Fatalf("the clone is on %s at %s, want %s at the base %s", on, at, checkoutBranchName, base)
+	if on, at := mustGit(t, dir, "symbolic-ref", "--short", "HEAD"), mustGit(t, dir, "rev-parse", "HEAD"); on != checkoutBranchName || at != base {
+		t.Fatalf("the branch's clone is on %s at %s, want %s at the base %s", on, at, checkoutBranchName, base)
+	}
+	if on, at := mustGit(t, clone, "symbolic-ref", "--short", "HEAD"), mustGit(t, clone, "rev-parse", "HEAD"); on != testBranch || at != before {
+		t.Fatalf("the clone it ran in is on %s at %s, want it left on %s at %s", on, at, testBranch, before)
+	}
+	if url := mustGit(t, dir, "remote", "get-url", "origin"); url != origin {
+		t.Fatalf("the branch's clone pushes to %s, want %s", url, origin)
 	}
 
-	mustGit(t, clone, "commit", "-q", "--allow-empty", "-m", "my change")
-	mine := mustGit(t, clone, "rev-parse", "HEAD")
-	mustGit(t, clone, "checkout", "-q", testBranch)
+	// Work in progress in the branch's clone stays through another checkout, as after a restart.
+	mustGit(t, dir, "commit", "-q", "--allow-empty", "-m", "my change")
+	mine := mustGit(t, dir, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(dir, "draft.py"), []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	code, stdout, stderr = checkout(checkoutHypothesis)
-	if want := `{"branch":"` + checkoutBranchName + `"}`; code != 0 || stdout != want || mustGit(t, clone, "rev-parse", "HEAD") != mine {
-		t.Fatalf("second checkout: exit code = %d, stdout = %s, stderr = %s, want %s with my change kept", code, stdout, stderr, want)
+	if want := answer(""); code != 0 || stdout != want || mustGit(t, dir, "rev-parse", "HEAD") != mine || read(t, dir, "draft.py") != "mine\n" {
+		t.Fatalf("second checkout: exit code = %d, stdout = %s, stderr = %s, want %s with my work kept", code, stdout, stderr, want)
 	}
 	if code, _, stderr := checkout(checkoutHypothesis, "--from", "job-other"); code != 1 || !strings.Contains(stderr, "exists") {
 		t.Errorf("--from for a branch that exists: exit code = %d, stderr = %s, want it refused", code, stderr)
 	}
 
-	// A branch only origin has, as in a fresh clone, is checked out from there.
-	mustGit(t, clone, "push", "-q", "origin", checkoutBranchName)
-	mustGit(t, clone, "checkout", "-q", testBranch)
-	mustGit(t, clone, "branch", "-q", "-D", checkoutBranchName)
-	if code, stdout, stderr := checkout(checkoutHypothesis); code != 0 || stdout != `{"branch":"`+checkoutBranchName+`"}` || mustGit(t, clone, "rev-parse", "HEAD") != mine {
+	// A branch only origin has, as on a new machine, is cloned again from there.
+	mustGit(t, dir, "push", "-q", "origin", checkoutBranchName)
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if code, stdout, stderr := checkout(checkoutHypothesis); code != 0 || stdout != answer("") || mustGit(t, dir, "rev-parse", "HEAD") != mine {
 		t.Fatalf("checkout of a branch origin has: exit code = %d, stdout = %s, stderr = %s, want my pushed change", code, stdout, stderr)
 	}
 
-	// Each checkout that put the clone on the branch was recorded as ag-1 working on it, and
+	// Each checkout that put the branch in its clone was recorded as ag-1 working on it, and
 	// one of a hypothesis another agent works on says who, and still checks out.
 	if len(seen.recorded) != 3 || seen.recorded[0]["agent_id"] != "ag-1" || seen.recorded[0]["branch"] != checkoutBranchName {
 		t.Fatalf("checkouts recorded = %v, want the three that checked out, as ag-1 on %s", seen.recorded, checkoutBranchName)
 	}
 	seen.others = []map[string]string{{"agent_id": "ag-2", "name": "Researcher 2"}}
 	code, stdout, stderr = checkout(checkoutHypothesis)
-	if want := `{"branch":"` + checkoutBranchName + `","working":[{"agent_id":"ag-2","name":"Researcher 2"}],"warning":"Researcher 2 already works on hypothesis ` + checkoutHypothesis + `"}`; code != 0 || stdout != want {
+	if want := answer(`,"working":[{"agent_id":"ag-2","name":"Researcher 2"}],"warning":"Researcher 2 already works on hypothesis ` + checkoutHypothesis + `"`); code != 0 || stdout != want {
 		t.Fatalf("checkout of a hypothesis another agent works on: exit code = %d, stdout = %s, stderr = %s, want %s", code, stdout, stderr, want)
 	}
 }
 
 // --from starts the branch from one particular job's commit, another agent's implementation
-// included. With nothing to start from the checkout says so and makes no branch.
+// included. With nothing to start from the checkout says so and leaves no clone.
 func TestHypothesisCheckoutStartsFromAJobOrSaysThereIsNoBase(t *testing.T) {
 	clone, origin := pushedClone(t)
 	mustGit(t, clone, "commit", "-q", "--allow-empty", "-m", "another agent's implementation")
@@ -138,6 +163,7 @@ func TestHypothesisCheckoutStartsFromAJobOrSaysThereIsNoBase(t *testing.T) {
 	mustGit(t, clone, "push", "-q", "origin", "HEAD:refs/heads/hl/pe-1/researcher-2/fp16-at-batch-32-a1b2c3")
 	mustGit(t, clone, "reset", "-q", "--hard", "HEAD~1")
 	checkoutServer(t, "", origin+"@"+other)
+	dir := checkoutHome(t)
 
 	if code, _, stderr := checkout(checkoutHypothesis); code != 1 || !strings.Contains(stderr, "no baseline is declared") || !strings.Contains(stderr, "--from JOB") {
 		t.Fatalf("no base: exit code = %d, stderr = %s, want it refused naming the baseline and --from", code, stderr)
@@ -145,36 +171,11 @@ func TestHypothesisCheckoutStartsFromAJobOrSaysThereIsNoBase(t *testing.T) {
 	if code, _, stderr := checkout(checkoutHypothesis, "--from", "job-elsewhere"); code != 1 || !strings.Contains(stderr, "of the same one") {
 		t.Fatalf("--from a job of another platform experiment: exit code = %d, stderr = %s, want it refused", code, stderr)
 	}
-	if on := mustGit(t, clone, "symbolic-ref", "--short", "HEAD"); on != testBranch {
-		t.Fatalf("a refused checkout left the clone on %s, want %s", on, testBranch)
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("a refused checkout left %s: %v", dir, err)
 	}
 	code, stdout, stderr := checkout(checkoutHypothesis, "--from", "job-other")
-	if want := `{"branch":"` + checkoutBranchName + `","base":"` + other + `"}`; code != 0 || stdout != want || mustGit(t, clone, "rev-parse", "HEAD") != other {
+	if want := `{"branch":"` + checkoutBranchName + `","dir":"` + dir + `","base":"` + other + `"}`; code != 0 || stdout != want || mustGit(t, dir, "rev-parse", "HEAD") != other {
 		t.Fatalf("--from: exit code = %d, stdout = %s, stderr = %s, want %s", code, stdout, stderr, want)
-	}
-}
-
-// Researchers wrote files in their clone before they checked out a hypothesis, and git's
-// own refusal sent them into a stash dance that failed too. The refusal says what to do.
-func TestHypothesisCheckoutOverChangesSaysToCommitOrStashThem(t *testing.T) {
-	clone, origin := pushedClone(t)
-	if err := os.WriteFile(filepath.Join(clone, "metrics.py"), []byte("baseline's\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	mustGit(t, clone, "add", "metrics.py")
-	mustGit(t, clone, "commit", "-q", "-m", "the baseline")
-	base := mustGit(t, clone, "rev-parse", "HEAD")
-	mustGit(t, clone, "reset", "-q", "--hard", "HEAD~1")
-	if err := os.WriteFile(filepath.Join(clone, "metrics.py"), []byte("mine\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	checkoutServer(t, origin+"@"+base, "")
-
-	code, _, stderr := checkout(checkoutHypothesis)
-	if code != 1 || !strings.Contains(stderr, "Commit them (git add -A && git commit) or stash them (git stash -u), then run hl hypothesis checkout again") || strings.Contains(stderr, "exit status") {
-		t.Fatalf("checkout over an untracked file: exit code = %d, stderr = %s, want it refused saying to commit or stash", code, stderr)
-	}
-	if on := mustGit(t, clone, "symbolic-ref", "--short", "HEAD"); on != testBranch || read(t, clone, "metrics.py") != "mine\n" {
-		t.Fatalf("a refused checkout left the clone on %s, want %s with the file untouched", on, testBranch)
 	}
 }

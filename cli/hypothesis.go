@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -1109,13 +1110,16 @@ func implementationBranch(platformExperiment, agentName, text, hypothesisID stri
 func hypothesisCheckout(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("hypothesis checkout", `usage: hl hypothesis checkout ID [--from JOB]
 
-Run in your clone of the platform experiment's repository. Puts it on your branch for
-hypothesis ID: your implementation of it. A hypothesis is an idea and a branch is one agent's
-code for it, so any agent may check out any hypothesis, its own or another's, and each gets a
-branch of its own: hl/PE/<your agent name>/<start of the hypothesis text>-<end of its id>.
+Run in a clone of the platform experiment's repository. Puts your branch for hypothesis ID,
+your implementation of it, in a clone of its own, ~/hl-checkouts/<branch>, made from this one
+and its origin unless it exists, and leaves this one as it is. Work, build and submit there:
+no other branch shares its files, index, stash or refs, and hl env run gives it its own view
+of the image. A hypothesis is an idea and a branch is one agent's code for it, so any agent
+may check out any hypothesis, its own or another's, and each gets a branch of its own:
+hl/PE/<your agent name>/<start of the hypothesis text>-<end of its id>.
 
-It fetches origin first. When your branch exists, here or on origin, it is checked out as it
-is. Otherwise it is created: from the commit job JOB ran with --from JOB (any job of the
+It fetches origin first. When your branch exists, in its clone or on origin, it is checked out
+as it is. Otherwise it is created: from the commit job JOB ran with --from JOB (any job of the
 platform experiment, to start from one particular implementation), else from base_ref of the
 hypothesis: the commit the newest completed job of the hypothesis it builds on ran, whichever
 agent's, that hypothesis's own base while it has no completed job, and the baseline job's
@@ -1128,7 +1132,7 @@ in working and the coordinator sees it, for two hours or until a job of yours sh
 Checking out again renews it. Another agent already on it is no refusal: two approaches to one
 idea can both be worth running. Read what they do before you repeat it.
 
-Prints one JSON object: branch; base, the commit a branch it created starts from; and, when
+Prints one JSON object: branch; dir, its clone; base, the commit a branch it created starts from; and, when
 other agents are on the hypothesis now, working, who, and warning. Refused with the reason
 when there is nothing to start from (no baseline is declared yet), and when --from is given for
 a branch that exists. hl job submit pushes the branch.`, stderr)
@@ -1177,16 +1181,24 @@ a branch that exists. hl job submit pushes the branch.`, stderr)
 		}
 		base = job.CodeRef
 	}
-	created, err := checkoutBranch("", branch, base, *from)
+	dir, made, err := cloneFor("", branch)
 	if err != nil {
+		return fail(stderr, fmt.Errorf("hypothesis checkout: %w", err))
+	}
+	created, err := checkoutBranch(dir, branch, base, *from)
+	if err != nil {
+		if made {
+			_ = os.RemoveAll(dir)
+		}
 		return fail(stderr, fmt.Errorf("hypothesis checkout: %w", err))
 	}
 	out := struct {
 		Branch  string            `json:"branch"`
+		Dir     string            `json:"dir"`
 		Base    string            `json:"base,omitempty"`
 		Working []json.RawMessage `json:"working,omitempty"`
 		Warning string            `json:"warning,omitempty"`
-	}{Branch: branch, Base: created}
+	}{Branch: branch, Dir: dir, Base: created}
 	if err := c.Do("POST", "/hypotheses/"+url.PathEscape(h.ID)+"/checkouts", map[string]string{"agent_id": *agent, "branch": branch}, &out); err != nil {
 		fmt.Fprintf(stderr, "hl: hypothesis checkout: the branch is checked out and the platform did not record it: %v\n", err)
 	}
@@ -1195,14 +1207,40 @@ a branch that exists. hl job submit pushes the branch.`, stderr)
 	return 0
 }
 
+// cloneFor is the clone branch has to itself, ~/hl-checkouts/<branch>, made unless it exists from
+// the origin of the clone in dir, taking the objects that clone has from it. Branches in worktrees
+// of one clone shared its stash and refs, and one agent's changes showed up in another's tree.
+func cloneFor(dir, branch string) (clone string, made bool, err error) {
+	common, err := git(dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return "", false, errors.New("this is not a git repository: run it in your clone of the platform experiment's repository (hl platform-experiments get names repository_url)")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", false, err
+	}
+	clone = filepath.Join(home, "hl-checkouts", filepath.FromSlash(branch))
+	if _, err := os.Stat(filepath.Join(clone, ".git")); err == nil {
+		return clone, false, nil
+	}
+	origin, err := git(dir, "remote", "get-url", "origin")
+	if err != nil {
+		return "", false, err
+	}
+	if err := os.MkdirAll(filepath.Dir(clone), 0o755); err != nil {
+		return "", false, err
+	}
+	if _, err := git(dir, "clone", "--quiet", "--reference", common, "--dissociate", origin, clone); err != nil {
+		return "", false, err
+	}
+	return clone, true, nil
+}
+
 // checkoutBranch puts the clone in dir on branch after fetching origin. A branch the clone or
 // origin has is checked out as it is, and from, the job a new one was to start from, is then
 // refused. One neither has is created at the commit of base, a code_ref, and that commit is
 // returned.
 func checkoutBranch(dir, branch, base, from string) (created string, err error) {
-	if _, err := git(dir, "rev-parse", "--is-inside-work-tree"); err != nil {
-		return "", errors.New("this is not a git repository: run it in your clone of the platform experiment's repository (hl platform-experiments get names repository_url)")
-	}
 	if _, err := git(dir, "fetch", "--quiet", "origin"); err != nil {
 		return "", err
 	}
@@ -1216,31 +1254,17 @@ func checkoutBranch(dir, branch, base, from string) (created string, err error) 
 		if localErr != nil {
 			args = []string{"checkout", "--quiet", "-b", branch, "--track", "origin/" + branch}
 		}
-		return "", switchBranch(dir, args...)
+		_, err := git(dir, args...)
+		return "", err
 	}
 	if base == "" {
 		return "", errors.New("there is no commit to start from: the hypothesis builds up to the objective and no baseline is declared yet. Wait for the baseline, or name a job to start from with --from JOB")
 	}
 	sha := base[strings.LastIndex(base, "@")+1:]
-	if err := switchBranch(dir, "checkout", "--quiet", "-b", branch, sha); err != nil {
+	if _, err := git(dir, "checkout", "--quiet", "-b", branch, sha); err != nil {
 		return "", err
 	}
 	return sha, nil
-}
-
-// switchBranch runs the git checkout of args. Refused over changes in the clone, it says what to
-// do about them in place of git's error.
-func switchBranch(dir string, args ...string) error {
-	_, err := git(dir, args...)
-	if err == nil {
-		return nil
-	}
-	if changes, statusErr := git(dir, "status", "--porcelain"); statusErr == nil && strings.TrimSpace(changes) != "" {
-		return errors.New("git will not switch branches over the changes in your clone (git status lists them). " +
-			"Commit them (git add -A && git commit) or stash them (git stash -u), then run hl hypothesis checkout again; " +
-			"the branch starts from its base, and git cherry-pick or git stash pop brings your changes onto it")
-	}
-	return err
 }
 
 // shortID is the start of a hypothesis id, which is a UUID: what an agent copies from a listing.

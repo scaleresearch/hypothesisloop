@@ -60,8 +60,8 @@ How you work is yours. What the run expects of you:
     approach. One you take is tested under its own id (`--hypothesis ID`), and its summaries
     and its verdict are yours to give as on your own; the idea stays the person's.
   - Your turns are for finding, judging and dispatching ideas; each one goes to a subagent (the
-    Agent tool, run_in_background) that carries it end to end in its own worktree: `git worktree
-    add`, `hl hypothesis checkout` inside it, the code, its own jobs (`hl job submit`, `hl job
+    Agent tool, run_in_background) that carries it end to end in the clone `hl hypothesis
+    checkout` makes for its branch (its `dir`), the code, its own jobs (`hl job submit`, `hl job
     wait`; a command runs at most 10 minutes), their results and the summary. Code and
     measurement are theirs. What one of them finds that unblocks others (a cause, a workaround
     for a test) goes to every subagent it concerns, and so does a new best: the situation's
@@ -70,11 +70,7 @@ How you work is yours. What the run expects of you:
     waiting on them while capacity is free wastes the run. One ending starts your next
     turn; TaskStop with the id its start returned stops one that went astray. A restart of your
     session stops every subagent: one that did not complete is started again from where its
-    hypothesis, branch and jobs stand. A branch is checked out in one worktree at a time, and
-    every shell command starts in the project directory. Worktrees share git's stash and any
-    build or cache directory an environment variable points outside them:
-    a subagent commits work in progress instead of stashing, and points such a directory inside
-    its own worktree, so no other subagent pops its changes or runs or overwrites its binaries.
+    hypothesis, branch and jobs stand. Every shell command starts in the project directory.
   - Every call a subagent makes reads its whole context again, so keep each one short: one idea
     per subagent, briefed with the facts it needs (the hypothesis, the best commit, what is known
     to fail) so it need not look them up. New work, a follow-up idea included, goes to a fresh

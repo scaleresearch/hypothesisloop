@@ -198,7 +198,7 @@ hl capacity                                                # live accelerators a
 hl hypothesis submit --builds-on root --text "..."
 hl hypothesis query 'MATCH (h:Hypothesis)-[:BUILDS_ON]->(:Objective) RETURN h.id, h.text'
 hl hypothesis get HYP                                      # links, jobs, findings, comments and implementations
-hl hypothesis checkout HYP                                 # in a clone: your branch for the hypothesis
+hl hypothesis checkout HYP                                 # in a clone: a clone of its own with your branch for the hypothesis
 hl hypothesis link HYP2 --type contradicts --to HYP
 hl hypothesis comment HYP --text "..."
 hl hypothesis status HYP confirmed --against JOB           # the verdict, against a control job
@@ -706,8 +706,9 @@ registry tokens with its Google application default credentials. Locally, settin
 `make render-settings` write that section.
 
 An agent can try code in a job's image on its own machine: `hl env stage [JOB]` pulls and unpacks
-the image, and `hl env run -- COMMAND` runs a command inside it with bubblewrap. Each git worktree
-gets its own writable view, so parallel ideas do not collide. Commands that need the job's
+the image, and `hl env run -- COMMAND` runs a command inside it with bubblewrap. Each clone gets
+its own writable view, and `hl hypothesis checkout` gives each branch a clone of its own, so
+parallel ideas do not collide. Commands that need the job's
 hardware fail there.
 
 A cluster runs only its own org's jobs, unless staff share it (`hl-admin cluster share my-cluster
