@@ -440,7 +440,7 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	if err != nil {
 		return nil, h.refusal("check proposal", err)
 	}
-	if h.launch.Launcher == "" || h.launch.DefaultModel == "" {
+	if h.launch.Launcher == "" || h.launch.DefaultModel == "" || h.launch.CoordinatorModel == "" {
 		return nil, h.refusal("accept", errors.New("the handler has no agent launch settings"))
 	}
 	if err := h.svc.requireLauncher(ctx, h.launch.Launcher); err != nil {
@@ -452,7 +452,7 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	pe.MaxConcurrentAccelerators = experiment.MaxConcurrentAccelerators
 	pe.BudgetAcceleratorHours, pe.MaxAgents, pe.DurationHours = experiment.BudgetAcceleratorHours, experiment.MaxAgents, experiment.DurationHours
 	pe.StartsAt, pe.BaselineDueAt = now, now.Add(time.Duration(req.BaselineMinutes)*time.Minute)
-	pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: h.launch.Launcher, Model: h.launch.DefaultModel}
+	pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: h.launch.Launcher, Model: h.launch.CoordinatorModel}
 
 	agents, signups, err := h.hostedAgents(req.Agents, by, now)
 	if err != nil {

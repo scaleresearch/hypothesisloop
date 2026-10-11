@@ -40,7 +40,7 @@ auth:
 # asked for with hosted: true is started by a launcher, a separate process that holds a provider
 # account and asks this API which instances should exist. Nothing here names a provider.
 # A platform experiment created with coordinator_hosted gets its coordinator the same way: one
-# more instance of the same launcher and image, on default_model unless the
+# more instance of the same launcher and image, on coordinator_model unless the
 # request names another.
 #
 #   launcher   the launcher a newly hosted agent is given to: 1 to 16 lowercase letters and
@@ -54,6 +54,9 @@ auth:
 #              pull it. A change replaces every running agent's machine.
 #   default_model  the model an agent runs on when it joins without naming one. Written onto the
 #              agent when it joins, so a change moves new agents only.
+#   coordinator_model  the model a hosted coordinator runs on when its create request names none,
+#              a stronger one than default_model since it supervises the whole run. Written onto
+#              the platform experiment when it is created, so a change moves new ones only.
 #   boot_limit_seconds  how long a hosted machine may go unreported by its launcher after it was
 #              asked for, or stay starting after it was first reported, before it is given up on
 #              and a restart is spent: three in any six hours, the fourth stops the agent. A
@@ -87,6 +90,7 @@ agents:
   launcher: main
   image: registry.example.invalid/hypothesisloop-experimentator-base:latest
   default_model: claude-sonnet-5
+  coordinator_model: claude-opus-5-5
   boot_limit_seconds: 300
   progress_limit_seconds: 300
   max_new_instances_per_answer: 10

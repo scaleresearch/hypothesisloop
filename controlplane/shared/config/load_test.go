@@ -302,6 +302,8 @@ func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 		"no image":                 {"  image: registry.example.invalid/hypothesisloop-experimentator-base:latest", `  image: ""`},
 		"misspelled agents key":    {"  launcher: main", "  launcher: main\n  launchers: [main]"},
 		"no default model":         {"  default_model: claude-sonnet-5\n", ""},
+		"no coordinator model":     {"  coordinator_model: claude-opus-5-5\n", ""},
+		"coordinator model unsafe": {"  coordinator_model: claude-opus-5-5", "  coordinator_model: $(id)"},
 		"no boot limit":            {"  boot_limit_seconds: 300\n", ""},
 		"no progress limit":        {"  progress_limit_seconds: 300\n", ""},
 		"progress limit too short": {"  progress_limit_seconds: 300", "  progress_limit_seconds: 60"},

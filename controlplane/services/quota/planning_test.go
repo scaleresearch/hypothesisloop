@@ -44,7 +44,7 @@ func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Princ
 	planningRepositories = &fakeRepositories{files: map[string]string{"prj-a": ""}}
 	svc.WithRepositories(planningRepositories)
 	handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).
-		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
+		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
 		WithJobImages([]domain.JobImage{{Name: "torch", Image: "registry.example.com/hl/torch:1"}})
 	if drafts, ok := store.(*draftStore); ok {
 		svc.reachable = func(context.Context, string) (map[string][]domain.Cluster, error) { return drafts.reachable, nil }
@@ -921,7 +921,7 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	if pe.StartsAt.Before(before) || pe.DurationHours != 2 || !pe.EndsAt.IsZero() || !pe.BaselineDueAt.Equal(pe.StartsAt.Add(25*time.Minute)) {
 		t.Errorf("starts %v, %v hours ending %v, baseline due %v: want 2 hours with no end yet and the baseline due 25 minutes after the accept", pe.StartsAt, pe.DurationHours, pe.EndsAt, pe.BaselineDueAt)
 	}
-	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Launcher != "main" || pe.Coordinator.Model != "platform-model-1" {
+	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Launcher != "main" || pe.Coordinator.Model != "platform-coordinator-1" {
 		t.Errorf("coordinator %+v, want one the platform hosts", pe.Coordinator)
 	}
 	// A coordinator had to boot, take a turn and add the agent that measures the baseline before
@@ -1500,7 +1500,7 @@ func TestAProposalIsAcceptedAsProposedUnlessAPersonActsFirst(t *testing.T) {
 		}
 		svc, call := planningAPI(t, store, planner)
 		handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).
-			WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
+			WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
 			WithJobImages([]domain.JobImage{{Name: "torch", Image: "registry.example.com/hl/torch:1"}})
 		return store, handler, call
 	}

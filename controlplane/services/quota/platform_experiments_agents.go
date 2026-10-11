@@ -39,6 +39,8 @@ type AgentLaunch struct {
 	Launcher string
 	// DefaultModel is what an agent that names no model runs on.
 	DefaultModel string
+	// CoordinatorModel is what a hosted coordinator that names no model runs on.
+	CoordinatorModel string
 	// SigningSecret derives an agent's own token.
 	SigningSecret string
 	// MaxHosted is how many machines the platform runs for one platform experiment, written
@@ -346,13 +348,13 @@ func (h *PlatformExperimentsHandler) withHosting(ctx context.Context, req Create
 	if !req.CoordinatorHosted {
 		return req, nil
 	}
-	if h.launch.Launcher == "" || h.launch.DefaultModel == "" {
+	if h.launch.Launcher == "" || h.launch.CoordinatorModel == "" {
 		return req, errors.New("platform_experiments.Create: the handler has no agent launch settings")
 	}
 	if err := h.svc.requireLauncher(ctx, h.launch.Launcher); err != nil {
 		return req, err
 	}
-	_, model, err := domain.ResolveAgentLaunch("", req.CoordinatorModel, h.launch.DefaultModel, nil)
+	_, model, err := domain.ResolveAgentLaunch("", req.CoordinatorModel, h.launch.CoordinatorModel, nil)
 	if err != nil {
 		return req, refuseSignup(400, "invalid_request", "coordinator_model: %s", err)
 	}

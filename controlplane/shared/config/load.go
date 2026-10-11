@@ -275,6 +275,9 @@ func (c *Config) build() error {
 	if _, _, err := domain.ResolveAgentLaunch("", "", c.Agents.DefaultModel, nil); err != nil {
 		return fmt.Errorf("agents default_model is required, the model an agent runs on when it names none: %w", err)
 	}
+	if _, _, err := domain.ResolveAgentLaunch("", "", c.Agents.CoordinatorModel, nil); err != nil {
+		return fmt.Errorf("agents coordinator_model is required, the model a hosted coordinator runs on when it names none: %w", err)
+	}
 	if c.Agents.BootLimitSeconds <= 0 {
 		return fmt.Errorf("agents boot_limit_seconds is required and positive: how long a hosted agent's machine may stay starting")
 	}

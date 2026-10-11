@@ -49,7 +49,7 @@ func hostingAPI(t *testing.T, repos *fakeRepositories) (*hostingStore, func(body
 	placement := authtest.Placement{Projects: map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}}, PlatformExperiments: map[string]domain.Tenancy{}}
 	router := chi.NewRouter()
 	doc := apidocs.New(router, "test", "1.0.0", "", ownerOfA, auth.NewAccess(placement), zap.NewNop())
-	handler := NewPlatformExperimentsHandler(svc, repos, testPlanning, zap.NewNop()).WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "model-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted})
+	handler := NewPlatformExperimentsHandler(svc, repos, testPlanning, zap.NewNop()).WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "model-default", CoordinatorModel: "coordinator-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted})
 	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), handler)
 	return store, func(body map[string]any) (int, map[string]any) {
 		t.Helper()
@@ -76,7 +76,7 @@ func TestCreateWithAHostedCoordinatorGivesItToTheConfiguredLauncher(t *testing.T
 		t.Fatalf("got = %d %v, want 201", code, out)
 	}
 	pe := store.created[0]
-	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Launcher != "main" || pe.Coordinator.Model != "model-default" {
+	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Launcher != "main" || pe.Coordinator.Model != "coordinator-default" {
 		t.Fatalf("created = %+v (coordinator %+v), want one on the configured launcher and default model", pe, pe.Coordinator)
 	}
 	if out["coordinator_hosted"] != true || out["signup_count"] != float64(1) || out["max_hosted"] != float64(hostingMaxHosted) {
@@ -202,7 +202,7 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 		}
 		router := chi.NewRouter()
 		doc := apidocs.New(router, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(placement), zap.NewNop())
-		RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()).WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "m", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted}))
+		RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()).WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "m", CoordinatorModel: "c", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted}))
 		var payload bytes.Buffer
 		if err := json.NewEncoder(&payload).Encode(body); err != nil {
 			t.Fatal(err)

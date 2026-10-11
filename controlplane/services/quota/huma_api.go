@@ -156,7 +156,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"repository, which the same body names (422 no_repository without it, no_experiment_file when the file is not there), a YAML file shaped like this body. What the body carries wins. budget_accelerator_hours, max_agents and duration_hours " +
 			"are never read from the file: any agent's token can push to that branch, so what a run costs and how " +
 			"long it lasts is stated by whoever creates it. A file that cannot be used answers 422 invalid_experiment_file and names the file. " +
-			"coordinator_hosted: true has the platform run the coordinator as one more machine beside the agents', on coordinator_model or the platform's default: " +
+			"coordinator_hosted: true has the platform run the coordinator as one more machine beside the agents', on coordinator_model or the platform's coordinator default: " +
 			"it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked. " + coordinatorWanted + " " +
 			"It is not read from the file, and is fixed from then on. " +
 			"repository is the code the platform experiment works on, owner/name on GitHub: agents clone it and push their branches to it, jobs check it out, and repository_url in the answer is where from. " +

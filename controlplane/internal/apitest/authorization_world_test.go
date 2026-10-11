@@ -288,7 +288,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 
 	doc := apidocs.New(api.router, "hypothesisloop API", "1.0.0", "", authenticator, access, logger)
 	api.docs[""] = doc
-	peHandler := quota.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, logger).WithAgentLaunch(quota.AgentLaunch{Launcher: worldLauncher, DefaultModel: "model-1", SigningSecret: worldSecret, MaxHosted: 20})
+	peHandler := quota.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, logger).WithAgentLaunch(quota.AgentLaunch{Launcher: worldLauncher, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: worldSecret, MaxHosted: 20})
 	quota.RegisterHuma(doc, quota.NewHandler(nil, logger), peHandler)
 	quota.RegisterAgentsHuma(doc, peHandler, worldGraph{world: w})
 	quota.RegisterPlanningHuma(doc, peHandler)

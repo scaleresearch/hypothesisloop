@@ -338,7 +338,7 @@ func agentsRouter(t *testing.T, store *rosterStore, caller auth.Principal) http.
 }
 
 func agentsTestLaunch() AgentLaunch {
-	return AgentLaunch{Launcher: "launcher-main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: 20}
+	return AgentLaunch{Launcher: "launcher-main", DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: 20}
 }
 
 func call(t *testing.T, r http.Handler, method, path, body string) (int, map[string]any) {

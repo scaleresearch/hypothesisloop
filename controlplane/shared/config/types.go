@@ -263,6 +263,9 @@ type AgentsConfig struct {
 	// DefaultModel is the model an agent runs on when it joins without naming one. It is
 	// resolved onto the agent's signup at that moment, so changing it moves new agents only.
 	DefaultModel string `yaml:"default_model"`
+	// CoordinatorModel is the model a hosted coordinator runs on when the create request names
+	// none. It is written onto the platform experiment when it is created.
+	CoordinatorModel string `yaml:"coordinator_model"`
 	// BootLimitSeconds is how long a hosted machine may go unreported after it was asked for, or
 	// stay starting after it was first reported, before it is given up on as an exited one is.
 	BootLimitSeconds int `yaml:"boot_limit_seconds"`

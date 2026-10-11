@@ -19,7 +19,7 @@ budget_accelerator_hours: 10
 max_agents: 2
 
 # coordinator_hosted: true has the platform run the coordinator, one more machine beside the
-# agents', on coordinator_model or the platform's default, and creates one hosted baseline agent
+# agents', on coordinator_model or the platform's coordinator default, and creates one hosted baseline agent
 # with the experiment, which measures the baseline. Left out, you add an agent of role baseline
 # and declare its job. It is stated here in the request and never read from a repository's
 # experiment file.

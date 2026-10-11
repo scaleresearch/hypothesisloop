@@ -226,7 +226,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		WithJobImages(pcfg.OfferedJobImages()).
 		WithLiveCapacity(metricsDBURL, connectedWithin, store).
 		WithAgentLaunch(quota.AgentLaunch{
-			Launcher: pcfg.Agents.Launcher, DefaultModel: pcfg.Agents.DefaultModel,
+			Launcher: pcfg.Agents.Launcher, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
 			SigningSecret: pcfg.Auth.SigningSecret, MaxHosted: pcfg.Agents.MaxHostedPerPlatformExperiment,
 		})
 

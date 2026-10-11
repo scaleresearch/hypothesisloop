@@ -309,7 +309,7 @@ type CreatePlatformExperimentRequest struct {
 	// to get the platform's (config quota.default_quota_tier).
 	DefaultQuotaTier string `json:"default_quota_tier,omitempty"`
 	// CoordinatorHosted has the platform run this platform experiment's coordinator, on
-	// CoordinatorModel or the platform's default model. It rents a machine, so neither is read
+	// CoordinatorModel or the platform's coordinator default model. It rents a machine, so neither is read
 	// from the experiment file.
 	CoordinatorHosted bool   `json:"coordinator_hosted,omitempty"`
 	CoordinatorModel  string `json:"coordinator_model,omitempty"`
