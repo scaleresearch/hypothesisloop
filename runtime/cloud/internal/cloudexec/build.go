@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/opencontainers/go-digest"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -87,19 +86,8 @@ func (e *Executor) buildSpec(exp *domain.Experiment) (provider.Spec, error) {
 		return provider.Spec{}, fmt.Errorf("cloudexec: experiment %s: %w", exp.ID, err)
 	}
 
-	// The instance ends by itself at the moment the control plane names, whether or not this
-	// runtime can still reach it then.
-	if exp.EndsAt == nil {
-		return provider.Spec{}, fmt.Errorf("cloudexec: experiment %s has no ends_at in desired state", exp.ID)
-	}
-	lifetime := time.Until(*exp.EndsAt).Truncate(time.Second)
-	if lifetime <= 0 {
-		return provider.Spec{}, fmt.Errorf("cloudexec: experiment %s: its ends_at %s has passed", exp.ID, exp.EndsAt.UTC().Format(time.RFC3339))
-	}
-
 	argv := append(append([]string(nil), command...), args...)
 	return provider.Spec{
-		Lifetime:         lifetime,
 		Image:            spec.Image,
 		Command:          wrapperCommand(max(grace, checkpointGrace), argv),
 		Env:              env,

@@ -147,8 +147,6 @@ type kept struct {
 	role     string
 	instance domain.AgentInstance
 	ending   bool
-	// endsBy is the latest moment a machine rented for it now may still run.
-	endsBy time.Time
 	// launch is launchOf the image this one boots and the launcher's digest.
 	launch string
 	// describe takes how many machines of this one ended before.
@@ -207,7 +205,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		}
 		signup, image := agent.AgentSignup, h.imageOf(agent.AgentImage)
 		all = append(all, kept{
-			platformExperimentID: agent.PlatformExperimentID, agentID: agent.AgentID, role: string(agent.Role), instance: *agent.Instance, ending: agent.Ended != "", endsBy: agent.EndsBy,
+			platformExperimentID: agent.PlatformExperimentID, agentID: agent.AgentID, role: string(agent.Role), instance: *agent.Instance, ending: agent.Ended != "",
 			launch: launchOf(image, observed.LaunchDigest),
 			describe: func(ended int) (Instance, error) {
 				return instanceFor(signup, ended, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
@@ -217,7 +215,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 	for _, coordinator := range coordinators {
 		pe, model, image := coordinator.PlatformExperimentID, coordinator.Model, h.imageOf(coordinator.AgentImage)
 		all = append(all, kept{
-			platformExperimentID: pe, role: domain.CoordinatorHealthRole, instance: coordinator.Instance, ending: coordinator.Ending, endsBy: coordinator.EndsBy,
+			platformExperimentID: pe, role: domain.CoordinatorHealthRole, instance: coordinator.Instance, ending: coordinator.Ending,
 			launch: launchOf(image, observed.LaunchDigest),
 			describe: func(ended int) (Instance, error) {
 				return coordinatorInstanceFor(pe, model, ended, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
@@ -234,9 +232,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		// A machine is named after how many ended before it, whether or not their end spent a
 		// restart, so every one that ends is followed by another name.
 		describe := func(restarts, renewals int) (Instance, error) {
-			instance, err := one.describe(restarts + renewals)
-			instance.EndsAt = one.endsBy.UTC()
-			return instance, err
+			return one.describe(restarts + renewals)
 		}
 		if one.ending {
 			// Named as it was created, whatever config says now: a new name would have its
@@ -332,7 +328,6 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 //     one. A report whose marker the launcher could not read is held to the same limit by the
 //     same clock, and its end is recorded as progress unreadable, which spends no restart: an
 //     outage of the provider's log says nothing of the command, and must not stop every agent.
-//     The machines that follow are bounded by the run, each rented to end at one.endsBy.
 //   - unknown, of a machine last recorded running: nothing is recorded, so it stays running, and
 //     it is ended by the progress limit as a running one is. A host unreachable for a pass ends
 //     nothing, and one that stays away is not kept past the limit.

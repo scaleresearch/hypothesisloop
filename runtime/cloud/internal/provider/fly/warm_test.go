@@ -27,7 +27,7 @@ func TestWarmCreatesAStoppedMachineOfTheSpecsImageAndSizeThatRunsNothing(t *test
 	api.on(http.MethodGet, machinesPath, answer(200, machines(warmMachineJSON("9001", "hl-agent-pe1-pool-k", "created"))))
 	p := newTestProvider(t, api)
 	spec := agentSpec()
-	spec.Name, spec.Lifetime = "hl-agent-pe1-pool-k", time.Hour
+	spec.Name = "hl-agent-pe1-pool-k"
 
 	id, err := p.Warm(context.Background(), spec)
 	if err != nil || id != "9001" {
@@ -96,7 +96,6 @@ func TestStartWarmGivesTheMachineTheConfigACreateWouldHaveWaitsForTheReplacement
 	api.on(http.MethodGet, machinesPath, answer(200, machines(machineJSON("9001", "hl-agent-pe1-a2", "started", 0))))
 	p := newTestProvider(t, api)
 	spec := agentSpec()
-	spec.Lifetime = time.Hour
 
 	if err := p.StartWarm(context.Background(), "9001", spec); err != nil {
 		t.Fatalf("StartWarm: %v", err)

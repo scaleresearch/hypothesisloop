@@ -119,7 +119,7 @@ func (s *reconcileStore) RunFirstReportedAt(_ context.Context, ids []string) (ma
 	return s.runReportedAt, nil
 }
 
-func (s *reconcileStore) ListDesiredWorkloads(_ context.Context, cluster string, _ time.Duration) ([]*domain.Experiment, error) {
+func (s *reconcileStore) ListDesiredWorkloads(_ context.Context, cluster string) ([]*domain.Experiment, error) {
 	return s.desired[cluster], nil
 }
 

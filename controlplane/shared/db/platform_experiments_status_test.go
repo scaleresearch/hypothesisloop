@@ -149,10 +149,6 @@ func TestARunWaitsForItsFirstResearchersMachineWithinItsRun(t *testing.T) {
 	if !waiting.AwaitsAgents() || !waiting.EndsAt.Equal(end) || time.Until(waiting.AgentsDueAt) > agentsDue+time.Second || time.Until(waiting.AgentsDueAt) < agentsDue-time.Minute {
 		t.Fatalf("started with no machine up: got = started %v, ends %v, agents due %v, want no researcher at work, the end an hour after the start %v and the machines due in %s", waiting.StartedAt, waiting.EndsAt, waiting.AgentsDueAt, waiting.StartsAt, agentsDue)
 	}
-	agents, err := pes.ListLauncherAgents(ctx, waiting.Coordinator.Launcher, windDown)
-	if err != nil || len(agents) == 0 || !agents[0].EndsBy.Equal(end.Add(windDown)) {
-		t.Fatalf("machines rented while it waits: got = %+v, %v, want them bound by its end, %s", agents, err, end.Add(windDown))
-	}
 	observe(pe, baseline, domain.InstanceRunning)
 	observe(pe, researcher, domain.InstanceStarting)
 	if still := read(pe); !still.AwaitsAgents() {

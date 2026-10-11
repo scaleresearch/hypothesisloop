@@ -47,7 +47,7 @@ import (
 
 // Store is the desired-state persistence interface the handler needs.
 type Store interface {
-	ListDesiredWorkloads(ctx context.Context, clusterName string, windDown time.Duration) ([]*domain.Experiment, error)
+	ListDesiredWorkloads(ctx context.Context, clusterName string) ([]*domain.Experiment, error)
 	// ListRecentlyUndesiredWorkloads returns the experiments last placed on the cluster that have
 	// just stopped being desired, the ones its agent is about to delete, so the reconcile
 	// response can name which of them earned a checkpoint window.
@@ -429,9 +429,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
 		}
 
-		// Each job says when its instance ends at the latest: the close of its platform experiment,
-		// the wind-down a close is given and the longest checkpoint window after it.
-		exps, err := h.store.ListDesiredWorkloads(ctx, clusterName, domain.AgentWindDown+h.maxCheckpointGrace)
+		exps, err := h.store.ListDesiredWorkloads(ctx, clusterName)
 		if err != nil {
 			return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
 		}

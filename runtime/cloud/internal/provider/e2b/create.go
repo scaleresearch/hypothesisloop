@@ -43,8 +43,7 @@ func (p *Provider) Create(ctx context.Context, spec provider.Spec) (string, erro
 		SandboxID       string `json:"sandboxID"`
 		EnvdAccessToken string `json:"envdAccessToken"`
 	}
-	sandboxSeconds, commandLifetime := p.cfg.lifetimes(spec)
-	req := createRequest{TemplateID: template, Timeout: sandboxSeconds, Metadata: map[string]string{nameKey: spec.Name}}
+	req := createRequest{TemplateID: template, Timeout: p.cfg.LifetimeSeconds, Metadata: map[string]string{nameKey: spec.Name}}
 	_, err := p.call(ctx, http.MethodPost, "/v2/sandboxes", req, &created)
 	if hasStatus(err, http.StatusNotFound) {
 		return "", fmt.Errorf("e2b: template %s for image %q with %d cores and %d MiB of memory is not built; build it with `%s %s %d %d`: %w",
@@ -56,7 +55,7 @@ func (p *Provider) Create(ctx context.Context, spec provider.Spec) (string, erro
 	if created.SandboxID == "" || created.EnvdAccessToken == "" {
 		return "", fmt.Errorf("e2b: creating a sandbox for %q answered without an id or without its token", spec.Name)
 	}
-	if err := p.launch(ctx, created.SandboxID, created.EnvdAccessToken, spec, template, commandLifetime); err != nil {
+	if err := p.launch(ctx, created.SandboxID, created.EnvdAccessToken, spec, template, p.cfg.commandLifetime()); err != nil {
 		destroy := func(ctx context.Context) error { return p.Destroy(ctx, created.SandboxID) }
 		return "", vendorapi.GiveBack(ctx, destroy, requestTimeout, err)
 	}

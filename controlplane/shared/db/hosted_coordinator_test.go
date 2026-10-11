@@ -27,49 +27,6 @@ func createTestPEWithCoordinator(t *testing.T, pool *Pool, launcher string) stri
 	return pe.ID
 }
 
-// An open platform experiment ends duration_hours after its starts_at, measuring the baseline
-// included, so that is what bounds a machine rented while it is open. A running one ends at its
-// end time.
-func TestAMachineIsBoundByTheLatestEndItsPlatformExperimentCanStillHave(t *testing.T) {
-	pool := eventsTestDB(t)
-	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
-	launcher := "launcher-" + uuid.New().String()[:8]
-	pe := createTestPEWithCoordinator(t, pool, launcher)
-	spawnTestAgents(t, pes, pe, domain.AgentSignup{Hosted: true, Launcher: launcher, Flavor: "generalist", Role: domain.SignupRoleBaseline})
-	const windDown = 2 * time.Minute
-	deadline := time.Now().UTC().Add(3 * time.Hour).Truncate(time.Second)
-	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET starts_at = $2, ends_at = $2, duration_hours = 5, coordinator_reason = 'baseline_required' WHERE id = $1`, pe, deadline); err != nil {
-		t.Fatal(err)
-	}
-	if err := pes.AskInstance(ctx, pe, "", "c", "launch-1"); err != nil {
-		t.Fatal(err)
-	}
-	bounds := func() (agent, coordinator time.Time) {
-		t.Helper()
-		agents, err := pes.ListLauncherAgents(ctx, launcher, windDown)
-		if err != nil || len(agents) != 1 {
-			t.Fatalf("agents = %+v, %v", agents, err)
-		}
-		coordinators, err := pes.ListLauncherCoordinators(ctx, launcher, windDown)
-		if err != nil || len(coordinators) != 1 {
-			t.Fatalf("coordinators = %+v, %v", coordinators, err)
-		}
-		return agents[0].EndsBy, coordinators[0].EndsBy
-	}
-	if agent, coordinator := bounds(); !agent.Equal(deadline.Add(5*time.Hour+windDown)) || !coordinator.Equal(agent) {
-		t.Fatalf("open: bounds = %s and %s, want starts_at %s, its 5h and the wind-down", agent, coordinator, deadline)
-	}
-	setPEStatus(t, pool, pe, domain.PlatformExpRunning, 0)
-	if agent, coordinator := bounds(); !agent.Equal(deadline.Add(windDown)) || !coordinator.Equal(agent) {
-		t.Fatalf("running: bounds = %s and %s, want the end time %s and the wind-down", agent, coordinator, deadline)
-	}
-	setPEStatus(t, pool, pe, domain.PlatformExpClosed, time.Minute)
-	if agent, coordinator := bounds(); !coordinator.Equal(agent) || time.Until(agent) > windDown-time.Minute+time.Second || time.Until(agent) < windDown-2*time.Minute {
-		t.Fatalf("closed a minute ago: bounds = %s and %s, want the wind-down after the close", agent, coordinator)
-	}
-}
-
 func TestAHostedCoordinatorIsStoredReadAndListedOnlyWhereItIsOne(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()

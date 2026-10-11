@@ -111,15 +111,6 @@ type Spec struct {
 	// caller found unable to start an instance. A vendor that names no host in List is never
 	// given any.
 	AvoidHosts []string
-
-	// Lifetime is how long the instance may run its command, in whole seconds. At its end the
-	// instance ends by itself, whether or not its caller or the vendor's API can still reach
-	// it: the command is killed, and the instance is exited, or gone where the vendor ends an
-	// instance whole. Either way it stops being billed for compute. An adapter maps it to its
-	// vendor's own lifetime where there is one and counts it inside the instance otherwise.
-	// Zero asks for no end beyond what the vendor imposes. An instance the vendor's own limit
-	// ends first is listed as exited with Instance.Expired.
-	Lifetime time.Duration
 }
 
 // ImageLogin is a login to the registry host Registry.
@@ -137,7 +128,7 @@ type Instance struct {
 	State     State
 	StartedAt time.Time
 	// Expired says of an exited instance that its vendor's own limit on how long it rents one
-	// ended the command, sooner than Spec.Lifetime asked: the command did nothing wrong, and a
+	// ended the command, sooner than a caller asked for: the command did nothing wrong, and a
 	// caller that still wants it rents another. Only an adapter whose vendor has such a limit
 	// sets it. A caller that does not look in time finds the instance gone instead, as the
 	// vendor removes it soon after.

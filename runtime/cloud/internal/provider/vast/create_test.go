@@ -115,7 +115,7 @@ func TestCreateSearchesForTheSpecAndRentsTheCheapestOffer(t *testing.T) {
 		"disk":      41.0,
 		"env":       map[string]any{"HYPOTHESISLOOP_TOKEN": "t = 'x' \"y\" $Z"},
 		"onstart":   "/bin/sh",
-		"args": []any{"-c", supervisor(0), "hl-supervisor",
+		"args": []any{"-c", supervisor(), "hl-supervisor",
 			"hl", "exec", "--stop-grace", "30", "--", "python", "train.py", "--note", `two  spaces 'and' "quotes" $HOME`, ""},
 	}
 	if !reflect.DeepEqual(rent[0].Body, wantRent) {

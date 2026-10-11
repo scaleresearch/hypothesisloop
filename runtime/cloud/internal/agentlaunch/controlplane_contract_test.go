@@ -33,11 +33,8 @@ var contractSettings = launcherapi.Settings{
 	SigningSecret: contractSecret, BootLimit: contractBootLimit, ProgressLimit: 4 * contractBootLimit, MaxNewPerAnswer: 50,
 }
 
-// contractEndsBy is the latest end of every platform experiment of these tests.
-var contractEndsBy = time.Now().Add(30 * time.Hour)
-
 func hostedAgent(pe, agent string) db.LauncherAgent {
-	return db.LauncherAgent{EndsBy: contractEndsBy, AgentSignup: domain.AgentSignup{
+	return db.LauncherAgent{AgentSignup: domain.AgentSignup{
 		PlatformExperimentID: pe, AgentID: agent, Hosted: true, Launcher: "main",
 		Flavor: "data-search", Model: "model-1", Hyperparameters: map[string]any{"batch_size": float64(64)},
 		Instance: &domain.AgentInstance{},
@@ -307,7 +304,7 @@ func TestARotatedCredentialReplacesEveryRunningInstance(t *testing.T) {
 
 func TestAHostedCoordinatorIsRentedRestartedAndEndedThroughTheSamePass(t *testing.T) {
 	c := newContract(t, hostedAgent("pe-1", "ag-one"))
-	c.store.Coordinators = []db.LauncherCoordinator{{PlatformExperimentID: "pe-1", EndsBy: contractEndsBy.Add(time.Hour), HostedCoordinator: domain.HostedCoordinator{Launcher: "main", Model: "model-2"}}}
+	c.store.Coordinators = []db.LauncherCoordinator{{PlatformExperimentID: "pe-1", HostedCoordinator: domain.HostedCoordinator{Launcher: "main", Model: "model-2"}}}
 	c.pass()
 	names := c.rented.Names()
 	if len(names) != 2 || !strings.HasPrefix(names[0], "hl-agent-main-pe1-agone-") || !strings.HasPrefix(names[1], "hl-agent-main-pe1-coordinator-") {

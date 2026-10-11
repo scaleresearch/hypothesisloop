@@ -1189,27 +1189,6 @@ func TestARefusedLauncherIsToldWhatToKeepAndWhatEndsAndIsAskedForNothingNew(t *t
 	}
 }
 
-func TestEveryInstanceCarriesTheMomentItsPlatformExperimentCanLastUntil(t *testing.T) {
-	agentEnd := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
-	coordinatorEnd := agentEnd.Add(time.Hour)
-	store := oneAgentAndACoordinator()
-	store.ByLauncher["main"][0].EndsBy = agentEnd.In(time.FixedZone("elsewhere", 7200))
-	store.Coordinators[0].EndsBy = coordinatorEnd
-	code, raw := reconcileUnder(t, store, testSettings, observed())
-	if code != http.StatusOK || !strings.Contains(string(raw), `"ends_at":"2026-03-01T12:00:00Z"`) {
-		t.Fatalf("answer = %d %s, want the agent's ends_at in UTC", code, raw)
-	}
-	answer := decode(t, raw)
-	if !answer.Instances[0].EndsAt.Equal(agentEnd) || !answer.Instances[1].EndsAt.Equal(coordinatorEnd) {
-		t.Fatalf("ends_at = %s and %s", answer.Instances[0].EndsAt, answer.Instances[1].EndsAt)
-	}
-	named := mustReconcile(t, store, observed())
-	store.ByLauncher["main"][0].EndsBy = agentEnd.Add(48 * time.Hour)
-	if moved := mustReconcile(t, store, observed()); moved.Instances[0].Name != named.Instances[0].Name || !moved.Instances[0].EndsAt.Equal(agentEnd.Add(48*time.Hour)) {
-		t.Fatalf("a moved bound: %+v, want the same name with the new ends_at", moved.Instances[0])
-	}
-}
-
 func TestTheTokenMintedForAMachineIsTakenOutOfItsExitLog(t *testing.T) {
 	store := oneAgentAndACoordinator()
 	answer := mustReconcile(t, store, observed())

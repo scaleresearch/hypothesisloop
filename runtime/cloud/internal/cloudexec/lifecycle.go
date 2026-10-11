@@ -89,7 +89,7 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment, p
 	if err != nil {
 		return fmt.Errorf("cloudexec: create instance %s: %w", spec.Name, err)
 	}
-	log.Printf("cloudexec: created instance %s (%s): attempt %d of experiment %s is desired in slot %s; it ends itself at %s", spec.Name, id, exp.AttemptCount, exp.ID, name, exp.EndsAt.UTC().Format(time.RFC3339))
+	log.Printf("cloudexec: created instance %s (%s): attempt %d of experiment %s is desired in slot %s", spec.Name, id, exp.AttemptCount, exp.ID, name)
 	v.add(instance{
 		Instance:     provider.Instance{ID: id, Name: spec.Name, State: provider.StateStarting},
 		experimentID: exp.ID, attempt: exp.AttemptCount, shape: shape.Name, index: index,

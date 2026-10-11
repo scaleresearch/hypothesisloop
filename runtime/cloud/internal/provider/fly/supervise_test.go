@@ -18,7 +18,7 @@ import (
 // the given shell.
 func startSupervised(t *testing.T, shell []string, dir string, env []string, command ...string) *exec.Cmd {
 	t.Helper()
-	cmd := supervisetest.Command(shell, supervised(0, command)[1:]...)
+	cmd := supervisetest.Command(shell, supervised(command)[1:]...)
 	cmd.Env = append([]string{"PATH=" + os.Getenv("PATH"), "TMPDIR=" + dir, "DIR=" + dir}, env...)
 	cmd.Stdout = &bytes.Buffer{}
 	if err := cmd.Start(); err != nil {
@@ -118,29 +118,6 @@ func TestSupervisorPassesTheFirstSIGTERMOnAndLetsTheCommandFinish(t *testing.T) 
 	})
 }
 
-// A Machine stops when its supervisor exits, so this is a Machine nothing reaches ending itself:
-// the command heeds no signal and none is sent.
-func TestSupervisorKillsTheCommandAtTheEndOfTheLifetimeAndMarksTheEnd(t *testing.T) {
-	supervisetest.EachShell(t, func(t *testing.T, shell []string) {
-		dir := t.TempDir()
-		argv := supervised(time.Second, []string{"/bin/sh", "-c", `trap '' TERM; echo working; : > "$DIR/ready"; while :; do sleep 0.05 & wait $!; done`})
-		cmd := supervisetest.Command(shell, argv[1:]...)
-		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "TMPDIR=" + dir, "DIR=" + dir}
-		cmd.Stdout = &bytes.Buffer{}
-		began := time.Now()
-		if err := cmd.Start(); err != nil {
-			t.Fatalf("start supervisor: %v", err)
-		}
-		t.Cleanup(func() { _ = cmd.Process.Kill() })
-		awaitFile(t, filepath.Join(dir, "ready"))
-
-		wantLines(t, finish(t, cmd), "hl-out|working", "hl-ended")
-		if lived := time.Since(began); lived < time.Second || lived > 5*time.Second {
-			t.Errorf("the supervisor ended after %s, want its lifetime of one second", lived.Round(10*time.Millisecond))
-		}
-	})
-}
-
 // The supervisor is the Machine's main process, so a signal that killed it would stop the
 // Machine with no end mark. mkfifo runs before the command exists; this one signals the
 // supervisor from there.
@@ -219,7 +196,7 @@ func TestSupervisorRefusesToRunTheCommandInAnImageWithoutItsTools(t *testing.T) 
 					}
 				}
 			}
-			cmd := exec.Command("/bin/sh", supervised(0, []string{"/bin/sh", "-c", `: > "$DIR/ran"`})[1:]...)
+			cmd := exec.Command("/bin/sh", supervised([]string{"/bin/sh", "-c", `: > "$DIR/ran"`})[1:]...)
 			cmd.Env = []string{"PATH=" + tools, "TMPDIR=" + dir, "DIR=" + dir}
 
 			output, err := cmd.Output()
@@ -239,7 +216,7 @@ func TestSupervisorRefusesToRunTheCommandInAnImageWithoutItsTools(t *testing.T) 
 
 func TestSupervisorRefusesToRunTheCommandWithoutATemporaryDirectory(t *testing.T) {
 	dir := t.TempDir()
-	cmd := exec.Command("/bin/sh", supervised(0, []string{"/bin/sh", "-c", `: > "$DIR/ran"`})[1:]...)
+	cmd := exec.Command("/bin/sh", supervised([]string{"/bin/sh", "-c", `: > "$DIR/ran"`})[1:]...)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "TMPDIR=" + filepath.Join(dir, "missing"), "DIR=" + dir}
 
 	output, err := cmd.Output()

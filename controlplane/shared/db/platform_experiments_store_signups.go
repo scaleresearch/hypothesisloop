@@ -812,29 +812,7 @@ type LauncherAgent struct {
 	// AgentImage is the image the agent's platform experiment names for its machines, empty for
 	// the platform's own.
 	AgentImage string
-	// EndsBy is the latest moment a machine rented for the agent now may still run
-	// (launcherEndsBySQL).
-	EndsBy time.Time
 }
-
-// launcherEndsBySQL is the latest moment platform experiment pe can still have a machine, $2
-// seconds of wind-down included: of a draft the end of its planning, and once its planner
-// answered the moment the planner is kept until, of an open one the end of the longest run it
-// can still have, which starts at its baseline_due_at, and of a running one the end of its run.
-// An open one's moves when its owner changes starts_at or duration_hours.
-const launcherEndsBySQL = `(CASE
-            WHEN pe.status = 'closed' THEN pe.closed_at
-            WHEN pe.status = 'draft' AND pe.planner_ends_at IS NOT NULL THEN pe.planner_ends_at
-            WHEN pe.status = 'open' THEN pe.ends_at + make_interval(secs => pe.duration_hours * 3600)
-            WHEN pe.status = 'running' AND pe.started_at IS NULL THEN ` + runOverAtSQL + `
-            ELSE pe.ends_at END + make_interval(secs => $2))`
-
-// launcherAgentEndsBySQL is launcherEndsBySQL for the agent s, but for the baseline agent of a
-// draft, whose machine starts before the draft is accepted and has to outlast the baseline:
-// it is bounded by the draft's own end, when an unaccepted proposal is closed.
-const launcherAgentEndsBySQL = `(CASE WHEN pe.status = 'draft' AND s.role = '` + string(domain.SignupRoleBaseline) + `'
-            THEN pe.ends_at + make_interval(secs => $2)
-            ELSE ` + launcherEndsBySQL + ` END)`
 
 // launcherAgentsFrom selects the hosted agents a launcher still has something to do for: those
 // of a running platform experiment that were not cut and did not finish, those that measure the
@@ -872,7 +850,7 @@ WHERE s.hosted AND s.launcher = $1 AND NOT (` + awaitsRepository + `)
 // ListLauncherAgents returns the hosted agents the launcher's desired state is decided from.
 func (s *PlatformExperimentsStore) ListLauncherAgents(ctx context.Context, launcher string, windDown time.Duration) ([]LauncherAgent, error) {
 	rows, err := s.pool.pool.Query(ctx, `
-SELECT `+agentSignupColumns+`, pe.agent_image, `+launcherAgentEndsBySQL+launcherAgentsFrom+`
+SELECT `+agentSignupColumns+`, pe.agent_image`+launcherAgentsFrom+`
 ORDER BY s.platform_experiment_id, s.agent_id`, launcher, windDown.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.ListLauncherAgents: %w", err)
@@ -882,7 +860,7 @@ ORDER BY s.platform_experiment_id, s.agent_id`, launcher, windDown.Seconds())
 	for rows.Next() {
 		var agent LauncherAgent
 		var err error
-		if agent.AgentSignup, err = scanAgentSignup(rows, &agent.AgentImage, &agent.EndsBy); err != nil {
+		if agent.AgentSignup, err = scanAgentSignup(rows, &agent.AgentImage); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.ListLauncherAgents: %w", err)
 		}
 		agents = append(agents, agent)

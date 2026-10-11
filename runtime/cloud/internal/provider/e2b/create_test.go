@@ -119,40 +119,21 @@ func TestCreateStartsASandboxOfTheTemplateAndTheCommandInside(t *testing.T) {
 	}
 }
 
-// A lifetime the plan can give is the vendor's to keep: at its end nobody wants the instance. A
-// sandbox the plan ends sooner than was asked is still wanted then, so its supervisor ends the
-// command five minutes before the vendor ends the sandbox and says that it did.
-func TestCreateGivesTheSandboxTheSpecsLifetimeUnderThePlansLongest(t *testing.T) {
-	for name, tc := range map[string]struct {
-		lifetime time.Duration
-		want     float64
-		counted  string
-	}{
-		"shorter than the plan's": {20 * time.Minute, 1200, ""},
-		"the plan's exactly":      {time.Hour, 3600, ""},
-		"longer than the plan's":  {36 * time.Hour, 3600, "(sleep 3300 && kill -USR1 $$)"},
-		"none of its own":         {0, 3600, "(sleep 3300 && kill -USR1 $$)"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			api := newFakeAPI(t)
-			creatable(api, "hl-agent-pe1-a2")
-			p := newTestProvider(t, api)
-			spec := agentSpec()
-			spec.Lifetime = tc.lifetime
-			if _, err := p.Create(context.Background(), spec); err != nil {
-				t.Fatalf("Create: %v", err)
-			}
-			if got := api.sent(http.MethodPost, sandboxesPath)[0].json(t)["timeout"]; got != tc.want {
-				t.Errorf("timeout = %v, want %v", got, tc.want)
-			}
-			file := uploaded(t, api.sent(http.MethodPost, envdFiles)[0])
-			if tc.counted == "" && strings.Contains(file, "USR1") {
-				t.Error("the supervisor counts a lifetime the vendor already keeps")
-			}
-			if !strings.Contains(file, tc.counted) || strings.Contains(file, "echo expired") != (tc.counted != "") {
-				t.Errorf("launch file, want it to count %q and to say expired only then:\n%s", tc.counted, file)
-			}
-		})
+// A sandbox is rented for the plan's longest lifetime, and its supervisor ends the command five
+// minutes before the vendor ends the sandbox and says that it did.
+func TestCreateRentsTheSandboxForThePlansLongestAndTheSupervisorEndsTheCommandFiveMinutesBefore(t *testing.T) {
+	api := newFakeAPI(t)
+	creatable(api, "hl-agent-pe1-a2")
+	p := newTestProvider(t, api)
+	if _, err := p.Create(context.Background(), agentSpec()); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if got := api.sent(http.MethodPost, sandboxesPath)[0].json(t)["timeout"]; got != float64(3600) {
+		t.Errorf("timeout = %v, want 3600", got)
+	}
+	file := uploaded(t, api.sent(http.MethodPost, envdFiles)[0])
+	if !strings.Contains(file, "(sleep 3300 && kill -USR1 $$)") || !strings.Contains(file, "echo expired") {
+		t.Errorf("launch file, want it to count 3300 seconds and to say expired:\n%s", file)
 	}
 }
 

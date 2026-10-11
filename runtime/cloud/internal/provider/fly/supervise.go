@@ -1,8 +1,6 @@
 package fly
 
 import (
-	"time"
-
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/supervise"
 )
 
@@ -36,11 +34,8 @@ const (
 //
 // It needs sh, mkfifo and sleep in the image and a temporary directory it can write to. Without
 // them it says so under outputPrefix and does not run the command.
-//
-// Fly has no lifetime of its own for a Machine, so the supervisor counts the spec's: when it
-// ends the command is killed, the supervisor exits as after any ending, and the Machine stops.
-func supervisor(lifetime time.Duration) string {
-	return supervise.Script(parts, lifetime)
+func supervisor() string {
+	return supervise.Script(parts, 0)
 }
 
 var parts = supervise.Parts{
@@ -67,7 +62,7 @@ kill -KILL "$timer" 2>/dev/null
 echo "` + endMark + `"`,
 }
 
-// supervised is the argv that runs command under the supervisor for lifetime at most.
-func supervised(lifetime time.Duration, command []string) []string {
-	return append([]string{"/bin/sh", "-c", supervisor(lifetime), "hl-supervisor"}, command...)
+// supervised is the argv that runs command under the supervisor.
+func supervised(command []string) []string {
+	return append([]string{"/bin/sh", "-c", supervisor(), "hl-supervisor"}, command...)
 }

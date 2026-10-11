@@ -39,7 +39,6 @@ func RunWarm(t *testing.T, p provider.Provider, opts Options) {
 
 	spec := r.spec("started", `printf 'conformance-env=%s\n' "$HL_CONFORMANCE_VALUE"; echo conformance-ready`)
 	spec.Env = map[string]string{"HL_CONFORMANCE_VALUE": envValue}
-	spec.Lifetime = time.Hour
 	asked = time.Now()
 	if err := warmer.StartWarm(ctx, id, spec); err != nil {
 		t.Fatalf("StartWarm: %v", err)

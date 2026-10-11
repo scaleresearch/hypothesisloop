@@ -33,7 +33,7 @@ const replaceWaitSeconds = 25
 //     the image is already on the host, and a start before the replacement is done is refused
 //     with 412. A start after it had the command running in under two seconds.
 func (p *Provider) Warm(ctx context.Context, spec provider.Spec) (string, error) {
-	spec.Command, spec.Env, spec.Lifetime = idle, nil, 0
+	spec.Command, spec.Env = idle, nil
 	req, err := p.newCreateRequest(spec)
 	if err != nil {
 		return "", err

@@ -91,7 +91,7 @@ func (p *Provider) newCreateRequest(spec provider.Spec) (createRequest, error) {
 		Region: p.cfg.Region,
 		Config: machineConfig{
 			Image:    spec.Image,
-			Init:     machineInit{Exec: supervised(spec.Lifetime, spec.Command)},
+			Init:     machineInit{Exec: supervised(spec.Command)},
 			Env:      env,
 			Metadata: map[string]string{nameKey: spec.Name},
 			Guest:    size,

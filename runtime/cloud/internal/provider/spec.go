@@ -3,7 +3,6 @@ package provider
 import (
 	"fmt"
 	"regexp"
-	"time"
 )
 
 var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -27,9 +26,6 @@ func (s Spec) Validate() error {
 	}
 	if s.CPUMillis <= 0 || s.MemoryBytes <= 0 || s.DiskBytes <= 0 {
 		return fmt.Errorf("spec %q must state cpu, memory and disk", s.Name)
-	}
-	if s.Lifetime < 0 || s.Lifetime%time.Second != 0 {
-		return fmt.Errorf("spec %q has a lifetime of %s, and a lifetime is whole seconds", s.Name, s.Lifetime)
 	}
 	for name := range s.Env {
 		if !envNamePattern.MatchString(name) {

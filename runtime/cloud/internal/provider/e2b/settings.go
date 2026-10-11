@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 	"time"
-
-	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 )
 
 // Settings is the adapter's own section of the config file, provider.settings.
@@ -25,18 +23,10 @@ type Settings struct {
 // time a caller has to read that: twenty passes at the interval the launcher ships with.
 const expiryNotice = 5 * time.Minute
 
-// lifetimes is how long a sandbox for spec is rented, in the vendor's seconds, and for how long
-// its supervisor lets the command run, zero for no end of the supervisor's own.
-//
-// A spec whose own lifetime fits the plan's is rented for that and the vendor keeps it: when it
-// ends nobody wants the instance, and it leaves the list. Any other is rented for the plan's
-// longest, and its supervisor ends the command expiryNotice before the vendor ends the sandbox.
-func (c Settings) lifetimes(spec provider.Spec) (sandboxSeconds int, command time.Duration) {
-	longest := time.Duration(c.LifetimeSeconds) * time.Second
-	if spec.Lifetime > 0 && spec.Lifetime <= longest {
-		return int(spec.Lifetime / time.Second), 0
-	}
-	return c.LifetimeSeconds, longest - expiryNotice
+// commandLifetime is how long the supervisor lets a sandbox's command run: the plan's longest
+// lifetime less expiryNotice, so the command is ended before the vendor ends the sandbox.
+func (c Settings) commandLifetime() time.Duration {
+	return time.Duration(c.LifetimeSeconds)*time.Second - expiryNotice
 }
 
 func (c Settings) validate() error {

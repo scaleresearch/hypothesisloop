@@ -147,7 +147,7 @@ func (p *Provider) awaitListed(ctx context.Context, id, name string) error {
 
 // newCreateRequest hands the argv over as JSON strings end to end, so no shell ever parses it.
 func newCreateRequest(spec provider.Spec) createRequest {
-	entrypoint, args := supervised(spec.Lifetime, spec.Command)
+	entrypoint, args := supervised(spec.Command)
 	req := createRequest{
 		ClientID: "me",
 		Image:    spec.Image,
