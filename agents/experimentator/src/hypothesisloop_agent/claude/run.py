@@ -234,6 +234,73 @@ async def _task_stop_hook(hook_input, tool_use_id, context) -> dict:
                                    "permissionDecisionReason": SUBAGENT_TASK_STOP}}
 
 
+# The most subagents an agent runs at once. Researchers ran 3 to 10, and each one's end starts a
+# turn of the lead's over its whole context, which then grew past its rotation as some were
+# always live.
+_MAX_SUBAGENTS = config.tuning("HL_MAX_SUBAGENTS", 4)
+SUBAGENT_CAP = ("{live} of your subagents are at work, the most that run at once{why}. Start this one when one "
+                "of them ends: its end starts your next turn.")
+# How long a subagent let through counts after its start returned, while the CLI does not list it.
+_STARTING_S = 60
+
+
+class Subagents:
+    """The subagents of a session: those the CLI lists in the background, and those whose start was
+    let through that it does not list yet. Its messages are read after the hooks of the same step
+    run, so the starts of one step all come before the first of them is listed."""
+
+    def __init__(self, background: dict[str, dict], clock=time.monotonic):
+        self._background, self._clock = background, clock
+        # By tool use id: the agent id its start returned and when, None until it returned.
+        self._starting: dict[str, tuple[str | None, float | None]] = {}
+
+    def live(self) -> int:
+        listed = {task_id for task_id, task in self._background.items() if _is_subagent(task)}
+        now = self._clock()
+        self._starting = {use: (agent, at) for use, (agent, at) in self._starting.items()
+                          if agent not in listed and (at is None or now - at < _STARTING_S)}
+        return len(listed) + len(self._starting)
+
+    def starting(self, tool_use_id: str) -> None:
+        self._starting[tool_use_id] = (None, None)
+
+    def started(self, tool_use_id: str, response) -> None:
+        """A start returned with response, None for one that failed. Only a subagent launched in
+        the background is still at work."""
+        if tool_use_id not in self._starting:
+            return
+        if isinstance(response, dict) and response.get("status") == "async_launched":
+            self._starting[tool_use_id] = (response.get("agentId"), self._clock())
+        else:
+            del self._starting[tool_use_id]
+
+
+def _subagent_cap() -> tuple[int, str]:
+    """How many subagents may run at once now, and why that many when it is fewer than usual."""
+    return _MAX_SUBAGENTS, ""
+
+
+def _subagent_hooks(subagents: Subagents) -> dict[str, HookMatcher]:
+    """The hooks that refuse a subagent past the cap, by hook event."""
+
+    async def before(hook_input, tool_use_id, context) -> dict:
+        cap, why = _subagent_cap()
+        if (live := subagents.live()) < cap:
+            subagents.starting(tool_use_id or hook_input.get("tool_use_id", ""))
+            return {}
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                       "permissionDecisionReason": SUBAGENT_CAP.format(live=live, why=why)}}
+
+    async def after(hook_input, tool_use_id, context) -> dict:
+        response = hook_input.get("tool_response") if hook_input["hook_event_name"] == "PostToolUse" else None
+        subagents.started(tool_use_id or hook_input.get("tool_use_id", ""), response)
+        return {}
+
+    return {"PreToolUse": HookMatcher(matcher="Agent", hooks=[before]),
+            "PostToolUse": HookMatcher(matcher="Agent", hooks=[after]),
+            "PostToolUseFailure": HookMatcher(matcher="Agent", hooks=[after])}
+
+
 def _session_file(setup: core.RunSetup) -> str:
     return os.path.join(setup.statedir, _SESSION_ID_FILE)
 
@@ -897,6 +964,8 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     cfg = setup.cfg
     watch_env = updates.watch_env(cfg.api_url, cfg.token, setup.statedir)
     handing = asyncio.Lock()
+    background: dict[str, dict] = {}
+    capped = _subagent_hooks(Subagents(background))
     options = ClaudeAgentOptions(
         system_prompt=setup.system_prompt + _FILE_TOOLS_NOTE,
         model=model,
@@ -925,9 +994,10 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
         # The CLI says each prompt again as the turn that takes it up starts, see _answer.
         extra_args={"replay-user-messages": None},
         hooks={"PreToolUse": [HookMatcher(matcher="Bash", hooks=[_wait_hook]),
-                              HookMatcher(matcher="TaskStop", hooks=[_task_stop_hook])],
-               "PostToolUse": [HookMatcher(hooks=[_updates_hook(setup, watch_env, handing)]), _UNDELIVERED_MATCHER],
-               "PostToolUseFailure": [_UNDELIVERED_MATCHER]},
+                              HookMatcher(matcher="TaskStop", hooks=[_task_stop_hook]), capped["PreToolUse"]],
+               "PostToolUse": [HookMatcher(hooks=[_updates_hook(setup, watch_env, handing)]), _UNDELIVERED_MATCHER,
+                               capped["PostToolUse"]],
+               "PostToolUseFailure": [_UNDELIVERED_MATCHER, capped["PostToolUseFailure"]]},
     )
 
     def stopped() -> bool:
@@ -948,7 +1018,6 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
 
     opening = await _with_situation(setup, watch_env, await asyncio.to_thread(_opening, setup, resume_id, initial_prompt))
     connecting = time.monotonic()
-    background: dict[str, dict] = {}
     told_nothing = False
     _progress.subagents(0)
     async with ClaudeSDKClient(options=options) as client:

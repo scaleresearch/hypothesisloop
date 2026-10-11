@@ -404,6 +404,58 @@ class ContextOverflowTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run._rotation_limits(result({"claude-x-2026": {"contextWindow": 200_000}}), "claude-x"), (150_000, 180_000))
 
 
+# A researcher ran 3 to 10 subagents at once, and its session grew past its rotation since some
+# were always live. Starts past the cap are refused, those of one step included: the CLI lists a
+# subagent only after the hooks of the step that started it ran.
+class SubagentCapTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.now = 0.0
+        self.background = {}
+        self.hooks = run._subagent_hooks(run.Subagents(self.background, clock=lambda: self.now))
+
+    async def start(self, use: str) -> dict:
+        [hook] = self.hooks["PreToolUse"].hooks
+        self.assertEqual(self.hooks["PreToolUse"].matcher, "Agent")
+        return await hook({"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": {}}, use, {})
+
+    async def returned(self, use: str, response: dict | None) -> None:
+        event = "PostToolUse" if response is not None else "PostToolUseFailure"
+        [hook] = self.hooks[event].hooks
+        self.assertEqual(await hook({"hook_event_name": event, "tool_name": "Agent", "tool_response": response}, use, {}), {})
+
+    def listed(self, *ids: str) -> None:
+        run._note_background(SystemMessage("background_tasks_changed", {"tasks": [
+            {"task_id": i, "task_type": "local_agent"} for i in ids] + [{"task_id": "b-1", "task_type": "local_bash"}]}),
+            self.background)
+
+    async def test_starts_past_the_cap_are_refused_until_one_ends(self):
+        with mock.patch.object(run, "_MAX_SUBAGENTS", 3):
+            for use in ("t-1", "t-2", "t-3"):
+                self.assertEqual(await self.start(use), {}, use)
+            told = (await self.start("t-4"))["hookSpecificOutput"]
+            self.assertEqual(told["permissionDecision"], "deny")
+            self.assertEqual(told["permissionDecisionReason"], run.SUBAGENT_CAP.format(live=3, why=""))
+            for use, agent in (("t-1", "a-1"), ("t-2", "a-2"), ("t-3", "a-3")):
+                await self.returned(use, {"isAsync": True, "status": "async_launched", "agentId": agent})
+            self.listed("a-1", "a-2", "a-3")
+            self.assertIn("deny", str(await self.start("t-5")), "each listed once, a command not counted")
+            self.listed("a-1", "a-3")
+            self.assertEqual(await self.start("t-6"), {})
+
+    async def test_a_start_that_failed_or_ran_in_the_foreground_counts_no_more(self):
+        with mock.patch.object(run, "_MAX_SUBAGENTS", 2):
+            await self.start("t-1")
+            await self.start("t-2")
+            await self.returned("t-1", None)
+            await self.returned("t-2", {"status": "completed", "content": []})
+            self.assertEqual(await self.start("t-3"), {})
+            await self.returned("t-3", {"status": "async_launched", "agentId": "a-3"})
+            await self.start("t-4")
+            self.assertIn("deny", str(await self.start("t-5")))
+            self.now += run._STARTING_S
+            self.assertEqual(await self.start("t-5"), {}, "a start the CLI never listed counts for a while only")
+
+
 class TurnWatchdogTest(unittest.IsolatedAsyncioTestCase):
     async def test_silent_cli_ends_session_with_turn_stalled(self):
         setup = _setup()
