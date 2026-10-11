@@ -80,7 +80,7 @@ func TestCreateHandsTheSpecsLifetimeToTheSupervisorInsideTheMachine(t *testing.T
 	}
 	config := api.sent(http.MethodPost, machinesPath)[0].Body["config"].(map[string]any)
 	script := config["init"].(map[string]any)["exec"].([]any)[2].(string)
-	if script != supervisor(36*time.Hour) || !strings.Contains(script, "ends_at=$((ends_at + 129600))") || !strings.Contains(script, endsAtPath) {
+	if script != supervisor(36*time.Hour) || !strings.Contains(script, "(sleep 129600 && kill -USR1 $$)") {
 		t.Errorf("the Machine's supervisor does not count 129600 seconds:\n%s", script)
 	}
 	if strings.Contains(supervisor(0), "USR1") {

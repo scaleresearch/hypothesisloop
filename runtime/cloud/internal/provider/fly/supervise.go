@@ -39,17 +39,9 @@ const (
 //
 // Fly has no lifetime of its own for a Machine, so the supervisor counts the spec's: when it
 // ends the command is killed, the supervisor exits as after any ending, and the Machine stops.
-// It keeps the end at endsAtPath, where Extend moves it.
 func supervisor(lifetime time.Duration) string {
-	withEnd := parts
-	withEnd.EndsAtFile = endsAtPath
-	return supervise.Script(withEnd, lifetime)
+	return supervise.Script(parts, lifetime)
 }
-
-// endsAtPath is where a Machine's supervisor keeps the end of its lifetime. It is a fixed path,
-// not one under TMPDIR, as Extend runs outside the supervisor's environment. A variable for the
-// tests that run a supervisor on their own host.
-var endsAtPath = "/tmp/.hl-supervisor-ends-at"
 
 var parts = supervise.Parts{
 	Before: `echo "` + startMark + `"

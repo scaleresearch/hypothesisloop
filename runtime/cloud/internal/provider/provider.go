@@ -20,8 +20,8 @@
 //     vendor, and fake implements it.
 //   - A wrapper of a Provider passes on the capabilities of what it wraps (Bounded does).
 //
-// Pauser, Market, Warmer and Extender are the capabilities there are. The ones foreseen, to be
-// shaped the same way when something needs them and not before:
+// Pauser, Market and Warmer are the capabilities there are. The ones foreseen, to be shaped the same way when
+// something needs them and not before:
 //
 //   - Snapshotter: Snapshot(ctx, id) (ref, error) and a Spec field naming a snapshot to create
 //     from, for a vendor that can copy an instance's filesystem. The harness's own session
@@ -118,8 +118,7 @@ type Spec struct {
 	// instance whole. Either way it stops being billed for compute. An adapter maps it to its
 	// vendor's own lifetime where there is one and counts it inside the instance otherwise.
 	// Zero asks for no end beyond what the vendor imposes. An instance the vendor's own limit
-	// ends first is listed as exited with Instance.Expired. An Extender moves the end while the
-	// command runs.
+	// ends first is listed as exited with Instance.Expired.
 	Lifetime time.Duration
 }
 

@@ -20,9 +20,6 @@ type instance struct {
 	name  string
 	image string
 	env   map[string]string
-	// endsAt is the moment after which the instance must not run. It is rented with the time
-	// left until then as its lifetime.
-	endsAt time.Time
 }
 
 // desired is one answer of the control plane, keyed by full instance name: what should run, and
@@ -42,10 +39,9 @@ type desired struct {
 // every agent.
 type reconcileAnswer struct {
 	Instances *[]struct {
-		Name   string            `json:"name"`
-		Image  string            `json:"image"`
-		Env    map[string]string `json:"env"`
-		EndsAt time.Time         `json:"ends_at"`
+		Name  string            `json:"name"`
+		Image string            `json:"image"`
+		Env   map[string]string `json:"env"`
 	} `json:"instances"`
 	Ending  *[]string `json:"ending"`
 	Image   string    `json:"image"`
@@ -186,8 +182,8 @@ func (l *Launcher) read(answer reconcileAnswer) (*desired, error) {
 	want := &desired{instances: map[string]instance{}, ending: map[string]bool{}, image: answer.Image}
 	for _, entry := range *answer.Instances {
 		name := l.prefix + entry.Name
-		if entry.Name == "" || entry.Image == "" || entry.EndsAt.IsZero() {
-			return nil, fmt.Errorf("desired instance %q has no name, no image or no ends_at", entry.Name)
+		if entry.Name == "" || entry.Image == "" {
+			return nil, fmt.Errorf("desired instance %q has no name or no image", entry.Name)
 		}
 		if err := provider.ValidateName(name); err != nil {
 			return nil, fmt.Errorf("desired state: %w", err)
@@ -203,7 +199,7 @@ func (l *Launcher) read(answer reconcileAnswer) (*desired, error) {
 				return nil, fmt.Errorf("desired instance %q sets %s, which this launcher adds from its own config", entry.Name, own)
 			}
 		}
-		want.instances[name] = instance{name: name, image: entry.Image, env: entry.Env, endsAt: entry.EndsAt}
+		want.instances[name] = instance{name: name, image: entry.Image, env: entry.Env}
 	}
 	if answer.Refusal != nil {
 		if answer.Refusal.Reason == "" || answer.Refusal.Message == "" {

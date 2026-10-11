@@ -83,17 +83,13 @@ func newControlPlane(t *testing.T) *controlPlane {
 }
 
 type entry struct {
-	Name   string            `json:"name"`
-	Image  string            `json:"image"`
-	Env    map[string]string `json:"env"`
-	EndsAt time.Time         `json:"ends_at"`
+	Name  string            `json:"name"`
+	Image string            `json:"image"`
+	Env   map[string]string `json:"env"`
 }
 
-// testEndsAt is the moment every instance of these tests must be gone by.
-var testEndsAt = time.Now().Add(36 * time.Hour).UTC().Truncate(time.Second)
-
 func agent(name string) entry {
-	return entry{Name: name, Image: "registry.example.invalid/agent:1", Env: map[string]string{"AGENT_ID": name, "HL_TOKEN": agentToken}, EndsAt: testEndsAt}
+	return entry{Name: name, Image: "registry.example.invalid/agent:1", Env: map[string]string{"AGENT_ID": name, "HL_TOKEN": agentToken}}
 }
 
 func (cp *controlPlane) want(instances []entry, ending []string) {
@@ -201,10 +197,6 @@ func TestAMissingInstanceIsCreatedFromTheListAndTheLaunchersOwnConfig(t *testing
 	h.names(full("a"), full("b"))
 
 	spec := h.rented.Spec(full("a"))
-	if left := time.Until(testEndsAt); spec.Lifetime > left || spec.Lifetime < left-time.Minute || spec.Lifetime%time.Second != 0 {
-		t.Fatalf("lifetime = %s, want the whole seconds left until ends_at, %s", spec.Lifetime, left)
-	}
-	spec.Lifetime = 0
 	want := provider.Spec{
 		Name:        full("a"),
 		Image:       "registry.example.invalid/agent:1",
@@ -219,36 +211,6 @@ func TestAMissingInstanceIsCreatedFromTheListAndTheLaunchersOwnConfig(t *testing
 	}
 	if h.rented.Calls("List") != 1 {
 		t.Errorf("List calls in one pass = %d, want 1", h.rented.Calls("List"))
-	}
-}
-
-// The lifetime is what ends a machine when this launcher is gone or cut off. It is the time left
-// until the moment the control plane names for that instance, and nothing of the launcher's own.
-func TestEachInstanceIsRentedWithTheTimeLeftUntilItsOwnEnd(t *testing.T) {
-	h := newHarness(t)
-	short, long := agent("a"), agent("b")
-	short.EndsAt, long.EndsAt = time.Now().Add(2*time.Hour), time.Now().Add(100*time.Hour)
-	h.cp.want([]entry{short, long}, nil)
-	h.mustPass()
-	for name, want := range map[string]time.Duration{"a": 2 * time.Hour, "b": 100 * time.Hour} {
-		if got := h.rented.Spec(full(name)).Lifetime; got > want || got < want-time.Minute || got%time.Second != 0 {
-			t.Errorf("%s is rented with a lifetime of %s, want whole seconds just under %s", name, got, want)
-		}
-	}
-}
-
-// A machine with no time left would be rented with no bound at all, so it is not rented.
-func TestAnInstanceWhoseEndHasPassedIsNotRentedAndTheRestOfThePassRuns(t *testing.T) {
-	h := newHarness(t)
-	late := agent("a")
-	late.EndsAt = time.Now().Add(-time.Minute)
-	h.cp.want([]entry{late, agent("b")}, nil)
-	if err := h.pass(); err == nil || !strings.Contains(err.Error(), "create "+full("a")+": its ends_at") {
-		t.Fatalf("pass = %v, want the create refused for its passed ends_at", err)
-	}
-	h.names(full("b"))
-	if h.rented.Calls("Create") != 1 {
-		t.Fatalf("creates = %d", h.rented.Calls("Create"))
 	}
 }
 
@@ -721,17 +683,15 @@ func TestAnAnswerThatIsNotACompleteListChangesNothing(t *testing.T) {
 		"an error with 200":       {http.StatusOK, `{"error":"something"}`},
 		"instances null":          {http.StatusOK, `{"instances":null,"ending":[]}`},
 		"no ending list":          {http.StatusOK, `{"instances":[]}`},
-		"truncated":               {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{},"ends_at":"2099-01-01T00:00:00Z"}`},
-		"instance without a name": {http.StatusOK, `{"instances":[{"image":"i","env":{},"ends_at":"2099-01-01T00:00:00Z"}],"ending":[]}`},
-		"instance without image":  {http.StatusOK, `{"instances":[{"name":"a","env":{},"ends_at":"2099-01-01T00:00:00Z"}],"ending":[]}`},
-		"name outside the rules":  {http.StatusOK, `{"instances":[{"name":"A_b","image":"i","env":{},"ends_at":"2099-01-01T00:00:00Z"}],"ending":[]}`},
-		"name too long":           {http.StatusOK, `{"instances":[{"name":"` + strings.Repeat("x", 120) + `","image":"i","env":{},"ends_at":"2099-01-01T00:00:00Z"}],"ending":[]}`},
-		"one name twice":          {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{},"ends_at":"2099-01-01T00:00:00Z"},{"name":"a","image":"i","env":{},"ends_at":"2099-01-01T00:00:00Z"}],"ending":[]}`},
-		"running and ending":      {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{},"ends_at":"2099-01-01T00:00:00Z"}],"ending":["a"]}`},
+		"truncated":               {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{}}`},
+		"instance without a name": {http.StatusOK, `{"instances":[{"image":"i","env":{}}],"ending":[]}`},
+		"instance without image":  {http.StatusOK, `{"instances":[{"name":"a","env":{}}],"ending":[]}`},
+		"name outside the rules":  {http.StatusOK, `{"instances":[{"name":"A_b","image":"i","env":{}}],"ending":[]}`},
+		"name too long":           {http.StatusOK, `{"instances":[{"name":"` + strings.Repeat("x", 120) + `","image":"i","env":{}}],"ending":[]}`},
+		"one name twice":          {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{}},{"name":"a","image":"i","env":{}}],"ending":[]}`},
+		"running and ending":      {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{}}],"ending":["a"]}`},
 		"ending without a name":   {http.StatusOK, `{"instances":[],"ending":[""]}`},
-		"sets the launcher's env": {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{"CLAUDE_CODE_OAUTH_TOKEN":"x"},"ends_at":"2099-01-01T00:00:00Z"}],"ending":[]}`},
-		"instance without an end": {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{}}],"ending":[]}`},
-		"an end that is no time":  {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{},"ends_at":"in three days"}],"ending":[]}`},
+		"sets the launcher's env": {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{"CLAUDE_CODE_OAUTH_TOKEN":"x"}}],"ending":[]}`},
 		"refusal without message": {http.StatusOK, `{"instances":[],"ending":[],"refusal":{"reason":"pass_does_not_fit"}}`},
 		"conflict":                {http.StatusConflict, `{"instances":[],"ending":[]}`},
 	} {

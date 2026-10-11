@@ -583,7 +583,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		MaxBodyBytes: maxRequestBytes,
 		Description: "The launcher sends what its provider lists, for an exited instance the end of its output, for a running one its progress marker, what its agent says it is doing (activity) and what its agent's harness last said of itself (harness_state: subagents, turn and the model provider's rate limit), and how it paces its passes. The answer is its complete desired state. " +
 			"instances: each {name, image, env, ends_at} should exist and be running: one per hosted agent, and one per platform experiment whose coordinator the platform runs. " +
-			"ends_at is the latest moment its platform experiment can still have a machine, wind-down included, and the launcher rents the instance so that it ends by itself then, reachable or not. It decides nothing about an instance already rented. " +
+			"ends_at is the latest moment its platform experiment can still have a machine, wind-down included, and the launcher does nothing with it: it stops an instance when its name is in ending. " +
 			"ending: names whose agent's run is over; each is told to stop and is otherwise left to finish, neither created nor replaced, and destroyed once its command has exited. " +
 			"image: the image an instance boots unless its platform experiment names its own, which a launcher with a warm pool warms while no instance is asked for. " +
 			"Any other instance of the launcher should not exist, and an answer asks for a bounded number of instances that do not exist yet: the rest follow in the next. " +

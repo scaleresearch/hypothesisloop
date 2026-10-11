@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"sort"
 	"testing"
-	"time"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/fake"
@@ -15,45 +14,16 @@ import (
 type core struct{ provider.Provider }
 
 // some is a provider that has the capabilities of its fields that are set.
-func some(p *fake.Provider, pauses, counts, warms, extends bool) provider.Provider {
+func some(p *fake.Provider, pauses, counts, warms bool) provider.Provider {
 	type (
 		P = provider.Pauser
 		M = provider.Market
 		W = provider.Warmer
-		E = provider.Extender
 	)
 	c := core{p}
 	switch {
-	case pauses && counts && warms && extends:
-		return p
 	case pauses && counts && warms:
-		return struct {
-			core
-			P
-			M
-			W
-		}{c, p, p, p}
-	case pauses && counts && extends:
-		return struct {
-			core
-			P
-			M
-			E
-		}{c, p, p, p}
-	case pauses && warms && extends:
-		return struct {
-			core
-			P
-			W
-			E
-		}{c, p, p, p}
-	case counts && warms && extends:
-		return struct {
-			core
-			M
-			W
-			E
-		}{c, p, p, p}
+		return p
 	case pauses && counts:
 		return struct {
 			core
@@ -66,29 +36,11 @@ func some(p *fake.Provider, pauses, counts, warms, extends bool) provider.Provid
 			P
 			W
 		}{c, p, p}
-	case pauses && extends:
-		return struct {
-			core
-			P
-			E
-		}{c, p, p}
 	case counts && warms:
 		return struct {
 			core
 			M
 			W
-		}{c, p, p}
-	case counts && extends:
-		return struct {
-			core
-			M
-			E
-		}{c, p, p}
-	case warms && extends:
-		return struct {
-			core
-			W
-			E
 		}{c, p, p}
 	case pauses:
 		return struct {
@@ -105,11 +57,6 @@ func some(p *fake.Provider, pauses, counts, warms, extends bool) provider.Provid
 			core
 			W
 		}{c, p}
-	case extends:
-		return struct {
-			core
-			E
-		}{c, p}
 	}
 	return c
 }
@@ -119,21 +66,19 @@ func TestACapabilityIsFoundOnTheProviderAndSurvivesTheBoundingWrapper(t *testing
 	for _, pauses := range []bool{false, true} {
 		for _, counts := range []bool{false, true} {
 			for _, warms := range []bool{false, true} {
-				for _, extends := range []bool{false, true} {
-					want := []string{}
-					for name, has := range map[string]bool{provider.CapabilityPause: pauses, provider.CapabilityMarket: counts, provider.CapabilityWarm: warms, provider.CapabilityExtend: extends} {
-						if has {
-							want = append(want, name)
-						}
+				want := []string{}
+				for name, has := range map[string]bool{provider.CapabilityPause: pauses, provider.CapabilityMarket: counts, provider.CapabilityWarm: warms} {
+					if has {
+						want = append(want, name)
 					}
-					sort.Strings(want)
-					one := some(pausing, pauses, counts, warms, extends)
-					for _, p := range []provider.Provider{one, provider.Bounded(one)} {
-						got := provider.Capabilities(p)
-						sort.Strings(got)
-						if !reflect.DeepEqual(got, want) {
-							t.Fatalf("Capabilities of %T = %v, want %v: the wrapper hid what it wraps or made up what it does not", p, got, want)
-						}
+				}
+				sort.Strings(want)
+				one := some(pausing, pauses, counts, warms)
+				for _, p := range []provider.Provider{one, provider.Bounded(one)} {
+					got := provider.Capabilities(p)
+					sort.Strings(got)
+					if !reflect.DeepEqual(got, want) {
+						t.Fatalf("Capabilities of %T = %v, want %v: the wrapper hid what it wraps or made up what it does not", p, got, want)
 					}
 				}
 			}
@@ -181,21 +126,5 @@ func TestACapabilityIsFoundOnTheProviderAndSurvivesTheBoundingWrapper(t *testing
 	}
 	if err := bounded.Resume(ctx, id); err == nil {
 		t.Fatal("Resume of an instance that is gone returned no error")
-	}
-}
-
-func TestExtendReachesTheProviderThroughTheBoundingWrapper(t *testing.T) {
-	p, ctx := fake.New(), context.Background()
-	id, err := p.Create(ctx, provider.Spec{Name: "hl-a", Lifetime: time.Hour})
-	if err != nil {
-		t.Fatal(err)
-	}
-	p.Start("hl-a")
-	until := time.Now().Add(2 * time.Hour)
-	if err := provider.Bounded(p).(provider.Extender).Extend(ctx, id, until); err != nil {
-		t.Fatal(err)
-	}
-	if got := p.EndsAt("hl-a"); !got.Equal(until) {
-		t.Fatalf("the instance ends at %s, want %s", got, until)
 	}
 }

@@ -123,9 +123,6 @@ func TestSupervisorPassesTheFirstSIGTERMOnAndLetsTheCommandFinish(t *testing.T) 
 func TestSupervisorKillsTheCommandAtTheEndOfTheLifetimeAndMarksTheEnd(t *testing.T) {
 	supervisetest.EachShell(t, func(t *testing.T, shell []string) {
 		dir := t.TempDir()
-		endsAt := filepath.Join(dir, "ends-at")
-		defer func(was string) { endsAtPath = was }(endsAtPath)
-		endsAtPath = endsAt
 		argv := supervised(time.Second, []string{"/bin/sh", "-c", `trap '' TERM; echo working; : > "$DIR/ready"; while :; do sleep 0.05 & wait $!; done`})
 		cmd := supervisetest.Command(shell, argv[1:]...)
 		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "TMPDIR=" + dir, "DIR=" + dir}
@@ -140,9 +137,6 @@ func TestSupervisorKillsTheCommandAtTheEndOfTheLifetimeAndMarksTheEnd(t *testing
 		wantLines(t, finish(t, cmd), "hl-out|working", "hl-ended")
 		if lived := time.Since(began); lived < time.Second || lived > 5*time.Second {
 			t.Errorf("the supervisor ended after %s, want its lifetime of one second", lived.Round(10*time.Millisecond))
-		}
-		if _, err := os.Stat(endsAt); err != nil {
-			t.Errorf("the supervisor kept no end where Extend moves it: %v", err)
 		}
 	})
 }

@@ -14,17 +14,8 @@ func Bounded(p Provider) Provider {
 	pauser, pauses := p.(Pauser)
 	market, counts := p.(Market)
 	warmer, warms := p.(Warmer)
-	extender, extends := p.(Extender)
-	b, bp, bm, bw, be := bounded{p}, boundedPauser{pauser}, boundedMarket{market}, boundedWarmer{warmer}, boundedExtender{extender}
+	b, bp, bm, bw := bounded{p}, boundedPauser{pauser}, boundedMarket{market}, boundedWarmer{warmer}
 	switch {
-	case pauses && counts && warms && extends:
-		return struct {
-			bounded
-			boundedPauser
-			boundedMarket
-			boundedWarmer
-			boundedExtender
-		}{b, bp, bm, bw, be}
 	case pauses && counts && warms:
 		return struct {
 			bounded
@@ -32,27 +23,6 @@ func Bounded(p Provider) Provider {
 			boundedMarket
 			boundedWarmer
 		}{b, bp, bm, bw}
-	case pauses && counts && extends:
-		return struct {
-			bounded
-			boundedPauser
-			boundedMarket
-			boundedExtender
-		}{b, bp, bm, be}
-	case pauses && warms && extends:
-		return struct {
-			bounded
-			boundedPauser
-			boundedWarmer
-			boundedExtender
-		}{b, bp, bw, be}
-	case counts && warms && extends:
-		return struct {
-			bounded
-			boundedMarket
-			boundedWarmer
-			boundedExtender
-		}{b, bm, bw, be}
 	case pauses && counts:
 		return struct {
 			bounded
@@ -65,30 +35,12 @@ func Bounded(p Provider) Provider {
 			boundedPauser
 			boundedWarmer
 		}{b, bp, bw}
-	case pauses && extends:
-		return struct {
-			bounded
-			boundedPauser
-			boundedExtender
-		}{b, bp, be}
 	case counts && warms:
 		return struct {
 			bounded
 			boundedMarket
 			boundedWarmer
 		}{b, bm, bw}
-	case counts && extends:
-		return struct {
-			bounded
-			boundedMarket
-			boundedExtender
-		}{b, bm, be}
-	case warms && extends:
-		return struct {
-			bounded
-			boundedWarmer
-			boundedExtender
-		}{b, bw, be}
 	case pauses:
 		return struct {
 			bounded
@@ -104,21 +56,8 @@ func Bounded(p Provider) Provider {
 			bounded
 			boundedWarmer
 		}{b, bw}
-	case extends:
-		return struct {
-			bounded
-			boundedExtender
-		}{b, be}
 	}
 	return b
-}
-
-type boundedExtender struct{ extender Extender }
-
-func (b boundedExtender) Extend(ctx context.Context, id string, until time.Time) error {
-	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
-	defer cancel()
-	return b.extender.Extend(ctx, id, until)
 }
 
 type boundedWarmer struct{ warmer Warmer }

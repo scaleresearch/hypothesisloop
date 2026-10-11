@@ -38,9 +38,6 @@ func Capabilities(p Provider) []string {
 	if _, ok := p.(Warmer); ok {
 		found = append(found, CapabilityWarm)
 	}
-	if _, ok := p.(Extender); ok {
-		found = append(found, CapabilityExtend)
-	}
 	return found
 }
 

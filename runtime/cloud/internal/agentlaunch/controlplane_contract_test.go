@@ -21,7 +21,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/fake"
 )
 
@@ -63,8 +62,6 @@ type contract struct {
 	rented     *fake.Provider
 	launcher   *Launcher
 	registered *registered
-	// cfg is what launcher was made with.
-	cfg Config
 }
 
 func newContract(t *testing.T, agents ...db.LauncherAgent) *contract {
@@ -97,28 +94,18 @@ func newContractUnder(t *testing.T, settings launcherapi.Settings, agents ...db.
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.cfg = Config{
+	launcher, err := New(Config{
 		Name: "main", APIURL: server.URL, Token: token,
 		Command: []string{"run-agent"}, Size: Size{CPUMillis: 1000, MemoryBytes: 1 << 30, DiskBytes: 1 << 30},
 		ModelProvider: "example", Env: map[string]string{"MODEL_CREDENTIAL": oauthToken},
 		Provider: c.rented, HTTPClient: server.Client(), Interval: time.Second,
 		Log: func(format string, args ...any) {},
-	}
-	c.relaunch(c.rented)
-	return c
-}
-
-// relaunch replaces the launcher with a process that starts afresh on p, which rents what
-// c.rented holds.
-func (c *contract) relaunch(p provider.Provider) {
-	c.t.Helper()
-	cfg := c.cfg
-	cfg.Provider = p
-	launcher, err := New(cfg)
+	})
 	if err != nil {
-		c.t.Fatal(err)
+		t.Fatal(err)
 	}
 	c.launcher = launcher
+	return c
 }
 
 func (c *contract) pass() {
@@ -147,11 +134,6 @@ func TestTheLaunchersPassAgainstTheControlPlanesOwnHandler(t *testing.T) {
 	wantEnv := map[string]string{"API_URL": "https://api.example.invalid", "HL_TOKEN": token, "MODEL_CREDENTIAL": oauthToken}
 	if spec.Image != "registry.example.invalid/agent:1" || !reflect.DeepEqual(spec.Env, wantEnv) || !reflect.DeepEqual(spec.Command, []string{"run-agent"}) {
 		t.Fatalf("spec = %+v\nwant env %v", spec, wantEnv)
-	}
-	// The machine ends by itself at the latest end the control plane knows for its platform
-	// experiment, whatever becomes of this launcher.
-	if left := time.Until(contractEndsBy); spec.Lifetime > left || spec.Lifetime < left-time.Minute || spec.Lifetime%time.Second != 0 {
-		t.Fatalf("rented with a lifetime of %s, want the whole seconds of the %s left to its platform experiment", spec.Lifetime, left)
 	}
 	if got := c.instance("ag-one").Name; "hl-agent-main-"+got != names[0] {
 		t.Fatalf("the control plane recorded the name %q for the instance rented as %q", got, names[0])
@@ -339,9 +321,6 @@ func TestAHostedCoordinatorIsRentedRestartedAndEndedThroughTheSamePass(t *testin
 	wantEnv := map[string]string{"API_URL": "https://api.example.invalid", "HL_TOKEN": token, "MODEL_CREDENTIAL": oauthToken}
 	if spec := c.rented.Spec(coordinator); !reflect.DeepEqual(spec.Env, wantEnv) || strings.Contains(spec.Name, token) {
 		t.Fatalf("coordinator's env = %v, want %v", spec.Env, wantEnv)
-	}
-	if got, left := c.rented.Spec(coordinator).Lifetime, time.Until(contractEndsBy.Add(time.Hour)); got > left || got < left-time.Minute {
-		t.Fatalf("the coordinator is rented with a lifetime of %s, want the %s left to its platform experiment", got, left)
 	}
 	c.rented.Start(agent)
 	agentIDs := c.rented.IDs(agent)
@@ -674,101 +653,6 @@ func TestARefusedLauncherEndsWhatItHoldsByTheControlPlanesListsAndRentsNothing(t
 	}
 }
 
-// A platform experiment's latest end moves when its owner changes its start or length, while it
-// is open or while it runs. The instance rented before is not replaced: its end is moved to the
-// new one, earlier or later, once, and again by a launcher process that starts afresh.
-func TestAMovedEndMovesTheEndOfTheInstanceRentedBefore(t *testing.T) {
-	c := newContract(t, hostedAgent("pe-1", "ag-one"))
-	c.pass()
-	first := c.rented.Names()[0]
-	c.rented.Start(first)
-	ids := c.rented.IDs(first)
-	c.pass()
-	if c.rented.Calls("Extend") != 0 {
-		t.Fatal("the end an instance was rented with was set again")
-	}
-
-	for _, endsBy := range []time.Time{contractEndsBy.Add(8 * time.Hour), contractEndsBy.Add(-2 * time.Hour)} {
-		c.store.ByLauncher["main"][0].EndsBy = endsBy
-		c.pass()
-		c.pass()
-		if !reflect.DeepEqual(c.rented.IDs(first), ids) || c.rented.Calls("Create") != 1 {
-			t.Fatal("a moved end replaced the instance rented before it")
-		}
-		if got := c.rented.EndsAt(first); !got.Equal(endsBy) {
-			t.Fatalf("the instance ends at %s, want the moved end %s", got, endsBy)
-		}
-	}
-	if got := c.rented.Calls("Extend"); got != 2 {
-		t.Fatalf("Extend was called %d times, want once for each move", got)
-	}
-
-	c.relaunch(c.rented)
-	c.pass()
-	c.pass()
-	if got := c.rented.Calls("Extend"); got != 3 {
-		t.Fatalf("Extend was called %d times in all, want once more by the new process, which knows no end", got)
-	}
-}
-
-// A move that fails leaves the instance running with the end it has, and is tried again after
-// extendRetry, not on every pass.
-func TestAMoveOfAnEndThatFailsIsTriedAgainLater(t *testing.T) {
-	c := newContract(t, hostedAgent("pe-1", "ag-one"))
-	c.pass()
-	first := c.rented.Names()[0]
-	c.rented.Start(first)
-	now := time.Now()
-	c.launcher.now = func() time.Time { return now }
-	c.rented.Fail = func(method, _ string) error {
-		if method == "Extend" {
-			return errors.New("the vendor's API is down")
-		}
-		return nil
-	}
-	moved := contractEndsBy.Add(8 * time.Hour)
-	c.store.ByLauncher["main"][0].EndsBy = moved
-	c.pass()
-	c.pass()
-	if got := c.rented.Calls("Extend"); got != 1 {
-		t.Fatalf("Extend was called %d times, want once until the retry is due", got)
-	}
-	c.rented.Fail = nil
-	now = now.Add(extendRetry)
-	c.pass()
-	if got := c.rented.EndsAt(first); !got.Equal(moved) || c.rented.Calls("Extend") != 2 {
-		t.Fatalf("the instance ends at %s after %d calls, want %s", got, c.rented.Calls("Extend"), moved)
-	}
-}
-
-// A provider that cannot move an end leaves the instance rented before with the end it was
-// rented with, and one rented after gets the new one.
-func TestALaterEndOnAProviderThatCannotMoveEndsBoundsTheNextInstanceRented(t *testing.T) {
-	c := newContract(t, hostedAgent("pe-1", "ag-one"))
-	c.relaunch(struct {
-		provider.Provider
-		provider.Warmer
-	}{c.rented, c.rented})
-	c.pass()
-	first := c.rented.Names()[0]
-	c.rented.Start(first)
-	ids, rentedWith := c.rented.IDs(first), c.rented.Spec(first).Lifetime
-
-	c.store.ByLauncher["main"][0].EndsBy = contractEndsBy.Add(100 * time.Hour)
-	c.pass()
-	if !reflect.DeepEqual(c.rented.IDs(first), ids) || c.rented.Spec(first).Lifetime != rentedWith || c.rented.Calls("Create") != 1 || c.rented.Calls("Extend") != 0 {
-		t.Fatal("a moved end replaced or changed the instance rented before it")
-	}
-
-	// It ends itself at the end it was rented with, which the control plane sees as an exit.
-	c.rented.Exit(first, "killed at its lifetime")
-	c.pass()
-	next := c.rented.Names()[0]
-	if left := time.Until(contractEndsBy.Add(100 * time.Hour)); next == first || c.rented.Spec(next).Lifetime > left || c.rented.Spec(next).Lifetime < left-time.Minute {
-		t.Fatalf("the next instance %q is rented with a lifetime of %s, want the %s now left", next, c.rented.Spec(next).Lifetime, left)
-	}
-}
-
 // A launcher is taken out of service by giving its agents to none: its token works while it is
 // registered, so its last passes end what it holds. Removing its row first would leave them.
 func TestARegisteredLauncherNoAgentIsGivenToDestroysWhatItHoldsAndAnUnregisteredOneCanDoNothing(t *testing.T) {
@@ -841,8 +725,7 @@ func TestAHungAgentIsReplacedByTheControlPlanesDecisionAndAWorkingOneIsKept(t *t
 
 // With the vendor's log down the launcher reads no marker and says so by leaving it out. The
 // control plane holds such a machine to the progress limit as well, so a hung agent does not run
-// on unseen, and counts no restart for it, so an outage however long stops no agent. Each
-// machine rented meanwhile ends by itself at its platform experiment's latest end.
+// on unseen, and counts no restart for it, so an outage however long stops no agent.
 func TestAnAgentWhoseOutputCannotBeReadIsReplacedAtTheProgressLimitAndNeverStopped(t *testing.T) {
 	c := newContract(t, hostedAgent("pe-1", "ag-one"))
 	c.pass()
@@ -873,9 +756,6 @@ func TestAnAgentWhoseOutputCannotBeReadIsReplacedAtTheProgressLimitAndNeverStopp
 			t.Fatalf("outage %d: rented %v (was %q), recorded %+v, want a new machine and no restart spent", outage, names, name, recorded)
 		}
 		name = names[0]
-		if left := time.Until(contractEndsBy); c.rented.Spec(name).Lifetime > left {
-			t.Fatalf("outage %d: the replacement is rented for %s, longer than the %s left to its platform experiment", outage, c.rented.Spec(name).Lifetime, left)
-		}
 		c.rented.Start(name)
 		c.pass()
 	}
