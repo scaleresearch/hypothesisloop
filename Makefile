@@ -472,7 +472,7 @@ agent-test:
 	cd agents/experimentator && uv run python -m unittest discover -s tests
 
 # The GitHub client's checks against github.com itself, as the App .env names
-# (controlplane/shared/github/github_live_test.go). Both the token checks and the push check use
+# (controlplane/shared/githost/github/live_test.go). Both the token checks and the push check use
 # the sandbox repository of HL_E2E_GITHUB_REPO; the push check and the first-commit check each
 # make a branch there and delete it. The App's key reaches the test in a file that exists only
 # for the run. The creation check runs with HYPOTHESISLOOP_GITHUB_LIVE_CREATE=1 and creates on
@@ -490,7 +490,7 @@ test-github-live:
 	  HYPOTHESISLOOP_GITHUB_LIVE_REPOSITORY="$$(lib_env_value HL_E2E_GITHUB_REPO)" \
 	  HYPOTHESISLOOP_GITHUB_LIVE_PUSH_REPOSITORY="$$(lib_env_value HL_E2E_GITHUB_REPO)" \
 	  HYPOTHESISLOOP_GITHUB_LIVE_CREATE_INSTALLATION="$$(lib_env_value HL_E2E_GITHUB_CREATE_INSTALLATION)" \
-	  go test ./controlplane/shared/github -run Live -count=1 -v -timeout 180s'
+	  go test ./controlplane/shared/githost/github -run Live -count=1 -v -timeout 180s'
 
 lint:
 	golangci-lint run ./...

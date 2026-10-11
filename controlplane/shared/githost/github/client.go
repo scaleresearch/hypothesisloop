@@ -293,8 +293,8 @@ func ValidRepository(fullName string) error {
 	return nil
 }
 
-// Host is the host git asks credentials for when it clones a repository.
-const Host = "github.com"
+// gitHost is the host git asks credentials for when it clones a repository.
+const gitHost = "github.com"
 
 // CloneURL is the HTTPS address git clones the repository from.
 func CloneURL(fullName string) string {
@@ -735,7 +735,8 @@ func (c *Client) mint(ctx context.Context, installationID int64, body map[string
 	// GitHub answers 422 both for a repository outside the installation and for a permission the
 	// installation has not granted, and only its message tells them apart.
 	case errors.Is(err, errUnprocessable) && errors.As(err, &refused) && strings.Contains(strings.ToLower(refused.message), "permission"):
-		return nil, ErrPermissionNotGranted
+		asked, _ := body["permissions"].(map[string]string)
+		return nil, c.permissionsMissing(ctx, installationID, asked)
 	case errors.Is(err, errUnprocessable):
 		return nil, ErrRepositoryNotInstalled
 	case errors.Is(err, errUnauthorized):
@@ -747,6 +748,47 @@ func (c *Client) mint(ctx context.Context, installationID int64, body map[string
 		return nil, fmt.Errorf("github: POST %s answered without a token or its expiry", routeOf(path))
 	}
 	return &out, nil
+}
+
+// PermissionMissingError names the permissions a token was asked with that the installation has
+// not granted, each as name:level.
+type PermissionMissingError struct {
+	Installation int64
+	Missing      []string
+}
+
+func (e *PermissionMissingError) Error() string {
+	return fmt.Sprintf("github: installation %d has not granted the App %s", e.Installation, strings.Join(e.Missing, ", "))
+}
+
+func (e *PermissionMissingError) Unwrap() error { return ErrPermissionNotGranted }
+
+var permissionLevels = map[string]int{"read": 1, "write": 2, "admin": 3}
+
+// permissionsMissing asks GitHub, as the App, which of asked an installation has not granted, after
+// GitHub refused a token for a permission without saying which. ErrPermissionNotGranted when it
+// cannot tell.
+func (c *Client) permissionsMissing(ctx context.Context, installationID int64, asked map[string]string) error {
+	jwt, err := c.appJWT()
+	if err != nil {
+		return ErrPermissionNotGranted
+	}
+	var out struct {
+		Permissions map[string]string `json:"permissions"`
+	}
+	if c.call(ctx, http.MethodGet, "/app/installations/"+strconv.FormatInt(installationID, 10), jwt, nil, &out) != nil {
+		return ErrPermissionNotGranted
+	}
+	missing := []string{}
+	for _, name := range slices.Sorted(maps.Keys(asked)) {
+		if permissionLevels[out.Permissions[name]] < permissionLevels[asked[name]] {
+			missing = append(missing, name+":"+asked[name])
+		}
+	}
+	if len(missing) == 0 {
+		return ErrPermissionNotGranted
+	}
+	return &PermissionMissingError{Installation: installationID, Missing: missing}
 }
 
 // File reads one file of a repository with a token minted for it, at ref, a branch name or a

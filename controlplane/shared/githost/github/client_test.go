@@ -377,7 +377,11 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			f.refuse(w, http.StatusNotFound, "Not Found")
 			return
 		}
-		body := map[string]any{"id": id, "suspended_at": nil, "account": f.accountOf(id), "repository_selection": "selected"}
+		body := map[string]any{"id": id, "suspended_at": nil, "account": f.accountOf(id), "repository_selection": "selected",
+			"permissions": map[string]string{"metadata": "read", "contents": "write"}}
+		if f.ungranted {
+			body["permissions"] = map[string]string{"metadata": "read", "contents": "read"}
+		}
 		if installation.all {
 			body["repository_selection"] = "all"
 		}
@@ -1536,8 +1540,10 @@ func TestTokenNamesTheRepositoryInGitHubsOwnCasing(t *testing.T) {
 	}
 	f.repos["acme/model"].fullName = "Acme/Model"
 	f.ungranted = true
-	if _, err := client.Token(ctx, 100, "acme/model", Write); !errors.Is(err, ErrPermissionNotGranted) {
-		t.Fatalf("a permission the installation has not granted: got = %v, want %v", err, ErrPermissionNotGranted)
+	_, err = client.Token(ctx, 100, "acme/model", Write)
+	var missing *PermissionMissingError
+	if !errors.Is(err, ErrPermissionNotGranted) || !errors.As(err, &missing) || !slices.Equal(missing.Missing, []string{"contents:write"}) || missing.Installation != 100 {
+		t.Fatalf("a permission the installation has not granted: got = %v, want it named as contents:write", err)
 	}
 }
 

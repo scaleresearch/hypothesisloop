@@ -13,7 +13,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/github"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost/github"
 )
 
 func settingsPath(t *testing.T) string {

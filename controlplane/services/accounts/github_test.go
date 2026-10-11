@@ -23,7 +23,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/github"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost/github"
 )
 
 // memInstallations is InstallationStore in memory over the world's orgs and projects.
@@ -322,7 +322,7 @@ type githubWorld struct {
 	experiments   experiments
 	app           *fakeApp
 	svc           *Repositories
-	host          *GitHubHost
+	host          *github.Host
 }
 
 // newGitHubWorld is the accounts world with the GitHub routes on it. Platform experiment pe-a,
@@ -335,7 +335,7 @@ func newGitHubWorld(t *testing.T, withApp bool) *githubWorld {
 	w.experiments = experiments{"pe-a": {w.projectA, "Acme/Model"}, "pe-bare": {w.projectA, ""}, "pe-b": {w.projectB, "Acme/Model"}, "pe-closed": {w.projectA, "Acme/Model", "closed"}, "pe-draft": {w.projectA, "Acme/Model", "draft"}}
 	access := auth.NewAccess(placement{memStore: w.store})
 	if withApp {
-		w.host = NewGitHubHost(w.installations, w.app, zap.NewNop())
+		w.host = github.NewHost(w.installations, w.app, zap.NewNop())
 		w.svc = NewRepositories(w.installations, w.experiments, w.app, w.host, access, zap.NewNop())
 	} else {
 		plain, err := githost.NewPlain("https://git.example.invalid", "", "")
@@ -559,12 +559,12 @@ func TestConnectRefusals(t *testing.T) {
 		"a collaborator on one repository":        {connectBody("code-guest", 0), nil, 422, ReasonAppNotInstalled, 1},
 		"a collaborator naming the installation":  {connectBody("code-guest", 100), nil, 422, ReasonInstallationNotControlled, 1},
 		"an installation that does not exist":     {connectBody("code-both", 999), nil, 422, ReasonInstallationNotReachable, 1},
-		"a code github does not take":             {connectBody("code-made-up", 100), nil, 422, ReasonCodeRejected, 1},
+		"a code github does not take":             {connectBody("code-made-up", 100), nil, 422, github.ReasonCodeRejected, 1},
 		"no code":                                 {connectBody("", 100), nil, 422, ReasonInvalidRequest, 0},
 		"no redirect":                             {map[string]any{"code": "code-acme", "redirect_uri": ""}, nil, 422, ReasonInvalidRequest, 0},
 		"a negative installation":                 {connectBody("code-acme", -1), nil, 422, ReasonInvalidRequest, 0},
-		"github rate limits":                      {connectBody("code-acme", 100), fmt.Errorf("%w (%s)", github.ErrRateLimited, leak), 503, ReasonUnavailable, 1},
-		"the app key expired":                     {connectBody("code-acme", 100), fmt.Errorf("%w (%s)", github.ErrAppCredentials, leak), 502, ReasonUnavailable, 1},
+		"github rate limits":                      {connectBody("code-acme", 100), fmt.Errorf("%w (%s)", github.ErrRateLimited, leak), 503, github.ReasonUnavailable, 1},
+		"the app key expired":                     {connectBody("code-acme", 100), fmt.Errorf("%w (%s)", github.ErrAppCredentials, leak), 502, github.ReasonUnavailable, 1},
 		"something else":                          {connectBody("code-acme", 100), errors.New("dial tcp: " + leak), 500, "", 1},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -683,17 +683,17 @@ func TestRepositoriesAreReadFromGitHubOnEveryCallAcrossTheOrgsInstallations(t *t
 	}
 	// Any other failure is a failure of the read: a short list would read as the whole of it.
 	w.app.listErr[200] = fmt.Errorf("%w (%s)", github.ErrRateLimited, leak)
-	if message := w.refused("member", "GET", path, nil, http.StatusServiceUnavailable, ReasonUnavailable); strings.Contains(message, leak) {
+	if message := w.refused("member", "GET", path, nil, http.StatusServiceUnavailable, github.ReasonUnavailable); strings.Contains(message, leak) {
 		t.Fatalf("the answer repeats the failure's text: %s", message)
 	}
 	// GitHub failing is told apart from the platform failing, and names the installation.
 	w.app.listErr[200] = &github.FailedError{Installation: 200, Status: 500, Err: errors.New(leak)}
-	message := w.refused("member", "GET", path, nil, http.StatusBadGateway, ReasonGitHubFailed)
+	message := w.refused("member", "GET", path, nil, http.StatusBadGateway, github.ReasonGitHubFailed)
 	if !strings.Contains(message, "GitHub") || !strings.Contains(message, "installation 200") || !strings.Contains(message, "answered 500") || strings.Contains(message, leak) {
 		t.Fatalf("GitHub failing: %s, want GitHub, the installation and its status named and nothing else", message)
 	}
 	w.app.listErr[200] = &github.FailedError{Installation: 200, Err: errors.New(leak)}
-	if message := w.refused("member", "GET", path, nil, http.StatusBadGateway, ReasonGitHubFailed); !strings.Contains(message, "did not answer") {
+	if message := w.refused("member", "GET", path, nil, http.StatusBadGateway, github.ReasonGitHubFailed); !strings.Contains(message, "did not answer") {
 		t.Fatalf("GitHub not answering: %s", message)
 	}
 	w.app.listErr[200] = errors.New("unexpected " + leak)
@@ -840,7 +840,7 @@ func TestNoGitCredentialForAnyoneElse(t *testing.T) {
 	}
 	// An agent of another org's experiment that names the same repository gets nothing through
 	// this org's installation: its own org connected none.
-	w.refused("agent-other-org", "POST", "/git-credentials", modelCredential, http.StatusConflict, ReasonInstallationNotConnected)
+	w.refused("agent-other-org", "POST", "/git-credentials", modelCredential, http.StatusConflict, github.ReasonInstallationNotConnected)
 	w.refused("agent-bare", "POST", "/git-credentials", modelCredential, http.StatusNotFound, ReasonNoRepository)
 	if len(w.app.mints) != 0 {
 		t.Fatalf("a token was minted for a refused caller: %+v", w.app.mints)
@@ -886,16 +886,16 @@ func TestACredentialIsRefusedOnceTheRepositoryCanNoLongerBeReached(t *testing.T)
 		status  int
 		reason  string
 	}{
-		"the org disconnected the installation":            {func(w *githubWorld) { w.installations.connected[w.orgA] = nil }, 409, ReasonInstallationNotConnected},
-		"the org connected only another account's":         {func(w *githubWorld) { w.installations.connected[w.orgA] = nil; w.connect(w.orgA, rival) }, 409, ReasonInstallationNotConnected},
-		"the repository was taken out of the installation": {func(w *githubWorld) { w.app.covers[100] = w.app.covers[100][:1] }, 409, ReasonRepositoryNotReachable},
-		"the app was removed on github":                    {func(w *githubWorld) { delete(w.app.covers, 100) }, 409, ReasonInstallationGone},
-		"the installation withholds the access":            {func(w *githubWorld) { w.app.tokenErr = github.ErrPermissionNotGranted }, 409, ReasonPermissionNotGranted},
-		"github rate limits":                               {func(w *githubWorld) { w.app.tokenErr = github.ErrRateLimited }, 503, ReasonUnavailable},
-		"the app key expired":                              {func(w *githubWorld) { w.app.tokenErr = fmt.Errorf("%w (%s)", github.ErrAppCredentials, leak) }, 502, ReasonUnavailable},
+		"the org disconnected the installation":            {func(w *githubWorld) { w.installations.connected[w.orgA] = nil }, 409, github.ReasonInstallationNotConnected},
+		"the org connected only another account's":         {func(w *githubWorld) { w.installations.connected[w.orgA] = nil; w.connect(w.orgA, rival) }, 409, github.ReasonInstallationNotConnected},
+		"the repository was taken out of the installation": {func(w *githubWorld) { w.app.covers[100] = w.app.covers[100][:1] }, 409, github.ReasonRepositoryNotReachable},
+		"the app was removed on github":                    {func(w *githubWorld) { delete(w.app.covers, 100) }, 409, github.ReasonInstallationGone},
+		"the installation withholds the access":            {func(w *githubWorld) { w.app.tokenErr = github.ErrPermissionNotGranted }, 409, github.ReasonPermissionMissing},
+		"github rate limits":                               {func(w *githubWorld) { w.app.tokenErr = github.ErrRateLimited }, 503, github.ReasonUnavailable},
+		"the app key expired":                              {func(w *githubWorld) { w.app.tokenErr = fmt.Errorf("%w (%s)", github.ErrAppCredentials, leak) }, 502, github.ReasonUnavailable},
 		"github fails": {func(w *githubWorld) {
 			w.app.tokenErr = &github.FailedError{Installation: 100, Status: 500, Err: errors.New(leak)}
-		}, 502, ReasonGitHubFailed},
+		}, 502, github.ReasonGitHubFailed},
 		"something else": {func(w *githubWorld) { w.app.tokenErr = errors.New("unexpected " + leak) }, 500, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -916,7 +916,7 @@ func TestACredentialIsRefusedOnceTheRepositoryCanNoLongerBeReached(t *testing.T)
 	}
 	// Connected again, the same agent is served again with no other step.
 	w := newGitHubWorld(t, true)
-	w.refused("agent", "POST", "/git-credentials", modelCredential, http.StatusConflict, ReasonInstallationNotConnected)
+	w.refused("agent", "POST", "/git-credentials", modelCredential, http.StatusConflict, github.ReasonInstallationNotConnected)
 	w.connect(w.orgA, acme)
 	w.ok("agent", "POST", "/git-credentials", modelCredential, http.StatusCreated, nil)
 }
@@ -935,11 +935,11 @@ func TestARepositoryIsReachableThroughTheInstallationsOfTheProjectsOrgAlone(t *t
 		status              int
 		reason              string
 	}{
-		"a repository of an account the org did not connect": {w.projectA, "rival/secret", 422, ReasonInstallationNotConnected},
-		"another org's installation, for this org's project": {w.projectB, "Acme/Model", 422, ReasonInstallationNotConnected},
-		"a repository the installation does not cover":       {w.projectA, "acme/unlisted", 422, ReasonRepositoryNotReachable},
-		"a name that is no repository":                       {w.projectA, "https://github.com/acme/model", 422, ReasonInvalidRepository},
-		"a path out of the api":                              {w.projectA, "acme/../../app", 422, ReasonInvalidRepository},
+		"a repository of an account the org did not connect": {w.projectA, "rival/secret", 422, github.ReasonInstallationNotConnected},
+		"another org's installation, for this org's project": {w.projectB, "Acme/Model", 422, github.ReasonInstallationNotConnected},
+		"a repository the installation does not cover":       {w.projectA, "acme/unlisted", 422, github.ReasonRepositoryNotReachable},
+		"a name that is no repository":                       {w.projectA, "https://github.com/acme/model", 422, github.ReasonInvalidRepository},
+		"a path out of the api":                              {w.projectA, "acme/../../app", 422, github.ReasonInvalidRepository},
 		"a project that does not exist":                      {"prj-missing", "acme/model", 404, ReasonNotFound},
 	} {
 		named, err := w.host.Reachable(ctx, tc.project, tc.repository)
@@ -951,7 +951,7 @@ func TestARepositoryIsReachableThroughTheInstallationsOfTheProjectsOrgAlone(t *t
 		t.Fatalf("a token was minted for a repository that is not reachable: %+v", w.app.mints)
 	}
 	delete(w.app.covers, 100)
-	if _, err := w.host.Reachable(ctx, w.projectA, "acme/model"); statusOf(err) != 422 || reasonOf(err) != ReasonInstallationGone {
+	if _, err := w.host.Reachable(ctx, w.projectA, "acme/model"); statusOf(err) != 422 || reasonOf(err) != github.ReasonInstallationGone {
 		t.Errorf("with the App removed on GitHub: %v, want 422 installation_gone", err)
 	}
 }
@@ -959,7 +959,7 @@ func TestARepositoryIsReachableThroughTheInstallationsOfTheProjectsOrgAlone(t *t
 func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 	ctx := context.Background()
 	w := newGitHubWorld(t, true)
-	if named, err := w.host.Create(ctx, w.projectA, "", "sweep-1a2b3c4d", "", firstFiles); named != "" || statusOf(err) != 422 || reasonOf(err) != ReasonGitHubNotConnected {
+	if named, err := w.host.Create(ctx, w.projectA, "", "sweep-1a2b3c4d", "", firstFiles); named != "" || statusOf(err) != 422 || reasonOf(err) != github.ReasonGitHubNotConnected {
 		t.Fatalf("for an org that connected no GitHub account: Create = %q, %v, want 422 github_not_connected", named, err)
 	}
 	w.connect(w.orgA, acme)
@@ -970,13 +970,13 @@ func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 	}
 	// With two accounts connected the request says which, and nothing is made on a guess.
 	w.connect(w.orgA, rival)
-	if named, err := w.host.Create(ctx, w.projectA, "", "ambiguous", "", firstFiles); named != "" || statusOf(err) != 422 || reasonOf(err) != ReasonRepositoryAccountRequired || !strings.Contains(err.Error(), "Acme, rival") {
+	if named, err := w.host.Create(ctx, w.projectA, "", "ambiguous", "", firstFiles); named != "" || statusOf(err) != 422 || reasonOf(err) != github.ReasonRepositoryAccountRequired || !strings.Contains(err.Error(), "Acme, rival") {
 		t.Fatalf("with two accounts and none named: Create = %q, %v, want 422 repository_account_required listing them", named, err)
 	}
 	if named, err := w.host.Create(ctx, w.projectA, "RIVAL", "on-rival", "", firstFiles); err != nil || len(w.app.created) != 2 || w.app.created[1] != "200 on-rival" {
 		t.Fatalf("naming the account: Create = %q, %v (created %v), want it made through that account's installation", named, err, w.app.created)
 	}
-	if named, err := w.host.Create(ctx, w.projectA, "elsewhere", "nowhere", "", firstFiles); named != "" || statusOf(err) != 422 || reasonOf(err) != ReasonInstallationNotConnected || len(w.app.created) != 2 {
+	if named, err := w.host.Create(ctx, w.projectA, "elsewhere", "nowhere", "", firstFiles); named != "" || statusOf(err) != 422 || reasonOf(err) != github.ReasonInstallationNotConnected || len(w.app.created) != 2 {
 		t.Fatalf("naming an account the org did not connect: Create = %q, %v, want 422 installation_not_connected", named, err)
 	}
 	for name, tc := range map[string]struct {
@@ -985,11 +985,11 @@ func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 		status    int
 		reason    string
 	}{
-		"the installation may not create": {w.projectA, &github.CreationNotPermittedError{Accepted: "administration=write; repository_creation=write"}, 422, ReasonRepositoryCreationNotPermitted},
-		"the name is taken":               {w.projectA, github.ErrRepositoryExists, 409, ReasonRepositoryExists},
-		"github rate limits":              {w.projectA, github.ErrRateLimited, 503, ReasonUnavailable},
-		"github refuses for its own":      {w.projectA, &github.CreationFailedError{Status: 422, Message: "Repository creation failed."}, 502, ReasonRepositoryNotCreated},
-		"the App was removed on GitHub":   {w.projectA, github.ErrInstallationGone, 422, ReasonInstallationGone},
+		"the installation may not create": {w.projectA, &github.CreationNotPermittedError{Accepted: "administration=write; repository_creation=write"}, 422, github.ReasonRepositoryCreationNotPermitted},
+		"the name is taken":               {w.projectA, github.ErrRepositoryExists, 409, github.ReasonRepositoryExists},
+		"github rate limits":              {w.projectA, github.ErrRateLimited, 503, github.ReasonUnavailable},
+		"github refuses for its own":      {w.projectA, &github.CreationFailedError{Status: 422, Message: "Repository creation failed."}, 502, github.ReasonRepositoryNotCreated},
+		"the App was removed on GitHub":   {w.projectA, github.ErrInstallationGone, 422, github.ReasonInstallationGone},
 		"a project that does not exist":   {"prj-missing", nil, 404, ReasonNotFound},
 	} {
 		w.app.createErr = tc.createErr
@@ -1009,7 +1009,7 @@ func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 	// The repository GitHub made stays there, so the refusal names it and what to do with it.
 	w.app.createErr = &github.FirstCommitError{Repository: "Acme/another", Cause: errors.New("github: POST /repos/Acme/another/git/trees answered 409")}
 	_, err = w.host.Create(ctx, w.projectA, "acme", "another", "", firstFiles)
-	if statusOf(err) != 502 || reasonOf(err) != ReasonRepositoryNotCreated || !strings.Contains(err.Error(), "Acme/another") || !strings.Contains(err.Error(), "name it in repository") || strings.Contains(err.Error(), "409") {
+	if statusOf(err) != 502 || reasonOf(err) != github.ReasonRepositoryNotCreated || !strings.Contains(err.Error(), "Acme/another") || !strings.Contains(err.Error(), "name it in repository") || strings.Contains(err.Error(), "409") {
 		t.Errorf("a first commit GitHub refused: Create = %v, want 502 repository_not_created naming the repository left behind and nothing GitHub said", err)
 	}
 
@@ -1023,7 +1023,7 @@ func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 		t.Errorf("a repository made before from the template: Create = %q, %v, want Acme/Model taken as it is", named, err)
 	}
 	w.app.file = "name: their own\n"
-	if named, err := w.host.Create(ctx, w.projectA, "acme", "model", "", template); named != "" || statusOf(err) != 409 || reasonOf(err) != ReasonRepositoryExists {
+	if named, err := w.host.Create(ctx, w.projectA, "acme", "model", "", template); named != "" || statusOf(err) != 409 || reasonOf(err) != github.ReasonRepositoryExists {
 		t.Errorf("a repository of the name with another experiment file: Create = %q, %v, want 409 repository_exists", named, err)
 	}
 	w.app.fileErr = github.ErrFileNotFound
@@ -1157,7 +1157,7 @@ func TestDisconnectingAPersonalAccountEndsTheAuthorisationKeptForItAtGitHub(t *t
 	// GitHub rate limiting the renewal is no reason to drop a live authorisation.
 	w = connected()
 	w.app.refreshErr = github.ErrRateLimited
-	w.refused("owner", "DELETE", path(w), nil, http.StatusServiceUnavailable, ReasonUnavailable)
+	w.refused("owner", "DELETE", path(w), nil, http.StatusServiceUnavailable, github.ReasonUnavailable)
 	if len(w.installations.connected[w.orgA]) != 1 {
 		t.Fatal("a disconnect GitHub rate limited dropped the installation")
 	}
@@ -1175,31 +1175,31 @@ func TestACreateOnAPersonalAccountThatGitHubRefusesSaysWhatItsOwnerDoes(t *testi
 		says    []string
 	}{
 		"connected before the authorisation was kept": {func(w *githubWorld) { w.connect(w.orgA, carol) },
-			422, ReasonRepositoryAuthorizationRequired, []string{"connects the account again", "names it in repository"}},
+			422, github.ReasonRepositoryAuthorizationRequired, []string{"connects the account again", "names it in repository"}},
 		"an authorisation sealed under a secret since replaced": {func(w *githubWorld) {
 			w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
 			w.installations.unreadable = true
-		}, 422, ReasonRepositoryAuthorizationRequired, []string{"connects the account again"}},
+		}, 422, github.ReasonRepositoryAuthorizationRequired, []string{"connects the account again"}},
 		"github makes it on another account or public": {func(w *githubWorld) {
 			w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
 			w.app.createErr = &github.NotAsAskedError{Repository: "dave/sweep"}
-		}, 502, ReasonRepositoryNotCreated, []string{"dave/sweep", "names it in repository"}},
+		}, 502, github.ReasonRepositoryNotCreated, []string{"dave/sweep", "names it in repository"}},
 		"an authorisation that ran out or was revoked": {func(w *githubWorld) {
 			w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
 			w.app.refreshErr = github.ErrUserAuthorization
-		}, 422, ReasonRepositoryAuthorizationRequired, []string{"connects the account again", "names it in repository"}},
+		}, 422, github.ReasonRepositoryAuthorizationRequired, []string{"connects the account again", "names it in repository"}},
 		"github refuses the person the creation": {func(w *githubWorld) {
 			w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
 			w.app.createErr = &github.CreationNotPermittedError{Accepted: "administration=write; repository_creation=write"}
-		}, 422, ReasonRepositoryCreationNotPermitted, []string{"administration=write; repository_creation=write", "names it in repository"}},
+		}, 422, github.ReasonRepositoryCreationNotPermitted, []string{"administration=write; repository_creation=write", "names it in repository"}},
 		"github does not add it to the installation": {func(w *githubWorld) {
 			w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
 			w.app.createErr = &github.NotCoveredError{Repository: "carol/sweep", Cause: errors.New("github: PUT /user/installations/300/repositories/7 answered 403: " + leak)}
-		}, 502, ReasonRepositoryNotAdded, []string{"carol/sweep", "Add it to the installation", "name it in repository"}},
+		}, 502, github.ReasonRepositoryNotAdded, []string{"carol/sweep", "Add it to the installation", "name it in repository"}},
 		"github rate limits the renewal": {func(w *githubWorld) {
 			w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
 			w.app.refreshErr = github.ErrRateLimited
-		}, 503, ReasonUnavailable, nil},
+		}, 503, github.ReasonUnavailable, nil},
 	} {
 		w := newGitHubWorld(t, true)
 		tc.arrange(w)
@@ -1237,7 +1237,7 @@ func TestAnInstallationConnectedBeforeItsAccountTypeWasKeptIsReadAsStored(t *tes
 	if len(listed) != 1 || listed[0].AccountType != "" || len(w.app.looked) != 0 {
 		t.Fatalf("listed = %+v after asking GitHub about %v, want it as stored and GitHub not asked", listed, w.app.looked)
 	}
-	if _, err := w.host.Create(ctx, w.projectA, "", "sweep", "", firstFiles); reasonOf(err) != ReasonRepositoryAuthorizationRequired || len(w.app.created) != 0 {
+	if _, err := w.host.Create(ctx, w.projectA, "", "sweep", "", firstFiles); reasonOf(err) != github.ReasonRepositoryAuthorizationRequired || len(w.app.created) != 0 {
 		t.Fatalf("Create on an untyped personal account: %v (created %v), want repository_authorization_required", err, w.app.created)
 	}
 	// A connect that names nothing adds no account the org connected, so it is disconnected first.
@@ -1273,10 +1273,10 @@ func TestTheExperimentFileIsReadFromTheRepositoryNamed(t *testing.T) {
 		status int
 		reason string
 	}{
-		"no such file":        {github.ErrFileNotFound, 422, ReasonNoExperimentFile},
-		"a directory":         {github.ErrNotAFile, 422, ReasonNoExperimentFile},
-		"too large":           {github.ErrFileTooLarge, 422, ReasonNoExperimentFile},
-		"github rate limits":  {github.ErrRateLimited, 503, ReasonUnavailable},
+		"no such file":        {github.ErrFileNotFound, 422, github.ReasonNoExperimentFile},
+		"a directory":         {github.ErrNotAFile, 422, github.ReasonNoExperimentFile},
+		"too large":           {github.ErrFileTooLarge, 422, github.ReasonNoExperimentFile},
+		"github rate limits":  {github.ErrRateLimited, 503, github.ReasonUnavailable},
 		"something unplanned": {errors.New("unexpected " + leak), 500, ""},
 	} {
 		w.app.fileErr = tc.err
@@ -1287,7 +1287,7 @@ func TestTheExperimentFileIsReadFromTheRepositoryNamed(t *testing.T) {
 	}
 	w.app.fileErr = nil
 	read := len(w.app.files)
-	if _, err := w.host.File(ctx, w.projectA, "rival/secret", domain.ExperimentFile); reasonOf(err) != ReasonInstallationNotConnected || len(w.app.files) != read {
+	if _, err := w.host.File(ctx, w.projectA, "rival/secret", domain.ExperimentFile); reasonOf(err) != github.ReasonInstallationNotConnected || len(w.app.files) != read {
 		t.Errorf("a repository the org does not reach: %v, read %d files, want installation_not_connected and none read", err, len(w.app.files)-read)
 	}
 }

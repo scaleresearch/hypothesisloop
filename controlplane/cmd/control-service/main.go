@@ -31,7 +31,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/github"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost/github"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/imagedigest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/leaderelection"
@@ -154,7 +154,7 @@ func main() {
 		if err != nil {
 			logger.Fatal("control-service: configure the GitHub App", zap.Error(err))
 		}
-		githubApp, gitHost = client, accounts.NewGitHubHost(accountsStore, client, logger)
+		githubApp, gitHost = client, github.NewHost(accountsStore, client, logger)
 	case hypothesisloopcfg.GitProviderPlain:
 		gitHost, err = githost.NewPlain(pcfg.Git.BaseURL, pcfg.Git.Username, pcfg.Git.Password)
 		if err != nil {
