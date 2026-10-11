@@ -351,18 +351,26 @@ class ContextOverflowTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run._load_handoff(setup), "where things stand")
 
     # A rotation ends the CLI and every subagent at work with it, whose ideas the lead then
-    # started again. Past the rotation point it waits for them, up to the hard limit.
-    async def test_a_rotation_waits_for_live_subagents_until_the_hard_limit(self):
+    # started again. Past the rotation point it waits for them, up to the ceiling, and the next
+    # session is told which stopped.
+    async def test_a_rotation_waits_for_live_subagents_until_the_ceiling(self):
         def result(text):
             return ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
                                  session_id="s-1", result=text, model_usage={"m-1": {"contextWindow": 1_000_000}})
 
         def turn(tokens):
-            return [SystemMessage("background_tasks_changed", {"tasks": [{"task_id": "sub-1"}]}),
+            return [SystemMessage("background_tasks_changed", {"tasks": [
+                        {"task_id": "sub-1", "task_type": "local_agent", "description": "lr warmup on hyp-1"},
+                        {"task_id": "sub-2", "task_type": "local_agent", "description": "fp16 on hyp-2"},
+                        {"task_id": "b-1", "task_type": "local_bash", "description": "make"}]}),
                     AssistantMessage(content=[TextBlock(text="worked")], model="m", usage={"input_tokens": tokens}),
                     result("worked")]
 
-        turns = [turn(500_000), turn(950_000), [UserMessage(content=run._COMPACTION_PROMPT), result("where things stand")]]
+        # sub-2 completes during the handoff's turn and is not started again.
+        turns = [turn(450_000), turn(run._CONTEXT_CEILING_TOKENS),
+                 [SystemMessage("background_tasks_changed", {"tasks": [
+                     {"task_id": "sub-1", "task_type": "local_agent", "description": "lr warmup on hyp-1"}]}),
+                  UserMessage(content=run._COMPACTION_PROMPT), result("where things stand")]]
 
         class RotatingClient(StoppableClient):
             async def receive_response(self):
@@ -376,19 +384,23 @@ class ContextOverflowTest(unittest.IsolatedAsyncioTestCase):
                 mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=[])), \
                 contextlib.redirect_stdout(io.StringIO()), self.assertLogs("llm_agent") as logged:
             self.assertEqual(await asyncio.wait_for(run._run_one_session(setup, "m", None, [False]), timeout=5), True)
-        self.assertIn("rotation deferred: 1 subagents live", "\n".join(logged.output))
+        self.assertIn("rotation deferred: 3 subagents live", "\n".join(logged.output))
         self.assertEqual(HangingClient.instances[-1].queries[1:], ["Platform updates:\ncomment.new hyp-1 human" + S, run._COMPACTION_PROMPT])
-        self.assertEqual(run._load_handoff(setup), "where things stand")
+        self.assertEqual(run._load_handoff(setup), "where things stand\n\n" + run._STOPPED_SUBAGENTS.format(
+            tasks="- lr warmup on hyp-1"))
+        self.assertIn("Start each again with Agent", run._restart_state(setup)[1])
 
     def test_the_rotation_point_follows_a_smaller_context_window(self):
         def result(model_usage):
             return ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
                                  session_id="s-1", model_usage=model_usage)
 
-        ceiling = run._CONTEXT_COMPACTION_THRESHOLD_TOKENS
-        self.assertEqual(run._rotation_limits(result(None), "claude-x"), (ceiling, ceiling))
+        threshold, ceiling = run._CONTEXT_COMPACTION_THRESHOLD_TOKENS, run._CONTEXT_CEILING_TOKENS
+        self.assertEqual(run._rotation_limits(result(None), "claude-x"), (threshold, ceiling))
         self.assertEqual(run._rotation_limits(result({"claude-x-2026": {"contextWindow": 1_000_000},
-                                                      "claude-h": {"contextWindow": 200_000}}), "claude-x"), (ceiling, 900_000))
+                                                      "claude-h": {"contextWindow": 200_000}}), "claude-x"), (threshold, ceiling))
+        with mock.patch.object(run, "_CONTEXT_CEILING_TOKENS", 300_000):
+            self.assertEqual(run._rotation_limits(result({"claude-x": {"contextWindow": 1_000_000}}), "claude-x"), (300_000, 300_000))
         self.assertEqual(run._rotation_limits(result({"claude-x-2026": {"contextWindow": 200_000}}), "claude-x"), (150_000, 180_000))
 
 

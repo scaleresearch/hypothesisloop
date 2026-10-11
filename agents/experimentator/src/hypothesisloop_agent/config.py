@@ -13,6 +13,18 @@ def required(name: str, what: str = "") -> str:
     return value
 
 
+def tuning(name: str, default: int | float) -> int | float:
+    """A limit the harness runs with: the environment's value of name when it sets one, else
+    default, and of default's type."""
+    value = os.environ.get(name)
+    if not value:
+        return default
+    try:
+        return type(default)(value)
+    except ValueError:
+        raise SystemExit(f"agent: {name} must be a {type(default).__name__}, not {value!r}") from None
+
+
 # What a platform experiment's coordinator runs as. It is no flavor of an agent: a coordinator is
 # not in the experiment, and HL_TOKEN is the platform experiment's coordinator token.
 COORDINATOR_FLAVOR = "coordinator"

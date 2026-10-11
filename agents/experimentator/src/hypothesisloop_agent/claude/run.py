@@ -321,10 +321,18 @@ _CONTEXT_WINDOW_SHARE = 0.75
 # A transcript this large rotates too, so that the session still fits what the platform stores.
 _TRANSCRIPT_ROTATION_BYTES = session.MAX_BYTES * 3 // 4
 # A rotation ends the CLI and with it every subagent at work, which a lead then starts again. While
-# one is live the session goes on past the points above, up to this part of the window or of what
-# the platform stores.
+# one is live the session goes on past the points above, up to the ceiling or this part of the
+# window, or of what the platform stores.
 _HARD_SHARE = 0.9
 _TRANSCRIPT_HARD_BYTES = int(session.MAX_BYTES * _HARD_SHARE)
+# Every model call reads the session's whole context again. Researchers whose subagents were live
+# at nearly every turn end carried 0.7-0.85M tokens into each call, about 50M cache-read tokens an
+# hour each, and spent the account's five-hour allowance in three.
+_CONTEXT_CEILING_TOKENS = config.tuning("HL_CONTEXT_CEILING_TOKENS", 500_000)
+# Ends the handoff of a session rotated with subagents at work.
+_STOPPED_SUBAGENTS = (
+    "These subagents were at work when that session ended and stopped with it before they completed:\n"
+    "{tasks}\nStart each again with Agent from where its hypothesis, branch and jobs stand: its jobs ran on.")
 _COMPACTION_PROMPT = (
     "We must rotate to a fresh session because this session has reached its context budget. "
     "Produce a concise but complete handoff for the next instance of yourself: current platform "
@@ -791,15 +799,23 @@ def context_overflowed(message: ResultMessage) -> bool:
 
 
 def _rotation_limits(message: ResultMessage, model: str) -> tuple[int, int]:
-    """The context at which the session rotates with no subagent live, the fixed ceiling or less
+    """The context at which the session rotates with no subagent live, the fixed threshold or less
     for a model whose window, as the CLI reports it in the turn's result, is smaller, and the
-    context at which it rotates whatever is live. Without a window reported the two are one."""
+    context at which it rotates whatever is live, the ceiling or less for such a window."""
     windows = {name: int(usage.get("contextWindow") or 0) for name, usage in (message.model_usage or {}).items()
                if isinstance(usage, dict)}
     window = next((w for name, w in windows.items() if name.startswith(model) and w), max(windows.values(), default=0))
-    if not window:
-        return _CONTEXT_COMPACTION_THRESHOLD_TOKENS, _CONTEXT_COMPACTION_THRESHOLD_TOKENS
-    return min(_CONTEXT_COMPACTION_THRESHOLD_TOKENS, int(window * _CONTEXT_WINDOW_SHARE)), int(window * _HARD_SHARE)
+    soft, hard = _CONTEXT_COMPACTION_THRESHOLD_TOKENS, _CONTEXT_CEILING_TOKENS
+    if window:
+        soft, hard = min(soft, int(window * _CONTEXT_WINDOW_SHARE)), min(hard, int(window * _HARD_SHARE))
+    return min(soft, hard), hard
+
+
+def _stopped_subagents(background: dict[str, dict]) -> str:
+    """What the next session is told of the subagents a rotation stops, "" for none."""
+    tasks = [f"- {task.get('description') or 'a subagent'}" for task in background.values()
+             if _is_subagent(task)]
+    return "\n\n" + _STOPPED_SUBAGENTS.format(tasks="\n".join(tasks)) if tasks else ""
 
 
 def _transcript_bytes(session_id: str | None) -> int:
@@ -932,7 +948,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
 
     opening = await _with_situation(setup, watch_env, await asyncio.to_thread(_opening, setup, resume_id, initial_prompt))
     connecting = time.monotonic()
-    background: set[str] = set()
+    background: dict[str, dict] = {}
     told_nothing = False
     _progress.subagents(0)
     async with ClaudeSDKClient(options=options) as client:
@@ -1015,7 +1031,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 log.info("context reached ~%d tokens, transcript %d bytes: creating handoff before fresh session",
                          context_tokens, transcript_bytes)
                 await client.query(_COMPACTION_PROMPT)
-                handoff_result = await _answer(client, setup, _COMPACTION_PROMPT)
+                handoff_result = await _answer(client, setup, _COMPACTION_PROMPT, background)
                 if not handoff_result or handoff_result.is_error:
                     log.warning("context handoff failed — preserving old session for retry")
                     return False
@@ -1023,7 +1039,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 if not handoff:
                     log.warning("context handoff was empty — preserving old session for retry")
                     return False
-                await _rotate(setup, handoff, resume_id)
+                await _rotate(setup, handoff + _stopped_subagents(background), resume_id)
                 return True
 
             # The agent ended its turn. With no job of its own queued or running and no subagent
@@ -1098,7 +1114,7 @@ async def _next_told(setup: core.RunSetup, watch_env: dict[str, str], ended, idl
             updates.delivered(taken)
 
 
-async def _answer(client, setup: core.RunSetup, prompt: str) -> ResultMessage | None:
+async def _answer(client, setup: core.RunSetup, prompt: str, background: dict[str, dict]) -> ResultMessage | None:
     """The result of the turn that took up prompt, None for a stream that ended first. A subagent
     that ends as prompt is sent starts a turn of its own that can come first: it is read and passed."""
     while True:
@@ -1106,6 +1122,7 @@ async def _answer(client, setup: core.RunSetup, prompt: str) -> ResultMessage | 
         result = None
         async for message in _receive_turn(client):
             _log_message(message, setup.cfg.agent_id)
+            _note_background(message, background)
             took = took or (isinstance(message, UserMessage) and message.content == prompt)
             if isinstance(message, ResultMessage):
                 result = message
@@ -1113,16 +1130,22 @@ async def _answer(client, setup: core.RunSetup, prompt: str) -> ResultMessage | 
             return result
 
 
-def _note_background(message, background: set[str]) -> None:
-    """Keeps background to the tasks the CLI says run in the background: subagents, and a command
-    the CLI backgrounded by itself."""
+def _note_background(message, background: dict[str, dict]) -> None:
+    """Keeps background to the tasks the CLI says run in the background, by id: subagents, and a
+    command the CLI backgrounded by itself."""
     if isinstance(message, SystemMessage) and message.subtype == "background_tasks_changed":
         background.clear()
-        background.update(task["task_id"] for task in message.data.get("tasks", []))
+        background.update((task["task_id"], task) for task in message.data.get("tasks", []))
         _progress.subagents(len(background))
 
 
-async def _own_turn(client, setup: core.RunSetup, background: set[str]) -> None:
+def _is_subagent(task: dict) -> bool:
+    """Whether a background task the CLI lists is a subagent. The CLI names a subagent's type
+    local_agent and a command's local_bash."""
+    return task.get("task_type", "local_agent").endswith("agent")
+
+
+async def _own_turn(client, setup: core.RunSetup, background: dict[str, dict]) -> None:
     """Returns once the CLI starts a turn by itself, or its stream ends. It starts one when a
     background task ends, and on a resume it answers the opening with a turn of its own, without
     a model call, for the subagents that stopped with the last process before the opening's turn.
