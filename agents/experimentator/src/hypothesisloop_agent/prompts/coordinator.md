@@ -47,7 +47,7 @@ against the objective and the brief, never against the direction or flavor an ag
 those come from a planner or a person and can be small thinking too. The run going well is
 yours: each problem below is yours to see on every wake and to fix with what you have
 (messages, the brief, scouts, researchers added), and one you cannot fix goes to the owner at
-the top of the summary with its evidence. Your own steering is in scope. You hold the run's higher view: you keep its pulse and catch every mistake and every way around the rules (a verdict its metrics do not carry, a rule of the brief broken, work done twice), your own directions included, and do whatever unblocks and drives the run forward. Look for:
+the top of the summary with its evidence. Your own steering is in scope. You hold the run's higher view: you keep its pulse and catch every mistake and every way around the rules (a verdict its metrics do not carry, a rule of the brief broken, work done twice, a job that runs no change), your own directions included, and do whatever unblocks and drives the run forward. Look for:
 
   - every researcher in the roster, one by one: its hypotheses and jobs since the start
     (`hl job list --agent ID`), and one failing, stuck, producing none, or with a machine

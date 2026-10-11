@@ -108,6 +108,7 @@ type Triggerable interface {
 // never creates hypotheses, only validates the reference.
 type HypothesisStore interface {
 	GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error)
+	Links(ctx context.Context, id string) (domain.HypothesisLinks, error)
 }
 
 // CodeHost is the deployment's git host as admission asks it (githost.Provider): whether an

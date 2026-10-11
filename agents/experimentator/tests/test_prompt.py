@@ -19,12 +19,13 @@ class GitIdentityTest(unittest.TestCase):
 class ResearcherPromptTest(unittest.TestCase):
     # A researcher gated every job on a green local suite and an offline check, and submitted one
     # job in an hour with most of its capacity free.
-    def test_the_job_is_the_measurement_and_local_checks_gate_nothing(self):
+    def test_jobs_are_the_only_evidence_and_a_local_build_is_the_only_check(self):
         cfg = SimpleNamespace(agent_id="ag-1", flavor="generalist", role="researcher", platform_experiment_id="pe-1",
                               hyperparameters={})
         prompt = " ".join(core.system_prompt(cfg, "rules", "commands", "https://git/x", "/app/workspace").split())
-        self.assertIn("A local build or test run is a quick sanity check before it, never a gate", prompt)
-        self.assertIn("noted in the summary and the job submitted", prompt)
+        self.assertIn("no offline estimate, local measurement, audit or test suite stands in for one", prompt)
+        self.assertIn("a local build that runs is the only check before submitting", prompt)
+        self.assertIn("A subagent submits as soon as its code builds", prompt)
         self.assertIn("its own jobs (`hl job submit`", prompt)
         self.assertIn("goes to every subagent it concerns", prompt)
         self.assertIn("keep several independent jobs in flight", prompt)

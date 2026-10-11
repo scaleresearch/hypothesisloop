@@ -346,6 +346,9 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		if err := s.bindHypothesis(ctx, exp); err != nil {
 			return err
 		}
+		if err := s.refuseRepeats(ctx, pe, exp); err != nil {
+			return err
+		}
 	}
 
 	// 4. What the job holds of its agent's quota until it ends.

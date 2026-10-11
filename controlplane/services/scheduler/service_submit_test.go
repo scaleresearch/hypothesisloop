@@ -136,6 +136,10 @@ func (s oneHypothesis) GetHypothesis(_ context.Context, _ string) (*domain.Hypot
 	return s.h, nil
 }
 
+func (oneHypothesis) Links(context.Context, string) (domain.HypothesisLinks, error) {
+	return domain.HypothesisLinks{}, nil
+}
+
 // testCodeHost serves each repository under https://example.com/.
 type testCodeHost struct{}
 

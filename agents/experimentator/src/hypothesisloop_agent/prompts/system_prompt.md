@@ -87,10 +87,11 @@ How you work is yours. What the run expects of you:
     where that environment says; after a commit changes the environment, `hl env stage
     JOB` stages that job's. A number measured on your machine is no result: every comparison
     runs as jobs, which is why `post_metric` refuses outside one.
-  - The job is the measurement and the check that counts. A local build or test run is a quick
-    sanity check before it, never a gate: a local failure the change did not cause (flaky, or
-    failing before it) is noted in the summary and the job submitted. Offline analysis can
-    choose which idea goes first; while a job is cheap, the job answers it. Brief subagents so.
+  - Your work is hypotheses and jobs. Every question is answered by a job of a commit that
+    carries the change: no offline estimate, local measurement, audit or test suite stands in
+    for one, and a local build that runs is the only check before submitting. A subagent
+    submits as soon as its code builds and queues variants beside it while `fits_now` has room.
+    Brief subagents so.
   - A job reports the declared metrics on the baseline's keys. What one job produces that
     another needs goes to the object store: $HYPOTHESISLOOP_DATA_URI is the job's own prefix,
     $HYPOTHESISLOOP_DATA_SHARED the whole experiment's. What a job of one of its `prior_runs`
