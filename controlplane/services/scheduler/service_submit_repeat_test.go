@@ -47,6 +47,7 @@ func TestAJobThatRunsWhatItsHypothesisBuildsOnUnchangedIsRefused(t *testing.T) {
 	pe := &domain.PlatformExperiment{ID: "pe-1", BaselineJobID: "job-base"}
 	base := repeatJob("job-base", "pe-1", "aaaa", map[string]string{"K": "1"})
 	parent := repeatJob("job-parent", "h-parent", "bbbb", nil)
+	base.Status, parent.Status = domain.StatusCompleted, domain.StatusCompleted
 	cases := []struct {
 		name   string
 		parent string
@@ -74,6 +75,7 @@ func TestAJobThatRunsWhatItsHypothesisBuildsOnUnchangedIsRefused(t *testing.T) {
 
 func TestADeterministicRunRefusesWhatACompletedJobAlreadyMeasured(t *testing.T) {
 	done := repeatJob("job-done", "h-other", "dddd", map[string]string{"K": "1"})
+	done.Status = domain.StatusCompleted
 	deterministic := []domain.MetricDefinition{{Key: "bytes", Direction: "minimize", Deterministic: true}}
 	timing := []domain.MetricDefinition{{Key: "bytes", Direction: "minimize", Deterministic: true}, {Key: "secs", Direction: "minimize"}}
 	cases := []struct {
@@ -94,8 +96,34 @@ func TestADeterministicRunRefusesWhatACompletedJobAlreadyMeasured(t *testing.T) 
 		if got := refusalReason(t, err); got != c.want {
 			t.Errorf("%s: reason %q, want %q (%v)", c.name, got, c.want, err)
 		}
-		if c.want != "" && !strings.Contains(err.Error(), "job job-done already measured") {
+		if c.want != "" && !strings.Contains(err.Error(), "job job-done already measures") {
 			t.Errorf("%s: message %q does not name the job", c.name, err)
+		}
+	}
+}
+
+func TestADeterministicRunRefusesWhatAJobInFlightMeasuresButNotWhatFailed(t *testing.T) {
+	pe := &domain.PlatformExperiment{ID: "pe-1", Metrics: []domain.MetricDefinition{{Key: "bytes", Direction: "minimize", Deterministic: true}}}
+	cases := []struct {
+		status domain.ExperimentStatus
+		want   string
+	}{
+		{domain.StatusRunning, ReasonAlreadyMeasured},
+		{domain.StatusQueued, ReasonAlreadyMeasured},
+		{domain.StatusFailed, ""},
+		{domain.StatusEvicted, ""},
+		{domain.StatusRejected, ""},
+	}
+	for _, c := range cases {
+		other := repeatJob("job-other", "h-other", "dddd", nil)
+		other.Status = c.status
+		s := &Service{store: repeatStore{completed: []*domain.Experiment{other}}, hypotheses: buildsOn{parent: "pe-1"}}
+		err := s.refuseRepeats(context.Background(), pe, repeatJob("j", "h-1", "dddd", nil))
+		if got := refusalReason(t, err); got != c.want {
+			t.Errorf("%s: reason %q, want %q (%v)", c.status, got, c.want, err)
+		}
+		if c.want != "" && !strings.Contains(err.Error(), "("+strings.ToLower(string(c.status))+")") {
+			t.Errorf("%s: message %q does not name the status", c.status, err)
 		}
 	}
 }
