@@ -459,15 +459,18 @@ _COMPACTION_PROMPT = (
 )
 
 
-# Longest silence a healthy turn can produce between two CLI messages: Claude Code caps one Bash
-# call at 10 min (BASH_MAX_TIMEOUT_MS) and one API request at 10 min (API_TIMEOUT_MS). Seen live:
-# an agent got no model response after a tool result and sat silent until stopped.
+# Longest silence a healthy turn can produce between two CLI messages, a model call's wait for its
+# first stream event included: Claude Code caps one Bash call at 10 min (BASH_MAX_TIMEOUT_MS) and
+# one API request at 10 min (API_TIMEOUT_MS). Seen live: an agent got no model response after a
+# tool result and sat silent until stopped.
 _TURN_SILENCE_TIMEOUT_S = 900
 
-# Longest a model call may go without a message, from its request to its last stream event. A
-# healthy call sends one at least every 1.5 s, thinking included (an empty thinking_delta per ~50
-# tokens, measured on the bundled CLI); one call sat 6 min on 2790 tokens. A stalled call is
-# interrupted and asked for again once.
+# Longest a model call may go without a message once it streams, from its message_start to its
+# last stream event. A healthy call sends one at least every 1.5 s, thinking included (an empty
+# thinking_delta per ~50 tokens, measured on the bundled CLI); one call sat 6 min on 2790 tokens.
+# A stalled call is interrupted and asked for again once. message_start comes with the first
+# token, after the prefill of the whole context, so before it _TURN_SILENCE_TIMEOUT_S bounds the
+# call: resumed 650-710K sessions with a cold cache were silent past 120 s there, every time.
 _CALL_STALL_S = 120
 _STALL_PROMPT = f"Your last model call sent nothing for {_CALL_STALL_S} s and was interrupted. Go on from where it stopped."
 
@@ -808,9 +811,7 @@ async def _last_turn(client, setup: core.RunSetup, watch_env: dict[str, str], ha
 
 
 def _in_call(message, in_call: bool) -> bool:
-    """Whether a model call is in flight once message has arrived."""
-    if isinstance(message, SystemMessage) and message.subtype == "status":
-        return in_call or message.data.get("status") == "requesting"
+    """Whether a model call streams once message has arrived."""
     if isinstance(message, StreamEvent):
         kind = message.event.get("type")
         if kind == "message_start" and not message.parent_tool_use_id:

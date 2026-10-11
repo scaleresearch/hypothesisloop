@@ -562,6 +562,21 @@ class CallStallTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(run.TurnStalled):
             await self.receive(StallingClient(stalls=2))
 
+    # message_start comes with the first token, after the prefill of the whole context: resumed
+    # 700K-token sessions with a cold cache were cut there, on every call.
+    async def test_a_call_waiting_for_its_first_event_is_no_stall(self):
+        class SlowPrefill(StallingClient):
+            def ask(self):
+                self.stream.put_nowait(SystemMessage(subtype="status", data={"status": "requesting"}))
+                later = (_event("message_start"), AssistantMessage(content=[TextBlock(text="answered")], model="m"),
+                         _event("message_stop"), _result())
+                asyncio.get_running_loop().call_later(0.2, lambda: [self.stream.put_nowait(m) for m in later])
+
+        client = SlowPrefill(stalls=0)
+        received = await self.receive(client)
+        self.assertEqual(client.queries, [])
+        self.assertEqual([m.content[0].text for m in received if isinstance(m, AssistantMessage)], ["answered"])
+
     async def test_a_tool_running_after_its_call_ended_is_no_stall(self):
         class SlowTool(StallingClient):
             def ask(self):
