@@ -132,7 +132,23 @@ describe('an owner', () => {
     expect(router.replace).not.toHaveBeenCalled()
   })
 
-  it('is told in the API\'s words that the last owner cannot leave, and stays', async () => {
+  it('cannot leave while the only owner, and is told what to do first', async () => {
+    show()
+    const own = await row('Ada Lovelace')
+    expect(own.getByText('Make someone else an owner before you leave')).toBeTruthy()
+    expect(own.getByRole('button', { name: 'Leave' })).toHaveProperty('disabled', true)
+  })
+
+  it('can leave when another owner remains', async () => {
+    members = [...members, { org_id: 'org_a', user_id: 'u3', name: 'Cy', role: 'owner', joined_at: at }]
+    show()
+    const own = await row('Ada Lovelace')
+    expect(own.queryByText('Make someone else an owner before you leave')).toBeNull()
+    expect(own.getByRole('button', { name: 'Leave' })).toHaveProperty('disabled', false)
+  })
+
+  it('is told in the API\'s words when the other owner has left meanwhile, and stays', async () => {
+    members = [...members, { org_id: 'org_a', user_id: 'u3', name: 'Cy', role: 'owner', joined_at: at }]
     vi.mocked(removeOrgMember).mockRejectedValue(new ApiError(409, LAST_OWNER, 'last_owner'))
     show()
     await userEvent.click((await row('Ada Lovelace')).getByRole('button', { name: 'Leave' }))

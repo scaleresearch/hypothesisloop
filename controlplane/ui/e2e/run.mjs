@@ -1363,9 +1363,8 @@ async function scenarios(browser) {
   assert.equal(await adaRow.getByText(ada.name, { exact: true }).getAttribute('title'), adaMe.user_id)
   assert.equal(await adaRow.getByText(adaMe.user_id).count(), 0, 'the id is not what the row reads')
   await page.getByText('No pending invites.').waitFor()
-  await adaRow.getByRole('button', { name: 'Leave' }).click()
-  await confirmWith(page, 'Leave')
-  await page.locator('.error-banner', { hasText: 'an org keeps at least one owner' }).waitFor()
+  await adaRow.getByText('Make someone else an owner before you leave').waitFor()
+  assert.equal(await adaRow.getByRole('button', { name: 'Leave' }).isDisabled(), true)
 
   await page.getByRole('button', { name: 'Create invite link' }).click()
   const revokedLink = await page.getByTestId('secret').innerText()
