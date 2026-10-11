@@ -916,6 +916,19 @@ def context_overflowed(message: ResultMessage) -> bool:
     return any(marker in text for marker in _CONTEXT_OVERFLOWS)
 
 
+# Statuses of a request the API refuses for what it asks, which asking again cannot change: a
+# coordinator on a model its CLI was too old for got a 400 on every turn and was asked again for
+# hours. A timeout, a conflict and a rate limit pass with time, as does every 5xx.
+_RETRYABLE_4XX = (408, 409, 429)
+
+
+def request_refused(message: ResultMessage) -> bool:
+    """Whether the API refused the turn's request for good. An overflowed context is rotated instead."""
+    status = message.api_error_status
+    return (message.is_error and status is not None and 400 <= status < 500 and status not in _RETRYABLE_4XX
+            and not context_overflowed(message))
+
+
 def _rotation_limits(message: ResultMessage, model: str) -> tuple[int, int]:
     """The context at which the session rotates with no subagent live, the fixed threshold or less
     for a model whose window, as the CLI reports it in the turn's result, is smaller, and the
@@ -1096,6 +1109,9 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                             # Backing off cannot fix a credential the provider refuses. Exiting
                             # is what tells whoever started this agent, and with what words.
                             raise SystemExit(f"agent: the model provider refused this agent's credential: {(message.result or '').strip()[:300]}")
+                        if request_refused(message):
+                            raise SystemExit(f"agent: the model provider refused this agent's requests "
+                                             f"({message.api_error_status}): {(message.result or '').strip()[:300]}")
                         resume_id = message.session_id
                         _save_resume_id(setup, resume_id)
                         if not message.is_error:

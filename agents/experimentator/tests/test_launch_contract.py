@@ -58,6 +58,7 @@ class ErrorTurnClient:
     """Ends its one turn with the error text the test set."""
 
     result = ""
+    status = None
 
     def __init__(self, options):
         pass
@@ -76,16 +77,17 @@ class ErrorTurnClient:
 
     async def receive_response(self):
         yield ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=True, num_turns=1,
-                            session_id="s-1", result=ErrorTurnClient.result)
+                            session_id="s-1", result=ErrorTurnClient.result, api_error_status=ErrorTurnClient.status)
 
 
 class RefusedCredentialTest(unittest.IsolatedAsyncioTestCase):
-    async def session(self, result: str):
+    async def session(self, result: str, status: int | None = None):
         setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                                 client=SimpleNamespace(get_signup=lambda *_: {}),
                                 cfg=SimpleNamespace(agent_id="ag-1", flavor="generalist", role="competitor", api_url="http://x", token=AGENT_TOKEN, platform_experiment_id="pe-1"))
         with mock.patch.object(run, "ClaudeSDKClient", ErrorTurnClient), \
                 mock.patch.object(ErrorTurnClient, "result", result), \
+                mock.patch.object(ErrorTurnClient, "status", status), \
                 contextlib.redirect_stdout(io.StringIO()):
             return await asyncio.wait_for(run._run_one_session(setup, "m", None, [False]), timeout=5)
 
@@ -99,9 +101,26 @@ class RefusedCredentialTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn(refusal[:20], str(ended.exception))
 
     async def test_an_error_that_can_pass_is_waited_out(self):
-        for transient in ('API Error: 529 {"type":"error","error":{"type":"overloaded_error"}}',
-                          "API Error: 500 Internal server error", "Connection error.", "", "You've hit your usage limit"):
-            self.assertEqual(await self.session(transient), False, transient)
+        for transient, status in (('API Error: 529 {"type":"error","error":{"type":"overloaded_error"}}', 529),
+                                  ("API Error: 500 Internal server error", 500), ("Connection error.", None), ("", None),
+                                  ("You've hit your usage limit", 429), ("API Error: 408 Request timeout", 408)):
+            self.assertEqual(await self.session(transient, status), False, transient)
+
+    # A coordinator on a model its CLI was too old for was asked again every few minutes for hours.
+    async def test_a_request_the_api_refuses_for_good_ends_the_agent_with_the_providers_words(self):
+        for refusal, status in (("API Error: 400 Claude Code 2.1.212 does not support this model; version 2.1.280 or "
+                                 "newer is required.", 400),
+                                ("There's an issue with the selected model (claude-x). It may not exist or you may not "
+                                 "have access to it.", 404)):
+            with self.assertRaises(SystemExit) as ended:
+                await self.session(refusal, status)
+            self.assertIn(f"refused this agent's requests ({status})", str(ended.exception))
+            self.assertIn(refusal[:40], str(ended.exception))
+
+    def test_a_context_that_overflowed_is_no_refused_request(self):
+        overflow = ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=True, num_turns=1,
+                                 session_id="s-1", result="Prompt is too long", api_error_status=400)
+        self.assertFalse(run.request_refused(overflow))
 
     def test_only_the_providers_refusal_of_the_credential_counts(self):
         self.assertFalse(run.credential_refused(None))
