@@ -51,6 +51,11 @@ DISALLOWED_TOOLS = ["ScheduleWakeup", "Monitor", "TaskCreate", "TaskUpdate", "Ta
                      # called EnterWorktree instead and it failed.
                      "EnterWorktree", "ExitWorktree"]
 
+# The CLI compacts a session near the model's window, 1M or so, and subagents, which the platform
+# never rotates, re-read 400-450K on every call. Past this window less about 33K it compacts each
+# session, a subagent's too (CLAUDE_CODE_AUTO_COMPACT_WINDOW, 100K to 1M). 0 leaves the CLI's own.
+_AUTO_COMPACT_WINDOW_TOKENS = config.tuning("HL_AUTO_COMPACT_WINDOW_TOKENS", 200_000)
+
 # The CLI defers WebSearch and WebFetch behind ToolSearch by default: a planner had to call
 # ToolSearch "select:WebSearch" first, and in live runs most researchers and planners never
 # searched at all. With tool search off every allowed tool is sent whole, so these two are directly callable.
@@ -64,7 +69,8 @@ CLI_ENV = {"ENABLE_TOOL_SEARCH": "false",
            # The CLI caches a subagent's context for 5 min, and the lead's too on an API key or in
            # overage: a subagent whose `hl job wait` returns every 9 min would write its whole
            # context again on each wake. Every call is cached for an hour.
-           "ENABLE_PROMPT_CACHING_1H": "1"}
+           "ENABLE_PROMPT_CACHING_1H": "1",
+           **({"CLAUDE_CODE_AUTO_COMPACT_WINDOW": str(_AUTO_COMPACT_WINDOW_TOKENS)} if _AUTO_COMPACT_WINDOW_TOKENS else {})}
 
 # Refused for a Bash call with run_in_background: work that outlasts a command goes to a subagent.
 BACKGROUND_COMMAND = ("Commands run in the foreground here. Work that should go on while you do something "
@@ -404,15 +410,17 @@ async def _wait_out_limit(resets_at: float, stop_flag: list) -> None:
     await _pause(wait_s, stop_flag)
 
 
-# Claude Code normally auto-compacts near its model-dependent context limit, but that path does
-# not fire reliably for this SDK's long-lived sequence of query()/receive_response() calls (the
-# production transcript reached 650K cache-read tokens with zero compact boundaries). The SDK has
-# no public compact method or context-limit option, so checkpoint into a fresh, non-resumed
-# session at a fixed ceiling. The last assistant message's usage measures the context of the latest
-# model call; ResultMessage usage sums every call in the turn and overstates it many times over.
-_CONTEXT_COMPACTION_THRESHOLD_TOKENS = 400_000
-# Below a smaller window than that, the session rotates at this part of the window the CLI reports.
+# Left at the model's window the CLI's auto-compaction never fired (a production transcript reached
+# 650K cache-read tokens with zero compact boundaries), and the SDK has no compact method, so a
+# session is checkpointed into a fresh, non-resumed one at a fixed threshold. A lead with no
+# subagent live rotates with the platform's handoff before the CLI compacts it; with one live, the
+# CLI's compaction keeps the subagents a rotation would stop. The last assistant message's usage
+# measures the context of the latest model call; ResultMessage usage sums every call in the turn
+# and overstates it many times over.
+# Below a smaller model window, the session rotates at this part of the one the CLI reports.
 _CONTEXT_WINDOW_SHARE = 0.75
+_CONTEXT_COMPACTION_THRESHOLD_TOKENS = (min(400_000, int(_AUTO_COMPACT_WINDOW_TOKENS * _CONTEXT_WINDOW_SHARE))
+                                        if _AUTO_COMPACT_WINDOW_TOKENS else 400_000)
 # A transcript this large rotates too, so that the session still fits what the platform stores.
 _TRANSCRIPT_ROTATION_BYTES = session.MAX_BYTES * 3 // 4
 # A rotation ends the CLI and with it every subagent at work, which a lead then starts again. While

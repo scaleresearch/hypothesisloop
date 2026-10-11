@@ -407,6 +407,15 @@ class ContextOverflowTest(unittest.IsolatedAsyncioTestCase):
             tasks="- lr warmup on hyp-1"))
         self.assertIn("Start each again with Agent", run._restart_state(setup)[1])
 
+    # Subagents, which never rotate, re-read 400-450K on every call when the CLI compacted only near
+    # the model's 1M window. It compacts every session past the configured window, and a lead with
+    # no subagent live rotates with the platform's handoff before that.
+    def test_the_cli_compacts_sessions_past_a_bounded_window(self):
+        window = run._AUTO_COMPACT_WINDOW_TOKENS
+        self.assertEqual(run.CLI_ENV["CLAUDE_CODE_AUTO_COMPACT_WINDOW"], str(window))
+        self.assertGreaterEqual(window, 100_000)
+        self.assertLess(run._CONTEXT_COMPACTION_THRESHOLD_TOKENS, window - 33_000)
+
     def test_the_rotation_point_follows_a_smaller_context_window(self):
         def result(model_usage):
             return ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
@@ -416,8 +425,8 @@ class ContextOverflowTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run._rotation_limits(result(None), "claude-x"), (threshold, ceiling))
         self.assertEqual(run._rotation_limits(result({"claude-x-2026": {"contextWindow": 1_000_000},
                                                       "claude-h": {"contextWindow": 200_000}}), "claude-x"), (threshold, ceiling))
-        with mock.patch.object(run, "_CONTEXT_CEILING_TOKENS", 300_000):
-            self.assertEqual(run._rotation_limits(result({"claude-x": {"contextWindow": 1_000_000}}), "claude-x"), (300_000, 300_000))
+        with mock.patch.object(run, "_CONTEXT_CEILING_TOKENS", 120_000):
+            self.assertEqual(run._rotation_limits(result({"claude-x": {"contextWindow": 1_000_000}}), "claude-x"), (120_000, 120_000))
         self.assertEqual(run._rotation_limits(result({"claude-x-2026": {"contextWindow": 200_000}}), "claude-x"), (150_000, 180_000))
 
 
