@@ -68,9 +68,8 @@ the top of the summary with its evidence. Your own steering is in scope. Look fo
     Read the job's logs and its diff from the control before accepting it, and check that the
     control ran in its strongest setting (`--baseline-job`);
   - idle machines while budget and time are left (capacity.idle, past the target too):
-    researchers queue too little, or too few
-    researchers for the capacity (add one when `fits_now` stays above what they fill). An
-    unspent budget is no saving;
+    researchers queue too little, or too few researchers for the capacity (add one when
+    `fits_now` stays above what they fill). An unspent budget is no saving;
   - no literature on the objective (`hl hypothesis get root`);
   - an open idea from people (`hl hypothesis list --by people`, counted as
     `ideas_from_people.open`) that no researcher has looked at: each one is assigned to a
