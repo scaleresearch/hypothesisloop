@@ -44,12 +44,14 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 	}
 
 	// With a registry in .env the environments are the ones beside it.
-	render(t, repo, dir, rendered, `HL_ENVIRONMENTS_PROJECT=my-project HL_ENVIRONMENTS_REPOSITORY=europe-west1-docker.pkg.dev/my-project/images-environments/environment`)
+	registry := `lib_env_value() { case "$1" in CONTAINER_REGISTRY_PROVIDER) echo gcp ;; CONTAINER_REGISTRY_GCP_PROJECT) echo my-project ;;
+		CONTAINER_REGISTRY_GCP_LOCATION) echo europe-west1 ;; CONTAINER_REGISTRY_GCP_REPOSITORY) echo images ;; esac; } && lib_container_registry`
+	render(t, repo, dir, rendered, registry)
 	if cfg, err = Load(rendered); err != nil {
 		t.Fatalf("the rendered local settings with environments do not load: %v", err)
 	}
-	if want := (EnvironmentsConfig{Repository: "europe-west1-docker.pkg.dev/my-project/images-environments/environment",
-		Pusher: "env-pusher@my-project.iam.gserviceaccount.com", Puller: "env-puller@my-project.iam.gserviceaccount.com"}); cfg.Environments == nil || *cfg.Environments != want {
+	if want := (EnvironmentsConfig{Repository: "europe-west1-docker.pkg.dev/my-project/images-environments/environment", Provider: RegistryProviderGCP,
+		GCP: GCPRegistryConfig{Pusher: "env-pusher@my-project.iam.gserviceaccount.com", Puller: "env-puller@my-project.iam.gserviceaccount.com"}}); cfg.Environments == nil || *cfg.Environments != want {
 		t.Errorf("environments = %+v, want %+v", cfg.Environments, want)
 	}
 
@@ -65,7 +67,7 @@ func render(t *testing.T, repo, dir, rendered, environments string) {
 	t.Helper()
 	// The tag is stated: computing it reads the git state of the tree, which is absent in an
 	// exported checkout and changes under a tree others are writing to.
-	script := `. localdev/lib/auth.sh && HL_DEV_JWT_KEY="$1/key.pem" && HL_GITHUB_APP_ID="" && HL_LOCAL_IDENTITY_PROVIDER="" && ` + environments + ` && TAG=abc1234 lib_render_settings host.example.internal "$2"`
+	script := `. localdev/lib/auth.sh && HL_DEV_JWT_KEY="$1/key.pem" && HL_GITHUB_APP_ID="" && HL_IDENTITY_PROVIDER="" && ` + environments + ` && TAG=abc1234 lib_render_settings host.example.internal "$2"`
 	cmd := exec.Command("bash", "-c", script, "render", dir, rendered)
 	cmd.Dir = repo
 	if out, err := cmd.CombinedOutput(); err != nil {

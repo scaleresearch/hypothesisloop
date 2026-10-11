@@ -332,7 +332,7 @@ func TestAnAgentsQuotaSaysWhatDataItHoldsAgainstTheCeiling(t *testing.T) {
 		_, _ = w.Write([]byte(`<ListBucketResult><Contents><Key>k1</Key><Size>700</Size></Contents><Contents><Key>k2</Key><Size>300</Size></Contents></ListBucketResult>`))
 	}))
 	defer objects.Close()
-	client, err := objectstore.New(objects.URL, objects.URL, "us-east-1", "hl-data", "root", "root-secret")
+	client, err := objectstore.New("minio", objects.URL, objects.URL, "us-east-1", "hl-data", "root", "root-secret")
 	if err != nil {
 		t.Fatal(err)
 	}

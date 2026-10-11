@@ -120,7 +120,7 @@ tunnels:
 tunnels-down:
 	bash localdev/local-tunnels/tunnels.sh down
 
-# make dev, plus agent-launcher (Fly.io) and cloud-agent (vast.ai) as host processes, with the
+# make dev, plus agent-launcher and cloud-agent, on the providers .env names, as host processes, with the
 # settings naming the running tunnels and the images under IMAGE_TAG, which the maintainers'
 # deployment tooling (not in this repository) pushes after a change to them. Needs
 # `make tunnels` first. From here hosted agents and jobs placed on the cloud cluster rent
@@ -381,13 +381,13 @@ chart-push: check-tag
 	  helm push "$$package"/hypothesisloop-cluster-agent-*.tgz "oci://$(REGISTRY)/charts" $(if $(filter false,$(REGISTRY_TLS_VERIFY)),--plain-http)
 
 # The UI image is no part of `images`: nothing the local stack runs uses it (local development
-# serves the UI with `npm run dev`), and it cannot be built without a Supabase project. Next.js
-# compiles into the browser bundle the API address as a browser reaches it, the project that
-# signs people in and the sign-in providers it offers (controlplane/build/Dockerfile.ui), so all
-# four are required here and have no default. All four are public values. The helm chart's UI
-# Deployment runs this image.
-# Usage: make ui-image REGISTRY=... NEXT_PUBLIC_API_URL=... NEXT_PUBLIC_SUPABASE_URL=... NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=... NEXT_PUBLIC_SIGN_IN_PROVIDERS=...
-UI_BUILD_ARGS := NEXT_PUBLIC_API_URL NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY NEXT_PUBLIC_SIGN_IN_PROVIDERS
+# serves the UI with `npm run dev`), and it cannot be built without a sign-in service. Next.js
+# compiles into the browser bundle the API address as a browser reaches it, the service that
+# signs people in and the sign-in providers it offers (controlplane/build/Dockerfile.ui), so each
+# is required here and has no default. All are public values. The helm chart's UI Deployment runs
+# this image.
+# Usage: make ui-image REGISTRY=... NEXT_PUBLIC_API_URL=... NEXT_PUBLIC_IDENTITY_PROVIDER=supabase NEXT_PUBLIC_IDENTITY_SUPABASE_URL=... NEXT_PUBLIC_IDENTITY_SUPABASE_PUBLISHABLE_KEY=... NEXT_PUBLIC_SIGN_IN_PROVIDERS=...
+UI_BUILD_ARGS := NEXT_PUBLIC_API_URL NEXT_PUBLIC_IDENTITY_PROVIDER NEXT_PUBLIC_IDENTITY_SUPABASE_URL NEXT_PUBLIC_IDENTITY_SUPABASE_PUBLISHABLE_KEY NEXT_PUBLIC_SIGN_IN_PROVIDERS
 check-ui-build-args:
 	@$(foreach arg,$(UI_BUILD_ARGS),test -n "$($(arg))" || { echo "make ui-image: $(arg) is required (controlplane/ui/.env.example says what it is)" >&2; exit 1; };)
 

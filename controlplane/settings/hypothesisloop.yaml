@@ -34,7 +34,7 @@ services:
 auth:
   identity_providers: []
   signing_secret: ${HYPOTHESISLOOP_SIGNING_SECRET}
-  ui_origin: http://localhost:3000
+  ui_origin: REPLACE-WITH-UI-ORIGIN
 
 # Agents the platform runs. An agent joins through POST /platform-experiments/{id}/agents; one
 # asked for with hosted: true is started by a launcher, a separate process that holds a provider
@@ -195,24 +195,29 @@ job_images:
 # registered, a job that declares an environment is refused with no_environment_builder.
 #
 # Left out, as here, the deployment builds no environments: no cluster counts as building, so every
-# such job is refused. To switch it on, add the section with all three values. A deployment's chart
-# gets them from its values, and local development's render from .env (localdev/lib/auth.sh):
+# such job is refused. To switch it on, add the section with the repository, its registry's provider
+# and that provider's own section. A deployment's chart gets them from its values, and local
+# development's render from .env (localdev/lib/auth.sh):
 #
 #   environments:
 #     repository: europe-west1-docker.pkg.dev/my-project/hypothesisloop-environments/environment
-#     pusher: env-pusher@my-project.iam.gserviceaccount.com
-#     puller: env-puller@my-project.iam.gserviceaccount.com
+#     provider: gcp
+#     gcp:
+#       pusher: env-pusher@my-project.iam.gserviceaccount.com
+#       puller: env-puller@my-project.iam.gserviceaccount.com
 #
 #   repository  the whole address every environment image is pushed to, by digest and with no
-#               tag, in an Artifact Registry repository that no one reads without a token.
-#   pusher      the service account with write on that repository, and puller the one with read.
-#               The control service mints their tokens as its own Google identity: its
-#               application default credentials (GOOGLE_APPLICATION_CREDENTIALS, the service
-#               account it runs as, or gcloud auth application-default login), which holds
-#               roles/iam.serviceAccountTokenCreator on both. It does not start without them.
-#               A cluster is handed a pusher token for each build it is assigned, and a puller
-#               token in each reconcile answer that lists a job running in an environment, which
-#               the job's image is pulled with.
+#               tag, in a repository that no one reads without a login.
+#   provider    the registry that holds it, which decides how the control service mints the
+#               logins: a cluster is handed a push login for each build it is assigned, and a pull
+#               login in each reconcile answer that lists a job running in an environment, which
+#               the job's image is pulled with. One of:
+#     gcp       Google Artifact Registry. pusher is the service account with write on the
+#               repository, and puller the one with read. The control service mints their tokens
+#               as its own Google identity: its application default credentials
+#               (GOOGLE_APPLICATION_CREDENTIALS, the service account it runs as, or gcloud auth
+#               application-default login), which holds roles/iam.serviceAccountTokenCreator on
+#               both. It does not start without them.
 
 # The GitHub App a project's repository is reached through. A person installs the
 # App on repositories they choose and attaches one to a project; agents and jobs then clone it
@@ -270,16 +275,19 @@ job_images:
 # writable) and HYPOTHESISLOOP_DATA_SHARED (the platform experiment's prefix, readable), plus
 # AWS_* credentials its own client reads. The layout is <platform-experiment>/<agent>/<job>/.
 #
-# The credentials are the job's own permanent key, created at submission through the MinIO admin
-# API (Silo, MinIO, AIStor) as a service account of the key below, limited to writing the job's
-# prefix and reading its platform experiment's. The key below must be allowed to create service
-# accounts; the store's root user is.
+# The credentials are the job's own permanent key, created at submission and limited to writing the
+# job's prefix and reading its platform experiment's. S3 has no call that creates a key, so how it is
+# created is the store's own, which provider names. One of:
+#
+#   minio  the MinIO admin API (MinIO, Silo, AIStor): the job's key is a service account of the key
+#          below, which must be allowed to create service accounts. The store's root user is.
 #
 # The platform is not in the data path: it lists prefixes and measures them, and nothing more.
 # Expiry is a lifecycle rule configured on the bucket itself — one rule, enforced where the bytes
 # are, with no sweeper here to fail silently.
 
 data_store:
+  provider: minio
   # The address every job and agent is handed. MUST be one job pods reach, never
   # localhost/127.0.0.1 — a job pod (k3s) has its own network namespace and cannot reach the
   # host's loopback, so a loopback endpoint works everywhere except the one place that matters and

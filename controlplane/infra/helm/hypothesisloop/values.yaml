@@ -31,11 +31,11 @@ images:
 #   HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET   only with github.appId: the App's OAuth client
 #   HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY     secret and the PEM GitHub issued for it
 #   HYPOTHESISLOOP_GIT_PASSWORD      only with git.username: that account's password
-#   GOOGLE_CREDENTIALS               only with environments.repository: control-service's own Google
-#                                    identity, as an application default credentials file (a
-#                                    service account key or a workload identity federation
-#                                    config), which may mint the tokens of environments.pusher
-#                                    and environments.puller
+#   ENVIRONMENTS_GCP_CREDENTIALS     only with environments.provider gcp: control-service's own
+#                                    Google identity, as an application default credentials file
+#                                    (a service account key or a workload identity federation
+#                                    config), which may mint the tokens of environments.gcp.pusher
+#                                    and environments.gcp.puller
 #
 # plus whatever cloudAgent.secretEnv and agentLauncher.secretEnv name.
 secretName: ""
@@ -72,14 +72,18 @@ github:
   appSlug: ""
   clientId: ""
 
-# Where environment images are pushed and the two service accounts whose tokens control-service
-# hands out for them: the environments section of hypothesisloop.yaml, which explains each value.
-# With repository empty the deployment builds no environments, and the Secret needs no
-# GOOGLE_CREDENTIALS. With it set, pusher and puller are required.
+# Where environment images are pushed and the registry provider whose logins control-service hands
+# out for them: the environments section of hypothesisloop.yaml, which explains each value. With
+# repository empty the deployment builds no environments. With it set, provider is required, and
+# so is that provider's section:
+#   gcp  Google Artifact Registry: the two service accounts, pusher and puller, and the Secret's
+#        ENVIRONMENTS_GCP_CREDENTIALS, which mints their tokens.
 environments:
   repository: ""
-  pusher: ""
-  puller: ""
+  provider: ""
+  gcp:
+    pusher: ""
+    puller: ""
 
 # Any git host that serves repositories under one root: the git section of hypothesisloop.yaml
 # with provider plain. Read only without github.appId, and then baseURL is required.
@@ -150,8 +154,11 @@ memgraph:
     enabled: false
     url: ""
 
-# Durable-data object store (S3 plus the MinIO admin API, which creates each job's key).
+# Durable-data object store: the data_store section of hypothesisloop.yaml.
 objectStore:
+  # How the store creates each job's key, data_store.provider: minio, the MinIO admin API, which
+  # the in-cluster store below speaks.
+  provider: minio
   # Deploys Silo and creates the bucket named in hypothesisloop.yaml. false when endpoint names
   # a store run elsewhere.
   enabled: true
@@ -194,15 +201,19 @@ metricsService:
     nodePort: 30084
 
 # Image hypothesisloop-ui. Next.js compiles NEXT_PUBLIC_* values into the image when it is built
-# (controlplane/build/Dockerfile.ui): the API address and the two Supabase values. The Deployment
-# sets the two Supabase values as environment too, and they must be the ones the image was built
+# (controlplane/build/Dockerfile.ui): the API address and the sign-in service. The Deployment sets
+# the sign-in service's values as environment too, and they must be the ones the image was built
 # with.
 ui:
   enabled: true
-  # Required with enabled: https://<project>.supabase.co and the project's publishable key. Both
-  # are public values.
-  supabaseURL: ""
-  supabasePublishableKey: ""
+  # Required with enabled: the service that signs people in, and that provider's section. All are
+  # public values.
+  #   supabase  a Supabase project: url, https://<project>.supabase.co, and its publishableKey.
+  identity:
+    provider: ""
+    supabase:
+      url: ""
+      publishableKey: ""
   replicas: 1
   port: 3000
   resources:

@@ -60,7 +60,7 @@ func TestACutAgentOrAClosedPlatformExperimentGetsNoDataKey(t *testing.T) {
 	} {
 		store := &windDownStore{status: tc.status, cut: "agent-cut"}
 		svc := newSignupTestService(t, store)
-		client, err := objectstore.New("http://127.0.0.1:1", "http://127.0.0.1:1", "us-east-1", "hl-data", "root", "root-secret")
+		client, err := objectstore.New("minio", "http://127.0.0.1:1", "http://127.0.0.1:1", "us-east-1", "hl-data", "root", "root-secret")
 		if err != nil {
 			t.Fatal(err)
 		}

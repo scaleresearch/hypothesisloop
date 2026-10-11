@@ -14,7 +14,7 @@
 #                         process's arguments.
 #   AUTOSCALER_ENABLED -> autoscalerEnabled (default: false)
 #   REGISTRY_URL       -> images.registry. Must already be reachable from every node; providing
-#                         that reachability is the cluster provisioner's job (default: localhost:5000)
+#                         that reachability is the cluster provisioner's job (required)
 #   TAG                -> images.tag, the TAG `make images` pushed (required)
 #   KUBECONFIG_PATH    kubeconfig file to use (default: $HOME/.kube/config)
 #   KUBE_CONTEXT       kubectl context to target (default: current-context)
@@ -30,7 +30,7 @@ API_URL="${API_URL:?API_URL must be the control-plane API base URL, reachable fr
 METRICS_URL="${METRICS_URL:?METRICS_URL must be the metrics-service base URL, reachable from every node in this cluster}"
 RUNTIME_TOKEN="${RUNTIME_TOKEN:?RUNTIME_TOKEN must be the runtime token this cluster was given when it was registered}"
 AUTOSCALER_ENABLED="${AUTOSCALER_ENABLED:-false}"
-REGISTRY_URL="${REGISTRY_URL:-localhost:5000}"
+REGISTRY_URL="${REGISTRY_URL:?REGISTRY_URL is required: the registry every node pulls the runtime images from}"
 TAG="${TAG:?TAG must name the image tag make images pushed}"
 KUBECONFIG_PATH="${KUBECONFIG_PATH:-${HOME}/.kube/config}"
 KUBE_CONTEXT="${KUBE_CONTEXT:-}"

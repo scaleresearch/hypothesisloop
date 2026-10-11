@@ -11,7 +11,7 @@ import (
 // object-store outage can never blank a cluster's desired state.
 func TestAttachDataAccessHandsEachJobItsOwnStoredKey(t *testing.T) {
 	// An unreachable endpoint: any store call would fail.
-	store, err := objectstore.New("http://127.0.0.1:1", "http://127.0.0.1:1", "us-east-1", "hl-data", "root", "root-secret")
+	store, err := objectstore.New("minio", "http://127.0.0.1:1", "http://127.0.0.1:1", "us-east-1", "hl-data", "root", "root-secret")
 	if err != nil {
 		t.Fatal(err)
 	}

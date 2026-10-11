@@ -1,7 +1,8 @@
 // Package objectstore is the only place the durable-data object store is queried from. It speaks
 // S3's ListObjectsV2 over net/http with a hand-rolled SigV4 signer rather than pulling in an SDK:
 // the control plane never moves a byte of job data — it lists and measures prefixes, creates one
-// key per job and signs read URLs — and a vendored SDK is a large dependency for those.
+// key per job and signs read URLs — and a vendored SDK is a large dependency for those. S3 has no
+// call that creates a key, so that part is the provider's (KeyIssuer), in a sub-package of its own.
 package objectstore
 
 import (
@@ -20,6 +21,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore/minio"
 )
 
 const unreachableAfter = 5 * time.Second
@@ -44,13 +48,14 @@ type Client struct {
 	SecretAccessKey string
 	HTTP            *http.Client
 	address         string
+	keys            KeyIssuer
 }
 
 // New returns a Client that reaches the store at address and hands endpoint out to jobs and
-// agents, which may reach the store by another address than this process does. Every field is
-// required: a half-configured store has no usable behaviour, so it fails at construction rather
-// than at the first listing.
-func New(address, endpoint, region, bucket, accessKeyID, secretAccessKey string) (*Client, error) {
+// agents, which may reach the store by another address than this process does, and creates keys
+// the way provider's store does. Every field is required: a half-configured store has no usable
+// behaviour, so it fails at construction rather than at the first listing.
+func New(provider, address, endpoint, region, bucket, accessKeyID, secretAccessKey string) (*Client, error) {
 	if address == "" || endpoint == "" || region == "" || bucket == "" || accessKeyID == "" || secretAccessKey == "" {
 		return nil, fmt.Errorf("objectstore: address, endpoint, region, bucket, access_key_id and secret_access_key are all required")
 	}
@@ -63,12 +68,19 @@ func New(address, endpoint, region, bucket, accessKeyID, secretAccessKey string)
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DialContext = (&net.Dialer{Timeout: unreachableAfter}).DialContext
 	transport.ResponseHeaderTimeout = unreachableAfter
-	return &Client{
+	c := &Client{
 		Endpoint: strings.TrimSuffix(endpoint, "/"), Region: region, Bucket: bucket,
 		AccessKeyID: accessKeyID, SecretAccessKey: secretAccessKey,
 		HTTP:    &http.Client{Timeout: 20 * time.Second, Transport: transport},
 		address: strings.TrimSuffix(address, "/"),
-	}, nil
+	}
+	switch provider {
+	case config.DataStoreProviderMinIO:
+		c.keys = minio.New(c, secretAccessKey)
+	default:
+		return nil, fmt.Errorf("objectstore: provider %q is not one this build knows (%s)", provider, config.DataStoreProviderMinIO)
+	}
+	return c, nil
 }
 
 // Unavailable is a call the store did not answer: it could not be reached, did not answer in
@@ -83,7 +95,8 @@ func (e *Unavailable) Unavailable() (reason, message string) {
 	return "object_store_unavailable", "the platform's object store is not answering, so nothing that measures or keys durable data can be answered: try again shortly"
 }
 
-func (c *Client) do(req *http.Request) (*http.Response, error) {
+// Do sends req, made by SignedRequest. A store that is not answering is an *Unavailable.
+func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, &Unavailable{Err: err}
@@ -151,11 +164,11 @@ func (c *Client) listPage(ctx context.Context, prefix, token string) ([]Object, 
 	if token != "" {
 		query["continuation-token"] = token
 	}
-	req, err := c.signedRequest(ctx, http.MethodGet, "/"+c.Bucket, query, nil)
+	req, err := c.SignedRequest(ctx, http.MethodGet, "/"+c.Bucket, query, nil)
 	if err != nil {
 		return nil, "", err
 	}
-	resp, err := c.do(req)
+	resp, err := c.Do(req)
 	if err != nil {
 		return nil, "", fmt.Errorf("objectstore: list %q: %w", prefix, err)
 	}
@@ -184,8 +197,9 @@ func (c *Client) listPage(ctx context.Context, prefix, token string) ([]Object, 
 
 const emptyPayloadSHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
-// signedRequest signs one request with SigV4 in the s3 scope, which the admin API shares.
-func (c *Client) signedRequest(ctx context.Context, method, path string, query map[string]string, body []byte) (*http.Request, error) {
+// SignedRequest is one request to path on the store as the control plane reaches it, signed with
+// SigV4 in the s3 scope as the configured key. A provider's admin API shares the scope.
+func (c *Client) SignedRequest(ctx context.Context, method, path string, query map[string]string, body []byte) (*http.Request, error) {
 	canonicalQuery := encodeCanonicalQuery(query)
 	url := c.address + path
 	if canonicalQuery != "" {

@@ -3,6 +3,7 @@
 # local process is started with, the key the local control plane verifies a person's JWT against,
 # and hl-admin for tokens and cluster registration against the compose stack's postgres.
 LIB_AUTH_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "${LIB_AUTH_REPO}/localdev/lib/clusters.sh"
 
 # The signing secret every local process is started with is made on this machine by the first
 # render and never leaves it. It has one source, the file: a value from the caller's environment
@@ -29,8 +30,8 @@ fi
 
 # Who signs people in on the local stack. The first is always a key made on this machine by the
 # first render, which never leaves it: the e2e suite and the browser run sign their users with it.
-# LOCAL_IDENTITY_PROVIDER=supabase in .env lists the Supabase project beside it, so a person
-# signs in for real on the same stack the tests run against.
+# IDENTITY_PROVIDER in .env lists the sign-in service it names beside it, so a person signs in for
+# real on the same stack the tests run against.
 export HL_DEV_JWT_KEY="${LIB_AUTH_REPO}/localdev/.dev-jwt-key.pem"
 export HL_DEV_JWT_KID="local-dev"
 export HL_DEV_JWT_ISSUER="http://localhost/hypothesisloop-dev"
@@ -52,11 +53,11 @@ export HL_GOOGLE_CREDENTIALS_FILE
 lib_env_value() {
   (set +u; . "${LIB_AUTH_REPO}/.env"; printf '%s' "${!1:-}")
 }
-HL_LOCAL_IDENTITY_PROVIDER=""
+HL_IDENTITY_PROVIDER=""
 HL_GITHUB_APP_ID=""
 if [[ -f "${LIB_AUTH_REPO}/.env" ]]; then
   HL_GITHUB_APP_ID="$(lib_env_value GITHUB_APP_ID)"
-  HL_LOCAL_IDENTITY_PROVIDER="$(lib_env_value LOCAL_IDENTITY_PROVIDER)"
+  HL_IDENTITY_PROVIDER="$(lib_env_value IDENTITY_PROVIDER)"
 fi
 if [[ -n "${HL_GITHUB_APP_ID}" ]]; then
   for lib_auth_key in GITHUB_APP_SLUG GITHUB_APP_CLIENT_ID GITHUB_APP_CLIENT_SECRET GITHUB_APP_PRIVATE_KEY; do
@@ -73,21 +74,46 @@ if [[ -n "${HL_GITHUB_APP_ID}" ]]; then
   export HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY
 fi
 
-# Where local development's environments are built to, from the registry keys of .env: the private repository <REGISTRY_REPOSITORY>-environments and its env-pusher and
-# env-puller service accounts. The control plane mints their tokens with this machine's
-# application default credentials (gcloud auth application-default login), whose account
-# must be allowed to mint them. With no REGISTRY_REPOSITORY the local control plane builds none.
-HL_ENVIRONMENTS_REPOSITORY=""
-if [[ -f "${LIB_AUTH_REPO}/.env" && -n "$(lib_env_value REGISTRY_REPOSITORY)" ]]; then
-  for lib_auth_key in GCP_PROJECT REGISTRY_LOCATION; do
-    if [[ -z "$(lib_env_value "${lib_auth_key}")" ]]; then
-      echo "auth: .env sets REGISTRY_REPOSITORY and not ${lib_auth_key} (.env.example says what it is)" >&2
-      return 1 2>/dev/null || exit 1
-    fi
-  done
-  unset lib_auth_key
-  HL_ENVIRONMENTS_PROJECT="$(lib_env_value GCP_PROJECT)"
-  HL_ENVIRONMENTS_REPOSITORY="$(lib_env_value REGISTRY_LOCATION)-docker.pkg.dev/${HL_ENVIRONMENTS_PROJECT}/$(lib_env_value REGISTRY_REPOSITORY)-environments/environment"
+# The container registry CONTAINER_REGISTRY_PROVIDER in .env names, read from that provider's own
+# keys. lib_container_registry sets HL_REGISTRY, the address the deployment's images are pushed
+# under, which make dev-hosted runs them from; HL_ENVIRONMENTS_REPOSITORY, where local
+# development's environments are built to; and HL_ENVIRONMENTS_PROVIDER, the lines of the settings'
+# environments section after repository: the provider that hands out the logins to it and its own
+# section. With no provider all three are empty, and the local control plane builds no environments.
+#
+#   gcp  Google Artifact Registry: the repository CONTAINER_REGISTRY_GCP_REPOSITORY in
+#        CONTAINER_REGISTRY_GCP_LOCATION of CONTAINER_REGISTRY_GCP_PROJECT. Environments go to the
+#        private repository <repository>-environments beside it, whose env-pusher and env-puller
+#        service accounts the control plane mints tokens of with this machine's application
+#        default credentials (gcloud auth application-default login), whose account must be
+#        allowed to mint them.
+lib_container_registry() {
+  local provider key project
+  HL_REGISTRY="" HL_ENVIRONMENTS_REPOSITORY="" HL_ENVIRONMENTS_PROVIDER=""
+  provider="$(lib_env_value CONTAINER_REGISTRY_PROVIDER)"
+  case "${provider}" in
+    "") ;;
+    gcp)
+      for key in CONTAINER_REGISTRY_GCP_PROJECT CONTAINER_REGISTRY_GCP_LOCATION CONTAINER_REGISTRY_GCP_REPOSITORY; do
+        if [[ -z "$(lib_env_value "${key}")" ]]; then
+          echo "auth: .env sets CONTAINER_REGISTRY_PROVIDER=gcp and not ${key} (.env.example says what it is)" >&2
+          return 1
+        fi
+      done
+      project="$(lib_env_value CONTAINER_REGISTRY_GCP_PROJECT)"
+      HL_REGISTRY="$(lib_env_value CONTAINER_REGISTRY_GCP_LOCATION)-docker.pkg.dev/${project}/$(lib_env_value CONTAINER_REGISTRY_GCP_REPOSITORY)"
+      HL_ENVIRONMENTS_REPOSITORY="${HL_REGISTRY}-environments/environment"
+      HL_ENVIRONMENTS_PROVIDER="$(printf '  provider: gcp\n  gcp:\n    pusher: env-pusher@%s.iam.gserviceaccount.com\n    puller: env-puller@%s.iam.gserviceaccount.com' "${project}" "${project}")"
+      ;;
+    *)
+      echo "auth: .env sets CONTAINER_REGISTRY_PROVIDER=${provider}; it is empty or gcp" >&2
+      return 1
+      ;;
+  esac
+}
+HL_REGISTRY="" HL_ENVIRONMENTS_REPOSITORY="" HL_ENVIRONMENTS_PROVIDER=""
+if [[ -f "${LIB_AUTH_REPO}/.env" ]]; then
+  lib_container_registry || return 1 2>/dev/null || exit 1
 fi
 
 # The git host local platform experiments keep their code on: GitHub through the App when .env
@@ -127,10 +153,10 @@ lib_render_settings() {
     openssl ec -in "${HL_DEV_JWT_KEY}" -pubout -outform DER 2>/dev/null | tail -c 64 | "$@" | base64 | tr '+/' '-_' | tr -d '=\n'
   }
   providers="{issuer: \"${HL_DEV_JWT_ISSUER}\", audience: ${HL_DEV_JWT_AUDIENCE}, jwt_keys: [{kid: ${HL_DEV_JWT_KID}, kty: EC, alg: ES256, crv: P-256, x: \"$(coordinate head -c 32)\", y: \"$(coordinate tail -c 32)\"}]}"
-  if [[ "${HL_LOCAL_IDENTITY_PROVIDER}" == "supabase" ]]; then
-    project="$(lib_env_value SUPABASE_PROJECT_REF)"
+  if [[ "${HL_IDENTITY_PROVIDER}" == "supabase" ]]; then
+    project="$(lib_env_value IDENTITY_SUPABASE_PROJECT_REF)"
     if [[ -z "${project}" ]]; then
-      echo "render-settings: .env sets LOCAL_IDENTITY_PROVIDER=supabase and not SUPABASE_PROJECT_REF" >&2
+      echo "render-settings: .env sets IDENTITY_PROVIDER=supabase and not IDENTITY_SUPABASE_PROJECT_REF" >&2
       return 1
     fi
     issuer="https://${project}.supabase.co/auth/v1"
@@ -139,8 +165,8 @@ lib_render_settings() {
       return 1
     }
     providers="${providers}, {issuer: \"${issuer}\", audience: authenticated, jwt_keys: ${keys}}"
-  elif [[ -n "${HL_LOCAL_IDENTITY_PROVIDER}" ]]; then
-    echo "render-settings: .env sets LOCAL_IDENTITY_PROVIDER=${HL_LOCAL_IDENTITY_PROVIDER}; it is empty or supabase" >&2
+  elif [[ -n "${HL_IDENTITY_PROVIDER}" ]]; then
+    echo "render-settings: .env sets IDENTITY_PROVIDER=${HL_IDENTITY_PROVIDER}; it is empty or supabase" >&2
     return 1
   fi
   # The local runtimes install the images `make images` pushes to the dev registry, under the
@@ -154,6 +180,7 @@ lib_render_settings() {
   fi
   sed -e "s|REPLACE-WITH-HOST-ADDRESS|${host_address}|g" \
       -e "s|REPLACE-WITH-IMAGE-TAG|${image_tag}|g" \
+      -e "s|REPLACE-WITH-UI-ORIGIN|http://localhost:3000|g" \
       -e "s|^  identity_providers: \[\]$|  identity_providers: [${providers}]|" \
       "${LIB_AUTH_REPO}/controlplane/settings/hypothesisloop.yaml" > "${output}"
   for rendered in "issuer: \"${HL_DEV_JWT_ISSUER}\"" ${issuer:+"issuer: \"${issuer}\""}; do
@@ -164,8 +191,7 @@ lib_render_settings() {
     return 1
   fi
   if [[ -n "${HL_ENVIRONMENTS_REPOSITORY}" ]]; then
-    printf '\nenvironments:\n  repository: %s\n  pusher: env-pusher@%s.iam.gserviceaccount.com\n  puller: env-puller@%s.iam.gserviceaccount.com\n' \
-      "${HL_ENVIRONMENTS_REPOSITORY}" "${HL_ENVIRONMENTS_PROJECT}" "${HL_ENVIRONMENTS_PROJECT}" >> "${output}"
+    printf '\nenvironments:\n  repository: %s\n%s\n' "${HL_ENVIRONMENTS_REPOSITORY}" "${HL_ENVIRONMENTS_PROVIDER}" >> "${output}"
   fi
   if [[ "$(lib_git_provider)" == "github" ]]; then
     # The values are JSON strings, which YAML reads as they are.
@@ -213,23 +239,22 @@ lib_runtime_token() {
   lib_hl_admin token "runtime:$1"
 }
 
-# The clusters on machines of their own (a Tenstorrent box, an NVIDIA host) that LOCAL_EXTRA_CLUSTERS
-# in .env names, registered for the org every schema starts with, and the launcher the committed
-# settings give hosted agents to (agents.launcher). Needs the control plane to have started once,
-# since it creates the tables.
+# The clusters on the platform's own machines (a Tenstorrent box, an NVIDIA host) that
+# OWNED_COMPUTE_CLUSTERS in .env lists (lib_owned_clusters), registered for the org every schema
+# starts with, and the launcher the committed settings give hosted agents to (agents.launcher).
+# Needs the control plane to have started once, since it creates the tables.
 lib_register_clusters() {
-  local entry name ceiling extra=""
-  if [[ -f "${LIB_AUTH_REPO}/.env" ]]; then
-    extra="$(lib_env_value LOCAL_EXTRA_CLUSTERS)"
-  fi
-  for entry in ${extra//,/ }; do
-    name="${entry%%:*}"
+  local clusters line name ceiling
+  clusters="$(lib_owned_clusters)" || return 1
+  while read -r line; do
+    [[ -n "${line}" ]] || continue
+    name="${line%% *}"
     lib_hl_admin cluster add "${name}" default >/dev/null
-    if [[ "${entry}" == *:* ]]; then
-      ceiling="${entry#*:}"
+    ceiling="$(lib_cluster_field silence_ceiling_seconds "${line}")"
+    if [[ -n "${ceiling}" ]]; then
       lib_hl_admin cluster settings "${name}" "{\"status_silence_ceiling_seconds\":${ceiling}}"
     fi
-  done
+  done <<<"${clusters}"
   lib_hl_admin launcher add main >/dev/null
 }
 

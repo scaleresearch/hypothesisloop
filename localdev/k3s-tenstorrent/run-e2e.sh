@@ -5,17 +5,18 @@
 # environment-agnostic; this wrapper is the one place that knows "on a Tenstorrent host,
 # provisioning means dev-nodes-up.sh."
 #
-# TT_NODE names the host's node (lib_tt_node) and TT_CLUSTER the cluster it is registered as,
-# the node's name unless the environment or .env sets it.
+# The host is the OWNED_COMPUTE_CLUSTERS entry of .env whose context is TT_CONTEXT: TT_CLUSTER is
+# its name and TT_NODE its node (lib_host_node). With no such entry the cluster is named after the
+# node.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${DIR}/../lib/node.sh"
-TT_NODE="$(lib_tt_node "${TT_CONTEXT:-k3s-tt}")"
-if [[ -z "${TT_CLUSTER:-}" && -f "${LIB_NODE_REPO}/.env" ]]; then
-  TT_CLUSTER="$(set +u; . "${LIB_NODE_REPO}/.env"; printf '%s' "${TT_CLUSTER:-}")"
-fi
+TT_CONTEXT="${TT_CONTEXT:-k3s-tt}"
+cluster="$(lib_owned_cluster_at "${TT_CONTEXT}")"
+TT_NODE="$(lib_host_node "${TT_CONTEXT}")"
+TT_CLUSTER="${cluster%% *}"
 TT_CLUSTER="${TT_CLUSTER:-${TT_NODE}}"
-export TT_NODE TT_CLUSTER
+export TT_CONTEXT TT_NODE TT_CLUSTER
 
 t0=$(date +%s)
 bash "${DIR}/dev-nodes-up.sh"

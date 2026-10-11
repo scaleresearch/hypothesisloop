@@ -61,11 +61,11 @@ func (c *Client) put(ctx context.Context, key string, body []byte) error {
 	if len(body) == 0 {
 		return fmt.Errorf("objectstore: put %s: nothing to store", key)
 	}
-	req, err := c.signedRequest(ctx, http.MethodPut, "/"+c.Bucket+"/"+key, nil, body)
+	req, err := c.SignedRequest(ctx, http.MethodPut, "/"+c.Bucket+"/"+key, nil, body)
 	if err != nil {
 		return err
 	}
-	resp, err := c.do(req)
+	resp, err := c.Do(req)
 	if err != nil {
 		return fmt.Errorf("objectstore: put %s: %w", key, err)
 	}
@@ -79,11 +79,11 @@ func (c *Client) put(ctx context.Context, key string, body []byte) error {
 
 // get reads one object. One larger than maxBytes is an error: nothing this package stored is.
 func (c *Client) get(ctx context.Context, key string, maxBytes int64) ([]byte, bool, error) {
-	req, err := c.signedRequest(ctx, http.MethodGet, "/"+c.Bucket+"/"+key, nil, nil)
+	req, err := c.SignedRequest(ctx, http.MethodGet, "/"+c.Bucket+"/"+key, nil, nil)
 	if err != nil {
 		return nil, false, err
 	}
-	resp, err := c.do(req)
+	resp, err := c.Do(req)
 	if err != nil {
 		return nil, false, fmt.Errorf("objectstore: get %s: %w", key, err)
 	}

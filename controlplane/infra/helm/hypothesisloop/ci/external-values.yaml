@@ -32,12 +32,17 @@ runtimes:
 objectStore:
   endpoint: https://object-store.example.invalid
 ui:
-  supabaseURL: https://project.supabase.example.invalid
-  supabasePublishableKey: sb_publishable_made-up
+  identity:
+    provider: supabase
+    supabase:
+      url: https://project.supabase.example.invalid
+      publishableKey: sb_publishable_made-up
 environments:
   repository: europe-west1-docker.pkg.dev/made-up-project/hypothesisloop-environments/environment
-  pusher: env-pusher@made-up-project.iam.gserviceaccount.com
-  puller: env-puller@made-up-project.iam.gserviceaccount.com
+  provider: gcp
+  gcp:
+    pusher: env-pusher@made-up-project.iam.gserviceaccount.com
+    puller: env-puller@made-up-project.iam.gserviceaccount.com
 github:
   appId: 4242
   appSlug: made-up-app

@@ -126,10 +126,11 @@ services:
       HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY: ${HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY:-}
       # The local git server's password, which the rendered settings name when .env has no App.
       HYPOTHESISLOOP_GIT_PASSWORD: ${HYPOTHESISLOOP_GIT_PASSWORD:-}
-      # The control service's own Google identity, which mints the environment registry's
-      # tokens: the application default credentials `gcloud auth application-default login`
-      # writes to its well-known path, or HL_GOOGLE_CREDENTIALS_FILE. Without either, auth.sh
-      # mounts /dev/null and the stack builds no environments.
+      # With CONTAINER_REGISTRY_PROVIDER=gcp in .env, the control service's own Google identity,
+      # which mints the environment registry's tokens: the application default credentials
+      # `gcloud auth application-default login` writes to its well-known path, or
+      # HL_GOOGLE_CREDENTIALS_FILE. Without either, auth.sh mounts /dev/null and the control
+      # service cannot mint them.
       GOOGLE_APPLICATION_CREDENTIALS: /google/credentials.json
     ports:
       - "${API_HOST_PORT:-8081}:8081"

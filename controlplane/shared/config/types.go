@@ -193,10 +193,12 @@ type ServicesConfig struct {
 // DataStoreConfig addresses the S3-compatible object store jobs write checkpoints and datasets
 // to. The control plane creates one key per job, hands out the address and that key, and never
 // sits in the data path: beyond the keys it lists prefixes and measures them, nothing more. The
-// configured key creates the job keys, so it must be allowed to create service accounts (the
-// store's root user does). Expiring a closed platform
-// experiment's prefix is a lifecycle rule configured on the bucket itself, not a sweeper here.
+// configured key creates the job keys the way Provider's store does, so it must be allowed to.
+// Expiring a closed platform experiment's prefix is a lifecycle rule configured on the bucket
+// itself, not a sweeper here.
 type DataStoreConfig struct {
+	// Provider names the store, which decides how a job's key is created: DataStoreProviderMinIO.
+	Provider string `yaml:"provider"`
 	// Endpoint is the address handed to every job and agent, which reach the store from other
 	// machines. The control plane sends none of its own requests there.
 	Endpoint string `yaml:"endpoint"`
@@ -326,15 +328,30 @@ type RuntimesConfig struct {
 }
 
 // EnvironmentsConfig is where the images a repository's .hypothesisloop/Dockerfile declares are
-// pushed by the cluster each build is assigned to, and the two service accounts whose tokens the
-// control plane hands out for them (shared/registrycred). Left out, the deployment builds no
-// environments: no cluster counts as building, so a job whose commit declares one is refused.
+// pushed by the cluster each build is assigned to, and the registry provider that hands out the
+// logins to it (shared/registrycred). Left out, the deployment builds no environments: no cluster
+// counts as building, so a job whose commit declares one is refused.
 type EnvironmentsConfig struct {
 	// Repository is the whole address environment images are pushed to by digest,
 	// host/path/name, in a registry no one pulls from without a token.
 	Repository string `yaml:"repository"`
-	// Pusher is the email of the service account that may write to Repository, and Puller of
-	// the one that may read it. The control plane's own Google identity may mint tokens of both.
+	// Provider names the registry that holds Repository, and with it the section below that is
+	// read: RegistryProviderGCP, Google Artifact Registry.
+	Provider string            `yaml:"provider"`
+	GCP      GCPRegistryConfig `yaml:"gcp"`
+}
+
+// DataStoreProviderMinIO is a store that speaks the MinIO admin API (MinIO, Silo, AIStor), which
+// creates a job's key as a service account of the configured key.
+const DataStoreProviderMinIO = "minio"
+
+// RegistryProviderGCP is Google Artifact Registry, logged in to with service account tokens.
+const RegistryProviderGCP = "gcp"
+
+// GCPRegistryConfig is the two service accounts whose tokens are the logins to an Artifact
+// Registry repository. Pusher is the email of the one that may write to it, and Puller of the one
+// that may read it. The control plane's own Google identity may mint tokens of both.
+type GCPRegistryConfig struct {
 	Pusher string `yaml:"pusher"`
 	Puller string `yaml:"puller"`
 }

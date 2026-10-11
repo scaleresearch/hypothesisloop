@@ -233,6 +233,9 @@ func (c *Config) build() error {
 	}
 	// Neither address stands in for the other: the control plane's is often one no job reaches,
 	// and a job's is often one that is down while the control plane's own store is up.
+	if c.DataStore.Provider != DataStoreProviderMinIO {
+		return fmt.Errorf("data_store provider %q is not a store provider this build knows (%s)", c.DataStore.Provider, DataStoreProviderMinIO)
+	}
 	if c.DataStore.ControlPlaneEndpoint == "" {
 		return fmt.Errorf("data_store control_plane_endpoint is required: the address the control plane itself reaches the object store at, on its own network. endpoint is only what jobs and agents are handed")
 	}
@@ -357,10 +360,15 @@ func (c *Config) build() error {
 		if _, path, ok := strings.Cut(e.Repository, "/"); !ok || path == "" || strings.ContainsAny(e.Repository, " \t@") || strings.Contains(e.Repository, "://") {
 			return fmt.Errorf("environments repository %q must be the whole address environment images are pushed to, host/path", e.Repository)
 		}
-		for key, account := range map[string]string{"pusher": e.Pusher, "puller": e.Puller} {
-			if !serviceAccountEmail.MatchString(account) {
-				return fmt.Errorf("environments %s %q must be the email of a Google service account", key, account)
+		switch e.Provider {
+		case RegistryProviderGCP:
+			for key, account := range map[string]string{"pusher": e.GCP.Pusher, "puller": e.GCP.Puller} {
+				if !serviceAccountEmail.MatchString(account) {
+					return fmt.Errorf("environments gcp %s %q must be the email of a Google service account", key, account)
+				}
 			}
+		default:
+			return fmt.Errorf("environments provider %q is not a registry provider this build knows (%s)", e.Provider, RegistryProviderGCP)
 		}
 	}
 	if c.Auth.UIOrigin == "" {

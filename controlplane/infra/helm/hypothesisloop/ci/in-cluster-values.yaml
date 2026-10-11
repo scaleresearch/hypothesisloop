@@ -19,5 +19,8 @@ git:
   baseURL: https://git.example.invalid/experiments
   username: made-up-git-account
 ui:
-  supabaseURL: https://project.supabase.example.invalid
-  supabasePublishableKey: sb_publishable_made-up
+  identity:
+    provider: supabase
+    supabase:
+      url: https://project.supabase.example.invalid
+      publishableKey: sb_publishable_made-up

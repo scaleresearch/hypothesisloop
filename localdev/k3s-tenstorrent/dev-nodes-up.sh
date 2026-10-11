@@ -10,7 +10,7 @@ HOST_ADDRESS="$(lib_host_address)"
 export HOST_ADDRESS
 
 CONTEXT="${TT_CONTEXT:-k3s-tt}"
-NODE="$(lib_tt_node "${CONTEXT}")"
+NODE="$(lib_host_node "${CONTEXT}")"
 
 kubectl --context "${CONTEXT}" get node "${NODE}" >/dev/null 2>&1 \
   || { echo "ERROR: ${CONTEXT} has no node ${NODE} — run install.sh first" >&2; exit 2; }

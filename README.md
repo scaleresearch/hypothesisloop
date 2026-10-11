@@ -95,22 +95,24 @@ point-cloud codec.
 
 ```bash
 cd controlplane/ui && npm install
-cp .env.example .env.local                         # then fill in the four values
+cp .env.example .env.local                         # then fill in the values
 npm run dev                                        # http://localhost:3000
 ```
 
 ### Sign-in
 
-People sign in through a [Supabase](https://supabase.com) project of your own. The UI sends the
-session's access token with every API request. `controlplane/ui/.env.local` names the project.
-All four values are public and compiled into the browser bundle. An image takes them as build
+People sign in through a sign-in service of your own, which `NEXT_PUBLIC_IDENTITY_PROVIDER`
+names. The one the UI knows is `supabase`, a [Supabase](https://supabase.com) project. The UI
+sends the session's access token with every API request. `controlplane/ui/.env.local` names the
+service. All values are public and compiled into the browser bundle. An image takes them as build
 arguments of `controlplane/build/Dockerfile.ui`.
 
 | Variable | Value |
 |---|---|
 | `NEXT_PUBLIC_API_URL` | the control plane's API as the browser reaches it, e.g. `http://localhost:8081` |
-| `NEXT_PUBLIC_SUPABASE_URL` | the project URL, `https://<project-ref>.supabase.co` |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | the project's publishable key, `sb_publishable_...` |
+| `NEXT_PUBLIC_IDENTITY_PROVIDER` | the sign-in service, `supabase` |
+| `NEXT_PUBLIC_IDENTITY_SUPABASE_URL` | supabase: the project URL, `https://<project-ref>.supabase.co` |
+| `NEXT_PUBLIC_IDENTITY_SUPABASE_PUBLISHABLE_KEY` | supabase: the project's publishable key, `sb_publishable_...` |
 | `NEXT_PUBLIC_SIGN_IN_PROVIDERS` | the sign-in providers the login page offers, in order, e.g. `github` |
 
 In the Supabase project (Authentication settings):
@@ -138,8 +140,8 @@ auth:
 is checked against the entry whose issuer it names. Locally, `make render-settings`
 (`localdev/lib/auth.sh`) always adds a stand-in provider with a key made on this machine. The e2e
 suite and the UI's browser tests sign their users in with it. With
-`LOCAL_IDENTITY_PROVIDER=supabase` in `.env` it also lists your Supabase project, so GitHub
-sign-in and the tests work on the same stack.
+`IDENTITY_PROVIDER=supabase` and `IDENTITY_SUPABASE_PROJECT_REF` in `.env` it also lists your
+Supabase project, so GitHub sign-in and the tests work on the same stack.
 
 ```bash
 cd controlplane/ui
@@ -559,6 +561,45 @@ Scheduling sits behind one interface (`controlplane/shared/workload.Backend`). T
 implementation keeps desired state in Postgres and reads actual state from the runtimes. Another
 scheduler (Kueue, Volcano) can implement the same interface.
 
+## Configuration
+
+The control plane reads one settings file (`controlplane/settings/hypothesisloop.yaml`, which
+explains every key), and each runtime process one config file of its own
+(`runtime/*/settings`). Local development renders them from `.env` (`.env.example` names every
+key) with `make render-settings`, and a deployment from its chart values. Nothing that ships
+names an address or a registry: every image reference, public URL and registry comes from that
+configuration.
+
+Each external service the platform depends on fills a role, and each role names its provider in
+the same way, so the rest of the system never depends on which one it is:
+
+- `.env` has one key `<ROLE>_PROVIDER` naming the provider, such as
+  `CONTAINER_REGISTRY_PROVIDER='gcp'`, and keys `<ROLE>_<PROVIDER>_<FIELD>` that only that
+  provider reads, such as `CONTAINER_REGISTRY_GCP_PROJECT`. A key with no provider in its name,
+  such as `IMAGE_TAG`, means the same with every provider.
+- A settings or config section has `provider: <name>` and a subsection named after the provider
+  with its own keys (`environments.provider: gcp` with `environments.gcp`), or, in a runtime
+  process's config, `provider.name` and `provider.settings`.
+- In Go, the role is one small interface in its own package and each provider a sub-package
+  (`controlplane/shared/registrycred/gcp`, `controlplane/shared/objectstore/minio`,
+  `runtime/cloud/internal/provider/fly`). The provider is chosen once, from configuration, and an
+  unknown name stops the process at start.
+
+| Role | `.env` | Settings | Providers |
+|---|---|---|---|
+| container registry | `CONTAINER_REGISTRY_PROVIDER` | `environments.provider` | `gcp` (Artifact Registry) |
+| durable-data object store | (local MinIO) | `data_store.provider` | `minio` (MinIO admin API: MinIO, Silo, AIStor) |
+| sign-in service | `IDENTITY_PROVIDER`, UI `NEXT_PUBLIC_IDENTITY_PROVIDER` | `auth.identity_providers` (any OIDC issuer) | `supabase` |
+| git host | `GITHUB_APP_*` | `git.provider` | `github`, `plain` |
+| hosted agent sandboxes | `SANDBOX_PROVIDER` | agent-launcher `provider.name` | `fly`, `e2b` |
+| models of hosted agents | `MODEL_PROVIDER` | agent-launcher `model_provider.name` | `anthropic` |
+| rented compute for jobs | `CLOUD_COMPUTE_PROVIDER` | cloud-agent `provider.name` | `vast` |
+| the platform's own clusters | `OWNED_COMPUTE_CLUSTERS` | (registered clusters) | `k8s`, `bare-metal` |
+
+Every provider in `.env` is the platform's own: adding one is an operator's decision, and no
+customer sees it. A customer brings compute through the product instead, by registering a cluster
+or a machine of their own (`hl cluster add`, below).
+
 ## Setup
 
 ### Option A - macOS/Linux with local cluster
@@ -698,12 +739,13 @@ and metrics-service do not start without it, and rotating it ends every token. L
 creates one at the first render (`localdev/.run/signing-secret`).
 
 Environments, images built from a repository's `.hypothesisloop/Dockerfile`, are built only when
-the settings have an `environments` section naming a registry repository and a pusher and puller
-service account (see `controlplane/settings/hypothesisloop.yaml`). Without it, a job whose commit
-declares an environment is refused with `no_environment_builder`. control-service mints the
-registry tokens with its Google application default credentials. Locally, setting
-`REGISTRY_REPOSITORY`, `GCP_PROJECT` and `REGISTRY_LOCATION` in `.env` makes
-`make render-settings` write that section.
+the settings have an `environments` section naming a registry repository and the registry
+provider that hands out logins to it (see `controlplane/settings/hypothesisloop.yaml`). Without
+it, a job whose commit declares an environment is refused with `no_environment_builder`. With
+provider `gcp` (Google Artifact Registry), control-service mints the logins as tokens of a pusher
+and a puller service account, with its Google application default credentials. Locally,
+`CONTAINER_REGISTRY_PROVIDER` and that provider's keys in `.env` make `make render-settings`
+write that section.
 
 An agent can try code in a job's image on its own machine: `hl env stage [JOB]` pulls and unpacks
 the image, and `hl env run -- COMMAND` runs a command inside it with bubblewrap. Each git worktree
@@ -732,8 +774,8 @@ read.
 A cluster binds to the first `cluster_id` its runtime reports. After rebuilding its machines, run
 `hl cluster forget-identity`. `hl cluster settings` overrides scheduler timeouts for one cluster.
 
-The local stack's clusters (`local`, plus any `LOCAL_EXTRA_CLUSTERS` in `.env`) are registered
-for the org `default` by `make controlplane-up` and `make dev`.
+The local stack's clusters (`local`, plus the platform's own machines `OWNED_COMPUTE_CLUSTERS` in
+`.env` lists) are registered for the org `default` by `make controlplane-up` and `make dev`.
 
 ### Option C - Windows (untested)
 
@@ -802,7 +844,7 @@ The whole public API is served from one port and described by one OpenAPI docume
 | `make dev`                        | The control plane and the UI as host processes against the compose datastores; starts in seconds and rents nothing |
 | `make dev-api`                    | Rebuild and restart the API and metrics-service after a Go change   |
 | `make dev-status` / `make dev-down` | Show or stop the `make dev` processes                             |
-| `make dev-hosted`                 | `make dev` plus agent-launcher (Fly.io or E2B) and cloud-agent (vast.ai), through public tunnels (`make tunnels`); rents compute. It runs the agent and job images published under `IMAGE_TAG` |
+| `make dev-hosted`                 | `make dev` plus agent-launcher (on `SANDBOX_PROVIDER`) and cloud-agent (on `CLOUD_COMPUTE_PROVIDER`), through public tunnels (`make tunnels`); rents compute. It runs the agent and job images published under `IMAGE_TAG` |
 | `make staff-token`                | Print a staff token for local work (`make -s staff-token`)          |
 | `make git-repository NAME=x`      | Create a repository on the local git server                         |
 | `make e2e`                        | The e2e suite against the `make dev` stack and the local k3s cluster |

@@ -7,11 +7,12 @@
 #
 #   up       render the settings for the local cluster and (re)start the API and metrics-service;
 #            start the UI unless it runs, and the git server when the stack has no GitHub App
-#   hosted   the same with what rents compute elsewhere: agent-launcher (Fly.io or E2B, whichever
-#            HOSTED_SANDBOX_PROVIDER in .env names) and cloud-agent
-#            (vast.ai) as two more processes, and settings that name the running tunnels (make
-#            tunnels) and the images under IMAGE_TAG in the deployment's registry. Its inputs are keys of .env,
-#            and every missing one is named before anything is touched
+#   hosted   the same with what rents compute elsewhere: agent-launcher, on the sandbox provider
+#            SANDBOX_PROVIDER in .env names, and cloud-agent, on the compute provider
+#            CLOUD_COMPUTE_PROVIDER names, as two more processes, and settings that name the
+#            running tunnels (make tunnels) and the images under IMAGE_TAG in the registry
+#            CONTAINER_REGISTRY_PROVIDER names. Its inputs are keys of .env, and every missing one is
+#            named before anything is touched
 #   api      rebuild and restart the API and metrics-service with the settings as they were last
 #            rendered. Everything else keeps running
 #   ui       (re)start the UI, which otherwise reloads by itself
@@ -32,8 +33,10 @@ settings=controlplane/settings/.hypothesisloop.dev.yaml
 bin=localdev/.bin
 run=localdev/.run
 processes=(control-service metrics-service ui git-server cloud-agent agent-launcher)
-# The name every org sees the platform's rented compute under.
-cloud_cluster=hypothesisloop-vast
+# The compute provider cloud-agent rents from, and the name every org sees that compute under.
+# Empty when .env names none.
+cloud_provider="$( [[ ! -f .env ]] || lib_env_value CLOUD_COMPUTE_PROVIDER)"
+cloud_cluster="${cloud_provider:+hypothesisloop-${cloud_provider}}"
 
 mkdir -p "${bin}" "${run}"
 export HYPOTHESISLOOP_CONFIG="${repo}/${settings}"
@@ -135,25 +138,25 @@ render_settings() {
 # environment of the one process that needs it.
 render_runtime_configs() {
   local value
+  # Which vendor rents is the provider section of each config and nothing else: the control
+  # plane, the harness and the processes' own loops are the same for every one.
   sed -e "s|^cluster_name: .*$|cluster_name: ${cloud_cluster}|" \
       -e "s|^api_url: .*$|api_url: ${public_api}|" \
       -e "s|^job_image: .*$|job_image: ${registry}/hypothesisloop-job:${tag}|" \
       -e "s|^environments_repository: .*$|environments_repository: ${HL_ENVIRONMENTS_REPOSITORY}|" \
-      -e "s|^  account_id: .*$|  account_id: \"$(lib_env_value VAST_ACCOUNT_ID)\"|" \
-      runtime/cloud/settings/cloud-agent.vast.yaml > "${bin}/cloud-agent.yaml"
-  # Which vendor runs hosted agents is this one section of the launcher's config and nothing
-  # else: the control plane, the harness and the launcher's own loop are the same for both.
+      -e "s|^  account_id: .*$|  account_id: \"$(lib_env_value CLOUD_COMPUTE_VAST_ACCOUNT_ID)\"|" \
+      "runtime/cloud/settings/cloud-agent.${cloud_provider}.yaml" > "${bin}/cloud-agent.yaml"
   local sandbox_settings
   case "${sandbox_provider}" in
-    fly) sandbox_settings="{api_token_env: FLY_API_TOKEN, app: $(lib_env_value FLY_APP), region: ams, cpu_kind: performance}" ;;
+    fly) sandbox_settings="{api_token_env: FLY_API_TOKEN, app: $(lib_env_value SANDBOX_FLY_APP), region: ams, cpu_kind: performance}" ;;
     e2b) sandbox_settings="{api_key_env: E2B_API_KEY, lifetime_seconds: 3600}" ;;
   esac
   sed -e "s|^api_url: .*$|api_url: http://localhost:8081|" \
       -e "s|^  name: example$|  name: ${sandbox_provider}|" \
       -e "s|^  settings: {}$|  settings: ${sandbox_settings}|" \
       runtime/cloud/settings/agent-launcher.yaml > "${bin}/agent-launcher.yaml"
-  for value in "cluster_name: ${cloud_cluster}" "api_url: ${public_api}" "job_image: ${registry}/hypothesisloop-job:${tag}" "environments_repository: ${HL_ENVIRONMENTS_REPOSITORY}" "account_id: \"$(lib_env_value VAST_ACCOUNT_ID)\""; do
-    grep -qF -- "${value}" "${bin}/cloud-agent.yaml" || { echo "dev: runtime/cloud/settings/cloud-agent.vast.yaml changed shape, '${value}' was not rendered" >&2; exit 1; }
+  for value in "cluster_name: ${cloud_cluster}" "api_url: ${public_api}" "job_image: ${registry}/hypothesisloop-job:${tag}" "environments_repository: ${HL_ENVIRONMENTS_REPOSITORY}" "account_id: \"$(lib_env_value CLOUD_COMPUTE_VAST_ACCOUNT_ID)\""; do
+    grep -qF -- "${value}" "${bin}/cloud-agent.yaml" || { echo "dev: runtime/cloud/settings/cloud-agent.${cloud_provider}.yaml changed shape, '${value}' was not rendered" >&2; exit 1; }
   done
   for value in "api_url: http://localhost:8081" "  name: ${sandbox_provider}" "  settings: ${sandbox_settings}"; do
     grep -qF -- "${value}" "${bin}/agent-launcher.yaml" || { echo "dev: runtime/cloud/settings/agent-launcher.yaml changed shape, '${value}' was not rendered" >&2; exit 1; }
@@ -161,18 +164,37 @@ render_runtime_configs() {
   launcher="$(sed -n 's/^launcher_name: *//p' "${bin}/agent-launcher.yaml")"
 }
 
+# Each provider of .env is one its role knows, and each key that provider reads is set.
 hosted_inputs() {
-  local missing=() key tunnels sandbox_keys
-  sandbox_provider="$(lib_env_value HOSTED_SANDBOX_PROVIDER)"
+  local missing=() key tunnels provider_keys
+  sandbox_provider="$(lib_env_value SANDBOX_PROVIDER)"
   case "${sandbox_provider}" in
-    fly) sandbox_keys="FLY_APP FLY_DEPLOY_TOKEN" ;;
-    e2b) sandbox_keys="E2B_API_KEY" ;;
+    fly) provider_keys="SANDBOX_FLY_APP SANDBOX_FLY_DEPLOY_TOKEN" ;;
+    e2b) provider_keys="SANDBOX_E2B_API_KEY" ;;
     *)
-      echo "dev: .env sets HOSTED_SANDBOX_PROVIDER to '${sandbox_provider}', and hosted agents run on fly or e2b" >&2
+      echo "dev: .env sets SANDBOX_PROVIDER to '${sandbox_provider}', and hosted agents run on fly or e2b" >&2
       exit 1
       ;;
   esac
-  for key in IMAGE_TAG GCP_PROJECT REGISTRY_LOCATION REGISTRY_REPOSITORY ${sandbox_keys} VAST_API_KEY VAST_ACCOUNT_ID CLAUDE_CODE_OAUTH_TOKEN; do
+  case "${cloud_provider}" in
+    vast) provider_keys+=" CLOUD_COMPUTE_VAST_API_KEY CLOUD_COMPUTE_VAST_ACCOUNT_ID" ;;
+    *)
+      echo "dev: .env sets CLOUD_COMPUTE_PROVIDER to '${cloud_provider}', and cloud-agent rents on vast" >&2
+      exit 1
+      ;;
+  esac
+  case "$(lib_env_value MODEL_PROVIDER)" in
+    anthropic) provider_keys+=" MODEL_ANTHROPIC_OAUTH_TOKEN" ;;
+    *)
+      echo "dev: .env sets MODEL_PROVIDER to '$(lib_env_value MODEL_PROVIDER)', and hosted agents run on anthropic" >&2
+      exit 1
+      ;;
+  esac
+  if [[ -z "${HL_REGISTRY}" ]]; then
+    echo "dev: .env names no CONTAINER_REGISTRY_PROVIDER, the registry the images under IMAGE_TAG are in" >&2
+    exit 1
+  fi
+  for key in IMAGE_TAG ${provider_keys}; do
     [[ -n "$(lib_env_value "${key}")" ]] || missing+=("${key}")
   done
   if [[ ${#missing[@]} -gt 0 ]]; then
@@ -184,8 +206,7 @@ hosted_inputs() {
   public_metrics="$(awk '$1 == "metric-controller" { print $2 }' <<<"${tunnels}")"
   public_store="$(awk '$1 == "object-store" { print $2 }' <<<"${tunnels}")"
   public_git="$(awk '$1 == "git" { print $2 }' <<<"${tunnels}")"
-  # The registry's address, composed from the three keys of .env that name it.
-  registry="$(lib_env_value REGISTRY_LOCATION)-docker.pkg.dev/$(lib_env_value GCP_PROJECT)/$(lib_env_value REGISTRY_REPOSITORY)"
+  registry="${HL_REGISTRY}"
   tag="$(lib_env_value IMAGE_TAG)"
 }
 
@@ -288,8 +309,10 @@ case "${action}" in
     local_cluster enable
     # Nor is the cloud cluster offered to every org while nothing can rent for it: hosted mode
     # shares it again. A job placed on it goes back to the queue.
-    lib_hl_admin cluster add "${cloud_cluster}" default >/dev/null
-    lib_hl_admin cluster share "${cloud_cluster}" off >/dev/null
+    if [[ -n "${cloud_cluster}" ]]; then
+      lib_hl_admin cluster add "${cloud_cluster}" default >/dev/null
+      lib_hl_admin cluster share "${cloud_cluster}" off >/dev/null
+    fi
     start_ui
     echo "dev: API http://localhost:8081, UI http://localhost:3000"
     status
@@ -309,10 +332,10 @@ case "${action}" in
     lib_hl_admin cluster share "${cloud_cluster}" on >/dev/null
     launcher_token="$(lib_hl_admin launcher add "${launcher}")"
     CLOUD_AGENT_CONFIG="${repo}/${bin}/cloud-agent.yaml" RUNTIME_TOKEN="${runtime_token}" \
-      VAST_API_KEY="$(lib_env_value VAST_API_KEY)" start cloud-agent "${bin}/cloud-agent"
+      VAST_API_KEY="$(lib_env_value CLOUD_COMPUTE_VAST_API_KEY)" start cloud-agent "${bin}/cloud-agent"
     AGENT_LAUNCHER_CONFIG="${repo}/${bin}/agent-launcher.yaml" LAUNCHER_TOKEN="${launcher_token}" \
-      FLY_API_TOKEN="$(lib_env_value FLY_DEPLOY_TOKEN)" E2B_API_KEY="$(lib_env_value E2B_API_KEY)" \
-      CLAUDE_CODE_OAUTH_TOKEN="$(lib_env_value CLAUDE_CODE_OAUTH_TOKEN)" \
+      FLY_API_TOKEN="$(lib_env_value SANDBOX_FLY_DEPLOY_TOKEN)" E2B_API_KEY="$(lib_env_value SANDBOX_E2B_API_KEY)" \
+      CLAUDE_CODE_OAUTH_TOKEN="$(lib_env_value MODEL_ANTHROPIC_OAUTH_TOKEN)" \
       start agent-launcher "${bin}/agent-launcher"
     must_stay_up cloud-agent
     must_stay_up agent-launcher

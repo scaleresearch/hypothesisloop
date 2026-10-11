@@ -15,6 +15,7 @@ written as ${NAME}: both services replace it from their environment, which the S
   (list "runtimes" "metrics_url" (required "runtimes.metricsURL is required: the address a cluster's runtime reaches metrics-service at" .Values.runtimes.metricsURL))
   (list "runtimes" "registry" (required "images.registry is required: pass the REGISTRY `make images` pushed to" .Values.images.registry))
   (list "runtimes" "image_tag" (required "images.tag is required: pass the TAG `make images` built" .Values.images.tag))
+  (list "data_store" "provider" (required "objectStore.provider is required: how the store creates each job's key" .Values.objectStore.provider))
   (list "data_store" "endpoint" (required "objectStore.endpoint is required: the address every job and agent is handed to reach the object store at" .Values.objectStore.endpoint))
   (list "data_store" "control_plane_endpoint" (include "hypothesisloop.objectStoreControlPlaneEndpoint" .))
   (list "data_store" "access_key_id" "${OBJECT_STORE_ACCESS_KEY_ID}")
@@ -56,12 +57,16 @@ The staged file has no environments section: the chart adds the one the values n
 {{- end }}
 {{- with .Values.environments }}
 {{- if .repository }}
-{{- $raw = printf "%s\nenvironments:\n  repository: %s\n  pusher: %s\n  puller: %s\n" (trimSuffix "\n" $raw)
+{{- if eq .provider "gcp" }}
+{{- $raw = printf "%s\nenvironments:\n  repository: %s\n  provider: gcp\n  gcp:\n    pusher: %s\n    puller: %s\n" (trimSuffix "\n" $raw)
   (toJson .repository)
-  (toJson (required "environments.pusher is required with environments.repository: the service account that writes to it" .pusher))
-  (toJson (required "environments.puller is required with environments.repository: the service account that reads it" .puller)) }}
-{{- else if or .pusher .puller }}
-{{- fail "environments.pusher and environments.puller are set without environments.repository, the repository they push to and pull from" }}
+  (toJson (required "environments.gcp.pusher is required with environments.provider gcp: the service account that writes to the repository" .gcp.pusher))
+  (toJson (required "environments.gcp.puller is required with environments.provider gcp: the service account that reads it" .gcp.puller)) }}
+{{- else }}
+{{- fail (printf "environments.provider is %q, and with environments.repository it is gcp" .provider) }}
+{{- end }}
+{{- else if or .provider .gcp.pusher .gcp.puller }}
+{{- fail "environments.provider or its section is set without environments.repository, the repository they push to and pull from" }}
 {{- end }}
 {{- end }}
 apiVersion: v1

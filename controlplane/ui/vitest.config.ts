@@ -10,8 +10,9 @@ export default defineConfig({
     include: ['src/**/*.test.{ts,tsx}'],
     env: {
       NEXT_PUBLIC_API_URL: 'http://api.test',
-      NEXT_PUBLIC_SUPABASE_URL: 'http://identity.test',
-      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test',
+      NEXT_PUBLIC_IDENTITY_PROVIDER: 'supabase',
+      NEXT_PUBLIC_IDENTITY_SUPABASE_URL: 'http://identity.test',
+      NEXT_PUBLIC_IDENTITY_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test',
       NEXT_PUBLIC_SIGN_IN_PROVIDERS: 'github,google,apple',
     },
     setupFiles: ['src/test-setup.ts'],

@@ -125,16 +125,16 @@ func TestEnvironmentsOfTheValuesReachTheConfigWithTheGoogleIdentityThatMintsThei
 		}
 	}
 	files := googleCredentialFiles(release, secretNames[charttest.External])
-	if len(files) != 1 || files[env["GOOGLE_APPLICATION_CREDENTIALS"]] != "GOOGLE_CREDENTIALS" {
-		t.Errorf("GOOGLE_APPLICATION_CREDENTIALS = %q among the mounted files %v, want the one file of Secret key GOOGLE_CREDENTIALS", env["GOOGLE_APPLICATION_CREDENTIALS"], files)
+	if len(files) != 1 || files[env["GOOGLE_APPLICATION_CREDENTIALS"]] != "ENVIRONMENTS_GCP_CREDENTIALS" {
+		t.Errorf("GOOGLE_APPLICATION_CREDENTIALS = %q among the mounted files %v, want the one file of Secret key ENVIRONMENTS_GCP_CREDENTIALS", env["GOOGLE_APPLICATION_CREDENTIALS"], files)
 	}
-	if _, known := charttest.Secret["GOOGLE_CREDENTIALS"]; !known {
-		t.Error("charttest.Secret has no GOOGLE_CREDENTIALS")
+	if _, known := charttest.Secret["ENVIRONMENTS_GCP_CREDENTIALS"]; !known {
+		t.Error("charttest.Secret has no ENVIRONMENTS_GCP_CREDENTIALS")
 	}
 	for _, deployment := range configLoaders {
 		cfg := loadRendered(t, release, charttest.External, deployment)
-		want := config.EnvironmentsConfig{Repository: "europe-west1-docker.pkg.dev/made-up-project/hypothesisloop-environments/environment",
-			Pusher: "env-pusher@made-up-project.iam.gserviceaccount.com", Puller: "env-puller@made-up-project.iam.gserviceaccount.com"}
+		want := config.EnvironmentsConfig{Repository: "europe-west1-docker.pkg.dev/made-up-project/hypothesisloop-environments/environment", Provider: config.RegistryProviderGCP,
+			GCP: config.GCPRegistryConfig{Pusher: "env-pusher@made-up-project.iam.gserviceaccount.com", Puller: "env-puller@made-up-project.iam.gserviceaccount.com"}}
 		if cfg.Environments == nil || *cfg.Environments != want {
 			t.Errorf("%s: environments = %+v, want the values'", deployment, cfg.Environments)
 		}
@@ -227,16 +227,18 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		"no agent image":              {charttest.InCluster, `agents.image=""`, "agents.image is required"},
 		"no API address":              {charttest.InCluster, `publicAPIURL=""`, "publicAPIURL is required"},
 		"an environment builder":      {charttest.InCluster, `environmentBuilder.address=tcp://builder.example.invalid:31234`, "environmentBuilder"},
-		"environments with no pusher": {charttest.External, `environments.pusher=""`, "environments.pusher is required"},
-		"environments with no puller": {charttest.External, `environments.puller=""`, "environments.puller is required"},
+		"environments with no pusher": {charttest.External, `environments.gcp.pusher=""`, "environments.gcp.pusher is required"},
+		"environments with no puller": {charttest.External, `environments.gcp.puller=""`, "environments.gcp.puller is required"},
+		"environments of no provider": {charttest.External, `environments.provider=""`, "with environments.repository it is gcp"},
 		"accounts with no repository": {charttest.External, `environments.repository=""`, "without environments.repository"},
 		"the API address per reader":  {charttest.InCluster, `agents.apiURL=http://api.example.invalid`, "apiURL"},
 		"no runtime metrics address":  {charttest.InCluster, `runtimes.metricsURL=""`, "runtimes.metricsURL is required"},
 		"no object store address":     {charttest.InCluster, `objectStore.endpoint=""`, "objectStore.endpoint is required"},
 		"a store elsewhere, unnamed":  {charttest.InCluster, `objectStore.enabled=false`, "objectStore.controlPlaneEndpoint is required"},
 		"two addresses for one store": {charttest.InCluster, `objectStore.controlPlaneEndpoint="http://store.example.invalid:9000"`, "objectStore.controlPlaneEndpoint is set while"},
-		"no Supabase address":         {charttest.InCluster, `ui.supabaseURL=""`, "ui.supabaseURL is required"},
-		"no publishable key":          {charttest.InCluster, `ui.supabasePublishableKey=""`, "ui.supabasePublishableKey is required"},
+		"no sign-in service":          {charttest.InCluster, `ui.identity.provider=""`, "with ui.enabled it is supabase"},
+		"no Supabase address":         {charttest.InCluster, `ui.identity.supabase.url=""`, "ui.identity.supabase.url is required"},
+		"no publishable key":          {charttest.InCluster, `ui.identity.supabase.publishableKey=""`, "ui.identity.supabase.publishableKey is required"},
 		"cloud-agent without config":  {charttest.InCluster, `cloudAgent.enabled=true`, "cloudAgent.config is required"},
 		"launcher without config":     {charttest.InCluster, `agentLauncher.enabled=true`, "agentLauncher.config is required"},
 		"cloud-agent with no cluster": {charttest.External, `cloudAgent.clusterName=""`, "cloudAgent.clusterName is required"},

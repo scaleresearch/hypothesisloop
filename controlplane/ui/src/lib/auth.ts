@@ -4,11 +4,17 @@ import { isAuthRetryableFetchError } from '@supabase/supabase-js'
 
 // Next.js inlines a NEXT_PUBLIC_ variable only where it is named in full, so each is read here
 // and nowhere else.
+// The sign-in service is a Supabase project: NEXT_PUBLIC_IDENTITY_PROVIDER names it, so a
+// deployment states which service it signs people in with.
 function config(): { url: string; key: string } {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-  if (!url) throw new Error('NEXT_PUBLIC_SUPABASE_URL is not set: copy .env.example to .env.local and fill it in')
-  if (!key) throw new Error('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY is not set: copy .env.example to .env.local and fill it in')
+  const provider = process.env.NEXT_PUBLIC_IDENTITY_PROVIDER
+  if (provider !== 'supabase') {
+    throw new Error(`NEXT_PUBLIC_IDENTITY_PROVIDER is ${provider ? `'${provider}'` : 'not set'}, and the one sign-in service this UI knows is supabase: set it in .env.local, as .env.example shows`)
+  }
+  const url = process.env.NEXT_PUBLIC_IDENTITY_SUPABASE_URL
+  const key = process.env.NEXT_PUBLIC_IDENTITY_SUPABASE_PUBLISHABLE_KEY
+  if (!url) throw new Error('NEXT_PUBLIC_IDENTITY_SUPABASE_URL is not set: copy .env.example to .env.local and fill it in')
+  if (!key) throw new Error('NEXT_PUBLIC_IDENTITY_SUPABASE_PUBLISHABLE_KEY is not set: copy .env.example to .env.local and fill it in')
   return { url, key }
 }
 

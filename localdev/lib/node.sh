@@ -7,14 +7,15 @@
 
 LIB_NODE_TAINT_KEY="hypothesisloop.io/no-workload"
 LIB_NODE_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "${LIB_NODE_REPO}/localdev/lib/clusters.sh"
 
-# lib_tt_node <context>: the node of the Tenstorrent host: TT_NODE from the environment or the
-# repository's .env, else the cluster's k3s server node, which install.sh makes the host itself.
-lib_tt_node() {
-  local node="${TT_NODE:-}"
-  if [[ -z "${node}" && -f "${LIB_NODE_REPO}/.env" ]]; then
-    node="$(set +u; . "${LIB_NODE_REPO}/.env"; printf '%s' "${TT_NODE:-}")"
-  fi
+# lib_host_node <context>: the node of the hardware host the kube context reaches: the node field
+# of the OWNED_COMPUTE_CLUSTERS entry at that context (lib_owned_cluster_at), else the cluster's
+# k3s server node, which a host's install.sh makes the host itself.
+lib_host_node() {
+  local cluster node
+  cluster="$(lib_owned_cluster_at "$1")" || return 1
+  node="$(lib_cluster_field node "${cluster}")"
   if [[ -z "${node}" ]]; then
     node="$(kubectl --context "$1" get nodes -l node-role.kubernetes.io/control-plane -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
   fi

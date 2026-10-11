@@ -1,4 +1,4 @@
-package registrycred
+package gcp
 
 import (
 	"context"

@@ -32,6 +32,7 @@ func withoutGitHost(t *testing.T) string {
 		t.Fatal(err)
 	}
 	rendered := strings.ReplaceAll(string(b), Placeholder+"HOST-ADDRESS", "host.example.invalid")
+	rendered = strings.ReplaceAll(rendered, Placeholder+"UI-ORIGIN", "http://localhost:3000")
 	return strings.ReplaceAll(rendered, Placeholder+"IMAGE-TAG", "abc1234")
 }
 
@@ -533,8 +534,10 @@ func TestAnAcceleratorTypeDeclaresWhatEveryJobOnItNeeds(t *testing.T) {
 const environmentsSection = `
 environments:
   repository: europe-west1-docker.pkg.dev/project/hypothesisloop-environments/environment
-  pusher: env-pusher@project.iam.gserviceaccount.com
-  puller: env-puller@project.iam.gserviceaccount.com
+  provider: gcp
+  gcp:
+    pusher: env-pusher@project.iam.gserviceaccount.com
+    puller: env-puller@project.iam.gserviceaccount.com
 `
 
 func TestEnvironmentsAreLeftOutOrStatedWhole(t *testing.T) {
@@ -552,12 +555,14 @@ func TestEnvironmentsAreLeftOutOrStatedWhole(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load with the section: %v", err)
 	}
-	if want := (EnvironmentsConfig{Repository: "europe-west1-docker.pkg.dev/project/hypothesisloop-environments/environment",
-		Pusher: "env-pusher@project.iam.gserviceaccount.com", Puller: "env-puller@project.iam.gserviceaccount.com"}); *cfg.Environments != want {
+	if want := (EnvironmentsConfig{Repository: "europe-west1-docker.pkg.dev/project/hypothesisloop-environments/environment", Provider: RegistryProviderGCP,
+		GCP: GCPRegistryConfig{Pusher: "env-pusher@project.iam.gserviceaccount.com", Puller: "env-puller@project.iam.gserviceaccount.com"}}); *cfg.Environments != want {
 		t.Fatalf("environments = %+v, want %+v", *cfg.Environments, want)
 	}
 	for name, replace := range map[string][2]string{
-		"no pusher":                   {"  pusher: env-pusher@project.iam.gserviceaccount.com\n", ""},
+		"no pusher":                   {"    pusher: env-pusher@project.iam.gserviceaccount.com\n", ""},
+		"no provider":                 {"  provider: gcp\n", ""},
+		"an unknown provider":         {"provider: gcp", "provider: elsewhere"},
 		"a puller that is no account": {"env-puller@project.iam.gserviceaccount.com", "someone@example.com"},
 		"a repository with no path":   {"europe-west1-docker.pkg.dev/project/hypothesisloop-environments/environment", "europe-west1-docker.pkg.dev"},
 		"a repository with a scheme":  {"europe-west1-docker.pkg.dev/project", "https://europe-west1-docker.pkg.dev/project"},

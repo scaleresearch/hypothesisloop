@@ -2,18 +2,9 @@ package objectstore
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/pbkdf2"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base32"
-	"encoding/binary"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -36,21 +27,15 @@ func NewDataKey() (domain.DataKey, error) {
 	return domain.DataKey{AccessKeyID: enc.EncodeToString(access), SecretAccessKey: enc.EncodeToString(secret)}, nil
 }
 
-const (
-	addServiceAccountPath    = "/minio/admin/v3/add-service-account"
-	deleteServiceAccountPath = "/minio/admin/v3/delete-service-account"
-)
-
-type addServiceAccountRequest struct {
-	Policy      json.RawMessage `json:"policy"`
-	AccessKey   string          `json:"accessKey"`
-	SecretKey   string          `json:"secretKey"`
-	Description string          `json:"description"`
+// KeyIssuer registers the data keys jobs and agents reach the store with, each limited by an IAM
+// policy document, and takes them out again. How is the store's own: one sub-package per provider.
+type KeyIssuer interface {
+	CreateKey(ctx context.Context, key domain.DataKey, policy []byte, description string) error
+	DeleteKey(ctx context.Context, accessKeyID string) error
 }
 
-// CreateDataKey registers key with the store as a service account of the control plane's own key,
-// limited by JobPolicy. This is the MinIO admin API (Silo, MinIO, AIStor). The store refuses an
-// access key that already exists, so a key is never silently redefined.
+// CreateDataKey registers key with the store, limited by JobPolicy. The store refuses an access
+// key that already exists, so a key is never silently redefined.
 func (c *Client) CreateDataKey(ctx context.Context, key domain.DataKey, platformExperimentID, agentID, experimentID string) error {
 	policy, err := JobPolicy(c.Bucket, platformExperimentID, agentID, experimentID)
 	if err != nil {
@@ -72,20 +57,7 @@ func (c *Client) CreateAgentDataKey(ctx context.Context, key domain.DataKey, pla
 // which it opens nothing. A key the store no longer has is deleted already, so a removal whose
 // first attempt lost the store's answer can be repeated.
 func (c *Client) DeleteDataKey(ctx context.Context, accessKeyID string) error {
-	req, err := c.signedRequest(ctx, http.MethodDelete, deleteServiceAccountPath, map[string]string{"accessKey": accessKeyID}, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := c.do(req)
-	if err != nil {
-		return fmt.Errorf("objectstore: delete data key %s: %w", accessKeyID, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("objectstore: delete data key %s: status %d: %s", accessKeyID, resp.StatusCode, strings.TrimSpace(string(msg)))
-	}
-	return nil
+	return c.keys.DeleteKey(ctx, accessKeyID)
 }
 
 func (c *Client) createKey(ctx context.Context, key domain.DataKey, policy Policy, description string) error {
@@ -93,68 +65,5 @@ func (c *Client) createKey(ctx context.Context, key domain.DataKey, policy Polic
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(addServiceAccountRequest{
-		Policy: json.RawMessage(document), AccessKey: key.AccessKeyID, SecretKey: key.SecretAccessKey,
-		Description: description,
-	})
-	if err != nil {
-		return fmt.Errorf("objectstore: encode data key request: %w", err)
-	}
-	encrypted, err := encryptAdminBody(c.SecretAccessKey, body)
-	if err != nil {
-		return err
-	}
-	req, err := c.signedRequest(ctx, http.MethodPut, addServiceAccountPath, nil, encrypted)
-	if err != nil {
-		return err
-	}
-	resp, err := c.do(req)
-	if err != nil {
-		return fmt.Errorf("objectstore: create data key for %s: %w", description, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("objectstore: create data key for %s: status %d: %s", description, resp.StatusCode, strings.TrimSpace(string(msg)))
-	}
-	return nil
-}
-
-// adminBodyPBKDF2AESGCM is madmin's algorithm id for a PBKDF2-SHA256 key with AES-256-GCM, which
-// the server decrypts in every mode. It saves vendoring madmin-go and its dependency tree.
-const (
-	adminBodyPBKDF2AESGCM = 0x02
-	adminBodyPBKDF2Rounds = 8192
-)
-
-// encryptAdminBody produces madmin's EncryptData format: salt(32) | algorithm id(1) | nonce(8) |
-// one final sio fragment. sio derives the fragment's associated data by sealing nothing under
-// sequence number 0, then seals the payload under sequence number 1 with the final flag 0x80.
-// One fragment holds up to 16 KiB, far above any request body here.
-func encryptAdminBody(password string, plaintext []byte) ([]byte, error) {
-	if len(plaintext) > 1<<14 {
-		return nil, fmt.Errorf("objectstore: admin request body of %d bytes exceeds one encryption fragment", len(plaintext))
-	}
-	header := make([]byte, 32+1+8)
-	if _, err := rand.Read(header); err != nil {
-		return nil, fmt.Errorf("objectstore: draw admin body salt: %w", err)
-	}
-	header[32] = adminBodyPBKDF2AESGCM
-	key, err := pbkdf2.Key(sha256.New, password, header[:32], adminBodyPBKDF2Rounds, 32)
-	if err != nil {
-		return nil, fmt.Errorf("objectstore: derive admin body key: %w", err)
-	}
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, fmt.Errorf("objectstore: admin body cipher: %w", err)
-	}
-	aead, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, fmt.Errorf("objectstore: admin body cipher: %w", err)
-	}
-	nonce := make([]byte, aead.NonceSize())
-	copy(nonce, header[33:])
-	associated := append([]byte{0x80}, aead.Seal(nil, nonce, nil, nil)...)
-	binary.LittleEndian.PutUint32(nonce[8:], 1)
-	return aead.Seal(header, nonce, plaintext, associated), nil
+	return c.keys.CreateKey(ctx, key, []byte(document), description)
 }

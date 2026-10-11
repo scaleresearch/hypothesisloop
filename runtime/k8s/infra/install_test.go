@@ -40,7 +40,7 @@ func TestInstallHandsHelmTheRuntimeTokenOnStdinAndNeverAsAnArgument(t *testing.T
 	bin, argsFile, stdinFile := fakeBin(t)
 	cmd := exec.Command("bash", "install.sh")
 	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"),
-		"CLUSTER_NAME=edge", "API_URL=http://api", "METRICS_URL=http://metrics", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
+		"CLUSTER_NAME=edge", "API_URL=http://api", "METRICS_URL=http://metrics", "REGISTRY_URL=registry.example.invalid", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("install.sh: %v\n%s", err, out)
@@ -74,7 +74,7 @@ func TestInstallWithBuilderTrueEnablesTheBuilder(t *testing.T) {
 	for builder, want := range map[string]string{"true": "builder.enabled=true\n", "yes": ""} {
 		cmd := exec.Command("bash", "install.sh")
 		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "BUILDER="+builder,
-			"CLUSTER_NAME=edge", "API_URL=http://api", "METRICS_URL=http://metrics", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
+			"CLUSTER_NAME=edge", "API_URL=http://api", "METRICS_URL=http://metrics", "REGISTRY_URL=registry.example.invalid", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
 		out, err := cmd.CombinedOutput()
 		if want == "" {
 			if err == nil {
@@ -238,7 +238,7 @@ func TestInstallLoadsBuildsIntoTheNodeOnlyWithABuilder(t *testing.T) {
 	for builder, ok := range map[string]bool{"true": true, "false": false} {
 		cmd := exec.Command("bash", "install.sh")
 		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "BUILDER="+builder, "BUILDER_NODE_IMAGES=/run/k3s/containerd/containerd.sock",
-			"CLUSTER_NAME=edge", "API_URL=http://api", "METRICS_URL=http://metrics", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
+			"CLUSTER_NAME=edge", "API_URL=http://api", "METRICS_URL=http://metrics", "REGISTRY_URL=registry.example.invalid", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
 		out, err := cmd.CombinedOutput()
 		if !ok {
 			if err == nil {

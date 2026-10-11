@@ -2,15 +2,8 @@ package objectstore
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/pbkdf2"
-	"crypto/sha256"
-	"encoding/binary"
 	"encoding/json"
-	"io"
-	"net/http"
-	"net/http/httptest"
+	"errors"
 	"strings"
 	"testing"
 
@@ -34,115 +27,79 @@ func TestNewDataKeyFitsTheStoresLengthBoundsAndIsFreshEachTime(t *testing.T) {
 	}
 }
 
-// decryptAdminBody is the server side of madmin's format for algorithm 0x02 with one sio fragment,
-// written from the format description independently of encryptAdminBody.
-func decryptAdminBody(t *testing.T, password string, data []byte) []byte {
-	t.Helper()
-	if len(data) < 41 || data[32] != adminBodyPBKDF2AESGCM {
-		t.Fatalf("body is not madmin algorithm 0x02: % x", data[:min(len(data), 41)])
-	}
-	key, err := pbkdf2.Key(sha256.New, password, data[:32], 8192, 32)
-	if err != nil {
-		t.Fatal(err)
-	}
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	aead, err := cipher.NewGCM(block)
-	if err != nil {
-		t.Fatal(err)
-	}
-	nonce := make([]byte, 12)
-	copy(nonce, data[33:41])
-	tag := aead.Seal(nil, nonce, nil, nil)
-	binary.LittleEndian.PutUint32(nonce[8:], 1)
-	plain, err := aead.Open(nil, nonce, data[41:], append([]byte{0x80}, tag...))
-	if err != nil {
-		t.Fatalf("body does not open as one final sio fragment: %v", err)
-	}
-	return plain
+// issued records what the client asks its provider to create and delete.
+type issued struct {
+	key         domain.DataKey
+	policy      Policy
+	description string
+	deleted     string
+	err         error
 }
 
-func TestCreateDataKeySendsTheKeyAndItsPolicyEncryptedToTheAdminAPI(t *testing.T) {
-	var got addServiceAccountRequest
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPut || r.URL.Path != addServiceAccountPath {
-			t.Errorf("request %s %s, want PUT %s", r.Method, r.URL.Path, addServiceAccountPath)
-		}
-		if auth := r.Header.Get("Authorization"); !strings.Contains(auth, "Credential=root/") || !strings.Contains(auth, "/s3/aws4_request") {
-			t.Errorf("Authorization %q is not SigV4 in the s3 scope with the control plane's key", auth)
-		}
-		body, _ := io.ReadAll(r.Body)
-		if err := json.Unmarshal(decryptAdminBody(t, "root-secret", body), &got); err != nil {
-			t.Errorf("decrypted body is not JSON: %v", err)
-		}
-	}))
-	defer srv.Close()
-	client, err := New(srv.URL, srv.URL, "us-east-1", testBucket, "root", "root-secret")
+func (f *issued) CreateKey(_ context.Context, key domain.DataKey, policy []byte, description string) error {
+	f.key, f.description = key, description
+	if err := json.Unmarshal(policy, &f.policy); err != nil {
+		return err
+	}
+	return f.err
+}
+
+func (f *issued) DeleteKey(_ context.Context, accessKeyID string) error {
+	f.deleted = accessKeyID
+	return f.err
+}
+
+func clientIssuing(t *testing.T, keys KeyIssuer) *Client {
+	t.Helper()
+	client, err := New("minio", "http://127.0.0.1:1", "http://127.0.0.1:1", "us-east-1", testBucket, "root", "root-secret")
 	if err != nil {
 		t.Fatal(err)
 	}
+	client.keys = keys
+	return client
+}
+
+func TestCreateDataKeyAsksTheProviderForTheJobsScope(t *testing.T) {
+	keys := &issued{}
 	key := domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"}
-	if err := client.CreateDataKey(context.Background(), key, testPE, testAgent, testJob); err != nil {
+	if err := clientIssuing(t, keys).CreateDataKey(context.Background(), key, testPE, testAgent, testJob); err != nil {
 		t.Fatalf("CreateDataKey: %v", err)
 	}
-	if got.AccessKey != "AK" || got.SecretKey != "SK" {
-		t.Fatalf("store was asked for key %q/%q, want the one stored with the job", got.AccessKey, got.SecretKey)
+	if keys.key != key || keys.description != "job pe-1/agent-a/exp-7/" {
+		t.Fatalf("provider was asked for %+v %q, want the job's key", keys.key, keys.description)
 	}
-	var policy Policy
-	if err := json.Unmarshal(got.Policy, &policy); err != nil {
-		t.Fatalf("policy is not a JSON document: %v", err)
-	}
-	if !allows(policy, "s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-a/exp-7/x") ||
-		allows(policy, "s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-b/exp-9/x") {
-		t.Fatalf("key policy is not the job's write scope: %s", got.Policy)
+	if !allows(keys.policy, "s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-a/exp-7/x") ||
+		allows(keys.policy, "s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-b/exp-9/x") {
+		t.Fatalf("key policy is not the job's write scope: %+v", keys.policy)
 	}
 }
 
-func TestCreateAgentDataKeyAsksForTheAgentsWriteScope(t *testing.T) {
-	var got addServiceAccountRequest
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		if err := json.Unmarshal(decryptAdminBody(t, "root-secret", body), &got); err != nil {
-			t.Errorf("decrypted body is not JSON: %v", err)
-		}
-	}))
-	defer srv.Close()
-	client, err := New(srv.URL, srv.URL, "us-east-1", testBucket, "root", "root-secret")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := client.CreateAgentDataKey(context.Background(), domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"}, testPE, testAgent); err != nil {
+func TestCreateAgentDataKeyAsksTheProviderForTheAgentsScope(t *testing.T) {
+	keys := &issued{}
+	if err := clientIssuing(t, keys).CreateAgentDataKey(context.Background(), domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"}, testPE, testAgent); err != nil {
 		t.Fatalf("CreateAgentDataKey: %v", err)
 	}
-	if got.AccessKey != "AK" || got.SecretKey != "SK" || got.Description != "agent pe-1/agent-a/" {
-		t.Fatalf("store was asked for %q/%q %q", got.AccessKey, got.SecretKey, got.Description)
+	if keys.description != "agent pe-1/agent-a/" {
+		t.Fatalf("provider was asked for %q", keys.description)
 	}
-	var policy Policy
-	if err := json.Unmarshal(got.Policy, &policy); err != nil {
-		t.Fatalf("policy is not a JSON document: %v", err)
-	}
-	if !allows(policy, "s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-a/x") ||
-		allows(policy, "s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-b/x") {
-		t.Fatalf("key policy is not the agent's write scope: %s", got.Policy)
+	if !allows(keys.policy, "s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-a/x") ||
+		allows(keys.policy, "s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-b/x") {
+		t.Fatalf("key policy is not the agent's write scope: %+v", keys.policy)
 	}
 }
 
 // A refusal must reach the submitter as an error: a key the store never created would be stored
 // with the job and hand it credentials that work nowhere.
-func TestCreateDataKeyReportsAStoreRefusal(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-		io.WriteString(w, `{"Code":"XMinioIAMServiceAccountNotAllowed"}`)
-	}))
-	defer srv.Close()
-	client, err := New(srv.URL, srv.URL, "us-east-1", testBucket, "root", "root-secret")
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = client.CreateDataKey(context.Background(), domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"}, testPE, testAgent, testJob)
+func TestCreateDataKeyReportsTheProvidersRefusal(t *testing.T) {
+	keys := &issued{err: errors.New("XMinioIAMServiceAccountNotAllowed")}
+	err := clientIssuing(t, keys).CreateDataKey(context.Background(), domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"}, testPE, testAgent, testJob)
 	if err == nil || !strings.Contains(err.Error(), "XMinioIAMServiceAccountNotAllowed") {
 		t.Fatalf("CreateDataKey = %v, want the store's refusal", err)
+	}
+}
+
+func TestAStoreOfAnUnknownProviderIsRefused(t *testing.T) {
+	if _, err := New("elsewhere", "http://127.0.0.1:1", "http://127.0.0.1:1", "us-east-1", testBucket, "root", "root-secret"); err == nil {
+		t.Fatal("New accepted a provider it has no key issuer for")
 	}
 }

@@ -229,6 +229,11 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "provider": {
+          "enum": [
+            "minio"
+          ]
+        },
         "enabled": {
           "type": "boolean"
         },
@@ -349,11 +354,29 @@
         "enabled": {
           "type": "boolean"
         },
-        "supabaseURL": {
-          "type": "string"
-        },
-        "supabasePublishableKey": {
-          "type": "string"
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "provider": {
+              "enum": [
+                "",
+                "supabase"
+              ]
+            },
+            "supabase": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "publishableKey": {
+                  "type": "string"
+                }
+              }
+            }
+          }
         },
         "replicas": {
           "type": "integer",
@@ -480,11 +503,23 @@
         "repository": {
           "type": "string"
         },
-        "pusher": {
-          "type": "string"
+        "provider": {
+          "enum": [
+            "",
+            "gcp"
+          ]
         },
-        "puller": {
-          "type": "string"
+        "gcp": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "pusher": {
+              "type": "string"
+            },
+            "puller": {
+              "type": "string"
+            }
+          }
         }
       }
     }

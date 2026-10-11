@@ -28,7 +28,7 @@ func listingBytes(t *testing.T, size int64) *objectstore.Client {
 		fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><IsTruncated>false</IsTruncated><Contents><Key>pe-1/agent/exp/ckpt</Key><Size>%d</Size></Contents></ListBucketResult>`, size)
 	}))
 	t.Cleanup(srv.Close)
-	client, err := objectstore.New(srv.URL, srv.URL, "us-east-1", "hl-data", "key", "secret")
+	client, err := objectstore.New("minio", srv.URL, srv.URL, "us-east-1", "hl-data", "key", "secret")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestSubmitWithTheObjectStoreDownAnswers503NamingIt(t *testing.T) {
 		w.WriteHeader(http.StatusBadGateway)
 	}))
 	t.Cleanup(srv.Close)
-	client, err := objectstore.New(srv.URL, srv.URL, "us-east-1", "hl-data", "key", "secret")
+	client, err := objectstore.New("minio", srv.URL, srv.URL, "us-east-1", "hl-data", "key", "secret")
 	if err != nil {
 		t.Fatal(err)
 	}

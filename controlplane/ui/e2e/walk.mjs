@@ -53,8 +53,8 @@ async function main() {
   closers.push(() => proxy.close())
   const ui = spawn(process.execPath, [join(here, '..', 'node_modules', 'next', 'dist', 'bin', 'next'), 'dev', '-p', String(UI_PORT)], {
     cwd: join(here, '..'),
-    env: { ...process.env, NEXT_DIST_DIR: UI_BUILD, NEXT_PUBLIC_API_URL: API, NEXT_PUBLIC_SUPABASE_URL: IDP,
-      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_browser-run', NEXT_PUBLIC_SIGN_IN_PROVIDERS: 'github' },
+    env: { ...process.env, NEXT_DIST_DIR: UI_BUILD, NEXT_PUBLIC_API_URL: API, NEXT_PUBLIC_IDENTITY_PROVIDER: 'supabase', NEXT_PUBLIC_IDENTITY_SUPABASE_URL: IDP,
+      NEXT_PUBLIC_IDENTITY_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_browser-run', NEXT_PUBLIC_SIGN_IN_PROVIDERS: 'github' },
     stdio: ['ignore', 'ignore', 'inherit'],
   })
   closers.push(async () => {
