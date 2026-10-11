@@ -656,6 +656,7 @@ var platformExperimentCommands = []subcommand{
 	{"propose", "a draft's planner: propose the experiment the draft becomes", cmdPlatformExperimentsPropose, asAgent},
 	{"decline", "a draft's planner: say why no experiment is proposed", cmdPlatformExperimentsDecline, asAgent},
 	{"close", "end the platform experiment for good", cmdPlatformExperimentsClose, ofTheRun},
+	{"reopen", "set a closed platform experiment running again until TIME, as it was", cmdPlatformExperimentsReopen, ofPeople},
 	{"summary", "write the summary of the platform experiment", cmdPlatformExperimentsSummary, ofTheRun},
 	{"agents", "the agents of a platform experiment", group("platform-experiments agents", agentsCommands), everyone},
 }
@@ -1187,6 +1188,43 @@ in the platform's record of the close, and told to the coordinator and the agent
 	}
 	var out any
 	if err := c.Do("POST", "/platform-experiments/"+url.PathEscape(id)+"/close", body, &out); err != nil {
+		return fail(stderr, err)
+	}
+	printJSON(stdout, out)
+	return 0
+}
+
+func cmdPlatformExperimentsReopen(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("platform-experiments reopen", `usage: hl platform-experiments reopen [--platform-experiment PE] --ends-at TIME [--coordinator-model M]
+
+Staff only. Sets a closed platform experiment, whose run started, running again until TIME
+(RFC 3339) as the same run: its hypotheses, jobs, branches, brief, baseline and agents stay. Every
+agent whose run ended only with the close is at work again, and so is a hosted coordinator, on
+--coordinator-model when it is given. An agent that finished or was cut before the close stays as
+it ended.`, stderr)
+	endsAt := fs.String("ends-at", "", "when the run closes again, RFC 3339")
+	model := fs.String("coordinator-model", "", "the model the hosted coordinator runs on from now (default the one it has)")
+	pe := experimentFlag(fs)
+	if err := parseNone(fs, args); err != nil {
+		return parseExit(err)
+	}
+	if *endsAt == "" {
+		return parseExit(misuse(fs, "want --ends-at"))
+	}
+	end, err := time.Parse(time.RFC3339, *endsAt)
+	if err != nil {
+		return parseExit(misuse(fs, "--ends-at %q is no RFC 3339 time, such as 2026-10-12T18:00:00Z", *endsAt))
+	}
+	id, err := namedExperiment(fs, c, *pe)
+	if err != nil {
+		return parseExit(err)
+	}
+	body := map[string]any{"ends_at": end.Format(time.RFC3339)}
+	if *model != "" {
+		body["coordinator_model"] = *model
+	}
+	var out any
+	if err := c.Do("POST", "/platform-experiments/"+url.PathEscape(id)+"/reopen", body, &out); err != nil {
 		return fail(stderr, err)
 	}
 	printJSON(stdout, out)

@@ -987,6 +987,38 @@ func TestAMachineThePlatformReleasedIsNotOneItsProviderLost(t *testing.T) {
 	}
 }
 
+// A run closed and reopened is wanted again by its rows alone: once its close's wind-down passed
+// and its machines were released, an agent and a coordinator of a running run with no machine are
+// asked for one, with no restart spent and nothing read as lost.
+func TestAnAgentAndACoordinatorWhoseMachinesWereReleasedAreAskedForAgainOnceTheirRunGoesOn(t *testing.T) {
+	store := oneAgentAndACoordinator()
+	first := mustReconcile(t, store, observed())
+	var running []ObservedInstance
+	for _, instance := range first.Instances {
+		running = append(running, ObservedInstance{Name: instance.Name, State: "running"})
+	}
+	mustReconcile(t, store, observed(running...))
+
+	store.ByLauncher["main"][0].Ended, store.Coordinators[0].Ending = domain.RunEndClosed, true
+	if closing := mustReconcile(t, store, observed(running...)); len(closing.Instances) != 0 || len(closing.Ending) != 2 {
+		t.Fatalf("closed: answer = %+v, want both machines ending", closing)
+	}
+	store.Over = map[string]domain.RunEnd{"pe-1/ag-1": domain.RunEndClosed}
+	mustReconcile(t, store, observed())
+	store.Coordinators[0].Instance.Name, store.Coordinators[0].Instance.EndReason = "", string(db.InstanceReleased)
+
+	store.Over, store.ByLauncher["main"][0].Ended, store.Coordinators[0].Ending = nil, "", false
+	again := mustReconcile(t, store, observed())
+	if len(again.Instances) != 2 || len(again.Ending) != 0 {
+		t.Fatalf("reopened: answer = %+v, want a machine for the agent and one for the coordinator", again)
+	}
+	for _, agent := range []string{"ag-1", ""} {
+		if recorded := store.Find("pe-1", agent); recorded.Name == "" || recorded.Restarts != 0 || recorded.Stopped || strings.Contains(recorded.ExitLog, "lost") {
+			t.Fatalf("%q: recorded %+v, want a machine asked for with no restart spent", agent, recorded)
+		}
+	}
+}
+
 // Restarts are spent under one image and one launcher config. What stopped an agent may have
 // been either, for every agent of every org at once, so a change of either starts it again.
 func TestAStoppedAgentIsAskedForAgainOnceTheImageOrTheLaunchersInputsChange(t *testing.T) {

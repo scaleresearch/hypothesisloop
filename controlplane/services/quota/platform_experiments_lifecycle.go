@@ -1231,6 +1231,46 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, by *d
 	return s.stored(ctx, id)
 }
 
+// Reopen sets the closed platform experiment id, whose run started, running again until endsAt as
+// the same run: its registry, jobs, branches, brief, baseline and agents stay, and what the close
+// wrote goes. Its agents and coordinator are live again by the rows alone: those whose run ended
+// only with the close have no end of their own, while one that finished or was cut before keeps
+// it. endsAt is held to the length a create is held to, counted from the run's start.
+// coordinatorModel, resolved by the caller, moves a hosted coordinator to that model, and empty
+// keeps the one stored.
+func (s *PlatformExperimentsService) Reopen(ctx context.Context, id string, endsAt time.Time, coordinatorModel string) (*domain.PlatformExperiment, error) {
+	pe, err := s.stored(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case pe.Status != domain.PlatformExpClosed:
+		return nil, invalidTransition("platform experiment %s is %s: only a closed one is reopened", id, pe.Status)
+	case pe.StartedAt.IsZero():
+		return nil, invalidTransition("platform experiment %s closed before its run started (close_reason %s): there is no run to continue, create it again", id, pe.CloseReason)
+	case !endsAt.After(time.Now()):
+		return nil, refuseUpdate(422, "invalid_length", "ends_at %s has passed: state a time ahead", endsAt.UTC().Format(time.RFC3339))
+	case coordinatorModel != "" && !pe.CoordinatorHosted:
+		return nil, refuseSignup(400, "invalid_request", "coordinator_model is set and platform experiment %s has no hosted coordinator", id)
+	}
+	if length := endsAt.Sub(pe.StartsAt); length > s.cfg.MaxRunLength {
+		return nil, refuseUpdate(422, "run_too_long", "ends_at %s would have the run, started at %s, last %.1f days, and a platform experiment runs at most %g days (quota.max_platform_experiment_days): state an earlier ends_at",
+			endsAt.UTC().Format(time.RFC3339), pe.StartsAt.UTC().Format(time.RFC3339), length.Hours()/24, s.cfg.MaxRunLength.Hours()/24)
+	}
+	durationHours := endsAt.Sub(pe.StartsAt).Hours()
+	err = s.store.ReopenPlatformExperiment(ctx, id, endsAt, durationHours, coordinatorModel)
+	switch {
+	case errors.Is(err, db.ErrPlatformExperimentNotFound):
+		return nil, noPlatformExperiment(id)
+	case errors.Is(err, db.ErrNotReopenable):
+		return nil, invalidTransition("platform experiment %s is continued by a later run, or changed since it was read: a continued run stays closed", id)
+	case err != nil:
+		return nil, fmt.Errorf("reopen: %w", err)
+	}
+	s.logger.Info("platform experiment reopened", zap.String("platform_experiment_id", id), zap.Time("ends_at", endsAt))
+	return s.stored(ctx, id)
+}
+
 // closeRecordWindow is how long after its close a platform experiment whose jobs have not all
 // settled waits for its record of the close.
 const closeRecordWindow = 24 * time.Hour

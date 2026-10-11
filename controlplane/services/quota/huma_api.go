@@ -501,6 +501,43 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		return peh.Answer(ctx, pe)
 	})
 
+	apidocs.Register(doc, apidocs.AudienceStaff, huma.Operation{
+		OperationID: "reopen-platform-experiment", Method: "POST", Path: "/platform-experiments/{id}/reopen",
+		Summary: "Set a closed platform experiment running again", Tags: []string{"platform-experiments"},
+		Description: "Staff only. A run closed early, for one to redeploy the platform, continues as the same run until ends_at: its hypotheses, jobs, branches, brief, baseline and agents stay as the close left them. " +
+			"closed_at, close_reason, closed_by, close_message, the record of the close and its placements go, and the answer reads running with the new ends_at and duration_hours counted from its start. " +
+			"Every agent whose run ended only with the close is at work again, its machine asked for and its token accepted, and so is a hosted coordinator. One that finished or was cut before the close stays as it ended. " +
+			"Jobs the close evicted stay evicted. Agents are told with platform_experiment.status running and platform_experiment.description, as the run's length changed. " +
+			"coordinator_model moves a hosted coordinator to that model, checked as on a create, and left out keeps the one it has. " +
+			"409 invalid_transition for one that is not closed, one that closed before its run started, and one a later run continues. 422 invalid_length for an ends_at that has passed, run_too_long for one past quota.max_platform_experiment_days from the run's start. " +
+			"400 invalid_request for a coordinator_model on a run with no hosted coordinator.",
+	}, func(ctx context.Context, in *struct {
+		ID   string `path:"id"`
+		Body struct {
+			EndsAt           time.Time `json:"ends_at" doc:"When the run closes again, RFC 3339, in the future."`
+			CoordinatorModel string    `json:"coordinator_model,omitempty" doc:"The model the hosted coordinator runs on from now. Left out, it keeps the one it has."`
+		}
+	}) (*struct{ Body *domain.PlatformExperiment }, error) {
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
+		model := ""
+		if in.Body.CoordinatorModel != "" {
+			if peh.launch.CoordinatorModel == "" {
+				return nil, auth.Internal(peh.logger, "reopen platform experiment failed", errors.New("the handler has no agent launch settings"))
+			}
+			var err error
+			if _, model, err = domain.ResolveAgentLaunch("", in.Body.CoordinatorModel, peh.launch.CoordinatorModel, nil); err != nil {
+				return nil, refuseSignup(400, "invalid_request", "coordinator_model: %s", err)
+			}
+		}
+		pe, err := peh.svc.Reopen(ctx, in.ID, in.Body.EndsAt, model)
+		if err != nil {
+			return nil, peh.refusal("reopen platform experiment", err)
+		}
+		return peh.Answer(ctx, pe)
+	})
+
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment-results", Method: "GET", Path: "/platform-experiments/{id}/results",
 		Summary: "Final standings and operator summary", Tags: []string{"platform-experiments"},

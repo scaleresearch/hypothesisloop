@@ -32,6 +32,10 @@ type PlatformExperimentsStore interface {
 	// ClosePlatformExperiment closes it and records why: by is whose credential asked, nil for
 	// the platform at the end time.
 	ClosePlatformExperiment(ctx context.Context, id string, by *domain.Actor, message string) error
+	// ReopenPlatformExperiment sets a closed run that started running again until endsAt, its
+	// hosted coordinator on coordinatorModel unless it is empty, and takes back what the close
+	// wrote: db.ErrNotReopenable, db.ErrPlatformExperimentNotFound.
+	ReopenPlatformExperiment(ctx context.Context, id string, endsAt time.Time, durationHours float64, coordinatorModel string) error
 	// UpdatePlatformExperiment writes pe only if it is still in expectedStatus — see the db
 	// implementation's comment for why the compare-and-swap matters here.
 	UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus) error

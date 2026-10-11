@@ -1281,7 +1281,7 @@ ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS closed_by_id   TEXT NO
 -- What the caller who closed it said of why, empty when it said nothing.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS close_message  TEXT NOT NULL DEFAULT '';
 -- A coordinator the platform runs: one more machine of coordinator_launcher beside the agents',
--- on coordinator_model. Fixed at creation. The coordinator_instance_* columns say what became
+-- on coordinator_model. Fixed at creation, and changed only by a reopen. The coordinator_instance_* columns say what became
 -- of its machine, exactly as the instance_* columns of experiment_signups do for an agent's.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_hosted             BOOLEAN     NOT NULL DEFAULT false;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_launcher           TEXT        NOT NULL DEFAULT '';
