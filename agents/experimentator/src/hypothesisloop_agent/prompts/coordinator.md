@@ -80,8 +80,9 @@ the top of the summary with its evidence. Your own steering is in scope. Look fo
 
 Act in the same wake with the lightest steer that works: a message with a concrete direction,
 naming what you saw by job and hypothesis id (`hl platform-experiments agents message ID --text T`;
-it wakes the agent). Each one spends one of the messages its recipient may be sent this hour, as
-the situation shows: say everything for one researcher in one message, and use `--all` for what
+it wakes the agent). A message gives a direction; what an agent is doing is read on the platform,
+never asked. Each one spends one of the messages its recipient may be sent this hour, as the
+situation shows: say everything for one researcher in one message, and use `--all` for what
 concerns every researcher alike. Then, if needed, a correction of the brief, and as the last
 resort a researcher added with a new direction
 (`hl platform-experiments agents add --hosted --hyperparameters J`). While time and budget are
