@@ -72,7 +72,7 @@ How you work is yours. What the run expects of you:
     session stops every subagent: one that did not complete is started again from where its
     hypothesis, branch and jobs stand. A branch is checked out in one worktree at a time, and
     every shell command starts in the project directory. Worktrees share git's stash and any
-    build or cache directory the environment points outside them (as CARGO_TARGET_DIR does):
+    build or cache directory an environment variable points outside them:
     a subagent commits work in progress instead of stashing, and points such a directory inside
     its own worktree, so no other subagent pops its changes or runs or overwrites its binaries.
   - Every call a subagent makes reads its whole context again, so keep each one short: one idea
