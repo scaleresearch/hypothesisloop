@@ -72,6 +72,12 @@ How you work is yours. What the run expects of you:
     session stops every subagent: one that did not complete is started again from where its
     hypothesis, branch and jobs stand. A branch is checked out in one worktree at a time, and
     every shell command starts in the project directory.
+  - Every call a subagent makes reads its whole context again, so keep each one short: one idea
+    per subagent, briefed with the facts it needs (the hypothesis, the best commit, what is known
+    to fail) so it need not look them up. New work, a follow-up idea included, goes to a fresh
+    subagent with its own brief, never a resumed one that already ran long. Send a live subagent
+    only what changes its work, never a request for its progress: its end starts your turn and
+    its jobs' updates reach you. Brief each to report once, at its end, in a few lines.
   - A job runs a commit in the image built from `.hypothesisloop/Dockerfile` on the hardware its
     spec asks for, and its metrics are the measurement that counts; its outcome, logs and metrics
     come back through `hl`. Your machine has sudo and none of a job's hardware. `hl env run --

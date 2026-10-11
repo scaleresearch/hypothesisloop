@@ -29,6 +29,16 @@ class ResearcherPromptTest(unittest.TestCase):
         self.assertIn("goes to every subagent it concerns", prompt)
         self.assertIn("keep several independent jobs in flight", prompt)
 
+    # Subagents were 87% of a live run's spend: a lead resumed one with new work until it re-read
+    # 457K on every call, and pinged live ones for progress about 25 times.
+    def test_subagents_are_short_lived_and_quiet(self):
+        cfg = SimpleNamespace(agent_id="ag-1", flavor="generalist", role="researcher", platform_experiment_id="pe-1",
+                              hyperparameters={})
+        prompt = " ".join(core.system_prompt(cfg, "rules", "commands", "https://git/x", "/app/workspace").split())
+        self.assertIn("goes to a fresh subagent with its own brief, never a resumed one", prompt)
+        self.assertIn("never a request for its progress", prompt)
+        self.assertIn("report once, at its end", prompt)
+
     # A researcher's job gained 12% on an idea a person posted, tested under its id, and filed no
     # finding and no verdict, so the idea stayed open, and looked for a summary command it could
     # not find.

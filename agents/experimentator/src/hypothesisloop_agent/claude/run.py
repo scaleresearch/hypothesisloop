@@ -79,6 +79,10 @@ BACKGROUND_COMMAND = ("Commands run in the foreground here. Work that should go 
 SUBAGENT_BACKGROUND_COMMAND = "Commands run in the foreground here: wait for your jobs with `hl job wait ID`."
 # A subagent is given TaskStop too, and could stop its siblings with it.
 SUBAGENT_TASK_STOP = "Only the agent that started you stops a task."
+# A subagent's interim SendMessages each started a turn of its lead over the lead's whole context:
+# 41% of one researcher's reads.
+SUBAGENT_MESSAGE = ("Your final message, when you end, is your report: it reaches the agent that started you then, "
+                    "so send it nothing before.")
 
 # The CLI writes each message as one line, and the SDK ends the session on a line past its bound,
 # 1 MB by default: a researcher whose six subagents read papers lost its session to one.
@@ -260,11 +264,19 @@ async def _wait_hook(hook_input, tool_use_id, context) -> dict:
                                    "permissionDecisionReason": reason}}
 
 
-async def _task_stop_hook(hook_input, tool_use_id, context) -> dict:
-    if not hook_input.get("agent_id"):
-        return {}
-    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                   "permissionDecisionReason": SUBAGENT_TASK_STOP}}
+def _refuse_subagent(reason: str):
+    """A PreToolUse hook that refuses the tool to subagents with reason."""
+    async def hook(hook_input, tool_use_id, context) -> dict:
+        if not hook_input.get("agent_id"):
+            return {}
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                       "permissionDecisionReason": reason}}
+
+    return hook
+
+
+_task_stop_hook = _refuse_subagent(SUBAGENT_TASK_STOP)
+_subagent_message_hook = _refuse_subagent(SUBAGENT_MESSAGE)
 
 
 # The most subagents an agent runs at once. Researchers ran 3 to 10, and each one's end starts a
@@ -1032,7 +1044,8 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
         # The CLI says each prompt again as the turn that takes it up starts, see _answer.
         extra_args={"replay-user-messages": None},
         hooks={"PreToolUse": [HookMatcher(matcher="Bash", hooks=[_wait_hook]),
-                              HookMatcher(matcher="TaskStop", hooks=[_task_stop_hook]), capped["PreToolUse"]],
+                              HookMatcher(matcher="TaskStop", hooks=[_task_stop_hook]),
+                              HookMatcher(matcher="SendMessage", hooks=[_subagent_message_hook]), capped["PreToolUse"]],
                "PostToolUse": [HookMatcher(hooks=[_updates_hook(setup, watch_env, handing)]), _UNDELIVERED_MATCHER,
                                capped["PostToolUse"]],
                "PostToolUseFailure": [_UNDELIVERED_MATCHER, capped["PostToolUseFailure"]]},

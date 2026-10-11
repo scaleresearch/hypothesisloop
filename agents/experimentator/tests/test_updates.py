@@ -546,6 +546,15 @@ class WaitTest(unittest.IsolatedAsyncioTestCase):
         told = (await run._task_stop_hook({**stop, "agent_id": "sub-1"}, "tool-1", {}))["hookSpecificOutput"]
         self.assertEqual((told["permissionDecision"], told["permissionDecisionReason"]), ("deny", run.SUBAGENT_TASK_STOP))
 
+    # A subagent's interim messages each started a turn of its lead over the lead's whole context.
+    async def test_the_agent_messages_a_subagent_and_a_subagent_reports_only_at_its_end(self):
+        from hypothesisloop_agent.claude import run
+
+        send = {"tool_name": "SendMessage", "tool_input": {"to": "a1", "message": "the best moved"}}
+        self.assertEqual(await run._subagent_message_hook(send, "tool-1", {}), {})
+        told = (await run._subagent_message_hook({**send, "agent_id": "sub-1"}, "tool-1", {}))["hookSpecificOutput"]
+        self.assertEqual((told["permissionDecision"], told["permissionDecisionReason"]), ("deny", run.SUBAGENT_MESSAGE))
+
     async def test_a_short_pause_and_a_command_that_only_names_sleep_run(self):
         from hypothesisloop_agent.claude import run
 
