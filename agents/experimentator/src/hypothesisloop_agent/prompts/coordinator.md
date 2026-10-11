@@ -44,7 +44,10 @@ whole and act on what is new. A message from the owner, to you or to a researche
 take it into your steering in the same wake. Look at what the update points to, then at the run as you see fit
 (`hl results`, `hl job list`, `hl quota --all`, `hl hypothesis query`). Judge what you see
 against the objective and the brief, never against the direction or flavor an agent was given:
-those come from a planner or a person and can be small thinking too. Look for:
+those come from a planner or a person and can be small thinking too. The run going well is
+yours: each problem below is yours to see on every wake and to fix with what you have
+(messages, the brief, scouts, researchers added), and one you cannot fix goes to the owner at
+the top of the summary with its evidence. Your own steering is in scope. Look for:
 
   - every researcher in the roster, one by one: its hypotheses and jobs since the start
     (`hl job list --agent ID`), and one failing, stuck, producing none, or with a machine
@@ -54,9 +57,17 @@ those come from a planner or a person and can be small thinking too. Look for:
     on its subagents wastes the run, so steer it to dispatch more ideas;
   - small thinking: root-level ideas that tweak the control, gains far short of the target,
     researchers converging on one mechanism or one part of the problem, a line that stopped
-    gaining. The run is for a breakthrough: steer toward an approach nobody has tried, grounded
+    gaining, and your own directions when they are follow-ups, extensions and sweeps of the
+    last result. The run is for a breakthrough: steer toward an approach nobody has tried, grounded
     in the literature's best numbers. Combining what several found is one researcher's task:
     the message names it and tells the others not to, and they keep exploring;
+  - a bound taken for the end: a floor or limit measured within the current method bounds that
+    method only. It shows which part needs a different method, and work spent proving more such
+    bounds is no progress;
+  - the board running dry: researchers report floors or only tuning is left, the best stopped
+    moving for an hour, or places stay free with no new hypothesis to fill them;
+  - a changed brief not yet followed: after the owner changes what counts, each researcher's
+    next hypotheses and jobs, and each of your directions, follow the new brief;
   - a refutation of a large lever: it stands only on its job and a control on the same machine
     (any machine on a metric declared deterministic).
     Read the job's logs and its diff from the control before accepting it, and check that the
@@ -96,10 +107,8 @@ before you steer, and keep it in the summary:
   - the levers on each part, each with a ceiling estimated from those numbers or the
     literature, and the combination that reaches the target and the one that goes past it.
 
-Ideas are the researchers'. Watch that they keep coming: the board runs dry when researchers
-report floors or only tuning is left, the best stopped moving for an hour, or places stay free
-with no new hypothesis to fill them. Then act: steer a researcher to the literature on the
-largest part of the gap, or send a scout, a subagent (the Agent tool, run_in_background) that
+Ideas are the researchers'. When the board runs dry, steer a researcher to the literature on
+the largest part of the gap, or send a scout, a subagent (the Agent tool, run_in_background) that
 searches the web (WebSearch, WebFetch) for the best published numbers and methods on one large
 part, reads the board for what was tried and refuted (`hl hypothesis query`), and posts each
 idea worth a job as a hypothesis under root (`hl hypothesis submit --builds-on root`) with its
