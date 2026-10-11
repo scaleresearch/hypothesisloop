@@ -17,7 +17,7 @@ class AllowanceTest(unittest.TestCase):
         self.allowance.read("five_hour", 0.35, self.now + 4 * HOUR)
         self.assertEqual(self.allowance.pacing(), pacing.Reading("five_hour", 0.35, self.now + 4 * HOUR))
         self.assertEqual(self.allowance.cap()[0], pacing.SUBAGENTS)
-        self.assertIn("used 35% of its five_hour window with 20% of the window gone", self.allowance.note(coordinator=False))
+        self.assertIn("used 35% of its five_hour window with 20% of its time gone", self.allowance.note(coordinator=False))
         self.assertNotIn("regular review", self.allowance.note(coordinator=False))
         self.assertIn("regular review", self.allowance.note(coordinator=True))
 
@@ -47,6 +47,19 @@ class AllowanceTest(unittest.TestCase):
             "seven_day_opus": None, "extra_usage": {"is_enabled": False, "utilization": None}, "limits": []}})
         self.assertEqual(self.allowance.furthest(), pacing.Reading("five_hour", 0.7, self.now + 2 * HOUR))
         self.allowance.read_usage({"rate_limits": None})
+
+    # Run 15 had a week's window 53% used with 15% of it gone and seven hours left of the run:
+    # held to two subagents, eight job places stood empty.
+    def test_a_run_ending_before_the_reset_is_paced_to_its_end(self):
+        self.allowance.read("seven_day", 0.53, self.now + (7 * 24 - 25) * HOUR)
+        self.assertIsNotNone(self.allowance.pacing(), "paced to the reset, 15% gone")
+        self.allowance.until(self.now + 7 * HOUR)
+        self.assertAlmostEqual(self.allowance.furthest().gone(self.now, self.now + 7 * HOUR), 25 / 32)
+        self.assertIsNone(self.allowance.pacing(), "78% of the time to the run's end gone")
+        self.allowance.until(self.now + 30 * 24 * HOUR)
+        self.assertIsNotNone(self.allowance.pacing(), "a run past the reset is paced to the reset")
+        self.allowance.until(None)
+        self.assertIsNotNone(self.allowance.pacing())
 
     def test_the_thresholds_are_set_from_the_environment(self):
         with mock.patch.object(pacing, "MARGIN", 0.3):

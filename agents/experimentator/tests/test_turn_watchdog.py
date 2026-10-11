@@ -297,7 +297,7 @@ class ReviewTest(unittest.IsolatedAsyncioTestCase):
             waits, queries = await self.waits("coordinator", [[], []])
             note = allowance.note(coordinator=True)
         self.assertEqual(waits, [run.pacing.REVIEW_S] * 2)
-        self.assertIn("used 80% of its five_hour window with 60% of the window gone", note)
+        self.assertIn("used 80% of its five_hour window with 60% of its time gone", note)
         self.assertIn(f"Your regular review comes every {run.pacing.REVIEW_S // 60} minutes", note)
         self.assertEqual(queries[:2], ["Begin.\n\n" + note + S,
                                        run.updates.review_prompt(run.pacing.REVIEW_S // 60, idle) + "\n\n" + note + S])

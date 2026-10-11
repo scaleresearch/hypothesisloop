@@ -4,7 +4,8 @@ The provider counts use in windows that reset at a stated time. Three agents on 
 spent its five-hour window in about three hours and were refused calls for the rest of it. An
 agent whose window is used further than its elapsed share, by more than MARGIN, is ahead of the
 pace that lasts the window: it starts fewer subagents, a coordinator reviews less often, and each
-wake says so.
+wake says so. A run that ends before the window resets needs the allowance only until its end, so
+its pace lasts until then: a run near its end on a window half used is not held back.
 """
 from __future__ import annotations
 
@@ -26,8 +27,8 @@ SUBAGENTS = config.tuning("HL_PACING_SUBAGENTS", 2)
 REVIEW_S = config.tuning("HL_PACING_REVIEW_S", 3600)
 
 NOTE = ("Model allowance: the model account you share with the run's other agents has used {used:.0%} of its "
-        "{window} window with {gone:.0%} of the window gone, ahead of the pace that lasts until it resets at "
-        "{resets} UTC. Calls past the allowance are refused until then. Until it is back on pace, at most "
+        "{window} window with {gone:.0%} of its time gone, ahead of the pace that lasts {horizon}. "
+        "Calls past the allowance are refused until it resets at {resets} UTC. Until it is back on pace, at most "
         "{subagents} subagents run at once: let those at work finish, give each a whole idea, and end a turn "
         "that has nothing to act on.")
 COORDINATOR_NOTE = (" Your regular review comes every {minutes} minutes until then, and a researcher with "
@@ -40,12 +41,21 @@ class Reading:
     utilization: float
     resets_at: float
 
-    def gone(self, now: float) -> float:
-        """The share of the window that has passed at now."""
-        return min(1.0, max(0.0, 1 - (self.resets_at - now) / WINDOW_S[self.window]))
+    def gone(self, now: float, until: float | None = None) -> float:
+        """The share of the window that has passed at now, of the window up to until when that
+        comes before its reset."""
+        start = self.resets_at - WINDOW_S[self.window]
+        end = min(self.resets_at, until) if until else self.resets_at
+        if end <= start:
+            return 1.0
+        return min(1.0, max(0.0, (now - start) / (end - start)))
 
-    def ahead(self, now: float) -> float:
-        return self.utilization - self.gone(now)
+    def ahead(self, now: float, until: float | None = None) -> float:
+        return self.utilization - self.gone(now, until)
+
+
+def _utc(t: float) -> str:
+    return time.strftime("%Y-%m-%d %H:%M", time.gmtime(t))
 
 
 class Allowance:
@@ -54,6 +64,11 @@ class Allowance:
     def __init__(self, clock=time.time):
         self._clock = clock
         self._readings: dict[str, Reading] = {}
+        self._until: float | None = None
+
+    def until(self, ends_at: float | None) -> None:
+        """When the run ends, None for no end known: the allowance is paced to last until then."""
+        self._until = ends_at
 
     def read(self, window: str | None, utilization: float | None, resets_at: float | None) -> None:
         if window in WINDOW_S and utilization is not None and resets_at:
@@ -74,12 +89,12 @@ class Allowance:
         """The live reading furthest ahead of its pace, None for none."""
         now = self._clock()
         live = [r for r in self._readings.values() if r.resets_at > now]
-        return max(live, key=lambda r: r.ahead(now), default=None)
+        return max(live, key=lambda r: r.ahead(now, self._until), default=None)
 
     def pacing(self) -> Reading | None:
         """The reading that runs ahead of its pace, None while every window is on pace."""
         reading = self.furthest()
-        if reading and reading.utilization >= FLOOR and reading.ahead(self._clock()) > MARGIN:
+        if reading and reading.utilization >= FLOOR and reading.ahead(self._clock(), self._until) > MARGIN:
             return reading
         return None
 
@@ -88,8 +103,10 @@ class Allowance:
         reading = self.pacing()
         if reading is None:
             return ""
-        said = NOTE.format(used=reading.utilization, window=reading.window, gone=reading.gone(self._clock()),
-                           resets=time.strftime("%Y-%m-%d %H:%M", time.gmtime(reading.resets_at)), subagents=SUBAGENTS)
+        horizon = (f"until the run ends at {_utc(self._until)} UTC" if self._until and self._until < reading.resets_at
+                   else "until it resets")
+        said = NOTE.format(used=reading.utilization, window=reading.window, gone=reading.gone(self._clock(), self._until),
+                           horizon=horizon, resets=_utc(reading.resets_at), subagents=SUBAGENTS)
         return said + (COORDINATOR_NOTE.format(minutes=REVIEW_S // 60) if coordinator else "")
 
     def cap(self) -> tuple[int, str] | None:
@@ -98,4 +115,4 @@ class Allowance:
         if reading is None:
             return None
         return SUBAGENTS, (f" while the model allowance runs ahead of its pace ({reading.utilization:.0%} of its "
-                           f"{reading.window} window used, {reading.gone(self._clock()):.0%} of it gone)")
+                           f"{reading.window} window used, {reading.gone(self._clock(), self._until):.0%} of it gone)")

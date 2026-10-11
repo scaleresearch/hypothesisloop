@@ -9,6 +9,7 @@ machine resumes the conversation.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 import logging
 import math
@@ -126,6 +127,21 @@ _allowance = pacing.Allowance()
 # asked for it at a turn's end, at most this often. It asks the provider.
 _USAGE_READ_S = 300
 _usage_read_at: float | None = None
+_run_end_read_at: float | None = None
+
+
+def _read_run_end(setup: core.RunSetup) -> None:
+    """Reads when the run ends, for the allowance to be paced until then, at most every
+    _USAGE_READ_S: a run reopened or extended moves its end. A read that fails keeps the last."""
+    global _run_end_read_at
+    if _run_end_read_at is not None and time.monotonic() - _run_end_read_at < _USAGE_READ_S:
+        return
+    _run_end_read_at = time.monotonic()
+    try:
+        ends_at = setup.client.get_platform_experiment(setup.cfg.platform_experiment_id).get("ends_at")
+        _allowance.until(datetime.datetime.fromisoformat(ends_at.replace("Z", "+00:00")).timestamp() if ends_at else None)
+    except Exception as e:
+        log.info("the run's end was not read: %s", e)
 
 
 async def _read_usage(client) -> None:
@@ -696,6 +712,7 @@ def _revision_prompt(setup: core.RunSetup, draft: dict) -> str:
 async def _with_situation(setup: core.RunSetup, watch_env: dict[str, str], prompt: str) -> str:
     """prompt with the situation at its end, read now, for every role in a run: a planner has
     none yet. While the model allowance is paced it says so before."""
+    await asyncio.to_thread(_read_run_end, setup)
     if note := _allowance.note(config.coordinates(setup.cfg)):
         prompt = f"{prompt}\n\n{note}"
     if config.plans(setup.cfg):
@@ -724,6 +741,7 @@ def _first_prompt(setup: core.RunSetup, resume_id: str | None, initial_prompt: s
     """What opens a connection: a handoff, the start, or for a resumed session the revision that
     brought a planner back, else that it goes on, with a baseline agent's clock. A new machine is
     said in each."""
+    _read_run_end(setup)
     draft = core.revising(setup) if resume_id and not initial_prompt else None
     if draft:
         return _revision_prompt(setup, draft)
