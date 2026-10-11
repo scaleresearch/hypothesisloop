@@ -96,6 +96,7 @@ func TestAVerdictWithoutTheEvidenceStandsOnAStatedReasonWhichIsKept(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	store.jobs = []*domain.Experiment{jobOn("job-1", h.ID, domain.StatusFailed)}
 	// A person rules for the agent: the verdict and its basis are the agent's, and both name the person.
 	store.actorNames = map[string]string{"user-ada": "Ada Lovelace"}
 	settled, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", adaActor, Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid})
@@ -124,6 +125,7 @@ func TestAVerdictWhoseBasisWasNotWrittenGetsItOnTheRepeat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	store.jobs = []*domain.Experiment{jobOn("job-1", h.ID, domain.StatusFailed)}
 	verdict := Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid}
 	store.failNextComment = true
 	if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), verdict); err == nil {
@@ -149,9 +151,9 @@ func TestAVerdictWhoseBasisWasNotWrittenGetsItOnTheRepeat(t *testing.T) {
 	}
 }
 
-// What needs no evidence: saying a hypothesis is open or inconclusive, and saying again what it
-// already is.
-func TestOpenAndInconclusiveNeedNoEvidence(t *testing.T) {
+// Every verdict but open needs a job of the hypothesis's own that completed or failed, whoever
+// gives it and whatever reason comes with it. Open needs nothing.
+func TestEveryVerdictNeedsAFinishedJobOfItsOwn(t *testing.T) {
 	ctx := context.Background()
 	store := newPoolStore()
 	svc := poolService(store)
@@ -159,9 +161,33 @@ func TestOpenAndInconclusiveNeedNoEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, status := range []domain.HypothesisStatus{domain.HypothesisInconclusive, domain.HypothesisOpen} {
-		if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), Verdict{Status: status}); err != nil {
-			t.Fatalf("%s: %v", status, err)
+	store.jobs = []*domain.Experiment{jobOn("job-control", "", domain.StatusCompleted), jobOn("job-elsewhere", "other", domain.StatusCompleted),
+		jobOn("job-running", h.ID, domain.StatusRunning)}
+	refused := []Verdict{
+		{Status: domain.HypothesisInconclusive},
+		{Status: domain.HypothesisRefuted, Despite: enoughSaid},
+		{Status: domain.HypothesisConfirmed, Against: "job-control", Despite: enoughSaid},
+	}
+	for _, verdict := range refused {
+		_, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), verdict)
+		var unsupported *UnsupportedVerdictError
+		if !errors.As(err, &unsupported) || !strings.Contains(unsupported.Detail, string(verdict.Status)+" needs a job of this hypothesis") {
+			t.Fatalf("%s with no finished job of its own: got = %v, want it refused", verdict.Status, err)
+		}
+	}
+	if got, _ := svc.GetHypothesis(ctx, h.ID); got.Status != domain.HypothesisOpen || len(store.comments) != 0 {
+		t.Fatalf("after the refusals the hypothesis is %s with notes %v", got.Status, store.comments)
+	}
+	if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisOpen}); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	for _, finished := range []domain.ExperimentStatus{domain.StatusFailed, domain.StatusCompleted} {
+		store.jobs = []*domain.Experiment{jobOn("job-1", h.ID, finished)}
+		if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisInconclusive}); err != nil {
+			t.Fatalf("inconclusive after a %s job: %v", finished, err)
+		}
+		if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisOpen}); err != nil {
+			t.Fatalf("open: %v", err)
 		}
 	}
 	if len(store.comments) != 0 {
@@ -187,7 +213,7 @@ func TestAVerdictOnDeterministicMetricsNeedsNoRepeat(t *testing.T) {
 	}
 	store.jobs = []*domain.Experiment{jobOn("job-control", "", domain.StatusCompleted)}
 	var unsupported *UnsupportedVerdictError
-	if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Against: "job-control"}); !errors.As(err, &unsupported) || !strings.Contains(unsupported.Detail, "it has none") {
+	if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Against: "job-control"}); !errors.As(err, &unsupported) || !strings.Contains(unsupported.Detail, "needs a job of this hypothesis") {
 		t.Fatalf("a verdict with no run of its own: got = %v, want it refused", err)
 	}
 	store.jobs = append(store.jobs, jobOn("job-1", h.ID, domain.StatusCompleted))
@@ -216,14 +242,18 @@ func TestOnDeterministicMetricsAJobAndAControlSettleTheVerdictInPlaceOfAReason(t
 	store.jobs = []*domain.Experiment{jobOn("job-control", "", domain.StatusCompleted), jobOn("job-control-running", "", domain.StatusRunning),
 		jobOn("job-1", ran.ID, domain.StatusCompleted)}
 
+	var unsupported *UnsupportedVerdictError
+	if _, err := svc.SetHypothesisStatus(ctx, offline.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid}); !errors.As(err, &unsupported) {
+		t.Fatalf("a reason for a hypothesis no job tested: got = %v, want it refused", err)
+	}
+	store.jobs = append(store.jobs, jobOn("job-offline", offline.ID, domain.StatusFailed))
 	if _, err := svc.SetHypothesisStatus(ctx, offline.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid}); err != nil {
-		t.Fatalf("a reason for a hypothesis no job tested: got = %v, want it to stand", err)
+		t.Fatalf("a reason for a hypothesis whose job failed: got = %v, want it to stand", err)
 	}
 	if len(store.comments) != 1 || !strings.Contains(store.comments[0], "given without a repeated run and a control: "+enoughSaid) {
-		t.Fatalf("the basis of a verdict with no job: %v", store.comments)
+		t.Fatalf("the basis of a verdict with a failed job: %v", store.comments)
 	}
 
-	var unsupported *UnsupportedVerdictError
 	_, err = svc.SetHypothesisStatus(ctx, ran.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid})
 	if !errors.As(err, &unsupported) {
 		t.Fatalf("a reason in place of the control for a hypothesis with a completed job: got = %v, want it refused", err)

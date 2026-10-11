@@ -58,6 +58,9 @@ func newRegistryAs(t *testing.T, caller auth.Principal) *registryAs {
 		t.Fatal(err)
 	}
 	fixture.unowned, fixture.seeded = unowned, len(fixture.graph.rows)
+	for _, h := range []*domain.Hypothesis{fixture.own, fixture.rivals, unowned} {
+		store.jobs = append(store.jobs, jobOn("job-"+h.ID, h.ID, domain.StatusFailed))
+	}
 	RegisterHuma(apidocs.New(fixture.router, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(watchTenancy), zap.NewNop()), NewHandler(svc, zap.NewNop()))
 	return fixture
 }

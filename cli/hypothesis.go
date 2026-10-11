@@ -522,6 +522,7 @@ Sets the verdict on your own hypothesis, or on one no agent owns: a person's ide
 under its own id is yours to judge like your own, and stays the person's. --status VERDICT works too.
 A person or an API key ruling on an agent's hypothesis names that agent with --agent, and is
 kept as who gave the verdict.
+Every verdict needs a job of the hypothesis that completed or failed; --despite never replaces it.
 confirmed and refuted compare the hypothesis's jobs with a control, so they need the record
 to show it: --against names the control, a completed job of this experiment (a baseline run, or
 the same job without your change), and the hypothesis has two completed jobs of its own besides

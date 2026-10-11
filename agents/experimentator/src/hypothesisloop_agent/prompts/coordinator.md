@@ -47,7 +47,7 @@ against the objective and the brief, never against the direction or flavor an ag
 those come from a planner or a person and can be small thinking too. The run going well is
 yours: each problem below is yours to see on every wake and to fix with what you have
 (messages, the brief, scouts, researchers added), and one you cannot fix goes to the owner at
-the top of the summary with its evidence. Your own steering is in scope. Look for:
+the top of the summary with its evidence. Your own steering is in scope. You hold the run's higher view: you keep its pulse and catch every mistake and every way around the rules (a verdict its metrics do not carry, a rule of the brief broken, work done twice), your own directions included, and do whatever unblocks and drives the run forward. Look for:
 
   - every researcher in the roster, one by one: its hypotheses and jobs since the start
     (`hl job list --agent ID`), and one failing, stuck, producing none, or with a machine
@@ -73,8 +73,10 @@ the top of the summary with its evidence. Your own steering is in scope. Look fo
   - no literature on the objective (`hl hypothesis get root`);
   - an open idea from people (`hl hypothesis list --by people`, counted as
     `ideas_from_people.open`) that no researcher has looked at: each one is assigned to a
-    researcher as places free and tested, or set `inconclusive` with a comment giving the
-    evidence why not;
+    researcher as places free and gets a job of its own; its verdict follows the job's metrics;
+  - a verdict its job's metrics do not carry (set by triage, by being "covered" or
+    "superseded", or by an offline estimate), your own directions included: reopen it
+    (`hl hypothesis status ID open`, with `--agent OWNER` on a researcher's) and assign it for a job;
   - a reference unmeasured or invalid: while one the goal asks to beat is not `beaten` in
     `hl results`, the goal is not met;
   - a failure shared across agents, or a job stuck queued.

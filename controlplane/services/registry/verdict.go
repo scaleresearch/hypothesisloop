@@ -34,8 +34,9 @@ type UnsupportedVerdictError struct{ Detail string }
 
 func (e *UnsupportedVerdictError) Error() string { return e.Detail }
 
-// supported checks a confirmed or refuted verdict against the jobs on record and returns the
-// basis to note with it. The rule knows nothing of the task: it asks for a repeated measurement
+// supported checks a verdict against the jobs on record and returns the
+// basis to note with it. Every verdict but open needs a job of the hypothesis's own that completed
+// or failed, which a reason never replaces. The rule knows nothing of the task: it asks for a repeated measurement
 // and a named control, both finished, both of this platform experiment, and no repeat where every
 // ranking metric is declared deterministic. What it cannot see (a failure that needs no repeat, a
 // control measured elsewhere) the agent states in Despite, which is kept beside the verdict. A
@@ -43,16 +44,26 @@ func (e *UnsupportedVerdictError) Error() string { return e.Detail }
 // deterministic, a hypothesis with a completed job of its own has all the record needs but the
 // control, so a reason does not stand in for naming it.
 func (s *Service) supported(ctx context.Context, h *domain.Hypothesis, v Verdict) (string, error) {
-	if v.Status != domain.HypothesisConfirmed && v.Status != domain.HypothesisRefuted {
+	if v.Status == domain.HypothesisOpen {
+		return "", nil
+	}
+	tested, err := s.store.ListExperimentsTesting(ctx, []string{h.ID})
+	if err != nil {
+		return "", err
+	}
+	finished := false
+	for _, job := range tested {
+		finished = finished || job.Status == domain.StatusCompleted || job.Status == domain.StatusFailed
+	}
+	if !finished {
+		return "", &UnsupportedVerdictError{Detail: fmt.Sprintf("%s needs a job of this hypothesis that completed or failed: run one (hl job submit FILE --hypothesis %s), its metrics decide the verdict", v.Status, h.ID)}
+	}
+	if v.Status == domain.HypothesisInconclusive {
 		return "", nil
 	}
 	reason := strings.TrimSpace(v.Despite)
 	if reason != "" && len(reason) < minDespiteLength {
 		return "", &UnsupportedVerdictError{Detail: fmt.Sprintf("the reason given with despite is %d characters, and it takes at least %d characters: say in a sentence why this verdict holds without a repeated run and a control (hl hypothesis status %s %s --despite \"<why>\")", len(reason), minDespiteLength, h.ID, v.Status)}
-	}
-	tested, err := s.store.ListExperimentsTesting(ctx, []string{h.ID})
-	if err != nil {
-		return "", err
 	}
 	var own []string
 	for _, job := range tested {
@@ -120,7 +131,7 @@ func (s *Service) controlled(ctx context.Context, h *domain.Hypothesis, v Verdic
 func otherwise(h *domain.Hypothesis, v Verdict, deterministic bool) string {
 	without := "A repeat is needed only where results vary between runs: for a deterministic job on a metric not declared so (the same code and data give the same numbers), a failure that needs no repeat, or a control measured outside this experiment"
 	if deterministic {
-		without = "Every ranking metric here is declared deterministic, so one completed job and a control settle it with no repeat. For a verdict no job of the hypothesis can show (a failure that needs no repeat, a check made without a job)"
+		without = "Every ranking metric here is declared deterministic, so one completed job and a control settle it with no repeat. For a verdict the hypothesis's jobs cannot show on their own (a failure that needs no repeat)"
 	}
 	return fmt.Sprintf("Until then the verdict is inconclusive. %s, give the verdict with despite, a sentence of at least %d characters saying why it holds without them: hl hypothesis status %s %s --despite \"<why>\"", without, minDespiteLength, h.ID, v.Status)
 }

@@ -429,11 +429,13 @@ func TestRegisteringAnAgentRowWithAHumanRowsTextReturnsTheExistingHumanRow(t *te
 // rule is therefore the owner predicate read literally: nobody owns it, so whoever tested it may
 // record the verdict, with the findings underneath as the record of who earned it.
 func TestSetHypothesisStatusLetsAnyAgentSettleAnUnownedHumanRow(t *testing.T) {
-	svc := poolService(newPoolStore())
+	store := newPoolStore()
+	svc := poolService(store)
 	human, _, _, _, err := svc.RegisterHypothesis(context.Background(), "", adaActor, "pe-1", "warmup helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
+	store.jobs = []*domain.Experiment{jobOn("job-1", human.ID, domain.StatusFailed)}
 
 	settled, err := svc.SetHypothesisStatus(context.Background(), human.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid})
 	if err != nil {
@@ -450,11 +452,13 @@ func TestSetHypothesisStatusLetsAnyAgentSettleAnUnownedHumanRow(t *testing.T) {
 // The same rule from the other direction: an agent's own row stays its own to judge, and a
 // second agent's verdict on it is refused rather than recorded.
 func TestSetHypothesisStatusRefusesAnAgentSettingAnotherAgentsRowStatus(t *testing.T) {
-	svc := poolService(newPoolStore())
+	store := newPoolStore()
+	svc := poolService(store)
 	owned, _, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", agentActor("agent-1"), "pe-1", "warmup helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
+	store.jobs = []*domain.Experiment{jobOn("job-1", owned.ID, domain.StatusFailed)}
 
 	if _, err := svc.SetHypothesisStatus(context.Background(), owned.ID, "agent-2", agentActor("agent-2"), Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid}); !errors.Is(err, ErrHypothesisNotOwner) {
 		t.Fatalf("SetHypothesisStatus by a non-owner: got = %v, want %v", err, ErrHypothesisNotOwner)
@@ -555,12 +559,14 @@ func TestRegisteringAnExistingHypothesisAnnouncesNothing(t *testing.T) {
 // A verdict is announced once, when it changes; re-sending the same verdict is not news.
 func TestSettlingAHypothesisAnnouncesTheVerdictOnlyWhenItChanges(t *testing.T) {
 	events := &recordedEvents{}
-	svc := poolService(newPoolStore())
+	store := newPoolStore()
+	svc := poolService(store)
 	svc.events = events
 	h, _, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", agentActor("agent-1"), "pe-1", "warmup helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
+	store.jobs = []*domain.Experiment{jobOn("job-1", h.ID, domain.StatusFailed)}
 
 	for range 2 {
 		if _, err := svc.SetHypothesisStatus(context.Background(), h.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid}); err != nil {
@@ -612,7 +618,8 @@ func TestAddingALinkAnnouncesItOnceWithTheTargetAsDetail(t *testing.T) {
 // the event the failed attempt never did, once, at the retry's own position.
 func TestARetryAfterAFailedEmitSendsTheEventTheFailureLost(t *testing.T) {
 	events := &recordedEvents{}
-	svc := poolService(newPoolStore())
+	store := newPoolStore()
+	svc := poolService(store)
 	svc.events = events
 	ctx := context.Background()
 	b, _, _, _, err := svc.RegisterHypothesis(ctx, "agent-2", agentActor("agent-2"), "pe-1", "cooldown helps", buildOnRoot, nil)
@@ -630,6 +637,7 @@ func TestARetryAfterAFailedEmitSendsTheEventTheFailureLost(t *testing.T) {
 			return err
 		}},
 		{db.EventHypothesisStatus, func() error {
+			store.jobs = []*domain.Experiment{jobOn("job-1", a.ID, domain.StatusFailed)}
 			_, err := svc.SetHypothesisStatus(ctx, a.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid})
 			return err
 		}},

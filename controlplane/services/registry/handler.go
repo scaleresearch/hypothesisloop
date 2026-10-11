@@ -893,7 +893,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "Set a hypothesis's status", Tags: []string{"hypotheses"},
 		Description: "open (default) / confirmed (validated as a real improvement) / refuted " +
 			"(confidently established as not working) / inconclusive (noisy or not worth drilling " +
-			"into). confirmed and refuted are given with the evidence: against names the control, a " +
+			"into). Every verdict but open needs a job of the hypothesis that completed or failed, else 409; despite never replaces it. confirmed and refuted are given with the evidence: against names the control, a " +
 			"completed job of the same platform experiment, and the hypothesis has two completed " +
 			"jobs of its own besides it, or one where every ranking metric of the platform experiment is declared deterministic. Without that the answer is 409 with what is missing, " +
 			"unless despite carries a sentence of why the verdict holds anyway: a repeat is needed only where results " +
