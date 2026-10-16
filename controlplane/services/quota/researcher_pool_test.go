@@ -37,6 +37,29 @@ func TestCreateWithAHostedCoordinatorCreatesItsResearchersInTheSameWrite(t *test
 	}
 }
 
+// Every answer about a platform experiment counts the researchers at work, as the store counts them,
+// against each entry of the pool in its order and outside it.
+func TestTheAnswerCountsTheResearchersAtWorkPerPoolEntryAndOutsideIt(t *testing.T) {
+	store, create := hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
+	store.atWork = map[domain.PoolKey]int{
+		{AgentType: "generalist", Model: "model-default"}:            2,
+		{AgentType: "hyperparameter-search", Model: "model-default"}: 3,
+	}
+	code, out := create(run(map[string]any{"coordinator_hosted": true, "max_agents": 6, "researchers": []map[string]any{
+		{"count": 2},
+		{"agent_type": "data-search", "count": 1},
+	}}))
+	if code != http.StatusCreated {
+		t.Fatalf("got = %d %v, want 201", code, out)
+	}
+	counts, _ := out["researchers_at_work"].(map[string]any)
+	pool, _ := counts["pool"].([]any)
+	if counts["total"] != float64(5) || counts["outside_pool"] != float64(3) || len(pool) != 2 ||
+		pool[0].(map[string]any)["at_work"] != float64(2) || pool[1].(map[string]any)["at_work"] != float64(0) {
+		t.Errorf("researchers_at_work = %v, want 5 in all, 2 and 0 in the pool entries, 3 outside the pool", counts)
+	}
+}
+
 // What the pool may say is checked before anything is created.
 func TestResearchersAreCheckedBeforeAnythingIsCreated(t *testing.T) {
 	for name, researchers := range map[string][]map[string]any{

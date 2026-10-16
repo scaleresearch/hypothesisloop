@@ -63,11 +63,11 @@ func (m *memAgentTypes) Version(_ context.Context, orgID, id string, n int) (*do
 	return &m.versions[id][n-1], nil
 }
 
-func (m *memAgentTypes) Create(_ context.Context, orgID, name string, role domain.AgentRole, prompt string, settings domain.AgentTypeSettings, by domain.Actor) (*domain.CurrentAgentType, error) {
+func (m *memAgentTypes) Create(_ context.Context, orgID, name, description string, role domain.AgentRole, prompt string, settings domain.AgentTypeSettings, by domain.Actor) (*domain.CurrentAgentType, error) {
 	m.next++
 	id := "at-" + strings.Repeat("0", m.next)
 	version := domain.AgentTypeVersion{TypeID: id, Version: 1, Prompt: prompt, Settings: settings, CreatedBy: &by}
-	m.types[id] = &domain.CurrentAgentType{AgentType: domain.AgentType{ID: id, OrgID: orgID, Name: name, Role: role, CurrentVersion: 1, CreatedBy: &by}, Current: version}
+	m.types[id] = &domain.CurrentAgentType{AgentType: domain.AgentType{ID: id, OrgID: orgID, Name: name, Description: description, Role: role, CurrentVersion: 1, CreatedBy: &by}, Current: version}
 	m.versions[id] = []domain.AgentTypeVersion{version}
 	return m.types[id], nil
 }
@@ -84,7 +84,7 @@ func (m *memAgentTypes) Edit(_ context.Context, e db.AgentTypeEdit, _ domain.Mod
 	}
 	version := domain.AgentTypeVersion{TypeID: t.ID, Version: t.CurrentVersion + 1, Prompt: e.Prompt, Settings: e.Settings, CreatedBy: &e.By}
 	m.versions[t.ID] = append(m.versions[t.ID], version)
-	t.Name, t.CurrentVersion, t.Current = e.Name, version.Version, version
+	t.Name, t.Description, t.CurrentVersion, t.Current = e.Name, e.Description, version.Version, version
 	return t, &domain.Propagation{Version: version.Version, Moved: []domain.PinMove{}, Failed: []domain.PinMove{}}, nil
 }
 

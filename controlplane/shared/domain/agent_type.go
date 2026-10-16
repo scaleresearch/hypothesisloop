@@ -74,6 +74,7 @@ type AgentType struct {
 	ID             string     `json:"id"`
 	OrgID          string     `json:"org_id,omitempty" doc:"The org that owns it, empty for a built-in type."`
 	Name           string     `json:"name"`
+	Description    string     `json:"description" doc:"One line on what agents of the type do, at most 200 characters. Empty when none was written."`
 	Role           AgentRole  `json:"role" enum:"researcher,baseline,coordinator,planner"`
 	Builtin        bool       `json:"builtin" doc:"Seeded by the platform from its repository and read-only for everyone. Duplicate one to change it."`
 	CurrentVersion int        `json:"current_version" doc:"The version new agents of the type are pinned to, and live agents are moved to when it is edited."`
@@ -162,10 +163,11 @@ func (s AgentTypeSettings) ResolvedModel(defaultModel string) string {
 	return defaultModel
 }
 
-// MaxAgentTypeNameLength and MaxAgentPromptBytes bound what an org saves.
+// MaxAgentTypeNameLength, MaxAgentTypeDescriptionLength and MaxAgentPromptBytes bound what an org saves.
 const (
-	MaxAgentTypeNameLength = 80
-	MaxAgentPromptBytes    = 64 << 10
+	MaxAgentTypeNameLength        = 80
+	MaxAgentTypeDescriptionLength = 200
+	MaxAgentPromptBytes           = 64 << 10
 )
 
 // The placeholders a prompt holds. The platform fills the assignment's when it serves the prompt
@@ -252,6 +254,15 @@ func placeholderList(names []string) string {
 func ValidateAgentTypeName(name string) error {
 	if strings.TrimSpace(name) == "" || utf8.RuneCountInString(name) > MaxAgentTypeNameLength {
 		return fmt.Errorf("name must be 1 to %d characters", MaxAgentTypeNameLength)
+	}
+	return nil
+}
+
+// ValidateAgentTypeDescription refuses a description of more than one line or over
+// MaxAgentTypeDescriptionLength characters. An empty one is allowed.
+func ValidateAgentTypeDescription(description string) error {
+	if strings.ContainsAny(description, "\r\n") || utf8.RuneCountInString(description) > MaxAgentTypeDescriptionLength {
+		return fmt.Errorf("description must be one line of at most %d characters", MaxAgentTypeDescriptionLength)
 	}
 	return nil
 }

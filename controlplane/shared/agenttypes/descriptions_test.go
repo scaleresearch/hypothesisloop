@@ -1,0 +1,27 @@
+package agenttypes
+
+import (
+	"testing"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+)
+
+func TestEachBuiltinHasAValidDescription(t *testing.T) {
+	all, err := Builtins()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range all {
+		if b.Description == "" {
+			t.Errorf("%s has no description", b.ID)
+		}
+		if err := domain.ValidateAgentTypeDescription(b.Description); err != nil {
+			t.Errorf("%s: %v", b.ID, err)
+		}
+	}
+	for _, c := range Catalog() {
+		if c.Description == "" {
+			t.Errorf("catalog entry %s has no description", c.ID)
+		}
+	}
+}

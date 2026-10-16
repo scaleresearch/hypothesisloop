@@ -1103,6 +1103,12 @@ func (h *PlatformExperimentsHandler) Answer(ctx context.Context, pe *domain.Plat
 	if err := h.svc.Describe(ctx, pe, reader); err != nil {
 		return nil, auth.Internal(h.logger, "describe platform experiment", err, zap.String("id", pe.ID))
 	}
+	atWork, err := h.svc.store.ResearchersAtWork(ctx, pe.ID)
+	if err != nil {
+		return nil, auth.Internal(h.logger, "count researchers at work", err, zap.String("id", pe.ID))
+	}
+	counts := pe.Researchers.AtWorkOf(atWork)
+	pe.ResearchersAtWork = &counts
 	if pe.Repository != "" {
 		if h.proxyURL == "" {
 			return nil, auth.Internal(h.logger, "describe platform experiment", errors.New("no git proxy address to name its repository at"), zap.String("id", pe.ID))

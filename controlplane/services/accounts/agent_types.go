@@ -31,7 +31,7 @@ type AgentTypes interface {
 	Get(ctx context.Context, orgID, id string) (*domain.CurrentAgentType, error)
 	Versions(ctx context.Context, orgID, id string) ([]domain.AgentTypeVersion, error)
 	Version(ctx context.Context, orgID, id string, n int) (*domain.AgentTypeVersion, error)
-	Create(ctx context.Context, orgID, name string, role domain.AgentRole, prompt string, settings domain.AgentTypeSettings, by domain.Actor) (*domain.CurrentAgentType, error)
+	Create(ctx context.Context, orgID, name, description string, role domain.AgentRole, prompt string, settings domain.AgentTypeSettings, by domain.Actor) (*domain.CurrentAgentType, error)
 	Edit(ctx context.Context, e db.AgentTypeEdit, defaults domain.ModelDefaults) (*domain.CurrentAgentType, *domain.Propagation, error)
 	Archive(ctx context.Context, orgID, id string) (*domain.CurrentAgentType, error)
 }
@@ -70,19 +70,21 @@ type EditedAgentType struct {
 
 // CreateAgentTypeBody makes an agent type: from scratch, or as a copy of one the org reads.
 type CreateAgentTypeBody struct {
-	From     string                    `json:"from,omitempty" doc:"Copy this agent type, a built-in one or the org's own: its role, prompt and settings, at its current version. With it, only name may be given."`
-	Name     string                    `json:"name,omitempty" doc:"Required without from. With from, the copy's name, \"Copy of\" the source's when left out."`
-	Role     domain.AgentRole          `json:"role,omitempty" enum:"researcher,baseline,coordinator,planner" doc:"Required without from, and fixed once made."`
-	Prompt   string                    `json:"prompt,omitempty" doc:"Required without from. It must hold {{rules}} and {{hl_commands}}, and no placeholder its role has no value for."`
-	Settings *domain.AgentTypeSettings `json:"settings,omitempty" doc:"Required without from."`
+	From        string                    `json:"from,omitempty" doc:"Copy this agent type, a built-in one or the org's own: its role, prompt and settings, at its current version. With it, only name may be given."`
+	Name        string                    `json:"name,omitempty" doc:"Required without from. With from, the copy's name, \"Copy of\" the source's when left out."`
+	Description string                    `json:"description,omitempty" maxLength:"200" doc:"One line on what agents of the type do, at most 200 characters. With from, the copy has the source's."`
+	Role        domain.AgentRole          `json:"role,omitempty" enum:"researcher,baseline,coordinator,planner" doc:"Required without from, and fixed once made."`
+	Prompt      string                    `json:"prompt,omitempty" doc:"Required without from. It must hold {{rules}} and {{hl_commands}}, and no placeholder its role has no value for."`
+	Settings    *domain.AgentTypeSettings `json:"settings,omitempty" doc:"Required without from."`
 }
 
 // EditAgentTypeBody is the next version of an agent type.
 type EditAgentTypeBody struct {
-	IfVersion int                      `json:"if_version" doc:"The version the edit was made from: 409 version_conflict when it is no longer current."`
-	Name      string                   `json:"name" doc:"Its name, which no version holds: changing it alone makes no version."`
-	Prompt    string                   `json:"prompt"`
-	Settings  domain.AgentTypeSettings `json:"settings"`
+	IfVersion   int                      `json:"if_version" doc:"The version the edit was made from: 409 version_conflict when it is no longer current."`
+	Name        string                   `json:"name" doc:"Its name, which no version holds: changing it alone makes no version."`
+	Description *string                  `json:"description,omitempty" maxLength:"200" doc:"Its description, one line of at most 200 characters, which no version holds either. Left out, it stays as it was."`
+	Prompt      string                   `json:"prompt"`
+	Settings    domain.AgentTypeSettings `json:"settings"`
 }
 
 // RegisterAgentTypesHuma registers the agent types of an org on the shared API document.
@@ -173,11 +175,11 @@ func RegisterAgentTypesHuma(doc *apidocs.Doc, h *AgentTypesHandler) {
 		if err != nil {
 			return nil, err
 		}
-		name, role, prompt, settings, err := h.newType(ctx, in.ID, in.Body)
+		name, description, role, prompt, settings, err := h.newType(ctx, in.ID, in.Body)
 		if err != nil {
 			return nil, h.answer("create-agent-type", err)
 		}
-		created, err := h.store.Create(ctx, in.ID, name, role, prompt, settings, caller.Actor())
+		created, err := h.store.Create(ctx, in.ID, name, description, role, prompt, settings, caller.Actor())
 		if err != nil {
 			return nil, h.answer("create-agent-type", err)
 		}
@@ -205,11 +207,15 @@ func RegisterAgentTypesHuma(doc *apidocs.Doc, h *AgentTypesHandler) {
 			return nil, h.answer("edit-agent-type", err)
 		}
 		name := strings.TrimSpace(in.Body.Name)
-		if err := checkAgentType(current.Role, name, in.Body.Prompt, &in.Body.Settings); err != nil {
+		description := current.Description
+		if in.Body.Description != nil {
+			description = *in.Body.Description
+		}
+		if err := checkAgentType(current.Role, name, description, in.Body.Prompt, &in.Body.Settings); err != nil {
 			return nil, err
 		}
 		edited, propagation, err := h.store.Edit(ctx, db.AgentTypeEdit{
-			OrgID: in.ID, ID: in.TypeID, IfVersion: in.Body.IfVersion, Name: name, Prompt: in.Body.Prompt, Settings: in.Body.Settings, By: caller.Actor(),
+			OrgID: in.ID, ID: in.TypeID, IfVersion: in.Body.IfVersion, Name: name, Description: description, Prompt: in.Body.Prompt, Settings: in.Body.Settings, By: caller.Actor(),
 		}, h.defaults)
 		if err != nil {
 			return nil, h.answer("edit-agent-type", err)
@@ -243,39 +249,39 @@ func RegisterAgentTypesHuma(doc *apidocs.Doc, h *AgentTypesHandler) {
 }
 
 // newType is what a create makes: body's own, or a copy of the type it names in from.
-func (h *AgentTypesHandler) newType(ctx context.Context, orgID string, body CreateAgentTypeBody) (string, domain.AgentRole, string, domain.AgentTypeSettings, error) {
+func (h *AgentTypesHandler) newType(ctx context.Context, orgID string, body CreateAgentTypeBody) (string, string, domain.AgentRole, string, domain.AgentTypeSettings, error) {
 	name := strings.TrimSpace(body.Name)
 	if body.From == "" {
 		role, err := domain.ParseAgentRole(string(body.Role))
 		if err != nil {
-			return "", "", "", domain.AgentTypeSettings{}, invalid(ReasonInvalidAgentType, err.Error())
+			return "", "", "", "", domain.AgentTypeSettings{}, invalid(ReasonInvalidAgentType, err.Error())
 		}
 		if body.Settings == nil {
-			return "", "", "", domain.AgentTypeSettings{}, invalid(ReasonInvalidAgentType, "settings are required without from")
+			return "", "", "", "", domain.AgentTypeSettings{}, invalid(ReasonInvalidAgentType, "settings are required without from")
 		}
 		settings := *body.Settings
-		return name, role, body.Prompt, settings, checkAgentType(role, name, body.Prompt, &settings)
+		return name, body.Description, role, body.Prompt, settings, checkAgentType(role, name, body.Description, body.Prompt, &settings)
 	}
-	if body.Role != "" || body.Prompt != "" || body.Settings != nil {
-		return "", "", "", domain.AgentTypeSettings{}, invalid(ReasonInvalidAgentType, "a copy (from) takes its role, prompt and settings from the type it copies: give only name, and edit the copy")
+	if body.Description != "" || body.Role != "" || body.Prompt != "" || body.Settings != nil {
+		return "", "", "", "", domain.AgentTypeSettings{}, invalid(ReasonInvalidAgentType, "a copy (from) takes its role, prompt and settings from the type it copies: give only name, and edit the copy")
 	}
 	source, err := h.store.Get(ctx, orgID, body.From)
 	if err != nil {
-		return "", "", "", domain.AgentTypeSettings{}, err
+		return "", "", "", "", domain.AgentTypeSettings{}, err
 	}
 	if name == "" {
 		name = "Copy of " + source.Name
 	}
 	settings := source.Current.Settings
-	return name, source.Role, source.Current.Prompt, settings, checkAgentType(source.Role, name, source.Current.Prompt, &settings)
+	return name, source.Description, source.Role, source.Current.Prompt, settings, checkAgentType(source.Role, name, source.Description, source.Current.Prompt, &settings)
 }
 
-// checkAgentType refuses a name, prompt or settings an agent of role could not run with.
-func checkAgentType(role domain.AgentRole, name, prompt string, settings *domain.AgentTypeSettings) error {
+// checkAgentType refuses a name, description, prompt or settings an agent of role could not run with.
+func checkAgentType(role domain.AgentRole, name, description, prompt string, settings *domain.AgentTypeSettings) error {
 	if settings.Hyperparameters == nil {
 		settings.Hyperparameters = map[string]any{}
 	}
-	for _, err := range []error{domain.ValidateAgentTypeName(name), domain.ValidatePrompt(role, prompt), settings.Validate()} {
+	for _, err := range []error{domain.ValidateAgentTypeName(name), domain.ValidateAgentTypeDescription(description), domain.ValidatePrompt(role, prompt), settings.Validate()} {
 		if err != nil {
 			return invalid(ReasonInvalidAgentType, err.Error())
 		}

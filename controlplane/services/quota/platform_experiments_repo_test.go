@@ -164,6 +164,8 @@ type createdStore struct {
 	objective []*domain.Experiment
 	// completed is every COMPLETED job, oldest first.
 	completed []*domain.Experiment
+	// atWork is the researchers at work by agent type and model, as the store counts them.
+	atWork map[domain.PoolKey]int
 	// started counts the starts that reached the store.
 	started int
 	// answered is when a launcher last asked for its machines, by name. One not in it asked now.
@@ -291,6 +293,10 @@ func (s *createdStore) GetPlatformExperiment(_ context.Context, id string) (*dom
 		}
 	}
 	return nil, nil
+}
+
+func (s *createdStore) ResearchersAtWork(context.Context, string) (map[domain.PoolKey]int, error) {
+	return s.atWork, nil
 }
 
 func (s *createdStore) ListSignups(context.Context, string) ([]string, error) { return nil, nil }

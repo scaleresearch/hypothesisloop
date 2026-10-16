@@ -1,0 +1,9 @@
+{
+  "generalist": "No fixed axis: whatever moves the metric, settings, structure, inputs or scale.",
+  "hyperparameter-search": "Holds structure and inputs fixed and tunes the knobs: rates, sizes, thresholds.",
+  "architecture-search": "Holds settings and inputs fixed and searches the structure of the method.",
+  "data-search": "Holds structure and settings fixed and searches what the method is fed.",
+  "baseline": "Builds the harness, measures the control and each reference, and finishes.",
+  "planner": "Turns a one-line goal into an experiment and proposes it.",
+  "coordinator": "Supervises the run, catches mistakes and files the summary."
+}

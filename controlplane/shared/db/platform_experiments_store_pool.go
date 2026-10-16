@@ -42,10 +42,15 @@ func poolJSON(pool domain.ResearcherPool) ([]byte, error) {
 	return json.Marshal(pool)
 }
 
-// researchersAtWorkTx counts the researchers at work of platform experiment platformExpID
+// querier is a pool or a transaction.
+type querier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// researchersAtWork counts the researchers at work of platform experiment platformExpID
 // (researcherAtWorkSQL) by flavor and model.
-func researchersAtWorkTx(ctx context.Context, tx pgx.Tx, platformExpID string) (map[domain.PoolKey]int, error) {
-	rows, err := tx.Query(ctx, `
+func researchersAtWork(ctx context.Context, q querier, platformExpID string) (map[domain.PoolKey]int, error) {
+	rows, err := q.Query(ctx, `
 SELECT `+signupKeySQL+`, count(*) FROM experiment_signups s
 WHERE s.platform_experiment_id = $1 AND `+researcherAtWorkSQL+`
 GROUP BY 1, 2`, platformExpID)
@@ -63,6 +68,16 @@ GROUP BY 1, 2`, platformExpID)
 		atWork[key] = n
 	}
 	return atWork, rows.Err()
+}
+
+// ResearchersAtWork counts the researchers at work of platform experiment platformExpID by agent
+// type and model.
+func (s *PlatformExperimentsStore) ResearchersAtWork(ctx context.Context, platformExpID string) (map[domain.PoolKey]int, error) {
+	atWork, err := researchersAtWork(ctx, s.pool.pool, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.ResearchersAtWork: %w", err)
+	}
+	return atWork, nil
 }
 
 // holdsAtWork refuses a max_agents below the researchers at work, and a pool, unless nil, that
@@ -91,7 +106,7 @@ func setResearchersTx(ctx context.Context, tx pgx.Tx, platformExpID string, maxA
 	if err := evictAboveMaxTx(ctx, tx, platformExpID, maxAgents, pool == nil); err != nil {
 		return err
 	}
-	atWork, err := researchersAtWorkTx(ctx, tx, platformExpID)
+	atWork, err := researchersAtWork(ctx, tx, platformExpID)
 	if err != nil {
 		return err
 	}
@@ -211,7 +226,7 @@ func shrinkPoolToAtWorkTx(ctx context.Context, tx pgx.Tx, platformExpID string, 
 	if err != nil {
 		return err
 	}
-	atWork, err := researchersAtWorkTx(ctx, tx, platformExpID)
+	atWork, err := researchersAtWork(ctx, tx, platformExpID)
 	if err != nil {
 		return err
 	}
@@ -265,7 +280,7 @@ func (s *PlatformExperimentsStore) ResearcherPoolState(ctx context.Context, plat
 	if err := tx.QueryRow(ctx, `SELECT researchers, max_agents FROM platform_experiments WHERE id = $1`, platformExpID).Scan(&state.Pool, &state.MaxAgents); err != nil {
 		return PoolState{}, fmt.Errorf("platform_experiments_store.ResearcherPoolState: read researchers: %w", err)
 	}
-	if state.AtWork, err = researchersAtWorkTx(ctx, tx, platformExpID); err != nil {
+	if state.AtWork, err = researchersAtWork(ctx, tx, platformExpID); err != nil {
 		return PoolState{}, fmt.Errorf("platform_experiments_store.ResearcherPoolState: %w", err)
 	}
 	rows, err := tx.Query(ctx, `

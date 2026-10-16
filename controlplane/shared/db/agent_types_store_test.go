@@ -27,7 +27,7 @@ func orgWithExperiment(t *testing.T, pool *Pool) (orgID, peID string, custom *do
 	_, orgID = newTestUserHome(t, accounts)
 	peID = "pe-" + uuid.New().String()[:8]
 	createTestPEIn(t, pool, peID, defaultProjectOf(t, accounts, orgID).ID)
-	custom, err := NewAgentTypesStore(pool).Create(context.Background(), orgID, "Tuner", domain.AgentRoleResearcher, testPrompt, testTypeSettings(), domain.Actor{Kind: domain.ActorUser, ID: "u"})
+	custom, err := NewAgentTypesStore(pool).Create(context.Background(), orgID, "Tuner", "Tunes the knobs.", domain.AgentRoleResearcher, testPrompt, testTypeSettings(), domain.Actor{Kind: domain.ActorUser, ID: "u"})
 	if err != nil {
 		t.Fatalf("create: got = %v, want = nil", err)
 	}
@@ -346,7 +346,7 @@ func TestAnEditOfACoordinatorTypeMovesTheCoordinatorsOfRunsThatGoOn(t *testing.T
 	pes := NewPlatformExperimentsStore(pool)
 	orgID, peID, _ := orgWithExperiment(t, pool)
 	coordinatorPrompt := "{{rules}}\n{{hl_commands}}\nCoordinate {{platform_experiment_id}}."
-	custom, err := store.Create(ctx, orgID, "Strict coordinator", domain.AgentRoleCoordinator, coordinatorPrompt, testTypeSettings(), domain.Actor{Kind: domain.ActorUser, ID: "u"})
+	custom, err := store.Create(ctx, orgID, "Strict coordinator", "", domain.AgentRoleCoordinator, coordinatorPrompt, testTypeSettings(), domain.Actor{Kind: domain.ActorUser, ID: "u"})
 	if err != nil {
 		t.Fatal(err)
 	}

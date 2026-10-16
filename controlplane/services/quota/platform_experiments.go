@@ -48,6 +48,8 @@ type PlatformExperimentsStore interface {
 	// implementation's comment for why the compare-and-swap matters here — and researchers when
 	// not nil, with max_agents and them held to the researchers at work (db.PoolBelowAtWorkError).
 	UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus, researchers domain.ResearcherPool) error
+	// ResearchersAtWork counts the researchers at work of a platform experiment by agent type and model.
+	ResearchersAtWork(ctx context.Context, platformExpID string) (map[domain.PoolKey]int, error)
 	// ResearcherPoolState is what keeping the researchers of a running platform experiment is
 	// decided from: its pool and max_agents, who is at work and whose place is free for good.
 	ResearcherPoolState(ctx context.Context, platformExpID string) (db.PoolState, error)

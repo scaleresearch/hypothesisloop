@@ -4,22 +4,24 @@ package agenttypes
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-//go:embed builtin/*.md
-var prompts embed.FS
+//go:embed builtin/*.md builtin/descriptions.json
+var files embed.FS
 
 // Builtin is one built-in agent type: its id, which is also the file its prompt is in, name, role
 // and settings.
 type Builtin struct {
-	ID       string
-	Name     string
-	Role     domain.AgentRole
-	Prompt   string
-	Settings domain.AgentTypeSettings
+	ID          string
+	Name        string
+	Description string
+	Role        domain.AgentRole
+	Prompt      string
+	Settings    domain.AgentTypeSettings
 }
 
 var builtins = []struct {
@@ -38,15 +40,29 @@ var builtins = []struct {
 
 // Builtins is every built-in agent type, each checked as an org's would be on save.
 func Builtins() ([]Builtin, error) {
+	raw, err := files.ReadFile("builtin/descriptions.json")
+	if err != nil {
+		return nil, fmt.Errorf("agenttypes: %w", err)
+	}
+	var descriptions map[string]string
+	if err := json.Unmarshal(raw, &descriptions); err != nil {
+		return nil, fmt.Errorf("agenttypes: descriptions.json: %w", err)
+	}
+	if len(descriptions) != len(builtins) {
+		return nil, fmt.Errorf("agenttypes: descriptions.json holds %d descriptions for %d built-in types", len(descriptions), len(builtins))
+	}
 	out := make([]Builtin, 0, len(builtins))
 	for _, b := range builtins {
-		prompt, err := prompts.ReadFile("builtin/" + b.id + ".md")
+		prompt, err := files.ReadFile("builtin/" + b.id + ".md")
 		if err != nil {
 			return nil, fmt.Errorf("agenttypes: %w", err)
 		}
 		builtin := Builtin{
-			ID: b.id, Name: b.name, Role: b.role, Prompt: string(prompt),
+			ID: b.id, Name: b.name, Description: descriptions[b.id], Role: b.role, Prompt: string(prompt),
 			Settings: domain.AgentTypeSettings{MaxSubagents: 4, PacingSubagents: 2, Effort: b.effort, Hyperparameters: map[string]any{}},
+		}
+		if err := domain.ValidateAgentTypeDescription(builtin.Description); err != nil {
+			return nil, fmt.Errorf("agenttypes: built-in %s: %w", b.id, err)
 		}
 		if err := domain.ValidatePrompt(builtin.Role, builtin.Prompt); err != nil {
 			return nil, fmt.Errorf("agenttypes: built-in %s: %w", b.id, err)
@@ -68,7 +84,7 @@ func Catalog() domain.AgentTypeCatalog {
 	catalog := make(domain.AgentTypeCatalog, len(all))
 	for i, b := range all {
 		catalog[i] = domain.CurrentAgentType{
-			AgentType: domain.AgentType{ID: b.ID, Name: b.Name, Role: b.Role, Builtin: true, CurrentVersion: 1},
+			AgentType: domain.AgentType{ID: b.ID, Name: b.Name, Description: b.Description, Role: b.Role, Builtin: true, CurrentVersion: 1},
 			Current:   domain.AgentTypeVersion{TypeID: b.ID, Version: 1, Prompt: b.Prompt, Settings: b.Settings},
 		}
 	}

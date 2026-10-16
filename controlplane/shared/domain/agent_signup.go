@@ -49,6 +49,10 @@ type AgentSignup struct {
 	// CutReason is why the platform cut the agent other than at a stage boundary, empty for a stage
 	// cut and for an agent that was not cut.
 	CutReason string `json:"cut_reason,omitempty" doc:"Why the platform cut it other than at a stage boundary: max_agents_lowered for one of the newest researchers above a max_agents lowered below those at work. Absent for a stage cut and an agent that was not cut."`
+	// AtWork is whether the agent is a researcher at work, the one count max_agents and the pool
+	// hold to, and EndedReason why a researcher's place is free: one of the EndedReason constants.
+	AtWork      bool   `json:"at_work" doc:"Whether it is a researcher at work: of role competitor, not finished, not cut, not replaced and, run by the platform, with a machine. The one count max_agents and the researchers pool hold to."`
+	EndedReason string `json:"ended_reason,omitempty" enum:"finished,cut,replaced,stopped" doc:"Why it no longer holds a place among the researchers: finished, cut (at a stage boundary or by a lowered max_agents), replaced (the platform added a researcher in its place) or stopped (its machine stopped with no restart left). Absent while it holds one, and for an agent whose run is over only with the close."`
 	// Instance is what became of a hosted agent's machine, nil for an agent the platform does
 	// not run.
 	Instance *AgentInstance `json:"instance,omitempty"`
@@ -177,6 +181,13 @@ func ActivityOf(text string, at *time.Time) *AgentActivity {
 	}
 	return &AgentActivity{Text: text, At: *at}
 }
+
+// Why an agent no longer holds a place among the researchers (AgentSignup.EndedReason), beside
+// RunEndCut and RunEndFinished.
+const (
+	EndedReplaced = "replaced"
+	EndedStopped  = "stopped"
+)
 
 // RunEnd is why an agent's run in a platform experiment is over.
 type RunEnd string

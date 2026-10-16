@@ -253,6 +253,9 @@ type PlatformExperiment struct {
 	// are to be at work, at most MaxAgents in all. The platform keeps it while the run goes on
 	// (quota.KeepResearchers). Optional; empty on a draft, which its accepted proposal fills.
 	Researchers ResearcherPool `json:"researchers" doc:"The researchers it is to have at work, an entry per agent type and model with its count, at most max_agents in all. Optional. Where the platform hosts the coordinator they are agents the platform runs: it creates them with the platform experiment, or with the accepted proposal, and while the run goes on it adds a new researcher of the same agent type, model and hyperparameters in the place of one that finished or whose machine stopped with no restart left, which agent.replaced tells, until less of the run is left than one trial of its baseline job (job_estimated_duration_hours, at least 15 minutes) or the budget its researchers left unspent holds no trial for a newcomer. A stage boundary lowers the count of the entry of each researcher it cuts, so nobody takes a cut researcher's place. The coordinator may add researchers beyond them, up to max_agents. Elsewhere they say who is wanted and nothing is added by the platform."`
+	// ResearchersAtWork counts who is at work against the pool, on every answer about one platform
+	// experiment (quota.PlatformExperimentsHandler.Answer), stored nowhere.
+	ResearchersAtWork *ResearchersAtWork `json:"researchers_at_work,omitempty" doc:"The researchers at work, counted by the rule max_agents holds to: in all, for each entry of researchers, and outside_pool for those of an agent type and model it names no entry of. Absent on a list."`
 	// MaxConcurrentAccelerators bounds accelerators-in-flight (SUBMITTED+RUNNING, summed across
 	// this platform experiment's agents' jobs) at any moment. Nil defers to
 	// quota.default_max_concurrent_accelerators. Speculative submission makes capacity appear on

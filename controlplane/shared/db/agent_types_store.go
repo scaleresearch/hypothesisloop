@@ -66,7 +66,7 @@ const liveSignupSQL = `(` + runEndSQL + `) = '' AND NOT (s.hosted AND s.instance
 const liveAgentsSQL = `((SELECT count(*) FROM experiment_signups s WHERE s.flavor = t.id AND ` + liveSignupSQL + `)
   + (SELECT count(*) FROM platform_experiments cpe WHERE cpe.coordinator_agent_type = t.id AND cpe.status <> 'closed'))::int`
 
-const currentAgentTypeColumns = `t.id, COALESCE(t.org_id, ''), t.name, t.role, t.current_version, t.archived_at, t.created_by_kind, t.created_by_id, t.created_at,
+const currentAgentTypeColumns = `t.id, COALESCE(t.org_id, ''), t.name, t.description, t.role, t.current_version, t.archived_at, t.created_by_kind, t.created_by_id, t.created_at,
        v.version, v.prompt, v.settings, v.digest, v.created_by_kind, v.created_by_id, v.created_at, ` + liveAgentsSQL + `
 FROM agent_types t JOIN agent_type_versions v ON v.type_id = t.id AND v.version = t.current_version`
 
@@ -74,7 +74,7 @@ func scanCurrentAgentType(row pgx.Row) (domain.CurrentAgentType, error) {
 	var t domain.CurrentAgentType
 	var typeBy, versionBy domain.Actor
 	var settings []byte
-	if err := row.Scan(&t.ID, &t.OrgID, &t.Name, &t.Role, &t.CurrentVersion, &t.ArchivedAt, &typeBy.Kind, &typeBy.ID, &t.CreatedAt,
+	if err := row.Scan(&t.ID, &t.OrgID, &t.Name, &t.Description, &t.Role, &t.CurrentVersion, &t.ArchivedAt, &typeBy.Kind, &typeBy.ID, &t.CreatedAt,
 		&t.Current.Version, &t.Current.Prompt, &settings, &t.Current.Digest, &versionBy.Kind, &versionBy.ID, &t.Current.CreatedAt, &t.LiveAgents); err != nil {
 		return t, err
 	}
@@ -197,7 +197,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)`, typeID, version, prompt, encoded, digest, 
 
 // Create makes an agent type of org orgID at version 1. prompt and settings are checked by the
 // caller (domain.ValidatePrompt, AgentTypeSettings.Validate).
-func (s *AgentTypesStore) Create(ctx context.Context, orgID, name string, role domain.AgentRole, prompt string, settings domain.AgentTypeSettings, by domain.Actor) (*domain.CurrentAgentType, error) {
+func (s *AgentTypesStore) Create(ctx context.Context, orgID, name, description string, role domain.AgentRole, prompt string, settings domain.AgentTypeSettings, by domain.Actor) (*domain.CurrentAgentType, error) {
 	id, err := domain.NewID(domain.AgentTypeIDPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("agent_types_store.Create: %w", err)
@@ -208,8 +208,8 @@ func (s *AgentTypesStore) Create(ctx context.Context, orgID, name string, role d
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	if _, err := tx.Exec(ctx, `
-INSERT INTO agent_types (id, org_id, name, role, current_version, created_by_kind, created_by_id)
-VALUES ($1, $2, $3, $4, 1, $5, $6)`, id, orgID, name, string(role), string(by.Kind), by.ID); err != nil {
+INSERT INTO agent_types (id, org_id, name, description, role, current_version, created_by_kind, created_by_id)
+VALUES ($1, $2, $3, $4, $5, 1, $6, $7)`, id, orgID, name, description, string(role), string(by.Kind), by.ID); err != nil {
 		return nil, fmt.Errorf("agent_types_store.Create: %w", err)
 	}
 	if err := insertAgentTypeVersion(ctx, tx, id, 1, prompt, settings, by); err != nil {
@@ -228,13 +228,14 @@ VALUES ($1, $2, $3, $4, 1, $5, $6)`, id, orgID, name, string(role), string(by.Ki
 // AgentTypeEdit is a new version of an org's agent type: its name, which is no part of a version,
 // and the prompt and settings of the version, made from version IfVersion.
 type AgentTypeEdit struct {
-	OrgID     string
-	ID        string
-	IfVersion int
-	Name      string
-	Prompt    string
-	Settings  domain.AgentTypeSettings
-	By        domain.Actor
+	OrgID       string
+	ID          string
+	IfVersion   int
+	Name        string
+	Description string
+	Prompt      string
+	Settings    domain.AgentTypeSettings
+	By          domain.Actor
 }
 
 // Edit inserts the next version of an agent type of org e.OrgID, makes it current and moves every
@@ -260,7 +261,7 @@ func (s *AgentTypesStore) Edit(ctx context.Context, e AgentTypeEdit, defaults do
 	case current.CurrentVersion != e.IfVersion:
 		return nil, nil, &AgentTypeVersionConflict{IfVersion: e.IfVersion, Current: current.CurrentVersion}
 	}
-	if _, err := tx.Exec(ctx, `UPDATE agent_types SET name = $2 WHERE id = $1`, e.ID, e.Name); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE agent_types SET name = $2, description = $3 WHERE id = $1`, e.ID, e.Name, e.Description); err != nil {
 		return nil, nil, fmt.Errorf("agent_types_store.Edit: rename: %w", err)
 	}
 	digest, err := domain.AgentTypeDigest(e.Prompt, e.Settings)
@@ -502,8 +503,8 @@ FROM agent_types t WHERE pe.coordinator_agent_type_version IS NULL AND t.id = pe
 func seedBuiltinTx(ctx context.Context, tx pgx.Tx, b agenttypes.Builtin, defaults domain.ModelDefaults) (*domain.Propagation, error) {
 	platform := domain.Actor{Kind: domain.ActorStaff}
 	tag, err := tx.Exec(ctx, `
-INSERT INTO agent_types (id, org_id, name, role, current_version, created_by_kind) VALUES ($1, NULL, $2, $3, 1, $4)
-ON CONFLICT (id) DO NOTHING`, b.ID, b.Name, string(b.Role), string(platform.Kind))
+INSERT INTO agent_types (id, org_id, name, description, role, current_version, created_by_kind) VALUES ($1, NULL, $2, $3, $4, 1, $5)
+ON CONFLICT (id) DO NOTHING`, b.ID, b.Name, b.Description, string(b.Role), string(platform.Kind))
 	if err != nil {
 		return nil, err
 	}
@@ -520,7 +521,7 @@ ON CONFLICT (id) DO NOTHING`, b.ID, b.Name, string(b.Role), string(platform.Kind
 	if current.Role != b.Role {
 		return nil, fmt.Errorf("the built-in is of role %s and the stored one of %s: a type's role is fixed", b.Role, current.Role)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE agent_types SET name = $2 WHERE id = $1 AND name <> $2`, b.ID, b.Name); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE agent_types SET name = $2, description = $3 WHERE id = $1 AND (name <> $2 OR description <> $3)`, b.ID, b.Name, b.Description); err != nil {
 		return nil, err
 	}
 	digest, err := domain.AgentTypeDigest(b.Prompt, b.Settings)
