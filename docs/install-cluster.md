@@ -32,7 +32,16 @@ cluster's row brings both back.
 - `helm` 3.17 or newer and `kubectl` access that may create namespaces, PriorityClasses and
   cluster roles (cluster admin, once).
 - Every node reaches the API and metrics addresses shown in the command, and pulls images from
-  the registry in it. All traffic is outbound.
+  the registry in it. All traffic is outbound. Pods resolve the addresses with the cluster's
+  DNS, which does not know tailnet (MagicDNS) names: a control plane on a tailnet is named by its
+  IP. `hl cluster add` warns of an address only the control plane's own machine reaches
+  (loopback or `host.containers.internal`).
+- A registry that serves plain HTTP, as a local development registry does, needs every node's
+  containerd to pull from it over HTTP. When the control plane says its registry is one
+  (`runtimes.registry_plain_http`), the command pulls the chart with `--plain-http` and sets
+  `insecureRegistry.enabled=true`: a DaemonSet then writes a containerd `hosts.toml` for the
+  registry on every node, into `insecureRegistry.hostsDir` (k3s's by default; plain containerd
+  needs `config_path` set to `/etc/containerd/certs.d` and that value). Off by default.
 - At least one node without taints, or with the `hypothesisloop.io/no-workload` taint or the
   control-plane role, for the cluster-agent.
 - For accelerators, their device plugin or DRA driver. The agent discovers what the cluster
@@ -66,18 +75,27 @@ Resources: the agents request 10m CPU and 16 to 32 MiB of memory each.
 
 ### Steps
 
-1. Preview: paste the command, add `--dry-run=server` at the end and run it. Helm prints every
-   object and installs nothing.
+1. Preview: paste the command, add `--dry-run=server` at the end and run it. This is helm's
+   own flag: the API server checks every object and helm prints them, installing nothing. It
+   does not check that the cluster reaches the control plane or pulls the images; `install.sh
+   --dry-run` from a checkout does (below). Add `--kube-context CONTEXT` for another cluster
+   than the current one, and `--set-string kubeContext=CONTEXT` so the notes name it too.
 2. Install: run the command and paste the runtime token when it asks for it.
 3. Check: `kubectl -n hypothesisloop get pods` shows the cluster-agent and one node-agent per
    node running. The cluster shows **Connected** in the UI within a minute (`hl cluster list`).
+   The agent logs each step of its start: the jobs namespace, syncing the cluster's nodes and
+   pods (bounded at 5 minutes, then it exits naming the step), and its first contact.
 4. If it does not connect: `kubectl -n hypothesisloop logs deploy/hypothesisloop-cluster-agent`.
+   `hl cluster list` shows when the agent was last heard from (`last_contact_at`), what the
+   control plane last refused it with (`last_error`), and the version it runs
+   (`agent_version`), with `version_skew` when that is not the control plane's: run the
+   command again to upgrade it.
 
 The release's values are the cluster's one config file:
 `helm get values hypothesisloop-cluster-agent -n hypothesisloop`. Optional values are documented
 in the chart (`helm show values oci://REGISTRY/charts/hypothesisloop-cluster-agent`):
 `jobs.preemptLowerPriorityPods`, `nodeAgent.nodeSelector`, `autoscalerEnabled`,
-`detachOnUninstall` and `builder.*`. Append `--set key=value` to the command to set one.
+`detachOnUninstall`, `insecureRegistry.*`, `kubeContext` and `builder.*`. Append `--set key=value` to the command to set one.
 
 ### Upgrade and uninstall
 
@@ -159,9 +177,33 @@ Operators with a checkout install the same chart from `runtime/k8s/infra/chart`:
 ```bash
 RUNTIME_TOKEN="$(hl cluster token my-cluster)" make cluster-agent-up CLUSTER=my-cluster \
   API_URL=https://api.example.com METRICS_URL=https://metrics.example.com \
-  REGISTRY=registry.example.com/hypothesisloop TAG=the-tag-that-was-pushed DRY_RUN=true
+  REGISTRY=registry.example.com/hypothesisloop TAG=the-tag-that-was-pushed INSTALL_FLAGS=--dry-run
 ```
 
-`runtime/k8s/infra/install.sh --help` lists every setting. `DRY_RUN=true` checks the tools and
-the cluster, lists the accelerators it sees and prints the plan; drop it to install.
-`make cluster-agent-down` uninstalls.
+`runtime/k8s/infra/install.sh --help` lists every setting. `install.sh --dry-run` (from make,
+`INSTALL_FLAGS=--dry-run`) checks the tools and the cluster, lists the nodes, the accelerators
+and the DRA devices it sees, and prints the plan, saying whether it creates the release or
+upgrades it from which revision. It then runs the agent's image once, as a short-lived pod in
+the namespace `default` with the token in a Secret beside it, both deleted after: the pod's
+node pulls both images, and the agent asks the API's and the metrics service's `/healthz` and
+an endpoint that answers only this cluster's token. Each check says ok or FAIL, and the dry run
+exits non-zero when one fails. Drop the flag to install. `INSECURE_REGISTRY=true` has every node
+pull from a registry of plain HTTP. `make cluster-agent-down` uninstalls.
+
+## A cluster on another machine, attached to a local stack
+
+The stack `make dev` runs names this machine as its own containers reach it
+(`host.containers.internal` on macOS), which no other machine resolves. To attach a cluster on
+another machine, for example over Tailscale, set one key in `.env`:
+
+```bash
+LOCAL_REACHABLE_ADDRESS='100.64.0.5'   # this machine's tailnet IP: tailscale ip -4
+```
+
+and run `make dev` again. The rendered settings then hand that address to every cluster, agent
+and job: the API (`:8081`), the metrics service (`:8084`), the registry and its chart (`:5000`),
+the object store (`:9000`) and the local git server (`:8085`). The registry is published on it
+too, and `hl cluster add` prints a command that pulls the chart over plain HTTP and has every
+node's containerd trust the registry. Use the IP and not a tailnet name, which pods do not
+resolve. The local k3s cluster keeps reaching everything as before. Images are still pushed
+with `make images`; the remote cluster runs the tag the control plane names.

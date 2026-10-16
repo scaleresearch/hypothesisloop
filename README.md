@@ -229,7 +229,7 @@ switched on in Supabase.
 `hl` is the command-line client. `hl --help` and `hl <command> --help` list every command and flag.
 
 ```bash
-go build -o bin/hl ./cli
+go build -o bin/hl ./cli                   # make dev keeps localdev/.bin/hl built from the tree
 export API_URL=http://localhost:8081
 export HL_TOKEN="$(make -s staff-token)"   # every request carries a token: an API key, a user token or a staff token
 export HL_ORG=default HL_PROJECT=default   # where `platform-experiments create` puts what it makes
@@ -691,7 +691,9 @@ In short:
 1. Register the cluster: **Compute Resources > Add cluster** in the UI, or
    `hl cluster add my-cluster` (`--bare-metal` for one node).
 2. Run the command it shows. It asks for the runtime token shown beside it. Add
-   `--dry-run=server` (Kubernetes) or `--dry-run` (bare metal) at the end to preview.
+   `--dry-run=server` (Kubernetes, helm's own flag) or `--dry-run` (bare metal) at the end to
+   preview. From a checkout, `install.sh --dry-run` also checks from inside the cluster that it
+   reaches the control plane, takes the token and pulls the images.
 3. The cluster shows Connected within a minute (`hl cluster list`, `hl capacity`).
 
 A **Kubernetes cluster** gets the Helm release `hypothesisloop-cluster-agent` in the namespace
@@ -704,13 +706,16 @@ detach` then `sudo bare-agent uninstall` removes it.
 The command carries the control plane's settings: `services.public_api_url` and
 `runtimes.metrics_url` for the agents, and `runtimes.registry` and `runtimes.image_tag` for
 their images. `make images REGISTRY=...` pushes the chart beside the images. All of them, and
-the object store's `data_store.endpoint`, must be reachable from inside the cluster. A control
-plane started with `make dev` or `make controlplane-up` names this host as local containers see
-it, which other machines cannot resolve, so a remote cluster needs settings with addresses it
-can reach.
+the object store's `data_store.endpoint`, must be reachable from inside the cluster, by IP for
+a control plane on a tailnet, since pods do not resolve tailnet names. A control plane started
+with `make dev` or `make controlplane-up` names this host as local containers see it, which
+other machines cannot resolve: set `LOCAL_REACHABLE_ADDRESS` in `.env` to an address they reach
+(such as this machine's tailnet IP) and run `make dev` again
+([docs/install-cluster.md](docs/install-cluster.md#a-cluster-on-another-machine-attached-to-a-local-stack)).
 
 From a checkout, `make cluster-agent-up` installs the chart from `runtime/k8s/infra/chart`
-(`runtime/k8s/infra/install.sh --help` lists its settings, `DRY_RUN=true` prints the plan), and
+(`runtime/k8s/infra/install.sh --help` lists its settings, `INSTALL_FLAGS=--dry-run` prints the
+plan and checks from inside the cluster), and
 `make cluster-agent-down` removes it. `BUILDER=true` also lets the cluster build experiment
 environments (`.hypothesisloop/Dockerfile`) with a rootless BuildKit sidecar, which reserves
 `builder.requests` (4 cores and 8 GiB) from the capacity it reports. Build the bare-metal agent

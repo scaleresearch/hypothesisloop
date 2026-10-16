@@ -23,18 +23,27 @@ const secretToken = "hls_dGhlLXNlY3JldA.c2lnbmF0dXJl"
 const minKubeVersion = "1.34.0"
 
 // fakeBin puts a helm that records its arguments and its stdin, and a kubectl that answers for a
-// cluster of one node with two GPUs, ahead of the real ones.
+// cluster of one node with two GPUs and four DRA devices, ahead of the real ones. The release is
+// installed at FAKE_REVISION when that is set. The dry run's check pod ends as FAKE_POD_STATE
+// says (phase|node|waiting reasons), Succeeded on node-1 by default, and logs FAKE_POD_LOGS; the
+// manifest applied is kept in kubectl.applied.
 func fakeBin(t *testing.T) (dir, argsFile, stdinFile string) {
 	t.Helper()
 	dir = t.TempDir()
 	argsFile, stdinFile = filepath.Join(dir, "helm.args"), filepath.Join(dir, "helm.stdin")
-	helm := "#!/bin/sh\n[ \"$1\" = version ] && { echo v3.17.0; exit 0; }\nprintf '%s\\n' \"$@\" > " + argsFile + "\ncat > " + stdinFile + "\n"
+	helm := "#!/bin/sh\n[ \"$1\" = version ] && { echo v3.17.0; exit 0; }\n" +
+		"[ \"$1\" = list ] && { if [ -n \"$FAKE_REVISION\" ]; then echo \"[{\\\"name\\\":\\\"hypothesisloop-cluster-agent\\\",\\\"revision\\\":\\\"$FAKE_REVISION\\\"}]\"; else echo '[]'; fi; exit 0; }\n" +
+		"printf '%s\\n' \"$@\" > " + argsFile + "\ncat > " + stdinFile + "\n"
 	kubectl := `#!/bin/sh
 case "$*" in
   *"config current-context"*) echo test-context ;;
   *"version -o json"*) printf '{\n  "serverVersion": {\n    "gitVersion": "v1.35.1"\n  }\n}\n' ;;
   *"get nodes --no-headers"*) echo node-1 ;;
   *"get nodes -o jsonpath"*) echo '{"cpu":"8","memory":"32Gi","nvidia.com/gpu":"2"}' ;;
+  *"get resourceslices"*) printf 'tenstorrent.com node-1 4\n' ;;
+  *"apply -f -"*) cat > "$(dirname "$0")/kubectl.applied" ;;
+  *"get pod"*) printf '%s' "${FAKE_POD_STATE:-Succeeded|node-1|;}" ;;
+  *" logs "*) printf '%s\n' "${FAKE_POD_LOGS:-ok   token: the API takes the runtime token of cluster edge}" ;;
 esac
 `
 	for name, script := range map[string]string{"helm": helm, "kubectl": kubectl} {
@@ -337,7 +346,13 @@ func render(t *testing.T, set ...string) []map[string]any {
 	}
 	args := []string{"template", "hypothesisloop-cluster-agent", "chart", "--namespace", "hypothesisloop", "--kube-version", minKubeVersion,
 		"--set-string", "clusterName=edge,apiURL=http://api,metricsURL=http://metrics,runtimeToken=t,images.registry=r,images.tag=t1"}
+	// helm applies --set-string after --set, so a string value replaces one of the defaults above
+	// only as another --set-string: such a value is given as "string:key=value".
 	for _, value := range set {
+		if text, ok := strings.CutPrefix(value, "string:"); ok {
+			args = append(args, "--set-string", text)
+			continue
+		}
 		args = append(args, "--set", value)
 	}
 	out, err := exec.Command("helm", args...).CombinedOutput()
@@ -482,13 +497,144 @@ func TestDryRunPrintsThePlanAndInstallsNothing(t *testing.T) {
 	if !strings.HasPrefix(string(args), "template\n") || strings.Contains(string(args), "upgrade") {
 		t.Errorf("helm arguments = %q, want the chart rendered and nothing installed", args)
 	}
-	for _, want := range []string{"namespace hypothesisloop", "hypothesisloop-jobs", "https://api.example", "registry.example/hypothesisloop-cluster-agent:t1", "nvidia.com/gpu: 2 on 1 nodes", "Nothing was changed"} {
+	for _, want := range []string{"namespace hypothesisloop", "hypothesisloop-jobs", "https://api.example", "registry.example/hypothesisloop-cluster-agent:t1",
+		"Kubernetes v1.35.1, 1 node)", "nvidia.com/gpu: 2 on 1 node\n", "tenstorrent.com: 4 devices on 1 node\n", "not installed yet", "Creates:",
+		"ok   images: node node-1 pulled", "ok   token: the API takes the runtime token", "every check passed. Nothing was changed"} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("the plan does not say %q:\n%s", want, out)
 		}
 	}
 	if strings.Contains(string(out)+string(args), secretToken) {
 		t.Errorf("the token is in the plan or helm's arguments:\n%s", out)
+	}
+	// The check pod runs the agent's image, pulls the node-agent's too, and reads the token from
+	// a Secret, never from its spec.
+	applied, _ := os.ReadFile(filepath.Join(bin, "kubectl.applied"))
+	for _, want := range []string{"image: registry.example/hypothesisloop-cluster-agent:t1", "image: registry.example/hypothesisloop-node-agent:t1",
+		`command: ["/cluster-agent", "check"]`, "secretKeyRef", `token: "` + secretToken + `"`, "namespace: default"} {
+		if !strings.Contains(string(applied), want) {
+			t.Errorf("the check's manifest has no %q:\n%s", want, applied)
+		}
+	}
+}
+
+// A dry run against an installed release says it upgrades it, from which revision.
+func TestDryRunSaysItUpgradesAnInstalledRelease(t *testing.T) {
+	bin, _, _ := fakeBin(t)
+	cmd := exec.Command("bash", "install.sh", "--dry-run")
+	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "FAKE_REVISION=3",
+		"CLUSTER_NAME=edge", "API_URL=https://api.example", "METRICS_URL=https://metrics.example", "REGISTRY_URL=registry.example", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("install.sh --dry-run: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "Upgrades:   helm release hypothesisloop-cluster-agent in namespace hypothesisloop, revision 3 to 4") || strings.Contains(string(out), "Creates:") {
+		t.Errorf("the plan of an upgrade:\n%s", out)
+	}
+}
+
+// What would make the install fail is found by the dry run, which says so and exits non-zero: a
+// node that cannot pull the images, or an API that refuses the token or cannot be reached.
+func TestDryRunFailsOnWhatTheInstallWouldNotSurvive(t *testing.T) {
+	for name, tc := range map[string]struct {
+		env  []string
+		want string
+	}{
+		"images not pullable": {[]string{"FAKE_POD_STATE=Pending|node-1|ErrImagePull:http: server gave HTTP response to HTTPS client;"},
+			"FAIL images: node node-1 cannot pull them: ErrImagePull:http: server gave HTTP response to HTTPS client"},
+		"token refused": {[]string{"FAKE_POD_STATE=Failed|node-1|;", "FAKE_POD_LOGS=FAIL token: control plane answered 401: bad signature"},
+			"FAIL token: control plane answered 401: bad signature"},
+	} {
+		bin, _, _ := fakeBin(t)
+		cmd := exec.Command("bash", "install.sh", "--dry-run")
+		cmd.Env = append(append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"),
+			"CLUSTER_NAME=edge", "API_URL=https://api.example", "METRICS_URL=https://metrics.example", "REGISTRY_URL=100.64.0.5:5000", "TAG=t1", "RUNTIME_TOKEN="+secretToken), tc.env...)
+		out, err := cmd.CombinedOutput()
+		if err == nil || !strings.Contains(string(out), tc.want) || !strings.Contains(string(out), "would not work as it stands") {
+			t.Errorf("%s: err = %v, want a failure saying %q:\n%s", name, err, tc.want, out)
+		}
+		if name == "images not pullable" && !strings.Contains(string(out), "INSECURE_REGISTRY=true") {
+			t.Errorf("%s: a registry on a port with no insecureRegistry is not pointed at it:\n%s", name, out)
+		}
+	}
+}
+
+// A registry of plain HTTP is configured on every node only when asked, and the notes name the
+// context the install ran against.
+func TestInstallSetsTheInsecureRegistryOnlyWhenAskedAndTheContextAlways(t *testing.T) {
+	for _, insecure := range []string{"", "true"} {
+		bin, argsFile, _ := fakeBin(t)
+		cmd := exec.Command("bash", "install.sh")
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "INSECURE_REGISTRY="+insecure,
+			"CLUSTER_NAME=edge", "API_URL=http://api", "METRICS_URL=http://metrics", "REGISTRY_URL=registry.example", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("install.sh: %v\n%s", err, out)
+		}
+		args, _ := os.ReadFile(argsFile)
+		if want := "insecureRegistry.enabled=" + cmpOr(insecure, "false") + "\n"; !strings.Contains(string(args), want) {
+			t.Errorf("INSECURE_REGISTRY=%q: helm arguments = %q, want %q", insecure, args, want)
+		}
+		if !strings.Contains(string(args), "kubeContext=test-context\n") {
+			t.Errorf("helm arguments = %q, want the context the install ran against", args)
+		}
+	}
+}
+
+func cmpOr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// The DaemonSet that trusts a registry of plain HTTP writes containerd's hosts.toml for the
+// registry's host and port, without its path, on every node; unasked, there is none.
+func TestTheInsecureRegistryDaemonSetWritesTheRegistrysHostsFileOnlyWhenEnabled(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm is not installed")
+	}
+	for _, ds := range ofKind(render(t), "DaemonSet") {
+		if metadata(ds, "name") == "hypothesisloop-insecure-registry" {
+			t.Fatal("unasked, the chart renders the insecure registry DaemonSet")
+		}
+	}
+	var found map[string]any
+	for _, ds := range ofKind(render(t, "insecureRegistry.enabled=true", "string:images.registry=100.64.0.5:5000/images"), "DaemonSet") {
+		if metadata(ds, "name") == "hypothesisloop-insecure-registry" {
+			found = ds
+		}
+	}
+	if found == nil {
+		t.Fatal("insecureRegistry.enabled=true renders no DaemonSet")
+	}
+	spec := podSpec(found)
+	script := fmt.Sprint(spec["containers"].([]any)[0].(map[string]any)["command"])
+	for _, want := range []string{`dir="/hosts/100.64.0.5:5000"`, `server = "http://%s"`, "skip_verify = true"} {
+		if !strings.Contains(script, want) {
+			t.Errorf("the script has no %q:\n%s", want, script)
+		}
+	}
+	if strings.Contains(script, "/images") {
+		t.Errorf("the hosts directory carries the registry's path:\n%s", script)
+	}
+	if tolerations := fmt.Sprint(spec["tolerations"]); !strings.Contains(tolerations, "Exists") {
+		t.Errorf("tolerations = %s, want every node", tolerations)
+	}
+	volume := fmt.Sprint(spec["volumes"])
+	if !strings.Contains(volume, "/var/lib/rancher/k3s/agent/etc/containerd/certs.d") {
+		t.Errorf("volumes = %s, want k3s's hosts directory by default", volume)
+	}
+}
+
+// The agent reports the tag it was installed with, which is the tag of its image.
+func TestTheClusterAgentKnowsItsVersion(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm is not installed")
+	}
+	deployment := ofKind(render(t), "Deployment")[0]
+	container := podSpec(deployment)["containers"].([]any)[0]
+	if got := envValue(container, "HYPOTHESISLOOP_AGENT_VERSION"); got != "t1" {
+		t.Errorf("HYPOTHESISLOOP_AGENT_VERSION = %v, want images.tag", got)
 	}
 }
 
