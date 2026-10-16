@@ -28,10 +28,10 @@ import type {
   HypothesisComment,
   HypothesisFinding,
   HypothesisGraph,
+  HypothesisGraphNode,
   HypothesisLink,
   HypothesisLinkInput,
   HypothesisLinkType,
-  HypothesisListItem,
   HypothesisStatus,
   HypothesisWithJobs,
   JobMetric,
@@ -341,8 +341,9 @@ export interface HypothesesParams {
 }
 
 /** A page of hypotheses: the open ideas of people first, then the newest. */
-export function fetchHypothesesPage(params: HypothesesParams): Promise<Page<HypothesisListItem>> {
-  return apiFetchPage<HypothesisListItem>(withQuery('/hypotheses', params))
+// Each row carries what was found for it, as its node in the graph does.
+export function fetchHypothesesPage(params: HypothesesParams): Promise<Page<HypothesisGraphNode>> {
+  return apiFetchPage<HypothesisGraphNode>(withQuery('/hypotheses', params))
 }
 
 // A hypothesis with a verdict, a finding or a job with a metric: its newest finding and the job
@@ -601,7 +602,8 @@ interface AgentStanding {
 // Standings rank the competitors on each ranking metric, the first being the primary one. bests
 // holds every reporting agent's best raw value on every declared metric and the job that set it.
 export interface PlatformExperimentResults {
-  metrics: { metric: string; direction: 'maximize' | 'minimize'; standings: AgentStanding[] }[]
+  // baseline is the declared baseline job's last value on the metric, absent until it reported one.
+  metrics: { metric: string; direction: 'maximize' | 'minimize'; baseline?: number; standings: AgentStanding[] }[]
   bests: {
     metric: string
     agents: { agent_id: string; best: number; experiment_id?: string }[]

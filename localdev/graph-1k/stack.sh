@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# stack.sh up|ui|down|env
+# stack.sh up|api|ui|down|env
 #
 # A control plane of its own for timing the hypothesis graph page against a big graph: its own
 # Postgres, Memgraph, GreptimeDB and object store containers (prefix hl-graph1k-, no named
@@ -9,12 +9,13 @@
 # identity provider the UI's browser run uses (controlplane/ui/e2e/identity-provider.mjs).
 #
 #   up    start everything, building the services from this tree
+#   api   rebuild and restart the API and the metrics service, keeping the data
 #   ui    restart the UI alone (UI_MODE=prod for a production build)
 #   down  stop the processes and remove the containers with their data
 #   env   print the addresses and the state directory as shell variables
 set -euo pipefail
 
-action="${1:?usage: stack.sh up|ui|down|env}"
+action="${1:?usage: stack.sh up|api|ui|down|env}"
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STATE="${STATE:-/tmp/graph-1k/stack}"
 PREFIX=hl-graph1k
@@ -157,27 +158,38 @@ start_ui() {
   wait_for ui "http://localhost:${UI_PORT}/login"
 }
 
+service_env() {
+  export DATABASE_URL HYPOTHESISLOOP_CONFIG="${STATE}/hypothesisloop.yaml"
+  HYPOTHESISLOOP_SIGNING_SECRET="$(<"${STATE}/signing-secret")"
+  HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD="$(<"${STATE}/git-password")"
+  # The model proxy's credential is never used here: no agent is hosted.
+  MODEL_ANTHROPIC_OAUTH_TOKEN=unused-by-graph-1k
+  export HYPOTHESISLOOP_SIGNING_SECRET HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD MODEL_ANTHROPIC_OAUTH_TOKEN
+}
+
+# Built before anything is stopped, so a tree that does not compile leaves the running ones be.
+start_services() {
+  (cd "${repo}/controlplane" && go build -o "${STATE}/bin/" ./cmd/control-service ./cmd/metrics-service ./cmd/hl-admin)
+  stop control-service
+  stop metrics-service
+  start control-service "${STATE}/bin/control-service"
+  wait_for control-service "http://localhost:${API_PORT}/health"
+  start metrics-service "${STATE}/bin/metrics-service"
+  wait_for metrics-service "http://localhost:${METRICS_PORT}/health"
+}
+
 case "${action}" in
   up)
     mkdir -p "${STATE}/git" "${STATE}/bin"
     require_free "${PG_PORT}" "${MEMGRAPH_PORT}" "${GREPTIME_PORT}" "${STORE_PORT}" "${API_PORT}" "${METRICS_PORT}" "${GIT_PORT}" "${IDP_PORT}"
     render_settings
-    (cd "${repo}/controlplane" && go build -o "${STATE}/bin/" ./cmd/control-service ./cmd/metrics-service ./cmd/hl-admin)
     (cd "${repo}" && go build -o "${STATE}/bin/git-server" ./localdev/local-git)
     containers_up
-    export DATABASE_URL HYPOTHESISLOOP_CONFIG="${STATE}/hypothesisloop.yaml"
-    HYPOTHESISLOOP_SIGNING_SECRET="$(<"${STATE}/signing-secret")"
-    HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD="$(<"${STATE}/git-password")"
-    # The model proxy's credential is never used here: no agent is hosted.
-    MODEL_ANTHROPIC_OAUTH_TOKEN=unused-by-graph-1k
-    export HYPOTHESISLOOP_SIGNING_SECRET HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD MODEL_ANTHROPIC_OAUTH_TOKEN
+    service_env
     GIT_SERVER_ADDRESS=":${GIT_PORT}" GIT_SERVER_ROOT="${STATE}/git" GIT_SERVER_USERNAME=hypothesisloop \
       GIT_SERVER_PASSWORD="${HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD}" start git-server "${STATE}/bin/git-server"
     wait_for git-server "http://localhost:${GIT_PORT}/health"
-    start control-service "${STATE}/bin/control-service"
-    wait_for control-service "http://localhost:${API_PORT}/health"
-    start metrics-service "${STATE}/bin/metrics-service"
-    wait_for metrics-service "http://localhost:${METRICS_PORT}/health"
+    start_services
     start identity-provider node "${repo}/localdev/graph-1k/identity-provider.mjs" "${IDP_PORT}" "${STATE}/jwt-key.pem" "http://localhost:${UI_PORT}"
     wait_for identity-provider "http://127.0.0.1:${IDP_PORT}/test/state"
     API_URL="http://localhost:${API_PORT}" IDP_URL="http://127.0.0.1:${IDP_PORT}" start cluster node "${repo}/localdev/graph-1k/cluster.mjs"
@@ -188,6 +200,10 @@ case "${action}" in
     for name in "${processes[@]}"; do stop "${name}"; done
     for c in postgres memgraph greptimedb store; do podman rm -f -v "${PREFIX}-${c}" >/dev/null 2>&1 || true; done
     ;;
+  api)
+    service_env
+    start_services
+    ;;
   ui)
     mkdir -p "${STATE}"
     start_ui
@@ -196,7 +212,7 @@ case "${action}" in
     print_env
     ;;
   *)
-    echo "usage: stack.sh up|ui|down|env" >&2
+    echo "usage: stack.sh up|api|ui|down|env" >&2
     exit 1
     ;;
 esac

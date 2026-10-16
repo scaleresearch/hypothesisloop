@@ -149,6 +149,8 @@ const config: Config = {
       },
       gridTemplateColumns: {
         'with-aside': 'minmax(0, 1fr) 340px',
+        // A rail of choices beside the content they scope.
+        'scope-rail': '17rem minmax(0, 1fr)',
         tiles: 'repeat(auto-fit, minmax(11rem, 1fr))',
         'tiles-sm': 'repeat(auto-fit, minmax(7.5rem, 1fr))',
         panels: 'repeat(auto-fill, minmax(30rem, 1fr))',
