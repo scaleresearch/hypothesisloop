@@ -740,6 +740,9 @@ export interface OrgCluster extends ClusterSettings {
   // The org registered the cluster and may change its settings.
   owned: boolean
   connected: boolean
+  // Where a job of the org tries the cluster, 1 first. Clusters of one place are tried together,
+  // the one with the most room first. Absent while the org has the cluster turned off.
+  place?: number
   // The connected agent reports an autoscaler that adds nodes for waiting jobs.
   autoscaler_enabled: boolean
   // When the cluster's agent was last heard from, within the last 30 days.

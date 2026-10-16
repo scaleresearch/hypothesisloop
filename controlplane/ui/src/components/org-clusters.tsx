@@ -120,6 +120,7 @@ function ClusterStatus({ cluster: c }: { cluster: OrgCluster }) {
       {!c.connected && (
         <Text as="div" variant="meta">
           {c.last_contact_at ? <>Last contact <span title={formatDate(c.last_contact_at)}>{relTime(c.last_contact_at)}</span></> : 'Not heard from in 30 days'}
+          {c.enabled && ' · skipped until it reconnects'}
         </Text>
       )}
       {c.agent_version && (
@@ -171,22 +172,51 @@ function StartCommand({ registered, onHide }: { registered: RegisteredCluster; o
   )
 }
 
-/**
- * Where a cluster the org registered stands among its own, and the two ways to move it: the
- * buttons here, and dragging its row.
- */
-function ClusterOrder({ cluster, place, of, onMove, disabled }: { cluster: OrgCluster; place: number; of: number; onMove: (to: number) => void; disabled: boolean }) {
+/** The buttons that move one of the org's own clusters up or down its order, beside the grip a row is dragged by. */
+function MoveButtons({ cluster, index, of, onMove, disabled }: { cluster: OrgCluster; index: number; of: number; onMove: (to: number) => void; disabled: boolean }) {
   return (
     <span className="flex items-center gap-1">
       <GripVertical aria-hidden="true" size={14} className="cursor-grab text-subtle" />
-      <Code className="w-4">{place + 1}</Code>
-      <Button size="icon" variant="ghost" aria-label={`Move ${cluster.name} up`} disabled={disabled || place === 0} onClick={() => onMove(place - 1)}>
+      <Button size="icon" variant="ghost" aria-label={`Move ${cluster.name} up`} disabled={disabled || index === 0} onClick={() => onMove(index - 1)}>
         <ChevronUp aria-hidden="true" size={14} />
       </Button>
-      <Button size="icon" variant="ghost" aria-label={`Move ${cluster.name} down`} disabled={disabled || place === of - 1} onClick={() => onMove(place + 1)}>
+      <Button size="icon" variant="ghost" aria-label={`Move ${cluster.name} down`} disabled={disabled || index === of - 1} onClick={() => onMove(index + 1)}>
         <ChevronDown aria-hidden="true" size={14} />
       </Button>
     </span>
+  )
+}
+
+/**
+ * Where a job of the org tries the cluster: its place, which it may share with others the job
+ * tries together, or that it is skipped while turned off.
+ */
+function Place({ place, shared }: { place?: number; shared: boolean }) {
+  if (!place) return <Text as="span" variant="note">Off</Text>
+  return (
+    <Stack gap="2xs" start>
+      <Code>{place}</Code>
+      {shared && <Text as="div" variant="meta" className="whitespace-nowrap">tied, most room first</Text>}
+    </Stack>
+  )
+}
+
+/**
+ * Where a job of the org goes right now: the first place with a connected cluster. A job that does
+ * not fit there moves down the order.
+ */
+function NextPlacement({ clusters }: { clusters: OrgCluster[] }) {
+  const placed = clusters.filter(c => c.place)
+  if (placed.length === 0) return <Text variant="note">Every cluster is turned off, so jobs wait in the queue.</Text>
+  const first = Math.min(...placed.filter(c => c.connected).map(c => c.place!))
+  if (!Number.isFinite(first)) return <Text variant="note">No cluster in use is connected, so jobs wait in the queue until one is.</Text>
+  const names = placed.filter(c => c.place === first && c.connected).map(c => c.name)
+  return (
+    <Text variant="note">
+      Jobs go to the first connected cluster below with room: right now{' '}
+      {names.map((n, i) => <Fragment key={n}>{i > 0 && ' or '}<Code>{n}</Code></Fragment>)}.
+      {' '}A job that does not fit there moves down the order.
+    </Text>
   )
 }
 
@@ -212,8 +242,13 @@ export function OrgClusters() {
 
   const own = (data ?? []).filter(c => c.owned && !c.shared)
   const others = (data ?? []).filter(c => !c.owned || c.shared)
-  // While a move is written the list shows the order asked for; a refusal puts it back.
-  const shownOwn = moving ? moving.map(n => own.find(c => c.name === n)).filter((c): c is OrgCluster => !!c) : own
+  // While a move is written the list shows the order asked for, each in a place of its own as the
+  // write gives it; a refusal puts it back.
+  const shownOwn = moving
+    ? moving.map(n => own.find(c => c.name === n)).filter((c): c is OrgCluster => !!c).map((c, i) => ({ ...c, place: c.enabled ? i + 1 : undefined }))
+    : own
+  const shown = [...shownOwn, ...others]
+  const tied = (c: OrgCluster) => !!c.place && shown.filter(o => o.place === c.place).length > 1
   const columns = administers ? 6 : 5
 
   async function change(cluster: string, act: () => Promise<unknown>) {
@@ -260,6 +295,77 @@ export function OrgClusters() {
     if (await register(name.trim())) setName('')
   }
 
+  function row(c: OrgCluster, index?: number) {
+    const orders = administers && index !== undefined
+    return (
+      <Fragment key={c.name}>
+        <tr
+          data-cluster={c.name}
+          draggable={orders && switching === ''}
+          onDragStart={orders ? () => setDragged(c.name) : undefined}
+          onDragOver={orders && dragged ? e => e.preventDefault() : undefined}
+          onDrop={orders && dragged ? () => { void move(dragged, index); setDragged('') } : undefined}
+          onDragEnd={() => setDragged('')}
+        >
+          <td className="text-xs">
+            <span className="flex items-center gap-2">
+              <Place place={c.place} shared={tied(c)} />
+              {orders && <MoveButtons cluster={c} index={index} of={shownOwn.length} onMove={to => move(c.name, to)} disabled={switching !== ''} />}
+            </span>
+          </td>
+          <td className="font-mono text-xs font-medium">{c.name}</td>
+          <td><ClusterStatus cluster={c} /></td>
+          <td className="text-xs">
+            {c.owned ? org.name : <Badge tone="neutral">Platform</Badge>}
+            {c.shared && <Text as="div" variant="meta">shared with every org</Text>}
+          </td>
+          <td>
+            <Switch
+              label={`Use ${c.name} for the jobs of ${org.name}`}
+              checked={c.enabled}
+              disabled={!administers || switching !== ''}
+              onChange={enabled => change(c.name, () => setClusterEnabled(org.id, c.name, enabled))}
+            />
+            {!c.enabled && <Text as="div" variant="meta" className="whitespace-nowrap">Off: no new jobs go here.</Text>}
+          </td>
+          {administers && (
+            <td>
+              {c.owned && (
+                <Inline>
+                  <Button size="sm" disabled={busy} onClick={() => register(c.name)}>Show start command</Button>
+                  <Button size="sm" variant="ghost" aria-expanded={advanced === c.name} onClick={() => setAdvanced(advanced === c.name ? '' : c.name)}>Advanced</Button>
+                </Inline>
+              )}
+            </td>
+          )}
+        </tr>
+        {administers && c.owned && advanced === c.name && (
+          <tr>
+            <td colSpan={columns} aria-label={`Advanced settings of ${c.name}`}>
+              <Stack start className="py-1">
+                <ClusterSettingsEditor key={c.name} orgID={org.id} cluster={c} onSaved={mutate} />
+                <Inline gap="md">
+                  {staff && (
+                    <label className="flex items-center gap-2 text-xs">
+                      <Switch
+                        label={`Share ${c.name} with every org`}
+                        checked={c.shared}
+                        disabled={switching !== ''}
+                        onChange={shared => change(c.name, () => updateCluster(org.id, c.name, { shared }))}
+                      />
+                      Shared with every org · staff only
+                    </label>
+                  )}
+                  <Button size="sm" variant="danger" disabled={switching !== ''} onClick={() => setRemoving(c.name)}>Remove cluster</Button>
+                </Inline>
+              </Stack>
+            </td>
+          </tr>
+        )}
+      </Fragment>
+    )
+  }
+
   return (
     <Stack>
       {administers && (
@@ -289,94 +395,42 @@ export function OrgClusters() {
         </EmptyState>
       )}
       {data && data.length > 0 && (
-        <Table>
-          <thead>
-            <tr>
-              <th>Cluster</th>
-              <th>Status</th>
-              <th>Provided by</th>
-              <th>Order</th>
-              <th>Jobs of {org.name}</th>
-              {administers && <th />}
-            </tr>
-          </thead>
-          <tbody>
-            {[...shownOwn, ...others].map((c, place) => {
-              const orders = administers && place < shownOwn.length
-              return (
-              <Fragment key={c.name}>
-              <tr
-                draggable={orders && switching === ''}
-                onDragStart={orders ? () => setDragged(c.name) : undefined}
-                onDragOver={orders && dragged ? e => e.preventDefault() : undefined}
-                onDrop={orders && dragged ? () => { void move(dragged, place); setDragged('') } : undefined}
-                onDragEnd={() => setDragged('')}
-              >
-                <td className="font-mono text-xs font-medium">{c.name}</td>
-                <td><ClusterStatus cluster={c} /></td>
-                <td className="text-xs">
-                  {c.owned ? org.name : <Badge tone="neutral">Platform</Badge>}
-                  {c.shared && <Text as="div" variant="meta">shared with every org</Text>}
-                </td>
-                <td className="text-xs">
-                  {place >= shownOwn.length
-                    ? <span className="text-muted">used last, after {org.name}&apos;s own</span>
-                    : orders
-                      ? <ClusterOrder cluster={c} place={place} of={shownOwn.length} onMove={to => move(c.name, to)} disabled={switching !== ''} />
-                      : <Code>{place + 1}</Code>}
-                </td>
-                <td>
-                  <Switch
-                    label={`Use ${c.name} for the jobs of ${org.name}`}
-                    checked={c.enabled}
-                    disabled={!administers || switching !== ''}
-                    onChange={enabled => change(c.name, () => setClusterEnabled(org.id, c.name, enabled))}
-                  />
-                  {!c.enabled && (
-                    <Text as="div" variant="meta" className="max-w-56">
-                      Turned off: no job of {org.name} is placed here. Jobs already running finish.
-                    </Text>
-                  )}
-                </td>
-                {administers && (
-                  <td>
-                    {c.owned && (
-                      <Inline>
-                        <Button size="sm" disabled={busy} onClick={() => register(c.name)}>Show start command</Button>
-                        <Button size="sm" variant="ghost" aria-expanded={advanced === c.name} onClick={() => setAdvanced(advanced === c.name ? '' : c.name)}>Advanced</Button>
-                      </Inline>
-                    )}
-                  </td>
-                )}
+        <Stack gap="sm">
+          <NextPlacement clusters={shown} />
+          <Table>
+            <thead>
+              <tr>
+                <th>Order</th>
+                <th>Cluster</th>
+                <th>Status</th>
+                <th>Provided by</th>
+                <th title={`Whether jobs of ${org.name} are placed on the cluster`}>Use for jobs</th>
+                {administers && <th />}
               </tr>
-              {administers && c.owned && advanced === c.name && (
+            </thead>
+            <tbody>
+              <tr>
+                <th colSpan={columns} scope="colgroup" className="bg-surface-inset py-2 text-foreground">Clusters of {org.name}, tried first, in the order {administers ? 'you set' : 'an owner sets'}</th>
+              </tr>
+              {shownOwn.length === 0 && (
                 <tr>
-                  <td colSpan={columns} aria-label={`Advanced settings of ${c.name}`}>
-                    <Stack start className="py-1">
-                      <ClusterSettingsEditor key={c.name} orgID={org.id} cluster={c} onSaved={mutate} />
-                      <Inline gap="md">
-                        {staff && (
-                          <label className="flex items-center gap-2 text-xs">
-                            <Switch
-                              label={`Share ${c.name} with every org`}
-                              checked={c.shared}
-                              disabled={switching !== ''}
-                              onChange={shared => change(c.name, () => updateCluster(org.id, c.name, { shared }))}
-                            />
-                            Shared with every org · staff only
-                          </label>
-                        )}
-                        <Button size="sm" variant="danger" disabled={switching !== ''} onClick={() => setRemoving(c.name)}>Remove cluster</Button>
-                      </Inline>
-                    </Stack>
+                  <td colSpan={columns}>
+                    <Text as="span" variant="note">
+                      None yet. {administers ? 'Add one above' : 'An owner adds one here'} to run jobs on your own hardware before the platform&apos;s.
+                    </Text>
                   </td>
                 </tr>
               )}
-              </Fragment>
-              )
-            })}
-          </tbody>
-        </Table>
+              {shownOwn.map((c, index) => row(c, index))}
+              {others.length > 0 && (
+                <tr>
+                  <th colSpan={columns} scope="colgroup" className="bg-surface-inset py-2 text-foreground">Platform compute, shared with every org, tried after {org.name}&apos;s own</th>
+                </tr>
+              )}
+              {others.map(c => row(c))}
+            </tbody>
+          </Table>
+        </Stack>
       )}
       <ConfirmDialog
         open={removing !== ''}

@@ -162,7 +162,7 @@ export default function ClusterPage() {
           Each cluster runs an agent that only calls out to the platform for its work and reports
           back. Nothing connects into your cluster."
     >
-      <Section title={`Clusters ${org.name} can run on`} scrollX>
+      <Section title={`Where the jobs of ${org.name} run`} scrollX>
         <OrgClusters />
       </Section>
       <LiveCapacity />

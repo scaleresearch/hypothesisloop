@@ -188,6 +188,7 @@ type ListedCluster struct {
 	ClusterView
 	Owned             bool       `json:"owned" doc:"The org registered the cluster and may change its settings. False for a cluster of another org that the platform shares: its org_id, cluster_id, settings, agent_version and last_error are left out."`
 	Connected         bool       `json:"connected"`
+	Place             int        `json:"place,omitempty" doc:"Where the cluster stands in the order a job of the org is tried on its clusters, 1 first. Clusters of one place are tried together, the one with the most room for the job first. The platform's shared clusters come after every cluster of the org's own. Absent while the org has the cluster turned off."`
 	AutoscalerEnabled bool       `json:"autoscaler_enabled" doc:"The cluster's connected agent reports an autoscaler that adds nodes for waiting jobs, which is what scale_up_timeout_seconds and max_speculative_accelerators act on."`
 	LastContactAt     *time.Time `json:"last_contact_at,omitempty" doc:"When the cluster's agent last reconciled with the platform, if within the last 30 days. Absent: not heard from in them, or never."`
 	AgentVersion      string     `json:"agent_version,omitempty" doc:"The version, an image tag, the cluster's agent said it runs at its last contact."`
@@ -241,12 +242,22 @@ func (h *Handler) listClusters(ctx context.Context, orgID string, caller auth.Pr
 	}
 	out := &clusterList{}
 	out.Body.Clusters = make([]ListedCluster, len(clusters))
+	// clusters come highest priority first, and placement tries one priority at a time
+	// (placement.Tiers), so each new priority among the clusters in use is the next place.
+	place, placed := 0, -1
 	for i, c := range clusters {
 		var contact *Contact
 		if seen, ok := contacts[c.Name]; ok {
 			contact = &seen
 		}
 		out.Body.Clusters[i] = listed(c, orgID, caller, connected[c.Name], connected[c.Name] && autoscalers[c.Name], contact, h.runtimes.ImageTag)
+		if !c.EnabledFor(orgID) {
+			continue
+		}
+		if c.Priority != placed {
+			place, placed = place+1, c.Priority
+		}
+		out.Body.Clusters[i].Place = place
 	}
 	return out, nil
 }

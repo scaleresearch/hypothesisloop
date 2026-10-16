@@ -24,7 +24,7 @@ const staff: Me = { ...me, kind: 'staff' }
 
 const owned = (name: string, over: Partial<OrgCluster> = {}): OrgCluster =>
   ({ name, org_id: 'org_a', shared: false, enabled: true, created_at: at, owned: true, connected: false, autoscaler_enabled: false, ...over })
-const platform: OrgCluster = { name: 'platform-gpu', shared: true, enabled: true, created_at: at, owned: false, connected: true, autoscaler_enabled: false }
+const platform: OrgCluster = { name: 'platform-gpu', shared: true, enabled: true, created_at: at, owned: false, connected: true, autoscaler_enabled: false, place: 4 }
 
 // In the order the API lists them: the org's own as it ordered them, then the platform's.
 let clusters: OrgCluster[]
@@ -40,14 +40,14 @@ function show(as: Me = me) {
 }
 
 const rowOf = async (name: string) => (await screen.findByRole('cell', { name })).closest('tr')!
-const names = () => screen.getAllByRole('row').slice(1).map(r => r.querySelector('td')!.textContent)
+const names = () => screen.getAllByRole('row').map(r => r.getAttribute('data-cluster')).filter(Boolean)
 
 beforeEach(() => {
   vi.resetAllMocks()
-  clusters = [owned('lab', { connected: true, scale_up_timeout_seconds: 600 }), owned('new'), owned('spare'), platform]
+  clusters = [owned('lab', { connected: true, scale_up_timeout_seconds: 600, place: 1 }), owned('new', { place: 2 }), owned('spare', { place: 3 }), platform]
   vi.mocked(fetchOrgClusters).mockImplementation(async () => [...clusters])
   vi.mocked(setClusterOrder).mockImplementation(async (_orgID, order) => {
-    clusters = [...order.map(n => clusters.find(c => c.name === n)!), platform]
+    clusters = [...order.map((n, i) => ({ ...clusters.find(c => c.name === n)!, place: i + 1 })), platform]
     return clusters
   })
   vi.mocked(updateCluster).mockImplementation(async (_orgID, name, change) => {
@@ -55,7 +55,7 @@ beforeEach(() => {
   })
   vi.mocked(removeCluster).mockImplementation(async (_orgID, name) => { clusters = clusters.filter(c => c.name !== name) })
   vi.mocked(setClusterEnabled).mockImplementation(async (_orgID, name, enabled) => {
-    clusters = clusters.map(c => (c.name === name ? { ...c, enabled } : c))
+    clusters = clusters.map(c => (c.name === name ? { ...c, enabled, place: enabled ? 4 : undefined } : c))
   })
   vi.mocked(registerCluster).mockImplementation(async (_orgID, name) => {
     if (!clusters.some(c => c.name === name)) clusters = [owned(name), ...clusters]
@@ -73,7 +73,8 @@ describe('the org\'s clusters', () => {
     expect(within(await rowOf('new')).getByText('Disconnected')).toBeTruthy()
     const shared = await rowOf('platform-gpu')
     expect(within(shared).getByText('Platform')).toBeTruthy()
-    expect(within(shared).getByText('used last, after Ada\'s own')).toBeTruthy()
+    expect(screen.getByRole('columnheader', { name: 'Platform compute, shared with every org, tried after Ada\'s own' })).toBeTruthy()
+    expect(within(shared).getByText('4')).toBeTruthy()
     expect(within(shared).queryByRole('button')).toBeNull()
     expect(names()).toEqual(['lab', 'new', 'spare', 'platform-gpu'])
   })
@@ -95,17 +96,57 @@ describe('the org\'s clusters', () => {
     expect(box.getByText('old1234')).toBeTruthy()
     expect(box.getByText('Not the platform\'s version')).toBeTruthy()
     expect(box.getByText(/Last refused .*: cluster tt-box is bound to another cluster_id/)).toBeTruthy()
-    expect(within(await rowOf('never')).getByText('Not heard from in 30 days')).toBeTruthy()
+    expect(within(await rowOf('never')).getByText('Not heard from in 30 days · skipped until it reconnects')).toBeTruthy()
   })
 
   it('are only shown to a member', async () => {
-    clusters = clusters.map(c => (c.name === 'platform-gpu' ? { ...c, enabled: false } : c))
+    clusters = clusters.map(c => (c.name === 'platform-gpu' ? { ...c, enabled: false, place: undefined } : c))
     show(member)
     const shared = await rowOf('platform-gpu')
     expect(within(shared).getByRole('switch')).toHaveProperty('disabled', true)
-    expect(within(shared).getByText(/no job of Ada is placed here/)).toBeTruthy()
+    expect(within(shared).getByText('Off: no new jobs go here.')).toBeTruthy()
+    expect(within(shared).getByText('Off')).toBeTruthy()
     expect(screen.queryByRole('button')).toBeNull()
     expect(screen.queryByLabelText('Cluster name')).toBeNull()
+  })
+})
+
+describe('where the org\'s jobs run', () => {
+  it('is the places the API answers, tied ones marked, with the first connected place named above the table', async () => {
+    clusters = [owned('lab', { place: 1 }), owned('spare', { place: 1, connected: true }), owned('old', { enabled: false }), { ...platform, place: 2 }]
+    show()
+    expect(await screen.findByText(/Jobs go to the first connected cluster below with room: right now/)).toBeTruthy()
+    expect(screen.getByText(/right now/).querySelector('code')!.textContent).toBe('spare')
+    for (const name of ['lab', 'spare']) {
+      const row = within(await rowOf(name))
+      expect(row.getByText('1')).toBeTruthy()
+      expect(row.getByText('tied, most room first')).toBeTruthy()
+    }
+    expect(within(await rowOf('lab')).getByText(/skipped until it reconnects/)).toBeTruthy()
+    const old = within(await rowOf('old'))
+    expect(old.getByText('Off')).toBeTruthy()
+    expect(old.queryByText(/skipped until it reconnects/)).toBeNull()
+    expect(within(await rowOf('platform-gpu')).queryByText('tied, most room first')).toBeNull()
+  })
+
+  it('is the platform\'s compute alone for an org with no cluster of its own, which is told where its own would go', async () => {
+    clusters = [{ ...platform, place: 1 }, { ...platform, name: 'platform-tt', place: 1, connected: false }]
+    show()
+    expect(await screen.findByRole('columnheader', { name: 'Clusters of Ada, tried first, in the order you set' })).toBeTruthy()
+    expect(screen.getByText(/None yet\. Add one above to run jobs on your own hardware before the platform/)).toBeTruthy()
+    expect(screen.getByText(/right now/).querySelector('code')!.textContent).toBe('platform-gpu')
+    expect(names()).toEqual(['platform-gpu', 'platform-tt'])
+    expect(within(await rowOf('platform-tt')).getByText('Platform')).toBeTruthy()
+  })
+
+  it('says jobs wait when no cluster in use is connected, or every one is off', async () => {
+    clusters = [owned('lab', { place: 1 }), { ...platform, connected: false, place: 2 }]
+    const { unmount } = show()
+    expect(await screen.findByText('No cluster in use is connected, so jobs wait in the queue until one is.')).toBeTruthy()
+    unmount()
+    clusters = [owned('lab', { enabled: false }), { ...platform, enabled: false, place: undefined }]
+    show()
+    expect(await screen.findByText('Every cluster is turned off, so jobs wait in the queue.')).toBeTruthy()
   })
 })
 
@@ -163,7 +204,7 @@ describe('turning a cluster off for the org\'s jobs', () => {
 
     await userEvent.click(use)
     expect(setClusterEnabled).toHaveBeenCalledExactlyOnceWith('org_a', 'platform-gpu', false)
-    expect(await within(row).findByText('Turned off: no job of Ada is placed here. Jobs already running finish.')).toBeTruthy()
+    expect(await within(row).findByText('Off: no new jobs go here.')).toBeTruthy()
     expect(within(row).getByRole('switch').getAttribute('aria-checked')).toBe('false')
 
     vi.mocked(setClusterEnabled).mockRejectedValue(new Error('forbidden: only an owner of the org may change it'))
@@ -183,10 +224,9 @@ describe('the order of the org\'s own clusters', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Move spare up' }))
     await waitFor(() => expect(setClusterOrder).toHaveBeenCalledExactlyOnceWith('org_a', ['lab', 'spare', 'new']))
     await waitFor(() => expect(names()).toEqual(['lab', 'spare', 'new', 'platform-gpu']))
-    const rows = screen.getAllByRole('row')
-    fireEvent.dragStart(rows[3])
-    fireEvent.dragOver(rows[1])
-    fireEvent.drop(rows[1])
+    fireEvent.dragStart(await rowOf('new'))
+    fireEvent.dragOver(await rowOf('lab'))
+    fireEvent.drop(await rowOf('lab'))
     await waitFor(() => expect(setClusterOrder).toHaveBeenLastCalledWith('org_a', ['new', 'lab', 'spare']))
     await waitFor(() => expect(names()).toEqual(['new', 'lab', 'spare', 'platform-gpu']))
   })

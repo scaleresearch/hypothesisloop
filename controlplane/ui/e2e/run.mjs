@@ -1482,7 +1482,7 @@ async function scenarios(browser) {
   hlAdmin('user', 'staff', bob.id, 'on')
   try {
     await otherPage.goto(`${UI}/orgs/${bobMe.orgs[0].id}/clusters`)
-    await otherPage.getByText(`Clusters Default org can run on`).waitFor()
+    await otherPage.getByText(`Where the jobs of Default org run`).waitFor()
     await otherPage.getByText('All Clusters · every org · staff only').waitFor()
     await otherPage.getByRole('columnheader', { name: 'Autoscaler' }).waitFor()
     await otherPage.goto(`${UI}/projects/${bobProjects[0]}/statistics`)

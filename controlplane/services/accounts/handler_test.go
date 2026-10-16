@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -835,6 +836,41 @@ func TestAClusterIsListedWithItsLastContactLastErrorAndAgentVersion(t *testing.T
 		if c.Name == w.clusterA && (c.LastContactAt == nil || c.AgentVersion != "" || c.VersionSkew || c.LastError != "" || c.LastErrorAt != nil) {
 			t.Errorf("the shared cluster to another org = %+v, want its last contact alone", c)
 		}
+	}
+}
+
+// Each cluster an org uses is answered with its place in the order its jobs are tried: clusters
+// of one priority share a place, the platform's shared ones come after the org's own, and one the
+// org turned off has none.
+func TestAListedClusterStatesItsPlaceInTheOrder(t *testing.T) {
+	w := newWorld(t)
+	w.ok("owner", "POST", "/orgs/"+w.orgA+"/clusters", name{"name": "second"}, http.StatusOK, nil)
+	w.ok("staff", "PATCH", "/orgs/"+w.orgB+"/clusters/"+w.clusterB, map[string]any{"shared": true}, http.StatusOK, nil)
+	places := func() map[string]int {
+		t.Helper()
+		var listed struct {
+			Clusters []ListedCluster `json:"clusters"`
+		}
+		w.ok("member", "GET", "/orgs/"+w.orgA+"/clusters", nil, http.StatusOK, &listed)
+		out := map[string]int{}
+		for _, c := range listed.Clusters {
+			out[c.Name] = c.Place
+		}
+		return out
+	}
+	want := map[string]int{w.clusterA: 1, "second": 1, w.clusterB: 2}
+	if got := places(); !maps.Equal(got, want) {
+		t.Fatalf("two own clusters of the default priority and a shared one: got = %v, want = %v", got, want)
+	}
+	w.ok("owner", "PUT", "/orgs/"+w.orgA+"/clusters/order", map[string]any{"names": []string{"second", w.clusterA}}, http.StatusOK, nil)
+	want = map[string]int{"second": 1, w.clusterA: 2, w.clusterB: 3}
+	if got := places(); !maps.Equal(got, want) {
+		t.Fatalf("after ordering: got = %v, want = %v", got, want)
+	}
+	w.ok("owner", "POST", "/orgs/"+w.orgA+"/clusters/second/disable", nil, http.StatusOK, nil)
+	want = map[string]int{"second": 0, w.clusterA: 1, w.clusterB: 2}
+	if got := places(); !maps.Equal(got, want) {
+		t.Fatalf("with second turned off: got = %v, want = %v", got, want)
 	}
 }
 
