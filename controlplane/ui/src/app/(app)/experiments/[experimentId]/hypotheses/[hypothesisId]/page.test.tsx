@@ -1,20 +1,23 @@
 import { render, screen, within } from '@testing-library/react'
 import { SWRConfig } from 'swr'
 import { describe, expect, it, vi } from 'vitest'
-import { fetchHypothesis, fetchPlatformExperiment, fetchPlatformExperimentAgents } from '@/lib/api'
+import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
+import { fetchHypothesis } from '@/lib/api/hypotheses'
+import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
+import type { Me } from '@/types/accounts'
+import type { HypothesisWithJobs } from '@/types/hypotheses'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import HypothesisDetailPage from '@/app/(app)/experiments/[experimentId]/hypotheses/[hypothesisId]/page'
-import type { HypothesisWithJobs, Me, PlatformExperiment } from '@/types'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   usePathname: () => '/experiments/pe-x/hypotheses/hyp-1',
   useSearchParams: () => new URLSearchParams(),
 }))
-vi.mock('@/lib/api', () => ({
-  fetchHypothesis: vi.fn(), fetchPlatformExperiment: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
-  addHumanHypothesisComment: vi.fn(), addHumanHypothesisLink: vi.fn(), searchHypotheses: vi.fn(),
-}))
+vi.mock('@/lib/api/agents', () => ({ fetchPlatformExperimentAgents: vi.fn() }))
+vi.mock('@/lib/api/hypotheses', () => ({ fetchHypothesis: vi.fn(), addHumanHypothesisComment: vi.fn(), addHumanHypothesisLink: vi.fn(), searchHypotheses: vi.fn() }))
+vi.mock('@/lib/api/platform-experiments', () => ({ fetchPlatformExperiment: vi.fn() }))
 
 const at = '2026-01-01T00:00:00Z'
 const me: Me = {

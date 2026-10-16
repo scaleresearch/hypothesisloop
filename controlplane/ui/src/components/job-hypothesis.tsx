@@ -1,4 +1,4 @@
-import type { Experiment } from '@/types'
+import type { Experiment } from '@/types/jobs'
 import { TextLink } from '@/components/ui/link'
 import { graphHref } from '@/lib/hypothesis-graph'
 import { hypothesisPath } from '@/lib/routes'

@@ -2,8 +2,8 @@
 
 import { useState } from 'react'
 import useSWR from 'swr'
-import { deleteExperimentDraft, fetchExperimentDrafts } from '@/lib/api'
-import type { ExperimentDraft } from '@/lib/api'
+import { deleteExperimentDraft, fetchExperimentDrafts } from '@/lib/api/drafts'
+import type { ExperimentDraft } from '@/types/drafts'
 import { headline, relTime } from '@/lib/format'
 import { useTenant } from '@/lib/tenant'
 import { Button } from '@/components/ui/button'

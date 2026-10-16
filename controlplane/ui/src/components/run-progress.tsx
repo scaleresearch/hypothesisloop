@@ -1,4 +1,4 @@
-import type { StagesStatus } from '@/lib/api'
+import type { StagesStatus } from '@/types/platform-experiments'
 import { Stack } from '@/components/ui/stack'
 import { Text } from '@/components/ui/text'
 

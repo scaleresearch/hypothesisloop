@@ -1,7 +1,8 @@
 'use client'
 
 import useSWR from 'swr'
-import { fetchExperiments, fetchExperimentStats, fetchAllExperimentStats, fetchAllClusters } from '@/lib/api'
+import { fetchAllClusters } from '@/lib/api/clusters'
+import { fetchAllExperimentStats, fetchExperiments, fetchExperimentStats } from '@/lib/api/jobs'
 import { useTenant } from '@/lib/tenant'
 import { jobPath, projectPath, withQuery } from '@/lib/routes'
 import { Page } from '@/components/ui/page'

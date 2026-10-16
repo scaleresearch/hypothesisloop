@@ -2,15 +2,15 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAgentType, fetchAgentTypes } from '@/lib/api'
+import { createAgentType, fetchAgentTypes } from '@/lib/api/agent-types'
+import type { Me } from '@/types/accounts'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { AgentTypesList } from '@/components/agent-types/list'
 import { CATALOG, agentType } from '@/test-agent-types'
-import type { Me } from '@/types'
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }))
 vi.mock('next/navigation', () => ({ useRouter: () => navigation }))
-vi.mock('@/lib/api', () => ({ fetchAgentTypes: vi.fn(), createAgentType: vi.fn() }))
+vi.mock('@/lib/api/agent-types', () => ({ fetchAgentTypes: vi.fn(), createAgentType: vi.fn() }))
 
 const at = '2026-01-01T00:00:00Z'
 const me = (role: 'owner' | 'member'): Me => ({

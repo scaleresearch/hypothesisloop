@@ -3,19 +3,19 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig, useSWRConfig } from 'swr'
 import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, fetchMe, fetchPlatformExperiment } from '@/lib/api'
+import { fetchMe } from '@/lib/api/accounts'
+import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
+import { ApiError } from '@/lib/api/request'
+import type { Me } from '@/types/accounts'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { useTenant } from '@/lib/tenant'
 import { AppShell } from '@/components/app-shell'
-import type { Me, PlatformExperiment } from '@/types'
 
 const navigation = vi.hoisted(() => ({ params: {} as Record<string, string> }))
 
 vi.mock('next/navigation', () => ({ useParams: () => navigation.params }))
-vi.mock('@/lib/api', async importOriginal => ({
-  ApiError: (await importOriginal<typeof import('@/lib/api')>()).ApiError,
-  fetchMe: vi.fn(),
-  fetchPlatformExperiment: vi.fn(),
-}))
+vi.mock('@/lib/api/accounts', () => ({ fetchMe: vi.fn() }))
+vi.mock('@/lib/api/platform-experiments', () => ({ fetchPlatformExperiment: vi.fn() }))
 vi.mock('@/components/nav', () => ({ Nav: () => <nav>nav</nav> }))
 vi.mock('@/components/command-palette', async () => {
   const { useState } = await import('react')

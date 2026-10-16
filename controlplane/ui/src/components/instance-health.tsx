@@ -1,6 +1,6 @@
 'use client'
 
-import type { AgentInstance } from '@/types'
+import type { AgentInstance } from '@/types/agents'
 import type { Tone } from '@/lib/colors'
 import { relTime } from '@/lib/format'
 import { useTick } from '@/lib/tick'

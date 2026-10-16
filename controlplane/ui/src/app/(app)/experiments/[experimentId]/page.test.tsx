@@ -1,11 +1,16 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '@/lib/api'
+import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
+import { fetchFindings, fetchHypothesisStats } from '@/lib/api/hypotheses'
+import { fetchExperimentMetrics, fetchExperimentsPage, fetchExperimentStats } from '@/lib/api/jobs'
+import { fetchPlatformExperiment, fetchPlatformExperimentResults, fetchPlatformExperimentTimeseries, fetchStages } from '@/lib/api/platform-experiments'
+import { fetchPlatformExperimentQuotas } from '@/lib/api/quotas'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import PlatformExperimentDetailPage from '@/app/(app)/experiments/[experimentId]/page'
-import { PlatformExperimentStatus } from '@/types'
-import type { Me, PlatformExperiment } from '@/types'
+import type { Me } from '@/types/accounts'
+import { PlatformExperimentStatus } from '@/types/platform-experiments'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 
 const navigation = vi.hoisted(() => ({ search: '', push: vi.fn(), replace: vi.fn() }))
 
@@ -14,18 +19,16 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/experiments/pe-x',
   useSearchParams: () => new URLSearchParams(navigation.search),
 }))
-vi.mock('@/lib/api', () => ({
-  fetchPlatformExperiment: vi.fn(), fetchPlatformExperimentQuotas: vi.fn(), fetchPlatformExperimentResults: vi.fn(),
-  fetchExperimentsPage: vi.fn(), fetchExperimentStats: vi.fn(), fetchStages: vi.fn(),
-  fetchExperimentMetrics: vi.fn(), fetchPlatformExperimentTimeseries: vi.fn(), fetchHypothesisStats: vi.fn(),
-  fetchFindings: vi.fn(),
-  addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
-  fetchPlatformExperimentAgentToken: vi.fn(), removePlatformExperimentAgent: vi.fn(),
-  fetchPlatformExperimentMessages: vi.fn().mockResolvedValue([]), sendPlatformExperimentMessage: vi.fn(),
-  fetchAgentTypes: vi.fn().mockResolvedValue([]), updatePlatformExperiment: vi.fn(),
-  MAX_LIST_PAGE_SIZE: 200,
-  HYPOTHESIS_STATUSES: ['open', 'confirmed', 'refuted', 'inconclusive'],
+vi.mock('@/lib/api/agent-types', () => ({ fetchAgentTypes: vi.fn().mockResolvedValue([]) }))
+vi.mock('@/lib/api/agents', () => ({
+  addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgentToken: vi.fn(), removePlatformExperimentAgent: vi.fn(), fetchPlatformExperimentMessages: vi.fn().mockResolvedValue([]), sendPlatformExperimentMessage: vi.fn(),
 }))
+vi.mock('@/lib/api/hypotheses', () => ({ fetchHypothesisStats: vi.fn(), fetchFindings: vi.fn() }))
+vi.mock('@/lib/api/jobs', () => ({ fetchExperimentsPage: vi.fn(), fetchExperimentStats: vi.fn(), fetchExperimentMetrics: vi.fn() }))
+vi.mock('@/lib/api/platform-experiments', () => ({
+  fetchPlatformExperiment: vi.fn(), fetchPlatformExperimentResults: vi.fn(), fetchStages: vi.fn(), fetchPlatformExperimentTimeseries: vi.fn(), updatePlatformExperiment: vi.fn(),
+}))
+vi.mock('@/lib/api/quotas', () => ({ fetchPlatformExperimentQuotas: vi.fn() }))
 
 const at = '2026-01-01T00:00:00Z'
 const me: Me = {
@@ -39,7 +42,7 @@ function show(search: string, more: Partial<PlatformExperiment>) {
   navigation.search = search
   const status = more.status ?? PlatformExperimentStatus.OPEN
   const reason = { draft: 'planning', open: 'baseline_measuring', running: 'running', closed: more.close_reason ?? 'closed' }[status]
-  vi.mocked(api.fetchPlatformExperiment).mockResolvedValue({
+  vi.mocked(fetchPlatformExperiment).mockResolvedValue({
     id: 'pe-x', name: 'Vision benchmark', project_id: 'prj_platform', status, shared: true,
     status_reason: { reason, message: `the API's sentence for ${reason}`, summary: `The summary for ${reason}.`, ...(status === PlatformExperimentStatus.CLOSED ? {} : { waits_for: 'platform' as const }) },
     budget_accelerator_hours: 100, max_agents: 4, signup_count: 1, stages: [], current_stage: 1, created_at: at, ...more,
@@ -54,14 +57,14 @@ function show(search: string, more: Partial<PlatformExperiment>) {
 }
 
 beforeEach(() => {
-  vi.mocked(api.fetchPlatformExperimentQuotas).mockResolvedValue([])
-  vi.mocked(api.fetchPlatformExperimentResults).mockResolvedValue({ metrics: [], bests: [] })
-  vi.mocked(api.fetchExperimentsPage).mockResolvedValue({ items: [], total: 0 })
-  vi.mocked(api.fetchExperimentStats).mockResolvedValue({ total: 0, by_status: {} } as never)
-  vi.mocked(api.fetchStages).mockResolvedValue({ stages: [], current_stage: 1, progress: 0, next_boundary_progress: 1, advances: [], active_agents: [], cut_agents: [] })
-  vi.mocked(api.fetchHypothesisStats).mockResolvedValue({ total: 0, by_status: {} })
-  vi.mocked(api.fetchFindings).mockResolvedValue([])
-  vi.mocked(api.fetchPlatformExperimentAgents).mockResolvedValue([
+  vi.mocked(fetchPlatformExperimentQuotas).mockResolvedValue([])
+  vi.mocked(fetchPlatformExperimentResults).mockResolvedValue({ metrics: [], bests: [] })
+  vi.mocked(fetchExperimentsPage).mockResolvedValue({ items: [], total: 0 })
+  vi.mocked(fetchExperimentStats).mockResolvedValue({ total: 0, by_status: {} } as never)
+  vi.mocked(fetchStages).mockResolvedValue({ stages: [], current_stage: 1, progress: 0, next_boundary_progress: 1, advances: [], active_agents: [], cut_agents: [] })
+  vi.mocked(fetchHypothesisStats).mockResolvedValue({ total: 0, by_status: {} })
+  vi.mocked(fetchFindings).mockResolvedValue([])
+  vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([
     { platform_experiment_id: 'pe-x', agent_id: 'ag-self', name: 'ag-self', role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted: false, at_work: true, signed_up_at: at },
   ])
 })
@@ -85,7 +88,7 @@ describe('a shared platform experiment of another org', () => {
   it('reads its lists within the experiment\'s own project, never the reader\'s', async () => {
     show('', {})
     await screen.findByRole('heading', { name: 'Vision benchmark' })
-    for (const read of [api.fetchExperimentsPage, api.fetchExperimentStats]) {
+    for (const read of [fetchExperimentsPage, fetchExperimentStats]) {
       await vi.waitFor(() => expect(read).toHaveBeenCalled())
       for (const [params] of vi.mocked(read).mock.calls) {
         expect(params).toMatchObject({ project_id: 'prj_platform', platform_experiment_id: 'pe-x' })
@@ -104,8 +107,8 @@ describe('the baseline of a platform experiment', () => {
     cleanup()
 
     const point = (name: string, value: number, basis = 'raw') => ({ experiment_id: 'job-base', fraction_complete: 1, metric_name: name, metric_value: value, metric_basis: basis })
-    vi.mocked(api.fetchPlatformExperimentTimeseries).mockResolvedValue({ series: [] })
-    vi.mocked(api.fetchExperimentMetrics).mockResolvedValue([point('val_loss', 2.1), point('val_loss', 1.8), point('exact_match', 1), point('val_loss', 0.2, 'scaled')] as never)
+    vi.mocked(fetchPlatformExperimentTimeseries).mockResolvedValue({ series: [] })
+    vi.mocked(fetchExperimentMetrics).mockResolvedValue([point('val_loss', 2.1), point('val_loss', 1.8), point('exact_match', 1), point('val_loss', 0.2, 'scaled')] as never)
     show('', {
       status: PlatformExperimentStatus.RUNNING, baseline_job_id: 'job-base',
       metrics: [{ key: 'val_loss', direction: 'minimize' }, { key: 'exact_match', direction: 'maximize', role: 'constraint', bound: 1 }],
@@ -117,8 +120,8 @@ describe('the baseline of a platform experiment', () => {
   })
 
   it('says who raised it while the run went on, from which job and why', async () => {
-    vi.mocked(api.fetchPlatformExperimentTimeseries).mockResolvedValue({ series: [] })
-    vi.mocked(api.fetchExperimentMetrics).mockResolvedValue([{ experiment_id: 'job-2', fraction_complete: 1, metric_name: 'val_loss', metric_value: 1.6, metric_basis: 'raw' }] as never)
+    vi.mocked(fetchPlatformExperimentTimeseries).mockResolvedValue({ series: [] })
+    vi.mocked(fetchExperimentMetrics).mockResolvedValue([{ experiment_id: 'job-2', fraction_complete: 1, metric_name: 'val_loss', metric_value: 1.6, metric_basis: 'raw' }] as never)
     show('', {
       status: PlatformExperimentStatus.RUNNING, baseline_job_id: 'job-2', metrics: [{ key: 'val_loss', direction: 'minimize' }],
       baseline_raises: [{ from: 'job-1', to: 'job-2', reason: "the control's other coder", detail: '', actor: { kind: 'coordinator', id: 'pe-x', name: 'Coordinator' }, at: '2026-10-08T19:00:00Z' }],
@@ -130,7 +133,7 @@ describe('the baseline of a platform experiment', () => {
 
 describe('the references of a platform experiment', () => {
   it('lists every measured value with whether its job met the constraints, and the leader against the best that counts', async () => {
-    vi.mocked(api.fetchPlatformExperimentResults).mockResolvedValue({
+    vi.mocked(fetchPlatformExperimentResults).mockResolvedValue({
       metrics: [], bests: [],
       references: [
         {

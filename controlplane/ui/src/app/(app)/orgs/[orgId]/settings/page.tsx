@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { createProject, renameOrg, renameProject } from '@/lib/api'
+import { createProject, renameOrg, renameProject } from '@/lib/api/accounts'
 import { GITHUB_CARD } from '@/lib/github-connect'
 import { orgPath } from '@/lib/routes'
 import { useRefreshMe, useTenant } from '@/lib/tenant'

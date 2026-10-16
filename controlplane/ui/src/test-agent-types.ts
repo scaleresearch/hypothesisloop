@@ -1,4 +1,4 @@
-import type { AgentRole, AgentType } from '@/types'
+import type { AgentRole, AgentType } from '@/types/agent-types'
 
 const at = '2026-01-01T00:00:00Z'
 

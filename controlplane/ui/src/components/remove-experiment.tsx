@@ -2,8 +2,8 @@
 
 import { useState } from 'react'
 import { useSWRConfig } from 'swr'
-import { removePlatformExperiment } from '@/lib/api'
-import type { PlatformExperiment } from '@/types'
+import { removePlatformExperiment } from '@/lib/api/platform-experiments'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
 

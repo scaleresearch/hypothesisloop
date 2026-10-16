@@ -1,12 +1,12 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { closePlatformExperiment } from '@/lib/api'
+import { closePlatformExperiment } from '@/lib/api/platform-experiments'
+import { PlatformExperimentStatus } from '@/types/platform-experiments'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { CloseExperiment } from '@/components/close-experiment'
-import { PlatformExperimentStatus } from '@/types'
-import type { PlatformExperiment } from '@/types'
 
-vi.mock('@/lib/api', () => ({ closePlatformExperiment: vi.fn() }))
+vi.mock('@/lib/api/platform-experiments', () => ({ closePlatformExperiment: vi.fn() }))
 
 const pe = { id: 'pe-1', name: 'Cosine', status: PlatformExperimentStatus.RUNNING } as PlatformExperiment
 

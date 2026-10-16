@@ -1,5 +1,4 @@
-import type { Stage } from '@/lib/api'
-import type { MetricDefinition, ResearcherPoolEntry } from '@/types'
+import type { MetricDefinition, ResearcherPoolEntry, Stage } from '@/types/platform-experiments'
 import { DEFAULT_AGENT_TYPE } from '@/lib/agent-types'
 
 // What a new experiment starts from. The stage ladder and the report interval are left out, so

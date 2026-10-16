@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { cutByMax, poolProblem, researchersAtWork, toPool, toRows } from '@/lib/researcher-pool'
-import type { JoinedAgent } from '@/types'
+import type { JoinedAgent } from '@/types/agents'
 
 function researcher(id: string, joined: string, more: Partial<JoinedAgent> = {}): JoinedAgent {
   return {

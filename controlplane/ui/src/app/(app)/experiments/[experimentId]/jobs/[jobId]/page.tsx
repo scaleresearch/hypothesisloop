@@ -6,8 +6,8 @@ import { TextLink } from '@/components/ui/link'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { fetchExperiment, fetchExperimentMetrics, fetchExperimentLogs } from '@/lib/api'
-import type { MetricDataPoint } from '@/types'
+import { fetchExperiment, fetchExperimentLogs, fetchExperimentMetrics } from '@/lib/api/jobs'
+import type { MetricDataPoint } from '@/types/jobs'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { Section } from '@/components/ui/section'
 import { CodeBlock } from '@/components/ui/code-block'

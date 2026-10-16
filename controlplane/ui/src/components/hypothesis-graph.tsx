@@ -9,7 +9,7 @@ import type { Edge, Node, NodeHandle, NodeProps, NodeTypes, ReactFlowState } fro
 import '@xyflow/react/dist/style.css'
 import { clsx } from 'clsx'
 import { FileText, MessageSquare, Plus } from 'lucide-react'
-import type { HypothesisGraph, HypothesisGraphNode, HypothesisLinkType, ObjectiveEvidence } from '@/types'
+import type { HypothesisGraph, HypothesisGraphNode, HypothesisLinkType, ObjectiveEvidence } from '@/types/hypotheses'
 import { chart, hypothesisLinkStyles, hypothesisStatuses, semantic, statusColor, statusTone, tint } from '@/lib/colors'
 import { opacity as scale } from '@/lib/scale'
 import { Button } from '@/components/ui/button'

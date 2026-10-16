@@ -3,20 +3,17 @@ import { choose } from '@/test-select'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  ApiError, createOrgInvite, fetchMe, fetchOrgInvites, fetchOrgMembers, removeOrgMember, revokeOrgInvite, setOrgMemberRole,
-} from '@/lib/api'
+import { createOrgInvite, fetchMe, fetchOrgInvites, fetchOrgMembers, removeOrgMember, revokeOrgInvite, setOrgMemberRole } from '@/lib/api/accounts'
+import { ApiError } from '@/lib/api/request'
+import type { Me, OrgInvite, OrgMember } from '@/types/accounts'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { OrgMembers } from '@/components/org-members'
-import type { Me, OrgInvite, OrgMember } from '@/types'
 
 const router = vi.hoisted(() => ({ replace: vi.fn() }))
 
 vi.mock('next/navigation', () => ({ useRouter: () => router }))
-vi.mock('@/lib/api', async importActual => ({
-  ApiError: (await importActual<typeof import('@/lib/api')>()).ApiError,
-  createOrgInvite: vi.fn(), fetchMe: vi.fn(), fetchOrgInvites: vi.fn(), fetchOrgMembers: vi.fn(),
-  removeOrgMember: vi.fn(), revokeOrgInvite: vi.fn(), setOrgMemberRole: vi.fn(),
+vi.mock('@/lib/api/accounts', () => ({
+  createOrgInvite: vi.fn(), fetchMe: vi.fn(), fetchOrgInvites: vi.fn(), fetchOrgMembers: vi.fn(), removeOrgMember: vi.fn(), revokeOrgInvite: vi.fn(), setOrgMemberRole: vi.fn(),
 }))
 
 const at = '2026-01-01T00:00:00Z'

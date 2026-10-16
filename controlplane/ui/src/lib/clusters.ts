@@ -1,4 +1,4 @@
-import type { OrgCluster } from '@/types'
+import type { OrgCluster } from '@/types/clusters'
 
 /**
  * What an org's jobs can run on: the clusters it uses, its own and the platform's, and how many

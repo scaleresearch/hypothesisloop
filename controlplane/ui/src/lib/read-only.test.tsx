@@ -2,12 +2,13 @@ import { renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { SWRConfig } from 'swr'
 import { describe, expect, it, vi } from 'vitest'
-import { fetchPlatformExperiment } from '@/lib/api'
+import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
+import type { Me } from '@/types/accounts'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { isReadOnly, listProject, ReadOnlyProvider, useExperimentAccess, useReadOnly } from '@/lib/read-only'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
-import type { Me, PlatformExperiment } from '@/types'
 
-vi.mock('@/lib/api', () => ({ fetchPlatformExperiment: vi.fn() }))
+vi.mock('@/lib/api/platform-experiments', () => ({ fetchPlatformExperiment: vi.fn() }))
 
 const at = '2026-01-01T00:00:00Z'
 const me: Me = {

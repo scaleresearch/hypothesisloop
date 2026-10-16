@@ -2,8 +2,8 @@
 
 import { useState } from 'react'
 import useSWR from 'swr'
-import { createAPIKey, fetchAPIKeys, revokeAPIKey } from '@/lib/api'
-import type { APIKey, CreatedAPIKey } from '@/types'
+import { createAPIKey, fetchAPIKeys, revokeAPIKey } from '@/lib/api/accounts'
+import type { APIKey, CreatedAPIKey } from '@/types/accounts'
 import { errorMessage } from '@/lib/errors'
 import { useTenant } from '@/lib/tenant'
 import { StatusLabel } from '@/components/ui/badge'

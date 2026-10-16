@@ -1,22 +1,32 @@
 import { render, screen, within } from '@testing-library/react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchAgentsPage, fetchExperimentStats, fetchHypothesisStats, fetchOrgClusters, fetchPlatformExperimentQuotas, fetchPlatformExperimentsPage } from '@/lib/api'
+import { fetchAgentsPage } from '@/lib/api/agents'
+import { fetchOrgClusters } from '@/lib/api/clusters'
+import { fetchHypothesisStats } from '@/lib/api/hypotheses'
+import { fetchExperimentStats } from '@/lib/api/jobs'
+import { fetchPlatformExperimentsPage } from '@/lib/api/platform-experiments'
+import { fetchPlatformExperimentQuotas } from '@/lib/api/quotas'
+import type { Me } from '@/types/accounts'
+import { PlatformExperimentStatus } from '@/types/platform-experiments'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import PlatformExperimentsPage from '@/app/(app)/projects/[projectId]/experiments/page'
-import { PlatformExperimentStatus } from '@/types'
-import type { Me, PlatformExperiment } from '@/types'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => '/projects/prj_1/experiments',
   useSearchParams: () => new URLSearchParams(),
 }))
-vi.mock('@/lib/api', () => ({
-  fetchPlatformExperimentsPage: vi.fn(), fetchPlatformExperimentQuotas: vi.fn(),
-  fetchExperimentStats: vi.fn(), fetchHypothesisStats: vi.fn(), fetchOrgClusters: vi.fn(), fetchAgentsPage: vi.fn(), apiSend: vi.fn(),
-  createPlatformExperiment: vi.fn(), updatePlatformExperiment: vi.fn(),
-  HYPOTHESIS_STATUSES: ['open', 'confirmed', 'refuted', 'inconclusive'],
+vi.mock('@/lib/api/agents', () => ({ fetchAgentsPage: vi.fn() }))
+vi.mock('@/lib/api/clusters', () => ({ fetchOrgClusters: vi.fn() }))
+vi.mock('@/lib/api/hypotheses', () => ({ fetchHypothesisStats: vi.fn() }))
+vi.mock('@/lib/api/jobs', () => ({ fetchExperimentStats: vi.fn() }))
+vi.mock('@/lib/api/platform-experiments', () => ({ fetchPlatformExperimentsPage: vi.fn(), createPlatformExperiment: vi.fn(), updatePlatformExperiment: vi.fn() }))
+vi.mock('@/lib/api/quotas', () => ({ fetchPlatformExperimentQuotas: vi.fn() }))
+vi.mock('@/lib/api/request', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/request')>()),
+  apiSend: vi.fn(),
 }))
 vi.mock('@/components/repository-select', () => ({ RepositorySelect: () => null }))
 vi.mock('@/components/connect-github-step', () => ({ useNeedsGitHub: () => false, useGitHub: () => undefined, ConnectGitHubStep: () => null }))

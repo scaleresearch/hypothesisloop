@@ -3,7 +3,7 @@
 import { createContext, useContext, useMemo } from 'react'
 import type { ReactNode } from 'react'
 import useSWR from 'swr'
-import { fetchPlatformExperimentAgents } from '@/lib/api'
+import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
 
 const Names = createContext<{ names: Map<string, string>; error?: Error }>({ names: new Map() })
 

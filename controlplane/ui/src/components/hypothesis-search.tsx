@@ -2,8 +2,8 @@
 
 import { useState } from 'react'
 import useSWR from 'swr'
-import { searchHypotheses } from '@/lib/api'
-import type { HypothesisSearchHit } from '@/lib/api'
+import { searchHypotheses } from '@/lib/api/hypotheses'
+import type { HypothesisSearchHit } from '@/types/hypotheses'
 import { Badge } from '@/components/ui/badge'
 import { Button, RowButton } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'

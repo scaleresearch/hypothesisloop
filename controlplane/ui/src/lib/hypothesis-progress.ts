@@ -1,6 +1,5 @@
-import { ExperimentStatus } from '@/types'
-import type { Experiment } from '@/types'
-import type { ExperimentStats } from '@/lib/api'
+import { ExperimentStatus } from '@/types/jobs'
+import type { Experiment, ExperimentStats } from '@/types/jobs'
 import { relTime } from '@/lib/format'
 
 const TERMINAL: string[] = [

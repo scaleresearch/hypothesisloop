@@ -2,18 +2,22 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchAgentTypes, fetchPlatformExperimentAgents, updatePlatformExperiment } from '@/lib/api'
+import { fetchAgentTypes } from '@/lib/api/agent-types'
+import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
+import { updatePlatformExperiment } from '@/lib/api/platform-experiments'
+import type { Me } from '@/types/accounts'
+import type { JoinedAgent } from '@/types/agents'
+import { PlatformExperimentStatus } from '@/types/platform-experiments'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { ReadOnlyProvider } from '@/lib/read-only'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { ResearcherPool } from '@/components/researcher-pool'
 import { CATALOG } from '@/test-agent-types'
 import { choose } from '@/test-select'
-import { PlatformExperimentStatus } from '@/types'
-import type { JoinedAgent, Me, PlatformExperiment } from '@/types'
 
-vi.mock('@/lib/api', () => ({
-  fetchAgentTypes: vi.fn(), fetchPlatformExperimentAgents: vi.fn(), updatePlatformExperiment: vi.fn(),
-}))
+vi.mock('@/lib/api/agent-types', () => ({ fetchAgentTypes: vi.fn() }))
+vi.mock('@/lib/api/agents', () => ({ fetchPlatformExperimentAgents: vi.fn() }))
+vi.mock('@/lib/api/platform-experiments', () => ({ updatePlatformExperiment: vi.fn() }))
 
 const at = '2026-01-01T00:00:00Z'
 const me: Me = {

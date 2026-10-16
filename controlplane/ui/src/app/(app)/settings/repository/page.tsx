@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { finishGitHubInstall } from '@/lib/api'
+import { finishGitHubInstall } from '@/lib/api/github'
 import { githubCardPath, takeReturn, type ReturnView } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
 import { TextLink } from '@/components/ui/link'

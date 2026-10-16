@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ExperimentStats } from '@/lib/api'
+import type { ExperimentStats } from '@/types/jobs'
 import { hypothesisActivity } from '@/lib/hypothesis-progress'
 
 const stats = (status: string) => ({ total: 1, by_status: { [status]: 1 } }) as unknown as ExperimentStats

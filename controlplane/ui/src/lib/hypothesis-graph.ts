@@ -1,4 +1,4 @@
-import type { Evidence, Hypothesis, HypothesisGraph, HypothesisLinkType, HypothesisListItem } from '@/types'
+import type { Evidence, Hypothesis, HypothesisGraph, HypothesisLinkType, HypothesisListItem } from '@/types/hypotheses'
 import { experimentPath, withQuery } from '@/lib/routes'
 
 export const NODE_WIDTH = 280
@@ -166,7 +166,7 @@ export function allowedLinkKinds(graph: HypothesisGraph, to: string): Hypothesis
   return to === graph.root ? ['builds_on'] : LINK_KINDS
 }
 
-export type LinkPlan = { from: string; to: string } | { refused: string }
+type LinkPlan = { from: string; to: string } | { refused: string }
 
 // What the API takes from a person linking `from` to `to`: a link is stored on the idea it leaves,
 // and only an idea no agent owns takes one from a person. A related or contradicts link reads the
@@ -241,7 +241,7 @@ export function findIdeas(graph: HypothesisGraph, query: string): HypothesisList
   })
 }
 
-export interface OutlineRow {
+interface OutlineRow {
   node: HypothesisListItem
   depth: number
   /** builds_on targets beyond the one this row is nested under. */
@@ -269,7 +269,7 @@ export function outlineRows(graph: HypothesisGraph): OutlineRow[] {
   return rows
 }
 
-export interface LinkGroup<T> {
+interface LinkGroup<T> {
   label: string
   items: T[]
 }

@@ -9,7 +9,9 @@ import {
   ArrowUp, ArrowDown, Hash, Settings, Zap, type LucideIcon,
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { ApiError, fetchExperiment, fetchPlatformExperiment } from '@/lib/api'
+import { fetchExperiment } from '@/lib/api/jobs'
+import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
+import { ApiError } from '@/lib/api/request'
 import { errorMessage } from '@/lib/errors'
 import { useTenant } from '@/lib/tenant'
 import { Button } from '@/components/ui/button'

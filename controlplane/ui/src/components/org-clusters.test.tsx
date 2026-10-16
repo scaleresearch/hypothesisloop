@@ -2,12 +2,13 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchOrgClusters, registerCluster, removeCluster, setClusterEnabled, setClusterOrder, updateCluster } from '@/lib/api'
+import { fetchOrgClusters, registerCluster, removeCluster, setClusterEnabled, setClusterOrder, updateCluster } from '@/lib/api/clusters'
+import type { Me } from '@/types/accounts'
+import type { OrgCluster } from '@/types/clusters'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { OrgClusters } from '@/components/org-clusters'
-import type { Me, OrgCluster } from '@/types'
 
-vi.mock('@/lib/api', () => ({
+vi.mock('@/lib/api/clusters', () => ({
   fetchOrgClusters: vi.fn(), registerCluster: vi.fn(), removeCluster: vi.fn(), setClusterEnabled: vi.fn(), setClusterOrder: vi.fn(), updateCluster: vi.fn(),
 }))
 

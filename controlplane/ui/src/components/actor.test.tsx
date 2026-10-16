@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import type { Actor as ActorRecord } from '@/types'
+import type { Actor as ActorRecord } from '@/types/actors'
 import { Actor, actorLabel, verdictBy } from '@/components/actor'
 
 afterEach(cleanup)

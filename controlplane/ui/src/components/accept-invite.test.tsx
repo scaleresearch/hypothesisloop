@@ -2,18 +2,16 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, acceptOrgInvite, fetchMe } from '@/lib/api'
+import { acceptOrgInvite, fetchMe } from '@/lib/api/accounts'
+import { ApiError } from '@/lib/api/request'
+import type { Me } from '@/types/accounts'
 import { accessToken } from '@/lib/auth'
 import { AcceptInvite } from '@/components/accept-invite'
-import type { Me } from '@/types'
 
 const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }))
 
 vi.mock('next/navigation', () => ({ useRouter: () => router }))
-vi.mock('@/lib/api', async importActual => ({
-  ApiError: (await importActual<typeof import('@/lib/api')>()).ApiError,
-  acceptOrgInvite: vi.fn(), fetchMe: vi.fn(),
-}))
+vi.mock('@/lib/api/accounts', () => ({ acceptOrgInvite: vi.fn(), fetchMe: vi.fn() }))
 vi.mock('@/lib/auth', async importActual => ({
   ...(await importActual<typeof import('@/lib/auth')>()),
   accessToken: vi.fn(),

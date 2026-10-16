@@ -1,9 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { addHumanHypothesisComment, addHumanHypothesisLink } from '@/lib/api'
-import type { HypothesisSearchHit } from '@/lib/api'
-import type { HypothesisLinkType, HypothesisWithJobs } from '@/types'
+import { addHumanHypothesisComment, addHumanHypothesisLink } from '@/lib/api/hypotheses'
+import type { HypothesisLinkType, HypothesisSearchHit, HypothesisWithJobs } from '@/types/hypotheses'
 import { Button, Chip } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/input'
 import { InlineError } from '@/components/ui/status-message'

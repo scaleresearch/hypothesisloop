@@ -2,22 +2,25 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { apiSend, fetchPlatformExperimentAgents } from '@/lib/api'
+import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
+import { apiSend } from '@/lib/api/request'
+import type { Me } from '@/types/accounts'
+import type { AgentSignup } from '@/types/agents'
+import type { Draft, Proposal } from '@/types/planning'
+import { PlatformExperimentStatus } from '@/types/platform-experiments'
 import { DraftView } from '@/components/draft'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { formatDate } from '@/lib/format'
-import type { Draft, Proposal } from '@/lib/planning'
-import { PlatformExperimentStatus } from '@/types'
-import type { AgentSignup, Me } from '@/types'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => '/experiments/pe-1',
   useSearchParams: () => new URLSearchParams(),
 }))
-vi.mock('@/lib/api', async importActual => ({
-  ApiError: (await importActual<typeof import('@/lib/api')>()).ApiError,
-  apiSend: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
+vi.mock('@/lib/api/agents', () => ({ fetchPlatformExperimentAgents: vi.fn() }))
+vi.mock('@/lib/api/request', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/request')>()),
+  apiSend: vi.fn(),
 }))
 
 const sweeper = { flavor: 'hyperparameter-search', model: 'claude-opus-4-5', hyperparameters: { direction: 'Find the schedule: warmup length first, then the decay.' } }

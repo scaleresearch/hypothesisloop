@@ -1,0 +1,92 @@
+import { accessToken, endSession } from '@/lib/auth'
+
+// One API, one base URL: quota, scheduler and registry operations are all served together.
+// Next.js inlines a NEXT_PUBLIC_ variable only where it is named in full.
+export function apiURL(): string {
+  const url = process.env.NEXT_PUBLIC_API_URL
+  if (!url) throw new Error('NEXT_PUBLIC_API_URL is not set: copy .env.example to .env.local and fill it in')
+  return url
+}
+
+/** A refusal or failure the API answered with: its status, its own message, and its reason code when it gave one. */
+export class ApiError extends Error {
+  /** `body` is the whole answer, for a refusal that carries more than its reason. */
+  constructor(readonly status: number, message: string, readonly reason?: string, readonly body?: Record<string, unknown>) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
+// The API answers a failure as {"error"} or {"reason","message"}. A refusal for a condition of the
+// platform also carries summary, the sentence for a person, and for staff operator_detail.
+async function failure(res: Response): Promise<ApiError> {
+  const text = await res.text()
+  let message = text
+  let reason: string | undefined
+  let body: Record<string, unknown> | undefined
+  try {
+    body = JSON.parse(text)
+    message = body?.summary
+      ? [body.summary, body.operator_detail].filter(Boolean).join(' ')
+      : (body?.message ?? body?.error ?? text) as string
+    reason = body?.reason as string | undefined
+  } catch {
+    // A proxy in front of the API answers in its own format.
+  }
+  return new ApiError(res.status, message || `API error ${res.status}`, reason, body)
+}
+
+// Every call to the API goes through here: it carries the session's access token, and a session
+// that is gone or that the API refuses has one outcome, the sign-in page.
+async function request(method: string, path: string, body?: unknown): Promise<Response> {
+  const token = await accessToken()
+  if (!token) return endSession('ended')
+  const res = await fetch(`${apiURL()}${path}`, {
+    method,
+    cache: 'no-store',
+    headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  if (res.status === 401) return endSession('refused')
+  return res
+}
+
+export async function apiCall(method: string, path: string, body?: unknown): Promise<Response> {
+  const res = await request(method, path, body)
+  if (!res.ok) throw await failure(res)
+  return res
+}
+
+export async function apiSend<T>(method: string, path: string, body?: unknown): Promise<T> {
+  return (await apiCall(method, path, body)).json() as Promise<T>
+}
+
+export function apiFetch<T>(path: string): Promise<T> {
+  return apiSend<T>('GET', path)
+}
+
+// Query params are the fields of `params` sent under their own names, unset ones left out.
+export function withQuery(path: string, params: object): string {
+  const query = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== '') query.set(k, String(v))
+  }
+  return query.size ? `${path}?${query}` : path
+}
+
+// A paginated list response: the page of items plus the total match count across all pages,
+// read off the X-Total-Count response header, as every list endpoint sends it (?limit, ?offset,
+// ?sort; total in X-Total-Count).
+export interface Page<T> {
+  items: T[]
+  total: number
+}
+
+export const MAX_LIST_PAGE_SIZE = 200
+
+export async function apiFetchPage<T>(path: string): Promise<Page<T>> {
+  const res = await apiCall('GET', path)
+  const total = res.headers.get('X-Total-Count')
+  if (total == null) throw new Error(`${path} answered a list without X-Total-Count`)
+  return { items: (await res.json()) as T[], total: Number(total) }
+}

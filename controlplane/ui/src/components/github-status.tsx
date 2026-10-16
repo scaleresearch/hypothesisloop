@@ -3,7 +3,7 @@
 import type { ReactNode } from 'react'
 import type { Tone } from '@/lib/colors'
 import { installationSettingsURL, type Install } from '@/lib/github-connect'
-import type { GitHubInstallation } from '@/types'
+import type { GitHubInstallation } from '@/types/github'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { inlineLinkClass } from '@/components/ui/link'

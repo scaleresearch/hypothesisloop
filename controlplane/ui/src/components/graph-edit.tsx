@@ -5,9 +5,8 @@ import type { CSSProperties } from 'react'
 import type { KeyedMutator } from 'swr'
 import { Plus, X } from 'lucide-react'
 import { clsx } from 'clsx'
-import { addHumanHypothesisLink, editHumanHypothesis, registerHumanHypothesis, removeHumanHypothesis } from '@/lib/api'
-import type { RegisteredHypothesis, SimilarHypothesis } from '@/lib/api'
-import type { HypothesisGraph, HypothesisGraphNode, HypothesisLinkInput, HypothesisLinkType } from '@/types'
+import { addHumanHypothesisLink, editHumanHypothesis, registerHumanHypothesis, removeHumanHypothesis } from '@/lib/api/hypotheses'
+import type { HypothesisGraph, HypothesisGraphNode, HypothesisLinkInput, HypothesisLinkType, RegisteredHypothesis, SimilarHypothesis } from '@/types/hypotheses'
 import { Badge } from '@/components/ui/badge'
 import { Button, Chip, RowButton } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
@@ -17,7 +16,7 @@ import { Eyebrow, Text } from '@/components/ui/text'
 import { useTenant } from '@/lib/tenant'
 import { LINK_KINDS, LINK_KIND_HINTS, LINK_KIND_LABELS, allowedLinkKinds, findIdeas, linkPlanner, withEdge, withHypothesis } from '@/lib/hypothesis-graph'
 
-export interface GraphEditor {
+interface GraphEditor {
   graph: HypothesisGraph
   /** The ids some link of the graph points to. */
   linked: Set<string>
@@ -230,7 +229,7 @@ function nodeLabel(editor: GraphEditor, id: string): string {
 }
 
 /** Stands where an idea would be added to a closed experiment. */
-export function ClosedNote() {
+function ClosedNote() {
   return <Text as="span" variant="hint">Closed. New ideas go into a new experiment.</Text>
 }
 
@@ -277,7 +276,7 @@ export function LinkButton({ id }: { id: string }) {
 }
 
 /** Finds a node of the graph by its text, without a round trip, and hands the chosen one back. */
-export function IdeaSearch({ placeholder = 'Find an idea by its text' }: { placeholder?: string }) {
+function IdeaSearch({ placeholder = 'Find an idea by its text' }: { placeholder?: string }) {
   const editor = useEditor()
   const [q, setQ] = useState('')
   if (!editor) return null

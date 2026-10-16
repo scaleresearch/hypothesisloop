@@ -1,18 +1,18 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { finishGitHubInstall } from '@/lib/api'
+import { finishGitHubInstall } from '@/lib/api/github'
+import type { Me } from '@/types/accounts'
 import { takeReturn } from '@/lib/github-connect'
 import type { ReturnView } from '@/lib/github-connect'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import GitHubReturnPage from '@/app/(app)/settings/repository/page'
-import type { Me } from '@/types'
 
 const navigation = vi.hoisted(() => ({ search: '' }))
 
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(navigation.search),
 }))
-vi.mock('@/lib/api', () => ({ finishGitHubInstall: vi.fn() }))
+vi.mock('@/lib/api/github', () => ({ finishGitHubInstall: vi.fn() }))
 vi.mock('@/lib/github-connect', async importActual => ({
   ...(await importActual<typeof import('@/lib/github-connect')>()),
   takeReturn: vi.fn(),

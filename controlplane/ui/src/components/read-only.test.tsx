@@ -2,9 +2,14 @@ import { render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  fetchExperimentStats, fetchHypothesisStats, fetchPlatformExperimentAgents, fetchPlatformExperimentQuotas,
-} from '@/lib/api'
+import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
+import { fetchHypothesisStats } from '@/lib/api/hypotheses'
+import { fetchExperimentStats } from '@/lib/api/jobs'
+import { fetchPlatformExperimentQuotas } from '@/lib/api/quotas'
+import type { Me } from '@/types/accounts'
+import type { HypothesisGraph, HypothesisListItem, HypothesisWithJobs } from '@/types/hypotheses'
+import { PlatformExperimentStatus } from '@/types/platform-experiments'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { ReadOnlyProvider, useReadOnly } from '@/lib/read-only'
 import { AddIdeaButton, GraphEditorProvider, useGraphEditor } from '@/components/graph-edit'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
@@ -12,22 +17,20 @@ import { ExperimentAgents } from '@/components/experiment-agents'
 import { AddCommentForm, AddLinkForm } from '@/components/human-idea'
 import { HypothesisPanel, ObjectiveBar } from '@/components/hypothesis-panel'
 import { PlatformExperimentCard } from '@/components/platform-experiment-card'
-import { PlatformExperimentStatus } from '@/types'
-import type { HypothesisGraph, HypothesisListItem, HypothesisWithJobs, Me, PlatformExperiment } from '@/types'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => '/experiments/pe-x/hypotheses',
   useSearchParams: () => new URLSearchParams(),
 }))
-vi.mock('@/lib/api', () => ({
-  addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
-  fetchPlatformExperimentAgentToken: vi.fn(), removePlatformExperimentAgent: vi.fn(),
-  registerHumanHypothesis: vi.fn(), addHumanHypothesisComment: vi.fn(), addHumanHypothesisLink: vi.fn(),
-  searchHypotheses: vi.fn(),
-  fetchPlatformExperimentQuotas: vi.fn(), fetchExperimentStats: vi.fn(), fetchHypothesisStats: vi.fn(),
-  HYPOTHESIS_STATUSES: ['open', 'confirmed', 'refuted', 'inconclusive'],
+vi.mock('@/lib/api/agents', () => ({
+  addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgentToken: vi.fn(), removePlatformExperimentAgent: vi.fn(),
 }))
+vi.mock('@/lib/api/hypotheses', () => ({
+  registerHumanHypothesis: vi.fn(), addHumanHypothesisComment: vi.fn(), addHumanHypothesisLink: vi.fn(), searchHypotheses: vi.fn(), fetchHypothesisStats: vi.fn(),
+}))
+vi.mock('@/lib/api/jobs', () => ({ fetchExperimentStats: vi.fn() }))
+vi.mock('@/lib/api/quotas', () => ({ fetchPlatformExperimentQuotas: vi.fn() }))
 
 const at = '2026-01-01T00:00:00Z'
 const me: Me = {

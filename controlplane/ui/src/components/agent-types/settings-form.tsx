@@ -1,7 +1,7 @@
 'use client'
 
 import { EFFORTS, MAX_SUBAGENTS, modelProblem, parseHyperparameters } from '@/lib/agent-types'
-import type { AgentRole, AgentTypeSettings } from '@/types'
+import type { AgentRole, AgentTypeSettings } from '@/types/agent-types'
 import { Facts } from '@/components/ui/facts'
 import { FieldGroup, FormField } from '@/components/ui/form-field'
 import { Input, Textarea } from '@/components/ui/input'

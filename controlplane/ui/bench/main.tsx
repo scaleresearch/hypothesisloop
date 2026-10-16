@@ -5,7 +5,7 @@ import { HypothesisGraphCanvas } from '@/components/hypothesis-graph'
 import { Expandable } from '@/components/ui/expandable'
 import { extendLayout, layoutGraph } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
-import type { HypothesisGraph } from '@/types'
+import type { HypothesisGraph } from '@/types/hypotheses'
 import { fixtureGraph } from './fixture'
 
 // The hypotheses page's layout without its tidy step: laid out whole once, extended on each poll.

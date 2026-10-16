@@ -2,20 +2,21 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { useMemo, useState } from 'react'
 import type { KeyedMutator } from 'swr'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { addHumanHypothesisLink, editHumanHypothesis, registerHumanHypothesis, removeHumanHypothesis } from '@/lib/api'
+import { addHumanHypothesisLink, editHumanHypothesis, registerHumanHypothesis, removeHumanHypothesis } from '@/lib/api/hypotheses'
+import type { HypothesisGraph, HypothesisGraphNode, RegisteredHypothesis, SimilarHypothesis } from '@/types/hypotheses'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
-import type { RegisteredHypothesis, SimilarHypothesis } from '@/lib/api'
 import { AddIdeaButton, AddedNote, GraphEditorProvider, IdeaEditor, LinkBar, useGraphEditor } from '@/components/graph-edit'
 import { HypothesisPanel } from '@/components/hypothesis-panel'
 import { HypothesisGraphCanvas } from '@/components/hypothesis-graph'
 import { HypothesisOutline } from '@/components/hypothesis-outline'
 import { Expandable } from '@/components/ui/expandable'
 import { layoutGraph } from '@/lib/hypothesis-graph'
-import type { HypothesisGraph, HypothesisGraphNode } from '@/types'
 
 // Its dot pattern reads a size jsdom never lays out.
 vi.mock('@xyflow/react', async original => ({ ...await original(), Background: () => null }))
-vi.mock('@/lib/api', () => ({ registerHumanHypothesis: vi.fn(), addHumanHypothesisLink: vi.fn(), editHumanHypothesis: vi.fn(), removeHumanHypothesis: vi.fn() }))
+vi.mock('@/lib/api/hypotheses', () => ({
+  registerHumanHypothesis: vi.fn(), addHumanHypothesisLink: vi.fn(), editHumanHypothesis: vi.fn(), removeHumanHypothesis: vi.fn(),
+}))
 vi.mock('@/components/agent-label', () => ({ AgentLabel: ({ id }: { id: string }) => <span>{id}</span>, useAgentName: () => (id: string) => id }))
 
 const at = '2026-01-01T00:00:00Z'

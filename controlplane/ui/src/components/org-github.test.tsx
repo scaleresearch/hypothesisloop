@@ -2,14 +2,16 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, beginGitHubInstall, checkGitHubInstallation, disconnectGitHubInstallation, fetchGitHubApp, fetchGitHubInstallations } from '@/lib/api'
+import { beginGitHubInstall, checkGitHubInstallation, disconnectGitHubInstallation, fetchGitHubApp, fetchGitHubInstallations } from '@/lib/api/github'
+import { ApiError } from '@/lib/api/request'
+import type { Me } from '@/types/accounts'
+import type { GitHubInstallation } from '@/types/github'
 import { takeReturn } from '@/lib/github-connect'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { OrgGitHub } from '@/components/org-github'
-import type { GitHubInstallation, Me } from '@/types'
 
-vi.mock('@/lib/api', async importActual => ({
-  ...(await importActual<typeof import('@/lib/api')>()),
+vi.mock('@/lib/api/github', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/github')>()),
   beginGitHubInstall: vi.fn(), checkGitHubInstallation: vi.fn(), disconnectGitHubInstallation: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(),
 }))
 

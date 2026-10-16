@@ -1,8 +1,9 @@
 'use client'
 
 import useSWR from 'swr'
-import { fetchExperimentMetrics } from '@/lib/api'
-import type { MetricDataPoint, PlatformExperiment } from '@/types'
+import { fetchExperimentMetrics } from '@/lib/api/jobs'
+import type { MetricDataPoint } from '@/types/jobs'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { TextLink } from '@/components/ui/link'
 import { Callout } from '@/components/ui/status-message'
 import { jobPath } from '@/lib/routes'

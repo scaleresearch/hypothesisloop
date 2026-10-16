@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { COLUMN, ROW, extendLayout, layoutGraph, linkPlanner, objectiveFinding } from '@/lib/hypothesis-graph'
-import type { HypothesisGraph, HypothesisGraphNode } from '@/types'
+import type { HypothesisGraph, HypothesisGraphNode } from '@/types/hypotheses'
 
 const at = '2026-01-01T00:00:00Z'
 const actor = { kind: 'user' as const, id: 'u1', name: 'Ada' }

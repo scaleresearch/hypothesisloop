@@ -1,8 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { updateCluster } from '@/lib/api'
-import type { ClusterSettings, OrgCluster } from '@/types'
+import { updateCluster } from '@/lib/api/clusters'
+import type { ClusterSettings, OrgCluster } from '@/types/clusters'
 import { Button } from '@/components/ui/button'
 import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'

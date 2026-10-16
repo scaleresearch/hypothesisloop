@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSWRConfig } from 'swr'
-import { createAgentType } from '@/lib/api'
-import type { CreateAgentTypeRequest } from '@/lib/api'
+import { createAgentType } from '@/lib/api/agent-types'
+import type { CreateAgentTypeRequest } from '@/lib/api/agent-types'
 import { agentTypesPath } from '@/lib/routes'
 
 /** Makes an agent type of the org, a copy or a new one, and opens it in the editor. */

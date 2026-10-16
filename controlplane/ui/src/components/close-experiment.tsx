@@ -1,8 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { closePlatformExperiment } from '@/lib/api'
-import type { PlatformExperiment } from '@/types'
+import { closePlatformExperiment } from '@/lib/api/platform-experiments'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
 

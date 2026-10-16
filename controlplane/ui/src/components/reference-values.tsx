@@ -1,4 +1,4 @@
-import type { MetricReference } from '@/lib/api'
+import type { MetricReference } from '@/types/platform-experiments'
 import { jobPath } from '@/lib/routes'
 import { AgentLabel } from '@/components/agent-label'
 import { Badge } from '@/components/ui/badge'

@@ -1,4 +1,4 @@
-import type { Project } from '@/types'
+import type { Project } from '@/types/accounts'
 
 /** The pages of a project, each listing what the project holds. */
 export type ProjectSection = 'experiments' | 'hypotheses' | 'jobs' | 'agents' | 'statistics'

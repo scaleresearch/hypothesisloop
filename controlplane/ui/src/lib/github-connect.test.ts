@@ -2,16 +2,18 @@ import { createElement, type ReactNode } from 'react'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, beginGitHubInstall } from '@/lib/api'
-import type { GitHubInstallation } from '@/types'
+import { beginGitHubInstall } from '@/lib/api/github'
+import type { GitHubInstallation } from '@/types/github'
 
 vi.mock('@/lib/auth', () => ({ accessToken: vi.fn(), endSession: vi.fn() }))
-vi.mock('@/lib/api', async importActual => ({
-  ...(await importActual<typeof import('@/lib/api')>()),
+vi.mock('@/lib/api/github', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/github')>()),
   beginGitHubInstall: vi.fn(),
 }))
 
 type Module = typeof import('@/lib/github-connect')
+// Read after each module reset, so that it is the class the module under test checks against.
+let ApiError: typeof import('@/lib/api/request').ApiError
 
 const INSTALL = 'https://github.test/apps/hl/installations/new'
 const RETURN = '/projects/prj_1/experiments?new=1'
@@ -35,6 +37,7 @@ function tab() {
 beforeEach(async () => {
   vi.resetModules()
   lib = await import('@/lib/github-connect')
+  ApiError = (await import('@/lib/api/request')).ApiError
   finish = vi.fn().mockResolvedValue({ org_id: 'org_a', return_to: RETURN, installation })
 })
 

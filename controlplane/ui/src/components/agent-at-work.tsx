@@ -3,7 +3,7 @@
 import { clsx } from 'clsx'
 import { relTime } from '@/lib/format'
 import { useTick } from '@/lib/tick'
-import type { AgentActivity, AgentInstance, JoinedAgent } from '@/types'
+import type { AgentActivity, AgentInstance, JoinedAgent } from '@/types/agents'
 import { Stack } from '@/components/ui/stack'
 import { Steps } from '@/components/ui/steps'
 import { Text } from '@/components/ui/text'
@@ -15,7 +15,7 @@ const MACHINE_STEPS = [
 ]
 
 /** What an agent's machine is doing now. One asked for after another ended is a restart, and says so. */
-export function machineSentence(instance: AgentInstance | undefined): string {
+function machineSentence(instance: AgentInstance | undefined): string {
   if (!instance) return 'Its machine is being asked for.'
   const restart = instance.restarts > 0 ? `restart ${instance.restarts}` : ''
   switch (instance.state) {

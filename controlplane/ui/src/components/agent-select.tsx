@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import useSWR from 'swr'
-import { fetchAgentsPage } from '@/lib/api'
+import { fetchAgentsPage } from '@/lib/api/agents'
 import { useTenant } from '@/lib/tenant'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 

@@ -2,7 +2,7 @@ import { render } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import ConsolePage from '@/app/(app)/console/page'
-import type { Me } from '@/types'
+import type { Me } from '@/types/accounts'
 
 const navigation = vi.hoisted(() => ({ replace: vi.fn(), search: '' }))
 

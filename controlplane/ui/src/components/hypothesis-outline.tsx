@@ -3,7 +3,7 @@
 import { memo, useEffect, useMemo, useRef } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import { clsx } from 'clsx'
-import type { HypothesisGraph, HypothesisGraphNode } from '@/types'
+import type { HypothesisGraph, HypothesisGraphNode } from '@/types/hypotheses'
 import { Badge } from '@/components/ui/badge'
 import { RowButton } from '@/components/ui/button'
 import { Inline } from '@/components/ui/stack'

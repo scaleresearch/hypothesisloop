@@ -2,17 +2,18 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, archiveAgentType, createAgentType, editAgentType, fetchAgentType, fetchAgentTypeVersions, restoreAgentType } from '@/lib/api'
+import { archiveAgentType, createAgentType, editAgentType, fetchAgentType, fetchAgentTypeVersions, restoreAgentType } from '@/lib/api/agent-types'
+import { ApiError } from '@/lib/api/request'
+import type { Me } from '@/types/accounts'
+import type { AgentType, AgentTypeVersion, EditedAgentType } from '@/types/agent-types'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { AgentTypeDetail } from '@/components/agent-types/detail'
 import { CATALOG, RESEARCHER_PROMPT, agentType } from '@/test-agent-types'
 import { choose } from '@/test-select'
-import type { AgentType, AgentTypeVersion, EditedAgentType, Me } from '@/types'
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }))
 vi.mock('next/navigation', () => ({ useRouter: () => navigation }))
-vi.mock('@/lib/api', () => ({
-  ApiError: class extends Error { constructor(readonly status: number, message: string, readonly reason?: string) { super(message) } },
+vi.mock('@/lib/api/agent-types', () => ({
   fetchAgentType: vi.fn(), fetchAgentTypeVersions: vi.fn(), editAgentType: vi.fn(), restoreAgentType: vi.fn(), archiveAgentType: vi.fn(), createAgentType: vi.fn(),
 }))
 

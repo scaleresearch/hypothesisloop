@@ -1,5 +1,5 @@
-import { PlatformExperimentStatus } from '@/types'
-import type { PlatformExperiment, StatusReason } from '@/types'
+import { PlatformExperimentStatus } from '@/types/platform-experiments'
+import type { PlatformExperiment, StatusReason } from '@/types/platform-experiments'
 
 type Phase = 'planning' | 'proposal' | 'baseline' | 'running' | 'closed'
 

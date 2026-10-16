@@ -1,4 +1,4 @@
-import { apiURL } from '@/lib/api'
+import { apiURL } from '@/lib/api/request'
 import { identityServiceURL } from '@/lib/auth'
 
 /** The request header that hands a page the nonce its inline scripts carry. */

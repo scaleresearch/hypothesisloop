@@ -3,15 +3,22 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, beginGitHubInstall, checkGitHubInstallation, checkRepository, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api'
+import { beginGitHubInstall, checkGitHubInstallation, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api/github'
+import { checkRepository } from '@/lib/api/platform-experiments'
+import { ApiError } from '@/lib/api/request'
+import type { Me } from '@/types/accounts'
+import type { GitHubInstallation, GitHubRepository } from '@/types/github'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { takeReturn } from '@/lib/github-connect'
 import { RepositorySelect, repositoryFields } from '@/components/repository-select'
-import type { GitHubInstallation, GitHubRepository, Me } from '@/types'
 
-vi.mock('@/lib/api', async importActual => ({
-  ...(await importActual<typeof import('@/lib/api')>()),
-  beginGitHubInstall: vi.fn(), checkGitHubInstallation: vi.fn(), checkRepository: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
+vi.mock('@/lib/api/github', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/github')>()),
+  beginGitHubInstall: vi.fn(), checkGitHubInstallation: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
+}))
+vi.mock('@/lib/api/platform-experiments', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/platform-experiments')>()),
+  checkRepository: vi.fn(),
 }))
 
 const at = '2026-01-01T00:00:00Z'

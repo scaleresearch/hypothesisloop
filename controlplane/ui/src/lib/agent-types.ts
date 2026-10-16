@@ -1,6 +1,7 @@
 import useSWR from 'swr'
-import { ApiError, fetchAgentTypes } from '@/lib/api'
-import type { AgentRole, AgentType, AgentTypeSettings } from '@/types'
+import { fetchAgentTypes } from '@/lib/api/agent-types'
+import { ApiError } from '@/lib/api/request'
+import type { AgentRole, AgentType, AgentTypeSettings } from '@/types/agent-types'
 
 /** The built-in researcher type an agent runs as when it names none. */
 export const DEFAULT_AGENT_TYPE = 'generalist'
@@ -51,14 +52,14 @@ export function researcherTypes(catalog: AgentType[] | undefined): AgentType[] {
 // Prompt placeholders, as domain.AgentPlaceholders and domain.ValidatePrompt hold them
 // ---------------------------------------------------------------------------
 
-export interface Placeholder {
+interface Placeholder {
   name: string
   description: string
   /** Who fills it: the platform when it serves the prompt, or the harness on the machine. */
   filledBy: 'platform' | 'harness'
 }
 
-export const PLACEHOLDERS: Placeholder[] = [
+const PLACEHOLDERS: Placeholder[] = [
   { name: 'rules', description: "The platform's rules every agent is bound by.", filledBy: 'platform' },
   { name: 'hl_commands', description: 'The commands of hl on the machine, with their flags.', filledBy: 'harness' },
   { name: 'workdir', description: 'The directory the agent works in.', filledBy: 'harness' },
@@ -80,8 +81,8 @@ export function placeholdersOf(role: AgentRole): Placeholder[] {
 }
 
 export const MAX_PROMPT_BYTES = 64 << 10
-export const MAX_NAME_LENGTH = 80
-export const MAX_DESCRIPTION_LENGTH = 200
+const MAX_NAME_LENGTH = 80
+const MAX_DESCRIPTION_LENGTH = 200
 
 const PLACEHOLDER = /\{\{([a-z_]+)\}\}/g
 const STRAY = /\{\{|\}\}/
@@ -130,7 +131,7 @@ export function descriptionProblem(description: string): string | null {
 
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 export const MAX_SUBAGENTS = 10
-export const MAX_HYPERPARAMETERS_BYTES = 4 << 10
+const MAX_HYPERPARAMETERS_BYTES = 4 << 10
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:[\]-]*$/
 const MAX_MODEL_LENGTH = 128
 
@@ -166,7 +167,7 @@ export function settingsProblems(s: AgentTypeSettings): Partial<Record<keyof Age
   return out
 }
 
-export const REFUSALS: Record<string, string> = {
+const REFUSALS: Record<string, string> = {
   builtin_read_only: 'Built-in types are read-only. Duplicate it to change it.',
   archived: 'This type is archived and can no longer be edited.',
   version_conflict: 'Someone saved a newer version while you were editing.',

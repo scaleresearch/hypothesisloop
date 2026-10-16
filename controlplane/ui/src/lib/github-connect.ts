@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import useSWR, { useSWRConfig } from 'swr'
-import { ApiError, beginGitHubInstall, fetchGitHubApp } from '@/lib/api'
+import { beginGitHubInstall, fetchGitHubApp } from '@/lib/api/github'
+import { ApiError } from '@/lib/api/request'
+import type { GitHubInstallation, GitHubInstallFinished, GitHubInstallStart } from '@/types/github'
 import { orgPath } from '@/lib/routes'
-import type { GitHubInstallation, GitHubInstallFinished, GitHubInstallStart } from '@/types'
 import { errorMessage } from '@/lib/errors'
 
 /**

@@ -1,7 +1,7 @@
 'use client'
 
 import { clsx } from 'clsx'
-import type { Actor as ActorRecord } from '@/types'
+import type { Actor as ActorRecord } from '@/types/actors'
 import { relTime } from '@/lib/format'
 import { Badge } from '@/components/ui/badge'
 import { Text } from '@/components/ui/text'

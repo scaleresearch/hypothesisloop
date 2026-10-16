@@ -2,10 +2,10 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createOrg, createProject, fetchMe } from '@/lib/api'
+import { createOrg, createProject, fetchMe } from '@/lib/api/accounts'
+import type { Me } from '@/types/accounts'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { ProjectSwitcher } from '@/components/project-switcher'
-import type { Me } from '@/types'
 
 const navigation = vi.hoisted(() => ({ push: vi.fn(), pathname: '/projects/prj_a1/jobs' }))
 
@@ -14,7 +14,7 @@ vi.mock('next/navigation', () => ({
   usePathname: () => navigation.pathname,
 }))
 
-vi.mock('@/lib/api', () => ({ createOrg: vi.fn(), createProject: vi.fn(), fetchMe: vi.fn() }))
+vi.mock('@/lib/api/accounts', () => ({ createOrg: vi.fn(), createProject: vi.fn(), fetchMe: vi.fn() }))
 
 const at = '2026-01-01T00:00:00Z'
 const me: Me = {

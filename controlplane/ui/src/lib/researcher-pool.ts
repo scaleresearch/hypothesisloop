@@ -1,4 +1,5 @@
-import type { JoinedAgent, ResearcherPoolEntry } from '@/types'
+import type { JoinedAgent } from '@/types/agents'
+import type { ResearcherPoolEntry } from '@/types/platform-experiments'
 import { DEFAULT_AGENT_TYPE } from '@/lib/agent-types'
 
 /** The researchers at work, oldest first: the agents the platform says are (`at_work`). */

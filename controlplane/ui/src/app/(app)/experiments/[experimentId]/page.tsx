@@ -9,21 +9,15 @@ import { SharedBadge } from '@/components/shared-badge'
 import { TextLink } from '@/components/ui/link'
 import useSWR from 'swr'
 import { clsx } from 'clsx'
-import {
-  fetchPlatformExperiment,
-  fetchPlatformExperimentQuotas,
-  fetchPlatformExperimentResults,
-  fetchExperimentsPage,
-  fetchExperimentStats,
-  fetchStages,
-  fetchPlatformExperimentTimeseries,
-  fetchHypothesisStats,
-  fetchFindings,
-  HYPOTHESIS_STATUSES,
-} from '@/lib/api'
-import type { StagesStatus } from '@/lib/api'
-import type { PlatformExperiment, AgentQuota, AgentMetricSeries } from '@/types'
-import { PlatformExperimentStatus } from '@/types'
+import { fetchFindings, fetchHypothesisStats } from '@/lib/api/hypotheses'
+import { fetchExperimentsPage, fetchExperimentStats } from '@/lib/api/jobs'
+import { fetchPlatformExperiment, fetchPlatformExperimentResults, fetchPlatformExperimentTimeseries, fetchStages } from '@/lib/api/platform-experiments'
+import { fetchPlatformExperimentQuotas } from '@/lib/api/quotas'
+import { HYPOTHESIS_STATUSES } from '@/types/hypotheses'
+import type { Draft } from '@/types/planning'
+import { PlatformExperimentStatus } from '@/types/platform-experiments'
+import type { AgentMetricSeries, PlatformExperiment, StagesStatus } from '@/types/platform-experiments'
+import type { AgentQuota } from '@/types/quotas'
 import { Baseline } from '@/components/baseline'
 import { JobHypothesis } from '@/components/job-hypothesis'
 import { DraftView } from '@/components/draft'
@@ -60,7 +54,6 @@ import { ReferenceValues } from '@/components/reference-values'
 import { filedAfterVerdict, hypothesisActivity, settings, variedEnvByHypothesis, variedEnvSettings, variedKeys } from '@/lib/hypothesis-progress'
 import { graphHref } from '@/lib/hypothesis-graph'
 import { budgetKind, budgetUnit, inFlight, kindOf } from '@/lib/units'
-import type { Draft } from '@/lib/planning'
 import { phaseOf } from '@/lib/phase'
 import { pollEvery, useRoster } from '@/lib/roster'
 

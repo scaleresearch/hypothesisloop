@@ -3,12 +3,12 @@
 import { useState } from 'react'
 import { clsx } from 'clsx'
 import useSWR from 'swr'
-import { fetchAgentTypeVersions, restoreAgentType } from '@/lib/api'
+import { fetchAgentTypeVersions, restoreAgentType } from '@/lib/api/agent-types'
+import type { AgentType, AgentTypeSettings, AgentTypeVersion, EditedAgentType } from '@/types/agent-types'
 import { APPLIES_LIVE, said } from '@/lib/agent-types'
 import { diffLines, foldUnchanged } from '@/lib/diff'
 import type { DiffLine } from '@/lib/diff'
 import { relTime } from '@/lib/format'
-import type { AgentType, AgentTypeSettings, AgentTypeVersion, EditedAgentType } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -45,7 +45,7 @@ function Lines({ lines }: { lines: DiffLine[] }) {
 }
 
 /** The lines of two prompts, changed ones marked and long unchanged stretches folded. */
-export function PromptDiff({ before, after }: { before: string; after: string }) {
+function PromptDiff({ before, after }: { before: string; after: string }) {
   const [opened, setOpened] = useState<Set<number>>(new Set())
   const lines = diffLines(before, after)
   if (lines.every(l => l.kind === 'same')) return <Text variant="note">The prompt is the same.</Text>
@@ -79,7 +79,7 @@ function show(v: unknown): string {
 }
 
 /** The settings that differ between two versions, each from before to after. */
-export function settingsChanges(before: AgentTypeSettings, after: AgentTypeSettings): { field: string; from: string; to: string }[] {
+function settingsChanges(before: AgentTypeSettings, after: AgentTypeSettings): { field: string; from: string; to: string }[] {
   const fields: [keyof AgentTypeSettings, string][] = [
     ['model', 'Model'], ['effort', 'Effort'], ['max_subagents', 'Max subagents'], ['hyperparameters', 'Hyperparameters'],
   ]

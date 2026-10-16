@@ -1,20 +1,20 @@
 import { render, screen, within } from '@testing-library/react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchExperimentsPage, fetchExperimentStats, fetchOrgClusters } from '@/lib/api'
+import { fetchOrgClusters } from '@/lib/api/clusters'
+import { fetchExperimentsPage, fetchExperimentStats } from '@/lib/api/jobs'
+import type { Me } from '@/types/accounts'
+import type { Experiment } from '@/types/jobs'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { JobsList } from '@/components/jobs-list'
-import type { Experiment, Me } from '@/types'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => '/projects/prj_1/jobs',
   useSearchParams: () => new URLSearchParams(),
 }))
-vi.mock('@/lib/api', () => ({
-  cancelExperiment: vi.fn(), fetchExperimentsPage: vi.fn(), fetchExperimentStats: vi.fn(),
-  fetchOrgClusters: vi.fn(),
-}))
+vi.mock('@/lib/api/clusters', () => ({ fetchOrgClusters: vi.fn() }))
+vi.mock('@/lib/api/jobs', () => ({ cancelExperiment: vi.fn(), fetchExperimentsPage: vi.fn(), fetchExperimentStats: vi.fn() }))
 vi.mock('@/components/agent-select', () => ({ AgentSelect: () => null }))
 vi.mock('@/components/platform-experiment-select', () => ({ PlatformExperimentSelect: () => null }))
 vi.mock('@/components/platform-experiment-name', () => ({ PlatformExperimentName: () => null }))

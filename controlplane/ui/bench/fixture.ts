@@ -1,4 +1,4 @@
-import type { HypothesisGraph, HypothesisGraphNode, HypothesisLinkType, HypothesisStatus } from '@/types'
+import type { HypothesisGraph, HypothesisGraphNode, HypothesisLinkType, HypothesisStatus } from '@/types/hypotheses'
 
 // Deterministic, so every run draws the same graph for a given size.
 function random(seed: number) {

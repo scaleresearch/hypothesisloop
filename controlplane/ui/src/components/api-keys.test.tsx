@@ -3,12 +3,12 @@ import { choose } from '@/test-select'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAPIKey, fetchAPIKeys, revokeAPIKey } from '@/lib/api'
+import { createAPIKey, fetchAPIKeys, revokeAPIKey } from '@/lib/api/accounts'
+import type { APIKey, Me } from '@/types/accounts'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { APIKeys } from '@/components/api-keys'
-import type { APIKey, Me } from '@/types'
 
-vi.mock('@/lib/api', () => ({ createAPIKey: vi.fn(), fetchAPIKeys: vi.fn(), revokeAPIKey: vi.fn() }))
+vi.mock('@/lib/api/accounts', () => ({ createAPIKey: vi.fn(), fetchAPIKeys: vi.fn(), revokeAPIKey: vi.fn() }))
 
 const at = '2026-01-01T00:00:00Z'
 const TOKEN = 'hlk_k2_the-secret-shown-once'

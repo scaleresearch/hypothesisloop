@@ -16,12 +16,9 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from 'recharts'
-import {
-  fetchExperimentsPage,
-  fetchExperimentMetrics,
-} from '@/lib/api'
-import type { StagesStatus } from '@/lib/api'
-import type { Experiment, MetricDataPoint, AgentMetricSeries } from '@/types'
+import { fetchExperimentMetrics, fetchExperimentsPage } from '@/lib/api/jobs'
+import type { Experiment, MetricDataPoint } from '@/types/jobs'
+import type { AgentMetricSeries, StagesStatus } from '@/types/platform-experiments'
 import { AgentLabel, useAgentName } from '@/components/agent-label'
 import { InsetCard } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'

@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { ApiError } from '@/lib/api'
+import { ApiError } from '@/lib/api/request'
 import { ConfirmDialog } from '@/components/ui/dialog'
 
 function Asking({ action }: { action: () => Promise<void> }) {

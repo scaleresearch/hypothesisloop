@@ -1,11 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { createOrg, createProject } from '@/lib/api'
+import { createOrg, createProject } from '@/lib/api/accounts'
+import type { Project } from '@/types/accounts'
 import { usePathname, useRouter } from 'next/navigation'
 import { sectionOf, sectionPath } from '@/lib/routes'
 import { orgLabels, useRefreshMe, useTenant } from '@/lib/tenant'
-import type { Project } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { InlineError } from '@/components/ui/status-message'

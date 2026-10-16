@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { COMMON_ML_METRICS } from '@/types'
-import type { MetricDefinition } from '@/types'
+import { COMMON_ML_METRICS } from '@/components/platform-experiment-form/common-metrics'
+import type { MetricDefinition } from '@/types/platform-experiments'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
 import type { ComboboxChoice } from '@/components/ui/combobox'

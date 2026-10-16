@@ -1,5 +1,5 @@
 import { clsx } from 'clsx'
-import type { PlatformExperiment } from '@/types'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { textLinkClass } from '@/components/ui/link'
 import { Text } from '@/components/ui/text'
 

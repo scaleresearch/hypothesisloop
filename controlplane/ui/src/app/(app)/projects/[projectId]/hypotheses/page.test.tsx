@@ -1,10 +1,12 @@
 import { render, screen } from '@testing-library/react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchHypothesisStats, fetchPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api'
+import { fetchHypothesisStats } from '@/lib/api/hypotheses'
+import { fetchPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api/platform-experiments'
+import type { Me } from '@/types/accounts'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import ProjectHypothesesPage from '@/app/(app)/projects/[projectId]/hypotheses/page'
-import type { Me, PlatformExperiment } from '@/types'
 
 const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn(), search: '' }))
 
@@ -13,11 +15,13 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/projects/prj_1/hypotheses',
   useSearchParams: () => new URLSearchParams(navigation.search),
 }))
-vi.mock('@/lib/api', async importActual => ({
-  ...(await importActual<typeof import('@/lib/api')>()),
+vi.mock('@/lib/api/hypotheses', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/hypotheses')>()),
   fetchHypothesisStats: vi.fn(),
-  fetchPlatformExperiment: vi.fn(),
-  fetchPlatformExperimentsPage: vi.fn(),
+}))
+vi.mock('@/lib/api/platform-experiments', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/platform-experiments')>()),
+  fetchPlatformExperiment: vi.fn(), fetchPlatformExperimentsPage: vi.fn(),
 }))
 vi.mock('@/components/platform-experiment-select', () => ({
   PlatformExperimentSelect: ({ value, onChange }: { value: string; onChange: (id: string) => void }) => (

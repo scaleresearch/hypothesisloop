@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { clustersInUse } from '@/lib/clusters'
-import type { OrgCluster } from '@/types'
+import type { OrgCluster } from '@/types/clusters'
 
 const cluster = (over: Partial<OrgCluster>): OrgCluster => ({ name: 'c', shared: false, enabled: true, created_at: '', owned: false, connected: true, autoscaler_enabled: false, ...over })
 

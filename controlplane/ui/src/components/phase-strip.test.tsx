@@ -2,19 +2,20 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchPlatformExperimentAgents } from '@/lib/api'
+import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
+import type { JoinedAgent } from '@/types/agents'
+import type { Draft, Proposal } from '@/types/planning'
+import { PlatformExperimentStatus } from '@/types/platform-experiments'
+import type { StatusReason } from '@/types/platform-experiments'
 import { PhaseStrip } from '@/components/phase-strip'
 import { formatDate } from '@/lib/format'
-import type { Draft, Proposal } from '@/lib/planning'
-import { PlatformExperimentStatus } from '@/types'
-import type { JoinedAgent, StatusReason } from '@/types'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => '/experiments/pe-1',
   useSearchParams: () => new URLSearchParams(),
 }))
-vi.mock('@/lib/api', () => ({ fetchPlatformExperimentAgents: vi.fn() }))
+vi.mock('@/lib/api/agents', () => ({ fetchPlatformExperimentAgents: vi.fn() }))
 vi.mock('@/components/platform-experiment-form', () => ({
   PlatformExperimentDialog: ({ initial }: { initial: Draft }) => <div role="dialog">Edit experiment {initial.name}, budget {initial.budget_accelerator_hours}</div>,
 }))

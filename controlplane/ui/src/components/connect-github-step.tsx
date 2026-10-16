@@ -1,7 +1,7 @@
 'use client'
 
 import useSWR from 'swr'
-import { fetchGitHubInstallations } from '@/lib/api'
+import { fetchGitHubInstallations } from '@/lib/api/github'
 import { useGitHubApp, useGitHubInstall } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
 import { InstallProgress } from '@/components/github-status'

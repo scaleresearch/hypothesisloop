@@ -1,7 +1,7 @@
 import { act, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { InstanceHealth } from '@/components/instance-health'
-import type { AgentInstance } from '@/types'
+import type { AgentInstance } from '@/types/agents'
 
 const NOW = new Date('2026-10-05T12:00:00Z')
 const ago = (seconds: number) => new Date(NOW.getTime() - seconds * 1000).toISOString()

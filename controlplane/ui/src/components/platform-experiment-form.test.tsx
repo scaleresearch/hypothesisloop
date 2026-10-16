@@ -2,21 +2,39 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  ApiError, addPlatformExperimentAgents, beginGitHubInstall, fetchAgentTypes, createExperimentDraft, createPlatformExperiment, deleteExperimentDraft, fetchExperimentFile, fetchGitHubApp,
-  fetchGitHubInstallations, fetchGitHubRepositories, updateExperimentDraft, updatePlatformExperiment,
-} from '@/lib/api'
-import type { ExperimentDraft } from '@/lib/api'
+import { fetchAgentTypes } from '@/lib/api/agent-types'
+import { addPlatformExperimentAgents } from '@/lib/api/agents'
+import { createExperimentDraft, deleteExperimentDraft, updateExperimentDraft } from '@/lib/api/drafts'
+import { beginGitHubInstall, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api/github'
+import { createPlatformExperiment, fetchExperimentFile, updatePlatformExperiment } from '@/lib/api/platform-experiments'
+import { ApiError } from '@/lib/api/request'
+import type { Me } from '@/types/accounts'
+import type { ExperimentDraft } from '@/types/drafts'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { PlatformExperimentForm } from '@/components/platform-experiment-form'
-import type { Me, PlatformExperiment } from '@/types'
 import { CATALOG } from '@/test-agent-types'
 import { choose } from '@/test-select'
 
-vi.mock('@/lib/api', async importActual => ({
-  ...(await importActual<typeof import('@/lib/api')>()),
-  addPlatformExperimentAgents: vi.fn(), beginGitHubInstall: vi.fn(), fetchAgentTypes: vi.fn(), createPlatformExperiment: vi.fn(), fetchExperimentFile: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
-  updatePlatformExperiment: vi.fn(), createExperimentDraft: vi.fn(), updateExperimentDraft: vi.fn(), deleteExperimentDraft: vi.fn(),
+vi.mock('@/lib/api/agent-types', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/agent-types')>()),
+  fetchAgentTypes: vi.fn(),
+}))
+vi.mock('@/lib/api/agents', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/agents')>()),
+  addPlatformExperimentAgents: vi.fn(),
+}))
+vi.mock('@/lib/api/drafts', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/drafts')>()),
+  createExperimentDraft: vi.fn(), updateExperimentDraft: vi.fn(), deleteExperimentDraft: vi.fn(),
+}))
+vi.mock('@/lib/api/github', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/github')>()),
+  beginGitHubInstall: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
+}))
+vi.mock('@/lib/api/platform-experiments', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/platform-experiments')>()),
+  createPlatformExperiment: vi.fn(), fetchExperimentFile: vi.fn(), updatePlatformExperiment: vi.fn(),
 }))
 
 const at = '2026-01-01T00:00:00Z'

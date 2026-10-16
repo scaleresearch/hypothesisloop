@@ -2,28 +2,27 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  addPlatformExperimentAgents, fetchPlatformExperimentAgents, fetchPlatformExperimentAgentToken, removePlatformExperimentAgent,
-  createPlatformExperiment, fetchAgentTypes, fetchPlatformExperimentMessages, sendPlatformExperimentMessage,
-} from '@/lib/api'
+import { fetchAgentTypes } from '@/lib/api/agent-types'
+import { addPlatformExperimentAgents, fetchPlatformExperimentAgents, fetchPlatformExperimentAgentToken, fetchPlatformExperimentMessages, removePlatformExperimentAgent, sendPlatformExperimentMessage } from '@/lib/api/agents'
+import { createPlatformExperiment } from '@/lib/api/platform-experiments'
+import type { Me } from '@/types/accounts'
+import type { AgentMessage, AgentSignup, JoinedAgent } from '@/types/agents'
+import { PlatformExperimentStatus } from '@/types/platform-experiments'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { choose } from '@/test-select'
 import { CATALOG } from '@/test-agent-types'
 import { ExperimentAgents } from '@/components/experiment-agents'
-import { PlatformExperimentStatus } from '@/types'
-import type { AgentMessage, AgentSignup, JoinedAgent, Me, PlatformExperiment } from '@/types'
 
 class ApiError extends Error {
   constructor(readonly status: number, message: string, readonly reason?: string) { super(message) }
 }
 
-vi.mock('@/lib/api', () => ({
-  apiURL: () => 'http://api.test',
-  createPlatformExperiment: vi.fn(),
-  addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
-  fetchPlatformExperimentAgentToken: vi.fn(), removePlatformExperimentAgent: vi.fn(),
-  fetchPlatformExperimentMessages: vi.fn(), sendPlatformExperimentMessage: vi.fn(), fetchAgentTypes: vi.fn(),
+vi.mock('@/lib/api/agent-types', () => ({ fetchAgentTypes: vi.fn() }))
+vi.mock('@/lib/api/agents', () => ({
+  addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgentToken: vi.fn(), removePlatformExperimentAgent: vi.fn(), fetchPlatformExperimentMessages: vi.fn(), sendPlatformExperimentMessage: vi.fn(),
 }))
+vi.mock('@/lib/api/platform-experiments', () => ({ createPlatformExperiment: vi.fn() }))
 
 const at = '2026-01-01T00:00:00Z'
 let roster: JoinedAgent[]

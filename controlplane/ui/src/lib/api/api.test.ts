@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { accessToken, endSession } from '@/lib/auth'
-import {
-  ApiError, addHumanHypothesisComment, registerCluster, beginGitHubInstall, finishGitHubInstall, disconnectGitHubInstallation, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories, createAPIKey, createPlatformExperiment, fetchAgentsPage, fetchMe,
-  fetchPlatformExperimentAgentToken, fetchPlatformExperimentsPage, removePlatformExperimentAgent, fetchResourceCapacity, updateCluster, setClusterEnabled, setClusterOrder,
-  registerHumanHypothesis, revokeAPIKey,
-  acceptOrgInvite, createOrgInvite, fetchOrgInvites, fetchOrgMembers, removeOrgMember, revokeOrgInvite, setOrgMemberRole,
-} from '@/lib/api'
+import { acceptOrgInvite, createAPIKey, createOrgInvite, fetchMe, fetchOrgInvites, fetchOrgMembers, removeOrgMember, revokeAPIKey, revokeOrgInvite, setOrgMemberRole } from '@/lib/api/accounts'
+import { fetchAgentsPage, fetchPlatformExperimentAgentToken, removePlatformExperimentAgent } from '@/lib/api/agents'
+import { fetchResourceCapacity, registerCluster, setClusterEnabled, setClusterOrder, updateCluster } from '@/lib/api/clusters'
+import { beginGitHubInstall, disconnectGitHubInstallation, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories, finishGitHubInstall } from '@/lib/api/github'
+import { addHumanHypothesisComment, registerHumanHypothesis } from '@/lib/api/hypotheses'
+import { createPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api/platform-experiments'
+import { ApiError } from '@/lib/api/request'
 
 vi.mock('@/lib/auth', () => ({ accessToken: vi.fn(), endSession: vi.fn() }))
 

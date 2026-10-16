@@ -2,8 +2,9 @@
 
 import { relTime } from '@/lib/format'
 import { useRoster } from '@/lib/roster'
-import { PlatformExperimentStatus } from '@/types'
-import type { AgentInstance, PlatformExperiment } from '@/types'
+import type { AgentInstance } from '@/types/agents'
+import { PlatformExperimentStatus } from '@/types/platform-experiments'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { Text } from '@/components/ui/text'
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`

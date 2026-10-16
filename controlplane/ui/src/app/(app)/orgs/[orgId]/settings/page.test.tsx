@@ -2,12 +2,12 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createProject, fetchMe, renameOrg, renameProject } from '@/lib/api'
+import { createProject, fetchMe, renameOrg, renameProject } from '@/lib/api/accounts'
+import type { Me } from '@/types/accounts'
 import { resolveOrgTenant, resolveTenant, TenantContext } from '@/lib/tenant'
 import SettingsPage from '@/app/(app)/orgs/[orgId]/settings/page'
-import type { Me } from '@/types'
 
-vi.mock('@/lib/api', () => ({ createProject: vi.fn(), fetchMe: vi.fn(), renameOrg: vi.fn(), renameProject: vi.fn() }))
+vi.mock('@/lib/api/accounts', () => ({ createProject: vi.fn(), fetchMe: vi.fn(), renameOrg: vi.fn(), renameProject: vi.fn() }))
 vi.mock('@/components/api-keys', () => ({ APIKeys: () => <p>api keys</p> }))
 vi.mock('@/components/org-members', () => ({ OrgMembers: () => <p>members</p> }))
 vi.mock('@/components/org-github', () => ({ OrgGitHub: () => <p>github accounts</p> }))

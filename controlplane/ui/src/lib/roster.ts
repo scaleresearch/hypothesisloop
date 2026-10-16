@@ -1,7 +1,7 @@
 import useSWR from 'swr'
-import { fetchPlatformExperimentAgents } from '@/lib/api'
+import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { phaseOf } from '@/lib/phase'
-import type { PlatformExperiment } from '@/types'
 
 const WHILE_PLANNING_MS = 3_000
 const OTHERWISE_MS = 15_000

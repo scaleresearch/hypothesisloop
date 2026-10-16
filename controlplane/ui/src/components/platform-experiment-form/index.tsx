@@ -2,14 +2,15 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { useSWRConfig } from 'swr'
-import {
-  ApiError, NO_EXPERIMENT_FILE, createExperimentDraft, createPlatformExperiment, deleteExperimentDraft, fetchExperimentFile, updateExperimentDraft, updatePlatformExperiment,
-} from '@/lib/api'
-import type { CreatePlatformExperimentRequest, ExperimentDraft, PlatformExperimentPatch } from '@/lib/api'
+import { createExperimentDraft, deleteExperimentDraft, updateExperimentDraft } from '@/lib/api/drafts'
+import { createPlatformExperiment, fetchExperimentFile, NO_EXPERIMENT_FILE, updatePlatformExperiment } from '@/lib/api/platform-experiments'
+import type { CreatePlatformExperimentRequest, PlatformExperimentPatch } from '@/lib/api/platform-experiments'
+import { ApiError } from '@/lib/api/request'
+import type { ExperimentDraft } from '@/types/drafts'
+import { PlatformExperimentStatus } from '@/types/platform-experiments'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { isZeroDate } from '@/lib/format'
 import { useTenant } from '@/lib/tenant'
-import { PlatformExperimentStatus } from '@/types'
-import type { PlatformExperiment } from '@/types'
 import { repositoryFields } from '@/components/repository-select'
 import { ConnectGitHubStep, useNeedsGitHub } from '@/components/connect-github-step'
 import { Button } from '@/components/ui/button'
@@ -38,7 +39,7 @@ interface FormProps {
 }
 
 /** What the dialog asks of the form it holds: to be left, keeping what was typed. */
-export interface FormHandle {
+interface FormHandle {
   leave: () => void
 }
 

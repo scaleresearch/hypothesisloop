@@ -1,11 +1,15 @@
 import { render, screen } from '@testing-library/react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchHypothesisGraph, fetchPlatformExperiment, fetchPlatformExperimentAgents } from '@/lib/api'
+import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
+import { fetchHypothesisGraph } from '@/lib/api/hypotheses'
+import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
+import type { Me } from '@/types/accounts'
+import type { HypothesisGraph } from '@/types/hypotheses'
+import { PlatformExperimentStatus } from '@/types/platform-experiments'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import HypothesesPage from '@/app/(app)/experiments/[experimentId]/hypotheses/page'
-import { PlatformExperimentStatus } from '@/types'
-import type { HypothesisGraph, Me, PlatformExperiment } from '@/types'
 
 const navigation = vi.hoisted(() => ({ search: '', push: vi.fn(), replace: vi.fn() }))
 
@@ -14,10 +18,11 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/experiments/pe-x/hypotheses',
   useSearchParams: () => new URLSearchParams(navigation.search),
 }))
-vi.mock('@/lib/api', () => ({
-  fetchHypothesisGraph: vi.fn(), fetchPlatformExperiment: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
-  searchHypotheses: vi.fn(), registerHumanHypothesis: vi.fn(), addHumanHypothesisComment: vi.fn(), addHumanHypothesisLink: vi.fn(),
+vi.mock('@/lib/api/agents', () => ({ fetchPlatformExperimentAgents: vi.fn() }))
+vi.mock('@/lib/api/hypotheses', () => ({
+  fetchHypothesisGraph: vi.fn(), searchHypotheses: vi.fn(), registerHumanHypothesis: vi.fn(), addHumanHypothesisComment: vi.fn(), addHumanHypothesisLink: vi.fn(),
 }))
+vi.mock('@/lib/api/platform-experiments', () => ({ fetchPlatformExperiment: vi.fn() }))
 vi.mock('@/components/platform-experiment-select', () => ({ PlatformExperimentSelect: () => <span>experiment select</span> }))
 vi.mock('@/components/hypothesis-graph', async original => ({ ...await original(), HypothesisGraphCanvas: () => <div>graph canvas</div> }))
 

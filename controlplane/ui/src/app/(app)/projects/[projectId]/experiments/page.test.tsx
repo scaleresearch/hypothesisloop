@@ -2,14 +2,18 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  ApiError, apiSend, createExperimentDraft, createPlatformExperiment, deleteExperimentDraft, fetchAgentsPage, fetchExperimentDraft, fetchExperimentDrafts,
-  fetchExperimentStats, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories, fetchOrgClusters, fetchPlatformExperimentsPage,
-} from '@/lib/api'
-import type { ExperimentDraft } from '@/lib/api'
+import { fetchAgentsPage } from '@/lib/api/agents'
+import { fetchOrgClusters } from '@/lib/api/clusters'
+import { createExperimentDraft, deleteExperimentDraft, fetchExperimentDraft, fetchExperimentDrafts } from '@/lib/api/drafts'
+import { fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api/github'
+import { fetchExperimentStats } from '@/lib/api/jobs'
+import { createPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api/platform-experiments'
+import { ApiError, apiSend } from '@/lib/api/request'
+import type { Me } from '@/types/accounts'
+import type { ExperimentDraft } from '@/types/drafts'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import PlatformExperimentsPage from '@/app/(app)/projects/[projectId]/experiments/page'
-import type { Me, PlatformExperiment } from '@/types'
 
 const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn(), search: '' }))
 
@@ -18,11 +22,33 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/projects/prj_1/experiments',
   useSearchParams: () => new URLSearchParams(navigation.search),
 }))
-vi.mock('@/lib/api', async importActual => ({
-  ...(await importActual<typeof import('@/lib/api')>()),
-  addPlatformExperimentAgents: vi.fn(), apiSend: vi.fn(), createPlatformExperiment: vi.fn(), fetchAgentsPage: vi.fn(), fetchExperimentStats: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(),
-  fetchGitHubRepositories: vi.fn(), fetchOrgClusters: vi.fn(), fetchPlatformExperimentsPage: vi.fn(),
+vi.mock('@/lib/api/agents', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/agents')>()),
+  addPlatformExperimentAgents: vi.fn(), fetchAgentsPage: vi.fn(),
+}))
+vi.mock('@/lib/api/clusters', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/clusters')>()),
+  fetchOrgClusters: vi.fn(),
+}))
+vi.mock('@/lib/api/drafts', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/drafts')>()),
   createExperimentDraft: vi.fn(), deleteExperimentDraft: vi.fn(), fetchExperimentDraft: vi.fn(), fetchExperimentDrafts: vi.fn(),
+}))
+vi.mock('@/lib/api/github', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/github')>()),
+  fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
+}))
+vi.mock('@/lib/api/jobs', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/jobs')>()),
+  fetchExperimentStats: vi.fn(),
+}))
+vi.mock('@/lib/api/platform-experiments', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/platform-experiments')>()),
+  createPlatformExperiment: vi.fn(), fetchPlatformExperimentsPage: vi.fn(),
+}))
+vi.mock('@/lib/api/request', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/request')>()),
+  apiSend: vi.fn(),
 }))
 vi.mock('@/components/platform-experiment-card', () => ({
   PlatformExperimentCard: ({ pe }: { pe: PlatformExperiment }) => <article>{pe.name}{pe.shared ? ' (shared)' : ''}</article>,

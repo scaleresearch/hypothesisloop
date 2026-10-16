@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import useSWR from 'swr'
-import { fetchPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api'
+import { fetchPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api/platform-experiments'
 import { useTenant } from '@/lib/tenant'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 

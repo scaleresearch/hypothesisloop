@@ -3,7 +3,7 @@ import { LANDING_PATH, LOGIN_PATH, SIGNED_IN_HEADER, hasSession, overHTTPS, safe
 import type { ServerSession } from '@/lib/auth'
 import { movedTo, recordPath } from '@/lib/legacy-routes'
 import { INVITE_PATH } from '@/lib/invite'
-import { apiURL } from '@/lib/api'
+import { apiURL } from '@/lib/api/request'
 import { NONCE_HEADER, contentSecurityPolicy, newNonce } from '@/lib/content-security'
 
 type WrittenCookie = Parameters<NextResponse['cookies']['set']>[2] & { name: string; value: string }

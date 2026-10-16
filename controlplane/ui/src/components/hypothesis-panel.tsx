@@ -1,7 +1,8 @@
 'use client'
 
 import { TextLink } from '@/components/ui/link'
-import type { HypothesisGraph, HypothesisGraphNode, HypothesisLinkType, PlatformExperiment } from '@/types'
+import type { HypothesisGraph, HypothesisGraphNode, HypothesisLinkType } from '@/types/hypotheses'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button, RowButton } from '@/components/ui/button'

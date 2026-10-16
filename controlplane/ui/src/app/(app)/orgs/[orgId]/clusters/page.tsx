@@ -1,8 +1,8 @@
 'use client'
 
 import useSWR from 'swr'
-import { fetchAllClusters, fetchResourceCapacity } from '@/lib/api'
-import type { ClustersResponse, ClusterInfo } from '@/types'
+import { fetchAllClusters, fetchResourceCapacity } from '@/lib/api/clusters'
+import type { ClusterInfo, ClustersResponse } from '@/types/clusters'
 import { useTenant } from '@/lib/tenant'
 import { budgetUnit, unitCount, unitRate } from '@/lib/units'
 import { OrgClusters } from '@/components/org-clusters'

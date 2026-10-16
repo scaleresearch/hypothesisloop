@@ -2,9 +2,10 @@
 
 import { createContext, useContext } from 'react'
 import useSWR from 'swr'
-import { fetchPlatformExperiment } from '@/lib/api'
+import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
+import type { Me, Project } from '@/types/accounts'
+import type { PlatformExperiment } from '@/types/platform-experiments'
 import { useTenant } from '@/lib/tenant'
-import type { Me, PlatformExperiment, Project } from '@/types'
 
 function reaches(me: Me, projectID: string): boolean {
   return me.projects.some(p => p.id === projectID)
