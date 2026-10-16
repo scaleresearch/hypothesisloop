@@ -53,8 +53,9 @@ func agentsAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
    or: hl platform-experiments agents add [--platform-experiment PE] --agent ID [--role ROLE] [--quota-tier TIER]
 
 The only way an agent joins a platform experiment, while it is open; once per agent. While it
-runs, the coordinator or the owner adds a researcher in the place of one that finished, was cut
-or lost its machine, with a share of what those left unspent. The first form creates one; the
+runs, the coordinator or the owner adds a researcher in a place max_agents leaves free, with a
+share of what the researchers left unspent; the platform itself replaces a researcher of the
+experiment's researchers that finished or lost its machine. The first form creates one; the
 second joins a registered one again under its id (a removed agent), or prints a self-run agent's
 token again. max_agents counts the researchers (role competitor) at work. A reviewer re-checks others' claims and records agreement or dispute; like a
 baseline agent it is not ranked, cut or counted.

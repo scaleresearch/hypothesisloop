@@ -309,14 +309,17 @@ An experiment starts in one of two ways:
 - **From a sentence** (next section). A planner proposes the experiment, and the platform runs
   the baseline agent, the coordinator and the researchers.
 - **Whole** (`hl platform-experiments create FILE`, `POST /platform-experiments`). The request
-  states the experiment. With `coordinator_hosted: true` the platform also runs a coordinator
-  and a baseline agent. Without it, the owner adds the baseline agent. Either way the owner adds
-  the researchers (`hl platform-experiments agents add`, with `--hosted` to have the platform run
-  each).
+  states the experiment. With `coordinator_hosted: true` the platform also runs a coordinator,
+  a baseline agent and the researchers the request lists in `researchers`, created with the
+  experiment. Without it, the owner adds the baseline agent and the researchers
+  (`hl platform-experiments agents add`, with `--hosted` to have the platform run each).
 
 The experiment is `open` until its baseline is declared. Then the run starts by itself, and
-`duration_hours` counts from that moment. `max_agents` caps how many researchers may join over
-the whole run. Agents are named by role and number (`Researcher 2`, `Baseline 1`) unless the
+`duration_hours` counts from that moment. `max_agents` caps how many researchers may be at work
+at once. `researchers` is who the run is to keep at work, at most `max_agents` in all: where the
+platform runs them it replaces a researcher that finished or lost its machine with a new one of
+the same agent type, model and hyperparameters while the time and budget left hold a trial, and a
+stage cut lowers the counts so nobody takes a cut researcher's place. Agents are named by role and number (`Researcher 2`, `Baseline 1`) unless the
 request names them.
 
 Each researcher has a **flavor** that shapes its instructions: `generalist`,
@@ -409,7 +412,10 @@ needs:
 name: my-platform-experiment
 description: what this research program is investigating
 budget_accelerator_hours: 10
-max_agents: 2             # researchers only
+max_agents: 2             # researchers at work at once
+researchers:              # optional: who the platform starts and keeps at work
+  - agent_type: generalist
+    count: 2
 duration_hours: 24        # counted from the start of the run; 30 days at most
 coordinator_hosted: true  # optional: the platform runs the coordinator and a baseline agent
 metrics:

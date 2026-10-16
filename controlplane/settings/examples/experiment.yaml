@@ -13,10 +13,19 @@ description: what this research program is investigating
 # are hard physical-fit-checked at admission, not hours-budgeted.
 budget_accelerator_hours: 10
 
-# How many researchers may join over its whole life: the agents of role competitor, whatever
-# their flavor. Required. One that finished or was cut still counts. Agents of role baseline,
-# reviewers and the coordinator never count.
+# How many researchers may be at work at once: the agents of role competitor, whatever their
+# agent type. Required. One that finished, was cut, was replaced or lost its machine no longer
+# counts. Agents of role baseline, reviewers, a planner and the coordinator never count.
 max_agents: 2
+
+# Optional: the researchers it starts with and is to keep at work, at most max_agents in all. With
+# coordinator_hosted the platform creates them with the experiment and, while the run goes on,
+# replaces one that finished or lost its machine with a new one of the same agent type, model and
+# hyperparameters; a stage cut lowers the counts. Never read from a repository's experiment file.
+# researchers:
+#   - agent_type: generalist   # or hyperparameter-search, architecture-search, data-search
+#     count: 2
+#     model: claude-sonnet-5   # optional: the platform's default
 
 # coordinator_hosted: true has the platform run the coordinator, one more machine beside the
 # agents', on coordinator_model or the platform's coordinator default, and creates one hosted baseline agent

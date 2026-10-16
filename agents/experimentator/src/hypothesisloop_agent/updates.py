@@ -50,13 +50,15 @@ _DRAIN_S = 5
 # message of the owner (agent.message=owner) wakes it whether sent to it or to a researcher: either
 # is direction the steering has to take in; its own messages come back as coordinator.
 # A job submitted on a hypothesis another agent's job tests (job.duplicate) wakes it too: two
-# seats on one idea are one seat wasted until it gives one of them another direction.
+# seats on one idea are one seat wasted until it gives one of them another direction. So does a
+# researcher the platform added in the place of one that ended (agent.replaced): it starts with
+# no direction but its predecessor's hyperparameters.
 # Everything else is read when next acting. A kind wakes only for what its reader can act on.
 WAKES = {
     "coordinator": ("agent.finished", "agent.idle=new", "capacity.idle=new", "experiment.blocked", "job.held", "stage.boundary", "comment.new",
                     "platform_experiment.status", "platform_experiment.description", "platform_experiment.baseline",
                     "hypothesis.new=user", "hypothesis.new=key", "hypothesis.new=staff", "agent.message=owner",
-                    "job.duplicate"),
+                    "job.duplicate", "agent.replaced"),
     "agent": ("experiment.status", "experiment.blocked", "job.held", "job.underperforming", "agent.cut", "agent.idle",
               "agent.message", "stage.boundary", "comment.new", "platform_experiment.status", "platform_experiment.description",
               "platform_experiment.baseline", "platform_experiment.revision", "environment.status"),

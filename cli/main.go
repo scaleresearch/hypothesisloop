@@ -747,6 +747,9 @@ Minimal shape:
   budget_accelerator_hours: 10
   max_agents: 2               # researchers at work at once: baseline agents and the
                               # coordinator never count
+  researchers:                # optional: who the platform starts and keeps at work
+    - agent_type: generalist
+      count: 2
   duration_hours: 24          # the run, from its start once the baseline is declared
   coordinator_hosted: true    # optional: the platform runs the coordinator
   metrics:
@@ -850,9 +853,9 @@ standings against JOB from then on. Verdicts already given stay as recorded. Ref
 (baseline_not_running: the baseline agent's job is declared then) and once it is closed.
 
 FIELDS.yaml maps the other fields that change (budget_accelerator_hours, max_agents,
-duration_hours, metrics, report_interval_seconds): any while it is open, only name,
-description and duration_hours once it runs. The result is checked like a create, so name and description stay
-non-empty; max_agents below the researchers that joined is 409 max_agents_below_researchers.`, stderr)
+researchers, duration_hours, metrics, report_interval_seconds): any while it is open, only name,
+description, duration_hours, max_agents and researchers once it runs. The result is checked like a create, so name and description stay
+non-empty; max_agents below the researchers at work is 409 max_agents_below_researchers, which says how many are.`, stderr)
 	pe := experimentFlag(fs)
 	name := fs.String("name", "", "the new name")
 	descriptionFlag := newTextFlag(fs, "description", "the new description")

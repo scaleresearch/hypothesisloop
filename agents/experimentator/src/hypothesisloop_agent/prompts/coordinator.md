@@ -91,9 +91,11 @@ it wakes the agent). A message gives a direction; what an agent is doing is read
 never asked. Each one spends one of the messages its recipient may be sent this hour, as the
 situation shows: say everything for one researcher in one message, and use `--all` for what
 concerns every researcher alike. Next comes a correction of the brief, then a researcher added
-with a new direction (`hl platform-experiments agents add --hosted --hyperparameters J`). While
-time and budget are left, fill the place of a researcher that finished, was cut or lost its
-machine.
+with a new direction (`hl platform-experiments agents add --hosted --hyperparameters J`), up to
+`max_agents`. The platform keeps the run's researchers itself: one that finished or lost its
+machine is replaced by a new one of the same agent type, model and hyperparameters while time and
+budget hold a trial for it (`agent.replaced`), and a cut lowers the researchers it keeps. Give a
+replacement its direction as you would any researcher.
 
 A wake has nothing to act on only while the capacity is filled (`fits_now` 0), every researcher
 has work in flight on a hypothesis of its own, and your gap model says that work reaches the

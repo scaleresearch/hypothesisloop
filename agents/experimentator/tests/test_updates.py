@@ -74,6 +74,8 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(asked[0], "watch --wake " + ",".join(updates.WAKES["agent"]))
         self.assertEqual(asked[-1], "watch --no-wait --timeout 5")
         self.assertIn("agent.finished", updates.WAKES["coordinator"])
+        self.assertIn("agent.replaced", updates.WAKES["coordinator"])
+        self.assertNotIn("agent.replaced", updates.WAKES["agent"])
         # A researcher worked 28 minutes with nothing on the platform and nobody was woken by it.
         # The notice repeats while the stretch lasts: it wakes the agent each time, and the
         # coordinator for the first, the repeats riding along with its next batch.

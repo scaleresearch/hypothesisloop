@@ -94,7 +94,7 @@ The proposal, in the shape `hl platform-experiments propose` shows:
     fifth (core-hours on cpu); duration = the rounds those trials take side by side. A trial's
     length is estimated from what the harness runs and on how much data. `sizing_reason`
     shows what was read, what assumed, and the arithmetic. Researchers: as stated, else as many
-    as keep the capacity busy, each keeping a few jobs in flight, up to `max_agents`: generalists, each
+    as keep the capacity busy, each keeping a few jobs in flight, up to the draft's `max_agents`: generalists, each
     given a distinct area to start from (a part of the problem or a family of methods), never a
     method; a flavor only where the goal asks for that kind of work.
   - `baseline_minutes`: the harness, the environment built from nothing, the jobs, and one
