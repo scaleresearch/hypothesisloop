@@ -240,7 +240,9 @@ func (s *Service) BaseRef(ctx context.Context, h *domain.Hypothesis) (string, er
 
 // ListHypotheses returns one page of hypotheses, the open ideas of people first, then the most
 // recent, each carrying its place in the graph and its finding/comment counts. The caller states the page.
-func (s *Service) ListHypotheses(ctx context.Context, f graphdb.ListFilter) ([]*domain.HypothesisListItem, error) {
+// ListHypotheses returns the hypotheses matching f, each with what was found for it as its graph
+// node carries it, judged by its own platform experiment's ranking metric.
+func (s *Service) ListHypotheses(ctx context.Context, f graphdb.ListFilter) ([]*GraphNode, error) {
 	if f.Status != "" && !domain.ValidHypothesisStatus(f.Status) {
 		return nil, fmt.Errorf("registry.ListHypotheses: invalid status %q", f.Status)
 	}
@@ -262,10 +264,34 @@ func (s *Service) ListHypotheses(ctx context.Context, f graphdb.ListFilter) ([]*
 	for _, item := range items {
 		item.Working = working[item.ID]
 	}
-	if err := s.store.NameActors(ctx, itemActors(items)); err != nil {
+	byExperiment := map[string][]string{}
+	for _, item := range items {
+		byExperiment[item.PlatformExperimentID] = append(byExperiment[item.PlatformExperimentID], item.ID)
+	}
+	evidence := map[string]Evidence{}
+	for pe, peIDs := range byExperiment {
+		metrics, _, err := s.store.GetPlatformExperimentMetrics(ctx, pe)
+		if err != nil {
+			return nil, fmt.Errorf("registry.ListHypotheses: %w", err)
+		}
+		found, err := s.evidence(ctx, metrics, peIDs)
+		if err != nil {
+			return nil, fmt.Errorf("registry.ListHypotheses: %w", err)
+		}
+		maps.Copy(evidence, found)
+	}
+	nodes := make([]*GraphNode, len(items))
+	actors := itemActors(items)
+	for i, item := range items {
+		nodes[i] = &GraphNode{HypothesisListItem: item, Evidence: evidence[item.ID]}
+		if f := nodes[i].Finding; f != nil {
+			actors = append(actors, &f.Actor)
+		}
+	}
+	if err := s.store.NameActors(ctx, actors); err != nil {
 		return nil, fmt.Errorf("registry.ListHypotheses: %w", err)
 	}
-	return items, nil
+	return nodes, nil
 }
 
 // HypothesisStats counts the hypotheses matching the same filters by status, ignoring limit/offset.

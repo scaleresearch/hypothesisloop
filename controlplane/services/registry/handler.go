@@ -569,7 +569,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"The open ideas of people come first, those no agent has settled or built on yet, then the most recent. " +
 			"Total match count is returned in the X-Total-Count response header. Rows carry builds_on " +
 			"(what each builds on; the platform_experiment_id stands for the objective), child_count " +
-			"(how many build on it), finding_count/comment_count and working, the agents on it now: a job of theirs queued or running, or a " +
+			"(how many build on it), finding_count/comment_count, finding and best_job as GET /hypotheses/graph gives them, and working, the agents on it now: a job of theirs queued or running, or a " +
 			"checkout within two hours, absent while none is. To walk or search the graph use " +
 			"POST /hypotheses/query.",
 	}, func(ctx context.Context, in *struct {
@@ -583,7 +583,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Limit                int                     `query:"limit" doc:"Page size, default 20, maximum 200. A larger one is refused. See X-Total-Count for how much you have not seen."`
 		Offset               int                     `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
 	}) (*struct {
-		Body       []*domain.HypothesisListItem
+		Body       []*GraphNode
 		TotalCount int `header:"X-Total-Count"`
 	}, error) {
 		if in.Status != "" && !domain.ValidHypothesisStatus(in.Status) {
@@ -613,7 +613,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, auth.Internal(h.logger, "list hypotheses", err)
 		}
 		return &struct {
-			Body       []*domain.HypothesisListItem
+			Body       []*GraphNode
 			TotalCount int `header:"X-Total-Count"`
 		}{Body: hs, TotalCount: stats.Total}, nil
 	})
