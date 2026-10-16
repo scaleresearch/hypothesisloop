@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/moby/moby/client"
 
@@ -146,48 +145,16 @@ func (e *Executor) GetLiveRAMCapacity(ctx context.Context) (available, total int
 // storageReading is one look at the disk jobs write to.
 type storageReading struct{ available, total int64 }
 
-// writtenRefresh is how long a measurement of the containers' writable layers is used. The
-// engine walks every file of a layer to size it, 1.7 s for a layer of 300 000 files, so the walk
-// is not made on every pass. It is the time the walk itself is allowed.
-const writtenRefresh = engineCallTimeout
-
-// writtenBytes is what each container has written, by container id, as of the last walk.
-func (e *Executor) writtenBytes(ctx context.Context) (map[string]int64, error) {
-	e.mu.Lock()
-	written, fresh := e.written, time.Since(e.writtenAt) < writtenRefresh
-	e.mu.Unlock()
-	if fresh {
-		return written, nil
-	}
-	at := time.Now()
-	containers, err := e.listContainers(ctx, true)
-	if err != nil {
-		return nil, err
-	}
-	written = make(map[string]int64, len(containers))
-	for _, c := range containers {
-		written[c.ID] = c.WrittenBytes
-	}
-	e.mu.Lock()
-	e.written, e.writtenAt = written, at
-	e.mu.Unlock()
-	return written, nil
-}
-
 // readStorage reports total as what jobs can be given when none runs: what the filesystem has
 // free now plus what this cluster's containers have written, which comes back when they are
 // removed. The filesystem's own size is never free, so a job sized between the two was accepted
-// and queued for good. Free space and the containers there are come from this reading, and only
-// what each has written is as old as writtenRefresh. available is the smaller of two independent
+// and queued for good. Everything comes from this one reading, made once per pass (ForPass): the
+// engine walks every file of a layer to size it. available is the smaller of two independent
 // limits: what no running job has reserved, and what the filesystem physically still has, which
 // image layers and exited containers also take from.
 func (e *Executor) readStorage(ctx context.Context) (storageReading, error) {
 	ops := e.operations()
-	containers, err := e.listManagedContainers(ctx)
-	if err != nil {
-		return storageReading{}, err
-	}
-	written, err := e.writtenBytes(ctx)
+	containers, err := e.listContainers(ctx, true)
 	if err != nil {
 		return storageReading{}, err
 	}
@@ -197,7 +164,7 @@ func (e *Executor) readStorage(ctx context.Context) (storageReading, error) {
 	}
 	total := free
 	for _, c := range containers {
-		total += written[c.ID]
+		total += c.WrittenBytes
 	}
 	requests := sumRequests(ops, containers)
 	available := min(free, requests.left(total, requests.storageBytes))

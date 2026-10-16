@@ -90,17 +90,11 @@ type Executor struct {
 	// it is how shutdown stops them.
 	life context.Context
 
-	mu sync.Mutex
-	// unscoped is the containers already reported as started before containers were scoped.
-	unscoped map[string]bool
+	mu       sync.Mutex
 	inFlight map[string]operation
 	// failedPulls is each job's last pull, when it failed.
 	failedPulls map[string]failedPull
-	// written and writtenAt are the last measurement of the containers' writable layers (see
-	// writtenBytes).
-	written   map[string]int64
-	writtenAt time.Time
-	workers   sync.WaitGroup
+	workers     sync.WaitGroup
 }
 
 // engine is the part of the Engine API client this package calls.

@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sort"
 
 	"github.com/containerd/errdefs"
@@ -39,14 +38,13 @@ func (c containerInfo) name() string {
 // including stopped ones, since a stopped container is itself the "gone" record (see
 // different-backend.md §4.6) until it's pruned by reapTerminal. Everything this package lists,
 // counts, stops or removes comes from here, so the agents of two clusters on one engine never
-// touch each other's jobs. A container that carries no cluster at all was started before
-// containers were scoped: it is nobody's to stop on a guess, so it is left alone and named once.
+// touch each other's jobs.
 func (e *Executor) listManagedContainers(ctx context.Context) ([]containerInfo, error) {
 	return e.listContainers(ctx, false)
 }
 
 // listContainers measures each container's writable layer when written is set. The engine walks
-// the layer's files to answer, so only writtenBytes asks.
+// the layer's files to answer, so only readStorage asks.
 func (e *Executor) listContainers(ctx context.Context, written bool) ([]containerInfo, error) {
 	summaries, err := e.docker.ContainerList(ctx, client.ContainerListOptions{
 		All:     true,
@@ -58,12 +56,7 @@ func (e *Executor) listContainers(ctx context.Context, written bool) ([]containe
 	}
 	out := make([]containerInfo, 0, len(summaries.Items))
 	for _, s := range summaries.Items {
-		cluster, scoped := s.Labels[LabelCluster]
-		if !scoped {
-			e.reportUnscoped(s.ID, trimSlashPrefix(s.Names))
-			continue
-		}
-		if cluster != e.clusterName {
+		if s.Labels[LabelCluster] != e.clusterName {
 			continue
 		}
 		out = append(out, containerInfo{
@@ -75,19 +68,6 @@ func (e *Executor) listContainers(ctx context.Context, written bool) ([]containe
 		})
 	}
 	return out, nil
-}
-
-func (e *Executor) reportUnscoped(id string, names []string) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.unscoped[id] {
-		return
-	}
-	if e.unscoped == nil {
-		e.unscoped = map[string]bool{}
-	}
-	e.unscoped[id] = true
-	log.Printf("podexec: container %v (%s) was started by an agent from before containers named their cluster: this agent does not manage, count or stop it; remove it by hand once its job is no longer wanted", names, id)
 }
 
 // trimSlashPrefix strips the leading "/" the engine API prefixes container names with.

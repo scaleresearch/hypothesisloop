@@ -1,10 +1,7 @@
 package podexec
 
 import (
-	"bytes"
 	"context"
-	"log"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -27,10 +24,6 @@ func jobContainer(cluster, state string, scoped bool) *fakeContainer {
 // the tests of a shared development host. An agent that managed every container carrying the
 // platform's label stopped the other cluster's jobs as no longer desired.
 func TestAnAgentManagesOnlyTheContainersOfItsOwnCluster(t *testing.T) {
-	var logged bytes.Buffer
-	log.SetOutput(&logged)
-	defer log.SetOutput(os.Stderr)
-
 	engine := newFakeEngine()
 	for id, c := range map[string]*fakeContainer{
 		"mine": jobContainer("east", "running", true), "mine-done": jobContainer("east", "exited", true),
@@ -80,15 +73,6 @@ func TestAnAgentManagesOnlyTheContainersOfItsOwnCluster(t *testing.T) {
 	slices.Sort(left)
 	if !slices.Equal(left, []string{"from-before", "theirs"}) {
 		t.Fatalf("containers left on the engine = %v, want the other cluster's and the one from before untouched", left)
-	}
-
-	// A container from before containers named their cluster is nobody's to stop on a guess. It
-	// is said once, however many passes list it.
-	if said := strings.Count(logged.String(), "from before containers named their cluster"); said != 1 {
-		t.Fatalf("the container from before was reported %d times:\n%s", said, logged.String())
-	}
-	if !strings.Contains(logged.String(), containerName("from-before")) {
-		t.Fatalf("the report does not name the container:\n%s", logged.String())
 	}
 }
 
