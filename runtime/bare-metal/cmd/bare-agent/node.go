@@ -22,12 +22,17 @@ const usage = `usage: bare-agent                                          run th
        bare-agent install --cluster NAME --api-url URL     install or upgrade the agent on this node and start it
                           [--dry-run]                      check the node and the token, print what install does, change nothing
        bare-agent detach                                   remove this node's cluster, stop its jobs, stop the agent
+       bare-agent version                                  print the version this binary was built as
        bare-agent uninstall                                remove the agent from a detached node`
 
 var commands = map[string]func(args []string) error{
 	"install":   install,
 	"detach":    detach,
 	"uninstall": uninstall,
+	"version": func([]string) error {
+		fmt.Println(version)
+		return nil
+	},
 }
 
 func say(format string, args ...any) {
@@ -48,6 +53,7 @@ func agentFor(settings hostinstall.Settings) *agentloop.Agent {
 		ClusterName:       settings.ClusterName,
 		APIURL:            settings.APIURL,
 		Token:             settings.Token,
+		Version:           version,
 		HTTPClient:        &http.Client{Timeout: 35 * time.Second},
 		ReconcileInterval: reconcileInterval,
 		StatusInterval:    statusInterval,

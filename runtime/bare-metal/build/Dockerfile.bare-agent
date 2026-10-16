@@ -11,6 +11,7 @@ FROM --platform=$BUILDPLATFORM golang:1.25 AS go
 
 FROM --platform=$BUILDPLATFORM ubuntu:20.04 AS builder
 ARG TARGETOS TARGETARCH
+ARG VERSION
 RUN set -e; \
     case "$TARGETARCH" in \
       amd64) triple=x86_64-linux-gnu; package=gcc-x86-64-linux-gnu ;; \
@@ -32,7 +33,8 @@ WORKDIR /app
 COPY . .
 COPY vendor ./vendor
 RUN --mount=type=cache,target=/root/.cache/go-build set -e; \
-    CGO_ENABLED=1 CC=target-cc GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=vendor -o /bare-agent ./runtime/bare-metal/cmd/bare-agent; \
+    [ -n "$VERSION" ] || { echo "build with --build-arg VERSION=<image tag>: the agent reports it to the control plane" >&2; exit 1; }; \
+    CGO_ENABLED=1 CC=target-cc GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=vendor -ldflags "-X main.version=$VERSION" -o /bare-agent ./runtime/bare-metal/cmd/bare-agent; \
     newest="$(target-objdump -T /bare-agent | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"; \
     echo "newest glibc symbol version linked: $newest"; \
     [ "$(printf '%s\n' GLIBC_2.17 "$newest" | sort -V | tail -1)" = GLIBC_2.17 ] || { echo "bare-agent needs $newest, above the floor of 2.17" >&2; exit 1; }

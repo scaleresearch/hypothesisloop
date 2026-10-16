@@ -358,7 +358,7 @@ locked-images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-u
 	for entry in $(IMAGE_TARGETS); do \
 		name="$${entry%%:*}"; rest="$${entry#*:}"; dockerfile="$${rest%%:*}"; ctx="$${rest#*:}"; \
 		echo "==> building hypothesisloop-$$name:$(TAG)"; \
-		base=""; [ "$$name" = job ] && base="--build-arg BASE=$(REGISTRY)/hypothesisloop-job-base:$(TAG)"; \
+		base=""; [ "$$name" = job ] && base="--build-arg BASE=$(REGISTRY)/hypothesisloop-job-base:$(TAG)"; [ "$$name" = bare-agent ] && base="--build-arg VERSION=$(TAG)"; \
 		podman build --platform $(IMAGE_PLATFORM) $$base -f "$$dockerfile" -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$$ctx" || exit 1; \
 		podman tag "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$(REGISTRY)/hypothesisloop-$$name:latest"; \
 		$(REGISTRY_LOGIN) || exit 1; \

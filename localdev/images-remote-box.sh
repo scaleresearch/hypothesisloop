@@ -45,7 +45,7 @@ spec() {
     job) dockerfile=infra/images/job/Dockerfile; args=(--build-arg "BASE=$(image job-base)") ;;
     control-service | metrics-service) dockerfile="controlplane/build/Dockerfile.$1" ;;
     cluster-agent | node-agent) dockerfile="runtime/k8s/build/Dockerfile.$1" ;;
-    bare-agent) dockerfile=runtime/bare-metal/build/Dockerfile.bare-agent ;;
+    bare-agent) dockerfile=runtime/bare-metal/build/Dockerfile.bare-agent; args=(--build-arg "VERSION=${tag}") ;;
     cloud-agent | agent-launcher) dockerfile="runtime/cloud/build/Dockerfile.$1" ;;
     workload) dockerfile=tests/workloads/generic/Dockerfile.train; context=tests/workloads/generic ;;
     *)

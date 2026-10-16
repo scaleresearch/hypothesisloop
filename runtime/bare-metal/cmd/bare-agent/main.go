@@ -35,6 +35,10 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentloop"
 )
 
+// version is the image tag this binary was built from, set at link time (-X main.version=TAG).
+// Built without it, the agent names no version.
+var version string
+
 const (
 	binaryName        = "bare-agent"
 	reconcileInterval = 2 * time.Second
@@ -94,6 +98,7 @@ func main() {
 		ClusterName:       clusterName,
 		APIURL:            apiURL,
 		Token:             token,
+		Version:           version,
 		Executor:          exec,
 		HTTPClient:        &http.Client{Timeout: 35 * time.Second},
 		ReconcileInterval: reconcileInterval,
