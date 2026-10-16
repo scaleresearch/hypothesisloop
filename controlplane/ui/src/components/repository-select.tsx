@@ -60,7 +60,7 @@ function accountOf(value: string, accounts: GitHubInstallation[], unasked?: GitH
  */
 function RepositoryCheckNote({ value, account, onInstall }: { value: string; account?: GitHubInstallation; onInstall?: () => void }) {
   const { project } = useTenant()
-  const { error, isValidating, mutate } = useSWR(['repository-check', project.id, value], () => checkRepository(project.id, repositoryFields(value)), { shouldRetryOnError: false })
+  const { error, isValidating, mutate } = useSWR(['repository-check', project.id, value], () => checkRepository(project.id, repositoryFields(value)))
   if (!error) return null
   return (
     <GitHubProblem
@@ -102,13 +102,12 @@ export function RepositorySelect({ value, onChange, compact = false }: {
   const dead = useSWR(
     listedAccounts.length > 0 ? ['github-installation-checks', org.id, ...listedAccounts.map(a => a.installation_id)] : null,
     () => unusable(org.id, listedAccounts),
-    { shouldRetryOnError: false },
   ).data ?? []
   const [refreshing, setRefreshing] = useState(false)
   const { data, error, mutate } = useSWR(
     connected ? ['github-repositories', org.id, q] : null,
     () => fetchGitHubRepositories(org.id, { q, limit: LISTED }),
-    { keepPreviousData: true, shouldRetryOnError: false },
+    { keepPreviousData: true },
   )
 
   if (app.error instanceof ApiError && app.error.reason === GITHUB_NOT_CONFIGURED) {

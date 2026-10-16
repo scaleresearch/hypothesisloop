@@ -27,18 +27,11 @@ function nameOf(draft: ExperimentDraft): string {
 export function ExperimentDrafts({ onOpen }: { onOpen: (draft: ExperimentDraft) => void }) {
   const { project } = useTenant()
   const { data, error, mutate } = useSWR(['experiment-drafts', project.id], () => fetchExperimentDrafts(project.id))
-  const [deleteError, setDeleteError] = useState('')
   const [deleting, setDeleting] = useState<ExperimentDraft | null>(null)
 
   async function drop(draft: ExperimentDraft) {
-    setDeleting(null)
-    setDeleteError('')
-    try {
-      await deleteExperimentDraft(project.id, draft.id)
-      await mutate()
-    } catch (e) {
-      setDeleteError(e instanceof Error ? e.message : String(e))
-    }
+    await deleteExperimentDraft(project.id, draft.id)
+    await mutate()
   }
 
   if (error) return <ErrorMessage>Could not load the drafts of {project.name}: {error.message}</ErrorMessage>
@@ -57,16 +50,17 @@ export function ExperimentDrafts({ onOpen }: { onOpen: (draft: ExperimentDraft) 
             <Button size="sm" variant="ghost" onClick={() => setDeleting(draft)}>Delete</Button>
           </Inline>
         ))}
-        {deleteError && <InlineError>Could not delete the draft: {deleteError}</InlineError>}
-        <ConfirmDialog
-          open={deleting !== null}
-          title="Delete this draft?"
-          confirmLabel="Delete draft"
-          onConfirm={() => deleting && void drop(deleting)}
-          onCancel={() => setDeleting(null)}
-        >
-          {deleting && `"${nameOf(deleting)}" and everything typed in it are deleted. Nothing was created from it.`}
-        </ConfirmDialog>
+        {deleting && (
+          <ConfirmDialog
+            open
+            title="Delete this draft?"
+            confirmLabel="Delete draft"
+            onConfirm={() => drop(deleting)}
+            onClose={() => setDeleting(null)}
+          >
+            {`"${nameOf(deleting)}" and everything typed in it are deleted. Nothing was created from it.`}
+          </ConfirmDialog>
+        )}
       </Stack>
     </Section>
   )

@@ -27,6 +27,7 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Table, num } from '@/components/ui/table'
 import { Code, Eyebrow, Text } from '@/components/ui/text'
+import { errorMessage } from '@/lib/errors'
 
 const NEW_ROW: PoolRow = { agent_type: DEFAULT_AGENT_TYPE, model: '', count: '1' }
 
@@ -103,7 +104,7 @@ function PoolEditor({ pe, atWork, onDone }: { pe: PlatformExperiment; atWork: Jo
       await mutate(['pe-agents', pe.id])
       onDone()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(errorMessage(e))
     } finally {
       setBusy(false)
     }
@@ -156,7 +157,7 @@ function PoolEditor({ pe, atWork, onDone }: { pe: PlatformExperiment; atWork: Jo
                     aria-label={`Pool entry ${i + 1} count`}
                     onChange={e => setRow(i, { count: e.target.value })}
                   />
-                  <Button type="button" variant="ghost" size="icon" title="Remove this entry" onClick={() => setRows(rows.filter((_, idx) => idx !== i))}>×</Button>
+                  <Button type="button" variant="ghost" size="icon" aria-label={`Remove pool entry ${i + 1}`} title="Remove this entry" onClick={() => setRows(rows.filter((_, idx) => idx !== i))}>×</Button>
                   <Text variant="hint" className="col-span-4 mb-1">
                     {type ? describeType(type) : ''}{working > 0 && ` ${working} at work.`}
                   </Text>

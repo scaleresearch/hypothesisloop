@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/input'
 import { Inline } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
+import { errorMessage } from '@/lib/errors'
 
 const ASK = 'What do you want to find out?'
 const PLACEHOLDER = `${ASK} For example: does a cosine learning-rate schedule beat a constant one for train.py, judged by validation loss?`
@@ -67,7 +68,7 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
       if (hostingReason) {
         setRefused(hostingReason)
         void hosting.mutate()
-      } else setError(e instanceof Error ? e.message : String(e))
+      } else setError(errorMessage(e))
       setSending(false)
     }
   }
@@ -78,7 +79,7 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
     try {
       onConfigure(await formDraftFromGoal(projectID, goal.trim(), repository))
     } catch (e) {
-      setError(`Could not save your text as a draft: ${e instanceof Error ? e.message : String(e)}`)
+      setError(`Could not save your text as a draft: ${errorMessage(e)}`)
     }
     setMoving(false)
   }

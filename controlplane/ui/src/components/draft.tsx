@@ -20,9 +20,9 @@ import { Page } from '@/components/ui/page'
 import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
+import { errorMessage } from '@/lib/errors'
 import { Text } from '@/components/ui/text'
 
-const said = (error: unknown) => (error instanceof Error ? error.message : String(error))
 function Revise({ draft, declined, onDone }: { draft: Draft; declined: boolean; onDone: () => void }) {
   const [message, setMessage] = useState('')
   const [sending, setSending] = useState(false)
@@ -38,7 +38,7 @@ function Revise({ draft, declined, onDone }: { draft: Draft; declined: boolean; 
       setMessage('')
       onDone()
     } catch (e) {
-      setError(said(e))
+      setError(errorMessage(e))
     }
     setSending(false)
   }
@@ -78,21 +78,14 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
   const router = useRouter()
   const { project } = useTenant()
   const { mutate } = useSWRConfig()
-  const [abandonError, setAbandonError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
   const state = reasonOf(draft).reason
   const reread = () => void mutate(['pe', draft.id])
   const revise = !readOnly && (state === 'proposed' || state === 'accepting' || state === 'declined') && <Revise draft={draft} declined={state === 'declined'} onDone={reread} />
 
   async function abandon() {
-    setConfirming(false)
-    setAbandonError(null)
-    try {
-      await abandonDraft(draft.id)
-      reread()
-    } catch (e) {
-      setAbandonError(said(e))
-    }
+    await abandonDraft(draft.id)
+    reread()
   }
 
   return (
@@ -133,8 +126,7 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
       {!readOnly && (
         <Inline gap="md">
           <Button variant="ghost" onClick={() => setConfirming(true)}>Abandon this draft</Button>
-          {abandonError && <InlineError>{abandonError}</InlineError>}
-          <ConfirmDialog open={confirming} title="Abandon this draft?" confirmLabel="Abandon draft" onConfirm={() => void abandon()} onCancel={() => setConfirming(false)}>
+          <ConfirmDialog open={confirming} title="Abandon this draft?" confirmLabel="Abandon draft" onConfirm={abandon} onClose={() => setConfirming(false)}>
             Planning stops and the draft closes. Nothing ran, so nothing is charged, and what you asked stays readable here.
           </ConfirmDialog>
         </Inline>

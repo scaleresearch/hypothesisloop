@@ -16,6 +16,7 @@ import { Stack } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
 import { Steps } from '@/components/ui/steps'
 import { Text } from '@/components/ui/text'
+import { errorMessage } from '@/lib/errors'
 
 
 const STEPS = [
@@ -45,7 +46,7 @@ function SetUpMyself({ pe }: { pe: Draft }) {
       const form = await formDraftFromGoal(project.id, pe.goal ?? '', pe.repository ?? '')
       router.push(`${projectPath(project.id, 'experiments')}?draft=${form.id}`)
     } catch (e) {
-      setError(`Could not open the form: ${e instanceof Error ? e.message : String(e)}`)
+      setError(`Could not open the form: ${errorMessage(e)}`)
       setMoving(false)
     }
   }

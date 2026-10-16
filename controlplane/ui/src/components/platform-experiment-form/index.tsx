@@ -24,6 +24,7 @@ import { StepWhat } from '@/components/platform-experiment-form/step-what'
 import type { FileNote } from '@/components/platform-experiment-form/step-what'
 import { StepMeasure } from '@/components/platform-experiment-form/step-measure'
 import { StepBudget } from '@/components/platform-experiment-form/step-budget'
+import { errorMessage } from '@/lib/errors'
 
 interface FormProps {
   /** The experiment to edit. Without one the form creates one in the selected project. */
@@ -119,7 +120,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
     try {
       await keepDraft(step, failure)
     } catch (err: unknown) {
-      setError(`Could not save the draft: ${said(err)}`)
+      setError(`Could not save the draft: ${errorMessage(err)}`)
     } finally {
       setSavingDraft(false)
     }
@@ -135,7 +136,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
       settled.current = true
       onCancel?.()
     } catch (err: unknown) {
-      setError(`Could not keep what you typed as a draft, so the form stays open: ${said(err)}`)
+      setError(`Could not keep what you typed as a draft, so the form stays open: ${errorMessage(err)}`)
       setSavingDraft(false)
     }
   }
@@ -185,7 +186,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
       setFromFile({ repository, state: 'filled', filled })
     } catch (err: unknown) {
       if (err instanceof ApiError && err.reason === NO_EXPERIMENT_FILE) return setFromFile({ repository, state: 'none' })
-      setFromFile({ repository, state: 'failed', message: said(err) })
+      setFromFile({ repository, state: 'failed', message: errorMessage(err) })
     }
   }
 
@@ -253,7 +254,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
       onSaved(experiment, true)
     } catch (err: unknown) {
       if (isEdit) {
-        setError(said(err))
+        setError(errorMessage(err))
         return
       }
       // A refused create keeps what was typed, as a draft that names why, at the step of its first problem.
@@ -264,7 +265,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
       try {
         await keepDraft(at, problems.map(p => p.message).join(' '))
       } catch (unkept: unknown) {
-        setError(`Could not save the draft: ${said(unkept)}`)
+        setError(`Could not save the draft: ${errorMessage(unkept)}`)
       }
     } finally {
       setSubmitting(false)
@@ -321,14 +322,10 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
 
 // Every problem a refusal names: the several of a check that found more than one, or the one.
 function problemsOf(error: unknown): Problem[] {
-  if (!(error instanceof ApiError)) return [{ message: said(error) }]
+  if (!(error instanceof ApiError)) return [{ message: errorMessage(error) }]
   const listed = error.body?.problems
   if (Array.isArray(listed) && listed.length > 0) return listed as Problem[]
   return [{ reason: error.reason, message: error.message }]
-}
-
-function said(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 /** The form in a dialog, which closes once the experiment is saved. Escape and a click outside leave it as Cancel does. */

@@ -21,6 +21,7 @@ import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, InlineError } from '@/components/ui/status-message'
 import { Code, Pill, Text } from '@/components/ui/text'
+import { errorMessage } from '@/lib/errors'
 
 type Stated = 'name' | 'budget' | 'baseline' | 'hours' | 'researchers'
 
@@ -98,7 +99,7 @@ function Countdown({ draft, accept, sending, onDone }: { draft: Draft; accept: (
       await (which === 'edit' ? holdDraft(draft.id) : abandonDraft(draft.id))
       onDone()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(errorMessage(e))
       setActing(null)
     }
   }
@@ -172,7 +173,7 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
     } catch (e) {
       const field = e instanceof ApiError && e.reason ? FIELD_OF[e.reason] : undefined
       if (field) setRefusal({ field, message: (e as ApiError).message })
-      else setError(e instanceof Error ? e.message : String(e))
+      else setError(errorMessage(e))
       setSending(false)
     }
   }
