@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useSWRConfig } from 'swr'
 import { formatDate, relTime } from '@/lib/format'
-import { abandonDraft, reviseDraft } from '@/lib/planning'
+import { PLANNING_MOVES, abandonDraft, reviseDraft } from '@/lib/planning'
 import type { Draft } from '@/lib/planning'
 import { reasonOf } from '@/lib/phase'
 import { useRouter } from 'next/navigation'
@@ -22,7 +22,6 @@ import { InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 
 const said = (error: unknown) => (error instanceof Error ? error.message : String(error))
-
 function Revise({ draft, declined, onDone }: { draft: Draft; declined: boolean; onDone: () => void }) {
   const [message, setMessage] = useState('')
   const [sending, setSending] = useState(false)
@@ -97,7 +96,7 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
     <Page
       back={{ label: 'Experiments', onClick: () => router.push(projectPath(project.id, 'experiments')) }}
       title={draft.name}
-      description={<Text as="span" variant="hint">Draft, {state === 'proposed' || state === 'declined' ? 'waiting for you' : state === 'accepting' ? 'starting in a moment' : 'being planned'}</Text>}
+      description={<Text as="span" variant="hint">Draft, {state === 'proposed' || state === 'declined' ? 'waiting for you' : state === 'accepting' ? 'starting in a moment' : PLANNING_MOVES.has(state) ? 'being planned' : 'planning on hold'}</Text>}
     >
       <PhaseStrip pe={draft} readOnly={readOnly} />
       <Section title="What you asked">

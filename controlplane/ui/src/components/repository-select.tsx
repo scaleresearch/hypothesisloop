@@ -135,7 +135,7 @@ export function RepositorySelect({ value, onChange, compact = false }: {
     )
   }
 
-  const newLabel = compact ? 'New private repo' : 'A new private repository'
+  const newLabel = compact ? 'New private repository' : 'A new private repository'
   const listed = data?.items ?? []
   const more = (data?.total ?? 0) - listed.length
   // What is chosen stays an option while a search leaves it out.
@@ -162,12 +162,12 @@ export function RepositorySelect({ value, onChange, compact = false }: {
     <>
       <SearchableSelect
         fieldSize="default"
-        className={compact ? 'w-56' : 'w-full'}
+        className={compact ? 'w-80 max-w-full' : 'w-full'}
         value={value}
         onChange={onChange}
         onSearch={setQ}
         allLabel={unaskedLabel}
-        placeholder={createsUnasked ? unaskedLabel : compact ? 'Choose a repo' : 'Choose a repository'}
+        placeholder={createsUnasked ? unaskedLabel : 'Choose a repository'}
         hideAllOption={!createsUnasked}
         options={options}
         hint={more > 0 ? `${more} more, type to search` : undefined}

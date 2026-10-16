@@ -10,9 +10,10 @@ import type { Draft } from '@/lib/planning'
 import { useRoster } from '@/lib/roster'
 import { ExperimentStatus } from '@/types'
 import type { Experiment, JoinedAgent, StatusReason } from '@/types'
-import { AgentAtWork, PlannerAtWork } from '@/components/agent-at-work'
+import { AgentAtWork } from '@/components/agent-at-work'
 import { AGENTS_CARD } from '@/components/experiment-agents'
 import { JobReason } from '@/components/job-reason'
+import { PlanningProgress } from '@/components/planning-progress'
 import { PlatformExperimentDialog } from '@/components/platform-experiment-form'
 import { ProposalForm } from '@/components/proposal-form'
 import { RunProgress } from '@/components/run-progress'
@@ -119,7 +120,7 @@ export function PhaseStrip({ pe, jobs = [], stages, readOnly = false, children }
           open={pastProposal ? ['proposal'] : []} shown={showProposal ? 'proposal' : undefined} onOpen={() => setShowProposal(shown => !shown)}
         />
         {phase === 'running' && pe.started_at && stages && stages.stages.length > 0 && <RunProgress status={stages} />}
-        {!who ? why : who === 'owner' ? (
+        {phase === 'planning' ? <PlanningProgress pe={pe} planner={planner} readOnly={readOnly} /> : !who ? why : who === 'owner' ? (
           <Callout tone="warning" className="grid justify-items-start gap-1.5">
             <Eyebrow tone="warning">Your move</Eyebrow>
             {why}
@@ -128,12 +129,11 @@ export function PhaseStrip({ pe, jobs = [], stages, readOnly = false, children }
         ) : (
           <div>
             {why}
-            {phase !== 'planning' && <Text variant="note">Nothing is needed from you: {NEXT_IS[who]}.</Text>}
+            <Text variant="note">Nothing is needed from you: {NEXT_IS[who]}.</Text>
           </div>
         )}
-        {operatorDetail && <Text variant="note">Operator: {operatorDetail}</Text>}
+        {phase !== 'planning' && operatorDetail && <Text variant="note">Operator: {operatorDetail}</Text>}
         {children}
-        {phase === 'planning' && <PlannerAtWork agent={planner} activity={pe.activity} />}
         {phase === 'baseline' && baseline && (
           <InsetCard role="group" aria-label="Baseline agent">
             <Eyebrow>Baseline agent {baseline.name}</Eyebrow>

@@ -60,13 +60,15 @@ export const OWNER_ACTIONS: Record<string, OwnerAction | null> = {
   researchers_done: null,
 }
 
-/** The one place that says which phase an experiment is in, from its status and its status_reason. */
-export function phaseOf(pe: Stated): Phase {
+/**
+ * The one place that says which phase an experiment is in, from its status and its status_reason.
+ * A draft is at its proposal while one stands or its planner declined, and planning otherwise,
+ * also while something the platform runs holds planning up (launcher_unreachable).
+ */
+export function phaseOf(pe: Stated & { proposed_at?: string }): Phase {
   switch (pe.status) {
-    case PlatformExperimentStatus.DRAFT: {
-      const { reason } = reasonOf(pe)
-      return reason === 'planning' || reason === 'revising' || reason === 'repository_creating' ? 'planning' : 'proposal'
-    }
+    case PlatformExperimentStatus.DRAFT:
+      return pe.proposed_at || reasonOf(pe).reason === 'declined' ? 'proposal' : 'planning'
     case PlatformExperimentStatus.OPEN: return 'baseline'
     case PlatformExperimentStatus.RUNNING: return 'running'
     case PlatformExperimentStatus.CLOSED: return 'closed'

@@ -38,38 +38,6 @@ export function Activity({ activity, prominent = false, className }: { activity:
   )
 }
 
-const PLANNER_STEPS = [
-  { key: 'requested', label: 'Finding a machine' },
-  { key: 'starting', label: 'Starting the planner' },
-  { key: 'running', label: 'Planning' },
-]
-
-/** Where a draft's planner stands, in the person's words. Undefined when its own sentence says enough. */
-export function plannerSentence(instance: AgentInstance | undefined, saidSomething: boolean): string | undefined {
-  if (!instance) return 'Finding a machine for the planner.'
-  const restart = instance.restarts > 0 ? ` (restart ${instance.restarts})` : ''
-  switch (instance.state) {
-    case 'requested': return restart ? `The planner's machine ended. Finding another${restart}.` : 'Finding a machine for the planner.'
-    case 'starting': return restart ? `The planner's machine ended. Starting another${restart}.` : 'Starting the planner, usually about a minute.'
-    case 'running': return restart ? `The planner is back at work${restart}.` : saidSomething ? undefined : 'The planner is at work.'
-    case 'stopped': return instance.end_reason === 'released' ? 'The planner is done.' : 'The planner stopped and is not started again.'
-    default: return machineSentence(instance)
-  }
-}
-
-/** A draft's planner: what it says it is doing, first and largest, then where it stands. */
-export function PlannerAtWork({ agent, activity }: { agent: JoinedAgent | undefined; activity?: AgentActivity }) {
-  const instance = agent?.instance
-  const sentence = agent?.finished_at ? `${agent.name} finished: ${agent.finished_reason}` : plannerSentence(instance, !!activity)
-  return (
-    <Stack gap="sm">
-      {activity && <Activity activity={activity} prominent />}
-      <Steps label="Machine" steps={PLANNER_STEPS} current={instance?.state ?? 'requested'} live />
-      {sentence && <Text variant="note" aria-live="polite">{sentence}</Text>}
-    </Stack>
-  )
-}
-
 /**
  * The one agent a phase waits for, a draft's planner or the baseline agent: where its machine
  * stands, as its launcher reported it, and what the agent says it is doing. `activity` is the

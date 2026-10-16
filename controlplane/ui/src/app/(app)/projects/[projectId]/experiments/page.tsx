@@ -164,7 +164,7 @@ function PlatformExperimentsPageContent() {
       {/* The box draws no edge of its own; the card is its edge, and darkens while the box has focus. */}
       <Card className="mb-7 transition-colors focus-within:border-border-control">
         <div ref={planning}>
-          <GoalInput projectID={project.id} onCreated={open} />
+          <GoalInput projectID={project.id} onCreated={open} onConfigure={draft => setDialog({ editing: null, draft })} />
         </div>
         {clusters && clustersInUse(clusters).online === 0 && (
           <Text variant="note" className="border-t px-6 py-3">

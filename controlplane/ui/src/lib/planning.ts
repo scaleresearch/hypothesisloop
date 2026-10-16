@@ -1,5 +1,6 @@
-import { apiSend } from '@/lib/api'
-import type { Actor, AgentActivity, MetricDefinition, PlatformExperiment } from '@/types'
+import { ApiError, apiSend, createExperimentDraft } from '@/lib/api'
+import type { ExperimentDraft } from '@/lib/api'
+import type { Actor, AgentActivity, MetricDefinition, PlatformExperiment, StatusReason } from '@/types'
 
 /** One researcher of a proposal or of an acceptance. */
 export interface ProposedAgent {
@@ -103,8 +104,22 @@ export interface Acceptance {
 
 export const MAX_GOAL_LENGTH = 2000
 
+// The reasons of a draft being planned that move on by themselves. Any other holds planning up.
+export const PLANNING_MOVES = new Set(['planning', 'revising', 'repository_creating'])
+
+/** Why hosting is unavailable, when the API refused a create for it (503 with a status reason as its body). */
+export function hostingRefusal(error: unknown): StatusReason | null {
+  if (!(error instanceof ApiError) || error.status !== 503 || typeof error.body?.summary !== 'string') return null
+  return error.body as unknown as StatusReason
+}
+
 export function createDraft(projectID: string, goal: string, repository: { repository?: string; repository_account?: string } = {}): Promise<Draft> {
   return apiSend<Draft>('POST', '/platform-experiments/drafts', { project_id: projectID, goal, ...repository })
+}
+
+/** Keeps a goal as a saved draft of the full form, its brief, for a person who sets the experiment up themselves. */
+export function formDraftFromGoal(projectID: string, goal: string, repository: string): Promise<ExperimentDraft> {
+  return createExperimentDraft(projectID, { form: { description: goal, repository }, step: '1', failure: '' })
 }
 
 export function reviseDraft(id: string, message: string): Promise<Draft> {
