@@ -23,7 +23,7 @@ func summarize(why *domain.StatusReason, pe *domain.PlatformExperiment, signups 
 	sentence := map[string]func() string{
 		reasonLauncherUnreachable: func() string {
 			if pe.Status == domain.PlatformExpDraft {
-				return "Planning can't start right now. Your brief is saved."
+				return "Planning waits for the agent launcher."
 			}
 			return why.Summary
 		},
@@ -42,7 +42,7 @@ func summarize(why *domain.StatusReason, pe *domain.PlatformExperiment, signups 
 			return "The plan is ready and starts as proposed in " + in(*pe.AcceptsAt) + ". Accept, edit or reject it before then."
 		},
 		"proposed": func() string {
-			return "The plan is ready. Nothing runs or is spent until you accept it, and it expires in " + in(pe.ProposalExpiresAt) + "."
+			return "The plan is ready and waits for your accept. It expires in " + in(pe.ProposalExpiresAt) + "."
 		},
 		"declined": func() string {
 			return "The planner couldn't propose an experiment and says what it needs. Revise the goal or close it; it closes by itself in " + in(pe.ProposalExpiresAt) + "."
@@ -91,7 +91,7 @@ func summarize(why *domain.StatusReason, pe *domain.PlatformExperiment, signups 
 			return "The baseline is ready, but there is no researcher to run. Add a researcher and the run starts."
 		},
 		"budget_spent": func() string {
-			return "Measuring the baseline used the whole budget, so nothing is left for researchers. Raise the budget to start the run."
+			return "Measuring the baseline used the whole budget. Raise the budget to start the run."
 		},
 		"starting": func() string { return "Everything is ready. The run starts within a minute." },
 
@@ -103,35 +103,35 @@ func summarize(why *domain.StatusReason, pe *domain.PlatformExperiment, signups 
 			return "No researcher is left to submit jobs. " + next("add a researcher, or write the summary and close the experiment") + " It closes by itself in " + in(pe.EndsAt) + "."
 		},
 
-		string(domain.CloseEndTimeReached): func() string { return "It reached its end time." },
+		string(domain.CloseEndTimeReached): func() string { return "Closed: it reached its end time." },
 		string(domain.CloseByRequest): func() string {
 			who := "its owner"
 			if pe.ClosedBy != nil && pe.ClosedBy.Name != "" {
 				who = pe.ClosedBy.Name
 			}
 			if said := strings.Join(strings.Fields(pe.CloseMessage), " "); said != "" {
-				return fmt.Sprintf("Closed early by %s, who said: %q", who, said)
+				return fmt.Sprintf("Closed by %s: %q", who, said)
 			}
-			return "Closed early by " + who + "."
+			return "Closed by " + who + "."
 		},
-		string(domain.ClosePlanningLimitReached): func() string { return "It never ran: the planner proposed nothing in time." },
-		string(domain.CloseProposalExpired):      func() string { return "It never ran: nobody accepted or revised the plan in time." },
+		string(domain.ClosePlanningLimitReached): func() string { return "Closed: the planner proposed nothing in time." },
+		string(domain.CloseProposalExpired):      func() string { return "Closed: nobody accepted or revised the plan in time." },
 		string(domain.CloseBaselineLimitReached): func() string {
 			if pe.BaselineJobID != "" {
-				return "It never ran: the baseline was ready, but no researcher or budget was there to start the run in time."
+				return "Closed: the baseline was ready, but no researcher or budget started the run in time."
 			}
-			return "It never ran: no baseline was measured in time."
+			return "Closed: no baseline was measured in time."
 		},
 		string(domain.ClosePlannerStopped): func() string {
-			return "It never ran: the planner's machine kept failing before it answered. Nothing was spent; create it again to retry."
+			return "Closed: the planner's machine failed before it answered."
 		},
 		string(domain.CloseAgentsNotStarted): func() string {
-			return "It closed because no researcher's machine started in time. Each agent's details say why its machine didn't come up."
+			return "Closed: no researcher's machine started in time."
 		},
 		string(domain.CloseRepositoryNotCreated): func() string {
-			return "It never ran: its repository couldn't be created, and nothing was spent. GitHub said: " + pe.RepositoryError
+			return "Closed: its repository couldn't be created: " + pe.RepositoryError
 		},
-		"closed": func() string { return "It closed before the platform recorded why." },
+		"closed": func() string { return "Closed before the platform recorded why." },
 	}
 	say, known := sentence[why.Reason]
 	if !known {

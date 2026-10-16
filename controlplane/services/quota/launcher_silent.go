@@ -74,17 +74,17 @@ func launcherSilence(name string, contact db.LauncherContact, now time.Time, sta
 	switch {
 	case at == nil:
 		why.Message = fmt.Sprintf("launcher %s has not checked in since it was registered", name)
-		why.Summary = "Agents can't start yet. They start automatically once they can."
+		why.Summary = "Agents wait for the agent launcher, which has not checked in yet."
 		silence = "has never checked in"
 	case now.Sub(*at) > launcherSilentAfter:
 		ago := readableDuration(now.Sub(*at))
 		why.Message = fmt.Sprintf("launcher %s last checked in %s ago", name, ago)
-		why.Summary = "Agents are paused and will resume automatically."
+		why.Summary = "Agents are paused: the agent launcher stopped checking in."
 		silence = "last checked in " + ago + " ago"
 	default:
 		return nil
 	}
-	why.Message += ", so none of its machines starts or is watched until it checks in again. Deadlines keep running, and only the platform's operator brings the launcher (agent-launcher) back"
+	why.Message += ", so none of its machines starts or is watched until it checks in again"
 	if staff {
 		why.OperatorDetail = fmt.Sprintf("The agent-launcher registered as %q %s. Start it or check its logs (on a dev stack: make dev-hosted).", name, silence)
 		if contact.AgentVersion != "" {
@@ -171,7 +171,7 @@ func (s *PlatformExperimentsService) hosting(ctx context.Context, launcher strin
 		return Hosting{Available: true}, nil
 	}
 	why.Message = "nothing can be hosted now: " + why.Message
-	why.Summary = "Hosted agents aren't available right now. They become available automatically."
+	why.Summary = "Hosted agents are unavailable: the agent launcher is not checking in."
 	return Hosting{Unavailable: why}, nil
 }
 

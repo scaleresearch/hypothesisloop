@@ -158,7 +158,7 @@ const reasonInstanceStarting = "instance_starting"
 // waited for a run that never started: no machine was asked for it and it took no turn.
 func neverLaunched(why *domain.StatusReason) *domain.StatusReason {
 	return &domain.StatusReason{Reason: "never_launched", Message: "it never took a turn and no machine was asked for it: its platform experiment closed before the run started, with close_reason " + why.Reason + ": " + why.Message,
-		Summary: "It never started: the experiment closed before the run began."}
+		Summary: "Never started: the experiment closed before the run."}
 }
 
 // instanceStarting is the status_reason of a hosted agent whose run goes on and whose machine is
@@ -176,7 +176,7 @@ func instanceStarting(signup domain.AgentSignup, now time.Time) *domain.StatusRe
 	where, summary := "its machine is asked of its launcher at the launcher's next pass", "Its machine is being requested."
 	if instance.Name != "" && instance.AskedAt != nil {
 		ago := readableDuration(now.Sub(*instance.AskedAt))
-		where, summary = "its machine was asked for "+ago+" ago and its launcher has not listed it yet", "Its machine was requested "+ago+" ago and is on its way."
+		where, summary = "its machine was asked for "+ago+" ago and its launcher has not listed it yet", "Its machine was requested "+ago+" ago and is not listed yet."
 		if state == domain.InstanceStarting {
 			where, summary = "its machine was asked for "+ago+" ago and is starting", "Its machine is starting (requested "+ago+" ago)."
 		}

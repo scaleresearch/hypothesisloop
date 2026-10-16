@@ -990,9 +990,9 @@ func (s *PlatformExperimentsService) closedReason(ctx context.Context, pe *domai
 		domain.CloseRemoved:              closer + " removed it",
 		domain.ClosePlanningLimitReached: "its planner answered nothing by planning_ends_at and the platform closed the draft",
 		domain.CloseProposalExpired:      "no person accepted or revised its planner's answer by proposal_expires_at and the platform closed the draft",
-		domain.ClosePlannerStopped:       "its planner's machine ended before it answered and the platform had restarted it as often as it restarts one, so it closed the draft: the planner's instance in the roster says how the last machine ended (end_reason, exit_log). Nothing was spent on a run, and the same goal makes a new draft",
-		domain.CloseAgentsNotStarted:     "it started and no researcher's machine was running by agents_due_at, so the platform closed it. No researcher took a turn: read each agent's instance for why its machine did not come up, and create it again",
-		domain.CloseRepositoryNotCreated: "the platform could not create its repository, so none of its machines started and nothing was spent. Create it again, or name a repository. GitHub answered: " + pe.RepositoryError,
+		domain.ClosePlannerStopped:       "its planner's machine ended before it answered and the platform had restarted it as often as it restarts one, so it closed the draft: the planner's instance in the roster says how the last machine ended (end_reason, exit_log)",
+		domain.CloseAgentsNotStarted:     "it started and no researcher's machine was running by agents_due_at, so the platform closed it. Each agent's instance says why its machine did not come up",
+		domain.CloseRepositoryNotCreated: "the platform could not create its repository, so none of its machines started. GitHub answered: " + pe.RepositoryError,
 	}
 	if pe.CloseReason == domain.CloseBaselineLimitReached {
 		submitted, err := s.jobsSubmitted(ctx, pe.ID)
