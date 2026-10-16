@@ -52,7 +52,7 @@ export interface StatusReason {
   summary: string
   // What the platform's operator checks: only in answers to staff.
   operator_detail?: string
-  // When the condition began, where known (a launcher's last check-in).
+  // When the condition began, where known.
   since?: string
   waits_for?: 'owner' | 'coordinator' | 'platform'
 }

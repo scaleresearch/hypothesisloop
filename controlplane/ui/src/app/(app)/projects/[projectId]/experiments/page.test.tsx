@@ -161,12 +161,12 @@ describe('the experiments page', () => {
   })
 
   it('says why a sentence was refused, and that no cluster is online, and stays', async () => {
-    vi.mocked(apiSend).mockRejectedValue(new Error('no launcher is registered, so nothing would run the planner'))
+    vi.mocked(apiSend).mockRejectedValue(new Error('hosting_not_configured: this deployment has no sandbox provider to run hosted machines on'))
     show()
     expect(await screen.findByText(/^No compute is online yet\./)).toBeTruthy()
     await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'goal')
     await userEvent.click(screen.getByRole('button', { name: 'Plan it' }))
-    expect(await screen.findByText(/no launcher is registered/)).toBeTruthy()
+    expect(await screen.findByText(/no sandbox provider to run hosted machines on/)).toBeTruthy()
     expect(navigation.push).not.toHaveBeenCalled()
   })
 

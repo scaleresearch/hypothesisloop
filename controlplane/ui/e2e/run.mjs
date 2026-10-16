@@ -97,7 +97,7 @@ const addsAgent = url => url.origin === API && /^\/platform-experiments\/[^/]+\/
 async function newContext(browser) {
   const context = await browser.newContext(VIEW)
   // The form creates every experiment for the platform to run: a hosted coordinator, then one
-  // hosted agent a call, each a machine a launcher would rent. The stack rents nothing, so the
+  // hosted agent a call, each a machine the platform would rent. The stack rents nothing, so the
   // coordinator is taken out of the create and a hosted agent is answered without reaching the
   // API. A scenario that asserts on these writes routes them on its page, which comes first.
   await context.route(creates, route => {
@@ -529,9 +529,9 @@ async function scenarios(browser) {
   assert.equal(await agentRows.count(), 2)
 
   section('a hosted agent the platform refuses is not listed, and the page says why')
-  // The real API would take this one and a launcher would rent for it. The refusal is stood in for: what a deployment
-  // with no launcher registered answers. Nothing reaches the API.
-  const refusedHosting = { reason: 'launcher_not_registered', message: 'no launcher named main is registered: nothing can be hosted until hl-admin launcher add main' }
+  // The real API would take this one and rent for it. The refusal is stood in for: what a deployment
+  // with no sandbox provider in its settings answers. Nothing reaches the API.
+  const refusedHosting = { reason: 'hosting_not_configured', message: 'hosting_not_configured: this deployment has no sandbox provider to run hosted machines on', summary: 'Hosted agents are not available on this platform.' }
   const hostedAddURL = `${API}/platform-experiments/${experimentID}/agents`
   const refuseHosted = route => route.request().method() === 'POST'
     ? route.fulfill({ status: 503, headers: { 'access-control-allow-origin': UI }, json: refusedHosting })
@@ -541,7 +541,7 @@ async function scenarios(browser) {
   await page.getByRole('button', { name: 'The platform' }).click()
   await page.getByRole('button', { name: 'Add agent' }).click()
   assert.deepEqual((await hostedAdd).request().postDataJSON().hosted, true, 'the agent was asked for hosted')
-  const hostedRefusal = page.locator('.error-banner', { hasText: 'no launcher named main is registered' })
+  const hostedRefusal = page.locator('.error-banner', { hasText: 'Hosted agents are not available on this platform.' })
   await hostedRefusal.waitFor()
   await page.unroute(hostedAddURL, refuseHosted)
   assert.equal(await agentRows.count(), 2, 'the refused agent is not listed')
@@ -555,7 +555,7 @@ async function scenarios(browser) {
   assert.equal((await api(agentToken, `/platform-experiments/${experimentID}`)).status, 401, 'the same request is refused once the agent is removed')
 
   section('a hosted agent shows what became of its machine')
-  // Stood in for: an agent the platform really hosts needs a repository and a launcher that rents.
+  // Stood in for: an agent the platform really hosts needs a repository and a sandbox provider that rents.
   const agentsAPI = `${API}/platform-experiments/${experimentID}/agents`
   const signedUp = { platform_experiment_id: experimentID, role: 'competitor', hosted: true, flavor: 'generalist', model: 'stand-in-model', signed_up_at: new Date().toISOString() }
   await page.route(agentsAPI, route => route.request().method() === 'GET'
@@ -616,8 +616,8 @@ async function scenarios(browser) {
   assert.equal((await (await api(await tokenOf(ada), `/platform-experiments/${homeExperimentID}`)).json()).status, 'open', 'it waits for its baseline')
 
   section('home: Create experiment composes create and one call an agent, and nothing is rented')
-  // The stack has no GitHub account connected, and an agent the platform really hosts has a
-  // launcher rent for it. So the repository list is stood in for, and each write goes to
+  // The stack has no GitHub account connected, and an agent the platform really hosts is
+  // rented for. So the repository list is stood in for, and each write goes to
   // the real API with what would rent taken out of it: the repository and the hosted coordinator
   // from the create, and hosted from each agent, which then joins as one its operator runs. What
   // the page sent is asserted as sent, and what exists afterwards is asserted from the real API.

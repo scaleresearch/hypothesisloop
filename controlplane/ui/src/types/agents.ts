@@ -53,7 +53,6 @@ export interface AgentInstance {
 
 // The coordinator the platform runs for a platform experiment. Mirrors domain.HostedCoordinator.
 export interface HostedCoordinator {
-  launcher: string
   model: string
   instance: AgentInstance
   // Absent on a coordinator that has not reported yet.

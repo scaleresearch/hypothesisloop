@@ -63,7 +63,7 @@ export const OWNER_ACTIONS: Record<string, OwnerAction | null> = {
 /**
  * The one place that says which phase an experiment is in, from its status and its status_reason.
  * A draft is at its proposal while one stands or its planner declined, and planning otherwise,
- * also while something the platform runs holds planning up (launcher_unreachable).
+ * also while something the platform runs holds planning up.
  */
 export function phaseOf(pe: Stated & { proposed_at?: string }): Phase {
   switch (pe.status) {
