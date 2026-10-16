@@ -146,9 +146,9 @@ class BeatInTheRunLoopTest(unittest.IsolatedAsyncioTestCase):
     async def test_the_run_loop_prints_markers_while_a_turn_is_alive_and_none_once_it_is_silent_too_long(self):
         printed = []
         beating = progress.Progress(quiet_limit_s=0.15, emit=printed.append)
-        setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
+        setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                                 client=SimpleNamespace(get_signup=lambda *_: {}),
-                                cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", role="competitor", api_url="http://x", token=AGENT_TOKEN,
+                                cfg=SimpleNamespace(agent_id="agent-a", role="researcher", api_url="http://x", token=AGENT_TOKEN,
                                                     platform_experiment_id="pe-1"))
         with mock.patch.object(run, "ClaudeSDKClient", SilentClient), \
                 mock.patch.object(run, "_progress", beating), \
@@ -158,7 +158,7 @@ class BeatInTheRunLoopTest(unittest.IsolatedAsyncioTestCase):
                 mock.patch.object(run, "_live_session_id", None), \
                 mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": tempfile.mkdtemp()}), \
                 contextlib.redirect_stdout(io.StringIO()):
-            task = asyncio.ensure_future(run._run(setup, "m"))
+            task = asyncio.ensure_future(run._run(setup))
             await asyncio.sleep(0.1)
             alive = len(printed)
             await asyncio.sleep(0.3)
@@ -205,13 +205,6 @@ class StreamedCallTest(unittest.IsolatedAsyncioTestCase):
                 if isinstance(message, AssistantMessage):
                     waited.append(awaited.waited())
         self.assertEqual(waited, [100, 60])
-
-
-class EffortTest(unittest.TestCase):
-    def test_a_baseline_agent_and_a_planner_think_at_medium_and_every_other_role_at_high(self):
-        for role, effort in {"baseline": "medium", "planner": "medium", "competitor": "high", "": "high"}.items():
-            flavor = "planner" if role == "planner" else "generalist"
-            self.assertEqual(run._effort(SimpleNamespace(role=role, flavor=flavor)), effort, role)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import signal
@@ -10,81 +9,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from hypothesisloop_agent import api_client, config, outage
+from hypothesisloop_agent import api_client, config, instructions, outage, prompt
 
 log = logging.getLogger("llm_agent")
 
-# One briefing for every flavor. It names hl's commands and repeats neither the
-# platform's rules nor hl's command listing: both are spliced in at startup, the rules from the
-# platform as {rules} and the listing from the hl on this PATH as {hl_commands}, so neither is a
-# copy that can drift. The specialization lives in prompts/flavors/<flavor>.md, spliced in as
-# {flavor_brief}.
-_PROMPTS_DIR = Path(__file__).parent / "prompts"
-# Each role reads hl's listing, which holds the rules every command shares, and the help of the
-# commands it acts with; it reads the help of any other when it runs one. A planner runs nothing,
-# so the listing is not for it: it is shown its two commands and what hl repo init will write
-# from its proposal.
-_HL_HELP = ([], ["hypothesis", "submit"])
-_HL_HELP_PLANNER = (["platform-experiments", "propose"], ["platform-experiments", "decline"], ["repo", "init"])
-_HL_HELP_BASELINE = ([], ["job", "submit"], ["job", "summary"], ["platform-experiments", "agents", "finish"])
-_HL_HELP_COORDINATOR = ([], ["platform-experiments", "update"], ["platform-experiments", "summary"],
-                        ["platform-experiments", "close"], ["platform-experiments", "agents", "add"],
-                        ["hypothesis", "comment"])
-
-
-def hl_commands(cfg: config.Config) -> str:
-    """hl's own listing of its commands and of the subcommands the briefing leans on."""
-    groups = _HL_HELP
-    if config.coordinates(cfg):
-        groups = _HL_HELP_COORDINATOR
-    elif config.plans(cfg):
-        groups = _HL_HELP_PLANNER
-    elif config.measures_baseline(cfg):
-        groups = _HL_HELP_BASELINE
-    # hl prints the help of a group on stdout and the help of one command on stderr.
-    return "\n\n".join(
-        subprocess.run(["hl", *group, "--help"], check=True, text=True,
-                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout.strip()
-        for group in groups)
-
-
-def _code_sections() -> dict[str, str]:
-    """The paragraphs of a briefing about the experiment's repository. A baseline agent starts
-    the code and a researcher starts from it, so how the workspace begins is a section per role."""
-    text = (_PROMPTS_DIR / "code.md").read_text()
-    sections = {}
-    for section in text.split("\n==== ")[1:]:
-        name, _, body = section.partition("\n")
-        sections[name.strip()] = body.rstrip("\n")
-    return sections
-
-
-# Said once, to every role. Agents ended turns with `true` or an `echo` and waited for a job in
-# sleep loops around `hl job status`: ending the turn is the one way to wait.
+# What a wait refused is answered with, as every built-in prompt says it once. Agents ended turns
+# with `true` or an `echo` and waited for a job in sleep loops around `hl job status`: ending the
+# turn is the one way to wait.
 WAIT = "To wait, reply with no command in it: your turn ends, and the next update starts another."
-_EVERY_ROLE = (f"\n{WAIT} A job's change arrives as an update, so reading its status, metrics or logs "
-               "again before one comes is refused. An error from `hl` is signal: do what it says. "
-               "`hl` prints its answer on stdout and its hints on stderr: parse stdout alone.")
-
-
-def system_prompt(cfg: config.Config, rules: str, commands: str, repository_url: str, workdir: str) -> str:
-    values = dict(rules=rules.strip(), hl_commands=commands, platform_experiment_id=cfg.platform_experiment_id,
-                  repository_url=repository_url, workdir=workdir)
-    code = _code_sections()
-    template, sections = "coordinator.md", ("repository_line", "start_code")
-    if config.plans(cfg):
-        template, sections = "planner.md", ()
-        values.update(agent_id=cfg.agent_id)
-    elif config.measures_baseline(cfg):
-        template, sections = "baseline.md", ("workspace",)
-        values.update(agent_id=cfg.agent_id)
-        values.update(start=code["start_baseline"].format(**values))
-    elif not config.coordinates(cfg):
-        template, sections = "system_prompt.md", ("workspace",)
-        values.update(agent_id=cfg.agent_id, flavor=cfg.flavor, hyperparameters=json.dumps(cfg.hyperparameters),
-                      flavor_brief=(_PROMPTS_DIR / "flavors" / f"{cfg.flavor}.md").read_text().strip())
-        values.update(start=code["start_researcher"].format(**values))
-    return (_PROMPTS_DIR / template).read_text().format(**values, **{name: code[name].format(**values) for name in sections}) + _EVERY_ROLE
 
 
 def install_signal_handler() -> list:
@@ -104,7 +36,9 @@ class RunSetup:
     """Everything the run loop needs, assembled once from the environment."""
     cfg: config.Config
     client: api_client.PlatformClient
-    system_prompt: str
+    # hl's listing of its commands for the role, which fills {{hl_commands}} of every prompt the
+    # platform serves it: the hl on this machine does not change while it runs.
+    commands: str
     workdir: str
     # Where the harness keeps what it needs to go on: outside workdir, which holds nothing but
     # what the agent puts there, so a clone into it is clean and no file of the harness is ever
@@ -186,7 +120,9 @@ def clone_workspace(repository_url: str, workdir: str) -> None:
 
 
 def prepare() -> RunSetup:
-    """Shared startup: logging, config, the agent's Python, workdir, platform client, prompt."""
+    """Shared startup: logging, config, the agent's Python, workdir, platform client, and the
+    instructions it runs with, read once here for its role and to fail before the first
+    connection on any it could not run."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     cfg = config.Config()
@@ -195,11 +131,11 @@ def prepare() -> RunSetup:
     client = api_client.PlatformClient(cfg.api_url, cfg.token)
     if config.coordinates(cfg):
         platform_experiment = client.require_coordinated(cfg.platform_experiment_id)
-        cfg.run_as(config.COORDINATOR_FLAVOR, (platform_experiment.get("coordinator") or {}).get("model"))
     else:
-        signup = client.require_joined(cfg.agent_id, cfg.platform_experiment_id)
-        cfg.run_as(signup.get("flavor"), signup.get("model"), signup.get("hyperparameters"), signup.get("role"))
+        client.require_joined(cfg.agent_id, cfg.platform_experiment_id)
         platform_experiment = client.get_platform_experiment(cfg.platform_experiment_id)
+    answer = instructions.read(client, cfg)
+    cfg.run_as(answer.get("role", ""))
 
     workdir = os.path.abspath(config.required("AGENT_WORKDIR", "the directory the agent clones into and works in"))
     statedir = config.required("AGENT_STATE_DIR", "the directory the harness keeps its own state in, outside AGENT_WORKDIR")
@@ -218,9 +154,9 @@ def prepare() -> RunSetup:
 
     if not config.plans(cfg) and not config.coordinates(cfg):
         clone_workspace(repository_url, workdir)
-    commands = hl_commands(cfg)
-    system_prompt_text = system_prompt(cfg, client.fetch_rules(), commands, repository_url, workdir)
-    return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt_text, workdir=workdir, statedir=statedir)
+    commands = prompt.hl_commands(cfg)
+    instructions.complete(answer, cfg, commands, workdir)
+    return RunSetup(cfg=cfg, client=client, commands=commands, workdir=workdir, statedir=statedir)
 
 
 def revising(setup: RunSetup) -> dict | None:
@@ -308,10 +244,25 @@ def run_ended(setup: RunSetup) -> str:
     tells a hosted machine to stop for this and for nothing else: closed, cut, finished, or
     planned for a planner whose answer to its draft is stored. A coordinator's run ends when its
     platform experiment closes."""
+    return _run_end(setup)[0]
+
+
+def _run_end(setup: RunSetup) -> tuple[str, str]:
+    """run_ended, and for a cut its cut_reason: "" for a cut at a stage boundary."""
     cfg = setup.cfg
     if config.coordinates(cfg):
-        return "closed" if setup.client.get_platform_experiment(cfg.platform_experiment_id)["status"] == "closed" else ""
-    return setup.client.get_signup(cfg.agent_id, cfg.platform_experiment_id).get("ended", "")
+        return "closed" if setup.client.get_platform_experiment(cfg.platform_experiment_id)["status"] == "closed" else "", ""
+    signup = setup.client.get_signup(cfg.agent_id, cfg.platform_experiment_id)
+    return signup.get("ended", ""), signup.get("cut_reason", "")
+
+
+def _cut_because(reason: str) -> str:
+    if reason == "":
+        return "You are being stopped because you were cut from the platform experiment at a stage boundary."
+    if reason == "max_agents_lowered":
+        return ("You are being stopped because you were cut from the platform experiment: its max_agents was lowered "
+                "below the researchers at work, and the newest of them were cut.")
+    return f"You are being stopped because you were cut from the platform experiment, for a reason the platform names {reason}."
 
 
 def _closed_because(setup: RunSetup) -> str | None:
@@ -343,13 +294,14 @@ def stop_cause(setup: RunSetup) -> str | None:
     nothing and stops by itself. A cause the platform does not give is said to be unknown, never
     inferred."""
     try:
-        ended = run_ended(setup)
+        ended, cut_reason = _run_end(setup)
         if ended == "closed":
             return _closed_because(setup)
+        if ended == "cut":
+            return _cut_because(cut_reason)
         return {
             "finished": None,
             "planned": None,
-            "cut": "You are being stopped because you were cut from the platform experiment at a stage boundary.",
             "": ("You are being stopped while your run on the platform goes on: the platform ended nothing of yours. "
                  "Only this machine is being stopped, and the platform does not say why."),
         }[ended]

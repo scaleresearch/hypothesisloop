@@ -5,21 +5,21 @@ from unittest import mock
 from types import SimpleNamespace
 
 from conftest import SITUATION
-from hypothesisloop_agent import core
+from hypothesisloop_agent import core, prompt
 
 
 def planner():
-    return SimpleNamespace(agent_id="ag-planner", flavor="planner", role="planner", platform_experiment_id="pe-1", hyperparameters={})
+    return SimpleNamespace(agent_id="ag-planner", role="planner", platform_experiment_id="pe-1", hyperparameters={})
 
 
 def baseline_agent():
-    return SimpleNamespace(agent_id="ag-baseline", flavor="generalist", role="baseline", platform_experiment_id="pe-1", hyperparameters={})
+    return SimpleNamespace(agent_id="ag-baseline", role="baseline", platform_experiment_id="pe-1", hyperparameters={})
 
 
 def listed(cfg) -> list:
     asked = []
-    with mock.patch.object(core.subprocess, "run", lambda command, **_: asked.append(command[1:-1]) or mock.Mock(stdout="usage\n")):
-        core.hl_commands(cfg)
+    with mock.patch.object(prompt.subprocess, "run", lambda command, **_: asked.append(command[1:-1]) or mock.Mock(stdout="usage\n")):
+        prompt.hl_commands(cfg)
     return asked
 
 
@@ -145,12 +145,12 @@ sizing_reason: " kept as sent"
 
     # Researchers once finished in twenty minutes and their machines idled to the end time.
     def test_a_researcher_stops_once_it_finished_and_not_before(self):
-        researcher = SimpleNamespace(agent_id="ag-1", flavor="generalist", platform_experiment_id="pe-1")
+        researcher = SimpleNamespace(agent_id="ag-1", role="researcher", platform_experiment_id="pe-1")
         self.assertIsNone(self.reason(researcher, {}))
         self.assertEqual(self.reason(researcher, {"ended": "finished"}), "the platform ended the run: finished")
 
     def test_a_coordinator_stops_once_its_platform_experiment_closed(self):
-        coordinator = SimpleNamespace(agent_id="", flavor="coordinator", platform_experiment_id="pe-1")
+        coordinator = SimpleNamespace(agent_id="coordinator", role="coordinator", platform_experiment_id="pe-1")
         self.assertIsNone(self.reason(coordinator, None, {"status": "running"}))
         self.assertEqual(self.reason(coordinator, None, {"status": "closed"}), "the platform ended the run: closed")
 

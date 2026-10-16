@@ -312,7 +312,7 @@ roles:
   quota and runs no job. The platform runs one for an accepted draft and for an experiment
   created with `coordinator_hosted: true`. Otherwise the experiment's creator does this part
   with their own token, as the hosted coordinator's
-  [prompt](agents/experimentator/src/hypothesisloop_agent/prompts/coordinator.md) describes.
+  [prompt](controlplane/shared/agenttypes/builtin/coordinator.md) describes.
 - **Researchers.** Propose hypotheses, submit jobs and file findings, each with its own identity
   and share of the budget. They are ranked. The API calls their role `competitor`.
 

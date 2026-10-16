@@ -5,7 +5,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from hypothesisloop_agent import config, core, updates
+from hypothesisloop_agent import config, core, prompt, updates
 from hypothesisloop_agent.claude import run
 from test_require_joined import AGENT_TOKEN, FakePlatform, PlatformCase, derived
 from test_updates import COMPLETED, fake_hl
@@ -36,7 +36,7 @@ class StartupTest(PlatformCase):
         env = {**LAUNCH_ENV, "API_URL": self.url, "AGENT_WORKDIR": self.workdir, "AGENT_STATE_DIR": self.workdir,
                "AGENT_VENV": "/agent/.venv", "PATH": "/usr/bin"}
         with mock.patch.dict(os.environ, env, clear=True), \
-                mock.patch.object(core, "hl_commands", return_value="usage: hl") as commands:
+                mock.patch.object(prompt, "hl_commands", return_value="usage: hl") as commands:
             setup = core.prepare()
         commands.assert_called_once_with(setup.cfg)
         return setup
@@ -49,8 +49,8 @@ class StartupTest(PlatformCase):
         self.assertFalse([path for _, path in FakePlatform.calls if "/signups/" in path])
         self.assertNotIn("POST", [method for method, _ in FakePlatform.calls])
         self.assertEqual(FakePlatform.tokens, {"Bearer " + COORDINATOR_TOKEN})
-        self.assertEqual((setup.cfg.flavor, setup.cfg.model), ("coordinator", "model-1"))
-        self.assertIn("coordinator of one platform experiment", setup.system_prompt)
+        self.assertEqual(setup.cfg.role, "coordinator")
+        self.assertIn(("GET", "/platform-experiments/pe-1/coordinator/instructions"), FakePlatform.calls)
 
     def test_a_token_that_does_not_coordinate_fails_startup_without_showing_itself(self):
         FakePlatform.joined = set()
@@ -69,18 +69,18 @@ class BriefingTest(unittest.TestCase):
         def fake_run(command, **how):
             # One command's help is on stderr: read from stdout alone, a planner was never
             # shown the proposal file and a coordinator never how to add an agent.
-            self.assertEqual(how["stderr"], core.subprocess.STDOUT)
+            self.assertEqual(how["stderr"], prompt.subprocess.STDOUT)
             asked.append(command[1:-1])
             return mock.Mock(stdout="usage\n")
 
-        with mock.patch.object(core.subprocess, "run", fake_run):
-            core.hl_commands(SimpleNamespace(flavor="coordinator", role=""))
+        with mock.patch.object(prompt.subprocess, "run", fake_run):
+            prompt.hl_commands(SimpleNamespace(role="coordinator"))
             self.assertIn(["platform-experiments", "agents", "add"], asked)
             self.assertIn(["platform-experiments", "update"], asked)
             self.assertIn(["platform-experiments", "summary"], asked)
             self.assertIn(["platform-experiments", "close"], asked)
             asked.clear()
-            core.hl_commands(SimpleNamespace(flavor="generalist", role="competitor"))
+            prompt.hl_commands(SimpleNamespace(role="researcher"))
         self.assertEqual(asked, [[], ["hypothesis", "submit"]])
 
 
@@ -105,19 +105,23 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
     def test_the_last_turn_opens_with_why_the_run_stops_as_the_platform_has_it(self):
         ended = {"status": "closed", "closed_at": "2026-01-01T02:48:05Z"}
         person = {"kind": "user", "id": "u-1", "name": "Ada"}
-        for experiment, signup, flavor, want in (
+        for experiment, signup, role, want in (
             ({**ended, "close_reason": "end_time_reached"}, {}, "coordinator", "reached its end time and the platform closed it at 2026-01-01T02:48:05Z"),
             ({**ended, "close_reason": "closed_by_request", "closed_by": person}, {}, "coordinator", "a person closed it (Ada) at 2026-01-01T02:48:05Z. They gave no reason."),
             ({**ended, "close_reason": "closed_by_request", "closed_by": person, "close_message": "the baseline measured the old split"}, {}, "coordinator",
              "a person closed it (Ada) at 2026-01-01T02:48:05Z. Their reason: the baseline measured the old split"),
-            ({**ended, "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}, {"ended": "closed"}, "generalist", "its coordinator closed it"),
+            ({**ended, "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}, {"ended": "closed"}, "researcher", "its coordinator closed it"),
             (ended, {}, "coordinator", "The platform recorded no reason"),
             ({**ended, "close_reason": "planning_limit_reached"}, {"ended": "closed"}, "planner", "the planning limit passed with nothing proposed, and the platform closed the draft at 2026-01-01T02:48:05Z"),
-            ({**ended, "close_reason": "baseline_limit_reached"}, {"ended": "closed"}, "generalist", "was not running by its baseline limit, and the platform closed it at 2026-01-01T02:48:05Z before it started"),
+            ({**ended, "close_reason": "baseline_limit_reached"}, {"ended": "closed"}, "researcher", "was not running by its baseline limit, and the platform closed it at 2026-01-01T02:48:05Z before it started"),
             ({"status": "running"}, {}, "coordinator", "Only this machine is being stopped, and the platform does not say why"),
-            ({"status": "running"}, {"ended": "cut"}, "generalist", "you were cut from the platform experiment at a stage boundary"),
+            ({"status": "running"}, {"ended": "cut"}, "researcher", "you were cut from the platform experiment at a stage boundary"),
+            ({"status": "running"}, {"ended": "cut", "cut_reason": "max_agents_lowered"}, "researcher",
+             "you were cut from the platform experiment: its max_agents was lowered below the researchers at work, and the newest of them were cut."),
+            ({"status": "running"}, {"ended": "cut", "cut_reason": "something_new"}, "researcher",
+             "you were cut from the platform experiment, for a reason the platform names something_new."),
         ):
-            setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", flavor=flavor, role="competitor", platform_experiment_id="pe-1"),
+            setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", role=role, platform_experiment_id="pe-1"),
                                     client=SimpleNamespace(get_platform_experiment=lambda _id, e=experiment: e, get_signup=lambda *_, s=signup: s))
             prompt = run._shutdown_prompt(setup)
             self.assertTrue(prompt.startswith("You are being stopped"), prompt)
@@ -127,8 +131,8 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
     # A baseline agent's last turn asked it for verdicts, and it registers no hypothesis.
     def test_a_baseline_agent_is_asked_for_no_verdict(self):
         closed = {"status": "closed", "closed_at": "2026-01-01T02:48:05Z", "close_reason": "baseline_limit_reached"}
-        for role, verdicts in (("baseline", False), ("competitor", True)):
-            setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", flavor="generalist", role=role, platform_experiment_id="pe-1"),
+        for role, verdicts in (("baseline", False), ("researcher", True)):
+            setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", role=role, platform_experiment_id="pe-1"),
                                     client=SimpleNamespace(get_platform_experiment=lambda _id: closed, get_signup=lambda *_: {"ended": "closed"}))
             prompt = run._shutdown_prompt(setup)
             self.assertIn("File what your finished jobs showed as their summaries", prompt)
@@ -139,14 +143,14 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
     # what they did not owe.
     def test_an_agent_whose_own_action_ended_its_run_gets_no_last_turn(self):
         closed = {"status": "closed", "closed_at": "2026-01-01T02:48:05Z", "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}
-        for experiment, signup, flavor in (
-            ({"status": "running"}, {"ended": "finished"}, "generalist"),
+        for experiment, signup, role in (
+            ({"status": "running"}, {"ended": "finished"}, "researcher"),
             ({"status": "draft"}, {"ended": "planned"}, "planner"),
             (closed, {}, "coordinator"),
         ):
-            setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", flavor=flavor, role="competitor", platform_experiment_id="pe-1"),
+            setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", role=role, platform_experiment_id="pe-1"),
                                     client=SimpleNamespace(get_platform_experiment=lambda _id, e=experiment: e, get_signup=lambda *_, s=signup: s))
-            self.assertIsNone(run._shutdown_prompt(setup), flavor)
+            self.assertIsNone(run._shutdown_prompt(setup), role)
 
 
 if __name__ == "__main__":

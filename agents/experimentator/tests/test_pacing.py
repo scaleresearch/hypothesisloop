@@ -16,17 +16,17 @@ class AllowanceTest(unittest.TestCase):
     def test_a_window_used_further_than_its_time_is_paced(self):
         self.allowance.read("five_hour", 0.35, self.now + 4 * HOUR)
         self.assertEqual(self.allowance.pacing(), pacing.Reading("five_hour", 0.35, self.now + 4 * HOUR))
-        self.assertEqual(self.allowance.cap()[0], pacing.SUBAGENTS)
-        self.assertIn("used 35% of its five_hour window with 20% of its time gone", self.allowance.note(coordinator=False))
-        self.assertNotIn("regular review", self.allowance.note(coordinator=False))
-        self.assertIn("regular review", self.allowance.note(coordinator=True))
+        self.assertEqual(self.allowance.cap(3)[0], 3)
+        self.assertIn("used 35% of its five_hour window with 20% of its time gone", self.allowance.note(coordinator=False, subagents=2))
+        self.assertNotIn("regular review", self.allowance.note(coordinator=False, subagents=2))
+        self.assertIn("regular review", self.allowance.note(coordinator=True, subagents=2))
 
     def test_a_window_on_pace_early_or_reset_is_not(self):
         self.allowance.read("five_hour", 0.45, self.now + 2 * HOUR)
         self.allowance.read("seven_day", 0.25, self.now + 6 * 24 * HOUR)
         self.assertIsNone(self.allowance.pacing(), "five_hour on pace, seven_day under the floor")
-        self.assertEqual(self.allowance.note(coordinator=True), "")
-        self.assertIsNone(self.allowance.cap())
+        self.assertEqual(self.allowance.note(coordinator=True, subagents=2), "")
+        self.assertIsNone(self.allowance.cap(3))
         self.allowance.read("five_hour", 0.95, self.now - 1)
         self.assertIsNone(self.allowance.pacing(), "a window that reset")
         self.allowance.read("unknown_window", 0.99, self.now + HOUR)

@@ -1,95 +1,62 @@
 import os
+import pathlib
 import subprocess
 import tempfile
 import unittest
 from types import SimpleNamespace
 
-from hypothesisloop_agent import core
+import hypothesisloop_agent
+from hypothesisloop_agent import core, prompt
 
 
 class GitIdentityTest(unittest.TestCase):
     # Every agent's commits carried the image's one name, so a branch's history did not say who
     # wrote what.
     def test_commits_carry_the_agents_own_id(self):
-        agent = SimpleNamespace(agent_id="ag-7", flavor="generalist", platform_experiment_id="pe-1")
+        agent = SimpleNamespace(agent_id="ag-7", role="researcher", platform_experiment_id="pe-1")
         identity = core.git_identity(agent)
         self.assertEqual((identity["GIT_AUTHOR_NAME"], identity["GIT_COMMITTER_NAME"]), ("ag-7", "ag-7"))
         self.assertTrue(identity["GIT_AUTHOR_EMAIL"].startswith("ag-7@"))
-        coordinator = SimpleNamespace(agent_id="coordinator", flavor="coordinator", platform_experiment_id="pe-1")
+        coordinator = SimpleNamespace(agent_id="coordinator", role="coordinator", platform_experiment_id="pe-1")
         self.assertEqual(core.git_identity(coordinator)["GIT_AUTHOR_NAME"], "coordinator-pe-1")
 
 
-class ResearcherPromptTest(unittest.TestCase):
-    # A researcher gated every job on a green local suite and an offline check, and submitted one
-    # job in an hour with most of its capacity free.
-    def test_jobs_are_the_only_evidence_and_a_local_build_is_the_only_check(self):
-        cfg = SimpleNamespace(agent_id="ag-1", flavor="generalist", role="researcher", platform_experiment_id="pe-1",
-                              hyperparameters={})
-        prompt = " ".join(core.system_prompt(cfg, "rules", "commands", "https://git/x", "/app/workspace").split())
-        self.assertIn("no offline estimate, local measurement, audit or test suite stands in for one", prompt)
-        self.assertIn("a local build that runs is the only check before submitting", prompt)
-        self.assertIn("A subagent submits as soon as its code builds", prompt)
-        self.assertIn("its own jobs (`hl job submit`", prompt)
-        self.assertIn("goes to every subagent it concerns", prompt)
-        self.assertIn("keep several independent jobs in flight", prompt)
+class FillTest(unittest.TestCase):
+    VALUES = {"hl_commands": "usage: hl {{not a placeholder}} $1 \\1", "workdir": "/agent/workspace"}
 
-    # Subagents were 87% of a live run's spend: a lead resumed one with new work until it re-read
-    # 457K on every call, and pinged live ones for progress about 25 times.
-    def test_subagents_are_short_lived_and_quiet(self):
-        cfg = SimpleNamespace(agent_id="ag-1", flavor="generalist", role="researcher", platform_experiment_id="pe-1",
-                              hyperparameters={})
-        prompt = " ".join(core.system_prompt(cfg, "rules", "commands", "https://git/x", "/app/workspace").split())
-        self.assertIn("goes to a fresh subagent with its own brief, never a resumed one", prompt)
-        self.assertIn("never a request for its progress", prompt)
-        self.assertIn("report once, at its end", prompt)
+    def test_the_harness_placeholders_are_filled_in_one_pass_and_no_value_is_expanded_again(self):
+        served = "Work in {{workdir}}.\n{{hl_commands}}\nAgain {{workdir}}, braces {single} stay."
+        self.assertEqual(prompt.fill(served, ["hl_commands", "workdir"], self.VALUES),
+                         "Work in /agent/workspace.\nusage: hl {{not a placeholder}} $1 \\1\nAgain /agent/workspace, braces {single} stay.")
 
-    # A researcher's job gained 12% on an idea a person posted, tested under its id, and filed no
-    # finding and no verdict, so the idea stayed open, and looked for a summary command it could
-    # not find.
-    def test_a_persons_idea_it_tested_is_its_to_summarize_and_judge(self):
-        cfg = SimpleNamespace(agent_id="ag-1", flavor="generalist", role="researcher", platform_experiment_id="pe-1",
-                              hyperparameters={})
-        prompt = " ".join(core.system_prompt(cfg, "rules", "commands", "https://git/x", "/app/workspace").split())
-        self.assertIn("(`hl job summary JOB --text T`)", prompt)
-        self.assertIn("its summaries and its verdict are yours to give as on your own; the idea stays the person's", prompt)
+    def test_a_placeholder_left_in_the_prompt_ends_the_harness(self):
+        for served, said in (
+            ("{{workdir}} for {{agent_id}}", "holds '{{agent_id}}'"),
+            ("{{hl_commands}} and {{ workdir }}", "holds '{{ workdir }}'"),
+            ("{{hl_commands}} {{", "holds '{{'"),
+            # One the platform did not list for the harness is not the harness's to fill.
+            ("{{hl_commands}} in {{workdir}}", "holds '{{workdir}}'"),
+        ):
+            placeholders = ["hl_commands"] if said == "holds '{{workdir}}'" else ["hl_commands", "workdir"]
+            with self.assertRaises(SystemExit) as ctx:
+                prompt.fill(served, placeholders, self.VALUES)
+            self.assertIn(said, str(ctx.exception))
+
+    def test_a_placeholder_the_harness_has_no_value_for_ends_the_harness(self):
+        with self.assertRaises(SystemExit) as ctx:
+            prompt.fill("{{hl_commands}} {{gpu}}", ["hl_commands", "gpu"], self.VALUES)
+        self.assertIn("leaves gpu to the harness", str(ctx.exception))
 
 
-class PlannerPromptTest(unittest.TestCase):
-    def prompt(self):
-        cfg = SimpleNamespace(agent_id="ag-planner", flavor="planner", role="planner", platform_experiment_id="pe-1", hyperparameters={})
-        return " ".join(core.system_prompt(cfg, "rules", "commands", "https://git/x", "/app/workspace").split())
-
-    # A planner proposed a copy with an A100 sed into it to see whether it passed, and the copy was
-    # stored and accepted for a brief that said CPU only.
-    def test_variants_are_checked_and_only_the_final_one_proposed(self):
-        prompt = self.prompt()
-        self.assertIn("`hl platform-experiments propose --check FILE`", prompt)
-        self.assertIn("stores nothing and lists every problem at once, and `propose` only the final one", prompt)
-        self.assertIn("a goal that says it needs no accelerator is never proposed on one", prompt)
-        self.assertIn("Every field of the proposal says what the brief says.", prompt)
-
-    # The planner was refused for "", cpu and the CPU type in turn: the contract is to leave the
-    # type out for cores, or to copy one hl capacity prints.
-    def test_work_on_cores_states_no_accelerator_type(self):
-        prompt = self.prompt()
-        self.assertIn("`accelerator_type` is an `accelerator_type` string `hl capacity` prints, copied verbatim", prompt)
-        self.assertIn("Work that needs no accelerator leaves `accelerator_type` out", prompt)
-        self.assertIn("A refusal lists the valid values", prompt)
-
-    # A planner spent 3.5 minutes on web searches for a toy goal whose Metric and Control were given.
-    def test_the_web_is_searched_only_for_what_the_goal_leaves_unknown(self):
-        prompt = self.prompt()
-        self.assertIn("only when the goal leaves the control or the size of the effect to expect unknown", prompt)
-        self.assertIn("a goal that states its Metric and Control needs no search, or one at most", prompt)
-        self.assertNotIn("search the web (WebSearch) for the best published result on its problem", prompt)
-
-    # The UI ticks a point of the goal by its label at the start of a line, and the brief the
-    # planner wrote dropped them, so every point read as missing.
-    def test_the_brief_keeps_the_goals_labels(self):
-        prompt = self.prompt()
-        for label in ("Metric", "Control", "Win", "Held equal", "Fixed", "For"):
-            self.assertIn(f"`{label}:`", prompt)
-        self.assertIn("keeps that label at the start of its own line in the brief", prompt)
+class NoPromptFilesTest(unittest.TestCase):
+    # The prompts live with the platform (controlplane/shared/agenttypes/builtin), which serves
+    # every agent the version it is pinned to: a copy in the image would be one that drifts.
+    def test_the_harness_ships_no_prompt_and_reads_none(self):
+        package = pathlib.Path(hypothesisloop_agent.__file__).parent
+        self.assertEqual(sorted(str(p.relative_to(package)) for p in package.rglob("*.md")), [])
+        self.assertFalse((package / "prompts").exists())
+        for source in package.rglob("*.py"):
+            self.assertNotIn('.md"', source.read_text(), source)
 
 
 class CloneWorkspaceTest(unittest.TestCase):
@@ -112,12 +79,6 @@ class CloneWorkspaceTest(unittest.TestCase):
             open(os.path.join(workdir, "work"), "w").close()
             core.clone_workspace("https://git/x", workdir)
             self.assertEqual(os.listdir(workdir), ["work"])
-
-    def test_the_briefing_says_the_clone_is_made(self):
-        cfg = SimpleNamespace(agent_id="ag-1", flavor="generalist", role="researcher", platform_experiment_id="pe-1",
-                              hyperparameters={})
-        prompt = " ".join(core.system_prompt(cfg, "rules", "commands", "https://git/x", "/app/workspace").split())
-        self.assertIn("/app/workspace, the directory every command starts in, holds the clone of https://git/x", prompt)
 
 
 if __name__ == "__main__":

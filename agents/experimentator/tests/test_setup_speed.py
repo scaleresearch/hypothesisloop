@@ -12,11 +12,11 @@ from hypothesisloop_agent.claude import run
 
 
 def planner():
-    return SimpleNamespace(agent_id="ag-planner", flavor="planner", role="planner", platform_experiment_id="pe-1", hyperparameters={})
+    return SimpleNamespace(agent_id="ag-planner", role="planner", platform_experiment_id="pe-1", hyperparameters={})
 
 
 def baseline_agent():
-    return SimpleNamespace(agent_id="ag-baseline", flavor="generalist", role="baseline", platform_experiment_id="pe-1", hyperparameters={})
+    return SimpleNamespace(agent_id="ag-baseline", role="baseline", platform_experiment_id="pe-1", hyperparameters={})
 
 
 def git(*args, cwd):
@@ -88,9 +88,9 @@ class PlannerOpeningTest(unittest.TestCase):
                 raise Started(kwargs["cwd"])
 
             setup = SimpleNamespace(cfg=SimpleNamespace(**vars(planner()), api_url="http://api", token="t"),
-                                    system_prompt="", workdir=workdir, statedir=root)
+                                    client=None, commands="usage: hl", workdir=workdir, statedir=root)
             with mock.patch.object(run, "ClaudeAgentOptions", options), self.assertRaises(Started) as started:
-                asyncio.run(run._run_one_session(setup, "model", None, [False]))
+                asyncio.run(run._run_one_session(setup, None, [False]))
             self.assertEqual(started.exception.args[0], workdir)
 
     # Only a session that starts fresh is opened with them: a resumed one has read them.
@@ -131,9 +131,9 @@ class ToolsTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as root:
             setup = SimpleNamespace(cfg=SimpleNamespace(**vars(planner()), api_url="http://api", token="t"),
-                                    system_prompt="", workdir=root, statedir=root)
+                                    client=None, commands="usage: hl", workdir=root, statedir=root)
             with mock.patch.object(run, "ClaudeAgentOptions", options), self.assertRaises(Started) as started:
-                asyncio.run(run._run_one_session(setup, "model", None, [False]))
+                asyncio.run(run._run_one_session(setup, None, [False]))
         given = started.exception.args[0]
         self.assertEqual(given["env"]["ENABLE_TOOL_SEARCH"], "false")
         self.assertFalse({"WebSearch", "WebFetch"} & set(given["disallowed_tools"]))

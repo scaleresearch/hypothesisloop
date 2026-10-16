@@ -23,12 +23,14 @@ class LaunchEnvironmentTest(unittest.TestCase):
         stale = {"AGENT_FLAVOR": "data-search", "AGENT_MODEL": "model-1", "ANTHROPIC_MODEL": "model-2", "AGENT_ID": "left-over"}
         with mock.patch.dict(os.environ, {**LAUNCH_ENV, **stale}, clear=True):
             cfg = config.Config()
-        self.assertEqual((cfg.agent_id, cfg.platform_experiment_id, cfg.flavor, cfg.model), ("agent-a", "pe-1", "", ""))
-        for flavor, model in (("", "model-1"), ("data-search", "")):
+        self.assertEqual((cfg.agent_id, cfg.platform_experiment_id, cfg.role), ("agent-a", "pe-1", ""))
+        for role in ("", "competitor", "coordinator"):
             with self.assertRaises(SystemExit):
-                cfg.run_as(flavor, model)
-        cfg.run_as("data-search", "model-1", {"batch_size": 64})
-        self.assertEqual((cfg.flavor, cfg.model, cfg.hyperparameters), ("data-search", "model-1", {"batch_size": 64}))
+                cfg.run_as(role)
+        cfg.run_as("planner")
+        self.assertEqual(cfg.role, "planner")
+        with self.assertRaises(SystemExit):
+            cfg.run_as("researcher")
 
 
 class StopSignalTest(unittest.TestCase):
@@ -82,14 +84,14 @@ class ErrorTurnClient:
 
 class RefusedCredentialTest(unittest.IsolatedAsyncioTestCase):
     async def session(self, result: str, status: int | None = None):
-        setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
+        setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                                 client=SimpleNamespace(get_signup=lambda *_: {}),
-                                cfg=SimpleNamespace(agent_id="ag-1", flavor="generalist", role="competitor", api_url="http://x", token=AGENT_TOKEN, platform_experiment_id="pe-1"))
+                                cfg=SimpleNamespace(agent_id="ag-1", role="researcher", api_url="http://x", token=AGENT_TOKEN, platform_experiment_id="pe-1"))
         with mock.patch.object(run, "ClaudeSDKClient", ErrorTurnClient), \
                 mock.patch.object(ErrorTurnClient, "result", result), \
                 mock.patch.object(ErrorTurnClient, "status", status), \
                 contextlib.redirect_stdout(io.StringIO()):
-            return await asyncio.wait_for(run._run_one_session(setup, "m", None, [False]), timeout=5)
+            return await asyncio.wait_for(run._run_one_session(setup, None, [False]), timeout=5)
 
     async def test_a_refused_credential_ends_the_agent_with_the_providers_words(self):
         for refusal in ("Not logged in · Please run /login", "Invalid API key · Fix external API key",

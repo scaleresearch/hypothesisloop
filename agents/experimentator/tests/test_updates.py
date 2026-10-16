@@ -6,7 +6,7 @@ import tempfile
 import time
 import unittest
 
-from conftest import SITUATION
+from conftest import SITUATION, served
 from hypothesisloop_agent import outage, updates
 
 # The read itself, which conftest stubs for every test.
@@ -395,10 +395,13 @@ class HookTest(unittest.IsolatedAsyncioTestCase):
         from types import SimpleNamespace
 
         self.draft = {"status": "draft", "status_reason": {"reason": "proposed"}, "revisions": [{"message": "Make it fit one accelerator."}]}
-        self.cfg = SimpleNamespace(agent_id="agent-a", flavor="generalist", role="competitor")
+        self.cfg = SimpleNamespace(agent_id="agent-a", role="researcher")
         self.setup = SimpleNamespace(cfg=self.cfg, client=SimpleNamespace(get_platform_experiment=lambda _id: self.draft),
                                      workdir=tempfile.mkdtemp())
         self.cfg.platform_experiment_id = "pe-1"
+        running = mock.patch.object(run, "_running", served(self.cfg))
+        running.start()
+        self.addCleanup(running.stop)
         self.handing = asyncio.Lock()
         self.hook = run._updates_hook(self.setup, {"HL_STATE_DIR": os.path.join(tempfile.mkdtemp(), ".hl-state")}, self.handing)
 
@@ -452,7 +455,7 @@ class HookTest(unittest.IsolatedAsyncioTestCase):
         from hypothesisloop_agent import config
 
         revision = {"kind": updates.REVISION, "subject": "pe-1", "value": ""}
-        self.cfg.flavor = config.PLANNER_FLAVOR
+        self.cfg.role = config.PLANNER
         self.waiting = [revision]
         self.assertEqual(await self.call(), {})
 
@@ -677,15 +680,15 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
         async def one_batch(env, stopped, idle_s):
             return [{"kind": "experiment.status", "subject": "exp-1", "value": "COMPLETED", "agent_id": "agent-a"}]
 
-        setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
+        setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                                 client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
-                                cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", role="competitor", api_url="http://x", token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
+                                cfg=SimpleNamespace(agent_id="agent-a", role="researcher", api_url="http://x", token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
         with mock.patch.object(run, "ClaudeSDKClient", Client), \
                 mock.patch.object(updates, "next_batch", one_batch), \
                 mock.patch.object(updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \
                 mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 redirect_stdout(StringIO()) as out:
-            await asyncio.wait_for(run._run_one_session(setup, "m", None, stop_flag), timeout=5)
+            await asyncio.wait_for(run._run_one_session(setup, None, stop_flag), timeout=5)
         self.assertEqual(sent, ["Begin." + S, "Platform updates:\nexperiment.status exp-1 COMPLETED" + S, run._shutdown_prompt(setup) + S])
         self.assertIn("agent-a event experiment.status exp-1 COMPLETED", out.getvalue())
         self.assertEqual(os.listdir(setup.workdir), [], "the harness wrote into the directory the agent clones into")
@@ -734,7 +737,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
             return batch
 
         read = mock.AsyncMock(side_effect=in_flight)
-        setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
+        setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                                 client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
                                 cfg=cfg)
         with mock.patch.object(run, "ClaudeSDKClient", Client), \
@@ -742,7 +745,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
                 mock.patch.object(updates, "jobs_in_flight", read), \
                 mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 redirect_stdout(StringIO()):
-            await asyncio.wait_for(run._run_one_session(setup, "m", None, stop_flag), timeout=5)
+            await asyncio.wait_for(run._run_one_session(setup, None, stop_flag), timeout=5)
         return sent[:-1], read.await_count
 
     # A researcher whose last job ended waited 10 minutes for agent.idle, or 30 for the harness's
@@ -752,7 +755,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
     # what the statement costs, where saying it again would be a model call after each answer.
     async def test_a_turn_ended_with_no_job_in_flight_is_told_so_unless_it_answered_that(self):
         from types import SimpleNamespace
-        cfg = SimpleNamespace(agent_id="agent-a", flavor="generalist", role="competitor", api_url="http://x",
+        cfg = SimpleNamespace(agent_id="agent-a", role="researcher", api_url="http://x",
                               token=ENV["HL_TOKEN"], platform_experiment_id="pe-1")
         idle = [{"kind": "agent.idle", "subject": "agent-a", "value": "continues", "agent_id": "agent-a"}]
         sent, reads = await self._turn_ends(cfg, [0, 0], [idle, []])
@@ -762,7 +765,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_job_in_flight_and_a_failed_read_say_nothing(self):
         from types import SimpleNamespace
-        cfg = SimpleNamespace(agent_id="agent-a", flavor="generalist", role="baseline", api_url="http://x",
+        cfg = SimpleNamespace(agent_id="agent-a", role="baseline", api_url="http://x",
                               token=ENV["HL_TOKEN"], platform_experiment_id="pe-1")
         update = [{"kind": "comment.new", "subject": "hyp-1", "value": "agent", "agent_id": "agent-b"}]
         sent, _ = await self._turn_ends(cfg, [None, 2, 0, 1], [update, update, []])
@@ -822,9 +825,9 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
             stop_flag[0] = True
             return []
 
-        setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
+        setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                                 client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
-                                cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", role="competitor", api_url="http://x",
+                                cfg=SimpleNamespace(agent_id="agent-a", role="researcher", api_url="http://x",
                                                     token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
         read = mock.AsyncMock(return_value=1)
         with mock.patch.object(run, "ClaudeSDKClient", Client), \
@@ -832,7 +835,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
                 mock.patch.object(updates, "jobs_in_flight", read), \
                 mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 redirect_stdout(StringIO()):
-            await asyncio.wait_for(run._run_one_session(setup, "m", None, stop_flag), timeout=5)
+            await asyncio.wait_for(run._run_one_session(setup, None, stop_flag), timeout=5)
         self.assertEqual((sent[:-1], len(waits), read.await_count), (["Begin." + S], 2, 1))
 
     # A resumed session whose subagents stopped with the last process answers the opening with an
@@ -886,9 +889,9 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
             stop_flag[0] = True
             return []
 
-        setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
+        setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                                 client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
-                                cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", role="competitor", api_url="http://x",
+                                cfg=SimpleNamespace(agent_id="agent-a", role="researcher", api_url="http://x",
                                                     token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
         delivered = mock.Mock()
         with mock.patch.object(run, "ClaudeSDKClient", Client), \
@@ -897,7 +900,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
                 mock.patch.object(updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \
                 mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[update])), \
                 redirect_stdout(StringIO()):
-            await asyncio.wait_for(run._run_one_session(setup, "m", "s", stop_flag), timeout=5)
+            await asyncio.wait_for(run._run_one_session(setup, "s", stop_flag), timeout=5)
         self.assertEqual(len(read_turns), 3, "the opening's turn, the CLI's own and the last")
         self.assertEqual(sent[1:], [run._shutdown_prompt(setup) + "\n\nPlatform updates:\ncomment.new hyp-1 agent by agent-b" + S])
         self.assertEqual([call.args[0]["HL_STATE_DIR"].rsplit(".", 1)[1] for call in delivered.call_args_list], ["closing"])
@@ -939,9 +942,9 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
                 await asyncio.Event().wait()
                 yield
 
-        setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
+        setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                                 client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
-                                cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", role="competitor", api_url="http://x",
+                                cfg=SimpleNamespace(agent_id="agent-a", role="researcher", api_url="http://x",
                                                     token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
         waits = []
 
@@ -961,7 +964,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
                 mock.patch.object(updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \
                 mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 redirect_stdout(StringIO()):
-            await asyncio.wait_for(run._run_one_session(setup, "m", None, stop_flag), timeout=5)
+            await asyncio.wait_for(run._run_one_session(setup, None, stop_flag), timeout=5)
         self.assertEqual(len(read_turns), 3, "the opening's turn, the one under way and the last")
         self.assertEqual(sent, ["Begin." + S, run._shutdown_prompt(setup) + S])
 
@@ -970,7 +973,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
         from unittest import mock
 
         from hypothesisloop_agent import config
-        cfg = SimpleNamespace(agent_id="", flavor=config.COORDINATOR_FLAVOR, role="", api_url="http://x",
+        cfg = SimpleNamespace(agent_id="", role="coordinator", api_url="http://x",
                               token=ENV["HL_TOKEN"], platform_experiment_id="pe-1")
         update = [{"kind": "comment.new", "subject": "hyp-1", "value": "agent", "agent_id": "agent-b"}]
         with mock.patch("hypothesisloop_agent.claude.run._told", mock.AsyncMock(return_value="told")):
@@ -1028,16 +1031,16 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
                 return []
             return [{"kind": updates.REVISION, "subject": "pe-1", "value": ""}]
 
-        setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
+        setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                                 client=SimpleNamespace(get_platform_experiment=lambda _id: draft, get_signup=lambda *_: {}),
-                                cfg=SimpleNamespace(agent_id="agent-a", flavor=config.PLANNER_FLAVOR, role="planner", api_url="http://x",
+                                cfg=SimpleNamespace(agent_id="agent-a", role="planner", api_url="http://x",
                                                     token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
         with mock.patch.object(run, "ClaudeSDKClient", Client), \
                 mock.patch.object(run.seed, "planner", lambda workdir: ""), \
                 mock.patch.object(updates, "next_batch", revised), \
                 mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 redirect_stdout(StringIO()):
-            await asyncio.wait_for(run._run_one_session(setup, "m", None, stop_flag), timeout=5)
+            await asyncio.wait_for(run._run_one_session(setup, None, stop_flag), timeout=5)
         self.assertEqual(batches, 3)
         self.assertEqual(sent[0], "Begin.")
         self.assertEqual(sent[1], "The person read your answer and asks for this revision:\n\nMake it fit one accelerator.\n\n"

@@ -134,7 +134,7 @@ RUN uv sync --no-dev --locked --no-cache --compile-bytecode --no-install-project
 COPY --chown=agent:agent agents/experimentator/src/ src/
 RUN uv sync --no-dev --locked --no-cache --compile-bytecode \
  && .venv/bin/python3 -m compileall -q src
-# No docs/ copy: the platform rules are fetched live at startup (api_client.PlatformClient.fetch_rules).
+# No prompt in the image: the platform serves each agent its instructions, rules included (instructions.py).
 
 # /agent/workspace is where the agent clones and works, and nothing else is ever written there:
 # what a tool keeps under ~ (.cache, .claude, .local) and what the harness keeps (AGENT_STATE_DIR)

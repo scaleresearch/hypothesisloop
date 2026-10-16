@@ -11,8 +11,9 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// The golden prompts are what the experimentator composed itself before its prompts moved into the
-// database (testdata/generate.py): served with the same assignment, a built-in says the same.
+// The golden prompts are what the experimentator composed itself before its prompts moved to the
+// platform: served with the same assignment, a built-in says the same until one is edited on
+// purpose, golden file and all.
 func TestEachBuiltinComposesToWhatTheHarnessComposed(t *testing.T) {
 	raw, err := os.ReadFile("testdata/assignment.json")
 	if err != nil {
@@ -56,26 +57,12 @@ func firstDifference(got, want string) string {
 	return "one is a prefix of the other"
 }
 
-// Until the harness reads its prompt from the platform, a researcher of a built-in type is started
-// with the flavor brief of the same name, which the image must hold.
-func TestEveryBuiltinResearcherIsABriefTheAgentImageHolds(t *testing.T) {
-	briefs, err := filepath.Glob("../../../agents/experimentator/src/hypothesisloop_agent/prompts/flavors/*.md")
-	if err != nil || len(briefs) == 0 {
-		t.Fatalf("no flavor briefs found: %v", err)
-	}
-	var held, researchers []string
-	for _, brief := range briefs {
-		held = append(held, strings.TrimSuffix(filepath.Base(brief), ".md"))
-	}
+func TestEveryRoleHasABuiltinDefault(t *testing.T) {
+	var researchers []string
 	for _, t := range Catalog() {
 		if t.Role == domain.AgentRoleResearcher {
 			researchers = append(researchers, t.ID)
 		}
-	}
-	slices.Sort(held)
-	slices.Sort(researchers)
-	if !slices.Equal(held, researchers) {
-		t.Fatalf("built-in researchers %v, the image holds %v", researchers, held)
 	}
 	if !slices.Contains(researchers, domain.DefaultAgentFlavor) {
 		t.Fatalf("the default type %q is no built-in researcher", domain.DefaultAgentFlavor)
@@ -85,4 +72,74 @@ func TestEveryBuiltinResearcherIsABriefTheAgentImageHolds(t *testing.T) {
 			t.Errorf("role %s has no built-in default: %v", role, err)
 		}
 	}
+}
+
+// What live runs taught the built-in prompts, each said where the agent reads it. These were the
+// harness's checks of its own prompts before the prompts moved to the platform.
+func TestTheBuiltinPromptsKeepWhatRunsTaught(t *testing.T) {
+	prompts := map[string]string{}
+	for _, b := range mustBuiltins(t) {
+		prompts[b.ID] = strings.Join(strings.Fields(b.Prompt), " ")
+	}
+	for id, said := range map[string][]string{
+		// A researcher gated every job on a green local suite and an offline check, and submitted
+		// one job in an hour with most of its capacity free.
+		domain.DefaultAgentFlavor: {
+			"no offline estimate, local measurement, audit or test suite stands in for one",
+			"a local build that runs is the only check before submitting",
+			"A subagent submits as soon as its code builds",
+			"its own jobs (`hl job submit`",
+			"goes to every subagent it concerns",
+			"keep several independent jobs in flight",
+			// Subagents were 87% of a live run's spend: a lead resumed one with new work until it
+			// re-read 457K on every call, and pinged live ones for progress about 25 times.
+			"goes to a fresh subagent with its own brief, never a resumed one",
+			"never a request for its progress",
+			"report once, at its end",
+			// A researcher tested a person's idea, gained 12% and filed no finding and no verdict.
+			"(`hl job summary JOB --text T`)",
+			"its summaries and its verdict are yours to give as on your own; the idea stays the person's",
+			// The CLI caches that its directory is no git repository: the harness clones first.
+			"{{workdir}}, the directory every command starts in, holds the clone of {{repository_url}}",
+		},
+		domain.PlannerFlavor: {
+			// A planner proposed a copy with an A100 sed into it for a brief that said CPU only.
+			"`hl platform-experiments propose --check FILE`",
+			"stores nothing and lists every problem at once, and `propose` only the final one",
+			"a goal that says it needs no accelerator is never proposed on one",
+			"Every field of the proposal says what the brief says.",
+			// Refused for "", cpu and the CPU type in turn.
+			"`accelerator_type` is an `accelerator_type` string `hl capacity` prints, copied verbatim",
+			"Work that needs no accelerator leaves `accelerator_type` out",
+			"A refusal lists the valid values",
+			// 3.5 minutes of web searches for a toy goal whose Metric and Control were given.
+			"only when the goal leaves the control or the size of the effect to expect unknown",
+			"a goal that states its Metric and Control needs no search, or one at most",
+			// The UI ticks a point of the goal by its label at the start of a line.
+			"keeps that label at the start of its own line in the brief",
+			"`Metric:`", "`Control:`", "`Win:`", "`Held equal:`", "`Fixed:`", "`For:`",
+		},
+	} {
+		for _, want := range said {
+			if !strings.Contains(prompts[id], want) {
+				t.Errorf("built-in %s no longer says %q", id, want)
+			}
+		}
+	}
+	// Agents ended turns with `true` or an `echo` and waited in sleep loops: every role is told
+	// once that ending the turn is the way to wait, the sentence the harness refuses a wait with.
+	for id, prompt := range prompts {
+		if !strings.Contains(prompt, "To wait, reply with no command in it: your turn ends, and the next update starts another.") {
+			t.Errorf("built-in %s does not say how to wait", id)
+		}
+	}
+}
+
+func mustBuiltins(t *testing.T) []Builtin {
+	t.Helper()
+	all, err := Builtins()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return all
 }

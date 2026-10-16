@@ -25,14 +25,15 @@ def tuning(name: str, default: int | float) -> int | float:
         raise SystemExit(f"agent: {name} must be a {type(default).__name__}, not {value!r}") from None
 
 
-# What a platform experiment's coordinator runs as. It is no flavor of an agent: a coordinator is
-# not in the experiment, and HL_TOKEN is the platform experiment's coordinator token.
-COORDINATOR_FLAVOR = "coordinator"
-# What the agent of a draft is started as. It is an agent of the platform experiment like any
-# other, with its own token, and its briefing is its own: it plans the experiment
-# the others will later run in.
-PLANNER_FLAVOR = "planner"
-BASELINE_ROLE = "baseline"
+# The roles the platform serves instructions for (domain.AgentRoles). A coordinator is no agent of
+# the run: HL_TOKEN is the platform experiment's coordinator token, and its agent_id is this name,
+# which is also the subject of its own agent.instructions (domain.CoordinatorRecipient).
+COORDINATOR = "coordinator"
+# The agent of a draft: it plans the experiment the others will later run in.
+PLANNER = "planner"
+BASELINE = "baseline"
+RESEARCHER = "researcher"
+_AGENT_ROLES = (RESEARCHER, BASELINE, PLANNER)
 
 
 def token_scope(token: str) -> tuple[str, str, str]:
@@ -60,56 +61,50 @@ def token_scope(token: str) -> tuple[str, str, str]:
 class Config:
     """What the harness is started with is API_URL and HL_TOKEN. The token says which agent of
     which platform experiment this is, or that it is the experiment's coordinator, and the rest is
-    read from the platform at startup (core.prepare)."""
+    read from the platform: its instructions say what it runs as (instructions.py)."""
     # The agent's own `hl` reads API_URL and HL_TOKEN from this same environment.
     api_url: str = field(default_factory=lambda: required("API_URL"))
     token: str = field(default_factory=lambda: required("HL_TOKEN"))
 
-    # From the token. A coordinator has no agent id: agent_id is then its flavor, which names it
-    # in the activity log and its working directory and is never sent to the platform.
+    # From the token. A coordinator has no agent id: agent_id is then COORDINATOR, which names it
+    # in the activity log and its working directory and is never sent to the platform as an id.
     agent_id: str = field(init=False)
     platform_experiment_id: str = field(init=False)
 
-    # From the agent's signup, or for a coordinator from its platform experiment. flavor selects
-    # the brief inlined into the prompt (prompts/flavors/<flavor>.md), model is what it runs on,
-    # and hyperparameters is the direction the agent was given, a small JSON object its prompt shows.
-    flavor: str = field(init=False, default="")
-    model: str = field(init=False, default="")
-    hyperparameters: dict = field(init=False, default_factory=dict)
-    # From the agent's signup: what it is in the roster. Empty for a coordinator, which has no place in it.
+    # The role its instructions name, which no edit of its agent type changes. A coordinator's is
+    # known from its token.
     role: str = field(init=False, default="")
 
     def __post_init__(self):
         kind, self.platform_experiment_id, agent_id = token_scope(self.token)
         if kind == "coordinator":
-            self.agent_id = self.flavor = COORDINATOR_FLAVOR
+            self.agent_id = self.role = COORDINATOR
         else:
             self.agent_id = agent_id
 
-    def run_as(self, flavor, model, hyperparameters=None, role="") -> None:
-        """Takes what the platform says this one runs as. Neither flavor nor model has a default:
-        the roster shows both, and a default here would run something the roster does not say."""
-        if not flavor or not model:
-            raise SystemExit(f"agent: the platform names no flavor or no model for {self.agent_id} "
-                             f"(flavor {flavor!r}, model {model!r})")
-        self.flavor, self.model, self.hyperparameters, self.role = flavor, model, hyperparameters or {}, role
+    def run_as(self, role: str) -> None:
+        """Takes the role the platform's instructions name. A coordinator's token runs a
+        coordinator and an agent's one of the agents' roles, and a role once taken stays."""
+        allowed = (COORDINATOR,) if coordinates(self) else _AGENT_ROLES
+        if role not in allowed or (self.role and role != self.role):
+            raise SystemExit(f"agent: the platform's instructions for {self.agent_id} name the role {role!r}, "
+                             f"which it cannot run as (it runs as {self.role or 'one of ' + ', '.join(allowed)})")
+        self.role = role
 
 
 def coordinates(cfg) -> bool:
-    return cfg.flavor == COORDINATOR_FLAVOR
+    return cfg.role == COORDINATOR
 
 
 def plans(cfg) -> bool:
-    return cfg.flavor == PLANNER_FLAVOR
+    return cfg.role == PLANNER
 
 
 def measures_baseline(cfg) -> bool:
     """An agent of role baseline measures the control before the run starts."""
-    return cfg.role == BASELINE_ROLE
+    return cfg.role == BASELINE
 
 
 def submits_jobs(cfg) -> bool:
     """A researcher or a baseline agent: whoever has jobs of its own to wait for."""
     return not coordinates(cfg) and not plans(cfg)
-
-

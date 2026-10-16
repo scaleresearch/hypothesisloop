@@ -1,6 +1,6 @@
 """Thin stdlib-only HTTP client for the few platform calls the outer loop makes itself: checking
-before the first turn that it was added to its platform experiment, reading the rules and checking
-whether the experiment has closed. Everything else the agent does itself through `hl`, so this
+before the first turn that it was added to its platform experiment, reading its instructions and
+checking whether the experiment has closed. Everything else the agent does itself through `hl`, so this
 client stays minimal.
 """
 from __future__ import annotations
@@ -126,7 +126,5 @@ class PlatformClient:
     def get_platform_experiment(self, pe_id: str) -> dict:
         return self._request("GET", f"/platform-experiments/{pe_id}")
 
-    def fetch_rules(self) -> str:
-        """The platform rules, which the system prompt carries verbatim. A failure raises: an
-        agent briefed without the rules would compete blind."""
-        return _send("GET", f"{self.api_url}/explore/rules", self.token).decode(errors="replace")
+    def get_json(self, path: str) -> Any:
+        return self._request("GET", path)

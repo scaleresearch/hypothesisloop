@@ -8,7 +8,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest import mock
 
-from hypothesisloop_agent import api_client, core
+from hypothesisloop_agent import api_client, config, core, instructions, prompt
 
 
 def derived(scope: str) -> str:
@@ -30,6 +30,7 @@ class FakePlatform(BaseHTTPRequestHandler):
     status_for_strangers = 401
     repository_url = "https://github.com/acme/model.git"
     git_url = "https://api.example.invalid/git/pe-1.git"
+    instructions: dict = {}
 
     def _reply(self, status, body):
         self.send_response(status)
@@ -40,11 +41,9 @@ class FakePlatform(BaseHTTPRequestHandler):
     def do_GET(self):
         FakePlatform.calls.append(("GET", self.path))
         FakePlatform.tokens.add(self.headers["Authorization"])
-        if self.path == "/explore/rules":
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"## platform rules\n")
-            return
+        if self.path.endswith("/instructions"):
+            role = "coordinator" if self.path.endswith("/coordinator/instructions") else FakePlatform.instructions["role"]
+            return self._reply(200, {**FakePlatform.instructions, "role": role})
         if self.path == "/platform-experiments/pe-1":
             body = {"id": "pe-1", "status": "running", "coordinator": {"model": "model-1"}}
             if FakePlatform.repository_url:
@@ -65,6 +64,15 @@ class FakePlatform(BaseHTTPRequestHandler):
         pass
 
 
+def served(**changes) -> dict:
+    """Instructions as the platform answers them."""
+    return {"agent_type": "generalist", "agent_type_version": 1, "role": "researcher",
+            "prompt": "Work in {{workdir}} with:\n{{hl_commands}}", "placeholders": ["hl_commands", "workdir"],
+            "settings": {"model": "model-1", "max_subagents": 4, "pacing_subagents": 2, "effort": "high",
+                         "hyperparameters": {"batch_size": 64}},
+            "digest": "digest-1", **changes}
+
+
 class PlatformCase(unittest.TestCase):
     def setUp(self):
         FakePlatform.joined, FakePlatform.calls, FakePlatform.tokens = {"agent-a"}, [], set()
@@ -72,6 +80,7 @@ class PlatformCase(unittest.TestCase):
         FakePlatform.status_for_strangers = 401
         FakePlatform.repository_url = "https://github.com/acme/model.git"
         FakePlatform.git_url = "https://api.example.invalid/git/pe-1.git"
+        FakePlatform.instructions = served()
         self.server = HTTPServer(("127.0.0.1", 0), FakePlatform)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.addCleanup(self.server.server_close)
@@ -127,27 +136,27 @@ class StartupTest(PlatformCase):
 
     def prepare(self, **overrides):
         with mock.patch.dict(os.environ, self.environment(**overrides), clear=True), \
-                mock.patch.object(core, "hl_commands", return_value="usage: hl"):
+                mock.patch.object(prompt, "hl_commands", return_value="usage: hl"):
             return core.prepare()
 
-    def test_prepare_reads_who_it_is_from_the_token_and_what_it_runs_as_from_its_signup(self):
+    def test_prepare_reads_who_it_is_from_the_token_and_what_it_runs_as_from_its_instructions(self):
         # What a stale environment says of who this is counts for nothing.
+        FakePlatform.instructions = served(role="baseline")
         setup = self.prepare(AGENT_ID="left-over", PLATFORM_EXPERIMENT_ID="pe-stale", AGENT_FLAVOR="coordinator", AGENT_MODEL="other")
         cfg = setup.cfg
-        self.assertEqual((cfg.agent_id, cfg.platform_experiment_id), ("agent-a", "pe-1"))
-        self.assertEqual((cfg.flavor, cfg.model, cfg.hyperparameters), ("generalist", "model-1", {"batch_size": 64}))
+        self.assertEqual((cfg.agent_id, cfg.platform_experiment_id, cfg.role), ("agent-a", "pe-1", "baseline"))
+        self.assertEqual(setup.commands, "usage: hl")
         self.assertEqual(FakePlatform.calls, [
             ("GET", "/platform-experiments/pe-1/signups/agent-a"),
             ("GET", "/platform-experiments/pe-1"),
-            ("GET", "/explore/rules"),
+            ("GET", "/platform-experiments/pe-1/agents/agent-a/instructions"),
         ])
-        self.assertIn("clone https://github.com/acme/model.git", setup.system_prompt)
 
     # An agent's `pip install` went to a user site the python3 on its PATH, the harness's, never
     # read, and three more tries passed before it had a place to install into.
     def test_prepare_puts_the_agents_own_virtualenv_first_for_everything_it_starts(self):
         with mock.patch.dict(os.environ, self.environment(VIRTUAL_ENV="/opt/hypothesisloop-agent/.venv"), clear=True), \
-                mock.patch.object(core, "hl_commands", return_value="usage: hl"):
+                mock.patch.object(prompt, "hl_commands", return_value="usage: hl"):
             core.prepare()
             self.assertEqual((os.environ["VIRTUAL_ENV"], os.environ["PATH"]), ("/agent/.venv", "/agent/.venv/bin:/usr/bin"))
         with self.assertRaises(SystemExit) as ctx:
@@ -171,7 +180,7 @@ class StartupTest(PlatformCase):
     # token, and no credential of the git host is handed to it.
     def test_prepare_sends_git_for_the_repository_to_the_platforms_git_proxy(self):
         with mock.patch.dict(os.environ, self.environment(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="core.pager", GIT_CONFIG_VALUE_0="cat"), clear=True), \
-                mock.patch.object(core, "hl_commands", return_value="usage: hl"), mock.patch.object(core, "clone_workspace"):
+                mock.patch.object(prompt, "hl_commands", return_value="usage: hl"), mock.patch.object(core, "clone_workspace"):
             core.prepare()
             self.assertEqual(os.environ["GIT_CONFIG_COUNT"], "2")
             self.assertEqual((os.environ["GIT_CONFIG_KEY_0"], os.environ["GIT_CONFIG_VALUE_0"]), ("core.pager", "cat"))
@@ -183,7 +192,7 @@ class StartupTest(PlatformCase):
             self.prepare()
         self.assertIn("names no git_url", str(refused.exception))
 
-    def test_prepare_stops_an_agent_nobody_added_before_it_reads_the_rules(self):
+    def test_prepare_stops_an_agent_nobody_added_before_it_reads_its_instructions(self):
         with self.assertRaises(SystemExit):
             self.prepare(HL_TOKEN=derived("agent:pe-1/agent-b"))
         self.assertEqual(FakePlatform.calls, [("GET", "/platform-experiments/pe-1/signups/agent-b")])
@@ -204,12 +213,29 @@ class StartupTest(PlatformCase):
             self.assertNotIn(token, str(ctx.exception))
         self.assertEqual(FakePlatform.calls, [])
 
-    def test_a_signup_that_names_no_flavor_or_no_model_fails_startup(self):
-        for gone in ("flavor", "model"):
-            FakePlatform.signup = {"flavor": "generalist", "model": "model-1", gone: ""}
+    # A harness that ran instructions it could not read whole would run something nobody chose.
+    def test_instructions_the_harness_cannot_run_fail_startup(self):
+        settings = served()["settings"]
+        for broken, said in (
+            (served(settings={**settings, "model": ""}), "name no model"),
+            (served(settings={**settings, "pacing_subagents": 5}), "5 subagents while paced and 4 at most"),
+            (served(settings={k: v for k, v in settings.items() if k != "effort"}), "'effort'"),
+            (served(role="coordinator"), "cannot run as"),
+            (served(prompt="{{rules}} and {{workdir}}"), "holds '{{rules}} and '"),
+            (served(placeholders=["hl_commands", "workdir", "secret"]), "leaves secret to the harness, which fills only hl_commands, workdir"),
+        ):
+            FakePlatform.instructions = broken
             with self.assertRaises(SystemExit) as ctx:
                 self.prepare()
-            self.assertIn("names no flavor or no model", str(ctx.exception))
+            self.assertIn(said, str(ctx.exception))
+
+    def test_an_agent_the_platform_serves_no_instructions_fails_startup(self):
+        client = api_client.PlatformClient(self.url, "agent-token")
+        with mock.patch.object(client, "get_json", side_effect=api_client.APIError("GET", "/x", 404, "instructions not found")), \
+                mock.patch.dict(os.environ, {"API_URL": self.url, "HL_TOKEN": AGENT_TOKEN}, clear=True), \
+                self.assertRaises(SystemExit) as ctx:
+            instructions.read(client, config.Config())
+        self.assertIn("serves agent-a no instructions (HTTP 404)", str(ctx.exception))
 
 
 if __name__ == "__main__":

@@ -22,8 +22,8 @@ WINDOW_S = {"five_hour": 5 * 3600, "seven_day": 7 * 86400, "seven_day_opus": 7 *
 # share of time.
 FLOOR = config.tuning("HL_PACING_FLOOR", 0.3)
 MARGIN = config.tuning("HL_PACING_MARGIN", 0.1)
-# The most subagents an agent runs at once while ahead, and a coordinator's review interval.
-SUBAGENTS = config.tuning("HL_PACING_SUBAGENTS", 2)
+# A coordinator's review interval while ahead. How many subagents an agent runs at once then is
+# pacing_subagents of its instructions.
 REVIEW_S = config.tuning("HL_PACING_REVIEW_S", 3600)
 
 NOTE = ("Model allowance: the model account you share with the run's other agents has used {used:.0%} of its "
@@ -98,7 +98,7 @@ class Allowance:
             return reading
         return None
 
-    def note(self, coordinator: bool) -> str:
+    def note(self, coordinator: bool, subagents: int) -> str:
         """What a wake says of the allowance while it is paced, "" while it is not."""
         reading = self.pacing()
         if reading is None:
@@ -106,13 +106,13 @@ class Allowance:
         horizon = (f"until the run ends at {_utc(self._until)} UTC" if self._until and self._until < reading.resets_at
                    else "until it resets")
         said = NOTE.format(used=reading.utilization, window=reading.window, gone=reading.gone(self._clock(), self._until),
-                           horizon=horizon, resets=_utc(reading.resets_at), subagents=SUBAGENTS)
+                           horizon=horizon, resets=_utc(reading.resets_at), subagents=subagents)
         return said + (COORDINATOR_NOTE.format(minutes=REVIEW_S // 60) if coordinator else "")
 
-    def cap(self) -> tuple[int, str] | None:
+    def cap(self, subagents: int) -> tuple[int, str] | None:
         """The subagents that run at once while paced, and why, None while not."""
         reading = self.pacing()
         if reading is None:
             return None
-        return SUBAGENTS, (f" while the model allowance runs ahead of its pace ({reading.utilization:.0%} of its "
+        return subagents, (f" while the model allowance runs ahead of its pace ({reading.utilization:.0%} of its "
                            f"{reading.window} window used, {reading.gone(self._clock(), self._until):.0%} of it gone)")

@@ -33,7 +33,7 @@ from claude_agent_sdk import (
     UserMessage,
 )
 
-from hypothesisloop_agent import config, core, progress, proposal, seed, session, updates
+from hypothesisloop_agent import api_client, config, core, instructions, progress, proposal, seed, session, updates
 from hypothesisloop_agent.claude import activity, pacing
 
 log = logging.getLogger("llm_agent")
@@ -295,10 +295,9 @@ _task_stop_hook = _refuse_subagent(SUBAGENT_TASK_STOP)
 _subagent_message_hook = _refuse_subagent(SUBAGENT_MESSAGE)
 
 
-# The most subagents an agent runs at once. Researchers ran 3 to 10, and each one's end starts a
-# turn of the lead's over its whole context, which then grew past its rotation as some were
-# always live.
-_MAX_SUBAGENTS = config.tuning("HL_MAX_SUBAGENTS", 4)
+# The most subagents an agent runs at once is max_subagents of its instructions. Researchers ran 3
+# to 10, and each one's end starts a turn of the lead's over its whole context, which then grew
+# past its rotation as some were always live.
 SUBAGENT_CAP = ("{live} of your subagents are at work, the most that run at once{why}. Start this one when one "
                 "of them ends: its end starts your next turn.")
 # How long a subagent let through counts after its start returned, while the CLI does not list it.
@@ -338,8 +337,8 @@ class Subagents:
 
 def _subagent_cap() -> tuple[int, str]:
     """How many subagents may run at once now, and why that many when it is fewer than usual."""
-    paced = _allowance.cap()
-    return paced if paced and paced[0] < _MAX_SUBAGENTS else (_MAX_SUBAGENTS, "")
+    paced = _allowance.cap(_running.pacing_subagents)
+    return paced if paced and paced[0] < _running.max_subagents else (_running.max_subagents, "")
 
 
 def _subagent_hooks(subagents: Subagents) -> dict[str, HookMatcher]:
@@ -464,8 +463,8 @@ _CONTEXT_CEILING_TOKENS = config.tuning("HL_CONTEXT_CEILING_TOKENS", 500_000)
 _STOPPED_SUBAGENTS = (
     "These subagents were at work when that session ended and stopped with it before they completed:\n"
     "{tasks}\nStart each again with Agent from where its hypothesis, branch and jobs stand: its jobs ran on.")
-_COMPACTION_PROMPT = (
-    "We must rotate to a fresh session because this session has reached its context budget. "
+_HANDOFF_PROMPT = (
+    "We must rotate to a fresh session because {why}. "
     "Produce a concise but complete handoff for the next instance of yourself: current platform "
     "experiment state, hypotheses and evidence, actions/results so far, important files or jobs, "
     "decisions and rejected paths, any message from the coordinator or the owner not yet acted on, "
@@ -473,6 +472,11 @@ _COMPACTION_PROMPT = (
     "worktree, branch, jobs and how far it got, and the exact next useful steps. Do not do more research or "
     "use tools; output only the handoff."
 )
+_COMPACTION_PROMPT = _HANDOFF_PROMPT.format(why="this session has reached its context budget")
+# A session keeps the system prompt and the model it started with, a resumed one too (seen on the
+# real API), so new instructions that change either start a fresh session.
+_INSTRUCTIONS_ROTATION = _HANDOFF_PROMPT.format(
+    why="the instructions you run with changed, and the next session runs with the new ones")
 
 
 # Longest silence a healthy turn can produce between two CLI messages, a model call's wait for its
@@ -617,7 +621,7 @@ async def _store_session(setup: core.RunSetup) -> None:
     if _sessions is None:
         return
     statedir = Path(setup.statedir)
-    files = [_SESSION_ID_FILE, _HANDOFF_FILE, _LIVE_SESSION_FILE]
+    files = [_SESSION_ID_FILE, _HANDOFF_FILE, _LIVE_SESSION_FILE, instructions.FILE]
     files += [str(path.relative_to(statedir)) for path in (statedir / _WATCH_STATE_DIR).rglob("*") if path.is_file()]
     transcripts = {name for session_id in (_load_resume_id(setup), _live_session_id) for name in _transcript_files(session_id)}
     async with _store_lock:
@@ -713,7 +717,7 @@ async def _with_situation(setup: core.RunSetup, watch_env: dict[str, str], promp
     """prompt with the situation at its end, read now, for every role in a run: a planner has
     none yet. While the model allowance is paced it says so before."""
     await asyncio.to_thread(_read_run_end, setup)
-    if note := _allowance.note(config.coordinates(setup.cfg)):
+    if note := _allowance.note(config.coordinates(setup.cfg), _running.pacing_subagents):
         prompt = f"{prompt}\n\n{note}"
     if config.plans(setup.cfg):
         return prompt
@@ -724,7 +728,9 @@ async def _told(setup: core.RunSetup, watch_env: dict[str, str], events: list[di
     """What the agent is told of a batch of updates, "" for nothing. A revision asked of a planner
     is an event that points at the draft: it is told as the revision itself, and one that the
     planner has answered since, which a restored cursor replays, is told as nothing. A baseline
-    agent is told its clock with the updates, and everyone the situation."""
+    agent is told its clock with the updates, and everyone the situation. That its own
+    instructions changed is told to no one: the harness applies them at the turn boundary."""
+    events = _not_own_instructions(setup, events)
     rest = [e for e in events if e["kind"] != updates.REVISION]
     parts = [updates.message(rest, setup.cfg.agent_id)] if rest else []
     if len(rest) < len(events):
@@ -817,6 +823,7 @@ async def _last_turn(client, setup: core.RunSetup, watch_env: dict[str, str], ha
         events = await updates.drain(env)
         for line in activity.event_lines(events, agent):
             print(line, flush=True)
+        events = _not_own_instructions(setup, events)
         await client.query(await _with_situation(setup, watch_env, prompt + ("\n\n" + updates.message(events, agent) if events else "")))
         updates.delivered(env)
     limit = _shutdown_turn_s(setup)
@@ -892,13 +899,82 @@ async def _receive_turn(client):
         _progress.doing(progress.WAITING)
 
 
-# How hard the model thinks before each step. A baseline agent measures a control it is told how to
-# run, against a deadline: at high it thought for 107 s (9155 tokens) before running `date` and
-# for 135 s (10529 tokens) before a `cat`, 7 min of 40 in single calls. A planner at high spent
-# 155 s of its 3m41s in three generations. Researchers and the coordinator design and judge
-# experiments and keep high.
-def _effort(cfg) -> str:
-    return "medium" if config.measures_baseline(cfg) or config.plans(cfg) else "high"
+# The instructions the session runs with: its system prompt and model, and the subagent limits and
+# effort, which change in the session. Set at the start of each connection.
+_running: instructions.Instructions | None = None
+# Whether agent.instructions said the agent's instructions changed since they were last read: they
+# are read and applied at the next turn boundary.
+_instructions_told = False
+
+
+def _not_own_instructions(setup: core.RunSetup, events: list[dict]) -> list[dict]:
+    """events without the ones that say the agent's own instructions changed, which are noted."""
+    global _instructions_told
+    rest = [e for e in events if not instructions.addressed(e, setup.cfg)]
+    if len(rest) < len(events):
+        _instructions_told = True
+    return rest
+
+
+def _connection_instructions(setup: core.RunSetup, resume_id: str | None) -> instructions.Instructions:
+    """The instructions a connection starts with, read from the platform. A resumed session keeps
+    the system prompt it was started with, so it is run with the instructions it was started with
+    and the ones read now are applied at its first turn boundary."""
+    global _instructions_told
+    newest = instructions.fetch(setup.client, setup.cfg, setup.commands, setup.workdir)
+    kept = instructions.load(setup.statedir) if resume_id else None
+    running = kept or newest
+    _instructions_told = running.digest != newest.digest
+    instructions.save(setup.statedir, running)
+    log.info("running %s version %d (digest %s): model=%s effort=%s max_subagents=%d pacing_subagents=%d%s",
+             running.agent_type, running.version, running.digest[:12], running.model, running.effort,
+             running.max_subagents, running.pacing_subagents,
+             f", version {newest.version} (digest {newest.digest[:12]}) applies at the first turn boundary" if _instructions_told else "")
+    return running
+
+
+async def _set_effort(client, effort: str) -> None:
+    """Changes how hard the model thinks from the next call on, in the session. The SDK has no
+    method for the CLI's apply_flag_settings."""
+    await client._query._send_control_request({"subtype": "apply_flag_settings", "settings": {"effortLevel": effort}}, timeout=20)
+
+
+async def _apply_instructions(client, setup: core.RunSetup, background: dict[str, dict], resume_id: str | None) -> bool:
+    """At a turn boundary, reads the instructions agent.instructions said changed and applies them:
+    the subagent limits and the effort in the session, a prompt or a model in a fresh session the
+    lead hands off to. A subagent that ended before the boundary has reported; one still at work
+    stops with the session, and the handoff names it for the lead to start again. Whether the
+    session rotated. A read or an apply that failed is tried again at the next boundary."""
+    global _running, _instructions_told
+    if not _instructions_told:
+        return False
+    try:
+        newest = await asyncio.to_thread(instructions.fetch, setup.client, setup.cfg, setup.commands, setup.workdir)
+    except api_client.APIError as e:
+        log.warning("the changed instructions were not read (%s): reading them at the next turn boundary", e)
+        return False
+    _instructions_told = False
+    if newest.digest == _running.digest:
+        return False
+    if _running.needs_new_session(newest):
+        log.info("instructions changed to %s version %d (digest %s), its prompt or model with them: handing off to a fresh session",
+                 newest.agent_type, newest.version, newest.digest[:12])
+        if await _hand_off(client, setup, _INSTRUCTIONS_ROTATION, background, resume_id):
+            return True
+        _instructions_told = True
+        return False
+    if newest.effort != _running.effort:
+        try:
+            await _set_effort(client, newest.effort)
+        except Exception as e:
+            log.warning("the effort was not changed to %s (%s): trying again at the next turn boundary", newest.effort, e)
+            _instructions_told = True
+            return False
+    log.info("instructions changed to %s version %d (digest %s) in the session: effort=%s max_subagents=%d pacing_subagents=%d",
+             newest.agent_type, newest.version, newest.digest[:12], newest.effort, newest.max_subagents, newest.pacing_subagents)
+    _running = newest
+    instructions.save(setup.statedir, newest)
+    return False
 
 
 def _context_tokens(usage: dict) -> int:
@@ -1033,7 +1109,7 @@ def _delete_retired_transcripts() -> None:
         _retired_sessions.discard(session_id)
 
 
-async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | None,
+async def _run_one_session(setup: core.RunSetup, resume_id: str | None,
                             stop_flag: list,
                             initial_prompt: str | None = None,
                             on_good_turn=lambda: None,
@@ -1043,15 +1119,21 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     Returns whether it rotated: a handoff was written and the next session starts fresh from
     it. A rate limit is read by the run loop from _refused_until. The session id and the handoff live on disk, see _restart_state.
     """
+    global _running
     cfg = setup.cfg
+    try:
+        _running = await asyncio.to_thread(_connection_instructions, setup, resume_id)
+    except api_client.APIError as e:
+        log.warning("the instructions were not read (%s): connecting again after the backoff", e)
+        return False
     watch_env = updates.watch_env(cfg.api_url, cfg.token, setup.statedir)
     handing = asyncio.Lock()
     background: dict[str, dict] = {}
     capped = _subagent_hooks(Subagents(background))
     options = ClaudeAgentOptions(
-        system_prompt=setup.system_prompt + _FILE_TOOLS_NOTE,
-        model=model,
-        effort=_effort(cfg),
+        system_prompt=_running.prompt + _FILE_TOOLS_NOTE,
+        model=_running.model,
+        effort=_running.effort,
         # The stream events of a model call say what it writes while it writes, see activity.Composing.
         include_partial_messages=True,
         max_buffer_size=MAX_MESSAGE_BYTES,
@@ -1122,7 +1204,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                         got_result = True
                         turn_is_error = message.is_error
                         overflowed = message.is_error and context_overflowed(message)
-                        rotate_at, hard_at = _rotation_limits(message, model)
+                        rotate_at, hard_at = _rotation_limits(message, _running.model)
                         if message.is_error and credential_refused(message.result):
                             # Backing off cannot fix a credential the provider refuses. Exiting
                             # is what tells whoever started this agent, and with what words.
@@ -1177,6 +1259,9 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 log.warning("turn completed with an underlying error (is_error) — treating as transient")
                 return False
 
+            if await _apply_instructions(client, setup, background, resume_id):
+                return True
+
             transcript_bytes = _transcript_bytes(resume_id)
             due = context_tokens >= rotate_at or transcript_bytes >= _TRANSCRIPT_ROTATION_BYTES
             if due and background and context_tokens < hard_at and transcript_bytes < _TRANSCRIPT_HARD_BYTES:
@@ -1185,17 +1270,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             elif due:
                 log.info("context reached ~%d tokens, transcript %d bytes: creating handoff before fresh session",
                          context_tokens, transcript_bytes)
-                await client.query(_COMPACTION_PROMPT)
-                handoff_result = await _answer(client, setup, _COMPACTION_PROMPT, background)
-                if not handoff_result or handoff_result.is_error:
-                    log.warning("context handoff failed — preserving old session for retry")
-                    return False
-                handoff = (handoff_result.result or "").strip()
-                if not handoff:
-                    log.warning("context handoff was empty — preserving old session for retry")
-                    return False
-                await _rotate(setup, handoff + _stopped_subagents(background), resume_id)
-                return True
+                return await _hand_off(client, setup, _COMPACTION_PROMPT, background, resume_id)
 
             # The agent ended its turn. With no job of its own queued or running and no subagent
             # live its wait waits for nothing: it is told so at every such end but the one of the
@@ -1217,11 +1292,20 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             # over on the same connection. A turn the CLI starts by itself ends the wait and is
             # read first: one starts when a subagent ends, and on a resume to say which stopped.
             # The batch the wait took is then read again, as its cursor moves only once handed over.
-            own = asyncio.ensure_future(_own_turn(client, setup, background))
-            events, told, taken = await _next_told(setup, watch_env, lambda: stopped() or own.done(), wait_s, handing)
-            came = own.done()
-            own.cancel()
-            await asyncio.gather(own, return_exceptions=True)
+            while True:
+                own = asyncio.ensure_future(_own_turn(client, setup, background))
+                events, told, taken = await _next_told(setup, watch_env, lambda: stopped() or own.done(), wait_s, handing)
+                came = own.done()
+                own.cancel()
+                await asyncio.gather(own, return_exceptions=True)
+                if not events or told or came or stopped() or not _instructions_told:
+                    break
+                # A batch that said only that its own instructions changed: between turns is a
+                # turn boundary, where they apply, and the wait goes on.
+                async with handing:
+                    updates.delivered(taken)
+                if await _apply_instructions(client, setup, background, resume_id):
+                    return True
             if came:
                 _forget_job_reads()
                 continue
@@ -1250,16 +1334,34 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
 async def _next_told(setup: core.RunSetup, watch_env: dict[str, str], ended, idle_s: float,
                      handing: asyncio.Lock) -> tuple[list[dict], str, dict[str, str]]:
     """The next batch of updates, what the agent is told of it, "" once ended(), and the env that
-    took it, for updates.delivered. A batch that tells nothing held only a revision answered
-    since: it is passed and the wait goes on."""
+    took it, for updates.delivered. A batch that tells nothing held a revision answered since,
+    which is passed and the wait goes on, or said that the agent's own instructions changed,
+    which the session applies."""
     while True:
         taken = updates.taking(watch_env, "waiting")
         events = await updates.next_batch(taken, ended, idle_s)
         told = await _told(setup, watch_env, events) if events and not ended() else ""
-        if told or not events or ended():
+        if told or not events or ended() or _instructions_told:
             return events, told, taken
         async with handing:
             updates.delivered(taken)
+
+
+async def _hand_off(client, setup: core.RunSetup, prompt: str, background: dict[str, dict], resume_id: str | None) -> bool:
+    """Asks the lead for its handoff with prompt and makes it open the next session, which starts
+    fresh, with the subagents that stop with this one named. Whether it did: a handoff that failed
+    or came back empty keeps this session, for another try."""
+    await client.query(prompt)
+    handoff_result = await _answer(client, setup, prompt, background)
+    if not handoff_result or handoff_result.is_error:
+        log.warning("handoff failed — preserving old session for retry")
+        return False
+    handoff = (handoff_result.result or "").strip()
+    if not handoff:
+        log.warning("handoff was empty — preserving old session for retry")
+        return False
+    await _rotate(setup, handoff + _stopped_subagents(background), resume_id)
+    return True
 
 
 async def _answer(client, setup: core.RunSetup, prompt: str, background: dict[str, dict]) -> ResultMessage | None:
@@ -1323,18 +1425,18 @@ def _restart_state(setup: core.RunSetup) -> tuple[str | None, str | None]:
     return None, "Continue this experiment from the following handoff:\n\n" + handoff
 
 
-async def _run(setup: core.RunSetup, model: str) -> None:
+async def _run(setup: core.RunSetup) -> None:
     stop_flag = core.install_signal_handler()
     beat = asyncio.ensure_future(_progress.run())
     storing = asyncio.ensure_future(_keep_session_stored(setup))
     try:
-        await core.run_until_lost(setup, _run_until_stopped(setup, model, stop_flag), stop_flag)
+        await core.run_until_lost(setup, _run_until_stopped(setup, stop_flag), stop_flag)
     finally:
         beat.cancel()
         storing.cancel()
 
 
-async def _run_until_stopped(setup: core.RunSetup, model: str, stop_flag: list) -> None:
+async def _run_until_stopped(setup: core.RunSetup, stop_flag: list) -> None:
     backoff_s = _RECONNECT_BACKOFF_INITIAL_S
     await core.until_accepted(setup, stop_flag, said=lambda: _progress.doing("waiting for the plan to be accepted"))
 
@@ -1355,7 +1457,7 @@ async def _run_until_stopped(setup: core.RunSetup, model: str, stop_flag: list) 
         resume_id, initial_prompt = _restart_state(setup)
         try:
             rotated = await _run_one_session(
-                setup, model, resume_id, stop_flag, initial_prompt, reset_backoff,
+                setup, resume_id, stop_flag, initial_prompt, reset_backoff,
             )
         except Exception as e:
             if not _transport_error(e):
@@ -1388,14 +1490,13 @@ def main() -> None:
     core.start_staging(setup)
     _sessions = session.Sessions(setup.client, setup.cfg, setup.statedir, _model_home())
     _restore_session(setup)
-    model = setup.cfg.model
     # With the line the CLI connects with, this says where a slow start went: what precedes
     # both is the machine, its image and the interpreter.
     log.info(
-        "llm_agent %s starting (claude): pe=%s model=%s, prepared in %.1fs",
-        setup.cfg.agent_id, setup.cfg.platform_experiment_id, model, time.monotonic() - started,
+        "llm_agent %s starting (claude): pe=%s role=%s, prepared in %.1fs",
+        setup.cfg.agent_id, setup.cfg.platform_experiment_id, setup.cfg.role, time.monotonic() - started,
     )
-    asyncio.run(_run(setup, model))
+    asyncio.run(_run(setup))
     log.info("llm_agent %s stopped", setup.cfg.agent_id)
 
 

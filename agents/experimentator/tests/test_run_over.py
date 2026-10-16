@@ -17,7 +17,7 @@ def setup(answer):
             raise result
         return result
 
-    cfg = SimpleNamespace(agent_id="ag-1", flavor="generalist", role="competitor", platform_experiment_id="pe-1")
+    cfg = SimpleNamespace(agent_id="ag-1", role="researcher", platform_experiment_id="pe-1")
     return SimpleNamespace(cfg=cfg, client=SimpleNamespace(get_signup=get_signup))
 
 
