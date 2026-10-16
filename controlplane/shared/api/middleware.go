@@ -60,12 +60,17 @@ func LoggingMiddleware(logger *zap.Logger) func(http.Handler) http.Handler {
 }
 
 // RecoveryMiddleware returns a middleware that catches panics, logs them with a
-// stack trace, and responds with HTTP 500.
+// stack trace, and responds with HTTP 500. http.ErrAbortHandler is a handler cutting its own
+// response on purpose, as a cut stream does: it goes on to the server, which drops the
+// connection without logging it, and nothing is written after what was already sent.
 func RecoveryMiddleware(logger *zap.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if rec := recover(); rec != nil {
+					if rec == http.ErrAbortHandler {
+						panic(rec)
+					}
 					auth.WriteError(w, logger, auth.Internal(logger, "panic recovered", fmt.Errorf("%v", rec),
 						zap.String("stack", string(debug.Stack())),
 						zap.String("method", r.Method),
