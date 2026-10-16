@@ -330,22 +330,6 @@ export function fetchHypothesisStats(platformExperimentID: string): Promise<Hypo
   )
 }
 
-interface HypothesesParams {
-  project_id?: string
-  platform_experiment_id?: string
-  status?: HypothesisStatus
-  /** Substring of the claim, ignoring case. */
-  q?: string
-  limit: number
-  offset: number
-}
-
-/** A page of hypotheses: the open ideas of people first, then the newest. */
-// Each row carries what was found for it, as its node in the graph does.
-export function fetchHypothesesPage(params: HypothesesParams): Promise<Page<HypothesisGraphNode>> {
-  return apiFetchPage<HypothesisGraphNode>(withQuery('/hypotheses', params))
-}
-
 // A hypothesis with a verdict, a finding or a job with a metric: its newest finding and the job
 // testing it that did best on the ranking metric.
 interface HypothesisEvidence extends Hypothesis {

@@ -34,6 +34,9 @@ import { isReadOnly, ReadOnlyProvider } from '@/lib/read-only'
 import { HUMAN_OWNER, extendLayout, graphHref, layoutGraph, matchesFilters, shareUnchanged } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
 
+/** The view a hypotheses page opens in, which the URL leaves out. */
+export const HYPOTHESES_VIEW = 'outline'
+
 const STATUS_OPTIONS = ['open', 'confirmed', 'refuted', 'inconclusive'].map(s => ({ value: s, label: s }))
 
 /** Narrows the graph to one agent's hypotheses, or to the ones people added. */
@@ -75,15 +78,14 @@ function useStableLayout(graph: HypothesisGraph) {
 }
 
 /**
- * One experiment's hypotheses as a graph or an outline, with its search, filters, selection and
+ * One experiment's hypotheses as an outline or a graph, with its search, filters, selection and
  * editing. On the experiment's own page it heads itself and switches experiment and view; embedded
- * in the project's hypotheses page, that page does both and lists the views (defaultView there is
- * its own default, which the URL leaves out).
+ * in the project's hypotheses page, that page does both.
  */
-export function ExperimentHypotheses({ peID, defaultView = 'graph', embedded = false }: { peID: string; defaultView?: string; embedded?: boolean }) {
+export function ExperimentHypotheses({ peID, embedded = false }: { peID: string; embedded?: boolean }) {
   const { me } = useTenant()
   const router = useRouter()
-  const [view, setView] = useQueryParam('view', defaultView)
+  const [view, setView] = useQueryParam('view', HYPOTHESES_VIEW)
   const [statusFilter, setStatusFilter] = useQueryParam('status')
   const [ownerFilter, setOwnerFilter] = useQueryParam('agent')
   const [q, setQ] = useQueryParam('q')
@@ -104,7 +106,7 @@ export function ExperimentHypotheses({ peID, defaultView = 'graph', embedded = f
   const matching = graph ? graph.nodes.filter(n => matchesFilters(n, filters)).length : 0
 
   function selectExperiment(next: string) {
-    router.push(withQuery(graphHref(next), { view: view === 'graph' ? undefined : view }))
+    router.push(withQuery(graphHref(next), { view: view === HYPOTHESES_VIEW ? undefined : view }))
   }
 
   // Nothing is added to a graph whose experiment has not been read yet, nor to a closed one.
@@ -127,8 +129,8 @@ export function ExperimentHypotheses({ peID, defaultView = 'graph', embedded = f
       <Inline gap="md" nowrap className="ml-auto">
         {action}
         <Inline gap="xs" nowrap role="group" aria-label="View">
-          <Chip active={view === 'graph'} onClick={() => setView('graph')}>Graph</Chip>
           <Chip active={view === 'outline'} onClick={() => setView('outline')}>Outline</Chip>
+          <Chip active={view === 'graph'} onClick={() => setView('graph')}>Graph</Chip>
         </Inline>
       </Inline>
     </Inline>}
@@ -229,7 +231,7 @@ function Workspace({ graph, pe, mutate, canWrite, closed, view, q, setQ, search,
       <div className={clsx('grid min-h-canvas flex-fill grid-rows-1 gap-4', showSide ? 'grid-cols-with-aside' : 'grid-cols-1')}>
         <Card className="flex flex-col">
           <LinkBar />
-          {view === 'outline' ? (
+          {view !== 'graph' ? (
             <>
               {graph.nodes.length === 0 && (
                 <Text variant="note" className="px-3 pt-2.5">No hypotheses yet. Agents place each idea under the objective or an earlier one.</Text>

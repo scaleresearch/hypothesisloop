@@ -1,52 +1,42 @@
 'use client'
 
-import { Suspense, useState } from 'react'
+import { Suspense } from 'react'
 import type { ReactNode } from 'react'
 import useSWR from 'swr'
 import { clsx } from 'clsx'
 import { ArrowUpRight } from 'lucide-react'
-import {
-  HYPOTHESIS_STATUSES, fetchHypothesesPage, fetchHypothesisStats, fetchPlatformExperimentResults, fetchPlatformExperimentsPage,
-} from '@/lib/api'
+import { HYPOTHESIS_STATUSES, fetchHypothesisStats, fetchPlatformExperimentResults, fetchPlatformExperimentsPage } from '@/lib/api'
 import { statusColor } from '@/lib/colors'
-import { relTime } from '@/lib/format'
 import { useQueryParam } from '@/lib/query-state'
-import { experimentPath, hypothesisPath, projectPath } from '@/lib/routes'
+import { experimentPath, projectPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
 import { PlatformExperimentStatus } from '@/types'
 import type { HypothesisStats } from '@/lib/api'
-import type { HypothesisGraphNode, HypothesisStatus, PlatformExperiment } from '@/types'
-import { actorLabel } from '@/components/actor'
-import { ExperimentHypotheses } from '@/components/hypotheses-workspace'
+import type { PlatformExperiment } from '@/types'
+import { ExperimentHypotheses, HYPOTHESES_VIEW } from '@/components/hypotheses-workspace'
 import { Badge } from '@/components/ui/badge'
-import { ButtonLink, Chip } from '@/components/ui/button'
+import { ButtonLink } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
 import { TextLink } from '@/components/ui/link'
 import { Page } from '@/components/ui/page'
-import { Pagination } from '@/components/ui/pagination'
 import { Segmented } from '@/components/ui/segmented'
 import { Inline, Stack } from '@/components/ui/stack'
-import { LinkTr, RowAnchor, Table, num, quiet } from '@/components/ui/table'
-import { Eyebrow, Heading, Text } from '@/components/ui/text'
+import { Heading, Text } from '@/components/ui/text'
 import { ErrorMessage, Loading } from '@/components/ui/status-message'
 
 // The experiments a project holds are few; past this many the newest are listed and the rest named.
 const EXPERIMENTS_LISTED = 50
-const HYPOTHESES_PAGE_SIZE = 25
-const VIEWS = [{ value: 'list', label: 'List' }, { value: 'graph', label: 'Graph' }, { value: 'outline', label: 'Outline' }] as const
+const VIEWS = [{ value: 'outline', label: 'Outline' }, { value: 'graph', label: 'Graph' }] as const
 
-const capitalised = (word: string) => word.charAt(0).toUpperCase() + word.slice(1)
-
-/** The owner of a hypothesis by name: its agent, or the person who registered one no agent owns. */
-function ownerLabel(h: Pick<HypothesisGraphNode, 'agent_id' | 'actor'>): string {
-  const own = h.actor.kind === 'agent' && h.actor.id === h.agent_id && h.actor.name
-  return actorLabel(h.actor, h.agent_id, own || h.agent_id)
-}
-
-function lastActivity(h: HypothesisGraphNode): string {
-  return h.status_changed_at && h.status_changed_at > h.created_at ? h.status_changed_at : h.created_at
+/**
+ * The experiment with the most recent activity: an open or running one, the latest started first
+ * as the list comes, else the one that closed last.
+ */
+function mostRecentlyActive(experiments: PlatformExperiment[]): PlatformExperiment {
+  const live = experiments.find(pe => pe.status === PlatformExperimentStatus.OPEN || pe.status === PlatformExperimentStatus.RUNNING)
+  if (live) return live
+  return experiments.reduce((last, pe) => (pe.closed_at ?? '') > (last.closed_at ?? '') ? pe : last)
 }
 
 interface Standing {
@@ -136,27 +126,26 @@ export default function ProjectHypothesesPage() {
 
 /**
  * The project's home for hypotheses: its experiments down the side, each with its state, its ideas
- * by status and its best result against its baseline, picking the scope; beside them the scope's
- * ideas as a list, or one experiment's as its graph or outline. The URL keeps scope and view.
+ * by status and its best result against its baseline; beside them the chosen one's ideas as an
+ * outline or a graph. The URL keeps the experiment and the view.
  */
 function ProjectHypotheses() {
   const { project } = useTenant()
-  const [scope, setScope] = useQueryParam('experiment')
-  const [view, setView] = useQueryParam('view', 'list')
+  const [chosen, setChosen] = useQueryParam('experiment')
+  const [view, setView] = useQueryParam('view', HYPOTHESES_VIEW)
   const { data, error } = useSWR(
     ['platform-experiments', project.id, 'hypotheses-scope'],
     () => fetchPlatformExperimentsPage({ project_id: project.id, sort: '-starts_at', limit: EXPERIMENTS_LISTED }),
     { refreshInterval: 15_000, keepPreviousData: true },
   )
   const experiments = (data?.items ?? []).filter(pe => pe.status !== PlatformExperimentStatus.DRAFT)
-  const scoped = experiments.find(pe => pe.id === scope)
-  const workspace = view !== 'list' && scoped
+  const selected = experiments.length === 0 ? undefined : chosen ? experiments.find(pe => pe.id === chosen) : mostRecentlyActive(experiments)
 
   return (
     <Page
-      fill={!!workspace}
+      fill={!!selected}
       title="Hypotheses"
-      description={`What agents and people claim and test across the experiments of ${project.name}. Pick an experiment to see only its ideas, or its graph.`}
+      description={`What agents and people claim and test in the experiments of ${project.name}, one experiment at a time.`}
       actions={experiments.length > 0 && <Segmented label="View" size="sm" options={[...VIEWS]} value={view} onChange={setView} />}
     >
       {error && <ErrorMessage>Could not load the experiments of {project.name}: {error.message}</ErrorMessage>}
@@ -171,17 +160,16 @@ function ProjectHypotheses() {
       )}
       {experiments.length > 0 && (
         <div className="grid flex-fill gap-5 xl:grid-cols-scope-rail">
-          <ScopeRail
-            experiments={experiments}
-            total={data!.total}
-            scope={scoped?.id ?? ''}
-            onScope={id => setScope(id)}
-          />
+          <ScopeRail experiments={experiments} total={data!.total} selected={selected?.id} onSelect={setChosen} />
           <Stack gap="lg" className="min-w-0">
-            {scoped && <ExperimentHeader pe={scoped} />}
-            {view === 'list' && <HypothesesList experiments={experiments} scoped={scoped} />}
-            {view !== 'list' && !scoped && <PickExperiment experiments={experiments} onScope={setScope} />}
-            {workspace && <ExperimentHypotheses key={scoped.id} peID={scoped.id} defaultView="list" embedded />}
+            {selected ? (
+              <>
+                <ExperimentHeader pe={selected} />
+                <ExperimentHypotheses key={selected.id} peID={selected.id} embedded />
+              </>
+            ) : (
+              <ErrorMessage>Experiment {chosen} is not among the experiments of {project.name} listed here. Choose one beside.</ErrorMessage>
+            )}
           </Stack>
         </div>
       )}
@@ -189,27 +177,18 @@ function ProjectHypotheses() {
   )
 }
 
-function ScopeRail({ experiments, total, scope, onScope }: {
+function ScopeRail({ experiments, total, selected, onSelect }: {
   experiments: PlatformExperiment[]
   total: number
-  scope: string
-  onScope: (id: string) => void
+  selected?: string
+  onSelect: (id: string) => void
 }) {
   return (
     <nav aria-label="Experiments" className="min-w-0">
       <ul className="flex list-none gap-2 overflow-x-auto pb-1 xl:flex-col xl:overflow-visible xl:pb-0">
-        <li className="w-60 flex-none xl:w-auto">
-          <ScopeButton selected={scope === ''} onClick={() => onScope('')}>
-            <Inline gap="sm" nowrap>
-              <span className="min-w-0 flex-1 truncate font-medium">All experiments</span>
-              <Text as="span" variant="meta" tone="subtle" className="tabular-nums">{experiments.length}</Text>
-            </Inline>
-            <Text as="span" variant="meta" tone="subtle">Every idea of the project, newest activity first</Text>
-          </ScopeButton>
-        </li>
         {experiments.map(pe => (
           <li key={pe.id} className="w-60 flex-none xl:w-auto">
-            <ExperimentScope pe={pe} selected={scope === pe.id} onClick={() => onScope(pe.id)} />
+            <ExperimentScope pe={pe} selected={selected === pe.id} onClick={() => onSelect(pe.id)} />
           </li>
         ))}
       </ul>
@@ -283,138 +262,5 @@ function ExperimentHeader({ pe }: { pe: PlatformExperiment }) {
         <StatusBar stats={stats} />
       </Stack>
     </Card>
-  )
-}
-
-function PickExperiment({ experiments, onScope }: { experiments: PlatformExperiment[]; onScope: (id: string) => void }) {
-  return (
-    <EmptyState framed>
-      <Stack gap="md" className="items-center">
-        <span>A graph belongs to one experiment. Pick the one to draw:</span>
-        <Inline gap="sm" className="justify-center">
-          {experiments.map(pe => <Chip key={pe.id} onClick={() => onScope(pe.id)}>{pe.name}</Chip>)}
-        </Inline>
-      </Stack>
-    </EmptyState>
-  )
-}
-
-function HypothesesList({ experiments, scoped }: { experiments: PlatformExperiment[]; scoped?: PlatformExperiment }) {
-  const { project } = useTenant()
-  const [status, setStatus] = useQueryParam('status')
-  const [search, setSearch] = useQueryParam('q')
-  const [page, setPage] = useState(0)
-  const byID = new Map(experiments.map(pe => [pe.id, pe]))
-
-  const { data, error, isLoading } = useSWR(
-    ['hypotheses', project.id, scoped?.id ?? '', status, search, page],
-    () => fetchHypothesesPage({
-      // A shared experiment of another org lies outside the project, so it is asked for by itself.
-      project_id: scoped && scoped.project_id !== project.id ? undefined : project.id,
-      platform_experiment_id: scoped?.id,
-      status: (status || undefined) as HypothesisStatus | undefined,
-      q: search || undefined,
-      limit: HYPOTHESES_PAGE_SIZE,
-      offset: page * HYPOTHESES_PAGE_SIZE,
-    }),
-    { refreshInterval: 15_000 },
-  )
-  const rows = data?.items ?? []
-  const filtered = !!(status || search)
-
-  return (
-    <Card>
-      <div className="border-b px-5 py-3">
-        <Inline gap="md">
-          <Segmented
-            label="Status"
-            size="sm"
-            options={['', ...HYPOTHESIS_STATUSES].map(s => ({ value: s, label: s ? capitalised(s) : 'All' }))}
-            value={status}
-            onChange={s => { setStatus(s); setPage(0) }}
-          />
-          {data && <Text as="span" variant="hint" className="tabular-nums">{data.total} {data.total === 1 ? 'idea' : 'ideas'}</Text>}
-          <Input
-            fieldSize="sm"
-            className="ml-auto w-64"
-            aria-label="Search hypotheses"
-            value={search}
-            onChange={e => { setSearch(e.target.value); setPage(0) }}
-            placeholder={scoped ? `Search the claims of ${scoped.name}` : 'Search every claim'}
-          />
-        </Inline>
-      </div>
-      {error && <ErrorMessage className="m-5">Could not load the hypotheses: {error.message}</ErrorMessage>}
-      {isLoading && <Loading />}
-      {data && (
-        <div className="overflow-x-auto">
-          <Table className="min-w-xl table-fixed">
-            <thead>
-              <tr>
-                <th>Claim</th>
-                <th className="w-28">Status</th>
-                <th className={`w-28 ${num}`}>Best result</th>
-                <th className="hidden w-36 xl:table-cell">Proposed by</th>
-                <th className="w-24">Activity</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={5}>
-                    <EmptyState>
-                      {filtered
-                        ? `No hypotheses match${search ? ` "${search}"` : ' these filters'}${scoped ? ` in ${scoped.name}` : ''}.`
-                        : scoped
-                          ? `No hypotheses in ${scoped.name} yet. Its agents register them as they start working, and you can add one from its graph.`
-                          : 'No hypotheses yet. Agents register them as they start working.'}
-                    </EmptyState>
-                  </td>
-                </tr>
-              ) : rows.map(h => (
-                <HypothesisRow key={h.id} h={h} pe={byID.get(h.platform_experiment_id)} showExperiment={!scoped} />
-              ))}
-            </tbody>
-          </Table>
-        </div>
-      )}
-      <Pagination page={page} pageSize={HYPOTHESES_PAGE_SIZE} total={data?.total ?? 0} onPageChange={setPage} />
-    </Card>
-  )
-}
-
-function HypothesisRow({ h, pe, showExperiment }: { h: HypothesisGraphNode; pe?: PlatformExperiment; showExperiment: boolean }) {
-  const standing = useStanding(pe)
-  const best = h.best_job?.metric
-  return (
-    <LinkTr href={hypothesisPath(h.platform_experiment_id, h.id)}>
-      <td className="break-words">
-        <Stack gap="2xs">
-          <RowAnchor className="line-clamp-2" title={h.text}>{h.text}</RowAnchor>
-          {/* Where it lives, and below the widest screens who proposed it, whose column is left out there. */}
-          <Inline gap="xs" nowrap className={clsx('text-xs text-muted', !showExperiment && 'xl:hidden')}>
-            {showExperiment && (
-              <>
-                <Eyebrow className="flex-none">In</Eyebrow>
-                <span className="min-w-0 truncate">{pe?.name ?? h.platform_experiment_id}</span>
-                {pe && pe.status !== PlatformExperimentStatus.RUNNING && <span className="flex-none text-subtle">· {pe.status}</span>}
-              </>
-            )}
-            <span className="min-w-0 truncate text-subtle xl:hidden">{showExperiment && '· '}by {ownerLabel(h)}</span>
-          </Inline>
-        </Stack>
-      </td>
-      <td><Badge status={h.status}>{h.status}</Badge></td>
-      <td className={num} title={best ? `Best ${best.name} of its jobs` : 'No job of it reported a result yet'}>
-        {best ? (
-          <Stack gap="2xs" className="items-end">
-            <span className="text-foreground">{best.value.toFixed(4)}</span>
-            <Delta value={best.value} standing={standing} />
-          </Stack>
-        ) : <span className="text-subtle">–</span>}
-      </td>
-      <td className="hidden truncate text-xs xl:table-cell" title={ownerLabel(h)}>{ownerLabel(h)}</td>
-      <td className={quiet}>{relTime(lastActivity(h))}</td>
-    </LinkTr>
   )
 }
