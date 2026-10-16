@@ -265,7 +265,7 @@ async function choose(page, field, option) {
 // brief, then on Measure one metric from Add a metric. `form` is where the form is shown.
 async function fillNewExperiment(page, form, name) {
   await form.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(name)
-  await form.getByPlaceholder(/^Goals, evaluation protocol/).fill(`The brief of ${name}.`)
+  await form.getByLabel('Brief', { exact: true }).fill(`The brief of ${name}.`)
   await form.getByRole('button', { name: 'Next', exact: true }).click()
   const metric = form.getByLabel('Add a metric')
   await metric.click()

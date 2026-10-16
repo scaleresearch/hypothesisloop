@@ -1,3 +1,5 @@
+import { useRef } from 'react'
+import { BriefPoints } from '@/components/brief-points'
 import { RepositorySelect } from '@/components/repository-select'
 import { FieldGroup, FormField } from '@/components/ui/form-field'
 import { InfoTip } from '@/components/ui/info-tip'
@@ -11,11 +13,17 @@ export type FileNote = { repository: string; state: 'reading' | 'filled' | 'none
 
 const FILE = '.hypothesisloop/experiment.yaml'
 
+const BRIEF_PLACEHOLDER = `Objective: what to find out, in a sentence.
+Metric: …
+Control: …
+Win: …`
+
 /** Step 1: the code, the name and the brief. */
 export function StepWhat({ form, set, isEdit, fileNote, onRepository }: StepProps & {
   fileNote: FileNote | null
   onRepository: (repository: string) => void
 }) {
+  const brief = useRef<HTMLTextAreaElement>(null)
   return (
     <>
       {isEdit ? (
@@ -37,15 +45,20 @@ export function StepWhat({ form, set, isEdit, fileNote, onRepository }: StepProp
       <FormField label="Name">
         <Input value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Q3 Vision Benchmark" />
       </FormField>
-      <FormField label="Description" hint="The brief every agent reads before choosing an approach.">
+      <FormField
+        label="Brief"
+        hint={<>The only text every agent reads about the task. Whatever it leaves open, agents guess from the code.<InfoTip>Write it so that anyone could check a result against it, with numbers, units and file names.</InfoTip></>}
+      >
         <Textarea
-          rows={4}
+          ref={brief}
+          rows={8}
           className="overflow-x-hidden break-words"
           value={form.description}
           onChange={e => set('description', e.target.value)}
-          placeholder="Goals, evaluation protocol, dataset details, winner criteria…"
+          placeholder={BRIEF_PLACEHOLDER}
         />
       </FormField>
+      <BriefPoints text={form.description} onChange={text => set('description', text)} box={brief} />
     </>
   )
 }

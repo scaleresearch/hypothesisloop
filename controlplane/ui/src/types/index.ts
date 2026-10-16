@@ -189,11 +189,13 @@ export interface MetricDefinition {
   description?: string
   // role decides what this metric is for: ranking (counts for cuts/standings, the default when
   // omitted), constraint (must satisfy bound or the job is excluded from standings), attribute
-  // (shown, never ranked).
-  role?: 'ranking' | 'constraint' | 'attribute'
+  // (shown, never ranked), reference (an outside system measured beside the standings).
+  role?: 'ranking' | 'constraint' | 'attribute' | 'reference'
   bound?: number
   // On a ranking metric: the goal as a signed change against the baseline's value, 0.5 for +50%.
   target_vs_baseline?: number
+  // The same code and data give the same value on any machine and in every run.
+  deterministic?: boolean
 }
 
 // Why a platform experiment is in its status, and whose move it waits for: a person of its

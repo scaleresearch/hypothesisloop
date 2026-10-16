@@ -7,17 +7,19 @@ import { MetricsEditor } from '@/components/platform-experiment-form/metrics-edi
 import { LOCKED } from '@/components/platform-experiment-form/model'
 import type { StepProps } from '@/components/platform-experiment-form/model'
 
+const ROLE_WORD = { constraint: 'gate', attribute: 'tracked', reference: 'reference' } as const
+
 /** Step 2: the metrics and how long it runs. */
 export function StepMeasure({ form, set, locked }: StepProps) {
   return (
     <>
       <FieldGroup
         label="Metrics"
-        hint={locked ? LOCKED : <>★ ranks the leaderboard; ↑↓ flips a direction.<InfoTip>At a stage cut an agent survives if it survives on at least one metric, so a specialist is not cut for a metric it never targeted.</InfoTip></>}
+        hint={locked ? LOCKED : <>★ ranks the leaderboard and its target is the win agents aim for. A job that misses a gate&apos;s bound ranks nowhere; a tracked metric is only shown.<InfoTip>The target is how far past the measured baseline counts as a win, in percent. At a stage cut an agent survives if it survives on at least one ranked metric, so a specialist is not cut for a metric it never targeted.</InfoTip></>}
       >
         {locked ? (
           <Inline gap="xs">
-            {form.metrics.map(m => <Pill key={m.key}>{m.key} {m.direction === 'maximize' ? '↑' : '↓'}</Pill>)}
+            {form.metrics.map(m => <Pill key={m.key}>{m.key} {m.direction === 'maximize' ? '↑' : '↓'}{m.role && m.role !== 'ranking' ? ` · ${ROLE_WORD[m.role]}` : ''}</Pill>)}
           </Inline>
         ) : (
           <MetricsEditor metrics={form.metrics} onChange={m => set('metrics', m)} />

@@ -1,12 +1,25 @@
+import { useState } from 'react'
 import { COMMON_ML_METRICS } from '@/types'
 import type { MetricDefinition } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
 import type { ComboboxChoice } from '@/components/ui/combobox'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { Inline, Stack } from '@/components/ui/stack'
-import { Pill } from '@/components/ui/text'
+import { Code, Text } from '@/components/ui/text'
 
 const arrow = (direction: MetricDefinition['direction']) => direction === 'maximize' ? '↑ max' : '↓ min'
+
+type Role = NonNullable<MetricDefinition['role']>
+
+const ROLES: { value: Role; label: string }[] = [
+  { value: 'ranking', label: 'Ranked' },
+  { value: 'constraint', label: 'Gate' },
+  { value: 'attribute', label: 'Tracked' },
+]
+
+const roleOf = (m: MetricDefinition): Role => m.role ?? 'ranking'
 
 /** The metrics to add for what is typed: a key of one's own first, which maximizes until flipped, then the common ones. */
 function choices(taken: string[], typed: string): ComboboxChoice<MetricDefinition>[] {
@@ -19,10 +32,59 @@ function choices(taken: string[], typed: string): ComboboxChoice<MetricDefinitio
   ]
 }
 
-/** The metrics of an experiment: the first ranks the leaderboard, each has a direction. */
+/**
+ * A number field held as typed, so that a half-typed value such as "-" or "0." stays while it is
+ * typed. It hands on a number, or undefined while it is empty or no number.
+ */
+function NumberField({ value, onChange, ...props }: {
+  value: number | undefined
+  onChange: (value: number | undefined) => void
+  'aria-label': string
+  placeholder?: string
+}) {
+  const [typed, setTyped] = useState(value === undefined ? '' : String(value))
+  return (
+    <Input
+      fieldSize="sm"
+      inputMode="decimal"
+      className="w-24"
+      value={typed}
+      onChange={e => {
+        setTyped(e.target.value)
+        const n = Number(e.target.value)
+        onChange(e.target.value.trim() === '' || !Number.isFinite(n) ? undefined : n)
+      }}
+      {...props}
+    />
+  )
+}
+
+// target_vs_baseline is signed in the metric's direction; the person types how far past the control, in percent.
+const targetPct = (m: MetricDefinition) => m.target_vs_baseline === undefined ? undefined : Math.round(Math.abs(m.target_vs_baseline) * 1000) / 10
+const signedTarget = (pct: number, direction: MetricDefinition['direction']) => (direction === 'maximize' ? pct : -pct) / 100
+
+/**
+ * The metrics of an experiment, each with a direction and a role: ranked, a gate every job must
+ * pass, or tracked only. The first ranked one ranks the leaderboard and may carry the target.
+ */
 export function MetricsEditor({ metrics, onChange }: { metrics: MetricDefinition[]; onChange: (m: MetricDefinition[]) => void }) {
-  function toggleDir(key: string) {
-    onChange(metrics.map(m => m.key === key ? { ...m, direction: m.direction === 'maximize' ? 'minimize' : 'maximize' } : m))
+  const primary = metrics.find(m => roleOf(m) === 'ranking')?.key
+
+  function change(key: string, to: (m: MetricDefinition) => MetricDefinition) {
+    onChange(metrics.map(m => m.key === key ? to(m) : m))
+  }
+
+  function flip(m: MetricDefinition): MetricDefinition {
+    const direction = m.direction === 'maximize' ? 'minimize' : 'maximize'
+    return { ...m, direction, ...(m.target_vs_baseline !== undefined ? { target_vs_baseline: -m.target_vs_baseline } : {}) }
+  }
+
+  // A metric keeps only what its role reads: a bound on a gate, a target on a ranked one.
+  function withRole(m: MetricDefinition, role: Role): MetricDefinition {
+    const { bound, target_vs_baseline, ...rest } = m
+    if (role === 'constraint') return { ...rest, role, ...(bound !== undefined ? { bound } : {}) }
+    if (role === 'ranking') return { ...rest, role, ...(target_vs_baseline !== undefined ? { target_vs_baseline } : {}) }
+    return { ...rest, role }
   }
 
   function makePrimary(key: string) {
@@ -39,20 +101,44 @@ export function MetricsEditor({ metrics, onChange }: { metrics: MetricDefinition
         onPick={m => onChange([...metrics, m])}
       />
       {metrics.length > 0 && (
-        <Inline gap="xs">
-          {metrics.map((m, i) => (
-            <Pill key={m.key} tone={m.direction === 'maximize' ? 'success' : 'warning'} active={i === 0}>
-              {i === 0
-                ? <span title="Primary: ranks the leaderboard">★</span>
-                : <Button type="button" variant="ghost" size="icon" onClick={() => makePrimary(m.key)} title="Make primary">☆</Button>}
-              <Button type="button" variant="ghost" size="icon" onClick={() => toggleDir(m.key)} title="Flip between maximize and minimize">
-                {m.direction === 'maximize' ? '↑' : '↓'}
-              </Button>
-              {m.key}
-              <Button type="button" variant="ghost" size="icon" onClick={() => onChange(metrics.filter(x => x.key !== m.key))} title="Remove this metric">×</Button>
-            </Pill>
-          ))}
-        </Inline>
+        <Stack as="ul" gap="xs">
+          {metrics.map(m => {
+            const role = roleOf(m)
+            return (
+              <Inline as="li" key={m.key} gap="sm" nowrap>
+                {m.key === primary
+                  ? <span className="w-5 text-center" title="Primary: ranks the leaderboard">★</span>
+                  : <Button type="button" variant="ghost" size="icon" disabled={role !== 'ranking'} onClick={() => makePrimary(m.key)} title="Make primary">☆</Button>}
+                <Code className="min-w-0 flex-1 truncate">{m.key}</Code>
+                <Button type="button" size="sm" onClick={() => change(m.key, flip)} title="Flip between maximize and minimize">
+                  {arrow(m.direction)}
+                </Button>
+                {role === 'reference'
+                  ? <Text as="span" variant="hint" className="w-28">Reference</Text>
+                  : <Select fieldSize="sm" className="w-28" aria-label={`Role of ${m.key}`} value={role} options={ROLES} onChange={r => change(m.key, x => withRole(x, r))} />}
+                {role === 'constraint' && (
+                  <Inline gap="xs" nowrap>
+                    <Text as="span" variant="hint">{m.direction === 'maximize' ? 'at least' : 'at most'}</Text>
+                    <NumberField aria-label={`Bound of ${m.key}`} placeholder="bound" value={m.bound} onChange={bound => change(m.key, x => ({ ...withRole(x, 'constraint'), ...(bound !== undefined ? { bound } : {}) }))} />
+                  </Inline>
+                )}
+                {m.key === primary && (
+                  <Inline gap="xs" nowrap>
+                    <Text as="span" variant="hint">target</Text>
+                    <NumberField
+                      aria-label={`Target of ${m.key}, percent past the baseline`}
+                      placeholder="none"
+                      value={targetPct(m)}
+                      onChange={pct => change(m.key, x => ({ ...withRole(x, 'ranking'), ...(pct !== undefined ? { target_vs_baseline: signedTarget(pct, x.direction) } : {}) }))}
+                    />
+                    <Text as="span" variant="hint">% past baseline</Text>
+                  </Inline>
+                )}
+                <Button type="button" variant="ghost" size="icon" onClick={() => onChange(metrics.filter(x => x.key !== m.key))} title="Remove this metric">×</Button>
+              </Inline>
+            )
+          })}
+        </Stack>
       )}
     </Stack>
   )

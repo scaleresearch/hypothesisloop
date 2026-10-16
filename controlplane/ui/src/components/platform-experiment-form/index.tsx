@@ -109,10 +109,11 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
 
   function formError(): string | null {
     if (!form.name.trim()) return 'Name is required.'
-    if (!isEdit && !form.description.trim()) return 'Description is required: it is the brief every agent works from.'
+    if (!isEdit && !form.description.trim()) return 'A brief is required: it is the only text every agent reads about the task.'
     if (Number(form.duration_hours) <= 0) return 'Duration must be greater than 0.'
     if (Number(form.budget_accelerator_hours) <= 0) return 'Budget must be greater than 0.'
     if (!isEdit && Number(form.max_agents) < 1) return 'At least one researcher.'
+    if (form.metrics.some(m => m.role === 'constraint' && m.bound === undefined)) return 'Every gate needs a bound.'
     return null
   }
 

@@ -48,7 +48,7 @@ async function chooseRepository(repository: string) {
 // The name and the brief, then on through the steps to the last.
 async function essentials({ repository }: { repository?: string } = {}) {
   await userEvent.type(name(), 'Run')
-  await userEvent.type(screen.getByPlaceholderText(/^Goals, evaluation protocol/), 'The brief')
+  await userEvent.type(screen.getByLabelText('Brief'), 'The brief')
   if (repository) await chooseRepository(repository)
   await next()
   await next()
@@ -79,7 +79,7 @@ describe('a new platform experiment', () => {
   it('sends what the person states over the defaults', async () => {
     show()
     await userEvent.type(name(), 'Run')
-    await userEvent.type(screen.getByPlaceholderText(/^Goals, evaluation protocol/), 'The brief')
+    await userEvent.type(screen.getByLabelText('Brief'), 'The brief')
     await next()
     await userEvent.clear(screen.getByLabelText('Duration (hours)'))
     await userEvent.type(screen.getByLabelText('Duration (hours)'), '6')
@@ -95,7 +95,7 @@ describe('a new platform experiment', () => {
   it('adds a common metric or a typed key from one control, a typed key maximizing', async () => {
     show()
     await userEvent.type(name(), 'Run')
-    await userEvent.type(screen.getByPlaceholderText(/^Goals, evaluation protocol/), 'The brief')
+    await userEvent.type(screen.getByLabelText('Brief'), 'The brief')
     await next()
     const metric = screen.getByLabelText('Add a metric')
     await userEvent.type(metric, 'val_loss')
@@ -105,6 +105,36 @@ describe('a new platform experiment', () => {
     await create()
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
     expect(sent().metrics).toEqual([{ key: 'val_loss', direction: 'minimize' }, { key: 'widget_score', direction: 'maximize' }])
+  })
+
+  it('states a gate with its bound, a tracked metric and the target of the ranked one, signed in its direction', async () => {
+    show()
+    await userEvent.type(name(), 'Run')
+    await userEvent.type(screen.getByLabelText('Brief'), 'The brief')
+    await next()
+    const metric = screen.getByLabelText('Add a metric')
+    await userEvent.type(metric, 'val_loss')
+    await userEvent.click(await screen.findByRole('option', { name: /Val Loss/ }))
+    await userEvent.type(metric, 'diverged{Enter}')
+    await userEvent.type(metric, 'step{Enter}')
+    await userEvent.type(screen.getByLabelText('Target of val_loss, percent past the baseline'), '2')
+    await userEvent.click(screen.getByLabelText('Role of diverged'))
+    await userEvent.click(await screen.findByRole('option', { name: 'Gate' }))
+    await userEvent.click(screen.getByLabelText('Role of step'))
+    await userEvent.click(await screen.findByRole('option', { name: 'Tracked' }))
+    await next()
+    await create()
+    expect(await screen.findByText('Every gate needs a bound.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('tab', { name: '2. Measure' }))
+    await userEvent.type(screen.getByLabelText('Bound of diverged'), '0')
+    await next()
+    await create()
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(sent().metrics).toEqual([
+      { key: 'val_loss', direction: 'minimize', role: 'ranking', target_vs_baseline: -0.02 },
+      { key: 'diverged', direction: 'maximize', role: 'constraint', bound: 0 },
+      { key: 'step', direction: 'maximize', role: 'attribute' },
+    ])
   })
 
   it('shows a refused create in the API\'s words and stays on the form, with nothing else called', async () => {

@@ -101,6 +101,26 @@ describe('the experiments page', () => {
     await waitFor(() => expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/experiments/pe-draft'))
   })
 
+  // Planners proposed on readings of what a win is or what is held equal that the person never
+  // stated, and agents then guessed the rest from the code.
+  it('offers the points a goal leaves open once the box is taken, each as a line to fill in, ticked once filled', async () => {
+    vi.mocked(apiSend).mockReset().mockResolvedValue(experiment('pe-draft'))
+    show()
+    expect(screen.queryByRole('button', { name: 'Win' })).toBeNull()
+    const goal = screen.getByLabelText('What do you want to find out?')
+    await userEvent.type(goal, 'Does Lion beat AdamW?')
+    const win = screen.getByRole('button', { name: 'Win' })
+    expect(win.getAttribute('aria-pressed')).toBe('false')
+    await userEvent.click(win)
+    expect(screen.getByText(/^How much better counts/)).toBeTruthy()
+    expect(document.activeElement).toBe(goal)
+    await userEvent.keyboard('1% lower val loss over 3 seeds')
+    expect(goal).toHaveProperty('value', 'Does Lion beat AdamW?\nWin: 1% lower val loss over 3 seeds')
+    expect(win.getAttribute('aria-pressed')).toBe('true')
+    await userEvent.click(screen.getByRole('button', { name: 'Plan it' }))
+    expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/drafts', { project_id: 'prj_1', goal: 'Does Lion beat AdamW?\nWin: 1% lower val loss over 3 seeds' })
+  })
+
   it('says why a sentence was refused, and that no cluster is online, and stays', async () => {
     vi.mocked(apiSend).mockRejectedValue(new Error('no launcher is registered, so nothing would run the planner'))
     show()
@@ -122,7 +142,7 @@ describe('the experiments page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Configure it myself' }))
     const dialog = within(screen.getByRole('dialog'))
     await userEvent.type(dialog.getByPlaceholderText('e.g. Q3 Vision Benchmark'), 'First run')
-    await userEvent.type(dialog.getByPlaceholderText(/^Goals, evaluation protocol/), 'The brief')
+    await userEvent.type(dialog.getByLabelText('Brief'), 'The brief')
     await userEvent.click(dialog.getByRole('button', { name: 'Next' }))
     await userEvent.click(dialog.getByRole('button', { name: 'Next' }))
     await userEvent.click(dialog.getByRole('button', { name: 'Create experiment' }))

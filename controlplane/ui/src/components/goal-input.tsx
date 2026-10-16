@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Field, Label } from '@headlessui/react'
 import { githubCardPath } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
@@ -15,6 +15,7 @@ import { InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 import { useGitHub } from '@/components/connect-github-step'
 import { RepositorySelect, repositoryFields } from '@/components/repository-select'
+import { BriefPoints } from '@/components/brief-points'
 
 const CONNECT_FIRST = 'Connect GitHub in Settings to start'
 const ASK = 'What do you want to find out?'
@@ -65,7 +66,8 @@ function useTypedExamples(stopped: boolean): string {
 
 /**
  * The shortest way to an experiment: one sentence saying what to find out. The platform plans
- * the rest and proposes it on the draft's page, where the person approves it.
+ * the rest and proposes it on the draft's page, where the person approves it. Once the box is
+ * taken it offers the points the planner cannot read from the code, as lines to add.
  */
 export function GoalInput({ projectID, onCreated }: { projectID: string; onCreated: (draft: Draft) => void }) {
   const { org } = useTenant()
@@ -76,6 +78,7 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
   const github = useGitHub()
   const [repository, setRepository] = useState('')
   const placeholder = useTypedExamples(touched)
+  const box = useRef<HTMLTextAreaElement>(null)
 
   // One rule for the button and for Enter: a sentence, GitHub connected where it is needed, and no plan already on its way.
   const ready = goal.trim() !== '' && !sending && github !== 'unconnected'
@@ -95,8 +98,9 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
   return (
     <div>
       <Textarea
+        ref={box}
         bare
-        rows={3}
+        rows={Math.min(10, Math.max(3, goal.split('\n').length + 1))}
         maxLength={MAX_GOAL_LENGTH}
         aria-label={ASK}
         placeholder={placeholder}
@@ -111,6 +115,7 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
           void plan()
         }}
       />
+      {touched && <BriefPoints text={goal} onChange={setGoal} box={box} className="px-6 pb-3" />}
       <Inline gap="md" className="px-4 pb-4">
         {github === 'connected' && (
           <Field>
