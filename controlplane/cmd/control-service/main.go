@@ -89,6 +89,10 @@ func main() {
 	for _, name := range migrated.Applied {
 		logger.Info("applied database migration", zap.String("migration", name))
 	}
+	if len(migrated.Unknown) > 0 {
+		logger.Warn("the database has migrations of a later release, which this one runs against until it is replaced",
+			zap.Strings("migrations", migrated.Unknown))
+	}
 	seedBuiltinAgentTypes(pool, modelDefaults(pcfg), logger)
 
 	metricsCtx, metricsCancel := context.WithTimeout(context.Background(), 30*time.Second)

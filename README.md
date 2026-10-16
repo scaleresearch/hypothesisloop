@@ -626,8 +626,9 @@ state from what the runtimes report to the metrics store.
 The Postgres schema is a sequence of migrations, `controlplane/shared/db/migrations/NNNN_name.sql`,
 embedded in `control-service`. At start it applies the pending ones in order, each in its own
 transaction, and records each in `schema_migrations` with the checksum of its file. It refuses to
-start when an applied migration's file has changed, or when the database has a migration it does
-not know. `make db-migration NAME=add_widget_color` creates the next file.
+start when an applied migration's file has changed or the recorded versions have a gap. A database
+with migrations it does not know is a later release's: it starts, logs a warning naming them, and
+leaves them alone. `make db-migration NAME=add_widget_color` creates the next file.
 
 A migration is never edited once merged, and it must keep the previous release working, so two
 releases can serve side by side during a rolling deploy. A change the previous release cannot run

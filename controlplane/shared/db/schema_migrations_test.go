@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"net/url"
 	"os"
@@ -89,6 +90,12 @@ func ledger(t *testing.T, pool *Pool) []string {
 	return out
 }
 
+// after names the k-th migration after the embedded ones, as NNNN_name.
+func after(t *testing.T, k int, name string) string {
+	t.Helper()
+	return fmt.Sprintf("%04d_%s", len(embeddedMigrationsWith(t, nil).steps)+k, name)
+}
+
 func files(all migrations) []string {
 	var out []string
 	for _, m := range all.steps {
@@ -140,19 +147,20 @@ func TestADatabaseFromBeforeMigrationsIsAdoptedAtTheBaseline(t *testing.T) {
 	if _, err := pool.pool.Exec(ctx, `INSERT INTO agents (id, name, org_id) VALUES ('kept', 'Kept', 'default')`); err != nil {
 		t.Fatal(err)
 	}
+	note := after(t, 1, "agent_note")
 	migrations := embeddedMigrationsWith(t, map[string]string{
-		"0002_agent_note.sql": `ALTER TABLE agents ADD COLUMN note TEXT NOT NULL DEFAULT 'new';`,
+		note + ".sql": `ALTER TABLE agents ADD COLUMN note TEXT NOT NULL DEFAULT 'new';`,
 	})
 	done, err := migrate(ctx, pool, migrations)
-	if err != nil || !done.Adopted || !slices.Equal(done.Applied, []string{"0002_agent_note"}) {
-		t.Fatalf("adoption: got = %+v, %v, want adopted and 0002 applied", done, err)
+	if want := files(migrations)[1:]; err != nil || !done.Adopted || !slices.Equal(done.Applied, want) {
+		t.Fatalf("adoption: got = %+v, %v, want adopted and %v applied", done, err, want)
 	}
-	if got := ledger(t, pool); !slices.Equal(got, []string{"0001_baseline", "0002_agent_note"}) {
-		t.Fatalf("schema_migrations: got = %v", got)
+	if got := ledger(t, pool); !slices.Equal(got, files(migrations)) {
+		t.Fatalf("schema_migrations: got = %v, want %v", got, files(migrations))
 	}
-	var note string
-	if err := pool.pool.QueryRow(ctx, `SELECT note FROM agents WHERE id = 'kept'`).Scan(&note); err != nil || note != "new" {
-		t.Fatalf("the row from before: got = %q, %v, want it kept with the new column", note, err)
+	var kept string
+	if err := pool.pool.QueryRow(ctx, `SELECT note FROM agents WHERE id = 'kept'`).Scan(&kept); err != nil || kept != "new" {
+		t.Fatalf("the row from before: got = %q, %v, want it kept with the new column", kept, err)
 	}
 	var leftover bool
 	if err := pool.pool.QueryRow(ctx, `SELECT to_regnamespace($1) IS NOT NULL`, adoptionCheckSchema).Scan(&leftover); err != nil || leftover {
@@ -160,6 +168,20 @@ func TestADatabaseFromBeforeMigrationsIsAdoptedAtTheBaseline(t *testing.T) {
 	}
 	if done, err := migrate(ctx, pool, migrations); err != nil || done.Adopted || len(done.Applied) != 0 {
 		t.Fatalf("next start: got = %+v, %v, want nothing to do", done, err)
+	}
+}
+
+// A database started by the schema.sql of 456f346d already has the columns 0002 adds.
+func TestADatabaseThatHasTheLastErrorColumnsIsAdoptedAndTakes0002(t *testing.T) {
+	pool := legacyDatabase(t)
+	ctx := context.Background()
+	if _, err := pool.pool.Exec(ctx, `ALTER TABLE clusters ADD COLUMN last_error TEXT NOT NULL DEFAULT '';
+ALTER TABLE clusters ADD COLUMN last_error_at TIMESTAMPTZ;`); err != nil {
+		t.Fatal(err)
+	}
+	done, err := Migrate(ctx, pool)
+	if err != nil || !done.Adopted || !slices.Contains(done.Applied, "0002_cluster_last_error") {
+		t.Fatalf("got = %+v, %v, want adopted and 0002 applied", done, err)
 	}
 }
 
@@ -195,15 +217,36 @@ func TestAMigrationChangedAfterItWasAppliedIsRefused(t *testing.T) {
 	}
 }
 
-func TestADatabaseNewerThanTheBinaryIsRefused(t *testing.T) {
+// During a rollout the previous release keeps running on the schema the next one migrated: it
+// starts, names the migrations it does not know, and leaves them alone.
+func TestADatabaseNewerThanTheBinaryStillStartsIt(t *testing.T) {
 	pool := scratchDatabase(t)
 	ctx := context.Background()
-	newer := embeddedMigrationsWith(t, map[string]string{"0002_from_the_future.sql": `CREATE TABLE future (id INTEGER);`})
+	future := after(t, 1, "from_the_future")
+	newer := embeddedMigrationsWith(t, map[string]string{future + ".sql": `CREATE TABLE future (id INTEGER);`})
 	if _, err := migrate(ctx, pool, newer); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Migrate(ctx, pool); err == nil || !strings.Contains(err.Error(), "at migration 0002_from_the_future, newer than") {
-		t.Fatalf("got = %v, want a refusal naming the newer migration", err)
+	done, err := Migrate(ctx, pool)
+	if err != nil || len(done.Applied) != 0 || !slices.Equal(done.Unknown, []string{future}) {
+		t.Fatalf("got = %+v, %v, want a start naming %s as unknown", done, err, future)
+	}
+	if got := ledger(t, pool); !slices.Equal(got, files(newer)) {
+		t.Fatalf("schema_migrations: got = %v, want %v", got, files(newer))
+	}
+}
+
+func TestALedgerWithAGapIsRefused(t *testing.T) {
+	pool := scratchDatabase(t)
+	ctx := context.Background()
+	if _, err := Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.pool.Exec(ctx, `INSERT INTO schema_migrations (version, name, checksum) VALUES (9999, 'far_ahead', 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Migrate(ctx, pool); err == nil || !strings.Contains(err.Error(), "9999_far_ahead") {
+		t.Fatalf("got = %v, want a refusal naming the row out of order", err)
 	}
 }
 
@@ -323,21 +366,25 @@ func TestEverySnapshotIsTheSchemaOfItsMigrations(t *testing.T) {
 // before migrations is adopted at the baseline and takes every migration after it in order.
 func TestAFreshDatabaseStartsFromTheNewestSnapshotAndAnExistingOneConvertsInOrder(t *testing.T) {
 	ctx := context.Background()
-	baseline, err := fs.ReadFile(migrationFiles, "migrations/0001_baseline.sql")
-	if err != nil {
-		t.Fatal(err)
+	embedded := embeddedMigrationsWith(t, nil)
+	var chain strings.Builder
+	for _, m := range embedded.steps {
+		chain.WriteString(m.sql + "\n")
 	}
+	const addNote = `ALTER TABLE agents ADD COLUMN note TEXT NOT NULL DEFAULT '';`
+	note, rank := after(t, 1, "agent_note"), after(t, 2, "agent_rank")
+	at := len(embedded.steps) + 1
 	all := embeddedMigrationsWith(t, map[string]string{
-		"0002_agent_note.sql": `ALTER TABLE agents ADD COLUMN note TEXT NOT NULL DEFAULT '';`,
-		"0003_agent_rank.sql": `ALTER TABLE agents ADD COLUMN rank INTEGER;`,
-		"snapshots/0002.sql":  string(baseline) + "\nALTER TABLE agents ADD COLUMN note TEXT NOT NULL DEFAULT '';\n",
+		note + ".sql":                         addNote,
+		rank + ".sql":                         `ALTER TABLE agents ADD COLUMN rank INTEGER;`,
+		fmt.Sprintf("snapshots/%04d.sql", at): chain.String() + addNote,
 	})
-	requireSameSchema(t, 2, all, all.snapshots[0])
+	requireSameSchema(t, at, all, all.snapshots[0])
 
 	fresh := scratchDatabase(t)
 	done, err := migrate(ctx, fresh, all)
-	if err != nil || done.Adopted || done.Snapshot != 2 || !slices.Equal(done.Applied, []string{"0003_agent_rank"}) {
-		t.Fatalf("fresh: got = %+v, %v, want snapshot 0002 then 0003", done, err)
+	if err != nil || done.Adopted || done.Snapshot != at || !slices.Equal(done.Applied, []string{rank}) {
+		t.Fatalf("fresh: got = %+v, %v, want snapshot %04d then %s", done, err, at, rank)
 	}
 	if got := ledger(t, fresh); !slices.Equal(got, files(all)) {
 		t.Fatalf("fresh schema_migrations: got = %v, want %v", got, files(all))
@@ -345,8 +392,8 @@ func TestAFreshDatabaseStartsFromTheNewestSnapshotAndAnExistingOneConvertsInOrde
 
 	existing := legacyDatabase(t)
 	done, err = migrate(ctx, existing, all)
-	if err != nil || !done.Adopted || done.Snapshot != 0 || !slices.Equal(done.Applied, []string{"0002_agent_note", "0003_agent_rank"}) {
-		t.Fatalf("existing: got = %+v, %v, want adopted then 0002 and 0003", done, err)
+	if want := files(all)[1:]; err != nil || !done.Adopted || done.Snapshot != 0 || !slices.Equal(done.Applied, want) {
+		t.Fatalf("existing: got = %+v, %v, want adopted then %v", done, err, want)
 	}
 	if got := ledger(t, existing); !slices.Equal(got, files(all)) {
 		t.Fatalf("existing schema_migrations: got = %v, want %v", got, files(all))

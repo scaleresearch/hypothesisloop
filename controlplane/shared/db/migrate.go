@@ -68,18 +68,20 @@ type appliedMigration struct {
 }
 
 // Migrated is what Migrate did: whether it adopted a database built before migrations at the
-// baseline, the snapshot it built a fresh database from (0 for none), and the migrations it ran,
-// in order.
+// baseline, the snapshot it built a fresh database from (0 for none), the applied migrations this
+// binary does not know (a later release's), and the migrations it ran, in order.
 type Migrated struct {
 	Adopted  bool
 	Snapshot int
+	Unknown  []string
 	Applied  []string
 }
 
 // Migrate brings the database to the newest migration this binary embeds. Each pending migration
 // runs in its own transaction and is recorded in schema_migrations with the checksum of its file.
-// It refuses to start when an applied migration's file has changed since, or when the database has
-// a migration this binary does not know. A fresh database is built from the newest snapshot
+// It refuses to start when an applied migration's file has changed since. A database with
+// migrations this binary does not know is a later release's, which keeps this one working
+// (expand/contract): they are reported in Unknown and left alone. A fresh database is built from the newest snapshot
 // (migrations/snapshots/NNNN.sql) when there is one, recorded as having run the migrations up to
 // it, and takes the ones after it. A database with the schema and no schema_migrations was built
 // by the idempotent schema.sql that came before: it is checked against the baseline and recorded
@@ -222,10 +224,11 @@ func migrate(ctx context.Context, pool *Pool, all migrations) (Migrated, error) 
 	if err != nil {
 		return done, fmt.Errorf("db.Migrate: %w", err)
 	}
-	if err := checkApplied(applied, migrations); err != nil {
+	done.Unknown, err = checkApplied(applied, migrations)
+	if err != nil {
 		return done, err
 	}
-	for _, m := range migrations[len(applied):] {
+	for _, m := range migrations[min(len(applied), len(migrations)):] {
 		err := pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
 			if _, err := tx.Exec(ctx, m.sql); err != nil {
 				return err
@@ -245,23 +248,25 @@ func recordMigration(ctx context.Context, tx pgx.Tx, m migration) error {
 	return err
 }
 
-func checkApplied(applied []appliedMigration, migrations []migration) error {
-	if n := len(applied); n > len(migrations) {
-		last := applied[n-1]
-		return fmt.Errorf("db.Migrate: the database is at migration %04d_%s, newer than %s, the newest this binary knows: run the release that has it",
-			last.version, last.name, migrations[len(migrations)-1].file())
-	}
+// checkApplied refuses a ledger with a gap or an applied migration whose file changed, and
+// returns the applied migrations this binary does not know: a later release's, which this one
+// runs against during a rollout.
+func checkApplied(applied []appliedMigration, migrations []migration) ([]string, error) {
+	var unknown []string
 	for i, a := range applied {
-		m := migrations[i]
-		if a.version != m.version {
-			return fmt.Errorf("db.Migrate: schema_migrations has %04d_%s where %s belongs", a.version, a.name, m.file())
+		if a.version != i+1 {
+			return nil, fmt.Errorf("db.Migrate: schema_migrations has %04d_%s where version %04d belongs", a.version, a.name, i+1)
 		}
-		if a.checksum != m.checksum {
-			return fmt.Errorf("db.Migrate: migration %s changed after it was applied (checksum %s, applied as %s): an applied migration is never edited, add a new one",
+		if i >= len(migrations) {
+			unknown = append(unknown, fmt.Sprintf("%04d_%s", a.version, a.name))
+			continue
+		}
+		if m := migrations[i]; a.checksum != m.checksum {
+			return nil, fmt.Errorf("db.Migrate: migration %s changed after it was applied (checksum %s, applied as %s): an applied migration is never edited, add a new one",
 				m.file(), m.checksum, a.checksum)
 		}
 	}
-	return nil
+	return unknown, nil
 }
 
 // checkAdoptable builds the baseline in a schema of its own inside a transaction it rolls back,
