@@ -114,18 +114,28 @@ export function extendLayout(graph: HypothesisGraph, previous: Map<string, Posit
     if (p) positions.set(n.id, p)
   }
   let pending = graph.nodes.filter(n => !positions.has(n.id)).sort((a, b) => a.created_at.localeCompare(b.created_at))
+  if (pending.length === 0) return positions
+  // The x of every node on each row, so placing one looks at its own row only.
+  const rows = new Map<number, number[]>()
+  for (const p of Array.from(positions.values())) {
+    if (!rows.has(p.y)) rows.set(p.y, [])
+    rows.get(p.y)!.push(p.x)
+  }
   while (pending.length > 0) {
     const waiting = pending.filter(n => n.builds_on.length === 0 || n.builds_on.some(p => !positions.has(p)))
     if (waiting.length === pending.length) break
+    const ready = new Set(waiting)
     for (const n of pending) {
-      if (waiting.includes(n)) continue
+      if (ready.has(n)) continue
       const parent = n.builds_on.map(p => positions.get(p)!).reduce((a, b) => (b.y > a.y ? b : a))
       const y = parent.y + ROW
-      const taken = Array.from(positions.values()).filter(p => p.y === y).map(p => p.x)
+      if (!rows.has(y)) rows.set(y, [])
+      const taken = rows.get(y)!
       for (let k = 0; ; k++) {
         const x = [parent.x + k * COLUMN, parent.x - k * COLUMN].find(c => taken.every(t => Math.abs(t - c) >= COLUMN))
         if (x !== undefined) {
           positions.set(n.id, { x, y })
+          taken.push(x)
           break
         }
       }
@@ -244,7 +254,8 @@ export function outlineRows(graph: HypothesisGraph): OutlineRow[] {
   const children = new Map<string, HypothesisListItem[]>()
   for (const n of graph.nodes) {
     const parent = n.builds_on[0]
-    children.set(parent, [...(children.get(parent) ?? []), n])
+    if (!children.has(parent)) children.set(parent, [])
+    children.get(parent)!.push(n)
   }
   const rows: OutlineRow[] = []
   function visit(parent: string, depth: number) {
@@ -286,4 +297,21 @@ export function objectiveFinding(objective: Evidence): { job: string; summary: s
   if (best?.summary) return { job: best.id, summary: best.summary, baseline: true }
   if (finding) return { job: finding.experiment_id, summary: finding.summary, baseline: finding.experiment_id === best?.id }
   return null
+}
+
+// A poll answers the whole graph again. Each idea that reads the same as before keeps its object,
+// so what is memoized on it (graph nodes, outline rows) re-renders only for the ideas that changed.
+export function shareUnchanged(previous: HypothesisGraph | undefined, next: HypothesisGraph): HypothesisGraph {
+  if (!previous || previous.root !== next.root) return next
+  const before = new Map(previous.nodes.map(n => [n.id, n]))
+  let same = previous.nodes.length === next.nodes.length
+  const nodes = next.nodes.map(n => {
+    const p = before.get(n.id)
+    if (p && JSON.stringify(p) === JSON.stringify(n)) return p
+    same = false
+    return n
+  })
+  const rest = (g: HypothesisGraph) => JSON.stringify([g.edges, g.objective])
+  if (same && rest(previous) === rest(next)) return previous
+  return { ...next, nodes }
 }

@@ -31,7 +31,7 @@ import { useQueryParam } from '@/lib/query-state'
 import { withQuery } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
 import { isReadOnly, ReadOnlyProvider } from '@/lib/read-only'
-import { HUMAN_OWNER, extendLayout, graphHref, layoutGraph, matchesFilters } from '@/lib/hypothesis-graph'
+import { HUMAN_OWNER, extendLayout, graphHref, layoutGraph, matchesFilters, shareUnchanged } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
 
 const STATUS_OPTIONS = ['open', 'confirmed', 'refuted', 'inconclusive'].map(s => ({ value: s, label: s }))
@@ -92,11 +92,13 @@ function HypothesesPageContent({ peID }: { peID: string }) {
 
   const { data: pe, error: selectedError } = useSWR(['pe', peID], () => fetchPlatformExperiment(peID))
 
+  const shown = useRef<HypothesisGraph>()
   const { data: graph, error, mutate } = useSWR(
     ['hypothesis-graph', peID],
-    () => fetchHypothesisGraph(peID),
+    async () => shareUnchanged(shown.current, await fetchHypothesisGraph(peID)),
     { refreshInterval: 15_000 },
   )
+  shown.current = graph
   const search = useHypothesisSearch(peID, q)
   const filters = useMemo(() => ({ status: statusFilter, owner: ownerFilter }), [statusFilter, ownerFilter])
 
@@ -201,7 +203,7 @@ function Workspace({ graph, pe, mutate, canWrite, closed, view, q, setQ, search,
   filters: GraphFilters
   toolbar: (action: ReactNode) => ReactNode
 }) {
-  const [focus, setFocus] = useQueryParam('focus')
+  const [focus, setFocus] = useQueryParam('focus', '', { replace: true })
   const layout = useStableLayout(graph)
   const editor = useGraphEditor({ graph, rootLabel: pe.name, canWrite, closed, mutate, onSelect: setFocus })
   const nodeByID = useMemo(() => new Map(graph.nodes.map(n => [n.id, n])), [graph])

@@ -77,6 +77,14 @@ export function ObjectiveMeta({ objective }: { objective: ObjectiveEvidence }) {
 type HypothesisNodeData = { item: HypothesisGraphNode }
 type ObjectiveNodeData = { label: string; objective: ObjectiveEvidence }
 
+// One data object per idea object, so a memoized node whose idea a poll left unchanged is skipped.
+const nodeData = new WeakMap<HypothesisGraphNode, HypothesisNodeData>()
+function dataOf(item: HypothesisGraphNode): HypothesisNodeData {
+  let data = nodeData.get(item)
+  if (!data) nodeData.set(item, (data = { item }))
+  return data
+}
+
 // A small graph is seen whole on the canvas; the map only takes room from it.
 const MINIMAP_FROM = 15
 
@@ -318,7 +326,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
       width: NODE_WIDTH,
       height: NODE_HEIGHT,
       handles: NODE_HANDLES,
-      data: { item },
+      data: dataOf(item),
     })),
   ], [graph, positions, rootLabel])
   const canPick = editor?.canPick

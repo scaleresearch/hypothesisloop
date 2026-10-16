@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useMemo, useRef } from 'react'
+import { memo, useEffect, useMemo, useRef } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import { clsx } from 'clsx'
-import type { HypothesisGraph } from '@/types'
+import type { HypothesisGraph, HypothesisGraphNode } from '@/types'
 import { Badge } from '@/components/ui/badge'
 import { RowButton } from '@/components/ui/button'
 import { Inline } from '@/components/ui/stack'
@@ -58,6 +58,32 @@ function Row({ id, depth, selected, selectedRef, hit, className, onSelect, child
   )
 }
 
+// One row per idea, memoized on its own props: selecting, filtering or a poll that changes one idea
+// re-renders the rows that changed and not the thousand around them.
+const IdeaRow = memo(function IdeaRow({ node, depth, alsoBuildsOn, selected, hit, dimmed, selectedRef, onSelect }: {
+  node: HypothesisGraphNode
+  depth: number
+  alsoBuildsOn: number
+  selected: boolean
+  hit: boolean
+  dimmed: boolean
+  selectedRef: RefObject<HTMLButtonElement>
+  onSelect: (id: string) => void
+}) {
+  return (
+    <Row id={node.id} depth={depth} selected={selected} hit={hit} className={clsx(dimmed && 'opacity-dimmed')} selectedRef={selectedRef} onSelect={onSelect}>
+      <span title={verdictBy(node) && `${node.status} ${verdictBy(node)}`}><Badge status={node.status}>{node.status}</Badge></span>
+      <span className="min-w-0 flex-1 truncate" title={node.text}>{node.text}</span>
+      {alsoBuildsOn > 0 && (
+        <Text as="span" variant="meta" tone="subtle" className="whitespace-nowrap">
+          also refines {alsoBuildsOn}
+        </Text>
+      )}
+      <NodeMeta item={node} />
+    </Row>
+  )
+})
+
 /** The graph as an indented builds_on tree: scannable, and reachable by keyboard and screen reader. */
 export function HypothesisOutline({ graph, rootLabel, selected, hits, filters, onSelect }: HypothesisOutlineProps) {
   const rows = useMemo(() => outlineRows(graph), [graph])
@@ -76,24 +102,16 @@ export function HypothesisOutline({ graph, rootLabel, selected, hits, filters, o
         <ObjectiveMeta objective={graph.objective} />
       </Row>
       {rows.map(({ node, depth, alsoBuildsOn }) => (
-        <Row
+        <IdeaRow
           key={node.id}
-          id={node.id}
+          node={node}
           depth={depth + 1}
+          alsoBuildsOn={alsoBuildsOn.length}
           selected={selected === node.id}
           hit={hits.has(node.id)}
-          className={clsx(!matchesFilters(node, filters) && 'opacity-dimmed')}
+          dimmed={!matchesFilters(node, filters)}
           {...common}
-        >
-          <span title={verdictBy(node) && `${node.status} ${verdictBy(node)}`}><Badge status={node.status}>{node.status}</Badge></span>
-          <span className="min-w-0 flex-1 truncate" title={node.text}>{node.text}</span>
-          {alsoBuildsOn.length > 0 && (
-            <Text as="span" variant="meta" tone="subtle" className="whitespace-nowrap">
-              also refines {alsoBuildsOn.length}
-            </Text>
-          )}
-          <NodeMeta item={node} />
-        </Row>
+        />
       ))}
     </ul>
   )

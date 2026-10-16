@@ -19,6 +19,8 @@ import { LINK_KINDS, LINK_KIND_HINTS, LINK_KIND_LABELS, allowedLinkKinds, findId
 
 export interface GraphEditor {
   graph: HypothesisGraph
+  /** The ids some link of the graph points to. */
+  linked: Set<string>
   rootLabel: string
   /** A person of the experiment's org, while it is not closed. */
   canWrite: boolean
@@ -73,6 +75,7 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
   const [linkBusy, setLinkBusy] = useState(false)
   const [linkError, setLinkError] = useState('')
   const plan = useMemo(() => linkPlanner(graph), [graph])
+  const linked = useMemo(() => new Set(graph.edges.map(e => e.to)), [graph])
 
   const cancel = useCallback(() => {
     setComposing(false)
@@ -170,8 +173,9 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
     await drawn
   }
 
-  return {
+  return useMemo<GraphEditor>(() => ({
     graph,
+    linked,
     rootLabel,
     canWrite,
     closed,
@@ -208,7 +212,8 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
     dismissSimilar: () => setAddedSimilar([]),
     refresh: () => mutate(),
     cancel,
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- its functions read only these
+  }), [graph, linked, rootLabel, canWrite, closed, composing, links, findingTarget, linking, linkBusy, linkError, addedSimilar, plan, mutate, onSelect, cancel, startAdding])
 }
 
 const EditorContext = createContext<GraphEditor | null>(null)
@@ -385,6 +390,7 @@ export function IdeaEditor() {
       if (h.already_existed) {
         setExistingID(h.id)
       } else {
+        setText('')
         await ed.added(h)
       }
     } catch (e) {
@@ -489,7 +495,7 @@ export function IdeaText({ node }: { node: HypothesisGraphNode }) {
   }, [node.id])
 
   const persons = !node.agent_id && node.actor.kind === 'user'
-  const untouched = !node.best_job && node.finding_count === 0 && !editor?.graph.edges.some(e => e.to === node.id)
+  const untouched = !node.best_job && node.finding_count === 0 && !editor?.linked.has(node.id)
   const open = !!editor?.canWrite && persons && untouched
   const author = open && !!me.user_id && node.actor.id === me.user_id
   const remover = author || (open && org.role === 'owner')
