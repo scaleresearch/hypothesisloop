@@ -109,8 +109,8 @@ func (s *PlatformExperimentsService) wakeRepositories(pe *domain.PlatformExperim
 }
 
 // StartRepositoryPass runs ProvideRepositories when a create wakes it and every interval, until
-// ctx is cancelled.
-func (s *PlatformExperimentsService) StartRepositoryPass(ctx context.Context, interval time.Duration) {
+// ctx is cancelled, each pass bounded by passTimeout.
+func (s *PlatformExperimentsService) StartRepositoryPass(ctx context.Context, interval, passTimeout time.Duration) {
 	if s.repos == nil {
 		panic("quota: StartRepositoryPass without WithRepositories: no platform experiment would get its repository")
 	}
@@ -123,9 +123,11 @@ func (s *PlatformExperimentsService) StartRepositoryPass(ctx context.Context, in
 		case <-s.repositoryWake:
 		case <-ticker.C:
 		}
-		if err := s.ProvideRepositories(ctx); err != nil {
+		passCtx, cancel := context.WithTimeout(ctx, passTimeout)
+		if err := s.ProvideRepositories(passCtx); err != nil {
 			s.logger.Error("provide_repositories: scan", zap.Error(err))
 		}
+		cancel()
 	}
 }
 

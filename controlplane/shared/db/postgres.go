@@ -131,7 +131,11 @@ func (l *AdvisoryLock) Ping(ctx context.Context) error {
 	return nil
 }
 
-// Release returns the lock's connection to the pool.
+// Release closes the lock's connection, which is what releases the lock: a connection handed
+// back to the pool after a ping that did not answer could still hold it.
 func (l *AdvisoryLock) Release() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	l.conn.Conn().Close(ctx) //nolint:errcheck
 	l.conn.Release()
 }

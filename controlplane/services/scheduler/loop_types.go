@@ -317,13 +317,13 @@ func (l *Loop) Trigger() {
 	}
 }
 
-// Start runs the loop goroutine until ctx is cancelled.
+// Start runs the loop until ctx is cancelled, each tick bounded by passTimeout.
 //
 // Panics on a loop that was never fully wired. The disbalance evictor has no disabled state — it
 // is one of the passes a tick runs — so a nil evictor or a non-positive tolerance is a wiring
 // mistake, not a configuration. Failing here, at startup, beats discovering it as a nil
 // dereference on the first tick that finds a victim, hours into a run.
-func (l *Loop) Start(ctx context.Context) {
+func (l *Loop) Start(ctx context.Context, passTimeout time.Duration) {
 	if l.evictor == nil || l.disbalanceTolerance <= 0 {
 		panic("scheduler: Loop started without WithDisbalanceEvictor — see loop_disbalance.go")
 	}
@@ -339,19 +339,19 @@ func (l *Loop) Start(ctx context.Context) {
 	if l.heartbeat <= 0 || l.guaranteedFairnessWindow <= 0 || l.heldJobNotice <= 0 {
 		panic("scheduler: Loop started without WithHeartbeat, WithGuaranteedFairnessWindow and WithHeldJobNotice")
 	}
-	go func() {
-		ticker := time.NewTicker(l.heartbeat)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-l.trigger:
-			case <-ticker.C:
-			}
-			if err := l.tick(ctx); err != nil {
-				l.logger.Error("scheduler loop tick", zap.Error(err))
-			}
+	ticker := time.NewTicker(l.heartbeat)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-l.trigger:
+		case <-ticker.C:
 		}
-	}()
+		passCtx, cancel := context.WithTimeout(ctx, passTimeout)
+		if err := l.tick(passCtx); err != nil {
+			l.logger.Error("scheduler loop tick", zap.Error(err))
+		}
+		cancel()
+	}
 }

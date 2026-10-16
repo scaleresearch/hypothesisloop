@@ -1101,7 +1101,7 @@ func TestAJobsEndWakesAdmissionAndItsRoomIsRefilled(t *testing.T) {
 	l.heartbeat = time.Hour
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	l.Start(ctx)
+	go l.Start(ctx, time.Minute)
 	w := NewJobWatcher(statusSim{s}, nil, noopSettler{}, zap.NewNop()).WithCapacityFreed(l.Trigger)
 
 	ended := time.Now()

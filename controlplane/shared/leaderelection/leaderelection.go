@@ -1,15 +1,8 @@
-// Package leaderelection makes exactly one control-service replica active for work that is only
-// safe single-threaded across the whole deployment: the scheduler's admission tick (reads
-// capacity, decides, writes — not a CAS) and the JobWatcher scan. Every other replica stays in
-// standby.
-//
-// The lock is a Postgres session-level advisory lock: it lives on one dedicated connection and is
-// released automatically by Postgres the instant that connection closes, including on a hard
-// process crash — no explicit unlock, heartbeat table, or TTL bookkeeping needed.
 package leaderelection
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -17,16 +10,21 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 )
 
-// SchedulerLockKey is the fixed advisory-lock key the scheduler leader holds. Arbitrary but
-// stable — changing it would let two replicas both think they're leader across a rolling deploy.
-const SchedulerLockKey = 72901 // arbitrary fixed key, do not change once deployed
+// SchedulerLockKey is the advisory-lock key control-service's leader holds. Changing a key lets
+// two replicas both lead across a rolling deploy.
+const SchedulerLockKey = 72901
 
-// Run blocks until ctx is cancelled, alternating between standby (retrying
-// pg_try_advisory_lock every retryInterval) and leader (holding one dedicated connection and
-// running onLeader in a context that's cancelled the moment leadership is lost). onLeader must
-// return once its context is cancelled; Run waits for it before releasing the connection and
-// returning to standby.
-func Run(ctx context.Context, pool *db.Pool, key int64, retryInterval time.Duration, logger *zap.Logger, onLeader func(ctx context.Context)) {
+// ControllerLockKey is the advisory-lock key metrics-service's leader holds.
+const ControllerLockKey = 72902
+
+// Run blocks until ctx is cancelled, alternating between standby, trying the advisory lock key
+// every interval, and leading: holding the lock on one dedicated connection and running every
+// loop in a context cancelled the moment leadership is lost. Each loop must return once its
+// context is cancelled. The lock is released only after every loop has returned, so no two
+// replicas ever run them at once. A ping of the lock's connection that does not answer within
+// interval is leadership lost: Postgres may have dropped the session, and its lock with it.
+func Run(ctx context.Context, pool *db.Pool, key int64, interval time.Duration, logger *zap.Logger, loops ...func(context.Context)) {
+	logger = logger.With(zap.Int64("lockKey", key))
 	for ctx.Err() == nil {
 		lock, err := pool.TryAdvisoryLock(ctx, key)
 		if err != nil {
@@ -36,40 +34,37 @@ func Run(ctx context.Context, pool *db.Pool, key int64, retryInterval time.Durat
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(retryInterval):
+			case <-time.After(interval):
 			}
 			continue
 		}
 
-		logger.Info("leaderelection: acquired scheduler leadership")
+		logger.Info("leaderelection: acquired leadership")
 		leaderCtx, cancel := context.WithCancel(ctx)
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			onLeader(leaderCtx)
-		}()
-
-		holdUntilLost(leaderCtx, lock, retryInterval, logger)
+		var running sync.WaitGroup
+		for _, loop := range loops {
+			running.Go(func() { loop(leaderCtx) })
+		}
+		holdUntilLost(leaderCtx, lock, interval, logger)
 		cancel()
-		<-done
+		running.Wait()
 		lock.Release()
-		logger.Warn("leaderelection: lost scheduler leadership")
+		logger.Warn("leaderelection: lost leadership")
 	}
 }
 
-// holdUntilLost blocks until the leader connection is no longer healthy or ctx is cancelled. A
-// dead connection is exactly what releases the advisory lock (Postgres does this automatically
-// on connection close), so probing liveness here is what lets another replica detect and take
-// over leadership within one retryInterval of this process dying.
-func holdUntilLost(ctx context.Context, lock *db.AdvisoryLock, retryInterval time.Duration, logger *zap.Logger) {
-	ticker := time.NewTicker(retryInterval)
+func holdUntilLost(ctx context.Context, lock *db.AdvisoryLock, interval time.Duration, logger *zap.Logger) {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := lock.Ping(ctx); err != nil {
+			pingCtx, cancel := context.WithTimeout(ctx, interval)
+			err := lock.Ping(pingCtx)
+			cancel()
+			if err != nil {
 				logger.Warn("leaderelection: leader connection lost", zap.Error(err))
 				return
 			}

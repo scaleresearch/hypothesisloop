@@ -762,8 +762,9 @@ func (h *PlatformExperimentsHandler) acceptAsProposed(ctx context.Context, id st
 	return err
 }
 
-// StartAutoAccept runs AcceptDue every interval until ctx is cancelled.
-func (h *PlatformExperimentsHandler) StartAutoAccept(ctx context.Context, interval time.Duration) {
+// StartAutoAccept runs AcceptDue every interval until ctx is cancelled, each pass bounded by
+// passTimeout.
+func (h *PlatformExperimentsHandler) StartAutoAccept(ctx context.Context, interval, passTimeout time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -771,9 +772,11 @@ func (h *PlatformExperimentsHandler) StartAutoAccept(ctx context.Context, interv
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := h.AcceptDue(ctx); err != nil {
+			passCtx, cancel := context.WithTimeout(ctx, passTimeout)
+			if err := h.AcceptDue(passCtx); err != nil {
 				h.logger.Error("accept_due: scan", zap.Error(err))
 			}
+			cancel()
 		}
 	}
 }

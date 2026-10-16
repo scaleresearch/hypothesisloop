@@ -1769,9 +1769,10 @@ func (s *PlatformExperimentsService) tellCoordinator(ctx context.Context, pe *do
 }
 
 // StartExpirySweep runs SweepAutoStart, TendBaselines, SweepExpired, RecordCloses,
-// TellCoordinators and the idle notices on a ticker until ctx is cancelled. TendBaselines runs before SweepExpired, so a baseline that waited
-// on the platform until its deadline is given that time before it is closed.
-func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, interval time.Duration) {
+// TellCoordinators and the idle notices on a ticker until ctx is cancelled, each pass bounded by
+// passTimeout. TendBaselines runs before SweepExpired, so a baseline that waited on the platform
+// until its deadline is given that time before it is closed.
+func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, interval, passTimeout time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -1779,6 +1780,14 @@ func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, inter
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			passCtx, cancel := context.WithTimeout(ctx, passTimeout)
+			s.expirySweep(passCtx)
+			cancel()
+		}
+	}
+}
+
+func (s *PlatformExperimentsService) expirySweep(ctx context.Context) {
 			if err := s.SweepAutoStart(ctx); err != nil {
 				s.logger.Error("sweep_auto_start: scan", zap.Error(err))
 			}
@@ -1802,8 +1811,6 @@ func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, inter
 					s.logger.Error("notice_idle_capacity: scan", zap.Error(err))
 				}
 			}
-		}
-	}
 }
 
 // NoticeIdleResearchers tells every researcher due an idle notice that it is idle (agent.idle),
@@ -1990,8 +1997,8 @@ func (n capacityNotice) detail() string {
 }
 
 // StartEndSweep runs SweepEnded on a ticker until ctx is cancelled: StartExpirySweep's interval
-// would close a run up to that long after its end.
-func (s *PlatformExperimentsService) StartEndSweep(ctx context.Context, interval time.Duration) {
+// would close a run up to that long after its end. Each pass is bounded by passTimeout.
+func (s *PlatformExperimentsService) StartEndSweep(ctx context.Context, interval, passTimeout time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -1999,9 +2006,11 @@ func (s *PlatformExperimentsService) StartEndSweep(ctx context.Context, interval
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := s.SweepEnded(ctx); err != nil {
+			passCtx, cancel := context.WithTimeout(ctx, passTimeout)
+			if err := s.SweepEnded(passCtx); err != nil {
 				s.logger.Error("sweep_ended: scan", zap.Error(err))
 			}
+			cancel()
 		}
 	}
 }

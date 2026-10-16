@@ -17,16 +17,18 @@ import (
 
 // Start repeatedly derives lifecycle work from PostgreSQL desired state and the latest backend
 // observation. No per-experiment goroutine or transition history survives a pass.
-func (w *JobWatcher) Start(ctx context.Context) {
+func (w *JobWatcher) Start(ctx context.Context, passTimeout time.Duration) {
 	if w.pollInterval <= 0 {
 		panic("job_watcher: poll interval must be positive")
 	}
 	ticker := time.NewTicker(w.pollInterval)
 	defer ticker.Stop()
 	for {
-		if err := w.scanAndWatch(ctx); err != nil {
+		passCtx, cancel := context.WithTimeout(ctx, passTimeout)
+		if err := w.scanAndWatch(passCtx); err != nil {
 			w.logger.Error("job_watcher: reconcile", zap.Error(err))
 		}
+		cancel()
 		select {
 		case <-ctx.Done():
 			return

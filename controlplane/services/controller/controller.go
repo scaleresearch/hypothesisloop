@@ -166,9 +166,8 @@ func (c *Controller) WithReconcileInterval(d time.Duration) *Controller {
 	return c
 }
 
-// Start launches the reconcile loop in a goroutine; it stops when ctx is
-// cancelled and returns the first non-context error (if any).
-func (c *Controller) Start(ctx context.Context) error {
+// Check refuses a controller that was not fully wired, before Run is handed to anything.
+func (c *Controller) Check() error {
 	if c.store == nil || c.quota == nil || c.settler == nil || c.stagesStore == nil || c.researchers == nil || c.logger == nil {
 		return fmt.Errorf("controller: store, quota, settler, stages store, researcher keeper and logger are required")
 	}
@@ -180,23 +179,27 @@ func (c *Controller) Start(ctx context.Context) error {
 		c.silenceMultiplier <= 0 || c.clusterSilenceCeiling <= 0 {
 		return fmt.Errorf("controller: all timing and multiplier values must be explicitly valid")
 	}
-	go func() {
-		ticker := time.NewTicker(c.reconcileInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if err := c.Reconcile(ctx); err != nil {
-					c.logger.Error("reconcile error", zap.Error(err))
-				}
-				if err := c.recordRunHealth(ctx); err != nil {
-					c.logger.Error("run health", zap.Error(err))
-				}
-			}
-		}
-	}()
-
 	return nil
+}
+
+// Run reconciles every reconcile interval until ctx is cancelled, each pass bounded by
+// passTimeout. The controller is Check-ed.
+func (c *Controller) Run(ctx context.Context, passTimeout time.Duration) {
+	ticker := time.NewTicker(c.reconcileInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			passCtx, cancel := context.WithTimeout(ctx, passTimeout)
+			if err := c.Reconcile(passCtx); err != nil {
+				c.logger.Error("reconcile error", zap.Error(err))
+			}
+			if err := c.recordRunHealth(passCtx); err != nil {
+				c.logger.Error("run health", zap.Error(err))
+			}
+			cancel()
+		}
+	}
 }

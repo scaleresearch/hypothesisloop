@@ -478,21 +478,21 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 	// loops rather than running per replica. Both are idempotent — Settle is an absolute set,
 	// Close() logs invalid_transition when it loses a race — so concurrent copies are not
 	// incorrect, just N redundant sweeps racing over the same row. One owner.
-	go leaderelection.Run(runCtx, pool, leaderelection.SchedulerLockKey,
-		5*time.Second, logger, func(leaderCtx context.Context) {
-			go settlementReconciler.Start(leaderCtx)
-			// Auto-close platform experiments past their ends_at deadline.
-			go expQuotaSvc.StartExpirySweep(leaderCtx, 60*time.Second)
-			// A run closes within seconds of its ends_at.
-			go expQuotaSvc.StartEndSweep(leaderCtx, 5*time.Second)
-			// A draft's create wakes this pass on the leader; the interval covers one created on
-			// another replica and one left by a restart.
-			go expQuotaSvc.StartRepositoryPass(leaderCtx, 5*time.Second)
-			// A proposal is accepted by itself planning.auto_accept_seconds after it is made.
-			go peHandler.StartAutoAccept(leaderCtx, 2*time.Second)
-			schedulerLoop.Start(leaderCtx)
-			watcher.Start(leaderCtx)
-		})
+	pass := pcfg.Scheduler.PassTimeout()
+	go leaderelection.Run(runCtx, pool, leaderelection.SchedulerLockKey, 5*time.Second, logger,
+		func(ctx context.Context) { settlementReconciler.Start(ctx, pass) },
+		// Auto-close platform experiments past their ends_at deadline.
+		func(ctx context.Context) { expQuotaSvc.StartExpirySweep(ctx, 60*time.Second, pass) },
+		// A run closes within seconds of its ends_at.
+		func(ctx context.Context) { expQuotaSvc.StartEndSweep(ctx, 5*time.Second, pass) },
+		// A draft's create wakes this pass on the leader; the interval covers one created on
+		// another replica and one left by a restart.
+		func(ctx context.Context) { expQuotaSvc.StartRepositoryPass(ctx, 5*time.Second, pass) },
+		// A proposal is accepted by itself planning.auto_accept_seconds after it is made.
+		func(ctx context.Context) { peHandler.StartAutoAccept(ctx, 2*time.Second, pass) },
+		func(ctx context.Context) { schedulerLoop.Start(ctx, pass) },
+		func(ctx context.Context) { watcher.Start(ctx, pass) },
+	)
 
 	schedulerHandler := scheduler.NewHandler(schedulerSvc)
 

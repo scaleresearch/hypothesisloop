@@ -169,8 +169,8 @@ func NewReconciler(store Store, settler *Settler, interval time.Duration, logger
 	return &Reconciler{store: store, settler: settler, interval: interval, logger: logger}
 }
 
-// Start runs the reconcile loop until ctx is cancelled.
-func (r *Reconciler) Start(ctx context.Context) {
+// Start runs the reconcile loop until ctx is cancelled, each pass bounded by passTimeout.
+func (r *Reconciler) Start(ctx context.Context, passTimeout time.Duration) {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
 	for {
@@ -178,7 +178,9 @@ func (r *Reconciler) Start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			r.reconcileOnce(ctx)
+			passCtx, cancel := context.WithTimeout(ctx, passTimeout)
+			r.reconcileOnce(passCtx)
+			cancel()
 		}
 	}
 }

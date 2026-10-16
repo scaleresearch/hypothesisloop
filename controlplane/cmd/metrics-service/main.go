@@ -23,6 +23,7 @@ import (
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/leaderelection"
 )
 
 // metrics-service hosts the metric-controller: the node-agent metric push endpoint and the
@@ -74,7 +75,7 @@ func main() {
 		logger.Fatal("metrics-service: configure auth", zap.Error(err))
 	}
 
-	controllerServer, runCancel := newControllerServer(authenticator, store, peFullStore, quotaCfg, pcfg, metricsDBURL, controllerPort, logger)
+	controllerServer, runCancel := newControllerServer(authenticator, pool, store, peFullStore, quotaCfg, pcfg, metricsDBURL, controllerPort, logger)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -98,7 +99,7 @@ func main() {
 	logger.Info("metrics-service: stopped")
 }
 
-func newControllerServer(authenticator *auth.Authenticator, store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) (*http.Server, context.CancelFunc) {
+func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) (*http.Server, context.CancelFunc) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap)
 
@@ -130,17 +131,17 @@ func newControllerServer(authenticator *auth.Authenticator, store *db.Store, peF
 	ctrl = ctrl.WithSettler(settler)
 	settlementReconciler := settlement.NewReconciler(store, settler, 30*time.Second, logger)
 
-	// metrics-service runs single-replica. The reconcile loop below is not leader-elected, and
-	// two of them would compute stage cuts from two different mid-flight snapshots — computeCut is
-	// read-decide-then-write, not a CAS, so whichever commits first wins and the other's verdict
-	// is lost. (The settlement reconciler above is safe either way: Settle is an idempotent
-	// absolute set.) Scale this out only behind the same leaderelection.Run gate control-service
-	// uses for its scheduler loop.
-	runCtx, runCancel := context.WithCancel(context.Background())
-	go settlementReconciler.Start(runCtx)
-	if err := ctrl.Start(runCtx); err != nil {
-		logger.Fatal("metrics-service: start reconcile loop", zap.Error(err))
+	// The controller's passes read, decide and write without a CAS, so one replica runs them, as
+	// control-service runs its scheduler.
+	if err := ctrl.Check(); err != nil {
+		logger.Fatal("metrics-service: reconcile loop", zap.Error(err))
 	}
+	runCtx, runCancel := context.WithCancel(context.Background())
+	pass := pcfg.Scheduler.PassTimeout()
+	go leaderelection.Run(runCtx, pool, leaderelection.ControllerLockKey, 5*time.Second, logger,
+		func(ctx context.Context) { settlementReconciler.Start(ctx, pass) },
+		func(ctx context.Context) { ctrl.Run(ctx, pass) },
+	)
 
 	srv := &http.Server{
 		Addr:         ":" + port,
