@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchAgentTypes, fetchPlatformExperimentAgents, fetchStages, updatePlatformExperiment } from '@/lib/api'
+import { fetchAgentTypes, fetchPlatformExperimentAgents, updatePlatformExperiment } from '@/lib/api'
 import { ReadOnlyProvider } from '@/lib/read-only'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { ResearcherPool } from '@/components/researcher-pool'
@@ -12,7 +12,7 @@ import { PlatformExperimentStatus } from '@/types'
 import type { JoinedAgent, Me, PlatformExperiment } from '@/types'
 
 vi.mock('@/lib/api', () => ({
-  fetchAgentTypes: vi.fn(), fetchPlatformExperimentAgents: vi.fn(), fetchStages: vi.fn(), updatePlatformExperiment: vi.fn(),
+  fetchAgentTypes: vi.fn(), fetchPlatformExperimentAgents: vi.fn(), updatePlatformExperiment: vi.fn(),
 }))
 
 const at = '2026-01-01T00:00:00Z'
@@ -25,13 +25,14 @@ const me: Me = {
 function researcher(id: string, hour: number, flavor = 'generalist'): JoinedAgent {
   return {
     platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' },
-    hosted: true, flavor, model: 'm', agent_type_version: 1, signed_up_at: `2026-01-01T0${hour}:00:00Z`,
+    hosted: true, flavor, model: 'm', agent_type_version: 1, at_work: true, signed_up_at: `2026-01-01T0${hour}:00:00Z`,
   }
 }
 
 const pe = {
   id: 'pe-1', project_id: 'prj_1', status: PlatformExperimentStatus.RUNNING, max_agents: 4,
   researchers: [{ agent_type: 'generalist', model: 'm', count: 2 }, { agent_type: 'at-lr', model: 'm', count: 1 }],
+  researchers_at_work: { total: 3, pool: [{ agent_type: 'generalist', model: 'm', at_work: 2 }, { agent_type: 'at-lr', model: 'm', at_work: 1 }], outside_pool: 0 },
 } as PlatformExperiment
 
 function show(readOnly = false, experiment = pe) {
@@ -49,9 +50,8 @@ function show(readOnly = false, experiment = pe) {
 beforeEach(() => {
   vi.mocked(fetchAgentTypes).mockResolvedValue(CATALOG)
   vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([
-    researcher('ag-old', 1), researcher('ag-mid', 2), researcher('ag-lr', 3, 'at-lr'), researcher('ag-cut', 0),
+    researcher('ag-old', 1), researcher('ag-mid', 2), researcher('ag-lr', 3, 'at-lr'), { ...researcher('ag-cut', 0), at_work: false, ended_reason: 'cut' as const },
   ])
-  vi.mocked(fetchStages).mockResolvedValue({ stages: [], current_stage: 1, progress: 0, next_boundary_progress: 1, advances: [], active_agents: [], cut_agents: [{ agent_id: 'ag-cut', stage_index: 1 }] })
   vi.mocked(updatePlatformExperiment).mockImplementation(async (_id, patch) => ({ ...pe, ...patch }) as PlatformExperiment)
 })
 
@@ -61,6 +61,13 @@ describe('the researchers of an experiment', () => {
     expect(await screen.findByText('3 at work of 4 max')).toBeTruthy()
     const rows = within(screen.getByRole('table', { name: 'Pool' })).getAllByRole('row').slice(1).map(r => r.textContent)
     expect(rows).toEqual(['Generalistm22', 'LR sweeperm11'])
+  })
+
+  it('counts what the coordinator added beyond the pool on its own row', async () => {
+    show(false, { ...pe, researchers_at_work: { ...pe.researchers_at_work!, total: 5, outside_pool: 2 } })
+    expect(await screen.findByText('5 at work of 4 max')).toBeTruthy()
+    const rows = within(screen.getByRole('table', { name: 'Pool' })).getAllByRole('row').slice(1).map(r => r.textContent)
+    expect(rows).toEqual(['Generalistm22', 'LR sweeperm11', 'Added by the coordinator beyond the pool2'])
   })
 
   it('confirms a lowered max naming how many and which researchers, the newest, are cut', async () => {

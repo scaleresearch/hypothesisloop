@@ -839,7 +839,7 @@ export function fetchAgentTypeVersions(orgID: string, typeID: string): Promise<A
 
 export type CreateAgentTypeRequest =
   | { from: string; name?: string }
-  | { name: string; role: AgentRole; prompt: string; settings: AgentTypeSettings }
+  | { name: string; description?: string; role: AgentRole; prompt: string; settings: AgentTypeSettings }
 
 // For an owner. A copy (from) takes its role, prompt and settings from the type it copies.
 export function createAgentType(orgID: string, req: CreateAgentTypeRequest): Promise<AgentType> {
@@ -850,6 +850,8 @@ export interface EditAgentTypeRequest {
   /** The version the edit was made from: 409 version_conflict when it is no longer current. */
   if_version: number
   name: string
+  /** Left out, the description stays as it was. */
+  description?: string
   prompt: string
   settings: AgentTypeSettings
 }

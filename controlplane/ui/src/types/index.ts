@@ -245,6 +245,8 @@ export interface AgentType {
   // Empty for a built-in type.
   org_id?: string
   name: string
+  // One line on what agents of the type do, empty when none was written.
+  description: string
   role: AgentRole
   builtin: boolean
   current_version: number
@@ -275,6 +277,13 @@ export interface ResearcherPoolEntry {
   count: number
 }
 
+/** The researchers at work: in all, per entry of the pool in its order, and outside it. */
+export interface ResearchersAtWork {
+  total: number
+  pool: { agent_type?: string; model?: string; at_work: number }[]
+  outside_pool: number
+}
+
 export interface PlatformExperiment {
   id: string
   project_id: string
@@ -286,6 +295,8 @@ export interface PlatformExperiment {
   // Who it is to keep at work, at most max_agents in all. Where the platform runs them it replaces
   // one that finished or lost its machine, and a cut lowers the counts. Empty on a draft.
   researchers?: ResearcherPoolEntry[]
+  // The researchers at work by the one rule max_agents holds to, answered with the experiment.
+  researchers_at_work?: ResearchersAtWork
   // Accelerators-in-flight (SUBMITTED+RUNNING) this experiment may hold at once. Absent uses the
   // platform default (quota.default_max_concurrent_accelerators).
   max_concurrent_accelerators?: number
@@ -808,6 +819,10 @@ export interface AgentSignup {
   flavor?: string
   agent_type_version?: number
   model?: string
+  // Whether it is a researcher at work, by the one rule max_agents holds to.
+  at_work: boolean
+  // Why it no longer holds a place among the researchers, absent while it does.
+  ended_reason?: 'finished' | 'cut' | 'replaced' | 'stopped'
   // Why the platform cut it other than at a stage boundary: max_agents_lowered.
   cut_reason?: string
   // The researcher whose place the platform gave this one, and the one given this one's place.

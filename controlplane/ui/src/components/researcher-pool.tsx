@@ -1,8 +1,8 @@
 'use client'
 
 import { Fragment, useState } from 'react'
-import useSWR, { useSWRConfig } from 'swr'
-import { fetchStages, updatePlatformExperiment } from '@/lib/api'
+import { useSWRConfig } from 'swr'
+import { updatePlatformExperiment } from '@/lib/api'
 import type { PlatformExperimentPatch } from '@/lib/api'
 import { DEFAULT_AGENT_TYPE, describeType, researcherTypes, typeName, useAgentTypes } from '@/lib/agent-types'
 import { relTime } from '@/lib/format'
@@ -194,31 +194,28 @@ function PoolEditor({ pe, atWork, onDone }: { pe: PlatformExperiment; atWork: Jo
 export function ResearcherPool({ pe }: { pe: PlatformExperiment }) {
   const { org } = useTenant()
   const readOnly = useReadOnly()
-  const { data: roster, error: rosterError } = useRoster(pe)
-  const { data: stages, error: stagesError } = useSWR(['pe-stages', pe.id], () => fetchStages(pe.id), { refreshInterval: 15_000 })
+  const { data: roster, error } = useRoster(pe)
   const { data: catalog } = useAgentTypes(org.id)
   const [editing, setEditing] = useState(false)
   const editable = !readOnly && (pe.status === PlatformExperimentStatus.OPEN || pe.status === PlatformExperimentStatus.RUNNING)
 
-  const error = rosterError ?? stagesError
-  const atWork = roster && stages ? researchersAtWork(roster, new Set(stages.cut_agents.map(c => c.agent_id))) : undefined
-  const working = atWork ? atWorkByKey(atWork) : new Map<string, number>()
+  const atWork = roster && researchersAtWork(roster)
+  const counts = pe.researchers_at_work
   const pool = pe.researchers ?? []
-  const inPool = new Set(pool.map(e => poolKey(e.agent_type, e.model)))
-  const beyond = atWork?.filter(a => !inPool.has(poolKey(a.flavor, a.model))) ?? []
+  const beyond = counts?.outside_pool ?? 0
 
   return (
     <Section
       title="Researchers"
-      note={atWork && `${atWork.length} at work of ${pe.max_agents} max`}
+      note={counts && `${counts.total} at work of ${pe.max_agents} max`}
       actions={editable && !editing && atWork && <Button size="sm" onClick={() => setEditing(true)}>Edit</Button>}
     >
       {error && <ErrorMessage>Could not load the researchers: {error.message}</ErrorMessage>}
-      {!error && !atWork && <Loading rows={2} />}
+      {!counts && <Loading rows={2} />}
       {atWork && editing && <PoolEditor pe={pe} atWork={atWork} onDone={() => setEditing(false)} />}
-      {atWork && !editing && (
+      {counts && !editing && (
         <Stack>
-          {pool.length === 0 && beyond.length === 0 ? (
+          {pool.length === 0 && beyond === 0 ? (
             <Text variant="note">No pool. The coordinator adds researchers up to the max of {pe.max_agents}.</Text>
           ) : (
             <Table aria-label="Pool">
@@ -226,18 +223,18 @@ export function ResearcherPool({ pe }: { pe: PlatformExperiment }) {
                 <tr><th>Type</th><th>Model</th><th className="text-right">Wanted</th><th className="text-right">At work</th></tr>
               </thead>
               <tbody>
-                {pool.map(e => (
+                {pool.map((e, i) => (
                   <tr key={poolKey(e.agent_type, e.model)}>
                     <td className="text-xs font-medium">{typeName(e.agent_type || DEFAULT_AGENT_TYPE, catalog)}</td>
                     <td><Code className="text-xs">{e.model || 'platform default'}</Code></td>
                     <td className={num}>{e.count}</td>
-                    <td className={num}>{working.get(poolKey(e.agent_type, e.model)) ?? 0}</td>
+                    <td className={num}>{counts.pool[i]?.at_work ?? 0}</td>
                   </tr>
                 ))}
-                {beyond.length > 0 && (
+                {beyond > 0 && (
                   <tr>
                     <td colSpan={3} className="text-xs text-muted">Added by the coordinator beyond the pool</td>
-                    <td className={num}>{beyond.length}</td>
+                    <td className={num}>{beyond}</td>
                   </tr>
                 )}
               </tbody>

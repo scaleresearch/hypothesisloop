@@ -35,7 +35,7 @@ const me: Me = {
 }
 
 function signup(id: string, hosted: boolean, flavor?: string): AgentSignup {
-  return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted, flavor, signed_up_at: at }
+  return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted, flavor, at_work: true, signed_up_at: at }
 }
 
 function show(status = PlatformExperimentStatus.OPEN, more: Partial<PlatformExperiment> = {}) {

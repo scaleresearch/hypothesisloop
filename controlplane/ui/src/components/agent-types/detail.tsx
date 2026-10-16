@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import useSWR, { useSWRConfig } from 'swr'
 import { ApiError, archiveAgentType, editAgentType, fetchAgentType } from '@/lib/api'
-import { REFUSALS, describeType, nameProblem, promptProblems, roleOf } from '@/lib/agent-types'
+import { REFUSALS, describeType, descriptionProblem, nameProblem, promptProblems, roleOf } from '@/lib/agent-types'
 import { relTime } from '@/lib/format'
 import { agentTypesPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
@@ -52,7 +52,7 @@ function sameSettings(a: object, b: object): boolean {
 
 function Saved({ edited, onDismiss }: { edited: EditedAgentType | 'renamed'; onDismiss: () => void }) {
   if (edited === 'renamed') {
-    return <Callout tone="success">Renamed. A new name makes no new version.</Callout>
+    return <Callout tone="success">Saved. A new name or description makes no new version.</Callout>
   }
   const moved = edited.propagation.moved ?? []
   const failed = edited.propagation.failed ?? []
@@ -130,6 +130,7 @@ function Editor({ type, editable, onSaved, onReload }: {
 }) {
   const { org } = useTenant()
   const [name, setName] = useState(type.name)
+  const [description, setDescription] = useState(type.description)
   const [prompt, setPrompt] = useState(type.current.prompt)
   const [settingsDraft, setSettingsDraft] = useState<SettingsDraft>(() => toDraft(type.current.settings))
   const [confirming, setConfirming] = useState(false)
@@ -138,12 +139,13 @@ function Editor({ type, editable, onSaved, onReload }: {
 
   const { settings, problems: settingsProblems } = fromDraft(settingsDraft)
   const newVersion = prompt !== type.current.prompt || !sameSettings(settings, { ...type.current.settings, model: type.current.settings.model ?? '', hyperparameters: type.current.settings.hyperparameters ?? {} })
-  const dirty = newVersion || name.trim() !== type.name
-  const problems = [nameProblem(name), ...promptProblems(type.role, prompt), ...Object.values(settingsProblems)].filter(Boolean)
+  const dirty = newVersion || name.trim() !== type.name || description.trim() !== type.description
+  const problems = [nameProblem(name), descriptionProblem(description), ...promptProblems(type.role, prompt), ...Object.values(settingsProblems)].filter(Boolean)
   const r = roleOf(type.role)
 
   function discard() {
     setName(type.name)
+    setDescription(type.description)
     setPrompt(type.current.prompt)
     setSettingsDraft(toDraft(type.current.settings))
     setError(null)
@@ -154,7 +156,7 @@ function Editor({ type, editable, onSaved, onReload }: {
     setBusy(true)
     setError(null)
     try {
-      const edited = await editAgentType(org.id, type.id, { if_version: type.current_version, name: name.trim(), prompt, settings })
+      const edited = await editAgentType(org.id, type.id, { if_version: type.current_version, name: name.trim(), description: description.trim(), prompt, settings })
       await onSaved(edited)
     } catch (e) {
       setError({ message: said(e), conflict: e instanceof ApiError && e.reason === 'version_conflict' })
@@ -177,6 +179,9 @@ function Editor({ type, editable, onSaved, onReload }: {
           </FormField>
           <FormField label="Role" hint="Fixed once made.">
             <Input value={r.label} readOnly disabled />
+          </FormField>
+          <FormField label="Description" className="md:col-span-2" error={editable ? descriptionProblem(description) : undefined} hint="One line on what agents of this type do.">
+            <Input value={description} readOnly={!editable} onChange={e => setDescription(e.target.value)} />
           </FormField>
         </div>
       </Section>
@@ -204,7 +209,7 @@ function Editor({ type, editable, onSaved, onReload }: {
                   ? `${problems.length} ${problems.length === 1 ? 'problem' : 'problems'} to fix before saving.`
                   : newVersion
                     ? `Saving makes v${type.current_version + 1}.${type.live_agents > 0 ? ` ${type.live_agents} live ${type.live_agents === 1 ? 'agent moves' : 'agents move'} to it.` : ''}`
-                    : 'Only the name changed: no new version.'}
+                    : 'Only the name or description changed: no new version.'}
               </Text>
               <Inline gap="xs">
                 {error?.conflict && <Button size="sm" onClick={() => void onReload()}>Reload</Button>}

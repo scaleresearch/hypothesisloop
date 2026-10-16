@@ -69,9 +69,10 @@ describe('checking settings as domain.AgentTypeSettings.Validate does', () => {
 })
 
 describe('naming and describing types', () => {
-  it('describes a built-in type by what it does and an org\'s own by its version and author', () => {
+  it('describes a type by the description it states, and an org\'s own that states none by its role and author', () => {
     expect(describeType(CATALOG[1])).toMatch(/tunes the knobs/)
     expect(describeType(CATALOG.find(t => t.id === 'at-lr')!)).toBe("Your org's own researcher type, made by Ada.")
+    expect(describeType(agentType('at-x', 'X', 'researcher', { description: 'Sweeps lr.' }))).toBe('Sweeps lr.')
   })
 
   it('reads an id as its name, and an id the catalog does not hold as itself', () => {

@@ -1,15 +1,10 @@
 import type { JoinedAgent, ResearcherPoolEntry } from '@/types'
 import { DEFAULT_AGENT_TYPE } from '@/lib/agent-types'
 
-/**
- * The researchers at work, oldest first, as the platform counts them against max_agents: agents of
- * role competitor that have not finished, were not cut, were not replaced and still have a machine.
- * `cut` is the agents a stage boundary cut, which the roster does not say.
- */
-export function researchersAtWork(roster: JoinedAgent[], cut: Set<string>): JoinedAgent[] {
+/** The researchers at work, oldest first: the agents the platform says are (`at_work`). */
+export function researchersAtWork(roster: JoinedAgent[]): JoinedAgent[] {
   return roster
-    .filter(a => a.role === 'competitor' && !a.finished_at && !a.replaced_by && !a.cut_reason && !cut.has(a.agent_id)
-      && !(a.hosted && a.instance?.stopped))
+    .filter(a => a.at_work)
     .sort((a, b) => a.signed_up_at.localeCompare(b.signed_up_at) || a.agent_id.localeCompare(b.agent_id))
 }
 

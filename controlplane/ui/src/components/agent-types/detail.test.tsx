@@ -93,7 +93,7 @@ describe('editing an org\'s agent type', () => {
     expect(editAgentType).not.toHaveBeenCalled()
     await userEvent.click(dialog.getByRole('button', { name: 'Save and restart sessions' }))
     expect(editAgentType).toHaveBeenCalledExactlyOnceWith('org_a', 'at-lr', {
-      if_version: 3, name: 'LR sweeper', prompt: RESEARCHER_PROMPT,
+      if_version: 3, name: 'LR sweeper', description: '', prompt: RESEARCHER_PROMPT,
       settings: { model: '', max_subagents: 6, pacing_subagents: 2, effort: 'high', hyperparameters: {} },
     })
     expect(await screen.findByText(/Saved as v4\. 2 live agents pick it up at their next turn\./)).toBeTruthy()
@@ -117,10 +117,26 @@ describe('editing an org\'s agent type', () => {
     const name = await screen.findByLabelText('Name')
     await userEvent.clear(name)
     await userEvent.type(name, 'LR')
-    expect(screen.getByText('Only the name changed: no new version.')).toBeTruthy()
+    expect(screen.getByText('Only the name or description changed: no new version.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(await screen.findByText('Renamed. A new name makes no new version.')).toBeTruthy()
+    expect(await screen.findByText('Saved. A new name or description makes no new version.')).toBeTruthy()
+  })
+
+  it('saves a new description without a new version, and refuses one over 200 characters', async () => {
+    vi.mocked(editAgentType).mockImplementation(async (_org, _id, req) => { type = { ...type, description: req.description ?? '' }; return edited(type, 0) })
+    show()
+    const description = await screen.findByLabelText('Description')
+    await userEvent.type(description, 'Sweeps the learning rate.')
+    expect(screen.getByText('Only the name or description changed: no new version.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(editAgentType).toHaveBeenCalledWith('org_a', 'at-lr', expect.objectContaining({ description: 'Sweeps the learning rate.' }))
+    expect(await screen.findByText('Saved. A new name or description makes no new version.')).toBeTruthy()
+    await userEvent.clear(screen.getByLabelText('Description'))
+    await userEvent.click(screen.getByLabelText('Description'))
+    await userEvent.paste('x'.repeat(201))
+    expect(screen.getByText('A description is at most 200 characters.')).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('says another save came first, and offers to reload', async () => {

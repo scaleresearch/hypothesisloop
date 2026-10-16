@@ -18,21 +18,9 @@ export function roleOf(role: AgentRole) {
   return found
 }
 
-// What each built-in type does, in one line. The API holds no description, and these follow the
-// prompts in controlplane/shared/agenttypes/builtin.
-const BUILTIN_DESCRIPTIONS: Record<string, string> = {
-  generalist: 'No fixed axis: whatever moves the metric, settings, structure, inputs or scale.',
-  'hyperparameter-search': 'Holds structure and inputs fixed and tunes the knobs: rates, sizes, thresholds.',
-  'architecture-search': 'Holds settings and inputs fixed and searches the structure of the method.',
-  'data-search': 'Holds structure and settings fixed and searches what the method is fed.',
-  baseline: 'Builds the harness, measures the control and each reference, and finishes.',
-  planner: 'Turns a one-line goal into an experiment and proposes it.',
-  coordinator: 'Supervises the run, catches mistakes and files the summary.',
-}
-
-/** One line on what agents of the type do. */
+/** One line on what agents of the type do: the one the type states, a built-in's always. */
 export function describeType(t: AgentType): string {
-  if (t.builtin) return BUILTIN_DESCRIPTIONS[t.id] ?? roleOf(t.role).description
+  if (t.builtin || t.description) return t.description
   const by = t.created_by?.name ? `, made by ${t.created_by.name}` : ''
   return `Your org's own ${roleOf(t.role).label.toLowerCase()} type${by}.`
 }
@@ -87,6 +75,7 @@ export function placeholdersOf(role: AgentRole): Placeholder[] {
 
 export const MAX_PROMPT_BYTES = 64 << 10
 export const MAX_NAME_LENGTH = 80
+export const MAX_DESCRIPTION_LENGTH = 200
 
 const PLACEHOLDER = /\{\{([a-z_]+)\}\}/g
 const STRAY = /\{\{|\}\}/
@@ -123,6 +112,10 @@ export function promptProblems(role: AgentRole, prompt: string): string[] {
 export function nameProblem(name: string): string | null {
   const length = Array.from(name.trim()).length
   return length === 0 || length > MAX_NAME_LENGTH ? `A name is 1 to ${MAX_NAME_LENGTH} characters.` : null
+}
+
+export function descriptionProblem(description: string): string | null {
+  return Array.from(description.trim()).length > MAX_DESCRIPTION_LENGTH ? `A description is at most ${MAX_DESCRIPTION_LENGTH} characters.` : null
 }
 
 // ---------------------------------------------------------------------------

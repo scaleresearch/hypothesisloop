@@ -5,24 +5,21 @@ import type { JoinedAgent } from '@/types'
 function researcher(id: string, joined: string, more: Partial<JoinedAgent> = {}): JoinedAgent {
   return {
     platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' },
-    hosted: true, flavor: 'generalist', model: 'm', signed_up_at: `2026-01-01T0${joined}:00:00Z`, ...more,
+    hosted: true, flavor: 'generalist', model: 'm', at_work: true, signed_up_at: `2026-01-01T0${joined}:00:00Z`, ...more,
   }
 }
 
-describe('the researchers at work, as the platform counts them against max_agents', () => {
-  it('leaves out other roles and anyone finished, replaced, cut or without a machine, oldest first', () => {
+describe('the researchers at work, as the platform says', () => {
+  it('keeps those the platform says are at work, oldest first', () => {
     const roster = [
       researcher('c', '3'),
       researcher('a', '1'),
-      researcher('baseline', '0', { role: 'baseline' }),
-      researcher('done', '1', { finished_at: '2026-01-01T05:00:00Z' }),
-      researcher('old', '1', { replaced_by: 'c' }),
-      researcher('lowered', '2', { cut_reason: 'max_agents_lowered' }),
-      researcher('staged', '2'),
-      researcher('lost', '2', { instance: { state: 'stopped', restarts: 3, stopped: true } }),
+      researcher('baseline', '0', { role: 'baseline', at_work: false }),
+      researcher('done', '1', { at_work: false, ended_reason: 'finished' }),
+      researcher('old', '1', { at_work: false, ended_reason: 'replaced' }),
       researcher('b', '2'),
     ]
-    expect(researchersAtWork(roster, new Set(['staged'])).map(a => a.agent_id)).toEqual(['a', 'b', 'c'])
+    expect(researchersAtWork(roster).map(a => a.agent_id)).toEqual(['a', 'b', 'c'])
   })
 
   it('cuts the newest above a lowered max', () => {
