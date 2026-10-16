@@ -28,6 +28,7 @@ type PlatformExperimentsHandler struct {
 	metricsDBURL      string
 	capacityFreshness time.Duration
 	clusters          ClusterRegistry
+	podResources      domain.PodResources
 
 	// Set via WithAgentLaunch.
 	launch AgentLaunch
@@ -81,7 +82,8 @@ type ClusterRegistry interface {
 // per-flavor capacity reports land in, the freshness window past which a cluster's last
 // report is treated as stale, and the registry that says which clusters a caller may see. The
 // service checks a platform experiment against the same read.
-func (h *PlatformExperimentsHandler) WithLiveCapacity(metricsDBURL string, freshness time.Duration, clusters ClusterRegistry) *PlatformExperimentsHandler {
+func (h *PlatformExperimentsHandler) WithLiveCapacity(metricsDBURL string, freshness time.Duration, clusters ClusterRegistry, podResources domain.PodResources) *PlatformExperimentsHandler {
+	h.podResources = podResources
 	h.metricsDBURL = metricsDBURL
 	h.capacityFreshness = freshness
 	h.clusters = clusters
@@ -176,7 +178,7 @@ func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context, orgID str
 	if err != nil {
 		return nil, err
 	}
-	clusters := buildClusterCapacity(available, total)
+	clusters := buildClusterCapacity(available, total, h.podResources)
 	cpuAvailable, err := metricsdb.LiveClusterCPUCapacity(ctx, h.metricsDBURL, h.capacityFreshness)
 	if err != nil {
 		return nil, err
@@ -371,7 +373,7 @@ func placeableBy(orgID string, registered map[string]domain.Cluster, clusters []
 
 // buildClusterCapacity assembles the agent-facing view from live per-cluster/per-type counts.
 // Both maps are already keyed by accelerator type, so there is nothing to translate here.
-func buildClusterCapacity(available, total map[string]map[string]int64) []ClusterCapacity {
+func buildClusterCapacity(available, total map[string]map[string]int64, podResources domain.PodResources) []ClusterCapacity {
 	clusterNames := make(map[string]bool, len(available))
 	for cluster := range available {
 		clusterNames[cluster] = true
@@ -401,7 +403,7 @@ func buildClusterCapacity(available, total map[string]map[string]int64) []Cluste
 				Available:       available[cluster][t],
 				Total:           total[cluster][t],
 				AccHPerHour:     rate,
-				PodResources:    domain.AcceleratorType(t).PodResources(),
+				PodResources:    podResources.Of(domain.AcceleratorType(t)),
 			})
 		}
 		sort.Slice(accelerators, func(i, j int) bool { return accelerators[i].AcceleratorType < accelerators[j].AcceleratorType })

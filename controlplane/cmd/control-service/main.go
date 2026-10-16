@@ -118,7 +118,6 @@ func main() {
 	store := db.NewStore(pool, metricsDBURL, pcfg.Scheduler.MaxInfrastructureRequeues)
 
 	domain.SetAcceleratorRates(pcfg.RateByName)
-	domain.SetAcceleratorPodResources(pcfg.PodResourcesByName)
 
 	quotaCfg := domain.QuotaConfig{
 		Top3BonusFraction:                pcfg.Quota.Top3BonusFraction,
@@ -236,7 +235,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	}, logger).
 		WithJobImages(pcfg.OfferedJobImages()).
 		WithGitProxy(pcfg.GitHost.ProxyURL).
-		WithLiveCapacity(metricsDBURL, connectedWithin, store).
+		WithLiveCapacity(metricsDBURL, connectedWithin, store, domain.NewPodResources(pcfg.PodResourcesByName)).
 		WithAgentLaunch(quota.AgentLaunch{
 			Launcher: pcfg.Agents.Launcher, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
 			SigningSecret: pcfg.Auth.SigningSecret, MaxHosted: pcfg.Agents.MaxHostedPerPlatformExperiment,
@@ -455,6 +454,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 		WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent)
 
 	schedulerLoop := scheduler.NewLoop(store, expQuotaSvc, clusterReports, grace, logger).
+		WithPodResources(domain.NewPodResources(pcfg.PodResourcesByName)).
 		WithReprioritizer(schedulerSvc).
 		WithHeartbeat(time.Duration(pcfg.Scheduler.LoopHeartbeatSeconds)*time.Second).
 		WithGuaranteedFairnessWindow(time.Duration(pcfg.Scheduler.GuaranteedFairnessWindowSeconds)*time.Second).

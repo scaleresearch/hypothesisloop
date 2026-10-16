@@ -12,8 +12,6 @@ import (
 // writes it into the job the runtime runs, whatever the job stated.
 func TestAdmissionAddsWhatTheCatalogSaysAJobOnTheTypeAlwaysNeeds(t *testing.T) {
 	withCPUType(t)
-	domain.SetAcceleratorPodResources(map[string]map[string]string{h100: {"hugepages-1Gi": "4Gi"}})
-	t.Cleanup(func() { domain.SetAcceleratorPodResources(nil) })
 
 	plain := priced(holdJob("plain", domain.CapacityBurst, h100, 1, "1"), 1)
 	stating := priced(holdJob("stating", domain.CapacityBurst, h100, 1, "1"), 1)
@@ -22,6 +20,7 @@ func TestAdmissionAddsWhatTheCatalogSaysAJobOnTheTypeAlwaysNeeds(t *testing.T) {
 	cores := priced(coresJob("cores", domain.CapacityBurst, 2), 1)
 	store := &mixedStore{holdStore: holdStore{noRunningListStore: noRunningListStore{t: t, queued: []*domain.Experiment{plain, stating, cores}}}}
 	l, _, _ := mixedLoop(store, mixedWorkload{h100Free: 4, cpuFree: 16, published: true}, nil)
+	l.WithPodResources(domain.NewPodResources(map[string]map[string]string{h100: {"hugepages-1Gi": "4Gi"}}))
 
 	tickOnce(t, l)
 

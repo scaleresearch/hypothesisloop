@@ -455,7 +455,7 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 	if err != nil {
 		return err
 	}
-	resolved.AcceleratorPodResources = exp.AcceleratorType.WithPodResources(resolved.AcceleratorPodResources)
+	resolved.AcceleratorPodResources = l.podResources.Over(exp.AcceleratorType, resolved.AcceleratorPodResources)
 	if exp.EnvironmentImage != "" {
 		resolved.Image = exp.EnvironmentImage
 	}

@@ -42,7 +42,7 @@ func TestCapacityCarriesEachTypesAccHRate(t *testing.T) {
 
 	clusters := buildClusterCapacity(
 		map[string]map[string]int64{"local": {"gpu.product=L40": 3}},
-		map[string]map[string]int64{"local": {"gpu.product=L40": 8}})
+		map[string]map[string]int64{"local": {"gpu.product=L40": 8}}, nil)
 
 	want := AcceleratorCapacity{AcceleratorType: "gpu.product=L40", Kind: domain.TypeKindAccelerator, Available: 3, Total: 8, AccHPerHour: 0.25}
 	if len(clusters) != 1 || len(clusters[0].Accelerators) != 1 || !reflect.DeepEqual(clusters[0].Accelerators[0], want) {
@@ -55,15 +55,12 @@ func TestCapacityCarriesEachTypesAccHRate(t *testing.T) {
 func TestCapacityCarriesWhatThePlatformAddsToAJobOnAType(t *testing.T) {
 	const blackhole, l40 = "tenstorrent.com/chipArch=blackhole", "gpu.product=L40"
 	domain.SetAcceleratorRates(map[string]float64{"h100": 1.0, blackhole: 0.5, l40: 0.25})
-	domain.SetAcceleratorPodResources(map[string]map[string]string{blackhole: {"hugepages-1Gi": "4Gi"}})
-	t.Cleanup(func() {
-		domain.SetAcceleratorRates(map[string]float64{"h100": 1.0})
-		domain.SetAcceleratorPodResources(nil)
-	})
+	t.Cleanup(func() { domain.SetAcceleratorRates(map[string]float64{"h100": 1.0}) })
 
 	clusters := buildClusterCapacity(
 		map[string]map[string]int64{"local": {blackhole: 1, l40: 3}},
-		map[string]map[string]int64{"local": {blackhole: 2, l40: 8}})
+		map[string]map[string]int64{"local": {blackhole: 2, l40: 8}},
+		domain.NewPodResources(map[string]map[string]string{blackhole: {"hugepages-1Gi": "4Gi"}}))
 	if len(clusters) != 1 || len(clusters[0].Accelerators) != 2 {
 		t.Fatalf("capacity = %+v, want one cluster with two types", clusters)
 	}
@@ -86,7 +83,7 @@ func TestCapacitySaysWhichTypeCountsCores(t *testing.T) {
 
 	clusters := buildClusterCapacity(
 		map[string]map[string]int64{"mixed": {chip: 3, cores: 12}},
-		map[string]map[string]int64{"mixed": {chip: 4, cores: 16}})
+		map[string]map[string]int64{"mixed": {chip: 4, cores: 16}}, nil)
 
 	want := []AcceleratorCapacity{
 		{AcceleratorType: chip, Kind: domain.TypeKindAccelerator, Available: 3, Total: 4, AccHPerHour: 0.25},
@@ -184,7 +181,7 @@ func TestCapacitySaysWhichClustersRunEveryJobInOneImage(t *testing.T) {
 // accelerator was in no capacity answer at all, so nobody choosing where to run could see either.
 func TestCapacityCarriesEachClustersCoresAndMemory(t *testing.T) {
 	clusters := withResources(
-		buildClusterCapacity(map[string]map[string]int64{"chips": {"chip": 1}}, map[string]map[string]int64{"chips": {"chip": 4}}),
+		buildClusterCapacity(map[string]map[string]int64{"chips": {"chip": 1}}, map[string]map[string]int64{"chips": {"chip": 4}}, nil),
 		map[string]float64{"chips": 12, "cpu-only": 30.5}, map[string]float64{"chips": 16, "cpu-only": 32},
 		map[string]int64{"chips": 1 << 30, "cpu-only": 2 << 30}, map[string]int64{"chips": 4 << 30, "cpu-only": 8 << 30})
 
@@ -224,7 +221,7 @@ func TestCapacityCarriesEachClustersCoresAndMemory(t *testing.T) {
 	}
 
 	// A cluster that reported accelerators and no cores in the window has no resources to show.
-	silent := withResources(buildClusterCapacity(map[string]map[string]int64{"old": {"chip": 1}}, nil), nil, nil, nil, nil)
+	silent := withResources(buildClusterCapacity(map[string]map[string]int64{"old": {"chip": 1}}, nil, nil), nil, nil, nil, nil)
 	if len(silent) != 1 || silent[0].Resources != nil {
 		t.Errorf("a cluster with no cores reported: %+v", silent)
 	}
@@ -236,7 +233,7 @@ func TestTheTypesAProposalMayStateAreTheLinesCapacityLists(t *testing.T) {
 	const cores, chip, gone = string(domain.CPUType), "gpu.product=L40", "gpu.product=A100"
 	clusters := buildClusterCapacity(
 		map[string]map[string]int64{"mixed": {chip: 0, cores: 4, gone: 0}},
-		map[string]map[string]int64{"mixed": {chip: 4, cores: 16, gone: 0}})
+		map[string]map[string]int64{"mixed": {chip: 4, cores: 16, gone: 0}}, nil)
 	clusters[0].JobImage = "registry.example.com/hl/box:1"
 
 	var lines []string

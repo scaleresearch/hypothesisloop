@@ -69,30 +69,28 @@ func SetAcceleratorRates(rates map[string]float64) {
 	acceleratorRateRegistry = next
 }
 
-// acceleratorPodResources is what every node of a job on a type needs beside the device, such as
-// the hugepages a Tenstorrent chip's driver maps. Populated by SetAcceleratorPodResources at
-// startup from hypothesisloop.yaml and keyed by foldKey.
-var acceleratorPodResources = map[string]map[string]string{}
+// PodResources is what every node of a job on a type needs beside the device, such as the
+// hugepages a Tenstorrent chip's driver maps, by type as the settings' catalog names it.
+type PodResources map[string]map[string]string
 
-// SetAcceleratorPodResources registers each type's pod resources loaded from config. Call once at
-// startup.
-func SetAcceleratorPodResources(byType map[string]map[string]string) {
-	next := make(map[string]map[string]string, len(byType))
+// NewPodResources keys the catalog's pod resources so that any spelling of a type finds its own.
+func NewPodResources(byType map[string]map[string]string) PodResources {
+	out := make(PodResources, len(byType))
 	for name, resources := range byType {
-		next[foldKey(name)] = resources
+		out[foldKey(name)] = resources
 	}
-	acceleratorPodResources = next
+	return out
 }
 
-// PodResources is what the catalog says every node of a job on this type needs beside the device.
-func (g AcceleratorType) PodResources() map[string]string {
-	return acceleratorPodResources[foldKey(string(g))]
+// Of is what every node of a job on t needs beside the device.
+func (p PodResources) Of(t AcceleratorType) map[string]string {
+	return p[foldKey(string(t))]
 }
 
-// WithPodResources is a job's accelerator_pod_resources as it runs on this type: what the job
-// stated, and over it what the type always needs, so a job states none of that itself.
-func (g AcceleratorType) WithPodResources(stated map[string]string) map[string]string {
-	always := g.PodResources()
+// Over is a job's accelerator_pod_resources as it runs on t: what the job stated, and over it
+// what the type always needs, so a job states none of that itself.
+func (p PodResources) Over(t AcceleratorType, stated map[string]string) map[string]string {
+	always := p.Of(t)
 	if len(always) == 0 {
 		return stated
 	}
