@@ -251,6 +251,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		hypotheses:          graph,
 		sharing:             db.NewPlatformExperimentsStore(pool),
 		instructions:        db.NewPlatformExperimentsStore(pool),
+		agentTypes:          accounts.NewAgentTypesHandler(db.NewAgentTypesStore(pool), modelDefaults(pcfg), logger),
 		dataUsage:           quota.NewDataUsageHandler(dataStore, store, peSvc, pcfg.DataStore.MaxBytesPerAgent, logger),
 		sessions:            dataStore,
 		drafts:              db.NewExperimentDraftsStore(pool),
@@ -293,6 +294,7 @@ type routes struct {
 	instructions        quota.InstructionsStore
 	drafts              quota.ExperimentDraftStore
 	accounts            *accounts.Handler
+	agentTypes          *accounts.AgentTypesHandler
 	repositories        *accounts.Repositories
 	scheduler           *scheduler.Handler
 	registry            *registry.Handler
@@ -357,6 +359,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	quota.RegisterInstructionsHuma(doc, h.instructions, logger)
 	quota.RegisterExperimentDraftsHuma(doc, h.drafts, logger)
 	accounts.RegisterHuma(doc, h.accounts)
+	accounts.RegisterAgentTypesHuma(doc, h.agentTypes)
 	accounts.RegisterRepositoriesHuma(doc, h.repositories)
 	scheduler.RegisterHuma(doc, h.scheduler)
 	registry.RegisterHuma(doc, h.registry)

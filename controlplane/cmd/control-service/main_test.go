@@ -53,6 +53,7 @@ func testRouter(t *testing.T) chi.Router {
 		hypotheses:          noHypotheses{},
 		dataUsage:           &quota.DataUsageHandler{},
 		accounts:            &accounts.Handler{},
+		agentTypes:          &accounts.AgentTypesHandler{},
 		repositories:        &accounts.Repositories{},
 		scheduler:           &scheduler.Handler{},
 		registry:            &registry.Handler{},

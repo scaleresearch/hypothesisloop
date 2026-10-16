@@ -104,11 +104,11 @@ type CurrentAgentType struct {
 
 // AgentTypeSettings is what an agent type runs with besides its prompt.
 type AgentTypeSettings struct {
-	Model           string         `json:"model" doc:"The model an agent of the type runs on when the agent names none. Empty: the platform's default."`
+	Model           string         `json:"model" required:"false" doc:"The model an agent of the type runs on when the agent names none. Empty or left out: the platform's default."`
 	MaxSubagents    int            `json:"max_subagents" doc:"How many subagents run at once, 1 to 10."`
 	PacingSubagents int            `json:"pacing_subagents" doc:"How many run at once while the model account is ahead of its pace, 1 to max_subagents."`
 	Effort          string         `json:"effort" enum:"low,medium,high,xhigh,max" doc:"How hard the model thinks."`
-	Hyperparameters map[string]any `json:"hyperparameters" doc:"What an agent of the type starts from when it is given none, at most 4096 bytes as JSON."`
+	Hyperparameters map[string]any `json:"hyperparameters" required:"false" doc:"What an agent of the type starts from when it is given none, at most 4096 bytes as JSON. Left out: none."`
 }
 
 // MaxSubagentsLimit bounds max_subagents.

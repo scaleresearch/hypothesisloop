@@ -35,6 +35,9 @@ type world struct {
 	router  http.Handler
 	callers map[string]auth.Principal
 
+	agentTypes *memAgentTypes
+	ownType    string
+
 	orgA, orgB           string
 	projectA, projectA2  string
 	projectB             string
@@ -153,6 +156,10 @@ func newWorld(t *testing.T) *world {
 	connected := func(context.Context) (map[string]bool, error) { return map[string]bool{w.clusterA: true}, nil }
 	autoscalers := func(context.Context) (map[string]bool, error) { return map[string]bool{}, nil }
 	RegisterHuma(doc, NewHandler(w.store, w.store, connected, autoscalers, testSigningSecret, testRuntimeAddresses, testLimits, zap.NewNop()))
+	w.agentTypes = newMemAgentTypes()
+	ownType, _ := w.agentTypes.Create(ctx, w.orgA, "Own", domain.AgentRoleResearcher, ownPrompt, domain.AgentTypeSettings{MaxSubagents: 2, PacingSubagents: 1, Effort: "high"}, domain.Actor{Kind: domain.ActorUser, ID: "u-owner"})
+	w.ownType = ownType.ID
+	RegisterAgentTypesHuma(doc, NewAgentTypesHandler(w.agentTypes, domain.ModelDefaults{Agent: "model-a", Coordinator: "model-c"}, zap.NewNop()))
 	w.router = router
 	return w
 }
@@ -287,6 +294,36 @@ func TestWhoMayCallWhat(t *testing.T) {
 			map[string]int{"owner": ok, "member": forbidden, "outsider": notFound, "org-key": notFound, "project-key": notFound, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
 		{"revoke a key the member made", func(w *world) request { return request{"DELETE", "/api-keys/" + w.memberKey, nil} },
 			map[string]int{"owner": ok, "member": ok, "outsider": notFound, "org-key": notFound, "project-key": notFound, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
+		{"list agent types", func(w *world) request { return request{"GET", "/orgs/" + w.orgA + "/agent-types", nil} },
+			map[string]int{"owner": ok, "member": ok, "outsider": notFound, "org-key": ok, "project-key": ok, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
+		{"read the org's agent type", func(w *world) request { return request{"GET", "/orgs/" + w.orgA + "/agent-types/" + w.ownType, nil} },
+			map[string]int{"owner": ok, "member": ok, "outsider": notFound, "org-key": ok, "project-key": ok, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
+		{"read the org's agent type through another org", func(w *world) request { return request{"GET", "/orgs/" + w.orgB + "/agent-types/" + w.ownType, nil} },
+			map[string]int{"owner": notFound, "member": notFound, "outsider": notFound, "org-key": notFound, "project-key": notFound, "foreign-key": notFound, "staff": notFound, "staff-user": notFound}},
+		{"create an agent type", func(w *world) request {
+			return request{"POST", "/orgs/" + w.orgA + "/agent-types", name{"name": "new", "role": "researcher", "prompt": ownPrompt, "settings": ownSettings()}}
+		},
+			map[string]int{"owner": created, "member": forbidden, "outsider": notFound, "org-key": created, "project-key": forbidden, "foreign-key": notFound, "staff": created, "staff-user": created}},
+		{"edit the org's agent type", func(w *world) request {
+			return request{"PUT", "/orgs/" + w.orgA + "/agent-types/" + w.ownType, name{"if_version": 1, "name": "Own", "prompt": ownPrompt + " Edited.", "settings": ownSettings()}}
+		},
+			map[string]int{"owner": ok, "member": forbidden, "outsider": notFound, "org-key": ok, "project-key": forbidden, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
+		{"edit a built-in agent type", func(w *world) request {
+			return request{"PUT", "/orgs/" + w.orgA + "/agent-types/generalist", name{"if_version": 1, "name": "Mine", "prompt": ownPrompt, "settings": ownSettings()}}
+		},
+			map[string]int{"owner": forbidden, "member": forbidden, "outsider": notFound, "org-key": forbidden, "project-key": forbidden, "foreign-key": notFound, "staff": forbidden, "staff-user": forbidden}},
+		{"edit the org's agent type through another org", func(w *world) request {
+			return request{"PUT", "/orgs/" + w.orgB + "/agent-types/" + w.ownType, name{"if_version": 1, "name": "Own", "prompt": ownPrompt, "settings": ownSettings()}}
+		},
+			map[string]int{"owner": notFound, "member": notFound, "outsider": notFound, "org-key": notFound, "project-key": notFound, "foreign-key": notFound, "staff": notFound, "staff-user": notFound}},
+		{"archive the org's agent type", func(w *world) request {
+			return request{"POST", "/orgs/" + w.orgA + "/agent-types/" + w.ownType + "/archive", nil}
+		},
+			map[string]int{"owner": ok, "member": forbidden, "outsider": notFound, "org-key": ok, "project-key": forbidden, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
+		{"archive a built-in agent type", func(w *world) request {
+			return request{"POST", "/orgs/" + w.orgA + "/agent-types/generalist/archive", nil}
+		},
+			map[string]int{"owner": forbidden, "member": forbidden, "outsider": notFound, "org-key": forbidden, "project-key": forbidden, "foreign-key": notFound, "staff": forbidden, "staff-user": forbidden}},
 		{"list members", func(w *world) request { return request{"GET", "/orgs/" + w.orgA + "/members", nil} },
 			map[string]int{"owner": ok, "member": ok, "outsider": notFound, "org-key": ok, "project-key": forbidden, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
 		{"make the member an owner", func(w *world) request {
