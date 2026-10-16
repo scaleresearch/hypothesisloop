@@ -223,9 +223,10 @@ type Repository struct {
 // Token is an installation token. It works for about an hour and on one repository, which
 // Repository names as owner/name the way GitHub does at the moment of minting.
 type Token struct {
-	Value      string
-	ExpiresAt  time.Time
-	Repository string
+	Value        string
+	ExpiresAt    time.Time
+	Repository   string
+	installation int64
 }
 
 // App is what a browser needs to send a person to GitHub.
@@ -608,7 +609,7 @@ func (c *Client) StartFresh(ctx context.Context, token *Token, files map[string]
 		DefaultBranch string `json:"default_branch"`
 	}
 	if err := c.call(ctx, http.MethodGet, "/repos/"+token.Repository, token.Value, nil, &repository); err != nil {
-		return err
+		return failedFor(token.installation, err)
 	}
 	var commits []struct {
 		Parents []struct {
@@ -617,12 +618,12 @@ func (c *Client) StartFresh(ctx context.Context, token *Token, files map[string]
 	}
 	path := "/repos/" + token.Repository + "/commits?per_page=2&sha=" + url.QueryEscape(repository.DefaultBranch)
 	if err := c.call(ctx, http.MethodGet, path, token.Value, nil, &commits); err != nil {
-		return err
+		return failedFor(token.installation, err)
 	}
 	if len(commits) != 1 || len(commits[0].Parents) != 0 {
 		return ErrNotFresh
 	}
-	return c.firstCommit(ctx, token, repository.DefaultBranch, files)
+	return failedFor(token.installation, c.firstCommit(ctx, token, repository.DefaultBranch, files))
 }
 
 // firstCommit makes files the only commit of a branch the token's repository has: a tree, a
@@ -695,7 +696,7 @@ func (c *Client) Token(ctx context.Context, installationID int64, fullName strin
 		}
 		return nil, fmt.Errorf("github: the token minted for installation %d is not limited to one repository", installationID)
 	}
-	return &Token{Value: out.Token, ExpiresAt: out.ExpiresAt, Repository: out.Repositories[0].FullName}, nil
+	return &Token{Value: out.Token, ExpiresAt: out.ExpiresAt, Repository: out.Repositories[0].FullName, installation: installationID}, nil
 }
 
 type minted struct {
@@ -767,7 +768,7 @@ func (c *Client) File(ctx context.Context, token *Token, ref, path string) ([]by
 	case errors.Is(err, errNotFound):
 		return nil, ErrFileNotFound
 	case err != nil:
-		return nil, err
+		return nil, failedFor(token.installation, err)
 	}
 	var file struct {
 		Type     string `json:"type"`

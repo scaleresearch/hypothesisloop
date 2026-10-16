@@ -49,9 +49,10 @@ type InstallationStore interface {
 }
 
 // ExperimentRepositories says which repository a platform experiment names, which project it is
-// in and whether it is closed. *db.PlatformExperimentsStore satisfies it.
+// in, whether it is closed and whether it is still a draft. *db.PlatformExperimentsStore
+// satisfies it.
 type ExperimentRepositories interface {
-	PlatformExperimentRepository(ctx context.Context, id string) (projectID, repository string, closed bool, err error)
+	PlatformExperimentRepository(ctx context.Context, id string) (projectID, repository string, closed, draft bool, err error)
 }
 
 // Repositories serves the GitHub installations orgs connect and what they cover, and the git
@@ -398,7 +399,8 @@ func (r *Repositories) repositories(ctx context.Context, orgID, q string) ([]Rep
 
 // credential mints the caller's git credential. It goes only to what the platform launched into
 // a platform experiment, for the repository that experiment names and for no other address: an
-// agent may push, a coordinator and a job read. Nothing is minted for a run that is over, though
+// agent may push once the experiment is past its draft, and a coordinator, a job and the planner
+// of a draft read. Nothing is minted for a run that is over, though
 // its token still files summaries, since the credential would outlive the token by an hour. The
 // close is read again here, so a run closed after the token was read asks nothing of the git host.
 func (r *Repositories) credential(ctx context.Context, protocol, host, path string) (*GitCredential, error) {
@@ -406,18 +408,16 @@ func (r *Repositories) credential(ctx context.Context, protocol, host, path stri
 	if !ok {
 		return nil, auth.Unauthenticated("the request carries no principal")
 	}
-	write := false
 	switch p.Kind {
-	case auth.KindAgent:
-		write = true
-	case auth.KindCoordinator, auth.KindJob:
+	case auth.KindAgent, auth.KindCoordinator, auth.KindJob:
 	default:
 		return nil, api.Refuse(http.StatusForbidden, ReasonForbidden, "a "+string(p.Kind)+" token has no repository of its own: a git credential goes to an agent, a coordinator or a job")
 	}
-	projectID, repository, closed, err := r.experiments.PlatformExperimentRepository(ctx, p.PlatformExperimentID)
+	projectID, repository, closed, draft, err := r.experiments.PlatformExperimentRepository(ctx, p.PlatformExperimentID)
 	if err != nil {
 		return nil, err
 	}
+	write := p.Kind == auth.KindAgent && !draft
 	if closed {
 		return nil, api.Refuse(http.StatusForbidden, ReasonRunOver, "run closed, nothing more is pushed: platform experiment "+p.PlatformExperimentID+" is closed, so no git credential is handed out for it. "+
 			"What is not pushed stays out of the repository; the summary and comments still take what matters until the token ends")
@@ -588,7 +588,7 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 		OperationID: "create-git-credential", Method: "POST", Path: "/git-credentials", DefaultStatus: http.StatusCreated,
 		Summary: "Mint a git credential for your platform experiment's repository", Tags: []string{"github"},
 		Description: "For an agent, a coordinator and a job: a GitHub token minted for this call, good for about an hour and for the one repository the " +
-			"caller's platform experiment names. An agent's may push, a coordinator's and a job's read. `hl git-credential` is git's credential helper " +
+			"caller's platform experiment names. An agent's may push once the platform experiment is past its draft; a coordinator's, a job's and a draft's planner's read. `hl git-credential` is git's credential helper " +
 			"over this call, so git asks for a fresh one whenever it needs one and nothing has to be stored. protocol, host and path are what git asked " +
 			"a credential for: nothing is minted unless they name that repository over https, as owner/name, owner/name.git or its LFS endpoint " +
 			"owner/name.git/info/lfs. 403 run_over once the platform experiment is closed or the agent, for a job the agent it belongs to, was cut, and " +

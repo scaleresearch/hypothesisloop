@@ -110,12 +110,12 @@ func (s *memInstallations) DisconnectGitHubInstallation(_ context.Context, orgID
 // experiments says which repository each platform experiment names, and in which org.
 type experiments map[string][3]string
 
-func (e experiments) PlatformExperimentRepository(_ context.Context, id string) (string, string, bool, error) {
+func (e experiments) PlatformExperimentRepository(_ context.Context, id string) (string, string, bool, bool, error) {
 	found, ok := e[id]
 	if !ok {
-		return "", "", false, db.ErrPlatformExperimentNotFound
+		return "", "", false, false, db.ErrPlatformExperimentNotFound
 	}
-	return found[0], found[1], found[2] == "closed", nil
+	return found[0], found[1], found[2] == "closed", found[2] == "draft", nil
 }
 
 type minted struct {
@@ -332,7 +332,7 @@ func newGitHubWorld(t *testing.T, withApp bool) *githubWorld {
 	t.Helper()
 	w := &githubWorld{world: newWorld(t), app: newFakeApp()}
 	w.installations = &memInstallations{memStore: w.store, connected: map[string][]*domain.OrgGitHubInstallation{}, kept: map[string]string{}}
-	w.experiments = experiments{"pe-a": {w.projectA, "Acme/Model"}, "pe-bare": {w.projectA, ""}, "pe-b": {w.projectB, "Acme/Model"}, "pe-closed": {w.projectA, "Acme/Model", "closed"}}
+	w.experiments = experiments{"pe-a": {w.projectA, "Acme/Model"}, "pe-bare": {w.projectA, ""}, "pe-b": {w.projectB, "Acme/Model"}, "pe-closed": {w.projectA, "Acme/Model", "closed"}, "pe-draft": {w.projectA, "Acme/Model", "draft"}}
 	access := auth.NewAccess(placement{memStore: w.store})
 	if withApp {
 		w.host = NewGitHubHost(w.installations, w.app, zap.NewNop())
@@ -354,6 +354,9 @@ func newGitHubWorld(t *testing.T, withApp bool) *githubWorld {
 	closedAfterTheToken := w.callers["agent"]
 	closedAfterTheToken.PlatformExperimentID = "pe-closed"
 	w.callers["agent-closed"] = closedAfterTheToken
+	planner := w.callers["agent"]
+	planner.PlatformExperimentID = "pe-draft"
+	w.callers["planner"] = planner
 	router := authtest.Router(tokens{w.world})
 	doc := apidocs.New(router, "test", "1.0.0", "", access, zap.NewNop())
 	RegisterRepositoriesHuma(doc, w.svc)
@@ -757,7 +760,7 @@ func TestAGitCredentialGoesToWhatThePlatformLaunchedForItsExperimentsRepository(
 	for _, tc := range []struct {
 		caller string
 		access github.Access
-	}{{"agent", github.Write}, {"coordinator", github.Read}, {"job", github.Read}} {
+	}{{"agent", github.Write}, {"coordinator", github.Read}, {"job", github.Read}, {"planner", github.Read}} {
 		before := len(w.app.mints)
 		rec := w.call(tc.caller, "POST", "/git-credentials", modelCredential)
 		if rec.Code != http.StatusCreated || rec.Header().Get("Cache-Control") != "no-store" {

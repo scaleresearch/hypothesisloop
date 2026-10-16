@@ -226,12 +226,12 @@ func (s plannerListed) ListAgentSignups(_ context.Context, id string) ([]domain.
 // draftRepositories answers the git credential service from the drafts a store holds.
 type draftRepositories struct{ store *draftStore }
 
-func (d draftRepositories) PlatformExperimentRepository(ctx context.Context, id string) (string, string, bool, error) {
+func (d draftRepositories) PlatformExperimentRepository(ctx context.Context, id string) (string, string, bool, bool, error) {
 	pe, err := d.store.GetPlatformExperiment(ctx, id)
 	if err != nil || pe == nil {
-		return "", "", false, db.ErrPlatformExperimentNotFound
+		return "", "", false, false, db.ErrPlatformExperimentNotFound
 	}
-	return pe.ProjectID, pe.Repository, pe.Status == domain.PlatformExpClosed, nil
+	return pe.ProjectID, pe.Repository, pe.Status == domain.PlatformExpClosed, pe.Status == domain.PlatformExpDraft, nil
 }
 
 // A planner clones its draft's repository before it proposes, so the token of a planner at work

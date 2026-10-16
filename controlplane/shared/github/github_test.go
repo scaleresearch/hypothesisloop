@@ -1298,14 +1298,20 @@ func TestTokenRefusals(t *testing.T) {
 }
 
 // GitHub has answered a scoped installation token with a bare 500: that reads as GitHub failing,
-// for the installation the call was made for.
+// for the installation the call was made for, as does a read with a token minted before.
 func TestGitHubFailingACallNamesTheInstallation(t *testing.T) {
 	_, client := newFakeGitHub(t)
 	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	t.Cleanup(broken.Close)
+	token, err := client.Token(ctx, 100, "acme/model", Write)
+	if err != nil {
+		t.Fatal(err)
+	}
 	calls := map[string]func() error{
+		"File":         func() error { _, err := client.File(ctx, token, "", "README.md"); return err },
+		"StartFresh":   func() error { return client.StartFresh(ctx, token, firstFiles) },
 		"Installation": func() error { _, err := client.Installation(ctx, 100); return err },
 		"Repositories": func() error { _, err := client.Repositories(ctx, 100); return err },
 		"Token":        func() error { _, err := client.Token(ctx, 100, "acme/model", Write); return err },
