@@ -5,6 +5,7 @@ import (
 
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -21,6 +22,9 @@ const (
 	maxPushBacklog = 24 * time.Hour
 	maxPushSkew    = 5 * time.Minute
 )
+
+// maxPushBytes bounds one node's push, a few hundred bytes per pod it runs.
+const maxPushBytes = 4 << 20
 
 func validPushTime(at, now time.Time) error {
 	if at.IsZero() {
@@ -69,7 +73,11 @@ func NewPushHandler(dbURL string, placements Placements) http.Handler {
 			return
 		}
 		var req PushRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPushBytes)).Decode(&req); err != nil {
+			if tooLarge := (*http.MaxBytesError)(nil); errors.As(err, &tooLarge) {
+				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+				return
+			}
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
