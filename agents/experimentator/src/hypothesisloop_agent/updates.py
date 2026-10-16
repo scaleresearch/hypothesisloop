@@ -105,13 +105,15 @@ _SITUATION_S = 30
 
 
 _AGENT_ID = "HL_WATCH_AGENT_ID"
+# Where hl keeps the cursor of the agent's update feed, in the harness's state directory.
+STATE_DIR = ".hl-state"
 
 
 def watch_env(cfg: config.Config, statedir: str) -> dict[str, str]:
     """The environment hl watch needs: the API, the token, which says to hl who is watching, and
     a state dir that outlives the process, with the agent the token is, "" for a coordinator."""
     return {**os.environ, "API_URL": cfg.api_url, "HL_TOKEN": cfg.token,
-            "HL_STATE_DIR": os.path.join(os.path.abspath(statedir), ".hl-state"),
+            "HL_STATE_DIR": os.path.join(os.path.abspath(statedir), STATE_DIR),
             _AGENT_ID: "" if config.coordinates(cfg) else cfg.agent_id}
 
 
