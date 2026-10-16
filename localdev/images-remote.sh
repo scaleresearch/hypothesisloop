@@ -10,7 +10,7 @@
 #   IMAGES    the images to build, by name (default: the agent image, the job images and the
 #             runtimes a cluster's attach command installs, and the runtime chart)
 #   --import  also import every image into the k3s containerd of BUILDER, so its jobs pull nothing
-#   JOB_IMAGE_BASE  name=base[=torch] (infra/images/job/bases.mk): a framework job image to add
+#   JOB_IMAGE_BASE  name=base[=torch] (images/job/bases.mk): a framework job image to add
 #   SSH_OPTIONS  more options for ssh, such as -F <config> for a host reached through a proxy
 #
 # The registry token is minted here (gcloud, as GCP_ACCOUNT of .env), lives an hour, and reaches

@@ -77,9 +77,20 @@ render-settings:
 	@bash -c '. localdev/lib/auth.sh && lib_render_settings "$(HOST_ADDRESS)" $(RENDERED_SETTINGS) && lib_registry_reachable_ip >/dev/null'
 	@echo "$(HOST_ADDRESS)" > $(HOST_ADDRESS_FILE)
 
+# await WHAT,COMMAND runs COMMAND every second until it succeeds, and fails once AWAIT_SECONDS
+# have passed without it.
+AWAIT_SECONDS ?= 120
+define await
+@(waited=0; until $(2) >/dev/null 2>&1; do \
+	waited=$$((waited + 1)); \
+	[ $$waited -lt $(AWAIT_SECONDS) ] || { echo "make: $(1) did not answer within $(AWAIT_SECONDS)s" >&2; exit 1; }; \
+	sleep 1; \
+done)
+endef
+
 registry-up:
 	$(COMPOSE) up -d registry
-	@until curl -fsS -o /dev/null http://$(REGISTRY_PUBLISH_IP):5000/v2/; do sleep 1; done
+	$(call await,the dev registry,curl -fsS -o /dev/null http://$(REGISTRY_PUBLISH_IP):5000/v2/)
 
 # One build of this project's images stays on this machine: every other tag leaves podman's
 # image store and the dev registry (localdev/prune-images.py says what counts as in use). Each
@@ -98,8 +109,8 @@ $(BUILDS):
 # a PEM does not survive being a make variable.
 controlplane-up: registry-up render-settings images
 	bash -c '. localdev/lib/auth.sh && $(COMPOSE) up -d'
-	@until curl -fsS -o /dev/null http://localhost:$${API_HOST_PORT:-8081}/health; do sleep 1; done
-	@until curl -fsS -o /dev/null http://localhost:8084/health; do sleep 1; done
+	$(call await,the control service,curl -fsS -o /dev/null http://localhost:$${API_HOST_PORT:-8081}/health)
+	$(call await,the metrics service,curl -fsS -o /dev/null http://localhost:8084/health)
 	bash -c '. localdev/lib/auth.sh && lib_register_clusters && lib_register_local_cluster'
 
 # The control plane and the UI as host processes against the compose datastores: starts in
@@ -345,8 +356,8 @@ IMAGE_TARGETS := control-service:controlplane/build/Dockerfile.control-service:.
 	bare-agent:runtime/bare-metal/build/Dockerfile.bare-agent:. \
 	cloud-agent:runtime/cloud/build/Dockerfile.cloud-agent:. \
 	agent-launcher:runtime/cloud/build/Dockerfile.agent-launcher:. \
-	job-base:infra/images/job/Dockerfile.base:. \
-	job:infra/images/job/Dockerfile:. \
+	job-base:images/job/Dockerfile.base:. \
+	job:images/job/Dockerfile:. \
 	workload:tests/workloads/generic/Dockerfile.train:tests/workloads/generic
 
 # The Go images build with -mod=vendor from a vendor/ that is not tracked, so it is made here
@@ -375,15 +386,15 @@ locked-images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-u
 # The job images that carry a framework, built and pushed to $(REGISTRY), which a local cluster
 # pulls them from. Apart from `images` because each pulls gigabytes. The deployment's registry
 # gets them from the maintainers' deployment tooling.
-include infra/images/job/bases.mk
+include images/job/bases.mk
 
 job-images: check-tag
 	@for entry in $(JOB_IMAGE_BASES); do \
 		name="$${entry%%=*}"; rest="$${entry#*=}"; base="$${rest%%=*}"; torch=""; \
 		case "$$rest" in *=*) torch="$${rest#*=}";; esac; \
 		echo "==> building hypothesisloop-$$name:$(TAG) from $$base$${torch:+ with CPU torch $$torch}"; \
-		podman build --platform $(IMAGE_PLATFORM) --build-arg BASE="$$base" --build-arg TORCH_CPU="$$torch" -f infra/images/job/Dockerfile.base -t "$(REGISTRY)/hypothesisloop-$$name-base:$(TAG)" . || exit 1; \
-		podman build --platform $(IMAGE_PLATFORM) --build-arg BASE="$(REGISTRY)/hypothesisloop-$$name-base:$(TAG)" -f infra/images/job/Dockerfile -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" . || exit 1; \
+		podman build --platform $(IMAGE_PLATFORM) --build-arg BASE="$$base" --build-arg TORCH_CPU="$$torch" -f images/job/Dockerfile.base -t "$(REGISTRY)/hypothesisloop-$$name-base:$(TAG)" . || exit 1; \
+		podman build --platform $(IMAGE_PLATFORM) --build-arg BASE="$(REGISTRY)/hypothesisloop-$$name-base:$(TAG)" -f images/job/Dockerfile -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" . || exit 1; \
 		$(REGISTRY_LOGIN) || exit 1; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name-base:$(TAG)" || exit 1; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" || exit 1; \
@@ -491,7 +502,7 @@ build:
 TEST_MEMGRAPH := hypothesisloop-test-memgraph
 test:
 	podman run -d --rm --name $(TEST_MEMGRAPH) -p 127.0.0.1:7688:7687 docker.io/memgraph/memgraph:3.13.1 --telemetry-enabled=false >/dev/null
-	@until podman exec $(TEST_MEMGRAPH) sh -c "echo 'RETURN 1;' | mgconsole" >/dev/null 2>&1; do sleep 1; done
+	$(call await,the test Memgraph,podman exec $(TEST_MEMGRAPH) sh -c "echo 'RETURN 1;' | mgconsole") || { podman rm -f $(TEST_MEMGRAPH) >/dev/null; exit 1; }
 	go test ./... -timeout 60s; rc=$$?; podman rm -f $(TEST_MEMGRAPH) >/dev/null; exit $$rc
 
 # pytest, not unittest discovery: the conftest.py fixtures every test relies on only load under pytest.

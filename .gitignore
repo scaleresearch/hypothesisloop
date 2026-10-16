@@ -105,10 +105,8 @@ localdev/.image-tag
 controlplane/infra/helm/hypothesisloop/files/hypothesisloop.yaml
 local.secrets.env
 
-# Deployment tooling (Pulumi program and stacks, image publishing) is kept locally. The job
-# image's Dockerfiles stay tracked: make images and make job-images build them.
-/infra/*
-!/infra/images/
+# Deployment tooling (Pulumi program and stacks, image publishing) is kept locally.
+/infra/
 
 # Owner's local working notes and scratch
 /fix-later.md
