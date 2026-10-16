@@ -28,7 +28,7 @@ import { Page } from '@/components/ui/page'
 import { Pagination } from '@/components/ui/pagination'
 import { Segmented } from '@/components/ui/segmented'
 import { Inline, Stack } from '@/components/ui/stack'
-import { LinkTr, Table, num, quiet } from '@/components/ui/table'
+import { LinkTr, RowAnchor, Table, num, quiet } from '@/components/ui/table'
 import { Eyebrow, Heading, Text } from '@/components/ui/text'
 import { ErrorMessage, Loading } from '@/components/ui/status-message'
 
@@ -317,7 +317,7 @@ function HypothesesList({ experiments, scoped }: { experiments: PlatformExperime
       limit: HYPOTHESES_PAGE_SIZE,
       offset: page * HYPOTHESES_PAGE_SIZE,
     }),
-    { refreshInterval: 15_000, keepPreviousData: true },
+    { refreshInterval: 15_000 },
   )
   const rows = data?.items ?? []
   const filtered = !!(status || search)
@@ -390,7 +390,7 @@ function HypothesisRow({ h, pe, showExperiment }: { h: HypothesisGraphNode; pe?:
     <LinkTr href={hypothesisPath(h.platform_experiment_id, h.id)}>
       <td className="break-words">
         <Stack gap="2xs">
-          <span className="line-clamp-2" title={h.text}>{h.text}</span>
+          <RowAnchor className="line-clamp-2" title={h.text}>{h.text}</RowAnchor>
           {/* Where it lives, and below the widest screens who proposed it, whose column is left out there. */}
           <Inline gap="xs" nowrap className={clsx('text-xs text-muted', !showExperiment && 'xl:hidden')}>
             {showExperiment && (

@@ -27,6 +27,7 @@ import { Select } from '@/components/ui/select'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Pagination } from '@/components/ui/pagination'
 import { Segmented } from '@/components/ui/segmented'
+import { errorMessage } from '@/lib/errors'
 
 const PAGE_SIZE = 10
 
@@ -107,7 +108,7 @@ function PlatformExperimentsPageContent() {
     let live = true
     fetchExperimentDraft(project.id, draftID).then(
       draft => { if (live) setDialog({ editing: null, draft }) },
-      (e: unknown) => { if (live) setDraftError(e instanceof Error ? e.message : String(e)) },
+      (e: unknown) => { if (live) setDraftError(errorMessage(e)) },
     )
     const rest = new URLSearchParams(searchParams.toString())
     rest.delete('draft')

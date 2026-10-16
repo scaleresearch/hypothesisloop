@@ -50,12 +50,11 @@ import { PlatformExperimentDialog } from '@/components/platform-experiment-form'
 import { EmptyState } from '@/components/ui/empty-state'
 import { ExperimentCode } from '@/components/experiment-code'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
-import { LinkTr, Table, num } from '@/components/ui/table'
+import { LinkTr, RowAnchor, Table, num } from '@/components/ui/table'
 import { Pill, Text } from '@/components/ui/text'
 import { semantic } from '@/lib/colors'
-import { formatAccH, headline, runClock, shortId } from '@/lib/format'
+import { formatAccH, headline, relTime, runClock, shortId } from '@/lib/format'
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
-import { JobReason } from '@/components/job-reason'
 import { ReferenceValues } from '@/components/reference-values'
 import { filedAfterVerdict, hypothesisActivity, settings, variedEnvByHypothesis, variedEnvSettings, variedKeys } from '@/lib/hypothesis-progress'
 import { graphHref } from '@/lib/hypothesis-graph'
@@ -594,44 +593,34 @@ function PlatformExperimentDetail({ id }: { id: string }) {
           {jobRows.length === 0 ? (
             <EmptyState>No jobs submitted yet.</EmptyState>
           ) : (
-            <Table>
+            <Table className="min-w-[44rem] table-fixed">
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>Agent</th>
-                  <th>Status</th>
-                  <th title="Under each hypothesis: the settings that differ between these jobs of it">Hypothesis · varied settings</th>
-                  <th className="text-right" title="The last value the job reported, which it is ranked by">Last {primaryStandings?.metric ?? 'Metric'}</th>
-                  <th className="text-right">Est. Cost</th>
-                  <th>Submitted</th>
+                  <th className="w-24">Job</th>
+                  <th className="hidden w-32 xl:table-cell">Agent</th>
+                  <th className="w-32">Status</th>
+                  <th title="What the job tests. Hover a row for the settings that differ between these jobs of it">Hypothesis</th>
+                  <th className={clsx(num, 'w-28')} title={`The last value the job reported on ${primaryStandings?.metric ?? 'the ranking metric'}, which it is ranked by`}>Last metric</th>
+                  <th className={clsx(num, 'w-32')}>Est. cost</th>
+                  <th className="hidden w-28 xl:table-cell">Submitted</th>
                 </tr>
               </thead>
               <tbody>
                 {jobRows.map(exp => {
-                  const cost = exp.estimated_cost_acch
+                  const cost = exp.estimated_cost_acch != null ? `${formatAccH(exp.estimated_cost_acch)} ${budgetUnit(kindOf(exp.accelerator_type))}` : '—'
+                  const varied = variedEnvSettings(exp, variedByHypothesis)
                   return (
                     <LinkTr key={exp.id} href={jobPath(id, exp.id)}>
-                      <td className="whitespace-nowrap font-mono text-2xs">
-                        <TextLink onClick={e => e.stopPropagation()} href={jobPath(id, exp.id)}>{shortId(exp.id)}</TextLink>
-                      </td>
-                      <td className="whitespace-nowrap text-xs"><AgentLabel id={exp.agent_id} /></td>
-                      <td>
-                        <Badge status={exp.status} />
-                        {exp.eviction_reason && (
-                          <Text as="div" variant="meta" tone="subtle" className="max-w-sm">
-                            <JobReason reason={exp.eviction_reason} />
-                          </Text>
-                        )}
-                      </td>
-                      <td className="max-w-xs truncate text-xs" title={exp.hypothesis}>
+                      <td className="whitespace-nowrap font-mono text-2xs" title={exp.id}><RowAnchor>{shortId(exp.id)}</RowAnchor></td>
+                      <td className="hidden truncate text-xs xl:table-cell"><AgentLabel id={exp.agent_id} /></td>
+                      <td className="truncate" title={exp.eviction_reason}><Badge status={exp.status} /></td>
+                      <td className="truncate text-xs" title={[exp.hypothesis, varied].filter(Boolean).join('\n')}>
                         <JobHypothesis job={exp} />
-                        <Text as="div" variant="meta" mono className="whitespace-normal">
-                          {variedEnvSettings(exp, variedByHypothesis)}
-                        </Text>
+                        {varied && <span className="ml-2 font-mono text-2xs text-subtle">{varied}</span>}
                       </td>
-                      <td className={num}>{exp.metric?.value.toFixed(4) ?? '—'}</td>
-                      <td className={num}>{cost != null ? `${formatAccH(cost)} ${budgetUnit(kindOf(exp.accelerator_type))}` : '—'}</td>
-                      <td className="text-xs text-subtle">{new Date(exp.created_at).toLocaleString()}</td>
+                      <td className={clsx(num, 'truncate')} title={exp.metric?.name}>{exp.metric?.value.toFixed(4) ?? '—'}</td>
+                      <td className={clsx(num, 'truncate')} title={cost}>{cost}</td>
+                      <td className="hidden truncate text-xs text-subtle xl:table-cell" title={new Date(exp.created_at).toLocaleString()}>{relTime(exp.created_at)}</td>
                     </LinkTr>
                   )
                 })}

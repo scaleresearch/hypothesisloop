@@ -19,6 +19,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Badge } from '@/components/ui/badge'
 import { FormField } from '@/components/ui/form-field'
 import { StatTile } from '@/components/ui/stat-tile'
+import { Fetched } from '@/components/ui/fetched'
 import { ColumnTh, Table, num } from '@/components/ui/table'
 import { Loading, ErrorMessage, InlineError } from '@/components/ui/status-message'
 import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
@@ -41,7 +42,7 @@ function AgentExperimentQuota({ agentId, pe, colSpan }: { agentId: string; pe: P
   const { data: q, error } = useSWR(
     ['agent-quota', pe.id, agentId],
     () => fetchAgentQuota(pe.id, agentId),
-    { refreshInterval: 30_000, shouldRetryOnError: false },
+    { refreshInterval: 30_000 },
   )
   if (error instanceof ApiError && error.status === 404) return null
   if (error) return (
@@ -73,7 +74,11 @@ function AgentExperimentQuota({ agentId, pe, colSpan }: { agentId: string; pe: P
   )
 }
 
-function AgentQuotaRows({ agentId, experiments, colSpan }: { agentId: string; experiments: PlatformExperiment[]; colSpan: number }) {
+function AgentQuotaRows({ agentId, experiments, error, colSpan }: { agentId: string; experiments: PlatformExperiment[] | undefined; error: Error | undefined; colSpan: number }) {
+  if (error) return (
+    <tr><td colSpan={colSpan} className="pl-7"><InlineError>Could not load the experiments it holds compute in: {error.message}</InlineError></td></tr>
+  )
+  if (!experiments) return <tr><td colSpan={colSpan} className="pl-7"><Loading rows={1} /></td></tr>
   if (experiments.length === 0) return (
     <tr><td colSpan={colSpan} className="pl-5 text-xs text-subtle">No running experiments</td></tr>
   )
@@ -95,50 +100,53 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null)
   const [page, setPage] = useState(0)
 
-  const { data, error, isLoading } = useSWR(
+  const { data, error } = useSWR(
     ['agents-page', project.id, experimentFilter, page],
     () => fetchAgentsPage({ project_id: project.id, platform_experiment_id: experimentFilter, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
-    { refreshInterval: 15_000, keepPreviousData: true },
+    { refreshInterval: 15_000 },
   )
   const agents = data?.items
   const total = data?.total ?? 0
 
-  const { data: stats } = useSWR(
+  const { data: stats, error: statsError } = useSWR(
     ['agent-stats', project.id, experimentFilter],
     () => fetchAgentStats({ project_id: project.id, platform_experiment_id: experimentFilter }),
-    { refreshInterval: 15_000, keepPreviousData: true },
+    { refreshInterval: 15_000 },
   )
 
   // Quota exists from an experiment's start, so only running ones have a row to show.
-  const { data: running } = useSWR<PlatformExperiment[]>(
-    ['platform-experiments-running', project.id],
+  const { data: running, error: runningError } = useSWR<PlatformExperiment[]>(
+    experimentFilter ? null : ['platform-experiments-running', project.id],
     () => fetchPlatformExperimentsPage({ project_id: project.id, status: 'running', limit: MAX_LIST_PAGE_SIZE }).then(p => p.items),
     { refreshInterval: 30_000 },
   )
 
-  const { data: selectedPE } = useSWR(
+  const { data: selectedPE, error: selectedPEError } = useSWR(
     experimentFilter ? ['pe', experimentFilter] : null,
     () => fetchPlatformExperiment(experimentFilter),
   )
   // What the platform allocated each agent of the selected experiment.
-  const { data: quotas } = useSWR(
+  const { data: quotas, error: quotasError } = useSWR(
     experimentFilter ? ['pe-quotas', experimentFilter] : null,
     () => fetchPlatformExperimentQuotas(experimentFilter),
     { refreshInterval: 30_000 },
   )
 
   // What each agent did in the selected experiment: its jobs, its best result and standing.
-  const { data: jobStats } = useSWR(
+  const { data: jobStats, error: jobStatsError } = useSWR(
     experimentFilter ? ['pe-stats-by-agent', experimentFilter] : null,
     () => fetchExperimentStats({ project_id: project.id, platform_experiment_id: experimentFilter, group_by: 'agent' }),
     { refreshInterval: 15_000 },
   )
-  const { data: results } = useSWR(
+  const { data: results, error: resultsError } = useSWR(
     experimentFilter ? ['pe-results', experimentFilter] : null,
     () => fetchPlatformExperimentResults(experimentFilter),
     { refreshInterval: 15_000 },
   )
   const ranking = results?.metrics[0]
+  const shown = experimentFilter
+    ? { experiments: selectedPE && [selectedPE], error: selectedPEError }
+    : { experiments: running, error: runningError }
   const colSpan = experimentFilter ? 6 : 3
 
   const [sorting, setSorting] = useState<SortingState>([{ id: 'top3_count', desc: true }])
@@ -162,8 +170,13 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
       description="The agents of this project, how they have placed, and the compute each holds in running experiments."
     >
       <div className="grid grid-cols-2 gap-3">
-        <StatTile label="Agents" value={total || '—'} />
-        <StatTile label="With the top-3 bonus" value={stats?.top3_eligible ?? '—'} tone="success" sub="25% more guaranteed compute" />
+        <StatTile label="Agents" value={<Fetched data={data} error={error}>{d => d.total}</Fetched>} />
+        <StatTile
+          label="With the top-3 bonus"
+          value={<Fetched data={stats} error={statsError}>{s => s.top3_eligible}</Fetched>}
+          tone="success"
+          sub="25% more guaranteed compute"
+        />
       </div>
 
       <Stack gap="sm">
@@ -181,10 +194,11 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
         </Text>
       </Stack>
 
-      {isLoading && <Loading />}
       {error && <ErrorMessage>Could not load the agents of {project.name}: {error.message}</ErrorMessage>}
+      {!agents && !error && <Loading />}
 
-      <Section title="Agents" note={agents ? total : undefined} scrollX>
+      {agents && (
+        <Section title="Agents" note={total} scrollX>
           <Table>
             <thead>
               <tr>
@@ -206,7 +220,7 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
               </tr>
             </thead>
             <tbody>
-              {!agents || agents.length === 0 ? (
+              {agents.length === 0 ? (
                 <tr>
                   <td colSpan={colSpan} className="p-0">
                     <EmptyState>
@@ -216,10 +230,7 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
                 </tr>
               ) : sortedAgents.map(a => {
                 const isExpanded = expandedAgent === a.id
-                const standing = ranking?.standings.find(st => st.agent_id === a.id)
-                const quota = quotas?.find(q => q.agent_id === a.id)
-                const jobs = jobStats?.groups?.[a.id]
-                const shown = selectedPE ? [selectedPE] : running
+                const none = <span className="text-subtle">—</span>
                 return (
                   <Fragment key={a.id}>
                     <tr
@@ -236,32 +247,48 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
                       {experimentFilter && (
                         <>
                           <td className={num} title="Its part of the budget released so far">
-                            {quota ? formatAccH(quota.share_accelerator_hours) : <span className="text-subtle">—</span>}
+                            <Fetched data={quotas} error={quotasError}>
+                              {qs => {
+                                const quota = qs.find(q => q.agent_id === a.id)
+                                return quota ? formatAccH(quota.share_accelerator_hours) : none
+                              }}
+                            </Fetched>
                           </td>
                           <td className={num}>
-                            {standing?.experiment_id ? (
-                              <TextLink href={jobPath(experimentFilter, standing.experiment_id)} onClick={e => e.stopPropagation()}>
-                                #{standing.rank} · {standing.best.toFixed(4)}
-                              </TextLink>
-                            ) : <span className="text-subtle">—</span>}
+                            <Fetched data={results} error={resultsError}>
+                              {() => {
+                                const standing = ranking?.standings.find(st => st.agent_id === a.id)
+                                return standing?.experiment_id ? (
+                                  <TextLink href={jobPath(experimentFilter, standing.experiment_id)} onClick={e => e.stopPropagation()}>
+                                    #{standing.rank} · {standing.best.toFixed(4)}
+                                  </TextLink>
+                                ) : none
+                              }}
+                            </Fetched>
                           </td>
                           <td className="text-2xs">
-                            {jobs
-                              ? Object.entries(jobs.by_status).map(([status, n]) => `${n} ${status.toLowerCase()}`).join(' · ')
-                              : <span className="text-xs text-subtle">none</span>}
+                            <Fetched data={jobStats} error={jobStatsError}>
+                              {s => {
+                                const jobs = s.groups?.[a.id]
+                                return jobs
+                                  ? Object.entries(jobs.by_status).map(([status, n]) => `${n} ${status.toLowerCase()}`).join(' · ')
+                                  : <span className="text-xs text-subtle">none</span>
+                              }}
+                            </Fetched>
                           </td>
                         </>
                       )}
                       <td className="whitespace-nowrap text-right text-xs text-subtle">{isExpanded ? 'Hide compute ▲' : 'Compute ▼'}</td>
                     </tr>
-                    {isExpanded && shown && <AgentQuotaRows agentId={a.id} experiments={shown} colSpan={colSpan} />}
+                    {isExpanded && <AgentQuotaRows agentId={a.id} experiments={shown.experiments} error={shown.error} colSpan={colSpan} />}
                   </Fragment>
                 )
               })}
             </tbody>
           </Table>
           <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
-      </Section>
+        </Section>
+      )}
     </Page>
   )
 }

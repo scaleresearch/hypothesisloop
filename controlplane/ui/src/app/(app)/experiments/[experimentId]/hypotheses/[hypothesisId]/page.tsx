@@ -16,7 +16,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Page } from '@/components/ui/page'
 import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
-import { LinkTr, Table, num, quiet } from '@/components/ui/table'
+import { LinkTr, RowAnchor, Table, num, quiet } from '@/components/ui/table'
 import { Code, Eyebrow, Text } from '@/components/ui/text'
 import { Badge } from '@/components/ui/badge'
 import { Loading, InlineError } from '@/components/ui/status-message'
@@ -253,7 +253,7 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
                 const cost = j.estimated_cost_acch != null ? formatAccH(j.estimated_cost_acch) : null
                 return (
                   <LinkTr key={job.id} href={jobPath(experimentId, job.id)}>
-                    <td className={quiet}>{shortId(job.id)}</td>
+                    <td className={quiet}><RowAnchor>{shortId(job.id)}</RowAnchor></td>
                     <td className="text-xs" title={job.agent_id}>{job.agent_name}</td>
                     <td className="whitespace-nowrap">
                       <Badge status={status}>{status}</Badge>
