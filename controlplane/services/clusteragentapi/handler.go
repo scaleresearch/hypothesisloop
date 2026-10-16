@@ -278,7 +278,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{
 		OperationID: "cluster-reconcile", Method: "POST", Path: "/{name}/reconcile",
 		MaxBodyBytes: maxReconcileBytes,
-		Summary:"Exchange actual capacity for desired workloads", Tags: []string{"cluster-agent"},
+		Summary:      "Exchange actual capacity for desired workloads", Tags: []string{"cluster-agent"},
 		Description: "Atomically records one complete actual-capacity snapshot in metrics storage, keeping only priced accelerator types, then returns the complete PostgreSQL desired workload set for this cluster, plus the ids of workloads whose termination earns them their declared checkpoint window, " +
 			"the environment builds assigned to this cluster (builds, recorded as building only for a runtime that reports builds true), and registry_pull, a login that reads environment images, when a listed workload runs in one. " +
 			"The version the agent sends in " + clusterapi.AgentVersionHeader + " is kept with the snapshot, and a refusal of the request is kept as the cluster's last error until one is accepted.",

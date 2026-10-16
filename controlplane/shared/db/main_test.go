@@ -17,7 +17,7 @@ import (
 // testTimeouts are the committed settings' database timeouts.
 var testTimeouts = Timeouts{Statement: 30 * time.Second, Lock: 10 * time.Second, IdleInTransaction: 60 * time.Second}
 
-const devDSN ="postgres://hypothesisloop:hypothesisloop@localhost:5433/hypothesisloop?sslmode=disable"
+const devDSN = "postgres://hypothesisloop:hypothesisloop@localhost:5433/hypothesisloop?sslmode=disable"
 
 // scratchDSN is the database TestMain creates for this run with every migration applied. Tests
 // never touch the server's own databases: schema DDL there takes locks that deadlocked live

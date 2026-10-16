@@ -1793,29 +1793,29 @@ func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, inter
 }
 
 func (s *PlatformExperimentsService) expirySweep(ctx context.Context) {
-			if err := s.SweepAutoStart(ctx); err != nil {
-				s.logger.Error("sweep_auto_start: scan", zap.Error(err))
-			}
-			if err := s.TendBaselines(ctx); err != nil {
-				s.logger.Error("tend_baselines: scan", zap.Error(err))
-			}
-			if err := s.SweepExpired(ctx); err != nil {
-				s.logger.Error("sweep_expired: scan", zap.Error(err))
-			}
-			if err := s.RecordCloses(ctx); err != nil {
-				s.logger.Error("record_closes: scan", zap.Error(err))
-			}
-			if err := s.TellCoordinators(ctx); err != nil {
-				s.logger.Error("tell_coordinators: scan", zap.Error(err))
-			}
-			if s.idle != nil {
-				if err := s.NoticeIdleResearchers(ctx); err != nil {
-					s.logger.Error("notice_idle_researchers: scan", zap.Error(err))
-				}
-				if err := s.NoticeIdleCapacity(ctx); err != nil {
-					s.logger.Error("notice_idle_capacity: scan", zap.Error(err))
-				}
-			}
+	if err := s.SweepAutoStart(ctx); err != nil {
+		s.logger.Error("sweep_auto_start: scan", zap.Error(err))
+	}
+	if err := s.TendBaselines(ctx); err != nil {
+		s.logger.Error("tend_baselines: scan", zap.Error(err))
+	}
+	if err := s.SweepExpired(ctx); err != nil {
+		s.logger.Error("sweep_expired: scan", zap.Error(err))
+	}
+	if err := s.RecordCloses(ctx); err != nil {
+		s.logger.Error("record_closes: scan", zap.Error(err))
+	}
+	if err := s.TellCoordinators(ctx); err != nil {
+		s.logger.Error("tell_coordinators: scan", zap.Error(err))
+	}
+	if s.idle != nil {
+		if err := s.NoticeIdleResearchers(ctx); err != nil {
+			s.logger.Error("notice_idle_researchers: scan", zap.Error(err))
+		}
+		if err := s.NoticeIdleCapacity(ctx); err != nil {
+			s.logger.Error("notice_idle_capacity: scan", zap.Error(err))
+		}
+	}
 }
 
 // NoticeIdleResearchers tells every researcher due an idle notice that it is idle (agent.idle),
