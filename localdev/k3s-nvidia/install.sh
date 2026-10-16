@@ -41,6 +41,7 @@ CLUSTER_NAME="k3s-nvidia"
 : "${RUNTIME_TOKEN:?set RUNTIME_TOKEN (make runtime-token CLUSTER=k3s-nvidia on the control-plane host)}"
 : "${TAG:?set TAG (e.g. the git SHA of this checkout)}"
 export TAG
+REGISTRY="localhost:5000"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/node.sh"
@@ -143,13 +144,13 @@ grep -qFi "nvidia.com/gpu.product=${GPU_PRODUCT}" "${ROOT}/controlplane/settings
 
 echo "==> Building cluster-agent/node-agent images (this host, --docker)..."
 for img in cluster-agent node-agent; do
-  docker build -f "${ROOT}/runtime/k8s/build/Dockerfile.${img}" -t "localhost:5000/hypothesisloop-${img}:${TAG}" "${ROOT}" >/dev/null
+  docker build -f "${ROOT}/runtime/k8s/build/Dockerfile.${img}" -t "${REGISTRY}/hypothesisloop-${img}:${TAG}" "${ROOT}" >/dev/null
 done
 
 lib_ensure_helm
 echo "==> Installing cluster-agent bundle (API: ${API_URL})..."
 CLUSTER_NAME="${CLUSTER_NAME}" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
-  API_URL="${API_URL}" METRICS_URL="${METRICS_URL}" RUNTIME_TOKEN="${RUNTIME_TOKEN}" REGISTRY_URL=localhost:5000 \
+  API_URL="${API_URL}" METRICS_URL="${METRICS_URL}" RUNTIME_TOKEN="${RUNTIME_TOKEN}" REGISTRY_URL="${REGISTRY}" \
   bash "${ROOT}/runtime/k8s/infra/install.sh"
 
 echo "==> Cluster ready. Context: ${CONTEXT_NAME}  Cluster name: ${CLUSTER_NAME}"
