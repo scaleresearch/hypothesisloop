@@ -373,6 +373,8 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		pe.BaselineDueAt = pe.StartsAt.Add(time.Hour)
 		pe.DefaultQuotaTier = domain.QuotaTierGuaranteed
 		pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: launcher, Model: "model-1"}
+		acceptedAt := time.Now().UTC()
+		pe.AcceptedAt, pe.AcceptedBy, pe.AcceptedAnswers = &acceptedAt, &domain.Actor{Kind: domain.ActorUser, ID: "u-accepting"}, []string{"32 only."}
 		var agents []*domain.Agent
 		var signups []domain.AgentSignup
 		// The researchers, and last the agent that measures the baseline.
@@ -472,6 +474,11 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	}
 	if got.StartsAt.IsZero() || time.Since(got.StartsAt) > time.Minute {
 		t.Errorf("starts_at = %v, want now, when its baseline begins to be measured", got.StartsAt)
+	}
+	// The proposal is kept as proposed beside who accepted it, when and with which answers.
+	if string(got.Proposal) != `{}` || got.ProposedAt == nil || got.AcceptedAt == nil || !got.AcceptedAt.Equal(pe.AcceptedAt.Truncate(time.Microsecond)) ||
+		got.AcceptedBy == nil || *got.AcceptedBy != (domain.Actor{Kind: domain.ActorUser, ID: "u-accepting"}) || !slices.Equal(got.AcceptedAnswers, []string{"32 only."}) {
+		t.Errorf("accepted: proposal %s proposed at %v, accepted at %v by %+v with %q, want the proposal kept and the accept recorded", got.Proposal, got.ProposedAt, got.AcceptedAt, got.AcceptedBy, got.AcceptedAnswers)
 	}
 	if err := pes.AcceptDraft(ctx, pe, nil, nil); err != ErrNotDraft {
 		t.Fatalf("accepting twice: got = %v, want ErrNotDraft", err)
@@ -955,6 +962,8 @@ func TestAProposalSignsUpTheBaselineAgentWhoseMachineRunsUntilTheDraftIsHeld(t *
 	pe.BaselineDueAt = pe.StartsAt.Add(time.Hour)
 	pe.DefaultQuotaTier = domain.QuotaTierGuaranteed
 	pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: launcher, Model: "model-1"}
+	acceptedAt := time.Now().UTC()
+	pe.AcceptedAt = &acceptedAt
 	researcher := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
 	if err := pes.AcceptDraft(ctx, pe, []*domain.Agent{researcher}, []domain.AgentSignup{{AgentID: researcher.ID, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: launcher, Flavor: "generalist", Model: "model-1"}}); err != nil {
 		t.Fatal(err)
@@ -964,6 +973,9 @@ func TestAProposalSignsUpTheBaselineAgentWhoseMachineRunsUntilTheDraftIsHeld(t *
 	}
 	if wanted := baselineWanted(); wanted == nil {
 		t.Fatalf("the accepted draft's baseline agent is wanted as %+v, want it listed", wanted)
+	}
+	if got, err := pes.GetPlatformExperiment(ctx, id); err != nil || got.AcceptedAt == nil || got.AcceptedBy != nil || got.AcceptedAnswers != nil || len(got.Proposal) == 0 {
+		t.Fatalf("accepted by the platform: got = %+v, %v, want the proposal kept, accepted_at and no accepted_by", got, err)
 	}
 	if err := pes.HoldAccept(ctx, id); err != ErrNotDraft {
 		t.Fatalf("holding what is no draft: got = %v, want ErrNotDraft", err)

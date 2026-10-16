@@ -272,7 +272,7 @@ var ErrNothingProposed = errors.New("nothing is proposed")
 
 // AcceptDraft makes a proposed draft the open platform experiment pe describes and signs its
 // researchers up, and its baseline agent where its proposal signed none up, or does neither. pe carries what the proposal stated and what the person who
-// accepts stated; its baseline is measured from its StartsAt, and it is open until its
+// accepts stated, and who accepted it, when and with which answers, beside the proposal kept as proposed; its baseline is measured from its StartsAt, and it is open until its
 // BaselineDueAt. Its planner has nothing left to answer, so the time its machine was kept for a
 // revision ends with the accept. The limits a signup holds are held here too
 // (ErrMaxAgentsReached, ErrMaxHostedReached).
@@ -287,6 +287,19 @@ func (s *PlatformExperimentsStore) AcceptDraft(ctx context.Context, pe *domain.P
 	stages, err := json.Marshal(pe.Stages)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.AcceptDraft: marshal stages: %w", err)
+	}
+	if pe.AcceptedAt == nil {
+		return errors.New("platform_experiments_store.AcceptDraft: an accept states when it was made")
+	}
+	var answers []byte
+	if len(pe.AcceptedAnswers) > 0 {
+		if answers, err = json.Marshal(pe.AcceptedAnswers); err != nil {
+			return fmt.Errorf("platform_experiments_store.AcceptDraft: marshal answers: %w", err)
+		}
+	}
+	var acceptedBy domain.Actor
+	if pe.AcceptedBy != nil {
+		acceptedBy = *pe.AcceptedBy
 	}
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
@@ -311,10 +324,12 @@ SET status = 'open', name = $2, description = $3, budget_accelerator_hours = $4,
     report_interval_seconds = $7, starts_at = $15, ends_at = $8, stages = $9, current_stage = 1,
     default_quota_tier = $10, max_concurrent_accelerators = $11,
     coordinator_hosted = true, coordinator_launcher = $12, coordinator_model = $13, duration_hours = $14, updated_at = now(),
-    planner_ends_at = LEAST(planner_ends_at, now()), accepts_at = NULL
+    planner_ends_at = LEAST(planner_ends_at, now()), accepts_at = NULL,
+    accepted_at = $16, accepted_by_kind = $17, accepted_by_id = $18, accepted_answers = $19
 WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents, metrics,
 		pe.ReportIntervalSeconds, pe.BaselineDueAt, stages,
-		string(pe.DefaultQuotaTier), pe.MaxConcurrentAccelerators, pe.Coordinator.Launcher, pe.Coordinator.Model, pe.DurationHours, pe.StartsAt); err != nil {
+		string(pe.DefaultQuotaTier), pe.MaxConcurrentAccelerators, pe.Coordinator.Launcher, pe.Coordinator.Model, pe.DurationHours, pe.StartsAt,
+		pe.AcceptedAt, string(acceptedBy.Kind), acceptedBy.ID, answers); err != nil {
 		return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
 	}
 	if _, err := enrolTx(ctx, tx, pe.ID, create, signups, nil); err != nil {

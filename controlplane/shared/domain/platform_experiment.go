@@ -351,11 +351,17 @@ type PlatformExperiment struct {
 	// absent while the draft is being planned or revised, when the last proposal or reason stays
 	// to be read until the planner answers again. See Answered.
 	// Carried by a read of one platform experiment and left out of a list.
-	Proposal       json.RawMessage `json:"proposal,omitempty" doc:"The proposal as PUT /platform-experiments/{id}/proposal took it."`
+	Proposal       json.RawMessage `json:"proposal,omitempty" doc:"The proposal as PUT /platform-experiments/{id}/proposal took it. Kept as proposed once it is accepted."`
 	ProposedAt     *time.Time      `json:"proposed_at,omitempty" doc:"On a draft: when its planner proposed what proposal holds and the draft began to wait for a person. Absent while it is planned or revised, and on one its planner declined."`
 	DeclinedAt     *time.Time      `json:"declined_at,omitempty" doc:"On a draft: when its planner declined to propose, for declined_reason, and the draft began to wait for a person. Absent while it is planned or revised, and on one that has a proposal."`
 	DeclinedReason string          `json:"declined_reason,omitempty" doc:"Why the draft's planner proposed nothing. It stays while a revision is planned and goes with the next proposal."`
 	AcceptsAt      *time.Time      `json:"accepts_at,omitempty" doc:"On a proposed draft: when the platform accepts the proposal as proposed, unless a person accepts it sooner, holds it to edit it (POST /platform-experiments/{id}/hold), revises it or closes it. Its baseline agent's machine starts with the proposal and runs while this is set. Absent on a draft that waits for a person."`
+	// AcceptedAt is when its proposal was accepted, AcceptedBy whose credential accepted it, nil
+	// when the platform did at AcceptsAt, and AcceptedAnswers the answers given to the
+	// proposal's questions. Carried by a read of one platform experiment and left out of a list.
+	AcceptedAt      *time.Time `json:"accepted_at,omitempty" doc:"When the draft's proposal was accepted, by a person or by the platform at accepts_at. Absent on a draft, on one created whole and on one accepted before this was kept."`
+	AcceptedBy      *Actor     `json:"accepted_by,omitempty" doc:"Whose credential accepted the proposal. Absent beside accepted_at when the platform accepted it by itself."`
+	AcceptedAnswers []string   `json:"accepted_answers,omitempty" doc:"The answers given to proposal.questions on accepting it, one for each, in their order, as they were added to the brief."`
 	// Revisions are what a person asked the planner to change, oldest first. One made after the
 	// planner's last answer, or while there is none, is not answered yet.
 	Revisions []PlanningRequest `json:"revisions,omitempty"`

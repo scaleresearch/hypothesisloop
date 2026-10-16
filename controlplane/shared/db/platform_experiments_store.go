@@ -213,6 +213,7 @@ SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, 
        ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.repository_url, pe.agent_image, pe.goal, COALESCE(pe.continues, ''), pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason,
        pe.baseline_job_id, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id, pe.close_message, pe.repository_error, pe.repository_account,
        pe.duration_hours, pe.started_at, pe.planner_ends_at, pe.accepts_at, pe.coordinator_instance_activity, pe.coordinator_instance_activity_at,
+       pe.accepted_at, pe.accepted_by_kind, pe.accepted_by_id, pe.accepted_answers,
        (SELECT planner.instance_activity FROM experiment_signups planner WHERE ` + plannerOfDraft + `),
        (SELECT planner.instance_activity_at FROM experiment_signups planner WHERE ` + plannerOfDraft + `)
 FROM platform_experiments pe
@@ -222,8 +223,8 @@ WHERE id = $1`
 	var status string
 	var metricsRaw, stagesRaw []byte
 	var coordinator domain.HostedCoordinator
-	var createdBy, closedBy domain.Actor
-	var proposal []byte
+	var createdBy, closedBy, acceptedBy domain.Actor
+	var proposal, acceptedAnswers []byte
 	var closesAt time.Time
 	var startedAt, answeredAt, plannerEndsAt, acceptsAt, coordinatorActivityAt, plannerActivityAt *time.Time
 	var coordinatorActivity string
@@ -240,6 +241,7 @@ WHERE id = $1`
 		&pe.Goal, &pe.Continues, &createdBy.Kind, &createdBy.ID, &proposal, &answeredAt, &pe.DeclinedReason,
 		&pe.BaselineJobID, &pe.JobEstimatedDurationHours, &pe.ClosedAt, &pe.CloseReason, &closedBy.Kind, &closedBy.ID, &pe.CloseMessage, &pe.RepositoryError, &pe.RepositoryAccount,
 		&pe.DurationHours, &startedAt, &plannerEndsAt, &acceptsAt, &coordinatorActivity, &coordinatorActivityAt,
+		&pe.AcceptedAt, &acceptedBy.Kind, &acceptedBy.ID, &acceptedAnswers,
 		&plannerActivity, &plannerActivityAt,
 	)
 	if err != nil {
@@ -267,6 +269,14 @@ WHERE id = $1`
 	}
 	if len(proposal) > 0 {
 		pe.Proposal = proposal
+	}
+	if acceptedBy.Kind != "" {
+		pe.AcceptedBy = &acceptedBy
+	}
+	if len(acceptedAnswers) > 0 {
+		if err := json.Unmarshal(acceptedAnswers, &pe.AcceptedAnswers); err != nil {
+			return nil, fmt.Errorf("platform_experiments_store.Get: unmarshal accepted answers: %w", err)
+		}
 	}
 	pe.SetAnswered(answeredAt, len(proposal) > 0)
 	if pe.Goal != "" {

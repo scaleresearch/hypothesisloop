@@ -9,6 +9,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -29,7 +30,7 @@ import (
 // planningAPI is the planning routes and the ones a draft passes through, over store.
 func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Principal) (*PlatformExperimentsService, func(method, path string, body any) (int, map[string]any)) {
 	t.Helper()
-	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)
+	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute)
 	placement := authtest.Placement{
 		Projects: map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}, "prj-b": {ID: "prj-b", OrgID: "org-b"}},
 		PlatformExperiments: map[string]domain.Tenancy{
@@ -1535,6 +1536,11 @@ func TestAProposalIsAcceptedAsProposedUnlessAPersonActsFirst(t *testing.T) {
 	if len(store.acceptedSignups) != 2 || store.acceptedSignups[0].Flavor != "hyperparameter-search" || store.acceptedSignups[0].Actor.ID != "u-creator" || len(store.baselines) != 1 {
 		t.Fatalf("researchers %+v beside %d baseline agents, want the 2 proposed, added for the creator, and the one baseline agent", store.acceptedSignups, len(store.baselines))
 	}
+	// Accepted by the platform, the proposal stays to be read, with no person named as accepting.
+	_, out = call("GET", "/platform-experiments/pe-draft", nil)
+	if proposal, _ := out["proposal"].(map[string]any); proposal["experiment"] == nil || out["accepted_at"] == nil || out["accepted_by"] != nil {
+		t.Fatalf("read after the platform accepted: proposal %v, accepted_at %v, accepted_by %v, want the proposal and accepted_at without accepted_by", out["proposal"], out["accepted_at"], out["accepted_by"])
+	}
 
 	// Held, it waits for a person and is not accepted by itself.
 	store, handler, call = proposed(t)
@@ -1551,6 +1557,10 @@ func TestAProposalIsAcceptedAsProposedUnlessAPersonActsFirst(t *testing.T) {
 	// The person accepts what they edited.
 	if code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 2, "duration_hours": 1, "baseline_minutes": 45, "agents": []map[string]any{{}}}); code != http.StatusOK || store.created[0].BudgetAcceleratorHours != 2 {
 		t.Fatalf("accepting the edited proposal: got = %d %v", code, out)
+	}
+	_, out = call("GET", "/platform-experiments/pe-draft", nil)
+	if by, _ := out["accepted_by"].(map[string]any); by["id"] != "u-1" || by["name"] != "named u-1" || out["accepted_at"] == nil || out["proposal"] == nil {
+		t.Fatalf("read after a person accepted: accepted_by %v, accepted_at %v, want the person, named, and the proposal kept", out["accepted_by"], out["accepted_at"])
 	}
 	if code, out := call("POST", "/platform-experiments/pe-draft/hold", nil); code != http.StatusConflict || out["reason"] != "invalid_transition" {
 		t.Errorf("holding what is no draft: got = %d %v, want 409 invalid_transition", code, out)
@@ -1626,6 +1636,24 @@ func TestAProposalWithQuestionsWaitsForAPersonWhoseAnswersGoIntoTheBrief(t *test
 	want := "Decisions the owner made before the run:\n- How big a win counts? Answer: 1.5x the control's throughput.\n- Which batch sizes are held equal? Answer: 32 and 64."
 	if !strings.HasPrefix(pe.Description, "Train the small transformer") || !strings.HasSuffix(pe.Description, "\n\n"+want) {
 		t.Errorf("accepted brief %q, want the proposal's brief followed by\n%s", pe.Description, want)
+	}
+
+	// The proposal, its questions with the answers planned on, and the answers given stay to be
+	// read by anyone who reads the experiment, and by nobody of another org.
+	if pe.AcceptedBy == nil || pe.AcceptedBy.ID != "u-1" || pe.AcceptedAt == nil || !slices.Equal(pe.AcceptedAnswers, []string{"1.5x the control's throughput.", "32 and 64."}) {
+		t.Errorf("accept recorded as by %+v at %v with %q, want u-1, now, and the answers as the brief states them", pe.AcceptedBy, pe.AcceptedAt, pe.AcceptedAnswers)
+	}
+	reader := auth.Principal{Kind: auth.KindUser, UserID: "u-reader", OrgIDs: []string{"org-a"}}
+	_, read := planningAPI(t, store, reader)
+	code, out = read("GET", "/platform-experiments/pe-draft", nil)
+	proposal, _ := out["proposal"].(map[string]any)
+	asked, _ := proposal["questions"].([]any)
+	if first, _ := asked[0].(map[string]any); code != http.StatusOK || len(asked) != 2 || first["answer"] != "1.5x the control's throughput." || fmt.Sprint(out["accepted_answers"]) != "[1.5x the control's throughput. 32 and 64.]" {
+		t.Errorf("a reader of the org: got = %d, questions %v, accepted_answers %v, want the proposal's questions and the answers given", code, proposal["questions"], out["accepted_answers"])
+	}
+	_, foreign := planningAPI(t, store, auth.Principal{Kind: auth.KindUser, UserID: "u-foreign", OrgIDs: []string{"org-b"}})
+	if code, out := foreign("GET", "/platform-experiments/pe-draft", nil); code != http.StatusNotFound || out["proposal"] != nil {
+		t.Errorf("a user of another org: got = %d %v, want 404", code, out)
 	}
 
 	// Without questions an accept that answers some is refused, so no answer is dropped unread.

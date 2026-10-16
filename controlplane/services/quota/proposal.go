@@ -253,6 +253,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"its budget, its length, the minutes its baseline has and its researchers are the ones this body states, whatever the proposal proposed, because an agent wrote the proposal. " +
 			"name, when the body states one, replaces the proposal's name and nothing else of it (422 invalid_experiment for one that is no name). " +
 			"answers holds one answer for each of the proposal's questions, in their order, as the person confirmed or changed it: each question and its answer are added to the end of the brief, a line each, so every agent reads the decisions as made. 422 invalid_answers when it does not hold one non-empty answer for each question. " +
+			"proposal stays on the platform experiment as it was proposed, for anyone who reads it, beside accepted_at, accepted_by (absent when the platform accepted it by itself) and accepted_answers. " +
 			"The budget caps everything the platform experiment spends, the baseline included: what measuring it cost is taken from the budget, the rest is shared among the researchers, and an agent's burst hours run on idle capacity and come out of its share, never on top of it. " +
 			"The platform hosts its coordinator, each researcher and one agent of role baseline, named by its role, which the proposal signed up so that its machine starts while the proposal is read, and which is created here for a proposal that signed none up. " + coordinatorWanted + " " +
 			"starts_at is now and it is open until baseline_due_at, baseline_minutes from now, and one not running by then is closed with close_reason baseline_limit_reached. The run lasts duration_hours from the moment it starts, and measuring the baseline takes nothing from it. Nothing has run yet: the baseline agent measures the baseline, the platform declares the job it leaves when it finishes and starts the run, " +
@@ -272,7 +273,8 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err != nil {
 			return nil, err
 		}
-		pe, err := h.accept(ctx, in.ID, in.Body, caller.Actor())
+		by := caller.Actor()
+		pe, err := h.accept(ctx, in.ID, in.Body, by, &by)
 		if err != nil {
 			return nil, err
 		}
@@ -405,35 +407,39 @@ type AcceptRequest struct {
 }
 
 // answered is the proposal's experiment with each question and its answer added to the end of
-// its brief, a line each, so that every agent reads the decisions the person made.
-func answered(experiment json.RawMessage, questions []ProposalQuestion, answers []string) (json.RawMessage, error) {
+// its brief, a line each, so that every agent reads the decisions the person made, and the
+// answers as the brief states them.
+func answered(experiment json.RawMessage, questions []ProposalQuestion, answers []string) (json.RawMessage, []string, error) {
 	if len(answers) != len(questions) {
-		return nil, refusedProposal("invalid_answers", "answers: the proposal has %d questions and the accept answers %d: answer each, in their order", len(questions), len(answers))
+		return nil, nil, refusedProposal("invalid_answers", "answers: the proposal has %d questions and the accept answers %d: answer each, in their order", len(questions), len(answers))
 	}
 	if len(questions) == 0 {
-		return experiment, nil
+		return experiment, nil, nil
 	}
 	fields := map[string]json.RawMessage{}
 	if err := json.Unmarshal(experiment, &fields); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var brief string
 	if err := json.Unmarshal(fields["description"], &brief); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	lines := []string{strings.TrimRight(brief, "\n"), "", "Decisions the owner made before the run:"}
+	given := make([]string, len(questions))
 	for i, q := range questions {
 		answer := strings.Join(strings.Fields(answers[i]), " ")
 		if answer == "" || len(answer) > maxProposalTextBytes {
-			return nil, refusedProposal("invalid_answers", "answers[%d]: answer %q in a sentence of at most %d bytes", i, q.Question, maxProposalTextBytes)
+			return nil, nil, refusedProposal("invalid_answers", "answers[%d]: answer %q in a sentence of at most %d bytes", i, q.Question, maxProposalTextBytes)
 		}
+		given[i] = answer
 		lines = append(lines, "- "+strings.Join(strings.Fields(q.Question), " ")+" Answer: "+answer)
 	}
 	var err error
 	if fields["description"], err = json.Marshal(strings.Join(lines, "\n")); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return json.Marshal(fields)
+	experiment, err = json.Marshal(fields)
+	return experiment, given, err
 }
 
 // named is the proposal's experiment under the name the person who accepts gave it.
@@ -455,8 +461,9 @@ func invalidTransition(format string, args ...any) error {
 
 // accept makes the draft id the open platform experiment its proposal describes, at the cost
 // req states, with a hosted coordinator, its researchers and the agent that measures its
-// baseline, in one write.
-func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req AcceptRequest, by domain.Actor) (*domain.PlatformExperiment, error) {
+// baseline, in one write. by owns its agents; acceptedBy is the person who accepted, nil when the
+// platform accepts it as proposed.
+func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req AcceptRequest, by domain.Actor, acceptedBy *domain.Actor) (*domain.PlatformExperiment, error) {
 	pe, err := h.svc.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
 		return nil, h.refusal("read draft", err)
@@ -484,7 +491,8 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 			return nil, h.refusal("name the proposed experiment", err)
 		}
 	}
-	if proposal.Experiment, err = answered(proposal.Experiment, proposal.Questions, req.Answers); err != nil {
+	var answers []string
+	if proposal.Experiment, answers, err = answered(proposal.Experiment, proposal.Questions, req.Answers); err != nil {
 		return nil, h.refusal("answer the proposal's questions", err)
 	}
 	now := time.Now().UTC()
@@ -505,6 +513,7 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	pe.BudgetAcceleratorHours, pe.MaxAgents, pe.DurationHours = experiment.BudgetAcceleratorHours, experiment.MaxAgents, experiment.DurationHours
 	pe.StartsAt, pe.BaselineDueAt = now, now.Add(time.Duration(req.BaselineMinutes)*time.Minute)
 	pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: h.launch.Launcher, Model: h.launch.CoordinatorModel}
+	pe.AcceptedAt, pe.AcceptedBy, pe.AcceptedAnswers = &now, acceptedBy, answers
 
 	agents, signups, err := h.hostedAgents(req.Agents, by, now)
 	if err != nil {
@@ -536,8 +545,8 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	return accepted, nil
 }
 
-// nameActors names whoever created pe, whoever asked for its revisions and whoever raised its
-// baseline, when it carries them.
+// nameActors names whoever created pe, closed it, accepted its proposal, asked for its revisions
+// and raised its baseline, when it carries them.
 func (h *PlatformExperimentsHandler) nameActors(ctx context.Context, pe *domain.PlatformExperiment) error {
 	var actors []*domain.Actor
 	if pe.Actor != nil {
@@ -545,6 +554,9 @@ func (h *PlatformExperimentsHandler) nameActors(ctx context.Context, pe *domain.
 	}
 	if pe.ClosedBy != nil {
 		actors = append(actors, pe.ClosedBy)
+	}
+	if pe.AcceptedBy != nil {
+		actors = append(actors, pe.AcceptedBy)
 	}
 	for i := range pe.Revisions {
 		actors = append(actors, &pe.Revisions[i].Actor)
@@ -674,7 +686,7 @@ func (h *PlatformExperimentsHandler) acceptAsProposed(ctx context.Context, id st
 	_, err = h.accept(ctx, id, AcceptRequest{
 		BudgetAcceleratorHours: proposal.BudgetAcceleratorHours, DurationHours: proposal.DurationHours,
 		BaselineMinutes: proposal.BaselineMinutes, Agents: proposal.Agents,
-	}, by)
+	}, by, nil)
 	return err
 }
 

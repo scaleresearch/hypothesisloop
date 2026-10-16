@@ -1703,6 +1703,14 @@ SET proposal = jsonb_set(proposal, '{questions}', (
 WHERE jsonb_typeof(proposal->'questions') = 'array'
   AND EXISTS (SELECT 1 FROM jsonb_array_elements(proposal->'questions') q WHERE jsonb_typeof(q) = 'string');
 
+-- When a draft's proposal was accepted, whose credential accepted it (empty when the platform
+-- accepted it by itself at accepts_at) and the answers given to its questions, in their order.
+-- proposal stays as proposed, and these keep what the accept added, since the brief changes later.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS accepted_at      TIMESTAMPTZ;
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS accepted_by_kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS accepted_by_id   TEXT NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS accepted_answers JSONB;
+
 -- A new platform experiment's form as a person left it, to be finished later. form is the
 -- client's own and read by nothing here; failure is why the last create from it was refused.
 CREATE TABLE IF NOT EXISTS experiment_drafts (
