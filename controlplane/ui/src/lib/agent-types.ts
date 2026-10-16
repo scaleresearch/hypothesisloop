@@ -162,7 +162,6 @@ export function settingsProblems(s: AgentTypeSettings): Partial<Record<keyof Age
   const model = modelProblem(s.model ?? '')
   if (model) out.model = model
   if (!Number.isInteger(s.max_subagents) || s.max_subagents < 1 || s.max_subagents > MAX_SUBAGENTS) out.max_subagents = `1 to ${MAX_SUBAGENTS}.`
-  if (!Number.isInteger(s.pacing_subagents) || s.pacing_subagents < 1 || s.pacing_subagents > s.max_subagents) out.pacing_subagents = `1 to ${s.max_subagents}.`
   if (!(EFFORTS as readonly string[]).includes(s.effort)) out.effort = `One of ${EFFORTS.join(', ')}.`
   return out
 }

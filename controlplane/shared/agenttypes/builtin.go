@@ -73,7 +73,7 @@ func Builtins() ([]Builtin, error) {
 		}
 		builtin := Builtin{
 			ID: b.id, Name: b.name, Description: descriptions[b.id], Role: b.role, Prompt: string(prompt),
-			Settings: domain.AgentTypeSettings{MaxSubagents: 4, PacingSubagents: 2, Effort: b.effort, Hyperparameters: map[string]any{}},
+			Settings: domain.AgentTypeSettings{MaxSubagents: 4, Effort: b.effort, Hyperparameters: map[string]any{}},
 		}
 		if err := domain.ValidateAgentTypeDescription(builtin.Description); err != nil {
 			return nil, fmt.Errorf("agenttypes: built-in %s: %w", b.id, err)

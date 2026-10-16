@@ -12,7 +12,6 @@ import { Select } from '@/components/ui/select'
 export interface SettingsDraft {
   model: string
   max_subagents: number
-  pacing_subagents: number
   effort: AgentTypeSettings['effort']
   hyperparameters: string
 }
@@ -22,7 +21,6 @@ export function toDraft(s: AgentTypeSettings): SettingsDraft {
   return {
     model: s.model ?? '',
     max_subagents: s.max_subagents,
-    pacing_subagents: s.pacing_subagents,
     effort: s.effort,
     hyperparameters: Object.keys(h).length === 0 ? '' : JSON.stringify(h).length <= 80 ? JSON.stringify(h) : JSON.stringify(h, null, 2),
   }
@@ -39,7 +37,6 @@ export function fromDraft(d: SettingsDraft): { settings: AgentTypeSettings; prob
     settings: {
       model: d.model.trim(),
       max_subagents: d.max_subagents,
-      pacing_subagents: d.pacing_subagents,
       effort: d.effort,
       hyperparameters: 'value' in h ? h.value : {},
     },
@@ -69,11 +66,8 @@ export function SettingsForm({ role, draft, onChange }: { role: AgentRole; draft
         <Select
           value={String(draft.max_subagents)}
           options={counts(MAX_SUBAGENTS)}
-          onChange={v => set({ max_subagents: Number(v), pacing_subagents: Math.min(draft.pacing_subagents, Number(v)) })}
+          onChange={v => set({ max_subagents: Number(v) })}
         />
-      </FormField>
-      <FormField label="Pacing subagents" hint="How many run while the model account is ahead of its pace.">
-        <Select value={String(draft.pacing_subagents)} options={counts(draft.max_subagents)} onChange={v => set({ pacing_subagents: Number(v) })} />
       </FormField>
       {role === 'researcher' && (
         <FormField
@@ -101,7 +95,6 @@ export function SettingsFacts({ role, settings }: { role: AgentRole; settings: A
       ['Model', settings.model || 'platform default'],
       ['Effort', settings.effort],
       ['Max subagents', settings.max_subagents],
-      ['Pacing subagents', settings.pacing_subagents],
       ...(role === 'researcher' ? [['Hyperparameters', Object.keys(h).length ? JSON.stringify(h) : 'none'] as [string, string]] : []),
     ]} />
   )

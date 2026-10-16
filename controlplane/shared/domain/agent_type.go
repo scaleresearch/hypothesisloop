@@ -158,7 +158,6 @@ type CurrentAgentType struct {
 type AgentTypeSettings struct {
 	Model           string         `json:"model" required:"false" doc:"The model an agent of the type runs on when the agent names none, read whenever the agent is served. Empty or left out: the platform's default."`
 	MaxSubagents    int            `json:"max_subagents" doc:"How many subagents run at once, 1 to 10."`
-	PacingSubagents int            `json:"pacing_subagents" doc:"How many run at once while the model account is ahead of its pace, 1 to max_subagents."`
 	Effort          string         `json:"effort" enum:"low,medium,high,xhigh,max" doc:"How hard the model thinks."`
 	Hyperparameters map[string]any `json:"hyperparameters" required:"false" doc:"What an agent of the type starts from when it is given none, read whenever the agent is served, at most 4096 bytes as JSON. Left out: none."`
 }
@@ -177,9 +176,6 @@ func (s AgentTypeSettings) Validate() error {
 	}
 	if s.MaxSubagents < 1 || s.MaxSubagents > MaxSubagentsLimit {
 		return fmt.Errorf("max_subagents must be 1 to %d, got %d", MaxSubagentsLimit, s.MaxSubagents)
-	}
-	if s.PacingSubagents < 1 || s.PacingSubagents > s.MaxSubagents {
-		return fmt.Errorf("pacing_subagents must be 1 to max_subagents (%d), got %d", s.MaxSubagents, s.PacingSubagents)
 	}
 	if !slices.Contains(agentEfforts, s.Effort) {
 		return fmt.Errorf("effort must be one of %s, got %q", strings.Join(agentEfforts, ", "), s.Effort)

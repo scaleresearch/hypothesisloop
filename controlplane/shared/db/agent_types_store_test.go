@@ -17,7 +17,7 @@ import (
 const testPrompt = "{{rules}}\n{{hl_commands}}\nYou are {{agent_id}} in {{platform_experiment_id}}."
 
 func testTypeSettings() domain.AgentTypeSettings {
-	return domain.AgentTypeSettings{MaxSubagents: 4, PacingSubagents: 2, Effort: "high", Hyperparameters: map[string]any{}}
+	return domain.AgentTypeSettings{MaxSubagents: 4, Effort: "high", Hyperparameters: map[string]any{}}
 }
 
 // orgWithExperiment is a new org, a platform experiment of it with max_agents 10, and its own

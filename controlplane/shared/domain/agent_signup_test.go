@@ -40,7 +40,7 @@ func TestAgentLaunchValuesAreCheckedAndLeftToTheTypeWhenOmitted(t *testing.T) {
 // An agent's own model and hyperparameters win; left out, the type's current version gives them,
 // and the platform's default the model of a type that names none.
 func TestEffectiveSettingsFollowTheTypeWhereTheAgentNamesNothing(t *testing.T) {
-	version := AgentTypeSettings{Model: "type-model", MaxSubagents: 2, PacingSubagents: 1, Effort: "high", Hyperparameters: map[string]any{"lr": 0.1}}
+	version := AgentTypeSettings{Model: "type-model", MaxSubagents: 2, Effort: "high", Hyperparameters: map[string]any{"lr": 0.1}}
 	if got := EffectiveAgentSettings(version, "", nil, "platform"); got.Model != "type-model" || got.Hyperparameters["lr"] != 0.1 {
 		t.Errorf("nothing of its own: got = %+v, want the type's", got)
 	}
@@ -54,7 +54,7 @@ func TestEffectiveSettingsFollowTheTypeWhereTheAgentNamesNothing(t *testing.T) {
 }
 
 func TestTheInstructionsDigestHoldsTheRulesVersion(t *testing.T) {
-	settings := AgentTypeSettings{Model: "m", MaxSubagents: 1, PacingSubagents: 1, Effort: "high"}
+	settings := AgentTypeSettings{Model: "m", MaxSubagents: 1, Effort: "high"}
 	one, err1 := InstructionsDigest("prompt", settings, 1)
 	two, err2 := InstructionsDigest("prompt", settings, 2)
 	if err1 != nil || err2 != nil || one == two {

@@ -7,7 +7,7 @@ import (
 )
 
 func testSettings() AgentTypeSettings {
-	return AgentTypeSettings{MaxSubagents: 4, PacingSubagents: 2, Effort: "high"}
+	return AgentTypeSettings{MaxSubagents: 4, Effort: "high"}
 }
 
 func testCatalog() AgentTypeCatalog {
@@ -94,7 +94,6 @@ func TestSettingsAreBounded(t *testing.T) {
 		"a model no agent can run":  {func(s *AgentTypeSettings) { s.Model = "a b" }, false},
 		"no subagent":               {func(s *AgentTypeSettings) { s.MaxSubagents = 0 }, false},
 		"too many subagents":        {func(s *AgentTypeSettings) { s.MaxSubagents = 11 }, false},
-		"pacing above the most":     {func(s *AgentTypeSettings) { s.PacingSubagents = 5 }, false},
 		"an effort the SDK has not": {func(s *AgentTypeSettings) { s.Effort = "extreme" }, false},
 		"hyperparameters too large": {func(s *AgentTypeSettings) { s.Hyperparameters = map[string]any{"a": strings.Repeat("a", 5000)} }, false},
 	} {

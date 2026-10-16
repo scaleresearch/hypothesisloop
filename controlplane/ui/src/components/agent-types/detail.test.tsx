@@ -26,7 +26,7 @@ const me = (role: 'owner' | 'member'): Me => ({
 let type: AgentType
 
 function version(n: number, prompt: string, effort: AgentType['current']['settings']['effort'] = 'high'): AgentTypeVersion {
-  return { agent_type: type.id, version: n, prompt, digest: `d${n}0000000000000`, created_at: at, created_by: { kind: 'user', id: 'u1', name: 'Ada' }, settings: { model: '', max_subagents: 4, pacing_subagents: 2, effort, hyperparameters: {} } }
+  return { agent_type: type.id, version: n, prompt, digest: `d${n}0000000000000`, created_at: at, created_by: { kind: 'user', id: 'u1', name: 'Ada' }, settings: { model: '', max_subagents: 4, effort, hyperparameters: {} } }
 }
 
 function show(role: 'owner' | 'member' = 'owner') {
@@ -95,7 +95,7 @@ describe('editing an org\'s agent type', () => {
     await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
     expect(editAgentType).toHaveBeenCalledExactlyOnceWith('org_a', 'at-lr', {
       if_version: 3, name: 'LR sweeper', description: '', prompt: RESEARCHER_PROMPT,
-      settings: { model: '', max_subagents: 6, pacing_subagents: 2, effort: 'high', hyperparameters: {} },
+      settings: { model: '', max_subagents: 6, effort: 'high', hyperparameters: {} },
     })
     expect(await screen.findByText('v4 is current. Changes apply in real time to running agents.')).toBeTruthy()
   })

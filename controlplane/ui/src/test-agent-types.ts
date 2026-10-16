@@ -13,7 +13,7 @@ export function agentType(id: string, name: string, role: AgentRole, more: Parti
     ...(builtin ? {} : { org_id: 'org_a', created_by: { kind: 'user', id: 'u1', name: 'Ada' } }),
     current: {
       agent_type: id, version, prompt: RESEARCHER_PROMPT, digest: `digest-${id}-${version}`, created_at: at,
-      settings: { model: '', max_subagents: 4, pacing_subagents: 2, effort: 'high', hyperparameters: {} },
+      settings: { model: '', max_subagents: 4, effort: 'high', hyperparameters: {} },
     },
     ...more,
   }

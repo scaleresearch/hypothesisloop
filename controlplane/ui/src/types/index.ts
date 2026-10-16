@@ -229,7 +229,6 @@ export interface AgentTypeSettings {
   // Empty is the platform's default.
   model?: string
   max_subagents: number
-  pacing_subagents: number
   effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   hyperparameters?: Record<string, unknown>
 }

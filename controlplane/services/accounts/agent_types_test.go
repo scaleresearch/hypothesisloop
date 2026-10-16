@@ -150,7 +150,7 @@ func (m *memAgentTypes) Archive(_ context.Context, orgID, id string, by domain.A
 const ownPrompt = "{{rules}}\n{{hl_commands}}\nYou are {{agent_id}}."
 
 func ownSettings() name {
-	return name{"max_subagents": 3, "pacing_subagents": 1, "effort": "medium"}
+	return name{"max_subagents": 3, "effort": "medium"}
 }
 
 func TestAnOrgsOwnerCopiesABuiltinAndEditsTheCopy(t *testing.T) {
@@ -187,7 +187,7 @@ func TestAPromptOrSettingsAnAgentCannotRunWithAreRefused(t *testing.T) {
 		"no role":                {"name": "x", "prompt": ownPrompt, "settings": ownSettings()},
 		"no settings":            {"name": "x", "role": "researcher", "prompt": ownPrompt},
 		"no name":                {"role": "researcher", "prompt": ownPrompt, "settings": ownSettings()},
-		"too many subagents":     {"name": "x", "role": "researcher", "prompt": ownPrompt, "settings": name{"max_subagents": 11, "pacing_subagents": 1, "effort": "high"}},
+		"too many subagents":     {"name": "x", "role": "researcher", "prompt": ownPrompt, "settings": name{"max_subagents": 11, "effort": "high"}},
 	} {
 		if rec := w.call("owner", "POST", "/orgs/"+w.orgA+"/agent-types", body); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), ReasonInvalidAgentType) {
 			t.Errorf("%s: got = %d %s, want 422 %s", what, rec.Code, rec.Body, ReasonInvalidAgentType)

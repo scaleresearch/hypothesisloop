@@ -46,15 +46,14 @@ describe('checking a prompt as domain.ValidatePrompt does', () => {
 })
 
 describe('checking settings as domain.AgentTypeSettings.Validate does', () => {
-  const ok = { model: '', max_subagents: 4, pacing_subagents: 2, effort: 'high' as const }
+  const ok = { model: '', max_subagents: 4, effort: 'high' as const }
 
   it('passes the built-in settings and an empty model', () => {
     expect(settingsProblems(ok)).toEqual({})
   })
 
-  it('holds subagents to 1..10 and pacing to 1..max, and a model to its pattern', () => {
+  it('holds subagents to 1..10, and a model to its pattern', () => {
     expect(settingsProblems({ ...ok, max_subagents: 11 }).max_subagents).toBe('1 to 10.')
-    expect(settingsProblems({ ...ok, pacing_subagents: 5 }).pacing_subagents).toBe('1 to 4.')
     expect(settingsProblems({ ...ok, model: 'has space' }).model).toMatch(/letters, digits/)
     expect(settingsProblems({ ...ok, model: 'claude-opus-4-5[1m]' })).toEqual({})
   })

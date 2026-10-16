@@ -81,7 +81,7 @@ function show(v: unknown): string {
 /** The settings that differ between two versions, each from before to after. */
 export function settingsChanges(before: AgentTypeSettings, after: AgentTypeSettings): { field: string; from: string; to: string }[] {
   const fields: [keyof AgentTypeSettings, string][] = [
-    ['model', 'Model'], ['effort', 'Effort'], ['max_subagents', 'Max subagents'], ['pacing_subagents', 'Pacing subagents'], ['hyperparameters', 'Hyperparameters'],
+    ['model', 'Model'], ['effort', 'Effort'], ['max_subagents', 'Max subagents'], ['hyperparameters', 'Hyperparameters'],
   ]
   return fields
     .map(([key, field]) => ({ field, from: show(before[key]), to: show(after[key]) }))
