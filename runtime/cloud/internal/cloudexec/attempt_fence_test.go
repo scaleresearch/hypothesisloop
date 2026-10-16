@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/scaleresearch/hypothesisloop/contract/exitline"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
-	"github.com/scaleresearch/hypothesisloop/runtime/shared/exitline"
 )
 
 // A requeue reuses the experiment id. The attempt in the instance name is what keeps the

@@ -10,7 +10,7 @@ import (
 
 	"go.yaml.in/yaml/v4"
 
-	"github.com/scaleresearch/hypothesisloop/cli/repotemplate"
+	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
 )
 
 // A job spec with no image names the one its experiment was proposed with in hl repo check. A

@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/runtime/shared/exitline"
+	"github.com/scaleresearch/hypothesisloop/contract/exitline"
 )
 
 func cmdExec(args []string, stdout, stderr io.Writer) int {

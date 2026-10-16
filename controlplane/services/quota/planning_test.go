@@ -16,7 +16,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/cli/repotemplate"
+	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"

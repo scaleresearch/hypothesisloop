@@ -8,11 +8,11 @@ import (
 	"log"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/exitline"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
-	"github.com/scaleresearch/hypothesisloop/runtime/shared/exitline"
 )
 
 // workloadOf reports whether i is exp's workload: the instance of its current attempt in the slot

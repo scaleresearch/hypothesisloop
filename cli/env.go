@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
-	"github.com/scaleresearch/hypothesisloop/cli/repotemplate"
+	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
 )
 
 var envCommands = []subcommand{

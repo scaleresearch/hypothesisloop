@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/runtime/shared/exitline"
+	"github.com/scaleresearch/hypothesisloop/contract/exitline"
 )
 
 // execResult runs hl exec with its output in a file, which hands the command the file itself as

@@ -21,7 +21,7 @@ EXPERIMENTS = REPO / "agents/coordinator/experiments"
 # copied into an experiment's repository and workloads into an image, so none of them can import
 # a shared one. Of the experiments, those on disk whose seed defines post_metric.
 METRIC_HELPERS = [path for path in [
-    "cli/repotemplate/files/metrics.py",
+    "contract/repotemplate/files/metrics.py",
     "tests/workloads/generic/train.py",
     "tests/workloads/generic/data_stage.py",
     "tests/workloads/generic/train_distributed.py",
@@ -33,7 +33,7 @@ METRIC_HELPERS = [path for path in [
 )
 
 
-TEMPLATE_HELPER = "cli/repotemplate/files/metrics.py"
+TEMPLATE_HELPER = "contract/repotemplate/files/metrics.py"
 
 
 def load_post_metric(path, api_url):

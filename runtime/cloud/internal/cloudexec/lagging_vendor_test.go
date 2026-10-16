@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/exitline"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/fake"
-	"github.com/scaleresearch/hypothesisloop/runtime/shared/exitline"
 )
 
 // laggingVendor lists every instance in the state it was in `behind` lists ago, as a vendor does

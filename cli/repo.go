@@ -15,7 +15,7 @@ import (
 	"go.yaml.in/yaml/v4"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
-	"github.com/scaleresearch/hypothesisloop/cli/repotemplate"
+	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
 )
 
 var repoCommands = []subcommand{

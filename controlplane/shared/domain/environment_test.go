@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
 )
 
 func TestAnEnvironmentFileIsBuiltOnTheBaseThePlatformPasses(t *testing.T) {
@@ -57,5 +59,17 @@ func TestACacheScopeIsAHostNameOfOneRepositoryOfOneOrg(t *testing.T) {
 	}
 	if !regexp.MustCompile(`^[a-z0-9-]{1,63}$`).MatchString(scope) {
 		t.Errorf("cache scope %q is not a host name", scope)
+	}
+}
+
+// A baseline agent COPYed a vendored crate into its environment, which the platform builds with
+// no build context. The template says so and is a file the platform builds.
+func TestTheTemplatesEnvironmentFileSaysItIsBuiltAloneAndTheCodeComesByTheClone(t *testing.T) {
+	file := repotemplate.Files()[repotemplate.Environment]
+	if err := ValidateEnvironmentFile(file); err != nil {
+		t.Fatalf("the template: %v", err)
+	}
+	if !strings.Contains(file, "from this file alone") || !strings.Contains(file, "clones its commit") {
+		t.Errorf("the template says nothing of how it is built:\n%s", file)
 	}
 }

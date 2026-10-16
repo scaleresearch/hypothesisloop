@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/cli/repotemplate"
+	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 )
 

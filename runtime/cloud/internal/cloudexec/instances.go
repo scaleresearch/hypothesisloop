@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/scaleresearch/hypothesisloop/contract/exitline"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
-	"github.com/scaleresearch/hypothesisloop/runtime/shared/exitline"
 )
 
 // instance is a rented instance read back through its name. The name is the only thing a
