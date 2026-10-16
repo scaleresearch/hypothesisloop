@@ -42,10 +42,11 @@ const me: Me = {
 function Page() {
   const { org, project } = useTenant()
   const [token, setToken] = useState('')
-  const { mutate } = useSWRConfig()
+  const { mutate, shouldRetryOnError, revalidateOnFocus } = useSWRConfig()
   return (
     <>
       <p>page of {org.name} / {project.name}</p>
+      <p>retries {String(shouldRetryOnError)}, rereads on focus {String(revalidateOnFocus)}</p>
       <button onClick={() => setToken('hls_shown')}>show token</button>
       <button onClick={() => void mutate('me')}>reread account</button>
       <output>{token}</output>
@@ -55,7 +56,7 @@ function Page() {
 
 function tree() {
   return (
-    <SWRConfig value={{ provider: () => new Map(), shouldRetryOnError: false, dedupingInterval: 0 }}>
+    <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
       <AppShell><Page /></AppShell>
     </SWRConfig>
   )
@@ -88,8 +89,32 @@ describe('the signed-in shell', () => {
   it('says so when the API cannot be reached, and shows no empty app', async () => {
     vi.mocked(fetchMe).mockRejectedValue(new Error('Failed to fetch'))
     show()
-    expect(await screen.findByText(/Cannot reach the API to load your account: Failed to fetch/)).toBeTruthy()
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe('Cannot reach the API to load your account: Failed to fetch.')
     expect(screen.queryByText(/page of/)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy()
+  })
+
+  it('reads the account again only when asked to, and then renders the app', async () => {
+    vi.mocked(fetchMe).mockRejectedValueOnce(new Error('Failed to fetch'))
+    show()
+    await userEvent.click(await screen.findByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText('page of Ada / default')).toBeTruthy()
+    expect(fetchMe).toHaveBeenCalledTimes(2)
+  })
+
+  it('tells a refused session apart from an API out of reach, and offers to sign out', async () => {
+    vi.mocked(fetchMe).mockRejectedValue(new ApiError(403, 'this token does not reach accounts'))
+    show()
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toMatch(/^The API refused your session for your account: this token does not reach accounts\. Sign out and sign in again/)
+    expect(alert.textContent).not.toMatch(/Cannot reach|Retrying/)
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy()
+  })
+
+  it('gives every read inside it one configuration: no retry on a failure, a reread when the tab comes back', async () => {
+    show()
+    expect(await screen.findByText('retries false, rereads on focus true')).toBeTruthy()
   })
 
   it('says so when the URL names a project that is gone or out of reach, and offers the way home', async () => {
@@ -123,6 +148,15 @@ describe('the signed-in shell', () => {
     vi.mocked(fetchPlatformExperiment).mockResolvedValue({ id: 'pe-x', project_id: 'prj_of_another_org', shared: true } as PlatformExperiment)
     show({ experimentId: 'pe-x' })
     expect(await screen.findByText('page of Ada / default')).toBeTruthy()
+  })
+
+  it('says an experiment that could not be read failed, with a way home, again and out', async () => {
+    vi.mocked(fetchPlatformExperiment).mockRejectedValue(new ApiError(500, 'database unavailable'))
+    show({ experimentId: 'pe-1' })
+    expect((await screen.findByRole('alert')).textContent).toBe('The API could not load experiment pe-1: database unavailable.')
+    expect(screen.getByRole('link', { name: 'Go to your experiments' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy()
   })
 
   it('says an experiment the caller cannot read was not found, and renders no page', async () => {
@@ -159,7 +193,7 @@ describe('the signed-in shell', () => {
     expect(await screen.findByText('page of Ada / default')).toBeTruthy()
     vi.mocked(fetchMe).mockRejectedValue(new Error('Failed to fetch'))
     await userEvent.click(screen.getByRole('button', { name: 'reread account' }))
-    expect(await screen.findByText(/Could not reread your account: Failed to fetch/)).toBeTruthy()
+    expect(await screen.findByText(/Cannot reach the API to load your account again: Failed to fetch\. Your organizations, projects and role are as last read\./)).toBeTruthy()
     expect(screen.getByText('page of Ada / default')).toBeTruthy()
   })
 
