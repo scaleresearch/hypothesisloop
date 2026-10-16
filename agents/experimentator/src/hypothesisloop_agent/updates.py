@@ -53,15 +53,16 @@ _DRAIN_S = 5
 # seats on one idea are one seat wasted until it gives one of them another direction. So does a
 # researcher the platform added in the place of one that ended (agent.replaced): it starts with
 # no direction but its predecessor's hyperparameters.
-# Both learn at once that an agent type was edited and an agent moved to its new version
-# (agent.instructions): the harness applies its own at the turn boundary and tells the agent
-# nothing of it, and a coordinator is told of its researchers'.
+# Both learn at once that their own agent type was edited and they were moved to its new version
+# (agent.instructions): the harness applies it at the turn boundary and tells the agent nothing
+# of it. A coordinator is not woken by its researchers' edits (KIND@SUBJECT matches the subject,
+# which is COORDINATOR for its own): it reads them in the situation and with its next batch.
 # Everything else is read when next acting. A kind wakes only for what its reader can act on.
 WAKES = {
     "coordinator": ("agent.finished", "agent.idle=new", "capacity.idle=new", "experiment.blocked", "job.held", "stage.boundary", "comment.new",
                     "platform_experiment.status", "platform_experiment.description", "platform_experiment.baseline",
                     "hypothesis.new=user", "hypothesis.new=key", "hypothesis.new=staff", "agent.message=owner",
-                    "job.duplicate", "agent.replaced", "agent.instructions"),
+                    "job.duplicate", "agent.replaced", "agent.instructions@coordinator"),
     "agent": ("experiment.status", "experiment.blocked", "job.held", "job.underperforming", "agent.cut", "agent.idle",
               "agent.message", "stage.boundary", "comment.new", "platform_experiment.status", "platform_experiment.description",
               "platform_experiment.baseline", "platform_experiment.revision", "environment.status", "agent.instructions"),

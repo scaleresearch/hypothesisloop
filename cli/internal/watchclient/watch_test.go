@@ -576,12 +576,14 @@ func TestAWakeWatchHoldsOtherKindsUntilAWakingOneArrives(t *testing.T) {
 	settleWindow = 100 * time.Millisecond
 	finding := `{"kind":"finding.new","subject":"hyp-1","position":10,"cursor":10}`
 	finished := `{"kind":"agent.finished","subject":"agent-a","position":11,"cursor":11}`
+	others := `{"kind":"agent.finished","subject":"agent-b","position":12,"cursor":12}`
 	for _, tc := range []struct {
 		frames     []string
 		want       string
 		wantCursor int64
 	}{
 		{[]string{finding}, "", 0},
+		{[]string{others}, "", 0},
 		{[]string{finding, finding, finished}, finding + "\n" + finished + "\n", 11},
 	} {
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -610,7 +612,7 @@ func TestAWakeWatchHoldsOtherKindsUntilAWakingOneArrives(t *testing.T) {
 		cursorFile := filepath.Join(t.TempDir(), "cursor.json")
 		var stdout, stderr bytes.Buffer
 		code := Run(Options{Token: "test-token", URL: "ws://" + ln.Addr().String(), PlatformExperiment: "pe-1", Agent: "agent-a",
-			Wake: func(kind, _ string) bool { return kind == "agent.finished" }, Timeout: 500 * time.Millisecond, CursorFile: cursorFile, Stdout: &stdout, Stderr: &stderr})
+			Wake: func(kind, subject, _ string) bool { return kind == "agent.finished" && subject == "agent-a" }, Timeout: 500 * time.Millisecond, CursorFile: cursorFile, Stdout: &stdout, Stderr: &stderr})
 		if code != 0 || stdout.String() != tc.want {
 			t.Fatalf("exit code = %d, output = %q, want = %q, stderr = %s", code, stdout.String(), tc.want, stderr.String())
 		}

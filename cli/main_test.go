@@ -657,20 +657,27 @@ func TestAWakeKindThePlatformDoesNotKnowIsRefusedBeforeAnyWatch(t *testing.T) {
 
 // A coordinator was woken for a baseline job that completed, which it acts on only once the
 // agent finishes: a kind wakes for the values its reader can act on.
-func TestAWakeEntryNamesAKindOrAKindWithTheValueThatWakesOrTheOneThatDoesNot(t *testing.T) {
-	for entry, wakes := range map[string]map[string]bool{
-		"experiment.status":        {"FAILED": true, "COMPLETED": true},
-		"experiment.status=FAILED": {"FAILED": true, "COMPLETED": false},
-		"job.held!=stage_cut":      {"stage_cut": false, "capacity_unavailable": true},
+func TestAWakeEntryNamesAKindOrAKindWithTheValueOrTheSubjectThatWakesOrTheValueThatDoesNot(t *testing.T) {
+	type event struct{ subject, value string }
+	for entry, wakes := range map[string]map[event]bool{
+		"experiment.status":                 {{"e1", "FAILED"}: true, {"e2", "COMPLETED"}: true},
+		"experiment.status=FAILED":          {{"e1", "FAILED"}: true, {"e1", "COMPLETED"}: false},
+		"job.held!=stage_cut":               {{"e1", "stage_cut"}: false, {"e1", "capacity_unavailable"}: true},
+		"agent.instructions@coordinator":    {{"coordinator", "2"}: true, {"ag-7", "2"}: false},
+		"agent.instructions@coordinator=2":  {{"coordinator", "2"}: true, {"coordinator", "3"}: false, {"ag-7", "2"}: false},
+		"agent.instructions@coordinator!=2": {{"coordinator", "3"}: true, {"coordinator", "2"}: false, {"ag-7", "3"}: false},
 	} {
-		kind, value, woken := cutWake(entry)
-		if wantKind, _, _ := strings.Cut(strings.ReplaceAll(entry, "!", ""), "="); kind != wantKind {
-			t.Errorf("%s: kind = %q", entry, kind)
+		kind := strings.FieldsFunc(entry, func(r rune) bool { return r == '@' || r == '=' || r == '!' })[0]
+		if got := cutWake(entry).kind; got != kind {
+			t.Errorf("%s: kind = %q", entry, got)
 		}
-		for of, want := range wakes {
-			if woken(of == value) != want {
-				t.Errorf("%s: an event of value %s wakes = %v, want %v", entry, of, !want, want)
+		for e, want := range wakes {
+			if got := cutWake(entry).wakes(kind, e.subject, e.value); got != want {
+				t.Errorf("%s: an event of subject %s and value %s wakes = %v, want %v", entry, e.subject, e.value, got, want)
 			}
+		}
+		if cutWake(entry).wakes("other.kind", "coordinator", "2") {
+			t.Errorf("%s: wakes for another kind", entry)
 		}
 	}
 }

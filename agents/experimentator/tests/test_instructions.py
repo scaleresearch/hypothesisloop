@@ -254,7 +254,9 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
 class WakeTest(unittest.TestCase):
     def test_an_edit_wakes_an_agent_and_a_coordinator_waiting_between_turns(self):
         self.assertIn(instructions.EVENT, run.updates.WAKES["agent"])
-        self.assertIn(instructions.EVENT, run.updates.WAKES["coordinator"])
+        # A coordinator wakes for its own edit only: its researchers' are read in the situation.
+        self.assertIn(f"{instructions.EVENT}@{config.COORDINATOR}", run.updates.WAKES["coordinator"])
+        self.assertNotIn(instructions.EVENT, run.updates.WAKES["coordinator"])
 
 
 if __name__ == "__main__":
