@@ -8,7 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
@@ -68,11 +68,11 @@ func TestGetNodeTotalCapacityExcludesNonPlatformPodsButNotPlatformOnes(t *testin
 	const rawAllocatableMilli = 8000
 	const daemonSetRequestMilli = 500
 	want := int64(rawAllocatableMilli - daemonSetRequestMilli) // platform pod's 2000m is NOT subtracted
-	if got["node-a"][domain.NodeResourceCPUMillicores] != want {
+	if got["node-a"][clusterapi.NodeResourceCPUMillicores] != want {
 		t.Fatalf("node-a cpu_millicores = %d, want %d (allocatable %d minus only the non-platform pod's %d; the platform pod's own request must not move this denominator)",
-			got["node-a"][domain.NodeResourceCPUMillicores], want, int64(rawAllocatableMilli), int64(daemonSetRequestMilli))
+			got["node-a"][clusterapi.NodeResourceCPUMillicores], want, int64(rawAllocatableMilli), int64(daemonSetRequestMilli))
 	}
-	if got["node-a"][domain.NodeResourceCPUMillicores] == rawAllocatableMilli {
+	if got["node-a"][clusterapi.NodeResourceCPUMillicores] == rawAllocatableMilli {
 		t.Fatal("GetNodeTotalCapacity reported the raw allocatable total unchanged — the DaemonSet pod's permanent request was not excluded")
 	}
 }
@@ -131,12 +131,12 @@ func TestANodesCoresAreUnitsOfTheCPUTypeWithNothingWrittenToTheCluster(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	cores := string(domain.CPUType)
+	cores := string(clusterapi.CPUType)
 	if total[cores] != 18 || available[cores] != 14 || byNode["box"][cores] != 11 || byNode["small"][cores] != 3 || len(total) != 1 {
 		t.Errorf("total %v, available %v, by node %v; want 18 cores in all (15 and 3), 14 free, 11 of them on box", total, available, byNode)
 	}
 	totals, err := c.GetNodeTotalCapacity(ctx)
-	if err != nil || totals["box"][domain.NodeResourceCPUMillicores]/1000 != 15 {
+	if err != nil || totals["box"][clusterapi.NodeResourceCPUMillicores]/1000 != 15 {
 		t.Errorf("box's cores for platform jobs = %v, %v; want the 15 its units add up to", totals["box"], err)
 	}
 	for _, action := range kube.Actions() {
@@ -146,8 +146,8 @@ func TestANodesCoresAreUnitsOfTheCPUTypeWithNothingWrittenToTheCluster(t *testin
 	}
 
 	exp := attemptTestExperiment(0)
-	exp.AcceleratorType, exp.AcceleratorCount = domain.CPUType, 4
-	exp.Job.AcceleratorType, exp.Job.AcceleratorCount, exp.Job.CPU = domain.CPUType, 4, "4"
+	exp.AcceleratorType, exp.AcceleratorCount = clusterapi.CPUType, 4
+	exp.Job.AcceleratorType, exp.Job.AcceleratorCount, exp.Job.CPU = clusterapi.CPUType, 4, "4"
 	placement, err := c.resolvePlacementFor(ctx, exp)
 	if err != nil || placement != (AcceleratorPlacement{}) {
 		t.Fatalf("placement of a job on cores = %+v, %v; want none needed", placement, err)
@@ -195,16 +195,16 @@ func TestASidecarsRequestIsHeldOfItsNodeAsTheSchedulerHoldsIt(t *testing.T) {
 	c.kube = chartKube(t, totalCapacityTestNode("box", 16, 64), agent)
 	ctx := context.Background()
 	available, total, _, _, err := c.GetLiveAcceleratorCapacitySnapshot(ctx)
-	cores := string(domain.CPUType)
+	cores := string(clusterapi.CPUType)
 	if err != nil || total[cores] != 11 || available[cores] != 11 {
 		t.Fatalf("cores total %v, available %v, %v; want 11 of 16 once the agent's 4110m are held", total, available, err)
 	}
 	totals, err := c.GetNodeTotalCapacity(ctx)
-	if err != nil || totals["box"][domain.NodeResourceMemoryBytes] != 56<<30 {
+	if err != nil || totals["box"][clusterapi.NodeResourceMemoryBytes] != 56<<30 {
 		t.Fatalf("box's totals %v, %v; want 56Gi of memory left after the sidecar's 8Gi", totals["box"], err)
 	}
 	free, err := c.GetLiveNodeResourceCapacity(ctx)
-	if err != nil || free["box"][domain.NodeResourceCPUMillicores] != 11890 {
+	if err != nil || free["box"][clusterapi.NodeResourceCPUMillicores] != 11890 {
 		t.Fatalf("box's free %v, %v; want 11890m", free["box"], err)
 	}
 }

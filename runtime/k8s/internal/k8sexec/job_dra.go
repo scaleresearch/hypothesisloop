@@ -18,7 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
@@ -50,7 +50,7 @@ type draLiveCapacity struct {
 
 // liveDRACapacitySnapshots reads standard Kubernetes DRA inventory and allocations once, then
 // reports capacity keyed by accelerator type — the driver-published "<driver>/<attribute>=<value>"
-// strings a job spec names directly (see domain.AcceleratorType).
+// strings a job spec names directly (see clusterapi.AcceleratorType).
 //
 // Every attribute a device publishes yields one type, so the same physical device is counted
 // under each fact that is true of it (vendor=tenstorrent, chipArch=blackhole, boardType=7, ...).
@@ -248,7 +248,7 @@ func deviceClassDriver(class unstructured.Unstructured) (string, error) {
 // ensureResourceClaimTemplate creates the companion resource a DRA-backed Pod references. A
 // retained resource from a different desired specification is removed; the next stateless pass
 // recreates it before creating the Job.
-func (c *JobWorkloadClient) ensureResourceClaimTemplate(ctx context.Context, job *batchv1.Job, exp *domain.Experiment) error {
+func (c *JobWorkloadClient) ensureResourceClaimTemplate(ctx context.Context, job *batchv1.Job, exp *clusterapi.DesiredJob) error {
 	placement, err := c.ResolveAcceleratorPlacement(ctx, exp.AcceleratorType)
 	if err != nil {
 		return err

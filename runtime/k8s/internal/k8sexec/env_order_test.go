@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
 // The order of a pod's environment is part of the pod spec the reconciler hashes. A change of
@@ -28,7 +28,7 @@ var (
 	groupedRankEnvOrder   = []string{"HYPOTHESISLOOP_GROUP", "HYPOTHESISLOOP_GROUP_RANK", "HYPOTHESISLOOP_GROUP_REPLICAS", "HYPOTHESISLOOP_RANK_OFFSET"}
 )
 
-func envNames(t *testing.T, exp *domain.Experiment) [][]string {
+func envNames(t *testing.T, exp *clusterapi.DesiredJob) [][]string {
 	t.Helper()
 	c := &JobWorkloadClient{apiURL: testAPIURL}
 	jobs, err := c.BuildJobs(exp, AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})

@@ -8,7 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
 func TestExistingJobMatchesDesiredRequiresHashAndIdentity(t *testing.T) {
@@ -85,13 +85,13 @@ func TestAPodWithNoReadableShutdownGraceIsAnErrorRatherThanAGuess(t *testing.T) 
 // error rather than a silent empty placement.
 func TestAGroupedJobResolvesPlacementFromItsGroupsNotItsEmptyTopLevelCount(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: testAPIURL}
-	exp := &domain.Experiment{
+	exp := &clusterapi.DesiredJob{
 		ID:              "grouped-placement",
 		AcceleratorType: "unqualified-type",
-		Job: domain.JobSpec{
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorType: "unqualified-type",
-			Groups: []domain.JobGroup{
+			Groups: []clusterapi.JobGroup{
 				{Name: "learner", Replicas: 1, CPU: "2", Memory: "8Gi", Storage: "5Gi", AcceleratorCount: 1},
 				{Name: "actor", Replicas: 2, CPU: "1", Memory: "1Gi", Storage: "1Gi"},
 			},
@@ -107,12 +107,12 @@ func TestAGroupedJobResolvesPlacementFromItsGroupsNotItsEmptyTopLevelCount(t *te
 // inventory nor fails on an accelerator type it never named.
 func TestAJobWithNoAcceleratorsInAnyGroupTakesTheZeroPlacement(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: testAPIURL}
-	exp := &domain.Experiment{
+	exp := &clusterapi.DesiredJob{
 		ID:              "cpu-only",
 		AcceleratorType: "unqualified-type",
-		Job: domain.JobSpec{
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
-			Groups: []domain.JobGroup{
+			Groups: []clusterapi.JobGroup{
 				{Name: "worker", Replicas: 2, CPU: "1", Memory: "1Gi", Storage: "1Gi"},
 			},
 		},
@@ -130,11 +130,11 @@ func TestAJobWithNoAcceleratorsInAnyGroupTakesTheZeroPlacement(t *testing.T) {
 // BuildJobs compiles and guards on, not from the job as it was submitted.
 func TestPlacementIsResolvedForTheJobAdmissionResolved(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: testAPIURL}
-	submitted := domain.JobSpec{Image: "example.invalid/workload", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
+	submitted := clusterapi.JobSpec{Image: "example.invalid/workload", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 		CPU: "1", Memory: "1Gi", Storage: "1Gi"}
 	resolved := submitted
 	resolved.AcceleratorType, resolved.AcceleratorCount = "unqualified-type", 1
-	exp := &domain.Experiment{ID: "resolved-placement", AcceleratorType: "unqualified-type", Job: submitted, ResolvedJob: &resolved}
+	exp := &clusterapi.DesiredJob{ID: "resolved-placement", AcceleratorType: "unqualified-type", Job: submitted, ResolvedJob: &resolved}
 	if _, err := c.resolvePlacementFor(context.Background(), exp); err == nil {
 		t.Fatal("a job resolved to hold an accelerator was given the empty placement without any resolution attempt")
 	}

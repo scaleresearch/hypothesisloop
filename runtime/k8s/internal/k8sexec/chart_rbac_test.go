@@ -10,7 +10,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
@@ -22,6 +21,8 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
+
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
 // Every fake API server in this package's tests answers only what the chart grants the

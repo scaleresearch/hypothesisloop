@@ -23,7 +23,8 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
 // buildPlatform is the platform every environment is built for: the job images are amd64.
@@ -34,8 +35,8 @@ const buildPlatform = "linux/amd64"
 type Credential = func(ctx context.Context) (username, password string, err error)
 
 // GitCredential returns what reads the repository the build's file is of, asked each time a RUN
-// mounts domain.EnvironmentGitSecret.
-type GitCredential = func(ctx context.Context) (domain.EnvironmentGitCredential, error)
+// mounts clusterapi.EnvironmentGitSecret.
+type GitCredential = func(ctx context.Context) (clusterapi.EnvironmentGitCredential, error)
 
 // solver is the part of a BuildKit client a build uses.
 type solver interface {
@@ -82,8 +83,8 @@ type Progress = func(format string, args ...any)
 // digest, and reports how it ended under no attempt. An image of the platform's that does not
 // pull is the platform's fault, whatever the reason, so a registry outage never fails a file. Once ctx is done the report is meaningless and the caller sends
 // none. loaded, which may be nil, is told the image once it is in its node, before the push ends.
-// gitCredential is what a RUN that mounts domain.EnvironmentGitSecret reads the repository with.
-func (d *Daemon) Run(ctx context.Context, b domain.EnvironmentBuild, credential Credential, gitCredential GitCredential, progress Progress, loaded Loaded) domain.EnvironmentBuildReport {
+// gitCredential is what a RUN that mounts clusterapi.EnvironmentGitSecret reads the repository with.
+func (d *Daemon) Run(ctx context.Context, b clusterapi.EnvironmentBuild, credential Credential, gitCredential GitCredential, progress Progress, loaded Loaded) clusterapi.EnvironmentBuildReport {
 	steps := newSteps(progress)
 	for _, image := range []string{b.Base, b.Tools} {
 		if image == "" {
@@ -100,15 +101,15 @@ func (d *Daemon) Run(ctx context.Context, b domain.EnvironmentBuild, credential 
 	var failed *buildFailed
 	switch {
 	case errors.As(err, &failed):
-		return domain.EnvironmentBuildReport{Outcome: domain.EnvironmentBuildFileFault, LogTail: failed.log}
+		return clusterapi.EnvironmentBuildReport{Outcome: clusterapi.EnvironmentBuildFileFault, LogTail: failed.log}
 	case err != nil:
 		return platformFault(err)
 	}
-	return domain.EnvironmentBuildReport{Outcome: domain.EnvironmentBuildPushed, Digest: digest}
+	return clusterapi.EnvironmentBuildReport{Outcome: clusterapi.EnvironmentBuildPushed, Digest: digest}
 }
 
-func platformFault(err error) domain.EnvironmentBuildReport {
-	return domain.EnvironmentBuildReport{Outcome: domain.EnvironmentBuildPlatformFault, LogTail: lastBytes(err.Error(), domain.MaxEnvironmentLogBytes)}
+func platformFault(err error) clusterapi.EnvironmentBuildReport {
+	return clusterapi.EnvironmentBuildReport{Outcome: clusterapi.EnvironmentBuildPlatformFault, LogTail: lastBytes(err.Error(), clusterapi.MaxEnvironmentLogBytes)}
 }
 
 // pull runs a command on image, which pulls and unpacks it into the daemon's cache.
@@ -143,7 +144,7 @@ func (d *Daemon) solve(ctx context.Context, def *llb.Definition, opt client.Solv
 }
 
 // buildFailed is a build an instruction of the file failed, with the end of its output, at most
-// domain.MaxEnvironmentLogBytes.
+// clusterapi.MaxEnvironmentLogBytes.
 type buildFailed struct{ log string }
 
 func (e *buildFailed) Error() string { return "the build failed" }
@@ -157,7 +158,7 @@ var pushRetries = []time.Duration{15 * time.Second, 30 * time.Second, time.Minut
 // with no tag, which it returns. A *buildFailed is an instruction of the file failing; any other
 // error is the platform's. A push that fails once the image is loaded into its node is tried
 // again (pushRetries): a job there may already run it.
-func (d *Daemon) build(ctx context.Context, attachables []session.Attachable, b domain.EnvironmentBuild, steps *steps, onLoaded Loaded) (string, error) {
+func (d *Daemon) build(ctx context.Context, attachables []session.Attachable, b clusterapi.EnvironmentBuild, steps *steps, onLoaded Loaded) (string, error) {
 	if b.CacheScope == "" {
 		return "", errors.New("build: the build names no cache scope")
 	}
@@ -205,8 +206,8 @@ func (d *Daemon) build(ctx context.Context, attachables []session.Attachable, b 
 				fmt.Fprintf(&log, "\n%s: %s\n", v.Name, v.Error)
 			}
 		}
-		if log.Len() > 4*domain.MaxEnvironmentLogBytes {
-			tail := lastBytes(log.String(), domain.MaxEnvironmentLogBytes)
+		if log.Len() > 4*clusterapi.MaxEnvironmentLogBytes {
+			tail := lastBytes(log.String(), clusterapi.MaxEnvironmentLogBytes)
 			log.Reset()
 			log.WriteString(tail)
 		}
@@ -219,7 +220,7 @@ func (d *Daemon) build(ctx context.Context, attachables []session.Attachable, b 
 	if err != nil {
 		// A RUN a cancel stopped exits with a code it did not choose.
 		if ctx.Err() == nil && fileFault(err) {
-			return "", &buildFailed{log: lastBytes(log.String()+"\n"+err.Error(), domain.MaxEnvironmentLogBytes)}
+			return "", &buildFailed{log: lastBytes(log.String()+"\n"+err.Error(), clusterapi.MaxEnvironmentLogBytes)}
 		}
 		if load == nil || loadErr != nil || loaded == "" || ctx.Err() != nil {
 			return "", fmt.Errorf("build: %w", err)
@@ -357,7 +358,7 @@ func (a *registryAuth) Credentials(ctx context.Context, req *auth.CredentialsReq
 	return &auth.CredentialsResponse{Username: username, Secret: password}, nil
 }
 
-// repositorySecret answers domain.EnvironmentGitSecret, and no other secret, with git's credential
+// repositorySecret answers clusterapi.EnvironmentGitSecret, and no other secret, with git's credential
 // store for the repository the build's file is of: a line of its host alone, which a git that
 // sends no path matches, then a line of its path with and without .git, which a git with
 // credential.useHttpPath (the job images set it) matches as cloned. The credential reads that one
@@ -366,11 +367,11 @@ func (a *registryAuth) Credentials(ctx context.Context, req *auth.CredentialsReq
 type repositorySecret GitCredential
 
 func (r repositorySecret) GetSecret(ctx context.Context, id string) ([]byte, error) {
-	if id != domain.EnvironmentGitSecret || r == nil {
+	if id != clusterapi.EnvironmentGitSecret || r == nil {
 		return nil, secrets.ErrNotFound
 	}
 	credential, err := r(ctx)
-	if errors.Is(err, domain.ErrNoEnvironmentGitCredential) {
+	if errors.Is(err, agentexec.ErrNoEnvironmentGitCredential) {
 		return nil, secrets.ErrNotFound
 	}
 	if err != nil {
@@ -385,7 +386,7 @@ func (r repositorySecret) GetSecret(ctx context.Context, id string) ([]byte, err
 	return []byte(origin + "\n" + origin + "/" + path + "\n" + origin + "/" + path + ".git\n"), nil
 }
 
-// withTools is dockerfile with domain.PlatformTools copied from the image tools into the stage
+// withTools is dockerfile with clusterapi.PlatformTools copied from the image tools into the stage
 // it builds, its last, as its last instruction, so they are the image's last layer and a new
 // release of them leaves every layer before cached. The file's own lines keep their numbers.
 func withTools(dockerfile, tools string) string {
@@ -395,7 +396,7 @@ func withTools(dockerfile, tools string) string {
 	if dockerfile != "" && !strings.HasSuffix(dockerfile, "\n") {
 		dockerfile += "\n"
 	}
-	return dockerfile + "COPY --from=" + tools + " " + strings.Join(domain.PlatformTools, " ") + " /usr/local/bin/\n"
+	return dockerfile + "COPY --from=" + tools + " " + strings.Join(clusterapi.PlatformTools, " ") + " /usr/local/bin/\n"
 }
 
 // dockerfileState is the Dockerfile and the build context the frontend reads it from: one state

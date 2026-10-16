@@ -14,22 +14,23 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
 // buildsAPI is a control plane that lists builds, hands out push logins and takes reports.
 type buildsAPI struct {
 	mu            sync.Mutex
-	listed        []domain.EnvironmentBuild
+	listed        []clusterapi.EnvironmentBuild
 	reportsBuilds []bool
-	credentials   []domain.EnvironmentBuildCredentialRequest
-	reports       map[string][]domain.EnvironmentBuildReport
+	credentials   []clusterapi.EnvironmentBuildCredentialRequest
+	reports       map[string][]clusterapi.EnvironmentBuildReport
 	refuse        bool
-	progress      map[string][]domain.EnvironmentBuildProgress
+	progress      map[string][]clusterapi.EnvironmentBuildProgress
 	// refuseProgress answers every progress report 503.
 	refuseProgress bool
 	// loaded is each loaded report, and order every loaded report and outcome as they came.
-	loaded []domain.EnvironmentBuildLoaded
+	loaded []clusterapi.EnvironmentBuildLoaded
 	order  []string
 }
 
@@ -46,25 +47,25 @@ func (api *buildsAPI) serve(t *testing.T) *httptest.Server {
 			api.reportsBuilds = append(api.reportsBuilds, report.Builds)
 			_ = json.NewEncoder(w).Encode(map[string]any{"experiments": []any{}, "builds": api.listed})
 		case "/internal/clusters/test/builds/k1/credential":
-			var req domain.EnvironmentBuildCredentialRequest
+			var req clusterapi.EnvironmentBuildCredentialRequest
 			_ = json.NewDecoder(r.Body).Decode(&req)
 			api.credentials = append(api.credentials, req)
-			_ = json.NewEncoder(w).Encode(domain.RegistryLogin{Registry: "registry.test", Username: "oauth2accesstoken", Password: "push-token"})
+			_ = json.NewEncoder(w).Encode(clusterapi.RegistryLogin{Registry: "registry.test", Username: "oauth2accesstoken", Password: "push-token"})
 		case "/internal/clusters/test/builds/k1/progress", "/internal/clusters/test/builds/k2/progress":
 			if api.refuseProgress {
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
 			}
-			var progress domain.EnvironmentBuildProgress
+			var progress clusterapi.EnvironmentBuildProgress
 			_ = json.NewDecoder(r.Body).Decode(&progress)
 			key := strings.TrimSuffix(r.URL.Path[len("/internal/clusters/test/builds/"):], "/progress")
 			if api.progress == nil {
-				api.progress = map[string][]domain.EnvironmentBuildProgress{}
+				api.progress = map[string][]clusterapi.EnvironmentBuildProgress{}
 			}
 			api.progress[key] = append(api.progress[key], progress)
 			w.WriteHeader(http.StatusNoContent)
 		case "/internal/clusters/test/builds/k1/loaded":
-			var loaded domain.EnvironmentBuildLoaded
+			var loaded clusterapi.EnvironmentBuildLoaded
 			_ = json.NewDecoder(r.Body).Decode(&loaded)
 			api.loaded = append(api.loaded, loaded)
 			api.order = append(api.order, "loaded")
@@ -75,7 +76,7 @@ func (api *buildsAPI) serve(t *testing.T) *httptest.Server {
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
 			}
-			var report domain.EnvironmentBuildReport
+			var report clusterapi.EnvironmentBuildReport
 			_ = json.NewDecoder(r.Body).Decode(&report)
 			key := r.URL.Path[len("/internal/clusters/test/builds/"):]
 			api.reports[key] = append(api.reports[key], report)
@@ -89,16 +90,16 @@ func (api *buildsAPI) serve(t *testing.T) *httptest.Server {
 	return server
 }
 
-func (api *buildsAPI) list(builds ...domain.EnvironmentBuild) {
+func (api *buildsAPI) list(builds ...clusterapi.EnvironmentBuild) {
 	api.mu.Lock()
 	defer api.mu.Unlock()
 	api.listed = builds
 }
 
-func (api *buildsAPI) reported(key string) []domain.EnvironmentBuildReport {
+func (api *buildsAPI) reported(key string) []clusterapi.EnvironmentBuildReport {
 	api.mu.Lock()
 	defer api.mu.Unlock()
-	return append([]domain.EnvironmentBuildReport(nil), api.reports[key]...)
+	return append([]clusterapi.EnvironmentBuildReport(nil), api.reports[key]...)
 }
 
 // fakeBuilder runs a build until it is released or cancelled, asking for the push login once.
@@ -118,7 +119,7 @@ func newFakeBuilder() *fakeBuilder {
 	return &fakeBuilder{runs: map[string]int{}, cancelled: map[string]int{}, release: make(chan struct{})}
 }
 
-func (b *fakeBuilder) Run(ctx context.Context, build domain.EnvironmentBuild, credential func(context.Context) (string, string, error), _ func(context.Context) (domain.EnvironmentGitCredential, error), progress func(string, ...any), loaded func(node, digest string)) domain.EnvironmentBuildReport {
+func (b *fakeBuilder) Run(ctx context.Context, build clusterapi.EnvironmentBuild, credential func(context.Context) (string, string, error), _ func(context.Context) (clusterapi.EnvironmentGitCredential, error), progress func(string, ...any), loaded func(node, digest string)) clusterapi.EnvironmentBuildReport {
 	if b.loadedOn != "" {
 		loaded(b.loadedOn, "sha256:abc")
 	}
@@ -137,17 +138,17 @@ func (b *fakeBuilder) Run(ctx context.Context, build domain.EnvironmentBuild, cr
 		b.mu.Lock()
 		b.cancelled[build.Key]++
 		b.mu.Unlock()
-		return domain.EnvironmentBuildReport{Outcome: domain.EnvironmentBuildPlatformFault, LogTail: "cancelled"}
+		return clusterapi.EnvironmentBuildReport{Outcome: clusterapi.EnvironmentBuildPlatformFault, LogTail: "cancelled"}
 	case <-b.release:
 	}
 	username, password, err := credential(ctx)
 	if err != nil {
-		return domain.EnvironmentBuildReport{Outcome: domain.EnvironmentBuildPlatformFault, LogTail: err.Error()}
+		return clusterapi.EnvironmentBuildReport{Outcome: clusterapi.EnvironmentBuildPlatformFault, LogTail: err.Error()}
 	}
 	b.mu.Lock()
 	b.logins = append(b.logins, username+":"+password)
 	b.mu.Unlock()
-	return domain.EnvironmentBuildReport{Outcome: domain.EnvironmentBuildPushed, Digest: "sha256:abc"}
+	return clusterapi.EnvironmentBuildReport{Outcome: clusterapi.EnvironmentBuildPushed, Digest: "sha256:abc"}
 }
 
 func (b *fakeBuilder) count(m map[string]int, key string) int {
@@ -173,10 +174,10 @@ func buildAgent(server *httptest.Server, builder Builder) *Agent {
 	return agent
 }
 
-var k1 = domain.EnvironmentBuild{Key: "k1", Attempt: 1, Base: "registry.test/hl/job:1", Dockerfile: "ARG BASE\nFROM ${BASE}\n", Repository: "registry.test/envs/env", CacheScope: "hl-test"}
+var k1 = clusterapi.EnvironmentBuild{Key: "k1", Attempt: 1, Base: "registry.test/hl/job:1", Dockerfile: "ARG BASE\nFROM ${BASE}\n", Repository: "registry.test/envs/env", CacheScope: "hl-test"}
 
 func TestAListedBuildRunsOnceFetchesItsLoginAtItsAttemptAndIsReported(t *testing.T) {
-	api := &buildsAPI{reports: map[string][]domain.EnvironmentBuildReport{}}
+	api := &buildsAPI{reports: map[string][]clusterapi.EnvironmentBuildReport{}}
 	server := api.serve(t)
 	builder := newFakeBuilder()
 	agent := buildAgent(server, builder)
@@ -193,7 +194,7 @@ func TestAListedBuildRunsOnceFetchesItsLoginAtItsAttemptAndIsReported(t *testing
 	}
 	agent.building.Wait()
 
-	if got := api.reported("k1")[0]; got.Attempt != 1 || got.Outcome != domain.EnvironmentBuildPushed || got.Digest != "sha256:abc" {
+	if got := api.reported("k1")[0]; got.Attempt != 1 || got.Outcome != clusterapi.EnvironmentBuildPushed || got.Digest != "sha256:abc" {
 		t.Errorf("report %+v, want attempt 1 pushed with its digest", got)
 	}
 	if len(api.credentials) != 1 || api.credentials[0].Attempt != 1 || builder.logins[0] != "oauth2accesstoken:push-token" {
@@ -208,12 +209,12 @@ func TestAListedBuildRunsOnceFetchesItsLoginAtItsAttemptAndIsReported(t *testing
 }
 
 func TestABuildNoLongerListedAtItsAttemptIsCancelledAndNotReported(t *testing.T) {
-	api := &buildsAPI{reports: map[string][]domain.EnvironmentBuildReport{}}
+	api := &buildsAPI{reports: map[string][]clusterapi.EnvironmentBuildReport{}}
 	server := api.serve(t)
 	builder := newFakeBuilder()
 	agent := buildAgent(server, builder)
 	ctx := context.Background()
-	k2 := domain.EnvironmentBuild{Key: "k2", Attempt: 1}
+	k2 := clusterapi.EnvironmentBuild{Key: "k2", Attempt: 1}
 
 	api.list(k1, k2)
 	if err := agent.reconcileOnce(ctx); err != nil {
@@ -245,7 +246,7 @@ func TestABuildNoLongerListedAtItsAttemptIsCancelledAndNotReported(t *testing.T)
 // report was not taken is posted again by the next pass that lists it, and the build is never run
 // again: a file that failed fails the same way.
 func TestABuildWhoseReportWasRefusedIsReportedAgainNotRunAgain(t *testing.T) {
-	api := &buildsAPI{reports: map[string][]domain.EnvironmentBuildReport{}, refuse: true}
+	api := &buildsAPI{reports: map[string][]clusterapi.EnvironmentBuildReport{}, refuse: true}
 	server := api.serve(t)
 	builder := newFakeBuilder()
 	close(builder.release)
@@ -268,7 +269,7 @@ func TestABuildWhoseReportWasRefusedIsReportedAgainNotRunAgain(t *testing.T) {
 		agent.building.Wait()
 	}
 
-	if runs, got := builder.count(builder.runs, "k1"), api.reported("k1"); runs != 1 || len(got) != 1 || got[0].Attempt != 1 || got[0].Outcome != domain.EnvironmentBuildPushed {
+	if runs, got := builder.count(builder.runs, "k1"), api.reported("k1"); runs != 1 || len(got) != 1 || got[0].Attempt != 1 || got[0].Outcome != clusterapi.EnvironmentBuildPushed {
 		t.Errorf("ran %d times with reports %+v taken, want it run once and its outcome reported once", runs, got)
 	}
 	api.mu.Lock()
@@ -285,7 +286,7 @@ func TestABuildWhoseReportWasRefusedIsReportedAgainNotRunAgain(t *testing.T) {
 }
 
 func TestAnAgentWithoutABuilderSaysItDoesNotBuildAndRunsNone(t *testing.T) {
-	api := &buildsAPI{reports: map[string][]domain.EnvironmentBuildReport{}}
+	api := &buildsAPI{reports: map[string][]clusterapi.EnvironmentBuildReport{}}
 	server := api.serve(t)
 	agent := newTestAgent(server, &captureExecutor{})
 	api.list(k1)
@@ -318,14 +319,14 @@ func (l *agentLog) has(line string) bool {
 // A build the control plane took the report of leaves the list on the next pass. It ended, and
 // only a build a cancel cut short is told as cancelled.
 func TestABuildIsToldAsItGoesAndCancelledOnlyWhenACancelCutItShort(t *testing.T) {
-	api := &buildsAPI{reports: map[string][]domain.EnvironmentBuildReport{}}
+	api := &buildsAPI{reports: map[string][]clusterapi.EnvironmentBuildReport{}}
 	server := api.serve(t)
 	builder := newFakeBuilder()
 	agent := buildAgent(server, builder)
 	var logged agentLog
 	agent.Log = logged.log
 	ctx := context.Background()
-	k2 := domain.EnvironmentBuild{Key: "k2", Attempt: 1}
+	k2 := clusterapi.EnvironmentBuild{Key: "k2", Attempt: 1}
 
 	api.list(k1, k2)
 	if err := agent.reconcileOnce(ctx); err != nil {
@@ -359,9 +360,9 @@ func TestABuildIsToldAsItGoesAndCancelledOnlyWhenACancelCutItShort(t *testing.T)
 // waiting for the environment shows it. A progress post the control plane refuses costs the
 // build nothing.
 func TestABuildPostsTheStepItIsAtAndARefusedPostCostsItNothing(t *testing.T) {
-	long := "[2/2] RUN " + strings.Repeat("é", domain.MaxEnvironmentProgressBytes)
+	long := "[2/2] RUN " + strings.Repeat("é", clusterapi.MaxEnvironmentProgressBytes)
 	for _, refuse := range []bool{false, true} {
-		api := &buildsAPI{reports: map[string][]domain.EnvironmentBuildReport{}, refuseProgress: refuse}
+		api := &buildsAPI{reports: map[string][]clusterapi.EnvironmentBuildReport{}, refuseProgress: refuse}
 		builder := newFakeBuilder()
 		builder.steps = []string{"[1/2] RUN cat <<EOF\nsecond line: started", "", long}
 		close(builder.release)
@@ -375,7 +376,7 @@ func TestABuildPostsTheStepItIsAtAndARefusedPostCostsItNothing(t *testing.T) {
 		}
 		waitFor(t, "the report", func() bool { return len(api.reported("k1")) == 1 })
 		agent.building.Wait()
-		if got := api.reported("k1")[0]; got.Outcome != domain.EnvironmentBuildPushed {
+		if got := api.reported("k1")[0]; got.Outcome != clusterapi.EnvironmentBuildPushed {
 			t.Fatalf("refuse=%v: reported %+v, want the build pushed", refuse, got)
 		}
 		api.mu.Lock()
@@ -391,11 +392,11 @@ func TestABuildPostsTheStepItIsAtAndARefusedPostCostsItNothing(t *testing.T) {
 			t.Fatalf("posted %+v, want the steps, the latest replacing one still waiting", progress)
 		}
 		for _, p := range progress {
-			if p.Attempt != 1 || p.Step == "" || strings.ContainsAny(p.Step, "\r\n") || len(p.Step) > domain.MaxEnvironmentProgressBytes || !utf8.ValidString(p.Step) {
+			if p.Attempt != 1 || p.Step == "" || strings.ContainsAny(p.Step, "\r\n") || len(p.Step) > clusterapi.MaxEnvironmentProgressBytes || !utf8.ValidString(p.Step) {
 				t.Errorf("posted %+v, want one valid line within the bound at attempt 1", p)
 			}
 		}
-		if last := progress[len(progress)-1].Step; !strings.HasPrefix(long, last) || len(last) < domain.MaxEnvironmentProgressBytes-1 {
+		if last := progress[len(progress)-1].Step; !strings.HasPrefix(long, last) || len(last) < clusterapi.MaxEnvironmentProgressBytes-1 {
 			t.Errorf("last step %q, want the long step cut to the bound", last)
 		}
 	}
@@ -406,7 +407,7 @@ func TestAProgressStepIsTheFirstLineCutOnARuneBoundary(t *testing.T) {
 		"[1/2] RUN a\nb: started": "[1/2] RUN a",
 		"  x\r\n":                 "x",
 		"\nlater":                 "",
-		strings.Repeat("a", domain.MaxEnvironmentProgressBytes-1) + "é": strings.Repeat("a", domain.MaxEnvironmentProgressBytes-1),
+		strings.Repeat("a", clusterapi.MaxEnvironmentProgressBytes-1) + "é": strings.Repeat("a", clusterapi.MaxEnvironmentProgressBytes-1),
 	} {
 		if got := progressStep(line); got != want {
 			t.Errorf("progressStep(%q) = %q, want %q", line, got, want)
@@ -417,7 +418,7 @@ func TestAProgressStepIsTheFirstLineCutOnARuneBoundary(t *testing.T) {
 // The node a build's image is loaded on is reported at its attempt as soon as the builder tells it,
 // and before the outcome.
 func TestABuildLoadedOnItsNodeIsReportedBeforeItsOutcome(t *testing.T) {
-	api := &buildsAPI{reports: map[string][]domain.EnvironmentBuildReport{}}
+	api := &buildsAPI{reports: map[string][]clusterapi.EnvironmentBuildReport{}}
 	server := api.serve(t)
 	builder := newFakeBuilder()
 	builder.loadedOn = "node-1"
@@ -430,7 +431,7 @@ func TestABuildLoadedOnItsNodeIsReportedBeforeItsOutcome(t *testing.T) {
 	waitFor(t, "the report", func() bool { return len(api.reported("k1")) == 1 })
 	api.mu.Lock()
 	defer api.mu.Unlock()
-	if len(api.loaded) != 1 || api.loaded[0] != (domain.EnvironmentBuildLoaded{Attempt: 1, Node: "node-1", Digest: "sha256:abc"}) || !slices.Equal(api.order, []string{"loaded", "outcome"}) {
+	if len(api.loaded) != 1 || api.loaded[0] != (clusterapi.EnvironmentBuildLoaded{Attempt: 1, Node: "node-1", Digest: "sha256:abc"}) || !slices.Equal(api.order, []string{"loaded", "outcome"}) {
 		t.Errorf("loaded %+v in order %v, want node-1 at attempt 1 before the outcome", api.loaded, api.order)
 	}
 }
@@ -438,10 +439,10 @@ func TestABuildLoadedOnItsNodeIsReportedBeforeItsOutcome(t *testing.T) {
 // gitCredentialBuilder asks for the git credential once and hands on what it was answered.
 type gitCredentialBuilder struct{ answered chan error }
 
-func (b *gitCredentialBuilder) Run(ctx context.Context, _ domain.EnvironmentBuild, _ func(context.Context) (string, string, error), git func(context.Context) (domain.EnvironmentGitCredential, error), _ func(string, ...any), _ func(node, digest string)) domain.EnvironmentBuildReport {
+func (b *gitCredentialBuilder) Run(ctx context.Context, _ clusterapi.EnvironmentBuild, _ func(context.Context) (string, string, error), git func(context.Context) (clusterapi.EnvironmentGitCredential, error), _ func(string, ...any), _ func(node, digest string)) clusterapi.EnvironmentBuildReport {
 	_, err := git(ctx)
 	b.answered <- err
-	return domain.EnvironmentBuildReport{Outcome: domain.EnvironmentBuildPushed, Digest: "sha256:abc"}
+	return clusterapi.EnvironmentBuildReport{Outcome: clusterapi.EnvironmentBuildPushed, Digest: "sha256:abc"}
 }
 
 func TestAGitCredentialTheControlPlaneHasNoneOfIsNoCredentialAndARefusalAnError(t *testing.T) {
@@ -452,7 +453,7 @@ func TestAGitCredentialTheControlPlaneHasNoneOfIsNoCredentialAndARefusalAnError(
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/internal/clusters/test/reconcile":
-				_ = json.NewEncoder(w).Encode(map[string]any{"experiments": []any{}, "builds": []domain.EnvironmentBuild{k1}})
+				_ = json.NewEncoder(w).Encode(map[string]any{"experiments": []any{}, "builds": []clusterapi.EnvironmentBuild{k1}})
 			case "/internal/clusters/test/builds/k1/git-credential":
 				w.WriteHeader(c.status)
 			default:
@@ -467,7 +468,7 @@ func TestAGitCredentialTheControlPlaneHasNoneOfIsNoCredentialAndARefusalAnError(
 		err := <-builder.answered
 		agent.building.Wait()
 		server.Close()
-		if err == nil || errors.Is(err, domain.ErrNoEnvironmentGitCredential) != c.none {
+		if err == nil || errors.Is(err, agentexec.ErrNoEnvironmentGitCredential) != c.none {
 			t.Errorf("answered %d: %v, want no credential %v", c.status, err, c.none)
 		}
 	}

@@ -9,9 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/contract/exitline"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
@@ -39,7 +38,7 @@ func TestAnInstanceThatNeverBootsWaitsUnplacedUntilItIsNoLongerDesired(t *testin
 		matches, err := e.WorkloadMatchesDesired(ctx, exp)
 		_, _, _, scheduled, _, detailErr := e.PollPhaseDetail(ctx, "exp-1", 0)
 		phase, attempt := status(t, e, "exp-1")
-		if err != nil || detailErr != nil || !matches || phase != workload.JobPhasePending || attempt != 0 || scheduled != 0 {
+		if err != nil || detailErr != nil || !matches || phase != clusterapi.JobPhasePending || attempt != 0 || scheduled != 0 {
 			t.Fatalf("pass %d: matches %v, phase %v, attempt %d, scheduled %d, %v %v", pass, matches, phase, attempt, scheduled, err, detailErr)
 		}
 	}
@@ -49,7 +48,7 @@ func TestAnInstanceThatNeverBootsWaitsUnplacedUntilItIsNoLongerDesired(t *testin
 	if available, _, _, _, _ := e.GetLiveAcceleratorCapacitySnapshot(ctx); available[h100] != 1 {
 		t.Fatalf("available = %v, want the booting instance's slot taken", available)
 	}
-	if reason, message, _, _, _, _ := e.PollPhaseDetail(ctx, "exp-1", 0); reason != domain.PhaseReasonInstanceStarting || message == "" {
+	if reason, message, _, _, _, _ := e.PollPhaseDetail(ctx, "exp-1", 0); reason != clusterapi.PhaseReasonInstanceStarting || message == "" {
 		t.Fatalf("a starting instance reads as %q %q, want it to say what the job waits for", reason, message)
 	}
 
@@ -131,13 +130,13 @@ func TestAnInstanceTheProviderCannotPlaceIsKeptAndLeftToTheControlPlane(t *testi
 		matches, err := e.WorkloadMatchesDesired(ctx, exp)
 		reason, message, _, scheduled, _, detailErr := e.PollPhaseDetail(ctx, "exp-1", 0)
 		phase, attempt := status(t, e, "exp-1")
-		if err != nil || detailErr != nil || !matches || phase != workload.JobPhasePending || attempt != 0 || scheduled != 1 || reason != domain.PhaseReasonInstanceUnknown || !strings.Contains(message, "does not say whether the job runs") {
+		if err != nil || detailErr != nil || !matches || phase != clusterapi.JobPhasePending || attempt != 0 || scheduled != 1 || reason != clusterapi.PhaseReasonInstanceUnknown || !strings.Contains(message, "does not say whether the job runs") {
 			t.Fatalf("pass %d: matches %v, phase %v, attempt %d, scheduled %d, reason %q, message %q, %v %v", pass, matches, phase, attempt, scheduled, reason, message, err, detailErr)
 		}
 		if tail, err := e.FetchLogTail(ctx, "exp-1", 10); err != nil || tail != nil {
 			t.Fatalf("pass %d: tail %v, %v", pass, tail, err)
 		}
-		if err := e.ReapTerminal(ctx, map[string]*domain.Experiment{"exp-1": exp}); err != nil {
+		if err := e.ReapTerminal(ctx, map[string]*clusterapi.DesiredJob{"exp-1": exp}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -150,7 +149,7 @@ func TestAnInstanceTheProviderCannotPlaceIsKeptAndLeftToTheControlPlane(t *testi
 
 	// The host answers again and the job is as it was.
 	p.Start(name)
-	if phase, _ := status(t, e, "exp-1"); phase != workload.JobPhaseRunning {
+	if phase, _ := status(t, e, "exp-1"); phase != clusterapi.JobPhaseRunning {
 		t.Fatalf("phase %v after the host answered again", phase)
 	}
 
@@ -177,7 +176,7 @@ func TestAnInstanceThatVanishesMidRunReadsAsGoneAndIsRentedAgain(t *testing.T) {
 	if err := p.Destroy(ctx, "fake-0001"); err != nil {
 		t.Fatal(err)
 	}
-	if phase, attempt := status(t, e, "exp-1"); phase != workload.JobPhaseGone || attempt != workload.AttemptUnknown {
+	if phase, attempt := status(t, e, "exp-1"); phase != clusterapi.JobPhaseGone || attempt != clusterapi.AttemptUnknown {
 		t.Fatalf("status = %v attempt %d", phase, attempt)
 	}
 	actual, err := e.ListManagedJobs(ctx)
@@ -191,7 +190,7 @@ func TestAnInstanceThatVanishesMidRunReadsAsGoneAndIsRentedAgain(t *testing.T) {
 	}
 
 	mustCreate(t, e, exp)
-	if phase, attempt := status(t, e, "exp-1"); phase != workload.JobPhasePending || attempt != 4 {
+	if phase, attempt := status(t, e, "exp-1"); phase != clusterapi.JobPhasePending || attempt != 4 {
 		t.Fatalf("after renting again: %v attempt %d", phase, attempt)
 	}
 }
@@ -246,7 +245,7 @@ func TestAFailedCreateRentsNothingAndTheNextPassTriesAgain(t *testing.T) {
 	if err := e.CreateWorkload(ctx, exp, nil); !errors.Is(err, errVendor) {
 		t.Fatalf("err = %v", err)
 	}
-	if phase, _ := status(t, e, "exp-1"); phase != workload.JobPhaseGone || len(p.Names()) != 0 {
+	if phase, _ := status(t, e, "exp-1"); phase != clusterapi.JobPhaseGone || len(p.Names()) != 0 {
 		t.Fatalf("phase %v, rented %v", phase, p.Names())
 	}
 
@@ -262,13 +261,13 @@ func TestAFailedCreateRentsNothingAndTheNextPassTriesAgain(t *testing.T) {
 	exp.SubmittedAt = &admitted
 	exp = asHanded(t, exp)
 	var waiting *agentexec.Waiting
-	if err := e.CreateWorkload(ctx, exp, nil); !errors.As(err, &waiting) || waiting.Reason != domain.PhaseReasonWaitingForOffer || !strings.Contains(waiting.Why, "h100") {
+	if err := e.CreateWorkload(ctx, exp, nil); !errors.As(err, &waiting) || waiting.Reason != clusterapi.PhaseReasonWaitingForOffer || !strings.Contains(waiting.Why, "h100") {
 		t.Fatalf("no offer yet: err = %v, want the job waiting for one for its shape", err)
 	}
 	admitted = time.Now().Add(-time.Hour)
 	exp.SubmittedAt = &admitted
 	var unrunnable *agentexec.Unrunnable
-	if err := e.CreateWorkload(ctx, exp, nil); !errors.As(err, &unrunnable) || unrunnable.Reason != domain.PhaseReasonNoOffer {
+	if err := e.CreateWorkload(ctx, exp, nil); !errors.As(err, &unrunnable) || unrunnable.Reason != clusterapi.PhaseReasonNoOffer {
 		t.Fatalf("no offer past the bound: err = %v, want no_offer", err)
 	}
 
@@ -316,7 +315,7 @@ func TestAFailedStopLeavesTheInstanceRunningForTheNextPass(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 	p.Fail = nil
-	if phase, _ := status(t, e, "exp-1"); phase != workload.JobPhaseRunning || p.Stops(name) != 0 {
+	if phase, _ := status(t, e, "exp-1"); phase != clusterapi.JobPhaseRunning || p.Stops(name) != 0 {
 		t.Fatalf("phase %v, stops %d", phase, p.Stops(name))
 	}
 	if err := e.DeleteWorkload(ctx, "exp-1", true); err != nil || p.Stops(name) != 1 {
@@ -341,7 +340,7 @@ func TestAnExitedInstanceWithUnreadableOutputIsReportedGone(t *testing.T) {
 	p.Fail = failing("Logs", name)
 
 	observed, err := e.PollJobStatus(ctx, "exp-1")
-	if err != nil || observed.Phase != workload.JobPhaseGone || observed.Attempt != 0 {
+	if err != nil || observed.Phase != clusterapi.JobPhaseGone || observed.Attempt != 0 {
 		t.Fatalf("poll = %+v, %v", observed, err)
 	}
 	if reason, message, _, _, _, err := e.PollPhaseDetail(ctx, "exp-1", 0); err != nil || reason != "" || message != "" {
@@ -350,11 +349,11 @@ func TestAnExitedInstanceWithUnreadableOutputIsReportedGone(t *testing.T) {
 	// While its attempt is desired the instance is kept and not rented again, so a read that
 	// works on a later push still finds the outcome.
 	mustCreate(t, e, exp)
-	if err := e.ReapTerminal(ctx, map[string]*domain.Experiment{"exp-1": exp}); err != nil || len(p.IDs(name)) != 1 {
+	if err := e.ReapTerminal(ctx, map[string]*clusterapi.DesiredJob{"exp-1": exp}); err != nil || len(p.IDs(name)) != 1 {
 		t.Fatalf("reap: %v, rented %v", err, p.Names())
 	}
 	p.Fail = nil
-	if phase, _ := status(t, e, "exp-1"); phase != workload.JobPhaseSucceeded {
+	if phase, _ := status(t, e, "exp-1"); phase != clusterapi.JobPhaseSucceeded {
 		t.Fatalf("phase = %v once the output is readable", phase)
 	}
 }
@@ -366,14 +365,14 @@ func TestAnInstanceThatEndedWithoutAnExitLineIsGoneAndNotRentedAgain(t *testing.
 	ctx := context.Background()
 	const name = "hl-job-t1-exp-1-a0-cpu-0"
 	exp := job(t, "exp-1", 0, 0)
-	desired := map[string]*domain.Experiment{"exp-1": exp}
+	desired := map[string]*clusterapi.DesiredJob{"exp-1": exp}
 	mustCreate(t, e, exp)
 	p.Start(name)
 	p.Exit(name, "epoch 4", "Killed")
 
 	for pass := 0; pass < 2; pass++ {
 		observed, err := e.PollJobStatus(ctx, "exp-1")
-		if err != nil || observed.Phase != workload.JobPhaseGone || observed.Attempt != 0 {
+		if err != nil || observed.Phase != clusterapi.JobPhaseGone || observed.Attempt != 0 {
 			t.Fatalf("pass %d: poll = %+v, %v", pass, observed, err)
 		}
 		mustCreate(t, e, exp)
@@ -385,7 +384,7 @@ func TestAnInstanceThatEndedWithoutAnExitLineIsGoneAndNotRentedAgain(t *testing.
 		t.Fatalf("rented %v", p.Names())
 	}
 	// The requeue the control plane answers with leaves the dead attempt behind.
-	if err := e.ReapTerminal(ctx, map[string]*domain.Experiment{"exp-1": on(job(t, "exp-1", 1, 0), "cpu-0")}); err != nil || len(p.Names()) != 0 {
+	if err := e.ReapTerminal(ctx, map[string]*clusterapi.DesiredJob{"exp-1": on(job(t, "exp-1", 1, 0), "cpu-0")}); err != nil || len(p.Names()) != 0 {
 		t.Fatalf("after the requeue: %v, rented %v", err, p.Names())
 	}
 }
@@ -411,7 +410,7 @@ func TestDuplicateInstancesOfOneAttemptAreReducedToTheLowestID(t *testing.T) {
 			other := on(job(t, "exp-2", 0, 1), "h100-0")
 			mustCreate(t, e, other)
 
-			desired := map[string]*domain.Experiment{"exp-1": exp, "exp-2": other}
+			desired := map[string]*clusterapi.DesiredJob{"exp-1": exp, "exp-2": other}
 			if err := e.ReapTerminal(ctx, desired); err != nil {
 				t.Fatal(err)
 			}
@@ -421,7 +420,7 @@ func TestDuplicateInstancesOfOneAttemptAreReducedToTheLowestID(t *testing.T) {
 			if len(p.Names()) != 2 {
 				t.Fatalf("rented %v", p.Names())
 			}
-			if observed, err := e.PollJobStatus(ctx, "exp-1"); err != nil || observed.Attempt != 0 || observed.Phase == workload.JobPhaseGone {
+			if observed, err := e.PollJobStatus(ctx, "exp-1"); err != nil || observed.Attempt != 0 || observed.Phase == clusterapi.JobPhaseGone {
 				t.Fatalf("poll = %+v, %v", observed, err)
 			}
 		})
@@ -480,14 +479,14 @@ func TestAnInstanceUnderThePrefixThatNamesNoJobIsDestroyed(t *testing.T) {
 	}
 
 	p.Fail = failing("Destroy", "hl-job-t1-something-unknown")
-	if err := e.ReapTerminal(ctx, map[string]*domain.Experiment{"exp-1": exp}); err == nil {
+	if err := e.ReapTerminal(ctx, map[string]*clusterapi.DesiredJob{"exp-1": exp}); err == nil {
 		t.Fatal("a destroy that failed was not reported")
 	}
 	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-cpu-0", "hl-job-t1-something-unknown"}) {
 		t.Fatalf("rented %v, want the job and the one instance whose destroy failed", names)
 	}
 	p.Fail = nil
-	if err := e.ReapTerminal(ctx, map[string]*domain.Experiment{"exp-1": exp}); err != nil {
+	if err := e.ReapTerminal(ctx, map[string]*clusterapi.DesiredJob{"exp-1": exp}); err != nil {
 		t.Fatal(err)
 	}
 	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-cpu-0"}) {
@@ -501,7 +500,7 @@ func TestARestartedAgentTakesOverTheInstancesAlreadyRented(t *testing.T) {
 	before, p := newTestExecutor(t)
 	ctx := context.Background()
 	running, finished, booting := job(t, "exp-running", 1, 1), job(t, "exp-finished", 0, 0), on(job(t, "exp-booting", 0, 1), "h100-1")
-	for _, exp := range []*domain.Experiment{running, finished, booting} {
+	for _, exp := range []*clusterapi.DesiredJob{running, finished, booting} {
 		mustCreate(t, before, exp)
 	}
 	p.Start("hl-job-t1-exp-running-a1-h100-0")
@@ -513,16 +512,16 @@ func TestARestartedAgentTakesOverTheInstancesAlreadyRented(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	desired := map[string]*domain.Experiment{}
-	for _, exp := range []*domain.Experiment{running, finished, booting} {
+	desired := map[string]*clusterapi.DesiredJob{}
+	for _, exp := range []*clusterapi.DesiredJob{running, finished, booting} {
 		desired[exp.ID] = exp
 		mustCreate(t, after, exp)
 	}
 	if err := after.ReapTerminal(ctx, desired); err != nil || !reflect.DeepEqual(p.Names(), rented) {
 		t.Fatalf("a pass after the restart changed what is rented: %v, %v", p.Names(), err)
 	}
-	for id, want := range map[string]workload.JobPhase{
-		"exp-running": workload.JobPhaseRunning, "exp-finished": workload.JobPhaseSucceeded, "exp-booting": workload.JobPhasePending,
+	for id, want := range map[string]clusterapi.JobPhase{
+		"exp-running": clusterapi.JobPhaseRunning, "exp-finished": clusterapi.JobPhaseSucceeded, "exp-booting": clusterapi.JobPhasePending,
 	} {
 		if phase, attempt := status(t, after, id); phase != want || attempt != desired[id].AttemptCount {
 			t.Errorf("%s: %v attempt %d", id, phase, attempt)

@@ -17,8 +17,7 @@ import (
 	"github.com/moby/moby/api/types/registry"
 	"github.com/moby/moby/client"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
@@ -293,12 +292,12 @@ func newFakeExecutor(f *fakeEngine, devicePaths ...string) *Executor {
 	}
 }
 
-func fakeJob(id, image string, accelerators int) *domain.Experiment {
-	return &domain.Experiment{
+func fakeJob(id, image string, accelerators int) *clusterapi.DesiredJob {
+	return &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: id, AgentID: "agent", ProjectID: "project",
-		AcceleratorType: fakeAcceleratorType, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		AcceleratorType: fakeAcceleratorType, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: image, CPU: "1", Memory: "1Gi", Storage: "1Gi",
 			MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorType: fakeAcceleratorType, AcceleratorCount: accelerators,
@@ -308,12 +307,12 @@ func fakeJob(id, image string, accelerators int) *domain.Experiment {
 
 // pass is one reconcile pass as agentloop runs it: compare desired with actual, create, delete,
 // reap. It fails the test if the pass waits on an operation in flight.
-func pass(t *testing.T, ctx context.Context, e *Executor, desired ...*domain.Experiment) {
+func pass(t *testing.T, ctx context.Context, e *Executor, desired ...*clusterapi.DesiredJob) {
 	t.Helper()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		byID := map[string]*domain.Experiment{}
+		byID := map[string]*clusterapi.DesiredJob{}
 		for _, exp := range desired {
 			byID[exp.ID] = exp
 		}
@@ -463,7 +462,7 @@ func testAJobInFlightGetsNoSecondOperation(t *testing.T, stoppingState string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.Phase == workload.JobPhaseGone {
+	if status.Phase == clusterapi.JobPhaseGone {
 		t.Fatal("a job still being stopped is reported as gone")
 	}
 
@@ -645,7 +644,7 @@ func TestAFailedPullIsRetriedByTheNextPass(t *testing.T) {
 	if ids, err := e.ListManagedJobsForStatus(ctx); err != nil || !slices.Contains(ids, "retried") {
 		t.Fatalf("status lists %v (err %v), want the job between its failed pull and the retry", ids, err)
 	}
-	if status, err := e.PollJobStatus(ctx, "retried"); err != nil || status.Phase != workload.JobPhasePending {
+	if status, err := e.PollJobStatus(ctx, "retried"); err != nil || status.Phase != clusterapi.JobPhasePending {
 		t.Fatalf("status = %+v (err %v), want pending", status, err)
 	}
 	reason, message, _, _, _, err := e.PollPhaseDetail(ctx, "retried", 0)
@@ -673,7 +672,7 @@ func TestAnImageThatCanNeverBePulledMakesTheJobUnrunnable(t *testing.T) {
 	eventually(t, "the failed pull has returned", idle(e, "hopeless"))
 	err := e.CreateWorkload(ctx, job, nil)
 	var unrunnable *agentexec.Unrunnable
-	if !errors.As(err, &unrunnable) || unrunnable.Reason != domain.PhaseReasonImagePullFailed || !strings.Contains(unrunnable.Why, "manifest unknown") {
+	if !errors.As(err, &unrunnable) || unrunnable.Reason != clusterapi.PhaseReasonImagePullFailed || !strings.Contains(unrunnable.Why, "manifest unknown") {
 		t.Fatalf("CreateWorkload = %v, want an Unrunnable for a failed image pull carrying the engine's error", err)
 	}
 	if got := f.count(f.pulls, "absent"); got != 1 {
@@ -754,7 +753,7 @@ func TestAJobPullingItsImageIsReportedPendingAndPlaced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.Phase != workload.JobPhasePending || status.Attempt != 3 {
+	if status.Phase != clusterapi.JobPhasePending || status.Attempt != 3 {
 		t.Fatalf("status = %s attempt %d, want pending attempt 3", status.Phase, status.Attempt)
 	}
 	reason, message, _, scheduledNodes, _, err := e.PollPhaseDetail(ctx, "pulling", status.Attempt)
@@ -781,7 +780,7 @@ func TestAJobPullingItsImageIsReportedPendingAndPlaced(t *testing.T) {
 	eventually(t, "the second pull is under way", f.blockedIn("pull other"))
 	pass(t, ctx, e, job)
 	eventually(t, "the cancelled pull has returned", idle(e, "dropped"))
-	if status, err := e.PollJobStatus(ctx, "dropped"); err != nil || status.Phase != workload.JobPhaseGone {
+	if status, err := e.PollJobStatus(ctx, "dropped"); err != nil || status.Phase != clusterapi.JobPhaseGone {
 		t.Fatalf("status of a job with no container and no operation = %s, %v, want gone", status.Phase, err)
 	}
 }
@@ -960,7 +959,7 @@ func TestAJobInAnEnvironmentPullsWithTheAnswersLogin(t *testing.T) {
 	f := newFakeEngine()
 	e := newFakeExecutor(f)
 	ctx := t.Context()
-	pull := &domain.RegistryLogin{Registry: "europe-west1-docker.pkg.dev", Username: "oauth2accesstoken", Password: "pull-token"}
+	pull := &clusterapi.RegistryLogin{Registry: "europe-west1-docker.pkg.dev", Username: "oauth2accesstoken", Password: "pull-token"}
 	inEnvironment := fakeJob("in-environment", "europe-west1-docker.pkg.dev/p/r-environments/environment@sha256:abc", 0)
 	inEnvironment.EnvironmentKey = "key-1"
 

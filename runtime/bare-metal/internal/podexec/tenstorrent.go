@@ -17,7 +17,7 @@ var tenstorrentClassDir = "/sys/class/tenstorrent"
 // tenstorrentChipArch maps a Tenstorrent PCI device ID — the kernel's own "device" sysfs
 // attribute, not anything we compute — to the chip architecture name tt-metal/ttnn and this
 // platform's DRA catalog both call it by (tenstorrent.com/chipArch, see
-// controlplane/shared/domain/accelerator.go). Same role as acceleratorname.NVIDIAProductLabel plays for
+// contract/clusterapi/accelerator.go). Same role as acceleratorname.NVIDIAProductLabel plays for
 // NVIDIA: reproducing the vendor's own naming exactly so a submitted accelerator_type matches.
 var tenstorrentChipArch = map[string]string{
 	"0xfaca": "grayskull",

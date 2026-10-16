@@ -7,7 +7,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
 // Both runtimes read runtime/shared/testdata/grace_answer.json (podexec has the twin test): one
@@ -19,9 +19,9 @@ func TestGraceFromTheSharedReconcileAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	var golden struct {
-		Experiment                 domain.Experiment `json:"experiment"`
-		OrdinaryStopGraceSeconds   int64             `json:"ordinary_stop_grace_seconds"`
-		CheckpointStopGraceSeconds int64             `json:"checkpoint_stop_grace_seconds"`
+		Experiment                 clusterapi.DesiredJob `json:"experiment"`
+		OrdinaryStopGraceSeconds   int64                 `json:"ordinary_stop_grace_seconds"`
+		CheckpointStopGraceSeconds int64                 `json:"checkpoint_stop_grace_seconds"`
 	}
 	if err := json.Unmarshal(raw, &golden); err != nil {
 		t.Fatal(err)

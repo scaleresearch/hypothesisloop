@@ -11,8 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
@@ -41,7 +40,7 @@ type captureExecutor struct {
 	deleted            []string
 	created            int
 	// pulls is the registry login each created job was handed.
-	pulls map[string]*domain.RegistryLogin
+	pulls map[string]*clusterapi.RegistryLogin
 }
 
 func (e *captureExecutor) ListManagedJobs(context.Context) ([]string, error) { return e.managed, nil }
@@ -60,13 +59,13 @@ func (e *captureExecutor) ListManagedAuxiliaryWorkloads(context.Context) ([]stri
 }
 
 // Nothing to prune is a valid implementation, not a missing one — see agentexec.Executor.
-func (e *captureExecutor) ReapTerminal(context.Context, map[string]*domain.Experiment) error {
+func (e *captureExecutor) ReapTerminal(context.Context, map[string]*clusterapi.DesiredJob) error {
 	return nil
 }
-func (e *captureExecutor) WorkloadMatchesDesired(context.Context, *domain.Experiment) (bool, error) {
+func (e *captureExecutor) WorkloadMatchesDesired(context.Context, *clusterapi.DesiredJob) (bool, error) {
 	return !e.drifted, nil
 }
-func (e *captureExecutor) CreateWorkload(_ context.Context, exp *domain.Experiment, pull *domain.RegistryLogin) error {
+func (e *captureExecutor) CreateWorkload(_ context.Context, exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if err := e.uncreatable[exp.ID]; err != nil {
@@ -74,26 +73,26 @@ func (e *captureExecutor) CreateWorkload(_ context.Context, exp *domain.Experime
 	}
 	e.created++
 	if e.pulls == nil {
-		e.pulls = map[string]*domain.RegistryLogin{}
+		e.pulls = map[string]*clusterapi.RegistryLogin{}
 	}
 	e.pulls[exp.ID] = pull
 	return nil
 }
 func (e *captureExecutor) PollJobStatus(_ context.Context, id string) (agentexec.JobStatus, error) {
 	if id != "" && id == e.unpollable {
-		return agentexec.JobStatus{Phase: workload.JobPhasePending, Attempt: workload.AttemptUnknown},
+		return agentexec.JobStatus{Phase: clusterapi.JobPhasePending, Attempt: clusterapi.AttemptUnknown},
 			fmt.Errorf("transient poll failure for %s", id)
 	}
-	return agentexec.JobStatus{Phase: workload.JobPhaseFailed, UID: "uid", Attempt: 0, StartedAt: e.startedAt, EndedAt: e.endedAt}, nil
+	return agentexec.JobStatus{Phase: clusterapi.JobPhaseFailed, UID: "uid", Attempt: 0, StartedAt: e.startedAt, EndedAt: e.endedAt}, nil
 }
-func (e *captureExecutor) ResolveAdmittedAcceleratorType(context.Context, string) (domain.AcceleratorType, string, bool, error) {
+func (e *captureExecutor) ResolveAdmittedAcceleratorType(context.Context, string) (clusterapi.AcceleratorType, string, bool, error) {
 	return "nvidia.com/gpu.product=NVIDIA-L40", "node-a", true, nil
 }
 func (e *captureExecutor) FetchLogTail(context.Context, string, int) ([]string, error) {
 	return e.logTail, nil
 }
 func (e *captureExecutor) PollPhaseDetail(context.Context, string, int) (string, string, int32, int32, string, error) {
-	return domain.PhaseReasonContainerFailed, "container exited with code 1", 0, 0, "", nil
+	return clusterapi.PhaseReasonContainerFailed, "container exited with code 1", 0, 0, "", nil
 }
 func (e *captureExecutor) GetClusterID(context.Context) (string, error) {
 	return "test-cluster-id", nil
@@ -132,7 +131,7 @@ func (e *captureExecutor) DeleteWorkload(_ context.Context, id string, _ bool) e
 // or a job that died between two status pushes is recorded as FAILED with nothing attached.
 func TestReconcilePushesFinalOutputBeforeDeletingAnUndesiredWorkload(t *testing.T) {
 	var mu sync.Mutex
-	var pushed [][]statusReportWire
+	var pushed [][]clusterapi.StatusReport
 	var deletedWhenPushed []string
 
 	exec := &captureExecutor{managed: []string{"exp-gone"}, logTail: []string{"Traceback", "RuntimeError: device crashed"}}
@@ -144,7 +143,7 @@ func TestReconcilePushesFinalOutputBeforeDeletingAnUndesiredWorkload(t *testing.
 			return
 		}
 		var body struct {
-			Reports []statusReportWire `json:"reports"`
+			Reports []clusterapi.StatusReport `json:"reports"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		mu.Lock()
@@ -181,8 +180,8 @@ func TestReconcilePushesFinalOutputBeforeDeletingAnUndesiredWorkload(t *testing.
 	if len(report.LogTail) != 2 || report.LogTail[1] != "RuntimeError: device crashed" {
 		t.Errorf("final report log tail = %v, want the crashed job's output", report.LogTail)
 	}
-	if report.Reason != domain.PhaseReasonContainerFailed {
-		t.Errorf("final report reason = %q, want %q", report.Reason, domain.PhaseReasonContainerFailed)
+	if report.Reason != clusterapi.PhaseReasonContainerFailed {
+		t.Errorf("final report reason = %q, want %q", report.Reason, clusterapi.PhaseReasonContainerFailed)
 	}
 	// The output travels in the log tail alone: the control plane adds it to the failure cause.
 	if want := "container exited with code 1"; report.Message != want {

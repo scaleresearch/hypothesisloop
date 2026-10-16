@@ -13,8 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
@@ -40,13 +39,13 @@ func TestIntegrationLifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	exp := &domain.Experiment{
+	exp := &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID:           "it-" + filepath.Base(t.TempDir()),
 		AgentID:      "agent-1",
 		ProjectID:    "proj-1",
-		CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image:      "busybox",
 			Command:    []string{"sh", "-c"},
 			Args:       []string{"echo hello && sleep 1"},
@@ -96,12 +95,12 @@ func TestIntegrationLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("PollJobStatus: %v", err)
 		}
-		if status.Phase == workload.JobPhaseSucceeded || status.Phase == workload.JobPhaseFailed {
+		if status.Phase == clusterapi.JobPhaseSucceeded || status.Phase == clusterapi.JobPhaseFailed {
 			break
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	if status.Phase != workload.JobPhaseSucceeded {
+	if status.Phase != clusterapi.JobPhaseSucceeded {
 		t.Fatalf("expected phase succeeded, got %v", status.Phase)
 	}
 
@@ -109,7 +108,7 @@ func TestIntegrationLifecycle(t *testing.T) {
 		t.Fatalf("DeleteWorkload: %v", err)
 	}
 	e.Wait()
-	if err := e.ReapTerminal(ctx, map[string]*domain.Experiment{}); err != nil {
+	if err := e.ReapTerminal(ctx, map[string]*clusterapi.DesiredJob{}); err != nil {
 		t.Fatalf("ReapTerminal: %v", err)
 	}
 	e.Wait()
@@ -117,7 +116,7 @@ func TestIntegrationLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PollJobStatus after delete: %v", err)
 	}
-	if status.Phase != workload.JobPhaseGone {
+	if status.Phase != clusterapi.JobPhaseGone {
 		t.Fatalf("expected phase gone after reap, got %v", status.Phase)
 	}
 }
@@ -159,11 +158,11 @@ func TestIntegrationCapacityReporting(t *testing.T) {
 // to partially honor distributed placement across multiple bare nodes on a single-node runtime.
 func TestIntegrationRejectsMultiNode(t *testing.T) {
 	e := newTestExecutor(t)
-	spec := domain.JobSpec{
+	spec := clusterapi.JobSpec{
 		Image: "busybox", CPU: "0.5", Memory: "64Mi", Storage: "128Mi",
 		MaxRetries: maxRetries(0), TerminationGracePeriodSeconds: int64Ptr(5), NumNodes: 2,
 	}
-	exp := &domain.Experiment{ID: "reject-num-nodes", Job: spec, Data: testDataAccess(), Token: "test-job-token"}
+	exp := &clusterapi.DesiredJob{ID: "reject-num-nodes", Job: spec, Data: testDataAccess(), Token: "test-job-token"}
 	if _, err := e.BuildContainerSpec(exp, Placement{}); err == nil {
 		t.Fatal("expected rejection for num_nodes>1")
 	}
@@ -173,12 +172,12 @@ func TestIntegrationRejectsMultiNode(t *testing.T) {
 // they permit a tainted node and ask for nothing, and a bare node has no taints.
 func TestIntegrationToleratesTolerations(t *testing.T) {
 	e := newTestExecutor(t)
-	spec := domain.JobSpec{
+	spec := clusterapi.JobSpec{
 		Image: "busybox", CPU: "0.5", Memory: "64Mi", Storage: "128Mi",
 		MaxRetries: maxRetries(0), TerminationGracePeriodSeconds: int64Ptr(5),
 		AcceleratorTolerations: []string{"x"},
 	}
-	exp := &domain.Experiment{ID: "tolerations", Job: spec, Data: testDataAccess(), Token: "test-job-token"}
+	exp := &clusterapi.DesiredJob{ID: "tolerations", Job: spec, Data: testDataAccess(), Token: "test-job-token"}
 	if _, err := e.BuildContainerSpec(exp, Placement{}); err != nil {
 		t.Fatalf("a job carrying tolerations was refused: %v", err)
 	}

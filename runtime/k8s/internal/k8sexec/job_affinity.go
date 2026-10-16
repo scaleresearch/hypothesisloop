@@ -4,7 +4,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
@@ -12,7 +12,7 @@ import (
 // hardware the resolved accelerator placement pins to, and how this job's ranks sit relative to
 // each other (JobSpec.Topology). JobSpec.NodeSelector is unrelated placement and is applied
 // directly as a pod nodeSelector, not here. Returns nil when nothing was requested.
-func (c *JobWorkloadClient) buildAffinity(experimentID string, spec domain.JobSpec, placement AcceleratorPlacement, distributed bool) *corev1.Affinity {
+func (c *JobWorkloadClient) buildAffinity(experimentID string, spec clusterapi.JobSpec, placement AcceleratorPlacement, distributed bool) *corev1.Affinity {
 	aff := &corev1.Affinity{
 		NodeAffinity:    acceleratorNodeAffinity(placement),
 		PodAffinity:     nil,

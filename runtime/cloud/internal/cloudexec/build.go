@@ -8,7 +8,7 @@ import (
 	"github.com/opencontainers/go-digest"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
@@ -31,7 +31,7 @@ func (e *Executor) isEnvironment(image string) bool {
 }
 
 // buildSpec compiles exp into the instance to rent, without its name.
-func (e *Executor) buildSpec(exp *domain.Experiment) (provider.Spec, error) {
+func (e *Executor) buildSpec(exp *clusterapi.DesiredJob) (provider.Spec, error) {
 	// EffectiveJob, never exp.Job: an admitted experiment's literal quantities and graces are in
 	// exp.ResolvedJob.
 	spec := exp.EffectiveJob()
@@ -88,7 +88,7 @@ func (e *Executor) buildSpec(exp *domain.Experiment) (provider.Spec, error) {
 
 	// A job on CPU counts its cores as units of the CPU type, which is no device to rent.
 	acceleratorType, accelerators := string(exp.AcceleratorType), group.AcceleratorCount
-	if exp.AcceleratorType.Kind() == domain.TypeKindCPU {
+	if exp.AcceleratorType.Kind() == clusterapi.TypeKindCPU {
 		acceleratorType, accelerators = "", 0
 	}
 	argv := append(append([]string(nil), command...), args...)

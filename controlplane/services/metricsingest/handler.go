@@ -1,6 +1,8 @@
 package metricsingest
 
 import (
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+
 	"context"
 	"encoding/json"
 	"fmt"
@@ -33,19 +35,12 @@ func validPushTime(at, now time.Time) error {
 	return nil
 }
 
-// PushRequest is the fresh observation payload sent by hypothesisloop-node-agent.
-type PushRequest struct {
-	Node      string      `json:"node"`
-	Timestamp time.Time   `json:"timestamp"`
-	Pods      []PodSample `json:"pods"`
-}
-
-// PodSample is a pod execution observation tagged with the experiment it belongs to
-// (from the pod's hypothesisloop.io/experiment-id label — resolved by the node-agent, not us).
-type PodSample struct {
-	PodUID       string `json:"pod_uid"`
-	ExperimentID string `json:"experiment_id,omitempty"`
-}
+// PushRequest is the fresh observation payload sent by hypothesisloop-node-agent, and PodSample
+// one pod of it, tagged by the node-agent with the experiment it belongs to.
+type (
+	PushRequest = clusterapi.NodeMetricsPush
+	PodSample   = clusterapi.PodSample
+)
 
 // Placements resolves where each named job is placed. Implemented by db.ExperimentsStore.
 type Placements interface {

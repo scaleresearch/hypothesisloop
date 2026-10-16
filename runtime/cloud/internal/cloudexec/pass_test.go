@@ -11,9 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/contract/exitline"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/fake"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentloop"
 )
@@ -33,7 +32,7 @@ type controlPlane struct {
 	reports []pushedReport
 }
 
-func newControlPlane(t *testing.T, p *fake.Provider, desired ...*domain.Experiment) *controlPlane {
+func newControlPlane(t *testing.T, p *fake.Provider, desired ...*clusterapi.DesiredJob) *controlPlane {
 	t.Helper()
 	answer, err := json.Marshal(map[string]any{"experiments": desired})
 	if err != nil {
@@ -93,7 +92,7 @@ func run(t *testing.T, e *Executor, cp *controlPlane, reconcile, status time.Dur
 }
 
 // rented puts one running, one finished and one booting job on the account.
-func rented(t *testing.T, e *Executor, p *fake.Provider) (keep, done, booting *domain.Experiment) {
+func rented(t *testing.T, e *Executor, p *fake.Provider) (keep, done, booting *clusterapi.DesiredJob) {
 	t.Helper()
 	keep, done, booting = job(t, "exp-keep", 0, 1), job(t, "exp-done", 2, 0), on(job(t, "exp-booting", 0, 1), "h100-1")
 	mustCreate(t, e, keep)
@@ -179,7 +178,7 @@ func TestAPassFollowsItsOwnChangesAndIsReadAgainForTheNext(t *testing.T) {
 	if !reflect.DeepEqual(sorted(ids), []string{"exp-2", "exp-4"}) || p.Calls("List") != 2 {
 		t.Fatalf("pass sees %v after %d List calls", ids, p.Calls("List"))
 	}
-	if phase, _ := status(t, pass, "exp-2"); phase != workload.JobPhasePending {
+	if phase, _ := status(t, pass, "exp-2"); phase != clusterapi.JobPhasePending {
 		t.Fatalf("an instance created in the pass reads as %v", phase)
 	}
 
@@ -187,14 +186,14 @@ func TestAPassFollowsItsOwnChangesAndIsReadAgainForTheNext(t *testing.T) {
 	if err := p.Destroy(ctx, p.IDs("hl-job-t1-exp-2-a0-h100-0")[0]); err != nil {
 		t.Fatal(err)
 	}
-	if phase, _ := status(t, pass, "exp-2"); phase != workload.JobPhasePending {
+	if phase, _ := status(t, pass, "exp-2"); phase != clusterapi.JobPhasePending {
 		t.Fatalf("the pass read the account again: %v", phase)
 	}
 	next, err := e.ForPass(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if phase, _ := status(t, next.(*Executor), "exp-2"); phase != workload.JobPhaseGone {
+	if phase, _ := status(t, next.(*Executor), "exp-2"); phase != clusterapi.JobPhaseGone {
 		t.Fatalf("the next pass still sees the instance: %v", phase)
 	}
 	if e.pass != nil {
@@ -218,7 +217,7 @@ func TestOneUnreadableExitedInstanceDoesNotWithholdTheClustersPush(t *testing.T)
 	reports := map[string]pushedReport{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/reconcile") {
-			answer, _ := json.Marshal(map[string]any{"experiments": []*domain.Experiment{keep, done, booting}})
+			answer, _ := json.Marshal(map[string]any{"experiments": []*clusterapi.DesiredJob{keep, done, booting}})
 			_, _ = w.Write(answer)
 			return
 		}
@@ -244,11 +243,11 @@ func TestOneUnreadableExitedInstanceDoesNotWithholdTheClustersPush(t *testing.T)
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(reports) != 3 || reports["exp-keep"].Phase != workload.JobPhaseRunning.String() || reports["exp-booting"].Phase != workload.JobPhasePending.String() {
+	if len(reports) != 3 || reports["exp-keep"].Phase != clusterapi.JobPhaseRunning.String() || reports["exp-booting"].Phase != clusterapi.JobPhasePending.String() {
 		t.Fatalf("pushed %+v", reports)
 	}
 	unread := reports["exp-done"]
-	if unread.Phase != workload.JobPhaseGone.String() || unread.Attempt == nil || *unread.Attempt != 2 {
+	if unread.Phase != clusterapi.JobPhaseGone.String() || unread.Attempt == nil || *unread.Attempt != 2 {
 		t.Fatalf("the unreadable job was pushed as %+v", unread)
 	}
 	if len(p.Names()) != 3 {
@@ -272,7 +271,7 @@ func TestTheLoopNeverReportsAPreemptedRunsExitAsTheReadmittedJobsResult(t *testi
 	})
 
 	for _, report := range cp.reported() {
-		if report.Phase == workload.JobPhaseFailed.String() || report.Phase == workload.JobPhaseSucceeded.String() {
+		if report.Phase == clusterapi.JobPhaseFailed.String() || report.Phase == clusterapi.JobPhaseSucceeded.String() {
 			t.Fatalf("pushed %+v", report)
 		}
 	}

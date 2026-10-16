@@ -12,15 +12,16 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"io"
+	"errors"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/cpclient"
 )
 
 const (
@@ -41,17 +42,6 @@ const (
 	pendingPushLimit = 1800
 )
 
-type podSample struct {
-	PodUID       string `json:"pod_uid"`
-	ExperimentID string `json:"experiment_id,omitempty"`
-}
-
-type pushPayload struct {
-	Node      string      `json:"node"`
-	Timestamp time.Time   `json:"timestamp"`
-	Pods      []podSample `json:"pods"`
-}
-
 func main() {
 	nodeName := os.Getenv("NODE_NAME")
 	if nodeName == "" {
@@ -61,11 +51,11 @@ func main() {
 	if cpURL == "" {
 		log.Fatal("HYPOTHESISLOOP_CONTROL_PLANE_URL is required")
 	}
-	endpoint := cpURL + "/internal/node-metrics"
 	token := os.Getenv("RUNTIME_TOKEN")
 	if token == "" {
 		log.Fatal("RUNTIME_TOKEN is required")
 	}
+	controlPlane := &cpclient.Client{BaseURL: cpURL + "/internal/node-metrics", Token: token, HTTP: &http.Client{Timeout: 5 * time.Second}}
 
 	ms := os.Getenv("PUSH_INTERVAL_MS")
 	n, err := strconv.Atoi(ms)
@@ -74,7 +64,7 @@ func main() {
 	}
 	interval := time.Duration(n) * time.Millisecond
 
-	log.Printf("hypothesisloop-node-agent starting: node=%s endpoint=%s interval=%s", nodeName, endpoint, interval)
+	log.Printf("hypothesisloop-node-agent starting: node=%s endpoint=%s interval=%s", nodeName, controlPlane.BaseURL, interval)
 
 	kubeClient, err := inClusterPodLister()
 	if err != nil {
@@ -83,19 +73,18 @@ func main() {
 
 	ctx := context.Background()
 
-	client := &http.Client{Timeout: 5 * time.Second}
-	var pending []pushPayload
+	var pending []clusterapi.NodeMetricsPush
 
 	for {
 		time.Sleep(interval)
 
-		// UTC explicitly: this timestamp crosses the wire into pushPayload.Timestamp and gets
+		// UTC explicitly: this timestamp crosses the wire as NodeMetricsPush.Timestamp and gets
 		// compared against control-plane-side watermarks from other nodes/processes — pin the
 		// zone here so that's never a question, even though Go's time.Time comparisons are
 		// already zone-independent given a correct absolute instant.
 		now := time.Now().UTC()
 		current := podUIDsWithCgroups()
-		samples := []podSample{}
+		samples := []clusterapi.PodSample{}
 
 		// Re-listed every tick rather than watched: a plain List is self-healing by
 		// construction (a missed update just means it self-corrects on the very next
@@ -109,7 +98,7 @@ func main() {
 
 		for uid := range current {
 			if expByUID[uid] != "" {
-				samples = append(samples, podSample{PodUID: uid, ExperimentID: expByUID[uid]})
+				samples = append(samples, clusterapi.PodSample{PodUID: uid, ExperimentID: expByUID[uid]})
 			}
 		}
 
@@ -118,9 +107,9 @@ func main() {
 				log.Printf("push buffer full; dropping the observation from %s", pending[0].Timestamp)
 				pending = pending[1:]
 			}
-			pending = append(pending, pushPayload{Node: nodeName, Timestamp: now, Pods: samples})
+			pending = append(pending, clusterapi.NodeMetricsPush{Node: nodeName, Timestamp: now, Pods: samples})
 		}
-		pending = flush(client, endpoint, token, pending)
+		pending = flush(controlPlane, pending)
 	}
 }
 
@@ -129,9 +118,9 @@ func main() {
 // observed at. It stops at the first payload the control plane could not take, which is retried
 // next tick; one it refused is dropped, since sending it again gets the same answer and would
 // hold everything behind it.
-func flush(client *http.Client, endpoint, token string, pending []pushPayload) []pushPayload {
+func flush(controlPlane *cpclient.Client, pending []clusterapi.NodeMetricsPush) []clusterapi.NodeMetricsPush {
 	for len(pending) > 0 {
-		if push(client, endpoint, token, pending[0]) == pushRetry {
+		if push(controlPlane, pending[0]) == pushRetry {
 			break
 		}
 		pending = pending[1:]
@@ -147,36 +136,20 @@ const (
 	pushRetry
 )
 
-// refusalBodyLimit bounds how much of a refusal's body is logged.
-const refusalBodyLimit = 512
-
-func push(client *http.Client, endpoint, token string, payload pushPayload) pushOutcome {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		log.Printf("push marshal error, dropping the observation from %s: %v", payload.Timestamp, err)
-		return pushRefused
+func push(controlPlane *cpclient.Client, payload clusterapi.NodeMetricsPush) pushOutcome {
+	err := controlPlane.Do(context.Background(), http.MethodPost, "", payload, nil)
+	if err == nil {
+		return pushDelivered
 	}
-	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		log.Printf("push request error: %v", err)
-		return pushRetry
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := client.Do(req)
-	if err != nil {
+	var refused *cpclient.Refusal
+	if !errors.As(err, &refused) {
 		log.Printf("push error: %v", err)
 		return pushRetry
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode/100 == 2 {
-		return pushDelivered
-	}
-	reason, _ := io.ReadAll(io.LimitReader(resp.Body, refusalBodyLimit))
-	if resp.StatusCode/100 == 4 {
-		log.Printf("push refused with status %d, dropping the observation from %s: %s", resp.StatusCode, payload.Timestamp, bytes.TrimSpace(reason))
+	if refused.Status/100 == 4 {
+		log.Printf("push refused with status %d, dropping the observation from %s: %s", refused.Status, payload.Timestamp, refused.Body)
 		return pushRefused
 	}
-	log.Printf("push failed with status %d, will retry: %s", resp.StatusCode, bytes.TrimSpace(reason))
+	log.Printf("push failed with status %d, will retry: %s", refused.Status, refused.Body)
 	return pushRetry
 }

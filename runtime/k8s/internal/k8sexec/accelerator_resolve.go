@@ -9,10 +9,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
-// An accelerator type is a fact its driver publishes (see domain.AcceleratorType) — it says what
+// An accelerator type is a fact its driver publishes (see clusterapi.AcceleratorType) — it says what
 // the hardware IS, not how Kubernetes is asked for it. This file is the single place that turns
 // the former into the latter, and it does so by reading the cluster's live inventory rather than
 // from any configured table. That is what keeps one name valid everywhere: nothing restates the
@@ -54,7 +54,7 @@ func (p AcceleratorPlacement) UsesDRA() bool { return p.DeviceClassName != "" }
 // the failure this returns instead. An ambiguous resolution (a vendor domain advertising more
 // than one extended resource on the matching nodes) also errors: silently picking one would
 // make billing and placement disagree about what ran.
-func (c *JobWorkloadClient) ResolveAcceleratorPlacement(ctx context.Context, acceleratorType domain.AcceleratorType) (AcceleratorPlacement, error) {
+func (c *JobWorkloadClient) ResolveAcceleratorPlacement(ctx context.Context, acceleratorType clusterapi.AcceleratorType) (AcceleratorPlacement, error) {
 	if err := acceleratorType.Validate(); err != nil {
 		return AcceleratorPlacement{}, fmt.Errorf("workload: %w", err)
 	}
@@ -81,7 +81,7 @@ func (c *JobWorkloadClient) ResolveAcceleratorPlacement(ctx context.Context, acc
 // as the capacity read passes over it. A ResourceSlice that cannot be read is an error, as it is
 // there. Two DeviceClasses for the type's driver are an error as well: a claim names one class,
 // and nothing says which.
-func (c *JobWorkloadClient) resolveDRAPlacement(ctx context.Context, acceleratorType domain.AcceleratorType) (AcceleratorPlacement, bool, error) {
+func (c *JobWorkloadClient) resolveDRAPlacement(ctx context.Context, acceleratorType clusterapi.AcceleratorType) (AcceleratorPlacement, bool, error) {
 	classes, err := c.dyn.Resource(deviceClassGVR).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return AcceleratorPlacement{}, false, fmt.Errorf("workload: list DRA DeviceClasses: %w", err)
@@ -114,7 +114,7 @@ func (c *JobWorkloadClient) resolveDRAPlacement(ctx context.Context, accelerator
 }
 
 // publishedBy reports whether a device of driver in slices publishes acceleratorType.
-func publishedBy(slices []unstructured.Unstructured, driver string, acceleratorType domain.AcceleratorType) (bool, error) {
+func publishedBy(slices []unstructured.Unstructured, driver string, acceleratorType clusterapi.AcceleratorType) (bool, error) {
 	for _, slice := range slices {
 		sliceDriver, found, err := unstructured.NestedString(slice.Object, "spec", "driver")
 		if err != nil || !found {
@@ -142,7 +142,7 @@ func publishedBy(slices []unstructured.Unstructured, driver string, acceleratorT
 
 // resolveDevicePluginPlacement looks for nodes carrying the type's label, then for the extended
 // resource those nodes advertise in the same vendor domain.
-func (c *JobWorkloadClient) resolveDevicePluginPlacement(ctx context.Context, acceleratorType domain.AcceleratorType) (AcceleratorPlacement, bool, error) {
+func (c *JobWorkloadClient) resolveDevicePluginPlacement(ctx context.Context, acceleratorType clusterapi.AcceleratorType) (AcceleratorPlacement, bool, error) {
 	nodes, _, err := c.listSchedulableNodesAndPods(ctx)
 	if err != nil {
 		return AcceleratorPlacement{}, false, err
@@ -246,7 +246,7 @@ func acceleratorNodeAffinity(placement AcceleratorPlacement) *corev1.NodeAffinit
 // job states its accelerators per group and leaves the top-level count at zero, so keying this on
 // the top-level count skipped resolution for every grouped job and then failed it at the guard —
 // the job was admitted, reserved capacity, and never compiled into a single Job object.
-func (c *JobWorkloadClient) resolvePlacementFor(ctx context.Context, exp *domain.Experiment) (AcceleratorPlacement, error) {
+func (c *JobWorkloadClient) resolvePlacementFor(ctx context.Context, exp *clusterapi.DesiredJob) (AcceleratorPlacement, error) {
 	if exp.EffectiveJob().TotalAccelerators() <= 0 || onCores(exp) {
 		return AcceleratorPlacement{}, nil
 	}

@@ -13,7 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
@@ -28,17 +28,17 @@ func pullTestClient(t *testing.T, objects ...runtime.Object) *JobWorkloadClient 
 	}
 }
 
-func pullTestExperiment(id, environmentKey, image string) *domain.Experiment {
-	return &domain.Experiment{
+func pullTestExperiment(id, environmentKey, image string) *clusterapi.DesiredJob {
+	return &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token", ID: id, AgentID: "agent", EnvironmentKey: environmentKey,
-		EstimatedDurationHours: 1, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{Image: image, Command: []string{"python", "train.py"}, CPU: "1", Memory: "1Gi", Storage: "1Gi",
+		EstimatedDurationHours: 1, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{Image: image, Command: []string{"python", "train.py"}, CPU: "1", Memory: "1Gi", Storage: "1Gi",
 			MaxRetries: intPtr(1), TerminationGracePeriodSeconds: int64Ptr(5)},
 	}
 }
 
-func pullLogin(password string) *domain.RegistryLogin {
-	return &domain.RegistryLogin{Registry: "europe-west1-docker.pkg.dev", Username: "oauth2accesstoken", Password: password}
+func pullLogin(password string) *clusterapi.RegistryLogin {
+	return &clusterapi.RegistryLogin{Registry: "europe-west1-docker.pkg.dev", Username: "oauth2accesstoken", Password: password}
 }
 
 // secretLogin is the login a pull Secret holds for registry.

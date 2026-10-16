@@ -8,8 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
@@ -106,7 +105,7 @@ func TestPollPhaseDetailCountsOnlyTheRequestedAttemptsPods(t *testing.T) {
 	}
 }
 
-// workload.AttemptUnknown (the executor could not resolve an attempt) must fall back to counting
+// clusterapi.AttemptUnknown (the executor could not resolve an attempt) must fall back to counting
 // every pod under the experiment, today's pre-attempt-label behaviour, rather than filtering on a
 // label value that doesn't exist.
 func TestPollPhaseDetailCountsEveryPodWhenAttemptIsUnknown(t *testing.T) {
@@ -115,7 +114,7 @@ func TestPollPhaseDetailCountsEveryPodWhenAttemptIsUnknown(t *testing.T) {
 		schedulingPodAttempt("gang-exp-0", true, "", 3),
 	)
 
-	_, _, _, scheduledNodes, _, err := c.PollPhaseDetail(context.Background(), "gang-exp", workload.AttemptUnknown)
+	_, _, _, scheduledNodes, _, err := c.PollPhaseDetail(context.Background(), "gang-exp", clusterapi.AttemptUnknown)
 	if err != nil {
 		t.Fatalf("PollPhaseDetail: %v", err)
 	}
@@ -139,7 +138,7 @@ func TestACrashedRankIsReportedBesideARankThatStillWaits(t *testing.T) {
 	c.kube = chartKube(t, waiting, crashed)
 
 	reason, message, _, scheduledNodes, _, err := c.PollPhaseDetail(context.Background(), "gang-exp", 0)
-	if err != nil || reason != domain.PhaseReasonOOMKilled || message != "container exited with code 137 (OOMKilled)" || scheduledNodes != 2 {
+	if err != nil || reason != clusterapi.PhaseReasonOOMKilled || message != "container exited with code 137 (OOMKilled)" || scheduledNodes != 2 {
 		t.Fatalf("reason %q, message %q, scheduled %d, %v, want the crash", reason, message, scheduledNodes, err)
 	}
 
@@ -168,14 +167,14 @@ func TestGetClusterIDReturnsTheKubeSystemNamespaceUID(t *testing.T) {
 }
 
 func TestAContainerThatExitedWithTheCodeUnreachableCodeIsReportedSo(t *testing.T) {
-	reason, message, _ := terminatedPhaseDetail(&corev1.ContainerStateTerminated{ExitCode: domain.ExitCodeCodeUnreachable, Reason: "Error"}, 0)
-	if reason != domain.PhaseReasonCodeUnreachable || message != "container exited with code 75 (Error)" {
+	reason, message, _ := terminatedPhaseDetail(&corev1.ContainerStateTerminated{ExitCode: clusterapi.ExitCodeCodeUnreachable, Reason: "Error"}, 0)
+	if reason != clusterapi.PhaseReasonCodeUnreachable || message != "container exited with code 75 (Error)" {
 		t.Fatalf("got %q %q", reason, message)
 	}
-	if reason, _, _ := terminatedPhaseDetail(&corev1.ContainerStateTerminated{ExitCode: 1, Reason: "Error"}, 0); reason != domain.PhaseReasonContainerFailed {
+	if reason, _, _ := terminatedPhaseDetail(&corev1.ContainerStateTerminated{ExitCode: 1, Reason: "Error"}, 0); reason != clusterapi.PhaseReasonContainerFailed {
 		t.Fatalf("exit 1 is %q", reason)
 	}
-	if reason, _, _ := terminatedPhaseDetail(&corev1.ContainerStateTerminated{ExitCode: 137, Reason: "OOMKilled"}, 0); reason != domain.PhaseReasonOOMKilled {
+	if reason, _, _ := terminatedPhaseDetail(&corev1.ContainerStateTerminated{ExitCode: 137, Reason: "OOMKilled"}, 0); reason != clusterapi.PhaseReasonOOMKilled {
 		t.Fatalf("an OOM kill is %q", reason)
 	}
 }

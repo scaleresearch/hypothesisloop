@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 	"os"
 	"reflect"
 	"sort"
@@ -12,9 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
+
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/contract/exitline"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/fake"
 )
@@ -48,9 +48,9 @@ func testConfig(p provider.Provider) Config {
 }
 
 type goldenAnswer struct {
-	Experiment                 domain.Experiment `json:"experiment"`
-	OrdinaryStopGraceSeconds   int64             `json:"ordinary_stop_grace_seconds"`
-	CheckpointStopGraceSeconds int64             `json:"checkpoint_stop_grace_seconds"`
+	Experiment                 clusterapi.DesiredJob `json:"experiment"`
+	OrdinaryStopGraceSeconds   int64                 `json:"ordinary_stop_grace_seconds"`
+	CheckpointStopGraceSeconds int64                 `json:"checkpoint_stop_grace_seconds"`
 }
 
 func readGolden(t *testing.T) goldenAnswer {
@@ -69,16 +69,16 @@ func readGolden(t *testing.T) goldenAnswer {
 // job is the shared reconcile answer's experiment under another id and attempt, with the command
 // a rented instance needs, admitted to the first slot of the shape it asks for: h100-0 with
 // accelerators, cpu-0 without.
-func job(t *testing.T, id string, attempt, accelerators int) *domain.Experiment {
+func job(t *testing.T, id string, attempt, accelerators int) *clusterapi.DesiredJob {
 	t.Helper()
 	exp := readGolden(t).Experiment
 	exp.ID, exp.AttemptCount = id, attempt
 	resolved := *exp.ResolvedJob
 	resolved.Command, resolved.Args = []string{"python", "train.py"}, []string{"--epochs", "3"}
 	resolved.Image = testImage
-	resolved.NodeSelector = map[string]string{domain.NodeSlotLabel: "cpu-0"}
+	resolved.NodeSelector = map[string]string{clusterapi.NodeSlotLabel: "cpu-0"}
 	if accelerators > 0 {
-		resolved.NodeSelector = map[string]string{domain.NodeSlotLabel: "h100-0"}
+		resolved.NodeSelector = map[string]string{clusterapi.NodeSlotLabel: "h100-0"}
 		exp.AcceleratorType, exp.AcceleratorCount = h100, accelerators
 		resolved.AcceleratorType, resolved.AcceleratorCount = h100, accelerators
 	}
@@ -87,33 +87,33 @@ func job(t *testing.T, id string, attempt, accelerators int) *domain.Experiment 
 }
 
 // on moves exp to another slot, as admission would have placed it.
-func on(exp *domain.Experiment, slot string) *domain.Experiment {
-	exp.ResolvedJob.NodeSelector = map[string]string{domain.NodeSlotLabel: slot}
+func on(exp *clusterapi.DesiredJob, slot string) *clusterapi.DesiredJob {
+	exp.ResolvedJob.NodeSelector = map[string]string{clusterapi.NodeSlotLabel: slot}
 	return exp
 }
 
 // asHanded is exp as a reconcile answer carries it to a runtime.
-func asHanded(t *testing.T, exp *domain.Experiment) *domain.Experiment {
+func asHanded(t *testing.T, exp *clusterapi.DesiredJob) *clusterapi.DesiredJob {
 	t.Helper()
-	wire, err := json.Marshal(exp.ForRuntime())
+	wire, err := json.Marshal(exp)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var handed domain.Experiment
+	var handed clusterapi.DesiredJob
 	if err := json.Unmarshal(wire, &handed); err != nil {
 		t.Fatal(err)
 	}
 	return &handed
 }
 
-func mustCreate(t *testing.T, e *Executor, exp *domain.Experiment) {
+func mustCreate(t *testing.T, e *Executor, exp *clusterapi.DesiredJob) {
 	t.Helper()
 	if err := e.CreateWorkload(context.Background(), exp, nil); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func status(t *testing.T, e *Executor, id string) (workload.JobPhase, int) {
+func status(t *testing.T, e *Executor, id string) (clusterapi.JobPhase, int) {
 	t.Helper()
 	observed, err := e.PollJobStatus(context.Background(), id)
 	if err != nil {
@@ -182,7 +182,7 @@ func TestAJobThatCannotRunAsOneWrappedInstanceIsRefused(t *testing.T) {
 	twoNodes.ResolvedJob.NumNodes = 2
 	hostMount := job(t, "exp-3", 0, 0)
 	hostMount.ResolvedJob.HostMounts = map[string]string{"/data": "/mnt/data"}
-	for _, exp := range []*domain.Experiment{noCommand, twoNodes, hostMount} {
+	for _, exp := range []*clusterapi.DesiredJob{noCommand, twoNodes, hostMount} {
 		if err := e.CreateWorkload(context.Background(), exp, nil); err == nil {
 			t.Errorf("%s was rented", exp.ID)
 		}
@@ -197,7 +197,7 @@ func TestAJobThatCannotRunAsOneWrappedInstanceIsRefused(t *testing.T) {
 // image, or none, is one it does not rent for.
 func TestAnInstanceBootsTheJobImageOrAnEnvironmentAndNothingElse(t *testing.T) {
 	e, p := newTestExecutor(t)
-	pull := &domain.RegistryLogin{Registry: "registry.test", Username: "oauth2accesstoken", Password: "pull-token"}
+	pull := &clusterapi.RegistryLogin{Registry: "registry.test", Username: "oauth2accesstoken", Password: "pull-token"}
 	if err := e.CreateWorkload(context.Background(), job(t, "exp-1", 0, 0), pull); err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func TestAJobIsRentedInExactlyTheSlotItWasAdmittedTo(t *testing.T) {
 	tooLarge := job(t, "exp-large", 0, 0)
 	tooLarge.ResolvedJob.CPU = "6"
 	otherType := on(job(t, "exp-type", 0, 1), "cpu-0")
-	for want, exp := range map[string]*domain.Experiment{
+	for want, exp := range map[string]*clusterapi.DesiredJob{
 		"without a slot":         unpinned,
 		"not configured":         on(job(t, "exp-nowhere", 0, 0), "h100-2"),
 		"still holds":            on(job(t, "exp-second", 0, 0), "h100-0"),
@@ -337,7 +337,7 @@ func TestCapacityIsTheShapesMinusWhatIsRentedRightNow(t *testing.T) {
 		}
 		available, total, byNode, labels, err := e.GetLiveAcceleratorCapacitySnapshot(ctx)
 		if err != nil || total[h100] != 2 || len(labels) != 3 || labels["h100-1"]["nvidia.com/gpu.product"] != "NVIDIA-H100" ||
-			labels["h100-1"][domain.NodeSlotLabel] != "h100-1" || labels["h100-1"][domain.NodeSlotAcceleratorsLabel] != "1" || !reflect.DeepEqual(labels["cpu-0"], map[string]string{domain.NodeSlotLabel: "cpu-0"}) {
+			labels["h100-1"][clusterapi.NodeSlotLabel] != "h100-1" || labels["h100-1"][clusterapi.NodeSlotAcceleratorsLabel] != "1" || !reflect.DeepEqual(labels["cpu-0"], map[string]string{clusterapi.NodeSlotLabel: "cpu-0"}) {
 			t.Fatalf("accelerator snapshot = %v %v %v, %v", total, byNode, labels, err)
 		}
 		nodes, err = e.GetLiveNodeResourceCapacity(ctx)
@@ -348,17 +348,17 @@ func TestCapacityIsTheShapesMinusWhatIsRentedRightNow(t *testing.T) {
 	}
 
 	cpu, accelerators, nodes, byNode := read()
-	if cpu != 20 || accelerators != 2 || nodes["h100-0"][domain.NodeResourceMemoryBytes] != 32*gib || byNode["h100-0"][h100] != 1 {
+	if cpu != 20 || accelerators != 2 || nodes["h100-0"][clusterapi.NodeResourceMemoryBytes] != 32*gib || byNode["h100-0"][h100] != 1 {
 		t.Fatalf("empty account: cpu %v, accelerators %v, nodes %v, by node %v", cpu, accelerators, nodes, byNode)
 	}
-	if !reflect.DeepEqual(byNode["cpu-0"], map[string]int64{string(domain.CPUType): 4}) || byNode["h100-0"][string(domain.CPUType)] != 0 {
+	if !reflect.DeepEqual(byNode["cpu-0"], map[string]int64{string(clusterapi.CPUType): 4}) || byNode["h100-0"][string(clusterapi.CPUType)] != 0 {
 		t.Fatalf("by node %v: want the cpu shape's 4 cores as units of the cpu type, and no cores on a slot with a device", byNode)
 	}
 
 	// A slot is one instance however small the job: a 1-cpu job leaves none of its 8.
 	mustCreate(t, e, job(t, "exp-1", 0, 1))
 	cpu, accelerators, nodes, byNode = read()
-	if cpu != 12 || accelerators != 1 || nodes["h100-0"][domain.NodeResourceCPUMillicores] != 0 || byNode["h100-0"][h100] != 0 || byNode["h100-1"][h100] != 1 {
+	if cpu != 12 || accelerators != 1 || nodes["h100-0"][clusterapi.NodeResourceCPUMillicores] != 0 || byNode["h100-0"][h100] != 0 || byNode["h100-1"][h100] != 1 {
 		t.Fatalf("one rented: cpu %v, accelerators %v, nodes %v, by node %v", cpu, accelerators, nodes, byNode)
 	}
 
@@ -372,7 +372,7 @@ func TestCapacityIsTheShapesMinusWhatIsRentedRightNow(t *testing.T) {
 	}
 
 	total, err := e.GetNodeTotalCapacity(ctx)
-	if err != nil || len(total) != 3 || total["cpu-0"][domain.NodeResourceStorageBytes] != 50*gib {
+	if err != nil || len(total) != 3 || total["cpu-0"][clusterapi.NodeResourceStorageBytes] != 50*gib {
 		t.Fatalf("node totals = %v, %v", total, err)
 	}
 }
@@ -383,13 +383,13 @@ func TestARunningJobReportsTheSlotItOccupies(t *testing.T) {
 	mustCreate(t, e, job(t, "exp-1", 0, 1))
 
 	_, _, _, scheduled, _, err := e.PollPhaseDetail(ctx, "exp-1", 0)
-	if phase, _ := status(t, e, "exp-1"); phase != workload.JobPhasePending || scheduled != 0 || err != nil {
+	if phase, _ := status(t, e, "exp-1"); phase != clusterapi.JobPhasePending || scheduled != 0 || err != nil {
 		t.Fatalf("starting instance: phase %v, scheduled %d, %v", phase, scheduled, err)
 	}
 
 	p.Start("hl-job-t1-exp-1-a0-h100-0")
 	_, _, _, scheduled, _, err = e.PollPhaseDetail(ctx, "exp-1", 0)
-	if phase, _ := status(t, e, "exp-1"); phase != workload.JobPhaseRunning || scheduled != 1 || err != nil {
+	if phase, _ := status(t, e, "exp-1"); phase != clusterapi.JobPhaseRunning || scheduled != 1 || err != nil {
 		t.Fatalf("running instance: phase %v, scheduled %d, %v", phase, scheduled, err)
 	}
 	acceleratorType, node, consistent, err := e.ResolveAdmittedAcceleratorType(ctx, "exp-1")
@@ -406,12 +406,12 @@ func TestAJobReportsTheMachineItsInstanceIsOn(t *testing.T) {
 	mustCreate(t, e, job(t, "exp-1", 0, 1))
 
 	observed, err := e.PollJobStatus(ctx, "exp-1")
-	if want := (domain.JobMachine{InstanceID: "fake-0001"}); err != nil || observed.Machine == nil || *observed.Machine != want {
+	if want := (clusterapi.JobMachine{InstanceID: "fake-0001"}); err != nil || observed.Machine == nil || *observed.Machine != want {
 		t.Fatalf("a provider that says nothing of the machine: %+v, %v, want %+v", observed.Machine, err, want)
 	}
 	p.RunsOn("hl-job-t1-exp-1-a0-h100-0", "machine-11230", "H100", "AMD EPYC 7B13", 2.25)
 	observed, err = e.PollJobStatus(ctx, "exp-1")
-	want := domain.JobMachine{InstanceID: "fake-0001", HostID: "machine-11230", AcceleratorModel: "H100", CPUModel: "AMD EPYC 7B13", PricePerHourUSD: 2.25}
+	want := clusterapi.JobMachine{InstanceID: "fake-0001", HostID: "machine-11230", AcceleratorModel: "H100", CPUModel: "AMD EPYC 7B13", PricePerHourUSD: 2.25}
 	if err != nil || observed.Machine == nil || *observed.Machine != want {
 		t.Fatalf("machine = %+v, %v, want %+v", observed.Machine, err, want)
 	}
@@ -420,17 +420,17 @@ func TestAJobReportsTheMachineItsInstanceIsOn(t *testing.T) {
 func TestTheExitLineDecidesHowAnExitedInstanceEnded(t *testing.T) {
 	for name, tc := range map[string]struct {
 		lines       []string
-		phase       workload.JobPhase
+		phase       clusterapi.JobPhase
 		reason      string
 		messagePart string
 	}{
-		"zero":     {[]string{"done", exitline.Format(0)}, workload.JobPhaseSucceeded, "", ""},
-		"non-zero": {[]string{"Traceback", exitline.Format(3), "late stderr"}, workload.JobPhaseFailed, domain.PhaseReasonContainerFailed, "code 3"},
+		"zero":     {[]string{"done", exitline.Format(0)}, clusterapi.JobPhaseSucceeded, "", ""},
+		"non-zero": {[]string{"Traceback", exitline.Format(3), "late stderr"}, clusterapi.JobPhaseFailed, clusterapi.PhaseReasonContainerFailed, "code 3"},
 		// The wrapper died with its machine: an infrastructure outcome, never the job's failure.
-		"no exit line": {[]string{"epoch 4", "Killed"}, workload.JobPhaseGone, "", ""},
-		"no output":    {nil, workload.JobPhaseGone, "", ""},
+		"no exit line": {[]string{"epoch 4", "Killed"}, clusterapi.JobPhaseGone, "", ""},
+		"no output":    {nil, clusterapi.JobPhaseGone, "", ""},
 		// A job that prints the line itself and goes on is judged by the wrapper's, the last.
-		"last line wins": {[]string{exitline.Format(0), "more", exitline.Format(7)}, workload.JobPhaseFailed, domain.PhaseReasonContainerFailed, "code 7"},
+		"last line wins": {[]string{exitline.Format(0), "more", exitline.Format(7)}, clusterapi.JobPhaseFailed, clusterapi.PhaseReasonContainerFailed, "code 7"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e, p := newTestExecutor(t)
@@ -498,7 +498,7 @@ func TestATerminationWithoutAGrantDestroysTheInstanceAtOnce(t *testing.T) {
 	if names := p.Names(); len(names) != 0 {
 		t.Fatalf("still rented: %v", names)
 	}
-	if phase, attempt := status(t, e, "exp-running"); phase != workload.JobPhaseGone || attempt != workload.AttemptUnknown {
+	if phase, attempt := status(t, e, "exp-running"); phase != clusterapi.JobPhaseGone || attempt != clusterapi.AttemptUnknown {
 		t.Fatalf("destroyed instance reads as %v attempt %d", phase, attempt)
 	}
 }
@@ -530,7 +530,7 @@ func TestInstancesOutsideTheNamespaceAreNeverListedCountedOrDestroyed(t *testing
 	if err != nil || acceleratorErr != nil || cpu != cpuTotal || available[h100] != total[h100] {
 		t.Fatalf("capacity %v/%v, %v/%v: a foreign instance took a slot", cpu, cpuTotal, available, total)
 	}
-	if phase, _ := status(t, e, "exp-1"); phase != workload.JobPhaseGone {
+	if phase, _ := status(t, e, "exp-1"); phase != clusterapi.JobPhaseGone {
 		t.Fatalf("another namespace's exp-1 was reported as %v", phase)
 	}
 
@@ -602,12 +602,12 @@ func TestAJobARentedInstanceCanNeverRunIsUnrunnableAndAFailedRentIsNot(t *testin
 		t.Fatalf("OnlyImage() = %q, want the image every instance boots", e.OnlyImage())
 	}
 	for name, c := range map[string]struct {
-		spoil func(*domain.JobSpec)
+		spoil func(*clusterapi.JobSpec)
 		says  string
 	}{
-		"host mounts": {func(s *domain.JobSpec) { s.HostMounts = map[string]string{"/data": "/data"} }, "host_mounts"},
-		"no command":  {func(s *domain.JobSpec) { s.Command, s.Args = nil, nil }, "no command"},
-		"two nodes":   {func(s *domain.JobSpec) { s.NumNodes = 2 }, "2 nodes"},
+		"host mounts": {func(s *clusterapi.JobSpec) { s.HostMounts = map[string]string{"/data": "/data"} }, "host_mounts"},
+		"no command":  {func(s *clusterapi.JobSpec) { s.Command, s.Args = nil, nil }, "no command"},
+		"two nodes":   {func(s *clusterapi.JobSpec) { s.NumNodes = 2 }, "2 nodes"},
 	} {
 		exp := job(t, "exp-"+strings.ReplaceAll(name, " ", "-"), 0, 0)
 		c.spoil(exp.ResolvedJob)
@@ -654,7 +654,7 @@ func TestLeavingAsksAgainForEveryDestroyThatFailedAndSaysWhatStaysRented(t *test
 		}
 		return nil
 	}
-	if err := e.ReapTerminal(ctx, map[string]*domain.Experiment{"exp-running": running}); !errors.Is(err, refused) {
+	if err := e.ReapTerminal(ctx, map[string]*clusterapi.DesiredJob{"exp-running": running}); !errors.Is(err, refused) {
 		t.Fatalf("ReapTerminal = %v, want the refused destroy", err)
 	}
 	err := e.Leave(ctx)
@@ -680,15 +680,15 @@ func TestLeavingAsksAgainForEveryDestroyThatFailedAndSaysWhatStaysRented(t *test
 func TestACPUShapeOffersItsCoresAndAJobOnCPURentsNoDevice(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
-	cores := string(domain.CPUType)
+	cores := string(clusterapi.CPUType)
 	available, total, _, _, err := e.GetLiveAcceleratorCapacitySnapshot(ctx)
 	if err != nil || available[cores] != 4 || total[cores] != 4 {
 		t.Fatalf("cores %d of %d, %v, want the cpu shape's 4", available[cores], total[cores], err)
 	}
 
 	exp := job(t, "exp-cores", 0, 0)
-	exp.AcceleratorType, exp.AcceleratorCount = domain.CPUType, 4
-	exp.ResolvedJob.AcceleratorType, exp.ResolvedJob.AcceleratorCount, exp.ResolvedJob.CPU = domain.CPUType, 4, "4"
+	exp.AcceleratorType, exp.AcceleratorCount = clusterapi.CPUType, 4
+	exp.ResolvedJob.AcceleratorType, exp.ResolvedJob.AcceleratorCount, exp.ResolvedJob.CPU = clusterapi.CPUType, 4, "4"
 	mustCreate(t, e, exp)
 	instances, err := p.List(ctx, "")
 	if err != nil || len(instances) != 1 {

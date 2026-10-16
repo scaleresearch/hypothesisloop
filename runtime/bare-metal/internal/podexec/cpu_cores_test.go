@@ -5,15 +5,15 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
-const cores = string(domain.CPUType)
+const cores = string(clusterapi.CPUType)
 
 // coreJob asks for cores, as submission leaves such a job: its cpu is its count.
-func coreJob(id string, count int) *domain.Experiment {
+func coreJob(id string, count int) *clusterapi.DesiredJob {
 	exp := fakeJob(id, "fast", count)
-	exp.AcceleratorType, exp.Job.AcceleratorType = domain.CPUType, domain.CPUType
+	exp.AcceleratorType, exp.Job.AcceleratorType = clusterapi.CPUType, clusterapi.CPUType
 	exp.Job.CPU = strconv.Itoa(count)
 	return exp
 }

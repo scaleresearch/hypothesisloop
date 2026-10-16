@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 )
 
@@ -162,23 +162,23 @@ func (e *Executor) configured(name string) (shape Shape, index int, ok bool) {
 // how many it has and the label its type stands for, as a device plugin would publish it, and
 // for an offerless slot that it is one, so a job waiting for it is told what it waits for.
 func (s slot) labels() map[string]string {
-	labels := map[string]string{domain.NodeSlotLabel: s.name}
+	labels := map[string]string{clusterapi.NodeSlotLabel: s.name}
 	if s.offerless() {
-		labels[domain.NodeSlotNoOfferLabel] = s.noOffer
+		labels[clusterapi.NodeSlotNoOfferLabel] = s.noOffer
 	}
 	if key, value, ok := strings.Cut(s.shape.AcceleratorType, "="); ok {
 		labels[key] = value
-		labels[domain.NodeSlotAcceleratorsLabel] = strconv.Itoa(s.shape.Accelerators)
+		labels[clusterapi.NodeSlotAcceleratorsLabel] = strconv.Itoa(s.shape.Accelerators)
 	}
 	return labels
 }
 
 // holds says whether a slot of this shape may be asked for want. Admission chose the slot and
 // sized the job to it; this keeps a job from renting more than the shape allows, whatever desired
-// state says. The type is compared the way admission compares it (domain.AcceleratorType.Is), so
+// state says. The type is compared the way admission compares it (clusterapi.AcceleratorType.Is), so
 // a job admitted to this slot is never refused here for how it cased its type.
 func (s Shape) holds(want provider.Spec) error {
-	if want.AcceleratorCount > 0 && !domain.AcceleratorType(want.AcceleratorType).Is(domain.AcceleratorType(s.AcceleratorType)) {
+	if want.AcceleratorCount > 0 && !clusterapi.AcceleratorType(want.AcceleratorType).Is(clusterapi.AcceleratorType(s.AcceleratorType)) {
 		return fmt.Errorf("accelerator type %q is not the slot's %q", want.AcceleratorType, s.AcceleratorType)
 	}
 	if want.AcceleratorCount > s.Accelerators || want.CPUMillis > s.CPUMillis || want.MemoryBytes > s.MemoryBytes || want.DiskBytes > s.StorageBytes {
@@ -259,9 +259,9 @@ func (e *Executor) GetNodeTotalCapacity(context.Context) (map[string]map[string]
 
 func nodeResources(s Shape) map[string]int64 {
 	return map[string]int64{
-		domain.NodeResourceCPUMillicores: s.CPUMillis,
-		domain.NodeResourceMemoryBytes:   s.MemoryBytes,
-		domain.NodeResourceStorageBytes:  s.StorageBytes,
+		clusterapi.NodeResourceCPUMillicores: s.CPUMillis,
+		clusterapi.NodeResourceMemoryBytes:   s.MemoryBytes,
+		clusterapi.NodeResourceStorageBytes:  s.StorageBytes,
 	}
 }
 
@@ -288,12 +288,12 @@ func (e *Executor) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (avai
 }
 
 // units is what a slot of the shape offers a job, as the type it is priced under and how many:
-// its accelerators, or for a shape with none its whole cores as units of domain.CPUType, which a
+// its accelerators, or for a shape with none its whole cores as units of clusterapi.CPUType, which a
 // job on CPU holds all of. A shape with accelerators offers no cores: a job on CPU never holds a
-// slot with a device (domain.NodeSlotLabel).
+// slot with a device (clusterapi.NodeSlotLabel).
 func (s Shape) units() (unit string, count int64) {
 	if s.Accelerators == 0 {
-		return string(domain.CPUType), s.CPUMillis / 1000
+		return string(clusterapi.CPUType), s.CPUMillis / 1000
 	}
 	return s.AcceleratorType, int64(s.Accelerators)
 }

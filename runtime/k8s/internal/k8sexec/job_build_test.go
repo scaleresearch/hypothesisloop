@@ -5,23 +5,24 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
 const testAPIURL = "http://metrics-service:8083"
 
 func TestBuildJobAddsConfiguredAcceleratorPodResources(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: testAPIURL}
-	exp := &domain.Experiment{
+	exp := &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "hugepage-test", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
-		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(3), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorPodResources: map[string]string{"hugepages-1Gi": "4Gi"},
 			// The operator requirement must not be weakened by a submitted extra resource.
@@ -44,16 +45,16 @@ func TestBuildJobAddsConfiguredAcceleratorPodResources(t *testing.T) {
 }
 
 func TestBuildJobReturnsAnErrorForAnUnparseableQuantity(t *testing.T) {
-	for field, spoil := range map[string]func(*domain.JobSpec){
-		"shm_size": func(j *domain.JobSpec) { j.ShmSize = "4GB" },
-		"memory":   func(j *domain.JobSpec) { j.Memory = "8GB" },
+	for field, spoil := range map[string]func(*clusterapi.JobSpec){
+		"shm_size": func(j *clusterapi.JobSpec) { j.ShmSize = "4GB" },
+		"memory":   func(j *clusterapi.JobSpec) { j.Memory = "8GB" },
 	} {
 		c := &JobWorkloadClient{apiURL: testAPIURL}
-		exp := &domain.Experiment{
+		exp := &clusterapi.DesiredJob{
 			Data: testDataAccess(), Token: "test-job-token",
 			ID: "bad-quantity", AgentID: "agent", ProjectID: "project",
-			EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-			Job: domain.JobSpec{
+			EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+			Job: clusterapi.JobSpec{
 				Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(3), TerminationGracePeriodSeconds: int64Ptr(5),
 			},
 		}
@@ -73,13 +74,13 @@ func TestBuildJobReturnsAnErrorForAnUnparseableQuantity(t *testing.T) {
 // stuck_pending once job_watcher's scale-up deadline passed.
 func TestBuildJobPodTemplateCarriesTheAttemptLabel(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: testAPIURL}
-	exp := &domain.Experiment{
+	exp := &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "attempt-label-test", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
 		AttemptCount:           2,
-		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(3), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 		},
@@ -104,12 +105,12 @@ func TestBuildJobPodTemplateCarriesTheAttemptLabel(t *testing.T) {
 
 func TestBuildJobAddsReadOnlyHostPathVolumeForHostMounts(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: testAPIURL}
-	exp := &domain.Experiment{
+	exp := &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "host-mount-test", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
-		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(3), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 			HostMounts: map[string]string{"/data/dataset": "/var/lib/hypothesisloop/datasets/example"},
@@ -146,9 +147,9 @@ func TestDesiredSpecHashChangesWithDesiredJob(t *testing.T) {
 	c := &JobWorkloadClient{
 		apiURL: "http://registry",
 	}
-	exp := &domain.Experiment{Data: testDataAccess(), Token: "test-job-token", ID: "hash-test", AgentID: "agent", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
-		EstimatedDurationHours: 1, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{Image: "image:v1", Env: map[string]string{"Z_LAST": "z", "A_FIRST": "a"}, CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: intPtr(1), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1, AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}}
+	exp := &clusterapi.DesiredJob{Data: testDataAccess(), Token: "test-job-token", ID: "hash-test", AgentID: "agent", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
+		EstimatedDurationHours: 1, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{Image: "image:v1", Env: map[string]string{"Z_LAST": "z", "A_FIRST": "a"}, CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: intPtr(1), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1, AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}}
 	first, err := c.BuildJob(exp, nvidiaPlacement)
 	if err != nil {
 		t.Fatal(err)
@@ -176,13 +177,13 @@ func TestDesiredSpecHashChangesWithDesiredJob(t *testing.T) {
 
 func intPtr(v int) *int { return &v }
 
-func jobWithRetries(retries int) *domain.Experiment {
-	return &domain.Experiment{
+func jobWithRetries(retries int) *clusterapi.DesiredJob {
+	return &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "retry-test", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
-		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
 			MaxRetries: intPtr(retries), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
@@ -231,9 +232,9 @@ func TestDesiredSpecHashIgnoresResolvedPlacement(t *testing.T) {
 	c := &JobWorkloadClient{
 		apiURL: "http://registry",
 	}
-	exp := &domain.Experiment{Data: testDataAccess(), Token: "test-job-token", ID: "placement-test", AgentID: "agent", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
-		EstimatedDurationHours: 1, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{Image: "image:v1", CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: intPtr(1), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1, AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}}
+	exp := &clusterapi.DesiredJob{Data: testDataAccess(), Token: "test-job-token", ID: "placement-test", AgentID: "agent", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
+		EstimatedDurationHours: 1, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{Image: "image:v1", CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: intPtr(1), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1, AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}}
 
 	first, err := c.BuildJob(exp, nvidiaPlacement)
 	if err != nil {
@@ -261,14 +262,14 @@ func TestDesiredSpecHashIgnoresResolvedPlacement(t *testing.T) {
 // stays on the experiment, which is what admission and billing read.
 func TestBuildJobInjectsPerNodeAcceleratorCountNotTheJobTotal(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: testAPIURL}
-	exp := &domain.Experiment{
+	exp := &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "per-node-count", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
 		// The job total: 4 per node across 2 nodes, exactly as submission stores it.
 		AcceleratorCount:       8,
-		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 4, NumNodes: 2,
 			AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
@@ -304,14 +305,14 @@ func envValue(job *batchv1.Job, name string) string {
 }
 
 // distributedExperiment is a gang of nodes with a retry budget the runtime must NOT try to spend.
-func distributedExperiment(nodes, maxRetries int) *domain.Experiment {
-	return &domain.Experiment{
+func distributedExperiment(nodes, maxRetries int) *clusterapi.DesiredJob {
+	return &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "gang", AgentID: "agent", ProjectID: "project",
 		AcceleratorType:        "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
 		AcceleratorCount:       nodes,
-		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
 			MaxRetries: intPtr(maxRetries), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1, NumNodes: nodes,
 			AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
@@ -384,8 +385,8 @@ func TestSingleNodeJobKeepsRuntimeRetryBudget(t *testing.T) {
 // Every job in every test gets the same durable-data access the control plane really sends,
 // because BuildJob refuses to build a job without one: a job with nowhere to save is a job whose
 // result cannot outlive it, and that must fail at build time rather than at the end of a run.
-func testDataAccess() *domain.DataAccess {
-	return &domain.DataAccess{
+func testDataAccess() *clusterapi.DataAccess {
+	return &clusterapi.DataAccess{
 		URI: "s3://hl-data/pe-1/agent/exp-1/", Shared: "s3://hl-data/pe-1/",
 		Endpoint: "http://store.invalid:9000", Region: "us-east-1",
 		AccessKeyID: "key", SecretAccessKey: "secret",
@@ -399,12 +400,12 @@ func testDataAccess() *domain.DataAccess {
 // the eval job reading it back has no way to know where that was.
 func TestBuildJobInjectsDurableDataAddressFromDesiredState(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: testAPIURL}
-	exp := &domain.Experiment{
+	exp := &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "data-env", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
-		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 		},
@@ -439,12 +440,12 @@ func TestBuildJobInjectsDurableDataAddressFromDesiredState(t *testing.T) {
 // different key means a different job, and the hash must say so.
 func TestDesiredSpecHashChangesWithDurableDataKey(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: testAPIURL}
-	exp := &domain.Experiment{
+	exp := &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "key-change", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
-		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 		},
@@ -455,7 +456,7 @@ func TestDesiredSpecHashChangesWithDurableDataKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	rekeyed := *exp
-	rekeyed.Data = &domain.DataAccess{
+	rekeyed.Data = &clusterapi.DataAccess{
 		URI: exp.Data.URI, Shared: exp.Data.Shared, Endpoint: exp.Data.Endpoint, Region: exp.Data.Region,
 		AccessKeyID: "other-key", SecretAccessKey: "other-secret",
 	}
@@ -473,12 +474,12 @@ func TestDesiredSpecHashChangesWithDurableDataKey(t *testing.T) {
 // writing to the old one forever.
 func TestDesiredSpecHashChangesWithDurableDataPrefix(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: testAPIURL}
-	exp := &domain.Experiment{
+	exp := &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "prefix-change", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
-		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 		},
@@ -506,11 +507,11 @@ func TestDesiredSpecHashChangesWithDurableDataPrefix(t *testing.T) {
 // run wastes the whole run to discover it.
 func TestBuildJobRefusesAnExperimentWithNoDurableDataAccess(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: testAPIURL}
-	exp := &domain.Experiment{
+	exp := &clusterapi.DesiredJob{
 		ID: "no-data", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
-		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 		},
@@ -523,16 +524,16 @@ func TestBuildJobRefusesAnExperimentWithNoDurableDataAccess(t *testing.T) {
 
 // groupedExperiment is the canonical heterogeneous job these tests reason about: one learner on
 // eight accelerators alongside three CPU-only actors, as one experiment.
-func groupedExperiment() *domain.Experiment {
-	return &domain.Experiment{
+func groupedExperiment() *clusterapi.DesiredJob {
+	return &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "grouped", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 8,
-		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", MaxRetries: intPtr(2), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorType: "tenstorrent.com/chipArch=blackhole",
-			Groups: []domain.JobGroup{
+			Groups: []clusterapi.JobGroup{
 				{Name: "learner", Replicas: 1, AcceleratorCount: 8, CPU: "16", Memory: "128Gi", Storage: "10Gi",
 					Command: []string{"python", "learner.py"}},
 				{Name: "actor", Replicas: 3, CPU: "1", Memory: "4Gi", Storage: "1Gi",
@@ -701,12 +702,12 @@ func TestAFailureInEitherGroupIsSetToFailThatGroupsJobOutright(t *testing.T) {
 // same group machinery, and any divergence would rewrite every job already running in a cluster.
 func TestAnUngroupedJobStillCompilesToExactlyTheJobItAlwaysDid(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: testAPIURL}
-	exp := &domain.Experiment{
+	exp := &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "ungrouped", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 4,
-		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(2), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorCount: 2, AcceleratorType: "tenstorrent.com/chipArch=blackhole", NumNodes: 2,
 			Command: []string{"python", "train.py"},
@@ -850,7 +851,7 @@ func TestEveryGroupOfADistributedJobCarriesTheCheckpointWindow(t *testing.T) {
 	exp := checkpointWindowExperiment(int64Ptr(300))
 	exp.Job.AcceleratorCount = 0
 	exp.Job.CPU, exp.Job.Memory, exp.Job.Storage = "", "", ""
-	exp.Job.Groups = []domain.JobGroup{
+	exp.Job.Groups = []clusterapi.JobGroup{
 		{Name: "learner", Replicas: 1, CPU: "2", Memory: "8Gi", Storage: "5Gi", AcceleratorCount: 1},
 		{Name: "actors", Replicas: 3, CPU: "1", Memory: "2Gi", Storage: "1Gi"},
 	}
@@ -878,13 +879,13 @@ func TestAJobWithoutResolvedGraceIsRefused(t *testing.T) {
 	}
 }
 
-func checkpointWindowExperiment(checkpointGrace *int64) *domain.Experiment {
-	return &domain.Experiment{
+func checkpointWindowExperiment(checkpointGrace *int64) *clusterapi.DesiredJob {
+	return &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "checkpoint-window", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
-		EstimatedDurationHours: 1, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 1, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
 			MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1,
 			AcceleratorType:        "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
@@ -901,14 +902,14 @@ func checkpointWindowExperiment(checkpointGrace *int64) *domain.Experiment {
 // is the only way to assert the sum rather than the two halves separately.
 func TestEveryPodOfATwoGroupJobComputesADistinctGlobalRank(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: testAPIURL}
-	exp := &domain.Experiment{
+	exp := &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "grouped-rank-test", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
-		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
-			Groups: []domain.JobGroup{
+			Groups: []clusterapi.JobGroup{
 				{Name: "writer", Replicas: 1, CPU: "250m", Memory: "128Mi", Storage: "512Mi", AcceleratorCount: 1},
 				{Name: "helper", Replicas: 2, CPU: "100m", Memory: "64Mi", Storage: "256Mi"},
 			},
@@ -971,9 +972,9 @@ func TestEveryPodOfATwoGroupJobComputesADistinctGlobalRank(t *testing.T) {
 
 func TestBuildJobSetsTheSecretEnvOnTheContainer(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: "http://registry"}
-	exp := &domain.Experiment{Data: testDataAccess(), Token: "test-job-token", ID: "secret-env-test", AgentID: "agent",
-		EstimatedDurationHours: 1, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{Image: "image:v1", Env: map[string]string{"Z_LAST": "z"}, CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5)}}
+	exp := &clusterapi.DesiredJob{Data: testDataAccess(), Token: "test-job-token", ID: "secret-env-test", AgentID: "agent",
+		EstimatedDurationHours: 1, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{Image: "image:v1", Env: map[string]string{"Z_LAST": "z"}, CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5)}}
 	plain, err := c.BuildJob(exp, AcceleratorPlacement{})
 	if err != nil {
 		t.Fatal(err)

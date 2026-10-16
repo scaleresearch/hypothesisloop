@@ -12,7 +12,7 @@ import (
 
 	"github.com/moby/moby/client"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
@@ -256,10 +256,10 @@ func (e *Executor) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (avai
 			total[label]++
 		}
 	}
-	cores := string(domain.CPUType)
+	cores := string(clusterapi.CPUType)
 	total[cores] = int64(totalCPUCores())
 	// Folded: total's label casing and a running job's requested casing can differ (see
-	// domain.AcceleratorType.MatchesLabels); joining on exact match previously undercounted
+	// clusterapi.AcceleratorType.MatchesLabels); joining on exact match previously undercounted
 	// in-use devices, letting a second job double-book an occupied one.
 	for label, count := range requests.accelerators {
 		inUse[strings.ToLower(label)] += count
@@ -313,9 +313,9 @@ func (p *passExecutor) GetLiveNodeResourceCapacity(ctx context.Context) (map[str
 		return nil, err
 	}
 	return map[string]map[string]int64{p.nodeName: {
-		domain.NodeResourceCPUMillicores: int64(cpuAvail * 1000),
-		domain.NodeResourceMemoryBytes:   ramAvail,
-		domain.NodeResourceStorageBytes:  storageAvail,
+		clusterapi.NodeResourceCPUMillicores: int64(cpuAvail * 1000),
+		clusterapi.NodeResourceMemoryBytes:   ramAvail,
+		clusterapi.NodeResourceStorageBytes:  storageAvail,
 	}}, nil
 }
 
@@ -340,9 +340,9 @@ func (p *passExecutor) GetNodeTotalCapacity(ctx context.Context) (map[string]map
 		return nil, err
 	}
 	return map[string]map[string]int64{p.nodeName: {
-		domain.NodeResourceCPUMillicores: int64(cpuTotal * 1000),
-		domain.NodeResourceMemoryBytes:   ramTotal,
-		domain.NodeResourceStorageBytes:  storageTotal,
+		clusterapi.NodeResourceCPUMillicores: int64(cpuTotal * 1000),
+		clusterapi.NodeResourceMemoryBytes:   ramTotal,
+		clusterapi.NodeResourceStorageBytes:  storageTotal,
 	}}, nil
 }
 
@@ -433,7 +433,7 @@ func (e *Executor) currentDevicesFor(ctx context.Context, experimentID string) (
 // the single-node analogue of k8sexec's ResolveAcceleratorPlacement. Placement is a function of
 // live device probes, current containers and the operations in flight, recomputed every call.
 // Only the reconcile pass calls it, so two jobs are never placed at the same time.
-func (e *Executor) resolvePlacementFor(ctx context.Context, exp *domain.Experiment) (Placement, error) {
+func (e *Executor) resolvePlacementFor(ctx context.Context, exp *clusterapi.DesiredJob) (Placement, error) {
 	// The job's TOTAL, not its top-level count: a grouped job states its accelerators per group
 	// and leaves the top-level count at zero, so keying on that resolved no devices and then
 	// failed the job in BuildContainerSpec for a placement nobody had been asked to make. This

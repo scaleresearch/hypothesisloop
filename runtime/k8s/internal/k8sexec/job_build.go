@@ -12,7 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/boundedname"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
@@ -23,7 +23,7 @@ import (
 // actually landed on.
 //
 // An annotation, not a label, because an accelerator type is a driver-published "key=value"
-// (see domain.AcceleratorType) and Kubernetes label *values* admit neither "/" nor "=" — a Job
+// (see clusterapi.AcceleratorType) and Kubernetes label *values* admit neither "/" nor "=" — a Job
 // carrying one as a label is rejected outright by the API server. Sanitizing it into a legal
 // label would break the round-trip this value exists for: the string read back has to be
 // byte-identical to the one submitted, or the admitted type no longer matches the type quota
@@ -55,7 +55,7 @@ const GraceSecondsAnnotation = workloadkeys.GraceSeconds
 // Pure: same desired state plus same placement always compiles to the same Job. It performs no
 // cluster reads of its own — callers resolve placement once (see ResolveAcceleratorPlacement) and
 // pass it in.
-func (c *JobWorkloadClient) BuildJob(exp *domain.Experiment, placement AcceleratorPlacement) (*batchv1.Job, error) {
+func (c *JobWorkloadClient) BuildJob(exp *clusterapi.DesiredJob, placement AcceleratorPlacement) (*batchv1.Job, error) {
 	jobs, err := c.BuildJobs(exp, placement)
 	if err != nil {
 		return nil, err
@@ -67,7 +67,7 @@ func (c *JobWorkloadClient) BuildJob(exp *domain.Experiment, placement Accelerat
 }
 
 // BuildJobs compiles exp into the complete set of native Jobs it runs as: exactly one for an
-// ungrouped job, and one Indexed Job per group for a heterogeneous one (see domain.JobSpec.Groups).
+// ungrouped job, and one Indexed Job per group for a heterogeneous one (see clusterapi.JobSpec.Groups).
 // The group Jobs share one headless Service (CreateWorkload creates it before any of them), so
 // every node of every group resolves every other by name and the whole set has one rendezvous.
 //
@@ -75,9 +75,9 @@ func (c *JobWorkloadClient) BuildJob(exp *domain.Experiment, placement Accelerat
 // M pods of shape B". They remain one gang: each carries the same FailJob-on-any-non-zero-exit
 // policy §1 established, and PollJobStatus reports the SET's phase, so a failure anywhere
 // ends the experiment and takes every group's pods with it.
-func (c *JobWorkloadClient) BuildJobs(exp *domain.Experiment, placement AcceleratorPlacement) ([]*batchv1.Job, error) {
+func (c *JobWorkloadClient) BuildJobs(exp *clusterapi.DesiredJob, placement AcceleratorPlacement) ([]*batchv1.Job, error) {
 	// EffectiveJob, never exp.Job directly: the job as admission resolved it lives in
-	// exp.ResolvedJob (see domain.Experiment.ResolvedJob), and nothing rewrites exp.Job in place.
+	// exp.ResolvedJob (see clusterapi.DesiredJob.ResolvedJob), and nothing rewrites exp.Job in place.
 	spec := exp.EffectiveJob()
 	if spec.MaxRetries == nil || *spec.MaxRetries < 0 {
 		return nil, fmt.Errorf("workload: CPU, memory, storage, and non-negative max_retries are required desired state")
@@ -147,7 +147,7 @@ func (c *JobWorkloadClient) BuildJobs(exp *domain.Experiment, placement Accelera
 // has exactly one plan whose group carries the top-level shape and whose name is empty, which is
 // what keeps its compiled Job byte-identical to the one this code produced before groups existed.
 type groupPlan struct {
-	group      domain.JobGroup
+	group      clusterapi.JobGroup
 	grouped    bool
 	rankOffset int
 	totalNodes int
@@ -159,7 +159,7 @@ type groupPlan struct {
 // compileJob assembles the Job. Split from BuildJob so the desired-spec hash can be taken over the
 // same assembly with placement left out, without enumerating (and later forgetting) which fields
 // placement reaches.
-func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement AcceleratorPlacement, plan groupPlan) (*batchv1.Job, error) {
+func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement AcceleratorPlacement, plan groupPlan) (*batchv1.Job, error) {
 	spec := exp.EffectiveJob()
 	group := plan.group
 
@@ -187,7 +187,7 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 	podGrace := max(terminationGrace, checkpointGrace)
 
 	priorityClass := PriorityClassGuaranteed
-	if exp.CapacityTier == domain.CapacityBurst {
+	if exp.CapacityTier == clusterapi.CapacityBurst {
 		priorityClass = PriorityClassBurst
 	}
 

@@ -8,9 +8,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/contract/exitline"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
@@ -19,8 +18,8 @@ import (
 // admission pinned it to. The attempt alone does not say so. A preempted job is readmitted under
 // the attempt it had, and the instance it left in another slot would otherwise pass for it, and
 // that instance's exit for the job's result.
-func workloadOf(exp *domain.Experiment, i instance) bool {
-	return i.experimentID == exp.ID && i.attempt == exp.AttemptCount && i.slot() == exp.EffectiveJob().NodeSelector[domain.NodeSlotLabel]
+func workloadOf(exp *clusterapi.DesiredJob, i instance) bool {
+	return i.experimentID == exp.ID && i.attempt == exp.AttemptCount && i.slot() == exp.EffectiveJob().NodeSelector[clusterapi.NodeSlotLabel]
 }
 
 // CreateWorkload rents the instance for exp's current attempt, in the slot admission placed the
@@ -35,7 +34,7 @@ func workloadOf(exp *domain.Experiment, i instance) bool {
 // delete first, and until it has, nothing is rented.
 //
 // An instance that boots an environment pulls it with pull, the reconcile answer's registry_pull.
-func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment, pull *domain.RegistryLogin) error {
+func (e *Executor) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) error {
 	spec, err := e.buildSpec(exp)
 	if err != nil {
 		return err
@@ -46,9 +45,9 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment, p
 		}
 		spec.ImageLogin = &provider.ImageLogin{Registry: pull.Registry, Username: pull.Username, Password: pull.Password}
 	}
-	name := exp.EffectiveJob().NodeSelector[domain.NodeSlotLabel]
+	name := exp.EffectiveJob().NodeSelector[clusterapi.NodeSlotLabel]
 	if name == "" {
-		return fmt.Errorf("cloudexec: experiment %s was admitted without a slot in its node selector (%s)", exp.ID, domain.NodeSlotLabel)
+		return fmt.Errorf("cloudexec: experiment %s was admitted without a slot in its node selector (%s)", exp.ID, clusterapi.NodeSlotLabel)
 	}
 	shape, index, ok := e.configured(name)
 	if !ok {
@@ -100,15 +99,15 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment, p
 // withoutOffer is what a job is told when there is no machine to rent for it: that it waits,
 // and once it has waited OfferWait since its admission, that this cluster has none for it. The
 // control plane then queues the job again, where it waits for a slot that has an offer.
-func (e *Executor) withoutOffer(exp *domain.Experiment, shape Shape) error {
+func (e *Executor) withoutOffer(exp *clusterapi.DesiredJob, shape Shape) error {
 	if exp.SubmittedAt == nil {
 		return fmt.Errorf("cloudexec: experiment %s is placed here with no admission time", exp.ID)
 	}
 	what := fmt.Sprintf("no machine to rent for shape %s (%s) within the provider's configured filters", shape.Name, cmp.Or(shape.AcceleratorType, "no accelerator"))
 	if time.Since(*exp.SubmittedAt) >= e.offerWait {
-		return &agentexec.Unrunnable{Reason: domain.PhaseReasonNoOffer, Why: fmt.Sprintf("%s in %s of asking", what, e.offerWait)}
+		return &agentexec.Unrunnable{Reason: clusterapi.PhaseReasonNoOffer, Why: fmt.Sprintf("%s in %s of asking", what, e.offerWait)}
 	}
-	return &agentexec.Waiting{Reason: domain.PhaseReasonWaitingForOffer, Why: fmt.Sprintf("%s yet; the job goes back to the queue as no_offer if none comes within %s of its admission", what, e.offerWait)}
+	return &agentexec.Waiting{Reason: clusterapi.PhaseReasonWaitingForOffer, Why: fmt.Sprintf("%s yet; the job goes back to the queue as no_offer if none comes within %s of its admission", what, e.offerWait)}
 }
 
 // overdue says i was rented longer ago than Startup and has not started its command. An instance
@@ -244,7 +243,7 @@ func (e *Executor) ListManagedAuxiliaryWorkloads(context.Context) ([]string, err
 // a lowered max_instances leaves one, is an error and is left running: it takes no slot, so it is
 // billed beside a full account, and destroying it would end a job the control plane still wants.
 // The same instance of a job that is no longer desired is deleted like any other.
-func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *domain.Experiment) (bool, error) {
+func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *clusterapi.DesiredJob) (bool, error) {
 	v, err := e.current(ctx)
 	if err != nil {
 		return false, err
@@ -291,18 +290,18 @@ func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *domain.Exper
 func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agentexec.JobStatus, error) {
 	v, err := e.current(ctx)
 	if err != nil {
-		return agentexec.JobStatus{Phase: workload.JobPhasePending, Attempt: workload.AttemptUnknown}, err
+		return agentexec.JobStatus{Phase: clusterapi.JobPhasePending, Attempt: clusterapi.AttemptUnknown}, err
 	}
 	i, ok := v.newest(experimentID)
 	if !ok {
-		return agentexec.JobStatus{Phase: workload.JobPhaseGone, Attempt: workload.AttemptUnknown}, nil
+		return agentexec.JobStatus{Phase: clusterapi.JobPhaseGone, Attempt: clusterapi.AttemptUnknown}, nil
 	}
-	observed := agentexec.JobStatus{Phase: workload.JobPhasePending, UID: i.Name, Attempt: i.attempt, Machine: &domain.JobMachine{
+	observed := agentexec.JobStatus{Phase: clusterapi.JobPhasePending, UID: i.Name, Attempt: i.attempt, Machine: &clusterapi.JobMachine{
 		InstanceID: i.ID, HostID: i.Host, AcceleratorModel: i.AcceleratorModel, CPUModel: i.CPUModel, PricePerHourUSD: i.PricePerHour,
 	}}
 	switch i.State {
 	case provider.StateRunning:
-		observed.Phase = workload.JobPhaseRunning
+		observed.Phase = clusterapi.JobPhaseRunning
 	case provider.StateExited:
 		how, _, readErr := e.ending(ctx, v, i)
 		if readErr != nil {
@@ -311,10 +310,10 @@ func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agen
 		if how != endingUnknown {
 			observed.StartedAt, observed.EndedAt, _ = exitline.FindRun(e.output(ctx, v, i).lines)
 		}
-		observed.Phase = map[ending]workload.JobPhase{
-			endingUnknown:   workload.JobPhaseGone,
-			endingSucceeded: workload.JobPhaseSucceeded,
-			endingFailed:    workload.JobPhaseFailed,
+		observed.Phase = map[ending]clusterapi.JobPhase{
+			endingUnknown:   clusterapi.JobPhaseGone,
+			endingSucceeded: clusterapi.JobPhaseSucceeded,
+			endingFailed:    clusterapi.JobPhaseFailed,
 		}[how]
 	}
 	return observed, nil
@@ -322,7 +321,7 @@ func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agen
 
 // ResolveAdmittedAcceleratorType reports the type and node of the slot experimentID's instance
 // occupies.
-func (e *Executor) ResolveAdmittedAcceleratorType(ctx context.Context, experimentID string) (domain.AcceleratorType, string, bool, error) {
+func (e *Executor) ResolveAdmittedAcceleratorType(ctx context.Context, experimentID string) (clusterapi.AcceleratorType, string, bool, error) {
 	v, err := e.current(ctx)
 	if err != nil {
 		return "", "", true, err
@@ -332,7 +331,7 @@ func (e *Executor) ResolveAdmittedAcceleratorType(ctx context.Context, experimen
 		return "", "", true, nil
 	}
 	shape, _, _ := e.configured(i.slot())
-	return domain.AcceleratorType(shape.AcceleratorType), i.slot(), true, nil
+	return clusterapi.AcceleratorType(shape.AcceleratorType), i.slot(), true, nil
 }
 
 // ReapTerminal destroys what no pass has a use for any more: every instance of one name beyond
@@ -344,7 +343,7 @@ func (e *Executor) ResolveAdmittedAcceleratorType(ctx context.Context, experimen
 // A second instance of one name is a create the vendor carried out and reported failed, or a
 // list that lagged behind a create. The lowest id is kept, which is also the one every status
 // read reports, so which of the two survives does not depend on the pass that finds them.
-func (e *Executor) ReapTerminal(ctx context.Context, desired map[string]*domain.Experiment) error {
+func (e *Executor) ReapTerminal(ctx context.Context, desired map[string]*clusterapi.DesiredJob) error {
 	v, err := e.current(ctx)
 	if err != nil {
 		return err

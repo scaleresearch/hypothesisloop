@@ -3,11 +3,11 @@ package k8sexec
 import (
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
-// nodeCores counts each node's whole cores as units of domain.CPUType: total is what platform
+// nodeCores counts each node's whole cores as units of clusterapi.CPUType: total is what platform
 // jobs can hold in all (the cores GetNodeTotalCapacity reports), free what no pod has requested.
 // Nothing is written to the cluster for it. A job on cores requests plain cpu, so the cores an
 // accelerator job holds are gone from the free count like any other.
@@ -78,6 +78,6 @@ func addRequests(into, from corev1.ResourceList) {
 
 // onCores reports whether exp holds cores and no device, so that nothing but its cpu is requested
 // for it and it needs no placement.
-func onCores(exp *domain.Experiment) bool {
-	return exp.AcceleratorType.Kind() == domain.TypeKindCPU
+func onCores(exp *clusterapi.DesiredJob) bool {
+	return exp.AcceleratorType.Kind() == clusterapi.TypeKindCPU
 }

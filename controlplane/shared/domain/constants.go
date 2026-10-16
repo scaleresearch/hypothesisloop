@@ -1,6 +1,10 @@
 package domain
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+)
 
 // MinRemainingHours is the minimum rescheduled duration after preemption (15 minutes).
 const MinRemainingHours = 0.25
@@ -177,9 +181,9 @@ func (r EvictionReason) Code() EvictionReason {
 // accelerator counts. Named here so the runtimes reporting them and admission reading them cannot
 // drift apart — a mistyped key is not an error, it is a silently absent dimension.
 const (
-	NodeResourceCPUMillicores = "cpu_millicores"
-	NodeResourceMemoryBytes   = "memory_bytes"
-	NodeResourceStorageBytes  = "storage_bytes"
+	NodeResourceCPUMillicores = clusterapi.NodeResourceCPUMillicores
+	NodeResourceMemoryBytes   = clusterapi.NodeResourceMemoryBytes
+	NodeResourceStorageBytes  = clusterapi.NodeResourceStorageBytes
 )
 
 const (
@@ -289,58 +293,21 @@ type PhaseDetail struct {
 	RestartCount int32  `json:"restart_count,omitempty"`
 }
 
+// The PhaseReason* vocabulary is the cluster contract's (clusterapi).
 const (
-	// PhaseReasonImagePullFailed: the runtime could not pull the job's image (unknown
-	// tag/repo, no registry credentials, image genuinely absent). Never self-heals without a
-	// new image being pushed or the job resubmitted with a correct reference.
-	PhaseReasonImagePullFailed = "image_pull_failed"
-	// PhaseReasonConfigError: the runtime rejected the job's own container configuration
-	// (a malformed command, an invalid resource request, a mount that cannot be satisfied).
-	// Never self-heals without the job spec changing.
-	PhaseReasonConfigError = "config_error"
-	// PhaseReasonInvalidImage: the image reference itself is malformed, not merely unpullable.
-	PhaseReasonInvalidImage = "invalid_image"
-	// PhaseReasonContainerFailed: the workload's own process exited non-zero. Deliberately NOT
-	// in NeverSelfHealsPhaseReasons — a job with retries left should use them; this reports what
-	// happened, it does not decide the job's fate.
-	PhaseReasonContainerFailed = "container_failed"
-	// PhaseReasonOOMKilled: the container was killed for exceeding its memory limit. Distinct
-	// from a plain non-zero exit because the fix is different — raise the request, not the code.
-	PhaseReasonOOMKilled = "oom_killed"
-	// PhaseReasonCodeUnreachable: the job's process ended with ExitCodeCodeUnreachable.
-	PhaseReasonCodeUnreachable = "code_unreachable"
-	// PhaseReasonNoOffer: a runtime that rents machines found none to rent for the job within
-	// the time its operator allows. Another look changes nothing the runtime has not waited for,
-	// so the placement is ended early, as EvictionNoOffer and no fault of the job's.
-	PhaseReasonNoOffer = "no_offer"
-	// PhaseReasonWaitingForOffer and PhaseReasonInstanceStarting say what a job on rented
-	// compute waits for. Neither ends it.
-	PhaseReasonWaitingForOffer  = "waiting_for_offer"
-	PhaseReasonInstanceStarting = "instance_starting"
-	// PhaseReasonInstanceUnknown: the job's rented machine is listed and its provider does not
-	// say whether the job runs on it, as when the host is unreachable. It ends nothing.
-	PhaseReasonInstanceUnknown = "instance_unknown"
-	// PhaseReasonCreateFailed: the runtime tried to create the job's workload and its platform
-	// refused, as when the runtime lacks a permission. Message is the refusal. It ends nothing:
-	// the runtime tries again each pass, and the stuck-pending deadline bounds the wait, its
-	// eviction carrying this message.
-	PhaseReasonCreateFailed = "create_failed"
+	PhaseReasonImagePullFailed  = clusterapi.PhaseReasonImagePullFailed
+	PhaseReasonConfigError      = clusterapi.PhaseReasonConfigError
+	PhaseReasonInvalidImage     = clusterapi.PhaseReasonInvalidImage
+	PhaseReasonContainerFailed  = clusterapi.PhaseReasonContainerFailed
+	PhaseReasonOOMKilled        = clusterapi.PhaseReasonOOMKilled
+	PhaseReasonCodeUnreachable  = clusterapi.PhaseReasonCodeUnreachable
+	PhaseReasonNoOffer          = clusterapi.PhaseReasonNoOffer
+	PhaseReasonWaitingForOffer  = clusterapi.PhaseReasonWaitingForOffer
+	PhaseReasonInstanceStarting = clusterapi.PhaseReasonInstanceStarting
+	PhaseReasonInstanceUnknown  = clusterapi.PhaseReasonInstanceUnknown
+	PhaseReasonCreateFailed     = clusterapi.PhaseReasonCreateFailed
+	ExitCodeCodeUnreachable     = clusterapi.ExitCodeCodeUnreachable
 )
-
-// ExitCodeCodeUnreachable is the one exit code with a meaning to the platform: hl-clone ends with
-// it when neither the platform's git credential nor the repository answered, so the job's own
-// command never started. It is EX_TEMPFAIL of sysexits.h. A job's command that ends with it says
-// the same of itself.
-const ExitCodeCodeUnreachable = 75
-
-// PhaseReasonOfExit is the reason every runtime reports a process that ended with a non-zero code
-// under.
-func PhaseReasonOfExit(code int) string {
-	if code == ExitCodeCodeUnreachable {
-		return PhaseReasonCodeUnreachable
-	}
-	return PhaseReasonContainerFailed
-}
 
 // failureCauseDetailRunes bounds the runtime's message in a failure cause: the cause is stored on
 // the job and travels in every update about it.

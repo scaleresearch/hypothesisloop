@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/contract/exitline"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/fake"
 )
@@ -66,12 +66,12 @@ func TestARunIsTimedByTheWrapperHoweverLateTheVendorReportsIt(t *testing.T) {
 
 			for read := 0; read < behind; read++ {
 				observed, err := e.PollJobStatus(ctx, "exp-1")
-				if err != nil || observed.Phase != workload.JobPhasePending || !observed.StartedAt.IsZero() || !observed.EndedAt.IsZero() {
+				if err != nil || observed.Phase != clusterapi.JobPhasePending || !observed.StartedAt.IsZero() || !observed.EndedAt.IsZero() {
 					t.Fatalf("read %d behind the vendor: %+v, %v, want a pending job with no run", read, observed, err)
 				}
 			}
 			observed, err := e.PollJobStatus(ctx, "exp-1")
-			if err != nil || observed.Phase != workload.JobPhaseSucceeded || !observed.StartedAt.Equal(started) || !observed.EndedAt.Equal(ended) {
+			if err != nil || observed.Phase != clusterapi.JobPhaseSucceeded || !observed.StartedAt.Equal(started) || !observed.EndedAt.Equal(ended) {
 				t.Fatalf("once the vendor says it exited: %+v, %v, want succeeded and the run %v to %v", observed, err, started, ended)
 			}
 		})
@@ -83,12 +83,12 @@ func TestARunIsReportedOnlyWithTheExitLineThatEndsIt(t *testing.T) {
 	run := exitline.FormatRun(started, started.Add(time.Second))
 	for name, tc := range map[string]struct {
 		lines []string
-		phase workload.JobPhase
+		phase clusterapi.JobPhase
 		timed bool
 	}{
-		"failed":                       {[]string{run, exitline.Format(3)}, workload.JobPhaseFailed, true},
-		"a wrapper that timed nothing": {[]string{exitline.Format(0)}, workload.JobPhaseSucceeded, false},
-		"a run line the job printed":   {[]string{run, "Killed"}, workload.JobPhaseGone, false},
+		"failed":                       {[]string{run, exitline.Format(3)}, clusterapi.JobPhaseFailed, true},
+		"a wrapper that timed nothing": {[]string{exitline.Format(0)}, clusterapi.JobPhaseSucceeded, false},
+		"a run line the job printed":   {[]string{run, "Killed"}, clusterapi.JobPhaseGone, false},
 	} {
 		e, p := newTestExecutor(t)
 		mustCreate(t, e, job(t, "exp-1", 0, 0))

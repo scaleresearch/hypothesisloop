@@ -11,9 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/contract/exitline"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentloop"
 )
 
@@ -35,7 +34,7 @@ func TestAnExitedInstanceKeepsItsOutcomeAndOutputUntilTheControlPlaneLetsGo(t *t
 	p.Start("hl-job-t1-exp-1-a0-cpu-0")
 	p.Exit("hl-job-t1-exp-1-a0-cpu-0", "RuntimeError: device crashed", exitline.Format(1))
 
-	desired := map[string]*domain.Experiment{"exp-1": exp}
+	desired := map[string]*clusterapi.DesiredJob{"exp-1": exp}
 	for pass := 0; pass < 2; pass++ {
 		mustCreate(t, e, exp)
 		if err := e.ReapTerminal(ctx, desired); err != nil {
@@ -50,7 +49,7 @@ func TestAnExitedInstanceKeepsItsOutcomeAndOutputUntilTheControlPlaneLetsGo(t *t
 	if err != nil || tailErr != nil || !reflect.DeepEqual(ids, []string{"exp-1"}) || tail[0] != "RuntimeError: device crashed" {
 		t.Fatalf("status set %v, tail %q, %v %v", ids, tail, err, tailErr)
 	}
-	if phase, _ := status(t, e, "exp-1"); phase != workload.JobPhaseFailed {
+	if phase, _ := status(t, e, "exp-1"); phase != clusterapi.JobPhaseFailed {
 		t.Fatalf("phase = %v", phase)
 	}
 
@@ -116,7 +115,7 @@ func TestTheSharedLoopCapturesARunningInstancesOutputBeforeDestroyingIt(t *testi
 		t.Fatalf("pushes while the instance was still rented: %+v", captured)
 	}
 	got := captured[0]
-	if got.ExperimentID != "exp-gone" || got.Phase != workload.JobPhaseRunning.String() || got.Attempt == nil || *got.Attempt != 3 ||
+	if got.ExperimentID != "exp-gone" || got.Phase != clusterapi.JobPhaseRunning.String() || got.Attempt == nil || *got.Attempt != 3 ||
 		!reflect.DeepEqual(got.LogTail, []string{"epoch 7 loss 0.31"}) {
 		t.Fatalf("final capture = %+v", got)
 	}

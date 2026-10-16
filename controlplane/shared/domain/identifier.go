@@ -6,6 +6,8 @@ import (
 	"regexp"
 
 	"github.com/google/uuid"
+
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
 // identifierPattern is the shape every id the platform accepts from outside must have: RFC1123,
@@ -21,7 +23,7 @@ import (
 var identifierPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 // MaxIdentifierLength bounds an id at the DNS label limit Kubernetes object names are built from.
-const MaxIdentifierLength = 63
+const MaxIdentifierLength = clusterapi.MaxIdentifierLength
 
 // ValidateIdentifier reports whether value is usable as an externally-supplied id, naming the
 // field in the error so the submitter can act on it. kind is the field name as the API spells it.

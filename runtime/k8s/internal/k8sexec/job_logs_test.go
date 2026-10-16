@@ -8,7 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
 func pod(name string, ageMinutes int, exitCode *int32) corev1.Pod {
@@ -89,8 +89,8 @@ func TestTerminatedExitCodeReportsWorstContainer(t *testing.T) {
 func TestTerminatedPhaseDetailReportsExitCode(t *testing.T) {
 	reason, message, restarts := terminatedPhaseDetail(
 		&corev1.ContainerStateTerminated{ExitCode: 1, Reason: "Error"}, 2)
-	if reason != domain.PhaseReasonContainerFailed {
-		t.Errorf("reason = %q, want %q", reason, domain.PhaseReasonContainerFailed)
+	if reason != clusterapi.PhaseReasonContainerFailed {
+		t.Errorf("reason = %q, want %q", reason, clusterapi.PhaseReasonContainerFailed)
 	}
 	if !strings.Contains(message, "code 1") || !strings.Contains(message, "Error") {
 		t.Errorf("message = %q, want it to name the exit code and reason", message)
@@ -104,20 +104,11 @@ func TestTerminatedPhaseDetailReportsExitCode(t *testing.T) {
 func TestTerminatedPhaseDetailDistinguishesOOM(t *testing.T) {
 	reason, message, _ := terminatedPhaseDetail(
 		&corev1.ContainerStateTerminated{ExitCode: 137, Reason: "OOMKilled"}, 0)
-	if reason != domain.PhaseReasonOOMKilled {
-		t.Errorf("reason = %q, want %q", reason, domain.PhaseReasonOOMKilled)
+	if reason != clusterapi.PhaseReasonOOMKilled {
+		t.Errorf("reason = %q, want %q", reason, clusterapi.PhaseReasonOOMKilled)
 	}
 	if !strings.Contains(message, "137") {
 		t.Errorf("message = %q, want the exit code", message)
-	}
-}
-
-// Reporting a failure must not by itself condemn a job that still has retries left.
-func TestContainerFailureDoesNotForceEarlyEviction(t *testing.T) {
-	for _, r := range []string{domain.PhaseReasonContainerFailed, domain.PhaseReasonOOMKilled} {
-		if domain.NeverSelfHealsPhaseReasons[r] {
-			t.Errorf("%s must not be in NeverSelfHealsPhaseReasons — it would evict before retries run", r)
-		}
 	}
 }
 

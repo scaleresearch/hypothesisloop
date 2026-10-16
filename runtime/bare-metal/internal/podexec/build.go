@@ -12,7 +12,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 )
@@ -147,9 +147,9 @@ type Placement struct {
 // (see hugepageMountsFor), a host mount that is not there, and more than one node.
 // accelerator_tolerations ask for nothing: they permit landing on a tainted node, and a bare
 // node has no taints, so a job that carries them runs as it would without.
-func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placement) (containerSpec, error) {
+func (e *Executor) BuildContainerSpec(exp *clusterapi.DesiredJob, placement Placement) (containerSpec, error) {
 	// EffectiveJob, never exp.Job directly: the job as admission resolved it lives in
-	// exp.ResolvedJob (see domain.Experiment.ResolvedJob).
+	// exp.ResolvedJob (see clusterapi.DesiredJob.ResolvedJob).
 	spec := exp.EffectiveJob()
 	// Nodes() sums a grouped job's replicas, so a heterogeneous job is refused here by exactly the
 	// same rule and the same error a num_nodes > 1 job already gets. Groups do not make this

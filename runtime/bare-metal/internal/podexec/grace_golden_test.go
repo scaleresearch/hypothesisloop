@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
 // Both runtimes read runtime/shared/testdata/grace_answer.json (k8sexec has the twin test): one
@@ -17,9 +17,9 @@ func TestGraceFromTheSharedReconcileAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	var golden struct {
-		Experiment                 domain.Experiment `json:"experiment"`
-		OrdinaryStopGraceSeconds   int64             `json:"ordinary_stop_grace_seconds"`
-		CheckpointStopGraceSeconds int64             `json:"checkpoint_stop_grace_seconds"`
+		Experiment                 clusterapi.DesiredJob `json:"experiment"`
+		OrdinaryStopGraceSeconds   int64                 `json:"ordinary_stop_grace_seconds"`
+		CheckpointStopGraceSeconds int64                 `json:"checkpoint_stop_grace_seconds"`
 	}
 	if err := json.Unmarshal(raw, &golden); err != nil {
 		t.Fatal(err)

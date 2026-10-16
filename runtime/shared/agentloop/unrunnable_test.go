@@ -12,7 +12,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
@@ -23,7 +23,7 @@ type controlPlane struct {
 	// registryPull is the answer's registry_pull, as JSON. Empty sends none.
 	registryPull string
 	reconcile    []map[string]any
-	statuses     [][]statusReportWire
+	statuses     [][]clusterapi.StatusReport
 }
 
 func (c *controlPlane) serve(t *testing.T) *httptest.Server {
@@ -44,7 +44,7 @@ func (c *controlPlane) serve(t *testing.T) *httptest.Server {
 			return
 		}
 		var sent struct {
-			Reports []statusReportWire `json:"reports"`
+			Reports []clusterapi.StatusReport `json:"reports"`
 		}
 		_ = json.Unmarshal(body, &sent)
 		c.statuses = append(c.statuses, sent.Reports)
@@ -54,7 +54,7 @@ func (c *controlPlane) serve(t *testing.T) *httptest.Server {
 	return server
 }
 
-func (c *controlPlane) lastStatus() []statusReportWire {
+func (c *controlPlane) lastStatus() []clusterapi.StatusReport {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.statuses) == 0 {
@@ -94,25 +94,19 @@ func TestAJobTheRuntimeDidNotCreateIsReportedWithItsReason(t *testing.T) {
 		t.Fatalf("logged %q over three passes, want each refused create once", logged.lines)
 	}
 	agent.reportStatuses(ctx, exec)
-	reports := map[string]statusReportWire{}
+	reports := map[string]clusterapi.StatusReport{}
 	for _, report := range cp.lastStatus() {
 		reports[report.ExperimentID] = report
 	}
 	refused, reported := reports["exp-refused"]
-	if !reported || refused.Phase != "pending" || refused.Reason != domain.PhaseReasonConfigError ||
+	if !reported || refused.Phase != "pending" || refused.Reason != clusterapi.PhaseReasonConfigError ||
 		refused.Message != "the job asks for host_mounts, and a rented instance has none" || refused.Attempt == nil || *refused.Attempt != 2 {
 		t.Fatalf("the refused job was reported as %+v", refused)
 	}
-	if !domain.NeverSelfHealsPhaseReasons[refused.Reason] {
-		t.Fatalf("reason %q is not one the control plane ends a job for", refused.Reason)
-	}
 	failed, reported := reports["exp-later"]
-	if !reported || failed.Phase != "pending" || failed.Reason != domain.PhaseReasonCreateFailed ||
+	if !reported || failed.Phase != "pending" || failed.Reason != clusterapi.PhaseReasonCreateFailed ||
 		failed.Message != exec.uncreatable["exp-later"].Error() || failed.Attempt == nil || *failed.Attempt != 1 {
 		t.Fatalf("the job whose create failed was reported as %+v", failed)
-	}
-	if domain.NeverSelfHealsPhaseReasons[failed.Reason] {
-		t.Fatalf("reason %q ends the job, want it to wait for the next try", failed.Reason)
 	}
 	if len(reports) != 4 {
 		t.Fatalf("reported %v, want the two running jobs and the two not created", reports)
@@ -141,7 +135,7 @@ func TestARefusedCreateIsNotReportedOverAWorkloadThatExists(t *testing.T) {
 	}
 	exec.managed = []string{"exp-a"}
 	agent.reportStatuses(context.Background(), exec)
-	if got := cp.lastStatus(); len(got) != 1 || got[0].Reason == domain.PhaseReasonConfigError {
+	if got := cp.lastStatus(); len(got) != 1 || got[0].Reason == clusterapi.PhaseReasonConfigError {
 		t.Fatalf("reported %+v, want the workload's own status once", got)
 	}
 }
@@ -196,7 +190,7 @@ type refreshingExecutor struct {
 	refreshed map[string]string
 }
 
-func (e *refreshingExecutor) RefreshPull(_ context.Context, exp *domain.Experiment, pull *domain.RegistryLogin) error {
+func (e *refreshingExecutor) RefreshPull(_ context.Context, exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) error {
 	e.refreshed[exp.ID] = pull.Password
 	return nil
 }

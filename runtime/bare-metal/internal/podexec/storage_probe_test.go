@@ -11,7 +11,7 @@ import (
 	"github.com/moby/moby/api/types/storage"
 	"github.com/moby/moby/client"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
 // probedEngine creates containers unless told to refuse a size or every create, and keeps count
@@ -112,12 +112,12 @@ func TestAProbeImageTheEngineKeepsFailsTheProbeAndIsNamed(t *testing.T) {
 	}
 }
 
-func sizedExperiment() *domain.Experiment {
-	return &domain.Experiment{
+func sizedExperiment() *clusterapi.DesiredJob {
+	return &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "sized", AgentID: "agent", ProjectID: "project",
-		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", CPU: "1", Memory: "1Gi", Storage: "128Mi",
 			MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 		},

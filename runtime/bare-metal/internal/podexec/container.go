@@ -13,7 +13,7 @@ import (
 	"github.com/moby/moby/api/types/registry"
 	"github.com/moby/moby/client"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
 // containerInfo is the subset of a container.Summary this runtime reads. The engine is the
@@ -251,7 +251,7 @@ func (e *Executor) removeContainer(ctx context.Context, name string) error {
 // just the IfNotPresent policy every other image in this repo already runs under.
 // registryAuth is what the engine pulls exp's image with: pull, encoded as the engine takes it,
 // for a job that runs in an environment, and nothing for one on a public job image.
-func registryAuth(exp *domain.Experiment, pull *domain.RegistryLogin) (string, error) {
+func registryAuth(exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) (string, error) {
 	if exp.EnvironmentKey == "" {
 		return "", nil
 	}

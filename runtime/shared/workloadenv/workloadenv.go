@@ -9,7 +9,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
 type Var struct{ Name, Value string }
@@ -25,7 +25,7 @@ type Var struct{ Name, Value string }
 // without the attempt in desired state the rebuilt workload is identical to the terminal one
 // still in the cluster, the reconciler reads that dead workload as matching desired state, and
 // nothing is recreated.
-func Platform(exp *domain.Experiment, group domain.JobGroup, apiURL string, reach func(url string) string) ([]Var, error) {
+func Platform(exp *clusterapi.DesiredJob, group clusterapi.JobGroup, apiURL string, reach func(url string) string) ([]Var, error) {
 	// Durable data is desired state: the control plane computes the address and hands it over
 	// with the credentials. A job that silently runs without a place to save is worse than one
 	// that never starts.
@@ -87,7 +87,7 @@ func allottedCPUs(cpu string) (string, error) {
 // Job returns the job's own environment with the group's entries over it: the job-level map says
 // what is true of every node, the group's what is true of its role. The job's secret_env is part
 // of it; admission refused a name the job or a group also sets in the open.
-func Job(spec domain.JobSpec, group domain.JobGroup) map[string]string {
+func Job(spec clusterapi.JobSpec, group clusterapi.JobGroup) map[string]string {
 	env := make(map[string]string, len(spec.Env)+len(group.Env)+len(spec.SecretEnv))
 	for k, v := range spec.Env {
 		env[k] = v
@@ -103,7 +103,7 @@ func Job(spec domain.JobSpec, group domain.JobGroup) map[string]string {
 
 // Merged is the whole environment of one node of group as one map: the job's own entries, and the
 // platform's for every name the job did not set itself.
-func Merged(exp *domain.Experiment, spec domain.JobSpec, group domain.JobGroup, apiURL string, reach func(url string) string) (map[string]string, error) {
+func Merged(exp *clusterapi.DesiredJob, spec clusterapi.JobSpec, group clusterapi.JobGroup, apiURL string, reach func(url string) string) (map[string]string, error) {
 	platform, err := Platform(exp, group, apiURL, reach)
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func Merged(exp *domain.Experiment, spec domain.JobSpec, group domain.JobGroup, 
 
 // Command is the process one node of group runs: the group's own when it names one, the job's
 // shared entrypoint otherwise. An ungrouped job's one group carries the job-level values.
-func Command(spec domain.JobSpec, group domain.JobGroup) (command, args []string) {
+func Command(spec clusterapi.JobSpec, group clusterapi.JobGroup) (command, args []string) {
 	if len(group.Command) > 0 {
 		return group.Command, group.Args
 	}

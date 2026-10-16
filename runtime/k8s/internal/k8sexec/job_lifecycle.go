@@ -15,13 +15,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
-func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *domain.Experiment, pull *domain.RegistryLogin) error {
+func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) error {
 	// Reconcile calls this only when no live Job exists for the experiment, so any pod still
 	// carrying its identity belongs to the previous generation and may be inside its checkpoint
 	// window. A new pod started now would read the store before that checkpoint lands, restart
@@ -70,7 +69,7 @@ func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *domain.Expe
 // createJob creates one compiled Job, resolving a collision with a previous generation of the
 // same name. Split out because a grouped experiment creates several and each one meets the same
 // stale-object question independently.
-func (c *JobWorkloadClient) createJob(ctx context.Context, exp *domain.Experiment, job *batchv1.Job) error {
+func (c *JobWorkloadClient) createJob(ctx context.Context, exp *clusterapi.DesiredJob, job *batchv1.Job) error {
 	if len(job.Spec.Template.Spec.ResourceClaims) > 0 {
 		// Must exist before the Job's pod is created (async, via the Job controller) or the
 		// pod fails to schedule — same reason ensureHeadlessService runs before Job Create.
@@ -134,7 +133,7 @@ func existingJobMatchesDesired(existing, desired *batchv1.Job, experimentID stri
 // pods need for the rendezvous name (see HYPOTHESISLOOP_MASTER_ADDR in BuildJob) — named after
 // the experiment and selecting its pods by experiment-id label alone, so ONE Service covers every
 // node of every group and any node can resolve any other.
-func (c *JobWorkloadClient) ensureHeadlessService(ctx context.Context, exp *domain.Experiment, job *batchv1.Job) error {
+func (c *JobWorkloadClient) ensureHeadlessService(ctx context.Context, exp *clusterapi.DesiredJob, job *batchv1.Job) error {
 	labels := map[string]string{
 		workloadkeys.ManagedBy:    workloadkeys.ManagedByValue,
 		workloadkeys.ExperimentID: exp.ID,
@@ -253,7 +252,7 @@ func (c *JobWorkloadClient) ListManagedJobsForStatus(ctx context.Context) ([]str
 // For a grouped experiment every group's Job must match, and the set of Jobs present must be
 // exactly the set desired: an extra Job left behind by a spec that used to have three groups is
 // as much a drift as a changed resource request, and reconcile has to delete and rebuild.
-func (c *JobWorkloadClient) WorkloadMatchesDesired(ctx context.Context, exp *domain.Experiment) (bool, error) {
+func (c *JobWorkloadClient) WorkloadMatchesDesired(ctx context.Context, exp *clusterapi.DesiredJob) (bool, error) {
 	placement, err := c.resolvePlacementFor(ctx, exp)
 	if err != nil {
 		return false, err
@@ -478,9 +477,9 @@ func (c *JobWorkloadClient) GetLiveNodeResourceCapacity(ctx context.Context) (ma
 		name     corev1.ResourceName
 		quantity func(resource.Quantity) int64
 	}{
-		{domain.NodeResourceCPUMillicores, corev1.ResourceCPU, func(q resource.Quantity) int64 { return q.MilliValue() }},
-		{domain.NodeResourceMemoryBytes, corev1.ResourceMemory, func(q resource.Quantity) int64 { return q.Value() }},
-		{domain.NodeResourceStorageBytes, corev1.ResourceEphemeralStorage, func(q resource.Quantity) int64 { return q.Value() }},
+		{clusterapi.NodeResourceCPUMillicores, corev1.ResourceCPU, func(q resource.Quantity) int64 { return q.MilliValue() }},
+		{clusterapi.NodeResourceMemoryBytes, corev1.ResourceMemory, func(q resource.Quantity) int64 { return q.Value() }},
+		{clusterapi.NodeResourceStorageBytes, corev1.ResourceEphemeralStorage, func(q resource.Quantity) int64 { return q.Value() }},
 	}
 	out := make(map[string]map[string]int64, len(nodes))
 	for _, n := range nodes {
@@ -519,7 +518,7 @@ func (c *JobWorkloadClient) GetLiveNodeResourceCapacity(ctx context.Context) (ma
 // double-count capacity that is permanently gone.
 //
 // Platform job pods themselves are deliberately NOT subtracted, unlike GetLiveNodeResourceCapacity's
-// free-capacity view: this is the stable per-node denominator fair-share math (domain.FairShare)
+// free-capacity view: this is the stable per-node denominator fair-share math of the control plane
 // needs, and it must report the same number whether or not a platform job happens to be running
 // there right now — a platform job coming and going must not move its own node's fair-share base.
 func (c *JobWorkloadClient) GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]int64, error) {
@@ -532,9 +531,9 @@ func (c *JobWorkloadClient) GetNodeTotalCapacity(ctx context.Context) (map[strin
 		name     corev1.ResourceName
 		quantity func(resource.Quantity) int64
 	}{
-		{domain.NodeResourceCPUMillicores, corev1.ResourceCPU, func(q resource.Quantity) int64 { return q.MilliValue() }},
-		{domain.NodeResourceMemoryBytes, corev1.ResourceMemory, func(q resource.Quantity) int64 { return q.Value() }},
-		{domain.NodeResourceStorageBytes, corev1.ResourceEphemeralStorage, func(q resource.Quantity) int64 { return q.Value() }},
+		{clusterapi.NodeResourceCPUMillicores, corev1.ResourceCPU, func(q resource.Quantity) int64 { return q.MilliValue() }},
+		{clusterapi.NodeResourceMemoryBytes, corev1.ResourceMemory, func(q resource.Quantity) int64 { return q.Value() }},
+		{clusterapi.NodeResourceStorageBytes, corev1.ResourceEphemeralStorage, func(q resource.Quantity) int64 { return q.Value() }},
 	}
 	out := make(map[string]map[string]int64, len(nodes))
 	for _, n := range nodes {
@@ -660,7 +659,7 @@ func (c *JobWorkloadClient) GetLiveAcceleratorCapacitySnapshot(ctx context.Conte
 		}
 	}
 	freeCores, totalCores := nodeCores(nodes, pods)
-	cores := string(domain.CPUType)
+	cores := string(clusterapi.CPUType)
 	for _, node := range nodes {
 		if byNode[node.Name] == nil {
 			byNode[node.Name] = make(map[string]int64)
@@ -797,15 +796,15 @@ func (c *JobWorkloadClient) DeleteWorkload(ctx context.Context, experimentID str
 func (c *JobWorkloadClient) PollJobStatus(ctx context.Context, experimentID string) (agentexec.JobStatus, error) {
 	jobs, err := c.managedJobsFor(ctx, experimentID)
 	if err != nil {
-		return agentexec.JobStatus{Phase: workload.JobPhasePending, Attempt: workload.AttemptUnknown}, err
+		return agentexec.JobStatus{Phase: clusterapi.JobPhasePending, Attempt: clusterapi.AttemptUnknown}, err
 	}
 	if len(jobs) == 0 {
-		return agentexec.JobStatus{Phase: workload.JobPhaseGone, Attempt: workload.AttemptUnknown}, nil
+		return agentexec.JobStatus{Phase: clusterapi.JobPhaseGone, Attempt: clusterapi.AttemptUnknown}, nil
 	}
 	// managedJobsFor is one experiment's Jobs, so every group carries the same attempt; the
 	// first is the workload's. Unparseable or absent reads as unknown rather than as a number:
 	// the control plane fences on it, and a wrong number is worse than no number.
-	attempt := workload.AttemptUnknown
+	attempt := clusterapi.AttemptUnknown
 	if raw, ok := jobs[0].Labels[workloadkeys.Attempt]; ok {
 		if n, err := strconv.Atoi(raw); err == nil {
 			attempt = n
@@ -822,43 +821,43 @@ func (c *JobWorkloadClient) PollJobStatus(ctx context.Context, experimentID stri
 	succeeded, running := 0, 0
 	for i := range jobs {
 		switch jobPhase(&jobs[i]) {
-		case workload.JobPhaseFailed:
-			observed.Phase = workload.JobPhaseFailed
+		case clusterapi.JobPhaseFailed:
+			observed.Phase = clusterapi.JobPhaseFailed
 			return observed, nil
-		case workload.JobPhaseSucceeded:
+		case clusterapi.JobPhaseSucceeded:
 			succeeded++
-		case workload.JobPhaseRunning:
+		case clusterapi.JobPhaseRunning:
 			running++
 		}
 	}
 	switch {
 	case succeeded == len(jobs):
-		observed.Phase = workload.JobPhaseSucceeded
+		observed.Phase = clusterapi.JobPhaseSucceeded
 	case running > 0:
-		observed.Phase = workload.JobPhaseRunning
+		observed.Phase = clusterapi.JobPhaseRunning
 	default:
-		observed.Phase = workload.JobPhasePending
+		observed.Phase = clusterapi.JobPhasePending
 	}
 	return observed, nil
 }
 
 // jobPhase maps one native Job to a platform phase. Never Gone — a Job that was handed to this
 // function exists; absence is the caller's question, not this one's.
-func jobPhase(job *batchv1.Job) workload.JobPhase {
+func jobPhase(job *batchv1.Job) clusterapi.JobPhase {
 	// Check the native JobComplete condition before falling back to a raw Succeeded count:
 	// for Indexed jobs with a SuccessPolicy, a non-master worker finishing first bumps
 	// Status.Succeeded without the job actually being done.
 	for _, cond := range job.Status.Conditions {
 		if cond.Type == batchv1.JobComplete && cond.Status == corev1.ConditionTrue {
-			return workload.JobPhaseSucceeded
+			return clusterapi.JobPhaseSucceeded
 		}
 		if cond.Type == batchv1.JobFailed && cond.Status == corev1.ConditionTrue {
-			return workload.JobPhaseFailed
+			return clusterapi.JobPhaseFailed
 		}
 	}
 	if job.Spec.CompletionMode == nil || *job.Spec.CompletionMode != batchv1.IndexedCompletion {
 		if job.Status.Succeeded > 0 {
-			return workload.JobPhaseSucceeded
+			return clusterapi.JobPhaseSucceeded
 		}
 	}
 	// Ready, not Active. Active counts a pod from the moment it exists, so a pod sitting in
@@ -873,9 +872,9 @@ func jobPhase(job *batchv1.Job) workload.JobPhase {
 	// A nil Ready is a cluster that does not populate the field at all: no evidence of execution,
 	// so the job is reported as not yet running rather than assumed to be.
 	if job.Status.Ready != nil && *job.Status.Ready > 0 {
-		return workload.JobPhaseRunning
+		return clusterapi.JobPhaseRunning
 	}
-	return workload.JobPhasePending
+	return clusterapi.JobPhasePending
 }
 
 // ResolveAdmittedAcceleratorType inspects experimentID's currently-scheduled pod(s) and returns the accelerator
@@ -896,7 +895,7 @@ func jobPhase(job *batchv1.Job) workload.JobPhase {
 // Returns ("", "", true, nil) if no pod is scheduled yet. node can be non-empty even when
 // acceleratorType is "" (e.g. a non-accelerator/dev cluster) — reported independently since
 // node attribution is meaningful even without a recognized accelerator type.
-func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, experimentID string) (acceleratorType domain.AcceleratorType, node string, consistent bool, err error) {
+func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, experimentID string) (acceleratorType clusterapi.AcceleratorType, node string, consistent bool, err error) {
 	pods, err := c.kube.CoreV1().Pods(HypothesisLoopNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=%s", workloadkeys.ExperimentID, experimentID),
 	})
@@ -923,7 +922,7 @@ func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, 
 	}
 	node = primary.Spec.NodeName
 
-	acceleratorType = domain.AcceleratorType(primary.Annotations[AcceleratorTypeAnnotation])
+	acceleratorType = clusterapi.AcceleratorType(primary.Annotations[AcceleratorTypeAnnotation])
 	if acceleratorType == "" {
 		return "", node, true, nil
 	}
@@ -934,7 +933,7 @@ func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, 
 		if p.Spec.NodeName == "" {
 			continue
 		}
-		if t := domain.AcceleratorType(p.Annotations[AcceleratorTypeAnnotation]); t != acceleratorType {
+		if t := clusterapi.AcceleratorType(p.Annotations[AcceleratorTypeAnnotation]); t != acceleratorType {
 			consistent = false
 		}
 	}
@@ -966,6 +965,6 @@ func (c *JobWorkloadClient) GetClusterID(ctx context.Context) (string, error) {
 
 // ReapTerminal has nothing to do here. A finished k8s Job is removed by the reconcile pass that
 // finds it undesired; unlike a container engine, k8s keeps no separate terminal record behind it.
-func (c *JobWorkloadClient) ReapTerminal(context.Context, map[string]*domain.Experiment) error {
+func (c *JobWorkloadClient) ReapTerminal(context.Context, map[string]*clusterapi.DesiredJob) error {
 	return nil
 }

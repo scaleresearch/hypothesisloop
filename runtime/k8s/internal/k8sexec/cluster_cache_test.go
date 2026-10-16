@@ -9,7 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	k8stesting "k8s.io/client-go/testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
 // Every reconcile pass reads capacity several times. The nodes and pods behind it are listed once
@@ -32,7 +32,7 @@ func TestCapacityReadsListNodesAndPodsOnceAndFollowTheWatch(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return byNode["node-a"][domain.NodeResourceCPUMillicores]
+		return byNode["node-a"][clusterapi.NodeResourceCPUMillicores]
 	}
 	for range 10 {
 		if got := freeCPU(); got != 7500 {

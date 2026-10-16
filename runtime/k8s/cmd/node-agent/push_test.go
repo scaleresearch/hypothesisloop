@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/cpclient"
 )
 
 // answers serves one status per request, in order, and records what it was sent.
@@ -33,11 +36,11 @@ func answers(t *testing.T, statuses ...int) (*httptest.Server, *[]string) {
 	return server, &received
 }
 
-func backlog(n int) []pushPayload {
+func backlog(n int) []clusterapi.NodeMetricsPush {
 	start := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
-	out := make([]pushPayload, n)
+	out := make([]clusterapi.NodeMetricsPush, n)
 	for i := range out {
-		out[i] = pushPayload{Node: "n", Timestamp: start.Add(time.Duration(i) * time.Second), Pods: []podSample{{PodUID: "p", ExperimentID: "job"}}}
+		out[i] = clusterapi.NodeMetricsPush{Node: "n", Timestamp: start.Add(time.Duration(i) * time.Second), Pods: []clusterapi.PodSample{{PodUID: "p", ExperimentID: "job"}}}
 	}
 	return out
 }
@@ -54,7 +57,7 @@ func captureLog(t *testing.T) *bytes.Buffer {
 func TestARefusedObservationIsDroppedWithItsReasonAndTheRestStillGoes(t *testing.T) {
 	logged := captureLog(t)
 	server, received := answers(t, http.StatusUnauthorized, http.StatusBadRequest, http.StatusNoContent)
-	left := flush(server.Client(), server.URL, "tok", backlog(3))
+	left := flush(&cpclient.Client{BaseURL: server.URL, Token: "tok", HTTP: server.Client()}, backlog(3))
 	if len(left) != 0 || len(*received) != 3 {
 		t.Fatalf("left = %d after %d requests, want an empty backlog after 3", len(left), len(*received))
 	}
@@ -70,7 +73,7 @@ func TestAnObservationTheControlPlaneCouldNotTakeWaitsAtTheHeadOfTheQueue(t *tes
 	logged := captureLog(t)
 	server, received := answers(t, http.StatusNoContent, http.StatusServiceUnavailable)
 	queue := backlog(3)
-	left := flush(server.Client(), server.URL, "tok", queue)
+	left := flush(&cpclient.Client{BaseURL: server.URL, Token: "tok", HTTP: server.Client()}, queue)
 	if len(left) != 2 || !left[0].Timestamp.Equal(queue[1].Timestamp) || len(*received) != 2 {
 		t.Fatalf("left = %d after %d requests, want the second and third kept after 2", len(left), len(*received))
 	}
@@ -79,7 +82,7 @@ func TestAnObservationTheControlPlaneCouldNotTakeWaitsAtTheHeadOfTheQueue(t *tes
 	}
 
 	server.Close()
-	if left := flush(server.Client(), server.URL, "tok", queue); len(left) != 3 {
+	if left := flush(&cpclient.Client{BaseURL: server.URL, Token: "tok", HTTP: server.Client()}, queue); len(left) != 3 {
 		t.Fatalf("with the control plane unreachable: left = %d, want all 3 kept", len(left))
 	}
 }

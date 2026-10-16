@@ -8,17 +8,16 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
-func attemptTestExperiment(attempt int) *domain.Experiment {
-	return &domain.Experiment{
+func attemptTestExperiment(attempt int) *clusterapi.DesiredJob {
+	return &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token", ID: "attempt-test", AgentID: "agent",
 		AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
-		EstimatedDurationHours: 1, CapacityTier: domain.CapacityGuaranteed, AttemptCount: attempt,
-		Job: domain.JobSpec{Image: "image:v1", CPU: "1", Memory: "1Gi", Storage: "1Gi",
+		EstimatedDurationHours: 1, CapacityTier: clusterapi.CapacityGuaranteed, AttemptCount: attempt,
+		Job: clusterapi.JobSpec{Image: "image:v1", CPU: "1", Memory: "1Gi", Storage: "1Gi",
 			MaxRetries: intPtr(1), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1,
 			AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"},
 	}
@@ -86,8 +85,8 @@ func TestAWorkloadWithNoAttemptLabelReportsUnknownRatherThanZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PollJobStatus: %v", err)
 	}
-	if status.Attempt != workload.AttemptUnknown {
-		t.Errorf("attempt = %d, want %d (AttemptUnknown)", status.Attempt, workload.AttemptUnknown)
+	if status.Attempt != clusterapi.AttemptUnknown {
+		t.Errorf("attempt = %d, want %d (AttemptUnknown)", status.Attempt, clusterapi.AttemptUnknown)
 	}
 }
 
@@ -101,11 +100,11 @@ func TestAnAbsentWorkloadReportsGoneWithNoAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PollJobStatus: %v", err)
 	}
-	if status.Phase != workload.JobPhaseGone {
+	if status.Phase != clusterapi.JobPhaseGone {
 		t.Errorf("phase = %v, want Gone", status.Phase)
 	}
-	if status.Attempt != workload.AttemptUnknown {
-		t.Errorf("attempt = %d, want %d (AttemptUnknown)", status.Attempt, workload.AttemptUnknown)
+	if status.Attempt != clusterapi.AttemptUnknown {
+		t.Errorf("attempt = %d, want %d (AttemptUnknown)", status.Attempt, clusterapi.AttemptUnknown)
 	}
 }
 

@@ -43,9 +43,3 @@ func TestGraceLimitsResolveRefusesUnsetLimits(t *testing.T) {
 		t.Fatal("zero limits resolved a grace")
 	}
 }
-
-func TestResolvedGraceRefusesAnUnresolvedJob(t *testing.T) {
-	if _, _, err := (JobSpec{}).ResolvedGrace(); err == nil {
-		t.Fatal("a job without resolved termination grace was accepted")
-	}
-}

@@ -6,9 +6,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/contract/exitline"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
 // A requeue reuses the experiment id. The attempt in the instance name is what keeps the
@@ -18,7 +17,7 @@ func TestARequeuedJobReplacesTheRunningInstanceOfItsPreviousAttempt(t *testing.T
 	ctx := context.Background()
 	mustCreate(t, e, job(t, "exp-1", 1, 1))
 	p.Start("hl-job-t1-exp-1-a1-h100-0")
-	if phase, attempt := status(t, e, "exp-1"); phase != workload.JobPhaseRunning || attempt != 1 {
+	if phase, attempt := status(t, e, "exp-1"); phase != clusterapi.JobPhaseRunning || attempt != 1 {
 		t.Fatalf("status = %v attempt %d", phase, attempt)
 	}
 
@@ -39,7 +38,7 @@ func TestARequeuedJobReplacesTheRunningInstanceOfItsPreviousAttempt(t *testing.T
 	if matches, err := e.WorkloadMatchesDesired(ctx, requeued); err != nil || !matches {
 		t.Fatalf("the new attempt's instance does not match: %v, %v", matches, err)
 	}
-	if phase, attempt := status(t, e, "exp-1"); phase != workload.JobPhasePending || attempt != 2 {
+	if phase, attempt := status(t, e, "exp-1"); phase != clusterapi.JobPhasePending || attempt != 2 {
 		t.Fatalf("status = %v attempt %d", phase, attempt)
 	}
 }
@@ -53,7 +52,7 @@ func TestAnExitedInstanceOfThePreviousAttemptIsNeitherReusedNorReportedAsTheNewO
 	mustCreate(t, e, job(t, "exp-1", 1, 1))
 	p.Start("hl-job-t1-exp-1-a1-h100-0")
 	p.Exit("hl-job-t1-exp-1-a1-h100-0", exitline.Format(1))
-	if phase, attempt := status(t, e, "exp-1"); phase != workload.JobPhaseFailed || attempt != 1 {
+	if phase, attempt := status(t, e, "exp-1"); phase != clusterapi.JobPhaseFailed || attempt != 1 {
 		t.Fatalf("status = %v attempt %d", phase, attempt)
 	}
 
@@ -67,10 +66,10 @@ func TestAnExitedInstanceOfThePreviousAttemptIsNeitherReusedNorReportedAsTheNewO
 	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a2-h100-1"}) {
 		t.Fatalf("rented %v", names)
 	}
-	if phase, attempt := status(t, e, "exp-1"); phase != workload.JobPhasePending || attempt != 2 {
+	if phase, attempt := status(t, e, "exp-1"); phase != clusterapi.JobPhasePending || attempt != 2 {
 		t.Fatalf("status = %v attempt %d, want the new attempt's", phase, attempt)
 	}
-	if reason, message, _, _, _, err := e.PollPhaseDetail(ctx, "exp-1", 2); err != nil || reason != domain.PhaseReasonInstanceStarting {
+	if reason, message, _, _, _, err := e.PollPhaseDetail(ctx, "exp-1", 2); err != nil || reason != clusterapi.PhaseReasonInstanceStarting {
 		t.Fatalf("detail = %q %q, %v, want the new attempt's starting instance and nothing of the old one's exit", reason, message, err)
 	}
 }
@@ -145,7 +144,7 @@ func TestTheExitOfTheInstanceAJobWasPreemptedFromIsNotItsResult(t *testing.T) {
 			readmitted := on(job(t, "exp-1", 3, 1), "h100-1")
 
 			if reapFirst {
-				if err := e.ReapTerminal(ctx, map[string]*domain.Experiment{"exp-1": readmitted}); err != nil {
+				if err := e.ReapTerminal(ctx, map[string]*clusterapi.DesiredJob{"exp-1": readmitted}); err != nil {
 					t.Fatal(err)
 				}
 				if names := p.Names(); len(names) != 0 {
@@ -156,7 +155,7 @@ func TestTheExitOfTheInstanceAJobWasPreemptedFromIsNotItsResult(t *testing.T) {
 			if names := p.Names(); !reflect.DeepEqual(names, []string{placed}) {
 				t.Fatalf("rented %v, want the job on its new slot alone", names)
 			}
-			if phase, attempt := status(t, e, "exp-1"); phase != workload.JobPhasePending || attempt != 3 {
+			if phase, attempt := status(t, e, "exp-1"); phase != clusterapi.JobPhasePending || attempt != 3 {
 				t.Fatalf("status = %v attempt %d, want the new instance still booting", phase, attempt)
 			}
 		})

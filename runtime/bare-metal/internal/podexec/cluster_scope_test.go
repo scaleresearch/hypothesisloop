@@ -3,13 +3,13 @@ package podexec
 import (
 	"bytes"
 	"context"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 	"log"
 	"os"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
 func jobContainer(cluster, state string, scoped bool) *fakeContainer {
@@ -114,11 +114,11 @@ func TestAnExitedContainerWithNoReportedStateIsFailedWithAReason(t *testing.T) {
 	east.clusterName = "east"
 
 	status, err := east.PollJobStatus(context.Background(), "unknown-end")
-	if err != nil || status.Phase != workload.JobPhaseFailed {
+	if err != nil || status.Phase != clusterapi.JobPhaseFailed {
 		t.Fatalf("status = %s (err %v), want failed: nothing says the command succeeded", status.Phase, err)
 	}
 	reason, message, _, _, _, err := east.PollPhaseDetail(context.Background(), "unknown-end", 0)
-	if err != nil || reason != domain.PhaseReasonContainerFailed || !strings.Contains(message, "no state") {
+	if err != nil || reason != clusterapi.PhaseReasonContainerFailed || !strings.Contains(message, "no state") {
 		t.Fatalf("phase detail = %q %q (err %v), want the failure and that the engine reported no state", reason, message, err)
 	}
 }
@@ -127,17 +127,17 @@ func TestAnExitedContainerWithNoReportedStateIsFailedWithAReason(t *testing.T) {
 // nothing said, a dead one as pending for good, and so did any state nobody had thought of.
 func TestEveryEngineStateIsReportedByNameAndAnUnknownOneIsAFailureWithTheReason(t *testing.T) {
 	for state, want := range map[string]struct {
-		phase   workload.JobPhase
+		phase   clusterapi.JobPhase
 		reason  string
 		message string
 	}{
-		"running":     {workload.JobPhaseRunning, "", ""},
-		"created":     {workload.JobPhasePending, "", ""},
-		"restarting":  {workload.JobPhasePending, "", ""},
-		"paused":      {workload.JobPhasePending, "", "paused"},
-		"removing":    {workload.JobPhaseGone, "", ""},
-		"dead":        {workload.JobPhaseFailed, domain.PhaseReasonContainerFailed, "dead"},
-		"hibernating": {workload.JobPhaseFailed, domain.PhaseReasonContainerFailed, `"hibernating"`},
+		"running":     {clusterapi.JobPhaseRunning, "", ""},
+		"created":     {clusterapi.JobPhasePending, "", ""},
+		"restarting":  {clusterapi.JobPhasePending, "", ""},
+		"paused":      {clusterapi.JobPhasePending, "", "paused"},
+		"removing":    {clusterapi.JobPhaseGone, "", ""},
+		"dead":        {clusterapi.JobPhaseFailed, clusterapi.PhaseReasonContainerFailed, "dead"},
+		"hibernating": {clusterapi.JobPhaseFailed, clusterapi.PhaseReasonContainerFailed, `"hibernating"`},
 	} {
 		t.Run(state, func(t *testing.T) {
 			engine := newFakeEngine()
@@ -171,7 +171,7 @@ func TestAContainerThatExitedNonZeroIsReportedAsFailedWithItsCode(t *testing.T) 
 	east.clusterName = "east"
 
 	reason, message, _, _, _, err := east.PollPhaseDetail(context.Background(), "crashed", 0)
-	if err != nil || reason != domain.PhaseReasonContainerFailed || message != "container exited with code 3" {
+	if err != nil || reason != clusterapi.PhaseReasonContainerFailed || message != "container exited with code 3" {
 		t.Fatalf("phase detail = %q %q (err %v), want the failure and its exit code", reason, message, err)
 	}
 	if reason, message, _, _, _, err := east.PollPhaseDetail(context.Background(), "finished", 0); err != nil || reason != "" || message != "" {

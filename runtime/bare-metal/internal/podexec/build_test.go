@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
@@ -70,16 +70,16 @@ func TestAJobAskingForWhatTheNodeCannotGiveIsUnrunnable(t *testing.T) {
 	placement := Placement{DevicePaths: []string{"/dev/tenstorrent/0"}}
 
 	for name, tc := range map[string]struct {
-		change func(*domain.JobSpec)
+		change func(*clusterapi.JobSpec)
 		want   string
 	}{
-		"a hugepage size with no mount on the node": {func(s *domain.JobSpec) {
+		"a hugepage size with no mount on the node": {func(s *clusterapi.JobSpec) {
 			s.AcceleratorPodResources = map[string]string{"hugepages-1Gi": "4Gi"}
 		}, absent},
-		"a pod resource that is no hugepage size": {func(s *domain.JobSpec) {
+		"a pod resource that is no hugepage size": {func(s *clusterapi.JobSpec) {
 			s.AcceleratorPodResources = map[string]string{"example.com/thing": "1"}
 		}, "accelerator_pod_resources[example.com/thing]"},
-		"extra_resources": {func(s *domain.JobSpec) {
+		"extra_resources": {func(s *clusterapi.JobSpec) {
 			s.ExtraResources = map[string]string{"google.com/tpu": "1"}
 		}, "google.com/tpu"},
 	} {
@@ -162,14 +162,14 @@ func TestBuildContainerSpecInjectsPerNodeAcceleratorCount(t *testing.T) {
 	e := &Executor{
 		apiURL: "http://example.invalid:8083",
 	}
-	exp := &domain.Experiment{
+	exp := &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "per-node-count", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 		// Deliberately disagreeing with the spec: only reading the spec produces "2".
 		AcceleratorCount:       8,
-		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
 			MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 2,
 			AcceleratorType: "tenstorrent.com/chipArch=blackhole",
@@ -189,7 +189,7 @@ func TestBuildContainerSpecInjectsPerNodeAcceleratorCount(t *testing.T) {
 // engine makes from the container's own id.
 func TestAContainerIsNamedByItsWholeExperimentId(t *testing.T) {
 	const issued, sameMillisecond = "job-0199c2a4b7d07f3a9c1e5b2d4f608a13", "job-0199c2a4b7d07e11a04c7d9e3b5f2c68"
-	longest := strings.Repeat("a", domain.MaxIdentifierLength)
+	longest := strings.Repeat("a", clusterapi.MaxIdentifierLength)
 	for _, id := range []string{issued, sameMillisecond, longest} {
 		if got := containerName(id); got != containerNamePrefix+id {
 			t.Errorf("containerName(%q) = %q", id, got)
@@ -204,8 +204,8 @@ func TestAContainerIsNamedByItsWholeExperimentId(t *testing.T) {
 // Every job in every test gets the same durable-data access the control plane really sends,
 // because BuildJob refuses to build a job without one: a job with nowhere to save is a job whose
 // result cannot outlive it, and that must fail at build time rather than at the end of a run.
-func testDataAccess() *domain.DataAccess {
-	return &domain.DataAccess{
+func testDataAccess() *clusterapi.DataAccess {
+	return &clusterapi.DataAccess{
 		URI: "s3://hl-data/pe-1/agent/exp-1/", Shared: "s3://hl-data/pe-1/",
 		Endpoint: "http://store.invalid:9000", Region: "us-east-1",
 		AccessKeyID: "key", SecretAccessKey: "secret",
@@ -219,13 +219,13 @@ func TestBuildContainerSpecInjectsDurableDataAddressFromDesiredState(t *testing.
 	e := &Executor{
 		apiURL: "http://example.invalid:8083",
 	}
-	exp := &domain.Experiment{
+	exp := &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "data-env", AgentID: "agent", ProjectID: "project",
 		AcceleratorType:        "tenstorrent.com/chipArch=blackhole",
 		AcceleratorCount:       1,
-		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
 			MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1,
 			AcceleratorType: "tenstorrent.com/chipArch=blackhole",
@@ -313,13 +313,13 @@ func TestTwoGroupJobIsRejectedByTheSameSingleNodeRuleNumNodesMeets(t *testing.T)
 	e := &Executor{
 		apiURL: "http://example.invalid:8083",
 	}
-	exp := &domain.Experiment{
+	exp := &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "grouped", AgentID: "agent", ProjectID: "project",
-		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
-			Groups: []domain.JobGroup{
+			Groups: []clusterapi.JobGroup{
 				{Name: "learner", Replicas: 1, CPU: "2", Memory: "8Gi", Storage: "5Gi"},
 				{Name: "actor", Replicas: 3, CPU: "1", Memory: "1Gi", Storage: "1Gi"},
 			},
@@ -346,15 +346,15 @@ func TestSingleReplicaGroupRunsAndTakesItsShapeFromTheGroup(t *testing.T) {
 	e := &Executor{
 		apiURL: "http://example.invalid:8083",
 	}
-	exp := &domain.Experiment{
+	exp := &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "one-group", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 2,
-		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorType: "tenstorrent.com/chipArch=blackhole",
-			Groups: []domain.JobGroup{
+			Groups: []clusterapi.JobGroup{
 				{Name: "solo", Replicas: 1, AcceleratorCount: 2, CPU: "2", Memory: "8Gi", Storage: "5Gi",
 					Command: []string{"python", "solo.py"}},
 			},
@@ -426,13 +426,13 @@ func TestAJobWithoutResolvedGraceIsRefused(t *testing.T) {
 	}
 }
 
-func checkpointWindowExperiment(checkpointGrace *int64) *domain.Experiment {
-	return &domain.Experiment{
+func checkpointWindowExperiment(checkpointGrace *int64) *clusterapi.DesiredJob {
+	return &clusterapi.DesiredJob{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "checkpoint-window", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
-		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
-		Job: domain.JobSpec{
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
 			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
 			MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1,
 			AcceleratorType:        "tenstorrent.com/chipArch=blackhole",

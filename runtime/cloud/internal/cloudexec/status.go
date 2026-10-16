@@ -4,8 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 )
 
@@ -40,20 +39,20 @@ func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string, att
 		return "", "", 0, 0, "", err
 	}
 	i, ok := v.newest(experimentID)
-	if !ok || (attempt != workload.AttemptUnknown && i.attempt != attempt) {
+	if !ok || (attempt != clusterapi.AttemptUnknown && i.attempt != attempt) {
 		return "", "", 0, 0, "", nil
 	}
 	if i.State == provider.StateStarting {
-		return domain.PhaseReasonInstanceStarting, fmt.Sprintf("a machine is rented and has not started the job yet; it is replaced by another if it has not within %s", e.startup), 0, 0, "", nil
+		return clusterapi.PhaseReasonInstanceStarting, fmt.Sprintf("a machine is rented and has not started the job yet; it is replaced by another if it has not within %s", e.startup), 0, 0, "", nil
 	}
 	if i.State == provider.StateUnknown {
-		return domain.PhaseReasonInstanceUnknown, "the provider lists the job's machine and does not say whether the job runs on it: its host is unreachable or the provider is moving it", 0, 1, "", nil
+		return clusterapi.PhaseReasonInstanceUnknown, "the provider lists the job's machine and does not say whether the job runs on it: its host is unreachable or the provider is moving it", 0, 1, "", nil
 	}
 	if i.State != provider.StateExited {
 		return "", "", 0, 1, "", nil
 	}
 	if how, code, _ := e.ending(ctx, v, i); how == endingFailed {
-		return domain.PhaseReasonOfExit(code), fmt.Sprintf("command exited with code %d", code), 0, 1, "", nil
+		return clusterapi.PhaseReasonOfExit(code), fmt.Sprintf("command exited with code %d", code), 0, 1, "", nil
 	}
 	return "", "", 0, 1, "", nil
 }

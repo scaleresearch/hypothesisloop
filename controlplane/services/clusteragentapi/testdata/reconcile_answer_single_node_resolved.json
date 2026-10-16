@@ -1,0 +1,121 @@
+{
+  "experiments": [
+    {
+      "id": "job-1",
+      "agent_id": "agent-a",
+      "platform_experiment_id": "",
+      "actor": {
+        "kind": "",
+        "id": "",
+        "name": ""
+      },
+      "project_id": "proj-1",
+      "org_id": "",
+      "code_ref": "https://git.test/r.git@0123456789abcdef0123456789abcdef01234567",
+      "branch": "",
+      "config_hash": "cfg-1",
+      "data_ref": "data-1",
+      "job": {
+        "image": "registry.test/job:1",
+        "command": [
+          "bash",
+          "-c",
+          "python train.py"
+        ],
+        "args": [
+          "--lr",
+          "0.1"
+        ],
+        "env": {
+          "LR": "0.1"
+        },
+        "secret_env": {
+          "HF_TOKEN": "the-secret-value"
+        },
+        "cpu": "8",
+        "memory": "32Gi",
+        "storage": "100Gi",
+        "accelerator_count": 1,
+        "accelerator_type": "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
+        "termination_grace_period_seconds": 30,
+        "checkpoint_grace_seconds": 120,
+        "shm_size": "8Gi"
+      },
+      "resolved_job": {
+        "image": "registry.test/job:1",
+        "command": [
+          "bash",
+          "-c",
+          "python train.py"
+        ],
+        "args": [
+          "--lr",
+          "0.1"
+        ],
+        "env": {
+          "LR": "0.1"
+        },
+        "secret_env": {
+          "HF_TOKEN": "the-secret-value"
+        },
+        "cpu": "16",
+        "memory": "64Gi",
+        "storage": "200Gi",
+        "accelerator_count": 1,
+        "accelerator_type": "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
+        "node_selector": {
+          "hypothesisloop.io/slot": "slot-3"
+        },
+        "accelerator_pod_resources": {
+          "hugepages-1Gi": "4Gi"
+        },
+        "termination_grace_period_seconds": 30,
+        "checkpoint_grace_seconds": 120,
+        "shm_size": "8Gi"
+      },
+      "environment_key": "env-abc",
+      "hypothesis": "",
+      "accelerator_type": "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
+      "accelerator_count": 1,
+      "estimated_duration_hours": 2.5,
+      "estimated_cost_acch": 0,
+      "capacity_tier": "guaranteed",
+      "priority_score": 0,
+      "status": "",
+      "submitted_at": "2026-10-01T12:30:00Z",
+      "data": {
+        "uri": "s3://hl-data/pe-1/agent-a/job-1/",
+        "shared": "s3://hl-data/pe-1/",
+        "endpoint": "http://minio.test:9000",
+        "region": "us-east-1",
+        "access_key_id": "AK1",
+        "secret_access_key": "SK1"
+      },
+      "token": "hls_am9iOmpvYi0x.tDjMzQv77idoVw3MSNmhQG88wnN9PLi1Yd1UOeR-xlk",
+      "attempt_count": 3,
+      "infra_requeue_count": 0,
+      "created_at": "0001-01-01T00:00:00Z",
+      "updated_at": "0001-01-01T00:00:00Z"
+    }
+  ],
+  "checkpoint_window": [
+    "job-0"
+  ],
+  "builds": [
+    {
+      "key": "env-def",
+      "attempt": 1,
+      "base": "registry.test/job@sha256:aa",
+      "tools": "registry.test/tools@sha256:bb",
+      "dockerfile": "ARG BASE\nFROM ${BASE}\n",
+      "repository": "registry.test/envs",
+      "cache_scope": "hl-0123"
+    }
+  ],
+  "registry_pull": {
+    "registry": "registry.test",
+    "username": "puller",
+    "password": "pw",
+    "expires_at": "2026-10-01T13:30:00Z"
+  }
+}

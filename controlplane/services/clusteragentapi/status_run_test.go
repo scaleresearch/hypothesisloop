@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
@@ -47,7 +48,7 @@ func TestARunNeverSeenRunningCountsWhole(t *testing.T) {
 	now := time.Date(2026, 10, 6, 21, 43, 30, 0, time.UTC)
 	admitted := now.Add(-5 * time.Minute)
 	started, ended := now.Add(-150*time.Second), now.Add(-19*time.Second)
-	rep := statusReport{ExperimentID: "job-1", Phase: "succeeded", AdmittedNode: "rtx4090-0", StartedAt: &started, EndedAt: &ended}
+	rep := clusterapi.StatusReport{ExperimentID: "job-1", Phase: "succeeded", AdmittedNode: "rtx4090-0", StartedAt: &started, EndedAt: &ended}
 
 	first, last, total := span(t, observationsOf(rep, admitted, now, "of-a", now, testCadence))
 	if !first.Equal(started) || !last.Equal(ended) || total != 131*time.Second {
@@ -80,7 +81,7 @@ func TestARunReportedAgainIsCountedOnce(t *testing.T) {
 	const ran = 131 * time.Second
 	started := reported.Add(time.Hour)
 	ended := started.Add(ran)
-	rep := statusReport{ExperimentID: "job-1", Phase: "succeeded", AdmittedNode: "rtx4090-0", StartedAt: &started, EndedAt: &ended}
+	rep := clusterapi.StatusReport{ExperimentID: "job-1", Phase: "succeeded", AdmittedNode: "rtx4090-0", StartedAt: &started, EndedAt: &ended}
 
 	seen := map[time.Time]bool{}
 	var union []metricsdb.Observation
@@ -177,7 +178,7 @@ func TestARunToldByAWrongClockStaysWithinWhatThePlatformSaw(t *testing.T) {
 		"longer than the job was held": {now.Add(-time.Hour), 30 * time.Minute, admitted, now},
 	} {
 		ended := tc.started.Add(tc.ran)
-		rep := statusReport{ExperimentID: "job-1", Phase: "succeeded", AdmittedNode: "rtx4090-0", StartedAt: &tc.started, EndedAt: &ended}
+		rep := clusterapi.StatusReport{ExperimentID: "job-1", Phase: "succeeded", AdmittedNode: "rtx4090-0", StartedAt: &tc.started, EndedAt: &ended}
 		first, last, total := span(t, observationsOf(rep, admitted, now, "of-a", now, testCadence))
 		if !first.Equal(tc.wantFirst) || !last.Equal(tc.wantLast) || total != tc.wantLast.Sub(tc.wantFirst) {
 			t.Errorf("%s: observed %v to %v, %v in all, want %v to %v whole", name, first, last, total, tc.wantFirst, tc.wantLast)

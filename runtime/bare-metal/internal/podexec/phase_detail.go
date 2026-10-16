@@ -8,7 +8,7 @@ import (
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
 // PollPhaseDetail inspects experimentID's container (if one exists yet) for an error and
@@ -41,7 +41,7 @@ func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string, _ i
 		scheduledNodes = 1
 		if resp.Container.State == nil {
 			if c.State == "exited" || c.State == "stopped" {
-				return domain.PhaseReasonContainerFailed, "the engine reports no state for the exited container, so how its command ended is unknown", restartCount, scheduledNodes, "", nil
+				return clusterapi.PhaseReasonContainerFailed, "the engine reports no state for the exited container, so how its command ended is unknown", restartCount, scheduledNodes, "", nil
 			}
 			return "", "", restartCount, scheduledNodes, "", nil
 		}
@@ -54,12 +54,12 @@ func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string, _ i
 		case "paused":
 			return "", "the container is paused on this node's engine, so the job's command does not run until somebody unpauses it", restartCount, scheduledNodes, "", nil
 		case "dead":
-			return domain.PhaseReasonContainerFailed, "the engine reports the container dead: it could neither run it nor remove it", restartCount, scheduledNodes, "", nil
+			return clusterapi.PhaseReasonContainerFailed, "the engine reports the container dead: it could neither run it nor remove it", restartCount, scheduledNodes, "", nil
 		default:
-			return domain.PhaseReasonContainerFailed, fmt.Sprintf("the engine reports the container in state %q, which this runtime does not know", c.State), restartCount, scheduledNodes, "", nil
+			return clusterapi.PhaseReasonContainerFailed, fmt.Sprintf("the engine reports the container in state %q, which this runtime does not know", c.State), restartCount, scheduledNodes, "", nil
 		}
 		if resp.Container.State.ExitCode != 0 {
-			return domain.PhaseReasonOfExit(resp.Container.State.ExitCode), fmt.Sprintf("container exited with code %d", resp.Container.State.ExitCode), restartCount, scheduledNodes, "", nil
+			return clusterapi.PhaseReasonOfExit(resp.Container.State.ExitCode), fmt.Sprintf("container exited with code %d", resp.Container.State.ExitCode), restartCount, scheduledNodes, "", nil
 		}
 		return "", "", restartCount, scheduledNodes, "", nil
 	}
@@ -80,24 +80,24 @@ func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string, _ i
 func pullFailureReason(err error) string {
 	switch {
 	case errdefs.IsNotFound(err), errdefs.IsUnauthorized(err), errdefs.IsPermissionDenied(err):
-		return domain.PhaseReasonImagePullFailed
+		return clusterapi.PhaseReasonImagePullFailed
 	case errdefs.IsInvalidArgument(err):
-		return domain.PhaseReasonInvalidImage
+		return clusterapi.PhaseReasonInvalidImage
 	default:
 		return podexecPhaseReason(err.Error())
 	}
 }
 
 // podexecPhaseReason classifies a container engine's own error text into the control plane's
-// generic domain.PhaseReason* vocabulary — the control plane must never learn the engine's own
+// generic clusterapi.PhaseReason* vocabulary — the control plane must never learn the engine's own
 // error strings (important.md #7). Unrecognized text reports message only, no reason.
 func podexecPhaseReason(engineError string) string {
 	lower := strings.ToLower(engineError)
 	switch {
 	case containsAny(lower, "no such image", "pull access denied", "manifest unknown", "not found: manifest"):
-		return domain.PhaseReasonImagePullFailed
+		return clusterapi.PhaseReasonImagePullFailed
 	case containsAny(lower, "invalid reference format"):
-		return domain.PhaseReasonInvalidImage
+		return clusterapi.PhaseReasonInvalidImage
 	default:
 		return ""
 	}

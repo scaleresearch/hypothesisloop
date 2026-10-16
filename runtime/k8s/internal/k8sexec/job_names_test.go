@@ -8,7 +8,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
@@ -18,7 +18,7 @@ const (
 )
 
 // longestID is the longest id the control plane accepts.
-var longestID = strings.Repeat("a", domain.MaxIdentifierLength-1) + "b"
+var longestID = strings.Repeat("a", clusterapi.MaxIdentifierLength-1) + "b"
 
 // assertNamesAreValid holds a compiled Job to what the API server holds it to: its name is copied
 // into the job-name label, each pod of an Indexed Job is reached at <name>-<index>, and every

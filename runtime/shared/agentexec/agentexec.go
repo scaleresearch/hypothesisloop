@@ -7,10 +7,10 @@ package agentexec
 
 import (
 	"context"
+	"errors"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
 // Unrunnable is what CreateWorkload returns for a job this runtime will never run as it is
@@ -19,10 +19,15 @@ import (
 // what becomes of it, where every other creation error is logged and tried again next pass.
 //
 // Reason is the phase reason it is reported under, one the control plane ends a job for
-// (domain.NeverSelfHealsPhaseReasons). Empty is domain.PhaseReasonConfigError.
+// (a bad image, a malformed config, no offer). Empty is clusterapi.PhaseReasonConfigError.
 type Unrunnable struct{ Reason, Why string }
 
 func (u *Unrunnable) Error() string { return u.Why }
+
+// ErrNoEnvironmentGitCredential is a build whose repository is read with no credential: the
+// control plane answers its git credential with 404. Its clusterapi.EnvironmentGitSecret is
+// absent then, so a RUN that mounts it reads the repository anonymously.
+var ErrNoEnvironmentGitCredential = errors.New("the repository of the build takes no credential")
 
 // Waiting is what CreateWorkload returns while what the job needs is not there yet and may still
 // come, such as a machine to rent. The loop reports the job as pending under Reason with Why as
@@ -33,7 +38,7 @@ func (w *Waiting) Error() string { return w.Why }
 
 // Executor is the cluster-local half of the desired-state reconcile loop: given exp's compiled
 // desired state, create/delete/compare it against whatever is actually running, and report
-// phase back. This is deliberately not controlplane/shared/workload.Backend — Backend is the
+// phase back. This is deliberately not the control plane's own workload.Backend — Backend is the
 // control-plane-facing, multi-cluster contract (queuebackend); Executor is the single-cluster,
 // agent-facing contract each cluster-agent/bare-agent binary drives its local reconcile/status
 // loop with.
@@ -41,7 +46,7 @@ type Executor interface {
 	// CreateWorkload creates exp's workload. pull is the reconcile answer's registry_pull, the
 	// login a job that runs in an environment (exp.EnvironmentKey) pulls its image with, and nil
 	// when no desired job runs in one.
-	CreateWorkload(ctx context.Context, exp *domain.Experiment, pull *domain.RegistryLogin) error
+	CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) error
 	// DeleteWorkload removes the experiment's workload. grantCheckpointWindow says whether the
 	// control plane granted this termination the checkpoint window the job declared: true for a
 	// policy-class termination (the platform decided and the job was fine), false for everything
@@ -58,12 +63,12 @@ type Executor interface {
 	// evicts live work.
 	ListManagedJobsForStatus(ctx context.Context) ([]string, error)
 	ListManagedAuxiliaryWorkloads(ctx context.Context) ([]string, error)
-	WorkloadMatchesDesired(ctx context.Context, exp *domain.Experiment) (bool, error)
+	WorkloadMatchesDesired(ctx context.Context, exp *clusterapi.DesiredJob) (bool, error)
 
 	// ReapTerminal prunes whatever terminal records the ecosystem retains for jobs no longer
 	// desired. Nothing to prune is a valid implementation, not a missing one — k8s deletes the
 	// Job object itself, so its executor has no separate record to remove.
-	ReapTerminal(ctx context.Context, desired map[string]*domain.Experiment) error
+	ReapTerminal(ctx context.Context, desired map[string]*clusterapi.DesiredJob) error
 
 	// FetchLogTail and PollPhaseDetail are how a job explains itself: the runtime watching the
 	// job relays its output and its non-start reason, never the job process (important.md #16).
@@ -73,7 +78,7 @@ type Executor interface {
 	// actually landed (k8s: PodScheduled=True; bare metal: the container exists), and
 	// schedulingReason is a best-effort explanation for why a pod is still Pending (autoscaler
 	// refusal/acceptance text), empty when there is nothing to report.
-	// attempt is the generation this poll should count pods for (workload.AttemptUnknown when the
+	// attempt is the generation this poll should count pods for (clusterapi.AttemptUnknown when the
 	// executor cannot resolve one), so a still-terminating pod from a superseded attempt is never
 	// counted toward the current attempt's scheduled_nodes.
 	PollPhaseDetail(ctx context.Context, experimentID string, attempt int) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, err error)
@@ -83,19 +88,19 @@ type Executor interface {
 	// delete-and-recreate landing between them pairs the old generation's phase with the new
 	// one's number, which is precisely the confusion JobStatus.Attempt exists to resolve.
 	PollJobStatus(ctx context.Context, experimentID string) (JobStatus, error)
-	ResolveAdmittedAcceleratorType(ctx context.Context, experimentID string) (acceleratorType domain.AcceleratorType, node string, consistent bool, err error)
+	ResolveAdmittedAcceleratorType(ctx context.Context, experimentID string) (acceleratorType clusterapi.AcceleratorType, node string, consistent bool, err error)
 
 	GetLiveCPUCapacity(ctx context.Context) (available, total float64, err error)
 	GetLiveRAMCapacity(ctx context.Context) (available, total int64, err error)
 	GetLiveStorageCapacity(ctx context.Context) (available, total int64, err error)
 	// GetLiveNodeResourceCapacity reports free CPU/memory/storage per node, keyed by
-	// domain.NodeResource*. The cluster-wide totals above cannot answer "does this job fit a
+	// clusterapi.NodeResource*. The cluster-wide totals above cannot answer "does this job fit a
 	// node", and a job runs on one node — admission needs both views.
 	GetLiveNodeResourceCapacity(ctx context.Context) (map[string]map[string]int64, error)
 	// GetNodeTotalCapacity reports each node's capacity available to PLATFORM-scheduled jobs —
 	// allocatable minus non-platform-pod requests (DaemonSets, CNI, monitoring, anything else
 	// permanently resident; platform job pods themselves are not subtracted), as
-	// by domain.NodeResource* like GetLiveNodeResourceCapacity above — but total rather than free.
+	// by clusterapi.NodeResource* like GetLiveNodeResourceCapacity above — but total rather than free.
 	// Fair-share math needs a denominator that doesn't move every time something else is scheduled
 	// or freed, which the free/available view above cannot provide.
 	GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]int64, error)
@@ -140,22 +145,22 @@ type PassScoped interface {
 // current registry_pull for each live workload of a job that runs in an environment, since the
 // login it was created with expires.
 type PullRefresher interface {
-	RefreshPull(ctx context.Context, exp *domain.Experiment, pull *domain.RegistryLogin) error
+	RefreshPull(ctx context.Context, exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) error
 }
 
 // JobStatus is what one poll of a managed workload observed.
 type JobStatus struct {
-	Phase workload.JobPhase
+	Phase clusterapi.JobPhase
 	// UID changes whenever the underlying workload is replaced, so a caller can tell a job that
 	// has been recreated from one that has merely changed phase.
 	UID string
 	// Attempt is the generation of the experiment this workload was created for, as the control
-	// plane numbered it. workload.AttemptUnknown when the workload carries no attempt at all —
+	// plane numbered it. clusterapi.AttemptUnknown when the workload carries no attempt at all —
 	// one created by a runtime build that predates it, or one that is already gone.
 	Attempt int
 	// Machine is what the workload runs on, from an executor that knows more of it than the node
 	// ResolveAdmittedAcceleratorType names. Nil from every other.
-	Machine *domain.JobMachine
+	Machine *clusterapi.JobMachine
 	// StartedAt and EndedAt are when the workload's command started and ended, from an executor
 	// whose look at the workload cannot time it and that reads the times something beside the
 	// command measured. Both set once the command has ended, both zero until then and from

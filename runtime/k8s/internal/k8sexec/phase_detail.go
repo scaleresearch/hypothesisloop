@@ -7,21 +7,20 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
 // k8sPhaseReasons translates the small set of Kubernetes container-status waiting reasons that
-// never self-heal into the control plane's generic domain.PhaseReason* vocabulary — the
+// never self-heal into the control plane's generic clusterapi.PhaseReason* vocabulary — the
 // control plane must never learn Kubernetes' own reason strings (important.md #7). Reasons not
 // in this map (CrashLoopBackOff, ContainerCreating, PodInitializing, ...) are expected to
 // resolve on their own and are reported with an empty Reason, message only.
 var k8sPhaseReasons = map[string]string{
-	"ErrImagePull":               domain.PhaseReasonImagePullFailed,
-	"ImagePullBackOff":           domain.PhaseReasonImagePullFailed,
-	"InvalidImageName":           domain.PhaseReasonInvalidImage,
-	"CreateContainerConfigError": domain.PhaseReasonConfigError,
+	"ErrImagePull":               clusterapi.PhaseReasonImagePullFailed,
+	"ImagePullBackOff":           clusterapi.PhaseReasonImagePullFailed,
+	"InvalidImageName":           clusterapi.PhaseReasonInvalidImage,
+	"CreateContainerConfigError": clusterapi.PhaseReasonConfigError,
 }
 
 // PollPhaseDetail inspects experimentID's currently-scheduled pod(s) for a waiting or
@@ -38,12 +37,12 @@ var k8sPhaseReasons = map[string]string{
 // (recreated after a failover, or an Indexed Job's replaced index) still lists under
 // experimentID by label alone, and would otherwise inflate scheduledNodes with a pod this
 // attempt never created — reading, for example, a genuinely 0-of-2-bound gang as fully bound
-// because attempt N-1's terminating pods are still around. workload.AttemptUnknown (the executor
+// because attempt N-1's terminating pods are still around. clusterapi.AttemptUnknown (the executor
 // could not resolve one) falls back to counting every pod under the experiment, today's
 // behaviour, rather than filtering on a label value that doesn't exist.
 func (c *JobWorkloadClient) PollPhaseDetail(ctx context.Context, experimentID string, attempt int) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, err error) {
 	selector := fmt.Sprintf("%s=%s", workloadkeys.ExperimentID, experimentID)
-	if attempt != workload.AttemptUnknown {
+	if attempt != clusterapi.AttemptUnknown {
 		selector = fmt.Sprintf("%s,%s=%d", selector, workloadkeys.Attempt, attempt)
 	}
 	pods, err := c.kube.CoreV1().Pods(HypothesisLoopNamespace).List(ctx, metav1.ListOptions{
@@ -114,9 +113,9 @@ func podScheduledCondition(p *corev1.Pod) (scheduled bool, unscheduledMessage st
 // tail as the single diagnostic channel. Reported through phase_detail rather than a new column
 // because it reaches the experiment record on the existing path, with no schema change.
 func terminatedPhaseDetail(t *corev1.ContainerStateTerminated, restarts int32) (string, string, int32) {
-	reason := domain.PhaseReasonOfExit(int(t.ExitCode))
+	reason := clusterapi.PhaseReasonOfExit(int(t.ExitCode))
 	if t.Reason == "OOMKilled" {
-		reason = domain.PhaseReasonOOMKilled
+		reason = clusterapi.PhaseReasonOOMKilled
 	}
 	message := fmt.Sprintf("container exited with code %d", t.ExitCode)
 	if t.Reason != "" {

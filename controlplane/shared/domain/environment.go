@@ -11,6 +11,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
+
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
 // EnvironmentFile is the file of an experiment repository that declares the environment its jobs
@@ -19,21 +21,15 @@ import (
 const EnvironmentFile = ".hypothesisloop/Dockerfile"
 
 // EnvironmentGitSecret is the id of the BuildKit secret a RUN of an environment file mounts to
-// read the repository that declared it, at /run/secrets/git-credentials by default: one line of
-// git's credential store, read-only, so a step can fetch a commit it pins and prefetch from it.
-// A secret mount is never part of a layer.
-const EnvironmentGitSecret = "git-credentials"
-
-// ErrNoEnvironmentGitCredential is a build whose repository is read with no credential: the
-// environment names no repository, or its git host takes none. Its EnvironmentGitSecret is
-// absent then, so a RUN that mounts it reads the repository anonymously.
-var ErrNoEnvironmentGitCredential = errors.New("the repository of the build takes no credential")
+// read the repository that declared it, at /run/secrets/git-credentials by default. A secret
+// mount is never part of a layer.
+const EnvironmentGitSecret = clusterapi.EnvironmentGitSecret
 
 // MaxEnvironmentFileBytes bounds an environment file.
 const MaxEnvironmentFileBytes = 64 << 10
 
 // MaxEnvironmentLogBytes bounds the end of a build's output that is kept and handed to the agent.
-const MaxEnvironmentLogBytes = 4 << 10
+const MaxEnvironmentLogBytes = clusterapi.MaxEnvironmentLogBytes
 
 // EnvironmentState is where the build of an environment is.
 type EnvironmentState string
@@ -133,12 +129,6 @@ func EnvironmentCacheScope(orgID, gitRepository string) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%s%d:%s", len(orgID), orgID, len(gitRepository), gitRepository)))
 	return "hl-" + hex.EncodeToString(sum[:12])
 }
-
-// PlatformTools are the files of a job image a job needs from the platform: its client, and
-// hl-clone, which fetches the job's commit. An environment built on a job image's base gets them
-// from the job image as its last layer, so what the file installs stays cached across releases of
-// the platform that change only them.
-var PlatformTools = []string{"/usr/local/bin/hl", "/usr/local/bin/hl-clone"}
 
 // EnvironmentBuildOutcome is what the cluster a build was assigned to reports of it.
 type EnvironmentBuildOutcome struct {

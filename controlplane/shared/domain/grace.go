@@ -29,16 +29,3 @@ func (g GraceLimits) Resolve(job JobSpec) (JobSpec, error) {
 	}
 	return job, nil
 }
-
-// ResolvedGrace reads the grace a runtime applies from a job admission resolved: the ordinary
-// shutdown grace and the checkpoint window (0 when the job declared none). A job without a
-// shutdown grace was not resolved by admission and is refused.
-func (j JobSpec) ResolvedGrace() (shutdown, checkpoint int64, err error) {
-	if j.TerminationGracePeriodSeconds == nil {
-		return 0, 0, fmt.Errorf("job spec carries no resolved termination grace")
-	}
-	if j.CheckpointGraceSeconds != nil {
-		checkpoint = *j.CheckpointGraceSeconds
-	}
-	return *j.TerminationGracePeriodSeconds, checkpoint, nil
-}

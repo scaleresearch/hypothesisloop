@@ -1,8 +1,9 @@
 package domain
 
 import (
-	"fmt"
 	"strings"
+
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
 // AcceleratorType identifies a piece of hardware by a fact its own driver publishes, written
@@ -25,101 +26,27 @@ import (
 // these strings — it never defines or renames them.
 type AcceleratorType string
 
-// Key returns the label/attribute name (the part before "="), and Value the driver-published
-// value after it. Both return "" for a malformed type; callers that need a hard failure use
-// Validate.
-func (g AcceleratorType) Key() string {
-	key, _, ok := g.split()
-	if !ok {
-		return ""
-	}
-	return key
-}
+// Key, Value, Domain, Validate, MatchesLabels, MatchesAttributes and Is are the cluster
+// contract's (clusterapi.AcceleratorType), so admission and a runtime read a type alike.
+func (g AcceleratorType) Key() string     { return clusterapi.AcceleratorType(g).Key() }
+func (g AcceleratorType) Value() string   { return clusterapi.AcceleratorType(g).Value() }
+func (g AcceleratorType) Domain() string  { return clusterapi.AcceleratorType(g).Domain() }
+func (g AcceleratorType) Validate() error { return clusterapi.AcceleratorType(g).Validate() }
 
-func (g AcceleratorType) Value() string {
-	_, value, ok := g.split()
-	if !ok {
-		return ""
-	}
-	return value
-}
-
-// Domain returns the vendor domain the key belongs to — "nvidia.com" for
-// "nvidia.com/gpu.product", "tenstorrent.com" for "tenstorrent.com/chipArch". This is how a type
-// is tied back to the driver that publishes it (a DRA driver name, or the domain of the extended
-// resource a device plugin advertises) without the code knowing anything vendor-specific.
-func (g AcceleratorType) Domain() string {
-	key := g.Key()
-	slash := strings.Index(key, "/")
-	if slash <= 0 {
-		return ""
-	}
-	return key[:slash]
-}
-
-// Validate rejects anything that is not a fully-qualified driver-published key=value pair.
-// Enforced at admission so a malformed type fails at submission with a clear message, rather
-// than silently matching no hardware and queueing forever.
-func (g AcceleratorType) Validate() error {
-	key, value, ok := g.split()
-	if !ok {
-		return fmt.Errorf("accelerator type %q must be a driver-published \"key=value\" pair, e.g. nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", string(g))
-	}
-	if strings.Index(key, "/") <= 0 {
-		return fmt.Errorf("accelerator type %q must have a vendor-qualified key (e.g. nvidia.com/gpu.product), so it can be traced to the driver that publishes it", string(g))
-	}
-	if value == "" {
-		return fmt.Errorf("accelerator type %q has an empty value", string(g))
-	}
-	return nil
-}
-
-func (g AcceleratorType) split() (key, value string, ok bool) {
-	s := string(g)
-	eq := strings.Index(s, "=")
-	if eq <= 0 || eq == len(s)-1 {
-		return "", "", false
-	}
-	return s[:eq], s[eq+1:], true
-}
-
-// MatchesLabels reports whether a node publishing these labels carries this accelerator type.
-// Used for device-plugin hardware, whose identity the vendor publishes as a node label.
-//
-// Value compares with EqualFold: different discovery mechanisms case the same hardware
-// differently (e.g. NVIDIA's GFD emits "NVIDIA-GeForce-RTX-4090", our own NVML probe emits
-// "NVIDIA-GEFORCE-RTX-4090"). The key still compares exact — it's a vendor-qualified identifier.
 func (g AcceleratorType) MatchesLabels(labels map[string]string) bool {
-	key, value, ok := g.split()
-	if !ok {
-		return false
-	}
-	return strings.EqualFold(labels[key], value)
+	return clusterapi.AcceleratorType(g).MatchesLabels(labels)
 }
 
-// MatchesAttributes reports whether a DRA device publishing these attributes carries this
-// accelerator type. attributes are keyed by their bare attribute name as published in the
-// ResourceSlice ("chipArch"); the type's key is vendor-qualified ("tenstorrent.com/chipArch"),
-// and driver is the DRA driver name that qualifies them. See MatchesLabels re: casing.
 func (g AcceleratorType) MatchesAttributes(driver string, attributes map[string]string) bool {
-	key, value, ok := g.split()
-	if !ok || g.Domain() != driver {
-		return false
-	}
-	bare := key[strings.Index(key, "/")+1:]
-	return strings.EqualFold(attributes[bare], value)
+	return clusterapi.AcceleratorType(g).MatchesAttributes(driver, attributes)
+}
+
+func (g AcceleratorType) Is(other AcceleratorType) bool {
+	return clusterapi.AcceleratorType(g).Is(clusterapi.AcceleratorType(other))
 }
 
 // foldKey normalizes an accelerator type string for case-insensitive map lookups.
 func foldKey(s string) string { return strings.ToLower(s) }
-
-// Is reports whether g and other name the same accelerator type. Types compare without regard
-// to case, everywhere: the rate table, a footprint's key and node placement all fold it (see
-// MatchesLabels for why), so a job that wrote its type in another casing than a runtime reports
-// is admitted as that type and has to be run and recognised as it too.
-func (g AcceleratorType) Is(other AcceleratorType) bool {
-	return foldKey(string(g)) == foldKey(string(other))
-}
 
 // acceleratorRateRegistry is populated by SetAcceleratorRates() at startup from hypothesisloop.yaml.
 // Rates are in accelerator-hours (AccH), H100-equivalent: 1 AccH = 1 H100-hour, so H100 is
@@ -182,7 +109,7 @@ func (g AcceleratorType) WithPodResources(stated map[string]string) map[string]s
 // CPUType is the one type whose unit is a CPU core. Every runtime offers its nodes' whole cores
 // as units of it, and a job that asks for cores and no accelerator holds that many units (see
 // scheduler.ValidateExperiment). The catalog prices it like any other type.
-const CPUType AcceleratorType = "hypothesisloop.dev/cpu=core"
+const CPUType = AcceleratorType(clusterapi.CPUType)
 
 // TypeKind says what one unit of a priced type is: a device, or one CPU core. It decides two
 // things and nothing else: for the cpu type the count of a job is its cores, and sums and labels

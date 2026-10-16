@@ -8,8 +8,8 @@ import (
 	"strconv"
 
 	"github.com/moby/moby/client"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
@@ -21,7 +21,7 @@ import (
 // the job still without a container, tries again. How the pull ended is remembered: a pass that
 // finds the image of this very spec and attempt can never be pulled starts no further pull and
 // returns the job as unrunnable with what the engine said.
-func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment, pull *domain.RegistryLogin) error {
+func (e *Executor) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) error {
 	if _, busy := e.operations()[exp.ID]; busy {
 		return nil
 	}
@@ -238,7 +238,7 @@ func (e *Executor) ListManagedAuxiliaryWorkloads(_ context.Context) ([]string, e
 
 // WorkloadMatchesDesired recompiles exp and compares its hash against the currently running
 // container's recorded desired-spec hash.
-func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *domain.Experiment) (bool, error) {
+func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *clusterapi.DesiredJob) (bool, error) {
 	placement, err := e.resolvePlacementFor(ctx, exp)
 	if err != nil {
 		return false, err
@@ -271,7 +271,7 @@ func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *domain.Exper
 // job's failure, with the state as the reason in PollPhaseDetail: an error here would withhold
 // the node's whole status push for as long as the container stays that way.
 func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agentexec.JobStatus, error) {
-	pending := agentexec.JobStatus{Phase: workload.JobPhasePending, Attempt: workload.AttemptUnknown}
+	pending := agentexec.JobStatus{Phase: clusterapi.JobPhasePending, Attempt: clusterapi.AttemptUnknown}
 	op, busy := e.operations()[experimentID]
 	containers, err := e.listManagedContainers(ctx)
 	if err != nil {
@@ -286,33 +286,33 @@ func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agen
 		observed := agentexec.JobStatus{UID: c.ID, Attempt: attemptOf(c.Labels)}
 		switch c.State {
 		case "running":
-			observed.Phase = workload.JobPhaseRunning
+			observed.Phase = clusterapi.JobPhaseRunning
 		case "created":
 			// Created but not started is not running: it consumes nothing and may never start.
 			// Reporting it as running billed a wedged container as if it were training.
-			observed.Phase = workload.JobPhasePending
+			observed.Phase = clusterapi.JobPhasePending
 		case "paused", "restarting":
 			// The container exists and its command does not run: frozen by somebody on the
 			// host, or between two starts. Reported as running it would read as alive for good.
-			observed.Phase = workload.JobPhasePending
+			observed.Phase = clusterapi.JobPhasePending
 		case "removing":
 			// It is leaving the engine and nothing of it can be read any more.
-			return agentexec.JobStatus{Phase: workload.JobPhaseGone, Attempt: workload.AttemptUnknown}, nil
+			return agentexec.JobStatus{Phase: clusterapi.JobPhaseGone, Attempt: clusterapi.AttemptUnknown}, nil
 		case "exited", "stopped":
 			code, reported, err := e.exitCode(ctx, c.ID)
 			if err != nil {
 				return pending, err
 			}
 			// An exit nobody reported is not a success. PollPhaseDetail says why it is a failure.
-			observed.Phase = workload.JobPhaseFailed
+			observed.Phase = clusterapi.JobPhaseFailed
 			if reported && code == 0 {
-				observed.Phase = workload.JobPhaseSucceeded
+				observed.Phase = clusterapi.JobPhaseSucceeded
 			}
 		case "dead":
 			// The engine's word for a container it could neither run nor remove.
-			observed.Phase = workload.JobPhaseFailed
+			observed.Phase = clusterapi.JobPhaseFailed
 		default:
-			observed.Phase = workload.JobPhaseFailed
+			observed.Phase = clusterapi.JobPhaseFailed
 		}
 		return observed, nil
 	}
@@ -324,13 +324,13 @@ func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agen
 		pending.Attempt = attemptOf(failed.labels)
 		return pending, nil
 	}
-	return agentexec.JobStatus{Phase: workload.JobPhaseGone, Attempt: workload.AttemptUnknown}, nil
+	return agentexec.JobStatus{Phase: clusterapi.JobPhaseGone, Attempt: clusterapi.AttemptUnknown}, nil
 }
 
 func attemptOf(labels map[string]string) int {
 	n, err := strconv.Atoi(labels[LabelAttempt])
 	if err != nil {
-		return workload.AttemptUnknown
+		return clusterapi.AttemptUnknown
 	}
 	return n
 }
@@ -340,7 +340,7 @@ func attemptOf(labels map[string]string) int {
 // runtime resolves placement itself, deterministically, in resolvePlacementFor) — this simply
 // reads back what was recorded on the container at creation time, and node is always this
 // node's own identity.
-func (e *Executor) ResolveAdmittedAcceleratorType(ctx context.Context, experimentID string) (domain.AcceleratorType, string, bool, error) {
+func (e *Executor) ResolveAdmittedAcceleratorType(ctx context.Context, experimentID string) (clusterapi.AcceleratorType, string, bool, error) {
 	containers, err := e.listManagedContainers(ctx)
 	if err != nil {
 		return "", "", true, err
@@ -352,14 +352,14 @@ func (e *Executor) ResolveAdmittedAcceleratorType(ctx context.Context, experimen
 		if c.State != "running" && c.State != "created" {
 			return "", "", true, nil
 		}
-		return domain.AcceleratorType(c.Labels[LabelAcceleratorType]), e.nodeName, true, nil
+		return clusterapi.AcceleratorType(c.Labels[LabelAcceleratorType]), e.nodeName, true, nil
 	}
 	return "", "", true, nil
 }
 
 // ReapTerminal removes containers that are stopped and whose experiment ID is not a key of
 // desired — the exported entry point reconcile.go calls once per tick.
-func (e *Executor) ReapTerminal(ctx context.Context, desired map[string]*domain.Experiment) error {
+func (e *Executor) ReapTerminal(ctx context.Context, desired map[string]*clusterapi.DesiredJob) error {
 	desiredIDs := make(map[string]bool, len(desired))
 	for id := range desired {
 		desiredIDs[id] = true

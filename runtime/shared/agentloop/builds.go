@@ -1,9 +1,7 @@
 package agentloop
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,7 +10,9 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/cpclient"
 )
 
 // reconcileBuilds starts every listed build not running at its attempt and cancels every running
@@ -20,7 +20,7 @@ import (
 // again: its report is posted again, so a file that failed, whose next run fails the same way,
 // runs once however long the control plane is out of reach. An agent that restarts starts its
 // builds again, and the daemon's cache makes that cheap.
-func (a *Agent) reconcileBuilds(ctx context.Context, listed []domain.EnvironmentBuild) {
+func (a *Agent) reconcileBuilds(ctx context.Context, listed []clusterapi.EnvironmentBuild) {
 	if a.Builder == nil {
 		return
 	}
@@ -63,7 +63,7 @@ func (a *Agent) reconcileBuilds(ctx context.Context, listed []domain.Environment
 // did not take is kept, and the next pass that still lists b posts it again (postReport). A
 // reported build is cancelled too once the list drops it, which stops nothing, so the cancel is
 // told here.
-func (a *Agent) runBuild(ctx context.Context, running *runningBuild, b domain.EnvironmentBuild) {
+func (a *Agent) runBuild(ctx context.Context, running *runningBuild, b clusterapi.EnvironmentBuild) {
 	defer a.building.Done()
 	defer running.cancel()
 	a.Log("build %s attempt %d: started on %s", b.Key, b.Attempt, b.Base)
@@ -77,22 +77,22 @@ func (a *Agent) runBuild(ctx context.Context, running *runningBuild, b domain.En
 		loadedPosted.Add(1)
 		go func() {
 			defer loadedPosted.Done()
-			err := a.postJSON(ctx, "/builds/"+url.PathEscape(b.Key)+"/loaded", domain.EnvironmentBuildLoaded{Attempt: b.Attempt, Node: node, Digest: digest}, nil)
+			err := a.call(ctx, http.MethodPost, "/builds/"+url.PathEscape(b.Key)+"/loaded", clusterapi.EnvironmentBuildLoaded{Attempt: b.Attempt, Node: node, Digest: digest}, nil)
 			if err != nil && ctx.Err() == nil {
 				a.Log("build %s attempt %d: loaded on %s: %v", b.Key, b.Attempt, node, err)
 			}
 		}()
 	}
 	report := a.Builder.Run(ctx, b, func(ctx context.Context) (string, string, error) {
-		var login domain.RegistryLogin
-		err := a.postJSON(ctx, "/builds/"+url.PathEscape(b.Key)+"/credential", domain.EnvironmentBuildCredentialRequest{Attempt: b.Attempt}, &login)
+		var login clusterapi.RegistryLogin
+		err := a.call(ctx, http.MethodPost, "/builds/"+url.PathEscape(b.Key)+"/credential", clusterapi.EnvironmentBuildCredentialRequest{Attempt: b.Attempt}, &login)
 		return login.Username, login.Password, err
-	}, func(ctx context.Context) (domain.EnvironmentGitCredential, error) {
-		var credential domain.EnvironmentGitCredential
-		err := a.postJSON(ctx, "/builds/"+url.PathEscape(b.Key)+"/git-credential", domain.EnvironmentBuildCredentialRequest{Attempt: b.Attempt}, &credential)
-		var refused *refusedError
-		if errors.As(err, &refused) && refused.status == http.StatusNotFound {
-			return credential, fmt.Errorf("%w: %w", domain.ErrNoEnvironmentGitCredential, err)
+	}, func(ctx context.Context) (clusterapi.EnvironmentGitCredential, error) {
+		var credential clusterapi.EnvironmentGitCredential
+		err := a.call(ctx, http.MethodPost, "/builds/"+url.PathEscape(b.Key)+"/git-credential", clusterapi.EnvironmentBuildCredentialRequest{Attempt: b.Attempt}, &credential)
+		var refused *cpclient.Refusal
+		if errors.As(err, &refused) && refused.Status == http.StatusNotFound {
+			return credential, fmt.Errorf("%w: %w", agentexec.ErrNoEnvironmentGitCredential, err)
 		}
 		return credential, err
 	}, func(format string, args ...any) {
@@ -125,11 +125,11 @@ func (a *Agent) runBuild(ctx context.Context, running *runningBuild, b domain.En
 
 // postReport posts the unsent report of b. Taken, it is sent; not taken, it waits for the next
 // pass that still lists b at its attempt, which posts it again.
-func (a *Agent) postReport(ctx context.Context, running *runningBuild, b domain.EnvironmentBuild) {
+func (a *Agent) postReport(ctx context.Context, running *runningBuild, b clusterapi.EnvironmentBuild) {
 	a.buildsMu.Lock()
 	report := *running.unsent
 	a.buildsMu.Unlock()
-	err := a.postJSON(ctx, "/builds/"+url.PathEscape(b.Key), report, nil)
+	err := a.call(ctx, http.MethodPost, "/builds/"+url.PathEscape(b.Key), report, nil)
 	a.buildsMu.Lock()
 	running.posting = false
 	if err == nil {
@@ -138,7 +138,7 @@ func (a *Agent) postReport(ctx context.Context, running *runningBuild, b domain.
 	a.buildsMu.Unlock()
 	if err == nil {
 		detail := report.Digest
-		if report.Outcome != domain.EnvironmentBuildPushed {
+		if report.Outcome != clusterapi.EnvironmentBuildPushed {
 			lines := strings.Split(strings.TrimSpace(report.LogTail), "\n")
 			detail = lines[len(lines)-1]
 		}
@@ -151,54 +151,27 @@ func (a *Agent) postReport(ctx context.Context, running *runningBuild, b domain.
 // postProgress posts each step it receives as the step b is at, until steps closes, then closes
 // posted. A step told while one is posted replaces the one waiting, so a slow control plane holds
 // no build back, and a post that fails is logged and costs the build nothing.
-func (a *Agent) postProgress(ctx context.Context, b domain.EnvironmentBuild, steps <-chan string, posted chan<- struct{}) {
+func (a *Agent) postProgress(ctx context.Context, b clusterapi.EnvironmentBuild, steps <-chan string, posted chan<- struct{}) {
 	defer close(posted)
 	for step := range steps {
-		err := a.postJSON(ctx, "/builds/"+url.PathEscape(b.Key)+"/progress", domain.EnvironmentBuildProgress{Attempt: b.Attempt, Step: step}, nil)
+		err := a.call(ctx, http.MethodPost, "/builds/"+url.PathEscape(b.Key)+"/progress", clusterapi.EnvironmentBuildProgress{Attempt: b.Attempt, Step: step}, nil)
 		if err != nil && ctx.Err() == nil {
 			a.Log("build %s attempt %d: progress: %v", b.Key, b.Attempt, err)
 		}
 	}
 }
 
-// progressStep is the first line of line, cut to domain.MaxEnvironmentProgressBytes on a rune
+// progressStep is the first line of line, cut to clusterapi.MaxEnvironmentProgressBytes on a rune
 // boundary.
 func progressStep(line string) string {
 	line, _, _ = strings.Cut(strings.ReplaceAll(line, "\r", "\n"), "\n")
 	line = strings.TrimSpace(line)
-	if len(line) <= domain.MaxEnvironmentProgressBytes {
+	if len(line) <= clusterapi.MaxEnvironmentProgressBytes {
 		return line
 	}
-	cut := domain.MaxEnvironmentProgressBytes
+	cut := clusterapi.MaxEnvironmentProgressBytes
 	for !utf8.RuneStart(line[cut]) {
 		cut--
 	}
 	return strings.TrimSpace(line[:cut])
-}
-
-// postJSON posts body to path under this cluster's API and decodes a 2xx answer into out, when
-// out is not nil.
-func (a *Agent) postJSON(ctx context.Context, path string, body, out any) error {
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/internal/clusters/%s%s", a.APIURL, a.ClusterName, path), bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+a.Token)
-	resp, err := a.HTTPClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return refusal(resp)
-	}
-	if out == nil {
-		return nil
-	}
-	return json.NewDecoder(resp.Body).Decode(out)
 }

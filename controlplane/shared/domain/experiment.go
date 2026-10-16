@@ -113,17 +113,11 @@ type Experiment struct {
 	NotRankableReason string `json:"not_rankable_reason,omitempty" doc:"With rankable false: the constraint the job does not hold, the value it reported and the bound."`
 	// Summary is the write-up the job's agent filed for it. Set on a read of one job only.
 	Summary string `json:"summary,omitempty"`
-	// Data is the job's durable-data addressing and key, assembled on the way out to a runtime.
-	// Nil on every other read of an experiment.
-	Data *DataAccess `json:"data,omitempty"`
-	// Token is the job's own platform token, good for reporting its metrics and nothing else.
-	// Like Data it is assembled on the way out to a runtime and absent on every other read.
-	Token string `json:"token,omitempty"`
 	// DataKey is the job's permanent object-store key, created at submission and stored with
-	// the row. Never serialized: only Data carries it, and only to the runtime.
+	// the row. Never serialized: only the desired state of its runtime carries it.
 	DataKey DataKey `json:"-"`
 	// SecretEnv is the secret_env the job was submitted with, stored with the row and apart from
-	// Job. Never serialized: ForRuntime alone puts it back on the spec, for the runtime.
+	// Job. Never serialized: only the desired state of its runtime puts it back on the spec.
 	SecretEnv map[string]string `json:"-"`
 	// SubmissionKey is the key the submit stated to be safe to repeat: a later submit of the same
 	// agent with it is answered with this job. Written with the row and read back by no one.
@@ -229,45 +223,6 @@ func (e *Experiment) EffectiveJob() JobSpec {
 		return *e.ResolvedJob
 	}
 	return e.Job
-}
-
-// ForRuntime is the job as a cluster's runtime is handed it: what a runtime builds a workload
-// from, and nothing it has no use for. A runtime may be another org's, so the hypothesis, the
-// objective, the theory and where the job sits in its org stay with the platform. The fields
-// kept are the ones the executors and the workload environment read
-// (runtime/shared/workloadenv), under the names they already decode, and the admission time, which
-// a runtime that waits for a machine to rent measures that wait from, and the environment key,
-// which tells a runtime the job's image is pulled with the reconcile answer's registry_pull. This
-// is the one place the job's secret_env leaves the platform: on the spec, where the runtime reads
-// the rest of the job's environment.
-func (e *Experiment) ForRuntime() *Experiment {
-	job := e.Job
-	job.SecretEnv = e.SecretEnv
-	resolved := e.ResolvedJob
-	if resolved != nil {
-		withSecrets := *resolved
-		withSecrets.SecretEnv = e.SecretEnv
-		resolved = &withSecrets
-	}
-	return &Experiment{
-		ID:                     e.ID,
-		AgentID:                e.AgentID,
-		ProjectID:              e.ProjectID,
-		CodeRef:                e.CodeRef,
-		ConfigHash:             e.ConfigHash,
-		DataRef:                e.DataRef,
-		Job:                    job,
-		ResolvedJob:            resolved,
-		AcceleratorType:        e.AcceleratorType,
-		AcceleratorCount:       e.AcceleratorCount,
-		EstimatedDurationHours: e.EstimatedDurationHours,
-		CapacityTier:           e.CapacityTier,
-		AttemptCount:           e.AttemptCount,
-		SubmittedAt:            e.SubmittedAt,
-		Data:                   e.Data,
-		Token:                  e.Token,
-		EnvironmentKey:         e.EnvironmentKey,
-	}
 }
 
 // NodeShapes is the placement view of e's EffectiveJob — see JobSpec.NodeShapes. It is on

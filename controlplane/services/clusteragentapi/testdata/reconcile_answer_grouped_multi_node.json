@@ -1,0 +1,101 @@
+{
+  "experiments": [
+    {
+      "id": "job-2",
+      "agent_id": "agent-b",
+      "platform_experiment_id": "",
+      "actor": {
+        "kind": "",
+        "id": "",
+        "name": ""
+      },
+      "project_id": "proj-1",
+      "org_id": "",
+      "code_ref": "https://git.test/r.git@89abcdef0123456789abcdef0123456789abcdef",
+      "branch": "",
+      "config_hash": "cfg-2",
+      "data_ref": "",
+      "job": {
+        "image": "registry.test/job:2",
+        "env": {
+          "SHARED": "1"
+        },
+        "accelerator_count": 0,
+        "accelerator_type": "tenstorrent.com/chipArch=blackhole",
+        "acceptable_accelerator_types": [
+          "tenstorrent.com/chipArch=wormhole"
+        ],
+        "node_selector": {
+          "zone": "a"
+        },
+        "accelerator_tolerations": [
+          "tenstorrent.com/chip"
+        ],
+        "groups": [
+          {
+            "name": "learner",
+            "replicas": 1,
+            "cpu": "32",
+            "memory": "128Gi",
+            "storage": "500Gi",
+            "accelerator_count": 4,
+            "accelerator_type": "tenstorrent.com/chipArch=blackhole",
+            "command": [
+              "python",
+              "learn.py"
+            ],
+            "env": {
+              "ROLE": "learner"
+            }
+          },
+          {
+            "name": "actor",
+            "replicas": 3,
+            "cpu": "4",
+            "memory": "8Gi",
+            "storage": "10Gi",
+            "args": [
+              "--actor"
+            ]
+          }
+        ],
+        "max_retries": 2,
+        "termination_grace_period_seconds": 10,
+        "topology": {
+          "spread_across_hosts": false,
+          "same_zone": true
+        },
+        "extra_resources": {
+          "example.com/fpga": "1"
+        },
+        "host_mounts": {
+          "/data": "/mnt/datasets/imagenet"
+        }
+      },
+      "hypothesis": "",
+      "accelerator_type": "tenstorrent.com/chipArch=blackhole",
+      "accelerator_count": 4,
+      "estimated_duration_hours": 1,
+      "estimated_cost_acch": 0,
+      "capacity_tier": "burst",
+      "priority_score": 0,
+      "status": "",
+      "submitted_at": "2026-10-01T12:30:00Z",
+      "data": {
+        "uri": "s3://hl-data/pe-1/agent-b/job-2/",
+        "shared": "s3://hl-data/pe-1/",
+        "endpoint": "http://minio.test:9000",
+        "region": "us-east-1",
+        "access_key_id": "AK2",
+        "secret_access_key": "SK2"
+      },
+      "token": "hls_am9iOmpvYi0y.gRh9hADYFl_MMpTp7KZc6cJr3r6mENIQSw2B--33kII",
+      "attempt_count": 0,
+      "infra_requeue_count": 0,
+      "created_at": "0001-01-01T00:00:00Z",
+      "updated_at": "0001-01-01T00:00:00Z"
+    }
+  ],
+  "checkpoint_window": null,
+  "builds": []
+}

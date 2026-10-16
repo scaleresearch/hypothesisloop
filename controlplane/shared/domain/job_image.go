@@ -15,7 +15,7 @@ type JobImage struct {
 	// Suits is prefixes of accelerator type names. None means every type.
 	Suits []string `json:"suits,omitempty" doc:"The accelerator types it suits, as prefixes of their names. Absent: every type."`
 	// EnvironmentBase is the image an environment of a job naming this one is built on: this one
-	// without domain.PlatformTools, which change with every release of the platform and are added
+	// without clusterapi.PlatformTools, which change with every release of the platform and are added
 	// to the environment last. Empty builds it on this image itself.
 	EnvironmentBase string `json:"-"`
 }

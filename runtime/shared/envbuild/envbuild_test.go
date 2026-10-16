@@ -24,7 +24,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
 func TestTheDaemonGetsTheCredentialOfTheRegistryAloneAndFetchesItsTokenItself(t *testing.T) {
@@ -91,9 +92,9 @@ func TestOnlyAnInstructionOfTheFileFailingIsTheFiles(t *testing.T) {
 
 func TestOnlyTheEndOfALongBuildOutputIsKept(t *testing.T) {
 	log := strings.Repeat("compiling a crate\n", 2000) + "error[E0425]: cannot find value\n"
-	tail := lastBytes(log, domain.MaxEnvironmentLogBytes)
-	if len(tail) > domain.MaxEnvironmentLogBytes || !strings.HasSuffix(tail, "error[E0425]: cannot find value\n") || !strings.HasPrefix(tail, "compiling") {
-		t.Errorf("tail of %d bytes, want at most %d starting on a line and ending with the error", len(tail), domain.MaxEnvironmentLogBytes)
+	tail := lastBytes(log, clusterapi.MaxEnvironmentLogBytes)
+	if len(tail) > clusterapi.MaxEnvironmentLogBytes || !strings.HasSuffix(tail, "error[E0425]: cannot find value\n") || !strings.HasPrefix(tail, "compiling") {
+		t.Errorf("tail of %d bytes, want at most %d starting on a line and ending with the error", len(tail), clusterapi.MaxEnvironmentLogBytes)
 	}
 }
 
@@ -152,8 +153,8 @@ func (d *fakeDaemon) Solve(_ context.Context, def *llb.Definition, opt client.So
 
 func TestABuildIsReadyWithTheDigestItPushedUntagged(t *testing.T) {
 	daemon := &fakeDaemon{digest: "sha256:abc"}
-	got := (&Daemon{solver: daemon}).Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Dockerfile: "ARG BASE\nFROM ${BASE}\n", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress, nil)
-	if got.Outcome != domain.EnvironmentBuildPushed || got.Digest != "sha256:abc" {
+	got := (&Daemon{solver: daemon}).Run(context.Background(), clusterapi.EnvironmentBuild{Base: "registry.test/hl/job:1", Dockerfile: "ARG BASE\nFROM ${BASE}\n", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress, nil)
+	if got.Outcome != clusterapi.EnvironmentBuildPushed || got.Digest != "sha256:abc" {
 		t.Fatalf("result %+v, want ready with the digest", got)
 	}
 	attrs := daemon.builds[0].Exports[0].Attrs
@@ -170,8 +171,8 @@ func TestABuildIsReadyWithTheDigestItPushedUntagged(t *testing.T) {
 
 func TestABuildThatNamesNoCacheScopeIsNotBuilt(t *testing.T) {
 	daemon := &fakeDaemon{digest: "sha256:abc"}
-	got := (&Daemon{solver: daemon}).Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil, nil, ignoreProgress, nil)
-	if got.Outcome != domain.EnvironmentBuildPlatformFault || len(daemon.builds) != 0 {
+	got := (&Daemon{solver: daemon}).Run(context.Background(), clusterapi.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env"}, nil, nil, ignoreProgress, nil)
+	if got.Outcome != clusterapi.EnvironmentBuildPlatformFault || len(daemon.builds) != 0 {
 		t.Errorf("a build with no cache scope is %+v after %d builds, want the platform's fault and none", got, len(daemon.builds))
 	}
 }
@@ -179,11 +180,11 @@ func TestABuildThatNamesNoCacheScopeIsNotBuilt(t *testing.T) {
 func TestTheGitSecretIsTheRepositorysCredentialStoreAndAbsentWithoutOne(t *testing.T) {
 	ctx := context.Background()
 	asked := 0
-	secret := repositorySecret(func(context.Context) (domain.EnvironmentGitCredential, error) {
+	secret := repositorySecret(func(context.Context) (clusterapi.EnvironmentGitCredential, error) {
 		asked++
-		return domain.EnvironmentGitCredential{URL: "https://github.com/acme/model.git", Username: "x-access-token", Password: "p@ss"}, nil
+		return clusterapi.EnvironmentGitCredential{URL: "https://github.com/acme/model.git", Username: "x-access-token", Password: "p@ss"}, nil
 	})
-	got, err := secret.GetSecret(ctx, domain.EnvironmentGitSecret)
+	got, err := secret.GetSecret(ctx, clusterapi.EnvironmentGitSecret)
 	want := "https://x-access-token:p%40ss@github.com\nhttps://x-access-token:p%40ss@github.com/acme/model\nhttps://x-access-token:p%40ss@github.com/acme/model.git\n"
 	if err != nil || string(got) != want {
 		t.Errorf("the secret = %q %v, want %q", got, err, want)
@@ -191,16 +192,16 @@ func TestTheGitSecretIsTheRepositorysCredentialStoreAndAbsentWithoutOne(t *testi
 	if _, err := secret.GetSecret(ctx, "other"); !errors.Is(err, secrets.ErrNotFound) || asked != 1 {
 		t.Errorf("another secret: %v after %d asks, want not found and the credential not asked", err, asked)
 	}
-	none := repositorySecret(func(context.Context) (domain.EnvironmentGitCredential, error) {
-		return domain.EnvironmentGitCredential{}, fmt.Errorf("%w: control plane answered 404", domain.ErrNoEnvironmentGitCredential)
+	none := repositorySecret(func(context.Context) (clusterapi.EnvironmentGitCredential, error) {
+		return clusterapi.EnvironmentGitCredential{}, fmt.Errorf("%w: control plane answered 404", agentexec.ErrNoEnvironmentGitCredential)
 	})
-	if _, err := none.GetSecret(ctx, domain.EnvironmentGitSecret); !errors.Is(err, secrets.ErrNotFound) {
+	if _, err := none.GetSecret(ctx, clusterapi.EnvironmentGitSecret); !errors.Is(err, secrets.ErrNotFound) {
 		t.Errorf("a repository read with no credential: %v, want the secret not found", err)
 	}
-	refused := repositorySecret(func(context.Context) (domain.EnvironmentGitCredential, error) {
-		return domain.EnvironmentGitCredential{}, errors.New("control plane answered 409")
+	refused := repositorySecret(func(context.Context) (clusterapi.EnvironmentGitCredential, error) {
+		return clusterapi.EnvironmentGitCredential{}, errors.New("control plane answered 409")
 	})
-	if _, err := refused.GetSecret(ctx, domain.EnvironmentGitSecret); err == nil || errors.Is(err, secrets.ErrNotFound) {
+	if _, err := refused.GetSecret(ctx, clusterapi.EnvironmentGitSecret); err == nil || errors.Is(err, secrets.ErrNotFound) {
 		t.Errorf("a refused credential: %v, want an error other than not found", err)
 	}
 }
@@ -213,16 +214,16 @@ func TestWhoseFaultABuildThatPushedNothingIs(t *testing.T) {
 		&errdefs.Solve_Cache{Cache: &errdefs.ContentCache{}}, nil, nil), line)
 	for name, c := range map[string]struct {
 		daemon *fakeDaemon
-		fault  domain.EnvironmentBuildOutcomeKind
+		fault  clusterapi.EnvironmentBuildOutcomeKind
 		log    string
 	}{
-		"the base does not pull":   {&fakeDaemon{pull: errors.New("registry.test/hl/job:1: 503 Service Unavailable")}, domain.EnvironmentBuildPlatformFault, "503 Service Unavailable"},
-		"a RUN of the file fails":  {&fakeDaemon{build: runFailed, output: "installing nonexistent\n"}, domain.EnvironmentBuildFileFault, "installing nonexistent"},
-		"a COPY source is missing": {&fakeDaemon{build: copyMissing, output: "[4/6] COPY vendor/codec /opt/codec\n"}, domain.EnvironmentBuildFileFault, `"/vendor/codec": not found`},
-		"the push fails":           {&fakeDaemon{build: errors.New("failed to push: failed to authorize")}, domain.EnvironmentBuildPlatformFault, "failed to authorize"},
-		"no digest is named":       {&fakeDaemon{}, domain.EnvironmentBuildPlatformFault, "no digest"},
+		"the base does not pull":   {&fakeDaemon{pull: errors.New("registry.test/hl/job:1: 503 Service Unavailable")}, clusterapi.EnvironmentBuildPlatformFault, "503 Service Unavailable"},
+		"a RUN of the file fails":  {&fakeDaemon{build: runFailed, output: "installing nonexistent\n"}, clusterapi.EnvironmentBuildFileFault, "installing nonexistent"},
+		"a COPY source is missing": {&fakeDaemon{build: copyMissing, output: "[4/6] COPY vendor/codec /opt/codec\n"}, clusterapi.EnvironmentBuildFileFault, `"/vendor/codec": not found`},
+		"the push fails":           {&fakeDaemon{build: errors.New("failed to push: failed to authorize")}, clusterapi.EnvironmentBuildPlatformFault, "failed to authorize"},
+		"no digest is named":       {&fakeDaemon{}, clusterapi.EnvironmentBuildPlatformFault, "no digest"},
 	} {
-		got := (&Daemon{solver: c.daemon}).Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress, nil)
+		got := (&Daemon{solver: c.daemon}).Run(context.Background(), clusterapi.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress, nil)
 		if got.Outcome != c.fault || got.Digest != "" || !strings.Contains(got.LogTail, c.log) {
 			t.Errorf("%s: %+v, want fault %q with %q in its log", name, got, c.fault, c.log)
 		}
@@ -236,8 +237,8 @@ func TestARunACancelStoppedIsNotTheFiles(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	killed := &gatewaypb.ExitError{ExitCode: 137, Err: errors.New("exit code: 137")}
-	got := (&Daemon{solver: &fakeDaemon{build: killed}}).Run(ctx, domain.EnvironmentBuild{Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress, nil)
-	if got.Outcome == domain.EnvironmentBuildFileFault {
+	got := (&Daemon{solver: &fakeDaemon{build: killed}}).Run(ctx, clusterapi.EnvironmentBuild{Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress, nil)
+	if got.Outcome == clusterapi.EnvironmentBuildFileFault {
 		t.Errorf("a cancelled build is %+v, the file's fault", got)
 	}
 }
@@ -268,9 +269,9 @@ func TestABuildThatLoadsSendsTheImageToTheLoaderAndPushesItLast(t *testing.T) {
 	var told []string
 	d := &Daemon{solver: daemon}
 	d.LoadInto(loader, "")
-	got := d.Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil,
+	got := d.Run(context.Background(), clusterapi.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil,
 		func(format string, args ...any) { told = append(told, fmt.Sprintf(format, args...)) }, nil)
-	if got.Outcome != domain.EnvironmentBuildPushed || got.Digest != "sha256:abc" {
+	if got.Outcome != clusterapi.EnvironmentBuildPushed || got.Digest != "sha256:abc" {
 		t.Fatalf("result %+v, want pushed with the digest", got)
 	}
 	exports := daemon.builds[0].Exports
@@ -300,9 +301,9 @@ func TestALoadThatGoesWrongNeverFailsTheBuild(t *testing.T) {
 		d := &Daemon{solver: &fakeDaemon{digest: "sha256:abc", image: bytes.Repeat([]byte("layer"), 1<<20)}}
 		d.LoadInto(loader, "")
 		var told []string
-		got := d.Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil,
+		got := d.Run(context.Background(), clusterapi.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil,
 			func(format string, args ...any) { told = append(told, fmt.Sprintf(format, args...)) }, nil)
-		if got.Outcome != domain.EnvironmentBuildPushed || got.Digest != "sha256:abc" {
+		if got.Outcome != clusterapi.EnvironmentBuildPushed || got.Digest != "sha256:abc" {
 			t.Errorf("%s: %+v, want pushed with the digest", name, got)
 		}
 		if last := told[len(told)-1]; !strings.HasSuffix(last, "its jobs pull it") {
@@ -315,8 +316,8 @@ func TestABuildThatFailsBeforeItsExportLoadsNothing(t *testing.T) {
 	loader := &fakeLoader{}
 	d := &Daemon{solver: &fakeDaemon{build: errors.New("failed to push: failed to authorize")}}
 	d.LoadInto(loader, "")
-	got := d.Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress, nil)
-	if got.Outcome != domain.EnvironmentBuildPlatformFault || loader.repository != "" {
+	got := d.Run(context.Background(), clusterapi.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress, nil)
+	if got.Outcome != clusterapi.EnvironmentBuildPlatformFault || loader.repository != "" {
 		t.Errorf("%+v, loader asked for %q, want the platform's fault and nothing loaded", got, loader.repository)
 	}
 }
@@ -386,9 +387,9 @@ func TestABuildLoadedIntoItsNodeTellsSoBeforeItsPushEnds(t *testing.T) {
 	}
 	d := &Daemon{solver: daemon}
 	d.LoadInto(&fakeLoader{read: len(image), digest: "sha256:abc"}, "node-1")
-	got := d.Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress,
+	got := d.Run(context.Background(), clusterapi.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress,
 		func(node, digest string) { told <- node + " " + digest })
-	if got.Outcome != domain.EnvironmentBuildPushed || got.Digest != "sha256:abc" {
+	if got.Outcome != clusterapi.EnvironmentBuildPushed || got.Digest != "sha256:abc" {
 		t.Fatalf("result %+v, want pushed with the digest", got)
 	}
 	if loaded := <-told; loaded != "node-1 sha256:abc" {
@@ -408,8 +409,8 @@ func TestALoadThatFailedOrIntoNoNamedNodeTellsNothing(t *testing.T) {
 		d := &Daemon{solver: &fakeDaemon{digest: "sha256:abc", image: bytes.Repeat([]byte("layer"), 1<<20)}}
 		d.LoadInto(c.loader, c.node)
 		told := 0
-		got := d.Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress, func(string, string) { told++ })
-		if got.Outcome != domain.EnvironmentBuildPushed || told != 0 {
+		got := d.Run(context.Background(), clusterapi.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress, func(string, string) { told++ })
+		if got.Outcome != clusterapi.EnvironmentBuildPushed || told != 0 {
 			t.Errorf("%s: %+v told %d times, want pushed and nothing told", name, got, told)
 		}
 	}
@@ -425,24 +426,24 @@ func TestAPushThatFailsOnceTheImageIsInItsNodeIsTriedAgain(t *testing.T) {
 	image := bytes.Repeat([]byte("layer"), 1<<10)
 	for name, c := range map[string]struct {
 		pushes  []error
-		outcome domain.EnvironmentBuildOutcomeKind
+		outcome clusterapi.EnvironmentBuildOutcomeKind
 		solves  int
 	}{
-		"pushed the second time": {[]error{errors.New("failed to push: 503"), nil}, domain.EnvironmentBuildPushed, 2},
-		"never pushed":           {[]error{errors.New("failed to push: 503"), errors.New("failed to push: 503"), errors.New("failed to push: broken pipe")}, domain.EnvironmentBuildPlatformFault, 3},
+		"pushed the second time": {[]error{errors.New("failed to push: 503"), nil}, clusterapi.EnvironmentBuildPushed, 2},
+		"never pushed":           {[]error{errors.New("failed to push: 503"), errors.New("failed to push: 503"), errors.New("failed to push: broken pipe")}, clusterapi.EnvironmentBuildPlatformFault, 3},
 	} {
 		daemon := &fakeDaemon{digest: "sha256:abc", image: image, pushes: c.pushes}
 		d := &Daemon{solver: daemon}
 		d.LoadInto(&fakeLoader{read: len(image), digest: "sha256:abc"}, "node-1")
 		told := 0
-		got := d.Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress, func(string, string) { told++ })
+		got := d.Run(context.Background(), clusterapi.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress, func(string, string) { told++ })
 		if got.Outcome != c.outcome || len(daemon.builds) != c.solves || told != 1 {
 			t.Errorf("%s: %+v after %d solves, told %d times, want %s after %d, told once", name, got, len(daemon.builds), told, c.outcome, c.solves)
 		}
-		if c.outcome == domain.EnvironmentBuildPushed && got.Digest != "sha256:abc" {
+		if c.outcome == clusterapi.EnvironmentBuildPushed && got.Digest != "sha256:abc" {
 			t.Errorf("%s: digest %q", name, got.Digest)
 		}
-		if c.outcome == domain.EnvironmentBuildPlatformFault && !strings.Contains(got.LogTail, "broken pipe") {
+		if c.outcome == clusterapi.EnvironmentBuildPlatformFault && !strings.Contains(got.LogTail, "broken pipe") {
 			t.Errorf("%s: log %q, want the last push's error", name, got.LogTail)
 		}
 		for _, again := range daemon.builds[1:] {
@@ -458,8 +459,8 @@ func TestAPushThatFailsBeforeTheImageIsInItsNodeIsNotTriedAgain(t *testing.T) {
 	daemon := &fakeDaemon{digest: "sha256:abc", image: image, pushes: []error{errors.New("failed to push: 503"), nil}}
 	d := &Daemon{solver: daemon}
 	d.LoadInto(&fakeLoader{read: len(image), err: errors.New("import: permission denied")}, "node-1")
-	got := d.Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress, nil)
-	if got.Outcome != domain.EnvironmentBuildPlatformFault || len(daemon.builds) != 1 {
+	got := d.Run(context.Background(), clusterapi.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress, nil)
+	if got.Outcome != clusterapi.EnvironmentBuildPlatformFault || len(daemon.builds) != 1 {
 		t.Errorf("%+v after %d solves, want the platform's fault at once", got, len(daemon.builds))
 	}
 }
@@ -475,12 +476,12 @@ func TestTheToolsAreCopiedLastFromTheirImage(t *testing.T) {
 		t.Error("a build with no tools image changed its file")
 	}
 	daemon := &fakeDaemon{digest: "sha256:abc"}
-	report := (&Daemon{solver: daemon}).Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job-base@sha256:1111111111111111111111111111111111111111111111111111111111111111", Tools: "registry.test/hl/job@sha256:2222222222222222222222222222222222222222222222222222222222222222", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress, nil)
-	if report.Outcome != domain.EnvironmentBuildPushed || daemon.pulls != 2 {
+	report := (&Daemon{solver: daemon}).Run(context.Background(), clusterapi.EnvironmentBuild{Base: "registry.test/hl/job-base@sha256:1111111111111111111111111111111111111111111111111111111111111111", Tools: "registry.test/hl/job@sha256:2222222222222222222222222222222222222222222222222222222222222222", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress, nil)
+	if report.Outcome != clusterapi.EnvironmentBuildPushed || daemon.pulls != 2 {
 		t.Errorf("%+v after %d pulls, want pushed after pulling the base and the tools", report, daemon.pulls)
 	}
 	failing := &fakeDaemon{pull: errors.New("registry.test/hl/job@sha256:2: not found")}
-	if report := (&Daemon{solver: failing}).Run(context.Background(), domain.EnvironmentBuild{Base: "registry.test/hl/job-base@sha256:1111111111111111111111111111111111111111111111111111111111111111", Tools: "registry.test/hl/job@sha256:2222222222222222222222222222222222222222222222222222222222222222", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress, nil); report.Outcome != domain.EnvironmentBuildPlatformFault || len(failing.builds) != 0 {
+	if report := (&Daemon{solver: failing}).Run(context.Background(), clusterapi.EnvironmentBuild{Base: "registry.test/hl/job-base@sha256:1111111111111111111111111111111111111111111111111111111111111111", Tools: "registry.test/hl/job@sha256:2222222222222222222222222222222222222222222222222222222222222222", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress, nil); report.Outcome != clusterapi.EnvironmentBuildPlatformFault || len(failing.builds) != 0 {
 		t.Errorf("%+v, want the platform's fault and nothing built", report)
 	}
 }

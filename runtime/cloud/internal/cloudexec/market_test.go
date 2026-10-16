@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 )
 
@@ -31,7 +31,7 @@ func TestFreeCapacityIsWhatTheVendorHasOnOfferWithinTheShapes(t *testing.T) {
 	if err != nil || available[h100] != 1 || total[h100] != 2 || byNode["h100-0"][h100] != 1 || byNode["h100-1"][h100] != 0 {
 		t.Fatalf("available %v of %v, by node %v, %v", available, total, byNode, err)
 	}
-	if labels["h100-0"][domain.NodeSlotNoOfferLabel] != "" || labels["h100-1"][domain.NodeSlotNoOfferLabel] != "shape h100: the provider has fewer machines on offer for it than max_instances, and the shape's lower slots take them" || labels["cpu-0"][domain.NodeSlotNoOfferLabel] != "" {
+	if labels["h100-0"][clusterapi.NodeSlotNoOfferLabel] != "" || labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] != "shape h100: the provider has fewer machines on offer for it than max_instances, and the shape's lower slots take them" || labels["cpu-0"][clusterapi.NodeSlotNoOfferLabel] != "" {
 		t.Fatalf("labels %v, want only h100-1 without an offer", labels)
 	}
 	want := provider.Spec{AcceleratorType: h100, AcceleratorCount: 1, CPUMillis: 8000, MemoryBytes: 32 * gib, DiskBytes: 100 * gib}
@@ -39,13 +39,13 @@ func TestFreeCapacityIsWhatTheVendorHasOnOfferWithinTheShapes(t *testing.T) {
 		t.Fatalf("asked the market about %+v, want the shape as it is rented: %+v", asked[0], want)
 	}
 	nodes, err := e.GetLiveNodeResourceCapacity(ctx)
-	if err != nil || nodes["h100-0"][domain.NodeResourceCPUMillicores] != 8000 || nodes["h100-1"][domain.NodeResourceCPUMillicores] != 0 {
+	if err != nil || nodes["h100-0"][clusterapi.NodeResourceCPUMillicores] != 8000 || nodes["h100-1"][clusterapi.NodeResourceCPUMillicores] != 0 {
 		t.Fatalf("node resources %v, %v", nodes, err)
 	}
 	if cpu, cpuTotal, err := e.GetLiveCPUCapacity(ctx); err != nil || cpu != 12 || cpuTotal != 20 {
 		t.Fatalf("cpu %v of %v, %v", cpu, cpuTotal, err)
 	}
-	if sizes, err := e.GetNodeTotalCapacity(ctx); err != nil || sizes["h100-1"][domain.NodeResourceCPUMillicores] != 8000 {
+	if sizes, err := e.GetNodeTotalCapacity(ctx); err != nil || sizes["h100-1"][clusterapi.NodeResourceCPUMillicores] != 8000 {
 		t.Fatalf("an offerless slot lost its size: %v, %v", sizes, err)
 	}
 
@@ -54,7 +54,7 @@ func TestFreeCapacityIsWhatTheVendorHasOnOfferWithinTheShapes(t *testing.T) {
 	mustCreate(t, e, job(t, "exp-1", 0, 1))
 	onOffer[h100] = 0
 	available, _, _, labels, err = e.GetLiveAcceleratorCapacitySnapshot(ctx)
-	if err != nil || available[h100] != 0 || labels["h100-0"][domain.NodeSlotNoOfferLabel] != "" || labels["h100-1"][domain.NodeSlotNoOfferLabel] != "shape h100: every machine on offer for it when last counted is rented by this cluster since" {
+	if err != nil || available[h100] != 0 || labels["h100-0"][clusterapi.NodeSlotNoOfferLabel] != "" || labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] != "shape h100: every machine on offer for it when last counted is rented by this cluster since" {
 		t.Fatalf("one rented and none on offer: available %v, labels %v, %v", available, labels, err)
 	}
 }
@@ -93,11 +93,11 @@ func TestAShapeWithNothingToRentSaysWhyOnItsSlotsAndInTheLog(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, slot := range []string{"h100-0", "h100-1"} {
-			if got := labels[slot][domain.NodeSlotNoOfferLabel]; got != "shape h100: no offer passes the filters" {
+			if got := labels[slot][clusterapi.NodeSlotNoOfferLabel]; got != "shape h100: no offer passes the filters" {
 				t.Fatalf("slot %s says %q", slot, got)
 			}
 		}
-		if got := labels["cpu-0"][domain.NodeSlotNoOfferLabel]; got != "" {
+		if got := labels["cpu-0"][clusterapi.NodeSlotNoOfferLabel]; got != "" {
 			t.Fatalf("the cpu slot, which has an offer, says %q", got)
 		}
 		clock = clock.Add(10 * time.Second)
@@ -189,7 +189,7 @@ func TestAProviderWithoutAMarketReportsEverySlotNoInstanceHoldsFree(t *testing.T
 		t.Fatal(err)
 	}
 	available, _, _, labels, err := e.GetLiveAcceleratorCapacitySnapshot(context.Background())
-	if err != nil || available[h100] != 2 || labels["h100-1"][domain.NodeSlotNoOfferLabel] != "" || p.Calls("Rentable") != 0 {
+	if err != nil || available[h100] != 2 || labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] != "" || p.Calls("Rentable") != 0 {
 		t.Fatalf("available %v, labels %v, market calls %d, %v", available, labels, p.Calls("Rentable"), err)
 	}
 }

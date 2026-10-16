@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
@@ -13,7 +14,7 @@ import (
 // attempts would look fine while every retry read as a foreign generation and was requeued or
 // evicted forever. Absence has to survive decoding as absence.
 func TestAStatusReportWithNoAttemptIsRecordedAsUnknownNotZero(t *testing.T) {
-	var rep statusReport
+	var rep clusterapi.StatusReport
 	if err := json.Unmarshal([]byte(`{"experiment_id":"exp-1","phase":"running"}`), &rep); err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +26,7 @@ func TestAStatusReportWithNoAttemptIsRecordedAsUnknownNotZero(t *testing.T) {
 
 // A first attempt is a real generation and must survive the same path as the number it is.
 func TestAStatusReportForTheFirstAttemptIsRecordedAsZero(t *testing.T) {
-	var rep statusReport
+	var rep clusterapi.StatusReport
 	if err := json.Unmarshal([]byte(`{"experiment_id":"exp-1","phase":"running","attempt":0}`), &rep); err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +42,7 @@ func TestAReportFromASupersededAttemptIsDroppedNotRecorded(t *testing.T) {
 	current := domain.Placement{ClusterName: cluster, AttemptCount: 2}
 
 	for name, tc := range map[string]struct {
-		rep       statusReport
+		rep       clusterapi.StatusReport
 		placement domain.Placement
 		accepted  bool
 	}{
@@ -58,7 +59,7 @@ func TestAReportFromASupersededAttemptIsDroppedNotRecorded(t *testing.T) {
 		},
 		// A cluster-agent that predates the field. Accepted, or its cluster goes dark on upgrade.
 		"a report naming no attempt": {
-			rep: statusReport{ExperimentID: "exp-1", Phase: "running"}, placement: current, accepted: true,
+			rep: clusterapi.StatusReport{ExperimentID: "exp-1", Phase: "running"}, placement: current, accepted: true,
 		},
 		// Ownership still decides first, whatever the generation says.
 		"the right attempt on the wrong cluster": {
@@ -102,7 +103,7 @@ func TestAFirstAttemptIsFencedLikeAnyOtherNumber(t *testing.T) {
 func TestAReportFromASlotTheJobIsNoLongerPlacedOnIsDropped(t *testing.T) {
 	const cluster = "rented"
 	placed := domain.Placement{ClusterName: cluster, AttemptCount: 3, Slot: "h100-1"}
-	from := func(node, phase string) statusReport {
+	from := func(node, phase string) clusterapi.StatusReport {
 		rep := reportOfAttempt(3)
 		rep.AdmittedNode, rep.Phase = node, phase
 		return rep
@@ -126,6 +127,6 @@ func TestAReportFromASlotTheJobIsNoLongerPlacedOnIsDropped(t *testing.T) {
 	}
 }
 
-func reportOfAttempt(n int) statusReport {
-	return statusReport{ExperimentID: "exp-1", Phase: "running", Attempt: &n}
+func reportOfAttempt(n int) clusterapi.StatusReport {
+	return clusterapi.StatusReport{ExperimentID: "exp-1", Phase: "running", Attempt: &n}
 }

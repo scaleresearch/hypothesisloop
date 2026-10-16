@@ -35,6 +35,7 @@ import (
 	"github.com/opencontainers/go-digest"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
@@ -160,7 +161,7 @@ func NewHandler(store Store, connectedWithin time.Duration, metricsDBURL string,
 }
 
 // keepPricedAccelerators drops every accelerator type outside the priced catalog from report.
-func (h *Handler) keepPricedAccelerators(report *capacityReport) {
+func (h *Handler) keepPricedAccelerators(report *clusterapi.ReconcileRequest) {
 	unpriced := func(flavor string) bool { return !h.pricedAcceleratorTypes[strings.ToLower(flavor)] }
 	for _, byFlavor := range []map[string]int64{report.AcceleratorAvailableByFlavor, report.AcceleratorTotalByFlavor} {
 		for flavor := range byFlavor {
@@ -190,36 +191,6 @@ func splitLongLines(lines []string, maxLineChars int) []string {
 		out = append(out, line)
 	}
 	return out
-}
-
-// attachDataAccess hands each workload its durable-data address, derived from the experiment's
-// own identity (platform experiment, agent, job), and the job's permanent key stored with it. The
-// store already limits that key to writing the job's own prefix and reading its platform
-// experiment's, so no agent can overwrite another's evidence whatever code it runs.
-func (h *Handler) attachDataAccess(exps []*domain.Experiment) {
-	for _, exp := range exps {
-		exp.Data = &domain.DataAccess{
-			URI:             h.dataStore.URI(objectstore.JobPrefix(exp.PlatformExperimentID, exp.AgentID, exp.ID)),
-			Shared:          h.dataStore.URI(objectstore.PlatformExperimentPrefix(exp.PlatformExperimentID)),
-			Endpoint:        h.dataStore.Endpoint,
-			Region:          h.dataStore.Region,
-			AccessKeyID:     exp.DataKey.AccessKeyID,
-			SecretAccessKey: exp.DataKey.SecretAccessKey,
-		}
-	}
-}
-
-// attachTokens hands each workload the token its job reports metrics with. The token is derived
-// from the job's id, so every reconcile answers with the same one.
-func (h *Handler) attachTokens(exps []*domain.Experiment) error {
-	for _, exp := range exps {
-		token, err := auth.Mint(h.signingSecret, auth.JobScope(exp.ID))
-		if err != nil {
-			return err
-		}
-		exp.Token = token
-	}
-	return nil
 }
 
 // RegisterHuma registers the cluster-agent-facing operations on doc. Paths are relative to
@@ -292,7 +263,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "Atomically records one complete actual-capacity snapshot in metrics storage, keeping only priced accelerator types, then returns the complete PostgreSQL desired workload set for this cluster, plus the ids of workloads whose termination earns them their declared checkpoint window, " +
 			"the environment builds assigned to this cluster (builds, recorded as building only for a runtime that reports builds true), and registry_pull, a login that reads environment images, when a listed workload runs in one.",
 	}, func(ctx context.Context, in *reconcileInput) (*struct {
-		Body reconcileBody
+		Body clusterapi.ReconcileAnswer
 	}, error) {
 		clusterName := in.Name
 
@@ -446,17 +417,13 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
 		}
 		resp := &struct {
-			Body reconcileBody
+			Body clusterapi.ReconcileAnswer
 		}{}
-		h.attachDataAccess(exps)
-		if err := h.attachTokens(exps); err != nil {
-			return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
-		}
-		// A runtime may belong to another org than the job, so it is handed what it builds a
-		// workload from and nothing else of the job.
-		resp.Body.Experiments = make([]*domain.Experiment, len(exps))
+		resp.Body.Jobs = make([]*clusterapi.DesiredJob, len(exps))
 		for i, exp := range exps {
-			resp.Body.Experiments[i] = exp.ForRuntime()
+			if resp.Body.Jobs[i], err = h.desiredJob(exp); err != nil {
+				return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
+			}
 		}
 		resp.Body.CheckpointWindow = domain.CheckpointWindowGrants(undesired)
 		if resp.Body.Builds, resp.Body.RegistryPull, err = h.environmentWork(ctx, clusterName, exps); err != nil {
@@ -653,9 +620,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	}, func(ctx context.Context, in *struct {
 		Name string `path:"name"`
 	}) (*struct {
-		Body struct {
-			Requeued []string `json:"requeued"`
-		}
+		Body clusterapi.DetachAnswer
 	}, error) {
 		requeued, err := h.store.RemoveCluster(ctx, in.Name)
 		switch {
@@ -665,13 +630,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, auth.Internal(h.logger, "detach cluster", err, zap.String("cluster", in.Name))
 		}
 		h.logger.Info("cluster detached by its runtime", zap.String("cluster", in.Name), zap.Int("requeued", len(requeued)))
-		resp := &struct {
-			Body struct {
-				Requeued []string `json:"requeued"`
-			}
-		}{}
-		resp.Body.Requeued = append([]string{}, requeued...)
-		return resp, nil
+		return &struct {
+			Body clusterapi.DetachAnswer
+		}{Body: clusterapi.DetachAnswer{Requeued: append([]string{}, requeued...)}}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{
@@ -680,13 +641,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "Body: {\"reports\": [...]}. The complete snapshot is validated and written atomically; any invalid report rejects the whole request.",
 	}, func(ctx context.Context, in *struct {
 		Name string `path:"name"`
-		Body struct {
-			Reports []statusReport `json:"reports"`
-		}
+		Body clusterapi.StatusPush
 	}) (*struct {
-		Body struct {
-			Status string `json:"status"`
-		}
+		Body clusterapi.StatusAck
 	}, error) {
 		clusterName := in.Name
 		now := time.Now().UTC()
@@ -716,7 +673,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, auth.Internal(h.logger, "cluster push status", err, zap.String("cluster", clusterName))
 		}
-		accepted := make([]statusReport, 0, len(in.Body.Reports))
+		accepted := make([]clusterapi.StatusReport, 0, len(in.Body.Reports))
 		var ended []string
 		for _, rep := range in.Body.Reports {
 			// A report for an experiment this cluster no longer owns is dropped, not a reason to
@@ -745,7 +702,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		for _, rep := range accepted {
 			statusSamples = append(statusSamples, metricsdb.JobStatusSample{
 				ExperimentID: rep.ExperimentID, ClusterName: clusterName, Phase: rep.Phase,
-				AdmittedAcceleratorType: rep.AdmittedAcceleratorType, AdmittedNode: rep.AdmittedNode, AdmittedMachine: rep.AdmittedMachine, At: now,
+				AdmittedAcceleratorType: rep.AdmittedAcceleratorType, AdmittedNode: rep.AdmittedNode, AdmittedMachine: jobMachine(rep.AdmittedMachine), At: now,
 			})
 			observations = append(observations, observationsOf(rep, placementByID[rep.ExperimentID].AdmittedAt, runReportedAt[rep.ExperimentID], clusterName, now, h.observationCadence)...)
 			// LogTail is optional per report (nil when the executor has nothing new)
@@ -780,13 +737,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err := metricsdb.RecordJobStatuses(ctx, h.metricsDBURL, clusterName, now, statusSamples); err != nil {
 			return nil, auth.Internal(h.logger, "cluster push status", err, zap.String("cluster", clusterName))
 		}
-		resp := &struct {
-			Body struct {
-				Status string `json:"status"`
-			}
-		}{}
-		resp.Body.Status = "ok"
-		return resp, nil
+		return &struct {
+			Body clusterapi.StatusAck
+		}{Body: clusterapi.StatusAck{Status: "ok"}}, nil
 	})
 }
 
@@ -818,78 +771,9 @@ func (h *Handler) environmentWork(ctx context.Context, cluster string, exps []*d
 	return builds, &login, nil
 }
 
-// reconcileBody is one reconcile pass's whole answer: what should exist here, and which of the
-// things that should no longer exist are entitled to their checkpoint window on the way out.
-type reconcileBody struct {
-	Experiments []*domain.Experiment `json:"experiments"`
-	// CheckpointWindow names the experiments whose termination was the platform's own decision.
-	// Deliberately ids and nothing else: the runtime is told which workloads still have a window
-	// coming, never the fault class or the rule that produced it. How long each window is was
-	// declared on the job's own spec and compiled into the workload when the runtime created it.
-	CheckpointWindow []string `json:"checkpoint_window"`
-	// Builds are the environment builds assigned to this cluster now.
-	Builds []domain.EnvironmentBuild `json:"builds"`
-	// RegistryPull pulls the environment images of the experiments listed, sent only when one
-	// of them runs in one.
-	RegistryPull *domain.RegistryLogin `json:"registry_pull,omitempty"`
-}
-
 type reconcileInput struct {
 	Name string `path:"name"`
-	Body capacityReport
-}
-
-type capacityReport struct {
-	CPUAvailableCores            float64                     `json:"cpu_available_cores"`
-	CPUTotalCores                float64                     `json:"cpu_total_cores"`
-	AcceleratorAvailableByFlavor map[string]int64            `json:"accelerator_available_by_type"`
-	AcceleratorTotalByFlavor     map[string]int64            `json:"accelerator_total_by_type"`
-	AcceleratorAvailableByNode   map[string]map[string]int64 `json:"accelerator_available_by_node"`
-	// NodeResourcesByNode is free CPU/memory/storage per node, keyed by domain.NodeResource*.
-	// Required: a job runs on one node and must fit that node in every dimension, and a
-	// cluster-wide total cannot answer that — see scheduler.reservePlacement.
-	NodeResourcesByNode map[string]map[string]int64 `json:"node_resources_by_node"`
-	// NodeResourcesTotalByNode mirrors NodeResourcesByNode but carries each node's installed
-	// (allocatable) amount rather than what's currently free — the stable per-node denominator
-	// fair-share math needs, since free capacity fluctuates with what's running. Required for the
-	// same reason NodeResourcesByNode is: a job's node-local fair share cannot be judged against a
-	// number that moves every time something else is scheduled or freed.
-	NodeResourcesTotalByNode map[string]map[string]int64  `json:"node_resources_total_by_node"`
-	NodeLabelsByNode         map[string]map[string]string `json:"node_labels_by_node"`
-	// MultiNodeCapable is whether this cluster's runtime can execute a job spanning more than one
-	// node. A capability of the cluster, reported alongside its capacity and read by admission —
-	// see agentexec.Executor.SupportsMultiNodeJobs. Absent (false) means single-node only, which
-	// is the safe reading: a cluster that has not said it can run distributed work does not get
-	// distributed work.
-	MultiNodeCapable bool `json:"multi_node_capable"`
-	// JobImage is the one image this cluster runs, for a runtime that boots its own
-	// (agentexec.Executor.JobImage). Absent means it runs whatever image a job names.
-	// Placement reads it: a job naming no image goes only where one is fixed, and a job naming
-	// one only where that image runs.
-	JobImage string `json:"job_image,omitempty"`
-	// JobImageDefault is sent only by a runtime built when a cluster that runs any image also
-	// reported, in job_image, where a job naming none ran. True, the cluster runs any image and
-	// job_image is not read. It goes once no such runtime is installed: a report that carries
-	// a field this body does not name is refused.
-	JobImageDefault bool `json:"job_image_default,omitempty"`
-	// AutoscalerEnabled is whether this cluster sits behind a native autoscaler (cluster-autoscaler
-	// / Karpenter) that reacts to Pending pods. Operator-set on the agent deployment
-	// (AUTOSCALER_ENABLED), fail-closed: absent (false) means the scheduler never speculatively
-	// submits onto this cluster.
-	AutoscalerEnabled bool `json:"autoscaler_enabled"`
-	// Builds is whether this cluster's runtime builds environments. Absent (false) means it is
-	// assigned none.
-	Builds bool `json:"builds,omitempty"`
-	// ClusterID is a stable fingerprint the runtime derives live and never persists itself: the
-	// kube-system namespace UID on k8s, /etc/machine-id on bare metal. Unlike ClusterName (an
-	// operator-typed label that can be renamed or duplicated), this identifies the cluster across
-	// a rename — everything scheduler-side that must survive a rename (the cluster's settings,
-	// tried_clusters) keys on it instead of the name.
-	ClusterID             string `json:"cluster_id"`
-	RAMAvailableBytes     int64  `json:"ram_available_bytes"`
-	RAMTotalBytes         int64  `json:"ram_total_bytes"`
-	StorageAvailableBytes int64  `json:"storage_available_bytes"`
-	StorageTotalBytes     int64  `json:"storage_total_bytes"`
+	Body clusterapi.ReconcileRequest
 }
 
 // clusterInfo is one row of GET /internal/clusters.
@@ -927,47 +811,10 @@ type clusterInfo struct {
 	// apart: 16 cores and 4 chips are not 20 of anything.
 	CoreBusy  int64 `json:"core_busy"`
 	CoreTotal int64 `json:"core_total"`
-	// AutoscalerEnabled mirrors the cluster's own most recent capacityReport — see
-	// capacityReport.AutoscalerEnabled. False (the fail-closed default) for a cluster whose agent
+	// AutoscalerEnabled mirrors the cluster's own most recent clusterapi.ReconcileRequest — see
+	// clusterapi.ReconcileRequest.AutoscalerEnabled. False (the fail-closed default) for a cluster whose agent
 	// has never reported it or is not within the freshness window.
 	AutoscalerEnabled bool `json:"autoscaler_enabled"`
-}
-
-// statusReport is one job-status push from a cluster-agent. Reason/Message/RestartCount are the
-// runtime's explanation for why a job's container hasn't started (or has been restarting) — see
-// domain.PhaseDetail. Runtime-agnostic strings: each runtime (k8s, bare-metal) translates its
-// own native vocabulary into domain.PhaseReason* before this ever leaves the agent process.
-type statusReport struct {
-	ExperimentID            string `json:"experiment_id"`
-	Phase                   string `json:"phase"` // pending | running | succeeded | failed | gone
-	AdmittedAcceleratorType string `json:"admitted_accelerator_type,omitempty"`
-	AdmittedNode            string `json:"admitted_node,omitempty"`
-	// AdmittedMachine is what stands behind AdmittedNode, from a runtime that knows it. It goes
-	// only with a node. Absent from a runtime built before it, and from one that knows no more
-	// than the node.
-	AdmittedMachine *domain.JobMachine `json:"admitted_machine,omitempty"`
-	LogTail         []string           `json:"log_tail,omitempty"`
-	Reason          string             `json:"reason,omitempty"`
-	Message         string             `json:"message,omitempty"`
-	RestartCount    int32              `json:"restart_count,omitempty"`
-	// ScheduledNodes is the count of this report's pods with condition PodScheduled=True — see
-	// PhaseDetailRow.ScheduledNodes. Absent (0) on runtimes that don't yet compute it or for a
-	// report where nothing has bound.
-	ScheduledNodes int32 `json:"scheduled_nodes,omitempty"`
-	// SchedulingReason is a best-effort explanation for a still-Pending pod (autoscaler event
-	// message) — see PhaseDetailRow.SchedulingReason.
-	SchedulingReason string `json:"scheduling_reason,omitempty"`
-	// Attempt is the generation of the workload this observation came from, as the control plane
-	// numbered it (domain.Experiment.AttemptCount, handed to the runtime and carried on the
-	// workload it created). A pointer because absent and zero are different answers — see
-	// reportedAttempt.
-	Attempt *int `json:"attempt,omitempty"`
-	// StartedAt and EndedAt are when the job's command started and ended, from a runtime whose
-	// own look at the workload cannot time it: one that rents machines sees them through a
-	// vendor, and reads the times the wrapper beside the command measured. Sent together, once
-	// the command has ended. The time between them is the job's observed run (measuredRun).
-	StartedAt *time.Time `json:"started_at,omitempty"`
-	EndedAt   *time.Time `json:"ended_at,omitempty"`
 }
 
 // measuredRun places the run a machine timed by its own clock on this one. How long the command
@@ -993,7 +840,7 @@ func measuredRun(startedAt, endedAt, admittedAt, reportedAt time.Time) (from, to
 // span every reader computes (metricsdb.ObserveSpan) holds the run whole however rarely the job
 // was seen running. A run reported for a job that holds no capacity is nobody's. runReportedAt is
 // when the end of the run was first reported (Store.RunFirstReportedAt).
-func observationsOf(rep statusReport, admittedAt, runReportedAt time.Time, clusterName string, now time.Time, cadence time.Duration) []metricsdb.Observation {
+func observationsOf(rep clusterapi.StatusReport, admittedAt, runReportedAt time.Time, clusterName string, now time.Time, cadence time.Duration) []metricsdb.Observation {
 	labels := map[string]string{"cluster_name": clusterName}
 	if rep.AdmittedNode != "" {
 		labels["node"] = rep.AdmittedNode
@@ -1037,7 +884,7 @@ func observationsOf(rep statusReport, admittedAt, runReportedAt time.Time, clust
 // behind is of the right cluster and the right generation, and its exit would be recorded as the
 // readmitted job's result. A report naming no node is accepted: it describes no workload in
 // particular.
-func rejectReport(rep statusReport, placement domain.Placement, clusterName string) (string, bool) {
+func rejectReport(rep clusterapi.StatusReport, placement domain.Placement, clusterName string) (string, bool) {
 	if placement.ClusterName != clusterName {
 		return "dropping status report for an experiment this cluster no longer owns", false
 	}
@@ -1052,7 +899,7 @@ func rejectReport(rep statusReport, placement domain.Placement, clusterName stri
 
 // reportedAttempt is the generation a report belongs to, or workload.AttemptUnknown when the
 // cluster-agent named none.
-func reportedAttempt(rep statusReport) int {
+func reportedAttempt(rep clusterapi.StatusReport) int {
 	if rep.Attempt == nil {
 		return workload.AttemptUnknown
 	}

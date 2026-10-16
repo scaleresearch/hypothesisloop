@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"time"
+
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
 // User is a person known to the identity provider. ID is the provider's subject.
@@ -287,4 +289,4 @@ func contains(list []string, v string) bool {
 // no longer registered. A runtime reads it as its cluster having been removed: it stops the
 // workloads it holds and exits. Any other 401 is a token somebody has to fix, and the runtime
 // keeps what it runs.
-const ReasonClusterNotRegistered = "cluster_not_registered"
+const ReasonClusterNotRegistered = clusterapi.ReasonClusterNotRegistered

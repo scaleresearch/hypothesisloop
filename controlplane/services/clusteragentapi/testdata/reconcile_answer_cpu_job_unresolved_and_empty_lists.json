@@ -1,0 +1,50 @@
+{
+  "experiments": [
+    {
+      "id": "job-3",
+      "agent_id": "agent-c",
+      "platform_experiment_id": "",
+      "actor": {
+        "kind": "",
+        "id": "",
+        "name": ""
+      },
+      "project_id": "proj-2",
+      "org_id": "",
+      "code_ref": "",
+      "branch": "",
+      "config_hash": "",
+      "data_ref": "",
+      "job": {
+        "image": "registry.test/job:3",
+        "cpu": "2",
+        "memory": "8Gi",
+        "storage": "4Gi",
+        "accelerator_count": 0
+      },
+      "hypothesis": "",
+      "accelerator_type": "hypothesisloop.dev/cpu=core",
+      "accelerator_count": 2,
+      "estimated_duration_hours": 0,
+      "estimated_cost_acch": 0,
+      "capacity_tier": "guaranteed",
+      "priority_score": 0,
+      "status": "",
+      "data": {
+        "uri": "s3://hl-data/pe-2/agent-c/job-3/",
+        "shared": "s3://hl-data/pe-2/",
+        "endpoint": "http://minio.test:9000",
+        "region": "us-east-1",
+        "access_key_id": "AK3",
+        "secret_access_key": "SK3"
+      },
+      "token": "hls_am9iOmpvYi0z.Wc5MzBIhznwIswTkZzV-rACYe8ihdgi6EiKIYR3fdAA",
+      "attempt_count": 0,
+      "infra_requeue_count": 0,
+      "created_at": "0001-01-01T00:00:00Z",
+      "updated_at": "0001-01-01T00:00:00Z"
+    }
+  ],
+  "checkpoint_window": null,
+  "builds": []
+}

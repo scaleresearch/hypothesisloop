@@ -13,7 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/boundedname"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
@@ -26,7 +26,7 @@ func pullSecretName(experimentID string) string {
 
 // ensurePullSecret writes pull as the experiment's pull Secret when it holds anything else, so
 // its pods pull with the login the control plane handed out last.
-func (c *JobWorkloadClient) ensurePullSecret(ctx context.Context, exp *domain.Experiment, pull *domain.RegistryLogin) error {
+func (c *JobWorkloadClient) ensurePullSecret(ctx context.Context, exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) error {
 	if pull == nil {
 		return fmt.Errorf("workload: experiment %s runs in an environment and the reconcile answer has no registry_pull", exp.ID)
 	}
@@ -71,7 +71,7 @@ func (c *JobWorkloadClient) ensurePullSecret(ctx context.Context, exp *domain.Ex
 
 // RefreshPull rewrites the pull Secret of exp's live workload with the current login: a pod that
 // is rescheduled after the login it was created with expired pulls with this one.
-func (c *JobWorkloadClient) RefreshPull(ctx context.Context, exp *domain.Experiment, pull *domain.RegistryLogin) error {
+func (c *JobWorkloadClient) RefreshPull(ctx context.Context, exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) error {
 	return c.ensurePullSecret(ctx, exp, pull)
 }
 

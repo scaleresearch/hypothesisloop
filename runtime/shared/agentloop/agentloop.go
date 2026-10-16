@@ -4,13 +4,10 @@
 package agentloop
 
 import (
-	"bytes"
 	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,9 +19,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/cpclient"
 )
 
 // DefaultLogTailLines is how many trailing lines FetchLogTail is asked for when the agent
@@ -84,8 +81,8 @@ type Agent struct {
 // progress is told each step of the build as it starts and ends, and loaded the node its image is
 // held on and its digest once it is there, before the push ends.
 type Builder interface {
-	Run(ctx context.Context, b domain.EnvironmentBuild, credential func(ctx context.Context) (username, password string, err error),
-		gitCredential func(ctx context.Context) (domain.EnvironmentGitCredential, error), progress func(format string, args ...any), loaded func(node, digest string)) domain.EnvironmentBuildReport
+	Run(ctx context.Context, b clusterapi.EnvironmentBuild, credential func(ctx context.Context) (username, password string, err error),
+		gitCredential func(ctx context.Context) (clusterapi.EnvironmentGitCredential, error), progress func(format string, args ...any), loaded func(node, digest string)) clusterapi.EnvironmentBuildReport
 }
 
 type runningBuild struct {
@@ -93,7 +90,7 @@ type runningBuild struct {
 	cancel  context.CancelFunc
 	// unsent is the outcome of a build that ended and whose report the control plane did not
 	// take; posting is set while it is posted again.
-	unsent  *domain.EnvironmentBuildReport
+	unsent  *clusterapi.EnvironmentBuildReport
 	posting bool
 }
 
@@ -170,7 +167,7 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 		a.removed.Store(true)
 	}
 	a.reconcileBuilds(ctx, answer.Builds)
-	desired := answer.Experiments
+	desired := answer.Jobs
 	checkpointWindow := make(map[string]bool, len(answer.CheckpointWindow))
 	for _, id := range answer.CheckpointWindow {
 		checkpointWindow[id] = true
@@ -195,7 +192,7 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 		a.Log("this cluster was removed from the control plane: stopping the %d workloads it holds", len(held))
 	}
 
-	desiredByID := make(map[string]*domain.Experiment, len(desired))
+	desiredByID := make(map[string]*clusterapi.DesiredJob, len(desired))
 	for _, exp := range desired {
 		if exp == nil || exp.ID == "" {
 			return fmt.Errorf("desired state contains experiment without identity")
@@ -262,10 +259,10 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 			// failure is tried again next pass, and said as create_failed so its owner reads why
 			// it waits. Both are told with the next status push, logged when they change, and
 			// fail no pass.
-			refused[id] = refusedCreate{attempt: exp.AttemptCount, reason: domain.PhaseReasonCreateFailed, why: err.Error()}
+			refused[id] = refusedCreate{attempt: exp.AttemptCount, reason: clusterapi.PhaseReasonCreateFailed, why: err.Error()}
 			var unrunnable *agentexec.Unrunnable
 			if errors.As(err, &unrunnable) {
-				refused[id] = refusedCreate{attempt: exp.AttemptCount, reason: cmp.Or(unrunnable.Reason, domain.PhaseReasonConfigError), why: unrunnable.Why}
+				refused[id] = refusedCreate{attempt: exp.AttemptCount, reason: cmp.Or(unrunnable.Reason, clusterapi.PhaseReasonConfigError), why: unrunnable.Why}
 			}
 			if a.lastRefused(id) != refused[id] {
 				a.Log("create workload %s: %v", id, err)
@@ -335,7 +332,7 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 	return errors.Join(reconcileErrors...)
 }
 
-func orphanAuxiliaryIDs(desired map[string]*domain.Experiment, actualJobs map[string]bool, auxiliary []string) []string {
+func orphanAuxiliaryIDs(desired map[string]*clusterapi.DesiredJob, actualJobs map[string]bool, auxiliary []string) []string {
 	orphans := make([]string, 0, len(auxiliary))
 	for _, id := range auxiliary {
 		if desired[id] == nil && !actualJobs[id] {
@@ -345,112 +342,56 @@ func orphanAuxiliaryIDs(desired map[string]*domain.Experiment, actualJobs map[st
 	return orphans
 }
 
-// reconcileAnswer is one pass's view of desired state: the workloads that should exist, the
-// experiment ids whose termination the control plane granted a checkpoint window, which of the
-// things that should not exist may still exist for a moment, the builds this cluster runs, and
-// the login the jobs that run in an environment pull their image with.
-type reconcileAnswer struct {
-	Experiments []*domain.Experiment `json:"experiments"`
-	// CheckpointWindow is a plain grant list, not a class or a rule: this loop hands each id
-	// straight to DeleteWorkload and interprets nothing.
-	CheckpointWindow []string                  `json:"checkpoint_window"`
-	Builds           []domain.EnvironmentBuild `json:"builds"`
-	RegistryPull     *domain.RegistryLogin     `json:"registry_pull"`
-}
-
 // fetchDesiredState returns this cluster's desired state. A removed cluster's is empty.
-func (a *Agent) fetchDesiredState(ctx context.Context, exec agentexec.Executor) (reconcileAnswer, error) {
+func (a *Agent) fetchDesiredState(ctx context.Context, exec agentexec.Executor) (clusterapi.ReconcileAnswer, error) {
 	cpuAvail, cpuTotal, err := exec.GetLiveCPUCapacity(ctx)
 	if err != nil {
-		return reconcileAnswer{}, fmt.Errorf("get live CPU capacity: %w", err)
+		return clusterapi.ReconcileAnswer{}, fmt.Errorf("get live CPU capacity: %w", err)
 	}
 	acceleratorAvail, acceleratorTotal, acceleratorByNode, nodeLabels, err := exec.GetLiveAcceleratorCapacitySnapshot(ctx)
 	if err != nil {
-		return reconcileAnswer{}, fmt.Errorf("get live accelerator capacity: %w", err)
+		return clusterapi.ReconcileAnswer{}, fmt.Errorf("get live accelerator capacity: %w", err)
 	}
 	ramAvail, ramTotal, err := exec.GetLiveRAMCapacity(ctx)
 	if err != nil {
-		return reconcileAnswer{}, fmt.Errorf("get live RAM capacity: %w", err)
+		return clusterapi.ReconcileAnswer{}, fmt.Errorf("get live RAM capacity: %w", err)
 	}
 	storageAvail, storageTotal, err := exec.GetLiveStorageCapacity(ctx)
 	if err != nil {
-		return reconcileAnswer{}, fmt.Errorf("get live storage capacity: %w", err)
+		return clusterapi.ReconcileAnswer{}, fmt.Errorf("get live storage capacity: %w", err)
 	}
 	nodeResources, err := exec.GetLiveNodeResourceCapacity(ctx)
 	if err != nil {
-		return reconcileAnswer{}, fmt.Errorf("get live per-node resource capacity: %w", err)
+		return clusterapi.ReconcileAnswer{}, fmt.Errorf("get live per-node resource capacity: %w", err)
 	}
 	nodeResourcesTotal, err := exec.GetNodeTotalCapacity(ctx)
 	if err != nil {
-		return reconcileAnswer{}, fmt.Errorf("get per-node total resource capacity: %w", err)
+		return clusterapi.ReconcileAnswer{}, fmt.Errorf("get per-node total resource capacity: %w", err)
 	}
 	clusterID, err := exec.GetClusterID(ctx)
 	if err != nil {
-		return reconcileAnswer{}, fmt.Errorf("get cluster id: %w", err)
+		return clusterapi.ReconcileAnswer{}, fmt.Errorf("get cluster id: %w", err)
 	}
-	payload, err := json.Marshal(map[string]any{
-		"cpu_available_cores": cpuAvail, "cpu_total_cores": cpuTotal,
-		"accelerator_available_by_type": acceleratorAvail, "accelerator_total_by_type": acceleratorTotal,
-		"accelerator_available_by_node": acceleratorByNode,
-		"node_resources_by_node":        nodeResources,
-		"node_resources_total_by_node":  nodeResourcesTotal,
-		"node_labels_by_node":           nodeLabels,
-		"multi_node_capable":            exec.SupportsMultiNodeJobs(),
-		"job_image":                     exec.OnlyImage(),
-		"autoscaler_enabled":            a.AutoscalerEnabled,
-		"builds":                        a.Builder != nil,
-		"cluster_id":                    clusterID,
-		"ram_available_bytes":           ramAvail, "ram_total_bytes": ramTotal,
-		"storage_available_bytes": storageAvail, "storage_total_bytes": storageTotal,
-	})
-	if err != nil {
-		return reconcileAnswer{}, fmt.Errorf("encode reconcile snapshot: %w", err)
+	report := clusterapi.ReconcileRequest{
+		CPUAvailableCores: cpuAvail, CPUTotalCores: cpuTotal,
+		AcceleratorAvailableByFlavor: acceleratorAvail, AcceleratorTotalByFlavor: acceleratorTotal,
+		AcceleratorAvailableByNode: acceleratorByNode,
+		NodeResourcesByNode:        nodeResources,
+		NodeResourcesTotalByNode:   nodeResourcesTotal,
+		NodeLabelsByNode:           nodeLabels,
+		MultiNodeCapable:           exec.SupportsMultiNodeJobs(),
+		JobImage:                   exec.OnlyImage(),
+		AutoscalerEnabled:          a.AutoscalerEnabled,
+		Builds:                     a.Builder != nil,
+		ClusterID:                  clusterID,
+		RAMAvailableBytes:          ramAvail, RAMTotalBytes: ramTotal,
+		StorageAvailableBytes: storageAvail, StorageTotalBytes: storageTotal,
 	}
-	url := fmt.Sprintf("%s/internal/clusters/%s/reconcile", a.APIURL, a.ClusterName)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return reconcileAnswer{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+a.Token)
-	resp, err := a.HTTPClient.Do(req)
-	if err != nil {
-		return reconcileAnswer{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return reconcileAnswer{}, refusal(resp)
-	}
-	var answer reconcileAnswer
-	if err := json.NewDecoder(resp.Body).Decode(&answer); err != nil {
-		return reconcileAnswer{}, err
+	var answer clusterapi.ReconcileAnswer
+	if err := a.call(ctx, http.MethodPost, "/reconcile", report, &answer); err != nil {
+		return clusterapi.ReconcileAnswer{}, err
 	}
 	return answer, nil
-}
-
-type statusReportWire struct {
-	ExperimentID            string `json:"experiment_id"`
-	Phase                   string `json:"phase"`
-	AdmittedAcceleratorType string `json:"admitted_accelerator_type,omitempty"`
-	AdmittedNode            string `json:"admitted_node,omitempty"`
-	// AdmittedMachine is what stands behind AdmittedNode, and goes only with it.
-	AdmittedMachine *domain.JobMachine `json:"admitted_machine,omitempty"`
-	LogTail         []string           `json:"log_tail,omitempty"`
-	Reason          string             `json:"reason,omitempty"`
-	Message         string             `json:"message,omitempty"`
-	RestartCount    int32              `json:"restart_count,omitempty"`
-	// ScheduledNodes/SchedulingReason carry the gang-readiness facts PollPhaseDetail computes —
-	// see agentexec.Executor.PollPhaseDetail.
-	ScheduledNodes   int32  `json:"scheduled_nodes,omitempty"`
-	SchedulingReason string `json:"scheduling_reason,omitempty"`
-	// Attempt is the generation of the experiment this observation came from. A pointer so an
-	// executor that could not establish one (workload.AttemptUnknown) sends no field at all
-	// rather than a number: the control plane reads absence as "cannot fence" and accepts the
-	// report, and reads a number as a claim it will check against desired state.
-	Attempt *int `json:"attempt,omitempty"`
-	// StartedAt and EndedAt are JobStatus's, sent together or not at all.
-	StartedAt *time.Time `json:"started_at,omitempty"`
-	EndedAt   *time.Time `json:"ended_at,omitempty"`
 }
 
 func (a *Agent) statusReportLoop(ctx context.Context) {
@@ -492,7 +433,7 @@ func (a *Agent) reportStatuses(ctx context.Context, exec agentexec.Executor) {
 	// observe would report it as vanished and get it killed, which is far worse than this tick
 	// reporting nothing: a cluster with no fresh snapshot reads as "cannot tell", and the
 	// controller declines to act on it (see checkSilence's !found branch).
-	reports := make([]statusReportWire, 0, len(ids))
+	reports := make([]clusterapi.StatusReport, 0, len(ids))
 	for _, id := range ids {
 		report, ok := a.statusReportFor(ctx, exec, id)
 		if !ok {
@@ -510,17 +451,17 @@ func (a *Agent) reportStatuses(ctx context.Context, exec agentexec.Executor) {
 // no workload: pending, under the reason the runtime gave, which the control plane ends the job
 // for when it is one that never heals, and with the runtime's words as the message its owner
 // reads.
-func (a *Agent) refusedReports(existing []string) []statusReportWire {
+func (a *Agent) refusedReports(existing []string) []clusterapi.StatusReport {
 	a.unrunnableMu.Lock()
 	defer a.unrunnableMu.Unlock()
-	var reports []statusReportWire
+	var reports []clusterapi.StatusReport
 	for id, refused := range a.unrunnable {
 		if slices.Contains(existing, id) {
 			continue
 		}
 		attempt := refused.attempt
-		reports = append(reports, statusReportWire{
-			ExperimentID: id, Attempt: &attempt, Phase: workload.JobPhasePending.String(),
+		reports = append(reports, clusterapi.StatusReport{
+			ExperimentID: id, Attempt: &attempt, Phase: clusterapi.JobPhasePending.String(),
 			Reason: refused.reason, Message: refused.why,
 		})
 	}
@@ -538,13 +479,13 @@ func (a *Agent) lastRefused(id string) refusedCreate {
 // statusReportFor observes one job: its phase, where it landed, its log tail and why its
 // container is in the state it is in. ok is false when the job could not be observed coherently,
 // which costs the whole snapshot — see reportChangedStatuses for why a partial one is dangerous.
-func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id string) (statusReportWire, bool) {
+func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id string) (clusterapi.StatusReport, bool) {
 	// One combined poll keeps phase, UID and attempt from separate reads from being combined
 	// into an impossible observation during a delete/recreate race.
 	observed, err := exec.PollJobStatus(ctx, id)
 	if err != nil {
 		a.Log("poll job phase %s: %v", id, err)
-		return statusReportWire{}, false
+		return clusterapi.StatusReport{}, false
 	}
 	phase := observed.Phase
 	// Attribution is reported when it can be resolved and left empty when it cannot. It says
@@ -555,8 +496,8 @@ func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id
 	// The control plane bounds an unattributable job on its own (see job_watcher's
 	// runningTypeUnobservable), which it can only do if it keeps hearing the phase.
 	var admittedAcceleratorType, admittedNode string
-	var admittedMachine *domain.JobMachine
-	if phase != workload.JobPhaseGone {
+	var admittedMachine *clusterapi.JobMachine
+	if phase != clusterapi.JobPhaseGone {
 		t, node, consistent, err := exec.ResolveAdmittedAcceleratorType(ctx, id)
 		switch {
 		case err != nil:
@@ -578,7 +519,7 @@ func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id
 	var reason, message string
 	var restartCount, scheduledNodes int32
 	var schedulingReason string
-	if phase != workload.JobPhaseGone {
+	if phase != clusterapi.JobPhaseGone {
 		// Diagnostics accompany the phase; they are not the phase. A read error on one job must
 		// not stop this batch reporting phase for every other job (important.md #19), so it is
 		// logged and that job reports phase alone.
@@ -595,7 +536,7 @@ func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id
 	}
 
 	var attempt *int
-	if observed.Attempt != workload.AttemptUnknown {
+	if observed.Attempt != clusterapi.AttemptUnknown {
 		attempt = &observed.Attempt
 	}
 
@@ -604,7 +545,7 @@ func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id
 		startedAt, endedAt = &observed.StartedAt, &observed.EndedAt
 	}
 
-	return statusReportWire{
+	return clusterapi.StatusReport{
 		ExperimentID:            id,
 		Attempt:                 attempt,
 		StartedAt:               startedAt,
@@ -622,96 +563,43 @@ func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id
 	}, true
 }
 
-// refusalBodyLimit bounds how much of a refusal's body is carried into the log.
-const refusalBodyLimit = 512
+// controlPlane is this cluster's API on the control plane.
+func (a *Agent) controlPlane() *cpclient.Client {
+	return &cpclient.Client{BaseURL: fmt.Sprintf("%s/internal/clusters/%s", a.APIURL, a.ClusterName), Token: a.Token, HTTP: a.HTTPClient}
+}
 
-// refusal is the control plane's own words for why it did not take a request. The loop goes on
-// either way: a 401 or 403 is a token or a registration somebody has to fix, and the reason is
-// what tells them which.
-func refusal(resp *http.Response) error {
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, refusalBodyLimit))
-	var said struct {
-		Reason string `json:"reason"`
-	}
-	if resp.StatusCode == http.StatusUnauthorized && json.Unmarshal(body, &said) == nil && said.Reason == domain.ReasonClusterNotRegistered {
+// call makes one request of this cluster's API. A 401 that says the cluster is no longer
+// registered is ErrClusterRemoved; any other refusal is the control plane's own words, and the
+// loop goes on either way: a 401 or 403 is a token or a registration somebody has to fix, and the
+// reason is what tells them which.
+func (a *Agent) call(ctx context.Context, method, path string, body, out any) error {
+	err := a.controlPlane().Do(ctx, method, path, body, out)
+	var refused *cpclient.Refusal
+	if errors.As(err, &refused) && refused.Status == http.StatusUnauthorized && refused.Reason == clusterapi.ReasonClusterNotRegistered {
 		return ErrClusterRemoved
 	}
-	return &refusedError{status: resp.StatusCode, body: string(bytes.TrimSpace(body))}
-}
-
-// refusedError is a request the control plane answered with status, in its own words.
-type refusedError struct {
-	status int
-	body   string
-}
-
-func (e *refusedError) Error() string {
-	return fmt.Sprintf("control plane answered %d: %s", e.status, e.body)
+	return err
 }
 
 // Detach ends this cluster on the control plane, as its owner would by removing it: its jobs go
 // back to the queue, named in requeued, and its runtime token is refused from then on. The
 // running agent reads that refusal, stops the workloads it holds and exits.
 func (a *Agent) Detach(ctx context.Context) (requeued []string, err error) {
-	url := fmt.Sprintf("%s/internal/clusters/%s", a.APIURL, a.ClusterName)
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
-	if err != nil {
+	var answer clusterapi.DetachAnswer
+	if err := a.call(ctx, http.MethodDelete, "", nil, &answer); err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+a.Token)
-	resp, err := a.HTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, refusal(resp)
-	}
-	var body struct {
-		Requeued []string `json:"requeued"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, err
-	}
-	return body.Requeued, nil
+	return answer.Requeued, nil
 }
 
-type pushStatusResponse struct {
-	Status string `json:"status"`
-}
-
-func (a *Agent) pushStatus(ctx context.Context, reports []statusReportWire) {
-	buf, err := json.Marshal(map[string]any{"reports": reports})
-	if err != nil {
-		a.Log("push status: encode request: %v", err)
-		return
-	}
-	url := fmt.Sprintf("%s/internal/clusters/%s/status", a.APIURL, a.ClusterName)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(buf))
-	if err != nil {
-		a.Log("push status: build request: %v", err)
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+a.Token)
-	resp, err := a.HTTPClient.Do(req)
-	if err != nil {
+func (a *Agent) pushStatus(ctx context.Context, reports []clusterapi.StatusReport) {
+	var ack clusterapi.StatusAck
+	if err := a.call(ctx, http.MethodPost, "/status", clusterapi.StatusPush{Reports: reports}, &ack); err != nil {
 		a.Log("push status: %v", err)
 		return
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		a.Log("push status: %v", refusal(resp))
-		return
-	}
-
-	var body pushStatusResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		a.Log("push status: decode response: %v", err)
-		return
-	}
-	if body.Status != "ok" {
-		a.Log("push status: invalid acknowledgement status %q", body.Status)
+	if ack.Status != "ok" {
+		a.Log("push status: invalid acknowledgement status %q", ack.Status)
 	}
 }
 
