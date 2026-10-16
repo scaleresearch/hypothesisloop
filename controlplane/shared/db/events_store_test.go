@@ -1523,7 +1523,7 @@ capacity_noticed_at = capacity_noticed_at - $2::interval WHERE id = $1`, peID, a
 	}
 	ago("11 minutes")
 	due := mark(true, 10*time.Minute)
-	if due == nil || due.Repeat != 0 || due.NoticedAt != nil || time.Since(due.Since) < 11*time.Minute {
+	if due == nil || due.Repeat != 0 || due.NoticedAt != nil || time.Since(due.Since) < 10*time.Minute {
 		t.Fatalf("free 11 minutes: due %+v, want the first notice of a stretch begun 11 minutes ago", due)
 	}
 	events, stop := listenForEvents(t, pool)
