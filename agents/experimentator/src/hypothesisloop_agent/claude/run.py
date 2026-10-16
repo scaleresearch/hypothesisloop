@@ -483,6 +483,13 @@ _COORDINATOR_SHUTDOWN_PROMPT = (
     "in the past tense, with nothing in it still under way, and where it says why the run ended, say "
     "what is stated above. The platform adds its own record of the close after it. Then end your turn."
 )
+# A planner has no job and no hypothesis, and what it owes is its proposal, which it proposes only
+# finished. The session outlives the machine and resumes with a revision; a file does not.
+_PLANNER_SHUTDOWN_PROMPT = (
+    "This is your last turn, about a minute long. Start nothing new and propose nothing you have not finished. "
+    "End your turn with where your proposal stands and what is left to do on it: a file you wrote on this "
+    "machine is gone with it. A refusal with reason `experiment_closed` means the draft is closed, so retry nothing."
+)
 
 
 def _shutdown_turn_s(setup: core.RunSetup) -> int:
@@ -497,6 +504,8 @@ async def _shutdown_prompt(setup: core.RunSetup) -> str | None:
         return None
     if config.coordinates(setup.cfg):
         return f"{cause} {_COORDINATOR_SHUTDOWN_PROMPT}"
+    if config.plans(setup.cfg):
+        return f"{cause} {_PLANNER_SHUTDOWN_PROMPT}"
     return f"{cause} {_BASELINE_SHUTDOWN_PROMPT if config.measures_baseline(setup.cfg) else _SHUTDOWN_PROMPT}"
 
 
