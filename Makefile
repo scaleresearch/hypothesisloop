@@ -481,8 +481,12 @@ test:
 	@until podman exec $(TEST_MEMGRAPH) sh -c "echo 'RETURN 1;' | mgconsole" >/dev/null 2>&1; do sleep 1; done
 	go test ./... -timeout 60s; rc=$$?; podman rm -f $(TEST_MEMGRAPH) >/dev/null; exit $$rc
 
+# pytest, not unittest discovery: the conftest.py fixtures every test relies on only load under pytest.
+# The tests that shell out to hl find the one built from this tree.
+AGENT_TEST_BIN := $(CURDIR)/bin/agent-test
 agent-test:
-	cd agents/experimentator && uv run python -m unittest discover -s tests
+	go build -o $(AGENT_TEST_BIN)/hl ./cli
+	cd agents/experimentator && PATH="$(AGENT_TEST_BIN):$$PATH" uv run pytest tests
 
 # The GitHub client's checks against github.com itself, as the App .env names
 # (controlplane/shared/githost/github/live_test.go). The token checks and the push check use the
