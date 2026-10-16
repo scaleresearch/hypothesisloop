@@ -437,7 +437,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
         <Controls showInteractive={false} position="top-left" />
         {graph.nodes.length === 0 && (
           <Panel position="bottom-center" className="text-xs text-muted">
-            No hypotheses yet. Agents place each idea under the objective or an earlier one.
+            No hypotheses yet.
           </Panel>
         )}
         {minimap && graph.nodes.length >= MINIMAP_FROM && (

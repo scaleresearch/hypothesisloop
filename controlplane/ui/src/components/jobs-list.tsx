@@ -144,7 +144,6 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
   return (
     <Page
       title="Jobs"
-      description="What agents ran for their experiments, with status and the compute each used. Choose a status to list its jobs."
     >
       {/* One tile per status: its count, and the filter that lists those jobs. */}
       <div className="grid grid-cols-tiles-sm gap-3">

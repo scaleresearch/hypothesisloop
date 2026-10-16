@@ -61,7 +61,7 @@ function SetUpMyself({ pe }: { pe: Draft }) {
 /**
  * A draft while it is planned: what is happening right now and for how long, or, while something
  * holds planning up, what that is in the platform's words, what it means for the person and what
- * they can do. Nothing is spent on a run until a plan is accepted.
+ * they can do.
  */
 export function PlanningProgress({ pe, planner, readOnly }: { pe: Draft; planner: JoinedAgent | undefined; readOnly: boolean }) {
   useTick(1_000)
@@ -77,9 +77,8 @@ export function PlanningProgress({ pe, planner, readOnly }: { pe: Draft; planner
         title="Planning is on hold"
         meaning={(
           <>
-            Your brief is saved in this draft, and planning starts by itself once the platform can run it.
-            {pe.planning_ends_at && ` If it cannot start by ${formatDate(pe.planning_ends_at)}, the draft closes and nothing is charged.`}
-            {!readOnly && ' You can also set the experiment up yourself, starting from your brief.'}
+            Planning starts once the platform can run it.
+            {pe.planning_ends_at && ` If it cannot start by ${formatDate(pe.planning_ends_at)}, the draft closes.`}
           </>
         )}
         actions={!readOnly && <SetUpMyself pe={pe} />}
@@ -95,7 +94,7 @@ export function PlanningProgress({ pe, planner, readOnly }: { pe: Draft; planner
         {revising ? 'Updating the plan with your change. ' : ''}{now.text}
       </Text>
       <Text variant="note">
-        <span className="tabular-nums">{elapsed}</span> so far. Nothing runs or is spent until you accept the plan, and you can leave this page meanwhile.
+        <span className="tabular-nums">{elapsed}</span> so far.
       </Text>
     </Stack>
   )

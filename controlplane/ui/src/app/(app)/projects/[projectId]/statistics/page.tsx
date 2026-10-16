@@ -136,7 +136,7 @@ function StaffStatistics() {
   )
 
   return (
-    <Page title="Statistics" description={`How the jobs of ${project.name} ended, by status and by capacity tier, and how well the platform places and finishes work.`}>
+    <Page title="Statistics">
       {error && <ErrorMessage>Could not load the job statistics of {project.name}: {error.message}</ErrorMessage>}
       {!stats && !error && <Loading />}
 

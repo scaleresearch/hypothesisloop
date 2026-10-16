@@ -58,7 +58,7 @@ export function ExperimentDrafts({ onOpen }: { onOpen: (draft: ExperimentDraft) 
             onConfirm={() => drop(deleting)}
             onClose={() => setDeleting(null)}
           >
-            {`"${nameOf(deleting)}" and everything typed in it are deleted. Nothing was created from it.`}
+            {`"${nameOf(deleting)}" and everything typed in it are deleted.`}
           </ConfirmDialog>
         )}
       </Stack>

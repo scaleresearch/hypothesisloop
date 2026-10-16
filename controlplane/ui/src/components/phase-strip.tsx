@@ -98,7 +98,7 @@ export function PhaseStrip({ pe, jobs = [], stages, readOnly = false, children }
   const { data: agents } = useRoster(pe)
   const why = (
     <Text role="status">
-      {phase === 'baseline' && !pe.baseline_job_id && reasonOf(pe).reason !== 'repository_creating' && 'Preparing the baseline. No researcher starts and none of their machines is rented until it is measured. '}
+      {phase === 'baseline' && !pe.baseline_job_id && reasonOf(pe).reason !== 'repository_creating' && 'Preparing the baseline. '}
       {phase === 'closed' && pe.closed_at && `Closed ${formatDate(pe.closed_at)}. `}
       {reasonOf(pe).summary}
     </Text>

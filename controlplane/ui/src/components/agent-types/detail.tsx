@@ -29,7 +29,7 @@ import { Code, Text } from '@/components/ui/text'
 function readOnlyReason(t: AgentType, administers: boolean, orgName: string): string | null {
   if (t.builtin) return 'Built-in types are read-only for everyone. Duplicate it to get a copy you can edit.'
   if (t.archived_at) return `Archived ${relTime(t.archived_at)}. It takes no new agents and can no longer be edited. Duplicate it to start a new type from it.`
-  if (!administers) return `Only an owner of ${orgName} can edit agent types. You can read this one.`
+  if (!administers) return `Only an owner of ${orgName} can edit agent types.`
   return null
 }
 
@@ -80,7 +80,7 @@ function ArchiveDialog({ type, onClose, onArchived }: { type: AgentType; onClose
   return (
     <Dialog open onClose={onClose} title={`Archive ${type.name}?`} size="sm">
       <Stack>
-        <Text variant="note">It takes no new agents and can no longer be edited. Agents already on it keep running. Nothing is deleted.</Text>
+        <Text variant="note">It takes no new agents and can no longer be edited. Agents already on it keep running.</Text>
         {refusal && (
           <ErrorMessage>
             {refusal.inUse

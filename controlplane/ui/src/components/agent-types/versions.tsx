@@ -197,7 +197,7 @@ export function VersionHistory({ orgID, type, editable, onRestored }: {
           ))}
         </ol>
         {versions.length < 2 ? (
-          <EmptyState>One version so far. Each save makes the next one, and you can compare any two here.</EmptyState>
+          <EmptyState>One version so far.</EmptyState>
         ) : (
           <Stack>
             <Inline gap="sm">

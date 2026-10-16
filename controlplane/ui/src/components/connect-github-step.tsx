@@ -50,7 +50,6 @@ export function ConnectGitHubStep() {
     <>
       <Text tone="muted">
         An experiment keeps its code in a GitHub repository, and no GitHub account is connected to {org.name}.
-        The platform creates repositories and needs none of your existing ones.
       </Text>
       <InstallGitHub />
     </>

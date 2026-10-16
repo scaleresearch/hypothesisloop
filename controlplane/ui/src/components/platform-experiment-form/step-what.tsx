@@ -39,11 +39,11 @@ export function StepWhat({ form, set, isEdit, fileNote, onRepository }: StepProp
           {fileNote?.state === 'filled' && (
             <Text variant="note" role="status">
               {fileNote.filled.length > 0
-                ? `Filled in ${listed(fileNote.filled)} from ${FILE}. Change anything before you create it.`
+                ? `Filled in ${listed(fileNote.filled)} from ${FILE}.`
                 : `${FILE} of ${fileNote.repository} states nothing this form does not already hold.`}
             </Text>
           )}
-          {fileNote?.state === 'none' && <Text variant="note" role="status">{fileNote.repository} has no {FILE}, so the rest is yours to fill in.</Text>}
+          {fileNote?.state === 'none' && <Text variant="note" role="status">{fileNote.repository} has no {FILE}.</Text>}
           {fileNote?.state === 'failed' && (
             <Inline gap="sm">
               <InlineError>Could not read {FILE} of {fileNote.repository}: {fileNote.message}</InlineError>
@@ -67,7 +67,7 @@ export function StepWhat({ form, set, isEdit, fileNote, onRepository }: StepProp
           placeholder={BRIEF_PLACEHOLDER}
         />
       </FormField>
-      <BriefGuide note="Anything the brief leaves open, the agents decide from the code." />
+      <BriefGuide />
     </>
   )
 }

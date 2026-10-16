@@ -152,7 +152,7 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
 
       <Section title="Implementations" note={data.base_ref && <>a new one starts from <Code><Commit codeRef={data.base_ref} /></Code></>} scrollX>
           {data.implementations.length === 0 ? (
-            <EmptyState>No agent has run this hypothesis yet. Each one that does works on a branch of its own.</EmptyState>
+            <EmptyState>No agent has run this hypothesis yet.</EmptyState>
           ) : (
             <Table>
               <thead>
@@ -177,10 +177,7 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
 
       <Section title="Findings" note={data.finding_count > 0 && `${data.finding_count}${data.finding_count > findings.length ? `, showing ${findings.length}` : ''}`}>
           {findings.length === 0 ? (
-            <EmptyState>
-              No findings yet. An agent files one as the summary of a job that tested this hypothesis, once the job
-              has ended.
-            </EmptyState>
+            <EmptyState>No findings yet.</EmptyState>
           ) : (
             <Stack>
               {findings.map(f => {
@@ -209,7 +206,7 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
 
       <Section title="Comments" note={data.comment_count > 0 && `${data.comment_count}${data.comment_count > comments.length ? `, showing ${comments.length}` : ''}`}>
           {comments.length === 0 ? (
-            <EmptyState>No comments yet. A note here needs no job behind it.</EmptyState>
+            <EmptyState>No comments yet.</EmptyState>
           ) : (
             <Stack>
               {comments.map(c => (

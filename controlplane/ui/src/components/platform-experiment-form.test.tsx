@@ -216,7 +216,7 @@ describe('a new platform experiment', () => {
       form: expect.objectContaining({ name: 'Run', description: 'The brief', repository: 'acme/widgets' }), step: '1', failure: 'the installation does not cover acme/widgets',
     }])
     expect(screen.getByLabelText('Brief')).toBeTruthy()
-    expect(screen.getByText(/What you typed is kept as a draft/)).toBeTruthy()
+    expect(screen.getByText('Not created. Change what the refusal names and try again.')).toBeTruthy()
 
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
     await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created, true))

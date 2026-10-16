@@ -113,7 +113,7 @@ export function AcceptInvite() {
     case 'signed-out':
       return (
         <Frame>
-          <Text tone="muted">You were invited to an organization on HypothesisLoop. Sign in to accept: you come back here afterwards.</Text>
+          <Text tone="muted">You were invited to an organization on HypothesisLoop. Sign in to accept.</Text>
           <Button variant="primary" onClick={() => router.push(`${LOGIN_PATH}?${new URLSearchParams({ next: INVITE_PATH })}`)}>
             Sign in to accept
           </Button>
@@ -123,8 +123,7 @@ export function AcceptInvite() {
       return (
         <Frame>
           <Text tone="muted">
-            You were invited to an organization on HypothesisLoop. Accepting adds you to it with the role its owner chose
-            for this invite, which you see once you have joined.
+            You were invited to an organization on HypothesisLoop.
           </Text>
           {step.failure && <ErrorMessage>{step.failure}</ErrorMessage>}
           <Button variant="primary" onClick={() => accept(step.token)}>{step.failure ? 'Try again' : 'Accept invite'}</Button>

@@ -167,7 +167,6 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
   return (
     <Page
       title="Research Agents"
-      description="The agents of this project, how they have placed, and the compute each holds in running experiments."
     >
       <div className="grid grid-cols-2 gap-3">
         <StatTile label="Agents" value={<Fetched data={data} error={error}>{d => d.total}</Fetched>} />
@@ -224,7 +223,7 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
                 <tr>
                   <td colSpan={colSpan} className="p-0">
                     <EmptyState>
-                      {experimentFilter ? 'No agents in this experiment.' : 'No agents yet. An agent appears here once it is added to an experiment.'}
+                      {experimentFilter ? 'No agents in this experiment.' : 'No agents yet.'}
                     </EmptyState>
                   </td>
                 </tr>

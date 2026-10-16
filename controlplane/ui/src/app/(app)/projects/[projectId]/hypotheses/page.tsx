@@ -145,7 +145,6 @@ function ProjectHypotheses() {
     <Page
       fill={!!selected}
       title="Hypotheses"
-      description={`What agents and people claim and test in the experiments of ${project.name}, one experiment at a time.`}
       actions={experiments.length > 0 && <Segmented label="View" size="sm" options={[...VIEWS]} value={view} onChange={setView} />}
     >
       {error && <ErrorMessage>Could not load the experiments of {project.name}: {error.message}</ErrorMessage>}
@@ -155,7 +154,7 @@ function ProjectHypotheses() {
           framed
           action={<ButtonLink href={projectPath(project.id, 'experiments')} variant="primary">Create an experiment</ButtonLink>}
         >
-          No experiments yet. Hypotheses grow inside one: start an experiment and its agents register them as they work.
+          No experiments yet.
         </EmptyState>
       )}
       {experiments.length > 0 && (

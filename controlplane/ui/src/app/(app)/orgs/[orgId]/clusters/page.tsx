@@ -13,7 +13,7 @@ import { StatusLabel } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Stack } from '@/components/ui/stack'
 import { Table, num } from '@/components/ui/table'
-import { Code, Heading, Text } from '@/components/ui/text'
+import { Heading, Text } from '@/components/ui/text'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 
 function AllClustersCounts({ clusters }: { clusters: ClusterInfo[] }) {
@@ -52,7 +52,7 @@ function AllClusters() {
           {error && <ErrorMessage>Could not load the clusters of every org: {error.message}</ErrorMessage>}
           {data && data.clusters.length === 0 && (
             <EmptyState>
-              No cluster has ever connected. Add one above with <Code>Add cluster</Code> and run the start command it shows.
+              No cluster has ever connected.
             </EmptyState>
           )}
           {data && data.clusters.length > 0 && (
@@ -104,8 +104,7 @@ function LiveCapacity() {
         {error && <ErrorMessage>Could not load live capacity: {error.message}</ErrorMessage>}
         {data && clusters.length === 0 && (
           <EmptyState>
-            No cluster {org.name} can use is reporting what it has free right now. This fills in
-            once one of its clusters, or one the platform shares, is connected.
+            No cluster {org.name} can use is reporting what it has free right now.
           </EmptyState>
         )}
         {clusters.map(cluster => (
@@ -158,9 +157,6 @@ export default function ClusterPage() {
   return (
     <Page
         title="Compute Resources"
-        description="The clusters your jobs can run on, which an owner adds, orders and removes here.
-          Each cluster runs an agent that only calls out to the platform for its work and reports
-          back. Nothing connects into your cluster."
     >
       <Section title={`Where the jobs of ${org.name} run`} scrollX>
         <OrgClusters />

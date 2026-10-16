@@ -51,7 +51,7 @@ function NewTypeDialog({ catalog, onClose }: { catalog: AgentType[]; onClose: ()
           />
           <Text variant="hint">{roleOf(role).description} The role is fixed once made.</Text>
         </Stack>
-        <FormField label="Name" hint={start ? `Starts as a copy of ${start.name}, which you then edit.` : undefined}>
+        <FormField label="Name" hint={start ? `Starts as a copy of ${start.name}.` : undefined}>
           <Input value={name} placeholder={start ? `Copy of ${start.name}` : ''} onChange={e => setName(e.target.value)} autoFocus />
         </FormField>
         {error && <ErrorMessage>{error}</ErrorMessage>}
@@ -121,12 +121,11 @@ export function AgentTypesList() {
   return (
     <Page
       title="Agent types"
-      description="What agents run as: a role, a prompt and settings. Built-in types are read-only. Duplicate one to make your own."
       actions={administers && catalog && <Button variant="primary" size="sm" onClick={() => setAdding(true)}>New type</Button>}
     >
       {!administers && (
         <Text tone="muted" role="note">
-          You are a member of {org.name}. You can read every type. Only an owner can create, edit or archive them.
+          Only an owner of {org.name} can create, edit or archive agent types.
         </Text>
       )}
       {error && <ErrorMessage>Could not load agent types: {error.message}</ErrorMessage>}

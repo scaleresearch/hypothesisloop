@@ -48,9 +48,9 @@ function Revise({ draft, declined, onDone }: { draft: Draft; declined: boolean; 
       <Stack gap="sm">
         <FormField
           label={declined ? 'What was missing?' : 'What should be different?'}
-          hint={`${waiting
+          hint={waiting
             ? `The planner is still running until ${formatDate(draft.planner_ends_at)} and starts on this at once.`
-            : 'The planner starts again first, usually about a minute.'}${declined ? '' : ' The current plan stays until the new one is ready.'}`}
+            : 'The planner starts again first, usually about a minute.'}
         >
           <Textarea
             rows={2}
@@ -127,7 +127,7 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
         <Inline gap="md">
           <Button variant="ghost" onClick={() => setConfirming(true)}>Abandon this draft</Button>
           <ConfirmDialog open={confirming} title="Abandon this draft?" confirmLabel="Abandon draft" onConfirm={abandon} onClose={() => setConfirming(false)}>
-            Planning stops and the draft closes. Nothing ran, so nothing is charged, and what you asked stays readable here.
+            Planning stops and the draft closes.
           </ConfirmDialog>
         </Inline>
       )}

@@ -50,7 +50,7 @@ describe('the setup URL GitHub returns the install tab to', () => {
 
   it('says it is done and leads back when the browser does not let it close', async () => {
     arrive('installation_id=7&state=s', { view: 'connected', account: 'acme', returnTo: '/projects/prj_1/experiments' })
-    expect(await screen.findByText('Connected acme. You can close this tab.')).toBeTruthy()
+    expect(await screen.findByText('Connected acme.')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Back to HypothesisLoop' }).getAttribute('href')).toBe('/projects/prj_1/experiments')
   })
 

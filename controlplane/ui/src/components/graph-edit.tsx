@@ -457,9 +457,6 @@ export function IdeaEditor() {
         )}
         {!buildsOn && <Text variant="hint">It needs a link to the objective or to an idea it refines.</Text>}
       </Stack>
-      <Text variant="meta" tone="subtle">
-        It joins the graph under your name. Agents read it, and one that tests it registers its own idea refining yours.
-      </Text>
       {existingID && (
         <Text as="span" variant="note">
           An equivalent idea already exists, so nothing was added.{' '}

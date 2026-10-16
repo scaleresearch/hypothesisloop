@@ -17,7 +17,7 @@ import { errorMessage } from '@/lib/errors'
 
 // Why the visitor is here again, as the redirect that brought them says it.
 const NOTICES = new Map([
-  ['ended', 'Your session ended. Sign in again to continue where you were.'],
+  ['ended', 'Your session ended. Sign in again.'],
   ['refused', 'The API did not accept your session. Sign in again.'],
   ['failed', 'Sign-in did not complete. Try again.'],
 ])
@@ -30,7 +30,7 @@ const WORDING = {
   },
   'sign-up': {
     title: 'Create your account',
-    lead: 'Sign up with an account you already have. There is no password to choose, and the same button signs you in next time.',
+    lead: 'Sign up with an account you already have.',
     other: { question: 'Already have an account?', label: 'Sign in', mode: 'sign-in' },
   },
 } as const

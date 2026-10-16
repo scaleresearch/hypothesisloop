@@ -65,7 +65,7 @@ describe('the agent types page', () => {
     expect(dialog.queryByRole('button', { name: 'Coordinator' })).toBeNull()
     expect(dialog.queryByRole('button', { name: 'Planner' })).toBeNull()
     await userEvent.click(dialog.getByRole('button', { name: 'Baseline' }))
-    expect(dialog.getByText('Starts as a copy of Baseline, which you then edit.')).toBeTruthy()
+    expect(dialog.getByText('Starts as a copy of Baseline.')).toBeTruthy()
     await userEvent.type(dialog.getByLabelText('Name'), 'Strict baseline')
     await userEvent.click(dialog.getByRole('button', { name: 'Create and edit' }))
     expect(createAgentType).toHaveBeenCalledExactlyOnceWith('org_a', { from: 'baseline', name: 'Strict baseline' })
@@ -83,7 +83,7 @@ describe('the agent types page', () => {
   it('lets a member read every type and says only an owner changes them', async () => {
     show('member')
     await screen.findByRole('table', { name: 'Researcher types' })
-    expect(screen.getByRole('note').textContent).toMatch(/Only an owner can create, edit or archive them/)
+    expect(screen.getByRole('note').textContent).toMatch(/Only an owner of Lab can create, edit or archive agent types/)
     expect(screen.queryByRole('button', { name: 'Duplicate' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'New type' })).toBeNull()
   })

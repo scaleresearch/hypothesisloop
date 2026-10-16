@@ -133,7 +133,7 @@ describe('where the org\'s jobs run', () => {
     clusters = [{ ...platform, place: 1 }, { ...platform, name: 'platform-tt', place: 1, connected: false }]
     show()
     expect(await screen.findByRole('columnheader', { name: 'Clusters of Ada, tried first, in the order you set' })).toBeTruthy()
-    expect(screen.getByText(/None yet\. Add one above to run jobs on your own hardware before the platform/)).toBeTruthy()
+    expect(screen.getByText('None yet.')).toBeTruthy()
     expect(screen.getByText(/right now/).querySelector('code')!.textContent).toBe('platform-gpu')
     expect(names()).toEqual(['platform-gpu', 'platform-tt'])
     expect(within(await rowOf('platform-tt')).getByText('Platform')).toBeTruthy()

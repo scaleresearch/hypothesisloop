@@ -391,7 +391,7 @@ export function OrgClusters() {
       {data && data.length === 0 && (
         <EmptyState>
           No cluster is registered for {org.name}, and the platform provides none.
-          {administers ? ' Add one above to run jobs on your own hardware.' : ' An owner adds one here.'}
+          {!administers && ' An owner adds one here.'}
         </EmptyState>
       )}
       {data && data.length > 0 && (
@@ -416,7 +416,7 @@ export function OrgClusters() {
                 <tr>
                   <td colSpan={columns}>
                     <Text as="span" variant="note">
-                      None yet. {administers ? 'Add one above' : 'An owner adds one here'} to run jobs on your own hardware before the platform&apos;s.
+                      None yet.
                     </Text>
                   </td>
                 </tr>

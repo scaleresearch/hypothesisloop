@@ -32,9 +32,9 @@ export default function GitHubReturnPage() {
   const back = view.view === 'connected' && view.returnTo ? view.returnTo : githubCardPath(org.id)
   return (
     <Stack start>
-      {view.view === 'connected' && <Text>Connected {view.account}. You can close this tab.</Text>}
+      {view.view === 'connected' && <Text>Connected {view.account}.</Text>}
       {view.view === 'failed' && <ErrorMessage>{view.message}</ErrorMessage>}
-      {view.view === 'changed' && <Text>Your changes on GitHub are saved. You can close this tab.</Text>}
+      {view.view === 'changed' && <Text>Your changes on GitHub are saved.</Text>}
       {view.view === 'nothing' && <Text>This page finishes an install of the GitHub App. Nothing was connected.</Text>}
       <TextLink href={back}>Back to HypothesisLoop</TextLink>
     </Stack>

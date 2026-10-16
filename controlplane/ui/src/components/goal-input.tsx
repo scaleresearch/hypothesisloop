@@ -152,7 +152,7 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
           void plan()
         }}
       />
-      <BriefGuide note="Anything you leave out, the planner proposes, and you review the whole plan before anything runs or is spent." className="px-6 pb-3" />
+      <BriefGuide className="px-6 pb-3" />
       {unavailable && (
         <div className="px-4 pb-3">
           <Callout tone="warning" className="flex flex-wrap items-center justify-between gap-2">

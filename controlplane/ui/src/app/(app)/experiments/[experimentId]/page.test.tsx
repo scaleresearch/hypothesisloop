@@ -67,12 +67,11 @@ beforeEach(() => {
 })
 
 describe('a shared platform experiment of another org', () => {
-  it('opens in the reader\'s own project, with one note that it is shared and read only', async () => {
+  it('opens in the reader\'s own project, marked shared and read only', async () => {
     show('', {})
     expect(await screen.findByRole('heading', { name: 'Vision benchmark' })).toBeTruthy()
     expect(screen.getByText('Shared · read only')).toBeTruthy()
-    expect(screen.getAllByRole('note')).toHaveLength(1)
-    expect(screen.getByRole('note').textContent).toMatch(/shares this experiment with every account.*change nothing/)
+    expect(screen.queryByRole('note')).toBeNull()
   })
 
   it('shows its agents and no control that writes', async () => {
@@ -100,7 +99,7 @@ describe('a shared platform experiment of another org', () => {
 describe('the baseline of a platform experiment', () => {
   it('is being prepared while the experiment is open without one, and is the job with what it reported once declared', async () => {
     const first = show('', {})
-    expect(await screen.findByText(/Preparing the baseline\. No researcher starts/)).toBeTruthy()
+    expect(await screen.findByText(/Preparing the baseline\./)).toBeTruthy()
     first.unmount()
     cleanup()
 

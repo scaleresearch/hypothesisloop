@@ -87,8 +87,6 @@ export function OrgGitHub() {
 
   return (
     <Stack>
-      <Text tone="muted">Experiments keep their code in repositories of the GitHub accounts connected here.</Text>
-
       {administers && unconfigured && (
         <Callout tone="neutral">This deployment has no GitHub App configured, so no GitHub account can be connected.</Callout>
       )}

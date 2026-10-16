@@ -298,7 +298,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
           {rowError && <ErrorMessage>{rowError}</ErrorMessage>}
           {!agents && !error && <Loading />}
           {agents && agents.length === 0 && (
-            <EmptyState>No agents yet.{!readOnly && ' Nothing runs in this experiment until at least one joins.'}</EmptyState>
+            <EmptyState>No agents yet.</EmptyState>
           )}
           {agents && agents.length > 0 && (
             <Table aria-label="Agents">

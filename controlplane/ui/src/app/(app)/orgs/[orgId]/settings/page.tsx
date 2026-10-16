@@ -121,7 +121,7 @@ export default function SettingsPage() {
   const { me, org, administers } = useTenant()
   const where = org.role ? `, where you are ${org.role}` : ''
   return (
-    <Page title="Settings" description={`Settings of ${org.name}${where}: its name, projects, members, API keys and GitHub accounts.`}>
+    <Page title="Settings" description={`Settings of ${org.name}${where}.`}>
       <Section title="Your organizations" note={me.orgs.filter(o => o.role).length} scrollX>
         <YourOrgs />
       </Section>

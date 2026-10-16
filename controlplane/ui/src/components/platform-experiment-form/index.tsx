@@ -298,7 +298,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
                 </ul>
               )}
             </ErrorMessage>
-            <Text variant="hint">Not created. {draftID ? 'What you typed is kept as a draft: change what the refusal names and try again.' : 'Change what the refusal names and try again.'}</Text>
+            <Text variant="hint">Not created. Change what the refusal names and try again.</Text>
           </Stack>
         )}
         {error && <ErrorMessage>{error}</ErrorMessage>}

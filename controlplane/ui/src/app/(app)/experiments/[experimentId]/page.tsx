@@ -404,12 +404,6 @@ function PlatformExperimentDetail({ id }: { id: string }) {
         <HostedMachines pe={pe} jobs={stats?.total ?? 0} />
       </PhaseStrip>
 
-      {readOnly && (
-        <Text variant="note" role="note">
-          The platform shares this experiment with every account. You can read everything in it and change nothing.
-        </Text>
-      )}
-
       <Baseline pe={pe} />
       <Figures label="This experiment in figures" figures={figures} />
 

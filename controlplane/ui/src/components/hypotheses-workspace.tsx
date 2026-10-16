@@ -189,7 +189,6 @@ export function ExperimentHypotheses({ peID, embedded = false }: { peID: string;
         <Page
           fill
           title="Hypotheses"
-          description="Each experiment grows a graph of research claims. Every hypothesis is a new approach to the experiment's objective or refines earlier hypotheses, and may contradict or relate to others."
         >
           {content}
         </Page>
@@ -234,7 +233,7 @@ function Workspace({ graph, pe, mutate, canWrite, closed, view, q, setQ, search,
           {view !== 'graph' ? (
             <>
               {graph.nodes.length === 0 && (
-                <Text variant="note" className="px-3 pt-2.5">No hypotheses yet. Agents place each idea under the objective or an earlier one.</Text>
+                <Text variant="note" className="px-3 pt-2.5">No hypotheses yet.</Text>
               )}
               <HypothesisOutline
                 graph={graph}

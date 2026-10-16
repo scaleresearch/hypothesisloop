@@ -25,7 +25,7 @@ function machinesStatus(instances: AgentInstance[], jobs: number): { now: string
   const now = `The platform runs ${plural(instances.length, 'machine')} for this experiment: ${parts.join(', ')}.`
   const latest = instances.map(i => i.progress_at).filter((at): at is string => !!at).sort().pop()
   if (count('stopped') === instances.length) return { now, next: 'None is asked for again. Agents, below, says why each ended.' }
-  if (!latest) return { now, next: 'A machine boots and clones the repository in about a minute. Nothing else shows until then.' }
+  if (!latest) return { now, next: 'A machine boots and clones the repository in about a minute.' }
   const progress = `Last progress ${relTime(latest)}.`
   if (jobs === 0) return { now, next: `${progress} The agents are reading the brief and the code. Their first hypotheses and jobs follow within a few minutes.` }
   return { now, next: progress }

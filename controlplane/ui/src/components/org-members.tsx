@@ -251,8 +251,8 @@ function Question({ change, onConfirm, onClose }: { change: Change; onConfirm: (
       onClose={onClose}
     >
       {self
-        ? 'You lose access to it at once: your API keys in it stop working and the invites you made are revoked. What you wrote stays. Coming back takes a new invite.'
-        : 'They lose access at once: their API keys in it stop working and the invites they made are revoked. What they wrote stays.'}
+        ? 'You lose access to it at once: your API keys in it stop working and the invites you made are revoked. Coming back takes a new invite.'
+        : 'They lose access at once: their API keys in it stop working and the invites they made are revoked.'}
     </ConfirmDialog>
   )
 }

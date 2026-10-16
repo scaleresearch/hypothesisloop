@@ -144,7 +144,7 @@ describe('your organizations', () => {
       expect.stringMatching(/^Laborg_labmember1.*Current$/),
     ])
     expect(rows()[1].getAttribute('aria-current')).toBe('true')
-    expect(screen.getByText(/^Settings of Lab, where you are member:/)).toBeTruthy()
+    expect(screen.getByText('Settings of Lab, where you are member.')).toBeTruthy()
   })
 
   it('switches to another org in one click, to the settings of that org', () => {

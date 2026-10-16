@@ -165,7 +165,7 @@ describe('what nobody here edits', () => {
 
   it('shows a member the org\'s type read-only and says who can edit it', async () => {
     show('member')
-    expect(await screen.findByText('Only an owner of Lab can edit agent types. You can read this one.')).toBeTruthy()
+    expect(await screen.findByText('Only an owner of Lab can edit agent types.')).toBeTruthy()
     expect(prompt().readOnly).toBe(true)
     expect(screen.queryByRole('button', { name: /Duplicate|Archive/ })).toBeNull()
     await screen.findByText('3 versions')

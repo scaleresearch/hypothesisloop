@@ -249,7 +249,7 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
             <Facts facts={runsOn(proposal)} />
             {!accepted && (
               <Text variant="note">
-                Nothing has run yet. Once you accept, the baseline is measured on {acceleratorLabel(proposal.accelerator_type)} before any researcher starts.
+                Once you accept, the baseline is measured on {acceleratorLabel(proposal.accelerator_type)} before any researcher starts.
               </Text>
             )}
           </Stack>
@@ -280,9 +280,6 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
         )}
         {accepted ? (
           <Captioned caption="What it may spend, as proposed">
-            <Text tone="muted" className="mb-2">
-              The planner estimated these before anything ran. Whoever accepted stated the figures the run started with, shown on this page.
-            </Text>
             <Facts facts={[
               [`Budget (${unit})`, formatAccH(proposal.budget_accelerator_hours)],
               ['Baseline (minutes)', String(proposal.baseline_minutes)],
@@ -293,8 +290,7 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
         ) : (
         <Captioned caption="What it may spend">
           <Text tone="muted" className="mb-2">
-            These four are yours to state. The planner proposed {formatAccH(proposal.budget_accelerator_hours)} {unit} over {proposal.duration_hours} hours of research
-            for {proposal.agents.length} {proposal.agents.length === 1 ? 'researcher' : 'researchers'}, after {proposal.baseline_minutes} minutes to measure the baseline; the figures are an estimate, since nothing has run, and the budget is a cap on everything the run spends, the baseline and burst hours included.
+            The budget caps everything the run spends, the baseline and burst hours included.
           </Text>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <FormField label={`Budget (${unit})`} error={errorOf('budget')}><Input type="number" min={0} step="any" value={budget} disabled={!editable} onChange={e => setBudget(e.target.value)} /></FormField>
