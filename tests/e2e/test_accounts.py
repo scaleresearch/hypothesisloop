@@ -256,14 +256,19 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
 
     printed = a.api.hl("cluster", "add", name)
     match = re.fullmatch(
-        r"""sh -c '[^']*helm upgrade --install hypothesisloop-cluster-agent "\$chart" --version "\$version" """
-        r"""--namespace hypothesisloop --create-namespace --take-ownership --set-file runtimeToken=/dev/stdin "\$@"' sh """
-        r"'oci://([^' ]+)/charts/hypothesisloop-cluster-agent' '0\.1\.0\+([^' ]+)' "
-        rf"--set-string 'clusterName={name}' --set-string 'apiURL=(http://\S+:8081)' --set-string 'metricsURL=(http://\S+:8084)' "
-        r"--set-string 'images\.registry=([^' ]+)' --set-string 'images\.tag=([^' ]+)'\n"
+        r"""sh -c '[^']*printf %s "\$token" \| "\$@"' sh \\\n"""
+        r"  helm upgrade --install hypothesisloop-cluster-agent 'oci://([^' ]+)/charts/hypothesisloop-cluster-agent' \\\n"
+        r"  --version '0\.1\.0\+([^' ]+)' \\\n"
+        r"  --namespace hypothesisloop --create-namespace --take-ownership \\\n"
+        r"  --set-file runtimeToken=/dev/stdin \\\n"
+        rf"  --set-string 'clusterName={name}' \\\n"
+        r"  --set-string 'apiURL=(http://\S+:8081)' \\\n"
+        r"  --set-string 'metricsURL=(http://\S+:8084)' \\\n"
+        r"  --set-string 'images\.registry=([^' ]+)' \\\n"
+        r"  --set-string 'images\.tag=([^' ]+)'\n"
         rf"\nIt asks for the runtime token of {name}:\n(hls_\S+)\n", printed)
     assert match, f"hl cluster add printed {printed!r}"
-    command = printed.split("\n", 1)[0]
+    command = printed.split("\n\n", 1)[0]
     assert "hls_" not in command and "hl cluster token" not in command, "the command holds the runtime token or needs hl on the machine"
     chart_registry, chart_tag, api_url, metrics_url, registry, image_tag, shown_token = match.groups()
     assert (chart_registry, chart_tag) == (registry, image_tag), "the chart named is the one pushed beside the images it runs"

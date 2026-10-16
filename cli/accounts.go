@@ -420,17 +420,19 @@ cluster's runtime token, which the command asks for when it runs, so the token i
 history and the machine needs neither hl nor an API key. Adding a name the org already has
 prints the same again. A cluster takes its own org's jobs only.
 
-Without --bare-metal the command is for a Kubernetes cluster: run it with helm 3.17 or newer
-and kubectl pointed at the cluster (add --kube-context to name another). It installs the
-runtime's chart from the registry, or upgrades it, and takes over a hypothesisloop-jobs
-namespace an older install left. helm uninstall hypothesisloop-cluster-agent -n hypothesisloop
-detaches the cluster again: it removes the cluster here, where its jobs go back to the queue,
-and stops what it runs there.
+Without --bare-metal the command is for a Kubernetes cluster (1.34 or newer): run it with helm
+3.17 or newer where kubectl reaches the cluster (add --kube-context to name another). It
+installs the runtime's chart from the registry into the namespace hypothesisloop, or upgrades
+it, and adds the namespace hypothesisloop-jobs where jobs run. Add --dry-run=server at the end
+to see every object without installing. helm uninstall hypothesisloop-cluster-agent -n
+hypothesisloop detaches the cluster again: it removes the cluster here, where its jobs go back
+to the queue, and stops what it runs there.
 
 With --bare-metal it is for one node with docker or podman, which is a cluster of its own. Run
 the command on the node. It copies the agent out of its image and installs it as a systemd
 unit that starts at boot. It needs root, outbound access to the platform and the image
-registries, and nothing inbound. Running the command of a newer image tag upgrades the agent.
+registries, and nothing inbound. Add --dry-run at the end to check the node and print what it
+would write, changing nothing. Running the command of a newer image tag upgrades the agent.
 To detach the node again, on the node:
 
   sudo bare-agent detach        removes the cluster here, stops its jobs and the agent

@@ -889,23 +889,25 @@ async function scenarios(browser) {
   await page.getByLabel('Cluster name').fill(clusterName)
   await page.getByRole('button', { name: 'Add cluster' }).click()
   const command = await page.getByTestId('secret').innerText()
-  assert.match(
-    command,
-    new RegExp(`^sh -c '[^']*helm upgrade --install hypothesisloop-cluster-agent "\\$chart" --version "\\$version" --namespace hypothesisloop --create-namespace --take-ownership --set-file runtimeToken=/dev/stdin "\\$@"' sh 'oci://[^']+/charts/hypothesisloop-cluster-agent' '0\\.1\\.0\\+[^']+' --set-string 'clusterName=${clusterName}' --set-string 'apiURL=https?://[^']+' --set-string 'metricsURL=https?://[^']+' --set-string 'images\\.registry=[^']+' --set-string 'images\\.tag=[^']+'$`),
-    'the command is the one hl cluster add prints, with the addresses the platform answered with',
-  )
+  const commandLines = command.split(' \\\n  ')
+  assert.match(commandLines[0], /^sh -c '[^']*printf %s "\$token" \| "\$@"' sh$/, 'the command first asks for the token')
+  assert.match(commandLines[1], /^helm upgrade --install hypothesisloop-cluster-agent 'oci:\/\/[^']+\/charts\/hypothesisloop-cluster-agent'$/)
+  assert.match(commandLines[2], /^--version '0\.1\.0\+[^']+'$/)
+  assert.deepEqual(commandLines.slice(3, 6), ['--namespace hypothesisloop --create-namespace --take-ownership', '--set-file runtimeToken=/dev/stdin', `--set-string 'clusterName=${clusterName}'`],
+    'the command is the one hl cluster add prints')
   const registered = await (await api(await tokenOf(ada), `/orgs/${adaMe.orgs[0].id}/clusters`, 'POST', { name: clusterName })).json()
   const runtimeToken = registered.runtime_token
   assert.match(runtimeToken, /^hls_/)
   secrets.add(runtimeToken)
   assert.ok(!command.includes(runtimeToken) && !command.includes('hl cluster token'), 'the command holds no token and needs no hl')
   assert.equal(await page.getByTestId('runtime-token').innerText(), runtimeToken, 'the token the command asks for is shown beside it')
-  assert.ok(command.includes(`--set-string 'apiURL=${registered.api_url}' --set-string 'metricsURL=${registered.metrics_url}' --set-string 'images.registry=${registered.registry}' --set-string 'images.tag=${registered.image_tag}'`))
+  assert.deepEqual(commandLines.slice(6), [`--set-string 'apiURL=${registered.api_url}'`, `--set-string 'metricsURL=${registered.metrics_url}'`, `--set-string 'images.registry=${registered.registry}'`, `--set-string 'images.tag=${registered.image_tag}'`],
+    'the command carries the addresses the platform answered with')
   await page.getByRole('group', { name: 'Kind of cluster' }).getByRole('button', { name: 'Bare-metal node' }).click()
   const nodeCommand = await page.getByTestId('secret').innerText()
   assert.ok(
     nodeCommand.startsWith(`sudo sh -c 'engine="$(command -v docker || command -v podman)" || `) &&
-      nodeCommand.endsWith(` install --cluster "$1" --api-url "$2"' sh '${clusterName}' '${registered.api_url}' '${registered.registry}/hypothesisloop-bare-agent:${registered.image_tag}'`),
+      nodeCommand.endsWith(` exec /usr/local/bin/bare-agent.new "$@"' sh \\\n  '${registered.registry}/hypothesisloop-bare-agent:${registered.image_tag}' \\\n  install --cluster '${clusterName}' --api-url '${registered.api_url}'`),
     `a bare-metal node is shown the command that installs its agent: ${nodeCommand}`,
   )
   assert.ok(!nodeCommand.includes(runtimeToken) && !nodeCommand.includes('hl cluster token'), 'the node command holds no token and needs no hl')

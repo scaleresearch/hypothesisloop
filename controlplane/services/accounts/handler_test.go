@@ -683,16 +683,21 @@ func TestRegisteringAClusterReturnsItsRuntimeToken(t *testing.T) {
 	tricky := RegisteredCluster{ClusterView: ClusterView{Name: "gpu-east"}, RuntimeToken: want, APIURL: "https://api.example/a?ids=1,2&c=$(id)", MetricsURL: "https://metrics.example/it's",
 		Registry: "registry.example/images", ImageTag: "abc1234"}
 	commands := attachCommands(tricky)
-	wantKubernetes := `sh -c '[ -t 0 ] && { printf "Runtime token: " >&2; trap "stty echo" EXIT; stty -echo; }; IFS= read -r token; [ -t 0 ] && echo >&2; ` +
-		`chart="$1" version="$2"; shift 2; printf %s "$token" | helm upgrade --install hypothesisloop-cluster-agent "$chart" --version "$version" ` +
-		`--namespace hypothesisloop --create-namespace --take-ownership --set-file runtimeToken=/dev/stdin "$@"' sh ` +
-		`'oci://registry.example/images/charts/hypothesisloop-cluster-agent' '0.1.0+abc1234' ` +
-		`--set-string 'clusterName=gpu-east' --set-string 'apiURL=https://api.example/a?ids=1\,2&c=$(id)' --set-string 'metricsURL=https://metrics.example/it'\''s' ` +
-		`--set-string 'images.registry=registry.example/images' --set-string 'images.tag=abc1234'`
+	wantKubernetes := `sh -c '[ -t 0 ] && { printf "Runtime token: " >&2; trap "stty echo" EXIT; stty -echo; }; IFS= read -r token; [ -t 0 ] && echo >&2; printf %s "$token" | "$@"' sh \
+  helm upgrade --install hypothesisloop-cluster-agent 'oci://registry.example/images/charts/hypothesisloop-cluster-agent' \
+  --version '0.1.0+abc1234' \
+  --namespace hypothesisloop --create-namespace --take-ownership \
+  --set-file runtimeToken=/dev/stdin \
+  --set-string 'clusterName=gpu-east' \
+  --set-string 'apiURL=https://api.example/a?ids=1\,2&c=$(id)' \
+  --set-string 'metricsURL=https://metrics.example/it'\''s' \
+  --set-string 'images.registry=registry.example/images' \
+  --set-string 'images.tag=abc1234'`
 	wantBareMetal := `sudo sh -c 'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; ` +
-		`staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && ` +
-		`exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2"' sh ` +
-		`'gpu-east' 'https://api.example/a?ids=1,2&c=$(id)' 'registry.example/images/hypothesisloop-bare-agent:abc1234'`
+		`staged="$("$engine" create "$1")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && ` +
+		`shift && exec /usr/local/bin/bare-agent.new "$@"' sh \
+  'registry.example/images/hypothesisloop-bare-agent:abc1234' \
+  install --cluster 'gpu-east' --api-url 'https://api.example/a?ids=1,2&c=$(id)'`
 	if commands.Kubernetes != wantKubernetes {
 		t.Fatalf("kubernetes command: got = %q, want = %q", commands.Kubernetes, wantKubernetes)
 	}
@@ -703,7 +708,7 @@ func TestRegisteringAClusterReturnsItsRuntimeToken(t *testing.T) {
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/clusters", name{"name": "gpu-east"}, http.StatusOK, &registered)
 	plain := registered
 	plain.Attach = AttachCommands{}
-	if registered.Attach != attachCommands(plain) || !strings.Contains(registered.Attach.BareMetal, "'gpu-east' 'https://api.test.invalid'") || strings.Contains(registered.Attach.Kubernetes+registered.Attach.BareMetal, "hls_") {
+	if registered.Attach != attachCommands(plain) || !strings.Contains(registered.Attach.BareMetal, "--cluster 'gpu-east' --api-url 'https://api.test.invalid'") || strings.Contains(registered.Attach.Kubernetes+registered.Attach.BareMetal, "hls_") {
 		t.Fatalf("attach commands answered: %+v, want the two built from the answer, without the token", registered.Attach)
 	}
 
