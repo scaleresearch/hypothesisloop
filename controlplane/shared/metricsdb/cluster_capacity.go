@@ -612,11 +612,6 @@ func runClusterSnapshotQuery(ctx context.Context, dbURL, query string) ([]Vector
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
-	// Metric tables are created by their first write, so before any cluster has reported there
-	// is no snapshot: no rows, the same answer querySQLRows gives.
-	if result.Code == greptimeCodeTableNotFound {
-		return nil, nil
-	}
 	if result.Error != "" {
 		return nil, fmt.Errorf("greptimedb query failed (%d): %s", result.Code, result.Error)
 	}

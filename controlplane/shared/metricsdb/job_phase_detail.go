@@ -27,16 +27,6 @@ const ensureJobPhaseDetailTableSQL = `CREATE TABLE IF NOT EXISTS job_phase_detai
 	PRIMARY KEY(experiment_id)
 ) WITH(ttl='30d')`
 
-// ensureJobPhaseDetailColumnsSQL adds the autoscaler gang-readiness columns to a job_phase_detail
-// table created before they existed. CREATE TABLE IF NOT EXISTS above is a no-op against an
-// existing table, so a rolling upgrade needs this explicit ALTER; IF NOT EXISTS makes it safe to
-// run on every call alongside the CREATE.
-var ensureJobPhaseDetailColumnsSQL = []string{
-	`ALTER TABLE job_phase_detail ADD COLUMN IF NOT EXISTS scheduled_nodes BIGINT`,
-	`ALTER TABLE job_phase_detail ADD COLUMN IF NOT EXISTS scheduling_reason STRING`,
-	`ALTER TABLE job_phase_detail ADD COLUMN IF NOT EXISTS attempt BIGINT`,
-}
-
 // RecordPhaseDetail stores the runtime's current explanation for experimentID's phase — why its
 // container hasn't started, or why it has been restarting — plus the gang-readiness facts the
 // scale-up-timeout watcher needs: scheduledNodes (pods with PodScheduled=True) and
@@ -48,14 +38,6 @@ var ensureJobPhaseDetailColumnsSQL = []string{
 func RecordPhaseDetail(ctx context.Context, dbURL, experimentID, clusterName, reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, attempt int, at time.Time) error {
 	if experimentID == "" {
 		return fmt.Errorf("metricsdb.RecordPhaseDetail: experiment_id is required")
-	}
-	if err := execSQL(ctx, dbURL, ensureJobPhaseDetailTableSQL); err != nil {
-		return fmt.Errorf("metricsdb.RecordPhaseDetail: ensure table: %w", err)
-	}
-	for _, alter := range ensureJobPhaseDetailColumnsSQL {
-		if err := execSQL(ctx, dbURL, alter); err != nil {
-			return fmt.Errorf("metricsdb.RecordPhaseDetail: ensure columns: %w", err)
-		}
 	}
 	insertSQL := fmt.Sprintf(
 		`INSERT INTO job_phase_detail (experiment_id, cluster_name, reason, phase_message, restart_count, scheduled_nodes, scheduling_reason, attempt, ts) VALUES (%s, %s, %s, %s, %d, %d, %s, %d, %d)`,

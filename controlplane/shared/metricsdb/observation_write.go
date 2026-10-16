@@ -3,6 +3,7 @@ package metricsdb
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -30,10 +31,8 @@ const (
 	ExperimentMetricFraction = "experiment_metric_fraction"
 )
 
-// The observation tables as remote write would create them on a first sample, declared up front
-// with every label a reader filters on. ObserveSpan reads all three series in one statement,
-// which fails as a whole while any table is missing, so a store where no job had reported a
-// metric yet billed every job as never observed.
+// Every table a SQL read names, as its first write would create it, declared up front with every
+// column a reader filters on: a read of a missing table is a fault and never an empty answer.
 var ensureObservationTablesSQL = []string{
 	`CREATE TABLE IF NOT EXISTS greptime_physical_table (
 	greptime_timestamp TIMESTAMP(3) NOT NULL,
@@ -65,10 +64,37 @@ var ensureObservationTablesSQL = []string{
 	TIME INDEX (greptime_timestamp),
 	PRIMARY KEY (agent_id, job_id, metric_basis, metric_name, platform_experiment_id)
 ) ENGINE=metric WITH ("on_physical_table" = "greptime_physical_table")`,
+	metricTableSQL(clusterJobSnapshotMetric, "cluster_name", "sample_kind"),
+	metricTableSQL(clusterJobPhaseMetric, "cluster_name", "experiment_id", "sample_kind"),
+	metricTableSQL(clusterJobObservedAtMetric, "cluster_name", "experiment_id", "sample_kind"),
+	metricTableSQL(clusterHeartbeatMetric, "agent_version", "cluster_id", "cluster_name"),
+	metricTableSQL(clusterAcceleratorAvailableMetric, "accelerator_type", "cluster_name"),
+	metricTableSQL(clusterAcceleratorTotalMetric, "accelerator_type", "cluster_name"),
+	metricTableSQL(clusterNodeAcceleratorAvailableMetric, "accelerator_type", "cluster_name", "node"),
+	metricTableSQL(clusterNodeResourceAvailableMetric, "cluster_name", "node", "resource"),
+	metricTableSQL(clusterNodeResourceTotalMetric, "cluster_name", "node", "resource"),
+	metricTableSQL(clusterNodeLabelMetric, "cluster_name", "label_key", "label_value", "node"),
+	ensureJobLogsTableSQL,
+	ensureJobPhaseDetailTableSQL,
+	// The gang-readiness columns, for a job_phase_detail created before them.
+	`ALTER TABLE job_phase_detail ADD COLUMN IF NOT EXISTS scheduled_nodes BIGINT`,
+	`ALTER TABLE job_phase_detail ADD COLUMN IF NOT EXISTS scheduling_reason STRING`,
+	`ALTER TABLE job_phase_detail ADD COLUMN IF NOT EXISTS attempt BIGINT`,
 }
 
-// EnsureObservationTables creates the series ObserveSpan reads, so that a missing one is a
-// fault and never an empty answer. Idempotent; run once at startup.
+// metricTableSQL is the logical table remote write creates for a metric on its first sample,
+// with the labels it is written with as its tags.
+func metricTableSQL(metric string, labels ...string) string {
+	var columns strings.Builder
+	for _, label := range labels {
+		columns.WriteString("\t" + label + " STRING NULL,\n")
+	}
+	return "CREATE TABLE IF NOT EXISTS " + metric + " (\n\tgreptime_timestamp TIMESTAMP(3) NOT NULL,\n\tgreptime_value DOUBLE NULL,\n" +
+		columns.String() + "\tTIME INDEX (greptime_timestamp),\n\tPRIMARY KEY (" + strings.Join(labels, ", ") + ")\n" +
+		`) ENGINE=metric WITH ("on_physical_table" = "greptime_physical_table")`
+}
+
+// EnsureObservationTables creates every table a SQL read names. Idempotent; run once at startup.
 func EnsureObservationTables(ctx context.Context, dbURL string) error {
 	for _, ddl := range ensureObservationTablesSQL {
 		if err := execSQL(ctx, dbURL, ddl); err != nil {
