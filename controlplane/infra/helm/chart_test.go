@@ -180,49 +180,12 @@ func TestTheGitHostOfTheValuesReachesTheConfig(t *testing.T) {
 	}
 }
 
-// A runtime's token is derived from the signing secret, which only the control plane's tool
-// reads. The pod runs that tool first, with what control-service is started with, and the
-// process is started with what it printed.
-func TestEachRuntimeProcessTakesItsTokenFromTheControlPlanesTool(t *testing.T) {
-	release := charttest.Render(t, charttest.External)
-	for deployment, want := range map[string]struct{ script, start string }{
-		"hypothesisloop-cloud-agent": {
-			"/hl-admin cluster add vast default > /token/token && /hl-admin cluster share vast on",
-			`RUNTIME_TOKEN="$(cat /token/token)" exec /cloud-agent`},
-		"hypothesisloop-agent-launcher": {
-			"/hl-admin launcher add main > /token/token",
-			`LAUNCHER_TOKEN="$(cat /token/token)" exec /agent-launcher`},
-	} {
-		script, env := release.TokenInit(t, deployment, secretNames[charttest.External])
-		if script != want.script {
-			t.Errorf("%s: the init container runs %q, want %q", deployment, script, want.script)
-		}
-		charttest.Setenv(t, env)
-		if _, err := config.Load(release.ConfigFile(t, "hypothesisloop-config", "hypothesisloop.yaml")); err != nil {
-			t.Errorf("%s: hl-admin could not load the config with the init container's environment: %v", deployment, err)
-		}
-		if env["DATABASE_URL"] != charttest.Secret["DATABASE_URL"] {
-			t.Errorf("%s: the init container has no DATABASE_URL, which registering a cluster needs", deployment)
-		}
-		pod := release.Deployments[deployment].Spec.Template.Spec
-		if command := pod.Containers[0].Command; len(command) != 3 || command[2] != want.start {
-			t.Errorf("%s: started with %q, want %q", deployment, command, want.start)
-		}
-		for _, entry := range pod.Containers[0].Env {
-			if entry.ValueFrom != nil && (entry.ValueFrom.SecretKeyRef.Key == "HYPOTHESISLOOP_SIGNING_SECRET" || entry.ValueFrom.SecretKeyRef.Key == "DATABASE_URL") {
-				t.Errorf("%s: the process itself is handed %s", deployment, entry.ValueFrom.SecretKeyRef.Key)
-			}
-		}
-	}
-}
-
 func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 	for name, refused := range map[string]struct{ values, set, complaint string }{
 		"no secret name":              {charttest.InCluster, `secretName=""`, "secretName is required"},
 		"no image registry":           {charttest.InCluster, `images.registry=""`, "images.registry is required"},
 		"no image tag":                {charttest.InCluster, `images.tag=""`, "images.tag is required"},
 		"no UI origin":                {charttest.InCluster, `auth.uiOrigin=""`, "auth.uiOrigin is required"},
-		"no launcher":                 {charttest.InCluster, `agents.launcher=""`, "agents.launcher is required"},
 		"no agent image":              {charttest.InCluster, `agents.image=""`, "agents.image is required"},
 		"no API address":              {charttest.InCluster, `publicAPIURL=""`, "publicAPIURL is required"},
 		"an environment builder":      {charttest.InCluster, `environmentBuilder.address=tcp://builder.example.invalid:31234`, "environmentBuilder"},
@@ -238,11 +201,6 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		"no sign-in service":          {charttest.InCluster, `ui.identity.provider=""`, "with ui.enabled it is supabase"},
 		"no Supabase address":         {charttest.InCluster, `ui.identity.supabase.url=""`, "ui.identity.supabase.url is required"},
 		"no publishable key":          {charttest.InCluster, `ui.identity.supabase.publishableKey=""`, "ui.identity.supabase.publishableKey is required"},
-		"cloud-agent without config":  {charttest.InCluster, `cloudAgent.enabled=true`, "cloudAgent.config is required"},
-		"launcher without config":     {charttest.InCluster, `agentLauncher.enabled=true`, "agentLauncher.config is required"},
-		"cloud-agent with no cluster": {charttest.External, `cloudAgent.clusterName=""`, "cloudAgent.clusterName is required"},
-		"cloud-agent with no org":     {charttest.External, `cloudAgent.org=""`, "cloudAgent.org is required"},
-		"a cluster name with a shell": {charttest.External, `cloudAgent.clusterName="a; rm"`, "/cloudAgent/clusterName"},
 		"an App with no slug":         {charttest.External, `gitHost.github.appSlug=""`, "gitHost.github.appSlug is required"},
 		"an App with no id":           {charttest.External, `gitHost.github.appId=0`, "gitHost.github.appId is required"},
 		"no git host":                 {charttest.External, `gitHost.provider=""`, "gitHost/provider"},
@@ -257,7 +215,7 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		"a flag that is text":         {charttest.External, `postgres.enabled="no"`, "/postgres/enabled"},
 		"a secret passed as a value":  {charttest.External, `auth.signingSecret="made-up"`, "signingSecret"},
 		"the removed extra section":   {charttest.External, `config={"extra":"auth: {}"}`, "config"},
-		"env names as one string":     {charttest.External, `cloudAgent.secretEnv="VAST_API_KEY"`, "/cloudAgent/secretEnv"},
+		"env names as one string":     {charttest.External, `providerSecretEnv="VAST_API_KEY"`, "/providerSecretEnv"},
 	} {
 		if complaint := charttest.RenderError(t, refused.values, refused.set); !strings.Contains(complaint, refused.complaint) {
 			t.Errorf("%s: helm said %q, want it to name %q", name, complaint, refused.complaint)
@@ -285,10 +243,6 @@ func TestEachStoreAcceptsOnlyThePodsThatUseIt(t *testing.T) {
 		}},
 		"the database elsewhere": {charttest.External, nil, map[string]access{
 			"hypothesisloop-memgraph": memgraph, "hypothesisloop-greptimedb": greptimedb,
-		}},
-		"runtime processes beside the chart's Postgres": {charttest.External, []string{`postgres.enabled=true`}, map[string]access{
-			"hypothesisloop-memgraph": memgraph, "hypothesisloop-greptimedb": greptimedb,
-			"hypothesisloop-postgres": {5432, []string{control, metrics, "hypothesisloop-cloud-agent", "hypothesisloop-agent-launcher"}},
 		}},
 		"every store elsewhere": {charttest.External, []string{
 			`memgraph.external={"enabled":true,"url":"bolt://memgraph.example.invalid:7687"}`,

@@ -117,10 +117,6 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "launcher": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$|^$"
-        },
         "image": {
           "type": "string"
         }
@@ -410,59 +406,20 @@
         }
       }
     },
-    "cloudAgent": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
-        "config": {
-          "type": "string"
-        },
-        "secretEnv": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
-          }
-        },
-        "resources": {
-          "type": "object"
-        },
-        "clusterName": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$|^$"
-        },
-        "org": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$|^$"
-        },
-        "shared": {
-          "type": "boolean"
-        }
+    "sandbox": {
+      "type": "object"
+    },
+    "cloudCompute": {
+      "type": "array",
+      "items": {
+        "type": "object"
       }
     },
-    "agentLauncher": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
-        "config": {
-          "type": "string"
-        },
-        "secretEnv": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
-          }
-        },
-        "resources": {
-          "type": "object"
-        }
+    "providerSecretEnv": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
       }
     },
     "gitHost": {

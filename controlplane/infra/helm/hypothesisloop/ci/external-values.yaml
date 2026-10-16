@@ -1,6 +1,5 @@
 # A hosted install: the database runs elsewhere, people sign in through an identity provider,
-# repositories are reached through a GitHub App, and a cloud-agent and an agent-launcher rent
-# from two providers. Every value is made up. The chart's
+# repositories are reached through a GitHub App, and control-service rents from two providers. Every value is made up. The chart's
 # tests render it (controlplane/infra/helm/chart_test.go).
 namespace:
   create: false
@@ -22,7 +21,6 @@ auth:
           "y": x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0
   uiOrigin: https://ui.example.invalid
 agents:
-  launcher: main
   image: registry.example.invalid/hypothesisloop-experimentator-base:test
 publicAPIURL: https://api.example.invalid
 postgres:
@@ -49,15 +47,9 @@ gitHost:
   github:
     appId: 4242
     appSlug: made-up-app
-cloudAgent:
-  enabled: true
-  clusterName: vast
-  org: default
-  shared: true
-  secretEnv: [VAST_API_KEY]
-  config: |
-    cluster_name: vast
-    api_url: https://api.example.invalid
+providerSecretEnv: [VAST_API_KEY, FLY_API_TOKEN]
+cloudCompute:
+  - cluster_name: vast
     job_image: registry.example.invalid/hypothesisloop-job:test
     namespace: main
     reconcile_interval_seconds: 10
@@ -84,24 +76,20 @@ cloudAgent:
         memory: 32Gi
         storage: 100Gi
         max_instances: 2
-agentLauncher:
-  enabled: true
-  secretEnv: [FLY_API_TOKEN]
-  config: |
-    launcher_name: main
-    api_url: http://control-service:8081
-    reconcile_interval_seconds: 5
-    create_pause_milliseconds: 1000
-    warm_pool_size: 4
-    provider:
-      name: fly
-      settings:
-        api_token_env: FLY_API_TOKEN
-        app: agents-example
-        region: ams
-        cpu_kind: shared
-    instance:
-      command: ["/opt/hypothesisloop-agent/.venv/bin/python3", "-m", "hypothesisloop_agent.claude.run"]
-      cpu: "2"
-      memory: 4Gi
-      storage: 10Gi
+sandbox:
+  name: main
+  reconcile_interval_seconds: 5
+  create_pause_milliseconds: 1000
+  warm_pool_size: 4
+  provider:
+    name: fly
+    settings:
+      api_token_env: FLY_API_TOKEN
+      app: agents-example
+      region: ams
+      cpu_kind: shared
+  instance:
+    command: ["/opt/hypothesisloop-agent/.venv/bin/python3", "-m", "hypothesisloop_agent.claude.run"]
+    cpu: "2"
+    memory: 4Gi
+    storage: 10Gi

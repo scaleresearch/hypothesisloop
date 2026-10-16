@@ -195,17 +195,6 @@ func (r *Release) Env(t testing.TB, deployment, secretName string) map[string]st
 	return env(t, deployment, containers[0], secretName)
 }
 
-// TokenInit is the init container that leaves a runtime process its token: the script it runs
-// and the environment it runs it with.
-func (r *Release) TokenInit(t testing.TB, deployment, secretName string) (script string, environment map[string]string) {
-	t.Helper()
-	pod := r.Deployments[deployment].Spec.Template.Spec
-	if len(pod.InitContainers) != 1 || len(pod.InitContainers[0].Command) != 3 {
-		t.Fatalf("Deployment %s: init containers = %+v, want the one that runs hl-admin through a shell", deployment, pod.InitContainers)
-	}
-	return pod.InitContainers[0].Command[2], env(t, deployment, pod.InitContainers[0], secretName)
-}
-
 func env(t testing.TB, deployment string, container corev1.Container, secretName string) map[string]string {
 	t.Helper()
 	env := map[string]string{}
@@ -232,7 +221,7 @@ func env(t testing.TB, deployment string, container corev1.Container, secretName
 // exports cannot stand in for one the chart forgot.
 func Setenv(t *testing.T, env map[string]string) {
 	t.Helper()
-	names := []string{"RUNTIME_TOKEN", "LAUNCHER_TOKEN"}
+	var names []string
 	for key := range Secret {
 		names = append(names, key)
 	}

@@ -10,7 +10,6 @@ written as ${NAME}: both services replace it from their environment, which the S
   (list "auth" "identity_providers" .Values.auth.identityProviders)
   (list "auth" "signing_secret" "${HYPOTHESISLOOP_SIGNING_SECRET}")
   (list "auth" "ui_origin" (required "auth.uiOrigin is required: the one browser origin allowed to call the API, which is the address people open the UI at" .Values.auth.uiOrigin))
-  (list "agents" "launcher" (required "agents.launcher is required: the launcher a newly hosted agent is given to" .Values.agents.launcher))
   (list "agents" "image" (required "agents.image is required: the image a hosted agent's machine boots" .Values.agents.image))
   (list "runtimes" "metrics_url" (required "runtimes.metricsURL is required: the address a cluster's runtime reaches metrics-service at" .Values.runtimes.metricsURL))
   (list "runtimes" "registry" (required "images.registry is required: pass the REGISTRY `make images` pushed to" .Values.images.registry))
@@ -69,6 +68,18 @@ The staged file has no environments section: the chart adds the one the values n
 {{- else if or .provider .gcp.pusher .gcp.puller }}
 {{- fail "environments.provider or its section is set without environments.repository, the repository they push to and pull from" }}
 {{- end }}
+{{- end }}
+{{- /*
+The staged file rents nothing: the chart adds the sandbox and cloud_compute sections the values hold.
+*/ -}}
+{{- if regexMatch "(?m)^(sandbox|cloud_compute):" $raw }}
+{{- fail "files/hypothesisloop.yaml has a sandbox or cloud_compute section, and the chart would add a second one" }}
+{{- end }}
+{{- with .Values.sandbox }}
+{{- $raw = printf "%s\nsandbox:\n%s" (trimSuffix "\n" $raw) (toYaml . | indent 2) }}
+{{- end }}
+{{- with .Values.cloudCompute }}
+{{- $raw = printf "%s\ncloud_compute:\n%s" (trimSuffix "\n" $raw) (toYaml . | indent 2) }}
 {{- end }}
 apiVersion: v1
 kind: ConfigMap

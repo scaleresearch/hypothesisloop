@@ -40,7 +40,7 @@ images:
 #                                    config), which may mint the tokens of environments.gcp.pusher
 #                                    and environments.gcp.puller
 #
-# plus whatever cloudAgent.secretEnv and agentLauncher.secretEnv name.
+# plus whatever providerSecretEnv names.
 secretName: ""
 
 # Set to any string that changes when the Secret's content does (a hash of it). It is stamped on
@@ -107,9 +107,7 @@ publicAPIURL: ""
 
 # Hosted agents: the agents section of hypothesisloop.yaml.
 agents:
-  # The launcher_name of the agent-launcher that starts them.
-  launcher: main
-  # Required: the image a hosted agent's machine boots, pullable from wherever the launcher rents.
+  # Required: the image a hosted agent's machine boots, pullable from the sandbox provider.
   image: ""
 
 # Where a cluster's runtime sends metrics: the runtimes section of hypothesisloop.yaml. It is
@@ -228,40 +226,14 @@ ui:
     type: ClusterIP
     nodePort: 30300
 
-# One process per compute provider account; it registers as a cluster and holds that provider's
-# key. Image hypothesisloop-cloud-agent.
-cloudAgent:
-  enabled: false
-  # Required with enabled: the whole config file, as runtime/cloud/settings/cloud-agent.yaml
-  # describes it. It is mounted as it is, so it holds the names of environment variables and
-  # never a secret.
-  config: ""
-  # Required with enabled: the config's cluster_name and the org the cluster belongs to. The pod
-  # registers the cluster for that org at every start and takes its runtime token from the
-  # control plane's own tool, so no one carries a token into the Secret. shared places every
-  # org's jobs on the cluster, and false only its own org's.
-  clusterName: ""
-  org: ""
-  shared: false
-  # Secret keys handed to the process as environment variables of the same name: every variable
-  # the config names, such as the provider's api_key_env.
-  secretEnv: []
-  resources:
-    requests: { cpu: 50m, memory: 64Mi }
-    limits: { cpu: 500m, memory: 256Mi }
-
-# One process per sandbox provider account; it creates and destroys the machines hosted agents
-# run in. Image hypothesisloop-agent-launcher.
-agentLauncher:
-  enabled: false
-  # Required with enabled: the whole config file, as runtime/cloud/settings/agent-launcher.yaml
-  # describes it. Its launcher_name must be agents.launcher above.
-  config: ""
-  # Secret keys handed to the process as environment variables of the same name: the variables
-  # the provider's settings name. The pod takes its own token for agents.launcher from the
-  # control plane's tool at every start. No model credential belongs here: the agents' model
-  # calls go through control-service, which holds it.
-  secretEnv: []
-  resources:
-    requests: { cpu: 50m, memory: 64Mi }
-    limits: { cpu: 500m, memory: 256Mi }
+# Machines control-service rents itself: the sandbox and cloud_compute sections of
+# hypothesisloop.yaml, written as those sections are, which controlplane/settings/sandbox.yaml
+# and cloud-compute.yaml describe. They hold the names of environment variables and never a
+# secret. Without a sandbox nothing is hosted. Each cloud_compute entry is a cluster registered
+# as any other (hl-admin cluster add, run in the control-service pod), and nothing is rented for
+# it until it is.
+sandbox: {}
+cloudCompute: []
+# Secret keys handed to control-service as environment variables of the same name: every variable
+# the provider settings above name, such as FLY_API_TOKEN or VAST_API_KEY.
+providerSecretEnv: []

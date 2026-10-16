@@ -38,9 +38,5 @@ spec:
 {{- end }}
 {{- if .Values.postgres.enabled }}
 ---
-{{- /* The runtime processes reach Postgres from their init container, which registers them. */}}
-{{- $clients := list "control-service" "metrics-service" }}
-{{- if .Values.cloudAgent.enabled }}{{ $clients = append $clients "cloud-agent" }}{{ end }}
-{{- if .Values.agentLauncher.enabled }}{{ $clients = append $clients "agent-launcher" }}{{ end }}
-{{ include "hypothesisloop.storePolicy" (dict "store" "postgres" "ports" (list 5432) "clients" $clients "root" $) }}
+{{ include "hypothesisloop.storePolicy" (dict "store" "postgres" "ports" (list 5432) "clients" (list "control-service" "metrics-service") "root" $) }}
 {{- end }}
