@@ -4,6 +4,7 @@
 # and hl-admin for tokens and cluster registration against the compose stack's postgres.
 LIB_AUTH_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "${LIB_AUTH_REPO}/localdev/lib/clusters.sh"
+. "${LIB_AUTH_REPO}/localdev/lib/node.sh"
 
 # The signing secret every local process is started with is made on this machine by the first
 # render and never leaves it. It has one source, the file: a value from the caller's environment
@@ -146,9 +147,14 @@ fi
 # lib_render_settings <host address> <output>: the settings the local control plane runs with,
 # which are the committed ones with this host's address and the local identity providers filled
 # in, the git host GIT_HOST_PROVIDER names: the GitHub App or the local git server,
-# and the environments section when .env names a registry.
+# and the environments section when .env names a registry. The address is LOCAL_REACHABLE_ADDRESS
+# when .env sets it (lib_advertised_address), so a cluster on another machine reaches the API,
+# the metrics service, the registry, the object store, the git proxy and the git server it is
+# handed. The dev registry serves plain HTTP, which runtimes.registry_plain_http says to every
+# attach command.
 lib_render_settings() {
   local host_address="$1" output="$2" coordinate providers project issuer keys rendered
+  host_address="$(lib_advertised_address "${host_address}")" || return 1
   if [[ ! -e "${HL_SIGNING_SECRET_FILE}" ]]; then
     mkdir -p "$(dirname "${HL_SIGNING_SECRET_FILE}")"
     (umask 077 && openssl rand -hex 32 > "${HL_SIGNING_SECRET_FILE}")
@@ -189,10 +195,11 @@ lib_render_settings() {
   sed -e "s|REPLACE-WITH-HOST-ADDRESS|${host_address}|g" \
       -e "s|REPLACE-WITH-IMAGE-TAG|${image_tag}|g" \
       -e "s|REPLACE-WITH-UI-ORIGIN|http://localhost:3000|g" \
+      -e "s|^  registry_plain_http: false$|  registry_plain_http: true|" \
       -e "s|^  identity_providers: \[\]$|  identity_providers: [${providers}]|" \
       "${LIB_AUTH_REPO}/controlplane/settings/hypothesisloop.yaml" > "${output}"
-  for rendered in "issuer: \"${HL_DEV_JWT_ISSUER}\"" ${issuer:+"issuer: \"${issuer}\""}; do
-    grep -qF -- "${rendered}" "${output}" || { echo "render-settings: the auth section of the settings file changed shape, '${rendered}' was not rendered" >&2; return 1; }
+  for rendered in "issuer: \"${HL_DEV_JWT_ISSUER}\"" ${issuer:+"issuer: \"${issuer}\""} "  registry_plain_http: true"; do
+    grep -qF -- "${rendered}" "${output}" || { echo "render-settings: the settings file changed shape, '${rendered}' was not rendered" >&2; return 1; }
   done
   if grep -qE '^(git_host|environments):' "${output}"; then
     echo "render-settings: the settings file has a git_host or environments section, and the render would add a second one" >&2

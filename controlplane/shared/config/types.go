@@ -325,6 +325,10 @@ type RuntimesConfig struct {
 	MetricsURL string `yaml:"metrics_url"`
 	Registry   string `yaml:"registry"`
 	ImageTag   string `yaml:"image_tag"`
+	// RegistryPlainHTTP says Registry serves plain HTTP with no TLS, as the local dev registry
+	// does: the attach command then pulls the chart over HTTP and has the chart configure every
+	// node's containerd to pull from it over HTTP.
+	RegistryPlainHTTP bool `yaml:"registry_plain_http"`
 }
 
 // EnvironmentsConfig is where the images a repository's .hypothesisloop/Dockerfile declares are

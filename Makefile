@@ -22,6 +22,12 @@ IMAGE_TAG_FILE := localdev/.image-tag
 # the LAN address on Linux. Never *:5000, which macOS AirPlay holds.
 HOST_ADDRESS := $(shell bash -c '. localdev/lib/node.sh && lib_host_address')
 REGISTRY_PUBLISH_IP := $(shell bash -c '. localdev/lib/node.sh && lib_registry_publish_ip')
+# LOCAL_REACHABLE_ADDRESS in .env (.env.example) is the address clusters on other machines reach
+# this host at. Set, the rendered settings hand it out in place of HOST_ADDRESS, and the registry
+# also publishes on REGISTRY_REACHABLE_IP, what it resolves to (docker-compose.reachable.yml).
+# Local nodes keep reaching everything through HOST_ADDRESS.
+REGISTRY_REACHABLE_IP := $(shell bash -c '. localdev/lib/node.sh && lib_registry_reachable_ip')
+COMPOSE := podman compose -f $(COMPOSE_FILE) $(if $(REGISTRY_REACHABLE_IP),-f localdev/controlplane/docker-compose.reachable.yml)
 
 # In production REGISTRY names a real registry the operator provisioned and every cluster
 # node already has network access to (see runtime/k8s/infra/install.sh's REGISTRY_URL) --
@@ -35,7 +41,7 @@ REGISTRY ?= $(LOCAL_REGISTRY)
 ifndef TAG
 TAG := $(shell bash localdev/lib/image-tag.sh)
 endif
-export HOST_ADDRESS REGISTRY_PUBLISH_IP REGISTRY TAG
+export HOST_ADDRESS REGISTRY_PUBLISH_IP REGISTRY_REACHABLE_IP REGISTRY TAG
 # The settings file names this variable and never holds the secret. Local development's value is
 # made by the first render in localdev/.run/signing-secret (localdev/lib/auth.sh reads it) and
 # reaches compose, the scripts and the tests from here.
@@ -57,7 +63,8 @@ check-tag:
 # data_store.endpoint in controlplane/settings/hypothesisloop.yaml carries a
 # REPLACE-WITH-HOST-ADDRESS placeholder rather than an address, because a k3s job pod has its own
 # network namespace and can't reach the host's loopback, and the address differs between macOS
-# and Linux hosts. This renders HOST_ADDRESS in at start-up; the control plane rejects a
+# and Linux hosts. This renders HOST_ADDRESS in at start-up, or LOCAL_REACHABLE_ADDRESS when .env
+# sets it, the one address remote clusters are handed for everything; the control plane rejects a
 # loopback endpoint outright, so a wrong address fails here, not hours into a run with nothing saved.
 # HOST_ADDRESS_FILE hands the same address to the scripts and tests that run outside make.
 # Everything that runs hl-admin depends on this: it reads the rendered settings, since the
@@ -65,11 +72,11 @@ check-tag:
 # target whose output is a token stays just the token.
 render-settings:
 	@test -n "$(HOST_ADDRESS)" || { echo "make: could not detect this host's address" >&2; exit 1; }
-	@bash -c '. localdev/lib/auth.sh && lib_render_settings "$(HOST_ADDRESS)" $(RENDERED_SETTINGS)'
+	@bash -c '. localdev/lib/auth.sh && lib_render_settings "$(HOST_ADDRESS)" $(RENDERED_SETTINGS) && lib_registry_reachable_ip >/dev/null'
 	@echo "$(HOST_ADDRESS)" > $(HOST_ADDRESS_FILE)
 
 registry-up:
-	podman compose -f $(COMPOSE_FILE) up -d registry
+	$(COMPOSE) up -d registry
 	@until curl -fsS -o /dev/null http://$(REGISTRY_PUBLISH_IP):5000/v2/; do sleep 1; done
 
 # One build of this project's images stays on this machine: every other tag leaves podman's
@@ -88,7 +95,7 @@ $(BUILDS):
 # compose is started under auth.sh, which exports the git host's secrets GIT_HOST_PROVIDER names:
 # a PEM does not survive being a make variable.
 controlplane-up: registry-up render-settings images
-	bash -c '. localdev/lib/auth.sh && podman compose -f $(COMPOSE_FILE) up -d'
+	bash -c '. localdev/lib/auth.sh && $(COMPOSE) up -d'
 	@until curl -fsS -o /dev/null http://localhost:$${API_HOST_PORT:-8081}/health; do sleep 1; done
 	@until curl -fsS -o /dev/null http://localhost:8084/health; do sleep 1; done
 	bash -c '. localdev/lib/auth.sh && lib_register_clusters && lib_register_local_cluster'
@@ -149,7 +156,7 @@ runtime-token: render-settings
 # Stops and removes the control-plane containers but KEEPS the data volumes, so `down` + `up` is
 # always safe. To delete the data too, ask for it by name: `make controlplane-destroy`.
 controlplane-down:
-	podman compose -f $(COMPOSE_FILE) down
+	$(COMPOSE) down
 
 # Irreversible: deletes the postgres + GreptimeDB + Memgraph + MinIO volumes (every platform
 # experiment, experiment record, metric, hypothesis and stored checkpoint). Prompts unless CONFIRM=--yes.
@@ -159,7 +166,7 @@ controlplane-destroy:
 		echo "  Re-run with CONFIRM=--yes to proceed." >&2; \
 		exit 1; \
 	fi
-	podman compose -f $(COMPOSE_FILE) down --volumes
+	$(COMPOSE) down --volumes
 
 reset:
 	$(MAKE) controlplane-down
@@ -174,7 +181,13 @@ reset:
 # echo nor a process list shows it.
 # BUILDER=true also builds environments there (install.sh's BUILDER).
 # BUILDER_NODE_IMAGES, the builder node's containerd socket, also loads each build into that node.
-# Usage: RUNTIME_TOKEN="$$(make -s runtime-token CLUSTER=<name>)" make cluster-agent-up CLUSTER=<name> API_URL=... METRICS_URL=... [REGISTRY=...] [TAG=...] [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...] [BUILDER=true [BUILDER_NODE_IMAGES=<containerd socket>]] [DRY_RUN=true]
+# INSECURE_REGISTRY=true has every node pull from REGISTRY over plain HTTP (install.sh's), the
+# default while REGISTRY_TLS_VERIFY=false, as with the dev registry. For a cluster on another
+# machine, name the dev registry as that machine reaches it: REGISTRY=<LOCAL_REACHABLE_ADDRESS>:5000.
+# INSTALL_FLAGS=--dry-run runs install.sh --dry-run: the plan and the checks from inside the
+# cluster, changing nothing.
+# Usage: RUNTIME_TOKEN="$$(make -s runtime-token CLUSTER=<name>)" make cluster-agent-up CLUSTER=<name> API_URL=... METRICS_URL=... [REGISTRY=...] [TAG=...] [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...] [BUILDER=true [BUILDER_NODE_IMAGES=<containerd socket>]] [INSECURE_REGISTRY=true|false] [INSTALL_FLAGS=--dry-run]
+INSECURE_REGISTRY ?= $(if $(filter false,$(REGISTRY_TLS_VERIFY)),true,false)
 cluster-agent-up:
 	@test -n "$(CLUSTER)" || { echo "make cluster-agent-up: CLUSTER=<name> is required, the name the cluster was registered under" >&2; exit 1; }
 	@test -n "$(API_URL)" || { echo "make cluster-agent-up: API_URL is required, the control-plane API as a pod in that cluster reaches it" >&2; exit 1; }
@@ -183,7 +196,7 @@ cluster-agent-up:
 	@test -n "$$RUNTIME_TOKEN" || { echo "make cluster-agent-up: RUNTIME_TOKEN must be in the environment, the token make -s runtime-token CLUSTER=$(CLUSTER) printed" >&2; exit 1; }
 	CLUSTER_NAME="$(CLUSTER)" API_URL="$(API_URL)" METRICS_URL="$(METRICS_URL)" REGISTRY_URL="$(REGISTRY)" TAG="$(TAG)" \
 	  RUNTIME_TOKEN="$$RUNTIME_TOKEN" KUBECONFIG_PATH="$(KUBECONFIG_PATH)" KUBE_CONTEXT="$(KUBE_CONTEXT)" \
-	  BUILDER="$(BUILDER)" BUILDER_NODE_IMAGES="$(BUILDER_NODE_IMAGES)" bash runtime/k8s/infra/install.sh $(if $(filter true,$(DRY_RUN)),--dry-run)
+	  BUILDER="$(BUILDER)" BUILDER_NODE_IMAGES="$(BUILDER_NODE_IMAGES)" INSECURE_REGISTRY="$(INSECURE_REGISTRY)" bash runtime/k8s/infra/install.sh $(INSTALL_FLAGS)
 
 cluster-agent-down:
 	bash runtime/k8s/infra/destroy.sh

@@ -5,7 +5,8 @@
 # change needs a restart of one process and no image build. Every process is started detached,
 # with its pid and its log in localdev/.run, so one can be restarted while the rest keep running.
 #
-#   up       render the settings for the local cluster and (re)start the API and metrics-service;
+#   up       render the settings for the local cluster and (re)start the API and metrics-service,
+#            building hl beside them in localdev/.bin;
 #            start the UI unless it runs, and the git server when GIT_HOST_PROVIDER is local
 #   hosted   the same with what rents compute elsewhere: agent-launcher, on the sandbox provider
 #            SANDBOX_PROVIDER in .env names, and cloud-agent, on the compute provider
@@ -28,7 +29,12 @@ cd "${repo}"
 . localdev/lib/auth.sh
 git_host="$(lib_git_host_provider)"
 
-compose=localdev/controlplane/docker-compose.yml
+# With LOCAL_REACHABLE_ADDRESS in .env the registry is published on that address too
+# (REGISTRY_REACHABLE_IP, from make), so other machines pull from it.
+compose=(-f localdev/controlplane/docker-compose.yml)
+if [[ -n "${REGISTRY_REACHABLE_IP:-}" ]]; then
+  compose+=(-f localdev/controlplane/docker-compose.reachable.yml)
+fi
 rendered=controlplane/settings/.hypothesisloop.rendered.yaml
 settings=controlplane/settings/.hypothesisloop.dev.yaml
 bin=localdev/.bin
@@ -112,19 +118,20 @@ must_stay_up() {
 render_settings() {
   local hosted=() values=("http://localhost:4010" "bolt://localhost:7687" "  control_plane_endpoint: http://localhost:9000") value host
   if [[ "${1:-}" == "hosted" ]]; then
-    host="$(cat localdev/.host-address)"
+    host="$(lib_advertised_address "$(cat localdev/.host-address)")"
     hosted=(-e "s|http://${host}:8081|${public_api}|"
             -e "s|http://${host}:8084|${public_metrics}|"
             -e "s|http://${host}:9000|${public_store}|"
             -e "s|^  image: registry.example.invalid/hypothesisloop-experimentator-base:latest$|  image: ${registry}/hypothesisloop-experimentator-base:${tag}|"
             -e "s|^  registry: ${host}:5000$|  registry: ${registry}|"
+            -e "s|^  registry_plain_http: true$|  registry_plain_http: false|"
             -e "s|^  image_tag: .*$|  image_tag: ${tag}|")
     if [[ "${git_host}" == "local" ]]; then
       hosted+=(-e "s|^    base_url: http://${host}:${HL_GIT_PORT}$|    base_url: ${public_git}|")
       values+=("    base_url: ${public_git}")
     fi
     values+=("  public_api_url: ${public_api}" "  proxy_url: ${public_api}/git" "  metrics_url: ${public_metrics}" "  endpoint: ${public_store}" "  image: ${registry}/hypothesisloop-experimentator-base:${tag}"
-             "  registry: ${registry}" "  image_tag: ${tag}")
+             "  registry: ${registry}" "  image_tag: ${tag}" "  registry_plain_http: false")
   fi
   sed -e 's|http://greptimedb:4000|http://localhost:4010|' \
       -e 's|bolt://memgraph:7687|bolt://localhost:7687|' \
@@ -218,6 +225,9 @@ start_control_plane() {
   fi
   # Built before anything is stopped: a tree that does not compile leaves what runs running.
   (cd controlplane && go build -o "${repo}/${bin}/" ./cmd/control-service ./cmd/metrics-service)
+  # hl beside them, built from the same tree, so localdev/.bin/hl never lags the API it calls.
+  # go build relinks only what changed.
+  go build -o "${repo}/${bin}/hl" ./cli
   # Checked before anything is stopped too: settings rendered before this tree made a key
   # required do not load, and the API would be stopped with nothing to start in its place.
   if ! lib_hl_admin token staff >/dev/null; then
@@ -265,11 +275,11 @@ start_git_server() {
 }
 
 start_datastores() {
-  podman compose -f "${compose}" stop control-service metrics-service >/dev/null 2>&1 || true
+  podman compose "${compose[@]}" stop control-service metrics-service >/dev/null 2>&1 || true
   # Every checkout's compose project has the same name, so a container may have been made from
   # another checkout's paths. compose replaces one whose definition differs from this tree's; the
   # data is in named volumes and stays.
-  REGISTRY=unused TAG=unused podman compose -f "${compose}" up -d postgres memgraph greptimedb minio minio-init >/dev/null
+  REGISTRY=unused TAG=unused podman compose "${compose[@]}" up -d registry postgres memgraph greptimedb minio minio-init >/dev/null
 }
 
 start_ui() {
@@ -316,6 +326,10 @@ case "${action}" in
     fi
     start_ui
     echo "dev: API http://localhost:8081, UI http://localhost:3000"
+    reachable="$(lib_reachable_address)"
+    if [[ -n "${reachable}" ]]; then
+      echo "dev: clusters on other machines are handed ${reachable} (LOCAL_REACHABLE_ADDRESS): API :8081, metrics :8084, registry :5000 (plain HTTP), object store :9000"
+    fi
     status
     ;;
   hosted)

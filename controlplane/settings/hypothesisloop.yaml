@@ -153,10 +153,16 @@ accounts:
 #   registry      the registry the runtime's images are pulled from (host[:port][/path], no
 #                 scheme): where `make images REGISTRY=...` pushed.
 #   image_tag     the tag of those images. One deployment runs one tag: the control plane's own.
+#                 A cluster whose agent reports another is shown with version_skew.
+#   registry_plain_http  true when the registry serves plain HTTP with no TLS, as the local dev
+#                 registry does. The attach command then pulls the chart with helm's --plain-http
+#                 and sets the chart's insecureRegistry, which has every node's containerd pull
+#                 from the registry over HTTP. `make render-settings` sets it for the dev registry.
 runtimes:
   metrics_url: http://REPLACE-WITH-HOST-ADDRESS:8084
   registry: REPLACE-WITH-HOST-ADDRESS:5000
   image_tag: REPLACE-WITH-IMAGE-TAG
+  registry_plain_http: false
 
 # The images the deployment offers a job to run in, so that an agent need not install a
 # framework into a bare image on every run. `hl capacity` lists them and names, on each
@@ -292,7 +298,8 @@ data_store:
   # host's loopback, so a loopback endpoint works everywhere except the one place that matters and
   # fails hours into a run with nothing saved. The same rule the shared code repo's URL follows.
   # `make render-settings` fills in host.containers.internal
-  # on macOS and the LAN address on a Linux host. Loaded config rejects a loopback endpoint rather
+  # on macOS and the LAN address on a Linux host, or LOCAL_REACHABLE_ADDRESS from .env for
+  # clusters on other machines. Loaded config rejects a loopback endpoint rather
   # than letting it through. The control plane sends none of its own requests here.
   endpoint: http://REPLACE-WITH-HOST-ADDRESS:9000
   # Where the control plane itself reaches the store, on its own network: every read and write it

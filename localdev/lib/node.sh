@@ -108,18 +108,72 @@ lib_registry_publish_ip() {
   if [[ "$(uname)" == "Darwin" ]]; then echo 127.0.0.1; else lib_host_ip; fi
 }
 
+# lib_reachable_address prints LOCAL_REACHABLE_ADDRESS from .env (.env.example), the address
+# other machines and the pods of their clusters reach this host at, or nothing when it is unset.
+# It is refused when it is a URL, carries a port, or names this host as only this host reaches it.
+lib_reachable_address() {
+  local address
+  [[ -f "${LIB_NODE_REPO}/.env" ]] || return 0
+  address="$(set +u; . "${LIB_NODE_REPO}/.env"; printf '%s' "${LOCAL_REACHABLE_ADDRESS:-}")"
+  [[ -n "${address}" ]] || return 0
+  if [[ ! "${address}" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
+    echo "LOCAL_REACHABLE_ADDRESS='${address}' must be an IPv4 address or a host name, with no scheme, port or path" >&2
+    return 1
+  fi
+  case "${address}" in
+    localhost | 127.* | 0.0.0.0 | host.containers.internal | host.docker.internal)
+      echo "LOCAL_REACHABLE_ADDRESS='${address}' is an address only this machine reaches: name one other machines and their pods reach, such as this machine's tailnet IP" >&2
+      return 1
+      ;;
+  esac
+  printf '%s' "${address}"
+}
+
+# lib_advertised_address <host address>: the address the rendered settings hand to every cluster,
+# agent and job: LOCAL_REACHABLE_ADDRESS when .env sets it, else the host address.
+lib_advertised_address() {
+  local reachable
+  reachable="$(lib_reachable_address)" || return 1
+  printf '%s' "${reachable:-$1}"
+}
+
+# lib_registry_reachable_ip prints the IPv4 address the registry publishes on beside
+# lib_registry_publish_ip, so other machines pull from it at LOCAL_REACHABLE_ADDRESS. Nothing when
+# that is unset or is the address the registry publishes on anyway.
+lib_registry_reachable_ip() {
+  local reachable ip
+  reachable="$(lib_reachable_address)" || return 1
+  [[ -n "${reachable}" ]] || return 0
+  ip="$(python3 -c 'import socket, sys; print(socket.gethostbyname(sys.argv[1]))' "${reachable}" 2>/dev/null)" || {
+    echo "LOCAL_REACHABLE_ADDRESS='${reachable}' does not resolve on this machine" >&2
+    return 1
+  }
+  [[ "${ip}" == "$(lib_registry_publish_ip)" ]] || printf '%s' "${ip}"
+}
+
 # Prints a k3s registries.yaml that mirrors the local registry at <registry_host>:5000
 # as plain HTTP with no TLS verification -- matches docker-compose.yml's registry service, which
-# is dev-only and never TLS-terminated. A remote cluster's own containerd config is the
-# provisioner's responsibility (see runtime/k8s/infra/install.sh's REGISTRY_URL), not
-# something this repo generates.
+# is dev-only and never TLS-terminated. With LOCAL_REACHABLE_ADDRESS set, the settings name the
+# images under that address, and a local node pulls those through <registry_host> as well, so it
+# never depends on the other network. A remote cluster trusts the registry through the chart's
+# insecureRegistry (runtime/k8s/infra/chart/values.yaml).
 lib_registries_yaml() {
-  local registry_host="$1"
+  local registry_host="$1" reachable
+  reachable="$(lib_reachable_address)" || return 1
   cat <<EOF
 mirrors:
   "${registry_host}:5000":
     endpoint:
       - "http://${registry_host}:5000"
+EOF
+  if [[ -n "${reachable}" && "${reachable}" != "${registry_host}" ]]; then
+    cat <<EOF
+  "${reachable}:5000":
+    endpoint:
+      - "http://${registry_host}:5000"
+EOF
+  fi
+  cat <<EOF
 configs:
   "${registry_host}:5000":
     tls:

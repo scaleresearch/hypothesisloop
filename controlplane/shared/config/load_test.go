@@ -229,7 +229,7 @@ func TestLoadRequiresTheControlPlanesOwnAddressOfTheDataStore(t *testing.T) {
 func TestLoadRejectsRuntimeAddressesARuntimeCannotReach(t *testing.T) {
 	const api, metrics = "  public_api_url: http://host.example.invalid:8081", "  metrics_url: http://host.example.invalid:8084"
 	for name, edit := range map[string][2]string{
-		"no section":                            {"runtimes:\n" + metrics + "\n  registry: host.example.invalid:5000\n  image_tag: abc1234", ""},
+		"no section":                            {"runtimes:\n" + metrics + "\n  registry: host.example.invalid:5000\n  image_tag: abc1234\n  registry_plain_http: false", ""},
 		"no api url":                            {api + "\n", ""},
 		"api url with no host":                  {api, "  public_api_url: /api"},
 		"api url not http":                      {api, "  public_api_url: ftp://example.invalid"},

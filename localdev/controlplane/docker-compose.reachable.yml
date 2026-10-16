@@ -1,0 +1,7 @@
+# Added to docker-compose.yml when .env sets LOCAL_REACHABLE_ADDRESS: the registry is also
+# published on that address, so a cluster on another machine pulls the images and the chart the
+# rendered settings name there. The other services already publish on every address.
+services:
+  registry:
+    ports:
+      - "${REGISTRY_REACHABLE_IP:?run through make, which resolves LOCAL_REACHABLE_ADDRESS}:5000:5000"
