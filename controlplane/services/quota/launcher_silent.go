@@ -72,12 +72,12 @@ func launcherSilence(name string, at *time.Time, now time.Time, staff bool) *dom
 	switch {
 	case at == nil:
 		why.Message = fmt.Sprintf("launcher %s has not checked in since it was registered", name)
-		why.Summary = "Agents can't start: the agent launcher has never checked in. They start when it connects, and deadlines keep running."
+		why.Summary = "Agents can't start yet. They start automatically once they can."
 		silence = "has never checked in"
 	case now.Sub(*at) > launcherSilentAfter:
 		ago := readableDuration(now.Sub(*at))
 		why.Message = fmt.Sprintf("launcher %s last checked in %s ago", name, ago)
-		why.Summary = "Agents are paused: the agent launcher hasn't checked in for " + ago + ". They resume when it reconnects, and deadlines keep running."
+		why.Summary = "Agents are paused and will resume automatically."
 		silence = "last checked in " + ago + " ago"
 	default:
 		return nil
@@ -154,7 +154,7 @@ func (s *PlatformExperimentsService) hosting(ctx context.Context, launcher strin
 		why := &domain.StatusReason{
 			Reason:  reasonLauncherNotRegistered,
 			Message: fmt.Sprintf("the platform gives hosted machines to launcher %q (config agents.launcher), which is not registered: an operator registers it with `hl-admin launcher add %s`", launcher, launcher),
-			Summary: "Hosted agents are unavailable: this platform has no agent launcher set up. The platform's operator needs to start one.",
+			Summary: "Hosted agents aren't available on this platform yet.",
 		}
 		if staff {
 			why.OperatorDetail = fmt.Sprintf("No launcher is registered as %q (config agents.launcher). Register it with hl-admin launcher add %s and start the agent-launcher service (on a dev stack: make dev-hosted).", launcher, launcher)
@@ -167,9 +167,9 @@ func (s *PlatformExperimentsService) hosting(ctx context.Context, launcher strin
 	}
 	why.Message = "nothing can be hosted now: " + why.Message
 	if at == nil {
-		why.Summary = "Hosted agents are unavailable: the agent launcher has never checked in. They become available when it connects."
+		why.Summary = "Hosted agents aren't available right now. They become available automatically."
 	} else {
-		why.Summary = "Hosted agents are unavailable: the agent launcher hasn't checked in for " + readableDuration(time.Since(*at)) + ". They become available when it reconnects."
+		why.Summary = "Hosted agents aren't available right now. They become available automatically."
 	}
 	return Hosting{Unavailable: why}, nil
 }

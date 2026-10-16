@@ -21,7 +21,12 @@ func summarize(why *domain.StatusReason, pe *domain.PlatformExperiment, signups 
 		return strings.ToUpper(move[:1]) + move[1:] + "."
 	}
 	sentence := map[string]func() string{
-		reasonLauncherUnreachable: func() string { return why.Summary },
+		reasonLauncherUnreachable: func() string {
+			if pe.Status == domain.PlatformExpDraft {
+				return "Planning can't start right now. Your brief is saved."
+			}
+			return why.Summary
+		},
 
 		"repository_creating": func() string { return "Creating the experiment's repository. Nothing starts until it exists." },
 		"planning": func() string {
