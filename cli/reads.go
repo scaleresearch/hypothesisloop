@@ -185,8 +185,11 @@ states none of it. For CPU cores (kind cpu, the one type
 hypothesisloop.dev/cpu=core): cores_available, cores_total, per_node_cores_available and
 acch_per_core_hour, which is 1, so
 a budget spent on cores reads as CPU core-hours. A job that needs no accelerator states cpu, a
-whole number, and no accelerator_type, and holds that many cores. accelerator_type is the exact
-string a job spec takes; a type with none available queues and never errors. Last, one line per
+whole number, and no accelerator_type, and holds that many cores; a proposal for such work
+leaves accelerator_type out too, or states hypothesisloop.dev/cpu=core. It runs only on a
+cluster that prints that line. The accelerator_type strings printed here are the only ones a
+job spec or a proposal takes, copied verbatim; a type with none available queues and never
+errors. Last, one line per
 image the deployment offers a job to run in: job_image is its name and what job.image takes,
 image its registry address, carries what is installed. A type's line names in job_images the
 ones that suit it, so a job there names one of those and installs no framework. job.image is

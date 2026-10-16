@@ -302,6 +302,46 @@ func TestAProposalsListOfTextsMayBeOneBlock(t *testing.T) {
 	}
 }
 
+// A planner tried a variant by proposing a copy, which was stored and accepted. --check sends the
+// same proposal for the same check with nothing stored, and a refusal prints every problem.
+func TestAPlannerChecksAProposalWithoutStoringIt(t *testing.T) {
+	got := recordingServer(t, func(int, recorded) any { return map[string]any{"status": "draft"} })
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/ag-1"))
+	file := writeFile(t, "experiment:\n  name: n\nbudget_accelerator_hours: 6\ncpu: 2\n")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"platform-experiments", "propose", "--check", file}, &stdout, &stderr); code != 0 {
+		t.Fatalf("propose --check: exit %d, stderr %s", code, stderr.String())
+	}
+	want := []recorded{{Method: "PUT", Path: "/platform-experiments/pe-env/proposal", Query: "check=true", Body: map[string]any{
+		"experiment": map[string]any{"name": "n"}, "budget_accelerator_hours": float64(6), "cpu": "2",
+	}}}
+	if !reflect.DeepEqual(*got, want) {
+		t.Fatalf("requests = %+v\nwant %+v", *got, want)
+	}
+	if said := stdout.String(); !strings.Contains(said, "passes every check; nothing is stored") || strings.Contains(said, "status") {
+		t.Errorf("stdout = %q, want the line that it passes and nothing stored, and no draft", said)
+	}
+
+	refusal := `{"reason":"invalid_cost","message":"2 problems: ...","problems":[` +
+		`{"reason":"invalid_cost","message":"budget_accelerator_hours is required and must be positive"},` +
+		`{"reason":"accelerator_unreachable","message":"accelerator_type \"cpu\" is on no cluster: \"rtx-4090\""}]}`
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(refusal))
+	}))
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/ag-1"))
+	stdout.Reset()
+	if code := run([]string{"platform-experiments", "propose", "--check", file}, &stdout, &stderr); code != 1 {
+		t.Fatalf("a refused check: exit %d, want 1. stderr %s", code, stderr.String())
+	}
+	for _, line := range []string{"2 problems, fix them all:", "  invalid_cost: budget_accelerator_hours is required", "  accelerator_unreachable: accelerator_type \"cpu\""} {
+		if !strings.Contains(stderr.String(), line) {
+			t.Errorf("stderr = %q, want the line %q", stderr.String(), line)
+		}
+	}
+}
+
 func TestAPlannerProposesItsDraftFromAFile(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any { return map[string]any{"status": "draft"} })
 	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/ag-1"))

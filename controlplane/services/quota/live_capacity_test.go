@@ -221,3 +221,25 @@ func TestCapacityCarriesEachClustersCoresAndMemory(t *testing.T) {
 		t.Errorf("a cluster with no cores reported: %+v", silent)
 	}
 }
+
+// A proposal is held to the types `hl capacity` prints, so the types it may state are read from
+// the same answer, and a type a cluster has none of is on neither.
+func TestTheTypesAProposalMayStateAreTheLinesCapacityLists(t *testing.T) {
+	const cores, chip, gone = string(domain.CPUType), "gpu.product=L40", "gpu.product=A100"
+	clusters := buildClusterCapacity(
+		map[string]map[string]int64{"mixed": {chip: 0, cores: 4, gone: 0}},
+		map[string]map[string]int64{"mixed": {chip: 4, cores: 16, gone: 0}})
+	clusters[0].JobImage = "registry.example.com/hl/box:1"
+
+	var lines []string
+	for _, line := range clusters[0].Accelerators {
+		lines = append(lines, line.AcceleratorType)
+	}
+	want := map[string][]domain.Cluster{
+		chip:  {{Name: "mixed", JobImage: "registry.example.com/hl/box:1"}},
+		cores: {{Name: "mixed", JobImage: "registry.example.com/hl/box:1"}},
+	}
+	if got := typesListed(clusters); !reflect.DeepEqual(got, want) || !reflect.DeepEqual(lines, []string{chip, cores}) {
+		t.Fatalf("listed %v and may state %v, want the lines %v and %v", lines, got, []string{chip, cores}, want)
+	}
+}

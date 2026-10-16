@@ -1025,6 +1025,90 @@ func TestAProposalNamesNoBaselineJobAndStatesTheTypeItsJobsAreSizedFor(t *testin
 	}
 }
 
+// A planner of a CPU-only brief was refused six times: accelerator_type was required, and "", cpu
+// and the CPU type were each unreachable with no word of what was. A proposal states a type
+// `hl capacity` lists, or none for work on cores, and a refusal names every type that is listed.
+func TestAProposalStatesATypeCapacityListsOrNoneForCores(t *testing.T) {
+	cpuAndGPU := map[string][]domain.Cluster{string(domain.CPUType): {{Name: "k3s"}}, "rtx-4090": {{Name: "rented"}}}
+	gpuOnly := map[string][]domain.Cluster{"rtx-4090": {{Name: "rented"}}}
+	for _, tc := range []struct {
+		name      string
+		reachable map[string][]domain.Cluster
+		stated    any
+		wantType  string
+		wantNames []string
+	}{
+		{name: "no accelerator_type is work on cores", reachable: cpuAndGPU, stated: nil, wantType: string(domain.CPUType)},
+		{name: "the CPU type as hl capacity prints it", reachable: cpuAndGPU, stated: string(domain.CPUType), wantType: string(domain.CPUType)},
+		{name: "an accelerator hl capacity lists", reachable: cpuAndGPU, stated: "rtx-4090", wantType: "rtx-4090"},
+		{name: "a type nobody lists", reachable: cpuAndGPU, stated: "cpu", wantNames: []string{`"cpu"`, `"rtx-4090"`, `"` + string(domain.CPUType) + `" (or no accelerator_type`}},
+		{name: "an empty type is no accelerator_type", reachable: gpuOnly, stated: "", wantNames: []string{"work on CPU cores", `"rtx-4090"`}},
+		{name: "cores where no cluster lists them", reachable: gpuOnly, stated: nil, wantNames: []string{"work on CPU cores", `"rtx-4090"`}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := draftWithPlanner()
+			store.reachable = tc.reachable
+			_, call := planningAPI(t, store, thePlanner)
+			body := aProposal(map[string]any{"accelerator_type": tc.stated})
+			if tc.stated == nil {
+				delete(body, "accelerator_type")
+			}
+			code, out := call("PUT", "/platform-experiments/pe-draft/proposal", body)
+			if tc.wantType != "" {
+				if proposal, _ := out["proposal"].(map[string]any); code != http.StatusOK || proposal["accelerator_type"] != tc.wantType {
+					t.Fatalf("got = %d %v, want 200 and accelerator_type %s stored", code, out, tc.wantType)
+				}
+				return
+			}
+			message, _ := out["message"].(string)
+			if code != http.StatusUnprocessableEntity || out["reason"] != "accelerator_unreachable" || store.created[0].ProposedAt != nil {
+				t.Fatalf("got = %d %v, want 422 accelerator_unreachable and nothing stored", code, out)
+			}
+			for _, name := range tc.wantNames {
+				if !strings.Contains(message, name) {
+					t.Errorf("message %q names no %s", message, name)
+				}
+			}
+		})
+	}
+}
+
+// A planner learned of one problem per propose, and to try a variant it proposed a copy, which was
+// stored and accepted. check runs the same check, stores nothing, and a refusal holds every problem.
+func TestACheckedProposalIsStoredNeverAndARefusalHoldsEveryProblem(t *testing.T) {
+	store := draftWithPlanner()
+	_, call := planningAPI(t, store, thePlanner)
+	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal?check=true", aProposal(nil)); code != http.StatusOK || store.created[0].ProposedAt != nil || store.created[0].Proposal != nil || out["proposal"] != nil {
+		t.Fatalf("a checked proposal that passes: got = %d %v, want 200 with the draft as it stands and nothing stored", code, out)
+	}
+
+	broken := aProposal(map[string]any{"budget_accelerator_hours": 0, "accelerator_type": "cpu", "baseline_minutes": 1, "metric_reason": " ", "cpu": "lots"})
+	for _, path := range []string{"/platform-experiments/pe-draft/proposal?check=true", "/platform-experiments/pe-draft/proposal"} {
+		code, out := call("PUT", path, broken)
+		if code != http.StatusUnprocessableEntity || store.created[0].ProposedAt != nil {
+			t.Fatalf("%s: got = %d %v, want 422 and nothing stored", path, code, out)
+		}
+		problems, _ := out["problems"].([]any)
+		var reasons []string
+		for _, problem := range problems {
+			reason, _ := problem.(map[string]any)["reason"].(string)
+			reasons = append(reasons, reason)
+		}
+		for _, want := range []string{"invalid_baseline_minutes", "invalid_cost", "accelerator_unreachable", "invalid_resources", "missing_explanation"} {
+			if !slices.Contains(reasons, want) {
+				t.Errorf("%s: problems %v hold no %s", path, reasons, want)
+			}
+		}
+		if message, _ := out["message"].(string); out["reason"] != reasons[0] || !strings.Contains(message, "5 problems") {
+			t.Errorf("%s: reason %v and message %q, want the first problem's reason and every problem counted", path, out["reason"], message)
+		}
+	}
+
+	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK || store.created[0].ProposedAt == nil {
+		t.Fatalf("the proposal meant, without check: got = %d %v, want it stored", code, out)
+	}
+}
+
 func (s *draftStore) Revise(_ context.Context, id, message string, by domain.Actor, planUntil time.Time) error {
 	for _, pe := range s.created {
 		if pe.ID != id || pe.Status != domain.PlatformExpDraft {

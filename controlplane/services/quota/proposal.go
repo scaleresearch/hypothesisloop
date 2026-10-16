@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -40,7 +41,7 @@ type Proposal struct {
 	BaselineMinutes        int             `json:"baseline_minutes" doc:"The minutes the baseline agent needs, from the accept, to measure the baseline and leave its job: few where the repository holds a harness that runs unchanged, more where the harness and its environment are written from nothing. At least planning.min_baseline_minutes and at most planning.baseline_limit_minutes."`
 	Agents                 []ProposedAgent `json:"agents" doc:"The researchers proposed, one entry each."`
 
-	AcceleratorType domain.AcceleratorType `json:"accelerator_type" doc:"The type the run's jobs are sized for, as GET /resource-catalog/capacity lists it for a cluster this org's jobs can be placed on: an accelerator, or the CPU type for work that needs none, whose budget is then CPU core-hours."`
+	AcceleratorType domain.AcceleratorType `json:"accelerator_type,omitempty" doc:"The type the run's jobs are sized for, one of the accelerator_type strings GET /resource-catalog/capacity lists (hl capacity), copied verbatim. Left out for work that needs no accelerator: the run is then on CPU cores, hypothesisloop.dev/cpu=core, which is what is stored, and its budget is CPU core-hours. 422 accelerator_unreachable names every type that is listed now."`
 	Image           string                 `json:"image" doc:"The image the run's jobs name as job.image, checked as a submit checks it: a job image the platform offers, by name, or the whole address of another, which a cluster that has accelerator_type runs."`
 	// CPU, Memory and Storage are what one node of the run's jobs asks for, as job.cpu, job.memory
 	// and job.storage state it, so that whoever writes a job copies them from here and from no prose.
@@ -88,68 +89,91 @@ func maxProposedResearchers(maxHosted int) int {
 }
 
 // checkProposal is the mechanical check of a proposal: everything that can be decided from the
-// proposal and the platform's config. It returns the experiment the proposal states, as validate
-// answers it: with its cost, its length and one place for each researcher. It leaves p as it is
-// stored: every text of it without the whitespace around it.
+// proposal and the platform's config. It refuses with every problem it finds, so a planner fixes
+// them in one pass. It returns the experiment the proposal states, as validate answers it: with
+// its cost, its length and one place for each researcher. It leaves p as it is stored: every text
+// of it without the whitespace around it, and the CPU type where it states no accelerator_type.
 func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p *Proposal, draft *domain.PlatformExperiment) (CreatePlatformExperimentRequest, error) {
+	var problems api.Problems
+	refuse := func(reason, format string, args ...any) {
+		problems = append(problems, api.Refuse(http.StatusUnprocessableEntity, reason, fmt.Sprintf(format, args...)))
+	}
 	experiment, err := decodeExperimentBase(p.Experiment)
-	if err != nil {
-		return experiment, refusedProposal("invalid_experiment", "experiment: %s", err)
+	decoded := err == nil
+	if !decoded {
+		refuse("invalid_experiment", "experiment: %s", err)
 	}
 	if most := maxProposedResearchers(draft.MaxHosted); len(p.Agents) == 0 || len(p.Agents) > most {
-		return experiment, refusedProposal("invalid_agents", "agents: propose between 1 and %d researchers (the draft's max_agents), got %d", most, len(p.Agents))
+		refuse("invalid_agents", "agents: propose between 1 and %d researchers (the draft's max_agents), got %d", most, len(p.Agents))
 	}
 	least, limit := max(1, int(h.svc.cfg.MinBaseline.Minutes())), int(h.svc.cfg.BaselineLimit.Minutes())
 	if p.BaselineMinutes < least || p.BaselineMinutes > limit {
-		return experiment, refusedProposal("invalid_baseline_minutes", "baseline_minutes is %d: state the minutes measuring the baseline needs, from %d (planning.min_baseline_minutes) to %d (planning.baseline_limit_minutes). "+
+		refuse("invalid_baseline_minutes", "baseline_minutes is %d: state the minutes measuring the baseline needs, from %d (planning.min_baseline_minutes) to %d (planning.baseline_limit_minutes). "+
 			"The platform gives a baseline at least %d minutes because one written from nothing writes its harness, waits for the platform to build its environment and measures once in that time, and a shorter window closes the experiment before its run starts",
 			p.BaselineMinutes, least, limit, least)
 	}
-	// An accepted draft starts when it is accepted, whatever its experiment says of a start.
-	experiment.StartsAt = time.Time{}
-	experiment.BudgetAcceleratorHours, experiment.DurationHours, experiment.MaxAgents = p.BudgetAcceleratorHours, p.DurationHours, len(p.Agents)
-	if experiment, err = h.svc.validate(experiment); err != nil {
-		return experiment, err
+	if decoded {
+		// An accepted draft starts when it is accepted, whatever its experiment says of a start.
+		experiment.StartsAt = time.Time{}
+		experiment.BudgetAcceleratorHours, experiment.DurationHours, experiment.MaxAgents = p.BudgetAcceleratorHours, p.DurationHours, len(p.Agents)
+		var invalid error
+		experiment, invalid = h.svc.validate(experiment)
+		if err := problems.Add(invalid); err != nil {
+			return experiment, err
+		}
+		if invalid == nil {
+			if err := problems.Add(h.svc.requireContinuedMetrics(ctx, draft.Continues, experiment.Metrics)); err != nil {
+				return experiment, err
+			}
+			if p.Experiment, err = withTexts(p.Experiment, experiment); err != nil {
+				refuse("invalid_experiment", "experiment: %s", err)
+			}
+		}
 	}
-	if err := h.svc.requireContinuedMetrics(ctx, draft.Continues, experiment.Metrics); err != nil {
-		return experiment, err
-	}
-	if p.Experiment, err = withTexts(p.Experiment, experiment); err != nil {
-		return experiment, refusedProposal("invalid_experiment", "experiment: %s", err)
+	p.AcceleratorType = domain.AcceleratorType(strings.TrimSpace(string(p.AcceleratorType)))
+	if p.AcceleratorType == "" {
+		p.AcceleratorType = domain.CPUType
 	}
 	clusters, err := h.svc.requireReachable(ctx, draft.ProjectID, &p.AcceleratorType)
-	if err != nil {
+	if err := problems.Add(err); err != nil {
 		return experiment, err
 	}
-	if err := requireImage(h.jobImages, clusters, p.Image); err != nil {
-		return experiment, err
+	if err == nil {
+		if err := problems.Add(requireImage(h.jobImages, clusters, p.Image)); err != nil {
+			return experiment, err
+		}
 	}
 	p.CPU, p.Memory, p.Storage = strings.TrimSpace(p.CPU), strings.TrimSpace(p.Memory), strings.TrimSpace(p.Storage)
 	if err := workload.CheckNodeRequest(p.CPU, p.Memory, p.Storage); err != nil {
-		return experiment, refusedProposal("invalid_resources", "%s", err)
+		refuse("invalid_resources", "%s", err)
 	}
 	for i, agent := range p.Agents {
 		if _, _, err := domain.ResolveAgentLaunch(agent.Flavor, agent.Model, h.launch.DefaultModel, agent.Hyperparameters); err != nil {
-			return experiment, refusedProposal("invalid_agents", "agents[%d]: %s", i, err)
+			refuse("invalid_agents", "agents[%d]: %s", i, err)
 		}
 	}
-	for name, text := range map[string]*string{"metric_reason": &p.MetricReason, "measurement": &p.Measurement, "sizing_reason": &p.SizingReason} {
+	explanations := map[string]*string{"metric_reason": &p.MetricReason, "measurement": &p.Measurement, "sizing_reason": &p.SizingReason}
+	for _, name := range slices.Sorted(maps.Keys(explanations)) {
+		text := explanations[name]
 		*text = strings.TrimSpace(*text)
 		if *text == "" {
-			return experiment, refusedProposal("missing_explanation", "%s is required: the person who confirms reads it in place of the code", name)
+			refuse("missing_explanation", "%s is required: the person who confirms reads it in place of the code", name)
 		}
 		if len(*text) > maxProposalTextBytes {
-			return experiment, refusedProposal("too_long", "%s is %d bytes and at most %d", name, len(*text), maxProposalTextBytes)
+			refuse("too_long", "%s is %d bytes and at most %d", name, len(*text), maxProposalTextBytes)
 		}
 	}
 	if p.RepoMap = strings.TrimSpace(p.RepoMap); len(p.RepoMap) > maxProposalTextBytes {
-		return experiment, refusedProposal("too_long", "repo_map is %d bytes and at most %d: a line per file or directory that matters", len(p.RepoMap), maxProposalTextBytes)
+		refuse("too_long", "repo_map is %d bytes and at most %d: a line per file or directory that matters", len(p.RepoMap), maxProposalTextBytes)
 	}
-	for name, list := range map[string][]string{"out_of_scope": p.OutOfScope, "risks": p.Risks} {
-		for i, entry := range list {
-			list[i] = strings.TrimSpace(entry)
-			if list[i] == "" || len(list[i]) > maxProposalTextBytes {
-				return experiment, refusedProposal("too_long", "%s: each entry is a sentence of at most %d bytes", name, maxProposalTextBytes)
+	for _, field := range []struct {
+		name string
+		list []string
+	}{{"out_of_scope", p.OutOfScope}, {"risks", p.Risks}} {
+		for i, entry := range field.list {
+			field.list[i] = strings.TrimSpace(entry)
+			if field.list[i] == "" || len(field.list[i]) > maxProposalTextBytes {
+				refuse("too_long", "%s[%d]: each entry is a sentence of at most %d bytes", field.name, i, maxProposalTextBytes)
 			}
 		}
 	}
@@ -157,10 +181,10 @@ func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p *Propo
 		q := &p.Questions[i]
 		q.Question, q.Answer = strings.TrimSpace(q.Question), strings.TrimSpace(q.Answer)
 		if q.Question == "" || q.Answer == "" || len(q.Question) > maxProposalTextBytes || len(q.Answer) > maxProposalTextBytes {
-			return experiment, refusedProposal("too_long", "questions[%d]: question and answer are each a sentence of at most %d bytes: the decision, and the answer the proposal is planned on", i, maxProposalTextBytes)
+			refuse("too_long", "questions[%d]: question and answer are each a sentence of at most %d bytes: the decision, and the answer the proposal is planned on", i, maxProposalTextBytes)
 		}
 	}
-	return experiment, nil
+	return experiment, problems.Err()
 }
 
 // withTexts is the experiment of a proposal with its texts as validate answered them, so that
@@ -315,12 +339,15 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"and the baseline is measured once it is accepted, before any researcher starts, by the baseline agent the proposal signs up, whose machine starts with it. " +
 			"The proposal is checked before it is stored, its experiment and its cost by the rules of POST /platform-experiments, and refused with 422 and a reason the planner can act on: invalid_experiment, invalid_metrics, invalid_stages, " +
 			"invalid_cost, invalid_agents, invalid_length, run_too_long (duration_hours over the platform's quota.max_platform_experiment_days), invalid_baseline_minutes (under planning.min_baseline_minutes, or over planning.baseline_limit_minutes), missing_explanation, too_long, " +
-			"accelerator_unreachable for an accelerator_type no cluster this org's jobs can be placed on has now, and for image the two refusals a job submit gives: " +
+			"accelerator_unreachable for an accelerator_type no cluster this org's jobs can be placed on has now, naming every type that is, and for image the two refusals a job submit gives: " +
 			"unknown_job_image for one that is neither a job image the platform offers nor a whole registry address, and no_cluster_for_image for one no cluster that has the type runs. Stored, it replaces the one before, marks the draft proposed " +
-			"(proposed_at), and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the platform accepts it as proposed at accepts_at (planning.auto_accept_seconds from now) unless a person accepts it sooner, holds it, revises it or closes it. A proposal with questions, or one made with no auto-accept configured, has no accepts_at and waits for a person to accept it, and its baseline agent's machine starts with the accept.",
+			"(proposed_at), and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the platform accepts it as proposed at accepts_at (planning.auto_accept_seconds from now) unless a person accepts it sooner, holds it, revises it or closes it. A proposal with questions, or one made with no auto-accept configured, has no accepts_at and waits for a person to accept it, and its baseline agent's machine starts with the accept. " +
+			"A refusal lists every problem the check found, each in problems with its reason and message, the first also as the refusal's own reason. " +
+			"With check=true the proposal is checked exactly so and nothing is stored: 422 with every problem, or 200 with the draft as it stands, so a planner tries variants with check and proposes only the one it means.",
 	}, func(ctx context.Context, in *struct {
-		ID   string `path:"id"`
-		Body Proposal
+		ID    string `path:"id"`
+		Check bool   `query:"check" doc:"Check the proposal as a proposal is checked and store nothing: the answer is the draft as it stands, or 422 with every problem."`
+		Body  Proposal
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
@@ -340,6 +367,9 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		}
 		if _, err := h.checkProposal(ctx, &in.Body, pe); err != nil {
 			return nil, h.refusal("check proposal", err)
+		}
+		if in.Check {
+			return h.Answer(ctx, pe)
 		}
 		stored, err := json.Marshal(in.Body)
 		if err != nil {

@@ -223,15 +223,20 @@ func (h *PlatformExperimentsHandler) reachableTypes(ctx context.Context, project
 	if err != nil {
 		return nil, err
 	}
-	reachable := map[string][]domain.Cluster{}
+	return typesListed(clusters), nil
+}
+
+// typesListed is every type line of a capacity answer, with the clusters that have it and the
+// one image such a cluster runs: the types `hl capacity` prints are exactly the ones a proposal
+// may be sized for.
+func typesListed(clusters []ClusterCapacity) map[string][]domain.Cluster {
+	listed := map[string][]domain.Cluster{}
 	for _, cluster := range clusters {
 		for _, accelerator := range cluster.Accelerators {
-			if accelerator.Total > 0 {
-				reachable[accelerator.AcceleratorType] = append(reachable[accelerator.AcceleratorType], domain.Cluster{Name: cluster.ClusterName, JobImage: cluster.JobImage})
-			}
+			listed[accelerator.AcceleratorType] = append(listed[accelerator.AcceleratorType], domain.Cluster{Name: cluster.ClusterName, JobImage: cluster.JobImage})
 		}
 	}
-	return reachable, nil
+	return listed
 }
 
 // withResources adds each cluster's cores and memory, and the clusters that have no accelerator
@@ -366,6 +371,10 @@ func buildClusterCapacity(available, total map[string]map[string]int64) []Cluste
 		}
 		accelerators := make([]AcceleratorCapacity, 0, len(typesSeen))
 		for t := range typesSeen {
+			// A type the cluster has none of places no job, so it is no line to choose from.
+			if total[cluster][t] <= 0 {
+				continue
+			}
 			rate, _ := domain.AcceleratorType(t).LookupCost()
 			accelerators = append(accelerators, AcceleratorCapacity{
 				AcceleratorType: t,

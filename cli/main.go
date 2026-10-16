@@ -256,6 +256,8 @@ func fail(stderr io.Writer, err error) int {
 	if errors.As(err, &refused) {
 		if invalid := invalidFields([]byte(refused.Body)); invalid != "" {
 			refused.Body = invalid
+		} else if problems := problemLines([]byte(refused.Body)); problems != "" {
+			refused.Body = problems
 		} else if body, jsonErr := compactJSON([]byte(refused.Body)); jsonErr == nil {
 			refused.Body = string(body)
 		}
@@ -287,6 +289,25 @@ func invalidFields(body []byte) string {
 		clauses = append(clauses, clause)
 	}
 	return strings.Join(clauses, "; ")
+}
+
+// problemLines is a refusal that holds several problems, one line each, reason first, so all of
+// them are fixed in one pass. Empty for an answer with fewer than two.
+func problemLines(body []byte) string {
+	var refusal struct {
+		Problems []struct {
+			Reason  string `json:"reason"`
+			Message string `json:"message"`
+		} `json:"problems"`
+	}
+	if json.Unmarshal(body, &refusal) != nil || len(refusal.Problems) < 2 {
+		return ""
+	}
+	lines := []string{fmt.Sprintf("%d problems, fix them all:", len(refusal.Problems))}
+	for _, p := range refusal.Problems {
+		lines = append(lines, "  "+p.Reason+": "+p.Message)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // flagSet answers -h with the command's help and any misuse with one error line and the synopsis,
@@ -909,10 +930,13 @@ func baselineDeclared(experiment map[string]any) string {
 }
 
 func cmdPlatformExperimentsPropose(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments propose", `usage: hl platform-experiments propose [--platform-experiment PE] [FILE|-]
+	fs := newFlags("platform-experiments propose", `usage: hl platform-experiments propose [--platform-experiment PE] [--check] [FILE|-]
 
 For the planner of a draft. A proposal defines the experiment and runs nothing: no job, no
-code. FILE is YAML of this shape, with every field shown required unless it says optional.
+code. --check runs the platform's whole check of FILE and stores nothing: it prints every
+problem at once, or that the proposal passes. Try variants with --check; propose only the one
+you mean, since a propose that passes is stored at once.
+FILE is YAML of this shape, with every field shown required unless it says optional.
 Every free-text value is a | block, a list item too (- |): unquoted text breaks on a colon or
 a leading quote.
 
@@ -941,13 +965,16 @@ a leading quote.
       - key: other_val_accuracy        # optional: one per outside system the goal names, its own
         direction: maximize            # number apart from the control. Shown beside the standings,
         role: reference                # never ranked or gating
-  accelerator_type: ...                # copied verbatim from 'hl capacity', the CPU type for work on cores
+  accelerator_type: ...                # optional: an accelerator_type 'hl capacity' prints, copied verbatim.
+                                       # Left out for work that needs no accelerator: the run is
+                                       # on CPU cores (hypothesisloop.dev/cpu=core) and its
+                                       # budget is core-hours. A refusal lists the valid types
   image: ...                           # the job image the brief names, from the same line of 'hl capacity':
                                        # one of its job_images, or its only_job_image where it shows one
   cpu: 8                               # optional, like memory and storage: what one node of a job
   memory: 32Gi                         # asks for, as job.cpu, job.memory and job.storage state it.
   storage: 100Gi                       # hl repo init writes them into job.yaml, so no brief repeats them
-  budget_accelerator_hours: 6          # proposed; the person states the real ones at accept
+  budget_accelerator_hours: 6          # proposed, positive; the person states the real ones at accept
   duration_hours: 4                    # the run, from its start: a time the goal states is this
   baseline_minutes: 60                 # what measuring the baseline needs from the accept, from
                                        # planning.min_baseline_minutes (45) to
@@ -981,13 +1008,15 @@ a leading quote.
     a line per file or directory that matters, its entry points, how it builds and runs, and
     the toolchain and dependency pins. The baseline agent is given it when it starts.
 
-A refusal names what to fix and changes nothing: for a file that is no YAML the line and what
-is wrong there, for the image what a job submit would refuse (unknown_job_image,
-no_cluster_for_image), and invalid_resources for a cpu, memory or storage that is no quantity.
-One that passes is stored at once, replaces the one before and is what the person is asked to
-accept, so send only the finished proposal. Your machine is kept some minutes after it, and a
-revision the person asks for in that time arrives as your next update.`, stderr)
+A refusal names every problem at once and changes nothing: for a file that is no YAML the line
+and what is wrong there, accelerator_unreachable with the types that are listed, for the image
+what a job submit would refuse (unknown_job_image, no_cluster_for_image), and invalid_resources
+for a cpu, memory or storage that is no quantity. Without --check, one that passes is stored at
+once, replaces the one before and is what the person is asked to accept, so propose only the
+finished proposal. Your machine is kept some minutes after it, and a revision the person asks
+for in that time arrives as your next update.`, stderr)
 	pe := experimentFlag(fs)
+	check := fs.Bool("check", false, "check the proposal and store nothing")
 	operands, err := parseArgs(fs, args)
 	if err != nil {
 		return parseExit(err)
@@ -1010,9 +1039,17 @@ revision the person asks for in that time arrives as your next update.`, stderr)
 	}
 	quantitiesAsStrings(body)
 	textsAsLists(body)
+	path = "/platform-experiments/" + url.PathEscape(id) + "/proposal"
+	if *check {
+		path += "?check=true"
+	}
 	var out any
-	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(id)+"/proposal", body, &out); err != nil {
+	if err := c.Do("PUT", path, body, &out); err != nil {
 		return fail(stderr, err)
+	}
+	if *check {
+		fmt.Fprintln(stdout, "the proposal passes every check; nothing is stored. Propose it without --check when it is the one you mean.")
+		return 0
 	}
 	printJSON(stdout, out)
 	return 0

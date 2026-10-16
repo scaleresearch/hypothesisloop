@@ -76,47 +76,52 @@ func trimTexts(spec CreatePlatformExperimentRequest) (CreatePlatformExperimentRe
 
 // validate is the one check of what a platform experiment is, whoever states it: a create, a
 // planner's proposal, the person accepting one or a patch of an existing one. It returns spec as it is stored,
-// with the platform's settings where spec leaves a field to them.
+// with the platform's settings where spec leaves a field to them, and refuses with every problem it finds.
 func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
 	spec, err := trimTexts(s.withSettings(spec))
 	if err != nil {
 		return spec, err
 	}
+	var problems api.Problems
+	refuse := func(reason, format string, args ...any) {
+		problems = append(problems, api.Refuse(422, reason, fmt.Sprintf(format, args...)))
+	}
 	if spec.Name == "" || spec.Description == "" {
-		return spec, refuseUpdate(422, "invalid_experiment", "name and description are required: the description is the brief every agent works from")
+		refuse("invalid_experiment", "name and description are required: the description is the brief every agent works from")
 	}
 	if len(spec.Description) > domain.MaxProseBytes {
-		return spec, refuseUpdate(422, "invalid_experiment", "%s", tooLong("description", len(spec.Description)))
+		refuse("invalid_experiment", "%s", tooLong("description", len(spec.Description)))
 	}
 	if err := domain.ValidateMetricDefinitions(spec.Metrics); err != nil {
-		return spec, refuseUpdate(422, "invalid_metrics", "metrics: %s", err)
-	}
-	if err := domain.RequireRankingMetric(spec.Metrics); err != nil {
-		return spec, refuseUpdate(422, "invalid_metrics", "metrics: %s", err)
+		refuse("invalid_metrics", "metrics: %s", err)
+	} else if err := domain.RequireRankingMetric(spec.Metrics); err != nil {
+		refuse("invalid_metrics", "metrics: %s", err)
 	}
 	if spec.ReportIntervalSeconds <= 0 {
-		return spec, refuseUpdate(422, "invalid_experiment", "report_interval_seconds must be positive: how often a job really reports")
+		refuse("invalid_experiment", "report_interval_seconds must be positive: how often a job really reports")
 	}
 	if err := domain.ValidateStages(spec.Stages); err != nil {
-		return spec, refuseUpdate(422, "invalid_stages", "stages: %s", err)
+		refuse("invalid_stages", "stages: %s", err)
 	}
 	if tier := domain.QuotaTier(spec.DefaultQuotaTier); tier != domain.QuotaTierGuaranteed && tier != domain.QuotaTierBurstOnly {
-		return spec, refuseUpdate(422, "invalid_experiment", "default_quota_tier must be \"guaranteed\" or \"burst_only\"")
+		refuse("invalid_experiment", "default_quota_tier must be \"guaranteed\" or \"burst_only\"")
 	}
 	if spec.MaxConcurrentAccelerators != nil && *spec.MaxConcurrentAccelerators <= 0 {
-		return spec, refuseUpdate(422, "invalid_experiment", "max_concurrent_accelerators must be positive")
+		refuse("invalid_experiment", "max_concurrent_accelerators must be positive")
 	}
 	if spec.BudgetAcceleratorHours <= 0 {
-		return spec, refuseUpdate(422, "invalid_cost", "budget_accelerator_hours is required and must be positive: the cap on everything the run spends")
+		refuse("invalid_cost", "budget_accelerator_hours is required and must be positive: the cap on everything the run spends, in accelerator-hours, and in CPU core-hours for work on cores (hypothesisloop.dev/cpu=core costs 1 an hour per core)")
 	}
 	if spec.MaxAgents <= 0 {
-		return spec, refuseUpdate(422, "invalid_agents", "max_agents is required and must be positive: how many researchers (agents of role competitor) may join")
-	}
-	if len(spec.Stages) > 1 && spec.MaxAgents < domain.MinResearchersForCut {
-		return spec, refuseUpdate(422, "invalid_stages", "stages: %d stages for at most %d researchers, and a run of fewer than %d has one stage since no boundary cuts: state one stage or leave stages out",
+		refuse("invalid_agents", "max_agents is required and must be positive: how many researchers (agents of role competitor) may join")
+	} else if len(spec.Stages) > 1 && spec.MaxAgents < domain.MinResearchersForCut {
+		refuse("invalid_stages", "stages: %d stages for at most %d researchers, and a run of fewer than %d has one stage since no boundary cuts: state one stage or leave stages out",
 			len(spec.Stages), spec.MaxAgents, domain.MinResearchersForCut)
 	}
-	return spec, s.checkLength(spec.DurationHours)
+	if err := problems.Add(s.checkLength(spec.DurationHours)); err != nil {
+		return spec, err
+	}
+	return spec, problems.Err()
 }
 
 // requireReachable refuses a platform experiment coming into being where nothing could run it:
@@ -138,9 +143,30 @@ func (s *PlatformExperimentsService) requireReachable(ctx context.Context, proje
 	}
 	clusters := reachable[string(*sizedFor)]
 	if len(clusters) == 0 {
-		return nil, refuseUpdate(422, "accelerator_unreachable", "accelerator_type %q is on no cluster this org's jobs can be placed on now: state a type `hl capacity` lists, copied verbatim", *sizedFor)
+		return nil, refuseUpdate(422, "accelerator_unreachable", "%s", unreachableType(*sizedFor, reachable))
 	}
 	return clusters, nil
+}
+
+// unreachableType says that sizedFor is on none of the clusters of reachable, and which types are:
+// the accelerator_type lines `hl capacity` prints, the only strings a proposal states.
+func unreachableType(sizedFor domain.AcceleratorType, reachable map[string][]domain.Cluster) string {
+	stated := fmt.Sprintf("accelerator_type %q is", sizedFor)
+	if sizedFor == domain.CPUType {
+		stated = fmt.Sprintf("work on CPU cores (no accelerator_type, or %q) is", domain.CPUType)
+	}
+	if len(reachable) == 0 {
+		return stated + " on no cluster this org's jobs can be placed on now, and no cluster reports any type: register a cluster or turn a shared one on"
+	}
+	valid := make([]string, 0, len(reachable))
+	for _, t := range slices.Sorted(maps.Keys(reachable)) {
+		if t == string(domain.CPUType) {
+			valid = append(valid, fmt.Sprintf("%q (or no accelerator_type, for work on cores)", t))
+			continue
+		}
+		valid = append(valid, fmt.Sprintf("%q", t))
+	}
+	return stated + " on no cluster this org's jobs can be placed on now. State one of the types `hl capacity` lists now, copied verbatim: " + strings.Join(valid, ", ")
 }
 
 // requireImage refuses a proposal whose image no job on clusters, the ones that have its type,
