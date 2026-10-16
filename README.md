@@ -606,9 +606,8 @@ HypothesisLoop has two kinds of deployable parts:
 
   Runtime agents call the control plane; the control plane never connects into them.
 
-Scheduling sits behind one interface (`controlplane/shared/workload.Backend`). The built-in
-implementation keeps desired state in Postgres and reads actual state from the runtimes. Another
-scheduler (Kueue, Volcano) can implement the same interface.
+The scheduler (`controlplane/services/scheduler`) keeps desired state in Postgres and reads actual
+state from what the runtimes report to the metrics store.
 
 ## Configuration
 

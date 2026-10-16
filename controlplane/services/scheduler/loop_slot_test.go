@@ -386,8 +386,8 @@ func TestSubmittingToASlotClusterWritesTheSlotIntoDesiredState(t *testing.T) {
 	if slot := slotOf(store.written); slot != "h100-1" || store.written.CPU != "8" {
 		t.Fatalf("resolved job written with selector %v and %s cpu, want slot h100-1 and its 8", store.written.NodeSelector, store.written.CPU)
 	}
-	if slotOf(exp.EffectiveJob()) != "h100-1" || exp.Job.NodeSelector != nil || exp.Job.CPU != "6" || !live.created {
-		t.Fatalf("effective %v, submitted %+v, created %v", exp.EffectiveJob().NodeSelector, exp.Job, live.created)
+	if slotOf(exp.EffectiveJob()) != "h100-1" || exp.Job.NodeSelector != nil || exp.Job.CPU != "6" {
+		t.Fatalf("effective %v, submitted %+v", exp.EffectiveJob().NodeSelector, exp.Job)
 	}
 }
 
@@ -452,13 +452,12 @@ func (slotQuota) ReserveAdmittedFlavor(context.Context, string, domain.Accelerat
 	return nil
 }
 
-// slotWorkload reports the fixture as the one connected cluster. desiredFree is what the queue
-// backend derives: the cluster's whole size minus the footprint of every desired job.
+// slotWorkload reports the fixture as the one connected cluster. desiredFree is what
+// ClusterReports derives: the cluster's whole size minus the footprint of every desired job.
 type slotWorkload struct {
-	LoopWorkloadClient
+	ClusterCapacity
 	c       *slotFixture
 	desired []*domain.Experiment
-	created []string
 }
 
 func (w *slotWorkload) whole() domain.Footprint {
@@ -497,12 +496,8 @@ func (w *slotWorkload) GetNodeLabels(context.Context) (map[string]map[string]map
 func (w *slotWorkload) GetMultiNodeCapability(context.Context) (map[string]bool, error) {
 	return map[string]bool{rented: false}, nil
 }
-func (w *slotWorkload) CreateWorkload(_ context.Context, exp *domain.Experiment) error {
-	w.created = append(w.created, exp.ID)
-	return nil
-}
 
-func slotLoop(store *slotStore, c *slotFixture, observed ObservedState) (*Loop, *slotWorkload) {
+func slotLoop(store *slotStore, c *slotFixture, observed ObservedState) *Loop {
 	workload := &slotWorkload{c: c, desired: append(append([]*domain.Experiment(nil), store.running...), store.submitted...)}
 	l := NewLoop(store, slotQuota{}, workload, testGraceLimits, zap.NewNop())
 	l.observed = fakeObserved{}
@@ -511,7 +506,7 @@ func slotLoop(store *slotStore, c *slotFixture, observed ObservedState) (*Loop, 
 	l.reprioritizer = noopReprioritizer{}
 	l.observed = observed
 	l.settler = &recordingSettler{}
-	return l, workload
+	return l
 }
 
 // One whole tick over a cluster of slots. Four 2-cpu jobs and three H100 jobs are queued against
@@ -526,7 +521,7 @@ func TestATickAdmitsOneJobPerSlotSizedAndPinned(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		store.queued = append(store.queued, h100Job(fmt.Sprintf("h100-job-%d", i), "2"))
 	}
-	l, workload := slotLoop(store, c, fakeObserved{})
+	l := slotLoop(store, c, fakeObserved{})
 
 	if err := l.tick(context.Background()); err != nil {
 		t.Fatal(err)
@@ -546,8 +541,8 @@ func TestATickAdmitsOneJobPerSlotSizedAndPinned(t *testing.T) {
 			t.Errorf("%s was admitted to %s", id, slotOf(job))
 		}
 	}
-	if len(store.written) != 3 || len(workload.created) != 3 {
-		t.Fatalf("admitted %v, created %v, want one job per slot", slots, workload.created)
+	if len(store.written) != 3 {
+		t.Fatalf("admitted %v, want one job per slot", slots)
 	}
 	for _, exp := range store.queued {
 		if _, admitted := store.written[exp.ID]; admitted {
@@ -567,7 +562,7 @@ func TestARequeuedJobIsAdmittedToAnotherSlot(t *testing.T) {
 	requeued := h100Job("requeued", "2")
 	requeued.AttemptCount, requeued.EvictionReason = 1, string(domain.EvictionStuckPending)
 	store := &slotStore{queued: []*domain.Experiment{requeued}}
-	l, _ := slotLoop(store, c, fakeObserved{})
+	l := slotLoop(store, c, fakeObserved{})
 
 	if err := l.tick(context.Background()); err != nil {
 		t.Fatal(err)
@@ -596,7 +591,7 @@ func TestAGuaranteedJobPreemptsABurstJobForItsWholeSlot(t *testing.T) {
 	guaranteed := h100Job("guaranteed", "4")
 	guaranteed.CapacityTier = domain.CapacityGuaranteed
 	store := &slotStore{queued: []*domain.Experiment{guaranteed}, running: running}
-	l, _ := slotLoop(store, c, fakeObserved{node: nodes, elapsed: map[string]float64{"burst-0": 5, "burst-1": 1}})
+	l := slotLoop(store, c, fakeObserved{node: nodes, elapsed: map[string]float64{"burst-0": 5, "burst-1": 1}})
 
 	if err := l.tick(context.Background()); err != nil {
 		t.Fatal(err)
@@ -611,7 +606,7 @@ func TestAGuaranteedJobPreemptsABurstJobForItsWholeSlot(t *testing.T) {
 	// Next tick the victim is QUEUED and its instance still holds the slot. The capacity is
 	// promised, so nothing more is preempted for the same job.
 	store.running, store.requeued = running[:1], nil
-	l, _ = slotLoop(store, c, fakeObserved{node: nodes})
+	l = slotLoop(store, c, fakeObserved{node: nodes})
 	if err := l.tick(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -622,7 +617,7 @@ func TestAGuaranteedJobPreemptsABurstJobForItsWholeSlot(t *testing.T) {
 	// The instance is gone and the slot reads free: the job is admitted to it.
 	c.free["h100-1"] = size(8000, 32, 100)
 	c.accelerators["h100-1"] = map[string]int64{h100: 1}
-	l, _ = slotLoop(store, c, fakeObserved{node: nodes})
+	l = slotLoop(store, c, fakeObserved{node: nodes})
 	if err := l.tick(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -675,7 +670,7 @@ func TestAGuaranteedJobPreemptsOnTheSmallestShapeThatHasAVictim(t *testing.T) {
 	guaranteed := h100Job("guaranteed", "4")
 	guaranteed.CapacityTier = domain.CapacityGuaranteed
 	store := &slotStore{queued: []*domain.Experiment{guaranteed}, running: []*domain.Experiment{holder, victim}}
-	l, _ := slotLoop(store, c, fakeObserved{node: nodes})
+	l := slotLoop(store, c, fakeObserved{node: nodes})
 
 	if err := l.tick(context.Background()); err != nil {
 		t.Fatal(err)
@@ -686,7 +681,7 @@ func TestAGuaranteedJobPreemptsOnTheSmallestShapeThatHasAVictim(t *testing.T) {
 
 	// Its instance still holds the slot: the capacity is promised and nothing more is preempted.
 	store.running, store.requeued = []*domain.Experiment{holder}, nil
-	l, _ = slotLoop(store, c, fakeObserved{node: nodes})
+	l = slotLoop(store, c, fakeObserved{node: nodes})
 	if err := l.tick(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -696,7 +691,7 @@ func TestAGuaranteedJobPreemptsOnTheSmallestShapeThatHasAVictim(t *testing.T) {
 
 	c.free["large-0"] = size(16000, 64, 200)
 	c.accelerators["large-0"] = map[string]int64{h100: 1}
-	l, _ = slotLoop(store, c, fakeObserved{node: nodes})
+	l = slotLoop(store, c, fakeObserved{node: nodes})
 	if err := l.tick(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -722,7 +717,7 @@ func TestAGuaranteedJobPreemptsOnTheSmallerShapeWhenBothHaveAVictim(t *testing.T
 	guaranteed := h100Job("guaranteed", "4")
 	guaranteed.CapacityTier = domain.CapacityGuaranteed
 	store := &slotStore{queued: []*domain.Experiment{guaranteed}, running: running}
-	l, _ := slotLoop(store, c, fakeObserved{node: nodes, elapsed: map[string]float64{"burst-on-small-0": 5, "burst-on-large-0": 1}})
+	l := slotLoop(store, c, fakeObserved{node: nodes, elapsed: map[string]float64{"burst-on-small-0": 5, "burst-on-large-0": 1}})
 
 	if err := l.tick(context.Background()); err != nil {
 		t.Fatal(err)
@@ -745,7 +740,7 @@ func TestAFreeSlotOfAnotherAcceleratorCountDoesNotStandInForAVictim(t *testing.T
 	guaranteed := h100Job("guaranteed", "4")
 	guaranteed.CapacityTier = domain.CapacityGuaranteed
 	store := &slotStore{queued: []*domain.Experiment{guaranteed}, running: []*domain.Experiment{victim}}
-	l, _ := slotLoop(store, c, fakeObserved{node: map[string]string{"burst": "one-0"}})
+	l := slotLoop(store, c, fakeObserved{node: map[string]string{"burst": "one-0"}})
 
 	if err := l.tick(context.Background()); err != nil {
 		t.Fatal(err)
@@ -766,7 +761,7 @@ func TestAJobWaitingForAPreemptedSlotSaysWhichSlot(t *testing.T) {
 	guaranteed := h100Job("guaranteed", "4")
 	guaranteed.CapacityTier = domain.CapacityGuaranteed
 	store := &slotStore{queued: []*domain.Experiment{guaranteed}, running: []*domain.Experiment{holder}}
-	l, _ := slotLoop(store, c, fakeObserved{node: map[string]string{"holder": "small-0"}})
+	l := slotLoop(store, c, fakeObserved{node: map[string]string{"holder": "small-0"}})
 
 	if err := l.tick(context.Background()); err != nil {
 		t.Fatal(err)
@@ -801,7 +796,7 @@ func TestAJobWaitingForASlotHoldsNoOtherSlotAgainstBurst(t *testing.T) {
 			burst := h100Job("burst", "4")
 			burst.AcceleratorCount, burst.Job.AcceleratorCount = 2, 2
 			store.queued = []*domain.Experiment{guaranteed, burst}
-			l, _ := slotLoop(store, c, fakeObserved{node: map[string]string{"victim": "one-0"}})
+			l := slotLoop(store, c, fakeObserved{node: map[string]string{"victim": "one-0"}})
 
 			if err := l.tick(context.Background()); err != nil {
 				t.Fatal(err)
@@ -827,7 +822,7 @@ func TestAJobBeyondWhatTheVendorHasOnOfferWaitsSayingSo(t *testing.T) {
 		first, second := h100Job("first", "2"), h100Job("second", "2")
 		first.CapacityTier, second.CapacityTier = tier, tier
 		store := &slotStore{queued: []*domain.Experiment{first, second}}
-		l, _ := slotLoop(store, c, fakeObserved{})
+		l := slotLoop(store, c, fakeObserved{})
 
 		if err := l.tick(context.Background()); err != nil {
 			t.Fatal(err)
@@ -856,7 +851,7 @@ func TestAJobBeyondWhatTheVendorHasOnOfferWaitsSayingSo(t *testing.T) {
 		waiting := h100Job("waiting", "2")
 		waiting.CapacityTier = tier
 		next := &slotStore{queued: []*domain.Experiment{waiting}, running: []*domain.Experiment{holder}}
-		l, _ = slotLoop(next, c, fakeObserved{node: map[string]string{"holder": "h100-0"}})
+		l = slotLoop(next, c, fakeObserved{node: map[string]string{"holder": "h100-0"}})
 		if err := l.tick(context.Background()); err != nil {
 			t.Fatal(err)
 		}
@@ -882,7 +877,7 @@ func TestAJobOnCPUHoldsAWholeSlotWithoutAccelerators(t *testing.T) {
 	c := newSlots().add("h100-0", 1, size(8000, 32, 100)).addCores("cpu-0", size(4000, 16, 50))
 	first, second := slotCoresJob("first", 2), slotCoresJob("second", 2)
 	store := &slotStore{queued: []*domain.Experiment{first, second}}
-	l, workload := slotLoop(store, c, fakeObserved{})
+	l := slotLoop(store, c, fakeObserved{})
 
 	if err := l.tick(context.Background()); err != nil {
 		t.Fatal(err)
@@ -891,8 +886,8 @@ func TestAJobOnCPUHoldsAWholeSlotWithoutAccelerators(t *testing.T) {
 	if !admitted || slotOf(job) != "cpu-0" || job.CPU != "4" || job.AcceleratorCount != 4 || job.AcceleratorType != domain.CPUType {
 		t.Fatalf("written %+v (reasons %v), want the first job on cpu-0 with its 4 cores as its count", store.written, store.reasons)
 	}
-	if _, admitted := store.written["second"]; admitted || len(workload.created) != 1 {
-		t.Fatalf("written %v, created %v, want the second job waiting for the one cpu slot", store.written, workload.created)
+	if _, admitted := store.written["second"]; admitted || len(store.written) != 1 {
+		t.Fatalf("written %v, want the second job waiting for the one cpu slot", store.written)
 	}
 	if reason := store.reasons["second"]; strings.HasPrefix(reason, domain.NotAdmittedExceedsClusterCapacity) {
 		t.Fatalf("the second job is refused: %q", reason)

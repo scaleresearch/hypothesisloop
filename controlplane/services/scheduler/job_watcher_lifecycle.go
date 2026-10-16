@@ -39,7 +39,7 @@ func (w *JobWatcher) stuckPendingOverdue(ctx context.Context, exp *domain.Experi
 	if overdue <= 0 || waiting.Reason == "" {
 		return overdue, nil
 	}
-	since, found, err := w.backend.PhaseReportedSince(ctx, exp, waiting.Reason)
+	since, found, err := w.reports.PhaseReportedSince(ctx, exp, waiting.Reason)
 	if err != nil {
 		return 0, fmt.Errorf("first report of %s: %w", waiting.Reason, err)
 	}
@@ -352,7 +352,7 @@ func (w *JobWatcher) onRunning(ctx context.Context, exp *domain.Experiment) (dom
 	w.logger.Info("job_watcher: experiment running", zap.String("id", exp.ID))
 	var admittedType domain.AcceleratorType
 	if exp.AcceleratorCount > 0 {
-		observedType, observed, err := w.backend.GetAdmittedAcceleratorType(ctx, exp)
+		observedType, observed, err := w.reports.GetAdmittedAcceleratorType(ctx, exp)
 		if err != nil {
 			w.logger.Error("job_watcher: read observed accelerator type", zap.String("id", exp.ID), zap.Error(err))
 			return "", runningTypeUnobservable

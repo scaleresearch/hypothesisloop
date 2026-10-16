@@ -1,4 +1,4 @@
-package queuebackend
+package scheduler
 
 import (
 	"context"
@@ -18,10 +18,10 @@ func (constructorStore) SumDesiredFootprintByCluster(context.Context) (map[strin
 	return map[string]domain.Footprint{}, nil
 }
 
-func TestNewRejectsMissingAuthoritativeInputs(t *testing.T) {
+func TestNewClusterReportsRejectsMissingAuthoritativeInputs(t *testing.T) {
 	tests := []struct {
 		name       string
-		store      Store
+		store      DesiredFootprints
 		metricsURL string
 		window     time.Duration
 	}{
@@ -31,8 +31,8 @@ func TestNewRejectsMissingAuthoritativeInputs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := New(tt.store, tt.metricsURL, tt.window); err == nil {
-				t.Fatalf("New accepted missing %s", tt.name)
+			if _, err := NewClusterReports(tt.store, tt.metricsURL, tt.window); err == nil {
+				t.Fatalf("NewClusterReports accepted missing %s", tt.name)
 			}
 		})
 	}
@@ -66,7 +66,7 @@ func TestMinimumFootprintDesiredClaimWinsBeforeActualCatchesUp(t *testing.T) {
 }
 
 func TestValidateCapacitySnapshotRejectsMissingAuthoritativeMetric(t *testing.T) {
-	b := &Backend{}
+	b := &ClusterReports{}
 	inconsistent := b.validateCapacitySnapshot(
 		map[string]bool{"cluster-a": true},
 		map[string]float64{"cluster-a": 4}, map[string]int64{"cluster-a": 8000},
@@ -81,7 +81,7 @@ func TestValidateCapacitySnapshotRejectsMissingAuthoritativeMetric(t *testing.T)
 }
 
 func TestValidateCapacitySnapshotAllowsClusterSpecificAcceleratorTypes(t *testing.T) {
-	b := &Backend{}
+	b := &ClusterReports{}
 	inconsistent := b.validateCapacitySnapshot(
 		map[string]bool{"cluster-a": true},
 		map[string]float64{"cluster-a": 4}, map[string]int64{"cluster-a": 8000},
@@ -96,7 +96,7 @@ func TestValidateCapacitySnapshotAllowsClusterSpecificAcceleratorTypes(t *testin
 }
 
 func TestAnInconsistentClusterSnapshotCondemnsOnlyThatCluster(t *testing.T) {
-	b := &Backend{}
+	b := &ClusterReports{}
 	inconsistent := b.validateCapacitySnapshot(
 		map[string]bool{"cluster-a": true, "cluster-b": true},
 		map[string]float64{"cluster-a": 4, "cluster-b": 64}, map[string]int64{"cluster-a": 8000, "cluster-b": 8000},
@@ -140,28 +140,28 @@ func TestAJobsPhaseIsReadOnlyFromSnapshotsSinceItWasClaimed(t *testing.T) {
 		_, _ = w.Write([]byte(`{"output":[{"records":{"rows":[[20,3,20]]}}]}`))
 	}))
 	defer server.Close()
-	b := &Backend{metricsDBURL: server.URL, connectedWithin: time.Minute}
+	b := &ClusterReports{metricsDBURL: server.URL, connectedWithin: time.Minute}
 	claimed := func(ago time.Duration) *domain.Experiment {
 		at := time.Now().Add(-ago)
 		return &domain.Experiment{ID: "exp-1", ClusterName: "cluster-a", SubmittedAt: &at}
 	}
 
-	if _, found, err := b.PollJobPhase(context.Background(), claimed(500*time.Millisecond)); err != nil || found || len(queries) != 0 {
+	if _, found, err := b.LatestJobPhase(context.Background(), claimed(500*time.Millisecond)); err != nil || found || len(queries) != 0 {
 		t.Fatalf("claimed half a second ago: found %v, err %v, %d queries, want no phase and no read of an older snapshot", found, err, len(queries))
 	}
-	if _, found, err := b.PollJobPhase(context.Background(), claimed(5500*time.Millisecond)); err != nil || !found || !strings.Contains(queries[0], "INTERVAL '5 seconds'") {
+	if _, found, err := b.LatestJobPhase(context.Background(), claimed(5500*time.Millisecond)); err != nil || !found || !strings.Contains(queries[0], "INTERVAL '5 seconds'") {
 		t.Fatalf("claimed 5.5s ago: found %v, err %v, query %q, want the snapshots of the last 5 seconds", found, err, queries)
 	}
-	if _, found, err := b.PollJobPhase(context.Background(), claimed(time.Hour)); err != nil || !found || !strings.Contains(queries[1], "INTERVAL '60 seconds'") {
+	if _, found, err := b.LatestJobPhase(context.Background(), claimed(time.Hour)); err != nil || !found || !strings.Contains(queries[1], "INTERVAL '60 seconds'") {
 		t.Fatalf("claimed an hour ago: found %v, err %v, query %q, want the liveness window", found, err, queries)
 	}
-	if _, _, err := b.PollJobPhase(context.Background(), &domain.Experiment{ID: "exp-1", ClusterName: "cluster-a"}); err == nil {
+	if _, _, err := b.LatestJobPhase(context.Background(), &domain.Experiment{ID: "exp-1", ClusterName: "cluster-a"}); err == nil {
 		t.Fatal("a job with no submission time was given a phase")
 	}
 }
 
 func TestInconsistentSnapshotsNamesEachSkippedClusterWithItsReason(t *testing.T) {
-	b := &Backend{}
+	b := &ClusterReports{}
 	var err error = InconsistentSnapshots(b.validateCapacitySnapshot(
 		map[string]bool{"cluster-b": true},
 		map[string]float64{"cluster-b": 64}, map[string]int64{"cluster-b": 8000},
@@ -169,8 +169,8 @@ func TestInconsistentSnapshotsNamesEachSkippedClusterWithItsReason(t *testing.T)
 		map[string]int64{"cluster-b": 8}, map[string]int64{"cluster-b": 16},
 		map[string]int64{"cluster-b": 16}, map[string]int64{"cluster-b": 32},
 	))
-	var skipped interface{ SkippedClusters() map[string]error }
-	if !errors.As(err, &skipped) || skipped.SkippedClusters()["cluster-b"] == nil {
+	var skipped InconsistentSnapshots
+	if !errors.As(err, &skipped) || skipped["cluster-b"] == nil {
 		t.Fatalf("err = %v, want it to carry cluster-b's inconsistency", err)
 	}
 	if !strings.Contains(err.Error(), "exceeds total") {

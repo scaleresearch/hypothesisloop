@@ -17,9 +17,9 @@ import (
 //
 // For a distributed job, exp.AcceleratorCount is already the job's TOTAL footprint (per-node
 // count x NumNodes, set at submission), so tick()'s fit check requires the whole job's demand to
-// fit before admitting, and submitJob creates every rank in one CreateWorkload call. Admission
-// is therefore atomic: either the whole job fits and is created together, or none of it is and
-// the job stays QUEUED.
+// fit before admitting, and submitJob claims every rank in one ClaimSubmitted. Admission is
+// therefore atomic: either the whole job fits and is claimed together, or none of it is and the
+// job stays QUEUED.
 //
 // Distributed accelerator jobs with hard host spreading are additionally checked against fresh
 // per-node metrics, so capacity concentrated on too few hosts cannot pass admission.
@@ -114,11 +114,9 @@ func (o metricsDBObserver) LatestExperimentNode(ctx context.Context, experimentI
 	return metricsdb.LatestExperimentNode(ctx, o.url, experimentID, createdAt, now)
 }
 
-// LoopWorkloadClient is the backend-agnostic interface needed by the loop. No DeleteWorkload:
-// preemption requeues the victim (status -> QUEUED) and stops there — that status change alone
-// tells the cluster-agent the Job should go away; the loop never waits for it.
-type LoopWorkloadClient interface {
-	CreateWorkload(ctx context.Context, exp *domain.Experiment) error
+// ClusterCapacity is what the loop reads of the clusters' capacity: live reports net of desired
+// footprint. Placing a job is its ClaimSubmitted row alone, which the cluster reconciles against.
+type ClusterCapacity interface {
 	// GetFlavorCapacity returns per connected cluster what can be claimed now (available) and
 	// what is free once every job already told to stop is gone (desiredFree). The loop
 	// enumerates clusters from these maps.
@@ -177,7 +175,7 @@ type Reprioritizer interface {
 type Loop struct {
 	store         LoopStore
 	quota         LoopQuotaStore
-	workload      LoopWorkloadClient
+	clusters      ClusterCapacity
 	grace         domain.GraceLimits
 	reprioritizer Reprioritizer // called after each admission pass
 	trigger       chan struct{}
@@ -242,11 +240,11 @@ type Loop struct {
 const DefaultEvictionTTL = 60 * time.Second
 
 // NewLoop constructs a Loop.
-func NewLoop(store LoopStore, quota LoopQuotaStore, workloadClient LoopWorkloadClient, grace domain.GraceLimits, logger *zap.Logger) *Loop {
+func NewLoop(store LoopStore, quota LoopQuotaStore, clusters ClusterCapacity, grace domain.GraceLimits, logger *zap.Logger) *Loop {
 	return &Loop{
 		store:            store,
 		quota:            quota,
-		workload:         workloadClient,
+		clusters:         clusters,
 		grace:            grace,
 		trigger:          make(chan struct{}, 1),
 		logger:           logger,

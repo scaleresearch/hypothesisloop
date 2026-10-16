@@ -98,7 +98,7 @@ func (q *mixedQuota) ReserveAdmittedFlavor(_ context.Context, id string, flavor 
 	return nil
 }
 
-func mixedLoop(store LoopStore, workload LoopWorkloadClient, observed ObservedState) (*Loop, *mixedQuota, *recordingEvictor) {
+func mixedLoop(store LoopStore, workload ClusterCapacity, observed ObservedState) (*Loop, *mixedQuota, *recordingEvictor) {
 	evictor := &recordingEvictor{}
 	l := holdLoop(store, workload, evictor)
 	quota := &mixedQuota{reserved: map[string]reservation{}}
@@ -353,7 +353,7 @@ func (*mixedStore) MarkHeldJobs(context.Context, time.Duration) error { return n
 // coreBoxes is one idle node per cluster offering its cores as units of the CPU type, with the
 // cores and memory named here.
 type coreBoxes struct {
-	LoopWorkloadClient
+	ClusterCapacity
 	cores  map[string]int64
 	memory map[string]int64
 }
@@ -404,7 +404,6 @@ func (w coreBoxes) GetNodeLabels(context.Context) (map[string]map[string]map[str
 func (coreBoxes) GetMultiNodeCapability(context.Context) (map[string]bool, error) {
 	return map[string]bool{}, nil
 }
-func (coreBoxes) CreateWorkload(context.Context, *domain.Experiment) error { return nil }
 
 // A job above its cores' part of one cluster's nodes goes to another cluster whose nodes hold it,
 // and is refused only when no cluster's do, in cores and Gi, naming every cluster tried.

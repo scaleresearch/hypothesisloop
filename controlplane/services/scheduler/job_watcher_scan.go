@@ -46,7 +46,7 @@ func (w *JobWatcher) scanAndWatch(ctx context.Context) error {
 	// Which connected cluster reports which id, read once for the pass: every stuck-pending
 	// decision in it needs the id to find its cluster's timeout, and reading it per job cost one
 	// cluster-wide metrics query for every job still waiting to start.
-	clusterIDs, idsErr := w.backend.GetClusterIDs(ctx)
+	clusterIDs, idsErr := w.reports.GetClusterIDs(ctx)
 	// Speculative-submit inputs (autoscaler.md), read only when a deployment has opted in via
 	// WithScaleUpTimeout — mirrors Loop.tick's own opt-in gate for the same reason: a backend
 	// that has not implemented the capability read must not be asked to. With the opt-in a fetch
@@ -55,7 +55,7 @@ func (w *JobWatcher) scanAndWatch(ctx context.Context) error {
 	var autoscalerEnabled map[string]bool
 	if w.scaleUpTimeout > 0 {
 		var err error
-		autoscalerEnabled, err = w.backend.GetAutoscalerCapability(ctx)
+		autoscalerEnabled, err = w.reports.GetAutoscalerCapability(ctx)
 		if err != nil {
 			return fmt.Errorf("autoscaler capability: %w", err)
 		}
@@ -91,7 +91,7 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 	// stuck in ImagePullBackOff — the desired-state Job "exists and isn't finished" long
 	// before its container ever actually starts. A never-self-heals reason means it never
 	// will, whatever exp.Status currently says.
-	reason, message, _, scheduledNodes, schedulingReason, found, err := w.backend.PollPhaseDetail(ctx, exp)
+	reason, message, _, scheduledNodes, schedulingReason, found, err := w.reports.LatestPhaseDetail(ctx, exp)
 	if err != nil {
 		return fmt.Errorf("poll phase detail: %w", err)
 	}
@@ -143,7 +143,7 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 	// plainly Running — they were merely blocked from being *marked* RUNNING, which is a different
 	// fault with a different remedy, and refunding them as never-started billed nobody for real
 	// hardware.
-	phase, reported, err := w.backend.PollJobPhase(ctx, exp)
+	phase, reported, err := w.reports.LatestJobPhase(ctx, exp)
 	if err != nil || !reported {
 		// A bound job is past the placement deadline above, and a cluster that stops reporting
 		// never yields a phase to act on, so the admission deadline is its only bound. A cluster
@@ -172,7 +172,7 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 			return nil
 		}
 		// The runtime pushes a job's log tail before the phase that ends it, so it is stored by now.
-		tail, err := w.backend.LogTail(ctx, exp, failureOutputLines)
+		tail, err := w.reports.LogTail(ctx, exp, failureOutputLines)
 		if err != nil {
 			return fmt.Errorf("read log tail: %w", err)
 		}

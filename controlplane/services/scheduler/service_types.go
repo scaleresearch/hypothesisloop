@@ -128,7 +128,7 @@ type Environments interface {
 
 // InstalledCapacity is what each connected cluster and each of its nodes has installed, whether
 // it scales up and whether it runs a job over several nodes, as the admission loop reads them
-// (LoopWorkloadClient).
+// (ClusterCapacity).
 type InstalledCapacity interface {
 	GetTotalCapacity(ctx context.Context) (map[string]domain.Footprint, error)
 	GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)

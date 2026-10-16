@@ -62,7 +62,7 @@ func (resilienceQuota) GetAgentQuota(context.Context, string, string) (*domain.A
 
 // resilienceWorkload reports a cluster with no free capacity, so every job is skipped rather than
 // submitted — this test is about the prefilter surviving, not about placement.
-type resilienceWorkload struct{ LoopWorkloadClient }
+type resilienceWorkload struct{ ClusterCapacity }
 
 func (resilienceWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
 	return map[string]domain.Footprint{"c1": domain.NewFootprint()},
@@ -246,21 +246,16 @@ func TestTickSkipsAnAgentWhoseQuotaCannotBeRead(t *testing.T) {
 
 type skippedClusterWorkload struct{ resilienceWorkload }
 
-type skippedReport map[string]error
-
-func (skippedReport) Error() string                       { return "inconsistent snapshots" }
-func (r skippedReport) SkippedClusters() map[string]error { return r }
-
 func (w skippedClusterWorkload) GetFlavorCapacity(ctx context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
 	available, desiredFree, _ := w.resilienceWorkload.GetFlavorCapacity(ctx)
-	return available, desiredFree, skippedReport{"c2": errors.New("available capacity exceeds total")}
+	return available, desiredFree, InconsistentSnapshots{"c2": errors.New("available capacity exceeds total")}
 }
 
 func TestTickLogsASkippedClusterWithItsReasonAndContinues(t *testing.T) {
 	core, logs := observer.New(zap.WarnLevel)
 	store := &resilienceStore{queued: []*domain.Experiment{queuedJob("exp-a", "pe-live", domain.CapacityGuaranteed)}}
 	l := resilienceLoop(store)
-	l.workload = skippedClusterWorkload{}
+	l.clusters = skippedClusterWorkload{}
 	l.logger = zap.New(core)
 
 	if err := l.tick(context.Background()); err != nil {

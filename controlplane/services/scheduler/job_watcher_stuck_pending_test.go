@@ -61,7 +61,7 @@ var errPhase = errors.New("no snapshot")
 // one in both directions, for every way a job can fail to reach RUNNING.
 func TestAClustersOwnStuckPendingTimeoutReplacesTheGlobalOne(t *testing.T) {
 	const global = 5 * time.Minute
-	ways := map[string]JobBackendClient{
+	ways := map[string]JobReports{
 		"never placed":                       &scaleUpBackend{phase: workload.JobPhasePending, scheduledNodes: 0, clusterIDs: clusterA},
 		"placed, then gone":                  &scaleUpBackend{phase: workload.JobPhaseGone, scheduledNodes: 1, clusterIDs: clusterA},
 		"placed, phase unreadable":           &scaleUpBackend{phase: workload.JobPhasePending, scheduledNodes: 1, phaseErr: errPhase, clusterIDs: clusterA},
@@ -334,6 +334,6 @@ type phaseByJobBackend struct {
 	phases map[string]workload.JobPhase
 }
 
-func (b *phaseByJobBackend) PollJobPhase(_ context.Context, exp *domain.Experiment) (workload.JobPhase, bool, error) {
+func (b *phaseByJobBackend) LatestJobPhase(_ context.Context, exp *domain.Experiment) (workload.JobPhase, bool, error) {
 	return b.phases[exp.ID], true, nil
 }

@@ -13,7 +13,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
-// scaleUpBackend is the minimal JobBackendClient fake needed to drive reconcileOne/
+// scaleUpBackend is the minimal JobReports fake needed to drive reconcileOne/
 // checkScaleUpDeadline through the watcher's public entry points.
 type scaleUpBackend struct {
 	phase             workload.JobPhase
@@ -41,13 +41,13 @@ func (b *scaleUpBackend) LogTail(_ context.Context, _ *domain.Experiment, n int)
 	return b.logTail[max(0, len(b.logTail)-n):], nil
 }
 
-func (b *scaleUpBackend) PollJobPhase(context.Context, *domain.Experiment) (workload.JobPhase, bool, error) {
+func (b *scaleUpBackend) LatestJobPhase(context.Context, *domain.Experiment) (workload.JobPhase, bool, error) {
 	return b.phase, !b.phaseUnreported, b.phaseErr
 }
 func (b *scaleUpBackend) GetAdmittedAcceleratorType(context.Context, *domain.Experiment) (domain.AcceleratorType, bool, error) {
 	return b.admittedType, true, nil
 }
-func (b *scaleUpBackend) PollPhaseDetail(context.Context, *domain.Experiment) (reason, message string, restartCount, scheduledNodes int32, schedulingReason string, found bool, err error) {
+func (b *scaleUpBackend) LatestPhaseDetail(context.Context, *domain.Experiment) (reason, message string, restartCount, scheduledNodes int32, schedulingReason string, found bool, err error) {
 	found = true
 	if b.phaseDetailFound != nil {
 		found = *b.phaseDetailFound
@@ -267,7 +267,7 @@ func TestScaleUpDeadlineDisabledWithoutOptIn(t *testing.T) {
 }
 
 // A job whose phase-detail row was never written (quota-blocked pod, or an agent whose
-// PollPhaseDetail has errored every poll) must still be bounded by the placement deadline — not
+// LatestPhaseDetail has errored every poll) must still be bounded by the placement deadline — not
 // held forever. found=false used to be read as "we don't know, skip the check entirely", which
 // made such a job immortal: this proves not-found now degenerates to "not placed yet" and the
 // deadline still fires once it has genuinely passed.

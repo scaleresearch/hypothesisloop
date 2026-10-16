@@ -56,22 +56,22 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	// 1. Get available physical capacity as a domain.Footprint per cluster — a pooled total
 	// would hide which cluster has room, admitting against a combined number while the actual
 	// target cluster is full.
-	gAvail, desiredFree, err := readFlavorCapacity(ctx, l.workload, l.logger)
+	gAvail, desiredFree, err := readFlavorCapacity(ctx, l.clusters, l.logger)
 	if err != nil {
 		return err
 	}
 	// Guaranteed and burst share one physical pool per cluster; preemption enforces the tier
 	// boundary.
 	bAvail := cloneAvail(gAvail)
-	nodeAvail, err := l.workload.GetAcceleratorCapacityByNode(ctx)
+	nodeAvail, err := l.clusters.GetAcceleratorCapacityByNode(ctx)
 	if err != nil {
 		return fmt.Errorf("per-node accelerator capacity: %w", err)
 	}
-	nodeResources, err := l.workload.GetNodeResourceCapacity(ctx)
+	nodeResources, err := l.clusters.GetNodeResourceCapacity(ctx)
 	if err != nil {
 		return fmt.Errorf("per-node resource capacity: %w", err)
 	}
-	nodeLabels, err := l.workload.GetNodeLabels(ctx)
+	nodeLabels, err := l.clusters.GetNodeLabels(ctx)
 	if err != nil {
 		return fmt.Errorf("node labels: %w", err)
 	}
@@ -79,7 +79,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	// reports about itself, filtered on here so a distributed job is never placed on a runtime
 	// that executes single-node jobs only — that used to be discovered at workload creation,
 	// after the job had already been admitted and had already claimed a reservation.
-	multiNodeCapable, err := l.workload.GetMultiNodeCapability(ctx)
+	multiNodeCapable, err := l.clusters.GetMultiNodeCapability(ctx)
 	if err != nil {
 		return fmt.Errorf("multi-node capability: %w", err)
 	}
@@ -91,23 +91,23 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 		return fmt.Errorf("registered clusters: %w", err)
 	}
 	// Speculative-submit inputs (autoscaler.md), read only when a deployment has opted in via
-	// WithSpeculation — a LoopWorkloadClient that has not implemented these two methods (every
+	// WithSpeculation — a ClusterCapacity that has not implemented these two methods (every
 	// pre-autoscaler test fake, and any deployment that never calls WithSpeculation) must not be
 	// asked to.
 	var autoscalerEnabled map[string]bool
 	var clusterIDs map[string]string
 	if l.triedClusterTTL > 0 {
-		autoscalerEnabled, err = l.workload.GetAutoscalerCapability(ctx)
+		autoscalerEnabled, err = l.clusters.GetAutoscalerCapability(ctx)
 		if err != nil {
 			return fmt.Errorf("autoscaler capability: %w", err)
 		}
-		clusterIDs, err = l.workload.GetClusterIDs(ctx)
+		clusterIDs, err = l.clusters.GetClusterIDs(ctx)
 		if err != nil {
 			return fmt.Errorf("cluster ids: %w", err)
 		}
 	}
 	// gAvail only has entries for clusters GetFlavorCapacity's heartbeat read found connected
-	// (see queuebackend.Backend.GetFlavorCapacity) — reusing its key set here is the same
+	// (see ClusterReports.GetFlavorCapacity) — reusing its key set here is the same
 	// "unreachable cluster is never a speculative candidate" rule the doc calls out as a
 	// pre-existing bug fixed in step 0, applied to the speculative path too.
 	connectedClusters := make(map[string]bool, len(gAvail))
@@ -141,7 +141,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	// against. An unreadable read lands in that same state. Failing the whole tick instead would
 	// let a telemetry gap in the evidence for one destructive decision stop every ordinary
 	// admission on the platform, which is the opposite of what the evidence is for.
-	totalCapacity, err := l.workload.GetTotalCapacity(ctx)
+	totalCapacity, err := l.clusters.GetTotalCapacity(ctx)
 	if err != nil {
 		l.logger.Warn("total capacity unavailable; disbalance eviction cannot judge this tick", zap.Error(err))
 		totalCapacity = nil
@@ -151,7 +151,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	// degrade-gracefully treatment as totalCapacity immediately above: absent for a cluster (or
 	// entirely, on a read failure) just means that cluster's disbalance judgment abstains this
 	// tick, never that the whole tick fails.
-	nodeResourcesTotal, err := l.workload.GetNodeTotalCapacity(ctx)
+	nodeResourcesTotal, err := l.clusters.GetNodeTotalCapacity(ctx)
 	if err != nil {
 		l.logger.Warn("per-node total capacity unavailable; disbalance eviction cannot judge this tick", zap.Error(err))
 		nodeResourcesTotal = nil
@@ -1231,7 +1231,7 @@ func shortfall(avail domain.Footprint, footprint domain.Footprint) domain.Footpr
 }
 
 // nodeAcceleratorKey is the key a node's free accelerators of a type are under: the type in lower
-// case, as the capacity read keys them (queuebackend.GetAcceleratorCapacityByNode).
+// case, as the capacity read keys them (ClusterReports.GetAcceleratorCapacityByNode).
 func nodeAcceleratorKey(t domain.AcceleratorType) string {
 	return strings.ToLower(string(t))
 }
@@ -2014,7 +2014,7 @@ func newEnvironmentPass() *environmentPass {
 // read, reading them first if it has not (db.EnvironmentsStore.AssignEnvironment).
 func (l *Loop) assignBuild(ctx context.Context, pass *environmentPass, key string) (*domain.Environment, error) {
 	if !pass.read {
-		live, err := l.workload.GetLiveClusters(ctx)
+		live, err := l.clusters.GetLiveClusters(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("live clusters: %w", err)
 		}

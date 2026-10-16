@@ -38,10 +38,8 @@ func (w *Waiting) Error() string { return w.Why }
 
 // Executor is the cluster-local half of the desired-state reconcile loop: given exp's compiled
 // desired state, create/delete/compare it against whatever is actually running, and report
-// phase back. This is deliberately not the control plane's own workload.Backend — Backend is the
-// control-plane-facing, multi-cluster contract (queuebackend); Executor is the single-cluster,
-// agent-facing contract each cluster-agent/bare-agent binary drives its local reconcile/status
-// loop with.
+// phase back. It is the single-cluster, agent-facing contract each cluster-agent/bare-agent
+// binary drives its local reconcile/status loop with.
 type Executor interface {
 	// CreateWorkload creates exp's workload. pull is the reconcile answer's registry_pull, the
 	// login a job that runs in an environment (exp.EnvironmentKey) pulls its image with, and nil

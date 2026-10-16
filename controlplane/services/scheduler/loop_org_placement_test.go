@@ -71,7 +71,7 @@ type orgCluster struct {
 }
 
 type orgWorkload struct {
-	LoopWorkloadClient
+	ClusterCapacity
 	clusters map[string]orgCluster
 }
 
@@ -135,7 +135,6 @@ func (w orgWorkload) GetClusterIDs(context.Context) (map[string]string, error) {
 	}
 	return out, nil
 }
-func (orgWorkload) CreateWorkload(context.Context, *domain.Experiment) error { return nil }
 
 // orgStore is a deployment with several orgs: registered says whose each cluster is.
 type orgStore struct {

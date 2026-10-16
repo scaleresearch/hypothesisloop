@@ -1,12 +1,11 @@
 package scheduler
 
-// JobWatcher watches backend-executed workloads for experiments in SUBMITTED
-// state and drives the DB transitions SUBMITTED → RUNNING → COMPLETED/FAILED.
-// It talks only to the workload.Backend interface, so it has no idea whether jobs are
-// actually running as Kubernetes Jobs, Slurm allocations, or anything else.
+// JobWatcher reads what clusters report about experiments in SUBMITTED state and drives the DB
+// transitions SUBMITTED → RUNNING → COMPLETED/FAILED. It reads only JobReports, so it has no
+// idea whether jobs are actually running as Kubernetes Jobs, Slurm allocations, or anything else.
 //
 // Responsibility split:
-//   - JobWatcher: backend workload status → DB status sync and quota accounting on completion.
+//   - JobWatcher: reported job status → DB status sync and quota accounting on completion.
 //   - Controller (services/controller): policy-driven eviction (silence,
 //     quota exhaustion, metric decline). Terminates jobs that are running but should stop.
 //
@@ -60,19 +59,17 @@ type QuotaSettler interface {
 	Settle(ctx context.Context, exp *domain.Experiment) error
 }
 
-// JobBackendClient is the narrow slice of workload.Backend that JobWatcher needs. It is
-// deliberately backend-agnostic: JobWatcher never assumes Kubernetes (or any other
-// execution engine) underneath. Implemented by the PostgreSQL/metrics desired-state backend.
-type JobBackendClient interface {
-	// PollJobPhase's found=false means the job's cluster has reported no status within the
+// JobReports is what JobWatcher reads of what clusters report about jobs.
+type JobReports interface {
+	// LatestJobPhase's found=false means the job's cluster has reported no status within the
 	// liveness window, which every job is in between its placement and its runtime's next report.
-	PollJobPhase(ctx context.Context, exp *domain.Experiment) (phase workload.JobPhase, found bool, err error)
+	LatestJobPhase(ctx context.Context, exp *domain.Experiment) (phase workload.JobPhase, found bool, err error)
 	// GetAdmittedAcceleratorType's found=false means no sample of this admission names a type yet.
 	GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (acceleratorType domain.AcceleratorType, found bool, err error)
-	// PollPhaseDetail is the runtime's latest explanation for why a job has not started (see
+	// LatestPhaseDetail is the runtime's latest explanation for why a job has not started (see
 	// domain.PhaseDetail), plus the gang-readiness facts checkScaleUpDeadline needs.
 	// found=false means no runtime has reported one yet.
-	PollPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, found bool, err error)
+	LatestPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, found bool, err error)
 	// PhaseReportedSince is when exp's current attempt first reported reason. found=false means
 	// it never did.
 	PhaseReportedSince(ctx context.Context, exp *domain.Experiment, reason string) (since time.Time, found bool, err error)
@@ -80,18 +77,18 @@ type JobBackendClient interface {
 	// reported none.
 	LogTail(ctx context.Context, exp *domain.Experiment, n int) ([]string, error)
 	// GetAutoscalerCapability reports, per cluster (by cluster_name), whether it sits behind a
-	// native autoscaler — see queuebackend.Backend.GetAutoscalerCapability.
+	// native autoscaler.
 	GetAutoscalerCapability(ctx context.Context) (map[string]bool, error)
 	// GetClusterIDs reports each connected cluster's runtime-derived stable identity, keyed by
-	// cluster_name — see queuebackend.Backend.GetClusterIDs.
+	// cluster_name.
 	GetClusterIDs(ctx context.Context) (map[string]string, error)
 }
 
 // JobWatcher performs periodic stateless passes over durable desired state and drives lifecycle
-// transitions from the latest backend observations.
+// transitions from the latest cluster reports.
 type JobWatcher struct {
 	store        JobStatusStore
-	backend      JobBackendClient
+	reports      JobReports
 	logger       *zap.Logger
 	settler      QuotaSettler // durably settles final usage on job end
 	pollInterval time.Duration
@@ -119,13 +116,13 @@ type JobWatcher struct {
 }
 
 // NewJobWatcher constructs a JobWatcher.
-func NewJobWatcher(store JobStatusStore, backend JobBackendClient, settler QuotaSettler, logger *zap.Logger) *JobWatcher {
+func NewJobWatcher(store JobStatusStore, reports JobReports, settler QuotaSettler, logger *zap.Logger) *JobWatcher {
 	if settler == nil {
 		panic("scheduler: NewJobWatcher requires a quota settler — it is the only path terminal usage is written by")
 	}
 	return &JobWatcher{
 		store:   store,
-		backend: backend,
+		reports: reports,
 		settler: settler,
 		logger:  logger,
 	}

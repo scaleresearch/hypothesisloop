@@ -1,10 +1,4 @@
-// Package queuebackend implements workload.Backend without ever calling into a target
-// cluster. Every method reads or writes Postgres only (via db.ClusterQueueStore). There's no
-// command outbox or "delete" call: the experiment's status (set by services/scheduler before
-// Backend is called) is itself the desired state a cluster-agent reconciles against, like
-// updating a Deployment's spec instead of issuing an imperative RPC. experiments.status is
-// the only record of desired state. The control plane never holds cluster credentials.
-package queuebackend
+package scheduler
 
 import (
 	"context"
@@ -18,17 +12,19 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
-// Store is the persistence interface Backend needs. Satisfied by *db.Store.
-type Store interface {
+// DesiredFootprints is the desired state ClusterReports subtracts from installed capacity.
+// Satisfied by *db.Store.
+type DesiredFootprints interface {
 	SumDesiredFootprintByCluster(ctx context.Context) (map[string]domain.Footprint, error)
 }
 
-// Backend implements workload.Backend using PostgreSQL desired state and metrics observations.
-type Backend struct {
-	store Store
-	// metricsDBURL is where cluster-agents' live per-flavor accelerator capacity lives (see
-	// metricsdb.RecordClusterCapacitySnapshot) — capacity is
-	// metric data, read live, never duplicated into Postgres.
+// ClusterReports answers the scheduler's reads of what clusters report: capacity, phases and
+// output from the metrics store, net of the desired footprint PostgreSQL holds. It never
+// connects to a cluster; a job's status row is the desired state its cluster reconciles against.
+type ClusterReports struct {
+	store DesiredFootprints
+	// metricsDBURL is where cluster-agents' live capacity and job reports live: metric data,
+	// read live, never duplicated into Postgres.
 	metricsDBURL string
 	// connectedWithin mirrors clusteragentapi.Handler's staleness window
 	// (scheduler.cluster_unreachable_after_seconds): a cluster whose heartbeat is older than
@@ -37,38 +33,37 @@ type Backend struct {
 	connectedWithin time.Duration
 }
 
-// New constructs a Backend from the authoritative stores and cluster-liveness threshold.
-func New(store Store, metricsDBURL string, connectedWithin time.Duration) (*Backend, error) {
+// NewClusterReports reads desired footprint from store and reports from the metrics store at
+// metricsDBURL, counting a cluster live while it reported within connectedWithin.
+func NewClusterReports(store DesiredFootprints, metricsDBURL string, connectedWithin time.Duration) (*ClusterReports, error) {
 	if store == nil {
-		return nil, fmt.Errorf("queuebackend: store is required")
+		return nil, fmt.Errorf("scheduler: desired footprint store is required")
 	}
 	if metricsDBURL == "" {
-		return nil, fmt.Errorf("queuebackend: metrics DB URL is required")
+		return nil, fmt.Errorf("scheduler: metrics DB URL is required")
 	}
 	if connectedWithin <= 0 {
-		return nil, fmt.Errorf("queuebackend: cluster liveness window must be positive")
+		return nil, fmt.Errorf("scheduler: cluster liveness window must be positive")
 	}
-	return &Backend{store: store, metricsDBURL: metricsDBURL, connectedWithin: connectedWithin}, nil
+	return &ClusterReports{store: store, metricsDBURL: metricsDBURL, connectedWithin: connectedWithin}, nil
 }
 
-var _ workload.Backend = (*Backend)(nil)
+var (
+	_ ClusterCapacity   = (*ClusterReports)(nil)
+	_ JobReports        = (*ClusterReports)(nil)
+	_ InstalledCapacity = (*ClusterReports)(nil)
+)
 
-// CreateWorkload is a no-op: the caller already updated exp's status to SUBMITTED (or
-// similar), and that status change is exactly what a cluster-agent's desired-state
-// reconciliation reads. Deliberately not even a database write, to avoid a second place
-// that could disagree with experiments.status.
-func (b *Backend) CreateWorkload(_ context.Context, _ *domain.Experiment) error { return nil }
-
-// PollJobPhase reads the latest fresh phase metric pushed by the cluster agent. found=false means
+// LatestJobPhase reads the latest fresh phase metric pushed by the cluster agent. found=false means
 // the cluster has no status snapshot inside the liveness window, or none since exp was admitted.
 //
 // A snapshot taken before submitted_at is of the admission before this one: a job requeued and
 // claimed again between two snapshots was read as ended by the report that requeued it. A stored
 // phase names no attempt, and one could not tell the two apart anyway, since a preempted job
 // keeps its attempt. The window is cut to whole seconds, so it never reaches back past the claim.
-func (b *Backend) PollJobPhase(ctx context.Context, exp *domain.Experiment) (workload.JobPhase, bool, error) {
+func (b *ClusterReports) LatestJobPhase(ctx context.Context, exp *domain.Experiment) (workload.JobPhase, bool, error) {
 	if exp.SubmittedAt == nil {
-		return workload.JobPhasePending, false, fmt.Errorf("queuebackend: experiment %s has no submission time to read its phase against", exp.ID)
+		return workload.JobPhasePending, false, fmt.Errorf("scheduler: experiment %s has no submission time to read its phase against", exp.ID)
 	}
 	window := min(b.connectedWithin, time.Since(*exp.SubmittedAt).Truncate(time.Second))
 	if window <= 0 {
@@ -77,11 +72,10 @@ func (b *Backend) PollJobPhase(ctx context.Context, exp *domain.Experiment) (wor
 	return metricsdb.LatestJobPhase(ctx, b.metricsDBURL, exp.ID, exp.ClusterName, window)
 }
 
-// PollPhaseDetail reads the runtime's latest reported explanation for why exp's container
+// LatestPhaseDetail reads the runtime's latest reported explanation for why exp's container
 // hasn't started (or has been restarting). found=false means nothing has been reported yet —
 // distinct from an empty reason, which just means the runtime has nothing notable to say.
-// Implements scheduler.PhaseDetailer.
-func (b *Backend) PollPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, found bool, err error) {
+func (b *ClusterReports) LatestPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, found bool, err error) {
 	row, found, err := metricsdb.GetLatestPhaseDetailFull(ctx, b.metricsDBURL, exp.ID, exp.ClusterName, exp.AttemptCount)
 	if err != nil || !found {
 		return "", "", 0, 0, "", found, err
@@ -90,12 +84,12 @@ func (b *Backend) PollPhaseDetail(ctx context.Context, exp *domain.Experiment) (
 }
 
 // PhaseReportedSince is when exp's current attempt on its cluster first reported reason.
-func (b *Backend) PhaseReportedSince(ctx context.Context, exp *domain.Experiment, reason string) (time.Time, bool, error) {
+func (b *ClusterReports) PhaseReportedSince(ctx context.Context, exp *domain.Experiment, reason string) (time.Time, bool, error) {
 	return metricsdb.PhaseReportedSince(ctx, b.metricsDBURL, exp.ID, exp.ClusterName, exp.AttemptCount, reason)
 }
 
 // LogTail reads up to the last n lines of exp's most recently reported output.
-func (b *Backend) LogTail(ctx context.Context, exp *domain.Experiment, n int) ([]string, error) {
+func (b *ClusterReports) LogTail(ctx context.Context, exp *domain.Experiment, n int) ([]string, error) {
 	return metricsdb.GetLatestLogTail(ctx, b.metricsDBURL, exp.ID, n)
 }
 
@@ -108,9 +102,9 @@ func (b *Backend) LogTail(ctx context.Context, exp *domain.Experiment, n int) ([
 // happened one admission ago.
 //
 // found=false means no sample of this admission names a type yet.
-func (b *Backend) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, bool, error) {
+func (b *ClusterReports) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, bool, error) {
 	if exp.SubmittedAt == nil {
-		return "", false, fmt.Errorf("queuebackend: experiment %s has no submission time to read its accelerator type against", exp.ID)
+		return "", false, fmt.Errorf("scheduler: experiment %s has no submission time to read its accelerator type against", exp.ID)
 	}
 	now := time.Now().UTC()
 	window := b.connectedWithin
@@ -138,34 +132,34 @@ func (b *Backend) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Ex
 // CPU, memory and storage totals are the per-node figures net of non-platform pods, so a
 // desiredFree above available there is always a platform job still terminating. Accelerator
 // totals are raw allocatable: the runtime does not report them net of non-platform pods.
-func (b *Backend) GetFlavorCapacity(ctx context.Context) (available, desiredFree map[string]domain.Footprint, err error) {
+func (b *ClusterReports) GetFlavorCapacity(ctx context.Context) (available, desiredFree map[string]domain.Footprint, err error) {
 	heartbeats, err := metricsdb.LiveClusterHeartbeats(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
-		return nil, nil, fmt.Errorf("queuebackend: live clusters: %w", err)
+		return nil, nil, fmt.Errorf("scheduler: live clusters: %w", err)
 	}
 	nodeTotals, err := metricsdb.LiveClusterNodeTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
-		return nil, nil, fmt.Errorf("queuebackend: total node capacity: %w", err)
+		return nil, nil, fmt.Errorf("scheduler: total node capacity: %w", err)
 	}
 	cpuAvailable, err := metricsdb.LiveClusterCPUCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
-		return nil, nil, fmt.Errorf("queuebackend: available CPU capacity: %w", err)
+		return nil, nil, fmt.Errorf("scheduler: available CPU capacity: %w", err)
 	}
 	acceleratorAvailable, acceleratorTotal, err := metricsdb.LiveClusterAcceleratorAvailableAndTotal(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
-		return nil, nil, fmt.Errorf("queuebackend: accelerator capacity: %w", err)
+		return nil, nil, fmt.Errorf("scheduler: accelerator capacity: %w", err)
 	}
 	ramAvailable, err := metricsdb.LiveClusterRAMCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
-		return nil, nil, fmt.Errorf("queuebackend: available RAM capacity: %w", err)
+		return nil, nil, fmt.Errorf("scheduler: available RAM capacity: %w", err)
 	}
 	storageAvailable, err := metricsdb.LiveClusterStorageCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
-		return nil, nil, fmt.Errorf("queuebackend: available storage capacity: %w", err)
+		return nil, nil, fmt.Errorf("scheduler: available storage capacity: %w", err)
 	}
 	desiredByCluster, err := b.store.SumDesiredFootprintByCluster(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("queuebackend: desired footprint: %w", err)
+		return nil, nil, fmt.Errorf("scheduler: desired footprint: %w", err)
 	}
 	cpuTotal, ramTotal, storageTotal := sumNodeTotals(nodeTotals)
 	inconsistent := b.validateCapacitySnapshot(heartbeats, cpuAvailable, cpuTotal, acceleratorAvailable, acceleratorTotal, ramAvailable, ramTotal, storageAvailable, storageTotal)
@@ -200,8 +194,6 @@ func (e InconsistentSnapshots) Error() string {
 	return strings.Join(reasons, "; ")
 }
 
-func (e InconsistentSnapshots) SkippedClusters() map[string]error { return e }
-
 // sumNodeTotals adds up each cluster's per-node capacity left to platform jobs: CPU in
 // millicores, memory and storage in bytes.
 func sumNodeTotals(byNode map[string]map[string]map[string]int64) (cpuMillicores, ramBytes, storageBytes map[string]int64) {
@@ -217,7 +209,7 @@ func sumNodeTotals(byNode map[string]map[string]map[string]int64) (cpuMillicores
 }
 
 // validateCapacitySnapshot returns, per connected cluster whose snapshot cannot be trusted, why.
-func (b *Backend) validateCapacitySnapshot(
+func (b *ClusterReports) validateCapacitySnapshot(
 	heartbeats map[string]bool,
 	cpuAvailable map[string]float64, cpuTotalMillicores map[string]int64,
 	acceleratorAvailable, acceleratorTotal map[string]map[string]int64,
@@ -250,27 +242,27 @@ func validateClusterSnapshot(
 	accelAvail, accelAvailOK := acceleratorAvailable[cluster]
 	accelTotal, accelTotalOK := acceleratorTotal[cluster]
 	if !cpuAvailOK || !cpuTotalOK || !ramAvailOK || !ramTotalOK || !storageAvailOK || !storageTotalOK {
-		return fmt.Errorf("queuebackend: incomplete live capacity snapshot for active cluster %q", cluster)
+		return fmt.Errorf("scheduler: incomplete live capacity snapshot for active cluster %q", cluster)
 	}
 	if accelAvailOK != accelTotalOK {
-		return fmt.Errorf("queuebackend: incomplete live accelerator capacity for cluster %q", cluster)
+		return fmt.Errorf("scheduler: incomplete live accelerator capacity for cluster %q", cluster)
 	}
 	if !accelAvailOK {
 		accelAvail, accelTotal = map[string]int64{}, map[string]int64{}
 	}
 	if int64(cpuAvail*1000) > cpuTot || ramAvail > ramTot || storageAvail > storageTot {
-		return fmt.Errorf("queuebackend: available capacity exceeds total for active cluster %q", cluster)
+		return fmt.Errorf("scheduler: available capacity exceeds total for active cluster %q", cluster)
 	}
 	if len(accelAvail) != len(accelTotal) {
-		return fmt.Errorf("queuebackend: mismatched live accelerator capacity sets for cluster %q", cluster)
+		return fmt.Errorf("scheduler: mismatched live accelerator capacity sets for cluster %q", cluster)
 	}
 	for flavor, total := range accelTotal {
 		available, availableOK := accelAvail[flavor]
 		if !availableOK {
-			return fmt.Errorf("queuebackend: incomplete live accelerator capacity for cluster %q flavor %q", cluster, flavor)
+			return fmt.Errorf("scheduler: incomplete live accelerator capacity for cluster %q flavor %q", cluster, flavor)
 		}
 		if available > total {
-			return fmt.Errorf("queuebackend: available accelerator capacity exceeds total for cluster %q flavor %q", cluster, flavor)
+			return fmt.Errorf("scheduler: available accelerator capacity exceeds total for cluster %q flavor %q", cluster, flavor)
 		}
 	}
 	return nil
@@ -281,7 +273,7 @@ func validateClusterSnapshot(
 // A type is keyed in lower case, the form a footprint names it in: a node reports it as its
 // driver cases it, and an accelerator type is one type however it is cased
 // (domain.AcceleratorType.Is), so every reader looks it up exactly.
-func (b *Backend) GetAcceleratorCapacityByNode(ctx context.Context) (map[string]map[string]map[string]int64, error) {
+func (b *ClusterReports) GetAcceleratorCapacityByNode(ctx context.Context) (map[string]map[string]map[string]int64, error) {
 	reported, err := metricsdb.LiveClusterNodeAcceleratorCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
 		return nil, err
@@ -306,7 +298,7 @@ func lowerAcceleratorTypes(reported map[string]map[string]map[string]int64) map[
 
 // GetNodeResourceCapacity reports fresh free CPU/memory/storage per node as
 // cluster -> node -> domain.NodeResource* -> amount.
-func (b *Backend) GetNodeResourceCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error) {
+func (b *ClusterReports) GetNodeResourceCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error) {
 	return metricsdb.LiveClusterNodeResourceCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 }
 
@@ -314,33 +306,33 @@ func (b *Backend) GetNodeResourceCapacity(ctx context.Context) (map[string]map[s
 // allocatable minus non-platform-pod requests (DaemonSets, CNI, monitoring, anything else
 // permanently resident; platform job pods themselves are not subtracted), as
 // cluster -> node -> domain.NodeResource* -> amount.
-func (b *Backend) GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error) {
+func (b *ClusterReports) GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error) {
 	return metricsdb.LiveClusterNodeTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 }
 
 // GetTotalCapacity returns each connected cluster's installed capacity, for consumers that need
 // the cluster's shape rather than its free space. Only clusters with a complete fresh snapshot are
 // returned; a cluster whose totals are missing or stale is omitted entirely, never zero-filled.
-func (b *Backend) GetTotalCapacity(ctx context.Context) (map[string]domain.Footprint, error) {
+func (b *ClusterReports) GetTotalCapacity(ctx context.Context) (map[string]domain.Footprint, error) {
 	heartbeats, err := metricsdb.LiveClusterHeartbeats(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
-		return nil, fmt.Errorf("queuebackend: live clusters: %w", err)
+		return nil, fmt.Errorf("scheduler: live clusters: %w", err)
 	}
 	cpuTotal, err := metricsdb.LiveClusterCPUTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
-		return nil, fmt.Errorf("queuebackend: total CPU capacity: %w", err)
+		return nil, fmt.Errorf("scheduler: total CPU capacity: %w", err)
 	}
 	acceleratorTotal, err := metricsdb.LiveClusterAcceleratorTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
-		return nil, fmt.Errorf("queuebackend: total accelerator capacity: %w", err)
+		return nil, fmt.Errorf("scheduler: total accelerator capacity: %w", err)
 	}
 	ramTotal, err := metricsdb.LiveClusterRAMTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
-		return nil, fmt.Errorf("queuebackend: total RAM capacity: %w", err)
+		return nil, fmt.Errorf("scheduler: total RAM capacity: %w", err)
 	}
 	storageTotal, err := metricsdb.LiveClusterStorageTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil {
-		return nil, fmt.Errorf("queuebackend: total storage capacity: %w", err)
+		return nil, fmt.Errorf("scheduler: total storage capacity: %w", err)
 	}
 	out := make(map[string]domain.Footprint, len(heartbeats))
 	for cluster, connected := range heartbeats {
@@ -361,7 +353,7 @@ func (b *Backend) GetTotalCapacity(ctx context.Context) (map[string]domain.Footp
 // GetMultiNodeCapability reports which clusters say their runtime can execute a job spanning more
 // than one node. A cluster with no fresh report is absent, and admission reads absence as "cannot"
 // — the same fail-closed rule every other capacity read here follows.
-func (b *Backend) GetMultiNodeCapability(ctx context.Context) (map[string]bool, error) {
+func (b *ClusterReports) GetMultiNodeCapability(ctx context.Context) (map[string]bool, error) {
 	return metricsdb.LiveClusterMultiNodeCapability(ctx, b.metricsDBURL, b.connectedWithin)
 }
 
@@ -369,11 +361,11 @@ func (b *Backend) GetMultiNodeCapability(ctx context.Context) (map[string]bool, 
 // (cluster-autoscaler / Karpenter) that reacts to Pending pods. A cluster with no fresh report is
 // absent, and speculative admission reads absence as "no autoscaler" — the same fail-closed rule
 // GetMultiNodeCapability follows.
-func (b *Backend) GetAutoscalerCapability(ctx context.Context) (map[string]bool, error) {
+func (b *ClusterReports) GetAutoscalerCapability(ctx context.Context) (map[string]bool, error) {
 	return metricsdb.LiveClusterAutoscalerCapability(ctx, b.metricsDBURL, b.connectedWithin)
 }
 
-func (b *Backend) GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error) {
+func (b *ClusterReports) GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error) {
 	return metricsdb.LiveClusterNodeLabels(ctx, b.metricsDBURL, b.connectedWithin)
 }
 
@@ -381,11 +373,11 @@ func (b *Backend) GetNodeLabels(ctx context.Context) (map[string]map[string]map[
 // namespace UID / machine-id), keyed by cluster_name — the routing key everything else here uses.
 // Speculative admission's tried-cluster bookkeeping keys on cluster_id (a rename must not split
 // or merge it); a cluster whose agent has not yet started sending cluster_id is simply absent.
-func (b *Backend) GetClusterIDs(ctx context.Context) (map[string]string, error) {
+func (b *ClusterReports) GetClusterIDs(ctx context.Context) (map[string]string, error) {
 	return metricsdb.LiveClusterIDs(ctx, b.metricsDBURL, b.connectedWithin)
 }
 
-func (b *Backend) GetLiveClusters(ctx context.Context) (map[string]bool, error) {
+func (b *ClusterReports) GetLiveClusters(ctx context.Context) (map[string]bool, error) {
 	live, err := metricsdb.LiveClusterHeartbeats(ctx, b.metricsDBURL, b.connectedWithin)
 	if err != nil || domain.EnvironmentBuildHold <= b.connectedWithin {
 		return live, err

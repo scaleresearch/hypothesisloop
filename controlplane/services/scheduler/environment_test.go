@@ -144,7 +144,7 @@ func (s *environmentStore) EndQueuedSettled(_ context.Context, id string, to dom
 
 // buildersLive reports the clusters that are live.
 type buildersLive struct {
-	LoopWorkloadClient
+	ClusterCapacity
 	live  map[string]bool
 	reads *int
 }

@@ -44,7 +44,7 @@ type simRow struct {
 // sim is the store, the clusters, the quota and the metrics store of one simulated deployment.
 type sim struct {
 	LoopStore
-	LoopWorkloadClient
+	ClusterCapacity
 
 	t     *testing.T
 	mu    sync.Mutex
@@ -308,7 +308,7 @@ func (s *sim) LatestExperimentNode(_ context.Context, id string, _, _ time.Time)
 func (s *sim) RecordAdmission(context.Context, string, time.Time) error { return nil }
 
 // The clusters: what each has free is what it has less every placed job's footprint, as
-// queuebackend derives it from desired state.
+// ClusterReports derives it from desired state.
 
 func (b simBox) total() domain.Footprint {
 	return domain.CapacityFootprint(b.cores, map[string]int64{string(cpuType): int64(b.cores)}, b.memory, 1<<40)
@@ -403,7 +403,6 @@ func (s *sim) GetTotalCapacity(context.Context) (map[string]domain.Footprint, er
 func (s *sim) GetMultiNodeCapability(context.Context) (map[string]bool, error) {
 	return map[string]bool{}, nil
 }
-func (s *sim) CreateWorkload(context.Context, *domain.Experiment) error { return nil }
 
 // advance moves the clock by d: placed jobs start, and those whose run time is up complete. It
 // returns how many completed.

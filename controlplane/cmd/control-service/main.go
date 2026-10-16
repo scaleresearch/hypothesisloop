@@ -37,9 +37,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/leaderelection"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/queuebackend"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/registrycred"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
 // control-service serves the entire agent- and UI-facing API from one listener: quota,
@@ -366,14 +364,11 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environmentsSvc *environments.Service, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *quota.PlatformExperimentsService, peHandler *quota.PlatformExperimentsHandler, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Handler, *clusteragentapi.Handler) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
-	// jwc is workload.Backend; swap this line to plug in a different scheduling mechanism
-	// (see workload/backend.go). queuebackend.Backend only reads/writes Postgres.
-	queueBackend, err := queuebackend.New(store, metricsDBURL,
+	clusterReports, err := scheduler.NewClusterReports(store, metricsDBURL,
 		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second)
 	if err != nil {
-		logger.Fatal("control-service: configure scheduler backend", zap.Error(err))
+		logger.Fatal("control-service: configure cluster reports", zap.Error(err))
 	}
-	var jwc workload.Backend = queueBackend
 
 	// settler is the sole path that durably writes a terminal experiment's final observed usage
 	// (see services/settlement) — used inline by JobWatcher and by the reconciler below to
@@ -381,7 +376,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 	settler := settlement.New(expQuotaSvc, metricsDBURL, observedGapCap)
 	settlementReconciler := settlement.NewReconciler(store, settler, 30*time.Second, logger)
 
-	watcher := scheduler.NewJobWatcher(store, jwc, settler, logger).
+	watcher := scheduler.NewJobWatcher(store, clusterReports, settler, logger).
 		WithPollInterval(time.Duration(pcfg.Scheduler.JobPollIntervalSeconds) * time.Second).
 		WithStuckPendingTimeout(time.Duration(pcfg.Scheduler.StuckPendingTimeoutSeconds) * time.Second).
 		WithStartTimeout(time.Duration(pcfg.Scheduler.StartTimeoutSeconds) * time.Second).
@@ -393,13 +388,13 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 		MaxCheckpointSeconds:   int64(pcfg.Scheduler.MaxCheckpointGraceSeconds),
 	}
 	noveltyDetector := dedup.New()
-	schedulerSvc := scheduler.NewService(store, expQuotaSvc, noveltyDetector, graph, gitHost, queueBackend, settler, metricsDBURL, logger).
+	schedulerSvc := scheduler.NewService(store, expQuotaSvc, noveltyDetector, graph, gitHost, clusterReports, settler, metricsDBURL, logger).
 		WithQuotaConfig(quotaCfg).
 		WithJobImages(pcfg.OfferedJobImages()).
 		WithEnvironments(environmentsSvc).
 		WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent)
 
-	schedulerLoop := scheduler.NewLoop(store, expQuotaSvc, jwc, grace, logger).
+	schedulerLoop := scheduler.NewLoop(store, expQuotaSvc, clusterReports, grace, logger).
 		WithReprioritizer(schedulerSvc).
 		WithHeartbeat(time.Duration(pcfg.Scheduler.LoopHeartbeatSeconds)*time.Second).
 		WithGuaranteedFairnessWindow(time.Duration(pcfg.Scheduler.GuaranteedFairnessWindowSeconds)*time.Second).

@@ -106,7 +106,7 @@ func Fits(capacity, footprint Footprint) bool {
 
 // CapacityFootprint builds a per-cluster capacity Footprint from live CPU-core,
 // per-accelerator-flavor, and RAM/ephemeral-storage availability — the shape
-// workload.Backend.GetFlavorCapacity implementations report. cpuCores is floored to whole
+// the scheduler's capacity read (ClusterReports.GetFlavorCapacity) reports. cpuCores is floored to whole
 // millicores (never rounded up in the admission loop's favor), preserving fractional-CPU
 // precision. ramBytes/storageBytes are already integer bytes — pass 0 if a cluster has no fresh
 // report for that dimension so Fits() fails closed. acceleratorByFlavor keys must already be

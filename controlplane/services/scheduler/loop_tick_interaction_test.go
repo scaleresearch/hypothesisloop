@@ -45,13 +45,12 @@ func (s *claimStore) MarkQueued(_ context.Context, id, reason string) error {
 // tests mutate it between building exp and invoking submitJob to simulate the cluster losing a
 // node in the gap between the tick's placement decision and the claim.
 type liveWorkload struct {
-	LoopWorkloadClient
+	ClusterCapacity
 	guaranteed map[string]domain.Footprint
 	burst      map[string]domain.Footprint
 	nodeAccel  map[string]map[string]map[string]int64
 	nodeRes    map[string]map[string]map[string]int64
 	nodeLabels map[string]map[string]map[string]string
-	created    bool
 }
 
 func (w *liveWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
@@ -65,10 +64,6 @@ func (w *liveWorkload) GetNodeResourceCapacity(context.Context) (map[string]map[
 }
 func (w *liveWorkload) GetNodeLabels(context.Context) (map[string]map[string]map[string]string, error) {
 	return w.nodeLabels, nil
-}
-func (w *liveWorkload) CreateWorkload(context.Context, *domain.Experiment) error {
-	w.created = true
-	return nil
 }
 
 type submitQuota struct{ LoopQuotaStore }
@@ -110,13 +105,9 @@ func TestSubmitJobRejectsClaimWhenNodeVanishesBeforeClaim(t *testing.T) {
 	if store.claimed {
 		t.Fatal("claim succeeded despite the node the placement relied on being gone by claim time")
 	}
-	if workload.created {
-		t.Fatal("CreateWorkload ran even though the claim was rejected")
-	}
 }
 
-// Same setup, but the node is still there at claim time: the claim must succeed and the workload
-// must be created. This is the control for the test above — it proves the rejection there is
+// Same setup, but the node is still there at claim time: the claim must succeed. This is the control for the test above — it proves the rejection there is
 // because the node vanished, not because the harness always refuses.
 func TestSubmitJobSucceedsWhenNodeStillPresentAtClaim(t *testing.T) {
 	exp := distributedExperiment(1, 1)
@@ -138,9 +129,6 @@ func TestSubmitJobSucceedsWhenNodeStillPresentAtClaim(t *testing.T) {
 	}
 	if !store.claimed {
 		t.Fatal("claim should have succeeded")
-	}
-	if !workload.created {
-		t.Fatal("CreateWorkload should have run after a successful claim")
 	}
 }
 
@@ -197,7 +185,7 @@ func (tickQuota) GetAgentQuota(context.Context, string, string) (*domain.AgentQu
 // layoutShortWorkload reports a cluster with enough aggregate capacity for the job (scalarFits)
 // but with that capacity split across two nodes so a hard-spread two-rank job's distinct-host
 // requirement fails (topologyFits is false).
-type layoutShortWorkload struct{ LoopWorkloadClient }
+type layoutShortWorkload struct{ ClusterCapacity }
 
 func (layoutShortWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
 	fp := domain.CapacityFootprint(16, map[string]int64{h100: 2}, 64<<30, 64<<30)
@@ -245,7 +233,7 @@ func (s *scaleUpWaitingStore) ListSubmittedExperiments(context.Context) ([]*doma
 // negative in the job's accelerator dimension (a SUBMITTED row is already outstanding there) —
 // live fit fails, and this job's own request is oversized for the only known node, so it never
 // becomes a speculative candidate itself; it must fall through to preemption and be skipped there.
-type scaleUpWaitingWorkload struct{ LoopWorkloadClient }
+type scaleUpWaitingWorkload struct{ ClusterCapacity }
 
 func (scaleUpWaitingWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
 	fp := domain.NewFootprint()
@@ -342,7 +330,7 @@ func TestTickSkipsPreemptionForLayoutOnlyShortfall(t *testing.T) {
 
 // shareWorkload is one node with eight free accelerators and 6 cores in total, so one accelerator
 // is entitled to 750m. Every scalar and topology check passes; only the share is too small.
-type shareWorkload struct{ LoopWorkloadClient }
+type shareWorkload struct{ ClusterCapacity }
 
 func (shareWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
 	free := func() domain.Footprint {
@@ -460,7 +448,7 @@ const l40 = "nvidia.com/gpu.product=nvidia-l40"
 // with one free h100. cpuCores is what cluster-a has free, terminating the h100 on cluster-a that
 // desired state has released and a terminating pod still holds.
 type holdWorkload struct {
-	LoopWorkloadClient
+	ClusterCapacity
 	cpuCores    float64
 	terminating int64
 }
@@ -500,7 +488,6 @@ func (holdWorkload) GetTotalCapacity(context.Context) (map[string]domain.Footpri
 		"cluster-b": domain.CapacityFootprint(16, map[string]int64{h100: 1}, 64<<30, 64<<30),
 	}, nil
 }
-func (holdWorkload) CreateWorkload(context.Context, *domain.Experiment) error { return nil }
 
 func holdNodeTotal() map[string]int64 {
 	return map[string]int64{
@@ -551,7 +538,7 @@ func holdJob(id string, tier domain.CapacityTier, flavor domain.AcceleratorType,
 	}
 }
 
-func holdLoop(store LoopStore, workload LoopWorkloadClient, evictor ExperimentEvictor) *Loop {
+func holdLoop(store LoopStore, workload ClusterCapacity, evictor ExperimentEvictor) *Loop {
 	l := NewLoop(store, holdQuota{}, workload, testGraceLimits, zap.NewNop())
 	l.observed = fakeObserved{}
 	l.evictor = evictor

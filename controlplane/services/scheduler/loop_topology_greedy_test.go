@@ -257,7 +257,7 @@ func TestPlaceAtFlavorReturnsFalseWhenNoClusterHasLayout(t *testing.T) {
 }
 
 // A job names its type as its agent cased it and a node's free accelerators are keyed in lower
-// case where they are read (queuebackend), so the placement of a job whose type is cased
+// case where they are read (ClusterReports), so the placement of a job whose type is cased
 // otherwise finds them with an exact lookup.
 func TestAJobIsPlacedOnANodeWhateverCaseItNamesItsTypeIn(t *testing.T) {
 	exp := distributedExperiment(1, 2)

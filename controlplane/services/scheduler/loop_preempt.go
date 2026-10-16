@@ -20,18 +20,14 @@ var errAdmissionCapacityChanged = errors.New("capacity changed during admission"
 // rejection from a generic submit failure without importing the quota package's concrete type.
 type concurrencyCapExceeded interface{ ConcurrencyCapExceeded() bool }
 
-// skippedClusters is implemented by queuebackend.InconsistentSnapshots: the capacity read is
-// valid for every other cluster and names the ones it left out.
-type skippedClusters interface{ SkippedClusters() map[string]error }
-
 // readFlavorCapacity is GetFlavorCapacity with the clusters it left out logged and the read kept.
 func readFlavorCapacity(ctx context.Context, client interface {
 	GetFlavorCapacity(ctx context.Context) (available, desiredFree map[string]domain.Footprint, err error)
 }, logger *zap.Logger) (available, desiredFree map[string]domain.Footprint, err error) {
 	available, desiredFree, err = client.GetFlavorCapacity(ctx)
-	var skipped skippedClusters
+	var skipped InconsistentSnapshots
 	if errors.As(err, &skipped) {
-		for cluster, why := range skipped.SkippedClusters() {
+		for cluster, why := range skipped {
 			logger.Warn("cluster left out of the capacity read", zap.String("cluster", cluster), zap.Error(why))
 		}
 		return available, desiredFree, nil
@@ -330,10 +326,6 @@ func (l *Loop) completionFractions(ctx context.Context, exps []*domain.Experimen
 	return out
 }
 
-// submitJob marks the experiment SUBMITTED and assigns it to clusterName in the DB first
-// (atomically — see MarkSubmitted), then creates the backend workload. MarkSubmitted is itself
-// the durable capacity claim because GetFlavorCapacity subtracts all desired experiments. On
-// backend failure we roll back to QUEUED so the next tick can retry from durable state.
 // settleStint records a requeued preemption victim's consumed hours as observed usage.
 //
 // Best-effort: the requeue itself has already committed, and reporting a settlement failure as if
@@ -436,22 +428,22 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 		}
 	} else {
 		capacityAvailable = func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
-			available, _, err := readFlavorCapacity(ctx, l.workload, l.logger)
+			available, _, err := readFlavorCapacity(ctx, l.clusters, l.logger)
 			if err != nil {
 				return false, err
 			}
 			if !domain.Fits(available[clusterName], fp) {
 				return false, nil
 			}
-			nodeAvail, err := l.workload.GetAcceleratorCapacityByNode(ctx)
+			nodeAvail, err := l.clusters.GetAcceleratorCapacityByNode(ctx)
 			if err != nil {
 				return false, err
 			}
-			nodeResources, err := l.workload.GetNodeResourceCapacity(ctx)
+			nodeResources, err := l.clusters.GetNodeResourceCapacity(ctx)
 			if err != nil {
 				return false, err
 			}
-			nodeLabels, err := l.workload.GetNodeLabels(ctx)
+			nodeLabels, err := l.clusters.GetNodeLabels(ctx)
 			if err != nil {
 				return false, err
 			}
@@ -478,13 +470,6 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 		return errAdmissionCapacityChanged
 	}
 	exp.ClusterName = clusterName
-	if err := l.workload.CreateWorkload(ctx, exp); err != nil {
-		if rbErr := l.store.MarkQueued(ctx, exp.ID, workloadCreationReason()); rbErr != nil {
-			l.logger.Error("rollback to QUEUED failed after workload creation error",
-				zap.String("exp", exp.ID), zap.Error(rbErr))
-		}
-		return err
-	}
 	return nil
 }
 
