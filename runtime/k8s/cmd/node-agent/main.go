@@ -12,6 +12,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"log"
@@ -28,6 +29,10 @@ import (
 )
 
 const cgroupRoot = "/sys/fs/cgroup/kubepods.slice"
+
+// version is the image tag this binary was built from, set at link time (-X main.version=TAG).
+// Built without it, the agent names no version.
+var version string
 
 func main() {
 	nodeName := os.Getenv("NODE_NAME")
@@ -50,7 +55,7 @@ func main() {
 	}
 	interval := time.Duration(n) * time.Millisecond
 
-	log.Printf("hypothesisloop-node-agent starting: node=%s endpoint=%s interval=%s", nodeName, controlPlane.BaseURL, interval)
+	log.Printf("hypothesisloop-node-agent starting: version=%s node=%s endpoint=%s interval=%s", cmp.Or(version, "unknown"), nodeName, controlPlane.BaseURL, interval)
 
 	kubeClient, err := inClusterPodLister()
 	if err != nil {
