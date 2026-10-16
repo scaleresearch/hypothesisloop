@@ -129,12 +129,13 @@ func TestAnEndingAgentThatExitedGoesAndThePoolStaysFull(t *testing.T) {
 	h.names(full("a"), pool)
 }
 
-func TestAWarmInstanceThatFailsToStartIsDestroyedAndTheAgentCreated(t *testing.T) {
+func TestAWarmInstanceThatFailsToStartFailsThePassAndIsDestroyed(t *testing.T) {
 	h := newPoolHarness(t, 1)
 	h.cp.want([]entry{agent("a")}, nil)
 	pool := h.warmPool(image1)
 	h.rented.Start(full("a"))
 	warmID := h.rented.IDs(pool)[0]
+	creates := h.rented.Calls("Create")
 
 	h.cp.want([]entry{agent("a"), agent("b")}, nil)
 	h.rented.Fail = func(method, name string) error {
@@ -143,16 +144,24 @@ func TestAWarmInstanceThatFailsToStartIsDestroyedAndTheAgentCreated(t *testing.T
 		}
 		return nil
 	}
-	if err := h.pass(); err != nil {
-		t.Fatalf("pass: %v", err)
+	err := h.pass()
+	if err == nil || !strings.Contains(err.Error(), "start "+full("b")) || strings.Contains(err.Error(), agentToken) {
+		t.Fatalf("pass = %v, want the failed start without the agent's token", err)
 	}
-	h.names(full("a"), full("b"), pool)
+	h.names(full("a"), pool)
 	if ids := h.rented.IDs(pool); len(ids) != 1 || ids[0] == warmID {
 		t.Fatalf("pool = %v, want a new instance in place of %s", ids, warmID)
+	}
+	if h.rented.Calls("Create") != creates {
+		t.Fatal("the agent was created in place of the warm start")
 	}
 	if h.logged(agentToken) != 0 {
 		t.Fatalf("the agent's token reached the log: %q", h.log)
 	}
+
+	h.rented.Fail = nil
+	h.mustPass()
+	h.names(full("a"), full("b"), pool)
 }
 
 func TestAnAgentOfAnotherImageIsCreatedAndThePoolFollowsTheImageAsked(t *testing.T) {
@@ -366,17 +375,9 @@ func TestAPoolNeedsAProviderThatWarms(t *testing.T) {
 	}
 }
 
-// Passes that come faster than ProgressInterval report the last progress read, and an exited
-// instance's output is read once.
-func TestOutputIsReadOncePerProgressIntervalAndAnExitOnce(t *testing.T) {
+// Every pass reads the output of every running and every exited instance afresh.
+func TestOutputIsReadOnEveryPass(t *testing.T) {
 	h := newHarness(t)
-	cfg := h.config()
-	cfg.ProgressInterval = time.Hour
-	launcher, err := New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h.launcher = launcher
 	h.cp.want([]entry{agent("a"), agent("b")}, nil)
 	h.mustPass()
 	h.rented.Start(full("a"))
@@ -385,26 +386,20 @@ func TestOutputIsReadOncePerProgressIntervalAndAnExitOnce(t *testing.T) {
 	h.mustPass()
 	h.rented.Print(full("a"), "hl-progress 2")
 	h.mustPass()
-	if got := *h.cp.lastQuestion().Instances[0].Progress; got != "1" {
-		t.Fatalf("progress = %q, want the read of the pass before", got)
+	if got := *h.cp.lastQuestion().Instances[0].Progress; got != "2" {
+		t.Fatalf("progress = %q, want this pass's read", got)
 	}
-	if reads := h.rented.Calls("Logs"); reads != 2 {
-		t.Fatalf("log reads = %d, want one per running instance", reads)
+	if reads := h.rented.Calls("Logs"); reads != 4 {
+		t.Fatalf("log reads = %d, want one per running instance and pass", reads)
 	}
 
 	h.rented.Exit(full("b"), "the end")
 	h.mustPass()
 	h.mustPass()
-	if reads := h.rented.Calls("Logs"); reads != 3 {
-		t.Fatalf("log reads = %d, want the exit read once", reads)
+	if reads := h.rented.Calls("Logs"); reads != 8 {
+		t.Fatalf("log reads = %d, want one per instance and pass", reads)
 	}
 	if got := h.cp.lastQuestion().Instances[1].Log; got != "the end" {
 		t.Fatalf("exit log = %q", got)
-	}
-
-	launcher.cfg.ProgressInterval = 0
-	h.mustPass()
-	if got := *h.cp.lastQuestion().Instances[0].Progress; got != "2" {
-		t.Fatalf("progress = %q, want a fresh read", got)
 	}
 }

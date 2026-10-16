@@ -285,10 +285,8 @@ func TestAnInstanceTheListNoLongerNamesIsDestroyed(t *testing.T) {
 	h.names()
 }
 
-func TestAnEndingInstanceIsToldToStopOnceAndAgainOnlyWhileItKeepsRunning(t *testing.T) {
+func TestAnEndingInstanceIsToldToStopOnEveryPassUntilItsCommandExits(t *testing.T) {
 	h := newHarness(t)
-	now := time.Now()
-	h.launcher.now = func() time.Time { return now }
 	h.cp.want([]entry{agent("a"), agent("b"), agent("c")}, nil)
 	h.mustPass()
 	h.rented.Start(full("a"))
@@ -299,7 +297,7 @@ func TestAnEndingInstanceIsToldToStopOnceAndAgainOnlyWhileItKeepsRunning(t *test
 	h.mustPass()
 	h.mustPass()
 	// One whose command already exited has had its last turn and goes at once, needing no
-	// signal. A coordinator was once kept four minutes after it.
+	// signal.
 	h.names(full("a"), full("c"))
 	if !reflect.DeepEqual(h.rented.IDs(full("a")), idsA) || !reflect.DeepEqual(h.rented.IDs(full("c")), idsC) || len(idsB) != 1 {
 		t.Fatal("an ending instance was replaced")
@@ -307,23 +305,14 @@ func TestAnEndingInstanceIsToldToStopOnceAndAgainOnlyWhileItKeepsRunning(t *test
 	if h.rented.Calls("Create") != 3 || h.rented.Calls("Destroy") != 1 {
 		t.Fatalf("creates %d destroys %d, want 3 and the exited one", h.rented.Calls("Create"), h.rented.Calls("Destroy"))
 	}
-	// The signal is what starts the agent's last turn. Running or still starting, an ending
-	// instance gets it once. A launcher once sent it to one machine on every pass, 33 times in
-	// a minute.
-	if a, c := h.rented.Stops(full("a")), h.rented.Stops(full("c")); a != 1 || c != 1 || h.rented.Calls("Stop") != 2 {
-		t.Fatalf("stops: running %d, starting %d, all %d, want 1, 1 and none to the exited one", a, c, h.rented.Calls("Stop"))
+	if a, c := h.rented.Stops(full("a")), h.rented.Stops(full("c")); a != 2 || c != 2 || h.rented.Calls("Stop") != 4 {
+		t.Fatalf("stops: running %d, starting %d, all %d, want one each per pass and none to the exited one", a, c, h.rented.Calls("Stop"))
 	}
-	now = now.Add(stopRetry - time.Second)
-	h.mustPass()
-	if a, c := h.rented.Stops(full("a")), h.rented.Stops(full("c")); a != 1 || c != 1 {
-		t.Fatalf("stops before the retry: running %d, starting %d, want 1 each", a, c)
-	}
-	// One still running after the retry interval is told again; one that exited is destroyed.
+
 	h.rented.Exit(full("c"))
-	now = now.Add(time.Second)
 	h.mustPass()
-	if a := h.rented.Stops(full("a")); a != 2 || h.rented.Calls("Stop") != 3 {
-		t.Fatalf("stops after the retry: running %d, all %d, want 2 and none to the exited one", a, h.rented.Calls("Stop"))
+	if a := h.rented.Stops(full("a")); a != 3 || h.rented.Calls("Stop") != 5 {
+		t.Fatalf("stops: running %d, all %d, want 3 and none to the exited one", a, h.rented.Calls("Stop"))
 	}
 	h.names(full("a"))
 
@@ -364,11 +353,11 @@ func TestAStopThatFailsIsReportedAndTheRestOfThePassRuns(t *testing.T) {
 	if h.rented.Stops(full("b")) != 1 {
 		t.Fatal("the other ending instance was not told to stop")
 	}
-	// The failed stop is sent again on the next pass, and the one that was taken is not.
+	// The next pass stops both again.
 	h.rented.Fail = nil
 	h.mustPass()
-	if a, b := h.rented.Stops(full("a")), h.rented.Stops(full("b")); a != 1 || b != 1 {
-		t.Fatalf("stops after a failed one: %d and %d, want the failed one sent again and the other left", a, b)
+	if a, b := h.rented.Stops(full("a")), h.rented.Stops(full("b")); a != 1 || b != 2 {
+		t.Fatalf("stops after a failed one: %d and %d, want 1 and 2", a, b)
 	}
 }
 
@@ -832,8 +821,8 @@ func TestARefusedPassStopsAndDestroysByTheListsAndCreatesNothing(t *testing.T) {
 		}
 	}
 	h.names(full("kept"), full("winding-down"))
-	if h.rented.Calls("Create") != 3 || h.rented.Calls("Destroy") != 1 || h.rented.Stops(full("winding-down")) != 1 || !reflect.DeepEqual(h.rented.IDs(full("kept")), kept) {
-		t.Fatalf("refused passes: creates %d destroys %d stops %d, want nothing created, the one over destroyed and the ending one told to stop once",
+	if h.rented.Calls("Create") != 3 || h.rented.Calls("Destroy") != 1 || h.rented.Stops(full("winding-down")) != 2 || !reflect.DeepEqual(h.rented.IDs(full("kept")), kept) {
+		t.Fatalf("refused passes: creates %d destroys %d stops %d, want nothing created, the one over destroyed and the ending one told to stop on each pass",
 			h.rented.Calls("Create"), h.rented.Calls("Destroy"), h.rented.Stops(full("winding-down")))
 	}
 

@@ -57,23 +57,29 @@ func (l *Launcher) readyPool(pool []provider.Instance) map[string][]provider.Ins
 	return ready
 }
 
-// startWarm starts spec on a warm instance of its image and reports whether one runs it. A pool
-// instance that fails to start is destroyed, and the caller creates one instead.
-func (p *pass) startWarm(ctx context.Context, spec provider.Spec) (string, bool) {
-	l := p.l
-	name := l.poolName(spec.Image)
+// warmFor takes the oldest warm instance of spec's image for this pass, if the pool has one.
+func (p *pass) warmFor(spec provider.Spec) (provider.Instance, bool) {
+	name := p.l.poolName(spec.Image)
 	if len(p.ready[name]) == 0 {
-		return "", false
+		return provider.Instance{}, false
 	}
 	i := p.ready[name][0]
 	p.ready[name] = p.ready[name][1:]
 	p.started[i.ID] = true
+	return i, true
+}
+
+// startWarm starts spec on the warm instance i. One that fails to start fails the agent's pass and
+// is destroyed, so the next pass does not try it again.
+func (p *pass) startWarm(ctx context.Context, i provider.Instance, spec provider.Spec) {
+	l := p.l
 	if err := l.warmer.StartWarm(ctx, i.ID, spec); err != nil {
-		l.cfg.Log("start %s on warm instance %s: %v; it is destroyed and the agent created", spec.Name, i.ID, err)
+		l.cfg.Log("start %s on warm instance %s: %v", spec.Name, i.ID, err)
+		p.failures = append(p.failures, fmt.Errorf("start %s on warm instance %s: %w", spec.Name, i.ID, err))
 		p.destroy(ctx, i, "its start failed")
-		return "", false
+		return
 	}
-	return i.ID, true
+	l.cfg.Log("started %s (asked for and not rented) on warm instance %s", spec.Name, i.ID)
 }
 
 // keepPool brings the pool to WarmPool instances of the image the answer calls for. What else

@@ -49,10 +49,6 @@ type Config struct {
 	// that limits how fast instances may be rented. Zero is no pause. Starting a warm instance is
 	// no rental and is never paused for.
 	CreatePause time.Duration
-	// ProgressInterval is how often a running instance's output is read for its progress when the
-	// passes come faster: a pass in between reports what the last read found. Zero reads it on
-	// every pass.
-	ProgressInterval time.Duration
 	// WarmPool is how many warm instances the launcher keeps ready to start in place of a create
 	// (pool.go). Zero keeps none and destroys any there are. Above zero the provider must be a
 	// provider.Warmer.
@@ -68,27 +64,6 @@ type Launcher struct {
 	warmer       provider.Warmer
 	launchDigest string
 	maxAnswer    int
-	// outputs is what was last read of each instance's output, by instance id, to spare the
-	// provider's log API a read on every pass: a running instance's progress for
-	// ProgressInterval, and an exited instance's end for as long as it is listed. Losing it
-	// costs a read and nothing else.
-	outputs map[string]outputRead
-	// stopped is when each ending instance was last told to stop, by instance id.
-	stopped map[string]time.Time
-	now     func() time.Time
-}
-
-// stopRetry is how long an ending instance that is still running waits before it is told to stop
-// again: one stop starts the agent's last turn, and a launcher once sent one to the same machine
-// every pass for a minute.
-const stopRetry = 2 * time.Minute
-
-type outputRead struct {
-	at time.Time
-	// exited says that log is the end of the output of an instance that exited.
-	exited                           bool
-	progress, activity, harnessState string
-	log                              string
 }
 
 func New(cfg Config) (*Launcher, error) {
@@ -104,8 +79,7 @@ func New(cfg Config) (*Launcher, error) {
 	}
 	l := &Launcher{
 		cfg: cfg, prefix: provider.AgentPrefix(cfg.Name), provider: provider.Bounded(cfg.Provider),
-		launchDigest: digest, maxAnswer: maxAnswerBytes, outputs: map[string]outputRead{},
-		stopped: map[string]time.Time{}, now: time.Now,
+		launchDigest: digest, maxAnswer: maxAnswerBytes,
 	}
 	l.poolPrefix = l.prefix + poolSegment
 	l.warmer, _ = l.provider.(provider.Warmer)
@@ -151,8 +125,8 @@ func (cfg Config) Validate() error {
 	if cfg.Interval <= 0 {
 		return errors.New("agentlaunch: Interval must be positive")
 	}
-	if cfg.CreatePause < 0 || cfg.ProgressInterval < 0 || cfg.WarmPool < 0 {
-		return errors.New("agentlaunch: CreatePause, ProgressInterval and WarmPool must not be negative")
+	if cfg.CreatePause < 0 || cfg.WarmPool < 0 {
+		return errors.New("agentlaunch: CreatePause and WarmPool must not be negative")
 	}
 	return nil
 }
@@ -218,7 +192,6 @@ func (l *Launcher) Pass(ctx context.Context) error {
 		}
 		byName[i.Name] = append(byName[i.Name], i)
 	}
-	l.forgetUnlisted(rented)
 	want, err := l.fetchDesired(ctx, l.observe(ctx, byName))
 	if err != nil {
 		return fmt.Errorf("fetch desired state: %w", err)
@@ -234,27 +207,20 @@ func (l *Launcher) Pass(ctx context.Context) error {
 	}
 	p.create(ctx, want, byName)
 
-	// An ending instance is told to stop once, and again every stopRetry until its command has
-	// exited: the signal is what starts the agent's last turn. A stop that failed is sent again
-	// on the next pass. Once its command has exited its last turn is over and it is destroyed,
-	// its end already reported with this pass's question: a coordinator was once kept four
-	// minutes after it, to the end of the control plane's wind-down.
+	// An ending instance is told to stop on every pass until its command has exited: the first
+	// signal starts the agent's last turn and the instance's supervisor ignores the rest. Once its
+	// command has exited its last turn is over and it is destroyed, its end already reported with
+	// this pass's question.
 	for _, name := range sortedKeys(want.ending) {
 		for _, i := range byName[name] {
 			if i.State == provider.StateExited {
 				p.destroy(ctx, i, "its last turn ended")
 				continue
 			}
-			if at, told := l.stopped[i.ID]; told && l.now().Sub(at) < stopRetry {
-				continue
-			}
 			if err := l.provider.Stop(ctx, i.ID); err != nil {
 				l.cfg.Log("stop %s (ending), instance %s: %v", i.Name, i.ID, err)
 				p.failures = append(p.failures, fmt.Errorf("stop %s: %w", i.Name, err))
-				continue
 			}
-			l.stopped[i.ID] = l.now()
-			l.cfg.Log("told %s to stop (ending), instance %s", i.Name, i.ID)
 		}
 	}
 
@@ -376,8 +342,8 @@ func (p *pass) create(ctx context.Context, want *desired, byName map[string][]pr
 			continue
 		}
 		spec := l.spec(want.instances[name])
-		if id, ok := p.startWarm(ctx, spec); ok {
-			l.cfg.Log("started %s (asked for and not rented) on warm instance %s", name, id)
+		if warm, ok := p.warmFor(spec); ok {
+			p.startWarm(ctx, warm, spec)
 			continue
 		}
 		if !p.rent(ctx) {
@@ -414,46 +380,22 @@ const (
 	progressLines = 200
 )
 
-// progressPattern is the line an agent's harness prints while it works or waits as it should.
-// What follows the word is the marker, which only the control plane gives a meaning to.
-var progressPattern = regexp.MustCompile(`^hl-progress ([A-Za-z0-9._:-]{1,64})$`)
-
-// lastProgress is the marker of the newest progress line among lines, or "" when none is one.
-func lastProgress(lines []string) string {
-	for i := len(lines) - 1; i >= 0; i-- {
-		if found := progressPattern.FindStringSubmatch(strings.TrimRight(lines[i], "\r")); found != nil {
-			return found[1]
-		}
-	}
-	return ""
-}
-
-// activityPattern is the line an agent's harness prints beside its progress to say what the
-// agent is doing: a sentence the control plane stores and shows, and gives no other meaning to.
-var activityPattern = regexp.MustCompile(`^hl-activity (.+)$`)
+// The lines an agent's harness prints while it works. What follows the word is only the control
+// plane's to give a meaning to: progress is a marker, activity a sentence it shows of what the
+// agent is doing, and state what the harness runs and the rate limit it last read.
+var (
+	progressPattern     = regexp.MustCompile(`^hl-progress ([A-Za-z0-9._:-]{1,64})$`)
+	activityPattern     = regexp.MustCompile(`^hl-activity (.+)$`)
+	harnessStatePattern = regexp.MustCompile(`^hl-state (.{1,200})$`)
+)
 
 // maxActivityLength is the longest sentence the control plane takes, in characters.
 const maxActivityLength = 120
 
-// lastActivity is the sentence of the newest activity line among lines, or "" when none is one.
-func lastActivity(lines []string) string {
+// lastMatch is what pattern captures of the newest of lines it matches, or "" when none does.
+func lastMatch(lines []string, pattern *regexp.Regexp) string {
 	for i := len(lines) - 1; i >= 0; i-- {
-		if found := activityPattern.FindStringSubmatch(strings.TrimRight(lines[i], "\r")); found != nil {
-			return found[1]
-		}
-	}
-	return ""
-}
-
-// harnessStatePattern is the line an agent's harness prints with its progress to say what it is
-// running and the model provider's rate limit it last read, which only the control plane gives a
-// meaning to.
-var harnessStatePattern = regexp.MustCompile(`^hl-state (.{1,200})$`)
-
-// lastHarnessState is what follows the word on the newest state line among lines, or "".
-func lastHarnessState(lines []string) string {
-	for i := len(lines) - 1; i >= 0; i-- {
-		if found := harnessStatePattern.FindStringSubmatch(strings.TrimRight(lines[i], "\r")); found != nil {
+		if found := pattern.FindStringSubmatch(strings.TrimRight(lines[i], "\r")); found != nil {
 			return found[1]
 		}
 	}
@@ -463,7 +405,7 @@ func lastHarnessState(lines []string) string {
 // activityOf is what the control plane is told the agent whose output ends in lines is doing: its
 // newest sentence, cut to what the control plane takes.
 func activityOf(lines []string) string {
-	said := []rune(lastActivity(lines))
+	said := []rune(lastMatch(lines, activityPattern))
 	if len(said) > maxActivityLength {
 		said = said[:maxActivityLength]
 	}
@@ -501,10 +443,11 @@ func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Ins
 		}
 		entry := launcherapi.ObservedInstance{Name: name[len(l.prefix):], Machine: reportedBy.ID, State: string(state)}
 		if running != nil {
-			if seen, ok := l.progressOf(ctx, *running); ok {
-				entry.Progress = &seen.progress
-				entry.Activity = seen.activity
-				entry.HarnessState = seen.harnessState
+			if lines, ok := l.progressOf(ctx, *running); ok {
+				progress := lastMatch(lines, progressPattern)
+				entry.Progress = &progress
+				entry.Activity = activityOf(lines)
+				entry.HarnessState = lastMatch(lines, harnessStatePattern)
 			}
 		}
 		if state == provider.StateExited {
@@ -516,55 +459,25 @@ func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Ins
 	return observed
 }
 
-// progressOf is the progress and activity of a running instance, read from its output unless a
-// read of it is younger than ProgressInterval and the passes come faster than that.
-func (l *Launcher) progressOf(ctx context.Context, i provider.Instance) (outputRead, bool) {
-	if seen, ok := l.outputs[i.ID]; ok && !seen.exited && l.cfg.Interval < l.cfg.ProgressInterval && time.Since(seen.at) < l.cfg.ProgressInterval {
-		return seen, true
-	}
+// progressOf is the end of a running instance's output, where its progress lines are.
+func (l *Launcher) progressOf(ctx context.Context, i provider.Instance) ([]string, bool) {
 	lines, err := l.provider.Logs(ctx, i.ID, progressLines)
 	if err != nil {
 		l.cfg.Log("read the progress of running %s: %v", i.Name, err)
-		return outputRead{}, false
+		return nil, false
 	}
-	seen := outputRead{at: time.Now(), progress: lastProgress(lines), activity: activityOf(lines), harnessState: lastHarnessState(lines)}
-	l.outputs[i.ID] = seen
-	return seen, true
+	return lines, true
 }
 
-// exitLogOf is the end of an exited instance's output, read once: an instance shows as exited
-// only when its output is complete.
+// exitLogOf is the end of an exited instance's output: an instance shows as exited only when its
+// output is complete.
 func (l *Launcher) exitLogOf(ctx context.Context, i provider.Instance) string {
-	if seen, ok := l.outputs[i.ID]; ok && seen.exited {
-		return seen.log
-	}
 	lines, err := l.provider.Logs(ctx, i.ID, exitLogLines)
 	if err != nil {
 		l.cfg.Log("read the output of exited %s: %v", i.Name, err)
 		return ""
 	}
-	log := tail(strings.Join(lines, "\n"), exitLogBytes)
-	l.outputs[i.ID] = outputRead{at: time.Now(), exited: true, log: log}
-	return log
-}
-
-// forgetUnlisted drops what is kept of instances that are no longer listed: what was read of
-// them and when they were told to stop.
-func (l *Launcher) forgetUnlisted(listed []provider.Instance) {
-	ids := make(map[string]bool, len(listed))
-	for _, i := range listed {
-		ids[i.ID] = true
-	}
-	for id := range l.outputs {
-		if !ids[id] {
-			delete(l.outputs, id)
-		}
-	}
-	for id := range l.stopped {
-		if !ids[id] {
-			delete(l.stopped, id)
-		}
-	}
+	return tail(strings.Join(lines, "\n"), exitLogBytes)
 }
 
 func tail(text string, limit int) string {

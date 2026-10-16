@@ -19,13 +19,13 @@ launcher_name: main
 # plane's own services.public_api_url and arrives in each instance's environment.
 api_url: https://api.example.invalid
 
-# One pass costs the provider one list call, and a create, start or destroy call for each
-# instance that has to change, and the control plane one request. A running agent's output is
-# read for its progress once every 15 seconds however fast the passes come. The control plane
-# has no way to wake a launcher, so this is also the longest a newly asked for agent waits before
-# anything is done for it. Set this against the provider's rate limit: Fly allows one list a
-# second with bursts of three.
-reconcile_interval_seconds: 2
+# One pass costs the provider one list call, one log read per running or exited agent, one stop
+# per ending agent, and a create, start or destroy call for each instance that has to change, and
+# the control plane two requests. The control plane has no way to wake a launcher, so this is
+# also the longest a newly asked for agent waits before anything is done for it. Set this against
+# the provider's rate limit: at 5 seconds ten running agents cost 12 lists and 120 log reads a
+# minute.
+reconcile_interval_seconds: 5
 
 # Waited between two rentals of one pass (a create, or a warm for the pool below), for a provider
 # that limits how fast instances may be rented: the strictest one shipped documents one create a

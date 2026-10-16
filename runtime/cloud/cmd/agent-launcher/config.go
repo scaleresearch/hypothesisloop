@@ -73,12 +73,7 @@ func loadConfig(path string) (*config, error) {
 	return &cfg, nil
 }
 
-const (
-	defaultWarmPool = 2
-	// progressInterval is how often a running agent's output is read for its progress when the
-	// passes come faster: once a pass would be a log search per agent every two seconds.
-	progressInterval = 15 * time.Second
-)
+const defaultWarmPool = 2
 
 // warmPool is the pool the launcher keeps on p: the configured size, or the default where p can
 // warm instances.
@@ -96,13 +91,12 @@ func (cfg *config) warmPool(p provider.Provider) int {
 // warm pool that depends on it (warmPool), the HTTP client and the log are the process's to add.
 func (cfg *config) launch() agentlaunch.Config {
 	return agentlaunch.Config{
-		Name:             cfg.LauncherName,
-		APIURL:           cfg.APIURL,
-		Command:          cfg.Instance.Command,
-		Size:             cfg.size,
-		Interval:         time.Duration(cfg.ReconcileIntervalSeconds) * time.Second,
-		CreatePause:      time.Duration(*cfg.CreatePauseMilliseconds) * time.Millisecond,
-		ProgressInterval: progressInterval,
+		Name:        cfg.LauncherName,
+		APIURL:      cfg.APIURL,
+		Command:     cfg.Instance.Command,
+		Size:        cfg.size,
+		Interval:    time.Duration(cfg.ReconcileIntervalSeconds) * time.Second,
+		CreatePause: time.Duration(*cfg.CreatePauseMilliseconds) * time.Millisecond,
 	}
 }
 

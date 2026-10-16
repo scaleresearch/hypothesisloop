@@ -39,13 +39,12 @@ func TestTheShippedConfigLoadsIntoWhatTheLauncherRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := agentlaunch.Config{
-		Name:             "main",
-		APIURL:           "https://api.example.invalid",
-		Command:          []string{"/opt/hypothesisloop-agent/.venv/bin/python3", "-m", "hypothesisloop_agent.claude.run"},
-		Size:             agentlaunch.Size{CPUMillis: 8000, MemoryBytes: 16 << 30, DiskBytes: 50 << 30},
-		Interval:         2 * time.Second,
-		CreatePause:      time.Second,
-		ProgressInterval: 15 * time.Second,
+		Name:        "main",
+		APIURL:      "https://api.example.invalid",
+		Command:     []string{"/opt/hypothesisloop-agent/.venv/bin/python3", "-m", "hypothesisloop_agent.claude.run"},
+		Size:        agentlaunch.Size{CPUMillis: 8000, MemoryBytes: 16 << 30, DiskBytes: 50 << 30},
+		Interval:    5 * time.Second,
+		CreatePause: time.Second,
 	}
 	if got := cfg.launch(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("launch config = %+v\nwant          %+v", got, want)
@@ -98,8 +97,8 @@ func TestAConfigThatIsIncompleteOrMisspelledIsRefused(t *testing.T) {
 		"no api url":              {"api_url: https://api.example.invalid", `api_url: ""`},
 		"a namespace":             {"launcher_name: main\n", "launcher_name: main\nnamespace: main\n"},
 		"launcher name with dash": {"launcher_name: main", "launcher_name: team-a"},
-		"no interval":             {"reconcile_interval_seconds: 2\n", ""},
-		"negative interval":       {"reconcile_interval_seconds: 2", "reconcile_interval_seconds: -1"},
+		"no interval":             {"reconcile_interval_seconds: 5\n", ""},
+		"negative interval":       {"reconcile_interval_seconds: 5", "reconcile_interval_seconds: -1"},
 		"negative warm pool":      {"warm_pool_size: 4", "warm_pool_size: -1"},
 		"a boot limit of its own": {"create_pause_milliseconds: 1000", "create_pause_milliseconds: 1000\nboot_limit_seconds: 120"},
 		"no create pause":         {"create_pause_milliseconds: 1000\n", ""},
