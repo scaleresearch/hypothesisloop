@@ -299,7 +299,11 @@ start_datastores() {
   # Every checkout's compose project has the same name, so a container may have been made from
   # another checkout's paths. compose replaces one whose definition differs from this tree's; the
   # data is in named volumes and stays.
-  REGISTRY=unused TAG=unused podman compose "${compose[@]}" up -d registry postgres memgraph greptimedb minio minio-init >/dev/null
+  local out
+  if ! out="$(REGISTRY=unused TAG=unused podman compose "${compose[@]}" up -d registry postgres memgraph greptimedb minio minio-init 2>&1)"; then
+    printf '%s\n' "${out}" >&2
+    exit 1
+  fi
 }
 
 start_ui() {

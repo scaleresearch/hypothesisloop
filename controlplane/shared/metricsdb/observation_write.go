@@ -84,13 +84,16 @@ var ensureObservationTablesSQL = []string{
 
 // metricTableSQL is the logical table remote write creates for a metric on its first sample,
 // with the labels it is written with as its tags.
+// Labels are quoted: a label may be an SQL keyword (resource).
 func metricTableSQL(metric string, labels ...string) string {
 	var columns strings.Builder
-	for _, label := range labels {
-		columns.WriteString("\t" + label + " STRING NULL,\n")
+	quoted := make([]string, len(labels))
+	for i, label := range labels {
+		quoted[i] = `"` + label + `"`
+		columns.WriteString("\t" + quoted[i] + " STRING NULL,\n")
 	}
 	return "CREATE TABLE IF NOT EXISTS " + metric + " (\n\tgreptime_timestamp TIMESTAMP(3) NOT NULL,\n\tgreptime_value DOUBLE NULL,\n" +
-		columns.String() + "\tTIME INDEX (greptime_timestamp),\n\tPRIMARY KEY (" + strings.Join(labels, ", ") + ")\n" +
+		columns.String() + "\tTIME INDEX (greptime_timestamp),\n\tPRIMARY KEY (" + strings.Join(quoted, ", ") + ")\n" +
 		`) ENGINE=metric WITH ("on_physical_table" = "greptime_physical_table")`
 }
 

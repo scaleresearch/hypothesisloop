@@ -87,7 +87,7 @@ services:
     command: ["server", "/data", "--address", "0.0.0.0:9000"]
     environment:
       MINIO_ROOT_USER: hypothesisloop
-      MINIO_ROOT_PASSWORD: hypothesisloop
+      MINIO_ROOT_PASSWORD: ${DATA_STORE_SECRET_ACCESS_KEY:?run through make, which reads it from .env}
     ports:
       - "9000:9000"
     volumes:
@@ -101,8 +101,10 @@ services:
   minio-init:
     image: docker.io/pgsty/silo:RELEASE.2026-09-16T00-00-00Z
     entrypoint: ["sh", "-c"]
+    environment:
+      DATA_STORE_SECRET_ACCESS_KEY: ${DATA_STORE_SECRET_ACCESS_KEY:?run through make, which reads it from .env}
     command:
-      - "mcli alias set hl http://minio:9000 hypothesisloop hypothesisloop && mcli mb --ignore-existing hl/hypothesisloop-data"
+      - "mcli alias set hl http://minio:9000 hypothesisloop \"$${DATA_STORE_SECRET_ACCESS_KEY}\" && mcli mb --ignore-existing hl/hypothesisloop-data"
     depends_on:
       minio:
         condition: service_healthy
