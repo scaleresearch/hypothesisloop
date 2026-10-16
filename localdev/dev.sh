@@ -8,17 +8,17 @@
 #   up       render the settings for the local cluster and (re)start the API and metrics-service,
 #            building hl beside them in localdev/.bin;
 #            start the UI unless it runs, and the git server when GIT_HOST_PROVIDER is local
-#   hosted   the same with what rents compute elsewhere: agent-launcher, on the sandbox provider
-#            SANDBOX_PROVIDER in .env names, and cloud-agent, on the compute provider
-#            CLOUD_COMPUTE_PROVIDER names, as two more processes, and settings that name the
-#            running tunnels (make tunnels) and the images under IMAGE_TAG in the registry
-#            CONTAINER_REGISTRY_PROVIDER names. Its inputs are keys of .env, and every missing one is
-#            named before anything is touched
+#   hosted   the same with settings that rent compute elsewhere: a sandbox section on the
+#            provider SANDBOX_PROVIDER in .env names, for hosted agents, and a cloud_compute
+#            section on the provider CLOUD_COMPUTE_PROVIDER names, for jobs, both run by
+#            control-service itself. The settings name the running tunnels (make tunnels) and the
+#            images under IMAGE_TAG in the registry CONTAINER_REGISTRY_PROVIDER names. Its inputs
+#            are keys of .env, and every missing one is named before anything is touched
 #   api      rebuild and restart the API and metrics-service with the settings as they were last
 #            rendered. Everything else keeps running
 #   ui       (re)start the UI, which otherwise reloads by itself
 #   status   which processes run
-#   require-local  fail, naming them, while the processes that rent compute run. What must
+#   require-local  fail while control-service runs with settings that rent compute. What must
 #            never reach a provider (the e2e suite) asks this first
 #   down     stop them all. The tunnels are not part of this (make tunnels-down)
 set -euo pipefail
@@ -39,8 +39,8 @@ rendered=controlplane/settings/.hypothesisloop.rendered.yaml
 settings=controlplane/settings/.hypothesisloop.dev.yaml
 bin=localdev/.bin
 run=localdev/.run
-processes=(control-service metrics-service ui git-server cloud-agent agent-launcher)
-# The compute provider cloud-agent rents from, and the name every org sees that compute under.
+processes=(control-service metrics-service ui git-server)
+# The compute provider jobs are rented machines on, and the name every org sees that compute under.
 # Empty when .env names none.
 cloud_provider="$( [[ ! -f .env ]] || lib_env_value CLOUD_COMPUTE_PROVIDER)"
 cloud_cluster="${cloud_provider:+hypothesisloop-${cloud_provider}}"
@@ -60,7 +60,7 @@ stop() {
     # next dev serves from a child of the process started here.
     pkill -TERM -P "${pid}" 2>/dev/null || true
     kill "${pid}" 2>/dev/null || true
-    # cloud-agent asks again for the destroys a vendor refused before it ends, for up to 20 s.
+    # control-service asks again for the destroys a vendor refused before it ends, for up to 20 s.
     for _ in $(seq 1 125); do
       kill -0 "${pid}" 2>/dev/null || break
       sleep 0.2
@@ -140,35 +140,35 @@ render_settings() {
   done
 }
 
-# Each runtime process reads one config file: the example the core ships, with this deployment's
-# addresses, images and accounts in it. A secret is named there and handed over in the
-# environment of the one process that needs it.
-render_runtime_configs() {
-  local value
-  # Which vendor rents is the provider section of each config and nothing else: the control
-  # plane, the harness and the processes' own loops are the same for every one.
-  sed -e "s|^cluster_name: .*$|cluster_name: ${cloud_cluster}|" \
-      -e "s|^api_url: .*$|api_url: ${public_api}|" \
-      -e "s|^job_image: .*$|job_image: ${registry}/hypothesisloop-job:${tag}|" \
-      -e "s|^environments_repository: .*$|environments_repository: ${HL_ENVIRONMENTS_REPOSITORY}|" \
-      -e "s|^  account_id: .*$|  account_id: \"$(lib_env_value CLOUD_COMPUTE_VAST_ACCOUNT_ID)\"|" \
-      "runtime/cloud/settings/cloud-agent.${cloud_provider}.yaml" > "${bin}/cloud-agent.yaml"
-  local sandbox_settings
+# rents: whether the settings last rendered rent compute (make dev-hosted).
+rents() {
+  grep -qE '^(sandbox|cloud_compute):' "${settings}"
+}
+
+# The sandbox and cloud_compute sections are the examples the core ships, with this deployment's
+# provider, images and account in them, appended to the settings. A secret is named there and
+# handed to control-service in its environment.
+render_rented() {
+  local value sandbox_settings rented="${bin}/rented.yaml"
   case "${sandbox_provider}" in
     fly) sandbox_settings="{api_token_env: FLY_API_TOKEN, app: $(lib_env_value SANDBOX_FLY_APP), region: ams, cpu_kind: performance}" ;;
     e2b) sandbox_settings="{api_key_env: E2B_API_KEY, lifetime_seconds: 3600}" ;;
   esac
-  sed -e "s|^api_url: .*$|api_url: http://localhost:8081|" \
-      -e "s|^  name: example$|  name: ${sandbox_provider}|" \
-      -e "s|^  settings: {}$|  settings: ${sandbox_settings}|" \
-      runtime/cloud/settings/agent-launcher.yaml > "${bin}/agent-launcher.yaml"
-  for value in "cluster_name: ${cloud_cluster}" "api_url: ${public_api}" "job_image: ${registry}/hypothesisloop-job:${tag}" "environments_repository: ${HL_ENVIRONMENTS_REPOSITORY}" "account_id: \"$(lib_env_value CLOUD_COMPUTE_VAST_ACCOUNT_ID)\""; do
-    grep -qF -- "${value}" "${bin}/cloud-agent.yaml" || { echo "dev: runtime/cloud/settings/cloud-agent.${cloud_provider}.yaml changed shape, '${value}' was not rendered" >&2; exit 1; }
+  {
+    sed -e "s|^    name: example$|    name: ${sandbox_provider}|" \
+        -e "s|^    settings: {}$|    settings: ${sandbox_settings}|" \
+        controlplane/settings/sandbox.yaml
+    echo
+    sed -e "s|^  - cluster_name: .*$|  - cluster_name: ${cloud_cluster}|" \
+        -e "s|^    job_image: .*$|    job_image: ${registry}/hypothesisloop-job:${tag}|" \
+        -e "s|^      account_id: .*$|      account_id: \"$(lib_env_value CLOUD_COMPUTE_VAST_ACCOUNT_ID)\"|" \
+        "controlplane/settings/cloud-compute.yaml"
+  } > "${rented}"
+  for value in "    name: ${sandbox_provider}" "    settings: ${sandbox_settings}" "  - cluster_name: ${cloud_cluster}" "    job_image: ${registry}/hypothesisloop-job:${tag}" "      account_id: \"$(lib_env_value CLOUD_COMPUTE_VAST_ACCOUNT_ID)\""; do
+    grep -qF -- "${value}" "${rented}" || { echo "dev: controlplane/settings/sandbox.yaml or cloud-compute.yaml changed shape, '${value}' was not rendered" >&2; exit 1; }
   done
-  for value in "api_url: http://localhost:8081" "  name: ${sandbox_provider}" "  settings: ${sandbox_settings}"; do
-    grep -qF -- "${value}" "${bin}/agent-launcher.yaml" || { echo "dev: runtime/cloud/settings/agent-launcher.yaml changed shape, '${value}' was not rendered" >&2; exit 1; }
-  done
-  launcher="$(sed -n 's/^launcher_name: *//p' "${bin}/agent-launcher.yaml")"
+  printf '\n' >> "${settings}"
+  cat "${rented}" >> "${settings}"
 }
 
 # Each provider of .env is one its role knows, and each key that provider reads is set.
@@ -186,7 +186,7 @@ hosted_inputs() {
   case "${cloud_provider}" in
     vast) provider_keys+=" CLOUD_COMPUTE_VAST_API_KEY CLOUD_COMPUTE_VAST_ACCOUNT_ID" ;;
     *)
-      echo "dev: .env sets CLOUD_COMPUTE_PROVIDER to '${cloud_provider}', and cloud-agent rents on vast" >&2
+      echo "dev: .env sets CLOUD_COMPUTE_PROVIDER to '${cloud_provider}', and jobs are rented on vast" >&2
       exit 1
       ;;
   esac
@@ -237,32 +237,17 @@ start_control_plane() {
   stop metrics-service
   require_port 8081
   require_port 8084
-  start control-service "${bin}/control-service"
+  # The provider keys the rented sections name, read from .env by the one process that rents.
+  local provider_env=()
+  if rents; then
+    provider_env=(FLY_API_TOKEN="$(lib_env_value SANDBOX_FLY_DEPLOY_TOKEN)" E2B_API_KEY="$(lib_env_value SANDBOX_E2B_API_KEY)"
+                  VAST_API_KEY="$(lib_env_value CLOUD_COMPUTE_VAST_API_KEY)")
+  fi
+  start control-service env ${provider_env[@]+"${provider_env[@]}"} "${bin}/control-service"
   start metrics-service "${bin}/metrics-service"
   wait_for control-service http://localhost:8081/health
   wait_for metrics-service http://localhost:8084/health
   lib_register_clusters
-}
-
-# unregister_launcher: a stack that runs no agent-launcher has none registered, so the API reports
-# hosting unavailable and refuses hosted work up front. A launcher that still has machines or
-# hosted agents to take down is refused removal: while it runs it keeps running, and the dev
-# switch fails; once it is gone it stays registered and silent, which the API reports too.
-unregister_launcher() {
-  local name out
-  name="$(sed -n 's/^launcher_name: *//p' runtime/cloud/settings/agent-launcher.yaml)"
-  if out="$(lib_hl_admin launcher remove "${name}" 2>&1)"; then
-    echo "dev: launcher ${name} unregistered: this stack runs no agent-launcher, so hosted agents are unavailable"
-    return
-  fi
-  if [[ "${out}" == *"no launcher ${name} is registered"* ]]; then
-    return
-  fi
-  if running agent-launcher; then
-    echo "dev: agent-launcher ${name} still has hosted work, so it keeps running (close its experiments, or stay on make dev-hosted): ${out}" >&2
-    exit 1
-  fi
-  echo "dev: launcher ${name} stays registered and runs nowhere, so the API reports it silent: ${out}" >&2
 }
 
 # local_cluster enable|disable: whether org default places jobs on the cluster on this machine
@@ -333,18 +318,11 @@ status() {
 
 case "${action}" in
   up)
-    # Asked first while the launcher runs, so a refusal leaves the hosted stack as it was.
-    if running agent-launcher; then
-      unregister_launcher
-    fi
+    # Local settings give hosted agents no address they could reach, so they rent nothing.
     render_settings
     start_datastores
     start_git_server
     start_control_plane
-    # Local settings give hosted agents no address they could reach, so nothing rents for them.
-    unregister_launcher
-    stop cloud-agent
-    stop agent-launcher
     lib_register_local_cluster
     local_cluster enable
     # Nor is the cloud cluster offered to every org while nothing can rent for it: hosted mode
@@ -364,27 +342,20 @@ case "${action}" in
   hosted)
     hosted_inputs
     render_settings hosted
-    render_runtime_configs
-    go build -o "${repo}/${bin}/" ./runtime/cloud/cmd/cloud-agent ./runtime/cloud/cmd/agent-launcher
+    render_rented
     start_datastores
     start_git_server
     start_control_plane
     local_cluster disable
     # The cloud cluster belongs to the org every schema starts with and is shared, so every org's
-    # jobs are placed on it. Registering again changes nothing and prints the same token.
-    runtime_token="$(lib_hl_admin cluster add "${cloud_cluster}" default)"
+    # jobs are placed on it. Registering again changes nothing. control-service rents nothing for
+    # it until it is registered.
+    lib_hl_admin cluster add "${cloud_cluster}" default >/dev/null
     lib_hl_admin cluster share "${cloud_cluster}" on >/dev/null
-    launcher_token="$(lib_hl_admin launcher add "${launcher}")"
-    CLOUD_AGENT_CONFIG="${repo}/${bin}/cloud-agent.yaml" RUNTIME_TOKEN="${runtime_token}" \
-      VAST_API_KEY="$(lib_env_value CLOUD_COMPUTE_VAST_API_KEY)" start cloud-agent "${bin}/cloud-agent"
-    AGENT_LAUNCHER_CONFIG="${repo}/${bin}/agent-launcher.yaml" LAUNCHER_TOKEN="${launcher_token}" \
-      FLY_API_TOKEN="$(lib_env_value SANDBOX_FLY_DEPLOY_TOKEN)" E2B_API_KEY="$(lib_env_value SANDBOX_E2B_API_KEY)" \
-      start agent-launcher "${bin}/agent-launcher"
-    must_stay_up cloud-agent
-    must_stay_up agent-launcher
+    must_stay_up control-service
     start_ui
     echo "dev: API http://localhost:8081 (from outside ${public_api}), UI http://localhost:3000"
-    echo "dev: cloud-agent rents for cluster ${cloud_cluster}; agent-launcher ${launcher} runs hosted agents on ${sandbox_provider}"
+    echo "dev: control-service rents jobs for cluster ${cloud_cluster} and runs hosted agents on ${sandbox_provider}"
     status
     ;;
   api)
@@ -400,12 +371,10 @@ case "${action}" in
     status
     ;;
   require-local)
-    for name in cloud-agent agent-launcher; do
-      if running "${name}"; then
-        echo "dev: ${name} runs (pid $(cat "${run}/${name}.pid")), so this stack rents compute (make dev-hosted). Run make dev for a stack that cannot" >&2
-        exit 1
-      fi
-    done
+    if running control-service && [[ -f "${settings}" ]] && rents; then
+      echo "dev: control-service runs (pid $(cat "${run}/control-service.pid")) with settings that rent compute (make dev-hosted). Run make dev for a stack that cannot" >&2
+      exit 1
+    fi
     ;;
   down)
     for name in "${processes[@]}"; do

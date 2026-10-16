@@ -46,7 +46,6 @@ spec() {
     control-service | metrics-service) dockerfile="controlplane/build/Dockerfile.$1" ;;
     cluster-agent | node-agent) dockerfile="runtime/k8s/build/Dockerfile.$1"; args=(--build-arg "VERSION=${tag}") ;;
     bare-agent) dockerfile=runtime/bare-metal/build/Dockerfile.bare-agent; args=(--build-arg "VERSION=${tag}") ;;
-    cloud-agent | agent-launcher) dockerfile="runtime/cloud/build/Dockerfile.$1"; args=(--build-arg "VERSION=${tag}") ;;
     workload) dockerfile=tests/workloads/generic/Dockerfile.train; context=tests/workloads/generic ;;
     *)
       local entry base_name base torch
@@ -91,7 +90,7 @@ case "${command}" in
     shift 2
     # The Go images copy a vendor/ that is not tracked. Made with the toolchain go.mod names, in a
     # container, since the builder's own go may be older.
-    if [[ " $* " =~ \ (cluster-agent|node-agent|bare-agent|cloud-agent|agent-launcher|control-service|metrics-service)\  ]]; then
+    if [[ " $* " =~ \ (cluster-agent|node-agent|bare-agent|control-service|metrics-service)\  ]]; then
       mkdir -p "${build_dir}/go-cache"
       docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -e GOMODCACHE=/cache/mod -e GOCACHE=/cache/build -e GOFLAGS=-modcacherw \
         -v "${build_dir}/go-cache:/cache" -v "${src}:/src" -w /src golang:1.25-bookworm go mod vendor

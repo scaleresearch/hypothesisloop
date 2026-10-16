@@ -141,8 +141,8 @@ tunnels:
 tunnels-down:
 	bash localdev/local-tunnels/tunnels.sh down
 
-# make dev, plus agent-launcher and cloud-agent, on the providers .env names, as host processes, with the
-# settings naming the running tunnels and the images under IMAGE_TAG, which the maintainers'
+# make dev, with settings that have control-service rent hosted agents and jobs on the providers
+# .env names, naming the running tunnels and the images under IMAGE_TAG, which the maintainers'
 # deployment tooling (not in this repository) pushes after a change to them. Needs
 # `make tunnels` first. From here hosted agents and jobs placed on the cloud cluster rent
 # machines, which cost money.
@@ -355,8 +355,6 @@ IMAGE_TARGETS := control-service:controlplane/build/Dockerfile.control-service:.
 	node-agent:runtime/k8s/build/Dockerfile.node-agent:. \
 	cluster-agent:runtime/k8s/build/Dockerfile.cluster-agent:. \
 	bare-agent:runtime/bare-metal/build/Dockerfile.bare-agent:. \
-	cloud-agent:runtime/cloud/build/Dockerfile.cloud-agent:. \
-	agent-launcher:runtime/cloud/build/Dockerfile.agent-launcher:. \
 	job-base:images/job/Dockerfile.base:. \
 	job:images/job/Dockerfile:. \
 	workload:tests/workloads/generic/Dockerfile.train:tests/workloads/generic
@@ -372,7 +370,7 @@ locked-images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-u
 		echo "==> building hypothesisloop-$$name:$(TAG)"; \
 		args=""; case "$$name" in \
 			job) args="--build-arg BASE=$(REGISTRY)/hypothesisloop-job-base:$(TAG)";; \
-			*-agent | agent-launcher) args="--build-arg VERSION=$(TAG)";; \
+			*-agent) args="--build-arg VERSION=$(TAG)";; \
 		esac; \
 		podman build --platform $(IMAGE_PLATFORM) $$args -f "$$dockerfile" -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$$ctx" || exit 1; \
 		podman tag "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$(REGISTRY)/hypothesisloop-$$name:latest"; \
