@@ -105,7 +105,7 @@ func TestReconcileAdvancesTheLadderOfEveryRunningPlatformExperimentNotOnlyTheFir
 		})
 	}
 
-	c := New(&noRunningJobsStore{}, wholeBudget{}, zap.NewNop()).WithStagesStore(store, srv.URL)
+	c := New(&noRunningJobsStore{}, wholeBudget{}, zap.NewNop()).WithStagesStore(store, srv.URL).WithResearcherKeeper(keptNothing{})
 	if err := c.Reconcile(context.Background()); err != nil {
 		t.Fatalf("Reconcile err = %v, want nil", err)
 	}
@@ -140,7 +140,7 @@ func TestASingleStageRunCrossesNoBoundary(t *testing.T) {
 		CreatedAt:    now.Add(-2 * time.Hour), StartedAt: now.Add(-2 * time.Hour), EndsAt: now.Add(-time.Hour),
 	}}}
 
-	c := New(&noRunningJobsStore{}, wholeBudget{}, zap.NewNop()).WithStagesStore(store, srv.URL)
+	c := New(&noRunningJobsStore{}, wholeBudget{}, zap.NewNop()).WithStagesStore(store, srv.URL).WithResearcherKeeper(keptNothing{})
 	if err := c.Reconcile(context.Background()); err != nil {
 		t.Fatalf("Reconcile err = %v, want nil", err)
 	}

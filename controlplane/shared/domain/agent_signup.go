@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"slices"
-	"strings"
 	"time"
 )
 
@@ -37,6 +35,10 @@ type AgentSignup struct {
 	// gave as why. From then its machine is no longer wanted.
 	FinishedAt     *time.Time `json:"finished_at,omitempty"`
 	FinishedReason string     `json:"finished_reason,omitempty"`
+	// Replaces is the researcher whose place the platform added this one in, keeping its
+	// platform experiment's researchers, and ReplacedBy the one added in this one's place.
+	Replaces   string `json:"replaces,omitempty" doc:"The researcher that finished or lost its machine whose place the platform added this one in, with its flavor, model and hyperparameters."`
+	ReplacedBy string `json:"replaced_by,omitempty" doc:"The researcher the platform added in this one's place. A replaced researcher takes no place and is never started again."`
 	// Ended is why the agent's run in the platform experiment is over, empty while it goes on.
 	// A hosted agent's machine is told to stop for this and for nothing else, and the agent
 	// reads it to learn why.
@@ -370,8 +372,8 @@ func ResolveAgentLaunch(flavor, model, defaultModel string, hyperparameters map[
 	if flavor == "" {
 		flavor = DefaultAgentFlavor
 	}
-	if !slices.Contains(AgentFlavors, flavor) {
-		return "", "", fmt.Errorf("flavor %q is not one an agent can run: %s", flavor, strings.Join(AgentFlavors, ", "))
+	if err := LookupAgentType(flavor); err != nil {
+		return "", "", err
 	}
 	if model == "" {
 		model = defaultModel

@@ -54,6 +54,10 @@ const (
 	// EventAgentFinished says an agent told the platform it has nothing left to do. It is the
 	// agent's own, so no rival is woken by it; whoever steers the run sees every one.
 	EventAgentFinished = "agent.finished"
+	// EventAgentReplaced says the platform added a researcher in the place of one that finished
+	// or lost its machine for good, keeping its platform experiment's researchers. It is the new
+	// researcher's own, so no rival is woken by it; whoever steers the run sees every one.
+	EventAgentReplaced = "agent.replaced"
 	// EventAgentIdle says no job of a researcher of a running platform experiment ran on
 	// the platform for a while, and it has none queued or running: its machines are idle. It is the agent's own, so it
 	// reaches that agent and whoever steers the run, and no rival. Its value is IdleNew on the
@@ -141,6 +145,8 @@ var EventKinds = []EventKindDoc{
 		Description: "This agent was cut at a stage boundary. Its own stop condition, without a GET to find out whether the cut was its."},
 	{Kind: EventAgentFinished, Subject: "agent id", Value: "empty by design",
 		Description: "This agent said it has nothing left to do, and its machine stops. detail is the reason it gave, and for a researcher the blocker it named and the time and quota it left. When every agent is finished or cut the run has nobody left to wait for."},
+	{Kind: EventAgentReplaced, Subject: "agent id of the new researcher", Value: "agent id of the researcher it replaces",
+		Description: "The platform added a researcher in the place of one that finished or whose machine stopped with no restart left, with its flavor, model and hyperparameters, to keep the researchers the run is to have at work (researchers on GET /platform-experiments/{id}). detail says why the place was free. Nobody adds it: the platform does, while the time and the budget left hold a trial for it. A cut researcher is not replaced."},
 	{Kind: EventAgentIdle, Subject: "agent id", Value: "new or continues",
 		Description: "No job of this researcher of a running platform experiment ran on the platform for the platform's agents.idle_notice_minutes, and it has none queued or running: nothing of its own is in flight. " +
 			"Sent again every agents.idle_notice_minutes while the stretch lasts: new on the first notice of a stretch, continues on each after it, and a job it starts ends the stretch. " +
@@ -244,7 +250,7 @@ func isExperimentSubject(kind string) bool {
 // one agent's stop condition, the boundary is about the ladder.
 func isAgentOwned(kind string) bool {
 	switch kind {
-	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventQuotaChanged, EventAgentCut, EventAgentFinished, EventAgentIdle, EventAgentMessage, EventJobUnderperforming, EventJobHeld,
+	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventQuotaChanged, EventAgentCut, EventAgentFinished, EventAgentReplaced, EventAgentIdle, EventAgentMessage, EventJobUnderperforming, EventJobHeld,
 		EventJobDuplicate, EventEnvironmentStatus:
 		return true
 	default:

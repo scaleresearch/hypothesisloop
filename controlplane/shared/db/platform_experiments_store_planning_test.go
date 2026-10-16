@@ -620,19 +620,19 @@ func TestABaselineAgentsQuotaIsHalfTheBudgetOfAnOpenExperiment(t *testing.T) {
 		t.Fatal(err)
 	}
 	pe.BudgetAcceleratorHours = 50
-	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpOpen); err != nil {
+	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpOpen, nil); err != nil {
 		t.Fatal(err)
 	}
 	held("with the budget raised to 50", 25)
 	pe.MaxAgents = 4
-	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpOpen); err != nil {
+	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpOpen, nil); err != nil {
 		t.Fatal(err)
 	}
 	held("with max_agents lowered to 4", 25)
 
 	// An update that is refused leaves the quota with the experiment it was refused for.
 	pe.BudgetAcceleratorHours = 1
-	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpRunning); err == nil {
+	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpRunning, nil); err == nil {
 		t.Fatal("an update checked for a running experiment was written to an open one")
 	}
 	held("after a refused update", 25)
@@ -640,7 +640,7 @@ func TestABaselineAgentsQuotaIsHalfTheBudgetOfAnOpenExperiment(t *testing.T) {
 	// Running, the shares are what the start and the stage ladder made them.
 	setPEStatus(t, pool, id, domain.PlatformExpRunning, 0)
 	pe.Name = "renamed"
-	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpRunning); err != nil {
+	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpRunning, nil); err != nil {
 		t.Fatal(err)
 	}
 	held("renamed while running", 25)
@@ -766,10 +766,10 @@ func TestADeclaredBaselineIsStoredWithTheUpdateThatDeclaresIt(t *testing.T) {
 		t.Fatalf("a new platform experiment: got = %+v, %v, want no baseline", pe, err)
 	}
 	pe.Description, pe.BaselineJobID, pe.JobEstimatedDurationHours = "BASELINE measured: job-1", "job-1", 0.3
-	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpRunning); err == nil {
+	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpRunning, nil); err == nil {
 		t.Fatal("an update checked for a running experiment was written to an open one")
 	}
-	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpOpen); err != nil {
+	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpOpen, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := pes.GetPlatformExperiment(ctx, id)

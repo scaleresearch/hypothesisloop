@@ -227,6 +227,7 @@ FROM pg_current_snapshot() s`).Scan(&horizon, &next); err != nil {
 		replayStageBoundaries,
 		replayAgentCuts,
 		replayAgentsFinished,
+		replayAgentsReplaced,
 		replayAgentsIdle,
 		replayCapacityIdle,
 		replayPlatformExperiment,
@@ -496,6 +497,31 @@ WHERE platform_experiment_id = $1 AND finished_xid >= $2`, peID, since)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("events_store.replayAgentsFinished: %w", err)
+	}
+	return events, nil
+}
+
+// replayAgentsReplaced derives agent.replaced from the signup of the researcher added, which
+// records whose place it took once, and from that researcher's why, as the trigger reads it.
+func replayAgentsReplaced(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]domain.Event, error) {
+	rows, err := tx.Query(ctx, `
+SELECT s.agent_id, s.replaces,
+       CASE WHEN old.finished_at IS NOT NULL THEN 'it finished: ' || old.finished_reason ELSE 'its machine stopped with no restart left' END,
+       s.replaces_xid
+FROM experiment_signups s
+JOIN experiment_signups old ON old.platform_experiment_id = s.platform_experiment_id AND old.agent_id = s.replaces
+WHERE s.platform_experiment_id = $1 AND s.replaces <> '' AND s.replaces_xid >= $2`, peID, since)
+	if err != nil {
+		return nil, fmt.Errorf("events_store.replayAgentsReplaced: %w", err)
+	}
+	events, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.Event, error) {
+		event := domain.Event{Kind: domain.EventAgentReplaced, PlatformExperimentID: peID}
+		err := row.Scan(&event.AgentID, &event.Value, &event.Detail, &event.Position)
+		event.Subject = event.AgentID
+		return event, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("events_store.replayAgentsReplaced: %w", err)
 	}
 	return events, nil
 }

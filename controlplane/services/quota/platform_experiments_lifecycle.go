@@ -113,10 +113,15 @@ func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentReque
 		refuse("invalid_cost", "budget_accelerator_hours is required and must be positive: the cap on everything the run spends, in accelerator-hours, and in CPU core-hours for work on cores (hypothesisloop.dev/cpu=core costs 1 an hour per core)")
 	}
 	if spec.MaxAgents <= 0 {
-		refuse("invalid_agents", "max_agents is required and must be positive: how many researchers (agents of role competitor) may join")
+		refuse("invalid_agents", "max_agents is required and must be positive: how many researchers (agents of role competitor) may be at work at once")
 	} else if len(spec.Stages) > 1 && spec.MaxAgents < domain.MinResearchersForCut {
 		refuse("invalid_stages", "stages: %d stages for at most %d researchers, and a run of fewer than %d has one stage since no boundary cuts: state one stage or leave stages out",
 			len(spec.Stages), spec.MaxAgents, domain.MinResearchersForCut)
+	}
+	if spec.MaxAgents > 0 {
+		if err := spec.Researchers.Check(spec.MaxAgents); err != nil {
+			refuse("invalid_agents", "%s: researchers is the researchers it is to have at work, [{agent_type, model, hyperparameters, count}]", err)
+		}
 	}
 	if err := problems.Add(s.checkLength(spec.DurationHours)); err != nil {
 		return spec, err
@@ -219,6 +224,7 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		Description:               req.Description,
 		BudgetAcceleratorHours:    req.BudgetAcceleratorHours,
 		MaxAgents:                 req.MaxAgents,
+		Researchers:               req.Researchers,
 		Metrics:                   req.Metrics,
 		ReportIntervalSeconds:     req.ReportIntervalSeconds,
 		StartsAt:                  domain.ClockStart(req.StartsAt, now),
@@ -346,8 +352,8 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	if pe.Status != domain.PlatformExpOpen && pe.Status != domain.PlatformExpRunning {
 		return nil, refuseUpdate(409, "experiment_not_editable", "platform experiment %s is %s: only an open or running one is changed", id, pe.Status)
 	}
-	if locked := patch.carried("name", "description", "duration_hours", "max_agents", "baseline_job_id", "baseline_reason"); pe.Status == domain.PlatformExpRunning && len(locked) > 0 {
-		return nil, refuseUpdate(409, "experiment_running", "only name, description, duration_hours, max_agents and the baseline (baseline_job_id with baseline_reason) change once a platform experiment runs, and the body also carries: %s. Leave them out", strings.Join(locked, ", "))
+	if locked := patch.carried("name", "description", "duration_hours", "max_agents", "researchers", "baseline_job_id", "baseline_reason"); pe.Status == domain.PlatformExpRunning && len(locked) > 0 {
+		return nil, refuseUpdate(409, "experiment_running", "only name, description, duration_hours, max_agents, researchers and the baseline (baseline_job_id with baseline_reason) change once a platform experiment runs, and the body also carries: %s. Leave them out", strings.Join(locked, ", "))
 	}
 	raising := pe.Status == domain.PlatformExpRunning && patch.BaselineJobID != nil
 	if err := checkRaiseRequest(pe, patch); err != nil {
@@ -364,14 +370,12 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	if patch.BudgetAcceleratorHours != nil {
 		patched.BudgetAcceleratorHours = *patch.BudgetAcceleratorHours
 	}
+	if patch.Researchers != nil {
+		patched.Researchers = *patch.Researchers
+	}
+	// Held to the researchers at work in the write that stores it (db.PoolBelowAtWorkError), the
+	// count a join is held to.
 	if patch.MaxAgents != nil {
-		researchers, err := s.store.ListSignupsByRole(ctx, id, domain.SignupRoleCompetitor)
-		if err != nil {
-			return nil, fmt.Errorf("platform_experiments.Update: %w", err)
-		}
-		if *patch.MaxAgents < len(researchers) {
-			return nil, refuseUpdate(409, "max_agents_below_researchers", "max_agents %d is below the %d researchers (agents of role competitor) that joined: remove one first, or state at least %d", *patch.MaxAgents, len(researchers), len(researchers))
-		}
 		patched.MaxAgents = *patch.MaxAgents
 		if pe.Status == domain.PlatformExpRunning && patched.MaxAgents > pe.MaxAgents {
 			if err := s.seatsHoldTrials(ctx, &patched); err != nil {
@@ -419,7 +423,7 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	_, measured := splitMeasuredBaseline(pe.Description)
 	checked, err := s.validate(CreatePlatformExperimentRequest{
 		Name: patched.Name, Description: authored,
-		BudgetAcceleratorHours: patched.BudgetAcceleratorHours, MaxAgents: patched.MaxAgents,
+		BudgetAcceleratorHours: patched.BudgetAcceleratorHours, MaxAgents: patched.MaxAgents, Researchers: patched.Researchers,
 		MaxConcurrentAccelerators: patched.MaxConcurrentAccelerators, Metrics: patched.Metrics,
 		ReportIntervalSeconds: patched.ReportIntervalSeconds, StartsAt: patched.StartsAt, DurationHours: patched.DurationHours,
 		Stages: patched.Stages, DefaultQuotaTier: string(patched.DefaultQuotaTier),
@@ -456,7 +460,17 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 		return s.stored(ctx, pe.ID)
 	}
 	pe = &patched
-	if err := s.store.UpdatePlatformExperiment(ctx, pe, expectedStatus); err != nil {
+	var researchers domain.ResearcherPool
+	if patch.Researchers != nil {
+		researchers = patched.Researchers
+	}
+	var below *db.PoolBelowAtWorkError
+	switch err := s.store.UpdatePlatformExperiment(ctx, pe, expectedStatus, researchers); {
+	case errors.As(err, &below) && below.Key == (domain.PoolKey{}):
+		return nil, refuseUpdate(409, "max_agents_below_researchers", "max_agents %d is below the %d researchers (agents of role competitor) at work: state at least %d. One that finished, was cut, was replaced or lost its machine is not at work", below.Count, below.AtWork, below.AtWork)
+	case errors.As(err, &below):
+		return nil, refuseUpdate(409, "researchers_below_at_work", "%s: a change of researchers takes out no researcher at work, so state at least that many", below)
+	case err != nil:
 		return nil, fmt.Errorf("platform_experiments.Update: %w", err)
 	}
 	if pe.Status != domain.PlatformExpOpen {
@@ -676,7 +690,7 @@ func (s *PlatformExperimentsService) StartIfReady(ctx context.Context, id string
 // maxAgentsReached refuses a researcher past max_agents, which counts the researchers at work and
 // nothing else.
 func maxAgentsReached(limit int) error {
-	return refuseSignup(409, "max_agents_reached", "max_agents is %d and that many researchers (agents of role competitor) are at work. One that finished, was cut or lost its machine with no restart left no longer counts, and agents of role baseline, reviewers and the coordinator never do: the owner raises max_agents, or the agent joins with another role", limit)
+	return refuseSignup(409, "max_agents_reached", "max_agents is %d and that many researchers (agents of role competitor) are at work. One that finished, was cut, was replaced or lost its machine with no restart left no longer counts, and agents of role baseline, reviewers and the coordinator never do: the owner raises max_agents, or the agent joins with another role", limit)
 }
 
 func maxHostedReached(limit int) string {
@@ -943,7 +957,7 @@ func runningReason(pe *domain.PlatformExperiment, signups []domain.AgentSignup, 
 	case pe.AwaitsAgents():
 		return &domain.StatusReason{Reason: "agents_starting", Message: "the run started at starts_at, " + pe.StartsAt.UTC().Format(time.RFC3339) + ", and its researchers' machines are starting: the first one running sets started_at. The platform closes it at agents_due_at, with close_reason " + string(domain.CloseAgentsNotStarted) + ", if none is running by then, and at " + endsClock(pe, now) + ", in any case"}
 	case !researcherLeft(signups):
-		return &domain.StatusReason{Reason: "researchers_done", Message: fmt.Sprintf("every researcher of platform experiment %s has finished, was cut or lost its machine with no restart left, so nobody is left to submit a job until its coordinator adds a researcher in their place with `hl platform-experiments agents add --hosted --platform-experiment %s`, which it does while time and quota are left. The platform closes it at its %s, and its coordinator may write the summary with `hl platform-experiments summary --file FILE --platform-experiment %s` and close it sooner with `hl platform-experiments close --platform-experiment %s`",
+		return &domain.StatusReason{Reason: "researchers_done", Message: fmt.Sprintf("every researcher of platform experiment %s has finished, was cut or lost its machine with no restart left, so nobody is left to submit a job. Where it runs them the platform adds a researcher of its researchers in the place of one that finished or lost its machine while the run has time for a trial and its budget a share for one, and none is added now; its coordinator may add one up to max_agents with `hl platform-experiments agents add --hosted --platform-experiment %s`. The platform closes it at its %s, and its coordinator may write the summary with `hl platform-experiments summary --file FILE --platform-experiment %s` and close it sooner with `hl platform-experiments close --platform-experiment %s`",
 			pe.ID, pe.ID, endsClock(pe, now), pe.ID, pe.ID)}
 	}
 	return &domain.StatusReason{Reason: "running", Message: "its researchers are at work and the platform closes it at " + endsClock(pe, now)}

@@ -288,6 +288,10 @@ func (s *PlatformExperimentsStore) AcceptDraft(ctx context.Context, pe *domain.P
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.AcceptDraft: marshal stages: %w", err)
 	}
+	researchers, err := poolJSON(pe.Researchers)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.AcceptDraft: marshal researchers: %w", err)
+	}
 	if pe.AcceptedAt == nil {
 		return errors.New("platform_experiments_store.AcceptDraft: an accept states when it was made")
 	}
@@ -325,11 +329,11 @@ SET status = 'open', name = $2, description = $3, budget_accelerator_hours = $4,
     default_quota_tier = $10, max_concurrent_accelerators = $11,
     coordinator_hosted = true, coordinator_launcher = $12, coordinator_model = $13, duration_hours = $14, updated_at = now(),
     planner_ends_at = LEAST(planner_ends_at, now()), accepts_at = NULL,
-    accepted_at = $16, accepted_by_kind = $17, accepted_by_id = $18, accepted_answers = $19
+    accepted_at = $16, accepted_by_kind = $17, accepted_by_id = $18, accepted_answers = $19, researchers = $20
 WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents, metrics,
 		pe.ReportIntervalSeconds, pe.BaselineDueAt, stages,
 		string(pe.DefaultQuotaTier), pe.MaxConcurrentAccelerators, pe.Coordinator.Launcher, pe.Coordinator.Model, pe.DurationHours, pe.StartsAt,
-		pe.AcceptedAt, string(acceptedBy.Kind), acceptedBy.ID, answers); err != nil {
+		pe.AcceptedAt, string(acceptedBy.Kind), acceptedBy.ID, answers, researchers); err != nil {
 		return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
 	}
 	if _, err := enrolTx(ctx, tx, pe.ID, create, signups, nil); err != nil {

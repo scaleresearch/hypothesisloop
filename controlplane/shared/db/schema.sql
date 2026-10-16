@@ -212,6 +212,29 @@ EXCEPTION
     WHEN duplicate_object THEN NULL;
 END $$;
 
+-- domain.ResearcherPool: the researchers a platform experiment is to have at work,
+-- [{agent_type, model, hyperparameters, count}], at most max_agents in all, which the platform
+-- keeps where it runs them. A row from before the column is given an entry per agent type and model
+-- of the researchers at work when it is added, so that the ones it has are kept; a draft none.
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = current_schema() AND table_name = 'platform_experiments' AND column_name = 'researchers') THEN
+        ALTER TABLE platform_experiments ADD COLUMN researchers JSONB NOT NULL DEFAULT '[]';
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'experiment_signups') THEN
+            EXECUTE $m$
+            UPDATE platform_experiments pe SET researchers = COALESCE((
+                SELECT jsonb_agg(jsonb_build_object('agent_type', g.agent_type, 'model', g.model, 'count', g.n) ORDER BY g.n DESC, g.agent_type, g.model)
+                FROM (SELECT COALESCE(NULLIF(s.flavor, ''), 'generalist') AS agent_type, s.model, count(*) AS n
+                      FROM experiment_signups s
+                      WHERE s.platform_experiment_id = pe.id AND s.role = 'competitor' AND s.finished_at IS NULL AND NOT (s.hosted AND s.instance_stopped)
+                        AND NOT EXISTS (SELECT 1 FROM platform_experiment_cuts c WHERE c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id)
+                      GROUP BY 1, 2) g), '[]'::jsonb)
+            WHERE pe.status <> 'draft'
+            $m$;
+        END IF;
+    END IF;
+END $$;
+
 -- Per-agent CPU-hours and RAM/storage-hours quota tracking were never reachable through the UI
 -- and are fully deleted: no code reads or writes these columns any more.
 ALTER TABLE platform_experiments DROP COLUMN IF EXISTS budget_cpu_core_hours;
@@ -568,6 +591,12 @@ ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS launcher        TEXT    
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS flavor          TEXT    NOT NULL DEFAULT '';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS hyperparameters JSONB   NOT NULL DEFAULT '{}';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS model           TEXT    NOT NULL DEFAULT '';
+-- The researcher whose place the platform added this one in, keeping its platform experiment's
+-- researchers (quota.KeepResearchers), '' for one nobody replaced, and the transaction that added
+-- it for the replay of agent.replaced. A researcher is replaced once.
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS replaces     TEXT   NOT NULL DEFAULT '';
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS replaces_xid BIGINT;
+CREATE UNIQUE INDEX IF NOT EXISTS experiment_signups_replaced_once ON experiment_signups (platform_experiment_id, replaces) WHERE replaces <> '';
 -- What became of a hosted agent's machine, written by its launcher's reconcile call.
 -- instance_name is the name it was last asked for under, kept so that an agent whose run is over
 -- is still named as it was created when config has changed since. A machine reported as exited
@@ -1046,6 +1075,23 @@ DROP TRIGGER IF EXISTS signup_finished_notify ON experiment_signups;
 CREATE TRIGGER signup_finished_notify AFTER UPDATE OF finished_at ON experiment_signups
     FOR EACH ROW WHEN (OLD.finished_at IS NULL AND NEW.finished_at IS NOT NULL)
     EXECUTE FUNCTION hypothesisloop_agent_finished_notify();
+
+CREATE OR REPLACE FUNCTION hypothesisloop_agent_replaced_notify() RETURNS trigger AS $$
+BEGIN
+    PERFORM hypothesisloop_notify_event('agent.replaced', NEW.agent_id,
+        NEW.replaces, (SELECT CASE WHEN gone.finished_at IS NOT NULL THEN 'it finished: ' || gone.finished_reason
+                                   ELSE 'its machine stopped with no restart left' END
+                       FROM experiment_signups gone
+                       WHERE gone.platform_experiment_id = NEW.platform_experiment_id AND gone.agent_id = NEW.replaces),
+        NEW.platform_experiment_id, NEW.agent_id);
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS signup_replaced_notify ON experiment_signups;
+CREATE TRIGGER signup_replaced_notify AFTER INSERT ON experiment_signups
+    FOR EACH ROW WHEN (NEW.replaces <> '')
+    EXECUTE FUNCTION hypothesisloop_agent_replaced_notify();
 
 CREATE OR REPLACE FUNCTION hypothesisloop_agent_idle_notify() RETURNS trigger AS $$
 BEGIN

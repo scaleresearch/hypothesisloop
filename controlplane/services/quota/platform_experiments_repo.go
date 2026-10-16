@@ -143,7 +143,7 @@ func (h *PlatformExperimentsHandler) repositoryOf(ctx context.Context, projectID
 
 // neverFromTheFile are what one run costs and how long it lasts. Any agent's token can push to
 // the branch the file is read from, so these come from the request and from nowhere else.
-var neverFromTheFile = []string{"budget_accelerator_hours", "max_agents", "duration_hours", "coordinator_hosted", "coordinator_model", "agent_image"}
+var neverFromTheFile = []string{"budget_accelerator_hours", "max_agents", "researchers", "duration_hours", "coordinator_hosted", "coordinator_model", "agent_image"}
 
 // fromRepo returns req laid over the experiment file of the repository it names: every field the
 // body carried is the request's, every other one the file's.

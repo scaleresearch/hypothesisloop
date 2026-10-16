@@ -47,6 +47,12 @@ type QuotaService interface {
 	RunBudget(ctx context.Context, pe *domain.PlatformExperiment) (float64, error)
 }
 
+// ResearcherKeeper keeps the researchers of a running platform experiment at work as its pool
+// says, adding those it wants beyond the ones at work (quota.PlatformExperimentsService.KeepResearchers).
+type ResearcherKeeper interface {
+	KeepResearchers(ctx context.Context, pe *domain.PlatformExperiment, now time.Time) error
+}
+
 // QuotaSettler durably writes a terminal experiment's final observed usage — see
 // services/settlement.Settler. Idempotent and safe to retry.
 type QuotaSettler interface {
@@ -63,6 +69,7 @@ type Controller struct {
 
 	stagesStore StagesStore
 	observed    ObservedState
+	researchers ResearcherKeeper
 
 	silenceMultiplier     float64
 	defaultReportInterval time.Duration
@@ -147,6 +154,12 @@ func (c *Controller) WithStagesStore(s StagesStore, metricsDBURL string) *Contro
 	return c
 }
 
+// WithResearcherKeeper has every pass keep the researchers of each running platform experiment.
+func (c *Controller) WithResearcherKeeper(k ResearcherKeeper) *Controller {
+	c.researchers = k
+	return c
+}
+
 // WithReconcileInterval overrides the default reconcile interval (useful for tests).
 func (c *Controller) WithReconcileInterval(d time.Duration) *Controller {
 	c.reconcileInterval = d
@@ -156,8 +169,8 @@ func (c *Controller) WithReconcileInterval(d time.Duration) *Controller {
 // Start launches the reconcile loop in a goroutine; it stops when ctx is
 // cancelled and returns the first non-context error (if any).
 func (c *Controller) Start(ctx context.Context) error {
-	if c.store == nil || c.quota == nil || c.settler == nil || c.stagesStore == nil || c.logger == nil {
-		return fmt.Errorf("controller: store, quota, settler, stages store, and logger are required")
+	if c.store == nil || c.quota == nil || c.settler == nil || c.stagesStore == nil || c.researchers == nil || c.logger == nil {
+		return fmt.Errorf("controller: store, quota, settler, stages store, researcher keeper and logger are required")
 	}
 	if c.observed == nil {
 		return fmt.Errorf("controller: metrics DB URL is required")

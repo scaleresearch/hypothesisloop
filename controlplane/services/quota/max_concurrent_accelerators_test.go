@@ -24,7 +24,7 @@ func (f *createStore) GetPlatformExperiment(ctx context.Context, id string) (*do
 	return f.created, nil
 }
 
-func (f *createStore) UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus) error {
+func (f *createStore) UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus, _ domain.ResearcherPool) error {
 	f.created = pe
 	return nil
 }

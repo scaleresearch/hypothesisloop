@@ -32,6 +32,17 @@ func (s *seatStore) IsAgentCut(_ context.Context, _, agentID string) (bool, erro
 	return s.cut[agentID], nil
 }
 
+// UpdatePlatformExperiment holds max_agents to the researchers at work: a cut one is not.
+func (s *seatStore) UpdatePlatformExperiment(_ context.Context, pe *domain.PlatformExperiment, _ domain.PlatformExperimentStatus, researchers domain.ResearcherPool) error {
+	atWork := 0
+	for _, id := range s.researchers {
+		if !s.cut[id] {
+			atWork++
+		}
+	}
+	return s.update(pe, researchers, atWork)
+}
+
 func (s *seatStore) AddDesiredQuotaUsageOne(context.Context, *domain.AgentQuota) error { return nil }
 
 func (s *seatStore) GetAgentRunningExperiments(context.Context, string, string) ([]*domain.Experiment, error) {
@@ -83,7 +94,7 @@ func TestARunningExperimentTakesAMaxAgentsItsUnspentHoursHold(t *testing.T) {
 	}{
 		"more places than a trial apiece":           {8, nil, "budget_below_baseline"},
 		"a cut researcher's hours count for nobody": {5, []string{"ag-2"}, "budget_below_baseline"},
-		"fewer than joined":                         {2, nil, "max_agents_below_researchers"},
+		"fewer than at work":                        {1, nil, "max_agents_below_researchers"},
 	} {
 		store, err := update(c.maxAgents, c.cut...)
 		if reason(err) != c.reason || store.created[0].MaxAgents != 2 {

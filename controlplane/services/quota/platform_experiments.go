@@ -37,8 +37,12 @@ type PlatformExperimentsStore interface {
 	// wrote: db.ErrNotReopenable, db.ErrPlatformExperimentNotFound.
 	ReopenPlatformExperiment(ctx context.Context, id string, endsAt time.Time, durationHours float64, coordinatorModel string) error
 	// UpdatePlatformExperiment writes pe only if it is still in expectedStatus — see the db
-	// implementation's comment for why the compare-and-swap matters here.
-	UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus) error
+	// implementation's comment for why the compare-and-swap matters here — and researchers when
+	// not nil, with max_agents and them held to the researchers at work (db.PoolBelowAtWorkError).
+	UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus, researchers domain.ResearcherPool) error
+	// ResearcherPoolState is what keeping the researchers of a running platform experiment is
+	// decided from: its pool and max_agents, who is at work and whose place is free for good.
+	ResearcherPoolState(ctx context.Context, platformExpID string) (db.PoolState, error)
 	// RaiseBaseline writes the running pe as patched with its baseline raised and records the
 	// raise, or does neither.
 	RaiseBaseline(ctx context.Context, pe *domain.PlatformExperiment, raise domain.BaselineRaise) error
@@ -293,11 +297,12 @@ type CreatePlatformExperimentRequest struct {
 	ProjectID string `json:"project_id,omitempty"`
 	// FromRepo takes every field the request leaves out from .hypothesisloop/experiment.yaml at
 	// the head of the default branch of the repository the request names.
-	FromRepo               bool    `json:"from_repo,omitempty"`
-	Name                   string  `json:"name" required:"false"`
-	Description            string  `json:"description" required:"false"`
-	BudgetAcceleratorHours float64 `json:"budget_accelerator_hours"`
-	MaxAgents              int     `json:"max_agents" doc:"How many researchers may be at work at once: the agents of role competitor, whatever their flavor, that have not finished, were not cut and still have a machine. One that ended leaves its place to another. Agents of role baseline, reviewers and the coordinator never count."`
+	FromRepo               bool                  `json:"from_repo,omitempty"`
+	Name                   string                `json:"name" required:"false"`
+	Description            string                `json:"description" required:"false"`
+	BudgetAcceleratorHours float64               `json:"budget_accelerator_hours"`
+	MaxAgents              int                   `json:"max_agents" doc:"How many researchers may be at work at once: the agents of role competitor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. At least the total of researchers."`
+	Researchers            domain.ResearcherPool `json:"researchers,omitempty" doc:"Optional: the researchers it is to have at work, an entry each agent type and model, [{agent_type, model, hyperparameters, count}], at most max_agents in all. A model left out is the platform's default, which the answer shows. 422 invalid_agents for a count below 1, an agent type that is none, a model no agent can be started on, two entries of one agent type and model, or more than max_agents in all. With coordinator_hosted the platform creates them with the platform experiment, runs them and keeps their counts at work while the run goes on. The coordinator may add researchers beyond them, up to max_agents."`
 	// MaxConcurrentAccelerators bounds accelerators-in-flight for this experiment. Nil means
 	// "leave unset" on create (defers to quota.default_max_concurrent_accelerators) and "no
 	// change" on update; a present zero is rejected by domain validation, not treated as unset.
@@ -364,7 +369,8 @@ type PlatformExperimentPatch struct {
 	Name                      *string                    `json:"name,omitempty" doc:"Not empty."`
 	Description               *string                    `json:"description,omitempty" doc:"The brief every agent works from, not empty and at most 32768 bytes."`
 	BudgetAcceleratorHours    *float64                   `json:"budget_accelerator_hours,omitempty"`
-	MaxAgents                 *int                       `json:"max_agents,omitempty" doc:"How many researchers may be at work at once: the agents of role competitor, whatever their flavor, that have not finished, were not cut and still have a machine. One that ended leaves its place to another. Agents of role baseline, reviewers and the coordinator never count. At least the researchers that already joined. While it runs, held to the hours its researchers left unspent: one trial of the baseline for each."`
+	MaxAgents                 *int                       `json:"max_agents,omitempty" doc:"How many researchers may be at work at once, counted as a join counts them: the agents of role competitor that have not finished, were not cut, were not replaced and still have a machine. The coordinator, a draft's planner, agents of role baseline and reviewers never count. At least the researchers at work and the total of researchers: 409 max_agents_below_researchers says how many are at work. While it runs, held to the hours its researchers left unspent: one trial of the baseline for each."`
+	Researchers               *domain.ResearcherPool     `json:"researchers,omitempty" doc:"The researchers it is to have at work, the whole list as on create, at most max_agents in all. Each entry at least the researchers of its agent type and model at work: 409 researchers_below_at_work otherwise. Where the platform runs the researchers it adds the ones a raised count wants."`
 	MaxConcurrentAccelerators *int                       `json:"max_concurrent_accelerators,omitempty"`
 	Metrics                   *[]domain.MetricDefinition `json:"metrics,omitempty"`
 	ReportIntervalSeconds     *int                       `json:"report_interval_seconds,omitempty"`
@@ -388,6 +394,7 @@ func (p PlatformExperimentPatch) carried(except ...string) []string {
 		{"description", p.Description != nil},
 		{"budget_accelerator_hours", p.BudgetAcceleratorHours != nil},
 		{"max_agents", p.MaxAgents != nil},
+		{"researchers", p.Researchers != nil},
 		{"max_concurrent_accelerators", p.MaxConcurrentAccelerators != nil},
 		{"metrics", p.Metrics != nil},
 		{"report_interval_seconds", p.ReportIntervalSeconds != nil},

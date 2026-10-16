@@ -85,12 +85,16 @@ type execer interface {
 
 func insertPlatformExperiment(ctx context.Context, db execer, pe *domain.PlatformExperiment) error {
 	const q = `
-INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_launcher, coordinator_model, max_hosted, repository, repository_url, agent_image, goal, created_by_kind, created_by_id, duration_hours, repository_account, continues)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, NULLIF($30, ''))`
+INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_launcher, coordinator_model, max_hosted, repository, repository_url, agent_image, goal, created_by_kind, created_by_id, duration_hours, repository_account, continues, researchers)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, NULLIF($30, ''), $31)`
 
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Create: marshal metrics: %w", err)
+	}
+	researchers, err := poolJSON(pe.Researchers)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.Create: marshal researchers: %w", err)
 	}
 	// The ladder is fixed at creation, so it is validated here rather than defended against
 	// on every read.
@@ -123,7 +127,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 		pe.CreatedAt, pe.UpdatedAt, pe.MaxConcurrentAccelerators, string(pe.DefaultQuotaTier),
 		pe.CoordinatorHosted, coordinator.Launcher, coordinator.Model, pe.MaxHosted,
 		pe.Repository, pe.RepositoryURL, pe.AgentImage,
-		pe.Goal, string(createdBy.Kind), createdBy.ID, pe.DurationHours, pe.RepositoryAccount, pe.Continues,
+		pe.Goal, string(createdBy.Kind), createdBy.ID, pe.DurationHours, pe.RepositoryAccount, pe.Continues, researchers,
 	)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Create: %w", err)
@@ -209,7 +213,7 @@ ORDER BY wanted.n`, ids, string(domain.SignupRoleCompetitor))
 // GetPlatformExperiment fetches a single platform experiment by ID.
 func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	q := `
-SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, ` + summarySQL + `, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, pe.shared,
+SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, researchers, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, ` + summarySQL + `, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, pe.shared,
        ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.repository_url, pe.agent_image, pe.goal, COALESCE(pe.continues, ''), pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason,
        pe.baseline_job_id, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id, pe.close_message, pe.repository_error, pe.repository_account,
        pe.duration_hours, pe.started_at, pe.planner_ends_at, pe.accepts_at, pe.coordinator_instance_activity, pe.coordinator_instance_activity_at,
@@ -230,7 +234,7 @@ WHERE id = $1`
 	var coordinatorActivity string
 	var plannerActivity *string
 	err := s.pool.pool.QueryRow(ctx, q, id).Scan(
-		&pe.ID, &pe.ProjectID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents,
+		&pe.ID, &pe.ProjectID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents, &pe.Researchers,
 		&metricsRaw, &pe.ReportIntervalSeconds,
 		&pe.StartsAt, &closesAt, &status,
 		&stagesRaw, &pe.CurrentStage, &pe.Summary,
@@ -457,7 +461,7 @@ func (s *PlatformExperimentsStore) ListPlatformExperimentsByStatus(ctx context.C
 
 func platformExperimentSelect(clauses []string, sort string) string {
 	return `
-SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hours, pe.max_agents,
+SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hours, pe.max_agents, pe.researchers,
        pe.metrics, pe.report_interval_seconds,
        pe.starts_at, pe.ends_at, pe.status,
        pe.stages, pe.current_stage, ` + summarySQL + `,
@@ -488,7 +492,7 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 		var startedAt, answeredAt *time.Time
 		var proposed bool
 		if err := rows.Scan(
-			&pe.ID, &pe.ProjectID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents,
+			&pe.ID, &pe.ProjectID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents, &pe.Researchers,
 			&metricsRaw, &pe.ReportIntervalSeconds,
 			&pe.StartsAt, &closesAt, &status,
 			&stagesRaw, &pe.CurrentStage, &pe.Summary,
@@ -706,7 +710,12 @@ WHERE pe.id = c.id AND pe.status = 'open' AND pe.baseline_job_id = '' AND ($2::b
 // The quota of an agent of role baseline is a share of the budget, so in an open experiment,
 // where the budget changes, it is written again from the row as patched in the same
 // transaction (allocateBaselineQuota).
-func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus) error {
+//
+// max_agents and the researchers are held to the researchers at work under the row's lock
+// (holdsAtWork): a *PoolBelowAtWorkError refuses them, and nothing is written. researchers left
+// nil stay as they are, so a patch that does not change them never writes back a pool a cut
+// lowered since it read.
+func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus, researchers domain.ResearcherPool) error {
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Update: marshal metrics: %w", err)
@@ -717,6 +726,9 @@ func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context,
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	if err := writePlatformExperiment(ctx, tx, pe, metrics, expectedStatus, ""); err != nil {
+		return fmt.Errorf("platform_experiments_store.Update: %w", err)
+	}
+	if err := setResearchersTx(ctx, tx, pe.ID, pe.MaxAgents, researchers); err != nil {
 		return fmt.Errorf("platform_experiments_store.Update: %w", err)
 	}
 	if expectedStatus == domain.PlatformExpOpen {
@@ -1022,6 +1034,13 @@ func (s *PlatformExperimentsStore) AdvanceStage(ctx context.Context, platformExp
 			platformExpID, agentID, stageIndex,
 		); err != nil {
 			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: insert cut %s: %w", agentID, err)
+		}
+	}
+	// The stages after the boundary want as many fewer researchers as it cut, written with the
+	// cut: nobody is added in a cut researcher's place.
+	if len(cutAgentIDs) > 0 {
+		if err := lowerPoolTx(ctx, tx, platformExpID, cutAgentIDs); err != nil {
+			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: %w", err)
 		}
 	}
 

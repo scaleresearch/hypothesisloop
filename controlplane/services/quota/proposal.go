@@ -88,6 +88,31 @@ func maxProposedResearchers(maxHosted int) int {
 	return maxHosted - 2
 }
 
+// proposedPool is the researchers the agents of a proposal make: an entry for each agent type and
+// model they run on, as each is resolved when the platform creates it (domain.ResolveAgentLaunch).
+func proposedPool(agents []ProposedAgent, defaultModel string) (domain.ResearcherPool, error) {
+	keys := make([]domain.PoolKey, 0, len(agents))
+	for i, agent := range agents {
+		agentType, model, err := domain.ResolveAgentLaunch(agent.Flavor, agent.Model, defaultModel, agent.Hyperparameters)
+		if err != nil {
+			return nil, refusedProposal("invalid_agents", "agents[%d]: %s", i, err)
+		}
+		keys = append(keys, domain.PoolKey{AgentType: agentType, Model: model})
+	}
+	return domain.PoolOf(keys), nil
+}
+
+// poolAgents is a researcher of each place of pool, as hostedAgents creates them.
+func poolAgents(pool domain.ResearcherPool) []ProposedAgent {
+	var agents []ProposedAgent
+	for _, e := range pool {
+		for range e.Count {
+			agents = append(agents, ProposedAgent{Flavor: e.AgentType, Model: e.Model, Hyperparameters: e.Hyperparameters})
+		}
+	}
+	return agents
+}
+
 // checkProposal is the mechanical check of a proposal: everything that can be decided from the
 // proposal and the platform's config. It refuses with every problem it finds, so a planner fixes
 // them in one pass. It returns the experiment the proposal states, as validate answers it: with
@@ -116,6 +141,11 @@ func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p *Propo
 		// An accepted draft starts when it is accepted, whatever its experiment says of a start.
 		experiment.StartsAt = time.Time{}
 		experiment.BudgetAcceleratorHours, experiment.DurationHours, experiment.MaxAgents = p.BudgetAcceleratorHours, p.DurationHours, len(p.Agents)
+		pool, unresolved := proposedPool(p.Agents, h.launch.DefaultModel)
+		if err := problems.Add(unresolved); err != nil {
+			return experiment, err
+		}
+		experiment.Researchers = pool
 		var invalid error
 		experiment, invalid = h.svc.validate(experiment)
 		if err := problems.Add(invalid); err != nil {
@@ -540,7 +570,7 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	pe.Name, pe.Description, pe.Metrics, pe.ReportIntervalSeconds = experiment.Name, experiment.Description, experiment.Metrics, experiment.ReportIntervalSeconds
 	pe.Stages, pe.DefaultQuotaTier = experiment.Stages, domain.QuotaTier(experiment.DefaultQuotaTier)
 	pe.MaxConcurrentAccelerators = experiment.MaxConcurrentAccelerators
-	pe.BudgetAcceleratorHours, pe.MaxAgents, pe.DurationHours = experiment.BudgetAcceleratorHours, experiment.MaxAgents, experiment.DurationHours
+	pe.BudgetAcceleratorHours, pe.MaxAgents, pe.Researchers, pe.DurationHours = experiment.BudgetAcceleratorHours, experiment.MaxAgents, experiment.Researchers, experiment.DurationHours
 	pe.StartsAt, pe.BaselineDueAt = now, now.Add(time.Duration(req.BaselineMinutes)*time.Minute)
 	pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: h.launch.Launcher, Model: h.launch.CoordinatorModel}
 	pe.AcceptedAt, pe.AcceptedBy, pe.AcceptedAnswers = &now, acceptedBy, answers

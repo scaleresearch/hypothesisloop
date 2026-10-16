@@ -15,7 +15,7 @@ import (
 
 // ---- experiment_signups ----
 
-// ErrMaxAgentsReached is a researcher's signup refused because max_agents researchers joined.
+// ErrMaxAgentsReached is a researcher's signup refused because max_agents researchers are at work.
 var ErrMaxAgentsReached = errors.New("max_agents reached")
 
 // ErrMaxHostedReached is returned when a platform experiment would have the platform run more
@@ -217,10 +217,11 @@ VALUES ($1, $2, $3, $4, $5)`, agent.ID, agent.Name, agent.OrgID, agent.Performan
 			addedBy = *signup.Actor
 		}
 		tag, err := tx.Exec(ctx, `
-INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, flavor, hyperparameters, model, added_by_kind, added_by_id)
-VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9, $10, $11)
+INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, flavor, hyperparameters, model, added_by_kind, added_by_id,
+                                replaces, replaces_xid)
+VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::text, CASE WHEN $12::text <> '' THEN pg_current_xact_id()::text::bigint END)
 ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
-			signup.Hosted, signup.Launcher, signup.Flavor, hyperparameters, signup.Model, string(addedBy.Kind), addedBy.ID)
+			signup.Hosted, signup.Launcher, signup.Flavor, hyperparameters, signup.Model, string(addedBy.Kind), addedBy.ID, signup.Replaces)
 		if err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: %w", err)
 		}
@@ -265,16 +266,13 @@ WHERE platform_experiment_id = $1 AND hosted AND finished_at IS NULL AND NOT ins
 	if inserted == 0 {
 		return 0, nil
 	}
-	// max_agents bounds the researchers at work at once: one that finished, was cut or whose
-	// machine stopped with no restart left leaves its place to another, and nobody of another
-	// role takes one.
+	// max_agents bounds the researchers at work at once (researcherAtWorkSQL), and nobody of
+	// another role takes a place.
 	if competitors {
 		var count int
 		if err := tx.QueryRow(ctx, `
 SELECT COUNT(*) FROM experiment_signups s
-WHERE s.platform_experiment_id = $1 AND s.role = $2 AND s.finished_at IS NULL AND NOT (s.hosted AND s.instance_stopped)
-  AND NOT EXISTS (SELECT 1 FROM platform_experiment_cuts c WHERE c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id)`,
-			platformExpID, string(domain.SignupRoleCompetitor)).Scan(&count); err != nil {
+WHERE s.platform_experiment_id = $1 AND `+researcherAtWorkSQL, platformExpID).Scan(&count); err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: count competitors: %w", err)
 		}
 		if count > maxAgents {
@@ -397,7 +395,8 @@ func (s *PlatformExperimentsStore) RemoveAgent(ctx context.Context, platformExpI
 		return fmt.Errorf("platform_experiments_store.RemoveAgent: lock: %w", err)
 	}
 	var status string
-	if err := tx.QueryRow(ctx, `SELECT status FROM platform_experiments WHERE id=$1 FOR UPDATE`, platformExpID).Scan(&status); err != nil {
+	var platformRuns bool
+	if err := tx.QueryRow(ctx, `SELECT status, coordinator_hosted FROM platform_experiments WHERE id=$1 FOR UPDATE`, platformExpID).Scan(&status, &platformRuns); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrSignupClosed
 		}
@@ -430,8 +429,19 @@ WHERE s.platform_experiment_id=$1 AND s.agent_id=$2 FOR UPDATE OF s`, platformEx
 			return fmt.Errorf("platform_experiments_store.RemoveAgent: delete data key: %w", err)
 		}
 	}
+	keys, err := signupKeysTx(ctx, tx, platformExpID, []string{agentID})
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM experiment_signups WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID); err != nil {
 		return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
+	}
+	// Where the platform runs the researchers, the pool is what it runs: a researcher removed
+	// before the start lowers its entry, or the platform would add another in its place.
+	if platformRuns && len(keys) > 0 {
+		if err := shrinkPoolToAtWorkTx(ctx, tx, platformExpID, keys[0]); err != nil {
+			return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
+		}
 	}
 	// Only an agent of role baseline holds one before the start.
 	if _, err := tx.Exec(ctx, `DELETE FROM agent_quotas WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID); err != nil {
@@ -713,6 +723,17 @@ const runEndSQL = `CASE WHEN (SELECT ended.status = 'closed' FROM platform_exper
             WHEN s.role = '` + string(domain.SignupRolePlanner) + `' AND (SELECT planned.planner_ends_at <= now() FROM platform_experiments planned WHERE planned.id = s.platform_experiment_id) THEN '` + string(domain.RunEndPlanned) + `'
             ELSE '' END`
 
+// replacedSQL is whether the platform added a researcher in the place of signup s.
+const replacedSQL = `EXISTS (SELECT 1 FROM experiment_signups r WHERE r.platform_experiment_id = s.platform_experiment_id AND r.replaces = s.agent_id)`
+
+// researcherAtWorkSQL is whether signup s is a researcher at work: one that did not finish, was
+// not cut, was not replaced and, run by the platform, did not lose its machine with no restart
+// left. Each takes one of the places max_agents counts, and only they do: the one count of the
+// researchers a platform experiment has, for a signup and for a change of max_agents alike.
+const researcherAtWorkSQL = `s.role = '` + string(domain.SignupRoleCompetitor) + `' AND s.finished_at IS NULL AND NOT (s.hosted AND s.instance_stopped)
+  AND NOT EXISTS (SELECT 1 FROM platform_experiment_cuts c WHERE c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id)
+  AND NOT ` + replacedSQL
+
 // The last two columns are whether the agent's run ended long enough ago for its machine to be
 // released, and why it ended: its platform experiment closed, it was cut, it finished, or it is
 // a planner whose answer is stored.
@@ -721,7 +742,8 @@ var agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name,
        s.instance_name, s.instance_restarts, s.instance_renewals, s.instance_stopped, s.instance_exited_at, s.instance_exit_log,
        s.instance_seen_at, s.instance_asked_at, s.instance_launch,
        s.instance_state, s.instance_progress_at, s.instance_end_reason, s.instance_activity, s.instance_activity_at,
-       s.finished_at, s.finished_reason, s.added_by_kind, s.added_by_id,
+       s.finished_at, s.finished_reason, s.added_by_kind, s.added_by_id, s.replaces,
+       COALESCE((SELECT r.agent_id FROM experiment_signups r WHERE r.platform_experiment_id = s.platform_experiment_id AND r.replaces = s.agent_id), ''),
        ` + domain.InstanceReleasedSQL(`LEAST(
            s.finished_at,
            (SELECT ended.closed_at FROM platform_experiments ended WHERE ended.id = s.platform_experiment_id),
@@ -741,7 +763,7 @@ func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 		&signup.Hosted, &signup.Launcher, &signup.Flavor, &hyperparameters, &signup.Model, &signup.SignedUpAt,
 		&instance.Name, &instance.Restarts, &instance.Renewals, &instance.Stopped, &instance.ExitedAt, &instance.ExitLog,
 		&instance.SeenAt, &instance.AskedAt, &instance.Launch, &instance.Reported, &instance.ProgressAt, &instance.EndReason, &activity, &activityAt,
-		&signup.FinishedAt, &signup.FinishedReason, &addedBy.Kind, &addedBy.ID, &instance.Released, &signup.Ended}, more...)...); err != nil {
+		&signup.FinishedAt, &signup.FinishedReason, &addedBy.Kind, &addedBy.ID, &signup.Replaces, &signup.ReplacedBy, &instance.Released, &signup.Ended}, more...)...); err != nil {
 		return domain.AgentSignup{}, err
 	}
 	if addedBy.Kind == "" {
@@ -834,6 +856,9 @@ type LauncherAgent struct {
 // the draft's planner_ends_at, for a revision asked for soon, and then let wind down for $2
 // seconds, as it is after the draft closed. Once the draft is accepted it has nothing left to
 // do, in an experiment that is then open or running.
+//
+// A researcher the platform replaced has nothing left to do either: one whose machine stopped
+// would otherwise be started again once what it is started with changes, beside its replacement.
 const launcherAgentsFrom = `
 FROM experiment_signups s
 JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
@@ -845,7 +870,8 @@ WHERE s.hosted AND s.launcher = $1 AND NOT (` + awaitsRepository + `)
        OR s.role = '` + string(domain.SignupRoleBaseline) + `' AND pe.status = 'draft' AND pe.accepts_at IS NOT NULL
        OR s.role = '` + string(domain.SignupRolePlanner) + `' AND pe.status = 'draft' AND (pe.planner_ends_at IS NULL OR pe.planner_ends_at > now() - make_interval(secs => $2)))
   AND (c.agent_id IS NULL OR c.cut_at > now() - make_interval(secs => $2))
-  AND (s.finished_at IS NULL OR s.finished_at > now() - make_interval(secs => $2))`
+  AND (s.finished_at IS NULL OR s.finished_at > now() - make_interval(secs => $2))
+  AND NOT ` + replacedSQL
 
 // ListLauncherAgents returns the hosted agents the launcher's desired state is decided from.
 func (s *PlatformExperimentsStore) ListLauncherAgents(ctx context.Context, launcher string, windDown time.Duration) ([]LauncherAgent, error) {

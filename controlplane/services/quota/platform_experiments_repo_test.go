@@ -303,7 +303,18 @@ func (s *createdStore) ListAgentSignups(context.Context, string) ([]domain.Agent
 	return append(signups, s.baselines...), nil
 }
 
-func (s *createdStore) UpdatePlatformExperiment(_ context.Context, pe *domain.PlatformExperiment, _ domain.PlatformExperimentStatus) error {
+// UpdatePlatformExperiment holds max_agents to the researchers that joined, every one at work.
+func (s *createdStore) UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, status domain.PlatformExperimentStatus, researchers domain.ResearcherPool) error {
+	return s.update(pe, researchers, len(s.researchers))
+}
+
+func (s *createdStore) update(pe *domain.PlatformExperiment, researchers domain.ResearcherPool, atWork int) error {
+	if pe.MaxAgents < atWork {
+		return &db.PoolBelowAtWorkError{Count: pe.MaxAgents, AtWork: atWork}
+	}
+	if researchers != nil {
+		pe.Researchers = researchers
+	}
 	for i, stored := range s.created {
 		if stored.ID == pe.ID {
 			s.created[i] = pe
@@ -686,7 +697,7 @@ func TestTheExperimentFileOfARepositoryIsReadWithoutCreatingAnything(t *testing.
 func (s *createdStore) RaiseBaseline(ctx context.Context, pe *domain.PlatformExperiment, raise domain.BaselineRaise) error {
 	raise.At = time.Now().UTC()
 	pe.BaselineRaises = append(pe.BaselineRaises, raise)
-	return s.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpRunning)
+	return s.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpRunning, nil)
 }
 
 func (s *createdStore) ListAgentMessages(context.Context, string, string) ([]domain.AgentMessage, error) {

@@ -256,6 +256,12 @@ func (s *PlatformExperimentsService) lateJoin(ctx context.Context, pe *domain.Pl
 	if by.Kind == domain.ActorAgent {
 		return nil, refuseSignup(403, "not_coordinator", "an agent adds no agent to a running platform experiment: its coordinator or its owner does")
 	}
+	return s.lateShare(ctx, pe)
+}
+
+// lateShare is what a researcher joining the running pe is given its quota from: what each
+// researcher used, and the least share worth giving, one trial of the baseline.
+func (s *PlatformExperimentsService) lateShare(ctx context.Context, pe *domain.PlatformExperiment) (*db.LateJoin, error) {
 	quotas, err := s.researcherQuotas(ctx, pe)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.lateJoin: %w", err)
@@ -808,7 +814,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler, graph H
 			"The token acts as that agent in that platform experiment and nowhere else, and asking again with agent_id returns it again. " +
 			"role decides ranking: \"competitor\" (default) is a researcher, whatever its flavor: ranked, cut-eligible and counted against max_agents; \"baseline\" and " +
 			"\"reviewer\" are none of the three, though their jobs are billed and gated identically. " +
-			"409 max_agents_reached for a researcher past max_agents, which counts the researchers at work, none that finished, was cut or lost its machine with no restart left, and no agent of another role and no coordinator. 409 signup_closed for any role but researcher once the run started, and for every one once it closed. " +
+			"409 max_agents_reached for a researcher past max_agents, which counts the researchers at work, none that finished, was cut, was replaced or lost its machine with no restart left, and no agent of another role and no coordinator. 409 signup_closed for any role but researcher once the run started, and for every one once it closed. " +
 			"An agent of role baseline measures the baseline before the start: its machine, when hosted, starts at once, it holds a quota from the moment it joins (half the budget, which no researcher can spend before the start, so a failed measurement can be run again; it follows a later change of the budget while the experiment is open)," +
 			"and its job is the only one an open experiment accepts. It takes no share at the start, and what it spent is taken from the budget before the others' shares are carved.",
 	}, func(ctx context.Context, in *struct {

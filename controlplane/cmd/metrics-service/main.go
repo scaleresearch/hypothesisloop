@@ -117,6 +117,11 @@ func newControllerServer(authenticator *auth.Authenticator, store *db.Store, peF
 	// Wire the stage-ladder store and GreptimeDB (Prometheus-compatible) URL. The ladder itself
 	// is per-platform-experiment config, not a controller-wide setting.
 	ctrl = ctrl.WithStagesStore(peFullStore, metricsDBURL)
+	// Each pass keeps the researchers of every running platform experiment at work as its pool
+	// says, launched as the control service launches the researchers it creates.
+	ctrl = ctrl.WithResearcherKeeper(quota.NewResearcherKeeper(peSvc, quota.AgentLaunch{
+		Launcher: pcfg.Agents.Launcher, DefaultModel: pcfg.Agents.DefaultModel,
+	}))
 
 	// settler durably writes a terminal experiment's final observed usage (see
 	// services/settlement) — used both inline by the controller for the fast path and by the

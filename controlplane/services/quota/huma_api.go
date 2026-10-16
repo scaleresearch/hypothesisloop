@@ -172,7 +172,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Summary: "Create a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
 		Description: "Operator/dashboard endpoint. project_id, name, description, metrics, budget_accelerator_hours, max_agents and duration_hours are required. " +
-			"max_agents is how many researchers (agents of role competitor, whatever their flavor) may join over its whole life, and counts nobody else: no agent of role baseline, no reviewer, no coordinator. " +
+			"max_agents is how many researchers (agents of role competitor, whatever their agent type) may be at work at once, and counts nobody else: no agent of role baseline, which measures the baseline before the run, no reviewer, no coordinator and no planner. " +
+			"researchers, optional, is who the run starts with and is to keep at work: an entry each agent type and model with its count, [{agent_type, model, hyperparameters, count}], at most max_agents in all. " +
 			"duration_hours is how long the run lasts from the moment it starts, at most the platform's quota.max_platform_experiment_days (422 invalid_length without it, run_too_long over that). The answer carries no ends_at: the run ends duration_hours after it starts. " +
 			"Created, it is open until its baseline is declared and the platform starts the run, and baseline_due_at in the answer is until when: planning.baseline_limit_minutes after starts_at, which is this create or a later one the body states. One not running by then is closed with close_reason baseline_limit_reached. " +
 			"Three fields left out are the platform's settings: report_interval_seconds is scheduler.default_report_interval_seconds, stages is stages.default, as one stage of its whole length when max_agents is below 5, since a boundary cuts nobody from fewer researchers (more than one stage stated for such a field is refused invalid_stages), and " +
@@ -205,8 +206,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"422 repository_required without it, repository_not_reachable when it does not answer git, and 422 experiment_file_unsupported with from_repo. " +
 			"agent_image is the image the hosted agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Left out, " +
 			"it is the platform's own. 422 invalid_agent_image when it is no image reference. Neither is read from the file and both are fixed from then on. " +
-			"With coordinator_hosted: true it also creates one hosted agent of role baseline, named by its role, as accepting a draft does: its machine is asked for at once, it measures the baseline, and the platform declares the job it leaves when it finishes, so status_reason reads baseline_measuring from the first answer and nobody adds a baseline agent. 409 max_hosted_reached where the platform's limit holds no machine for it beside the coordinator's. " +
-			"Without coordinator_hosted this call creates the experiment and no agent. Every researcher, and any other agent, joins by its own POST /platform-experiments/{id}/agents. " +
+			"With coordinator_hosted: true it also creates, in the same write, one hosted researcher for each place of researchers, of its entry's agent type, model and hyperparameters, whose machines are asked for when the run starts. While the run goes on the platform keeps them at work: it adds a new researcher in the place of one that finished or whose machine stopped with no restart left, with its agent type, model and hyperparameters, until less of the run is left than one trial of the baseline job (job_estimated_duration_hours, at least 15 minutes) or the budget its researchers left unspent holds no trial for one, and a stage boundary lowers the counts by the researchers it cuts, so none of them is replaced. agent.replaced tells each researcher added. " +
+			"It also creates one hosted agent of role baseline, named by its role, as accepting a draft does: its machine is asked for at once, it measures the baseline, and the platform declares the job it leaves when it finishes, so status_reason reads baseline_measuring from the first answer and nobody adds a baseline agent. 409 max_hosted_reached where the platform's limit holds no machine for it beside the coordinator's. " +
+			"Without coordinator_hosted this call creates the experiment and no agent, and the platform adds none: every researcher, and any other agent, joins by its own POST /platform-experiments/{id}/agents. " +
 			"max_hosted in the answer is how many machines the platform runs for this platform experiment at once, its hosted agents of every role and its coordinator together: " +
 			"one of them is kept for an agent of role baseline, and an agent that finished holds none. " +
 			"GET /platform-experiments/{id} shows the coordinator's launcher, model and what became of its machine.",
@@ -243,6 +245,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			}
 			in.Body = body
 		}
+		if in.Body.Researchers, err = peh.resolvedPool(in.Body.Researchers); err != nil {
+			return nil, err
+		}
 		hosting, err := peh.withHosting(ctx, in.Body)
 		if err != nil {
 			return nil, peh.refusal("create platform experiment", err)
@@ -254,7 +259,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		by := caller.Actor()
 		hosting.createdBy = &by
 		if hosting.CoordinatorHosted {
-			if hosting.agents, hosting.signups, err = peh.hostedAgents(nil, by, time.Now().UTC()); err != nil {
+			if hosting.agents, hosting.signups, err = peh.hostedAgents(poolAgents(hosting.Researchers), by, time.Now().UTC()); err != nil {
 				return nil, peh.refusal("create platform experiment", err)
 			}
 		}
@@ -424,7 +429,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"A duration_hours of a running one moves the end of its run, still counted from its start, and one that ends it before now is 422 invalid_length. A new description or duration_hours reaches every agent of it as platform_experiment.description. " +
 			"409 experiment_not_editable for a draft or a closed one. The experiment as patched is checked like a create and refused with the same 422: " +
 			"invalid_experiment (an empty name or description among them), invalid_metrics, invalid_cost, invalid_agents, invalid_length, " +
-			"409 max_agents_below_researchers for a max_agents under the researchers (agents of role competitor) that already joined, " +
+			"409 max_agents_below_researchers for a max_agents under the researchers (agents of role competitor) at work, the count a join is held to, which the message gives, and 409 researchers_below_at_work for researchers that want fewer of an agent type and model than are at work. researchers above max_agents in all is 422 invalid_agents. " +
 			"run_too_long for a duration_hours over the platform's quota.max_platform_experiment_days. A starts_at in the body moves baseline_due_at with it, a starts_at past being now. " +
 			"`baseline_job_id` declares the baseline while the experiment is open, and nothing else is needed in the body. The platform makes this declaration itself, by the same check, when an agent of role baseline finishes naming the job (baseline_job_id of its finish) or, naming none, the baseline agents that finished left exactly one COMPLETED job that reports the ranking metric, and again in the patch that clears what that declaration was refused for (a raised budget_accelerator_hours): a caller declares only where a choice is needed, between several jobs or after a redo. The platform writes what it holds of the job into the description, a block that begins `" + measuredBaselineHeader + "` and states job, code_ref, env (the job's settings, when it has any) and measured (the last value the job reported on each metric but the references), then a line for each value a COMPLETED job reported on a reference, its job and whether that job met the constraints (only one that did counts), and the references no completed job reported, as not measured, and keeps that block through every later patch of the description. With a researcher joined and no starts_at ahead the run starts in this same request and the answer reads running; otherwise it starts with the request that adds the researcher, or at starts_at. The start closes signup and gives each agent present, those of role baseline apart, its share of the first stage's part of the budget, less what measuring the baseline spent. The start also settles `stages`: a boundary cuts nobody from fewer than 5 researchers (role competitor), so a run started with fewer has one stage of its whole length, with the last declared stage's max_job_hours, and each researcher holds its whole share from the start. With 5 or more the ladder is as declared. status_reason in the answer says what an open experiment still waits for: no_researchers until one joined, budget_spent when the baseline left nothing to share. The job is read from the platform's own records and the declaration refused with 422: " +
 			"no_baseline (no job of an agent of role baseline of this platform experiment), baseline_not_completed, baseline_not_on_branch (the job ran a branch other than the baseline branch), baseline_without_finding, " +
@@ -437,7 +442,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"A raise rewrites the measured baseline block of the description from the new job, keeps job_estimated_duration_hours, and is recorded in baseline_raises (from, to, reason, who, when), in the record of the close and as platform_experiment.baseline to every agent, whose detail says the values before and after. Standings in results are set against the new baseline from then on, and a verdict already given against the old one stays as recorded. " +
 			"422 invalid_experiment for a report_interval_seconds of 0 or less. " +
 			"A change of budget_accelerator_hours writes the quota of every agent of role baseline again, as half the budget. " +
-			"A coordinator's token changes `description`, `baseline_job_id` and `baseline_reason` only: a body that carries any other field answers 403 coordinator_changes_description_only. Its owner raises max_agents, and the coordinator then adds researchers in the places that gives. " +
+			"A coordinator's token changes `description`, `baseline_job_id` and `baseline_reason` only: a body that carries any other field answers 403 coordinator_changes_description_only. Its owner raises max_agents, and the coordinator then adds researchers in the places that gives; researchers, which the platform keeps where it runs them, are its owner's to change too. " +
 			"The project, the repository, the agent image, the stages and the default quota tier are fixed at creation and are no fields of this body.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
@@ -459,6 +464,13 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		by := caller.Actor()
 		in.Body.by = &by
+		if in.Body.Researchers != nil {
+			resolved, err := peh.resolvedPool(*in.Body.Researchers)
+			if err != nil {
+				return nil, err
+			}
+			in.Body.Researchers = &resolved
+		}
 		pe, err := peh.svc.Update(ctx, in.ID, in.Body)
 		if err != nil {
 			return nil, peh.refusal("update platform experiment", err)
