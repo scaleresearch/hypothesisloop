@@ -32,28 +32,17 @@ const MaxInstanceNameLength = namePlatformExperimentLength + 1 + nameAgentLength
 // reconcile answers with the same one until one of them changes.
 //
 // The machine is handed where the platform is and the agent's token, and nothing else: the token
-// says which agent of which platform experiment it is, and the agent reads its flavor, model and
-// hyperparameters from its own signup. Those still go into the machine's name, so an agent for
-// whom one of them changes gets a new machine.
+// says which agent of which platform experiment it is, and the agent reads its agent type, model
+// and hyperparameters from its instructions, again whenever they change. None of them goes into
+// the machine's name: the agent applies an edit of its type or model on the machine it has.
 func instanceFor(agent domain.AgentSignup, ended int, image, apiURL, signingSecret, launchDigest string) (Instance, error) {
 	if agent.Flavor == "" || agent.Model == "" {
 		return Instance{}, fmt.Errorf("signup of %s has no flavor or no model", agent.AgentID)
-	}
-	hyperparameters := []byte("{}")
-	var err error
-	if agent.Hyperparameters != nil {
-		hyperparameters, err = json.Marshal(agent.Hyperparameters)
-	}
-	if err != nil {
-		return Instance{}, fmt.Errorf("encode hyperparameters of %s: %w", agent.AgentID, err)
 	}
 	startedAs := map[string]string{
 		"API_URL":                apiURL,
 		"AGENT_ID":               agent.AgentID,
 		"PLATFORM_EXPERIMENT_ID": agent.PlatformExperimentID,
-		"AGENT_FLAVOR":           agent.Flavor,
-		"AGENT_MODEL":            agent.Model,
-		"AGENT_HYPERPARAMETERS":  string(hyperparameters),
 	}
 	name, err := instanceName(agent.PlatformExperimentID, agent.AgentID, "", image, startedAs, launchDigest, ended)
 	if err != nil {
@@ -71,7 +60,7 @@ const coordinatorName = "coordinator"
 
 // coordinatorInstanceFor is the machine a platform experiment's hosted coordinator runs in: the
 // agents' image started with the platform experiment's coordinator token, which is what makes it
-// a coordinator. It reads its model from the platform experiment.
+// a coordinator. It reads its model from its instructions, so a change of it keeps the machine.
 func coordinatorInstanceFor(platformExperimentID, model string, ended int, image, apiURL, signingSecret, launchDigest string) (Instance, error) {
 	if model == "" {
 		return Instance{}, fmt.Errorf("coordinator of %s has no model", platformExperimentID)
@@ -79,8 +68,6 @@ func coordinatorInstanceFor(platformExperimentID, model string, ended int, image
 	startedAs := map[string]string{
 		"API_URL":                apiURL,
 		"PLATFORM_EXPERIMENT_ID": platformExperimentID,
-		"AGENT_FLAVOR":           domain.CoordinatorFlavor,
-		"AGENT_MODEL":            model,
 	}
 	name, err := instanceName(platformExperimentID, coordinatorName, coordinatorName, image, startedAs, launchDigest, ended)
 	if err != nil {

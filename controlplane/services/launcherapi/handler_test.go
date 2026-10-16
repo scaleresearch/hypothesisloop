@@ -198,16 +198,33 @@ func TestALauncherWithNothingToRunIsAnsweredWithTwoEmptyListsAndThePlatformsImag
 	}
 }
 
-func TestAnAgentWhoseModelChangesGetsANewMachineAndASignupWithoutFlavorOrModelIsLeftOutAndLogged(t *testing.T) {
+// The agent reads its type, model and hyperparameters from its instructions and applies an edit of
+// them itself, so none of them replaces its machine.
+func TestAnAgentWhoseTypeModelOrHyperparametersChangeKeepsItsMachineAndASignupWithoutFlavorOrModelIsLeftOutAndLogged(t *testing.T) {
 	agent := hosted("pe-1", "ag-1")
 	instance, err := instanceFor(agent, agent.Instance.Restarts, testImage, testAPIURL, testSecret, testDigest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent.Model = "another-model"
-	changed, err := instanceFor(agent, agent.Instance.Restarts, testImage, testAPIURL, testSecret, testDigest)
-	if err != nil || changed.Name == instance.Name || !maps.Equal(changed.Env, instance.Env) {
-		t.Errorf("after a change of model: got = %+v, %v, want another name than %s for the same environment", changed, err, instance.Name)
+	for what, edit := range map[string]func(*domain.AgentSignup){
+		"flavor":             func(a *domain.AgentSignup) { a.Flavor = "data-search" },
+		"agent type version": func(a *domain.AgentSignup) { a.AgentTypeVersion++ },
+		"model":              func(a *domain.AgentSignup) { a.Model = "another-model" },
+		"hyperparameters":    func(a *domain.AgentSignup) { a.Hyperparameters = map[string]any{"batch_size": float64(32)} },
+	} {
+		edited := agent
+		edit(&edited)
+		changed, err := instanceFor(edited, edited.Instance.Restarts, testImage, testAPIURL, testSecret, testDigest)
+		if err != nil || changed.Name != instance.Name || !maps.Equal(changed.Env, instance.Env) {
+			t.Errorf("after a change of %s: got = %+v, %v, want the machine %s as it was", what, changed, err, instance.Name)
+		}
+	}
+	coordinator, err := coordinatorInstanceFor("pe-1", "claude-sonnet-5", 0, testImage, testAPIURL, testSecret, testDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other, err := coordinatorInstanceFor("pe-1", "another-model", 0, testImage, testAPIURL, testSecret, testDigest); err != nil || other.Name != coordinator.Name {
+		t.Errorf("after a change of the coordinator's model: got = %+v, %v, want the machine %s as it was", other, err, coordinator.Name)
 	}
 
 	noFlavor, noModel := hosted("pe-1", "ag-no-flavor"), hosted("pe-1", "ag-no-model")
@@ -574,15 +591,6 @@ func TestANameChangesWithWhatTheInstanceRunsAndNotWithTheSecret(t *testing.T) {
 
 	changed := map[string]string{"image": name(base, "registry.example.invalid/agent:2", testAPIURL, testSecret)}
 	changed["api url"] = name(base, testImage, "https://other.example.invalid", testSecret)
-	for what, edit := range map[string]func(*domain.AgentSignup){
-		"flavor":          func(a *domain.AgentSignup) { a.Flavor = "generalist" },
-		"model":           func(a *domain.AgentSignup) { a.Model = "another-model" },
-		"hyperparameters": func(a *domain.AgentSignup) { a.Hyperparameters = map[string]any{"batch_size": float64(32)} },
-	} {
-		agent := base
-		edit(&agent)
-		changed[what] = name(agent, testImage, testAPIURL, testSecret)
-	}
 	restarted := hosted("pe-1", "ag-1")
 	restarted.Instance.Restarts = 1
 	changed["restart count"] = name(restarted, testImage, testAPIURL, testSecret)
