@@ -384,7 +384,6 @@ func (p *pass) create(ctx context.Context, want *desired, byName map[string][]pr
 		creates++
 		id, err := l.provider.Create(ctx, spec)
 		if err != nil {
-			err = withoutEnvironment(err, spec.Env)
 			l.cfg.Log("create %s: %v", name, err)
 			p.failures = append(p.failures, fmt.Errorf("create %s: %w", name, err))
 			failedCreates++
@@ -585,26 +584,6 @@ func (l *Launcher) pause(ctx context.Context) bool {
 	case <-timer.C:
 		return true
 	}
-}
-
-// minRedactedLength keeps short values such as a flavor readable in an error: nothing that
-// short is a secret.
-const minRedactedLength = 8
-
-// withoutEnvironment is err with every value of the instance's environment taken out of its
-// text. A vendor that refuses a create may quote the request back, and the request holds the
-// agent's token.
-func withoutEnvironment(err error, env map[string]string) error {
-	text := err.Error()
-	for _, name := range sortedKeys(env) {
-		if value := env[name]; len(value) >= minRedactedLength {
-			text = strings.ReplaceAll(text, value, "<"+name+">")
-		}
-	}
-	if text == err.Error() {
-		return err
-	}
-	return errors.New(text)
 }
 
 func (l *Launcher) spec(i instance) provider.Spec {

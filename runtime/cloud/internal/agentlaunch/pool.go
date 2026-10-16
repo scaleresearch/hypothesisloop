@@ -69,7 +69,6 @@ func (p *pass) startWarm(ctx context.Context, spec provider.Spec) (string, bool)
 	p.ready[name] = p.ready[name][1:]
 	p.started[i.ID] = true
 	if err := l.warmer.StartWarm(ctx, i.ID, spec); err != nil {
-		err = withoutEnvironment(err, spec.Env)
 		l.cfg.Log("start %s on warm instance %s: %v; it is destroyed and the agent created", spec.Name, i.ID, err)
 		p.destroy(ctx, i, "its start failed")
 		return "", false

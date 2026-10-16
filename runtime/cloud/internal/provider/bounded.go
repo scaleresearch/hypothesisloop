@@ -8,8 +8,9 @@ import (
 // CallTimeout bounds every call a Bounded provider makes to the vendor.
 const CallTimeout = time.Minute
 
-// Bounded wraps p so that an API which stops answering fails the pass instead of stalling it.
-// What it returns has the capabilities p has.
+// Bounded wraps p so that an API which stops answering fails the pass instead of stalling it, and
+// so that the error of a call given a spec never quotes that spec's secrets. What it returns has
+// the capabilities p has.
 func Bounded(p Provider) Provider {
 	pauser, pauses := p.(Pauser)
 	market, counts := p.(Market)
@@ -65,13 +66,14 @@ type boundedWarmer struct{ warmer Warmer }
 func (b boundedWarmer) Warm(ctx context.Context, spec Spec) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
 	defer cancel()
-	return b.warmer.Warm(ctx, spec)
+	id, err := b.warmer.Warm(ctx, spec)
+	return id, withoutSecrets(err, spec)
 }
 
 func (b boundedWarmer) StartWarm(ctx context.Context, id string, spec Spec) error {
 	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
 	defer cancel()
-	return b.warmer.StartWarm(ctx, id, spec)
+	return withoutSecrets(b.warmer.StartWarm(ctx, id, spec), spec)
 }
 
 type boundedMarket struct{ market Market }
@@ -79,7 +81,8 @@ type boundedMarket struct{ market Market }
 func (b boundedMarket) Rentable(ctx context.Context, spec Spec, atMost int) (Supply, error) {
 	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
 	defer cancel()
-	return b.market.Rentable(ctx, spec, atMost)
+	supply, err := b.market.Rentable(ctx, spec, atMost)
+	return supply, withoutSecrets(err, spec)
 }
 
 type boundedPauser struct{ pauser Pauser }
@@ -101,7 +104,8 @@ type bounded struct{ Provider }
 func (b bounded) Create(ctx context.Context, spec Spec) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
 	defer cancel()
-	return b.Provider.Create(ctx, spec)
+	id, err := b.Provider.Create(ctx, spec)
+	return id, withoutSecrets(err, spec)
 }
 
 func (b bounded) List(ctx context.Context, namePrefix string) ([]Instance, error) {
