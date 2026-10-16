@@ -408,6 +408,62 @@ func TestAnAgentWhoseWriteFailsIsLeftOutAndTheRestOfTheListStands(t *testing.T) 
 	}
 }
 
+// Only a decision written down changes what a launcher keeps: a pass whose write fails answers
+// the machine already asked for, which the launcher would otherwise destroy.
+func TestAMachineWhoseWriteFailsIsKeptAsItWas(t *testing.T) {
+	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}}}
+	first := mustReconcile(t, store, observed())
+	if len(first.Instances) != 1 {
+		t.Fatalf("instances = %+v", first.Instances)
+	}
+	running := first.Instances[0]
+	store.WriteErr = map[string]error{"ag-1": errors.New("statement timeout")}
+
+	exited := mustReconcile(t, store, observed(ObservedInstance{Name: running.Name, State: "exited", Log: "boom"}))
+	if !reflect.DeepEqual(exited.Instances, []Instance{running}) {
+		t.Fatalf("after a failed write of its end: instances = %+v, want %+v unchanged", exited.Instances, running)
+	}
+
+	rotated := observed(ObservedInstance{Name: running.Name, State: "running"})
+	rotated.LaunchDigest = "fedcba9876543210fedcba9876543210"
+	renamed := mustReconcile(t, store, rotated)
+	if len(renamed.Instances) != 1 || renamed.Instances[0].Name != running.Name {
+		t.Fatalf("after a failed write of its new name: instances = %+v, want %q kept", renamed.Instances, running.Name)
+	}
+	if got := store.Find("pe-1", "ag-1"); got.Name != running.Name || got.Restarts != 0 {
+		t.Fatalf("recorded = %+v, want the machine as it was", got)
+	}
+}
+
+// A machine renamed by a config change runs until its replacement's turn comes: the bound on new
+// machines per answer holds back the new one and never ends the old.
+func TestARenamedMachineWaitingItsTurnIsKept(t *testing.T) {
+	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {
+		{AgentSignup: hosted("pe-1", "ag-1")}, {AgentSignup: hosted("pe-1", "ag-2")},
+	}}}
+	first := mustReconcile(t, store, observed())
+	var listed []ObservedInstance
+	for _, instance := range first.Instances {
+		listed = append(listed, ObservedInstance{Name: instance.Name, State: "running"})
+	}
+	cfg := testSettings
+	cfg.MaxNewPerAnswer = 1
+	rotated := observed(listed...)
+	rotated.LaunchDigest = "fedcba9876543210fedcba9876543210"
+	code, raw := reconcileUnder(t, store, cfg, rotated)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d %s", code, raw)
+	}
+	answer := decode(t, raw)
+	names := map[string]bool{}
+	for _, instance := range answer.Instances {
+		names[instance.Name] = true
+	}
+	if len(answer.Instances) != 2 || names[first.Instances[0].Name] || !names[first.Instances[1].Name] {
+		t.Fatalf("instances = %+v, want the first renamed and the second kept under %q", answer.Instances, first.Instances[1].Name)
+	}
+}
+
 func TestARequestThatDoesNotSayWhatWasObservedIsRefused(t *testing.T) {
 	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}}}
 	for what, body := range map[string]any{

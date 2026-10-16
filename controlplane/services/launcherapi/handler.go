@@ -234,6 +234,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 			after, ended, err := h.observe(ctx, one, seen, instance.Env["HL_TOKEN"])
 			if err != nil {
 				log.Error("record instance outcome failed", zap.Error(err))
+				out.Instances = append(out.Instances, instance)
 				continue
 			}
 			if ended {
@@ -249,16 +250,25 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 			}
 		}
 		if instance.Name != current.Name {
+			// The machine recorded is the desired one until a new name is: an answer without it
+			// would have the launcher destroy a machine the platform still asks for.
+			keepCurrent := func() {
+				if current.Name != "" {
+					out.Instances = append(out.Instances, Instance{Name: current.Name, Image: instance.Image, Env: instance.Env})
+				}
+			}
 			// A launcher creates one machine after another, so an answer asks for a bounded
 			// number of new ones and the rest wait for the next: a pass must end, and its
 			// machines be reported, well inside the boot limit. A refused launcher is asked for
 			// none.
 			if refusal != nil || asked == h.cfg.MaxNewPerAnswer {
+				keepCurrent()
 				continue
 			}
 			asked++
 			if err := h.store.AskInstance(ctx, one.platformExperimentID, one.agentID, instance.Name, one.launch); err != nil {
 				log.Error("record instance name failed", zap.Error(err))
+				keepCurrent()
 				continue
 			}
 		}
