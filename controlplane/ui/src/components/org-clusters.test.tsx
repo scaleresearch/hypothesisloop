@@ -59,7 +59,10 @@ beforeEach(() => {
   })
   vi.mocked(registerCluster).mockImplementation(async (_orgID, name) => {
     if (!clusters.some(c => c.name === name)) clusters = [owned(name), ...clusters]
-    return { name, runtime_token: 'hls_cnVudGltZQ.c2ln', attach_commands: { kubernetes: `sh -c 'helm' sh '${name}'`, bare_metal: `sudo sh -c 'install' sh '${name}'` } }
+    return {
+      name, runtime_token: 'hls_cnVudGltZQ.c2ln', attach_commands: { kubernetes: `sh -c 'helm' sh '${name}'`, bare_metal: `sudo sh -c 'install' sh '${name}'` },
+      api_url: 'https://api.example.com', metrics_url: 'https://metrics.example.com', registry: 'registry.example.com/hl',
+    }
   })
 })
 
@@ -188,12 +191,21 @@ describe('adding a cluster', () => {
     expect(screen.getByTestId('runtime-token').textContent).toBe('hls_cnVudGltZQ.c2ln')
     expect(await screen.findByRole('cell', { name: 'edge' })).toBeTruthy()
     expect((screen.getByLabelText('Cluster name') as HTMLInputElement).value).toBe('')
+    // Beside the command: what it needs, what it installs where, and how it is checked and removed.
+    const before = within(screen.getByRole('region', { name: 'Before you run it' }))
+    expect(before.getByText('https://api.example.com')).toBeTruthy()
+    expect(before.getByText('registry.example.com/hl')).toBeTruthy()
+    expect(within(screen.getByRole('region', { name: 'What it installs' })).getByText('hypothesisloop-runtime-token')).toBeTruthy()
+    expect(screen.getByText('--dry-run=server')).toBeTruthy()
+    expect(screen.getByText('helm uninstall hypothesisloop-cluster-agent -n hypothesisloop')).toBeTruthy()
 
     const kinds = within(screen.getByRole('group', { name: 'Kind of cluster' }))
     expect(kinds.getByRole('button', { name: 'Kubernetes cluster' }).getAttribute('aria-pressed')).toBe('true')
     await userEvent.click(kinds.getByRole('button', { name: 'Bare-metal node' }))
     expect(screen.getByTestId('secret').textContent).toBe(`sudo sh -c 'install' sh 'edge'`)
     expect(screen.getByText(/sudo bare-agent detach/)).toBeTruthy()
+    expect(screen.getByText('/etc/hypothesisloop/bare-agent.env')).toBeTruthy()
+    expect(screen.getByText('--dry-run')).toBeTruthy()
     expect(registerCluster).toHaveBeenCalledTimes(1)
 
     await userEvent.click(screen.getByRole('button', { name: 'Hide' }))

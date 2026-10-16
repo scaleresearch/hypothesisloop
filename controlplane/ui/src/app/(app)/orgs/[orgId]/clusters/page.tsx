@@ -52,8 +52,7 @@ function AllClusters() {
           {error && <ErrorMessage>Could not load the clusters of every org: {error.message}</ErrorMessage>}
           {data && data.clusters.length === 0 && (
             <EmptyState>
-              No cluster has ever connected. Install a cluster-agent (<Code>make cluster-agent-up CLUSTER=&lt;name&gt; API_URL=&lt;control-service-url&gt; METRICS_URL=&lt;metrics-service-url&gt;</Code>)
-              pointed at this control plane.
+              No cluster has ever connected. Add one above with <Code>Add cluster</Code> and run the start command it shows.
             </EmptyState>
           )}
           {data && data.clusters.length > 0 && (
@@ -160,8 +159,8 @@ export default function ClusterPage() {
     <Page
         title="Compute Resources"
         description="The clusters your jobs can run on, which an owner adds, orders and removes here.
-          The control plane never connects to a cluster directly: each cluster runs its own
-          cluster-agent, which polls here for work and reports its own presence via heartbeat."
+          Each cluster runs an agent that only calls out to the platform for its work and reports
+          back. Nothing connects into your cluster."
     >
       <Section title={`Clusters ${org.name} can run on`} scrollX>
         <OrgClusters />

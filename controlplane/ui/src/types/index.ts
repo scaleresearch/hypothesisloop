@@ -676,6 +676,11 @@ export interface RegisteredCluster {
   name: string
   runtime_token: string
   attach_commands: Record<ClusterKind, string>
+  // Where the cluster's agents reach the platform and pull their images from, from the
+  // control plane's settings.
+  api_url: string
+  metrics_url: string
+  registry: string
 }
 
 // What became of the machine the platform runs for a hosted agent or a coordinator, as its

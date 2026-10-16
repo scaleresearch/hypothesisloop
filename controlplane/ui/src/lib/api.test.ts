@@ -224,10 +224,11 @@ describe('what a person writes is theirs by their session: no body names who wro
 })
 
 describe('registering a cluster', () => {
-  it('answers with the cluster, its attach commands and its runtime token, and nothing else of the answer', async () => {
+  it('answers with the cluster, its attach commands, its runtime token and where its agents reach, and nothing else of the answer', async () => {
     const attach_commands = { kubernetes: "sh -c 'helm' sh", bare_metal: "sudo sh -c 'install' sh" }
-    fetchMock().mockResolvedValue(answer(200, { name: 'edge', org_id: 'org_a', shared: false, runtime_token: 'hls_runtime', api_url: 'http://api.cluster.test', attach_commands }))
-    await expect(registerCluster('org_a', 'edge')).resolves.toEqual({ name: 'edge', runtime_token: 'hls_runtime', attach_commands })
+    const addresses = { api_url: 'https://api.cluster.test', metrics_url: 'https://metrics.cluster.test', registry: 'registry.cluster.test/hl' }
+    fetchMock().mockResolvedValue(answer(200, { name: 'edge', org_id: 'org_a', shared: false, runtime_token: 'hls_runtime', image_tag: 't1', ...addresses, attach_commands }))
+    await expect(registerCluster('org_a', 'edge')).resolves.toEqual({ name: 'edge', runtime_token: 'hls_runtime', attach_commands, ...addresses })
     expect(sent().body).toEqual({ name: 'edge' })
   })
 })

@@ -172,7 +172,10 @@ export async function removeCluster(orgID: string, name: string): Promise<void> 
 // runtime token is left behind here, so no page holds it.
 export async function registerCluster(orgID: string, name: string): Promise<RegisteredCluster> {
   const registered = await apiSend<RegisteredCluster>('POST', `/orgs/${orgID}/clusters`, { name })
-  return { name: registered.name, runtime_token: registered.runtime_token, attach_commands: registered.attach_commands }
+  return {
+    name: registered.name, runtime_token: registered.runtime_token, attach_commands: registered.attach_commands,
+    api_url: registered.api_url, metrics_url: registered.metrics_url, registry: registered.registry,
+  }
 }
 
 
