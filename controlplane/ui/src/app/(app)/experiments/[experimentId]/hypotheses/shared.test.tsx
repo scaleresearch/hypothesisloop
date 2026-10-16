@@ -24,7 +24,7 @@ vi.mock('@/lib/api/hypotheses', () => ({
 }))
 vi.mock('@/lib/api/platform-experiments', () => ({ fetchPlatformExperiment: vi.fn() }))
 vi.mock('@/components/platform-experiment-select', () => ({ PlatformExperimentSelect: () => <span>experiment select</span> }))
-vi.mock('@/components/hypothesis-graph', async original => ({ ...await original(), HypothesisGraphCanvas: () => <div>graph canvas</div> }))
+vi.mock('@/components/hypotheses/graph-canvas', async original => ({ ...await original(), HypothesisGraphCanvas: () => <div>graph canvas</div> }))
 
 const at = '2026-01-01T00:00:00Z'
 const me: Me = {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@/app/globals.css'
-import { HypothesisGraphCanvas } from '@/components/hypothesis-graph'
+import { HypothesisGraphCanvas } from '@/components/hypotheses/graph-canvas'
 import { Expandable } from '@/components/ui/expandable'
 import { extendLayout, layoutGraph } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'

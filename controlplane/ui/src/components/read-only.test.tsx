@@ -11,11 +11,12 @@ import type { HypothesisGraph, HypothesisListItem, HypothesisWithJobs } from '@/
 import { PlatformExperimentStatus } from '@/types/platform-experiments'
 import type { PlatformExperiment } from '@/types/platform-experiments'
 import { ReadOnlyProvider, useReadOnly } from '@/lib/read-only'
-import { AddIdeaButton, GraphEditorProvider, useGraphEditor } from '@/components/graph-edit'
+import { GraphEditorProvider, useGraphEditor } from '@/components/hypotheses/editor'
+import { AddIdeaButton } from '@/components/hypotheses/editor-controls'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { ExperimentAgents } from '@/components/experiment-agents'
-import { AddCommentForm, AddLinkForm } from '@/components/human-idea'
-import { HypothesisPanel, ObjectiveBar } from '@/components/hypothesis-panel'
+import { AddCommentForm, AddLinkForm } from '@/components/hypotheses/human-idea'
+import { HypothesisPanel, ObjectiveBar } from '@/components/hypotheses/panel'
 import { PlatformExperimentCard } from '@/components/platform-experiment-card'
 
 vi.mock('next/navigation', () => ({

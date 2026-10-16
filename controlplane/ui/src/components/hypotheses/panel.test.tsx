@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { ObjectiveBar } from '@/components/hypothesis-panel'
+import { ObjectiveBar } from '@/components/hypotheses/panel'
 import type { HypothesisGraph } from '@/types/hypotheses'
 import { PlatformExperimentStatus } from '@/types/platform-experiments'
 import type { PlatformExperiment } from '@/types/platform-experiments'
