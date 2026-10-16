@@ -55,10 +55,9 @@ class Instructions:
 # (domain.AgentTypeSettings) the harness knows. One missing is an incompatibility and ends the
 # harness; one it does not know is a feature it does not have yet, said once and passed over, so
 # that a control plane deployed before the harness image stops no agent. rules_version is not
-# kept: the digest holds it, and the digest is what the harness compares. pacing_subagents is not
-# kept: the model proxy paces the model allowance.
+# kept: the digest holds it, and the digest is what the harness compares.
 _ANSWER = frozenset({"agent_type", "agent_type_version", "rules_version", "role", "prompt", "placeholders", "settings", "digest"})
-_SETTINGS = frozenset({"model", "max_subagents", "pacing_subagents", "effort", "hyperparameters"})
+_SETTINGS = frozenset({"model", "max_subagents", "effort", "hyperparameters"})
 _said_unknown: set[tuple[str, tuple[str, ...]]] = set()
 
 
