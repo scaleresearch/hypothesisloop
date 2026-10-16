@@ -98,6 +98,8 @@ beforeAll(() => {
     offsetHeight: { configurable: true, get() { return 800 } },
   })
   Element.prototype.scrollIntoView = vi.fn()
+  // Edges are drawn from the handles each node declares, and a labelled one measures its text.
+  ;(SVGElement.prototype as unknown as SVGGraphicsElement).getBBox = () => ({ x: 0, y: 0, width: 40, height: 12 }) as DOMRect
 })
 
 beforeEach(() => {

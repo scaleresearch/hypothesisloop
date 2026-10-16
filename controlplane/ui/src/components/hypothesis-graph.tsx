@@ -3,9 +3,9 @@
 import { createContext, memo, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow, ReactFlowProvider, Background, ConnectionMode, Controls, MiniMap, Handle, Panel,
-  Position as Side, useReactFlow, useStore, useStoreApi,
+  Position as Side, useReactFlow, useStore,
 } from '@xyflow/react'
-import type { Edge, Node, NodeProps, NodeTypes } from '@xyflow/react'
+import type { Edge, Node, NodeHandle, NodeProps, NodeTypes, ReactFlowState } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { clsx } from 'clsx'
 import { FileText, MessageSquare, Plus } from 'lucide-react'
@@ -24,8 +24,10 @@ import { addHereLabel, useEditor } from '@/components/graph-edit'
 import { LINK_KIND_LABELS, NODE_HEIGHT, NODE_WIDTH, ROW, matchesFilters, objectiveFinding } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
 
-// Kinds read apart by line as well as colour: a related link is dotted, the others solid.
-const LINK_DASH: Partial<Record<HypothesisLinkType, string>> = { related: '2 4' }
+// Kinds read apart by line as well as colour: a related link is thin, the others thick. No line is
+// dashed: a dash pattern on a long path is rasterized dash by dash, which at hundreds of links
+// stalls every frame of a pan or zoom.
+const LINK_WIDTH: Record<HypothesisLinkType, number> = { builds_on: 1.5, related: 1, contradicts: 2.5 }
 
 const COUNT = 'inline-flex items-center gap-0.5'
 
@@ -92,9 +94,19 @@ function pickClass(pickable: Set<string> | null, id: string) {
   return pickable.has(id) ? 'cursor-crosshair ring-1 ring-primary' : 'cursor-not-allowed opacity-dimmed'
 }
 
-const HANDLE = 'pointer-events-none opacity-0'
+// Points at the middle of each side of the node's box. Given on every node, so React Flow places
+// edges without first drawing and measuring every node, which lets it draw only the nodes in view.
+// The drawn handles sit on the same points, so measuring a node once in view changes nothing.
+const HANDLE = 'pointer-events-none !min-h-0 !min-w-0 !h-0 !w-0 !border-0 opacity-0'
+const NODE_HANDLES: NodeHandle[] = [
+  { id: 'top', type: 'target', position: Side.Top, x: NODE_WIDTH / 2, y: 0, width: 0, height: 0 },
+  { id: 'bottom', type: 'source', position: Side.Bottom, x: NODE_WIDTH / 2, y: NODE_HEIGHT, width: 0, height: 0 },
+  { id: 'left', type: 'source', position: Side.Left, x: 0, y: NODE_HEIGHT / 2, width: 0, height: 0 },
+  { id: 'right', type: 'source', position: Side.Right, x: NODE_WIDTH, y: NODE_HEIGHT / 2, width: 0, height: 0 },
+]
 
-// Drawn at screen size whatever the zoom: the canvas keeps its zoom in --zoom.
+// Drawn at screen size whatever the zoom: the canvas keeps its zoom in --zoom, set once a zoom
+// ends, since changing it restyles every drawn node.
 function NodeAdd({ id, objective }: { id: string; objective: boolean }) {
   const { onAdd } = useContext(Highlight)
   if (!onAdd) return null
@@ -117,6 +129,12 @@ function NodeAdd({ id, objective }: { id: string; objective: boolean }) {
   )
 }
 
+// Below this zoom a node's text is too small to read: nodes are drawn as blocks of their status
+// colour and links without labels, so a view of the whole graph stays light to draw.
+const FAR_ZOOM = 0.4
+const isFar = (s: ReactFlowState) => s.transform[2] < FAR_ZOOM
+const FAR_NODE = 'rounded border border-border-strong'
+
 const NODE = 'group relative flex cursor-pointer flex-col gap-1.5 rounded border border-l-3 py-2 pl-3 pr-2.5 text-foreground transition hover:bg-surface-raised'
 // The box is NODE_WIDTH by NODE_HEIGHT: the layout places nodes by those.
 const NODE_BOX = { width: NODE_WIDTH, height: NODE_HEIGHT }
@@ -136,8 +154,23 @@ function HiddenHandles() {
 const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<HypothesisNodeData>>) {
   const { item } = data
   const { selected, hits, dimmed, pickable } = useContext(Highlight)
+  const far = useStore(isFar)
   const color = statusColor(item.status)
+  if (far) {
+    return (
+      <>
+      <HiddenHandles />
+      <div
+        className={clsx(FAR_NODE, selected === item.id && 'ring-4 ring-accent', hits.has(item.id) && 'ring-4 ring-warning', dimmed.has(item.id) && 'opacity-dimmed', pickClass(pickable, item.id))}
+        style={{ ...NODE_BOX, background: tint(color, 'edge') }}
+        title={item.text}
+      />
+      </>
+    )
+  }
   return (
+    <>
+    <HiddenHandles />
     <div
       className={clsx(
         NODE,
@@ -150,7 +183,6 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
       style={{ ...NODE_BOX, borderLeftColor: color }}
       title={item.text}
     >
-      <HiddenHandles />
       <NodeAdd id={item.id} objective={false} />
       <div className={NODE_TEXT}>{item.text}</div>
       <div className="flex min-w-0 items-center gap-2">
@@ -160,14 +192,25 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
         <NodeMeta item={item} />
       </div>
     </div>
+    </>
   )
 })
 
 const ObjectiveNode = memo(function ObjectiveNode({ id, data }: NodeProps<Node<ObjectiveNodeData>>) {
   const { selected, pickable } = useContext(Highlight)
-  return (
-    <div className={clsx(NODE, 'justify-center border-primary', selected === id ? 'bg-surface-raised shadow-md ring-1 ring-accent' : 'bg-surface-inset', pickClass(pickable, id))} style={NODE_BOX}>
+  const far = useStore(isFar)
+  if (far) {
+    return (
+      <>
       <HiddenHandles />
+      <div className={clsx(FAR_NODE, 'border-primary', selected === id && 'ring-4 ring-accent', pickClass(pickable, id))} style={{ ...NODE_BOX, background: semantic.surfaceInset }} title={data.label} />
+      </>
+    )
+  }
+  return (
+    <>
+    <HiddenHandles />
+    <div className={clsx(NODE, 'justify-center border-primary', selected === id ? 'bg-surface-raised shadow-md ring-1 ring-accent' : 'bg-surface-inset', pickClass(pickable, id))} style={NODE_BOX}>
       <div className="flex items-center justify-between gap-2">
         <Eyebrow>Objective</Eyebrow>
         <ObjectiveMeta objective={data.objective} />
@@ -175,6 +218,7 @@ const ObjectiveNode = memo(function ObjectiveNode({ id, data }: NodeProps<Node<O
       <NodeAdd id={id} objective />
       <div className={NODE_TEXT}>{data.label}</div>
     </div>
+    </>
   )
 })
 
@@ -188,7 +232,7 @@ function Legend({ onTidy }: { onTidy?: () => void }) {
         return (
           <span key={type} className="inline-flex items-center gap-1.5">
             <svg width="26" height="8" aria-hidden="true">
-              <line x1="0" y1="4" x2="26" y2="4" stroke={s.color} strokeWidth="2" strokeDasharray={LINK_DASH[type]} />
+              <line x1="0" y1="4" x2="26" y2="4" stroke={s.color} strokeWidth={LINK_WIDTH[type]} />
             </svg>
             {LINK_KIND_LABELS[type]}
           </span>
@@ -243,18 +287,14 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
   const picking = editor?.picking ?? false
   // The "+" of each node, while one can be added; the nodes stay memoized as the editor changes.
   const onAdd = editor?.canWrite && !picking ? editor.startAdding : null
+  const far = useStore(isFar)
   const width = useStore(s => s.width)
   const height = useStore(s => s.height)
   const [ready, setReady] = useState(false)
   const centered = useRef('')
   const expanded = useExpanded()
   const flow = useRef<HTMLDivElement>(null)
-  const store = useStoreApi()
-  useEffect(() => {
-    const set = (zoom: number) => flow.current?.style.setProperty('--zoom', String(zoom))
-    set(store.getState().transform[2])
-    return store.subscribe(s => set(s.transform[2]))
-  }, [store])
+  const setZoom = (zoom: number) => flow.current?.style.setProperty('--zoom', String(zoom))
 
   const dimmed = useMemo(
     () => new Set(graph.nodes.filter(n => !matchesFilters(n, filters)).map(n => n.id)),
@@ -268,6 +308,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
       position: positions.get(graph.root)!,
       width: NODE_WIDTH,
       height: NODE_HEIGHT,
+      handles: NODE_HANDLES,
       data: { label: rootLabel, objective: graph.objective },
     },
     ...graph.nodes.filter(item => positions.has(item.id)).map(item => ({
@@ -276,6 +317,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
       position: positions.get(item.id)!,
       width: NODE_WIDTH,
       height: NODE_HEIGHT,
+      handles: NODE_HANDLES,
       data: { item },
     })),
   ], [graph, positions, rootLabel])
@@ -305,7 +347,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
     // a row has to cross it, from side to side.
     const rows = (b.y - a.y) / ROW
     // A node hangs one row under its deepest parent, so a builds_on that skips a row is a further
-    // parent: it curves into the child's side, dashed and labelled, clear of the tree's own lines.
+    // parent: it curves into the child's side, labelled, clear of the tree's own lines.
     const further = hierarchy && rows > 1
     // A cross link to the node's own parent would lie on the tree's line, so it loops round the side.
     const [sourceHandle, targetHandle] = further ? ['bottom', a.x < b.x ? 'left' : 'right']
@@ -321,19 +363,18 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
       targetHandle,
       type: further || rows > 1 ? 'default' : 'smoothstep',
       pathOptions: hierarchy ? undefined : { stepPosition: 1, offset: e.type === 'related' ? 12 : 20 },
-      label: hierarchy && !further ? undefined : LINK_KIND_LABELS[e.type],
+      label: far || (hierarchy && !further) ? undefined : LINK_KIND_LABELS[e.type],
       zIndex: hierarchy && !further ? 0 : 1,
       labelStyle: { ...chart.label, fill: s.text, opacity },
       labelBgStyle: { fill: semantic.surface },
       labelBgPadding: [4, 2] as [number, number],
       style: {
         stroke: s.color,
-        strokeWidth: hierarchy ? 1.5 : 2,
-        strokeDasharray: further ? '6 4' : LINK_DASH[e.type],
+        strokeWidth: LINK_WIDTH[e.type],
         opacity,
       },
     }
-  })}, [graph, positions, dimmed])
+  })}, [graph, positions, dimmed, far])
 
   // Opening in or leaving the whole window resizes the canvas: the view is placed again once it has.
   useEffect(() => {
@@ -369,10 +410,14 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
         edges={edges}
         nodeTypes={nodeTypes}
         connectionMode={ConnectionMode.Loose}
-        onInit={() => setReady(true)}
+        onInit={instance => {
+          setZoom(instance.getZoom())
+          setReady(true)
+        }}
+        onMoveEnd={(_, viewport) => setZoom(viewport.zoom)}
         minZoom={0.05}
         maxZoom={2}
-        onlyRenderVisibleElements={nodes.length > 200}
+        onlyRenderVisibleElements
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
