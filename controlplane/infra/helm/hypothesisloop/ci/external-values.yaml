@@ -62,7 +62,6 @@ cloudAgent:
     namespace: main
     reconcile_interval_seconds: 10
     status_interval_seconds: 30
-    log_tail_lines: 100
     offer_wait_seconds: 180
     startup_seconds: 240
     provider:
