@@ -19,7 +19,7 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { LinkTr, RowAnchor, Table, num, quiet } from '@/components/ui/table'
 import { Code, Eyebrow, Text } from '@/components/ui/text'
 import { Badge } from '@/components/ui/badge'
-import { Loading, InlineError } from '@/components/ui/status-message'
+import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { acceleratorLabel, formatAccH, relTime, shortId } from '@/lib/format'
 import { budgetUnit, kindOf } from '@/lib/units'
 import { AddCommentForm, AddLinkForm } from '@/components/human-idea'
@@ -81,7 +81,7 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
   const elsewhere = data && data.platform_experiment_id !== experimentId
   if (error || elsewhere) return (
     <Page title="Hypothesis">
-      <p><InlineError>Could not load hypothesis {id}: {elsewhere ? 'it is not in this experiment' : error.message}</InlineError></p>
+      <ErrorMessage>Could not load hypothesis {id}: {elsewhere ? 'it is not in this experiment' : error.message}</ErrorMessage>
       <TextLink href={graphHref(experimentId)} className="text-sm">← Hypothesis graph</TextLink>
     </Page>
   )

@@ -1,19 +1,22 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Dialog, DialogBackdrop, DialogPanel } from '@headlessui/react'
 import { experimentPath, jobPath, sectionPath, type Section } from '@/lib/routes'
 import {
   FlaskConical, ListTree, Server, LineChart, Lightbulb, Search, CornerDownLeft,
-  ArrowUp, ArrowDown, Hash, Zap, type LucideIcon,
+  ArrowUp, ArrowDown, Hash, Settings, Zap, type LucideIcon,
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { fetchExperiment, fetchPlatformExperiment } from '@/lib/api'
+import { ApiError, fetchExperiment, fetchPlatformExperiment } from '@/lib/api'
+import { errorMessage } from '@/lib/errors'
 import { useTenant } from '@/lib/tenant'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Inline } from '@/components/ui/stack'
+import { InlineError } from '@/components/ui/status-message'
 import { Kbd, Text } from '@/components/ui/text'
 
 type CommandItem = {
@@ -31,7 +34,14 @@ const DESTINATIONS: (Omit<CommandItem, 'action'> & { section: Section; staffOnly
   { id: 'nav-jobs', section: 'jobs',        label: 'Jobs',              sub: 'Go to page', icon: ListTree,     keywords: 'jobs runs workloads' },
   { id: 'nav-clu',  section: 'clusters',    label: 'Compute Resources', sub: 'Go to page', icon: Server,       keywords: 'clusters compute accelerator' },
   { id: 'nav-stat', section: 'statistics',  label: 'Statistics',        sub: 'Go to page', icon: LineChart,    keywords: 'dashboard scheduler quality evictions completion rate', staffOnly: true },
+  { id: 'nav-set',  section: 'settings',    label: 'Settings',          sub: 'Go to page', icon: Settings,     keywords: 'settings members invites api keys github agent types organization' },
 ]
+
+const notFound = (e: unknown) => e instanceof ApiError && e.status === 404
+
+// What a pasted id is: a job, else a platform experiment. Only a 404 means "not this kind": any
+// other failure is the lookup failing, which is said as such.
+type Lookup = { state: 'none' } | { state: 'resolving' } | { state: 'found'; item: CommandItem } | { state: 'missing' } | { state: 'failed'; message: string }
 
 /**
  * Global ⌘K / Ctrl+K command palette. It's the primary way both human
@@ -44,74 +54,58 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
-  const [resolving, setResolving] = useState(false)
-  const [idResult, setIdResult] = useState<CommandItem | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [lookup, setLookup] = useState<Lookup>({ state: 'none' })
+  const listID = useId()
 
   const close = useCallback(() => {
     setOpen(false)
     setQuery('')
-    setIdResult(null)
+    setLookup({ state: 'none' })
     setActiveIndex(0)
   }, [])
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      const isMeta = e.metaKey || e.ctrlKey
-      if (isMeta && e.key.toLowerCase() === 'k') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         setOpen(o => !o)
-        return
-      }
-      if (e.key === 'Escape' && open) {
-        e.preventDefault()
-        close()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [open, close])
+  }, [])
 
-  useEffect(() => {
-    if (open) requestAnimationFrame(() => inputRef.current?.focus())
-  }, [open])
-
-  // A bare UUID-looking query resolves against jobs, then platform experiments.
   useEffect(() => {
     const q = query.trim()
-    const looksLikeId = /^[0-9a-f]{6,}(-[0-9a-f]{4,}){0,4}$/i.test(q)
-    if (!looksLikeId) {
-      setIdResult(null)
+    if (!/^[0-9a-f]{6,}(-[0-9a-f]{4,}){0,4}$/i.test(q)) {
+      setLookup({ state: 'none' })
       return
     }
     let cancelled = false
-    setResolving(true)
-    fetchExperiment(q)
-      .then(exp => {
-        if (cancelled) return
-        setIdResult({
-          id: 'resolved-job',
-          label: `Job ${q.slice(0, 12)}…`,
-          sub: `${exp.status} · open job`,
-          icon: Hash,
+    const settle = (next: Lookup) => { if (!cancelled) setLookup(next) }
+    setLookup({ state: 'resolving' })
+    async function resolve(): Promise<Lookup> {
+      try {
+        const exp = await fetchExperiment(q)
+        return { state: 'found', item: {
+          id: 'resolved-job', label: `Job ${q.slice(0, 12)}…`, sub: `${exp.status} · open job`, icon: Hash,
           action: () => { router.push(jobPath(exp.platform_experiment_id, q)); close() },
-        })
-      })
-      .catch(() =>
-        fetchPlatformExperiment(q)
-          .then(pe => {
-            if (cancelled) return
-            setIdResult({
-              id: 'resolved-pe',
-              label: pe.name || `Platform experiment ${q.slice(0, 12)}…`,
-              sub: 'open experiment',
-              icon: Hash,
-              action: () => { router.push(experimentPath(q)); close() },
-            })
-          })
-          .catch(() => { if (!cancelled) setIdResult(null) }),
-      )
-      .finally(() => { if (!cancelled) setResolving(false) })
+        } }
+      } catch (e) {
+        if (!notFound(e)) throw e
+      }
+      try {
+        const pe = await fetchPlatformExperiment(q)
+        return { state: 'found', item: {
+          id: 'resolved-pe', label: pe.name || `Platform experiment ${q.slice(0, 12)}…`, sub: 'open experiment', icon: Hash,
+          action: () => { router.push(experimentPath(q)); close() },
+        } }
+      } catch (e) {
+        if (!notFound(e)) throw e
+      }
+      return { state: 'missing' }
+    }
+    resolve().then(settle, e => settle({ state: 'failed', message: errorMessage(e) }))
     return () => { cancelled = true }
   }, [query, router, close])
 
@@ -124,8 +118,8 @@ export function CommandPalette() {
     const filtered = q
       ? base.filter(i => (i.label + ' ' + (i.sub ?? '') + ' ' + (i.keywords ?? '')).toLowerCase().includes(q))
       : base
-    return idResult ? [idResult, ...filtered] : filtered
-  }, [query, router, close, idResult, staff, project])
+    return lookup.state === 'found' ? [lookup.item, ...filtered] : filtered
+  }, [query, router, close, lookup, staff, project])
 
   useEffect(() => { setActiveIndex(0) }, [items.length, query])
 
@@ -142,65 +136,72 @@ export function CommandPalette() {
     }
   }
 
-  if (!open) return null
+  const optionID = (i: number) => `${listID}-${i}`
 
+  // The dialog keeps focus inside while open and hands it back to where it was on close.
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-scrim pt-drop backdrop-blur-sm" onClick={close}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Jump to a page or record"
-        className="w-full max-w-xl overflow-hidden rounded-lg border border-border-strong bg-surface-raised shadow-lg"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center gap-2.5 border-b px-4 py-3.5">
-          <Search size={16} strokeWidth={2} className="flex-none text-muted" />
-          <Input
-            ref={inputRef}
-            bare
-            className="flex-1 text-base"
-            aria-label="Search"
-            placeholder="Jump to a page, or paste a job / experiment ID…"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            onKeyDown={onKeyDownInList}
-          />
-          {resolving && <Text as="span" variant="meta" mono tone="accent" className="whitespace-nowrap">resolving…</Text>}
-          <Kbd>ESC</Kbd>
-        </div>
-        <div className="max-h-80 overflow-y-auto p-1.5" role="listbox" aria-label="Results">
-          {items.length === 0 && (
-            <EmptyState>No matches. Try a page name or paste a full job/experiment ID.</EmptyState>
-          )}
-          {items.map((item, i) => {
-            const Icon = item.icon
-            const active = i === activeIndex
-            return (
-              <div
-                key={item.id}
-                role="option"
-                aria-selected={active}
-                className={clsx('flex cursor-pointer items-center gap-2.5 rounded px-2.5 py-2', active ? 'bg-highlight text-foreground' : 'text-muted')}
-                onMouseEnter={() => setActiveIndex(i)}
-                onClick={item.action}
-              >
-                <Icon size={15} strokeWidth={2} className={clsx('flex-none', active && 'text-accent')} />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">{item.label}</div>
-                  {item.sub && <Text as="div" variant="hint">{item.sub}</Text>}
+    <Dialog open={open} onClose={close} className="relative z-50">
+      <DialogBackdrop className="fixed inset-0 bg-scrim backdrop-blur-sm" />
+      <div className="fixed inset-0 flex items-start justify-center pt-drop">
+        <DialogPanel aria-label="Jump to a page or record" className="w-full max-w-xl overflow-hidden rounded-lg border border-border-strong bg-surface-raised shadow-lg">
+          <div className="flex items-center gap-2.5 border-b px-4 py-3.5">
+            <Search size={16} strokeWidth={2} className="flex-none text-muted" aria-hidden="true" />
+            <Input
+              autoFocus
+              bare
+              className="flex-1 text-base"
+              role="combobox"
+              aria-label="Search"
+              aria-expanded="true"
+              aria-controls={listID}
+              aria-autocomplete="list"
+              aria-activedescendant={items[activeIndex] ? optionID(activeIndex) : undefined}
+              placeholder="Jump to a page, or paste a job / experiment ID…"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={onKeyDownInList}
+            />
+            {lookup.state === 'resolving' && <Text as="span" variant="meta" mono tone="accent" className="whitespace-nowrap">resolving…</Text>}
+            <Kbd>ESC</Kbd>
+          </div>
+          <div id={listID} className="max-h-80 overflow-y-auto p-1.5" role="listbox" aria-label="Results">
+            {lookup.state === 'failed' && (
+              <InlineError className="block px-2.5 py-2">Could not look up {query.trim()}: {lookup.message}</InlineError>
+            )}
+            {items.length === 0 && lookup.state !== 'failed' && lookup.state !== 'resolving' && (
+              <EmptyState>No matches. Try a page name or paste a full job/experiment ID.</EmptyState>
+            )}
+            {items.map((item, i) => {
+              const Icon = item.icon
+              const active = i === activeIndex
+              return (
+                <div
+                  key={item.id}
+                  id={optionID(i)}
+                  role="option"
+                  aria-selected={active}
+                  className={clsx('flex cursor-pointer items-center gap-2.5 rounded px-2.5 py-2', active ? 'bg-highlight text-foreground' : 'text-muted')}
+                  onMouseEnter={() => setActiveIndex(i)}
+                  onClick={item.action}
+                >
+                  <Icon size={15} strokeWidth={2} aria-hidden="true" className={clsx('flex-none', active && 'text-accent')} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{item.label}</div>
+                    {item.sub && <Text as="div" variant="hint">{item.sub}</Text>}
+                  </div>
+                  {active && <CornerDownLeft size={13} strokeWidth={2} aria-hidden="true" className="flex-none text-accent" />}
                 </div>
-                {active && <CornerDownLeft size={13} strokeWidth={2} className="flex-none text-accent" />}
-              </div>
-            )
-          })}
-        </div>
-        <Inline gap="lg" nowrap className="border-t bg-surface-inset px-4 py-2 text-2xs text-subtle">
-          <Inline gap="xs" nowrap><ArrowUp size={11} /><ArrowDown size={11} /> navigate</Inline>
-          <Inline gap="xs" nowrap><CornerDownLeft size={11} /> select</Inline>
-          <Inline gap="xs" nowrap className="ml-auto"><Zap size={11} /> agent- and human-readable IDs both work</Inline>
-        </Inline>
+              )
+            })}
+          </div>
+          <Inline gap="lg" nowrap className="border-t bg-surface-inset px-4 py-2 text-2xs text-subtle">
+            <Inline gap="xs" nowrap><ArrowUp size={11} /><ArrowDown size={11} /> navigate</Inline>
+            <Inline gap="xs" nowrap><CornerDownLeft size={11} /> select</Inline>
+            <Inline gap="xs" nowrap className="ml-auto"><Zap size={11} /> agent- and human-readable IDs both work</Inline>
+          </Inline>
+        </DialogPanel>
       </div>
-    </div>
+    </Dialog>
   )
 }
 

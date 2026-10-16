@@ -38,7 +38,7 @@ const variantClass: Record<Variant, string> = {
 const sizeClass: Record<Size, string> = {
   default: clsx(controlHeight.default, 'px-4 text-sm'),
   sm: clsx(controlHeight.sm, 'px-3 text-xs'),
-  icon: 'size-5 flex-none text-xs',
+  icon: 'size-6 flex-none text-xs',
 }
 
 const linkSizeClass: Record<Size, string> = {
