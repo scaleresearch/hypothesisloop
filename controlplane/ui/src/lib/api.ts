@@ -128,7 +128,7 @@ function withQuery(path: string, params: object): string {
 // A paginated list response: the page of items plus the total match count across all pages,
 // read off the X-Total-Count response header, as every list endpoint sends it (?limit, ?offset,
 // ?sort; total in X-Total-Count).
-export interface Page<T> {
+interface Page<T> {
   items: T[]
   total: number
 }
@@ -195,7 +195,7 @@ export async function registerCluster(orgID: string, name: string): Promise<Regi
 // A list is asked for within a project. What is in a shared platform experiment of another org
 // is asked for by platform_experiment_id alone: it lies in a project the caller's project_id
 // never matches, and the API admits a list narrowed to a shared one.
-export interface AgentsParams {
+interface AgentsParams {
   project_id?: string
   platform_experiment_id?: string
   /** Substring match against id and name. */
@@ -209,7 +209,7 @@ export function fetchAgentsPage(params: AgentsParams): Promise<Page<Agent>> {
 }
 
 // Whole-set figures for the filters fetchAgentsPage accepts, aggregated server-side.
-export interface AgentStats {
+interface AgentStats {
   total: number
   top3_eligible: number
 }
@@ -224,7 +224,7 @@ export function fetchAgentStats(params: Pick<AgentsParams, 'project_id' | 'platf
 // ---------------------------------------------------------------------------
 
 // Field names are sent verbatim as query params, so they must match the API's own names.
-export interface ExperimentsParams {
+interface ExperimentsParams {
   project_id?: string
   status?: string
   agent_id?: string
@@ -330,7 +330,7 @@ export function fetchHypothesisStats(platformExperimentID: string): Promise<Hypo
   )
 }
 
-export interface HypothesesParams {
+interface HypothesesParams {
   project_id?: string
   platform_experiment_id?: string
   status?: HypothesisStatus
@@ -348,7 +348,7 @@ export function fetchHypothesesPage(params: HypothesesParams): Promise<Page<Hypo
 
 // A hypothesis with a verdict, a finding or a job with a metric: its newest finding and the job
 // testing it that did best on the ranking metric.
-export interface HypothesisEvidence extends Hypothesis {
+interface HypothesisEvidence extends Hypothesis {
   finding?: HypothesisFinding
   // summary is the write-up filed for that job, absent when none was.
   best_job?: { id: string; metric: JobMetric; summary?: string }
@@ -498,7 +498,7 @@ export interface CreatePlatformExperimentRequest {
 }
 
 /** What a repository's .hypothesisloop/experiment.yaml states of a platform experiment. */
-export interface ExperimentFile {
+interface ExperimentFile {
   repository: string
   name?: string
   description?: string
@@ -515,7 +515,7 @@ export function fetchExperimentFile(projectID: string, repository: string): Prom
 }
 
 /** Where a create with these repository fields would keep its code. */
-export interface RepositoryCheck {
+interface RepositoryCheck {
   repository?: string
   repository_url?: string
   /** The account a new repository would be created on. */
@@ -539,7 +539,7 @@ export interface ExperimentDraft {
   updated_at: string
 }
 
-export type ExperimentDraftBody = Pick<ExperimentDraft, 'form' | 'step' | 'failure'>
+type ExperimentDraftBody = Pick<ExperimentDraft, 'form' | 'step' | 'failure'>
 
 export function fetchExperimentDrafts(projectID: string): Promise<ExperimentDraft[]> {
   return apiFetch<ExperimentDraft[]>(`/projects/${projectID}/experiment-drafts`)
@@ -565,7 +565,7 @@ export function createPlatformExperiment(projectID: string, req: CreatePlatformE
   return apiSend<PlatformExperiment>('POST', '/platform-experiments', { ...req, project_id: projectID })
 }
 
-export interface PlatformExperimentsParams {
+interface PlatformExperimentsParams {
   /** The project's own. The ones staff shared with every account are listed with them, in every project. */
   project_id?: string
   /** true keeps only the shared ones, false leaves them out. */
@@ -601,7 +601,7 @@ interface AgentStanding {
 
 // Standings rank the competitors on each ranking metric, the first being the primary one. bests
 // holds every reporting agent's best raw value on every declared metric and the job that set it.
-export interface PlatformExperimentResults {
+interface PlatformExperimentResults {
   // baseline is the declared baseline job's last value on the metric, absent until it reported one.
   metrics: { metric: string; direction: 'maximize' | 'minimize'; baseline?: number; standings: AgentStanding[] }[]
   bests: {
@@ -638,7 +638,7 @@ export function fetchAgentQuota(platformExpID: string, agentID: string): Promise
 
 // Live, per-cluster accelerator capacity: what is schedulable right now, read from the metrics
 // store, and what an hour on one accelerator of each type costs in accelerator hours.
-export interface ResourceCapacity {
+interface ResourceCapacity {
   clusters: Array<{
     cluster_name: string
     // The cluster rents a machine when a job needs one. Nothing stands by: a type's total is the
@@ -712,7 +712,7 @@ export function fetchPlatformExperimentAgents(platformExpID: string): Promise<Jo
   return apiFetch<{ agents: JoinedAgent[] }>(`/platform-experiments/${platformExpID}/agents`).then(r => r.agents)
 }
 
-export interface AddAgentsRequest {
+interface AddAgentsRequest {
   /** true: the platform runs the agent. false: its token comes back, to run it yourself. */
   hosted: boolean
   flavor?: string
@@ -851,7 +851,7 @@ export function createAgentType(orgID: string, req: CreateAgentTypeRequest): Pro
   return apiSend<AgentType>('POST', `/orgs/${orgID}/agent-types`, req)
 }
 
-export interface EditAgentTypeRequest {
+interface EditAgentTypeRequest {
   /** The version the edit was made from: 409 version_conflict when it is no longer current. */
   if_version: number
   name: string
