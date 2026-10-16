@@ -855,7 +855,9 @@ standings against JOB from then on. Verdicts already given stay as recorded. Ref
 FIELDS.yaml maps the other fields that change (budget_accelerator_hours, max_agents,
 researchers, duration_hours, metrics, report_interval_seconds): any while it is open, only name,
 description, duration_hours, max_agents and researchers once it runs. The result is checked like a create, so name and description stay
-non-empty; max_agents below the researchers at work is 409 max_agents_below_researchers, which says how many are.`, stderr)
+non-empty. Once it runs, max_agents below the researchers at work cuts the newest of them
+(agent.cut with detail max_agents_lowered) and nobody takes their places; before that it is
+409 max_agents_below_researchers, which says how many are signed up.`, stderr)
 	pe := experimentFlag(fs)
 	name := fs.String("name", "", "the new name")
 	descriptionFlag := newTextFlag(fs, "description", "the new description")
