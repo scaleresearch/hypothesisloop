@@ -49,6 +49,24 @@ class Instructions:
         return self.prompt != other.prompt
 
 
+# The fields of the platform's answer (quota.Instructions) and of its settings
+# (domain.AgentTypeSettings), each one the harness has decided on: a field the platform adds or
+# drops ends the harness until it is decided here. rules_version is not kept: the digest holds it,
+# and the digest is what the harness compares. pacing_subagents is kept and read by nothing: the
+# model proxy paces the model allowance.
+_ANSWER = frozenset({"agent_type", "agent_type_version", "rules_version", "role", "prompt", "placeholders", "settings", "digest"})
+_SETTINGS = frozenset({"model", "max_subagents", "pacing_subagents", "effort", "hyperparameters"})
+
+
+def _schema(cfg: config.Config, what: str, given, expected: frozenset) -> None:
+    if not isinstance(given, dict):
+        raise SystemExit(f"agent: {what} for {cfg.agent_id} is no JSON object")
+    unknown, missing = sorted(given.keys() - expected), sorted(expected - given.keys())
+    if unknown or missing:
+        raise SystemExit(f"agent: {what} for {cfg.agent_id} hold fields the harness has not decided on {unknown} "
+                         f"and lack fields it runs with {missing}")
+
+
 def path(cfg: config.Config) -> str:
     pe = cfg.platform_experiment_id
     if config.coordinates(cfg):
@@ -71,6 +89,8 @@ async def read(client: api_client.PlatformClient, cfg: config.Config) -> dict:
 def complete(answer: dict, cfg: config.Config, commands: str, workdir: str) -> Instructions:
     """answer, as read(), with the prompt filled for this machine. Anything the harness cannot run
     with ends it."""
+    _schema(cfg, "the platform's instructions", answer, _ANSWER)
+    _schema(cfg, "the platform's instruction settings", answer["settings"], _SETTINGS)
     try:
         settings = answer["settings"]
         cfg.run_as(answer["role"])
@@ -79,7 +99,7 @@ def complete(answer: dict, cfg: config.Config, commands: str, workdir: str) -> I
             prompt=prompt.fill(answer["prompt"], answer["placeholders"], {prompt.HL_COMMANDS: commands, prompt.WORKDIR: workdir}),
             model=settings["model"], max_subagents=int(settings["max_subagents"]),
             pacing_subagents=int(settings["pacing_subagents"]), effort=settings["effort"],
-            hyperparameters=settings.get("hyperparameters") or {}, digest=answer["digest"])
+            hyperparameters=settings["hyperparameters"] or {}, digest=answer["digest"])
     except (KeyError, TypeError, ValueError) as e:
         raise SystemExit(f"agent: the platform's instructions for {cfg.agent_id} are not what the harness runs with: {e!r}") from None
     if not instructions.model:
@@ -102,9 +122,15 @@ def save(statedir: str, instructions: Instructions) -> None:
 
 
 def load(statedir: str) -> Instructions | None:
-    """What save() kept, None for nothing kept."""
+    """What save() kept, None for nothing kept. A file kept with other fields than Instructions
+    has, by a harness of another version, ends the harness: what it holds has to be decided on."""
     try:
         with open(os.path.join(statedir, FILE)) as f:
-            return Instructions(**json.load(f))
+            kept = json.load(f)
     except FileNotFoundError:
         return None
+    fields = frozenset(field.name for field in dataclasses.fields(Instructions))
+    if not isinstance(kept, dict) or kept.keys() != fields:
+        raise SystemExit(f"agent: {FILE} of the state directory holds {sorted(kept) if isinstance(kept, dict) else kept!r}, "
+                         f"and the harness keeps {sorted(fields)}")
+    return Instructions(**kept)
