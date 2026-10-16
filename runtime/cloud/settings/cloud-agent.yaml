@@ -26,8 +26,6 @@ namespace: main
 # started. Set these against the provider's rate limit.
 reconcile_interval_seconds: 10
 status_interval_seconds: 10
-# How much of a job's output a status push relays.
-log_tail_lines: 100
 # How long a job may wait for a machine to rent before it goes back to the queue as no_offer, at
 # no cost and with no failure counted against its agent, and how long
 # a rented machine may take to start the job before it is destroyed and another rented. The

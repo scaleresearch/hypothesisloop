@@ -49,10 +49,8 @@ type Config struct {
 	// EnvironmentsRepository is where the environments the control plane builds on JobImage are,
 	// host/path: a job may run in one of its images, named by digest. Empty runs none.
 	EnvironmentsRepository string
-	// LogTailLines is how much of an instance's output one pass reads.
-	LogTailLines int
-	Shapes       []Shape
-	Provider     provider.Provider
+	Shapes                 []Shape
+	Provider               provider.Provider
 	// OfferWait is how long a job may wait from its admission for a machine to rent before it is
 	// reported as one this cluster cannot run.
 	OfferWait time.Duration
@@ -69,7 +67,6 @@ type Executor struct {
 	apiURL       string
 	jobImage     string
 	environments string
-	logTailLines int
 	shapes       []Shape
 	provider     provider.Provider
 	// market is the provider's Market capability, nil for a vendor that has none.
@@ -108,7 +105,6 @@ func New(cfg Config) (*Executor, error) {
 		apiURL:       cfg.APIURL,
 		jobImage:     cfg.JobImage,
 		environments: cfg.EnvironmentsRepository,
-		logTailLines: cfg.LogTailLines,
 		shapes:       append([]Shape(nil), cfg.Shapes...),
 		provider:     rented,
 		offerWait:    cfg.OfferWait,
@@ -129,9 +125,6 @@ func (cfg Config) Validate() error {
 	}
 	if err := provider.ValidateSegment("namespace", cfg.Namespace); err != nil {
 		return fmt.Errorf("cloudexec: %w", err)
-	}
-	if cfg.LogTailLines <= 0 {
-		return fmt.Errorf("cloudexec: LogTailLines must be positive")
 	}
 	if cfg.OfferWait <= 0 || cfg.Startup <= 0 {
 		return fmt.Errorf("cloudexec: OfferWait and Startup must be positive")

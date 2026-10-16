@@ -39,7 +39,6 @@ func newTestAgent(server *httptest.Server, exec *captureExecutor) *Agent {
 		HTTPClient:        server.Client(),
 		ReconcileInterval: time.Second,
 		StatusInterval:    time.Second,
-		LogTailLines:      LogTailLines,
 		Log:               func(string, ...any) {},
 	}
 }

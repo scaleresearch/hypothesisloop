@@ -57,7 +57,6 @@ func main() {
 		HTTPClient:        &http.Client{Timeout: 35 * time.Second},
 		ReconcileInterval: time.Duration(cfg.ReconcileIntervalSeconds) * time.Second,
 		StatusInterval:    time.Duration(cfg.StatusIntervalSeconds) * time.Second,
-		LogTailLines:      cfg.LogTailLines,
 		Log:               log.Printf,
 	}
 	if err := a.Run(ctx); err != nil {

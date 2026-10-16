@@ -24,11 +24,10 @@ type config struct {
 	EnvironmentsRepository string `yaml:"environments_repository"`
 	// Namespace is part of every instance name, so agents sharing an account keep apart.
 	Namespace string `yaml:"namespace"`
-	// The loop intervals and how much of a job's output a status push relays. Each pass costs
-	// calls to the vendor's API, so these are the operator's to set against its rate limit.
+	// The loop intervals. Each pass costs calls to the vendor's API, so these are the operator's
+	// to set against its rate limit.
 	ReconcileIntervalSeconds int `yaml:"reconcile_interval_seconds"`
 	StatusIntervalSeconds    int `yaml:"status_interval_seconds"`
-	LogTailLines             int `yaml:"log_tail_lines"`
 	// How long a job may wait for a machine to rent, and a rented one to start, before the job
 	// is given up here and the machine destroyed.
 	OfferWaitSeconds int            `yaml:"offer_wait_seconds"`
@@ -92,7 +91,6 @@ func (cfg *config) executor(rented provider.Provider) cloudexec.Config {
 		APIURL:                 cfg.APIURL,
 		JobImage:               cfg.JobImage,
 		EnvironmentsRepository: cfg.EnvironmentsRepository,
-		LogTailLines:           cfg.LogTailLines,
 		OfferWait:              time.Duration(cfg.OfferWaitSeconds) * time.Second,
 		Startup:                time.Duration(cfg.StartupSeconds) * time.Second,
 		Shapes:                 cfg.shapes,

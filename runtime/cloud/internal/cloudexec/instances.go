@@ -10,6 +10,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/contract/exitline"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
 // instance is a rented instance read back through its name. The name is the only thing a
@@ -183,7 +184,7 @@ func (e *Executor) output(ctx context.Context, v *view, i instance) output {
 	if read, done := v.outputs[i.ID]; done {
 		return read
 	}
-	lines, err := e.provider.Logs(ctx, i.ID, max(e.logTailLines, exitLineTail))
+	lines, err := e.provider.Logs(ctx, i.ID, max(agentexec.LogTailLines, exitLineTail))
 	if err != nil {
 		err = fmt.Errorf("cloudexec: read output of instance %s: %w", i.Name, err)
 	}

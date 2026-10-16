@@ -28,8 +28,8 @@ provider:
 # What to set the intervals of the embedding config against: the Machines API allows one request
 # a second per action and app, with bursts of three. A list of the instances is one request; a
 # machine that stopped in the last two minutes adds one log read to it. Reading an instance's
-# output is one request to the log API, which gives the last 500 entries: a log_tail_lines above
-# about 400 fails once an instance has written that much.
+# output is one request to the log API, which gives the last 500 entries, more than the
+# agent's tail of 100 lines.
 #
 # The adapter can warm instances: a Machine created stopped, its image pulled onto its host, which
 # an agent-launcher keeps a pool of (warm_pool_size). Starting an agent in one is an update, a

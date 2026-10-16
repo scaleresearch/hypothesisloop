@@ -96,7 +96,6 @@ func main() {
 		HTTPClient:        &http.Client{Timeout: 35 * time.Second},
 		ReconcileInterval: reconcileInterval,
 		StatusInterval:    statusInterval,
-		LogTailLines:      agentloop.LogTailLines,
 		Log:               say,
 	}
 	err = a.Run(ctx)

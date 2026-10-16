@@ -39,7 +39,7 @@ func TestTheShippedConfigLoadsIntoShapesTheExecutorAccepts(t *testing.T) {
 	if len(cfg.shapes) != 1 || cfg.shapes[0].CPUMillis != 16000 || cfg.shapes[0].MemoryBytes != 64<<30 || cfg.shapes[0].Accelerators != 1 {
 		t.Fatalf("shapes = %+v", cfg.shapes)
 	}
-	if cfg.ReconcileIntervalSeconds != 10 || cfg.StatusIntervalSeconds != 10 || cfg.LogTailLines != 100 || cfg.Namespace != "main" {
+	if cfg.ReconcileIntervalSeconds != 10 || cfg.StatusIntervalSeconds != 10 || cfg.Namespace != "main" {
 		t.Fatalf("config = %+v", cfg)
 	}
 	rented := fake.New()
@@ -69,7 +69,6 @@ func TestAConfigThatIsIncompleteOrMisspelledIsRefused(t *testing.T) {
 		"namespace with dash":    {"namespace: main", "namespace: team-a"},
 		"no reconcile interval":  {"reconcile_interval_seconds: 10\n", ""},
 		"zero status interval":   {"status_interval_seconds: 10", "status_interval_seconds: 0"},
-		"no log tail":            {"log_tail_lines: 100\n", ""},
 		"shape name with dash":   {"name: h100", "name: h100-big"},
 		"type in another casing": {"nvidia.com/gpu.product=NVIDIA-H100", "nvidia.com/gpu.product=nvidia-h100"},
 		"type not a label":       {"nvidia.com/gpu.product=NVIDIA-H100", "H100"},

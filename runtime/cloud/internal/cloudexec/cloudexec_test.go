@@ -44,7 +44,7 @@ func newTestExecutor(t *testing.T) (*Executor, *fake.Provider) {
 }
 
 func testConfig(p provider.Provider) Config {
-	return Config{ClusterID: "fake-account-1", Namespace: "t1", APIURL: testAPI, JobImage: testImage, EnvironmentsRepository: testEnvironments, LogTailLines: 100, OfferWait: 3 * time.Minute, Startup: 4 * time.Minute, Shapes: testShapes, Provider: p}
+	return Config{ClusterID: "fake-account-1", Namespace: "t1", APIURL: testAPI, JobImage: testImage, EnvironmentsRepository: testEnvironments, OfferWait: 3 * time.Minute, Startup: 4 * time.Minute, Shapes: testShapes, Provider: p}
 }
 
 type goldenAnswer struct {
@@ -576,7 +576,6 @@ func TestTheConfigurationIsValidatedAtStartup(t *testing.T) {
 		"no namespace":           func(c *Config) { c.Namespace = "" },
 		"dash in namespace":      func(c *Config) { c.Namespace = "team-a" },
 		"namespace too long":     func(c *Config) { c.Namespace = "a1234567890123456" },
-		"no log tail":            func(c *Config) { c.LogTailLines = 0 },
 		"no job image":           func(c *Config) { c.JobImage = "" },
 		"environments by digest": func(c *Config) { c.EnvironmentsRepository = testEnvironments + "@sha256:abc" },
 		"environments no path":   func(c *Config) { c.EnvironmentsRepository = "registry.test" },

@@ -96,7 +96,7 @@ func TestAPassListsTheClustersNodesAndPodsOnce(t *testing.T) {
 	agent := &agentloop.Agent{
 		ClusterName: "edge", APIURL: server.URL, HTTPClient: server.Client(),
 		Executor:          endOfPass{c, ended},
-		ReconcileInterval: time.Hour, StatusInterval: time.Hour, LogTailLines: agentloop.LogTailLines,
+		ReconcileInterval: time.Hour, StatusInterval: time.Hour,
 		Log: func(string, ...any) {},
 	}
 
@@ -136,7 +136,7 @@ func TestAPassListsTheClustersNodesAndPodsOnce(t *testing.T) {
 		if _, _, _, err := pass.ResolveAdmittedAcceleratorType(ctx, id); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := pass.FetchLogTail(ctx, id, agentloop.LogTailLines); err != nil {
+		if _, err := pass.FetchLogTail(ctx, id, agentexec.LogTailLines); err != nil {
 			t.Fatal(err)
 		}
 		if _, _, _, _, _, err := pass.PollPhaseDetail(ctx, id, observed.Attempt); err != nil {

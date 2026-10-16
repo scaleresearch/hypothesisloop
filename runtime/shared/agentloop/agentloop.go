@@ -24,9 +24,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/cpclient"
 )
 
-// LogTailLines is how many trailing log lines a status report carries per job.
-const LogTailLines = 100
-
 // passIntervals bounds one reconcile pass or status push at this many of its intervals. It
 // outlasts one control plane call (the agents' HTTP timeout) plus the final capture, and a
 // stalled call is cancelled with the pass, which the next pass asks again.
@@ -51,8 +48,6 @@ type Agent struct {
 	HTTPClient        *http.Client
 	ReconcileInterval time.Duration
 	StatusInterval    time.Duration
-	// LogTailLines is how many trailing lines FetchLogTail is asked for per job and push.
-	LogTailLines int
 	// AutoscalerEnabled is the operator's own claim that this cluster sits behind a native
 	// autoscaler (cluster-autoscaler / Karpenter) reacting to Pending pods — AUTOSCALER_ENABLED
 	// env var, default false (fail-closed: a false positive costs a job a wasted scale-up
@@ -556,7 +551,7 @@ func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id
 		// Diagnostics accompany the phase; they are not the phase. A read error on one job must
 		// not stop this batch reporting phase for every other job (important.md #19), so it is
 		// logged and that job reports phase alone.
-		logTail, err = exec.FetchLogTail(ctx, id, a.LogTailLines)
+		logTail, err = exec.FetchLogTail(ctx, id, agentexec.LogTailLines)
 		if err != nil {
 			a.Log("fetch log tail %s: %v", id, err)
 			logTail = nil

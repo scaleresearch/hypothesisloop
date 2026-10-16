@@ -27,7 +27,6 @@ reconcile_interval_seconds: 10
 # four seconds to deliver each read. Allow about three seconds per instance the shapes below can
 # hold: 30 for these six, 60 for twenty.
 status_interval_seconds: 30
-log_tail_lines: 100
 # How long a job may wait for a machine to rent before it goes back to the queue as no_offer, at
 # no cost and with no failure counted against its agent, and how long
 # a rented machine may take to start the job before it is destroyed and another rented. The

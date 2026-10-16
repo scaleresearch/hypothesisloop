@@ -13,6 +13,9 @@ import (
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
+// LogTailLines is how many trailing log lines a status report carries per job.
+const LogTailLines = 100
+
 // Unrunnable is what CreateWorkload returns for a job this runtime will never run as it is
 // specified: asking again changes nothing, only another spec or another cluster does. Why is the
 // runtime's own words for it. The loop reports such a job to the control plane, which decides
