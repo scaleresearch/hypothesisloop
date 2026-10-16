@@ -50,6 +50,14 @@ func (c *slotFixture) add(node string, accelerators int64, whole map[string]int6
 	return c
 }
 
+// addCores is a slot with no accelerators that offers its cores as units of the CPU type, as a
+// runtime that rents a machine per job reports a shape without accelerators.
+func (c *slotFixture) addCores(node string, whole map[string]int64) *slotFixture {
+	c.add(node, 0, whole)
+	c.accelerators[node] = map[string]int64{string(domain.CPUType): whole[domain.NodeResourceCPUMillicores] / 1000}
+	return c
+}
+
 // take is what the runtime reports once an instance is in the slot.
 func (c *slotFixture) take(node string) *slotFixture {
 	holdSlot(c.accelerators, c.free, c.labels, node)
@@ -89,6 +97,14 @@ func (c *slotFixture) capacity() domain.Footprint {
 func cpuJob(id, cpu string) *domain.Experiment {
 	return &domain.Experiment{ID: id, AgentID: "agent-1", CapacityTier: domain.CapacityBurst, EstimatedDurationHours: 1,
 		Job: domain.JobSpec{Image: "job", CPU: cpu, Memory: "1Gi", Storage: "1Gi"}}
+}
+
+// slotCoresJob is a job on CPU as submission leaves it: of the CPU type, its count its cores.
+func slotCoresJob(id string, cores int) *domain.Experiment {
+	exp := cpuJob(id, fmt.Sprint(cores))
+	exp.AcceleratorType, exp.AcceleratorCount = domain.CPUType, cores
+	exp.Job.AcceleratorType, exp.Job.AcceleratorCount = domain.CPUType, cores
+	return exp
 }
 
 func h100Job(id, cpu string) *domain.Experiment {
@@ -448,6 +464,10 @@ type slotWorkload struct {
 func (w *slotWorkload) whole() domain.Footprint {
 	all := newSlots()
 	for node, whole := range w.c.sizes {
+		if _, cores := w.c.accelerators[node][string(domain.CPUType)]; cores {
+			all.addCores(node, whole)
+			continue
+		}
 		all.add(node, int64(slotAccelerators(w.c.labels[node])), whole)
 	}
 	return all.capacity()
@@ -852,5 +872,37 @@ func TestNothingIsLeavingASlotWithoutAnOffer(t *testing.T) {
 	vacating := vacatingSlots(rented, c.sizes, c.free, c.labels, nil)
 	if _, leaving := vacating["h100-0"]; !leaving || len(vacating) != 1 {
 		t.Fatalf("vacating %v, want only the slot an instance holds", vacating)
+	}
+}
+
+// A job on CPU asks for cores, and a slot without accelerators offers its cores as units of the
+// CPU type: the job is admitted to that slot and holds all of its cores, count included, and
+// never a slot with a device. A second one waits for the slot.
+func TestAJobOnCPUHoldsAWholeSlotWithoutAccelerators(t *testing.T) {
+	c := newSlots().add("h100-0", 1, size(8000, 32, 100)).addCores("cpu-0", size(4000, 16, 50))
+	first, second := slotCoresJob("first", 2), slotCoresJob("second", 2)
+	store := &slotStore{queued: []*domain.Experiment{first, second}}
+	l, workload := slotLoop(store, c, fakeObserved{})
+
+	if err := l.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	job, admitted := store.written["first"]
+	if !admitted || slotOf(job) != "cpu-0" || job.CPU != "4" || job.AcceleratorCount != 4 || job.AcceleratorType != domain.CPUType {
+		t.Fatalf("written %+v (reasons %v), want the first job on cpu-0 with its 4 cores as its count", store.written, store.reasons)
+	}
+	if _, admitted := store.written["second"]; admitted || len(workload.created) != 1 {
+		t.Fatalf("written %v, created %v, want the second job waiting for the one cpu slot", store.written, workload.created)
+	}
+	if reason := store.reasons["second"]; strings.HasPrefix(reason, domain.NotAdmittedExceedsClusterCapacity) {
+		t.Fatalf("the second job is refused: %q", reason)
+	}
+}
+
+// A cluster of slots with none that offers cores has no slot for a job on CPU.
+func TestAJobOnCPUFindsNoSlotWithADevice(t *testing.T) {
+	c := newSlots().add("h100-0", 1, size(8000, 32, 100))
+	if _, misfit := resolveOntoSlot(slotCoresJob("cores", 2), rented, c.sizes, c.free, c.labels); !strings.Contains(misfit, "none for a job on CPU") {
+		t.Fatalf("misfit %q", misfit)
 	}
 }

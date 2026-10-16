@@ -275,16 +275,25 @@ func (e *Executor) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (avai
 	nodeLabels = make(map[string]map[string]string, len(slots))
 	for _, s := range slots {
 		nodeLabels[s.name] = s.labels()
-		if s.shape.Accelerators == 0 {
-			continue
-		}
-		free := int64(s.shape.Accelerators)
+		unit, units := s.shape.units()
+		free := units
 		if !s.free() {
 			free = 0
 		}
-		total[s.shape.AcceleratorType] += int64(s.shape.Accelerators)
-		available[s.shape.AcceleratorType] += free
-		byNode[s.name] = map[string]int64{s.shape.AcceleratorType: free}
+		total[unit] += units
+		available[unit] += free
+		byNode[s.name] = map[string]int64{unit: free}
 	}
 	return available, total, byNode, nodeLabels, nil
+}
+
+// units is what a slot of the shape offers a job, as the type it is priced under and how many:
+// its accelerators, or for a shape with none its whole cores as units of domain.CPUType, which a
+// job on CPU holds all of. A shape with accelerators offers no cores: a job on CPU never holds a
+// slot with a device (domain.NodeSlotLabel).
+func (s Shape) units() (unit string, count int64) {
+	if s.Accelerators == 0 {
+		return string(domain.CPUType), s.CPUMillis / 1000
+	}
+	return s.AcceleratorType, int64(s.Accelerators)
 }

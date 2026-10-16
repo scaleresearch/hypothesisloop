@@ -17,6 +17,13 @@ func TestTheShippedVastConfigBuildsTheAdapter(t *testing.T) {
 	if _, err := newProvider(cfg.Provider, cfg.shapes); err != nil {
 		t.Fatalf("provider: %v", err)
 	}
+	cpu := false
+	for _, shape := range cfg.shapes {
+		cpu = cpu || shape.Accelerators == 0
+	}
+	if !cpu {
+		t.Fatal("the shipped config has no shape without accelerators, so no job on CPU can run on it")
+	}
 }
 
 func TestAShapeTheVastSettingsCannotRentStopsStartup(t *testing.T) {

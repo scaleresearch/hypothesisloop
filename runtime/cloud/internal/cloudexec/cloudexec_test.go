@@ -351,8 +351,8 @@ func TestCapacityIsTheShapesMinusWhatIsRentedRightNow(t *testing.T) {
 	if cpu != 20 || accelerators != 2 || nodes["h100-0"][domain.NodeResourceMemoryBytes] != 32*gib || byNode["h100-0"][h100] != 1 {
 		t.Fatalf("empty account: cpu %v, accelerators %v, nodes %v, by node %v", cpu, accelerators, nodes, byNode)
 	}
-	if _, isAcceleratorNode := byNode["cpu-0"]; isAcceleratorNode {
-		t.Fatal("the cpu shape was reported as an accelerator node")
+	if !reflect.DeepEqual(byNode["cpu-0"], map[string]int64{string(domain.CPUType): 4}) || byNode["h100-0"][string(domain.CPUType)] != 0 {
+		t.Fatalf("by node %v: want the cpu shape's 4 cores as units of the cpu type, and no cores on a slot with a device", byNode)
 	}
 
 	// A slot is one instance however small the job: a 1-cpu job leaves none of its 8.
@@ -672,5 +672,34 @@ func TestLeavingAsksAgainForEveryDestroyThatFailedAndSaysWhatStaysRented(t *test
 	destroys := p.Calls("Destroy")
 	if err := e.Leave(ctx); err != nil || p.Calls("Destroy") != destroys {
 		t.Fatalf("Leave with nothing outstanding: err = %v, destroys %d then %d", err, destroys, p.Calls("Destroy"))
+	}
+}
+
+// A shape without accelerators offers its whole cores as units of the CPU type, so a job on CPU
+// can be placed on it, and a job on CPU is rented as an instance with no device.
+func TestACPUShapeOffersItsCoresAndAJobOnCPURentsNoDevice(t *testing.T) {
+	e, p := newTestExecutor(t)
+	ctx := context.Background()
+	cores := string(domain.CPUType)
+	available, total, _, _, err := e.GetLiveAcceleratorCapacitySnapshot(ctx)
+	if err != nil || available[cores] != 4 || total[cores] != 4 {
+		t.Fatalf("cores %d of %d, %v, want the cpu shape's 4", available[cores], total[cores], err)
+	}
+
+	exp := job(t, "exp-cores", 0, 0)
+	exp.AcceleratorType, exp.AcceleratorCount = domain.CPUType, 4
+	exp.ResolvedJob.AcceleratorType, exp.ResolvedJob.AcceleratorCount, exp.ResolvedJob.CPU = domain.CPUType, 4, "4"
+	mustCreate(t, e, exp)
+	instances, err := p.List(ctx, "")
+	if err != nil || len(instances) != 1 {
+		t.Fatalf("instances %v, %v", instances, err)
+	}
+	spec := p.Spec(instances[0].Name)
+	if spec.AcceleratorType != "" || spec.AcceleratorCount != 0 || spec.CPUMillis != 4000 {
+		t.Fatalf("rented %+v, want 4 cores and no device", spec)
+	}
+	available, _, _, _, err = e.GetLiveAcceleratorCapacitySnapshot(ctx)
+	if err != nil || available[cores] != 0 {
+		t.Fatalf("cores available %d once the slot is rented, %v", available[cores], err)
 	}
 }

@@ -16,6 +16,9 @@ import (
 // an ordinary node that the job fills. The two rules that are a slot's own are which slot a job
 // is sized to (resolveOntoSlot) and that a slot takes only a job of its size (takesWholeSlot).
 
+// onCores says exp holds cores and no device (domain.CPUType).
+func onCores(exp *domain.Experiment) bool { return exp.AcceleratorType.Kind() == domain.TypeKindCPU }
+
 func isSlot(labels map[string]string) bool { return labels[domain.NodeSlotLabel] != "" }
 
 func hasSlots(labelsByNode map[string]map[string]string) bool {
@@ -58,8 +61,8 @@ func takesWholeSlot(shape domain.NodeShape, nodeKey string, accelerators, resour
 }
 
 // resolveOntoSlot sizes exp's job to the slot it is to hold on a cluster of slots (slotFor): its
-// cpu, memory and storage become that slot's. Which slot of that size the job lands on is decided
-// when it is claimed.
+// cpu, memory and storage become that slot's, and for a job on CPU its count too, which is its
+// cores. Which slot of that size the job lands on is decided when it is claimed.
 func resolveOntoSlot(exp *domain.Experiment, cluster string, sizes, free map[string]map[string]int64, labelsByNode map[string]map[string]string) (resolved *domain.JobSpec, misfit string) {
 	node, _, misfit := slotFor(exp, cluster, sizes, free, labelsByNode)
 	if misfit != "" {
@@ -69,12 +72,19 @@ func resolveOntoSlot(exp *domain.Experiment, cluster string, sizes, free map[str
 	cpu := canonicalQuantityString(domain.NodeResourceCPUMillicores, float64(size[domain.NodeResourceCPUMillicores]))
 	memory := canonicalQuantityString(domain.NodeResourceMemoryBytes, float64(size[domain.NodeResourceMemoryBytes]))
 	storage := canonicalQuantityString(domain.NodeResourceStorageBytes, float64(size[domain.NodeResourceStorageBytes]))
+	cores := int(size[domain.NodeResourceCPUMillicores] / 1000)
 	out := exp.Job
 	if len(exp.Job.Groups) > 0 {
 		out.Groups = append([]domain.JobGroup(nil), exp.Job.Groups...)
 		out.Groups[0].CPU, out.Groups[0].Memory, out.Groups[0].Storage = cpu, memory, storage
+		if onCores(exp) {
+			out.Groups[0].AcceleratorCount = cores
+		}
 	} else {
 		out.CPU, out.Memory, out.Storage = cpu, memory, storage
+		if onCores(exp) {
+			out.AcceleratorCount = cores
+		}
 	}
 	return &out, ""
 }
@@ -84,7 +94,8 @@ func resolveOntoSlot(exp *domain.Experiment, cluster string, sizes, free map[str
 // sizes is each slot's whole size and free what each has free: now, once the instances that are
 // leaving are gone (vacatingSlots), or for a preemption once its candidates are gone. The slot is
 // one whose accelerators are exactly the job's, of its type, that carries the job's node selector
-// and is at least as large as every quantity the job named. Of those a free one is taken before a
+// and is at least as large as every quantity the job named. A job on CPU counts its cores and
+// holds no device, so its slot is one with no accelerators. Of those a free one is taken before a
 // taken one, and the smallest before a larger: a job that must wait or preempt is sized to the
 // least it needs. isFree says which of the two the chosen slot is.
 //
@@ -94,6 +105,10 @@ func slotFor(exp *domain.Experiment, cluster string, sizes, free map[string]map[
 		return "", false, fmt.Sprintf("%s: cluster %s runs a job on one node", domain.NotAdmittedCapacityUnavailable, cluster)
 	}
 	group := exp.Job.NodeGroups()[0]
+	devices := group.AcceleratorCount
+	if onCores(exp) {
+		devices = 0
+	}
 	type slot struct {
 		node string
 		size map[string]int64
@@ -102,10 +117,10 @@ func slotFor(exp *domain.Experiment, cluster string, sizes, free map[string]map[
 	var slots []slot
 	for node, labels := range labelsByNode {
 		size := sizes[node]
-		if !isSlot(labels) || !labelsMatch(labels, exp.Job.NodeSelector) || slotAccelerators(labels) != group.AcceleratorCount {
+		if !isSlot(labels) || !labelsMatch(labels, exp.Job.NodeSelector) || slotAccelerators(labels) != devices {
 			continue
 		}
-		if group.AcceleratorCount > 0 && !exp.AcceleratorType.MatchesLabels(labels) {
+		if devices > 0 && !exp.AcceleratorType.MatchesLabels(labels) {
 			continue
 		}
 		if size[domain.NodeResourceCPUMillicores] <= 0 || size[domain.NodeResourceMemoryBytes] <= 0 || size[domain.NodeResourceStorageBytes] <= 0 {
@@ -117,8 +132,8 @@ func slotFor(exp *domain.Experiment, cluster string, sizes, free map[string]map[
 		slots = append(slots, slot{node: node, size: size, free: nodeHasRoom(free[node], size)})
 	}
 	if len(slots) == 0 {
-		return "", false, fmt.Sprintf("%s: no instance shape of cluster %s takes this job: a shape takes a job with exactly its accelerators (%d of %s here) whose cpu, memory and storage fit in it",
-			domain.NotAdmittedCapacityUnavailable, cluster, group.AcceleratorCount, exp.AcceleratorType)
+		return "", false, fmt.Sprintf("%s: no instance shape of cluster %s takes this job: a shape takes a job with exactly its accelerators (%d of %s here, none for a job on CPU) whose cpu, memory and storage fit in it",
+			domain.NotAdmittedCapacityUnavailable, cluster, devices, exp.AcceleratorType)
 	}
 	sort.Slice(slots, func(a, b int) bool {
 		if slots[a].free != slots[b].free {

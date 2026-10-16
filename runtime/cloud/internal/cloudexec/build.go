@@ -86,13 +86,18 @@ func (e *Executor) buildSpec(exp *domain.Experiment) (provider.Spec, error) {
 		return provider.Spec{}, fmt.Errorf("cloudexec: experiment %s: %w", exp.ID, err)
 	}
 
+	// A job on CPU counts its cores as units of the CPU type, which is no device to rent.
+	acceleratorType, accelerators := string(exp.AcceleratorType), group.AcceleratorCount
+	if exp.AcceleratorType.Kind() == domain.TypeKindCPU {
+		acceleratorType, accelerators = "", 0
+	}
 	argv := append(append([]string(nil), command...), args...)
 	return provider.Spec{
 		Image:            spec.Image,
 		Command:          wrapperCommand(max(grace, checkpointGrace), argv),
 		Env:              env,
-		AcceleratorType:  string(exp.AcceleratorType),
-		AcceleratorCount: group.AcceleratorCount,
+		AcceleratorType:  acceleratorType,
+		AcceleratorCount: accelerators,
 		CPUMillis:        cpu.MilliValue(),
 		MemoryBytes:      memory.Value(),
 		DiskBytes:        storage.Value(),
