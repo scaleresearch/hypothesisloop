@@ -56,7 +56,7 @@ func (g grant) allows(action k8stesting.Action) bool {
 }
 
 var clusterAgentGrants = sync.OnceValues(func() ([]grant, error) {
-	out, err := exec.Command("helm", "template", "hypothesisloop-cluster-agent", "../../infra/chart", "--namespace", "hypothesisloop",
+	out, err := exec.Command("helm", "template", "hypothesisloop-cluster-agent", "../../infra/chart", "--namespace", "hypothesisloop", "--kube-version", "1.34.0",
 		"--set-string", "clusterName=edge,apiURL=http://api,metricsURL=http://metrics,runtimeToken=t,images.registry=r,images.tag=t1",
 		"--set", "builder.enabled=true").CombinedOutput()
 	if err != nil {
