@@ -13,6 +13,8 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 2
+  # An uninstall that cannot finish the detach fails within this, and says so.
+  activeDeadlineSeconds: 900
   template:
     spec:
       serviceAccountName: hypothesisloop-cluster-agent
@@ -22,6 +24,14 @@ spec:
           image: {{ .Values.images.registry }}/hypothesisloop-cluster-agent:{{ .Values.images.tag }}
           imagePullPolicy: IfNotPresent
           command: ["/cluster-agent", "detach"]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           env:
             - name: CLUSTER_NAME
               value: {{ .Values.clusterName | quote }}

@@ -20,4 +20,5 @@ COPY --from=builder /app/controlplane/settings /settings
 ENV API_PORT=8081
 ENV HYPOTHESISLOOP_CONFIG=/settings/hypothesisloop.yaml
 EXPOSE 8081
+USER 65532:65532
 CMD ["/control-service"]

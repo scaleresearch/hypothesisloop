@@ -42,6 +42,7 @@ spec:
         - name: metrics-service
           image: {{ include "hypothesisloop.image" (dict "name" "metrics-service" "root" $) }}
           imagePullPolicy: {{ .Values.images.pullPolicy }}
+          {{- include "hypothesisloop.securityContext" . | nindent 10 }}
           env:
             - name: METRIC_CONTROLLER_PORT
               value: {{ .Values.metricsService.port | quote }}
@@ -62,7 +63,27 @@ spec:
               port: {{ .Values.metricsService.port }}
             initialDelaySeconds: 5
             periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.metricsService.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
       volumes:
         - name: config
           configMap:
             name: hypothesisloop-config
+{{- if gt (int .Values.metricsService.replicas) 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hypothesisloop-metrics-service
+  namespace: {{ include "hypothesisloop.namespace" . }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: hypothesisloop-metrics-service
+{{- end }}

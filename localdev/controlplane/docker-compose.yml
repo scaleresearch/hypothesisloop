@@ -46,7 +46,7 @@ services:
       retries: 30
 
   greptimedb:
-    image: docker.io/greptime/greptimedb:latest
+    image: docker.io/greptime/greptimedb:v1.2.1
     restart: unless-stopped
     command: ["standalone", "start", "--http-addr=0.0.0.0:4000", "--rpc-bind-addr=0.0.0.0:4001"]
     ports:
@@ -110,6 +110,8 @@ services:
 
   control-service:
     image: ${REGISTRY:?run through make, which names the registry}/hypothesisloop-control-service:${TAG:?TAG must name the image tag make images pushed}
+    # The mounted Google credentials file is readable by its owner alone, who is root here.
+    user: "0"
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable

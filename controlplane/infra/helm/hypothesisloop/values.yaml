@@ -133,7 +133,7 @@ postgres:
     limits: { cpu: "1", memory: 1Gi }
 
 greptimedb:
-  image: greptime/greptimedb:latest
+  image: greptime/greptimedb:v1.2.1
   storage: 5Gi
   storageClassName: ""
   resources:
@@ -182,7 +182,7 @@ objectStore:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 1Gi }
   service:
-    type: NodePort
+    type: ClusterIP
     nodePort: 30900
 
 controlService:
@@ -192,7 +192,7 @@ controlService:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { cpu: 500m, memory: 256Mi }
   service:
-    type: NodePort
+    type: ClusterIP
     nodePort: 30081
 
 metricsService:
@@ -202,7 +202,7 @@ metricsService:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { cpu: 500m, memory: 256Mi }
   service:
-    type: NodePort
+    type: ClusterIP
     nodePort: 30084
 
 # Image hypothesisloop-ui. Next.js compiles NEXT_PUBLIC_* values into the image when it is built
@@ -225,7 +225,7 @@ ui:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: 500m, memory: 512Mi }
   service:
-    type: NodePort
+    type: ClusterIP
     nodePort: 30300
 
 # One process per compute provider account; it registers as a cluster and holds that provider's

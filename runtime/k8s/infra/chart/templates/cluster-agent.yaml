@@ -221,6 +221,19 @@ spec:
             limits:
               cpu: {{ if and .Values.builder.enabled .Values.builder.nodeImages.containerdSocket }}"1"{{ else }}"300m"{{ end }}
               memory: {{ if and .Values.builder.enabled .Values.builder.nodeImages.containerdSocket }}"1Gi"{{ else if .Values.builder.enabled }}"128Mi"{{ else }}"64Mi"{{ end }}
+          # Loading into the node takes its containerd socket, which only root reaches.
+          securityContext:
+            {{- if and .Values.builder.enabled .Values.builder.nodeImages.containerdSocket }}
+            runAsUser: 0
+            {{- else }}
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            {{- end }}
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           {{- if .Values.builder.enabled }}
           volumeMounts:
             - name: buildkit-socket

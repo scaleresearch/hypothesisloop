@@ -29,12 +29,15 @@ spec:
         checksum/config: {{ .Values.agentLauncher.config | sha256sum }}
         {{- include "hypothesisloop.secretAnnotations" . | nindent 8 }}
     spec:
+      # Past the launcher's own limit for destroying its warm pool as it stops.
+      terminationGracePeriodSeconds: 90
       initContainers:
         {{- include "hypothesisloop.tokenInit" (dict "script" (printf "/hl-admin launcher add %s > /token/token" .Values.agents.launcher) "root" $) | nindent 8 }}
       containers:
         - name: agent-launcher
           image: {{ include "hypothesisloop.image" (dict "name" "agent-launcher" "root" $) }}
           imagePullPolicy: {{ .Values.images.pullPolicy }}
+          {{- include "hypothesisloop.securityContext" $ | nindent 10 }}
           command: ["/bin/sh", "-ec", "LAUNCHER_TOKEN=\"$(cat /token/token)\" exec /agent-launcher"]
           env:
             - name: AGENT_LAUNCHER_CONFIG

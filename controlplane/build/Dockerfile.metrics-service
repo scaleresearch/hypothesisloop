@@ -16,4 +16,5 @@ COPY --from=builder /app/controlplane/settings /settings
 ENV METRIC_CONTROLLER_PORT=8084
 ENV HYPOTHESISLOOP_CONFIG=/settings/hypothesisloop.yaml
 EXPOSE 8084
+USER 65532:65532
 CMD ["/metrics-service"]

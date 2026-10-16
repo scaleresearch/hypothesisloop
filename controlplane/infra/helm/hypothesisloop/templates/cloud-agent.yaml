@@ -40,6 +40,7 @@ spec:
         - name: cloud-agent
           image: {{ include "hypothesisloop.image" (dict "name" "cloud-agent" "root" $) }}
           imagePullPolicy: {{ .Values.images.pullPolicy }}
+          {{- include "hypothesisloop.securityContext" $ | nindent 10 }}
           command: ["/bin/sh", "-ec", "RUNTIME_TOKEN=\"$(cat /token/token)\" exec /cloud-agent"]
           env:
             - name: CLOUD_AGENT_CONFIG

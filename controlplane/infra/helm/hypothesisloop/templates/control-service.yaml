@@ -49,6 +49,7 @@ spec:
         - name: control-service
           image: {{ include "hypothesisloop.image" (dict "name" "control-service" "root" $) }}
           imagePullPolicy: {{ .Values.images.pullPolicy }}
+          {{- include "hypothesisloop.securityContext" . | nindent 10 }}
           env:
             - name: API_PORT
               value: {{ .Values.controlService.port | quote }}
@@ -79,6 +80,13 @@ spec:
               port: {{ .Values.controlService.port }}
             initialDelaySeconds: 5
             periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.controlService.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
       volumes:
         - name: config
           configMap:
@@ -90,3 +98,16 @@ spec:
             items:
               - { key: ENVIRONMENTS_GCP_CREDENTIALS, path: google.json }
         {{- end }}
+{{- if gt (int .Values.controlService.replicas) 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hypothesisloop-control-service
+  namespace: {{ include "hypothesisloop.namespace" . }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: hypothesisloop-control-service
+{{- end }}

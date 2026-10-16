@@ -15,4 +15,5 @@ RUN --mount=type=cache,target=/root/.cache/go-build set -e; \
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /cloud-agent /cloud-agent
+USER 65532:65532
 CMD ["/cloud-agent"]

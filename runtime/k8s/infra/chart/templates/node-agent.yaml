@@ -46,7 +46,6 @@ spec:
         app: hypothesisloop-node-agent
     spec:
       serviceAccountName: hypothesisloop-node-agent
-      hostPID: true
       {{- with .Values.nodeAgent.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -60,11 +59,6 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-            # Identifies which target cluster this agent bundle is reporting for,
-            # so the control plane can attribute metrics/quota to the right cluster
-            # once multi-cluster routing lands. node-agent does not yet read this env var.
-            - name: CLUSTER_NAME
-              value: {{ required "clusterName is required" .Values.clusterName | quote }}
             - name: HYPOTHESISLOOP_CONTROL_PLANE_URL
               value: {{ required "metricsURL is required" .Values.metricsURL | quote }}
             - name: RUNTIME_TOKEN
@@ -95,7 +89,13 @@ spec:
               cpu: "250m"
               memory: "32Mi"
           securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
             readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
       volumes:
         - name: cgroup
           hostPath:

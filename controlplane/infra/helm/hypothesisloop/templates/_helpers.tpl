@@ -56,12 +56,25 @@ call as: include "hypothesisloop.tokenInit" (dict "script" "/hl-admin launcher a
     - name: HYPOTHESISLOOP_CONFIG
       value: /platform/hypothesisloop.yaml
     {{- include "hypothesisloop.configSecretEnv" .root | nindent 4 }}
+  {{- include "hypothesisloop.securityContext" . | nindent 2 }}
   volumeMounts:
     - name: token
       mountPath: /token
     - name: platform-config
       mountPath: /platform
       readOnly: true
+{{- end -}}
+
+{{/* The container securityContext of every image built from this repository. */}}
+{{- define "hypothesisloop.securityContext" -}}
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
 {{- end -}}
 
 {{/* The two volumes hypothesisloop.tokenInit mounts. */}}

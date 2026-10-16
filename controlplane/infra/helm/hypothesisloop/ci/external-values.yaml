@@ -91,7 +91,7 @@ agentLauncher:
   config: |
     launcher_name: main
     api_url: http://control-service:8081
-    reconcile_interval_seconds: 2
+    reconcile_interval_seconds: 5
     create_pause_milliseconds: 1000
     warm_pool_size: 4
     provider:
