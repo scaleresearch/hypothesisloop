@@ -497,6 +497,40 @@ export function checkRepository(projectID: string, fields: { repository?: string
   return apiFetch<RepositoryCheck>(withQuery(`/projects/${projectID}/repository-check`, fields))
 }
 
+/** A new experiment's form as a person left it in a project. The API stores `form` unread. */
+export interface ExperimentDraft {
+  id: string
+  project_id: string
+  form: Record<string, unknown>
+  step: string
+  /** Why the last create from it was refused, empty when none was. */
+  failure: string
+  created_at: string
+  updated_at: string
+}
+
+export type ExperimentDraftBody = Pick<ExperimentDraft, 'form' | 'step' | 'failure'>
+
+export function fetchExperimentDrafts(projectID: string): Promise<ExperimentDraft[]> {
+  return apiFetch<ExperimentDraft[]>(`/projects/${projectID}/experiment-drafts`)
+}
+
+export function fetchExperimentDraft(projectID: string, draftID: string): Promise<ExperimentDraft> {
+  return apiFetch<ExperimentDraft>(`/projects/${projectID}/experiment-drafts/${draftID}`)
+}
+
+export function createExperimentDraft(projectID: string, body: ExperimentDraftBody): Promise<ExperimentDraft> {
+  return apiSend<ExperimentDraft>('POST', `/projects/${projectID}/experiment-drafts`, body)
+}
+
+export function updateExperimentDraft(projectID: string, draftID: string, body: ExperimentDraftBody): Promise<ExperimentDraft> {
+  return apiSend<ExperimentDraft>('PUT', `/projects/${projectID}/experiment-drafts/${draftID}`, body)
+}
+
+export async function deleteExperimentDraft(projectID: string, draftID: string): Promise<void> {
+  await answer('DELETE', `/projects/${projectID}/experiment-drafts/${draftID}`)
+}
+
 export function createPlatformExperiment(projectID: string, req: CreatePlatformExperimentRequest): Promise<PlatformExperiment> {
   return apiSend<PlatformExperiment>('POST', '/platform-experiments', { ...req, project_id: projectID })
 }

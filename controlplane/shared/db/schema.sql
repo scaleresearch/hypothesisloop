@@ -1702,3 +1702,16 @@ SET proposal = jsonb_set(proposal, '{questions}', (
     FROM jsonb_array_elements(proposal->'questions') q))
 WHERE jsonb_typeof(proposal->'questions') = 'array'
   AND EXISTS (SELECT 1 FROM jsonb_array_elements(proposal->'questions') q WHERE jsonb_typeof(q) = 'string');
+
+-- A new platform experiment's form as a person left it, to be finished later. form is the
+-- client's own and read by nothing here; failure is why the last create from it was refused.
+CREATE TABLE IF NOT EXISTS experiment_drafts (
+    id         TEXT        PRIMARY KEY,
+    project_id TEXT        NOT NULL REFERENCES projects(id),
+    form       JSONB       NOT NULL,
+    step       TEXT        NOT NULL,
+    failure    TEXT        NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS experiment_drafts_project ON experiment_drafts (project_id, updated_at DESC);

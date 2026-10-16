@@ -3,14 +3,14 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import { ApiError, GITHUB_NOT_CONFIGURED, checkRepository, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api'
-import { githubCardPath, useGitHubApp } from '@/lib/github-connect'
+import { beginInstall, githubCardPath, leaveFor, useConnect, useGitHubApp } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
 import type { GitHubApp, GitHubInstallation } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { TextLink, inlineLinkClass } from '@/components/ui/link'
 import { SearchableSelect } from '@/components/ui/searchable-select'
-import { InlineError } from '@/components/ui/status-message'
+import { ErrorMessage, InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 
 const LISTED = 50
@@ -60,16 +60,26 @@ function RepositoryCheckNote({ value, app }: { value: string; app?: GitHubApp })
  * Picks the repository a platform experiment works on, from those the org's connected GitHub
  * accounts cover. Typing searches all of them on the server, which reads GitHub on each call.
  * With none chosen the platform creates one on a connected account. Unless `compact`, the way on
- * is offered: the person creates the repository on GitHub, lets the App reach it, and refreshes
- * this list to choose it. With no account connected it says where one is connected. On a deployment whose
- * git host is not GitHub the repository is typed: the platform creates none there. A new repository
- * goes to the only connected account or the org's default, named in the option, and with several
- * the person may pick another. Unless `compact`, what is picked is checked as the create would check it.
+ * is offered: the person creates the repository on GitHub and refreshes this list to choose it,
+ * or, given `leave`, lets the App reach one in this tab: `leave` keeps what the page holds and
+ * answers the path GitHub's return comes back to, where this list shows how it went. With no
+ * account connected it says where one is connected. On a deployment whose git host is not GitHub
+ * the repository is typed: the platform creates none there. A new repository goes to the only
+ * connected account or the org's default, named in the option, and with several the person may
+ * pick another. Unless `compact`, what is picked is checked as the create would check it.
  */
-export function RepositorySelect({ value, onChange, compact = false }: { value: string; onChange: (repository: string) => void; compact?: boolean }) {
+export function RepositorySelect({ value, onChange, compact = false, leave }: {
+  value: string
+  onChange: (repository: string) => void
+  compact?: boolean
+  leave?: () => Promise<string>
+}) {
   const { org } = useTenant()
   const [q, setQ] = useState('')
   const app = useGitHubApp()
+  const connect = useConnect()
+  const [leaving, setLeaving] = useState(false)
+  const [leaveError, setLeaveError] = useState('')
   const installations = useSWR(app.data ? ['github-installations', org.id] : null, () => fetchGitHubInstallations(org.id))
   const connected = (installations.data?.total ?? 0) > 0
   const [refreshing, setRefreshing] = useState(false)
@@ -115,6 +125,18 @@ export function RepositorySelect({ value, onChange, compact = false }: { value: 
     options.unshift(...creating.filter(a => a !== unasked).map(a => ({ value: ON_ACCOUNT + a.account_login, label: `${newLabel} on ${a.account_login}`, badge: undefined })))
   }
   const unaskedLabel = unasked ? `${newLabel} on ${unasked.account_login}` : newLabel
+  async function grant(installURL: string) {
+    setLeaving(true)
+    setLeaveError('')
+    try {
+      leaveFor(beginInstall(installURL, { orgID: org.id, returnTo: await leave!() }))
+    } catch (e) {
+      setLeaveError(e instanceof Error ? e.message : String(e))
+      setLeaving(false)
+    }
+  }
+  // What a connect of this org came back with, shown where the person returned to.
+  const outcome = !leave ? null : connect.state === 'refused' || ('orgID' in connect && connect.orgID === org.id) ? connect : null
   async function refresh() {
     setRefreshing(true)
     try {
@@ -140,11 +162,19 @@ export function RepositorySelect({ value, onChange, compact = false }: { value: 
       {app.data && !compact && (
         <Text variant="hint">
           Not listed?{' '}
-          <a href={newRepositoryURL(app.data.new_repository_url, accounts)} target="_blank" rel="noreferrer" className={inlineLinkClass}>create it on GitHub</a> or{' '}
-          <a href={app.data.install_url} target="_blank" rel="noreferrer" className={inlineLinkClass}>give the App access</a>, then{' '}
+          <a href={newRepositoryURL(app.data.new_repository_url, accounts)} target="_blank" rel="noreferrer" className={inlineLinkClass}>create it on GitHub</a>
+          {leave && (
+            <>
+              {' '}or{' '}
+              <Button type="button" variant="link" size="sm" loading={leaving} onClick={() => void grant(app.data!.install_url)}>give the App access</Button>
+            </>
+          )}, then{' '}
           <Button type="button" variant="link" size="sm" loading={refreshing} onClick={() => void refresh()}>refresh this list</Button>.
         </Text>
       )}
+      {outcome?.state === 'connected' && <Text variant="note">{outcome.installation.account_login} is connected: the repositories it lets the App reach are listed.</Text>}
+      {(outcome?.state === 'failed' || outcome?.state === 'refused') && <ErrorMessage>{outcome.message}</ErrorMessage>}
+      {leaveError && <InlineError>Could not leave for GitHub: {leaveError}</InlineError>}
       {error && <InlineError>Could not list the repositories: {error.message}</InlineError>}
       {!compact && (value !== '' || createsUnasked) && <RepositoryCheckNote value={value} app={app.data} />}
     </>

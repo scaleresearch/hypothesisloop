@@ -5,9 +5,14 @@ import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, checkRepository, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
+import { leaveFor, resetConnect, takeReturn } from '@/lib/github-connect'
 import { RepositorySelect, repositoryFields } from '@/components/repository-select'
 import type { GitHubInstallation, GitHubRepository, Me } from '@/types'
 
+vi.mock('@/lib/github-connect', async importActual => ({
+  ...(await importActual<typeof import('@/lib/github-connect')>()),
+  leaveFor: vi.fn(),
+}))
 vi.mock('@/lib/api', async importActual => ({
   ...(await importActual<typeof import('@/lib/api')>()),
   checkRepository: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
@@ -81,7 +86,7 @@ describe('the repository of a new platform experiment', () => {
     await userEvent.click(await screen.findByRole('combobox'))
     await userEvent.click(await screen.findByRole('option', { name: 'A new private repository on second' }))
     expect(screen.getByRole('status').textContent).toBe('@second')
-    expect(screen.queryByRole('option', { name: 'A new private repository' })).toBeNull()
+    expect(screen.queryByRole('option', { name: 'A new private repository on acme' })).toBeNull()
   })
 
   it('offers a new one on a personal account as on an organisation', async () => {
@@ -99,7 +104,7 @@ describe('the repository of a new platform experiment', () => {
     expect(await screen.findByRole('option', { name: 'A new private repository on acme' })).toBeTruthy()
     await userEvent.click(screen.getByRole('option', { name: 'A new private repository on ada' }))
     expect(screen.getByRole('status').textContent).toBe('@ada')
-    expect(screen.queryByRole('option', { name: 'A new private repository' })).toBeNull()
+    expect(screen.queryByRole('option', { name: 'A new private repository on acme' })).toBeNull()
   })
 
   it('offers no new one on an account connected before its type was kept', async () => {
@@ -115,7 +120,7 @@ describe('the repository of a new platform experiment', () => {
     show()
     const create = await screen.findByRole('link', { name: 'create it on GitHub' })
     expect(create.getAttribute('href')).toBe('https://github.test/new?owner=acme&visibility=private')
-    expect(screen.getByRole('link', { name: 'give the App access' }).getAttribute('href')).toBe('https://github.test/install')
+    expect(screen.queryByRole('button', { name: 'give the App access' })).toBeNull()
     await userEvent.click(screen.getByRole('combobox'))
     await screen.findByRole('option', { name: 'acme/open' })
     expect(screen.queryByRole('option', { name: /acme\/mine/ })).toBeNull()
@@ -198,5 +203,47 @@ describe('the repository of a new platform experiment', () => {
     vi.mocked(fetchGitHubRepositories).mockRejectedValue(new Error('GitHub is unreachable'))
     show()
     expect((await screen.findByRole('alert')).textContent).toBe('Could not list the repositories: GitHub is unreachable')
+  })
+})
+
+describe('giving the App access from the form', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear()
+    resetConnect()
+    vi.mocked(leaveFor).mockReset()
+  })
+
+  function showLeaving(leave: () => Promise<string>) {
+    const resolved = resolveTenant(me, '')
+    if (resolved.state !== 'selected') throw new Error('no tenant')
+    return render(
+      <SWRConfig value={{ provider: () => new Map() }}>
+        <TenantContext.Provider value={resolved.tenant}><RepositorySelect value="" onChange={() => {}} leave={leave} /></TenantContext.Provider>
+      </SWRConfig>,
+    )
+  }
+
+  it('keeps the form first and returns to where it is kept', async () => {
+    const leave = vi.fn().mockResolvedValue('/projects/prj_1/experiments?draft=draft-1')
+    showLeaving(leave)
+    await userEvent.click(await screen.findByRole('button', { name: 'give the App access' }))
+    await waitFor(() => expect(leaveFor).toHaveBeenCalledExactlyOnceWith('https://github.test/install'))
+    expect(leave).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(window.sessionStorage.getItem('hl-github-connect')!)).toMatchObject({ step: 'install', orgID: 'org_a', returnTo: '/projects/prj_1/experiments?draft=draft-1' })
+  })
+
+  it('stays when the form cannot be kept, and says why', async () => {
+    showLeaving(vi.fn().mockRejectedValue(new Error('API unreachable')))
+    await userEvent.click(await screen.findByRole('button', { name: 'give the App access' }))
+    expect(await screen.findByText('Could not leave for GitHub: API unreachable')).toBeTruthy()
+    expect(leaveFor).not.toHaveBeenCalled()
+    expect(window.sessionStorage.getItem('hl-github-connect')).toBeNull()
+  })
+
+  it('shows how the connect went when GitHub returns the person here', async () => {
+    window.sessionStorage.setItem('hl-github-connect', JSON.stringify({ nonce: 'n', step: 'install', orgID: 'org_a', returnTo: '/projects/prj_1/experiments' }))
+    await takeReturn('setup_action=request', { app: vi.fn(), connect: vi.fn(), installations: vi.fn() })
+    showLeaving(vi.fn())
+    expect(await screen.findByText('GitHub asked an owner of that organisation to install the App: connect again once they have.')).toBeTruthy()
   })
 })

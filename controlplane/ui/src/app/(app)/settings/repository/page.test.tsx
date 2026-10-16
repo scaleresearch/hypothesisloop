@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { connectGitHubInstallation, fetchGitHubApp } from '@/lib/api'
+import { connectGitHubInstallation, fetchGitHubApp, fetchGitHubInstallations } from '@/lib/api'
 import { leaveFor, takeReturn } from '@/lib/github-connect'
 import type { Next } from '@/lib/github-connect'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
@@ -13,7 +13,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: navigation.replace }),
   useSearchParams: () => new URLSearchParams(navigation.search),
 }))
-vi.mock('@/lib/api', () => ({ connectGitHubInstallation: vi.fn(), fetchGitHubApp: vi.fn() }))
+vi.mock('@/lib/api', () => ({ connectGitHubInstallation: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn() }))
 vi.mock('@/lib/github-connect', async importActual => ({
   ...(await importActual<typeof import('@/lib/github-connect')>()),
   leaveFor: vi.fn(), takeReturn: vi.fn(),
@@ -39,16 +39,16 @@ beforeEach(() => {
 })
 
 describe('the address GitHub returns to', () => {
-  it('takes the return and lands on the GitHub card of the org the person left from', async () => {
-    arrive('code=c&state=s', { to: 'settings', orgID: 'org_7' })
+  it('takes the return and lands on the page the person left from', async () => {
+    arrive('code=c&state=s', { to: 'app', path: '/projects/prj_1/experiments?draft=draft-1' })
     expect(screen.getByRole('status', { name: 'Returning from GitHub…' })).toBeTruthy()
     expect(vi.mocked(takeReturn).mock.calls[0][0]).toBe('code=c&state=s')
-    await waitFor(() => expect(navigation.replace).toHaveBeenCalledExactlyOnceWith('/orgs/org_7/settings#github'))
+    await waitFor(() => expect(navigation.replace).toHaveBeenCalledExactlyOnceWith('/projects/prj_1/experiments?draft=draft-1'))
     expect(leaveFor).not.toHaveBeenCalled()
   })
 
-  it('lands on the caller\'s own org when the return names none, as on a plain visit', async () => {
-    arrive('', { to: 'settings', orgID: null })
+  it('lands on the GitHub card of the caller\'s own org when the return names no page, as on a plain visit', async () => {
+    arrive('', { to: 'app', path: null })
     await waitFor(() => expect(navigation.replace).toHaveBeenCalledExactlyOnceWith('/orgs/org_a/settings#github'))
   })
 
@@ -59,7 +59,7 @@ describe('the address GitHub returns to', () => {
   })
 
   it('connects through the API with the code, where GitHub returned it and the installation', async () => {
-    arrive('code=c&state=s', { to: 'settings', orgID: 'org_a' })
+    arrive('code=c&state=s', { to: 'app', path: '/orgs/org_a/settings#github' })
     const calls = vi.mocked(takeReturn).mock.calls[0][1]
     vi.mocked(fetchGitHubApp).mockResolvedValue({ slug: 'hl', client_id: 'app', install_url: 'i', authorize_url: 'a', new_repository_url: 'n' })
     await expect(calls.app()).resolves.toMatchObject({ authorize_url: 'a', install_url: 'i' })
@@ -67,5 +67,8 @@ describe('the address GitHub returns to', () => {
     expect(connectGitHubInstallation).toHaveBeenCalledExactlyOnceWith('org_a', {
       code: 'c', redirectURI: `${window.location.origin}/settings/repository`, installationID: 9,
     })
+    vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [], total: 0 })
+    await expect(calls.installations('org_a')).resolves.toEqual([])
+    expect(fetchGitHubInstallations).toHaveBeenCalledExactlyOnceWith('org_a')
   })
 })

@@ -42,10 +42,11 @@ function show(as: Me = owner) {
 
 // Leaves for GitHub as the card does and comes back with what GitHub would return.
 async function comeBack(query: (state: string) => string, installationID?: number) {
-  const address = beginConnect(app.authorize_url, { orgID: 'org_a' }, installationID)
+  const address = beginConnect(app.authorize_url, { orgID: 'org_a', returnTo: '/orgs/org_a/settings#github' }, installationID)
   return takeReturn(query(new URL(address).searchParams.get('state')!), {
     app: async () => app,
     connect: (orgID, code, id) => connectGitHubInstallation(orgID, { code, redirectURI: 'u', installationID: id }),
+    installations: async () => installations,
   })
 }
 
@@ -112,6 +113,7 @@ describe('connecting', () => {
     await takeReturn(`code=c2&state=${address.searchParams.get('state')}`, {
       app: async () => app,
       connect: (orgID, code, id) => connectGitHubInstallation(orgID, { code, redirectURI: 'u', installationID: id }),
+      installations: async () => installations,
     })
     expect(connectGitHubInstallation).toHaveBeenLastCalledWith('org_a', { code: 'c2', redirectURI: 'u', installationID: 9 })
     expect(await screen.findByRole('cell', { name: 'lab' })).toBeTruthy()
@@ -160,9 +162,9 @@ describe('connecting', () => {
   })
 
   it('says nothing of a connect that belongs to another org', async () => {
-    const address = beginConnect(app.authorize_url, { orgID: 'org_other' })
+    const address = beginConnect(app.authorize_url, { orgID: 'org_other', returnTo: '/orgs/org_other/settings#github' })
     await takeReturn(`code=c&state=${new URL(address).searchParams.get('state')}`, {
-      app: async () => app, connect: async () => ({ ...lab, org_id: 'org_other' }),
+      app: async () => app, connect: async () => ({ ...lab, org_id: 'org_other' }), installations: async () => [],
     })
     show()
     await screen.findByRole('cell', { name: 'acme' })

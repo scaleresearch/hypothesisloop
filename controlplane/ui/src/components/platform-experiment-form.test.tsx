@@ -3,9 +3,11 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  ApiError, addPlatformExperimentAgents, createPlatformExperiment, fetchExperimentFile, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories,
-  updatePlatformExperiment,
+  ApiError, addPlatformExperimentAgents, createExperimentDraft, createPlatformExperiment, deleteExperimentDraft, fetchExperimentFile, fetchGitHubApp,
+  fetchGitHubInstallations, fetchGitHubRepositories, updateExperimentDraft, updatePlatformExperiment,
 } from '@/lib/api'
+import type { ExperimentDraft } from '@/lib/api'
+import { leaveFor } from '@/lib/github-connect'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { PlatformExperimentForm } from '@/components/platform-experiment-form'
 import type { Me, PlatformExperiment } from '@/types'
@@ -13,7 +15,11 @@ import type { Me, PlatformExperiment } from '@/types'
 vi.mock('@/lib/api', async importActual => ({
   ...(await importActual<typeof import('@/lib/api')>()),
   addPlatformExperimentAgents: vi.fn(), createPlatformExperiment: vi.fn(), fetchExperimentFile: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
-  updatePlatformExperiment: vi.fn(),
+  updatePlatformExperiment: vi.fn(), createExperimentDraft: vi.fn(), updateExperimentDraft: vi.fn(), deleteExperimentDraft: vi.fn(),
+}))
+vi.mock('@/lib/github-connect', async importActual => ({
+  ...(await importActual<typeof import('@/lib/github-connect')>()),
+  leaveFor: vi.fn(),
 }))
 
 const at = '2026-01-01T00:00:00Z'
@@ -25,12 +31,12 @@ const me: Me = {
 const created = { id: 'pe-new', project_id: 'prj_1', name: 'Run' } as PlatformExperiment
 const onSaved = vi.fn()
 
-function show(initial?: PlatformExperiment) {
+function show(initial?: PlatformExperiment, draft?: ExperimentDraft) {
   const resolved = resolveTenant(me, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
     <SWRConfig value={{ provider: () => new Map() }}>
-      <TenantContext.Provider value={resolved.tenant}><PlatformExperimentForm initial={initial} onSaved={onSaved} /></TenantContext.Provider>
+      <TenantContext.Provider value={resolved.tenant}><PlatformExperimentForm initial={initial} draft={draft} onSaved={onSaved} /></TenantContext.Provider>
     </SWRConfig>,
   )
 }
@@ -63,6 +69,14 @@ beforeEach(() => {
   vi.mocked(createPlatformExperiment).mockReset().mockResolvedValue(created)
   vi.mocked(addPlatformExperimentAgents).mockReset().mockResolvedValue([])
   vi.mocked(updatePlatformExperiment).mockReset()
+  const kept = (id: string) => async (_: string, ...rest: unknown[]) => {
+    const body = rest[rest.length - 1] as Pick<ExperimentDraft, 'form' | 'step' | 'failure'>
+    return { id, project_id: 'prj_1', ...body, created_at: at, updated_at: at }
+  }
+  vi.mocked(createExperimentDraft).mockReset().mockImplementation(kept('draft-1'))
+  vi.mocked(updateExperimentDraft).mockReset().mockImplementation(kept('draft-1'))
+  vi.mocked(deleteExperimentDraft).mockReset().mockResolvedValue()
+  vi.mocked(leaveFor).mockReset()
 })
 
 describe('a new platform experiment', () => {
@@ -137,14 +151,24 @@ describe('a new platform experiment', () => {
     ])
   })
 
-  it('shows a refused create in the API\'s words and stays on the form, with nothing else called', async () => {
-    vi.mocked(createPlatformExperiment).mockRejectedValue(new Error('the installation does not cover acme/widgets'))
+  it('shows a refused create in the API\'s words at the step it concerns, keeps the input as a draft naming why, and tries again', async () => {
+    vi.mocked(createPlatformExperiment).mockRejectedValueOnce(new ApiError(422, 'the installation does not cover acme/widgets', 'repository_not_reachable'))
     show()
     await essentials({ repository: 'acme/widgets' })
     await create()
     expect(await screen.findByText('the installation does not cover acme/widgets')).toBeTruthy()
     expect(onSaved).not.toHaveBeenCalled()
     expect(addPlatformExperimentAgents).not.toHaveBeenCalled()
+    await waitFor(() => expect(createExperimentDraft).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(createExperimentDraft).mock.calls[0]).toEqual(['prj_1', {
+      form: expect.objectContaining({ name: 'Run', description: 'The brief', repository: 'acme/widgets' }), step: '1', failure: 'the installation does not cover acme/widgets',
+    }])
+    expect(screen.getByLabelText('Brief')).toBeTruthy()
+    expect(screen.getByText(/What you typed is kept as a draft/)).toBeTruthy()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created, { failure: undefined }))
+    expect(deleteExperimentDraft).toHaveBeenCalledExactlyOnceWith('prj_1', 'draft-1')
   })
 
   it('hands on the experiment with the step the API stopped at, since the experiment exists', async () => {
@@ -231,5 +255,54 @@ describe('editing a platform experiment', () => {
     await userEvent.type(screen.getByLabelText('Max concurrent accelerators'), '4')
     await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
     await waitFor(() => expect(updatePlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-1', { report_interval_seconds: 60 }))
+  })
+})
+
+describe('a draft of a new platform experiment', () => {
+  const draft: ExperimentDraft = {
+    id: 'draft-7', project_id: 'prj_1', step: '2', failure: '', created_at: at, updated_at: at,
+    form: { name: 'Half done', description: 'A brief', repository: '', budget_accelerator_hours: '3' },
+  }
+
+  it('is saved from any step, as typed, and saved again in place', async () => {
+    show()
+    await userEvent.type(name(), 'Run')
+    await next()
+    await userEvent.click(screen.getByRole('button', { name: 'Save draft' }))
+    expect(await screen.findByText('Draft saved.')).toBeTruthy()
+    expect(vi.mocked(createExperimentDraft).mock.calls[0]).toEqual(['prj_1', { form: expect.objectContaining({ name: 'Run', budget_accelerator_hours: '10' }), step: '2', failure: '' }])
+    await next()
+    await userEvent.click(screen.getByRole('button', { name: 'Save draft' }))
+    await waitFor(() => expect(updateExperimentDraft).toHaveBeenCalledWith('prj_1', 'draft-1', expect.objectContaining({ step: '3' })))
+    expect(createExperimentDraft).toHaveBeenCalledTimes(1)
+  })
+
+  it('opens at its step with what was typed, and goes once the experiment is created from it', async () => {
+    show(undefined, draft)
+    expect(screen.getByRole('tab', { name: '2. Measure', selected: true })).toBeTruthy()
+    await next()
+    await create()
+    await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created, { failure: undefined }))
+    expect(sent()).toMatchObject({ name: 'Half done', description: 'A brief', budget_accelerator_hours: 3 })
+    expect(deleteExperimentDraft).toHaveBeenCalledExactlyOnceWith('prj_1', 'draft-7')
+  })
+
+  it('stays while the create is refused, and shows why it was refused last', async () => {
+    vi.mocked(createPlatformExperiment).mockRejectedValue(new ApiError(422, 'budget over the org\'s limit', 'quota_exceeded'))
+    show(undefined, { ...draft, failure: 'repository creation failed' })
+    expect(screen.getByText('repository creation failed')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText('budget over the org\'s limit')).toBeTruthy()
+    await waitFor(() => expect(updateExperimentDraft).toHaveBeenCalledWith('prj_1', 'draft-7', expect.objectContaining({ step: '3', failure: 'budget over the org\'s limit' })))
+    expect(deleteExperimentDraft).not.toHaveBeenCalled()
+  })
+
+  it('is what leaving for GitHub keeps, and GitHub\'s return opens it again', async () => {
+    show()
+    await userEvent.type(name(), 'Before GitHub')
+    await userEvent.click(await screen.findByRole('button', { name: 'give the App access' }))
+    await waitFor(() => expect(leaveFor).toHaveBeenCalledExactlyOnceWith('https://github.test/install'))
+    expect(vi.mocked(createExperimentDraft).mock.calls[0][1]).toMatchObject({ form: { name: 'Before GitHub' }, step: '1' })
+    expect(JSON.parse(window.sessionStorage.getItem('hl-github-connect')!)).toMatchObject({ step: 'install', orgID: 'org_a', returnTo: '/projects/prj_1/experiments?draft=draft-1' })
   })
 })

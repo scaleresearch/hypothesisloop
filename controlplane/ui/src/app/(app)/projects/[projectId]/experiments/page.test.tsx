@@ -3,24 +3,26 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  ApiError, apiSend, createPlatformExperiment, fetchAgentsPage, fetchExperimentStats, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories,
-  fetchOrgClusters, fetchPlatformExperimentsPage,
+  ApiError, apiSend, createExperimentDraft, createPlatformExperiment, deleteExperimentDraft, fetchAgentsPage, fetchExperimentDraft, fetchExperimentDrafts,
+  fetchExperimentStats, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories, fetchOrgClusters, fetchPlatformExperimentsPage,
 } from '@/lib/api'
+import type { ExperimentDraft } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import PlatformExperimentsPage from '@/app/(app)/projects/[projectId]/experiments/page'
 import type { Me, PlatformExperiment } from '@/types'
 
-const navigation = vi.hoisted(() => ({ push: vi.fn() }))
+const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn(), search: '' }))
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: navigation.push, replace: vi.fn() }),
+  useRouter: () => ({ push: navigation.push, replace: navigation.replace }),
   usePathname: () => '/projects/prj_1/experiments',
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(navigation.search),
 }))
 vi.mock('@/lib/api', async importActual => ({
   ...(await importActual<typeof import('@/lib/api')>()),
   addPlatformExperimentAgents: vi.fn(), apiSend: vi.fn(), createPlatformExperiment: vi.fn(), fetchAgentsPage: vi.fn(), fetchExperimentStats: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(),
   fetchGitHubRepositories: vi.fn(), fetchOrgClusters: vi.fn(), fetchPlatformExperimentsPage: vi.fn(),
+  createExperimentDraft: vi.fn(), deleteExperimentDraft: vi.fn(), fetchExperimentDraft: vi.fn(), fetchExperimentDrafts: vi.fn(),
 }))
 vi.mock('@/components/platform-experiment-card', () => ({
   PlatformExperimentCard: ({ pe }: { pe: PlatformExperiment }) => <article>{pe.name}{pe.shared ? ' (shared)' : ''}</article>,
@@ -47,8 +49,19 @@ function show() {
   )
 }
 
+const kept: ExperimentDraft = {
+  id: 'draft-1', project_id: 'prj_1', step: '3', failure: 'GitHub refused to create acme/run', created_at: at, updated_at: at,
+  form: { name: 'Kept run', description: 'The kept brief' },
+}
+
 beforeEach(() => {
   navigation.push.mockReset()
+  navigation.replace.mockReset()
+  navigation.search = ''
+  vi.mocked(fetchExperimentDrafts).mockReset().mockResolvedValue([])
+  vi.mocked(fetchExperimentDraft).mockReset().mockResolvedValue(kept)
+  vi.mocked(createExperimentDraft).mockReset().mockImplementation(async (_, body) => ({ ...kept, ...body }))
+  vi.mocked(deleteExperimentDraft).mockReset().mockResolvedValue()
   own = []
   shared = []
   vi.mocked(fetchOrgClusters).mockResolvedValue([])
@@ -148,10 +161,37 @@ describe('the experiments page', () => {
     await userEvent.click(dialog.getByRole('button', { name: 'Create experiment' }))
     expect(await dialog.findByText('the org has reached its limit of platform experiments')).toBeTruthy()
     expect(navigation.push).not.toHaveBeenCalled()
-    await userEvent.click(dialog.getByRole('button', { name: 'Create experiment' }))
+    await waitFor(() => expect(createExperimentDraft).toHaveBeenCalledTimes(1))
+    await userEvent.click(dialog.getByRole('button', { name: 'Try again' }))
     expect(vi.mocked(createPlatformExperiment).mock.calls[1]).toMatchObject(['prj_1', { name: 'First run', description: 'The brief' }])
     await waitFor(() => expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/experiments/pe-new'))
     expect(screen.queryByRole('dialog')).toBeNull()
+    expect(deleteExperimentDraft).toHaveBeenCalledExactlyOnceWith('prj_1', 'draft-1')
+  })
+
+  it('lists the saved drafts with why each was last refused, and opens one at its step', async () => {
+    vi.mocked(fetchExperimentDrafts).mockResolvedValue([kept])
+    show()
+    expect(await screen.findByText('Kept run')).toBeTruthy()
+    expect(screen.getByText('Not created: GitHub refused to create acme/run')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    const dialog = within(screen.getByRole('dialog'))
+    expect(dialog.getByRole('tab', { name: '3. Budget and rules', selected: true })).toBeTruthy()
+    expect(dialog.getByText('GitHub refused to create acme/run')).toBeTruthy()
+    await userEvent.click(dialog.getByRole('button', { name: 'Back' }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Back' }))
+    expect((dialog.getByPlaceholderText('e.g. Q3 Vision Benchmark') as HTMLInputElement).value).toBe('Kept run')
+  })
+
+  it('opens the draft ?draft names, as GitHub\'s return asks, and leaves the address', async () => {
+    navigation.search = 'draft=draft-1'
+    vi.mocked(fetchExperimentDraft).mockResolvedValue({ ...kept, step: '1' })
+    show()
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(fetchExperimentDraft).toHaveBeenCalledWith('prj_1', 'draft-1')
+    expect(navigation.replace).toHaveBeenCalledWith('/projects/prj_1/experiments')
+    expect(dialog.getByLabelText('Brief')).toBeTruthy()
+    expect((dialog.getByLabelText('Brief') as HTMLTextAreaElement).value).toBe('The kept brief')
   })
 
   it('lists the experiments under the goal box, or says it could not read them and keeps the box', async () => {

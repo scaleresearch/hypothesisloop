@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import useSWR from 'swr'
 import { ApiError, GITHUB_NOT_CONFIGURED, checkGitHubInstallation, disconnectGitHubInstallation, fetchGitHubInstallations, makeGitHubInstallationDefault } from '@/lib/api'
-import { beginConnect, beginInstall, leaveFor, resetConnect, useConnect, useGitHubApp } from '@/lib/github-connect'
+import { beginConnect, beginInstall, githubCardPath, leaveFor, resetConnect, useConnect, useGitHubApp } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
 import type { GitHubApp, GitHubInstallation } from '@/types'
 import { Actor } from '@/components/actor'
@@ -65,7 +65,7 @@ export function OrgGitHub() {
     if (connected) void mutate()
   }, [connected, mutate])
 
-  const origin = { orgID: org.id }
+  const origin = { orgID: org.id, returnTo: githubCardPath(org.id) }
   function leave(address: string) {
     setLeaving(true)
     leaveFor(address)

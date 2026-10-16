@@ -253,6 +253,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		sharing:             db.NewPlatformExperimentsStore(pool),
 		dataUsage:           quota.NewDataUsageHandler(dataStore, store, peSvc, pcfg.DataStore.MaxBytesPerAgent, logger),
 		sessions:            dataStore,
+		drafts:              db.NewExperimentDraftsStore(pool),
 		accounts: accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, autoscaledClusters, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag},
 			accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, logger),
 		repositories: repos,
@@ -285,6 +286,7 @@ type routes struct {
 	sharing             quota.Sharing
 	dataUsage           *quota.DataUsageHandler
 	sessions            quota.SessionStore
+	drafts              quota.ExperimentDraftStore
 	accounts            *accounts.Handler
 	repositories        *accounts.Repositories
 	scheduler           *scheduler.Handler
@@ -344,6 +346,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	quota.RegisterShareHuma(doc, h.sharing, h.platformExperiments.Answer, logger)
 	quota.RegisterDataUsageHuma(doc, h.dataUsage)
 	quota.RegisterSessionsHuma(doc, h.sessions, logger)
+	quota.RegisterExperimentDraftsHuma(doc, h.drafts, logger)
 	accounts.RegisterHuma(doc, h.accounts)
 	accounts.RegisterRepositoriesHuma(doc, h.repositories)
 	scheduler.RegisterHuma(doc, h.scheduler)

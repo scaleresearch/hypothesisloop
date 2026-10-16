@@ -1,15 +1,17 @@
 'use client'
 
-import { Suspense, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import useSWR from 'swr'
 import { clustersInUse } from '@/lib/clusters'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useQueryParam } from '@/lib/query-state'
 import { experimentPath, orgPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
-import { fetchAgentsPage, fetchExperimentStats, fetchOrgClusters, fetchPlatformExperimentsPage } from '@/lib/api'
+import { fetchAgentsPage, fetchExperimentDraft, fetchExperimentStats, fetchOrgClusters, fetchPlatformExperimentsPage } from '@/lib/api'
+import type { ExperimentDraft } from '@/lib/api'
 import type { PlatformExperiment } from '@/types'
+import { ExperimentDrafts } from '@/components/experiment-drafts'
 import { GoalInput } from '@/components/goal-input'
 import { Page } from '@/components/ui/page'
 import { PlatformExperimentDialog } from '@/components/platform-experiment-form'
@@ -80,8 +82,9 @@ export default function PlatformExperimentsPage() {
 
 /**
  * The experiments of the selected project and two ways to a new one: a sentence the platform
- * plans, or the full form, which opens in a dialog as it does for an edit. The experiments the
- * platform shares are listed too, read only.
+ * plans, or the full form, which opens in a dialog as it does for an edit. A draft of the form
+ * opens from ?draft, which is also where GitHub's return brings the person back to. The
+ * experiments the platform shares are listed too, read only.
  */
 function PlatformExperimentsPageContent() {
   const { org, project } = useTenant()
@@ -90,9 +93,27 @@ function PlatformExperimentsPageContent() {
   const [search, setSearch] = useQueryParam('q')
   const [sort, setSort] = useQueryParam('sort', '-starts_at')
   const [page, setPage] = useState(0)
-  const [dialog, setDialog] = useState<{ editing: PlatformExperiment | null } | null>(null)
+  const [dialog, setDialog] = useState<{ editing: PlatformExperiment | null; draft?: ExperimentDraft } | null>(null)
   const configuring = dialog !== null && dialog.editing === null
   const planning = useRef<HTMLDivElement>(null)
+
+  // ?draft opens that draft once and leaves the address.
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const draftID = searchParams.get('draft')
+  const [draftError, setDraftError] = useState('')
+  useEffect(() => {
+    if (!draftID) return
+    let live = true
+    fetchExperimentDraft(project.id, draftID).then(
+      draft => { if (live) setDialog({ editing: null, draft }) },
+      (e: unknown) => { if (live) setDraftError(e instanceof Error ? e.message : String(e)) },
+    )
+    const rest = new URLSearchParams(searchParams.toString())
+    rest.delete('draft')
+    router.replace(rest.size ? `${pathname}?${rest}` : pathname)
+    return () => { live = false }
+  }, [draftID, project.id, pathname, router, searchParams])
 
   const { data, error, isLoading, mutate } = useSWR(
     ['platform-experiments', project.id, statusFilter, search, sort, page],
@@ -129,9 +150,11 @@ function PlatformExperimentsPageContent() {
         />
       )}
     >
+      {draftError && <ErrorMessage>Could not open the draft: {draftError}</ErrorMessage>}
       {dialog && (
         <PlatformExperimentDialog
           initial={dialog.editing}
+          draft={dialog.draft}
           onClose={() => setDialog(null)}
           // An edit stays here and rereads the list. A new experiment, or one the form also ran, opens.
           onSaved={(saved, run) => (dialog.editing && !run ? void mutate() : open(saved))}
@@ -168,6 +191,8 @@ function PlatformExperimentsPageContent() {
         />
         <Select fieldSize="sm" aria-label="Sort" value={sort} onChange={v => { setSort(v); setPage(0) }} options={SORT_OPTIONS} />
       </Inline>
+
+      {(statusFilter === '' || statusFilter === 'draft') && !search && <ExperimentDrafts onOpen={draft => setDialog({ editing: null, draft })} />}
 
       {isLoading && <Loading />}
       {error && <ErrorMessage>Could not load the experiments of {project.name}: {error.message}</ErrorMessage>}
