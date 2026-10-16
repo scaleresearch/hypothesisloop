@@ -1,4 +1,4 @@
-package scheduler
+package placement
 
 import (
 	"testing"
@@ -20,11 +20,11 @@ func TestTopologyFitsRequiresEnoughDistinctHosts(t *testing.T) {
 		"node-a": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 4},
 		"node-b": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 2},
 	}
-	if topologyFits(byNode, nil, nil, exp) {
+	if TopologyFits(byNode, nil, nil, exp) {
 		t.Fatal("aggregate six accelerators on two hosts must not satisfy three distinct ranks")
 	}
 	byNode["node-c"] = map[string]int64{"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 2}
-	if !topologyFits(byNode, nil, nil, exp) {
+	if !TopologyFits(byNode, nil, nil, exp) {
 		t.Fatal("three qualifying hosts should satisfy three distinct ranks")
 	}
 }
@@ -33,10 +33,10 @@ func TestTopologyFitsHonorsExplicitSpreadDisablement(t *testing.T) {
 	spread := false
 	exp := distributedExperiment(3, 2)
 	exp.Job.Topology = &domain.TopologySpec{SpreadAcrossHosts: &spread}
-	if topologyFits(map[string]map[string]int64{"node-a": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 2}}, nil, nil, exp) {
+	if TopologyFits(map[string]map[string]int64{"node-a": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 2}}, nil, nil, exp) {
 		t.Fatal("three ranks must not reuse the same two accelerators")
 	}
-	if !topologyFits(map[string]map[string]int64{"node-a": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 6}}, nil, nil, exp) {
+	if !TopologyFits(map[string]map[string]int64{"node-a": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 6}}, nil, nil, exp) {
 		t.Fatal("explicitly disabling host spreading should allow all three ranks on one sufficiently large host")
 	}
 }
@@ -47,13 +47,13 @@ func TestReserveTopologyPreventsSameTickDoubleClaim(t *testing.T) {
 		"node-a": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 1},
 		"node-b": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 1},
 	}
-	if !topologyFits(byNode, nil, nil, exp) {
+	if !TopologyFits(byNode, nil, nil, exp) {
 		t.Fatal("initial topology should fit")
 	}
-	if !reservePlacement(byNode, nil, nil, exp) {
+	if !Reserve(byNode, nil, nil, exp) {
 		t.Fatal("initial topology reservation failed")
 	}
-	if topologyFits(byNode, nil, nil, exp) {
+	if TopologyFits(byNode, nil, nil, exp) {
 		t.Fatal("a second job in the same tick must not reuse the first job's node slots")
 	}
 }
@@ -62,10 +62,10 @@ func TestTopologyFitsRequiresDeclaredNodeSelector(t *testing.T) {
 	exp := distributedExperiment(1, 1)
 	exp.Job.NodeSelector = map[string]string{"vendor.example/model": "wanted"}
 	capacity := map[string]map[string]int64{"node-a": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 1}}
-	if topologyFits(capacity, nil, map[string]map[string]string{"node-a": {"vendor.example/model": "other"}}, exp) {
+	if TopologyFits(capacity, nil, map[string]map[string]string{"node-a": {"vendor.example/model": "other"}}, exp) {
 		t.Fatal("resource capacity on a node that fails the job-declared selector was accepted")
 	}
-	if !topologyFits(capacity, nil, map[string]map[string]string{"node-a": {"vendor.example/model": "wanted"}}, exp) {
+	if !TopologyFits(capacity, nil, map[string]map[string]string{"node-a": {"vendor.example/model": "wanted"}}, exp) {
 		t.Fatal("matching live resource capacity and node selector was rejected")
 	}
 }
@@ -78,7 +78,7 @@ func TestResolveClusterAndFootprintSkipsTopologyInfeasibleCluster(t *testing.T) 
 		"cluster-a": {"node-a": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 2}},
 		"cluster-b": {"node-b1": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 1}, "node-b2": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 1}},
 	}
-	cluster, _ := resolveClusterAndFootprint(avail, nil, nodes, nil, nil, exp)
+	cluster, _ := ClusterAndFootprint(avail, nil, nodes, nil, nil, exp)
 	if cluster != "cluster-b" {
 		t.Fatalf("resolved cluster = %q, want topology-feasible cluster-b", cluster)
 	}
@@ -96,13 +96,13 @@ func TestReservePlacementRequiresTheWholeFootprintOnOneNode(t *testing.T) {
 	// The only node carrying the flavor has accelerators to spare but not the CPU.
 	byNode := map[string]map[string]int64{"node-a": {flavor: 8}}
 	starved := map[string]map[string]int64{"node-a": {domain.NodeResourceCPUMillicores: 3000}}
-	if reservePlacement(byNode, starved, nil, exp) {
+	if Reserve(byNode, starved, nil, exp) {
 		t.Fatal("admitted onto a node with 3 cores free for a job requesting 4")
 	}
 
 	byNode = map[string]map[string]int64{"node-a": {flavor: 8}}
 	roomy := map[string]map[string]int64{"node-a": {domain.NodeResourceCPUMillicores: 4000}}
-	if !reservePlacement(byNode, roomy, nil, exp) {
+	if !Reserve(byNode, roomy, nil, exp) {
 		t.Fatal("a node with exactly enough CPU should accept the job")
 	}
 	if left := roomy["node-a"][domain.NodeResourceCPUMillicores]; left != 0 {
@@ -121,7 +121,7 @@ func TestReservePlacementDoesNotPoolCPUAcrossNodes(t *testing.T) {
 		"node-a": {domain.NodeResourceCPUMillicores: 4000},
 		"node-b": {domain.NodeResourceCPUMillicores: 4000},
 	}
-	if reservePlacement(byNode, split, nil, exp) {
+	if Reserve(byNode, split, nil, exp) {
 		t.Fatal("8 cores free cluster-wide but 4 on any node accepted a 6-core rank")
 	}
 }

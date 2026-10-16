@@ -123,7 +123,7 @@ type ClusterCapacity interface {
 	GetFlavorCapacity(ctx context.Context) (available, desiredFree map[string]domain.Footprint, err error)
 	GetAcceleratorCapacityByNode(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	// GetNodeResourceCapacity reports free CPU/memory/storage per node — see
-	// reservePlacement, which must prove a job fits one node in every dimension.
+	// placement.Reserve, which must prove a job fits one node in every dimension.
 	GetNodeResourceCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error)
 	// GetNodeTotalCapacity reports each node's TOTAL installed capacity (not just what's

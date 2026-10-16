@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -57,7 +58,7 @@ func disbalanceJob(id, cpu string, accelerators int) *domain.Experiment {
 // disbalanceNodes reports freeChips accelerators still free on node-a, keyed as the capacity
 // read keys them: in lower case, where the jobs here name the type in the driver's casing.
 func disbalanceNodes(freeChips int64) map[string]map[string]int64 {
-	return map[string]map[string]int64{"node-a": {nodeAcceleratorKey(disbalanceFlavor): freeChips}}
+	return map[string]map[string]int64{"node-a": {placement.AcceleratorKey(disbalanceFlavor): freeChips}}
 }
 
 func TestSelectDisbalanceVictimsEvictsHogStrandingIdleAccelerators(t *testing.T) {
@@ -312,7 +313,7 @@ func TestSelectDisbalanceVictimsUsesNodeLocalShareNotClusterWideAverage(t *testi
 	avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)
 	// node-b has 7 chips free plus the hog's 1 held = 8 installed, matching the "8 chips" node
 	// shape the comment above assumes: 16000m / 8 chips = 2000m (2 cores) per chip.
-	nodeAvail := map[string]map[string]int64{"node-b": {nodeAcceleratorKey(disbalanceFlavor): 7}}
+	nodeAvail := map[string]map[string]int64{"node-b": {placement.AcceleratorKey(disbalanceFlavor): 7}}
 
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, clusterTotal,
 		nodesTotal, nodeAvail, nil, nil, []placedExperiment{{experiment: hog, node: "node-b"}}, testDisbalanceTolerance)
@@ -440,7 +441,7 @@ func TestAPendingEvictionCreditsItsNodeResources(t *testing.T) {
 	l.observed = fakeObserved{}
 	l.pendingEvictions["hog"] = pendingEviction{
 		cluster: "cluster-a", node: "node-a", footprint: hog.Footprint(),
-		acceleratorType: nodeAcceleratorKey(disbalanceFlavor), acceleratorCount: 1, evictedAt: now, nodeFreeAtEviction: 3,
+		acceleratorType: placement.AcceleratorKey(disbalanceFlavor), acceleratorCount: 1, evictedAt: now, nodeFreeAtEviction: 3,
 	}
 
 	avail := map[string]domain.Footprint{"cluster-a": domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)}
@@ -449,12 +450,12 @@ func TestAPendingEvictionCreditsItsNodeResources(t *testing.T) {
 		domain.NodeResourceCPUMillicores: 500,
 		domain.NodeResourceMemoryBytes:   32 << 30,
 	}}}
-	l.applyPendingEvictions(now, avail, cloneAvail(avail), nodeAvail, nodeResources)
+	l.applyPendingEvictions(now, avail, placement.CloneAvail(avail), nodeAvail, nodeResources)
 
 	if got := nodeResources["cluster-a"]["node-a"][domain.NodeResourceCPUMillicores]; got != 14500 {
 		t.Fatalf("node CPU after credit = %d millicores, want 14500", got)
 	}
-	shortage := preemptionShortfall(avail["cluster-a"], nodeAvail["cluster-a"], nodeResources["cluster-a"], nil, blocked, blocked.Footprint())
+	shortage := placement.PreemptionShortfall(avail["cluster-a"], nodeAvail["cluster-a"], nodeResources["cluster-a"], nil, blocked, blocked.Footprint())
 	if len(shortage) != 0 {
 		t.Fatalf("blocked job is still short %s while the hog's capacity is on its way back", footprintStr(shortage))
 	}

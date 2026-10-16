@@ -1,4 +1,4 @@
-package scheduler
+package placement
 
 import (
 	"fmt"
@@ -20,7 +20,7 @@ func groupedExperiment(groups ...domain.JobGroup) *domain.Experiment {
 	}
 }
 
-// reservePlacement walks ranks in declared order and hands each the first (alphabetical) node
+// Reserve walks ranks in declared order and hands each the first (alphabetical) node
 // that fits, never backtracking. A small rank placed first can take the only node that could
 // host a later large rank, so a job with a valid assignment is reported as not fitting.
 //
@@ -33,7 +33,7 @@ func TestTopologyFitsGreedyOrderFalseNegativeOnAccelerators(t *testing.T) {
 		domain.JobGroup{Name: "learner", Replicas: 1, AcceleratorCount: 4},
 	)
 	byNode := map[string]map[string]int64{"node-a": {h100: 4}, "node-b": {h100: 1}}
-	if !topologyFits(byNode, nil, nil, exp) {
+	if !TopologyFits(byNode, nil, nil, exp) {
 		t.Fatal("actor→node-b, learner→node-a is a valid placement, but greedy first-fit rejected the job")
 	}
 }
@@ -51,7 +51,7 @@ func TestTopologyFitsGreedyOrderFalseNegativeOnCPU(t *testing.T) {
 		"node-a": {domain.NodeResourceCPUMillicores: 8000},
 		"node-b": {domain.NodeResourceCPUMillicores: 1000},
 	}
-	if !topologyFits(byNode, resources, nil, exp) {
+	if !TopologyFits(byNode, resources, nil, exp) {
 		t.Fatal("small→node-b, big→node-a is a valid placement, but greedy first-fit rejected the job")
 	}
 }
@@ -66,12 +66,12 @@ func TestTopologyFitsGreedyOrderFalseNegativeWithoutSpread(t *testing.T) {
 	)
 	exp.Job.Topology = &domain.TopologySpec{SpreadAcrossHosts: &spread}
 	byNode := map[string]map[string]int64{"node-a": {h100: 2}, "node-b": {h100: 1}}
-	if !topologyFits(byNode, nil, nil, exp) {
+	if !TopologyFits(byNode, nil, nil, exp) {
 		t.Fatal("small→node-b, big→node-a is a valid placement, but greedy first-fit rejected the job")
 	}
 }
 
-// desiredPlacementFits (the ClaimSubmitted re-check) replays already-desired jobs with the same
+// DesiredFits (the ClaimSubmitted re-check) replays already-desired jobs with the same
 // first-fit walk, so it can strand capacity a candidate needs even though the runtime is free to
 // place the desired job elsewhere. The claim then fails with errAdmissionCapacityChanged for a
 // job the cluster can host.
@@ -81,19 +81,19 @@ func TestDesiredPlacementFitsGreedyReplayFalseNegative(t *testing.T) {
 	candidate := distributedExperiment(1, 2)
 	candidate.Job.Topology = &domain.TopologySpec{SpreadAcrossHosts: &spread}
 	byNode := map[string]map[string]int64{"node-a": {h100: 2}, "node-b": {h100: 1}}
-	if !desiredPlacementFits(byNode, nil, nil, []*domain.Experiment{pending}, candidate, &domain.JobSpec{Image: "registry.test/job:1"}) {
+	if !DesiredFits(byNode, nil, nil, []*domain.Experiment{pending}, candidate, &domain.JobSpec{Image: "registry.test/job:1"}) {
 		t.Fatal("pending→node-b leaves node-a for the 2-GPU candidate, but the greedy replay put pending on node-a and rejected the claim")
 	}
 }
 
-// reservePlacement subtracts each rank as it is placed and does not roll back when a later rank
-// finds no host. topologyFits hides this behind a clone, but the function's own contract is that
-// a false answer has changed nothing — otherwise a caller that (like desiredPlacementFits)
+// Reserve subtracts each rank as it is placed and does not roll back when a later rank
+// finds no host. TopologyFits hides this behind a clone, but the function's own contract is that
+// a false answer has changed nothing — otherwise a caller that (like DesiredFits)
 // keeps using the map after a false has lost capacity that was never claimed.
 func TestReservePlacementFailureLeavesInputUntouched(t *testing.T) {
 	exp := distributedExperiment(2, 1)
 	byNode := map[string]map[string]int64{"node-a": {h100: 1}}
-	if reservePlacement(byNode, nil, nil, exp) {
+	if Reserve(byNode, nil, nil, exp) {
 		t.Fatal("two distinct ranks cannot fit on one node")
 	}
 	if got := byNode["node-a"][h100]; got != 1 {
@@ -102,7 +102,7 @@ func TestReservePlacementFailureLeavesInputUntouched(t *testing.T) {
 }
 
 // ExtraResources (arbitrary extended resources) are part of the cluster-scalar footprint but not
-// of NodeShapes, so topologyFits never checks that any single node has them. Two nodes with one
+// of NodeShapes, so TopologyFits never checks that any single node has them. Two nodes with one
 // device each satisfy the cluster total of 2 while no node can run the rank that needs 2.
 //
 // Known gap, not fixable in the scheduler alone: cluster agents report only CPU/memory/storage
@@ -115,15 +115,15 @@ func TestTopologyFitsIgnoresExtraResourcesPerNode(t *testing.T) {
 		"node-a": {domain.NodeResourceCPUMillicores: 4000, "example.com/fpga": 1},
 		"node-b": {domain.NodeResourceCPUMillicores: 4000, "example.com/fpga": 1},
 	}
-	if topologyFits(nil, resources, nil, exp) {
+	if TopologyFits(nil, resources, nil, exp) {
 		t.Fatal("no node has 2 example.com/fpga, yet the placement was accepted on cluster-wide total alone")
 	}
 }
 
 // A CPU-only job (TotalAccelerators == 0) is now judged on node layout too: cluster-a's aggregate
 // is large enough (6 cores across two nodes) but no single node can host the whole rank, while
-// cluster-b's one node can. Before this went through placeAtFlavor, clusterWithBestFit picked
-// cluster-a on the scalar total alone and the tick then failed topologyFits there and went to
+// cluster-b's one node can. Before this went through AtFlavor, BestFit picked
+// cluster-a on the scalar total alone and the tick then failed TopologyFits there and went to
 // preemption instead of using cluster-b.
 func TestResolveClusterAndFootprintCPUOnlySkipsTopologyCheck(t *testing.T) {
 	exp := &domain.Experiment{Job: domain.JobSpec{Image: "registry.test/job:1", NumNodes: 1, CPU: "6"}}
@@ -133,7 +133,7 @@ func TestResolveClusterAndFootprintCPUOnlySkipsTopologyCheck(t *testing.T) {
 		"cluster-a": {"node-a1": {domain.NodeResourceCPUMillicores: 3000}, "node-a2": {domain.NodeResourceCPUMillicores: 3000}},
 		"cluster-b": {"node-b1": {domain.NodeResourceCPUMillicores: 6000}},
 	}
-	cluster, _ := resolveClusterAndFootprint(avail, nil, nil, resources, nil, exp)
+	cluster, _ := ClusterAndFootprint(avail, nil, nil, resources, nil, exp)
 	if cluster != "cluster-b" {
 		t.Fatalf("resolved cluster = %q, want cluster-b (the only cluster with a node that can hold a 6-core rank)", cluster)
 	}
@@ -153,7 +153,7 @@ func TestTopologyFitsInfeasibleHomogeneousJobAnswersFast(t *testing.T) {
 	exp := distributedExperiment(65, 8)
 	exp.Job.CPU = "4"
 	start := time.Now()
-	if topologyFits(byNode, resources, nil, exp) {
+	if TopologyFits(byNode, resources, nil, exp) {
 		t.Fatal("65 distinct ranks were accepted on 64 nodes")
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
@@ -161,7 +161,7 @@ func TestTopologyFitsInfeasibleHomogeneousJobAnswersFast(t *testing.T) {
 	}
 	exp = distributedExperiment(64, 8)
 	exp.Job.CPU = "4"
-	if !topologyFits(byNode, resources, nil, exp) {
+	if !TopologyFits(byNode, resources, nil, exp) {
 		t.Fatal("64 distinct ranks were rejected on 64 matching nodes")
 	}
 }
@@ -174,7 +174,7 @@ func TestTopologyFitsBacktrackingStillRejectsInfeasible(t *testing.T) {
 		domain.JobGroup{Name: "learner", Replicas: 2, AcceleratorCount: 4},
 	)
 	byNode := map[string]map[string]int64{"node-a": {h100: 4}, "node-b": {h100: 2}, "node-c": {h100: 1}}
-	if topologyFits(byNode, nil, nil, exp) {
+	if TopologyFits(byNode, nil, nil, exp) {
 		t.Fatal("two 4-GPU ranks were accepted with only one 4-GPU node")
 	}
 }
@@ -192,7 +192,7 @@ func TestTopologyFitsCrossDimensionAssignment(t *testing.T) {
 		"node-a": {domain.NodeResourceCPUMillicores: 8000},
 		"node-b": {domain.NodeResourceCPUMillicores: 2000},
 	}
-	if !topologyFits(byNode, resources, nil, exp) {
+	if !TopologyFits(byNode, resources, nil, exp) {
 		t.Fatal("a→node-b, b→node-a is a valid placement but was rejected")
 	}
 }
@@ -209,7 +209,7 @@ func TestReservePlacementCommitsExactlyThePlan(t *testing.T) {
 		"node-a": {domain.NodeResourceCPUMillicores: 4000},
 		"node-b": {domain.NodeResourceCPUMillicores: 4000},
 	}
-	if !reservePlacement(byNode, resources, nil, exp) {
+	if !Reserve(byNode, resources, nil, exp) {
 		t.Fatal("placement rejected")
 	}
 	if byNode["node-a"][h100] != 0 || byNode["node-b"][h100] != 0 {
@@ -221,9 +221,9 @@ func TestReservePlacementCommitsExactlyThePlan(t *testing.T) {
 }
 
 // A CPU-only job that fits nowhere in node layout falls back to the scalar best-fit cluster
-// rather than reporting "no cluster" outright — the caller (placeAtFlavor's own caller in the
-// tick) still re-checks topologyFits on the chosen cluster and routes to preemption from there.
-// This documents that fallback rather than assuming resolveClusterAndFootprint itself proves
+// rather than reporting "no cluster" outright — the caller (AtFlavor's own caller in the
+// tick) still re-checks TopologyFits on the chosen cluster and routes to preemption from there.
+// This documents that fallback rather than assuming ClusterAndFootprint itself proves
 // feasibility for a CPU-only job when nothing actually fits.
 func TestResolveClusterAndFootprintCPUOnlyFallsBackWhenNoNodeFits(t *testing.T) {
 	exp := &domain.Experiment{Job: domain.JobSpec{Image: "registry.test/job:1", NumNodes: 1, CPU: "6"}}
@@ -232,7 +232,7 @@ func TestResolveClusterAndFootprintCPUOnlyFallsBackWhenNoNodeFits(t *testing.T) 
 	resources := map[string]map[string]map[string]int64{
 		"cluster-a": {"node-a1": {domain.NodeResourceCPUMillicores: 3000}, "node-a2": {domain.NodeResourceCPUMillicores: 3000}},
 	}
-	cluster, gotFP := resolveClusterAndFootprint(avail, nil, nil, resources, nil, exp)
+	cluster, gotFP := ClusterAndFootprint(avail, nil, nil, resources, nil, exp)
 	if cluster != "cluster-a" {
 		t.Fatalf("resolved cluster = %q, want the scalar best-fit fallback cluster-a", cluster)
 	}
@@ -241,7 +241,7 @@ func TestResolveClusterAndFootprintCPUOnlyFallsBackWhenNoNodeFits(t *testing.T) 
 	}
 }
 
-// placeAtFlavor's ok=false path: every candidate cluster fits on the scalar footprint but none
+// AtFlavor's ok=false path: every candidate cluster fits on the scalar footprint but none
 // has node layout for it.
 func TestPlaceAtFlavorReturnsFalseWhenNoClusterHasLayout(t *testing.T) {
 	exp := distributedExperiment(2, 1)
@@ -250,7 +250,7 @@ func TestPlaceAtFlavorReturnsFalseWhenNoClusterHasLayout(t *testing.T) {
 	nodeAvail := map[string]map[string]map[string]int64{
 		"cluster-a": {"node-a": {h100: 2}}, // one node has both accelerators; a spread job needs two distinct hosts
 	}
-	cluster, ok := placeAtFlavor(avail, nil, nodeAvail, nil, nil, exp)
+	cluster, ok := AtFlavor(avail, nil, nodeAvail, nil, nil, exp)
 	if ok {
 		t.Fatalf("placeAtFlavor reported ok=true with cluster %q, want false: no cluster has two distinct qualifying hosts", cluster)
 	}
@@ -275,9 +275,9 @@ func TestAJobIsPlacedOnANodeWhateverCaseItNamesItsTypeIn(t *testing.T) {
 // trials on a job that genuinely needs backtracking exercises that path directly rather than
 // relying on a huge cluster to exhaust the real 50k budget.
 func TestPlanPlacementBudgetExhaustionIsConservative(t *testing.T) {
-	original := placementSearchBudget
-	placementSearchBudget = 1
-	defer func() { placementSearchBudget = original }()
+	original := searchBudget
+	searchBudget = 1
+	defer func() { searchBudget = original }()
 
 	// The same layout as TestTopologyFitsCrossDimensionAssignment, which is feasible but only via
 	// the second candidate tried for one of the ranks — exactly what a budget of 1 trial cannot
@@ -291,31 +291,31 @@ func TestPlanPlacementBudgetExhaustionIsConservative(t *testing.T) {
 		"node-a": {domain.NodeResourceCPUMillicores: 8000},
 		"node-b": {domain.NodeResourceCPUMillicores: 2000},
 	}
-	if topologyFits(byNode, resources, nil, exp) {
+	if TopologyFits(byNode, resources, nil, exp) {
 		t.Fatal("a budget of 1 trial should not be enough to find this placement")
 	}
 	// The real budget must still find it.
-	placementSearchBudget = original
-	if !topologyFits(byNode, resources, nil, exp) {
+	searchBudget = original
+	if !TopologyFits(byNode, resources, nil, exp) {
 		t.Fatal("with its real budget the same placement should still be found")
 	}
 }
 
-// nodeHasRoom's own edge cases, exercised directly rather than only through a full reservation.
+// NodeHasRoom's own edge cases, exercised directly rather than only through a full reservation.
 func TestNodeHasRoomEdgeCases(t *testing.T) {
-	if !nodeHasRoom(nil, nil) {
+	if !NodeHasRoom(nil, nil) {
 		t.Fatal("a rank that needs nothing fits a node with no reported resources at all")
 	}
-	if nodeHasRoom(nil, map[string]int64{domain.NodeResourceCPUMillicores: 1}) {
+	if NodeHasRoom(nil, map[string]int64{domain.NodeResourceCPUMillicores: 1}) {
 		t.Fatal("a node the cluster reported no resources for cannot be proven to have room for a rank that needs some")
 	}
-	if !nodeHasRoom(map[string]int64{domain.NodeResourceCPUMillicores: 0}, nil) {
+	if !NodeHasRoom(map[string]int64{domain.NodeResourceCPUMillicores: 0}, nil) {
 		t.Fatal("a rank that needs nothing fits even a node reporting zero of everything")
 	}
 }
 
 // When an accelerator job has an alternate acceptable flavor and neither flavor fits anywhere,
-// resolveClusterAndFootprint must restore the originally requested flavor (so the caller's own
+// ClusterAndFootprint must restore the originally requested flavor (so the caller's own
 // preemption path reasons about the flavor the job actually asked for) and return the requested
 // flavor's own best-fit fallback, not the alternate's.
 func TestResolveClusterAndFootprintRestoresRequestedFlavorWhenNothingFits(t *testing.T) {
@@ -324,7 +324,7 @@ func TestResolveClusterAndFootprintRestoresRequestedFlavorWhenNothingFits(t *tes
 	exp.Job.AcceptableAcceleratorTypes = []domain.AcceleratorType{altFlavor}
 	fpRequested := exp.Footprint()
 	avail := map[string]domain.Footprint{"cluster-a": fpRequested}
-	cluster, fp := resolveClusterAndFootprint(avail, nil, nil, nil, nil, exp)
+	cluster, fp := ClusterAndFootprint(avail, nil, nil, nil, nil, exp)
 	if exp.AcceleratorType != h100 {
 		t.Fatalf("AcceleratorType left as %q after failed substitution, want restored to requested %q", exp.AcceleratorType, h100)
 	}

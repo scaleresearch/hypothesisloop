@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -40,7 +41,7 @@ func newSlots() *slotFixture {
 
 func (c *slotFixture) add(node string, accelerators int64, whole map[string]int64) *slotFixture {
 	c.sizes[node] = whole
-	c.free[node] = cloneNodeCapacity(map[string]map[string]int64{node: whole})[node]
+	c.free[node] = placement.CloneNodes(map[string]map[string]int64{node: whole})[node]
 	c.labels[node] = map[string]string{domain.NodeSlotLabel: node}
 	if accelerators > 0 {
 		c.accelerators[node] = map[string]int64{h100: accelerators}
@@ -60,7 +61,7 @@ func (c *slotFixture) addCores(node string, whole map[string]int64) *slotFixture
 
 // take is what the runtime reports once an instance is in the slot.
 func (c *slotFixture) take(node string) *slotFixture {
-	holdSlot(c.accelerators, c.free, c.labels, node)
+	placement.HoldSlot(c.accelerators, c.free, c.labels, node)
 	return c
 }
 
@@ -70,7 +71,7 @@ const noOfferWhy = "shape h100: no vast offer of its size passes regions"
 // offerless is what the runtime reports for a slot no instance holds and its vendor has no
 // machine to rent for: nothing free, and the label that says why.
 func (c *slotFixture) offerless(node string) *slotFixture {
-	holdSlot(c.accelerators, c.free, c.labels, node)
+	placement.HoldSlot(c.accelerators, c.free, c.labels, node)
 	c.labels[node][domain.NodeSlotNoOfferLabel] = noOfferWhy
 	return c
 }
@@ -117,7 +118,7 @@ func h100Job(id, cpu string) *domain.Experiment {
 // sized is exp as the tick resolves it on the cluster.
 func sized(t *testing.T, c *slotFixture, exp *domain.Experiment) *domain.Experiment {
 	t.Helper()
-	resolved, misfit := resolveOntoSlot(exp, rented, c.sizes, c.free, c.labels)
+	resolved, misfit := placement.ResolveOntoSlot(exp, rented, c.sizes, c.free, c.labels)
 	if misfit != "" {
 		t.Fatalf("%s: %s", exp.ID, misfit)
 	}
@@ -177,14 +178,14 @@ func TestOnlyASlotOfTheJobsOwnShapeTakesIt(t *testing.T) {
 		h100Job("sixteen-cpu", "16"),
 		otherType, twoDevices, twoNodes, elsewhere,
 	} {
-		if resolved, misfit := resolveOntoSlot(exp, rented, c.sizes, c.free, c.labels); misfit == "" || !strings.HasPrefix(misfit, domain.NotAdmittedCapacityUnavailable) {
+		if resolved, misfit := placement.ResolveOntoSlot(exp, rented, c.sizes, c.free, c.labels); misfit == "" || !strings.HasPrefix(misfit, domain.NotAdmittedCapacityUnavailable) {
 			t.Errorf("%s: resolved to %+v, misfit %q", exp.ID, resolved, misfit)
 		}
 	}
 	// The type is the one the planner would match: the value folds case, as node labels do.
 	lowercase := h100Job("lowercase", "2")
 	lowercase.AcceleratorType = domain.AcceleratorType(strings.ToLower(h100))
-	if _, misfit := resolveOntoSlot(lowercase, rented, c.sizes, c.free, c.labels); misfit != "" {
+	if _, misfit := placement.ResolveOntoSlot(lowercase, rented, c.sizes, c.free, c.labels); misfit != "" {
 		t.Errorf("a type in another casing: %s", misfit)
 	}
 }
@@ -197,7 +198,7 @@ func TestAJobWithoutAcceleratorsNeverHoldsASlotThatHasThem(t *testing.T) {
 	if waiting.EffectiveJob().CPU != "4" {
 		t.Fatalf("resolved to %s cpu", waiting.EffectiveJob().CPU)
 	}
-	if topologyFits(c.accelerators, c.free, c.labels, waiting) {
+	if placement.TopologyFits(c.accelerators, c.free, c.labels, waiting) {
 		t.Fatal("a job without accelerators was placed with only H100 slots free")
 	}
 	// Sized like an H100 slot it still is not placed on one.
@@ -205,7 +206,7 @@ func TestAJobWithoutAcceleratorsNeverHoldsASlotThatHasThem(t *testing.T) {
 	resolved := asLarge.Job
 	resolved.CPU, resolved.Memory, resolved.Storage = "8", "32Gi", "100Gi"
 	asLarge.ResolvedJob = &resolved
-	if topologyFits(c.accelerators, c.free, c.labels, asLarge) {
+	if placement.TopologyFits(c.accelerators, c.free, c.labels, asLarge) {
 		t.Fatal("a job without accelerators was placed on a slot of its size that has one")
 	}
 }
@@ -236,8 +237,8 @@ func TestASlotIsFullOnceOneJobIsOnIt(t *testing.T) {
 	c := newSlots().add("only-0", 0, size(8000, 32, 100))
 	admitted := 0
 	for i := 0; i < 4; i++ {
-		probe, ok := onSlots(cpuJob(fmt.Sprintf("exp-%d", i), "2"), rented, c.free, c.labels)
-		if ok && reservePlacement(c.accelerators, c.free, c.labels, probe) {
+		probe, ok := placement.OnSlots(cpuJob(fmt.Sprintf("exp-%d", i), "2"), rented, c.free, c.labels)
+		if ok && placement.Reserve(c.accelerators, c.free, c.labels, probe) {
 			admitted++
 		}
 	}
@@ -246,7 +247,7 @@ func TestASlotIsFullOnceOneJobIsOnIt(t *testing.T) {
 	}
 	// A job that was not sized to the slot does not go on it at all.
 	fresh := newSlots().add("only-0", 0, size(8000, 32, 100))
-	if reservePlacement(fresh.accelerators, fresh.free, fresh.labels, cpuJob("unsized", "2")) {
+	if placement.Reserve(fresh.accelerators, fresh.free, fresh.labels, cpuJob("unsized", "2")) {
 		t.Fatal("a 2-cpu job was placed on an 8-cpu slot as a 2-cpu job")
 	}
 }
@@ -257,8 +258,8 @@ func TestANodeThatIsNotASlotPacksByRequest(t *testing.T) {
 	delete(c.labels["node-a"], domain.NodeSlotLabel)
 	for i := 0; i < 4; i++ {
 		exp := cpuJob(fmt.Sprintf("exp-%d", i), "2")
-		probe, ok := onSlots(exp, "cluster-a", c.free, c.labels)
-		if !ok || probe != exp || !reservePlacement(c.accelerators, c.free, c.labels, probe) {
+		probe, ok := placement.OnSlots(exp, "cluster-a", c.free, c.labels)
+		if !ok || probe != exp || !placement.Reserve(c.accelerators, c.free, c.labels, probe) {
 			t.Fatalf("job %d was not placed on an ordinary 8-cpu node", i)
 		}
 	}
@@ -278,7 +279,7 @@ func TestTheClaimPinsTheJobToTheSlotItWasPlacedOn(t *testing.T) {
 	candidate.Job.NodeSelector = map[string]string{"zone": "a"}
 	sized(t, c, candidate)
 
-	if !desiredPlacementFits(c.accelerators, c.free, c.labels, nil, candidate, candidate.ResolvedJob) {
+	if !placement.DesiredFits(c.accelerators, c.free, c.labels, nil, candidate, candidate.ResolvedJob) {
 		t.Fatal("a 6-cpu H100 job was refused with two free H100 slots")
 	}
 	resolved := candidate.ResolvedJob
@@ -299,7 +300,7 @@ func TestAJobOnAnOrdinaryNodeIsNotPinned(t *testing.T) {
 	delete(c.labels["node-a"], domain.NodeSlotLabel)
 	candidate := cpuJob("exp-1", "2")
 	resolved := candidate.Job
-	if !desiredPlacementFits(c.accelerators, c.free, c.labels, nil, candidate, &resolved) || resolved.NodeSelector != nil {
+	if !placement.DesiredFits(c.accelerators, c.free, c.labels, nil, candidate, &resolved) || resolved.NodeSelector != nil {
 		t.Fatalf("resolved selector = %v", resolved.NodeSelector)
 	}
 }
@@ -316,7 +317,7 @@ func TestAPinnedDesiredJobHoldsItsSlotBeforeAndAfterItIsRented(t *testing.T) {
 			}
 
 			second := sized(t, c, h100Job("second", "6"))
-			if !desiredPlacementFits(c.accelerators, c.free, c.labels, desired, second, second.ResolvedJob) {
+			if !placement.DesiredFits(c.accelerators, c.free, c.labels, desired, second, second.ResolvedJob) {
 				t.Fatal("the second job was refused with a slot free")
 			}
 			if slot := slotOf(*second.ResolvedJob); slot != "h100-1" {
@@ -325,7 +326,7 @@ func TestAPinnedDesiredJobHoldsItsSlotBeforeAndAfterItIsRented(t *testing.T) {
 
 			desired = append(desired, second)
 			third := sized(t, c, h100Job("third", "6"))
-			if desiredPlacementFits(c.accelerators, c.free, c.labels, desired, third, third.ResolvedJob) {
+			if placement.DesiredFits(c.accelerators, c.free, c.labels, desired, third, third.ResolvedJob) {
 				t.Fatalf("a third H100 job was admitted with both H100 slots held (pinned to %q)", slotOf(*third.ResolvedJob))
 			}
 		})
@@ -336,13 +337,13 @@ func TestAPinnedDesiredJobHoldsItsSlotBeforeAndAfterItIsRented(t *testing.T) {
 // takes its slot there, by the ordinary subtraction of what it holds, and no other.
 func TestReservingAPinnedJobTakesItsSlot(t *testing.T) {
 	c := twoH100AndACPU()
-	if !reservePlacement(c.accelerators, c.free, c.labels, pinnedTo(sized(t, c, h100Job("exp-1", "1")), "h100-1")) {
+	if !placement.Reserve(c.accelerators, c.free, c.labels, pinnedTo(sized(t, c, h100Job("exp-1", "1")), "h100-1")) {
 		t.Fatal("a pinned job was refused on its free slot")
 	}
 	if c.accelerators["h100-1"][h100] != 0 || c.free["h100-1"][domain.NodeResourceMemoryBytes] != 0 || c.free["h100-0"][domain.NodeResourceCPUMillicores] != 8000 {
 		t.Fatalf("after reserving: %v %v", c.accelerators, c.free)
 	}
-	if reservePlacement(c.accelerators, c.free, c.labels, pinnedTo(sized(t, twoH100AndACPU(), h100Job("exp-2", "1")), "h100-1")) {
+	if placement.Reserve(c.accelerators, c.free, c.labels, pinnedTo(sized(t, twoH100AndACPU(), h100Job("exp-2", "1")), "h100-1")) {
 		t.Fatal("a second job was placed on a slot that is taken")
 	}
 }
@@ -467,7 +468,7 @@ func (w *slotWorkload) whole() domain.Footprint {
 			all.addCores(node, whole)
 			continue
 		}
-		all.add(node, int64(slotAccelerators(w.c.labels[node])), whole)
+		all.add(node, int64(placement.SlotAccelerators(w.c.labels[node])), whole)
 	}
 	return all.capacity()
 }
@@ -482,13 +483,13 @@ func (w *slotWorkload) GetTotalCapacity(context.Context) (map[string]domain.Foot
 	return map[string]domain.Footprint{rented: w.whole()}, nil
 }
 func (w *slotWorkload) GetAcceleratorCapacityByNode(context.Context) (map[string]map[string]map[string]int64, error) {
-	return map[string]map[string]map[string]int64{rented: cloneNodeCapacity(w.c.accelerators)}, nil
+	return map[string]map[string]map[string]int64{rented: placement.CloneNodes(w.c.accelerators)}, nil
 }
 func (w *slotWorkload) GetNodeResourceCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
-	return map[string]map[string]map[string]int64{rented: cloneNodeCapacity(w.c.free)}, nil
+	return map[string]map[string]map[string]int64{rented: placement.CloneNodes(w.c.free)}, nil
 }
 func (w *slotWorkload) GetNodeTotalCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
-	return map[string]map[string]map[string]int64{rented: cloneNodeCapacity(w.c.sizes)}, nil
+	return map[string]map[string]map[string]int64{rented: placement.CloneNodes(w.c.sizes)}, nil
 }
 func (w *slotWorkload) GetNodeLabels(context.Context) (map[string]map[string]map[string]string, error) {
 	return map[string]map[string]map[string]string{rented: w.c.labels}, nil
@@ -533,8 +534,8 @@ func TestATickAdmitsOneJobPerSlotSizedAndPinned(t *testing.T) {
 		}
 		slots[slotOf(job)] = id
 		whole := c.sizes[slotOf(job)]
-		if job.CPU != canonicalQuantityString(domain.NodeResourceCPUMillicores, float64(whole[domain.NodeResourceCPUMillicores])) ||
-			job.Memory != canonicalQuantityString(domain.NodeResourceMemoryBytes, float64(whole[domain.NodeResourceMemoryBytes])) {
+		if job.CPU != placement.QuantityString(domain.NodeResourceCPUMillicores, float64(whole[domain.NodeResourceCPUMillicores])) ||
+			job.Memory != placement.QuantityString(domain.NodeResourceMemoryBytes, float64(whole[domain.NodeResourceMemoryBytes])) {
 			t.Errorf("%s on %s written with %s cpu and %s", id, slotOf(job), job.CPU, job.Memory)
 		}
 		if strings.HasPrefix(id, "cpu-job") != (slotOf(job) == "cpu-0") {
@@ -864,7 +865,7 @@ func TestAJobBeyondWhatTheVendorHasOnOfferWaitsSayingSo(t *testing.T) {
 
 func TestNothingIsLeavingASlotWithoutAnOffer(t *testing.T) {
 	c := twoH100AndACPU().take("h100-0").offerless("h100-1")
-	vacating := vacatingSlots(rented, c.sizes, c.free, c.labels, nil)
+	vacating := placement.VacatingSlots(rented, c.sizes, c.free, c.labels, nil)
 	if _, leaving := vacating["h100-0"]; !leaving || len(vacating) != 1 {
 		t.Fatalf("vacating %v, want only the slot an instance holds", vacating)
 	}
@@ -897,7 +898,7 @@ func TestAJobOnCPUHoldsAWholeSlotWithoutAccelerators(t *testing.T) {
 // A cluster of slots with none that offers cores has no slot for a job on CPU.
 func TestAJobOnCPUFindsNoSlotWithADevice(t *testing.T) {
 	c := newSlots().add("h100-0", 1, size(8000, 32, 100))
-	if _, misfit := resolveOntoSlot(slotCoresJob("cores", 2), rented, c.sizes, c.free, c.labels); !strings.Contains(misfit, "none for a job on CPU") {
+	if _, misfit := placement.ResolveOntoSlot(slotCoresJob("cores", 2), rented, c.sizes, c.free, c.labels); !strings.Contains(misfit, "none for a job on CPU") {
 		t.Fatalf("misfit %q", misfit)
 	}
 }

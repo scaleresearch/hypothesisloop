@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -61,7 +62,7 @@ func describeBytes(bytes int64) string {
 func describeNodeResources(resources map[string]int64) string {
 	fp := domain.NewFootprint()
 	for name, amount := range resources {
-		if kind, ok := nodeResourceKind(name); ok {
+		if kind, ok := placement.NodeResourceKind(name); ok {
 			fp.Add(domain.ResourceKey{Kind: kind}, amount)
 		}
 	}

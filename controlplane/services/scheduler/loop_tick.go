@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
@@ -62,7 +63,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	}
 	// Guaranteed and burst share one physical pool per cluster; preemption enforces the tier
 	// boundary.
-	bAvail := cloneAvail(gAvail)
+	bAvail := placement.CloneAvail(gAvail)
 	nodeAvail, err := l.clusters.GetAcceleratorCapacityByNode(ctx)
 	if err != nil {
 		return fmt.Errorf("per-node accelerator capacity: %w", err)
@@ -172,8 +173,8 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	// It is also what installed accelerators per node are rebuilt from (free plus claimed): a job
 	// admitted this tick is in neither the live free count nor the claimed list, so a share
 	// measured against live capacity grows with every admission.
-	nodeAvailAtTickStart := cloneNodeAvailByCluster(nodeAvail)
-	nodeResourcesAtTickStart := cloneNodeAvailByCluster(nodeResources)
+	nodeAvailAtTickStart := placement.CloneNodesByCluster(nodeAvail)
+	nodeResourcesAtTickStart := placement.CloneNodesByCluster(nodeResources)
 	clusters := tickClusters{
 		start: start, registered: registeredClusters, multiNode: multiNodeCapable, clusterIDs: clusterIDs,
 		nodeAvail: nodeAvail, nodeResources: nodeResources, nodeResourcesTotal: nodeResourcesTotal, nodeAvailAtTickStart: nodeAvailAtTickStart,
@@ -269,8 +270,8 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	// Both snapshots are taken here, before either pass claims anything. Taking the burst one
 	// after the guaranteed pass told a burst job displaced by a guaranteed one that the cluster
 	// had no room for it, when what happened is that a higher tier outranked it.
-	gAvailInitial := cloneAvail(gAvail)
-	bAvailInitial := cloneAvail(bAvail)
+	gAvailInitial := placement.CloneAvail(gAvail)
+	bAvailInitial := placement.CloneAvail(bAvail)
 
 	// Preemption candidates are read once per tick rather than once per job that fails to fit —
 	// a saturated cluster with a deep guaranteed queue otherwise issues one full scan per queued
@@ -299,7 +300,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 		// Which of the two fit checks failed decides whether preemption can help at all, so they
 		// are evaluated separately rather than or-ed into one condition.
 		scalarFits := domain.Fits(gAvail[cluster], fp)
-		liveFits := scalarFits && topologyFits(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp)
+		liveFits := scalarFits && placement.TopologyFits(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp)
 		if exp.EnvironmentImage != "" && (misfit != "" || !liveFits) {
 			l.waitForPush(ctx, "guaranteed", environments, exp, &tickErrs)
 			continue
@@ -399,7 +400,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 				runningLoaded = true
 			}
 			burstRunning := filterTierCluster(running, domain.CapacityBurst, cluster)
-			shortage := preemptionShortfall(gAvail[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp, fp)
+			shortage := placement.PreemptionShortfall(gAvail[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp, fp)
 			// With no burst job to preempt this is a full cluster and a job waiting its turn, every
 			// tick until capacity frees: the row's not_admitted_reason says so once.
 			level := zapcore.DebugLevel
@@ -417,7 +418,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 			//
 			// On a cluster of slots both questions are asked per slot, of the resolver that sized
 			// the job: the total is covered by a free slot of another shape, which never takes it.
-			slots := hasSlots(nodeLabels[cluster])
+			slots := placement.HasSlots(nodeLabels[cluster])
 			totalCovers := scalarFits && !slots
 			promised := !slots && !scalarFits && domain.Fits(desiredFree[cluster], fp)
 			leaving := ""
@@ -428,9 +429,9 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 						l.skipExperiment(&tickErrs, exp, fmt.Errorf("list claimed for vacating slots: %w", err))
 						continue
 					}
-					vacating[cluster] = vacatingSlots(cluster, nodeResourcesTotal[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], claimed)
+					vacating[cluster] = placement.VacatingSlots(cluster, nodeResourcesTotal[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], claimed)
 				}
-				if node, free, _ := slotFor(exp, cluster, nodeResourcesTotal[cluster], vacating[cluster], nodeLabels[cluster]); free {
+				if node, free, _ := placement.SlotFor(exp, cluster, nodeResourcesTotal[cluster], vacating[cluster], nodeLabels[cluster]); free {
 					leaving, promised = nodeLabels[cluster][node][domain.NodeSlotLabel], true
 					delete(vacating[cluster], node)
 				}
@@ -462,10 +463,10 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 			// is the slot itself, taken until its instance leaves: the total is the room of other
 			// slots, which never take this job.
 			if !slots && (promised || committed) {
-				subtractFootprint(bAvail[cluster], fp)
+				placement.SubtractFootprint(bAvail[cluster], fp)
 			}
 			if promised {
-				subtractFootprint(desiredFree[cluster], fp)
+				placement.SubtractFootprint(desiredFree[cluster], fp)
 			}
 			// Only a preempt that actually requeued victims makes the running set stale. Marking
 			// it stale unconditionally cost a full re-read for every blocked job behind it on a
@@ -510,7 +511,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 				reason = noOffer
 			default:
 				fitAtTickStart := domain.Fits(gAvailInitial[cluster], fp) &&
-					topologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
+					placement.TopologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
 				claimed, cerr := resolveCache.loadClaimed(ctx)
 				if cerr != nil {
 					l.skipExperiment(&tickErrs, exp, fmt.Errorf("list the jobs that hold capacity: %w", cerr))
@@ -533,12 +534,12 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 			}
 			continue
 		}
-		subtractFootprint(gAvail[cluster], fp)
+		placement.SubtractFootprint(gAvail[cluster], fp)
 		// bAvail is the same shared pool's other view — without this, the burst pass later in
 		// this tick could still see this unit as free and double-book it.
-		subtractFootprint(bAvail[cluster], fp)
-		subtractFootprint(desiredFree[cluster], fp)
-		reservePlacement(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp)
+		placement.SubtractFootprint(bAvail[cluster], fp)
+		placement.SubtractFootprint(desiredFree[cluster], fp)
+		placement.Reserve(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp)
 		obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "admitted").Inc()
 	}
 
@@ -566,7 +567,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 			continue
 		}
 		cluster, fp, misfit := placed.cluster, placed.fp, placed.misfit
-		fits := domain.Fits(bAvail[cluster], fp) && topologyFits(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp)
+		fits := domain.Fits(bAvail[cluster], fp) && placement.TopologyFits(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp)
 		if exp.EnvironmentImage != "" && (misfit != "" || !fits) {
 			l.waitForPush(ctx, "burst", environments, exp, &tickErrs)
 			continue
@@ -575,7 +576,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 			// Same shortage vector the guaranteed pass computes, for the same reason: "short
 			// {cpu: 12}" tells an operator which dimension to fix, where a bare
 			// capacity_unavailable tells them only that something, somewhere, did not fit.
-			shortage := preemptionShortfall(bAvail[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp, fp)
+			shortage := placement.PreemptionShortfall(bAvail[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp, fp)
 			// The guaranteed pass logs every skip ("guaranteed job needs preemption" below); the
 			// burst pass had no equivalent, so a burst job stuck QUEUED for many ticks left no
 			// trail at all — the actual bAvail[cluster]/nodeAvail[cluster] values a tick computed
@@ -589,7 +590,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 				zap.String("avail", footprintStr(bAvail[cluster])), zap.String("need", footprintStr(fp)),
 				zap.String("shortage", footprintStr(shortage)))
 			fitAtTickStart := domain.Fits(bAvailInitial[cluster], fp) &&
-				topologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
+				placement.TopologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
 			// A job that fit when the tick began lost its room to a higher rank and waits; nothing
 			// running is evicted for it.
 			if !fitAtTickStart && !disbalanceRan[cluster] {
@@ -615,7 +616,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 					continue
 				}
 				scalarFits := domain.Fits(bAvail[cluster], fp)
-				freed := !scalarFits && !hasSlots(nodeLabels[cluster]) && domain.Fits(desiredFree[cluster], fp)
+				freed := !scalarFits && !placement.HasSlots(nodeLabels[cluster]) && domain.Fits(desiredFree[cluster], fp)
 				reason = notAdmittedReasonFor(fitAtTickStart, scalarFits, freed, shortage, cluster, holdersOf(claimed, cluster, shortage, exp))
 				l.holdRoom(exp, cluster, fp, clusters, held, bAvail)
 			}
@@ -633,8 +634,8 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 			}
 			continue
 		}
-		subtractFootprint(bAvail[cluster], fp)
-		reservePlacement(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp)
+		placement.SubtractFootprint(bAvail[cluster], fp)
+		placement.Reserve(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp)
 		obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "admitted").Inc()
 	}
 
@@ -662,10 +663,10 @@ type tickClusters struct {
 	nodeAvail, nodeResources, nodeResourcesTotal, nodeAvailAtTickStart map[string]map[string]map[string]int64
 }
 
-// placement is where a queued job is tried in one pass: the cluster, "" when none could be picked,
+// queuedPlacement is where a queued job is tried in one pass: the cluster, "" when none could be picked,
 // and its footprint there. misfit is why the cluster picked does not take the job's own cpu,
 // memory and storage, and betFlavor the flavor a bet on a cluster that scales up is made at.
-type placement struct {
+type queuedPlacement struct {
 	cluster   string
 	fp        domain.Footprint
 	betFlavor domain.AcceleratorType
@@ -679,17 +680,17 @@ type placement struct {
 //
 // A job already assigned a cluster stays there and only its footprint is recomputed. Any other is
 // given a (cluster, flavor) pair among the requested type and its acceptable ones where the whole
-// footprint fits (resolveClusterAndFootprint). The search says its choice by setting
+// footprint fits (placement.ClusterAndFootprint). The search says its choice by setting
 // exp.AcceleratorType, and the resolved job is set on exp.
-func (l *Loop) placeQueued(ctx context.Context, pass string, exp *domain.Experiment, avail map[string]domain.Footprint, quota *domain.AgentQuota, c tickClusters, tickErrs *[]error) (placement, bool) {
-	skip := func(reason string) (placement, bool) {
+func (l *Loop) placeQueued(ctx context.Context, pass string, exp *domain.Experiment, avail map[string]domain.Footprint, quota *domain.AgentQuota, c tickClusters, tickErrs *[]error) (queuedPlacement, bool) {
+	skip := func(reason string) (queuedPlacement, bool) {
 		obsmetrics.AdmissionTickResultsTotal.WithLabelValues(pass, "skipped").Inc()
 		if err := l.markNotAdmitted(ctx, exp, reason); err != nil {
 			l.skipExperiment(tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 		}
-		return placement{}, false
+		return queuedPlacement{}, false
 	}
-	placed := placement{cluster: exp.ClusterName, betFlavor: exp.AcceleratorType}
+	placed := queuedPlacement{cluster: exp.ClusterName, betFlavor: exp.AcceleratorType}
 	candidates, ineligible := eligibleClusters(avail, c.multiNode, c.registered, exp)
 	if ineligible != "" {
 		return skip(ineligible)
@@ -710,10 +711,10 @@ func (l *Loop) placeQueued(ctx context.Context, pass string, exp *domain.Experim
 	for {
 		if !pinned {
 			exp.AcceleratorType, placed.betFlavor = queuedAt, queuedAt
-			placed.cluster, placed.fp = resolveClusterAndFootprint(candidates, c.registered, c.nodeAvail, c.nodeResources, c.nodeLabels, exp)
+			placed.cluster, placed.fp = placement.ClusterAndFootprint(candidates, c.registered, c.nodeAvail, c.nodeResources, c.nodeLabels, exp)
 		}
 		if exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType && !quotaCanCoverFlavor(quota, exp) {
-			if !slices.Contains(candidateAcceleratorTypes(exp), exp.Job.AcceleratorType) {
+			if !slices.Contains(placement.CandidateTypes(exp), exp.Job.AcceleratorType) {
 				return skip(ranOnTypeUncoveredReason(exp))
 			}
 			// Reverting to the requested flavor re-places the job, layout included: picking on
@@ -722,10 +723,10 @@ func (l *Loop) placeQueued(ctx context.Context, pass string, exp *domain.Experim
 			exp.AcceleratorType = exp.Job.AcceleratorType
 			placed.betFlavor = exp.AcceleratorType
 			placed.fp = exp.Footprint()
-			if cluster, ok := placeAtFlavor(candidates, c.registered, c.nodeAvail, c.nodeResources, c.nodeLabels, exp); ok {
+			if cluster, ok := placement.AtFlavor(candidates, c.registered, c.nodeAvail, c.nodeResources, c.nodeLabels, exp); ok {
 				placed.cluster = cluster
 			} else {
-				placed.cluster = clusterWithBestFit(candidates, c.registered, placed.fp)
+				placed.cluster = placement.BestFit(candidates, c.registered, placed.fp)
 			}
 		}
 		cluster := placed.cluster
@@ -735,7 +736,7 @@ func (l *Loop) placeQueued(ctx context.Context, pass string, exp *domain.Experim
 		resolvedJob, misfit, err := l.resolveClusterLocalResources(ctx, c.resolveCache, exp, cluster, c.nodeResourcesTotal[cluster], c.nodeAvailAtTickStart[cluster], c.nodeResources[cluster], c.nodeLabels[cluster])
 		if err != nil {
 			l.skipExperiment(tickErrs, exp, fmt.Errorf("resolve cluster-local resources: %w", err))
-			return placement{}, false
+			return queuedPlacement{}, false
 		}
 		if misfit == "" {
 			exp.ResolvedJob = resolvedJob
@@ -761,18 +762,18 @@ func (l *Loop) placeQueued(ctx context.Context, pass string, exp *domain.Experim
 // behind it otherwise take each core as it frees and exp never starts. One job holds a cluster per
 // tick, and only a cluster that holds it when idle, so the room left idle is one waiting job's.
 func (l *Loop) holdRoom(exp *domain.Experiment, cluster string, fp domain.Footprint, c tickClusters, held map[string]bool, views ...map[string]domain.Footprint) {
-	if l.heldJobNotice <= 0 || exp.QueuedAt == nil || held[cluster] || hasSlots(c.nodeLabels[cluster]) {
+	if l.heldJobNotice <= 0 || exp.QueuedAt == nil || held[cluster] || placement.HasSlots(c.nodeLabels[cluster]) {
 		return
 	}
 	if waited := c.start.Sub(*exp.QueuedAt); waited < l.heldJobNotice || waited.Hours() < exp.EstimatedDurationHours {
 		return
 	}
-	if total, ok := c.whenIdle.totals[cluster]; !ok || !fitsWhenIdle(total, c.whenIdle.nodeTotals[cluster], exp) {
+	if total, ok := c.whenIdle.totals[cluster]; !ok || !placement.FitsWhenIdle(total, c.whenIdle.nodeTotals[cluster], exp) {
 		return
 	}
 	held[cluster] = true
 	for _, view := range views {
-		subtractFootprint(view[cluster], fp)
+		placement.SubtractFootprint(view[cluster], fp)
 	}
 }
 
@@ -914,7 +915,7 @@ type installed struct {
 
 // neverFitsReason is the not_admitted_reason of a job that no wait admits as it is stated, and ""
 // for one that may yet run. Such a job asks for more than every cluster that runs its image
-// choice and reports what it has installed holds when idle (fitsWhenIdle), on each accelerator
+// choice and reports what it has installed holds when idle (placement.FitsWhenIdle), on each accelerator
 // type the job accepts. A cluster that scales up may yet hold it. A cluster that reports nothing
 // is away or not whole: it is named and not judged, and with none judged the job waits.
 //
@@ -934,7 +935,7 @@ func (in installed) neverFitsReason(exp *domain.Experiment) string {
 		case !reported:
 			judged = append(judged, c.Name+" reports nothing now")
 		case spansNodes && !in.multiNode[c.Name]:
-		case in.scalesUp[c.Name] || fitsWhenIdle(total, in.nodeTotals[c.Name], exp):
+		case in.scalesUp[c.Name] || placement.FitsWhenIdle(total, in.nodeTotals[c.Name], exp):
 			return ""
 		default:
 			lacking++
@@ -947,7 +948,7 @@ func (in installed) neverFitsReason(exp *domain.Experiment) string {
 	var holding []string
 	for _, c := range others {
 		total, reported := in.totals[c.Name]
-		if reported && (!spansNodes || in.multiNode[c.Name]) && fitsWhenIdle(total, in.nodeTotals[c.Name], exp) {
+		if reported && (!spansNodes || in.multiNode[c.Name]) && placement.FitsWhenIdle(total, in.nodeTotals[c.Name], exp) {
 			holding = append(holding, c.Name+" runs every job in "+c.JobImage)
 		}
 	}
@@ -970,7 +971,7 @@ func (in installed) neverFitsReason(exp *domain.Experiment) string {
 func (in installed) couldHold(candidates map[string]domain.Footprint, exp *domain.Experiment) map[string]domain.Footprint {
 	kept := make(map[string]domain.Footprint, len(candidates))
 	for cluster, free := range candidates {
-		if total, ok := in.totals[cluster]; !ok || fitsWhenIdle(total, in.nodeTotals[cluster], exp) {
+		if total, ok := in.totals[cluster]; !ok || placement.FitsWhenIdle(total, in.nodeTotals[cluster], exp) {
 			kept[cluster] = free
 		}
 	}
@@ -1002,7 +1003,7 @@ func noClusterRunsImageReason(others []domain.Cluster, exp *domain.Experiment) s
 func describeOffer(total domain.Footprint, nodeTotals map[string]map[string]int64, exp *domain.Experiment) string {
 	asked := domain.NewFootprint()
 	probe := *exp
-	types := candidateAcceleratorTypes(exp)
+	types := placement.CandidateTypes(exp)
 	if len(types) == 0 {
 		types = []domain.AcceleratorType{exp.AcceleratorType}
 	}
@@ -1023,50 +1024,6 @@ func describeOffer(total domain.Footprint, nodeTotals map[string]map[string]int6
 		}
 	}
 	return offer + ", at most " + describeNodeResources(largest) + " on one node"
-}
-
-// fitsWhenIdle reports whether a cluster with nothing running on it holds exp: its installed
-// total covers the job, and each node of the job fits the cpu, memory and storage of some node
-// of the cluster. Nodes whose totals were not read are not judged.
-func fitsWhenIdle(total domain.Footprint, nodeTotals map[string]map[string]int64, exp *domain.Experiment) bool {
-	if !fitsInstalled(total, exp) {
-		return false
-	}
-	if len(nodeTotals) == 0 {
-		return true
-	}
-	for _, shape := range exp.NodeShapes() {
-		held := false
-		for _, node := range nodeTotals {
-			if nodeHasRoom(node, shape.Resources) {
-				held = true
-				break
-			}
-		}
-		if !held {
-			return false
-		}
-	}
-	return true
-}
-
-// fitsInstalled reports whether total, a cluster's installed capacity, covers exp on one of the
-// accelerator types it accepts.
-func fitsInstalled(total domain.Footprint, exp *domain.Experiment) bool {
-	probe := *exp
-	// A job without accelerators has no type to vary and is judged once, as it is. Ranging over
-	// its empty type list judged it nowhere and so answered that it exceeds every cluster.
-	types := candidateAcceleratorTypes(exp)
-	if len(types) == 0 {
-		types = []domain.AcceleratorType{exp.AcceleratorType}
-	}
-	for _, t := range types {
-		probe.AcceleratorType = t
-		if domain.Fits(total, probe.Footprint()) {
-			return true
-		}
-	}
-	return false
 }
 
 // eligibleClusters narrows the clusters a job may be placed on to the ones that may and can run
@@ -1156,18 +1113,6 @@ func byImageChoice(registered map[string]domain.Cluster, exp *domain.Experiment)
 	return runs, others
 }
 
-func cloneAvail(avail map[string]domain.Footprint) map[string]domain.Footprint {
-	out := make(map[string]domain.Footprint, len(avail))
-	for cluster, fp := range avail {
-		copy := make(domain.Footprint, len(fp))
-		for key, value := range fp {
-			copy[key] = value
-		}
-		out[cluster] = copy
-	}
-	return out
-}
-
 // quotaCanCoverFlavor is an early, non-authoritative filter for a more expensive acceptable
 // flavor; ReserveAdmittedFlavor's transaction remains the final concurrency-safe check.
 func quotaCanCoverFlavor(quota *domain.AgentQuota, exp *domain.Experiment) bool {
@@ -1187,7 +1132,7 @@ func quotaCanCoverFlavor(quota *domain.AgentQuota, exp *domain.Experiment) bool 
 
 // ranOnTypeUncoveredReason is the not_admitted_reason of a job that ran on an alternative type
 // its quota no longer covers. The type it asked for is not one it may be placed on
-// (candidateAcceleratorTypes), so it waits for quota.
+// (placement.CandidateTypes), so it waits for quota.
 func ranOnTypeUncoveredReason(exp *domain.Experiment) string {
 	return fmt.Sprintf("%s: the job ran on %s and is placed on that type alone, which the agent's quota no longer covers", domain.NotAdmittedInsufficientQuota, exp.RanOnAcceleratorType)
 }
@@ -1201,799 +1146,6 @@ func footprintStr(fp domain.Footprint) string {
 	}
 	sort.Strings(parts)
 	return "{" + strings.Join(parts, ",") + "}"
-}
-
-// subtractFootprint subtracts fp from avail in place, clamped at zero per dimension. No-op if
-// avail is nil (cluster not present in the capacity map).
-func subtractFootprint(avail domain.Footprint, fp domain.Footprint) {
-	if avail == nil {
-		return
-	}
-	for k, v := range fp {
-		avail[k] -= v
-		if avail[k] < 0 {
-			avail[k] = 0
-		}
-	}
-}
-
-// shortfall returns, for every dimension footprint requests, how much more avail would need to
-// have to fit it (need - have, floored at 0 per dimension) — the vector preempt() must cover.
-func shortfall(avail domain.Footprint, footprint domain.Footprint) domain.Footprint {
-	out := domain.NewFootprint()
-	for k, need := range footprint {
-		have := avail[k]
-		if have < need {
-			out.Add(k, need-have)
-		}
-	}
-	return out
-}
-
-// nodeAcceleratorKey is the key a node's free accelerators of a type are under: the type in lower
-// case, as the capacity read keys them (ClusterReports.GetAcceleratorCapacityByNode).
-func nodeAcceleratorKey(t domain.AcceleratorType) string {
-	return strings.ToLower(string(t))
-}
-
-// preemptionShortfall keeps accelerator availability in the placement domain declared by the
-// job. Cluster-level extended-resource totals combine devices from nodes with different labels,
-// so they cannot answer whether (for example) A100 capacity is available when L40 capacity is
-// idle. CPU, memory, storage, and other resources retain their cluster-level shortfall.
-func preemptionShortfall(clusterAvail domain.Footprint, byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment, footprint domain.Footprint) domain.Footprint {
-	out := shortfall(clusterAvail, footprint)
-	// A job runs on one node, so a deficit can be entirely per-node: every dimension can be
-	// plentiful cluster-wide while no single node has the combination. Reported as an empty
-	// shortage, that job looked like it needed nothing — which left preemption with no vector to
-	// cover and the disbalance evictor with no deficit to explain, exactly when a neighbour's
-	// disproportionate request was the reason nothing fit.
-	addNodeResourceShortfall(out, byNode, nodeResources, labelsByNode, exp)
-	if exp.Job.TotalAccelerators() <= 0 {
-		return out
-	}
-	key := nodeAcceleratorKey(exp.AcceleratorType)
-	capacities := make([]int64, 0, len(byNode))
-	for node, capacity := range byNode {
-		if labelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
-			capacities = append(capacities, capacity[key])
-		}
-	}
-	sort.Slice(capacities, func(i, j int) bool { return capacities[i] > capacities[j] })
-
-	// The job's nodes, hungriest first, matched against the roomiest hosts. For an ungrouped job
-	// every node wants the same count and the order is immaterial; for a grouped one, pairing the
-	// learner with the emptiest host is the assignment that leaves the smallest real shortage.
-	perRank := make([]int64, 0, exp.Job.Nodes())
-	for _, shape := range exp.NodeShapes() {
-		if shape.AcceleratorCount > 0 {
-			perRank = append(perRank, shape.AcceleratorCount)
-		}
-	}
-	sort.Slice(perRank, func(i, j int) bool { return perRank[i] > perRank[j] })
-	var missing int64
-	if requiresDistinctHosts(exp) {
-		for rank, need := range perRank {
-			available := int64(0)
-			if rank < len(capacities) {
-				available = capacities[rank]
-			}
-			if available < need {
-				missing += need - available
-			}
-		}
-	} else {
-		for _, need := range perRank {
-			if len(capacities) == 0 {
-				missing += need
-				continue
-			}
-			sort.Slice(capacities, func(i, j int) bool { return capacities[i] > capacities[j] })
-			if capacities[0] < need {
-				missing += need - capacities[0]
-				capacities[0] = 0
-			} else {
-				capacities[0] -= need
-			}
-		}
-	}
-	acceleratorKey := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: key}
-	if missing > out[acceleratorKey] {
-		out[acceleratorKey] = missing
-	}
-	return out
-}
-
-// candidateAcceleratorTypes returns the flavors admission should try for exp, in preference
-// order: exp.AcceleratorType first, then any distinct AcceptableAcceleratorTypes.
-// AcceleratorCount is already flavor-independent, so trying an alternate only changes which
-// accelerator key the footprint is keyed under.
-func candidateAcceleratorTypes(exp *domain.Experiment) []domain.AcceleratorType {
-	if exp.Job.AcceleratorType == "" {
-		return nil
-	}
-	// A job that has already executed re-admits onto the flavor it actually ran on, and nothing
-	// else. Settlement bills lifetime observed hours at the rate the row carries, so moving a
-	// requeued job to a different flavor silently re-prices the stint it already ran at the new
-	// flavor's rate. Read from the type the row recorded when the job was marked RUNNING, which
-	// outlives every requeue and every placement that is rolled back, rather than from observed
-	// hours: metrics are delayed, so "has it consumed anything yet" can still read zero for a
-	// job that has run.
-	if exp.RanOnAcceleratorType != "" {
-		return []domain.AcceleratorType{exp.RanOnAcceleratorType}
-	}
-	types := make([]domain.AcceleratorType, 0, 1+len(exp.Job.AcceptableAcceleratorTypes))
-	types = append(types, exp.Job.AcceleratorType)
-	// The requested type is allowed to also appear in AcceptableAcceleratorTypes (see the
-	// admission check in admission.go), so collapse that overlap here rather than retrying the
-	// same flavor twice — "distinct" above is this dedup, not an assumption about the input.
-	seen := map[domain.AcceleratorType]bool{exp.Job.AcceleratorType: true}
-	for _, t := range exp.Job.AcceptableAcceleratorTypes {
-		if seen[t] {
-			continue
-		}
-		seen[t] = true
-		types = append(types, t)
-	}
-	return types
-}
-
-// resolveClusterAndFootprint picks a concrete (cluster, flavor) pair for an unpinned job. It
-// walks the clusters by priority (placementTiers), and within one priority tries every candidate
-// flavor (requested type first, see candidateAcceleratorTypes) before the next tier is looked at:
-// a job lands on a higher-priority cluster at an acceptable alternative flavor before it lands on
-// a lower one at the flavor it asked for, and a full tier never keeps it from a lower one that
-// fits. If nothing fits outright anywhere, falls back to the requested flavor's best-fit cluster
-// so the caller's preemption path still runs.
-// TotalAccelerators, not the top-level per-node count: a grouped job states its counts on its
-// groups and leaves the top-level field empty, so reading it literally said every heterogeneous
-// job wanted no accelerators at all. Such a job then took the CPU-only shortcut below — no flavor
-// substitution and, worse, no placeAtFlavor, so it was placed on scalar fit alone and could be
-// handed a cluster whose nodes had not one free device of the hardware it asked for.
-func resolveClusterAndFootprint(avail map[string]domain.Footprint, registered map[string]domain.Cluster, nodeAvail, nodeResources map[string]map[string]map[string]int64, nodeLabels map[string]map[string]map[string]string, exp *domain.Experiment) (string, domain.Footprint) {
-	requested := exp.AcceleratorType
-	types := candidateAcceleratorTypes(exp)
-	if exp.Job.TotalAccelerators() <= 0 {
-		// No flavor to vary. Still judged on node layout: a cluster whose aggregate is large
-		// enough but whose nodes are individually too small for one rank would otherwise be picked
-		// on the scalar alone, fail topologyFits in the tick, and go to preemption while another
-		// cluster could host it.
-		types = []domain.AcceleratorType{requested}
-	}
-	if len(types) == 0 {
-		return "", nil
-	}
-	for _, tier := range placementTiers(avail, registered) {
-		inTier := within(avail, tier)
-		for _, t := range types {
-			exp.AcceleratorType = t
-			if cluster, ok := placeAtFlavor(inTier, registered, nodeAvail, nodeResources, nodeLabels, exp); ok {
-				return cluster, exp.Footprint()
-			}
-		}
-	}
-	exp.AcceleratorType = types[0]
-	fallback := exp.Footprint()
-	exp.AcceleratorType = requested
-	return clusterWithBestFit(avail, registered, fallback), fallback
-}
-
-// placeAtFlavor names the cluster that can host exp at the accelerator type it currently carries,
-// judged on footprint and node layout alike: in the highest priority tier that has one, the one
-// with room for the most jobs like exp (roomFor), so jobs spread over the clusters an org ranked
-// alike and keep each busy. One run placed 7 of 9 researcher jobs on the first name that fit, a box
-// of 12 cores, while one of 28 sat mostly idle. Among those with equal room the cluster that built
-// exp's environment, which holds its image, goes first, then the name. ok=false means no cluster
-// can: the caller decides what to do with a job that does not fit anywhere, rather than being
-// handed a cluster that only looks big enough in the scalar.
-func placeAtFlavor(avail map[string]domain.Footprint, registered map[string]domain.Cluster, nodeAvail, nodeResources map[string]map[string]map[string]int64, nodeLabels map[string]map[string]map[string]string, exp *domain.Experiment) (string, bool) {
-	for _, tier := range placementTiers(avail, registered) {
-		best, bestRoom := "", int64(0)
-		for _, candidate := range tier {
-			// The job is not resolved yet, and on a cluster of slots it only fits as the slot it
-			// would be resolved to.
-			probe, ok := onSlots(exp, candidate, nodeResources[candidate], nodeLabels[candidate])
-			if !ok {
-				continue
-			}
-			fp := probe.Footprint()
-			if !domain.Fits(avail[candidate], fp) || !topologyFits(nodeAvail[candidate], nodeResources[candidate], nodeLabels[candidate], probe) {
-				continue
-			}
-			room := roomFor(avail[candidate], fp)
-			loaded := exp.EnvironmentCluster != "" && candidate == exp.EnvironmentCluster && best != exp.EnvironmentCluster
-			if best == "" || room > bestRoom || room == bestRoom && loaded {
-				best, bestRoom = candidate, room
-			}
-		}
-		if best != "" {
-			return best, true
-		}
-	}
-	return "", false
-}
-
-// roomFor is how many jobs of footprint fit in free capacity: the fewest of any dimension it asks
-// for.
-func roomFor(free, footprint domain.Footprint) int64 {
-	room := int64(-1)
-	for key, need := range footprint {
-		if need <= 0 {
-			continue
-		}
-		if n := free[key] / need; room < 0 || n < room {
-			room = n
-		}
-	}
-	return max(room, 0)
-}
-
-func requiresDistinctHosts(exp *domain.Experiment) bool {
-	// TotalAccelerators rather than the top-level per-node count: a grouped job states its counts
-	// per group and leaves the top-level field empty, which read literally would say every
-	// heterogeneous job is happy to stack all its ranks on one host.
-	if exp.Job.Nodes() <= 1 || exp.Job.TotalAccelerators() <= 0 {
-		return false
-	}
-	return exp.Job.Topology == nil || exp.Job.Topology.SpreadAcrossHosts == nil || *exp.Job.Topology.SpreadAcrossHosts
-}
-
-// topologyFits proves that every rank of a hard spread-across-hosts accelerator job has a
-// distinct currently-schedulable node with enough free devices of the selected flavor.
-func topologyFits(byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) bool {
-	return reservePlacement(cloneNodeCapacity(byNode), cloneNodeCapacity(nodeResources), labelsByNode, exp)
-}
-
-func labelsMatch(actual, required map[string]string) bool {
-	for key, value := range required {
-		if actual[key] != value {
-			return false
-		}
-	}
-	return true
-}
-
-// desiredPlacementFits proves candidate fits the cluster beside the jobs already desired there.
-// resolved is the candidate's job as the runtime will be handed it: when the candidate lands on a
-// slot (domain.NodeSlotLabel), resolved is pinned to that slot.
-func desiredPlacementFits(byNode map[string]map[string]int64, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, desired []*domain.Experiment, candidate *domain.Experiment, resolved *domain.JobSpec) bool {
-	byNode, nodeResources = cloneNodeCapacity(byNode), cloneNodeCapacity(nodeResources)
-	// Planned jointly, not one job after another: the runtime is free to put an already-desired
-	// job on whichever node it likes, so replaying it onto one fixed node and then asking whether
-	// the candidate fits around that guess rejected candidates the cluster could host.
-	//
-	// A desired job pinned to a slot is the exception, since its node is decided. It holds that
-	// slot whether or not the runtime has rented it yet, and is not planned again: its slot reads
-	// as taken from the moment its instance exists, and planning it there would find no room for
-	// a job that is already in place.
-	jobs := make([]*domain.Experiment, 0, len(desired)+1)
-	for _, d := range desired {
-		if slot := d.EffectiveJob().NodeSelector[domain.NodeSlotLabel]; slot != "" {
-			holdSlot(byNode, nodeResources, labelsByNode, slot)
-			continue
-		}
-		jobs = append(jobs, d)
-	}
-	jobs = append(jobs, candidate)
-	plan, ok := planPlacement(byNode, nodeResources, labelsByNode, jobs)
-	if !ok {
-		return false
-	}
-	// A slot holds a whole job, so only a job that is one node can be pinned to one.
-	if candidate.Job.Nodes() == 1 {
-		for _, p := range plan {
-			if slot := labelsByNode[p.node][domain.NodeSlotLabel]; p.job == len(jobs)-1 && slot != "" {
-				selector := make(map[string]string, len(resolved.NodeSelector)+1)
-				for key, value := range resolved.NodeSelector {
-					selector[key] = value
-				}
-				selector[domain.NodeSlotLabel] = slot
-				resolved.NodeSelector = selector
-			}
-		}
-	}
-	return true
-}
-
-func cloneNodeCapacity(byNode map[string]map[string]int64) map[string]map[string]int64 {
-	cloned := make(map[string]map[string]int64, len(byNode))
-	for node, capacity := range byNode {
-		cloned[node] = make(map[string]int64, len(capacity))
-		for key, count := range capacity {
-			cloned[node][key] = count
-		}
-	}
-	return cloned
-}
-
-// reservePlacement walks exp's ranks over the candidate nodes and subtracts what each rank takes,
-// returning false when no node can host one.
-//
-// Every dimension is checked per node, not just accelerators. A job runs on one node and must fit
-// that node's free CPU/memory/storage as well — checking those against a cluster-wide total
-// admitted jobs no node could run: they were placed in desired state, held a reservation, and sat
-// unschedulable until the stuck-pending deadline. It also silently disabled the disbalance
-// evictor, which only ever runs when admission fails and so never saw the jobs whose neighbours'
-// disproportionate requests were the reason nothing fit.
-//
-// This is resource-vector feasibility, not proof that the runtime will schedule the job: taints,
-// volumes and affinity are the runtime's own concerns and are not modelled here.
-// It walks domain.JobSpec.NodeShapes() — one entry per node, which for a heterogeneous (grouped)
-// job are genuinely different shapes. An averaged shape would be the one thing that must not be
-// used here: no node ever holds the average of a learner and 64 actors, so a job proven to fit
-// against it fits nowhere.
-//
-// The walk is a search, not a single greedy pass: ranks are tried hardest-first, each on the
-// tightest node that fits, and a rank that finds no host sends the search back to move an earlier
-// one. A plain first-fit in declared order let a small rank take the only node a later large rank
-// could use and reported a job with a valid assignment as not fitting. The input maps are
-// modified only when the whole job is placed — a false answer leaves them exactly as they were.
-func reservePlacement(byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) bool {
-	plan, ok := planPlacement(cloneNodeCapacity(byNode), cloneNodeCapacity(nodeResources), labelsByNode, []*domain.Experiment{exp})
-	if !ok {
-		return false
-	}
-	for _, p := range plan {
-		if p.shape.AcceleratorCount > 0 {
-			byNode[p.node][p.key] -= p.shape.AcceleratorCount
-		}
-		subtractNodeResources(nodeResources[p.node], p.shape.Resources)
-	}
-	return true
-}
-
-// rankAssignment is one rank of one job pinned to a node by planPlacement. key is the
-// nodeAcceleratorKey of the job's type, "" for a rank that holds no accelerator.
-type rankAssignment struct {
-	job   int
-	shape domain.NodeShape
-	node  string
-	key   string
-}
-
-// placementSearchBudget bounds the number of node trials one planPlacement call may make before
-// it gives up. Hardest-first ordering with best-fit node choice and equivalent-node pruning places
-// realistic jobs without backtracking at all; the budget is a guard against an adversarial layout
-// exhausting the tick, and running out of it is reported as "does not fit" — a conservative
-// answer, the same one the greedy walk gave whenever it guessed wrong.
-var placementSearchBudget = 50000
-
-// planPlacement finds nodes for every rank of every job in jobs against the given free capacity,
-// consuming capacity in the maps as it goes (callers pass clones). Distinct-host rules apply per
-// job; ranks of different jobs may share a node. Returns the assignment and whether all ranks
-// were placed. On false the maps are left in an unspecified state.
-func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, jobs []*domain.Experiment) ([]rankAssignment, bool) {
-	type rank struct {
-		job      int
-		shape    domain.NodeShape
-		key      string
-		distinct bool
-		nodes    []string // qualifying candidate set for this rank
-	}
-	var ranks []rank
-	for i, exp := range jobs {
-		key := nodeAcceleratorKey(exp.AcceleratorType)
-		// Two candidate sets: a node that reported accelerators, and any node the cluster
-		// reported resources for. A node needing no accelerator must not be confined to
-		// accelerator nodes.
-		acceleratorNodes := qualifyingNodes(byNode, labelsByNode, exp)
-		plainNodes := qualifyingNodes(nodeResources, labelsByNode, exp)
-		distinct := requiresDistinctHosts(exp)
-		for _, shape := range exp.NodeShapes() {
-			nodes := plainNodes
-			if shape.AcceleratorCount > 0 {
-				nodes = acceleratorNodes
-			}
-			ranks = append(ranks, rank{job: i, shape: shape, key: key, distinct: distinct, nodes: nodes})
-		}
-	}
-	// Hardest rank first: most accelerators, then the largest fungible request. The rank with the
-	// fewest possible hosts is placed while the most hosts are still free.
-	sort.SliceStable(ranks, func(a, b int) bool {
-		if ranks[a].shape.AcceleratorCount != ranks[b].shape.AcceleratorCount {
-			return ranks[a].shape.AcceleratorCount > ranks[b].shape.AcceleratorCount
-		}
-		return shapeResourceTotal(ranks[a].shape) > shapeResourceTotal(ranks[b].shape)
-	})
-
-	used := make([]map[string]bool, len(jobs))
-	for i := range used {
-		used[i] = make(map[string]bool)
-	}
-	plan := make([]rankAssignment, len(ranks))
-	budget := placementSearchBudget
-
-	// nodeFits reports whether node can host r right now and the accelerator key it would draw on.
-	nodeFits := func(r rank, node string) (string, bool) {
-		if r.distinct && used[r.job][node] {
-			return "", false
-		}
-		nodeKey := ""
-		if r.shape.AcceleratorCount > 0 {
-			nodeKey = r.key
-			if byNode[node][nodeKey] < r.shape.AcceleratorCount {
-				return "", false
-			}
-		}
-		if !nodeHasRoom(nodeResources[node], r.shape.Resources) {
-			return "", false
-		}
-		if isSlot(labelsByNode[node]) && !takesWholeSlot(r.shape, nodeKey, byNode[node], nodeResources[node]) {
-			return "", false
-		}
-		return nodeKey, true
-	}
-	// leftover is what node would have left after hosting r, summed into one number per family —
-	// the best-fit sort key only. Summing across dimensions is fine for deciding which node to
-	// *try* first (a rough "how much room is left" ranking); it is not fine for deciding two nodes
-	// are the same node, which is what equivalentState below is for.
-	leftover := func(r rank, node, nodeKey string) (int64, int64) {
-		var accelerators, resources int64
-		if r.shape.AcceleratorCount > 0 {
-			accelerators = byNode[node][nodeKey] - r.shape.AcceleratorCount
-		}
-		for k, v := range nodeResources[node] {
-			resources += v - r.shape.Resources[k]
-		}
-		return accelerators, resources
-	}
-	// equivalentState is the exact post-placement state of a node, dimension by dimension. It is
-	// the key the interchangeability pruning below is allowed to use.
-	//
-	// The scalar sum from leftover must never be used for this. Memory and storage are both
-	// byte-valued and of the same magnitude, so a node with 2Gi of memory and no disk and a node
-	// with no memory and 2Gi of disk produce the identical sum — the pruning then discarded one of
-	// them as a duplicate of the other and lost every assignment that needed the discarded one,
-	// reporting a placeable job as not fitting.
-	equivalentState := func(r rank, node, nodeKey string) string {
-		dimensions := make([]string, 0, len(nodeResources[node]))
-		for k := range nodeResources[node] {
-			dimensions = append(dimensions, k)
-		}
-		sort.Strings(dimensions)
-		var b strings.Builder
-		if r.shape.AcceleratorCount > 0 {
-			fmt.Fprintf(&b, "a=%d;", byNode[node][nodeKey]-r.shape.AcceleratorCount)
-		}
-		for _, k := range dimensions {
-			fmt.Fprintf(&b, "%s=%d;", k, nodeResources[node][k]-r.shape.Resources[k])
-		}
-		return b.String()
-	}
-
-	var place func(i int) bool
-	place = func(i int) bool {
-		if i == len(ranks) {
-			return true
-		}
-		r := ranks[i]
-		type candidate struct {
-			node, key string
-			accLeft   int64
-			resLeft   int64
-			state     string
-		}
-		candidates := make([]candidate, 0, len(r.nodes))
-		for _, node := range r.nodes {
-			nodeKey, ok := nodeFits(r, node)
-			if !ok {
-				continue
-			}
-			accLeft, resLeft := leftover(r, node, nodeKey)
-			candidates = append(candidates, candidate{node: node, key: nodeKey, accLeft: accLeft, resLeft: resLeft, state: equivalentState(r, node, nodeKey)})
-		}
-		sort.SliceStable(candidates, func(a, b int) bool {
-			if candidates[a].accLeft != candidates[b].accLeft {
-				return candidates[a].accLeft < candidates[b].accLeft
-			}
-			return candidates[a].resLeft < candidates[b].resLeft
-		})
-		// Two nodes that would be left in the same state are interchangeable for this rank, and
-		// for every rank after it. Retrying the same failed subtree from an equivalent node is
-		// what turns a homogeneous cluster into an exponential search.
-		tried := make(map[string]bool)
-		for _, c := range candidates {
-			if tried[c.state] {
-				continue
-			}
-			tried[c.state] = true
-			if budget <= 0 {
-				return false
-			}
-			budget--
-			if r.shape.AcceleratorCount > 0 {
-				byNode[c.node][c.key] -= r.shape.AcceleratorCount
-			}
-			subtractNodeResources(nodeResources[c.node], r.shape.Resources)
-			used[r.job][c.node] = true
-			plan[i] = rankAssignment{job: r.job, shape: r.shape, node: c.node, key: c.key}
-			if place(i + 1) {
-				return true
-			}
-			used[r.job][c.node] = false
-			addNodeResources(nodeResources[c.node], r.shape.Resources)
-			if r.shape.AcceleratorCount > 0 {
-				byNode[c.node][c.key] += r.shape.AcceleratorCount
-			}
-			if budget <= 0 {
-				return false
-			}
-		}
-		return false
-	}
-	if !place(0) {
-		return nil, false
-	}
-	return plan, true
-}
-
-func shapeResourceTotal(shape domain.NodeShape) int64 {
-	var total int64
-	for _, amount := range shape.Resources {
-		total += amount
-	}
-	return total
-}
-
-func addNodeResources(available, used map[string]int64) {
-	for key, amount := range used {
-		available[key] += amount
-	}
-}
-
-// qualifyingNodes is the sorted set of nodes from capacity that carry exp's required node labels.
-// The selector is the effective job's: admission may have pinned an admitted job to a slot, and
-// for every other job the resolved selector is the submitted one.
-func qualifyingNodes(capacity map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) []string {
-	nodes := make([]string, 0, len(capacity))
-	for node := range capacity {
-		if labelsMatch(labelsByNode[node], exp.EffectiveJob().NodeSelector) {
-			nodes = append(nodes, node)
-		}
-	}
-	sort.Strings(nodes)
-	return nodes
-}
-
-// hardestNodeShape is the single node of exp that is hardest to place — most accelerators first,
-// then the largest fungible request. Diagnostics that describe a job by one shape (the shortfall
-// vector, and the preemption plan built from it) use this one, because covering the hardest node
-// is what actually unblocks the job. Every shape is identical for an ungrouped job, so this is
-// that job's per-node shape exactly as before.
-func hardestNodeShape(exp *domain.Experiment) domain.NodeShape {
-	var hardest domain.NodeShape
-	var hardestTotal int64
-	for _, shape := range exp.NodeShapes() {
-		var total int64
-		for _, amount := range shape.Resources {
-			total += amount
-		}
-		if hardest.Resources == nil || shape.AcceleratorCount > hardest.AcceleratorCount ||
-			(shape.AcceleratorCount == hardest.AcceleratorCount && total > hardestTotal) {
-			hardest, hardestTotal = shape, total
-		}
-	}
-	return hardest
-}
-
-func nodeHasRoom(available, needed map[string]int64) bool {
-	if len(needed) == 0 {
-		return true
-	}
-	// A node the cluster did not report resources for cannot be proven to have room for a job
-	// that needs some. Reporting them is required (see clusteragentapi), so an absent entry is a
-	// malformed report, not a default.
-	if available == nil {
-		return false
-	}
-	for key, amount := range needed {
-		if available[key] < amount {
-			return false
-		}
-	}
-	return true
-}
-
-func subtractNodeResources(available, used map[string]int64) {
-	for key, amount := range used {
-		available[key] -= amount
-	}
-}
-
-// addNodeResourceShortfall folds in what the fungible dimensions still lack once the job's ranks
-// are laid out over the qualifying nodes. It walks the ranks hardest-first, consuming each node it
-// places one on, and reports the *least* deficient node for the first rank that finds no host —
-// least deficient because covering that one node lets that rank land, which is what has to be
-// freed somewhere rather than everywhere.
-//
-// The walk has to consume capacity as it goes, because a job's ranks compete with each other. Only
-// asking whether some node could host one rank called a job satisfied whenever a single node had
-// room, even when the job needed several such nodes and the cluster had one: two ranks wanting 2Gi
-// of disk apiece on a cluster holding 4Gi spread as 1+1+2 passes the cluster-level check, cannot
-// be placed, and was reported as needing nothing at all — leaving preemption with no vector to
-// cover and the disbalance evictor with no deficit to explain, so the job sat queued forever while
-// the scheduler said it wanted nothing.
-func addNodeResourceShortfall(out domain.Footprint, byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) {
-	shapes := exp.NodeShapes()
-	if len(shapes) == 0 {
-		return
-	}
-	// Hardest first, mirroring planPlacement: the rank with the fewest possible hosts is laid down
-	// while the most nodes are still free, so a deficit reported here is one the real search would
-	// also have hit rather than an artefact of an unlucky order.
-	sort.SliceStable(shapes, func(a, b int) bool {
-		if shapes[a].AcceleratorCount != shapes[b].AcceleratorCount {
-			return shapes[a].AcceleratorCount > shapes[b].AcceleratorCount
-		}
-		return shapeResourceTotal(shapes[a]) > shapeResourceTotal(shapes[b])
-	})
-
-	// Clones: this is a diagnostic pass over the tick's live capacity maps and must not disturb
-	// them for the admission decisions that follow.
-	accelerators := cloneNodeCapacity(byNode)
-	resources := cloneNodeCapacity(nodeResources)
-	key := nodeAcceleratorKey(exp.AcceleratorType)
-	distinct := requiresDistinctHosts(exp)
-	occupied := map[string]bool{}
-
-	nodes := make([]string, 0, len(resources))
-	for node := range resources {
-		nodes = append(nodes, node)
-	}
-	sort.Strings(nodes) // deterministic reporting across ticks
-
-	for _, shape := range shapes {
-		var bestDeficit map[string]int64
-		var bestTotal int64
-		placed := ""
-
-		for _, node := range nodes {
-			if !labelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
-				continue
-			}
-			if distinct && occupied[node] {
-				continue
-			}
-			// Only nodes that could host this rank's accelerators are candidates; where the
-			// accelerators themselves are missing, the per-node accelerator shortfall reported by
-			// preemptionShortfall already says so.
-			if shape.AcceleratorCount > 0 && accelerators[node][key] < shape.AcceleratorCount {
-				continue
-			}
-			deficit := map[string]int64{}
-			var total int64
-			for resource, need := range shape.Resources {
-				if short := need - resources[node][resource]; short > 0 {
-					deficit[resource] = short
-					total += short
-				}
-			}
-			if total == 0 {
-				placed = node
-				break
-			}
-			if bestDeficit == nil || total < bestTotal {
-				bestDeficit, bestTotal = deficit, total
-			}
-		}
-
-		if placed != "" {
-			if shape.AcceleratorCount > 0 {
-				accelerators[placed][key] -= shape.AcceleratorCount
-			}
-			subtractNodeResources(resources[placed], shape.Resources)
-			occupied[placed] = true
-			continue
-		}
-
-		// This rank has nowhere to go. Report what the closest node lacks and stop: freeing that
-		// much lets this rank land, and a later tick re-measures whatever remains.
-		for resource, short := range bestDeficit {
-			kind, ok := nodeResourceKind(resource)
-			if !ok {
-				continue
-			}
-			if k := (domain.ResourceKey{Kind: kind}); out[k] < short {
-				out[k] = short
-			}
-		}
-		return
-	}
-}
-
-func nodeResourceKind(resource string) (domain.ResourceKind, bool) {
-	switch resource {
-	case domain.NodeResourceCPUMillicores:
-		return domain.ResourceKindCPU, true
-	case domain.NodeResourceMemoryBytes:
-		return domain.ResourceKindMemory, true
-	case domain.NodeResourceStorageBytes:
-		return domain.ResourceKindStorage, true
-	default:
-		return "", false
-	}
-}
-
-// clusterWithBestFit picks a target cluster for footprint among every configured cluster in
-// avail (iterated in stable, sorted-by-name order for determinism):
-//  1. the first cluster where footprint already Fits — a job that fits outright always beats
-//     one that would need preemption; cluster name order is the tiebreak among those
-//  2. otherwise, among the clusters that could ever host the request, the one with the smallest
-//     total shortage (sum across dimensions of max(0, need-have)) — the best candidate for
-//     preempt() to free room on
-//
-// "Could ever host it" is the load-bearing half of step 2, and it is not the same question as
-// step 1's. A cluster that has never reported a dimension the job asks for — an accelerator
-// flavor it does not own — has a shortage equal to the whole request, which ties with a cluster
-// that owns exactly that hardware and is merely full of preemptible burst work. The tie used to
-// go to whichever name sorted first, and when it went to the cluster without the hardware the
-// guaranteed job was handed a preemption target where no victim could ever free what it needs:
-// preemption is scoped to the chosen cluster, found nothing to take there, and the job stayed
-// QUEUED tick after tick while the real hardware sat under evictable burst jobs.
-//
-// Returning "" when no cluster reports the request is the honest answer and needs no special
-// case at the call sites: the absent footprint fails every fit check, so the job is marked
-// capacity_unavailable, which is exactly what "no cluster on this platform has this hardware"
-// means.
-//
-// Both steps go by priority before anything else (placementTiers): step 1 takes the first fit in
-// placement order, and step 2 answers from the highest-priority tier that holds a cluster which
-// could ever host the request, so the room is made on the compute the org ranked first.
-func clusterWithBestFit(avail map[string]domain.Footprint, registered map[string]domain.Cluster, footprint domain.Footprint) string {
-	tiers := placementTiers(avail, registered)
-	for _, tier := range tiers {
-		for _, c := range tier {
-			if domain.Fits(avail[c], footprint) {
-				return c
-			}
-		}
-	}
-	for _, tier := range tiers {
-		best := ""
-		var bestShortage int64 = -1
-		for _, c := range tier {
-			if !reportsEveryDimension(avail[c], footprint) {
-				continue
-			}
-			var shortage int64
-			for _, v := range shortfall(avail[c], footprint) {
-				shortage += v
-			}
-			if bestShortage < 0 || shortage < bestShortage {
-				bestShortage = shortage
-				best = c
-			}
-		}
-		if best != "" {
-			return best
-		}
-	}
-	return ""
-}
-
-// reportsEveryDimension reports whether capacity has an entry for every dimension footprint asks
-// for — present, not necessarily sufficient. Zero free of a flavor the cluster owns is a cluster
-// preemption can unblock; no entry at all is a cluster that does not have the hardware, and no
-// eviction there will ever produce it.
-func reportsEveryDimension(capacity domain.Footprint, footprint domain.Footprint) bool {
-	for key, need := range footprint {
-		if need <= 0 {
-			continue
-		}
-		if _, reported := capacity[key]; !reported {
-			return false
-		}
-	}
-	return true
-}
-
-// cloneNodeAvailByCluster deep-copies a cluster -> node -> resource capacity map, so a snapshot
-// survives the in-place reservations admission makes as it walks the queue.
-func cloneNodeAvailByCluster(byCluster map[string]map[string]map[string]int64) map[string]map[string]map[string]int64 {
-	cloned := make(map[string]map[string]map[string]int64, len(byCluster))
-	for cluster, byNode := range byCluster {
-		cloned[cluster] = cloneNodeCapacity(byNode)
-	}
-	return cloned
 }
 
 // environmentPass is what one tick read of the environments queued jobs wait for: each

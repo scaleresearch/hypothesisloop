@@ -9,8 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/resource"
-
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -107,7 +106,7 @@ func (c *resolutionCache) installedAcceleratorsByNode(ctx context.Context, clust
 	if flavor.Kind() == domain.TypeKindCPU {
 		return installedCoresByNode(nodeAvail, nodeResourcesTotal), nil
 	}
-	key := nodeAcceleratorKey(flavor)
+	key := placement.AcceleratorKey(flavor)
 	installed := make(map[string]int64, len(nodeAvail))
 	for node, byFlavor := range nodeAvail {
 		installed[node] = byFlavor[key]
@@ -182,11 +181,11 @@ func installedCoresByNode(nodeAvail, nodeResourcesTotal map[string]map[string]in
 // may still admit the job later, so this is never a hard rejection.
 //
 // On a cluster of slots (domain.NodeSlotLabel) none of the above applies: the job is sized to the
-// slot it is to hold, see resolveOntoSlot. nodeResources is what each node has free now, which
+// slot it is to hold, see placement.ResolveOntoSlot. nodeResources is what each node has free now, which
 // only that case reads.
 func (l *Loop) resolveClusterLocalResources(ctx context.Context, cache *resolutionCache, exp *domain.Experiment, cluster string, nodeResourcesTotal, nodeAvail, nodeResources map[string]map[string]int64, nodeLabels map[string]map[string]string) (resolved *domain.JobSpec, misfit string, err error) {
-	if hasSlots(nodeLabels) {
-		resolved, misfit = resolveOntoSlot(exp, cluster, nodeResourcesTotal, nodeResources, nodeLabels)
+	if placement.HasSlots(nodeLabels) {
+		resolved, misfit = placement.ResolveOntoSlot(exp, cluster, nodeResourcesTotal, nodeResources, nodeLabels)
 		return resolved, misfit, nil
 	}
 	out := exp.Job
@@ -211,7 +210,7 @@ func (l *Loop) resolveClusterLocalResources(ctx context.Context, cache *resoluti
 		} {
 			share, bounded := int64(0), false
 			for node, total := range nodeResourcesTotal {
-				if !labelsMatch(nodeLabels[node], exp.Job.NodeSelector) || installed[node] <= 0 {
+				if !placement.LabelsMatch(nodeLabels[node], exp.Job.NodeSelector) || installed[node] <= 0 {
 					continue
 				}
 				ofNode, err := domain.FairShare(total[dimension.key], int64(g.AcceleratorCount), installed[node])
@@ -225,7 +224,7 @@ func (l *Loop) resolveClusterLocalResources(ctx context.Context, cache *resoluti
 			if !bounded {
 				continue
 			}
-			requested, err := canonicalQuantityValue(dimension.key, dimension.requested)
+			requested, err := placement.QuantityValue(dimension.key, dimension.requested)
 			if err != nil {
 				return nil, "", fmt.Errorf("job %s %q: %w", dimension.name, dimension.requested, err)
 			}
@@ -254,7 +253,7 @@ func shareMisfit(dimension, requested, share string, count int, unit, cluster st
 func shareQuantityString(key string, value int64) string {
 	switch {
 	case key == domain.NodeResourceCPUMillicores || value < 1<<20:
-		return canonicalQuantityString(key, float64(value))
+		return placement.QuantityString(key, float64(value))
 	case value >= 1<<30:
 		return strconv.FormatFloat(math.Floor(float64(value)*10/(1<<30))/10, 'f', -1, 64) + "Gi"
 	}
@@ -270,26 +269,4 @@ func joinMisfits(misfits []string) string {
 		_, sentences[i] = domain.SplitQueueReason(m)
 	}
 	return code + ": " + strings.Join(sentences, "; ")
-}
-
-// canonicalQuantityValue parses a JobSpec-style quantity string into the canonical unit
-// domain.NodeResource* uses for key (millicores for CPU, bytes for memory/storage).
-func canonicalQuantityValue(key, qty string) (float64, error) {
-	q, err := resource.ParseQuantity(qty)
-	if err != nil {
-		return 0, err
-	}
-	if key == domain.NodeResourceCPUMillicores {
-		return float64(q.MilliValue()), nil
-	}
-	return float64(q.Value()), nil
-}
-
-// canonicalQuantityString renders a canonical-unit value (millicores for CPU, bytes for
-// memory/storage) back into a JobSpec-style quantity string.
-func canonicalQuantityString(key string, value float64) string {
-	if key == domain.NodeResourceCPUMillicores {
-		return resource.NewMilliQuantity(int64(value), resource.DecimalSI).String()
-	}
-	return resource.NewQuantity(int64(value), resource.BinarySI).String()
 }

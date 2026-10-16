@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
@@ -26,7 +27,7 @@ import (
 
 // nodeResourceName maps a fungible domain.ResourceKind to the domain.NodeResource* string key
 // the per-node capacity maps (nodeResources, nodeResourcesTotal) are keyed by — the reverse of
-// loop_tick.go's nodeResourceKind. Only CPU/memory/storage have a node-resource key; accelerators
+// placement.NodeResourceKind. Only CPU/memory/storage have a node-resource key; accelerators
 // are counted separately (see installedOf in selectDisbalanceVictims).
 func nodeResourceName(kind domain.ResourceKind) (string, bool) {
 	switch kind {
@@ -67,7 +68,7 @@ type pendingEviction struct {
 	cluster          string
 	node             string
 	footprint        domain.Footprint
-	acceleratorType  string // its nodeAcceleratorKey
+	acceleratorType  string // its placement.AcceleratorKey
 	acceleratorCount int64
 	evictedAt        time.Time
 	// nodeFreeAtEviction is what the victim's node reported free of its flavor at the moment it
@@ -251,7 +252,7 @@ func (l *Loop) evictDisbalanced(
 		// Record the freed capacity as pending so the next tick(s) — until evictionTTL or a
 		// capacity read catches up, whichever first — credit it back rather than evicting a fresh
 		// victim to cover the same shortage again. See applyPendingEvictions.
-		acceleratorType := nodeAcceleratorKey(victim.experiment.AcceleratorType)
+		acceleratorType := placement.AcceleratorKey(victim.experiment.AcceleratorType)
 		nodeFree := nodeAvail[victim.node][acceleratorType]
 		l.pendingEvictions[victim.experiment.ID] = pendingEviction{
 			cluster:            cluster,
@@ -296,13 +297,13 @@ func disbalancePremises(
 	if blocked.AcceleratorType.Kind() == domain.TypeKindCPU {
 		return nil, nil, false
 	}
-	// preemptionShortfall — the same function the tick's own fit check uses at the call site that
-	// led here (see loop_tick.go) — rather than a plain cluster-total shortfall(): the evictor
+	// placement.PreemptionShortfall — the same function the tick's own fit check uses at the call site that
+	// led here (see loop_tick.go) — rather than a plain cluster-total placement.Shortfall(): the evictor
 	// must judge "is blocked's accelerator dimension really short" with the identical per-node
 	// placement evidence the trigger used, not a coarser cluster-wide sum that can disagree with
-	// it. shortfall() only records dimensions with a real deficit, so every entry here is
+	// it. placement.Shortfall() only records dimensions with a real deficit, so every entry here is
 	// positive.
-	shortage := preemptionShortfall(clusterAvail, nodeAvail, nodeResources, nodeLabels, blocked, blockedFP)
+	shortage := placement.PreemptionShortfall(clusterAvail, nodeAvail, nodeResources, nodeLabels, blocked, blockedFP)
 	if len(shortage) == 0 {
 		return nil, nil, false
 	}
@@ -312,17 +313,17 @@ func disbalancePremises(
 		}
 	}
 
-	flavor := nodeAcceleratorKey(blocked.AcceleratorType)
+	flavor := placement.AcceleratorKey(blocked.AcceleratorType)
 	// Per NODE, not per job: the question is whether some single node is stranding enough free
-	// devices to host one of blocked's nodes. hardestNodeShape is the same one-shape summary the
+	// devices to host one of blocked's nodes. placement.HardestNodeShape is the same one-shape summary the
 	// shortfall vector uses, and covering the hardest node is what unblocks the job; for an
 	// ungrouped job every shape is identical, so this is its per-node count exactly as before.
-	perRank := hardestNodeShape(blocked).AcceleratorCount
+	perRank := placement.HardestNodeShape(blocked).AcceleratorCount
 	// Value, not just presence: how many accelerators a node is stranding is the whole cost of
 	// the disproportion, and the agent is told it verbatim (see disbalanceVictim.explain).
 	strandedNodes := make(map[string]int64, len(nodeAvail))
 	for node, capacity := range nodeAvail {
-		if !labelsMatch(nodeLabels[node], blocked.Job.NodeSelector) {
+		if !placement.LabelsMatch(nodeLabels[node], blocked.Job.NodeSelector) {
 			continue
 		}
 		if free := capacity[flavor]; free >= perRank {
@@ -393,7 +394,7 @@ func selectDisbalanceVictims(
 		if flavor.Kind() == domain.TypeKindCPU {
 			return cores[node]
 		}
-		installed := nodeAvail[node][nodeAcceleratorKey(flavor)]
+		installed := nodeAvail[node][placement.AcceleratorKey(flavor)]
 		for _, p := range placed {
 			if p.node == node && p.experiment.AcceleratorType.Is(flavor) {
 				installed += int64(p.experiment.AcceleratorCount)

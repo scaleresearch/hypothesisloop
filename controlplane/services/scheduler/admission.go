@@ -247,7 +247,7 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 			// among the alternatives — an agent listing every flavor it runs on naturally includes
 			// its preferred one, and rejecting that makes the obvious payload unsubmittable. Only a
 			// genuine repeat *within* acceptable_accelerator_types is malformed, so dedup from i=1.
-			// candidateAcceleratorTypes collapses the harmless overlap before placement.
+			// placement.CandidateTypes collapses the harmless overlap before placement.
 			if i > 0 {
 				if seen[t] {
 					return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("accelerator type %q is listed more than once", t)}

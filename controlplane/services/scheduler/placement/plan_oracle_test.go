@@ -1,4 +1,4 @@
-package scheduler
+package placement
 
 import (
 	"fmt"
@@ -33,8 +33,8 @@ type oracleRank struct {
 // exponential and only usable on the tiny layouts this file generates — which is the point. It
 // shares no code with planPlacement, so agreement between the two is real evidence.
 func oracleFits(nodeAccel, nodeRes map[string]map[string]int64, key string, ranks []oracleRank) bool {
-	accel := cloneNodeCapacity(nodeAccel)
-	res := cloneNodeCapacity(nodeRes)
+	accel := CloneNodes(nodeAccel)
+	res := CloneNodes(nodeRes)
 	used := map[[2]string]bool{} // (job, node) pairs already taken, for the distinct-host rule
 
 	var try func(i int) bool
@@ -96,7 +96,7 @@ func oracleRanks(nodeAccel, nodeRes map[string]map[string]int64, labelsByNode ma
 	for i, exp := range jobs {
 		acceleratorNodes := qualifyingNodes(nodeAccel, labelsByNode, exp)
 		plainNodes := qualifyingNodes(nodeRes, labelsByNode, exp)
-		distinct := requiresDistinctHosts(exp)
+		distinct := RequiresDistinctHosts(exp)
 		for _, shape := range exp.NodeShapes() {
 			candidates := plainNodes
 			if shape.AcceleratorCount > 0 {
@@ -120,14 +120,14 @@ func oracleRanks(nodeAccel, nodeRes map[string]map[string]int64, labelsByNode ma
 // first way it is illegal. A plan that does not survive this is a job the scheduler would admit
 // onto a node that cannot hold it.
 // distinctByJob[i] says whether job i actually carries the distinct-host requirement — an
-// accelerator-free job does not (see requiresDistinctHosts), and stacking its ranks on one node is
+// accelerator-free job does not (see RequiresDistinctHosts), and stacking its ranks on one node is
 // legal, not a violation.
 func validatePlan(nodeAccel, nodeRes map[string]map[string]int64, plan []rankAssignment, wantRanks int, distinctByJob []bool) error {
 	if len(plan) != wantRanks {
 		return fmt.Errorf("plan has %d assignments, job has %d ranks", len(plan), wantRanks)
 	}
-	accel := cloneNodeCapacity(nodeAccel)
-	res := cloneNodeCapacity(nodeRes)
+	accel := CloneNodes(nodeAccel)
+	res := CloneNodes(nodeRes)
 	used := map[[2]string]bool{}
 	for _, p := range plan {
 		if p.node == "" {
@@ -181,11 +181,11 @@ func TestPlanPlacementDoesNotPruneDimensionSwappedNodes(t *testing.T) {
 	if !oracleFits(nodeAccel, nodeRes, h100, oracleRanks(nodeAccel, nodeRes, nil, []*domain.Experiment{exp})) {
 		t.Fatal("fixture is wrong: big→node-b, mem→node-a should be a valid assignment")
 	}
-	plan, ok := planPlacement(cloneNodeCapacity(nodeAccel), cloneNodeCapacity(nodeRes), nil, []*domain.Experiment{exp})
+	plan, ok := planPlacement(CloneNodes(nodeAccel), CloneNodes(nodeRes), nil, []*domain.Experiment{exp})
 	if !ok {
 		t.Fatal("planPlacement rejected a placeable job: two nodes rich in different byte-valued dimensions were treated as interchangeable")
 	}
-	if err := validatePlan(nodeAccel, nodeRes, plan, 2, []bool{requiresDistinctHosts(exp)}); err != nil {
+	if err := validatePlan(nodeAccel, nodeRes, plan, 2, []bool{RequiresDistinctHosts(exp)}); err != nil {
 		t.Fatalf("plan is illegal: %v", err)
 	}
 }
@@ -296,7 +296,7 @@ func TestPlanPlacementMatchesBruteForceOracle(t *testing.T) {
 		c := generateCase(rnd)
 		jobs := []*domain.Experiment{c.exp}
 
-		plan, ok := planPlacement(cloneNodeCapacity(c.nodeAccel), cloneNodeCapacity(c.nodeRes), nil, jobs)
+		plan, ok := planPlacement(CloneNodes(c.nodeAccel), CloneNodes(c.nodeRes), nil, jobs)
 		want := oracleFits(c.nodeAccel, c.nodeRes, h100, oracleRanks(c.nodeAccel, c.nodeRes, nil, jobs))
 
 		switch {
@@ -310,7 +310,7 @@ func TestPlanPlacementMatchesBruteForceOracle(t *testing.T) {
 			}
 		}
 		if ok {
-			if err := validatePlan(c.nodeAccel, c.nodeRes, plan, len(c.exp.NodeShapes()), []bool{requiresDistinctHosts(c.exp)}); err != nil {
+			if err := validatePlan(c.nodeAccel, c.nodeRes, plan, len(c.exp.NodeShapes()), []bool{RequiresDistinctHosts(c.exp)}); err != nil {
 				unsound++
 				t.Errorf("case %d: planPlacement returned an illegal plan: %v\n%s", i, err, c.describe())
 			}
@@ -323,7 +323,7 @@ func TestPlanPlacementMatchesBruteForceOracle(t *testing.T) {
 }
 
 // TestPlanPlacementMultiJobMatchesOracle runs the same comparison with several jobs planned
-// together, which is the shape desiredPlacementFits uses when it re-plans every already-desired
+// together, which is the shape DesiredFits uses when it re-plans every already-desired
 // job alongside the candidate. Ranks of different jobs may share a node, so the distinct-host
 // bookkeeping has to be per job — getting that wrong is invisible in the single-job case above.
 func TestPlanPlacementMultiJobMatchesOracle(t *testing.T) {
@@ -336,7 +336,7 @@ func TestPlanPlacementMultiJobMatchesOracle(t *testing.T) {
 		second := generateCase(rnd).exp
 		jobs := []*domain.Experiment{c.exp, second}
 
-		plan, ok := planPlacement(cloneNodeCapacity(c.nodeAccel), cloneNodeCapacity(c.nodeRes), nil, jobs)
+		plan, ok := planPlacement(CloneNodes(c.nodeAccel), CloneNodes(c.nodeRes), nil, jobs)
 		want := oracleFits(c.nodeAccel, c.nodeRes, h100, oracleRanks(c.nodeAccel, c.nodeRes, nil, jobs))
 
 		if ok != want {
@@ -348,7 +348,7 @@ func TestPlanPlacementMultiJobMatchesOracle(t *testing.T) {
 		}
 		if ok {
 			totalRanks := len(c.exp.NodeShapes()) + len(second.NodeShapes())
-			distinct := []bool{requiresDistinctHosts(c.exp), requiresDistinctHosts(second)}
+			distinct := []bool{RequiresDistinctHosts(c.exp), RequiresDistinctHosts(second)}
 			if err := validatePlan(c.nodeAccel, c.nodeRes, plan, totalRanks, distinct); err != nil {
 				disagreements++
 				t.Errorf("case %d: illegal multi-job plan: %v\n%s", i, err, c.describe())
@@ -361,7 +361,7 @@ func TestPlanPlacementMultiJobMatchesOracle(t *testing.T) {
 }
 
 // TestReservePlacementLeavesCapacityConsistent checks the bookkeeping half of the contract that
-// the oracle cannot see: reservePlacement mutates the caller's maps, and every caller after it
+// the oracle cannot see: Reserve mutates the caller's maps, and every caller after it
 // (the admission loop's running total, the shortfall calculation, the next job's fit check)
 // trusts those maps. A success must subtract exactly the job's footprint and nothing else; a
 // failure must subtract nothing at all.
@@ -371,9 +371,9 @@ func TestReservePlacementLeavesCapacityConsistent(t *testing.T) {
 
 	for i := 0; i < iterations; i++ {
 		c := generateCase(rnd)
-		accel, res := cloneNodeCapacity(c.nodeAccel), cloneNodeCapacity(c.nodeRes)
+		accel, res := CloneNodes(c.nodeAccel), CloneNodes(c.nodeRes)
 
-		ok := reservePlacement(accel, res, nil, c.exp)
+		ok := Reserve(accel, res, nil, c.exp)
 
 		if !ok {
 			// Failure must be perfectly non-destructive: a rejected job that quietly ate capacity

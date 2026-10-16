@@ -75,7 +75,7 @@ func (submitQuota) ReserveAdmittedFlavor(context.Context, string, domain.Acceler
 // The tick decided cluster-a fits (that decision isn't reproduced here — this test starts from
 // "submitJob is now called for cluster-a"). Between that decision and this call, cluster-a's only
 // qualifying node went away. submitJob's own re-check (ClaimSubmitted's capacityAvailable
-// callback, which re-reads live per-node capacity via desiredPlacementFits) must catch this and
+// callback, which re-reads live per-node capacity via placement.DesiredFits) must catch this and
 // refuse the claim — not persist SUBMITTED against a node that no longer exists.
 func TestSubmitJobRejectsClaimWhenNodeVanishesBeforeClaim(t *testing.T) {
 	exp := distributedExperiment(1, 1)
@@ -184,7 +184,7 @@ func (tickQuota) GetAgentQuota(context.Context, string, string) (*domain.AgentQu
 
 // layoutShortWorkload reports a cluster with enough aggregate capacity for the job (scalarFits)
 // but with that capacity split across two nodes so a hard-spread two-rank job's distinct-host
-// requirement fails (topologyFits is false).
+// requirement fails (placement.TopologyFits is false).
 type layoutShortWorkload struct{ ClusterCapacity }
 
 func (layoutShortWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
@@ -729,7 +729,7 @@ func TestTickPreemptsOnceWhileTheVictimTerminates(t *testing.T) {
 
 // The job asked for h100, accepts l40 and its row is at l40, which its quota does not cover while
 // h100 is free. One that never ran goes back to the type it asked for. One that ran on l40 may be
-// placed on no other type (candidateAcceleratorTypes): it waits and says why.
+// placed on no other type (placement.CandidateTypes): it waits and says why.
 func TestTickDoesNotMoveAJobThatRanWhenItsQuotaNoLongerCoversItsType(t *testing.T) {
 	withCPUType(t)
 	for _, tier := range []domain.CapacityTier{domain.CapacityGuaranteed, domain.CapacityBurst} {

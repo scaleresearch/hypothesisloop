@@ -1,13 +1,16 @@
-package scheduler
+package placement
 
 import (
+	"fmt"
 	"math/rand"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// preemptionShortfall is what turns "this job did not fit" into an actionable vector: preempt()
+// PreemptionShortfall is what turns "this job did not fit" into an actionable vector: preempt()
 // picks victims whose combined footprint covers it, and the disbalance evictor uses it to explain
 // which neighbour is the reason nothing fits. Two ways it can be wrong, both expensive:
 //
@@ -22,7 +25,7 @@ import (
 // bug it was written to fix, which makes it exactly the thing a regression test should pin.
 
 // clusterTotals sums per-node capacity into the cluster-wide Footprint that the tick derives from
-// GetFlavorCapacity and hands to preemptionShortfall. Building it from the same per-node maps the
+// GetFlavorCapacity and hands to PreemptionShortfall. Building it from the same per-node maps the
 // placement check uses keeps the two views consistent, so a non-empty shortfall in the test can
 // only come from a genuine deficit rather than from two disagreeing snapshots.
 func clusterTotals(nodeAccel, nodeRes map[string]map[string]int64) domain.Footprint {
@@ -34,7 +37,7 @@ func clusterTotals(nodeAccel, nodeRes map[string]map[string]int64) domain.Footpr
 	}
 	for _, capacity := range nodeRes {
 		for dimension, n := range capacity {
-			kind, ok := nodeResourceKind(dimension)
+			kind, ok := NodeResourceKind(dimension)
 			if !ok {
 				continue
 			}
@@ -69,18 +72,18 @@ func TestPreemptionShortfallIsNeverEmptyForAJobThatDoesNotFit(t *testing.T) {
 		if err != nil {
 			continue // a generated spec that cannot be costed is not a placement question
 		}
-		if reservePlacement(cloneNodeCapacity(c.nodeAccel), cloneNodeCapacity(c.nodeRes), nil, c.exp) {
+		if Reserve(CloneNodes(c.nodeAccel), CloneNodes(c.nodeRes), nil, c.exp) {
 			continue // fits, so there is nothing to report
 		}
 		// A job of more ranks than the cluster has nodes, each on a host of its own, is short of
 		// nothing a stopped job gives back. While the node maps here were keyed in another case
 		// than the footprint, every such job read as short of its whole type and passed.
-		if requiresDistinctHosts(c.exp) && len(c.exp.NodeShapes()) > len(c.nodeRes) {
+		if RequiresDistinctHosts(c.exp) && len(c.exp.NodeShapes()) > len(c.nodeRes) {
 			continue
 		}
 		checked++
 
-		got := preemptionShortfall(clusterTotals(c.nodeAccel, c.nodeRes), c.nodeAccel, c.nodeRes, nil, c.exp, footprint)
+		got := PreemptionShortfall(clusterTotals(c.nodeAccel, c.nodeRes), c.nodeAccel, c.nodeRes, nil, c.exp, footprint)
 		if positiveDimensions(got) == 0 {
 			t.Fatalf("case %d: the job does not fit, yet the shortfall is empty — preemption gets no vector to cover and the evictor no deficit to explain, so this job stays queued forever while reported as needing nothing\nshortfall: %s\n%s",
 				i, footprintStr(got), c.describe())
@@ -111,7 +114,7 @@ func TestPreemptionShortfallCountsEveryRankNotJustOne(t *testing.T) {
 	}
 
 	// Establish the premise rather than assuming it: the job really is unplaceable.
-	if reservePlacement(cloneNodeCapacity(nodeAccel), cloneNodeCapacity(nodeRes), nil, exp) {
+	if Reserve(CloneNodes(nodeAccel), CloneNodes(nodeRes), nil, exp) {
 		t.Fatal("fixture is wrong: two ranks of 2Gi cannot both be placed on 1Gi+1Gi+2Gi")
 	}
 	footprint, err := exp.Job.Footprint(exp.AcceleratorType)
@@ -120,11 +123,11 @@ func TestPreemptionShortfallCountsEveryRankNotJustOne(t *testing.T) {
 	}
 	// ...and that the cluster-level view alone sees no problem, which is why the per-node pass has
 	// to be the one that catches it.
-	if len(shortfall(clusterTotals(nodeAccel, nodeRes), footprint)) != 0 {
+	if len(Shortfall(clusterTotals(nodeAccel, nodeRes), footprint)) != 0 {
 		t.Fatal("fixture is wrong: this case is only interesting while the cluster-wide totals suffice")
 	}
 
-	got := preemptionShortfall(clusterTotals(nodeAccel, nodeRes), nodeAccel, nodeRes, nil, exp, footprint)
+	got := PreemptionShortfall(clusterTotals(nodeAccel, nodeRes), nodeAccel, nodeRes, nil, exp, footprint)
 	storage := got[domain.ResourceKey{Kind: domain.ResourceKindStorage}]
 	if storage <= 0 {
 		t.Fatalf("shortfall = %s, want a positive storage deficit: the second rank has no host", footprintStr(got))
@@ -149,7 +152,7 @@ func TestPreemptionShortfallNeverReportsUnrequestedDimensions(t *testing.T) {
 		if err != nil {
 			continue
 		}
-		got := preemptionShortfall(clusterTotals(c.nodeAccel, c.nodeRes), c.nodeAccel, c.nodeRes, nil, c.exp, footprint)
+		got := PreemptionShortfall(clusterTotals(c.nodeAccel, c.nodeRes), c.nodeAccel, c.nodeRes, nil, c.exp, footprint)
 		for key, amount := range got {
 			if amount <= 0 {
 				continue
@@ -176,7 +179,7 @@ func TestPreemptionShortfallNeverExceedsTheJobsOwnFootprint(t *testing.T) {
 		if err != nil {
 			continue
 		}
-		got := preemptionShortfall(clusterTotals(c.nodeAccel, c.nodeRes), c.nodeAccel, c.nodeRes, nil, c.exp, footprint)
+		got := PreemptionShortfall(clusterTotals(c.nodeAccel, c.nodeRes), c.nodeAccel, c.nodeRes, nil, c.exp, footprint)
 		for key, amount := range got {
 			if amount > footprint[key] {
 				t.Fatalf("case %d: shortfall wants %d of %s/%s freed, but the whole job only uses %d — preemption would evict more than admitting this job can require\nshortfall: %s\n%s",
@@ -195,14 +198,14 @@ func TestShortfallBasics(t *testing.T) {
 	t.Run("reports only the deficit, not the whole request", func(t *testing.T) {
 		avail := domain.Footprint{cpu: 3000, accel: 1}
 		want := domain.Footprint{cpu: 4000, accel: 4}
-		got := shortfall(avail, want)
+		got := Shortfall(avail, want)
 		if got[cpu] != 1000 || got[accel] != 3 {
 			t.Fatalf("shortfall = %s, want cpu=1000 accel=3", footprintStr(got))
 		}
 	})
 
 	t.Run("a satisfied request produces no dimensions at all", func(t *testing.T) {
-		got := shortfall(domain.Footprint{cpu: 9000, accel: 8}, domain.Footprint{cpu: 1000, accel: 1})
+		got := Shortfall(domain.Footprint{cpu: 9000, accel: 8}, domain.Footprint{cpu: 1000, accel: 1})
 		if len(got) != 0 {
 			t.Fatalf("shortfall = %s, want empty for a request that already fits", footprintStr(got))
 		}
@@ -211,16 +214,25 @@ func TestShortfallBasics(t *testing.T) {
 	t.Run("a dimension absent from capacity counts as zero available", func(t *testing.T) {
 		// Failing closed matters here: a cluster that has not reported a dimension must read as
 		// having none of it, never as having enough.
-		got := shortfall(domain.Footprint{}, domain.Footprint{accel: 2})
+		got := Shortfall(domain.Footprint{}, domain.Footprint{accel: 2})
 		if got[accel] != 2 {
 			t.Fatalf("shortfall = %s, want the full request when capacity reports nothing", footprintStr(got))
 		}
 	})
 
 	t.Run("surplus in one dimension never offsets a deficit in another", func(t *testing.T) {
-		got := shortfall(domain.Footprint{cpu: 100000, accel: 0}, domain.Footprint{cpu: 1000, accel: 2})
+		got := Shortfall(domain.Footprint{cpu: 100000, accel: 0}, domain.Footprint{cpu: 1000, accel: 2})
 		if got[accel] != 2 || got[cpu] != 0 {
 			t.Fatalf("shortfall = %s, want accel=2 only — abundant CPU must not mask a missing accelerator", footprintStr(got))
 		}
 	})
+}
+
+func footprintStr(fp domain.Footprint) string {
+	parts := make([]string, 0, len(fp))
+	for k, v := range fp {
+		parts = append(parts, fmt.Sprintf("%s:%s=%d", k.Kind, k.Flavor, v))
+	}
+	sort.Strings(parts)
+	return "{" + strings.Join(parts, ",") + "}"
 }

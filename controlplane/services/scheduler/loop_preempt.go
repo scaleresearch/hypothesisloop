@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -119,12 +120,12 @@ func (l *Loop) preempt(ctx context.Context, cluster string, avail domain.Footpri
 	if len(candidates) == 0 {
 		return false, nil
 	}
-	if hasSlots(nodeLabels) {
-		freeable := cloneNodeCapacity(nodeResources)
+	if placement.HasSlots(nodeLabels) {
+		freeable := placement.CloneNodes(nodeResources)
 		for _, victim := range candidates {
 			creditNode(nil, freeable[nodeOf[victim.ID]], victim)
 		}
-		resolved, misfit := resolveOntoSlot(preemptor, cluster, nodeResourcesTotal, freeable, nodeLabels)
+		resolved, misfit := placement.ResolveOntoSlot(preemptor, cluster, nodeResourcesTotal, freeable, nodeLabels)
 		if misfit != "" {
 			return false, nil
 		}
@@ -157,13 +158,13 @@ func (l *Loop) preempt(ctx context.Context, cluster string, avail domain.Footpri
 	placeableWithout := func(victims []*domain.Experiment) bool {
 		free := domain.NewFootprint()
 		free.AddFootprint(avail)
-		accelerators, resources := cloneNodeCapacity(nodeAvail), cloneNodeCapacity(nodeResources)
+		accelerators, resources := placement.CloneNodes(nodeAvail), placement.CloneNodes(nodeResources)
 		for _, victim := range victims {
 			free.AddFootprint(victim.Footprint())
 			node := nodeOf[victim.ID]
 			creditNode(accelerators[node], resources[node], victim)
 		}
-		return domain.Fits(free, fp) && topologyFits(accelerators, resources, nodeLabels, preemptor)
+		return domain.Fits(free, fp) && placement.TopologyFits(accelerators, resources, nodeLabels, preemptor)
 	}
 
 	// Never disrupt jobs for a partial plan. If evicting every candidate still leaves the job
@@ -286,10 +287,10 @@ func creditNode(accelerators, resources map[string]int64, exp *domain.Experiment
 		}
 	}
 	if accelerators != nil && count > 0 {
-		accelerators[nodeAcceleratorKey(exp.AcceleratorType)] += count
+		accelerators[placement.AcceleratorKey(exp.AcceleratorType)] += count
 	}
 	if resources != nil {
-		addNodeResources(resources, least)
+		placement.AddNodeResources(resources, least)
 	}
 }
 
@@ -447,7 +448,7 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 			if err != nil {
 				return false, err
 			}
-			return desiredPlacementFits(nodeAvail[clusterName], nodeResources[clusterName], nodeLabels[clusterName], desired, exp, exp.ResolvedJob), nil
+			return placement.DesiredFits(nodeAvail[clusterName], nodeResources[clusterName], nodeLabels[clusterName], desired, exp, exp.ResolvedJob), nil
 		}
 	}
 	resolved, err := l.grace.Resolve(exp.EffectiveJob())

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -36,7 +37,7 @@ func (l *Loop) speculativeCandidates(
 		// today's live-fit-only behaviour exactly (see loop_types.go's triedClusterTTL doc).
 		return nil, nil, nil
 	}
-	gang := requiresDistinctHosts(exp) || len(exp.Job.Groups) > 0 || exp.Job.Nodes() > 1
+	gang := placement.RequiresDistinctHosts(exp) || len(exp.Job.Groups) > 0 || exp.Job.Nodes() > 1
 	now := time.Now()
 
 	// Cross-job half of the tried-cluster backoff (autoscaler.md line 109): a cluster any job
@@ -121,7 +122,7 @@ func (l *Loop) speculativeCandidates(
 		}
 		candidates = append(candidates, candidate{cluster: cluster, clusterID: clusterID, provenFit: provenFit})
 	}
-	// The cluster's priority decides first, as it does for every placement (placementTiers).
+	// The cluster's priority decides first, as it does for every placement (placement.Tiers).
 	// Within one priority, clusters with live proof of fit go first (higher confidence bet), then
 	// fewest currently-pending speculative jobs (spreads bets instead of piling onto one cluster),
 	// then a stable clusterID tiebreak — all using data already computed this tick, no new state.
@@ -252,11 +253,11 @@ func fitsLargestNode(exp *domain.Experiment, accelByNode, resourcesByNode map[st
 	for _, shape := range exp.NodeShapes() {
 		fitsSomeNode := false
 		for node, resources := range resourcesByNode {
-			if !labelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
+			if !placement.LabelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
 				continue
 			}
 			sawLabelMatch = true
-			if shape.AcceleratorCount <= accelByNode[node][flavor] && nodeHasRoom(resources, shape.Resources) {
+			if shape.AcceleratorCount <= accelByNode[node][flavor] && placement.NodeHasRoom(resources, shape.Resources) {
 				fitsSomeNode = true
 				break
 			}
