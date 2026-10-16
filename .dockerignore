@@ -1,6 +1,4 @@
-# Default dockerignore for Go service builds
-# Used by Dockerfile.control-service, Dockerfile.metrics-service,
-# Dockerfile.node-agent, Dockerfile.cluster-agent
+# Build context for every image built from the repository root
 
 # Version control
 .git/
@@ -23,10 +21,6 @@ docs/
 # UI (not needed in Go images)
 controlplane/ui/
 
-# Python workload (not needed in Go images)
-tests/workload/
-tests/workload-robotics/
-
 # Infra definitions (not needed at runtime)
 controlplane/infra/
 runtime/k8s/infra/
@@ -42,6 +36,7 @@ coverage.html
 # Secrets / env
 .env
 .env.*
+**/*.secrets.env
 secrets/
 *.secret
 *.pem
