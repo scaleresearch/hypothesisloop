@@ -212,6 +212,16 @@ func cursorNow(t *testing.T, pool *Pool) int64 {
 	return cursor
 }
 
+// replayHorizon is the snapshot xmin Replay caps every cursor it issues at.
+func replayHorizon(t *testing.T, pool *Pool) int64 {
+	t.Helper()
+	var horizon int64
+	if err := pool.pool.QueryRow(context.Background(), `SELECT pg_snapshot_xmin(pg_current_snapshot())::text::bigint`).Scan(&horizon); err != nil {
+		t.Fatalf("replay horizon: got = %v, want = nil", err)
+	}
+	return horizon
+}
+
 // insertJob writes one experiment row and walks it QUEUED -> SUBMITTED -> RUNNING, the way the
 // scheduler does, returning a cursor from just before the first transition.
 func insertJob(t *testing.T, pool *Pool, agentID, peID, hypothesisID, jobID string) int64 {
@@ -812,7 +822,7 @@ func TestNoCursorPassesAWriteEmitIsStillMaking(t *testing.T) {
 
 	var position, during int64
 	err := NewEventsStore(pool, noHypothesisEvents{}).Emit(context.Background(), func(stamp domain.Stamp) ([]domain.Event, error) {
-		position, during = stamp.Position, cursorNow(t, pool)
+		position, during = stamp.Position, replayHorizon(t, pool)
 		return []domain.Event{{Kind: domain.EventHypothesisNew, Subject: hypothesisID, PlatformExperimentID: peID}}, nil
 	})
 	if err != nil {
