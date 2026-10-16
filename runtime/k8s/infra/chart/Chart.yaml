@@ -1,6 +1,8 @@
 apiVersion: v2
 name: hypothesisloop-cluster-agent
-description: HypothesisLoop runtime for one Kubernetes cluster — the cluster-agent Deployment and the node-agent DaemonSet.
+description: Connects one Kubernetes cluster to HypothesisLoop. Installs the cluster-agent Deployment and the node-agent DaemonSet, which only call out to the control plane.
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
+# The agent reads DRA devices through resource.k8s.io/v1, served from 1.34 on.
+kubeVersion: ">=1.34.0-0"

@@ -19,14 +19,24 @@ import (
 
 const secretToken = "hls_dGhlLXNlY3JldA.c2lnbmF0dXJl"
 
-// fakeBin puts a helm that records its arguments and its stdin, and a kubectl that names a
-// context, ahead of the real ones.
+// minKubeVersion is the oldest Kubernetes the chart installs on (Chart.yaml kubeVersion).
+const minKubeVersion = "1.34.0"
+
+// fakeBin puts a helm that records its arguments and its stdin, and a kubectl that answers for a
+// cluster of one node with two GPUs, ahead of the real ones.
 func fakeBin(t *testing.T) (dir, argsFile, stdinFile string) {
 	t.Helper()
 	dir = t.TempDir()
 	argsFile, stdinFile = filepath.Join(dir, "helm.args"), filepath.Join(dir, "helm.stdin")
-	helm := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argsFile + "\ncat > " + stdinFile + "\n"
-	kubectl := "#!/bin/sh\necho test-context\n"
+	helm := "#!/bin/sh\n[ \"$1\" = version ] && { echo v3.17.0; exit 0; }\nprintf '%s\\n' \"$@\" > " + argsFile + "\ncat > " + stdinFile + "\n"
+	kubectl := `#!/bin/sh
+case "$*" in
+  *"config current-context"*) echo test-context ;;
+  *"version -o json"*) printf '{\n  "serverVersion": {\n    "gitVersion": "v1.35.1"\n  }\n}\n' ;;
+  *"get nodes --no-headers"*) echo node-1 ;;
+  *"get nodes -o jsonpath"*) echo '{"cpu":"8","memory":"32Gi","nvidia.com/gpu":"2"}' ;;
+esac
+`
 	for name, script := range map[string]string{"helm": helm, "kubectl": kubectl} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
 			t.Fatal(err)
@@ -40,7 +50,7 @@ func TestInstallHandsHelmTheRuntimeTokenOnStdinAndNeverAsAnArgument(t *testing.T
 	bin, argsFile, stdinFile := fakeBin(t)
 	cmd := exec.Command("bash", "install.sh")
 	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"),
-		"CLUSTER_NAME=edge", "API_URL=http://api", "METRICS_URL=http://metrics", "REGISTRY_URL=registry.example.invalid", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
+		"CLUSTER_NAME=edge", "API_URL=http://api", "METRICS_URL=http://metrics", "REGISTRY_URL=registry.example", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("install.sh: %v\n%s", err, out)
@@ -74,7 +84,7 @@ func TestInstallWithBuilderTrueEnablesTheBuilder(t *testing.T) {
 	for builder, want := range map[string]string{"true": "builder.enabled=true\n", "yes": ""} {
 		cmd := exec.Command("bash", "install.sh")
 		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "BUILDER="+builder,
-			"CLUSTER_NAME=edge", "API_URL=http://api", "METRICS_URL=http://metrics", "REGISTRY_URL=registry.example.invalid", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
+			"CLUSTER_NAME=edge", "API_URL=http://api", "METRICS_URL=http://metrics", "REGISTRY_URL=registry.example", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
 		out, err := cmd.CombinedOutput()
 		if want == "" {
 			if err == nil {
@@ -238,7 +248,7 @@ func TestInstallLoadsBuildsIntoTheNodeOnlyWithABuilder(t *testing.T) {
 	for builder, ok := range map[string]bool{"true": true, "false": false} {
 		cmd := exec.Command("bash", "install.sh")
 		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "BUILDER="+builder, "BUILDER_NODE_IMAGES=/run/k3s/containerd/containerd.sock",
-			"CLUSTER_NAME=edge", "API_URL=http://api", "METRICS_URL=http://metrics", "REGISTRY_URL=registry.example.invalid", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
+			"CLUSTER_NAME=edge", "API_URL=http://api", "METRICS_URL=http://metrics", "REGISTRY_URL=registry.example", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
 		out, err := cmd.CombinedOutput()
 		if !ok {
 			if err == nil {
@@ -290,7 +300,7 @@ func TestClusterAgentDoesNotTolerateEveryTaint(t *testing.T) {
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("helm is not installed")
 	}
-	out, err := exec.Command("helm", "template", "chart", "--show-only", "templates/cluster-agent.yaml",
+	out, err := exec.Command("helm", "template", "chart", "--show-only", "templates/cluster-agent.yaml", "--kube-version", minKubeVersion,
 		"--set-string", "clusterName=edge,apiURL=http://api,metricsURL=http://metrics,runtimeToken=t,images.registry=r,images.tag=t1").CombinedOutput()
 	if err != nil {
 		t.Fatalf("helm template: %v\n%s", err, out)
@@ -325,7 +335,7 @@ func render(t *testing.T, set ...string) []map[string]any {
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("helm is not installed")
 	}
-	args := []string{"template", "hypothesisloop-cluster-agent", "chart", "--namespace", "hypothesisloop",
+	args := []string{"template", "hypothesisloop-cluster-agent", "chart", "--namespace", "hypothesisloop", "--kube-version", minKubeVersion,
 		"--set-string", "clusterName=edge,apiURL=http://api,metricsURL=http://metrics,runtimeToken=t,images.registry=r,images.tag=t1"}
 	for _, value := range set {
 		args = append(args, "--set", value)
@@ -456,5 +466,50 @@ func TestUninstallDetachesTheClusterFirst(t *testing.T) {
 	}
 	if left := ofKind(render(t, "detachOnUninstall=false"), "Job"); len(left) != 0 {
 		t.Errorf("with detachOnUninstall=false the chart still rendered %d Jobs", len(left))
+	}
+}
+
+func TestDryRunPrintsThePlanAndInstallsNothing(t *testing.T) {
+	bin, argsFile, _ := fakeBin(t)
+	cmd := exec.Command("bash", "install.sh", "--dry-run")
+	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"),
+		"CLUSTER_NAME=edge", "API_URL=https://api.example", "METRICS_URL=https://metrics.example", "REGISTRY_URL=registry.example", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("install.sh --dry-run: %v\n%s", err, out)
+	}
+	args, _ := os.ReadFile(argsFile)
+	if !strings.HasPrefix(string(args), "template\n") || strings.Contains(string(args), "upgrade") {
+		t.Errorf("helm arguments = %q, want the chart rendered and nothing installed", args)
+	}
+	for _, want := range []string{"namespace hypothesisloop", "hypothesisloop-jobs", "https://api.example", "registry.example/hypothesisloop-cluster-agent:t1", "nvidia.com/gpu: 2 on 1 nodes", "Nothing was changed"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("the plan does not say %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(string(out)+string(args), secretToken) {
+		t.Errorf("the token is in the plan or helm's arguments:\n%s", out)
+	}
+}
+
+// A customer's install names the registry it pulls from: no local development registry is a default.
+func TestInstallRequiresTheRegistry(t *testing.T) {
+	bin, _, _ := fakeBin(t)
+	cmd := exec.Command("bash", "install.sh")
+	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "REGISTRY_URL=",
+		"CLUSTER_NAME=edge", "API_URL=https://api.example", "METRICS_URL=https://metrics.example", "TAG=t1", "RUNTIME_TOKEN="+secretToken)
+	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "REGISTRY_URL") {
+		t.Errorf("install.sh without REGISTRY_URL: err = %v\n%s", err, out)
+	}
+}
+
+func TestTheChartRefusesAKubernetesWithoutDRAv1(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm is not installed")
+	}
+	out, err := exec.Command("helm", "template", "chart", "--kube-version", "1.33.0",
+		"--set-string", "clusterName=edge,apiURL=http://api,metricsURL=http://metrics,runtimeToken=t,images.registry=r,images.tag=t1").CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "kubeVersion") {
+		t.Errorf("helm template on 1.33: err = %v\n%s", err, out)
 	}
 }

@@ -1,0 +1,25 @@
+HypothesisLoop runtime {{ if .Release.IsUpgrade }}upgraded{{ else }}installed{{ end }} for cluster {{ .Values.clusterName }}.
+
+Installed:
+  - namespace {{ .Release.Namespace }}: Deployment hypothesisloop-cluster-agent, DaemonSet hypothesisloop-node-agent,
+    Secret hypothesisloop-runtime-token{{ if .Values.builder.enabled }}, the builder's cache volume hypothesisloop-builder-cache{{ end }}
+  - namespace hypothesisloop-jobs, where every job runs as a Kubernetes Job
+  - PriorityClasses hypothesisloop-jobs-guaranteed and hypothesisloop-jobs-burst
+  - RBAC: write access in hypothesisloop-jobs only, read-only access to nodes, pods and DRA devices
+
+The agents open no port. They only call out, to {{ .Values.apiURL }} and {{ .Values.metricsURL }}.
+
+1. Check that the agents run:
+     kubectl -n {{ .Release.Namespace }} get pods
+2. The cluster shows Connected under Compute Resources in the UI within a minute, or:
+     hl cluster list
+3. If it does not, read the agent's log:
+     kubectl -n {{ .Release.Namespace }} logs deploy/hypothesisloop-cluster-agent
+
+Settings of this cluster:  helm get values {{ .Release.Name }} -n {{ .Release.Namespace }}
+Upgrade:                   run the install command again (the UI shows it under Show start command)
+Uninstall:                 helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}
+{{- if .Values.detachOnUninstall }}
+                           This first removes the cluster from HypothesisLoop and sends its jobs back to the queue.
+{{- end }}
+                           Then: kubectl delete namespace {{ .Release.Namespace }}
