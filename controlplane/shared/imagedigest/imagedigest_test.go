@@ -5,14 +5,13 @@ import (
 	"errors"
 	"slices"
 	"testing"
-	"time"
 )
 
 const sum = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 func asking(answers map[string]string) (*Resolver, *[]string) {
 	var asked []string
-	r := New(time.Minute)
+	r := New("10.0.0.2:5000")
 	r.resolve = func(_ context.Context, ref string, plain bool) (string, error) {
 		key := ref
 		if plain {

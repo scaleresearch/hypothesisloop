@@ -5,33 +5,28 @@ package imagedigest
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/containerd/containerd/v2/core/remotes/docker"
 	"github.com/distribution/reference"
 )
 
-// Resolver pins references to digests, asking a reference's registry at most once per ttl.
+// Resolver pins references to digests, asking a reference's registry every time.
 type Resolver struct {
-	ttl     time.Duration
-	resolve func(ctx context.Context, ref string, plainHTTP bool) (string, error)
-
-	mu     sync.Mutex
-	pinned map[string]pin
+	resolve   func(ctx context.Context, ref string, plainHTTP bool) (string, error)
+	plainHTTP map[string]bool
 }
 
-type pin struct {
-	digest string
-	at     time.Time
-}
-
-// New asks registries anonymously, as a node that pulls a job image does.
-func New(ttl time.Duration) *Resolver {
+// New asks registries anonymously, as a node that pulls a job image does: over plain HTTP the
+// registries plainHTTP names by host[:port], and over TLS every other.
+func New(plainHTTP ...string) *Resolver {
 	client := &http.Client{Timeout: 15 * time.Second}
-	return &Resolver{ttl: ttl, pinned: map[string]pin{}, resolve: func(ctx context.Context, ref string, plainHTTP bool) (string, error) {
+	hosts := make(map[string]bool, len(plainHTTP))
+	for _, host := range plainHTTP {
+		hosts[host] = true
+	}
+	return &Resolver{plainHTTP: hosts, resolve: func(ctx context.Context, ref string, plainHTTP bool) (string, error) {
 		_, desc, err := docker.NewResolver(docker.ResolverOptions{Client: client, PlainHTTP: plainHTTP}).Resolve(ctx, ref)
 		if err != nil {
 			return "", err
@@ -41,8 +36,7 @@ func New(ttl time.Duration) *Resolver {
 }
 
 // Pinned is ref as repository@digest: one that names its digest already keeps it, and any other
-// takes the digest its registry answers for it. A registry on an explicit port that does not
-// answer over TLS is asked over plain HTTP, as a local registry is served.
+// takes the digest its registry answers for it.
 func (r *Resolver) Pinned(ctx context.Context, ref string) (string, error) {
 	named, err := reference.ParseNormalizedNamed(ref)
 	if err != nil {
@@ -53,23 +47,9 @@ func (r *Resolver) Pinned(ctx context.Context, ref string) (string, error) {
 		return repository + "@" + digested.Digest().String(), nil
 	}
 	tagged := reference.TagNameOnly(named).String()
-	r.mu.Lock()
-	cached, ok := r.pinned[tagged]
-	r.mu.Unlock()
-	if ok && time.Since(cached.at) < r.ttl {
-		return repository + "@" + cached.digest, nil
-	}
-	digest, err := r.resolve(ctx, tagged, false)
-	if _, port, splitErr := net.SplitHostPort(reference.Domain(named)); err != nil && splitErr == nil && port != "" {
-		if plain, plainErr := r.resolve(ctx, tagged, true); plainErr == nil {
-			digest, err = plain, nil
-		}
-	}
+	digest, err := r.resolve(ctx, tagged, r.plainHTTP[reference.Domain(named)])
 	if err != nil {
 		return "", fmt.Errorf("imagedigest: %s: %w", tagged, err)
 	}
-	r.mu.Lock()
-	r.pinned[tagged] = pin{digest: digest, at: time.Now()}
-	r.mu.Unlock()
 	return repository + "@" + digest, nil
 }

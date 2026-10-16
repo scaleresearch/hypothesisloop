@@ -2,6 +2,7 @@
 package config
 
 import (
+	"strings"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -406,6 +407,16 @@ type JobImageConfig struct {
 	EnvironmentBase string   `yaml:"environment_base"`
 	Carries         string   `yaml:"carries"`
 	Suits           []string `yaml:"suits"`
+}
+
+// PlainHTTPRegistries is the registries, by host[:port], that serve plain HTTP: runtimes.registry
+// when registry_plain_http says so, and none otherwise.
+func (c *Config) PlainHTTPRegistries() []string {
+	if !c.Runtimes.RegistryPlainHTTP {
+		return nil
+	}
+	host, _, _ := strings.Cut(c.Runtimes.Registry, "/")
+	return []string{host}
 }
 
 // OfferedJobImages is the configured job images with their references resolved.
