@@ -99,12 +99,6 @@ func main() {
 	if err != nil {
 		logger.Fatal("control-service: metrics store tables", zap.Error(err))
 	}
-	modelUsageCtx, modelUsageCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	err = metricsdb.EnsureModelUsageTable(modelUsageCtx, metricsDBURL)
-	modelUsageCancel()
-	if err != nil {
-		logger.Fatal("control-service: metrics store tables", zap.Error(err))
-	}
 
 	graphCtx, graphCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	graph, err := openGraph(graphCtx, pcfg.Services.GraphDBURL)

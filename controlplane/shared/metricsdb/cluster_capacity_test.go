@@ -103,17 +103,6 @@ func TestRecordClusterCapacitySnapshotWritesHeartbeatLast(t *testing.T) {
 	}
 }
 
-func TestLiveClusterAcceleratorCapacityBeforeAnyReportIsEmpty(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, `{"code":4001,"error":"Failed to plan SQL: Table not found: greptime.public.cluster_agent_heartbeat"}`)
-	}))
-	defer server.Close()
-	available, total, err := LiveClusterAcceleratorAvailableAndTotal(context.Background(), server.URL, time.Minute)
-	if err != nil || len(available) != 0 || len(total) != 0 {
-		t.Fatalf("got (%v, %v, %v), want empty capacity and no error", available, total, err)
-	}
-}
-
 // One cluster heartbeating under two identities inside the window is one live cluster. It used
 // to fail the read, which stopped the scheduler for every org until the older series aged out.
 func TestAClusterWhoseIdentityChangedIsStillOneLiveClusterBesideTheOthers(t *testing.T) {

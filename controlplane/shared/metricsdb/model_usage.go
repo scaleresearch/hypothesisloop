@@ -24,14 +24,6 @@ const ensureModelUsageTableSQL = `CREATE TABLE IF NOT EXISTS model_usage (
 	PRIMARY KEY (org_id, platform_experiment_id, agent_id, provider, model)
 ) WITH ('append_mode' = 'true')`
 
-// EnsureModelUsageTable creates model_usage. Idempotent; run once at startup.
-func EnsureModelUsageTable(ctx context.Context, dbURL string) error {
-	if err := execSQL(ctx, dbURL, ensureModelUsageTableSQL); err != nil {
-		return fmt.Errorf("metricsdb.EnsureModelUsageTable: %w", err)
-	}
-	return nil
-}
-
 // ModelCall is what the provider counted for one model call.
 type ModelCall struct {
 	OrgID                    string

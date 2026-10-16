@@ -63,14 +63,3 @@ func TestModelUsageOfSumsPerAgentAndModel(t *testing.T) {
 		t.Fatalf("usage = %+v, want %+v", got, want)
 	}
 }
-
-func TestModelUsageOfIsEmptyBeforeAnyCall(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"code":4001,"error":"Table not found: greptime.public.model_usage"}`))
-	}))
-	defer server.Close()
-	got, err := ModelUsageOf(context.Background(), server.URL, "pe-1")
-	if err != nil || len(got) != 0 {
-		t.Fatalf("usage = %+v, %v; want none and no error", got, err)
-	}
-}

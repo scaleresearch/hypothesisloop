@@ -76,6 +76,7 @@ var ensureObservationTablesSQL = []string{
 	metricTableSQL(clusterNodeLabelMetric, "cluster_name", "label_key", "label_value", "node"),
 	ensureJobLogsTableSQL,
 	ensureJobPhaseDetailTableSQL,
+	ensureModelUsageTableSQL,
 	// The gang-readiness columns, for a job_phase_detail created before them.
 	`ALTER TABLE job_phase_detail ADD COLUMN IF NOT EXISTS scheduled_nodes BIGINT`,
 	`ALTER TABLE job_phase_detail ADD COLUMN IF NOT EXISTS scheduling_reason STRING`,
