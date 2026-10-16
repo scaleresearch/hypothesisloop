@@ -22,7 +22,7 @@ var publicPaths = map[string]bool{
 	"/explore": true, "/explore/coordinator": true, "/explore/rules": true,
 }
 
-var publicPrefixes = []string{"/internal/clusters", "/internal/launchers"}
+var publicPrefixes = []string{"/internal/clusters"}
 
 func public(path string) bool {
 	for _, prefix := range publicPrefixes {

@@ -111,14 +111,13 @@ func TestARunWaitsForItsFirstResearchersMachineWithinItsRun(t *testing.T) {
 	const agentsDue, windDown = 20 * time.Minute, 2 * time.Minute
 	start := func() (pe, researcher, baseline string) {
 		t.Helper()
-		launcher := "launcher-" + uuid.New().String()[:8]
-		pe = createTestPEWithCoordinator(t, pool, launcher)
+		pe = createTestPEWithCoordinator(t, pool)
 		if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET duration_hours = 1 WHERE id = $1`, pe); err != nil {
 			t.Fatal(err)
 		}
 		ids := spawnTestAgents(t, pes, pe,
-			domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: launcher, AgentType: "generalist"},
-			domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: launcher, AgentType: "baseline", Role: domain.SignupRoleBaseline})
+			domain.AgentSignup{Actor: testActor, Hosted: true, AgentType: "generalist"},
+			domain.AgentSignup{Actor: testActor, Hosted: true, AgentType: "baseline", Role: domain.SignupRoleBaseline})
 		started, _, err := pes.StartPlatformExperimentTx(ctx, pe, agentsDue, func([]StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) { return nil, oneStage, nil })
 		if err != nil || !started {
 			t.Fatalf("start: got = %v, %v, want started", started, err)

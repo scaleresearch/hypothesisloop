@@ -336,7 +336,7 @@ func (w *githubWorld) refused(caller, method, path string, body any, status int,
 
 func TestWhoMayReachAnOrgsGitHub(t *testing.T) {
 	const ok, created, gone, forbidden, notFound, noToken = http.StatusOK, http.StatusCreated, http.StatusNoContent, http.StatusForbidden, http.StatusNotFound, http.StatusUnauthorized
-	derived := map[string]int{"agent": forbidden, "coordinator": forbidden, "job": forbidden, "runtime": forbidden, "launcher": forbidden, "": noToken}
+	derived := map[string]int{"agent": forbidden, "coordinator": forbidden, "job": forbidden, "runtime": forbidden, "": noToken}
 	for _, tc := range []struct {
 		name, method, path string
 		body               func() any

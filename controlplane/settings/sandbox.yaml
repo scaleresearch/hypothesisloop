@@ -1,0 +1,64 @@
+# The sandbox section of the settings: one provider account, on which the control plane rents a
+# machine for every hosted agent and coordinator. A deployment that hosts agents adds it to its
+# settings file. Its provider section is one of provider.<name>.yaml beside this file.
+sandbox:
+  # 1 to 16 lowercase letters and digits, part of every instance name,
+  # hl-agent-<name>-<the platform's name for it>: the control plane lists, creates and destroys
+  # the instances that start so and no others, which keeps two deployments on one provider
+  # account apart. Nothing about the instances is kept between passes but the provider's list:
+  # changing provider.name, the account in provider.settings or this name leaves the machines
+  # rented before where the control plane no longer looks, running and billing. Drain first.
+  name: main
+
+  # One pass costs the provider one list call, one log read per running or exited agent, one stop
+  # per ending agent, and a create, start or destroy call for each instance that has to change.
+  # This is also the longest a newly asked for agent waits before anything is done for it. Set it
+  # against the provider's rate limit: at 5 seconds ten running agents cost 12 lists and 120 log
+  # reads a minute.
+  reconcile_interval_seconds: 5
+
+  # Waited between two rentals of one pass (a create, or a warm for the pool below), for a provider
+  # that limits how fast instances may be rented: the strictest one shipped documents one create a
+  # second. The first rental of a pass and a start from the pool are never paused for. A provider
+  # that ends every instance at a fixed age makes all agents of an experiment due at once, and this
+  # is what spreads their replacements. 0 is no pause. Twice
+  # (agents.max_new_instances_per_answer x this + reconcile_interval_seconds) must fit
+  # agents.boot_limit_seconds and agents.progress_limit_seconds.
+  create_pause_milliseconds: 1000
+
+  # How many instances are kept warm: rented ahead at the size below with the image the agents are
+  # asked for under, or the platform's own image while none is, that image on their host, running
+  # nothing. A missing agent is started in one of them in seconds, where a create waits for the
+  # image's pull, and the pool is topped up after. A warm instance is billed for its disk only (on
+  # Fly the root filesystem of a stopped machine, $0.15 a GB a month), never runs, and is replaced
+  # when the agents' image or this section changes. The pool is destroyed when the control plane
+  # stops leading and when this is 0. Left out, it is 2 on a provider that can warm instances
+  # (Fly) and 0 on another (E2B).
+  warm_pool_size: 4
+
+  provider:
+    # One of fly and e2b: provider.<name>.yaml says what its settings are.
+    name: example
+    # The adapter's own section. Nothing else reads it.
+    settings: {}
+
+  # What every agent instance runs and how large it is rented. Which image it boots and the
+  # environment of each agent are the platform's to say: where it reaches the API and its own
+  # token, with which its harness also makes its model calls through the control plane. No model
+  # credential is in any instance. The size is bound by the provider: provider.<name>.yaml states
+  # what it can rent, and a size above that fails the create of every agent on every pass, which
+  # the log reports as NO INSTANCE COULD BE CREATED. An agent compiles and benchmarks its code here
+  # before a job runs it, so the size is a Fly performance machine of 8 cores and 16 GiB with its
+  # largest disk. E2B rents at most 8 GiB of memory and 10 or 20 GiB of disk, so a sandbox on it
+  # needs less.
+  #
+  # Each instance is rented to end by itself at the latest moment its platform experiment can
+  # still be running, so a control plane that is down or cut off leaves nothing running past that.
+  # A provider that ends every instance at an age of its own still does, whichever comes first.
+  instance:
+    # The whole argv, in place of the image's entrypoint: the harness's own interpreter, as the
+    # image's entrypoint runs it, since uv run would build the harness again on every boot.
+    command: ["/opt/hypothesisloop-agent/.venv/bin/python3", "-m", "hypothesisloop_agent.claude.run"]
+    cpu: "8"
+    memory: 16Gi
+    storage: 50Gi

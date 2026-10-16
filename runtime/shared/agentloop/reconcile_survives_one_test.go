@@ -32,11 +32,12 @@ func newUndesiredStateServer(t *testing.T) *httptest.Server {
 }
 
 func newTestAgent(server *httptest.Server, exec *captureExecutor) *Agent {
+	remote := &Remote{ClusterName: "test", APIURL: server.URL, HTTP: server.Client()}
 	return &Agent{
 		ClusterName:       "test",
-		APIURL:            server.URL,
+		ControlPlane:      remote,
+		Builds:            remote,
 		Executor:          exec,
-		HTTPClient:        server.Client(),
 		ReconcileInterval: time.Second,
 		StatusInterval:    time.Second,
 		Log:               func(string, ...any) {},
@@ -188,3 +189,6 @@ func TestAThriceDuplicatedDesiredIDStaysQuarantined(t *testing.T) {
 		t.Fatalf("deleted = %v, created = %d; want neither — the third copy re-entered the desired set and was acted on", exec.deleted, exec.created)
 	}
 }
+
+// remoteOf is the Remote a test agent calls.
+func remoteOf(agent *Agent) *Remote { return agent.ControlPlane.(*Remote) }

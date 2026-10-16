@@ -29,9 +29,8 @@ type fakeDirectory struct {
 	// answeredAt is when a planner answered its draft, by platform experiment and agent.
 	answeredAt map[string]time.Time
 	finishedAt map[string]time.Time
-	// notSignedUp and launchers are read by the methods in roster_test.go.
+	// notSignedUp is read by the methods in roster_test.go.
 	notSignedUp map[string]bool
-	launchers   map[string]bool
 	clusters    map[string]string
 	// builds are the builds building now, by BuildScope.
 	builds      map[string]bool
@@ -369,7 +368,6 @@ func TestAnActorIsTheCredentialAndNothingARequestSays(t *testing.T) {
 		"a coordinator":       {Principal{Kind: KindCoordinator, PlatformExperimentID: "pe-1"}, domain.Actor{Kind: domain.ActorCoordinator, ID: "pe-1"}},
 		"a staff token":       {Principal{Kind: KindStaff}, domain.Actor{Kind: domain.ActorStaff}},
 		"a runtime":           {Principal{Kind: KindRuntime, ClusterName: "c"}, domain.Actor{}},
-		"a launcher":          {Principal{Kind: KindLauncher, LauncherName: "l"}, domain.Actor{}},
 	} {
 		if got := tc.p.Actor(); got != tc.want {
 			t.Errorf("%s: got = %+v, want = %+v", name, got, tc.want)

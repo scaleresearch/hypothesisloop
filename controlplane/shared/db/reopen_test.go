@@ -23,13 +23,12 @@ func closedRunWithAgents(t *testing.T, pool *Pool) ClosedRun {
 	t.Helper()
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
-	launcher := "launcher-" + uuid.New().String()[:8]
-	pe := createTestPEWithCoordinator(t, pool, launcher)
-	hosted := domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: launcher, AgentType: "generalist", Model: "model-1"}
+	pe := createTestPEWithCoordinator(t, pool)
+	hosted := domain.AgentSignup{Actor: testActor, Hosted: true, AgentType: "generalist", Model: "model-1"}
 	baseline := hosted
 	baseline.Role, baseline.AgentType = domain.SignupRoleBaseline, "baseline"
 	agents := spawnTestAgents(t, pes, pe, baseline, hosted, hosted, hosted)
-	run := ClosedRun{ID: pe, Launcher: launcher, Baseline: agents[0], Live: agents[1], Finished: agents[2], Cut: agents[3]}
+	run := ClosedRun{ID: pe, Baseline: agents[0], Live: agents[1], Finished: agents[2], Cut: agents[3]}
 	setPEStatus(t, pool, pe, domain.PlatformExpRunning, 3*time.Hour)
 	for _, agent := range []string{run.Baseline, run.Finished} {
 		if err := pes.FinishAgent(ctx, pe, agent, "nothing left to try"); err != nil {
@@ -65,7 +64,7 @@ func closedRunWithAgents(t *testing.T, pool *Pool) ClosedRun {
 	if err := pes.RecordClose(ctx, pe, closeRecordHeading+" it closed."); err != nil {
 		t.Fatal(err)
 	}
-	if err := pes.ReleaseInstances(ctx, launcher, domain.AgentWindDown, domain.CoordinatorWindDown); err != nil {
+	if err := pes.ReleaseInstances(ctx, domain.AgentWindDown, domain.CoordinatorWindDown); err != nil {
 		t.Fatal(err)
 	}
 	return run
@@ -82,7 +81,7 @@ func TestAReopenedRunReadsRunningAndWantsTheAgentsTheCloseEnded(t *testing.T) {
 	pes := NewPlatformExperimentsStore(pool)
 	run := closedRunWithAgents(t, pool)
 
-	if agents, err := pes.ListLauncherAgents(ctx, run.Launcher, domain.AgentWindDown); err != nil || len(agents) != 0 {
+	if agents, err := pes.ListLauncherAgents(ctx, domain.AgentWindDown); err != nil || len(agents) != 0 {
 		t.Fatalf("closed an hour ago: launcher agents = %+v, %v, want none", agents, err)
 	}
 	events, stop := listenForEvents(t, pool)
@@ -118,14 +117,14 @@ func TestAReopenedRunReadsRunningAndWantsTheAgentsTheCloseEnded(t *testing.T) {
 		t.Fatalf("closed_at the token check reads = %v, %v, want none", closedAt, err)
 	}
 
-	agents, err := pes.ListLauncherAgents(ctx, run.Launcher, domain.AgentWindDown)
+	agents, err := pes.ListLauncherAgents(ctx, domain.AgentWindDown)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(agents) != 1 || agents[0].AgentID != run.Live || agents[0].Ended != "" || agents[0].Instance.Released || agents[0].Instance.Stopped || agents[0].Instance.Name != "" {
 		t.Fatalf("launcher agents = %+v, want the researcher the close ended, at work and with no machine", agents)
 	}
-	coordinators, err := pes.ListLauncherCoordinators(ctx, run.Launcher, domain.CoordinatorWindDown)
+	coordinators, err := pes.ListLauncherCoordinators(ctx, domain.CoordinatorWindDown)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -216,14 +215,14 @@ WHERE pe.id = $1 AND pe.status = 'draft' AND pe.proposed_at IS NULL
 	return after, true, nil
 }
 
-// ReleaseInstances records, for every machine of launcher whose agent or coordinator the launcher
-// is no longer asked to keep, that the platform released it and why: the name is cleared, the end
+// ReleaseInstances records, for every machine whose agent or coordinator the launcher is no
+// longer asked to keep, that the platform released it and why: the name is cleared, the end
 // is InstanceReleased and the exit log says which end of the run it was. The launcher takes such
 // a machine down on its next answer, so without the record a later question about the same agent,
 // a planner whose draft is revised, finds a machine that was seen and is gone and counts a
 // machine the provider lost. No restart is spent. A pass with nothing to release writes nothing.
 // An agent's machine is kept windDown after its run ended, a coordinator's coordinatorWindDown.
-func (s *PlatformExperimentsStore) ReleaseInstances(ctx context.Context, launcher string, windDown, coordinatorWindDown time.Duration) error {
+func (s *PlatformExperimentsStore) ReleaseInstances(ctx context.Context, windDown, coordinatorWindDown time.Duration) error {
 	sentences := map[string]string{}
 	for _, end := range []domain.RunEnd{"", domain.RunEndClosed, domain.RunEndCut, domain.RunEndFinished, domain.RunEndPlanned} {
 		sentences[string(end)] = end.ReleasedBecause()
@@ -236,44 +235,44 @@ func (s *PlatformExperimentsStore) ReleaseInstances(ctx context.Context, launche
     activity = '', activity_at = NULL`
 	if _, err := s.pool.pool.Exec(ctx, `
 UPDATE hosted_instances i
-SET `+released+`, exit_log = $3::jsonb ->> (`+runEndSQL+`)
+SET `+released+`, exit_log = $2::jsonb ->> (`+runEndSQL+`)
 FROM experiment_signups s
 WHERE s.platform_experiment_id = i.platform_experiment_id AND s.agent_id = i.agent_id
-  AND s.hosted AND s.launcher = $1 AND i.name <> ''
+  AND s.hosted AND i.name <> ''
   AND (s.platform_experiment_id, s.agent_id) NOT IN (SELECT s.platform_experiment_id, s.agent_id`+launcherAgentsFrom+`)`,
-		launcher, windDown.Seconds(), because); err != nil {
+		windDown.Seconds(), because); err != nil {
 		return fmt.Errorf("platform_experiments_store.ReleaseInstances: agents: %w", err)
 	}
 	if _, err := s.pool.pool.Exec(ctx, `
 UPDATE hosted_instances i
-SET `+released+`, exit_log = $3
+SET `+released+`, exit_log = $2
 FROM platform_experiments pe
 WHERE pe.id = i.platform_experiment_id AND i.agent_id = ''
-  AND pe.coordinator_hosted AND pe.coordinator_launcher = $1 AND i.name <> ''
+  AND pe.coordinator_hosted AND i.name <> ''
   AND pe.id NOT IN (SELECT pe.id`+launcherCoordinatorsWhere+`)`,
-		launcher, coordinatorWindDown.Seconds(), domain.RunEndClosed.ReleasedBecause()); err != nil {
+		coordinatorWindDown.Seconds(), domain.RunEndClosed.ReleasedBecause()); err != nil {
 		return fmt.Errorf("platform_experiments_store.ReleaseInstances: coordinators: %w", err)
 	}
 	return nil
 }
 
-// LauncherMachine is a machine the platform holds for a launcher: the name it is asked for under
-// and the provider's id the launcher last reported that name by.
+// LauncherMachine is a machine the platform holds: the name it is asked for under and the
+// provider's id the launcher last reported that name by.
 type LauncherMachine struct {
 	Name    string
 	Machine string
 }
 
-// ListLauncherMachines returns every machine of launcher, an agent's or a coordinator's, whose
-// name is still held and was reported with a machine id, by name. It writes nothing.
-func (s *PlatformExperimentsStore) ListLauncherMachines(ctx context.Context, launcher string) ([]LauncherMachine, error) {
+// ListLauncherMachines returns every hosted machine, an agent's or a coordinator's, whose name is
+// still held and was reported with a machine id, by name. It writes nothing.
+func (s *PlatformExperimentsStore) ListLauncherMachines(ctx context.Context) ([]LauncherMachine, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT i.name, i.machine FROM hosted_instances i
 LEFT JOIN experiment_signups s ON s.platform_experiment_id = i.platform_experiment_id AND s.agent_id = i.agent_id
 LEFT JOIN platform_experiments pe ON pe.id = i.platform_experiment_id AND i.agent_id = ''
 WHERE i.name <> '' AND i.machine <> ''
-  AND (s.hosted AND s.launcher = $1 OR pe.coordinator_hosted AND pe.coordinator_launcher = $1)
-ORDER BY 1`, launcher)
+  AND (s.hosted OR pe.coordinator_hosted)
+ORDER BY 1`)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.ListLauncherMachines: %w", err)
 	}
@@ -286,121 +285,4 @@ ORDER BY 1`, launcher)
 		return nil, fmt.Errorf("platform_experiments_store.ListLauncherMachines: %w", err)
 	}
 	return machines, nil
-}
-
-// RegisterLauncher makes an agent-launcher's token work. Registering one again changes nothing.
-func (s *PlatformExperimentsStore) RegisterLauncher(ctx context.Context, name string) error {
-	if err := domain.ValidateLauncherName(name); err != nil {
-		return err
-	}
-	if _, err := s.pool.pool.Exec(ctx, `INSERT INTO launchers (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`, name); err != nil {
-		return fmt.Errorf("platform_experiments_store.RegisterLauncher: %w", err)
-	}
-	return nil
-}
-
-// SetLauncherHolds records that a launcher was answered, now, the version it said it runs, and
-// whether it holds machines after that question: holds is true when it listed any, or its answer
-// asks for any.
-func (s *PlatformExperimentsStore) SetLauncherHolds(ctx context.Context, name string, holds bool, agentVersion string) error {
-	if _, err := s.pool.pool.Exec(ctx, `UPDATE launchers SET holds_machines = $2, answered_at = now(), agent_version = $3 WHERE name = $1`, name, holds, agentVersion); err != nil {
-		return fmt.Errorf("platform_experiments_store.SetLauncherHolds: %w", err)
-	}
-	return nil
-}
-
-// LauncherContact is a launcher's last answered question: when, nil for one never answered, and
-// the version its agent said it runs then, empty from one that said none.
-type LauncherContact struct {
-	At           *time.Time
-	AgentVersion string
-}
-
-// LauncherContacts is each launcher named's last contact, absent for a name no launcher is
-// registered under.
-func (s *PlatformExperimentsStore) LauncherContacts(ctx context.Context, names []string) (map[string]LauncherContact, error) {
-	rows, err := s.pool.pool.Query(ctx, `SELECT name, answered_at, agent_version FROM launchers WHERE name = ANY($1)`, names)
-	if err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.LauncherContacts: %w", err)
-	}
-	defer rows.Close()
-	out := map[string]LauncherContact{}
-	for rows.Next() {
-		var name string
-		var contact LauncherContact
-		if err := rows.Scan(&name, &contact.At, &contact.AgentVersion); err != nil {
-			return nil, fmt.Errorf("platform_experiments_store.LauncherContacts: %w", err)
-		}
-		out[name] = contact
-	}
-	return out, rows.Err()
-}
-
-// LauncherInUseError is a launcher that cannot be removed: its token is what takes its machines
-// down, so it is kept while there is a machine to take down or an agent that may be given one.
-type LauncherInUseError struct {
-	Name string
-	// PlatformExperiments are those that have a hosted agent or coordinator of this launcher and
-	// did not close more than its wind-down ago. With none, the launcher's last question still
-	// listed machines or was answered with some.
-	PlatformExperiments []string
-}
-
-func (e *LauncherInUseError) Error() string {
-	if len(e.PlatformExperiments) > 0 {
-		return fmt.Sprintf("launcher %s runs the hosted agents of platform experiments %s: close them or let them end, then let the launcher take their machines down",
-			e.Name, strings.Join(e.PlatformExperiments, ", "))
-	}
-	return fmt.Sprintf("launcher %s holds machines, by its last question: keep it running until one of its passes lists none", e.Name)
-}
-
-// RemoveLauncher ends a launcher's token. It reports false for a name that was not registered,
-// and refuses with a *LauncherInUseError while the launcher has something to take down: removed
-// then, its machines would be nobody's.
-func (s *PlatformExperimentsStore) RemoveLauncher(ctx context.Context, name string) (bool, error) {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store.RemoveLauncher: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	var holds bool
-	err = tx.QueryRow(ctx, `SELECT holds_machines FROM launchers WHERE name = $1 FOR UPDATE`, name).Scan(&holds)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store.RemoveLauncher: lock launcher: %w", err)
-	}
-	rows, err := tx.Query(ctx, `
-SELECT pe.id FROM platform_experiments pe
-WHERE pe.coordinator_hosted AND pe.coordinator_launcher = $1 AND (pe.status <> 'closed' OR pe.closed_at > now() - make_interval(secs => $3))
-   OR EXISTS (SELECT 1 FROM experiment_signups s WHERE s.platform_experiment_id = pe.id AND s.hosted AND s.launcher = $1)
-      AND (pe.status <> 'closed' OR pe.closed_at > now() - make_interval(secs => $2))
-ORDER BY pe.id`, name, domain.AgentWindDown.Seconds(), domain.CoordinatorWindDown.Seconds())
-	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store.RemoveLauncher: list platform experiments: %w", err)
-	}
-	using, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store.RemoveLauncher: list platform experiments: %w", err)
-	}
-	if len(using) > 0 || holds {
-		return false, &LauncherInUseError{Name: name, PlatformExperiments: using}
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM launchers WHERE name = $1`, name); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.RemoveLauncher: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.RemoveLauncher: commit: %w", err)
-	}
-	return true, nil
-}
-
-// LauncherKnown reports whether a launcher of this name is registered.
-func (s *PlatformExperimentsStore) LauncherKnown(ctx context.Context, name string) (bool, error) {
-	var known bool
-	if err := s.pool.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM launchers WHERE name = $1)`, name).Scan(&known); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.LauncherKnown: %w", err)
-	}
-	return known, nil
 }

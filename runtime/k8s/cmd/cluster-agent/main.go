@@ -89,13 +89,12 @@ func main() {
 	ctx, cancel := agentloop.SignalContext(log)
 	defer cancel()
 
+	remote := &agentloop.Remote{ClusterName: clusterName, APIURL: apiURL, Token: token, Version: version, HTTP: &http.Client{Timeout: 35 * time.Second}}
 	a := &agentloop.Agent{
 		ClusterName:       clusterName,
-		APIURL:            apiURL,
-		Token:             token,
-		Version:           version,
+		ControlPlane:      remote,
+		Builds:            remote,
 		Executor:          jwc,
-		HTTPClient:        &http.Client{Timeout: 35 * time.Second},
 		ReconcileInterval: reconcileInterval,
 		StatusInterval:    statusInterval,
 		AutoscalerEnabled: autoscalerEnabled,
@@ -107,7 +106,7 @@ func main() {
 			os.Exit(1)
 		}
 		log("every job object this agent created here is gone")
-		a.SayIfStillRegistered(ctx, log)
+		remote.SayIfStillRegistered(ctx, log)
 		return
 	}
 
@@ -149,11 +148,11 @@ func main() {
 // check is the cluster-agent check subcommand: each line says ok or FAIL, and the exit status is
 // 1 when any failed.
 func check() int {
-	agent := &agentloop.Agent{
+	agent := &agentloop.Remote{
 		ClusterName: agentloop.RequiredEnv(binaryName, "CLUSTER_NAME"),
 		APIURL:      agentloop.RequiredEnv(binaryName, "API_URL"),
 		Token:       agentloop.RequiredEnv(binaryName, "RUNTIME_TOKEN"),
-		HTTPClient:  &http.Client{Timeout: 10 * time.Second},
+		HTTP:        &http.Client{Timeout: 10 * time.Second},
 	}
 	metricsURL := agentloop.RequiredEnv(binaryName, "METRICS_URL")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -167,8 +166,8 @@ func check() int {
 		}
 		fmt.Printf("ok   %s\n", what)
 	}
-	say("api: "+agent.APIURL+" answers from this pod", agentloop.CheckReachable(ctx, agent.HTTPClient, agent.APIURL))
-	say("metrics: "+metricsURL+" answers from this pod", agentloop.CheckReachable(ctx, agent.HTTPClient, metricsURL))
+	say("api: "+agent.APIURL+" answers from this pod", agentloop.CheckReachable(ctx, agent.HTTP, agent.APIURL))
+	say("metrics: "+metricsURL+" answers from this pod", agentloop.CheckReachable(ctx, agent.HTTP, metricsURL))
 	tokenErr := agent.CheckToken(ctx)
 	if errors.Is(tokenErr, agentloop.ErrClusterRemoved) {
 		tokenErr = fmt.Errorf("no cluster named %s is registered there (hl cluster add %s)", agent.ClusterName, agent.ClusterName)

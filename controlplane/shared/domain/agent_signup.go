@@ -19,9 +19,6 @@ type AgentSignup struct {
 	// platform experiment is running and the agent is not cut, and for one that measures the
 	// baseline also while it is open.
 	Hosted bool `json:"hosted"`
-	// Launcher is the launcher that runs a hosted agent, written when it joins so that a later
-	// change of the configured launcher moves new agents only.
-	Launcher string `json:"launcher,omitempty"`
 	// AgentType is the id of the agent type it runs, fixed when it joins: it runs the type's current
 	// version. Model, empty, and Hyperparameters, nil, are the type's, read whenever it is served.
 	AgentType       string         `json:"flavor" doc:"The agent type it runs, by id. It runs the type's current version, told with agent.instructions when that changes."`
@@ -300,26 +297,14 @@ func (i AgentInstance) MarshalJSON() ([]byte, error) {
 }
 
 // HostedCoordinator is the coordinator the platform runs for one platform experiment: one more
-// machine of its launcher, started as the agents are and holding a coordinator token. It is not
+// hosted machine, started as the agents are and holding a coordinator token. It is not
 // signed up, so it holds no quota and is not ranked.
 type HostedCoordinator struct {
-	Launcher string `json:"launcher"`
-	Model    string `json:"model"`
+	Model string `json:"model"`
 	// Instance is what became of its machine.
 	Instance AgentInstance `json:"instance"`
 	// Activity is what the coordinator last said it is doing.
 	Activity *AgentActivity `json:"activity,omitempty"`
-}
-
-var launcherNamePattern = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
-
-// ValidateLauncherName holds a launcher's name to what can start the name of every machine it
-// rents: with a dash in it, one launcher's names would start with another's.
-func ValidateLauncherName(name string) error {
-	if !launcherNamePattern.MatchString(name) {
-		return fmt.Errorf("launcher name %q must be 1 to 16 lowercase letters and digits", name)
-	}
-	return nil
 }
 
 // CoordinatorFlavor is what the harness is started as to coordinate. It is no flavor an agent

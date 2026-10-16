@@ -124,19 +124,6 @@ func (f *rosterStore) Create(context.Context, string, string, string, string, ma
 
 func (f *rosterStore) CreatesOn(context.Context, string, string) (string, error) { return "", nil }
 
-// LauncherContacts answers every launcher as checking in now, and none while unregistered.
-func (f *rosterStore) LauncherContacts(_ context.Context, names []string) (map[string]db.LauncherContact, error) {
-	now := time.Now()
-	out := map[string]db.LauncherContact{}
-	for _, name := range names {
-		if f.unregistered {
-			break
-		}
-		out[name] = db.LauncherContact{At: &now}
-	}
-	return out, nil
-}
-
 const rosterMaxHosted = 6
 
 func (f *rosterStore) ListSignups(context.Context, string) ([]string, error) {
@@ -336,7 +323,7 @@ func agentsRouter(t *testing.T, store *rosterStore, caller auth.Principal) http.
 }
 
 func agentsTestLaunch() AgentLaunch {
-	return AgentLaunch{Launcher: "launcher-main", DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: 20}
+	return AgentLaunch{Hosting: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: 20}
 }
 
 func call(t *testing.T, r http.Handler, method, path, body string) (int, map[string]any) {
@@ -411,7 +398,7 @@ func TestHostedAgentsAreCreatedForTheConfiguredLauncherAndHandedNoToken(t *testi
 			t.Errorf("a hosted agent was handed its token: %v", a)
 		}
 		want := map[string]any{
-			"hosted": true, "launcher": "launcher-main", "flavor": "hyperparameter-search", "model": "claude-sonnet-5",
+			"hosted": true, "flavor": "hyperparameter-search", "model": "claude-sonnet-5",
 			"role": "competitor", "hyperparameters": map[string]any{"batch_size": float64(64)}, "platform_experiment_id": "pe-1",
 		}
 		for key, value := range want {
@@ -603,29 +590,6 @@ func TestOneMachineIsKeptForAnAgentThatMeasuresTheBaseline(t *testing.T) {
 	addEach(t, r, 1, `{"hosted":true,"role":"baseline"}`)
 }
 
-func TestHostingIsRefusedWhileTheLauncherConfigNamesIsNotRegistered(t *testing.T) {
-	store := newRosterStore(domain.PlatformExpOpen, 5)
-	store.unregistered = true
-	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", OrgID: "org-a"}
-	r := agentsRouter(t, store, staff)
-	for _, body := range []string{`{"hosted":true}`, `{"agent_id":"veteran","hosted":true}`} {
-		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
-		if code != http.StatusServiceUnavailable || out["reason"] != "launcher_not_registered" {
-			t.Fatalf("%s: got = %d %v, want = 503 launcher_not_registered", body, code, out)
-		}
-		if message, _ := out["message"].(string); !strings.Contains(message, "hl-admin launcher add launcher-main") {
-			t.Errorf("%s: the refusal does not say what registers it: %q", body, message)
-		}
-		if detail, _ := out["operator_detail"].(string); out["summary"] == "" || !strings.Contains(detail, `No launcher is registered as "launcher-main"`) {
-			t.Errorf("%s: staff are not told what to check: %v", body, out)
-		}
-	}
-	if len(store.signups) != 0 {
-		t.Fatalf("a refused hosted join left %d signups behind", len(store.signups))
-	}
-	addEach(t, r, 2, `{}`)
-}
-
 // A coordinator's token outlives the close by its wind-down, and adds nothing in it.
 func TestACoordinatorAddsNoAgentOnceItsExperimentClosed(t *testing.T) {
 	coordinator := auth.Principal{Kind: auth.KindCoordinator, OrgIDs: []string{"org-a"}, ProjectID: "project-a", PlatformExperimentID: "pe-1"}
@@ -742,7 +706,6 @@ func TestOnlyACallerOfTheExperimentsOrgMayChangeOrReadItsRoster(t *testing.T) {
 		"agent of the experiment":       {auth.Principal{Kind: auth.KindAgent, OrgIDs: inOrg, ProjectID: "project-a", PlatformExperimentID: "pe-1", AgentID: "veteran"}, http.StatusForbidden},
 		"job":                           {auth.Principal{Kind: auth.KindJob, OrgIDs: inOrg, PlatformExperimentID: "pe-1", ExperimentID: "job-1"}, http.StatusForbidden},
 		"runtime":                       {auth.Principal{Kind: auth.KindRuntime, OrgIDs: inOrg, ClusterName: "pe-1"}, http.StatusForbidden},
-		"launcher":                      {auth.Principal{Kind: auth.KindLauncher, LauncherName: "launcher-main"}, http.StatusForbidden},
 	} {
 		t.Run(name, func(t *testing.T) {
 			store := newRosterStore(domain.PlatformExpOpen, 5)
@@ -798,8 +761,8 @@ func TestAHostedAgentJoinsAPlatformExperimentThatNamesNoRepository(t *testing.T)
 		if code != http.StatusCreated && code != http.StatusOK {
 			t.Fatalf("%s: got = %d %v, want it joined", body, code, out)
 		}
-		if agent := joined(t, out)[0]; agent["hosted"] != true || agent["launcher"] == nil {
-			t.Errorf("%s: joined as %v, want hosted with a launcher", body, agent)
+		if agent := joined(t, out)[0]; agent["hosted"] != true {
+			t.Errorf("%s: joined as %v, want hosted", body, agent)
 		}
 	}
 	if len(store.signups) != 2 {

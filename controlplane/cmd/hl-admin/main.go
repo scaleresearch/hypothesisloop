@@ -26,7 +26,7 @@ const usage = `usage: hl-admin <command>
 
   token SCOPE                      print the token for a scope: staff, runtime:<cluster>,
                                    agent:<platform experiment>/<agent>, coordinator:<platform experiment>,
-                                   job:<experiment>, launcher:<name>
+                                   job:<experiment>
   user add SUBJECT NAME            create a user named NAME with a home org named NAME and its default project.
                                    A person who signs in gets theirs named Default org
   user staff SUBJECT on|off        make a user one of the platform's operators, or stop
@@ -37,10 +37,6 @@ const usage = `usage: hl-admin <command>
                                    e.g. '{"status_silence_ceiling_seconds":21600}'. 0 puts one back on the default
   platform-experiment share ID     let every account read a platform experiment and what is in it
   platform-experiment unshare ID   take that back: its own org alone reads it again
-  launcher add NAME                register an agent-launcher and print its token
-  launcher remove NAME             end a launcher's token. Refused, with what is in the way, while a
-                                   platform experiment that has not closed has hosted agents on it or
-                                   its last pass still listed machines: its token is what takes them down
   github connect ORG INSTALLATION_ID
                                    connect an installation of the platform's GitHub App to an org, as
                                    an operator who vouches for it. GitHub is asked, as the App, which
@@ -133,29 +129,6 @@ func run(args []string, stdout io.Writer) error {
 				return err
 			}
 			fmt.Fprintln(stdout, token)
-			return nil
-		})
-	case len(args) == 3 && args[0] == "launcher" && args[1] == "add":
-		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
-			if err := db.NewPlatformExperimentsStore(pool).RegisterLauncher(ctx, args[2]); err != nil {
-				return err
-			}
-			token, err := auth.Mint(cfg.Auth.SigningSecret, auth.LauncherScope(args[2]))
-			if err != nil {
-				return err
-			}
-			fmt.Fprintln(stdout, token)
-			return nil
-		})
-	case len(args) == 3 && args[0] == "launcher" && args[1] == "remove":
-		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
-			removed, err := db.NewPlatformExperimentsStore(pool).RemoveLauncher(ctx, args[2])
-			if err != nil {
-				return err
-			}
-			if !removed {
-				return fmt.Errorf("no launcher %s is registered", args[2])
-			}
 			return nil
 		})
 	case len(args) == 4 && args[0] == "github" && args[1] == "connect":

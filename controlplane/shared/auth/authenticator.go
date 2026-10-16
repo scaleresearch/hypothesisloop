@@ -47,7 +47,6 @@ type Directory interface {
 	AgentCutAt(ctx context.Context, platformExperimentID, agentID string) (*time.Time, error)
 	AgentStanding(ctx context.Context, platformExperimentID, agentID string) (db.AgentStanding, error)
 	ClusterOrg(ctx context.Context, name string) (orgID string, found bool, err error)
-	LauncherKnown(ctx context.Context, name string) (bool, error)
 	AssignedEnvironmentBuild(ctx context.Context, cluster, key string, attempt int) (*domain.Environment, error)
 }
 
@@ -110,14 +109,6 @@ func (a *Authenticator) derived(ctx context.Context, token string) (Principal, e
 			return Principal{}, refusal
 		}
 		p.OrgIDs = []string{orgID}
-	case KindLauncher:
-		known, err := a.directory.LauncherKnown(ctx, p.LauncherName)
-		if err != nil {
-			return Principal{}, err
-		}
-		if !known {
-			return Principal{}, unauthenticated("launcher %s is not registered", p.LauncherName)
-		}
 	case KindBuild:
 		env, err := a.directory.AssignedEnvironmentBuild(ctx, p.Build.Cluster, p.Build.Key, p.Build.Attempt)
 		if err != nil {

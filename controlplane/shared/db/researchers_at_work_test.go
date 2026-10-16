@@ -31,7 +31,7 @@ func TestResearchersAtWorkAreCountedByTheOneRuleForEachAgentAndTheWholePool(t *t
 	exec(t, pool, `INSERT INTO hosted_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, true) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, pe, replaced)
 	replacement, _ := domain.NewID(domain.AgentIDPrefix)
 	if err := pes.JoinRunning(ctx, pe, &domain.Agent{ID: replacement, CreatedAt: time.Now().UTC()},
-		domain.AgentSignup{Actor: testActor, AgentID: replacement, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: "main", AgentType: "generalist", Model: "model-1", Replaces: replaced},
+		domain.AgentSignup{Actor: testActor, AgentID: replacement, Role: domain.SignupRoleCompetitor, Hosted: true, AgentType: "generalist", Model: "model-1", Replaces: replaced},
 		LateJoin{Used: map[string]float64{}}); err != nil {
 		t.Fatal(err)
 	}

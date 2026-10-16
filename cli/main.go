@@ -1133,9 +1133,7 @@ state. The reasons:
   open, its baseline declared: starts_at_ahead, no_researchers, budget_spent, starting
   running: agents_starting while no researcher's machine is up yet, then running
   running, every researcher finished, cut or stopped for good: researchers_done
-  any, while a machine it wants is on a launcher that stopped asking: launcher_unreachable
-An agent of the roster adds instance_starting, or launcher_unreachable while its launcher is
-silent (hl platform-experiments agents list).
+An agent of the roster adds instance_starting (hl platform-experiments agents list).
 Once the baseline is declared, baseline_branch and baseline_code_ref name the branch and commit
 of its job, where its harness is: the default branch may hold none of it.
 prior_runs lists every closed run of the same project and repository that ran, latest first,

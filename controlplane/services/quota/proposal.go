@@ -319,7 +319,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"The platform makes the same accept by itself at accepts_at, at the proposal's own budget, length, baseline_minutes and researchers, for the person who created the draft, unless a person accepted, held, revised or closed it first; one the check refuses then waits for a person. A proposal with questions has no accepts_at and waits for a person to answer them. " +
 			"409 invalid_transition for anything but a draft with a proposal; 422 with the proposal's reasons when the stated cost, baseline_minutes or agents do not pass its check, " +
 			"accelerator_unreachable among them when the proposal's accelerator_type is on no cluster the org's jobs can be placed on now, and no_cluster_for_image when none that has it runs the proposal's image any more; " +
-			"503 launcher_not_registered when nothing could run it. A draft's own planner cannot accept it.",
+			"503 hosting_not_configured when nothing could run it. A draft's own planner cannot accept it.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body AcceptRequest
@@ -443,7 +443,7 @@ func (h *PlatformExperimentsHandler) proposed(ctx context.Context, pe *domain.Pl
 		at := now.Add(h.planning.AutoAccept)
 		proposed.AcceptsAt = &at
 	}
-	if h.launch.Launcher == "" || h.launch.DefaultModel == "" {
+	if !h.launch.Hosting || h.launch.DefaultModel == "" {
 		return proposed, nil
 	}
 	var by domain.Actor
@@ -568,10 +568,10 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	if err != nil {
 		return nil, h.refusal("check proposal", err)
 	}
-	if h.launch.Launcher == "" || h.launch.DefaultModel == "" || h.launch.CoordinatorModel == "" {
+	if h.launch.DefaultModel == "" || h.launch.CoordinatorModel == "" {
 		return nil, h.refusal("accept", errors.New("the handler has no agent launch settings"))
 	}
-	if err := h.svc.requireHosting(ctx, h.launch.Launcher); err != nil {
+	if err := requireHosting(h.launch.Hosting); err != nil {
 		return nil, h.refusal("accept", err)
 	}
 
@@ -580,7 +580,7 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	pe.MaxConcurrentAccelerators = experiment.MaxConcurrentAccelerators
 	pe.BudgetAcceleratorHours, pe.MaxAgents, pe.Researchers, pe.DurationHours = experiment.BudgetAcceleratorHours, experiment.MaxAgents, experiment.Researchers, experiment.DurationHours
 	pe.StartsAt, pe.BaselineDueAt = now, now.Add(time.Duration(req.BaselineMinutes)*time.Minute)
-	pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: h.launch.Launcher}
+	pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{}
 	pe.AcceptedAt, pe.AcceptedBy, pe.AcceptedAnswers = &now, acceptedBy, answers
 
 	catalog, err := h.svc.store.AgentTypeCatalog(ctx, id)

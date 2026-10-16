@@ -1039,8 +1039,6 @@ func (s *PlatformExperimentsService) jobsSubmitted(ctx context.Context, id strin
 // Describe sets on pe why it is in its status (StatusReason): on a draft where it stands with its
 // planner, on an open one why it is not running yet and what reader does about it, on a running
 // one whether its clock runs and whether a researcher is left to work, and on a closed one why it closed. It is the one place that says so.
-// Before any of those, one that wants a machine of a launcher that is silent waits for that
-// launcher (launcherUnreachable).
 func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.PlatformExperiment, reader auth.Principal) error {
 	var why *domain.StatusReason
 	var signups []domain.AgentSignup
@@ -1083,13 +1081,6 @@ func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.Pl
 			}
 		}
 		why.Message = nextStep(pe, why.Reason, signups, reader, now) + why.Message
-	}
-	silent, err := s.launcherUnreachable(ctx, pe, signups, reader.Kind == auth.KindStaff)
-	if err != nil {
-		return fmt.Errorf("platform_experiments.Describe: %w", err)
-	}
-	if silent != nil {
-		why = silent
 	}
 	if err := summarize(why, pe, signups, now); err != nil {
 		return fmt.Errorf("platform_experiments.Describe: %w", err)

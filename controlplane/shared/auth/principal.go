@@ -18,7 +18,6 @@ const (
 	KindCoordinator Kind = "coordinator"
 	KindJob         Kind = "job"
 	KindRuntime     Kind = "runtime"
-	KindLauncher    Kind = "launcher"
 	// KindBuild reads, through the git proxy, the repository of one environment build while it
 	// is assigned and building, and reaches nothing else.
 	KindBuild Kind = "build"
@@ -56,7 +55,6 @@ type Principal struct {
 	AgentID      string
 	ExperimentID string
 	ClusterName  string
-	LauncherName string
 	// Build is the environment build a build token reads the repository of.
 	Build BuildRef
 }

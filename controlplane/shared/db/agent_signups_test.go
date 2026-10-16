@@ -84,7 +84,7 @@ func TestSpawnedAgentsAreCreatedInTheExperimentsOrgWithWhatTheyWereLaunchedWith(
 	pes := NewPlatformExperimentsStore(pool)
 
 	ids := spawnTestAgents(t, pes, pe,
-		domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: "main", AgentType: "data-search", Model: "model-x", Hyperparameters: map[string]any{"batch_size": float64(64)}},
+		domain.AgentSignup{Actor: testActor, Hosted: true, AgentType: "data-search", Model: "model-x", Hyperparameters: map[string]any{"batch_size": float64(64)}},
 		domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierBurstOnly},
 	)
 
@@ -97,12 +97,12 @@ func TestSpawnedAgentsAreCreatedInTheExperimentsOrgWithWhatTheyWereLaunchedWith(
 		byID[s.AgentID] = s
 	}
 	hosted, own := byID[ids[0]], byID[ids[1]]
-	if !hosted.Hosted || hosted.Launcher != "main" || hosted.AgentType != "data-search" || hosted.Model != "model-x" ||
+	if !hosted.Hosted || hosted.AgentType != "data-search" || hosted.Model != "model-x" ||
 		!reflect.DeepEqual(hosted.Hyperparameters, map[string]any{"batch_size": float64(64)}) ||
 		hosted.Role != domain.SignupRoleCompetitor || hosted.Name != "display-"+ids[0] || hosted.PlatformExperimentID != pe {
 		t.Errorf("hosted signup: got = %+v", hosted)
 	}
-	if own.Hosted || own.Launcher != "" || own.Role != domain.SignupRoleBaseline || own.QuotaTier != domain.QuotaTierBurstOnly ||
+	if own.Hosted || own.Role != domain.SignupRoleBaseline || own.QuotaTier != domain.QuotaTierBurstOnly ||
 		own.Hyperparameters != nil || own.Model != "" {
 		t.Errorf("self-run signup: got = %+v", own)
 	}
@@ -211,9 +211,8 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
 	accounts := NewAccountsStore(pool)
-	launcher := "launcher-" + uuid.New().String()[:8]
 	const windDown = 120 * time.Second
-	hosted := domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: launcher, AgentType: "generalist"}
+	hosted := domain.AgentSignup{Actor: testActor, Hosted: true, AgentType: "generalist"}
 
 	newPE := func() string {
 		pe := "pe-" + uuid.New().String()[:8]
@@ -237,7 +236,6 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 	}
 	expect(baselines[1], true)
 	spawnTestAgents(t, pes, open, domain.AgentSignup{Actor: testActor, AgentType: "generalist"})
-	spawnTestAgents(t, pes, open, domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: launcher + "-other", Role: domain.SignupRoleBaseline})
 
 	running := newPE()
 	runningAgents := spawnTestAgents(t, pes, running, hosted, hosted, hosted, hosted, hosted)
@@ -340,14 +338,14 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 	setPEStatus(t, pool, foreign, domain.PlatformExpRunning, time.Hour)
 	expect(foreignAgent, false)
 
-	listed, err := pes.ListLauncherAgents(ctx, launcher, windDown)
+	listed, err := pes.ListLauncherAgents(ctx, windDown)
 	if err != nil {
 		t.Fatalf("list launcher agents: got = %v, want = nil", err)
 	}
 	got := map[string]bool{}
 	var order []string
 	for _, a := range listed {
-		if !a.Hosted || a.Launcher != launcher {
+		if !a.Hosted {
 			t.Errorf("listed an agent that is not this launcher's: %+v", a)
 		}
 		got[a.AgentID] = a.Ended != ""
@@ -369,15 +367,14 @@ func TestTheWindDownIsCountedFromTheClose(t *testing.T) {
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
 	const windDown = 120 * time.Second
-	launcher := "launcher-" + uuid.New().String()[:8]
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
-	spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: launcher})
+	spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Hosted: true})
 	setPEStatus(t, pool, pe, domain.PlatformExpClosed, time.Hour)
 	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET status_changed_at = now() WHERE id = $1`, pe); err != nil {
 		t.Fatal(err)
 	}
-	if listed, err := pes.ListLauncherAgents(ctx, launcher, windDown); err != nil || len(listed) != 0 {
+	if listed, err := pes.ListLauncherAgents(ctx, windDown); err != nil || len(listed) != 0 {
 		t.Errorf("closed an hour ago with a fresh status change: listed = %+v, %v, want none", listed, err)
 	}
 }
@@ -390,15 +387,14 @@ func TestAMachineOfARunThatEndedIsShownAsStoppedOnceItsWindDownPassed(t *testing
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
-	launcher := "launcher-" + uuid.New().String()[:8]
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
-	agents := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: launcher}, domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: launcher})
+	agents := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Hosted: true}, domain.AgentSignup{Actor: testActor, Hosted: true})
 	if _, err := pool.pool.Exec(ctx, `INSERT INTO hosted_instances (platform_experiment_id, agent_id, name, state)
 SELECT platform_experiment_id, agent_id, 'm', 'running' FROM experiment_signups WHERE platform_experiment_id = $1`, pe); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET coordinator_hosted = true, coordinator_launcher = $2 WHERE id = $1`, pe, launcher); err != nil {
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET coordinator_hosted = true WHERE id = $1`, pe); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.pool.Exec(ctx, `INSERT INTO hosted_instances (platform_experiment_id, agent_id, name, asked_at, state) VALUES ($1, '', 'm', now(), 'running')`, pe); err != nil {

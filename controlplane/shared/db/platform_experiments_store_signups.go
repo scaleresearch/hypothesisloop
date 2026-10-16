@@ -267,11 +267,11 @@ VALUES ($1, $2, $3, $4)`, agent.ID, agent.Name, agent.OrgID, agent.CreatedAt); e
 		}
 		signup.QuotaTier = domain.ResolveQuotaTier(signup.QuotaTier, defaultTier)
 		tag, err := tx.Exec(ctx, `
-INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, agent_type, hyperparameters, model, added_by_kind, added_by_id,
+INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, agent_type, hyperparameters, model, added_by_kind, added_by_id,
                                 replaces, replaces_xid)
-VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::text, CASE WHEN $12::text <> '' THEN pg_current_xact_id()::text::bigint END)
+VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9, $10, $11::text, CASE WHEN $11::text <> '' THEN pg_current_xact_id()::text::bigint END)
 ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
-			signup.Hosted, signup.Launcher, agentType, hyperparameters, model, string(addedBy.Kind), addedBy.ID, signup.Replaces)
+			signup.Hosted, agentType, hyperparameters, model, string(addedBy.Kind), addedBy.ID, signup.Replaces)
 		if err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: %w", err)
 		}
@@ -803,7 +803,7 @@ const endedReasonSQL = `CASE WHEN EXISTS (SELECT 1 FROM platform_experiment_cuts
 // released, and why it ended: its platform experiment closed, it was cut, it finished, or it is
 // a planner whose answer is stored.
 var agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name, s.agent_id), s.role, s.quota_tier,
-       s.hosted, s.launcher, s.agent_type, s.hyperparameters, COALESCE(s.model, ''), s.signed_up_at,
+       s.hosted, s.agent_type, s.hyperparameters, COALESCE(s.model, ''), s.signed_up_at,
        ` + instanceColumns + `,
        s.finished_at, s.finished_reason, s.added_by_kind, s.added_by_id, s.replaces,
        COALESCE((SELECT r.agent_id FROM experiment_signups r WHERE r.platform_experiment_id = s.platform_experiment_id AND r.replaces = s.agent_id), ''),
@@ -825,7 +825,7 @@ func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 	var activity string
 	var activityAt *time.Time
 	if err := row.Scan(append([]any{&signup.PlatformExperimentID, &signup.AgentID, &signup.Name, &signup.Role, &signup.QuotaTier,
-		&signup.Hosted, &signup.Launcher, &signup.AgentType, &hyperparameters, &signup.Model, &signup.SignedUpAt,
+		&signup.Hosted, &signup.AgentType, &hyperparameters, &signup.Model, &signup.SignedUpAt,
 		&instance.Name, &instance.Restarts, &instance.Renewals, &instance.Stopped, &instance.ExitedAt, &instance.ExitLog,
 		&instance.SeenAt, &instance.AskedAt, &instance.Launch, &instance.Reported, &instance.ProgressAt, &instance.EndReason, &activity, &activityAt,
 		&signup.FinishedAt, &signup.FinishedReason, &addedBy.Kind, &addedBy.ID, &signup.Replaces, &signup.ReplacedBy, &instance.Released, &signup.Ended, &signup.CutReason, &signup.AtWork, &signup.EndedReason}, more...)...); err != nil {
@@ -901,11 +901,11 @@ type LauncherAgent struct {
 	AgentImage string
 }
 
-// launcherAgentsFrom selects the hosted agents a launcher still has something to do for: those
+// launcherAgentsFrom selects the hosted agents the launcher still has something to do for: those
 // of a running platform experiment that were not cut and did not finish, those that measure the
 // baseline of an open one, since no researcher's machine is rented before there is a baseline to
 // start from, and those
-// whose experiment closed, who were cut or who finished less than $2 seconds ago. A stopped agent is among them: it is asked for again
+// whose experiment closed, who were cut or who finished less than $1 seconds ago. A stopped agent is among them: it is asked for again
 // once what it is started with changes. Both moments and the comparison are on the database's
 // clock.
 //
@@ -918,7 +918,7 @@ type LauncherAgent struct {
 //
 // A draft's planner is the other way round. It has something to do while the draft is a draft
 // and nothing is proposed, which a revision makes true again. After its answer it is kept until
-// the draft's planner_ends_at, for a revision asked for soon, and then let wind down for $2
+// the draft's planner_ends_at, for a revision asked for soon, and then let wind down for $1
 // seconds, as it is after the draft closed. Once the draft is accepted it has nothing left to
 // do, in an experiment that is then open or running.
 //
@@ -929,20 +929,20 @@ FROM experiment_signups s
 JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
 LEFT JOIN agents a ON a.id = s.agent_id` + signupInstanceJoin + `
 LEFT JOIN platform_experiment_cuts c ON c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id
-WHERE s.hosted AND s.launcher = $1 AND NOT (` + awaitsRepository + `)
-  AND (pe.status = 'closed' AND pe.closed_at > now() - make_interval(secs => $2)
+WHERE s.hosted AND NOT (` + awaitsRepository + `)
+  AND (pe.status = 'closed' AND pe.closed_at > now() - make_interval(secs => $1)
        OR s.role <> '` + string(domain.SignupRolePlanner) + `' AND (pe.status = 'running' OR pe.status = 'open' AND s.role = '` + string(domain.SignupRoleBaseline) + `')
        OR s.role = '` + string(domain.SignupRoleBaseline) + `' AND pe.status = 'draft' AND pe.accepts_at IS NOT NULL
-       OR s.role = '` + string(domain.SignupRolePlanner) + `' AND pe.status = 'draft' AND (pe.planner_ends_at IS NULL OR pe.planner_ends_at > now() - make_interval(secs => $2)))
-  AND (c.agent_id IS NULL OR c.cut_at > now() - make_interval(secs => $2))
-  AND (s.finished_at IS NULL OR s.finished_at > now() - make_interval(secs => $2))
+       OR s.role = '` + string(domain.SignupRolePlanner) + `' AND pe.status = 'draft' AND (pe.planner_ends_at IS NULL OR pe.planner_ends_at > now() - make_interval(secs => $1)))
+  AND (c.agent_id IS NULL OR c.cut_at > now() - make_interval(secs => $1))
+  AND (s.finished_at IS NULL OR s.finished_at > now() - make_interval(secs => $1))
   AND NOT ` + replacedSQL
 
 // ListLauncherAgents returns the hosted agents the launcher's desired state is decided from.
-func (s *PlatformExperimentsStore) ListLauncherAgents(ctx context.Context, launcher string, windDown time.Duration) ([]LauncherAgent, error) {
+func (s *PlatformExperimentsStore) ListLauncherAgents(ctx context.Context, windDown time.Duration) ([]LauncherAgent, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT `+agentSignupColumns+`, pe.agent_image`+launcherAgentsFrom+`
-ORDER BY s.platform_experiment_id, s.agent_id`, launcher, windDown.Seconds())
+ORDER BY s.platform_experiment_id, s.agent_id`, windDown.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.ListLauncherAgents: %w", err)
 	}

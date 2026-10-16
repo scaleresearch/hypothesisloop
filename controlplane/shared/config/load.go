@@ -277,9 +277,6 @@ func (c *Config) build() error {
 	if len(c.Auth.SigningSecret) < MinSigningSecretLength {
 		return fmt.Errorf("auth signing_secret is required and must be at least %d characters", MinSigningSecretLength)
 	}
-	if err := domain.ValidateLauncherName(c.Agents.Launcher); err != nil {
-		return fmt.Errorf("agents launcher: %w", err)
-	}
 	if c.Agents.Image == "" {
 		return fmt.Errorf("agents image is required: what a hosted agent's machine boots")
 	}
@@ -297,7 +294,7 @@ func (c *Config) build() error {
 			domain.MinAgentProgressLimitSeconds, domain.AgentProgressIntervalSeconds, domain.MinAgentProgressLimitSeconds/domain.AgentProgressIntervalSeconds)
 	}
 	if c.Agents.MaxNewInstancesPerAnswer <= 0 {
-		return fmt.Errorf("agents max_new_instances_per_answer is required and positive: how many machines one answer asks a launcher to create")
+		return fmt.Errorf("agents max_new_instances_per_answer is required and positive: how many machines one pass over the sandbox provider creates")
 	}
 	if c.Agents.MaxHostedPerPlatformExperiment <= 0 {
 		return fmt.Errorf("agents max_hosted_per_platform_experiment is required and positive: how many machines the platform runs for one platform experiment, its coordinator included")
@@ -386,6 +383,9 @@ func (c *Config) build() error {
 		default:
 			return fmt.Errorf("environments provider %q is not a registry provider this build knows (%s)", e.Provider, RegistryProviderGCP)
 		}
+	}
+	if err := c.buildRented(); err != nil {
+		return err
 	}
 	if c.Auth.UIOrigin == "" {
 		return fmt.Errorf("auth ui_origin is required: the one browser origin allowed to call the API")

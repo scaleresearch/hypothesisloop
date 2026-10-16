@@ -21,7 +21,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
-	"github.com/scaleresearch/hypothesisloop/runtime/shared/cpclient"
 )
 
 // passIntervals bounds one reconcile pass or status push at this many of its intervals. It
@@ -35,17 +34,19 @@ const passIntervals = 30
 // actual job; capturing why they ended is worth a few seconds of it and no more.
 const finalStatusCaptureBudget = 10 * time.Second
 
+// ControlPlane is this cluster's API on the control plane: Remote for a runtime of its own, in
+// process for a cluster the control plane runs itself. Either answers ErrClusterRemoved once the
+// cluster is no longer registered.
+type ControlPlane interface {
+	Reconcile(ctx context.Context, report clusterapi.ReconcileRequest) (clusterapi.ReconcileAnswer, error)
+	PushStatus(ctx context.Context, push clusterapi.StatusPush) error
+}
+
 // Agent drives one cluster/node's reconcile and status-report loops against an Executor.
 type Agent struct {
-	ClusterName string
-	APIURL      string
-	// Token is this cluster's runtime token, sent on every call to the control plane.
-	Token string
-	// Version is what the agent runs, its image tag, sent on every call beside the token
-	// (clusterapi.AgentVersionHeader). Empty sends none.
-	Version           string
+	ClusterName       string
+	ControlPlane      ControlPlane
 	Executor          agentexec.Executor
-	HTTPClient        *http.Client
 	ReconcileInterval time.Duration
 	StatusInterval    time.Duration
 	// AutoscalerEnabled is the operator's own claim that this cluster sits behind a native
@@ -54,8 +55,9 @@ type Agent struct {
 	// deadline, so this is never heuristically detected). See autoscaler.md.
 	AutoscalerEnabled bool
 	// Builder builds the environments the control plane assigns this cluster, which reports
-	// that it builds. Nil builds none.
+	// that it builds, and Builds is what it asks of the control plane about them. Nil builds none.
 	Builder Builder
+	Builds  BuildAPI
 	Log     func(format string, args ...any)
 
 	// unrunnable is what the last reconcile pass did not create, by experiment, with the attempt,
@@ -413,11 +415,7 @@ func (a *Agent) fetchDesiredState(ctx context.Context, exec agentexec.Executor) 
 		RAMAvailableBytes:          ramAvail, RAMTotalBytes: ramTotal,
 		StorageAvailableBytes: storageAvail, StorageTotalBytes: storageTotal,
 	}
-	var answer clusterapi.ReconcileAnswer
-	if err := a.call(ctx, http.MethodPost, "/reconcile", report, &answer); err != nil {
-		return clusterapi.ReconcileAnswer{}, err
-	}
-	return answer, nil
+	return a.ControlPlane.Reconcile(ctx, report)
 }
 
 func (a *Agent) statusReportLoop(ctx context.Context) {
@@ -591,28 +589,6 @@ func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id
 	}, true
 }
 
-// controlPlane is this cluster's API on the control plane.
-func (a *Agent) controlPlane() *cpclient.Client {
-	client := &cpclient.Client{BaseURL: fmt.Sprintf("%s/internal/clusters/%s", a.APIURL, a.ClusterName), Token: a.Token, HTTP: a.HTTPClient}
-	if a.Version != "" {
-		client.Header = http.Header{clusterapi.AgentVersionHeader: {a.Version}}
-	}
-	return client
-}
-
-// call makes one request of this cluster's API. A 401 that says the cluster is no longer
-// registered is ErrClusterRemoved; any other refusal is the control plane's own words, and the
-// loop goes on either way: a 401 or 403 is a token or a registration somebody has to fix, and the
-// reason is what tells them which.
-func (a *Agent) call(ctx context.Context, method, path string, body, out any) error {
-	err := a.controlPlane().Do(ctx, method, path, body, out)
-	var refused *cpclient.Refusal
-	if errors.As(err, &refused) && refused.Status == http.StatusUnauthorized && refused.Reason == clusterapi.ReasonClusterNotRegistered {
-		return ErrClusterRemoved
-	}
-	return err
-}
-
 // Detach stops every workload this cluster holds here, as a pass that desires nothing, and
 // returns once none is left or ctx ends. It tells the control plane nothing: removing the cluster
 // there is its owner's, in the UI or with hl cluster remove.
@@ -645,28 +621,9 @@ func (a *Agent) detachOnce(ctx context.Context) (done bool, err error) {
 	return a.converge(pass, exec, clusterapi.ReconcileAnswer{}, true)
 }
 
-// SayIfStillRegistered tells, through log, how to remove this cluster from the control plane
-// when it still takes the cluster's token.
-func (a *Agent) SayIfStillRegistered(ctx context.Context, log func(format string, args ...any)) {
-	err := a.CheckToken(ctx)
-	switch {
-	case errors.Is(err, ErrClusterRemoved):
-		log("cluster %s is not registered at %s", a.ClusterName, a.APIURL)
-	case err != nil:
-		log("could not ask %s whether cluster %s is still registered (%v): if it is, remove it in the UI or with hl cluster remove %s", a.APIURL, a.ClusterName, err, a.ClusterName)
-	default:
-		log("cluster %s is still registered at %s: remove it in the UI or with hl cluster remove %s", a.ClusterName, a.APIURL, a.ClusterName)
-	}
-}
-
 func (a *Agent) pushStatus(ctx context.Context, reports []clusterapi.StatusReport) {
-	var ack clusterapi.StatusAck
-	if err := a.call(ctx, http.MethodPost, "/status", clusterapi.StatusPush{Reports: reports}, &ack); err != nil {
+	if err := a.ControlPlane.PushStatus(ctx, clusterapi.StatusPush{Reports: reports}); err != nil {
 		a.Log("push status: %v", err)
-		return
-	}
-	if ack.Status != "ok" {
-		a.Log("push status: invalid acknowledgement status %q", ack.Status)
 	}
 }
 
@@ -708,12 +665,6 @@ func SignalContext(logFn func(format string, args ...any)) (context.Context, con
 		cancel()
 	}()
 	return ctx, cancel
-}
-
-// CheckToken asks the control plane whether it takes this cluster's token, and changes nothing
-// there: no capacity is reported and no identity bound. An installer's dry run asks it.
-func (a *Agent) CheckToken(ctx context.Context) error {
-	return a.call(ctx, http.MethodGet, "/access", nil, nil)
 }
 
 // CheckReachable asks base's /healthz, which answers without a token.

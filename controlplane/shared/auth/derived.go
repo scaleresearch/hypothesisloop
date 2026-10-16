@@ -27,8 +27,6 @@ func CoordinatorScope(platformExperimentID string) string {
 
 func RuntimeScope(clusterName string) string { return "runtime:" + clusterName }
 
-func LauncherScope(name string) string { return "launcher:" + name }
-
 // BuildScope is the scope of the token one attempt of an environment build reads its repository
 // with through the git proxy.
 func BuildScope(cluster, key string, attempt int) string {
@@ -98,8 +96,6 @@ func parseScope(scope string) (Principal, error) {
 		return Principal{Kind: KindCoordinator, PlatformExperimentID: subject}, nil
 	case KindRuntime:
 		return Principal{Kind: KindRuntime, ClusterName: subject}, nil
-	case KindLauncher:
-		return Principal{Kind: KindLauncher, LauncherName: subject}, nil
 	case KindBuild:
 		parts := strings.Split(subject, "/")
 		attempt, err := strconv.Atoi(parts[len(parts)-1])

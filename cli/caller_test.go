@@ -36,7 +36,6 @@ func TestTheKindOfCallerIsReadFromTheTokensThePlatformMints(t *testing.T) {
 	for scope, want := range map[string]callerKind{
 		auth.AgentScope("pe-1", "ag-1"): callerAgent,
 		auth.CoordinatorScope("pe-1"):   callerCoordinator,
-		auth.LauncherScope("main"):      callerOther,
 		"staff":                         callerOther,
 	} {
 		token, err := auth.Mint(secret, scope)

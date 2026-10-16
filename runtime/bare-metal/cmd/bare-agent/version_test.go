@@ -42,7 +42,7 @@ func TestTheAgentSendsItsVersionOnTheControlPlane(t *testing.T) {
 	}))
 	defer server.Close()
 
-	agent := agentFor(hostinstall.Settings{ClusterName: "node-a", APIURL: server.URL, Token: "t"})
+	agent := remoteFor(hostinstall.Settings{ClusterName: "node-a", APIURL: server.URL, Token: "t"})
 	if err := agent.CheckToken(context.Background()); err != nil {
 		t.Fatalf("check token: %v", err)
 	}

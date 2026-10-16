@@ -281,7 +281,7 @@ func TestLoadRejectsRuntimeAddressesARuntimeCannotReach(t *testing.T) {
 		"no api url":                            {api + "\n", ""},
 		"api url with no host":                  {api, "  public_api_url: /api"},
 		"api url not http":                      {api, "  public_api_url: ftp://example.invalid"},
-		"api url under agents":                  {"  launcher: main", "  launcher: main\n  api_url: http://host.example.invalid:8081"},
+		"api url under agents":                  {"  default_model: claude-sonnet-5", "  default_model: claude-sonnet-5\n  api_url: http://host.example.invalid:8081"},
 		"api url under runtimes":                {metrics, metrics + "\n  api_url: http://host.example.invalid:8081"},
 		"no metrics url":                        {metrics, `  metrics_url: ""`},
 		"metrics url no host":                   {metrics, "  metrics_url: /metrics"},
@@ -346,10 +346,8 @@ func TestLoadRejectsRuntimeImagesANodeCannotPull(t *testing.T) {
 
 func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 	for name, edit := range map[string][2]string{
-		"no launcher":              {"  launcher: main", `  launcher: ""`},
-		"launcher not an id":       {"  launcher: main", "  launcher: Main_1"},
 		"no image":                 {"  image: registry.example.invalid/hypothesisloop-experimentator-base:latest", `  image: ""`},
-		"misspelled agents key":    {"  launcher: main", "  launcher: main\n  launchers: [main]"},
+		"misspelled agents key":    {"  default_model: claude-sonnet-5", "  default_model: claude-sonnet-5\n  launchers: [main]"},
 		"no default model":         {"  default_model: claude-sonnet-5\n", ""},
 		"no coordinator model":     {"  coordinator_model: claude-opus-5-5\n", ""},
 		"coordinator model unsafe": {"  coordinator_model: claude-opus-5-5", "  coordinator_model: $(id)"},
@@ -362,7 +360,6 @@ func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 		"zero hosted bound":        {"  max_hosted_per_platform_experiment: 25", "  max_hosted_per_platform_experiment: 0"},
 		"no idle notice":           {"  idle_notice_minutes: 10\n", ""},
 		"zero idle notice":         {"  idle_notice_minutes: 10", "  idle_notice_minutes: 0"},
-		"launcher with a dash":     {"  launcher: main", "  launcher: main-2"},
 		"default model unsafe":     {"  default_model: claude-sonnet-5", "  default_model: $(id)"},
 	} {
 		text := productionConfig(t)

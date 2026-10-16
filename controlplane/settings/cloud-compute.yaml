@@ -1,0 +1,112 @@
+# The cloud_compute section of the settings: provider accounts on which the control plane rents a
+# machine for every job placed on them, each account scheduled as one cluster. A deployment that
+# rents compute adds it to its settings file. Each cluster is registered as any other is
+# (hl-admin cluster add <cluster_name> <org>, and hl-admin cluster share for every org's jobs): the
+# control plane runs its runtime itself, and rents nothing for a cluster that is not registered.
+# Jobs boot with services.public_api_url, which a rented machine must reach, and environments
+# named by digest come from environments.repository. This one is a vast.ai account.
+cloud_compute:
+  - cluster_name: vast
+
+    # What every instance boots. It carries hl, which each job's command runs under, and needs sh,
+    # grep and curl: on vast.ai each job runs under a supervisor that stops its own instance when
+    # the job ends, and refuses to start the job without curl.
+    job_image: registry.example.invalid/hypothesisloop-job:latest
+
+    # Part of every instance name, hl-job-<namespace>-...: the cluster lists, counts and destroys
+    # the instances of its namespace only. 1 to 16 lowercase letters and digits. Do not change it
+    # while instances exist: they would run and bill unmanaged, and every job still desired would
+    # be rented a second time.
+    namespace: main
+
+    # One list call per pass and one or two offer searches per shape, so seven calls at most for
+    # the three shapes below, 42 a minute. The account's list answered two calls a second without a
+    # refusal and refused one in eighty at four a second, so ten seconds leaves room for the
+    # status pushes.
+    reconcile_interval_seconds: 10
+    # A push reads the output of every started instance, one after another, and vast.ai takes two
+    # to four seconds to deliver each read. Allow about three seconds per instance the shapes below
+    # can hold: 30 for these six, 60 for twenty.
+    status_interval_seconds: 30
+    # How long a job may wait for a machine to rent before it goes back to the queue as no_offer,
+    # at no cost and with no failure counted against its agent, and how long a rented machine may
+    # take to start the job before it is destroyed and another rented. The scheduler bounds each
+    # wait on its own: it requeues a job whose stuck-pending timeout (300 seconds unless the
+    # cluster's settings give stuck_pending_timeout_seconds) has passed since the cluster first
+    # reported the wait the job is in, so the two waits are never added up.
+    offer_wait_seconds: 180
+    startup_seconds: 240
+
+    provider:
+      name: vast
+      # The account's user id, as the vast.ai console shows it. With the name it is the cluster's
+      # id, which per-cluster settings are keyed on.
+      account_id: "000000"
+      settings:
+        # The environment variable that holds the account's API key. The key itself is never in
+        # a file.
+        api_key_env: VAST_API_KEY
+        # Offers above this price for the whole instance are never rented. Each rent takes the
+        # cheapest offer that passes the filters, so this is a ceiling and not what is paid. In
+        # October 2026 a verified RTX 4090 of the shape below with reliability 0.98 cost $0.55 to
+        # $1.30 an hour in Europe and the US (median $0.76), an A100 80GB about $1.05, and any GPU
+        # machine with 8 cores and 32 GB from $0.09 (median $0.43).
+        max_price_per_hour: 1.50
+        # The vendor's own score of a host, 0 to 1.
+        min_reliability: 0.98
+        # Two-letter country codes. Leave empty for any. Europe and North America: a handful of
+        # countries alone matched no offer of the shapes below.
+        regions: [US, CA, GB, IE, NO, SE, FI, DK, IS, NL, BE, LU, DE, FR, ES, PT, IT, CH, AT, PL, CZ, SK, HU, SI, HR, RO, BG, GR, EE, LV, LT]
+        # Only hosts the vendor has verified.
+        verified_only: true
+        # Machines never rented. The log names the machine of every instance rented and of every
+        # instance that is slow to start, with what the host says; a machine that keeps failing to
+        # start instances goes here.
+        excluded_machines: []
+        # Every GPU model a shape below names, under both of its names: product as the NVIDIA
+        # driver reports it, which is what the catalog string is made from, and gpu_name as
+        # vast.ai's offer search returns it. min_gpu_ram_mb tells apart models vast.ai sells under
+        # one name.
+        accelerators:
+          - product: NVIDIA GeForce RTX 4090
+            gpu_name: RTX 4090
+          - product: NVIDIA A100 80GB PCIe
+            gpu_name: A100 PCIE
+            min_gpu_ram_mb: 80000
+
+    # What this account may rent. Each of a shape's max_instances is reported as a node that holds
+    # one job, so the scheduler needs no provider settings of its own. A job is admitted to a shape
+    # with exactly the accelerators it asks for and at least the cpu, memory and storage, the
+    # smallest such shape first, and is rented and counted at the shape's whole size. name is 1 to
+    # 16 lowercase letters and digits. accelerator_type is the resource catalog string, written
+    # exactly as jobs request it and as it is priced in accelerator_types. A shape without
+    # accelerators offers its whole cores as units of hypothesisloop.dev/cpu=core. On a provider
+    # that rents out other people's offers (vast.ai) a node is reported free only while an offer
+    # passes the filters above for it, so the free capacity shown is what can be rented now.
+    #
+    # max_instances is set far above what experiments ask for at once, so it is no limit on how
+    # much is rented: what bounds the spend is each experiment's budget, each agent's quota, the
+    # experiment's concurrency limit and max_price_per_hour. Every instance of the maximum is
+    # reported as a node on every poll, which is the one reason the number is not larger.
+    shapes:
+      - name: rtx4090
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-GEFORCE-RTX-4090
+        accelerators: 1
+        cpu: "8"
+        memory: 32Gi
+        storage: 100Gi
+        max_instances: 200
+      - name: a100
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIE
+        accelerators: 1
+        cpu: "8"
+        memory: 64Gi
+        storage: 200Gi
+        max_instances: 200
+      # vast.ai rents no machine without a GPU, so this is the cheapest offer of any GPU model with
+      # the cores, memory and disk, within the filters above.
+      - name: cpu
+        cpu: "8"
+        memory: 32Gi
+        storage: 50Gi
+        max_instances: 200

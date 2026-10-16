@@ -87,13 +87,12 @@ func main() {
 		say("%s", fact)
 	}
 
+	remote := &agentloop.Remote{ClusterName: clusterName, APIURL: apiURL, Token: token, Version: version, HTTP: &http.Client{Timeout: 35 * time.Second}}
 	a := &agentloop.Agent{
 		ClusterName:       clusterName,
-		APIURL:            apiURL,
-		Token:             token,
-		Version:           version,
+		ControlPlane:      remote,
+		Builds:            remote,
 		Executor:          exec,
-		HTTPClient:        &http.Client{Timeout: 35 * time.Second},
 		ReconcileInterval: reconcileInterval,
 		StatusInterval:    statusInterval,
 		Log:               say,

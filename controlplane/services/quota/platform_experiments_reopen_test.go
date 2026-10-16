@@ -54,7 +54,7 @@ func reopenRouter(t *testing.T, store *reopenStore, caller auth.Principal) http.
 	r := authtest.Router(authtest.As(caller))
 	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{PlatformExperiments: tenancy}), zap.NewNop())
 	handler := NewPlatformExperimentsHandler(newSignupTestService(t, store), &fakeRepositories{}, testPlanning, zap.NewNop()).
-		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "model-default", CoordinatorModel: "coordinator-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted})
+		WithAgentLaunch(AgentLaunch{Hosting: true, DefaultModel: "model-default", CoordinatorModel: "coordinator-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted})
 	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), handler)
 	return r
 }
@@ -67,7 +67,7 @@ func closedRun(id string, startedAt time.Time, hosted bool) *domain.PlatformExpe
 		ClosedAt: &closedAt, CloseReason: domain.CloseByRequest, CloseMessage: "redeploying the platform", ClosedBy: &domain.Actor{Kind: domain.ActorStaff},
 	}
 	if hosted {
-		pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: "main", Model: "coordinator-old"}
+		pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Model: "coordinator-old"}
 	}
 	return pe
 }

@@ -56,7 +56,7 @@ func TestGateLetsOnlyItsAllowListThroughWithoutAToken(t *testing.T) {
 	for path, open := range map[string]bool{
 		"/health": true, "/healthz": true, "/openapi.json": true, "/docs": true, "/schemas/Thing.json": true,
 		"/explore": true, "/explore/coordinator": true, "/explore/rules": true,
-		"/internal/clusters/openapi.json": true, "/internal/launchers/explore": true, "/internal/clusters/schemas/X.json": true,
+		"/internal/clusters/openapi.json": true, "/internal/clusters/schemas/X.json": true,
 		"/metrics": false, "/me": false, "/internal/clusters": false, "/internal/clusters/c/state": false,
 		"/internal/clustersexplore": false, "/internal/node-metrics": false, "/watch": false, "/platform-experiments/explore": false,
 		"/nowhere": false,

@@ -195,7 +195,7 @@ type ServicesConfig struct {
 	// single /explore to discover all of it.
 	APIPort int `yaml:"api_port"`
 	// PublicAPIURL is the one address everything outside the control plane reaches this API at:
-	// a hosted agent from wherever its launcher rents, and a cluster's runtime from inside its
+	// a hosted agent from wherever its sandbox runs, and a cluster's runtime from inside its
 	// cluster. It is handed to both, so it is never loopback.
 	PublicAPIURL string `yaml:"public_api_url"`
 	// MetricControllerPort serves the internal controller only; nothing agent-facing.
@@ -269,13 +269,9 @@ type AuthConfig struct {
 	UIOrigin string `yaml:"ui_origin"`
 }
 
-// AgentsConfig decides where an agent the platform runs is started and from what. Each value is
-// read when an agent joins or when its launcher asks, and none of it names a provider: which
-// account a launcher rents from is that launcher's own config.
+// AgentsConfig decides what an agent the platform runs is started from and how it is watched.
+// Which account its machine is rented on is the sandbox section's.
 type AgentsConfig struct {
-	// Launcher is the launcher a newly hosted agent is given to. It is written onto the agent's
-	// signup, so changing it moves new agents only.
-	Launcher string `yaml:"launcher"`
 	// Image is what every hosted agent's machine boots.
 	Image string `yaml:"image"`
 	// DefaultModel is the model an agent runs on when it joins without naming one. It is
@@ -290,7 +286,7 @@ type AgentsConfig struct {
 	// ProgressLimitSeconds is how long a running hosted machine may go without reporting
 	// progress before it is given up on and a restart is spent.
 	ProgressLimitSeconds int `yaml:"progress_limit_seconds"`
-	// MaxNewInstancesPerAnswer is how many machines one answer asks a launcher to create.
+	// MaxNewInstancesPerAnswer is how many machines one pass over the sandbox provider creates.
 	MaxNewInstancesPerAnswer int `yaml:"max_new_instances_per_answer"`
 	// MaxHostedPerPlatformExperiment is how many machines the platform runs for one platform
 	// experiment: its hosted agents of every role and its coordinator.
@@ -494,6 +490,8 @@ type Config struct {
 	JobImages        []JobImageConfig        `yaml:"job_images"`
 	GitHost          GitHostConfig           `yaml:"git_host"`
 	Environments     *EnvironmentsConfig     `yaml:"environments"`
+	Sandbox          *SandboxConfig          `yaml:"sandbox"`
+	CloudCompute     []CloudComputeConfig    `yaml:"cloud_compute"`
 
 	// Derived maps built by Load() for fast lookup — not in YAML.
 	RateByName         map[string]float64           // accelerator name → AccH rate

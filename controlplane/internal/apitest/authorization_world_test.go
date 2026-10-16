@@ -18,8 +18,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/launcherapi"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/launcherapi/launchertest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
@@ -43,7 +41,6 @@ const (
 	worldSecret   = "the-authorization-table-signing-secret"
 	worldIssuer   = "https://issuer.test/auth/v1"
 	worldAudience = "hypothesisloop-test"
-	worldLauncher = "main"
 	worldBuildKey = "key-building"
 	worldMember   = "user-m"
 	// worldShared is the one platform experiment of org-b that staff shared with every account.
@@ -166,10 +163,6 @@ func (w *world) AssignedEnvironmentBuild(_ context.Context, cluster, key string,
 	return &domain.Environment{Key: key, OrgID: "org-a", ProjectID: "prj-a1", ClusterName: cluster, Attempt: attempt, State: domain.EnvironmentBuilding}, nil
 }
 
-func (w *world) LauncherKnown(_ context.Context, name string) (bool, error) {
-	return name == worldLauncher, nil
-}
-
 func (w *world) GetProject(_ context.Context, id string) (*domain.Project, error) {
 	org, ok := worldOrgOf[id]
 	if !ok {
@@ -201,40 +194,6 @@ func (g worldGraph) GetHypothesis(_ context.Context, id string) (*domain.Hypothe
 		return nil, nil
 	}
 	return &domain.Hypothesis{ID: id, PlatformExperimentID: t.PlatformExperimentID, AgentID: t.AgentID}, nil
-}
-
-type noLauncherAgents struct{}
-
-func (noLauncherAgents) ListLauncherAgents(context.Context, string, time.Duration) ([]db.LauncherAgent, error) {
-	panic("the launcher handler reached its store")
-}
-
-func (noLauncherAgents) ListLauncherCoordinators(context.Context, string, time.Duration) ([]db.LauncherCoordinator, error) {
-	panic("the launcher handler reached its store")
-}
-
-func (noLauncherAgents) ReleaseInstances(context.Context, string, time.Duration, time.Duration) error {
-	return nil
-}
-
-func (noLauncherAgents) AskInstance(context.Context, string, string, string, string) error {
-	panic("the launcher handler reached its store")
-}
-
-func (noLauncherAgents) ObserveInstance(context.Context, string, string, string, string, *string, time.Duration, string, string) error {
-	panic("the launcher handler reached its store")
-}
-
-func (noLauncherAgents) ListLauncherMachines(context.Context, string) ([]db.LauncherMachine, error) {
-	panic("the launcher handler reached its store")
-}
-
-func (noLauncherAgents) EndInstance(context.Context, string, string, string, db.InstanceEnd, string, time.Duration, int) (domain.AgentInstance, bool, error) {
-	panic("the launcher handler reached its store")
-}
-
-func (noLauncherAgents) SetLauncherHolds(context.Context, string, bool, string) error {
-	panic("the launcher handler reached its store")
 }
 
 var worldPlanning = quota.Planning{Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour, PlannerKept: 10 * time.Minute}
@@ -290,14 +249,9 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	clusteragentapi.RegisterHuma(api.docs["/internal/clusters"], clusteragentapi.NewHandler(nil, 0, "", 0, nil, 0, nil, 0, worldSecret, "https://api.test/git", &clusteragentapi.EnvironmentRegistry{Repository: "registry.test/environments/environment"}, logger))
 	api.router.Mount("/internal/clusters", clusters)
 
-	launchers := chi.NewRouter()
-	api.docs["/internal/launchers"] = apidocs.New(launchers, "launcher", "1.0.0", "", access, logger)
-	launcherapi.RegisterHuma(api.docs["/internal/launchers"], launcherapi.NewHandler(noLauncherAgents{}, &launchertest.Metrics{}, launcherapi.Settings{Image: "image", APIURL: "http://api", SigningSecret: worldSecret, BootLimit: time.Minute, ProgressLimit: time.Hour, MaxNewPerAnswer: 1}, logger))
-	api.router.Mount("/internal/launchers", launchers)
-
 	doc := apidocs.New(api.router, "hypothesisloop API", "1.0.0", "", access, logger)
 	api.docs[""] = doc
-	peHandler := quota.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, logger).WithAgentLaunch(quota.AgentLaunch{Launcher: worldLauncher, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: worldSecret, MaxHosted: 20})
+	peHandler := quota.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, logger).WithAgentLaunch(quota.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: worldSecret, MaxHosted: 20})
 	quota.RegisterHuma(doc, quota.NewHandler(nil, logger), peHandler)
 	quota.RegisterAgentsHuma(doc, peHandler, worldGraph{world: w})
 	quota.RegisterPlanningHuma(doc, peHandler)
@@ -334,7 +288,6 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	api.tokens["coordinator"] = mint(auth.CoordinatorScope("pe-a1"))
 	api.tokens["job"] = mint(auth.JobScope("job-own"))
 	api.tokens["runtime"] = mint(auth.RuntimeScope("cluster-a"))
-	api.tokens["launcher"] = mint(auth.LauncherScope(worldLauncher))
 	api.tokens["build"] = mint(auth.BuildScope("cluster-a", worldBuildKey, 1))
 	api.tokens["staff"] = mint(auth.StaffScope)
 	return api

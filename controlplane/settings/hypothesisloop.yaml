@@ -2,7 +2,7 @@
 # Platform-wide rates and scheduling policy live here.
 
 #   public_api_url  the one address this API is reached at from outside the control plane: by a
-#                   hosted agent from wherever its launcher rents, and by a cluster's runtime
+#                   hosted agent from wherever its sandbox runs, and by a cluster's runtime
 #                   from inside its cluster. Registering a cluster hands it out. A loopback
 #                   address is rejected at load.
 services:
@@ -46,46 +46,37 @@ auth:
   ui_origin: REPLACE-WITH-UI-ORIGIN
 
 # Agents the platform runs. An agent joins through POST /platform-experiments/{id}/agents; one
-# asked for with hosted: true is started by a launcher, a separate process that holds a provider
-# account and asks this API which instances should exist. Nothing here names a provider.
-# A platform experiment created with coordinator_hosted gets its coordinator the same way: one
-# more instance of the same launcher and image, on coordinator_model unless the
+# asked for with hosted: true runs on a machine the control plane rents on the provider of the
+# sandbox section (sandbox.yaml beside this file), and hosting is refused while there is none.
+# Nothing here names a provider. A platform experiment created with coordinator_hosted gets its
+# coordinator the same way: one more machine of the same image, on coordinator_model unless the
 # request names another.
 #
-#   launcher   the launcher a newly hosted agent is given to: 1 to 16 lowercase letters and
-#              digits, registered with `hl-admin launcher add`. It is written onto the agent when
-#              it joins, so changing this moves new agents only and running ones finish where they
-#              started. A launcher's token is accepted while the launcher is registered, whatever
-#              this names: one that no agent is given to any more is answered an empty list and
-#              takes down what it still holds. Hosting is refused while this names a launcher
-#              that is not registered.
-#   image      what every hosted agent's machine boots. The launcher's provider must be able to
+#   image      what every hosted agent's machine boots. The sandbox provider must be able to
 #              pull it. A change replaces every running agent's machine.
 #   default_model  the model an agent runs on when it joins without naming one. Written onto the
 #              agent when it joins, so a change moves new agents only.
 #   coordinator_model  the model a hosted coordinator runs on when its create request names none,
 #              a stronger one than default_model since it supervises the whole run. Written onto
 #              the platform experiment when it is created, so a change moves new ones only.
-#   boot_limit_seconds  how long a hosted machine may go unreported by its launcher after it was
+#   boot_limit_seconds  how long a hosted machine may go unlisted by its provider after it was
 #              asked for, or stay starting after it was first reported, before it is given up on
 #              and a restart is spent: three in any six hours, the fourth stops the agent. A
 #              first boot pulls the agent image (about 11 seconds on the slowest provider measured). Too low spends every restart on slow
-#              pulls. Restarts are spent under one image and one launcher config: a change of
+#              pulls. Restarts are spent under one image and one sandbox instance: a change of
 #              either gives every agent its restarts back and starts a stopped one again.
 #   progress_limit_seconds  how long a running hosted machine may go without its agent reporting
 #              progress before it is given up on and a restart is spent. An agent prints a
-#              progress marker every 15 seconds while it works or waits as it should, its launcher
-#              reads the newest one on each pass, and the limit runs on this platform's clock
+#              progress marker every 15 seconds while it works or waits as it should, the
+#              newest one is read on each pass over the sandbox provider, and the limit runs on this platform's clock
 #              from the last time the marker was seen to change. A hung agent is replaced between
 #              one and one and a quarter limits after it stopped. At least 120, and at least
-#              twice a launcher's pass as boot_limit_seconds is.
-#   max_new_instances_per_answer  how many machines one answer asks a launcher to create; the
-#              rest follow in the next. A launcher creates them one after another, so this bounds
-#              how long a pass takes. A launcher says how it paces itself with every question and
-#              is refused unless twice (this x its create pause + its interval) fits the boot
-#              limit: with 10 here, the 1 s pause and 15 s interval of the launcher's example
-#              settings, a pass is 25 s and the limit must be at least 50 s. A refused launcher
-#              rents nothing new and still stops and destroys the machines whose run is over.
+#              twice a pass over the sandbox provider as boot_limit_seconds is.
+#   max_new_instances_per_answer  how many machines one pass over the sandbox provider creates;
+#              the rest follow in the next. They are created one after another, so this bounds
+#              how long a pass takes: the settings are refused unless twice (this x
+#              sandbox.create_pause_milliseconds + sandbox.reconcile_interval_seconds) fits the
+#              boot limit and the progress limit.
 #   max_hosted_per_platform_experiment  how many machines the platform runs for one platform
 #              experiment: its hosted agents of every role and its coordinator. Written onto the
 #              platform experiment when it is created, so a change bounds new ones only.
@@ -96,7 +87,6 @@ auth:
 #              (agent.idle continues). The same period tells whoever steers a running platform
 #              experiment that its capacity holds places beyond its queued jobs (capacity.idle).
 agents:
-  launcher: main
   image: registry.example.invalid/hypothesisloop-experimentator-base:latest
   default_model: claude-sonnet-5
   coordinator_model: claude-opus-5-5
@@ -599,3 +589,8 @@ stages:
       evict_pct: 75
     - length_pct: 60
       evict_pct: 0
+
+# The machines the control plane rents itself, both left out here: sandbox, the provider account
+# hosted agents run on (sandbox.yaml beside this file), and cloud_compute, the provider accounts
+# jobs run on, each scheduled as a cluster (cloud-compute.yaml). A deployment that has them adds
+# those sections to this file; make dev-hosted does.

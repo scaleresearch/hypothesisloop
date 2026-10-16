@@ -2,6 +2,7 @@ package quota
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -21,13 +22,6 @@ func summarize(why *domain.StatusReason, pe *domain.PlatformExperiment, signups 
 		return strings.ToUpper(move[:1]) + move[1:] + "."
 	}
 	sentence := map[string]func() string{
-		reasonLauncherUnreachable: func() string {
-			if pe.Status == domain.PlatformExpDraft {
-				return "Planning waits for the agent launcher."
-			}
-			return why.Summary
-		},
-
 		"repository_creating": func() string { return "Creating the experiment's repository. Nothing starts until it exists." },
 		"planning": func() string {
 			return "The planner is working out how to measure your goal. It has up to " + in(pe.PlanningEndsAt) + " more."
@@ -156,4 +150,24 @@ func measuringBaseline(signups []domain.AgentSignup) string {
 		return names[0] + " is measuring the baseline."
 	}
 	return strings.Join(names, " and ") + " are measuring the baseline."
+}
+
+// readableDuration is d as a person says it: "less than a minute", "5 minutes", "4 hours", "3 days".
+func readableDuration(d time.Duration) string {
+	count := func(n float64, unit string) string {
+		if n == 1 {
+			return "1 " + unit
+		}
+		return fmt.Sprintf("%d %ss", int(n), unit)
+	}
+	if d < time.Minute {
+		return "less than a minute"
+	}
+	if minutes := math.Round(d.Minutes()); minutes < 60 {
+		return count(minutes, "minute")
+	}
+	if hours := math.Round(d.Hours()); hours < 48 {
+		return count(hours, "hour")
+	}
+	return count(math.Round(d.Hours()/24), "day")
 }

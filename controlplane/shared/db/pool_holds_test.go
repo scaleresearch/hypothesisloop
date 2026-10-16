@@ -29,7 +29,7 @@ func TestThePoolStateTellsEarlyEndsAndCountsRecentReplacements(t *testing.T) {
 	}
 	replacement, _ := domain.NewID(domain.AgentIDPrefix)
 	if err := pes.JoinRunning(ctx, pe, &domain.Agent{ID: replacement, CreatedAt: time.Now().UTC()},
-		domain.AgentSignup{Actor: testActor, AgentID: replacement, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: "main", AgentType: "generalist", Model: "model-1", Replaces: replaced},
+		domain.AgentSignup{Actor: testActor, AgentID: replacement, Role: domain.SignupRoleCompetitor, Hosted: true, AgentType: "generalist", Model: "model-1", Replaces: replaced},
 		LateJoin{Used: map[string]float64{}}); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestAResearcherAddedToKeepThePoolIsCheckedAgainstItUnderTheLock(t *testing.
 	join := func(replaces string) error {
 		id, _ := domain.NewID(domain.AgentIDPrefix)
 		return pes.JoinRunning(ctx, pe, &domain.Agent{ID: id, CreatedAt: time.Now().UTC()},
-			domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: "main", AgentType: "generalist", Model: "model-1", Replaces: replaces},
+			domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor, Hosted: true, AgentType: "generalist", Model: "model-1", Replaces: replaces},
 			LateJoin{Used: map[string]float64{}, Pool: true})
 	}
 	if err := join(""); !errors.Is(err, ErrPoolSatisfied) {

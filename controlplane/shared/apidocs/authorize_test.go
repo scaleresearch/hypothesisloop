@@ -44,7 +44,6 @@ var everyKind = tokenTable{
 	"agent":       {Kind: auth.KindAgent, PlatformExperimentID: "pe-a", AgentID: "agent-a"},
 	"job":         {Kind: auth.KindJob, ExperimentID: "job-a"},
 	"runtime-a":   {Kind: auth.KindRuntime, ClusterName: "cluster-a"},
-	"launcher":    {Kind: auth.KindLauncher, LauncherName: "fly"},
 	"build":       {Kind: auth.KindBuild, Build: auth.BuildRef{Cluster: "cluster-a", Key: "k", Attempt: 1}},
 	"staff":       {Kind: auth.KindStaff},
 }

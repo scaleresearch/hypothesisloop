@@ -57,13 +57,13 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 	if len(goal) > domain.MaxGoalBytes {
 		return nil, refuseUpdate(422, "invalid_goal", "goal is %d bytes and at most %d: say it in a sentence or two, the planner works out the rest", len(goal), domain.MaxGoalBytes)
 	}
-	if launch.Launcher == "" || launch.DefaultModel == "" {
+	if launch.DefaultModel == "" {
 		return nil, errors.New("platform_experiments.CreateDraft: no agent launch settings, and a draft is planned by an agent the platform runs")
 	}
 	if maxProposedResearchers(launch.MaxHosted) < 1 {
 		return nil, fmt.Errorf("platform_experiments.CreateDraft: the platform runs %d machines for one platform experiment (agents.max_hosted_per_platform_experiment), and an accepted draft takes three at least: its coordinator, its baseline agent and one researcher", launch.MaxHosted)
 	}
-	if err := s.requireHosting(ctx, launch.Launcher); err != nil {
+	if err := requireHosting(launch.Hosting); err != nil {
 		return nil, err
 	}
 	if err := s.requireContinuable(ctx, projectID, repository.Named, continues); err != nil {
@@ -105,7 +105,7 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 	planner := &domain.Agent{ID: plannerID, Name: "Planner", CreatedAt: now}
 	signup := domain.AgentSignup{
 		AgentID: plannerID, Role: domain.SignupRolePlanner, QuotaTier: domain.QuotaTierGuaranteed,
-		Hosted: true, Launcher: launch.Launcher, AgentType: domain.PlannerFlavor, Model: launch.DefaultModel,
+		Hosted: true, AgentType: domain.PlannerFlavor, Model: launch.DefaultModel,
 		Actor: &by,
 	}
 	if err := s.store.CreateDraft(ctx, pe, planner, signup); err != nil {
@@ -138,7 +138,7 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"A repository the platform creates is created after this answers: the draft is answered without repository and with status_reason repository_creating, and its planner starts once the repository is there. " +
 			"When GitHub does not create it the draft is closed with close_reason repository_not_created, and its status_reason message says what GitHub answered. " +
 			"On a deployment whose git host is plain, repository is a name under the host's root and is required: 422 repository_required without it, repository_not_reachable when it does not answer git. " +
-			"422 invalid_goal for a goal that is empty or over the length, invalid_continues for a continues that names no closed platform experiment of the project and repository with a declared baseline. 503 launcher_not_registered when the deployment has no launcher to run the planner.",
+			"422 invalid_goal for a goal that is empty or over the length, invalid_continues for a continues that names no closed platform experiment of the project and repository with a declared baseline. 503 hosting_not_configured when the deployment has no sandbox provider to run the planner on.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
 			ProjectID         string `json:"project_id"`

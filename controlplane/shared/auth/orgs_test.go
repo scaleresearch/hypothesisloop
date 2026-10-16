@@ -35,7 +35,6 @@ var accountCallers = map[string]auth.Principal{
 	"coordinator": {Kind: auth.KindCoordinator, PlatformExperimentID: "pe-a", ProjectID: "prj-a", OrgIDs: []string{"org-a"}},
 	"job":         {Kind: auth.KindJob, ExperimentID: "job-a", PlatformExperimentID: "pe-a", ProjectID: "prj-a", OrgIDs: []string{"org-a"}},
 	"runtime":     {Kind: auth.KindRuntime, ClusterName: "cluster-a", OrgIDs: []string{"org-a"}},
-	"launcher":    {Kind: auth.KindLauncher, LauncherName: "main"},
 	"staff":       {Kind: auth.KindStaff},
 }
 
@@ -79,39 +78,39 @@ func TestWhoReadsAndWhoAdministersAnOrgAndItsClusters(t *testing.T) {
 			return access.KeyEnd(ctx, &domain.APIKey{OrgID: "org-a", ProjectID: "prj-a", Actor: domain.Actor{Kind: domain.ActorUser, ID: "u-member"}})
 		},
 	}
-	//                                            owner member outsider org-key prj-key agent coord job runtime launcher staff
+	//                                            owner member outsider org-key prj-key agent coord job runtime staff
 	want := map[string][]int{
-		"hold an account":                      {200, 200, 200, 200, 200, 403, 403, 403, 403, 403, 200},
-		"read org a":                           {200, 200, 404, 200, 200, 403, 403, 403, 403, 403, 200},
-		"read an org that does not exist":      {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
-		"administer org a":                     {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 200},
-		"administer an org that is missing":    {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
-		"administer cluster-a under org a":     {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 200},
-		"administer cluster-b under org a":     {404, 403, 404, 404, 403, 403, 403, 403, 403, 403, 404},
-		"administer no cluster under org a":    {404, 403, 404, 404, 403, 403, 403, 403, 403, 403, 404},
-		"administer cluster-a under org b":     {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
-		"change project prj-a":                 {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 200},
-		"change project prj-a2":                {200, 403, 404, 200, 404, 403, 403, 403, 403, 403, 200},
-		"change a project that does not exist": {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
-		"place the org-wide key of org a":      {200, 200, 404, 200, 404, 403, 403, 403, 403, 403, 200},
-		"place a key of project prj-a":         {200, 200, 404, 200, 200, 403, 403, 403, 403, 403, 200},
-		"place a key of project prj-a2":        {200, 200, 404, 200, 404, 403, 403, 403, 403, 403, 200},
-		"place a key that does not exist":      {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
-		"be a signed-in person":                {200, 200, 200, 403, 403, 403, 403, 403, 403, 403, 403},
-		"invite into org a":                    {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 403},
-		"invite into an org that is missing":   {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
-		"end an invite into org a":             {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 200},
-		"end an invite that does not exist":    {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
-		"remove the owner from org a":          {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 200},
-		"remove the member from org a":         {200, 200, 404, 200, 403, 403, 403, 403, 403, 403, 200},
-		"remove someone from a missing org":    {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
-		"mint an org-wide key of org a":        {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 200},
-		"mint a key of project prj-a":          {200, 200, 404, 200, 403, 403, 403, 403, 403, 403, 200},
-		"mint a key in an org that is missing": {404, 404, 404, 404, 404, 403, 403, 403, 403, 403, 404},
-		"end a key the owner made":             {200, 403, 404, 200, 403, 403, 403, 403, 403, 403, 200},
-		"end a key the member made":            {200, 200, 404, 200, 403, 403, 403, 403, 403, 403, 200},
+		"hold an account":                      {200, 200, 200, 200, 200, 403, 403, 403, 403, 200},
+		"read org a":                           {200, 200, 404, 200, 200, 403, 403, 403, 403, 200},
+		"read an org that does not exist":      {404, 404, 404, 404, 404, 403, 403, 403, 403, 404},
+		"administer org a":                     {200, 403, 404, 200, 403, 403, 403, 403, 403, 200},
+		"administer an org that is missing":    {404, 404, 404, 404, 404, 403, 403, 403, 403, 404},
+		"administer cluster-a under org a":     {200, 403, 404, 200, 403, 403, 403, 403, 403, 200},
+		"administer cluster-b under org a":     {404, 403, 404, 404, 403, 403, 403, 403, 403, 404},
+		"administer no cluster under org a":    {404, 403, 404, 404, 403, 403, 403, 403, 403, 404},
+		"administer cluster-a under org b":     {404, 404, 404, 404, 404, 403, 403, 403, 403, 404},
+		"change project prj-a":                 {200, 403, 404, 200, 403, 403, 403, 403, 403, 200},
+		"change project prj-a2":                {200, 403, 404, 200, 404, 403, 403, 403, 403, 200},
+		"change a project that does not exist": {404, 404, 404, 404, 404, 403, 403, 403, 403, 404},
+		"place the org-wide key of org a":      {200, 200, 404, 200, 404, 403, 403, 403, 403, 200},
+		"place a key of project prj-a":         {200, 200, 404, 200, 200, 403, 403, 403, 403, 200},
+		"place a key of project prj-a2":        {200, 200, 404, 200, 404, 403, 403, 403, 403, 200},
+		"place a key that does not exist":      {404, 404, 404, 404, 404, 403, 403, 403, 403, 404},
+		"be a signed-in person":                {200, 200, 200, 403, 403, 403, 403, 403, 403, 403},
+		"invite into org a":                    {200, 403, 404, 200, 403, 403, 403, 403, 403, 403},
+		"invite into an org that is missing":   {404, 404, 404, 404, 404, 403, 403, 403, 403, 404},
+		"end an invite into org a":             {200, 403, 404, 200, 403, 403, 403, 403, 403, 200},
+		"end an invite that does not exist":    {404, 404, 404, 404, 404, 403, 403, 403, 403, 404},
+		"remove the owner from org a":          {200, 403, 404, 200, 403, 403, 403, 403, 403, 200},
+		"remove the member from org a":         {200, 200, 404, 200, 403, 403, 403, 403, 403, 200},
+		"remove someone from a missing org":    {404, 404, 404, 404, 404, 403, 403, 403, 403, 404},
+		"mint an org-wide key of org a":        {200, 403, 404, 200, 403, 403, 403, 403, 403, 200},
+		"mint a key of project prj-a":          {200, 200, 404, 200, 403, 403, 403, 403, 403, 200},
+		"mint a key in an org that is missing": {404, 404, 404, 404, 404, 403, 403, 403, 403, 404},
+		"end a key the owner made":             {200, 403, 404, 200, 403, 403, 403, 403, 403, 200},
+		"end a key the member made":            {200, 200, 404, 200, 403, 403, 403, 403, 403, 200},
 	}
-	order := []string{"owner", "member", "outsider", "org key", "project key", "agent", "coordinator", "job", "runtime", "launcher", "staff"}
+	order := []string{"owner", "member", "outsider", "org key", "project key", "agent", "coordinator", "job", "runtime", "staff"}
 	if len(want) != len(rules) {
 		t.Fatalf("the table holds %d rules and %d are defined", len(want), len(rules))
 	}
@@ -132,7 +131,7 @@ func TestACallerKnowsOnlyTheClustersOfItsOwnOrg(t *testing.T) {
 	own := domain.Cluster{Name: "own", OrgID: "org-a"}
 	shared := domain.Cluster{Name: "shared", OrgID: "org-b", Shared: true}
 	for caller, want := range map[string][2]bool{
-		"owner": {true, false}, "org key": {true, false}, "outsider": {false, true}, "launcher": {false, false}, "staff": {true, true},
+		"owner": {true, false}, "org key": {true, false}, "outsider": {false, true}, "staff": {true, true},
 	} {
 		p := accountCallers[caller]
 		if got := [2]bool{p.KnowsCluster(own), p.KnowsCluster(shared)}; got != want {

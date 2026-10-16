@@ -2,17 +2,12 @@ package agentloop
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"unicode/utf8"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
-	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
-	"github.com/scaleresearch/hypothesisloop/runtime/shared/cpclient"
 )
 
 // reconcileBuilds starts every listed build not running at its attempt and cancels every running
@@ -77,24 +72,17 @@ func (a *Agent) runBuild(ctx context.Context, running *runningBuild, b clusterap
 		loadedPosted.Add(1)
 		go func() {
 			defer loadedPosted.Done()
-			err := a.call(ctx, http.MethodPost, "/builds/"+url.PathEscape(b.Key)+"/loaded", clusterapi.EnvironmentBuildLoaded{Attempt: b.Attempt, Node: node, Digest: digest}, nil)
+			err := a.Builds.BuildLoaded(ctx, b.Key, clusterapi.EnvironmentBuildLoaded{Attempt: b.Attempt, Node: node, Digest: digest})
 			if err != nil && ctx.Err() == nil {
 				a.Log("build %s attempt %d: loaded on %s: %v", b.Key, b.Attempt, node, err)
 			}
 		}()
 	}
 	report := a.Builder.Run(ctx, b, func(ctx context.Context) (string, string, error) {
-		var login clusterapi.RegistryLogin
-		err := a.call(ctx, http.MethodPost, "/builds/"+url.PathEscape(b.Key)+"/credential", clusterapi.EnvironmentBuildCredentialRequest{Attempt: b.Attempt}, &login)
+		login, err := a.Builds.BuildCredential(ctx, b.Key, b.Attempt)
 		return login.Username, login.Password, err
 	}, func(ctx context.Context) (clusterapi.EnvironmentGitCredential, error) {
-		var credential clusterapi.EnvironmentGitCredential
-		err := a.call(ctx, http.MethodPost, "/builds/"+url.PathEscape(b.Key)+"/git-credential", clusterapi.EnvironmentBuildCredentialRequest{Attempt: b.Attempt}, &credential)
-		var refused *cpclient.Refusal
-		if errors.As(err, &refused) && refused.Status == http.StatusNotFound {
-			return credential, fmt.Errorf("%w: %w", agentexec.ErrNoEnvironmentGitCredential, err)
-		}
-		return credential, err
+		return a.Builds.BuildGitCredential(ctx, b.Key, b.Attempt)
 	}, func(format string, args ...any) {
 		line := fmt.Sprintf(format, args...)
 		a.Log("build %s attempt %d: %s", b.Key, b.Attempt, line)
@@ -129,7 +117,7 @@ func (a *Agent) postReport(ctx context.Context, running *runningBuild, b cluster
 	a.buildsMu.Lock()
 	report := *running.unsent
 	a.buildsMu.Unlock()
-	err := a.call(ctx, http.MethodPost, "/builds/"+url.PathEscape(b.Key), report, nil)
+	err := a.Builds.ReportBuild(ctx, b.Key, report)
 	a.buildsMu.Lock()
 	running.posting = false
 	if err == nil {
@@ -154,7 +142,7 @@ func (a *Agent) postReport(ctx context.Context, running *runningBuild, b cluster
 func (a *Agent) postProgress(ctx context.Context, b clusterapi.EnvironmentBuild, steps <-chan string, posted chan<- struct{}) {
 	defer close(posted)
 	for step := range steps {
-		err := a.call(ctx, http.MethodPost, "/builds/"+url.PathEscape(b.Key)+"/progress", clusterapi.EnvironmentBuildProgress{Attempt: b.Attempt, Step: step}, nil)
+		err := a.Builds.BuildProgress(ctx, b.Key, clusterapi.EnvironmentBuildProgress{Attempt: b.Attempt, Step: step})
 		if err != nil && ctx.Err() == nil {
 			a.Log("build %s attempt %d: progress: %v", b.Key, b.Attempt, err)
 		}

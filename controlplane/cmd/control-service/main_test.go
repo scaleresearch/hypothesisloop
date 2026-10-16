@@ -14,7 +14,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/launcherapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/modelproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
@@ -33,9 +32,6 @@ var public = map[string]bool{
 	"GET /internal/clusters/explore": true, "GET /internal/clusters/openapi.json": true, "GET /internal/clusters/openapi.yaml": true,
 	"GET /internal/clusters/openapi-3.0.json": true, "GET /internal/clusters/openapi-3.0.yaml": true,
 	"GET /internal/clusters/docs": true, "GET /internal/clusters/schemas/{schema}": true,
-	"GET /internal/launchers/explore": true, "GET /internal/launchers/openapi.json": true, "GET /internal/launchers/openapi.yaml": true,
-	"GET /internal/launchers/openapi-3.0.json": true, "GET /internal/launchers/openapi-3.0.yaml": true,
-	"GET /internal/launchers/docs": true, "GET /internal/launchers/schemas/{schema}": true,
 }
 
 // The routes are registered and never served, so what stands behind them is empty.
@@ -48,7 +44,7 @@ func testRouter(t *testing.T) chi.Router {
 	t.Helper()
 	unreachable := authtest.As{Kind: auth.KindStaff}
 	platformExperiments := quota.NewPlatformExperimentsHandler(nil, noRepositories{}, quota.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}, zap.NewNop()).
-		WithAgentLaunch(quota.AgentLaunch{Launcher: "launcher", DefaultModel: "model", CoordinatorModel: "model", SigningSecret: "secret", MaxHosted: 1})
+		WithAgentLaunch(quota.AgentLaunch{Hosting: true, DefaultModel: "model", CoordinatorModel: "model", SigningSecret: "secret", MaxHosted: 1})
 	modelProxy, err := modelproxy.New(noOneHosted{}, modelproxy.MetricsDB{}, "https://model.example.invalid", "credential", zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +61,6 @@ func testRouter(t *testing.T) chi.Router {
 		registry:            &registry.Handler{},
 		watch:               &registry.WatchHandler{},
 		clusterAgent:        &clusteragentapi.Handler{},
-		launcher:            &launcherapi.Handler{},
 		modelProxy:          modelProxy,
 		modelUsage:          modelproxy.MetricsDB{},
 	}, zap.NewNop())

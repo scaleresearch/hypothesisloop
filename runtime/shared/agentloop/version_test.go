@@ -32,12 +32,12 @@ func TestEveryCallToTheControlPlaneCarriesTheAgentVersion(t *testing.T) {
 	defer server.Close()
 
 	agent := newTestAgent(server, &captureExecutor{})
-	agent.Version = "abc1234"
+	remoteOf(agent).Version = "abc1234"
 	if _, err := agent.fetchDesiredState(context.Background(), agent.Executor); err != nil {
 		t.Fatalf("fetch desired state: %v", err)
 	}
 	agent.pushStatus(context.Background(), nil)
-	if err := agent.CheckToken(context.Background()); err != nil {
+	if err := remoteOf(agent).CheckToken(context.Background()); err != nil {
 		t.Fatalf("check token: %v", err)
 	}
 	for _, path := range []string{"/internal/clusters/test/reconcile", "/internal/clusters/test/status", "/internal/clusters/test/access"} {
@@ -96,7 +96,7 @@ func TestTheTokenCheckSaysWhatTheControlPlaneAnswered(t *testing.T) {
 			w.WriteHeader(tc.status)
 			_, _ = w.Write([]byte(tc.body))
 		}))
-		err := newTestAgent(server, &captureExecutor{}).CheckToken(context.Background())
+		err := remoteOf(newTestAgent(server, &captureExecutor{})).CheckToken(context.Background())
 		server.Close()
 		if !tc.want(err) {
 			t.Errorf("%s: CheckToken = %v", name, err)

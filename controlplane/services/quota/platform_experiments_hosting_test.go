@@ -18,7 +18,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -29,13 +28,6 @@ type hostingStore struct {
 	createErr error
 	// unregistered is a launcher config names and no operator registered.
 	unregistered bool
-}
-
-func (s *hostingStore) LauncherContacts(ctx context.Context, names []string) (map[string]db.LauncherContact, error) {
-	if s.unregistered {
-		return map[string]db.LauncherContact{}, nil
-	}
-	return s.createdStore.LauncherContacts(ctx, names)
 }
 
 func (s *hostingStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error {
@@ -52,7 +44,7 @@ func hostingAPI(t *testing.T, repos *fakeRepositories) (*hostingStore, func(body
 	placement := authtest.Placement{Projects: map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}}, PlatformExperiments: map[string]domain.Tenancy{}}
 	router := authtest.Router(ownerOfA)
 	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
-	handler := NewPlatformExperimentsHandler(svc, repos, testPlanning, zap.NewNop()).WithGitProxy("https://api.test/git").WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "model-default", CoordinatorModel: "coordinator-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted})
+	handler := NewPlatformExperimentsHandler(svc, repos, testPlanning, zap.NewNop()).WithGitProxy("https://api.test/git").WithAgentLaunch(AgentLaunch{Hosting: true, DefaultModel: "model-default", CoordinatorModel: "coordinator-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted})
 	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), handler)
 	return store, func(body map[string]any) (int, map[string]any) {
 		t.Helper()
@@ -79,7 +71,7 @@ func TestCreateWithAHostedCoordinatorGivesItToTheConfiguredLauncher(t *testing.T
 		t.Fatalf("got = %d %v, want 201", code, out)
 	}
 	pe := store.created[0]
-	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Launcher != "main" || pe.Coordinator.Model != "" {
+	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Model != "" {
 		t.Fatalf("created = %+v (coordinator %+v), want one on the configured launcher and its type's model", pe, pe.Coordinator)
 	}
 	if out["coordinator_hosted"] != true || out["signup_count"] != float64(1) || out["max_hosted"] != float64(hostingMaxHosted) {
@@ -88,7 +80,7 @@ func TestCreateWithAHostedCoordinatorGivesItToTheConfiguredLauncher(t *testing.T
 	// What accepting a draft stands up for the time before the run, a create with a hosted
 	// coordinator does too: nobody adds the agent that measures the baseline.
 	owner := auth.Principal(ownerOfA).Actor()
-	want := domain.AgentSignup{AgentID: store.baselines[0].AgentID, Name: "Baseline 1", Role: domain.SignupRoleBaseline, Hosted: true, Launcher: "main", AgentType: "baseline", Actor: &owner}
+	want := domain.AgentSignup{AgentID: store.baselines[0].AgentID, Name: "Baseline 1", Role: domain.SignupRoleBaseline, Hosted: true, AgentType: "baseline", Actor: &owner}
 	if len(store.baselines) != 1 || len(store.researchers) != 0 || !reflect.DeepEqual(store.baselines[0], want) {
 		t.Errorf("created with %+v and researchers %v, want one hosted baseline agent added by the creator and no researcher", store.baselines, store.researchers)
 	}
@@ -165,18 +157,6 @@ func TestCreateRefusesHostingItCannotStart(t *testing.T) {
 
 	attached := &fakeRepositories{files: map[string]string{"prj-a": ""}}
 	store, create := hostingAPI(t, attached)
-
-	// Nothing is hosted while the launcher config names has no row: its token would be refused.
-	store.unregistered = true
-	code, out := create(with(map[string]any{"coordinator_hosted": true, "repository": "acme/model"}))
-	if message, _ := out["message"].(string); code != http.StatusServiceUnavailable || out["reason"] != "launcher_not_registered" || !strings.Contains(message, "hl-admin launcher add main") || len(store.created) != 0 {
-		t.Fatalf("a coordinator with no launcher registered: got = %d %v, want 503 launcher_not_registered", code, out)
-	}
-	if code, out := create(with(nil)); code != http.StatusCreated {
-		t.Fatalf("nothing hosted and no launcher registered: got = %d %v, want 201", code, out)
-	}
-
-	store, create = hostingAPI(t, attached)
 	store.createErr = errors.New("the database is away")
 	if code, out := create(with(map[string]any{"coordinator_hosted": true, "repository": "acme/model"})); code != http.StatusInternalServerError || len(store.created) != 0 {
 		t.Fatalf("a write that failed: got = %d %v with %d created, want 500 and nothing", code, out, len(store.created))
@@ -205,7 +185,7 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 		}
 		router := authtest.Router(authtest.As(caller))
 		doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
-		RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()).WithGitProxy("https://api.test/git").WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "m", CoordinatorModel: "c", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted}))
+		RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()).WithGitProxy("https://api.test/git").WithAgentLaunch(AgentLaunch{Hosting: true, DefaultModel: "m", CoordinatorModel: "c", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted}))
 		var payload bytes.Buffer
 		if err := json.NewEncoder(&payload).Encode(body); err != nil {
 			t.Fatal(err)

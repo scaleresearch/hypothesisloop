@@ -42,7 +42,7 @@ func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Princ
 	planningRepositories = &fakeRepositories{files: map[string]string{"prj-a": ""}}
 	svc.WithRepositories(planningRepositories)
 	handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).WithGitProxy("https://api.test/git").
-		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
+		WithAgentLaunch(AgentLaunch{Hosting: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
 		WithJobImages([]domain.JobImage{{Name: "torch", Image: "registry.example.com/hl/torch:1"}})
 	if drafts, ok := store.(*draftStore); ok {
 		svc.reachable = func(context.Context, string) (map[string][]domain.Cluster, error) { return drafts.reachable, nil }
@@ -108,7 +108,7 @@ func TestADraftIsCreatedFromOneSentenceWithItsPlannerAndNothingOfARun(t *testing
 	}
 	// Its one agent is the planner, which the platform runs and never ranks or cuts.
 	planner, signup := store.planners[pe.ID], store.signups[pe.ID]
-	if planner == nil || planner.Name != "Planner" || signup.AgentID != planner.ID || !signup.Hosted || signup.Launcher != "main" ||
+	if planner == nil || planner.Name != "Planner" || signup.AgentID != planner.ID || !signup.Hosted ||
 		signup.AgentType != domain.PlannerFlavor || signup.Role != domain.SignupRolePlanner || signup.Model != "platform-model-1" || out["signup_count"] != float64(1) {
 		t.Errorf("planner %+v signed up as %+v, want a hosted planner of role baseline on the platform's model", planner, signup)
 	}
@@ -149,31 +149,6 @@ func TestADraftIsCreatedFromOneSentenceWithItsPlannerAndNothingOfARun(t *testing
 	if code, body := call2(t, agentsRouter(t, open, staff), "POST", "/platform-experiments/pe-1/agents", `{"hosted":true,"flavor":"planner"}`); code != http.StatusBadRequest || len(open.signups) != 0 {
 		t.Errorf("an agent asked for as a planner: got = %d %v, want 400 and nobody joined", code, body)
 	}
-
-	// With no launcher registered a planner would never start, so no draft is made.
-	store.unregistered = true
-	code, out = call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal})
-	if code != http.StatusServiceUnavailable || out["reason"] != "launcher_not_registered" || len(store.created) != 1 {
-		t.Errorf("no launcher: got = %d %v with %d created, want 503 launcher_not_registered", code, out, len(store.created))
-	}
-	if out["summary"] != "Hosted agents are unavailable: this platform has no agent launcher set up. The platform's operator needs to start one." || out["operator_detail"] != nil {
-		t.Errorf("no launcher, read by a person: got = %v, want the plain summary and no operator detail", out)
-	}
-
-	// Nor while the launcher is registered and has stopped checking in: the planner would wait for it.
-	store.unregistered = false
-	silent := time.Now().Add(-2 * time.Hour)
-	store.answered = map[string]*time.Time{"main": &silent}
-	code, out = call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal})
-	if code != http.StatusServiceUnavailable || out["reason"] != "launcher_unreachable" || len(store.created) != 1 ||
-		out["summary"] != "Hosted agents are unavailable: the agent launcher hasn't checked in for 2 hours. They become available when it reconnects." || out["since"] == nil {
-		t.Errorf("a silent launcher: got = %d %v with %d created, want 503 launcher_unreachable with its summary and since", code, out, len(store.created))
-	}
-	recent := time.Now().Add(-10 * time.Second)
-	store.answered = map[string]*time.Time{"main": &recent}
-	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal}); code != http.StatusCreated {
-		t.Errorf("a launcher that checked in 10s ago: got = %d %v, want 201", code, out)
-	}
 }
 
 // "Plan it" froze for seven seconds while GitHub created the draft's repository inside the
@@ -199,47 +174,6 @@ func TestADraftIsAnsweredBeforeItsRepositoryAndARefusedOneClosesIt(t *testing.T)
 	planningRepositories.notCreated = nil
 	if err := svc.ProvideRepositories(context.Background()); err != nil || len(planningRepositories.created) != 0 {
 		t.Fatalf("a second pass created %v, %v: want nothing", planningRepositories.created, err)
-	}
-}
-
-// A draft read "being planned" for half an hour while no launcher ran to start its planner. A
-// machine the platform wants of a launcher that has stopped asking says so, until it asks again.
-func TestADraftWhosePlannersLauncherIsSilentSaysItWaitsForTheLauncher(t *testing.T) {
-	store := draftWithPlanner()
-	store.created[0].Repository = "acme/model"
-	planner := store.signups["pe-draft"]
-	planner.Launcher = "main"
-	store.signups["pe-draft"] = planner
-	svc, _ := planningAPI(t, plannerListed{store}, thePlanner)
-	pe := store.created[0]
-
-	if err := svc.Describe(context.Background(), pe, auth.Principal{Kind: auth.KindUser}); err != nil || pe.StatusReason.Reason != "planning" {
-		t.Fatalf("with its launcher asking: %+v, %v, want planning", pe.StatusReason, err)
-	}
-	long := time.Now().Add(-3*time.Hour - 57*time.Minute - 55*time.Second)
-	store.answered = map[string]*time.Time{"main": &long}
-	if err := svc.Describe(context.Background(), pe, auth.Principal{Kind: auth.KindUser}); err != nil || pe.StatusReason.Reason != "launcher_unreachable" ||
-		pe.StatusReason.WaitsFor != domain.WaitsForPlatform || !strings.HasPrefix(pe.StatusReason.Message, "launcher main last checked in 4 hours ago, so none of its machines starts") {
-		t.Fatalf("with its launcher silent: %+v, %v, want launcher_unreachable naming main and how long", pe.StatusReason, err)
-	}
-	if why := pe.StatusReason; why.Summary != "Agents are paused: the agent launcher hasn't checked in for 4 hours. They resume when it reconnects, and deadlines keep running." ||
-		why.Since == nil || !why.Since.Equal(long) || why.OperatorDetail != "" {
-		t.Fatalf("a person reads: %+v, want a plain summary, since the last check-in, and no operator detail", why)
-	}
-	if err := svc.Describe(context.Background(), pe, auth.Principal{Kind: auth.KindStaff}); err != nil ||
-		pe.StatusReason.OperatorDetail != `The agent-launcher registered as "main" last checked in 4 hours ago. Start it or check its logs (on a dev stack: make dev-hosted).` {
-		t.Fatalf("staff read: %+v, %v, want what the operator checks", pe.StatusReason, err)
-	}
-	store.answered = map[string]*time.Time{"main": nil}
-	if err := svc.Describe(context.Background(), pe, auth.Principal{Kind: auth.KindUser}); err != nil || !strings.HasPrefix(pe.StatusReason.Message, "launcher main has not checked in since it was registered") ||
-		pe.StatusReason.Summary != "Agents can't start: the agent launcher has never checked in. They start when it connects, and deadlines keep running." || pe.StatusReason.Since != nil {
-		t.Fatalf("with a launcher that never checked in: %+v, %v", pe.StatusReason, err)
-	}
-	// A proposal waits for a person, and no machine is wanted for it.
-	now := time.Now()
-	pe.SetAnswered(&now, true)
-	if err := svc.Describe(context.Background(), pe, auth.Principal{Kind: auth.KindUser}); err != nil || pe.StatusReason.Reason != "proposed" {
-		t.Fatalf("a proposed draft with its launcher silent: %+v, %v, want proposed", pe.StatusReason, err)
 	}
 }
 
@@ -623,13 +557,6 @@ type draftStore struct {
 	acceptedSignups []domain.AgentSignup
 }
 
-func (s *draftStore) LauncherContacts(ctx context.Context, names []string) (map[string]db.LauncherContact, error) {
-	if s.unregistered {
-		return map[string]db.LauncherContact{}, nil
-	}
-	return s.statusStore.LauncherContacts(ctx, names)
-}
-
 func (s *draftStore) CreateDraft(_ context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup) error {
 	if s.planners == nil {
 		s.planners, s.signups = map[string]*domain.Agent{}, map[string]domain.AgentSignup{}
@@ -922,7 +849,7 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	if pe.StartsAt.Before(before) || pe.DurationHours != 2 || !pe.EndsAt.IsZero() || !pe.BaselineDueAt.Equal(pe.StartsAt.Add(25*time.Minute)) {
 		t.Errorf("starts %v, %v hours ending %v, baseline due %v: want 2 hours with no end yet and the baseline due 25 minutes after the accept", pe.StartsAt, pe.DurationHours, pe.EndsAt, pe.BaselineDueAt)
 	}
-	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Launcher != "main" || pe.Coordinator.Model != "" {
+	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Model != "" {
 		t.Errorf("coordinator %+v, want one the platform hosts on its type's model", pe.Coordinator)
 	}
 	// A coordinator had to boot, take a turn and add the agent that measures the baseline before
@@ -932,12 +859,12 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	}
 	for i, signup := range store.acceptedSignups {
 		agent := store.acceptedAgents[i]
-		if agent.Name != "" || signup.AgentID != agent.ID || !signup.Hosted || signup.Launcher != "main" || signup.Role != domain.SignupRoleCompetitor || signup.Model != "" ||
+		if agent.Name != "" || signup.AgentID != agent.ID || !signup.Hosted || signup.Role != domain.SignupRoleCompetitor || signup.Model != "" ||
 			signup.Actor == nil || signup.Actor.ID != "u-1" {
 			t.Errorf("agent %d: %+v signed up as %+v, want a hosted researcher added by the person who accepted", i, agent, signup)
 		}
 	}
-	if measures := store.baselines[0]; measures.Role != domain.SignupRoleBaseline || !measures.Hosted || measures.Launcher != "main" || measures.AgentType != "baseline" || len(measures.Hyperparameters) != 0 {
+	if measures := store.baselines[0]; measures.Role != domain.SignupRoleBaseline || !measures.Hosted || measures.AgentType != "baseline" || len(measures.Hyperparameters) != 0 {
 		t.Errorf("the baseline agent runs as %+v, want a hosted one of the built-in baseline type and no hyperparameters", measures)
 	}
 	if first := store.acceptedSignups[0]; first.AgentType != "architecture-search" || first.Hyperparameters["depth"] != float64(4) || store.acceptedSignups[1].AgentType != domain.DefaultAgentFlavor {
@@ -1586,7 +1513,7 @@ func TestAProposalIsAcceptedAsProposedUnlessAPersonActsFirst(t *testing.T) {
 		}
 		svc, call := planningAPI(t, store, planner)
 		handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).WithGitProxy("https://api.test/git").
-			WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
+			WithAgentLaunch(AgentLaunch{Hosting: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
 			WithJobImages([]domain.JobImage{{Name: "torch", Image: "registry.example.com/hl/torch:1"}})
 		return store, handler, call
 	}
@@ -1689,7 +1616,7 @@ func TestAProposalWithQuestionsWaitsForAPersonWhoseAnswersGoIntoTheBrief(t *test
 		}
 		svc, call := planningAPI(t, store, planner)
 		handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).WithGitProxy("https://api.test/git").
-			WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
+			WithAgentLaunch(AgentLaunch{Hosting: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
 			WithJobImages([]domain.JobImage{{Name: "torch", Image: "registry.example.com/hl/torch:1"}})
 		return store, handler, call
 	}

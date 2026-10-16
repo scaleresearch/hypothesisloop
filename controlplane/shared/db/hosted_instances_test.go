@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -38,8 +37,8 @@ func hostedThings(t *testing.T, pool *Pool) map[string]hostedThing {
 	}
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
-	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: "main"})[0]
-	coordinated := createTestPEWithCoordinator(t, pool, "main")
+	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Hosted: true})[0]
+	coordinated := createTestPEWithCoordinator(t, pool)
 	setPEStatus(t, pool, coordinated, domain.PlatformExpRunning, 0)
 	return map[string]hostedThing{
 		"agent": {pe, agent, func() domain.AgentInstance {
@@ -299,7 +298,7 @@ func TestALauncherIsToldTheMachineOfEveryNameItHolds(t *testing.T) {
 			if names == nil {
 				names = []string{name}
 			}
-			held, err := pes.ListLauncherMachines(ctx, "main")
+			held, err := pes.ListLauncherMachines(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -385,81 +384,6 @@ func TestOneExitReportedByTwoReconcilesAtOnceSpendsOneRestart(t *testing.T) {
 	}
 }
 
-func TestALaunchersTokenFollowsItsRow(t *testing.T) {
-	pool := eventsTestDB(t)
-	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
-	name := "l" + uuid.New().String()[:8]
-	known := func() bool {
-		t.Helper()
-		is, err := pes.LauncherKnown(ctx, name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return is
-	}
-	if known() {
-		t.Fatal("a launcher nobody registered is known")
-	}
-	// A signup naming it does not make it one.
-	pe := "pe-" + uuid.New().String()[:8]
-	createTestPE(t, pool, pe, 10)
-	spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: name})
-	if known() {
-		t.Fatal("a launcher a signup names and nobody registered is known")
-	}
-	for range 2 {
-		if err := pes.RegisterLauncher(ctx, name); err != nil || !known() {
-			t.Fatalf("register: got = %v, known %v", err, known())
-		}
-	}
-	// Its token is what takes its machines down, so it stays while an agent may be given one and
-	// while its last question left it holding any.
-	refused := func(when string, platformExperiments ...string) {
-		t.Helper()
-		var inUse *LauncherInUseError
-		removed, err := pes.RemoveLauncher(ctx, name)
-		if removed || !errors.As(err, &inUse) || !slices.Equal(inUse.PlatformExperiments, platformExperiments) || !known() {
-			t.Fatalf("remove %s: got = %v, %v, still known %v, want refused for %v", when, removed, err, known(), platformExperiments)
-		}
-	}
-	coordinated := createTestPEWithCoordinator(t, pool, name)
-	using := []string{pe, coordinated}
-	slices.Sort(using)
-	refused("with an agent and a coordinator in open platform experiments", using...)
-	setPEStatus(t, pool, coordinated, domain.PlatformExpClosed, domain.AgentWindDown+time.Second)
-	refused("inside a coordinator's wind-down, past an agent's", using...)
-	setPEStatus(t, pool, coordinated, domain.PlatformExpClosed, domain.CoordinatorWindDown+time.Second)
-	refused("with an agent in an open platform experiment", pe)
-	setPEStatus(t, pool, pe, domain.PlatformExpClosed, domain.AgentWindDown/2)
-	refused("inside the wind-down of its last platform experiment", pe)
-	setPEStatus(t, pool, pe, domain.PlatformExpClosed, domain.AgentWindDown+time.Minute)
-	if answered, err := pes.LauncherContacts(ctx, []string{name}); err != nil || answered[name].At != nil {
-		t.Fatalf("a launcher never answered: got = %v, %v, want no moment", answered, err)
-	}
-	if err := pes.SetLauncherHolds(ctx, name, true, ""); err != nil {
-		t.Fatal(err)
-	}
-	if answered, err := pes.LauncherContacts(ctx, []string{name}); err != nil || answered[name].At == nil || time.Since(*answered[name].At) > time.Minute {
-		t.Fatalf("a launcher just answered: got = %v, %v, want now", answered, err)
-	}
-	refused("while its last question listed machines")
-	if err := pes.SetLauncherHolds(ctx, name, false, ""); err != nil {
-		t.Fatal(err)
-	}
-	if removed, err := pes.RemoveLauncher(ctx, name); err != nil || !removed || known() {
-		t.Fatalf("remove: got = %v, %v, still known %v", removed, err, known())
-	}
-	if removed, err := pes.RemoveLauncher(ctx, name); err != nil || removed {
-		t.Fatalf("remove again: got = %v, %v, want false", removed, err)
-	}
-	for _, bad := range []string{"", "with-dash", "Upper", "seventeencharacter"} {
-		if err := pes.RegisterLauncher(ctx, bad); err == nil {
-			t.Errorf("registered a launcher named %q", bad)
-		}
-	}
-}
-
 // The bound is on machines, so a hosted baseline or reviewer counts as a competitor does, and so
 // does the coordinator.
 func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExperiment(t *testing.T) {
@@ -473,7 +397,7 @@ func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExp
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
 		Stages:    []domain.Stage{{LengthPct: 100, EvictPct: 0}},
 		CreatedAt: now, UpdatedAt: now, MaxHosted: 4,
-		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Launcher: "main", Model: "model-1"},
+		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Model: "model-1"},
 	}
 	if err := pes.CreatePlatformExperiment(ctx, pe, nil, nil); err != nil {
 		t.Fatal(err)
@@ -490,12 +414,12 @@ func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExp
 	// max_agents is two competitors, which no baseline or reviewer counts against. Added one at
 	// a time they would be without end, were machines not counted.
 	for i, role := range []domain.SignupRole{domain.SignupRoleBaseline, domain.SignupRoleReviewer, domain.SignupRoleBaseline} {
-		if err := add(domain.AgentSignup{Actor: testActor, Role: role, Hosted: true, Launcher: "main"}); err != nil {
+		if err := add(domain.AgentSignup{Actor: testActor, Role: role, Hosted: true}); err != nil {
 			t.Fatalf("hosted %s %d: got = %v, want = nil", role, i+1, err)
 		}
 	}
 	for _, role := range []domain.SignupRole{domain.SignupRoleBaseline, domain.SignupRoleReviewer, domain.SignupRoleCompetitor} {
-		if err := add(domain.AgentSignup{Actor: testActor, Role: role, Hosted: true, Launcher: "main"}); !errors.Is(err, ErrMaxHostedReached) {
+		if err := add(domain.AgentSignup{Actor: testActor, Role: role, Hosted: true}); !errors.Is(err, ErrMaxHostedReached) {
 			t.Fatalf("a fifth machine, a hosted %s: got = %v, want ErrMaxHostedReached", role, err)
 		}
 	}
@@ -521,7 +445,7 @@ func TestOneMachineIsKeptForTheBaselineAndAFinishedAgentHoldsNone(t *testing.T) 
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
 		Stages:    []domain.Stage{{LengthPct: 100, EvictPct: 0}},
 		CreatedAt: now, UpdatedAt: now, MaxHosted: 4,
-		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Launcher: "main", Model: "model-1"},
+		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Model: "model-1"},
 	}
 	if err := pes.CreatePlatformExperiment(ctx, pe, nil, nil); err != nil {
 		t.Fatal(err)
@@ -532,7 +456,7 @@ func TestOneMachineIsKeptForTheBaselineAndAFinishedAgentHoldsNone(t *testing.T) 
 			t.Fatal(err)
 		}
 		agent := &domain.Agent{ID: id, Name: id, CreatedAt: now}
-		return id, pes.SpawnAgent(ctx, pe.ID, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: role, Hosted: true, Launcher: "main"})
+		return id, pes.SpawnAgent(ctx, pe.ID, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: role, Hosted: true})
 	}
 	for i := range 2 {
 		if _, err := add(domain.SignupRoleCompetitor); err != nil {
@@ -749,7 +673,6 @@ func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t 
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
-	launcher := "launcher-" + uuid.New().String()[:8]
 	const windDown, coordinatorWindDown = 2 * time.Minute, 5 * time.Minute
 	running := "running"
 	rent := func(pe, agent, name string) {
@@ -763,7 +686,7 @@ func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t 
 	}
 	release := func() {
 		t.Helper()
-		if err := pes.ReleaseInstances(ctx, launcher, windDown, coordinatorWindDown); err != nil {
+		if err := pes.ReleaseInstances(ctx, windDown, coordinatorWindDown); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -776,14 +699,14 @@ func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t 
 		return *signup.Instance
 	}
 
-	draft, planner := createTestDraft(t, pool, launcher)
+	draft, planner := createTestDraft(t, pool)
 	rent(draft, planner, "planner-machine")
 	closing := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, closing, 10)
-	agent := spawnTestAgents(t, pes, closing, domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: launcher, AgentType: "generalist"})[0]
+	agent := spawnTestAgents(t, pes, closing, domain.AgentSignup{Actor: testActor, Hosted: true, AgentType: "generalist"})[0]
 	setPEStatus(t, pool, closing, domain.PlatformExpRunning, time.Hour)
 	rent(closing, agent, "agent-machine")
-	coordinated := createTestPEWithCoordinator(t, pool, launcher)
+	coordinated := createTestPEWithCoordinator(t, pool)
 	rent(coordinated, "", "coordinator-machine")
 
 	// Everything is still asked for: nothing is released.
@@ -803,7 +726,7 @@ func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t 
 	setPEStatus(t, pool, coordinated, domain.PlatformExpClosed, coordinatorWindDown+time.Second)
 	// Within its wind-down, which outlasts an agent's, a coordinator's machine is still the
 	// launcher's to keep.
-	fresh := createTestPEWithCoordinator(t, pool, launcher)
+	fresh := createTestPEWithCoordinator(t, pool)
 	rent(fresh, "", "fresh-coordinator-machine")
 	setPEStatus(t, pool, fresh, domain.PlatformExpClosed, windDown+time.Second)
 	release()
@@ -852,7 +775,6 @@ func TestADraftWhosePlannerIsGivenUpOnIsClosedSayingSo(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
-	launcher := "launcher-" + uuid.New().String()[:8]
 	const maxRestarts = 2
 	die := func(draft, planner string, times int) (after domain.AgentInstance) {
 		t.Helper()
@@ -870,14 +792,14 @@ func TestADraftWhosePlannerIsGivenUpOnIsClosedSayingSo(t *testing.T) {
 		return after
 	}
 
-	draft, planner := createTestDraft(t, pool, launcher)
+	draft, planner := createTestDraft(t, pool)
 	if after := die(draft, planner, maxRestarts); after.Stopped || after.Restarts != maxRestarts {
 		t.Fatalf("after %d machines: got = %+v, want every restart spent and the planner still asked for", maxRestarts, after)
 	}
 	if got, err := pes.GetPlatformExperiment(ctx, draft); err != nil || got.Status != domain.PlatformExpDraft {
 		t.Fatalf("a draft whose planner is being restarted: got = %+v, %v, want it a draft still", got, err)
 	}
-	if wanted, err := pes.ListLauncherAgents(ctx, launcher, time.Minute); err != nil || len(wanted) != 1 || wanted[0].AgentID != planner {
+	if wanted, err := pes.ListLauncherAgents(ctx, time.Minute); err != nil || len(wanted) != 1 || wanted[0].AgentID != planner {
 		t.Fatalf("the launcher is asked for %+v, %v, want the planner again", wanted, err)
 	}
 	if after := die(draft, planner, 1); !after.Stopped {
@@ -888,7 +810,7 @@ func TestADraftWhosePlannerIsGivenUpOnIsClosedSayingSo(t *testing.T) {
 		t.Fatalf("the draft of a stopped planner: got = %s %q closed by %v at %v, %v, want it closed planner_stopped by the platform", got.Status, got.CloseReason, got.ClosedBy, got.ClosedAt, err)
 	}
 
-	answered, answering := createTestDraft(t, pool, launcher)
+	answered, answering := createTestDraft(t, pool)
 	if err := pes.SetProposal(ctx, answered, []byte(`{}`), Proposed{WaitUntil: time.Now().UTC().Add(time.Hour), KeepPlanner: 10 * time.Minute}); err != nil {
 		t.Fatal(err)
 	}
@@ -909,10 +831,9 @@ func TestWhatAHostedAgentIsDoingIsKeptOnItsRowAndAnsweredWhereItIsRead(t *testin
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
-	launcher := "launcher-" + uuid.New().String()[:8]
-	pe := createTestPEWithCoordinator(t, pool, launcher)
-	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleBaseline, Hosted: true, Launcher: launcher, AgentType: "baseline"})[0]
-	draft, planner := createTestDraft(t, pool, launcher)
+	pe := createTestPEWithCoordinator(t, pool)
+	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleBaseline, Hosted: true, AgentType: "baseline"})[0]
+	draft, planner := createTestDraft(t, pool)
 
 	said := func(platformExpID, agentID string) *domain.AgentActivity {
 		t.Helper()
@@ -990,7 +911,7 @@ func TestWhatAHostedAgentIsDoingIsKeptOnItsRowAndAnsweredWhereItIsRead(t *testin
 	if err := pes.SetProposal(ctx, draft, []byte(`{}`), Proposed{WaitUntil: time.Now().UTC().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := pes.ReleaseInstances(ctx, launcher, 0, 0); err != nil {
+	if err := pes.ReleaseInstances(ctx, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := pes.GetPlatformExperiment(ctx, draft); err != nil || got.Activity != nil || said(draft, planner) != nil {

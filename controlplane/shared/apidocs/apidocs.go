@@ -69,10 +69,6 @@ const (
 	// never fetched by a research agent or the coordinator. Admits a runtime token on the
 	// cluster its {name} path parameter names, and staff.
 	AudienceInternal Audience = "internal"
-	// AudienceLauncher: agent-launcher binaries only. Admits a launcher token on the launcher
-	// its {name} path parameter names, and staff. Kept apart from AudienceInternal so that a
-	// runtime whose cluster shares a launcher's name is not let in, nor the other way round.
-	AudienceLauncher Audience = "launcher"
 	// AudienceStaff: the platform's own operators and nobody else. The audience is the whole
 	// rule of such an operation: a decision the platform makes across orgs.
 	AudienceStaff Audience = "staff"
@@ -80,7 +76,7 @@ const (
 
 func validAudience(a Audience) bool {
 	switch a {
-	case AudienceAgent, AudienceJob, AudienceCoordinator, AudienceInternal, AudienceLauncher, AudienceStaff:
+	case AudienceAgent, AudienceJob, AudienceCoordinator, AudienceInternal, AudienceStaff:
 		return true
 	default:
 		return false
@@ -89,7 +85,7 @@ func validAudience(a Audience) bool {
 
 // Admits reports whether the audience lets this principal in. clusterName is the operation's
 // {name} path parameter, empty on an operation that has none: the cluster of an AudienceInternal
-// operation, the launcher of an AudienceLauncher one.
+// operation.
 func (a Audience) Admits(p auth.Principal, clusterName string) bool {
 	switch p.Kind {
 	case auth.KindStaff:
@@ -102,8 +98,6 @@ func (a Audience) Admits(p auth.Principal, clusterName string) bool {
 		return a == AudienceJob
 	case auth.KindRuntime:
 		return a == AudienceInternal && clusterName != "" && clusterName == p.ClusterName
-	case auth.KindLauncher:
-		return a == AudienceLauncher && clusterName != "" && clusterName == p.LauncherName
 	default:
 		return false
 	}
@@ -114,8 +108,7 @@ func (a Audience) shownTo(reader Audience) bool {
 	return reader == "" || a == reader || (reader == AudienceAgent && a == AudienceJob)
 }
 
-// clusterNameParam is the path parameter an AudienceInternal operation names its cluster with,
-// and an AudienceLauncher operation its launcher.
+// clusterNameParam is the path parameter an AudienceInternal operation names its cluster with.
 const clusterNameParam = "name"
 
 const bearerScheme = "bearer"

@@ -151,7 +151,6 @@ func newWorld(t *testing.T) *world {
 		"coordinator": inA(auth.KindCoordinator),
 		"job":         func() auth.Principal { p := inA(auth.KindJob); p.ExperimentID = "job-1"; return p }(),
 		"runtime":     {Kind: auth.KindRuntime, ClusterName: w.clusterA, OrgIDs: []string{w.orgA}},
-		"launcher":    {Kind: auth.KindLauncher, LauncherName: "launcher-1"},
 		"staff":       {Kind: auth.KindStaff},
 		"staff-user":  {Kind: auth.KindStaff, UserID: "u-staff", Name: "Staff", OrgIDs: []string{}},
 	}
@@ -238,7 +237,7 @@ type request struct {
 }
 
 // Every operation against org A's resources, by every kind of caller. The gate in front of the
-// handlers refuses the tokens the platform derives for agents, jobs, runtimes and launchers; the
+// handlers refuses the tokens the platform derives for agents, jobs, runtimes; the
 // policy refuses the rest.
 func TestWhoMayCallWhat(t *testing.T) {
 	const (
@@ -251,7 +250,7 @@ func TestWhoMayCallWhat(t *testing.T) {
 		forbidden = http.StatusForbidden
 		notFound  = http.StatusNotFound
 	)
-	derived := map[string]int{"agent": forbidden, "coordinator": forbidden, "job": forbidden, "runtime": forbidden, "launcher": forbidden, "": noToken}
+	derived := map[string]int{"agent": forbidden, "coordinator": forbidden, "job": forbidden, "runtime": forbidden, "": noToken}
 	for _, op := range []struct {
 		name    string
 		request func(w *world) request

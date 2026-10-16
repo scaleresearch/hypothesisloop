@@ -48,13 +48,16 @@ func asRoot() error {
 	return nil
 }
 
+func remoteFor(settings hostinstall.Settings) *agentloop.Remote {
+	return &agentloop.Remote{ClusterName: settings.ClusterName, APIURL: settings.APIURL, Token: settings.Token, Version: version, HTTP: &http.Client{Timeout: 35 * time.Second}}
+}
+
 func agentFor(settings hostinstall.Settings) *agentloop.Agent {
+	remote := remoteFor(settings)
 	return &agentloop.Agent{
 		ClusterName:       settings.ClusterName,
-		APIURL:            settings.APIURL,
-		Token:             settings.Token,
-		Version:           version,
-		HTTPClient:        &http.Client{Timeout: 35 * time.Second},
+		ControlPlane:      remote,
+		Builds:            remote,
 		ReconcileInterval: reconcileInterval,
 		StatusInterval:    statusInterval,
 		Log:               say,
@@ -118,7 +121,7 @@ func install(args []string) error {
 		for _, fact := range facts {
 			say("%s", fact)
 		}
-		if err := agentFor(settings).CheckToken(ctx); errors.Is(err, agentloop.ErrClusterRemoved) {
+		if err := remoteFor(settings).CheckToken(ctx); errors.Is(err, agentloop.ErrClusterRemoved) {
 			return "", fmt.Errorf("no cluster named %s is registered at %s", settings.ClusterName, settings.APIURL)
 		} else if err != nil {
 			return "", fmt.Errorf("the platform does not take this token for cluster %s: %w", settings.ClusterName, err)
@@ -239,7 +242,7 @@ func detach(args []string) error {
 		return errors.New("interrupted before every job container was stopped; run it again")
 	}
 	say("every job container this node ran is stopped, and the agent no longer starts at boot")
-	agent.SayIfStillRegistered(ctx, say)
+	remoteFor(settings).SayIfStillRegistered(ctx, say)
 	if installed {
 		say("sudo bare-agent uninstall removes the agent from this node")
 	}

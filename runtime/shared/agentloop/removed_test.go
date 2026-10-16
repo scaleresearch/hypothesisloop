@@ -142,7 +142,7 @@ func TestAnAgentSaysHowToRemoveAClusterThatIsStillRegistered(t *testing.T) {
 			_, _ = w.Write([]byte(tc.body))
 		}))
 		var said string
-		newTestAgent(server, &captureExecutor{}).SayIfStillRegistered(context.Background(), func(format string, args ...any) {
+		remoteOf(newTestAgent(server, &captureExecutor{})).SayIfStillRegistered(context.Background(), func(format string, args ...any) {
 			said = fmt.Sprintf(format, args...)
 		})
 		server.Close()

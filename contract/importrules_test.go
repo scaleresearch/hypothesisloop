@@ -15,11 +15,8 @@ const module = "github.com/scaleresearch/hypothesisloop/"
 // testOnlyExceptions are the test files of the runtime and the CLI that import the control
 // plane, each because it runs the control plane's own code against the other side.
 var testOnlyExceptions = map[string]string{
-	"runtime/cloud/cmd/agent-launcher/chart_test.go":                   "renders the control plane's chart, which deploys the launcher",
-	"runtime/cloud/cmd/cloud-agent/chart_test.go":                      "renders the control plane's chart, which deploys the cloud agent",
-	"runtime/cloud/internal/agentlaunch/controlplane_contract_test.go": "runs the launcher against the real launcher API",
-	"cli/platformgate_test.go":                                         "runs the CLI against the real control plane services",
-	"cli/caller_test.go":                                               "reads tokens the control plane mints",
+	"cli/platformgate_test.go": "runs the CLI against the real control plane services",
+	"cli/caller_test.go":       "reads tokens the control plane mints",
 }
 
 // The runtime and the CLI share only the contract with the control plane, so either side can

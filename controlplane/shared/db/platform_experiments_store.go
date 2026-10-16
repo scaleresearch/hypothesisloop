@@ -36,7 +36,7 @@ func NewPlatformExperimentsStore(pool *Pool) *PlatformExperimentsStore {
 
 // coordinatorColumns are what a platform experiment says of the coordinator the platform runs
 // for it, read from platform_experiments as pe joined to its machine as ci (coordinatorInstanceJoin).
-var coordinatorColumns = `pe.coordinator_hosted, pe.coordinator_launcher, COALESCE(pe.coordinator_model, ''),
+var coordinatorColumns = `pe.coordinator_hosted, COALESCE(pe.coordinator_model, ''),
        COALESCE(ci.name, ''), COALESCE(ci.restarts, 0), COALESCE(ci.renewals, 0), COALESCE(ci.stopped, false), ci.exited_at, COALESCE(ci.exit_log, ''),
        ci.seen_at, ci.asked_at, COALESCE(ci.launch, ''), COALESCE(ci.state, ''), ci.progress_at, COALESCE(ci.end_reason, ''),
        ` + domain.InstanceReleasedSQL("pe.closed_at")
@@ -94,9 +94,9 @@ type execer interface {
 // locks the agent type of each entry of its researchers (poolTypesTx).
 func insertPlatformExperiment(ctx context.Context, tx pgx.Tx, pe *domain.PlatformExperiment) error {
 	const q = `
-INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_launcher, coordinator_model, max_hosted, repository, repository_url, agent_image, goal, created_by_kind, created_by_id, duration_hours, repository_account, continues, researchers,
+INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_model, max_hosted, repository, repository_url, agent_image, goal, created_by_kind, created_by_id, duration_hours, repository_account, continues, researchers,
                                   coordinator_agent_type)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NULLIF($20, ''), $21, $22, $23, $24, $25, $26, $27, $28, $29, NULLIF($30, ''), $31,
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NULLIF($19, ''), $20, $21, $22, $23, $24, $25, $26, $27, $28, NULLIF($29, ''), $30,
         '` + domain.CoordinatorFlavor + `')`
 
 	metrics, err := json.Marshal(pe.Metrics)
@@ -136,7 +136,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 		optionalTime(pe.StartsAt), pe.ClosesAt(), string(pe.Status),
 		stages, 1,
 		pe.CreatedAt, pe.UpdatedAt, pe.MaxConcurrentAccelerators, string(pe.DefaultQuotaTier),
-		pe.CoordinatorHosted, coordinator.Launcher, coordinator.Model, pe.MaxHosted,
+		pe.CoordinatorHosted, coordinator.Model, pe.MaxHosted,
 		pe.Repository, pe.RepositoryURL, pe.AgentImage,
 		pe.Goal, string(createdBy.Kind), createdBy.ID, pe.DurationHours, pe.RepositoryAccount, pe.Continues, researchers,
 	)
@@ -253,7 +253,7 @@ WHERE pe.id = $1`
 		&startsAt, &closesAt, &status,
 		&stagesRaw, &pe.CurrentStage, &pe.Summary,
 		&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier, &pe.Shared,
-		&pe.CoordinatorHosted, &coordinator.Launcher, &coordinator.Model, &coordinator.Instance.Name, &coordinator.Instance.Restarts,
+		&pe.CoordinatorHosted, &coordinator.Model, &coordinator.Instance.Name, &coordinator.Instance.Restarts,
 		&coordinator.Instance.Renewals, &coordinator.Instance.Stopped, &coordinator.Instance.ExitedAt, &coordinator.Instance.ExitLog,
 		&coordinator.Instance.SeenAt, &coordinator.Instance.AskedAt, &coordinator.Instance.Launch, &coordinator.Instance.Reported, &coordinator.Instance.ProgressAt, &coordinator.Instance.EndReason, &coordinator.Instance.Released, &pe.MaxHosted, &pe.Repository, &pe.RepositoryURL, &pe.AgentImage,
 		&pe.Goal, &pe.Continues, &createdBy.Kind, &createdBy.ID, &proposal, &answeredAt, &pe.DeclinedReason,

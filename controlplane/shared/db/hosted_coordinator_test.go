@@ -10,7 +10,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-func createTestPEWithCoordinator(t *testing.T, pool *Pool, launcher string) string {
+func createTestPEWithCoordinator(t *testing.T, pool *Pool) string {
 	t.Helper()
 	now := time.Now().UTC()
 	pe := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed,
@@ -19,7 +19,7 @@ func createTestPEWithCoordinator(t *testing.T, pool *Pool, launcher string) stri
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
 		Stages:    []domain.Stage{{LengthPct: 40, EvictPct: 75}, {LengthPct: 60, EvictPct: 0}},
 		CreatedAt: now, UpdatedAt: now,
-		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Launcher: launcher, Model: "model-1"}, MaxHosted: 50,
+		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Model: "model-1"}, MaxHosted: 50,
 	}
 	if err := NewPlatformExperimentsStore(pool).CreatePlatformExperiment(context.Background(), pe, nil, nil); err != nil {
 		t.Fatalf("create: got = %v, want = nil", err)
@@ -31,10 +31,10 @@ func TestHostedSaysWhoThePlatformRuns(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
-	coordinated := createTestPEWithCoordinator(t, pool, "main")
+	coordinated := createTestPEWithCoordinator(t, pool)
 	plain := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, plain, 10)
-	agents := spawnTestAgents(t, pes, plain, domain.AgentSignup{Hosted: true, Launcher: "main"}, domain.AgentSignup{})
+	agents := spawnTestAgents(t, pes, plain, domain.AgentSignup{Hosted: true}, domain.AgentSignup{})
 	for _, tc := range []struct {
 		name, pe, agent string
 		want            bool
@@ -57,13 +57,12 @@ func TestAHostedCoordinatorIsStoredReadAndListedOnlyWhereItIsOne(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
-	launcher := "launcher-" + uuid.New().String()[:8]
-	pe := createTestPEWithCoordinator(t, pool, launcher)
+	pe := createTestPEWithCoordinator(t, pool)
 	plain := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, plain, 10)
 
 	got, err := pes.GetPlatformExperiment(ctx, pe)
-	if err != nil || !got.CoordinatorHosted || got.Coordinator == nil || got.Coordinator.Launcher != launcher || got.Coordinator.Model != "model-1" || got.Coordinator.Instance.Name != "" {
+	if err != nil || !got.CoordinatorHosted || got.Coordinator == nil || got.Coordinator.Model != "model-1" || got.Coordinator.Instance.Name != "" {
 		t.Fatalf("got = %+v (coordinator %+v), %v", got, got.Coordinator, err)
 	}
 	if other, err := pes.GetPlatformExperiment(ctx, plain); err != nil || other.CoordinatorHosted || other.Coordinator != nil {
@@ -88,7 +87,7 @@ func TestAHostedCoordinatorIsStoredReadAndListedOnlyWhereItIsOne(t *testing.T) {
 	const windDown = 2 * time.Minute
 	listed := func() []LauncherCoordinator {
 		t.Helper()
-		out, err := pes.ListLauncherCoordinators(ctx, launcher, windDown)
+		out, err := pes.ListLauncherCoordinators(ctx, windDown)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -127,7 +126,6 @@ func TestAPlatformExperimentIsCreatedWithItsAgentsOrNotAtAll(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
-	launcher := "launcher-" + uuid.New().String()[:8]
 	now := time.Now().UTC()
 	experiment := func(maxHosted int) *domain.PlatformExperiment {
 		return &domain.PlatformExperiment{Actor: testActor,
@@ -136,12 +134,12 @@ func TestAPlatformExperimentIsCreatedWithItsAgentsOrNotAtAll(t *testing.T) {
 			Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
 			Stages:    []domain.Stage{{LengthPct: 40, EvictPct: 75}, {LengthPct: 60, EvictPct: 0}},
 			CreatedAt: now, UpdatedAt: now, DefaultQuotaTier: domain.QuotaTierGuaranteed,
-			CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Launcher: launcher, Model: "model-1"}, MaxHosted: maxHosted,
+			CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Model: "model-1"}, MaxHosted: maxHosted,
 		}
 	}
 	measuring := func() ([]*domain.Agent, []domain.AgentSignup) {
 		agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], CreatedAt: now}
-		return []*domain.Agent{agent}, []domain.AgentSignup{{Actor: testActor, AgentID: agent.ID, Role: domain.SignupRoleBaseline, Hosted: true, Launcher: launcher, AgentType: "baseline", Model: "model-1"}}
+		return []*domain.Agent{agent}, []domain.AgentSignup{{Actor: testActor, AgentID: agent.ID, Role: domain.SignupRoleBaseline, Hosted: true, AgentType: "baseline", Model: "model-1"}}
 	}
 
 	pe := experiment(4)
@@ -152,7 +150,7 @@ func TestAPlatformExperimentIsCreatedWithItsAgentsOrNotAtAll(t *testing.T) {
 	if agents[0].Name != "Baseline 1" {
 		t.Errorf("the baseline agent is named %q, want Baseline 1", agents[0].Name)
 	}
-	wanted, err := pes.ListLauncherAgents(ctx, launcher, time.Minute)
+	wanted, err := pes.ListLauncherAgents(ctx, time.Minute)
 	if err != nil || len(wanted) != 1 || wanted[0].AgentID != agents[0].ID {
 		t.Fatalf("the launcher is asked for %+v, %v, want the baseline agent's machine from the create on", wanted, err)
 	}

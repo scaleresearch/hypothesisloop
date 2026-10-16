@@ -1,0 +1,518 @@
+package hosting
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
+)
+
+type Store interface {
+	ListLauncherAgents(ctx context.Context, windDown time.Duration) ([]db.LauncherAgent, error)
+	ListLauncherCoordinators(ctx context.Context, windDown time.Duration) ([]db.LauncherCoordinator, error)
+	ReleaseInstances(ctx context.Context, windDown, coordinatorWindDown time.Duration) error
+	// The three writes take a hosted agent's id, or none for a platform experiment's coordinator.
+	AskInstance(ctx context.Context, platformExpID, agentID, name, launch string) error
+	ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity, machine string) error
+	EndInstance(ctx context.Context, platformExpID, agentID, name string, how db.InstanceEnd, exitLog string, limit time.Duration, maxRestarts int) (after domain.AgentInstance, recorded bool, err error)
+	ListLauncherMachines(ctx context.Context) ([]db.LauncherMachine, error)
+}
+
+// Metrics is where the harness states the launcher reads are kept: the run's health series.
+type Metrics interface {
+	RecordHarnessState(ctx context.Context, at time.Time, states []domain.HarnessState) error
+}
+
+// MetricsDB is Metrics in the metrics store at URL.
+type MetricsDB struct{ URL string }
+
+func (m MetricsDB) RecordHarnessState(ctx context.Context, at time.Time, states []domain.HarnessState) error {
+	return metricsdb.RecordHarnessState(ctx, m.URL, at, states)
+}
+
+// Settings is what the platform's config decides about hosted machines.
+type Settings struct {
+	// Image is what a hosted machine boots unless its platform experiment names its own, and
+	// APIURL where it reaches the API.
+	Image  string
+	APIURL string
+	// SigningSecret derives each agent's own token, handed out inside its environment.
+	SigningSecret string
+	// BootLimit is how long a machine may go unreported after it was asked for, or stay starting
+	// after it was first reported, before that is recorded as an exit.
+	BootLimit time.Duration
+	// ProgressLimit is how long a running machine may go without its command printing a new
+	// progress marker before that is recorded as an exit.
+	ProgressLimit time.Duration
+	// MaxNewPerAnswer is how many machines one answer asks the launcher to create. The rest wait
+	// for the next answer, so that a pass ends well inside BootLimit.
+	MaxNewPerAnswer int
+}
+
+// Decider decides which machines the launcher keeps, from the platform's records and what the
+// launcher observed of its provider, and records what it observed.
+type Decider struct {
+	store   Store
+	metrics Metrics
+	cfg     Settings
+	logger  *zap.Logger
+}
+
+func NewDecider(store Store, metrics Metrics, cfg Settings, logger *zap.Logger) *Decider {
+	if store == nil || metrics == nil || cfg.Image == "" || cfg.APIURL == "" || cfg.SigningSecret == "" || cfg.BootLimit <= 0 || cfg.ProgressLimit <= 0 || cfg.MaxNewPerAnswer <= 0 || logger == nil {
+		panic("hosting.NewDecider: store, metrics, logger and every setting are required")
+	}
+	return &Decider{store: store, metrics: metrics, cfg: cfg, logger: logger}
+}
+
+// The states the launcher observes an instance in (ObservedInstance.State).
+const (
+	stateStarting = "starting"
+	stateRunning  = "running"
+	stateExited   = "exited"
+	stateUnknown  = "unknown"
+)
+
+// Observed is what the launcher found on its provider account: every instance whose name starts
+// with its own prefix, by the name the decider gave it.
+type Observed struct {
+	// LaunchDigest is a digest of everything the launcher itself starts an instance with.
+	LaunchDigest string
+	Instances    []ObservedInstance
+}
+
+// ObservedInstance is one name of the launcher's namespace as its provider lists it, without the
+// launcher's prefix.
+type ObservedInstance struct {
+	Name string
+	// Machine is the provider's id of the machine the name is reported by.
+	Machine string
+	State   string
+	// Log is the end of what an exited instance's command wrote.
+	Log string
+	// Expired tells an exited instance its provider ended at the provider's own lifetime.
+	Expired bool
+	// Progress is the progress marker a running instance's command last printed, "" when it
+	// printed none, nil when its output could not be read.
+	Progress *string
+	// Activity is what a running instance's agent last said it is doing.
+	Activity string
+	// HarnessState is what a running instance's harness last said of itself (parseHarnessState).
+	HarnessState string
+}
+
+// Desired is the launcher's complete desired state. Instances should exist and be running.
+// Ending names instances whose run is over: they are told to stop and are otherwise left alone
+// for a last turn, neither created nor replaced, and destroyed once it has exited. An instance in
+// neither list should not exist. Image is the platform's image, which the launcher warms ahead
+// of the next machine while nothing is asked for.
+type Desired struct {
+	Instances []Instance
+	Ending    []string
+	Image     string
+}
+
+// Instance is one machine the launcher keeps: what it boots and the environment its agent starts
+// with. Name is its identity, and the launcher puts its own prefix in front of it.
+type Instance struct {
+	Name  string
+	Image string
+	Env   map[string]string
+}
+
+// HeldMachine is a machine the platform holds: the name it is asked for under, without the
+// launcher's prefix, and the provider's id the launcher last reported the name by.
+type HeldMachine struct {
+	Name    string
+	Machine string
+}
+
+// kept is one thing the launcher keeps a machine for: an agent, or a platform experiment's
+// coordinator, whose agentID is empty. Both are evaluated by the same steps.
+type kept struct {
+	platformExperimentID, agentID string
+	// role is its role in the run's health series, and agentType the agent type it runs.
+	role, agentType string
+	instance        domain.AgentInstance
+	ending          bool
+	// launch is launchOf the image this one boots and the launcher's digest.
+	launch string
+	// describe takes how many machines of this one ended before.
+	describe func(ended int) (Instance, error)
+}
+
+// launchOf identifies what a machine is started with on the platform's and the launcher's side.
+// Restarts are spent under one launch: a machine that cannot run under an image or a launcher
+// config says nothing about the next.
+func launchOf(image, launchDigest string) string {
+	digest := sha256.Sum256([]byte(image + "\x00" + launchDigest))
+	return hex.EncodeToString(digest[:16])
+}
+
+// imageOf is the image a platform experiment's machines boot: the one it names, or the
+// platform's own.
+func (h *Decider) imageOf(agentImage string) string {
+	if agentImage != "" {
+		return agentImage
+	}
+	return h.cfg.Image
+}
+
+// Held is every machine the platform holds, an agent's or a coordinator's. It changes nothing.
+func (h *Decider) Held(ctx context.Context) ([]HeldMachine, error) {
+	machines, err := h.store.ListLauncherMachines(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("hosting.Held: %w", err)
+	}
+	held := make([]HeldMachine, 0, len(machines))
+	for _, m := range machines {
+		held = append(held, HeldMachine{Name: m.Name, Machine: m.Machine})
+	}
+	return held, nil
+}
+
+// Reconcile records what the launcher observed and evaluates everything else: which agents and
+// coordinators are hosted, which of them still run, which have domain.AgentWindDown
+// (a coordinator domain.CoordinatorWindDown) left, and which get another machine after theirs ended. One that cannot be evaluated is
+// logged and left out and the rest of the list stands.
+func (h *Decider) Reconcile(ctx context.Context, observed Observed) (*Desired, error) {
+	// A machine this answer no longer names is taken down by the launcher: that is written
+	// down first, as the platform's own doing, so no later answer reads it as lost.
+	if err := h.store.ReleaseInstances(ctx, domain.AgentWindDown, domain.CoordinatorWindDown); err != nil {
+		return nil, err
+	}
+	agents, err := h.store.ListLauncherAgents(ctx, domain.AgentWindDown)
+	if err != nil {
+		return nil, err
+	}
+	coordinators, err := h.store.ListLauncherCoordinators(ctx, domain.CoordinatorWindDown)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]ObservedInstance{}
+	for _, instance := range observed.Instances {
+		seen[instance.Name] = instance
+	}
+
+	var all []kept
+	for _, agent := range agents {
+		if agent.Instance == nil {
+			h.logger.Error("the hosted list holds an agent that is not hosted", zap.String("platformExpID", agent.PlatformExperimentID), zap.String("agentID", agent.AgentID))
+			continue
+		}
+		signup, image := agent.AgentSignup, h.imageOf(agent.AgentImage)
+		all = append(all, kept{
+			platformExperimentID: agent.PlatformExperimentID, agentID: agent.AgentID, role: string(agent.Role), agentType: agent.AgentType, instance: *agent.Instance, ending: agent.Ended != "",
+			launch: launchOf(image, observed.LaunchDigest),
+			describe: func(ended int) (Instance, error) {
+				return instanceFor(signup, ended, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
+			},
+		})
+	}
+	for _, coordinator := range coordinators {
+		pe, image := coordinator.PlatformExperimentID, h.imageOf(coordinator.AgentImage)
+		all = append(all, kept{
+			platformExperimentID: pe, role: domain.CoordinatorHealthRole, agentType: domain.CoordinatorFlavor, instance: coordinator.Instance, ending: coordinator.Ending,
+			launch: launchOf(image, observed.LaunchDigest),
+			describe: func(ended int) (Instance, error) {
+				return coordinatorInstanceFor(pe, ended, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
+			},
+		})
+	}
+
+	out := &Desired{Instances: []Instance{}, Ending: []string{}, Image: h.cfg.Image}
+	asked := 0
+	var states []domain.HarnessState
+	for _, one := range all {
+		log := h.logger.With(zap.String("platformExpID", one.platformExperimentID), zap.String("agentID", one.agentID))
+		current := one.instance
+		// A machine is named after how many ended before it, whether or not their end spent a
+		// restart, so every one that ends is followed by another name.
+		describe := func(restarts, renewals int) (Instance, error) {
+			return one.describe(restarts + renewals)
+		}
+		if one.ending {
+			// Named as it was created, whatever config says now: a new name would have its
+			// machine destroyed in the middle of its last turn.
+			if current.Name != "" {
+				out.Ending = append(out.Ending, current.Name)
+			}
+			continue
+		}
+		// The restart budget is spent under one launch. Under another it is whole, and one that
+		// was stopped is asked for again: what stopped it may have been the image or the
+		// launcher's config.
+		if current.Launch == one.launch && current.Stopped {
+			continue
+		}
+		instance, err := describe(current.Restarts, current.Renewals)
+		if err != nil {
+			log.Error("hosted instance cannot be described", zap.Error(err))
+			continue
+		}
+		// What the launcher reports counts only for the machine that is still the one wanted. A
+		// name that config has since changed is replaced and its end is nobody's fault.
+		if current.Name == instance.Name {
+			if reported := seen[current.Name]; reported.State == stateRunning && reported.HarnessState != "" {
+				state, unknown, err := parseHarnessState(reported.HarnessState)
+				if len(unknown) > 0 {
+					log.Debug("harness state fields this platform does not know are ignored", zap.String("instance", current.Name), zap.Strings("fields", unknown))
+				}
+				if err != nil {
+					log.Warn("hosted instance reported a harness state that cannot be read", zap.String("instance", current.Name), zap.Error(err))
+				} else {
+					state.PlatformExperimentID, state.AgentID, state.Role, state.AgentType = one.platformExperimentID, one.agentID, one.role, one.agentType
+					states = append(states, state)
+				}
+			}
+			after, ended, err := h.observe(ctx, one, seen, instance.Env["HL_TOKEN"])
+			if err != nil {
+				log.Error("record instance outcome failed", zap.Error(err))
+				out.Instances = append(out.Instances, instance)
+				continue
+			}
+			if ended {
+				log.Warn("hosted instance ended", zap.String("instance", current.Name), zap.Int("restarts", after.Restarts), zap.Bool("stopped", after.Stopped), zap.String("why", after.ExitLog))
+				if after.Stopped {
+					continue
+				}
+				current.Name = ""
+				if instance, err = describe(after.Restarts, after.Renewals); err != nil {
+					log.Error("hosted instance cannot be described", zap.Error(err))
+					continue
+				}
+			}
+		}
+		if instance.Name != current.Name {
+			// The machine recorded is the desired one until a new name is: an answer without it
+			// would have the launcher destroy a machine the platform still asks for.
+			keepCurrent := func() {
+				if current.Name != "" {
+					out.Instances = append(out.Instances, Instance{Name: current.Name, Image: instance.Image, Env: instance.Env})
+				}
+			}
+			// The launcher creates one machine after another, so an answer asks for a bounded
+			// number of new ones and the rest wait for the next: a pass must end, and its
+			// machines be reported, well inside the boot limit.
+			if asked == h.cfg.MaxNewPerAnswer {
+				keepCurrent()
+				continue
+			}
+			asked++
+			if err := h.store.AskInstance(ctx, one.platformExperimentID, one.agentID, instance.Name, one.launch); err != nil {
+				log.Error("record instance name failed", zap.Error(err))
+				keepCurrent()
+				continue
+			}
+		}
+		out.Instances = append(out.Instances, instance)
+	}
+	// The states are health, which an answer does not wait for: one that is not written is
+	// followed by the next pass's.
+	if len(states) > 0 {
+		if err := h.metrics.RecordHarnessState(ctx, time.Now().UTC(), states); err != nil {
+			h.logger.Error("record harness states failed", zap.Error(err))
+		}
+	}
+	return out, nil
+}
+
+// observe holds the machine asked for under one.instance.Name against what the launcher reports
+// of that name, and records its end when the report says so:
+//   - exited: at once, with the end of its output. One its provider ended at the provider's own
+//     lifetime (expired) is recorded as that, which spends no restart.
+//   - reported before and not now: at once. The provider took it away. A machine the platform
+//     released itself is never here: ReleaseInstances cleared its name when it stopped being
+//     asked for.
+//   - never reported: once the boot limit has passed since it was asked for. No machine could
+//     be created, and the launcher's own log says what its provider answered.
+//   - starting: once the boot limit has passed since it was first reported.
+//   - running: once the progress limit has passed since its command last printed a progress
+//     marker the platform had not seen, or since it was first reported when it never printed
+//     one. A report whose marker the launcher could not read is held to the same limit by the
+//     same clock, and its end is recorded as progress unreadable, which spends no restart: an
+//     outage of the provider's log says nothing of the command, and must not stop every agent.
+//   - unknown, of a machine last recorded running: nothing is recorded, so it stays running, and
+//     it is ended by the progress limit as a running one is. A host unreachable for a pass ends
+//     nothing, and one that stays away is not kept past the limit.
+//   - unknown, of a machine never recorded running: as starting.
+//
+// The limits are counted by the store on the database's clock. token is the one this API
+// minted for the machine, which its output must not carry into the database.
+func (h *Decider) observe(ctx context.Context, one kept, seen map[string]ObservedInstance, token string) (domain.AgentInstance, bool, error) {
+	name := one.instance.Name
+	end := func(how db.InstanceEnd, exitLog string) (domain.AgentInstance, bool, error) {
+		limit := h.cfg.BootLimit
+		if how == db.InstanceSilent || how == db.InstanceProgressUnreadable {
+			limit = h.cfg.ProgressLimit
+		}
+		return h.store.EndInstance(ctx, one.platformExperimentID, one.agentID, name, how, exitLog, limit, domain.MaxAgentInstanceRestarts)
+	}
+	reported, listed := seen[name]
+	switch {
+	case !listed && one.instance.SeenAt != nil:
+		return end(db.InstanceGone, "the provider lost the machine: it was running, the platform still asks for it, and its provider no longer lists it")
+	case !listed:
+		return end(db.InstanceNeverSeen, fmt.Sprintf("no machine was listed %s after it was asked for, which is the boot limit: its launcher could not create it, and the launcher's log says what the provider answered", h.cfg.BootLimit))
+	case reported.State == stateExited:
+		exitLog := reported.Log
+		if token != "" {
+			exitLog = strings.ReplaceAll(exitLog, token, "<HL_TOKEN>")
+		}
+		how := db.InstanceExited
+		if reported.Expired {
+			how = db.InstanceExpired
+		}
+		return end(how, lastBytes(exitLog, domain.MaxAgentInstanceLogBytes))
+	case reported.State == stateUnknown && one.instance.Reported == stateRunning:
+		return end(db.InstanceSilent, fmt.Sprintf("the machine was running, its provider stopped saying whether it still does, and its command reported no progress for %s, which is the progress limit", h.cfg.ProgressLimit))
+	}
+	state := reported.State
+	if state == stateUnknown {
+		state = stateStarting
+	}
+	activity := ""
+	if reported.State == stateRunning {
+		activity = said(reported.Activity, token)
+	}
+	if err := h.store.ObserveInstance(ctx, one.platformExperimentID, one.agentID, name, state, reported.Progress, h.cfg.ProgressLimit, activity, reported.Machine); err != nil {
+		return domain.AgentInstance{}, false, err
+	}
+	switch {
+	case state == stateStarting:
+		return end(db.InstanceStillStarting, fmt.Sprintf("the machine was still starting %s after it was first listed, which is the boot limit", h.cfg.BootLimit))
+	case reported.State == stateRunning && reported.Progress == nil:
+		return end(db.InstanceProgressUnreadable, fmt.Sprintf("the machine was running, no progress of its command was read for %s, which is the progress limit, and its launcher cannot read its output: whether the command still works is not known, so the machine is replaced and no restart is spent", h.cfg.ProgressLimit))
+	case reported.State == stateRunning:
+		return end(db.InstanceSilent, fmt.Sprintf("the machine was running and its command reported no progress for %s, which is the progress limit", h.cfg.ProgressLimit))
+	}
+	return domain.AgentInstance{}, false, nil
+}
+
+// said is the sentence an agent printed of what it is doing, as the platform stores it: one
+// line, without the token this API minted for the machine, which its output must not carry into
+// the database.
+func said(activity, token string) string {
+	if token != "" {
+		activity = strings.ReplaceAll(activity, token, "<HL_TOKEN>")
+	}
+	return strings.Join(strings.Fields(strings.ToValidUTF8(activity, "")), " ")
+}
+
+var instructionsDigestPattern = regexp.MustCompile(fmt.Sprintf(`^[0-9a-f]{%d}$`, domain.InstructionsDigestLength))
+
+// parseHarnessState reads the state line a harness printed (agents/experimentator, progress.py):
+// key=value fields, subagents, turn and since required, instructions_digest and version, the
+// version of its agent type, once the harness runs instructions, the model_ ones present once the harness
+// has read a rate limit, and then model_status among them. A key it does not know, from a newer
+// harness, is returned in unknown and otherwise ignored.
+func parseHarnessState(line string) (state domain.HarnessState, unknown []string, err error) {
+	fields := map[string]string{}
+	for _, field := range strings.Fields(line) {
+		key, value, found := strings.Cut(field, "=")
+		if !found {
+			return state, nil, fmt.Errorf("%q is no key=value field", field)
+		}
+		if _, twice := fields[key]; twice {
+			return state, nil, fmt.Errorf("%s is given twice", key)
+		}
+		fields[key] = value
+	}
+	unixTime := func(key string) (time.Time, error) {
+		seconds, err := strconv.ParseInt(fields[key], 10, 64)
+		if err != nil || seconds <= 0 {
+			return time.Time{}, fmt.Errorf("%s %q is no Unix time", key, fields[key])
+		}
+		return time.Unix(seconds, 0).UTC(), nil
+	}
+	modelRead := false
+	for key, value := range fields {
+		switch key {
+		case "subagents":
+			state.Subagents, err = strconv.Atoi(value)
+			if err != nil || state.Subagents < 0 {
+				return state, unknown, fmt.Errorf("subagents %q is no count", value)
+			}
+		case "turn":
+			switch value {
+			case "working":
+			case "waiting":
+				state.TurnWaiting = true
+			default:
+				return state, unknown, fmt.Errorf("turn %q is neither working nor waiting", value)
+			}
+		case "since":
+			if state.TurnSince, err = unixTime(key); err != nil {
+				return state, unknown, err
+			}
+		case "instructions_digest":
+			if !instructionsDigestPattern.MatchString(value) {
+				return state, unknown, fmt.Errorf("instructions_digest %q is no %d lowercase hex characters", value, domain.InstructionsDigestLength)
+			}
+			state.InstructionsDigest = value
+		case "version":
+			state.AgentTypeVersion, err = strconv.Atoi(value)
+			if err != nil || state.AgentTypeVersion < 1 {
+				return state, unknown, fmt.Errorf("version %q is no version", value)
+			}
+		case "model_status":
+			switch value {
+			case "allowed", "allowed_warning":
+			case "rejected":
+				state.Model.Rejected = true
+			default:
+				return state, unknown, fmt.Errorf("model_status %q is none of allowed, allowed_warning and rejected", value)
+			}
+		case "model_type":
+		case "model_utilization":
+			u, err := strconv.ParseFloat(value, 64)
+			if err != nil || u < 0 || u > 1 {
+				return state, unknown, fmt.Errorf("model_utilization %q is no number from 0 to 1", value)
+			}
+			state.Model.Utilization = &u
+		case "model_resets_at":
+			at, err := unixTime(key)
+			if err != nil {
+				return state, unknown, err
+			}
+			state.Model.ResetsAt = &at
+		default:
+			unknown = append(unknown, key)
+			continue
+		}
+		modelRead = modelRead || strings.HasPrefix(key, "model_")
+	}
+	for _, key := range []string{"subagents", "turn", "since"} {
+		if _, given := fields[key]; !given {
+			return state, unknown, fmt.Errorf("%s is required", key)
+		}
+	}
+	if _, given := fields["model_status"]; modelRead && !given {
+		return state, unknown, fmt.Errorf("model_status is required with the other model_ fields")
+	}
+	slices.Sort(unknown)
+	return state, unknown, nil
+}
+
+// lastBytes keeps the end of text, cut at a line where one starts inside the limit.
+func lastBytes(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	text = text[len(text)-limit:]
+	if newline := strings.IndexByte(text, '\n'); newline >= 0 && newline < len(text)-1 {
+		text = text[newline+1:]
+	}
+	return strings.ToValidUTF8(text, "")
+}

@@ -119,7 +119,7 @@ func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store
 	// Each pass keeps the researchers of every running platform experiment at work as its pool
 	// says, launched as the control service launches the researchers it creates.
 	ctrl = ctrl.WithResearcherKeeper(quota.NewResearcherKeeper(peSvc, quota.AgentLaunch{
-		Launcher: pcfg.Agents.Launcher, DefaultModel: pcfg.Agents.DefaultModel,
+		Hosting: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel,
 	}))
 
 	// settler durably writes a terminal experiment's final observed usage (see

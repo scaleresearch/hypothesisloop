@@ -94,7 +94,7 @@ func TestAPassListsTheClustersNodesAndPodsOnce(t *testing.T) {
 	defer server.Close()
 	ended := make(chan struct{})
 	agent := &agentloop.Agent{
-		ClusterName: "edge", APIURL: server.URL, HTTPClient: server.Client(),
+		ClusterName: "edge", ControlPlane: &agentloop.Remote{ClusterName: "edge", APIURL: server.URL, HTTP: server.Client()},
 		Executor:          endOfPass{c, ended},
 		ReconcileInterval: time.Hour, StatusInterval: time.Hour,
 		Log: func(string, ...any) {},

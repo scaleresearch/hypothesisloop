@@ -64,7 +64,7 @@ func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *do
 	if pe.EndsAt.Sub(now) < domain.ReplacementLead(pe.JobEstimatedDurationHours) {
 		return nil
 	}
-	if launch.Launcher == "" || launch.DefaultModel == "" {
+	if launch.DefaultModel == "" {
 		return errors.New("platform_experiments.KeepResearchers: no agent launch settings")
 	}
 	state, err := s.store.ResearcherPoolState(ctx, pe.ID)
@@ -100,7 +100,7 @@ func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *do
 	if err != nil {
 		return fmt.Errorf("platform_experiments.KeepResearchers: %w", err)
 	}
-	if err := s.requireHosting(ctx, launch.Launcher); err != nil {
+	if err := requireHosting(launch.Hosting); err != nil {
 		return fmt.Errorf("platform_experiments.KeepResearchers: %w", err)
 	}
 	// Nobody's credential adds it: it is the platform's, on behalf of whoever created the run.
@@ -122,7 +122,7 @@ func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *do
 			continue
 		}
 		signup := domain.AgentSignup{
-			Role: domain.SignupRoleCompetitor, QuotaTier: tier, Hosted: true, Launcher: launch.Launcher,
+			Role: domain.SignupRoleCompetitor, QuotaTier: tier, Hosted: true,
 			AgentType: choice.AgentType, Model: choice.Model, Hyperparameters: choice.Hyperparameters, Actor: &by, Replaces: place.Replaces,
 		}
 		late, err := s.lateShare(ctx, pe)

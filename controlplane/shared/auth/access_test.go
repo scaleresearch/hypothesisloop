@@ -300,8 +300,7 @@ func TestWhoseRecordAWriteIsAndWhoseCredentialMadeIt(t *testing.T) {
 		"key for an agent of another org":         {callers["key of A"], "agent-b", "", domain.Actor{}, 404},
 		"coordinator as itself":                   {callers["coordinator of pe-a"], "", "", domain.Actor{Kind: domain.ActorCoordinator, ID: callers["coordinator of pe-a"].PlatformExperimentID}, 200},
 		"coordinator for an agent of another org": {callers["coordinator of pe-a"], "agent-b", "", domain.Actor{}, 404},
-		"runtime":  {auth.Principal{Kind: auth.KindRuntime, ClusterName: "c", OrgIDs: []string{"org-a"}}, "", "", domain.Actor{}, 403},
-		"launcher": {auth.Principal{Kind: auth.KindLauncher, LauncherName: "l"}, "", "", domain.Actor{}, 403},
+		"runtime": {auth.Principal{Kind: auth.KindRuntime, ClusterName: "c", OrgIDs: []string{"org-a"}}, "", "", domain.Actor{}, 403},
 	} {
 		owner, actor, err := access.Writer(auth.WithPrincipal(context.Background(), tc.caller), tc.agentID)
 		if status(err) != tc.status || owner != tc.owner || actor != tc.actor {

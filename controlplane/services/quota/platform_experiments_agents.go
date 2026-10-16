@@ -35,8 +35,8 @@ type AddAgentRequest struct {
 
 // AgentLaunch is what joining needs beyond the store.
 type AgentLaunch struct {
-	// Launcher is the launcher a hosted agent is given to.
-	Launcher string
+	// Hosting says the deployment has a sandbox provider: without one nothing is hosted.
+	Hosting bool
 	// DefaultModel is what an agent that names no model runs on.
 	DefaultModel string
 	// CoordinatorModel is what a hosted coordinator that names no model runs on.
@@ -54,7 +54,7 @@ type JoinedAgent struct {
 	domain.AgentSignup
 	// StatusReason is why the agent is not at work yet: its platform experiment is open and has
 	// not started, or its machine is asked for and not running.
-	StatusReason *domain.StatusReason `json:"status_reason,omitempty" doc:"Why the agent is not at work yet. On an agent that waits for its open platform experiment to start, every one but those of role baseline: reason is the platform experiment's own (baseline_measuring, baseline_required and the others of its status_reason), and message says the agent takes no turn and, when the platform runs it, has no machine asked for until the start. Its instance reads waiting until then. On a hosted agent whose machine is asked for and not running yet, its instance reading requested or starting: instance_starting, and message says how long ago the machine was asked for. That is a start in progress and no failure. Such an agent whose launcher has not asked for its machines for a minute: launcher_unreachable, and message names the launcher and how long ago it last asked. On an agent that waited for the start of a platform experiment that closed before its run started, and had no machine asked for it: never_launched, with no waits_for, and message gives the close_reason and why it closed. Its instance reads stopped with no end_reason."`
+	StatusReason *domain.StatusReason `json:"status_reason,omitempty" doc:"Why the agent is not at work yet. On an agent that waits for its open platform experiment to start, every one but those of role baseline: reason is the platform experiment's own (baseline_measuring, baseline_required and the others of its status_reason), and message says the agent takes no turn and, when the platform runs it, has no machine asked for until the start. Its instance reads waiting until then. On a hosted agent whose machine is asked for and not running yet, its instance reading requested or starting: instance_starting, and message says how long ago the machine was asked for. That is a start in progress and no failure. On an agent that waited for the start of a platform experiment that closed before its run started, and had no machine asked for it: never_launched, with no waits_for, and message gives the close_reason and why it closed. Its instance reads stopped with no end_reason."`
 	Token        string               `json:"token,omitempty"`
 	// The fields below say what an agent of an open or running platform experiment has going,
 	// absent once its run ended (withWork).
@@ -74,22 +74,8 @@ type JoinedAgent struct {
 func (s *PlatformExperimentsService) roster(ctx context.Context, platformExpID string, signups []domain.AgentSignup, reader domain.Actor) ([]JoinedAgent, error) {
 	out := make([]JoinedAgent, len(signups))
 	now := time.Now()
-	var starting []string
-	for _, signup := range signups {
-		if instanceStarting(signup, now) != nil {
-			starting = append(starting, signup.Launcher)
-		}
-	}
-	silent, err := s.silentLaunchers(ctx, starting, now, reader.Kind == domain.ActorStaff)
-	if err != nil {
-		return nil, fmt.Errorf("platform_experiments.roster: %w", err)
-	}
 	for i, signup := range signups {
 		out[i] = JoinedAgent{AgentSignup: signup, StatusReason: instanceStarting(signup, now)}
-		if why, ok := silent[signup.Launcher]; ok && out[i].StatusReason != nil {
-			paused := *why
-			out[i].StatusReason = &paused
-		}
 		if why := out[i].StatusReason; why != nil {
 			var err error
 			if why.WaitsFor, err = domain.WaitsFor(why.Reason, false); err != nil {
@@ -173,7 +159,7 @@ func instanceStarting(signup domain.AgentSignup, now time.Time) *domain.StatusRe
 	if state != domain.InstanceRequested && state != domain.InstanceStarting {
 		return nil
 	}
-	where, summary := "its machine is asked of its launcher at the launcher's next pass", "Its machine is being requested."
+	where, summary := "its machine is asked for at the launcher's next pass", "Its machine is being requested."
 	if instance.Name != "" && instance.AskedAt != nil {
 		ago := readableDuration(now.Sub(*instance.AskedAt))
 		where, summary = "its machine was asked for "+ago+" ago and its launcher has not listed it yet", "Its machine was requested "+ago+" ago and is not listed yet."
@@ -222,8 +208,7 @@ func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID
 		Hosted: req.Hosted, AgentType: choice.AgentType, Hyperparameters: choice.Hyperparameters, Model: choice.Model, Actor: &by,
 	}
 	if req.Hosted {
-		signup.Launcher = launch.Launcher
-		if err := s.requireHosting(ctx, launch.Launcher); err != nil {
+		if err := requireHosting(launch.Hosting); err != nil {
 			return nil, err
 		}
 	}
@@ -350,10 +335,10 @@ func (h *PlatformExperimentsHandler) withHosting(ctx context.Context, req Create
 	if !req.CoordinatorHosted {
 		return req, nil
 	}
-	if h.launch.Launcher == "" || h.launch.CoordinatorModel == "" {
+	if h.launch.CoordinatorModel == "" {
 		return req, errors.New("platform_experiments.Create: the handler has no agent launch settings")
 	}
-	if err := h.svc.requireHosting(ctx, h.launch.Launcher); err != nil {
+	if err := requireHosting(h.launch.Hosting); err != nil {
 		return req, err
 	}
 	if req.CoordinatorModel != "" {
@@ -366,7 +351,7 @@ func (h *PlatformExperimentsHandler) withHosting(ctx context.Context, req Create
 	if h.launch.MaxHosted < 2 {
 		return req, refuseSignup(409, "max_hosted_reached", "%s", maxHostedReached(h.launch.MaxHosted))
 	}
-	req.coordinator = &domain.HostedCoordinator{Launcher: h.launch.Launcher, Model: req.CoordinatorModel}
+	req.coordinator = &domain.HostedCoordinator{Model: req.CoordinatorModel}
 	return req, nil
 }
 
@@ -393,7 +378,7 @@ func (h *PlatformExperimentsHandler) hostedAgents(catalog domain.AgentTypeCatalo
 		}
 		agents = append(agents, &domain.Agent{ID: agentID, CreatedAt: now})
 		signups = append(signups, domain.AgentSignup{
-			AgentID: agentID, Role: role, Hosted: true, Launcher: h.launch.Launcher,
+			AgentID: agentID, Role: role, Hosted: true,
 			AgentType: choice.AgentType, Model: choice.Model, Hyperparameters: choice.Hyperparameters, Actor: &by,
 		})
 	}
@@ -473,7 +458,7 @@ func (s *PlatformExperimentsService) spawn(ctx context.Context, pe *domain.Platf
 		return nil, fmt.Errorf("platform_experiments.AddAgent: agent %s is not signed up after being created", id)
 	}
 	s.logger.Info("agent spawned", zap.String("platformExpID", platformExpID), zap.String("agentID", id),
-		zap.Bool("hosted", signup.Hosted), zap.String("launcher", signup.Launcher))
+		zap.Bool("hosted", signup.Hosted))
 	return []domain.AgentSignup{*joined}, nil
 }
 
@@ -788,7 +773,7 @@ func openHypotheses(ctx context.Context, graph Hypotheses, completed []*domain.E
 // RegisterAgentsHuma registers how agents join and leave a platform experiment. graph is where a
 // finish reads what the agent left open.
 func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler, graph Hypotheses) {
-	if h.launch.Launcher == "" || h.launch.DefaultModel == "" || h.launch.SigningSecret == "" || h.launch.MaxHosted <= 0 || h.repos == nil || graph == nil {
+	if h.launch.DefaultModel == "" || h.launch.SigningSecret == "" || h.launch.MaxHosted <= 0 || h.repos == nil || graph == nil {
 		panic("quota.RegisterAgentsHuma: the handler needs its repositories, WithAgentLaunch with every field set and the hypothesis graph")
 	}
 	access := doc.Access

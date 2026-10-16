@@ -363,7 +363,7 @@ var routes = []route{
 	{method: "POST", path: "/orgs/{id}/clusters/{name}/enable", request: "/orgs/<org>/clusters/<cluster>/enable", rule: orgLevel(people, http.StatusForbidden, reached)},
 	{method: "DELETE", path: "/orgs/{id}/clusters/{name}/identity", request: "/orgs/<org>/clusters/<cluster>/identity", rule: orgLevel(people, http.StatusForbidden, reached)},
 
-	// ---- runtimes and launchers ----
+	// ---- runtimes ----
 	{method: "GET", path: "/internal/clusters", rule: staffOnly},
 	{method: "POST", path: "/internal/clusters/{name}/reconcile", request: "/internal/clusters/<cluster>/reconcile", body: capacity1, rule: ofCluster(reached)},
 	{method: "GET", path: "/internal/clusters/{name}/access", request: "/internal/clusters/<cluster>/access", rule: ofCluster(http.StatusNoContent)},
@@ -374,8 +374,6 @@ var routes = []route{
 	{method: "POST", path: "/internal/clusters/{name}/builds/{key}/progress", request: "/internal/clusters/<cluster>/builds/key-1/progress", body: `{"attempt":1,"step":"[1/2] FROM base: started"}`, rule: ofCluster(reached)},
 	{method: "POST", path: "/internal/clusters/{name}/builds/{key}/loaded", request: "/internal/clusters/<cluster>/builds/key-1/loaded", body: `{"attempt":1,"node":"node-1","digest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}`, rule: ofCluster(reached)},
 	{method: "POST", path: "/internal/clusters/{name}/builds/{key}", request: "/internal/clusters/<cluster>/builds/key-1", body: `{"attempt":1,"outcome":"pushed","digest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}`, rule: ofCluster(reached)},
-	{method: "GET", path: "/internal/launchers/{name}/machines", request: "/internal/launchers/main/machines", rule: only([]string{"launcher"}, reached)},
-	{method: "POST", path: "/internal/launchers/{name}/reconcile", request: "/internal/launchers/main/reconcile", body: `{"launch_digest":"0123456789abcdef0123456789abcdef","instances":[],"reconcile_interval_seconds":15,"create_pause_milliseconds":1000}`, rule: only([]string{"launcher"}, reached)},
 	{method: "GET", path: "/metrics", rule: staffOnly},
 }
 
@@ -511,7 +509,6 @@ var cases = []struct {
 	{"staff sharing under an id that is a path", "staff", "POST", "/platform-experiments/pe-b%2F..%2Fpe-a1/share", "", 404},
 
 	{"a runtime reporting for a cluster of another org", "runtime", "POST", "/internal/clusters/cluster-b/status", `{"reports":[]}`, 403},
-	{"a launcher asking as another launcher", "launcher", "POST", "/internal/launchers/other/reconcile", `{"instances":[]}`, 403},
 	{"staff reading the process metrics", "staff", "GET", "/metrics", "", 200},
 
 	{"staff reading an agent's session", "staff", "GET", "/platform-experiments/pe-a1/agents/agent-1/session", "", reached},

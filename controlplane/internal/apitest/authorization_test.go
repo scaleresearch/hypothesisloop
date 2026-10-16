@@ -14,8 +14,8 @@ import (
 
 // The callers of the table, none of them staff: a signed-in owner of org-a (user), a signed-in
 // member of it who is no owner, an API key of org-a, one bound to its project prj-a1, agent-1's token in pe-a1, pe-a1's coordinator, the
-// token of agent-1's job, cluster-a's runtime, a launcher, and a request with no token.
-var principals = []string{"user", "member", "org key", "project key", "agent", "coordinator", "job", "runtime", "launcher", "build", "none"}
+// token of agent-1's job, cluster-a's runtime, and a request with no token.
+var principals = []string{"user", "member", "org key", "project key", "agent", "coordinator", "job", "runtime", "build", "none"}
 
 // Whose object a request names. own is agent-1's in pe-a1, peer another agent's in the same
 // platform experiment, sibling one in pe-a2 (same org, another project), foreign one in org-b,

@@ -264,179 +264,16 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "Atomically records one complete actual-capacity snapshot in metrics storage, keeping only priced accelerator types, then returns the complete PostgreSQL desired workload set for this cluster, plus the ids of workloads whose termination earns them their declared checkpoint window, " +
 			"the environment builds assigned to this cluster (builds, recorded as building only for a runtime that reports builds true), and registry_pull, a login that reads environment images, when a listed workload runs in one. " +
 			"The version the agent sends in " + clusterapi.AgentVersionHeader + " is kept with the snapshot, and a refusal of the request is kept as the cluster's last error until one is accepted.",
-	}, func(ctx context.Context, in *reconcileInput) (out *struct {
+	}, func(ctx context.Context, in *reconcileInput) (*struct {
 		Body clusterapi.ReconcileAnswer
-	}, err error) {
-		clusterName := in.Name
-		defer func() { h.recordContact(ctx, clusterName, err) }()
-		if err := api.CheckAgentVersion(in.AgentVersion); err != nil {
-			return nil, huma.Error400BadRequest(err.Error())
-		}
-
-		report := in.Body
-		if report.AcceleratorAvailableByFlavor == nil || report.AcceleratorTotalByFlavor == nil || report.AcceleratorAvailableByNode == nil {
-			return nil, huma.Error400BadRequest("complete accelerator capacity report is required")
-		}
-		h.keepPricedAccelerators(&report)
-		if report.NodeResourcesByNode == nil {
-			return nil, huma.Error400BadRequest("per-node resource capacity report is required")
-		}
-		if report.NodeResourcesTotalByNode == nil {
-			return nil, huma.Error400BadRequest("per-node total resource capacity report is required")
-		}
-		for node, byResource := range report.NodeResourcesByNode {
-			if node == "" {
-				return nil, huma.Error400BadRequest("per-node resource report has empty node identity")
-			}
-			for _, key := range []string{domain.NodeResourceCPUMillicores, domain.NodeResourceMemoryBytes, domain.NodeResourceStorageBytes} {
-				if _, present := byResource[key]; !present {
-					return nil, huma.Error400BadRequest("per-node resource report for " + node + " is missing " + key)
-				}
-			}
-			for resource, available := range byResource {
-				if resource == "" || available < 0 {
-					return nil, huma.Error400BadRequest("invalid per-node resource capacity value")
-				}
-			}
-			total, present := report.NodeResourcesTotalByNode[node]
-			if !present {
-				return nil, huma.Error400BadRequest("per-node total resource report for " + node + " is missing")
-			}
-			for _, key := range []string{domain.NodeResourceCPUMillicores, domain.NodeResourceMemoryBytes, domain.NodeResourceStorageBytes} {
-				totalValue, present := total[key]
-				if !present || totalValue < 0 {
-					return nil, huma.Error400BadRequest("per-node total resource report for " + node + " is missing or invalid " + key)
-				}
-				if byResource[key] > totalValue {
-					return nil, huma.Error400BadRequest("per-node available resource exceeds total for " + node)
-				}
-			}
-		}
-		if report.CPUAvailableCores < 0 || report.CPUTotalCores < 0 || report.CPUAvailableCores > report.CPUTotalCores {
-			return nil, huma.Error400BadRequest("invalid CPU capacity values")
-		}
-		for flavor, total := range report.AcceleratorTotalByFlavor {
-			if flavor == "" {
-				return nil, huma.Error400BadRequest("accelerator capacity contains empty flavor")
-			}
-			available, present := report.AcceleratorAvailableByFlavor[flavor]
-			if !present || total < 0 || available < 0 || available > total {
-				return nil, huma.Error400BadRequest("invalid accelerator capacity values")
-			}
-		}
-		if len(report.AcceleratorAvailableByFlavor) != len(report.AcceleratorTotalByFlavor) {
-			return nil, huma.Error400BadRequest("accelerator available and total flavor sets must match")
-		}
-		availableByNode := make(map[string]int64, len(report.AcceleratorAvailableByFlavor))
-		for node, flavors := range report.AcceleratorAvailableByNode {
-			if node == "" {
-				return nil, huma.Error400BadRequest("per-node accelerator report has empty node identity")
-			}
-			for flavor, available := range flavors {
-				if flavor == "" || available < 0 {
-					return nil, huma.Error400BadRequest("invalid per-node accelerator capacity value")
-				}
-				if _, present := report.AcceleratorTotalByFlavor[flavor]; !present {
-					return nil, huma.Error400BadRequest("per-node accelerator flavor is absent from cluster totals")
-				}
-				availableByNode[flavor] += available
-			}
-		}
-		for flavor, byNode := range availableByNode {
-			if byNode > report.AcceleratorAvailableByFlavor[flavor] {
-				return nil, huma.Error400BadRequest("per-node accelerator capacity exceeds cluster availability")
-			}
-		}
-
-		if report.RAMAvailableBytes < 0 || report.RAMTotalBytes < 0 || report.RAMAvailableBytes > report.RAMTotalBytes ||
-			report.StorageAvailableBytes < 0 || report.StorageTotalBytes < 0 || report.StorageAvailableBytes > report.StorageTotalBytes {
-			return nil, huma.Error400BadRequest("invalid memory or storage capacity values")
-		}
-
-		// The scheduler knows a connected cluster by the id its runtime reports, so an id is one cluster's and
-		// a cluster has one. A runtime stating another is refused before anything it reports is
-		// recorded.
-		if report.ClusterID != "" {
-			if err := domain.ValidateClusterID(report.ClusterID); err != nil {
-				return nil, huma.Error400BadRequest(err.Error())
-			}
-			switch err := h.store.BindReportedID(ctx, clusterName, report.ClusterID); {
-			case errors.Is(err, db.ErrClusterNotFound):
-				return nil, auth.NotFound("cluster")
-			case errors.Is(err, db.ErrClusterIDBound):
-				return nil, huma.Error409Conflict("cluster_id " + report.ClusterID + " is the identity of another registered cluster")
-			case errors.Is(err, db.ErrClusterIDChanged):
-				return nil, huma.Error409Conflict("cluster " + clusterName + " is bound to another cluster_id than the " + report.ClusterID +
-					" this runtime reports: if its machines were rebuilt, its owner forgets the old identity (hl cluster forget-identity " + clusterName + ")")
-			case err != nil:
-				return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
-			}
-		}
-
-		// Placement reads the image, so it is kept before the capacity that makes the cluster a
-		// candidate.
-		if len(report.JobImage) > domain.MaxJobImageLength {
-			return nil, huma.Error400BadRequest("job_image is longer than " + strconv.Itoa(domain.MaxJobImageLength) + " characters")
-		}
-		onlyImage := report.JobImage
-		if report.JobImageDefault {
-			onlyImage = ""
-		}
-		if err := h.store.RecordJobImage(ctx, clusterName, onlyImage); err != nil {
-			return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
-		}
-		if err := h.store.RecordBuilds(ctx, clusterName, report.Builds && h.environments != nil); err != nil {
-			return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
-		}
-
-		if err := metricsdb.RecordClusterCapacitySnapshot(ctx, h.metricsDBURL, metricsdb.ClusterCapacitySnapshot{
-			ClusterName: clusterName, At: time.Now().UTC(),
-			CPUAvailable: report.CPUAvailableCores, CPUTotal: report.CPUTotalCores,
-			AcceleratorAvailable: report.AcceleratorAvailableByFlavor, AcceleratorTotal: report.AcceleratorTotalByFlavor,
-			AcceleratorAvailableByNode: report.AcceleratorAvailableByNode,
-			NodeResourcesByNode:        report.NodeResourcesByNode,
-			NodeResourcesTotalByNode:   report.NodeResourcesTotalByNode,
-			NodeLabelsByNode:           report.NodeLabelsByNode,
-			MultiNodeCapable:           report.MultiNodeCapable,
-			AutoscalerEnabled:          report.AutoscalerEnabled,
-			ClusterID:                  report.ClusterID,
-			AgentVersion:               in.AgentVersion,
-			RAMAvailable:               report.RAMAvailableBytes, RAMTotal: report.RAMTotalBytes,
-			StorageAvailable: report.StorageAvailableBytes, StorageTotal: report.StorageTotalBytes,
-		}); err != nil {
-			return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
-		}
-
-		exps, err := h.store.ListDesiredWorkloads(ctx, clusterName)
+	}, error) {
+		answer, err := h.Reconcile(ctx, in.Name, in.AgentVersion, in.Body)
 		if err != nil {
-			return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
+			return nil, err
 		}
-		// The other half of the same view: what should NO LONGER exist, and for how much longer
-		// it may. A job the platform itself decided to stop -- preempted, cut, out of quota, out
-		// of time -- is fine and its work is worth saving, so it is told termination is coming
-		// and gets the window it declared before it is killed. A job the environment or its own
-		// code ended gets no window; it simply never appears here.
-		//
-		// Derived from the termination that is already recorded on the experiment, and expiring
-		// with maxCheckpointGrace, so there is no terminating state to write, advance or clear.
-		undesired, err := h.store.ListRecentlyUndesiredWorkloads(ctx, clusterName, h.maxCheckpointGrace)
-		if err != nil {
-			return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
-		}
-		resp := &struct {
+		return &struct {
 			Body clusterapi.ReconcileAnswer
-		}{}
-		resp.Body.Jobs = make([]*clusterapi.DesiredJob, len(exps))
-		for i, exp := range exps {
-			if resp.Body.Jobs[i], err = h.desiredJob(exp); err != nil {
-				return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
-			}
-		}
-		resp.Body.CheckpointWindow = domain.CheckpointWindowGrants(undesired)
-		if resp.Body.Builds, resp.Body.RegistryPull, err = h.environmentWork(ctx, clusterName, exps); err != nil {
-			return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
-		}
-		return resp, nil
+		}{Body: answer}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{
@@ -655,102 +492,281 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	}) (*struct {
 		Body clusterapi.StatusAck
 	}, error) {
-		clusterName := in.Name
-		now := time.Now().UTC()
-		statusSamples := make([]metricsdb.JobStatusSample, 0, len(in.Body.Reports))
-		// A runtime reporting a job as running is an observation that it is alive, and it is the
-		// one liveness observation every runtime produces — the per-pod cgroup heartbeat exists
-		// only where a node-agent is deployed. Recording it here, once, is what gives runtimes
-		// without one (bare metal) any observed runtime at all: without it their jobs were billed
-		// only in slivers around whatever metrics they happened to report, their preemption
-		// rescale computed a stint of ~0 and requeued them at full estimate, and every rule keyed
-		// on "never observed" could not be bounded because it would have condemned all of them.
-		var observations []metricsdb.Observation
-		ids := make([]string, 0, len(in.Body.Reports))
-		for _, rep := range in.Body.Reports {
-			if rep.ExperimentID == "" || rep.Phase == "" {
-				return nil, huma.Error400BadRequest("every status report requires experiment_id and phase")
-			}
-			if rep.AdmittedMachine != nil && rep.AdmittedNode == "" {
-				return nil, huma.Error400BadRequest("status report for " + rep.ExperimentID + " names an admitted_machine and no admitted_node")
-			}
-			if (rep.StartedAt == nil) != (rep.EndedAt == nil) || (rep.StartedAt != nil && rep.EndedAt.Before(*rep.StartedAt)) {
-				return nil, huma.Error400BadRequest("status report for " + rep.ExperimentID + " needs started_at and ended_at together, in that order")
-			}
-			ids = append(ids, rep.ExperimentID)
-		}
-		placementByID, err := h.store.PlacementByID(ctx, ids)
-		if err != nil {
-			return nil, auth.Internal(h.logger, "cluster push status", err, zap.String("cluster", clusterName))
-		}
-		accepted := make([]clusterapi.StatusReport, 0, len(in.Body.Reports))
-		var ended []string
-		for _, rep := range in.Body.Reports {
-			// A report for an experiment this cluster no longer owns is dropped, not a reason to
-			// reject the push. Mid-reschedule that is the ordinary state — the experiment has
-			// already been repointed at its new cluster while the old one is still tearing its
-			// workload down — and rejecting the whole snapshot blacked out status for every other
-			// job on the old cluster until it finished. Dropping it is also the honest report:
-			// the experiment genuinely is not this cluster's any more.
-			if reason, ok := rejectReport(rep, placementByID[rep.ExperimentID], clusterName); !ok {
-				h.logger.Info(reason, zap.String("experiment", rep.ExperimentID),
-					zap.String("cluster", clusterName), zap.Int("reported_attempt", reportedAttempt(rep)),
-					zap.Int("current_attempt", placementByID[rep.ExperimentID].AttemptCount))
-				continue
-			}
-			accepted = append(accepted, rep)
-			if rep.EndedAt != nil {
-				ended = append(ended, rep.ExperimentID)
-			}
-		}
-		// A runtime reports an ended run on every push until its workload is deleted. The run is
-		// placed by the time of the first of them, so the later ones write the same observations.
-		runReportedAt, err := h.store.RunFirstReportedAt(ctx, ended)
-		if err != nil {
-			return nil, auth.Internal(h.logger, "cluster push status", err, zap.String("cluster", clusterName))
-		}
-		for _, rep := range accepted {
-			statusSamples = append(statusSamples, metricsdb.JobStatusSample{
-				ExperimentID: rep.ExperimentID, ClusterName: clusterName, Phase: rep.Phase,
-				AdmittedAcceleratorType: rep.AdmittedAcceleratorType, AdmittedNode: rep.AdmittedNode, AdmittedMachine: jobMachine(rep.AdmittedMachine), At: now,
-			})
-			observations = append(observations, observationsOf(rep, placementByID[rep.ExperimentID].AdmittedAt, runReportedAt[rep.ExperimentID], clusterName, now, h.observationCadence)...)
-			// LogTail is optional per report (nil when the executor has nothing new)
-			// -- only write when the agent actually sent one, so a
-			// job with no fresh output this tick doesn't wipe out its last-known tail.
-			//
-			// A tail or a phase detail that cannot be written fails the push before any phase is
-			// recorded: the phase that ends a job is what its workload is deleted on, and the
-			// reason it ended would be gone with it. The runtime pushes the snapshot again.
-			if rep.LogTail != nil {
-				if err := metricsdb.RecordLogTail(ctx, h.metricsDBURL, rep.ExperimentID, clusterName, splitLongLines(rep.LogTail, h.maxLogLineChars), now); err != nil {
-					return nil, auth.Internal(h.logger, "cluster push status", err, zap.String("experiment_id", rep.ExperimentID), zap.String("cluster", clusterName))
-				}
-			}
-			// Reason/Message/RestartCount are optional the same way: only write when the
-			// runtime actually has something to say about why this job's container hasn't
-			// started or has been restarting, so a healthy tick doesn't overwrite a still-valid
-			// prior explanation with silence.
-			if rep.Reason != "" || rep.Message != "" || rep.RestartCount != 0 || rep.ScheduledNodes != 0 || rep.SchedulingReason != "" {
-				if err := metricsdb.RecordPhaseDetail(ctx, h.metricsDBURL, rep.ExperimentID, clusterName, rep.Reason, rep.Message, rep.RestartCount, rep.ScheduledNodes, rep.SchedulingReason, placementByID[rep.ExperimentID].AttemptCount, now); err != nil {
-					return nil, auth.Internal(h.logger, "cluster push status", err, zap.String("experiment_id", rep.ExperimentID), zap.String("cluster", clusterName))
-				}
-			}
-		}
-		// Observations first: the job watcher settles a job as soon as it reads the phase that
-		// ended it, from whatever was observed of it by then.
-		if len(observations) > 0 {
-			if err := metricsdb.RecordObservations(ctx, h.metricsDBURL, observations); err != nil {
-				return nil, auth.Internal(h.logger, "cluster push status", err, zap.String("cluster", clusterName))
-			}
-		}
-		if err := metricsdb.RecordJobStatuses(ctx, h.metricsDBURL, clusterName, now, statusSamples); err != nil {
-			return nil, auth.Internal(h.logger, "cluster push status", err, zap.String("cluster", clusterName))
+		if err := h.PushStatus(ctx, in.Name, in.Body); err != nil {
+			return nil, err
 		}
 		return &struct {
 			Body clusterapi.StatusAck
 		}{Body: clusterapi.StatusAck{Status: "ok"}}, nil
 	})
+}
+
+// Reconcile records one complete actual-capacity snapshot of clusterName, its runtime running
+// agentVersion, and answers the cluster's complete desired state. A refusal is kept as the
+// cluster's last error until a reconcile is accepted.
+func (h *Handler) Reconcile(ctx context.Context, clusterName, agentVersion string, report clusterapi.ReconcileRequest) (answer clusterapi.ReconcileAnswer, err error) {
+	defer func() { h.recordContact(ctx, clusterName, err) }()
+	if err := api.CheckAgentVersion(agentVersion); err != nil {
+		return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest(err.Error())
+	}
+
+	if report.AcceleratorAvailableByFlavor == nil || report.AcceleratorTotalByFlavor == nil || report.AcceleratorAvailableByNode == nil {
+		return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest("complete accelerator capacity report is required")
+	}
+	h.keepPricedAccelerators(&report)
+	if report.NodeResourcesByNode == nil {
+		return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest("per-node resource capacity report is required")
+	}
+	if report.NodeResourcesTotalByNode == nil {
+		return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest("per-node total resource capacity report is required")
+	}
+	for node, byResource := range report.NodeResourcesByNode {
+		if node == "" {
+			return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest("per-node resource report has empty node identity")
+		}
+		for _, key := range []string{domain.NodeResourceCPUMillicores, domain.NodeResourceMemoryBytes, domain.NodeResourceStorageBytes} {
+			if _, present := byResource[key]; !present {
+				return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest("per-node resource report for " + node + " is missing " + key)
+			}
+		}
+		for resource, available := range byResource {
+			if resource == "" || available < 0 {
+				return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest("invalid per-node resource capacity value")
+			}
+		}
+		total, present := report.NodeResourcesTotalByNode[node]
+		if !present {
+			return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest("per-node total resource report for " + node + " is missing")
+		}
+		for _, key := range []string{domain.NodeResourceCPUMillicores, domain.NodeResourceMemoryBytes, domain.NodeResourceStorageBytes} {
+			totalValue, present := total[key]
+			if !present || totalValue < 0 {
+				return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest("per-node total resource report for " + node + " is missing or invalid " + key)
+			}
+			if byResource[key] > totalValue {
+				return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest("per-node available resource exceeds total for " + node)
+			}
+		}
+	}
+	if report.CPUAvailableCores < 0 || report.CPUTotalCores < 0 || report.CPUAvailableCores > report.CPUTotalCores {
+		return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest("invalid CPU capacity values")
+	}
+	for flavor, total := range report.AcceleratorTotalByFlavor {
+		if flavor == "" {
+			return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest("accelerator capacity contains empty flavor")
+		}
+		available, present := report.AcceleratorAvailableByFlavor[flavor]
+		if !present || total < 0 || available < 0 || available > total {
+			return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest("invalid accelerator capacity values")
+		}
+	}
+	if len(report.AcceleratorAvailableByFlavor) != len(report.AcceleratorTotalByFlavor) {
+		return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest("accelerator available and total flavor sets must match")
+	}
+	availableByNode := make(map[string]int64, len(report.AcceleratorAvailableByFlavor))
+	for node, flavors := range report.AcceleratorAvailableByNode {
+		if node == "" {
+			return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest("per-node accelerator report has empty node identity")
+		}
+		for flavor, available := range flavors {
+			if flavor == "" || available < 0 {
+				return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest("invalid per-node accelerator capacity value")
+			}
+			if _, present := report.AcceleratorTotalByFlavor[flavor]; !present {
+				return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest("per-node accelerator flavor is absent from cluster totals")
+			}
+			availableByNode[flavor] += available
+		}
+	}
+	for flavor, byNode := range availableByNode {
+		if byNode > report.AcceleratorAvailableByFlavor[flavor] {
+			return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest("per-node accelerator capacity exceeds cluster availability")
+		}
+	}
+
+	if report.RAMAvailableBytes < 0 || report.RAMTotalBytes < 0 || report.RAMAvailableBytes > report.RAMTotalBytes ||
+		report.StorageAvailableBytes < 0 || report.StorageTotalBytes < 0 || report.StorageAvailableBytes > report.StorageTotalBytes {
+		return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest("invalid memory or storage capacity values")
+	}
+
+	// The scheduler knows a connected cluster by the id its runtime reports, so an id is one cluster's and
+	// a cluster has one. A runtime stating another is refused before anything it reports is
+	// recorded.
+	if report.ClusterID != "" {
+		if err := domain.ValidateClusterID(report.ClusterID); err != nil {
+			return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest(err.Error())
+		}
+		switch err := h.store.BindReportedID(ctx, clusterName, report.ClusterID); {
+		case errors.Is(err, db.ErrClusterNotFound):
+			return clusterapi.ReconcileAnswer{}, auth.NotFound("cluster")
+		case errors.Is(err, db.ErrClusterIDBound):
+			return clusterapi.ReconcileAnswer{}, huma.Error409Conflict("cluster_id " + report.ClusterID + " is the identity of another registered cluster")
+		case errors.Is(err, db.ErrClusterIDChanged):
+			return clusterapi.ReconcileAnswer{}, huma.Error409Conflict("cluster " + clusterName + " is bound to another cluster_id than the " + report.ClusterID +
+				" this runtime reports: if its machines were rebuilt, its owner forgets the old identity (hl cluster forget-identity " + clusterName + ")")
+		case err != nil:
+			return clusterapi.ReconcileAnswer{}, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
+		}
+	}
+
+	// Placement reads the image, so it is kept before the capacity that makes the cluster a
+	// candidate.
+	if len(report.JobImage) > domain.MaxJobImageLength {
+		return clusterapi.ReconcileAnswer{}, huma.Error400BadRequest("job_image is longer than " + strconv.Itoa(domain.MaxJobImageLength) + " characters")
+	}
+	onlyImage := report.JobImage
+	if report.JobImageDefault {
+		onlyImage = ""
+	}
+	if err := h.store.RecordJobImage(ctx, clusterName, onlyImage); err != nil {
+		return clusterapi.ReconcileAnswer{}, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
+	}
+	if err := h.store.RecordBuilds(ctx, clusterName, report.Builds && h.environments != nil); err != nil {
+		return clusterapi.ReconcileAnswer{}, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
+	}
+
+	if err := metricsdb.RecordClusterCapacitySnapshot(ctx, h.metricsDBURL, metricsdb.ClusterCapacitySnapshot{
+		ClusterName: clusterName, At: time.Now().UTC(),
+		CPUAvailable: report.CPUAvailableCores, CPUTotal: report.CPUTotalCores,
+		AcceleratorAvailable: report.AcceleratorAvailableByFlavor, AcceleratorTotal: report.AcceleratorTotalByFlavor,
+		AcceleratorAvailableByNode: report.AcceleratorAvailableByNode,
+		NodeResourcesByNode:        report.NodeResourcesByNode,
+		NodeResourcesTotalByNode:   report.NodeResourcesTotalByNode,
+		NodeLabelsByNode:           report.NodeLabelsByNode,
+		MultiNodeCapable:           report.MultiNodeCapable,
+		AutoscalerEnabled:          report.AutoscalerEnabled,
+		ClusterID:                  report.ClusterID,
+		AgentVersion:               agentVersion,
+		RAMAvailable:               report.RAMAvailableBytes, RAMTotal: report.RAMTotalBytes,
+		StorageAvailable: report.StorageAvailableBytes, StorageTotal: report.StorageTotalBytes,
+	}); err != nil {
+		return clusterapi.ReconcileAnswer{}, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
+	}
+
+	exps, err := h.store.ListDesiredWorkloads(ctx, clusterName)
+	if err != nil {
+		return clusterapi.ReconcileAnswer{}, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
+	}
+	// The other half of the same view: what should NO LONGER exist, and for how much longer
+	// it may. A job the platform itself decided to stop -- preempted, cut, out of quota, out
+	// of time -- is fine and its work is worth saving, so it is told termination is coming
+	// and gets the window it declared before it is killed. A job the environment or its own
+	// code ended gets no window; it simply never appears here.
+	//
+	// Derived from the termination that is already recorded on the experiment, and expiring
+	// with maxCheckpointGrace, so there is no terminating state to write, advance or clear.
+	undesired, err := h.store.ListRecentlyUndesiredWorkloads(ctx, clusterName, h.maxCheckpointGrace)
+	if err != nil {
+		return clusterapi.ReconcileAnswer{}, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
+	}
+	answer.Jobs = make([]*clusterapi.DesiredJob, len(exps))
+	for i, exp := range exps {
+		if answer.Jobs[i], err = h.desiredJob(exp); err != nil {
+			return clusterapi.ReconcileAnswer{}, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
+		}
+	}
+	answer.CheckpointWindow = domain.CheckpointWindowGrants(undesired)
+	if answer.Builds, answer.RegistryPull, err = h.environmentWork(ctx, clusterName, exps); err != nil {
+		return clusterapi.ReconcileAnswer{}, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
+	}
+	return answer, nil
+}
+
+// PushStatus validates one complete job-phase snapshot of clusterName and writes it atomically:
+// any invalid report rejects the whole push.
+func (h *Handler) PushStatus(ctx context.Context, clusterName string, push clusterapi.StatusPush) error {
+	now := time.Now().UTC()
+	statusSamples := make([]metricsdb.JobStatusSample, 0, len(push.Reports))
+	// A runtime reporting a job as running is an observation that it is alive, and it is the
+	// one liveness observation every runtime produces — the per-pod cgroup heartbeat exists
+	// only where a node-agent is deployed. Recording it here, once, is what gives runtimes
+	// without one (bare metal) any observed runtime at all: without it their jobs were billed
+	// only in slivers around whatever metrics they happened to report, their preemption
+	// rescale computed a stint of ~0 and requeued them at full estimate, and every rule keyed
+	// on "never observed" could not be bounded because it would have condemned all of them.
+	var observations []metricsdb.Observation
+	ids := make([]string, 0, len(push.Reports))
+	for _, rep := range push.Reports {
+		if rep.ExperimentID == "" || rep.Phase == "" {
+			return huma.Error400BadRequest("every status report requires experiment_id and phase")
+		}
+		if rep.AdmittedMachine != nil && rep.AdmittedNode == "" {
+			return huma.Error400BadRequest("status report for " + rep.ExperimentID + " names an admitted_machine and no admitted_node")
+		}
+		if (rep.StartedAt == nil) != (rep.EndedAt == nil) || (rep.StartedAt != nil && rep.EndedAt.Before(*rep.StartedAt)) {
+			return huma.Error400BadRequest("status report for " + rep.ExperimentID + " needs started_at and ended_at together, in that order")
+		}
+		ids = append(ids, rep.ExperimentID)
+	}
+	placementByID, err := h.store.PlacementByID(ctx, ids)
+	if err != nil {
+		return auth.Internal(h.logger, "cluster push status", err, zap.String("cluster", clusterName))
+	}
+	accepted := make([]clusterapi.StatusReport, 0, len(push.Reports))
+	var ended []string
+	for _, rep := range push.Reports {
+		// A report for an experiment this cluster no longer owns is dropped, not a reason to
+		// reject the push. Mid-reschedule that is the ordinary state — the experiment has
+		// already been repointed at its new cluster while the old one is still tearing its
+		// workload down — and rejecting the whole snapshot blacked out status for every other
+		// job on the old cluster until it finished. Dropping it is also the honest report:
+		// the experiment genuinely is not this cluster's any more.
+		if reason, ok := rejectReport(rep, placementByID[rep.ExperimentID], clusterName); !ok {
+			h.logger.Info(reason, zap.String("experiment", rep.ExperimentID),
+				zap.String("cluster", clusterName), zap.Int("reported_attempt", reportedAttempt(rep)),
+				zap.Int("current_attempt", placementByID[rep.ExperimentID].AttemptCount))
+			continue
+		}
+		accepted = append(accepted, rep)
+		if rep.EndedAt != nil {
+			ended = append(ended, rep.ExperimentID)
+		}
+	}
+	// A runtime reports an ended run on every push until its workload is deleted. The run is
+	// placed by the time of the first of them, so the later ones write the same observations.
+	runReportedAt, err := h.store.RunFirstReportedAt(ctx, ended)
+	if err != nil {
+		return auth.Internal(h.logger, "cluster push status", err, zap.String("cluster", clusterName))
+	}
+	for _, rep := range accepted {
+		statusSamples = append(statusSamples, metricsdb.JobStatusSample{
+			ExperimentID: rep.ExperimentID, ClusterName: clusterName, Phase: rep.Phase,
+			AdmittedAcceleratorType: rep.AdmittedAcceleratorType, AdmittedNode: rep.AdmittedNode, AdmittedMachine: jobMachine(rep.AdmittedMachine), At: now,
+		})
+		observations = append(observations, observationsOf(rep, placementByID[rep.ExperimentID].AdmittedAt, runReportedAt[rep.ExperimentID], clusterName, now, h.observationCadence)...)
+		// LogTail is optional per report (nil when the executor has nothing new)
+		// -- only write when the agent actually sent one, so a
+		// job with no fresh output this tick doesn't wipe out its last-known tail.
+		//
+		// A tail or a phase detail that cannot be written fails the push before any phase is
+		// recorded: the phase that ends a job is what its workload is deleted on, and the
+		// reason it ended would be gone with it. The runtime pushes the snapshot again.
+		if rep.LogTail != nil {
+			if err := metricsdb.RecordLogTail(ctx, h.metricsDBURL, rep.ExperimentID, clusterName, splitLongLines(rep.LogTail, h.maxLogLineChars), now); err != nil {
+				return auth.Internal(h.logger, "cluster push status", err, zap.String("experiment_id", rep.ExperimentID), zap.String("cluster", clusterName))
+			}
+		}
+		// Reason/Message/RestartCount are optional the same way: only write when the
+		// runtime actually has something to say about why this job's container hasn't
+		// started or has been restarting, so a healthy tick doesn't overwrite a still-valid
+		// prior explanation with silence.
+		if rep.Reason != "" || rep.Message != "" || rep.RestartCount != 0 || rep.ScheduledNodes != 0 || rep.SchedulingReason != "" {
+			if err := metricsdb.RecordPhaseDetail(ctx, h.metricsDBURL, rep.ExperimentID, clusterName, rep.Reason, rep.Message, rep.RestartCount, rep.ScheduledNodes, rep.SchedulingReason, placementByID[rep.ExperimentID].AttemptCount, now); err != nil {
+				return auth.Internal(h.logger, "cluster push status", err, zap.String("experiment_id", rep.ExperimentID), zap.String("cluster", clusterName))
+			}
+		}
+	}
+	// Observations first: the job watcher settles a job as soon as it reads the phase that
+	// ended it, from whatever was observed of it by then.
+	if len(observations) > 0 {
+		if err := metricsdb.RecordObservations(ctx, h.metricsDBURL, observations); err != nil {
+			return auth.Internal(h.logger, "cluster push status", err, zap.String("cluster", clusterName))
+		}
+	}
+	if err := metricsdb.RecordJobStatuses(ctx, h.metricsDBURL, clusterName, now, statusSamples); err != nil {
+		return auth.Internal(h.logger, "cluster push status", err, zap.String("cluster", clusterName))
+	}
+	return nil
 }
 
 // environmentWork is the builds assigned to cluster, and the pull login when one of exps, the

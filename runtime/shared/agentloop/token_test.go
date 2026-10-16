@@ -23,7 +23,7 @@ func TestBothCallsToTheControlPlaneCarryTheRuntimeToken(t *testing.T) {
 	defer server.Close()
 
 	agent := newTestAgent(server, &captureExecutor{})
-	agent.Token = "runtime-token"
+	remoteOf(agent).Token = "runtime-token"
 	if _, err := agent.fetchDesiredState(context.Background(), agent.Executor); err != nil {
 		t.Fatalf("fetch desired state: %v", err)
 	}

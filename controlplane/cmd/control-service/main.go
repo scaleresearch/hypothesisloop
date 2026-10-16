@@ -19,7 +19,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/environments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/gitproxy"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/launcherapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/modelproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
@@ -230,7 +229,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		WithGitProxy(pcfg.GitHost.ProxyURL).
 		WithLiveCapacity(metricsDBURL, connectedWithin, store, domain.NewPodResources(pcfg.PodResourcesByName)).
 		WithAgentLaunch(quota.AgentLaunch{
-			Launcher: pcfg.Agents.Launcher, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
+			Hosting: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
 			SigningSecret: pcfg.Auth.SigningSecret, MaxHosted: pcfg.Agents.MaxHostedPerPlatformExperiment,
 		})
 
@@ -284,12 +283,6 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		registry:     registry.NewHandler(registrySvc, logger),
 		watch:        watchHandler,
 		clusterAgent: clusterAgentHandler,
-		launcher: launcherapi.NewHandler(store, launcherapi.MetricsDB{URL: metricsDBURL}, launcherapi.Settings{
-			Image: pcfg.Agents.Image, APIURL: pcfg.Services.PublicAPIURL, SigningSecret: pcfg.Auth.SigningSecret,
-			BootLimit:       time.Duration(pcfg.Agents.BootLimitSeconds) * time.Second,
-			ProgressLimit:   time.Duration(pcfg.Agents.ProgressLimitSeconds) * time.Second,
-			MaxNewPerAnswer: pcfg.Agents.MaxNewInstancesPerAnswer,
-		}, logger),
 		gitProxy: gitproxy.New(struct {
 			*db.PlatformExperimentsStore
 			*db.EnvironmentsStore
@@ -325,7 +318,6 @@ type routes struct {
 	registry            *registry.Handler
 	watch               *registry.WatchHandler
 	clusterAgent        *clusteragentapi.Handler
-	launcher            *launcherapi.Handler
 	gitProxy            *gitproxy.Proxy
 	modelProxy          *modelproxy.Proxy
 	modelUsage          modelproxy.UsageReader
@@ -372,14 +364,6 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	clusteragentapi.RegisterHuma(clusterAgentDoc, h.clusterAgent)
 	clusterAgentDoc.MountExplore(clusterAgentRouter)
 	r.Mount("/internal/clusters", clusterAgentRouter)
-
-	// Agent-launchers ask here which agent instances should exist. A third audience with its own
-	// registration and docs, like the cluster-agents above.
-	launcherRouter := chi.NewRouter()
-	launcherDoc := apidocs.New(launcherRouter, "hypothesisloop agent-launcher API", "1.0.0", "", gate.access, logger)
-	launcherapi.RegisterHuma(launcherDoc, h.launcher)
-	launcherDoc.MountExplore(launcherRouter)
-	r.Mount("/internal/launchers", launcherRouter)
 
 	// One doc for the whole public API: every operation an agent or the UI can call is
 	// registered here, so /openapi.json and /explore describe all of it in one place.
@@ -470,8 +454,22 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 	// loops rather than running per replica. Both are idempotent — Settle is an absolute set,
 	// Close() logs invalid_transition when it loses a race — so concurrent copies are not
 	// incorrect, just N redundant sweeps racing over the same row. One owner.
+	// Cluster-agent-facing surface (Go cluster-agent binaries, not the research agent) gets its
+	// own Huma registration with its own openapi/explore docs, mounted under its own prefix.
+	clusterAgentHandler := clusteragentapi.NewHandler(store,
+		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metricsDBURL, pcfg.Scheduler.ObservationCadence(), dataStore,
+		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second,
+		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.Auth.SigningSecret, pcfg.GitHost.ProxyURL, environmentRegistry, logger).
+		WithBuildReported(schedulerLoop.Trigger)
+
+	// The sandbox launcher and the cloud compute clusters rent machines, so one replica runs them.
+	rented, err := newRented(pcfg, pool, store, clusterAgentHandler, metricsDBURL, logger)
+	if err != nil {
+		logger.Fatal("control-service: rented machines", zap.Error(err))
+	}
+
 	pass := pcfg.Scheduler.PassTimeout()
-	go leaderelection.Run(runCtx, pool, leaderelection.SchedulerLockKey, 5*time.Second, logger,
+	go leaderelection.Run(runCtx, pool, leaderelection.SchedulerLockKey, 5*time.Second, logger, append([]func(context.Context){
 		func(ctx context.Context) { settlementReconciler.Start(ctx, pass) },
 		// Auto-close platform experiments past their ends_at deadline.
 		func(ctx context.Context) { expQuotaSvc.StartExpirySweep(ctx, 60*time.Second, pass) },
@@ -484,18 +482,9 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 		func(ctx context.Context) { peHandler.StartAutoAccept(ctx, 2*time.Second, pass) },
 		func(ctx context.Context) { schedulerLoop.Start(ctx, pass) },
 		func(ctx context.Context) { watcher.Start(ctx, pass) },
-	)
+	}, rented...)...)
 
-	schedulerHandler := scheduler.NewHandler(schedulerSvc)
-
-	// Cluster-agent-facing surface (Go cluster-agent binaries, not the research agent) gets its
-	// own Huma registration with its own openapi/explore docs, mounted under its own prefix.
-	clusterAgentHandler := clusteragentapi.NewHandler(store,
-		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metricsDBURL, pcfg.Scheduler.ObservationCadence(), dataStore,
-		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second,
-		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.Auth.SigningSecret, pcfg.GitHost.ProxyURL, environmentRegistry, logger).
-		WithBuildReported(schedulerLoop.Trigger)
-	return schedulerHandler, clusterAgentHandler
+	return scheduler.NewHandler(schedulerSvc), clusterAgentHandler
 }
 
 // newEnvironmentRegistry is where assigned environment builds push to and the logins to it, and

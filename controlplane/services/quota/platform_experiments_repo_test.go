@@ -221,18 +221,6 @@ func (s *createdStore) FailRepository(_ context.Context, id, answer string) erro
 	return nil
 }
 
-func (s *createdStore) LauncherContacts(_ context.Context, names []string) (map[string]db.LauncherContact, error) {
-	now := time.Now()
-	out := map[string]db.LauncherContact{}
-	for _, name := range names {
-		out[name] = db.LauncherContact{At: &now}
-		if at, ok := s.answered[name]; ok {
-			out[name] = db.LauncherContact{At: at}
-		}
-	}
-	return out, nil
-}
-
 func (s *createdStore) ListExperimentsTesting(context.Context, []string) ([]*domain.Experiment, error) {
 	return s.objective, nil
 }
