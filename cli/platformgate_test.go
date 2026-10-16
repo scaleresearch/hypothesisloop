@@ -40,7 +40,8 @@ func principalOf(token string) auth.Principal {
 func platformRoutes(caller auth.Principal) http.Handler {
 	logger := zap.NewNop()
 	r := chi.NewRouter()
-	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", "", authtest.As(caller), auth.NewAccess(authtest.Placement{}), logger)
+	r.Use(auth.Gate(authtest.As(caller), logger, map[string]string{"/watch": registry.WatchSubprotocol}))
+	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", "", auth.NewAccess(authtest.Placement{}), logger)
 	experiments := quota.NewPlatformExperimentsHandler(nil, struct{ githost.Provider }{}, quota.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}, logger).
 		WithAgentLaunch(quota.AgentLaunch{Launcher: "launcher", DefaultModel: "model", SigningSecret: "secret", MaxHosted: 1})
 	quota.RegisterHuma(doc, quota.NewHandler(nil, logger), experiments)
@@ -55,7 +56,7 @@ func platformRoutes(caller auth.Principal) http.Handler {
 	registry.RegisterHuma(doc, registry.NewHandler(registry.New(nil, nil, nil, logger, "http://metrics.invalid", nil), logger))
 	registry.RegisterWatchHuma(doc)
 	access := auth.NewAccess(authtest.Placement{})
-	r.Get("/watch", registry.NewWatchHandler(nil, nil, authtest.As(caller), access, logger).ServeHTTP)
+	r.Get("/watch", registry.NewWatchHandler(nil, nil, access, logger).ServeHTTP)
 	return r
 }
 
