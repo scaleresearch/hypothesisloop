@@ -202,22 +202,22 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
       {data && (
         <Section title={shownLabel ? `${shownLabel} jobs` : 'Jobs'} note={total} scrollX>
           {/* One line a row. The short columns are fixed; experiment and hypothesis share what is
-              left and truncate, their whole text on hover. Agent, accelerator and submitted step
-              aside on a narrow window, and stay in the job's own tooltip. An experiment filter
-              makes the experiment the same on every row, so its column goes. */}
-          <Table className="min-w-[46rem] table-fixed">
+              left and truncate, their whole text on hover. Agent, accelerator, cost and submitted
+              step aside on a narrow window, and stay in the job's own tooltip. An experiment
+              filter makes the experiment the same on every row, so its column goes. */}
+          <Table className="min-w-[41rem] table-fixed">
             <thead>
               <tr>
-                <th className="w-24">Job</th>
-                {!peFilter && <th className="w-[24%]">Experiment</th>}
+                <th className="w-[5.5rem]">Job</th>
+                {!peFilter && <th className="w-[16%]">Experiment</th>}
                 <th title="What the job tests. Hover a row for its branch and the settings that differ between this page's jobs of it">Hypothesis</th>
                 <th className="hidden w-32 2xl:table-cell">Agent</th>
-                <SortableTh className="w-32" sorted={sortKey === 'status' && sortDir} onSort={() => toggleSort('status')}>Status</SortableTh>
+                <SortableTh className="w-36" sorted={sortKey === 'status' && sortDir} onSort={() => toggleSort('status')}>Status</SortableTh>
                 <th className="hidden w-32 2xl:table-cell">Accelerator</th>
-                <th className={clsx(num, 'w-28')} title="The last value the job reported on the ranking metric, which it is ranked by">Last metric</th>
-                <th className={clsx(num, 'w-32')}>Est. cost</th>
+                <th className="w-24 text-right" title="The last value the job reported on the ranking metric, which it is ranked by">Last metric</th>
+                <th className="hidden w-32 text-right xl:table-cell">Est. cost</th>
                 <SortableTh className="hidden w-28 xl:table-cell" sorted={sortKey === 'created_at' && sortDir} onSort={() => toggleSort('created_at')}>Submitted</SortableTh>
-                {!access.readOnly && <th className="w-24"><span className="sr-only">Actions</span></th>}
+                {!access.readOnly && <th className="w-[5.5rem]"><span className="sr-only">Actions</span></th>}
               </tr>
             </thead>
             <tbody>
@@ -284,7 +284,7 @@ function JobRow({ job, showExperiment, varied, connected, onCancel }: JobRowProp
 
   return (
     <LinkTr href={jobPath(job.platform_experiment_id, job.id)}>
-      <td className={quiet} title={`${job.id}\n${job.agent_name} · ${accelerator} · submitted ${new Date(job.created_at).toLocaleString()}`}>
+      <td className={quiet} title={`${job.id}\n${job.agent_name} · ${accelerator} · est. ${cost} · submitted ${new Date(job.created_at).toLocaleString()}`}>
         <RowAnchor>{shortId(job.id)}</RowAnchor>
       </td>
       {showExperiment && <td className="truncate text-xs"><ExperimentLink id={job.platform_experiment_id} /></td>}
@@ -307,7 +307,7 @@ function JobRow({ job, showExperiment, varied, connected, onCancel }: JobRowProp
       </td>
       <td className="hidden truncate font-mono text-2xs 2xl:table-cell" title={job.accelerator_type}>{accelerator}</td>
       <td className={clsx(num, 'truncate')} title={job.metric?.name}>{job.metric ? job.metric.value.toFixed(4) : '—'}</td>
-      <td className={clsx(num, 'truncate')} title={cost}>{cost}</td>
+      <td className={clsx(num, 'hidden truncate xl:table-cell')} title={cost}>{cost}</td>
       <td className={clsx(quiet, 'hidden xl:table-cell')} title={new Date(job.created_at).toLocaleString()}>{relTime(job.created_at)}</td>
       {onCancel && (
         <td className="text-right">

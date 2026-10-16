@@ -598,10 +598,10 @@ function PlatformExperimentDetail({ id }: { id: string }) {
                 <tr>
                   <th className="w-24">Job</th>
                   <th className="hidden w-32 xl:table-cell">Agent</th>
-                  <th className="w-32">Status</th>
+                  <th className="w-36">Status</th>
                   <th title="What the job tests. Hover a row for the settings that differ between these jobs of it">Hypothesis</th>
-                  <th className={clsx(num, 'w-28')} title={`The last value the job reported on ${primaryStandings?.metric ?? 'the ranking metric'}, which it is ranked by`}>Last metric</th>
-                  <th className={clsx(num, 'w-32')}>Est. cost</th>
+                  <th className="w-24 text-right" title={`The last value the job reported on ${primaryStandings?.metric ?? 'the ranking metric'}, which it is ranked by`}>Last metric</th>
+                  <th className="w-32 text-right">Est. cost</th>
                   <th className="hidden w-28 xl:table-cell">Submitted</th>
                 </tr>
               </thead>
