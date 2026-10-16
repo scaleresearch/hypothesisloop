@@ -18,6 +18,8 @@ EVENT = "agent.instructions"
 # resumed on another machine is compared with what it was started with: a resumed session keeps
 # the system prompt it was started with.
 FILE = ".instructions.json"
+# The effort only a session started with runs at.
+MAX_EFFORT = "max"
 
 
 @dataclass(frozen=True)
@@ -37,8 +39,11 @@ class Instructions:
 
     def needs_new_session(self, other: Instructions) -> bool:
         """Whether running other takes a new session: a session keeps its system prompt and model.
-        The subagent limits and the effort change in the session."""
-        return (self.prompt, self.model) != (other.prompt, other.model)
+        The subagent limits and the effort change in the session, except to and from max: the
+        CLI's effortLevel setting, which a session is changed with, holds low to xhigh and drops
+        anything else without a word (Claude Code 2.1.294)."""
+        max_changes = self.effort != other.effort and MAX_EFFORT in (self.effort, other.effort)
+        return (self.prompt, self.model) != (other.prompt, other.model) or max_changes
 
 
 def path(cfg: config.Config) -> str:

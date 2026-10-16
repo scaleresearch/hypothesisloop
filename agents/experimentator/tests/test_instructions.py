@@ -157,6 +157,20 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.queries[1], "Platform updates:\ncomment.new hyp-1 human" + S)
         self.assertNotIn("agent.instructions", " ".join(client.queries))
 
+    # The CLI's effortLevel setting holds low to xhigh and drops max without a word, so a change to
+    # or from max is a fresh session, and one between the others applies in the session.
+    async def test_a_change_to_or_from_max_effort_hands_off_to_a_fresh_session(self):
+        for before, after in (("high", "max"), ("max", "xhigh")):
+            setup = _setup()
+            first = served(setup.cfg, effort=before)
+            edited = served(setup.cfg, version=2, digest="digest-2", effort=after)
+            rotated, client = await self.run_session([first, edited], [[OWN], []], [[_result()], _handoff()], setup=setup)
+            self.assertTrue(rotated, (before, after))
+            self.assertEqual(settings(client), [])
+            self.assertEqual(client.queries[1:], [run._INSTRUCTIONS_ROTATION])
+        for before, after in (("high", "xhigh"), ("max", "max")):
+            self.assertFalse(served(setup.cfg, effort=before).needs_new_session(served(setup.cfg, digest="d2", effort=after, max_subagents=5)))
+
     # A session keeps the system prompt it started with, a resumed one too (seen on the real API):
     # a new prompt or model starts a fresh session the lead hands off to, and a subagent still at
     # work stops with the old one and is named for the lead to start again.

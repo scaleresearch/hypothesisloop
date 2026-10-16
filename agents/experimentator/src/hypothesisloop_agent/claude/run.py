@@ -973,6 +973,7 @@ async def _apply_instructions(client, setup: core.RunSetup, background: dict[str
     log.info("instructions changed to %s version %d (digest %s) in the session: effort=%s max_subagents=%d pacing_subagents=%d",
              newest.agent_type, newest.version, newest.digest[:12], newest.effort, newest.max_subagents, newest.pacing_subagents)
     _running = newest
+    _progress.instructions(newest.digest)
     instructions.save(setup.statedir, newest)
     return False
 
@@ -1126,6 +1127,7 @@ async def _run_one_session(setup: core.RunSetup, resume_id: str | None,
     except api_client.APIError as e:
         log.warning("the instructions were not read (%s): connecting again after the backoff", e)
         return False
+    _progress.instructions(_running.digest)
     watch_env = updates.watch_env(cfg.api_url, cfg.token, setup.statedir)
     handing = asyncio.Lock()
     background: dict[str, dict] = {}

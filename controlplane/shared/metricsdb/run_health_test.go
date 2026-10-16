@@ -90,6 +90,7 @@ func TestLatestHarnessStateReadsWhatEachHarnessLastSaid(t *testing.T) {
 		agentStateReportedAtMetric:      `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"1760000100"]},{"metric":{"role":"coordinator"},"value":[1,"1760000200"]}`,
 		agentSubagentsMetric:            `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"3"]},{"metric":{"role":"coordinator"},"value":[1,"0"]}`,
 		agentTurnWaitingMetric:          `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"0"]},{"metric":{"role":"coordinator"},"value":[1,"1"]}`,
+		agentInstructionsDigestMetric:   `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"4886718345"]}`,
 		agentTurnSinceMetric:            `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"1760000000"]},{"metric":{"role":"coordinator"},"value":[1,"1760000050"]}`,
 		agentRateLimitUtilizationMetric: `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"0.95"]},{"metric":{"agent_id":"ag-2","role":"competitor"},"value":[1,"0.5"]}`,
 		agentRateLimitRejectedMetric:    `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"1"]},{"metric":{"role":"coordinator"},"value":[1,"1"]}`,
@@ -111,7 +112,7 @@ func TestLatestHarnessStateReadsWhatEachHarnessLastSaid(t *testing.T) {
 	}
 	utilization := 0.95
 	want := []domain.HarnessState{
-		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "competitor", Subagents: 3, TurnSince: time.Unix(1760000000, 0).UTC(),
+		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "competitor", Subagents: 3, TurnSince: time.Unix(1760000000, 0).UTC(), InstructionsDigest: "000123456789",
 			Model: domain.RateLimit{Rejected: true, Utilization: &utilization, ResetsAt: &future}, At: time.Unix(1760000100, 0).UTC()},
 		{PlatformExperimentID: "pe-1", Role: "coordinator", TurnWaiting: true, TurnSince: time.Unix(1760000050, 0).UTC(),
 			Model: domain.RateLimit{ResetsAt: &past}, At: time.Unix(1760000200, 0).UTC()},
@@ -154,7 +155,7 @@ func TestRecordHarnessStateWritesTheRateLimitOnlyOnceRead(t *testing.T) {
 	utilization := 0.4
 	err := RecordHarnessState(context.Background(), server.URL, time.Now(), []domain.HarnessState{
 		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "competitor", Subagents: 2, TurnSince: time.Now(), Model: domain.RateLimit{Utilization: &utilization}},
-		{PlatformExperimentID: "pe-1", Role: "coordinator", TurnWaiting: true, TurnSince: time.Now()},
+		{PlatformExperimentID: "pe-1", Role: "coordinator", TurnWaiting: true, TurnSince: time.Now(), InstructionsDigest: "0123456789ab"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -162,7 +163,7 @@ func TestRecordHarnessStateWritesTheRateLimitOnlyOnceRead(t *testing.T) {
 	state := []string{agentStateReportedAtMetric, agentSubagentsMetric, agentTurnWaitingMetric, agentTurnSinceMetric}
 	want := map[string][]string{
 		"competitor":  append(slices.Clone(state), agentRateLimitRejectedMetric, agentRateLimitUtilizationMetric),
-		"coordinator": state,
+		"coordinator": append(slices.Clone(state), agentInstructionsDigestMetric),
 	}
 	if !reflect.DeepEqual(written, want) {
 		t.Errorf("written %v, want %v", written, want)

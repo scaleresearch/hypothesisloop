@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -25,6 +26,7 @@ const (
 	agentSubagentsMetric            = "agent_subagents"
 	agentTurnWaitingMetric          = "agent_turn_waiting"
 	agentTurnSinceMetric            = "agent_turn_since_seconds"
+	agentInstructionsDigestMetric   = "agent_instructions_digest"
 	agentRateLimitUtilizationMetric = "agent_rate_limit_utilization"
 	agentRateLimitRejectedMetric    = "agent_rate_limit_rejected"
 	agentRateLimitResetsAtMetric    = "agent_rate_limit_resets_at_seconds"
@@ -78,6 +80,13 @@ func RecordHarnessState(ctx context.Context, dbURL string, at time.Time, states 
 		gauge(agentSubagentsMetric, float64(s.Subagents))
 		gauge(agentTurnWaitingMetric, boolGauge(s.TurnWaiting))
 		gauge(agentTurnSinceMetric, float64(s.TurnSince.Unix()))
+		if s.InstructionsDigest != "" {
+			digest, err := strconv.ParseUint(s.InstructionsDigest, 16, 64)
+			if err != nil {
+				return fmt.Errorf("metricsdb.RecordHarnessState: instructions digest %q: %w", s.InstructionsDigest, err)
+			}
+			gauge(agentInstructionsDigestMetric, float64(digest))
+		}
 		if s.Model == (domain.RateLimit{}) {
 			continue
 		}
@@ -171,7 +180,7 @@ func LatestRunHealth(ctx context.Context, dbURL, platformExperimentID string, cr
 // Rejected only while its reset is ahead. Sorted by role, then agent.
 func LatestHarnessState(ctx context.Context, dbURL, platformExperimentID string, createdAt time.Time) ([]domain.HarnessState, error) {
 	series, err := latestHealth(ctx, dbURL, platformExperimentID, createdAt, append([]string{agentStateReportedAtMetric,
-		agentSubagentsMetric, agentTurnWaitingMetric, agentTurnSinceMetric}, rateLimitMetrics...))
+		agentSubagentsMetric, agentTurnWaitingMetric, agentTurnSinceMetric, agentInstructionsDigestMetric}, rateLimitMetrics...))
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.LatestHarnessState: %w", err)
 	}
@@ -183,6 +192,9 @@ func LatestHarnessState(ctx context.Context, dbURL, platformExperimentID string,
 		}
 		s := domain.HarnessState{PlatformExperimentID: platformExperimentID, Role: key.role, AgentID: key.agentID, At: unixGauge(at),
 			Subagents: int(values[agentSubagentsMetric]), TurnWaiting: values[agentTurnWaitingMetric] == 1, TurnSince: unixGauge(values[agentTurnSinceMetric])}
+		if value, ok := values[agentInstructionsDigestMetric]; ok {
+			s.InstructionsDigest = fmt.Sprintf("%0*x", domain.InstructionsDigestLength, uint64(value))
+		}
 		if value, ok := values[agentRateLimitUtilizationMetric]; ok {
 			s.Model.Utilization = &value
 		}

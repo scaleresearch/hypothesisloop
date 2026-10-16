@@ -60,6 +60,7 @@ type JoinedAgent struct {
 	// absent once its run ended (withWork).
 	Subagents                 *int                     `json:"subagents,omitempty" doc:"How many subagents its harness last reported running, of the machine it holds now. Absent with no such report, as for an agent the platform does not run."`
 	Turn                      *domain.AgentTurn        `json:"turn,omitempty" doc:"Whether its harness last reported its model in a turn or waiting for platform updates, and since when, of the machine it holds now."`
+	RunningPinnedInstructions *bool                    `json:"running_pinned_instructions,omitempty" doc:"Whether the instructions its harness last reported running are the ones the version of its agent type it is pinned to serves it now: false while an edit waits for its next turn boundary or a fresh session. Absent with no such report."`
 	Messages                  *domain.MessageAllowance `json:"messages,omitempty" doc:"How many more messages it may be sent this hour, and when that next grows."`
 	ModelAllowance            *domain.ModelAllowance   `json:"model_allowance,omitempty" doc:"Its model account's rate limit as its harness last read it, of the machine it holds now."`
 	MinutesWithoutJobInFlight *int                     `json:"minutes_without_job_in_flight,omitempty" doc:"Whole minutes since it last had a job of its own created or running, 0 while one is in flight. In a running platform experiment that started."`

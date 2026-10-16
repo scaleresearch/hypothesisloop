@@ -8,6 +8,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -633,9 +634,29 @@ func (s *PlatformExperimentsService) withWork(ctx context.Context, pe *domain.Pl
 		if state, ok := byAgent[row.AgentID]; ok && liveReading(row.Instance, state) {
 			subagents := state.Subagents
 			row.Subagents, row.Turn, row.ModelAllowance = &subagents, domain.TurnOf(state), domain.ModelAllowanceOf(state.Model, now)
+			if state.InstructionsDigest != "" {
+				if row.RunningPinnedInstructions, err = s.runsPinnedInstructions(ctx, pe.ID, row.AgentID, state.InstructionsDigest); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
+}
+
+// runsPinnedInstructions says whether digest, the start of the digest of the instructions a
+// harness runs, is that of the instructions agentID is served now, nil for an agent with none.
+func (s *PlatformExperimentsService) runsPinnedInstructions(ctx context.Context, platformExpID, agentID, digest string) (*bool, error) {
+	src, err := s.store.AgentInstructions(ctx, platformExpID, agentID)
+	if err != nil || src == nil {
+		return nil, err
+	}
+	pinned, err := composeInstructions(platformExpID, agentID, src)
+	if err != nil {
+		return nil, err
+	}
+	same := strings.HasPrefix(pinned.Digest, digest)
+	return &same, nil
 }
 
 // registerSituationHuma registers the situation read.

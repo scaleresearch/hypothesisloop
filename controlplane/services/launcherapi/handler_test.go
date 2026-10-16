@@ -696,14 +696,14 @@ func TestARunningMachinesHarnessStateGoesToTheRunsHealth(t *testing.T) {
 	agent, coordinator := first.Instances[0].Name, first.Instances[1].Name
 	metrics := &launchertest.Metrics{}
 	body := observed(
-		ObservedInstance{Name: agent, State: "running", Progress: marker("1"), HarnessState: "subagents=3 turn=working since=1759990000 model_status=rejected model_type=seven_day model_utilization=1.0 model_resets_at=1760000000"},
+		ObservedInstance{Name: agent, State: "running", Progress: marker("1"), HarnessState: "subagents=3 turn=working since=1759990000 instructions_digest=0123456789ab model_status=rejected model_type=seven_day model_utilization=1.0 model_resets_at=1760000000"},
 		ObservedInstance{Name: coordinator, State: "running", Progress: marker("1"), HarnessState: "subagents=0 turn=waiting since=1759999000"})
 	if code, raw := reconcileRecording(t, store, metrics, testSettings, body); code != http.StatusOK {
 		t.Fatalf("status = %d: %s", code, raw)
 	}
 	full, resets := 1.0, time.Unix(1760000000, 0).UTC()
 	want := []domain.HarnessState{
-		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "competitor", Subagents: 3, TurnSince: time.Unix(1759990000, 0).UTC(),
+		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "competitor", Subagents: 3, TurnSince: time.Unix(1759990000, 0).UTC(), InstructionsDigest: "0123456789ab",
 			Model: domain.RateLimit{Rejected: true, Utilization: &full, ResetsAt: &resets}},
 		{PlatformExperimentID: "pe-1", Role: domain.CoordinatorHealthRole, TurnWaiting: true, TurnSince: time.Unix(1759999000, 0).UTC()},
 	}
@@ -737,6 +737,9 @@ func TestParseHarnessStateRefusesWhatTheHarnessDoesNotPrint(t *testing.T) {
 		"subagents=1 turn=working since=1759990000 model_status=allowed model_resets_at=soon",
 		"subagents=1 turn=working since=1759990000 status=allowed",
 		"subagents=1 turn=working since=1759990000 stray",
+		"subagents=1 turn=working since=1759990000 instructions_digest=0123456789",
+		"subagents=1 turn=working since=1759990000 instructions_digest=0123456789AB",
+		"subagents=1 turn=working since=1759990000 instructions_digest=0123456789ab instructions_digest=0123456789ab",
 	} {
 		if state, err := parseHarnessState(line); err == nil {
 			t.Errorf("%q: read %+v, want an error", line, state)

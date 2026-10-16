@@ -361,8 +361,11 @@ func said(activity, token string) string {
 	return strings.Join(strings.Fields(strings.ToValidUTF8(activity, "")), " ")
 }
 
+var instructionsDigestPattern = regexp.MustCompile(fmt.Sprintf(`^[0-9a-f]{%d}$`, domain.InstructionsDigestLength))
+
 // parseHarnessState reads the state line a harness printed (agents/experimentator, progress.py):
-// key=value fields, subagents, turn and since required, the model_ ones present once the harness
+// key=value fields, subagents, turn and since required, instructions_digest once the harness runs
+// instructions, the model_ ones present once the harness
 // has read a rate limit, and then model_status among them.
 func parseHarnessState(line string) (domain.HarnessState, error) {
 	var state domain.HarnessState
@@ -405,6 +408,11 @@ func parseHarnessState(line string) (domain.HarnessState, error) {
 			if state.TurnSince, err = unixTime(key); err != nil {
 				return state, err
 			}
+		case "instructions_digest":
+			if !instructionsDigestPattern.MatchString(value) {
+				return state, fmt.Errorf("instructions_digest %q is no %d lowercase hex characters", value, domain.InstructionsDigestLength)
+			}
+			state.InstructionsDigest = value
 		case "model_status":
 			switch value {
 			case "allowed", "allowed_warning":

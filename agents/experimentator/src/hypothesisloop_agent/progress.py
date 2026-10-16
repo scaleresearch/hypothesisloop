@@ -20,17 +20,22 @@ MAX_ACTIVITY_LENGTH = 120
 # The line that carries what the harness observes of its agent, printed with every beat: how many
 # subagents are live, whether a turn is in flight (working) or the agent waits for an update, since
 # when (Unix seconds), and the model provider's rate limit as the CLI last said it, once there is a
-# reading. The launcher hands the newest to the platform, which keeps it in the run's metrics
+# reading, and the digest of the instructions it runs. The launcher hands the newest to the platform, which keeps it in the run's metrics
 # (launcherapi.parseHarnessState reads it).
 STATE_PREFIX = "hl-state"
+# Characters of the instructions digest the state line carries: the launcher keeps 200 characters
+# of it, and 12 hex characters are 48 bits, which the platform's metrics hold exactly.
+DIGEST_LENGTH = 12
 
 THINKING = "thinking"
 WAITING = "waiting for platform updates"
 
 
-def state_line(subagents: int, working: bool, since: float, model: dict[str, object]) -> str:
-    """The state line: subagents, turn and since, then the model_ fields of model that are known."""
+def state_line(subagents: int, working: bool, since: float, digest: str, model: dict[str, object]) -> str:
+    """The state line: subagents, turn and since, the instructions_digest once the harness runs
+    instructions, then the model_ fields of model that are known."""
     fields = {"subagents": subagents, "turn": "working" if working else "waiting", "since": int(since),
+              **({"instructions_digest": digest[:DIGEST_LENGTH]} if digest else {}),
               **{f"model_{k}": v for k, v in model.items() if v is not None}}
     return " ".join([STATE_PREFIX] + [f"{k}={v}" for k, v in fields.items()])
 
@@ -64,6 +69,7 @@ class Progress:
         self._said_at: float | None = None
         self._subagents = 0
         self._turn_since = wall()
+        self._digest = ""
         self._model: dict[str, object] = {}
 
     def awaiting(self) -> None:
@@ -102,6 +108,10 @@ class Progress:
         """How many subagents of the agent are live from now on."""
         self._subagents = live
 
+    def instructions(self, digest: str) -> None:
+        """The digest of the instructions the agent runs from now on."""
+        self._digest = digest
+
     def model(self, status: str, kind: str | None, utilization: float | None, resets_at: int | None) -> None:
         """The model provider's rate limit as the CLI said it last."""
         self._model = {"status": status, "type": kind, "utilization": utilization, "resets_at": resets_at}
@@ -120,7 +130,7 @@ class Progress:
             self._count += 1
             self._emit(f"{PREFIX} {self._count}")
             self._say()
-            self._emit(state_line(self._subagents, self._awaiting_since is not None, self._turn_since, self._model))
+            self._emit(state_line(self._subagents, self._awaiting_since is not None, self._turn_since, self._digest, self._model))
 
     async def run(self) -> None:
         while True:

@@ -117,3 +117,37 @@ func TestInstructionsAreReadByTheirOwnerAndTheOrgAlone(t *testing.T) {
 		t.Errorf("an agent not in the experiment: %d, want 404", code)
 	}
 }
+
+type pinnedExperiments struct {
+	PlatformExperimentsStore
+	pinned pinnedStore
+}
+
+func (p pinnedExperiments) AgentInstructions(ctx context.Context, pe, agent string) (*db.InstructionsSource, error) {
+	return p.pinned.AgentInstructions(ctx, pe, agent)
+}
+
+// The roster says whether the instructions a harness runs are the pinned ones by the digest it
+// prints, the start of the platform's own.
+func TestTheRosterSaysWhetherAHarnessRunsThePinnedInstructions(t *testing.T) {
+	src, _ := pinnedStore{}.AgentInstructions(context.Background(), "pe-1", "ag-1")
+	pinned, err := composeInstructions("pe-1", "ag-1", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	yes, no := true, false
+	svc := &PlatformExperimentsService{store: pinnedExperiments{}}
+	for _, c := range []struct {
+		name, agent, digest string
+		want                *bool
+	}{
+		{"the pinned instructions", "ag-1", pinned.Digest[:domain.InstructionsDigestLength], &yes},
+		{"an older version", "ag-1", strings.Repeat("0", domain.InstructionsDigestLength), &no},
+		{"an agent with none pinned", "ag-2", "0123456789ab", nil},
+	} {
+		got, err := svc.runsPinnedInstructions(context.Background(), "pe-1", c.agent, c.digest)
+		if err != nil || (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
+			t.Errorf("%s: got %v, %v; want %v", c.name, got, err, c.want)
+		}
+	}
+}
