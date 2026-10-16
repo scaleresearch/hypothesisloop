@@ -250,6 +250,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		platformExperiments: peHandler,
 		hypotheses:          graph,
 		sharing:             db.NewPlatformExperimentsStore(pool),
+		instructions:        db.NewPlatformExperimentsStore(pool),
 		dataUsage:           quota.NewDataUsageHandler(dataStore, store, peSvc, pcfg.DataStore.MaxBytesPerAgent, logger),
 		sessions:            dataStore,
 		drafts:              db.NewExperimentDraftsStore(pool),
@@ -289,6 +290,7 @@ type routes struct {
 	sharing             quota.Sharing
 	dataUsage           *quota.DataUsageHandler
 	sessions            quota.SessionStore
+	instructions        quota.InstructionsStore
 	drafts              quota.ExperimentDraftStore
 	accounts            *accounts.Handler
 	repositories        *accounts.Repositories
@@ -352,6 +354,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	quota.RegisterShareHuma(doc, h.sharing, h.platformExperiments.Answer, logger)
 	quota.RegisterDataUsageHuma(doc, h.dataUsage)
 	quota.RegisterSessionsHuma(doc, h.sessions, logger)
+	quota.RegisterInstructionsHuma(doc, h.instructions, logger)
 	quota.RegisterExperimentDraftsHuma(doc, h.drafts, logger)
 	accounts.RegisterHuma(doc, h.accounts)
 	accounts.RegisterRepositoriesHuma(doc, h.repositories)

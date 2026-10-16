@@ -282,6 +282,20 @@ func (a *Access) ReadSession(ctx context.Context, platformExperimentID, agentID 
 	return nil
 }
 
+// ReadInstructions admits the one the instructions are for, the agent agentID with its own token
+// or with no agentID the platform experiment's coordinator with its, and every account that
+// reaches the platform experiment as its own, as ReadSession does.
+func (a *Access) ReadInstructions(ctx context.Context, platformExperimentID, agentID string) error {
+	p, err := a.sessionCaller(ctx, platformExperimentID)
+	if err != nil {
+		return err
+	}
+	if !ownsSession(p, platformExperimentID, agentID) && !holdsAccount(p) {
+		return forbidden("instructions are read only by the agent or the coordinator they are for, with its own token, and by the org that owns the platform experiment")
+	}
+	return nil
+}
+
 func (a *Access) sessionCaller(ctx context.Context, platformExperimentID string) (Principal, error) {
 	p, err := principal(ctx)
 	if err != nil {
