@@ -22,6 +22,19 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, InlineError } from '@/components/ui/status-message'
 import { Code, Pill, Text } from '@/components/ui/text'
 
+type Stated = 'name' | 'budget' | 'baseline' | 'hours' | 'researchers'
+
+// The figure an accept's refusal concerns, by the API's reason. Accepting changes nothing of the
+// proposal's experiment but its name, so invalid_experiment is the name's.
+const FIELD_OF: Record<string, Stated> = {
+  invalid_experiment: 'name',
+  invalid_cost: 'budget',
+  invalid_baseline_minutes: 'baseline',
+  invalid_length: 'hours',
+  run_too_long: 'hours',
+  invalid_agents: 'researchers',
+}
+
 function metricLine(metric: MetricDefinition): string {
   if (metric.role === 'constraint') {
     return `${metric.key} must stay ${metric.direction === 'minimize' ? 'at or below' : 'at or above'} ${metric.bound}`
@@ -135,8 +148,9 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
   const [answers, setAnswers] = useState(() => questions.map(q => q.answer))
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // What the API refused the name for, said beside the name.
-  const [nameError, setNameError] = useState<string | null>(null)
+  // A refusal of one of the figures the person states, said beside it.
+  const [refusal, setRefusal] = useState<{ field: Stated; message: string } | null>(null)
+  const errorOf = (field: Stated) => refusal?.field === field ? refusal.message : null
 
   const { metrics, stages, report_interval_seconds: reportEvery } = proposal.experiment
   const unit = budgetUnit(kindOf(proposal.accelerator_type), 'long')
@@ -148,7 +162,7 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
   async function accept() {
     setSending(true)
     setError(null)
-    setNameError(null)
+    setRefusal(null)
     try {
       await acceptDraft(draft.id, {
         name: name.trim(), budget_accelerator_hours: Number(budget), duration_hours: Number(hours), baseline_minutes: Number(baselineMinutes), agents,
@@ -156,8 +170,8 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
       })
       onDone()
     } catch (e) {
-      // Accepting changes nothing of the proposal's experiment but its name.
-      if (e instanceof ApiError && e.reason === 'invalid_experiment') setNameError(e.message)
+      const field = e instanceof ApiError && e.reason ? FIELD_OF[e.reason] : undefined
+      if (field) setRefusal({ field, message: (e as ApiError).message })
       else setError(e instanceof Error ? e.message : String(e))
       setSending(false)
     }
@@ -211,7 +225,7 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
         {accepted ? (
           <Captioned caption="Name"><Text>{proposal.experiment.name}</Text></Captioned>
         ) : (
-          <FormField label="Name" error={nameError}>
+          <FormField label="Name" error={errorOf('name')}>
             <Input value={name} disabled={!editable} onChange={e => setName(e.target.value)} />
           </FormField>
         )}
@@ -281,11 +295,11 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
             These four are yours to state. The planner proposed {formatAccH(proposal.budget_accelerator_hours)} {unit} over {proposal.duration_hours} hours of research
             for {proposal.agents.length} {proposal.agents.length === 1 ? 'researcher' : 'researchers'}, after {proposal.baseline_minutes} minutes to measure the baseline; the figures are an estimate, since nothing has run, and the budget is a cap on everything the run spends, the baseline and burst hours included.
           </Text>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <FormField label={`Budget (${unit})`}><Input type="number" min={0} step="any" value={budget} disabled={!editable} onChange={e => setBudget(e.target.value)} /></FormField>
-            <FormField label="Baseline (minutes)" hint="Until the baseline is due. The run starts once it is measured."><Input type="number" min={1} step={1} value={baselineMinutes} disabled={!editable} onChange={e => setBaselineMinutes(e.target.value)} /></FormField>
-            <FormField label="Duration (hours)" hint="Research time, from the start of the run."><Input type="number" min={0} step="any" value={hours} disabled={!editable} onChange={e => setHours(e.target.value)} /></FormField>
-            <FormField label="Researchers"><Input type="number" min={1} step={1} value={researchers} disabled={!editable} onChange={e => setResearchers(e.target.value)} /></FormField>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <FormField label={`Budget (${unit})`} error={errorOf('budget')}><Input type="number" min={0} step="any" value={budget} disabled={!editable} onChange={e => setBudget(e.target.value)} /></FormField>
+            <FormField label="Baseline (minutes)" error={errorOf('baseline')} hint="Until the baseline is due. The run starts once it is measured."><Input type="number" min={1} step={1} value={baselineMinutes} disabled={!editable} onChange={e => setBaselineMinutes(e.target.value)} /></FormField>
+            <FormField label="Duration (hours)" error={errorOf('hours')} hint="Research time, from the start of the run."><Input type="number" min={0} step="any" value={hours} disabled={!editable} onChange={e => setHours(e.target.value)} /></FormField>
+            <FormField label="Researchers" error={errorOf('researchers')}><Input type="number" min={1} step={1} value={researchers} disabled={!editable} onChange={e => setResearchers(e.target.value)} /></FormField>
           </div>
         </Captioned>
         )}
