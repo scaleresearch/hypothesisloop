@@ -47,6 +47,11 @@ def sentence(text: str) -> str:
     return text if len(text) <= MAX_ACTIVITY_LENGTH else text[:MAX_ACTIVITY_LENGTH - 3] + "..."
 
 
+def announce(text: str) -> None:
+    """Says text as what the agent is doing, at once: the next beat says the agent's activity again."""
+    print(f"{ACTIVITY_PREFIX} {sentence(text)}", flush=True)
+
+
 class Progress:
     """Prints a new marker every INTERVAL_S for as long as the harness is doing what it should,
     and beside it what the agent is doing.
