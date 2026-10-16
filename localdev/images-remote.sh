@@ -11,6 +11,7 @@
 #             runtimes a cluster's attach command installs, and the runtime chart)
 #   --import  also import every image into the k3s containerd of BUILDER, so its jobs pull nothing
 #   JOB_IMAGE_BASE  name=base[=torch] (infra/images/job/bases.mk): a framework job image to add
+#   SSH_OPTIONS  more options for ssh, such as -F <config> for a host reached through a proxy
 #
 # The registry token is minted here (gcloud, as GCP_ACCOUNT of .env), lives an hour, and reaches
 # BUILDER only on ssh's stdin. BUILDER logs in with a docker config of its own and deletes it after.
@@ -45,12 +46,13 @@ done
 samples="$(lib_env_value EXPERIMENT_SAMPLES)"
 remote_dir="hl-build/$(id -un)"
 box="${remote_dir}/src/localdev/images-remote-box.sh"
+read -r -a ssh <<<"ssh -o BatchMode=yes ${SSH_OPTIONS:-}"
 
 # ssh_box COMMAND...: runs the box script with a fresh registry token as the first line of stdin.
 ssh_box() {
   local token
   token="$(gcloud auth print-access-token --account "${account}")"
-  ssh -o BatchMode=yes "${builder}" "bash ${box} $*" <<<"${token}"
+  "${ssh[@]}" "${builder}" "bash ${box} $*" <<<"${token}"
 }
 
 started="${SECONDS}"
@@ -68,7 +70,7 @@ for dir in "${experiments}"/*/; do
   [[ ! -f "${dir}.hypothesisloop/job.yaml" ]] || cp "${dir}.hypothesisloop/job.yaml" "${work}/${experiments}/${name}/.hypothesisloop/"
 done
 echo "==> sending HEAD ($(git rev-parse --short HEAD)) to ${builder}:${remote_dir}/src"
-tar -cz -C "${work}" . | ssh -o BatchMode=yes "${builder}" "rm -rf ${remote_dir}/src && mkdir -p ${remote_dir}/src && tar -xz -C ${remote_dir}/src"
+tar -cz -C "${work}" . | "${ssh[@]}" "${builder}" "rm -rf ${remote_dir}/src && mkdir -p ${remote_dir}/src && tar -xz -C ${remote_dir}/src"
 
 echo "==> asking ${HL_REGISTRY} which of ${images[*]} it lacks under ${tag}"
 listing="$(ssh_box missing "${HL_REGISTRY}" "${tag}" "${images[@]}")"

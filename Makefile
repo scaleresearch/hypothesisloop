@@ -387,10 +387,10 @@ job-images: check-tag
 # The images a hosted run uses, built on BUILDER (an ssh host with docker buildx, linux/amd64) and
 # pushed from there to the registry of .env, so none is uploaded from this machine
 # (localdev/images-remote.sh). Builds HEAD and prints the IMAGE_TAG to set.
-# Usage: make images-remote BUILDER=<ssh host> [IMPORT=true] [FRAMEWORK_JOBS=true] [IMAGES="<name>..."]
+# Usage: make images-remote BUILDER=<ssh host> [IMPORT=true] [FRAMEWORK_JOBS=true] [IMAGES="<name>..."] [SSH_OPTIONS=...]
 images-remote:
 	@test -n "$(BUILDER)" || { echo "usage: make images-remote BUILDER=<ssh host> [IMPORT=true] [FRAMEWORK_JOBS=true] [IMAGES=...]" >&2; exit 1; }
-	@IMAGES="$(IMAGES)" bash localdev/images-remote.sh "$(BUILDER)" $(if $(filter true,$(IMPORT)),--import) $(if $(filter true,$(FRAMEWORK_JOBS)),$(JOB_IMAGE_BASES))
+	@IMAGES="$(IMAGES)" SSH_OPTIONS="$(SSH_OPTIONS)" bash localdev/images-remote.sh "$(BUILDER)" $(if $(filter true,$(IMPORT)),--import) $(if $(filter true,$(FRAMEWORK_JOBS)),$(JOB_IMAGE_BASES))
 
 # The runtime chart goes to the registry its images are in, as an OCI artifact under charts/, so
 # a cluster is attached with one helm command and no checkout (hl cluster add prints it). Its
