@@ -54,6 +54,44 @@ class ResearcherPromptTest(unittest.TestCase):
         self.assertIn("its summaries and its verdict are yours to give as on your own; the idea stays the person's", prompt)
 
 
+class PlannerPromptTest(unittest.TestCase):
+    def prompt(self):
+        cfg = SimpleNamespace(agent_id="ag-planner", flavor="planner", role="planner", platform_experiment_id="pe-1", hyperparameters={})
+        return " ".join(core.system_prompt(cfg, "rules", "commands", "https://git/x", "/app/workspace").split())
+
+    # A planner proposed a copy with an A100 sed into it to see whether it passed, and the copy was
+    # stored and accepted for a brief that said CPU only.
+    def test_variants_are_checked_and_only_the_final_one_proposed(self):
+        prompt = self.prompt()
+        self.assertIn("`hl platform-experiments propose --check FILE`", prompt)
+        self.assertIn("stores nothing and lists every problem at once, and `propose` only the final one", prompt)
+        self.assertIn("a goal that says it needs no accelerator is never proposed on one", prompt)
+        self.assertIn("Every field of the proposal says what the brief says.", prompt)
+
+    # The planner was refused for "", cpu and the CPU type in turn: the contract is to leave the
+    # type out for cores, or to copy one hl capacity prints.
+    def test_work_on_cores_states_no_accelerator_type(self):
+        prompt = self.prompt()
+        self.assertIn("`accelerator_type` is an `accelerator_type` string `hl capacity` prints, copied verbatim", prompt)
+        self.assertIn("Work that needs no accelerator leaves `accelerator_type` out", prompt)
+        self.assertIn("A refusal lists the valid values", prompt)
+
+    # A planner spent 3.5 minutes on web searches for a toy goal whose Metric and Control were given.
+    def test_the_web_is_searched_only_for_what_the_goal_leaves_unknown(self):
+        prompt = self.prompt()
+        self.assertIn("only when the goal leaves the control or the size of the effect to expect unknown", prompt)
+        self.assertIn("a goal that states its Metric and Control needs no search, or one at most", prompt)
+        self.assertNotIn("search the web (WebSearch) for the best published result on its problem", prompt)
+
+    # The UI ticks a point of the goal by its label at the start of a line, and the brief the
+    # planner wrote dropped them, so every point read as missing.
+    def test_the_brief_keeps_the_goals_labels(self):
+        prompt = self.prompt()
+        for label in ("Metric", "Control", "Win", "Held equal", "Fixed", "For"):
+            self.assertIn(f"`{label}:`", prompt)
+        self.assertIn("keeps that label at the start of its own line in the brief", prompt)
+
+
 class CloneWorkspaceTest(unittest.TestCase):
     # The CLI caches that its directory is no git repository: a researcher that cloned in its first
     # turn had every `isolation: "worktree"` subagent refused with "not in a git repository".
