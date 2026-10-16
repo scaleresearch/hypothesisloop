@@ -1,9 +1,9 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createProject, fetchMe, renameOrg, renameProject } from '@/lib/api'
-import { resolveTenant, TenantContext } from '@/lib/tenant'
+import { resolveOrgTenant, resolveTenant, TenantContext } from '@/lib/tenant'
 import SettingsPage from '@/app/(app)/orgs/[orgId]/settings/page'
 import type { Me } from '@/types'
 
@@ -24,8 +24,8 @@ const owner: Me = {
   ],
 }
 
-function show(as: Me = owner) {
-  const resolved = resolveTenant(as, '')
+function show(as: Me = owner, orgID = '') {
+  const resolved = orgID ? resolveOrgTenant(as, orgID) : resolveTenant(as, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
     <SWRConfig value={{ provider: () => new Map() }}>
@@ -125,5 +125,42 @@ describe('the GitHub section', () => {
   it('is a card of the page, which a link can lead to, for an owner and a member alike', () => {
     show()
     expect(screen.getByText('github accounts').closest('#github')).not.toBeNull()
+  })
+})
+
+describe('your organizations', () => {
+  // A person's home org, which they own, and one they were invited into as a member.
+  const invited: Me = {
+    ...owner,
+    orgs: [owner.orgs[0], { id: 'org_lab', name: 'Lab', role: 'member', created_at: at }],
+    projects: [...owner.projects, { id: 'prj_lab', org_id: 'org_lab', name: 'default', created_at: at }],
+  }
+  const rows = () => within(screen.getByRole('table', { name: 'Your organizations' })).getAllByRole('row').slice(1)
+
+  it('lists every org the person belongs to with their role in it and marks the one these settings are of', () => {
+    show(invited, 'org_lab')
+    expect(rows().map(r => r.textContent)).toEqual([
+      expect.stringMatching(/^Adaorg_aowner2.*Switch$/),
+      expect.stringMatching(/^Laborg_labmember1.*Current$/),
+    ])
+    expect(rows()[1].getAttribute('aria-current')).toBe('true')
+    expect(screen.getByText(/^Settings of Lab, where you are member:/)).toBeTruthy()
+  })
+
+  it('switches to another org in one click, to the settings of that org', () => {
+    show(invited, 'org_lab')
+    expect(screen.getByRole('link', { name: 'Switch to Ada' }).getAttribute('href')).toBe('/orgs/org_a/settings')
+    expect(screen.queryByRole('link', { name: 'Switch to Lab' })).toBeNull()
+  })
+
+  it('tells apart two orgs of one name by the end of their ids', () => {
+    show({ ...invited, orgs: [invited.orgs[0], { ...invited.orgs[1], name: 'Ada' }] })
+    expect(screen.getByRole('link', { name: 'Switch to Ada (rg_lab)' })).toBeTruthy()
+  })
+
+  it('lists for staff only the orgs they belong to', () => {
+    show({ ...invited, kind: 'staff', orgs: [invited.orgs[0], { ...invited.orgs[1], role: undefined }] })
+    expect(rows()).toHaveLength(1)
+    expect(screen.queryByText('org_lab')).toBeNull()
   })
 })

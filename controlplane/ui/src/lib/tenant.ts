@@ -61,6 +61,12 @@ export function resolveExperimentTenant(me: Me, pe: Pick<PlatformExperiment, 'pr
   return resolveTenant(me, me.projects.some(p => p.id === pe.project_id) ? pe.project_id : '')
 }
 
+// Two orgs may carry the same name, so one that shares its name is told apart by the end of its id.
+export function orgLabels(me: Me): Map<string, string> {
+  const shared = (name: string) => me.orgs.filter(o => o.name === name).length > 1
+  return new Map(me.orgs.map(o => [o.id, shared(o.name) ? `${o.name} (${o.id.slice(-6)})` : o.name]))
+}
+
 export const TenantContext = createContext<Tenant | null>(null)
 
 export function useTenant(): Tenant {

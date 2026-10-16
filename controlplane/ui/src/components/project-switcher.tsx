@@ -4,20 +4,14 @@ import { useState } from 'react'
 import { createOrg, createProject } from '@/lib/api'
 import { usePathname, useRouter } from 'next/navigation'
 import { sectionOf, sectionPath } from '@/lib/routes'
-import { useRefreshMe, useTenant } from '@/lib/tenant'
-import type { Me, Project } from '@/types'
+import { orgLabels, useRefreshMe, useTenant } from '@/lib/tenant'
+import type { Project } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { InlineError } from '@/components/ui/status-message'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Eyebrow } from '@/components/ui/text'
 import { SearchableSelect } from '@/components/ui/searchable-select'
-
-// Two orgs may carry the same name, so one that shares its name is told apart by the end of its id.
-function orgLabels(me: Me): Map<string, string> {
-  const shared = (name: string) => me.orgs.filter(o => o.name === name).length > 1
-  return new Map(me.orgs.map(o => [o.id, shared(o.name) ? `${o.name} (${o.id.slice(-6)})` : o.name]))
-}
 
 /**
  * A "New ..." link that opens a name field in place. `create` makes the thing and switches to

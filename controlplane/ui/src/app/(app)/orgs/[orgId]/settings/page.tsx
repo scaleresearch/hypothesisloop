@@ -8,6 +8,7 @@ import { useRefreshMe, useTenant } from '@/lib/tenant'
 import { APIKeys } from '@/components/api-keys'
 import { OrgGitHub } from '@/components/org-github'
 import { OrgMembers } from '@/components/org-members'
+import { YourOrgs } from '@/components/your-orgs'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { InlineError } from '@/components/ui/status-message'
@@ -116,9 +117,14 @@ function Projects() {
 }
 
 export default function SettingsPage() {
-  const { org, administers } = useTenant()
+  const { me, org, administers } = useTenant()
+  const where = org.role ? `, where you are ${org.role}` : ''
   return (
-    <Page title="Settings" description={`${org.name}: its name, projects, members, API keys and GitHub accounts.`}>
+    <Page title="Settings" description={`Settings of ${org.name}${where}: its name, projects, members, API keys and GitHub accounts.`}>
+      <Section title="Your organizations" note={me.orgs.filter(o => o.role).length} scrollX>
+        <YourOrgs />
+      </Section>
+
       {!administers && (
         <Text tone="muted">
           You are a member of {org.name}. Only an owner can rename it or manage its projects, API keys and GitHub accounts.
