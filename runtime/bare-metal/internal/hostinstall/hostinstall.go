@@ -105,6 +105,25 @@ WantedBy=multi-user.target
 `), nil
 }
 
+// Plan says what Install writes and runs on a node whose engine is engine, and changes nothing.
+func Plan(engine string) (string, error) {
+	unitFile, err := unit(engine)
+	if err != nil {
+		return "", err
+	}
+	indented := "    " + strings.ReplaceAll(strings.TrimSpace(string(unitFile)), "\n", "\n    ")
+	return fmt.Sprintf(`would write:
+  %s  the agent, mode 0755
+  %s  CLUSTER_NAME, API_URL and RUNTIME_TOKEN, mode 0600 (root only)
+  %s  started at boot and restarted on failure:
+%s
+would run:
+  systemctl daemon-reload
+  systemctl enable %s
+  systemctl restart %s
+`, BinaryPath, EnvPath, UnitPath, indented, UnitName, UnitName), nil
+}
+
 // Install writes the agent's binary, settings and unit, and starts the unit, once check passes.
 // check runs the agent's own preflight with those settings and names the engine it found, which
 // the unit is ordered after. When check fails the node is left as it was. Running Install again

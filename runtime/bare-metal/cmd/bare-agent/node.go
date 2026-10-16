@@ -20,6 +20,7 @@ import (
 
 const usage = `usage: bare-agent                                          run the agent (what the installed unit does)
        bare-agent install --cluster NAME --api-url URL     install or upgrade the agent on this node and start it
+                          [--dry-run]                      check the node and the token, print what install does, change nothing
        bare-agent detach                                   remove this node's cluster, stop its jobs, stop the agent
        bare-agent uninstall                                remove the agent from a detached node`
 
@@ -58,6 +59,7 @@ func install(args []string) error {
 	flags := flag.NewFlagSet("bare-agent install", flag.ContinueOnError)
 	cluster := flags.String("cluster", "", "the name this node was registered under")
 	apiURL := flags.String("api-url", "", "the platform's API address, as this node and its job containers reach it")
+	dryRun := flags.Bool("dry-run", false, "check this node, the platform and the token, print what install would write and run, and change nothing")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -88,7 +90,7 @@ func install(args []string) error {
 	if settings.Token, err = readToken(settings.ClusterName, installed); err != nil {
 		return err
 	}
-	if err := startPodmanSocket(host); err != nil {
+	if err := startPodmanSocket(host, *dryRun); err != nil {
 		return err
 	}
 	binary, err := os.ReadFile(self)
@@ -96,7 +98,7 @@ func install(args []string) error {
 		return err
 	}
 
-	err = hostinstall.Install(host, binary, settings, func() (string, error) {
+	check := func() (string, error) {
 		executor, err := newExecutor(settings.ClusterName, settings.APIURL)
 		if err != nil {
 			return "", err
@@ -118,8 +120,21 @@ func install(args []string) error {
 			return "", fmt.Errorf("the platform does not take this token for cluster %s: %w", settings.ClusterName, err)
 		}
 		return executor.Engine(), nil
-	})
-	if err != nil {
+	}
+	if *dryRun {
+		engine, err := check()
+		if err != nil {
+			return fmt.Errorf("dry run, nothing was changed: %w", err)
+		}
+		plan, err := hostinstall.Plan(engine)
+		if err != nil {
+			return err
+		}
+		fmt.Print(plan)
+		say("dry run: this node is ready and nothing was changed. Run the same command without --dry-run to install.")
+		return nil
+	}
+	if err := hostinstall.Install(host, binary, settings, check); err != nil {
 		return fmt.Errorf("nothing was installed: %w", err)
 	}
 	say("installed %s, %s (root only) and %s", hostinstall.BinaryPath, hostinstall.EnvPath, hostinstall.UnitPath)
@@ -161,7 +176,7 @@ func readToken(cluster string, installed hostinstall.Settings) (string, error) {
 
 // A node with podman and no docker has an engine only once podman's socket is listening, which
 // is off until asked for.
-func startPodmanSocket(host hostinstall.Host) error {
+func startPodmanSocket(host hostinstall.Host, dryRun bool) error {
 	if _, err := os.Stat("/var/run/docker.sock"); err == nil {
 		return nil
 	}
@@ -170,6 +185,9 @@ func startPodmanSocket(host hostinstall.Host) error {
 	}
 	if host.Systemctl("is-active", "--quiet", "podman.socket") == nil {
 		return nil
+	}
+	if dryRun {
+		return errors.New("docker is not on this node and podman's socket is off: install would start it (systemctl enable --now podman.socket), and the dry run cannot check the node without it")
 	}
 	say("docker is not on this node: starting podman's socket (systemctl enable --now podman.socket)")
 	return host.Systemctl("enable", "--now", "podman.socket")

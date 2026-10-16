@@ -123,6 +123,36 @@ func TestInstallOnAPodmanNodeOrdersTheUnitAfterPodmansSocket(t *testing.T) {
 	}
 }
 
+// The plan a dry run prints is what Install does: the same three files, the same unit and the
+// same systemctl calls.
+func TestPlanSaysWhatInstallWritesAndRuns(t *testing.T) {
+	plan, err := Plan("docker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := newFakeHost()
+	if err := Install(host, []byte("b"), settings, passes("docker")); err != nil {
+		t.Fatal(err)
+	}
+	wants := []string{BinaryPath, EnvPath, UnitPath}
+	for _, line := range strings.Split(strings.TrimSpace(host.files[UnitPath]), "\n") {
+		if line != "" {
+			wants = append(wants, "    "+line)
+		}
+	}
+	for _, asked := range host.asked {
+		wants = append(wants, "systemctl "+asked)
+	}
+	for _, want := range wants {
+		if !strings.Contains(plan, want) {
+			t.Errorf("the plan lacks %q:\n%s", want, plan)
+		}
+	}
+	if _, err := Plan("containerd"); err == nil {
+		t.Error("a plan for an engine with no known unit was made")
+	}
+}
+
 // A node that fails its preflight would otherwise be enabled, fail at every boot and restart
 // every ten seconds for good.
 func TestInstallLeavesTheNodeAsItWasWhenThePreflightFails(t *testing.T) {
