@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/cli/repotemplate"
@@ -39,8 +38,8 @@ func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Princ
 			"pe-foreign": {PlatformExperimentID: "pe-foreign", ProjectID: "prj-b", OrgID: "org-b"},
 		},
 	}
-	router := chi.NewRouter()
-	doc := apidocs.New(router, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(placement), zap.NewNop())
+	router := authtest.Router(authtest.As(caller))
+	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
 	planningRepositories = &fakeRepositories{files: map[string]string{"prj-a": ""}}
 	svc.WithRepositories(planningRepositories)
 	handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).
@@ -253,8 +252,8 @@ func TestThePlannerOfADraftIsGivenAGitCredentialForItsRepository(t *testing.T) {
 	}
 	atWork := authtest.As{Kind: auth.KindAgent, PlatformExperimentID: pe.ID, AgentID: store.planners[pe.ID].ID, ProjectID: pe.ProjectID, OrgIDs: []string{"org-a"}}
 	access := auth.NewAccess(authtest.Placement{})
-	router := chi.NewRouter()
-	accounts.RegisterRepositoriesHuma(apidocs.New(router, "test", "1.0.0", "", atWork, access, zap.NewNop()),
+	router := authtest.Router(atWork)
+	accounts.RegisterRepositoriesHuma(apidocs.New(router, "test", "1.0.0", "", access, zap.NewNop()),
 		accounts.NewRepositories(struct{ accounts.InstallationStore }{}, draftRepositories{store}, nil, host, access, zap.NewNop()))
 	for repository, want := range map[string]int{pe.Repository: http.StatusCreated, "acme/another": http.StatusNotFound} {
 		code, out := call2(t, router, "POST", "/git-credentials", `{"protocol":"https","host":"git.test","path":"`+repository+`.git"}`)

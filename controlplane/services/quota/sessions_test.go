@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
@@ -46,8 +45,8 @@ func (m *memorySessions) GetSession(_ context.Context, pe, agent string, _ int64
 
 func sessionCall(t *testing.T, store SessionStore, placement authtest.Placement, caller auth.Principal, method, path string, body []byte) (int, []byte) {
 	t.Helper()
-	r := chi.NewRouter()
-	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(placement), zap.NewNop())
+	r := authtest.Router(authtest.As(caller))
+	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
 	RegisterSessionsHuma(doc, store, zap.NewNop())
 	req := httptest.NewRequest(method, path, bytes.NewReader(body))
 	if body != nil {

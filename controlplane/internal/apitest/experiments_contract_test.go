@@ -87,8 +87,8 @@ func schedulerRouter(t *testing.T, store scheduler.Store) chi.Router {
 		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
 	}))
 	t.Cleanup(metrics.Close)
-	r := chi.NewRouter()
-	d := apidocs.New(r, "scheduler", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	r := authtest.Router(authtest.Staff)
+	d := apidocs.New(r, "scheduler", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	scheduler.RegisterHuma(d, scheduler.NewHandler(scheduler.NewService(store, nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metrics.URL, zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{})))
 	return r
 }

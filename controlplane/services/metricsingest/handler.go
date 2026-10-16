@@ -1,4 +1,4 @@
-package metrics
+package metricsingest
 
 import (
 	"context"
@@ -57,7 +57,7 @@ type Placements interface {
 // remote-write request per push, using the agent's own collection timestamp (req.Timestamp), so a
 // payload buffered through a network blip still lands at the moment it happened.
 //
-// It must sit behind auth.RequireRuntime: a sample counts only for a job placed on the cluster
+// It must sit behind auth.Gate and auth.RequireRuntime: a sample counts only for a job placed on the cluster
 // the token names, since a heartbeat keeps a job alive and is what its runtime is billed from.
 //
 // Stateless: every reader (silence detection, quota accounting, Cancel) recomputes from

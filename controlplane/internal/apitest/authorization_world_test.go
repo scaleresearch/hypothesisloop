@@ -270,23 +270,24 @@ func newWorldAPI(t *testing.T) *worldAPI {
 
 	api := &worldAPI{router: chi.NewRouter(), docs: map[string]*apidocs.Doc{}, tokens: map[string]string{"none": ""}}
 	api.router.Use(tripwire)
-	api.router.Handle("/metrics", authenticator.RequireStaff(logger, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	api.router.Use(auth.Gate(authenticator, logger, map[string]string{"/watch": registry.WatchSubprotocol}))
+	api.router.Handle("/metrics", auth.RequireStaff(logger, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})))
-	watch := registry.NewWatchHandler(nil, nil, authenticator, access, logger)
+	watch := registry.NewWatchHandler(nil, nil, access, logger)
 	api.router.Get("/watch", watch.ServeHTTP)
 
 	clusters := chi.NewRouter()
-	api.docs["/internal/clusters"] = apidocs.New(clusters, "cluster-agent", "1.0.0", "", authenticator, access, logger)
+	api.docs["/internal/clusters"] = apidocs.New(clusters, "cluster-agent", "1.0.0", "", access, logger)
 	clusteragentapi.RegisterHuma(api.docs["/internal/clusters"], clusteragentapi.NewHandler(nil, 0, "", 0, nil, 0, nil, 0, worldSecret, &clusteragentapi.EnvironmentRegistry{Repository: "registry.test/environments/environment"}, logger))
 	api.router.Mount("/internal/clusters", clusters)
 
 	launchers := chi.NewRouter()
-	api.docs["/internal/launchers"] = apidocs.New(launchers, "launcher", "1.0.0", "", authenticator, access, logger)
+	api.docs["/internal/launchers"] = apidocs.New(launchers, "launcher", "1.0.0", "", access, logger)
 	launcherapi.RegisterHuma(api.docs["/internal/launchers"], launcherapi.NewHandler(noLauncherAgents{}, &launchertest.Metrics{}, launcherapi.Settings{Image: "image", APIURL: "http://api", SigningSecret: worldSecret, BootLimit: time.Minute, ProgressLimit: time.Hour, MaxNewPerAnswer: 1}, logger))
 	api.router.Mount("/internal/launchers", launchers)
 
-	doc := apidocs.New(api.router, "hypothesisloop API", "1.0.0", "", authenticator, access, logger)
+	doc := apidocs.New(api.router, "hypothesisloop API", "1.0.0", "", access, logger)
 	api.docs[""] = doc
 	peHandler := quota.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, logger).WithAgentLaunch(quota.AgentLaunch{Launcher: worldLauncher, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: worldSecret, MaxHosted: 20})
 	quota.RegisterHuma(doc, quota.NewHandler(nil, logger), peHandler)

@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
@@ -93,8 +92,8 @@ func reconcile(t *testing.T, store Store, caller auth.Principal, launcher string
 
 func reconcileWith(t *testing.T, store Store, caller auth.Principal, launcher string, logger *zap.Logger, body any) (int, []byte) {
 	t.Helper()
-	r := chi.NewRouter()
-	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	r := authtest.Router(authtest.As(caller))
+	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	RegisterHuma(doc, NewHandler(store, &launchertest.Metrics{}, testSettings, logger))
 	if o, ok := body.(Observed); ok {
 		body = withMachines(o)
@@ -376,8 +375,8 @@ func TestAChangeOfConfigOrOfTheLaunchersInputsRenamesRunningInstancesAndLeavesEn
 	}
 
 	// The same agents under another image: the handler is built anew, as after a config change.
-	r := chi.NewRouter()
-	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(mainLauncher), auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	r := authtest.Router(authtest.As(mainLauncher))
+	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	moved := testSettings
 	moved.Image, moved.APIURL = "registry.example.invalid/agent:2", "https://moved.example.invalid"
 	RegisterHuma(doc, NewHandler(store, &launchertest.Metrics{}, moved, zap.NewNop()))
@@ -464,8 +463,8 @@ func TestTheReconcileEndpointAdmitsItsOwnLauncherAndStaffOnly(t *testing.T) {
 }
 
 func TestARequestWithNoTokenIsRefused(t *testing.T) {
-	r := chi.NewRouter()
-	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(mainLauncher), auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	r := authtest.Router(authtest.As(mainLauncher))
+	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	store := &launcherStore{}
 	RegisterHuma(doc, NewHandler(store, &launchertest.Metrics{}, testSettings, zap.NewNop()))
 	rec := httptest.NewRecorder()
@@ -665,8 +664,8 @@ func reconcileUnder(t *testing.T, store Store, cfg Settings, body Observed) (int
 
 func reconcileRecording(t *testing.T, store Store, metrics Metrics, cfg Settings, body Observed) (int, []byte) {
 	t.Helper()
-	r := chi.NewRouter()
-	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(mainLauncher), auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	r := authtest.Router(authtest.As(mainLauncher))
+	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	RegisterHuma(doc, NewHandler(store, metrics, cfg, zap.NewNop()))
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -891,8 +890,8 @@ func TestAMachineReportedUnknownIsHeldToTheProgressLimitOnceItRanAndToTheBootLim
 // held is the launcher's GET of the machines the platform holds for it.
 func held(t *testing.T, store Store) (int, Held) {
 	t.Helper()
-	r := chi.NewRouter()
-	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(mainLauncher), auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	r := authtest.Router(authtest.As(mainLauncher))
+	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	RegisterHuma(doc, NewHandler(store, &launchertest.Metrics{}, testSettings, zap.NewNop()))
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest(http.MethodGet, "/main/machines", nil)))

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/go-chi/chi/v5"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
 	"go.uber.org/zap"
@@ -19,15 +18,15 @@ func TestRegisterRequiresValidAudience(t *testing.T) {
 			t.Fatal("expected Register to panic on an invalid audience")
 		}
 	}()
-	r := chi.NewRouter()
-	doc := New(r, "t", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	r := authtest.Router(authtest.Staff)
+	doc := New(r, "t", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	Register(doc, Audience("bogus"), huma.Operation{OperationID: "x", Method: "GET", Path: "/x"},
 		func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
 }
 
 func TestMountExploreAudienceFiltersByAudience(t *testing.T) {
-	r := chi.NewRouter()
-	doc := New(r, "t", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	r := authtest.Router(authtest.Staff)
+	doc := New(r, "t", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	Register(doc, AudienceAgent, huma.Operation{OperationID: "agent-op", Method: "GET", Path: "/agent-only", Summary: "agent summary"},
 		func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
 	Register(doc, AudienceCoordinator, huma.Operation{OperationID: "coord-op", Method: "GET", Path: "/coord-only", Summary: "coordinator summary"},

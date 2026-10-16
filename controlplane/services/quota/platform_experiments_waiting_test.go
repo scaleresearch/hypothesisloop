@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
@@ -224,8 +223,8 @@ func TestTheSweepTellsAHostedCoordinatorTheReasonThatWaitsForIt(t *testing.T) {
 func TestAQuotaAskedForBeforeTheStartIsRefusedWithTheReadersNextStep(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	store.signups = []domain.AgentSignup{{AgentID: "dana", Name: "Researcher 1", Role: domain.SignupRoleCompetitor}}
-	r := chi.NewRouter()
-	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(waitingAgent("dana")), auth.NewAccess(agentsTestPlacement), zap.NewNop())
+	r := authtest.Router(authtest.As(waitingAgent("dana")))
+	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
 	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(newSignupTestService(t, store), store, testPlanning, zap.NewNop()))
 
 	code, out := call(t, r, "GET", "/platform-experiments/pe-1/quotas/dana", "")
@@ -244,8 +243,8 @@ func TestAQuotaAskedForBeforeTheStartIsRefusedWithTheReadersNextStep(t *testing.
 func TestAPlannersQuotaIsRefusedSayingItNeedsNone(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpDraft, 5)
 	store.signups = []domain.AgentSignup{{AgentID: "pat", Name: "Planner", Role: domain.SignupRolePlanner}}
-	r := chi.NewRouter()
-	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(waitingAgent("pat")), auth.NewAccess(agentsTestPlacement), zap.NewNop())
+	r := authtest.Router(authtest.As(waitingAgent("pat")))
+	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
 	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(newSignupTestService(t, store), store, testPlanning, zap.NewNop()))
 
 	code, out := call(t, r, "GET", "/platform-experiments/pe-1/quotas/pat", "")

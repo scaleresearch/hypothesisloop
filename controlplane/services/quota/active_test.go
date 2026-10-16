@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
@@ -65,8 +64,8 @@ func TestACutAgentOrAClosedPlatformExperimentGetsNoDataKey(t *testing.T) {
 			t.Fatal(err)
 		}
 		caller := authtest.As(auth.Principal{Kind: auth.KindAgent, AgentID: tc.agent, PlatformExperimentID: "pe-1", ProjectID: "prj", OrgIDs: []string{"org"}})
-		r := chi.NewRouter()
-		doc := apidocs.New(r, "test", "1.0.0", "", caller, auth.NewAccess(placement), zap.NewNop())
+		r := authtest.Router(caller)
+		doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
 		RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()))
 		RegisterDataUsageHuma(doc, NewDataUsageHandler(client, store, svc, 0, zap.NewNop()))
 

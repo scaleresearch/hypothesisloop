@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
@@ -57,8 +56,8 @@ func TestFieldsAddedToExistingRequestBodiesStayOptional(t *testing.T) {
 // contract asserted here is the one callers actually meet.
 func openAPISpec(t *testing.T) map[string]any {
 	t.Helper()
-	r := chi.NewRouter()
-	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules, authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	r := authtest.Router(authtest.Staff)
+	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	platformExperiments := quota.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, nil).WithAgentLaunch(quota.AgentLaunch{Launcher: "main", DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxHosted: 20})
 	quota.RegisterHuma(doc, quota.NewHandler(nil, nil), platformExperiments)
 	quota.RegisterAgentsHuma(doc, platformExperiments, struct{ quota.Hypotheses }{})

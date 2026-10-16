@@ -169,11 +169,10 @@ type WatchHandler struct {
 	// experiments resolves the platform experiment a job belongs to, so a caller that knows
 	// only its own job id — which is all a running job is told — can subscribe without first
 	// having to look that up itself.
-	experiments   experimentLookup
-	authenticator apidocs.Authenticator
-	access        *auth.Access
-	hub           *hub
-	logger        *zap.Logger
+	experiments experimentLookup
+	access      *auth.Access
+	hub         *hub
+	logger      *zap.Logger
 	// recheckEvery is how often an open stream is pinged and its token asked again.
 	recheckEvery time.Duration
 }
@@ -183,8 +182,10 @@ type experimentLookup interface {
 }
 
 // NewWatchHandler returns a handler over source. Start must be called once to begin listening.
-func NewWatchHandler(source EventSource, experiments experimentLookup, authenticator apidocs.Authenticator, access *auth.Access, logger *zap.Logger) *WatchHandler {
-	return &WatchHandler{source: source, experiments: experiments, authenticator: authenticator, access: access, hub: newHub(), logger: logger, recheckEvery: watchPingInterval}
+// Its requests must pass auth.Gate first, which reads the token from the subprotocol
+// (WatchSubprotocol) before the upgrade.
+func NewWatchHandler(source EventSource, experiments experimentLookup, access *auth.Access, logger *zap.Logger) *WatchHandler {
+	return &WatchHandler{source: source, experiments: experiments, access: access, hub: newHub(), logger: logger, recheckEvery: watchPingInterval}
 }
 
 // Start runs the single LISTEN connection for this process until ctx ends, re-establishing it
@@ -222,25 +223,23 @@ func (h *WatchHandler) Start(ctx context.Context) {
 	}()
 }
 
-// The token is offered as a WebSocket subprotocol: a browser cannot set a header on a WebSocket,
-// so that is the one place every client, hl included, can put it.
-func (h *WatchHandler) authenticate(ctx context.Context, token string) (context.Context, auth.Principal, error) {
-	principal, err := h.authenticator.Authenticate(ctx, token)
-	if err != nil {
-		return nil, auth.Principal{}, err
-	}
+func (h *WatchHandler) admit(ctx context.Context, principal auth.Principal) (context.Context, error) {
 	if !apidocs.AudienceAgent.Admits(principal, "") {
-		return nil, auth.Principal{}, auth.Forbidden("forbidden: a " + string(principal.Kind) + " token may not watch")
+		return nil, auth.Forbidden("forbidden: a " + string(principal.Kind) + " token may not watch")
 	}
 	// A stream only reads. The platform experiment it is narrowed to is admitted by the access
 	// check on its own, so none is named for a listing here.
-	return auth.WithRead(auth.WithPrincipal(ctx, principal), ""), principal, nil
+	return auth.WithRead(auth.WithPrincipal(ctx, principal), ""), nil
 }
 
 // stillAdmitted asks again what the upgrade asked: a stream outlives the request that opened
 // it, and the token may have died or lost the platform experiment since.
-func (h *WatchHandler) stillAdmitted(ctx context.Context, token, platformExperimentID string) error {
-	ctx, _, err := h.authenticate(ctx, token)
+func (h *WatchHandler) stillAdmitted(ctx context.Context, platformExperimentID string) error {
+	principal, err := auth.Recheck(ctx)
+	if err != nil {
+		return err
+	}
+	ctx, err = h.admit(ctx, principal)
 	if err != nil {
 		return err
 	}
@@ -262,12 +261,12 @@ func (h *WatchHandler) stillAdmitted(ctx context.Context, token, platformExperim
 // this socket would be a second path to an effect that already has one, and the two would disagree
 // the first time this connection dropped.
 func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	token, err := watchToken(r.Header)
-	if err != nil {
-		auth.WriteError(w, h.logger, err)
+	principal, ok := auth.FromContext(r.Context())
+	if !ok {
+		auth.WriteError(w, h.logger, auth.Internal(h.logger, "watch: reached without passing auth.Gate", errors.New("no principal")))
 		return
 	}
-	ctx, principal, err := h.authenticate(r.Context(), token)
+	ctx, err := h.admit(r.Context(), principal)
 	if err != nil {
 		auth.WriteError(w, h.logger, err)
 		return
@@ -368,7 +367,7 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-ping.C:
-			if err := h.stillAdmitted(r.Context(), token, filter.PlatformExperimentID); err != nil {
+			if err := h.stillAdmitted(r.Context(), filter.PlatformExperimentID); err != nil {
 				var refusal *auth.Error
 				if errors.As(err, &refusal) {
 					h.logger.Info("watch: closing a stream whose token is no longer admitted",

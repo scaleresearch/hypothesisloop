@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
@@ -52,8 +51,8 @@ func reopenRouter(t *testing.T, store *reopenStore, caller auth.Principal) http.
 	for _, pe := range store.created {
 		tenancy[pe.ID] = domain.Tenancy{PlatformExperimentID: pe.ID, ProjectID: "prj-a", OrgID: "org-a"}
 	}
-	r := chi.NewRouter()
-	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(authtest.Placement{PlatformExperiments: tenancy}), zap.NewNop())
+	r := authtest.Router(authtest.As(caller))
+	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{PlatformExperiments: tenancy}), zap.NewNop())
 	handler := NewPlatformExperimentsHandler(newSignupTestService(t, store), &fakeRepositories{}, testPlanning, zap.NewNop()).
 		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "model-default", CoordinatorModel: "coordinator-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted})
 	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), handler)

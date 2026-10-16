@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
@@ -51,8 +50,8 @@ func (s *messageStore) NameActors(context.Context, []*domain.Actor) error { retu
 
 func messagesRouter(t *testing.T, store *messageStore, caller auth.Principal) http.Handler {
 	t.Helper()
-	r := chi.NewRouter()
-	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(agentsTestPlacement), zap.NewNop())
+	r := authtest.Router(authtest.As(caller))
+	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
 	registerMessagesHuma(doc, NewPlatformExperimentsHandler(newSignupTestService(t, store), nil, testPlanning, zap.NewNop()))
 	return r
 }

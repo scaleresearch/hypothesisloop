@@ -37,7 +37,7 @@ const (
 	// pendingPushLimit bounds the retry buffer below. Every dropped payload is a hole in the
 	// observed record a job is billed and evicted against, so a failed push is retried rather
 	// than discarded — the control plane accepts backdated pushes for exactly this reason (see
-	// shared/metrics.maxPushBacklog). At the default 2s cadence this covers a one-hour outage.
+	// services/metricsingest.maxPushBacklog). At the default 2s cadence this covers a one-hour outage.
 	pendingPushLimit = 1800
 )
 

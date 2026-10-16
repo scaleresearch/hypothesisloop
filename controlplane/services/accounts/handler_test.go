@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
@@ -149,8 +148,8 @@ func newWorld(t *testing.T) *world {
 		"staff":       {Kind: auth.KindStaff},
 		"staff-user":  {Kind: auth.KindStaff, UserID: "u-staff", Name: "Staff", OrgIDs: []string{}},
 	}
-	router := chi.NewRouter()
-	doc := apidocs.New(router, "test", "1.0.0", "", tokens{w}, auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
+	router := authtest.Router(tokens{w})
+	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
 	connected := func(context.Context) (map[string]bool, error) { return map[string]bool{w.clusterA: true}, nil }
 	autoscalers := func(context.Context) (map[string]bool, error) { return map[string]bool{}, nil }
 	RegisterHuma(doc, NewHandler(w.store, w.store, connected, autoscalers, testSigningSecret, testRuntimeAddresses, testLimits, zap.NewNop()))
@@ -909,8 +908,8 @@ func (failingStore) ListProjects(context.Context, []string) ([]*domain.Project, 
 
 func TestAFailureOfThePlatformIsAnsweredWithoutItsText(t *testing.T) {
 	w := newWorld(t)
-	router := chi.NewRouter()
-	doc := apidocs.New(router, "test", "1.0.0", "", tokens{w}, auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
+	router := authtest.Router(tokens{w})
+	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
 	connected := func(context.Context) (map[string]bool, error) {
 		return nil, errors.New("metrics store at 10.0.0.7 refused the connection")
 	}

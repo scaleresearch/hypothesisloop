@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
@@ -44,8 +43,8 @@ func (s *sharedFlags) GetPlatformExperiment(_ context.Context, id string) (*doma
 
 func shareAs(t *testing.T, store Sharing, caller auth.Principal, path string) (int, map[string]any) {
 	t.Helper()
-	router := chi.NewRouter()
-	doc := apidocs.New(router, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	router := authtest.Router(authtest.As(caller))
+	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	answer := func(_ context.Context, pe *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error) {
 		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 	}

@@ -80,15 +80,6 @@ func NewAuthenticator(cfg config.AuthConfig, directory Directory) (*Authenticato
 	return &Authenticator{signingSecret: cfg.SigningSecret, providers: providers, directory: directory, now: time.Now}, nil
 }
 
-// BearerToken returns the token of an Authorization header.
-func BearerToken(header string) (string, error) {
-	token, ok := strings.CutPrefix(header, "Bearer ")
-	if !ok || token == "" {
-		return "", unauthenticated("send Authorization: Bearer <token>")
-	}
-	return token, nil
-}
-
 // Authenticate resolves a token. A refusal is an *Error with status 401; any other error is the
 // platform failing to answer.
 func (a *Authenticator) Authenticate(ctx context.Context, token string) (Principal, error) {
@@ -256,47 +247,6 @@ func (a *Authenticator) user(ctx context.Context, token string) (Principal, erro
 	return p, nil
 }
 
-// RequireRuntime serves next only to a runtime token of a registered cluster, or to staff, with
-// the principal in the request's context. It guards the plain HTTP endpoints runtimes push to
-// outside the documented API.
-func (a *Authenticator) RequireRuntime(logger *zap.Logger, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p, err := a.AuthenticateRequest(r)
-		if err == nil && p.Kind != KindRuntime && p.Kind != KindStaff {
-			err = forbidden("forbidden: only a runtime token may push here")
-		}
-		if err != nil {
-			WriteError(w, logger, err)
-			return
-		}
-		next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), p)))
-	})
-}
-
-// RequireStaff serves next only to staff.
-func (a *Authenticator) RequireStaff(logger *zap.Logger, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p, err := a.AuthenticateRequest(r)
-		if err == nil && p.Kind != KindStaff {
-			err = forbidden("forbidden: staff only")
-		}
-		if err != nil {
-			WriteError(w, logger, err)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// AuthenticateRequest resolves the bearer token of a plain HTTP request.
-func (a *Authenticator) AuthenticateRequest(r *http.Request) (Principal, error) {
-	token, err := BearerToken(r.Header.Get("Authorization"))
-	if err != nil {
-		return Principal{}, err
-	}
-	return a.Authenticate(r.Context(), token)
-}
-
 // InternalError is the body of every answer to a failure of the platform's own. What failed is
 // logged and never sent: the caller may be anyone.
 const InternalError = "internal error"
@@ -325,5 +275,7 @@ func WriteError(w http.ResponseWriter, logger *zap.Logger, err error) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(refusal.status)
-	_ = json.NewEncoder(w).Encode(refusal)
+	encoder := json.NewEncoder(w)
+	encoder.SetEscapeHTML(false)
+	_ = encoder.Encode(refusal)
 }

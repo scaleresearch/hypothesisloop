@@ -149,13 +149,13 @@ func (s *lookupStore) GetExperiment(context.Context, string) (*domain.Experiment
 
 func watchServer(t *testing.T, source *fakeEvents) *httptest.Server {
 	t.Helper()
-	handler := NewWatchHandler(source, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}}, authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	handler := NewWatchHandler(source, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}}, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	ctx, cancel := context.WithCancel(context.Background())
 	handler.Start(ctx)
 	if source.listenGate == nil {
 		<-source.listening
 	}
-	server := httptest.NewServer(http.HandlerFunc(handler.ServeHTTP))
+	server := httptest.NewServer(gated(authtest.Staff, handler))
 	t.Cleanup(func() {
 		server.Close()
 		cancel()

@@ -9,7 +9,6 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
@@ -75,9 +74,9 @@ func (s *listStore) NameActors(context.Context, []*domain.Actor) error { return 
 
 func listHypotheses(t *testing.T, graph *listGraph, query string) (*httptest.ResponseRecorder, []string) {
 	t.Helper()
-	r := chi.NewRouter()
+	r := authtest.Router(authtest.Staff)
 	svc := &Service{store: &listStore{graph: graph}, graph: graph, logger: zap.NewNop()}
-	RegisterHuma(apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop()), NewHandler(svc, zap.NewNop()))
+	RegisterHuma(apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop()), NewHandler(svc, zap.NewNop()))
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest(http.MethodGet, "/hypotheses?"+query, nil)))
 	if rec.Code != http.StatusOK {

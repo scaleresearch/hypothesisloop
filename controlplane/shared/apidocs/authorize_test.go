@@ -50,8 +50,8 @@ var everyKind = tokenTable{
 
 func audienceRouter(t *testing.T) (chi.Router, *auth.Principal) {
 	t.Helper()
-	r := chi.NewRouter()
-	doc := New(r, "t", "1.0.0", "", everyKind, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	r := authtest.Router(everyKind)
+	doc := New(r, "t", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	var seen auth.Principal
 	handler := func(ctx context.Context, _ *struct {
 		Name string `path:"name"`
@@ -140,8 +140,8 @@ func TestACoordinatorOfAClosedPlatformExperimentReadsAndFilesTheSummaryOnly(t *t
 		"open":   {Kind: auth.KindCoordinator, PlatformExperimentID: "pe-a"},
 		"closed": {Kind: auth.KindCoordinator, PlatformExperimentID: "pe-a", PlatformExperimentClosed: true},
 	}
-	r := chi.NewRouter()
-	doc := New(r, "t", "1.0.0", "", tokens, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	r := authtest.Router(tokens)
+	doc := New(r, "t", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	ran := 0
 	handler := func(context.Context, *struct{}) (*struct{}, error) {
 		ran++
@@ -187,7 +187,7 @@ func TestTheHandlerSeesThePrincipalTheTokenResolvedTo(t *testing.T) {
 // operation and excludes everything coordinator-only.
 func TestTheAgentDigestIncludesTheJobAudience(t *testing.T) {
 	r, _ := audienceRouter(t)
-	doc := New(r, "t", "1.0.0", "", everyKind, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	doc := New(r, "t", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	Register(doc, AudienceJob, huma.Operation{OperationID: "m", Method: "POST", Path: "/metrics-op", Summary: "s"},
 		func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
 	Register(doc, AudienceCoordinator, huma.Operation{OperationID: "c", Method: "POST", Path: "/coordinator-op", Summary: "s"},
@@ -215,8 +215,8 @@ func TestARefusalWithAReasonCarriesItBesideTheMessage(t *testing.T) {
 }
 
 func TestAHandlersUnansweredErrorSaysNothingOfWhatFailed(t *testing.T) {
-	r := chi.NewRouter()
-	doc := New(r, "t", "1.0.0", "", everyKind, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	r := authtest.Router(everyKind)
+	doc := New(r, "t", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	Register(doc, AudienceAgent, huma.Operation{OperationID: "fail", Method: "GET", Path: "/fail"},
 		func(context.Context, *struct{}) (*struct{}, error) {
 			return nil, errors.New("pq: database is down at 10.0.0.7")

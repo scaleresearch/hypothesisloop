@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
@@ -37,15 +36,20 @@ var watchTenancy = authtest.Placement{
 	Agents: map[string]string{"agent-1": "org-a", "agent-2": "org-a", "agent-9": "org-b"},
 }
 
+// gated is the watch handler behind auth.Gate, as control-service mounts it.
+func gated(tokens auth.Tokens, handler *WatchHandler) http.Handler {
+	return auth.Gate(tokens, zap.NewNop(), map[string]string{"/watch": WatchSubprotocol})(handler)
+}
+
 func watchServerAs(t *testing.T, principal auth.Principal) *httptest.Server {
 	t.Helper()
 	source := newFakeEvents()
 	handler := NewWatchHandler(source, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}},
-		authtest.As(principal), auth.NewAccess(watchTenancy), zap.NewNop())
+		auth.NewAccess(watchTenancy), zap.NewNop())
 	ctx, cancel := context.WithCancel(context.Background())
 	handler.Start(ctx)
 	<-source.listening
-	server := httptest.NewServer(http.HandlerFunc(handler.ServeHTTP))
+	server := httptest.NewServer(gated(authtest.As(principal), handler))
 	t.Cleanup(func() {
 		server.Close()
 		cancel()
@@ -190,12 +194,12 @@ func TestAnOpenWatchStreamClosesOnceItsTokenIsRefused(t *testing.T) {
 		source := newFakeEvents()
 		caller := &switchable{principal: inOrgA}
 		handler := NewWatchHandler(source, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}},
-			caller, auth.NewAccess(watchTenancy), zap.NewNop())
+			auth.NewAccess(watchTenancy), zap.NewNop())
 		handler.recheckEvery = 20 * time.Millisecond
 		ctx, cancel := context.WithCancel(context.Background())
 		handler.Start(ctx)
 		<-source.listening
-		server := httptest.NewServer(http.HandlerFunc(handler.ServeHTTP))
+		server := httptest.NewServer(gated(caller, handler))
 
 		client := dialWatch(t, server, url.Values{"platform_experiment_id": {"pe-1"}})
 		client.sendText(t, "{}")
@@ -225,9 +229,9 @@ func TestAWriteNamingAHypothesisOutOfScopeIsNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r := chi.NewRouter()
 	caller := authtest.As(auth.Principal{Kind: auth.KindUser, UserID: "user-1", OrgIDs: []string{"org-a"}})
-	RegisterHuma(apidocs.New(r, "test", "1.0.0", "", caller, auth.NewAccess(watchTenancy), zap.NewNop()), NewHandler(svc, zap.NewNop()))
+	r := authtest.Router(caller)
+	RegisterHuma(apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(watchTenancy), zap.NewNop()), NewHandler(svc, zap.NewNop()))
 	post := func(path string, body map[string]any) *httptest.ResponseRecorder {
 		encoded, err := json.Marshal(body)
 		if err != nil {

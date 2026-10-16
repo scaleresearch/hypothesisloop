@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
@@ -330,8 +329,8 @@ var agentsTestPlacement = authtest.Placement{
 
 func agentsRouter(t *testing.T, store *rosterStore, caller auth.Principal) http.Handler {
 	t.Helper()
-	r := chi.NewRouter()
-	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(agentsTestPlacement), zap.NewNop())
+	r := authtest.Router(authtest.As(caller))
+	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
 	handler := NewPlatformExperimentsHandler(newSignupTestService(t, store), store, testPlanning, zap.NewNop()).WithAgentLaunch(agentsTestLaunch())
 	RegisterAgentsHuma(doc, handler, store)
 	return r

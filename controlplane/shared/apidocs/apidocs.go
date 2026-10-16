@@ -8,7 +8,6 @@ package apidocs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -115,11 +114,6 @@ func (a Audience) shownTo(reader Audience) bool {
 	return reader == "" || a == reader || (reader == AudienceAgent && a == AudienceJob)
 }
 
-// Authenticator resolves a request's token. *auth.Authenticator is the one used in service.
-type Authenticator interface {
-	Authenticate(ctx context.Context, token string) (auth.Principal, error)
-}
-
 // clusterNameParam is the path parameter an AudienceInternal operation names its cluster with,
 // and an AudienceLauncher operation its launcher.
 const clusterNameParam = "name"
@@ -138,22 +132,22 @@ type opMeta struct {
 // Doc wraps a huma.API and accumulates operation metadata as they are
 // registered, so the same registrations drive both /openapi.json and /explore.
 type Doc struct {
-	API           huma.API
-	title         string
-	preamble      string
-	ops           []opMeta
-	authenticator Authenticator
-	logger        *zap.Logger
+	API      huma.API
+	title    string
+	preamble string
+	ops      []opMeta
+	logger   *zap.Logger
 	// Access is what each handler asks whether its caller may reach the resource it loads.
 	Access *auth.Access
 }
 
 // New builds a Huma API over an existing chi router (preserving its middleware,
 // /metrics, /healthz and mount paths) and returns a Doc. Huma automatically
-// exposes /openapi.json, /openapi.yaml and /docs on the same router.
-func New(r chi.Router, title, version, preamble string, authenticator Authenticator, access *auth.Access, logger *zap.Logger) *Doc {
-	if authenticator == nil || access == nil || logger == nil {
-		panic("apidocs.New: an authenticator, an access check and a logger are required")
+// exposes /openapi.json, /openapi.yaml and /docs on the same router. The router's requests must
+// pass auth.Gate first: an operation reads the principal it put in the context.
+func New(r chi.Router, title, version, preamble string, access *auth.Access, logger *zap.Logger) *Doc {
+	if access == nil || logger == nil {
+		panic("apidocs.New: an access check and a logger are required")
 	}
 	cfg := huma.DefaultConfig(title, version)
 	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
@@ -163,7 +157,7 @@ func New(r chi.Router, title, version, preamble string, authenticator Authentica
 	// data for it is indistinguishable from a correct answer — a caller filtering by a mistyped or
 	// imagined param silently reads the whole table and believes it. 400 instead, naming the param.
 	cfg.RejectUnknownQueryParameters = true
-	return &Doc{API: humachi.New(r, cfg), title: title, preamble: preamble, authenticator: authenticator, logger: logger, Access: access}
+	return &Doc{API: humachi.New(r, cfg), title: title, preamble: preamble, logger: logger, Access: access}
 }
 
 // afterCloseKey marks an operation a coordinator token may still call once its platform
@@ -206,22 +200,17 @@ func allowedAfterClose(op *huma.Operation) bool {
 	return op.Method == http.MethodGet || op.Metadata[afterCloseKey] == true
 }
 
-// authorize is the one place a request is let in: it resolves the token, refuses a caller the
-// audience does not admit, and hands the handler a context carrying the principal. What the
-// principal may reach within the operation is the handler's question (auth.Access).
+// authorize refuses a caller the audience does not admit, the principal auth.Gate resolved. What
+// the principal may reach within the operation is the handler's question (auth.Access).
 func (d *Doc) authorize(audience Audience) func(huma.Context, func(huma.Context)) {
 	return func(ctx huma.Context, next func(huma.Context)) {
-		token, err := auth.BearerToken(ctx.Header("Authorization"))
-		if err != nil {
-			d.refuse(ctx, err)
-			return
-		}
-		principal, err := d.authenticator.Authenticate(ctx.Context(), token)
-		if err != nil {
-			d.refuse(ctx, err)
-			return
-		}
 		op := ctx.Operation()
+		principal, ok := auth.FromContext(ctx.Context())
+		if !ok {
+			refusal := auth.Internal(d.logger, "an operation was reached without passing auth.Gate", errors.New("no principal"), zap.String("path", op.Path))
+			_ = huma.WriteErr(d.API, ctx, refusal.GetStatus(), refusal.Message)
+			return
+		}
 		if !audience.Admits(principal, ctx.Param(clusterNameParam)) {
 			_ = huma.WriteErr(d.API, ctx, http.StatusForbidden,
 				fmt.Sprintf("forbidden: %s token may not call %s %s", withArticle(string(principal.Kind)), op.Method, op.Path))
@@ -232,26 +221,12 @@ func (d *Doc) authorize(audience Audience) func(huma.Context, func(huma.Context)
 				fmt.Sprintf("forbidden: platform experiment %s is closed, and its coordinator token now only reads and files the summary", principal.PlatformExperimentID))
 			return
 		}
-		admitted := auth.WithPrincipal(ctx.Context(), principal)
 		if reads(op) {
-			admitted = auth.WithRead(admitted, ctx.Query("platform_experiment_id"))
+			next(huma.WithContext(ctx, auth.WithRead(ctx.Context(), ctx.Query("platform_experiment_id"))))
+			return
 		}
-		next(huma.WithContext(ctx, admitted))
+		next(ctx)
 	}
-}
-
-func (d *Doc) refuse(ctx huma.Context, err error) {
-	var refusal *auth.Error
-	if !errors.As(err, &refusal) {
-		refusal = auth.Internal(d.logger, "could not authenticate a request", err, zap.String("path", ctx.Operation().Path))
-	}
-	if refusal.Reason != "" {
-		ctx.SetHeader("Content-Type", "application/json")
-		ctx.SetStatus(refusal.GetStatus())
-		_ = json.NewEncoder(ctx.BodyWriter()).Encode(refusal)
-		return
-	}
-	_ = huma.WriteErr(d.API, ctx, refusal.GetStatus(), refusal.Message)
 }
 
 // Register registers a Huma operation and records its metadata for the digest. audience is

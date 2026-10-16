@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -19,6 +22,13 @@ func (a As) Authenticate(context.Context, string) (auth.Principal, error) {
 
 // Staff authenticates every token as staff.
 var Staff = As{Kind: auth.KindStaff}
+
+// Router is a router whose requests pass auth.Gate over tokens, as every router in service does.
+func Router(tokens auth.Tokens) chi.Router {
+	r := chi.NewRouter()
+	r.Use(auth.Gate(tokens, zap.NewNop(), nil))
+	return r
+}
 
 // Authorize gives a request the bearer token As accepts.
 func Authorize(r *http.Request) *http.Request {

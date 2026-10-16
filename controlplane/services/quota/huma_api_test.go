@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
@@ -31,8 +30,8 @@ func (noExperimentStore) ListAgentQuotas(context.Context, string) ([]*domain.Age
 }
 
 func TestQuotasOfAnUnknownPlatformExperimentAreNotFound(t *testing.T) {
-	r := chi.NewRouter()
-	doc := apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	r := authtest.Router(authtest.Staff)
+	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	svc := newSignupTestService(t, noExperimentStore{})
 	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()))
 
@@ -59,8 +58,8 @@ func (s takenAgents) CreateAgent(_ context.Context, agent *domain.Agent) error {
 // A taken id was told from the database's error text, and an agent registered without a name was
 // silently named after its id.
 func TestRegisteringAnAgentRefusesATakenIDAndRequiresAName(t *testing.T) {
-	r := chi.NewRouter()
-	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(waitingPerson), auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	r := authtest.Router(authtest.As(waitingPerson))
+	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	agents := NewHandler(NewService(takenAgents{taken: map[string]bool{"veteran": true}}, zap.NewNop()), zap.NewNop())
 	RegisterHuma(doc, agents, NewPlatformExperimentsHandler(newSignupTestService(t, noExperimentStore{}), &fakeRepositories{}, testPlanning, zap.NewNop()))
 
@@ -107,8 +106,8 @@ func (pagedExperiments) CountPlatformExperiments(context.Context, db.PlatformExp
 // Both lists shortened a limit over the maximum to it, so a short page read as the whole set.
 func TestTheAgentAndPlatformExperimentListsRefuseAPageOverTheMaximum(t *testing.T) {
 	var read []int
-	r := chi.NewRouter()
-	doc := apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	r := authtest.Router(authtest.Staff)
+	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	RegisterHuma(doc, NewHandler(NewService(pagedAgents{limits: &read}, zap.NewNop()), zap.NewNop()),
 		NewPlatformExperimentsHandler(newSignupTestService(t, pagedExperiments{limits: &read}), &fakeRepositories{}, testPlanning, zap.NewNop()))
 
@@ -163,8 +162,8 @@ func TestCloseAndSummaryAnswerThePlatformExperimentAndRefuseByReason(t *testing.
 	}}}}
 	svc := newSignupTestService(t, store)
 	placement := authtest.Placement{PlatformExperiments: map[string]domain.Tenancy{"pe-1": {PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgID: "org-a"}}}
-	r := chi.NewRouter()
-	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(waitingPerson), auth.NewAccess(placement), zap.NewNop())
+	r := authtest.Router(authtest.As(waitingPerson))
+	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
 	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()))
 
 	if code, out := call(t, r, "PUT", "/platform-experiments/pe-1/summary", `{"summary":"what was found"}`); code != http.StatusOK || out["id"] != "pe-1" || out["summary"] != "what was found" {
@@ -222,8 +221,8 @@ func TestResultsTheMetricsStoreRefusesAreAnInternalErrorAndNotNotFound(t *testin
 		_, _ = w.Write([]byte(`{"status":"error","error":"invalid promql query","errorType":"InvalidArguments"}`))
 	}))
 	defer metricsDB.Close()
-	r := chi.NewRouter()
-	doc := apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	r := authtest.Router(authtest.Staff)
+	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	svc := newSignupTestService(t, constraintResultsStore{})
 	svc.metricsDBURL = metricsDB.URL
 	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()))

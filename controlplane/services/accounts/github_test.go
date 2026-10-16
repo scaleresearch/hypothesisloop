@@ -14,12 +14,12 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
@@ -354,8 +354,8 @@ func newGitHubWorld(t *testing.T, withApp bool) *githubWorld {
 	closedAfterTheToken := w.callers["agent"]
 	closedAfterTheToken.PlatformExperimentID = "pe-closed"
 	w.callers["agent-closed"] = closedAfterTheToken
-	router := chi.NewRouter()
-	doc := apidocs.New(router, "test", "1.0.0", "", tokens{w.world}, access, zap.NewNop())
+	router := authtest.Router(tokens{w.world})
+	doc := apidocs.New(router, "test", "1.0.0", "", access, zap.NewNop())
 	RegisterRepositoriesHuma(doc, w.svc)
 	w.router = router
 	return w

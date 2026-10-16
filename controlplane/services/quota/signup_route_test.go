@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
@@ -21,8 +20,8 @@ func TestAnAgentReadsItsOwnNameInItsSignup(t *testing.T) {
 	store.signups = []domain.AgentSignup{{PlatformExperimentID: "pe-1", AgentID: "dana", Name: "Researcher 1", Role: domain.SignupRoleCompetitor}}
 	dana := auth.Principal{Kind: auth.KindAgent, PlatformExperimentID: "pe-1", AgentID: "dana", ProjectID: "project-a", OrgIDs: []string{"org-a"}}
 
-	r := chi.NewRouter()
-	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(dana), auth.NewAccess(agentsTestPlacement), zap.NewNop())
+	r := authtest.Router(authtest.As(dana))
+	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
 	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(newSignupTestService(t, store), store, testPlanning, zap.NewNop()))
 
 	if code, out := call(t, r, "GET", "/platform-experiments/pe-1/signups/dana", ""); code != http.StatusOK || out["name"] != "Researcher 1" {

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
@@ -56,8 +55,8 @@ func dataKeyRouter(t *testing.T, keys AgentDataKeyStore, storeStatus int) (http.
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := chi.NewRouter()
-	RegisterDataUsageHuma(apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop()), NewDataUsageHandler(client, keys, anyoneActive{}, 0, zap.NewNop()))
+	r := authtest.Router(authtest.Staff)
+	RegisterDataUsageHuma(apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop()), NewDataUsageHandler(client, keys, anyoneActive{}, 0, zap.NewNop()))
 	return r, &created
 }
 

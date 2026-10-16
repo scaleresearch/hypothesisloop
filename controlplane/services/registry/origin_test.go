@@ -51,7 +51,7 @@ func newRegistryAs(t *testing.T, caller auth.Principal) *registryAs {
 		}
 		return hyp
 	}
-	fixture := &registryAs{store: store, graph: svc.graph.(*fakeGraph), events: svc.events.(*recordedEvents), router: chi.NewRouter(),
+	fixture := &registryAs{store: store, graph: svc.graph.(*fakeGraph), events: svc.events.(*recordedEvents), router: authtest.Router(authtest.As(caller)),
 		own: seed("agent-1", "pe-1", "warmup helps"), rivals: seed("agent-2", "pe-1", "dropout hurts"), elsewhere: seed("agent-9", "pe-other", "decay hurts")}
 	unowned, _, _, _, err := svc.RegisterHypothesis(ctx, "", adaActor, "pe-1", "label smoothing is neutral", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: "pe-1"}}, nil)
 	if err != nil {
@@ -61,7 +61,7 @@ func newRegistryAs(t *testing.T, caller auth.Principal) *registryAs {
 	for _, h := range []*domain.Hypothesis{fixture.own, fixture.rivals, unowned} {
 		store.jobs = append(store.jobs, jobOn("job-"+h.ID, h.ID, domain.StatusFailed))
 	}
-	RegisterHuma(apidocs.New(fixture.router, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(watchTenancy), zap.NewNop()), NewHandler(svc, zap.NewNop()))
+	RegisterHuma(apidocs.New(fixture.router, "test", "1.0.0", "", auth.NewAccess(watchTenancy), zap.NewNop()), NewHandler(svc, zap.NewNop()))
 	return fixture
 }
 

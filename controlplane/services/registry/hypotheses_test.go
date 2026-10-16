@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
@@ -723,8 +722,8 @@ func TestRegisterHypothesisRefusesAnUnknownPlatformExperiment(t *testing.T) {
 }
 
 func TestHypothesisGraphOfAnUnknownPlatformExperimentIsNotFound(t *testing.T) {
-	r := chi.NewRouter()
-	RegisterHuma(apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop()), NewHandler(poolService(&missingExperimentStore{}), zap.NewNop()))
+	r := authtest.Router(authtest.Staff)
+	RegisterHuma(apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop()), NewHandler(poolService(&missingExperimentStore{}), zap.NewNop()))
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest(http.MethodGet, "/hypotheses/graph?platform_experiment_id=pe-missing", nil)))

@@ -11,17 +11,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/controller"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/metricsingest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/settlement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metrics"
 )
 
 // metrics-service hosts the metric-controller: the node-agent metric push endpoint and the
@@ -138,9 +139,21 @@ func newControllerServer(authenticator *auth.Authenticator, store *db.Store, peF
 		logger.Fatal("metrics-service: start reconcile loop", zap.Error(err))
 	}
 
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", authenticator.RequireStaff(logger, promhttp.Handler()))
-	mux.Handle("/internal/node-metrics", authenticator.RequireRuntime(logger, metrics.NewPushHandler(metricsDBURL, store)))
+	srv := &http.Server{
+		Addr:         ":" + port,
+		Handler:      newRouter(authenticator, metricsingest.NewPushHandler(metricsDBURL, store), logger),
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  30 * time.Second,
+	}
+	return srv, runCancel
+}
+
+func newRouter(tokens auth.Tokens, push http.Handler, logger *zap.Logger) chi.Router {
+	r := chi.NewRouter()
+	r.Use(auth.Gate(tokens, logger, nil))
+	r.Handle("/metrics", auth.RequireStaff(logger, promhttp.Handler()))
+	r.Handle("/internal/node-metrics", auth.RequireRuntime(logger, push))
 	// Both spellings, same as the API server — a caller should never have to remember which
 	// of /health and /healthz a given process happens to answer.
 	health := func(w http.ResponseWriter, _ *http.Request) {
@@ -148,17 +161,9 @@ func newControllerServer(authenticator *auth.Authenticator, store *db.Store, peF
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, `{"status":"ok"}`)
 	}
-	mux.HandleFunc("/health", health)
-	mux.HandleFunc("/healthz", health)
-
-	srv := &http.Server{
-		Addr:         ":" + port,
-		Handler:      mux,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  30 * time.Second,
-	}
-	return srv, runCancel
+	r.HandleFunc("/health", health)
+	r.HandleFunc("/healthz", health)
+	return r
 }
 
 func requiredEnv(key string, logger *zap.Logger) string {

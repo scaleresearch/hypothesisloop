@@ -393,11 +393,11 @@ func TestAuthenticatorRefusesAMisconfiguredIdentityProvider(t *testing.T) {
 }
 
 func TestBearerToken(t *testing.T) {
-	if token, err := BearerToken("Bearer abc"); err != nil || token != "abc" {
+	if token, err := bearerToken("Bearer abc"); err != nil || token != "abc" {
 		t.Errorf("got = %q, %v, want abc", token, err)
 	}
 	for _, header := range []string{"", "abc", "Bearer ", "Basic abc", "bearer abc"} {
-		if token, err := BearerToken(header); err == nil {
+		if token, err := bearerToken(header); err == nil {
 			t.Errorf("header %q: got token %q, want a refusal", header, token)
 		}
 	}
@@ -407,11 +407,11 @@ func TestOnlyARuntimeOrStaffMayPush(t *testing.T) {
 	a, _ := newTestAuthenticator(t)
 	served := false
 	var caller Principal
-	handler := a.RequireRuntime(zap.NewNop(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := Gate(a, zap.NewNop(), nil)(RequireRuntime(zap.NewNop(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		served = true
 		caller, _ = FromContext(r.Context())
 		w.WriteHeader(http.StatusNoContent)
-	}))
+	})))
 	for _, tc := range []struct {
 		name   string
 		header string
@@ -446,7 +446,7 @@ func TestOnlyARuntimeOrStaffMayPush(t *testing.T) {
 
 func TestOnlyStaffReachWhatRequireStaffGuards(t *testing.T) {
 	a, _ := newTestAuthenticator(t)
-	handler := a.RequireStaff(zap.NewNop(), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	handler := Gate(a, zap.NewNop(), nil)(RequireStaff(zap.NewNop(), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })))
 	for name, tc := range map[string]struct {
 		header string
 		want   int
@@ -471,9 +471,9 @@ func TestOnlyStaffReachWhatRequireStaffGuards(t *testing.T) {
 func TestAFailureOfThePlatformsOwnIsAnsweredWithoutItsText(t *testing.T) {
 	a, directory := newTestAuthenticator(t)
 	directory.fail = errors.New("pq: password authentication failed for user hl at 10.0.0.7")
-	handler := a.RequireRuntime(zap.NewNop(), http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	handler := Gate(a, zap.NewNop(), nil)(RequireRuntime(zap.NewNop(), http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Error("the handler ran behind a failed directory read")
-	}))
+	})))
 	request := httptest.NewRequest(http.MethodPost, "/internal/node-metrics", strings.NewReader("{}"))
 	request.Header.Set("Authorization", "Bearer "+mustMint(t, testSecret, RuntimeScope("cluster-a")))
 	recorder := httptest.NewRecorder()
@@ -504,7 +504,7 @@ func TestInternalLogsTheCauseAndAnswersWithoutIt(t *testing.T) {
 // A token that fails for any other cause carries no reason, and the runtime keeps its jobs.
 func TestOnlyARemovedClustersRuntimeIsToldItsClusterIsNotRegistered(t *testing.T) {
 	a, _ := newTestAuthenticator(t)
-	handler := a.RequireRuntime(zap.NewNop(), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	handler := Gate(a, zap.NewNop(), nil)(RequireRuntime(zap.NewNop(), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {})))
 	for name, tc := range map[string]struct {
 		token  string
 		reason string

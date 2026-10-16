@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
@@ -187,9 +186,9 @@ func newWorld(t *testing.T, cluster string, wrap func(*reconcileStore) Store, bu
 	}))
 	t.Cleanup(metrics.Close)
 	data := &objectstore.Client{Endpoint: "http://store.invalid:9000", Region: "us-east-1", Bucket: "data"}
-	router := chi.NewRouter()
 	caller := authtest.As{Kind: auth.KindRuntime, ClusterName: cluster, OrgIDs: []string{"org-a"}}
-	doc := apidocs.New(router, "test", "1.0.0", "", caller, auth.NewAccess(authtest.Placement{Clusters: map[string]string{cluster: "org-a"}}), zap.NewNop())
+	router := authtest.Router(caller)
+	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{Clusters: map[string]string{cluster: "org-a"}}), zap.NewNop())
 	RegisterHuma(doc, NewHandler(wrap(w.store), time.Minute, metrics.URL, 90*time.Second, data, time.Minute, nil, 100, "test-signing-secret-of-enough-length", environments, zap.NewNop()).
 		WithBuildReported(func() { w.wakes.Add(1) }))
 	w.router = router

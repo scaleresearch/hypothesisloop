@@ -138,7 +138,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("control-service: configure auth", zap.Error(err))
 	}
-	gate := apiGate{authenticator: authenticator, access: auth.NewAccess(directory)}
+	gate := apiGate{tokens: authenticator, access: auth.NewAccess(directory)}
 
 	// The git host is one of two. On a plain one there is no GitHub App and no client for it:
 	// connecting GitHub answers that there is none.
@@ -190,8 +190,8 @@ func main() {
 }
 
 type apiGate struct {
-	authenticator *auth.Authenticator
-	access        *auth.Access
+	tokens auth.Tokens
+	access *auth.Access
 }
 
 func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repositories, gitHost githost.Provider, pool *db.Pool, store *db.Store, graph *graphdb.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
@@ -230,22 +230,81 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 			SigningSecret: pcfg.Auth.SigningSecret, MaxHosted: pcfg.Agents.MaxHostedPerPlatformExperiment,
 		})
 
-	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, gate, gitHost, environmentsSvc, pool, store, graph, peSvc, peHandler, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
+	schedulerHandler, clusterAgentHandler := newSchedulerParts(runCtx, gitHost, environmentsSvc, pool, store, graph, peSvc, peHandler, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
 	// The change stream: one LISTEN connection for this process, fanned out to whatever /watch
 	// connections are open. Nothing is persisted for it and nothing is held between connections
 	// — see services/registry/watch.go.
 	events := db.NewEventsStore(pool, graph)
 	registrySvc := registry.New(store, graph, events, logger, metricsDBURL, dataStore)
-	registryHandler := registry.NewHandler(registrySvc, logger)
-	watchHandler := registry.NewWatchHandler(events, store, gate.authenticator, gate.access, logger)
+	watchHandler := registry.NewWatchHandler(events, store, gate.access, logger)
 	watchHandler.Start(runCtx)
-	dataUsageHandler := quota.NewDataUsageHandler(dataStore, store, peSvc, pcfg.DataStore.MaxBytesPerAgent, logger)
+	connectedClusters := func(ctx context.Context) (map[string]bool, error) {
+		return metricsdb.LiveClusterHeartbeats(ctx, metricsDBURL, connectedWithin)
+	}
+	autoscaledClusters := func(ctx context.Context) (map[string]bool, error) {
+		return metricsdb.LiveClusterAutoscalerCapability(ctx, metricsDBURL, connectedWithin)
+	}
 
+	r := newRouter(gate, pcfg.Auth.UIOrigin, routes{
+		quota:               handler,
+		platformExperiments: peHandler,
+		hypotheses:          graph,
+		sharing:             db.NewPlatformExperimentsStore(pool),
+		dataUsage:           quota.NewDataUsageHandler(dataStore, store, peSvc, pcfg.DataStore.MaxBytesPerAgent, logger),
+		sessions:            dataStore,
+		accounts: accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, autoscaledClusters, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag},
+			accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, logger),
+		repositories: repos,
+		scheduler:    schedulerHandler,
+		registry:     registry.NewHandler(registrySvc, logger),
+		watch:        watchHandler,
+		clusterAgent: clusterAgentHandler,
+		launcher: launcherapi.NewHandler(store, launcherapi.MetricsDB{URL: metricsDBURL}, launcherapi.Settings{
+			Image: pcfg.Agents.Image, APIURL: pcfg.Services.PublicAPIURL, SigningSecret: pcfg.Auth.SigningSecret,
+			BootLimit:       time.Duration(pcfg.Agents.BootLimitSeconds) * time.Second,
+			ProgressLimit:   time.Duration(pcfg.Agents.ProgressLimitSeconds) * time.Second,
+			MaxNewPerAnswer: pcfg.Agents.MaxNewInstancesPerAnswer,
+		}, logger),
+	}, logger)
+
+	return &http.Server{
+		Addr:         ":" + port,
+		Handler:      r,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+}
+
+// routes is everything the API serves.
+type routes struct {
+	quota               *quota.Handler
+	platformExperiments *quota.PlatformExperimentsHandler
+	hypotheses          quota.Hypotheses
+	sharing             quota.Sharing
+	dataUsage           *quota.DataUsageHandler
+	sessions            quota.SessionStore
+	accounts            *accounts.Handler
+	repositories        *accounts.Repositories
+	scheduler           *scheduler.Handler
+	registry            *registry.Handler
+	watch               *registry.WatchHandler
+	clusterAgent        *clusteragentapi.Handler
+	launcher            *launcherapi.Handler
+}
+
+// webSockets are the paths a WebSocket client opens, with the subprotocol that carries its token.
+var webSockets = map[string]string{"/watch": registry.WatchSubprotocol}
+
+// newRouter mounts every route of the API behind auth.Gate, which every request but a CORS
+// preflight passes before any handler runs.
+func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.Router {
 	r := chi.NewRouter()
 	r.Use(api.RecoveryMiddleware(logger))
 	r.Use(api.LoggingMiddleware(logger))
-	r.Use(api.CORSMiddleware(pcfg.Auth.UIOrigin))
-	r.Handle("/metrics", gate.authenticator.RequireStaff(logger, promhttp.Handler()))
+	r.Use(api.CORSMiddleware(uiOrigin))
+	r.Use(auth.Gate(gate.tokens, logger, webSockets))
+	r.Handle("/metrics", auth.RequireStaff(logger, promhttp.Handler()))
 	for _, path := range []string{"/health", "/healthz"} {
 		r.Get(path, func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -257,45 +316,37 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	// the Huma doc below: Huma owns the response for every operation registered with it, and an
 	// upgrade needs the raw connection. Its vocabulary is GET /watch/kinds, registered below, and
 	// `hl watch` is its client, which the experimentator harness runs for an agent between turns.
-	r.Get("/watch", watchHandler.ServeHTTP)
+	r.Get("/watch", h.watch.ServeHTTP)
 
 	// Cluster-agent traffic (Go cluster-agent binaries, not research agents) keeps its own
 	// registration and its own docs under a distinct prefix — a different audience entirely.
+	clusterAgentRouter := chi.NewRouter()
+	clusterAgentDoc := apidocs.New(clusterAgentRouter, "hypothesisloop cluster-agent API", "1.0.0", "", gate.access, logger)
+	clusteragentapi.RegisterHuma(clusterAgentDoc, h.clusterAgent)
+	clusterAgentDoc.MountExplore(clusterAgentRouter)
 	r.Mount("/internal/clusters", clusterAgentRouter)
 
 	// Agent-launchers ask here which agent instances should exist. A third audience with its own
 	// registration and docs, like the cluster-agents above.
 	launcherRouter := chi.NewRouter()
-	launcherDoc := apidocs.New(launcherRouter, "hypothesisloop agent-launcher API", "1.0.0", "", gate.authenticator, gate.access, logger)
-	launcherapi.RegisterHuma(launcherDoc, launcherapi.NewHandler(store, launcherapi.MetricsDB{URL: metricsDBURL}, launcherapi.Settings{
-		Image: pcfg.Agents.Image, APIURL: pcfg.Services.PublicAPIURL, SigningSecret: pcfg.Auth.SigningSecret,
-		BootLimit:       time.Duration(pcfg.Agents.BootLimitSeconds) * time.Second,
-		ProgressLimit:   time.Duration(pcfg.Agents.ProgressLimitSeconds) * time.Second,
-		MaxNewPerAnswer: pcfg.Agents.MaxNewInstancesPerAnswer,
-	}, logger))
+	launcherDoc := apidocs.New(launcherRouter, "hypothesisloop agent-launcher API", "1.0.0", "", gate.access, logger)
+	launcherapi.RegisterHuma(launcherDoc, h.launcher)
 	launcherDoc.MountExplore(launcherRouter)
 	r.Mount("/internal/launchers", launcherRouter)
 
 	// One doc for the whole public API: every operation an agent or the UI can call is
 	// registered here, so /openapi.json and /explore describe all of it in one place.
-	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules, gate.authenticator, gate.access, logger)
-	quota.RegisterHuma(doc, handler, peHandler)
-	quota.RegisterAgentsHuma(doc, peHandler, graph)
-	quota.RegisterPlanningHuma(doc, peHandler)
-	quota.RegisterShareHuma(doc, db.NewPlatformExperimentsStore(pool), peHandler.Answer, logger)
-	quota.RegisterDataUsageHuma(doc, dataUsageHandler)
-	quota.RegisterSessionsHuma(doc, dataStore, logger)
-	connectedClusters := func(ctx context.Context) (map[string]bool, error) {
-		return metricsdb.LiveClusterHeartbeats(ctx, metricsDBURL, connectedWithin)
-	}
-	autoscaledClusters := func(ctx context.Context) (map[string]bool, error) {
-		return metricsdb.LiveClusterAutoscalerCapability(ctx, metricsDBURL, connectedWithin)
-	}
-	accounts.RegisterHuma(doc, accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, autoscaledClusters, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag},
-		accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, logger))
-	accounts.RegisterRepositoriesHuma(doc, repos)
-	scheduler.RegisterHuma(doc, schedulerHandler)
-	registry.RegisterHuma(doc, registryHandler)
+	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules, gate.access, logger)
+	quota.RegisterHuma(doc, h.quota, h.platformExperiments)
+	quota.RegisterAgentsHuma(doc, h.platformExperiments, h.hypotheses)
+	quota.RegisterPlanningHuma(doc, h.platformExperiments)
+	quota.RegisterShareHuma(doc, h.sharing, h.platformExperiments.Answer, logger)
+	quota.RegisterDataUsageHuma(doc, h.dataUsage)
+	quota.RegisterSessionsHuma(doc, h.sessions, logger)
+	accounts.RegisterHuma(doc, h.accounts)
+	accounts.RegisterRepositoriesHuma(doc, h.repositories)
+	scheduler.RegisterHuma(doc, h.scheduler)
+	registry.RegisterHuma(doc, h.registry)
 	// /watch itself cannot be registered here (it is an upgrade), but its vocabulary can be, so
 	// an agent reading /explore learns what the stream carries rather than having to be told.
 	registry.RegisterWatchHuma(doc)
@@ -305,20 +356,13 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	doc.MountExploreAudience(r, "/explore", apidocs.AudienceAgent)
 	doc.MountExploreAudience(r, "/explore/coordinator", apidocs.AudienceCoordinator)
 	doc.MountRules(r, "/explore/rules")
-
-	return &http.Server{
-		Addr:         ":" + port,
-		Handler:      r,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
+	return r
 }
 
 // newSchedulerParts builds the scheduler's handler and starts its background loops, returning
-// the pieces newAPIServer mounts: the handler goes on the shared API doc, the cluster-agent
-// router under its own prefix.
-func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Provider, environmentsSvc *environments.Service, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *quota.PlatformExperimentsService, peHandler *quota.PlatformExperimentsHandler, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Handler, chi.Router) {
+// the handlers newRouter serves: the scheduler's on the shared API doc, the cluster-agents' under
+// its own prefix.
+func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environmentsSvc *environments.Service, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *quota.PlatformExperimentsService, peHandler *quota.PlatformExperimentsHandler, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Handler, *clusteragentapi.Handler) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
 	// jwc is workload.Backend; swap this line to plug in a different scheduling mechanism
@@ -403,12 +447,7 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second,
 		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.Auth.SigningSecret, environmentRegistry, logger).
 		WithBuildReported(schedulerLoop.Trigger)
-	clusterAgentRouter := chi.NewRouter()
-	caDoc := apidocs.New(clusterAgentRouter, "hypothesisloop cluster-agent API", "1.0.0", "", gate.authenticator, gate.access, logger)
-	clusteragentapi.RegisterHuma(caDoc, clusterAgentHandler)
-	caDoc.MountExplore(clusterAgentRouter)
-
-	return schedulerHandler, clusterAgentRouter
+	return schedulerHandler, clusterAgentHandler
 }
 
 // newEnvironmentRegistry is where assigned environment builds push to and the logins to it, and
