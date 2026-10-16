@@ -1045,9 +1045,13 @@ func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.Pl
 	var signups []domain.AgentSignup
 	var err error
 	if pe.Status == domain.PlatformExpClosed {
-		if pe.StatusReason, err = s.closedReason(ctx, pe); err != nil {
+		if why, err = s.closedReason(ctx, pe); err != nil {
 			return fmt.Errorf("platform_experiments.Describe: %w", err)
 		}
+		if err := summarize(why, pe, nil, time.Now()); err != nil {
+			return fmt.Errorf("platform_experiments.Describe: %w", err)
+		}
+		pe.StatusReason = why
 		return nil
 	}
 	// A draft's planner has a machine only while it plans.
@@ -1079,12 +1083,15 @@ func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.Pl
 		}
 		why.Message = nextStep(pe, why.Reason, signups, reader, now) + why.Message
 	}
-	silent, err := s.launcherUnreachable(ctx, pe, signups)
+	silent, err := s.launcherUnreachable(ctx, pe, signups, reader.Kind == auth.KindStaff)
 	if err != nil {
 		return fmt.Errorf("platform_experiments.Describe: %w", err)
 	}
 	if silent != nil {
 		why = silent
+	}
+	if err := summarize(why, pe, signups, now); err != nil {
+		return fmt.Errorf("platform_experiments.Describe: %w", err)
 	}
 	if why.WaitsFor, err = domain.WaitsFor(why.Reason, pe.CoordinatorHosted); err != nil {
 		return fmt.Errorf("platform_experiments.Describe: %w", err)

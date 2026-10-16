@@ -63,7 +63,7 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 	if maxProposedResearchers(launch.MaxHosted) < 1 {
 		return nil, fmt.Errorf("platform_experiments.CreateDraft: the platform runs %d machines for one platform experiment (agents.max_hosted_per_platform_experiment), and an accepted draft takes three at least: its coordinator, its baseline agent and one researcher", launch.MaxHosted)
 	}
-	if err := s.requireLauncher(ctx, launch.Launcher); err != nil {
+	if err := s.requireHosting(ctx, launch.Launcher); err != nil {
 		return nil, err
 	}
 	if err := s.requireContinuable(ctx, projectID, repository.Named, continues); err != nil {

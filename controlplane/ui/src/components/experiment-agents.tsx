@@ -111,7 +111,7 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
 
 // One short word on where an agent is, and the longer story behind it for its title.
 function statusOf(agent: JoinedAgent, closed: boolean): { label: string; tone: Tone; detail?: string } {
-  const detail = [agent.finished_reason, agent.activity?.text, agent.status_reason?.message].filter(Boolean).join(' ') || undefined
+  const detail = [agent.finished_reason, agent.activity?.text, agent.status_reason?.summary].filter(Boolean).join(' ') || undefined
   if (agent.finished_at) return { label: `Finished ${relTime(agent.finished_at)}`, tone: 'neutral', detail }
   if (agent.cut_reason === 'max_agents_lowered') return { label: 'Cut, max researchers lowered', tone: 'neutral', detail }
   if (closed) return { label: 'Stopped, experiment closed', tone: 'neutral', detail }
@@ -204,7 +204,10 @@ function AgentDetails({ agent, messages, catalog }: { agent: JoinedAgent; messag
       {agent.instance && <InstanceHealth instance={agent.instance} />}
       {agent.activity && <Activity activity={agent.activity} className="max-w-md" />}
       {agent.status_reason && agent.instance && (
-        <Text variant="hint" className="max-w-md">{agent.status_reason.message}</Text>
+        <Text variant="hint" className="max-w-md">{agent.status_reason.summary}</Text>
+      )}
+      {agent.status_reason?.operator_detail && (
+        <Text variant="note" className="max-w-md">Operator: {agent.status_reason.operator_detail}</Text>
       )}
       {messages.length > 0 && <Messages messages={messages} />}
     </Stack>

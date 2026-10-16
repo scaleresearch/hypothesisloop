@@ -104,8 +104,6 @@ func (s *keepStore) ResearcherPoolState(context.Context, string) (db.PoolState, 
 	return s.state, nil
 }
 
-func (s *keepStore) LauncherKnown(context.Context, string) (bool, error) { return true, nil }
-
 func (s *keepStore) ListSignupsByRole(context.Context, string, domain.SignupRole) ([]string, error) {
 	return nil, nil
 }

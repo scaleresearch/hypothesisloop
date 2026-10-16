@@ -80,14 +80,15 @@ func (s *PlatformExperimentsService) roster(ctx context.Context, platformExpID s
 			starting = append(starting, signup.Launcher)
 		}
 	}
-	silent, err := s.silentLaunchers(ctx, starting, now)
+	silent, err := s.silentLaunchers(ctx, starting, now, reader.Kind == domain.ActorStaff)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.roster: %w", err)
 	}
 	for i, signup := range signups {
 		out[i] = JoinedAgent{AgentSignup: signup, StatusReason: instanceStarting(signup, now)}
-		if sentence, ok := silent[signup.Launcher]; ok && out[i].StatusReason != nil {
-			out[i].StatusReason = &domain.StatusReason{Reason: reasonLauncherUnreachable, Message: launcherUnreachableMessage(sentence)}
+		if why, ok := silent[signup.Launcher]; ok && out[i].StatusReason != nil {
+			paused := *why
+			out[i].StatusReason = &paused
 		}
 		if why := out[i].StatusReason; why != nil {
 			var err error
@@ -136,16 +137,16 @@ func (s *PlatformExperimentsService) roster(ctx context.Context, platformExpID s
 		if !signup.SharesBudget() {
 			continue
 		}
-		waits := "it takes its first turn when the platform starts the run"
+		waits, summary := "it takes its first turn when the platform starts the run", "It starts with the run."
 		if signup.Hosted {
-			waits = "its machine is asked for when the platform starts the run, and none is before"
+			waits, summary = "its machine is asked for when the platform starts the run, and none is before", "Its machine starts with the run."
 		}
 		if signup.Instance != nil {
 			instance := *signup.Instance
 			instance.Waiting = true
 			out[i].Instance = &instance
 		}
-		out[i].StatusReason = &domain.StatusReason{Reason: why.Reason, Message: waits + ": " + why.Message, WaitsFor: who}
+		out[i].StatusReason = &domain.StatusReason{Reason: why.Reason, Message: waits + ": " + why.Message, Summary: summary, WaitsFor: who}
 	}
 	return out, nil
 }
@@ -156,7 +157,8 @@ const reasonInstanceStarting = "instance_starting"
 // neverLaunched is the status_reason of an agent of a platform experiment closed for why that
 // waited for a run that never started: no machine was asked for it and it took no turn.
 func neverLaunched(why *domain.StatusReason) *domain.StatusReason {
-	return &domain.StatusReason{Reason: "never_launched", Message: "it never took a turn and no machine was asked for it: its platform experiment closed before the run started, with close_reason " + why.Reason + ": " + why.Message}
+	return &domain.StatusReason{Reason: "never_launched", Message: "it never took a turn and no machine was asked for it: its platform experiment closed before the run started, with close_reason " + why.Reason + ": " + why.Message,
+		Summary: "It never started: the experiment closed before the run began."}
 }
 
 // instanceStarting is the status_reason of a hosted agent whose run goes on and whose machine is
@@ -171,14 +173,15 @@ func instanceStarting(signup domain.AgentSignup, now time.Time) *domain.StatusRe
 	if state != domain.InstanceRequested && state != domain.InstanceStarting {
 		return nil
 	}
-	where := "its machine is asked of its launcher at the launcher's next pass"
-	switch {
-	case instance.Name != "" && instance.AskedAt != nil && state == domain.InstanceStarting:
-		where = fmt.Sprintf("its machine was asked for %s ago and is starting", now.Sub(*instance.AskedAt).Round(time.Second))
-	case instance.Name != "" && instance.AskedAt != nil:
-		where = fmt.Sprintf("its machine was asked for %s ago and its launcher has not listed it yet", now.Sub(*instance.AskedAt).Round(time.Second))
+	where, summary := "its machine is asked of its launcher at the launcher's next pass", "Its machine is being requested."
+	if instance.Name != "" && instance.AskedAt != nil {
+		ago := readableDuration(now.Sub(*instance.AskedAt))
+		where, summary = "its machine was asked for "+ago+" ago and its launcher has not listed it yet", "Its machine was requested "+ago+" ago and is on its way."
+		if state == domain.InstanceStarting {
+			where, summary = "its machine was asked for "+ago+" ago and is starting", "Its machine is starting (requested "+ago+" ago)."
+		}
 	}
-	return &domain.StatusReason{Reason: reasonInstanceStarting, Message: where +
+	return &domain.StatusReason{Reason: reasonInstanceStarting, Summary: summary, Message: where +
 		": a start in progress and no failure. A machine that does not come up is replaced, which restarts counts, and one given up on reads stopped with end_reason and exit_log"}
 }
 
@@ -220,7 +223,7 @@ func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID
 	}
 	if req.Hosted {
 		signup.Launcher = launch.Launcher
-		if err := s.requireLauncher(ctx, launch.Launcher); err != nil {
+		if err := s.requireHosting(ctx, launch.Launcher); err != nil {
 			return nil, err
 		}
 	}
@@ -336,19 +339,6 @@ func agentNameTaken(name string) error {
 	return refuseSignup(409, "agent_name_taken", "another agent of this platform experiment is named %q, and a name tells its agents apart: state another name, or none to have the platform name it by its role", name)
 }
 
-// requireLauncher refuses to host anything while the launcher config gives new machines to is
-// not registered: its token would be refused, and nothing would ever start.
-func (s *PlatformExperimentsService) requireLauncher(ctx context.Context, launcher string) error {
-	known, err := s.store.LauncherKnown(ctx, launcher)
-	if err != nil {
-		return fmt.Errorf("platform_experiments: launcher %s: %w", launcher, err)
-	}
-	if !known {
-		return refuseSignup(503, "launcher_not_registered", "the platform gives hosted machines to launcher %q (config agents.launcher), which is not registered: an operator registers it with `hl-admin launcher add %s`", launcher, launcher)
-	}
-	return nil
-}
-
 // withHosting resolves the coordinator a create asks the platform to run: its launcher and the
 // model it asked for, empty for its agent type's, and that the experiment names the repository it
 // works in.
@@ -363,7 +353,7 @@ func (h *PlatformExperimentsHandler) withHosting(ctx context.Context, req Create
 	if h.launch.Launcher == "" || h.launch.CoordinatorModel == "" {
 		return req, errors.New("platform_experiments.Create: the handler has no agent launch settings")
 	}
-	if err := h.svc.requireLauncher(ctx, h.launch.Launcher); err != nil {
+	if err := h.svc.requireHosting(ctx, h.launch.Launcher); err != nil {
 		return req, err
 	}
 	if req.CoordinatorModel != "" {

@@ -41,7 +41,7 @@ function show(search: string, more: Partial<PlatformExperiment>) {
   const reason = { draft: 'planning', open: 'baseline_measuring', running: 'running', closed: more.close_reason ?? 'closed' }[status]
   vi.mocked(api.fetchPlatformExperiment).mockResolvedValue({
     id: 'pe-x', name: 'Vision benchmark', project_id: 'prj_platform', status, shared: true,
-    status_reason: { reason, message: `the API's sentence for ${reason}`, ...(status === PlatformExperimentStatus.CLOSED ? {} : { waits_for: 'platform' as const }) },
+    status_reason: { reason, message: `the API's sentence for ${reason}`, summary: `The summary for ${reason}.`, ...(status === PlatformExperimentStatus.CLOSED ? {} : { waits_for: 'platform' as const }) },
     budget_accelerator_hours: 100, max_agents: 4, signup_count: 1, stages: [], current_stage: 1, created_at: at, ...more,
   })
   const resolved = resolveTenant(me, '')

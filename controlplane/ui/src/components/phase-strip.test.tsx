@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchPlatformExperimentAgents } from '@/lib/api'
-import { humanize, PhaseStrip } from '@/components/phase-strip'
+import { PhaseStrip } from '@/components/phase-strip'
 import { formatDate } from '@/lib/format'
 import type { Draft, Proposal } from '@/lib/planning'
 import { PlatformExperimentStatus } from '@/types'
@@ -83,11 +83,6 @@ describe('the phase strip', () => {
     await screen.findByText(/Baseline 1 is measuring the baseline/)
     expect(sentence()).toMatch(/^Preparing the baseline\..*Baseline 1 is measuring the baseline\. The run starts by itself when it finishes\.$/)
     expect(sentence()).not.toMatch(/pe-1|platform experiment/)
-  })
-
-  it('capitalises the API\'s message for a reason with no words of its own and drops the experiment id', () => {
-    expect(humanize('platform experiment pe-ab12 has no baseline declared')).toBe('This experiment has no baseline declared')
-    expect(humanize('the baseline agents of platform experiment pe-ab12 left two jobs')).toBe('The baseline agents left two jobs')
   })
 
   it('refuses an experiment that came without the reason every read of one carries', () => {

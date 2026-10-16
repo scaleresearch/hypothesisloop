@@ -6,6 +6,7 @@ import type {
   ClusterSettings,
   CreatedAPIKey,
   CreatedOrgInvite,
+  Hosting,
   JoinedAgent,
   Me,
   Org,
@@ -67,7 +68,8 @@ export class ApiError extends Error {
   }
 }
 
-// The API answers a failure as {"error"} or {"reason","message"}.
+// The API answers a failure as {"error"} or {"reason","message"}. A refusal for a condition of the
+// platform also carries summary, the sentence for a person, and for staff operator_detail.
 async function failure(res: Response): Promise<ApiError> {
   const text = await res.text()
   let message = text
@@ -75,7 +77,9 @@ async function failure(res: Response): Promise<ApiError> {
   let body: Record<string, unknown> | undefined
   try {
     body = JSON.parse(text)
-    message = (body?.message ?? body?.error ?? text) as string
+    message = body?.summary
+      ? [body.summary, body.operator_detail].filter(Boolean).join(' ')
+      : (body?.message ?? body?.error ?? text) as string
     reason = body?.reason as string | undefined
   } catch {
     // A proxy in front of the API answers in its own format.
@@ -876,6 +880,11 @@ export function archiveAgentType(orgID: string, typeID: string): Promise<AgentTy
 
 /** The reason the API gives on a deployment whose git host is not GitHub. */
 export const GITHUB_NOT_CONFIGURED = 'github_not_configured'
+
+// Whether the platform can host agents now, and why not while it cannot.
+export function fetchHosting(): Promise<Hosting> {
+  return apiFetch<Hosting>('/hosting')
+}
 
 // Answered 503 github_not_configured on a deployment whose git host is not GitHub.
 export function fetchGitHubApp(): Promise<GitHubApp> {

@@ -271,8 +271,7 @@ lib_runtime_token() {
 
 # The clusters on the platform's own machines (a Tenstorrent box, an NVIDIA host) that
 # OWNED_COMPUTE_CLUSTERS in .env lists (lib_owned_clusters), registered for the org every schema
-# starts with, and the launcher the committed settings give hosted agents to (agents.launcher).
-# Needs the control plane to have started once, since it creates the tables.
+# starts with. Needs the control plane to have started once, since it creates the tables.
 lib_register_clusters() {
   local clusters line name ceiling
   clusters="$(lib_owned_clusters)" || return 1
@@ -285,7 +284,6 @@ lib_register_clusters() {
       lib_hl_admin cluster settings "${name}" "{\"status_silence_ceiling_seconds\":${ceiling}}"
     fi
   done <<<"${clusters}"
-  lib_hl_admin launcher add main >/dev/null
 }
 
 # The k3s cluster on this machine (localdev/k3s-macos), whose nodes fake their accelerators and

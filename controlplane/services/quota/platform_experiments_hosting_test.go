@@ -30,8 +30,11 @@ type hostingStore struct {
 	unregistered bool
 }
 
-func (s *hostingStore) LauncherKnown(context.Context, string) (bool, error) {
-	return !s.unregistered, nil
+func (s *hostingStore) LauncherAnsweredAt(ctx context.Context, names []string) (map[string]*time.Time, error) {
+	if s.unregistered {
+		return map[string]*time.Time{}, nil
+	}
+	return s.createdStore.LauncherAnsweredAt(ctx, names)
 }
 
 func (s *hostingStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error {

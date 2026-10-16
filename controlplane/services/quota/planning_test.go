@@ -152,8 +152,27 @@ func TestADraftIsCreatedFromOneSentenceWithItsPlannerAndNothingOfARun(t *testing
 
 	// With no launcher registered a planner would never start, so no draft is made.
 	store.unregistered = true
-	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal}); code != http.StatusServiceUnavailable || out["reason"] != "launcher_not_registered" || len(store.created) != 1 {
+	code, out = call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal})
+	if code != http.StatusServiceUnavailable || out["reason"] != "launcher_not_registered" || len(store.created) != 1 {
 		t.Errorf("no launcher: got = %d %v with %d created, want 503 launcher_not_registered", code, out, len(store.created))
+	}
+	if out["summary"] != "Hosted agents are unavailable: this platform has no agent launcher set up. The platform's operator needs to start one." || out["operator_detail"] != nil {
+		t.Errorf("no launcher, read by a person: got = %v, want the plain summary and no operator detail", out)
+	}
+
+	// Nor while the launcher is registered and has stopped checking in: the planner would wait for it.
+	store.unregistered = false
+	silent := time.Now().Add(-2 * time.Hour)
+	store.answered = map[string]*time.Time{"main": &silent}
+	code, out = call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal})
+	if code != http.StatusServiceUnavailable || out["reason"] != "launcher_unreachable" || len(store.created) != 1 ||
+		out["summary"] != "Hosted agents are unavailable: the agent launcher hasn't checked in for 2 hours. They become available when it reconnects." || out["since"] == nil {
+		t.Errorf("a silent launcher: got = %d %v with %d created, want 503 launcher_unreachable with its summary and since", code, out, len(store.created))
+	}
+	recent := time.Now().Add(-10 * time.Second)
+	store.answered = map[string]*time.Time{"main": &recent}
+	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal}); code != http.StatusCreated {
+		t.Errorf("a launcher that checked in 10s ago: got = %d %v, want 201", code, out)
 	}
 }
 
@@ -197,15 +216,24 @@ func TestADraftWhosePlannersLauncherIsSilentSaysItWaitsForTheLauncher(t *testing
 	if err := svc.Describe(context.Background(), pe, auth.Principal{Kind: auth.KindUser}); err != nil || pe.StatusReason.Reason != "planning" {
 		t.Fatalf("with its launcher asking: %+v, %v, want planning", pe.StatusReason, err)
 	}
-	long := time.Now().Add(-10 * time.Minute)
+	long := time.Now().Add(-3*time.Hour - 57*time.Minute - 55*time.Second)
 	store.answered = map[string]*time.Time{"main": &long}
 	if err := svc.Describe(context.Background(), pe, auth.Principal{Kind: auth.KindUser}); err != nil || pe.StatusReason.Reason != "launcher_unreachable" ||
-		pe.StatusReason.WaitsFor != domain.WaitsForPlatform || !strings.Contains(pe.StatusReason.Message, "launcher main last asked for its machines 10m0s ago") {
+		pe.StatusReason.WaitsFor != domain.WaitsForPlatform || !strings.HasPrefix(pe.StatusReason.Message, "launcher main last checked in 4 hours ago, so none of its machines starts") {
 		t.Fatalf("with its launcher silent: %+v, %v, want launcher_unreachable naming main and how long", pe.StatusReason, err)
 	}
+	if why := pe.StatusReason; why.Summary != "Agents are paused: the agent launcher hasn't checked in for 4 hours. They resume when it reconnects, and deadlines keep running." ||
+		why.Since == nil || !why.Since.Equal(long) || why.OperatorDetail != "" {
+		t.Fatalf("a person reads: %+v, want a plain summary, since the last check-in, and no operator detail", why)
+	}
+	if err := svc.Describe(context.Background(), pe, auth.Principal{Kind: auth.KindStaff}); err != nil ||
+		pe.StatusReason.OperatorDetail != `The agent-launcher registered as "main" last checked in 4 hours ago. Start it or check its logs (on a dev stack: make dev-hosted).` {
+		t.Fatalf("staff read: %+v, %v, want what the operator checks", pe.StatusReason, err)
+	}
 	store.answered = map[string]*time.Time{"main": nil}
-	if err := svc.Describe(context.Background(), pe, auth.Principal{Kind: auth.KindUser}); err != nil || !strings.Contains(pe.StatusReason.Message, "launcher main has not asked") {
-		t.Fatalf("with a launcher that never asked: %+v, %v", pe.StatusReason, err)
+	if err := svc.Describe(context.Background(), pe, auth.Principal{Kind: auth.KindUser}); err != nil || !strings.HasPrefix(pe.StatusReason.Message, "launcher main has not checked in since it was registered") ||
+		pe.StatusReason.Summary != "Agents can't start: the agent launcher has never checked in. They start when it connects, and deadlines keep running." || pe.StatusReason.Since != nil {
+		t.Fatalf("with a launcher that never checked in: %+v, %v", pe.StatusReason, err)
 	}
 	// A proposal waits for a person, and no machine is wanted for it.
 	now := time.Now()
@@ -595,8 +623,11 @@ type draftStore struct {
 	acceptedSignups []domain.AgentSignup
 }
 
-func (s *draftStore) LauncherKnown(context.Context, string) (bool, error) {
-	return !s.unregistered, nil
+func (s *draftStore) LauncherAnsweredAt(ctx context.Context, names []string) (map[string]*time.Time, error) {
+	if s.unregistered {
+		return map[string]*time.Time{}, nil
+	}
+	return s.statusStore.LauncherAnsweredAt(ctx, names)
 }
 
 func (s *draftStore) CreateDraft(_ context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup) error {

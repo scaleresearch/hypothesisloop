@@ -214,7 +214,7 @@ describe('once the experiment has started', () => {
 })
 
 describe('an experiment waiting to start', () => {
-  const waits = { reason: 'baseline_required', waits_for: 'coordinator' as const, message: 'Add a baseline agent with `hl platform-experiments agents add --hosted --role baseline --platform-experiment pe-1`: none has joined. platform experiment pe-1 has no baseline declared' }
+  const waits = { reason: 'baseline_required', waits_for: 'coordinator' as const, summary: 'No usable baseline is measured yet.', message: 'Add a baseline agent with `hl platform-experiments agents add --hosted --role baseline --platform-experiment pe-1`: none has joined. platform experiment pe-1 has no baseline declared' }
 
   it('offers nothing to start it with', async () => {
     show(PlatformExperimentStatus.OPEN, { status_reason: waits })

@@ -203,8 +203,22 @@ export interface MetricDefinition {
 // carries no waits_for.
 export interface StatusReason {
   reason: string
+  // What an agent acts on. A page shows summary, never this.
   message: string
+  // One plain sentence for a person: what is happening, what it affects, who acts.
+  summary: string
+  // What the platform's operator checks: only in answers to staff.
+  operator_detail?: string
+  // When the condition began, where known (a launcher's last check-in).
+  since?: string
   waits_for?: 'owner' | 'coordinator' | 'platform'
+}
+
+// Whether the platform can host agents now (GET /hosting). unavailable says why while it cannot:
+// reason launcher_not_registered or launcher_unreachable.
+export interface Hosting {
+  available: boolean
+  unavailable?: StatusReason
 }
 
 // What an agent is doing now, in one short sentence, and when it said so.

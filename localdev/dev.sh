@@ -244,6 +244,27 @@ start_control_plane() {
   lib_register_clusters
 }
 
+# unregister_launcher: a stack that runs no agent-launcher has none registered, so the API reports
+# hosting unavailable and refuses hosted work up front. A launcher that still has machines or
+# hosted agents to take down is refused removal: while it runs it keeps running, and the dev
+# switch fails; once it is gone it stays registered and silent, which the API reports too.
+unregister_launcher() {
+  local name out
+  name="$(sed -n 's/^launcher_name: *//p' runtime/cloud/settings/agent-launcher.yaml)"
+  if out="$(lib_hl_admin launcher remove "${name}" 2>&1)"; then
+    echo "dev: launcher ${name} unregistered: this stack runs no agent-launcher, so hosted agents are unavailable"
+    return
+  fi
+  if [[ "${out}" == *"no launcher ${name} is registered"* ]]; then
+    return
+  fi
+  if running agent-launcher; then
+    echo "dev: agent-launcher ${name} still has hosted work, so it keeps running (close its experiments, or stay on make dev-hosted): ${out}" >&2
+    exit 1
+  fi
+  echo "dev: launcher ${name} stays registered and runs nowhere, so the API reports it silent: ${out}" >&2
+}
+
 # local_cluster enable|disable: whether org default places jobs on the cluster on this machine
 # (lib_register_local_cluster). A database an earlier make dev used has it registered, so a hosted
 # stack turns it off; one that never registered it answers 404 and has nothing to turn off.
@@ -308,13 +329,18 @@ status() {
 
 case "${action}" in
   up)
+    # Asked first while the launcher runs, so a refusal leaves the hosted stack as it was.
+    if running agent-launcher; then
+      unregister_launcher
+    fi
     render_settings
     start_datastores
     start_git_server
+    start_control_plane
     # Local settings give hosted agents no address they could reach, so nothing rents for them.
+    unregister_launcher
     stop cloud-agent
     stop agent-launcher
-    start_control_plane
     lib_register_local_cluster
     local_cluster enable
     # Nor is the cloud cluster offered to every org while nothing can rent for it: hosted mode

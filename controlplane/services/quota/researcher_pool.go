@@ -100,7 +100,7 @@ func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *do
 	if err != nil {
 		return fmt.Errorf("platform_experiments.KeepResearchers: %w", err)
 	}
-	if err := s.requireLauncher(ctx, launch.Launcher); err != nil {
+	if err := s.requireHosting(ctx, launch.Launcher); err != nil {
 		return fmt.Errorf("platform_experiments.KeepResearchers: %w", err)
 	}
 	// Nobody's credential adds it: it is the platform's, on behalf of whoever created the run.

@@ -286,6 +286,23 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		return peh.Answer(ctx, pe)
 	})
 
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "get-hosting", Method: "GET", Path: "/hosting",
+		Summary: "Whether the platform can host agents now", Tags: []string{"platform-experiments"},
+		Description: "available is true while the launcher the platform gives hosted machines to is registered and checked in within the last minute. " +
+			"While it is false, unavailable says why, and every request that would host an agent, a draft's planner or a coordinator is refused with 503 and the same reason.",
+	}, func(ctx context.Context, _ *struct{}) (*struct{ Body Hosting }, error) {
+		caller, err := access.Account(ctx)
+		if err != nil {
+			return nil, err
+		}
+		state, err := peh.svc.hosting(ctx, peh.launch.Launcher, caller.Kind == auth.KindStaff)
+		if err != nil {
+			return nil, auth.Internal(peh.logger, "read hosting", err)
+		}
+		return &struct{ Body Hosting }{Body: state}, nil
+	})
+
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-platform-experiments", Method: "GET", Path: "/platform-experiments",
 		Summary: "List platform experiments", Tags: []string{"platform-experiments"},

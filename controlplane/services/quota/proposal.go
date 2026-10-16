@@ -571,7 +571,7 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	if h.launch.Launcher == "" || h.launch.DefaultModel == "" || h.launch.CoordinatorModel == "" {
 		return nil, h.refusal("accept", errors.New("the handler has no agent launch settings"))
 	}
-	if err := h.svc.requireLauncher(ctx, h.launch.Launcher); err != nil {
+	if err := h.svc.requireHosting(ctx, h.launch.Launcher); err != nil {
 		return nil, h.refusal("accept", err)
 	}
 

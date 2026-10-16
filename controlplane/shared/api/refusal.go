@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Refusal is a refusal a client acts on by its reason, in the {"reason","message"} envelope.
@@ -13,6 +14,11 @@ type Refusal struct {
 	Reason   string     `json:"reason"`
 	Message  string     `json:"message"`
 	Problems []*Refusal `json:"problems,omitempty"`
+	// Summary, OperatorDetail and Since are those of domain.StatusReason, on a refusal that
+	// answers a condition of the platform rather than of the request.
+	Summary        string     `json:"summary,omitempty"`
+	OperatorDetail string     `json:"operator_detail,omitempty"`
+	Since          *time.Time `json:"since,omitempty"`
 }
 
 func (e *Refusal) Error() string  { return e.Message }

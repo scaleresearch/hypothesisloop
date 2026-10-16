@@ -266,7 +266,8 @@ func TestTheRosterOfARunningPlatformExperimentSaysWhichMachinesAreStillStarting(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if why := roster[0].StatusReason; why == nil || why.Reason != "instance_starting" || !strings.Contains(why.Message, "asked for 40s ago") {
+	if why := roster[0].StatusReason; why == nil || why.Reason != "instance_starting" || !strings.Contains(why.Message, "asked for less than a minute ago") ||
+		why.Summary != "Its machine was requested less than a minute ago and is on its way." {
 		t.Errorf("a machine not listed yet: got = %+v", why)
 	}
 	if roster[1].StatusReason != nil {
@@ -280,7 +281,8 @@ func TestTheRosterOfARunningPlatformExperimentSaysWhichMachinesAreStillStarting(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if why := roster[0].StatusReason; why == nil || why.Reason == "instance_starting" || !strings.Contains(why.Message, "its machine is asked for when the platform starts the run") {
+	if why := roster[0].StatusReason; why == nil || why.Reason == "instance_starting" || !strings.Contains(why.Message, "its machine is asked for when the platform starts the run") ||
+		why.Summary != "Its machine starts with the run." {
 		t.Errorf("before the start: got = %+v", why)
 	}
 }

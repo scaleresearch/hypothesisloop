@@ -124,11 +124,14 @@ func (f *rosterStore) Create(context.Context, string, string, string, string, ma
 
 func (f *rosterStore) CreatesOn(context.Context, string, string) (string, error) { return "", nil }
 
-// LauncherAnsweredAt answers every launcher as asking now.
+// LauncherAnsweredAt answers every launcher as checking in now, and none while unregistered.
 func (f *rosterStore) LauncherAnsweredAt(_ context.Context, names []string) (map[string]*time.Time, error) {
 	now := time.Now()
 	out := map[string]*time.Time{}
 	for _, name := range names {
+		if f.unregistered {
+			break
+		}
 		out[name] = &now
 	}
 	return out, nil
@@ -142,10 +145,6 @@ func (f *rosterStore) ListSignups(context.Context, string) ([]string, error) {
 		ids = append(ids, s.AgentID)
 	}
 	return ids, nil
-}
-
-func (f *rosterStore) LauncherKnown(context.Context, string) (bool, error) {
-	return !f.unregistered, nil
 }
 
 // machines is what the platform rents for the experiment at once, with more of them added.
@@ -616,6 +615,9 @@ func TestHostingIsRefusedWhileTheLauncherConfigNamesIsNotRegistered(t *testing.T
 		}
 		if message, _ := out["message"].(string); !strings.Contains(message, "hl-admin launcher add launcher-main") {
 			t.Errorf("%s: the refusal does not say what registers it: %q", body, message)
+		}
+		if detail, _ := out["operator_detail"].(string); out["summary"] == "" || !strings.Contains(detail, `No launcher is registered as "launcher-main"`) {
+			t.Errorf("%s: staff are not told what to check: %v", body, out)
 		}
 	}
 	if len(store.signups) != 0 {
