@@ -2,6 +2,7 @@ package github
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -42,6 +43,18 @@ var ErrNotConnected = errors.New("the org has connected no installation on that 
 // ErrNoInstallation reports an org that connected no GitHub account at all.
 var ErrNoInstallation = errors.New("the org has connected no GitHub account")
 
+// InstallationGoneError is ErrInstallationGone for the installation an org connected on Account.
+type InstallationGoneError struct {
+	Account      string
+	Installation int64
+}
+
+func (e *InstallationGoneError) Error() string {
+	return fmt.Sprintf("github: installation %d on %s was removed or suspended", e.Installation, e.Account)
+}
+
+func (e *InstallationGoneError) Unwrap() error { return ErrInstallationGone }
+
 // Refusal turns what GitHub refused into what the caller is told. gone is the status of a
 // repository the org's installations do not reach: 422 where a request names it, 409 where a
 // platform experiment already does. GitHub failing a call for an installation is 502
@@ -57,6 +70,7 @@ func Refusal(logger *zap.Logger, op string, err error, gone int) error {
 	var notAsAsked *NotAsAskedError
 	var githubFailed *FailedError
 	var missing *PermissionMissingError
+	var installationGone *InstallationGoneError
 	switch {
 	case errors.As(err, &status):
 		return err
@@ -95,6 +109,8 @@ func Refusal(logger *zap.Logger, op string, err error, gone int) error {
 		return api.Refuse(gone, ReasonInstallationNotConnected, "the org has connected no GitHub installation on that GitHub account, the one that owns the repository or the one a new repository was asked on: an owner of the org connects it with POST /orgs/{id}/github-installations")
 	case errors.Is(err, ErrRepositoryNotInstalled):
 		return api.Refuse(gone, ReasonRepositoryNotReachable, "the GitHub installation the org connected does not cover that repository: its owner adds it to the installation on GitHub")
+	case errors.As(err, &installationGone):
+		return api.Refuse(gone, ReasonInstallationGone, "the GitHub App is no longer installed on "+installationGone.Account+": GitHub answers that installation "+strconv.FormatInt(installationGone.Installation, 10)+" was removed or suspended. The owner of "+installationGone.Account+" installs the App there again (install_url of GET /github/app) and an owner of the org connects it in Settings, GitHub, or the experiment keeps its code on another account the org connected")
 	case errors.Is(err, ErrInstallationGone):
 		return api.Refuse(gone, ReasonInstallationGone, "the GitHub App installation was removed or suspended on GitHub: its owner installs the App again and an owner of the org connects it")
 	case errors.As(err, &missing):

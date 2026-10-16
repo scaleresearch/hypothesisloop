@@ -45,6 +45,7 @@ type InstallationStore interface {
 	KeepGitHubUserAuthorization(ctx context.Context, orgID string, installationID int64, authorization string) error
 	RenewGitHubUserToken(ctx context.Context, orgID string, installationID int64, renew func(ctx context.Context, authorization string) (accessToken, next string, err error)) (string, error)
 	DisconnectGitHubInstallation(ctx context.Context, orgID string, installationID int64) error
+	MakeGitHubInstallationDefault(ctx context.Context, orgID string, installationID int64) error
 }
 
 // ExperimentRepositories says which repository a platform experiment names, which project it is
@@ -448,6 +449,58 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 	}) (*struct{}, error) {
 		if err := r.disconnect(ctx, in.ID, in.InstallationID); err != nil {
 			return nil, refusal(r.logger, "delete-github-installation", err, http.StatusConflict)
+		}
+		return &struct{}{}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "make-github-installation-default", Method: "PUT", Path: "/orgs/{id}/github-installations/{installation_id}/default", DefaultStatus: http.StatusNoContent,
+		Summary: "Make a GitHub installation where an org's new repositories are created", Tags: []string{"github"},
+		Description: "For an owner of the org. A platform experiment or draft that names neither repository nor repository_account has its repository created on this installation's account, " +
+			"in place of the default before. With one installation connected that one is used whether or not it is the default; with several and none the default, " +
+			"such a create is refused 422 repository_account_required. Disconnecting the default leaves none. 404 not_found when the org has not connected it.",
+	}, func(ctx context.Context, in *struct {
+		ID             string `path:"id"`
+		InstallationID int64  `path:"installation_id"`
+	}) (*struct{}, error) {
+		const op = "make-github-installation-default"
+		if _, err := r.access.OrgAdmin(ctx, in.ID); err != nil {
+			return nil, err
+		}
+		if err := r.store.MakeGitHubInstallationDefault(ctx, in.ID, in.InstallationID); err != nil {
+			return nil, refusal(r.logger, op, err, http.StatusConflict)
+		}
+		return &struct{}{}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "check-github-installation", Method: "GET", Path: "/orgs/{id}/github-installations/{installation_id}/check", DefaultStatus: http.StatusNoContent,
+		Summary: "Check with GitHub that a connected installation still works", Tags: []string{"github"},
+		Description: "For any member of the org. Asks GitHub now whether the App is still installed on the account and has granted every permission the App asks for (app-manifest.json), " +
+			"the check a create runs on the account it creates on. 204 when it has. 422 installation_gone when GitHub removed or suspended it, github_permission_missing naming what it has not granted, " +
+			"each with what to do. 404 not_found when the org has not connected it. 502 github_failed, 503 github_not_configured.",
+	}, func(ctx context.Context, in *struct {
+		ID             string `path:"id"`
+		InstallationID int64  `path:"installation_id"`
+	}) (*struct{}, error) {
+		const op = "check-github-installation"
+		if _, err := r.access.OrgMember(ctx, in.ID); err != nil {
+			return nil, err
+		}
+		app, err := r.app()
+		if err != nil {
+			return nil, err
+		}
+		connected, err := r.store.ListGitHubInstallations(ctx, in.ID)
+		if err != nil {
+			return nil, refusal(r.logger, op, err, http.StatusUnprocessableEntity)
+		}
+		i := slices.IndexFunc(connected, func(one *domain.OrgGitHubInstallation) bool { return one.InstallationID == in.InstallationID })
+		if i < 0 {
+			return nil, notFound("GitHub installation")
+		}
+		if _, err := github.Installed(ctx, app, connected[i]); err != nil {
+			return nil, refusal(r.logger, op, err, http.StatusUnprocessableEntity)
 		}
 		return &struct{}{}, nil
 	})

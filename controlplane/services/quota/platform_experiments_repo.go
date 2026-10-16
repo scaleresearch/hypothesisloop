@@ -46,6 +46,14 @@ type RepositoryChoice struct {
 	Named, URL, CreateOn string
 }
 
+// RepositoryCheck is what a create would keep its code in: the repository it names, or the account
+// a new one is created on.
+type RepositoryCheck struct {
+	Repository        string `json:"repository,omitempty" doc:"The repository named, as the git host names it."`
+	RepositoryURL     string `json:"repository_url,omitempty" doc:"Where it is cloned from."`
+	RepositoryAccount string `json:"repository_account,omitempty" doc:"The account a new repository would be created on, when none is named."`
+}
+
 // chooseRepository is where a create keeps its code: named, which repositoryOf checked, or the
 // account a new one is created on, which the git host refuses here when it would refuse the
 // creation for the account alone.

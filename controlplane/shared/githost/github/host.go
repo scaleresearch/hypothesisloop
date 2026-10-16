@@ -20,6 +20,7 @@ type AppClient interface {
 	CreateRepository(ctx context.Context, installationID int64, userToken, name, description string, files map[string]string) (*Repository, error)
 	StartFresh(ctx context.Context, token *Token, files map[string]string) error
 	UserToken(ctx context.Context, authorization string) (accessToken, next string, err error)
+	Installation(ctx context.Context, installationID int64) (*Installation, error)
 }
 
 // InstallationStore is what Host reads of the installations orgs connected.
@@ -79,13 +80,17 @@ func (h *Host) token(ctx context.Context, projectID, repository string, access A
 	if installation == nil {
 		return nil, ErrNotConnected
 	}
-	return h.app.Token(ctx, installation.InstallationID, repository, access)
+	token, err := h.app.Token(ctx, installation.InstallationID, repository, access)
+	if errors.Is(err, ErrInstallationGone) {
+		return nil, &InstallationGoneError{Account: installation.AccountLogin, Installation: installation.InstallationID}
+	}
+	return token, err
 }
 
 // Reachable returns a repository as GitHub names it when an installation the org of the project
-// connected covers it.
+// connected covers it and lets the platform push to it, as the experiment's agents do.
 func (h *Host) Reachable(ctx context.Context, projectID, repository string) (string, error) {
-	token, err := h.token(ctx, projectID, repository, Read)
+	token, err := h.token(ctx, projectID, repository, Write)
 	if err != nil {
 		return "", Refusal(h.logger, "check-repository", err, http.StatusUnprocessableEntity)
 	}
@@ -93,17 +98,17 @@ func (h *Host) Reachable(ctx context.Context, projectID, repository string) (str
 }
 
 // Create makes a private repository on the GitHub account named, one the org of the project
-// connected, or with none named on the only account it connected: with several, which one is
-// the request's to say. files are its first commit. On a person's own account it is created
-// with that person's token, renewed from the authorisation kept when they connected it.
+// connected, or with none named on the org's only or default account. files are its first
+// commit. On a person's own account it is created with that person's token, renewed from the
+// authorisation kept when they connected it.
 func (h *Host) Create(ctx context.Context, projectID, account, name, description string, files map[string]string) (string, error) {
 	const op = "create-repository"
-	orgID, chosen, err := h.createsOn(ctx, projectID, account)
+	orgID, chosen, live, err := h.createsOn(ctx, projectID, account)
 	if err != nil {
 		return "", err
 	}
 	userToken := ""
-	if chosen.AccountType == AccountUser {
+	if live.AccountType == AccountUser {
 		if userToken, err = h.store.RenewGitHubUserToken(ctx, orgID, chosen.InstallationID, h.app.UserToken); err != nil {
 			return "", Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
 		}
@@ -147,47 +152,63 @@ func (h *Host) madeHere(ctx context.Context, chosen *domain.OrgGitHubInstallatio
 	return "", false
 }
 
+// CreatesOn is what Create checks before it creates, and on a person's own account the renewal of
+// the authorisation it would create with: what passes here is created unless GitHub refuses the
+// creation itself.
 func (h *Host) CreatesOn(ctx context.Context, projectID, account string) (string, error) {
-	_, chosen, err := h.createsOn(ctx, projectID, account)
+	orgID, chosen, live, err := h.createsOn(ctx, projectID, account)
 	if err != nil {
 		return "", err
+	}
+	if live.AccountType == AccountUser {
+		if _, err := h.store.RenewGitHubUserToken(ctx, orgID, chosen.InstallationID, h.app.UserToken); err != nil {
+			return "", Refusal(h.logger, "check-repository-creation", err, http.StatusUnprocessableEntity)
+		}
 	}
 	return chosen.AccountLogin, nil
 }
 
-// createsOn is the org of the project and the installation a repository is created through: the
-// one on account, or with none named the only one the org connected.
-func (h *Host) createsOn(ctx context.Context, projectID, account string) (string, *domain.OrgGitHubInstallation, error) {
+// createsOn is the org of the project, the installation a repository is created through and that
+// installation as GitHub states it now: the one on account, or with none named the org's only one
+// or its default. It is refused when GitHub removed it or it has not granted every permission the
+// App asks for.
+func (h *Host) createsOn(ctx context.Context, projectID, account string) (string, *domain.OrgGitHubInstallation, *Installation, error) {
 	const op = "create-repository"
 	project, err := h.store.GetProject(ctx, projectID)
 	if err != nil {
-		return "", nil, Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+		return "", nil, nil, Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
 	}
 	if project == nil {
-		return "", nil, notFound("project")
+		return "", nil, nil, notFound("project")
 	}
 	installations, err := h.store.ListGitHubInstallations(ctx, project.OrgID)
 	if err != nil {
-		return "", nil, Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+		return "", nil, nil, Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
 	}
 	if len(installations) == 0 {
-		return "", nil, Refusal(h.logger, op, ErrNoInstallation, http.StatusUnprocessableEntity)
+		return "", nil, nil, Refusal(h.logger, op, ErrNoInstallation, http.StatusUnprocessableEntity)
 	}
 	var chosen *domain.OrgGitHubInstallation
 	logins := []string{}
 	for _, one := range installations {
 		logins = append(logins, one.AccountLogin)
-		if strings.EqualFold(one.AccountLogin, account) || (account == "" && len(installations) == 1) {
+		switch {
+		case account != "" && strings.EqualFold(one.AccountLogin, account),
+			account == "" && (len(installations) == 1 || one.Default):
 			chosen = one
 		}
 	}
 	switch {
 	case chosen == nil && account == "":
-		return "", nil, invalid(ReasonRepositoryAccountRequired, "the org has connected several GitHub accounts ("+strings.Join(logins, ", ")+"): say in repository_account which one the new repository is created on, or name a repository")
+		return "", nil, nil, invalid(ReasonRepositoryAccountRequired, "the org has connected several GitHub accounts ("+strings.Join(logins, ", ")+") and made none the default for new repositories: say in repository_account which one the new repository is created on, or an owner of the org makes one the default in Settings, GitHub, or name a repository")
 	case chosen == nil:
-		return "", nil, Refusal(h.logger, op, ErrNotConnected, http.StatusUnprocessableEntity)
+		return "", nil, nil, Refusal(h.logger, op, ErrNotConnected, http.StatusUnprocessableEntity)
 	}
-	return project.OrgID, chosen, nil
+	live, err := Installed(ctx, h.app, chosen)
+	if err != nil {
+		return "", nil, nil, Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+	}
+	return project.OrgID, chosen, live, nil
 }
 
 func (h *Host) File(ctx context.Context, projectID, repository, path string) ([]byte, error) {
@@ -241,4 +262,17 @@ func (h *Host) Credential(ctx context.Context, projectID, repository string, wri
 func (h *Host) Serves(repository, protocol, host, path string) bool {
 	path = strings.TrimSuffix(strings.Trim(path, "/"), "/info/lfs")
 	return protocol == "https" && strings.EqualFold(host, gitHost) && strings.EqualFold(strings.TrimSuffix(path, ".git"), repository)
+}
+
+// Installed is a connected installation as GitHub states it now: InstallationGoneError when GitHub
+// removed or suspended it, and PermissionMissingError when it has not granted every permission
+// the App asks for.
+func Installed(ctx context.Context, app interface {
+	Installation(ctx context.Context, installationID int64) (*Installation, error)
+}, connected *domain.OrgGitHubInstallation) (*Installation, error) {
+	live, err := app.Installation(ctx, connected.InstallationID)
+	if errors.Is(err, ErrInstallationGone) {
+		return nil, &InstallationGoneError{Account: connected.AccountLogin, Installation: connected.InstallationID}
+	}
+	return live, err
 }

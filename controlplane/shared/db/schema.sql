@@ -1375,6 +1375,10 @@ ALTER TABLE org_github_installations ADD COLUMN IF NOT EXISTS account_type TEXT 
 -- in the clear, and its owner connects the account again.
 ALTER TABLE org_github_installations DROP COLUMN IF EXISTS user_refresh_token;
 ALTER TABLE org_github_installations ADD COLUMN IF NOT EXISTS user_authorization BYTEA;
+-- The account a new repository is created on when a request names none, for an org that
+-- connected several: at most one per org, and gone with its row when it is disconnected.
+ALTER TABLE org_github_installations ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT false;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_org_github_installations_default ON org_github_installations(org_id) WHERE is_default;
 -- The code a platform experiment works on, owner/name on GitHub, and the image its hosted agents
 -- and coordinator run. An empty image is the platform's own (config agents.image). Both are
 -- fixed at creation.

@@ -19,8 +19,9 @@ type Provider interface {
 	// platform experiment's code in it.
 	Reachable(ctx context.Context, projectID, repository string) (string, error)
 	// CreatesOn returns the account Create makes the project's repository on, account or the
-	// only one the host has for the project, or what refuses a repository there. It asks the host
-	// nothing, so a request is answered with it before anything is made.
+	// project's only or default one, or what refuses a repository there: everything Create checks
+	// before it creates, asked of the host now, so a request is answered with it before anything
+	// is made.
 	CreatesOn(ctx context.Context, projectID, account string) (string, error)
 	// Create makes a repository of that name for a platform experiment that names none, on the
 	// account named where the host has several for the project, and returns it. files, by path,

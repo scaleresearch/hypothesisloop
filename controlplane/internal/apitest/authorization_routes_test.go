@@ -293,6 +293,7 @@ var routes = []route{
 	{method: "POST", path: "/platform-experiments", body: pe1, rule: createsIn},
 	{method: "POST", path: "/platform-experiments/drafts", body: `{"project_id":"<prj>","goal":"find the best learning rate"}`, rule: createsIn},
 	{method: "GET", path: "/projects/{id}/experiment-file", request: "/projects/<prj>/experiment-file?repository=acme/model", rule: createsIn},
+	{method: "GET", path: "/projects/{id}/repository-check", request: "/projects/<prj>/repository-check?repository=acme/model", rule: answeredBy(createsIn, http.StatusOK)},
 	{method: "GET", path: "/platform-experiments", rule: listed(agentAudience, reached)},
 	{method: "GET", path: "/platform-experiments/{id}", request: "/platform-experiments/<pe>", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "PATCH", path: "/platform-experiments/{id}", request: "/platform-experiments/<pe>", body: `{"description":"d"}`, rule: scoped(coordinatorAudience, reached)},
@@ -386,6 +387,17 @@ func inOrgOf(audience []string, admitted int) rule {
 
 // createsIn is the creation of a platform experiment in a project: a token already bound to one
 // platform experiment creates no other, and a key bound to a project none outside it.
+// answeredBy is admits with what a handler answers once it is let through, for one whose git host
+// here answers without a store behind it.
+func answeredBy(admits rule, status int) rule {
+	return func(principal, owner string) int {
+		if got := admits(principal, owner); got != reached {
+			return got
+		}
+		return status
+	}
+}
+
 func createsIn(principal, owner string) int {
 	if status, refused := gate(coordinatorAudience, principal); refused {
 		return status

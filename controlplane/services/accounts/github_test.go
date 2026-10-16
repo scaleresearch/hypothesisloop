@@ -107,6 +107,16 @@ func (s *memInstallations) DisconnectGitHubInstallation(_ context.Context, orgID
 	return db.ErrGitHubInstallationNotFound
 }
 
+func (s *memInstallations) MakeGitHubInstallationDefault(_ context.Context, orgID string, id int64) error {
+	if !slices.ContainsFunc(s.connected[orgID], func(have *domain.OrgGitHubInstallation) bool { return have.InstallationID == id }) {
+		return db.ErrGitHubInstallationNotFound
+	}
+	for _, have := range s.connected[orgID] {
+		have.Default = have.InstallationID == id
+	}
+	return nil
+}
+
 // experiments says which repository each platform experiment names, and in which org.
 type experiments map[string][3]string
 
@@ -158,6 +168,8 @@ type fakeApp struct {
 	createErr error
 	// fresh says a repository asked to StartFresh holds only GitHub's first commit.
 	fresh bool
+	// notGranted is what of the App's permissions an installation has not granted, by its id.
+	notGranted map[int64][]string
 	// revoked holds each person's token ended, refreshed each refresh token traded, and unexpiring
 	// is an App whose user tokens do not expire, which issues no refresh token. revokeErr fails
 	// every revocation.
@@ -239,7 +251,8 @@ func newFakeApp() *fakeApp {
 			200: {{FullName: "rival/secret", Private: true}},
 			300: {{FullName: "carol/notes", Private: true}},
 		},
-		listErr: map[int64]error{},
+		listErr:    map[int64]error{},
+		notGranted: map[int64][]string{},
 	}
 }
 
@@ -276,6 +289,9 @@ func (a *fakeApp) Installation(_ context.Context, installationID int64) (*github
 	}
 	for _, one := range []github.Installation{acme, rival, carol} {
 		if _, covered := a.covers[installationID]; covered && one.ID == installationID {
+			if missing := a.notGranted[installationID]; len(missing) > 0 {
+				return nil, &github.PermissionMissingError{Installation: installationID, Missing: missing}
+			}
 			return &one, nil
 		}
 	}
@@ -928,6 +944,9 @@ func TestACredentialIsRefusedOnceTheRepositoryCanNoLongerBeReached(t *testing.T)
 				if strings.Contains(message, leak) || strings.Contains(message, "ghs_") {
 					t.Fatalf("%s: the refusal holds a credential or the failure's text: %s", caller, message)
 				}
+				if tc.reason == github.ReasonInstallationGone && (!strings.Contains(message, "no longer installed on Acme") || !strings.Contains(message, "installation 100")) {
+					t.Fatalf("%s: %s, want the account and the installation named", caller, message)
+				}
 			}
 			if len(w.app.mints) != 1 {
 				t.Fatalf("tokens minted = %d, want only the one from before", len(w.app.mints))
@@ -947,8 +966,8 @@ func TestARepositoryIsReachableThroughTheInstallationsOfTheProjectsOrgAlone(t *t
 	w.connect(w.orgB, rival)
 	ctx := context.Background()
 	named, err := w.host.Reachable(ctx, w.projectA2, "ACME/model")
-	if err != nil || named != "Acme/Model" || len(w.app.mints) != 1 || w.app.mints[0] != (minted{100, "Acme/Model", github.Read}) {
-		t.Fatalf("Reachable = %q, %v, minted %+v, want the name as GitHub spells it, checked with one read token", named, err, w.app.mints)
+	if err != nil || named != "Acme/Model" || len(w.app.mints) != 1 || w.app.mints[0] != (minted{100, "Acme/Model", github.Write}) {
+		t.Fatalf("Reachable = %q, %v, minted %+v, want the name as GitHub spells it, checked with one write token since agents push to it", named, err, w.app.mints)
 	}
 	for name, tc := range map[string]struct {
 		project, repository string
@@ -1275,6 +1294,78 @@ func TestAnInstallationConnectedBeforeItsAccountTypeWasKeptIsReadAsStored(t *tes
 
 var firstFiles = map[string]string{"README.md": "what this is\n"}
 
+// What Create would refuse for the account alone is refused by CreatesOn, which the create of a
+// platform experiment and the wizard's check both call before anything is made: an installation
+// GitHub removed, one that has not granted every permission the App asks for, and on a personal
+// account an authorisation GitHub no longer takes.
+func TestWhereARepositoryWouldBeCreatedIsCheckedWithGitHubBeforeAnythingIsMade(t *testing.T) {
+	ctx := context.Background()
+	w := newGitHubWorld(t, true)
+	w.connect(w.orgA, acme)
+	if on, err := w.host.CreatesOn(ctx, w.projectA, ""); err != nil || on != "Acme" || !slices.Equal(w.app.looked, []int64{acme.ID}) {
+		t.Fatalf("CreatesOn = %q, %v after asking GitHub about %v, want Acme, checked with GitHub", on, err, w.app.looked)
+	}
+	w.app.notGranted[acme.ID] = []string{"administration:write"}
+	for name, check := range map[string]func() error{
+		"CreatesOn": func() error { _, err := w.host.CreatesOn(ctx, w.projectA, ""); return err },
+		"Create":    func() error { _, err := w.host.Create(ctx, w.projectA, "", "sweep", "", firstFiles); return err },
+	} {
+		if err := check(); statusOf(err) != 422 || reasonOf(err) != github.ReasonPermissionMissing || !strings.Contains(err.Error(), "administration:write") {
+			t.Errorf("%s on an installation that may not create: %v, want 422 github_permission_missing naming what to grant", name, err)
+		}
+	}
+	w.app.notGranted[acme.ID] = nil
+	delete(w.app.covers, acme.ID)
+	for name, check := range map[string]func() error{
+		"CreatesOn": func() error { _, err := w.host.CreatesOn(ctx, w.projectA, "acme"); return err },
+		"Create":    func() error { _, err := w.host.Create(ctx, w.projectA, "acme", "sweep", "", firstFiles); return err },
+	} {
+		if err := check(); statusOf(err) != 422 || reasonOf(err) != github.ReasonInstallationGone || !strings.Contains(err.Error(), "no longer installed on Acme") || !strings.Contains(err.Error(), "100") {
+			t.Errorf("%s on an installation GitHub removed: %v, want 422 installation_gone naming the account and the installation", name, err)
+		}
+	}
+	if len(w.app.created) != 0 {
+		t.Fatalf("created %v on an installation that refuses, want nothing", w.app.created)
+	}
+
+	w = newGitHubWorld(t, true)
+	w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
+	if on, err := w.host.CreatesOn(ctx, w.projectA, ""); err != nil || on != "carol" || len(w.app.refreshed) != 1 {
+		t.Fatalf("CreatesOn on a personal account = %q, %v after %d renewals, want carol, her authorisation renewed once", on, err, len(w.app.refreshed))
+	}
+	w.app.refreshErr = github.ErrUserAuthorization
+	if _, err := w.host.CreatesOn(ctx, w.projectA, ""); reasonOf(err) != github.ReasonRepositoryAuthorizationRequired {
+		t.Fatalf("CreatesOn with an authorisation GitHub no longer takes: %v, want repository_authorization_required", err)
+	}
+}
+
+// With several accounts connected the org's default takes a new repository no request placed,
+// and an owner of the org sets it.
+func TestTheOrgsDefaultAccountTakesANewRepositoryNoRequestPlaced(t *testing.T) {
+	ctx := context.Background()
+	w := newGitHubWorld(t, true)
+	w.connect(w.orgA, acme)
+	w.connect(w.orgA, rival)
+	if _, err := w.host.CreatesOn(ctx, w.projectA, ""); reasonOf(err) != github.ReasonRepositoryAccountRequired || !strings.Contains(err.Error(), "default") {
+		t.Fatalf("several accounts and no default: %v, want repository_account_required saying a default may be set", err)
+	}
+	path := func(id int64) string { return fmt.Sprintf("/orgs/%s/github-installations/%d/default", w.orgA, id) }
+	w.refused("member", "PUT", path(rival.ID), nil, http.StatusForbidden, "")
+	w.refused("owner", "PUT", path(carol.ID), nil, http.StatusNotFound, ReasonNotFound)
+	w.ok("owner", "PUT", path(rival.ID), nil, http.StatusNoContent, nil)
+	var listed []domain.OrgGitHubInstallation
+	w.ok("member", "GET", "/orgs/"+w.orgA+"/github-installations", nil, http.StatusOK, &listed)
+	if len(listed) != 2 || listed[0].Default || !listed[1].Default {
+		t.Fatalf("listed = %+v, want rival alone the default", listed)
+	}
+	if on, err := w.host.CreatesOn(ctx, w.projectA, ""); err != nil || on != "rival" {
+		t.Fatalf("CreatesOn with rival the default = %q, %v, want rival", on, err)
+	}
+	if named, err := w.host.Create(ctx, w.projectA, "acme", "on-acme", "", firstFiles); err != nil || named != "Acme/on-acme" {
+		t.Fatalf("an account named beside the default: Create = %q, %v, want it made on the one named", named, err)
+	}
+}
+
 func TestTheExperimentFileIsReadFromTheRepositoryNamed(t *testing.T) {
 	w := newGitHubWorld(t, true)
 	w.connect(w.orgA, acme)
@@ -1310,4 +1401,23 @@ func TestTheExperimentFileIsReadFromTheRepositoryNamed(t *testing.T) {
 	if _, err := w.host.File(ctx, w.projectA, "rival/secret", domain.ExperimentFile); reasonOf(err) != github.ReasonInstallationNotConnected || len(w.app.files) != read {
 		t.Errorf("a repository the org does not reach: %v, read %d files, want installation_not_connected and none read", err, len(w.app.files)-read)
 	}
+}
+
+// The org's GitHub card asks GitHub whether each connected installation still works, by the check
+// a create runs on the account it creates on.
+func TestAConnectedInstallationIsCheckedWithGitHubOnRequest(t *testing.T) {
+	w := newGitHubWorld(t, true)
+	w.connect(w.orgA, acme)
+	path := fmt.Sprintf("/orgs/%s/github-installations/%d/check", w.orgA, acme.ID)
+	w.ok("member", "GET", path, nil, http.StatusNoContent, nil)
+	w.app.notGranted[acme.ID] = []string{"administration:write"}
+	if message := w.refused("member", "GET", path, nil, http.StatusUnprocessableEntity, github.ReasonPermissionMissing); !strings.Contains(message, "administration:write") {
+		t.Errorf("an installation that has not granted creation: %s, want what it has not granted", message)
+	}
+	delete(w.app.covers, acme.ID)
+	if message := w.refused("member", "GET", path, nil, http.StatusUnprocessableEntity, github.ReasonInstallationGone); !strings.Contains(message, "installs the App there again") {
+		t.Errorf("an installation GitHub removed: %s, want what to do", message)
+	}
+	w.refused("member", "GET", fmt.Sprintf("/orgs/%s/github-installations/%d/check", w.orgA, rival.ID), nil, http.StatusNotFound, ReasonNotFound)
+	w.refused("member", "GET", fmt.Sprintf("/orgs/%s/github-installations/%d/check", w.orgB, acme.ID), nil, http.StatusNotFound, "")
 }

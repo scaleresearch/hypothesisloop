@@ -81,6 +81,7 @@ type OrgGitHubInstallation struct {
 	AccountType    string    `json:"account_type,omitempty" enum:"User,Organization" doc:"Whether the account is a person's own or an organisation, as GitHub says. On a person's own account the platform creates a repository with the authorisation its owner connected it with. Absent on an installation connected before the type was kept, until it is connected again."`
 	ConnectedActor Actor     `json:"connected_actor" doc:"Who connected it: a user, the API key it was connected with, or staff."`
 	ConnectedAt    time.Time `json:"connected_at"`
+	Default        bool      `json:"default" doc:"A new repository is created on this account when a request names no repository_account. At most one of an org's installations is the default. With one installation connected, that one is used whether or not it is the default."`
 }
 
 // DefaultOrgName is the org a person starts with at their first sign-in, and DefaultProjectName

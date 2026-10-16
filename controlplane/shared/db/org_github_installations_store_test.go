@@ -102,6 +102,57 @@ func TestAnOrgConnectsSeveralInstallationsAndFindsOneByItsAccount(t *testing.T) 
 	}
 }
 
+// One installation per org is where a new repository goes when a request names no account. A new
+// installation on an account the org connected replaces the one GitHub removed there, default and all.
+func TestOneInstallationIsTheOrgsDefaultAndANewOneOnItsAccountReplacesIt(t *testing.T) {
+	pool := eventsTestDB(t)
+	accounts := NewAccountsStore(pool)
+	ctx := context.Background()
+	_, org := newTestUserHome(t, accounts)
+	by := domain.Actor{Kind: domain.ActorUser, ID: "user-1"}
+	for _, one := range []*domain.OrgGitHubInstallation{
+		{OrgID: org, InstallationID: 7, AccountLogin: "Acme", AccountType: "Organization", ConnectedActor: by},
+		{OrgID: org, InstallationID: 8, AccountLogin: "carol", AccountType: "User", ConnectedActor: by},
+	} {
+		if err := accounts.ConnectGitHubInstallation(ctx, one); err != nil || one.Default {
+			t.Fatalf("connect %d: %v, default %v, want it connected and not the default", one.InstallationID, err, one.Default)
+		}
+	}
+	defaults := func() []int64 {
+		t.Helper()
+		listed, err := accounts.ListGitHubInstallations(ctx, org)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := []int64{}
+		for _, one := range listed {
+			if one.Default {
+				out = append(out, one.InstallationID)
+			}
+		}
+		return out
+	}
+	for _, id := range []int64{7, 8, 8} {
+		if err := accounts.MakeGitHubInstallationDefault(ctx, org, id); err != nil || fmt.Sprint(defaults()) != fmt.Sprint([]int64{id}) {
+			t.Fatalf("make %d the default: %v, defaults %v, want it alone", id, err, defaults())
+		}
+	}
+	if err := accounts.MakeGitHubInstallationDefault(ctx, org, 99); !errors.Is(err, ErrGitHubInstallationNotFound) || fmt.Sprint(defaults()) != "[8]" {
+		t.Fatalf("make one the org did not connect the default: %v, defaults %v, want %v and 8 kept", err, defaults(), ErrGitHubInstallationNotFound)
+	}
+	reinstalled := &domain.OrgGitHubInstallation{OrgID: org, InstallationID: 18, AccountLogin: "Carol", AccountType: "User", ConnectedActor: by}
+	if err := accounts.ConnectGitHubInstallation(ctx, reinstalled); err != nil || !reinstalled.Default {
+		t.Fatalf("connect a new installation on carol: %+v, %v, want it the default in place of the one removed", reinstalled, err)
+	}
+	listed, err := accounts.ListGitHubInstallations(ctx, org)
+	if err != nil || len(listed) != 2 || listed[0].InstallationID != 7 || listed[1].InstallationID != 18 {
+		t.Fatalf("listed = %+v, %v, want Acme's and the new one on carol, the removed one gone", listed, err)
+	}
+	if err := accounts.DisconnectGitHubInstallation(ctx, org, 18); err != nil || len(defaults()) != 0 {
+		t.Fatalf("disconnect the default: %v, defaults %v, want none left", err, defaults())
+	}
+}
+
 const testSigningSecret = "a signing secret of a test, long enough"
 
 func newTestInstallationsStore(t *testing.T, pool *Pool, secret string) *GitHubInstallationsStore {

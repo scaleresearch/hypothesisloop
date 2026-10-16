@@ -692,3 +692,62 @@ func (s *createdStore) RaiseBaseline(ctx context.Context, pe *domain.PlatformExp
 func (s *createdStore) ListAgentMessages(context.Context, string, string) ([]domain.AgentMessage, error) {
 	return s.messages, nil
 }
+
+// The check a form makes before the create runs the create's own repository checks and creates
+// nothing: what it refuses, the create refuses with the same reason.
+func TestTheRepositoryCheckAnswersAsTheCreateWouldAndCreatesNothing(t *testing.T) {
+	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
+	store, call, _ := repoAPI(t, ownerOfA, repos)
+	check := func(query string) (int, map[string]any) {
+		t.Helper()
+		rec := call("GET", "/projects/prj-a/repository-check"+query, nil)
+		var out map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("%s: %d %s", query, rec.Code, rec.Body)
+		}
+		return rec.Code, out
+	}
+	if code, out := check("?repository=acme/model"); code != http.StatusOK || out["repository"] != testRepository || out["repository_url"] != "https://github.com/Acme/Model.git" || out["repository_account"] != nil {
+		t.Fatalf("a repository named: %d %v, want it as GitHub names it", code, out)
+	}
+	if code, out := check(""); code != http.StatusOK || out["repository_account"] != "acme" || out["repository"] != nil {
+		t.Fatalf("a new repository: %d %v, want the account it would be created on", code, out)
+	}
+	if code, out := check("?repository_account=second-account"); code != http.StatusOK || out["repository_account"] != "second-account" {
+		t.Fatalf("a new repository on an account named: %d %v", code, out)
+	}
+	for name, tc := range map[string]struct {
+		query, reason string
+		arrange       func()
+	}{
+		"a repository the org does not reach": {"?repository=rival/secret", "repository_not_reachable", nil},
+		"an account beside a repository":      {"?repository=acme/model&repository_account=acme", "invalid_request", nil},
+		"an installation GitHub removed": {"", "installation_gone", func() {
+			repos.notOn = api.Refuse(http.StatusUnprocessableEntity, "installation_gone", "the GitHub App is no longer installed on acme")
+		}},
+	} {
+		if tc.arrange != nil {
+			tc.arrange()
+		}
+		if code, out := check(tc.query); code != http.StatusUnprocessableEntity || out["reason"] != tc.reason {
+			t.Errorf("%s: %d %v, want 422 %s", name, code, out, tc.reason)
+		}
+		body := map[string]any{"project_id": "prj-a", "name": "n", "description": "d", "budget_accelerator_hours": 5, "max_agents": 3, "duration_hours": 48,
+			"metrics": []map[string]any{{"key": "loss", "role": "ranking", "direction": "minimize"}}}
+		if tc.query != "" {
+			for _, pair := range strings.Split(strings.TrimPrefix(tc.query, "?"), "&") {
+				k, v, _ := strings.Cut(pair, "=")
+				body[k] = v
+			}
+		}
+		if rec := call("POST", "/platform-experiments", body); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), tc.reason) {
+			t.Errorf("%s: the create answered %d %s, want 422 %s as the check did", name, rec.Code, rec.Body, tc.reason)
+		}
+	}
+	if len(store.created) != 0 || len(repos.created) != 0 {
+		t.Fatalf("created %d experiments and repositories %v, want nothing", len(store.created), repos.created)
+	}
+	if rec := call("GET", "/projects/prj-b/repository-check", nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("another org's project: %d, want 404", rec.Code)
+	}
+}
