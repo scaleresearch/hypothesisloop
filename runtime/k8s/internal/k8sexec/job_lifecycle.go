@@ -64,9 +64,8 @@ func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *clusterapi.
 	return nil
 }
 
-// createJob creates one compiled Job, resolving a collision with a previous generation of the
-// same name. Split out because a grouped experiment creates several and each one meets the same
-// stale-object question independently.
+// createJob creates one compiled Job, replacing a Job of another spec that holds the name. Split
+// out because a grouped experiment creates several and each one meets the same question.
 func (c *JobWorkloadClient) createJob(ctx context.Context, exp *clusterapi.DesiredJob, job *batchv1.Job) error {
 	if len(job.Spec.Template.Spec.ResourceClaims) > 0 {
 		// Must exist before the Job's pod is created (async, via the Job controller) or the
@@ -81,20 +80,34 @@ func (c *JobWorkloadClient) createJob(ctx context.Context, exp *clusterapi.Desir
 		return &agentexec.Unrunnable{Why: "the cluster's Kubernetes API refuses the job as it is specified: " + err.Error()}
 	}
 	if errors.IsAlreadyExists(err) {
-		// Job names are deterministic per experiment, so the name can be held by an earlier
-		// generation, still terminating or not yet compared. Nothing is deleted here: a pass that
-		// lists it compares it with desired state and replaces it when it differs, and a
-		// terminating one is gone by a later pass.
-		existing, getErr := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).Get(ctx, job.Name, metav1.GetOptions{})
-		if getErr != nil {
-			return fmt.Errorf("workload: inspect existing job %s: %w", job.Name, getErr)
-		}
-		if existingJobMatchesDesired(existing, job, exp.ID) {
-			return nil
-		}
-		return fmt.Errorf("workload: job %s of another spec or generation holds the name; the next pass compares it with desired state", job.Name)
+		return c.replaceJob(ctx, exp, job)
 	}
 	return err
+}
+
+// replaceJob converges a Job that holds job's name: one of the desired spec is kept, and any
+// other is deleted so the next pass creates the desired one. Job names are deterministic per
+// experiment, so the holder can be an earlier generation still terminating, or a Job the pass's
+// list did not count as this experiment's.
+func (c *JobWorkloadClient) replaceJob(ctx context.Context, exp *clusterapi.DesiredJob, job *batchv1.Job) error {
+	existing, err := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).Get(ctx, job.Name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("workload: inspect existing job %s: %w", job.Name, err)
+	}
+	if existingJobMatchesDesired(existing, job, exp.ID) {
+		return nil
+	}
+	if existing.DeletionTimestamp != nil {
+		return fmt.Errorf("workload: job %s of an earlier generation is still terminating; the next pass creates the desired one", job.Name)
+	}
+	prop := metav1.DeletePropagationBackground
+	err = c.kube.BatchV1().Jobs(HypothesisLoopNamespace).Delete(ctx, job.Name, metav1.DeleteOptions{
+		PropagationPolicy: &prop,
+	})
+	if err != nil && !errors.IsNotFound(err) {
+		return fmt.Errorf("workload: delete job %s of another spec: %w", job.Name, err)
+	}
+	return fmt.Errorf("workload: deleted job %s of another spec; the next pass creates the desired one", job.Name)
 }
 
 // managedJobsFor lists every Job this client manages for one experiment — one for an ungrouped

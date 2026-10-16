@@ -2,13 +2,11 @@ package k8sexec
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
@@ -139,32 +137,5 @@ func TestPlacementIsResolvedForTheJobAdmissionResolved(t *testing.T) {
 	exp := &clusterapi.DesiredJob{ID: "resolved-placement", AcceleratorType: "unqualified-type", Job: submitted, ResolvedJob: &resolved}
 	if _, err := c.resolvePlacementFor(context.Background(), exp); err == nil {
 		t.Fatal("a job resolved to hold an accelerator was given the empty placement without any resolution attempt")
-	}
-}
-
-// A Job of another spec holding the name is left for the reconcile pass's drift path, the one
-// place a workload is replaced: creating says so and deletes nothing.
-func TestCreatingOverAJobOfAnotherSpecDeletesNothing(t *testing.T) {
-	ctx := context.Background()
-	c := pullTestClient(t)
-	exp := pullTestExperiment("held", "", "busybox")
-	if err := c.CreateWorkload(ctx, exp, nil); err != nil {
-		t.Fatal(err)
-	}
-	changed := pullTestExperiment("held", "", "busybox:2")
-	if err := c.CreateWorkload(ctx, changed, nil); err == nil || !strings.Contains(err.Error(), "next pass compares") {
-		t.Fatalf("CreateWorkload over a Job of another spec = %v, want it to leave the Job to the next pass", err)
-	}
-	jobs, err := c.managedJobsFor(ctx, exp.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(jobs) != 1 || jobs[0].DeletionTimestamp != nil {
-		t.Fatalf("jobs = %d, want the existing Job untouched", len(jobs))
-	}
-	for _, action := range c.kube.(*fake.Clientset).Actions() {
-		if action.GetVerb() == "delete" {
-			t.Fatalf("CreateWorkload deleted %s", describe(action))
-		}
 	}
 }
