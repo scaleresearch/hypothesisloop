@@ -8,21 +8,17 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { startIdentityProvider } from './identity-provider.mjs'
 import { startProxy } from './proxy.mjs'
+import { API, SETTINGS, UI } from './settings.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '..', '..', '..')
-// The one origin the API allows a browser from and the GitHub App returns to. Port 3000 itself
-// belongs to the UI the stack's owner runs: the run serves its own copy on UI_PORT, and its
-// browser reaches that copy under this origin through the proxy.
-const UI = 'http://localhost:3000'
+// The UI origin belongs to the UI the stack's owner runs: the run serves its own copy on UI_PORT,
+// and its browser reaches that copy under that origin through the proxy.
 const UI_PORT = 3100
 const PROXY_PORT = 54398
 const UI_BUILD = '.next-e2e'
-const API = 'http://localhost:8081'
 const IDP = 'http://127.0.0.1:54399'
 const STACK_LOCK = '/tmp/hl-stack.lock'
-// hl-admin reads the settings the running control plane was started with.
-const SETTINGS = join(repo, 'controlplane', 'settings', '.hypothesisloop.dev.yaml')
 const run = randomUUID().slice(0, 8)
 
 const VIEW = { viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' }

@@ -15,16 +15,14 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { startIdentityProvider } from './identity-provider.mjs'
 import { startProxy } from './proxy.mjs'
+import { API, SETTINGS, UI } from './settings.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '..', '..', '..')
-const UI = 'http://localhost:3000'
 const UI_PORT = 3100
 const PROXY_PORT = 54398
 const UI_BUILD = '.next-walk'
-const API = 'http://localhost:8081'
 const IDP = 'http://127.0.0.1:54399'
-const SETTINGS = join(repo, 'controlplane', 'settings', '.hypothesisloop.dev.yaml')
 
 const flag = (name, fallback) => process.argv.includes(name) ? process.argv[process.argv.indexOf(name) + 1] : fallback
 const until = flag('--until', 'done')
@@ -49,7 +47,7 @@ async function main() {
   const closers = []
   const idp = await startIdentityProvider({ port: 54399, keyPath: join(repo, 'localdev', '.dev-jwt-key.pem'), ui: UI })
   closers.push(() => idp.close())
-  const proxy = await startProxy({ port: PROXY_PORT, from: { host: 'localhost', port: 3000 }, to: { host: 'localhost', port: UI_PORT } })
+  const proxy = await startProxy({ port: PROXY_PORT, from: { host: new URL(UI).hostname, port: Number(new URL(UI).port) }, to: { host: 'localhost', port: UI_PORT } })
   closers.push(() => proxy.close())
   const ui = spawn(process.execPath, [join(here, '..', 'node_modules', 'next', 'dist', 'bin', 'next'), 'dev', '-p', String(UI_PORT)], {
     cwd: join(here, '..'),
