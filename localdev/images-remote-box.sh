@@ -27,8 +27,10 @@ IFS= read -r token
 session="$(mktemp -d)"
 trap 'docker --config "${session}/docker" logout "${registry%%/*}" >/dev/null 2>&1 || true; rm -rf "${session}"' EXIT
 mkdir -p "${session}/docker"
-docker --config "${session}/docker" login --username oauth2accesstoken --password-stdin "${registry%%/*}" <<<"${token}" >/dev/null
-helm registry login --registry-config "${session}/helm.json" --username oauth2accesstoken --password-stdin "${registry%%/*}" <<<"${token}" >/dev/null 2>&1
+docker --config "${session}/docker" login --username oauth2accesstoken --password-stdin "${registry%%/*}" <<<"${token}" >"${session}/login" 2>&1 \
+  || { cat "${session}/login" >&2; exit 1; }
+helm registry login --registry-config "${session}/helm.json" --username oauth2accesstoken --password-stdin "${registry%%/*}" <<<"${token}" >"${session}/login" 2>&1 \
+  || { cat "${session}/login" >&2; exit 1; }
 
 image() {
   echo "${registry}/hypothesisloop-$1:${tag}"

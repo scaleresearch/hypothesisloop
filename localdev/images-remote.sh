@@ -58,7 +58,8 @@ ssh_box() {
 started="${SECONDS}"
 work="$(mktemp -d)"
 trap 'rm -rf "${work}"' EXIT
-git archive HEAD | tar -x -C "${work}"
+# docs/ and the UI are in no image built here.
+git archive HEAD -- . ':!docs' ':!controlplane/ui' | tar -x -C "${work}"
 # The experiments the agent image bakes in as samples are local to this checkout (git-ignored);
 # the image keeps their seed/ and .hypothesisloop/job.yaml only.
 experiments=agents/coordinator/experiments
@@ -70,7 +71,7 @@ for dir in "${experiments}"/*/; do
   [[ ! -f "${dir}.hypothesisloop/job.yaml" ]] || cp "${dir}.hypothesisloop/job.yaml" "${work}/${experiments}/${name}/.hypothesisloop/"
 done
 echo "==> sending HEAD ($(git rev-parse --short HEAD)) to ${builder}:${remote_dir}/src"
-tar -cz -C "${work}" . | "${ssh[@]}" "${builder}" "rm -rf ${remote_dir}/src && mkdir -p ${remote_dir}/src && tar -xz -C ${remote_dir}/src"
+COPYFILE_DISABLE=1 tar -cz --no-xattrs -C "${work}" . | "${ssh[@]}" "${builder}" "rm -rf ${remote_dir}/src && mkdir -p ${remote_dir}/src && tar -xz -C ${remote_dir}/src"
 
 echo "==> asking ${HL_REGISTRY} which of ${images[*]} it lacks under ${tag}"
 listing="$(ssh_box missing "${HL_REGISTRY}" "${tag}" "${images[@]}")"
