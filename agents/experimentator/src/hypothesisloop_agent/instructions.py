@@ -58,11 +58,12 @@ def path(cfg: config.Config) -> str:
 
 async def read(client: api_client.PlatformClient, cfg: config.Config) -> dict:
     """The instructions as the platform answers them. An agent the platform has none for ends the
-    harness: it has nothing to run with."""
+    harness: it has nothing to run with. Whether the token is accepted is checked once, at the
+    start (core.prepare), and later by core.run_over."""
     try:
         return await client.get_json(path(cfg))
     except api_client.APIError as e:
-        if e.status not in (401, 403, 404):
+        if e.status != 404:
             raise
         raise SystemExit(f"agent: the platform serves {cfg.agent_id} no instructions (HTTP {e.status}): {e.body[:300]}") from None
 

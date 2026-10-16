@@ -1158,7 +1158,7 @@ async def _run_one_session(setup: core.RunSetup, resume_id: str | None,
         log.warning("the instructions were not read (%s): connecting again after the backoff", e)
         return False
     _progress.instructions(_running.digest, _running.version)
-    watch_env = updates.watch_env(cfg.api_url, cfg.token, setup.statedir)
+    watch_env = updates.watch_env(cfg, setup.statedir)
     handing = asyncio.Lock()
     background: dict[str, dict] = {}
     subagents = Subagents(background)

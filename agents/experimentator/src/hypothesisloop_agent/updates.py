@@ -104,11 +104,15 @@ NOTHING_IN_FLIGHT = ("The platform holds no job of yours submitted, queued or ru
 _SITUATION_S = 30
 
 
-def watch_env(api_url: str, token: str, statedir: str) -> dict[str, str]:
+_AGENT_ID = "HL_WATCH_AGENT_ID"
+
+
+def watch_env(cfg: config.Config, statedir: str) -> dict[str, str]:
     """The environment hl watch needs: the API, the token, which says to hl who is watching, and
-    a state dir that outlives the process."""
-    return {**os.environ, "API_URL": api_url, "HL_TOKEN": token,
-            "HL_STATE_DIR": os.path.join(os.path.abspath(statedir), ".hl-state")}
+    a state dir that outlives the process, with the agent the token is, "" for a coordinator."""
+    return {**os.environ, "API_URL": cfg.api_url, "HL_TOKEN": cfg.token,
+            "HL_STATE_DIR": os.path.join(os.path.abspath(statedir), ".hl-state"),
+            _AGENT_ID: "" if config.coordinates(cfg) else cfg.agent_id}
 
 
 _DELIVERED_TO = "HL_STATE_DIR_DELIVERED"
@@ -159,8 +163,7 @@ def delivered(env: dict[str, str]) -> bool:
 
 
 def _agent(env: dict[str, str]) -> str:
-    """The agent the token in env is, or "" for a coordinator's."""
-    return config.token_scope(env["HL_TOKEN"])[2]
+    return env[_AGENT_ID]
 
 
 def watch_command(env: dict[str, str]) -> list[str]:
