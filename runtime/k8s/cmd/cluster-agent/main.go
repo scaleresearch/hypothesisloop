@@ -14,8 +14,6 @@
 //
 //	CLUSTER_NAME          — this cluster's stable identity
 //	API_URL               — base URL of the control-plane API
-//	HYPOTHESISLOOP_AGENT_VERSION: the image tag this agent runs, sent on every call. The chart
-//	                        sets it from images.tag.
 //	HYPOTHESISLOOP_BUILDS — the BuildKit daemon this cluster builds environments on, a unix
 //	                        socket in the pod. Unset, the cluster builds none.
 //	HYPOTHESISLOOP_NODE_IMAGES — the containerd socket of this pod's node. Set, each environment
@@ -48,6 +46,10 @@ const (
 	statusInterval    = 3 * time.Second
 )
 
+// version is the image tag this binary was built from, set at link time (-X main.version=TAG).
+// Built without it, the agent names no version.
+var version string
+
 func main() {
 	detach := false
 	if len(os.Args) > 1 {
@@ -70,7 +72,6 @@ func main() {
 	apiURL := agentloop.RequiredEnv(binaryName, "API_URL")
 	// The runtime token the cluster's owner was given when the cluster was registered.
 	token := agentloop.RequiredEnv(binaryName, "RUNTIME_TOKEN")
-	version := os.Getenv("HYPOTHESISLOOP_AGENT_VERSION")
 	// Optional: whether this cluster sits behind a native autoscaler. Fail-closed default false —
 	// see autoscaler.md's "Cluster capability".
 	autoscalerEnabled := agentloop.OptionalBoolEnv(binaryName, "AUTOSCALER_ENABLED")
@@ -121,11 +122,10 @@ func main() {
 			node, err := nodeimages.Dial(dialCtx, socket, os.Getenv("HYPOTHESISLOOP_NODE_SNAPSHOTTER"))
 			dialCancel()
 			if err != nil {
-				// Loading only spares a pull, so the cluster still builds without it.
-				fmt.Fprintf(os.Stderr, "cluster-agent: builds are not loaded into this node: %v\n", err)
-			} else {
-				daemon.LoadInto(node, os.Getenv("HYPOTHESISLOOP_NODE_NAME"))
+				fmt.Fprintf(os.Stderr, "cluster-agent: %v\n", err)
+				os.Exit(1)
 			}
+			daemon.LoadInto(node, os.Getenv("HYPOTHESISLOOP_NODE_NAME"))
 		}
 		a.Builder = daemon
 	}
