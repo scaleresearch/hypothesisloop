@@ -27,8 +27,10 @@ func TestTheChartStartsTheLauncherWithAConfigAndEnvironmentItAccepts(t *testing.
 	if _, err := providers.New(cfg.Provider.Name, cfg.Provider.Settings, nil); err != nil {
 		t.Fatalf("provider: %v", err)
 	}
-	if got := cfg.launch().Env["CLAUDE_CODE_OAUTH_TOKEN"]; got != charttest.Secret["CLAUDE_CODE_OAUTH_TOKEN"] {
-		t.Errorf("the model provider's credential in an instance = %q, want the Secret's", got)
+	for name, value := range env {
+		if value == charttest.Secret["MODEL_ANTHROPIC_OAUTH_TOKEN"] {
+			t.Errorf("the launcher is handed the model credential as %s: the agents' model calls go through control-service", name)
+		}
 	}
 	if cfg.LauncherName != "main" {
 		t.Errorf("launcher_name = %q, want the name the values give hosted agents to", cfg.LauncherName)

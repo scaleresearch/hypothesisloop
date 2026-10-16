@@ -2,8 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"regexp"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -28,28 +26,11 @@ type config struct {
 	CreatePauseMilliseconds *int `yaml:"create_pause_milliseconds"`
 	// WarmPoolSize is how many warm instances the launcher keeps ready to start agents in. Left
 	// out, it is defaultWarmPool on a provider that can warm instances and none on another.
-	WarmPoolSize  *int                `yaml:"warm_pool_size"`
-	Provider      providerConfig      `yaml:"provider"`
-	Instance      instanceConfig      `yaml:"instance"`
-	ModelProvider modelProviderConfig `yaml:"model_provider"`
+	WarmPoolSize *int           `yaml:"warm_pool_size"`
+	Provider     providerConfig `yaml:"provider"`
+	Instance     instanceConfig `yaml:"instance"`
 
-	size             agentlaunch.Size
-	modelProviderEnv map[string]string
-}
-
-// modelProviderConfig is whose models the agents run on and what that provider's harness needs
-// in every instance. The launcher adds it itself, so a credential never passes through the
-// control plane or its database.
-type modelProviderConfig struct {
-	Name string             `yaml:"name"`
-	Env  []instanceVariable `yaml:"env"`
-}
-
-// instanceVariable is one variable of every instance and the variable of this process that
-// holds its value. The file names variables and never holds a value.
-type instanceVariable struct {
-	Name     string `yaml:"name"`
-	ValueEnv string `yaml:"value_env"`
+	size agentlaunch.Size
 }
 
 type providerConfig struct {
@@ -83,23 +64,6 @@ func loadConfig(path string) (*config, error) {
 		return nil, fmt.Errorf("config: instance: %w", err)
 	}
 	cfg.size = size
-	if cfg.ModelProvider.Name == "" || len(cfg.ModelProvider.Env) == 0 {
-		return nil, fmt.Errorf("config: model_provider needs a name and env: the variables every agent instance is given, each with the variable of this process that holds its value (value_env)")
-	}
-	cfg.modelProviderEnv = make(map[string]string, len(cfg.ModelProvider.Env))
-	for _, variable := range cfg.ModelProvider.Env {
-		if !variableName.MatchString(variable.Name) || !variableName.MatchString(variable.ValueEnv) {
-			return nil, fmt.Errorf("config: model_provider.env entry %q: name and value_env are both names of environment variables, and a value is never written here", variable.Name)
-		}
-		if _, twice := cfg.modelProviderEnv[variable.Name]; twice {
-			return nil, fmt.Errorf("config: model_provider.env names %s twice", variable.Name)
-		}
-		value := os.Getenv(variable.ValueEnv)
-		if value == "" {
-			return nil, fmt.Errorf("config: environment variable %s, which model_provider.env gives to instances as %s, is not set", variable.ValueEnv, variable.Name)
-		}
-		cfg.modelProviderEnv[variable.Name] = value
-	}
 	if cfg.WarmPoolSize != nil && *cfg.WarmPoolSize < 0 {
 		return nil, fmt.Errorf("config: warm_pool_size must not be negative")
 	}
@@ -108,8 +72,6 @@ func loadConfig(path string) (*config, error) {
 	}
 	return &cfg, nil
 }
-
-var variableName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
 const (
 	defaultWarmPool = 2
@@ -138,8 +100,6 @@ func (cfg *config) launch() agentlaunch.Config {
 		APIURL:           cfg.APIURL,
 		Command:          cfg.Instance.Command,
 		Size:             cfg.size,
-		ModelProvider:    cfg.ModelProvider.Name,
-		Env:              cfg.modelProviderEnv,
 		Interval:         time.Duration(cfg.ReconcileIntervalSeconds) * time.Second,
 		CreatePause:      time.Duration(*cfg.CreatePauseMilliseconds) * time.Millisecond,
 		ProgressInterval: progressInterval,

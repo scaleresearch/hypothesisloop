@@ -43,7 +43,6 @@ var Secret = map[string]string{
 	"FLY_API_TOKEN":                                  "FlyV1 made-up-fly-token",
 	"E2B_API_KEY":                                    "made-up-e2b-api-key",
 	"MODEL_ANTHROPIC_OAUTH_TOKEN":                    "made-up-claude-subscription-token",
-	"CLAUDE_CODE_OAUTH_TOKEN":                        "made-up-claude-subscription-token",
 }
 
 // Release is one rendering of the chart.

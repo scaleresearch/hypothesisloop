@@ -100,11 +100,6 @@ func (l *Launcher) read(answer launcherapi.Desired) (*desired, error) {
 		if _, twice := want.instances[name]; twice {
 			return nil, fmt.Errorf("desired state names instance %q twice", entry.Name)
 		}
-		for own := range l.cfg.Env {
-			if _, set := entry.Env[own]; set {
-				return nil, fmt.Errorf("desired instance %q sets %s, which this launcher adds from its own config", entry.Name, own)
-			}
-		}
 		want.instances[name] = instance{name: name, image: entry.Image, env: entry.Env}
 	}
 	if answer.Refusal != nil {

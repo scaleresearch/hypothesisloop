@@ -73,6 +73,18 @@ CLI_ENV = {"ENABLE_TOOL_SEARCH": "false",
            "ENABLE_PROMPT_CACHING_1H": "1",
            **({"CLAUDE_CODE_AUTO_COMPACT_WINDOW": str(_AUTO_COMPACT_WINDOW_TOKENS)} if _AUTO_COMPACT_WINDOW_TOKENS else {})}
 
+
+def model_env(cfg: config.Config) -> dict[str, str]:
+    """Where the CLI makes its model calls: the platform, which makes each with the platform's own
+    credential (controlplane/services/modelproxy), reached with the agent's own token. The token
+    goes in as the CLI's OAuth token, so the CLI sends what it sends with a Claude subscription
+    and reads the account's rate limits from every answer, which it ignored with the token as
+    ANTHROPIC_AUTH_TOKEN. With its nonessential traffic off it sends the token nowhere else."""
+    return {"ANTHROPIC_BASE_URL": cfg.api_url.rstrip("/") + "/model/anthropic",
+            "CLAUDE_CODE_OAUTH_TOKEN": cfg.token,
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+
+
 # Refused for a Bash call with run_in_background: work that outlasts a command goes to a subagent.
 BACKGROUND_COMMAND = ("Commands run in the foreground here. Work that should go on while you do something "
                       "else goes to a subagent started with run_in_background; its end starts your next turn.")
@@ -1225,7 +1237,7 @@ async def _run_one_session(setup: core.RunSetup, resume_id: str | None,
         setting_sources=[],
         strict_mcp_config=True,
         disallowed_tools=DISALLOWED_TOOLS,
-        env={**CLI_ENV, **core.git_identity(cfg)},
+        env={**CLI_ENV, **model_env(cfg), **core.git_identity(cfg)},
         # The CLI says each prompt again as the turn that takes it up starts, see _answer.
         extra_args={"replay-user-messages": None},
         hooks={"PreToolUse": [HookMatcher(matcher="Bash", hooks=[_wait_hook]),

@@ -101,7 +101,7 @@ func TestAMissingAgentIsStartedOnAWarmInstanceAndThePoolToppedUp(t *testing.T) {
 		t.Fatalf("b runs on %v, want the warm instance %s", ids, warmID)
 	}
 	spec := h.rented.Spec(full("b"))
-	if spec.Env["HL_TOKEN"] != agentToken || spec.Env["CLAUDE_CODE_OAUTH_TOKEN"] != oauthToken || !reflect.DeepEqual(spec.Command, []string{"uv", "run", "agent"}) {
+	if !reflect.DeepEqual(spec.Env, map[string]string{"AGENT_ID": "b", "HL_TOKEN": agentToken}) || !reflect.DeepEqual(spec.Command, []string{"uv", "run", "agent"}) {
 		t.Fatalf("the warm instance was started with %+v", spec)
 	}
 	if h.logged("started "+full("b")+" (asked for and not rented) on warm instance "+warmID) != 1 {

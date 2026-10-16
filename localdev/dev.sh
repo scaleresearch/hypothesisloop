@@ -349,7 +349,6 @@ case "${action}" in
       VAST_API_KEY="$(lib_env_value CLOUD_COMPUTE_VAST_API_KEY)" start cloud-agent "${bin}/cloud-agent"
     AGENT_LAUNCHER_CONFIG="${repo}/${bin}/agent-launcher.yaml" LAUNCHER_TOKEN="${launcher_token}" \
       FLY_API_TOKEN="$(lib_env_value SANDBOX_FLY_DEPLOY_TOKEN)" E2B_API_KEY="$(lib_env_value SANDBOX_E2B_API_KEY)" \
-      CLAUDE_CODE_OAUTH_TOKEN="$(lib_env_value MODEL_ANTHROPIC_OAUTH_TOKEN)" \
       start agent-launcher "${bin}/agent-launcher"
     must_stay_up cloud-agent
     must_stay_up agent-launcher

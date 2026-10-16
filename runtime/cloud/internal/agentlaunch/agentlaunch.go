@@ -36,14 +36,12 @@ type Config struct {
 	// Command is the argv every instance runs.
 	Command []string
 	Size    Size
-	// ModelProvider names whose models the agents run on, and Env is what that provider's
-	// harness needs in every instance: its credential. Env is added here, so what it holds never
-	// passes through the control plane, and the control plane's list may not set any of its names.
-	ModelProvider string
-	Env           map[string]string
-	Provider      provider.Provider
-	HTTPClient    *http.Client
-	Interval      time.Duration
+	// Provider rents the instances. An instance's environment is the control plane's alone: where
+	// it is reached and the agent's own token. No model credential is in it, as the agents' model
+	// calls go through the control plane, which holds that.
+	Provider   provider.Provider
+	HTTPClient *http.Client
+	Interval   time.Duration
 	// CreatePause is waited between two rentals of one pass (a create or a warm), for a provider
 	// that limits how fast instances may be rented. Zero is no pause. Starting a warm instance is
 	// no rental and is never paused for.
@@ -115,16 +113,13 @@ func New(cfg Config) (*Launcher, error) {
 }
 
 // launchDigest is a digest of everything this launcher itself starts an instance with. The
-// control plane makes it part of each instance's name, so a changed command, size or credential
-// replaces the running instances as a changed image does. It holds a credential only hashed
-// together with the rest.
+// control plane makes it part of each instance's name, so a changed command or size replaces the
+// running instances as a changed image does.
 func (cfg Config) launchDigest() (string, error) {
 	inputs, err := json.Marshal(struct {
-		Command       []string          `json:"command"`
-		Size          Size              `json:"size"`
-		ModelProvider string            `json:"model_provider"`
-		Env           map[string]string `json:"env"`
-	}{cfg.Command, cfg.Size, cfg.ModelProvider, cfg.Env})
+		Command []string `json:"command"`
+		Size    Size     `json:"size"`
+	}{cfg.Command, cfg.Size})
 	if err != nil {
 		return "", fmt.Errorf("agentlaunch: digest launch inputs: %w", err)
 	}
@@ -155,14 +150,6 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.CreatePause < 0 || cfg.ProgressInterval < 0 || cfg.WarmPool < 0 {
 		return errors.New("agentlaunch: CreatePause, ProgressInterval and WarmPool must not be negative")
-	}
-	if cfg.ModelProvider == "" || len(cfg.Env) == 0 {
-		return errors.New("agentlaunch: ModelProvider and its Env are required")
-	}
-	for name, value := range cfg.Env {
-		if name == "" || value == "" {
-			return fmt.Errorf("agentlaunch: Env entry %q needs a name and a value", name)
-		}
 	}
 	return nil
 }
@@ -472,10 +459,9 @@ func lastHarnessState(lines []string) string {
 }
 
 // activityOf is what the control plane is told the agent whose output ends in lines is doing: its
-// newest sentence without this launcher's own environment, which may make it longer, cut to what
-// the control plane takes.
-func (l *Launcher) activityOf(lines []string) string {
-	said := []rune(l.withoutOwnEnvironment(lastActivity(lines)))
+// newest sentence, cut to what the control plane takes.
+func activityOf(lines []string) string {
+	said := []rune(lastActivity(lines))
 	if len(said) > maxActivityLength {
 		said = said[:maxActivityLength]
 	}
@@ -539,7 +525,7 @@ func (l *Launcher) progressOf(ctx context.Context, i provider.Instance) (outputR
 		l.cfg.Log("read the progress of running %s: %v", i.Name, err)
 		return outputRead{}, false
 	}
-	seen := outputRead{at: time.Now(), progress: lastProgress(lines), activity: l.activityOf(lines), harnessState: lastHarnessState(lines)}
+	seen := outputRead{at: time.Now(), progress: lastProgress(lines), activity: activityOf(lines), harnessState: lastHarnessState(lines)}
 	l.outputs[i.ID] = seen
 	return seen, true
 }
@@ -555,7 +541,7 @@ func (l *Launcher) exitLogOf(ctx context.Context, i provider.Instance) string {
 		l.cfg.Log("read the output of exited %s: %v", i.Name, err)
 		return ""
 	}
-	log := tail(l.withoutOwnEnvironment(strings.Join(lines, "\n")), exitLogBytes)
+	log := tail(strings.Join(lines, "\n"), exitLogBytes)
 	l.outputs[i.ID] = outputRead{at: time.Now(), exited: true, log: log}
 	return log
 }
@@ -577,18 +563,6 @@ func (l *Launcher) forgetUnlisted(listed []provider.Instance) {
 			delete(l.stopped, id)
 		}
 	}
-}
-
-// withoutOwnEnvironment is text with every value this launcher adds to an instance's environment
-// taken out: an agent may print the model provider's credential, and its output is stored by the
-// control plane. The instance's own token is the control plane's to take out, which minted it.
-func (l *Launcher) withoutOwnEnvironment(text string) string {
-	for _, name := range sortedKeys(l.cfg.Env) {
-		if value := l.cfg.Env[name]; len(value) >= minRedactedLength {
-			text = strings.ReplaceAll(text, value, "<"+name+">")
-		}
-	}
-	return text
 }
 
 func tail(text string, limit int) string {
@@ -619,7 +593,7 @@ const minRedactedLength = 8
 
 // withoutEnvironment is err with every value of the instance's environment taken out of its
 // text. A vendor that refuses a create may quote the request back, and the request holds the
-// agent's token and the model provider's credential.
+// agent's token.
 func withoutEnvironment(err error, env map[string]string) error {
 	text := err.Error()
 	for _, name := range sortedKeys(env) {
@@ -634,11 +608,8 @@ func withoutEnvironment(err error, env map[string]string) error {
 }
 
 func (l *Launcher) spec(i instance) provider.Spec {
-	env := make(map[string]string, len(i.env)+len(l.cfg.Env))
+	env := make(map[string]string, len(i.env))
 	for name, value := range i.env {
-		env[name] = value
-	}
-	for name, value := range l.cfg.Env {
 		env[name] = value
 	}
 	return provider.Spec{

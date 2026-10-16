@@ -95,7 +95,6 @@ func newContractUnder(t *testing.T, settings launcherapi.Settings, agents ...db.
 	launcher, err := New(Config{
 		Name: "main", APIURL: server.URL, Token: token,
 		Command: []string{"run-agent"}, Size: Size{CPUMillis: 1000, MemoryBytes: 1 << 30, DiskBytes: 1 << 30},
-		ModelProvider: "example", Env: map[string]string{"MODEL_CREDENTIAL": oauthToken},
 		Provider: c.rented, HTTPClient: server.Client(), Interval: time.Second,
 		Log: func(format string, args ...any) {},
 	})
@@ -129,7 +128,7 @@ func TestTheLaunchersPassAgainstTheControlPlanesOwnHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantEnv := map[string]string{"API_URL": "https://api.example.invalid", "HL_TOKEN": token, "MODEL_CREDENTIAL": oauthToken}
+	wantEnv := map[string]string{"API_URL": "https://api.example.invalid", "HL_TOKEN": token}
 	if spec.Image != "registry.example.invalid/agent:1" || !reflect.DeepEqual(spec.Env, wantEnv) || !reflect.DeepEqual(spec.Command, []string{"run-agent"}) {
 		t.Fatalf("spec = %+v\nwant env %v", spec, wantEnv)
 	}
@@ -276,30 +275,27 @@ func TestAnAgentWhoseRunIsOverIsToldToStopAndItsNormalExitIsNoCrash(t *testing.T
 	}
 }
 
-func TestARotatedCredentialReplacesEveryRunningInstance(t *testing.T) {
+func TestAChangedCommandReplacesEveryRunningInstance(t *testing.T) {
 	c := newContract(t, hostedAgent("pe-1", "ag-one"))
 	c.pass()
 	before := c.rented.Names()[0]
 	c.rented.Start(before)
 
 	cfg := c.launcher.cfg
-	cfg.Env = map[string]string{"MODEL_CREDENTIAL": "the-rotated-credential"}
-	rotated, err := New(cfg)
+	cfg.Command = []string{"run-agent", "--changed"}
+	changed, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := rotated.Pass(context.Background()); err != nil {
+	if err := changed.Pass(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	names := c.rented.Names()
 	if len(names) != 1 || names[0] == before {
-		t.Fatalf("rented %v after the rotation, want one instance under a new name (was %q)", names, before)
+		t.Fatalf("rented %v after the change, want one instance under a new name (was %q)", names, before)
 	}
-	if got := c.rented.Spec(names[0]).Env["MODEL_CREDENTIAL"]; got != "the-rotated-credential" {
-		t.Fatalf("the new instance runs with %q", got)
-	}
-	if strings.Contains(names[0], "rotated") {
-		t.Fatal("the credential is in the instance name")
+	if got := c.rented.Spec(names[0]).Command; !reflect.DeepEqual(got, cfg.Command) {
+		t.Fatalf("the new instance runs %q", got)
 	}
 }
 
@@ -316,7 +312,7 @@ func TestAHostedCoordinatorIsRentedRestartedAndEndedThroughTheSamePass(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantEnv := map[string]string{"API_URL": "https://api.example.invalid", "HL_TOKEN": token, "MODEL_CREDENTIAL": oauthToken}
+	wantEnv := map[string]string{"API_URL": "https://api.example.invalid", "HL_TOKEN": token}
 	if spec := c.rented.Spec(coordinator); !reflect.DeepEqual(spec.Env, wantEnv) || strings.Contains(spec.Name, token) {
 		t.Fatalf("coordinator's env = %v, want %v", spec.Env, wantEnv)
 	}
@@ -447,7 +443,7 @@ func TestACreateThatFailsOnEveryPassSpendsTheAgentsRestartsAndStopsIt(t *testing
 	c := newContract(t, hostedAgent("pe-1", "ag-unrentable"), hostedAgent("pe-1", "ag-fine"))
 	c.rented.Fail = func(method, name string) error {
 		if method == "Create" && strings.Contains(name, "agunrentable") {
-			return fmt.Errorf("vendor: HTTP 422: no such size, sent %s", oauthToken)
+			return fmt.Errorf("vendor: HTTP 422: no such size")
 		}
 		return nil
 	}

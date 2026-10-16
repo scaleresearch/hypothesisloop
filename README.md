@@ -689,7 +689,7 @@ the same way, so the rest of the system never depends on which one it is:
 | sign-in service | `IDENTITY_PROVIDER`, UI `NEXT_PUBLIC_IDENTITY_PROVIDER` | `auth.identity_providers` (any OIDC issuer) | `supabase` |
 | git host | `GIT_HOST_PROVIDER` | `git_host.provider` | `github`, `plain` (`local` in `.env`, the local git server) |
 | hosted agent sandboxes | `SANDBOX_PROVIDER` | agent-launcher `provider.name` | `fly`, `e2b` |
-| models of hosted agents | `MODEL_PROVIDER` | agent-launcher `model_provider.name` | `anthropic` |
+| models of hosted agents | `MODEL_PROVIDER` | `models.provider` (control-service makes their calls) | `anthropic` |
 | rented compute for jobs | `CLOUD_COMPUTE_PROVIDER` | cloud-agent `provider.name` | `vast` |
 | the platform's own clusters | `OWNED_COMPUTE_CLUSTERS` | (registered clusters) | `k8s`, `bare-metal` |
 

@@ -21,7 +21,6 @@ import (
 
 const (
 	launcherToken = "hls_launcher-token"
-	oauthToken    = "oauth-secret-value"
 	agentToken    = "hls_agent-token"
 )
 
@@ -153,16 +152,14 @@ func newHarness(t *testing.T) *harness {
 
 func (h *harness) config() Config {
 	return Config{
-		Name:          "main",
-		APIURL:        h.cp.server.URL,
-		Token:         launcherToken,
-		Command:       []string{"uv", "run", "agent"},
-		Size:          Size{CPUMillis: 2000, MemoryBytes: 4 << 30, DiskBytes: 20 << 30},
-		ModelProvider: "example",
-		Env:           map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": oauthToken},
-		Provider:      h.rented,
-		HTTPClient:    h.cp.server.Client(),
-		Interval:      time.Second,
+		Name:       "main",
+		APIURL:     h.cp.server.URL,
+		Token:      launcherToken,
+		Command:    []string{"uv", "run", "agent"},
+		Size:       Size{CPUMillis: 2000, MemoryBytes: 4 << 30, DiskBytes: 20 << 30},
+		Provider:   h.rented,
+		HTTPClient: h.cp.server.Client(),
+		Interval:   time.Second,
 		Log: func(format string, args ...any) {
 			h.logMu.Lock()
 			defer h.logMu.Unlock()
@@ -203,7 +200,7 @@ func TestAMissingInstanceIsCreatedFromTheListAndTheLaunchersOwnConfig(t *testing
 		Name:        full("a"),
 		Image:       "registry.example.invalid/agent:1",
 		Command:     []string{"uv", "run", "agent"},
-		Env:         map[string]string{"AGENT_ID": "a", "HL_TOKEN": agentToken, "CLAUDE_CODE_OAUTH_TOKEN": oauthToken},
+		Env:         map[string]string{"AGENT_ID": "a", "HL_TOKEN": agentToken},
 		CPUMillis:   2000,
 		MemoryBytes: 4 << 30,
 		DiskBytes:   20 << 30,
@@ -480,7 +477,7 @@ func TestTheLaunchDigestFollowsTheLaunchersOwnInputsAndHoldsNoSecret(t *testing.
 	if len(digest) != 64 || strings.Trim(digest, "0123456789abcdef") != "" || digest != first {
 		t.Fatalf("digest %q (first pass %q): want 64 hex characters, the same on every pass", digest, first)
 	}
-	if strings.Contains(digest, oauthToken) || strings.Contains(digest, launcherToken) {
+	if strings.Contains(digest, launcherToken) {
 		t.Fatal("the digest holds a secret")
 	}
 	again, err := h.config().launchDigest()
@@ -488,13 +485,10 @@ func TestTheLaunchDigestFollowsTheLaunchersOwnInputsAndHoldsNoSecret(t *testing.
 		t.Fatalf("a second launcher of the same config digests to %q, %v", again, err)
 	}
 	for what, edit := range map[string]func(*Config){
-		"command":        func(c *Config) { c.Command = []string{"uv", "run", "another"} },
-		"cpu":            func(c *Config) { c.Size.CPUMillis = 4000 },
-		"memory":         func(c *Config) { c.Size.MemoryBytes = 8 << 30 },
-		"disk":           func(c *Config) { c.Size.DiskBytes = 5 << 30 },
-		"credential":     func(c *Config) { c.Env = map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "a-rotated-credential"} },
-		"credential key": func(c *Config) { c.Env = map[string]string{"ANOTHER_KEY": oauthToken} },
-		"model provider": func(c *Config) { c.ModelProvider = "another" },
+		"command": func(c *Config) { c.Command = []string{"uv", "run", "another"} },
+		"cpu":     func(c *Config) { c.Size.CPUMillis = 4000 },
+		"memory":  func(c *Config) { c.Size.MemoryBytes = 8 << 30 },
+		"disk":    func(c *Config) { c.Size.DiskBytes = 5 << 30 },
 	} {
 		cfg := h.config()
 		edit(&cfg)
@@ -693,7 +687,6 @@ func TestAnAnswerThatIsNotACompleteListChangesNothing(t *testing.T) {
 		"one name twice":          {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{}},{"name":"a","image":"i","env":{}}],"ending":[]}`},
 		"running and ending":      {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{}}],"ending":["a"]}`},
 		"ending without a name":   {http.StatusOK, `{"instances":[],"ending":[""]}`},
-		"sets the launcher's env": {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{"CLAUDE_CODE_OAUTH_TOKEN":"x"}}],"ending":[]}`},
 		"refusal without message": {http.StatusOK, `{"instances":[],"ending":[],"refusal":{"reason":"pass_does_not_fit"}}`},
 		"conflict":                {http.StatusConflict, `{"instances":[],"ending":[]}`},
 	} {
@@ -873,19 +866,40 @@ func TestRunRefusedOnItsFirstPassEndsWhatAnEarlierProcessRentedAndKeepsPassing(t
 	}
 }
 
-func TestAnExitedInstancesOutputIsSentWithoutTheLaunchersOwnCredential(t *testing.T) {
+// An instance is started with the control plane's environment and nothing of the launcher's own:
+// a model credential in the launcher's environment, as an older deployment had, never reaches a
+// machine, created or started from the warm pool.
+func TestNoInstanceIsGivenACredentialOfTheLaunchersEnvironment(t *testing.T) {
+	const credential = "sk-ant-oat01-a-credential-the-launcher-holds"
+	for _, name := range []string{"CLAUDE_CODE_OAUTH_TOKEN", "MODEL_ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"} {
+		t.Setenv(name, credential)
+	}
+	h := newHarness(t)
+	h.cp.want([]entry{agent("a"), agent("b")}, nil)
+	h.mustPass()
+	for _, name := range []string{"a", "b"} {
+		spec := h.rented.Spec(full(name))
+		if want := map[string]string{"AGENT_ID": name, "HL_TOKEN": agentToken}; !reflect.DeepEqual(spec.Env, want) {
+			t.Fatalf("%s: env = %v, want exactly the control plane's %v", name, spec.Env, want)
+		}
+		for key, value := range spec.Env {
+			if strings.Contains(value, credential) {
+				t.Fatalf("%s: %s holds the launcher's credential", name, key)
+			}
+		}
+	}
+}
+
+func TestAnExitedInstancesOutputIsSentAsItEnded(t *testing.T) {
 	h := newHarness(t)
 	h.cp.want([]entry{agent("a")}, nil)
 	h.mustPass()
 	h.rented.Start(full("a"))
-	h.rented.Exit(full("a"), "env: CLAUDE_CODE_OAUTH_TOKEN="+oauthToken, "SystemExit: the reason")
+	h.rented.Exit(full("a"), "Traceback", "SystemExit: the reason")
 	h.mustPass()
 	sent := h.cp.lastQuestion().Instances
-	if len(sent) != 1 || strings.Contains(sent[0].Log, oauthToken) {
-		t.Fatalf("sent %+v, which holds the model provider's credential", sent)
-	}
-	if sent[0].Log != "env: CLAUDE_CODE_OAUTH_TOKEN=<CLAUDE_CODE_OAUTH_TOKEN>\nSystemExit: the reason" {
-		t.Fatalf("sent log %q", sent[0].Log)
+	if len(sent) != 1 || sent[0].Log != "Traceback\nSystemExit: the reason" {
+		t.Fatalf("sent %+v", sent)
 	}
 }
 
@@ -904,7 +918,7 @@ func TestNoSecretReachesTheLogOrAnInstanceName(t *testing.T) {
 		t.Fatal("no error")
 	}
 	spoken := strings.Join(h.log, "\n") + "\n" + err.Error() + "\n" + strings.Join(h.rented.Names(), "\n")
-	for _, secret := range []string{launcherToken, oauthToken, agentToken} {
+	for _, secret := range []string{launcherToken, agentToken} {
 		if strings.Contains(spoken, secret) {
 			t.Fatalf("%q appears in:\n%s", secret, spoken)
 		}
@@ -942,24 +956,21 @@ func TestRunPassesUntilCancelledAndSurvivesAFailingPass(t *testing.T) {
 func TestAConfigThatCannotLaunchIsRefused(t *testing.T) {
 	h := newHarness(t)
 	for name, edit := range map[string]func(*Config){
-		"no name":           func(c *Config) { c.Name = "" },
-		"no api url":        func(c *Config) { c.APIURL = "" },
-		"no token":          func(c *Config) { c.Token = "" },
-		"name with dash":    func(c *Config) { c.Name = "team-a" },
-		"interval of 1.5s":  func(c *Config) { c.Interval = 1500 * time.Millisecond },
-		"pause of 1.5us":    func(c *Config) { c.CreatePause = 1500 * time.Nanosecond },
-		"no command":        func(c *Config) { c.Command = nil },
-		"no cpu":            func(c *Config) { c.Size.CPUMillis = 0 },
-		"no memory":         func(c *Config) { c.Size.MemoryBytes = 0 },
-		"no disk":           func(c *Config) { c.Size.DiskBytes = 0 },
-		"no interval":       func(c *Config) { c.Interval = 0 },
-		"no model provider": func(c *Config) { c.ModelProvider = "" },
-		"no provider env":   func(c *Config) { c.Env = nil },
-		"negative pause":    func(c *Config) { c.CreatePause = -time.Second },
-		"empty env value":   func(c *Config) { c.Env = map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": ""} },
-		"no provider":       func(c *Config) { c.Provider = nil },
-		"no http client":    func(c *Config) { c.HTTPClient = nil },
-		"no log":            func(c *Config) { c.Log = nil },
+		"no name":          func(c *Config) { c.Name = "" },
+		"no api url":       func(c *Config) { c.APIURL = "" },
+		"no token":         func(c *Config) { c.Token = "" },
+		"name with dash":   func(c *Config) { c.Name = "team-a" },
+		"interval of 1.5s": func(c *Config) { c.Interval = 1500 * time.Millisecond },
+		"pause of 1.5us":   func(c *Config) { c.CreatePause = 1500 * time.Nanosecond },
+		"no command":       func(c *Config) { c.Command = nil },
+		"no cpu":           func(c *Config) { c.Size.CPUMillis = 0 },
+		"no memory":        func(c *Config) { c.Size.MemoryBytes = 0 },
+		"no disk":          func(c *Config) { c.Size.DiskBytes = 0 },
+		"no interval":      func(c *Config) { c.Interval = 0 },
+		"negative pause":   func(c *Config) { c.CreatePause = -time.Second },
+		"no provider":      func(c *Config) { c.Provider = nil },
+		"no http client":   func(c *Config) { c.HTTPClient = nil },
+		"no log":           func(c *Config) { c.Log = nil },
 	} {
 		cfg := h.config()
 		edit(&cfg)
@@ -1161,7 +1172,7 @@ func TestACreateThatFailsAndLeavesAnExitedInstanceIsNotRepeated(t *testing.T) {
 func TestAVendorErrorThatQuotesTheRequestBackReachesNoLogWithItsSecrets(t *testing.T) {
 	h := newHarness(t)
 	h.cp.want([]entry{agent("a")}, nil)
-	refusal := fmt.Sprintf(`vendor: POST /machines: HTTP 422: {"error":"bad guest","request":{"env":{"HL_TOKEN":%q,"CLAUDE_CODE_OAUTH_TOKEN":%q,"AGENT_ID":"a"}}}`, agentToken, oauthToken)
+	refusal := fmt.Sprintf(`vendor: POST /machines: HTTP 422: {"error":"bad guest","request":{"env":{"HL_TOKEN":%q,"AGENT_ID":"a"}}}`, agentToken)
 	h.rented.Fail = func(method, _ string) error {
 		if method == "Create" {
 			return fmt.Errorf("create machine: %w", errors.New(refusal))
@@ -1173,12 +1184,12 @@ func TestAVendorErrorThatQuotesTheRequestBackReachesNoLogWithItsSecrets(t *testi
 		t.Fatalf("err = %v, want the vendor's refusal", err)
 	}
 	said := err.Error() + strings.Join(h.log, "\n")
-	for _, secret := range []string{agentToken, oauthToken} {
+	for _, secret := range []string{agentToken} {
 		if strings.Contains(said, secret) {
 			t.Fatalf("a secret of the instance's environment was logged or returned: %s", said)
 		}
 	}
-	if !strings.Contains(said, "<HL_TOKEN>") || !strings.Contains(said, "<CLAUDE_CODE_OAUTH_TOKEN>") {
+	if !strings.Contains(said, "<HL_TOKEN>") {
 		t.Fatalf("the error does not say what was taken out: %s", said)
 	}
 	if h.logged("NO INSTANCE COULD BE CREATED") != 1 {
@@ -1235,7 +1246,7 @@ func TestWhatARunningAgentSaysItIsDoingIsReportedWithItsProgress(t *testing.T) {
 	}
 	h.rented.Print(full("a"), "hl-progress 1", "hl-activity thinking", "hl-progress 2", "hl-activity running hl capacity", "2026-01-01T00:00:00Z a tool Bash: hl capacity")
 	h.rented.Print(full("b"), "hl-progress 1", "hl-activity", " hl-activity indented", "not hl-activity either")
-	h.rented.Print(full("c"), "hl-progress 1", "hl-activity running "+oauthToken+" "+strings.Repeat("é", 200))
+	h.rented.Print(full("c"), "hl-progress 1", "hl-activity running hl job wait "+strings.Repeat("é", 200))
 	before := h.rented.Calls("Logs")
 	h.mustPass()
 	told := h.cp.lastQuestion().Instances
@@ -1245,7 +1256,7 @@ func TestWhatARunningAgentSaysItIsDoingIsReportedWithItsProgress(t *testing.T) {
 	if told[1].Activity != "" {
 		t.Fatalf("b, which printed no such line: told activity %q, want none", told[1].Activity)
 	}
-	if got := []rune(told[2].Activity); len(got) != maxActivityLength || !strings.HasPrefix(told[2].Activity, "running <CLAUDE_CODE_OAUTH_TOKEN> é") {
+	if got := []rune(told[2].Activity); len(got) != maxActivityLength || !strings.HasPrefix(told[2].Activity, "running hl job wait é") {
 		t.Fatalf("c: told %d characters %q, want this launcher's own environment taken out and the sentence cut to %d", len(got), told[2].Activity, maxActivityLength)
 	}
 	if reads := h.rented.Calls("Logs") - before; reads != 3 {

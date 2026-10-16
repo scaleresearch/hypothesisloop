@@ -87,7 +87,7 @@ cloudAgent:
         max_instances: 2
 agentLauncher:
   enabled: true
-  secretEnv: [CLAUDE_CODE_OAUTH_TOKEN, FLY_API_TOKEN]
+  secretEnv: [FLY_API_TOKEN]
   config: |
     launcher_name: main
     api_url: http://control-service:8081
@@ -106,8 +106,3 @@ agentLauncher:
       cpu: "2"
       memory: 4Gi
       storage: 10Gi
-    model_provider:
-      name: anthropic
-      env:
-        - name: CLAUDE_CODE_OAUTH_TOKEN
-          value_env: CLAUDE_CODE_OAUTH_TOKEN

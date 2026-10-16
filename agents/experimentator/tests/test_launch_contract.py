@@ -61,9 +61,10 @@ class ErrorTurnClient:
 
     result = ""
     status = None
+    options = None
 
     def __init__(self, options):
-        pass
+        ErrorTurnClient.options = options
 
     async def __aenter__(self):
         return self
@@ -118,6 +119,20 @@ class RefusedCredentialTest(unittest.IsolatedAsyncioTestCase):
                 await self.session(refusal, status)
             self.assertIn(f"refused this agent's requests ({status})", str(ended.exception))
             self.assertIn(refusal[:40], str(ended.exception))
+
+    # The machine holds no model credential: the CLI reaches the model through the platform with
+    # the agent's own token, and nothing else in its environment names a credential.
+    async def test_the_cli_makes_its_model_calls_through_the_platform_with_the_agents_own_token(self):
+        with mock.patch.dict(os.environ, LAUNCH_ENV, clear=True):
+            await self.session("API Error: 500 Internal server error", 500)
+        env = ErrorTurnClient.options.env
+        self.assertEqual(env["ANTHROPIC_BASE_URL"], "http://x/model/anthropic")
+        self.assertEqual(env["CLAUDE_CODE_OAUTH_TOKEN"], AGENT_TOKEN)
+        self.assertEqual(env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "1")
+        for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "MODEL_ANTHROPIC_OAUTH_TOKEN"):
+            self.assertNotIn(key, env)
+        self.assertEqual(run.model_env(SimpleNamespace(api_url="https://api.example/", token="t"))["ANTHROPIC_BASE_URL"],
+                         "https://api.example/model/anthropic")
 
     def test_a_context_that_overflowed_is_no_refused_request(self):
         overflow = ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=True, num_turns=1,

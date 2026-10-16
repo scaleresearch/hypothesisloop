@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import subprocess
 import time
-import uuid
 from pathlib import Path
 
 import pytest
@@ -59,13 +58,8 @@ instance:
   cpu: "1"
   memory: 1Gi
   storage: 1Gi
-model_provider:
-  name: example
-  env:
-    - name: MODEL_CREDENTIAL
-      value_env: E2E_MODEL_CREDENTIAL
 """)
-        self.secrets = {"LAUNCHER_TOKEN": admin.add_launcher(LAUNCHER), "E2E_MODEL_CREDENTIAL": f"credential-{uuid.uuid4().hex}"}
+        self.secrets = {"LAUNCHER_TOKEN": admin.add_launcher(LAUNCHER)}
         env = {"PATH": os.environ["PATH"], "AGENT_LAUNCHER_CONFIG": str(config), **self.secrets}
         self.log_file = self.log_path.open("w")
         self.process = subprocess.Popen([str(binary)], env=env, stdout=self.log_file, stderr=subprocess.STDOUT)

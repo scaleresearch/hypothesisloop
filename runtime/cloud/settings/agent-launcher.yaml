@@ -52,7 +52,9 @@ provider:
   settings: {}
 
 # What every agent instance runs and how large it is rented. Which image it boots and the
-# environment of each agent are the control plane's to say. The size is bound by the provider:
+# environment of each agent are the control plane's to say: where it reaches the control plane and
+# its own token, with which its harness also makes its model calls through the control plane. No
+# model credential is in any instance. The size is bound by the provider:
 # its section (settings/provider.<name>.yaml) states what it can rent, and a size above that
 # fails the create of every agent on every pass, which the log reports as NO AGENT COULD BE
 # STARTED. An agent compiles and benchmarks its code here before a job runs it, so the size is a
@@ -72,15 +74,3 @@ instance:
   cpu: "8"
   memory: 16Gi
   storage: 50Gi
-
-# Whose models the agents run on, and what that provider's harness needs in every instance. Each
-# env entry is a variable of the instance (name) and the variable of this process that holds its
-# value (value_env): the file names variables and never holds a value. The launcher adds them to each instance itself, so the
-# credential never passes through the control plane or its database. It is the platform's own
-# credential, the same in every agent of every org. Changing a value replaces every running
-# instance. Another model provider is its own name and env here and its own command above.
-model_provider:
-  name: anthropic
-  env:
-    - name: CLAUDE_CODE_OAUTH_TOKEN
-      value_env: CLAUDE_CODE_OAUTH_TOKEN

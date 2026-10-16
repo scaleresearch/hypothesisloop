@@ -34,7 +34,6 @@ func loadText(t *testing.T, text string) (*config, error) {
 }
 
 func TestTheShippedConfigLoadsIntoWhatTheLauncherRuns(t *testing.T) {
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-secret-value")
 	cfg, err := loadConfig(shippedConfig)
 	if err != nil {
 		t.Fatal(err)
@@ -44,8 +43,6 @@ func TestTheShippedConfigLoadsIntoWhatTheLauncherRuns(t *testing.T) {
 		APIURL:           "https://api.example.invalid",
 		Command:          []string{"/opt/hypothesisloop-agent/.venv/bin/python3", "-m", "hypothesisloop_agent.claude.run"},
 		Size:             agentlaunch.Size{CPUMillis: 8000, MemoryBytes: 16 << 30, DiskBytes: 50 << 30},
-		ModelProvider:    "anthropic",
-		Env:              map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "oauth-secret-value"},
 		Interval:         2 * time.Second,
 		CreatePause:      time.Second,
 		ProgressInterval: 15 * time.Second,
@@ -62,7 +59,6 @@ func TestTheShippedConfigLoadsIntoWhatTheLauncherRuns(t *testing.T) {
 }
 
 func TestTheWarmPoolLeftOutIsTwoOnAProviderThatWarmsAndNoneOnAnother(t *testing.T) {
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-secret-value")
 	cfg, err := loadText(t, strings.Replace(shipped(t), "warm_pool_size: 4\n", "", 1))
 	if err != nil {
 		t.Fatal(err)
@@ -82,29 +78,20 @@ func TestTheWarmPoolLeftOutIsTwoOnAProviderThatWarmsAndNoneOnAnother(t *testing.
 	}
 }
 
-func TestTheModelProvidersEnvironmentComesFromTheNamedVariablesAndIsRequired(t *testing.T) {
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
-	if _, err := loadConfig(shippedConfig); err == nil || !strings.Contains(err.Error(), "CLAUDE_CODE_OAUTH_TOKEN") {
-		t.Fatalf("with the variable unset: err = %v, want one naming it", err)
+// The agents' model calls go through the control plane, which holds the credential: a launcher
+// config that would still hand one to every instance is refused, and the shipped one names none.
+func TestALauncherHandsNoModelCredentialToItsInstances(t *testing.T) {
+	if text := shipped(t); strings.Contains(text, "model_provider:") || strings.Contains(text, "OAUTH_TOKEN") {
+		t.Fatal("the shipped config names a model credential")
 	}
-
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "the-default-variable")
-	t.Setenv("TEAM_MODEL_KEY", "the-named-variable")
-	t.Setenv("TEAM_MODEL_ORG", "the-second-variable")
-	text := strings.Replace(shipped(t), "  name: anthropic\n  env:\n    - name: CLAUDE_CODE_OAUTH_TOKEN\n      value_env: CLAUDE_CODE_OAUTH_TOKEN",
-		"  name: another\n  env:\n    - name: MODEL_API_KEY\n      value_env: TEAM_MODEL_KEY\n    - name: MODEL_ORG\n      value_env: TEAM_MODEL_ORG", 1)
-	cfg, err := loadText(t, text)
-	if err != nil {
-		t.Fatal(err)
-	}
-	launch := cfg.launch()
-	if launch.ModelProvider != "another" || !reflect.DeepEqual(launch.Env, map[string]string{"MODEL_API_KEY": "the-named-variable", "MODEL_ORG": "the-second-variable"}) {
-		t.Fatalf("model provider %q with instance env %v", launch.ModelProvider, launch.Env)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-held-by-an-old-deployment")
+	old := shipped(t) + "\nmodel_provider:\n  name: anthropic\n  env:\n    - name: CLAUDE_CODE_OAUTH_TOKEN\n      value_env: CLAUDE_CODE_OAUTH_TOKEN\n"
+	if _, err := loadText(t, old); err == nil || !strings.Contains(err.Error(), "model_provider") {
+		t.Fatalf("a config with a model_provider section: err = %v, want it refused", err)
 	}
 }
 
 func TestAConfigThatIsIncompleteOrMisspelledIsRefused(t *testing.T) {
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-secret-value")
 	for name, edit := range map[string][2]string{
 		"unknown key":             {"launcher_name: main", "launcher_name: main\nmetrics_url: http://x"},
 		"no launcher name":        {"launcher_name: main", `launcher_name: ""`},
@@ -126,14 +113,7 @@ func TestAConfigThatIsIncompleteOrMisspelledIsRefused(t *testing.T) {
 		"no storage":              {"storage: 50Gi\n", ""},
 		"misspelled in instance":  {"storage: 50Gi", "disk: 20Gi"},
 		"a lifetime of its own":   {"storage: 50Gi", "storage: 50Gi\n  lifetime_seconds: 259200"},
-		"no model provider":       {"model_provider:\n  name: anthropic\n  env:\n    - name: CLAUDE_CODE_OAUTH_TOKEN\n      value_env: CLAUDE_CODE_OAUTH_TOKEN\n", ""},
-		"no model provider name":  {"  name: anthropic", `  name: ""`},
-		"no model provider env":   {"  env:\n    - name: CLAUDE_CODE_OAUTH_TOKEN\n      value_env: CLAUDE_CODE_OAUTH_TOKEN", "  env: []"},
-		"the credential itself":   {"      value_env: CLAUDE_CODE_OAUTH_TOKEN", "      value: sk-ant-oat01-something"},
-		"a value for a name":      {"      value_env: CLAUDE_CODE_OAUTH_TOKEN", "      value_env: sk-ant-oat01-something"},
-		"a variable not a name":   {"    - name: CLAUDE_CODE_OAUTH_TOKEN", "    - name: claude token"},
-		"one variable twice":      {"      value_env: CLAUDE_CODE_OAUTH_TOKEN", "      value_env: CLAUDE_CODE_OAUTH_TOKEN\n    - name: CLAUDE_CODE_OAUTH_TOKEN\n      value_env: CLAUDE_CODE_OAUTH_TOKEN"},
-		"the old credential key":  {"model_provider:", "claude_code_oauth_token_env: CLAUDE_CODE_OAUTH_TOKEN\nmodel_provider:"},
+		"the old credential key":  {"instance:", "claude_code_oauth_token_env: CLAUDE_CODE_OAUTH_TOKEN\ninstance:"},
 	} {
 		text := shipped(t)
 		if !strings.Contains(text, edit[0]) {

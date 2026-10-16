@@ -26,6 +26,9 @@ images:
 #   POSTGRES_PASSWORD                only with postgres.enabled
 #   HYPOTHESISLOOP_SIGNING_SECRET    derives every token the platform hands out, 32 characters or
 #                                    more. Whoever holds it can mint a staff token.
+#   MODEL_ANTHROPIC_OAUTH_TOKEN      the Claude subscription token control-service makes every
+#                                    hosted agent's model calls with (models in
+#                                    hypothesisloop.yaml). No agent's machine is given it.
 #   OBJECT_STORE_ACCESS_KEY_ID       object store key that may create service accounts; with
 #   OBJECT_STORE_SECRET_ACCESS_KEY   objectStore.enabled these become the store's root user
 #   HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY     only with gitHost.provider github: the PEM
@@ -255,8 +258,9 @@ agentLauncher:
   # describes it. Its launcher_name must be agents.launcher above.
   config: ""
   # Secret keys handed to the process as environment variables of the same name: the variables
-  # model_provider.env names and the provider's. The pod takes its own token for
-  # agents.launcher from the control plane's tool at every start.
+  # the provider's settings name. The pod takes its own token for agents.launcher from the
+  # control plane's tool at every start. No model credential belongs here: the agents' model
+  # calls go through control-service, which holds it.
   secretEnv: []
   resources:
     requests: { cpu: 50m, memory: 64Mi }
