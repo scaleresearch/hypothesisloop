@@ -27,13 +27,16 @@ import { jobPath } from '@/lib/routes'
 
 // The states this page has words of its own for, by status_reason.reason. Any other is said in
 // the API's message, which is worded for whoever reads it.
-const SENTENCE: Record<string, (pe: Draft) => string> = {
+const SENTENCE: Record<string, (pe: Draft, baselineName?: string) => string> = {
   repository_creating: () => 'Creating your experiment\'s repository.',
   planning: () => 'Planning your experiment.',
   revising: () => 'Updating the plan with your change.',
   accepting: () => 'Your plan is ready and starts by itself in a moment, as proposed. Accept it now, edit it or reject it below.',
   proposed: pe => `Your plan is ready. Nothing runs or is spent until you accept it. It stays open until ${formatDate(pe.proposal_expires_at)}.`,
   declined: () => 'The planner needs more from you. Its reason is below.',
+  baseline_measuring: (_, name) => `${name ?? 'The baseline agent'} is measuring the baseline. The run starts by itself when it finishes.`,
+  baseline_declaring: () => 'The baseline is measured and the platform is declaring it. The run starts next.',
+  starting: () => 'Everything is ready and the run starts within a minute.',
   agents_starting: pe => `The researchers' machines are starting. The platform closes the experiment if none is running by ${formatDate(pe.agents_due_at)}.`,
   running: pe => `The researchers are at work until ${formatDate(pe.ends_at)}.`,
   researchers_done: pe => `No researcher is left to submit a job: each one finished, was cut or lost its machine. Its coordinator adds researchers in their place while time and quota are left with \`hl platform-experiments agents add --hosted --platform-experiment ${pe.id}\`. The platform closes the experiment on ${formatDate(pe.ends_at)}. Before then its summary is written with \`hl platform-experiments summary --file FILE --platform-experiment ${pe.id}\` and it is closed with \`hl platform-experiments close --platform-experiment ${pe.id}\`.`,
@@ -46,9 +49,15 @@ const SENTENCE: Record<string, (pe: Draft) => string> = {
   agents_not_started: () => 'It started, and no researcher\'s machine was running in time, so the platform closed it. Agents, below, says why each machine did not come up.',
 }
 
-function sentenceOf(pe: Draft): string {
+/** The API's message for a reason this page has no words for: capitalised, with no experiment id in it. */
+export function humanize(message: string): string {
+  const plain = message.replace(/\s+of platform experiment pe-[\w-]+/g, '').replace(/platform experiment pe-[\w-]+/g, 'this experiment').trim()
+  return plain.charAt(0).toUpperCase() + plain.slice(1)
+}
+
+export function sentenceOf(pe: Draft, baselineName?: string): string {
   const { reason, message } = reasonOf(pe)
-  return SENTENCE[reason]?.(pe) ?? message
+  return SENTENCE[reason]?.(pe, baselineName) ?? humanize(message)
 }
 
 /** The control for what an experiment waits on its owner for, where this page has one. */
@@ -121,16 +130,16 @@ export function PhaseStrip({ pe, jobs = [], stages, readOnly = false, children }
   children?: ReactNode
 }) {
   const phase = phaseOf(pe)
+  const { data: agents } = useRoster(pe)
   const why = (
     <Text role="status">
       {phase === 'baseline' && !pe.baseline_job_id && reasonOf(pe).reason !== 'repository_creating' && 'Preparing the baseline. No researcher starts and none of their machines is rented until it is measured. '}
       {phase === 'closed' && pe.closed_at && `Closed ${formatDate(pe.closed_at)}. `}
-      {sentenceOf(pe)}
+      {sentenceOf(pe, baselineAgent(agents)?.name)}
     </Text>
   )
   // A closed experiment waits for nobody, and a reader is told neither whose move it is.
   const who = readOnly || phase === 'closed' ? undefined : waitsFor(pe)
-  const { data: agents } = useRoster(pe)
   const planner = agents?.find(agent => agent.flavor === 'planner')
   const baseline = baselineAgent(agents)
   const [showProposal, setShowProposal] = useState(false)

@@ -27,6 +27,7 @@ import { PlatformExperimentStatus } from '@/types'
 import { Baseline } from '@/components/baseline'
 import { JobHypothesis } from '@/components/job-hypothesis'
 import { DraftView } from '@/components/draft'
+import { CloseExperiment } from '@/components/close-experiment'
 import { PhaseStrip } from '@/components/phase-strip'
 import { AgentJobsPanel, AgentSelector, CompetingAgentsChart, LiveMetricsPicker, MetricSelector, useAgentColorMap } from '@/components/experiment-charts'
 import { ExperimentAgents } from '@/components/experiment-agents'
@@ -377,7 +378,12 @@ function PlatformExperimentDetail({ id }: { id: string }) {
     <Page
       back={{ label: 'Experiments', onClick: () => router.push(projectPath(project.id, 'experiments')) }}
       title={pe.name}
-      actions={!readOnly && pe.status !== PlatformExperimentStatus.CLOSED && <Button size="sm" onClick={() => setEditing(true)}>Edit</Button>}
+      actions={!readOnly && pe.status !== PlatformExperimentStatus.CLOSED && (
+        <Inline gap="sm">
+          <Button size="sm" onClick={() => setEditing(true)}>Edit</Button>
+          <CloseExperiment pe={pe} onClosed={() => void mutatePE()} />
+        </Inline>
+      )}
       description={
         <Inline gap="md">
           <Badge status={pe.status}>{pe.status}</Badge>

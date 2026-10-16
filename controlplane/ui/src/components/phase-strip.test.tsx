@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchPlatformExperimentAgents } from '@/lib/api'
-import { PhaseStrip } from '@/components/phase-strip'
+import { humanize, PhaseStrip } from '@/components/phase-strip'
 import { formatDate } from '@/lib/format'
 import type { Draft, Proposal } from '@/lib/planning'
 import { PlatformExperimentStatus } from '@/types'
@@ -75,6 +75,19 @@ describe('the phase strip', () => {
     one.unmount()
     show(experiment('closed', 'closed_by_request', { closed_by: closer, close_message: 'the baseline measured the old split' }))
     expect(sentence()).toBe('It was closed early by Ada, who said: the baseline measured the old split')
+  })
+
+  it('words the baseline wait for a person: capitalised, the agent by name, no ids', async () => {
+    vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([agent('baseline')])
+    show(experiment('open', 'baseline_measuring', {}, { message: 'baseline agent Baseline 1 is measuring the baseline of platform experiment pe-1: when it finishes' }))
+    await screen.findByText(/Baseline 1 is measuring the baseline/)
+    expect(sentence()).toMatch(/^Preparing the baseline\..*Baseline 1 is measuring the baseline\. The run starts by itself when it finishes\.$/)
+    expect(sentence()).not.toMatch(/pe-1|platform experiment/)
+  })
+
+  it('capitalises the API\'s message for a reason with no words of its own and drops the experiment id', () => {
+    expect(humanize('platform experiment pe-ab12 has no baseline declared')).toBe('This experiment has no baseline declared')
+    expect(humanize('the baseline agents of platform experiment pe-ab12 left two jobs')).toBe('The baseline agents left two jobs')
   })
 
   it('refuses an experiment that came without the reason every read of one carries', () => {

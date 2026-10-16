@@ -37,7 +37,7 @@ export type OwnerAction = { opens: 'edit' | 'agents'; label: string }
  * reads that file and fails when the two differ. null is a move with no control in the strip:
  * the proposal and the revise box are below it, a baseline is added or declared with the hl
  * command the API's message gives, which names the platform experiment, the edit form has no
- * field for a metric's bound, and the page has no control that closes a running experiment, so
+ * field for a metric's bound, and the page's Close experiment button is there in every state, but
  * the strip's sentence gives the hl commands that write its summary and close it.
  */
 export const OWNER_ACTIONS: Record<string, OwnerAction | null> = {

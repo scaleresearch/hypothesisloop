@@ -302,3 +302,12 @@ describe('a draft the planner declined', () => {
     expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/revise', { message: 'The small transformer, by validation loss.' })
   })
 })
+
+describe('what the person asked', () => {
+  it('keeps the lines of the brief', () => {
+    show(draft('proposed', { goal: 'Find the best schedule.\nSpell out: val_loss only.' }))
+    const goal = screen.getByText(/Find the best schedule\./)
+    expect(goal.className).toContain('whitespace-pre-line')
+    expect(goal.textContent).toBe('Find the best schedule.\nSpell out: val_loss only.')
+  })
+})

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Field, Label } from '@headlessui/react'
 import { githubCardPath } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
@@ -80,6 +80,13 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
   const placeholder = useTypedExamples(touched)
   const box = useRef<HTMLTextAreaElement>(null)
 
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el || el.scrollHeight === 0) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [goal])
+
   // One rule for the button and for Enter: a sentence, GitHub connected where it is needed, and no plan already on its way.
   const ready = goal.trim() !== '' && !sending && github !== 'unconnected'
 
@@ -100,12 +107,12 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
       <Textarea
         ref={box}
         bare
-        rows={Math.min(10, Math.max(3, goal.split('\n').length + 1))}
+        rows={3}
         maxLength={MAX_GOAL_LENGTH}
         aria-label={ASK}
         placeholder={placeholder}
         // The page's styled scrollbars give an empty textarea a horizontal one; the sentence wraps instead.
-        className="block w-full resize-none overflow-x-hidden break-words px-6 pb-2 pt-5 text-lg"
+        className="block max-h-[60vh] w-full resize-none overflow-y-auto overflow-x-hidden break-words px-6 pb-2 pt-5 text-lg"
         value={goal}
         onFocus={() => setTouched(true)}
         onChange={e => { setTouched(true); setGoal(e.target.value) }}

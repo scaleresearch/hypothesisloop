@@ -102,9 +102,9 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
       <PhaseStrip pe={draft} readOnly={readOnly} />
       <Section title="What you asked">
         <Stack gap="sm">
-          <Text>{draft.goal}</Text>
+          <Text className="whitespace-pre-line">{draft.goal}</Text>
           {(draft.revisions ?? []).map(revision => (
-            <Text key={revision.at}>
+            <Text key={revision.at} className="whitespace-pre-line">
               <Text as="span" variant="note">{actorLabel(revision.actor)} asked {relTime(revision.at)}: </Text>
               {revision.message}
             </Text>

@@ -652,6 +652,11 @@ export function updatePlatformExperiment(id: string, patch: PlatformExperimentPa
   return apiSend<PlatformExperiment>('PATCH', `/platform-experiments/${id}`, patch)
 }
 
+/** Closes an open or running platform experiment: its agents wind down and its running jobs stop. */
+export function closePlatformExperiment(id: string): Promise<PlatformExperiment> {
+  return apiSend<PlatformExperiment>('POST', `/platform-experiments/${id}/close`)
+}
+
 export interface Stage {
   length_pct: number
   evict_pct: number

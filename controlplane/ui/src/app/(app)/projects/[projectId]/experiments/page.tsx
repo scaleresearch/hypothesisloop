@@ -40,7 +40,7 @@ const SORT_OPTIONS = [
 const PLAN = 'Plan it for me'
 const CONFIGURE = 'Configure it myself'
 
-/** The project's running jobs and agents, each only while there are some, as the subtitle of the page. */
+/** The project's running jobs and the agents that ran in it, each only while there are some, as the subtitle of the page. */
 function useLiveCounts(): ReactNode {
   const { project } = useTenant()
   // Both counts are server-side totals, not the length of a fetched page: see
@@ -54,7 +54,7 @@ function useLiveCounts(): ReactNode {
     statsError ? { key: 'jobs', text: 'Jobs running unknown', tone: 'danger' as const, title: statsError.message }
       : running > 0 && { key: 'jobs', text: `${running} ${running === 1 ? 'job' : 'jobs'} running`, tone: 'success' as const, title: undefined },
     agentsError ? { key: 'agents', text: 'Agents unknown', tone: 'danger' as const, title: agentsError.message }
-      : (agents?.total ?? 0) > 0 && { key: 'agents', text: `${agents!.total} ${agents!.total === 1 ? 'agent' : 'agents'}`, tone: 'neutral' as const, title: undefined },
+      : (agents?.total ?? 0) > 0 && { key: 'agents', text: `${agents!.total} ${agents!.total === 1 ? 'agent' : 'agents'} ran`, tone: 'neutral' as const, title: 'Every agent that signed up to an experiment of this project, running or ended' },
   ].filter(item => !!item)
   if (items.length === 0) return null
 

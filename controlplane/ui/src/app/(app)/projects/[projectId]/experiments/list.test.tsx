@@ -77,3 +77,12 @@ describe('the platform experiments of a project', () => {
     expect(card('Mine').getByRole('button', { name: 'Edit' })).toBeTruthy()
   })
 })
+
+describe('the subtitle of the list', () => {
+  it('counts the agents that ran, and does not say they are active', async () => {
+    vi.mocked(fetchAgentsPage).mockResolvedValue({ items: [], total: 5 })
+    vi.mocked(fetchPlatformExperimentsPage).mockResolvedValue({ items: [], total: 0 })
+    show()
+    expect(await screen.findByText('5 agents ran')).toBeTruthy()
+  })
+})
