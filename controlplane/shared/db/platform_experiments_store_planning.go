@@ -364,7 +364,7 @@ WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.Ma
 // experiment is and when it closed, whether the agent is in it, and when its run ended for each
 // of the reasons that end one.
 type AgentStanding struct {
-	// Tenancy is nil when there is no such platform experiment.
+	// Tenancy is nil when there is no such platform experiment, or it was removed.
 	Tenancy  *domain.Tenancy
 	ClosedAt *time.Time
 	SignedUp bool
@@ -389,7 +389,7 @@ SELECT pe.project_id, p.org_id, pe.shared, ARRAY(`+priorRuns+`), pe.closed_at,
        s.finished_at
 FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
 LEFT JOIN experiment_signups s ON s.platform_experiment_id = pe.id AND s.agent_id = $2
-WHERE pe.id = $1`, platformExpID, agentID).Scan(&t.ProjectID, &t.OrgID, &t.Shared, &t.PriorRuns, &out.ClosedAt,
+WHERE pe.id = $1 AND pe.removed_at IS NULL`, platformExpID, agentID).Scan(&t.ProjectID, &t.OrgID, &t.Shared, &t.PriorRuns, &out.ClosedAt,
 		&out.SignedUp, &out.CutAt, &out.PlannerAnsweredAt, &out.FinishedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return AgentStanding{}, nil
