@@ -141,7 +141,7 @@ func TestLogsGivesUpOnAnUploadThatDoesNotArriveOnItsOwnClock(t *testing.T) {
 // A status push reads its instances one after another at a few seconds each.
 func TestLogsWaitsNoLongerThanAPushCanAfford(t *testing.T) {
 	t.Setenv("VAST_TEST_KEY", testKey)
-	p, err := New(Settings{APIKeyEnv: "VAST_TEST_KEY", MaxPricePerHour: 0.5}, nil)
+	p, err := New(Settings{APIKeyEnv: "VAST_TEST_KEY", MaxPricePerHour: 0.5}, nil, t.Logf)
 	if err != nil {
 		t.Fatal(err)
 	}

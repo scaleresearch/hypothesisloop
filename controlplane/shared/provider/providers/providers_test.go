@@ -28,29 +28,29 @@ func settingsNode(t *testing.T, text string) yaml.Node {
 func TestAProviderIsBuiltFromItsOwnSectionOfTheConfig(t *testing.T) {
 	var got exampleSettings
 	var gotTypes []string
-	byName["example"] = adapter(func(s exampleSettings, acceleratorTypes []string) (*fake.Provider, error) {
+	byName["example"] = adapter(func(s exampleSettings, acceleratorTypes []string, _ func(string, ...any)) (*fake.Provider, error) {
 		got, gotTypes = s, acceleratorTypes
 		return fake.New(), nil
 	})
 	defer delete(byName, "example")
 
-	rented, err := New("example", settingsNode(t, "settings: {region: eu}"), []string{"nvidia.com/gpu.product=NVIDIA-H100"})
+	rented, err := New("example", settingsNode(t, "settings: {region: eu}"), []string{"nvidia.com/gpu.product=NVIDIA-H100"}, t.Logf)
 	if err != nil || rented == nil || got.Region != "eu" {
 		t.Fatalf("provider %v, settings %+v, %v", rented, got, err)
 	}
 	if len(gotTypes) != 1 || gotTypes[0] != "nvidia.com/gpu.product=NVIDIA-H100" {
 		t.Errorf("accelerator types handed to the provider = %q", gotTypes)
 	}
-	if _, err := New("example", settingsNode(t, "settings: {regoin: eu}"), nil); err == nil || !strings.Contains(err.Error(), "provider.settings") {
+	if _, err := New("example", settingsNode(t, "settings: {regoin: eu}"), nil, t.Logf); err == nil || !strings.Contains(err.Error(), "provider.settings") {
 		t.Errorf("a misspelled provider setting: err = %v", err)
 	}
-	if _, err := New("example", yaml.Node{}, nil); err != nil {
+	if _, err := New("example", yaml.Node{}, nil, t.Logf); err != nil {
 		t.Errorf("a provider with no settings of its own: %v", err)
 	}
 }
 
 func TestAProviderTheBinaryWasNotBuiltWithIsRefusedWithTheOnesItHas(t *testing.T) {
-	_, err := New("other", yaml.Node{}, nil)
+	_, err := New("other", yaml.Node{}, nil, t.Logf)
 	if err == nil || !strings.Contains(err.Error(), `"other"`) || !strings.Contains(err.Error(), "(e2b, fly, vast)") {
 		t.Fatalf("err = %v, want one naming the provider and listing e2b, fly and vast", err)
 	}
@@ -89,10 +89,10 @@ func TestTheShippedProviderSectionsBuildTheirAdapters(t *testing.T) {
 			if read.Provider.Name != name {
 				t.Fatalf("provider.name = %q, want %q", read.Provider.Name, name)
 			}
-			if _, err := New(read.Provider.Name, read.Provider.Settings, nil); err != nil {
+			if _, err := New(read.Provider.Name, read.Provider.Settings, nil, t.Logf); err != nil {
 				t.Fatalf("provider: %v", err)
 			}
-			_, err := New(read.Provider.Name, read.Provider.Settings, []string{"nvidia.com/gpu.product=NVIDIA-H100"})
+			_, err := New(read.Provider.Name, read.Provider.Settings, []string{"nvidia.com/gpu.product=NVIDIA-H100"}, t.Logf)
 			if err == nil || !strings.Contains(err.Error(), "NVIDIA-H100") {
 				t.Errorf("err = %v, want a refusal of an accelerator: neither vendor is rented for one", err)
 			}
@@ -111,7 +111,7 @@ func TestAVendorNamedWithoutASettingsSectionIsRefusedAtStartup(t *testing.T) {
 	} {
 		for form, text := range map[string]string{"no settings key": "name: " + name, "an empty settings key": "name: " + name + "\nsettings:"} {
 			t.Run(name+", "+form, func(t *testing.T) {
-				if _, err := New(name, settingsNode(t, text), nil); err == nil || !strings.Contains(err.Error(), want) {
+				if _, err := New(name, settingsNode(t, text), nil, t.Logf); err == nil || !strings.Contains(err.Error(), want) {
 					t.Fatalf("err = %v, want %q", err, want)
 				}
 			})

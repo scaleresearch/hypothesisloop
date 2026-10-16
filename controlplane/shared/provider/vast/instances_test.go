@@ -3,9 +3,8 @@ package vast
 import (
 	"bytes"
 	"context"
-	"log"
+	"fmt"
 	"net/http"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -159,8 +158,6 @@ func TestListMapsVendorStatuses(t *testing.T) {
 // unknown, so it keeps its slot and can be destroyed, and the log says what the vendor reported.
 func TestListReportsAStatusItDoesNotKnowAsUnknownAndLogsIt(t *testing.T) {
 	var logged bytes.Buffer
-	log.SetOutput(&logged)
-	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 	api := newFakeAPI(t)
 	api.on(http.MethodGet, listPath, answer(200, instancesPage("",
 		instanceJSON(1, "hl-a", "running"),
@@ -169,6 +166,7 @@ func TestListReportsAStatusItDoesNotKnowAsUnknownAndLogsIt(t *testing.T) {
 		instanceJSON(4, "hl-c", "exited"),
 	)))
 	p := newTestProvider(t, api, Settings{})
+	p.log = func(format string, args ...any) { fmt.Fprintf(&logged, format+"\n", args...) }
 
 	got, err := p.List(context.Background(), "hl-")
 	if err != nil {

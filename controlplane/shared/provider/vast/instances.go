@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -72,7 +71,7 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 			if found.Label == nil || !strings.HasPrefix(strings.TrimSuffix(*found.Label, stopMark), namePrefix) {
 				continue
 			}
-			listed = append(listed, found.instance())
+			listed = append(listed, p.instance(found))
 		}
 		if page.NextToken == nil || *page.NextToken == "" {
 			p.held.keep(onAccount)
@@ -83,18 +82,18 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 }
 
 // instance is found as a caller sees it, under the name it was created with.
-func (found instance) instance() provider.Instance {
+func (p *Provider) instance(found instance) provider.Instance {
 	name := ""
 	if found.Label != nil {
 		name = strings.TrimSuffix(*found.Label, stopMark)
 	}
 	state, known := stateOf(found.ActualStatus)
 	if !known {
-		log.Printf("vast: instance %d (%s) has status %q, which this adapter does not know; reporting it as unknown", found.ID, name, *found.ActualStatus)
+		p.log("instance %d (%s) has status %q, which this adapter does not know; reporting it as unknown", found.ID, name, *found.ActualStatus)
 	}
 	startedAt := time.Unix(0, int64(found.StartDate*float64(time.Second)))
 	if state == provider.StateStarting && time.Since(startedAt) > slowStart {
-		logSlowStart(found, name, startedAt)
+		p.logSlowStart(found, name, startedAt)
 	}
 	return provider.Instance{
 		ID:        strconv.FormatInt(found.ID, 10),
@@ -122,14 +121,14 @@ func (p *Provider) Get(ctx context.Context, id string) (provider.Instance, bool,
 	if shown.Instances == nil {
 		return provider.Instance{}, false, nil
 	}
-	return shown.Instances.instance(), true, nil
+	return p.instance(*shown.Instances), true, nil
 }
 
 // logSlowStart puts the host's own account of an instance that is not coming up where an
 // operator reads it: provider.Instance has no place for it, and it is the only word on why (an
 // image that cannot be pulled, a host that cannot hand over its GPU). It is logged on every List
 // until the caller's boot timeout destroys the instance.
-func logSlowStart(found instance, name string, startedAt time.Time) {
+func (p *Provider) logSlowStart(found instance, name string, startedAt time.Time) {
 	message := "no status message"
 	if found.StatusMsg != nil && strings.TrimSpace(*found.StatusMsg) != "" {
 		message = strings.Join(strings.Fields(*found.StatusMsg), " ")
@@ -137,7 +136,7 @@ func logSlowStart(found instance, name string, startedAt time.Time) {
 			message = message[:maxStatusMsg]
 		}
 	}
-	log.Printf("vast: instance %d (%s) on machine %d has been starting for %s: %s", found.ID, name, found.MachineID, time.Since(startedAt).Round(time.Second), message)
+	p.log("instance %d (%s) on machine %d has been starting for %s: %s", found.ID, name, found.MachineID, time.Since(startedAt).Round(time.Second), message)
 }
 
 // stateOf maps the status the host last reported. It is null until the host has answered, which

@@ -30,7 +30,7 @@ func TestFreeCapacityIsWhatTheVendorHasOnOfferWithinTheShapes(t *testing.T) {
 	if err != nil || available[h100] != 1 || total[h100] != 2 || byNode["h100-0"][h100] != 1 || byNode["h100-1"][h100] != 0 {
 		t.Fatalf("available %v of %v, by node %v, %v", available, total, byNode, err)
 	}
-	if labels["h100-0"][clusterapi.NodeSlotNoOfferLabel] != "" || labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] != "shape h100: the provider has fewer machines on offer for it than max_instances, and the shape's lower slots take them" || labels["cpu-0"][clusterapi.NodeSlotNoOfferLabel] != "" {
+	if labels["h100-0"][clusterapi.NodeSlotNoOfferLabel] != "" || labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] != "shape h100: the shape's lower slots take the machines its market was last read to have" || labels["cpu-0"][clusterapi.NodeSlotNoOfferLabel] != "" {
 		t.Fatalf("labels %v, want only h100-1 without an offer", labels)
 	}
 	want := provider.Spec{AcceleratorType: h100, AcceleratorCount: 1, CPUMillis: 8000, MemoryBytes: 32 * gib, DiskBytes: 100 * gib}
@@ -49,11 +49,12 @@ func TestFreeCapacityIsWhatTheVendorHasOnOfferWithinTheShapes(t *testing.T) {
 	}
 
 	// The one machine is rented and the vendor has no other: the slot its instance holds is
-	// taken, and the other one waits for an offer.
+	// taken, and the other one is free until the market's read is marketInterval old, for
+	// Create to find no offer for it.
 	mustCreate(t, e, job(t, "exp-1", 0, 1))
 	onOffer[h100] = 0
 	available, _, _, labels, err = e.GetLiveAcceleratorCapacitySnapshot(ctx)
-	if err != nil || available[h100] != 0 || labels["h100-0"][clusterapi.NodeSlotNoOfferLabel] != "" || labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] != "shape h100: no offer passes the filters" {
+	if err != nil || available[h100] != 1 || labels["h100-0"][clusterapi.NodeSlotNoOfferLabel] != "" || labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] != "" {
 		t.Fatalf("one rented and none on offer: available %v, labels %v, %v", available, labels, err)
 	}
 }
@@ -66,7 +67,7 @@ func supplyOf(count int) provider.Supply {
 }
 
 // A shape the market has nothing for says why on every slot of it no instance holds, in the
-// market's words, and logs the figures behind it on every pass that asks.
+// market's words, and logs the figures behind it once.
 func TestAShapeWithNothingToRentSaysWhyOnItsSlotsAndInTheLog(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
@@ -99,14 +100,14 @@ func TestAShapeWithNothingToRentSaysWhyOnItsSlotsAndInTheLog(t *testing.T) {
 		}
 	}
 	lines := strings.Count(logged.String(), "shape h100 has nothing to rent: no offer passes the filters (4 offers of the size; left out by price 4)")
-	if lines != 3 || strings.Contains(logged.String(), "shape cpu ") {
-		t.Fatalf("log:\n%s\nwant the h100 shape's reason once per pass", logged.String())
+	if lines != 1 || strings.Contains(logged.String(), "shape cpu ") {
+		t.Fatalf("log:\n%s\nwant the h100 shape's reason once", logged.String())
 	}
 }
 
-// The market is asked once per shape and pass, however many capacity reads the pass makes, and
-// each pass counts afresh.
-func TestTheMarketIsAskedOncePerShapeAndPass(t *testing.T) {
+// The market is asked once per shape, however many capacity reads and passes there are within
+// marketInterval.
+func TestTheMarketIsAskedOncePerShapeWithinItsInterval(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
 	onOffer := 2
@@ -135,18 +136,18 @@ func TestTheMarketIsAskedOncePerShapeAndPass(t *testing.T) {
 			t.Fatalf("free = %d, want 2", got)
 		}
 	}
-	if calls := p.Calls("Rentable"); calls != 5*len(testShapes) {
-		t.Fatalf("%d market calls in five passes, want one per shape and pass (%d)", calls, 5*len(testShapes))
+	if calls := p.Calls("Rentable"); calls != len(testShapes) {
+		t.Fatalf("%d market calls in five passes, want one per shape (%d)", calls, len(testShapes))
 	}
 
 	mustCreate(t, e, job(t, "exp-1", 0, 1))
 	onOffer = 0
-	if got := free(); got != 0 {
-		t.Fatalf("after one rent with nothing left on offer: free = %d, want 0", got)
+	if got := free(); got != 1 {
+		t.Fatalf("after one rent with the read standing: free = %d, want the slot no instance holds", got)
 	}
 }
 
-func TestAMarketThatDoesNotAnswerFailsTheCapacityRead(t *testing.T) {
+func TestAMarketThatDoesNotAnswerLeavesItsShapeNothingToRent(t *testing.T) {
 	e, p := newTestExecutor(t)
 	down := errors.New("search is down")
 	p.Fail = func(method, _ string) error {
@@ -155,8 +156,9 @@ func TestAMarketThatDoesNotAnswerFailsTheCapacityRead(t *testing.T) {
 		}
 		return nil
 	}
-	if _, _, _, _, err := e.GetLiveAcceleratorCapacitySnapshot(context.Background()); !errors.Is(err, down) || !strings.Contains(err.Error(), "h100") {
-		t.Fatalf("err = %v, want the market's error naming the shape", err)
+	available, _, _, labels, err := e.GetLiveAcceleratorCapacitySnapshot(context.Background())
+	if err != nil || available[h100] != 0 || labels["h100-0"][clusterapi.NodeSlotNoOfferLabel] != "shape h100: the provider's market could not be read: "+down.Error() {
+		t.Fatalf("available %v, labels %v, %v, want the market's error on the shape's slots", available, labels, err)
 	}
 }
 

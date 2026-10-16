@@ -16,9 +16,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/provider"
@@ -31,9 +34,13 @@ const (
 	requestTimeout = 30 * time.Second
 	maxErrorBody   = 512
 	pollInterval   = time.Second
+	// tooManyWait is how long a request the API answered with 429 and no time to wait is not
+	// sent again.
+	tooManyWait = time.Minute
 )
 
 type Provider struct {
+	log     func(format string, args ...any)
 	cfg     Settings
 	apiKey  string
 	baseURL string
@@ -42,11 +49,49 @@ type Provider struct {
 	logWait time.Duration
 	shuffle func([]offer)
 	held    *held
+	limited *limited
 }
+
+// limited is what the API refused with HTTP 429, by method and path, and until when. Such a
+// request is answered with that refusal until then, without being sent. The offer search is
+// limited by a quota of rows a day, which a refusal names with how long until it has room again.
+type limited struct {
+	mu    sync.Mutex
+	until map[string]refusal
+}
+
+type refusal struct {
+	until time.Time
+	err   *statusError
+}
+
+// refused is the refusal that still stands for a request, if one does.
+func (l *limited) refused(key string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	r, ok := l.until[key]
+	if !ok {
+		return nil
+	}
+	if !time.Now().Before(r.until) {
+		delete(l.until, key)
+		return nil
+	}
+	return r
+}
+
+func (r refusal) Error() string {
+	return fmt.Sprintf("%v; not asked again until %s", r.err, r.until.Format(time.RFC3339))
+}
+
+func (r refusal) Unwrap() error { return r.err }
 
 // New refuses settings that cannot rent one of acceleratorTypes, the catalog strings the caller
 // will ask for, so that a missing entry stops the process at startup instead of a job at Create.
-func New(cfg Settings, acceleratorTypes []string) (*Provider, error) {
+func New(cfg Settings, acceleratorTypes []string, log func(format string, args ...any)) (*Provider, error) {
+	if log == nil {
+		return nil, errors.New("vast: a log is required")
+	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -60,6 +105,7 @@ func New(cfg Settings, acceleratorTypes []string) (*Provider, error) {
 		return nil, err
 	}
 	return &Provider{
+		log:     log,
 		cfg:     cfg,
 		apiKey:  key,
 		baseURL: defaultBaseURL,
@@ -68,6 +114,7 @@ func New(cfg Settings, acceleratorTypes []string) (*Provider, error) {
 		logWait: logDeliveryTimeout,
 		shuffle: shuffleOffers,
 		held:    &held{offers: map[int64]holder{}},
+		limited: &limited{until: map[string]refusal{}},
 	}, nil
 }
 
@@ -88,6 +135,10 @@ func (e *statusError) Error() string {
 
 // call sends one authenticated JSON request and decodes a 2xx answer into out.
 func (p *Provider) call(ctx context.Context, method, path string, body, out any) (http.Header, error) {
+	key := method + " " + path
+	if err := p.limited.refused(key); err != nil {
+		return nil, err
+	}
 	var payload io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -116,16 +167,43 @@ func (p *Provider) call(ctx context.Context, method, path string, body, out any)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		var failure struct {
-			Error   string `json:"error"`
-			Message string `json:"msg"`
+			Error      string  `json:"error"`
+			Message    string  `json:"msg"`
+			RetryAfter float64 `json:"retry_after"`
 		}
 		_ = json.Unmarshal(raw, &failure)
-		return nil, &statusError{Method: method, Path: path, Status: resp.StatusCode, Code: failure.Error, Message: failure.Message, Body: truncate(raw)}
+		refused := &statusError{Method: method, Path: path, Status: resp.StatusCode, Code: failure.Error, Message: failure.Message, Body: truncate(raw)}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return nil, p.limit(key, refused, retryAfter(resp.Header, failure.RetryAfter))
+		}
+		return nil, refused
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
 		return nil, fmt.Errorf("vast: decode %s %s: %w", method, path, err)
 	}
 	return resp.Header, nil
+}
+
+// limit keeps the API's 429 to a request for wait, and says so once.
+func (p *Provider) limit(key string, refused *statusError, wait time.Duration) error {
+	r := refusal{until: time.Now().Add(wait), err: refused}
+	p.limited.mu.Lock()
+	p.limited.until[key] = r
+	p.limited.mu.Unlock()
+	p.log("the API answered %s with HTTP 429 (%s): it is not asked again until %s", key, refused.Body, r.until.Format(time.RFC3339))
+	return r
+}
+
+// retryAfter is how long the API asked to wait: its Retry-After header in seconds, else the
+// retry_after of its body, else tooManyWait.
+func retryAfter(header http.Header, inBody float64) time.Duration {
+	if seconds, err := strconv.Atoi(header.Get("Retry-After")); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if inBody > 0 {
+		return time.Duration(inBody * float64(time.Second))
+	}
+	return tooManyWait
 }
 
 func truncate(raw []byte) string {

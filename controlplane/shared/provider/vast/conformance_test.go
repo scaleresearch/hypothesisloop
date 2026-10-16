@@ -49,7 +49,7 @@ func conformanceProvider(t *testing.T, accelerators []Accelerator) *Provider {
 		VerifiedOnly:     true,
 		Accelerators:     accelerators,
 		ExcludedMachines: excludedMachines(t),
-	}, nil)
+	}, nil, t.Logf)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

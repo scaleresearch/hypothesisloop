@@ -37,7 +37,7 @@ func conformanceProvider(t *testing.T) *Provider {
 		t.Skip("E2B_API_KEY is not set")
 	}
 	// The hold must fit into one lifetime, and one hour is the most the free plan gives.
-	p, err := New(Settings{APIKeyEnv: "E2B_API_KEY", LifetimeSeconds: 3600}, nil)
+	p, err := New(Settings{APIKeyEnv: "E2B_API_KEY", LifetimeSeconds: 3600}, nil, t.Logf)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

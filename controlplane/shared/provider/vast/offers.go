@@ -22,8 +22,8 @@ const (
 	// offerCandidates is how many machines one Create chooses among.
 	offerCandidates = 5
 	// sizeSearchLimit is how many offers of a size, cheapest first, Rentable reads to say which
-	// filters leave them out when none passes all of them.
-	sizeSearchLimit = 1000
+	// filters leave them out when none passes all of them. The search quota counts every row.
+	sizeSearchLimit = 25
 )
 
 type offer struct {

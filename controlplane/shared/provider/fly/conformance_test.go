@@ -46,7 +46,7 @@ func conformanceProvider(t *testing.T) *Provider {
 		t.Fatal("FLY_CONFORMANCE_ORG, FLY_CONFORMANCE_APP and FLY_CONFORMANCE_REGION must be set")
 	}
 	settings := Settings{APITokenEnv: "FLY_API_TOKEN", App: app, Region: region, CPUKind: "shared"}
-	owner, err := New(settings, nil)
+	owner, err := New(settings, nil, t.Logf)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -62,7 +62,7 @@ func conformanceProvider(t *testing.T) *Provider {
 	}
 	t.Setenv("FLY_CONFORMANCE_DEPLOY_TOKEN", deploy.Token)
 	settings.APITokenEnv = "FLY_CONFORMANCE_DEPLOY_TOKEN"
-	p, err := New(settings, nil)
+	p, err := New(settings, nil, t.Logf)
 	if err != nil {
 		t.Fatalf("New with the app's deploy token: %v", err)
 	}

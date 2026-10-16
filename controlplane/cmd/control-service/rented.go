@@ -47,8 +47,9 @@ func newRented(pcfg *hypothesisloopcfg.Config, pool *db.Pool, store *db.Store, c
 }
 
 func newLauncher(pcfg *hypothesisloopcfg.Config, s *hypothesisloopcfg.SandboxConfig, pool *db.Pool, metricsDBURL string, logger *zap.Logger) (*hosting.Launcher, error) {
+	log := logger.Named("hosting")
 	// An agent instance has no accelerator, so the provider is asked for no accelerator type.
-	rented, err := providers.New(s.Provider.Name, s.Provider.Settings, nil)
+	rented, err := providers.New(s.Provider.Name, s.Provider.Settings, nil, log.Named(s.Provider.Name).Sugar().Infof)
 	if err != nil {
 		return nil, fmt.Errorf("sandbox: %w", err)
 	}
@@ -59,7 +60,6 @@ func newLauncher(pcfg *hypothesisloopcfg.Config, s *hypothesisloopcfg.SandboxCon
 	if s.WarmPoolSize != nil {
 		warmPool = *s.WarmPoolSize
 	}
-	log := logger.Named("hosting")
 	decider := hosting.NewDecider(db.NewPlatformExperimentsStore(pool), hosting.MetricsDB{URL: metricsDBURL}, hosting.Settings{
 		Image: pcfg.Agents.Image, APIURL: pcfg.Services.PublicAPIURL, SigningSecret: pcfg.Auth.SigningSecret,
 		BootLimit:       time.Duration(pcfg.Agents.BootLimitSeconds) * time.Second,
@@ -94,11 +94,11 @@ func newCloudCluster(pcfg *hypothesisloopcfg.Config, cc hypothesisloopcfg.CloudC
 			acceleratorTypes = append(acceleratorTypes, s.AcceleratorType)
 		}
 	}
-	rented, err := providers.New(cc.Provider.Name, cc.Provider.Settings, acceleratorTypes)
+	log := logger.Named("cloudcompute").With(zap.String("cluster", cc.ClusterName))
+	rented, err := providers.New(cc.Provider.Name, cc.Provider.Settings, acceleratorTypes, log.Named(cc.Provider.Name).Sugar().Infof)
 	if err != nil {
 		return nil, fmt.Errorf("cloud_compute %s: %w", cc.ClusterName, err)
 	}
-	log := logger.Named("cloudcompute").With(zap.String("cluster", cc.ClusterName))
 	cluster, err := cloudcompute.NewCluster(cloudcompute.ClusterConfig{
 		Name: cc.ClusterName,
 		Executor: cloudcompute.Config{
@@ -106,11 +106,11 @@ func newCloudCluster(pcfg *hypothesisloopcfg.Config, cc hypothesisloopcfg.CloudC
 			APIURL: pcfg.Services.PublicAPIURL, JobImage: cc.JobImage, EnvironmentsRepository: environments,
 			Shapes: shapes, Provider: rented,
 			OfferWait: time.Duration(cc.OfferWaitSeconds) * time.Second, Startup: time.Duration(cc.StartupSeconds) * time.Second,
+			Log: log.Sugar().Infof,
 		},
 		Exchange: clusters, Registry: store.ClustersStore, Version: pcfg.Runtimes.ImageTag,
 		ReconcileInterval: time.Duration(cc.ReconcileIntervalSeconds) * time.Second,
 		StatusInterval:    time.Duration(cc.StatusIntervalSeconds) * time.Second,
-		Log:               log.Sugar().Infof,
 	})
 	if err != nil {
 		return nil, err

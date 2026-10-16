@@ -57,10 +57,12 @@ type Config struct {
 	// Startup is how long a rented instance may take to start its command. Past it the instance
 	// is destroyed and another rented, so nothing rented and not running is paid for longer.
 	Startup time.Duration
+	Log     func(format string, args ...any)
 }
 
 // Executor keeps nothing about instances. Every method reads the account, unless the executor
-// came from ForPass, in which case it answers from that pass's one read.
+// came from ForPass, in which case it answers from that pass's one read. What it keeps is the
+// last read of the vendor's market (marketReads).
 type Executor struct {
 	clusterID    string
 	prefix       string
@@ -71,8 +73,10 @@ type Executor struct {
 	provider     provider.Provider
 	// market is the provider's Market capability, nil for a vendor that has none.
 	market    provider.Market
+	reads     *marketReads
 	offerWait time.Duration
 	startup   time.Duration
+	log       func(format string, args ...any)
 	pass      *view
 }
 
@@ -93,13 +97,14 @@ func New(cfg Config) (*Executor, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	if cfg.Provider == nil {
-		return nil, fmt.Errorf("cloudcompute: Provider is required")
+	if cfg.Provider == nil || cfg.Log == nil {
+		return nil, fmt.Errorf("cloudcompute: Provider and Log are required")
 	}
 	rented := provider.Bounded(cfg.Provider)
 	market, _ := rented.(provider.Market)
 	return &Executor{
 		market:       market,
+		reads:        newMarketReads(),
 		clusterID:    cfg.ClusterID,
 		prefix:       cfg.prefix(),
 		apiURL:       cfg.APIURL,
@@ -109,6 +114,7 @@ func New(cfg Config) (*Executor, error) {
 		provider:     rented,
 		offerWait:    cfg.OfferWait,
 		startup:      cfg.Startup,
+		log:          cfg.Log,
 	}, nil
 }
 

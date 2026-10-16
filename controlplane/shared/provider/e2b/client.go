@@ -52,6 +52,7 @@ const (
 )
 
 type Provider struct {
+	log     func(format string, args ...any)
 	cfg     Settings
 	apiKey  string
 	baseURL string
@@ -66,7 +67,10 @@ type Provider struct {
 
 // New refuses any accelerator type: the vendor rents CPU-only sandboxes, so a shape that asks
 // for an accelerator stops the process at startup instead of a job at Create.
-func New(cfg Settings, acceleratorTypes []string) (*Provider, error) {
+func New(cfg Settings, acceleratorTypes []string, log func(format string, args ...any)) (*Provider, error) {
+	if log == nil {
+		return nil, errors.New("e2b: a log is required")
+	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -78,6 +82,7 @@ func New(cfg Settings, acceleratorTypes []string) (*Provider, error) {
 		return nil, err
 	}
 	return &Provider{
+		log:       log,
 		cfg:       cfg,
 		apiKey:    key,
 		baseURL:   defaultBaseURL,

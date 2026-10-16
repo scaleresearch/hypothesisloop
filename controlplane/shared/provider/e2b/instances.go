@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -133,27 +132,27 @@ func (p *Provider) stateOf(ctx context.Context, found sandbox) (state provider.S
 		return provider.StatePaused, false
 	}
 	if found.State != "running" {
-		log.Printf("e2b: sandbox %s (%s) has state %q, which this adapter does not know; reporting it as unknown", id, name, found.State)
+		p.log("sandbox %s (%s) has state %q, which this adapter does not know; reporting it as unknown", id, name, found.State)
 		return provider.StateUnknown, false
 	}
 	ctx, cancel := context.WithTimeout(ctx, p.stateRead)
 	defer cancel()
 	inside, exists, err := p.inside(ctx, id)
 	if err != nil {
-		log.Printf("e2b: the token of sandbox %s (%s) could not be read; reporting it as unknown: %v", id, name, err)
+		p.log("the token of sandbox %s (%s) could not be read; reporting it as unknown: %v", id, name, err)
 		return provider.StateUnknown, false
 	}
 	if !exists {
-		log.Printf("e2b: sandbox %s (%s) is in the list and was not found when read; reporting it as unknown", id, name)
+		p.log("sandbox %s (%s) is in the list and was not found when read; reporting it as unknown", id, name)
 		return provider.StateUnknown, false
 	}
 	written, started, err := inside.readFile(ctx, statePath, maxStateBytes)
 	if errors.Is(err, vendorapi.ErrTooLarge) {
-		log.Printf("e2b: sandbox %s (%s): its state file is larger than the %d bytes the supervisor writes at most; reporting it as exited", id, name, maxStateBytes)
+		p.log("sandbox %s (%s): its state file is larger than the %d bytes the supervisor writes at most; reporting it as exited", id, name, maxStateBytes)
 		return provider.StateExited, false
 	}
 	if err != nil {
-		log.Printf("e2b: the state of sandbox %s (%s) could not be read; reporting it as unknown: %v", id, name, err)
+		p.log("the state of sandbox %s (%s) could not be read; reporting it as unknown: %v", id, name, err)
 		return provider.StateUnknown, false
 	}
 	if !started {
@@ -161,7 +160,7 @@ func (p *Provider) stateOf(ctx context.Context, found sandbox) (state provider.S
 	}
 	state, expired, err = stateWritten(written)
 	if err != nil {
-		log.Printf("e2b: sandbox %s (%s): %v; reporting it as exited", id, name, err)
+		p.log("sandbox %s (%s): %v; reporting it as exited", id, name, err)
 		return provider.StateExited, false
 	}
 	return state, expired

@@ -25,12 +25,12 @@ func TestNewRefusesIncompleteSettings(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cfg := valid
 			tc.mutate(&cfg)
-			if _, err := New(cfg, nil); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, err := New(cfg, nil, t.Logf); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want one about %q", err, tc.want)
 			}
 		})
 	}
-	if _, err := New(valid, nil); err != nil {
+	if _, err := New(valid, nil, t.Logf); err != nil {
 		t.Fatalf("New(valid): %v", err)
 	}
 }
@@ -57,10 +57,10 @@ func TestNewRefusesAnAcceleratorTypeTheSettingsCannotRent(t *testing.T) {
 		Accelerators:    []Accelerator{{Product: "NVIDIA GeForce RTX 4090", GPUName: "RTX 4090"}},
 	}
 
-	if _, err := New(settings, []string{"nvidia.com/gpu.product=NVIDIA-GEFORCE-RTX-4090"}); err != nil {
+	if _, err := New(settings, []string{"nvidia.com/gpu.product=NVIDIA-GEFORCE-RTX-4090"}, t.Logf); err != nil {
 		t.Fatalf("a type with an entry: %v", err)
 	}
-	_, err := New(settings, []string{"nvidia.com/gpu.product=NVIDIA-GEFORCE-RTX-4090", "nvidia.com/gpu.product=NVIDIA-H200"})
+	_, err := New(settings, []string{"nvidia.com/gpu.product=NVIDIA-GEFORCE-RTX-4090", "nvidia.com/gpu.product=NVIDIA-H200"}, t.Logf)
 	if err == nil || !strings.Contains(err.Error(), "NVIDIA-H200") {
 		t.Fatalf("err = %v, want one naming the type with no entry", err)
 	}

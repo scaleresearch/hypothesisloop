@@ -3,7 +3,6 @@ package fly
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -112,7 +111,7 @@ func (p *Provider) stateOf(ctx context.Context, found machine, now time.Time) (s
 	case "destroying", "destroyed":
 		return "", false
 	}
-	log.Printf("fly: machine %s (%s) has state %q, which this adapter does not know; reporting it as unknown", found.ID, found.Config.Metadata[nameKey], found.State)
+	p.log("machine %s (%s) has state %q, which this adapter does not know; reporting it as unknown", found.ID, found.Config.Metadata[nameKey], found.State)
 	return provider.StateUnknown, true
 }
 
@@ -128,7 +127,7 @@ func (p *Provider) outputComplete(ctx context.Context, found machine, now time.T
 	}
 	entries, err := p.logEntries(ctx, found.ID, endMarkWindow)
 	if err != nil {
-		log.Printf("fly: machine %s stopped and its log could not be read for the end mark; reporting it as running: %v", found.ID, err)
+		p.log("machine %s stopped and its log could not be read for the end mark; reporting it as running: %v", found.ID, err)
 		return false
 	}
 	run, _ := lastRun(entries)

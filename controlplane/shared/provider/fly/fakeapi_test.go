@@ -150,7 +150,7 @@ func logJSON(messages ...string) string {
 func newTestProvider(t *testing.T, api *fakeAPI) *Provider {
 	t.Helper()
 	t.Setenv("FLY_TEST_TOKEN", testToken)
-	p, err := New(Settings{APITokenEnv: "FLY_TEST_TOKEN", App: testApp, Region: "ams", CPUKind: "shared"}, nil)
+	p, err := New(Settings{APITokenEnv: "FLY_TEST_TOKEN", App: testApp, Region: "ams", CPUKind: "shared"}, nil, t.Logf)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

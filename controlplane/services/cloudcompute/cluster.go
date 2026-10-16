@@ -67,7 +67,6 @@ type ClusterConfig struct {
 	Version           string
 	ReconcileInterval time.Duration
 	StatusInterval    time.Duration
-	Log               func(format string, args ...any)
 }
 
 // Cluster is the runtime of one cloud compute account, run inside the control plane.
@@ -77,8 +76,8 @@ type Cluster struct {
 }
 
 func NewCluster(cfg ClusterConfig) (*Cluster, error) {
-	if cfg.Name == "" || cfg.Exchange == nil || cfg.Registry == nil || cfg.Log == nil || cfg.ReconcileInterval <= 0 || cfg.StatusInterval <= 0 {
-		return nil, errors.New("cloudcompute: Name, Exchange, Registry, Log and both intervals are required")
+	if cfg.Name == "" || cfg.Exchange == nil || cfg.Registry == nil || cfg.ReconcileInterval <= 0 || cfg.StatusInterval <= 0 {
+		return nil, errors.New("cloudcompute: Name, Exchange, Registry and both intervals are required")
 	}
 	exec, err := New(cfg.Executor)
 	if err != nil {
@@ -102,14 +101,14 @@ func (c *Cluster) Run(ctx context.Context) {
 			Executor:          c.exec,
 			ReconcileInterval: c.cfg.ReconcileInterval,
 			StatusInterval:    c.cfg.StatusInterval,
-			Log:               c.cfg.Log,
+			Log:               c.cfg.Executor.Log,
 		}
 		err := agent.Run(ctx)
 		if !errors.Is(err, agentloop.ErrClusterRemoved) {
 			break
 		}
 		if !removed {
-			c.cfg.Log("cluster %s is not registered: nothing is rented for it until it is (hl-admin cluster add %s)", c.cfg.Name, c.cfg.Name)
+			c.cfg.Executor.Log("cluster %s is not registered: nothing is rented for it until it is (hl-admin cluster add %s)", c.cfg.Name, c.cfg.Name)
 		}
 		removed = true
 		select {
@@ -120,6 +119,6 @@ func (c *Cluster) Run(ctx context.Context) {
 	leaving, cancel := context.WithTimeout(context.WithoutCancel(ctx), leaveLimit)
 	defer cancel()
 	if err := c.exec.Leave(leaving); err != nil {
-		c.cfg.Log("%v", err)
+		c.cfg.Executor.Log("%v", err)
 	}
 }

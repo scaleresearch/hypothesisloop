@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
@@ -88,7 +87,7 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJo
 	if err != nil {
 		return fmt.Errorf("cloudcompute: create instance %s: %w", spec.Name, err)
 	}
-	log.Printf("cloudcompute: created instance %s (%s): attempt %d of experiment %s is desired in slot %s", spec.Name, id, exp.AttemptCount, exp.ID, name)
+	e.log("created instance %s (%s): attempt %d of experiment %s is desired in slot %s", spec.Name, id, exp.AttemptCount, exp.ID, name)
 	v.add(instance{
 		Instance:     provider.Instance{ID: id, Name: spec.Name, State: provider.StateStarting},
 		experimentID: exp.ID, attempt: exp.AttemptCount, shape: shape.Name, index: index,
@@ -153,7 +152,7 @@ func (e *Executor) destroy(ctx context.Context, v *view, i instance, why string)
 	if err := e.provider.Destroy(ctx, i.ID); err != nil {
 		return fmt.Errorf("cloudcompute: destroy instance %s (%s): %s: %w", i.Name, i.ID, why, err)
 	}
-	log.Printf("cloudcompute: destroyed instance %s (%s): %s", i.Name, i.ID, why)
+	e.log("destroyed instance %s (%s): %s", i.Name, i.ID, why)
 	v.remove(i.ID)
 	return nil
 }
@@ -167,7 +166,7 @@ func (e *Executor) Leave(ctx context.Context) error {
 		return fmt.Errorf("cloudcompute: what is still rented could not be listed: %w", err)
 	}
 	for _, i := range listed {
-		log.Printf("cloudcompute: leaving instance %s (%s) rented, %s", i.Name, i.ID, i.State)
+		e.log("leaving instance %s (%s) rented, %s", i.Name, i.ID, i.State)
 	}
 	return nil
 }
@@ -238,7 +237,7 @@ func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *clusterapi.D
 			return false, fmt.Errorf("cloudcompute: instance %s runs experiment %s in slot %s, which no configured shape has, so it is billed beside every slot: restore the shape or its max_instances, or end the job", i.Name, exp.ID, i.slot())
 		}
 		if e.overdue(i) {
-			log.Printf("cloudcompute: instance %s has not started in %s and is replaced", i.Name, e.startup)
+			e.log("instance %s has not started in %s and is replaced", i.Name, e.startup)
 			return false, nil
 		}
 		matches = true
@@ -283,7 +282,7 @@ func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agen
 	case provider.StateExited:
 		how, _, readErr := e.ending(ctx, v, i)
 		if readErr != nil {
-			log.Printf("cloudcompute: reporting %s as gone: %v", i.Name, readErr)
+			e.log("reporting %s as gone: %v", i.Name, readErr)
 		}
 		if how != endingUnknown {
 			observed.StartedAt, observed.EndedAt, _ = exitline.FindRun(e.output(ctx, v, i).lines)

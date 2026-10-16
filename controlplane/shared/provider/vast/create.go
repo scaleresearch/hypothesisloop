@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"slices"
 	"strconv"
@@ -65,7 +64,7 @@ func (p *Provider) rentFirstAvailable(ctx context.Context, offers []offer, req c
 		id, err := p.rent(ctx, candidate, req)
 		p.held.settle(candidate.ID, id)
 		if err == nil {
-			log.Printf("vast: rented instance %s for %s on machine %d at $%.4f/h", id, req.Label, candidate.MachineID, candidate.PricePerHour)
+			p.log("rented instance %s for %s on machine %d at $%.4f/h", id, req.Label, candidate.MachineID, candidate.PricePerHour)
 			return id, nil
 		}
 		if !errors.Is(err, errOfferTaken) {
