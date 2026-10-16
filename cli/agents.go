@@ -161,9 +161,11 @@ restart until it was delivered. Use it to steer; a fact about a hypothesis goes 
 --coordinator tells the hosted coordinator, from a person or a key, the same way (409
 no_coordinator where none is hosted). At most 1500 bytes. A recipient is sent at most 6 messages
 an hour by the coordinator and 6 by the owner, counted apart: past that it is refused (429
-message_rate_limited) with when the next can go, and with --all none is sent. Refused for an
-agent that finished or was cut (409 agent_ended). Prints one line per message sent. hl
-platform-experiments agents messages reads what was sent before. --text-file FILE, or - for
+message_rate_limited) with when the next can go. With --all, researchers at their limit are
+skipped and the rest are sent: one line per message sent, then one line per researcher refused
+(agent_id, reason, retry_after) and a note on stderr; refused whole only when none could be sent.
+Refused for an agent that finished or was cut (409 agent_ended). Prints one line per message
+sent. hl platform-experiments agents messages reads what was sent before. --text-file FILE, or - for
 stdin, gives T in place of --text T.`, stderr)
 	named := experimentFlag(fs)
 	message := newTextFlag(fs, "text", "what the agent is told")
@@ -196,7 +198,25 @@ stdin, gives T in place of --text T.`, stderr)
 	default:
 		body["agent_id"] = operands[0]
 	}
-	return call(c, "POST", messagesPath(pe), body, "messages", "no message was sent", stdout, stderr)
+	var out struct {
+		Messages json.RawMessage   `json:"messages"`
+		Refused  []json.RawMessage `json:"refused"`
+	}
+	if err := c.Do("POST", messagesPath(pe), body, &out); err != nil {
+		return fail(stderr, err)
+	}
+	if err := printLines(stdout, stderr, "no message was sent", out.Messages); err != nil {
+		return fail(stderr, err)
+	}
+	for _, refused := range out.Refused {
+		if err := printLine(stdout, refused); err != nil {
+			return fail(stderr, err)
+		}
+	}
+	if len(out.Refused) > 0 {
+		fmt.Fprintf(stderr, "hl: %d recipients were not sent to: rate limited, see refused above\n", len(out.Refused))
+	}
+	return 0
 }
 
 func agentsMessages(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {

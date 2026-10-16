@@ -233,3 +233,27 @@ func TestAgentsMessageSendsToOneAgentOrEveryResearcher(t *testing.T) {
 		t.Errorf("message by an agent: exit %d with %d requests, want 1 and no further request", code, len(*got))
 	}
 }
+
+// A message to every researcher that some were rate limited for prints the messages sent, then
+// each researcher refused and why, and succeeds.
+func TestAgentsMessageAllNamesTheResearchersItDidNotReach(t *testing.T) {
+	recordingServer(t, func(_ int, _ recorded) any {
+		return map[string]any{
+			"messages": []map[string]any{{"agent_id": "ag-1", "from": "owner", "text": "queue more"}},
+			"refused":  []map[string]any{{"agent_id": "ag-2", "reason": "message_rate_limited", "retry_after": "2026-10-09T12:00:00Z"}},
+		}
+	})
+	var stdout, stderr bytes.Buffer
+	t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-env"))
+	if code := run([]string{"platform-experiments", "agents", "message", "--all", "--text", "queue more"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("message --all: exit %d, stderr %s", code, stderr.String())
+	}
+	want := `{"agent_id":"ag-1","from":"owner","text":"queue more"}` + "\n" +
+		`{"agent_id":"ag-2","reason":"message_rate_limited","retry_after":"2026-10-09T12:00:00Z"}` + "\n"
+	if stdout.String() != want {
+		t.Errorf("printed %q, want %q", stdout.String(), want)
+	}
+	if !strings.Contains(stderr.String(), "1 recipients were not sent to") {
+		t.Errorf("stderr %q, want the note on the refused", stderr.String())
+	}
+}

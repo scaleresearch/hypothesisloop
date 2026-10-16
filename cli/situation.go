@@ -35,7 +35,7 @@ The platform experiment as it stands now, one line per block, each field as key=
               admitted with now
   agents      one line per agent: jobs queued and running, subagents live, turn (working or
               waiting, and since when), activity, minutes_without_job_in_flight, messages
-              (left_this_hour it may still be sent, next_at when the next frees up) and model
+              (left_this_hour the caller may still send it, next_at when the next frees up) and model
               (utilization of the model allowance's window, resets_at when the window resets,
               refused_until while it refuses)
   hypotheses_in_flight one line per hypothesis with jobs queued or running or checked out in the

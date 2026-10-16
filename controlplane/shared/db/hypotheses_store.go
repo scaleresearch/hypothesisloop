@@ -403,11 +403,21 @@ WHERE platform_experiment_id = $1 GROUP BY 1`
 	return out, nil
 }
 
+// agentAtWork is the condition that the agent of agentRef in the platform experiment of peRef has
+// not ended: it neither finished nor was cut, and the platform experiment is not closed.
+func agentAtWork(peRef, agentRef string) string {
+	return `NOT EXISTS (SELECT 1 FROM experiment_signups fin WHERE fin.platform_experiment_id = ` + peRef + ` AND fin.agent_id = ` + agentRef + ` AND fin.finished_at IS NOT NULL)
+	AND NOT EXISTS (SELECT 1 FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = ` + peRef + ` AND cut.agent_id = ` + agentRef + `)
+	AND NOT EXISTS (SELECT 1 FROM platform_experiments shut WHERE shut.id = ` + peRef + ` AND shut.status = 'closed')`
+}
+
 // checkoutClaims is the condition on a hypothesis_checkouts row c that it still claims its
-// hypothesis: checked out within $2 seconds by an agent that has not finished.
-const checkoutClaims = `c.checked_out_at > now() - make_interval(secs => $2)
-	AND NOT EXISTS (SELECT 1 FROM experiment_signups s
-	                WHERE s.platform_experiment_id = c.platform_experiment_id AND s.agent_id = c.agent_id AND s.finished_at IS NOT NULL)`
+// hypothesis: checked out within $2 seconds by an agent that has not ended.
+var checkoutClaims = `c.checked_out_at > now() - make_interval(secs => $2)
+	AND ` + agentAtWork("c.platform_experiment_id", "c.agent_id")
+
+// jobOnIt is the condition on an experiments row e that a job of an agent at work is queued or running.
+var jobOnIt = `e.status IN ('QUEUED', 'SUBMITTED', 'RUNNING') AND ` + agentAtWork("e.platform_experiment_id", "e.agent_id")
 
 // CheckOutHypothesis records that agentID checked hypothesisID of platformExpID out on branch
 // now, and answers the other agents working on it.
@@ -435,8 +445,8 @@ ON CONFLICT (hypothesis_id, agent_id) DO UPDATE SET branch = EXCLUDED.branch, ch
 // within platformExpID or, empty, in every platform experiment.
 func (s *HypothesesStore) TakenHypotheses(ctx context.Context, platformExpID string) ([]string, error) {
 	rows, err := s.pool.pool.Query(ctx, `
-SELECT hypothesis_id FROM experiments
-WHERE hypothesis_id <> '' AND status IN ('QUEUED', 'SUBMITTED', 'RUNNING') AND ($1 = '' OR platform_experiment_id = $1)
+SELECT e.hypothesis_id FROM experiments e
+WHERE e.hypothesis_id <> '' AND `+jobOnIt+` AND ($1 = '' OR e.platform_experiment_id = $1)
 UNION
 SELECT c.hypothesis_id FROM hypothesis_checkouts c
 WHERE ($1 = '' OR c.platform_experiment_id = $1) AND `+checkoutClaims, platformExpID, domain.CheckoutClaim.Seconds())
@@ -465,8 +475,8 @@ func (s *HypothesesStore) Working(ctx context.Context, ids []string) (map[string
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT on_it.hypothesis_id, on_it.agent_id, COALESCE(NULLIF(a.name, ''), on_it.agent_id)
 FROM (
-	SELECT hypothesis_id, agent_id FROM experiments
-	WHERE hypothesis_id = ANY($1) AND status IN ('QUEUED', 'SUBMITTED', 'RUNNING')
+	SELECT e.hypothesis_id, e.agent_id FROM experiments e
+	WHERE e.hypothesis_id = ANY($1) AND `+jobOnIt+`
 	UNION
 	SELECT c.hypothesis_id, c.agent_id FROM hypothesis_checkouts c
 	WHERE c.hypothesis_id = ANY($1) AND `+checkoutClaims+`

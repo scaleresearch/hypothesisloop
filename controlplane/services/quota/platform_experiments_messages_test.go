@@ -22,15 +22,16 @@ type messageStore struct {
 	text    string
 	sender  domain.Actor
 	refuse  error
+	limited []db.MessagesRateLimited
 	readFor *string
 }
 
-func (s *messageStore) SendAgentMessages(_ context.Context, _ string, to []string, text string, sender domain.Actor) ([]domain.AgentMessage, error) {
+func (s *messageStore) SendAgentMessages(_ context.Context, _ string, to []string, text string, sender domain.Actor) ([]domain.AgentMessage, []db.MessagesRateLimited, error) {
 	if s.refuse != nil {
-		return nil, s.refuse
+		return nil, nil, s.refuse
 	}
 	s.to, s.text, s.sender = to, text, sender
-	return []domain.AgentMessage{{AgentID: "veteran", From: domain.MessageFrom(sender), Text: text, Actor: sender, At: time.Now()}}, nil
+	return []domain.AgentMessage{{AgentID: "veteran", From: domain.MessageFrom(sender), Text: text, Actor: sender, At: time.Now()}}, s.limited, nil
 }
 
 func (s *messageStore) SendCoordinatorMessage(_ context.Context, _, text string, sender domain.Actor) (*domain.AgentMessage, error) {
@@ -90,6 +91,27 @@ func TestTheCoordinatorAndTheOwnerMessageAgentsAndAnAgentReadsItsOwn(t *testing.
 	limited := &messageStore{refuse: &db.MessagesRateLimited{AgentID: "veteran", From: "coordinator", Next: time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)}}
 	if code, out := call(t, messagesRouter(t, limited, coordinator), "POST", "/platform-experiments/pe-1/messages", `{"agent_id":"veteran","text":"again"}`); code != http.StatusTooManyRequests || out["reason"] != "message_rate_limited" || !strings.Contains(out["message"].(string), "2026-10-09T12:00:00Z") || !strings.Contains(out["message"].(string), "by the coordinator") {
 		t.Errorf("past the limit: got = %d %v, want 429 message_rate_limited with when", code, out)
+	}
+
+	// A message to every researcher reaches those not rate limited and names the others.
+	partial := &messageStore{limited: []db.MessagesRateLimited{{AgentID: "dana", From: "owner", Next: time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)}}}
+	code, out = call(t, messagesRouter(t, partial, owner), "POST", "/platform-experiments/pe-1/messages", `{"all":true,"text":"queue more trials"}`)
+	refused, _ := out["refused"].([]any)
+	if code != http.StatusCreated || len(out["messages"].([]any)) != 1 || len(refused) != 1 {
+		t.Fatalf("all with one limited: got = %d %v, want the sent and the refused", code, out)
+	}
+	if r := refused[0].(map[string]any); r["agent_id"] != "dana" || r["reason"] != "message_rate_limited" || r["retry_after"] != "2026-10-09T12:00:00Z" {
+		t.Errorf("refused = %v, want dana, message_rate_limited and when", r)
+	}
+	if _, listed := out["refused"]; !listed {
+		t.Error("refused missing")
+	}
+	if code, out := call(t, messagesRouter(t, &messageStore{}, owner), "POST", "/platform-experiments/pe-1/messages", `{"all":true,"text":"queue more trials"}`); code != http.StatusCreated || out["refused"] != nil {
+		t.Errorf("all with none limited: got = %d %v, want no refused", code, out)
+	}
+	allLimited := &messageStore{refuse: &db.MessagesRateLimited{AgentID: "dana", From: "owner", Next: time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)}}
+	if code, out := call(t, messagesRouter(t, allLimited, owner), "POST", "/platform-experiments/pe-1/messages", `{"all":true,"text":"again"}`); code != http.StatusTooManyRequests || out["reason"] != "message_rate_limited" {
+		t.Errorf("all with every one limited: got = %d %v, want 429", code, out)
 	}
 
 	// A person steers the coordinator the same way, and is told where none is hosted.

@@ -20,6 +20,9 @@ import (
 
 var ErrPlatformExperimentNotFound = errors.New("platform experiment not found")
 
+// coordinatorReader reads a roster for the run's own bookkeeping, where no message allowance is shown.
+var coordinatorReader = domain.Actor{Kind: domain.ActorCoordinator}
+
 // checkLength holds a platform experiment to a run of at most quota.max_platform_experiment_days.
 // Until its end it may rent machines.
 func (s *PlatformExperimentsService) checkLength(durationHours float64) error {
@@ -1721,7 +1724,7 @@ func (s *PlatformExperimentsService) noticeIdle(ctx context.Context, id string, 
 	if err != nil {
 		return err
 	}
-	rows, err := s.roster(ctx, id, signups)
+	rows, err := s.roster(ctx, id, signups, coordinatorReader)
 	if err != nil {
 		return err
 	}
@@ -1816,7 +1819,7 @@ func (s *PlatformExperimentsService) noticeIdleCapacity(ctx context.Context, pe 
 		if err != nil {
 			return err
 		}
-		rows, err := s.roster(ctx, pe.ID, signups)
+		rows, err := s.roster(ctx, pe.ID, signups, coordinatorReader)
 		if err != nil {
 			return err
 		}

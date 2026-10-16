@@ -23,7 +23,7 @@ func TestAMessageIsToldToItsAgentAloneAndKept(t *testing.T) {
 	defer stop()
 
 	coordinator := domain.Actor{Kind: domain.ActorCoordinator, ID: peID}
-	sent, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "leave the lr line, try warmup", coordinator)
+	sent, _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "leave the lr line, try warmup", coordinator)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,20 +57,20 @@ func TestAMessageIsToldToItsAgentAloneAndKept(t *testing.T) {
 	// The owner's messages count apart from the coordinator's: they never spend its steering.
 	owner := domain.Actor{Kind: domain.ActorUser, ID: "user-1"}
 	for range domain.MaxAgentMessagesPerHour {
-		if _, err := pes.SendAgentMessages(ctx, peID, nil, "to every researcher", owner); err != nil {
+		if _, _, err := pes.SendAgentMessages(ctx, peID, nil, "to every researcher", owner); err != nil {
 			t.Fatal(err)
 		}
 	}
 	var limited *MessagesRateLimited
-	if _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "one too many", owner); !errors.As(err, &limited) || limited.AgentID != agentID || limited.From != "owner" || limited.Next.IsZero() {
+	if _, _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "one too many", owner); !errors.As(err, &limited) || limited.AgentID != agentID || limited.From != "owner" || limited.Next.IsZero() {
 		t.Fatalf("past the owner's hourly limit: got = %v, want MessagesRateLimited for %s from the owner", err, agentID)
 	}
 	for range domain.MaxAgentMessagesPerHour - 1 {
-		if _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "steer", coordinator); err != nil {
+		if _, _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "steer", coordinator); err != nil {
 			t.Fatalf("the coordinator's own allowance after the owner's: %v", err)
 		}
 	}
-	if _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "one too many", coordinator); !errors.As(err, &limited) || limited.From != "coordinator" {
+	if _, _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "one too many", coordinator); !errors.As(err, &limited) || limited.From != "coordinator" {
 		t.Fatalf("past the coordinator's hourly limit: got = %v, want MessagesRateLimited from the coordinator", err)
 	}
 	kept, err := pes.ListAgentMessages(ctx, peID, agentID)
@@ -81,18 +81,18 @@ func TestAMessageIsToldToItsAgentAloneAndKept(t *testing.T) {
 		t.Fatalf("kept: got = %+v, want the %d sent, oldest first", kept, 2*domain.MaxAgentMessagesPerHour)
 	}
 
-	if _, err := pes.SendAgentMessages(ctx, peID, []string{"nobody"}, "hello", coordinator); !errors.Is(err, ErrNotSignedUp) {
+	if _, _, err := pes.SendAgentMessages(ctx, peID, []string{"nobody"}, "hello", coordinator); !errors.Is(err, ErrNotSignedUp) {
 		t.Errorf("to an agent not signed up: got = %v, want = %v", err, ErrNotSignedUp)
 	}
 	exec(t, pool, `UPDATE experiment_signups SET finished_at = now() WHERE platform_experiment_id = $1`, peID)
-	if _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "hello", coordinator); !errors.Is(err, ErrAgentEnded) {
+	if _, _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "hello", coordinator); !errors.Is(err, ErrAgentEnded) {
 		t.Errorf("to a finished agent: got = %v, want = %v", err, ErrAgentEnded)
 	}
-	if _, err := pes.SendAgentMessages(ctx, peID, nil, "hello", coordinator); !errors.Is(err, ErrNoResearcherAtWork) {
+	if _, _, err := pes.SendAgentMessages(ctx, peID, nil, "hello", coordinator); !errors.Is(err, ErrNoResearcherAtWork) {
 		t.Errorf("to every researcher with none at work: got = %v, want = %v", err, ErrNoResearcherAtWork)
 	}
 	exec(t, pool, `UPDATE platform_experiments SET status = 'closed' WHERE id = $1`, peID)
-	if _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "hello", coordinator); !errors.Is(err, ErrPlatformExperimentClosed) {
+	if _, _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "hello", coordinator); !errors.Is(err, ErrPlatformExperimentClosed) {
 		t.Errorf("once closed: got = %v, want = %v", err, ErrPlatformExperimentClosed)
 	}
 }
@@ -109,7 +109,7 @@ func TestTheMessageAllowanceCountsTheLastHour(t *testing.T) {
 	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id) VALUES ($1, $2)`, peID, agentID)
 	allowance := func() domain.MessageAllowance {
 		t.Helper()
-		all, err := pes.MessageAllowance(ctx, peID)
+		all, err := pes.MessageAllowance(ctx, peID, domain.Actor{Kind: domain.ActorCoordinator})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -124,11 +124,11 @@ func TestTheMessageAllowanceCountsTheLastHour(t *testing.T) {
 	}
 	coordinator := domain.Actor{Kind: domain.ActorCoordinator, ID: peID}
 	for range 2 {
-		if _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "direction", coordinator); err != nil {
+		if _, _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "direction", coordinator); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "from the owner", domain.Actor{Kind: domain.ActorUser, ID: "user-1"}); err != nil {
+	if _, _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "from the owner", domain.Actor{Kind: domain.ActorUser, ID: "user-1"}); err != nil {
 		t.Fatal(err)
 	}
 	exec(t, pool, `UPDATE agent_messages SET created_at = now() - interval '50 minutes' WHERE id = (SELECT min(id) FROM agent_messages WHERE platform_experiment_id = $1)`, peID)
@@ -201,7 +201,7 @@ func TestAMessageToTheCoordinatorIsToldToItsStreamAlone(t *testing.T) {
 	if _, err := pes.SendCoordinatorMessage(ctx, peID, "one too many", staff); !errors.As(err, &limited) || limited.AgentID != domain.CoordinatorRecipient || limited.Next.IsZero() {
 		t.Fatalf("past the hourly limit: got = %v, want MessagesRateLimited for the coordinator", err)
 	}
-	if allowance, err := pes.MessageAllowance(ctx, peID); err != nil || allowance[agentID].LeftThisHour != domain.MaxAgentMessagesPerHour {
+	if allowance, err := pes.MessageAllowance(ctx, peID, domain.Actor{Kind: domain.ActorCoordinator}); err != nil || allowance[agentID].LeftThisHour != domain.MaxAgentMessagesPerHour {
 		t.Fatalf("the researcher's allowance: got = (%+v, %v), want it untouched", allowance, err)
 	}
 	if kept, err := pes.ListAgentMessages(ctx, peID, domain.CoordinatorRecipient); err != nil || len(kept) != domain.MaxAgentMessagesPerHour {
@@ -276,5 +276,49 @@ VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'test-accelerator', $
 	if len(got) != 1 || got[0].HypothesisID != hypothesisID || got[0].Queued != 1 || got[0].Running != 1 ||
 		len(got[0].AgentIDs) != 2 || got[0].AgentIDs[0] != agentID || got[0].AgentIDs[1] != other {
 		t.Fatalf("in flight: %+v, want the hypothesis's queued and running job of both agents", got)
+	}
+}
+
+// A message to every researcher reaches those the sender may still message and names the rest as
+// refused, and is refused whole only when none can be sent. The allowance is the reader's own.
+func TestAMessageToEveryResearcherSkipsThoseRateLimited(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	limitedAgent, peID, _ := seedRun(t, pool, "partial", true)
+	freeAgent, _, _ := seedRun(t, pool, "partial-b", true)
+	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
+	t.Cleanup(func() { exec(t, pool, `DELETE FROM experiment_signups WHERE agent_id = $1`, freeAgent) })
+	for _, agent := range []string{limitedAgent, freeAgent} {
+		exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, role) VALUES ($1, $2, 'competitor')`, peID, agent)
+	}
+	owner := domain.Actor{Kind: domain.ActorUser, ID: "user-1"}
+	coordinator := domain.Actor{Kind: domain.ActorCoordinator, ID: peID}
+	for range domain.MaxAgentMessagesPerHour {
+		if _, _, err := pes.SendAgentMessages(ctx, peID, []string{limitedAgent}, "steer", owner); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	allowance, err := pes.MessageAllowance(ctx, peID, owner)
+	if err != nil || allowance[limitedAgent].LeftThisHour != 0 || allowance[freeAgent].LeftThisHour != domain.MaxAgentMessagesPerHour {
+		t.Fatalf("owner's allowance = %+v, %v, want none left for %s and all for %s", allowance, err, limitedAgent, freeAgent)
+	}
+	if allowance, err = pes.MessageAllowance(ctx, peID, coordinator); err != nil || allowance[limitedAgent].LeftThisHour != domain.MaxAgentMessagesPerHour {
+		t.Fatalf("coordinator's allowance = %+v, %v, want the owner's messages not counted", allowance, err)
+	}
+
+	sent, refused, err := pes.SendAgentMessages(ctx, peID, nil, "to all", owner)
+	if err != nil || len(sent) != 1 || sent[0].AgentID != freeAgent || len(refused) != 1 || refused[0].AgentID != limitedAgent || refused[0].From != "owner" || refused[0].Next.IsZero() {
+		t.Fatalf("to all: sent %+v, refused %+v, %v, want %s sent to and %s refused", sent, refused, err, freeAgent, limitedAgent)
+	}
+	for range domain.MaxAgentMessagesPerHour - 1 {
+		if _, _, err := pes.SendAgentMessages(ctx, peID, []string{freeAgent}, "steer", owner); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var limited *MessagesRateLimited
+	if sent, refused, err = pes.SendAgentMessages(ctx, peID, nil, "to all", owner); !errors.As(err, &limited) || len(sent) != 0 || len(refused) != 0 {
+		t.Fatalf("to all with every one limited: sent %+v, refused %+v, %v, want MessagesRateLimited alone", sent, refused, err)
 	}
 }

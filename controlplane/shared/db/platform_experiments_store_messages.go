@@ -35,15 +35,17 @@ func (e *MessagesRateLimited) Error() string {
 	return fmt.Sprintf("agent %s was sent %d messages by the %s in the last hour", e.AgentID, domain.MaxAgentMessagesPerHour, e.From)
 }
 
-// SendAgentMessages stores text as a message from sender to each agent of to, or with to empty to
+// SendAgentMessages stores text as a message from sender to the agent of to, or with to empty to
 // every researcher at work, and returns them, or stores none: ErrPlatformExperimentClosed once the
 // platform experiment closed, ErrNotSignedUp for an agent not in it, ErrAgentEnded for one that
 // finished or was cut, ErrNoResearcherAtWork, and *MessagesRateLimited for an agent the same
-// sender sent domain.MaxAgentMessagesPerHour in the last hour. Each is told as agent.message.
-func (s *PlatformExperimentsStore) SendAgentMessages(ctx context.Context, platformExpID string, to []string, text string, sender domain.Actor) ([]domain.AgentMessage, error) {
+// sender sent domain.MaxAgentMessagesPerHour in the last hour. To every researcher, those the
+// sender may not message yet are returned as refused and the rest are sent, and only when none is
+// is it *MessagesRateLimited, for the first of them. Each is told as agent.message.
+func (s *PlatformExperimentsStore) SendAgentMessages(ctx context.Context, platformExpID string, to []string, text string, sender domain.Actor) (sent []domain.AgentMessage, refused []MessagesRateLimited, err error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: begin tx: %w", err)
+		return nil, nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
@@ -51,11 +53,11 @@ func (s *PlatformExperimentsStore) SendAgentMessages(ctx context.Context, platfo
 	err = tx.QueryRow(ctx, `SELECT status::text FROM platform_experiments WHERE id = $1 FOR SHARE`, platformExpID).Scan(&status)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		return nil, ErrNotSignedUp
+		return nil, nil, ErrNotSignedUp
 	case err != nil:
-		return nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: %w", err)
+		return nil, nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: %w", err)
 	case status == string(domain.PlatformExpClosed):
-		return nil, ErrPlatformExperimentClosed
+		return nil, nil, ErrPlatformExperimentClosed
 	}
 
 	if to == nil {
@@ -74,7 +76,7 @@ WHERE s.platform_experiment_id = $1 AND s.role <> $2 AND (cardinality($3::text[]
 ORDER BY s.signed_up_at, s.agent_id
 FOR UPDATE OF s`, platformExpID, string(domain.SignupRolePlanner), to, string(domain.SignupRoleCompetitor), from)
 	if err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: %w", err)
+		return nil, nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: %w", err)
 	}
 	type recipient struct {
 		agentID string
@@ -87,7 +89,7 @@ FOR UPDATE OF s`, platformExpID, string(domain.SignupRolePlanner), to, string(do
 		return r, err
 	})
 	if err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: %w", err)
+		return nil, nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: %w", err)
 	}
 	found := map[string]bool{}
 	var kept []recipient
@@ -95,21 +97,29 @@ FOR UPDATE OF s`, platformExpID, string(domain.SignupRolePlanner), to, string(do
 		found[r.agentID] = true
 		switch {
 		case r.ended && len(to) > 0:
-			return nil, fmt.Errorf("agent %s: %w", r.agentID, ErrAgentEnded)
+			return nil, nil, fmt.Errorf("agent %s: %w", r.agentID, ErrAgentEnded)
 		case r.ended:
 			continue
 		case len(r.recent) >= domain.MaxAgentMessagesPerHour:
-			return nil, &MessagesRateLimited{AgentID: r.agentID, From: from, Next: r.recent[len(r.recent)-domain.MaxAgentMessagesPerHour].Add(time.Hour).UTC()}
+			limited := MessagesRateLimited{AgentID: r.agentID, From: from, Next: r.recent[len(r.recent)-domain.MaxAgentMessagesPerHour].Add(time.Hour).UTC()}
+			if len(to) > 0 {
+				return nil, nil, &limited
+			}
+			refused = append(refused, limited)
+			continue
 		}
 		kept = append(kept, r)
 	}
 	for _, agentID := range to {
 		if !found[agentID] {
-			return nil, fmt.Errorf("agent %s: %w", agentID, ErrNotSignedUp)
+			return nil, nil, fmt.Errorf("agent %s: %w", agentID, ErrNotSignedUp)
 		}
 	}
+	if len(kept) == 0 && len(refused) > 0 {
+		return nil, nil, &refused[0]
+	}
 	if len(kept) == 0 {
-		return nil, ErrNoResearcherAtWork
+		return nil, nil, ErrNoResearcherAtWork
 	}
 
 	messages := make([]domain.AgentMessage, len(kept))
@@ -118,14 +128,14 @@ FOR UPDATE OF s`, platformExpID, string(domain.SignupRolePlanner), to, string(do
 		if err := tx.QueryRow(ctx, `INSERT INTO agent_messages (platform_experiment_id, agent_id, sender, text, actor_kind, actor_id, created_xid)
 VALUES ($1, $2, $3, $4, $5, $6, pg_current_xact_id()::text::bigint) RETURNING created_at`,
 			platformExpID, r.agentID, from, text, string(sender.Kind), sender.ID).Scan(&messages[i].At); err != nil {
-			return nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: insert: %w", err)
+			return nil, nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: insert: %w", err)
 		}
 		messages[i].At = messages[i].At.UTC()
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: commit: %w", err)
+		return nil, nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: commit: %w", err)
 	}
-	return messages, nil
+	return messages, refused, nil
 }
 
 // SendCoordinatorMessage stores text as a message from sender, a person or a key, to the hosted
@@ -177,16 +187,16 @@ VALUES ($1, $2, $3, $4, $5, $6, pg_current_xact_id()::text::bigint) RETURNING cr
 }
 
 // MessageAllowance is, for every agent of a platform experiment but its planner, how many more
-// messages the coordinator may send it now and when that next grows, counted as SendAgentMessages
-// refuses: the owner's messages count apart.
-func (s *PlatformExperimentsStore) MessageAllowance(ctx context.Context, platformExpID string) (map[string]domain.MessageAllowance, error) {
+// messages sender may send it now and when that next grows, counted as SendAgentMessages
+// refuses: the messages of the other sender count apart.
+func (s *PlatformExperimentsStore) MessageAllowance(ctx context.Context, platformExpID string, sender domain.Actor) (map[string]domain.MessageAllowance, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT s.agent_id, count(m.id), min(m.created_at)
 FROM experiment_signups s
 LEFT JOIN agent_messages m ON m.platform_experiment_id = s.platform_experiment_id AND m.agent_id = s.agent_id
                           AND m.sender = $3 AND m.created_at > now() - interval '1 hour'
 WHERE s.platform_experiment_id = $1 AND s.role <> $2
-GROUP BY s.agent_id`, platformExpID, string(domain.SignupRolePlanner), domain.MessageFrom(domain.Actor{Kind: domain.ActorCoordinator}))
+GROUP BY s.agent_id`, platformExpID, string(domain.SignupRolePlanner), domain.MessageFrom(sender))
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.MessageAllowance: %w", err)
 	}

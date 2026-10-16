@@ -204,6 +204,7 @@ type situationStore struct {
 	quotas    []*domain.AgentQuota
 	summaryAt *time.Time
 	allowance map[string]domain.MessageAllowance
+	readers   []domain.Actor
 	inFlight  []domain.HypothesisInFlight
 }
 
@@ -227,7 +228,8 @@ func (s *situationStore) ListCutAgents(context.Context, string) ([]domain.AgentC
 	return nil, nil
 }
 
-func (s *situationStore) MessageAllowance(context.Context, string) (map[string]domain.MessageAllowance, error) {
+func (s *situationStore) MessageAllowance(_ context.Context, _ string, reader domain.Actor) (map[string]domain.MessageAllowance, error) {
+	s.readers = append(s.readers, reader)
 	return s.allowance, nil
 }
 
@@ -292,7 +294,7 @@ func situationRun(t *testing.T) (*PlatformExperimentsService, *situationStore) {
 func TestTheSituationAnswersTheRunAndTheRowsTheCallerMaySee(t *testing.T) {
 	svc, _ := situationRun(t)
 	ctx := context.Background()
-	all, err := svc.Situation(ctx, "pe-1", "")
+	all, err := svc.Situation(ctx, "pe-1", "", domain.Actor{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +327,7 @@ func TestTheSituationAnswersTheRunAndTheRowsTheCallerMaySee(t *testing.T) {
 		t.Fatalf("ideas from people: %+v, want %+v", all.Ideas, want)
 	}
 
-	own, err := svc.Situation(ctx, "pe-1", "ag-2")
+	own, err := svc.Situation(ctx, "pe-1", "ag-2", domain.Actor{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,8 +337,20 @@ func TestTheSituationAnswersTheRunAndTheRowsTheCallerMaySee(t *testing.T) {
 	if own.Ideas.Open != 2 {
 		t.Fatalf("agent's read: ideas from people %+v, want the run's 2", own.Ideas)
 	}
-	if _, err := svc.Situation(ctx, "pe-none", ""); !errors.Is(err, ErrPlatformExperimentNotFound) {
+	if _, err := svc.Situation(ctx, "pe-none", "", domain.Actor{}); !errors.Is(err, ErrPlatformExperimentNotFound) {
 		t.Fatalf("no such run: %v", err)
+	}
+}
+
+// The messages left in the situation are counted for the reader: the sender of the actor that reads it.
+func TestTheSituationCountsTheMessagesItsReaderMaySend(t *testing.T) {
+	svc, store := situationRun(t)
+	owner := domain.Actor{Kind: domain.ActorUser, ID: "user-1"}
+	if _, err := svc.Situation(context.Background(), "pe-1", "", owner); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.readers) == 0 || store.readers[len(store.readers)-1] != owner {
+		t.Fatalf("allowance read for %+v, want the owner who reads the situation", store.readers)
 	}
 }
 
@@ -503,7 +517,7 @@ func TestTheSituationCountsTheJobsCompletedSinceTheSummary(t *testing.T) {
 	svc, store := situationRun(t)
 	before, after := store.summaryAt.Add(-time.Minute), store.summaryAt.Add(time.Minute)
 	store.completed = []*domain.Experiment{{ID: "job-1", AgentID: "ag-1", FinishedAt: &before}, {ID: "job-2", AgentID: "ag-2", FinishedAt: &after}}
-	got, err := svc.Situation(context.Background(), "pe-1", "")
+	got, err := svc.Situation(context.Background(), "pe-1", "", domain.Actor{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -511,7 +525,7 @@ func TestTheSituationCountsTheJobsCompletedSinceTheSummary(t *testing.T) {
 		t.Fatalf("coordinator %+v, want the one job completed after the summary", got.Coordinator)
 	}
 	store.summaryAt = nil
-	if got, err = svc.Situation(context.Background(), "pe-1", ""); err != nil || got.Coordinator.JobsCompletedSinceSummary != 2 {
+	if got, err = svc.Situation(context.Background(), "pe-1", "", domain.Actor{}); err != nil || got.Coordinator.JobsCompletedSinceSummary != 2 {
 		t.Fatalf("coordinator %+v (%v), want every job while no summary was written", got.Coordinator, err)
 	}
 }
@@ -537,7 +551,7 @@ func TestTheSituationNamesTheCommitOfTheBest(t *testing.T) {
 		{ID: "job-7", AgentID: "ag-1", FinishedAt: &done, CodeRef: "https://example.com/repo.git@f9a3", Branch: "hl/pe-1/r1-stack"},
 		{ID: "job-8", AgentID: "ag-2", FinishedAt: &done, CodeRef: "https://example.com/repo.git@0ld0", Branch: "hl/pe-1/r2"},
 	}
-	got, err := svc.Situation(context.Background(), "pe-1", "ag-2")
+	got, err := svc.Situation(context.Background(), "pe-1", "ag-2", domain.Actor{})
 	if err != nil {
 		t.Fatal(err)
 	}

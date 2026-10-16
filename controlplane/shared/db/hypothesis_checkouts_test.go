@@ -86,3 +86,48 @@ VALUES ('agent', 'checkout-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-acc
 		t.Errorf("working on a removed hypothesis = %+v, %v, want nobody", working, err)
 	}
 }
+
+// Only an agent not ended works on a hypothesis: one that was cut, and every agent once the
+// platform experiment closed, name nothing with their checkout or their job in flight.
+func TestAnAgentThatEndedWorksOnNothing(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	store, pes := NewHypothesesStore(pool), NewPlatformExperimentsStore(pool)
+	worker, peID, hypothesisID := seedRun(t, pool, "ended", true)
+	cut, _, _ := seedRun(t, pool, "ended-b", true)
+	t.Cleanup(func() {
+		exec(t, pool, `DELETE FROM experiments WHERE platform_experiment_id = $1`, peID)
+		exec(t, pool, `DELETE FROM hypothesis_checkouts WHERE platform_experiment_id = $1`, peID)
+		exec(t, pool, `DELETE FROM platform_experiment_cuts WHERE platform_experiment_id = $1`, peID)
+	})
+	for _, agent := range []string{worker, cut} {
+		if _, err := store.CheckOutHypothesis(ctx, peID, hypothesisID, agent, "hl/pe/"+agent+"/idea"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(t, pool, `INSERT INTO experiments
+(actor_kind, id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
+ hypothesis_id, hypothesis, accelerator_type, status, estimated_duration_hours, queued_at, data_access_key_id, data_secret_access_key)
+VALUES ('agent', 'ended-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', 'RUNNING', 1, now(), 'AK', 'SK')`, cut, peID, hypothesisID)
+	exec(t, pool, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index) VALUES ($1, $2, 1)`, peID, cut)
+
+	want := []domain.HypothesisWorker{{AgentID: worker, Name: worker}}
+	if working, err := store.Working(ctx, []string{hypothesisID}); err != nil || !reflect.DeepEqual(working[hypothesisID], want) {
+		t.Errorf("working = %+v, %v, want %+v: the cut agent's checkout and job name nobody", working, err, want)
+	}
+	inFlight, err := pes.HypothesesInFlight(ctx, peID)
+	if err != nil || len(inFlight) != 1 || inFlight[0].Running != 0 || !reflect.DeepEqual(inFlight[0].AgentIDs, []string{worker}) {
+		t.Errorf("in flight = %+v, %v, want the hypothesis with the worker alone and no running job", inFlight, err)
+	}
+
+	exec(t, pool, `UPDATE platform_experiments SET status = 'closed' WHERE id = $1`, peID)
+	if working, err := store.Working(ctx, []string{hypothesisID}); err != nil || len(working) != 0 {
+		t.Errorf("working once closed = %+v, %v, want nobody", working, err)
+	}
+	if taken, err := store.TakenHypotheses(ctx, peID); err != nil || len(taken) != 0 {
+		t.Errorf("taken once closed = %v, %v, want none", taken, err)
+	}
+	if inFlight, err := pes.HypothesesInFlight(ctx, peID); err != nil || len(inFlight) != 0 {
+		t.Errorf("in flight once closed = %+v, %v, want none", inFlight, err)
+	}
+}

@@ -55,7 +55,7 @@ type PlatformExperimentsStore interface {
 	// and who is on it.
 	HypothesesInFlight(ctx context.Context, id string) ([]domain.HypothesisInFlight, error)
 	// MessageAllowance is how many more messages each agent may be sent now.
-	MessageAllowance(ctx context.Context, platformExpID string) (map[string]domain.MessageAllowance, error)
+	MessageAllowance(ctx context.Context, platformExpID string, sender domain.Actor) (map[string]domain.MessageAllowance, error)
 	// JobsSettled says every job of a platform experiment ended and its cost was written.
 	JobsSettled(ctx context.Context, id string) (bool, error)
 	// ClosesToRecord is the platform experiments closed in the last within, after they were open,
@@ -116,7 +116,7 @@ type PlatformExperimentsStore interface {
 	FinishAgent(ctx context.Context, platformExpID, agentID, reason string) error
 	// SendAgentMessages stores a message to each agent named, or with none to every researcher at
 	// work, or stores none (see the db implementation for its refusals).
-	SendAgentMessages(ctx context.Context, platformExpID string, to []string, text string, sender domain.Actor) ([]domain.AgentMessage, error)
+	SendAgentMessages(ctx context.Context, platformExpID string, to []string, text string, sender domain.Actor) ([]domain.AgentMessage, []db.MessagesRateLimited, error)
 	// SendCoordinatorMessage stores a message of a person or a key to the hosted coordinator, or
 	// none (see the db implementation for its refusals).
 	SendCoordinatorMessage(ctx context.Context, platformExpID, text string, sender domain.Actor) (*domain.AgentMessage, error)

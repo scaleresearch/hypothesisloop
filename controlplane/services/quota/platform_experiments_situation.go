@@ -440,9 +440,9 @@ func minutesUntil(at, now time.Time) *int {
 	return &minutes
 }
 
-// Situation is where platform experiment id stands now. With agentID set, the answer of that
+// Situation is where platform experiment id stands now, with the messages reader may still send each agent. With agentID set, the answer of that
 // agent's token, it holds that agent's row alone and no coordinator.
-func (s *PlatformExperimentsService) Situation(ctx context.Context, id, agentID string) (*Situation, error) {
+func (s *PlatformExperimentsService) Situation(ctx context.Context, id, agentID string, reader domain.Actor) (*Situation, error) {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
 		return nil, err
@@ -479,7 +479,7 @@ func (s *PlatformExperimentsService) Situation(ctx context.Context, id, agentID 
 	if err != nil {
 		return nil, fmt.Errorf("situation: %w", err)
 	}
-	rows, err := s.roster(ctx, id, signups)
+	rows, err := s.roster(ctx, id, signups, reader)
 	if err != nil {
 		return nil, fmt.Errorf("situation: %w", err)
 	}
@@ -603,13 +603,13 @@ func liveReading(instance *domain.AgentInstance, state domain.HarnessState) bool
 
 // withWork sets on each row of pe what its agent has going: the subagents and turn its harness
 // last reported and the model allowance it last read, of the machine it holds now, the messages
-// it may still be sent, and how long it has had no job in flight.
-func (s *PlatformExperimentsService) withWork(ctx context.Context, pe *domain.PlatformExperiment, rows []JoinedAgent, now time.Time) error {
+// reader may still send it, and how long it has had no job in flight.
+func (s *PlatformExperimentsService) withWork(ctx context.Context, pe *domain.PlatformExperiment, rows []JoinedAgent, now time.Time, reader domain.Actor) error {
 	states, err := metricsdb.LatestHarnessState(ctx, s.metricsDBURL, pe.ID, pe.CreatedAt)
 	if err != nil {
 		return err
 	}
-	allowance, err := s.store.MessageAllowance(ctx, pe.ID)
+	allowance, err := s.store.MessageAllowance(ctx, pe.ID, reader)
 	if err != nil {
 		return err
 	}
@@ -649,7 +649,7 @@ func registerSituationHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"the target its target_vs_baseline sets against the baseline's value and the gap to it, and the best an hour and three hours ago), " +
 			"the capacity the run's jobs could use (free and total of its baseline job's type on each cluster its jobs can be placed on, fits_now: how many jobs shaped like the baseline job place now, node by node, and the run's jobs queued and running), " +
 			"the run's budget and spend, for a coordinator, a person or a key each hypothesis with jobs queued or running or checked out within two hours and who is on it, and for each agent its jobs queued and running, the subagents and turn its harness last reported, its activity, minutes without a job in flight, " +
-			"the messages it may still be sent this hour, its model account's allowance, and its share and the room left in it, " +
+			"the messages the reader may still send it this hour, its model account's allowance, and its share and the room left in it, " +
 			"and ideas_from_people: how many open ideas people registered, those no agent has settled or built on yet, and the command that lists them. " +
 			"An agent's token reads the run and its own row. A coordinator, a person or a key reads every row and the hosted coordinator: when its summary was last written, how many jobs completed since, and its model allowance.",
 	}, func(ctx context.Context, in *struct {
@@ -666,7 +666,7 @@ func registerSituationHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if caller.Kind == auth.KindAgent {
 			agentID = caller.AgentID
 		}
-		situation, err := h.svc.Situation(ctx, in.ID, agentID)
+		situation, err := h.svc.Situation(ctx, in.ID, agentID, caller.Actor())
 		if errors.Is(err, ErrPlatformExperimentNotFound) {
 			return nil, huma.Error404NotFound(err.Error())
 		}

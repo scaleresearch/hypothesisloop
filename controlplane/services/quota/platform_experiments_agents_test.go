@@ -54,7 +54,7 @@ type rosterStore struct {
 }
 
 // MessageAllowance answers every agent the whole hour's messages.
-func (s *rosterStore) MessageAllowance(context.Context, string) (map[string]domain.MessageAllowance, error) {
+func (s *rosterStore) MessageAllowance(context.Context, string, domain.Actor) (map[string]domain.MessageAllowance, error) {
 	out := map[string]domain.MessageAllowance{}
 	for _, signup := range s.signups {
 		out[signup.AgentID] = domain.MessageAllowance{LeftThisHour: domain.MaxAgentMessagesPerHour}

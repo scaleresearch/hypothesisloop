@@ -26,12 +26,20 @@ type SendMessageRequest struct {
 }
 
 type agentMessagesBody struct {
-	Messages []domain.AgentMessage `json:"messages"`
+	Messages []domain.AgentMessage `json:"messages" doc:"The messages sent, one for each agent sent to."`
+	Refused  []refusedMessage      `json:"refused,omitempty" doc:"With all, each researcher not sent to because the sender sent it the most an hour allows. Absent when none was refused."`
 }
 
-// SendMessage sends text from by to the agent named, with all to every researcher at work, or
-// with coordinator to the hosted coordinator.
-func (s *PlatformExperimentsService) SendMessage(ctx context.Context, platformExpID string, req SendMessageRequest, by domain.Actor) ([]domain.AgentMessage, error) {
+// refusedMessage is a recipient an all-message was not sent to.
+type refusedMessage struct {
+	AgentID    string    `json:"agent_id"`
+	Reason     string    `json:"reason" doc:"message_rate_limited."`
+	RetryAfter time.Time `json:"retry_after" doc:"When the next message can be sent to it."`
+}
+
+// SendMessage sends text from by to the agent named, with all to every researcher at work that by
+// may message now and names the rest as refused, or with coordinator to the hosted coordinator.
+func (s *PlatformExperimentsService) SendMessage(ctx context.Context, platformExpID string, req SendMessageRequest, by domain.Actor) ([]domain.AgentMessage, []refusedMessage, error) {
 	text := strings.TrimSpace(req.Text)
 	named := 0
 	for _, set := range []bool{req.AgentID != "", req.All, req.Coordinator} {
@@ -41,15 +49,16 @@ func (s *PlatformExperimentsService) SendMessage(ctx context.Context, platformEx
 	}
 	switch {
 	case named != 1:
-		return nil, api.Refuse(http.StatusUnprocessableEntity, "invalid_recipient", "invalid_recipient: name exactly one of agent_id, all and coordinator")
+		return nil, nil, api.Refuse(http.StatusUnprocessableEntity, "invalid_recipient", "invalid_recipient: name exactly one of agent_id, all and coordinator")
 	case req.Coordinator && by.Kind == domain.ActorCoordinator:
-		return nil, api.Refuse(http.StatusUnprocessableEntity, "invalid_recipient", "invalid_recipient: the coordinator sends no message to itself")
+		return nil, nil, api.Refuse(http.StatusUnprocessableEntity, "invalid_recipient", "invalid_recipient: the coordinator sends no message to itself")
 	case text == "":
-		return nil, api.Refuse(http.StatusUnprocessableEntity, "empty_message", "empty_message: text is empty")
+		return nil, nil, api.Refuse(http.StatusUnprocessableEntity, "empty_message", "empty_message: text is empty")
 	case len(text) > domain.MaxAgentMessageBytes:
-		return nil, api.Refuse(http.StatusUnprocessableEntity, "message_too_long", fmt.Sprintf("message_too_long: text is %d bytes, at most %d: say the one direction that matters, with the job and hypothesis ids it rests on", len(text), domain.MaxAgentMessageBytes))
+		return nil, nil, api.Refuse(http.StatusUnprocessableEntity, "message_too_long", fmt.Sprintf("message_too_long: text is %d bytes, at most %d: say the one direction that matters, with the job and hypothesis ids it rests on", len(text), domain.MaxAgentMessageBytes))
 	}
 	var messages []domain.AgentMessage
+	var refused []refusedMessage
 	var err error
 	if req.Coordinator {
 		var message *domain.AgentMessage
@@ -61,28 +70,32 @@ func (s *PlatformExperimentsService) SendMessage(ctx context.Context, platformEx
 		if req.AgentID != "" {
 			to = []string{req.AgentID}
 		}
-		messages, err = s.store.SendAgentMessages(ctx, platformExpID, to, text, by)
+		var limited []db.MessagesRateLimited
+		messages, limited, err = s.store.SendAgentMessages(ctx, platformExpID, to, text, by)
+		for _, l := range limited {
+			refused = append(refused, refusedMessage{AgentID: l.AgentID, Reason: "message_rate_limited", RetryAfter: l.Next})
+		}
 	}
 	var limited *db.MessagesRateLimited
 	switch {
 	case errors.As(err, &limited):
-		return nil, api.Refuse(http.StatusTooManyRequests, "message_rate_limited", fmt.Sprintf(
+		return nil, nil, api.Refuse(http.StatusTooManyRequests, "message_rate_limited", fmt.Sprintf(
 			"message_rate_limited: %s was sent %d messages by the %s in the last hour, the most an hour allows; the next can be sent from %s. Say in one message what you would say in several",
 			limited.AgentID, domain.MaxAgentMessagesPerHour, limited.From, limited.Next.Format(time.RFC3339)))
 	case errors.Is(err, db.ErrNoCoordinator):
-		return nil, api.Refuse(http.StatusConflict, "no_coordinator", "no_coordinator: the platform hosts no coordinator for platform experiment "+platformExpID)
+		return nil, nil, api.Refuse(http.StatusConflict, "no_coordinator", "no_coordinator: the platform hosts no coordinator for platform experiment "+platformExpID)
 	case errors.Is(err, db.ErrPlatformExperimentClosed):
-		return nil, api.Refuse(http.StatusConflict, "experiment_closed", "experiment_closed: platform experiment "+platformExpID+" is closed: no agent of it is at work")
+		return nil, nil, api.Refuse(http.StatusConflict, "experiment_closed", "experiment_closed: platform experiment "+platformExpID+" is closed: no agent of it is at work")
 	case errors.Is(err, db.ErrNotSignedUp):
-		return nil, refuseSignup(http.StatusNotFound, "not_signed_up", "%s of platform experiment %s: hl platform-experiments agents list names its agents", err.Error(), platformExpID)
+		return nil, nil, refuseSignup(http.StatusNotFound, "not_signed_up", "%s of platform experiment %s: hl platform-experiments agents list names its agents", err.Error(), platformExpID)
 	case errors.Is(err, db.ErrAgentEnded):
-		return nil, refuseSignup(http.StatusConflict, "agent_ended", "%s, it finished or was cut, and nothing reads a message to it", err.Error())
+		return nil, nil, refuseSignup(http.StatusConflict, "agent_ended", "%s, it finished or was cut, and nothing reads a message to it", err.Error())
 	case errors.Is(err, db.ErrNoResearcherAtWork):
-		return nil, refuseSignup(http.StatusConflict, "no_researcher_at_work", "every researcher of platform experiment %s finished or was cut, or none joined", platformExpID)
+		return nil, nil, refuseSignup(http.StatusConflict, "no_researcher_at_work", "every researcher of platform experiment %s finished or was cut, or none joined", platformExpID)
 	case err != nil:
-		return nil, fmt.Errorf("platform_experiments.SendMessage: %w", err)
+		return nil, nil, fmt.Errorf("platform_experiments.SendMessage: %w", err)
 	}
-	return messages, nil
+	return messages, refused, nil
 }
 
 func (h *PlatformExperimentsHandler) nameMessageActors(ctx context.Context, messages []domain.AgentMessage) error {
@@ -109,7 +122,7 @@ func registerMessagesHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"A person or an API key tells the hosted coordinator (coordinator) the same way: agent.message with coordinator as its subject and owner as its value, on the stream of the whole platform experiment and no agent's, which wakes the coordinator. 409 no_coordinator where the platform hosts none, 422 invalid_recipient from the coordinator itself. " +
 			"The answer is messages, one for each agent sent to. An agent's token sends none (403): what a researcher has to tell goes in a comment, or the reason of its finish. " +
 			"404 not_signed_up for an agent not in the platform experiment, 409 agent_ended for one that finished or was cut, 409 no_researcher_at_work for all with none, 409 experiment_closed once it closed. " +
-			"A recipient is sent at most 6 messages in any hour by the coordinator and 6 by the owner, each counted apart, so the owner's never spend the coordinator's: 429 message_rate_limited past that, saying when the next can be sent, and with all none is sent. 422 message_too_long above 1500 bytes.",
+			"A recipient is sent at most 6 messages in any hour by the coordinator and 6 by the owner, each counted apart, so the owner's never spend the coordinator's: 429 message_rate_limited past that, saying when the next can be sent. With all, a researcher the sender may not message yet is left out and named in refused {agent_id, reason, retry_after}, the rest are sent and the answer is 201: 429 only when none could be sent. 422 message_too_long above 1500 bytes.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body SendMessageRequest
@@ -121,14 +134,14 @@ func registerMessagesHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err != nil {
 			return nil, err
 		}
-		messages, err := h.svc.SendMessage(ctx, in.ID, in.Body, caller.Actor())
+		messages, refused, err := h.svc.SendMessage(ctx, in.ID, in.Body, caller.Actor())
 		if err != nil {
 			return nil, h.refusal("send message", err)
 		}
 		if err := h.nameMessageActors(ctx, messages); err != nil {
 			return nil, h.refusal("send message", err)
 		}
-		return &struct{ Body agentMessagesBody }{Body: agentMessagesBody{Messages: messages}}, nil
+		return &struct{ Body agentMessagesBody }{Body: agentMessagesBody{Messages: messages, Refused: refused}}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{

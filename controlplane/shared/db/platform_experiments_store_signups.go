@@ -661,8 +661,8 @@ func (s *PlatformExperimentsStore) HypothesesInFlight(ctx context.Context, id st
 SELECT hypothesis_id, count(*) FILTER (WHERE status <> 'RUNNING'), count(*) FILTER (WHERE status = 'RUNNING'),
        array_agg(DISTINCT agent_id ORDER BY agent_id)
 FROM (
-	SELECT hypothesis_id, agent_id, status::text AS status FROM experiments
-	WHERE platform_experiment_id = $1 AND status IN ('QUEUED', 'SUBMITTED', 'RUNNING') AND hypothesis_id <> platform_experiment_id
+	SELECT e.hypothesis_id, e.agent_id, e.status::text AS status FROM experiments e
+	WHERE e.platform_experiment_id = $1 AND `+jobOnIt+` AND e.hypothesis_id <> e.platform_experiment_id
 	UNION ALL
 	SELECT c.hypothesis_id, c.agent_id, NULL FROM hypothesis_checkouts c
 	WHERE c.platform_experiment_id = $1 AND `+checkoutClaims+`

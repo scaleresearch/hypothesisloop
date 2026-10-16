@@ -262,7 +262,7 @@ func TestTheRosterOfARunningPlatformExperimentSaysWhichMachinesAreStillStarting(
 		{AgentID: "dana", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{Name: "m-1", AskedAt: &asked}},
 		{AgentID: "eli", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{Name: "m-2", AskedAt: &asked, SeenAt: &asked, Reported: domain.InstanceRunning}},
 	}
-	roster, err := newSignupTestService(t, store).roster(context.Background(), "pe-1", signups)
+	roster, err := newSignupTestService(t, store).roster(context.Background(), "pe-1", signups, domain.Actor{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func TestTheRosterOfARunningPlatformExperimentSaysWhichMachinesAreStillStarting(
 	// Before the start a researcher has no machine asked for, and says that and not a start.
 	store.pe.Status = domain.PlatformExpOpen
 	store.signups = signups
-	roster, err = newSignupTestService(t, store).roster(context.Background(), "pe-1", signups[:1])
+	roster, err = newSignupTestService(t, store).roster(context.Background(), "pe-1", signups[:1], domain.Actor{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +314,7 @@ func TestAResearchersInstanceReadsWaitingUntilThePlatformExperimentStarts(t *tes
 		return out.Instance.State
 	}
 	svc := newSignupTestService(t, store)
-	roster, err := svc.roster(context.Background(), "pe-1", store.signups)
+	roster, err := svc.roster(context.Background(), "pe-1", store.signups, domain.Actor{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +332,7 @@ func TestAResearchersInstanceReadsWaitingUntilThePlatformExperimentStarts(t *tes
 	}
 
 	store.pe.Status = domain.PlatformExpRunning
-	if roster, err = svc.roster(context.Background(), "pe-1", store.signups); err != nil {
+	if roster, err = svc.roster(context.Background(), "pe-1", store.signups, domain.Actor{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := state(roster[0]); got != "requested" {
@@ -351,7 +351,7 @@ func TestAResearcherOfAnExperimentClosedBeforeItsRunSaysItNeverLaunchedAndWhy(t 
 		{AgentID: "dana", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{Released: true}},
 		{AgentID: "bo", Role: domain.SignupRoleBaseline, Hosted: true, Instance: &domain.AgentInstance{AskedAt: &asked, Released: true}},
 	}
-	roster, err := newSignupTestService(t, store).roster(context.Background(), "pe-1", store.signups)
+	roster, err := newSignupTestService(t, store).roster(context.Background(), "pe-1", store.signups, domain.Actor{})
 	if err != nil {
 		t.Fatal(err)
 	}
