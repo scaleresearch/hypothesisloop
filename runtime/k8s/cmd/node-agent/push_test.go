@@ -36,15 +36,6 @@ func answers(t *testing.T, statuses ...int) (*httptest.Server, *[]string) {
 	return server, &received
 }
 
-func backlog(n int) []clusterapi.NodeMetricsPush {
-	start := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
-	out := make([]clusterapi.NodeMetricsPush, n)
-	for i := range out {
-		out[i] = clusterapi.NodeMetricsPush{Node: "n", Timestamp: start.Add(time.Duration(i) * time.Second), Pods: []clusterapi.PodSample{{PodUID: "p", ExperimentID: "job"}}}
-	}
-	return out
-}
-
 func captureLog(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var out bytes.Buffer
@@ -54,35 +45,15 @@ func captureLog(t *testing.T) *bytes.Buffer {
 	return &out
 }
 
-func TestARefusedObservationIsDroppedWithItsReasonAndTheRestStillGoes(t *testing.T) {
+func TestARefusedObservationIsLoggedWithItsReason(t *testing.T) {
 	logged := captureLog(t)
-	server, received := answers(t, http.StatusUnauthorized, http.StatusBadRequest, http.StatusNoContent)
-	left := flush(&cpclient.Client{BaseURL: server.URL, Token: "tok", HTTP: server.Client()}, backlog(3))
-	if len(left) != 0 || len(*received) != 3 {
-		t.Fatalf("left = %d after %d requests, want an empty backlog after 3", len(left), len(*received))
-	}
-	if !strings.HasPrefix((*received)[0], "Bearer tok ") {
-		t.Errorf("request = %q, want the runtime token sent", (*received)[0])
+	server, received := answers(t, http.StatusUnauthorized)
+	observation := clusterapi.NodeMetricsPush{Node: "n", Timestamp: time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC), Pods: []clusterapi.PodSample{{PodUID: "p", ExperimentID: "job"}}}
+	push(t.Context(), &cpclient.Client{BaseURL: server.URL, Token: "tok", HTTP: server.Client()}, observation)
+	if len(*received) != 1 || !strings.HasPrefix((*received)[0], "Bearer tok ") {
+		t.Fatalf("requests = %q, want one carrying the runtime token", *received)
 	}
 	if !strings.Contains(logged.String(), "status 401") || !strings.Contains(logged.String(), "cluster edge-7 is not registered") {
 		t.Errorf("log = %q, want the status and the control plane's reason", logged.String())
-	}
-}
-
-func TestAnObservationTheControlPlaneCouldNotTakeWaitsAtTheHeadOfTheQueue(t *testing.T) {
-	logged := captureLog(t)
-	server, received := answers(t, http.StatusNoContent, http.StatusServiceUnavailable)
-	queue := backlog(3)
-	left := flush(&cpclient.Client{BaseURL: server.URL, Token: "tok", HTTP: server.Client()}, queue)
-	if len(left) != 2 || !left[0].Timestamp.Equal(queue[1].Timestamp) || len(*received) != 2 {
-		t.Fatalf("left = %d after %d requests, want the second and third kept after 2", len(left), len(*received))
-	}
-	if !strings.Contains(logged.String(), "status 503") {
-		t.Errorf("log = %q, want the status", logged.String())
-	}
-
-	server.Close()
-	if left := flush(&cpclient.Client{BaseURL: server.URL, Token: "tok", HTTP: server.Client()}, queue); len(left) != 3 {
-		t.Fatalf("with the control plane unreachable: left = %d, want all 3 kept", len(left))
 	}
 }

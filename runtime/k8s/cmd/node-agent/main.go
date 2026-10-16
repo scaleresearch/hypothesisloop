@@ -20,27 +20,14 @@ import (
 	"strconv"
 	"time"
 
+	"k8s.io/client-go/kubernetes"
+
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentloop"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/cpclient"
 )
 
-const (
-	cgroupRoot = "/sys/fs/cgroup/kubepods.slice"
-	// jobsNamespace is where the control plane creates every experiment Job — must match
-	// k8sexec.HypothesisLoopNamespace (runtime/k8s/internal/k8sexec/workload_client.go). Not
-	// imported directly: this binary is deliberately dependency-free from the control plane.
-	jobsNamespace = "hypothesisloop-jobs"
-
-	// experimentIDLabel is set on every experiment pod's template by the control plane
-	// (see workload_client.go) — the same label this agent reads back to tag its samples.
-	experimentIDLabel = "hypothesisloop.io/experiment-id"
-
-	// pendingPushLimit bounds the retry buffer below. Every dropped payload is a hole in the
-	// observed record a job is billed and evicted against, so a failed push is retried rather
-	// than discarded — the control plane accepts backdated pushes for exactly this reason (see
-	// services/metricsingest.maxPushBacklog). At the default 2s cadence this covers a one-hour outage.
-	pendingPushLimit = 1800
-)
+const cgroupRoot = "/sys/fs/cgroup/kubepods.slice"
 
 func main() {
 	nodeName := os.Getenv("NODE_NAME")
@@ -55,10 +42,9 @@ func main() {
 	if token == "" {
 		log.Fatal("RUNTIME_TOKEN is required")
 	}
-	controlPlane := &cpclient.Client{BaseURL: cpURL + "/internal/node-metrics", Token: token, HTTP: &http.Client{Timeout: 5 * time.Second}}
+	controlPlane := &cpclient.Client{BaseURL: cpURL + "/internal/node-metrics", Token: token, HTTP: &http.Client{}}
 
-	ms := os.Getenv("PUSH_INTERVAL_MS")
-	n, err := strconv.Atoi(ms)
+	n, err := strconv.Atoi(os.Getenv("PUSH_INTERVAL_MS"))
 	if err != nil || n <= 0 {
 		log.Fatal("PUSH_INTERVAL_MS must be a positive integer")
 	}
@@ -71,85 +57,53 @@ func main() {
 		log.Fatalf("pod identity client: %v", err)
 	}
 
-	ctx := context.Background()
-
-	var pending []clusterapi.NodeMetricsPush
-
+	ctx, cancel := agentloop.SignalContext(log.Printf)
+	defer cancel()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 	for {
-		time.Sleep(interval)
-
-		// UTC explicitly: this timestamp crosses the wire as NodeMetricsPush.Timestamp and gets
-		// compared against control-plane-side watermarks from other nodes/processes — pin the
-		// zone here so that's never a question, even though Go's time.Time comparisons are
-		// already zone-independent given a correct absolute instant.
-		now := time.Now().UTC()
-		current := podUIDsWithCgroups()
-		samples := []clusterapi.PodSample{}
-
-		// Re-listed every tick rather than watched: a plain List is self-healing by
-		// construction (a missed update just means it self-corrects on the very next
-		// iteration two seconds later), so it needs no reconnect/relist bookkeeping of its
-		// own — simpler and just as reliable as a long-lived watch for this cadence.
-		expByUID, err := podExperimentIDs(ctx, kubeClient, nodeName)
-		if err != nil {
-			log.Printf("pod identity list error: %v", err)
-			continue
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
-
-		for uid := range current {
-			if expByUID[uid] != "" {
-				samples = append(samples, clusterapi.PodSample{PodUID: uid, ExperimentID: expByUID[uid]})
-			}
-		}
-
-		if len(samples) > 0 {
-			if len(pending) == pendingPushLimit {
-				log.Printf("push buffer full; dropping the observation from %s", pending[0].Timestamp)
-				pending = pending[1:]
-			}
-			pending = append(pending, clusterapi.NodeMetricsPush{Node: nodeName, Timestamp: now, Pods: samples})
-		}
-		pending = flush(controlPlane, pending)
+		tickCtx, tickCancel := context.WithTimeout(ctx, interval)
+		tick(tickCtx, kubeClient, controlPlane, nodeName)
+		tickCancel()
 	}
 }
 
-// flush sends the backlog oldest first and returns what is left to send. The payloads carry
-// their own collection time, so a backlog delivered late still lands on the instants it was
-// observed at. It stops at the first payload the control plane could not take, which is retried
-// next tick; one it refused is dropped, since sending it again gets the same answer and would
-// hold everything behind it.
-func flush(controlPlane *cpclient.Client, pending []clusterapi.NodeMetricsPush) []clusterapi.NodeMetricsPush {
-	for len(pending) > 0 {
-		if push(controlPlane, pending[0]) == pushRetry {
-			break
-		}
-		pending = pending[1:]
+// tick pushes what runs on this node now. A push that does not land is not sent again: the next
+// tick's is current.
+func tick(ctx context.Context, kube kubernetes.Interface, controlPlane *cpclient.Client, nodeName string) {
+	// UTC: the timestamp is compared with watermarks other nodes and processes wrote.
+	now := time.Now().UTC()
+	current := podUIDsWithCgroups()
+	expByUID, err := podExperimentIDs(ctx, kube, nodeName)
+	if err != nil {
+		log.Printf("pod identity list error: %v", err)
+		return
 	}
-	return pending
+	samples := []clusterapi.PodSample{}
+	for uid := range current {
+		if expByUID[uid] != "" {
+			samples = append(samples, clusterapi.PodSample{PodUID: uid, ExperimentID: expByUID[uid]})
+		}
+	}
+	if len(samples) == 0 {
+		return
+	}
+	push(ctx, controlPlane, clusterapi.NodeMetricsPush{Node: nodeName, Timestamp: now, Pods: samples})
 }
 
-type pushOutcome int
-
-const (
-	pushDelivered pushOutcome = iota
-	pushRefused
-	pushRetry
-)
-
-func push(controlPlane *cpclient.Client, payload clusterapi.NodeMetricsPush) pushOutcome {
-	err := controlPlane.Do(context.Background(), http.MethodPost, "", payload, nil)
-	if err == nil {
-		return pushDelivered
-	}
+func push(ctx context.Context, controlPlane *cpclient.Client, payload clusterapi.NodeMetricsPush) {
+	err := controlPlane.Do(ctx, http.MethodPost, "", payload, nil)
 	var refused *cpclient.Refusal
-	if !errors.As(err, &refused) {
-		log.Printf("push error: %v", err)
-		return pushRetry
+	switch {
+	case err == nil:
+	case errors.As(err, &refused):
+		log.Printf("push of the observation from %s refused with status %d: %s", payload.Timestamp, refused.Status, refused.Body)
+	default:
+		log.Printf("push of the observation from %s: %v", payload.Timestamp, err)
 	}
-	if refused.Status/100 == 4 {
-		log.Printf("push refused with status %d, dropping the observation from %s: %s", refused.Status, payload.Timestamp, refused.Body)
-		return pushRefused
-	}
-	log.Printf("push failed with status %d, will retry: %s", refused.Status, refused.Body)
-	return pushRetry
 }
