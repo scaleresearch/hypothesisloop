@@ -1172,3 +1172,35 @@ func TestAConnectedInstallationIsCheckedWithGitHubOnRequest(t *testing.T) {
 	w.refused("member", "GET", fmt.Sprintf("/orgs/%s/github-installations/%d/check", w.orgA, rival.ID), nil, http.StatusNotFound, ReasonNotFound)
 	w.refused("member", "GET", fmt.Sprintf("/orgs/%s/github-installations/%d/check", w.orgB, acme.ID), nil, http.StatusNotFound, "")
 }
+
+// An installation GitHub removed is no choice for a new repository: with one working account left
+// it is used unasked, whether or not the dead one was the default.
+func TestADeadInstallationIsNoChoiceForANewRepository(t *testing.T) {
+	ctx := context.Background()
+	w := newGitHubWorld(t, true)
+	w.connect(w.orgA, acme)
+	w.connect(w.orgA, rival)
+	w.installations.connected[w.orgA][0].Default = false
+	delete(w.app.covers, acme.ID)
+	if on, err := w.host.CreatesOn(ctx, w.projectA, ""); err != nil || on != "rival" {
+		t.Fatalf("one working and one removed, no default: CreatesOn = %q, %v, want rival", on, err)
+	}
+	w.installations.connected[w.orgA][0].Default = true
+	if _, err := w.host.Create(ctx, w.projectA, "", "sweep", "", firstFiles); err != nil || !slices.Equal(w.app.created, []string{"200 sweep"}) {
+		t.Fatalf("the default removed: Create = %v (created %v), want it made on rival", err, w.app.created)
+	}
+	w.app.notGranted[rival.ID] = []string{"administration:write"}
+	if _, err := w.host.CreatesOn(ctx, w.projectA, ""); reasonOf(err) != github.ReasonInstallationGone {
+		t.Fatalf("none working: %v, want the refusal of the default, installation_gone", err)
+	}
+	w.app.notGranted[rival.ID] = nil
+	w.app.covers[acme.ID] = []github.Repository{{FullName: "Acme/Model"}}
+	w.installations.connected[w.orgA][0].Default = false
+	if _, err := w.host.CreatesOn(ctx, w.projectA, ""); reasonOf(err) != github.ReasonRepositoryAccountRequired {
+		t.Fatalf("two working, no default: %v, want repository_account_required", err)
+	}
+	w.app.installationErr = github.ErrRateLimited
+	if _, err := w.host.CreatesOn(ctx, w.projectA, ""); reasonOf(err) != github.ReasonUnavailable {
+		t.Fatalf("GitHub rate limiting: %v, want it told, not read as a dead installation", err)
+	}
+}

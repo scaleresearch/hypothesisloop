@@ -93,7 +93,7 @@ export type Install =
   | { phase: 'failed'; message: string; reason?: string }
 
 const IDLE: Install = { phase: 'idle' }
-const GITHUB_KEYS = new Set(['github-installations', 'github-repositories', 'repository-check', 'github-installation-check'])
+const GITHUB_KEYS = new Set(['github-installations', 'github-repositories', 'repository-check', 'github-installation-check', 'github-installation-checks'])
 
 /**
  * Installs the App from this tab without leaving it: `start`, from a click, opens GitHub in a new

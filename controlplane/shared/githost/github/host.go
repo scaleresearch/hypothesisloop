@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 
 	"go.uber.org/zap"
@@ -154,8 +155,8 @@ func (h *Host) CreatesOn(ctx context.Context, projectID, account string) (string
 }
 
 // createsOn is the org of the project and the installation a repository is created through: the
-// one on account, or with none named the org's only one or its default. It is refused when GitHub
-// removed it or it has not granted every permission the App asks for.
+// one on account, or with none named the org's default or else its only working one. It is refused
+// when GitHub removed it or it has not granted every permission the App asks for.
 func (h *Host) createsOn(ctx context.Context, projectID, account string) (string, *domain.OrgGitHubInstallation, error) {
 	const op = "create-repository"
 	project, err := h.store.GetProject(ctx, projectID)
@@ -172,26 +173,55 @@ func (h *Host) createsOn(ctx context.Context, projectID, account string) (string
 	if len(installations) == 0 {
 		return "", nil, Refusal(h.logger, op, ErrNoInstallation, http.StatusUnprocessableEntity)
 	}
-	var chosen *domain.OrgGitHubInstallation
-	logins := []string{}
+	if account != "" {
+		i := slices.IndexFunc(installations, func(one *domain.OrgGitHubInstallation) bool { return strings.EqualFold(one.AccountLogin, account) })
+		if i < 0 {
+			return "", nil, Refusal(h.logger, op, ErrNotConnected, http.StatusUnprocessableEntity)
+		}
+		if _, err := Installed(ctx, h.app, installations[i]); err != nil {
+			return "", nil, Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+		}
+		return project.OrgID, installations[i], nil
+	}
+	// With none named: the org's default, or else the one installation that still works. One
+	// GitHub removed, suspended or left without a permission is no choice.
+	var firstErr error
+	if i := slices.IndexFunc(installations, func(one *domain.OrgGitHubInstallation) bool { return one.Default }); i >= 0 {
+		_, err := Installed(ctx, h.app, installations[i])
+		if err == nil {
+			return project.OrgID, installations[i], nil
+		}
+		if !unusable(err) {
+			return "", nil, Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+		}
+		firstErr = err
+		installations = slices.Delete(slices.Clone(installations), i, i+1)
+	}
+	working, logins := []*domain.OrgGitHubInstallation{}, []string{}
 	for _, one := range installations {
-		logins = append(logins, one.AccountLogin)
+		_, err := Installed(ctx, h.app, one)
 		switch {
-		case account != "" && strings.EqualFold(one.AccountLogin, account),
-			account == "" && (len(installations) == 1 || one.Default):
-			chosen = one
+		case err == nil:
+			working, logins = append(working, one), append(logins, one.AccountLogin)
+		case !unusable(err):
+			return "", nil, Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+		case firstErr == nil:
+			firstErr = err
 		}
 	}
-	switch {
-	case chosen == nil && account == "":
-		return "", nil, invalid(ReasonRepositoryAccountRequired, "the org has connected several GitHub accounts ("+strings.Join(logins, ", ")+") and made none the default for new repositories: say in repository_account which one the new repository is created on, or an owner of the org makes one the default in Settings, GitHub, or name a repository")
-	case chosen == nil:
-		return "", nil, Refusal(h.logger, op, ErrNotConnected, http.StatusUnprocessableEntity)
+	switch len(working) {
+	case 0:
+		return "", nil, Refusal(h.logger, op, firstErr, http.StatusUnprocessableEntity)
+	case 1:
+		return project.OrgID, working[0], nil
 	}
-	if _, err := Installed(ctx, h.app, chosen); err != nil {
-		return "", nil, Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
-	}
-	return project.OrgID, chosen, nil
+	return "", nil, invalid(ReasonRepositoryAccountRequired, "the org has connected several working GitHub accounts ("+strings.Join(logins, ", ")+") and made none the default for new repositories: say in repository_account which one the new repository is created on, or an owner of the org makes one the default in Settings, GitHub, or name a repository")
+}
+
+// unusable says GitHub removed or suspended an installation or it lacks a permission the App
+// asks for: what its owner fixes, as opposed to GitHub failing to answer.
+func unusable(err error) bool {
+	return errors.Is(err, ErrInstallationGone) || errors.Is(err, ErrPermissionNotGranted)
 }
 
 func (h *Host) File(ctx context.Context, projectID, repository, path string) ([]byte, error) {

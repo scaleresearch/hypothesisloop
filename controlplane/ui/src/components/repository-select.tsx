@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import useSWR from 'swr'
-import { ApiError, GITHUB_NOT_CONFIGURED, checkRepository, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api'
+import { ApiError, GITHUB_NOT_CONFIGURED, checkGitHubInstallation, checkRepository, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api'
 import { useGitHubApp, useGitHubInstall } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
 import type { GitHubInstallation } from '@/types'
@@ -31,6 +31,19 @@ function newRepositoryURL(form: string, accounts: GitHubInstallation[]): string 
   if (accounts.length === 1) url.searchParams.set('owner', accounts[0].account_login)
   url.searchParams.set('visibility', 'private')
   return url.toString()
+}
+
+// What GitHub says of an installation that leaves it no account to create on: removed, suspended,
+// or without a permission the App asks for. GitHub failing to answer says nothing of it.
+const UNUSABLE = new Set(['installation_gone', 'installation_suspended', 'github_permission_missing'])
+
+// The installations GitHub says are unusable, asked by the check Settings runs on each.
+async function unusable(orgID: string, accounts: GitHubInstallation[]): Promise<number[]> {
+  const found = await Promise.all(accounts.map(a => checkGitHubInstallation(orgID, a.installation_id).then(
+    () => null,
+    (e: unknown) => e instanceof ApiError && e.reason && UNUSABLE.has(e.reason) ? a.installation_id : null,
+  )))
+  return found.filter((id): id is number => id != null)
 }
 
 // The connected account a value concerns: the owner of the repository named, the account named for
@@ -85,6 +98,12 @@ export function RepositorySelect({ value, onChange, compact = false }: {
   const onInstall = administers && app.data ? start : undefined
   const installations = useSWR(app.data ? ['github-installations', org.id] : null, () => fetchGitHubInstallations(org.id))
   const connected = (installations.data?.total ?? 0) > 0
+  const listedAccounts = installations.data?.items ?? []
+  const dead = useSWR(
+    listedAccounts.length > 0 ? ['github-installation-checks', org.id, ...listedAccounts.map(a => a.installation_id)] : null,
+    () => unusable(org.id, listedAccounts),
+    { shouldRetryOnError: false },
+  ).data ?? []
   const [refreshing, setRefreshing] = useState(false)
   const { data, error, mutate } = useSWR(
     connected ? ['github-repositories', org.id, q] : null,
@@ -122,16 +141,14 @@ export function RepositorySelect({ value, onChange, compact = false }: {
   // What is chosen stays an option while a search leaves it out.
   const options = listed.map(r => ({ value: r.repository, label: r.repository, badge: r.private ? 'private' : undefined }))
   if (value && !value.startsWith(ON_ACCOUNT) && !listed.some(r => r.repository === value)) options.unshift({ value, label: value, badge: undefined })
-  // A new repository goes to the only account or the org's default unasked, and with several
-  // connected the person may name another. One connected before its type was kept takes no new
-  // repository until it is connected again.
-  const accounts = installations.data?.items ?? []
-  const creating = accounts.filter(a => a.account_type != null)
-  const unasked = accounts.length === 1 ? creating[0] : creating.find(a => a.default)
+  // A new repository goes to the org's default or else the only working account unasked, and the
+  // person may name another working one. One GitHub says is unusable is offered for none, and one
+  // connected before its type was kept takes no new repository until it is connected again.
+  const accounts = listedAccounts
+  const creating = accounts.filter(a => a.account_type != null && !dead.includes(a.installation_id))
+  const unasked = creating.find(a => a.default) ?? (creating.length === 1 ? creating[0] : undefined)
   const createsUnasked = unasked != null
-  if (accounts.length > 1) {
-    options.unshift(...creating.filter(a => a !== unasked).map(a => ({ value: ON_ACCOUNT + a.account_login, label: `${newLabel} on ${a.account_login}`, badge: undefined })))
-  }
+  options.unshift(...creating.filter(a => a !== unasked).map(a => ({ value: ON_ACCOUNT + a.account_login, label: `${newLabel} on ${a.account_login}`, badge: undefined })))
   const unaskedLabel = unasked ? `${newLabel} on ${unasked.account_login}` : newLabel
   async function refresh() {
     setRefreshing(true)
