@@ -49,64 +49,6 @@ func TestTheKindOfCallerIsReadFromTheTokensThePlatformMints(t *testing.T) {
 	}
 }
 
-// A coordinator is no agent and acts for none. Every command that acts as one says so before any
-// request, whether --agent names one or a variable left in its environment does. What it writes
-// to the hypothesis graph it writes as itself, so there only naming an agent is refused.
-func TestACoordinatorIsRefusedEveryCommandThatActsAsAnAgent(t *testing.T) {
-	job := writeFile(t, "job: {image: i}\nmetadata: {hypothesis_id: hyp-1}\n")
-	graphWrites := map[string][]string{
-		"hypothesis submit":  {"hypothesis", "submit", "--text", "t", "--builds-on", "root"},
-		"hypothesis link":    {"hypothesis", "link", "hyp-1", "--type", "related", "--to", "hyp-2"},
-		"hypothesis comment": {"hypothesis", "comment", "hyp-1", "--text", "t"},
-		"hypothesis status":  {"hypothesis", "status", "hyp-1", "inconclusive"},
-	}
-	spending := map[string][]string{
-		"job submit": {"job", "submit", job},
-		"checkout":   {"hypothesis", "checkout", "hyp-1"},
-		"data-key":   {"data-key"},
-		"finish":     {"platform-experiments", "agents", "finish", "--reason", "quota spent"},
-	}
-	for name, args := range graphWrites {
-		got := recordingServer(t, func(int, recorded) any { return map[string]any{"id": "hyp-9"} })
-		t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
-		var stdout, stderr bytes.Buffer
-		if code := run(args, &stdout, &stderr); code != 0 || len(*got) != 1 {
-			t.Fatalf("%s as itself: exit %d with %d requests, want 0 and one. stderr: %s", name, code, len(*got), stderr.String())
-		}
-		if _, named := (*got)[0].Body["agent_id"]; named {
-			t.Errorf("%s as itself: body = %v, want no agent named", name, (*got)[0].Body)
-		}
-	}
-	commands := map[string][]string{}
-	for name, args := range spending {
-		commands[name] = args
-	}
-	for name, args := range commands {
-		for _, named := range [][]string{nil, {"--agent", "ag-7"}} {
-			got := recordingServer(t, func(int, recorded) any { return map[string]any{} })
-			t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
-			var stdout, stderr bytes.Buffer
-			if code := run(append(append([]string{}, args...), named...), &stdout, &stderr); code != 1 || len(*got) != 0 {
-				t.Errorf("%s %v: exit %d with %d requests, want 1 and none. stderr: %s", name, named, code, len(*got), stderr.String())
-			}
-			if !strings.Contains(stderr.String(), "is no agent and acts for none") || !strings.Contains(stderr.String(), "hl platform-experiments summary") {
-				t.Errorf("%s %v: stderr = %q, want it to say why and what a coordinator writes", name, named, stderr.String())
-			}
-		}
-	}
-	for name, args := range graphWrites {
-		got := recordingServer(t, func(int, recorded) any { return map[string]any{} })
-		t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
-		var stdout, stderr bytes.Buffer
-		if code := run(append(append([]string{}, args...), "--agent", "ag-7"), &stdout, &stderr); code != 1 || len(*got) != 0 {
-			t.Errorf("%s for an agent: exit %d with %d requests, want 1 and none. stderr: %s", name, code, len(*got), stderr.String())
-		}
-		if !strings.Contains(stderr.String(), "is no agent and acts for none") || !strings.Contains(stderr.String(), "without --agent") {
-			t.Errorf("%s for an agent: stderr = %q, want it to say a coordinator writes as itself", name, stderr.String())
-		}
-	}
-}
-
 // With no agent named, a write to the hypothesis graph is the caller's own: the agent an agent's
 // token is, and for a person or a key no agent. Nothing in the environment names either: AGENT_ID
 // and PLATFORM_EXPERIMENT_ID were read once, and one left over from another run named its agent.
@@ -224,23 +166,6 @@ func TestCloseAndSummaryAreWhatACoordinatorEndsARunWith(t *testing.T) {
 	}
 	if len(*got) != 8 {
 		t.Errorf("a refused summary was sent: %+v", *got)
-	}
-}
-
-// A hosted agent asked `hl cluster list` and was answered "403: a agent token may not call GET
-// /me", which says neither what the command is for nor what to use.
-func TestAnAgentTokenAskingForAnOrgsCommandIsToldWhatItCanUse(t *testing.T) {
-	for _, scope := range []string{"agent:pe-1/ag-1", "coordinator:pe-1"} {
-		got := recordingServer(t, func(int, recorded) any { return map[string]any{} })
-		t.Setenv("HL_TOKEN", derivedToken(scope))
-		t.Setenv("HL_ORG", "")
-		var stdout, stderr bytes.Buffer
-		if code := run([]string{"cluster", "list"}, &stdout, &stderr); code != 1 || len(*got) != 0 {
-			t.Fatalf("%s: exit %d with %d requests, want 1 and none. stderr: %s", scope, code, len(*got), stderr.String())
-		}
-		if said := stderr.String(); !strings.Contains(said, "reaches no org") || !strings.Contains(said, "hl capacity") || strings.Count(said, "\n") != 1 {
-			t.Errorf("%s: stderr = %q, want one line saying why and naming hl capacity", scope, said)
-		}
 	}
 }
 

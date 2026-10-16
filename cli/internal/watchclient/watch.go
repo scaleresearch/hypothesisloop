@@ -130,7 +130,7 @@ func Run(opts Options) int {
 			fmt.Fprintf(opts.Stderr, "hl watch: %s\n", err)
 			return UsageExitCode
 		}
-		w.cursor, w.seen, w.resumed = state.Cursor, state.seen(), state.Cursor != 0
+		w.cursor, w.seen = state.Cursor, state.seen()
 	}
 
 	code := w.run()
@@ -151,9 +151,6 @@ type watch struct {
 	satisfied func(event map[string]any) bool
 	cursor    int64
 	seen      map[string]int64
-	// resumed is true while the cursor came from the cursor file, so an unknown one falls back to
-	// the snapshot once instead of failing.
-	resumed  bool
 	printed  bool
 	settleBy time.Time
 	writeErr error
@@ -193,13 +190,12 @@ func (w *watch) run() int {
 		} else {
 			query.Del("since")
 		}
-		ws, err := connect(w.opts.URL, "/watch?"+query.Encode(), w.opts.Token, deadline.Sub(time.Now()))
+		ws, err := connect(w.opts.URL, "/watch?"+query.Encode(), w.opts.Token, time.Until(deadline))
 		if err != nil {
 			var refused *Refused
-			if errors.As(err, &refused) && refused.code == http.StatusGone && w.resumed {
-				fmt.Fprintf(w.opts.Stderr, "hl watch: the platform does not know saved cursor %d; starting from the current state\n", w.cursor)
-				w.cursor, w.seen, w.resumed = 0, map[string]int64{}, false
-				continue
+			if errors.As(err, &refused) && refused.code == http.StatusGone {
+				fmt.Fprintf(w.opts.Stderr, "hl watch: the platform no longer holds the events after cursor %d (%s); watch without it to start from the current state\n", w.cursor, refused)
+				return UsageExitCode
 			}
 			if errors.As(err, &refused) {
 				fmt.Fprintf(w.opts.Stderr, "hl watch: %s\n", refused)
@@ -454,6 +450,8 @@ func connect(base, path, token string, budget time.Duration) (*webSocket, error)
 	if err != nil {
 		return nil, err
 	}
+	// The handshake, the upgrade request and its answer all fall within the dial's budget.
+	_ = conn.SetDeadline(time.Now().Add(dialTimeout))
 	if secure {
 		tlsConn := tls.Client(conn, &tls.Config{ServerName: host})
 		if err := tlsConn.Handshake(); err != nil {
@@ -480,7 +478,6 @@ func connect(base, path, token string, budget time.Duration) (*webSocket, error)
 	}
 
 	ws := &webSocket{conn: conn}
-	ws.setReadDeadline(time.Now().Add(dialTimeout))
 	head, err := ws.readUntilHeaderEnd()
 	if err != nil {
 		conn.Close()
@@ -642,6 +639,7 @@ func (ws *webSocket) sendFrame(opcode byte, payload []byte) error {
 	for i, b := range payload {
 		masked[i] = b ^ mask[i%4]
 	}
+	_ = ws.conn.SetWriteDeadline(time.Now().Add(readTimeout))
 	_, err := ws.conn.Write(append(append(header, mask...), masked...))
 	return err
 }

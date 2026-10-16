@@ -48,7 +48,8 @@ func layerOf(t *testing.T, entries ...entry) v1.Layer {
 	if err := tw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	layer, err := tarball.LayerFromReader(&buf)
+	raw := buf.Bytes()
+	layer, err := tarball.LayerFromOpener(func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(raw)), nil })
 	if err != nil {
 		t.Fatal(err)
 	}

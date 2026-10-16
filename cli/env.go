@@ -13,10 +13,10 @@ import (
 )
 
 var envCommands = []subcommand{
-	{"build", "start building HEAD's .hypothesisloop/Dockerfile before the job that runs in it", envBuild, asAgent},
-	{"status", "say whether HEAD's .hypothesisloop/Dockerfile is building, built or failed, building nothing", envStatus, asAgent},
-	{"stage", "pull the image a job runs in, the baseline's by default, onto this machine for hl env run", envStage, asAgent},
-	{"run", "-- COMMAND: run COMMAND here inside the staged image", envRun, asAgent},
+	{"build", "start building HEAD's .hypothesisloop/Dockerfile before the job that runs in it", envBuild},
+	{"status", "say whether HEAD's .hypothesisloop/Dockerfile is building, built or failed, building nothing", envStatus},
+	{"stage", "pull the image a job runs in, the baseline's by default, onto this machine for hl env run", envStage},
+	{"run", "-- COMMAND: run COMMAND here inside the staged image", envRun},
 }
 
 func envBuild(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {

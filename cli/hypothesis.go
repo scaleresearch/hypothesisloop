@@ -79,14 +79,14 @@ Items are submitted in order; top-level fields default onto every item. Prints o
 per item. Full reference: controlplane/settings/examples/hypothesis.yaml`
 
 var hypothesisCommands = []subcommand{
-	{"submit", "register an idea under the objective or the hypotheses it builds on", hypothesisSubmit, everyone},
-	{"checkout", "put the clone on your branch for a hypothesis, made from what the hypothesis builds on, and record you as working on it", hypothesisCheckout, asAgent},
-	{"link", "add a link from your own hypothesis", hypothesisLink, everyone},
-	{"comment", "add a note to a hypothesis, or to the objective as root", hypothesisComment, everyone},
-	{"status", "set the verdict of your hypothesis or of a person's idea you tested; confirmed and refuted name the control (--against) and need two completed jobs of its own besides it, one where every ranking metric is deterministic, or --despite with why it holds without", hypothesisStatus, everyone},
-	{"list", "hypotheses, open ideas of people first, then most recent", hypothesisList, everyone},
-	{"get", "one hypothesis with its links, findings, implementations, comments and jobs, short unless --full; root: the comments on the objective", hypothesisGet, everyone},
-	{"query", "read-only Cypher over the graph, including its text search", hypothesisQuery, everyone},
+	{"submit", "register an idea under the objective or the hypotheses it builds on", hypothesisSubmit},
+	{"checkout", "put the clone on your branch for a hypothesis, made from what the hypothesis builds on, and record you as working on it", hypothesisCheckout},
+	{"link", "add a link from your own hypothesis", hypothesisLink},
+	{"comment", "add a note to a hypothesis, or to the objective as root", hypothesisComment},
+	{"status", "set the verdict of your hypothesis or of a person's idea you tested; confirmed and refuted name the control (--against) and need two completed jobs of its own besides it, one where every ranking metric is deterministic, or --despite with why it holds without", hypothesisStatus},
+	{"list", "hypotheses, open ideas of people first, then most recent", hypothesisList},
+	{"get", "one hypothesis with its links, findings, implementations, comments and jobs, short unless --full; root: the comments on the objective", hypothesisGet},
+	{"query", "read-only Cypher over the graph, including its text search", hypothesisQuery},
 }
 
 func cmdHypothesis(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -143,10 +143,7 @@ func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writ
 		}
 	}
 
-	owner, err := recordOwner(c, *agent)
-	if err != nil {
-		return fail(stderr, err)
-	}
+	owner := agentOf(c, *agent)
 	bodies, keys, err := buildSubmitBodies(items, flagLinks, distinctFrom, map[string]string{
 		"agent_id": owner, "platform_experiment_id": experimentOf(c, *pe), "text": text,
 	})
@@ -448,10 +445,7 @@ an agent's hypothesis names that agent with --agent, and is kept as who made the
 			return fail(stderr, err)
 		}
 	}
-	owner, err := recordOwner(c, *agent)
-	if err != nil {
-		return fail(stderr, err)
-	}
+	owner := agentOf(c, *agent)
 	body := map[string]string{"type": *typ, "to": *to}
 	if owner != "" {
 		body["agent_id"] = owner
@@ -497,10 +491,7 @@ an API key writes their own, or an agent's with --agent.`, stderr)
 			return fail(stderr, err)
 		}
 	}
-	owner, err := recordOwner(c, *agent)
-	if err != nil {
-		return fail(stderr, err)
-	}
+	owner := agentOf(c, *agent)
 	body := map[string]string{"text": text}
 	if owner != "" {
 		body["agent_id"] = owner
@@ -560,10 +551,7 @@ for stdin, gives REASON in place of --despite REASON.`, stderr)
 		return fail(stderr, err)
 	}
 	var out json.RawMessage
-	owner, err := recordOwner(c, *agent)
-	if err != nil {
-		return fail(stderr, err)
-	}
+	owner := agentOf(c, *agent)
 	body := map[string]string{"status": *status}
 	if owner != "" {
 		body["agent_id"] = owner

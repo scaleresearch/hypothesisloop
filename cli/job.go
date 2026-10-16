@@ -19,21 +19,21 @@ import (
 )
 
 var jobCommands = []subcommand{
-	{"submit", "submit a job spec, prints its id", jobSubmit, asAgent},
-	{"list", "jobs, newest first, one brief line each with its metrics", jobList, everyone},
-	{"status", "a job's whole record", jobStatus, everyone},
-	{"metrics", "per metric: last value, min, max and points reported", jobMetrics, everyone},
-	{"summary", "print a job's write-up, or file it with --text", jobSummary, everyone},
-	{"wait", "block until jobs end, then print each as list does", jobWait, everyone},
-	{"logs", "the last log lines its cluster reported", jobLogs, everyone},
+	{"submit", "submit a job spec, prints its id", jobSubmit},
+	{"list", "jobs, newest first, one brief line each with its metrics", jobList},
+	{"status", "a job's whole record", jobStatus},
+	{"metrics", "per metric: last value, min, max and points reported", jobMetrics},
+	{"summary", "print a job's write-up, or file it with --text", jobSummary},
+	{"wait", "block until jobs end, then print each as list does", jobWait},
+	{"logs", "the last log lines its cluster reported", jobLogs},
 	{"data", "what the job wrote to the object store", func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 		return jobRead(c, "data", "/data", "What the job wrote under its data prefix, one object per line, each with a url a plain GET reads it by for 12 hours: how a job of a prior run is read", args, stdout, stderr)
-	}, everyone},
+	}},
 	{"cost", "what it cost so far, against the estimate", func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 		return jobRead(c, "cost", "/cost", "Actual consumption so far (settled once final) beside the admission-time estimate", args, stdout, stderr)
-	}, everyone},
-	{"cancel", "cancel a job that has not ended, releasing what it holds of its agent's quota", jobCancel, everyone},
-	{"stats", "job counts by status, capacity tier and eviction reason", jobStats, everyone},
+	}},
+	{"cancel", "cancel a job that has not ended, releasing what it holds of its agent's quota", jobCancel},
+	{"stats", "job counts by status, capacity tier and eviction reason", jobStats},
 }
 
 func jobSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {

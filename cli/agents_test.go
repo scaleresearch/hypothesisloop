@@ -148,11 +148,11 @@ func TestAgentsRemoveAndList(t *testing.T) {
 	}
 	t.Setenv("HL_TOKEN", "hlk_x")
 	stderr.Reset()
-	if code := run([]string{"platform-experiments", "agents", "finish", "--reason", "quota spent"}, &stdout, &stderr); code != 1 || len(*got) != 1 || !strings.Contains(stderr.String(), "an agent does this itself") {
+	if code := run([]string{"platform-experiments", "agents", "finish", "--reason", "quota spent"}, &stdout, &stderr); code != 1 || len(*got) != 1 || !strings.Contains(stderr.String(), "an agent finishes itself") {
 		t.Errorf("finish by a person: exit %d with %d requests, stderr %q, want 1, no further request and why", code, len(*got), stderr.String())
 	}
-	if code := run([]string{"platform-experiments", "agents", "finish", "--reason", "quota spent", "--agent", "ag-1"}, &stdout, &stderr); code != 1 || len(*got) != 1 {
-		t.Errorf("finish by a person naming an agent: exit %d with %d requests, want 1 and no further one", code, len(*got))
+	if code := run([]string{"platform-experiments", "agents", "finish", "--reason", "quota spent", "--agent", "ag-1"}, &stdout, &stderr); code != 2 || len(*got) != 1 {
+		t.Errorf("finish by a person naming an agent: exit %d with %d requests, want 2 and no further one", code, len(*got))
 	}
 	t.Setenv("HL_TOKEN", "test-token")
 	*got = nil
@@ -227,10 +227,6 @@ func TestAgentsMessageSendsToOneAgentOrEveryResearcher(t *testing.T) {
 		if code := run(append([]string{"platform-experiments", "agents"}, args...), &stdout, &stderr); code != 2 {
 			t.Errorf("%v: exit %d, want 2", args, code)
 		}
-	}
-	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/ag-1"))
-	if code := run([]string{"platform-experiments", "agents", "message", "ag-2", "--text", "x"}, &stdout, &stderr); code != 1 || len(*got) != 4 {
-		t.Errorf("message by an agent: exit %d with %d requests, want 1 and no further request", code, len(*got))
 	}
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -11,13 +12,13 @@ import (
 )
 
 var agentsCommands = []subcommand{
-	{"add", "create one agent in a platform experiment, or join a registered one with --agent", agentsAdd, ofTheRun},
-	{"remove", "take an agent out of a platform experiment that has not started", agentsRemove, ofTheRun},
-	{"list", "the agents of a platform experiment and what each was launched with", agentsList, ofTheRun},
-	{"finish", "say that you, an agent, have nothing left to do: your machine stops", agentsFinish, theAgentItself},
-	{"message", "tell an agent, with --all every researcher or with --coordinator the coordinator, a direction directly: it is woken with it", agentsMessage, ofTheRun},
-	{"messages", "the messages sent to agents, oldest first; an agent's token reads its own", agentsMessages, everyone},
-	{"session", "the stored model session of an agent, the coordinator or the planner", agentsSession, everyone},
+	{"add", "create one agent in a platform experiment, or join a registered one with --agent", agentsAdd},
+	{"remove", "take an agent out of a platform experiment that has not started", agentsRemove},
+	{"list", "the agents of a platform experiment and what each was launched with", agentsList},
+	{"finish", "say that you, an agent, have nothing left to do: your machine stops", agentsFinish},
+	{"message", "tell an agent, with --all every researcher or with --coordinator the coordinator, a direction directly: it is woken with it", agentsMessage},
+	{"messages", "the messages sent to agents, oldest first; an agent's token reads its own", agentsMessages},
+	{"session", "the stored model session of an agent, the coordinator or the planner", agentsSession},
 }
 
 func agentsPath(platformExperiment string) string {
@@ -282,6 +283,9 @@ baseline agents left exactly one that reports the ranking metric.`, stderr)
 		return parseExit(misuse(fs, "want --reason or --reason-file"))
 	}
 	_, pe, agent := scopeOf(c.Token)
+	if agent == "" {
+		return fail(stderr, errors.New("platform-experiments agents finish: an agent finishes itself, with its own token, and HL_TOKEN names no agent"))
+	}
 	var out struct {
 		Agents []json.RawMessage `json:"agents"`
 		Open   []struct {

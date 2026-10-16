@@ -166,7 +166,12 @@ func stageJob(c *apiclient.Client, dir string, operands []string, pe string, dea
 		auth = &authn.Basic{Username: credential.Login.Username, Password: credential.Login.Password}
 	}
 	started := time.Now()
-	out, err := stage(context.Background(), dir, credential.Image, auth)
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	out, err := stage(ctx, dir, credential.Image, auth)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return nil, &stageTimeout{fmt.Sprintf("pulling %s did not finish within --timeout", credential.Image)}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", credential.Image, err)
 	}
