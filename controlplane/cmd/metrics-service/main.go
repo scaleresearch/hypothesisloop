@@ -41,18 +41,16 @@ func main() {
 	}
 	defer logger.Sync() //nolint:errcheck
 
-	pcfg := hypothesisloopcfg.MustLoad(requiredEnv("HYPOTHESISLOOP_CONFIG", logger))
-	controllerPort := strconv.Itoa(pcfg.Services.MetricControllerPort)
-
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		logger.Fatal("DATABASE_URL environment variable is required")
+	pcfg, err := hypothesisloopcfg.LoadFromEnv()
+	if err != nil {
+		logger.Fatal("metrics-service: settings", zap.Error(err))
 	}
+	controllerPort := strconv.Itoa(pcfg.Services.MetricControllerPort)
 
 	metricsDBURL := pcfg.Services.MetricsDBURL
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	pool, err := db.NewPool(ctx, db.Config{DSN: dsn, MaxConns: db.ServiceMaxConns})
+	pool, err := db.NewPool(ctx, db.ConfigOf(pcfg.Database, db.ServiceMaxConns))
 	cancel()
 	if err != nil {
 		logger.Fatal("metrics-service: connect db", zap.Error(err))
@@ -169,12 +167,4 @@ func newRouter(tokens auth.Tokens, push http.Handler, logger *zap.Logger) chi.Ro
 	r.HandleFunc("/health", health)
 	r.HandleFunc("/healthz", health)
 	return r
-}
-
-func requiredEnv(key string, logger *zap.Logger) string {
-	value := os.Getenv(key)
-	if value == "" {
-		logger.Fatal(key + " environment variable is required")
-	}
-	return value
 }

@@ -22,7 +22,7 @@ func scratchDatabase(t *testing.T) *Pool {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	admin, err := NewPool(ctx, Config{DSN: serverDSN(), MaxConns: 1, MinConns: 1})
+	admin, err := NewPool(ctx, Config{DSN: serverDSN(), MaxConns: 1, MinConns: 1, Timeouts: testTimeouts})
 	if err != nil {
 		t.Skipf("no database at %s: %v", serverDSN(), err)
 	}
@@ -39,7 +39,7 @@ func scratchDatabase(t *testing.T) *Pool {
 		t.Fatal(err)
 	}
 	dsn.Path = "/" + name
-	pool, err := NewPool(ctx, Config{DSN: dsn.String(), MaxConns: 4, MinConns: 1})
+	pool, err := NewPool(ctx, Config{DSN: dsn.String(), MaxConns: 4, MinConns: 1, Timeouts: testTimeouts})
 	if err != nil {
 		t.Fatalf("connect scratch database: %v", err)
 	}

@@ -30,6 +30,7 @@ func productionConfig(t *testing.T) string {
 func withoutGitHost(t *testing.T) string {
 	t.Helper()
 	t.Setenv(signingSecretEnv, "a-signing-secret-only-this-test-knows")
+	t.Setenv("DATABASE_URL", "postgres://test.example.invalid/hypothesisloop")
 	t.Setenv(modelCredentialEnv, "a-model-credential-only-this-test-knows")
 	b, err := os.ReadFile(committedConfig)
 	if err != nil {
@@ -143,6 +144,7 @@ func TestTheSigningSecretComesFromTheEnvironmentAndIsRequired(t *testing.T) {
 		t.Fatalf("Load with the secret in the environment: %v", err)
 	}
 	t.Setenv(signingSecretEnv, "too-short")
+	t.Setenv("DATABASE_URL", "postgres://test.example.invalid/hypothesisloop")
 	if err := loadText(t, text); err == nil {
 		t.Fatal("Load accepted a signing secret shorter than its MAC")
 	}
@@ -227,6 +229,7 @@ func TestLoadRequiresEveryIdentityProviderToBeCompleteAndListedOnce(t *testing.T
 
 func TestLoadRefusesTheCommittedFileUntilItsPlaceholdersAreFilledIn(t *testing.T) {
 	t.Setenv(signingSecretEnv, "a-signing-secret-only-this-test-knows")
+	t.Setenv("DATABASE_URL", "postgres://test.example.invalid/hypothesisloop")
 	t.Setenv(modelCredentialEnv, "a-model-credential-only-this-test-knows")
 	if _, err := Load(committedConfig); err == nil || !strings.Contains(err.Error(), "placeholder") {
 		t.Fatalf("Load of the committed settings: got = %v, want it refused for its placeholders", err)

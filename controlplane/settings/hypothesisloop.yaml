@@ -12,6 +12,15 @@ services:
   metrics_db_url: http://greptimedb:4000
   graph_db_url: bolt://memgraph:7687
 
+# The relational database, whose address holds its password. Postgres enforces the timeouts on
+# every session: one statement, one wait for a lock, and a transaction left idle (the longest
+# call made inside one is the object store's 20 s). Migrations run with their own, longer ones.
+database:
+  url: ${DATABASE_URL}
+  statement_timeout_seconds: 30
+  lock_timeout_seconds: 10
+  idle_in_transaction_session_timeout_seconds: 60
+
 # Who may call the API. Every request carries one token, and there is no setting that turns the
 # check off.
 #
@@ -514,6 +523,10 @@ scheduler:
   # How long a cluster stays excluded from a job's speculative candidates after that job failed
   # over off it. Past the TTL the cluster is eligible again for that job.
   tried_cluster_ttl_seconds: 900
+
+  # The longest one pass of any background loop may run before it is cancelled and the next
+  # starts.
+  pass_timeout_seconds: 120
 
   # Age-bucket width for guaranteed-tier admission fairness: jobs queued within this window of
   # each other are ordered by least-used-quota agent first instead of exact FIFO timestamp,

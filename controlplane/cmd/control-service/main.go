@@ -58,18 +58,16 @@ func main() {
 	}
 	defer logger.Sync() //nolint:errcheck
 
-	pcfg := hypothesisloopcfg.MustLoad(requiredEnv("HYPOTHESISLOOP_CONFIG", logger))
-	apiPort := strconv.Itoa(pcfg.Services.APIPort)
-
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		logger.Fatal("DATABASE_URL environment variable is required")
+	pcfg, err := hypothesisloopcfg.LoadFromEnv()
+	if err != nil {
+		logger.Fatal("control-service: settings", zap.Error(err))
 	}
+	apiPort := strconv.Itoa(pcfg.Services.APIPort)
 
 	metricsDBURL := pcfg.Services.MetricsDBURL
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	pool, err := db.NewPool(ctx, db.Config{DSN: dsn, MaxConns: db.ServiceMaxConns})
+	pool, err := db.NewPool(ctx, db.ConfigOf(pcfg.Database, db.ServiceMaxConns))
 	cancel()
 	if err != nil {
 		logger.Fatal("control-service: connect db", zap.Error(err))
@@ -78,7 +76,7 @@ func main() {
 
 	// control-service is the sole owner of the schema: metrics-service reads the same tables and
 	// never migrates them.
-	migrateCtx, migrateCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	migrateCtx, migrateCancel := context.WithTimeout(context.Background(), db.MigrationTimeouts.Statement)
 	migrated, err := db.Migrate(migrateCtx, pool)
 	migrateCancel()
 	if err != nil {
@@ -534,14 +532,6 @@ func openGraph(ctx context.Context, url string) (*graphdb.Store, error) {
 		return nil, err
 	}
 	return graph, nil
-}
-
-func requiredEnv(key string, logger *zap.Logger) string {
-	value := os.Getenv(key)
-	if value == "" {
-		logger.Fatal(key + " environment variable is required")
-	}
-	return value
 }
 
 // modelDefaults is the platform's model for an agent and for a coordinator that names none.

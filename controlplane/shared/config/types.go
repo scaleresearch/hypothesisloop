@@ -160,6 +160,22 @@ type SchedulerConfig struct {
 	// cluster could run the job. Past the TTL the cluster is eligible again. It is a delay: what
 	// bounds a job's attempts is its infrastructure-requeue allowance.
 	TriedClusterTTLSeconds int `yaml:"tried_cluster_ttl_seconds"`
+	// PassTimeoutSeconds bounds one pass of every background loop, so a pass stuck on a store
+	// that stopped answering ends and the next one starts.
+	PassTimeoutSeconds int `yaml:"pass_timeout_seconds"`
+}
+
+// PassTimeout is SchedulerConfig.PassTimeoutSeconds.
+func (s SchedulerConfig) PassTimeout() time.Duration {
+	return time.Duration(s.PassTimeoutSeconds) * time.Second
+}
+
+// DatabaseConfig is the relational database every control-plane process connects to.
+type DatabaseConfig struct {
+	URL                                    string `yaml:"url"`
+	StatementTimeoutSeconds                int    `yaml:"statement_timeout_seconds"`
+	LockTimeoutSeconds                     int    `yaml:"lock_timeout_seconds"`
+	IdleInTransactionSessionTimeoutSeconds int    `yaml:"idle_in_transaction_session_timeout_seconds"`
 }
 
 // MaxScaleUpTimeoutSeconds is the hard ceiling both the global default and any per-cluster
@@ -458,6 +474,7 @@ type Config struct {
 	Scheduler        SchedulerConfig         `yaml:"scheduler"`
 	Stages           StagesConfig            `yaml:"stages"`
 	Services         ServicesConfig          `yaml:"services"`
+	Database         DatabaseConfig          `yaml:"database"`
 	Auth             AuthConfig              `yaml:"auth"`
 	Agents           AgentsConfig            `yaml:"agents"`
 	Models           ModelsConfig            `yaml:"models"`

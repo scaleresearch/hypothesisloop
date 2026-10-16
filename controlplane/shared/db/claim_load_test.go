@@ -23,7 +23,7 @@ func TestClaimsRacingForTwoClustersNeverOvercommitOrPlaceAJobTwice(t *testing.T)
 	ctx := context.Background()
 	// Each claim holds a connection while its check reads on another; a pool smaller than the
 	// passes would wait on itself. Replicas each have their own.
-	pool, err := NewPool(ctx, Config{DSN: testDSN(), MaxConns: 20, MinConns: 1})
+	pool, err := NewPool(ctx, Config{DSN: testDSN(), MaxConns: 20, MinConns: 1, Timeouts: testTimeouts})
 	if err != nil {
 		t.Skipf("no database at %s: %v", testDSN(), err)
 	}

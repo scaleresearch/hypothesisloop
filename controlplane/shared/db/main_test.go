@@ -14,7 +14,10 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-const devDSN = "postgres://hypothesisloop:hypothesisloop@localhost:5433/hypothesisloop?sslmode=disable"
+// testTimeouts are the committed settings' database timeouts.
+var testTimeouts = Timeouts{Statement: 30 * time.Second, Lock: 10 * time.Second, IdleInTransaction: 60 * time.Second}
+
+const devDSN ="postgres://hypothesisloop:hypothesisloop@localhost:5433/hypothesisloop?sslmode=disable"
 
 // scratchDSN is the database TestMain creates for this run with every migration applied. Tests
 // never touch the server's own databases: schema DDL there takes locks that deadlocked live
@@ -44,7 +47,7 @@ func TestMain(m *testing.M) {
 func runWithScratchDatabase(m *testing.M) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	admin, err := NewPool(ctx, Config{DSN: serverDSN(), MaxConns: 1, MinConns: 1})
+	admin, err := NewPool(ctx, Config{DSN: serverDSN(), MaxConns: 1, MinConns: 1, Timeouts: testTimeouts})
 	if err != nil {
 		return m.Run()
 	}
@@ -70,7 +73,7 @@ func runWithScratchDatabase(m *testing.M) int {
 }
 
 func migrateAt(ctx context.Context, dsn string) error {
-	pool, err := NewPool(ctx, Config{DSN: dsn, MaxConns: 1, MinConns: 1})
+	pool, err := NewPool(ctx, Config{DSN: dsn, MaxConns: 1, MinConns: 1, Timeouts: testTimeouts})
 	if err != nil {
 		return err
 	}

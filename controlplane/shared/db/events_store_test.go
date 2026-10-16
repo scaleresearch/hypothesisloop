@@ -27,7 +27,7 @@ func eventsTestDB(t *testing.T) *Pool {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	pool, err := NewPool(ctx, Config{DSN: testDSN(), MaxConns: 4, MinConns: 1})
+	pool, err := NewPool(ctx, Config{DSN: testDSN(), MaxConns: 4, MinConns: 1, Timeouts: testTimeouts})
 	if err != nil {
 		t.Skipf("no database at %s: %v", testDSN(), err)
 	}

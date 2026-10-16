@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +26,10 @@ var migrationFiles embed.FS
 // follows it: the number means nothing, it only has to be the same everywhere so every caller
 // contends on the same lock.
 const schemaMigrationLockKey = 8125_2026
+
+// MigrationTimeouts are the session's while Migrate runs, in place of the pool's: a migration
+// rewrites whole tables, and waits on the lock for a replica starting beside it to finish first.
+var MigrationTimeouts = Timeouts{Statement: 30 * time.Minute, Lock: 2 * time.Minute, IdleInTransaction: 30 * time.Minute}
 
 // adoptionCheckSchema is where the baseline is built, inside a transaction that is rolled back,
 // to compare a database from before migrations against it.
@@ -155,6 +161,23 @@ func migrate(ctx context.Context, pool *Pool, all migrations) (Migrated, error) 
 		return done, fmt.Errorf("db.Migrate: acquire connection: %w", err)
 	}
 	defer conn.Release()
+	params, err := MigrationTimeouts.params()
+	if err != nil {
+		return done, fmt.Errorf("db.Migrate: %w", err)
+	}
+	for name, value := range params {
+		if _, err := conn.Exec(ctx, "SELECT set_config($1, $2, false)", name, value); err != nil {
+			return done, fmt.Errorf("db.Migrate: set %s: %w", name, err)
+		}
+	}
+	// The connection goes back to the pool with the pool's timeouts or not at all.
+	defer func() {
+		resetCtx, resetCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer resetCancel()
+		if _, err := conn.Exec(resetCtx, "SELECT set_config(name, reset_val, false) FROM pg_settings WHERE name = ANY($1)", slices.Collect(maps.Keys(params))); err != nil {
+			conn.Conn().Close(resetCtx) //nolint:errcheck
+		}
+	}()
 	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", schemaMigrationLockKey); err != nil {
 		return done, fmt.Errorf("db.Migrate: acquire advisory lock: %w", err)
 	}

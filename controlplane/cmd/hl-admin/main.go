@@ -47,8 +47,8 @@ const usage = `usage: hl-admin <command>
                                    account the installation is on. The API's own connect also asks a
                                    person to prove they reach the installation, and this does not
 
-token reads HYPOTHESISLOOP_CONFIG. The others also read DATABASE_URL, and github connect needs the
-git_host github section of the config.`
+Every command reads the settings HYPOTHESISLOOP_CONFIG names, and github connect needs their
+git_host github section.`
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
@@ -58,7 +58,7 @@ func main() {
 }
 
 func run(args []string, stdout io.Writer) error {
-	cfg, err := loadConfig()
+	cfg, err := config.LoadFromEnv()
 	if err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func run(args []string, stdout io.Writer) error {
 		fmt.Fprintln(stdout, token)
 		return nil
 	case len(args) == 4 && args[0] == "user" && args[1] == "add":
-		return withPool(func(ctx context.Context, pool *db.Pool) error {
+		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
 			return addUser(ctx, db.NewAccountsStore(pool), args[2], args[3], stdout)
 		})
 	case (len(args) == 4 || len(args) == 5) && args[0] == "api-key" && args[1] == "add":
@@ -79,7 +79,7 @@ func run(args []string, stdout io.Writer) error {
 		if len(args) == 5 {
 			projectID = args[4]
 		}
-		return withPool(func(ctx context.Context, pool *db.Pool) error {
+		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
 			return addAPIKey(ctx, db.NewAccountsStore(pool), args[2], args[3], projectID, stdout)
 		})
 	case len(args) == 4 && args[0] == "user" && args[1] == "staff":
@@ -87,7 +87,7 @@ func run(args []string, stdout io.Writer) error {
 		if err != nil {
 			return err
 		}
-		return withPool(func(ctx context.Context, pool *db.Pool) error {
+		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
 			return db.NewAccountsStore(pool).SetUserStaff(ctx, args[2], staff)
 		})
 	case len(args) == 4 && args[0] == "cluster" && args[1] == "share":
@@ -95,7 +95,7 @@ func run(args []string, stdout io.Writer) error {
 		if err != nil {
 			return err
 		}
-		return withPool(func(ctx context.Context, pool *db.Pool) error {
+		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
 			_, requeued, err := db.NewClustersStore(pool).UpdateCluster(ctx, args[2], &shared, domain.ClusterSettings{})
 			if err != nil {
 				return err
@@ -111,12 +111,12 @@ func run(args []string, stdout io.Writer) error {
 		if err := decoder.Decode(&change); err != nil || change.Empty() {
 			return fmt.Errorf("cluster settings: want a JSON object naming at least one setting: %v", err)
 		}
-		return withPool(func(ctx context.Context, pool *db.Pool) error {
+		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
 			_, _, err := db.NewClustersStore(pool).UpdateCluster(ctx, args[2], nil, change)
 			return err
 		})
 	case len(args) == 3 && args[0] == "platform-experiment" && (args[1] == "share" || args[1] == "unshare"):
-		return withPool(func(ctx context.Context, pool *db.Pool) error {
+		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
 			found, err := db.NewPlatformExperimentsStore(pool).SetPlatformExperimentShared(ctx, args[2], args[1] == "share")
 			if err == nil && !found {
 				err = fmt.Errorf("no platform experiment %s", args[2])
@@ -124,7 +124,7 @@ func run(args []string, stdout io.Writer) error {
 			return err
 		})
 	case len(args) == 4 && args[0] == "cluster" && args[1] == "add":
-		return withPool(func(ctx context.Context, pool *db.Pool) error {
+		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
 			if _, err := db.NewClustersStore(pool).RegisterCluster(ctx, args[2], args[3]); err != nil {
 				return err
 			}
@@ -136,7 +136,7 @@ func run(args []string, stdout io.Writer) error {
 			return nil
 		})
 	case len(args) == 3 && args[0] == "launcher" && args[1] == "add":
-		return withPool(func(ctx context.Context, pool *db.Pool) error {
+		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
 			if err := db.NewPlatformExperimentsStore(pool).RegisterLauncher(ctx, args[2]); err != nil {
 				return err
 			}
@@ -148,7 +148,7 @@ func run(args []string, stdout io.Writer) error {
 			return nil
 		})
 	case len(args) == 3 && args[0] == "launcher" && args[1] == "remove":
-		return withPool(func(ctx context.Context, pool *db.Pool) error {
+		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
 			removed, err := db.NewPlatformExperimentsStore(pool).RemoveLauncher(ctx, args[2])
 			if err != nil {
 				return err
@@ -170,7 +170,7 @@ func run(args []string, stdout io.Writer) error {
 		if err != nil {
 			return err
 		}
-		return withPool(func(ctx context.Context, pool *db.Pool) error {
+		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
 			return connectGitHub(ctx, db.NewAccountsStore(pool), app, args[2], installation, stdout)
 		})
 	default:
@@ -187,14 +187,6 @@ func onOff(arg string) (bool, error) {
 	default:
 		return false, fmt.Errorf("want on or off, got %q", arg)
 	}
-}
-
-func loadConfig() (*config.Config, error) {
-	path := os.Getenv("HYPOTHESISLOOP_CONFIG")
-	if path == "" {
-		return nil, errors.New("HYPOTHESISLOOP_CONFIG environment variable is required")
-	}
-	return config.Load(path)
 }
 
 type installationStore interface {
@@ -219,14 +211,10 @@ func connectGitHub(ctx context.Context, store installationStore, app installatio
 	return json.NewEncoder(stdout).Encode(connected)
 }
 
-func withPool(do func(context.Context, *db.Pool) error) error {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		return errors.New("DATABASE_URL environment variable is required")
-	}
+func withPool(database config.DatabaseConfig, do func(context.Context, *db.Pool) error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	pool, err := db.NewPool(ctx, db.Config{DSN: dsn, MaxConns: 2})
+	pool, err := db.NewPool(ctx, db.ConfigOf(database, 2))
 	if err != nil {
 		return err
 	}

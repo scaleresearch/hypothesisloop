@@ -3,18 +3,55 @@ package db
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 )
 
 // ServiceMaxConns is the pool size every control-plane service runs with.
 const ServiceMaxConns = 20
 
-// Config holds the database connection configuration. MaxConns is required.
+// ConfigOf is the pool of maxConns connections the database section of the settings describes.
+func ConfigOf(d config.DatabaseConfig, maxConns int32) Config {
+	return Config{DSN: d.URL, MaxConns: maxConns, Timeouts: Timeouts{
+		Statement:         time.Duration(d.StatementTimeoutSeconds) * time.Second,
+		Lock:              time.Duration(d.LockTimeoutSeconds) * time.Second,
+		IdleInTransaction: time.Duration(d.IdleInTransactionSessionTimeoutSeconds) * time.Second,
+	}}
+}
+
+// Config holds the database connection configuration. MaxConns and every timeout are required.
 type Config struct {
 	DSN      string
 	MaxConns int32
 	MinConns int32
+	Timeouts Timeouts
+}
+
+// Timeouts bound what one session may hold: one statement, one wait for a lock, and a
+// transaction left idle. Postgres enforces them, so a statement stuck behind a lock or a
+// transaction abandoned mid-way frees its connection and its locks on its own.
+type Timeouts struct {
+	Statement         time.Duration
+	Lock              time.Duration
+	IdleInTransaction time.Duration
+}
+
+func (t Timeouts) params() (map[string]string, error) {
+	params := map[string]string{
+		"statement_timeout":                   strconv.FormatInt(t.Statement.Milliseconds(), 10),
+		"lock_timeout":                        strconv.FormatInt(t.Lock.Milliseconds(), 10),
+		"idle_in_transaction_session_timeout": strconv.FormatInt(t.IdleInTransaction.Milliseconds(), 10),
+	}
+	for name, ms := range params {
+		if n, _ := strconv.ParseInt(ms, 10, 64); n <= 0 {
+			return nil, fmt.Errorf("%s must be at least a millisecond", name)
+		}
+	}
+	return params, nil
 }
 
 // Pool wraps a pgxpool.Pool for use across the application.
@@ -28,9 +65,16 @@ func NewPool(ctx context.Context, cfg Config) (*Pool, error) {
 		return nil, fmt.Errorf("db.NewPool: MaxConns must be positive, got %d", cfg.MaxConns)
 	}
 
+	params, err := cfg.Timeouts.params()
+	if err != nil {
+		return nil, fmt.Errorf("db.NewPool: %w", err)
+	}
 	poolCfg, err := pgxpool.ParseConfig(cfg.DSN)
 	if err != nil {
 		return nil, fmt.Errorf("db.NewPool: parse config: %w", err)
+	}
+	for name, value := range params {
+		poolCfg.ConnConfig.RuntimeParams[name] = value
 	}
 
 	poolCfg.MaxConns = cfg.MaxConns

@@ -132,13 +132,17 @@ func expandNode(node *yaml.Node) error {
 	return nil
 }
 
-// MustLoad calls Load and panics on error. Suitable for use in main().
-func MustLoad(path string) *Config {
-	cfg, err := Load(path)
-	if err != nil {
-		panic(err)
+// PathEnv is the one environment variable a control-plane process reads itself: where its
+// settings file is. Everything else, secrets included, the file names.
+const PathEnv = "HYPOTHESISLOOP_CONFIG"
+
+// LoadFromEnv loads the settings file PathEnv names.
+func LoadFromEnv() (*Config, error) {
+	path := os.Getenv(PathEnv)
+	if path == "" {
+		return nil, fmt.Errorf("config: the %s environment variable is required", PathEnv)
 	}
-	return cfg
+	return Load(path)
 }
 
 // cpuCoreAccHRate is what one core of domain.CPUType costs an hour. At 1 the budget of an
@@ -219,8 +223,12 @@ func (c *Config) build() error {
 		s.DefaultTerminationGracePeriodSeconds <= 0 || s.MaxTerminationGracePeriodSeconds <= 0 || s.DefaultReportIntervalSeconds <= 0 ||
 		s.SilenceMultiplier <= 0 || s.MinSilenceWindowSeconds <= 0 || s.MaxLogTailLineChars <= 0 ||
 		s.MaxInfrastructureRequeues <= 0 || s.MaxCheckpointGraceSeconds <= 0 ||
-		s.ResourceDisbalanceTolerance <= 0 || s.ScaleUpTimeoutSeconds <= 0 || s.TriedClusterTTLSeconds <= 0 {
+		s.ResourceDisbalanceTolerance <= 0 || s.ScaleUpTimeoutSeconds <= 0 || s.TriedClusterTTLSeconds <= 0 ||
+		s.PassTimeoutSeconds <= 0 {
 		return fmt.Errorf("all scheduler timing, retry, window, and multiplier settings must be positive")
+	}
+	if d := c.Database; d.URL == "" || d.StatementTimeoutSeconds <= 0 || d.LockTimeoutSeconds <= 0 || d.IdleInTransactionSessionTimeoutSeconds <= 0 {
+		return fmt.Errorf("database url and every database timeout are required, the timeouts positive")
 	}
 	if s.ScaleUpTimeoutSeconds >= MaxScaleUpTimeoutSeconds {
 		return fmt.Errorf("scheduler scale_up_timeout_seconds must be less than %d (PyTorch's default rendezvous timeout)", MaxScaleUpTimeoutSeconds)
