@@ -623,107 +623,40 @@ On macOS:
 
 ### Option B - Existing cluster or bare-metal node
 
-Register the cluster for your org first. `hl cluster add` prints the install command with the
-addresses from the control plane's settings: `services.public_api_url` and `runtimes.metrics_url`
-for the agents, and `runtimes.registry` and `runtimes.image_tag` for their images.
+[docs/install-cluster.md](docs/install-cluster.md) is the full guide: prerequisites, what is
+installed where, permissions, dry run, verify, upgrade and uninstall.
 
-```bash
-hl cluster add my-cluster
-```
+In short:
 
-Both addresses, and the object store's `data_store.endpoint`, must be reachable from inside the
-cluster. A control plane started with `make dev` or `make controlplane-up` names this host as
-local containers see it, which other machines cannot resolve, so a remote cluster needs settings
-with addresses it can reach.
+1. Register the cluster: **Compute Resources > Add cluster** in the UI, or
+   `hl cluster add my-cluster` (`--bare-metal` for one node).
+2. Run the command it shows. It asks for the runtime token shown beside it. Add
+   `--dry-run=server` (Kubernetes) or `--dry-run` (bare metal) at the end to preview.
+3. The cluster shows Connected within a minute (`hl cluster list`, `hl capacity`).
 
-**A Kubernetes cluster.** Needs `helm` 3.17 or newer, `kubectl` pointed at the cluster, and the
-images in a registry the nodes can pull from. `hl cluster add my-cluster`, or the UI, shows a
-command like this and the cluster's runtime token:
+A **Kubernetes cluster** gets the Helm release `hypothesisloop-cluster-agent` in the namespace
+`hypothesisloop`, and its jobs run in `hypothesisloop-jobs`. It needs Kubernetes 1.34 or newer
+and helm 3.17 or newer. `helm uninstall hypothesisloop-cluster-agent -n hypothesisloop` detaches
+it. A **bare-metal node** gets `/usr/local/bin/bare-agent`, `/etc/hypothesisloop/bare-agent.env`
+and the systemd unit `hypothesisloop-agent.service`, and needs docker or podman. `sudo bare-agent
+detach` then `sudo bare-agent uninstall` removes it.
 
-```bash
-sh -c '[ -t 0 ] && { printf "Runtime token: " >&2; trap "stty echo" EXIT; stty -echo; }; IFS= read -r token; [ -t 0 ] && echo >&2; chart="$1" version="$2"; shift 2; printf %s "$token" | helm upgrade --install hypothesisloop-cluster-agent "$chart" --version "$version" --namespace hypothesisloop --create-namespace --take-ownership --set-file runtimeToken=/dev/stdin "$@"' \
-  sh 'oci://registry.example.com/hypothesisloop/charts/hypothesisloop-cluster-agent' '0.1.0+the-tag-that-was-pushed' \
-  --set-string 'clusterName=my-cluster' \
-  --set-string 'apiURL=https://your-control-plane:8081' --set-string 'metricsURL=https://your-control-plane:8084' \
-  --set-string 'images.registry=registry.example.com/hypothesisloop' --set-string 'images.tag=the-tag-that-was-pushed'
-```
+The command carries the control plane's settings: `services.public_api_url` and
+`runtimes.metrics_url` for the agents, and `runtimes.registry` and `runtimes.image_tag` for
+their images. `make images REGISTRY=...` pushes the chart beside the images. All of them, and
+the object store's `data_store.endpoint`, must be reachable from inside the cluster. A control
+plane started with `make dev` or `make controlplane-up` names this host as local containers see
+it, which other machines cannot resolve, so a remote cluster needs settings with addresses it
+can reach.
 
-It asks for the token without echo and passes it to helm on standard input, so the token stays
-out of shell history and process arguments. The machine needs neither `hl` nor an API key.
-`make images REGISTRY=...` pushes the chart beside the images. Running the command again
-upgrades the release, and `--kube-context` picks a context other than the current one.
+From a checkout, `make cluster-agent-up` installs the chart from `runtime/k8s/infra/chart`
+(`runtime/k8s/infra/install.sh --help` lists its settings, `DRY_RUN=true` prints the plan), and
+`make cluster-agent-down` removes it. `BUILDER=true` also lets the cluster build experiment
+environments (`.hypothesisloop/Dockerfile`) with a rootless BuildKit sidecar, which reserves
+`builder.requests` (4 cores and 8 GiB) from the capacity it reports. Build the bare-metal agent
+with `go build -o bare-agent ./runtime/bare-metal/cmd/bare-agent` (needs Go and gcc) and run it
+in the foreground with `CLUSTER_NAME`, `API_URL` and `RUNTIME_TOKEN` set.
 
-The release installs a cluster-agent Deployment and a node-agent DaemonSet in the namespace
-`hypothesisloop`, and adds the namespace `hypothesisloop-jobs` where jobs run, the
-PriorityClasses `hypothesisloop-jobs-guaranteed` and `hypothesisloop-jobs-burst`, and the agents'
-permissions. The cluster-agent creates and deletes Jobs, pods, Services and
-ResourceClaimTemplates in `hypothesisloop-jobs` only, and elsewhere only reads nodes, pods and DRA
-devices and claims. It tolerates the `hypothesisloop.io/no-workload` taint and the control-plane
-role, so it needs one node free of other taints. Chart values
-(`runtime/k8s/infra/chart/values.yaml`):
-
-- `jobs.preemptLowerPriorityPods` (default `false`): `true` lets job pods evict lower-priority
-  pods of other workloads.
-- `nodeAgent.nodeSelector` (default empty): limits the node-agent to nodes with these labels.
-- `detachOnUninstall` (default `true`): see below.
-
-From a checkout, `make cluster-agent-up` installs the same chart from
-`runtime/k8s/infra/chart`:
-
-```bash
-RUNTIME_TOKEN="$(hl cluster token 'my-cluster' --org "$HL_ORG")" make cluster-agent-up CLUSTER='my-cluster' \
-  API_URL='https://your-control-plane:8081' METRICS_URL='https://your-control-plane:8084' \
-  REGISTRY='registry.example.com/hypothesisloop' TAG='the-tag-that-was-pushed' \
-  KUBECONFIG_PATH="$HOME/.kube/config" KUBE_CONTEXT='my-cluster'
-```
-
-Without `REGISTRY` and `TAG` it uses the local development registry and this checkout's tag.
-`BUILDER=true` also lets the cluster build experiment environments
-(`.hypothesisloop/Dockerfile`) with a rootless BuildKit sidecar, which reserves
-`builder.requests` (4 cores and 8 GiB) from the capacity it reports.
-
-To detach the cluster, run `make cluster-agent-down` (`helm uninstall hypothesisloop-cluster-agent
--n hypothesisloop`). A hook first removes the cluster from the platform, which requeues its jobs.
-If the platform cannot be reached the uninstall fails; `--no-hooks` forces it.
-`hl cluster remove my-cluster` detaches from the platform side: the agent stops its jobs and
-exits.
-
-**A bare-metal node.** Needs docker or podman, systemd, root, and glibc 2.17 or newer (amd64 or
-arm64). `hl cluster add my-node --bare-metal`, or the UI, shows the command to run on the node and
-the runtime token:
-
-```bash
-sudo sh -c 'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2"' \
-  sh 'my-node' 'https://your-control-plane:8081' 'registry.example.com/hypothesisloop/hypothesisloop-bare-agent:the-tag-that-was-pushed'
-```
-
-The command copies the agent binary out of its image and runs its installer. The installer asks
-for the token without echo, checks the node (engine, accelerators, storage) and that the platform
-accepts the token, then writes three files and starts the service:
-
-- `/usr/local/bin/bare-agent`, the agent.
-- `/etc/hypothesisloop/bare-agent.env`, its cluster name, API address and token, readable by
-  root only.
-- `/etc/systemd/system/hypothesisloop-agent.service`, started at boot and restarted on failure.
-  `journalctl -u hypothesisloop-agent -f` follows it.
-
-With podman and no docker it also enables `podman.socket`. Running a newer image's command
-upgrades the agent in place. The agent runs as root, since starting containers through the engine
-is root-equivalent anyway. It opens no port and only calls the platform. Job containers get only
-the devices and host directories their job names, and are never privileged.
-
-The node is its own cluster. To detach it, on the node:
-
-```bash
-sudo bare-agent detach      # removes the cluster from the platform, stops its jobs and the service
-sudo bare-agent uninstall   # removes the three files
-```
-
-From a checkout, build the agent with `go build -o bare-agent ./runtime/bare-metal/cmd/bare-agent`
-(needs Go and gcc) and run it in the foreground with `CLUSTER_NAME`, `API_URL` and
-`RUNTIME_TOKEN` set.
-
-`hl cluster list` shows the cluster connected within seconds, and `hl capacity` its accelerators.
 Repeat for each additional cluster.
 
 #### Clusters belong to an org
