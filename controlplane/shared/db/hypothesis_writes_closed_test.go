@@ -17,12 +17,13 @@ func TestAHypothesisWriteHoldsOffACloseAndNoneIsTakenAfterIt(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pe := "closedwrites-pe-" + uuid.New().String()[:8]
+	hypothesis := "closedwrites-hyp-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
 	events := NewEventsStore(pool, noHypothesisEvents{})
 	hypotheses := NewHypothesesStore(pool)
 	person := domain.Actor{Kind: domain.ActorUser, ID: "user-ada"}
 
-	if _, err := hypotheses.CreateHypothesisComment(ctx, "hyp-open", pe, "", person, "while open"); err != nil {
+	if _, err := hypotheses.CreateHypothesisComment(ctx, hypothesis, pe, "", person, "while open"); err != nil {
 		t.Fatalf("comment while open: got = %v, want nil", err)
 	}
 
@@ -55,10 +56,10 @@ func TestAHypothesisWriteHoldsOffACloseAndNoneIsTakenAfterIt(t *testing.T) {
 	if !errors.Is(err, ErrPlatformExperimentClosed) {
 		t.Errorf("a graph write after the close: got = %v, want %v", err, ErrPlatformExperimentClosed)
 	}
-	if _, err := hypotheses.CreateHypothesisComment(ctx, "hyp-open", pe, "", person, "after the close"); !errors.Is(err, ErrPlatformExperimentClosed) {
+	if _, err := hypotheses.CreateHypothesisComment(ctx, hypothesis, pe, "", person, "after the close"); !errors.Is(err, ErrPlatformExperimentClosed) {
 		t.Errorf("a comment after the close: got = %v, want %v", err, ErrPlatformExperimentClosed)
 	}
-	if count, err := hypotheses.CountCommentsByHypothesis(ctx, "hyp-open"); err != nil || count != 1 {
+	if count, err := hypotheses.CountCommentsByHypothesis(ctx, hypothesis); err != nil || count != 1 {
 		t.Errorf("comments kept: got = (%d, %v), want only the one made while open", count, err)
 	}
 }

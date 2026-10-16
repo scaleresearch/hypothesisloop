@@ -200,11 +200,13 @@ func TestTheSameChangeCommittedDoesReachAListener(t *testing.T) {
 	}
 }
 
-// cursorNow is the cursor a client would hold had it seen everything committed so far.
+// cursorNow is the cursor a client would hold had it seen everything committed so far. It is the
+// next transaction id, not the oldest one in flight: that one is cluster-wide, so a transaction of
+// another database or session holding it back would replay this test's earlier events too.
 func cursorNow(t *testing.T, pool *Pool) int64 {
 	t.Helper()
 	var cursor int64
-	if err := pool.pool.QueryRow(context.Background(), `SELECT pg_snapshot_xmin(pg_current_snapshot())::text::bigint`).Scan(&cursor); err != nil {
+	if err := pool.pool.QueryRow(context.Background(), `SELECT pg_snapshot_xmax(pg_current_snapshot())::text::bigint`).Scan(&cursor); err != nil {
 		t.Fatalf("current cursor: got = %v, want = nil", err)
 	}
 	return cursor
@@ -376,8 +378,14 @@ func TestReplayFromAnEventsCursorReturnsThatEventAndWhatCameAfterIt(t *testing.T
 	if err != nil {
 		t.Fatalf("replay from the second-to-last cursor: got = %v, want = nil", err)
 	}
-	if len(rest) != 2 || rest[0].Identity() != all[len(all)-2].Identity() || rest[1].Identity() != all[len(all)-1].Identity() {
-		t.Errorf("events from the second-to-last cursor: got = %+v, want = the last two of %+v", rest, all)
+	cursor := all[len(all)-2].Cursor
+	if len(rest) < 2 || rest[len(rest)-2].Identity() != all[len(all)-2].Identity() || rest[len(rest)-1].Identity() != all[len(all)-1].Identity() {
+		t.Errorf("events from the second-to-last cursor: got = %+v, want = ending in the last two of %+v", rest, all)
+	}
+	for _, e := range rest {
+		if e.Position < cursor {
+			t.Errorf("event %+v is from before the cursor %d", e, cursor)
+		}
 	}
 }
 
@@ -1605,7 +1613,7 @@ VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $
 	if got := inFlight(); got.Jobs != 2 || got.Running != 1 || got.Queued != 1 || got.IdleSince != nil || *got.MinutesWithoutJob(time.Now()) != 0 {
 		t.Fatalf("jobs in flight: in_flight %+v, want one running and one queued, and 0 minutes without", got)
 	}
-	exec(t, pool, `UPDATE experiments SET status = 'COMPLETED', run_reported_at = now() - interval '3 minutes' WHERE id = 'job-running'`)
+	exec(t, pool, `UPDATE experiments SET status = 'COMPLETED', run_reported_at = now() - interval '210 seconds' WHERE id = 'job-running'`)
 	exec(t, pool, `UPDATE experiments SET status = 'FAILED', created_at = now() - interval '30 minutes', run_reported_at = NULL WHERE id = 'job-queued'`)
 	if told := noticeIdle(t, store, peID, 10*time.Minute); told != 0 {
 		t.Fatalf("a job that ended 3 minutes ago, notice at 10: told %d, want no notice", told)
