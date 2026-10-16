@@ -33,8 +33,18 @@ describe('the pages that moved', () => {
     expect(moved('/settings')).toEqual({ path: '/console?to=settings' })
   })
 
+  it('send every bare section the nav names to the person\'s own project, none of them a 404', () => {
+    expect(moved('/experiments')).toEqual({ path: '/console?to=experiments' })
+    expect(moved('/hypotheses')).toEqual({ path: '/console?to=hypotheses' })
+    expect(moved('/jobs')).toEqual({ path: '/console?to=jobs' })
+    expect(moved('/clusters')).toEqual({ path: '/console?to=clusters' })
+    expect(moved('/statistics')).toEqual({ path: '/console?to=statistics' })
+    expect(moved('/settings')).toEqual({ path: '/console?to=settings' })
+    expect(moved('/experiments?project=prj_1&status=open')).toEqual({ path: '/projects/prj_1/experiments?status=open' })
+  })
+
   it('leave every current page alone', () => {
-    for (const path of ['/settings/repository', '/console', '/experiments/pe-1', '/projects/prj_1/jobs', '/orgs/o1/settings', '/jobs/j1/logs', '/']) {
+    for (const path of ['/settings/repository', '/console', '/experiments/pe-1', '/experiments/pe-1/hypotheses', '/clusters/c1', '/projects/prj_1/jobs', '/orgs/o1/settings', '/jobs/j1/logs', '/']) {
       expect(moved(path)).toBeNull()
     }
   })
