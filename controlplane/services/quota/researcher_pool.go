@@ -127,12 +127,14 @@ func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *do
 		}
 		late, err := s.lateShare(ctx, pe)
 		if err != nil {
-			return fmt.Errorf("platform_experiments.KeepResearchers: %w", err)
+			s.logger.Error("keep researchers: the share of a late researcher", zap.String("platform_experiment_id", pe.ID), zap.String("replaces", place.Replaces), zap.Error(err))
+			continue
 		}
 		late.Pool = true
 		id, err := domain.NewID(domain.AgentIDPrefix)
 		if err != nil {
-			return fmt.Errorf("platform_experiments.KeepResearchers: %w", err)
+			s.logger.Error("keep researchers: an agent id", zap.String("platform_experiment_id", pe.ID), zap.Error(err))
+			continue
 		}
 		signup.AgentID = id
 		agent := &domain.Agent{ID: id, CreatedAt: now}
@@ -142,7 +144,9 @@ func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *do
 			s.logger.Info("keep researchers: none added", zap.String("platform_experiment_id", pe.ID), zap.String("replaces", place.Replaces), zap.String("why", err.Error()))
 			return nil
 		case err != nil:
-			return fmt.Errorf("platform_experiments.KeepResearchers: add a researcher of %s on %s: %w", place.Entry.AgentType, place.Entry.Model, err)
+			s.logger.Error("keep researchers: add a researcher failed", zap.String("platform_experiment_id", pe.ID), zap.String("replaces", place.Replaces),
+				zap.String("agent_type", place.Entry.AgentType), zap.String("model", place.Entry.Model), zap.Error(err))
+			continue
 		}
 		s.logger.Info("researcher added to keep the pool", zap.String("platform_experiment_id", pe.ID), zap.String("agent_id", id),
 			zap.String("replaces", place.Replaces), zap.String("agent_type", place.Entry.AgentType), zap.String("model", place.Entry.Model))

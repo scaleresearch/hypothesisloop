@@ -1625,10 +1625,12 @@ func (s *PlatformExperimentsService) SweepEnded(ctx context.Context) error {
 
 func (s *PlatformExperimentsService) sweepExpired(ctx context.Context, statuses ...domain.PlatformExperimentStatus) error {
 	now := time.Now()
+	var failed error
 	for _, status := range statuses {
 		pes, err := s.store.ListPlatformExperimentsByStatus(ctx, status)
 		if err != nil {
-			return fmt.Errorf("list %s platform experiments: %w", status, err)
+			failed = errors.Join(failed, fmt.Errorf("list %s platform experiments: %w", status, err))
+			continue
 		}
 		for _, pe := range pes {
 			closesAt := pe.ClosesAt()
@@ -1644,7 +1646,7 @@ func (s *PlatformExperimentsService) sweepExpired(ctx context.Context, statuses 
 				zap.String("platform_experiment_id", pe.ID), zap.Time("closes_at", closesAt))
 		}
 	}
-	return nil
+	return failed
 }
 
 // SweepAutoStart starts every open platform experiment that is to be started: its baseline is
@@ -1720,6 +1722,7 @@ func (s *PlatformExperimentsService) tendBaseline(ctx context.Context, pe *domai
 		}
 	}
 	now := time.Now().UTC()
+	var failed error
 	for _, job := range jobs {
 		late := lateBaselineJob(job, pe.BaselineDueAt, now)
 		if late == "" {
@@ -1727,10 +1730,10 @@ func (s *PlatformExperimentsService) tendBaseline(ctx context.Context, pe *domai
 		}
 		reason := domain.HeldBaselineLate + ": " + late + ". " + strings.TrimSpace(baselineClock(pe.BaselineDueAt, now))
 		if err := s.store.MarkBaselineLate(ctx, job.ID, reason); err != nil {
-			return err
+			failed = errors.Join(failed, fmt.Errorf("job %s: %w", job.ID, err))
 		}
 	}
-	return nil
+	return failed
 }
 
 // TellCoordinators records, for every open or running platform experiment whose coordinator the
@@ -1740,10 +1743,12 @@ func (s *PlatformExperimentsService) tendBaseline(ctx context.Context, pe *domai
 // with no restart left, a baseline agent's that does. The record is that write, and one that
 // changes is announced as platform_experiment.status (db.TellCoordinator).
 func (s *PlatformExperimentsService) TellCoordinators(ctx context.Context) error {
+	var failed error
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpOpen, domain.PlatformExpRunning} {
 		pes, err := s.store.ListPlatformExperimentsByStatus(ctx, status)
 		if err != nil {
-			return fmt.Errorf("list %s platform experiments: %w", status, err)
+			failed = errors.Join(failed, fmt.Errorf("list %s platform experiments: %w", status, err))
+			continue
 		}
 		for _, pe := range pes {
 			if !pe.CoordinatorHosted {
@@ -1754,7 +1759,7 @@ func (s *PlatformExperimentsService) TellCoordinators(ctx context.Context) error
 			}
 		}
 	}
-	return nil
+	return failed
 }
 
 func (s *PlatformExperimentsService) tellCoordinator(ctx context.Context, pe *domain.PlatformExperiment) error {
