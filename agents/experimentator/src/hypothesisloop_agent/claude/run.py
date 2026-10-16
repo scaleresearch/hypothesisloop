@@ -489,10 +489,10 @@ def _shutdown_turn_s(setup: core.RunSetup) -> int:
     return _COORDINATOR_SHUTDOWN_TURN_S if config.coordinates(setup.cfg) else _SHUTDOWN_TURN_S
 
 
-def _shutdown_prompt(setup: core.RunSetup) -> str | None:
+async def _shutdown_prompt(setup: core.RunSetup) -> str | None:
     """The last turn's instruction, opened with why the machine stops as the platform has it now.
     None for an agent whose own action ended its run: it gets no last turn."""
-    cause = core.stop_cause(setup)
+    cause = await core.stop_cause(setup)
     if cause is None:
         return None
     if config.coordinates(setup.cfg):
@@ -637,7 +637,7 @@ async def _store_session(setup: core.RunSetup) -> None:
     transcripts = {name for session_id in (_load_resume_id(setup), _live_session_id) for name in _transcript_files(session_id)}
     async with _store_lock:
         try:
-            await asyncio.to_thread(_sessions.save, files, sorted(transcripts))
+            await _sessions.save(files, sorted(transcripts))
         except session.NotStored as why:
             _not_stored(str(why))
         else:
@@ -729,7 +729,7 @@ async def _turn_start(setup: core.RunSetup, watch_env: dict[str, str], prompt: s
     place a turn's context is put together: a baseline agent's clock, and the situation for every
     role in a run, which a planner has none of yet. A tool call mid-turn is handed its updates
     alone."""
-    clock = await asyncio.to_thread(core.baseline_clock, setup)
+    clock = await core.baseline_clock(setup)
     situation = "" if config.plans(setup.cfg) else await updates.situation(watch_env)
     return "\n\n".join(part for part in (prompt, clock, situation) if part)
 
@@ -743,27 +743,27 @@ async def _told(setup: core.RunSetup, events: list[dict]) -> str:
     rest = [e for e in events if e["kind"] != updates.REVISION]
     parts = [updates.message(rest, setup.cfg.agent_id)] if rest else []
     if len(rest) < len(events):
-        draft = await asyncio.to_thread(core.revising, setup)
+        draft = await core.revising(setup)
         if draft:
             parts.insert(0, _revision_prompt(setup, draft))
     return "\n\n".join(parts)
 
 
-def _opening(setup: core.RunSetup, resume_id: str | None, initial_prompt: str | None) -> str:
+async def _opening(setup: core.RunSetup, resume_id: str | None, initial_prompt: str | None) -> str:
     """What opens a connection: for a resumed session the revision that brought a planner back,
     else a handoff, that it goes on, or for a session that starts fresh what its role reads first:
     a planner's opening reads, a baseline agent's goal with the planner's map of the repository.
     A wait for the model provider's limit and a new machine are said before it."""
-    if resume_id and not initial_prompt and (draft := core.revising(setup)):
+    if resume_id and not initial_prompt and (draft := await core.revising(setup)):
         return _revision_prompt(setup, draft)
     if initial_prompt:
         body = initial_prompt
     elif resume_id:
         body = "Continue where you left off."
     elif config.measures_baseline(setup.cfg):
-        body = seed.baseline(core.repo_map(setup))
+        body = seed.baseline(await core.repo_map(setup))
     elif config.plans(setup.cfg):
-        body = "\n\n".join(part for part in ("Begin.", seed.planner(setup.workdir)) if part)
+        body = "\n\n".join(part for part in ("Begin.", await asyncio.to_thread(seed.planner, setup.workdir)) if part)
     else:
         body = "Begin."
     waited = _LIMIT_WAITED.format(since=time.strftime("%Y-%m-%d %H:%M", time.gmtime(_limit_since))) if _limit_since else ""
@@ -779,12 +779,12 @@ def _settled_on_this_machine() -> None:
     _limit_since = None
 
 
-def _restore_session(setup: core.RunSetup) -> None:
+async def _restore_session(setup: core.RunSetup) -> None:
     """On a machine that holds no session of its own, takes the one the platform keeps."""
     global _on_new_machine
     if _sessions is None or _load_resume_id(setup) or _load_handoff(setup):
         return
-    if _sessions.restore():
+    if await _sessions.restore():
         _on_new_machine = True
         live = os.path.join(setup.statedir, _LIVE_SESSION_FILE)
         if not _load_resume_id(setup) and os.path.exists(live):
@@ -800,7 +800,7 @@ async def _interrupt_on_stop(client, setup: core.RunSetup, stopped) -> None:
     action ended its run is its last and is interrupted only if it goes on past _shutdown_turn_s."""
     while not stopped():
         await asyncio.sleep(1)
-    if core.stop_cause(setup) is None:
+    if await core.stop_cause(setup) is None:
         limit = _shutdown_turn_s(setup)
         log.info("stop requested after the agent ended its own run: its turn has %ss to end by itself", limit)
         await asyncio.sleep(limit)
@@ -813,7 +813,7 @@ async def _interrupt_on_stop(client, setup: core.RunSetup, stopped) -> None:
 async def _last_turn(client, setup: core.RunSetup, watch_env: dict[str, str], handing: asyncio.Lock) -> None:
     """The shutdown turn, opened with whatever finished since the last delivery. An agent whose
     own action ended its run gets none."""
-    prompt = _shutdown_prompt(setup)
+    prompt = await _shutdown_prompt(setup)
     if prompt is None:
         log.info("stopping: the agent ended its own run, no last turn")
         return
@@ -922,13 +922,13 @@ _PROMPT_REPLACED = ("The instructions you run with changed: the system prompt yo
                     "and it replaces the one this session ran with so far.")
 
 
-def _connection_instructions(setup: core.RunSetup, resume_id: str | None) -> tuple[instructions.Instructions, bool]:
+async def _connection_instructions(setup: core.RunSetup, resume_id: str | None) -> tuple[instructions.Instructions, bool]:
     """The instructions a connection starts with, read from the platform, and whether they replace
     the system prompt of the session it resumes. A resumed session whose recorded prompt alone
     differs is resumed with the new one; otherwise it is run with the instructions it was started
     with and the ones read now are applied at its first turn boundary."""
     global _instructions_told
-    newest = instructions.fetch(setup.client, setup.cfg, setup.commands, setup.workdir)
+    newest = await instructions.fetch(setup.client, setup.cfg, setup.commands, setup.workdir)
     kept = instructions.load(setup.statedir) if resume_id else None
     replaced = bool(kept and kept.needs_new_prompt(newest) and not kept.needs_new_session(newest) and _records_prompt(resume_id))
     if replaced:
@@ -964,7 +964,7 @@ async def _apply_instructions(client, setup: core.RunSetup, background: dict[str
     if not _instructions_told:
         return False
     try:
-        newest = await asyncio.to_thread(instructions.fetch, setup.client, setup.cfg, setup.commands, setup.workdir)
+        newest = await instructions.fetch(setup.client, setup.cfg, setup.commands, setup.workdir)
     except api_client.APIError as e:
         log.warning("the changed instructions were not read (%s): reading them at the next turn boundary", e)
         return False
@@ -1144,7 +1144,7 @@ async def _run_one_session(setup: core.RunSetup, resume_id: str | None,
     global _running
     cfg = setup.cfg
     try:
-        _running, prompt_replaced = await asyncio.to_thread(_connection_instructions, setup, resume_id)
+        _running, prompt_replaced = await _connection_instructions(setup, resume_id)
     except api_client.APIError as e:
         log.warning("the instructions were not read (%s): connecting again after the backoff", e)
         return False
@@ -1195,7 +1195,7 @@ async def _run_one_session(setup: core.RunSetup, resume_id: str | None,
     async def over() -> bool:
         """Whether the run loop stops here, after the last turn when there is a platform to file
         with: a run it ended and a machine told to stop get one, a refused token gets none. The one place a last turn is given."""
-        lost = core.run_over(setup)
+        lost = await core.run_over(setup)
         if not lost and not stopped():
             return False
         log.info("stopping: %s", lost or "received signal")
@@ -1204,7 +1204,7 @@ async def _run_one_session(setup: core.RunSetup, resume_id: str | None,
             await _store_session(setup)
         return True
 
-    opening = await asyncio.to_thread(_opening, setup, resume_id, initial_prompt)
+    opening = await _opening(setup, resume_id, initial_prompt)
     opening = await _turn_start(setup, watch_env, _PROMPT_REPLACED + "\n\n" + opening if prompt_replaced else opening)
     connecting = time.monotonic()
     told_nothing = False
@@ -1473,7 +1473,7 @@ async def _run_until_stopped(setup: core.RunSetup, stop_flag: list) -> None:
     # must pause and resume, never permanently end the run, since running out of quota is an
     # everyday occurrence on a multi-day competition, not an exceptional one.
     while True:
-        reason = core.stop_reason(setup, stop_flag)
+        reason = await core.stop_reason(setup, stop_flag)
         if reason:
             log.info("stopping: %s", reason)
             return
@@ -1494,7 +1494,7 @@ async def _run_until_stopped(setup: core.RunSetup, stop_flag: list) -> None:
         # answer or an agent's finish no turn follows to store it.
         await _store_session(setup)
         _delete_retired_transcripts()
-        if rotated or core.stop_reason(setup, stop_flag):
+        if rotated or await core.stop_reason(setup, stop_flag):
             continue
 
         # Whatever ended the session, a refused account is waited out until its stated reset.
@@ -1507,21 +1507,28 @@ async def _run_until_stopped(setup: core.RunSetup, stop_flag: list) -> None:
             backoff_s = min(backoff_s * 2, _RECONNECT_BACKOFF_MAX_S)
 
 
-def main() -> None:
+async def _main() -> None:
     global _sessions
     started = time.monotonic()
-    setup = core.prepare()
-    core.start_staging(setup)
-    _sessions = session.Sessions(setup.client, setup.cfg, setup.statedir, _model_home())
-    _restore_session(setup)
-    # With the line the CLI connects with, this says where a slow start went: what precedes
-    # both is the machine, its image and the interpreter.
-    log.info(
-        "llm_agent %s starting (claude): pe=%s role=%s, prepared in %.1fs",
-        setup.cfg.agent_id, setup.cfg.platform_experiment_id, setup.cfg.role, time.monotonic() - started,
-    )
-    asyncio.run(_run(setup))
-    log.info("llm_agent %s stopped", setup.cfg.agent_id)
+    setup = await core.prepare()
+    try:
+        core.start_staging(setup)
+        _sessions = session.Sessions(setup.client, setup.cfg, setup.statedir, _model_home())
+        await _restore_session(setup)
+        # With the line the CLI connects with, this says where a slow start went: what precedes
+        # both is the machine, its image and the interpreter.
+        log.info(
+            "llm_agent %s starting (claude): pe=%s role=%s, prepared in %.1fs",
+            setup.cfg.agent_id, setup.cfg.platform_experiment_id, setup.cfg.role, time.monotonic() - started,
+        )
+        await _run(setup)
+        log.info("llm_agent %s stopped", setup.cfg.agent_id)
+    finally:
+        await setup.client.aclose()
+
+
+def main() -> None:
+    asyncio.run(_main())
 
 
 if __name__ == "__main__":

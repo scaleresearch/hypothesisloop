@@ -56,11 +56,11 @@ def path(cfg: config.Config) -> str:
     return f"/platform-experiments/{pe}/agents/{cfg.agent_id}/instructions"
 
 
-def read(client: api_client.PlatformClient, cfg: config.Config) -> dict:
+async def read(client: api_client.PlatformClient, cfg: config.Config) -> dict:
     """The instructions as the platform answers them. An agent the platform has none for ends the
     harness: it has nothing to run with."""
     try:
-        return client.get_json(path(cfg))
+        return await client.get_json(path(cfg))
     except api_client.APIError as e:
         if e.status not in (401, 403, 404):
             raise
@@ -86,8 +86,8 @@ def complete(answer: dict, cfg: config.Config, commands: str, workdir: str) -> I
     return instructions
 
 
-def fetch(client: api_client.PlatformClient, cfg: config.Config, commands: str, workdir: str) -> Instructions:
-    return complete(read(client, cfg), cfg, commands, workdir)
+async def fetch(client: api_client.PlatformClient, cfg: config.Config, commands: str, workdir: str) -> Instructions:
+    return complete(await read(client, cfg), cfg, commands, workdir)
 
 
 def addressed(event: dict, cfg: config.Config) -> bool:

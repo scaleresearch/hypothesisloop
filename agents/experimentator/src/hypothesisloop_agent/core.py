@@ -119,7 +119,7 @@ def clone_workspace(repository_url: str, workdir: str) -> None:
                     (done.stderr or done.stdout).strip()[-500:])
 
 
-def prepare() -> RunSetup:
+async def prepare() -> RunSetup:
     """Shared startup: logging, config, the agent's Python, workdir, platform client, and the
     instructions it runs with, read once here for its role and to fail before the first
     connection on any it could not run."""
@@ -130,11 +130,11 @@ def prepare() -> RunSetup:
 
     client = api_client.PlatformClient(cfg.api_url, cfg.token)
     if config.coordinates(cfg):
-        platform_experiment = client.require_coordinated(cfg.platform_experiment_id)
+        platform_experiment = await client.require_coordinated(cfg.platform_experiment_id)
     else:
-        client.require_joined(cfg.agent_id, cfg.platform_experiment_id)
-        platform_experiment = client.get_platform_experiment(cfg.platform_experiment_id)
-    answer = instructions.read(client, cfg)
+        await client.require_joined(cfg.agent_id, cfg.platform_experiment_id)
+        platform_experiment = await client.get_platform_experiment(cfg.platform_experiment_id)
+    answer = await instructions.read(client, cfg)
     cfg.run_as(answer.get("role", ""))
 
     workdir = os.path.abspath(config.required("AGENT_WORKDIR", "the directory the agent clones into and works in"))
@@ -153,32 +153,32 @@ def prepare() -> RunSetup:
     git_through_platform(repository_url, git_url)
 
     if not config.plans(cfg) and not config.coordinates(cfg):
-        clone_workspace(repository_url, workdir)
-    commands = prompt.hl_commands(cfg)
+        await asyncio.to_thread(clone_workspace, repository_url, workdir)
+    commands = await asyncio.to_thread(prompt.hl_commands, cfg)
     instructions.complete(answer, cfg, commands, workdir)
     return RunSetup(cfg=cfg, client=client, commands=commands, workdir=workdir, statedir=statedir)
 
 
-def revising(setup: RunSetup) -> dict | None:
+async def revising(setup: RunSetup) -> dict | None:
     """The draft of a planner that has a revision to answer, None for anyone else and for a draft
     with none: the platform reads such a draft as revising, and as proposed or declined once the
     last revision is answered."""
     if not config.plans(setup.cfg):
         return None
-    draft = setup.client.get_platform_experiment(setup.cfg.platform_experiment_id)
+    draft = await setup.client.get_platform_experiment(setup.cfg.platform_experiment_id)
     if draft.get("status_reason", {}).get("reason") != "revising":
         return None
     return draft
 
 
-def baseline_clock(setup: RunSetup) -> str:
+async def baseline_clock(setup: RunSetup) -> str:
     """What a baseline agent is told of its deadline with every prompt: baseline_due_at and the
     minutes left until it, as the platform has it now. "" for any other agent and once the
     experiment runs, when it has no such deadline."""
     if not config.measures_baseline(setup.cfg):
         return ""
     try:
-        due = setup.client.get_platform_experiment(setup.cfg.platform_experiment_id).get("baseline_due_at")
+        due = (await setup.client.get_platform_experiment(setup.cfg.platform_experiment_id)).get("baseline_due_at")
     except api_client.APIError as e:
         log.warning("could not read baseline_due_at (%s)", e)
         return "baseline_due_at could not be read: the platform did not answer."
@@ -202,7 +202,7 @@ async def until_accepted(setup: RunSetup, stop_flag: list, poll_s: float = ACCEP
     waiting = False
     while not stop_flag[0]:
         try:
-            status = (await asyncio.to_thread(setup.client.get_platform_experiment, setup.cfg.platform_experiment_id)).get("status")
+            status = (await setup.client.get_platform_experiment(setup.cfg.platform_experiment_id)).get("status")
         except api_client.APIError as e:
             log.warning("could not read whether the draft was accepted (%s)", e)
             status = None
@@ -215,11 +215,11 @@ async def until_accepted(setup: RunSetup, stop_flag: list, poll_s: float = ACCEP
         await asyncio.sleep(poll_s)
 
 
-def repo_map(setup: RunSetup) -> str:
+async def repo_map(setup: RunSetup) -> str:
     """What the planner recorded of the repository, "" where it recorded nothing or it could not
     be read."""
     try:
-        proposal = setup.client.get_platform_experiment(setup.cfg.platform_experiment_id).get("proposal") or {}
+        proposal = (await setup.client.get_platform_experiment(setup.cfg.platform_experiment_id)).get("proposal") or {}
     except api_client.APIError as e:
         log.warning("could not read the planner's map of the repository (%s)", e)
         return ""
@@ -239,20 +239,21 @@ def _closer(actor: dict | None) -> str:
     return "the platform does not say who closed it"
 
 
-def run_ended(setup: RunSetup) -> str:
+async def run_ended(setup: RunSetup) -> str:
     """Why the platform ended this agent's run, "" while it goes on. The platform decides it, and
     tells a hosted machine to stop for this and for nothing else: closed, cut, finished, or
     planned for a planner whose answer to its draft is stored. A coordinator's run ends when its
     platform experiment closes."""
-    return _run_end(setup)[0]
+    return (await _run_end(setup))[0]
 
 
-def _run_end(setup: RunSetup) -> tuple[str, str]:
+async def _run_end(setup: RunSetup) -> tuple[str, str]:
     """run_ended, and for a cut its cut_reason: "" for a cut at a stage boundary."""
     cfg = setup.cfg
     if config.coordinates(cfg):
-        return "closed" if setup.client.get_platform_experiment(cfg.platform_experiment_id)["status"] == "closed" else "", ""
-    signup = setup.client.get_signup(cfg.agent_id, cfg.platform_experiment_id)
+        pe = await setup.client.get_platform_experiment(cfg.platform_experiment_id)
+        return "closed" if pe["status"] == "closed" else "", ""
+    signup = await setup.client.get_signup(cfg.agent_id, cfg.platform_experiment_id)
     return signup.get("ended", ""), signup.get("cut_reason", "")
 
 
@@ -265,9 +266,9 @@ def _cut_because(reason: str) -> str:
     return f"You are being stopped because you were cut from the platform experiment, for a reason the platform names {reason}."
 
 
-def _closed_because(setup: RunSetup) -> str | None:
+async def _closed_because(setup: RunSetup) -> str | None:
     cfg = setup.cfg
-    pe = setup.client.get_platform_experiment(cfg.platform_experiment_id)
+    pe = await setup.client.get_platform_experiment(cfg.platform_experiment_id)
     closed_at = pe["closed_at"]
     if pe.get("close_reason") == "end_time_reached":
         return f"You are being stopped because the platform experiment reached its end time and the platform closed it at {closed_at}."
@@ -287,16 +288,16 @@ def _closed_because(setup: RunSetup) -> str | None:
     return f"You are being stopped because the platform experiment closed at {closed_at}. The platform recorded no reason."
 
 
-def stop_cause(setup: RunSetup) -> str | None:
+async def stop_cause(setup: RunSetup) -> str | None:
     """The sentence that tells the agent why its machine is being stopped, as the platform has it
     at this moment. None when the agent's own action ended its run: a researcher that finished, a
     planner whose answer is stored, a coordinator that closed its platform experiment. It is told
     nothing and stops by itself. A cause the platform does not give is said to be unknown, never
     inferred."""
     try:
-        ended, cut_reason = _run_end(setup)
+        ended, cut_reason = await _run_end(setup)
         if ended == "closed":
-            return _closed_because(setup)
+            return await _closed_because(setup)
         if ended == "cut":
             return _cut_because(cut_reason)
         return {
@@ -313,14 +314,14 @@ def stop_cause(setup: RunSetup) -> str | None:
 _RUN_CHECK_INTERVAL_S = 30
 
 
-def run_over(setup: RunSetup) -> str | None:
+async def run_over(setup: RunSetup) -> str | None:
     """Why this process has no run on the platform to work in, None while it has one: the one
     place the harness asks, and so what starts and ends the outage clock (outage.py). The
     platform ended the run, or it refuses the token, which it does once the wind-down after the
     end has passed. A platform that does not answer is waited out."""
     try:
         # A planner's run ends with its answer and a revision starts it again with its session.
-        ended = run_ended(setup)
+        ended = await run_ended(setup)
     except api_client.APIError as e:
         if e.status == 401:
             return f"the platform refuses this token, so its run is over ({e.body.strip()[:200]})"
@@ -345,7 +346,7 @@ async def until_lost(setup: RunSetup, stop_flag: list) -> str:
     A run the platform ended asks for the stop a signal asks for: its agent may still have a last
     turn to file what it owes, and only the wind-down its token has left to take it in."""
     while True:
-        reason = await asyncio.to_thread(run_over, setup)
+        reason = await run_over(setup)
         if lost_platform(reason):
             return reason
         if reason and not stop_flag[0]:
@@ -370,6 +371,6 @@ async def run_until_lost(setup: RunSetup, work, stop_flag: list) -> None:
         lost.cancel()
 
 
-def stop_reason(setup: RunSetup, stop_flag: list) -> str | None:
+async def stop_reason(setup: RunSetup, stop_flag: list) -> str | None:
     """Why the run loop stops, None while it goes on: run_over, or a signal."""
-    return run_over(setup) or ("received signal" if stop_flag[0] else None)
+    return await run_over(setup) or ("received signal" if stop_flag[0] else None)

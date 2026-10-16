@@ -275,6 +275,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "claude-agent-sdk" },
+    { name = "httpx" },
 ]
 
 [package.dev-dependencies]
@@ -283,7 +284,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "claude-agent-sdk", specifier = ">=0.2.165" }]
+requires-dist = [
+    { name = "claude-agent-sdk", specifier = ">=0.2.165" },
+    { name = "httpx", specifier = ">=0.28" },
+]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.0" }]

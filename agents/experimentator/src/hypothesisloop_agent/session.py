@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import gzip
 import hashlib
 import io
@@ -36,9 +37,9 @@ class Sessions:
         self._roots = {_STATE: Path(statedir), _MODEL_HOME: Path(model_home)}
         self._stored: str | None = None
 
-    def restore(self) -> bool:
+    async def restore(self) -> bool:
         """Puts the stored session's files in place. False when the platform holds none."""
-        snapshot = self._read()
+        snapshot = await self._read()
         if snapshot is None:
             return False
         with tarfile.open(fileobj=io.BytesIO(snapshot), mode="r:gz") as archive:
@@ -54,26 +55,26 @@ class Sessions:
         log.info("session restored from the platform (%d bytes)", len(snapshot))
         return True
 
-    def _read(self) -> bytes | None:
+    async def _read(self) -> bytes | None:
         # Starting without a session that exists would throw the agent's work so far away, so a
-        # read that fails, after the client has asked again, ends the harness.
+        # read that fails ends the harness.
         try:
-            return self._client.get_bytes(self._path)
+            return await self._client.get_bytes(self._path)
         except api_client.APIError as e:
             raise SystemExit(f"agent: could not read the stored session: {e}") from None
 
-    def save(self, state_files: list[str], model_home_files: list[str]) -> bool:
+    async def save(self, state_files: list[str], model_home_files: list[str]) -> bool:
         """Stores the named files, relative to their roots, when they differ from what is stored.
         True when something was sent. Raises NotStored for a session the platform does not take
         or could not be sent."""
-        snapshot = self._pack({_STATE: state_files, _MODEL_HOME: model_home_files})
+        snapshot = await asyncio.to_thread(self._pack, {_STATE: state_files, _MODEL_HOME: model_home_files})
         digest = hashlib.sha256(snapshot).hexdigest()
         if digest == self._stored:
             return False
         if len(snapshot) > MAX_BYTES:
             raise NotStored(f"it is {len(snapshot) / (1 << 20):.1f} MiB packed and the platform stores {MAX_BYTES >> 20} MiB")
         try:
-            self._client.put_bytes(self._path, snapshot)
+            await self._client.put_bytes(self._path, snapshot)
         except api_client.APIError as e:
             log.warning("could not store the session (%s)", e)
             raise NotStored(f"the platform answered HTTP {e.status}" if e.status else "the platform could not be reached") from None
