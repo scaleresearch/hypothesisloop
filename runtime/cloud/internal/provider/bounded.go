@@ -76,7 +76,7 @@ func (b boundedWarmer) StartWarm(ctx context.Context, id string, spec Spec) erro
 
 type boundedMarket struct{ market Market }
 
-func (b boundedMarket) Rentable(ctx context.Context, spec Spec, atMost int) (int, error) {
+func (b boundedMarket) Rentable(ctx context.Context, spec Spec, atMost int) (Supply, error) {
 	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
 	defer cancel()
 	return b.market.Rentable(ctx, spec, atMost)

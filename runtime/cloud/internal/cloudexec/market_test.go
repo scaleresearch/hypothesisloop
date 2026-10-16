@@ -1,8 +1,11 @@
 package cloudexec
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -19,16 +22,16 @@ func TestFreeCapacityIsWhatTheVendorHasOnOfferWithinTheShapes(t *testing.T) {
 	ctx := context.Background()
 	var asked []provider.Spec
 	onOffer := map[string]int{h100: 1, "": 1}
-	p.Market = func(spec provider.Spec) int {
+	p.Market = func(spec provider.Spec) provider.Supply {
 		asked = append(asked, spec)
-		return onOffer[spec.AcceleratorType]
+		return supplyOf(onOffer[spec.AcceleratorType])
 	}
 
 	available, total, byNode, labels, err := e.GetLiveAcceleratorCapacitySnapshot(ctx)
 	if err != nil || available[h100] != 1 || total[h100] != 2 || byNode["h100-0"][h100] != 1 || byNode["h100-1"][h100] != 0 {
 		t.Fatalf("available %v of %v, by node %v, %v", available, total, byNode, err)
 	}
-	if labels["h100-0"][domain.NodeSlotNoOfferLabel] != "" || labels["h100-1"][domain.NodeSlotNoOfferLabel] != "true" || labels["cpu-0"][domain.NodeSlotNoOfferLabel] != "" {
+	if labels["h100-0"][domain.NodeSlotNoOfferLabel] != "" || labels["h100-1"][domain.NodeSlotNoOfferLabel] != "shape h100: the provider has fewer machines on offer for it than max_instances, and the shape's lower slots take them" || labels["cpu-0"][domain.NodeSlotNoOfferLabel] != "" {
 		t.Fatalf("labels %v, want only h100-1 without an offer", labels)
 	}
 	want := provider.Spec{AcceleratorType: h100, AcceleratorCount: 1, CPUMillis: 8000, MemoryBytes: 32 * gib, DiskBytes: 100 * gib}
@@ -51,8 +54,64 @@ func TestFreeCapacityIsWhatTheVendorHasOnOfferWithinTheShapes(t *testing.T) {
 	mustCreate(t, e, job(t, "exp-1", 0, 1))
 	onOffer[h100] = 0
 	available, _, _, labels, err = e.GetLiveAcceleratorCapacitySnapshot(ctx)
-	if err != nil || available[h100] != 0 || labels["h100-0"][domain.NodeSlotNoOfferLabel] != "" || labels["h100-1"][domain.NodeSlotNoOfferLabel] != "true" {
+	if err != nil || available[h100] != 0 || labels["h100-0"][domain.NodeSlotNoOfferLabel] != "" || labels["h100-1"][domain.NodeSlotNoOfferLabel] != "shape h100: every machine on offer for it when last counted is rented by this cluster since" {
 		t.Fatalf("one rented and none on offer: available %v, labels %v, %v", available, labels, err)
+	}
+}
+
+func supplyOf(count int) provider.Supply {
+	if count == 0 {
+		return provider.Supply{Why: "no offer passes the filters", Detail: "4 offers of the size; left out by price 4"}
+	}
+	return provider.Supply{Count: count}
+}
+
+// A shape the market has nothing for says why on every slot of it no instance holds, in the
+// market's words, and the reason is logged once per count and not once per pass.
+func TestAShapeWithNothingToRentSaysWhyOnItsSlotsAndInTheLog(t *testing.T) {
+	e, p := newTestExecutor(t)
+	ctx := context.Background()
+	clock := time.Now()
+	e.now = func() time.Time { return clock }
+	p.Market = func(spec provider.Spec) provider.Supply {
+		if spec.AcceleratorCount == 0 {
+			return provider.Supply{Count: 1}
+		}
+		return supplyOf(0)
+	}
+	var logged bytes.Buffer
+	log.SetOutput(&logged)
+	defer log.SetOutput(os.Stderr)
+
+	for range 3 {
+		pass, err := e.ForPass(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _, _, labels, err := pass.GetLiveAcceleratorCapacitySnapshot(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, slot := range []string{"h100-0", "h100-1"} {
+			if got := labels[slot][domain.NodeSlotNoOfferLabel]; got != "shape h100: no offer passes the filters" {
+				t.Fatalf("slot %s says %q", slot, got)
+			}
+		}
+		if got := labels["cpu-0"][domain.NodeSlotNoOfferLabel]; got != "" {
+			t.Fatalf("the cpu slot, which has an offer, says %q", got)
+		}
+		clock = clock.Add(10 * time.Second)
+	}
+	lines := strings.Count(logged.String(), "shape h100 has nothing to rent: no offer passes the filters (4 offers of the size; left out by price 4)")
+	if lines != 1 || strings.Contains(logged.String(), "shape cpu ") {
+		t.Fatalf("log:\n%s\nwant the h100 shape's reason once", logged.String())
+	}
+	clock = clock.Add(3 * time.Minute)
+	if _, _, _, _, err := e.GetLiveAcceleratorCapacitySnapshot(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Count(logged.String(), "shape h100 has nothing to rent"); lines != 2 {
+		t.Fatalf("log after an offer wait:\n%s\nwant the reason again", logged.String())
 	}
 }
 
@@ -65,7 +124,7 @@ func TestTheMarketIsAskedOncePerShapeAndOfferWaitAndNotOncePerPass(t *testing.T)
 	clock := time.Now()
 	e.now = func() time.Time { return clock }
 	onOffer := 2
-	p.Market = func(provider.Spec) int { return onOffer }
+	p.Market = func(provider.Spec) provider.Supply { return supplyOf(onOffer) }
 	free := func() int64 {
 		t.Helper()
 		pass, err := e.ForPass(ctx)

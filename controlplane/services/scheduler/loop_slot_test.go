@@ -56,11 +56,14 @@ func (c *slotFixture) take(node string) *slotFixture {
 	return c
 }
 
+// noOfferWhy is what a runtime says of a slot it has no machine to rent for.
+const noOfferWhy = "shape h100: no vast offer of its size passes regions"
+
 // offerless is what the runtime reports for a slot no instance holds and its vendor has no
 // machine to rent for: nothing free, and the label that says why.
 func (c *slotFixture) offerless(node string) *slotFixture {
 	holdSlot(c.accelerators, c.free, c.labels, node)
-	c.labels[node][domain.NodeSlotNoOfferLabel] = "true"
+	c.labels[node][domain.NodeSlotNoOfferLabel] = noOfferWhy
 	return c
 }
 
@@ -838,7 +841,7 @@ func TestAJobBeyondWhatTheVendorHasOnOfferWaitsSayingSo(t *testing.T) {
 			t.Fatal(err)
 		}
 		reason := next.reasons[waiting.ID]
-		if len(next.written) != 0 || len(next.requeued) != 0 || !strings.HasPrefix(reason, domain.NotAdmittedCapacityUnavailable+": ") || !strings.Contains(reason, "no machine to rent") {
+		if len(next.written) != 0 || len(next.requeued) != 0 || !strings.HasPrefix(reason, domain.NotAdmittedCapacityUnavailable+": ") || !strings.Contains(reason, "no machine to rent for it now ("+noOfferWhy+")") {
 			t.Fatalf("%s: admitted %d, reason %q, want the job waiting for a machine on offer", tier, len(next.written), reason)
 		}
 	}

@@ -201,7 +201,10 @@ job meant for it names that image; job_image_carries says what is installed in i
 job needs goes into the environment, .hypothesisloop/Dockerfile, and installs nothing at runtime. A line with
 on_demand is of a cluster that rents a machine when a job needs one: nothing stands by, total is
 the most it rents at once and available is what it may still rent, so a job there starts after
-its machine is rented.
+its machine is rented. A line with no_offer is of such a cluster that has no machine to rent now
+for some of its slots, and says why in its runtime's words, such as which of its provider's
+filters leave out every offer of a shape: a job that needs such a slot waits until one comes on
+offer.
 
 The clusters are the ones one org's jobs can be placed on: its own and the shared ones. An API
 key and an agent token have one org and need no --org. A person in several orgs names one.`, stderr)
@@ -219,6 +222,7 @@ key and an agent token have one org and need no --org. A person in several orgs 
 			JobImage     string            `json:"job_image"`
 			Carries      string            `json:"job_image_carries"`
 			OnDemand     bool              `json:"on_demand"`
+			NoOffer      []string          `json:"no_offer"`
 			Resources    json.RawMessage   `json:"resources"`
 			PerNode      json.RawMessage   `json:"per_node"`
 			Accelerators []json.RawMessage `json:"accelerators"`
@@ -257,6 +261,11 @@ key and an agent token have one org and need no --org. A person in several orgs 
 				return fail(stderr, err)
 			}
 			if err := printPrefixed(stdout, a, prefix...); err != nil {
+				return fail(stderr, err)
+			}
+		}
+		for _, why := range cl.NoOffer {
+			if err := printPrefixed(stdout, json.RawMessage("{}"), append(prefix, "no_offer", why)...); err != nil {
 				return fail(stderr, err)
 			}
 		}

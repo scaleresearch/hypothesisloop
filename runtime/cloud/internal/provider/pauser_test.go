@@ -84,9 +84,9 @@ func TestACapabilityIsFoundOnTheProviderAndSurvivesTheBoundingWrapper(t *testing
 			}
 		}
 	}
-	pausing.Market = func(provider.Spec) int { return 3 }
-	if count, err := provider.Bounded(pausing).(provider.Market).Rentable(context.Background(), provider.Spec{}, 5); err != nil || count != 3 {
-		t.Fatalf("Rentable through the wrapper = %d, %v", count, err)
+	pausing.Market = func(provider.Spec) provider.Supply { return provider.Supply{Count: 3} }
+	if supply, err := provider.Bounded(pausing).(provider.Market).Rentable(context.Background(), provider.Spec{}, 5); err != nil || supply.Count != 3 {
+		t.Fatalf("Rentable through the wrapper = %+v, %v", supply, err)
 	}
 
 	ctx := context.Background()

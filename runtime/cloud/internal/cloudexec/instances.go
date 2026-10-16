@@ -81,7 +81,7 @@ type view struct {
 	unnamed   []instance
 	outputs   map[string]output
 	// rentable is Executor.rentable's answer for this view, nil until it is asked.
-	rentable map[string]int
+	rentable map[string]onOffer
 	// unstarting are the hosts of the instances this read found overdue. The pass destroys those
 	// instances, and what it rents is not rented on their hosts. Nothing carries a host into
 	// the next pass: once its instance is destroyed no list names it.

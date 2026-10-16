@@ -3,6 +3,7 @@ package cloudexec
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,16 +16,19 @@ import (
 // slot is room for one instance of one shape, reported as a node. It is taken while any instance
 // carries its name, whatever that instance's state, since an instance is billed until it is
 // destroyed. It is offerless when no instance holds it and the vendor has no machine to rent for
-// it right now: the configuration allows the instance and the market does not.
+// it right now: the configuration allows the instance and the market does not. noOffer then says
+// why, for whoever waits for the slot.
 type slot struct {
-	shape     Shape
-	name      string
-	taken     bool
-	offerless bool
+	shape   Shape
+	name    string
+	taken   bool
+	noOffer string
 }
 
+func (s slot) offerless() bool { return s.noOffer != "" }
+
 // free says a job admitted to the slot now can be rented a machine.
-func (s slot) free() bool { return !s.taken && !s.offerless }
+func (s slot) free() bool { return !s.taken && !s.offerless() }
 
 // slots lays every shape's slots against what the account holds and what the vendor has to rent.
 // An instance of a shape or an index that is no longer configured is in no slot: it is still
@@ -41,11 +45,12 @@ func (e *Executor) slots(ctx context.Context) ([]slot, error) {
 	return e.slotsAgainst(v, rentable), nil
 }
 
-// counted is one answer of the market about a shape: how many machines it had to rent, how many
-// instances of the shape the account held then, and when it was asked.
+// counted is one answer of the market about a shape: what it had to rent, how many instances of
+// the shape the account held then, and when it was asked.
 type counted struct {
-	offers, held int
-	at           time.Time
+	supply provider.Supply
+	held   int
+	at     time.Time
 }
 
 // offerCounts keeps the market's last answer per shape for the executors of every pass, because
@@ -57,15 +62,22 @@ type offerCounts struct {
 	byShape map[string]counted
 }
 
-// rentable is how many more instances of each shape the vendor has a machine for, at the size
-// Create rents a slot at. It is nil for a provider with no market, where every slot no instance
-// holds can be rented.
+// onOffer is how many more instances of a shape the vendor has a machine for, and why a slot of
+// the shape beyond them has none.
+type onOffer struct {
+	left int
+	why  string
+}
+
+// rentable is what the vendor has to rent of each shape, at the size Create rents a slot at. It
+// is nil for a provider with no market, where every slot no instance holds can be rented.
 //
 // The market is asked about a shape when its last answer is OfferWait old, the time a job is
 // given to find a machine anyway, and in between that answer stands less every instance of the
 // shape rented since: each took one of the machines counted. An instance that left is not added
-// back, since its machine need not be on offer again.
-func (e *Executor) rentable(ctx context.Context, v *view) (map[string]int, error) {
+// back, since its machine need not be on offer again. A count of nothing is logged each time it
+// is asked, which is once per shape and OfferWait at most.
+func (e *Executor) rentable(ctx context.Context, v *view) (map[string]onOffer, error) {
 	if e.market == nil || v.rentable != nil {
 		return v.rentable, nil
 	}
@@ -75,21 +87,34 @@ func (e *Executor) rentable(ctx context.Context, v *view) (map[string]int, error
 	}
 	e.offers.mu.Lock()
 	defer e.offers.mu.Unlock()
-	rentable := make(map[string]int, len(e.shapes))
+	rentable := make(map[string]onOffer, len(e.shapes))
 	for _, shape := range e.shapes {
 		last, asked := e.offers.byShape[shape.Name]
 		if !asked || e.now().Sub(last.at) >= e.offerWait {
-			count, err := e.market.Rentable(ctx, provider.Spec{
+			supply, err := e.market.Rentable(ctx, provider.Spec{
 				AcceleratorType: shape.AcceleratorType, AcceleratorCount: shape.Accelerators,
 				CPUMillis: shape.CPUMillis, MemoryBytes: shape.MemoryBytes, DiskBytes: shape.StorageBytes,
 			}, shape.MaxInstances)
 			if err != nil {
 				return nil, fmt.Errorf("cloudexec: count what there is to rent for shape %s: %w", shape.Name, err)
 			}
-			last = counted{offers: count, held: held[shape.Name], at: e.now()}
+			if supply.Count == 0 {
+				log.Printf("cloudexec: shape %s has nothing to rent: %s (%s)", shape.Name, supply.Why, supply.Detail)
+			}
+			last = counted{supply: supply, held: held[shape.Name], at: e.now()}
 			e.offers.byShape[shape.Name] = last
 		}
-		rentable[shape.Name] = max(0, last.offers-max(0, held[shape.Name]-last.held))
+		left := max(0, last.supply.Count-max(0, held[shape.Name]-last.held))
+		why := "shape " + shape.Name + ": "
+		switch {
+		case last.supply.Count == 0:
+			why += last.supply.Why
+		case left == 0:
+			why += "every machine on offer for it when last counted is rented by this cluster since"
+		default:
+			why += "the provider has fewer machines on offer for it than max_instances, and the shape's lower slots take them"
+		}
+		rentable[shape.Name] = onOffer{left: left, why: why}
 	}
 	v.rentable = rentable
 	return rentable, nil
@@ -97,18 +122,21 @@ func (e *Executor) rentable(ctx context.Context, v *view) (map[string]int, error
 
 // slotsAgainst marks the slots of v. rentable bounds how many of a shape's slots that no
 // instance holds are free, lowest index first, and nil bounds none.
-func (e *Executor) slotsAgainst(v *view, rentable map[string]int) []slot {
+func (e *Executor) slotsAgainst(v *view, rentable map[string]onOffer) []slot {
 	taken := make(map[string]bool, len(v.instances))
 	for _, i := range v.instances {
 		taken[i.slot()] = true
 	}
 	var slots []slot
 	for _, shape := range e.shapes {
-		left := rentable[shape.Name]
+		supply := rentable[shape.Name]
+		left := supply.left
 		for n := 0; n < shape.MaxInstances; n++ {
 			s := slot{shape: shape, name: slotName(shape.Name, n), taken: taken[slotName(shape.Name, n)]}
 			if !s.taken && rentable != nil {
-				s.offerless = left == 0
+				if left == 0 {
+					s.noOffer = supply.why
+				}
 				left = max(0, left-1)
 			}
 			slots = append(slots, s)
@@ -135,8 +163,8 @@ func (e *Executor) configured(name string) (shape Shape, index int, ok bool) {
 // for an offerless slot that it is one, so a job waiting for it is told what it waits for.
 func (s slot) labels() map[string]string {
 	labels := map[string]string{domain.NodeSlotLabel: s.name}
-	if s.offerless {
-		labels[domain.NodeSlotNoOfferLabel] = "true"
+	if s.offerless() {
+		labels[domain.NodeSlotNoOfferLabel] = s.noOffer
 	}
 	if key, value, ok := strings.Cut(s.shape.AcceleratorType, "="); ok {
 		labels[key] = value

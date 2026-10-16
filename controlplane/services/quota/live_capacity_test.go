@@ -102,11 +102,19 @@ func TestCapacitySaysWhichTypeCountsCores(t *testing.T) {
 func TestCapacitySaysWhichClustersRentOnDemand(t *testing.T) {
 	clusters := []ClusterCapacity{{ClusterName: "rack"}, {ClusterName: "rented"}, {ClusterName: "silent"}}
 	withOnDemand(clusters, map[string]map[string]map[string]string{
-		"rack":   {"node-1": {"gpu.product": "L40"}},
-		"rented": {"gpu-0": {domain.NodeSlotLabel: "gpu-0", "gpu.product": "L40"}, "gpu-1": {domain.NodeSlotLabel: "gpu-1"}},
+		"rack": {"node-1": {"gpu.product": "L40"}},
+		"rented": {
+			"gpu-0": {domain.NodeSlotLabel: "gpu-0", "gpu.product": "L40"},
+			"gpu-1": {domain.NodeSlotLabel: "gpu-1", domain.NodeSlotNoOfferLabel: "shape gpu: no vast offer of its size passes regions"},
+			"gpu-2": {domain.NodeSlotLabel: "gpu-2", domain.NodeSlotNoOfferLabel: "shape gpu: no vast offer of its size passes regions"},
+			"cpu-0": {domain.NodeSlotLabel: "cpu-0", domain.NodeSlotNoOfferLabel: "shape cpu: vast has no on-demand offer of its size"},
+		},
 	})
 	if clusters[0].OnDemand || !clusters[1].OnDemand || clusters[2].OnDemand {
 		t.Errorf("on demand = %v, %v, %v, want only the cluster of slots", clusters[0].OnDemand, clusters[1].OnDemand, clusters[2].OnDemand)
+	}
+	if want := []string{"shape cpu: vast has no on-demand offer of its size", "shape gpu: no vast offer of its size passes regions"}; !reflect.DeepEqual(clusters[1].NoOffer, want) || clusters[0].NoOffer != nil {
+		t.Errorf("no offer = %q and %q, want each reason of the cluster of slots once: %q", clusters[0].NoOffer, clusters[1].NoOffer, want)
 	}
 
 	// Each type's line names the offered images that suit it. A cluster that runs its own image

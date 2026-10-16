@@ -3,6 +3,8 @@ package quota
 import (
 	"context"
 	"errors"
+	"maps"
+	"slices"
 	"sort"
 	"time"
 
@@ -91,6 +93,9 @@ type ClusterCapacity struct {
 	// Its totals are then the most it rents at once, and what is available is what it may still
 	// rent. The runtime says so itself, by reporting its nodes as slots (domain.NodeSlotLabel).
 	OnDemand bool `json:"on_demand,omitempty"`
+	// NoOffer is why the runtime of a cluster that rents on demand has no machine to rent for
+	// some of its slots now, one line per reason as the runtime words it (domain.NodeSlotNoOfferLabel).
+	NoOffer []string `json:"no_offer,omitempty" doc:"On a cluster that rents on demand: why it has no machine to rent now for some of its slots, as its runtime words it, such as which of the provider filters leave out every offer of a shape. A job that needs such a slot waits until one comes on offer."`
 	// Resources is the cluster's cores and memory, which is all a job that asks for no
 	// accelerator needs to know. Absent for a cluster that reported none in the window.
 	Resources *ResourceCapacity `json:"resources,omitempty"`
@@ -297,15 +302,20 @@ func withJobImages(registered map[string]domain.Cluster, clusters []ClusterCapac
 	}
 }
 
-// withOnDemand marks the clusters whose nodes are slots, each a machine the runtime may rent.
+// withOnDemand marks the clusters whose nodes are slots, each a machine the runtime may rent, and
+// says why the runtime has nothing to rent for the slots it has none for.
 func withOnDemand(clusters []ClusterCapacity, nodeLabels map[string]map[string]map[string]string) {
 	for i := range clusters {
+		noOffer := map[string]bool{}
 		for _, labels := range nodeLabels[clusters[i].ClusterName] {
 			if labels[domain.NodeSlotLabel] != "" {
 				clusters[i].OnDemand = true
-				break
+			}
+			if why := labels[domain.NodeSlotNoOfferLabel]; why != "" {
+				noOffer[why] = true
 			}
 		}
+		clusters[i].NoOffer = slices.Sorted(maps.Keys(noOffer))
 	}
 }
 

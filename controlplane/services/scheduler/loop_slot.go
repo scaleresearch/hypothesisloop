@@ -2,8 +2,11 @@ package scheduler
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -160,17 +163,20 @@ func noOfferReason(exp *domain.Experiment, cluster string, sizes, free map[strin
 	if _, isFree, misfit := slotFor(exp, cluster, sizes, free, labelsByNode); misfit != "" || isFree {
 		return ""
 	}
-	offerless := map[string]map[string]string{}
+	why := map[string]bool{}
 	for node, labels := range labelsByNode {
-		if labels[domain.NodeSlotNoOfferLabel] != "" {
-			offerless[node] = labels
+		if labels[domain.NodeSlotNoOfferLabel] == "" {
+			continue
+		}
+		if _, _, misfit := slotFor(exp, cluster, sizes, free, map[string]map[string]string{node: labels}); misfit == "" {
+			why[labels[domain.NodeSlotNoOfferLabel]] = true
 		}
 	}
-	if _, _, misfit := slotFor(exp, cluster, sizes, free, offerless); misfit != "" {
+	if len(why) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%s: cluster %s has no machine to rent for it now: its provider offers none within the cluster's filters beyond the ones jobs hold, and the job is admitted when one comes on offer",
-		domain.NotAdmittedCapacityUnavailable, cluster)
+	return fmt.Sprintf("%s: cluster %s has no machine to rent for it now (%s), and the job is admitted when one comes on offer",
+		domain.NotAdmittedCapacityUnavailable, cluster, strings.Join(slices.Sorted(maps.Keys(why)), "; "))
 }
 
 func waitingForSlotReason(cluster, slot string) string {

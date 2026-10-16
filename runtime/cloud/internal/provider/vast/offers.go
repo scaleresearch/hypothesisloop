@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
@@ -20,18 +21,26 @@ const (
 	offerSearchLimit = 25
 	// offerCandidates is how many machines one Create chooses among.
 	offerCandidates = 5
+	// sizeSearchLimit is how many offers of a size, cheapest first, Rentable reads to say which
+	// filters leave them out when none passes all of them.
+	sizeSearchLimit = 1000
 )
 
 type offer struct {
 	ID           int64   `json:"id"`
 	MachineID    int64   `json:"machine_id"`
 	PricePerHour float64 `json:"dph_total"`
+	// "California, US": the country code comes last.
+	Geolocation  string  `json:"geolocation"`
+	Reliability  float64 `json:"reliability2"`
+	Verification string  `json:"verification"`
 }
 
-// offerQuery builds the search for the cheapest on-demand offers that fit the spec. The vendor
-// rents no machine without a GPU (a search for zero GPUs answers with storage offers that cannot
-// be rented as instances), so a CPU-only spec takes the cheapest offer of any GPU model.
-func (p *Provider) offerQuery(spec provider.Spec) (map[string]any, error) {
+// sizeQuery builds the search for the cheapest on-demand offers of the spec's size and
+// accelerator, before any of the settings' filters. The vendor rents no machine without a GPU (a
+// search for zero GPUs answers with nothing, or with storage offers that cannot be rented as
+// instances), so a CPU-only spec takes the cheapest offer of any GPU model.
+func (p *Provider) sizeQuery(spec provider.Spec) (map[string]any, error) {
 	query := map[string]any{
 		"type":                "ondemand",
 		"rentable":            map[string]any{"eq": true},
@@ -41,11 +50,34 @@ func (p *Provider) offerQuery(spec provider.Spec) (map[string]any, error) {
 		"disk_space":          map[string]any{"gte": diskGB(spec)},
 		// The quoted price covers the disk actually allocated.
 		"allocated_storage": diskGB(spec),
-		"dph_total":         map[string]any{"lte": p.cfg.MaxPricePerHour},
-		"reliability2":      map[string]any{"gte": p.cfg.MinReliability},
 		"order":             [][]string{{"dph_total", "asc"}},
 		"limit":             offerSearchLimit,
 	}
+	if spec.AcceleratorCount == 0 {
+		query["num_gpus"] = map[string]any{"gte": 1}
+		return query, nil
+	}
+	accelerator, err := p.cfg.accelerator(spec.AcceleratorType)
+	if err != nil {
+		return nil, err
+	}
+	query["num_gpus"] = map[string]any{"eq": spec.AcceleratorCount}
+	query["gpu_name"] = map[string]any{"eq": accelerator.GPUName}
+	if accelerator.MinGPURAMMB > 0 {
+		query["gpu_ram"] = map[string]any{"gte": accelerator.MinGPURAMMB}
+	}
+	return query, nil
+}
+
+// offerQuery builds the search for the cheapest on-demand offers that fit the spec and pass every
+// filter of the settings.
+func (p *Provider) offerQuery(spec provider.Spec) (map[string]any, error) {
+	query, err := p.sizeQuery(spec)
+	if err != nil {
+		return nil, err
+	}
+	query["dph_total"] = map[string]any{"lte": p.cfg.MaxPricePerHour}
+	query["reliability2"] = map[string]any{"gte": p.cfg.MinReliability}
 	excluded := append([]int64(nil), p.cfg.ExcludedMachines...)
 	for _, host := range spec.AvoidHosts {
 		machine, err := strconv.ParseInt(host, 10, 64)
@@ -56,19 +88,6 @@ func (p *Provider) offerQuery(spec provider.Spec) (map[string]any, error) {
 	}
 	if len(excluded) > 0 {
 		query["machine_id"] = map[string]any{"notin": excluded}
-	}
-	if spec.AcceleratorCount == 0 {
-		query["num_gpus"] = map[string]any{"gte": 1}
-	} else {
-		accelerator, err := p.cfg.accelerator(spec.AcceleratorType)
-		if err != nil {
-			return nil, err
-		}
-		query["num_gpus"] = map[string]any{"eq": spec.AcceleratorCount}
-		query["gpu_name"] = map[string]any{"eq": accelerator.GPUName}
-		if accelerator.MinGPURAMMB > 0 {
-			query["gpu_ram"] = map[string]any{"gte": accelerator.MinGPURAMMB}
-		}
 	}
 	if len(p.cfg.Regions) > 0 {
 		query["geolocation"] = map[string]any{"in": p.cfg.Regions}
@@ -185,18 +204,16 @@ func (p *Provider) candidates(ctx context.Context, spec provider.Spec) ([]offer,
 	if err != nil {
 		return nil, err
 	}
-	var found struct {
-		Offers []offer `json:"offers"`
-	}
-	if _, err := p.call(ctx, http.MethodPost, "/api/v0/bundles/", query, &found); err != nil {
+	found, err := p.search(ctx, query)
+	if err != nil {
 		return nil, err
 	}
-	if len(found.Offers) == 0 {
+	if len(found) == 0 {
 		return nil, fmt.Errorf("vast: %w %q within the configured filters", provider.ErrNoOffer, spec.Name)
 	}
-	open := p.held.free(found.Offers)
+	open := p.held.free(found)
 	if len(open) == 0 {
-		return nil, fmt.Errorf("vast: %w %q: this agent's own instances hold all %d offers within the configured filters", provider.ErrNoOffer, spec.Name, len(found.Offers))
+		return nil, fmt.Errorf("vast: %w %q: this agent's own instances hold all %d offers within the configured filters", provider.ErrNoOffer, spec.Name, len(found))
 	}
 	chosen := cheapestPerMachine(open, offerCandidates)
 	p.shuffle(chosen)
@@ -206,20 +223,122 @@ func (p *Provider) candidates(ctx context.Context, spec provider.Spec) ([]offer,
 var _ provider.Market = (*Provider)(nil)
 
 // Rentable counts the offers candidates chooses among: the same search, asked for as many offers
-// as are wanted on top of the ones this process holds, which the search goes on listing.
-func (p *Provider) Rentable(ctx context.Context, spec provider.Spec, atMost int) (int, error) {
+// as are wanted on top of the ones this process holds, which the search goes on listing. When
+// none passes the filters, a second search reads the offers of the spec's size alone and says
+// which filters leave them out.
+func (p *Provider) Rentable(ctx context.Context, spec provider.Spec, atMost int) (provider.Supply, error) {
 	query, err := p.offerQuery(spec)
 	if err != nil {
-		return 0, err
+		return provider.Supply{}, err
 	}
 	query["limit"] = atMost + p.held.count()
+	found, err := p.search(ctx, query)
+	if err != nil {
+		return provider.Supply{}, err
+	}
+	if open := p.held.free(found); len(open) > 0 {
+		return provider.Supply{Count: min(atMost, len(open))}, nil
+	}
+	if len(found) > 0 {
+		return provider.Supply{
+			Why:    "this agent's own instances hold every vast offer within the filters",
+			Detail: fmt.Sprintf("%d offers within the filters", len(found)),
+		}, nil
+	}
+	return p.shortfall(ctx, spec)
+}
+
+// shortfall says why no offer of spec's size passes the filters: which of them leave out the
+// offers there are, each with how many it leaves out, as one offer may fail several.
+func (p *Provider) shortfall(ctx context.Context, spec provider.Spec) (provider.Supply, error) {
+	query, err := p.sizeQuery(spec)
+	if err != nil {
+		return provider.Supply{}, err
+	}
+	query["limit"] = sizeSearchLimit
+	sized, err := p.search(ctx, query)
+	if err != nil {
+		return provider.Supply{}, err
+	}
+	if len(sized) == 0 {
+		return provider.Supply{
+			Why:    "vast has no on-demand offer of its size (" + describeSize(spec, p.cfg) + ")",
+			Detail: "no offer of the size, before any filter",
+		}, nil
+	}
+	filters := p.cfg.filters()
+	var failing, counts []string
+	for _, f := range filters {
+		out := 0
+		for _, o := range sized {
+			if !f.passes(o) {
+				out++
+			}
+		}
+		if out > 0 {
+			failing = append(failing, f.name)
+			counts = append(counts, fmt.Sprintf("%s %d", f.name, out))
+		}
+	}
+	detail := fmt.Sprintf("%d offers of the size, the cheapest at $%.3f/h", len(sized), sized[0].PricePerHour)
+	if len(counts) > 0 {
+		detail += "; left out by " + strings.Join(counts, ", ")
+	}
+	if len(failing) == 0 {
+		return provider.Supply{Why: "no vast offer of its size passed the filters when searched", Detail: detail}, nil
+	}
+	return provider.Supply{Why: "no vast offer of its size passes " + strings.Join(failing, ", "), Detail: detail}, nil
+}
+
+func (p *Provider) search(ctx context.Context, query map[string]any) ([]offer, error) {
 	var found struct {
 		Offers []offer `json:"offers"`
 	}
 	if _, err := p.call(ctx, http.MethodPost, "/api/v0/bundles/", query, &found); err != nil {
-		return 0, err
+		return nil, err
 	}
-	return min(atMost, len(p.held.free(found.Offers))), nil
+	return found.Offers, nil
+}
+
+// filter is one of the settings' filters as offerQuery applies it, by the setting's name.
+type filter struct {
+	name   string
+	passes func(offer) bool
+}
+
+func (c Settings) filters() []filter {
+	excluded := map[int64]bool{}
+	for _, machine := range c.ExcludedMachines {
+		excluded[machine] = true
+	}
+	regions := map[string]bool{}
+	for _, region := range c.Regions {
+		regions[strings.ToUpper(region)] = true
+	}
+	return []filter{
+		{"regions", func(o offer) bool { return len(regions) == 0 || regions[country(o.Geolocation)] }},
+		{"max_price_per_hour", func(o offer) bool { return o.PricePerHour <= c.MaxPricePerHour }},
+		{"min_reliability", func(o offer) bool { return o.Reliability >= c.MinReliability }},
+		{"verified_only", func(o offer) bool { return !c.VerifiedOnly || o.Verification == "verified" }},
+		{"excluded_machines", func(o offer) bool { return !excluded[o.MachineID] }},
+	}
+}
+
+// country is the country code a geolocation ends in.
+func country(geolocation string) string {
+	parts := strings.Split(geolocation, ",")
+	return strings.ToUpper(strings.TrimSpace(parts[len(parts)-1]))
+}
+
+func describeSize(spec provider.Spec, c Settings) string {
+	gpu := "any GPU"
+	if spec.AcceleratorCount > 0 {
+		gpu = fmt.Sprintf("%d x %s", spec.AcceleratorCount, spec.AcceleratorType)
+		if accelerator, err := c.accelerator(spec.AcceleratorType); err == nil {
+			gpu = fmt.Sprintf("%d x %s", spec.AcceleratorCount, accelerator.GPUName)
+		}
+	}
+	return fmt.Sprintf("%s, %d cores, %d MB memory, %d GB disk", gpu, provider.CeilDiv(spec.CPUMillis, 1000), provider.CeilDiv(spec.MemoryBytes, bytesPerMB), diskGB(spec))
 }
 
 // cheapestPerMachine keeps the first offer of each machine, up to limit machines. offers come

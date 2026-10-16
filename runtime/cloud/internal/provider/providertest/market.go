@@ -40,9 +40,12 @@ func RunMarket(t *testing.T, p provider.Provider, opts Options) {
 
 func rentable(t *testing.T, ctx context.Context, market provider.Market, spec provider.Spec) int {
 	t.Helper()
-	count, err := market.Rentable(ctx, spec, marketAsked)
+	supply, err := market.Rentable(ctx, spec, marketAsked)
 	if err != nil {
 		t.Fatalf("Rentable: %v", err)
 	}
-	return count
+	if (supply.Count == 0) != (supply.Why != "") {
+		t.Fatalf("Rentable = %+v: a count of nothing says why, and only such a count", supply)
+	}
+	return supply.Count
 }

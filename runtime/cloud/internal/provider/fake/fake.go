@@ -39,9 +39,9 @@ type Provider struct {
 	// name it is started under.
 	Fail func(method, name string) error
 
-	// Market, when set, is how many instances of a spec the vendor has to rent right now.
-	// Unset, there is one for every instance asked about.
-	Market func(spec provider.Spec) int
+	// Market, when set, is what the vendor has to rent of a spec right now. Unset, there is one
+	// for every instance asked about.
+	Market func(spec provider.Spec) provider.Supply
 }
 
 func New() *Provider {
@@ -55,16 +55,18 @@ var (
 	_ provider.Warmer   = (*Provider)(nil)
 )
 
-func (p *Provider) Rentable(_ context.Context, spec provider.Spec, atMost int) (int, error) {
+func (p *Provider) Rentable(_ context.Context, spec provider.Spec, atMost int) (provider.Supply, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if err := p.fail("Rentable", ""); err != nil {
-		return 0, err
+		return provider.Supply{}, err
 	}
 	if p.Market == nil {
-		return atMost, nil
+		return provider.Supply{Count: atMost}, nil
 	}
-	return max(0, min(atMost, p.Market(spec))), nil
+	supply := p.Market(spec)
+	supply.Count = max(0, min(atMost, supply.Count))
+	return supply, nil
 }
 
 func (p *Provider) Create(_ context.Context, spec provider.Spec) (string, error) {
