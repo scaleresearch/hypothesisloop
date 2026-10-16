@@ -437,6 +437,24 @@ func TestListAndLinksShowWhereEachHypothesisSits(t *testing.T) {
 	}
 }
 
+// Search finds a claim by any part of its text whatever its case, and the count agrees with the page.
+func TestSearchKeepsTheHypothesesWhoseTextHoldsIt(t *testing.T) {
+	s := testStore(t)
+	pe := testExperiment(t, s)
+	ctx := context.Background()
+	warmup := register(t, s, pe, "agent-1", "A longer Warmup lowers the loss", onRoot(pe))
+	register(t, s, pe, "agent-1", "Dropout on the embeddings", onRoot(pe))
+
+	f := ListFilter{PlatformExperimentID: pe, Search: "warmup", Limit: 10}
+	items, err := s.ListHypotheses(ctx, f)
+	if err != nil || len(items) != 1 || items[0].ID != warmup.ID {
+		t.Fatalf("search warmup: got = (%v, %v), want [%s]", items, err, warmup.ID)
+	}
+	if stats, err := s.HypothesisStats(ctx, f); err != nil || stats.Total != 1 {
+		t.Errorf("search warmup stats: got = (%+v, %v), want a total of 1", stats, err)
+	}
+}
+
 // The UI and agents show who made a link; a human's link carries its author, never an empty owner.
 func TestLinksAndGraphEdgesCarryWhoMadeThemAndWhen(t *testing.T) {
 	s := testStore(t)

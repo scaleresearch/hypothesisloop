@@ -565,7 +565,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "Optional ?platform_experiment_id restricts to one platform experiment; omitted, every " +
 			"platform experiment's hypotheses are candidates (the operator-facing global view). " +
 			"Optional ?agent_id for one agent's own, ?status (open|confirmed|refuted|inconclusive) " +
-			"for just that status, ?by=people for the ideas people registered, ?untaken=true for those no agent works on now (see working), ?limit (default 20, max 200, 422 invalid_page over it) and ?offset. " +
+			"for just that status, ?by=people for the ideas people registered, ?q for those whose text holds it, ignoring case, ?untaken=true for those no agent works on now (see working), ?limit (default 20, max 200, 422 invalid_page over it) and ?offset. " +
 			"The open ideas of people come first, those no agent has settled or built on yet, then the most recent. " +
 			"Total match count is returned in the X-Total-Count response header. Rows carry builds_on " +
 			"(what each builds on; the platform_experiment_id stands for the objective), child_count " +
@@ -578,6 +578,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Agent                string                  `query:"agent_id" doc:"Only hypotheses registered by this agent."`
 		Status               domain.HypothesisStatus `query:"status" doc:"open, confirmed, refuted or inconclusive -- the registering agent's own verdict on the claim, not job progress."`
 		By                   string                  `query:"by" enum:"people" doc:"people: only the hypotheses a person registered, an API key or staff included."`
+		Search               string                  `query:"q" doc:"Only hypotheses whose text holds this, ignoring case."`
 		Untaken              bool                    `query:"untaken" doc:"true: only the hypotheses no agent works on now: no job of theirs queued or running and no checkout within two hours."`
 		Limit                int                     `query:"limit" doc:"Page size, default 20, maximum 200. A larger one is refused. See X-Total-Count for how much you have not seen."`
 		Offset               int                     `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
@@ -597,7 +598,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, err
 		}
 		filter := graphdb.ListFilter{PlatformExperimentID: in.PlatformExperimentID, AgentID: in.Agent,
-			Restricted: restricted, Within: within, Status: in.Status, ByPeople: in.By == "people", Limit: limit, Offset: offset}
+			Restricted: restricted, Within: within, Status: in.Status, ByPeople: in.By == "people", Search: in.Search, Limit: limit, Offset: offset}
 		if in.Untaken {
 			if filter.ExcludeIDs, err = h.svc.TakenHypotheses(ctx, in.PlatformExperimentID); err != nil {
 				return nil, auth.Internal(h.logger, "list hypotheses", err)

@@ -377,6 +377,8 @@ type ListFilter struct {
 	Within     []string
 	// ByPeople keeps only the hypotheses a person registered.
 	ByPeople bool
+	// Search keeps only the hypotheses whose text holds it, ignoring case.
+	Search string
 	// IDs, when not nil, keeps only these hypotheses.
 	IDs []string
 	// ExcludeIDs, when not nil, drops these hypotheses.
@@ -418,6 +420,10 @@ func (f ListFilter) where() (string, map[string]any) {
 	}
 	if f.ByPeople {
 		clauses = append(clauses, personIdea)
+	}
+	if f.Search != "" {
+		clauses = append(clauses, "toLower(h.text) CONTAINS toLower($search)")
+		params["search"] = f.Search
 	}
 	if f.IDs != nil {
 		clauses = append(clauses, "h.id IN $ids")
