@@ -12,7 +12,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
@@ -34,7 +33,7 @@ func (s underperformStore) CompletedJobIDs(context.Context, string) (map[string]
 	return s.completed, nil
 }
 
-type marks struct{ events []db.Event }
+type marks struct{ events []domain.Event }
 
 func (s underperformStore) MarkUnderperforming(_ context.Context, id, metricName string) error {
 	for _, e := range s.marks.events {
@@ -42,7 +41,7 @@ func (s underperformStore) MarkUnderperforming(_ context.Context, id, metricName
 			return nil
 		}
 	}
-	s.marks.events = append(s.marks.events, db.Event{Kind: db.EventJobUnderperforming, Subject: id, Value: metricName})
+	s.marks.events = append(s.marks.events, domain.Event{Kind: domain.EventJobUnderperforming, Subject: id, Value: metricName})
 	return nil
 }
 
@@ -154,8 +153,8 @@ func TestUnderperformanceFiresOnceOnAJobThatTrailsFromItsFirstSample(t *testing.
 		t.Fatalf("events = %d, want 1", len(notifier.events))
 	}
 	got := notifier.events[0]
-	if got.Kind != db.EventJobUnderperforming || got.Subject != "exp-1" || got.Value != "acc" {
-		t.Fatalf("event = %+v, want kind=%s subject=exp-1 value=acc", got, db.EventJobUnderperforming)
+	if got.Kind != domain.EventJobUnderperforming || got.Subject != "exp-1" || got.Value != "acc" {
+		t.Fatalf("event = %+v, want kind=%s subject=exp-1 value=acc", got, domain.EventJobUnderperforming)
 	}
 }
 

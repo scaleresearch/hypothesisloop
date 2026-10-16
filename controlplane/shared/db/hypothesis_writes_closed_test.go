@@ -31,7 +31,7 @@ func TestAHypothesisWriteHoldsOffACloseAndNoneIsTakenAfterIt(t *testing.T) {
 		<-passed
 		closed <- NewPlatformExperimentsStore(pool).ClosePlatformExperiment(ctx, pe, &person, "")
 	}()
-	err := events.Emit(ctx, func(stamp Stamp) ([]Event, error) {
+	err := events.Emit(ctx, func(stamp domain.Stamp) ([]domain.Event, error) {
 		if err := stamp.RequireOpen(pe); err != nil {
 			return nil, err
 		}
@@ -51,7 +51,7 @@ func TestAHypothesisWriteHoldsOffACloseAndNoneIsTakenAfterIt(t *testing.T) {
 		t.Fatalf("close: got = %v, want nil", err)
 	}
 
-	err = events.Emit(ctx, func(stamp Stamp) ([]Event, error) { return nil, stamp.RequireOpen(pe) })
+	err = events.Emit(ctx, func(stamp domain.Stamp) ([]domain.Event, error) { return nil, stamp.RequireOpen(pe) })
 	if !errors.Is(err, ErrPlatformExperimentClosed) {
 		t.Errorf("a graph write after the close: got = %v, want %v", err, ErrPlatformExperimentClosed)
 	}

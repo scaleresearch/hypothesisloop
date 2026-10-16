@@ -30,23 +30,23 @@ func TestAMessageIsToldToItsAgentAloneAndKept(t *testing.T) {
 	if len(sent) != 1 || sent[0].AgentID != agentID || sent[0].From != "coordinator" || sent[0].At.IsZero() {
 		t.Fatalf("sent: got = %+v, want one message from the coordinator", sent)
 	}
-	live := awaitEvent(t, events, EventAgentMessage, agentID)
+	live := awaitEvent(t, events, domain.EventAgentMessage, agentID)
 	if live.Value != "coordinator" || live.Detail != "leave the lr line, try warmup" || live.AgentID != agentID {
 		t.Fatalf("live: got = %+v, want the text from the coordinator", live)
 	}
-	if own := (EventFilter{PlatformExperimentID: peID, AgentID: agentID}); !own.Matches(live) {
+	if own := (domain.EventFilter{PlatformExperimentID: peID, AgentID: agentID}); !own.Matches(live) {
 		t.Error("the agent's own subscription does not carry its message")
 	}
-	if rival := (EventFilter{PlatformExperimentID: peID, AgentID: "another"}); rival.Matches(live) {
+	if rival := (domain.EventFilter{PlatformExperimentID: peID, AgentID: "another"}); rival.Matches(live) {
 		t.Error("a rival's subscription carries the message")
 	}
-	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, EventFilter{PlatformExperimentID: peID, AgentID: agentID}, before)
+	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, domain.EventFilter{PlatformExperimentID: peID, AgentID: agentID}, before)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var told []Event
+	var told []domain.Event
 	for _, e := range replayed {
-		if e.Kind == EventAgentMessage {
+		if e.Kind == domain.EventAgentMessage {
 			told = append(told, e)
 		}
 	}
@@ -168,23 +168,23 @@ func TestAMessageToTheCoordinatorIsToldToItsStreamAlone(t *testing.T) {
 	if sent.AgentID != domain.CoordinatorRecipient || sent.From != "owner" || sent.At.IsZero() {
 		t.Fatalf("sent: got = %+v, want a message to the coordinator from the owner", sent)
 	}
-	live := awaitEvent(t, events, EventAgentMessage, domain.CoordinatorRecipient)
+	live := awaitEvent(t, events, domain.EventAgentMessage, domain.CoordinatorRecipient)
 	if live.Value != "owner" || live.Detail != "look at the gap" {
 		t.Fatalf("live: got = %+v, want the text from the owner", live)
 	}
-	if !(EventFilter{PlatformExperimentID: peID, Decisions: true}).Matches(live) {
+	if !(domain.EventFilter{PlatformExperimentID: peID, Decisions: true}).Matches(live) {
 		t.Error("the coordinator's stream does not carry the message")
 	}
-	if (EventFilter{PlatformExperimentID: peID, AgentID: agentID}).Matches(live) {
+	if (domain.EventFilter{PlatformExperimentID: peID, AgentID: agentID}).Matches(live) {
 		t.Error("a researcher's stream carries the coordinator's message")
 	}
-	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, EventFilter{PlatformExperimentID: peID, Decisions: true}, before)
+	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, domain.EventFilter{PlatformExperimentID: peID, Decisions: true}, before)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var told []Event
+	var told []domain.Event
 	for _, e := range replayed {
-		if e.Kind == EventAgentMessage {
+		if e.Kind == domain.EventAgentMessage {
 			told = append(told, e)
 		}
 	}

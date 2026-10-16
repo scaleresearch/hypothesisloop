@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -67,8 +66,8 @@ func onRoot(pe string) []domain.LinkSpec {
 }
 
 // stampAt stamps a write at position, as an Emit that finds every earlier write's events sent.
-func stampAt(position int64) db.Stamp {
-	return db.Stamp{Position: position, Aborted: func(int64) (bool, error) { return false, nil }}
+func stampAt(position int64) domain.Stamp {
+	return domain.Stamp{Position: position, Aborted: func(int64) (bool, error) { return false, nil }}
 }
 
 func register(t *testing.T, s *Store, pe, agentID, text string, links []domain.LinkSpec) *domain.Hypothesis {
@@ -586,7 +585,7 @@ CREATE (q)-[:RELATED {agent_id: '', author: 'Mallory', created_at: $later, creat
 		t.Fatalf("write old rows: %v", err)
 	}
 	fresh := register(t, s, pe, "agent-1", "a new one entirely", onRoot(pe))
-	writes := []db.HumanWrite{
+	writes := []domain.HumanWrite{
 		{UserID: "user-ada", Kind: "hypothesis", Subject: pe + "-person"},
 		{UserID: "user-ada", Kind: "link", Subject: pe + "-person related " + pe + "-typed"},
 		{UserID: "user-ada", Kind: "hypothesis", Subject: fresh.ID},
@@ -613,8 +612,8 @@ CREATE (q)-[:RELATED {agent_id: '', author: 'Mallory', created_at: $later, creat
 			t.Errorf("edge %s -%s-> %s: got actor %+v, want %+v", e.From, e.Type, e.To, e.Actor, wantNodes[e.From])
 		}
 	}
-	for _, bad := range []db.HumanWrite{{Kind: "link", Subject: "two parts"}, {Kind: "link", Subject: "a likes b"}, {Kind: "comment", Subject: "c"}} {
-		if err := s.CreditUsers(ctx, []db.HumanWrite{bad}); err == nil {
+	for _, bad := range []domain.HumanWrite{{Kind: "link", Subject: "two parts"}, {Kind: "link", Subject: "a likes b"}, {Kind: "comment", Subject: "c"}} {
+		if err := s.CreditUsers(ctx, []domain.HumanWrite{bad}); err == nil {
 			t.Errorf("CreditUsers of %+v: got = nil, want an error", bad)
 		}
 	}
@@ -904,11 +903,11 @@ func TestReplayDerivesHypothesisEventsFromThePositionsTheGraphStores(t *testing.
 	if err != nil {
 		t.Fatalf("ReplayEvents: got = %v, want nil", err)
 	}
-	want := map[db.Event]bool{
-		{Kind: db.EventHypothesisNew, Subject: a.ID, Value: "staff", PlatformExperimentID: pe, AgentID: "agent-1", Position: 11}:                      true,
-		{Kind: db.EventHypothesisNew, Subject: b.ID, Value: "agent", PlatformExperimentID: pe, AgentID: "agent-2", Position: 10}:                      true,
-		{Kind: db.EventHypothesisLink, Subject: b.ID, Value: "contradicts", Detail: a.ID, PlatformExperimentID: pe, AgentID: "agent-2", Position: 12}: true,
-		{Kind: db.EventHypothesisStatus, Subject: a.ID, Value: "confirmed", PlatformExperimentID: pe, AgentID: "agent-1", Position: 13}:               true,
+	want := map[domain.Event]bool{
+		{Kind: domain.EventHypothesisNew, Subject: a.ID, Value: "staff", PlatformExperimentID: pe, AgentID: "agent-1", Position: 11}:                      true,
+		{Kind: domain.EventHypothesisNew, Subject: b.ID, Value: "agent", PlatformExperimentID: pe, AgentID: "agent-2", Position: 10}:                      true,
+		{Kind: domain.EventHypothesisLink, Subject: b.ID, Value: "contradicts", Detail: a.ID, PlatformExperimentID: pe, AgentID: "agent-2", Position: 12}: true,
+		{Kind: domain.EventHypothesisStatus, Subject: a.ID, Value: "confirmed", PlatformExperimentID: pe, AgentID: "agent-1", Position: 13}:               true,
 	}
 	if len(events) != len(want) {
 		t.Errorf("replayed events: got %d (%+v), want %d", len(events), events, len(want))
@@ -920,7 +919,7 @@ func TestReplayDerivesHypothesisEventsFromThePositionsTheGraphStores(t *testing.
 	}
 
 	at, err := s.ReplayEvents(ctx, pe, 13)
-	if err != nil || len(at) != 1 || at[0].Kind != db.EventHypothesisStatus {
+	if err != nil || len(at) != 1 || at[0].Kind != domain.EventHypothesisStatus {
 		t.Errorf("replay from the last write's position: got = (%v, %v), want that write's hypothesis.status", at, err)
 	}
 	later, err := s.ReplayEvents(ctx, pe, 14)
@@ -938,8 +937,8 @@ func TestRepeatingAWriteWhoseTransactionAbortedAnnouncesItAgain(t *testing.T) {
 	pe := testExperiment(t, s)
 	ctx := context.Background()
 	aborted := map[int64]bool{20: true}
-	stamp := func(position int64) db.Stamp {
-		return db.Stamp{Position: position, Aborted: func(p int64) (bool, error) { return aborted[p], nil }}
+	stamp := func(position int64) domain.Stamp {
+		return domain.Stamp{Position: position, Aborted: func(p int64) (bool, error) { return aborted[p], nil }}
 	}
 	parent := register(t, s, pe, "agent-1", "warmup helps", onRoot(pe))
 	n := NewHypothesis{AgentID: "agent-1", PlatformExperimentID: pe,
@@ -1001,7 +1000,7 @@ func TestReAddingARegistrationLinkAnnouncesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register: got = %v, want nil", err)
 	}
-	abortedAll := db.Stamp{Position: 31, Aborted: func(int64) (bool, error) { return true, nil }}
+	abortedAll := domain.Stamp{Position: 31, Aborted: func(int64) (bool, error) { return true, nil }}
 	if result, err := s.AddLink(ctx, h.ID, "agent-1", agentActor("agent-1"), onRoot(pe)[0], abortedAll); err != nil || result.Announce {
 		t.Errorf("AddLink of the registration link: got = (%+v, %v), want nothing announced", result, err)
 	}
@@ -1215,19 +1214,19 @@ func TestConcernsAgentFindsActivityOnTheAgentsOwnHypotheses(t *testing.T) {
 	}
 
 	cases := []struct {
-		e    db.Event
+		e    domain.Event
 		want bool
 	}{
-		{db.Event{Kind: db.EventCommentNew, Subject: mine.ID}, true},
-		{db.Event{Kind: db.EventFindingNew, Subject: theirs.ID}, false},
-		{db.Event{Kind: db.EventHypothesisLink, Subject: theirs.ID, Detail: mine.ID}, true},
-		{db.Event{Kind: db.EventHypothesisLink, Subject: theirs.ID, Detail: pe}, false},
-		{db.Event{Kind: db.EventHypothesisNew, Subject: child.ID}, true},
-		{db.Event{Kind: db.EventHypothesisNew, Subject: theirs.ID}, false},
-		{db.Event{Kind: db.EventCommentNew, Subject: pe, PlatformExperimentID: pe}, true},
-		{db.Event{Kind: db.EventFindingNew, Subject: pe, PlatformExperimentID: pe}, false},
+		{domain.Event{Kind: domain.EventCommentNew, Subject: mine.ID}, true},
+		{domain.Event{Kind: domain.EventFindingNew, Subject: theirs.ID}, false},
+		{domain.Event{Kind: domain.EventHypothesisLink, Subject: theirs.ID, Detail: mine.ID}, true},
+		{domain.Event{Kind: domain.EventHypothesisLink, Subject: theirs.ID, Detail: pe}, false},
+		{domain.Event{Kind: domain.EventHypothesisNew, Subject: child.ID}, true},
+		{domain.Event{Kind: domain.EventHypothesisNew, Subject: theirs.ID}, false},
+		{domain.Event{Kind: domain.EventCommentNew, Subject: pe, PlatformExperimentID: pe}, true},
+		{domain.Event{Kind: domain.EventFindingNew, Subject: pe, PlatformExperimentID: pe}, false},
 	}
-	events := make([]db.Event, len(cases))
+	events := make([]domain.Event, len(cases))
 	for i, c := range cases {
 		events[i] = c.e
 	}

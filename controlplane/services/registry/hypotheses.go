@@ -61,7 +61,7 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor 
 		}
 	}
 
-	err = s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
+	err = s.events.Emit(ctx, func(stamp domain.Stamp) ([]domain.Event, error) {
 		if err := stamp.RequireOpen(platformExperimentID); err != nil {
 			return nil, err
 		}
@@ -74,7 +74,7 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor 
 		if err != nil || !announce {
 			return nil, err
 		}
-		return []db.Event{{Kind: db.EventHypothesisNew, Subject: h.ID, Value: string(h.Actor.Kind),
+		return []domain.Event{{Kind: domain.EventHypothesisNew, Subject: h.ID, Value: string(h.Actor.Kind),
 			PlatformExperimentID: h.PlatformExperimentID, AgentID: h.AgentID}}, nil
 	})
 	var held *graphdb.SimilarError
@@ -142,7 +142,7 @@ func (s *Service) AddHypothesisLink(ctx context.Context, id, agentID string, act
 		return nil, fmt.Errorf("registry.AddHypothesisLink: %w: %s", ErrHypothesisNotFound, id)
 	}
 	var result *graphdb.LinkResult
-	err = s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
+	err = s.events.Emit(ctx, func(stamp domain.Stamp) ([]domain.Event, error) {
 		if err := stamp.RequireOpen(from.PlatformExperimentID); err != nil {
 			return nil, err
 		}
@@ -151,7 +151,7 @@ func (s *Service) AddHypothesisLink(ctx context.Context, id, agentID string, act
 		if err != nil || !result.Announce {
 			return nil, err
 		}
-		return []db.Event{{Kind: db.EventHypothesisLink, Subject: id, Value: string(spec.Type), Detail: spec.To,
+		return []domain.Event{{Kind: domain.EventHypothesisLink, Subject: id, Value: string(spec.Type), Detail: spec.To,
 			PlatformExperimentID: result.From.PlatformExperimentID, AgentID: agentID}}, nil
 	})
 	if err != nil {
@@ -547,7 +547,7 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 	var h *domain.Hypothesis
 	var announced bool
 	var basis string
-	err = s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
+	err = s.events.Emit(ctx, func(stamp domain.Stamp) ([]domain.Event, error) {
 		if err := stamp.RequireOpen(current.PlatformExperimentID); err != nil {
 			return nil, err
 		}
@@ -569,7 +569,7 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 		if err != nil || !announced {
 			return nil, err
 		}
-		return []db.Event{{Kind: db.EventHypothesisStatus, Subject: h.ID, Value: string(h.Status),
+		return []domain.Event{{Kind: domain.EventHypothesisStatus, Subject: h.ID, Value: string(h.Status),
 			PlatformExperimentID: h.PlatformExperimentID, AgentID: h.AgentID}}, nil
 	})
 	if err != nil {
@@ -701,7 +701,7 @@ func (s *Service) EditHypothesis(ctx context.Context, id, text string) (*domain.
 		return nil, fmt.Errorf("registry.EditHypothesis: %w: %s", ErrHypothesisNotFound, id)
 	}
 	var h *domain.Hypothesis
-	err = s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
+	err = s.events.Emit(ctx, func(stamp domain.Stamp) ([]domain.Event, error) {
 		if err := stamp.RequireOpen(current.PlatformExperimentID); err != nil {
 			return nil, err
 		}
@@ -732,7 +732,7 @@ func (s *Service) RemoveHypothesis(ctx context.Context, id string) error {
 	if current == nil {
 		return fmt.Errorf("registry.RemoveHypothesis: %w: %s", ErrHypothesisNotFound, id)
 	}
-	err = s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
+	err = s.events.Emit(ctx, func(stamp domain.Stamp) ([]domain.Event, error) {
 		if err := stamp.RequireOpen(current.PlatformExperimentID); err != nil {
 			return nil, err
 		}

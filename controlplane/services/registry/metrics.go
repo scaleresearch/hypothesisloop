@@ -13,7 +13,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
@@ -133,7 +132,7 @@ const (
 // progress this job has reached) and, if it is the
 // clear straggler with underperformMinRemaining of its run still ahead, marks the job's row. The
 // first mark emits job.underperforming to the owning agent: once per job, never a command. See
-// db.EventJobUnderperforming.
+// domain.EventJobUnderperforming.
 //
 // Trailing is recomputed from the metrics store every time; the only thing kept is the marker on
 // the job's row saying its owner was told. A job launched against siblings that already finished
@@ -299,8 +298,8 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 // refusing an accepted push because a transient stream could not be told about it would turn a
 // notification outage into lost measurements.
 func (s *Service) notifyMetricArrived(ctx context.Context, experimentID, platformExperimentID, agentID, metricName string, fractionComplete float64) {
-	err := s.events.NotifyEvent(ctx, db.Event{
-		Kind:                 db.EventMetricPoint,
+	err := s.events.NotifyEvent(ctx, domain.Event{
+		Kind:                 domain.EventMetricPoint,
 		Subject:              experimentID,
 		Value:                metricName,
 		Detail:               strconv.FormatFloat(fractionComplete, 'g', -1, 64),

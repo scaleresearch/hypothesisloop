@@ -131,15 +131,6 @@ FROM hypotheses h WHERE h.id = c.hypothesis_id AND c.platform_experiment_id IS N
 	return nil
 }
 
-// HumanWrite is a row of the retired human_writes table: the signed-in user behind one
-// hypothesis, link or comment written before a record kept its actor. Subject is the hypothesis
-// id, the comment id, or for a link "<from> <type> <to>".
-type HumanWrite struct {
-	UserID  string
-	Kind    string
-	Subject string
-}
-
 // humanWritesLockKey serialises MoveHumanWrites across control-service replicas.
 const humanWritesLockKey = int64(0x68756d616e7772)
 
@@ -150,7 +141,7 @@ const humanWritesLockKey = int64(0x68756d616e7772)
 //
 // It does nothing once the table is gone. creditGraph runs before the drop commits and sets an
 // actor only where none is kept, so a start interrupted between the two repeats it harmlessly.
-func MoveHumanWrites(ctx context.Context, pool *Pool, creditGraph func([]HumanWrite) error) error {
+func MoveHumanWrites(ctx context.Context, pool *Pool, creditGraph func([]domain.HumanWrite) error) error {
 	tx, err := pool.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("db.MoveHumanWrites: begin: %w", err)
@@ -175,9 +166,9 @@ FROM human_writes w WHERE w.kind = 'comment' AND w.subject = c.id AND c.actor_ki
 	if err != nil {
 		return fmt.Errorf("db.MoveHumanWrites: %w", err)
 	}
-	var writes []HumanWrite
+	var writes []domain.HumanWrite
 	for r.Next() {
-		var w HumanWrite
+		var w domain.HumanWrite
 		if err := r.Scan(&w.UserID, &w.Kind, &w.Subject); err != nil {
 			r.Close()
 			return fmt.Errorf("db.MoveHumanWrites: scan: %w", err)

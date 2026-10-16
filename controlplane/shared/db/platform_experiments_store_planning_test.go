@@ -840,11 +840,11 @@ func TestARevisionIsAnEventOnThePlannersStreamLiveAndReplayed(t *testing.T) {
 	if err := pes.Revise(ctx, draft, "it must fit one accelerator", domain.Actor{Kind: domain.ActorUser, ID: "u-planning"}, time.Now().UTC().Add(30*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	live := awaitEvent(t, events, EventPlatformExperimentRevision, draft)
+	live := awaitEvent(t, events, domain.EventPlatformExperimentRevision, draft)
 	if live.PlatformExperimentID != draft || live.Value != "" || live.Detail != "" || live.AgentID != "" {
 		t.Fatalf("live: got = %+v, want a pointer at the draft with no text", live)
 	}
-	own := EventFilter{PlatformExperimentID: draft, AgentID: planner}
+	own := domain.EventFilter{PlatformExperimentID: draft, AgentID: planner}
 	if !own.Matches(live) {
 		t.Fatal("the planner's own subscription does not carry the revision")
 	}
@@ -852,9 +852,9 @@ func TestARevisionIsAnEventOnThePlannersStreamLiveAndReplayed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var revisions []Event
+	var revisions []domain.Event
 	for _, e := range replayed {
-		if e.Kind == EventPlatformExperimentRevision {
+		if e.Kind == domain.EventPlatformExperimentRevision {
 			revisions = append(revisions, e)
 		}
 	}

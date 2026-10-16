@@ -22,11 +22,11 @@ import (
 
 // EventSource is the change stream this service serves. Both halves come from the one store that
 // owns them (db.EventsStore): the live one from Postgres LISTEN/NOTIFY, the catch-up one derived
-// from the rows the events describe. Concerns completes db.EventFilter.Matches for an agent filter.
+// from the rows the events describe. Concerns completes domain.EventFilter.Matches for an agent filter.
 type EventSource interface {
-	ListenEvents(ctx context.Context, out chan<- db.Event, listening func()) error
-	Replay(ctx context.Context, filter db.EventFilter, since int64) ([]db.Event, error)
-	Concerns(ctx context.Context, filter db.EventFilter, events []db.Event) ([]db.Event, error)
+	ListenEvents(ctx context.Context, out chan<- domain.Event, listening func()) error
+	Replay(ctx context.Context, filter domain.EventFilter, since int64) ([]domain.Event, error)
+	Concerns(ctx context.Context, filter domain.EventFilter, events []domain.Event) ([]domain.Event, error)
 }
 
 const (
@@ -54,12 +54,12 @@ const (
 // filter is mutable because a connected client may re-scope its own subscription without dropping
 // the socket, so it is read and written under the hub's lock — the same lock broadcast holds.
 type subscriber struct {
-	filter db.EventFilter
+	filter domain.EventFilter
 	// since is the cursor this connection opened at. A widened filter replays the newly-added
 	// kinds from here (or from where they were last delivered), which is what stops a widen from
 	// being a silent gap.
 	since  int64
-	events chan db.Event
+	events chan domain.Event
 	// lagged is closed when this subscriber fell further behind than subscriberBuffer. The
 	// connection is then closed, deliberately, so the client reconnects and replays.
 	lagged chan struct{}
@@ -76,8 +76,8 @@ type hub struct {
 
 func newHub() *hub { return &hub{subs: map[*subscriber]struct{}{}} }
 
-func (h *hub) subscribe(filter db.EventFilter, since int64) *subscriber {
-	sub := &subscriber{filter: filter, since: since, events: make(chan db.Event, subscriberBuffer), lagged: make(chan struct{})}
+func (h *hub) subscribe(filter domain.EventFilter, since int64) *subscriber {
+	sub := &subscriber{filter: filter, since: since, events: make(chan domain.Event, subscriberBuffer), lagged: make(chan struct{})}
 	h.mu.Lock()
 	h.subs[sub] = struct{}{}
 	h.mu.Unlock()
@@ -86,13 +86,13 @@ func (h *hub) subscribe(filter db.EventFilter, since int64) *subscriber {
 
 // setFilter re-scopes one live connection. It takes the same lock broadcast does, so an event is
 // matched against either the old filter or the new one and never against a half-written one.
-func (h *hub) setFilter(sub *subscriber, filter db.EventFilter) {
+func (h *hub) setFilter(sub *subscriber, filter domain.EventFilter) {
 	h.mu.Lock()
 	sub.filter = filter
 	h.mu.Unlock()
 }
 
-func (h *hub) filterOf(sub *subscriber) db.EventFilter {
+func (h *hub) filterOf(sub *subscriber) domain.EventFilter {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return sub.filter
@@ -106,13 +106,13 @@ type WatchSubscription struct {
 	ExperimentID         string   `json:"experiment_id"`
 	AgentID              string   `json:"agent_id"`
 	Kinds                []string `json:"kinds"`
-	// Decisions is set on a stream narrowed to what may need a decision (db.EventFilter).
+	// Decisions is set on a stream narrowed to what may need a decision (domain.EventFilter).
 	Decisions bool `json:"decisions,omitempty"`
 	// Since is the cursor this connection opened at, and the floor a widened filter replays from.
 	Since int64 `json:"since"`
 }
 
-func describe(filter db.EventFilter, since int64) WatchSubscription {
+func describe(filter domain.EventFilter, since int64) WatchSubscription {
 	kinds := make([]string, 0, len(filter.Kinds))
 	for kind := range filter.Kinds {
 		kinds = append(kinds, kind)
@@ -134,7 +134,7 @@ func (h *hub) unsubscribe(sub *subscriber) {
 	h.mu.Unlock()
 }
 
-func (h *hub) broadcast(e db.Event) {
+func (h *hub) broadcast(e domain.Event) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for sub := range h.subs {
@@ -194,7 +194,7 @@ func NewWatchHandler(source EventSource, experiments experimentLookup, authentic
 func (h *WatchHandler) Start(ctx context.Context) {
 	go func() {
 		for ctx.Err() == nil {
-			events := make(chan db.Event, listenerBuffer)
+			events := make(chan domain.Event, listenerBuffer)
 			done := make(chan error, 1)
 			listenCtx, cancel := context.WithCancel(ctx)
 			go func() { done <- h.source.ListenEvents(listenCtx, events, h.hub.dropAll) }()
@@ -345,7 +345,7 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// It is stack-local to this connection and vanishes with it, like the subscription itself.
-	delivered := &served{ctx: r.Context(), source: h.source, logger: h.logger, floor: map[string]int64{}, sent: map[db.Event]bool{}}
+	delivered := &served{ctx: r.Context(), source: h.source, logger: h.logger, floor: map[string]int64{}, sent: map[domain.Event]bool{}}
 	for kind := range filter.Kinds {
 		delivered.floor[kind] = since
 	}
@@ -391,7 +391,7 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func writeEvent(conn *wsConn, e db.Event) error {
+func writeEvent(conn *wsConn, e domain.Event) error {
 	payload, err := json.Marshal(e)
 	if err != nil {
 		return err
@@ -413,10 +413,10 @@ type served struct {
 	source EventSource
 	logger *zap.Logger
 	floor  map[string]int64
-	sent   map[db.Event]bool
+	sent   map[domain.Event]bool
 }
 
-func (s *served) send(conn *wsConn, filter db.EventFilter, events ...db.Event) error {
+func (s *served) send(conn *wsConn, filter domain.EventFilter, events ...domain.Event) error {
 	events, err := s.source.Concerns(s.ctx, filter, events)
 	if err != nil {
 		s.logger.Error("watch: scope events to their agent", zap.Error(err))
@@ -538,13 +538,13 @@ func writeFrame(conn *wsConn, frame watchFrame) error {
 // than ignored: a client filtering on a kind that does not exist would wait forever on a stream
 // that looks healthy, which is exactly the failure /watch exists to end.
 //
-// It is built from db.EventKinds, which is also what GET /watch/kinds serves, so the set the
+// It is built from domain.EventKinds, which is also what GET /watch/kinds serves, so the set the
 // server accepts and the set it advertises are one set. A second list written by hand here would
 // be wrong the first time a kind was added, and wrong in the worst direction: a caller told a kind
 // exists, then refused when it asks for it.
 var knownKinds = func() map[string]bool {
-	kinds := make(map[string]bool, len(db.EventKinds))
-	for _, k := range db.EventKinds {
+	kinds := make(map[string]bool, len(domain.EventKinds))
+	for _, k := range domain.EventKinds {
 		kinds[k.Kind] = true
 	}
 	return kinds
@@ -556,7 +556,7 @@ var knownKinds = func() map[string]bool {
 // beside it. That makes it discoverable from /explore instead of folklore an agent could only
 // learn by being told; an agent's prompt carries only /explore/rules.
 //
-// The body is db.EventKinds itself, the same slice parseWatchQuery validates against, so this
+// The body is domain.EventKinds itself, the same slice parseWatchQuery validates against, so this
 // cannot describe a stream the server does not serve.
 func RegisterWatchHuma(doc *apidocs.Doc) {
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
@@ -583,14 +583,14 @@ func RegisterWatchHuma(doc *apidocs.Doc) {
 			"you last saw them; narrowing stops delivery. Nothing else may be sent up the socket.\n\n" +
 			"`hl watch` holds the socket for you: with an agent's token it watches that agent's own resources, " +
 			"resumes from the cursor it saved last time, and returns with the first batch of events.",
-	}, func(context.Context, *struct{}) (*struct{ Body []db.EventKindDoc }, error) {
-		return &struct{ Body []db.EventKindDoc }{Body: db.EventKinds}, nil
+	}, func(context.Context, *struct{}) (*struct{ Body []domain.EventKindDoc }, error) {
+		return &struct{ Body []domain.EventKindDoc }{Body: domain.EventKinds}, nil
 	})
 }
 
-func parseWatchQuery(r *http.Request) (db.EventFilter, int64, error) {
+func parseWatchQuery(r *http.Request) (domain.EventFilter, int64, error) {
 	q := r.URL.Query()
-	filter := db.EventFilter{
+	filter := domain.EventFilter{
 		PlatformExperimentID: q.Get("platform_experiment_id"),
 		ExperimentID:         q.Get("experiment_id"),
 		AgentID:              q.Get("agent_id"),
@@ -630,7 +630,7 @@ func parseWatchQuery(r *http.Request) (db.EventFilter, int64, error) {
 // default leaves out.
 func parseKinds(raw string) (map[string]bool, error) {
 	if strings.TrimSpace(raw) == "" {
-		return db.DefaultKinds(), nil
+		return domain.DefaultKinds(), nil
 	}
 	kinds := map[string]bool{}
 	for _, kind := range strings.Split(raw, ",") {

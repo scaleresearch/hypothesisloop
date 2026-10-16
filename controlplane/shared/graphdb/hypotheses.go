@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -45,7 +44,7 @@ type NewHypothesis struct {
 	DistinctFrom []string
 	// Stamp is the watch stream position of this write and its check for an earlier aborted one
 	// (see db.EventsStore.Emit).
-	Stamp db.Stamp
+	Stamp domain.Stamp
 }
 
 // Register creates a hypothesis and its outgoing links in one transaction, or returns the existing
@@ -140,7 +139,7 @@ type LinkResult struct {
 // stamp.Position. Only its registering agent may, or anyone when it was submitted by a human.
 // Links are append-only. agentID is the agent whose link it is, empty when no agent owns it, and
 // actor whose credential adds it.
-func (s *Store) AddLink(ctx context.Context, fromID, agentID string, actor domain.Actor, spec domain.LinkSpec, stamp db.Stamp) (*LinkResult, error) {
+func (s *Store) AddLink(ctx context.Context, fromID, agentID string, actor domain.Actor, spec domain.LinkSpec, stamp domain.Stamp) (*LinkResult, error) {
 	at := now()
 	out, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		from, err := getHypothesis(ctx, tx, fromID)
@@ -196,7 +195,7 @@ func (s *Store) AddLink(ctx context.Context, fromID, agentID string, actor domai
 // stamp.Position: the owning agent's verdict on its own claim, or anyone's on one no agent owns.
 // actor is whose credential gives the verdict, kept with the status it set. announce is true when the caller emits hypothesis.status: the status changed, or it already
 // held that value and the event of the write that set it was never sent (see restamp).
-func (s *Store) UpdateStatus(ctx context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus, stamp db.Stamp) (h *domain.Hypothesis, announce bool, err error) {
+func (s *Store) UpdateStatus(ctx context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus, stamp domain.Stamp) (h *domain.Hypothesis, announce bool, err error) {
 	at := now()
 	out, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		h, err := getHypothesis(ctx, tx, id)
@@ -575,7 +574,7 @@ ON CREATE SET r.agent_id = row.agent_id, r.author = row.author, r.created_at = r
 // retired human_writes table holds for them (see db.MoveHumanWrites). A hypothesis takes its
 // links made at registration with it. Only a record with no actor is touched, so running it
 // again changes nothing.
-func (s *Store) CreditUsers(ctx context.Context, writes []db.HumanWrite) error {
+func (s *Store) CreditUsers(ctx context.Context, writes []domain.HumanWrite) error {
 	var hypotheses []map[string]any
 	links := map[string][]map[string]any{}
 	for _, w := range writes {
@@ -823,7 +822,7 @@ func linkMatch(platformExperimentID string, spec domain.LinkSpec) string {
 // stamp.Position there instead and reports true, so the caller emits the event again from a
 // transaction that has to commit for the write to count. A position the stamping transaction is
 // still running on is left to that transaction's own caller, which retries if it aborts.
-func restamp(ctx context.Context, tx neo4j.ManagedTransaction, stamp db.Stamp, match, prop string, params map[string]any) (bool, error) {
+func restamp(ctx context.Context, tx neo4j.ManagedTransaction, stamp domain.Stamp, match, prop string, params map[string]any) (bool, error) {
 	records, err := collect(ctx, tx, match+" RETURN "+prop, params)
 	if err != nil || len(records) == 0 {
 		return false, err

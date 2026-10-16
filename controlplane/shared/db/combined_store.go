@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
 // Store embeds all store types providing unified access to all
@@ -24,10 +23,6 @@ type Store struct {
 	*HypothesesStore
 	*ClustersStore
 	*EnvironmentsStore
-
-	// usage is the sole read/write path for agent quota consumption (used_guaranteed_*/
-	// used_burst_*), backed by the metrics DB rather than Postgres — see metricsdb.UsageTracker.
-	usage *metricsdb.UsageTracker
 
 	// maxInfraRequeues bounds how many times one experiment may be returned to the queue for
 	// free after an infrastructure fault, before ResolveTermination gives up and terminates it
@@ -52,7 +47,6 @@ func NewStore(pool *Pool, metricsDBURL string, maxInfraRequeues int) *Store {
 		HypothesesStore:          NewHypothesesStore(pool),
 		ClustersStore:            NewClustersStore(pool),
 		EnvironmentsStore:        NewEnvironmentsStore(pool),
-		usage:                    metricsdb.NewUsageTracker(metricsDBURL),
 	}
 }
 

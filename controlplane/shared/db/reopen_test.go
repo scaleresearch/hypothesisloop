@@ -143,7 +143,7 @@ func TestAReopenedRunReadsRunningAndWantsTheAgentsTheCloseEnded(t *testing.T) {
 	for told := false; !told; {
 		select {
 		case e := <-events:
-			told = e.Kind == EventPlatformExperimentStatus && e.Subject == run.ID && e.Value == string(domain.PlatformExpRunning)
+			told = e.Kind == domain.EventPlatformExperimentStatus && e.Subject == run.ID && e.Value == string(domain.PlatformExpRunning)
 		case <-deadline:
 			t.Fatal("no platform_experiment.status running was announced")
 		}

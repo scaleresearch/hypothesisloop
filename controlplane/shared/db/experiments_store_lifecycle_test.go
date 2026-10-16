@@ -47,8 +47,8 @@ func TestUnderperformingIsSentOnceAndReplayed(t *testing.T) {
 	ctx := context.Background()
 	id := "underperforming-" + peID
 	seedExperimentForCapTest(t, pool, id, agentID, peID, 1, domain.StatusRunning)
-	filter := EventFilter{PlatformExperimentID: peID, AgentID: agentID, Kinds: map[string]bool{EventJobUnderperforming: true}}
-	replay := func(since int64) []Event {
+	filter := domain.EventFilter{PlatformExperimentID: peID, AgentID: agentID, Kinds: map[string]bool{domain.EventJobUnderperforming: true}}
+	replay := func(since int64) []domain.Event {
 		t.Helper()
 		got, err := events.Replay(ctx, filter, since)
 		if err != nil {
@@ -71,15 +71,15 @@ func TestUnderperformingIsSentOnceAndReplayed(t *testing.T) {
 	if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET status = 'FAILED' WHERE id = $1`, id); err != nil {
 		t.Fatalf("to FAILED: %v", err)
 	}
-	var sent []Event
+	var sent []domain.Event
 	for e := range live {
 		if e.Subject != id {
 			continue
 		}
-		if e.Kind == EventJobUnderperforming {
+		if e.Kind == domain.EventJobUnderperforming {
 			sent = append(sent, e)
 		}
-		if e.Kind == EventExperimentStatus && e.Value == string(domain.StatusFailed) {
+		if e.Kind == domain.EventExperimentStatus && e.Value == string(domain.StatusFailed) {
 			break
 		}
 	}

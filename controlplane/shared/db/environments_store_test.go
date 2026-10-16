@@ -530,15 +530,15 @@ func TestAnAgentThatAskedForABuildIsToldItEnded(t *testing.T) {
 	if !w.finish(t, w.ofA, env, domain.EnvironmentBuildOutcome{Fault: domain.EnvironmentFaultFile, LogTail: "E: no package"}) {
 		t.Fatal("the assigned cluster's report was refused")
 	}
-	failed := awaitEvent(t, events, EventEnvironmentStatus, failing.Key)
+	failed := awaitEvent(t, events, domain.EventEnvironmentStatus, failing.Key)
 	if failed.Value != "failed" || failed.AgentID != w.agent || failed.PlatformExperimentID != w.peA ||
 		!strings.Contains(failed.Detail, "commit cccccccccccc ") || !strings.Contains(failed.Detail, "on pytorch") || !strings.Contains(failed.Detail, "`hl env status`") {
 		t.Fatalf("failed: got = %+v, want it failed for the agent, naming the commit, the image and hl env status", failed)
 	}
-	if own := (EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent}); !own.Matches(failed) {
+	if own := (domain.EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent}); !own.Matches(failed) {
 		t.Error("the agent's own subscription does not carry the end of its build")
 	}
-	if rival := (EventFilter{PlatformExperimentID: w.peA, AgentID: "another"}); rival.Matches(failed) {
+	if rival := (domain.EventFilter{PlatformExperimentID: w.peA, AgentID: "another"}); rival.Matches(failed) {
 		t.Error("a rival's subscription carries the end of the agent's build")
 	}
 
@@ -550,24 +550,24 @@ func TestAnAgentThatAskedForABuildIsToldItEnded(t *testing.T) {
 	if !w.finish(t, w.ofA, env, domain.EnvironmentBuildOutcome{Image: "registry.test/env@sha256:" + w.suffix}) {
 		t.Fatal("the assigned cluster's report was refused")
 	}
-	built := awaitEvent(t, events, EventEnvironmentStatus, ready.Key)
+	built := awaitEvent(t, events, domain.EventEnvironmentStatus, ready.Key)
 	if built.Value != "ready" || !strings.Contains(built.Detail, "is built on pytorch") {
 		t.Fatalf("ready: got = %+v, want it built", built)
 	}
-	if decisions := (EventFilter{PlatformExperimentID: w.peA, Decisions: true}); decisions.Matches(built) || !decisions.Matches(failed) {
+	if decisions := (domain.EventFilter{PlatformExperimentID: w.peA, Decisions: true}); decisions.Matches(built) || !decisions.Matches(failed) {
 		t.Error("a decisions stream carries a build that is ready, or not one that failed")
 	}
 
 	if err := w.envs.AwaitEnvironmentBuild(ctx, ready.Key, w.peA, w.agent, codeRef, "pytorch"); err != nil {
 		t.Fatal(err)
 	}
-	replayed, err := NewEventsStore(w.pool, noHypothesisEvents{}).Replay(ctx, EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent}, before)
+	replayed, err := NewEventsStore(w.pool, noHypothesisEvents{}).Replay(ctx, domain.EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent}, before)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var told []Event
+	var told []domain.Event
 	for _, e := range replayed {
-		if e.Kind == EventEnvironmentStatus {
+		if e.Kind == domain.EventEnvironmentStatus {
 			told = append(told, e)
 		}
 	}
@@ -579,12 +579,12 @@ func TestAnAgentThatAskedForABuildIsToldItEnded(t *testing.T) {
 	if err := w.envs.AwaitEnvironmentBuild(ctx, again.Key, w.peA, w.agent, codeRef, "pytorch"); err != nil {
 		t.Fatal(err)
 	}
-	replayed, err = NewEventsStore(w.pool, noHypothesisEvents{}).Replay(ctx, EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent}, before)
+	replayed, err = NewEventsStore(w.pool, noHypothesisEvents{}).Replay(ctx, domain.EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent}, before)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, e := range replayed {
-		if e.Kind == EventEnvironmentStatus && e.Subject == again.Key {
+		if e.Kind == domain.EventEnvironmentStatus && e.Subject == again.Key {
 			t.Errorf("asked again once it failed: still told %+v, want it waiting for the next build", e)
 		}
 	}
@@ -604,7 +604,7 @@ func TestAnAgentIsToldItsBuildLoadedAndThenOnlyOfAFailure(t *testing.T) {
 
 	pushed := w.ensure(t, w.orgA, "told loaded then pushed")
 	failing := w.ensure(t, w.orgA, "told loaded then failed")
-	var loaded []Event
+	var loaded []domain.Event
 	for _, made := range []*domain.Environment{pushed, failing} {
 		if err := w.envs.AwaitEnvironmentBuild(ctx, made.Key, w.peA, w.agent, codeRef, "pytorch"); err != nil {
 			t.Fatal(err)
@@ -615,7 +615,7 @@ func TestAnAgentIsToldItsBuildLoadedAndThenOnlyOfAFailure(t *testing.T) {
 				t.Fatalf("loaded: took %v, %v", took, err)
 			}
 		}
-		told := awaitEvent(t, events, EventEnvironmentStatus, made.Key)
+		told := awaitEvent(t, events, domain.EventEnvironmentStatus, made.Key)
 		if told.Value != "loaded" || told.AgentID != w.agent || !strings.Contains(told.Detail, "commit dddddddddddd ") ||
 			!strings.Contains(told.Detail, "loaded on cluster "+w.ofA+" ") || !strings.Contains(told.Detail, "submit its jobs now") {
 			t.Fatalf("loaded: got = %+v, want it loaded on %s, saying to submit", told, w.ofA)
@@ -631,14 +631,14 @@ func TestAnAgentIsToldItsBuildLoadedAndThenOnlyOfAFailure(t *testing.T) {
 	if !w.finish(t, w.ofA, env, domain.EnvironmentBuildOutcome{Fault: domain.EnvironmentFaultFile, LogTail: "E: no package"}) {
 		t.Fatal("the file's fault was refused")
 	}
-	var failed Event
+	var failed domain.Event
 	for failed.Kind == "" {
 		select {
 		case e := <-events:
 			switch {
-			case e.Kind == EventEnvironmentStatus && e.Subject == pushed.Key:
+			case e.Kind == domain.EventEnvironmentStatus && e.Subject == pushed.Key:
 				t.Fatalf("told %+v, want nothing more of a build told loaded that ended ready", e)
-			case e.Kind == EventEnvironmentStatus && e.Subject == failing.Key:
+			case e.Kind == domain.EventEnvironmentStatus && e.Subject == failing.Key:
 				failed = e
 			}
 		case <-time.After(5 * time.Second):
@@ -649,17 +649,17 @@ func TestAnAgentIsToldItsBuildLoadedAndThenOnlyOfAFailure(t *testing.T) {
 		t.Fatalf("failed: got = %+v", failed)
 	}
 
-	replayed, err := NewEventsStore(w.pool, noHypothesisEvents{}).Replay(ctx, EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent}, before)
+	replayed, err := NewEventsStore(w.pool, noHypothesisEvents{}).Replay(ctx, domain.EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent}, before)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var told []Event
+	var told []domain.Event
 	for _, e := range replayed {
-		if e.Kind == EventEnvironmentStatus {
+		if e.Kind == domain.EventEnvironmentStatus {
 			told = append(told, e.Identity())
 		}
 	}
-	if want := []Event{loaded[0].Identity(), loaded[1].Identity(), failed.Identity()}; !slices.Equal(told, want) {
+	if want := []domain.Event{loaded[0].Identity(), loaded[1].Identity(), failed.Identity()}; !slices.Equal(told, want) {
 		t.Errorf("replayed: got = %v, want the live events %v", told, want)
 	}
 }

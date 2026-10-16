@@ -32,13 +32,13 @@ import (
 
 // fakeEvents is the change stream reduced to the two rules the real one guarantees: replay
 // returns the matching events at or after a cursor, in position order, and the live stream carries
-// whatever the database announced. It applies db.EventFilter itself rather than a test-local
+// whatever the database announced. It applies domain.EventFilter itself rather than a test-local
 // approximation, so a test here fails for the same reason production would.
 type fakeEvents struct {
 	// mu guards stored: a test adds to it while the server's handler goroutines replay from it.
 	mu     sync.Mutex
-	stored []db.Event
-	live   chan db.Event
+	stored []domain.Event
+	live   chan domain.Event
 	// owner maps a hypothesis id to the agent that registered it; links maps a hypothesis id to the
 	// ids it links to. Together they answer Concerns as the graph does.
 	owner map[string]string
@@ -55,12 +55,12 @@ type fakeEvents struct {
 	listeningOnce sync.Once
 }
 
-func newFakeEvents(stored ...db.Event) *fakeEvents {
-	return &fakeEvents{stored: stored, live: make(chan db.Event, 16), listening: make(chan struct{})}
+func newFakeEvents(stored ...domain.Event) *fakeEvents {
+	return &fakeEvents{stored: stored, live: make(chan domain.Event, 16), listening: make(chan struct{})}
 }
 
-func (f *fakeEvents) Replay(_ context.Context, filter db.EventFilter, since int64) ([]db.Event, error) {
-	var out []db.Event
+func (f *fakeEvents) Replay(_ context.Context, filter domain.EventFilter, since int64) ([]domain.Event, error) {
+	var out []domain.Event
 	if f.next != 0 && since > f.next {
 		return nil, db.ErrUnknownCursor
 	}
@@ -77,15 +77,15 @@ func (f *fakeEvents) Replay(_ context.Context, filter db.EventFilter, since int6
 	return out, nil
 }
 
-func (f *fakeEvents) store(e db.Event) {
+func (f *fakeEvents) store(e domain.Event) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.stored = append(f.stored, e)
 }
 
-func (f *fakeEvents) Concerns(_ context.Context, filter db.EventFilter, events []db.Event) ([]db.Event, error) {
+func (f *fakeEvents) Concerns(_ context.Context, filter domain.EventFilter, events []domain.Event) ([]domain.Event, error) {
 	f.concernsCalls.Add(1)
-	var kept []db.Event
+	var kept []domain.Event
 	for _, e := range events {
 		if f.concerns(filter, e) {
 			kept = append(kept, e)
@@ -94,25 +94,25 @@ func (f *fakeEvents) Concerns(_ context.Context, filter db.EventFilter, events [
 	return kept, nil
 }
 
-func (f *fakeEvents) concerns(filter db.EventFilter, e db.Event) bool {
+func (f *fakeEvents) concerns(filter domain.EventFilter, e domain.Event) bool {
 	switch {
 	case filter.AgentID == "" || !strings.HasPrefix(e.Subject, "hyp-"):
 		return true
-	case e.Kind == db.EventHypothesisNew:
+	case e.Kind == domain.EventHypothesisNew:
 		for _, to := range f.links[e.Subject] {
 			if f.owner[to] == filter.AgentID {
 				return true
 			}
 		}
 		return false
-	case e.Kind == db.EventHypothesisLink:
+	case e.Kind == domain.EventHypothesisLink:
 		return f.owner[e.Detail] == filter.AgentID
 	default:
 		return f.owner[e.Subject] == filter.AgentID
 	}
 }
 
-func (f *fakeEvents) ListenEvents(ctx context.Context, out chan<- db.Event, listening func()) error {
+func (f *fakeEvents) ListenEvents(ctx context.Context, out chan<- domain.Event, listening func()) error {
 	if f.listenGate != nil {
 		select {
 		case <-f.listenGate:
@@ -240,9 +240,9 @@ func (c *watchClient) sendText(t *testing.T, text string) {
 }
 
 // next returns the next event the server sent, skipping the pings that keep an idle stream alive.
-func (c *watchClient) next(t *testing.T) db.Event {
+func (c *watchClient) next(t *testing.T) domain.Event {
 	t.Helper()
-	var e db.Event
+	var e domain.Event
 	payload := c.nextRaw(t)
 	if err := json.Unmarshal(payload, &e); err != nil {
 		t.Fatalf("decode event %q: got = %v, want = nil", payload, err)
@@ -289,8 +289,8 @@ func (c *watchClient) nextRaw(t *testing.T) []byte {
 	}
 }
 
-func statusEvent(subject, value, agentID string, cursor int64) db.Event {
-	return db.Event{Kind: db.EventExperimentStatus, Subject: subject, Value: value,
+func statusEvent(subject, value, agentID string, cursor int64) domain.Event {
+	return domain.Event{Kind: domain.EventExperimentStatus, Subject: subject, Value: value,
 		PlatformExperimentID: "pe-1", AgentID: agentID, Position: cursor, Cursor: cursor}
 }
 
@@ -374,14 +374,14 @@ func TestAnEventAlreadyReplayedIsNotSentAgainWhenTheLiveStreamRepeatsIt(t *testi
 // at one cut_at. Each is news to the agent it names, so only the exact event a replay carried may
 // be dropped from the live stream, never its siblings.
 func TestEventsSharingACursorAreAllDeliveredAndOnlyTheReplayedOneIsDropped(t *testing.T) {
-	cut := func(agentID string) db.Event {
-		return db.Event{Kind: db.EventAgentCut, Subject: agentID, Value: "1", PlatformExperimentID: "pe-1", AgentID: agentID, Position: 500, Cursor: 500}
+	cut := func(agentID string) domain.Event {
+		return domain.Event{Kind: domain.EventAgentCut, Subject: agentID, Value: "1", PlatformExperimentID: "pe-1", AgentID: agentID, Position: 500, Cursor: 500}
 	}
 	source := newFakeEvents(cut("agent-a"))
 	server := watchServer(t, source)
 	client := dialWatch(t, server, url.Values{
 		"platform_experiment_id": {"pe-1"},
-		"kinds":                  {db.EventAgentCut},
+		"kinds":                  {domain.EventAgentCut},
 		"since":                  {"100"},
 	})
 
@@ -409,23 +409,23 @@ func TestASubscriptionNamingKindsReceivesOnlyThoseKinds(t *testing.T) {
 		"kinds":                  {"experiment.status"},
 	})
 
-	source.live <- db.Event{Kind: db.EventHypothesisNew, Subject: "hyp-1",
+	source.live <- domain.Event{Kind: domain.EventHypothesisNew, Subject: "hyp-1",
 		PlatformExperimentID: "pe-1", Position: 100, Cursor: 100}
-	source.live <- db.Event{Kind: db.EventCommentNew, Subject: "hyp-1",
+	source.live <- domain.Event{Kind: domain.EventCommentNew, Subject: "hyp-1",
 		PlatformExperimentID: "pe-1", Position: 150, Cursor: 150}
 	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
 
 	got := client.next(t)
-	if got.Kind != db.EventExperimentStatus {
-		t.Errorf("first delivered kind: got = %v, want = %v", got.Kind, db.EventExperimentStatus)
+	if got.Kind != domain.EventExperimentStatus {
+		t.Errorf("first delivered kind: got = %v, want = %v", got.Kind, domain.EventExperimentStatus)
 	}
 	if got.Value != "RUNNING" {
 		t.Errorf("first delivered value: got = %v, want = %v", got.Value, "RUNNING")
 	}
 }
 
-func hypEvent(kind, subject, detail, agentID string, position int64) db.Event {
-	return db.Event{Kind: kind, Subject: subject, Detail: detail, PlatformExperimentID: "pe-1",
+func hypEvent(kind, subject, detail, agentID string, position int64) domain.Event {
+	return domain.Event{Kind: kind, Subject: subject, Detail: detail, PlatformExperimentID: "pe-1",
 		AgentID: agentID, Position: position, Cursor: position}
 }
 
@@ -434,17 +434,17 @@ func hypEvent(kind, subject, detail, agentID string, position int64) db.Event {
 // someone else's hypothesis and the echo of the agent's own writes stay off it. Replay and live go
 // through the same rule, so a reconnect cannot widen or narrow what the agent is told.
 func TestAnAgentScopeCarriesOthersActivityOnItsOwnHypothesesAndNothingElseFromThePool(t *testing.T) {
-	events := []db.Event{
+	events := []domain.Event{
 		statusEvent("exp-2", "COMPLETED", "agent-b", 100),
-		hypEvent(db.EventCommentNew, "hyp-b", "", "agent-c", 110),
-		hypEvent(db.EventCommentNew, "hyp-a", "", "agent-a", 120),
-		hypEvent(db.EventCommentNew, "hyp-a", "", "agent-b", 130),
-		hypEvent(db.EventFindingNew, "hyp-a", "", "agent-b", 140),
-		hypEvent(db.EventHypothesisLink, "hyp-b", "hyp-a", "agent-b", 150),
-		hypEvent(db.EventHypothesisLink, "hyp-b", "pe-1", "agent-b", 160),
-		hypEvent(db.EventHypothesisNew, "hyp-c", "", "agent-b", 170),
-		hypEvent(db.EventHypothesisNew, "hyp-d", "", "agent-b", 180),
-		hypEvent(db.EventHypothesisStatus, "hyp-a", "", "agent-a", 190),
+		hypEvent(domain.EventCommentNew, "hyp-b", "", "agent-c", 110),
+		hypEvent(domain.EventCommentNew, "hyp-a", "", "agent-a", 120),
+		hypEvent(domain.EventCommentNew, "hyp-a", "", "agent-b", 130),
+		hypEvent(domain.EventFindingNew, "hyp-a", "", "agent-b", 140),
+		hypEvent(domain.EventHypothesisLink, "hyp-b", "hyp-a", "agent-b", 150),
+		hypEvent(domain.EventHypothesisLink, "hyp-b", "pe-1", "agent-b", 160),
+		hypEvent(domain.EventHypothesisNew, "hyp-c", "", "agent-b", 170),
+		hypEvent(domain.EventHypothesisNew, "hyp-d", "", "agent-b", 180),
+		hypEvent(domain.EventHypothesisStatus, "hyp-a", "", "agent-a", 190),
 		statusEvent("exp-1", "RUNNING", "agent-a", 200),
 		statusEvent("exp-1", "COMPLETED", "agent-a", 210),
 	}
@@ -665,9 +665,9 @@ func TestAnAgentCutReachesOnlyTheAgentItNames(t *testing.T) {
 		"agent_id":               {"agent-a"},
 	})
 
-	source.live <- db.Event{Kind: db.EventAgentCut, Subject: "agent-b", Value: "1",
+	source.live <- domain.Event{Kind: domain.EventAgentCut, Subject: "agent-b", Value: "1",
 		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 100, Cursor: 100}
-	source.live <- db.Event{Kind: db.EventAgentCut, Subject: "agent-a", Value: "1",
+	source.live <- domain.Event{Kind: domain.EventAgentCut, Subject: "agent-a", Value: "1",
 		PlatformExperimentID: "pe-1", AgentID: "agent-a", Position: 200, Cursor: 200}
 
 	if got := client.next(t).Subject; got != "agent-a" {
@@ -686,14 +686,14 @@ func TestARunWideChangeReachesAnAgentScopedSubscriptionWhoeverWroteIt(t *testing
 		"agent_id":               {"agent-a"},
 	})
 
-	source.live <- db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "advanced",
+	source.live <- domain.Event{Kind: domain.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "advanced",
 		PlatformExperimentID: "pe-1", Position: 100, Cursor: 100}
-	source.live <- db.Event{Kind: db.EventPlatformExperimentDescription, Subject: "pe-1",
+	source.live <- domain.Event{Kind: domain.EventPlatformExperimentDescription, Subject: "pe-1",
 		PlatformExperimentID: "pe-1", Position: 200, Cursor: 200}
-	source.live <- db.Event{Kind: db.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed",
+	source.live <- domain.Event{Kind: domain.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed",
 		PlatformExperimentID: "pe-1", Position: 300, Cursor: 300}
 
-	for _, want := range []string{db.EventStageBoundary, db.EventPlatformExperimentDescription, db.EventPlatformExperimentStatus} {
+	for _, want := range []string{domain.EventStageBoundary, domain.EventPlatformExperimentDescription, domain.EventPlatformExperimentStatus} {
 		if got := client.next(t).Kind; got != want {
 			t.Errorf("delivered kind: got = %v, want = %v", got, want)
 		}
@@ -709,14 +709,14 @@ func TestAJobScopedSubscriptionDoesNotReceiveTheRunWideKinds(t *testing.T) {
 	server := watchServer(t, source)
 	client := dialWatch(t, server, url.Values{"experiment_id": {"exp-1"}})
 
-	source.live <- db.Event{Kind: db.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed",
+	source.live <- domain.Event{Kind: domain.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed",
 		PlatformExperimentID: "pe-1", Position: 100, Cursor: 100}
-	source.live <- db.Event{Kind: db.EventAgentCut, Subject: "agent-a", Value: "1",
+	source.live <- domain.Event{Kind: domain.EventAgentCut, Subject: "agent-a", Value: "1",
 		PlatformExperimentID: "pe-1", AgentID: "agent-a", Position: 200, Cursor: 200}
 	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 300)
 
-	if got := client.next(t).Kind; got != db.EventExperimentStatus {
-		t.Errorf("first delivered kind: got = %v, want = %v", got, db.EventExperimentStatus)
+	if got := client.next(t).Kind; got != domain.EventExperimentStatus {
+		t.Errorf("first delivered kind: got = %v, want = %v", got, domain.EventExperimentStatus)
 	}
 }
 
@@ -725,7 +725,7 @@ func TestAJobScopedSubscriptionDoesNotReceiveTheRunWideKinds(t *testing.T) {
 // is the worse of the two failures: the caller does exactly what the documentation said and is
 // turned away with a 400 it cannot act on.
 func TestEveryAdvertisedKindIsAKindASubscriptionMayName(t *testing.T) {
-	for _, kind := range db.EventKinds {
+	for _, kind := range domain.EventKinds {
 		request := httptest.NewRequest(http.MethodGet,
 			"/watch?platform_experiment_id=pe-1&kinds="+url.QueryEscape(kind.Kind), nil)
 		filter, _, err := parseWatchQuery(request)
@@ -744,7 +744,7 @@ func TestEveryAdvertisedKindIsAKindASubscriptionMayName(t *testing.T) {
 // vocabulary was meant to end.
 func TestEveryKindASubscriptionMayNameIsAlsoAdvertised(t *testing.T) {
 	advertised := map[string]bool{}
-	for _, kind := range db.EventKinds {
+	for _, kind := range domain.EventKinds {
 		advertised[kind.Kind] = true
 	}
 	for kind := range knownKinds {
@@ -764,13 +764,13 @@ func TestASubscriptionNamingNoKindsCarriesEverythingTheAgentLoopWouldOtherwisePo
 	client := dialWatch(t, server, url.Values{"platform_experiment_id": {"pe-1"}})
 
 	wanted := []string{
-		db.EventExperimentStatus, db.EventExperimentBlocked, db.EventQuotaChanged,
-		db.EventAgentCut, db.EventPlatformExperimentStatus, db.EventPlatformExperimentDescription,
-		db.EventStageBoundary, db.EventHypothesisNew, db.EventHypothesisStatus,
-		db.EventFindingNew, db.EventCommentNew,
+		domain.EventExperimentStatus, domain.EventExperimentBlocked, domain.EventQuotaChanged,
+		domain.EventAgentCut, domain.EventPlatformExperimentStatus, domain.EventPlatformExperimentDescription,
+		domain.EventStageBoundary, domain.EventHypothesisNew, domain.EventHypothesisStatus,
+		domain.EventFindingNew, domain.EventCommentNew,
 	}
 	for i, kind := range wanted {
-		source.live <- db.Event{Kind: kind, Subject: "s", PlatformExperimentID: "pe-1",
+		source.live <- domain.Event{Kind: kind, Subject: "s", PlatformExperimentID: "pe-1",
 			AgentID: "agent-a", Position: int64(100 + i), Cursor: int64(100 + i)}
 	}
 	for _, want := range wanted {
@@ -789,12 +789,12 @@ func TestTheDefaultSubscriptionLeavesOutTheMetricPointerFirehose(t *testing.T) {
 	server := watchServer(t, source)
 	client := dialWatch(t, server, url.Values{"platform_experiment_id": {"pe-1"}})
 
-	source.live <- db.Event{Kind: db.EventMetricPoint, Subject: "exp-1", Value: "loss",
+	source.live <- domain.Event{Kind: domain.EventMetricPoint, Subject: "exp-1", Value: "loss",
 		PlatformExperimentID: "pe-1", AgentID: "agent-a", Position: 100, Cursor: 100}
 	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
 
-	if got := client.next(t).Kind; got != db.EventExperimentStatus {
-		t.Errorf("first delivered kind on the default subscription: got = %v, want = %v", got, db.EventExperimentStatus)
+	if got := client.next(t).Kind; got != domain.EventExperimentStatus {
+		t.Errorf("first delivered kind on the default subscription: got = %v, want = %v", got, domain.EventExperimentStatus)
 	}
 }
 
@@ -810,11 +810,11 @@ func TestNamingMetricPointExplicitlyStillDeliversItAndNothingElse(t *testing.T) 
 	})
 
 	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 100)
-	source.live <- db.Event{Kind: db.EventMetricPoint, Subject: "exp-1", Value: "loss",
+	source.live <- domain.Event{Kind: domain.EventMetricPoint, Subject: "exp-1", Value: "loss",
 		PlatformExperimentID: "pe-1", AgentID: "agent-a", Position: 200, Cursor: 200}
 
-	if got := client.next(t).Kind; got != db.EventMetricPoint {
-		t.Errorf("first delivered kind for an explicit kinds=metric.point: got = %v, want = %v", got, db.EventMetricPoint)
+	if got := client.next(t).Kind; got != domain.EventMetricPoint {
+		t.Errorf("first delivered kind for an explicit kinds=metric.point: got = %v, want = %v", got, domain.EventMetricPoint)
 	}
 }
 
@@ -856,11 +856,11 @@ func TestAConnectedClientIsToldTheFilterActuallyInForceIncludingTheDefaultItDidN
 	if got.PlatformExperimentID != "pe-1" || got.AgentID != "agent-a" {
 		t.Errorf("reported scope: got = %v/%v, want = pe-1/agent-a", got.PlatformExperimentID, got.AgentID)
 	}
-	if len(got.Kinds) != len(db.DefaultKinds()) {
-		t.Errorf("reported kinds: got = %v, want = the %v default kinds", got.Kinds, len(db.DefaultKinds()))
+	if len(got.Kinds) != len(domain.DefaultKinds()) {
+		t.Errorf("reported kinds: got = %v, want = the %v default kinds", got.Kinds, len(domain.DefaultKinds()))
 	}
 	for _, kind := range got.Kinds {
-		if kind == db.EventMetricPoint {
+		if kind == domain.EventMetricPoint {
 			t.Errorf("reported kinds: got = %v, want = one without metric.point", got.Kinds)
 		}
 	}
@@ -873,7 +873,7 @@ func TestAConnectedClientIsToldTheFilterActuallyInForceIncludingTheDefaultItDidN
 // repair.
 func TestWideningAFilterReplaysTheAddedKindFromWhereTheConnectionStoodRatherThanGoingLiveOnly(t *testing.T) {
 	source := newFakeEvents(
-		db.Event{Kind: db.EventHypothesisNew, Subject: "hyp-1",
+		domain.Event{Kind: domain.EventHypothesisNew, Subject: "hyp-1",
 			PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 150, Cursor: 150},
 	)
 	server := watchServer(t, source)
@@ -892,7 +892,7 @@ func TestWideningAFilterReplaysTheAddedKindFromWhereTheConnectionStoodRatherThan
 
 	// The pool event predates the last status this connection saw, and is delivered anyway:
 	// nothing carried that kind before, so nothing has served it.
-	if got := client.next(t); got.Kind != db.EventHypothesisNew || got.Cursor != 150 {
+	if got := client.next(t); got.Kind != domain.EventHypothesisNew || got.Cursor != 150 {
 		t.Errorf("first frame after widening: got = %v at %v, want = hypothesis.new at 150", got.Kind, got.Cursor)
 	}
 	if got := readSubscription(t, client); len(got.Kinds) != 2 {
@@ -903,7 +903,7 @@ func TestWideningAFilterReplaysTheAddedKindFromWhereTheConnectionStoodRatherThan
 // A replay starts at the floor it resumes from, the event that set the floor included. One this
 // connection already received live must not be sent again when a narrowed kind is re-added.
 func TestReAddingANarrowedKindDoesNotResendTheEventsItAlreadyDeliveredLive(t *testing.T) {
-	pool := db.Event{Kind: db.EventHypothesisNew, Subject: "hyp-1",
+	pool := domain.Event{Kind: domain.EventHypothesisNew, Subject: "hyp-1",
 		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 150, Cursor: 150}
 	source := newFakeEvents()
 	server := watchServer(t, source)
@@ -924,7 +924,7 @@ func TestReAddingANarrowedKindDoesNotResendTheEventsItAlreadyDeliveredLive(t *te
 	readSubscription(t, client)
 
 	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
-	if got := client.next(t); got.Kind != db.EventExperimentStatus {
+	if got := client.next(t); got.Kind != domain.EventExperimentStatus {
 		t.Errorf("next frame after re-adding the kind: got = %v %v, want = the live status, with no repeat of hyp-1", got.Kind, got.Subject)
 	}
 }
@@ -956,11 +956,11 @@ func TestAFilterChangeDoesNotDropAnEventThePreChangeFilterWouldHaveDelivered(t *
 		if frame.Subscription != nil {
 			continue
 		}
-		var e db.Event
+		var e domain.Event
 		if err := json.Unmarshal(payload, &e); err != nil {
 			t.Fatalf("decode event %q: got = %v, want = nil", payload, err)
 		}
-		if e.Kind == db.EventExperimentStatus && e.Value == "RUNNING" {
+		if e.Kind == domain.EventExperimentStatus && e.Value == "RUNNING" {
 			return
 		}
 	}
@@ -976,16 +976,16 @@ func TestNarrowingAFilterStopsTheDroppedKindAndKeepsTheOnesLeft(t *testing.T) {
 	client := dialWatch(t, server, url.Values{"platform_experiment_id": {"pe-1"}})
 
 	client.sendText(t, `{"kinds": "experiment.status"}`)
-	if got := readSubscription(t, client); len(got.Kinds) != 1 || got.Kinds[0] != db.EventExperimentStatus {
+	if got := readSubscription(t, client); len(got.Kinds) != 1 || got.Kinds[0] != domain.EventExperimentStatus {
 		t.Fatalf("reported kinds after narrowing: got = %v, want = [experiment.status]", got.Kinds)
 	}
 
-	source.live <- db.Event{Kind: db.EventCommentNew, Subject: "hyp-1",
+	source.live <- domain.Event{Kind: domain.EventCommentNew, Subject: "hyp-1",
 		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 100, Cursor: 100}
 	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
 
-	if got := client.next(t).Kind; got != db.EventExperimentStatus {
-		t.Errorf("first delivered kind after narrowing: got = %v, want = %v", got, db.EventExperimentStatus)
+	if got := client.next(t).Kind; got != domain.EventExperimentStatus {
+		t.Errorf("first delivered kind after narrowing: got = %v, want = %v", got, domain.EventExperimentStatus)
 	}
 }
 
@@ -1028,15 +1028,15 @@ func TestTheDefaultSubscriptionScopedToAnAgentStillNeverCarriesAnotherAgentsOwnE
 	})
 
 	source.live <- statusEvent("exp-2", "RUNNING", "agent-b", 100)
-	source.live <- db.Event{Kind: db.EventQuotaChanged, Subject: "agent-b", Value: "9",
+	source.live <- domain.Event{Kind: domain.EventQuotaChanged, Subject: "agent-b", Value: "9",
 		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 150, Cursor: 150}
-	source.live <- db.Event{Kind: db.EventAgentCut, Subject: "agent-b", Value: "1",
+	source.live <- domain.Event{Kind: domain.EventAgentCut, Subject: "agent-b", Value: "1",
 		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 175, Cursor: 175}
-	source.live <- db.Event{Kind: db.EventQuotaChanged, Subject: "agent-a", Value: "4",
+	source.live <- domain.Event{Kind: domain.EventQuotaChanged, Subject: "agent-a", Value: "4",
 		PlatformExperimentID: "pe-1", AgentID: "agent-a", Position: 200, Cursor: 200}
 
 	got := client.next(t)
-	if got.Kind != db.EventQuotaChanged || got.Subject != "agent-a" {
+	if got.Kind != domain.EventQuotaChanged || got.Subject != "agent-a" {
 		t.Errorf("first delivered event: got = %v for %v, want = quota.changed for agent-a", got.Kind, got.Subject)
 	}
 }
@@ -1050,7 +1050,7 @@ func TestTheDefaultTheServerAppliesIsTheDefaultGETWatchKindsAdvertises(t *testin
 	if err != nil {
 		t.Fatalf("subscribing without naming kinds: got = %v, want = nil", err)
 	}
-	for _, kind := range db.EventKinds {
+	for _, kind := range domain.EventKinds {
 		if filter.Kinds[kind.Kind] != kind.Default {
 			t.Errorf("kind %v on a subscription naming none: got = %v, want = %v (as advertised)",
 				kind.Kind, filter.Kinds[kind.Kind], kind.Default)
@@ -1076,10 +1076,10 @@ func TestHLWatchPrintsWhatTheServerSaysThisConnectionIsSubscribedTo(t *testing.T
 	}
 }
 
-func eventLines(output string) []db.Event {
-	var events []db.Event
+func eventLines(output string) []domain.Event {
+	var events []domain.Event
 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
-		var e db.Event
+		var e domain.Event
 		if json.Unmarshal([]byte(line), &e) == nil && e.Kind != "" {
 			events = append(events, e)
 		}
@@ -1087,7 +1087,7 @@ func eventLines(output string) []db.Event {
 	return events
 }
 
-func positions(events []db.Event) []int64 {
+func positions(events []domain.Event) []int64 {
 	out := []int64{}
 	for _, e := range events {
 		out = append(out, e.Position)
@@ -1107,7 +1107,7 @@ func agentEnv(t *testing.T) []string {
 func TestHLWatchResumesFromItsSavedCursorWithoutRepeatsOrGaps(t *testing.T) {
 	source := newFakeEvents(
 		statusEvent("exp-1", "COMPLETED", "agent-a", 100),
-		db.Event{Kind: db.EventExperimentStatus, Subject: "exp-2", Value: "FAILED", PlatformExperimentID: "pe-1",
+		domain.Event{Kind: domain.EventExperimentStatus, Subject: "exp-2", Value: "FAILED", PlatformExperimentID: "pe-1",
 			AgentID: "agent-a", Position: 110, Cursor: 105},
 	)
 	server := watchServer(t, source)
@@ -1175,8 +1175,8 @@ func TestAConnectionForgetsTheEventsItsFloorHasPassedAndStillDropsTheirRepeats(t
 	wire := &countingConn{}
 	conn := &wsConn{conn: wire, rw: bufio.NewReadWriter(bufio.NewReader(strings.NewReader("")), bufio.NewWriter(wire))}
 	delivered := &served{ctx: context.Background(), source: newFakeEvents(), logger: zap.NewNop(),
-		floor: map[string]int64{}, sent: map[db.Event]bool{}}
-	filter := db.EventFilter{PlatformExperimentID: "pe-1"}
+		floor: map[string]int64{}, sent: map[domain.Event]bool{}}
+	filter := domain.EventFilter{PlatformExperimentID: "pe-1"}
 
 	for cursor := int64(1); cursor <= 500; cursor++ {
 		if err := delivered.send(conn, filter, statusEvent("job-1", "RUNNING", "agent-1", cursor)); err != nil {

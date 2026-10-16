@@ -446,7 +446,7 @@ func openGraph(ctx context.Context, url string, pool *db.Pool) (*graphdb.Store, 
 		graph.Close(ctx) //nolint:errcheck
 		return nil, fmt.Errorf("move hypotheses from postgres to the graph: %w", err)
 	}
-	err = db.MoveHumanWrites(ctx, pool, func(writes []db.HumanWrite) error {
+	err = db.MoveHumanWrites(ctx, pool, func(writes []domain.HumanWrite) error {
 		return graph.CreditUsers(ctx, writes)
 	})
 	if err != nil {

@@ -38,10 +38,10 @@ func eventsTestDB(t *testing.T) *Pool {
 // listenForEvents starts a listener and returns the channel it delivers on, already listening by
 // the time this returns — a listener started after the write it is meant to observe proves
 // nothing.
-func listenForEvents(t *testing.T, pool *Pool) (<-chan Event, context.CancelFunc) {
+func listenForEvents(t *testing.T, pool *Pool) (<-chan domain.Event, context.CancelFunc) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	events := make(chan Event, 16)
+	events := make(chan domain.Event, 16)
 	ready := make(chan struct{})
 	go func() {
 		conn, err := pool.pool.Acquire(ctx)
@@ -60,7 +60,7 @@ func listenForEvents(t *testing.T, pool *Pool) (<-chan Event, context.CancelFunc
 			if err != nil {
 				return
 			}
-			var e Event
+			var e domain.Event
 			if err := json.Unmarshal([]byte(notification.Payload), &e); err != nil {
 				return
 			}
@@ -134,11 +134,11 @@ VALUES ($1, $2, $3, 'agent', $3, 'watch test comment')`, hypothesisID, peID, age
 // replay.
 type noHypothesisEvents struct{}
 
-func (noHypothesisEvents) ReplayEvents(context.Context, string, int64) ([]Event, error) {
+func (noHypothesisEvents) ReplayEvents(context.Context, string, int64) ([]domain.Event, error) {
 	return nil, nil
 }
 
-func (noHypothesisEvents) ConcernsAgent(_ context.Context, _ string, events []Event) ([]bool, error) {
+func (noHypothesisEvents) ConcernsAgent(_ context.Context, _ string, events []domain.Event) ([]bool, error) {
 	return make([]bool, len(events)), nil
 }
 
@@ -161,7 +161,7 @@ func TestAChangeInARolledBackTransactionProducesNoEvent(t *testing.T) {
 	for {
 		select {
 		case e := <-events:
-			if e.Kind == EventCommentNew && e.PlatformExperimentID == peID {
+			if e.Kind == domain.EventCommentNew && e.PlatformExperimentID == peID {
 				t.Fatalf("event after a rolled-back write: got = %v, want = %v", e.Kind, "no event")
 			}
 		case <-deadline:
@@ -184,7 +184,7 @@ func TestTheSameChangeCommittedDoesReachAListener(t *testing.T) {
 	for {
 		select {
 		case e := <-events:
-			if e.Kind != EventCommentNew {
+			if e.Kind != domain.EventCommentNew {
 				continue
 			}
 			if e.PlatformExperimentID != "watch-test-pe-commit" {
@@ -247,7 +247,7 @@ func TestReplayReconstructsAJobsStatusSequenceFromTheRowsOwnColumns(t *testing.T
 	before := insertJob(t, pool, agentID, peID, hypothesisID, "watch-test-job-replay")
 
 	events, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(),
-		EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventExperimentStatus: true}}, before)
+		domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventExperimentStatus: true}}, before)
 	if err != nil {
 		t.Fatalf("replay: got = %v, want = nil", err)
 	}
@@ -273,7 +273,7 @@ func TestReplayedJobEventsEqualTheirLiveTwins(t *testing.T) {
 	before := insertJob(t, pool, agentID, peID, hypothesisID, jobID)
 	exec(t, pool, `UPDATE experiments SET quota_settled_at = now(), updated_at = now() WHERE id = $1`, jobID)
 
-	var live []Event
+	var live []domain.Event
 	deadline := time.After(5 * time.Second)
 	for len(live) < 4 {
 		select {
@@ -286,11 +286,11 @@ func TestReplayedJobEventsEqualTheirLiveTwins(t *testing.T) {
 		}
 	}
 	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(),
-		EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventExperimentStatus: true, EventExperimentBlocked: true}}, before)
+		domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventExperimentStatus: true, domain.EventExperimentBlocked: true}}, before)
 	if err != nil {
 		t.Fatalf("replay: got = %v, want = nil", err)
 	}
-	twin := map[[3]string]Event{}
+	twin := map[[3]string]domain.Event{}
 	for _, e := range live {
 		twin[[3]string{e.Kind, e.Subject, e.Value}] = e.Identity()
 	}
@@ -326,7 +326,7 @@ func TestAJobAwaitingAdmissionIsNotAnnouncedAsBlocked(t *testing.T) {
 VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'test-accelerator',
         'QUEUED', 'awaiting_admission', 1, now(), 'AK', 'SK')`, jobID, agentID, peID, hypothesisID)
 	store := NewEventsStore(pool, noHypothesisEvents{})
-	filter := EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventExperimentBlocked: true}}
+	filter := domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventExperimentBlocked: true}}
 	for _, reason := range []string{domain.QueueReasonAwaitingAdmission} {
 		exec(t, pool, `UPDATE experiments SET not_admitted_reason = $2, updated_at = now() WHERE id = $1`, jobID, reason)
 		replayed, err := store.Replay(context.Background(), filter, before)
@@ -335,7 +335,7 @@ VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'test-accelerator',
 		}
 	}
 	exec(t, pool, `UPDATE experiments SET not_admitted_reason = 'capacity_unavailable', updated_at = now() WHERE id = $1`, jobID)
-	if got := awaitEvent(t, events, EventExperimentBlocked, jobID); got.Value != "capacity_unavailable" || got.Detail != "" {
+	if got := awaitEvent(t, events, domain.EventExperimentBlocked, jobID); got.Value != "capacity_unavailable" || got.Detail != "" {
 		t.Errorf("first live blocked event: got = %q with detail %q, want = capacity_unavailable and none", got.Value, got.Detail)
 	}
 
@@ -343,7 +343,7 @@ VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'test-accelerator',
 	const sentence = "cluster box-b is short of 16 cores, held by 2 jobs: 1 of this platform experiment and 1 of other platform experiments"
 	before = cursorNow(t, pool)
 	exec(t, pool, `UPDATE experiments SET not_admitted_reason = $2, updated_at = now() WHERE id = $1`, jobID, "capacity_unavailable: "+sentence)
-	if got := awaitEvent(t, events, EventExperimentBlocked, jobID); got.Value != "capacity_unavailable" || got.Detail != sentence {
+	if got := awaitEvent(t, events, domain.EventExperimentBlocked, jobID); got.Value != "capacity_unavailable" || got.Detail != sentence {
 		t.Errorf("live blocked event: got = %q with detail %q, want = the code and the sentence", got.Value, got.Detail)
 	}
 	replayed, err := store.Replay(context.Background(), filter, before)
@@ -364,7 +364,7 @@ func TestReplayFromAnEventsCursorReturnsThatEventAndWhatCameAfterIt(t *testing.T
 	before := insertJob(t, pool, agentID, peID, hypothesisID, "watch-test-job-cursor")
 
 	store := NewEventsStore(pool, noHypothesisEvents{})
-	filter := EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventExperimentStatus: true}}
+	filter := domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventExperimentStatus: true}}
 	all, err := store.Replay(context.Background(), filter, before)
 	if err != nil {
 		t.Fatalf("replay: got = %v, want = nil", err)
@@ -384,7 +384,7 @@ func TestReplayFromAnEventsCursorReturnsThatEventAndWhatCameAfterIt(t *testing.T
 // awaitEvent returns the first event of the given kind and subject, ignoring everything else on
 // the channel — the tests share one database, so a stream carrying another test's rows is the
 // ordinary case and not a failure.
-func awaitEvent(t *testing.T, events <-chan Event, kind, subject string) Event {
+func awaitEvent(t *testing.T, events <-chan domain.Event, kind, subject string) domain.Event {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
 	for {
@@ -421,7 +421,7 @@ func TestEditingTheDescriptionAnnouncesThatItChangedAndCarriesNoneOfItsText(t *t
 	exec(t, pool, `UPDATE platform_experiments SET description = $2 WHERE id = $1`, peID,
 		"the question, restated at some length after the coordinator resolved it")
 
-	e := awaitEvent(t, events, EventPlatformExperimentDescription, peID)
+	e := awaitEvent(t, events, domain.EventPlatformExperimentDescription, peID)
 	if e.Value != "" || e.Detail != "" {
 		t.Errorf("description event payload: got = %v/%v, want = empty, a pointer only", e.Value, e.Detail)
 	}
@@ -438,12 +438,12 @@ func TestChangingTheDurationIsAnnouncedAsTheBriefIs(t *testing.T) {
 
 	exec(t, pool, `UPDATE platform_experiments SET duration_hours = duration_hours + 2 WHERE id = $1`, peID)
 
-	awaitEvent(t, events, EventPlatformExperimentDescription, peID)
-	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(), EventFilter{PlatformExperimentID: peID}, before)
+	awaitEvent(t, events, domain.EventPlatformExperimentDescription, peID)
+	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(), domain.EventFilter{PlatformExperimentID: peID}, before)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.ContainsFunc(replayed, func(e Event) bool { return e.Kind == EventPlatformExperimentDescription }) {
+	if !slices.ContainsFunc(replayed, func(e domain.Event) bool { return e.Kind == domain.EventPlatformExperimentDescription }) {
 		t.Fatalf("replayed %+v, want the change among them", replayed)
 	}
 }
@@ -459,7 +459,7 @@ func TestClosingThePlatformExperimentAnnouncesItsNewStatus(t *testing.T) {
 
 	exec(t, pool, `UPDATE platform_experiments SET status = 'closed' WHERE id = $1`, peID)
 
-	if got := awaitEvent(t, events, EventPlatformExperimentStatus, peID).Value; got != "closed" {
+	if got := awaitEvent(t, events, domain.EventPlatformExperimentStatus, peID).Value; got != "closed" {
 		t.Errorf("announced run status: got = %v, want = %v", got, "closed")
 	}
 }
@@ -478,11 +478,11 @@ func TestTheCloseEventCarriesTheReasonGiven(t *testing.T) {
 	if err := store.ClosePlatformExperiment(ctx, peID, &domain.Actor{Kind: domain.ActorUser, ID: "u-1"}, "the baseline measured the old split"); err != nil {
 		t.Fatal(err)
 	}
-	live := awaitEvent(t, events, EventPlatformExperimentStatus, peID)
+	live := awaitEvent(t, events, domain.EventPlatformExperimentStatus, peID)
 	if live.Value != "closed" || live.Detail != "the baseline measured the old split" {
 		t.Fatalf("live event: got = %q %q, want = closed with the reason", live.Value, live.Detail)
 	}
-	filter := EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventPlatformExperimentStatus: true}}
+	filter := domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventPlatformExperimentStatus: true}}
 	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, filter, before)
 	if err != nil || len(replayed) != 1 || replayed[0].Identity() != live.Identity() || replayed[0].Detail != live.Detail {
 		t.Fatalf("replay: got = %+v, %v, want = the live event %+v alone", replayed, err, live)
@@ -506,8 +506,8 @@ func TestAReasonThatWaitsForTheCoordinatorIsAnnouncedOnceAsAStatusEventAndReplay
 	events, stop := listenForEvents(t, pool)
 	defer stop()
 	store := NewPlatformExperimentsStore(pool)
-	filter := EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventPlatformExperimentStatus: true}}
-	replay := func() []Event {
+	filter := domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventPlatformExperimentStatus: true}}
+	replay := func() []domain.Event {
 		t.Helper()
 		replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, filter, before)
 		if err != nil {
@@ -521,7 +521,7 @@ func TestAReasonThatWaitsForTheCoordinatorIsAnnouncedOnceAsAStatusEventAndReplay
 			t.Fatalf("tell %q: got = %v, want = nil", reason, err)
 		}
 	}
-	live := awaitEvent(t, events, EventPlatformExperimentStatus, peID)
+	live := awaitEvent(t, events, domain.EventPlatformExperimentStatus, peID)
 	if live.Value != "running" || live.Detail != "researchers_done" {
 		t.Fatalf("live event: got = %q %q, want = running researchers_done", live.Value, live.Detail)
 	}
@@ -536,13 +536,13 @@ func TestAReasonThatWaitsForTheCoordinatorIsAnnouncedOnceAsAStatusEventAndReplay
 			t.Fatalf("tell %q: got = %v, want = nil", reason, err)
 		}
 	}
-	again := awaitEvent(t, events, EventPlatformExperimentStatus, peID)
+	again := awaitEvent(t, events, domain.EventPlatformExperimentStatus, peID)
 	if again.Detail != "researchers_done" || again.Position == live.Position {
 		t.Fatalf("told again: got = %+v, want = researchers_done at a position past %d", again, live.Position)
 	}
 
 	exec(t, pool, `UPDATE platform_experiments SET status = 'closed' WHERE id = $1`, peID)
-	if closed := awaitEvent(t, events, EventPlatformExperimentStatus, peID); closed.Value != "closed" || closed.Detail != "" {
+	if closed := awaitEvent(t, events, domain.EventPlatformExperimentStatus, peID); closed.Value != "closed" || closed.Detail != "" {
 		t.Fatalf("closing: got = %q %q, want = closed with no detail", closed.Value, closed.Detail)
 	}
 	if err := store.TellCoordinator(ctx, peID, "researchers_done"); err != nil {
@@ -571,13 +571,13 @@ VALUES ($1, $1, $2, $3, $4, now())`, agentID, peID, tc.guaranteed, tc.burst)
 		t.Cleanup(func() { exec(t, pool, `DELETE FROM agent_quotas WHERE id = $1`, agentID) })
 
 		want := formatHours((&domain.AgentQuota{GuaranteedAcceleratorHours: tc.guaranteed, BurstAcceleratorHours: tc.burst}).Share())
-		live := awaitEvent(t, events, EventQuotaChanged, agentID)
+		live := awaitEvent(t, events, domain.EventQuotaChanged, agentID)
 		stop()
 		if live.Value != want || live.Detail != "" {
 			t.Fatalf("%s: live event: got = %q %q, want = the share %s and no detail", tc.name, live.Value, live.Detail, want)
 		}
 		replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(),
-			EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventQuotaChanged: true}}, before)
+			domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventQuotaChanged: true}}, before)
 		if err != nil || len(replayed) != 1 || replayed[0].Identity() != live.Identity() {
 			t.Fatalf("%s: replay: got = (%+v, %v), want = the live event %+v", tc.name, replayed, err, live)
 		}
@@ -600,17 +600,17 @@ func TestACutAnnouncesBothTheLadderBoundaryAndTheCutAgentsOwnStopCondition(t *te
 	if err := NewPlatformExperimentsStore(pool).FinishAgent(context.Background(), peID, agentID, "quota spent"); err != nil {
 		t.Fatalf("finish: got = %v, want = nil", err)
 	}
-	if got := awaitEvent(t, events, EventAgentFinished, agentID); got.Detail != "quota spent" || got.PlatformExperimentID != peID {
+	if got := awaitEvent(t, events, domain.EventAgentFinished, agentID); got.Detail != "quota spent" || got.PlatformExperimentID != peID {
 		t.Errorf("agent.finished: got = %+v, want = the reason in %s", got, peID)
 	}
 
 	exec(t, pool, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index)
 VALUES ($1, $2, 1)`, peID, agentID)
 
-	if got := awaitEvent(t, events, EventStageBoundary, peID).Detail; got != "cut" {
+	if got := awaitEvent(t, events, domain.EventStageBoundary, peID).Detail; got != "cut" {
 		t.Errorf("boundary detail: got = %v, want = %v", got, "cut")
 	}
-	if got := awaitEvent(t, events, EventAgentCut, agentID).PlatformExperimentID; got != peID {
+	if got := awaitEvent(t, events, domain.EventAgentCut, agentID).PlatformExperimentID; got != peID {
 		t.Errorf("agent.cut platform experiment: got = %v, want = %v", got, peID)
 	}
 }
@@ -675,7 +675,7 @@ func TestReplayReturnsEachOfTheNewKindsFromTheChangedRowsOwnColumns(t *testing.T
 	exec(t, pool, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index)
 VALUES ($1, $2, 1)`, peID, agentID)
 
-	events, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(), EventFilter{PlatformExperimentID: peID}, before)
+	events, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(), domain.EventFilter{PlatformExperimentID: peID}, before)
 	if err != nil {
 		t.Fatalf("replay: got = %v, want = nil", err)
 	}
@@ -684,11 +684,11 @@ VALUES ($1, $2, 1)`, peID, agentID)
 		seen[e.Kind] = e.Subject
 	}
 	for kind, wantSubject := range map[string]string{
-		EventCommentNew:                    hypothesisID,
-		EventPlatformExperimentStatus:      peID,
-		EventPlatformExperimentDescription: peID,
-		EventAgentCut:                      agentID,
-		EventAgentFinished:                 agentID,
+		domain.EventCommentNew:                    hypothesisID,
+		domain.EventPlatformExperimentStatus:      peID,
+		domain.EventPlatformExperimentDescription: peID,
+		domain.EventAgentCut:                      agentID,
+		domain.EventAgentFinished:                 agentID,
 	} {
 		if seen[kind] != wantSubject {
 			t.Errorf("replayed subject for %v: got = %v, want = %v", kind, seen[kind], wantSubject)
@@ -706,7 +706,7 @@ func TestReplayDoesNotReturnARunWideChangeThatHappenedBeforeTheGivenCursor(t *te
 	exec(t, pool, `UPDATE platform_experiments SET status = 'closed' WHERE id = $1`, peID)
 
 	store := NewEventsStore(pool, noHypothesisEvents{})
-	filter := EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventPlatformExperimentStatus: true}}
+	filter := domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventPlatformExperimentStatus: true}}
 	all, err := store.Replay(context.Background(), filter, before)
 	if err != nil {
 		t.Fatalf("replay: got = %v, want = nil", err)
@@ -744,17 +744,17 @@ func TestAnEventCommittedAfterALaterOneIsReplayedFromTheLaterOnesCursor(t *testi
 		t.Fatalf("insert in the open transaction: got = %v, want = nil", err)
 	}
 	exec(t, pool, insert, hypothesisID+"-late", peID, agentID, "written second, committed first")
-	seen := awaitEvent(t, events, EventCommentNew, hypothesisID+"-late")
+	seen := awaitEvent(t, events, domain.EventCommentNew, hypothesisID+"-late")
 	if err := early.Commit(ctx); err != nil {
 		t.Fatalf("commit: got = %v, want = nil", err)
 	}
-	committedLast := awaitEvent(t, events, EventCommentNew, hypothesisID+"-early")
+	committedLast := awaitEvent(t, events, domain.EventCommentNew, hypothesisID+"-early")
 	if seen.Cursor > committedLast.Position {
 		t.Errorf("cursor of the event committed first: got = %v, want = at most %v, the open transaction's position", seen.Cursor, committedLast.Position)
 	}
 
 	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx,
-		EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventCommentNew: true}}, seen.Cursor)
+		domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventCommentNew: true}}, seen.Cursor)
 	if err != nil {
 		t.Fatalf("replay: got = %v, want = nil", err)
 	}
@@ -776,10 +776,10 @@ func TestEveryEventOfATransactionIsReplayedFromTheCursorOfAnyOfThem(t *testing.T
 	defer stop()
 
 	exec(t, pool, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index) VALUES ($1, $2, 1)`, peID, agentID)
-	first := awaitEvent(t, events, EventStageBoundary, peID)
+	first := awaitEvent(t, events, domain.EventStageBoundary, peID)
 
 	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(),
-		EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventStageBoundary: true, EventAgentCut: true}}, first.Cursor)
+		domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventStageBoundary: true, domain.EventAgentCut: true}}, first.Cursor)
 	if err != nil {
 		t.Fatalf("replay: got = %v, want = nil", err)
 	}
@@ -789,7 +789,7 @@ func TestEveryEventOfATransactionIsReplayedFromTheCursorOfAnyOfThem(t *testing.T
 			kinds[e.Kind] = true
 		}
 	}
-	if !kinds[EventStageBoundary] || !kinds[EventAgentCut] {
+	if !kinds[domain.EventStageBoundary] || !kinds[domain.EventAgentCut] {
 		t.Errorf("replayed kinds of the cut's transaction: got = %v, want = stage.boundary and agent.cut", kinds)
 	}
 }
@@ -803,9 +803,9 @@ func TestNoCursorPassesAWriteEmitIsStillMaking(t *testing.T) {
 	defer stop()
 
 	var position, during int64
-	err := NewEventsStore(pool, noHypothesisEvents{}).Emit(context.Background(), func(stamp Stamp) ([]Event, error) {
+	err := NewEventsStore(pool, noHypothesisEvents{}).Emit(context.Background(), func(stamp domain.Stamp) ([]domain.Event, error) {
 		position, during = stamp.Position, cursorNow(t, pool)
-		return []Event{{Kind: EventHypothesisNew, Subject: hypothesisID, PlatformExperimentID: peID}}, nil
+		return []domain.Event{{Kind: domain.EventHypothesisNew, Subject: hypothesisID, PlatformExperimentID: peID}}, nil
 	})
 	if err != nil {
 		t.Fatalf("Emit: got = %v, want = nil", err)
@@ -813,7 +813,7 @@ func TestNoCursorPassesAWriteEmitIsStillMaking(t *testing.T) {
 	if during > position {
 		t.Errorf("cursor while the write was in flight: got = %v, want = at most its position %v", during, position)
 	}
-	if got := awaitEvent(t, events, EventHypothesisNew, hypothesisID); got.Position != position || got.Cursor > position {
+	if got := awaitEvent(t, events, domain.EventHypothesisNew, hypothesisID); got.Position != position || got.Cursor > position {
 		t.Errorf("emitted event: got = position %v cursor %v, want = position %v and a cursor at or below it", got.Position, got.Cursor, position)
 	}
 }
@@ -826,20 +826,20 @@ func TestEmitTellsAnAbortedPositionFromACommittedOrRunningOne(t *testing.T) {
 	store := NewEventsStore(pool, noHypothesisEvents{})
 	ctx := context.Background()
 	var committed, aborted int64
-	if err := store.Emit(ctx, func(stamp Stamp) ([]Event, error) {
+	if err := store.Emit(ctx, func(stamp domain.Stamp) ([]domain.Event, error) {
 		committed = stamp.Position
 		return nil, nil
 	}); err != nil {
 		t.Fatalf("Emit: got = %v, want = nil", err)
 	}
 	failed := errors.New("notify failed")
-	if err := store.Emit(ctx, func(stamp Stamp) ([]Event, error) {
+	if err := store.Emit(ctx, func(stamp domain.Stamp) ([]domain.Event, error) {
 		aborted = stamp.Position
 		return nil, failed
 	}); !errors.Is(err, failed) {
 		t.Fatalf("Emit: got = %v, want = %v", err, failed)
 	}
-	err := store.Emit(ctx, func(stamp Stamp) ([]Event, error) {
+	err := store.Emit(ctx, func(stamp domain.Stamp) ([]domain.Event, error) {
 		for position, want := range map[int64]bool{committed: false, aborted: true, stamp.Position: false, 0: false} {
 			if got, err := stamp.Aborted(position); err != nil || got != want {
 				t.Errorf("Aborted(%d): got = (%v, %v), want = (%v, nil)", position, got, err, want)
@@ -858,7 +858,7 @@ func TestReplayRefusesACursorThisDatabaseCannotHaveIssued(t *testing.T) {
 	pool := eventsTestDB(t)
 	store := NewEventsStore(pool, noHypothesisEvents{})
 	for _, since := range []int64{time.Now().UnixMicro(), -1} {
-		if _, err := store.Replay(context.Background(), EventFilter{PlatformExperimentID: "pe"}, since); !errors.Is(err, ErrUnknownCursor) {
+		if _, err := store.Replay(context.Background(), domain.EventFilter{PlatformExperimentID: "pe"}, since); !errors.Is(err, ErrUnknownCursor) {
 			t.Errorf("Replay(since=%d): got = %v, want = %v", since, err, ErrUnknownCursor)
 		}
 	}
@@ -871,12 +871,12 @@ func TestReplayRefusesACursorThisDatabaseCannotHaveIssued(t *testing.T) {
 // this has to keep honest, because a firehose in the default would cost every subscriber its buffer
 // and be the one kind a reconnect could not replay.
 func TestTheDefaultKindSetIsEveryKindOnTheStreamExceptTheMetricPointer(t *testing.T) {
-	kinds := DefaultKinds()
-	if kinds[EventMetricPoint] {
+	kinds := domain.DefaultKinds()
+	if kinds[domain.EventMetricPoint] {
 		t.Errorf("metric.point in the default set: got = %v, want = %v", true, false)
 	}
-	for _, kind := range EventKinds {
-		if kind.Kind == EventMetricPoint {
+	for _, kind := range domain.EventKinds {
+		if kind.Kind == domain.EventMetricPoint {
 			continue
 		}
 		if !kinds[kind.Kind] {
@@ -890,8 +890,8 @@ func TestTheDefaultKindSetIsEveryKindOnTheStreamExceptTheMetricPointer(t *testin
 // the set the server applies is the same failure a hand-kept second list produces: an agent told it
 // will be woken by something that never reaches it.
 func TestTheAdvertisedDefaultFlagIsTheSetTheServerWouldApply(t *testing.T) {
-	kinds := DefaultKinds()
-	for _, kind := range EventKinds {
+	kinds := domain.DefaultKinds()
+	for _, kind := range domain.EventKinds {
 		if kind.Default != kinds[kind.Kind] {
 			t.Errorf("advertised default for %v: got = %v, want = %v", kind.Kind, kind.Default, kinds[kind.Kind])
 		}
@@ -903,36 +903,36 @@ func TestTheAdvertisedDefaultFlagIsTheSetTheServerWouldApply(t *testing.T) {
 // for nothing, and a job moving through QUEUED, SUBMITTED or RUNNING, or waiting in the queue for
 // capacity, asks nothing of it.
 func TestAnAgentScopeAdmitsItsOwnOutcomesAndNoRivalsOrIntermediateStatuses(t *testing.T) {
-	filter := EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a", Kinds: DefaultKinds()}
-	admitted := []Event{
-		{Kind: EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-a"},
-		{Kind: EventExperimentStatus, Value: "EVICTED", AgentID: "agent-a"},
-		{Kind: EventExperimentStatus, Value: "QUEUED", Detail: "stuck_pending: admitted and not running within 5m0s", AgentID: "agent-a"},
-		{Kind: EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-a"},
-		{Kind: EventExperimentBlocked, Value: "exceeds_accelerator_share: cpu 64 above 8", AgentID: "agent-a"},
-		{Kind: EventExperimentBlocked, Value: "exceeds_cluster_capacity: needs {accelerator:h200=3}, more than any connected cluster has installed", AgentID: "agent-a"},
-		{Kind: EventQuotaChanged, Value: "4", AgentID: "agent-a"},
-		{Kind: EventAgentCut, Value: "1", AgentID: "agent-a"},
-		{Kind: EventStageBoundary, Value: "1", Detail: "advanced"},
-		{Kind: EventPlatformExperimentStatus, Value: "closed"},
-		{Kind: EventPlatformExperimentDescription},
-		{Kind: EventCommentNew, AgentID: "agent-b"},
-		{Kind: EventCommentNew},
+	filter := domain.EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a", Kinds: domain.DefaultKinds()}
+	admitted := []domain.Event{
+		{Kind: domain.EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-a"},
+		{Kind: domain.EventExperimentStatus, Value: "EVICTED", AgentID: "agent-a"},
+		{Kind: domain.EventExperimentStatus, Value: "QUEUED", Detail: "stuck_pending: admitted and not running within 5m0s", AgentID: "agent-a"},
+		{Kind: domain.EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-a"},
+		{Kind: domain.EventExperimentBlocked, Value: "exceeds_accelerator_share: cpu 64 above 8", AgentID: "agent-a"},
+		{Kind: domain.EventExperimentBlocked, Value: "exceeds_cluster_capacity: needs {accelerator:h200=3}, more than any connected cluster has installed", AgentID: "agent-a"},
+		{Kind: domain.EventQuotaChanged, Value: "4", AgentID: "agent-a"},
+		{Kind: domain.EventAgentCut, Value: "1", AgentID: "agent-a"},
+		{Kind: domain.EventStageBoundary, Value: "1", Detail: "advanced"},
+		{Kind: domain.EventPlatformExperimentStatus, Value: "closed"},
+		{Kind: domain.EventPlatformExperimentDescription},
+		{Kind: domain.EventCommentNew, AgentID: "agent-b"},
+		{Kind: domain.EventCommentNew},
 	}
-	refused := []Event{
-		{Kind: EventExperimentStatus, Value: "QUEUED", AgentID: "agent-a"},
-		{Kind: EventExperimentStatus, Value: "SUBMITTED", AgentID: "agent-a"},
-		{Kind: EventExperimentStatus, Value: "RUNNING", AgentID: "agent-a"},
-		{Kind: EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-b"},
-		{Kind: EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-b"},
-		{Kind: EventExperimentBlocked, Value: "capacity_unavailable", Detail: "cluster c is short of 1 x nvidia.com/gpu.product=nvidia-l40", AgentID: "agent-a"},
-		{Kind: EventExperimentBlocked, Value: "outranked", AgentID: "agent-a"},
-		{Kind: EventExperimentBlocked, Value: "concurrency_cap", AgentID: "agent-a"},
-		{Kind: EventQuotaChanged, Value: "4", AgentID: "agent-b"},
-		{Kind: EventAgentCut, Value: "1", AgentID: "agent-b"},
-		{Kind: EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-a"},
-		{Kind: EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-b"},
-		{Kind: EventMetricPoint, Value: "loss", AgentID: "agent-a"},
+	refused := []domain.Event{
+		{Kind: domain.EventExperimentStatus, Value: "QUEUED", AgentID: "agent-a"},
+		{Kind: domain.EventExperimentStatus, Value: "SUBMITTED", AgentID: "agent-a"},
+		{Kind: domain.EventExperimentStatus, Value: "RUNNING", AgentID: "agent-a"},
+		{Kind: domain.EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-b"},
+		{Kind: domain.EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-b"},
+		{Kind: domain.EventExperimentBlocked, Value: "capacity_unavailable", Detail: "cluster c is short of 1 x nvidia.com/gpu.product=nvidia-l40", AgentID: "agent-a"},
+		{Kind: domain.EventExperimentBlocked, Value: "outranked", AgentID: "agent-a"},
+		{Kind: domain.EventExperimentBlocked, Value: "concurrency_cap", AgentID: "agent-a"},
+		{Kind: domain.EventQuotaChanged, Value: "4", AgentID: "agent-b"},
+		{Kind: domain.EventAgentCut, Value: "1", AgentID: "agent-b"},
+		{Kind: domain.EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-a"},
+		{Kind: domain.EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-b"},
+		{Kind: domain.EventMetricPoint, Value: "loss", AgentID: "agent-a"},
 	}
 	for _, e := range admitted {
 		e.PlatformExperimentID = "pe-1"
@@ -950,9 +950,9 @@ func TestAnAgentScopeAdmitsItsOwnOutcomesAndNoRivalsOrIntermediateStatuses(t *te
 
 // The agent's own writes to the pool are echoes of what it just did; waking it for them is spam.
 func TestAnAgentScopeDropsTheEchoOfItsOwnHypothesisActivity(t *testing.T) {
-	filter := EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a", Kinds: DefaultKinds()}
-	for _, kind := range []string{EventHypothesisNew, EventHypothesisStatus, EventHypothesisLink, EventFindingNew, EventCommentNew} {
-		if filter.Matches(Event{Kind: kind, Subject: "hyp-1", PlatformExperimentID: "pe-1", AgentID: "agent-a"}) {
+	filter := domain.EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a", Kinds: domain.DefaultKinds()}
+	for _, kind := range []string{domain.EventHypothesisNew, domain.EventHypothesisStatus, domain.EventHypothesisLink, domain.EventFindingNew, domain.EventCommentNew} {
+		if filter.Matches(domain.Event{Kind: kind, Subject: "hyp-1", PlatformExperimentID: "pe-1", AgentID: "agent-a"}) {
 			t.Errorf("own %v on an agent scope: got = true, want = false", kind)
 		}
 	}
@@ -960,11 +960,11 @@ func TestAnAgentScopeDropsTheEchoOfItsOwnHypothesisActivity(t *testing.T) {
 
 // Without an agent the stream is the whole platform experiment, whoever wrote each row.
 func TestASubscriptionWithoutAnAgentCarriesEveryAgentsEvents(t *testing.T) {
-	filter := EventFilter{PlatformExperimentID: "pe-1", Kinds: DefaultKinds()}
-	for _, e := range []Event{
-		{Kind: EventExperimentStatus, Value: "RUNNING", AgentID: "agent-b"},
-		{Kind: EventHypothesisNew, AgentID: "agent-b"},
-		{Kind: EventStageBoundary, Detail: "cut", AgentID: "agent-b"},
+	filter := domain.EventFilter{PlatformExperimentID: "pe-1", Kinds: domain.DefaultKinds()}
+	for _, e := range []domain.Event{
+		{Kind: domain.EventExperimentStatus, Value: "RUNNING", AgentID: "agent-b"},
+		{Kind: domain.EventHypothesisNew, AgentID: "agent-b"},
+		{Kind: domain.EventStageBoundary, Detail: "cut", AgentID: "agent-b"},
 	} {
 		e.PlatformExperimentID = "pe-1"
 		if !filter.Matches(e) {
@@ -978,9 +978,11 @@ type ownedHypotheses struct {
 	reads *int
 }
 
-func (ownedHypotheses) ReplayEvents(context.Context, string, int64) ([]Event, error) { return nil, nil }
+func (ownedHypotheses) ReplayEvents(context.Context, string, int64) ([]domain.Event, error) {
+	return nil, nil
+}
 
-func (o ownedHypotheses) ConcernsAgent(_ context.Context, agentID string, events []Event) ([]bool, error) {
+func (o ownedHypotheses) ConcernsAgent(_ context.Context, agentID string, events []domain.Event) ([]bool, error) {
 	*o.reads++
 	out := make([]bool, len(events))
 	for i, e := range events {
@@ -994,20 +996,20 @@ func (o ownedHypotheses) ConcernsAgent(_ context.Context, agentID string, events
 func TestConcernsAsksTheGraphOnceAndOnlyAboutHypothesisEventsOnAnAgentScope(t *testing.T) {
 	reads := 0
 	store := NewEventsStore(nil, ownedHypotheses{owner: map[string]string{"hyp-a": "agent-a"}, reads: &reads})
-	mine := Event{Kind: EventCommentNew, Subject: "hyp-a", AgentID: "agent-b"}
-	theirs := Event{Kind: EventCommentNew, Subject: "hyp-b", AgentID: "agent-b"}
-	job := Event{Kind: EventExperimentStatus, Subject: "exp-1", Value: "COMPLETED", AgentID: "agent-a"}
-	events := []Event{theirs, job, mine, theirs}
+	mine := domain.Event{Kind: domain.EventCommentNew, Subject: "hyp-a", AgentID: "agent-b"}
+	theirs := domain.Event{Kind: domain.EventCommentNew, Subject: "hyp-b", AgentID: "agent-b"}
+	job := domain.Event{Kind: domain.EventExperimentStatus, Subject: "exp-1", Value: "COMPLETED", AgentID: "agent-a"}
+	events := []domain.Event{theirs, job, mine, theirs}
 
-	got, err := store.Concerns(context.Background(), EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a"}, events)
-	if err != nil || !reflect.DeepEqual(got, []Event{job, mine}) {
-		t.Errorf("Concerns on an agent scope: got = %+v, %v, want = %+v, nil", got, err, []Event{job, mine})
+	got, err := store.Concerns(context.Background(), domain.EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a"}, events)
+	if err != nil || !reflect.DeepEqual(got, []domain.Event{job, mine}) {
+		t.Errorf("Concerns on an agent scope: got = %+v, %v, want = %+v, nil", got, err, []domain.Event{job, mine})
 	}
 	if reads != 1 {
 		t.Errorf("graph reads for four events: got = %d, want = 1", reads)
 	}
 
-	got, err = store.Concerns(context.Background(), EventFilter{PlatformExperimentID: "pe-1"}, events)
+	got, err = store.Concerns(context.Background(), domain.EventFilter{PlatformExperimentID: "pe-1"}, events)
 	if err != nil || !reflect.DeepEqual(got, events) || reads != 1 {
 		t.Errorf("Concerns without an agent: got = %+v, %v after %d reads, want every event and no further read", got, err, reads)
 	}
@@ -1017,22 +1019,22 @@ func TestConcernsAsksTheGraphOnceAndOnlyAboutHypothesisEventsOnAnAgentScope(t *t
 // to mean exactly those kinds — including naming the one the default leaves out, which is how an
 // agent watching a single job's progress sees its samples arrive at all.
 func TestAnExplicitKindSetMeansExactlyWhatItNamesEvenWhenItNamesTheExcludedKind(t *testing.T) {
-	filter := EventFilter{PlatformExperimentID: "pe-1", Kinds: map[string]bool{EventMetricPoint: true}}
-	if !filter.Matches(Event{Kind: EventMetricPoint, Subject: "exp-1", PlatformExperimentID: "pe-1"}) {
+	filter := domain.EventFilter{PlatformExperimentID: "pe-1", Kinds: map[string]bool{domain.EventMetricPoint: true}}
+	if !filter.Matches(domain.Event{Kind: domain.EventMetricPoint, Subject: "exp-1", PlatformExperimentID: "pe-1"}) {
 		t.Errorf("metric.point on a subscription that named it: got = %v, want = %v", false, true)
 	}
-	if filter.Matches(Event{Kind: EventExperimentStatus, Subject: "exp-1", PlatformExperimentID: "pe-1"}) {
+	if filter.Matches(domain.Event{Kind: domain.EventExperimentStatus, Subject: "exp-1", PlatformExperimentID: "pe-1"}) {
 		t.Errorf("experiment.status on a subscription that named only metric.point: got = %v, want = %v", true, false)
 	}
 }
 
-type fixedHypothesisEvents []Event
+type fixedHypothesisEvents []domain.Event
 
-func (f fixedHypothesisEvents) ReplayEvents(context.Context, string, int64) ([]Event, error) {
+func (f fixedHypothesisEvents) ReplayEvents(context.Context, string, int64) ([]domain.Event, error) {
 	return f, nil
 }
 
-func (fixedHypothesisEvents) ConcernsAgent(_ context.Context, _ string, events []Event) ([]bool, error) {
+func (fixedHypothesisEvents) ConcernsAgent(_ context.Context, _ string, events []domain.Event) ([]bool, error) {
 	return make([]bool, len(events)), nil
 }
 
@@ -1048,13 +1050,13 @@ func TestReplayInterleavesTheGraphsHypothesisEventsWithPostgresEventsInPositionO
 		t.Fatalf("comment position: got = %v, want = nil", err)
 	}
 	graph := fixedHypothesisEvents{
-		{Kind: EventHypothesisNew, Subject: hypothesisID, PlatformExperimentID: peID, Position: commentPosition + 1},
-		{Kind: EventHypothesisLink, Subject: hypothesisID, Value: "related", PlatformExperimentID: peID, Position: commentPosition + 1000},
-		{Kind: EventHypothesisStatus, Subject: hypothesisID, Value: "refuted", PlatformExperimentID: peID, Position: before - 1},
+		{Kind: domain.EventHypothesisNew, Subject: hypothesisID, PlatformExperimentID: peID, Position: commentPosition + 1},
+		{Kind: domain.EventHypothesisLink, Subject: hypothesisID, Value: "related", PlatformExperimentID: peID, Position: commentPosition + 1000},
+		{Kind: domain.EventHypothesisStatus, Subject: hypothesisID, Value: "refuted", PlatformExperimentID: peID, Position: before - 1},
 	}
 
-	events, err := NewEventsStore(pool, graph).Replay(context.Background(), EventFilter{PlatformExperimentID: peID,
-		Kinds: map[string]bool{EventHypothesisNew: true, EventHypothesisLink: true, EventHypothesisStatus: true, EventCommentNew: true}}, before)
+	events, err := NewEventsStore(pool, graph).Replay(context.Background(), domain.EventFilter{PlatformExperimentID: peID,
+		Kinds: map[string]bool{domain.EventHypothesisNew: true, domain.EventHypothesisLink: true, domain.EventHypothesisStatus: true, domain.EventCommentNew: true}}, before)
 	if err != nil {
 		t.Fatalf("replay: got = %v, want = nil", err)
 	}
@@ -1072,28 +1074,28 @@ func TestReplayInterleavesTheGraphsHypothesisEventsWithPostgresEventsInPositionO
 // reread of its whole context that ended in "nothing to act on". Whoever steers an experiment
 // decides on outcomes and on jobs that are stuck, across every agent.
 func TestTheDecisionsStreamOfAnExperimentLeavesOutJobsThatAreOnTheirWay(t *testing.T) {
-	filter := EventFilter{PlatformExperimentID: "pe-1", Kinds: DefaultKinds(), Decisions: true}
-	whole := EventFilter{PlatformExperimentID: "pe-1", Kinds: DefaultKinds()}
-	admitted := []Event{
-		{Kind: EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-a"},
-		{Kind: EventExperimentStatus, Value: "FAILED", AgentID: "agent-b"},
-		{Kind: EventExperimentStatus, Value: "EVICTED", AgentID: "agent-b"},
-		{Kind: EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-a"},
-		{Kind: EventHypothesisNew, AgentID: "agent-a"},
-		{Kind: EventHypothesisStatus, Value: "confirmed", AgentID: "agent-a"},
-		{Kind: EventFindingNew, Value: "job-1", AgentID: "agent-b"},
-		{Kind: EventCommentNew},
-		{Kind: EventQuotaChanged, Value: "4", AgentID: "agent-b"},
-		{Kind: EventAgentCut, Value: "1", AgentID: "agent-b"},
-		{Kind: EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-b"},
-		{Kind: EventPlatformExperimentStatus, Value: "closed"},
+	filter := domain.EventFilter{PlatformExperimentID: "pe-1", Kinds: domain.DefaultKinds(), Decisions: true}
+	whole := domain.EventFilter{PlatformExperimentID: "pe-1", Kinds: domain.DefaultKinds()}
+	admitted := []domain.Event{
+		{Kind: domain.EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-a"},
+		{Kind: domain.EventExperimentStatus, Value: "FAILED", AgentID: "agent-b"},
+		{Kind: domain.EventExperimentStatus, Value: "EVICTED", AgentID: "agent-b"},
+		{Kind: domain.EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-a"},
+		{Kind: domain.EventHypothesisNew, AgentID: "agent-a"},
+		{Kind: domain.EventHypothesisStatus, Value: "confirmed", AgentID: "agent-a"},
+		{Kind: domain.EventFindingNew, Value: "job-1", AgentID: "agent-b"},
+		{Kind: domain.EventCommentNew},
+		{Kind: domain.EventQuotaChanged, Value: "4", AgentID: "agent-b"},
+		{Kind: domain.EventAgentCut, Value: "1", AgentID: "agent-b"},
+		{Kind: domain.EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-b"},
+		{Kind: domain.EventPlatformExperimentStatus, Value: "closed"},
 	}
-	onTheirWay := []Event{
-		{Kind: EventExperimentStatus, Value: "QUEUED", AgentID: "agent-a"},
-		{Kind: EventExperimentStatus, Value: "SUBMITTED", AgentID: "agent-a"},
-		{Kind: EventExperimentStatus, Value: "RUNNING", AgentID: "agent-b"},
-		{Kind: EventExperimentBlocked, Value: "capacity_unavailable", Detail: "cluster c is short of 1 x nvidia.com/gpu.product=nvidia-l40", AgentID: "agent-a"},
-		{Kind: EventExperimentBlocked, Value: "outranked", AgentID: "agent-b"},
+	onTheirWay := []domain.Event{
+		{Kind: domain.EventExperimentStatus, Value: "QUEUED", AgentID: "agent-a"},
+		{Kind: domain.EventExperimentStatus, Value: "SUBMITTED", AgentID: "agent-a"},
+		{Kind: domain.EventExperimentStatus, Value: "RUNNING", AgentID: "agent-b"},
+		{Kind: domain.EventExperimentBlocked, Value: "capacity_unavailable", Detail: "cluster c is short of 1 x nvidia.com/gpu.product=nvidia-l40", AgentID: "agent-a"},
+		{Kind: domain.EventExperimentBlocked, Value: "outranked", AgentID: "agent-b"},
 	}
 	for _, e := range admitted {
 		e.PlatformExperimentID = "pe-1"
@@ -1145,7 +1147,7 @@ func TestAFinishedJobIsAnnouncedWithItsCause(t *testing.T) {
 			}
 		}
 		replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx,
-			EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventExperimentStatus: true}}, before)
+			domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventExperimentStatus: true}}, before)
 		if err != nil {
 			t.Fatalf("replay: got = %v, want = nil", err)
 		}
@@ -1170,12 +1172,12 @@ func TestACancelledJobIsAnnouncedAsAReadAnswersIt(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	events, listening := make(chan Event, 16), make(chan struct{})
+	events, listening := make(chan domain.Event, 16), make(chan struct{})
 	go store.ListenEvents(ctx, events, func() { close(listening) }) //nolint:errcheck
 	<-listening
 	exec(t, pool, `UPDATE experiments SET status = 'EVICTED', eviction_reason = 'cancelled', updated_at = now() WHERE id = $1`, jobID)
 
-	var live Event
+	var live domain.Event
 	for live.Subject != jobID {
 		select {
 		case live = <-events:
@@ -1186,7 +1188,7 @@ func TestACancelledJobIsAnnouncedAsAReadAnswersIt(t *testing.T) {
 	if live.Value != "CANCELLED" || live.Detail != "cancelled" {
 		t.Errorf("live: got = %s %q, want CANCELLED \"cancelled\"", live.Value, live.Detail)
 	}
-	replayed, err := store.Replay(ctx, EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventExperimentStatus: true}}, before)
+	replayed, err := store.Replay(ctx, domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventExperimentStatus: true}}, before)
 	if err != nil {
 		t.Fatalf("replay: got = %v, want = nil", err)
 	}
@@ -1210,13 +1212,13 @@ func TestAnEventCarriesWhenItsChangeWasMadeLiveAndReplayed(t *testing.T) {
  estimated_duration_hours, queued_at, data_access_key_id, data_secret_access_key)
 VALUES ('agent', 'times-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator',
         'QUEUED', 'capacity_unavailable: no room', 1, now(), 'AK', 'SK')`, agentID, peID, hypothesisID)
-	live := awaitEvent(t, events, EventExperimentBlocked, "times-job")
+	live := awaitEvent(t, events, domain.EventExperimentBlocked, "times-job")
 	if live.OccurredAt.Before(started) || live.OccurredAt.After(time.Now().Add(time.Second)) || live.OccurredAt.Location() != time.UTC {
 		t.Fatalf("live event occurred_at = %v, want the moment of the write, in UTC", live.OccurredAt)
 	}
 
 	time.Sleep(20 * time.Millisecond)
-	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(), EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventExperimentBlocked: true}}, before)
+	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(), domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventExperimentBlocked: true}}, before)
 	if err != nil || len(replayed) != 1 {
 		t.Fatalf("replay: got = %+v, %v, want the one blocked event", replayed, err)
 	}
@@ -1231,7 +1233,7 @@ VALUES ('agent', 'times-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accele
 	// A change from before positions kept a time replays without one, and says so by leaving
 	// the field out.
 	exec(t, pool, `DELETE FROM event_times WHERE xid = $1`, live.Position)
-	replayed, err = NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(), EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventExperimentBlocked: true}}, before)
+	replayed, err = NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(), domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventExperimentBlocked: true}}, before)
 	if err != nil || len(replayed) != 1 || !replayed[0].OccurredAt.IsZero() {
 		t.Fatalf("replay of a change with no kept time: got = %+v, %v", replayed, err)
 	}
@@ -1269,7 +1271,7 @@ VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'test-accelerator',
 	if err := experiments.MarkHeldJobs(context.Background(), 5*time.Minute); err != nil {
 		t.Fatalf("MarkHeldJobs: %v", err)
 	}
-	if got := awaitEvent(t, events, EventJobHeld, "held-job-long-wait"); got.Value != "capacity_unavailable" || got.Detail != sentence || got.AgentID != agentID {
+	if got := awaitEvent(t, events, domain.EventJobHeld, "held-job-long-wait"); got.Value != "capacity_unavailable" || got.Detail != sentence || got.AgentID != agentID {
 		t.Errorf("live held event: got = %+v, want = the code, the sentence and the job's agent", got)
 	}
 
@@ -1278,7 +1280,7 @@ VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'test-accelerator',
 	if err := experiments.MarkHeldJobs(context.Background(), 5*time.Minute); err != nil {
 		t.Fatalf("MarkHeldJobs: %v", err)
 	}
-	filter := EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventJobHeld: true}}
+	filter := domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventJobHeld: true}}
 	replayed, err := store.Replay(context.Background(), filter, before)
 	if err != nil || len(replayed) != 1 || replayed[0].Subject != "held-job-long-wait" || replayed[0].Value != "capacity_unavailable" || replayed[0].Detail != sentence {
 		t.Fatalf("replayed held events: got = %+v, %v, want = the one job that waited past its estimate and the minimum, once", replayed, err)
@@ -1286,10 +1288,10 @@ VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'test-accelerator',
 
 	// The job's own agent and whoever steers the run are told, and no other agent.
 	held := replayed[0]
-	if !(EventFilter{PlatformExperimentID: peID, AgentID: agentID}).Matches(held) || !(EventFilter{PlatformExperimentID: peID, Decisions: true}).Matches(held) {
+	if !(domain.EventFilter{PlatformExperimentID: peID, AgentID: agentID}).Matches(held) || !(domain.EventFilter{PlatformExperimentID: peID, Decisions: true}).Matches(held) {
 		t.Errorf("a held job is kept from its agent or from its coordinator: %+v", held)
 	}
-	if (EventFilter{PlatformExperimentID: peID, AgentID: "another-agent"}).Matches(held) {
+	if (domain.EventFilter{PlatformExperimentID: peID, AgentID: "another-agent"}).Matches(held) {
 		t.Errorf("a held job is announced to another agent: %+v", held)
 	}
 
@@ -1319,7 +1321,7 @@ VALUES ('agent', 'late-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-acceler
 	if err := experiments.MarkBaselineLate(context.Background(), "late-job", domain.HeldBaselineLate+": "+first); err != nil {
 		t.Fatal(err)
 	}
-	if got := awaitEvent(t, events, EventJobHeld, "late-job"); got.Value != domain.HeldBaselineLate || got.Detail != first || got.AgentID != agentID {
+	if got := awaitEvent(t, events, domain.EventJobHeld, "late-job"); got.Value != domain.HeldBaselineLate || got.Detail != first || got.AgentID != agentID {
 		t.Fatalf("held event of a late baseline job: got = %+v, want baseline_late with its sentence to its agent", got)
 	}
 	if err := experiments.MarkBaselineLate(context.Background(), "late-job", domain.HeldBaselineLate+": a minute later, still late"); err != nil {
@@ -1379,9 +1381,9 @@ func TestAResearcherWithNoJobForTheNoticeIsToldAgainWhileTheStretchLasts(t *test
 	ctx := context.Background()
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running', started_at = now() - interval '20 minutes' WHERE id = $1`, peID)
 	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at) VALUES ($1, $2, now() - interval '30 minutes')`, peID, agentID)
-	replayed := func() []Event {
+	replayed := func() []domain.Event {
 		t.Helper()
-		events, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, EventFilter{PlatformExperimentID: peID, AgentID: agentID, Kinds: map[string]bool{EventAgentIdle: true}}, before)
+		events, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, domain.EventFilter{PlatformExperimentID: peID, AgentID: agentID, Kinds: map[string]bool{domain.EventAgentIdle: true}}, before)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1407,7 +1409,7 @@ VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $
 	if told := noticeIdle(t, store, peID, 10*time.Minute); told != 1 {
 		t.Fatalf("idle 20 minutes, notice at 10: told %d, want once", told)
 	}
-	live := awaitEvent(t, events, EventAgentIdle, agentID)
+	live := awaitEvent(t, events, domain.EventAgentIdle, agentID)
 	stop()
 	if live.Value != IdleNew || live.Detail != "idle 20 minutes, notice 0" || live.PlatformExperimentID != peID {
 		t.Fatalf("live: got = %+v, want new with the 20 minutes since the run started", live)
@@ -1420,7 +1422,7 @@ VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $
 	if told := noticeIdle(t, store, peID, 10*time.Minute); told != 1 {
 		t.Fatalf("the same stretch a notice later: told %d, want once more", told)
 	}
-	live = awaitEvent(t, events, EventAgentIdle, agentID)
+	live = awaitEvent(t, events, domain.EventAgentIdle, agentID)
 	stop()
 	if live.Value != IdleContinues || live.Detail != "idle 20 minutes, notice 1" {
 		t.Fatalf("live repeat: got = %+v, want continues, the second notice of the stretch", live)
@@ -1500,9 +1502,9 @@ func TestARunWithPlacesFreeForTheNoticeIsToldAgainWhileTheyStayFree(t *testing.T
 		}
 		return due
 	}
-	replayed := func(filter EventFilter) []Event {
+	replayed := func(filter domain.EventFilter) []domain.Event {
 		t.Helper()
-		filter.PlatformExperimentID, filter.Kinds = peID, map[string]bool{EventCapacityIdle: true}
+		filter.PlatformExperimentID, filter.Kinds = peID, map[string]bool{domain.EventCapacityIdle: true}
 		events, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, filter, before)
 		if err != nil {
 			t.Fatal(err)
@@ -1528,7 +1530,7 @@ capacity_noticed_at = capacity_noticed_at - $2::interval WHERE id = $1`, peID, a
 	if err := store.NoticeCapacityIdle(ctx, *due, "first"); err != nil {
 		t.Fatal(err)
 	}
-	live := awaitEvent(t, events, EventCapacityIdle, peID)
+	live := awaitEvent(t, events, domain.EventCapacityIdle, peID)
 	stop()
 	if live.Value != IdleNew || live.Detail != "first" || live.PlatformExperimentID != peID || live.AgentID != "" {
 		t.Fatalf("live: got = %+v, want new with its detail, of the run", live)
@@ -1547,10 +1549,10 @@ capacity_noticed_at = capacity_noticed_at - $2::interval WHERE id = $1`, peID, a
 	if err := store.NoticeCapacityIdle(ctx, *due, "second"); err != nil {
 		t.Fatal(err)
 	}
-	if got := replayed(EventFilter{Decisions: true}); len(got) != 1 || got[0].Value != IdleContinues || got[0].Detail != "second" || got[0].Subject != peID {
+	if got := replayed(domain.EventFilter{Decisions: true}); len(got) != 1 || got[0].Value != IdleContinues || got[0].Detail != "second" || got[0].Subject != peID {
 		t.Fatalf("replay: %+v, want the last notice, continues", got)
 	}
-	if got := replayed(EventFilter{AgentID: agentID}); len(got) != 0 {
+	if got := replayed(domain.EventFilter{AgentID: agentID}); len(got) != 0 {
 		t.Fatalf("an agent's replay: %+v, want none: it is the run's", got)
 	}
 
@@ -1635,17 +1637,17 @@ func TestAJobOnAnotherAgentsHypothesisIsAnnouncedAsADuplicateOnce(t *testing.T) 
 VALUES ('agent', 'duplicate-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator',
         'QUEUED', 'awaiting_admission', 1, now(), 'AK', 'SK', $4)`, agentID, peID, hypothesisID, sentence)
 
-	live := awaitEvent(t, events, EventJobDuplicate, "duplicate-job")
+	live := awaitEvent(t, events, domain.EventJobDuplicate, "duplicate-job")
 	if live.Value != hypothesisID || live.Detail != sentence || live.AgentID != agentID {
 		t.Fatalf("live: got = %+v, want the hypothesis, the sentence and the job's agent", live)
 	}
 	exec(t, pool, `UPDATE experiments SET not_admitted_reason = 'outranked' WHERE id = 'duplicate-job'`)
-	filter := EventFilter{PlatformExperimentID: peID, Decisions: true, Kinds: map[string]bool{EventJobDuplicate: true}}
+	filter := domain.EventFilter{PlatformExperimentID: peID, Decisions: true, Kinds: map[string]bool{domain.EventJobDuplicate: true}}
 	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(), filter, before)
 	if err != nil || len(replayed) != 1 || replayed[0].Identity() != live.Identity() {
 		t.Fatalf("replayed: got = %+v, %v, want the live event %+v once", replayed, err, live)
 	}
-	if (EventFilter{PlatformExperimentID: peID, AgentID: "another-agent"}).Matches(live) {
+	if (domain.EventFilter{PlatformExperimentID: peID, AgentID: "another-agent"}).Matches(live) {
 		t.Errorf("a duplicate is announced to another agent: %+v", live)
 	}
 	job, err := NewExperimentsStore(pool).GetExperiment(context.Background(), "duplicate-job")

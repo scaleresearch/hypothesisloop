@@ -5,8 +5,7 @@ import (
 	"fmt"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // ReplayEvents derives the hypothesis events of one platform experiment at a position of at least
@@ -15,10 +14,10 @@ import (
 // hypothesis.status from its status_changed_xid, hypothesis.link from an edge's created_xid. Edges
 // created with their hypothesis share its created_at and are skipped, as hypothesis.new announced
 // them. Like every replay it reports the latest status, not each one passed through.
-func (s *Store) ReplayEvents(ctx context.Context, platformExperimentID string, since int64) ([]db.Event, error) {
+func (s *Store) ReplayEvents(ctx context.Context, platformExperimentID string, since int64) ([]domain.Event, error) {
 	params := map[string]any{"pe": platformExperimentID, "since": since}
 	out, err := s.read(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		var events []db.Event
+		var events []domain.Event
 		for _, q := range []string{
 			`MATCH (h:Hypothesis {platform_experiment_id: $pe}) WHERE h.created_xid >= $since
 RETURN 'hypothesis.new' AS kind, h.id AS subject, coalesce(h.actor_kind, '') AS value, '' AS detail, h.agent_id AS agent_id, h.created_xid AS position`,
@@ -33,7 +32,7 @@ RETURN 'hypothesis.link' AS kind, h.id AS subject, toLower(type(r)) AS value, t.
 			}
 			var d decoder
 			for _, r := range records {
-				events = append(events, db.Event{
+				events = append(events, domain.Event{
 					Kind:                 d.str(r.Values[0]),
 					Subject:              d.str(r.Values[1]),
 					Value:                d.str(r.Values[2]),
@@ -52,7 +51,7 @@ RETURN 'hypothesis.link' AS kind, h.id AS subject, toLower(type(r)) AS value, t.
 	if err != nil {
 		return nil, fmt.Errorf("graphdb.ReplayEvents: %w", err)
 	}
-	return out.([]db.Event), nil
+	return out.([]domain.Event), nil
 }
 
 // ConcernsAgent reports, per event, whether a hypothesis event concerns a hypothesis agentID
@@ -61,14 +60,14 @@ RETURN 'hypothesis.link' AS kind, h.id AS subject, toLower(type(r)) AS value, t.
 // platform experiment's id, concerns every agent: the objective is everyone's. A link added to a
 // new hypothesis later is its own event, so it does not make the hypothesis.new concern the agent,
 // live or in a replay. It is one read however many events are asked about.
-func (s *Store) ConcernsAgent(ctx context.Context, agentID string, events []db.Event) ([]bool, error) {
+func (s *Store) ConcernsAgent(ctx context.Context, agentID string, events []domain.Event) ([]bool, error) {
 	var targets, created []string
 	for _, e := range events {
 		switch {
 		case onObjective(e):
-		case e.Kind == db.EventHypothesisNew:
+		case e.Kind == domain.EventHypothesisNew:
 			created = append(created, e.Subject)
-		case e.Kind == db.EventHypothesisLink:
+		case e.Kind == domain.EventHypothesisLink:
 			targets = append(targets, e.Detail)
 		default:
 			targets = append(targets, e.Subject)
@@ -108,7 +107,7 @@ RETURN DISTINCT h.id`, created},
 	result := make([]bool, len(events))
 	for i, e := range events {
 		id := e.Subject
-		if e.Kind == db.EventHypothesisLink {
+		if e.Kind == domain.EventHypothesisLink {
 			id = e.Detail
 		}
 		result[i] = onObjective(e) || concerned[id]
@@ -117,6 +116,6 @@ RETURN DISTINCT h.id`, created},
 }
 
 // onObjective is a comment on the objective, the root of its platform experiment's graph.
-func onObjective(e db.Event) bool {
-	return e.Kind == db.EventCommentNew && e.Subject != "" && e.Subject == e.PlatformExperimentID
+func onObjective(e domain.Event) bool {
+	return e.Kind == domain.EventCommentNew && e.Subject != "" && e.Subject == e.PlatformExperimentID
 }

@@ -119,14 +119,14 @@ VALUES ($1, 'hyp-1', $2, NULLIF($3, ''), $4, $5, $6, $7, 'note')`, id, peID, age
 	}
 
 	var calls atomic.Int32
-	var handed []HumanWrite
+	var handed []domain.HumanWrite
 	errs := make([]error, 2)
 	var wg sync.WaitGroup
 	for i := range errs {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs[i] = MoveHumanWrites(ctx, pool, func(writes []HumanWrite) error {
+			errs[i] = MoveHumanWrites(ctx, pool, func(writes []domain.HumanWrite) error {
 				calls.Add(1)
 				handed = writes
 				time.Sleep(200 * time.Millisecond)
@@ -140,7 +140,7 @@ VALUES ($1, 'hyp-1', $2, NULLIF($3, ''), $4, $5, $6, $7, 'note')`, id, peID, age
 			t.Fatalf("MoveHumanWrites %d: got = %v, want nil", i, err)
 		}
 	}
-	want := []HumanWrite{{UserID: userID, Kind: "hypothesis", Subject: "hyp-a"}, {UserID: userID, Kind: "link", Subject: link}}
+	want := []domain.HumanWrite{{UserID: userID, Kind: "hypothesis", Subject: "hyp-a"}, {UserID: userID, Kind: "link", Subject: link}}
 	if calls.Load() != 1 || !slices.Equal(handed, want) {
 		t.Fatalf("handed to the graph: got = %+v in %d calls, want %+v once", handed, calls.Load(), want)
 	}
@@ -159,7 +159,10 @@ VALUES ($1, 'hyp-1', $2, NULLIF($3, ''), $4, $5, $6, $7, 'note')`, id, peID, age
 			t.Errorf("comment %s: got = %+v, %v, want %+v", id, got, err, wantActor)
 		}
 	}
-	if err := MoveHumanWrites(ctx, pool, func([]HumanWrite) error { t.Error("the graph was asked again after the table was gone"); return nil }); err != nil {
+	if err := MoveHumanWrites(ctx, pool, func([]domain.HumanWrite) error {
+		t.Error("the graph was asked again after the table was gone")
+		return nil
+	}); err != nil {
 		t.Errorf("a later start: got = %v, want nil", err)
 	}
 }

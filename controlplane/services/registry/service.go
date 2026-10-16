@@ -60,8 +60,8 @@ type Store interface {
 // Implemented by graphdb.Store.
 type Graph interface {
 	Register(ctx context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, bool, []domain.SimilarHypothesis, error)
-	AddLink(ctx context.Context, fromID, agentID string, actor domain.Actor, spec domain.LinkSpec, stamp db.Stamp) (*graphdb.LinkResult, error)
-	UpdateStatus(ctx context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus, stamp db.Stamp) (*domain.Hypothesis, bool, error)
+	AddLink(ctx context.Context, fromID, agentID string, actor domain.Actor, spec domain.LinkSpec, stamp domain.Stamp) (*graphdb.LinkResult, error)
+	UpdateStatus(ctx context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus, stamp domain.Stamp) (*domain.Hypothesis, bool, error)
 	EditText(ctx context.Context, id, text string) (*domain.Hypothesis, error)
 	Remove(ctx context.Context, id string) error
 	GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error)
@@ -90,8 +90,8 @@ type Service struct {
 // EventNotifier emits the events no Postgres trigger emits: the metric pointer, and the hypothesis
 // events, emitted around the graph write they describe (see db.EventsStore.Emit).
 type EventNotifier interface {
-	NotifyEvent(ctx context.Context, e db.Event) error
-	Emit(ctx context.Context, write func(stamp db.Stamp) ([]db.Event, error)) error
+	NotifyEvent(ctx context.Context, e domain.Event) error
+	Emit(ctx context.Context, write func(stamp domain.Stamp) ([]domain.Event, error)) error
 }
 
 // New returns a new registry Service, which announces metric arrivals and hypothesis changes on

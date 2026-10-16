@@ -228,7 +228,7 @@ func (g *fakeGraph) stamp(id, fact string, position int64) {
 
 // restamp mirrors graphdb's: a repeated write over a fact whose transaction aborted takes the
 // repeat's position and announces it again.
-func (g *fakeGraph) restamp(id, fact string, stamp db.Stamp) (bool, error) {
+func (g *fakeGraph) restamp(id, fact string, stamp domain.Stamp) (bool, error) {
 	aborted, err := stamp.Aborted(g.stamps[fact])
 	if err != nil || !aborted {
 		return false, err
@@ -261,7 +261,7 @@ func (g *fakeGraph) GetHypothesis(_ context.Context, id string) (*domain.Hypothe
 	return g.rows[id], nil
 }
 
-func (g *fakeGraph) UpdateStatus(_ context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus, stamp db.Stamp) (*domain.Hypothesis, bool, error) {
+func (g *fakeGraph) UpdateStatus(_ context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus, stamp domain.Stamp) (*domain.Hypothesis, bool, error) {
 	h, ok := g.rows[id]
 	if !ok {
 		return nil, false, graphdb.ErrNotFound
@@ -279,7 +279,7 @@ func (g *fakeGraph) UpdateStatus(_ context.Context, id, callerAgentID string, ac
 	return h, true, nil
 }
 
-func (g *fakeGraph) AddLink(_ context.Context, fromID, agentID string, actor domain.Actor, spec domain.LinkSpec, stamp db.Stamp) (*graphdb.LinkResult, error) {
+func (g *fakeGraph) AddLink(_ context.Context, fromID, agentID string, actor domain.Actor, spec domain.LinkSpec, stamp domain.Stamp) (*graphdb.LinkResult, error) {
 	h, ok := g.rows[fromID]
 	if !ok {
 		return nil, graphdb.ErrNotFound
@@ -333,7 +333,7 @@ func (g *fakeGraph) Remove(_ context.Context, id string) error {
 // recordedEvents is the watch stream as the registry sees it. Emit hands out positions 1, 2, ...
 // and stamps them on the events, as Postgres would.
 type recordedEvents struct {
-	events   []db.Event
+	events   []domain.Event
 	position int64
 	// failNext fails the next Emit after its write, as a Postgres commit failing after the graph
 	// write committed; its position is then aborted.
@@ -343,14 +343,14 @@ type recordedEvents struct {
 	closed map[string]bool
 }
 
-func (r *recordedEvents) NotifyEvent(_ context.Context, e db.Event) error {
+func (r *recordedEvents) NotifyEvent(_ context.Context, e domain.Event) error {
 	r.events = append(r.events, e)
 	return nil
 }
 
-func (r *recordedEvents) Emit(_ context.Context, write func(stamp db.Stamp) ([]db.Event, error)) error {
+func (r *recordedEvents) Emit(_ context.Context, write func(stamp domain.Stamp) ([]domain.Event, error)) error {
 	r.position++
-	events, err := write(db.Stamp{Position: r.position, Aborted: func(p int64) (bool, error) { return r.aborted[p], nil },
+	events, err := write(domain.Stamp{Position: r.position, Aborted: func(p int64) (bool, error) { return r.aborted[p], nil },
 		RequireOpen: func(pe string) error {
 			if r.closed[pe] {
 				return fmt.Errorf("%w: %s", db.ErrPlatformExperimentClosed, pe)
@@ -528,7 +528,7 @@ func TestRegisteringANewHypothesisStampsTheGraphWriteWithItsEventsPosition(t *te
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
-	want := db.Event{Kind: db.EventHypothesisNew, Subject: h.ID, Value: string(domain.ActorAgent), PlatformExperimentID: "pe-1",
+	want := domain.Event{Kind: domain.EventHypothesisNew, Subject: h.ID, Value: string(domain.ActorAgent), PlatformExperimentID: "pe-1",
 		AgentID: "agent-1", Position: 1}
 	if len(events.events) != 1 || events.events[0] != want {
 		t.Errorf("events: got = %+v, want = [%+v]", events.events, want)
@@ -578,7 +578,7 @@ func TestSettlingAHypothesisAnnouncesTheVerdictOnlyWhenItChanges(t *testing.T) {
 	}
 	got := events.events[1]
 	positions := svc.graph.(*fakeGraph).positions[h.ID]
-	if got.Kind != db.EventHypothesisStatus || got.Value != "refuted" || len(positions) != 2 || got.Position != positions[1] {
+	if got.Kind != domain.EventHypothesisStatus || got.Value != "refuted" || len(positions) != 2 || got.Position != positions[1] {
 		t.Errorf("status event: got = %+v (graph positions %v), want = hypothesis.status refuted at the status write's position", got, positions)
 	}
 }
@@ -608,7 +608,7 @@ func TestAddingALinkAnnouncesItOnceWithTheTargetAsDetail(t *testing.T) {
 		t.Fatalf("events: got = %v, want = %v (two hypothesis.new, one hypothesis.link)", len(events.events), 3)
 	}
 	got := events.events[2]
-	if got.Kind != db.EventHypothesisLink || got.Subject != a.ID || got.Value != "contradicts" || got.Detail != b.ID {
+	if got.Kind != domain.EventHypothesisLink || got.Subject != a.ID || got.Value != "contradicts" || got.Detail != b.ID {
 		t.Errorf("link event: got = %+v, want = hypothesis.link %s contradicts %s", got, a.ID, b.ID)
 	}
 }
@@ -632,16 +632,16 @@ func TestARetryAfterAFailedEmitSendsTheEventTheFailureLost(t *testing.T) {
 		kind string
 		do   func() error
 	}{
-		{db.EventHypothesisNew, func() error {
+		{domain.EventHypothesisNew, func() error {
 			a, _, _, _, err = svc.RegisterHypothesis(ctx, "agent-1", agentActor("agent-1"), "pe-1", "warmup helps", buildOnRoot, nil)
 			return err
 		}},
-		{db.EventHypothesisStatus, func() error {
+		{domain.EventHypothesisStatus, func() error {
 			store.jobs = []*domain.Experiment{jobOn("job-1", a.ID, domain.StatusFailed)}
 			_, err := svc.SetHypothesisStatus(ctx, a.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid})
 			return err
 		}},
-		{db.EventHypothesisLink, func() error {
+		{domain.EventHypothesisLink, func() error {
 			_, err := svc.AddHypothesisLink(ctx, a.ID, "agent-1", agentActor("agent-1"), link)
 			return err
 		}},
