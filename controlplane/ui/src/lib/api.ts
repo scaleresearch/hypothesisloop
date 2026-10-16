@@ -36,6 +36,8 @@ import type {
   JobMetric,
   GitHubApp,
   GitHubInstallation,
+  GitHubInstallFinished,
+  GitHubInstallStart,
   GitHubRepository,
 } from '@/types'
 
@@ -815,10 +817,6 @@ export function acceptOrgInvite(token: string): Promise<OrgMember> {
 
 /** The reason the API gives on a deployment whose git host is not GitHub. */
 export const GITHUB_NOT_CONFIGURED = 'github_not_configured'
-/** The person's GitHub account reaches no installation of the App. */
-export const APP_NOT_INSTALLED = 'app_not_installed'
-/** The person reaches several installations; the refusal's body lists them as `installations`. */
-export const INSTALLATION_CHOICE_REQUIRED = 'installation_choice_required'
 
 // Answered 503 github_not_configured on a deployment whose git host is not GitHub.
 export function fetchGitHubApp(): Promise<GitHubApp> {
@@ -830,15 +828,15 @@ export function fetchGitHubInstallations(orgID: string): Promise<Page<GitHubInst
   return apiFetchPage<GitHubInstallation>(`/orgs/${orgID}/github-installations?limit=${MAX_LIST_PAGE_SIZE}`)
 }
 
-// `code` is what GitHub returned from authorising the App, to `redirectURI`: it proves the person
-// reaches the installation, and works once. Without `installationID` the one installation they
-// reach is connected, and reaching several is refused with INSTALLATION_CHOICE_REQUIRED.
-export function connectGitHubInstallation(
-  orgID: string, connect: { code: string; redirectURI: string; installationID?: number },
-): Promise<GitHubInstallation> {
-  return apiSend<GitHubInstallation>('POST', `/orgs/${orgID}/github-installations`, {
-    code: connect.code, redirect_uri: connect.redirectURI, installation_id: connect.installationID,
-  })
+// For an owner: a state good once, for the caller, and GitHub's install page carrying it.
+// `returnTo` is the page of this app the install starts from.
+export function beginGitHubInstall(orgID: string, returnTo: string): Promise<GitHubInstallStart> {
+  return apiSend<GitHubInstallStart>('POST', `/orgs/${orgID}/github-install-states`, { return_to: returnTo })
+}
+
+// What GitHub handed back to the setup URL: the state is taken once, whatever the outcome.
+export function finishGitHubInstall(state: string, installationID: number): Promise<GitHubInstallFinished> {
+  return apiSend<GitHubInstallFinished>('POST', '/github/installations', { state, installation_id: installationID })
 }
 
 export async function disconnectGitHubInstallation(orgID: string, installationID: number): Promise<void> {

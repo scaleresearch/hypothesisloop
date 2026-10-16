@@ -1,10 +1,8 @@
-import { useSyncExternalStore } from 'react'
-import useSWR from 'swr'
-import { APP_NOT_INSTALLED, ApiError, INSTALLATION_CHOICE_REQUIRED, fetchGitHubApp } from '@/lib/api'
+import { useEffect, useState } from 'react'
+import useSWR, { useSWRConfig } from 'swr'
+import { ApiError, beginGitHubInstall, fetchGitHubApp } from '@/lib/api'
 import { orgPath } from '@/lib/routes'
-import type { GitHubApp, GitHubInstallation, ReachableInstallation } from '@/types'
-
-const KEY = 'hl-github-connect'
+import type { GitHubInstallation, GitHubInstallFinished, GitHubInstallStart } from '@/types'
 
 /**
  * The platform's GitHub App, read under one key by every component that needs it. An error whose
@@ -14,11 +12,7 @@ export function useGitHubApp(enabled = true) {
   return useSWR(enabled ? 'github-app' : null, fetchGitHubApp, { shouldRetryOnError: false })
 }
 
-/**
- * Where GitHub returns the person: the callback and the setup address registered on the platform's
- * GitHub App. It carries no page of its own, only the return, and hands on to the page the
- * person left from.
- */
+/** The setup URL registered on the platform's GitHub App: where GitHub returns the install tab. */
 export const GITHUB_RETURN_PATH = '/settings/repository'
 /** The id of the GitHub card in the org's settings, for a link that leads to it. */
 export const GITHUB_CARD = 'github'
@@ -28,214 +22,157 @@ export function githubCardPath(orgID: string): string {
   return `${orgPath(orgID, 'settings')}#${GITHUB_CARD}`
 }
 
-// What this tab left for GitHub with. GitHub returns to one fixed address that names no org, so the return is tied to the attempt by the random value sent as `state`.
-// An attempt is read once: a second return with the same state finds nothing.
-interface Attempt {
-  nonce: string
-  // 'install' left for the App's install page, which returns with setup_action, the installation it
-  // made or changed and no state; 'authorise' left to prove who the person is, which returns with
-  // a code and the state.
-  step: 'install' | 'authorise'
-  orgID: string
-  // The page of this app the person left from, as a path, and returns to.
-  returnTo: string
-  installationID?: number
-}
-
-/**
- * The connect this tab is in the middle of. It lives outside the page because the return address
- * is another page than the card that shows the outcome, and the code GitHub returned works once.
- */
-export type Connect =
-  | { state: 'idle' }
-  | { state: 'connected'; orgID: string; installation: GitHubInstallation }
-  // The person reaches several installations and named none: they are asked which.
-  | { state: 'choice'; orgID: string; installations: ReachableInstallation[] }
-  // GitHub or the API said no. `reason` is the API's reason code when it gave one.
-  | { state: 'failed'; orgID: string; message: string; reason?: string }
-  // A return that no attempt of this tab accounts for. Nothing was sent anywhere.
-  | { state: 'refused'; message: string }
-
-const IDLE: Connect = { state: 'idle' }
-let current: Connect = IDLE
-const listeners = new Set<() => void>()
-
-function set(next: Connect) {
-  current = next
-  listeners.forEach(listener => listener())
-}
-
-function subscribe(listener: () => void) {
-  listeners.add(listener)
-  return () => { listeners.delete(listener) }
-}
-
-export function useConnect(): Connect {
-  return useSyncExternalStore(subscribe, () => current, () => IDLE)
-}
-
-export function resetConnect(): void {
-  set(IDLE)
-}
-
-/** Where GitHub returns the person after they authorise, which the connect names again. */
-export function redirectURI(): string {
-  return new URL(GITHUB_RETURN_PATH, window.location.origin).toString()
-}
-
-function keep(attempt: Attempt) {
-  window.sessionStorage.setItem(KEY, JSON.stringify(attempt))
-  set(IDLE)
+/** Where on GitHub the owner of an account reviews the App's installation: permissions, suspension. */
+export function installationSettingsURL(installation: Pick<GitHubInstallation, 'installation_id' | 'account_login' | 'account_type'>): string {
+  const id = installation.installation_id
+  return installation.account_type === 'User'
+    ? `https://github.com/settings/installations/${id}`
+    : `https://github.com/organizations/${encodeURIComponent(installation.account_login)}/settings/installations/${id}`
 }
 
 // A path of this app: one leading slash and no second, and no backslash or control character,
 // which a browser reads as a slash or drops and so turns into a second one that leaves the origin.
-function inApp(path: unknown): path is string {
-  return typeof path === 'string' && /^\/(?![/\\])/.test(path) && !/[\\\u0000-\u001f]/.test(path)
+export function inApp(path: unknown): path is string {
+  return typeof path === 'string' && /^\/(?!\/)/.test(path) && !/[\\\u0000-\u001f\u007f]/.test(path)
 }
 
-// An attempt whose return is not a path of this app is no attempt of this app.
-function held(): Attempt | null {
-  const stored = window.sessionStorage.getItem(KEY)
-  if (!stored) return null
-  const attempt = JSON.parse(stored) as Attempt
-  return inApp(attempt.returnTo) ? attempt : null
+// The install tab and the tab it was opened from talk over one channel of this origin. An install
+// is told apart by its state; a change made on GitHub without one asks every tab to read again.
+const CHANNEL = 'hl-github-install'
+
+export type InstallOutcome = { ok: true; installation: GitHubInstallation } | { ok: false; message: string; reason?: string }
+
+type Message = { state: string; outcome: InstallOutcome } | { changed: true }
+
+function post(message: Message) {
+  const channel = new BroadcastChannel(CHANNEL)
+  channel.postMessage(message)
+  channel.close()
 }
 
-export interface Origin {
-  /** The org the connect is for. */
-  orgID: string
-  /** The page of this app the person left from and returns to, as a path. */
-  returnTo: string
+function listen(onMessage: (message: Message) => void): () => void {
+  const channel = new BroadcastChannel(CHANNEL)
+  channel.onmessage = event => onMessage(event.data as Message)
+  return () => channel.close()
 }
 
-function checked(origin: Origin): Origin {
-  if (!inApp(origin.returnTo)) throw new Error(`not a path of this app: ${origin.returnTo}`)
-  return { orgID: origin.orgID, returnTo: origin.returnTo }
+/** The tab GitHub's install page opens in. */
+export interface InstallTab {
+  location: { href: string }
+  close(): void
 }
+
+const BLOCKED = 'Your browser blocked the GitHub tab. Allow pop-ups for this site, then press the button again.'
 
 /**
- * Records an attempt to connect GitHub to the org and returns where on GitHub it continues: the
- * App's authorisation. `installationID` names the installation to connect, once the person chose.
+ * Opens GitHub's install page of the App in a new tab and answers the state GitHub hands back.
+ * The tab is opened before anything is awaited, inside the click, so the browser lets it open;
+ * the address it goes to carries a state the API issued for this org, this person and returnTo.
  */
-export function beginConnect(authorizeURL: string, origin: Origin, installationID?: number): string {
-  const attempt: Attempt = { nonce: crypto.randomUUID(), step: 'authorise', ...checked(origin), installationID }
-  keep(attempt)
-  const url = new URL(authorizeURL)
-  url.searchParams.set('redirect_uri', redirectURI())
-  url.searchParams.set('state', attempt.nonce)
-  return url.toString()
+export async function openInstall(orgID: string, returnTo: string, deps: {
+  open: () => InstallTab | null
+  begin: (orgID: string, returnTo: string) => Promise<GitHubInstallStart>
+}): Promise<string> {
+  const tab = deps.open()
+  if (!tab) throw new Error(BLOCKED)
+  try {
+    const started = await deps.begin(orgID, returnTo)
+    tab.location.href = started.install_url
+    return started.state
+  } catch (error) {
+    tab.close()
+    throw error
+  }
 }
 
-/** Records that this tab left to install the App, so its return goes on to connect what it installed. */
-export function beginInstall(installURL: string, origin: Origin): string {
-  keep({ nonce: crypto.randomUUID(), step: 'install', ...checked(origin) })
-  return installURL
-}
+/** Where an install started in this tab stands. */
+export type Install =
+  | { phase: 'idle' }
+  | { phase: 'waiting'; state: string }
+  | { phase: 'connected'; installation: GitHubInstallation }
+  | { phase: 'failed'; message: string; reason?: string }
 
-const NOT_STARTED_HERE = 'This return from GitHub does not belong to a connect started in this tab, so nothing was done with it.'
+const IDLE: Install = { phase: 'idle' }
+const GITHUB_KEYS = new Set(['github-installations', 'github-repositories', 'repository-check', 'github-installation-check'])
 
 /**
- * What the return page does next: go back to a page of this app, or on to GitHub once more. A
- * return no attempt accounts for names no page: it shows the GitHub card of the caller's org.
+ * Installs the App from this tab without leaving it: `start`, from a click, opens GitHub in a new
+ * tab, and the tab GitHub returns to connects the installation and tells this one, which reads
+ * the org's GitHub accounts and repositories again. A change made on GitHub alone, as repositories
+ * added from its own settings, has every tab read them again.
  */
-export type Next = { to: 'app'; path: string | null } | { to: 'github'; address: string }
+export function useGitHubInstall(orgID: string, returnTo: string) {
+  const [install, setInstall] = useState<Install>(IDLE)
+  const { mutate } = useSWRConfig()
+  const waiting = install.phase === 'waiting' ? install.state : null
 
-interface Calls {
-  app: () => Promise<GitHubApp>
-  connect: (orgID: string, code: string, installationID?: number) => Promise<GitHubInstallation>
-  installations: (orgID: string) => Promise<GitHubInstallation[]>
+  useEffect(() => listen(message => {
+    if ('state' in message && message.state !== waiting) return
+    void mutate(key => Array.isArray(key) && GITHUB_KEYS.has(key[0]))
+    if ('state' in message) {
+      setInstall(message.outcome.ok ? { phase: 'connected', installation: message.outcome.installation } : { phase: 'failed', message: message.outcome.message, reason: message.outcome.reason })
+    }
+  }), [waiting, mutate])
+
+  function start() {
+    openInstall(orgID, returnTo, { open: () => window.open('', '_blank'), begin: beginGitHubInstall }).then(
+      state => setInstall({ phase: 'waiting', state }),
+      error => setInstall({ phase: 'failed', message: messageOf(error), reason: error instanceof ApiError ? error.reason : undefined }),
+    )
+  }
+  return { install, start, reset: () => setInstall(IDLE) }
 }
 
-const NOT_INSTALLED = 'Install the App on the GitHub account to connect, then connect again.'
-const REQUESTED = 'GitHub asked an owner of that organisation to install the App: connect again once they have.'
+/** What the install tab shows once it has taken GitHub's return, when it could not close itself. */
+export type ReturnView =
+  | { view: 'connected'; account: string; returnTo: string | null }
+  | { view: 'failed'; message: string }
+  // GitHub returned from a change made on GitHub, which no install of this app started.
+  | { view: 'changed' }
+  // Nothing GitHub sends: a visit.
+  | { view: 'nothing' }
+
+const REQUESTED = 'GitHub asked an owner of that organization to approve the install. Press Install GitHub App again once they have.'
+const NO_INSTALLATION = 'GitHub returned without an installation, so nothing was connected. Press Install GitHub App again.'
 
 /**
- * Takes a return from GitHub. Connecting is one pass: the person authorises, and the account they
- * control that the org has not connected is connected. With none, they go on to install the App,
- * and from installing, with the installation GitHub made or changed, to authorise for it. A return
- * from authorising needs the state of this tab's attempt and a code, and is connected through
- * `connect`, once. With GitHub's refusal the attempt ends with its words. Any other return is
- * refused and nothing is sent.
+ * Takes GitHub's return to the setup URL in the install tab: with the state and the installation
+ * GitHub handed back, the installation is connected through `finish`, once, and the outcome is
+ * told to the tab the install started in. A return with no state, from a change made on GitHub,
+ * has every tab read again and connects nothing.
  */
-export function takeReturn(query: string, calls: Calls): Promise<Next> {
-  // React runs an effect twice in development, and an attempt is taken once: the second run is
+export function takeReturn(query: string, finish: (state: string, installationID: number) => Promise<GitHubInstallFinished>): Promise<ReturnView> {
+  // React runs an effect twice in development, and a state works once: the second run is
   // answered what the first was.
-  if (taken?.query !== query) taken = { query, next: take(new URLSearchParams(query), calls) }
-  return taken.next
+  if (taken?.query !== query) taken = { query, view: take(new URLSearchParams(query), finish) }
+  return taken.view
 }
 
-let taken: { query: string; next: Promise<Next> } | null = null
+let taken: { query: string; view: Promise<ReturnView> } | null = null
 
-async function take(params: URLSearchParams, calls: Calls): Promise<Next> {
-  const attempt = held()
-  window.sessionStorage.removeItem(KEY)
+async function take(params: URLSearchParams, finish: (state: string, installationID: number) => Promise<GitHubInstallFinished>): Promise<ReturnView> {
   const state = params.get('state')
   const installed = Number(params.get('installation_id'))
-
-  if (attempt?.step === 'install' && state == null && params.has('setup_action')) {
-    const { orgID, returnTo } = attempt
-    const back = { to: 'app', path: returnTo } as const
-    if (!Number.isSafeInteger(installed) || installed <= 0) {
-      set({ state: 'failed', orgID, message: params.get('setup_action') === 'request' ? REQUESTED : NOT_INSTALLED })
-      return back
-    }
-    try {
-      // An installation the org already connected, whose repositories were just changed, has
-      // nothing left to connect.
-      const already = (await calls.installations(orgID)).find(i => i.installation_id === installed)
-      if (already) {
-        set({ state: 'connected', orgID, installation: already })
-        return back
-      }
-      return { to: 'github', address: beginConnect((await calls.app()).authorize_url, { orgID, returnTo }, installed) }
-    } catch (error) {
-      set({ state: 'failed', orgID, message: messageOf(error) })
-      return back
-    }
+  const hasInstallation = Number.isSafeInteger(installed) && installed > 0
+  if (!state) {
+    if (!hasInstallation) return { view: 'nothing' }
+    post({ changed: true })
+    return { view: 'changed' }
   }
-  if (attempt?.step !== 'authorise' || attempt.nonce !== state) {
-    // A return to this address with nothing GitHub would send is a visit, and says nothing.
-    if (params.has('code') || params.has('state') || params.has('error')) set({ state: 'refused', message: NOT_STARTED_HERE })
-    return { to: 'app', path: attempt?.returnTo ?? null }
+  const failed = (message: string, reason?: string): ReturnView => {
+    post({ state, outcome: { ok: false, message, reason } })
+    return { view: 'failed', message }
   }
-
-  const { orgID, returnTo, installationID } = attempt
-  const back = { to: 'app', path: returnTo } as const
-  const code = params.get('code')
-  if (code == null) {
-    const said = params.get('error_description') ?? params.get('error')
-    set({ state: 'failed', orgID, message: said ? `GitHub did not authorise the App: ${said}` : 'GitHub returned without a code.' })
-    return back
-  }
+  if (!hasInstallation) return failed(params.get('setup_action') === 'request' ? REQUESTED : NO_INSTALLATION)
   try {
-    set({ state: 'connected', orgID, installation: await calls.connect(orgID, code, installationID) })
-    return back
+    const finished = await finish(state, installed)
+    post({ state, outcome: { ok: true, installation: finished.installation } })
+    return { view: 'connected', account: finished.installation.account_login, returnTo: inApp(finished.return_to) ? finished.return_to : null }
   } catch (error) {
-    const reason = error instanceof ApiError ? error.reason : undefined
-    if (reason === APP_NOT_INSTALLED && installationID == null) {
-      try {
-        return { to: 'github', address: beginInstall((await calls.app()).install_url, { orgID, returnTo }) }
-      } catch (unread) {
-        set({ state: 'failed', orgID, message: messageOf(unread) })
-        return back
-      }
-    }
-    if (error instanceof ApiError && reason === INSTALLATION_CHOICE_REQUIRED && Array.isArray(error.body?.installations)) {
-      // Which account to connect is asked on the GitHub card of the org's settings alone.
-      set({ state: 'choice', orgID, installations: error.body.installations as ReachableInstallation[] })
-      return { to: 'app', path: githubCardPath(orgID) }
-    }
-    set({ state: 'failed', orgID, message: reason === APP_NOT_INSTALLED ? NOT_INSTALLED : messageOf(error), reason })
-    return back
+    return failed(messageOf(error), error instanceof ApiError ? error.reason : undefined)
   }
 }
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-/** Leaves the app for an address on GitHub, without leaving this page behind for Back to return to. */
-export function leaveFor(address: string): void {
-  window.location.replace(address)
 }

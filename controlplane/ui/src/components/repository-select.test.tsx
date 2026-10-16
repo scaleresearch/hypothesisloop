@@ -3,19 +3,15 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, checkRepository, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api'
+import { ApiError, beginGitHubInstall, checkRepository, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
-import { leaveFor, resetConnect, takeReturn } from '@/lib/github-connect'
+import { takeReturn } from '@/lib/github-connect'
 import { RepositorySelect, repositoryFields } from '@/components/repository-select'
 import type { GitHubInstallation, GitHubRepository, Me } from '@/types'
 
-vi.mock('@/lib/github-connect', async importActual => ({
-  ...(await importActual<typeof import('@/lib/github-connect')>()),
-  leaveFor: vi.fn(),
-}))
 vi.mock('@/lib/api', async importActual => ({
   ...(await importActual<typeof import('@/lib/api')>()),
-  checkRepository: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
+  beginGitHubInstall: vi.fn(), checkRepository: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
 }))
 
 const at = '2026-01-01T00:00:00Z'
@@ -24,6 +20,7 @@ const me: Me = {
   orgs: [{ id: 'org_a', name: 'Lab', role: 'member', created_at: at }],
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 }
+const owner: Me = { ...me, orgs: [{ ...me.orgs[0], role: 'owner' }] }
 const repositories: GitHubRepository[] = [
   { repository: 'acme/widgets', installation_id: 7, private: true },
   { repository: 'acme/open', installation_id: 7, private: false },
@@ -41,8 +38,8 @@ function Picker({ initial = '' }: { initial?: string }) {
   )
 }
 
-function show(initial?: string) {
-  const resolved = resolveTenant(me, '')
+function show(initial?: string, as: Me = me) {
+  const resolved = resolveTenant(as, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
     <SWRConfig value={{ provider: () => new Map() }}>
@@ -53,7 +50,7 @@ function show(initial?: string) {
 
 beforeEach(() => {
   vi.mocked(checkRepository).mockResolvedValue({ repository_account: 'acme' })
-  vi.mocked(fetchGitHubApp).mockResolvedValue({ slug: 'hl', client_id: 'c', install_url: 'https://github.test/install', authorize_url: 'https://github.test/authorize', new_repository_url: 'https://github.test/new' })
+  vi.mocked(fetchGitHubApp).mockResolvedValue({ slug: 'hl', install_url: 'https://github.test/install', new_repository_url: 'https://github.test/new' })
   vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [{ org_id: 'org_a', installation_id: 7, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: 'u9', name: 'Una' }, connected_at: at, default: false }], total: 1 })
   vi.mocked(fetchGitHubRepositories).mockImplementation(async (_, params) => {
     const found = repositories.filter(r => r.repository.includes(params?.q ?? ''))
@@ -146,25 +143,38 @@ describe('the repository of a new platform experiment', () => {
     expect(screen.getByRole('status').textContent).toBe('')
   })
 
-  it('shows what the create would refuse, with the way to fix it, before anything is created', async () => {
-    const gone = 'the GitHub App is no longer installed on acme: GitHub answers that installation 7 was removed or suspended.'
+  it('shows what the create would refuse as a chip and its fix, before anything is created', async () => {
+    const gone = 'the GitHub App is no longer installed on acme (installation 7): its owner installs the App again from Settings, GitHub'
     vi.mocked(checkRepository).mockRejectedValue(new ApiError(422, gone, 'installation_gone'))
     show()
-    const alert = await screen.findByRole('alert')
-    expect(alert.textContent).toContain(gone)
+    const chip = (await screen.findByText('Not installed')).closest('[title]')!
+    expect(chip.getAttribute('title')).toBe('The GitHub App was removed on acme, so experiments cannot use its repositories. Reinstall it to connect again.')
+    expect(document.body.textContent).not.toContain(gone)
     expect(checkRepository).toHaveBeenCalledWith('prj_1', {})
-    expect(within(alert).getByRole('link', { name: 'Open the App on GitHub' }).getAttribute('href')).toBe('https://github.test/install')
-    expect(within(alert).getByRole('link', { name: 'GitHub in Settings' }).getAttribute('href')).toBe('/orgs/org_a/settings#github')
     vi.mocked(checkRepository).mockResolvedValue({ repository_account: 'acme' })
-    await userEvent.click(within(alert).getByRole('button', { name: 'check again' }))
-    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(screen.queryByText('Not installed')).toBeNull())
   })
 
-  it('checks a repository picked as the create would', async () => {
+  it('offers an owner to reinstall where the App was removed', async () => {
+    vi.mocked(checkRepository).mockRejectedValue(new ApiError(422, 'gone', 'installation_gone'))
+    show(undefined, owner)
+    expect(await screen.findByRole('button', { name: 'Reinstall' })).toBeTruthy()
+  })
+
+  it('checks a repository picked as the create would, and offers to add it to the App', async () => {
     vi.mocked(checkRepository).mockRejectedValue(new ApiError(422, 'the GitHub installation the org connected does not cover that repository', 'repository_not_reachable'))
-    show('acme/open')
-    expect((await screen.findByRole('alert')).textContent).toContain('does not cover that repository')
+    show('acme/open', owner)
+    expect((await screen.findByText('No access')).closest('[title]')!.getAttribute('title')).toBe('The GitHub App cannot reach this repository. Add it to the App\'s repositories on acme.')
     expect(checkRepository).toHaveBeenCalledWith('prj_1', { repository: 'acme/open' })
+    expect(screen.getByRole('button', { name: 'Add repositories' })).toBeTruthy()
+  })
+
+  it('leads to the installation\'s page on GitHub for a permission the App was not granted', async () => {
+    vi.mocked(checkRepository).mockRejectedValue(new ApiError(422, 'github_permission_missing: administration:write. The GitHub App installation has not granted that', 'github_permission_missing'))
+    show()
+    expect((await screen.findByText('Missing permission')).closest('[title]')!.getAttribute('title')).toContain('administration (write)')
+    expect(screen.getByRole('link', { name: 'Review on GitHub' }).getAttribute('href')).toBe('https://github.com/organizations/acme/settings/installations/7')
   })
 
   it('names no owner for a new repository on GitHub when several accounts are connected', async () => {
@@ -183,10 +193,10 @@ describe('the repository of a new platform experiment', () => {
     await waitFor(() => expect(screen.getAllByRole('option').map(o => o.textContent)).toEqual(['A new private repository on acme', 'acme/widgetsprivate']))
   })
 
-  it('leads to the GitHub card of Settings when no account is connected, and asks GitHub nothing', async () => {
+  it('says an owner installs the App when no account is connected, and asks GitHub nothing', async () => {
     vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [], total: 0 })
     show()
-    expect((await screen.findByRole('link', { name: 'Connect GitHub in Settings' })).getAttribute('href')).toBe('/orgs/org_a/settings#github')
+    expect(await screen.findByText(/An owner of the org installs the GitHub App/)).toBeTruthy()
     expect(screen.queryByRole('combobox')).toBeNull()
     expect(fetchGitHubRepositories).not.toHaveBeenCalled()
   })
@@ -206,44 +216,32 @@ describe('the repository of a new platform experiment', () => {
   })
 })
 
-describe('giving the App access from the form', () => {
+describe('installing the App from the form', () => {
+  let opened: { location: { href: string }; close: () => void }
   beforeEach(() => {
-    window.sessionStorage.clear()
-    resetConnect()
-    vi.mocked(leaveFor).mockReset()
+    opened = { location: { href: '' }, close: vi.fn() }
+    vi.spyOn(window, 'open').mockReturnValue(opened as unknown as Window)
+    vi.mocked(beginGitHubInstall).mockResolvedValue({ state: 's-1', install_url: 'https://github.test/install?state=s-1', expires_at: at })
   })
 
-  function showLeaving(leave: () => Promise<string>) {
-    const resolved = resolveTenant(me, '')
-    if (resolved.state !== 'selected') throw new Error('no tenant')
-    return render(
-      <SWRConfig value={{ provider: () => new Map() }}>
-        <TenantContext.Provider value={resolved.tenant}><RepositorySelect value="" onChange={() => {}} leave={leave} /></TenantContext.Provider>
-      </SWRConfig>,
-    )
-  }
-
-  it('keeps the form first and returns to where it is kept', async () => {
-    const leave = vi.fn().mockResolvedValue('/projects/prj_1/experiments?draft=draft-1')
-    showLeaving(leave)
+  it('opens GitHub in a new tab, leaves the form as it is, and lists what the App reaches once the other tab connects', async () => {
+    show('acme/open', owner)
     await userEvent.click(await screen.findByRole('button', { name: 'give the App access' }))
-    await waitFor(() => expect(leaveFor).toHaveBeenCalledExactlyOnceWith('https://github.test/install'))
-    expect(leave).toHaveBeenCalledTimes(1)
-    expect(JSON.parse(window.sessionStorage.getItem('hl-github-connect')!)).toMatchObject({ step: 'install', orgID: 'org_a', returnTo: '/projects/prj_1/experiments?draft=draft-1' })
+    expect(beginGitHubInstall).toHaveBeenCalledExactlyOnceWith('org_a', '/')
+    expect(opened.location.href).toBe('https://github.test/install?state=s-1')
+    expect((await screen.findByText(/Waiting for GitHub/))).toBeTruthy()
+    expect(screen.getAllByRole('status').some(s => s.textContent === 'acme/open')).toBe(true)
+    const listed = vi.mocked(fetchGitHubRepositories).mock.calls.length
+    await takeReturn('installation_id=7&setup_action=update&state=s-1', async () => ({ org_id: 'org_a', return_to: '/', installation: organisation }))
+    expect(await screen.findByText('acme is connected.')).toBeTruthy()
+    await waitFor(() => expect(vi.mocked(fetchGitHubRepositories).mock.calls.length).toBeGreaterThan(listed))
   })
 
-  it('stays when the form cannot be kept, and says why', async () => {
-    showLeaving(vi.fn().mockRejectedValue(new Error('API unreachable')))
-    await userEvent.click(await screen.findByRole('button', { name: 'give the App access' }))
-    expect(await screen.findByText('Could not leave for GitHub: API unreachable')).toBeTruthy()
-    expect(leaveFor).not.toHaveBeenCalled()
-    expect(window.sessionStorage.getItem('hl-github-connect')).toBeNull()
-  })
-
-  it('shows how the connect went when GitHub returns the person here', async () => {
-    window.sessionStorage.setItem('hl-github-connect', JSON.stringify({ nonce: 'n', step: 'install', orgID: 'org_a', returnTo: '/projects/prj_1/experiments' }))
-    await takeReturn('setup_action=request', { app: vi.fn(), connect: vi.fn(), installations: vi.fn() })
-    showLeaving(vi.fn())
-    expect(await screen.findByText('GitHub asked an owner of that organisation to install the App: connect again once they have.')).toBeTruthy()
+  it('installs the App from the form when no account is connected', async () => {
+    vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [], total: 0 })
+    show(undefined, owner)
+    await userEvent.click(await screen.findByRole('button', { name: 'Install GitHub App' }))
+    expect(beginGitHubInstall).toHaveBeenCalledExactlyOnceWith('org_a', '/')
+    expect(await screen.findByText(/Waiting for GitHub/)).toBeTruthy()
   })
 })

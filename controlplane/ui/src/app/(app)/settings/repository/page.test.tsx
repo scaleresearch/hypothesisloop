@@ -1,22 +1,21 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { connectGitHubInstallation, fetchGitHubApp, fetchGitHubInstallations } from '@/lib/api'
-import { leaveFor, takeReturn } from '@/lib/github-connect'
-import type { Next } from '@/lib/github-connect'
+import { finishGitHubInstall } from '@/lib/api'
+import { takeReturn } from '@/lib/github-connect'
+import type { ReturnView } from '@/lib/github-connect'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import GitHubReturnPage from '@/app/(app)/settings/repository/page'
 import type { Me } from '@/types'
 
-const navigation = vi.hoisted(() => ({ search: '', replace: vi.fn() }))
+const navigation = vi.hoisted(() => ({ search: '' }))
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ replace: navigation.replace }),
   useSearchParams: () => new URLSearchParams(navigation.search),
 }))
-vi.mock('@/lib/api', () => ({ connectGitHubInstallation: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn() }))
+vi.mock('@/lib/api', () => ({ finishGitHubInstall: vi.fn() }))
 vi.mock('@/lib/github-connect', async importActual => ({
   ...(await importActual<typeof import('@/lib/github-connect')>()),
-  leaveFor: vi.fn(), takeReturn: vi.fn(),
+  takeReturn: vi.fn(),
 }))
 
 const at = '2026-01-01T00:00:00Z'
@@ -26,49 +25,45 @@ const me: Me = {
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 }
 
-function arrive(query: string, next: Next) {
+function arrive(query: string, view: ReturnView) {
   navigation.search = query
-  vi.mocked(takeReturn).mockResolvedValue(next)
+  vi.mocked(takeReturn).mockResolvedValue(view)
   const resolved = resolveTenant(me, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(<TenantContext.Provider value={resolved.tenant}><GitHubReturnPage /></TenantContext.Provider>)
 }
 
+let close: ReturnType<typeof vi.spyOn>
+
 beforeEach(() => {
-  navigation.replace.mockReset()
+  close = vi.spyOn(window, 'close').mockImplementation(() => {})
 })
 
-describe('the address GitHub returns to', () => {
-  it('takes the return and lands on the page the person left from', async () => {
-    arrive('code=c&state=s', { to: 'app', path: '/projects/prj_1/experiments?draft=draft-1' })
-    expect(screen.getByRole('status', { name: 'Returning from GitHub…' })).toBeTruthy()
-    expect(vi.mocked(takeReturn).mock.calls[0][0]).toBe('code=c&state=s')
-    await waitFor(() => expect(navigation.replace).toHaveBeenCalledExactlyOnceWith('/projects/prj_1/experiments?draft=draft-1'))
-    expect(leaveFor).not.toHaveBeenCalled()
+describe('the setup URL GitHub returns the install tab to', () => {
+  it('connects through the API with what GitHub handed back, then closes itself', async () => {
+    arrive('installation_id=7&setup_action=install&state=s', { view: 'connected', account: 'acme', returnTo: '/projects/prj_1/experiments' })
+    expect(screen.getByRole('status', { name: 'Connecting GitHub…' })).toBeTruthy()
+    expect(vi.mocked(takeReturn).mock.calls[0][0]).toBe('installation_id=7&setup_action=install&state=s')
+    expect(vi.mocked(takeReturn).mock.calls[0][1]).toBe(finishGitHubInstall)
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1))
   })
 
-  it('lands on the GitHub card of the caller\'s own org when the return names no page, as on a plain visit', async () => {
-    arrive('', { to: 'app', path: null })
-    await waitFor(() => expect(navigation.replace).toHaveBeenCalledExactlyOnceWith('/orgs/org_a/settings#github'))
+  it('says it is done and leads back when the browser does not let it close', async () => {
+    arrive('installation_id=7&state=s', { view: 'connected', account: 'acme', returnTo: '/projects/prj_1/experiments' })
+    expect(await screen.findByText('Connected acme. You can close this tab.')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Back to HypothesisLoop' }).getAttribute('href')).toBe('/projects/prj_1/experiments')
   })
 
-  it('goes on to GitHub when the App was just installed and is yet to be authorised', async () => {
-    arrive('installation_id=4242&setup_action=install', { to: 'github', address: 'https://github.test/authorize?state=n' })
-    await waitFor(() => expect(leaveFor).toHaveBeenCalledExactlyOnceWith('https://github.test/authorize?state=n'))
-    expect(navigation.replace).not.toHaveBeenCalled()
+  it('shows a refusal and leads to the GitHub card of the org', async () => {
+    arrive('installation_id=7&state=forged', { view: 'failed', message: 'This return from GitHub does not match an install you started.' })
+    expect((await screen.findByRole('alert')).textContent).toBe('This return from GitHub does not match an install you started.')
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('link', { name: 'Back to HypothesisLoop' }).getAttribute('href')).toBe('/orgs/org_a/settings#github')
   })
 
-  it('connects through the API with the code, where GitHub returned it and the installation', async () => {
-    arrive('code=c&state=s', { to: 'app', path: '/orgs/org_a/settings#github' })
-    const calls = vi.mocked(takeReturn).mock.calls[0][1]
-    vi.mocked(fetchGitHubApp).mockResolvedValue({ slug: 'hl', client_id: 'app', install_url: 'i', authorize_url: 'a', new_repository_url: 'n' })
-    await expect(calls.app()).resolves.toMatchObject({ authorize_url: 'a', install_url: 'i' })
-    await calls.connect('org_a', 'c', 9)
-    expect(connectGitHubInstallation).toHaveBeenCalledExactlyOnceWith('org_a', {
-      code: 'c', redirectURI: `${window.location.origin}/settings/repository`, installationID: 9,
-    })
-    vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [], total: 0 })
-    await expect(calls.installations('org_a')).resolves.toEqual([])
-    expect(fetchGitHubInstallations).toHaveBeenCalledExactlyOnceWith('org_a')
+  it('stays open on a plain visit', async () => {
+    arrive('', { view: 'nothing' })
+    expect(await screen.findByText('This page finishes an install of the GitHub App. Nothing was connected.')).toBeTruthy()
+    expect(close).not.toHaveBeenCalled()
   })
 })

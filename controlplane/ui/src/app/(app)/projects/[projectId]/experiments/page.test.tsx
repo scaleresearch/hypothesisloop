@@ -214,16 +214,14 @@ describe('the experiments page', () => {
 describe('the repository of a planned experiment', () => {
   const app = { slug: 'hl', client_id: 'c', install_url: 'https://github.test/install', authorize_url: 'https://github.test/authorize', new_repository_url: 'https://github.test/new' }
 
-  it('leads to Settings in one line while GitHub is not connected, and the button says why it waits', async () => {
+  it('says in one line who installs the GitHub App while GitHub is not connected, and the button says why it waits', async () => {
     vi.mocked(fetchGitHubApp).mockResolvedValue(app)
     show()
-    const connect = await screen.findByRole('link', { name: 'Connect GitHub in Settings' })
-    expect(connect.getAttribute('href')).toBe('/orgs/org_a/settings#github')
-    expect(connect.parentElement!.textContent).toBe('Connect GitHub in Settings to start.')
+    expect(await screen.findByText('An owner of Lab installs the GitHub App to start.')).toBeTruthy()
     await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'Is a cosine schedule better?')
     const plan = screen.getByRole('button', { name: 'Plan it' })
     expect(plan).toHaveProperty('disabled', true)
-    expect(plan.closest('[title]')!.getAttribute('title')).toBe('Connect GitHub in Settings to start')
+    expect(plan.closest('[title]')!.getAttribute('title')).toBe('Install the GitHub App to start')
     expect(screen.queryByText(/permission|select one only/i)).toBeNull()
     await userEvent.type(screen.getByLabelText('What do you want to find out?'), '{Enter}')
     expect(apiSend).not.toHaveBeenCalled()

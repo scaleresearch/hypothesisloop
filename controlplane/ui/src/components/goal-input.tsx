@@ -2,22 +2,18 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Field, Label } from '@headlessui/react'
-import { githubCardPath } from '@/lib/github-connect'
-import { useTenant } from '@/lib/tenant'
 import { GOAL_EXAMPLES } from '@/lib/goal-examples'
 import { createDraft, MAX_GOAL_LENGTH } from '@/lib/planning'
 import type { Draft } from '@/lib/planning'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/input'
-import { TextLink } from '@/components/ui/link'
 import { Inline } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
-import { Text } from '@/components/ui/text'
-import { useGitHub } from '@/components/connect-github-step'
+import { InstallGitHub, useGitHub } from '@/components/connect-github-step'
 import { RepositorySelect, repositoryFields } from '@/components/repository-select'
 import { BriefPoints } from '@/components/brief-points'
 
-const CONNECT_FIRST = 'Connect GitHub in Settings to start'
+const CONNECT_FIRST = 'Install the GitHub App to start'
 const ASK = 'What do you want to find out?'
 
 // The rhythm of the examples typed in the empty box, in milliseconds.
@@ -70,7 +66,6 @@ function useTypedExamples(stopped: boolean): string {
  * taken it offers the points the planner cannot read from the code, as lines to add.
  */
 export function GoalInput({ projectID, onCreated }: { projectID: string; onCreated: (draft: Draft) => void }) {
-  const { org } = useTenant()
   const [goal, setGoal] = useState('')
   const [touched, setTouched] = useState(false)
   const [sending, setSending] = useState(false)
@@ -131,9 +126,7 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
           </Field>
         )}
         {github === 'unconnected' && (
-          <Text variant="note" className="px-2">
-            <TextLink inline href={githubCardPath(org.id)}>Connect GitHub in Settings</TextLink> to start.
-          </Text>
+          <Inline gap="sm" className="px-2"><InstallGitHub /></Inline>
         )}
         {error && <InlineError className="px-2">{error}</InlineError>}
         {/* A disabled button shows no tooltip in every browser, so the reason sits on its wrapper. */}

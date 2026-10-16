@@ -1,230 +1,177 @@
+import { createElement, type ReactNode } from 'react'
+import { act, renderHook, waitFor } from '@testing-library/react'
+import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ApiError, beginGitHubInstall } from '@/lib/api'
 import type { GitHubInstallation } from '@/types'
 
 vi.mock('@/lib/auth', () => ({ accessToken: vi.fn(), endSession: vi.fn() }))
+vi.mock('@/lib/api', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api')>()),
+  beginGitHubInstall: vi.fn(),
+}))
 
 type Module = typeof import('@/lib/github-connect')
 
-const AUTHORIZE = 'https://github.test/login/oauth/authorize?client_id=app'
 const INSTALL = 'https://github.test/apps/hl/installations/new'
-const RETURN = '/projects/prj_1/experiments?draft=draft-1'
-const origin = { orgID: 'org_a', returnTo: RETURN }
-const installation: GitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_actor: { kind: 'user', id: 'u1', name: 'Ada' }, connected_at: '2026-01-01T00:00:00Z', default: false }
+const RETURN = '/projects/prj_1/experiments?new=1'
+const installation: GitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: 'u1', name: 'Ada' }, connected_at: '2026-01-01T00:00:00Z', default: true }
 
 let lib: Module
-// Loaded with the module under test, so its refusals are the class that module checks for.
-let ApiError: typeof import('@/lib/api').ApiError
-let connect: ReturnType<typeof vi.fn>
-let app: ReturnType<typeof vi.fn>
-let installations: ReturnType<typeof vi.fn>
-let state: () => ReturnType<Module['useConnect']>
+let finish: ReturnType<typeof vi.fn>
 
-// The state the module holds, read the way a component reads it but without rendering one.
-async function load() {
-  vi.resetModules()
-  lib = await import('@/lib/github-connect')
-  ApiError = (await import('@/lib/api')).ApiError
-  const { renderHook } = await import('@testing-library/react')
-  const hook = renderHook(() => lib.useConnect())
-  state = () => hook.result.current
+// What every other tab of this origin hears on the install channel.
+function overheard() {
+  const heard: unknown[] = []
+  const channel = new BroadcastChannel('hl-github-install')
+  channel.onmessage = event => heard.push(event.data)
+  return { heard, close: () => channel.close() }
 }
 
-function returned(query: string) {
-  return lib.takeReturn(query, { app, connect, installations } as never)
-}
-
-function sentState(address: string) {
-  return new URL(address).searchParams.get('state')!
+function tab() {
+  return { location: { href: '' }, close: vi.fn() }
 }
 
 beforeEach(async () => {
-  window.sessionStorage.clear()
-  connect = vi.fn().mockResolvedValue(installation)
-  app = vi.fn().mockResolvedValue({ authorize_url: AUTHORIZE, install_url: INSTALL })
-  installations = vi.fn().mockResolvedValue([])
-  await load()
+  vi.resetModules()
+  lib = await import('@/lib/github-connect')
+  finish = vi.fn().mockResolvedValue({ org_id: 'org_a', return_to: RETURN, installation })
 })
 
-describe('leaving to authorise', () => {
-  it('names where GitHub returns to and a state no one else knows', () => {
-    const address = new URL(lib.beginConnect(AUTHORIZE, origin))
-    expect(address.origin + address.pathname).toBe('https://github.test/login/oauth/authorize')
-    expect(address.searchParams.get('client_id')).toBe('app')
-    expect(address.searchParams.get('redirect_uri')).toBe(`${window.location.origin}/settings/repository`)
-    expect(address.searchParams.get('state')).toMatch(/^[0-9a-f-]{36}$/)
-    expect(sentState(lib.beginConnect(AUTHORIZE, origin))).not.toBe(address.searchParams.get('state'))
+describe('opening the install', () => {
+  it('opens the tab inside the click, then sends it to the install page carrying the state', async () => {
+    const opened = tab()
+    let begun = false
+    const open = vi.fn(() => {
+      expect(begun).toBe(false)
+      return opened
+    })
+    const begin = vi.fn(async () => {
+      begun = true
+      return { state: 's-1', install_url: `${INSTALL}?state=s-1`, expires_at: '' }
+    })
+    const started = lib.openInstall('org_a', RETURN, { open, begin })
+    expect(open).toHaveBeenCalledTimes(1)
+    await expect(started).resolves.toBe('s-1')
+    expect(begin).toHaveBeenCalledExactlyOnceWith('org_a', RETURN)
+    expect(opened.location.href).toBe(`${INSTALL}?state=s-1`)
+  })
+
+  it('says how to allow the tab when the browser blocks it, and asks the API nothing', async () => {
+    const begin = vi.fn()
+    await expect(lib.openInstall('org_a', RETURN, { open: () => null, begin })).rejects.toThrow('Allow pop-ups for this site')
+    expect(begin).not.toHaveBeenCalled()
+  })
+
+  it('closes the tab again when the API refuses the install', async () => {
+    const opened = tab()
+    await expect(lib.openInstall('org_a', RETURN, { open: () => opened, begin: () => Promise.reject(new Error('not an owner')) })).rejects.toThrow('not an owner')
+    expect(opened.close).toHaveBeenCalledTimes(1)
   })
 })
 
-describe('a return from authorising', () => {
-  it('connects once with the code, and leads back to the org the person was in', async () => {
-    const nonce = sentState(lib.beginConnect(AUTHORIZE, origin))
-    await expect(returned(`code=code-1&state=${nonce}`)).resolves.toEqual({ to: 'app', path: RETURN })
-    expect(connect).toHaveBeenCalledExactlyOnceWith('org_a', 'code-1', undefined)
-    expect(state()).toEqual({ state: 'connected', orgID: 'org_a', installation })
+describe('the tab GitHub returns to', () => {
+  it('connects in one pass with the state and the installation, and tells the tab the install started in', async () => {
+    const other = overheard()
+    await expect(lib.takeReturn('installation_id=7&setup_action=install&state=s-1', finish)).resolves.toEqual({ view: 'connected', account: 'acme', returnTo: RETURN })
+    expect(finish).toHaveBeenCalledExactlyOnceWith('s-1', 7)
+    await waitFor(() => expect(other.heard).toEqual([{ state: 's-1', outcome: { ok: true, installation } }]))
+    other.close()
   })
 
-  it('is taken once when the page asks twice, as React does in development', async () => {
-    const nonce = sentState(lib.beginConnect(AUTHORIZE, origin))
-    const first = returned(`code=code-1&state=${nonce}`)
-    const second = returned(`code=code-1&state=${nonce}`)
+  it('connects once when the page asks twice, as React does in development', async () => {
+    const first = lib.takeReturn('installation_id=7&setup_action=install&state=s-1', finish)
+    const second = lib.takeReturn('installation_id=7&setup_action=install&state=s-1', finish)
     expect(await second).toEqual(await first)
-    expect(connect).toHaveBeenCalledTimes(1)
+    expect(finish).toHaveBeenCalledTimes(1)
   })
 
-  it('names the installation the person chose', async () => {
-    const nonce = sentState(lib.beginConnect(AUTHORIZE, origin, 9))
-    await returned(`code=c&state=${nonce}`)
-    expect(connect).toHaveBeenCalledExactlyOnceWith('org_a', 'c', 9)
+  it('tells the refusal of an install the person may not connect, in the API\'s words and reason', async () => {
+    const other = overheard()
+    finish.mockRejectedValue(new ApiError(422, 'This return from GitHub does not match an install you started.', 'install_state_invalid'))
+    await expect(lib.takeReturn('installation_id=7&setup_action=install&state=forged', finish)).resolves.toEqual({ view: 'failed', message: 'This return from GitHub does not match an install you started.' })
+    await waitFor(() => expect(other.heard).toEqual([{ state: 'forged', outcome: { ok: false, message: 'This return from GitHub does not match an install you started.', reason: 'install_state_invalid' } }]))
+    other.close()
   })
 
-  it('asks which installation when the person reaches several', async () => {
-    const installations = [{ installation_id: 7, account_login: 'acme' }, { installation_id: 9, account_login: 'lab' }]
-    connect.mockRejectedValue(new ApiError(409, 'name one', 'installation_choice_required', { installations }))
-    // Which account is asked on the GitHub card of the org's settings alone.
-    await expect(returned(`code=c&state=${sentState(lib.beginConnect(AUTHORIZE, origin))}`)).resolves.toEqual({ to: 'app', path: '/orgs/org_a/settings#github' })
-    await vi.waitFor(() => expect(state()).toEqual({ state: 'choice', orgID: 'org_a', installations }))
+  it('says an owner of the organization was asked to approve, and connects nothing', async () => {
+    const view = await lib.takeReturn('setup_action=request&state=s-1', finish)
+    expect(view).toEqual({ view: 'failed', message: expect.stringContaining('asked an owner of that organization to approve') })
+    expect(finish).not.toHaveBeenCalled()
   })
 
-  it('ends with the API\'s words and reason when it refuses', async () => {
-    connect.mockRejectedValue(new ApiError(422, 'Ask an admin of the GitHub organisation acme to connect it.', 'installation_not_controlled'))
-    await expect(returned(`code=c&state=${sentState(lib.beginConnect(AUTHORIZE, origin))}`)).resolves.toEqual({ to: 'app', path: RETURN })
-    expect(state()).toEqual({ state: 'failed', orgID: 'org_a', message: 'Ask an admin of the GitHub organisation acme to connect it.', reason: 'installation_not_controlled' })
+  it('reads a change made on GitHub alone, with no state, as a change and connects nothing', async () => {
+    const other = overheard()
+    await expect(lib.takeReturn('installation_id=7&setup_action=update', finish)).resolves.toEqual({ view: 'changed' })
+    await waitFor(() => expect(other.heard).toEqual([{ changed: true }]))
+    expect(finish).not.toHaveBeenCalled()
+    other.close()
   })
 
-  it('goes on to install the App when the person controls no account the org has not connected', async () => {
-    connect.mockRejectedValue(new ApiError(422, 'Install the GitHub App', 'app_not_installed'))
-    await expect(returned(`code=c&state=${sentState(lib.beginConnect(AUTHORIZE, origin))}`)).resolves.toEqual({ to: 'github', address: INSTALL })
-    expect(state()).toEqual({ state: 'idle' })
-
-    // GitHub returns from installing, and the person authorises for the installation it made.
-    const next = await returned('installation_id=4242&setup_action=install')
-    if (next.to !== 'github') throw new Error('expected to go on to GitHub')
-    connect.mockResolvedValue(installation)
-    await returned(`code=c2&state=${sentState(next.address)}`)
-    expect(connect).toHaveBeenLastCalledWith('org_a', 'c2', 4242)
-    expect(state()).toEqual({ state: 'connected', orgID: 'org_a', installation })
+  it('reads a visit as nothing', async () => {
+    await expect(lib.takeReturn('', finish)).resolves.toEqual({ view: 'nothing' })
+    expect(finish).not.toHaveBeenCalled()
   })
 
-  it('does not go round again when the installation it named is not reached', async () => {
-    connect.mockRejectedValue(new ApiError(422, 'Install the GitHub App', 'app_not_installed'))
-    await expect(returned(`code=c&state=${sentState(lib.beginConnect(AUTHORIZE, origin, 4242))}`)).resolves.toEqual({ to: 'app', path: RETURN })
-    expect(state()).toEqual({ state: 'failed', orgID: 'org_a', message: 'Install the App on the GitHub account to connect, then connect again.', reason: 'app_not_installed' })
-  })
-
-  it('ends with GitHub\'s words when the person declined, and sends nothing', async () => {
-    const nonce = sentState(lib.beginConnect(AUTHORIZE, origin))
-    await returned(`error=access_denied&error_description=The+user+has+denied+access&state=${nonce}`)
-    expect(state()).toEqual({ state: 'failed', orgID: 'org_a', message: 'GitHub did not authorise the App: The user has denied access' })
-    expect(connect).not.toHaveBeenCalled()
-  })
-
-  it.each([
-    ['another state', 'code=stolen&state=forged'],
-    ['no state', 'code=stolen'],
-  ])('is refused with %s than the one this tab sent, and sends nothing', async (_, query) => {
-    lib.beginConnect(AUTHORIZE, origin)
-    await expect(returned(query)).resolves.toEqual({ to: 'app', path: RETURN })
-    expect(state().state).toBe('refused')
-    expect(connect).not.toHaveBeenCalled()
-  })
-
-  it('is refused when this tab started nothing', async () => {
-    await expect(returned('code=stolen&state=forged')).resolves.toEqual({ to: 'app', path: null })
-    expect(state().state).toBe('refused')
-    expect(connect).not.toHaveBeenCalled()
-  })
-
-  it('works once: the same return again finds no attempt', async () => {
-    const nonce = sentState(lib.beginConnect(AUTHORIZE, origin))
-    await returned(`code=code-1&state=${nonce}`)
-    await returned(`code=code-1&state=${nonce}&again=1`)
-    expect(connect).toHaveBeenCalledTimes(1)
-    expect(state().state).toBe('refused')
+  it('leads back to no page outside this app', async () => {
+    finish.mockResolvedValue({ org_id: 'org_a', return_to: '//elsewhere.example', installation })
+    await expect(lib.takeReturn('installation_id=7&state=s-2', finish)).resolves.toMatchObject({ view: 'connected', returnTo: null })
   })
 })
 
-describe('a return from installing the App', () => {
-  it('goes on to authorise for the installation GitHub made, when this tab left to install', async () => {
-    expect(lib.beginInstall(INSTALL, origin)).toBe(INSTALL)
-    const next = await returned('installation_id=4242&setup_action=install')
-    if (next.to !== 'github') throw new Error('expected to go on to GitHub')
-    expect(next.address.startsWith(AUTHORIZE)).toBe(true)
-    expect(connect).not.toHaveBeenCalled()
+describe('the tab the install started in', () => {
+  const opened = tab()
+  function hook() {
+    vi.spyOn(window, 'open').mockReturnValue(opened as unknown as Window)
+    vi.mocked(beginGitHubInstall).mockResolvedValue({ state: 's-9', install_url: `${INSTALL}?state=s-9`, expires_at: '' })
+    const cache = new Map()
+    const wrapper = ({ children }: { children: ReactNode }) => createElement(SWRConfig, { value: { provider: () => cache } }, children)
+    return renderHook(() => lib.useGitHubInstall('org_a', RETURN), { wrapper })
+  }
 
-    await returned(`code=c&state=${sentState(next.address)}`)
-    expect(connect).toHaveBeenCalledExactlyOnceWith('org_a', 'c', 4242)
+  it('waits for GitHub, then shows the account the other tab connected', async () => {
+    const { result } = hook()
+    act(() => result.current.start())
+    await waitFor(() => expect(result.current.install).toEqual({ phase: 'waiting', state: 's-9' }))
+    expect(beginGitHubInstall).toHaveBeenCalledExactlyOnceWith('org_a', RETURN)
+
+    // Another install's outcome says nothing here.
+    await lib.takeReturn('installation_id=8&state=s-other', finish)
+    await lib.takeReturn('installation_id=7&state=s-9', finish)
+    await waitFor(() => expect(result.current.install).toEqual({ phase: 'connected', installation }))
   })
 
-  it('goes on to authorise when GitHub authorised during the installation and returned a code with no state', async () => {
-    lib.beginInstall(INSTALL, origin)
-    const next = await returned('code=install-code&installation_id=4242&setup_action=install')
-    if (next.to !== 'github') throw new Error('expected to go on to GitHub')
-    expect(next.address.startsWith(AUTHORIZE)).toBe(true)
-    expect(connect).not.toHaveBeenCalled()
+  it('shows the precise refusal the other tab was given', async () => {
+    finish.mockRejectedValue(new ApiError(422, 'GitHub says the App on acme was last changed before this install started.', 'installation_not_new'))
+    const { result } = hook()
+    act(() => result.current.start())
+    await waitFor(() => expect(result.current.install.phase).toBe('waiting'))
+    await lib.takeReturn('installation_id=7&state=s-9', finish)
+    await waitFor(() => expect(result.current.install).toEqual({ phase: 'failed', message: 'GitHub says the App on acme was last changed before this install started.', reason: 'installation_not_new' }))
   })
 
-  it('says what to do when an organisation owner was asked to install the App', async () => {
-    lib.beginInstall(INSTALL, origin)
-    await expect(returned('setup_action=request')).resolves.toEqual({ to: 'app', path: RETURN })
-    expect(state()).toEqual({ state: 'failed', orgID: 'org_a', message: 'GitHub asked an owner of that organisation to install the App: connect again once they have.' })
-    expect(connect).not.toHaveBeenCalled()
+  it('stops waiting when the person cancels, and ignores a late outcome', async () => {
+    const { result } = hook()
+    act(() => result.current.start())
+    await waitFor(() => expect(result.current.install.phase).toBe('waiting'))
+    act(() => result.current.reset())
+    await lib.takeReturn('installation_id=7&state=s-9', finish)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(result.current.install).toEqual({ phase: 'idle' })
   })
 
-  it('does nothing with an installation this tab did not leave to make', async () => {
-    await expect(returned('installation_id=4242&setup_action=install')).resolves.toEqual({ to: 'app', path: null })
-    expect(state()).toEqual({ state: 'idle' })
-    expect(app).not.toHaveBeenCalled()
-    expect(connect).not.toHaveBeenCalled()
-  })
-
-  it('does not go on for an attempt that left to authorise', async () => {
-    lib.beginConnect(AUTHORIZE, origin)
-    await expect(returned('installation_id=4242&setup_action=install')).resolves.toEqual({ to: 'app', path: RETURN })
-    expect(app).not.toHaveBeenCalled()
-  })
-
-  it('says so when the App\'s addresses cannot be read', async () => {
-    app.mockRejectedValue(new Error('API unreachable'))
-    lib.beginInstall(INSTALL, origin)
-    await expect(returned('installation_id=4242&setup_action=install')).resolves.toEqual({ to: 'app', path: RETURN })
-    expect(state()).toEqual({ state: 'failed', orgID: 'org_a', message: 'API unreachable' })
+  it('says the tab was blocked without asking the API', async () => {
+    const { result } = hook()
+    vi.mocked(window.open).mockReturnValue(null)
+    act(() => result.current.start())
+    await waitFor(() => expect(result.current.install).toMatchObject({ phase: 'failed', message: expect.stringContaining('Allow pop-ups') }))
+    expect(beginGitHubInstall).not.toHaveBeenCalled()
   })
 })
 
-describe('where the person lands', () => {
-  it('is the page they left from, through installing and authorising', async () => {
-    lib.beginInstall(INSTALL, origin)
-    const next = await returned('installation_id=4242&setup_action=install')
-    if (next.to !== 'github') throw new Error('expected to go on to GitHub')
-    await expect(returned(`code=c&state=${sentState(next.address)}`)).resolves.toEqual({ to: 'app', path: RETURN })
-    expect(state()).toEqual({ state: 'connected', orgID: 'org_a', installation })
-  })
-
-  it('is the page they left from at once when the installation was connected already, with nothing to authorise', async () => {
-    installations.mockResolvedValue([{ ...installation, installation_id: 4242 }])
-    lib.beginInstall(INSTALL, origin)
-    await expect(returned('installation_id=4242&setup_action=update')).resolves.toEqual({ to: 'app', path: RETURN })
-    expect(installations).toHaveBeenCalledExactlyOnceWith('org_a')
-    expect(state()).toEqual({ state: 'connected', orgID: 'org_a', installation: { ...installation, installation_id: 4242 } })
-    expect(app).not.toHaveBeenCalled()
-    expect(connect).not.toHaveBeenCalled()
-  })
-
-  it('is the GitHub card of the settings for a connect started there', async () => {
-    const settings = { orgID: 'org_a', returnTo: lib.githubCardPath('org_a') }
-    await expect(returned(`code=c&state=${sentState(lib.beginConnect(AUTHORIZE, settings))}`)).resolves.toEqual({ to: 'app', path: '/orgs/org_a/settings#github' })
-  })
-
-  it.each(['//evil.test/x', '/\\evil.test', '/\t/evil.test', 'https://evil.test/', 'javascript:alert(1)', 'experiments', ''])('never leaves for %j', async returnTo => {
-    expect(() => lib.beginInstall(INSTALL, { orgID: 'org_a', returnTo })).toThrow('not a path of this app')
-    expect(window.sessionStorage.length).toBe(0)
-
-    // An attempt that names one anyway, as anything else in this tab could store, is none.
-    const nonce = 'n-1'
-    window.sessionStorage.setItem('hl-github-connect', JSON.stringify({ nonce, step: 'authorise', orgID: 'org_a', returnTo }))
-    await expect(returned(`code=c&state=${nonce}`)).resolves.toEqual({ to: 'app', path: null })
-    expect(state().state).toBe('refused')
-    expect(connect).not.toHaveBeenCalled()
+describe('the installation page on GitHub', () => {
+  it('is the organization\'s settings for an organization and the person\'s own for a personal account', () => {
+    expect(lib.installationSettingsURL({ installation_id: 7, account_login: 'acme', account_type: 'Organization' })).toBe('https://github.com/organizations/acme/settings/installations/7')
+    expect(lib.installationSettingsURL({ installation_id: 8, account_login: 'ada', account_type: 'User' })).toBe('https://github.com/settings/installations/8')
   })
 })

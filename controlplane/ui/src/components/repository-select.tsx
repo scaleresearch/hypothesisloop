@@ -3,14 +3,15 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import { ApiError, GITHUB_NOT_CONFIGURED, checkRepository, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api'
-import { beginInstall, githubCardPath, leaveFor, useConnect, useGitHubApp } from '@/lib/github-connect'
+import { useGitHubApp, useGitHubInstall } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
-import type { GitHubApp, GitHubInstallation } from '@/types'
+import type { GitHubInstallation } from '@/types'
+import { GitHubProblem, InstallProgress } from '@/components/github-status'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { TextLink, inlineLinkClass } from '@/components/ui/link'
+import { inlineLinkClass } from '@/components/ui/link'
 import { SearchableSelect } from '@/components/ui/searchable-select'
-import { ErrorMessage, InlineError } from '@/components/ui/status-message'
+import { InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 
 const LISTED = 50
@@ -32,27 +33,32 @@ function newRepositoryURL(form: string, accounts: GitHubInstallation[]): string 
   return url.toString()
 }
 
-// What the owner of the GitHub account fixes on GitHub, where the App is installed and configured.
-const FIXED_ON_GITHUB = new Set(['installation_gone', 'github_permission_missing', 'repository_not_reachable', 'repository_creation_not_permitted'])
+// The connected account a value concerns: the owner of the repository named, the account named for
+// a new one, or the account a new one goes to unasked.
+function accountOf(value: string, accounts: GitHubInstallation[], unasked?: GitHubInstallation): GitHubInstallation | undefined {
+  const owner = value.startsWith(ON_ACCOUNT) ? value.slice(ON_ACCOUNT.length) : value.split('/')[0]
+  return owner ? accounts.find(a => a.account_login.toLowerCase() === owner.toLowerCase()) : unasked
+}
 
 /**
  * Runs the create's own repository checks for the value picked, so a GitHub account the App left
- * or a repository it cannot push to shows here, with the way to fix it, before anything is created.
+ * or a repository it cannot push to shows here, as one chip and the one action that fixes it,
+ * before anything is created.
  */
-function RepositoryCheckNote({ value, app }: { value: string; app?: GitHubApp }) {
-  const { org, project } = useTenant()
+function RepositoryCheckNote({ value, account, onInstall }: { value: string; account?: GitHubInstallation; onInstall?: () => void }) {
+  const { project } = useTenant()
   const { error, isValidating, mutate } = useSWR(['repository-check', project.id, value], () => checkRepository(project.id, repositoryFields(value)), { shouldRetryOnError: false })
   if (!error) return null
-  const reason = error instanceof ApiError ? error.reason : undefined
   return (
-    <InlineError>
-      {error.message}{' '}
-      {app && reason && FIXED_ON_GITHUB.has(reason) && (
-        <><a href={app.install_url} target="_blank" rel="noreferrer" className={inlineLinkClass}>Open the App on GitHub</a>,{' '}</>
-      )}
-      <TextLink inline href={githubCardPath(org.id)}>GitHub in Settings</TextLink>,{' '}
-      <Button type="button" variant="link" size="sm" loading={isValidating} onClick={() => void mutate()}>check again</Button>
-    </InlineError>
+    <GitHubProblem
+      reason={error instanceof ApiError ? error.reason : undefined}
+      message={error.message}
+      account={account?.account_login ?? ''}
+      installation={account}
+      onInstall={onInstall}
+      onRetry={() => void mutate()}
+      retrying={isValidating}
+    />
   )
 }
 
@@ -61,25 +67,22 @@ function RepositoryCheckNote({ value, app }: { value: string; app?: GitHubApp })
  * accounts cover. Typing searches all of them on the server, which reads GitHub on each call.
  * With none chosen the platform creates one on a connected account. Unless `compact`, the way on
  * is offered: the person creates the repository on GitHub and refreshes this list to choose it,
- * or, given `leave`, lets the App reach one in this tab: `leave` keeps what the page holds and
- * answers the path GitHub's return comes back to, where this list shows how it went. With no
- * account connected it says where one is connected. On a deployment whose git host is not GitHub
+ * or an owner lets the App reach more in a new tab, after which the list is read again. With no
+ * account connected an owner installs the App from here. On a deployment whose git host is not GitHub
  * the repository is typed: the platform creates none there. A new repository goes to the only
  * connected account or the org's default, named in the option, and with several the person may
  * pick another. Unless `compact`, what is picked is checked as the create would check it.
  */
-export function RepositorySelect({ value, onChange, compact = false, leave }: {
+export function RepositorySelect({ value, onChange, compact = false }: {
   value: string
   onChange: (repository: string) => void
   compact?: boolean
-  leave?: () => Promise<string>
 }) {
-  const { org } = useTenant()
+  const { org, administers } = useTenant()
   const [q, setQ] = useState('')
   const app = useGitHubApp()
-  const connect = useConnect()
-  const [leaving, setLeaving] = useState(false)
-  const [leaveError, setLeaveError] = useState('')
+  const { install, start, reset } = useGitHubInstall(org.id, typeof window === 'undefined' ? '/' : window.location.pathname + window.location.search)
+  const onInstall = administers && app.data ? start : undefined
   const installations = useSWR(app.data ? ['github-installations', org.id] : null, () => fetchGitHubInstallations(org.id))
   const connected = (installations.data?.total ?? 0) > 0
   const [refreshing, setRefreshing] = useState(false)
@@ -101,10 +104,15 @@ export function RepositorySelect({ value, onChange, compact = false, leave }: {
   if (installations.error) return <InlineError>Could not load the GitHub accounts of {org.name}: {installations.error.message}</InlineError>
   if (installations.data && !connected) {
     return (
-      <Text variant="note">
-        No GitHub account is connected to {org.name}.{' '}
-        <TextLink inline href={githubCardPath(org.id)}>Connect GitHub in Settings</TextLink>
-      </Text>
+      <>
+        <Text variant="note">
+          No GitHub account is connected to {org.name}.{' '}
+          {onInstall
+            ? <Button type="button" variant="link" size="sm" disabled={install.phase === 'waiting'} onClick={onInstall}>Install GitHub App</Button>
+            : 'An owner of the org installs the GitHub App.'}
+        </Text>
+        <InstallProgress install={install} onCancel={reset} />
+      </>
     )
   }
 
@@ -125,18 +133,6 @@ export function RepositorySelect({ value, onChange, compact = false, leave }: {
     options.unshift(...creating.filter(a => a !== unasked).map(a => ({ value: ON_ACCOUNT + a.account_login, label: `${newLabel} on ${a.account_login}`, badge: undefined })))
   }
   const unaskedLabel = unasked ? `${newLabel} on ${unasked.account_login}` : newLabel
-  async function grant(installURL: string) {
-    setLeaving(true)
-    setLeaveError('')
-    try {
-      leaveFor(beginInstall(installURL, { orgID: org.id, returnTo: await leave!() }))
-    } catch (e) {
-      setLeaveError(e instanceof Error ? e.message : String(e))
-      setLeaving(false)
-    }
-  }
-  // What a connect of this org came back with, shown where the person returned to.
-  const outcome = !leave ? null : connect.state === 'refused' || ('orgID' in connect && connect.orgID === org.id) ? connect : null
   async function refresh() {
     setRefreshing(true)
     try {
@@ -163,20 +159,18 @@ export function RepositorySelect({ value, onChange, compact = false, leave }: {
         <Text variant="hint">
           Not listed?{' '}
           <a href={newRepositoryURL(app.data.new_repository_url, accounts)} target="_blank" rel="noreferrer" className={inlineLinkClass}>create it on GitHub</a>
-          {leave && (
+          {onInstall && (
             <>
               {' '}or{' '}
-              <Button type="button" variant="link" size="sm" loading={leaving} onClick={() => void grant(app.data!.install_url)}>give the App access</Button>
+              <Button type="button" variant="link" size="sm" disabled={install.phase === 'waiting'} onClick={onInstall}>give the App access</Button>
             </>
           )}, then{' '}
           <Button type="button" variant="link" size="sm" loading={refreshing} onClick={() => void refresh()}>refresh this list</Button>.
         </Text>
       )}
-      {outcome?.state === 'connected' && <Text variant="note">{outcome.installation.account_login} is connected: the repositories it lets the App reach are listed.</Text>}
-      {(outcome?.state === 'failed' || outcome?.state === 'refused') && <ErrorMessage>{outcome.message}</ErrorMessage>}
-      {leaveError && <InlineError>Could not leave for GitHub: {leaveError}</InlineError>}
+      {!compact && <InstallProgress install={install} onCancel={reset} />}
       {error && <InlineError>Could not list the repositories: {error.message}</InlineError>}
-      {!compact && (value !== '' || createsUnasked) && <RepositoryCheckNote value={value} app={app.data} />}
+      {!compact && (value !== '' || createsUnasked) && <RepositoryCheckNote value={value} account={accountOf(value, accounts, unasked)} onInstall={onInstall} />}
     </>
   )
 }

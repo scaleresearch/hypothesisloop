@@ -19,11 +19,9 @@ Control: …
 Win: …`
 
 /** Step 1: the code, the name and the brief. */
-export function StepWhat({ form, set, isEdit, fileNote, onRepository, leave }: StepProps & {
+export function StepWhat({ form, set, isEdit, fileNote, onRepository }: StepProps & {
   fileNote: FileNote | null
   onRepository: (repository: string) => void
-  /** Keeps the form and answers where GitHub's return comes back to. */
-  leave: () => Promise<string>
 }) {
   const brief = useRef<HTMLTextAreaElement>(null)
   return (
@@ -37,7 +35,7 @@ export function StepWhat({ form, set, isEdit, fileNote, onRepository, leave }: S
           label="Repository"
           hint={<InfoTip>{`A repository with ${FILE} fills in the rest of this form.`}</InfoTip>}
         >
-          <RepositorySelect value={form.repository} onChange={onRepository} leave={leave} />
+          <RepositorySelect value={form.repository} onChange={onRepository} />
           {fileNote?.state === 'reading' && <Text variant="hint">Reading {FILE} of {fileNote.repository}…</Text>}
           {fileNote?.state === 'filled' && <Text variant="note">Filled in from {FILE} of {fileNote.repository}.</Text>}
           {fileNote?.state === 'none' && <Text variant="note">{fileNote.repository} has no {FILE}.</Text>}

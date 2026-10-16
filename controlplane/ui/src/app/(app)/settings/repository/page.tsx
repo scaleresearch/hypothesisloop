@@ -1,34 +1,42 @@
 'use client'
 
-import { useEffect } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import { connectGitHubInstallation, fetchGitHubApp, fetchGitHubInstallations } from '@/lib/api'
-import { githubCardPath, leaveFor, redirectURI, takeReturn } from '@/lib/github-connect'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { finishGitHubInstall } from '@/lib/api'
+import { githubCardPath, takeReturn, type ReturnView } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
-import { Loading } from '@/components/ui/status-message'
+import { TextLink } from '@/components/ui/link'
+import { Stack } from '@/components/ui/stack'
+import { ErrorMessage, Loading } from '@/components/ui/status-message'
+import { Text } from '@/components/ui/text'
 
 /**
- * Where GitHub returns the person from installing or authorising the platform's App. The path is
- * the one registered on the App. The return is taken once, the connect it carries is made while
- * this page shows, and the person goes on to GitHub to install the App or back to the page they
- * left from, which shows how it went. A return no attempt of this tab accounts for lands on the
- * GitHub card of the org's settings.
+ * The App's setup URL: where GitHub returns the tab the install was opened in. The return is
+ * taken once, the installation connected, the tab the install started from told, and this tab
+ * closes. A tab the browser does not let close, as one opened by hand, says how it went and leads
+ * back.
  */
 export default function GitHubReturnPage() {
   const { org } = useTenant()
-  const router = useRouter()
   const query = useSearchParams().toString()
+  const [view, setView] = useState<ReturnView | null>(null)
 
   useEffect(() => {
-    void takeReturn(query, {
-      app: fetchGitHubApp,
-      connect: (orgID, code, installationID) => connectGitHubInstallation(orgID, { code, redirectURI: redirectURI(), installationID }),
-      installations: async orgID => (await fetchGitHubInstallations(orgID)).items,
-    }).then(next => {
-      if (next.to === 'github') leaveFor(next.address)
-      else router.replace(next.path ?? githubCardPath(org.id))
+    void takeReturn(query, finishGitHubInstall).then(taken => {
+      setView(taken)
+      if (taken.view !== 'nothing') window.close()
     })
-  }, [query, org.id, router])
+  }, [query])
 
-  return <Loading text="Returning from GitHub…" />
+  if (!view) return <Loading text="Connecting GitHub…" />
+  const back = view.view === 'connected' && view.returnTo ? view.returnTo : githubCardPath(org.id)
+  return (
+    <Stack start>
+      {view.view === 'connected' && <Text>Connected {view.account}. You can close this tab.</Text>}
+      {view.view === 'failed' && <ErrorMessage>{view.message}</ErrorMessage>}
+      {view.view === 'changed' && <Text>Your changes on GitHub are saved. You can close this tab.</Text>}
+      {view.view === 'nothing' && <Text>This page finishes an install of the GitHub App. Nothing was connected.</Text>}
+      <TextLink href={back}>Back to HypothesisLoop</TextLink>
+    </Stack>
+  )
 }

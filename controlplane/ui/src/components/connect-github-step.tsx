@@ -2,9 +2,10 @@
 
 import useSWR from 'swr'
 import { fetchGitHubInstallations } from '@/lib/api'
-import { githubCardPath, useGitHubApp } from '@/lib/github-connect'
+import { useGitHubApp, useGitHubInstall } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
-import { TextLink } from '@/components/ui/link'
+import { InstallProgress } from '@/components/github-status'
+import { Button } from '@/components/ui/button'
 import { Text } from '@/components/ui/text'
 
 /**
@@ -26,14 +27,32 @@ export function useNeedsGitHub(): boolean {
   return useGitHub() === 'unconnected'
 }
 
+/**
+ * Installs the GitHub App from where an experiment is created, in a new tab this page waits for,
+ * without leaving the page. A member is told an owner does it.
+ */
+export function InstallGitHub({ label = 'Install GitHub App' }: { label?: string }) {
+  const { org, administers } = useTenant()
+  const { install, start, reset } = useGitHubInstall(org.id, typeof window === 'undefined' ? '/' : window.location.pathname + window.location.search)
+  if (!administers) return <Text as="span" variant="note">An owner of {org.name} installs the GitHub App to start.</Text>
+  return (
+    <>
+      <Button type="button" variant="primary" disabled={install.phase === 'waiting'} onClick={start}>{label}</Button>
+      <InstallProgress install={install} onCancel={reset} />
+    </>
+  )
+}
+
 /** Stands where an experiment is created while the org has connected no GitHub account. */
 export function ConnectGitHubStep() {
   const { org } = useTenant()
   return (
-    <Text tone="muted">
-      An experiment keeps its code in a GitHub repository, and no GitHub account is connected to {org.name}.{' '}
-      <TextLink inline href={githubCardPath(org.id)}>Connect GitHub in Settings</TextLink>{' '}
-      first. The platform asks to create repositories and needs none of your existing ones: select one only to run an experiment in a repository you already have.
-    </Text>
+    <>
+      <Text tone="muted">
+        An experiment keeps its code in a GitHub repository, and no GitHub account is connected to {org.name}.
+        The platform creates repositories and needs none of your existing ones.
+      </Text>
+      <InstallGitHub />
+    </>
   )
 }

@@ -10,7 +10,6 @@ import type { TypeKind } from '@/lib/units'
 import { isZeroDate } from '@/lib/format'
 import { createAndRun } from '@/lib/run-experiment'
 import type { RunFailure } from '@/lib/run-experiment'
-import { projectPath, withQuery } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
 import { PlatformExperimentStatus } from '@/types'
 import type { PlatformExperiment } from '@/types'
@@ -111,11 +110,6 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
     } finally {
       setSavingDraft(false)
     }
-  }
-
-  // Leaving for GitHub keeps the form as a draft, which GitHub's return opens again.
-  async function leaveWithDraft(): Promise<string> {
-    return withQuery(projectPath(project.id, 'experiments'), { draft: await keepDraft(step, refused ?? '') })
   }
 
   function go(next: StepID) {
@@ -252,7 +246,7 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
 
       <Stack as="form" gap="xl" onSubmit={handleSubmit}>
         {step === '1' && (
-          <StepWhat {...stepProps} fileNote={fileNote} onRepository={r => void chooseRepository(r)} leave={leaveWithDraft} />
+          <StepWhat {...stepProps} fileNote={fileNote} onRepository={r => void chooseRepository(r)} />
         )}
         {step === '2' && <StepMeasure {...stepProps} />}
         {step === '3' && <StepBudget {...stepProps} budgetKind={budgetKind} />}

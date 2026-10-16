@@ -3,29 +3,24 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  ApiError, addPlatformExperimentAgents, createExperimentDraft, createPlatformExperiment, deleteExperimentDraft, fetchExperimentFile, fetchGitHubApp,
+  ApiError, addPlatformExperimentAgents, beginGitHubInstall, createExperimentDraft, createPlatformExperiment, deleteExperimentDraft, fetchExperimentFile, fetchGitHubApp,
   fetchGitHubInstallations, fetchGitHubRepositories, updateExperimentDraft, updatePlatformExperiment,
 } from '@/lib/api'
 import type { ExperimentDraft } from '@/lib/api'
-import { leaveFor } from '@/lib/github-connect'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { PlatformExperimentForm } from '@/components/platform-experiment-form'
 import type { Me, PlatformExperiment } from '@/types'
 
 vi.mock('@/lib/api', async importActual => ({
   ...(await importActual<typeof import('@/lib/api')>()),
-  addPlatformExperimentAgents: vi.fn(), createPlatformExperiment: vi.fn(), fetchExperimentFile: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
+  addPlatformExperimentAgents: vi.fn(), beginGitHubInstall: vi.fn(), createPlatformExperiment: vi.fn(), fetchExperimentFile: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
   updatePlatformExperiment: vi.fn(), createExperimentDraft: vi.fn(), updateExperimentDraft: vi.fn(), deleteExperimentDraft: vi.fn(),
-}))
-vi.mock('@/lib/github-connect', async importActual => ({
-  ...(await importActual<typeof import('@/lib/github-connect')>()),
-  leaveFor: vi.fn(),
 }))
 
 const at = '2026-01-01T00:00:00Z'
 const me: Me = {
   kind: 'user', user_id: 'u1', name: 'Ada',
-  orgs: [{ id: 'org_a', name: 'Lab', role: 'member', created_at: at }],
+  orgs: [{ id: 'org_a', name: 'Lab', role: 'owner', created_at: at }],
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 }
 const created = { id: 'pe-new', project_id: 'prj_1', name: 'Run' } as PlatformExperiment
@@ -63,7 +58,7 @@ async function essentials({ repository }: { repository?: string } = {}) {
 beforeEach(() => {
   onSaved.mockReset()
   vi.mocked(fetchExperimentFile).mockReset().mockRejectedValue(new ApiError(422, 'the repository has no experiment file', 'no_experiment_file'))
-  vi.mocked(fetchGitHubApp).mockResolvedValue({ slug: 'hl', client_id: 'c', install_url: 'https://github.test/install', authorize_url: 'https://github.test/authorize', new_repository_url: 'https://github.test/new' })
+  vi.mocked(fetchGitHubApp).mockResolvedValue({ slug: 'hl', install_url: 'https://github.test/install', new_repository_url: 'https://github.test/new' })
   vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [{ org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_actor: { kind: 'user', id: 'u9', name: 'Una' }, connected_at: at, default: false }], total: 1 })
   vi.mocked(fetchGitHubRepositories).mockResolvedValue({ items: [{ repository: 'acme/widgets', installation_id: 7, private: false }], total: 1 })
   vi.mocked(createPlatformExperiment).mockReset().mockResolvedValue(created)
@@ -76,7 +71,6 @@ beforeEach(() => {
   vi.mocked(createExperimentDraft).mockReset().mockImplementation(kept('draft-1'))
   vi.mocked(updateExperimentDraft).mockReset().mockImplementation(kept('draft-1'))
   vi.mocked(deleteExperimentDraft).mockReset().mockResolvedValue()
-  vi.mocked(leaveFor).mockReset()
 })
 
 describe('a new platform experiment', () => {
@@ -297,12 +291,16 @@ describe('a draft of a new platform experiment', () => {
     expect(deleteExperimentDraft).not.toHaveBeenCalled()
   })
 
-  it('is what leaving for GitHub keeps, and GitHub\'s return opens it again', async () => {
+  it('is left as it is while the App is installed in another tab', async () => {
+    const opened = { location: { href: '' }, close: vi.fn() }
+    vi.spyOn(window, 'open').mockReturnValue(opened as unknown as Window)
+    vi.mocked(beginGitHubInstall).mockResolvedValue({ state: 's-1', install_url: 'https://github.test/install?state=s-1', expires_at: '' })
     show()
     await userEvent.type(name(), 'Before GitHub')
     await userEvent.click(await screen.findByRole('button', { name: 'give the App access' }))
-    await waitFor(() => expect(leaveFor).toHaveBeenCalledExactlyOnceWith('https://github.test/install'))
-    expect(vi.mocked(createExperimentDraft).mock.calls[0][1]).toMatchObject({ form: { name: 'Before GitHub' }, step: '1' })
-    expect(JSON.parse(window.sessionStorage.getItem('hl-github-connect')!)).toMatchObject({ step: 'install', orgID: 'org_a', returnTo: '/projects/prj_1/experiments?draft=draft-1' })
+    expect(await screen.findByText(/Waiting for GitHub/)).toBeTruthy()
+    expect(opened.location.href).toBe('https://github.test/install?state=s-1')
+    expect(createExperimentDraft).not.toHaveBeenCalled()
+    expect(name()).toHaveProperty('value', 'Before GitHub')
   })
 })

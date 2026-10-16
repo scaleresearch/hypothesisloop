@@ -750,12 +750,10 @@ export interface JoinedAgent extends AgentSignup {
   status_reason?: StatusReason
 }
 
-/** The platform's GitHub App: where a person installs it and where they authorise it. */
+/** The platform's GitHub App. */
 export interface GitHubApp {
   slug: string
-  client_id: string
   install_url: string
-  authorize_url: string
   /** Where a person creates a repository on GitHub themselves. Takes `owner` and `visibility`. */
   new_repository_url: string
 }
@@ -780,10 +778,18 @@ export interface GitHubInstallation {
   default: boolean
 }
 
-/** An installation the person can reach, as a connect that must ask which one lists it. */
-export interface ReachableInstallation {
-  installation_id: number
-  account_login: string
+/** An install of the App started for an org: GitHub's install page carries the state. */
+export interface GitHubInstallStart {
+  state: string
+  install_url: string
+  expires_at: string
+}
+
+/** The installation an install connected, and the page of this app it was started from. */
+export interface GitHubInstallFinished {
+  org_id: string
+  return_to: string
+  installation: GitHubInstallation
 }
 
 /** A repository a platform experiment of the org may name. */
