@@ -13,6 +13,7 @@ import { Logo } from '@/components/ui/logo'
 import { Stack } from '@/components/ui/stack'
 import { ErrorMessage } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
+import { errorMessage } from '@/lib/errors'
 
 // Why the visitor is here again, as the redirect that brought them says it.
 const NOTICES = new Map([
@@ -38,7 +39,7 @@ function configured(): { providers: SignInProvider[]; problem?: string } {
   try {
     return { providers: signInProviders() }
   } catch (e) {
-    return { providers: [], problem: e instanceof Error ? e.message : String(e) }
+    return { providers: [], problem: errorMessage(e) }
   }
 }
 
@@ -63,7 +64,7 @@ function SignIn() {
         setRefused(list => [...list, provider])
         setError(e.message)
       } else {
-        setError(`Sign-in could not start: ${e instanceof Error ? e.message : String(e)}`)
+        setError(`Sign-in could not start: ${errorMessage(e)}`)
       }
       setPending('')
     }

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import useSWR from 'swr'
 import { ApiError, GITHUB_NOT_CONFIGURED, checkGitHubInstallation, disconnectGitHubInstallation, fetchGitHubInstallations, makeGitHubInstallationDefault } from '@/lib/api'
 import { githubCardPath, useGitHubApp, useGitHubInstall } from '@/lib/github-connect'
+import { errorMessage } from '@/lib/errors'
 import { useTenant } from '@/lib/tenant'
 import type { GitHubInstallation } from '@/types'
 import { Actor } from '@/components/actor'
@@ -28,7 +29,6 @@ function InstallationState({ installation, onInstall }: { installation: GitHubIn
   const { data, error, isValidating, mutate } = useSWR(
     ['github-installation-check', org.id, installation.installation_id],
     () => checkGitHubInstallation(org.id, installation.installation_id).then(() => true),
-    { shouldRetryOnError: false },
   )
   if (error) {
     return (
@@ -59,28 +59,26 @@ export function OrgGitHub() {
   const app = useGitHubApp(administers)
   const { install, start, reset } = useGitHubInstall(org.id, githubCardPath(org.id))
   const [disconnecting, setDisconnecting] = useState<GitHubInstallation | null>(null)
+  const [defaulting, setDefaulting] = useState<number | null>(null)
   const [actionError, setActionError] = useState('')
 
   async function makeDefault(installation: GitHubInstallation) {
+    setDefaulting(installation.installation_id)
     setActionError('')
     try {
       await makeGitHubInstallationDefault(org.id, installation.installation_id)
       await mutate()
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e))
+      setActionError(errorMessage(e))
+    } finally {
+      setDefaulting(null)
     }
   }
 
   async function disconnect(installation: GitHubInstallation) {
-    setDisconnecting(null)
-    setActionError('')
-    try {
-      await disconnectGitHubInstallation(org.id, installation.installation_id)
-      if (install.phase === 'connected' && install.installation.installation_id === installation.installation_id) reset()
-      await mutate()
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e))
-    }
+    await disconnectGitHubInstallation(org.id, installation.installation_id)
+    if (install.phase === 'connected' && install.installation.installation_id === installation.installation_id) reset()
+    await mutate()
   }
 
   const unconfigured = app.error instanceof ApiError && app.error.reason === GITHUB_NOT_CONFIGURED
@@ -119,7 +117,7 @@ export function OrgGitHub() {
                 {installations.length > 1 && (
                   <td>
                     {installation.default ? <Badge tone="accent">Default</Badge>
-                      : administers ? <Button size="sm" onClick={() => void makeDefault(installation)}>Make default</Button> : null}
+                      : administers ? <Button size="sm" loading={defaulting === installation.installation_id} disabled={defaulting !== null} onClick={() => void makeDefault(installation)}>Make default</Button> : null}
                   </td>
                 )}
                 <td title={new Date(installation.connected_at).toLocaleString()}>
@@ -152,7 +150,7 @@ export function OrgGitHub() {
           title={`Disconnect ${disconnecting.account_login} from ${org.name}?`}
           confirmLabel="Disconnect"
           onConfirm={() => disconnect(disconnecting)}
-          onCancel={() => setDisconnecting(null)}
+          onClose={() => setDisconnecting(null)}
         >
           Experiments that name one of its repositories keep running, but their agents and jobs can no longer
           clone, fetch or push within the hour. The App stays installed on GitHub.

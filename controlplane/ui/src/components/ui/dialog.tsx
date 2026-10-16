@@ -1,9 +1,11 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Dialog as HeadlessDialog, DialogBackdrop, DialogPanel, DialogTitle } from '@headlessui/react'
 import { clsx } from 'clsx'
+import { errorMessage } from '@/lib/errors'
 import { Button } from '@/components/ui/button'
+import { InlineError } from '@/components/ui/status-message'
 
 interface DialogProps {
   open: boolean
@@ -42,17 +44,44 @@ interface ConfirmDialogProps {
   cancelLabel?: string
   /** The confirm button is the danger one unless the action is harmless. */
   variant?: 'danger' | 'primary'
-  onConfirm: () => void
-  onCancel: () => void
+  /** The action. The dialog stays open until it settles, and shows its failure. */
+  onConfirm: () => Promise<void>
+  /** Called on cancel and once the action succeeded. */
+  onClose: () => void
 }
 
-export function ConfirmDialog({ open, title, children, confirmLabel, cancelLabel = 'Cancel', variant = 'danger', onConfirm, onCancel }: ConfirmDialogProps) {
+/** Asks before an action, runs it and closes once it is done; a failed one leaves the dialog open with the reason. */
+export function ConfirmDialog({ open, title, children, confirmLabel, cancelLabel = 'Cancel', variant = 'danger', onConfirm, onClose }: ConfirmDialogProps) {
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState('')
+
+  async function confirm() {
+    setPending(true)
+    setError('')
+    try {
+      await onConfirm()
+    } catch (e) {
+      setError(errorMessage(e))
+      return
+    } finally {
+      setPending(false)
+    }
+    onClose()
+  }
+
+  function cancel() {
+    if (pending) return
+    setError('')
+    onClose()
+  }
+
   return (
-    <Dialog open={open} onClose={onCancel} title={title} size="sm">
+    <Dialog open={open} onClose={cancel} title={title} size="sm">
       <p className="text-sm text-muted">{children}</p>
+      {error && <InlineError className="mt-3 block">{error}</InlineError>}
       <div className="mt-5 flex justify-end gap-2">
-        <Button type="button" onClick={onCancel}>{cancelLabel}</Button>
-        <Button type="button" variant={variant} onClick={onConfirm}>{confirmLabel}</Button>
+        <Button type="button" onClick={cancel} disabled={pending}>{cancelLabel}</Button>
+        <Button type="button" variant={variant} onClick={confirm} loading={pending}>{confirmLabel}</Button>
       </div>
     </Dialog>
   )

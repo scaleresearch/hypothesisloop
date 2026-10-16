@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import { createOrgInvite, fetchOrgInvites, fetchOrgMembers, removeOrgMember, revokeOrgInvite, setOrgMemberRole } from '@/lib/api'
+import { errorMessage } from '@/lib/errors'
 import { inviteLink } from '@/lib/invite'
 import { HOME_PATH } from '@/lib/auth'
 import { useRefreshMe, useTenant } from '@/lib/tenant'
@@ -53,21 +54,15 @@ function Invites({ onError }: { onError: (message: string) => void }) {
       setCreated(await createOrgInvite(org.id, role))
       await mutate()
     } catch (e) {
-      onError(e instanceof Error ? e.message : String(e))
+      onError(errorMessage(e))
     } finally {
       setBusy(false)
     }
   }
 
   async function revoke(invite: OrgInvite) {
-    setRevoking(null)
-    onError('')
-    try {
-      await revokeOrgInvite(invite.id)
-      if (created?.id === invite.id) setCreated(null)
-    } catch (e) {
-      onError(e instanceof Error ? e.message : String(e))
-    }
+    await revokeOrgInvite(invite.id)
+    if (created?.id === invite.id) setCreated(null)
     await mutate()
   }
 
@@ -124,7 +119,7 @@ function Invites({ onError }: { onError: (message: string) => void }) {
           title={`Revoke the invite ${revoking.actor.name} created ${when(revoking.created_at)}?`}
           confirmLabel="Revoke"
           onConfirm={() => revoke(revoking)}
-          onCancel={() => setRevoking(null)}
+          onClose={() => setRevoking(null)}
         >
           Its link stops working at once. This cannot be undone.
         </ConfirmDialog>
@@ -147,23 +142,17 @@ export function OrgMembers() {
   async function apply(change: Change) {
     const { member } = change
     const self = member.user_id === me.user_id
-    setChange(null)
-    setError('')
-    try {
-      if (change.kind === 'role') {
-        await setOrgMemberRole(org.id, member.user_id, change.role)
-        if (self) await refreshMe()
-      } else {
-        await removeOrgMember(org.id, member.user_id)
-        if (self) {
-          // The org is no longer theirs to see, so the URL stops naming its project before the account is reread.
-          router.replace(HOME_PATH)
-          await refreshMe()
-          return
-        }
+    if (change.kind === 'role') {
+      await setOrgMemberRole(org.id, member.user_id, change.role)
+      if (self) await refreshMe()
+    } else {
+      await removeOrgMember(org.id, member.user_id)
+      if (self) {
+        // The org is no longer theirs to see, so the URL stops naming its project before the account is reread.
+        router.replace(HOME_PATH)
+        await refreshMe()
+        return
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
     }
     await mutate()
   }
@@ -226,13 +215,13 @@ export function OrgMembers() {
       {data && data.total > data.items.length && (
         <Text variant="hint">Showing the first {data.items.length} of {data.total} members.</Text>
       )}
-      {change && <Question change={change} onConfirm={() => apply(change)} onCancel={() => setChange(null)} />}
+      {change && <Question change={change} onConfirm={() => apply(change)} onClose={() => setChange(null)} />}
       {administers && <Invites onError={setError} />}
     </Stack>
   )
 }
 
-function Question({ change, onConfirm, onCancel }: { change: Change; onConfirm: () => void; onCancel: () => void }) {
+function Question({ change, onConfirm, onClose }: { change: Change; onConfirm: () => Promise<void>; onClose: () => void }) {
   const { me, org } = useTenant()
   const self = change.member.user_id === me.user_id
   const id = change.member.name || change.member.user_id
@@ -245,7 +234,7 @@ function Question({ change, onConfirm, onCancel }: { change: Change; onConfirm: 
         confirmLabel={demotes ? 'Make member' : 'Make owner'}
         variant={demotes ? 'danger' : 'primary'}
         onConfirm={onConfirm}
-        onCancel={onCancel}
+        onClose={onClose}
       >
         {demotes
           ? `${self ? 'You keep' : 'They keep'} reading everything and running experiments, and lose what only an owner holds: ${self ? 'your' : 'their'} API keys of the whole organization stop working and the invites ${self ? 'you' : 'they'} made are revoked.`
@@ -259,7 +248,7 @@ function Question({ change, onConfirm, onCancel }: { change: Change; onConfirm: 
       title={self ? `Leave ${org.name}?` : `Remove ${id} from ${org.name}?`}
       confirmLabel={self ? 'Leave' : 'Remove'}
       onConfirm={onConfirm}
-      onCancel={onCancel}
+      onClose={onClose}
     >
       {self
         ? 'You lose access to it at once: your API keys in it stop working and the invites you made are revoked. What you wrote stays. Coming back takes a new invite.'

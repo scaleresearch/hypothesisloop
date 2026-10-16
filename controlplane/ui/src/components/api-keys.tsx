@@ -4,6 +4,7 @@ import { useState } from 'react'
 import useSWR from 'swr'
 import { createAPIKey, fetchAPIKeys, revokeAPIKey } from '@/lib/api'
 import type { APIKey, CreatedAPIKey } from '@/types'
+import { errorMessage } from '@/lib/errors'
 import { useTenant } from '@/lib/tenant'
 import { StatusLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -44,21 +45,15 @@ export function APIKeys() {
       setName('')
       await mutate()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(errorMessage(e))
     } finally {
       setBusy(false)
     }
   }
 
   async function revoke(key: APIKey) {
-    setRevoking(null)
-    setError('')
-    try {
-      await revokeAPIKey(key.id)
-      await mutate()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
+    await revokeAPIKey(key.id)
+    await mutate()
   }
 
   return (
@@ -138,7 +133,7 @@ export function APIKeys() {
           title={`Revoke "${revoking.name}"?`}
           confirmLabel="Revoke"
           onConfirm={() => revoke(revoking)}
-          onCancel={() => setRevoking(null)}
+          onClose={() => setRevoking(null)}
         >
           It stops working at once, with every key minted from it. This cannot be undone.
         </ConfirmDialog>

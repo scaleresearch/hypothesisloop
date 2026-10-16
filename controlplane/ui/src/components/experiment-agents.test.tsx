@@ -168,6 +168,7 @@ describe('removing an agent', () => {
     await userEvent.click(question.getByRole('button', { name: 'Remove' }))
     expect(removePlatformExperimentAgent).toHaveBeenCalledExactlyOnceWith('pe-1', 'ag-old')
     await waitFor(() => expect(screen.queryByRole('cell', { name: 'ag-old' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 
   it('does nothing when the answer is no', async () => {
@@ -184,7 +185,9 @@ describe('removing an agent', () => {
     show()
     await userEvent.click(await screen.findByRole('button', { name: 'Remove' }))
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }))
-    expect((await screen.findByRole('alert')).textContent).toBe(unfinished)
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe(unfinished)
+    expect(screen.getByRole('dialog').contains(alert)).toBe(true)
     expect(screen.getByRole('cell', { name: 'ag-old' })).toBeTruthy()
   })
 

@@ -17,6 +17,7 @@ import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Text } from '@/components/ui/text'
 import { TextLink } from '@/components/ui/link'
+import { errorMessage } from '@/lib/errors'
 
 /** A name with a Save beside it. `save` rejects with the API's own reason, which is shown. */
 function NameForm({ label, initial, action, placeholder, save }: {
@@ -38,7 +39,7 @@ function NameForm({ label, initial, action, placeholder, save }: {
       await save(name.trim())
       if (initial === '') setName('')
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(errorMessage(e))
     } finally {
       setBusy(false)
     }

@@ -14,6 +14,7 @@ import { Centered } from '@/components/ui/centered'
 import { Logo } from '@/components/ui/logo'
 import { ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
+import { errorMessage } from '@/lib/errors'
 
 const NEW_INVITE = 'Ask an owner of the organization for a new one.'
 
@@ -57,7 +58,7 @@ export function AcceptInvite() {
       accessToken().then(
         session => { if (mine === reading) setStep(session ? { at: 'offered', token } : { at: 'signed-out' }) },
         (e: unknown) => {
-          if (mine === reading) setStep({ at: 'offered', token, failure: `Could not check your session: ${e instanceof Error ? e.message : String(e)}` })
+          if (mine === reading) setStep({ at: 'offered', token, failure: `Could not check your session: ${errorMessage(e)}` })
         },
       )
     }
@@ -82,7 +83,7 @@ export function AcceptInvite() {
         setStep({ at: 'refused', message: REFUSALS[e.reason ?? (e.status === 404 ? 'not_found' : '')] ?? e.message })
       } else {
         // The API never answered, so the invite is unused and the same token can be sent again.
-        setStep({ at: 'offered', token, failure: `The invite could not be sent: ${e instanceof Error ? e.message : String(e)}` })
+        setStep({ at: 'offered', token, failure: `The invite could not be sent: ${errorMessage(e)}` })
       }
       return
     }
@@ -93,7 +94,7 @@ export function AcceptInvite() {
       if (project) router.replace(projectPath(project.id, 'experiments'))
       else setStep({ at: 'joined', member, stranded: 'The organization has no project yet.' })
     } catch (e) {
-      setStep({ at: 'joined', member, stranded: `Your account could not be read again: ${e instanceof Error ? e.message : String(e)}` })
+      setStep({ at: 'joined', member, stranded: `Your account could not be read again: ${errorMessage(e)}` })
     }
   }
 

@@ -28,6 +28,7 @@ import { Activity } from '@/components/agent-at-work'
 import { InstanceHealth } from '@/components/instance-health'
 import { DEFAULT_AGENT_TYPE, researcherTypes, typeName, useAgentTypes } from '@/lib/agent-types'
 import { useTenant } from '@/lib/tenant'
+import { errorMessage } from '@/lib/errors'
 import { Select } from '@/components/ui/select'
 import type { AgentType } from '@/types'
 import { relTime } from '@/lib/format'
@@ -61,7 +62,7 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
         hosted, flavor, model: model.trim() || undefined,
       }))
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(errorMessage(e))
     } finally {
       setBusy(false)
     }
@@ -144,7 +145,7 @@ function MessageAgent({ pe, agent, onSent, onClose }: {
       await onSent()
       onClose()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(errorMessage(e))
     } finally {
       setBusy(false)
     }
@@ -240,15 +241,9 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   const messagesTo = (agent: AgentSignup) => messages?.filter(m => m.agent_id === agent.agent_id) ?? []
 
   async function remove(agent: AgentSignup) {
-    setRemoving(null)
-    setRowError('')
-    try {
-      await removePlatformExperimentAgent(pe.id, agent.agent_id)
-      hide(agent.agent_id)
-      await mutate()
-    } catch (e) {
-      setRowError(e instanceof Error ? e.message : String(e))
-    }
+    await removePlatformExperimentAgent(pe.id, agent.agent_id)
+    hide(agent.agent_id)
+    await mutate()
   }
 
   function hide(agentID: string) {
@@ -265,7 +260,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
     try {
       show([await fetchPlatformExperimentAgentToken(pe.id, agent.agent_id)])
     } catch (e) {
-      setRowError(e instanceof Error ? e.message : String(e))
+      setRowError(errorMessage(e))
     }
   }
 
@@ -375,7 +370,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
             title={`Remove ${removing.name} from this experiment?`}
             confirmLabel="Remove"
             onConfirm={() => remove(removing)}
-            onCancel={() => setRemoving(null)}
+            onClose={() => setRemoving(null)}
           >
             Its token stops working{removing.hosted ? ' and its machine is taken down' : ''}.
           </ConfirmDialog>

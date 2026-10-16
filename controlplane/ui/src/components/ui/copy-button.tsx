@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { InlineError } from '@/components/ui/status-message'
+import { errorMessage } from '@/lib/errors'
 
 /** Copies `value` to the clipboard and says so; a refusal is shown beside it. */
 export function CopyButton({ value, variant = 'default' }: { value: string; variant?: 'default' | 'primary' }) {
@@ -15,7 +16,7 @@ export function CopyButton({ value, variant = 'default' }: { value: string; vari
       setCopied(true)
       setError('')
     } catch (e) {
-      setError(`Copy failed, select the text instead: ${e instanceof Error ? e.message : String(e)}`)
+      setError(`Copy failed, select the text instead: ${errorMessage(e)}`)
     }
   }
 

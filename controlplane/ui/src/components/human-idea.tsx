@@ -13,6 +13,7 @@ import { HypothesisPicker } from '@/components/hypothesis-search'
 import { AgentLabel } from '@/components/agent-label'
 import { useReadOnly } from '@/lib/read-only'
 import { LINK_KINDS, LINK_KIND_HINTS, LINK_KIND_LABELS } from '@/lib/hypothesis-graph'
+import { errorMessage } from '@/lib/errors'
 
 // From an agent's hypothesis only that agent links; one no agent owns is anyone's.
 export function AddLinkForm({ hypothesis, onAdded }: { hypothesis: HypothesisWithJobs; onAdded: () => void }) {
@@ -40,7 +41,7 @@ export function AddLinkForm({ hypothesis, onAdded }: { hypothesis: HypothesisWit
       setTarget(null)
       onAdded()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(errorMessage(e))
     } finally {
       setBusy(false)
     }
@@ -85,7 +86,7 @@ export function AddCommentForm({ hypothesisID, onAdded }: { hypothesisID: string
       setText('')
       onAdded()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(errorMessage(e))
     } finally {
       setBusy(false)
     }

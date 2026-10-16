@@ -3,13 +3,14 @@ import useSWR, { useSWRConfig } from 'swr'
 import { ApiError, beginGitHubInstall, fetchGitHubApp } from '@/lib/api'
 import { orgPath } from '@/lib/routes'
 import type { GitHubInstallation, GitHubInstallFinished, GitHubInstallStart } from '@/types'
+import { errorMessage } from '@/lib/errors'
 
 /**
  * The platform's GitHub App, read under one key by every component that needs it. An error whose
  * reason is GITHUB_NOT_CONFIGURED says the deployment's git host is not GitHub.
  */
 export function useGitHubApp(enabled = true) {
-  return useSWR(enabled ? 'github-app' : null, fetchGitHubApp, { shouldRetryOnError: false })
+  return useSWR(enabled ? 'github-app' : null, fetchGitHubApp)
 }
 
 /** The setup URL registered on the platform's GitHub App: where GitHub returns the install tab. */
@@ -117,7 +118,7 @@ export function useGitHubInstall(orgID: string, returnTo: string) {
   function start() {
     openInstall(orgID, returnTo, { open: () => window.open('', '_blank'), begin: beginGitHubInstall }).then(
       state => setInstall({ phase: 'waiting', state }),
-      error => setInstall({ phase: 'failed', message: messageOf(error), reason: error instanceof ApiError ? error.reason : undefined }),
+      error => setInstall({ phase: 'failed', message: errorMessage(error), reason: error instanceof ApiError ? error.reason : undefined }),
     )
   }
   return { install, start, reset: () => setInstall(IDLE) }
@@ -169,10 +170,6 @@ async function take(params: URLSearchParams, finish: (state: string, installatio
     post({ state, outcome: { ok: true, installation: finished.installation } })
     return { view: 'connected', account: finished.installation.account_login, returnTo: inApp(finished.return_to) ? finished.return_to : null }
   } catch (error) {
-    return failed(messageOf(error), error instanceof ApiError ? error.reason : undefined)
+    return failed(errorMessage(error), error instanceof ApiError ? error.reason : undefined)
   }
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }

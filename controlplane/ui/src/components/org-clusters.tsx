@@ -436,8 +436,8 @@ export function OrgClusters() {
         open={removing !== ''}
         title={`Remove ${removing}?`}
         confirmLabel="Remove cluster"
-        onCancel={() => setRemoving('')}
-        onConfirm={() => {
+        onClose={() => setRemoving('')}
+        onConfirm={async () => {
           const cluster = removing
           setRemoving('')
           setAdvanced('')
