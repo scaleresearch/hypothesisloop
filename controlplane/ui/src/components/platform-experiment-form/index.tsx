@@ -132,6 +132,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
     setSavingDraft(true)
     try {
       await keepDraft(step, failure)
+      settled.current = true
       onCancel?.()
     } catch (err: unknown) {
       setError(`Could not keep what you typed as a draft, so the form stays open: ${said(err)}`)
@@ -140,6 +141,21 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
   }
 
   useImperativeHandle(ref, () => ({ leave: () => void leave() }))
+
+  // A form taken off the page some other way, by the browser's Back or a link, keeps what was
+  // typed all the same, and a reload or a closed tab asks first.
+  const settled = useRef(false)
+  const keepOnUnmount = useRef<() => void>(() => undefined)
+  keepOnUnmount.current = () => {
+    if (!isEdit && unsaved && !settled.current) void keepDraft(step, failure).catch(() => undefined)
+  }
+  useEffect(() => () => keepOnUnmount.current(), [])
+  useEffect(() => {
+    if (isEdit || !unsaved) return
+    const ask = (e: BeforeUnloadEvent) => e.preventDefault()
+    window.addEventListener('beforeunload', ask)
+    return () => window.removeEventListener('beforeunload', ask)
+  }, [isEdit, unsaved])
 
   function go(next: StepID) {
     setError(null)
@@ -233,6 +249,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
       // The draft goes once the experiment it was for exists. One that stays is listed, to delete.
       if (draftID) await deleteExperimentDraft(project.id, draftID).catch(() => undefined)
       void mutate(['experiment-drafts', project.id])
+      settled.current = true
       onSaved(experiment, true)
     } catch (err: unknown) {
       if (isEdit) {
