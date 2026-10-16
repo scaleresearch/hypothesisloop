@@ -25,14 +25,12 @@ func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *clusterapi.
 	// carrying its identity belongs to the previous generation and may be inside its checkpoint
 	// window. A new pod started now would read the store before that checkpoint lands, restart
 	// from zero and later overwrite it. The next pass retries.
-	pods, err := c.kube.CoreV1().Pods(HypothesisLoopNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("%s=%s", workloadkeys.ExperimentID, exp.ID),
-	})
+	pods, err := c.experimentPods(ctx, exp.ID)
 	if err != nil {
 		return fmt.Errorf("workload: list pods for %s: %w", exp.ID, err)
 	}
-	if len(pods.Items) > 0 {
-		return fmt.Errorf("workload: %d pod(s) of the previous generation of %s still terminating; retry creation", len(pods.Items), exp.ID)
+	if len(pods) > 0 {
+		return fmt.Errorf("workload: %d pod(s) of the previous generation of %s still terminating; retry creation", len(pods), exp.ID)
 	}
 	// No admission handshake here: the scheduler loop already decided this experiment fits
 	// available capacity before calling CreateWorkload, so the Job is created ready-to-run.
@@ -83,12 +81,10 @@ func (c *JobWorkloadClient) createJob(ctx context.Context, exp *clusterapi.Desir
 		return &agentexec.Unrunnable{Why: "the cluster's Kubernetes API refuses the job as it is specified: " + err.Error()}
 	}
 	if errors.IsAlreadyExists(err) {
-		// Job names are deterministic per experiment ID, so re-admission after preemption
-		// collides with the prior Job object if its background-propagation
-		// delete hasn't removed it yet — observed live as exp stuck SUBMITTED for 3+min
-		// because this branch treated the stale, still-terminating object as a safe no-op.
-		// A DeletionTimestamp means it's the old, dying object: surface an error so submitJob
-		// rolls back to QUEUED and retries once the delete actually completes.
+		// Job names are deterministic per experiment, so the name can be held by an earlier
+		// generation, still terminating or not yet compared. Nothing is deleted here: a pass that
+		// lists it compares it with desired state and replaces it when it differs, and a
+		// terminating one is gone by a later pass.
 		existing, getErr := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).Get(ctx, job.Name, metav1.GetOptions{})
 		if getErr != nil {
 			return fmt.Errorf("workload: inspect existing job %s: %w", job.Name, getErr)
@@ -96,12 +92,7 @@ func (c *JobWorkloadClient) createJob(ctx context.Context, exp *clusterapi.Desir
 		if existingJobMatchesDesired(existing, job, exp.ID) {
 			return nil
 		}
-		if existing.DeletionTimestamp == nil {
-			if deleteErr := c.DeleteWorkload(ctx, exp.ID, false); deleteErr != nil {
-				return fmt.Errorf("workload: delete mismatched existing job %s: %w", job.Name, deleteErr)
-			}
-		}
-		return fmt.Errorf("workload: stale job %s removed or still terminating; retry creation", job.Name)
+		return fmt.Errorf("workload: job %s of another spec or generation holds the name; the next pass compares it with desired state", job.Name)
 	}
 	return err
 }
@@ -389,7 +380,7 @@ func (c *JobWorkloadClient) GetLiveStorageCapacity(ctx context.Context) (availab
 }
 
 // listSchedulableNodesAndPods is the shared node/pod read behind every live capacity
-// collector, from the watched cache (cluster_cache.go), so they all apply one definition of
+// collector, from the pass's one read (ForPass), so they all apply one definition of
 // "schedulable", rather than each collector deciding for itself.
 //
 // A node counts only when it is both uncordoned and Ready. Ready matters as much as the cordon
@@ -398,21 +389,17 @@ func (c *JobWorkloadClient) GetLiveStorageCapacity(ctx context.Context) (availab
 // unfiltered, that hardware keeps being reported as live capacity long after it stopped existing,
 // and jobs admitted against it queue forever with nothing to run them.
 func (c *JobWorkloadClient) listSchedulableNodesAndPods(ctx context.Context) ([]corev1.Node, []corev1.Pod, error) {
-	allNodes, allPods, err := c.cachedNodesAndPods(ctx)
+	read, err := c.cluster(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	nodes := make([]corev1.Node, 0, len(allNodes))
-	for _, n := range allNodes {
-		if schedulableNode(*n) {
-			nodes = append(nodes, *n)
+	nodes := make([]corev1.Node, 0, len(read.nodes))
+	for _, n := range read.nodes {
+		if schedulableNode(n) {
+			nodes = append(nodes, n)
 		}
 	}
-	pods := make([]corev1.Pod, 0, len(allPods))
-	for _, p := range allPods {
-		pods = append(pods, *p)
-	}
-	return nodes, pods, nil
+	return nodes, read.pods, nil
 }
 
 // schedulableNode reports whether n can actually accept work right now — see
@@ -695,7 +682,9 @@ func podDeleteGrace(pod *corev1.Pod, grantCheckpointWindow bool) (int64, error) 
 
 // signalPods deletes every pod of the experiment with an explicit grace period, which is what
 // actually delivers SIGTERM and starts the clock — the whole gang at once, before any Job object
-// is touched, so no rank is killed while another is still being told.
+// is touched, so no rank is killed while another is still being told. It lists the pods afresh
+// rather than from the pass's read: a pod started since would otherwise go with the Job, on the
+// widened grace its template carries whether or not this termination was granted it.
 //
 // grantCheckpointWindow chooses the clock: the pod's own TerminationGracePeriodSeconds, which
 // compileJob widened to hold the checkpoint window the job declared, or the ordinary shutdown
@@ -896,16 +885,14 @@ func jobPhase(job *batchv1.Job) clusterapi.JobPhase {
 // acceleratorType is "" (e.g. a non-accelerator/dev cluster) — reported independently since
 // node attribution is meaningful even without a recognized accelerator type.
 func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, experimentID string) (acceleratorType clusterapi.AcceleratorType, node string, consistent bool, err error) {
-	pods, err := c.kube.CoreV1().Pods(HypothesisLoopNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("%s=%s", workloadkeys.ExperimentID, experimentID),
-	})
+	pods, err := c.experimentPods(ctx, experimentID)
 	if err != nil {
 		return "", "", true, fmt.Errorf("workload: list pods for %s: %w", experimentID, err)
 	}
 
 	var primary *corev1.Pod
-	for i := range pods.Items {
-		p := &pods.Items[i]
+	for i := range pods {
+		p := &pods[i]
 		if p.Spec.NodeName == "" {
 			continue
 		}
@@ -928,8 +915,8 @@ func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, 
 	}
 
 	consistent = true
-	for i := range pods.Items {
-		p := &pods.Items[i]
+	for i := range pods {
+		p := &pods[i]
 		if p.Spec.NodeName == "" {
 			continue
 		}

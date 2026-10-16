@@ -45,7 +45,8 @@ type JobWorkloadClient struct {
 	dyn    dynamic.Interface
 	apiURL string
 
-	nodePods nodePodCache
+	// read is the one look at nodes and pods a pass answers from (ForPass); nil outside a pass.
+	read func() (clusterRead, error)
 }
 
 func New(cfg Config) (*JobWorkloadClient, error) {

@@ -46,8 +46,6 @@ const (
 	binaryName        = "cluster-agent"
 	reconcileInterval = 2 * time.Second
 	statusInterval    = 3 * time.Second
-	// cacheSyncTimeout bounds reading every node and pod of the cluster at start.
-	cacheSyncTimeout = 5 * time.Minute
 )
 
 func main() {
@@ -141,10 +139,6 @@ func main() {
 		os.Exit(1)
 	}
 	setupCancel()
-	if err := jwc.SyncCache(ctx, cacheSyncTimeout, log); err != nil {
-		fmt.Fprintf(os.Stderr, "cluster-agent: %v\n", err)
-		os.Exit(1)
-	}
 	log("first contact with the control plane at %s", apiURL)
 	// Once its owner removed the cluster the control plane refuses this cluster's token, and the
 	// same loop that keeps a cluster in step is what stops everything a removed one still holds.

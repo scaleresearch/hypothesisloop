@@ -3,9 +3,9 @@ package k8sexec
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
@@ -41,22 +41,22 @@ var k8sPhaseReasons = map[string]string{
 // could not resolve one) falls back to counting every pod under the experiment, today's
 // behaviour, rather than filtering on a label value that doesn't exist.
 func (c *JobWorkloadClient) PollPhaseDetail(ctx context.Context, experimentID string, attempt int) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, err error) {
-	selector := fmt.Sprintf("%s=%s", workloadkeys.ExperimentID, experimentID)
-	if attempt != clusterapi.AttemptUnknown {
-		selector = fmt.Sprintf("%s,%s=%d", selector, workloadkeys.Attempt, attempt)
-	}
-	pods, err := c.kube.CoreV1().Pods(HypothesisLoopNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: selector,
-	})
+	all, err := c.experimentPods(ctx, experimentID)
 	if err != nil {
 		return "", "", 0, 0, "", fmt.Errorf("workload: list pods for %s: %w", experimentID, err)
+	}
+	var pods []corev1.Pod
+	for _, p := range all {
+		if attempt == clusterapi.AttemptUnknown || p.Labels[workloadkeys.Attempt] == strconv.Itoa(attempt) {
+			pods = append(pods, p)
+		}
 	}
 
 	var maxRestarts int32
 	var firstWaiting *corev1.ContainerStateWaiting
 	var firstTerminated *corev1.ContainerStateTerminated
-	for i := range pods.Items {
-		p := &pods.Items[i]
+	for i := range pods {
+		p := &pods[i]
 		if scheduled, unscheduledReason := podScheduledCondition(p); scheduled {
 			scheduledNodes++
 		} else if unscheduledReason != "" && schedulingReason == "" {

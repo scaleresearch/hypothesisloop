@@ -7,9 +7,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
 // FetchLogTail returns the last maxLines lines of experimentID's pod output, read live from the
@@ -25,16 +22,14 @@ import (
 // nowhere at all once the pods were deleted. Both are returned so a retry cannot erase the one
 // thing worth reading.
 func (c *JobWorkloadClient) FetchLogTail(ctx context.Context, experimentID string, maxLines int) ([]string, error) {
-	pods, err := c.kube.CoreV1().Pods(HypothesisLoopNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("%s=%s", workloadkeys.ExperimentID, experimentID),
-	})
+	pods, err := c.experimentPods(ctx, experimentID)
 	if err != nil {
 		return nil, fmt.Errorf("k8sexec.FetchLogTail: list pods for %s: %w", experimentID, err)
 	}
-	if len(pods.Items) == 0 {
+	if len(pods) == 0 {
 		return nil, nil
 	}
-	newest, failed := selectLogPods(pods.Items)
+	newest, failed := selectLogPods(pods)
 
 	// maxLines is a budget for the whole response, not per section. This runs on every status
 	// push for every job and the result is shipped to the control plane and stored, so letting
