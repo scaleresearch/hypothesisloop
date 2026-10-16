@@ -614,7 +614,11 @@ HypothesisLoop has two kinds of deployable parts:
     container engine.
   - **Rented compute** (`runtime/cloud/`): a cloud-agent that rents one machine per job from a
     vendor (vast.ai, Fly.io or E2B) and releases it when the job ends. The agent-launcher beside
-    it runs the platform's hosted agents. Settings live in `runtime/cloud/settings/`.
+    it runs the platform's hosted agents. Settings live in `runtime/cloud/settings/`. No hosted
+    agent's machine holds the model credential: its harness makes every model call through the
+    control plane's model proxy, `/model/anthropic` on the API, with its own platform token. The
+    control plane makes the call with `models.anthropic.oauth_token` and records each call's
+    tokens for its org, platform experiment and agent (`GET /platform-experiments/{id}/model-usage`).
 
   Runtime agents call the control plane; the control plane never connects into them.
 
