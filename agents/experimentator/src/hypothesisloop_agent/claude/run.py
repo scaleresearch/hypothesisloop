@@ -1158,7 +1158,8 @@ async def _run_one_session(setup: core.RunSetup, resume_id: str | None,
     watch_env = updates.watch_env(cfg.api_url, cfg.token, setup.statedir)
     handing = asyncio.Lock()
     background: dict[str, dict] = {}
-    capped = _subagent_hooks(Subagents(background))
+    subagents = Subagents(background)
+    capped = _subagent_hooks(subagents)
     options = ClaudeAgentOptions(
         system_prompt=_running.prompt + _FILE_TOOLS_NOTE,
         model=_running.model,
@@ -1301,12 +1302,14 @@ async def _run_one_session(setup: core.RunSetup, resume_id: str | None,
                          context_tokens, transcript_bytes)
                 return await _hand_off(client, setup, _COMPACTION_PROMPT, background, resume_id)
 
-            # The agent ended its turn. With no job of its own queued or running and no subagent
-            # live its wait waits for nothing: it is told so at every such end but the one of the
-            # turn that answered the statement, after which it waits and the platform's recurring
-            # agent.idle is its timer. A read that failed says nothing.
+            # The agent ended its turn. With no job of its own submitted, queued or running on the
+            # platform, no background task the CLI lists and no subagent whose start it has not
+            # listed yet, its wait waits for nothing: it is told so at every such end but the one
+            # of the turn that answered the statement, after which it waits and the platform's
+            # recurring agent.idle is its timer. A read that failed says nothing.
             answered, told_nothing = told_nothing, False
-            if config.submits_jobs(cfg) and not background and not answered and await updates.jobs_in_flight(watch_env) == 0:
+            if (config.submits_jobs(cfg) and not answered and not background and not subagents.live()
+                    and await updates.jobs_in_flight(watch_env) == 0):
                 log.info("nothing in flight at the end of the turn, saying so")
                 _forget_job_reads()
                 await client.query(await _with_situation(setup, watch_env, updates.NOTHING_IN_FLIGHT))

@@ -94,9 +94,9 @@ IDEAS_OPEN = ("{ideas} ideas from people are still open (`hl hypothesis list --b
 # A coordinator's batch is held this long after the event that woke it, so that what follows it
 # closely comes in the same wake. An agent's comes at once: it has no window for messages.
 COALESCE_S = 90
-# Said to an agent at every end of a turn with no job of its own queued or running and no subagent
-# at work: it would otherwise wait for an update that cannot come.
-NOTHING_IN_FLIGHT = ("No job of yours is queued or running and no subagent of yours is at work, so no update of "
+# Said to an agent at every end of a turn with no job of its own submitted, queued or running and
+# no subagent at work: it would otherwise wait for an update that cannot come.
+NOTHING_IN_FLIGHT = ("The platform holds no job of yours submitted, queued or running and no subagent of yours is at work, so no update of "
                      "your own is coming. A job submitted while its environment builds waits for that build on the "
                      "platform. Put work in flight, or end your run with "
                      "`hl platform-experiments agents finish --reason TEXT`.")
