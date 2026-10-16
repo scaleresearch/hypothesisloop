@@ -102,8 +102,9 @@ func TestAnOrgConnectsSeveralInstallationsAndFindsOneByItsAccount(t *testing.T) 
 	}
 }
 
-// One installation per org is where a new repository goes when a request names no account. A new
-// installation on an account the org connected replaces the one GitHub removed there, default and all.
+// One installation per org is where a new repository goes when a request names no account: the
+// org's first, until another is made the default. A new installation on an account the org
+// connected replaces the one GitHub removed there, default and all.
 func TestOneInstallationIsTheOrgsDefaultAndANewOneOnItsAccountReplacesIt(t *testing.T) {
 	pool := eventsTestDB(t)
 	accounts := NewAccountsStore(pool)
@@ -114,8 +115,9 @@ func TestOneInstallationIsTheOrgsDefaultAndANewOneOnItsAccountReplacesIt(t *test
 		{OrgID: org, InstallationID: 7, AccountLogin: "Acme", AccountType: "Organization", ConnectedActor: by},
 		{OrgID: org, InstallationID: 8, AccountLogin: "carol", AccountType: "User", ConnectedActor: by},
 	} {
-		if err := accounts.ConnectGitHubInstallation(ctx, one); err != nil || one.Default {
-			t.Fatalf("connect %d: %v, default %v, want it connected and not the default", one.InstallationID, err, one.Default)
+		first := one.InstallationID == 7
+		if err := accounts.ConnectGitHubInstallation(ctx, one); err != nil || one.Default != first {
+			t.Fatalf("connect %d: %v, default %v, want it connected and the default only as the org's first", one.InstallationID, err, one.Default)
 		}
 	}
 	defaults := func() []int64 {
@@ -153,183 +155,62 @@ func TestOneInstallationIsTheOrgsDefaultAndANewOneOnItsAccountReplacesIt(t *test
 	}
 }
 
-const testSigningSecret = "a signing secret of a test, long enough"
+// An install state works once, for the actor it was issued to, until it runs out, and names the
+// org and the page the install was started from.
+func TestAnInstallStateIsTakenOnceByThePersonItWasIssuedToWhileItHolds(t *testing.T) {
+	pool := eventsTestDB(t)
+	accounts := NewAccountsStore(pool)
+	ctx := context.Background()
+	_, org := newTestUserHome(t, accounts)
+	alice := domain.Actor{Kind: domain.ActorUser, ID: "user-alice"}
+	bob := domain.Actor{Kind: domain.ActorUser, ID: "user-bob"}
 
-func newTestInstallationsStore(t *testing.T, pool *Pool, secret string) *GitHubInstallationsStore {
-	t.Helper()
-	store, err := NewGitHubInstallationsStore(NewAccountsStore(pool), secret)
+	before := time.Now().Add(-time.Second)
+	state, expires, err := accounts.IssueGitHubInstallState(ctx, org, alice, "/settings", 15*time.Minute)
+	if err != nil || len(state) < 40 || expires.Before(before.Add(14*time.Minute)) {
+		t.Fatalf("issue: got = %q until %v, %v, want a long random state good for 15 minutes", state, expires, err)
+	}
+	var stored []byte
+	if err := pool.pool.QueryRow(ctx, `SELECT state_hash FROM github_install_states`).Scan(&stored); err != nil || bytes.Contains(stored, []byte(state)) {
+		t.Fatalf("the state is stored in the clear: %v", err)
+	}
+	if _, err := accounts.TakeGitHubInstallState(ctx, state, bob); !errors.Is(err, ErrGitHubInstallStateInvalid) {
+		t.Fatalf("another person takes it: got = %v, want = %v", err, ErrGitHubInstallStateInvalid)
+	}
+	if _, err := accounts.TakeGitHubInstallState(ctx, "made-up", alice); !errors.Is(err, ErrGitHubInstallStateInvalid) {
+		t.Fatalf("a made-up state: got = %v, want = %v", err, ErrGitHubInstallStateInvalid)
+	}
+	taken, err := accounts.TakeGitHubInstallState(ctx, state, alice)
+	if err != nil || taken.OrgID != org || taken.ReturnTo != "/settings" || taken.Actor != alice || taken.IssuedAt.Before(before) {
+		t.Fatalf("take: got = %+v, %v, want the org, the page and when it was issued", taken, err)
+	}
+	if _, err := accounts.TakeGitHubInstallState(ctx, state, alice); !errors.Is(err, ErrGitHubInstallStateInvalid) {
+		t.Fatalf("taken twice: got = %v, want = %v", err, ErrGitHubInstallStateInvalid)
+	}
+
+	expired, _, err := accounts.IssueGitHubInstallState(ctx, org, alice, "/settings", 15*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return store
-}
-
-func TestThePersonsAuthorisationIsKeptPerOrgAndReplacedAtEachUse(t *testing.T) {
-	pool := eventsTestDB(t)
-	accounts := newTestInstallationsStore(t, pool, testSigningSecret)
-	ctx := context.Background()
-	_, orgA := newTestUserHome(t, accounts.AccountsStore)
-	_, orgB := newTestUserHome(t, accounts.AccountsStore)
-	for _, org := range []string{orgA, orgB} {
-		if err := accounts.ConnectGitHubInstallation(ctx, &domain.OrgGitHubInstallation{OrgID: org, InstallationID: 8, AccountLogin: "carol", AccountType: "User", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-1"}}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	renewal := func(access, next string, err error) (func(context.Context, string) (string, string, error), *string) {
-		var handed string
-		return func(_ context.Context, kept string) (string, string, error) {
-			handed = kept
-			return access, next, err
-		}, &handed
-	}
-
-	// With none kept the renewal is handed none, and what it refuses is the answer.
-	refused := errors.New("no authorisation")
-	renew, handed := renewal("", "", refused)
-	if access, err := accounts.RenewGitHubUserToken(ctx, orgA, 8, renew); !errors.Is(err, refused) || access != "" || *handed != "" {
-		t.Fatalf("with none kept: got = %q, %v after handing %q, want the renewal's refusal of an empty one", access, err, *handed)
-	}
-	if err := accounts.KeepGitHubUserAuthorization(ctx, orgA, 8, ""); err == nil {
-		t.Fatal("an empty authorisation was kept")
-	}
-	if err := accounts.KeepGitHubUserAuthorization(ctx, orgA, 8, "ghr_first"); err != nil {
-		t.Fatalf("keep: %v", err)
-	}
-	renew, handed = renewal("ghu_access", "ghr_second", nil)
-	if access, err := accounts.RenewGitHubUserToken(ctx, orgA, 8, renew); err != nil || access != "ghu_access" || *handed != "ghr_first" {
-		t.Fatalf("renew: got = %q, %v after handing %q, want the access token for the one kept", access, err, *handed)
-	}
-	// A renewal that fails leaves the one it was handed in place, and one that answers nothing
-	// to keep is a failure too.
-	renew, handed = renewal("", "ghr_lost", refused)
-	if _, err := accounts.RenewGitHubUserToken(ctx, orgA, 8, renew); !errors.Is(err, refused) || *handed != "ghr_second" {
-		t.Fatalf("a failed renewal: got = %v after handing %q, want the one the last renewal left", err, *handed)
-	}
-	renew, _ = renewal("ghu_access", "", nil)
-	if _, err := accounts.RenewGitHubUserToken(ctx, orgA, 8, renew); err == nil {
-		t.Fatal("a renewal that answered nothing to keep went through")
-	}
-	renew, handed = renewal("ghu_access", "ghr_third", nil)
-	if _, err := accounts.RenewGitHubUserToken(ctx, orgA, 8, renew); err != nil || *handed != "ghr_second" {
-		t.Fatalf("after failed renewals: got = %v after handing %q, want the one still kept", err, *handed)
-	}
-	// Another org's record of the same installation holds its own, and connecting again keeps it.
-	renew, handed = renewal("", "", refused)
-	if _, err := accounts.RenewGitHubUserToken(ctx, orgB, 8, renew); !errors.Is(err, refused) || *handed != "" {
-		t.Fatalf("the other org: handed %q, %v, want none", *handed, err)
-	}
-	if err := accounts.ConnectGitHubInstallation(ctx, &domain.OrgGitHubInstallation{OrgID: orgA, InstallationID: 8, AccountLogin: "carol", AccountType: "User", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-1"}}); err != nil {
+	if _, err := pool.pool.Exec(ctx, `UPDATE github_install_states SET expires_at = now() - interval '1 second'`); err != nil {
 		t.Fatal(err)
 	}
-	renew, handed = renewal("ghu_access", "ghr_fourth", nil)
-	if _, err := accounts.RenewGitHubUserToken(ctx, orgA, 8, renew); err != nil || *handed != "ghr_third" {
-		t.Fatalf("after connecting again: handed %q, %v, want the one kept", *handed, err)
+	if _, err := accounts.TakeGitHubInstallState(ctx, expired, alice); !errors.Is(err, ErrGitHubInstallStateInvalid) {
+		t.Fatalf("an expired state: got = %v, want = %v", err, ErrGitHubInstallStateInvalid)
 	}
-	for name, err := range map[string]error{
-		"keep on an installation the org did not connect":  accounts.KeepGitHubUserAuthorization(ctx, orgA, 99, "ghr_x"),
-		"renew on an installation the org did not connect": func() error { _, err := accounts.RenewGitHubUserToken(ctx, orgA, 99, renew); return err }(),
-	} {
-		if !errors.Is(err, ErrGitHubInstallationNotFound) {
-			t.Errorf("%s: got = %v, want = %v", name, err, ErrGitHubInstallationNotFound)
-		}
-	}
-}
-
-// GitHub replaces a refresh token the moment it reads it, so a caller that goes away while it is
-// being renewed must not leave the spent one stored.
-func TestARenewalIsKeptThoughTheRequestThatAskedForItWasCancelled(t *testing.T) {
-	pool := eventsTestDB(t)
-	accounts := newTestInstallationsStore(t, pool, testSigningSecret)
-	_, org := newTestUserHome(t, accounts.AccountsStore)
-	background := context.Background()
-	if err := accounts.ConnectGitHubInstallation(background, &domain.OrgGitHubInstallation{OrgID: org, InstallationID: 8, AccountLogin: "carol", AccountType: "User", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-1"}}); err != nil {
+	if _, _, err := accounts.IssueGitHubInstallState(ctx, org, alice, "/settings", 15*time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	if err := accounts.KeepGitHubUserAuthorization(background, org, 8, "ghr_first"); err != nil {
-		t.Fatal(err)
+	var left int
+	if err := pool.pool.QueryRow(ctx, `SELECT count(*) FROM github_install_states WHERE expires_at <= now()`).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("expired states left after an issue: %d, %v, want none", left, err)
 	}
-	request, disconnect := context.WithCancel(background)
-	access, err := accounts.RenewGitHubUserToken(request, org, 8, func(ctx context.Context, kept string) (string, string, error) {
-		disconnect()
-		if ctx.Err() != nil {
-			t.Error("the renewal was cancelled with the request")
-		}
-		return "ghu_access", "ghr_second", nil
-	})
-	if err != nil || access != "ghu_access" {
-		t.Fatalf("a renewal whose request was cancelled while GitHub answered: got = %q, %v, want it kept and answered", access, err)
+	if _, _, err := accounts.IssueGitHubInstallState(ctx, "org-nowhere", alice, "/settings", 15*time.Minute); !errors.Is(err, ErrOrgNotFound) {
+		t.Fatalf("issue for an org that does not exist: got = %v, want = %v", err, ErrOrgNotFound)
 	}
-	var handed string
-	if _, err := accounts.RenewGitHubUserToken(background, org, 8, func(_ context.Context, kept string) (string, string, error) {
-		handed = kept
-		return "ghu_access", "ghr_third", nil
-	}); err != nil || handed != "ghr_second" {
-		t.Fatalf("the next renewal was handed %q, %v, want the one GitHub issued while the request was cancelled", handed, err)
-	}
-}
-
-// What is kept acts as a person on GitHub, so the table holds it sealed: bound to its row, and
-// unreadable under another secret.
-func TestThePersonsAuthorisationIsStoredSealed(t *testing.T) {
-	pool := eventsTestDB(t)
-	accounts := newTestInstallationsStore(t, pool, testSigningSecret)
-	ctx := context.Background()
-	_, org := newTestUserHome(t, accounts.AccountsStore)
-	for _, id := range []int64{8, 9} {
-		if err := accounts.ConnectGitHubInstallation(ctx, &domain.OrgGitHubInstallation{OrgID: org, InstallationID: id, AccountLogin: fmt.Sprintf("carol-%d", id), AccountType: "User", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-1"}}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	stored := func(id int64) []byte {
-		t.Helper()
-		var kept []byte
-		if err := pool.pool.QueryRow(ctx, `SELECT user_authorization FROM org_github_installations WHERE org_id = $1 AND installation_id = $2`, org, id).Scan(&kept); err != nil {
-			t.Fatal(err)
-		}
-		return kept
-	}
-	if stored(8) != nil {
-		t.Fatalf("an installation with none kept stores %x, want NULL", stored(8))
-	}
-	const secret = "refresh:ghr_the_persons_own"
-	if err := accounts.KeepGitHubUserAuthorization(ctx, org, 8, secret); err != nil {
-		t.Fatal(err)
-	}
-	first := stored(8)
-	if bytes.Contains(first, []byte("ghr_")) || len(first) <= len(secret) {
-		t.Fatalf("the column holds %q, want it sealed", first)
-	}
-	if err := accounts.KeepGitHubUserAuthorization(ctx, org, 8, secret); err != nil || bytes.Equal(stored(8), first) {
-		t.Fatalf("kept twice: %v, stored the same bytes %v, want a fresh nonce each time", err, bytes.Equal(stored(8), first))
-	}
-	renew := func(_ context.Context, kept string) (string, string, error) { return "ghu_access", kept, nil }
-	// Moved to another row, or read under another secret, it does not open.
-	if _, err := pool.pool.Exec(ctx, `UPDATE org_github_installations SET user_authorization = $2 WHERE org_id = $1 AND installation_id = 9`, org, stored(8)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := accounts.RenewGitHubUserToken(ctx, org, 9, renew); !errors.Is(err, ErrGitHubAuthorizationUnreadable) {
-		t.Fatalf("an authorisation copied to another row: got = %v, want = %v", err, ErrGitHubAuthorizationUnreadable)
-	}
-	rotated := newTestInstallationsStore(t, pool, "another signing secret, as after a rotation")
-	if _, err := rotated.RenewGitHubUserToken(ctx, org, 8, renew); !errors.Is(err, ErrGitHubAuthorizationUnreadable) {
-		t.Fatalf("under another secret: got = %v, want = %v", err, ErrGitHubAuthorizationUnreadable)
-	}
-	if access, err := accounts.RenewGitHubUserToken(ctx, org, 8, renew); err != nil || access != "ghu_access" {
-		t.Fatalf("under its own secret: got = %q, %v, want it opened", access, err)
-	}
-	// Connecting again under the new secret replaces what could not be read.
-	if err := rotated.KeepGitHubUserAuthorization(ctx, org, 8, secret); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := rotated.RenewGitHubUserToken(ctx, org, 8, renew); err != nil {
-		t.Fatalf("after keeping again under the new secret: %v", err)
-	}
-	var clear bool
-	if err := pool.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'org_github_installations' AND column_name = 'user_refresh_token')`).Scan(&clear); err != nil || clear {
-		t.Fatalf("the column that held refresh tokens in the clear exists = %v, %v, want it dropped", clear, err)
-	}
-	if _, err := NewGitHubInstallationsStore(NewAccountsStore(pool), ""); err == nil {
-		t.Fatal("a store was built with no secret to seal under")
+	var personal bool
+	if err := pool.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'org_github_installations' AND column_name IN ('user_refresh_token', 'user_authorization'))`).Scan(&personal); err != nil || personal {
+		t.Fatalf("a column that kept a person's GitHub authorisation exists = %v, %v, want both dropped", personal, err)
 	}
 }
 

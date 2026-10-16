@@ -123,7 +123,6 @@ services:
       # The git host's secrets, which the rendered settings name (localdev/lib/auth.sh): the
       # GitHub App's two with GIT_HOST_PROVIDER=github, the local git server's password with local.
       # Empty and unread otherwise.
-      HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET:-}
       HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY:-}
       HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD: ${HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD:-}
       # With CONTAINER_REGISTRY_PROVIDER=gcp in .env, the control service's own Google identity,
@@ -156,7 +155,6 @@ services:
       # The git host's secrets, which the rendered settings name (localdev/lib/auth.sh): the
       # GitHub App's two with GIT_HOST_PROVIDER=github, the local git server's password with local.
       # Empty and unread otherwise.
-      HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET:-}
       HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY:-}
       HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD: ${HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD:-}
     ports:

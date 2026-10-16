@@ -77,7 +77,7 @@ lib_git_host_provider() {
 }
 case "${HL_GIT_HOST_PROVIDER}" in
   github)
-    for lib_auth_key in GIT_HOST_GITHUB_APP_ID GIT_HOST_GITHUB_APP_SLUG GIT_HOST_GITHUB_APP_CLIENT_ID GIT_HOST_GITHUB_APP_CLIENT_SECRET GIT_HOST_GITHUB_APP_PRIVATE_KEY; do
+    for lib_auth_key in GIT_HOST_GITHUB_APP_ID GIT_HOST_GITHUB_APP_SLUG GIT_HOST_GITHUB_APP_PRIVATE_KEY; do
       if [[ -z "$(lib_env_value "${lib_auth_key}")" ]]; then
         echo "auth: .env sets GIT_HOST_PROVIDER=github and not ${lib_auth_key} (.env.example says what it is)" >&2
         return 1 2>/dev/null || exit 1
@@ -86,10 +86,8 @@ case "${HL_GIT_HOST_PROVIDER}" in
     unset lib_auth_key
     HL_GIT_HOST_GITHUB_APP_ID="$(lib_env_value GIT_HOST_GITHUB_APP_ID)"
     HL_GIT_HOST_GITHUB_APP_SLUG="$(lib_env_value GIT_HOST_GITHUB_APP_SLUG)"
-    HL_GIT_HOST_GITHUB_APP_CLIENT_ID="$(lib_env_value GIT_HOST_GITHUB_APP_CLIENT_ID)"
-    HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET="$(lib_env_value GIT_HOST_GITHUB_APP_CLIENT_SECRET)"
     HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY="$(lib_env_value GIT_HOST_GITHUB_APP_PRIVATE_KEY)"
-    export HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY
+    export HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY
     ;;
   local)
     if [[ ! -s "${LIB_AUTH_REPO}/localdev/.run/git-password" ]]; then
@@ -206,8 +204,8 @@ lib_render_settings() {
   case "$(lib_git_host_provider)" in
     github)
       # The values are JSON strings, which YAML reads as they are.
-      printf '\ngit_host:\n  provider: github\n  github:\n    app_id: %d\n    app_slug: "%s"\n    client_id: "%s"\n    client_secret: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET}\n    private_key: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY}\n' \
-        "${HL_GIT_HOST_GITHUB_APP_ID}" "${HL_GIT_HOST_GITHUB_APP_SLUG}" "${HL_GIT_HOST_GITHUB_APP_CLIENT_ID}" >> "${output}"
+      printf '\ngit_host:\n  provider: github\n  github:\n    app_id: %d\n    app_slug: "%s"\n    private_key: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY}\n' \
+        "${HL_GIT_HOST_GITHUB_APP_ID}" "${HL_GIT_HOST_GITHUB_APP_SLUG}" >> "${output}"
       ;;
     local)
       printf '\ngit_host:\n  provider: plain\n  plain:\n    base_url: http://%s:%s\n    allow_http: true\n    username: %s\n    password: ${HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD}\n' \

@@ -1368,17 +1368,27 @@ END $$;
 -- says at connect. Only GitHub knows it of a row from before it was kept, so that row holds ''
 -- until the account is connected again.
 ALTER TABLE org_github_installations ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT '';
--- On a person's own account GitHub creates a repository for that person alone, so the
--- authorisation they connected it with is kept, sealed by the store under a key derived from the
--- deployment's signing secret, and replaced at each use. NULL on an organisation, and on a
--- personal account connected by staff or before it was kept sealed: user_refresh_token held it
--- in the clear, and its owner connects the account again.
+-- The platform acts on GitHub as its App alone: no person's GitHub authorisation is kept.
 ALTER TABLE org_github_installations DROP COLUMN IF EXISTS user_refresh_token;
-ALTER TABLE org_github_installations ADD COLUMN IF NOT EXISTS user_authorization BYTEA;
+ALTER TABLE org_github_installations DROP COLUMN IF EXISTS user_authorization;
 -- The account a new repository is created on when a request names none, for an org that
 -- connected several: at most one per org, and gone with its row when it is disconnected.
 ALTER TABLE org_github_installations ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT false;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_org_github_installations_default ON org_github_installations(org_id) WHERE is_default;
+-- An install of the GitHub App a person started for an org: GitHub hands the state back with the
+-- installation it made or changed, and the connect takes the row once. Only the state's hash is
+-- kept, so the table does not hold what would finish someone's install. return_to is the page of
+-- the UI the person left from.
+CREATE TABLE IF NOT EXISTS github_install_states (
+    state_hash  BYTEA       PRIMARY KEY,
+    org_id      TEXT        NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+    actor_kind  TEXT        NOT NULL,
+    actor_id    TEXT        NOT NULL,
+    return_to   TEXT        NOT NULL,
+    issued_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at  TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_github_install_states_expires ON github_install_states(expires_at);
 -- The code a platform experiment works on, owner/name on GitHub, and the image its hosted agents
 -- and coordinator run. An empty image is the platform's own (config agents.image). Both are
 -- fixed at creation.

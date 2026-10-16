@@ -404,12 +404,8 @@ type GitHostConfig struct {
 type GitHubConfig struct {
 	AppID   int64  `yaml:"app_id"`
 	AppSlug string `yaml:"app_slug"`
-	// ClientID and ClientSecret are the App's own OAuth pair. They prove, once per attach, that
-	// the person attaching a repository can push to it.
-	ClientID     string `yaml:"client_id"`
-	ClientSecret string `yaml:"client_secret"`
-	// PrivateKey is the PEM GitHub issued for the App. ClientSecret and PrivateKey are secrets of
-	// the deployment: the settings file names the environment variables that hold them.
+	// PrivateKey is the PEM GitHub issued for the App, a secret of the deployment: the settings
+	// file names the environment variable that holds it.
 	PrivateKey string `yaml:"private_key"`
 }
 

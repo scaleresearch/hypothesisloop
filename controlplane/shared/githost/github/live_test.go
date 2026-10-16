@@ -28,11 +28,9 @@ import (
 //	TEST_GIT_HOST_GITHUB_REPOSITORY     owner/name of a sandbox repository that installation
 //	                                    covers, which the push check and the first-commit check
 //	                                    may each make a branch in and delete again
-//	TEST_GIT_HOST_GITHUB_CREATE_INSTALLATION  an installation on an organisation, for the
-//	                                    creation check, which also needs TEST_GIT_HOST_GITHUB_CREATE=1
-//
-// Connecting an installation needs a person's authorisation code from a browser, so the code
-// exchange, GET /user/installations with a person's token and its revocation have no check here.
+//	TEST_GIT_HOST_GITHUB_CREATE_INSTALLATION  an installation on an organisation or a personal
+//	                                    account, for the creation check, which also needs
+//	                                    TEST_GIT_HOST_GITHUB_CREATE=1
 func liveClient(t *testing.T) *Client {
 	t.Helper()
 	appID, keyFile := os.Getenv("TEST_GIT_HOST_GITHUB_APP_ID"), os.Getenv("TEST_GIT_HOST_GITHUB_KEY_FILE")
@@ -47,7 +45,7 @@ func liveClient(t *testing.T) *Client {
 	if err != nil {
 		t.Fatalf("read the key file: %v", err)
 	}
-	client, err := New(config.GitHubConfig{AppID: id, AppSlug: "live", ClientID: "unused", ClientSecret: "unused", PrivateKey: string(key)})
+	client, err := New(config.GitHubConfig{AppID: id, AppSlug: "live", PrivateKey: string(key)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,24 +207,19 @@ func liveGit(t *testing.T, dir, token string, args ...string) (string, error) {
 // A read token clones and cannot push. A write token pushes a branch, and the branch is deleted.
 // Creating leaves a repository behind that the App cannot delete, so it runs only when asked to
 // by name: TEST_GIT_HOST_GITHUB_CREATE=1, on the installation
-// TEST_GIT_HOST_GITHUB_CREATE_INSTALLATION names, which is on an organisation and grants
-// the creation of repositories. On a person's own account their own token creates, which only
-// their browser's pass through GitHub yields, so no live check covers it.
+// TEST_GIT_HOST_GITHUB_CREATE_INSTALLATION names, on an organisation or a person's own account,
+// which grants the creation of repositories.
 func TestLiveARepositoryIsCreatedAndCoveredByItsInstallation(t *testing.T) {
 	if os.Getenv("TEST_GIT_HOST_GITHUB_CREATE") != "1" {
 		t.Skip("TEST_GIT_HOST_GITHUB_CREATE is not 1: this creates a repository on an organisation and cannot delete it")
 	}
 	client := liveClient(t)
 	installation := liveID(t, "TEST_GIT_HOST_GITHUB_CREATE_INSTALLATION")
-	target, err := client.Installation(t.Context(), installation)
-	if err != nil {
+	if _, err := client.Installation(t.Context(), installation); err != nil {
 		t.Fatalf("Installation(%d) = %v", installation, err)
 	}
-	if target.AccountType != AccountOrganization {
-		t.Skipf("TEST_GIT_HOST_GITHUB_CREATE_INSTALLATION is on %s, a personal account, where a repository is created with its owner's own token: name an installation on an organisation", target.AccountLogin)
-	}
 	name := "hl-live-create-" + strconv.FormatInt(client.now().Unix(), 10)
-	created, err := client.CreateRepository(t.Context(), installation, "", name, "Created by the platform's live check. Safe to delete.", map[string]string{"README.md": "Created by the platform's live check. Safe to delete.\n"})
+	created, err := client.CreateRepository(t.Context(), installation, name, "Created by the platform's live check. Safe to delete.", map[string]string{"README.md": "Created by the platform's live check. Safe to delete.\n"})
 	if err != nil {
 		t.Fatalf("CreateRepository(%s) = %v", name, err)
 	}

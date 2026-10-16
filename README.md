@@ -159,12 +159,15 @@ it cleans up what it created.
 Every experiment keeps its code in git. A deployment's settings name its git host
 (`git_host.provider`); local development takes it from `GIT_HOST_PROVIDER` in `.env`:
 
-- `github`: the platform's GitHub App. Settings, then GitHub, connects an installation of the App
-  to an org. An owner installs the App on a GitHub account and confirms on GitHub who they are.
-  An experiment then names a repository the installation covers, or the platform creates a
-  private one on that account. GitHub returns to `<ui origin>/settings/repository`, so the App's
-  callback URL and setup URL must be that address. The page reads the App's details from
-  `GET /github/app`.
+- `github`: the platform's GitHub App. An owner of an org presses Install GitHub App (Settings,
+  GitHub, or the new-experiment form), which opens GitHub's install page in a new tab, installs
+  the App on their own account or a GitHub organisation, and is connected: the tab GitHub returns
+  to tells the first one and closes. An experiment then names a repository the installation
+  covers, or the platform creates a private one on that account. GitHub returns to
+  `<ui origin>/settings/repository`, so the App's setup URL must be that address, with "Redirect
+  on update" on, so that adding repositories returns there too. The page reads the App's details
+  from `GET /github/app`. `hl-admin github connect ORG INSTALLATION_ID` connects one for an
+  operator.
 - `plain` (`local` in `.env`): any git server that serves repositories under one root. A
   repository is created beforehand and named when the experiment is created. `make dev` with
   `GIT_HOST_PROVIDER=local` runs one, and `make git-repository NAME=my-experiment` adds a
@@ -174,25 +177,36 @@ The App's permissions are stated once, in `controlplane/shared/githost/github/ap
 
 | Permission | Level | What needs it |
 |---|---|---|
-| Administration (repository) | write | creating a repository: `POST /orgs/{org}/repos` with an installation token, `POST /user/repos` with the owner's user token |
+| Administration (repository) | write | creating a repository with an installation token: `POST /orgs/{org}/repos` on an organisation, `POST /user/repos` on a personal account |
 | Contents (repository) | write | git clone, fetch and push of agents' branches, reading `.hypothesisloop/` files, the first commit of a created repository (trees, commits, refs) |
 | Metadata (repository) | read | listing the repositories an installation covers, reading a repository's default branch |
-| Members (organisation) | read | checking that the person connecting an organisation administers it |
 
-Nothing else is asked: no pull requests, issues, checks or workflows. Without Workflows (write)
-GitHub refuses a push that changes `.github/workflows`, so agents cannot change what CI runs.
-Users sign in to the App through its own OAuth, which takes no scopes: a user token holds the
-App's permissions as far as that person reaches. An installation that has not granted every
-permission is refused at connect and at each token, `github_permission_missing`, naming the
-missing ones.
+Nothing else is asked: no pull requests, issues, checks, workflows or members. Without Workflows
+(write) GitHub refuses a push that changes `.github/workflows`, so agents cannot change what CI
+runs. The platform acts only as the App and its installations: no person's GitHub token is asked
+for or kept. An installation that has not granted every permission is refused at connect and at
+each token, `github_permission_missing`, naming the missing ones.
+
+Connecting is bound to the person who pressed the button: the API issues a single-use `state`
+for the org, the person and the page they left from (`POST /orgs/{id}/github-install-states`),
+valid for 15 minutes, which the install address carries and GitHub hands back to the setup URL
+with `installation_id`. `POST /github/installations` takes both, and connects the installation
+only when the state is unused, unexpired and the caller's own, and GitHub says the installation
+was made or changed after the state was issued, is not suspended and granted every permission.
+The org's first installation becomes its default for new repositories.
 
 To make the App, fill the `REPLACE-WITH-` values of the manifest (the UI origin and a name),
 post it from a page as GitHub's manifest flow describes
 (<https://docs.github.com/apps/sharing-github-apps/registering-a-github-app-from-a-manifest>),
 and convert the code GitHub returns with `POST /app-manifests/{code}/conversions`, whose answer
-holds the App's id, slug, client id, client secret and private key. An App made by hand takes the
-same permissions from the table. Enable "Request user authorization (OAuth) during
-installation"; webhooks stay off.
+holds the App's id, slug and private key. An App made by hand takes the same permissions from
+the table, and these settings:
+
+- Setup URL: `<ui origin>/settings/repository`, with "Redirect on update" checked.
+- "Request user authorization (OAuth) during installation": off. No callback URL is needed.
+- Webhooks: off.
+- Where can this App be installed: any account, so people install it on their own account or an
+  organisation.
 
 The login page offers the providers `NEXT_PUBLIC_SIGN_IN_PROVIDERS` lists, out of the ones
 `controlplane/ui/src/lib/auth.ts` knows: `github`, `google` and `apple`. Each must also be

@@ -12,29 +12,27 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // The reasons a client tells a refusal about GitHub apart by.
 const (
-	ReasonCodeRejected                    = "code_rejected"
-	ReasonInstallationNotConnected        = "installation_not_connected"
-	ReasonInstallationGone                = "installation_gone"
-	ReasonPermissionMissing               = "github_permission_missing"
-	ReasonInvalidRepository               = "invalid_repository"
-	ReasonRepositoryNotReachable          = "repository_not_reachable"
-	ReasonGitHubNotConnected              = "github_not_connected"
-	ReasonRepositoryNotCreated            = "repository_not_created"
-	ReasonRepositoryExists                = "repository_exists"
-	ReasonRepositoryCreationNotPermitted  = "repository_creation_not_permitted"
-	ReasonRepositoryAuthorizationRequired = "repository_authorization_required"
-	ReasonRepositoryNotAdded              = "repository_not_added"
-	ReasonRepositoryAccountRequired       = "repository_account_required"
-	ReasonNoExperimentFile                = "no_experiment_file"
-	ReasonUnreadableFile                  = "unreadable_file"
-	ReasonUnavailable                     = "unavailable"
-	ReasonGitHubFailed                    = "github_failed"
+	ReasonInstallationNotConnected       = "installation_not_connected"
+	ReasonInstallationGone               = "installation_gone"
+	ReasonInstallationSuspended          = "installation_suspended"
+	ReasonPermissionMissing              = "github_permission_missing"
+	ReasonInvalidRepository              = "invalid_repository"
+	ReasonRepositoryNotReachable         = "repository_not_reachable"
+	ReasonGitHubNotConnected             = "github_not_connected"
+	ReasonRepositoryNotCreated           = "repository_not_created"
+	ReasonRepositoryExists               = "repository_exists"
+	ReasonRepositoryCreationNotPermitted = "repository_creation_not_permitted"
+	ReasonRepositoryNotAdded             = "repository_not_added"
+	ReasonRepositoryAccountRequired      = "repository_account_required"
+	ReasonNoExperimentFile               = "no_experiment_file"
+	ReasonUnreadableFile                 = "unreadable_file"
+	ReasonUnavailable                    = "unavailable"
+	ReasonGitHubFailed                   = "github_failed"
 )
 
 // ErrNotConnected reports a repository whose owner is no GitHub account the org connected.
@@ -43,17 +41,27 @@ var ErrNotConnected = errors.New("the org has connected no installation on that 
 // ErrNoInstallation reports an org that connected no GitHub account at all.
 var ErrNoInstallation = errors.New("the org has connected no GitHub account")
 
-// InstallationGoneError is ErrInstallationGone for the installation an org connected on Account.
+// InstallationGoneError is ErrInstallationGone for the installation an org connected on Account,
+// and ErrInstallationSuspended with Suspended.
 type InstallationGoneError struct {
 	Account      string
 	Installation int64
+	Suspended    bool
 }
 
 func (e *InstallationGoneError) Error() string {
-	return fmt.Sprintf("github: installation %d on %s was removed or suspended", e.Installation, e.Account)
+	if e.Suspended {
+		return fmt.Sprintf("github: installation %d on %s was suspended", e.Installation, e.Account)
+	}
+	return fmt.Sprintf("github: installation %d on %s was removed", e.Installation, e.Account)
 }
 
-func (e *InstallationGoneError) Unwrap() error { return ErrInstallationGone }
+func (e *InstallationGoneError) Unwrap() error {
+	if e.Suspended {
+		return ErrInstallationSuspended
+	}
+	return ErrInstallationGone
+}
 
 // Refusal turns what GitHub refused into what the caller is told. gone is the status of a
 // repository the org's installations do not reach: 422 where a request names it, 409 where a
@@ -83,15 +91,10 @@ func Refusal(logger *zap.Logger, op string, err error, gone int) error {
 	case errors.As(err, &notAsAsked):
 		logger.Error("github created a repository that is not the private one asked for", zap.String("operation", op), zap.Error(err))
 		return api.Refuse(http.StatusBadGateway, ReasonRepositoryNotCreated, "GitHub created the repository "+notAsAsked.Repository+", which is not the private repository asked for on the GitHub account the org connected, so nothing else was created. It is left on GitHub: its owner deletes it there, or makes it private and adds it to the installation, and the request names it in repository on the next try")
-	case errors.Is(err, db.ErrGitHubAuthorizationUnreadable):
-		logger.Error("a kept github authorisation cannot be read: the signing secret was replaced since the account was connected", zap.String("operation", op))
-		return authorizationRequired()
 	case errors.Is(err, ErrInvalidRepository):
 		return invalid(ReasonInvalidRepository, "repository must be owner/name, as in the repository's address on GitHub")
 	case errors.Is(err, ErrNoInstallation):
-		return invalid(ReasonGitHubNotConnected, "a platform experiment keeps its code in a GitHub repository, and the org has connected no GitHub account: an owner of the org connects one with POST /orgs/{id}/github-installations (Settings, GitHub), and the experiment then names a repository there or the platform creates one")
-	case errors.Is(err, ErrUserAuthorization):
-		return authorizationRequired()
+		return invalid(ReasonGitHubNotConnected, "a platform experiment keeps its code in a GitHub repository, and the org has connected no GitHub account: an owner of the org installs the GitHub App on a GitHub account in Settings, GitHub, and the experiment then names a repository there or the platform creates one")
 	case errors.As(err, &notPermitted):
 		accepted := ""
 		if notPermitted.Accepted != "" {
@@ -103,16 +106,18 @@ func Refusal(logger *zap.Logger, op string, err error, gone int) error {
 	case errors.As(err, &failed):
 		logger.Error("github refused to create a repository", zap.String("operation", op), zap.Error(err))
 		return api.Refuse(http.StatusBadGateway, ReasonRepositoryNotCreated, "GitHub did not create the repository, so nothing else was created. It answered "+strconv.Itoa(failed.Status)+": "+strconv.Quote(failed.Message)+". Name a repository the installation covers, or try again")
-	case errors.Is(err, ErrCodeRejected):
-		return invalid(ReasonCodeRejected, "GitHub did not accept the code: it works once, for ten minutes, and with the redirect_uri it was issued to, so authorise again and send the new one")
 	case errors.Is(err, ErrNotConnected):
-		return api.Refuse(gone, ReasonInstallationNotConnected, "the org has connected no GitHub installation on that GitHub account, the one that owns the repository or the one a new repository was asked on: an owner of the org connects it with POST /orgs/{id}/github-installations")
+		return api.Refuse(gone, ReasonInstallationNotConnected, "the org has connected no GitHub installation on that GitHub account, the one that owns the repository or the one a new repository was asked on: an owner of the org installs the GitHub App on it in Settings, GitHub")
 	case errors.Is(err, ErrRepositoryNotInstalled):
 		return api.Refuse(gone, ReasonRepositoryNotReachable, "the GitHub installation the org connected does not cover that repository: its owner adds it to the installation on GitHub")
+	case errors.As(err, &installationGone) && installationGone.Suspended:
+		return api.Refuse(gone, ReasonInstallationSuspended, "the GitHub App is suspended on "+installationGone.Account+" (installation "+strconv.FormatInt(installationGone.Installation, 10)+"): its owner unsuspends it on GitHub, in the account's Settings, Applications")
 	case errors.As(err, &installationGone):
-		return api.Refuse(gone, ReasonInstallationGone, "the GitHub App is no longer installed on "+installationGone.Account+": GitHub answers that installation "+strconv.FormatInt(installationGone.Installation, 10)+" was removed or suspended. The owner of "+installationGone.Account+" installs the App there again (install_url of GET /github/app) and an owner of the org connects it in Settings, GitHub, or the experiment keeps its code on another account the org connected")
+		return api.Refuse(gone, ReasonInstallationGone, "the GitHub App is no longer installed on "+installationGone.Account+" (installation "+strconv.FormatInt(installationGone.Installation, 10)+"): its owner installs the App again from Settings, GitHub")
+	case errors.Is(err, ErrInstallationSuspended):
+		return api.Refuse(gone, ReasonInstallationSuspended, "the GitHub App installation is suspended: its owner unsuspends it on GitHub, in the account's Settings, Applications")
 	case errors.Is(err, ErrInstallationGone):
-		return api.Refuse(gone, ReasonInstallationGone, "the GitHub App installation was removed or suspended on GitHub: its owner installs the App again and an owner of the org connects it")
+		return api.Refuse(gone, ReasonInstallationGone, "the GitHub App installation was removed on GitHub: its owner installs the App again from Settings, GitHub")
 	case errors.As(err, &missing):
 		return api.Refuse(gone, ReasonPermissionMissing, "github_permission_missing: "+strings.Join(missing.Missing, ", ")+". The GitHub App installation has not granted that, which the platform needs: its owner accepts the App's permissions on GitHub (the account's Settings, Applications, Configure)")
 	case errors.Is(err, ErrPermissionNotGranted):
@@ -139,8 +144,4 @@ func Refusal(logger *zap.Logger, op string, err error, gone int) error {
 	default:
 		return auth.Internal(logger, "github request failed", err, zap.String("operation", op))
 	}
-}
-
-func authorizationRequired() *api.Refusal {
-	return invalid(ReasonRepositoryAuthorizationRequired, "the GitHub account the repository was asked on is a personal account, where GitHub creates a repository for its owner alone, and the platform holds no authorisation of that owner that GitHub still takes: an owner of the org disconnects the account in Settings, GitHub, and its owner connects the account again there, or creates a private repository on it, adds it to the installation when that covers selected repositories only, and the request names it in repository")
 }

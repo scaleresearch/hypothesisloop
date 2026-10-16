@@ -173,10 +173,9 @@ func TestTheGitHostOfTheValuesReachesTheConfig(t *testing.T) {
 			t.Errorf("%s: in-cluster git host is %s, want the values' plain host and the Secret's password", deployment, plain.GitHost.Provider)
 		}
 		cfg := loadRendered(t, release, charttest.External, deployment)
-		want := config.GitHubConfig{AppID: 4242, AppSlug: "made-up-app", ClientID: "Iv23made-up",
-			ClientSecret: charttest.Secret["HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET"], PrivateKey: charttest.Secret["HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY"]}
+		want := config.GitHubConfig{AppID: 4242, AppSlug: "made-up-app", PrivateKey: charttest.Secret["HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY"]}
 		if got := cfg.GitHost; got.Provider != config.GitHostProviderGitHub || got.Plain != nil || got.GitHub == nil || *got.GitHub != want {
-			t.Errorf("%s: the git host is %q, or its App or secrets are not the values' and the Secret's", deployment, got.Provider)
+			t.Errorf("%s: the git host is %q, or its App or key are not the values' and the Secret's", deployment, got.Provider)
 		}
 	}
 }
@@ -244,7 +243,7 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		"cloud-agent with no cluster": {charttest.External, `cloudAgent.clusterName=""`, "cloudAgent.clusterName is required"},
 		"cloud-agent with no org":     {charttest.External, `cloudAgent.org=""`, "cloudAgent.org is required"},
 		"a cluster name with a shell": {charttest.External, `cloudAgent.clusterName="a; rm"`, "/cloudAgent/clusterName"},
-		"an App with no client id":    {charttest.External, `gitHost.github.clientId=""`, "gitHost.github.clientId is required"},
+		"an App with no slug":         {charttest.External, `gitHost.github.appSlug=""`, "gitHost.github.appSlug is required"},
 		"an App with no id":           {charttest.External, `gitHost.github.appId=0`, "gitHost.github.appId is required"},
 		"no git host":                 {charttest.External, `gitHost.provider=""`, "gitHost/provider"},
 		"a git host nobody wrote":     {charttest.External, `gitHost.provider="gitlab"`, "gitHost/provider"},

@@ -50,6 +50,8 @@ var (
 	ErrAppCredentials = errors.New("github refused the App's own credentials")
 	// ErrInstallationGone reports an installation that was removed or suspended by its owner.
 	ErrInstallationGone = errors.New("the GitHub App installation was removed or suspended")
+	// ErrInstallationSuspended is ErrInstallationGone for an installation its owner suspended.
+	ErrInstallationSuspended = fmt.Errorf("the GitHub App installation was suspended: %w", ErrInstallationGone)
 	// ErrRepositoryNotInstalled reports a repository the installation does not cover: it was
 	// never selected, was taken out of the selection, or does not exist.
 	ErrRepositoryNotInstalled = errors.New("the GitHub App is not installed on that repository")
@@ -61,9 +63,6 @@ var (
 	ErrNotAFile = errors.New("the path in the repository is not a file")
 	// ErrFileTooLarge reports a file over MaxFileBytes.
 	ErrFileTooLarge = errors.New("the file is larger than the platform reads from a repository")
-	// ErrCodeRejected reports a user authorisation code GitHub did not accept: used, expired or
-	// made up.
-	ErrCodeRejected = errors.New("github did not accept the authorisation code")
 	// ErrPermissionNotGranted reports an installation that has not granted the access the App
 	// asks for: its owner has yet to accept the App's permissions.
 	ErrPermissionNotGranted = errors.New("the installation has not granted the App the access it asks for")
@@ -73,9 +72,6 @@ var (
 	// repository on its account: it has not granted the permission, or the account forbids it.
 	// CreationNotPermittedError carries it.
 	ErrCannotCreateRepositories = errors.New("the installation does not let the GitHub App create repositories")
-	// ErrUserAuthorization reports that the platform holds no authorisation of the App by the
-	// person a call acts for, or one GitHub no longer takes: it ran out or was revoked.
-	ErrUserAuthorization = errors.New("the person's authorisation of the GitHub App is missing, expired or revoked")
 	// ErrRepositoryExists reports that the account already holds a repository of that name.
 	ErrRepositoryExists = errors.New("the GitHub account already has a repository of that name")
 	// ErrNotFresh reports a repository that holds more than the one commit GitHub makes for a
@@ -83,9 +79,9 @@ var (
 	ErrNotFresh = errors.New("the repository holds commits beyond the one GitHub made at its creation")
 )
 
-// NotCoveredError reports a repository that was created on a person's own account and that the
-// installation there, which covers selected repositories only, was not made to cover. It is left
-// on the account for its owner to add to the installation.
+// NotCoveredError reports a repository that was created and that the installation, which covers
+// selected repositories only, does not cover. It is left on the account for its owner to add to
+// the installation.
 type NotCoveredError struct {
 	Repository string
 	Cause      error
@@ -179,8 +175,7 @@ var manifest []byte
 
 // Permissions is every permission the App asks an installation for, by name, as
 // app-manifest.json, the one statement of them, declares: administration (write) creates a
-// repository, contents (write) reads, commits and pushes, metadata (read) lists repositories, and
-// members (read), an organisation permission, shows who administers an organisation.
+// repository, contents (write) reads, commits and pushes, metadata (read) lists repositories.
 var Permissions = func() map[string]string {
 	var app struct {
 		Permissions map[string]string `json:"default_permissions"`
@@ -191,18 +186,10 @@ var Permissions = func() map[string]string {
 	return app.Permissions
 }()
 
-// organisationPermissions are those of Permissions an installation on a person's own account
-// has nothing to grant.
-var organisationPermissions = map[string]bool{"members": true}
-
-// missingPermissions is what of Permissions an installation on an account of that type has not
-// granted, each as name:level.
-func missingPermissions(accountType string, granted map[string]string) []string {
+// missingPermissions is what of Permissions an installation has not granted, each as name:level.
+func missingPermissions(granted map[string]string) []string {
 	missing := []string{}
 	for _, name := range slices.Sorted(maps.Keys(Permissions)) {
-		if accountType == AccountUser && organisationPermissions[name] {
-			continue
-		}
 		if permissionLevels[granted[name]] < permissionLevels[Permissions[name]] {
 			missing = append(missing, name+":"+Permissions[name])
 		}
@@ -230,25 +217,12 @@ type Installation struct {
 	ID           int64  `json:"installation_id"`
 	AccountLogin string `json:"account_login" doc:"The GitHub user or organisation the App is installed on. It is the owner part of every repository the installation covers."`
 	AccountType  string `json:"account_type" enum:"User,Organization" doc:"Whether that account is a person's own or an organisation."`
-	// Controlled says the person asked about controls that account: it is their own, or an
-	// organisation they are an admin of. Set by UserInstallations alone.
-	Controlled bool `json:"-"`
-	// MembershipHidden says GitHub did not tell whether the person is an admin of the organisation
-	// the installation is on, because the installation has not granted the App the organisation
-	// permission Members (read). Set by UserInstallations alone.
-	MembershipHidden bool `json:"-"`
 	// SelectedRepositories says the installation covers the repositories its owner selected and
-	// no other. Set by Installation alone.
+	// no other.
 	SelectedRepositories bool `json:"-"`
-}
-
-// UserGrant is what a person's authorisation of the App gave: the installations they reach,
-// AccessToken, which acts as them now and which RevokeUser ends, and Authorization, which
-// UserToken takes for a token that acts as them later.
-type UserGrant struct {
-	Installations []Installation
-	AccessToken   string
-	Authorization string
+	// ChangedAt is when GitHub last changed the installation: made it, or changed its
+	// repositories or permissions.
+	ChangedAt time.Time `json:"-"`
 }
 
 // Repository is a repository an installation covers, named owner/name in GitHub's own casing.
@@ -268,10 +242,8 @@ type Token struct {
 
 // App is what a browser needs to send a person to GitHub.
 type App struct {
-	Slug         string `json:"slug"`
-	ClientID     string `json:"client_id"`
-	InstallURL   string `json:"install_url" doc:"Where a person installs the App on a GitHub account and chooses its repositories. GitHub sends them back with installation_id."`
-	AuthorizeURL string `json:"authorize_url" doc:"Where a person proves who they are on GitHub. Add redirect_uri and state. GitHub sends them back with code."`
+	Slug       string `json:"slug"`
+	InstallURL string `json:"install_url" doc:"Where a person installs the App on a GitHub account and chooses its repositories. Connecting goes through POST /orgs/{id}/github-install-states, whose install_url carries the state GitHub hands back."`
 	// NewRepositoryURL is GitHub's own form for a new repository.
 	NewRepositoryURL string `json:"new_repository_url" doc:"Where a person creates a repository on GitHub themselves. owner and visibility may be added as query parameters."`
 }
@@ -279,15 +251,13 @@ type App struct {
 // Client is the only code that talks to GitHub. It acts as the platform's GitHub App and keeps
 // no token: each is minted for the call that needs it and handed on or dropped.
 type Client struct {
-	appID        int64
-	slug         string
-	clientID     string
-	clientSecret string
-	key          *rsa.PrivateKey
-	apiURL       string
-	webURL       string
-	http         *http.Client
-	now          func() time.Time
+	appID  int64
+	slug   string
+	key    *rsa.PrivateKey
+	apiURL string
+	webURL string
+	http   *http.Client
+	now    func() time.Time
 	// mintRetries is the wait before each retry of a mint GitHub answered 5xx.
 	mintRetries []time.Duration
 }
@@ -303,7 +273,7 @@ func New(cfg config.GitHubConfig) (*Client, error) {
 		return nil, errors.New("github: private_key is not the RSA key GitHub issues for an App (PKCS#1 PEM)")
 	}
 	return &Client{
-		appID: cfg.AppID, slug: cfg.AppSlug, clientID: cfg.ClientID, clientSecret: cfg.ClientSecret, key: key,
+		appID: cfg.AppID, slug: cfg.AppSlug, key: key,
 		apiURL: apiURL, webURL: webURL, http: &http.Client{Timeout: 20 * time.Second}, now: time.Now,
 		mintRetries: []time.Duration{time.Second, 3 * time.Second},
 	}, nil
@@ -311,9 +281,8 @@ func New(cfg config.GitHubConfig) (*Client, error) {
 
 func (c *Client) App() App {
 	return App{
-		Slug: c.slug, ClientID: c.clientID,
+		Slug:             c.slug,
 		InstallURL:       c.webURL + "/apps/" + url.PathEscape(c.slug) + "/installations/new",
-		AuthorizeURL:     c.webURL + "/login/oauth/authorize?client_id=" + url.QueryEscape(c.clientID),
 		NewRepositoryURL: c.webURL + "/new",
 	}
 }
@@ -338,163 +307,14 @@ func CloneURL(fullName string) string {
 	return webURL + "/" + fullName + ".git"
 }
 
-// UserInstallations returns the installations of the App that the person behind userCode
-// reaches on GitHub, each marked with whether they control the account it is on, or for an
-// organisation with MembershipHidden when GitHub would not say. Reaching one takes no more than
-// being a collaborator on a single repository it covers, so only Controlled says who may connect it. redirectURI is the one the code was issued to. The grant is the
-// caller's to keep by its Authorization or to end with RevokeUser. One whose installations could
-// not be read is revoked here.
-func (c *Client) UserInstallations(ctx context.Context, userCode, redirectURI string) (*UserGrant, error) {
-	if userCode == "" {
-		return nil, ErrCodeRejected
-	}
-	tokens, err := c.userTokens(ctx, url.Values{"code": {userCode}, "redirect_uri": {redirectURI}})
-	if err != nil {
-		return nil, err
-	}
-	grant := &UserGrant{AccessToken: tokens.AccessToken}
-	if grant.Authorization, err = tokens.authorization(); err == nil {
-		grant.Installations, err = c.installationsOf(ctx, grant.AccessToken)
-	}
-	if err != nil {
-		_ = c.RevokeUser(ctx, grant.AccessToken)
-		return nil, err
-	}
-	return grant, nil
-}
-
-// The two forms of what keeps a person's grant. Which one GitHub issues is the App's setting
-// "Expire user authorization tokens": with it on, a refresh token that GitHub takes once and
-// answers with its replacement, good for six months; with it off, the access token itself, which
-// does not expire.
-const (
-	byRefreshToken = "refresh:"
-	byAccessToken  = "access:"
-)
-
-func (t *userTokens) authorization() (string, error) {
-	switch {
-	case t.RefreshToken != "":
-		return byRefreshToken + t.RefreshToken, nil
-	case t.ExpiresIn == 0:
-		return byAccessToken + t.AccessToken, nil
-	default:
-		return "", errors.New("github: the user token expires and came with no refresh token")
-	}
-}
-
-// UserToken returns a token that acts as the person whose grant authorization keeps, and the
-// authorization that keeps the grant from here on: the caller stores next in place of the one
-// given before anything else, since GitHub takes a refresh token once.
-// ErrUserAuthorization when there is none or GitHub no longer takes it.
-func (c *Client) UserToken(ctx context.Context, authorization string) (accessToken, next string, err error) {
-	if kept, ok := strings.CutPrefix(authorization, byAccessToken); ok && kept != "" {
-		return kept, authorization, nil
-	}
-	refreshToken, ok := strings.CutPrefix(authorization, byRefreshToken)
-	switch {
-	case authorization == "":
-		return "", "", ErrUserAuthorization
-	case !ok || refreshToken == "":
-		return "", "", errors.New("github: the authorisation kept is none this client issued")
-	}
-	tokens, err := c.userTokens(ctx, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refreshToken}})
-	if err != nil {
-		return "", "", err
-	}
-	if next, err = tokens.authorization(); err != nil {
-		return "", "", err
-	}
-	return tokens.AccessToken, next, nil
-}
-
-const pageSize = 100
-
-func (c *Client) installationsOf(ctx context.Context, userToken string) ([]Installation, error) {
-	var self struct {
-		ID int64 `json:"id"`
-	}
-	switch err := c.call(ctx, http.MethodGet, "/user", userToken, nil, &self); {
-	case errors.Is(err, errUnauthorized):
-		return nil, ErrCodeRejected
-	case err != nil:
-		return nil, err
-	}
-	if self.ID <= 0 {
-		return nil, fmt.Errorf("github: GET /user answered without the person's id")
-	}
-	found := []Installation{}
-	for page := 1; ; page++ {
-		var out struct {
-			TotalCount    int `json:"total_count"`
-			Installations []struct {
-				ID      int64 `json:"id"`
-				AppID   int64 `json:"app_id"`
-				Account struct {
-					ID    int64  `json:"id"`
-					Login string `json:"login"`
-					Type  string `json:"type"`
-				} `json:"account"`
-			} `json:"installations"`
-		}
-		path := fmt.Sprintf("/user/installations?per_page=%d&page=%d", pageSize, page)
-		switch err := c.call(ctx, http.MethodGet, path, userToken, nil, &out); {
-		case errors.Is(err, errUnauthorized):
-			return nil, ErrCodeRejected
-		case err != nil:
-			return nil, err
-		}
-		for _, one := range out.Installations {
-			// A token of this App lists this App's installations only, and it is checked all the
-			// same: an installation of another App must never be connected.
-			if one.AppID != c.appID || one.ID <= 0 || one.Account.Login == "" || one.Account.ID <= 0 || !accountType(one.Account.Type) {
-				return nil, fmt.Errorf("github: GET /user/installations answered an installation that is not this App's or is on no user or organisation")
-			}
-			installation := Installation{ID: one.ID, AccountLogin: one.Account.Login, AccountType: one.Account.Type, Controlled: one.Account.Type == AccountUser && one.Account.ID == self.ID}
-			if one.Account.Type == AccountOrganization {
-				admin, hidden, err := c.administers(ctx, userToken, one.Account.Login)
-				if err != nil {
-					return nil, err
-				}
-				installation.Controlled, installation.MembershipHidden = admin, hidden
-			}
-			found = append(found, installation)
-		}
-		if len(out.Installations) < pageSize || len(found) >= out.TotalCount {
-			return found, nil
-		}
-	}
-}
-
 func accountType(kind string) bool {
 	return kind == AccountUser || kind == AccountOrganization
 }
 
-// administers says whether the person behind userToken is an active admin of the organisation.
-// A user access token sees a membership only through an installation that granted the App the
-// organisation permission Members (read): without it GitHub answers 403 and hidden is true.
-// Not being a member at all is 404.
-func (c *Client) administers(ctx context.Context, userToken, organisation string) (admin, hidden bool, err error) {
-	var membership struct {
-		State string `json:"state"`
-		Role  string `json:"role"`
-	}
-	switch err := c.call(ctx, http.MethodGet, "/user/memberships/orgs/"+url.PathEscape(organisation), userToken, nil, &membership); {
-	case errors.Is(err, errNotFound):
-		return false, false, nil
-	case errors.Is(err, errForbidden):
-		return false, true, nil
-	case errors.Is(err, errUnauthorized):
-		return false, false, ErrCodeRejected
-	case err != nil:
-		return false, false, err
-	}
-	return membership.State == "active" && membership.Role == "admin", false, nil
-}
-
 // Installation returns one installation of the App as GitHub states it to the App itself:
-// ErrInstallationGone for one removed or suspended, and PermissionMissingError for one that has
-// not granted every permission the App asks for, as when its owner has yet to accept them.
+// ErrInstallationGone for one removed, ErrInstallationSuspended for one suspended, and
+// PermissionMissingError for one that has not granted every permission the App asks for, as
+// when its owner has yet to accept them.
 func (c *Client) Installation(ctx context.Context, installationID int64) (*Installation, error) {
 	jwt, err := c.appJWT()
 	if err != nil {
@@ -503,6 +323,7 @@ func (c *Client) Installation(ctx context.Context, installationID int64) (*Insta
 	var out struct {
 		ID                  int64             `json:"id"`
 		SuspendedAt         *string           `json:"suspended_at"`
+		UpdatedAt           time.Time         `json:"updated_at"`
 		RepositorySelection string            `json:"repository_selection"`
 		Permissions         map[string]string `json:"permissions"`
 		Account             struct {
@@ -520,16 +341,18 @@ func (c *Client) Installation(ctx context.Context, installationID int64) (*Insta
 		return nil, failedFor(installationID, err)
 	}
 	if out.SuspendedAt != nil {
-		return nil, ErrInstallationGone
+		return nil, ErrInstallationSuspended
 	}
-	if out.ID != installationID || out.Account.Login == "" || !accountType(out.Account.Type) || (out.RepositorySelection != "all" && out.RepositorySelection != "selected") {
-		return nil, fmt.Errorf("github: GET /app/installations/{id} answered without the installation asked for, its account, a user or an organisation, or whether it covers all repositories or selected ones")
+	if out.ID != installationID || out.UpdatedAt.IsZero() || out.Account.Login == "" || !accountType(out.Account.Type) || (out.RepositorySelection != "all" && out.RepositorySelection != "selected") {
+		return nil, fmt.Errorf("github: GET /app/installations/{id} answered without the installation asked for, when it last changed, its account, a user or an organisation, or whether it covers all repositories or selected ones")
 	}
-	if missing := missingPermissions(out.Account.Type, out.Permissions); len(missing) > 0 {
+	if missing := missingPermissions(out.Permissions); len(missing) > 0 {
 		return nil, &PermissionMissingError{Installation: installationID, Missing: missing}
 	}
-	return &Installation{ID: out.ID, AccountLogin: out.Account.Login, AccountType: out.Account.Type, SelectedRepositories: out.RepositorySelection == "selected"}, nil
+	return &Installation{ID: out.ID, AccountLogin: out.Account.Login, AccountType: out.Account.Type, SelectedRepositories: out.RepositorySelection == "selected", ChangedAt: out.UpdatedAt}, nil
 }
+
+const pageSize = 100
 
 // Repositories lists every repository an installation covers, as GitHub pages them. The token
 // it reads with reaches the installation's metadata and nothing else, and does not leave here.
@@ -566,13 +389,12 @@ func (c *Client) Repositories(ctx context.Context, installationID int64) ([]Repo
 var newRepositoryName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
 
 // CreateRepository creates a private repository of that name on the account an installation is
-// on, whose default branch holds one commit: files, by path. On an organisation the installation
-// creates it, with a token that holds everything it granted, and GitHub then counts it among the
-// repositories the installation covers, whichever ones its owner selected. On a person's own
-// account GitHub creates "for the authenticated user", and an installation token is no user's:
-// userToken, that person's from UserToken, creates it, and adds it to an installation that
-// covers selected repositories only. Neither token leaves here.
-func (c *Client) CreateRepository(ctx context.Context, installationID int64, userToken, name, description string, files map[string]string) (*Repository, error) {
+// on, whose default branch holds one commit: files, by path. The installation creates it with a
+// token that holds everything it granted: on an organisation through the organisation's
+// repositories, on a person's own account through "the authenticated user's", which GitHub
+// documents as taking an installation token with Administration (write). The token does not
+// leave here.
+func (c *Client) CreateRepository(ctx context.Context, installationID int64, name, description string, files map[string]string) (*Repository, error) {
 	if !newRepositoryName.MatchString(name) || name == "." || name == ".." {
 		return nil, ErrInvalidRepository
 	}
@@ -583,19 +405,16 @@ func (c *Client) CreateRepository(ctx context.Context, installationID int64, use
 	if err != nil {
 		return nil, err
 	}
-	owner, personal := installation.AccountLogin, installation.AccountType == AccountUser
-	creator, path := userToken, "/user/repos"
-	if personal && userToken == "" {
-		return nil, ErrUserAuthorization
+	owner := installation.AccountLogin
+	path := "/orgs/" + url.PathEscape(owner) + "/repos"
+	if installation.AccountType == AccountUser {
+		path = "/user/repos"
 	}
-	if !personal {
-		// GitHub documents no name by which a token is narrowed to creating repositories, so the
-		// token is asked for whole.
-		token, err := c.mint(ctx, installationID, map[string]any{})
-		if err != nil {
-			return nil, err
-		}
-		creator, path = token.Token, "/orgs/"+url.PathEscape(owner)+"/repos"
+	// GitHub documents no name by which a token is narrowed to creating repositories, so the
+	// token is asked for whole.
+	token, err := c.mint(ctx, installationID, map[string]any{})
+	if err != nil {
+		return nil, err
 	}
 	var out struct {
 		ID            int64  `json:"id"`
@@ -607,11 +426,9 @@ func (c *Client) CreateRepository(ctx context.Context, installationID int64, use
 	// and firstCommit takes its place.
 	body := map[string]any{"name": name, "description": description, "private": true, "auto_init": true}
 	var refused *refusal
-	switch err := c.call(ctx, http.MethodPost, path, creator, body, &out); {
+	switch err := c.call(ctx, http.MethodPost, path, token.Token, body, &out); {
 	case errors.Is(err, ErrRateLimited):
 		return nil, err
-	case errors.Is(err, errUnauthorized) && personal:
-		return nil, ErrUserAuthorization
 	case errors.Is(err, errUnprocessable) && errors.As(err, &refused) && refused.nameExists:
 		return nil, ErrRepositoryExists
 	case errors.Is(err, errForbidden) && errors.As(err, &refused), errors.Is(err, errNotFound) && errors.As(err, &refused):
@@ -621,20 +438,16 @@ func (c *Client) CreateRepository(ctx context.Context, installationID int64, use
 	case err != nil:
 		return nil, failedFor(installationID, err)
 	}
-	// The name is also what says the person behind userToken owns the installation's account.
 	if out.ID <= 0 || ValidRepository(out.FullName) != nil {
 		return nil, fmt.Errorf("github: POST %s answered without the repository it created", path)
 	}
 	if !out.Private || !strings.EqualFold(out.FullName, owner+"/"+name) {
 		return nil, &NotAsAskedError{Repository: out.FullName}
 	}
-	if personal && installation.SelectedRepositories {
-		added := fmt.Sprintf("/user/installations/%d/repositories/%d", installationID, out.ID)
-		if err := c.call(ctx, http.MethodPut, added, userToken, nil, nil); err != nil {
-			return nil, &NotCoveredError{Repository: out.FullName, Cause: err}
-		}
-	}
 	write, err := c.Token(ctx, installationID, out.FullName, Write)
+	if errors.Is(err, ErrRepositoryNotInstalled) {
+		return nil, &NotCoveredError{Repository: out.FullName, Cause: err}
+	}
 	if err != nil {
 		return nil, &FirstCommitError{Repository: out.FullName, Cause: err}
 	}
@@ -694,21 +507,6 @@ func (c *Client) firstCommit(ctx context.Context, token *Token, branch string, f
 		return fmt.Errorf("github: %s answered a tree or a commit without its sha", token.Repository)
 	}
 	return c.call(ctx, http.MethodPatch, git+"refs/heads/"+branch, token.Value, map[string]any{"sha": commit.SHA, "force": true}, nil)
-}
-
-// RevokeUser ends a person's token at GitHub, so that nothing of theirs outlives what it was
-// issued for. ErrUserAuthorization when GitHub knows no such token: it was ended before.
-func (c *Client) RevokeUser(ctx context.Context, accessToken string) error {
-	basic := "Basic " + base64.StdEncoding.EncodeToString([]byte(c.clientID+":"+c.clientSecret))
-	path := "/applications/" + url.PathEscape(c.clientID) + "/token"
-	err := c.request(ctx, http.MethodDelete, path, basic, maxResponseBytes, map[string]string{"access_token": accessToken}, nil)
-	switch {
-	case errors.Is(err, errUnauthorized):
-		return ErrAppCredentials
-	case errors.Is(err, errNotFound):
-		return ErrUserAuthorization
-	}
-	return err
 }
 
 // Token mints an installation token for one repository, named owner/name, with the access asked
@@ -877,55 +675,6 @@ func (c *Client) File(ctx context.Context, token *Token, ref, path string) ([]by
 		return nil, fmt.Errorf("github: the contents of %s are not base64", path)
 	}
 	return data, nil
-}
-
-type userTokens struct {
-	AccessToken  string `json:"access_token"`
-	ExpiresIn    int    `json:"expires_in"`
-	RefreshToken string `json:"refresh_token"`
-	Error        string `json:"error"`
-}
-
-// userTokens trades what a person's authorisation left, the code GitHub handed their browser or
-// the refresh token of an earlier trade, for that person's tokens.
-func (c *Client) userTokens(ctx context.Context, form url.Values) (*userTokens, error) {
-	form.Set("client_id", c.clientID)
-	form.Set("client_secret", c.clientSecret)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.webURL+"/login/oauth/access_token", strings.NewReader(form.Encode()))
-	if err != nil {
-		return nil, errors.New("github: build the user token request")
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("github: the user token request did not complete: %w", transportError(err))
-	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return nil, errors.New("github: the user token answer could not be read")
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("github: the user token request answered %d", resp.StatusCode)
-	}
-	var out userTokens
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, errors.New("github: the user token answer is not JSON")
-	}
-	switch {
-	case out.Error == "bad_verification_code", out.Error == "redirect_uri_mismatch":
-		return nil, ErrCodeRejected
-	case out.Error == "bad_refresh_token":
-		return nil, ErrUserAuthorization
-	case out.Error == "incorrect_client_credentials":
-		return nil, ErrAppCredentials
-	case out.Error != "":
-		return nil, fmt.Errorf("github: the user token request was refused: %s", bounded(out.Error))
-	case out.AccessToken == "":
-		return nil, errors.New("github: the user token request answered without a token")
-	}
-	return &out, nil
 }
 
 func (c *Client) appJWT() (string, error) {

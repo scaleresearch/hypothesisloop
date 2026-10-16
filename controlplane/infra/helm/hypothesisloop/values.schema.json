@@ -483,9 +483,6 @@
             },
             "appSlug": {
               "type": "string"
-            },
-            "clientId": {
-              "type": "string"
             }
           }
         },

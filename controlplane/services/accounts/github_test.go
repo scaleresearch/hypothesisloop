@@ -30,34 +30,31 @@ import (
 type memInstallations struct {
 	*memStore
 	connected map[string][]*domain.OrgGitHubInstallation
-	// kept holds the authorisation kept for an org's installation, by "org installation", and
-	// unreadable makes every one of them sealed under another secret.
-	kept       map[string]string
-	unreadable bool
+	states    map[string]memState
 }
 
-func (s *memInstallations) KeepGitHubUserAuthorization(_ context.Context, orgID string, id int64, authorization string) error {
-	if authorization == "" {
-		return errors.New("there is no authorisation to keep")
-	}
-	s.kept[fmt.Sprintf("%s %d", orgID, id)] = authorization
-	return nil
+type memState struct {
+	db.GitHubInstallState
+	expires time.Time
 }
 
-func (s *memInstallations) RenewGitHubUserToken(ctx context.Context, orgID string, id int64, renew func(context.Context, string) (string, string, error)) (string, error) {
-	if !slices.ContainsFunc(s.connected[orgID], func(have *domain.OrgGitHubInstallation) bool { return have.InstallationID == id }) {
-		return "", db.ErrGitHubInstallationNotFound
+func (s *memInstallations) IssueGitHubInstallState(_ context.Context, orgID string, actor domain.Actor, returnTo string, lifetime time.Duration) (string, time.Time, error) {
+	if _, ok := s.orgs[orgID]; !ok {
+		return "", time.Time{}, db.ErrOrgNotFound
 	}
-	key := fmt.Sprintf("%s %d", orgID, id)
-	if s.unreadable && s.kept[key] != "" {
-		return "", db.ErrGitHubAuthorizationUnreadable
+	state := fmt.Sprintf("state-%d", len(s.states)+1)
+	s.states[state] = memState{db.GitHubInstallState{OrgID: orgID, Actor: actor, ReturnTo: returnTo, IssuedAt: s.now()}, s.now().Add(lifetime)}
+	return state, s.now().Add(lifetime), nil
+}
+
+func (s *memInstallations) TakeGitHubInstallState(_ context.Context, state string, actor domain.Actor) (*db.GitHubInstallState, error) {
+	held, ok := s.states[state]
+	if !ok || held.Actor.Kind != actor.Kind || held.Actor.ID != actor.ID || !s.now().Before(held.expires) {
+		return nil, db.ErrGitHubInstallStateInvalid
 	}
-	access, next, err := renew(ctx, s.kept[key])
-	if err != nil {
-		return "", err
-	}
-	s.kept[key] = next
-	return access, nil
+	delete(s.states, state)
+	taken := held.GitHubInstallState
+	return &taken, nil
 }
 
 func (s *memInstallations) ConnectGitHubInstallation(_ context.Context, in *domain.OrgGitHubInstallation) error {
@@ -72,6 +69,7 @@ func (s *memInstallations) ConnectGitHubInstallation(_ context.Context, in *doma
 		}
 	}
 	in.ConnectedAt = s.now()
+	in.Default = len(s.connected[in.OrgID]) == 0
 	stored := *in
 	s.connected[in.OrgID] = append(s.connected[in.OrgID], &stored)
 	return nil
@@ -100,7 +98,6 @@ func (s *memInstallations) DisconnectGitHubInstallation(_ context.Context, orgID
 	for i, have := range s.connected[orgID] {
 		if have.InstallationID == id {
 			s.connected[orgID] = slices.Delete(s.connected[orgID], i, i+1)
-			delete(s.kept, fmt.Sprintf("%s %d", orgID, id))
 			return nil
 		}
 	}
@@ -134,20 +131,14 @@ type minted struct {
 	access       github.Access
 }
 
-type asked struct{ code, redirect string }
-
-const testRedirect = "http://localhost:3000/settings/github"
-
 // fakeApp is the GitHub App as the service sees it. Installation 100 is on the organisation Acme
 // and covers Acme/Model and acme/other; installation 200 is on the organisation rival and covers
-// rival/secret; installation 300 is on carol's own account and covers carol/notes. Each
-// code belongs to a person who reaches some of them, and controls the account of each one they
-// reach unless guests says they are only a collaborator on a repository there.
+// rival/secret; installation 300 is on carol's own account and covers carol/notes. Each was last
+// changed when changed says, or with none said at the moment GitHub is asked.
 type fakeApp struct {
-	reaches map[string][]github.Installation
-	guests  map[string]map[int64]bool
+	now     func() time.Time
+	changed map[int64]time.Time
 	covers  map[int64][]github.Repository
-	asked   []asked
 	listed  []int64
 	// looked holds each installation GitHub was asked about by its id, and installationErr fails
 	// every such question.
@@ -155,7 +146,6 @@ type fakeApp struct {
 	installationErr error
 	mints           []minted
 	files           []string
-	userErr         error
 	listErr         map[int64]error
 	// tokenErr fails every mint, fileErr every file read.
 	tokenErr error
@@ -170,30 +160,16 @@ type fakeApp struct {
 	fresh bool
 	// notGranted is what of the App's permissions an installation has not granted, by its id.
 	notGranted map[int64][]string
-	// revoked holds each person's token ended, refreshed each refresh token traded, and unexpiring
-	// is an App whose user tokens do not expire, which issues no refresh token. revokeErr fails
-	// every revocation.
-	revoked    []string
-	refreshed  []string
-	unexpiring bool
-	refreshErr error
-	revokeErr  error
 }
 
-// CreateRepository creates as GitHub does: on a person's own account for the person whose token
-// it is handed, and with none there not at all.
-func (a *fakeApp) CreateRepository(_ context.Context, installationID int64, userToken, name, _ string, files map[string]string) (*github.Repository, error) {
+// CreateRepository creates on the account the installation is on.
+func (a *fakeApp) CreateRepository(_ context.Context, installationID int64, name, _ string, files map[string]string) (*github.Repository, error) {
 	if a.createErr != nil {
 		return nil, a.createErr
 	}
 	owner := "Acme"
 	if installationID == carol.ID {
-		if !strings.HasPrefix(userToken, "ghu_carol_") {
-			return nil, github.ErrUserAuthorization
-		}
 		owner = "carol"
-	} else if userToken != "" {
-		return nil, fmt.Errorf("a person's token was handed to a create on an organisation")
 	}
 	a.created = append(a.created, fmt.Sprintf("%d %s", installationID, name))
 	a.committed = files
@@ -208,44 +184,16 @@ func (a *fakeApp) StartFresh(_ context.Context, token *github.Token, files map[s
 	return nil
 }
 
-func (a *fakeApp) RevokeUser(_ context.Context, accessToken string) error {
-	if a.revokeErr != nil {
-		return a.revokeErr
-	}
-	a.revoked = append(a.revoked, accessToken)
-	return nil
-}
-
-// UserToken takes a refresh token once, as GitHub does: ghr_carol_N becomes ghu_carol_N and
-// ghr_carol_N+1. A token that does not expire is the authorisation itself, at every use.
-func (a *fakeApp) UserToken(_ context.Context, authorization string) (string, string, error) {
-	if a.refreshErr != nil {
-		return "", "", a.refreshErr
-	}
-	if strings.HasPrefix(authorization, "ghu_carol_") {
-		return authorization, authorization, nil
-	}
-	var n int
-	if _, err := fmt.Sscanf(authorization, "ghr_carol_%d", &n); err != nil || slices.Contains(a.refreshed, authorization) {
-		return "", "", github.ErrUserAuthorization
-	}
-	a.refreshed = append(a.refreshed, authorization)
-	return fmt.Sprintf("ghu_carol_%d", n), fmt.Sprintf("ghr_carol_%d", n+1), nil
-}
-
 var (
 	acme  = github.Installation{ID: 100, AccountLogin: "Acme", AccountType: github.AccountOrganization}
 	rival = github.Installation{ID: 200, AccountLogin: "rival", AccountType: github.AccountOrganization}
 	carol = github.Installation{ID: 300, AccountLogin: "carol", AccountType: github.AccountUser}
-	// lab is an organisation that installed the App without granting it Members (read), so GitHub
-	// does not say whether the person is its admin.
-	lab = github.Installation{ID: 168837676, AccountLogin: "carols-lab", AccountType: github.AccountOrganization}
 )
 
 func newFakeApp() *fakeApp {
 	return &fakeApp{
-		reaches: map[string][]github.Installation{"code-acme": {acme}, "code-both": {acme, rival}, "code-none": {}, "code-guest": {acme}, "code-acme-admin-rival-guest": {acme, rival}, "code-carol": {acme, carol}, "code-lab-owner": {lab}},
-		guests:  map[string]map[int64]bool{"code-guest": {100: true}, "code-acme-admin-rival-guest": {200: true}, "code-carol": {100: true}},
+		now:     time.Now,
+		changed: map[int64]time.Time{},
 		covers: map[int64][]github.Repository{
 			100: {{FullName: "acme/other"}, {FullName: "Acme/Model", Private: true}},
 			200: {{FullName: "rival/secret", Private: true}},
@@ -257,29 +205,7 @@ func newFakeApp() *fakeApp {
 }
 
 func (a *fakeApp) App() github.App {
-	return github.App{Slug: "hypothesisloop", ClientID: "Iv23test", InstallURL: "https://github.test/install", AuthorizeURL: "https://github.test/authorize"}
-}
-
-func (a *fakeApp) UserInstallations(_ context.Context, code, redirect string) (*github.UserGrant, error) {
-	a.asked = append(a.asked, asked{code, redirect})
-	if a.userErr != nil {
-		return nil, a.userErr
-	}
-	reached, ok := a.reaches[code]
-	if !ok {
-		return nil, github.ErrCodeRejected
-	}
-	n := 10 * len(a.asked)
-	grant := &github.UserGrant{Installations: []github.Installation{}, AccessToken: fmt.Sprintf("ghu_carol_%d", n), Authorization: fmt.Sprintf("ghr_carol_%d", n)}
-	if a.unexpiring {
-		grant.Authorization = grant.AccessToken
-	}
-	for _, one := range reached {
-		one.Controlled = !a.guests[code][one.ID] && one.ID != lab.ID
-		one.MembershipHidden = one.ID == lab.ID
-		grant.Installations = append(grant.Installations, one)
-	}
-	return grant, nil
+	return github.App{Slug: "hypothesisloop", InstallURL: "https://github.test/apps/hypothesisloop/installations/new"}
 }
 
 func (a *fakeApp) Installation(_ context.Context, installationID int64) (*github.Installation, error) {
@@ -291,6 +217,10 @@ func (a *fakeApp) Installation(_ context.Context, installationID int64) (*github
 		if _, covered := a.covers[installationID]; covered && one.ID == installationID {
 			if missing := a.notGranted[installationID]; len(missing) > 0 {
 				return nil, &github.PermissionMissingError{Installation: installationID, Missing: missing}
+			}
+			one.ChangedAt = a.now()
+			if changed, ok := a.changed[installationID]; ok {
+				one.ChangedAt = changed
 			}
 			return &one, nil
 		}
@@ -352,7 +282,8 @@ type githubWorld struct {
 func newGitHubWorld(t *testing.T, withApp bool) *githubWorld {
 	t.Helper()
 	w := &githubWorld{world: newWorld(t), app: newFakeApp()}
-	w.installations = &memInstallations{memStore: w.store, connected: map[string][]*domain.OrgGitHubInstallation{}, kept: map[string]string{}}
+	w.installations = &memInstallations{memStore: w.store, connected: map[string][]*domain.OrgGitHubInstallation{}, states: map[string]memState{}}
+	w.app.now = w.store.now
 	w.experiments = experiments{"pe-a": {w.projectA, "Acme/Model"}, "pe-bare": {w.projectA, ""}, "pe-b": {w.projectB, "Acme/Model"}, "pe-closed": {w.projectA, "Acme/Model", "closed"}, "pe-draft": {w.projectA, "Acme/Model", "draft"}}
 	access := auth.NewAccess(placement{memStore: w.store})
 	if withApp {
@@ -396,12 +327,16 @@ func (w *githubWorld) connect(orgID string, installation github.Installation) {
 	}
 }
 
-func connectBody(code string, installation int64) map[string]any {
-	body := map[string]any{"code": code, "redirect_uri": testRedirect}
-	if installation != 0 {
-		body["installation_id"] = installation
-	}
-	return body
+// begin starts an install for orgID as caller and returns its state.
+func (w *githubWorld) begin(caller, orgID string) string {
+	w.t.Helper()
+	var started InstallStart
+	w.ok(caller, "POST", "/orgs/"+orgID+"/github-install-states", map[string]any{"return_to": "/projects/p-1/experiments?new=1"}, http.StatusCreated, &started)
+	return started.State
+}
+
+func finishBody(state string, installation int64) map[string]any {
+	return map[string]any{"state": state, "installation_id": installation}
 }
 
 // refusalOf is the reason and message of a refusal, which must be all its envelope holds
@@ -446,8 +381,8 @@ func TestWhoMayReachAnOrgsGitHub(t *testing.T) {
 	}{
 		{"the app", "GET", "/github/app", nil,
 			map[string]int{"owner": ok, "member": ok, "outsider": ok, "org-key": ok, "project-key": ok, "foreign-key": ok, "staff": ok, "staff-user": ok}},
-		{"connect", "POST", "/orgs/<a>/github-installations", func() any { return connectBody("code-acme", 100) },
-			map[string]int{"owner": created, "member": forbidden, "outsider": notFound, "org-key": created, "project-key": forbidden, "foreign-key": notFound, "staff": created, "staff-user": created}},
+		{"start an install", "POST", "/orgs/<a>/github-install-states", func() any { return map[string]any{"return_to": "/settings"} },
+			map[string]int{"owner": created, "member": forbidden, "outsider": notFound, "org-key": created, "project-key": forbidden, "foreign-key": notFound, "staff": forbidden, "staff-user": created}},
 		{"list installations", "GET", "/orgs/<a>/github-installations", nil,
 			map[string]int{"owner": ok, "member": ok, "outsider": notFound, "org-key": ok, "project-key": ok, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
 		{"list repositories", "GET", "/orgs/<a>/github-repositories", nil,
@@ -472,156 +407,126 @@ func TestWhoMayReachAnOrgsGitHub(t *testing.T) {
 				t.Errorf("%s as %q: got = %d %s, want = %d", tc.name, caller, rec.Code, rec.Body, want)
 			}
 			// Whoever is refused leaves the org's installations as they were and learns nothing.
-			if want >= 400 && (len(w.installations.connected[w.orgA]) != 1 || len(w.app.asked) != 0 || len(w.app.listed) != 0) {
+			if want >= 400 && (len(w.installations.connected[w.orgA]) != 1 || len(w.installations.states) != 0 || len(w.app.looked) != 0 || len(w.app.listed) != 0) {
 				t.Errorf("%s as %q: a refused call reached the store or GitHub", tc.name, caller)
 			}
 		}
 	}
 }
 
-func TestConnectRecordsAnInstallationThePersonReachesOnGitHub(t *testing.T) {
+// Installing the App is the whole connect: the state the person was issued comes back with the
+// installation GitHub made, and the installation is connected to the org the state names, the
+// org's default as its first, and the person returned to the page they left.
+func TestAnInstallConnectsTheInstallationGitHubHandsBack(t *testing.T) {
 	w := newGitHubWorld(t, true)
-	path := "/orgs/" + w.orgA + "/github-installations"
-	var connected domain.OrgGitHubInstallation
-	w.ok("owner", "POST", path, connectBody("code-both", 200), http.StatusCreated, &connected)
-	want := domain.OrgGitHubInstallation{OrgID: w.orgA, InstallationID: 200, AccountLogin: "rival", AccountType: github.AccountOrganization, ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "u-owner", Name: "Owner"}, ConnectedAt: connected.ConnectedAt}
-	if connected != want || connected.ConnectedAt.IsZero() {
-		t.Fatalf("connected = %+v, want %+v", connected, want)
+	var started InstallStart
+	w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-install-states", map[string]any{"return_to": "/projects/p-1/experiments?new=1"}, http.StatusCreated, &started)
+	if started.State == "" || started.InstallURL != "https://github.test/apps/hypothesisloop/installations/new?state="+started.State || started.ExpiresAt.Before(w.store.clock.Add(14*time.Minute)) || started.ExpiresAt.After(w.store.clock.Add(16*time.Minute)) {
+		t.Fatalf("started = %+v, want a state, the install page carrying it, good for 15 minutes", started)
 	}
-	if len(w.app.asked) != 1 || w.app.asked[0] != (asked{"code-both", testRedirect}) {
-		t.Fatalf("GitHub was asked %+v, want the code with its redirect once", w.app.asked)
+	w.store.clock = w.store.clock.Add(time.Minute)
+	var finished InstallFinished
+	w.ok("owner", "POST", "/github/installations", finishBody(started.State, rival.ID), http.StatusCreated, &finished)
+	want := domain.OrgGitHubInstallation{OrgID: w.orgA, InstallationID: rival.ID, AccountLogin: "rival", AccountType: github.AccountOrganization, ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "u-owner", Name: "Owner"}, Default: true}
+	if finished.Installation != nil {
+		want.ConnectedAt = finished.Installation.ConnectedAt
+	}
+	if finished.OrgID != w.orgA || finished.ReturnTo != "/projects/p-1/experiments?new=1" || finished.Installation == nil || *finished.Installation != want || want.ConnectedAt.IsZero() {
+		t.Fatalf("finished = %+v %+v, want the org, the page left and %+v", finished, finished.Installation, want)
+	}
+	if !slices.Equal(w.app.looked, []int64{rival.ID}) {
+		t.Fatalf("GitHub was asked about %v, want the installation handed back", w.app.looked)
 	}
 
-	// With no installation named, the only one the person reaches is the one meant.
-	w.ok("owner", "POST", path, connectBody("code-acme", 0), http.StatusCreated, &connected)
-	if connected.InstallationID != 100 || connected.AccountLogin != "Acme" {
-		t.Fatalf("connected with none named = %+v, want the one installation the person reaches", connected)
+	// A second account, as an API key: connected, not the default.
+	w.ok("org-key", "POST", "/github/installations", finishBody(w.begin("org-key", w.orgA), acme.ID), http.StatusCreated, &finished)
+	if finished.Installation.Default || finished.Installation.ConnectedActor != (domain.Actor{Kind: domain.ActorKey, ID: "k-org"}) || len(w.installations.connected[w.orgA]) != 2 {
+		t.Fatalf("finished = %+v, want acme connected by the key and rival kept the default", finished.Installation)
 	}
-	// Connecting what is connected answers with it as it was first connected.
-	first := connected
+
+	// Repositories added on GitHub to an installation the org connected come back the same way,
+	// however long ago GitHub last changed it, and leave it as it is.
+	w.app.changed[acme.ID] = w.store.now().Add(-24 * time.Hour)
 	w.store.clock = w.store.clock.Add(time.Hour)
-	w.ok("org-key", "POST", path, connectBody("code-acme", 100), http.StatusCreated, &connected)
-	if connected != first || len(w.installations.connected[w.orgA]) != 2 {
-		t.Fatalf("connected again = %+v with %d rows, want %+v and two", connected, len(w.installations.connected[w.orgA]), first)
-	}
-	// An API key that connects is named as who did.
-	w.installations.connected[w.orgA] = nil
-	w.ok("org-key", "POST", path, connectBody("code-acme", 100), http.StatusCreated, &connected)
-	if connected.ConnectedActor != (domain.Actor{Kind: domain.ActorKey, ID: "k-org"}) {
-		t.Fatalf("connected by a key = %+v, want the key named", connected)
+	w.ok("owner", "POST", "/github/installations", finishBody(w.begin("owner", w.orgA), acme.ID), http.StatusCreated, &finished)
+	if finished.Installation.ConnectedActor.Kind != domain.ActorKey || len(w.installations.connected[w.orgA]) != 2 {
+		t.Fatalf("finished = %+v, want acme as it was connected", finished.Installation)
 	}
 	if len(w.installations.connected[w.orgB]) != 0 {
-		t.Fatal("connecting to one org connected another")
+		t.Fatal("an install for one org connected another")
 	}
 }
 
-func TestConnectAsksWhichInstallationWhenThePersonReachesSeveral(t *testing.T) {
-	w := newGitHubWorld(t, true)
-	rec := w.call("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-both", 0))
-	var body struct {
-		Reason, Message string
-		Installations   []github.Installation
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || rec.Code != http.StatusConflict {
-		t.Fatalf("got = %d %s, want 409", rec.Code, rec.Body)
-	}
-	if body.Reason != ReasonInstallationChoiceRequired || body.Message == "" || !slices.Equal(body.Installations, []github.Installation{acme, rival}) {
-		t.Fatalf("answer = %s, want installation_choice_required with both installations", rec.Body)
-	}
-	if !strings.Contains(rec.Body.String(), `"installation_id":100`) || !strings.Contains(rec.Body.String(), `"account_login":"Acme"`) || !strings.Contains(rec.Body.String(), `"account_type":"Organization"`) {
-		t.Fatalf("the installations are not listed by installation_id, account_login and account_type: %s", rec.Body)
-	}
-	if len(w.installations.connected[w.orgA]) != 0 {
-		t.Fatal("an installation was connected though none was chosen")
-	}
-	// Only what the person controls is a choice: an admin of Acme who is a collaborator on one
-	// repository of rival is asked nothing, and cannot connect rival by naming it.
-	w.refused("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-acme-admin-rival-guest", 200), http.StatusUnprocessableEntity, ReasonInstallationNotControlled)
-	var connected domain.OrgGitHubInstallation
-	w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-acme-admin-rival-guest", 0), http.StatusCreated, &connected)
-	if connected.InstallationID != 100 || len(w.installations.connected[w.orgA]) != 1 {
-		t.Fatalf("connected = %+v, want Acme's installation alone", connected)
-	}
-}
-
-// A connect that names nothing adds an account the org has not connected yet, and with none left
-// says the App is to be installed on another, which is where the client sends the person next.
-func TestConnectWithNoneNamedAddsAnAccountTheOrgHasNotConnected(t *testing.T) {
-	w := newGitHubWorld(t, true)
-	path := "/orgs/" + w.orgA + "/github-installations"
-	w.connect(w.orgA, acme)
-	var connected domain.OrgGitHubInstallation
-	w.ok("owner", "POST", path, connectBody("code-both", 0), http.StatusCreated, &connected)
-	if connected.InstallationID != rival.ID {
-		t.Fatalf("connected = %+v, want rival, the one the org has not connected", connected)
-	}
-	message := w.refused("owner", "POST", path, connectBody("code-both", 0), http.StatusUnprocessableEntity, ReasonAppNotInstalled)
-	if strings.Count(message, ".") != 1 || !strings.HasPrefix(message, "Install") {
-		t.Fatalf("message = %q, want one sentence that says to install the App", message)
-	}
-	if len(w.installations.connected[w.orgA]) != 2 {
-		t.Fatalf("%d installations connected, want acme and rival", len(w.installations.connected[w.orgA]))
-	}
-}
-
-func TestConnectRefusals(t *testing.T) {
+// What would let someone other than the person who pressed the button, or an installation they
+// did not just make, be connected is refused, and nothing is connected.
+func TestAnInstallIsRefusedUnlessItsStateAndItsInstallationProveIt(t *testing.T) {
 	for name, tc := range map[string]struct {
-		body   map[string]any
-		err    error
-		status int
-		reason string
-		asks   int
+		arrange func(w *githubWorld) map[string]any
+		caller  string
+		status  int
+		reason  string
+		says    string
 	}{
-		"a person who reaches no installation":    {connectBody("code-none", 0), nil, 422, ReasonAppNotInstalled, 1},
-		"a person who reaches none, naming one":   {connectBody("code-none", 100), nil, 422, ReasonAppNotInstalled, 1},
-		"an installation the person cannot reach": {connectBody("code-acme", 200), nil, 422, ReasonInstallationNotReachable, 1},
-		"an organisation that hides its members":  {connectBody("code-lab-owner", 0), nil, 422, ReasonMembersPermissionNotGranted, 1},
-		"naming it":                               {connectBody("code-lab-owner", lab.ID), nil, 422, ReasonMembersPermissionNotGranted, 1},
-		"a collaborator on one repository":        {connectBody("code-guest", 0), nil, 422, ReasonAppNotInstalled, 1},
-		"a collaborator naming the installation":  {connectBody("code-guest", 100), nil, 422, ReasonInstallationNotControlled, 1},
-		"an installation that does not exist":     {connectBody("code-both", 999), nil, 422, ReasonInstallationNotReachable, 1},
-		"a code github does not take":             {connectBody("code-made-up", 100), nil, 422, github.ReasonCodeRejected, 1},
-		"no code":                                 {connectBody("", 100), nil, 422, ReasonInvalidRequest, 0},
-		"no redirect":                             {map[string]any{"code": "code-acme", "redirect_uri": ""}, nil, 422, ReasonInvalidRequest, 0},
-		"a negative installation":                 {connectBody("code-acme", -1), nil, 422, ReasonInvalidRequest, 0},
-		"github rate limits":                      {connectBody("code-acme", 100), fmt.Errorf("%w (%s)", github.ErrRateLimited, leak), 503, github.ReasonUnavailable, 1},
-		"the app key expired":                     {connectBody("code-acme", 100), fmt.Errorf("%w (%s)", github.ErrAppCredentials, leak), 502, github.ReasonUnavailable, 1},
-		"something else":                          {connectBody("code-acme", 100), errors.New("dial tcp: " + leak), 500, "", 1},
+		"a made-up state": {func(w *githubWorld) map[string]any { return finishBody("state-forged", acme.ID) }, "owner", 422, ReasonInstallStateInvalid, "Install GitHub App again"},
+		"a state used before": {func(w *githubWorld) map[string]any {
+			state := w.begin("owner", w.orgA)
+			w.ok("owner", "POST", "/github/installations", finishBody(state, rival.ID), http.StatusCreated, nil)
+			return finishBody(state, acme.ID)
+		}, "owner", 422, ReasonInstallStateInvalid, ""},
+		"a state run out": {func(w *githubWorld) map[string]any {
+			state := w.begin("owner", w.orgA)
+			w.store.clock = w.store.clock.Add(15 * time.Minute)
+			return finishBody(state, acme.ID)
+		}, "owner", 422, ReasonInstallStateInvalid, ""},
+		"another person's state": {func(w *githubWorld) map[string]any { return finishBody(w.begin("owner", w.orgA), acme.ID) }, "org-key", 422, ReasonInstallStateInvalid, ""},
+		"an installation last changed before the state was issued": {func(w *githubWorld) map[string]any {
+			w.app.changed[acme.ID] = w.store.now().Add(-2 * time.Minute)
+			return finishBody(w.begin("owner", w.orgA), acme.ID)
+		}, "owner", 422, ReasonInstallationNotNew, "Acme"},
+		"an installation that does not exist": {func(w *githubWorld) map[string]any { return finishBody(w.begin("owner", w.orgA), 999) }, "owner", 422, github.ReasonInstallationGone, "install"},
+		"a suspended installation": {func(w *githubWorld) map[string]any {
+			w.app.installationErr = github.ErrInstallationSuspended
+			return finishBody(w.begin("owner", w.orgA), acme.ID)
+		}, "owner", 422, github.ReasonInstallationSuspended, "unsuspends"},
+		"an installation missing a permission": {func(w *githubWorld) map[string]any {
+			w.app.notGranted[acme.ID] = []string{"administration:write"}
+			return finishBody(w.begin("owner", w.orgA), acme.ID)
+		}, "owner", 422, github.ReasonPermissionMissing, "administration:write"},
+		"no installation": {func(w *githubWorld) map[string]any { return finishBody(w.begin("owner", w.orgA), 0) }, "owner", 422, ReasonInvalidRequest, ""},
+		"no state":        {func(w *githubWorld) map[string]any { return finishBody("", acme.ID) }, "owner", 422, ReasonInvalidRequest, ""},
+		"github rate limits": {func(w *githubWorld) map[string]any {
+			w.app.installationErr = fmt.Errorf("%w (%s)", github.ErrRateLimited, leak)
+			return finishBody(w.begin("owner", w.orgA), acme.ID)
+		}, "owner", 503, github.ReasonUnavailable, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := newGitHubWorld(t, true)
-			w.app.userErr = tc.err
-			rec := w.call("owner", "POST", "/orgs/"+w.orgA+"/github-installations", tc.body)
+			body := tc.arrange(w)
+			before := len(w.installations.connected[w.orgA])
+			rec := w.call(tc.caller, "POST", "/github/installations", body)
 			reason, message := refusalOf(t, rec)
-			if rec.Code != tc.status || reason != tc.reason || message == "" {
-				t.Fatalf("got = %d %s, want = %d %s", rec.Code, rec.Body, tc.status, tc.reason)
+			if rec.Code != tc.status || reason != tc.reason || !strings.Contains(message, tc.says) {
+				t.Fatalf("got = %d %s, want = %d %s saying %q", rec.Code, rec.Body, tc.status, tc.reason, tc.says)
 			}
-			if len(w.app.asked) != tc.asks || len(w.installations.connected[w.orgA]) != 0 {
-				t.Fatalf("GitHub was asked %d times and %d installations are connected, want %d and none", len(w.app.asked), len(w.installations.connected[w.orgA]), tc.asks)
-			}
-			if strings.Contains(rec.Body.String(), leak) {
-				t.Fatalf("the answer repeats the failure's text: %s", rec.Body)
+			if len(w.installations.connected[w.orgA]) != before || strings.Contains(rec.Body.String(), leak) {
+				t.Fatalf("a refused install connected something or repeated GitHub's text: %s", rec.Body)
 			}
 		})
+	}
+
+	w := newGitHubWorld(t, true)
+	for _, returnTo := range []string{"", "settings", "//evil.example", "/\\evil.example", "/a\nb"} {
+		w.refused("owner", "POST", "/orgs/"+w.orgA+"/github-install-states", map[string]any{"return_to": returnTo}, http.StatusUnprocessableEntity, ReasonInvalidRequest)
+	}
+	// An owner who is a member no more by the time GitHub returns connects nothing.
+	state := w.begin("owner", w.orgA)
+	w.store.roles[w.orgA]["u-owner"] = domain.OrgRoleMember
+	if rec := w.call("owner", "POST", "/github/installations", finishBody(state, acme.ID)); rec.Code != http.StatusForbidden || len(w.installations.connected[w.orgA]) != 0 {
+		t.Fatalf("an install finished by one no longer an owner: got = %d %s, want 403 and nothing connected", rec.Code, rec.Body)
 	}
 }
 
 const leak = "ghs_a_token_in_an_error"
-
-// An installation whose owner has yet to accept a permission the App asks for is not connected,
-// and the refusal names what is missing. The person's grant is ended all the same.
-func TestConnectRefusesAnInstallationMissingAPermissionNamingIt(t *testing.T) {
-	w := newGitHubWorld(t, true)
-	w.app.installationErr = &github.PermissionMissingError{Installation: 100, Missing: []string{"administration:write"}}
-	rec := w.call("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-acme", 100))
-	reason, message := refusalOf(t, rec)
-	if rec.Code != http.StatusUnprocessableEntity || reason != github.ReasonPermissionMissing || !strings.Contains(message, "administration:write") {
-		t.Fatalf("got = %d %s, want 422 %s naming administration:write", rec.Code, rec.Body, github.ReasonPermissionMissing)
-	}
-	if len(w.installations.connected[w.orgA]) != 0 || len(w.app.revoked) != 1 {
-		t.Fatalf("connected %v and revoked %v, want nothing connected and the grant ended", w.installations.connected[w.orgA], w.app.revoked)
-	}
-}
 
 func TestInstallationsAreListedPagedAndDisconnected(t *testing.T) {
 	w := newGitHubWorld(t, true)
@@ -654,7 +559,7 @@ func TestInstallationsAreListedPagedAndDisconnected(t *testing.T) {
 	if len(w.installations.connected[w.orgA]) != 1 || len(w.installations.connected[w.orgB]) != 1 {
 		t.Fatalf("after disconnecting one: %d of org a and %d of org b, want one each", len(w.installations.connected[w.orgA]), len(w.installations.connected[w.orgB]))
 	}
-	if len(w.app.asked)+len(w.app.listed)+len(w.app.mints) != 0 {
+	if len(w.app.looked)+len(w.app.listed)+len(w.app.mints) != 0 {
 		t.Fatal("listing or disconnecting asked GitHub")
 	}
 }
@@ -747,7 +652,8 @@ func TestADeploymentWithoutAnAppAnswersSoAfterTheAccessCheck(t *testing.T) {
 		reason                     string
 	}{
 		{"the app", "owner", "GET", "/github/app", nil, 503, ReasonGitHubNotConfigured},
-		{"connect", "owner", "POST", org + "/github-installations", connectBody("code-acme", 100), 503, ReasonGitHubNotConfigured},
+		{"start an install", "owner", "POST", org + "/github-install-states", map[string]any{"return_to": "/settings"}, 503, ReasonGitHubNotConfigured},
+		{"finish an install", "owner", "POST", "/github/installations", finishBody("state-1", 100), 503, ReasonGitHubNotConfigured},
 		{"repositories", "member", "GET", org + "/github-repositories", nil, 503, ReasonGitHubNotConfigured},
 		{"a credential for a GitHub address", "agent", "POST", "/git-credentials", modelCredential, 404, ReasonNotFound},
 		{"a credential of an experiment with no repository", "agent-bare", "POST", "/git-credentials", modelCredential, 404, ReasonNoRepository},
@@ -762,8 +668,8 @@ func TestADeploymentWithoutAnAppAnswersSoAfterTheAccessCheck(t *testing.T) {
 		body                 any
 		want                 int
 	}{
-		"connect to another org":      {"owner", "POST", "/orgs/" + w.orgB + "/github-installations", connectBody("code-acme", 100), 404},
-		"connect as a member":         {"member", "POST", org + "/github-installations", connectBody("code-acme", 100), 403},
+		"install for another org":     {"owner", "POST", "/orgs/" + w.orgB + "/github-install-states", map[string]any{"return_to": "/settings"}, 404},
+		"install as a member":         {"member", "POST", org + "/github-install-states", map[string]any{"return_to": "/settings"}, 403},
 		"a credential for a person":   {"owner", "POST", "/git-credentials", modelCredential, 403},
 		"listing what is connected":   {"member", "GET", org + "/github-installations", nil, 200},
 		"disconnecting what is there": {"owner", "DELETE", org + "/github-installations/100", nil, 204},
@@ -1007,8 +913,10 @@ func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 	if err != nil || named != "Acme/sweep-1a2b3c4d" || len(w.app.created) != 1 || w.app.created[0] != "100 sweep-1a2b3c4d" || !maps.Equal(w.app.committed, firstFiles) {
 		t.Fatalf("Create = %q, %v (created %v with %v), want it made through the org's own installation with the files given", named, err, w.app.created, w.app.committed)
 	}
-	// With two accounts connected the request says which, and nothing is made on a guess.
+	// With two accounts connected and none the default the request says which, and nothing is
+	// made on a guess.
 	w.connect(w.orgA, rival)
+	w.installations.connected[w.orgA][0].Default = false
 	if named, err := w.host.Create(ctx, w.projectA, "", "ambiguous", "", firstFiles); named != "" || statusOf(err) != 422 || reasonOf(err) != github.ReasonRepositoryAccountRequired || !strings.Contains(err.Error(), "Acme, rival") {
 		t.Fatalf("with two accounts and none named: Create = %q, %v, want 422 repository_account_required listing them", named, err)
 	}
@@ -1080,171 +988,29 @@ func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 	}
 }
 
-// GitHub creates on a person's own account for that person alone, so the authorisation they
-// connected it with is kept, and each create renews it and creates with their token.
-func TestARepositoryIsCreatedOnAPersonalAccountWithTheAuthorisationItsOwnerConnectedItWith(t *testing.T) {
+// A personal account is created on as an organisation is, through its installation: no person's
+// token is asked for or kept. What GitHub refuses there says what its owner does.
+func TestARepositoryIsCreatedOnAPersonalAccountThroughItsInstallation(t *testing.T) {
 	ctx := context.Background()
 	w := newGitHubWorld(t, true)
-	path := "/orgs/" + w.orgA + "/github-installations"
-	var connected domain.OrgGitHubInstallation
-	w.ok("owner", "POST", path, connectBody("code-carol", 0), http.StatusCreated, &connected)
-	key := fmt.Sprintf("%s %d", w.orgA, carol.ID)
-	if connected.InstallationID != carol.ID || connected.AccountType != github.AccountUser || w.installations.kept[key] != "ghr_carol_10" || len(w.app.revoked) != 0 {
-		t.Fatalf("connected = %+v keeping %q with %v revoked, want carol's own account with her refresh token kept and not revoked", connected, w.installations.kept[key], w.app.revoked)
+	w.connect(w.orgA, carol)
+	if named, err := w.host.Create(ctx, w.projectA, "", "sweep", "", firstFiles); err != nil || named != "carol/sweep" || !slices.Equal(w.app.created, []string{"300 sweep"}) {
+		t.Fatalf("Create on a personal account = %q, %v (created %v), want it made through carol's installation", named, err, w.app.created)
 	}
-	if strings.Contains(w.call("owner", "GET", path, nil).Body.String(), "ghr_") {
-		t.Fatal("the listing of installations holds the refresh token")
-	}
-	for i, want := range []string{"ghr_carol_11", "ghr_carol_12"} {
-		name := fmt.Sprintf("sweep-%d", i)
-		named, err := w.host.Create(ctx, w.projectA, "", name, "", firstFiles)
-		if err != nil || named != "carol/"+name || w.app.created[i] != "300 "+name || w.installations.kept[key] != want {
-			t.Fatalf("Create %d on a personal account = %q, %v (created %v, keeping %q), want it created with the refresh token replaced by %s", i, named, err, w.app.created, w.installations.kept[key], want)
-		}
-	}
-	// Beside an organisation the request says which, and each is created its own way.
-	w.connect(w.orgA, acme)
-	if named, err := w.host.Create(ctx, w.projectA, "carol", "on-carol", "", firstFiles); err != nil || named != "carol/on-carol" {
-		t.Fatalf("naming the personal account beside an organisation: Create = %q, %v, want it created", named, err)
-	}
-	if named, err := w.host.Create(ctx, w.projectA, "acme", "on-acme", "", firstFiles); err != nil || named != "Acme/on-acme" || len(w.app.refreshed) != 3 {
-		t.Fatalf("naming the organisation beside a personal account: Create = %q, %v after %d renewals, want it created with no person's token", named, err, len(w.app.refreshed))
-	}
-	// An organisation's connect keeps nothing of the person: the grant is revoked.
-	w.ok("owner", "POST", path, connectBody("code-acme", acme.ID), http.StatusCreated, &connected)
-	if len(w.app.revoked) != 1 || w.installations.kept[fmt.Sprintf("%s %d", w.orgA, acme.ID)] != "" {
-		t.Fatalf("an organisation connected: %v revoked, keeping %q, want the grant revoked and nothing kept", w.app.revoked, w.installations.kept[fmt.Sprintf("%s %d", w.orgA, acme.ID)])
-	}
-	// So is the grant of a connect that is refused.
-	w.refused("owner", "POST", path, connectBody("code-guest", acme.ID), http.StatusUnprocessableEntity, ReasonInstallationNotControlled)
-	if len(w.app.revoked) != 2 {
-		t.Fatalf("a refused connect left its grant: %v revoked, want 2", w.app.revoked)
-	}
-}
-
-// An App whose user tokens do not expire issues no refresh token: the person's token itself is
-// what is kept, and each create uses it as it is.
-func TestAPersonalAccountOfAnAppWhoseUserTokensDoNotExpireIsKeptByTheTokenItself(t *testing.T) {
-	ctx := context.Background()
-	w := newGitHubWorld(t, true)
-	w.app.unexpiring = true
-	w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
-	key := fmt.Sprintf("%s %d", w.orgA, carol.ID)
-	if w.installations.kept[key] != "ghu_carol_10" || len(w.app.revoked) != 0 {
-		t.Fatalf("keeping %q with %v revoked, want carol's token kept and not revoked", w.installations.kept[key], w.app.revoked)
-	}
-	for i := range 2 {
-		name := fmt.Sprintf("sweep-%d", i)
-		if named, err := w.host.Create(ctx, w.projectA, "", name, "", firstFiles); err != nil || named != "carol/"+name || w.installations.kept[key] != "ghu_carol_10" || len(w.app.refreshed) != 0 {
-			t.Fatalf("Create %d = %q, %v (keeping %q after %d trades), want it created with the token kept as it is", i, named, err, w.installations.kept[key], len(w.app.refreshed))
-		}
-	}
-}
-
-// Disconnecting a personal account ends at GitHub the authorisation kept for it, and one GitHub
-// does not answer for stays connected, so that no authorisation outlives its connection unseen.
-func TestDisconnectingAPersonalAccountEndsTheAuthorisationKeptForItAtGitHub(t *testing.T) {
-	path := func(w *githubWorld) string {
-		return fmt.Sprintf("/orgs/%s/github-installations/%d", w.orgA, carol.ID)
-	}
-	connected := func() *githubWorld {
-		w := newGitHubWorld(t, true)
-		w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
-		return w
-	}
-	w := connected()
-	w.ok("owner", "DELETE", path(w), nil, http.StatusNoContent, nil)
-	if !slices.Equal(w.app.revoked, []string{"ghu_carol_10"}) || len(w.installations.connected[w.orgA]) != 0 || len(w.installations.kept) != 0 {
-		t.Fatalf("revoked %v with %d connected and %v kept, want the token of the renewed authorisation ended and nothing left", w.app.revoked, len(w.installations.connected[w.orgA]), w.installations.kept)
-	}
-
-	// GitHub fails the revocation: the installation stays, holding the authorisation that
-	// replaced the one spent, and the next call ends it.
-	w = connected()
-	w.app.revokeErr = errors.New("github: DELETE /applications/Iv23test/token answered 500: " + leak)
-	if message := w.refused("owner", "DELETE", path(w), nil, http.StatusInternalServerError, ""); strings.Contains(message, leak) {
-		t.Fatalf("the answer repeats the failure's text: %s", message)
-	}
-	key := fmt.Sprintf("%s %d", w.orgA, carol.ID)
-	if len(w.installations.connected[w.orgA]) != 1 || w.installations.kept[key] != "ghr_carol_11" {
-		t.Fatalf("after a failed revocation: %d connected keeping %q, want it connected with the next refresh token", len(w.installations.connected[w.orgA]), w.installations.kept[key])
-	}
-	w.app.revokeErr = nil
-	w.ok("owner", "DELETE", path(w), nil, http.StatusNoContent, nil)
-	if !slices.Equal(w.app.revoked, []string{"ghu_carol_11"}) {
-		t.Fatalf("revoked %v, want the token of the second renewal", w.app.revoked)
-	}
-
-	// An authorisation GitHub no longer takes, or one the deployment can no longer read, has
-	// nothing to end and does not keep the installation connected.
-	for name, arrange := range map[string]func(*githubWorld){
-		"ran out or revoked on GitHub":  func(w *githubWorld) { w.app.refreshErr = github.ErrUserAuthorization },
-		"sealed under another secret":   func(w *githubWorld) { w.installations.unreadable = true },
-		"an organisation, keeping none": func(w *githubWorld) { w.connect(w.orgA, acme) },
-	} {
-		w := connected()
-		arrange(w)
-		target := path(w)
-		if name == "an organisation, keeping none" {
-			target = fmt.Sprintf("/orgs/%s/github-installations/%d", w.orgA, acme.ID)
-		}
-		w.ok("owner", "DELETE", target, nil, http.StatusNoContent, nil)
-		if len(w.app.revoked) != 0 {
-			t.Errorf("%s: revoked %v, want nothing ended at GitHub", name, w.app.revoked)
-		}
-	}
-	// GitHub rate limiting the renewal is no reason to drop a live authorisation.
-	w = connected()
-	w.app.refreshErr = github.ErrRateLimited
-	w.refused("owner", "DELETE", path(w), nil, http.StatusServiceUnavailable, github.ReasonUnavailable)
-	if len(w.installations.connected[w.orgA]) != 1 {
-		t.Fatal("a disconnect GitHub rate limited dropped the installation")
-	}
-}
-
-// With no authorisation GitHub takes, or with GitHub refusing the person's token the create or
-// the installation the repository, the refusal says what the owner does: connect again, or create
-// the repository on GitHub and name it. A repository the request names works as on any account.
-func TestACreateOnAPersonalAccountThatGitHubRefusesSaysWhatItsOwnerDoes(t *testing.T) {
-	ctx := context.Background()
 	for name, tc := range map[string]struct {
-		arrange func(*githubWorld)
-		status  int
-		reason  string
-		says    []string
+		createErr error
+		status    int
+		reason    string
+		says      []string
 	}{
-		"connected before the authorisation was kept": {func(w *githubWorld) { w.connect(w.orgA, carol) },
-			422, github.ReasonRepositoryAuthorizationRequired, []string{"connects the account again", "names it in repository"}},
-		"an authorisation sealed under a secret since replaced": {func(w *githubWorld) {
-			w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
-			w.installations.unreadable = true
-		}, 422, github.ReasonRepositoryAuthorizationRequired, []string{"connects the account again"}},
-		"github makes it on another account or public": {func(w *githubWorld) {
-			w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
-			w.app.createErr = &github.NotAsAskedError{Repository: "dave/sweep"}
-		}, 502, github.ReasonRepositoryNotCreated, []string{"dave/sweep", "names it in repository"}},
-		"an authorisation that ran out or was revoked": {func(w *githubWorld) {
-			w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
-			w.app.refreshErr = github.ErrUserAuthorization
-		}, 422, github.ReasonRepositoryAuthorizationRequired, []string{"connects the account again", "names it in repository"}},
-		"github refuses the person the creation": {func(w *githubWorld) {
-			w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
-			w.app.createErr = &github.CreationNotPermittedError{Accepted: "administration=write; repository_creation=write"}
-		}, 422, github.ReasonRepositoryCreationNotPermitted, []string{"administration=write; repository_creation=write", "names it in repository"}},
-		"github does not add it to the installation": {func(w *githubWorld) {
-			w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
-			w.app.createErr = &github.NotCoveredError{Repository: "carol/sweep", Cause: errors.New("github: PUT /user/installations/300/repositories/7 answered 403: " + leak)}
-		}, 502, github.ReasonRepositoryNotAdded, []string{"carol/sweep", "Add it to the installation", "name it in repository"}},
-		"github rate limits the renewal": {func(w *githubWorld) {
-			w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
-			w.app.refreshErr = github.ErrRateLimited
-		}, 503, github.ReasonUnavailable, nil},
+		"github refuses the installation the creation": {&github.CreationNotPermittedError{Accepted: "administration=write"}, 422, github.ReasonRepositoryCreationNotPermitted, []string{"administration=write", "names it in repository"}},
+		"github does not let it cover the repository":  {&github.NotCoveredError{Repository: "carol/sweep", Cause: errors.New(leak)}, 502, github.ReasonRepositoryNotAdded, []string{"carol/sweep", "Add it to the installation"}},
+		"github makes it elsewhere or public":          {&github.NotAsAskedError{Repository: "dave/sweep"}, 502, github.ReasonRepositoryNotCreated, []string{"dave/sweep"}},
 	} {
-		w := newGitHubWorld(t, true)
-		tc.arrange(w)
-		named, err := w.host.Create(ctx, w.projectA, "", "sweep", "", firstFiles)
-		if named != "" || statusOf(err) != tc.status || reasonOf(err) != tc.reason || len(w.app.created) != 0 {
-			t.Errorf("%s: Create = %q, %v, want %d %s and nothing created", name, named, err, tc.status, tc.reason)
+		w.app.createErr = tc.createErr
+		named, err := w.host.Create(ctx, w.projectA, "", "sweep-2", "", firstFiles)
+		if named != "" || statusOf(err) != tc.status || reasonOf(err) != tc.reason || strings.Contains(fmt.Sprint(err), leak) {
+			t.Errorf("%s: Create = %q, %v, want %d %s", name, named, err, tc.status, tc.reason)
 			continue
 		}
 		for _, want := range tc.says {
@@ -1252,43 +1018,24 @@ func TestACreateOnAPersonalAccountThatGitHubRefusesSaysWhatItsOwnerDoes(t *testi
 				t.Errorf("%s: the refusal does not say %q: %v", name, want, err)
 			}
 		}
-		if strings.Contains(err.Error(), leak) || strings.Contains(err.Error(), "ghr_") {
-			t.Errorf("%s: the refusal repeats GitHub's text or a token: %v", name, err)
-		}
-		if reached, err := w.host.Reachable(ctx, w.projectA, "carol/notes"); err != nil || reached != "carol/notes" {
-			t.Errorf("%s: a repository named on the personal account: Reachable = %q, %v, want it reached", name, reached, err)
-		}
 	}
 }
 
 // An installation connected before the type of its account was kept is listed without it and
-// GitHub is not asked: a create on it is GitHub's to place, and a personal one says to connect
-// the account again, which records the type.
+// GitHub is not asked: a create on it is GitHub's to place.
 func TestAnInstallationConnectedBeforeItsAccountTypeWasKeptIsReadAsStored(t *testing.T) {
 	ctx := context.Background()
 	w := newGitHubWorld(t, true)
 	untyped := carol
 	untyped.AccountType = ""
 	w.connect(w.orgA, untyped)
-	path := "/orgs/" + w.orgA + "/github-installations"
 	var listed []domain.OrgGitHubInstallation
-	w.ok("member", "GET", path, nil, http.StatusOK, &listed)
+	w.ok("member", "GET", "/orgs/"+w.orgA+"/github-installations", nil, http.StatusOK, &listed)
 	if len(listed) != 1 || listed[0].AccountType != "" || len(w.app.looked) != 0 {
 		t.Fatalf("listed = %+v after asking GitHub about %v, want it as stored and GitHub not asked", listed, w.app.looked)
 	}
-	if _, err := w.host.Create(ctx, w.projectA, "", "sweep", "", firstFiles); reasonOf(err) != github.ReasonRepositoryAuthorizationRequired || len(w.app.created) != 0 {
-		t.Fatalf("Create on an untyped personal account: %v (created %v), want repository_authorization_required", err, w.app.created)
-	}
-	// A connect that names nothing adds no account the org connected, so it is disconnected first.
-	w.refused("owner", "POST", path, connectBody("code-carol", 0), http.StatusUnprocessableEntity, ReasonAppNotInstalled)
-	w.ok("owner", "DELETE", fmt.Sprintf("%s/%d", path, carol.ID), nil, http.StatusNoContent, nil)
-	w.ok("owner", "POST", path, connectBody("code-carol", 0), http.StatusCreated, nil)
-	w.ok("member", "GET", path, nil, http.StatusOK, &listed)
-	if listed[0].AccountType != github.AccountUser {
-		t.Fatalf("listed = %+v, want the type recorded once the account is connected again", listed[0])
-	}
 	if named, err := w.host.Create(ctx, w.projectA, "", "sweep", "", firstFiles); err != nil || named != "carol/sweep" {
-		t.Fatalf("Create after connecting again = %q, %v, want it created", named, err)
+		t.Fatalf("Create on an untyped account = %q, %v, want it created", named, err)
 	}
 }
 
@@ -1296,8 +1043,7 @@ var firstFiles = map[string]string{"README.md": "what this is\n"}
 
 // What Create would refuse for the account alone is refused by CreatesOn, which the create of a
 // platform experiment and the wizard's check both call before anything is made: an installation
-// GitHub removed, one that has not granted every permission the App asks for, and on a personal
-// account an authorisation GitHub no longer takes.
+// GitHub removed or suspended, and one that has not granted every permission the App asks for.
 func TestWhereARepositoryWouldBeCreatedIsCheckedWithGitHubBeforeAnythingIsMade(t *testing.T) {
 	ctx := context.Background()
 	w := newGitHubWorld(t, true)
@@ -1328,24 +1074,29 @@ func TestWhereARepositoryWouldBeCreatedIsCheckedWithGitHubBeforeAnythingIsMade(t
 		t.Fatalf("created %v on an installation that refuses, want nothing", w.app.created)
 	}
 
-	w = newGitHubWorld(t, true)
-	w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
-	if on, err := w.host.CreatesOn(ctx, w.projectA, ""); err != nil || on != "carol" || len(w.app.refreshed) != 1 {
-		t.Fatalf("CreatesOn on a personal account = %q, %v after %d renewals, want carol, her authorisation renewed once", on, err, len(w.app.refreshed))
+	w.app.installationErr = github.ErrInstallationSuspended
+	if _, err := w.host.CreatesOn(ctx, w.projectA, "acme"); statusOf(err) != 422 || reasonOf(err) != github.ReasonInstallationSuspended || !strings.Contains(err.Error(), "suspended on Acme") {
+		t.Errorf("CreatesOn on a suspended installation: %v, want 422 installation_suspended naming the account", err)
 	}
-	w.app.refreshErr = github.ErrUserAuthorization
-	if _, err := w.host.CreatesOn(ctx, w.projectA, ""); reasonOf(err) != github.ReasonRepositoryAuthorizationRequired {
-		t.Fatalf("CreatesOn with an authorisation GitHub no longer takes: %v, want repository_authorization_required", err)
+	w = newGitHubWorld(t, true)
+	w.connect(w.orgA, carol)
+	if on, err := w.host.CreatesOn(ctx, w.projectA, ""); err != nil || on != "carol" {
+		t.Fatalf("CreatesOn on a personal account = %q, %v, want carol", on, err)
 	}
 }
 
-// With several accounts connected the org's default takes a new repository no request placed,
-// and an owner of the org sets it.
+// With several accounts connected the org's default takes a new repository no request placed:
+// the org's first, or the one an owner of the org sets.
 func TestTheOrgsDefaultAccountTakesANewRepositoryNoRequestPlaced(t *testing.T) {
 	ctx := context.Background()
 	w := newGitHubWorld(t, true)
 	w.connect(w.orgA, acme)
 	w.connect(w.orgA, rival)
+	if on, err := w.host.CreatesOn(ctx, w.projectA, ""); err != nil || on != "Acme" {
+		t.Fatalf("CreatesOn with the org's first the default = %q, %v, want Acme", on, err)
+	}
+	w.ok("owner", "DELETE", fmt.Sprintf("/orgs/%s/github-installations/%d", w.orgA, acme.ID), nil, http.StatusNoContent, nil)
+	w.connect(w.orgA, acme)
 	if _, err := w.host.CreatesOn(ctx, w.projectA, ""); reasonOf(err) != github.ReasonRepositoryAccountRequired || !strings.Contains(err.Error(), "default") {
 		t.Fatalf("several accounts and no default: %v, want repository_account_required saying a default may be set", err)
 	}
@@ -1355,7 +1106,7 @@ func TestTheOrgsDefaultAccountTakesANewRepositoryNoRequestPlaced(t *testing.T) {
 	w.ok("owner", "PUT", path(rival.ID), nil, http.StatusNoContent, nil)
 	var listed []domain.OrgGitHubInstallation
 	w.ok("member", "GET", "/orgs/"+w.orgA+"/github-installations", nil, http.StatusOK, &listed)
-	if len(listed) != 2 || listed[0].Default || !listed[1].Default {
+	if len(listed) != 2 || !listed[0].Default || listed[0].InstallationID != rival.ID || listed[1].Default {
 		t.Fatalf("listed = %+v, want rival alone the default", listed)
 	}
 	if on, err := w.host.CreatesOn(ctx, w.projectA, ""); err != nil || on != "rival" {
@@ -1415,7 +1166,7 @@ func TestAConnectedInstallationIsCheckedWithGitHubOnRequest(t *testing.T) {
 		t.Errorf("an installation that has not granted creation: %s, want what it has not granted", message)
 	}
 	delete(w.app.covers, acme.ID)
-	if message := w.refused("member", "GET", path, nil, http.StatusUnprocessableEntity, github.ReasonInstallationGone); !strings.Contains(message, "installs the App there again") {
+	if message := w.refused("member", "GET", path, nil, http.StatusUnprocessableEntity, github.ReasonInstallationGone); !strings.Contains(message, "installs the App again") {
 		t.Errorf("an installation GitHub removed: %s, want what to do", message)
 	}
 	w.refused("member", "GET", fmt.Sprintf("/orgs/%s/github-installations/%d/check", w.orgA, rival.ID), nil, http.StatusNotFound, ReasonNotFound)

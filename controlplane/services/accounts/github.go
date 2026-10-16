@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"slices"
 	"sort"
 	"strings"
@@ -24,26 +25,23 @@ import (
 // GitHubApp is what the platform asks of its GitHub App. *github.Client satisfies it.
 type GitHubApp interface {
 	App() github.App
-	UserInstallations(ctx context.Context, userCode, redirectURI string) (*github.UserGrant, error)
-	RevokeUser(ctx context.Context, accessToken string) error
-	UserToken(ctx context.Context, authorization string) (accessToken, next string, err error)
 	Installation(ctx context.Context, installationID int64) (*github.Installation, error)
 	Repositories(ctx context.Context, installationID int64) ([]github.Repository, error)
 	Token(ctx context.Context, installationID int64, fullName string, access github.Access) (*github.Token, error)
 	File(ctx context.Context, token *github.Token, ref, path string) ([]byte, error)
-	CreateRepository(ctx context.Context, installationID int64, userToken, name, description string, files map[string]string) (*github.Repository, error)
+	CreateRepository(ctx context.Context, installationID int64, name, description string, files map[string]string) (*github.Repository, error)
 	StartFresh(ctx context.Context, token *github.Token, files map[string]string) error
 }
 
-// InstallationStore is the persistence of the installations orgs connected.
-// *db.GitHubInstallationsStore satisfies it.
+// InstallationStore is the persistence of the installations orgs connected and of the installs
+// people started. *db.AccountsStore satisfies it.
 type InstallationStore interface {
 	GetProject(ctx context.Context, id string) (*domain.Project, error)
 	ConnectGitHubInstallation(ctx context.Context, installation *domain.OrgGitHubInstallation) error
 	ListGitHubInstallations(ctx context.Context, orgID string) ([]*domain.OrgGitHubInstallation, error)
 	GitHubInstallationOfAccount(ctx context.Context, orgID, accountLogin string) (*domain.OrgGitHubInstallation, error)
-	KeepGitHubUserAuthorization(ctx context.Context, orgID string, installationID int64, authorization string) error
-	RenewGitHubUserToken(ctx context.Context, orgID string, installationID int64, renew func(ctx context.Context, authorization string) (accessToken, next string, err error)) (string, error)
+	IssueGitHubInstallState(ctx context.Context, orgID string, actor domain.Actor, returnTo string, lifetime time.Duration) (string, time.Time, error)
+	TakeGitHubInstallState(ctx context.Context, state string, actor domain.Actor) (*db.GitHubInstallState, error)
 	DisconnectGitHubInstallation(ctx context.Context, orgID string, installationID int64) error
 	MakeGitHubInstallationDefault(ctx context.Context, orgID string, installationID int64) error
 }
@@ -96,24 +94,23 @@ type GitCredential struct {
 // The reasons a client tells a refusal of a connect or a credential apart by. The others are
 // the git host's (github.Reason*).
 const (
-	ReasonGitHubNotConfigured         = "github_not_configured"
-	ReasonInvalidRequest              = "invalid_request"
-	ReasonAppNotInstalled             = "app_not_installed"
-	ReasonInstallationChoiceRequired  = "installation_choice_required"
-	ReasonInstallationNotReachable    = "installation_not_reachable"
-	ReasonInstallationNotControlled   = "installation_not_controlled"
-	ReasonMembersPermissionNotGranted = "members_permission_not_granted"
-	ReasonNoRepository                = "no_repository"
-	ReasonRunOver                     = "run_over"
-	ReasonForbidden                   = "forbidden"
+	ReasonGitHubNotConfigured = "github_not_configured"
+	ReasonInvalidRequest      = "invalid_request"
+	ReasonInstallStateInvalid = "install_state_invalid"
+	ReasonInstallationNotNew  = "installation_not_new"
+	ReasonNoRepository        = "no_repository"
+	ReasonRunOver             = "run_over"
+	ReasonForbidden           = "forbidden"
 )
 
-// choiceRequired is the refusal of a connect that named no installation while the person
-// reaches several: it carries them, for the client to ask which.
-type choiceRequired struct {
-	api.Refusal
-	Installations []github.Installation `json:"installations"`
-}
+const (
+	// installStateLifetime is how long a person has from pressing Install GitHub App to GitHub
+	// handing the state back.
+	installStateLifetime = 15 * time.Minute
+	// clockSkew is how far GitHub's clock may run behind the platform's when it says when an
+	// installation last changed.
+	clockSkew = time.Minute
+)
 
 var errNoApp = api.Refuse(http.StatusServiceUnavailable, ReasonGitHubNotConfigured,
 	"this deployment has no GitHub App configured, so GitHub cannot be connected and no repository cloned through it")
@@ -128,6 +125,8 @@ func refusal(logger *zap.Logger, op string, err error, gone int) error {
 		return notFound("GitHub installation")
 	case errors.Is(err, db.ErrPlatformExperimentNotFound):
 		return notFound("platform experiment")
+	case errors.Is(err, db.ErrGitHubInstallStateInvalid):
+		return invalid(ReasonInstallStateInvalid, "this return from GitHub does not match an install you started in the last 15 minutes, or it was used already: press Install GitHub App again")
 	}
 	return github.Refusal(logger, op, err, gone)
 }
@@ -139,13 +138,9 @@ func (r *Repositories) app() (GitHubApp, error) {
 	return r.github, nil
 }
 
-// connect records an installation of the App as an org's. The proof is GitHub's: the person
-// behind code controls the account the installation is on, their own or an organisation they
-// are an admin of. Reaching it is not enough, since a collaborator on one repository reaches the
-// installation that covers it. With no installation named, the only one they control is meant,
-// and with several the answer lists them for the client to ask which. The person's grant is
-// kept only for an installation on their own account, to create repositories there.
-func (r *Repositories) connect(ctx context.Context, orgID, code, redirectURI string, installationID int64) (*domain.OrgGitHubInstallation, error) {
+// beginInstall records an install of the App that the caller starts for an org, and returns the
+// address on GitHub that carries its state. returnTo is the page of the UI the person returns to.
+func (r *Repositories) beginInstall(ctx context.Context, orgID, returnTo string) (*InstallStart, error) {
 	p, err := r.access.OrgAdmin(ctx, orgID)
 	if err != nil {
 		return nil, err
@@ -154,121 +149,105 @@ func (r *Repositories) connect(ctx context.Context, orgID, code, redirectURI str
 	if err != nil {
 		return nil, err
 	}
-	if code == "" || redirectURI == "" || installationID < 0 {
-		return nil, invalid(ReasonInvalidRequest, "code and redirect_uri are required, and installation_id is a positive number or left out: GitHub hands the code back after the person authorises the App, to the redirect_uri it was sent")
+	if !inApp(returnTo) {
+		return nil, invalid(ReasonInvalidRequest, "return_to is a path of the UI: one leading slash, no second, no backslash or control character")
 	}
-	connected, err := r.store.ListGitHubInstallations(ctx, orgID)
+	actor := p.Actor()
+	if actor.ID == "" {
+		return nil, api.Refuse(http.StatusForbidden, ReasonForbidden, "an install of the GitHub App is started by a user or an API key, the one that finishes it")
+	}
+	state, expires, err := r.store.IssueGitHubInstallState(ctx, orgID, actor, returnTo, installStateLifetime)
 	if err != nil {
 		return nil, err
 	}
-	grant, err := app.UserInstallations(ctx, code, redirectURI)
+	address, err := url.Parse(app.App().InstallURL)
 	if err != nil {
 		return nil, err
 	}
-	// On a person's own account GitHub creates a repository for that person alone, so the grant
-	// of the one who connects theirs is kept. Any other is ended here.
-	chosen, err := chosenInstallation(grant.Installations, connected, installationID)
-	if err == nil {
-		// GitHub as the App states whether the installation granted every permission it asks for.
-		_, err = app.Installation(ctx, chosen.ID)
+	query := address.Query()
+	query.Set("state", state)
+	address.RawQuery = query.Encode()
+	return &InstallStart{State: state, InstallURL: address.String(), ExpiresAt: expires}, nil
+}
+
+// inApp is a path of the UI: one leading slash and no second, and no backslash or control
+// character, which a browser reads as a slash or drops and so turns into a second one that
+// leaves the origin.
+func inApp(path string) bool {
+	return strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "//") && !strings.ContainsFunc(path, func(c rune) bool { return c == '\\' || c < 0x20 || c == 0x7f })
+}
+
+// finishInstall connects the installation GitHub handed back with state to the org the state was
+// issued for. The state proves who started the install and for which org: it is the caller's, it
+// was not taken before and it has not run out. installation_id comes from the browser, so GitHub
+// is asked as the App about it: it exists, is not suspended, has granted every permission, and
+// was made or changed after the state was issued, which an installation the person did not just
+// install or change was not. One the org connected before is answered as it is, after its
+// repositories changed.
+func (r *Repositories) finishInstall(ctx context.Context, state string, installationID int64) (*InstallFinished, error) {
+	p, err := r.access.Account(ctx)
+	if err != nil {
+		return nil, err
 	}
-	if err != nil || chosen.AccountType != github.AccountUser {
-		if revokeErr := app.RevokeUser(ctx, grant.AccessToken); revokeErr != nil && err == nil {
-			err = revokeErr
-		}
+	app, err := r.app()
+	if err != nil {
+		return nil, err
+	}
+	if state == "" || installationID <= 0 {
+		return nil, invalid(ReasonInvalidRequest, "state and installation_id are required, as GitHub handed them back from the install")
+	}
+	started, err := r.store.TakeGitHubInstallState(ctx, state, p.Actor())
+	if err != nil {
+		return nil, err
+	}
+	if _, err := r.access.OrgAdmin(ctx, started.OrgID); err != nil {
+		return nil, err
+	}
+	live, err := app.Installation(ctx, installationID)
+	if errors.Is(err, github.ErrInstallationGone) {
+		err = &github.InstallationGoneError{Account: "the GitHub account", Installation: installationID, Suspended: errors.Is(err, github.ErrInstallationSuspended)}
 	}
 	if err != nil {
 		return nil, err
 	}
-	installation := &domain.OrgGitHubInstallation{OrgID: orgID, InstallationID: chosen.ID, AccountLogin: chosen.AccountLogin, AccountType: chosen.AccountType, ConnectedActor: p.Actor()}
+	connected, err := r.store.ListGitHubInstallations(ctx, started.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	if i := slices.IndexFunc(connected, func(one *domain.OrgGitHubInstallation) bool { return one.InstallationID == installationID }); i >= 0 {
+		return &InstallFinished{OrgID: started.OrgID, ReturnTo: started.ReturnTo, Installation: connected[i]}, nil
+	}
+	if live.ChangedAt.Before(started.IssuedAt.Add(-clockSkew)) {
+		return nil, invalid(ReasonInstallationNotNew, "GitHub says the App on "+live.AccountLogin+" was last changed before this install started, so nothing shows it was you who just installed it. "+
+			"On GitHub, change which repositories the App can reach there, or uninstall it and press Install GitHub App again")
+	}
+	installation := &domain.OrgGitHubInstallation{OrgID: started.OrgID, InstallationID: live.ID, AccountLogin: live.AccountLogin, AccountType: live.AccountType, ConnectedActor: p.Actor()}
 	if err := r.store.ConnectGitHubInstallation(ctx, installation); err != nil {
 		return nil, err
 	}
-	if chosen.AccountType == github.AccountUser {
-		if err := r.store.KeepGitHubUserAuthorization(ctx, orgID, chosen.ID, grant.Authorization); err != nil {
-			return nil, err
-		}
-	}
-	return installation, nil
+	return &InstallFinished{OrgID: started.OrgID, ReturnTo: started.ReturnTo, Installation: installation}, nil
 }
 
-// disconnect takes an installation away from an org. The authorisation kept for one on a
-// person's own account is ended at GitHub first, so that none outlives the connection: with
-// GitHub not answering, the installation stays connected and the call is made again.
+// InstallStart is an install of the GitHub App started for an org.
+type InstallStart struct {
+	State      string    `json:"state" doc:"Good once, for the caller, until expires_at. GitHub hands it back to the App's setup URL with installation_id."`
+	InstallURL string    `json:"install_url" doc:"GitHub's install page of the App, carrying state. Open it for the person."`
+	ExpiresAt  time.Time `json:"expires_at"`
+}
+
+// InstallFinished is an installation connected from the install it finished.
+type InstallFinished struct {
+	OrgID        string                        `json:"org_id"`
+	ReturnTo     string                        `json:"return_to" doc:"The page of the UI the install was started from."`
+	Installation *domain.OrgGitHubInstallation `json:"installation"`
+}
+
+// disconnect takes an installation away from an org.
 func (r *Repositories) disconnect(ctx context.Context, orgID string, installationID int64) error {
 	if _, err := r.access.OrgAdmin(ctx, orgID); err != nil {
 		return err
 	}
-	if r.github != nil {
-		accessToken, err := r.store.RenewGitHubUserToken(ctx, orgID, installationID, r.github.UserToken)
-		switch {
-		case errors.Is(err, github.ErrUserAuthorization):
-		case errors.Is(err, db.ErrGitHubAuthorizationUnreadable):
-			r.logger.Error("a kept github authorisation cannot be read and is dropped without being ended at GitHub", zap.String("orgID", orgID), zap.Int64("installationID", installationID))
-		case err != nil:
-			return err
-		default:
-			if err := r.github.RevokeUser(ctx, accessToken); err != nil && !errors.Is(err, github.ErrUserAuthorization) {
-				return err
-			}
-		}
-	}
 	return r.store.DisconnectGitHubInstallation(ctx, orgID, installationID)
-}
-
-// chosenInstallation is the installation a connect means among those the person reaches: the one
-// named, or with none named the only one they control that the org has not connected.
-func chosenInstallation(reached []github.Installation, connected []*domain.OrgGitHubInstallation, installationID int64) (*github.Installation, error) {
-	notInstalled := invalid(ReasonAppNotInstalled, "Install the GitHub App on the GitHub account to connect, at install_url of GET /github/app, then connect again.")
-	if installationID != 0 {
-		for i := range reached {
-			if reached[i].ID == installationID {
-				return &reached[i], controls(reached[i])
-			}
-		}
-		if len(reached) == 0 {
-			return nil, notInstalled
-		}
-		return nil, invalid(ReasonInstallationNotReachable, "Sign in to GitHub as an account that reaches that installation of the GitHub App, then connect again.")
-	}
-	candidates, hidden := []github.Installation{}, []github.Installation{}
-	for _, one := range reached {
-		switch {
-		case slices.ContainsFunc(connected, func(c *domain.OrgGitHubInstallation) bool { return c.InstallationID == one.ID }):
-		case one.Controlled:
-			candidates = append(candidates, one)
-		case one.MembershipHidden:
-			hidden = append(hidden, one)
-		}
-	}
-	switch {
-	case len(candidates) == 1:
-		return &candidates[0], nil
-	case len(candidates) > 1:
-		return nil, &choiceRequired{
-			Refusal: *api.Refuse(http.StatusConflict, ReasonInstallationChoiceRequired,
-				"Choose which GitHub account to connect and send its installation_id."),
-			Installations: candidates,
-		}
-	case len(hidden) > 0:
-		return nil, controls(hidden[0])
-	}
-	return nil, notInstalled
-}
-
-// controls refuses an installation the person reaches on an account they do not control, or whose
-// organisation GitHub does not say they administer.
-func controls(installation github.Installation) error {
-	switch {
-	case installation.Controlled:
-		return nil
-	case installation.MembershipHidden:
-		return invalid(ReasonMembersPermissionNotGranted, "Accept the GitHub App's request to read the members of "+installation.AccountLogin+" on GitHub, in that organisation's settings under GitHub Apps, then connect again.")
-	}
-	if installation.AccountType == github.AccountUser {
-		return invalid(ReasonInstallationNotControlled, "Sign in to GitHub as "+installation.AccountLogin+" to connect that account.")
-	}
-	return invalid(ReasonInstallationNotControlled, "Ask an admin of the GitHub organisation "+installation.AccountLogin+" to connect it.")
 }
 
 // repositories lists what the org's connected installations cover, read from GitHub now. An
@@ -352,11 +331,9 @@ func (r *Repositories) credential(ctx context.Context, protocol, host, path stri
 func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "get-github-app", Method: "GET", Path: "/github/app",
-		Summary: "Where to install and authorise the platform's GitHub App", Tags: []string{"github"},
-		Description: "The GitHub addresses a browser needs for an org's repositories. new_repository_url is where a person creates a repository themselves. Send the person to install_url to install the App on a " +
-			"GitHub account and choose its repositories: GitHub returns them with installation_id. Send them to authorize_url, with redirect_uri and " +
-			"state added, to prove who they are: GitHub returns them with code and state. The client must generate state itself, keep it, and refuse a " +
-			"return whose state is not the one it sent, or another site could finish the connect in the person's name. " +
+		Summary: "The platform's GitHub App", Tags: []string{"github"},
+		Description: "The GitHub addresses a browser needs for an org's repositories. new_repository_url is where a person creates a repository themselves. " +
+			"install_url is the App's install page; connecting an installation starts at POST /orgs/{id}/github-install-states, whose install_url carries the state. " +
 			"Answers 503 github_not_configured on a deployment that has no GitHub App.",
 	}, func(ctx context.Context, _ *struct{}) (*struct{ Body github.App }, error) {
 		if _, err := r.access.Account(ctx); err != nil {
@@ -370,39 +347,45 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 	})
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
-		OperationID: "create-github-installation", Method: "POST", Path: "/orgs/{id}/github-installations", DefaultStatus: http.StatusCreated,
-		Summary: "Connect a GitHub App installation to an org", Tags: []string{"github"},
-		Description: "For an owner of the org. From then on a platform experiment of the org may name any repository the installation covers, and the " +
-			"owner of the GitHub account decides that set on GitHub. code, from GitHub's authorisation of the App, must belong to a GitHub account that " +
-			"controls the account the installation is on: that account itself, or an admin of the GitHub organisation. GitHub is asked which installations it reaches " +
-			"and which accounts it controls: on an organisation GitHub shows that only through an installation that granted the App the organisation permission Members (read). The person's token is revoked before this call returns, but for an installation on their own account: GitHub creates a repository " +
-			"there for its owner alone, so the platform keeps that authorisation, stored sealed, until the installation is disconnected: renewed at each use for up to six months, " +
-			"or for as long as GitHub takes it where the GitHub App's user tokens do not expire. " +
-			"Reaching an installation, as a collaborator on one of its repositories does, connects nothing. " +
-			"redirect_uri is the one the code was issued to. Verify state before calling (see GET /github/app). " +
-			"installation_id may be left out when GitHub did not hand one back, as when the App was installed before: the one installation the " +
-			"person controls that the org has not connected is connected, with none the answer is 422 app_not_installed and the client sends the person to install_url, " +
-			"and with several it is 409 installation_choice_required with installations, a list of " +
-			"{installation_id, account_login, account_type} to ask them about, after which they authorise again. Connecting one that is connected answers with it. " +
-			"account_type says whether the account is a person's own (User) or an organisation: on an organisation the installation creates a repository, " +
-			"on a personal account the owner's kept authorisation does. " +
-			"422 invalid_request, code_rejected, app_not_installed (the person controls none the org has not connected, or reaches none), installation_not_reachable (not the one named), " +
-			"installation_not_controlled (reached, and on an account that is not theirs to connect) or members_permission_not_granted " +
-			"(on an organisation whose installation has not granted Members (read), so GitHub does not say whether the person is its admin). " +
-			"503 github_not_configured.",
+		OperationID: "create-github-install-state", Method: "POST", Path: "/orgs/{id}/github-install-states", DefaultStatus: http.StatusCreated,
+		Summary: "Start installing the platform's GitHub App for an org", Tags: []string{"github"},
+		Description: "For an owner of the org, as a user or an API key. Answers a state good once, for the caller, for 15 minutes, and install_url, GitHub's install page of the App carrying it. " +
+			"The person installs the App there on their own GitHub account or an organisation, or changes the repositories of an installation they made before. " +
+			"GitHub then sends them to the App's setup URL with state, installation_id and setup_action, and POST /github/installations connects the installation. " +
+			"return_to is the page of the UI the install starts from, handed back when it finishes. 422 invalid_request when it is not a path of the UI. 503 github_not_configured.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
-			Code           string `json:"code" doc:"The code GitHub returned from authorize_url. It works once."`
-			RedirectURI    string `json:"redirect_uri" doc:"The redirect_uri sent to authorize_url, to which GitHub returned the code."`
-			InstallationID int64  `json:"installation_id,omitempty" required:"false" doc:"The installation to connect, as GitHub returned it from install_url or as a 409 of this call listed it."`
+			ReturnTo string `json:"return_to" doc:"A path of the UI, as /settings."`
 		}
-	}) (*struct{ Body *domain.OrgGitHubInstallation }, error) {
-		installation, err := r.connect(ctx, in.ID, in.Body.Code, in.Body.RedirectURI, in.Body.InstallationID)
+	}) (*struct{ Body *InstallStart }, error) {
+		started, err := r.beginInstall(ctx, in.ID, in.Body.ReturnTo)
+		if err != nil {
+			return nil, refusal(r.logger, "create-github-install-state", err, http.StatusUnprocessableEntity)
+		}
+		return &struct{ Body *InstallStart }{Body: started}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "create-github-installation", Method: "POST", Path: "/github/installations", DefaultStatus: http.StatusCreated,
+		Summary: "Connect the GitHub App installation an install made or changed", Tags: []string{"github"},
+		Description: "For the user or API key that started the install, while still an owner of its org. state and installation_id are what GitHub handed back to the setup URL. " +
+			"The state is taken once whatever the outcome. The installation is asked of GitHub as the App: it must exist, not be suspended, have granted every permission the App asks for, " +
+			"and have been made or changed after the state was issued. An installation the org connected before is answered as it is; a new one is connected, and is the org's default for new repositories when it is the org's first. " +
+			"account_type says whether the account is a person's own (User) or an organisation. " +
+			"422 install_state_invalid (made up, used, expired or another person's), installation_not_new (last changed before the install started), installation_gone, installation_suspended, " +
+			"github_permission_missing naming each permission missing as name:level. 502 github_failed, 503 github_not_configured.",
+	}, func(ctx context.Context, in *struct {
+		Body struct {
+			State          string `json:"state" doc:"The state of POST /orgs/{id}/github-install-states, as GitHub handed it back."`
+			InstallationID int64  `json:"installation_id" doc:"The installation GitHub handed back."`
+		}
+	}) (*struct{ Body *InstallFinished }, error) {
+		finished, err := r.finishInstall(ctx, in.Body.State, in.Body.InstallationID)
 		if err != nil {
 			return nil, refusal(r.logger, "create-github-installation", err, http.StatusUnprocessableEntity)
 		}
-		return &struct{ Body *domain.OrgGitHubInstallation }{Body: installation}, nil
+		return &struct{ Body *InstallFinished }{Body: finished}, nil
 	})
 
 	type installationsPage struct {
@@ -440,8 +423,7 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 		Summary: "Disconnect a GitHub App installation from an org", Tags: []string{"github"},
 		Description: "For an owner of the org. No git credential is minted through it from then on: a platform experiment that names a repository of " +
 			"it keeps running, its agents and jobs can no longer clone, fetch or push once the credential they hold runs out, within the hour, and " +
-			"their next credential call answers 409 installation_not_connected. The authorisation kept for a personal account is ended at GitHub and dropped: " +
-			"when GitHub does not answer for that, the installation stays connected and the call is made again. The App stays installed on GitHub: removing it there is the account " +
+			"their next credential call answers 409 installation_not_connected. The App stays installed on GitHub: removing it there is the account " +
 			"owner's own step. 404 not_found when the org had not connected it.",
 	}, func(ctx context.Context, in *struct {
 		ID             string `path:"id"`
@@ -477,7 +459,7 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 		OperationID: "check-github-installation", Method: "GET", Path: "/orgs/{id}/github-installations/{installation_id}/check", DefaultStatus: http.StatusNoContent,
 		Summary: "Check with GitHub that a connected installation still works", Tags: []string{"github"},
 		Description: "For any member of the org. Asks GitHub now whether the App is still installed on the account and has granted every permission the App asks for (app-manifest.json), " +
-			"the check a create runs on the account it creates on. 204 when it has. 422 installation_gone when GitHub removed or suspended it, github_permission_missing naming what it has not granted, " +
+			"the check a create runs on the account it creates on. 204 when it has. 422 installation_gone when GitHub removed it, installation_suspended when its owner suspended it, github_permission_missing naming what it has not granted, " +
 			"each with what to do. 404 not_found when the org has not connected it. 502 github_failed, 503 github_not_configured.",
 	}, func(ctx context.Context, in *struct {
 		ID             string `path:"id"`
@@ -552,7 +534,7 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 			"owner/name.git/info/lfs. 403 run_over once the platform experiment is closed or the agent, for a job the agent it belongs to, was cut, and " +
 			"403 forbidden for any other kind of token. 404 no_repository when the platform experiment names none, 404 not_found for another address. " +
 			"409 installation_not_connected when the org disconnected the installation, repository_not_reachable when the repository left it, " +
-			"installation_gone when the App was removed on GitHub, github_permission_missing when its owner has yet to accept the App's permissions, naming each one missing as name:level. " +
+			"installation_gone when the App was removed on GitHub, installation_suspended when it was suspended there, github_permission_missing when its owner has yet to accept the App's permissions, naming each one missing as name:level. " +
 			"502 github_failed when GitHub answers 5xx or not at all for the installation, the message naming it and GitHub's answer. " +
 			"On a deployment whose git host is plain the credential is the deployment's one, the same for every caller and with no expires_at, " +
 			"and 404 not_found when that host takes none.",

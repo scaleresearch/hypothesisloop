@@ -391,8 +391,8 @@ func (c *Config) build() error {
 		if g.GitHub == nil || g.Plain != nil {
 			return fmt.Errorf("git_host provider github takes the git_host github section and no other")
 		}
-		if a := g.GitHub; a.AppID <= 0 || a.AppSlug == "" || a.ClientID == "" || a.ClientSecret == "" || a.PrivateKey == "" {
-			return fmt.Errorf("git_host github app_id, app_slug, client_id, client_secret and private_key are all required")
+		if a := g.GitHub; a.AppID <= 0 || a.AppSlug == "" || a.PrivateKey == "" {
+			return fmt.Errorf("git_host github app_id, app_slug and private_key are all required")
 		}
 	case GitHostProviderPlain:
 		if g.Plain == nil || g.GitHub != nil {

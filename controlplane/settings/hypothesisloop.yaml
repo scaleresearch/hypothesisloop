@@ -230,14 +230,9 @@ job_images:
 #     github:
 #       app_id: 123456
 #       app_slug: hypothesisloop
-#       client_id: Iv23...
-#       client_secret: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET}
 #       private_key: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY}
 #
 #   app_id, app_slug   the App's number and the name in its URL.
-#   client_id, client_secret
-#                      the App's own OAuth pair. They prove, once per attach, that the person
-#                      attaching a repository can push to it. The person's token is dropped after.
 #   private_key        the PEM GitHub issued for the App. It signs the request for every token.
 #
 # The App asks for the permissions controlplane/shared/githost/github/app-manifest.json states, and

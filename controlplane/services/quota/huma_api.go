@@ -145,9 +145,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Description: "Runs the repository checks of POST /platform-experiments and POST /platform-experiments/drafts for repository and repository_account as they would be sent, and creates nothing. " +
 			"A repository named must be reachable through an installation the org connected and the App allowed to push to it: it is answered as GitHub names it, with repository_url. " +
 			"With none named, the account a new repository would be created on is answered in repository_account, after GitHub confirms the App is still installed there and has granted " +
-			"every permission the App asks for, and on a personal account that the authorisation kept for it still works. " +
-			"Refused with the reasons of those creates: 422 github_not_connected, repository_account_required, installation_not_connected, installation_gone, github_permission_missing, " +
-			"repository_not_reachable, repository_authorization_required, invalid_repository, invalid_request; 502 github_failed; on a plain git host 422 repository_required and repository_not_reachable.",
+			"every permission the App asks for. " +
+			"Refused with the reasons of those creates: 422 github_not_connected, repository_account_required, installation_not_connected, installation_gone, installation_suspended, github_permission_missing, " +
+			"repository_not_reachable, invalid_repository, invalid_request; 502 github_failed; on a plain git host 422 repository_required and repository_not_reachable.",
 	}, func(ctx context.Context, in *struct {
 		ID                string `path:"id"`
 		Repository        string `query:"repository" doc:"owner/name, as the create would name it. Left out, a new repository is checked."`

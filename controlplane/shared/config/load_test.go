@@ -374,8 +374,6 @@ git_host:
   github:
     app_id: 4242
     app_slug: hypothesisloop
-    client_id: Iv23test
-    client_secret: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET}
     private_key: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY}
 `
 
@@ -384,7 +382,6 @@ func TestLoadTakesTheGitHubAppSecretsFromTheEnvironment(t *testing.T) {
 	if err := loadText(t, text); err == nil || !strings.Contains(err.Error(), "HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_") {
 		t.Fatalf("Load with the App's secrets unset: got = %v, want it to name the missing variable", err)
 	}
-	t.Setenv("HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET", "client-secret")
 	t.Setenv("HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\nabc: def # not a comment\n-----END RSA PRIVATE KEY-----\n")
 	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
@@ -395,20 +392,19 @@ func TestLoadTakesTheGitHubAppSecretsFromTheEnvironment(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	app := cfg.GitHost.GitHub
-	if cfg.GitHost.Provider != GitHostProviderGitHub || app == nil || app.AppID != 4242 || app.ClientSecret != "client-secret" ||
+	if cfg.GitHost.Provider != GitHostProviderGitHub || app == nil || app.AppID != 4242 ||
 		app.PrivateKey != os.Getenv("HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY") {
-		t.Fatalf("git_host = %+v, want the github section with both secrets as the environment holds them", cfg.GitHost.Provider)
+		t.Fatalf("git_host = %+v, want the github section with the private key as the environment holds it", cfg.GitHost.Provider)
 	}
 }
 
 func TestLoadTakesOneGitHostAndRefusesAHalfStatedOne(t *testing.T) {
-	t.Setenv("HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET", "client-secret")
 	t.Setenv("HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY", "pem")
 	t.Setenv("HL_TEST_GIT_USERNAME", "platform")
 	t.Setenv("HL_TEST_GIT_PASSWORD", "secret")
 	const plain = "\ngit_host:\n  provider: plain\n  plain:\n    base_url: https://git.example/experiments\n"
 	const credential = "    username: ${HL_TEST_GIT_USERNAME}\n    password: ${HL_TEST_GIT_PASSWORD}\n"
-	const app = "  github:\n    app_id: 4242\n    app_slug: hypothesisloop\n    client_id: Iv23test\n    client_secret: x\n    private_key: y\n"
+	const app = "  github:\n    app_id: 4242\n    app_slug: hypothesisloop\n    private_key: y\n"
 	for name, section := range map[string]string{
 		"a plain host that asks for no credential": plain,
 		"a plain host with the credential":         plain + credential,
@@ -449,10 +445,8 @@ func TestLoadTakesOneGitHostAndRefusesAHalfStatedOne(t *testing.T) {
 }
 
 func TestLoadRejectsAHalfConfiguredGitHubApp(t *testing.T) {
-	t.Setenv("HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET", "client-secret")
 	t.Setenv("HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY", "pem")
-	for _, line := range []string{"    app_id: 4242\n", "    app_slug: hypothesisloop\n", "    client_id: Iv23test\n",
-		"    client_secret: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET}\n", "    private_key: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY}\n"} {
+	for _, line := range []string{"    app_id: 4242\n", "    app_slug: hypothesisloop\n", "    private_key: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY}\n"} {
 		section := strings.Replace(githubSection, line, "", 1)
 		if section == githubSection {
 			t.Fatalf("the test section has no line %q", line)

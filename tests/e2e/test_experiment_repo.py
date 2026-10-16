@@ -66,7 +66,8 @@ def _call(api: API, method: str, path: str, body: dict | None = None) -> request
     return api.session.request(method, api._url(path), json=body, timeout=30)
 
 
-CONNECT = {"code": "a-code-github-never-issued", "redirect_uri": "http://localhost:3000/settings/github"}
+START = {"return_to": "/settings"}
+FINISH = {"state": "a-state-never-issued", "installation_id": 1}
 # What git's helper asks a credential for.
 ANY_REPO = {"protocol": "https", "host": "github.com", "path": "acme/model.git"}
 
@@ -87,7 +88,7 @@ def test_an_org_starts_with_no_github_connected(orgs):
 def test_another_orgs_github_reads_as_an_org_that_does_not_exist(orgs):
     a, b = orgs
     for method, suffix, body in (
-        ("GET", "github-installations", None), ("POST", "github-installations", CONNECT),
+        ("GET", "github-installations", None), ("POST", "github-install-states", START),
         ("DELETE", "github-installations/1", None), ("GET", "github-repositories", None),
     ):
         foreign = _call(a.api, method, f"/orgs/{b.org_id}/{suffix}", body)
@@ -98,20 +99,31 @@ def test_another_orgs_github_reads_as_an_org_that_does_not_exist(orgs):
 
 @pytest.mark.parallel
 def test_connect_is_refused_without_proof_from_github(orgs):
-    """A deployment whose git host is not GitHub says it has no App. With one, GitHub refuses a
-    made-up code. Either way nothing is connected."""
+    """A deployment whose git host is not GitHub says it has no App. With one, an install state
+    is issued once and only the person it was issued to finishes with it: a made-up one, or one
+    used before, connects nothing."""
     a, _ = orgs
     app = _call(a.api, "GET", "/github/app")
-    connect = _call(a.api, "POST", f"/orgs/{a.org_id}/github-installations", CONNECT)
+    finish = _call(a.api, "POST", "/github/installations", FINISH)
     if app.status_code == 503:
-        for refused in (app, connect, _call(a.api, "GET", f"/orgs/{a.org_id}/github-repositories")):
+        for refused in (app, finish, _call(a.api, "GET", f"/orgs/{a.org_id}/github-repositories"),
+                        _call(a.api, "POST", f"/orgs/{a.org_id}/github-install-states", START)):
             assert refused.status_code == 503 and refused.json()["reason"] == "github_not_configured", refused.text
             assert "GitHub App" in refused.json()["message"], refused.text
     else:
-        assert app.status_code == 200 and set(app.json()) >= {"slug", "client_id", "install_url", "authorize_url"}, app.text
-        assert connect.status_code == 422 and connect.json()["reason"] == "code_rejected", connect.text
-        for bad in ({**CONNECT, "code": ""}, {**CONNECT, "redirect_uri": ""}, {**CONNECT, "installation_id": -1}):
-            assert _call(a.api, "POST", f"/orgs/{a.org_id}/github-installations", bad).status_code == 422, bad
+        assert app.status_code == 200 and set(app.json()) >= {"slug", "install_url", "new_repository_url"}, app.text
+        assert finish.status_code == 422 and finish.json()["reason"] == "install_state_invalid", finish.text
+        started = _call(a.api, "POST", f"/orgs/{a.org_id}/github-install-states", START)
+        assert started.status_code == 201, started.text
+        state = started.json()["state"]
+        assert started.json()["install_url"].endswith("?state=" + state), started.text
+        # GitHub never made installation 1 for this App: the state is spent on it all the same.
+        first = _call(a.api, "POST", "/github/installations", {"state": state, "installation_id": 1})
+        assert first.status_code in (422, 502), first.text
+        again = _call(a.api, "POST", "/github/installations", {"state": state, "installation_id": 1})
+        assert again.status_code == 422 and again.json()["reason"] == "install_state_invalid", again.text
+        for bad in ({**START, "return_to": "//elsewhere.example"}, {**START, "return_to": ""}):
+            assert _call(a.api, "POST", f"/orgs/{a.org_id}/github-install-states", bad).status_code == 422, bad
     assert _installations(a) == []
 
 
@@ -121,7 +133,8 @@ def test_an_agent_token_reaches_nothing_of_the_orgs_github(orgs, run):
     _, agent = run
     for method, path, body in (
         ("GET", "/github/app", None), ("GET", f"/orgs/{a.org_id}/github-installations", None),
-        ("POST", f"/orgs/{a.org_id}/github-installations", CONNECT), ("DELETE", f"/orgs/{a.org_id}/github-installations/1", None),
+        ("POST", f"/orgs/{a.org_id}/github-install-states", START), ("POST", "/github/installations", FINISH),
+        ("DELETE", f"/orgs/{a.org_id}/github-installations/1", None),
         ("GET", f"/orgs/{a.org_id}/github-repositories", None),
     ):
         assert _call(agent, method, path, body).status_code == 403, (method, path)

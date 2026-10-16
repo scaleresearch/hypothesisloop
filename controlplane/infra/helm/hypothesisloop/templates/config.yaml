@@ -35,11 +35,9 @@ The staged file names no git host: the chart adds the one gitHost.provider names
 {{- if not $gitHost.github.appId }}
 {{- fail "gitHost.github.appId is required with gitHost.provider github: the App's number" }}
 {{- end }}
-{{- $raw = printf "%s\ngit_host:\n  provider: github\n  github:\n    app_id: %s\n    app_slug: %s\n    client_id: %s\n    client_secret: %s\n    private_key: %s\n" (trimSuffix "\n" $raw)
+{{- $raw = printf "%s\ngit_host:\n  provider: github\n  github:\n    app_id: %s\n    app_slug: %s\n    private_key: %s\n" (trimSuffix "\n" $raw)
   (toJson (int64 $gitHost.github.appId))
   (toJson (required "gitHost.github.appSlug is required with gitHost.provider github: the name in the App's URL" $gitHost.github.appSlug))
-  (toJson (required "gitHost.github.clientId is required with gitHost.provider github: the App's OAuth client id" $gitHost.github.clientId))
-  (toJson "${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET}")
   (toJson "${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY}") }}
 {{- else if eq $gitHost.provider "plain" }}
 {{- $raw = printf "%s\ngit_host:\n  provider: plain\n  plain:\n    base_url: %s\n    allow_http: %s\n" (trimSuffix "\n" $raw)

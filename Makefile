@@ -477,7 +477,7 @@ agent-test:
 # sandbox repository of TEST_GIT_HOST_GITHUB_REPOSITORY; the push check and the first-commit check
 # each make a branch there and delete it. The App's key reaches the test in a file that exists
 # only for the run. The creation check runs with TEST_GIT_HOST_GITHUB_CREATE=1 and creates on the
-# organisation of TEST_GIT_HOST_GITHUB_CREATE_INSTALLATION, skipping when .env names none.
+# account of TEST_GIT_HOST_GITHUB_CREATE_INSTALLATION, skipping when .env names none.
 test-github-live:
 	@bash -c 'set -euo pipefail; . localdev/lib/auth.sh; \
 	  test "$$(lib_git_host_provider)" = github || { echo "make test-github-live: .env does not set GIT_HOST_PROVIDER=github" >&2; exit 1; }; \
