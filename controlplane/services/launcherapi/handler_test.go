@@ -778,7 +778,7 @@ func TestParseHarnessStateRefusesWhatTheHarnessDoesNotPrint(t *testing.T) {
 		"subagents=1 turn=working since=1759990000 instructions_digest=0123456789ab version=0",
 		"subagents=1 turn=working since=1759990000 instructions_digest=0123456789ab version=v2",
 	} {
-		if state, err := parseHarnessState(line); err == nil {
+		if state, _, err := parseHarnessState(line); err == nil {
 			t.Errorf("%q: read %+v, want an error", line, state)
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -224,7 +225,10 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, agentVersion s
 		// name that config has since changed is replaced and its end is nobody's fault.
 		if current.Name == instance.Name {
 			if reported := seen[current.Name]; reported.State == stateRunning && reported.HarnessState != "" {
-				state, err := parseHarnessState(reported.HarnessState)
+				state, unknown, err := parseHarnessState(reported.HarnessState)
+				if len(unknown) > 0 {
+					log.Debug("harness state fields this platform does not know are ignored", zap.String("instance", current.Name), zap.Strings("fields", unknown))
+				}
 				if err != nil {
 					log.Warn("hosted instance reported a harness state that cannot be read", zap.String("instance", current.Name), zap.Error(err))
 				} else {
@@ -377,17 +381,17 @@ var instructionsDigestPattern = regexp.MustCompile(fmt.Sprintf(`^[0-9a-f]{%d}$`,
 // parseHarnessState reads the state line a harness printed (agents/experimentator, progress.py):
 // key=value fields, subagents, turn and since required, instructions_digest and version, the
 // version of its agent type, once the harness runs instructions, the model_ ones present once the harness
-// has read a rate limit, and then model_status among them.
-func parseHarnessState(line string) (domain.HarnessState, error) {
-	var state domain.HarnessState
+// has read a rate limit, and then model_status among them. A key it does not know, from a newer
+// harness, is returned in unknown and otherwise ignored.
+func parseHarnessState(line string) (state domain.HarnessState, unknown []string, err error) {
 	fields := map[string]string{}
 	for _, field := range strings.Fields(line) {
 		key, value, found := strings.Cut(field, "=")
 		if !found {
-			return state, fmt.Errorf("%q is no key=value field", field)
+			return state, nil, fmt.Errorf("%q is no key=value field", field)
 		}
 		if _, twice := fields[key]; twice {
-			return state, fmt.Errorf("%s is given twice", key)
+			return state, nil, fmt.Errorf("%s is given twice", key)
 		}
 		fields[key] = value
 	}
@@ -400,12 +404,11 @@ func parseHarnessState(line string) (domain.HarnessState, error) {
 	}
 	modelRead := false
 	for key, value := range fields {
-		var err error
 		switch key {
 		case "subagents":
 			state.Subagents, err = strconv.Atoi(value)
 			if err != nil || state.Subagents < 0 {
-				return state, fmt.Errorf("subagents %q is no count", value)
+				return state, unknown, fmt.Errorf("subagents %q is no count", value)
 			}
 		case "turn":
 			switch value {
@@ -413,21 +416,21 @@ func parseHarnessState(line string) (domain.HarnessState, error) {
 			case "waiting":
 				state.TurnWaiting = true
 			default:
-				return state, fmt.Errorf("turn %q is neither working nor waiting", value)
+				return state, unknown, fmt.Errorf("turn %q is neither working nor waiting", value)
 			}
 		case "since":
 			if state.TurnSince, err = unixTime(key); err != nil {
-				return state, err
+				return state, unknown, err
 			}
 		case "instructions_digest":
 			if !instructionsDigestPattern.MatchString(value) {
-				return state, fmt.Errorf("instructions_digest %q is no %d lowercase hex characters", value, domain.InstructionsDigestLength)
+				return state, unknown, fmt.Errorf("instructions_digest %q is no %d lowercase hex characters", value, domain.InstructionsDigestLength)
 			}
 			state.InstructionsDigest = value
 		case "version":
 			state.AgentTypeVersion, err = strconv.Atoi(value)
 			if err != nil || state.AgentTypeVersion < 1 {
-				return state, fmt.Errorf("version %q is no version", value)
+				return state, unknown, fmt.Errorf("version %q is no version", value)
 			}
 		case "model_status":
 			switch value {
@@ -435,35 +438,37 @@ func parseHarnessState(line string) (domain.HarnessState, error) {
 			case "rejected":
 				state.Model.Rejected = true
 			default:
-				return state, fmt.Errorf("model_status %q is none of allowed, allowed_warning and rejected", value)
+				return state, unknown, fmt.Errorf("model_status %q is none of allowed, allowed_warning and rejected", value)
 			}
 		case "model_type":
 		case "model_utilization":
 			u, err := strconv.ParseFloat(value, 64)
 			if err != nil || u < 0 || u > 1 {
-				return state, fmt.Errorf("model_utilization %q is no number from 0 to 1", value)
+				return state, unknown, fmt.Errorf("model_utilization %q is no number from 0 to 1", value)
 			}
 			state.Model.Utilization = &u
 		case "model_resets_at":
 			at, err := unixTime(key)
 			if err != nil {
-				return state, err
+				return state, unknown, err
 			}
 			state.Model.ResetsAt = &at
 		default:
-			return state, fmt.Errorf("%s is no field of a harness state", key)
+			unknown = append(unknown, key)
+			continue
 		}
 		modelRead = modelRead || strings.HasPrefix(key, "model_")
 	}
 	for _, key := range []string{"subagents", "turn", "since"} {
 		if _, given := fields[key]; !given {
-			return state, fmt.Errorf("%s is required", key)
+			return state, unknown, fmt.Errorf("%s is required", key)
 		}
 	}
 	if _, given := fields["model_status"]; modelRead && !given {
-		return state, fmt.Errorf("model_status is required with the other model_ fields")
+		return state, unknown, fmt.Errorf("model_status is required with the other model_ fields")
 	}
-	return state, nil
+	slices.Sort(unknown)
+	return state, unknown, nil
 }
 
 // lastBytes keeps the end of text, cut at a line where one starts inside the limit.
