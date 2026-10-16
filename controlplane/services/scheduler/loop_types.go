@@ -29,7 +29,6 @@ type LoopStore interface {
 	ListQueuedExperiments(ctx context.Context) ([]*domain.Experiment, error)
 	ListSubmittedExperiments(ctx context.Context) ([]*domain.Experiment, error)
 	ListRunningExperiments(ctx context.Context) ([]*domain.Experiment, error)
-	MarkQueued(ctx context.Context, id, reason string) error
 	// ClaimSubmitted persists resolvedJob (exp.ResolvedJob, required) alongside the SUBMITTED
 	// status transition, in the same transaction — see domain.Experiment.ResolvedJob's doc comment.
 	ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error)

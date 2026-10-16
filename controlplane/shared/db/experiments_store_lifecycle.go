@@ -17,7 +17,7 @@ import (
 // is what the status is stored and announced with: why it failed, or nothing.
 func (s *ExperimentsStore) TransitionStatus(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (bool, error) {
 	if to == domain.StatusQueued {
-		return false, fmt.Errorf("experiments_store.TransitionStatus: QUEUED requires MarkQueued with a reason")
+		return false, fmt.Errorf("experiments_store.TransitionStatus: QUEUED is set by the requeue that says why")
 	}
 	const q = `UPDATE experiments SET status = $3, eviction_reason = NULLIF($4, ''), not_admitted_reason = NULL, updated_at = NOW() WHERE id = $1 AND status = $2`
 	tag, err := s.pool.pool.Exec(ctx, q, id, string(from), string(to), reason)
@@ -41,23 +41,6 @@ func (s *ExperimentsStore) UpdateExperimentPriority(ctx context.Context, id stri
 		return fmt.Errorf("experiments_store.UpdateExperimentPriority: %w", err)
 	}
 	return nil
-}
-
-// MarkQueued sets the QUEUED lifecycle and its current scheduler decision together. Also resets
-// resolved_job_spec to NULL, as every transition to QUEUED does: a requeued job is re-admitted
-// from scratch and may land on a different cluster with a different fair share, or on another
-// slot, so the previous resolution (a slot's size, the slot pin in its node selector) is
-// stale and must not be read as though it were the resolution for wherever it lands next. A
-// QUEUED row therefore never carries one, and EffectiveJob on it is the submitted job.
-func (s *ExperimentsStore) MarkQueued(ctx context.Context, id, reason string) error {
-	if err := sentenced(reason); err != nil {
-		return fmt.Errorf("experiments_store.MarkQueued: %w", err)
-	}
-	const q = `UPDATE experiments SET status = 'QUEUED', queued_at = COALESCE(queued_at, NOW()),
-	cluster_name = '', submitted_at = NULL, not_admitted_reason = $2, resolved_job_spec = NULL, updated_at = NOW()
-	WHERE id = $1 AND status = 'SUBMITTED'`
-	_, err := s.pool.pool.Exec(ctx, q, id, reason)
-	return err
 }
 
 // ClaimSubmitted serializes admission decisions for one cluster, checks fresh capacity while

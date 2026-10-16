@@ -261,7 +261,7 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 	// A submission and a finish are decided under one lock. The finished agent's submission is
 	// refused inside the admission itself, and a finish that meets a submission in flight waits
 	// for it and then counts its job.
-	admission := NewPlatformExperimentsFullStore(NewStore(pool, "http://metrics.invalid", 1))
+	admission := NewPlatformExperimentsFullStore(NewStore(pool, 1))
 	late := &domain.Experiment{ID: "job-" + uuid.New().String()[:8], AgentID: runningAgents[3], PlatformExperimentID: running,
 		Actor: domain.Actor{Kind: domain.ActorAgent, ID: runningAgents[3]}, Status: domain.StatusQueued}
 	var refusal *AdmitRefusal

@@ -104,7 +104,7 @@ func (s *Store) Query(ctx context.Context, platformExperimentID, cypher string, 
 		return nil, queryError(err)
 	}
 	var d decoder
-	ids := make(map[int64]string, len(nodes))
+	ids := make(map[string]string, len(nodes))
 	for id, n := range nodes {
 		ids[id] = d.str(n.Props["id"])
 	}
@@ -178,18 +178,18 @@ func jsonValue(v any) any {
 	}
 }
 
-// resultNodes returns every node in rows by internal id, including relationship endpoints, which
-// the driver reports by internal id only and are fetched in the same transaction to name them.
-func resultNodes(ctx context.Context, tx neo4j.ExplicitTransaction, rows [][]any) (map[int64]neo4j.Node, error) {
-	nodes := map[int64]neo4j.Node{}
-	var endpoints []int64
+// resultNodes returns every node in rows by element id, including relationship endpoints, which
+// the driver reports by element id only and are fetched in the same transaction to name them.
+func resultNodes(ctx context.Context, tx neo4j.ExplicitTransaction, rows [][]any) (map[string]neo4j.Node, error) {
+	nodes := map[string]neo4j.Node{}
+	var endpoints []string
 	var walk func(v any)
 	walk = func(v any) {
 		switch t := v.(type) {
 		case neo4j.Node:
-			nodes[t.Id] = t
+			nodes[t.ElementId] = t
 		case neo4j.Relationship:
-			endpoints = append(endpoints, t.StartId, t.EndId)
+			endpoints = append(endpoints, t.StartElementId, t.EndElementId)
 		case neo4j.Path:
 			for _, n := range t.Nodes {
 				walk(n)
@@ -209,7 +209,7 @@ func resultNodes(ctx context.Context, tx neo4j.ExplicitTransaction, rows [][]any
 			walk(v)
 		}
 	}
-	var lookup []int64
+	var lookup []string
 	for _, id := range endpoints {
 		if _, ok := nodes[id]; !ok {
 			lookup = append(lookup, id)
@@ -218,7 +218,7 @@ func resultNodes(ctx context.Context, tx neo4j.ExplicitTransaction, rows [][]any
 	if len(lookup) == 0 {
 		return nodes, nil
 	}
-	result, err := tx.Run(ctx, `MATCH (n) WHERE id(n) IN $ids RETURN n`, map[string]any{"ids": lookup})
+	result, err := tx.Run(ctx, `MATCH (n) WHERE elementId(n) IN $ids RETURN n`, map[string]any{"ids": lookup})
 	if err != nil {
 		return nil, err
 	}
@@ -228,12 +228,12 @@ func resultNodes(ctx context.Context, tx neo4j.ExplicitTransaction, rows [][]any
 	}
 	for _, r := range records {
 		n := r.Values[0].(neo4j.Node)
-		nodes[n.Id] = n
+		nodes[n.ElementId] = n
 	}
 	return nodes, nil
 }
 
-func mapValue(v any, ids map[int64]string) any {
+func mapValue(v any, ids map[string]string) any {
 	switch t := v.(type) {
 	case neo4j.Node:
 		m := mapProps(t.Props, ids)
@@ -242,8 +242,8 @@ func mapValue(v any, ids map[int64]string) any {
 	case neo4j.Relationship:
 		m := mapProps(t.Props, ids)
 		m["_type"] = t.Type
-		m["_from"] = ids[t.StartId]
-		m["_to"] = ids[t.EndId]
+		m["_from"] = ids[t.StartElementId]
+		m["_to"] = ids[t.EndElementId]
 		return m
 	case neo4j.Path:
 		out := make([]any, 0, len(t.Nodes)+len(t.Relationships))
@@ -271,7 +271,7 @@ func mapValue(v any, ids map[int64]string) any {
 	}
 }
 
-func mapProps(props map[string]any, ids map[int64]string) map[string]any {
+func mapProps(props map[string]any, ids map[string]string) map[string]any {
 	out := make(map[string]any, len(props)+3)
 	for k, v := range props {
 		out[k] = mapValue(v, ids)

@@ -114,7 +114,7 @@ func main() {
 	}
 	defer graph.Close(context.Background()) //nolint:errcheck
 
-	store := db.NewStore(pool, metricsDBURL, pcfg.Scheduler.MaxInfrastructureRequeues)
+	store := db.NewStore(pool, pcfg.Scheduler.MaxInfrastructureRequeues)
 
 	domain.SetAcceleratorRates(pcfg.RateByName)
 

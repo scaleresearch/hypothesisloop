@@ -31,10 +31,9 @@ type Store struct {
 	maxInfraRequeues int
 }
 
-// NewStore creates a Store backed by the given pool, tracking agent quota usage in the metrics
-// DB at metricsDBURL. maxInfraRequeues must be positive: there is no "unbounded" and no "off" —
+// NewStore creates a Store backed by the given pool. maxInfraRequeues must be positive: there is no "unbounded" and no "off" —
 // a zero would silently turn every infrastructure fault back into a terminal eviction.
-func NewStore(pool *Pool, metricsDBURL string, maxInfraRequeues int) *Store {
+func NewStore(pool *Pool, maxInfraRequeues int) *Store {
 	if maxInfraRequeues <= 0 {
 		panic("db.NewStore: max_infrastructure_requeues must be positive")
 	}

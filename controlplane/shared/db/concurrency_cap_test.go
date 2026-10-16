@@ -63,7 +63,7 @@ func setupCapTestPool(t *testing.T, cap int) (*Pool, *PlatformExperimentsFullSto
 	}); err != nil {
 		t.Fatalf("start: got = %v, want = nil", err)
 	}
-	return pool, NewPlatformExperimentsFullStore(NewStore(pool, "http://metrics.invalid", 3)), agentID, peID
+	return pool, NewPlatformExperimentsFullStore(NewStore(pool, 3)), agentID, peID
 }
 
 // TestReserveAdmittedFlavorTxRejectsOverCap covers autoscaler.md's concurrency cap logic: a submit

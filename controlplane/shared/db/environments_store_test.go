@@ -307,7 +307,7 @@ func TestOnlyTheAssignedAttemptReportsABuildAndAFailedOneIsBuiltAgainWithItsLast
 // failed. A job no longer queued is left as it is.
 func TestAJobEndedForAnUnbuiltEnvironmentIsSettledWithItsStatusAndNotRequeued(t *testing.T) {
 	w := newEnvironments(t)
-	store := NewStore(w.pool, "http://metrics.invalid", 3)
+	store := NewStore(w.pool, 3)
 	id := w.queued(t, "unbuilt", w.peA)
 	reason := string(domain.EvictionEnvironmentUnbuilt.WithDetail("no fault of the file's"))
 	written, err := store.EndQueuedSettled(context.Background(), id, domain.StatusEvicted, reason)

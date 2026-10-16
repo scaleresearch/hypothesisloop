@@ -51,10 +51,6 @@ func forbidden(message string) *Error {
 	return &Error{status: http.StatusForbidden, Message: message}
 }
 
-func badRequest(message string) *Error {
-	return &Error{status: http.StatusBadRequest, Message: message}
-}
-
 type readKey struct{}
 
 // read is what the gate in front of every handler knows of a request that only reads.

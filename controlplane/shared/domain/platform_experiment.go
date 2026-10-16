@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"reflect"
 	"time"
 )
 
@@ -204,12 +203,6 @@ func RequireRankingMetric(defs []MetricDefinition) error {
 		return nil
 	}
 	return fmt.Errorf("at least one metric must have role \"ranking\": nothing else can order the field or cut a stage")
-}
-
-// MetricDefinitionsEqual reports whether two metric declarations are the same set in the same
-// order — order matters (the first ranking metric is primary), so this is not a set comparison.
-func MetricDefinitionsEqual(a, b []MetricDefinition) bool {
-	return reflect.DeepEqual(a, b)
 }
 
 // MaxAgentImageLength bounds an image reference.

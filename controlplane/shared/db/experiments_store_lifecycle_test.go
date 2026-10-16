@@ -284,9 +284,6 @@ func TestEveryRequeueClearsWhatTheLastAdmissionResolved(t *testing.T) {
 		"failover": {domain.StatusSubmitted, func(id string) (bool, error) {
 			return exps.RequeueInfrastructureFault(ctx, id, domain.StatusSubmitted, string(domain.EvictionScaleUpTimeout), 3)
 		}},
-		"rollback": {domain.StatusSubmitted, func(id string) (bool, error) {
-			return true, exps.MarkQueued(ctx, id, domain.NotAdmittedWorkloadCreation+": not handed over")
-		}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			id := "requeue-" + name + "-" + peID

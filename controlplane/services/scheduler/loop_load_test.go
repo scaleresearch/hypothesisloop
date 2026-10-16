@@ -180,16 +180,6 @@ func negative(fp domain.Footprint) bool {
 	return false
 }
 
-func (s *sim) MarkQueued(_ context.Context, id, reason string) error {
-	s.count("MarkQueued")
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if r := s.rows[id]; r != nil && r.exp.Status == domain.StatusSubmitted {
-		s.requeueLocked(r, reason)
-	}
-	return nil
-}
-
 func (s *sim) requeueLocked(r *simRow, reason string) {
 	r.exp.Status, r.exp.ClusterName, r.exp.ResolvedJob, r.claims = domain.StatusQueued, "", nil, 0
 	r.exp.NotAdmittedReason, r.exp.NotAdmittedMessage = domain.SplitQueueReason(reason)

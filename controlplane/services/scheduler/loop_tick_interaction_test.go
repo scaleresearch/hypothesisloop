@@ -22,7 +22,6 @@ import (
 type claimStore struct {
 	LoopStore
 	claimed     bool
-	markQueued  string
 	claimCalled bool
 }
 
@@ -34,11 +33,6 @@ func (s *claimStore) ClaimSubmitted(ctx context.Context, id, clusterName string,
 	}
 	s.claimed = true
 	return true, nil
-}
-
-func (s *claimStore) MarkQueued(_ context.Context, id, reason string) error {
-	s.markQueued = reason
-	return nil
 }
 
 // liveWorkload answers submitJob's re-check with whatever capacity is installed at call time —

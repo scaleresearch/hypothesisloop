@@ -2,8 +2,6 @@ package domain
 
 import (
 	"fmt"
-	"maps"
-	"slices"
 )
 
 // Waiter is whose move a platform experiment that is not closed waits for.
@@ -66,12 +64,6 @@ var statusWaiters = map[string]Waiter{
 	// A launcher that is to run a machine the platform wants has not asked for its machines
 	// lately. The platform's operator starts it; nothing an owner or agent does changes it.
 	"launcher_unreachable": WaitsForPlatform,
-}
-
-// StatusReasons is every reason of the table, sorted: what a text that lists them is checked
-// against.
-func StatusReasons() []string {
-	return slices.Sorted(maps.Keys(statusWaiters))
 }
 
 // WaitsFor is who acts on a platform experiment that answers reason. Where it has no coordinator
