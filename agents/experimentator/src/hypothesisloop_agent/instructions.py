@@ -83,9 +83,6 @@ def complete(answer: dict, cfg: config.Config, commands: str, workdir: str) -> I
         raise SystemExit(f"agent: the platform's instructions for {cfg.agent_id} are not what the harness runs with: {e!r}") from None
     if not instructions.model:
         raise SystemExit(f"agent: the platform's instructions for {cfg.agent_id} name no model")
-    if not 1 <= instructions.pacing_subagents <= instructions.max_subagents:
-        raise SystemExit(f"agent: the platform's instructions for {cfg.agent_id} run {instructions.pacing_subagents} subagents "
-                         f"while paced and {instructions.max_subagents} at most")
     return instructions
 
 

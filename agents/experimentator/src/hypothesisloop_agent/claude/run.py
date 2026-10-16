@@ -9,7 +9,6 @@ machine resumes the conversation.
 from __future__ import annotations
 
 import asyncio
-import datetime
 import json
 import logging
 import math
@@ -34,7 +33,7 @@ from claude_agent_sdk import (
 )
 
 from hypothesisloop_agent import api_client, config, core, instructions, progress, proposal, seed, session, updates
-from hypothesisloop_agent.claude import activity, pacing
+from hypothesisloop_agent.claude import activity
 
 log = logging.getLogger("llm_agent")
 
@@ -127,53 +126,11 @@ def _log_message(message, agent: str) -> None:
             info.status, info.rate_limit_type, info.utilization, info.resets_at,
         )
         _progress.model(info.status, info.rate_limit_type, info.utilization, info.resets_at)
-        _allowance.read(info.rate_limit_type, info.utilization, info.resets_at)
 
 
 # The model provider's rate limit as the CLI last said it, for the whole account: a subagent's
 # call that was refused refuses the agent's own, and the CLI says each change once.
 _rate_limit = None
-# The account's use of each of its windows, from the CLI's rate limits and its get_usage.
-_allowance = pacing.Allowance()
-# The CLI says a window's use by itself only close to its limit (five_hour from 90%), so it is
-# asked for it at a turn's end, at most this often. It asks the provider.
-_USAGE_READ_S = 300
-_usage_read_at: float | None = None
-_run_end_read_at: float | None = None
-
-
-def _read_run_end(setup: core.RunSetup) -> None:
-    """Reads when the run ends, for the allowance to be paced until then, at most every
-    _USAGE_READ_S: a run reopened or extended moves its end. A read that fails keeps the last."""
-    global _run_end_read_at
-    if _run_end_read_at is not None and time.monotonic() - _run_end_read_at < _USAGE_READ_S:
-        return
-    _run_end_read_at = time.monotonic()
-    try:
-        ends_at = setup.client.get_platform_experiment(setup.cfg.platform_experiment_id).get("ends_at")
-        _allowance.until(datetime.datetime.fromisoformat(ends_at.replace("Z", "+00:00")).timestamp() if ends_at else None)
-    except Exception as e:
-        log.info("the run's end was not read: %s", e)
-
-
-async def _read_usage(client) -> None:
-    """Reads the account's use of its windows from the CLI's get_usage, for which the SDK has no
-    method. A CLI that answers none, as on a credential without the profile scope, leaves the
-    readings as they were."""
-    global _usage_read_at
-    query = getattr(client, "_query", None)
-    if query is None or (_usage_read_at is not None and time.monotonic() - _usage_read_at < _USAGE_READ_S):
-        return
-    _usage_read_at = time.monotonic()
-    try:
-        usage = await query._send_control_request({"subtype": "get_usage"}, timeout=20)
-    except Exception as e:
-        log.info("the model account's usage was not read: %s", e)
-        return
-    _allowance.read_usage(usage)
-    reading = _allowance.furthest()
-    if reading and not _refused_until():
-        _progress.model("allowed", reading.window, reading.utilization, int(reading.resets_at))
 
 
 def _refused_until() -> float | None:
@@ -310,7 +267,7 @@ _subagent_message_hook = _refuse_subagent(SUBAGENT_MESSAGE)
 # The most subagents an agent runs at once is max_subagents of its instructions. Researchers ran 3
 # to 10, and each one's end starts a turn of the lead's over its whole context, which then grew
 # past its rotation as some were always live.
-SUBAGENT_CAP = ("{live} of your subagents are at work, the most that run at once{why}. Start this one when one "
+SUBAGENT_CAP = ("{live} of your subagents are at work, the most that run at once. Start this one when one "
                 "of them ends: its end starts your next turn.")
 # How long a subagent let through counts after its start returned, while the CLI does not list it.
 _STARTING_S = 60
@@ -347,22 +304,15 @@ class Subagents:
             del self._starting[tool_use_id]
 
 
-def _subagent_cap() -> tuple[int, str]:
-    """How many subagents may run at once now, and why that many when it is fewer than usual."""
-    paced = _allowance.cap(_running.pacing_subagents)
-    return paced if paced and paced[0] < _running.max_subagents else (_running.max_subagents, "")
-
-
 def _subagent_hooks(subagents: Subagents) -> dict[str, HookMatcher]:
     """The hooks that refuse a subagent past the cap, by hook event."""
 
     async def before(hook_input, tool_use_id, context) -> dict:
-        cap, why = _subagent_cap()
-        if (live := subagents.live()) < cap:
+        if (live := subagents.live()) < _running.max_subagents:
             subagents.starting(tool_use_id or hook_input.get("tool_use_id", ""))
             return {}
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                       "permissionDecisionReason": SUBAGENT_CAP.format(live=live, why=why)}}
+                                       "permissionDecisionReason": SUBAGENT_CAP.format(live=live)}}
 
     async def after(hook_input, tool_use_id, context) -> dict:
         response = hook_input.get("tool_response") if hook_input["hook_event_name"] == "PostToolUse" else None
@@ -776,10 +726,7 @@ def _revision_prompt(setup: core.RunSetup, draft: dict) -> str:
 
 async def _with_situation(setup: core.RunSetup, watch_env: dict[str, str], prompt: str) -> str:
     """prompt with the situation at its end, read now, for every role in a run: a planner has
-    none yet. While the model allowance is paced it says so before."""
-    await asyncio.to_thread(_read_run_end, setup)
-    if note := _allowance.note(config.coordinates(setup.cfg), _running.pacing_subagents):
-        prompt = f"{prompt}\n\n{note}"
+    none yet."""
     if config.plans(setup.cfg):
         return prompt
     return f"{prompt}\n\n{await updates.situation(watch_env)}"
@@ -808,7 +755,6 @@ def _first_prompt(setup: core.RunSetup, resume_id: str | None, initial_prompt: s
     """What opens a connection: a handoff, the start, or for a resumed session the revision that
     brought a planner back, else that it goes on, with a baseline agent's clock. A new machine is
     said in each."""
-    _read_run_end(setup)
     draft = core.revising(setup) if resume_id and not initial_prompt else None
     if draft:
         return _revision_prompt(setup, draft)
@@ -998,9 +944,9 @@ def _connection_instructions(setup: core.RunSetup, resume_id: str | None) -> tup
     running = newest if replaced else kept or newest
     _instructions_told = running.digest != newest.digest
     instructions.save(setup.statedir, running)
-    log.info("running %s version %d (digest %s): model=%s effort=%s max_subagents=%d pacing_subagents=%d%s",
+    log.info("running %s version %d (digest %s): model=%s effort=%s max_subagents=%d%s",
              running.agent_type, running.version, running.digest[:12], running.model, running.effort,
-             running.max_subagents, running.pacing_subagents,
+             running.max_subagents,
              f", version {newest.version} (digest {newest.digest[:12]}) applies at the first turn boundary" if _instructions_told else "")
     return running, replaced
 
@@ -1051,8 +997,8 @@ async def _apply_instructions(client, setup: core.RunSetup, background: dict[str
             log.warning("the effort was not changed to %s (%s): trying again at the next turn boundary", newest.effort, e)
             _instructions_told = True
             return False
-    log.info("instructions changed to %s version %d (digest %s) in the session: effort=%s max_subagents=%d pacing_subagents=%d",
-             newest.agent_type, newest.version, newest.digest[:12], newest.effort, newest.max_subagents, newest.pacing_subagents)
+    log.info("instructions changed to %s version %d (digest %s) in the session: effort=%s max_subagents=%d",
+             newest.agent_type, newest.version, newest.digest[:12], newest.effort, newest.max_subagents)
     _running = newest
     _progress.instructions(newest.digest, newest.version)
     instructions.save(setup.statedir, newest)
@@ -1307,7 +1253,6 @@ async def _run_one_session(setup: core.RunSetup, resume_id: str | None,
                 interrupter.cancel()
             if got_result:
                 await _store_session(setup)
-                await _read_usage(client)
 
             # A refused agent can take no turn, the last one included: the run loop waits.
             if refused_until := _refused_until():
@@ -1367,11 +1312,8 @@ async def _run_one_session(setup: core.RunSetup, resume_id: str | None,
                 await client.query(await _with_situation(setup, watch_env, updates.NOTHING_IN_FLIGHT))
                 told_nothing = True
                 continue
-            # An agent waits for an update with no limit, a coordinator until its review, later
-            # while the model allowance is paced.
+            # An agent waits for an update with no limit, a coordinator until its review.
             wait_s = updates.REVIEW_S if config.coordinates(cfg) else math.inf
-            if _allowance.pacing() is not None:
-                wait_s = max(wait_s, pacing.REVIEW_S)
             # Wait for the next batch of updates about its own jobs and hypotheses and hand it
             # over on the same connection. A turn the CLI starts by itself ends the wait and is
             # read first: one starts when a subagent ends, and on a resume to say which stopped.
