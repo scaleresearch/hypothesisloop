@@ -451,6 +451,38 @@ func TestCountingTokensSpendsNoneAndIsNotRecorded(t *testing.T) {
 	f.usage.none(t)
 }
 
+// The API server's deadlines are sized for API calls: a model's answer streams for longer, and
+// reaches the agent whole.
+func TestAnAnswerOutlastsTheServersOwnDeadlines(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for _, event := range []string{messageStart, textDelta, textDelta, messageDelta, messageStop} {
+			_, _ = io.WriteString(w, event)
+			w.(http.Flusher).Flush()
+			time.Sleep(150 * time.Millisecond)
+		}
+	}))
+	defer upstream.Close()
+	front := newAPI(t, upstream.URL, &recorded{done: make(chan struct{})})
+	front.Close()
+	slow := httptest.NewUnstartedServer(front.Config.Handler)
+	slow.Config.ReadTimeout, slow.Config.WriteTimeout = 100*time.Millisecond, 100*time.Millisecond
+	slow.Start()
+	defer slow.Close()
+	req, _ := http.NewRequest(http.MethodPost, slow.URL+messagesCall, strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer "+token(t, auth.AgentScope("pe-1", "agent-a")))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil || !strings.HasSuffix(string(body), messageStop) {
+		t.Fatalf("got %q, %v: the answer was cut at the server's deadline", body, err)
+	}
+}
+
 func TestAProviderThatCannotBeReachedIsAnsweredInItsOwnErrorShape(t *testing.T) {
 	gone := httptest.NewServer(http.NotFoundHandler())
 	gone.Close()
