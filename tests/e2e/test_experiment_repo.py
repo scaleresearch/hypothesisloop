@@ -1,5 +1,6 @@
 """The repository a platform experiment works on: how an org's GitHub connection is reached, what
-an experiment may name, who is handed a git credential, and what code a job may run.
+an experiment may name, who reaches it through the platform's git proxy and what they may push,
+and what code a job may run.
 
 Every boundary around an org's installations holds whichever git host the deployment has. On a
 plain host one test names, clones and pushes a repository of the local git server. On GitHub a
@@ -13,10 +14,9 @@ exists. It runs only when the environment names a sandbox repository:
 from __future__ import annotations
 
 import os
-import subprocess
+import re
 import uuid
 from dataclasses import dataclass
-from urllib.parse import urlparse
 
 import pytest
 import requests
@@ -68,8 +68,6 @@ def _call(api: API, method: str, path: str, body: dict | None = None) -> request
 
 START = {"return_to": "/settings"}
 FINISH = {"state": "a-state-never-issued", "installation_id": 1}
-# What git's helper asks a credential for.
-ANY_REPO = {"protocol": "https", "host": "github.com", "path": "acme/model.git"}
 
 
 def _installations(org: Org) -> list[dict]:
@@ -141,15 +139,20 @@ def test_an_agent_token_reaches_nothing_of_the_orgs_github(orgs, run):
 
 
 @pytest.mark.exclusive
-def test_a_git_credential_goes_only_to_what_the_platform_launched(api: API, orgs, run):
+def test_no_credential_of_the_git_host_is_handed_out_and_the_git_proxy_serves_only_what_the_platform_launched(api: API, orgs, run):
     a, _ = orgs
-    _, agent = run
+    pe_id, agent = run
+    gone = _call(agent, "POST", "/git-credentials", {"protocol": "https", "host": "github.com", "path": "acme/model.git"})
+    assert gone.status_code in (404, 405), gone.text
+    refs = f"/git/{pe_id}.git/info/refs?service=git-upload-pack"
+    served = _call(agent, "GET", refs)
+    assert served.status_code == 200 and served.headers["Content-Type"] == "application/x-git-upload-pack-advertisement", served.text
     for caller in (a.api, api):
-        refused = _call(caller, "POST", "/git-credentials", ANY_REPO)
-        assert refused.status_code == 403 and refused.json()["reason"] == "forbidden" and "password" not in refused.text, refused.text
-    assert requests.post(a.api._url("/git-credentials"), json=ANY_REPO, timeout=30).status_code == 401
-    # The address git asks about is part of the question.
-    assert _call(agent, "POST", "/git-credentials", {}).status_code == 422
+        refused = _call(caller, "GET", refs)
+        assert refused.status_code == 403 and "password" not in refused.text, refused.text
+    unauthenticated = requests.get(a.api._url(refs), timeout=30)
+    assert unauthenticated.status_code == 401 and unauthenticated.headers["WWW-Authenticate"].startswith("Basic "), unauthenticated.text
+    assert _call(agent, "GET", "/git/pe_does-not-exist.git/info/refs?service=git-upload-pack").status_code == 404
 
 
 @pytest.mark.parallel
@@ -209,16 +212,10 @@ def test_a_repository_is_checked_after_the_project_and_must_be_one_the_org_reach
 SANDBOX_ENV = ("TEST_GIT_HOST_GITHUB_INSTALLATION", "TEST_GIT_HOST_GITHUB_REPOSITORY")
 
 
-def _git(agent: API, cwd, *args: str) -> subprocess.CompletedProcess:
-    """git as an agent's image configures it: hl is the credential helper and nothing else is."""
-    env = agent.hl_env() | {
-        "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
-        "GIT_AUTHOR_NAME": "hl e2e", "GIT_AUTHOR_EMAIL": "e2e@hypothesisloop.local",
-        "GIT_COMMITTER_NAME": "hl e2e", "GIT_COMMITTER_EMAIL": "e2e@hypothesisloop.local",
-    }
-    cmd = ["git", "-c", "credential.helper=", "-c", f"credential.helper=!{agent.hl_bin} git-credential",
-           "-c", "credential.useHttpPath=true", *args]
-    return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
+def _own_branch(agent: API, pe_id: str, run_id: str) -> str:
+    """A branch of the agent's own, as hl hypothesis checkout names it: under its name."""
+    signup = agent.get_json(f"/platform-experiments/{pe_id}/signups/{token_scope(agent.token)[2]}")
+    return f"hl/{pe_id}/{re.sub(r'[^a-z0-9]+', '-', signup['name'].lower()).strip('-')}/e2e-{run_id}"
 
 
 @pytest.mark.exclusive
@@ -245,25 +242,26 @@ def test_on_a_plain_git_host_a_repository_is_named_and_an_agent_pushes_its_branc
             refused = _call(a.api, "POST", "/platform-experiments", body)
             assert refused.status_code == 422 and refused.json()["reason"] == reason, (reason, refused.text)
 
-    # A credential is handed out for the experiment's repository and for no other address.
-    host = urlparse(address)
-    mine = {"protocol": host.scheme, "host": host.netloc, "path": host.path.lstrip("/")}
-    assert _call(agent, "POST", "/git-credentials", mine).status_code == 201
-    elsewhere = _call(agent, "POST", "/git-credentials", {**mine, "path": f"no-such-{run_id}.git"})
-    assert elsewhere.status_code == 404 and elsewhere.json()["reason"] == "not_found", elsewhere.text
-
-    cloned = _git(agent, tmp_path, "clone", address, "work")
+    # git reaches the repository through the proxy, and the clone's origin stays its address.
+    cloned = agent.git(read, tmp_path, "clone", address, "work")
     assert cloned.returncode == 0, cloned.stderr
     work = tmp_path / "work"
-    branch = f"hl/{pe_id}/{token_scope(agent.token)[2]}"
-    assert _git(agent, work, "checkout", "-b", branch).returncode == 0
+    assert agent.git(read, work, "config", "--get", "remote.origin.url").stdout.strip() == address
+    branch = _own_branch(agent, pe_id, run_id)
+    assert agent.git(read, work, "checkout", "-b", branch).returncode == 0
     (work / "e2e.txt").write_text(f"pushed by {run_id}\n")
-    assert _git(agent, work, "add", "e2e.txt").returncode == 0
-    assert _git(agent, work, "commit", "-m", f"e2e {run_id}").returncode == 0
-    pushed = _git(agent, work, "push", "origin", branch)
+    assert agent.git(read, work, "add", "e2e.txt").returncode == 0
+    assert agent.git(read, work, "commit", "-m", f"e2e {run_id}").returncode == 0
+    pushed = agent.git(read, work, "push", "origin", branch)
     assert pushed.returncode == 0, pushed.stderr
-    listed = _git(agent, work, "ls-remote", "--heads", "origin", branch)
+    listed = agent.git(read, work, "ls-remote", "--heads", "origin", branch)
     assert listed.returncode == 0 and branch in listed.stdout, listed.stderr
+    # Nothing but its own branches: not the default branch, not another agent's, no tag.
+    for refused in ("HEAD:refs/heads/main", f"HEAD:refs/heads/hl/{pe_id}/someone-else/x", f"HEAD:refs/tags/e2e-{run_id}"):
+        denied = agent.git(read, work, "push", "origin", refused)
+        assert denied.returncode != 0 and "[remote rejected]" in denied.stderr, (refused, denied.stderr)
+    deleted = agent.git(read, work, "push", "origin", "--delete", branch)
+    assert deleted.returncode == 0, deleted.stderr
 
 
 @pytest.mark.exclusive
@@ -298,17 +296,7 @@ def test_an_agent_clones_and_pushes_its_branch_and_loses_access_when_github_is_d
         added = org.api.add_agents(pe_id)[0]
         agent = org.api.as_caller(added["token"], org.org_id, org.project_id)
 
-        mine = {"protocol": "https", "host": "github.com", "path": f"{repo}.git"}
-        minted = _call(agent, "POST", "/git-credentials", mine)
-        assert minted.status_code == 201 and minted.headers["Cache-Control"] == "no-store", minted.status_code
-        credential = minted.json()
-        assert credential["host"] == "github.com" and credential["path"] == f"{repo}.git", {k: v for k, v in credential.items() if k != "password"}
-        assert agent.post_json("/git-credentials", mine)["password"] != credential["password"], "the same token was handed out twice"
-        assert "password" in agent.post_json("/git-credentials", {**mine, "path": f"{repo}.git/info/lfs"})
-        # Nothing is minted for an address that is not the repository's.
-        for elsewhere in ({**mine, "path": f"{repo}-other.git"}, {**mine, "host": "example.com"}, {**mine, "protocol": "http"}):
-            refused = _call(agent, "POST", "/git-credentials", elsewhere)
-            assert refused.status_code == 404 and refused.json()["reason"] == "not_found", (elsewhere, refused.text)
+        read = agent.get_json(f"/platform-experiments/{pe_id}")
         # Another org cannot name the repository: it connected nothing that covers it.
         named = _call(other.api, "POST", "/platform-experiments", {
             **RUN, "project_id": other.project_id, "name": f"repo-taken-{run_id}", "description": "another org's repository",
@@ -316,39 +304,40 @@ def test_an_agent_clones_and_pushes_its_branch_and_loses_access_when_github_is_d
         })
         assert named.status_code == 422 and named.json()["reason"] == "installation_not_connected", named.text
 
-        cloned = _git(agent, tmp_path, "clone", "--depth", "1", clone_url, "work")
+        cloned = agent.git(read, tmp_path, "clone", "--depth", "1", clone_url, "work")
         assert cloned.returncode == 0, cloned.stderr
         work = tmp_path / "work"
-        branch = f"hl/{pe_id}/{added['agent_id']}"
-        assert _git(agent, work, "checkout", "-b", branch).returncode == 0
+        branch = _own_branch(agent, pe_id, run_id)
+        assert agent.git(read, work, "checkout", "-b", branch).returncode == 0
         (work / "e2e.txt").write_text(f"pushed by {run_id}\n")
-        assert _git(agent, work, "add", "e2e.txt").returncode == 0
-        assert _git(agent, work, "commit", "-m", f"e2e {run_id}").returncode == 0
-        pushed = _git(agent, work, "push", "origin", branch)
+        assert agent.git(read, work, "add", "e2e.txt").returncode == 0
+        assert agent.git(read, work, "commit", "-m", f"e2e {run_id}").returncode == 0
+        pushed = agent.git(read, work, "push", "origin", branch)
         assert pushed.returncode == 0, pushed.stderr
-        listed = _git(agent, work, "ls-remote", "--heads", "origin", branch)
+        listed = agent.git(read, work, "ls-remote", "--heads", "origin", branch)
         assert listed.returncode == 0 and branch in listed.stdout, listed.stderr
+        # The default branch is no agent's.
+        denied = agent.git(read, work, "push", "origin", "HEAD:refs/heads/main")
+        assert denied.returncode != 0 and "[remote rejected]" in denied.stderr, denied.stderr
 
         # A coordinator reads and does not push.
         coordinator = org.api.as_caller(admin.token(f"coordinator:{pe_id}"), org.org_id, org.project_id)
-        assert _git(coordinator, work, "fetch", "origin").returncode == 0
-        denied = _git(coordinator, work, "push", "origin", f"{branch}:{branch}-coordinator")
-        assert denied.returncode != 0, "a coordinator's read credential pushed a branch"
+        assert coordinator.git(read, work, "fetch", "origin").returncode == 0
+        denied = coordinator.git(read, work, "push", "origin", f"{branch}:{branch}-coordinator")
+        assert denied.returncode != 0 and "read-only" in denied.stderr, "a coordinator pushed a branch"
 
-        deleted = _git(agent, work, "push", "origin", "--delete", branch)
+        deleted = agent.git(read, work, "push", "origin", "--delete", branch)
         assert deleted.returncode == 0, deleted.stderr
         branch = ""
 
-        # Disconnected: the experiment still names the repository, and no credential is minted for it.
+        # Disconnected: the experiment still names the repository, and the proxy reaches it no more.
         assert _call(org.api, "DELETE", f"/orgs/{org.org_id}/github-installations/{installation}").status_code == 204
-        cut = _call(agent, "POST", "/git-credentials", mine)
-        assert cut.status_code == 409 and cut.json()["reason"] == "installation_not_connected", cut.text
-        after = _git(agent, work, "fetch", "origin")
-        assert after.returncode != 0, "git still fetched after GitHub was disconnected"
+        after = agent.git(read, work, "fetch", "origin")
+        assert after.returncode != 0 and "GitHub installation" in after.stderr, after.stderr
     finally:
         if branch:
             admin.connect_github(org.org_id, installation)
-            _git(agent, tmp_path / "work", "push", "origin", "--delete", branch)
+            agent.git(read, tmp_path / "work", "push", "origin", "--delete", branch)
         _call(org.api, "DELETE", f"/orgs/{org.org_id}/github-installations/{installation}")
         if pe_id:
             org.api.close_platform_experiment(pe_id)

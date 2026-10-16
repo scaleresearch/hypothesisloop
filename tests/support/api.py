@@ -250,6 +250,20 @@ class API:
             "PATH": "/usr/bin:/bin:/usr/local/bin",
         }
 
+    def git(self, platform_experiment: dict, cwd, *args: str) -> subprocess.CompletedProcess:
+        """git as an agent's image and harness configure it: the repository's own address is sent
+        to the platform's git proxy, git_url, and hl is the one credential helper, answering the
+        proxy with this caller's token. Nothing else of the machine's git config is read."""
+        git_url = platform_experiment["git_url"]
+        env = self.hl_env() | {
+            "HL_GIT_URL": git_url, "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
+            "GIT_AUTHOR_NAME": "hl e2e", "GIT_AUTHOR_EMAIL": "e2e@hypothesisloop.local",
+            "GIT_COMMITTER_NAME": "hl e2e", "GIT_COMMITTER_EMAIL": "e2e@hypothesisloop.local",
+        }
+        cmd = ["git", "-c", "credential.helper=", "-c", f"credential.helper=!{self.hl_bin} git-credential",
+               "-c", "credential.useHttpPath=true", "-c", f"url.{git_url}.insteadOf={platform_experiment['repository_url']}", *args]
+        return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
+
     def as_caller(self, token: str, org_id: str = "", project_id: str = "") -> "API":
         """The same API seen by another caller. What it creates is listed with what this one
         creates, so the session closes it too."""

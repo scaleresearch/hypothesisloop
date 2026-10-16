@@ -29,6 +29,7 @@ class FakePlatform(BaseHTTPRequestHandler):
     tokens: set = set()
     status_for_strangers = 401
     repository_url = "https://github.com/acme/model.git"
+    git_url = "https://api.example.invalid/git/pe-1.git"
 
     def _reply(self, status, body):
         self.send_response(status)
@@ -48,6 +49,8 @@ class FakePlatform(BaseHTTPRequestHandler):
             body = {"id": "pe-1", "status": "running", "coordinator": {"model": "model-1"}}
             if FakePlatform.repository_url:
                 body["repository_url"] = FakePlatform.repository_url
+            if FakePlatform.git_url:
+                body["git_url"] = FakePlatform.git_url
             return self._reply(200, body)
         agent_id = self.path.rsplit("/", 1)[-1]
         if agent_id in FakePlatform.joined:
@@ -68,6 +71,7 @@ class PlatformCase(unittest.TestCase):
         FakePlatform.signup = {"flavor": "generalist", "model": "model-1", "hyperparameters": {"batch_size": 64}}
         FakePlatform.status_for_strangers = 401
         FakePlatform.repository_url = "https://github.com/acme/model.git"
+        FakePlatform.git_url = "https://api.example.invalid/git/pe-1.git"
         self.server = HTTPServer(("127.0.0.1", 0), FakePlatform)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.addCleanup(self.server.server_close)
@@ -162,6 +166,22 @@ class StartupTest(PlatformCase):
         with self.assertRaises(SystemExit) as refused:
             self.prepare()
         self.assertIn("platform experiment pe-1 names no repository", str(refused.exception))
+
+    # The agent's git reaches the repository through the platform's git proxy with the agent's own
+    # token, and no credential of the git host is handed to it.
+    def test_prepare_sends_git_for_the_repository_to_the_platforms_git_proxy(self):
+        with mock.patch.dict(os.environ, self.environment(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="core.pager", GIT_CONFIG_VALUE_0="cat"), clear=True), \
+                mock.patch.object(core, "hl_commands", return_value="usage: hl"), mock.patch.object(core, "clone_workspace"):
+            core.prepare()
+            self.assertEqual(os.environ["GIT_CONFIG_COUNT"], "2")
+            self.assertEqual((os.environ["GIT_CONFIG_KEY_0"], os.environ["GIT_CONFIG_VALUE_0"]), ("core.pager", "cat"))
+            self.assertEqual(os.environ["GIT_CONFIG_KEY_1"], "url.https://api.example.invalid/git/pe-1.git.insteadOf")
+            self.assertEqual(os.environ["GIT_CONFIG_VALUE_1"], "https://github.com/acme/model.git")
+            self.assertEqual(os.environ["HL_GIT_URL"], "https://api.example.invalid/git/pe-1.git")
+        FakePlatform.git_url = ""
+        with self.assertRaises(SystemExit) as refused:
+            self.prepare()
+        self.assertIn("names no git_url", str(refused.exception))
 
     def test_prepare_stops_an_agent_nobody_added_before_it_reads_the_rules(self):
         with self.assertRaises(SystemExit):

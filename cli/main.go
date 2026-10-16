@@ -82,7 +82,7 @@ var commands = []struct {
 	{subcommand{"situation", "the run now: time, objective, capacity, budget and each agent's work and allowances", cmdSituation, everyone}, nil},
 	{subcommand{"data-key", `your S3 key to the experiment's data: eval "$(hl data-key)"`, cmdDataKey, asAgent}, nil},
 	{subcommand{"git-credential", "git's credential helper for your experiment's repository; git runs it", func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-		return cmdGitCredential(c, args, os.Stdin, stdout, stderr)
+		return cmdGitCredential(c, os.Getenv("HL_GIT_URL"), args, os.Stdin, stdout, stderr)
 	}, everyone}, nil},
 	{subcommand{"hypothesis", "", cmdHypothesis, everyone}, hypothesisCommands},
 	{subcommand{"job", "", group("job", jobCommands), everyone}, jobCommands},

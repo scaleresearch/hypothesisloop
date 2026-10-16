@@ -17,7 +17,6 @@ and the module runs with what make tt-e2e gives the suite, while nothing else us
 """
 from __future__ import annotations
 
-import subprocess
 import uuid
 from pathlib import Path
 
@@ -45,19 +44,13 @@ class Run:
     def __init__(self, api: API, pe_id: str, agent_id: str, token: str, work: Path):
         self.api, self.pe_id, self.agent_id, self.work = api, pe_id, agent_id, work
         self.agent = api.as_caller(token, api.org_id, api.project_id)
-        self.repository_url = api.get_json(f"/platform-experiments/{pe_id}")["repository_url"]
+        self.read = self.agent.get_json(f"/platform-experiments/{pe_id}")
+        self.repository_url = self.read["repository_url"]
         self.branch = f"hl/{pe_id}/baseline"
         self.pushed = False
 
     def git(self, *args: str, cwd: Path | None = None) -> str:
-        env = self.agent.hl_env() | {
-            "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
-            "GIT_AUTHOR_NAME": "hl e2e", "GIT_AUTHOR_EMAIL": "e2e@hypothesisloop.local",
-            "GIT_COMMITTER_NAME": "hl e2e", "GIT_COMMITTER_EMAIL": "e2e@hypothesisloop.local",
-        }
-        cmd = ["git", "-c", "credential.helper=", "-c", f"credential.helper=!{self.agent.hl_bin} git-credential",
-               "-c", "credential.useHttpPath=true", *args]
-        done = subprocess.run(cmd, cwd=cwd or self.work, env=env, capture_output=True, text=True, timeout=120)
+        done = self.agent.git(self.read, cwd or self.work, *args)
         assert done.returncode == 0, f"git {' '.join(args)}: {done.stderr}"
         return done.stdout.strip()
 
@@ -99,7 +92,7 @@ def run(api: API, sandbox_repository: str, pe, run_id: str, tmp_path: Path):
     added = api.add_agents(pe_id, role="baseline", quota_tier="guaranteed")[0]
     made = Run(api, pe_id, added["agent_id"], added["token"], tmp_path / "work")
     yield made
-    # The branch goes before the platform experiment closes, after which no credential is minted.
+    # The branch goes before the platform experiment closes, after which the proxy serves it no more.
     if made.pushed:
         made.git("push", "origin", "--delete", made.branch)
 

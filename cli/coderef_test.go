@@ -314,6 +314,37 @@ func TestHLCloneChecksOutTheCommitOfACodeRef(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(out, "job.yaml")); err != nil {
 		t.Fatalf("the commit's files are not there: %v", err)
 	}
+
+	// A job fetches through the platform's git proxy, whatever address its code_ref names.
+	proxied := filepath.Join(t.TempDir(), "code")
+	cmd := exec.Command("sh", script, "https://git-host.invalid/acme/model.git@"+sha, proxied)
+	cmd.Env = append(os.Environ(), "HYPOTHESISLOOP_GIT_URL=file://"+origin)
+	if printed, err := cmd.CombinedOutput(); err != nil || strings.TrimSpace(string(printed)) != proxied {
+		t.Fatalf("hl-clone through HYPOTHESISLOOP_GIT_URL: %v: %s", err, printed)
+	}
+	if got := mustGit(t, proxied, "rev-parse", "HEAD"); got != sha {
+		t.Fatalf("checked out %s through the proxy, want %s", got, sha)
+	}
+}
+
+// An agent's git reaches the repository through the platform's git proxy by a rewrite of its
+// address, and a job's code_ref still names the repository's own address, the one admission takes.
+func TestJobSubmitNamesTheRepositorysOwnAddressWhenGitIsSentElsewhere(t *testing.T) {
+	clone, origin := pushedClone(t)
+	const repositoryURL = "https://git-host.invalid/acme/model.git"
+	mustGit(t, clone, "remote", "set-url", "origin", repositoryURL)
+	mustGit(t, clone, "config", "url.file://"+origin+".insteadOf", repositoryURL)
+	code, stderr, sent := submit(t, "job.yaml")
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
+	}
+	head := mustGit(t, clone, "rev-parse", "HEAD")
+	if sent["code_ref"] != repositoryURL+"@"+head {
+		t.Fatalf("sent code_ref %v, want %s@%s", sent["code_ref"], repositoryURL, head)
+	}
+	if pushed := mustGit(t, origin, "rev-parse", "refs/heads/"+testBranch); pushed != head {
+		t.Fatalf("the proxy's side has %s at %s, want the submitted commit %s", testBranch, pushed, head)
+	}
 }
 
 // A researcher's subagent submitted on a branch made before the run's best and had to redo the

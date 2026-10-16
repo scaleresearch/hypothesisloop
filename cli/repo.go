@@ -215,12 +215,12 @@ func startDefaultBranch(root string) (bool, error) {
 }
 
 // originUnreached says which step of reaching origin failed, with what git answered. Where git
-// got no credential its last line blames a username prompt, and the reason is the platform's
-// answer to hl git-credential above it.
+// got no credential its last line blames a username prompt, and the reason is what hl
+// git-credential said above it.
 func originUnreached(step string, err error) error {
 	said := err.Error()
-	if strings.Contains(said, "/git-credentials") || strings.Contains(said, "git-credential") {
-		return fmt.Errorf("%s failed: git got no credential for origin, as the platform's answer to hl git-credential says: %w", step, err)
+	if strings.Contains(said, "git-credential") {
+		return fmt.Errorf("%s failed: git got no credential for origin, as hl git-credential says: %w", step, err)
 	}
 	return fmt.Errorf("%s failed: %w", step, err)
 }

@@ -130,6 +130,20 @@ def own_python() -> None:
     os.environ["PATH"] = os.path.join(venv, "bin") + os.pathsep + os.environ["PATH"]
 
 
+def git_through_platform(repository_url: str, git_url: str) -> None:
+    """Sends every git this process starts, the agent's included, to the platform's git proxy for
+    the repository, through the environment and no file: url.<git_url>.insteadOf rewrites the
+    repository's address, and HL_GIT_URL is the one address the image's `hl git-credential`
+    answers, with the agent's own token. The agent holds no credential of the git host, and the
+    proxy refuses a push to any ref but the agent's own branches. The origin a clone records stays
+    repository_url, which a job's code_ref names."""
+    n = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+    os.environ[f"GIT_CONFIG_KEY_{n}"] = f"url.{git_url}.insteadOf"
+    os.environ[f"GIT_CONFIG_VALUE_{n}"] = repository_url
+    os.environ["GIT_CONFIG_COUNT"] = str(n + 1)
+    os.environ["HL_GIT_URL"] = git_url
+
+
 _staging: list[subprocess.Popen] = []
 _STAGE_TIMEOUT_S = 24 * 3600
 
@@ -192,11 +206,15 @@ def prepare() -> RunSetup:
     os.makedirs(workdir, exist_ok=True)
     os.makedirs(statedir, exist_ok=True)
 
-    # The repository is the one the platform experiment names: the agent clones it through
-    # `hl git-credential`, so no address and no git token is handed to it at launch.
+    # The repository is the one the platform experiment names, so no address and no git token is
+    # handed to the agent at launch.
     repository_url = platform_experiment.get("repository_url")
     if not repository_url:
         raise SystemExit(f"agent: platform experiment {cfg.platform_experiment_id} names no repository, and an agent works in its clone of one")
+    git_url = platform_experiment.get("git_url")
+    if not git_url:
+        raise SystemExit(f"agent: platform experiment {cfg.platform_experiment_id} names no git_url, the platform's git proxy its repository is reached through")
+    git_through_platform(repository_url, git_url)
 
     if not config.plans(cfg) and not config.coordinates(cfg):
         clone_workspace(repository_url, workdir)

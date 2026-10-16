@@ -34,10 +34,12 @@ COPY --from=uv /uv /uvx /usr/local/bin/
 RUN py="$(command -v python3)" \
  && mkdir -p /etc/uv && printf '[pip]\npython = "%s"\n' "$py" > /etc/uv/uv.toml \
  && if [ "$(dirname "$(command -v pip)")" != "${py%/*}" ]; then uv pip install --no-cache pip; fi
-# hl-clone fetches the job's commit from the platform experiment's repository. git asks hl for the
-# credential on whichever host it talks to, and hl asks the platform as the job: a read credential
-# for that one repository, and nothing for any other address. hl itself comes with the job image.
+# hl-clone fetches the job's commit from the platform experiment's repository through the
+# platform's git proxy, HYPOTHESISLOOP_GIT_URL. git asks hl for the credential on whichever host it
+# talks to, and hl answers the proxy's address alone, with the job's own token: the proxy lets the
+# job read that one repository, and no credential of the git host reaches the job. hl itself
+# comes with the job image.
 RUN git config --system credential.helper \
-      '!API_URL="$HYPOTHESISLOOP_API_URL" HL_TOKEN="$HYPOTHESISLOOP_TOKEN" hl git-credential' \
+      '!HL_TOKEN="$HYPOTHESISLOOP_TOKEN" HL_GIT_URL="$HYPOTHESISLOOP_GIT_URL" hl git-credential' \
  && git config --system credential.useHttpPath true
 WORKDIR /workspace

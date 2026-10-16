@@ -123,8 +123,8 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
         for method, path, body in writes:
             r = _call(b.api, method, path, body)
             assert r.status_code == 404, f"a write to the shared platform experiment: {method} {path} answered {r.status_code} {r.text}, want 404"
-        git = _call(b.api, "POST", "/git-credentials", {"protocol": "https", "host": "github.com", "path": "x/y"})
-        assert git.status_code >= 400, f"another org's key was handed a git credential: {git.status_code}"
+        git = _call(b.api, "GET", f"/git/{pe_id}.git/info/refs?service=git-upload-pack")
+        assert git.status_code >= 400, f"another org's key reached the repository through the git proxy: {git.status_code}"
 
         # The shared one is in every account's listing of platform experiments, in whatever
         # project, and ?shared filters on it. Every other listing stays the caller's own.

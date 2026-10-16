@@ -64,11 +64,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
     && ln -sf /proc/self/mounts /etc/mtab
 COPY --from=uv /uv /uvx /usr/local/bin/
 
-# Non-interactive git auth, baked so the agent never handles credentials: git asks `hl
-# git-credential` (the hl copied in below) on whichever host it talks to, which asks the platform
-# for a credential limited to the platform experiment's repository. Nothing is stored and no git
-# token is in the environment. useHttpPath makes git name the repository, so the helper answers
-# for that one only and stays silent for every other address.
+# Non-interactive git auth, baked so the agent never handles a credential of the git host: the
+# harness sends git for the repository to the platform's git proxy (git_url), and git asks `hl
+# git-credential` (the hl copied in below) on whichever host it talks to. It answers the proxy's
+# address alone, with the agent's own platform token; the proxy reaches the git host itself and
+# refuses a push to any ref but the agent's own branches. Nothing is stored. useHttpPath makes git
+# name the repository, so the helper stays silent for every other address.
 # Plus a default commit identity so commits don't fail on a fresh container, and a first push of
 # a new branch that needs no -u.
 RUN git config --system credential.helper '!hl git-credential' \

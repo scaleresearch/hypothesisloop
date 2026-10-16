@@ -2,34 +2,34 @@ package main
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
-	"net/http"
+	"net/url"
 	"strings"
-	"time"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 )
 
 const gitCredentialHelp = `usage: hl git-credential get|store|erase
 
-git's credential helper for the repository your platform experiment names. git runs it, not you,
-and where it is set up git push, git fetch and hl job submit need nothing more:
+git's credential helper for the platform's git proxy, which serves the repository your platform
+experiment names at its git_url (hl platform-experiments get). git runs it, not you, and where it
+is set up git push, git fetch and hl job submit need nothing more:
 
   git config --global credential.helper '!hl git-credential'
   git config --global credential.useHttpPath true
+  git config --global url.<git_url>.insteadOf <repository_url>
 
-On get it sends the platform the address git asked about. For the experiment's repository, and its
-Git LFS address, the platform answers with the credential for that one repository and this hands
-it to git. Nothing is stored, so store and erase do nothing. For any other host or repository the
-platform has none, this prints nothing and git carries on without it. useHttpPath is what makes
-git state the repository: an address without protocol, host or path, as git sends without it
-and as one typed by hand may be, is refused with one line and nothing is handed out.`
+with HL_GIT_URL set to git_url. On get, for that address, it hands git your own platform token,
+HL_TOKEN, as the password: the proxy takes it, decides what you may fetch and push, and reaches
+the git host itself, so no credential of the git host is ever handed to you. For any other
+address it prints nothing and git carries on without it. Nothing is stored, so store and erase do
+nothing.`
 
 // cmdGitCredential speaks git's credential helper protocol: attributes as key=value lines on
-// stdin, and for get the credential the same way on stdout.
-func cmdGitCredential(c *apiclient.Client, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+// stdin, and for get the credential the same way on stdout. gitURL is the proxy's address of the
+// repository, the one address it answers for.
+func cmdGitCredential(c *apiclient.Client, gitURL string, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help") {
 		fmt.Fprintln(stdout, gitCredentialHelp)
 		return 0
@@ -57,6 +57,11 @@ func cmdGitCredential(c *apiclient.Client, args []string, stdin io.Reader, stdou
 		fmt.Fprintf(stderr, "hl: git-credential: reading what git asked: %s\n", err)
 		return 1
 	}
+	proxy, err := url.Parse(gitURL)
+	if gitURL == "" || err != nil || proxy.Host == "" {
+		fmt.Fprintf(stderr, "hl: git-credential: HL_GIT_URL %q is not the git_url of your platform experiment, the one address this answers for\n", gitURL)
+		return 1
+	}
 	// git with credential.useHttpPath states all three, so an address without one is typed by
 	// hand or comes from a git that is not set up.
 	for _, key := range []string{"protocol", "host", "path"} {
@@ -65,35 +70,14 @@ func cmdGitCredential(c *apiclient.Client, args []string, stdin io.Reader, stdou
 			return 1
 		}
 	}
-	var credential struct {
-		Username  string    `json:"username"`
-		Password  string    `json:"password"`
-		ExpiresAt time.Time `json:"expires_at"`
-	}
-	address := map[string]string{"protocol": asked["protocol"], "host": asked["host"], "path": asked["path"]}
-	err := c.Do("POST", "/git-credentials", address, &credential)
-	var refused *apiclient.HTTPError
-	if errors.As(err, &refused) && refused.Status == http.StatusNotFound {
+	repository := func(path string) string { return strings.TrimSuffix(strings.Trim(path, "/"), ".git") }
+	if asked["protocol"] != proxy.Scheme || !strings.EqualFold(asked["host"], proxy.Host) || repository(asked["path"]) != repository(proxy.Path) {
 		return 0
 	}
-	switch reason, message := refusalOf(err); {
-	case reason == "run_over":
-		fmt.Fprintf(stderr, "hl: git-credential: %s\n", message)
-		return 1
-	case reason != "":
-		fmt.Fprintf(stderr, "hl: git-credential: the platform handed out no credential for %s/%s, HTTP %d %s: %s\n", asked["host"], asked["path"], refused.Status, reason, message)
+	if c.Token == "" {
+		fmt.Fprintln(stderr, "hl: git-credential: HL_TOKEN is not set, and the git proxy takes your platform token")
 		return 1
 	}
-	if err != nil {
-		return fail(stderr, err)
-	}
-	if credential.Username == "" || credential.Password == "" {
-		fmt.Fprintln(stderr, "hl: git-credential: the platform answered without a username or a password")
-		return 1
-	}
-	fmt.Fprintf(stdout, "username=%s\npassword=%s\n", credential.Username, credential.Password)
-	if !credential.ExpiresAt.IsZero() {
-		fmt.Fprintf(stdout, "password_expiry_utc=%d\n", credential.ExpiresAt.Unix())
-	}
+	fmt.Fprintf(stdout, "username=hl\npassword=%s\n", c.Token)
 	return 0
 }

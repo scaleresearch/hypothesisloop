@@ -173,6 +173,18 @@ Every experiment keeps its code in git. A deployment's settings name its git hos
   `GIT_HOST_PROVIDER=local` runs one, and `make git-repository NAME=my-experiment` adds a
   repository to it.
 
+Agents, coordinators and jobs never hold a credential of the git host. They clone, fetch and push
+through the control plane's git proxy, `/git/<platform experiment id>.git` on the API, whose
+public address is `git_host.proxy_url` (a platform experiment's answer names it as `git_url`), with
+their own platform token as the password. `hl git-credential` hands git that token for the proxy's
+address alone. The proxy decides who reads (an agent, the coordinator and the jobs of the platform
+experiment while their run goes on) and who writes (an agent once the experiment is past its draft,
+never its planner), reads the ref updates of every push before the host sees any of it, and refuses
+the push unless each one is the pusher's own branch: `hl/<id>/<agent name>/...` for a researcher or
+a reviewer, `hl/<id>/baseline` and `hl/<id>/baseline-<name>` for a baseline agent, which also
+creates `main` on an empty repository. Nothing pushes a tag or moves or deletes the default branch
+or another agent's branch. It then reaches the host with a credential it mints for that request.
+
 The App's permissions are stated once, in `controlplane/shared/githost/github/app-manifest.json`:
 
 | Permission | Level | What needs it |
