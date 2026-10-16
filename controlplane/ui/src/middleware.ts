@@ -1,8 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { LANDING_PATH, LOGIN_PATH, hasSession, overHTTPS, safeNext, sessionToken } from '@/lib/auth'
+import { LANDING_PATH, LOGIN_PATH, SIGNED_IN_HEADER, hasSession, overHTTPS, safeNext, sessionToken } from '@/lib/auth'
 import type { ServerSession } from '@/lib/auth'
 import { movedTo, recordPath } from '@/lib/legacy-routes'
 import { INVITE_PATH } from '@/lib/invite'
+import { apiURL } from '@/lib/api'
 
 type WrittenCookie = Parameters<NextResponse['cookies']['set']>[2] & { name: string; value: string }
 
@@ -29,6 +30,9 @@ export async function middleware(request: NextRequest) {
     },
   }
   const signedIn = await hasSession(session)
+  // The pages behind this read the answer here rather than asking the identity provider again.
+  // Set on every request, so no visitor can send it.
+  request.headers.set(SIGNED_IN_HEADER, signedIn ? 'yes' : 'no')
 
   const { pathname, search, searchParams } = request.nextUrl
   let response: NextResponse
@@ -58,9 +62,7 @@ export async function middleware(request: NextRequest) {
 async function recordMovedTo(record: 'job' | 'hypothesis', id: string, session: ServerSession): Promise<string | null> {
   const token = await sessionToken(session)
   if (!token) return null
-  const api = process.env.NEXT_PUBLIC_API_URL
-  if (!api) throw new Error('NEXT_PUBLIC_API_URL is not set: copy .env.example to .env.local and fill it in')
-  const res = await fetch(`${api}/${record === 'job' ? 'experiments' : 'hypotheses'}/${encodeURIComponent(id)}`, {
+  const res = await fetch(`${apiURL()}/${record === 'job' ? 'experiments' : 'hypotheses'}/${encodeURIComponent(id)}`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: 'no-store',
   })

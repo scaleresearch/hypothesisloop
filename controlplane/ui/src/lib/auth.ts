@@ -50,6 +50,8 @@ export const CALLBACK_PATH = '/auth/callback'
 export const LOGIN_PATH = '/login'
 /** The public landing page. */
 export const LANDING_PATH = '/'
+/** The request header the middleware answers whether the request carries a verified session in. */
+export const SIGNED_IN_HEADER = 'x-hypothesisloop-signed-in'
 /** The signed-in home, where sign-in lands without a way back. */
 export const HOME_PATH = '/console'
 

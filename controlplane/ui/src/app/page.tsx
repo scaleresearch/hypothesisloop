@@ -1,20 +1,11 @@
-import { cookies, headers } from 'next/headers'
-import { HOME_PATH, LOGIN_PATH, SIGN_UP_PATH, hasSession, overHTTPS } from '@/lib/auth'
+import { headers } from 'next/headers'
+import { HOME_PATH, LOGIN_PATH, SIGNED_IN_HEADER, SIGN_UP_PATH } from '@/lib/auth'
 import { ButtonLink } from '@/components/ui/button'
 import { Logo } from '@/components/ui/logo'
 import { Heading } from '@/components/ui/text'
 
-// The middleware has already refreshed the session on this request, so the check here only reads.
-async function signedIn(): Promise<boolean> {
-  const host = headers().get('host') ?? 'localhost'
-  return hasSession({
-    https: overHTTPS(headers(), new URL(`http://${host}`)),
-    cookies: { getAll: () => cookies().getAll(), setAll: () => { } },
-  })
-}
-
-export default async function LandingPage() {
-  const inside = await signedIn()
+export default function LandingPage() {
+  const inside = headers().get(SIGNED_IN_HEADER) === 'yes'
   return (
     <div className="flex min-h-screen flex-1 flex-col">
       <header className="flex items-center justify-end gap-4 px-6 py-5 sm:px-10">
