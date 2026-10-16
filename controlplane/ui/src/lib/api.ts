@@ -208,7 +208,6 @@ export function fetchAgentsPage(params: AgentsParams): Promise<Page<Agent>> {
 export interface AgentStats {
   total: number
   top3_eligible: number
-  avg_performance_score: number
 }
 
 export function fetchAgentStats(params: Pick<AgentsParams, 'project_id' | 'platform_experiment_id'>): Promise<AgentStats> {

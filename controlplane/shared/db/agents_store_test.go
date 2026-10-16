@@ -21,7 +21,7 @@ func TestListAgentsFiltersBySignupAndSearch(t *testing.T) {
 	createTestAgent(t, pool, in)
 	createTestAgent(t, pool, out)
 	createTestPE(t, pool, pe, 10)
-	if _, err := NewPlatformExperimentsStore(pool).Signup(ctx, pe, domain.AgentSignup{AgentID: in, Role: domain.SignupRoleCompetitor}); err != nil {
+	if _, err := NewPlatformExperimentsStore(pool).Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: in, Role: domain.SignupRoleCompetitor}); err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 
@@ -95,7 +95,7 @@ func TestAnAgentIDThatIsTakenIsRefusedAsExisting(t *testing.T) {
 	}
 }
 
-func TestAgentStatsCountsTop3AndAveragesScoreOverTheWholeSet(t *testing.T) {
+func TestAgentStatsCountsTop3OverTheWholeSet(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
@@ -103,9 +103,6 @@ func TestAgentStatsCountsTop3AndAveragesScoreOverTheWholeSet(t *testing.T) {
 	createTestAgent(t, pool, placed)
 	createTestAgent(t, pool, unplaced)
 	createTestPE(t, pool, pe, 10)
-	if _, err := pool.pool.Exec(ctx, `UPDATE agents SET performance_score = CASE id WHEN $1 THEN 1 ELSE 0.5 END WHERE id IN ($1, $2)`, placed, unplaced); err != nil {
-		t.Fatalf("set scores: %v", err)
-	}
 	if _, err := pool.pool.Exec(ctx, `INSERT INTO experiment_top3 (platform_experiment_id, agent_id, final_metric) VALUES ($1, $2, 1)`, pe, placed); err != nil {
 		t.Fatalf("insert top3: %v", err)
 	}
@@ -114,7 +111,7 @@ func TestAgentStatsCountsTop3AndAveragesScoreOverTheWholeSet(t *testing.T) {
 	})
 
 	got, err := NewAgentsStore(pool).AgentStats(ctx, AgentsFilter{Scope: domain.AllTenants, Search: suffix})
-	want := domain.AgentStats{Total: 2, Top3Eligible: 1, AvgPerformanceScore: 0.75}
+	want := domain.AgentStats{Total: 2, Top3Eligible: 1}
 	if err != nil || *got != want {
 		t.Fatalf("stats = (%+v, %v), want %+v", got, err, want)
 	}

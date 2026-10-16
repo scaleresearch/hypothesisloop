@@ -28,17 +28,17 @@ func hostedThings(t *testing.T, pool *Pool) map[string]hostedThing {
 	t.Helper()
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
-	age := func(table, where string, args ...any) func(string, time.Duration) {
+	age := func(pe, agentID string) func(string, time.Duration) {
 		return func(column string, by time.Duration) {
 			t.Helper()
-			if _, err := pool.pool.Exec(ctx, `UPDATE `+table+` SET `+column+` = now() - make_interval(secs => $1) WHERE `+where, append([]any{by.Seconds()}, args...)...); err != nil {
+			if _, err := pool.pool.Exec(ctx, `UPDATE hosted_instances SET `+column+` = now() - make_interval(secs => $1) WHERE platform_experiment_id = $2 AND agent_id = $3`, by.Seconds(), pe, agentID); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
-	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Hosted: true, Launcher: "main"})[0]
+	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: "main"})[0]
 	coordinated := createTestPEWithCoordinator(t, pool, "main")
 	setPEStatus(t, pool, coordinated, domain.PlatformExpRunning, 0)
 	return map[string]hostedThing{
@@ -49,7 +49,7 @@ func hostedThings(t *testing.T, pool *Pool) map[string]hostedThing {
 				t.Fatalf("signup: got = %+v, %v", signup, err)
 			}
 			return *signup.Instance
-		}, age("experiment_signups", "platform_experiment_id = $2 AND agent_id = $3", pe, agent)},
+		}, age(pe, agent)},
 		"coordinator": {coordinated, "", func() domain.AgentInstance {
 			t.Helper()
 			got, err := pes.GetPlatformExperiment(ctx, coordinated)
@@ -57,15 +57,8 @@ func hostedThings(t *testing.T, pool *Pool) map[string]hostedThing {
 				t.Fatalf("platform experiment: got = %+v, %v", got, err)
 			}
 			return got.Coordinator.Instance
-		}, age("platform_experiments", "id = $2", coordinated)},
+		}, age(coordinated, "")},
 	}
-}
-
-func (h hostedThing) column(name string) string {
-	if h.agentID == "" {
-		return "coordinator_instance_" + name
-	}
-	return "instance_" + name
 }
 
 func TestAnExitedMachineIsRecordedRestartedAndFinallyStopsWhatItRan(t *testing.T) {
@@ -153,9 +146,9 @@ func TestRestartsOlderThanTheWindowNoLongerCount(t *testing.T) {
 		for i := range maxRestarts {
 			exit(fmt.Sprintf("early-%d", i))
 		}
-		if _, err := pool.pool.Exec(ctx, `UPDATE `+map[bool]string{true: "platform_experiments", false: "experiment_signups"}[thing.agentID == ""]+`
-SET `+thing.column("restarted_at")+` = ARRAY(SELECT t - make_interval(secs => $1) FROM unnest(`+thing.column("restarted_at")+`) t)
-WHERE `+map[bool]string{true: "id = $2", false: "platform_experiment_id = $2"}[thing.agentID == ""], (domain.AgentInstanceRestartWindow + time.Minute).Seconds(), thing.pe); err != nil {
+		if _, err := pool.pool.Exec(ctx, `UPDATE hosted_instances
+SET restarted_at = ARRAY(SELECT t - make_interval(secs => $1) FROM unnest(restarted_at) t)
+WHERE platform_experiment_id = $2 AND agent_id = $3`, (domain.AgentInstanceRestartWindow + time.Minute).Seconds(), thing.pe, thing.agentID); err != nil {
 			t.Fatal(err)
 		}
 		for i := range maxRestarts {
@@ -239,11 +232,11 @@ func TestAMachineIsGivenUpOnWhenItIsNeverSeenStaysStartingOrIsGone(t *testing.T)
 
 		// Never seen: only once the boot limit has passed since it was asked for.
 		ask("never-seen")
-		thing.age(thing.column("asked_at"), bootLimit-10*time.Second)
+		thing.age("asked_at", bootLimit-10*time.Second)
 		if end("never-seen", InstanceNeverSeen) || end("never-seen", InstanceGone) || end("never-seen", InstanceStillStarting) {
 			t.Fatalf("%s: an unseen machine inside the limit was given up on", kind)
 		}
-		thing.age(thing.column("asked_at"), bootLimit+time.Second)
+		thing.age("asked_at", bootLimit+time.Second)
 		if end("never-seen", InstanceGone) || end("never-seen", InstanceStillStarting) {
 			t.Fatalf("%s: an unseen machine was recorded as gone or as starting", kind)
 		}
@@ -254,7 +247,7 @@ func TestAMachineIsGivenUpOnWhenItIsNeverSeenStaysStartingOrIsGone(t *testing.T)
 		// Seen: the limit of a machine that stays starting is counted from then, however long
 		// ago it was asked for.
 		ask("starting")
-		thing.age(thing.column("asked_at"), 10*bootLimit)
+		thing.age("asked_at", 10*bootLimit)
 		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "another-name", "starting", nil, time.Hour, "", "machine-1"); err != nil {
 			t.Fatal(err)
 		}
@@ -271,7 +264,7 @@ func TestAMachineIsGivenUpOnWhenItIsNeverSeenStaysStartingOrIsGone(t *testing.T)
 		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "starting", "starting", nil, time.Hour, "", "machine-1"); err != nil || !thing.instance().SeenAt.Equal(*first) {
 			t.Fatalf("%s: seen again moved the first sight: %v", kind, err)
 		}
-		thing.age(thing.column("seen_at"), bootLimit+time.Second)
+		thing.age("seen_at", bootLimit+time.Second)
 		if !end("starting", InstanceStillStarting) || thing.instance().Restarts != 2 {
 			t.Fatalf("%s: starting past the limit: got = %+v, want a second restart spent", kind, thing.instance())
 		}
@@ -411,7 +404,7 @@ func TestALaunchersTokenFollowsItsRow(t *testing.T) {
 	// A signup naming it does not make it one.
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
-	spawnTestAgents(t, pes, pe, domain.AgentSignup{Hosted: true, Launcher: name})
+	spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: name})
 	if known() {
 		t.Fatal("a launcher a signup names and nobody registered is known")
 	}
@@ -474,7 +467,7 @@ func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExp
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
 	now := time.Now().UTC()
-	pe := &domain.PlatformExperiment{
+	pe := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed,
 		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "bounded", BudgetAcceleratorHours: 10,
 		MaxAgents: 2, StartsAt: now, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
@@ -491,23 +484,23 @@ func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExp
 			t.Fatal(err)
 		}
 		signup.AgentID = id
-		agent := &domain.Agent{ID: id, Name: id, PerformanceScore: 0.5, CreatedAt: now}
+		agent := &domain.Agent{ID: id, Name: id, CreatedAt: now}
 		return pes.SpawnAgent(ctx, pe.ID, agent, signup)
 	}
 	// max_agents is two competitors, which no baseline or reviewer counts against. Added one at
 	// a time they would be without end, were machines not counted.
 	for i, role := range []domain.SignupRole{domain.SignupRoleBaseline, domain.SignupRoleReviewer, domain.SignupRoleBaseline} {
-		if err := add(domain.AgentSignup{Role: role, Hosted: true, Launcher: "main"}); err != nil {
+		if err := add(domain.AgentSignup{Actor: testActor, Role: role, Hosted: true, Launcher: "main"}); err != nil {
 			t.Fatalf("hosted %s %d: got = %v, want = nil", role, i+1, err)
 		}
 	}
 	for _, role := range []domain.SignupRole{domain.SignupRoleBaseline, domain.SignupRoleReviewer, domain.SignupRoleCompetitor} {
-		if err := add(domain.AgentSignup{Role: role, Hosted: true, Launcher: "main"}); !errors.Is(err, ErrMaxHostedReached) {
+		if err := add(domain.AgentSignup{Actor: testActor, Role: role, Hosted: true, Launcher: "main"}); !errors.Is(err, ErrMaxHostedReached) {
 			t.Fatalf("a fifth machine, a hosted %s: got = %v, want ErrMaxHostedReached", role, err)
 		}
 	}
 	// An agent its owner runs is no machine of the platform's.
-	if err := add(domain.AgentSignup{Role: domain.SignupRoleCompetitor}); err != nil {
+	if err := add(domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleCompetitor}); err != nil {
 		t.Fatalf("a self-run agent in a full house: got = %v, want = nil", err)
 	}
 	if joined, err := pes.ListAgentSignups(ctx, pe.ID); err != nil || len(joined) != 4 {
@@ -522,7 +515,7 @@ func TestOneMachineIsKeptForTheBaselineAndAFinishedAgentHoldsNone(t *testing.T) 
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
 	now := time.Now().UTC()
-	pe := &domain.PlatformExperiment{
+	pe := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed,
 		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "kept", BudgetAcceleratorHours: 10,
 		MaxAgents: 5, StartsAt: now, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
@@ -538,8 +531,8 @@ func TestOneMachineIsKeptForTheBaselineAndAFinishedAgentHoldsNone(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		agent := &domain.Agent{ID: id, Name: id, PerformanceScore: 0.5, CreatedAt: now}
-		return id, pes.SpawnAgent(ctx, pe.ID, agent, domain.AgentSignup{AgentID: id, Role: role, Hosted: true, Launcher: "main"})
+		agent := &domain.Agent{ID: id, Name: id, CreatedAt: now}
+		return id, pes.SpawnAgent(ctx, pe.ID, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: role, Hosted: true, Launcher: "main"})
 	}
 	for i := range 2 {
 		if _, err := add(domain.SignupRoleCompetitor); err != nil {
@@ -599,7 +592,7 @@ func TestARunningMachinesProgressIsStampedOnThisClockAndItsSilenceEndsIt(t *test
 
 		// Starting, however long, is the boot limit's to judge.
 		observe("starting", nil)
-		thing.age(thing.column("seen_at"), 10*limit)
+		thing.age("seen_at", 10*limit)
 		if got := thing.instance(); got.Shown() != "starting" || got.ProgressAt != nil || silent() {
 			t.Fatalf("%s: starting: got = %+v, want no progress and no silence", kind, got)
 		}
@@ -609,7 +602,7 @@ func TestARunningMachinesProgressIsStampedOnThisClockAndItsSilenceEndsIt(t *test
 		if got := thing.instance(); got.Shown() != "running" || got.ProgressAt != nil {
 			t.Fatalf("%s: running with no marker: got = %+v", kind, got)
 		}
-		thing.age(thing.column("seen_at"), limit-10*time.Second)
+		thing.age("seen_at", limit-10*time.Second)
 		if silent() {
 			t.Fatalf("%s: a machine inside the limit of its first sight was ended as silent", kind)
 		}
@@ -628,25 +621,25 @@ func TestARunningMachinesProgressIsStampedOnThisClockAndItsSilenceEndsIt(t *test
 		}
 
 		// A new marker is written down at most four times a limit.
-		thing.age(thing.column("progress_at"), limit/4-10*time.Second)
+		thing.age("progress_at", limit/4-10*time.Second)
 		aged := thing.instance().ProgressAt
 		observe("running", marker("8"))
 		if got := thing.instance().ProgressAt; !got.Equal(*aged) {
 			t.Fatalf("%s: a marker inside a quarter of the limit was written down", kind)
 		}
-		thing.age(thing.column("progress_at"), limit/4+time.Second)
+		thing.age("progress_at", limit/4+time.Second)
 		observe("running", marker("8"))
 		if got := thing.instance().ProgressAt; time.Since(*got) > time.Minute {
 			t.Fatalf("%s: a new marker a quarter of the limit later: progress_at = %v, want now", kind, got)
 		}
 
 		// The marker stops changing: nothing inside the limit, an end past it.
-		thing.age(thing.column("progress_at"), limit-10*time.Second)
+		thing.age("progress_at", limit-10*time.Second)
 		observe("running", marker("8"))
 		if silent() {
 			t.Fatalf("%s: ended as silent inside the limit", kind)
 		}
-		thing.age(thing.column("progress_at"), limit+time.Second)
+		thing.age("progress_at", limit+time.Second)
 		observe("running", marker("8"))
 		if !silent() {
 			t.Fatalf("%s: a machine whose marker stood for the limit was not ended", kind)
@@ -700,16 +693,16 @@ func TestARunningMachineWhoseProgressIsUnreadableIsEndedByTheSilentClockAndSpend
 		// Never read: the limit runs from the first sight, and only for a running machine.
 		ask("name-1")
 		observe("name-1", "starting", nil)
-		thing.age(thing.column("seen_at"), 10*limit)
+		thing.age("seen_at", 10*limit)
 		if unreadable("name-1") {
 			t.Fatalf("%s: a starting machine was ended for its progress", kind)
 		}
 		observe("name-1", "running", nil)
-		thing.age(thing.column("seen_at"), limit-10*time.Second)
+		thing.age("seen_at", limit-10*time.Second)
 		if unreadable("name-1") {
 			t.Fatalf("%s: ended inside the limit of its first sight", kind)
 		}
-		thing.age(thing.column("seen_at"), limit+time.Second)
+		thing.age("seen_at", limit+time.Second)
 		if !unreadable("name-1") {
 			t.Fatalf("%s: unread for the limit since its first sight and not ended", kind)
 		}
@@ -720,13 +713,13 @@ func TestARunningMachineWhoseProgressIsUnreadableIsEndedByTheSilentClockAndSpend
 		// Read once: the limit runs from that progress, however long ago the machine was seen.
 		ask("name-2")
 		observe("name-2", "running", &marker)
-		thing.age(thing.column("seen_at"), 10*limit)
-		thing.age(thing.column("progress_at"), limit-10*time.Second)
+		thing.age("seen_at", 10*limit)
+		thing.age("progress_at", limit-10*time.Second)
 		observe("name-2", "running", nil)
 		if unreadable("name-2") {
 			t.Fatalf("%s: ended inside the limit of its last progress", kind)
 		}
-		thing.age(thing.column("progress_at"), limit+time.Second)
+		thing.age("progress_at", limit+time.Second)
 		if !unreadable("name-2") {
 			t.Fatalf("%s: unread for the limit since its last progress and not ended", kind)
 		}
@@ -738,7 +731,7 @@ func TestARunningMachineWhoseProgressIsUnreadableIsEndedByTheSilentClockAndSpend
 		}
 		ask("name-4")
 		observe("name-4", "running", nil)
-		thing.age(thing.column("seen_at"), limit+time.Second)
+		thing.age("seen_at", limit+time.Second)
 		if !unreadable("name-4") {
 			t.Fatalf("%s: not ended with no restart left", kind)
 		}
@@ -787,7 +780,7 @@ func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t 
 	rent(draft, planner, "planner-machine")
 	closing := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, closing, 10)
-	agent := spawnTestAgents(t, pes, closing, domain.AgentSignup{Hosted: true, Launcher: launcher, Flavor: "generalist"})[0]
+	agent := spawnTestAgents(t, pes, closing, domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: launcher, AgentType: "generalist"})[0]
 	setPEStatus(t, pool, closing, domain.PlatformExpRunning, time.Hour)
 	rent(closing, agent, "agent-machine")
 	coordinated := createTestPEWithCoordinator(t, pool, launcher)
@@ -918,7 +911,7 @@ func TestWhatAHostedAgentIsDoingIsKeptOnItsRowAndAnsweredWhereItIsRead(t *testin
 	pes := NewPlatformExperimentsStore(pool)
 	launcher := "launcher-" + uuid.New().String()[:8]
 	pe := createTestPEWithCoordinator(t, pool, launcher)
-	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Role: domain.SignupRoleBaseline, Hosted: true, Launcher: launcher, Flavor: "baseline"})[0]
+	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleBaseline, Hosted: true, Launcher: launcher, AgentType: "baseline"})[0]
 	draft, planner := createTestDraft(t, pool, launcher)
 
 	said := func(platformExpID, agentID string) *domain.AgentActivity {

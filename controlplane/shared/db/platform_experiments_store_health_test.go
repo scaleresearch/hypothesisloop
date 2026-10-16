@@ -19,7 +19,7 @@ func TestRunHealthCountsEveryRestartOfAnAgentAndTheCoordinatorAcrossLaunches(t *
 	pes := NewPlatformExperimentsStore(pool)
 	launcher := "launcher-" + uuid.New().String()[:8]
 	pe := createTestPEWithCoordinator(t, pool, launcher)
-	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Hosted: true, Launcher: launcher, Flavor: "generalist"})[0]
+	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: launcher, AgentType: "generalist"})[0]
 	for i, launch := range []string{"launch-1", "launch-1", "launch-2"} {
 		for _, id := range []string{agent, ""} {
 			name := uuid.New().String()[:8]

@@ -431,7 +431,6 @@ export interface AgentQuota {
 export interface Agent {
   id: string
   name: string
-  performance_score: number
   top3_count: number       // number of top-3 placements ever (drives +25% bonus)
   created_at: string
 }

@@ -815,8 +815,8 @@ func TestFlavorAndModelAreResolvedWhenAnAgentJoinsAndStored(t *testing.T) {
 	if a := joined(t, body)[0]; a["flavor"] != "generalist" || a["model"] != "platform-model-1" {
 		t.Errorf("an agent that named neither: flavor %v, model %v, want the defaults", a["flavor"], a["model"])
 	}
-	if s := store.signups[0]; s.Flavor != "generalist" || s.Model != "platform-model-1" {
-		t.Errorf("stored signup: flavor %q, model %q", s.Flavor, s.Model)
+	if s := store.signups[0]; s.AgentType != "generalist" || s.Model != "platform-model-1" {
+		t.Errorf("stored signup: flavor %q, model %q", s.AgentType, s.Model)
 	}
 	code, body = call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"flavor":"data-search","model":"another-model"}`)
 	if a := joined(t, body)[0]; code != http.StatusCreated || a["flavor"] != "data-search" || a["model"] != "another-model" {

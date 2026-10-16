@@ -35,11 +35,10 @@ func NewPlatformExperimentsStore(pool *Pool) *PlatformExperimentsStore {
 // ---- platform_experiments ----
 
 // coordinatorColumns are what a platform experiment says of the coordinator the platform runs
-// for it, read from platform_experiments as pe.
-var coordinatorColumns = `pe.coordinator_hosted, pe.coordinator_launcher, pe.coordinator_model, pe.coordinator_instance_name,
-       pe.coordinator_instance_restarts, pe.coordinator_instance_renewals, pe.coordinator_instance_stopped, pe.coordinator_instance_exited_at, pe.coordinator_instance_exit_log,
-       pe.coordinator_instance_seen_at, pe.coordinator_instance_asked_at, pe.coordinator_instance_launch,
-       pe.coordinator_instance_state, pe.coordinator_instance_progress_at, pe.coordinator_instance_end_reason,
+// for it, read from platform_experiments as pe joined to its machine as ci (coordinatorInstanceJoin).
+var coordinatorColumns = `pe.coordinator_hosted, pe.coordinator_launcher, pe.coordinator_model,
+       COALESCE(ci.name, ''), COALESCE(ci.restarts, 0), COALESCE(ci.renewals, 0), COALESCE(ci.stopped, false), ci.exited_at, COALESCE(ci.exit_log, ''),
+       ci.seen_at, ci.asked_at, COALESCE(ci.launch, ''), COALESCE(ci.state, ''), ci.progress_at, COALESCE(ci.end_reason, ''),
        ` + domain.InstanceReleasedSQL("pe.closed_at")
 
 // CreatePlatformExperiment stores pe and signs up the agents it is created with, the ones of
@@ -76,6 +75,14 @@ func (s *PlatformExperimentsStore) ProjectOrg(ctx context.Context, projectID str
 		return "", fmt.Errorf("platform_experiments_store.ProjectOrg: %w", err)
 	}
 	return orgID, nil
+}
+
+// optionalTime is t as a nullable column holds it: NULL for the zero time.
+func optionalTime(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }
 
 // execer is a pool or a transaction.
@@ -124,7 +131,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 	_, err = db.Exec(ctx, q,
 		pe.ID, pe.ProjectID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
 		metrics, pe.ReportIntervalSeconds,
-		pe.StartsAt, pe.ClosesAt(), string(pe.Status),
+		optionalTime(pe.StartsAt), pe.ClosesAt(), string(pe.Status),
 		stages, 1,
 		pe.CreatedAt, pe.UpdatedAt, pe.MaxConcurrentAccelerators, string(pe.DefaultQuotaTier),
 		pe.CoordinatorHosted, coordinator.Launcher, coordinator.Model, pe.MaxHosted,
@@ -215,15 +222,15 @@ ORDER BY wanted.n`, ids, string(domain.SignupRoleCompetitor))
 // GetPlatformExperiment fetches a single platform experiment by ID.
 func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	q := `
-SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, researchers, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, ` + summarySQL + `, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, pe.shared,
+SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hours, pe.max_agents, pe.researchers, pe.metrics, pe.report_interval_seconds, pe.starts_at, pe.ends_at, pe.status, pe.stages, pe.current_stage, ` + summarySQL + `, pe.created_at, pe.updated_at, pe.max_concurrent_accelerators, pe.default_quota_tier, pe.shared,
        ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.repository_url, pe.agent_image, pe.goal, COALESCE(pe.continues, ''), pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason,
        pe.baseline_job_id, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id, pe.close_message, pe.repository_error, pe.repository_account,
-       pe.duration_hours, pe.started_at, pe.planner_ends_at, pe.accepts_at, pe.coordinator_instance_activity, pe.coordinator_instance_activity_at,
+       pe.duration_hours, pe.started_at, pe.planner_ends_at, pe.accepts_at, COALESCE(ci.activity, ''), ci.activity_at,
        pe.accepted_at, pe.accepted_by_kind, pe.accepted_by_id, pe.accepted_answers,
-       (SELECT planner.instance_activity FROM experiment_signups planner WHERE ` + plannerOfDraft + `),
-       (SELECT planner.instance_activity_at FROM experiment_signups planner WHERE ` + plannerOfDraft + `)
-FROM platform_experiments pe
-WHERE id = $1`
+       (SELECT pi.activity FROM experiment_signups planner JOIN hosted_instances pi USING (platform_experiment_id, agent_id) WHERE ` + plannerOfDraft + `),
+       (SELECT pi.activity_at FROM experiment_signups planner JOIN hosted_instances pi USING (platform_experiment_id, agent_id) WHERE ` + plannerOfDraft + `)
+FROM platform_experiments pe` + coordinatorInstanceJoin + `
+WHERE pe.id = $1`
 
 	pe := &domain.PlatformExperiment{}
 	var status string
@@ -232,13 +239,13 @@ WHERE id = $1`
 	var createdBy, closedBy, acceptedBy domain.Actor
 	var proposal, acceptedAnswers []byte
 	var closesAt time.Time
-	var startedAt, answeredAt, plannerEndsAt, acceptsAt, coordinatorActivityAt, plannerActivityAt *time.Time
+	var startsAt, startedAt, answeredAt, plannerEndsAt, acceptsAt, coordinatorActivityAt, plannerActivityAt *time.Time
 	var coordinatorActivity string
 	var plannerActivity *string
 	err := s.pool.pool.QueryRow(ctx, q, id).Scan(
 		&pe.ID, &pe.ProjectID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents, &pe.Researchers,
 		&metricsRaw, &pe.ReportIntervalSeconds,
-		&pe.StartsAt, &closesAt, &status,
+		&startsAt, &closesAt, &status,
 		&stagesRaw, &pe.CurrentStage, &pe.Summary,
 		&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier, &pe.Shared,
 		&pe.CoordinatorHosted, &coordinator.Launcher, &coordinator.Model, &coordinator.Instance.Name, &coordinator.Instance.Restarts,
@@ -265,9 +272,6 @@ WHERE id = $1`
 	if pe.CoordinatorHosted {
 		coordinator.Activity = domain.ActivityOf(coordinatorActivity, coordinatorActivityAt)
 		pe.Coordinator = &coordinator
-	}
-	if createdBy.Kind == "" {
-		createdBy.Kind = domain.ActorUnverified
 	}
 	pe.Actor = &createdBy
 	if closedBy.Kind != "" {
@@ -302,6 +306,9 @@ WHERE id = $1`
 		return nil, fmt.Errorf("platform_experiments_store.Get: unmarshal stages: %w", err)
 	}
 	pe.Status = domain.PlatformExperimentStatus(status)
+	if startsAt != nil {
+		pe.StartsAt = *startsAt
+	}
 	if startedAt != nil {
 		pe.StartedAt = *startedAt
 	}
@@ -363,9 +370,9 @@ type PlatformExperimentsFilter struct {
 // used for SQL injection.
 var PlatformExperimentSortFields = map[string]string{
 	"created_at": "pe.created_at",
-	"starts_at":  "pe.starts_at",
+	"starts_at":  "COALESCE(pe.starts_at, '-infinity')",
 	"name":       "pe.name",
-	"status":     "pe.status",
+	"status":     "array_position(ARRAY['draft', 'open', 'running', 'closed'], pe.status)",
 }
 
 // statusPriorityTiebreak ranks running/open experiments ahead of closed ones when the primary
@@ -491,12 +498,12 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 		var status string
 		var metricsRaw, stagesRaw []byte
 		var closesAt time.Time
-		var startedAt, answeredAt *time.Time
+		var startsAt, startedAt, answeredAt *time.Time
 		var proposed bool
 		if err := rows.Scan(
 			&pe.ID, &pe.ProjectID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents, &pe.Researchers,
 			&metricsRaw, &pe.ReportIntervalSeconds,
-			&pe.StartsAt, &closesAt, &status,
+			&startsAt, &closesAt, &status,
 			&stagesRaw, &pe.CurrentStage, &pe.Summary,
 			&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier, &pe.Shared,
 			&pe.CoordinatorHosted, &pe.MaxHosted, &pe.Repository, &pe.RepositoryURL, &pe.AgentImage, &pe.Goal, &answeredAt, &proposed, &pe.DeclinedReason, &pe.BaselineJobID,
@@ -512,6 +519,9 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 			return nil, fmt.Errorf("platform_experiments_store.List: unmarshal stages: %w", err)
 		}
 		pe.Status = domain.PlatformExperimentStatus(status)
+		if startsAt != nil {
+			pe.StartsAt = *startsAt
+		}
 		if startedAt != nil {
 			pe.StartedAt = *startedAt
 		}
@@ -639,7 +649,7 @@ func (s *PlatformExperimentsStore) JobsSettled(ctx context.Context, id string) (
 func (s *PlatformExperimentsStore) ClosesToRecord(ctx context.Context, within time.Duration) ([]string, error) {
 	rows, err := s.pool.pool.Query(ctx, `SELECT pe.id FROM platform_experiments pe
 WHERE pe.status = 'closed' AND pe.close_record = '' AND pe.closed_at > now() - make_interval(secs => $1)
-  AND pe.close_reason IN ($2, $3, $4, $5) AND (pe.goal = '' OR pe.starts_at >= '0001-01-02')
+  AND pe.close_reason IN ($2, $3, $4, $5) AND (pe.goal = '' OR pe.starts_at IS NOT NULL)
   AND NOT `+unsettledJobsSQL+`
 ORDER BY pe.closed_at`, within.Seconds(), string(domain.CloseEndTimeReached), string(domain.CloseByRequest), string(domain.CloseBaselineLimitReached), string(domain.CloseAgentsNotStarted))
 	if err != nil {
@@ -755,7 +765,7 @@ SET name=$2, description=$3, budget_accelerator_hours=$4, max_agents=$5, metrics
 WHERE id=$1 AND status=$10 AND ($15 = '' OR baseline_job_id = $15)`
 	tag, err := tx.Exec(ctx, q,
 		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
-		metrics, pe.ReportIntervalSeconds, pe.StartsAt, pe.ClosesAt(),
+		metrics, pe.ReportIntervalSeconds, optionalTime(pe.StartsAt), pe.ClosesAt(),
 		expectedStatus,
 		pe.MaxConcurrentAccelerators, pe.BaselineJobID, pe.JobEstimatedDurationHours, pe.DurationHours, baseline,
 	)
@@ -830,7 +840,7 @@ WHERE platform_experiment_id = $1 AND role = $2`, pe.ID, string(domain.SignupRol
 		return fmt.Errorf("list baseline agents: %w", err)
 	}
 	for _, h := range holders {
-		if err := allocateBaselineQuota(ctx, tx, pe.ID, h.AgentID, h.Tier, pe.BudgetAcceleratorHours, pe.DefaultQuotaTier); err != nil {
+		if err := allocateBaselineQuota(ctx, tx, pe.ID, h.AgentID, h.Tier, pe.BudgetAcceleratorHours); err != nil {
 			return err
 		}
 	}
@@ -864,11 +874,10 @@ type StartParticipant struct {
 	Role        domain.SignupRole
 	AgentExists bool
 	HasTop3     bool
-	// QuotaTierOverride is what domain.ResolveQuotaTier needs to decide which column this
-	// participant's share lands in. Read here, inside the start transaction, because the signup
-	// set is: resolving the tier from a separate query could pair one transaction's participants
-	// with another's overrides.
-	QuotaTierOverride domain.QuotaTier
+	// QuotaTier decides which column this participant's share lands in. Read here, inside the
+	// start transaction, because the signup set is: reading the tier from a separate query could
+	// pair one transaction's participants with another's tiers.
+	QuotaTier domain.QuotaTier
 }
 
 // sharesBudgetSQL is domain.AgentSignup.SharesBudget of the signup s: a researcher or any other
@@ -888,9 +897,9 @@ func (s *PlatformExperimentsStore) startClock(ctx context.Context, platformExpID
 UPDATE platform_experiments pe
 SET started_at = NOW(), ends_at = `+runOverAtSQL+`, updated_at = NOW()
 WHERE pe.id = $1 AND pe.status = 'running' AND pe.started_at IS NULL
-  AND EXISTS (SELECT 1 FROM experiment_signups s
-              WHERE s.platform_experiment_id = pe.id AND s.agent_id = $2 AND s.hosted AND s.instance_name = $3
-                AND s.instance_state = '`+domain.InstanceRunning+`' AND `+sharesBudgetSQL+`)`,
+  AND EXISTS (SELECT 1 FROM experiment_signups s JOIN hosted_instances i USING (platform_experiment_id, agent_id)
+              WHERE s.platform_experiment_id = pe.id AND s.agent_id = $2 AND s.hosted AND i.name = $3
+                AND i.state = '`+domain.InstanceRunning+`' AND `+sharesBudgetSQL+`)`,
 		platformExpID, agentID, name); err != nil {
 		return fmt.Errorf("platform_experiments_store.startClock: %w", err)
 	}
@@ -959,7 +968,7 @@ ORDER BY s.agent_id`, id)
 	var participants []StartParticipant
 	for rows.Next() {
 		var p StartParticipant
-		if err := rows.Scan(&p.AgentID, &p.Role, &p.AgentExists, &p.HasTop3, &p.QuotaTierOverride); err != nil {
+		if err := rows.Scan(&p.AgentID, &p.Role, &p.AgentExists, &p.HasTop3, &p.QuotaTier); err != nil {
 			rows.Close()
 			return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: scan signup: %w", err)
 		}

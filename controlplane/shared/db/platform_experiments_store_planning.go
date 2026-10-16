@@ -41,8 +41,8 @@ func (s *PlatformExperimentsStore) CreateDraft(ctx context.Context, pe *domain.P
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO agents (id, name, org_id, performance_score, created_at)
-VALUES ($1, $2, $3, $4, $5)`, planner.ID, planner.Name, planner.OrgID, planner.PerformanceScore, planner.CreatedAt); err != nil {
+INSERT INTO agents (id, name, org_id, created_at)
+VALUES ($1, $2, $3, $4)`, planner.ID, planner.Name, planner.OrgID, planner.CreatedAt); err != nil {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: create planner: %w", err)
 	}
 	hyperparameters, err := json.Marshal(nonNilObject(signup.Hyperparameters))
@@ -53,13 +53,13 @@ VALUES ($1, $2, $3, $4, $5)`, planner.ID, planner.Name, planner.OrgID, planner.P
 	if signup.Actor != nil {
 		addedBy = *signup.Actor
 	}
-	agentType, version, err := agentTypePinTx(ctx, tx, pe.ID, signup.Flavor, domain.RoleOfSignup(signup.Role))
+	agentType, version, err := agentTypePinTx(ctx, tx, pe.ID, signup.AgentType, domain.RoleOfSignup(signup.Role))
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, flavor, agent_type_version, hyperparameters, model, added_by_kind, added_by_id)
-VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $12, $8, $9, $10, $11)`, pe.ID, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
+INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, agent_type, agent_type_version, hyperparameters, model, added_by_kind, added_by_id)
+VALUES ($1, $2, NOW(), $3, COALESCE(NULLIF($4, ''), (SELECT default_quota_tier FROM platform_experiments WHERE id = $1)), $5, $6, $7, $12, $8, $9, $10, $11)`, pe.ID, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
 		signup.Hosted, signup.Launcher, agentType, hyperparameters, signup.Model, string(addedBy.Kind), addedBy.ID, version); err != nil {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: sign the planner up: %w", err)
 	}
@@ -183,8 +183,8 @@ func signUpDraftBaseline(ctx context.Context, tx pgx.Tx, id string, agent *domai
 		return fmt.Errorf("read the draft's org: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO agents (id, name, org_id, performance_score, created_at)
-VALUES ($1, $2, $3, $4, $5)`, agent.ID, agent.Name, agent.OrgID, agent.PerformanceScore, agent.CreatedAt); err != nil {
+INSERT INTO agents (id, name, org_id, created_at)
+VALUES ($1, $2, $3, $4)`, agent.ID, agent.Name, agent.OrgID, agent.CreatedAt); err != nil {
 		return fmt.Errorf("create the baseline agent: %w", err)
 	}
 	hyperparameters, err := json.Marshal(nonNilObject(signup.Hyperparameters))
@@ -195,13 +195,13 @@ VALUES ($1, $2, $3, $4, $5)`, agent.ID, agent.Name, agent.OrgID, agent.Performan
 	if signup.Actor != nil {
 		addedBy = *signup.Actor
 	}
-	agentType, version, err := agentTypePinTx(ctx, tx, id, signup.Flavor, domain.RoleOfSignup(signup.Role))
+	agentType, version, err := agentTypePinTx(ctx, tx, id, signup.AgentType, domain.RoleOfSignup(signup.Role))
 	if err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, flavor, agent_type_version, hyperparameters, model, added_by_kind, added_by_id)
-VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $12, $8, $9, $10, $11)`, id, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
+INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, agent_type, agent_type_version, hyperparameters, model, added_by_kind, added_by_id)
+VALUES ($1, $2, NOW(), $3, COALESCE(NULLIF($4, ''), (SELECT default_quota_tier FROM platform_experiments WHERE id = $1)), $5, $6, $7, $12, $8, $9, $10, $11)`, id, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
 		signup.Hosted, signup.Launcher, agentType, hyperparameters, signup.Model, string(addedBy.Kind), addedBy.ID, version); err != nil {
 		return fmt.Errorf("sign the baseline agent up: %w", err)
 	}
@@ -340,7 +340,7 @@ SET status = 'open', name = $2, description = $3, budget_accelerator_hours = $4,
     accepted_at = $16, accepted_by_kind = $17, accepted_by_id = $18, accepted_answers = $19, researchers = $20
 WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents, metrics,
 		pe.ReportIntervalSeconds, pe.BaselineDueAt, stages,
-		string(pe.DefaultQuotaTier), pe.MaxConcurrentAccelerators, pe.Coordinator.Launcher, pe.Coordinator.Model, pe.DurationHours, pe.StartsAt,
+		string(pe.DefaultQuotaTier), pe.MaxConcurrentAccelerators, pe.Coordinator.Launcher, pe.Coordinator.Model, pe.DurationHours, optionalTime(pe.StartsAt),
 		pe.AcceptedAt, string(acceptedBy.Kind), acceptedBy.ID, answers, researchers); err != nil {
 		return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
 	}
@@ -416,7 +416,8 @@ func (s *PlatformExperimentsStore) Revise(ctx context.Context, id, message strin
 	// A planner whose machine ended because its work was done is asked for under a new launch,
 	// with its own restarts: a launch the launcher's reconcile does not know spends none of the
 	// old one's. One whose machine is still there keeps it and its launch.
-	if _, err := tx.Exec(ctx, `UPDATE experiment_signups SET instance_launch = '' WHERE platform_experiment_id = $1 AND role = $2 AND instance_name = ''`, id, string(domain.SignupRolePlanner)); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE hosted_instances i SET launch = '' FROM experiment_signups s
+WHERE s.platform_experiment_id = i.platform_experiment_id AND s.agent_id = i.agent_id AND i.platform_experiment_id = $1 AND s.role = $2 AND i.name = ''`, id, string(domain.SignupRolePlanner)); err != nil {
 		return fmt.Errorf("platform_experiments_store.Revise: renew the planner's launch: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO planning_requests (platform_experiment_id, message, actor_kind, actor_id, created_xid) VALUES ($1, $2, $3, $4, pg_current_xact_id()::text::bigint)`,

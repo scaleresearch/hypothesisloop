@@ -638,6 +638,11 @@ against is split across releases (expand, then contract):
 2. ship the code that uses it;
 3. drop or tighten what only the old code needed, in a later release's migration.
 
+`0004_clean_schema` is the one exception, made before launch: it converts the schema in place in
+one transaction, keeping every row, and the previous release cannot run against it, so it ships in
+one coordinated deploy. It refuses a database that still holds the `hypotheses` or `human_writes`
+table, which a start of the previous release moves out.
+
 `migrations/snapshots/NNNN.sql`, when present, is the whole schema at version NNNN in one file. A
 fresh database is built from the newest snapshot and recorded as having run the migrations up to
 it; an existing database runs those migrations in order. A test requires each snapshot to build

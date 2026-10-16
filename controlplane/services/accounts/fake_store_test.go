@@ -361,7 +361,7 @@ func (s *memStore) SetClusterOrder(_ context.Context, orgID string, names []stri
 	return nil
 }
 
-func (s *memStore) SetClusterEnabled(_ context.Context, name, orgID, by string, enabled bool) (*domain.Cluster, error) {
+func (s *memStore) SetClusterEnabled(_ context.Context, name, orgID string, by domain.Actor, enabled bool) (*domain.Cluster, error) {
 	c, ok := s.clusters[name]
 	if !ok || !c.OpenTo(orgID) {
 		return nil, db.ErrClusterNotFound
@@ -372,7 +372,7 @@ func (s *memStore) SetClusterEnabled(_ context.Context, name, orgID, by string, 
 		c.DisabledOrgs = slices.DeleteFunc(c.DisabledOrgs, func(o string) bool { return o == orgID })
 	case !enabled && !off:
 		c.DisabledOrgs = append(c.DisabledOrgs, orgID)
-		s.disabledBy = append(s.disabledBy, by)
+		s.disabledBy = append(s.disabledBy, by.ID)
 	}
 	out := *c
 	return &out, nil

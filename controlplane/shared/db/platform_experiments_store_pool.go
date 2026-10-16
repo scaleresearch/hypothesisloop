@@ -12,9 +12,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// signupKeySQL is the pool entry signup s is one of: its agent type, which the signup holds as
-// its flavor, and its model. A flavor from before flavors were stored reads as the default.
-const signupKeySQL = `COALESCE(NULLIF(s.flavor, ''), '` + domain.DefaultAgentFlavor + `'), s.model`
+// signupKeySQL is the pool entry signup s is one of: its agent type and its model.
+const signupKeySQL = `s.agent_type, s.model`
 
 // PoolBelowAtWorkError refuses a max_agents below the researchers at work of a platform experiment
 // that does not run yet, or researchers that want fewer of an agent type and model at work than
@@ -285,10 +284,10 @@ func (s *PlatformExperimentsStore) ResearcherPoolState(ctx context.Context, plat
 	}
 	rows, err := tx.Query(ctx, `
 SELECT `+signupKeySQL+`, s.agent_id, s.quota_tier, s.hyperparameters, s.added_by_kind, s.added_by_id,
-       COALESCE(s.finished_at, s.instance_exited_at, s.signed_up_at)
-FROM experiment_signups s
+       COALESCE(s.finished_at, i.exited_at, s.signed_up_at)
+FROM experiment_signups s`+signupInstanceJoin+`
 WHERE s.platform_experiment_id = $1 AND s.role = '`+string(domain.SignupRoleCompetitor)+`'
-  AND (s.finished_at IS NOT NULL OR (s.hosted AND s.instance_stopped))
+  AND (s.finished_at IS NOT NULL OR `+stoppedSQL+`)
   AND NOT EXISTS (SELECT 1 FROM platform_experiment_cuts c WHERE c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id)
   AND NOT `+replacedSQL+`
 ORDER BY 7, s.agent_id`, platformExpID)
@@ -309,7 +308,7 @@ ORDER BY 7, s.agent_id`, platformExpID)
 		if addedBy.Kind != "" {
 			ended.Actor = &addedBy
 		}
-		ended.PlatformExperimentID, ended.Role, ended.Flavor, ended.Model = platformExpID, domain.SignupRoleCompetitor, ended.Key.AgentType, ended.Key.Model
+		ended.PlatformExperimentID, ended.Role, ended.AgentType, ended.Model = platformExpID, domain.SignupRoleCompetitor, ended.Key.AgentType, ended.Key.Model
 		state.Ended[ended.Key] = append(state.Ended[ended.Key], ended)
 	}
 	if err := rows.Err(); err != nil {

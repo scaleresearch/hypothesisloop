@@ -109,7 +109,7 @@ func TestADraftIsCreatedFromOneSentenceWithItsPlannerAndNothingOfARun(t *testing
 	// Its one agent is the planner, which the platform runs and never ranks or cuts.
 	planner, signup := store.planners[pe.ID], store.signups[pe.ID]
 	if planner == nil || planner.Name != "Planner" || signup.AgentID != planner.ID || !signup.Hosted || signup.Launcher != "main" ||
-		signup.Flavor != domain.PlannerFlavor || signup.Role != domain.SignupRolePlanner || signup.Model != "platform-model-1" || out["signup_count"] != float64(1) {
+		signup.AgentType != domain.PlannerFlavor || signup.Role != domain.SignupRolePlanner || signup.Model != "platform-model-1" || out["signup_count"] != float64(1) {
 		t.Errorf("planner %+v signed up as %+v, want a hosted planner of role baseline on the platform's model", planner, signup)
 	}
 	// A draft has a repository: the one named, or a new one the repository pass makes after the
@@ -618,7 +618,7 @@ func (s *draftStore) GetAgentSignup(_ context.Context, platformExperimentID, age
 		}
 	}
 	if agentID == "ag-researcher" {
-		return &domain.AgentSignup{AgentID: agentID, Flavor: domain.DefaultAgentFlavor}, nil
+		return &domain.AgentSignup{AgentID: agentID, AgentType: domain.DefaultAgentFlavor}, nil
 	}
 	return nil, nil
 }
@@ -698,7 +698,7 @@ func draftWithPlanner() *draftStore {
 		statusStore: statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{{
 			ID: "pe-draft", ProjectID: "prj-a", Status: domain.PlatformExpDraft, Goal: "g", MaxHosted: draftMaxHosted, PlanningEndsAt: time.Now().Add(time.Minute),
 		}}}},
-		signups:   map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Role: domain.SignupRolePlanner, Flavor: domain.PlannerFlavor, Hosted: true}},
+		signups:   map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Role: domain.SignupRolePlanner, AgentType: domain.PlannerFlavor, Hosted: true}},
 		reachable: map[string][]domain.Cluster{"rtx-4090": {{Name: "rented"}}},
 	}
 }
@@ -906,10 +906,10 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 			t.Errorf("agent %d: %+v signed up as %+v, want a hosted researcher added by the person who accepted", i, agent, signup)
 		}
 	}
-	if measures := store.baselines[0]; measures.Role != domain.SignupRoleBaseline || !measures.Hosted || measures.Launcher != "main" || measures.Flavor != "baseline" || len(measures.Hyperparameters) != 0 {
+	if measures := store.baselines[0]; measures.Role != domain.SignupRoleBaseline || !measures.Hosted || measures.Launcher != "main" || measures.AgentType != "baseline" || len(measures.Hyperparameters) != 0 {
 		t.Errorf("the baseline agent runs as %+v, want a hosted one of the built-in baseline type and no hyperparameters", measures)
 	}
-	if first := store.acceptedSignups[0]; first.Flavor != "architecture-search" || first.Hyperparameters["depth"] != float64(4) || store.acceptedSignups[1].Flavor != domain.DefaultAgentFlavor {
+	if first := store.acceptedSignups[0]; first.AgentType != "architecture-search" || first.Hyperparameters["depth"] != float64(4) || store.acceptedSignups[1].AgentType != domain.DefaultAgentFlavor {
 		t.Errorf("signups %+v, want the flavors and hyperparameters the person stated", store.acceptedSignups)
 	}
 
@@ -1587,7 +1587,7 @@ func TestAProposalIsAcceptedAsProposedUnlessAPersonActsFirst(t *testing.T) {
 	if pe.Status != domain.PlatformExpOpen || pe.BudgetAcceleratorHours != 6 || pe.DurationHours != 4 || pe.MaxAgents != 2 || !pe.BaselineDueAt.Equal(pe.StartsAt.Add(30*time.Minute)) || pe.AcceptsAt != nil {
 		t.Fatalf("accepted as proposed: got %+v, want open at the proposal's 6 hours of budget, 4 of run, 2 researchers and 30 minutes of baseline", pe)
 	}
-	if len(store.acceptedSignups) != 2 || store.acceptedSignups[0].Flavor != "hyperparameter-search" || store.acceptedSignups[0].Actor.ID != "u-creator" || len(store.baselines) != 1 {
+	if len(store.acceptedSignups) != 2 || store.acceptedSignups[0].AgentType != "hyperparameter-search" || store.acceptedSignups[0].Actor.ID != "u-creator" || len(store.baselines) != 1 {
 		t.Fatalf("researchers %+v beside %d baseline agents, want the 2 proposed, added for the creator, and the one baseline agent", store.acceptedSignups, len(store.baselines))
 	}
 	// Accepted by the platform, the proposal stays to be read, with no person named as accepting.

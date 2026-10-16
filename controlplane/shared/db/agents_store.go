@@ -27,11 +27,11 @@ var ErrAgentExists = errors.New("agent already exists")
 // CreateAgent inserts a new agent row: ErrAgentExists for an id an agent already has.
 func (s *AgentsStore) CreateAgent(ctx context.Context, agent *domain.Agent) error {
 	const q = `
-INSERT INTO agents (id, name, org_id, performance_score, created_at)
-VALUES ($1, $2, $3, $4, $5)`
+INSERT INTO agents (id, name, org_id, created_at)
+VALUES ($1, $2, $3, $4)`
 
 	_, err := s.pool.pool.Exec(ctx, q,
-		agent.ID, agent.Name, agent.OrgID, agent.PerformanceScore, agent.CreatedAt,
+		agent.ID, agent.Name, agent.OrgID, agent.CreatedAt,
 	)
 	// The primary key is the table's only unique constraint.
 	var pgErr *pgconn.PgError
@@ -47,13 +47,13 @@ VALUES ($1, $2, $3, $4, $5)`
 // GetAgent retrieves an agent by ID.
 func (s *AgentsStore) GetAgent(ctx context.Context, id string) (*domain.Agent, error) {
 	const q = `
-SELECT id, name, org_id, performance_score, created_at
+SELECT id, name, org_id, created_at
 FROM agents
 WHERE id = $1`
 
 	agent := &domain.Agent{}
 	err := s.pool.pool.QueryRow(ctx, q, id).Scan(
-		&agent.ID, &agent.Name, &agent.OrgID, &agent.PerformanceScore, &agent.CreatedAt,
+		&agent.ID, &agent.Name, &agent.OrgID, &agent.CreatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -124,7 +124,7 @@ func (s *AgentsStore) ListAgents(ctx context.Context, filter AgentsFilter) ([]*d
 	where, args := agentFilterClauses(filter)
 	args = append(args, limit, filter.Offset)
 	q := fmt.Sprintf(`
-SELECT a.id, a.name, a.org_id, a.performance_score, a.created_at,
+SELECT a.id, a.name, a.org_id, a.created_at,
        (SELECT COUNT(*) FROM experiment_top3 t WHERE t.agent_id = a.id) AS top3_count
 FROM agents a
 WHERE %s
@@ -141,7 +141,7 @@ LIMIT $%d OFFSET $%d`, where, len(args)-1, len(args))
 	for rows.Next() {
 		agent := &domain.Agent{}
 		if err := rows.Scan(
-			&agent.ID, &agent.Name, &agent.OrgID, &agent.PerformanceScore, &agent.CreatedAt,
+			&agent.ID, &agent.Name, &agent.OrgID, &agent.CreatedAt,
 			&agent.Top3Count,
 		); err != nil {
 			return nil, fmt.Errorf("agents_store.ListAgents: scan: %w", err)
@@ -161,9 +161,8 @@ func (s *AgentsStore) AgentStats(ctx context.Context, filter AgentsFilter) (*dom
 	stats := &domain.AgentStats{}
 	if err := s.pool.pool.QueryRow(ctx, `
 SELECT COUNT(*),
-       COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM experiment_top3 t WHERE t.agent_id = a.id)),
-       COALESCE(AVG(a.performance_score), 0)
-FROM agents a WHERE `+where, args...).Scan(&stats.Total, &stats.Top3Eligible, &stats.AvgPerformanceScore); err != nil {
+       COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM experiment_top3 t WHERE t.agent_id = a.id))
+FROM agents a WHERE `+where, args...).Scan(&stats.Total, &stats.Top3Eligible); err != nil {
 		return nil, fmt.Errorf("agents_store.AgentStats: %w", err)
 	}
 	return stats, nil

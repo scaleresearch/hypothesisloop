@@ -102,8 +102,13 @@ func startWithDefault(t *testing.T, defaultTier domain.QuotaTier, participants .
 	return byAgent
 }
 
-func participant(agentID string, override domain.QuotaTier) db.StartParticipant {
-	return db.StartParticipant{AgentID: agentID, AgentExists: true, QuotaTierOverride: override}
+// participant is a signup of agentID whose tier is tier, guaranteed where it states none, as the
+// default of the experiments here resolves it at signup.
+func participant(agentID string, tier domain.QuotaTier) db.StartParticipant {
+	if tier == "" {
+		tier = domain.QuotaTierGuaranteed
+	}
+	return db.StartParticipant{AgentID: agentID, AgentExists: true, QuotaTier: tier}
 }
 
 // The tier is decided at signup and applied exactly once, here, when the allocation is made.
@@ -152,16 +157,6 @@ func TestStartLetsASignupOverrideWinOverTheAgentsKind(t *testing.T) {
 	}
 	if b := byAgent["human-burst-only"].BurstAcceleratorHours; b <= 0 {
 		t.Errorf("human restricted to burst_only: burst = %v, want > 0 — the share moves, it is not forfeited", b)
-	}
-}
-
-// A legacy experiment (default_quota_tier unset) with no signup override now resolves to the
-// same fixed guaranteed default as any other experiment — ResolveQuotaTier has no kind-based
-// fallback left to apply, by design (quota tier never depends on AgentKind).
-func TestStartLegacyExperimentDefaultsToGuaranteedWithNoKindInvolved(t *testing.T) {
-	byAgent := startWithDefault(t, "", participant("agent-1", ""))
-	if g := byAgent["agent-1"].GuaranteedAcceleratorHours; g <= 0 {
-		t.Errorf("legacy agent, no override: guaranteed = %v, want > 0", g)
 	}
 }
 
@@ -271,7 +266,7 @@ func TestThePlatformStartsARunOnceItsBaselineIsDeclaredAndSaysWhatItWaitsFor(t *
 // neither: "why is it in this state" is one field in every status. A run that waits for its first
 // researcher's machine says so and when the wait ends.
 func TestEveryStatusSaysWhyInItsStatusReason(t *testing.T) {
-	svc := newSignupTestService(t, &startStore{participants: []db.StartParticipant{{AgentID: "ag-r"}}})
+	svc := newSignupTestService(t, &startStore{participants: []db.StartParticipant{{AgentID: "ag-r", QuotaTier: domain.QuotaTierGuaranteed}}})
 	now := time.Now().UTC()
 	waiting := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning}
 	waiting.SetClosesAt(now.Add(20 * time.Minute))

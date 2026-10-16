@@ -36,7 +36,7 @@ var contractSettings = launcherapi.Settings{
 func hostedAgent(pe, agent string) db.LauncherAgent {
 	return db.LauncherAgent{AgentSignup: domain.AgentSignup{
 		PlatformExperimentID: pe, AgentID: agent, Hosted: true, Launcher: "main",
-		Flavor: "data-search", Model: "model-1", Hyperparameters: map[string]any{"batch_size": float64(64)},
+		AgentType: "data-search", Model: "model-1", Hyperparameters: map[string]any{"batch_size": float64(64)},
 		Instance: &domain.AgentInstance{},
 	}}
 }

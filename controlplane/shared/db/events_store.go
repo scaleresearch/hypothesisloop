@@ -557,7 +557,7 @@ WHERE platform_experiment_id = $1 AND idle_xid >= $2`, peID, since, IdleNew, Idl
 // record the version an edit last moved them to.
 func replayAgentInstructions(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]domain.Event, error) {
 	rows, err := tx.Query(ctx, `
-SELECT agent_id, agent_type_version::text, flavor, instructions_xid FROM experiment_signups
+SELECT agent_id, agent_type_version::text, agent_type, instructions_xid FROM experiment_signups
 WHERE platform_experiment_id = $1 AND instructions_xid >= $2
 UNION ALL
 SELECT $3, coordinator_agent_type_version::text, coordinator_agent_type, coordinator_instructions_xid FROM platform_experiments

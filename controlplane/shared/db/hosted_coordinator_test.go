@@ -13,7 +13,7 @@ import (
 func createTestPEWithCoordinator(t *testing.T, pool *Pool, launcher string) string {
 	t.Helper()
 	now := time.Now().UTC()
-	pe := &domain.PlatformExperiment{
+	pe := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed,
 		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "coordinated", BudgetAcceleratorHours: 10,
 		MaxAgents: 10, StartsAt: now, DurationHours: 24, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
@@ -104,7 +104,7 @@ func TestAPlatformExperimentIsCreatedWithItsAgentsOrNotAtAll(t *testing.T) {
 	launcher := "launcher-" + uuid.New().String()[:8]
 	now := time.Now().UTC()
 	experiment := func(maxHosted int) *domain.PlatformExperiment {
-		return &domain.PlatformExperiment{
+		return &domain.PlatformExperiment{Actor: testActor,
 			ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "created", BudgetAcceleratorHours: 6,
 			MaxAgents: 3, StartsAt: now, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
 			Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
@@ -114,8 +114,8 @@ func TestAPlatformExperimentIsCreatedWithItsAgentsOrNotAtAll(t *testing.T) {
 		}
 	}
 	measuring := func() ([]*domain.Agent, []domain.AgentSignup) {
-		agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], PerformanceScore: 0.5, CreatedAt: now}
-		return []*domain.Agent{agent}, []domain.AgentSignup{{AgentID: agent.ID, Role: domain.SignupRoleBaseline, Hosted: true, Launcher: launcher, Flavor: "baseline", Model: "model-1"}}
+		agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], CreatedAt: now}
+		return []*domain.Agent{agent}, []domain.AgentSignup{{Actor: testActor, AgentID: agent.ID, Role: domain.SignupRoleBaseline, Hosted: true, Launcher: launcher, AgentType: "baseline", Model: "model-1"}}
 	}
 
 	pe := experiment(4)

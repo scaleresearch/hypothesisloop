@@ -22,10 +22,10 @@ var ErrGitHubInstallationNotFound = errors.New("the org has not connected that G
 // connected with, under the name each carries now or its id while it carries none, or staff, or
 // unverified with no id and no name on one whose connector was not kept.
 const installationColumns = `org_id, installation_id, account_login, account_type, connected_by_kind,
-       CASE WHEN connected_by_kind IN ('user', 'key') THEN connected_by ELSE '' END,
+       CASE WHEN connected_by_kind IN ('user', 'key') THEN connected_by_id ELSE '' END,
        CASE connected_by_kind
-         WHEN 'user' THEN COALESCE((SELECT named.name FROM users named WHERE named.id = connected_by AND named.name <> ''), connected_by)
-         WHEN 'key' THEN COALESCE((SELECT named.name FROM api_keys named WHERE named.id = connected_by AND named.name <> ''), connected_by)
+         WHEN 'user' THEN COALESCE((SELECT named.name FROM users named WHERE named.id = connected_by_id AND named.name <> ''), connected_by_id)
+         WHEN 'key' THEN COALESCE((SELECT named.name FROM api_keys named WHERE named.id = connected_by_id AND named.name <> ''), connected_by_id)
          WHEN 'staff' THEN 'staff'
          ELSE '' END,
        connected_at, is_default`
@@ -65,7 +65,7 @@ SELECT COALESCE(bool_or(is_default), false) FROM replaced`, in.OrgID, in.Install
 		return fmt.Errorf("accounts_store.ConnectGitHubInstallation: replace the installation removed on the account: %w", err)
 	}
 	err = scanInstallation(tx.QueryRow(ctx, `
-INSERT INTO org_github_installations (org_id, installation_id, account_login, account_type, connected_by_kind, connected_by, is_default)
+INSERT INTO org_github_installations (org_id, installation_id, account_login, account_type, connected_by_kind, connected_by_id, is_default)
 VALUES ($1, $2, $3, $4, $5, $6, $7 OR NOT EXISTS (SELECT 1 FROM org_github_installations WHERE org_id = $1))
 ON CONFLICT (org_id, installation_id) DO UPDATE SET account_login = EXCLUDED.account_login, account_type = EXCLUDED.account_type
 RETURNING `+installationColumns, in.OrgID, in.InstallationID, in.AccountLogin, in.AccountType, string(in.ConnectedActor.Kind), in.ConnectedActor.ID, replacedDefault), in)

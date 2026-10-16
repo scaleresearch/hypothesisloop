@@ -249,7 +249,7 @@ func (s *createdStore) CompletedJobs(context.Context, string) ([]*domain.Experim
 func (s *createdStore) StartPlatformExperimentTx(_ context.Context, id string, _ time.Duration, quotasFor func([]db.StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error) {
 	participants := make([]db.StartParticipant, len(s.researchers))
 	for i, agentID := range s.researchers {
-		participants[i] = db.StartParticipant{AgentID: agentID, Role: domain.SignupRoleCompetitor, AgentExists: true}
+		participants[i] = db.StartParticipant{AgentID: agentID, Role: domain.SignupRoleCompetitor, AgentExists: true, QuotaTier: domain.QuotaTierGuaranteed}
 	}
 	quotas, _, err := quotasFor(participants)
 	if err != nil {

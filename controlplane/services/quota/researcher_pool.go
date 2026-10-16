@@ -116,7 +116,7 @@ func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *do
 		}
 		signup := domain.AgentSignup{
 			Role: domain.SignupRoleCompetitor, QuotaTier: tier, Hosted: true, Launcher: launch.Launcher,
-			Flavor: choice.AgentType, Model: choice.Model, Hyperparameters: choice.Hyperparameters, Actor: &by, Replaces: place.Replaces,
+			AgentType: choice.AgentType, Model: choice.Model, Hyperparameters: choice.Hyperparameters, Actor: &by, Replaces: place.Replaces,
 		}
 		late, err := s.lateShare(ctx, pe)
 		if err != nil {
@@ -127,7 +127,7 @@ func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *do
 			return fmt.Errorf("platform_experiments.KeepResearchers: %w", err)
 		}
 		signup.AgentID = id
-		agent := &domain.Agent{ID: id, PerformanceScore: 0.5, CreatedAt: now}
+		agent := &domain.Agent{ID: id, CreatedAt: now}
 		err = s.store.JoinRunning(ctx, pe.ID, agent, signup, *late)
 		switch {
 		case errors.Is(err, db.ErrNoShareLeft), errors.Is(err, db.ErrMaxAgentsReached), errors.Is(err, db.ErrMaxHostedReached), errors.Is(err, db.ErrSignupClosed):

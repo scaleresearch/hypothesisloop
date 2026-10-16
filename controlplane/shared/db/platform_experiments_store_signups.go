@@ -114,8 +114,8 @@ func (s *PlatformExperimentsStore) enrol(ctx context.Context, platformExpID stri
 // is open: half the budget (domain.BaselineShare), in the column its tier names
 // (domain.ApplyQuotaTier). It is written when the agent joins and again whenever the budget of
 // the open experiment changes.
-func allocateBaselineQuota(ctx context.Context, tx pgx.Tx, platformExpID, agentID string, tier domain.QuotaTier, budget float64, defaultTier domain.QuotaTier) error {
-	guaranteed, burst := domain.ApplyQuotaTier(domain.ResolveQuotaTier(tier, defaultTier), domain.BaselineShare(budget), 0)
+func allocateBaselineQuota(ctx context.Context, tx pgx.Tx, platformExpID, agentID string, tier domain.QuotaTier, budget float64) error {
+	guaranteed, burst := domain.ApplyQuotaTier(tier, domain.BaselineShare(budget), 0)
 	id, err := domain.NewID(domain.AgentQuotaIDPrefix)
 	if err != nil {
 		return err
@@ -183,8 +183,8 @@ WHERE pe.id=$1 FOR UPDATE OF pe`, platformExpID).Scan(&status, &maxAgents, &maxH
 			return 0, err
 		}
 		if _, err := tx.Exec(ctx, `
-INSERT INTO agents (id, name, org_id, performance_score, created_at)
-VALUES ($1, $2, $3, $4, $5)`, agent.ID, agent.Name, agent.OrgID, agent.PerformanceScore, agent.CreatedAt); err != nil {
+INSERT INTO agents (id, name, org_id, created_at)
+VALUES ($1, $2, $3, $4)`, agent.ID, agent.Name, agent.OrgID, agent.CreatedAt); err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: create agent %s: %w", agent.ID, err)
 		}
 	}
@@ -216,12 +216,13 @@ VALUES ($1, $2, $3, $4, $5)`, agent.ID, agent.Name, agent.OrgID, agent.Performan
 		if signup.Actor != nil {
 			addedBy = *signup.Actor
 		}
-		agentType, version, err := agentTypePinTx(ctx, tx, platformExpID, signup.Flavor, domain.RoleOfSignup(signup.Role))
+		agentType, version, err := agentTypePinTx(ctx, tx, platformExpID, signup.AgentType, domain.RoleOfSignup(signup.Role))
 		if err != nil {
 			return 0, err
 		}
+		signup.QuotaTier = domain.ResolveQuotaTier(signup.QuotaTier, defaultTier)
 		tag, err := tx.Exec(ctx, `
-INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, flavor, agent_type_version, hyperparameters, model, added_by_kind, added_by_id,
+INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, agent_type, agent_type_version, hyperparameters, model, added_by_kind, added_by_id,
                                 replaces, replaces_xid)
 VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $13, $8, $9, $10, $11, $12::text, CASE WHEN $12::text <> '' THEN pg_current_xact_id()::text::bigint END)
 ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
@@ -242,7 +243,7 @@ ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signu
 		if signup.Role != domain.SignupRoleBaseline {
 			continue
 		}
-		if err := allocateBaselineQuota(ctx, tx, platformExpID, signup.AgentID, signup.QuotaTier, budget, defaultTier); err != nil {
+		if err := allocateBaselineQuota(ctx, tx, platformExpID, signup.AgentID, signup.QuotaTier, budget); err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: %w", err)
 		}
 	}
@@ -255,8 +256,8 @@ ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signu
 		var measuring, others int
 		if err := tx.QueryRow(ctx, `
 SELECT COUNT(*) FILTER (WHERE role = $2), COUNT(*) FILTER (WHERE role <> $2)
-FROM experiment_signups
-WHERE platform_experiment_id = $1 AND hosted AND finished_at IS NULL AND NOT instance_stopped AND role <> $3`,
+FROM experiment_signups s
+WHERE s.platform_experiment_id = $1 AND s.hosted AND s.finished_at IS NULL AND NOT `+stoppedSQL+` AND s.role <> $3`,
 			platformExpID, string(domain.SignupRoleBaseline), string(domain.SignupRolePlanner)).Scan(&measuring, &others); err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: count hosted: %w", err)
 		}
@@ -284,7 +285,7 @@ WHERE s.platform_experiment_id = $1 AND `+researcherAtWorkSQL, platformExpID).Sc
 		}
 	}
 	for _, signup := range joined {
-		if err := allocateLateQuota(ctx, tx, platformExpID, signup, *late, defaultTier); err != nil {
+		if err := allocateLateQuota(ctx, tx, platformExpID, signup, *late); err != nil {
 			return 0, err
 		}
 	}
@@ -295,10 +296,10 @@ WHERE s.platform_experiment_id = $1 AND `+researcherAtWorkSQL, platformExpID).Sc
 // of what the researchers left unspent (domain.LateShare), and takes that share from the quotas of
 // the others, never below it nor below what they used. The experiment row is locked, so two researchers joining at once do not
 // take the same hours.
-func allocateLateQuota(ctx context.Context, tx pgx.Tx, platformExpID string, signup domain.AgentSignup, late LateJoin, defaultTier domain.QuotaTier) error {
+func allocateLateQuota(ctx context.Context, tx pgx.Tx, platformExpID string, signup domain.AgentSignup, late LateJoin) error {
 	rows, err := tx.Query(ctx, `
 SELECT q.agent_id, q.guaranteed_accelerator_hours, q.burst_accelerator_hours,
-       s.finished_at IS NOT NULL OR (s.hosted AND s.instance_stopped)
+       s.finished_at IS NOT NULL OR `+stoppedSQL+`
 FROM agent_quotas q
 JOIN experiment_signups s ON s.platform_experiment_id = q.platform_experiment_id AND s.agent_id = q.agent_id
 WHERE q.platform_experiment_id = $1 AND s.role = $2 AND s.agent_id <> $3
@@ -334,7 +335,7 @@ WHERE platform_experiment_id = $1 AND agent_id = $2`, platformExpID, agentID, ta
 			return fmt.Errorf("platform_experiments_store.JoinRunning: take from %s: %w", agentID, err)
 		}
 	}
-	guaranteed, burst := domain.ApplyQuotaTier(domain.ResolveQuotaTier(signup.QuotaTier, defaultTier), share, domain.RoundHours(share*late.BurstFraction))
+	guaranteed, burst := domain.ApplyQuotaTier(signup.QuotaTier, share, domain.RoundHours(share*late.BurstFraction))
 	id, err := domain.NewID(domain.AgentQuotaIDPrefix)
 	if err != nil {
 		return err
@@ -445,6 +446,9 @@ WHERE s.platform_experiment_id=$1 AND s.agent_id=$2 FOR UPDATE OF s`, platformEx
 	}
 	keys, err := signupKeysTx(ctx, tx, platformExpID, []string{agentID})
 	if err != nil {
+		return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM hosted_instances WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID); err != nil {
 		return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM experiment_signups WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID); err != nil {
@@ -744,7 +748,7 @@ const replacedSQL = `EXISTS (SELECT 1 FROM experiment_signups r WHERE r.platform
 // not cut, was not replaced and, run by the platform, did not lose its machine with no restart
 // left. Each takes one of the places max_agents counts, and only they do: the one count of the
 // researchers a platform experiment has, for a signup and for a change of max_agents alike.
-const researcherAtWorkSQL = `s.role = '` + string(domain.SignupRoleCompetitor) + `' AND s.finished_at IS NULL AND NOT (s.hosted AND s.instance_stopped)
+const researcherAtWorkSQL = `s.role = '` + string(domain.SignupRoleCompetitor) + `' AND s.finished_at IS NULL AND NOT ` + stoppedSQL + `
   AND NOT EXISTS (SELECT 1 FROM platform_experiment_cuts c WHERE c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id)
   AND NOT ` + replacedSQL
 
@@ -752,17 +756,15 @@ const researcherAtWorkSQL = `s.role = '` + string(domain.SignupRoleCompetitor) +
 const endedReasonSQL = `CASE WHEN EXISTS (SELECT 1 FROM platform_experiment_cuts c WHERE c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id) THEN '` + string(domain.RunEndCut) + `'
             WHEN ` + replacedSQL + ` THEN '` + domain.EndedReplaced + `'
             WHEN s.finished_at IS NOT NULL THEN '` + string(domain.RunEndFinished) + `'
-            WHEN s.hosted AND s.instance_stopped THEN '` + domain.EndedStopped + `'
+            WHEN ` + stoppedSQL + ` THEN '` + domain.EndedStopped + `'
             ELSE '' END`
 
 // The last two columns are whether the agent's run ended long enough ago for its machine to be
 // released, and why it ended: its platform experiment closed, it was cut, it finished, or it is
 // a planner whose answer is stored.
 var agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name, s.agent_id), s.role, s.quota_tier,
-       s.hosted, s.launcher, s.flavor, COALESCE(s.agent_type_version, 0), s.hyperparameters, s.model, s.signed_up_at,
-       s.instance_name, s.instance_restarts, s.instance_renewals, s.instance_stopped, s.instance_exited_at, s.instance_exit_log,
-       s.instance_seen_at, s.instance_asked_at, s.instance_launch,
-       s.instance_state, s.instance_progress_at, s.instance_end_reason, s.instance_activity, s.instance_activity_at,
+       s.hosted, s.launcher, s.agent_type, COALESCE(s.agent_type_version, 0), s.hyperparameters, s.model, s.signed_up_at,
+       ` + instanceColumns + `,
        s.finished_at, s.finished_reason, s.added_by_kind, s.added_by_id, s.replaces,
        COALESCE((SELECT r.agent_id FROM experiment_signups r WHERE r.platform_experiment_id = s.platform_experiment_id AND r.replaces = s.agent_id), ''),
        ` + domain.InstanceReleasedSQL(`LEAST(
@@ -783,14 +785,11 @@ func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 	var activity string
 	var activityAt *time.Time
 	if err := row.Scan(append([]any{&signup.PlatformExperimentID, &signup.AgentID, &signup.Name, &signup.Role, &signup.QuotaTier,
-		&signup.Hosted, &signup.Launcher, &signup.Flavor, &signup.AgentTypeVersion, &hyperparameters, &signup.Model, &signup.SignedUpAt,
+		&signup.Hosted, &signup.Launcher, &signup.AgentType, &signup.AgentTypeVersion, &hyperparameters, &signup.Model, &signup.SignedUpAt,
 		&instance.Name, &instance.Restarts, &instance.Renewals, &instance.Stopped, &instance.ExitedAt, &instance.ExitLog,
 		&instance.SeenAt, &instance.AskedAt, &instance.Launch, &instance.Reported, &instance.ProgressAt, &instance.EndReason, &activity, &activityAt,
 		&signup.FinishedAt, &signup.FinishedReason, &addedBy.Kind, &addedBy.ID, &signup.Replaces, &signup.ReplacedBy, &instance.Released, &signup.Ended, &signup.CutReason, &signup.AtWork, &signup.EndedReason}, more...)...); err != nil {
 		return domain.AgentSignup{}, err
-	}
-	if addedBy.Kind == "" {
-		addedBy.Kind = domain.ActorUnverified
 	}
 	signup.Actor = &addedBy
 	if signup.Hosted {
@@ -809,7 +808,7 @@ func (s *PlatformExperimentsStore) ListAgentSignups(ctx context.Context, platfor
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT `+agentSignupColumns+`, f.jobs, f.running,
        CASE WHEN pe.status = 'running' AND pe.started_at IS NOT NULL AND f.jobs = 0 THEN `+idleSinceSQL+` END
-FROM experiment_signups s LEFT JOIN agents a ON a.id = s.agent_id
+FROM experiment_signups s LEFT JOIN agents a ON a.id = s.agent_id`+signupInstanceJoin+`
 JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
 CROSS JOIN LATERAL (SELECT count(*) AS jobs, count(*) FILTER (WHERE e.status = 'RUNNING') AS running
                     FROM experiments e
@@ -839,7 +838,7 @@ ORDER BY s.signed_up_at, s.agent_id`, platformExpID)
 func (s *PlatformExperimentsStore) GetAgentSignup(ctx context.Context, platformExpID, agentID string) (*domain.AgentSignup, error) {
 	signup, err := scanAgentSignup(s.pool.pool.QueryRow(ctx, `
 SELECT `+agentSignupColumns+`
-FROM experiment_signups s LEFT JOIN agents a ON a.id = s.agent_id
+FROM experiment_signups s LEFT JOIN agents a ON a.id = s.agent_id`+signupInstanceJoin+`
 WHERE s.platform_experiment_id = $1 AND s.agent_id = $2`, platformExpID, agentID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -885,7 +884,7 @@ type LauncherAgent struct {
 const launcherAgentsFrom = `
 FROM experiment_signups s
 JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
-LEFT JOIN agents a ON a.id = s.agent_id
+LEFT JOIN agents a ON a.id = s.agent_id` + signupInstanceJoin + `
 LEFT JOIN platform_experiment_cuts c ON c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id
 WHERE s.hosted AND s.launcher = $1 AND NOT (` + awaitsRepository + `)
   AND (pe.status = 'closed' AND pe.closed_at > now() - make_interval(secs => $2)

@@ -34,12 +34,6 @@ func TestAShareIsTheSameUnderEitherTier(t *testing.T) {
 	}
 }
 
-func TestResolveQuotaTierDefaultsToGuaranteedWithNoOverrideOrPolicy(t *testing.T) {
-	if got := ResolveQuotaTier("", ""); got != QuotaTierGuaranteed {
-		t.Errorf("no override, no experiment policy: got %q, want guaranteed", got)
-	}
-}
-
 func TestResolveQuotaTierOverrideWinsOverExperimentPolicy(t *testing.T) {
 	if got := ResolveQuotaTier(QuotaTierBurstOnly, QuotaTierGuaranteed); got != QuotaTierBurstOnly {
 		t.Errorf("explicit burst_only override under a guaranteed policy: got %q, want burst_only", got)

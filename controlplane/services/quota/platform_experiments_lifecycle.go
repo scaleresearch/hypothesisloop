@@ -1170,7 +1170,7 @@ func (s *PlatformExperimentsService) start(ctx context.Context, pe *domain.Platf
 			// is allocated the same way and a burst-only participant's guaranteed part is moved
 			// into burst, not taken away.
 			acceleratorGuaranteed, acceleratorBurst = domain.ApplyQuotaTier(
-				domain.ResolveQuotaTier(p.QuotaTierOverride, pe.DefaultQuotaTier), acceleratorGuaranteed, acceleratorBurst)
+				p.QuotaTier, acceleratorGuaranteed, acceleratorBurst)
 			id, err := domain.NewID(domain.AgentQuotaIDPrefix)
 			if err != nil {
 				return nil, nil, fmt.Errorf("platform_experiments.start: %w", err)

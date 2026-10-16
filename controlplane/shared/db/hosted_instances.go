@@ -56,39 +56,41 @@ func (e InstanceEnd) SpendsRestart() bool {
 // and one that stops is ended at most a limit and one such part of it later.
 const progressStampsPerLimit = 4
 
-// instanceColumns is where a hosted agent or a hosted coordinator keeps what became of its
-// machine. Both are evaluated by the same statements. key takes the platform experiment as $1
-// and the agent as $2, which is empty for a coordinator.
-type instanceColumns struct {
-	table, key, prefix string
-}
+// signupInstanceJoin joins experiment_signups s to the machine of its agent as i, NULL for an
+// agent that never had one asked for.
+const signupInstanceJoin = `
+LEFT JOIN hosted_instances i ON i.platform_experiment_id = s.platform_experiment_id AND i.agent_id = s.agent_id`
 
-var (
-	agentInstance       = instanceColumns{"experiment_signups", "platform_experiment_id = $1 AND agent_id = $2 AND hosted", "instance_"}
-	coordinatorInstance = instanceColumns{"platform_experiments", "id = $1 AND $2 = '' AND coordinator_hosted", "coordinator_instance_"}
-)
+// coordinatorInstanceJoin joins platform_experiments pe to the machine of its coordinator as ci.
+const coordinatorInstanceJoin = `
+LEFT JOIN hosted_instances ci ON ci.platform_experiment_id = pe.id AND ci.agent_id = ''`
 
-func instanceOf(agentID string) instanceColumns {
-	if agentID == "" {
-		return coordinatorInstance
-	}
-	return agentInstance
-}
+// instanceColumns read the machine i of signupInstanceJoin as domain.AgentInstance holds it, what
+// it holds before one is asked for where none was.
+const instanceColumns = `COALESCE(i.name, ''), COALESCE(i.restarts, 0), COALESCE(i.renewals, 0), COALESCE(i.stopped, false), i.exited_at, COALESCE(i.exit_log, ''),
+       i.seen_at, i.asked_at, COALESCE(i.launch, ''),
+       COALESCE(i.state, ''), i.progress_at, COALESCE(i.end_reason, ''), COALESCE(i.activity, ''), i.activity_at`
+
+// stoppedSQL is whether the machine of signup s stopped with no restart left.
+const stoppedSQL = `EXISTS (SELECT 1 FROM hosted_instances stopped
+        WHERE stopped.platform_experiment_id = s.platform_experiment_id AND stopped.agent_id = s.agent_id AND stopped.stopped)`
 
 // AskInstance records the name a hosted agent's machine, or with no agentID a hosted
 // coordinator's, is asked for under, and when. launch identifies what the machine is started
 // with: under the launch the restart budget was spent under it stands, and under another the
-// budget is whole and a stopped one is asked for again. restarts counts every one, ever.
+// budget is whole and a stopped one is asked for again. restarts counts every one, ever. It
+// records nothing for an agent or coordinator the platform does not run.
 func (s *PlatformExperimentsStore) AskInstance(ctx context.Context, platformExpID, agentID, name, launch string) error {
-	c := instanceOf(agentID)
 	_, err := s.pool.pool.Exec(ctx, `
-UPDATE `+c.table+`
-SET `+c.prefix+`name = $3, `+c.prefix+`asked_at = now(), `+c.prefix+`seen_at = NULL, `+c.prefix+`launch = $4, `+c.prefix+`machine = '',
-    `+c.prefix+`state = '', `+c.prefix+`progress = '', `+c.prefix+`progress_at = NULL,
-    `+c.prefix+`activity = '', `+c.prefix+`activity_at = NULL,
-    `+c.prefix+`restarted_at = CASE WHEN `+c.prefix+`launch = $4 THEN `+c.prefix+`restarted_at ELSE '{}' END,
-    `+c.prefix+`stopped = `+c.prefix+`stopped AND `+c.prefix+`launch = $4
-WHERE `+c.key, platformExpID, agentID, name, launch)
+INSERT INTO hosted_instances AS i (platform_experiment_id, agent_id, name, launch, asked_at)
+SELECT $1, $2, $3, $4, now()
+WHERE EXISTS (SELECT 1 FROM experiment_signups s WHERE s.platform_experiment_id = $1 AND s.agent_id = $2 AND s.hosted)
+   OR $2 = '' AND EXISTS (SELECT 1 FROM platform_experiments pe WHERE pe.id = $1 AND pe.coordinator_hosted)
+ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE
+SET name = $3, asked_at = now(), seen_at = NULL, launch = $4, machine = '',
+    state = '', progress = '', progress_at = NULL, activity = '', activity_at = NULL,
+    restarted_at = CASE WHEN i.launch = $4 THEN i.restarted_at ELSE '{}' END,
+    stopped = i.stopped AND i.launch = $4`, platformExpID, agentID, name, launch)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.AskInstance: %w", err)
 	}
@@ -109,18 +111,17 @@ func (s *PlatformExperimentsStore) ObserveInstance(ctx context.Context, platform
 	if machine == "" {
 		return fmt.Errorf("platform_experiments_store.ObserveInstance: %s is reported with no machine id", name)
 	}
-	c := instanceOf(agentID)
-	stamp := `($5::text IS NOT NULL AND $5 <> ` + c.prefix + `progress AND (` + c.prefix + `progress_at IS NULL OR ` + c.prefix + `progress_at <= now() - make_interval(secs => $6)))`
-	said := `($7 <> '' AND $7 <> ` + c.prefix + `activity)`
+	const stamp = `($5::text IS NOT NULL AND $5 <> progress AND (progress_at IS NULL OR progress_at <= now() - make_interval(secs => $6)))`
+	const said = `($7 <> '' AND $7 <> activity)`
 	_, err := s.pool.pool.Exec(ctx, `
-UPDATE `+c.table+`
-SET `+c.prefix+`seen_at = COALESCE(`+c.prefix+`seen_at, now()), `+c.prefix+`state = $4, `+c.prefix+`machine = $8,
-    `+c.prefix+`progress = CASE WHEN `+stamp+` THEN $5 ELSE `+c.prefix+`progress END,
-    `+c.prefix+`progress_at = CASE WHEN `+stamp+` THEN now() ELSE `+c.prefix+`progress_at END,
-    `+c.prefix+`activity_at = CASE WHEN `+said+` THEN now() ELSE `+c.prefix+`activity_at END,
-    `+c.prefix+`activity = CASE WHEN `+said+` THEN $7 ELSE `+c.prefix+`activity END
-WHERE `+c.key+` AND `+c.prefix+`name = $3 AND `+c.prefix+`name <> ''
-  AND (`+c.prefix+`seen_at IS NULL OR `+c.prefix+`state <> $4 OR `+c.prefix+`machine <> $8 OR `+stamp+` OR `+said+`)`,
+UPDATE hosted_instances
+SET seen_at = COALESCE(seen_at, now()), state = $4, machine = $8,
+    progress = CASE WHEN `+stamp+` THEN $5 ELSE progress END,
+    progress_at = CASE WHEN `+stamp+` THEN now() ELSE progress_at END,
+    activity_at = CASE WHEN `+said+` THEN now() ELSE activity_at END,
+    activity = CASE WHEN `+said+` THEN $7 ELSE activity END
+WHERE platform_experiment_id = $1 AND agent_id = $2 AND name = $3 AND name <> ''
+  AND (seen_at IS NULL OR state <> $4 OR machine <> $8 OR `+stamp+` OR `+said+`)`,
 		platformExpID, agentID, name, state, progress, progressLimit.Seconds()/progressStampsPerLimit, activity, machine)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.ObserveInstance: %w", err)
@@ -141,20 +142,19 @@ WHERE `+c.key+` AND `+c.prefix+`name = $3 AND `+c.prefix+`name <> ''
 // is the boot limit for a machine never seen or still starting, the progress limit for a silent
 // one or one whose progress could not be read, and unused otherwise. after is the instance as the write left it.
 func (s *PlatformExperimentsStore) EndInstance(ctx context.Context, platformExpID, agentID, name string, how InstanceEnd, exitLog string, limit time.Duration, maxRestarts int) (after domain.AgentInstance, recorded bool, err error) {
-	c := instanceOf(agentID)
 	// Every form names $6, so that one statement serves them all.
 	var when string
 	switch how {
 	case InstanceExited, InstanceExpired:
 		when = "$6::float8 IS NOT NULL"
 	case InstanceGone:
-		when = "$6::float8 IS NOT NULL AND " + c.prefix + "seen_at IS NOT NULL"
+		when = "$6::float8 IS NOT NULL AND seen_at IS NOT NULL"
 	case InstanceNeverSeen:
-		when = c.prefix + "seen_at IS NULL AND " + c.prefix + "asked_at <= now() - make_interval(secs => $6)"
+		when = "seen_at IS NULL AND asked_at <= now() - make_interval(secs => $6)"
 	case InstanceStillStarting:
-		when = c.prefix + "seen_at <= now() - make_interval(secs => $6)"
+		when = "seen_at <= now() - make_interval(secs => $6)"
 	case InstanceSilent, InstanceProgressUnreadable:
-		when = c.prefix + "state = 'running' AND COALESCE(" + c.prefix + "progress_at, " + c.prefix + "seen_at) <= now() - make_interval(secs => $6)"
+		when = "state = 'running' AND COALESCE(progress_at, seen_at) <= now() - make_interval(secs => $6)"
 	default:
 		return after, false, fmt.Errorf("platform_experiments_store.EndInstance: unknown end %q", how)
 	}
@@ -163,18 +163,18 @@ func (s *PlatformExperimentsStore) EndInstance(ctx context.Context, platformExpI
 		return after, false, fmt.Errorf("platform_experiments_store.EndInstance: begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	recent := `ARRAY(SELECT t FROM unnest(` + c.prefix + `restarted_at) t WHERE t > now() - make_interval(secs => $9))`
-	restart := `$8::boolean AND cardinality(` + recent + `) < $5`
+	const recent = `ARRAY(SELECT t FROM unnest(restarted_at) t WHERE t > now() - make_interval(secs => $9))`
+	const restart = `$8::boolean AND cardinality(` + recent + `) < $5`
 	err = tx.QueryRow(ctx, `
-UPDATE `+c.table+`
-SET `+c.prefix+`name = '', `+c.prefix+`machine = '', `+c.prefix+`exited_at = now(), `+c.prefix+`exit_log = $4, `+c.prefix+`end_reason = $7, `+c.prefix+`state = '',
-    `+c.prefix+`activity = '', `+c.prefix+`activity_at = NULL,
-    `+c.prefix+`stopped = $8::boolean AND cardinality(`+recent+`) >= $5,
-    `+c.prefix+`restarts = `+c.prefix+`restarts + CASE WHEN `+restart+` THEN 1 ELSE 0 END,
-    `+c.prefix+`restarted_at = CASE WHEN `+restart+` THEN `+recent+` || now() ELSE `+recent+` END,
-    `+c.prefix+`renewals = `+c.prefix+`renewals + CASE WHEN $8::boolean THEN 0 ELSE 1 END
-WHERE `+c.key+` AND NOT `+c.prefix+`stopped AND `+c.prefix+`name = $3 AND `+c.prefix+`name <> '' AND `+when+`
-RETURNING `+c.prefix+`restarts, `+c.prefix+`renewals, `+c.prefix+`stopped, `+c.prefix+`exited_at, `+c.prefix+`exit_log, `+c.prefix+`launch, `+c.prefix+`end_reason`,
+UPDATE hosted_instances
+SET name = '', machine = '', exited_at = now(), exit_log = $4, end_reason = $7, state = '',
+    activity = '', activity_at = NULL,
+    stopped = $8::boolean AND cardinality(`+recent+`) >= $5,
+    restarts = restarts + CASE WHEN `+restart+` THEN 1 ELSE 0 END,
+    restarted_at = CASE WHEN `+restart+` THEN `+recent+` || now() ELSE `+recent+` END,
+    renewals = renewals + CASE WHEN $8::boolean THEN 0 ELSE 1 END
+WHERE platform_experiment_id = $1 AND agent_id = $2 AND NOT stopped AND name = $3 AND name <> '' AND `+when+`
+RETURNING restarts, renewals, stopped, exited_at, exit_log, launch, end_reason`,
 		platformExpID, agentID, name, exitLog, maxRestarts, limit.Seconds(), string(how), how.SpendsRestart(), domain.AgentInstanceRestartWindow.Seconds()).
 		Scan(&after.Restarts, &after.Renewals, &after.Stopped, &after.ExitedAt, &after.ExitLog, &after.Launch, &after.EndReason)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -218,22 +218,24 @@ func (s *PlatformExperimentsStore) ReleaseInstances(ctx context.Context, launche
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.ReleaseInstances: %w", err)
 	}
+	const released = `name = '', machine = '', state = '', exited_at = now(), end_reason = '` + string(InstanceReleased) + `',
+    activity = '', activity_at = NULL`
 	if _, err := s.pool.pool.Exec(ctx, `
-UPDATE experiment_signups s
-SET instance_name = '', instance_machine = '', instance_state = '', instance_exited_at = now(), instance_end_reason = '`+string(InstanceReleased)+`',
-    instance_activity = '', instance_activity_at = NULL,
-    instance_exit_log = $3::jsonb ->> (`+runEndSQL+`)
-WHERE s.hosted AND s.launcher = $1 AND s.instance_name <> ''
+UPDATE hosted_instances i
+SET `+released+`, exit_log = $3::jsonb ->> (`+runEndSQL+`)
+FROM experiment_signups s
+WHERE s.platform_experiment_id = i.platform_experiment_id AND s.agent_id = i.agent_id
+  AND s.hosted AND s.launcher = $1 AND i.name <> ''
   AND (s.platform_experiment_id, s.agent_id) NOT IN (SELECT s.platform_experiment_id, s.agent_id`+launcherAgentsFrom+`)`,
 		launcher, windDown.Seconds(), because); err != nil {
 		return fmt.Errorf("platform_experiments_store.ReleaseInstances: agents: %w", err)
 	}
 	if _, err := s.pool.pool.Exec(ctx, `
-UPDATE platform_experiments pe
-SET coordinator_instance_name = '', coordinator_instance_machine = '', coordinator_instance_state = '', coordinator_instance_exited_at = now(),
-    coordinator_instance_activity = '', coordinator_instance_activity_at = NULL,
-    coordinator_instance_end_reason = '`+string(InstanceReleased)+`', coordinator_instance_exit_log = $3
-WHERE pe.coordinator_hosted AND pe.coordinator_launcher = $1 AND pe.coordinator_instance_name <> ''
+UPDATE hosted_instances i
+SET `+released+`, exit_log = $3
+FROM platform_experiments pe
+WHERE pe.id = i.platform_experiment_id AND i.agent_id = ''
+  AND pe.coordinator_hosted AND pe.coordinator_launcher = $1 AND i.name <> ''
   AND pe.id NOT IN (SELECT pe.id`+launcherCoordinatorsWhere+`)`,
 		launcher, coordinatorWindDown.Seconds(), domain.RunEndClosed.ReleasedBecause()); err != nil {
 		return fmt.Errorf("platform_experiments_store.ReleaseInstances: coordinators: %w", err)
@@ -252,11 +254,11 @@ type LauncherMachine struct {
 // name is still held and was reported with a machine id, by name. It writes nothing.
 func (s *PlatformExperimentsStore) ListLauncherMachines(ctx context.Context, launcher string) ([]LauncherMachine, error) {
 	rows, err := s.pool.pool.Query(ctx, `
-SELECT instance_name, instance_machine FROM experiment_signups
-WHERE hosted AND launcher = $1 AND instance_name <> '' AND instance_machine <> ''
-UNION ALL
-SELECT coordinator_instance_name, coordinator_instance_machine FROM platform_experiments
-WHERE coordinator_hosted AND coordinator_launcher = $1 AND coordinator_instance_name <> '' AND coordinator_instance_machine <> ''
+SELECT i.name, i.machine FROM hosted_instances i
+LEFT JOIN experiment_signups s ON s.platform_experiment_id = i.platform_experiment_id AND s.agent_id = i.agent_id
+LEFT JOIN platform_experiments pe ON pe.id = i.platform_experiment_id AND i.agent_id = ''
+WHERE i.name <> '' AND i.machine <> ''
+  AND (s.hosted AND s.launcher = $1 OR pe.coordinator_hosted AND pe.coordinator_launcher = $1)
 ORDER BY 1`, launcher)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.ListLauncherMachines: %w", err)

@@ -26,12 +26,12 @@ func TestResearchersAtWorkAreCountedByTheOneRuleForEachAgentAndTheWholePool(t *t
 	if err := pes.FinishAgent(ctx, pe, finished, "nothing left"); err != nil {
 		t.Fatal(err)
 	}
-	exec(t, pool, `UPDATE experiment_signups SET instance_stopped = true WHERE platform_experiment_id = $1 AND agent_id = $2`, pe, stopped)
+	exec(t, pool, `INSERT INTO hosted_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, true) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, pe, stopped)
 	exec(t, pool, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index) VALUES ($1, $2, 1)`, pe, cut)
-	exec(t, pool, `UPDATE experiment_signups SET instance_stopped = true WHERE platform_experiment_id = $1 AND agent_id = $2`, pe, replaced)
+	exec(t, pool, `INSERT INTO hosted_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, true) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, pe, replaced)
 	replacement, _ := domain.NewID(domain.AgentIDPrefix)
 	if err := pes.JoinRunning(ctx, pe, &domain.Agent{ID: replacement, CreatedAt: time.Now().UTC()},
-		domain.AgentSignup{AgentID: replacement, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: "main", Flavor: "generalist", Model: "model-1", Replaces: replaced},
+		domain.AgentSignup{Actor: testActor, AgentID: replacement, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: "main", AgentType: "generalist", Model: "model-1", Replaces: replaced},
 		LateJoin{Used: map[string]float64{}}); err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestADescriptionIsSeededForABuiltinAndWrittenOnAnOrgsType(t *testing.T) {
 	if custom.Description != "Tunes the knobs." {
 		t.Errorf("created: got description %q", custom.Description)
 	}
-	edited, _, err := store.Edit(ctx, AgentTypeEdit{OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "Tuner", Description: "Changed.", Prompt: testPrompt, Settings: testTypeSettings()}, testModelDefaults)
+	edited, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "Tuner", Description: "Changed.", Prompt: testPrompt, Settings: testTypeSettings()}, testModelDefaults)
 	if err != nil || edited.Description != "Changed." || edited.CurrentVersion != 1 {
 		t.Errorf("edited: got = %+v, %v, want the description changed at version 1", edited, err)
 	}

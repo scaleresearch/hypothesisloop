@@ -51,7 +51,7 @@ type Clusters interface {
 	RegisterCluster(ctx context.Context, name, orgID string) (*domain.Cluster, error)
 	ClustersHosting(ctx context.Context, orgID string) ([]*domain.Cluster, error)
 	UpdateCluster(ctx context.Context, name string, shared *bool, change domain.ClusterSettings) (cluster *domain.Cluster, requeued []string, err error)
-	SetClusterEnabled(ctx context.Context, name, orgID, by string, enabled bool) (*domain.Cluster, error)
+	SetClusterEnabled(ctx context.Context, name, orgID string, by domain.Actor, enabled bool) (*domain.Cluster, error)
 	SetClusterOrder(ctx context.Context, orgID string, names []string) error
 	RemoveCluster(ctx context.Context, name string) (requeued []string, err error)
 	ClearReportedID(ctx context.Context, name string) (*domain.Cluster, error)
@@ -643,11 +643,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			if err != nil {
 				return nil, err
 			}
-			by := caller.Actor()
-			if by.ID == "" {
-				by.ID = string(by.Kind)
-			}
-			cluster, err := h.clusters.SetClusterEnabled(ctx, in.Name, in.ID, by.ID, use.enabled)
+			cluster, err := h.clusters.SetClusterEnabled(ctx, in.Name, in.ID, caller.Actor(), use.enabled)
 			if err != nil {
 				return nil, err
 			}

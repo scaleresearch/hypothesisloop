@@ -305,8 +305,7 @@ type PlatformExperiment struct {
 	// PriorRuns are its prior runs (Tenancy.PriorRuns) the reader reaches, latest close first.
 	// Carried by a read of one platform experiment and left out of a list.
 	PriorRuns []PriorRun `json:"prior_runs,omitempty" doc:"Every other closed platform experiment of the same project that works on the same repository and ran (its researchers started or it declared a baseline), latest close first. Its agents and its coordinator read each as they read their own, passing its id as platform_experiment_id or --platform-experiment: its summary, standings, jobs and their logs, its hypotheses and findings, and the data its jobs wrote by the url of each object GET /experiments/{id}/data lists. They write nothing to it. Absent when there is none, and on a list."`
-	// DefaultQuotaTier is used when a signup does not choose its own tier. Empty means this row
-	// predates the policy and ResolveQuotaTier must use the legacy kind-based default.
+	// DefaultQuotaTier is the tier of a signup that does not choose its own.
 	DefaultQuotaTier QuotaTier `json:"default_quota_tier,omitempty"`
 	// MaxHosted is how many machines the platform may run for this platform experiment, its
 	// coordinator included. Fixed at creation.

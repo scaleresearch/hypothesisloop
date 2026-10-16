@@ -453,8 +453,8 @@ func TestRunsToRankAreReadInTheOrderAsked(t *testing.T) {
 	createTestPE(t, pool, second, 10)
 	createTestAgent(t, pool, researcher)
 	createTestAgent(t, pool, baseline)
-	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id) VALUES ($1, $2)`, first, researcher)
-	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, role) VALUES ($1, $2, 'baseline')`, first, baseline)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist')`, first, researcher)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, role) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', 'baseline')`, first, baseline)
 	seedExperimentForCapTest(t, pool, "job-rank-done-"+suffix, researcher, first, 1, domain.StatusCompleted)
 	seedExperimentForCapTest(t, pool, "job-rank-failed-"+suffix, researcher, first, 1, domain.StatusFailed)
 
@@ -501,7 +501,7 @@ func TestListingsKeepToTheCallersScope(t *testing.T) {
 	}
 	pes := NewPlatformExperimentsStore(pool)
 	for pe, agent := range map[string]string{peA: agentA, peB: agentB} {
-		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: agent, Role: domain.SignupRoleCompetitor}); err != nil {
+		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: agent, Role: domain.SignupRoleCompetitor}); err != nil {
 			t.Fatalf("signup: %v", err)
 		}
 	}

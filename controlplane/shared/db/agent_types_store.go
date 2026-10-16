@@ -60,10 +60,10 @@ type rowsQuerier interface {
 
 // liveSignupSQL is whether the run of signup s goes on: it did not end (runEndSQL), its machine
 // was not given up on and nobody was added in its place.
-const liveSignupSQL = `(` + runEndSQL + `) = '' AND NOT (s.hosted AND s.instance_stopped) AND NOT ` + replacedSQL
+const liveSignupSQL = `(` + runEndSQL + `) = '' AND NOT ` + stoppedSQL + ` AND NOT ` + replacedSQL
 
 // liveAgentsSQL counts the agents and the coordinators whose run goes on that run agent type t.
-const liveAgentsSQL = `((SELECT count(*) FROM experiment_signups s WHERE s.flavor = t.id AND ` + liveSignupSQL + `)
+const liveAgentsSQL = `((SELECT count(*) FROM experiment_signups s WHERE s.agent_type = t.id AND ` + liveSignupSQL + `)
   + (SELECT count(*) FROM platform_experiments cpe WHERE cpe.coordinator_agent_type = t.id AND cpe.status <> 'closed'))::int`
 
 const currentAgentTypeColumns = `t.id, COALESCE(t.org_id, ''), t.name, t.description, t.role, t.current_version, t.archived_at, t.created_by_kind, t.created_by_id, t.created_at,
@@ -328,7 +328,7 @@ WHERE id = $1`, pin.PlatformExperimentID, version, oldModel, newModel)
 		}
 	} else {
 		live, err = collectPins(ctx, tx, `SELECT s.platform_experiment_id, s.agent_id FROM experiment_signups s
-WHERE s.flavor = $1 AND `+liveSignupSQL+` ORDER BY 1, 2`, typeID)
+WHERE s.agent_type = $1 AND `+liveSignupSQL+` ORDER BY 1, 2`, typeID)
 		move = func(pin domain.PinMove) error {
 			_, err := tx.Exec(ctx, `
 UPDATE experiment_signups SET agent_type_version = $3, instructions_xid = pg_current_xact_id()::text::bigint,
@@ -426,7 +426,7 @@ SELECT pe.id FROM platform_experiments pe
 WHERE pe.status <> 'closed' AND (
     pe.coordinator_agent_type = $1
     OR pe.researchers @> jsonb_build_array(jsonb_build_object('agent_type', $1::text))
-    OR EXISTS (SELECT 1 FROM experiment_signups s WHERE s.platform_experiment_id = pe.id AND s.flavor = $1))
+    OR EXISTS (SELECT 1 FROM experiment_signups s WHERE s.platform_experiment_id = pe.id AND s.agent_type = $1))
 ORDER BY pe.id`, id)
 	if err != nil {
 		return nil, fmt.Errorf("agent_types_store.Archive: %w", err)
@@ -484,7 +484,7 @@ func SeedBuiltinAgentTypes(ctx context.Context, pool *Pool, builtins []agenttype
 	}
 	if _, err := tx.Exec(ctx, `
 UPDATE experiment_signups s SET agent_type_version = t.current_version
-FROM agent_types t WHERE s.agent_type_version IS NULL AND t.id = s.flavor`); err != nil {
+FROM agent_types t WHERE s.agent_type_version IS NULL AND t.id = s.agent_type`); err != nil {
 		return nil, fmt.Errorf("db.SeedBuiltinAgentTypes: pin agents: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
@@ -603,8 +603,8 @@ func (s *PlatformExperimentsStore) AgentInstructions(ctx context.Context, platfo
 SELECT t.role, `+agentTypeVersionColumnsOnly+`, s.model, s.hyperparameters, pe.repository_url
 FROM experiment_signups s
 JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
-JOIN agent_types t ON t.id = s.flavor
-JOIN agent_type_versions v ON v.type_id = s.flavor AND v.version = s.agent_type_version
+JOIN agent_types t ON t.id = s.agent_type
+JOIN agent_type_versions v ON v.type_id = s.agent_type AND v.version = s.agent_type_version
 WHERE s.platform_experiment_id = $1 AND s.agent_id = $2`, platformExpID, agentID))
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.AgentInstructions: %w", err)

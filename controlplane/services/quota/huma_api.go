@@ -97,7 +97,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "agent-stats", Method: "GET", Path: "/agents/stats",
-		Summary: "Count registered agents, those with a top-3 placement, and their mean performance score", Tags: []string{"agents"},
+		Summary: "Count registered agents and those with a top-3 placement", Tags: []string{"agents"},
 		Description: "Whole-set figures for the same ?platform_experiment_id and ?q filters GET /agents accepts, " +
 			"aggregated in PostgreSQL. A list read is one page, so these cannot be tallied from it.",
 	}, func(ctx context.Context, in *struct {
@@ -509,7 +509,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			return nil, huma.Error404NotFound("agent is not signed up to this platform experiment")
 		}
 		return &struct{ Body signupReply }{Body: signupReply{
-			AgentID: signup.AgentID, Name: signup.Name, Role: string(signup.Role), Flavor: signup.Flavor, AgentTypeVersion: signup.AgentTypeVersion,
+			AgentID: signup.AgentID, Name: signup.Name, Role: string(signup.Role), Flavor: signup.AgentType, AgentTypeVersion: signup.AgentTypeVersion,
 			Model: signup.Model, Hyperparameters: signup.Hyperparameters, FinishedAt: signup.FinishedAt, Ended: signup.Ended, CutReason: signup.CutReason,
 		}}, nil
 	})

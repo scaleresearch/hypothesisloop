@@ -20,7 +20,7 @@ func createTestAgent(t *testing.T, pool *Pool, id string) {
 	t.Helper()
 	agents := NewAgentsStore(pool)
 	if err := agents.CreateAgent(context.Background(), &domain.Agent{
-		ID: id, Name: id, OrgID: "default", PerformanceScore: 0.5, CreatedAt: time.Now().UTC(),
+		ID: id, Name: id, OrgID: "default", CreatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("create agent %s: got = %v, want = nil", id, err)
 	}
@@ -37,12 +37,8 @@ func createTestPE(t *testing.T, pool *Pool, id string, budget float64) {
 		ReportIntervalSeconds: 30,
 		Stages:                []domain.Stage{{LengthPct: 40, EvictPct: 75}, {LengthPct: 60, EvictPct: 0}},
 		CurrentStage:          1,
-		// The store writes these through to CHECK-constrained columns. The service resolves the
-		// empty default (domain.ParseSubmitterPolicy) before it ever gets here, so a caller
-		// building the row itself has to resolve it too.,
-		// Left empty on purpose in most of this file: an empty DefaultQuotaTier is the legacy/
-		// unset-policy case, which ResolveQuotaTier now resolves to guaranteed for everyone (no
-		// AgentKind involved at all) — the exact case these tests exist to pin down.
+		DefaultQuotaTier:      domain.QuotaTierGuaranteed,
+		Actor:                 &domain.Actor{Kind: domain.ActorStaff},
 	}
 	pe.MaxHosted = 50
 	if err := pes.CreatePlatformExperiment(context.Background(), pe, nil, nil); err != nil {
@@ -61,7 +57,7 @@ func allocateStartQuotas(peID string, budget float64, participants []StartPartic
 	out := make([]*domain.AgentQuota, 0, len(participants))
 	for _, p := range participants {
 		g, b := domain.AllocateQuota(budget, len(participants), 0, 0, cfg)
-		g, b = domain.ApplyQuotaTier(domain.ResolveQuotaTier(p.QuotaTierOverride, ""), g, b)
+		g, b = domain.ApplyQuotaTier(p.QuotaTier, g, b)
 		out = append(out, &domain.AgentQuota{
 			ID: uuid.New().String(), AgentID: p.AgentID, PlatformExperimentID: peID,
 			GuaranteedAcceleratorHours: g, BurstAcceleratorHours: b, CreatedAt: time.Now().UTC(),
@@ -84,10 +80,10 @@ func TestSignupQuotaTierOverrideWinsRegardlessOfKind(t *testing.T) {
 	createTestPE(t, pool, pe, 10)
 
 	pes := NewPlatformExperimentsStore(pool)
-	if _, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: agentBurstOnly, Role: domain.SignupRoleCompetitor, QuotaTier: domain.QuotaTierBurstOnly}); err != nil {
+	if _, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: agentBurstOnly, Role: domain.SignupRoleCompetitor, QuotaTier: domain.QuotaTierBurstOnly}); err != nil {
 		t.Fatalf("signup agent with burst_only override: got = %v, want = nil", err)
 	}
-	if _, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: humanBurstOnly, Role: domain.SignupRoleCompetitor, QuotaTier: domain.QuotaTierBurstOnly}); err != nil {
+	if _, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: humanBurstOnly, Role: domain.SignupRoleCompetitor, QuotaTier: domain.QuotaTierBurstOnly}); err != nil {
 		t.Fatalf("signup human with burst_only override: got = %v, want = nil", err)
 	}
 
@@ -127,7 +123,7 @@ func TestAdvanceStageCreditsEverySurvivorIntoTheSameTierRegardlessOfKind(t *test
 
 	pes := NewPlatformExperimentsStore(pool)
 	for _, id := range []string{humanSurvivor, agentSurvivor, cutAgent} {
-		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: id, Role: domain.SignupRoleCompetitor}); err != nil {
+		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor}); err != nil {
 			t.Fatalf("signup %s: got = %v, want = nil", id, err)
 		}
 	}
@@ -177,7 +173,7 @@ func TestAdvanceStageReleasesACutBurstOnlyAgentsUnspentHours(t *testing.T) {
 	pes := NewPlatformExperimentsStore(pool)
 	for _, id := range ids {
 		createTestAgent(t, pool, id)
-		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: id, Role: domain.SignupRoleCompetitor, QuotaTier: domain.QuotaTierBurstOnly}); err != nil {
+		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor, QuotaTier: domain.QuotaTierBurstOnly}); err != nil {
 			t.Fatalf("signup %s: got = %v, want = nil", id, err)
 		}
 	}

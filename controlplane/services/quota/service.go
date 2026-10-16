@@ -34,11 +34,10 @@ func NewService(store Store, logger *zap.Logger) *Service {
 // RegisterAgent creates a new agent.
 func (s *Service) RegisterAgent(ctx context.Context, id, name, orgID string) (*domain.Agent, error) {
 	agent := &domain.Agent{
-		ID:               id,
-		Name:             name,
-		OrgID:            orgID,
-		PerformanceScore: 0.5,
-		CreatedAt:        time.Now().UTC(),
+		ID:        id,
+		Name:      name,
+		OrgID:     orgID,
+		CreatedAt: time.Now().UTC(),
 	}
 	if err := s.store.CreateAgent(ctx, agent); err != nil {
 		return nil, fmt.Errorf("quota.RegisterAgent: %w", err)

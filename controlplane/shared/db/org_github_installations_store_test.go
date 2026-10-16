@@ -220,7 +220,7 @@ func TestARepositorysAddressIsStoredAtCreation(t *testing.T) {
 	now := time.Now().UTC()
 	create := func(repository, address string) string {
 		t.Helper()
-		pe := &domain.PlatformExperiment{
+		pe := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed,
 			ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "with code", BudgetAcceleratorHours: 10,
 			MaxAgents: 10, StartsAt: now, EndsAt: now.Add(time.Hour), Status: domain.PlatformExpOpen,
 			Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,

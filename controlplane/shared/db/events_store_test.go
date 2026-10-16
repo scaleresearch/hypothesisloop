@@ -94,8 +94,8 @@ func seedRun(t *testing.T, pool *Pool, suffix string, commit bool) (agentID, peI
 	if _, err := tx.Exec(ctx, `INSERT INTO agents (id, name, org_id) VALUES ($1, $1, 'default')`, agentID); err != nil {
 		t.Fatalf("insert agent: got = %v, want = nil", err)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO platform_experiments (id, project_id, name, budget_accelerator_hours, starts_at, ends_at)
-VALUES ($1, 'default', $1, 1, now(), now() + interval '1 hour')`, peID); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO platform_experiments (id, project_id, name, budget_accelerator_hours, starts_at, ends_at, default_quota_tier, created_by_kind)
+VALUES ($1, 'default', $1, 1, now(), now() + interval '1 hour', 'guaranteed', 'staff')`, peID); err != nil {
 		t.Fatalf("insert platform experiment: got = %v, want = nil", err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO hypothesis_comments (hypothesis_id, platform_experiment_id, agent_id, actor_kind, actor_id, text)
@@ -114,6 +114,7 @@ VALUES ($1, $2, $3, 'agent', $3, 'watch test comment')`, hypothesisID, peID, age
 		for _, q := range []string{
 			`DELETE FROM hypothesis_findings WHERE platform_experiment_id = $1`,
 			`DELETE FROM hypothesis_comments WHERE platform_experiment_id = $1`,
+			`DELETE FROM baseline_raises WHERE platform_experiment_id = $1`,
 			`DELETE FROM experiments WHERE platform_experiment_id = $1`,
 			`DELETE FROM platform_experiment_cuts WHERE platform_experiment_id = $1`,
 			`DELETE FROM experiment_signups WHERE platform_experiment_id = $1`,
@@ -614,7 +615,7 @@ func TestACutAnnouncesBothTheLadderBoundaryAndTheCutAgentsOwnStopCondition(t *te
 
 	// The agent's other way out is its own: it says it has nothing left to do.
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
-	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id) VALUES ($1, $2)`, peID, agentID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist')`, peID, agentID)
 	if err := NewPlatformExperimentsStore(pool).FinishAgent(context.Background(), peID, agentID, "quota spent"); err != nil {
 		t.Fatalf("finish: got = %v, want = nil", err)
 	}
@@ -685,7 +686,7 @@ func TestReplayReturnsEachOfTheNewKindsFromTheChangedRowsOwnColumns(t *testing.T
 	agentID, peID, hypothesisID := seedRun(t, pool, "newkinds-replay", true)
 
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
-	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id) VALUES ($1, $2)`, peID, agentID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist')`, peID, agentID)
 	if err := NewPlatformExperimentsStore(pool).FinishAgent(context.Background(), peID, agentID, "nothing left"); err != nil {
 		t.Fatalf("finish: got = %v, want = nil", err)
 	}
@@ -1398,7 +1399,7 @@ func TestAResearcherWithNoJobForTheNoticeIsToldAgainWhileTheStretchLasts(t *test
 	store := NewPlatformExperimentsStore(pool)
 	ctx := context.Background()
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running', started_at = now() - interval '20 minutes' WHERE id = $1`, peID)
-	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at) VALUES ($1, $2, now() - interval '30 minutes')`, peID, agentID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, signed_up_at) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', now() - interval '30 minutes')`, peID, agentID)
 	replayed := func() []domain.Event {
 		t.Helper()
 		events, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, domain.EventFilter{PlatformExperimentID: peID, AgentID: agentID, Kinds: map[string]bool{domain.EventAgentIdle: true}}, before)
@@ -1484,7 +1485,7 @@ func TestAnIdleNoticeToldSinceItWasReadStands(t *testing.T) {
 	store := NewPlatformExperimentsStore(pool)
 	ctx := context.Background()
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running', started_at = now() - interval '20 minutes' WHERE id = $1`, peID)
-	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at) VALUES ($1, $2, now() - interval '30 minutes')`, peID, agentID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, signed_up_at) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', now() - interval '30 minutes')`, peID, agentID)
 	due, err := dueOf(t, store, peID, 10*time.Minute)
 	if err != nil || len(due) != 1 {
 		t.Fatalf("due %+v, %v, want the one researcher", due, err)
@@ -1596,7 +1597,7 @@ func TestAResearcherWithAJobRunningIsNotIdle(t *testing.T) {
 	store := NewPlatformExperimentsStore(pool)
 	ctx := context.Background()
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running', started_at = now() - interval '40 minutes' WHERE id = $1`, peID)
-	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at) VALUES ($1, $2, now() - interval '40 minutes')`, peID, agentID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, signed_up_at) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', now() - interval '40 minutes')`, peID, agentID)
 	job := func(id, status, created, reported string) {
 		t.Helper()
 		exec(t, pool, `INSERT INTO experiments

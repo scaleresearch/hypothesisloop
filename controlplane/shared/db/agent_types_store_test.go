@@ -55,7 +55,7 @@ func TestAVersionIsNeverChangedOrDeleted(t *testing.T) {
 	if _, err := pool.pool.Exec(ctx, `DELETE FROM agent_type_versions WHERE type_id = $1`, custom.ID); err == nil {
 		t.Error("a version was deleted")
 	}
-	edited, _, err := store.Edit(ctx, AgentTypeEdit{OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "Tuner", Prompt: testPrompt + " Tune.", Settings: testTypeSettings()}, testModelDefaults)
+	edited, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "Tuner", Prompt: testPrompt + " Tune.", Settings: testTypeSettings()}, testModelDefaults)
 	if err != nil || edited.CurrentVersion != 2 || edited.Current.Prompt != testPrompt+" Tune." {
 		t.Fatalf("edit: got = %+v, %v, want version 2", edited, err)
 	}
@@ -67,7 +67,7 @@ func TestAVersionIsNeverChangedOrDeleted(t *testing.T) {
 	if err != nil || len(versions) != 2 || versions[0].Version != 2 {
 		t.Errorf("versions: got = %+v, %v, want 2 then 1", versions, err)
 	}
-	if again, propagation, err := store.Edit(ctx, AgentTypeEdit{OrgID: orgID, ID: custom.ID, IfVersion: 2, Name: "Tuner 2", Prompt: testPrompt + " Tune.", Settings: testTypeSettings()}, testModelDefaults); err != nil || again.CurrentVersion != 2 || again.Name != "Tuner 2" || propagation.Version != 2 {
+	if again, propagation, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 2, Name: "Tuner 2", Prompt: testPrompt + " Tune.", Settings: testTypeSettings()}, testModelDefaults); err != nil || again.CurrentVersion != 2 || again.Name != "Tuner 2" || propagation.Version != 2 {
 		t.Errorf("an edit of the name alone: got = %+v, %+v, %v, want the name changed and no version", again, propagation, err)
 	}
 }
@@ -127,20 +127,20 @@ func TestAnOrgsTypeIsItsAloneAndABuiltinIsNobodys(t *testing.T) {
 	if _, err := store.Get(ctx, other, custom.ID); !errors.Is(err, ErrAgentTypeNotFound) {
 		t.Errorf("another org reads it: got = %v, want ErrAgentTypeNotFound", err)
 	}
-	if _, _, err := store.Edit(ctx, AgentTypeEdit{OrgID: other, ID: custom.ID, IfVersion: 1, Name: "x", Prompt: testPrompt, Settings: testTypeSettings()}, testModelDefaults); !errors.Is(err, ErrAgentTypeNotFound) {
+	if _, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: other, ID: custom.ID, IfVersion: 1, Name: "x", Prompt: testPrompt, Settings: testTypeSettings()}, testModelDefaults); !errors.Is(err, ErrAgentTypeNotFound) {
 		t.Errorf("another org edits it: got = %v, want ErrAgentTypeNotFound", err)
 	}
 	if _, err := store.Archive(ctx, other, custom.ID); !errors.Is(err, ErrAgentTypeNotFound) {
 		t.Errorf("another org archives it: got = %v, want ErrAgentTypeNotFound", err)
 	}
-	if _, _, err := store.Edit(ctx, AgentTypeEdit{OrgID: orgID, ID: domain.DefaultAgentFlavor, IfVersion: 1, Name: "x", Prompt: testPrompt, Settings: testTypeSettings()}, testModelDefaults); !errors.Is(err, ErrAgentTypeBuiltin) {
+	if _, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: domain.DefaultAgentFlavor, IfVersion: 1, Name: "x", Prompt: testPrompt, Settings: testTypeSettings()}, testModelDefaults); !errors.Is(err, ErrAgentTypeBuiltin) {
 		t.Errorf("an org edits a built-in: got = %v, want ErrAgentTypeBuiltin", err)
 	}
 	if _, err := store.Archive(ctx, orgID, domain.DefaultAgentFlavor); !errors.Is(err, ErrAgentTypeBuiltin) {
 		t.Errorf("an org archives a built-in: got = %v, want ErrAgentTypeBuiltin", err)
 	}
 	var conflict *AgentTypeVersionConflict
-	if _, _, err := store.Edit(ctx, AgentTypeEdit{OrgID: orgID, ID: custom.ID, IfVersion: 7, Name: "x", Prompt: testPrompt, Settings: testTypeSettings()}, testModelDefaults); !errors.As(err, &conflict) || conflict.Current != 1 {
+	if _, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 7, Name: "x", Prompt: testPrompt, Settings: testTypeSettings()}, testModelDefaults); !errors.As(err, &conflict) || conflict.Current != 1 {
 		t.Errorf("an edit from a stale version: got = %v, want a conflict naming version 1", err)
 	}
 	listed, err := store.List(ctx, orgID)
@@ -170,13 +170,13 @@ func TestATypeInUseIsNotArchivedAndAnArchivedOneTakesNoAgent(t *testing.T) {
 	if err != nil || archived.ArchivedAt == nil {
 		t.Fatalf("archive once its experiment closed: got = %+v, %v", archived, err)
 	}
-	if _, _, err := store.Edit(ctx, AgentTypeEdit{OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "x", Prompt: testPrompt, Settings: testTypeSettings()}, testModelDefaults); !errors.Is(err, ErrAgentTypeArchived) {
+	if _, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "x", Prompt: testPrompt, Settings: testTypeSettings()}, testModelDefaults); !errors.Is(err, ErrAgentTypeArchived) {
 		t.Errorf("edit an archived type: got = %v, want ErrAgentTypeArchived", err)
 	}
 	open := "pe-" + uuid.New().String()[:8]
 	createTestPEIn(t, pool, open, defaultProjectOf(t, NewAccountsStore(pool), orgID).ID)
-	agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:8], PerformanceScore: 0.5, CreatedAt: time.Now()}
-	if err := pes.SpawnAgent(ctx, open, agent, domain.AgentSignup{AgentID: agent.ID, Role: domain.SignupRoleCompetitor, Flavor: custom.ID, Model: "m"}); !errors.Is(err, ErrUnknownAgentType) {
+	agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:8], CreatedAt: time.Now()}
+	if err := pes.SpawnAgent(ctx, open, agent, domain.AgentSignup{Actor: testActor, AgentID: agent.ID, Role: domain.SignupRoleCompetitor, AgentType: custom.ID, Model: "m"}); !errors.Is(err, ErrUnknownAgentType) {
 		t.Errorf("an agent of an archived type: got = %v, want ErrUnknownAgentType", err)
 	}
 }
@@ -189,15 +189,15 @@ func TestAnAgentIsPinnedToAnAgentTypeOfItsOrgAndItsRole(t *testing.T) {
 	_, _, foreign := orgWithExperiment(t, pool)
 
 	spawn := func(role domain.SignupRole, agentType string) (string, error) {
-		agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:8], PerformanceScore: 0.5, CreatedAt: time.Now()}
-		return agent.ID, pes.SpawnAgent(ctx, peID, agent, domain.AgentSignup{AgentID: agent.ID, Role: role, Flavor: agentType, Model: "m"})
+		agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:8], CreatedAt: time.Now()}
+		return agent.ID, pes.SpawnAgent(ctx, peID, agent, domain.AgentSignup{Actor: testActor, AgentID: agent.ID, Role: role, AgentType: agentType, Model: "m"})
 	}
 	own, err := spawn(domain.SignupRoleCompetitor, custom.ID)
 	if err != nil {
 		t.Fatalf("an agent of its org's type: got = %v, want = nil", err)
 	}
-	if got := signupOf(t, pes, peID, own); got.Flavor != custom.ID || got.AgentTypeVersion != 1 {
-		t.Errorf("its signup: got = %s v%d, want %s v1", got.Flavor, got.AgentTypeVersion, custom.ID)
+	if got := signupOf(t, pes, peID, own); got.AgentType != custom.ID || got.AgentTypeVersion != 1 {
+		t.Errorf("its signup: got = %s v%d, want %s v1", got.AgentType, got.AgentTypeVersion, custom.ID)
 	}
 	if _, err := spawn(domain.SignupRoleCompetitor, foreign.ID); !errors.Is(err, ErrUnknownAgentType) {
 		t.Errorf("another org's type: got = %v, want ErrUnknownAgentType", err)
@@ -206,7 +206,7 @@ func TestAnAgentIsPinnedToAnAgentTypeOfItsOrgAndItsRole(t *testing.T) {
 		t.Errorf("a researcher type for a baseline agent: got = %v, want ErrUnknownAgentType", err)
 	}
 	baseline, err := spawn(domain.SignupRoleBaseline, "")
-	if err != nil || signupOf(t, pes, peID, baseline).Flavor != "baseline" {
+	if err != nil || signupOf(t, pes, peID, baseline).AgentType != "baseline" {
 		t.Errorf("a baseline agent naming no type: got = %v, want the built-in baseline", err)
 	}
 	src, err := pes.AgentInstructions(ctx, peID, own)
@@ -230,9 +230,9 @@ func TestAnEditMovesEveryLiveAgentAndTellsEach(t *testing.T) {
 	events := NewEventsStore(pool, noHypothesisEvents{})
 	orgID, peID, custom := orgWithExperiment(t, pool)
 	ids := spawnTestAgents(t, pes, peID,
-		domain.AgentSignup{Flavor: custom.ID, Model: testModelDefaults.Agent},
-		domain.AgentSignup{Flavor: custom.ID, Model: "its-own", Hyperparameters: map[string]any{"lr": 1.0}},
-		domain.AgentSignup{Flavor: custom.ID, Model: testModelDefaults.Agent})
+		domain.AgentSignup{Actor: testActor, AgentType: custom.ID, Model: testModelDefaults.Agent},
+		domain.AgentSignup{Actor: testActor, AgentType: custom.ID, Model: "its-own", Hyperparameters: map[string]any{"lr": 1.0}},
+		domain.AgentSignup{Actor: testActor, AgentType: custom.ID, Model: testModelDefaults.Agent})
 	follows, own, finished := ids[0], ids[1], ids[2]
 	setPEStatus(t, pool, peID, domain.PlatformExpRunning, time.Minute)
 	if err := pes.FinishAgent(ctx, peID, finished, "done"); err != nil {
@@ -246,7 +246,7 @@ func TestAnEditMovesEveryLiveAgentAndTellsEach(t *testing.T) {
 
 	settings := testTypeSettings()
 	settings.Model, settings.Hyperparameters = "the-new-model", map[string]any{"lr": 0.5}
-	edited, propagation, err := store.Edit(ctx, AgentTypeEdit{OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "Tuner", Prompt: testPrompt, Settings: settings}, testModelDefaults)
+	edited, propagation, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "Tuner", Prompt: testPrompt, Settings: settings}, testModelDefaults)
 	if err != nil || edited.CurrentVersion != 2 {
 		t.Fatalf("edit: got = %+v, %v", edited, err)
 	}
@@ -307,7 +307,7 @@ func TestAnAgentThatCannotBeMovedLeavesTheOthersMoved(t *testing.T) {
 	store := NewAgentTypesStore(pool)
 	pes := NewPlatformExperimentsStore(pool)
 	orgID, peID, custom := orgWithExperiment(t, pool)
-	ids := spawnTestAgents(t, pes, peID, domain.AgentSignup{Flavor: custom.ID, Model: "m"}, domain.AgentSignup{Flavor: custom.ID, Model: "m"}, domain.AgentSignup{Flavor: custom.ID, Model: "m"})
+	ids := spawnTestAgents(t, pes, peID, domain.AgentSignup{Actor: testActor, AgentType: custom.ID, Model: "m"}, domain.AgentSignup{Actor: testActor, AgentType: custom.ID, Model: "m"}, domain.AgentSignup{Actor: testActor, AgentType: custom.ID, Model: "m"})
 	broken := ids[1]
 	fn := "refuse_" + uuid.New().String()[:8]
 	if _, err := pool.pool.Exec(ctx, `CREATE FUNCTION `+fn+`() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'this agent cannot be moved'; END; $$ LANGUAGE plpgsql`); err != nil {
@@ -321,7 +321,7 @@ func TestAnAgentThatCannotBeMovedLeavesTheOthersMoved(t *testing.T) {
 		pool.pool.Exec(context.Background(), `DROP FUNCTION IF EXISTS `+fn+`()`)                    //nolint:errcheck
 	})
 
-	_, propagation, err := store.Edit(ctx, AgentTypeEdit{OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "Tuner", Prompt: testPrompt + " Again.", Settings: testTypeSettings()}, testModelDefaults)
+	_, propagation, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "Tuner", Prompt: testPrompt + " Again.", Settings: testTypeSettings()}, testModelDefaults)
 	if err != nil {
 		t.Fatalf("edit: got = %v, want = nil", err)
 	}
@@ -355,7 +355,7 @@ func TestAnEditOfACoordinatorTypeMovesTheCoordinatorsOfRunsThatGoOn(t *testing.T
 	}
 	settings := testTypeSettings()
 	settings.Model = "coordinator-next"
-	_, propagation, err := store.Edit(ctx, AgentTypeEdit{OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: custom.Name, Prompt: coordinatorPrompt + " Strictly.", Settings: settings}, testModelDefaults)
+	_, propagation, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: custom.Name, Prompt: coordinatorPrompt + " Strictly.", Settings: settings}, testModelDefaults)
 	if err != nil || len(propagation.Moved) != 1 || propagation.Moved[0] != (domain.PinMove{PlatformExperimentID: peID, AgentID: domain.CoordinatorRecipient}) {
 		t.Fatalf("edit: got = %+v, %v, want the coordinator of %s moved", propagation, err, peID)
 	}

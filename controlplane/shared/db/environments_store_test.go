@@ -28,10 +28,20 @@ func newEnvironments(t *testing.T) *environments {
 	return w
 }
 
+// projectOf is a project of org, which an environment is built for.
+func (w *environments) projectOf(t *testing.T, org string) string {
+	t.Helper()
+	var id string
+	if err := w.pool.pool.QueryRow(context.Background(), `SELECT id FROM projects WHERE org_id = $1 ORDER BY id LIMIT 1`, org).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
 func (w *environments) ensure(t *testing.T, org, what string) *domain.Environment {
 	t.Helper()
 	dockerfile := "ARG BASE\nFROM ${BASE}\nRUN echo " + w.suffix + " " + what + "\n"
-	env, err := w.envs.EnsureEnvironment(context.Background(), &domain.Environment{Key: domain.EnvironmentKey(org, "", dockerfile, "registry.test/job:1", ""), OrgID: org, Base: "registry.test/job:1", Dockerfile: dockerfile})
+	env, err := w.envs.EnsureEnvironment(context.Background(), &domain.Environment{Key: domain.EnvironmentKey(org, "", dockerfile, "registry.test/job:1", ""), OrgID: org, ProjectID: w.projectOf(t, org), GitRepository: "owner/repo", Base: "registry.test/job:1", Dockerfile: dockerfile})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,16 +143,16 @@ func TestABuildIsAssignedToTheLeastLoadedLiveClusterThatBuildsForItsOrg(t *testi
 		t.Fatalf("fifth with both clusters building two: %+v, want it waiting", got)
 	}
 
-	if _, err := w.clusters.SetClusterEnabled(ctx, w.ofA, w.orgA, "test", false); err != nil {
+	if _, err := w.clusters.SetClusterEnabled(ctx, w.ofA, w.orgA, domain.Actor{Kind: domain.ActorUser, ID: "test"}, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.clusters.SetClusterEnabled(ctx, w.ofB, w.orgA, "test", false); err != nil {
+	if _, err := w.clusters.SetClusterEnabled(ctx, w.ofB, w.orgA, domain.Actor{Kind: domain.ActorUser, ID: "test"}, false); err != nil {
 		t.Fatal(err)
 	}
 	if has, err := w.envs.OrgHasEnvironmentBuilder(ctx, w.orgA); err != nil || has {
 		t.Fatalf("org a turned every cluster off and has a builder: %v, %v", has, err)
 	}
-	if _, err := w.clusters.SetClusterEnabled(ctx, w.ofB, w.orgA, "test", true); err != nil {
+	if _, err := w.clusters.SetClusterEnabled(ctx, w.ofB, w.orgA, domain.Actor{Kind: domain.ActorUser, ID: "test"}, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.clusters.RecordBuilds(ctx, w.ofB, false); err != nil {
@@ -455,7 +465,7 @@ func TestAnEnvironmentKeepsTheImageItsToolsComeFrom(t *testing.T) {
 	ctx := context.Background()
 	dockerfile := "ARG BASE\nFROM ${BASE}\nRUN echo " + w.suffix + " tools\n"
 	base, tools := "registry.test/job-base@sha256:"+w.suffix, "registry.test/job@sha256:"+w.suffix
-	made, err := w.envs.EnsureEnvironment(ctx, &domain.Environment{Key: domain.EnvironmentKey(w.orgA, "", dockerfile, base, tools), OrgID: w.orgA, Base: base, Tools: tools, Dockerfile: dockerfile})
+	made, err := w.envs.EnsureEnvironment(ctx, &domain.Environment{Key: domain.EnvironmentKey(w.orgA, "", dockerfile, base, tools), OrgID: w.orgA, ProjectID: w.projectOf(t, w.orgA), GitRepository: "owner/repo", Base: base, Tools: tools, Dockerfile: dockerfile})
 	if err != nil {
 		t.Fatal(err)
 	}

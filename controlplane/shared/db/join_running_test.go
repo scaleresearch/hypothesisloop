@@ -27,7 +27,7 @@ func TestAResearcherJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *t
 	spawn := func(name string) string {
 		id, _ := domain.NewID(domain.AgentIDPrefix)
 		agent := &domain.Agent{ID: id, Name: name + "-" + id, CreatedAt: time.Now().UTC()}
-		if err := pes.SpawnAgent(ctx, pe, agent, domain.AgentSignup{AgentID: id, Role: domain.SignupRoleCompetitor}); err != nil {
+		if err := pes.SpawnAgent(ctx, pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor}); err != nil {
 			t.Fatalf("spawn %s: got = %v, want = nil", name, err)
 		}
 		return id
@@ -48,7 +48,7 @@ func TestAResearcherJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *t
 	join := func(role domain.SignupRole) (string, error) {
 		id, _ := domain.NewID(domain.AgentIDPrefix)
 		agent := &domain.Agent{ID: id, CreatedAt: time.Now().UTC()}
-		return id, pes.JoinRunning(ctx, pe, agent, domain.AgentSignup{AgentID: id, Role: role}, late)
+		return id, pes.JoinRunning(ctx, pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: role}, late)
 	}
 	if _, err := join(domain.SignupRoleCompetitor); !errors.Is(err, ErrMaxAgentsReached) {
 		t.Fatalf("a third researcher at work: got = %v, want = ErrMaxAgentsReached", err)

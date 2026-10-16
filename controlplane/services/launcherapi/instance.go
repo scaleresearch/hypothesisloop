@@ -36,7 +36,7 @@ const MaxInstanceNameLength = namePlatformExperimentLength + 1 + nameAgentLength
 // and hyperparameters from its instructions, again whenever they change. None of them goes into
 // the machine's name: the agent applies an edit of its type or model on the machine it has.
 func instanceFor(agent domain.AgentSignup, ended int, image, apiURL, signingSecret, launchDigest string) (Instance, error) {
-	if agent.Flavor == "" || agent.Model == "" {
+	if agent.AgentType == "" || agent.Model == "" {
 		return Instance{}, fmt.Errorf("signup of %s has no flavor or no model", agent.AgentID)
 	}
 	startedAs := map[string]string{

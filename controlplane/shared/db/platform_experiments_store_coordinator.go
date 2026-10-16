@@ -21,7 +21,7 @@ type LauncherCoordinator struct {
 }
 
 // coordinatorAskedSQL says the machine of pe's hosted coordinator was asked for at least once.
-const coordinatorAskedSQL = `pe.coordinator_instance_asked_at IS NOT NULL`
+const coordinatorAskedSQL = `ci.asked_at IS NOT NULL`
 
 // launcherCoordinatorsWhere selects the platform experiments whose coordinator a launcher still
 // has something to do for: open or running ones, so the coordinator supervises the baseline and
@@ -30,7 +30,7 @@ const coordinatorAskedSQL = `pe.coordinator_instance_asked_at IS NOT NULL`
 // them, as a stopped agent is. None is while the platform still creates the repository
 // (awaitsRepository).
 const launcherCoordinatorsWhere = `
-FROM platform_experiments pe
+FROM platform_experiments pe` + coordinatorInstanceJoin + `
 WHERE pe.coordinator_hosted AND pe.coordinator_launcher = $1 AND NOT (` + awaitsRepository + `)
   AND (pe.status IN ('open', 'running')
        OR pe.status = 'closed' AND pe.closed_at > now() - make_interval(secs => $2) AND ` + coordinatorAskedSQL + `)`

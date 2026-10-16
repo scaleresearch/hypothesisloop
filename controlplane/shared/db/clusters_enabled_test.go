@@ -12,7 +12,7 @@ import (
 
 func (w *twoOrgs) setEnabled(t *testing.T, cluster, org string, enabled bool) *domain.Cluster {
 	t.Helper()
-	c, err := w.clusters.SetClusterEnabled(context.Background(), cluster, org, "user-test", enabled)
+	c, err := w.clusters.SetClusterEnabled(context.Background(), cluster, org, domain.Actor{Kind: domain.ActorUser, ID: "user-test"}, enabled)
 	if err != nil {
 		t.Fatalf("SetClusterEnabled(%s, %s, %v): %v", cluster, org, enabled, err)
 	}
@@ -45,7 +45,7 @@ func TestAClaimSkipsAClusterItsOrgTurnedOffAndTakesItAgainOnceOn(t *testing.T) {
 	w.setEnabled(t, w.ofA, w.orgA, false)
 	var rows int
 	if err := w.pool.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM org_disabled_clusters WHERE cluster_name = $1 AND org_id = $2 AND disabled_by = 'user-test'`, w.ofA, w.orgA).Scan(&rows); err != nil || rows != 1 {
+		`SELECT count(*) FROM org_disabled_clusters WHERE cluster_name = $1 AND org_id = $2 AND disabled_by_kind = 'user' AND disabled_by_id = 'user-test'`, w.ofA, w.orgA).Scan(&rows); err != nil || rows != 1 {
 		t.Fatalf("rows for the turned-off cluster = %d, %v, want one", rows, err)
 	}
 
@@ -106,7 +106,7 @@ func TestAClusterNotOpenToAnOrgIsNotItsToTurnOff(t *testing.T) {
 	ctx := context.Background()
 	for _, name := range []string{w.ofB, w.unregisteredName} {
 		for _, enabled := range []bool{false, true} {
-			if _, err := w.clusters.SetClusterEnabled(ctx, name, w.orgA, "user-test", enabled); !errors.Is(err, ErrClusterNotFound) {
+			if _, err := w.clusters.SetClusterEnabled(ctx, name, w.orgA, domain.Actor{Kind: domain.ActorUser, ID: "user-test"}, enabled); !errors.Is(err, ErrClusterNotFound) {
 				t.Fatalf("SetClusterEnabled(%s, org a, %v) = %v, want ErrClusterNotFound", name, enabled, err)
 			}
 		}
@@ -148,7 +148,7 @@ func TestAClaimWaitingBehindAClusterBeingTurnedOffIsRefused(t *testing.T) {
 	if _, err := tx.Exec(ctx, clusterAdmissionLock, w.ofA); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO org_disabled_clusters (cluster_name, org_id, disabled_by) VALUES ($1, $2, 'user-test')`, w.ofA, w.orgA); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO org_disabled_clusters (cluster_name, org_id, disabled_by_kind, disabled_by_id) VALUES ($1, $2, 'user', 'user-test')`, w.ofA, w.orgA); err != nil {
 		t.Fatal(err)
 	}
 	type outcome struct {
@@ -196,7 +196,7 @@ func TestTurningAClusterOffWaitsForAClaimInFlightAndLeavesItsJob(t *testing.T) {
 	<-deciding
 	off := make(chan error, 1)
 	go func() {
-		_, err := w.clusters.SetClusterEnabled(ctx, w.ofA, w.orgA, "user-test", false)
+		_, err := w.clusters.SetClusterEnabled(ctx, w.ofA, w.orgA, domain.Actor{Kind: domain.ActorUser, ID: "user-test"}, false)
 		off <- err
 	}()
 	select {

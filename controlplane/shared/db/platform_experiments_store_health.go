@@ -19,19 +19,20 @@ SELECT s.platform_experiment_id, s.agent_id, s.role,
        EXTRACT(EPOCH FROM min(e.created_at) - st.start)::float8,
        EXTRACT(EPOCH FROM min(t.occurred_at) - st.start)::float8,
        count(e.id) FILTER (WHERE e.status IN ('QUEUED', 'SUBMITTED', 'RUNNING')),
-       s.instance_restarts,
+       COALESCE(i.restarts, 0),
        (SELECT count(*) FROM agent_messages m
          WHERE m.platform_experiment_id = s.platform_experiment_id AND m.agent_id = s.agent_id AND m.sender = 'coordinator')
-FROM experiment_signups s
+FROM experiment_signups s`+signupInstanceJoin+`
 JOIN platform_experiments p ON p.id = s.platform_experiment_id
 CROSS JOIN LATERAL (SELECT CASE WHEN s.role = 'competitor' THEN GREATEST(p.started_at, s.signed_up_at) ELSE s.signed_up_at END AS start) st
 LEFT JOIN experiments e ON e.platform_experiment_id = s.platform_experiment_id AND e.agent_id = s.agent_id
 LEFT JOIN event_times t ON t.xid = e.status_xid AND e.status = 'COMPLETED'
 WHERE p.status IN ('open', 'running')
-GROUP BY s.platform_experiment_id, s.agent_id, s.role, st.start, s.instance_restarts
+GROUP BY s.platform_experiment_id, s.agent_id, s.role, st.start, i.restarts
 UNION ALL
-SELECT p.id, '', $1::text, NULL, NULL, 0, p.coordinator_instance_restarts, 0
+SELECT p.id, '', $1::text, NULL, NULL, 0, COALESCE(ci.restarts, 0), 0
 FROM platform_experiments p
+LEFT JOIN hosted_instances ci ON ci.platform_experiment_id = p.id AND ci.agent_id = ''
 WHERE p.status IN ('open', 'running') AND p.coordinator_hosted`, domain.CoordinatorHealthRole)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.RunHealth: %w", err)

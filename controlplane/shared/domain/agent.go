@@ -6,12 +6,11 @@ import "time"
 // holds standings. The platform creates one when it is added to a platform experiment. Whether a
 // person or an agent wrote a record is that record's actor, and no property of an agent.
 type Agent struct {
-	ID               string    `json:"id"`
-	Name             string    `json:"name"`
-	OrgID            string    `json:"org_id"`
-	PerformanceScore float64   `json:"performance_score"`
-	Top3Count        int       `json:"top3_count"` // number of top-3 placements ever
-	CreatedAt        time.Time `json:"created_at"`
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	OrgID     string    `json:"org_id"`
+	Top3Count int       `json:"top3_count"` // number of top-3 placements ever
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // AgentStats is the whole set of agents matching a filter, aggregated in PostgreSQL: a list read
@@ -20,8 +19,6 @@ type AgentStats struct {
 	Total int `json:"total"`
 	// Top3Eligible counts agents with at least one top-3 placement.
 	Top3Eligible int `json:"top3_eligible"`
-	// AvgPerformanceScore is 0 when Total is 0.
-	AvgPerformanceScore float64 `json:"avg_performance_score"`
 }
 
 // QuotaTier is which column of an experiment's budget a participant's share lands in: the normal
@@ -48,17 +45,13 @@ func ValidQuotaTierOverride(s string) bool {
 	}
 }
 
-// ResolveQuotaTier applies a signup's explicit override, then the experiment's default_quota_tier
-// policy, then a fixed guaranteed default, which is also what an experiment created before
-// default_quota_tier existed resolves to.
+// ResolveQuotaTier is the tier a signup is stored with: its explicit override, else the
+// experiment's default_quota_tier.
 func ResolveQuotaTier(override, experimentDefault QuotaTier) QuotaTier {
 	if override != "" {
 		return override
 	}
-	if experimentDefault != "" {
-		return experimentDefault
-	}
-	return QuotaTierGuaranteed
+	return experimentDefault
 }
 
 // ApplyQuotaTier is the platform's one enforcement point for where a participant's

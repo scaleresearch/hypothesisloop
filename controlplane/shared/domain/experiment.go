@@ -365,7 +365,7 @@ var ExperimentSortFields = map[string]string{
 	"created_at":     "created_at",
 	"updated_at":     "updated_at",
 	"priority_score": "priority_score",
-	"status":         "status",
+	"status":         "array_position(ARRAY['SUBMITTED', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'EVICTED', 'REJECTED'], status)",
 }
 
 // ExperimentStats is the whole-table shape of the experiment set matching a filter, counted in

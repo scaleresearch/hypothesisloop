@@ -32,7 +32,7 @@ func spawnResearcher(t *testing.T, pes *PlatformExperimentsStore, pe, flavor str
 	t.Helper()
 	id, _ := domain.NewID(domain.AgentIDPrefix)
 	agent := &domain.Agent{ID: id, Name: "r-" + id, CreatedAt: time.Now().UTC()}
-	if err := pes.SpawnAgent(context.Background(), pe, agent, domain.AgentSignup{AgentID: id, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: "main", Flavor: flavor, Model: "model-1"}); err != nil {
+	if err := pes.SpawnAgent(context.Background(), pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: "main", AgentType: flavor, Model: "model-1"}); err != nil {
 		t.Fatalf("spawn: got = %v, want = nil", err)
 	}
 	qid, _ := domain.NewID(domain.AgentQuotaIDPrefix)
@@ -57,7 +57,7 @@ func TestThePoolStateNamesWhoEndedAndAReplacementTakesItsPlaceOnce(t *testing.T)
 	if err := pes.FinishAgent(ctx, pe, finished, "nothing left"); err != nil {
 		t.Fatal(err)
 	}
-	exec(t, pool, `UPDATE experiment_signups SET instance_stopped = true WHERE platform_experiment_id = $1 AND agent_id = $2`, pe, stopped)
+	exec(t, pool, `INSERT INTO hosted_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, true) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, pe, stopped)
 	exec(t, pool, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index) VALUES ($1, $2, 1)`, pe, cut)
 
 	state, err := pes.ResearcherPoolState(ctx, pe)
@@ -77,7 +77,7 @@ func TestThePoolStateNamesWhoEndedAndAReplacementTakesItsPlaceOnce(t *testing.T)
 	defer stop()
 	replacement, _ := domain.NewID(domain.AgentIDPrefix)
 	if err := pes.JoinRunning(ctx, pe, &domain.Agent{ID: replacement, CreatedAt: time.Now().UTC()},
-		domain.AgentSignup{AgentID: replacement, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: "main", Flavor: "generalist", Model: "model-1", Replaces: stopped},
+		domain.AgentSignup{Actor: testActor, AgentID: replacement, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: "main", AgentType: "generalist", Model: "model-1", Replaces: stopped},
 		LateJoin{Used: map[string]float64{}}); err != nil {
 		t.Fatalf("a replacement: got = %v, want = nil", err)
 	}
@@ -123,7 +123,7 @@ func TestThePoolStateNamesWhoEndedAndAReplacementTakesItsPlaceOnce(t *testing.T)
 	// A researcher is replaced once.
 	twice, _ := domain.NewID(domain.AgentIDPrefix)
 	if err := pes.JoinRunning(ctx, pe, &domain.Agent{ID: twice, CreatedAt: time.Now().UTC()},
-		domain.AgentSignup{AgentID: twice, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: "main", Flavor: "generalist", Model: "model-1", Replaces: stopped},
+		domain.AgentSignup{Actor: testActor, AgentID: twice, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: "main", AgentType: "generalist", Model: "model-1", Replaces: stopped},
 		LateJoin{Used: map[string]float64{}}); err == nil {
 		t.Error("a second replacement of one researcher was written")
 	}
@@ -282,7 +282,7 @@ func TestAPlatformExperimentIsCreatedWithItsResearchersOrNotAtAll(t *testing.T) 
 	pes := NewPlatformExperimentsStore(pool)
 	create := func(maxHosted, researchers int) (string, error) {
 		now := time.Now().UTC()
-		pe := &domain.PlatformExperiment{
+		pe := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed,
 			ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "pool", BudgetAcceleratorHours: 10,
 			MaxAgents: researchers, Researchers: domain.ResearcherPool{{AgentType: "generalist", Model: "model-1", Count: researchers}},
 			StartsAt: now, DurationHours: 24, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
@@ -299,7 +299,7 @@ func TestAPlatformExperimentIsCreatedWithItsResearchersOrNotAtAll(t *testing.T) 
 				role = domain.SignupRoleBaseline
 			}
 			agents = append(agents, &domain.Agent{ID: id, CreatedAt: now})
-			signups = append(signups, domain.AgentSignup{AgentID: id, Role: role, Hosted: true, Launcher: "main", Model: "model-1"})
+			signups = append(signups, domain.AgentSignup{Actor: testActor, AgentID: id, Role: role, Hosted: true, Launcher: "main", Model: "model-1"})
 		}
 		return pe.ID, pes.CreatePlatformExperiment(ctx, pe, agents, signups)
 	}

@@ -139,13 +139,12 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
     { refreshInterval: 15_000 },
   )
   const ranking = results?.metrics[0]
-  const colSpan = experimentFilter ? 7 : 4
+  const colSpan = experimentFilter ? 6 : 3
 
-  const [sorting, setSorting] = useState<SortingState>([{ id: 'performance_score', desc: true }])
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'top3_count', desc: true }])
   const agentColumns = useMemo(() => [
     { accessorKey: 'name', header: 'Agent' },
     { accessorKey: 'top3_count', header: 'Top-3 bonus' },
-    { accessorKey: 'performance_score', header: 'Performance score' },
   ], [])
   const agentTable = useReactTable({
     data: agents ?? [],
@@ -162,10 +161,9 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
       title="Research Agents"
       description="The agents of this project, how they have placed, and the compute each holds in running experiments."
     >
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3">
         <StatTile label="Agents" value={total || '—'} />
         <StatTile label="With the top-3 bonus" value={stats?.top3_eligible ?? '—'} tone="success" sub="25% more guaranteed compute" />
-        <StatTile label="Average performance score" value={stats?.total ? stats.avg_performance_score.toFixed(3) : '—'} />
       </div>
 
       <Stack gap="sm">
@@ -194,7 +192,7 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
                   <ColumnTh
                     key={h.id}
                     header={h}
-                    className={clsx(h.id === 'top3_count' && 'text-center', h.id === 'performance_score' && 'text-right')}
+                    className={clsx(h.id === 'top3_count' && 'text-center')}
                   />
                 ))}
                 {experimentFilter && (
@@ -235,7 +233,6 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
                       <td className="text-center">
                         {a.top3_count > 0 ? <Badge tone="success">+25%</Badge> : <span className="text-xs text-subtle">—</span>}
                       </td>
-                      <td className={num}>{a.performance_score.toFixed(3)}</td>
                       {experimentFilter && (
                         <>
                           <td className={num} title="Its part of the budget released so far">

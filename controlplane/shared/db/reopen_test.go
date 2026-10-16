@@ -25,9 +25,9 @@ func closedRunWithAgents(t *testing.T, pool *Pool) ClosedRun {
 	pes := NewPlatformExperimentsStore(pool)
 	launcher := "launcher-" + uuid.New().String()[:8]
 	pe := createTestPEWithCoordinator(t, pool, launcher)
-	hosted := domain.AgentSignup{Hosted: true, Launcher: launcher, Flavor: "generalist", Model: "model-1"}
+	hosted := domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: launcher, AgentType: "generalist", Model: "model-1"}
 	baseline := hosted
-	baseline.Role, baseline.Flavor = domain.SignupRoleBaseline, "baseline"
+	baseline.Role, baseline.AgentType = domain.SignupRoleBaseline, "baseline"
 	agents := spawnTestAgents(t, pes, pe, baseline, hosted, hosted, hosted)
 	run := ClosedRun{ID: pe, Launcher: launcher, Baseline: agents[0], Live: agents[1], Finished: agents[2], Cut: agents[3]}
 	setPEStatus(t, pool, pe, domain.PlatformExpRunning, 3*time.Hour)

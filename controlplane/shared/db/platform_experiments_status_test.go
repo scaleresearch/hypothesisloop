@@ -30,9 +30,9 @@ func TestClosingAPlatformExperimentExecutesAgainstARealDatabase(t *testing.T) {
 	id := eventsTestPrefix + "pe-status-" + time.Now().UTC().Format("150405.000000")
 	if _, err := pool.pool.Exec(ctx, `INSERT INTO platform_experiments
 		(id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds,
-		 starts_at, ends_at, status, stages, current_stage, created_at, updated_at)
+		 starts_at, ends_at, status, stages, current_stage, created_at, updated_at, default_quota_tier, created_by_kind)
 		VALUES ($1, 'default', $1, '', 1, 1, '[]'::jsonb, 10, NOW(), NOW() + interval '1 hour', 'open',
-		        '[]'::jsonb, 1, NOW(), NOW())`, id); err != nil {
+		        '[]'::jsonb, 1, NOW(), NOW(), 'guaranteed', 'staff')`, id); err != nil {
 		t.Fatalf("seed platform experiment: %v", err)
 	}
 	t.Cleanup(func() {
@@ -59,7 +59,7 @@ func TestTheRunLastsItsDurationFromItsStart(t *testing.T) {
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
 	created := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Microsecond)
-	pe := &domain.PlatformExperiment{
+	pe := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed,
 		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "an hour's run", BudgetAcceleratorHours: 10, MaxAgents: 2,
 		StartsAt: created, BaselineDueAt: created.Add(45 * time.Minute), DurationHours: 1, Status: domain.PlatformExpOpen,
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
@@ -117,8 +117,8 @@ func TestARunWaitsForItsFirstResearchersMachineWithinItsRun(t *testing.T) {
 			t.Fatal(err)
 		}
 		ids := spawnTestAgents(t, pes, pe,
-			domain.AgentSignup{Hosted: true, Launcher: launcher, Flavor: "generalist"},
-			domain.AgentSignup{Hosted: true, Launcher: launcher, Flavor: "baseline", Role: domain.SignupRoleBaseline})
+			domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: launcher, AgentType: "generalist"},
+			domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: launcher, AgentType: "baseline", Role: domain.SignupRoleBaseline})
 		started, _, err := pes.StartPlatformExperimentTx(ctx, pe, agentsDue, func([]StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) { return nil, oneStage, nil })
 		if err != nil || !started {
 			t.Fatalf("start: got = %v, %v, want started", started, err)
@@ -263,7 +263,7 @@ func TestTheTimeABaselineWaitsOnThePlatformMovesItsDeadline(t *testing.T) {
 	pes := NewPlatformExperimentsStore(pool)
 	created := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Microsecond)
 	due := created.Add(25 * time.Minute)
-	pe := &domain.PlatformExperiment{
+	pe := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed,
 		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "a held baseline", BudgetAcceleratorHours: 10, MaxAgents: 2,
 		StartsAt: created, BaselineDueAt: due, DurationHours: 1, Status: domain.PlatformExpOpen,
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,

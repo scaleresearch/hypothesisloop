@@ -43,7 +43,7 @@ var testSettings = Settings{Image: testImage, APIURL: testAPIURL, SigningSecret:
 func hosted(pe, agent string) domain.AgentSignup {
 	return domain.AgentSignup{
 		PlatformExperimentID: pe, AgentID: agent, Hosted: true, Launcher: "main",
-		Flavor: "data-search", Model: "claude-sonnet-5", Hyperparameters: map[string]any{"batch_size": float64(64), "a": "b"},
+		AgentType: "data-search", Model: "claude-sonnet-5", Hyperparameters: map[string]any{"batch_size": float64(64), "a": "b"},
 		Instance: &domain.AgentInstance{},
 	}
 }
@@ -207,7 +207,7 @@ func TestAnAgentWhoseTypeModelOrHyperparametersChangeKeepsItsMachineAndASignupWi
 		t.Fatal(err)
 	}
 	for what, edit := range map[string]func(*domain.AgentSignup){
-		"flavor":             func(a *domain.AgentSignup) { a.Flavor = "data-search" },
+		"flavor":             func(a *domain.AgentSignup) { a.AgentType = "data-search" },
 		"agent type version": func(a *domain.AgentSignup) { a.AgentTypeVersion++ },
 		"model":              func(a *domain.AgentSignup) { a.Model = "another-model" },
 		"hyperparameters":    func(a *domain.AgentSignup) { a.Hyperparameters = map[string]any{"batch_size": float64(32)} },
@@ -228,7 +228,7 @@ func TestAnAgentWhoseTypeModelOrHyperparametersChangeKeepsItsMachineAndASignupWi
 	}
 
 	noFlavor, noModel := hosted("pe-1", "ag-no-flavor"), hosted("pe-1", "ag-no-model")
-	noFlavor.Flavor, noModel.Model = "", ""
+	noFlavor.AgentType, noModel.Model = "", ""
 	core, logs := observer.New(zap.ErrorLevel)
 	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {
 		{AgentSignup: noFlavor}, {AgentSignup: hosted("pe-1", "ag-whole")}, {AgentSignup: noModel},

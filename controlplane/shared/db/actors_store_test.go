@@ -91,8 +91,8 @@ func TestACommentKeepsWhoseItIsAndWhoWroteIt(t *testing.T) {
 	// Rows from before the credential was kept: an agent's, and a person's under a typed name.
 	for _, old := range [][3]string{{agentID, "agent", ""}, {"", "human", "Grace"}} {
 		if _, err := pool.pool.Exec(ctx, `
-INSERT INTO hypothesis_comments (hypothesis_id, platform_experiment_id, agent_id, source, author, actor_kind, text, created_at)
-VALUES ($1, $2, NULLIF($3, ''), $4, $5, 'unverified', 'old', now() + interval '1 minute')`, hypothesisID, peID, old[0], old[1], old[2]); err != nil {
+INSERT INTO hypothesis_comments (hypothesis_id, platform_experiment_id, agent_id, author, actor_kind, text, created_at)
+VALUES ($1, $2, NULLIF($3, ''), $4, 'unverified', 'old', now() + interval '1 minute')`, hypothesisID, peID, old[0], old[2]); err != nil {
 			t.Fatalf("insert an old comment: %v", err)
 		}
 	}

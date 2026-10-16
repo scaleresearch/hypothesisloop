@@ -267,7 +267,7 @@ WHERE name = $1 RETURNING `+clusterColumns, name, shared, domain.SharedClusterPr
 // finish. It takes the admission lock, so a claim either committed before the cluster was turned
 // off or reads it as off. Repeating a decision changes nothing. A cluster that is not open to the
 // org is ErrClusterNotFound.
-func (s *ClustersStore) SetClusterEnabled(ctx context.Context, name, orgID, by string, enabled bool) (*domain.Cluster, error) {
+func (s *ClustersStore) SetClusterEnabled(ctx context.Context, name, orgID string, by domain.Actor, enabled bool) (*domain.Cluster, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("clusters_store.SetClusterEnabled: begin: %w", err)
@@ -281,9 +281,9 @@ func (s *ClustersStore) SetClusterEnabled(ctx context.Context, name, orgID, by s
 		_, err = tx.Exec(ctx, `DELETE FROM org_disabled_clusters WHERE cluster_name = $1 AND org_id = $2`, name, orgID)
 	} else {
 		_, err = tx.Exec(ctx, `
-INSERT INTO org_disabled_clusters (cluster_name, org_id, disabled_by)
-SELECT name, $2, $3 `+open+`
-ON CONFLICT (cluster_name, org_id) DO NOTHING`, name, orgID, by)
+INSERT INTO org_disabled_clusters (cluster_name, org_id, disabled_by_kind, disabled_by_id)
+SELECT name, $2, $3, $4 `+open+`
+ON CONFLICT (cluster_name, org_id) DO NOTHING`, name, orgID, string(by.Kind), by.ID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("clusters_store.SetClusterEnabled: %w", err)

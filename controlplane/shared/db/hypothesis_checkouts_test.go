@@ -19,7 +19,7 @@ func TestACheckoutClaimsTheHypothesisBeforeAJob(t *testing.T) {
 	second, _, _ := seedRun(t, pool, "checkout-b", true)
 	stale, _, _ := seedRun(t, pool, "checkout-c", true)
 	finished, _, _ := seedRun(t, pool, "checkout-d", true)
-	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, finished_at) VALUES ($1, $2, now())`, peID, finished)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, finished_at) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', now())`, peID, finished)
 	t.Cleanup(func() {
 		exec(t, pool, `DELETE FROM experiment_signups WHERE agent_id = $1`, finished)
 		exec(t, pool, `DELETE FROM experiments WHERE platform_experiment_id = $1`, peID)

@@ -13,6 +13,9 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
+// testActor is whose credential the agents of these tests are added with.
+var testActor = &domain.Actor{Kind: domain.ActorStaff}
+
 func spawnTestAgents(t *testing.T, pes *PlatformExperimentsStore, pe string, signups ...domain.AgentSignup) []string {
 	t.Helper()
 	ids := make([]string, len(signups))
@@ -25,7 +28,10 @@ func spawnTestAgents(t *testing.T, pes *PlatformExperimentsStore, pe string, sig
 		if signups[i].Role == "" {
 			signups[i].Role = domain.SignupRoleCompetitor
 		}
-		agent := &domain.Agent{ID: id, Name: "display-" + id, PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
+		if signups[i].Actor == nil {
+			signups[i].Actor = testActor
+		}
+		agent := &domain.Agent{ID: id, Name: "display-" + id, CreatedAt: time.Now().UTC()}
 		if err := pes.SpawnAgent(context.Background(), pe, agent, signups[i]); err != nil {
 			t.Fatalf("spawn agent: got = %v, want = nil", err)
 		}
@@ -44,7 +50,7 @@ func setPEStatus(t *testing.T, pool *Pool, pe string, status domain.PlatformExpe
 	} else {
 		_, err = pool.pool.Exec(ctx, `
 UPDATE platform_experiments
-SET status = $2::platform_experiment_status, started_at = CASE WHEN $2 = 'running' THEN COALESCE(started_at, now()) ELSE started_at END
+SET status = $2::text, started_at = CASE WHEN $2 = 'running' THEN COALESCE(started_at, now()) ELSE started_at END
 WHERE id = $1`, pe, string(status))
 	}
 	if err != nil {
@@ -78,8 +84,8 @@ func TestSpawnedAgentsAreCreatedInTheExperimentsOrgWithWhatTheyWereLaunchedWith(
 	pes := NewPlatformExperimentsStore(pool)
 
 	ids := spawnTestAgents(t, pes, pe,
-		domain.AgentSignup{Hosted: true, Launcher: "main", Flavor: "data-search", Model: "model-x", Hyperparameters: map[string]any{"batch_size": float64(64)}},
-		domain.AgentSignup{Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierBurstOnly},
+		domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: "main", AgentType: "data-search", Model: "model-x", Hyperparameters: map[string]any{"batch_size": float64(64)}},
+		domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierBurstOnly},
 	)
 
 	signups, err := pes.ListAgentSignups(ctx, pe)
@@ -91,7 +97,7 @@ func TestSpawnedAgentsAreCreatedInTheExperimentsOrgWithWhatTheyWereLaunchedWith(
 		byID[s.AgentID] = s
 	}
 	hosted, own := byID[ids[0]], byID[ids[1]]
-	if !hosted.Hosted || hosted.Launcher != "main" || hosted.Flavor != "data-search" || hosted.Model != "model-x" ||
+	if !hosted.Hosted || hosted.Launcher != "main" || hosted.AgentType != "data-search" || hosted.Model != "model-x" ||
 		!reflect.DeepEqual(hosted.Hyperparameters, map[string]any{"batch_size": float64(64)}) ||
 		hosted.Role != domain.SignupRoleCompetitor || hosted.Name != "display-"+ids[0] || hosted.PlatformExperimentID != pe {
 		t.Errorf("hosted signup: got = %+v", hosted)
@@ -133,7 +139,7 @@ func TestASpawnThatDoesNotFitOrComesTooLateLeavesNothingBehind(t *testing.T) {
 	spawn := func(pe string) error {
 		id, _ := domain.NewID(domain.AgentIDPrefix)
 		agent := &domain.Agent{ID: id, Name: "spawn-rollback-" + id, CreatedAt: time.Now().UTC()}
-		return pes.SpawnAgent(ctx, pe, agent, domain.AgentSignup{AgentID: id, Role: domain.SignupRoleCompetitor})
+		return pes.SpawnAgent(ctx, pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor})
 	}
 
 	full := "pe-" + uuid.New().String()[:8]
@@ -207,7 +213,7 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 	accounts := NewAccountsStore(pool)
 	launcher := "launcher-" + uuid.New().String()[:8]
 	const windDown = 120 * time.Second
-	hosted := domain.AgentSignup{Hosted: true, Launcher: launcher, Flavor: "generalist"}
+	hosted := domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: launcher, AgentType: "generalist"}
 
 	newPE := func() string {
 		pe := "pe-" + uuid.New().String()[:8]
@@ -222,7 +228,7 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 	// nobody else. One of them is done when it finishes, there and then.
 	open := newPE()
 	measuring := hosted
-	measuring.Role, measuring.Flavor = domain.SignupRoleBaseline, "baseline"
+	measuring.Role, measuring.AgentType = domain.SignupRoleBaseline, "baseline"
 	spawnTestAgents(t, pes, open, hosted)
 	baselines := spawnTestAgents(t, pes, open, measuring, measuring)
 	expect(baselines[0], false)
@@ -230,8 +236,8 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 		t.Fatalf("a baseline agent finishing in an open experiment: got = %v, want = nil", err)
 	}
 	expect(baselines[1], true)
-	spawnTestAgents(t, pes, open, domain.AgentSignup{Flavor: "generalist"})
-	spawnTestAgents(t, pes, open, domain.AgentSignup{Hosted: true, Launcher: launcher + "-other", Role: domain.SignupRoleBaseline})
+	spawnTestAgents(t, pes, open, domain.AgentSignup{Actor: testActor, AgentType: "generalist"})
+	spawnTestAgents(t, pes, open, domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: launcher + "-other", Role: domain.SignupRoleBaseline})
 
 	running := newPE()
 	runningAgents := spawnTestAgents(t, pes, running, hosted, hosted, hosted, hosted, hosted)
@@ -366,7 +372,7 @@ func TestTheWindDownIsCountedFromTheClose(t *testing.T) {
 	launcher := "launcher-" + uuid.New().String()[:8]
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
-	spawnTestAgents(t, pes, pe, domain.AgentSignup{Hosted: true, Launcher: launcher})
+	spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: launcher})
 	setPEStatus(t, pool, pe, domain.PlatformExpClosed, time.Hour)
 	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET status_changed_at = now() WHERE id = $1`, pe); err != nil {
 		t.Fatal(err)
@@ -387,11 +393,15 @@ func TestAMachineOfARunThatEndedIsShownAsStoppedOnceItsWindDownPassed(t *testing
 	launcher := "launcher-" + uuid.New().String()[:8]
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
-	agents := spawnTestAgents(t, pes, pe, domain.AgentSignup{Hosted: true, Launcher: launcher}, domain.AgentSignup{Hosted: true, Launcher: launcher})
-	if _, err := pool.pool.Exec(ctx, `UPDATE experiment_signups SET instance_name = 'm', instance_state = 'running' WHERE platform_experiment_id = $1`, pe); err != nil {
+	agents := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: launcher}, domain.AgentSignup{Actor: testActor, Hosted: true, Launcher: launcher})
+	if _, err := pool.pool.Exec(ctx, `INSERT INTO hosted_instances (platform_experiment_id, agent_id, name, state)
+SELECT platform_experiment_id, agent_id, 'm', 'running' FROM experiment_signups WHERE platform_experiment_id = $1`, pe); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET coordinator_hosted = true, coordinator_launcher = $2, coordinator_instance_name = 'm', coordinator_instance_asked_at = now(), coordinator_instance_state = 'running' WHERE id = $1`, pe, launcher); err != nil {
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET coordinator_hosted = true, coordinator_launcher = $2 WHERE id = $1`, pe, launcher); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.pool.Exec(ctx, `INSERT INTO hosted_instances (platform_experiment_id, agent_id, name, asked_at, state) VALUES ($1, '', 'm', now(), 'running')`, pe); err != nil {
 		t.Fatal(err)
 	}
 	shown := func() (first, second, coordinator string) {
@@ -439,7 +449,7 @@ func TestARegisteredAgentJoinsOnlyAnExperimentOfItsOwnOrg(t *testing.T) {
 	createTestPEIn(t, pool, peB, defaultProjectOf(t, accounts, orgB).ID)
 	agentOfA := spawnTestAgents(t, pes, peA, domain.AgentSignup{})[0]
 
-	signup := domain.AgentSignup{AgentID: agentOfA, Role: domain.SignupRoleCompetitor}
+	signup := domain.AgentSignup{Actor: testActor, AgentID: agentOfA, Role: domain.SignupRoleCompetitor}
 	if inserted, err := pes.Signup(ctx, peB, signup); !errors.Is(err, ErrAgentOutsideOrg) || inserted {
 		t.Fatalf("an agent of org A into an experiment of org B: got = %v, %v, want = ErrAgentOutsideOrg", inserted, err)
 	}
@@ -468,7 +478,7 @@ func TestARemovedAgentStaysInItsOrgAndJoinsAgainByItsID(t *testing.T) {
 	if got, found, err := accounts.AgentOrg(ctx, agent); err != nil || !found || got != orgID {
 		t.Fatalf("org of the removed agent: got = %q, %v, %v, want = %q", got, found, err, orgID)
 	}
-	if inserted, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: agent, Role: domain.SignupRoleCompetitor}); err != nil || !inserted {
+	if inserted, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: agent, Role: domain.SignupRoleCompetitor}); err != nil || !inserted {
 		t.Fatalf("join again: got = %v, %v, want = true, nil", inserted, err)
 	}
 }
@@ -487,8 +497,8 @@ func TestASignupKeepsWhoseCredentialAddedTheAgent(t *testing.T) {
 		t.Fatalf("the agent a coordinator added: got = %+v, %v, want actor %+v", added, err, coordinator)
 	}
 	before, err := pes.GetAgentSignup(ctx, pe, ids[1])
-	if err != nil || before == nil || before.Actor == nil || before.Actor.Kind != domain.ActorUnverified || before.Actor.ID != "" {
-		t.Fatalf("a signup that names nobody: got = %+v, %v, want an unverified actor", before, err)
+	if err != nil || before == nil || before.Actor == nil || *before.Actor != *testActor {
+		t.Fatalf("the agent staff added: got = %+v, %v, want actor %+v", before, err, *testActor)
 	}
 }
 
@@ -505,8 +515,8 @@ func TestAgentsOfAPlatformExperimentAreNamedByRoleAndNoTwoAlike(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		agent := &domain.Agent{ID: id, Name: name, PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
-		return agent, pes.SpawnAgent(ctx, pe, agent, domain.AgentSignup{AgentID: id, Role: role, Model: "model-1"})
+		agent := &domain.Agent{ID: id, Name: name, CreatedAt: time.Now().UTC()}
+		return agent, pes.SpawnAgent(ctx, pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: role, Model: "model-1"})
 	}
 	want := func(role domain.SignupRole, name string) *domain.Agent {
 		t.Helper()
@@ -526,7 +536,7 @@ func TestAgentsOfAPlatformExperimentAreNamedByRoleAndNoTwoAlike(t *testing.T) {
 	}
 	want(domain.SignupRoleCompetitor, "Researcher 1")
 	want(domain.SignupRoleCompetitor, "Researcher 3")
-	if inserted, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: first.ID, Role: domain.SignupRoleCompetitor}); !errors.Is(err, ErrAgentNameTaken) || inserted {
+	if inserted, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: first.ID, Role: domain.SignupRoleCompetitor}); !errors.Is(err, ErrAgentNameTaken) || inserted {
 		t.Fatalf("the removed Researcher 1 joining beside the new one: got = %v, %v, want ErrAgentNameTaken", inserted, err)
 	}
 	if _, err := add(domain.SignupRoleCompetitor, "Baseline 1"); !errors.Is(err, ErrAgentNameTaken) {
@@ -547,9 +557,9 @@ func TestFinishedBaselineJobsAreTheCompletedObjectiveJobsOfBaselineAgentsThatFin
 	jobs := NewExperimentsStore(pool)
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
-	measuring := domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "baseline"}
+	measuring := domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleBaseline, AgentType: "baseline"}
 	baselines := spawnTestAgents(t, pes, pe, measuring, measuring)
-	researcher := spawnTestAgents(t, pes, pe, domain.AgentSignup{Flavor: "generalist"})[0]
+	researcher := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, AgentType: "generalist"})[0]
 	if err := pes.FinishAgent(ctx, pe, baselines[0], "the baseline is measured"); err != nil {
 		t.Fatal(err)
 	}
@@ -584,7 +594,7 @@ func TestABaselineAgentHoldsItsQuotaForAsLongAsAJobOfItIsInFlight(t *testing.T) 
 	pes := NewPlatformExperimentsStore(pool)
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
-	baseline := spawnTestAgents(t, pes, pe, domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "baseline"})[0]
+	baseline := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleBaseline, AgentType: "baseline"})[0]
 	holds := func(when string) {
 		t.Helper()
 		if quota, err := pes.GetAgentQuota(ctx, baseline, pe); err != nil || quota == nil || quota.GuaranteedAcceleratorHours <= 0 {
@@ -619,7 +629,7 @@ func TestABaselineAgentHoldsItsQuotaForAsLongAsAJobOfItIsInFlight(t *testing.T) 
 	if quota, err := pes.GetAgentQuota(ctx, baseline, pe); err != nil || quota != nil {
 		t.Fatalf("after the removal: quota = %+v, %v, want none", quota, err)
 	}
-	if added, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: baseline, Role: domain.SignupRoleBaseline, Flavor: "baseline"}); err != nil || !added {
+	if added, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: baseline, Role: domain.SignupRoleBaseline, AgentType: "baseline"}); err != nil || !added {
 		t.Fatalf("joining again: %v, %v", added, err)
 	}
 	holds("joined again")

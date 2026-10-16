@@ -216,7 +216,7 @@ func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID
 	}
 	signup := domain.AgentSignup{
 		AgentID: req.AgentID, Role: role, QuotaTier: domain.QuotaTier(req.QuotaTier),
-		Hosted: req.Hosted, Flavor: choice.AgentType, Hyperparameters: choice.Hyperparameters, Model: choice.Model, Actor: &by,
+		Hosted: req.Hosted, AgentType: choice.AgentType, Hyperparameters: choice.Hyperparameters, Model: choice.Model, Actor: &by,
 	}
 	if req.Hosted {
 		signup.Launcher = launch.Launcher
@@ -402,10 +402,10 @@ func (h *PlatformExperimentsHandler) hostedAgents(catalog domain.AgentTypeCatalo
 		if err != nil {
 			return nil, nil, err
 		}
-		agents = append(agents, &domain.Agent{ID: agentID, PerformanceScore: 0.5, CreatedAt: now})
+		agents = append(agents, &domain.Agent{ID: agentID, CreatedAt: now})
 		signups = append(signups, domain.AgentSignup{
 			AgentID: agentID, Role: role, Hosted: true, Launcher: h.launch.Launcher,
-			Flavor: choice.AgentType, Model: choice.Model, Hyperparameters: choice.Hyperparameters, Actor: &by,
+			AgentType: choice.AgentType, Model: choice.Model, Hyperparameters: choice.Hyperparameters, Actor: &by,
 		})
 	}
 	return agents, signups, nil
@@ -464,7 +464,7 @@ func (s *PlatformExperimentsService) spawn(ctx context.Context, pe *domain.Platf
 		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}
 	signup.AgentID = id
-	agent := &domain.Agent{ID: id, Name: strings.TrimSpace(req.Name), PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
+	agent := &domain.Agent{ID: id, Name: strings.TrimSpace(req.Name), CreatedAt: time.Now().UTC()}
 	if late != nil {
 		err = s.store.JoinRunning(ctx, platformExpID, agent, signup, *late)
 	} else {

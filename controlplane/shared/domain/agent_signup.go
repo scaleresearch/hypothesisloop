@@ -22,9 +22,9 @@ type AgentSignup struct {
 	// Launcher is the launcher that runs a hosted agent, written when it joins so that a later
 	// change of the configured launcher moves new agents only.
 	Launcher string `json:"launcher,omitempty"`
-	// Flavor, the id of the agent type it runs, and Model are resolved when the agent joins: what it
+	// AgentType, the id of the agent type it runs, and Model are resolved when the agent joins: what it
 	// asked for, or the default at that moment. Neither is ever empty on a stored signup.
-	Flavor string `json:"flavor" doc:"The agent type it runs, by id."`
+	AgentType string `json:"flavor" doc:"The agent type it runs, by id."`
 	// AgentTypeVersion is the version of its agent type it is pinned to: the current one when it
 	// joined, moved by each edit of the type while its run goes on.
 	AgentTypeVersion int            `json:"agent_type_version" doc:"The version of its agent type it is pinned to: the current one when it joined, and each edit of the type while its run goes on moves it to the new version (agent.instructions)."`

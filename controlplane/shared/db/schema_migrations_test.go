@@ -119,13 +119,17 @@ func legacyDatabase(t *testing.T) *Pool {
 	return pool
 }
 
-func TestAFreshDatabaseGetsEveryMigrationOnce(t *testing.T) {
+func TestAFreshDatabaseIsBuiltOnce(t *testing.T) {
 	pool := scratchDatabase(t)
 	ctx := context.Background()
 	all := embeddedMigrationsWith(t, nil)
+	newest := 0
+	if len(all.snapshots) > 0 {
+		newest = all.snapshots[len(all.snapshots)-1].version
+	}
 	done, err := Migrate(ctx, pool)
-	if err != nil || done.Adopted || !slices.Equal(done.Applied, files(all)) {
-		t.Fatalf("first start: got = %+v, %v, want every migration applied", done, err)
+	if err != nil || done.Adopted || done.Snapshot != newest || !slices.Equal(done.Applied, files(all)[newest:]) {
+		t.Fatalf("first start: got = %+v, %v, want snapshot %04d and every migration after it applied", done, err, newest)
 	}
 	if got := ledger(t, pool); !slices.Equal(got, files(all)) {
 		t.Fatalf("schema_migrations: got = %v, want %v", got, files(all))
@@ -271,8 +275,8 @@ func TestReplicasStartingAtOnceApplyEachMigrationOnce(t *testing.T) {
 			t.Fatalf("replica %d: got = %v, want nil", i, err)
 		}
 	}
-	if applied := len(results[0].Applied) + len(results[1].Applied); applied != len(all) {
-		t.Fatalf("applied: got = %+v, want %d migrations between the two", results, len(all))
+	if built := len(results[0].Applied) + len(results[1].Applied) + results[0].Snapshot + results[1].Snapshot; built != len(all) {
+		t.Fatalf("built: got = %+v, want %d migrations between the two, a snapshot counting those it stands for", results, len(all))
 	}
 	if got := ledger(t, pool); !slices.Equal(got, all) {
 		t.Fatalf("schema_migrations: got = %v, want %v", got, all)
@@ -379,7 +383,7 @@ func TestAFreshDatabaseStartsFromTheNewestSnapshotAndAnExistingOneConvertsInOrde
 		rank + ".sql":                         `ALTER TABLE agents ADD COLUMN rank INTEGER;`,
 		fmt.Sprintf("snapshots/%04d.sql", at): chain.String() + addNote,
 	})
-	requireSameSchema(t, at, all, all.snapshots[0])
+	requireSameSchema(t, at, all, all.snapshots[len(all.snapshots)-1])
 
 	fresh := scratchDatabase(t)
 	done, err := migrate(ctx, fresh, all)
