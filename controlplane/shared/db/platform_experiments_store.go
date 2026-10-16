@@ -714,9 +714,10 @@ WHERE pe.id = c.id AND pe.status = 'open' AND pe.baseline_job_id = '' AND ($2::b
 // transaction (allocateBaselineQuota).
 //
 // max_agents and the researchers are held to the researchers at work under the row's lock
-// (holdsAtWork): a *PoolBelowAtWorkError refuses them, and nothing is written. researchers left
-// nil stay as they are, so a patch that does not change them never writes back a pool a cut
-// lowered since it read.
+// (setResearchersTx): a running platform experiment loses the newest researchers above a lowered
+// max_agents, and otherwise a *PoolBelowAtWorkError refuses them and nothing is written.
+// researchers left nil stay as they are, capped to max_agents, so a patch that does not change
+// them never writes back a pool a cut lowered since it read.
 func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus, researchers domain.ResearcherPool) error {
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {

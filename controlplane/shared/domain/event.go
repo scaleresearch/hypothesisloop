@@ -147,7 +147,7 @@ var EventKinds = []EventKindDoc{
 	{Kind: EventStageBoundary, Subject: "platform experiment id", Value: "stage index",
 		Description: "The elimination ladder advanced. detail is 'advanced' or 'cut'; agent_id names who was cut."},
 	{Kind: EventAgentCut, Subject: "agent id", Value: "stage index",
-		Description: "This agent was cut at a stage boundary. Its own stop condition, without a GET to find out whether the cut was its."},
+		Description: "This agent was cut, at a stage boundary or, with detail max_agents_lowered, as one of the newest researchers above a max_agents lowered below the researchers at work. Its own stop condition, without a GET to find out whether the cut was its."},
 	{Kind: EventAgentFinished, Subject: "agent id", Value: "empty by design",
 		Description: "This agent said it has nothing left to do, and its machine stops. detail is the reason it gave, and for a researcher the blocker it named and the time and quota it left. When every agent is finished or cut the run has nobody left to wait for."},
 	{Kind: EventAgentReplaced, Subject: "agent id of the new researcher", Value: "agent id of the researcher it replaces",

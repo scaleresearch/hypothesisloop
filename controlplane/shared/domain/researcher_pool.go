@@ -128,6 +128,19 @@ func (p ResearcherPool) Lowered(keys []PoolKey) ResearcherPool {
 	return out
 }
 
+// Capped is the pool with its last entries lowered until it wants at most maxAgents researchers in
+// all. No entry goes below zero.
+func (p ResearcherPool) Capped(maxAgents int) ResearcherPool {
+	out := slices.Clone(p)
+	over := out.Total() - maxAgents
+	for i := len(out) - 1; i >= 0 && over > 0; i-- {
+		cut := min(out[i].Count, over)
+		out[i].Count -= cut
+		over -= cut
+	}
+	return out
+}
+
 // ReplacementLeadFloor is the least time left in a run for the platform to add a researcher in
 // the place of one that ended: a machine boots, clones and reads the run in about that time.
 const ReplacementLeadFloor = 15 * time.Minute

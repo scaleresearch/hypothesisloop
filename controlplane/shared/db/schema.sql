@@ -726,6 +726,9 @@ CREATE TABLE IF NOT EXISTS platform_experiment_cuts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pe_cuts_platform ON platform_experiment_cuts(platform_experiment_id);
+-- Why the platform cut the agent other than at a stage boundary: max_agents_lowered for one of the
+-- newest researchers above a max_agents lowered below those at work. Empty for a stage cut.
+ALTER TABLE platform_experiment_cuts ADD COLUMN IF NOT EXISTS reason TEXT NOT NULL DEFAULT '';
 
 -- ---------------------------------------------------------------------------
 -- platform_experiment_stage_advances — one row per boundary crossed, committed with that
@@ -1047,14 +1050,17 @@ CREATE TRIGGER stage_advances_notify AFTER INSERT ON platform_experiment_stage_a
 -- sees the boundary and who it fell on together or not at all.
 CREATE OR REPLACE FUNCTION hypothesisloop_cuts_notify() RETURNS trigger AS $$
 BEGIN
-    PERFORM hypothesisloop_notify_event('stage.boundary', NEW.platform_experiment_id,
-        NEW.stage_index::text, 'cut', NEW.platform_experiment_id, NEW.agent_id);
+    -- A cut for a lowered max_agents is no move of the ladder.
+    IF NEW.reason = '' THEN
+        PERFORM hypothesisloop_notify_event('stage.boundary', NEW.platform_experiment_id,
+            NEW.stage_index::text, 'cut', NEW.platform_experiment_id, NEW.agent_id);
+    END IF;
     -- The same row, said the other way round. stage.boundary is about the ladder and reaches
     -- everyone; agent.cut is about one agent and is the only event that tells it, without a GET,
     -- that the run is over for IT. It is agent-owned, so an agent's own subscription receives its
     -- own cut and is not woken by every rival's.
     PERFORM hypothesisloop_notify_event('agent.cut', NEW.agent_id,
-        NEW.stage_index::text, '', NEW.platform_experiment_id, NEW.agent_id);
+        NEW.stage_index::text, NEW.reason, NEW.platform_experiment_id, NEW.agent_id);
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;

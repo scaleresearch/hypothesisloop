@@ -305,11 +305,13 @@ func (s *createdStore) ListAgentSignups(context.Context, string) ([]domain.Agent
 
 // UpdatePlatformExperiment holds max_agents to the researchers that joined, every one at work.
 func (s *createdStore) UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, status domain.PlatformExperimentStatus, researchers domain.ResearcherPool) error {
-	return s.update(pe, researchers, len(s.researchers))
+	return s.update(pe, status, researchers, len(s.researchers))
 }
 
-func (s *createdStore) update(pe *domain.PlatformExperiment, researchers domain.ResearcherPool, atWork int) error {
-	if pe.MaxAgents < atWork {
+// update refuses a max_agents below atWork before the run starts; once it runs the store cuts the
+// newest above it.
+func (s *createdStore) update(pe *domain.PlatformExperiment, status domain.PlatformExperimentStatus, researchers domain.ResearcherPool, atWork int) error {
+	if pe.MaxAgents < atWork && status != domain.PlatformExpRunning {
 		return &db.PoolBelowAtWorkError{Count: pe.MaxAgents, AtWork: atWork}
 	}
 	if researchers != nil {

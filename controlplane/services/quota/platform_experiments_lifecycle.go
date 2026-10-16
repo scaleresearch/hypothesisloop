@@ -376,10 +376,14 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	if patch.Researchers != nil {
 		patched.Researchers = *patch.Researchers
 	}
-	// Held to the researchers at work in the write that stores it (db.PoolBelowAtWorkError), the
-	// count a join is held to.
+	// Held to the researchers at work in the write that stores it, the count a join is held to: a
+	// running one loses the newest above it, and an open one refuses it (db.PoolBelowAtWorkError).
+	// Researchers the patch does not state are capped to it there.
 	if patch.MaxAgents != nil {
 		patched.MaxAgents = *patch.MaxAgents
+		if patch.Researchers == nil {
+			patched.Researchers = patched.Researchers.Capped(patched.MaxAgents)
+		}
 		if pe.Status == domain.PlatformExpRunning && patched.MaxAgents > pe.MaxAgents {
 			if err := s.seatsHoldTrials(ctx, &patched); err != nil {
 				return nil, err
@@ -474,7 +478,7 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	var below *db.PoolBelowAtWorkError
 	switch err := s.store.UpdatePlatformExperiment(ctx, pe, expectedStatus, researchers); {
 	case errors.As(err, &below) && below.Key == (domain.PoolKey{}):
-		return nil, refuseUpdate(409, "max_agents_below_researchers", "max_agents %d is below the %d researchers (agents of role competitor) at work: state at least %d. One that finished, was cut, was replaced or lost its machine is not at work", below.Count, below.AtWork, below.AtWork)
+		return nil, refuseUpdate(409, "max_agents_below_researchers", "max_agents %d is below the %d researchers (agents of role competitor) of platform experiment %s, which has not started: state at least %d, or remove researchers first. Once it runs, a lower max_agents cuts the newest of them", below.Count, below.AtWork, pe.ID, below.AtWork)
 	case errors.As(err, &below):
 		return nil, refuseUpdate(409, "researchers_below_at_work", "%s: a change of researchers takes out no researcher at work, so state at least that many", below)
 	case err != nil:

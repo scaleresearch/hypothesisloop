@@ -33,14 +33,14 @@ func (s *seatStore) IsAgentCut(_ context.Context, _, agentID string) (bool, erro
 }
 
 // UpdatePlatformExperiment holds max_agents to the researchers at work: a cut one is not.
-func (s *seatStore) UpdatePlatformExperiment(_ context.Context, pe *domain.PlatformExperiment, _ domain.PlatformExperimentStatus, researchers domain.ResearcherPool) error {
+func (s *seatStore) UpdatePlatformExperiment(_ context.Context, pe *domain.PlatformExperiment, status domain.PlatformExperimentStatus, researchers domain.ResearcherPool) error {
 	atWork := 0
 	for _, id := range s.researchers {
 		if !s.cut[id] {
 			atWork++
 		}
 	}
-	return s.update(pe, researchers, atWork)
+	return s.update(pe, status, researchers, atWork)
 }
 
 func (s *seatStore) AddDesiredQuotaUsageOne(context.Context, *domain.AgentQuota) error { return nil }
@@ -87,6 +87,10 @@ func TestARunningExperimentTakesAMaxAgentsItsUnspentHoursHold(t *testing.T) {
 	if store, err := update(7); err != nil || store.created[0].MaxAgents != 7 {
 		t.Errorf("seven places 4.5 unspent hours hold: got = %v, stored %d, want 7", err, store.created[0].MaxAgents)
 	}
+	// The store cuts the newest researchers above a lowered max_agents of a running one.
+	if store, err := update(1); err != nil || store.created[0].MaxAgents != 1 {
+		t.Errorf("fewer places than at work: got = %v, stored %d, want 1", err, store.created[0].MaxAgents)
+	}
 	for name, c := range map[string]struct {
 		maxAgents int
 		cut       []string
@@ -94,7 +98,6 @@ func TestARunningExperimentTakesAMaxAgentsItsUnspentHoursHold(t *testing.T) {
 	}{
 		"more places than a trial apiece":           {8, nil, "budget_below_baseline"},
 		"a cut researcher's hours count for nobody": {5, []string{"ag-2"}, "budget_below_baseline"},
-		"fewer than at work":                        {1, nil, "max_agents_below_researchers"},
 	} {
 		store, err := update(c.maxAgents, c.cut...)
 		if reason(err) != c.reason || store.created[0].MaxAgents != 2 {

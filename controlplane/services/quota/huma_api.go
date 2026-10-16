@@ -433,7 +433,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"A duration_hours of a running one moves the end of its run, still counted from its start, and one that ends it before now is 422 invalid_length. A new description or duration_hours reaches every agent of it as platform_experiment.description. " +
 			"409 experiment_not_editable for a draft or a closed one. The experiment as patched is checked like a create and refused with the same 422: " +
 			"invalid_experiment (an empty name or description among them), invalid_metrics, invalid_cost, invalid_agents, invalid_length, " +
-			"409 max_agents_below_researchers for a max_agents under the researchers (agents of role competitor) at work, the count a join is held to, which the message gives, and 409 researchers_below_at_work for researchers that want fewer of an agent type and model than are at work. researchers above max_agents in all is 422 invalid_agents. " +
+			"A max_agents lowered below the researchers (agents of role competitor) at work of a running one cuts the newest of them, the count a join is held to: each winds down as a cut researcher does, told by agent.cut with detail max_agents_lowered, and nobody is added in its place; researchers the body does not state are lowered to it from the last entry. " +
+			"Before the run starts 409 max_agents_below_researchers refuses one under the researchers signed up, which the message gives. 409 researchers_below_at_work for researchers that want fewer of an agent type and model than are at work. researchers above max_agents in all is 422 invalid_agents. " +
 			"run_too_long for a duration_hours over the platform's quota.max_platform_experiment_days. A starts_at in the body moves baseline_due_at with it, a starts_at past being now. " +
 			"`baseline_job_id` declares the baseline while the experiment is open, and nothing else is needed in the body. The platform makes this declaration itself, by the same check, when an agent of role baseline finishes naming the job (baseline_job_id of its finish) or, naming none, the baseline agents that finished left exactly one COMPLETED job that reports the ranking metric, and again in the patch that clears what that declaration was refused for (a raised budget_accelerator_hours): a caller declares only where a choice is needed, between several jobs or after a redo. The platform writes what it holds of the job into the description, a block that begins `" + measuredBaselineHeader + "` and states job, code_ref, env (the job's settings, when it has any) and measured (the last value the job reported on each metric but the references), then a line for each value a COMPLETED job reported on a reference, its job and whether that job met the constraints (only one that did counts), and the references no completed job reported, as not measured, and keeps that block through every later patch of the description. With a researcher joined and no starts_at ahead the run starts in this same request and the answer reads running; otherwise it starts with the request that adds the researcher, or at starts_at. The start closes signup and gives each agent present, those of role baseline apart, its share of the first stage's part of the budget, less what measuring the baseline spent. The start also settles `stages`: a boundary cuts nobody from fewer than 5 researchers (role competitor), so a run started with fewer has one stage of its whole length, with the last declared stage's max_job_hours, and each researcher holds its whole share from the start. With 5 or more the ladder is as declared. status_reason in the answer says what an open experiment still waits for: no_researchers until one joined, budget_spent when the baseline left nothing to share. The job is read from the platform's own records and the declaration refused with 422: " +
 			"no_baseline (no job of an agent of role baseline of this platform experiment), baseline_not_completed, baseline_not_on_branch (the job ran a branch other than the baseline branch), baseline_without_finding, " +
@@ -508,8 +509,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			return nil, huma.Error404NotFound("agent is not signed up to this platform experiment")
 		}
 		return &struct{ Body signupReply }{Body: signupReply{
-			AgentID: signup.AgentID, Name: signup.Name, Role: string(signup.Role), Flavor: signup.Flavor, Model: signup.Model, Hyperparameters: signup.Hyperparameters,
-			FinishedAt: signup.FinishedAt, Ended: signup.Ended,
+			AgentID: signup.AgentID, Name: signup.Name, Role: string(signup.Role), Flavor: signup.Flavor, AgentTypeVersion: signup.AgentTypeVersion,
+			Model: signup.Model, Hyperparameters: signup.Hyperparameters, FinishedAt: signup.FinishedAt, Ended: signup.Ended, CutReason: signup.CutReason,
 		}}, nil
 	})
 
@@ -847,12 +848,14 @@ type StagesStatusResponse struct {
 
 // signupReply is an agent's signup as any caller in its platform experiment reads it.
 type signupReply struct {
-	AgentID         string         `json:"agent_id"`
-	Name            string         `json:"name" doc:"The name the agent's branches carry: hl/<platform experiment>/<name>/..."`
-	Role            string         `json:"role"`
-	Flavor          string         `json:"flavor"`
-	Model           string         `json:"model"`
-	Hyperparameters map[string]any `json:"hyperparameters"`
-	FinishedAt      *time.Time     `json:"finished_at,omitempty" doc:"When the agent said it has nothing left to do."`
-	Ended           domain.RunEnd  `json:"ended" enum:",closed,cut,finished,planned" doc:"Why the agent's run here is over, the empty string while it goes on: the platform experiment closed, the agent was cut at a stage boundary, it finished, or it is a draft's planner whose proposal or decline is stored. A machine the platform runs for the agent is told to stop for this and nothing else."`
+	AgentID          string         `json:"agent_id"`
+	Name             string         `json:"name" doc:"The name the agent's branches carry: hl/<platform experiment>/<name>/..."`
+	Role             string         `json:"role"`
+	Flavor           string         `json:"flavor" doc:"The agent type it runs, by id."`
+	AgentTypeVersion int            `json:"agent_type_version" doc:"The version of its agent type it is pinned to. Its instructions are GET /platform-experiments/{id}/agents/{agent_id}/instructions."`
+	Model            string         `json:"model"`
+	Hyperparameters  map[string]any `json:"hyperparameters"`
+	FinishedAt       *time.Time     `json:"finished_at,omitempty" doc:"When the agent said it has nothing left to do."`
+	Ended            domain.RunEnd  `json:"ended" enum:",closed,cut,finished,planned" doc:"Why the agent's run here is over, the empty string while it goes on: the platform experiment closed, the agent was cut, it finished, or it is a draft's planner whose proposal or decline is stored. A machine the platform runs for the agent is told to stop for this and nothing else."`
+	CutReason        string         `json:"cut_reason,omitempty" doc:"Why the platform cut it other than at a stage boundary: max_agents_lowered for one of the newest researchers above a max_agents lowered below those at work. Absent for a stage cut."`
 }

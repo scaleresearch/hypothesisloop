@@ -160,11 +160,53 @@ func TestMaxAgentsIsHeldToTheResearchersAtWork(t *testing.T) {
 	spawnResearcher(t, pes, pe, "generalist")
 	spawnResearcher(t, pes, pe, "generalist")
 	finished, cut := spawnResearcher(t, pes, pe, "generalist"), spawnResearcher(t, pes, pe, "generalist")
+
+	got, err := pes.GetPlatformExperiment(ctx, pe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got.MaxAgents = 3
+	var below *PoolBelowAtWorkError
+	if err := pes.UpdatePlatformExperiment(ctx, got, domain.PlatformExpOpen, nil); !errors.As(err, &below) || below.AtWork != 4 || below.Count != 3 {
+		t.Fatalf("max_agents below the four signed up before the start: got = %v, want PoolBelowAtWorkError of 4", err)
+	}
 	setPEStatus(t, pool, pe, domain.PlatformExpRunning, 0)
 	if err := pes.FinishAgent(ctx, pe, finished, "done"); err != nil {
 		t.Fatal(err)
 	}
 	exec(t, pool, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index) VALUES ($1, $2, 1)`, pe, cut)
+	if got, err = pes.GetPlatformExperiment(ctx, pe); err != nil {
+		t.Fatal(err)
+	}
+	got.MaxAgents = 2
+	if err := pes.UpdatePlatformExperiment(ctx, got, domain.PlatformExpRunning, nil); err != nil {
+		t.Fatalf("max_agents of the two at work: got = %v, want = nil", err)
+	}
+	if err := pes.UpdatePlatformExperiment(ctx, got, domain.PlatformExpRunning, domain.ResearcherPool{{AgentType: "generalist", Model: "model-1", Count: 1}}); !errors.As(err, &below) || below.Key.AgentType != "generalist" {
+		t.Fatalf("an entry below its researchers at work: got = %v, want PoolBelowAtWorkError of the entry", err)
+	}
+	if stored, _ := pes.GetPlatformExperiment(ctx, pe); stored.MaxAgents != 2 || len(stored.Researchers) != 0 {
+		t.Errorf("stored %d and %+v, want the refused write to leave max_agents 2 and no researchers", stored.MaxAgents, stored.Researchers)
+	}
+}
+
+// A max_agents lowered below the researchers at work of a running platform experiment cuts the
+// newest of them, as the platform's decision written as their end: each is told agent.cut with
+// why, the ladder does not move, and nobody takes their places.
+func TestALoweredMaxAgentsCutsTheNewestResearchersAndNobodyReplacesThem(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	generalist := domain.PoolKey{AgentType: "generalist", Model: "model-1"}
+	dataSearch := domain.PoolKey{AgentType: "data-search", Model: "model-1"}
+	pe, pes := poolRun(t, pool, 4, domain.ResearcherPool{{AgentType: "generalist", Model: "model-1", Count: 3}, {AgentType: "data-search", Model: "model-1", Count: 1}})
+	first := spawnResearcher(t, pes, pe, "generalist")
+	second := spawnResearcher(t, pes, pe, "generalist")
+	third := spawnResearcher(t, pes, pe, "generalist")
+	newest := spawnResearcher(t, pes, pe, "data-search")
+	setPEStatus(t, pool, pe, domain.PlatformExpRunning, 0)
+	before := cursorNow(t, pool)
+	live, stop := listenForEvents(t, pool)
+	defer stop()
 
 	got, err := pes.GetPlatformExperiment(ctx, pe)
 	if err != nil {
@@ -172,19 +214,63 @@ func TestMaxAgentsIsHeldToTheResearchersAtWork(t *testing.T) {
 	}
 	got.MaxAgents = 2
 	if err := pes.UpdatePlatformExperiment(ctx, got, domain.PlatformExpRunning, nil); err != nil {
-		t.Fatalf("max_agents of the two at work: got = %v, want = nil", err)
+		t.Fatalf("lower max_agents to 2 of 4 at work: got = %v, want = nil", err)
 	}
-	got.MaxAgents = 1
-	var below *PoolBelowAtWorkError
-	if err := pes.UpdatePlatformExperiment(ctx, got, domain.PlatformExpRunning, nil); !errors.As(err, &below) || below.AtWork != 2 || below.Count != 1 {
-		t.Fatalf("max_agents below the two at work: got = %v, want PoolBelowAtWorkError of 2 at work", err)
+	for _, c := range []struct {
+		agent string
+		ended domain.RunEnd
+	}{{first, ""}, {second, ""}, {third, domain.RunEndCut}, {newest, domain.RunEndCut}} {
+		if signup := signupOf(t, pes, pe, c.agent); signup.Ended != c.ended || (c.ended == domain.RunEndCut) != (signup.CutReason == CutMaxAgentsLowered) {
+			t.Errorf("%s: ended %q cut for %q, want %q", c.agent, signup.Ended, signup.CutReason, c.ended)
+		}
 	}
-	got.MaxAgents = 2
-	if err := pes.UpdatePlatformExperiment(ctx, got, domain.PlatformExpRunning, domain.ResearcherPool{{AgentType: "generalist", Model: "model-1", Count: 1}}); !errors.As(err, &below) || below.Key.AgentType != "generalist" {
-		t.Fatalf("an entry below its researchers at work: got = %v, want PoolBelowAtWorkError of the entry", err)
+	state, err := pes.ResearcherPoolState(ctx, pe)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if stored, _ := pes.GetPlatformExperiment(ctx, pe); stored.MaxAgents != 2 || len(stored.Researchers) != 0 {
-		t.Errorf("stored %d and %+v, want the refused writes to leave max_agents 2 and no researchers", stored.MaxAgents, stored.Researchers)
+	if state.MaxAgents != 2 || state.AtWork[generalist] != 2 || state.AtWork[dataSearch] != 0 || len(state.Ended[generalist])+len(state.Ended[dataSearch]) != 0 {
+		t.Fatalf("state = %+v, want two at work and nobody whose place is free", state)
+	}
+	if state.Pool.Total() != 2 || len(domain.PoolDeficit(state.Pool, state.MaxAgents, state.AtWork, nil)) != 0 {
+		t.Errorf("researchers %+v, want them lowered by the two cut, so that nobody is added", state.Pool)
+	}
+
+	told := map[string]string{}
+	deadline := time.After(5 * time.Second)
+	for len(told) < 2 {
+		select {
+		case e := <-live:
+			if e.PlatformExperimentID != pe {
+				continue
+			}
+			if e.Kind == domain.EventStageBoundary {
+				t.Errorf("a cut for max_agents moved the ladder: %+v", e)
+			}
+			if e.Kind == domain.EventAgentCut {
+				told[e.AgentID] = e.Detail
+			}
+		case <-deadline:
+			t.Fatalf("told %v, want the two cut", told)
+		}
+	}
+	if told[third] != CutMaxAgentsLowered || told[newest] != CutMaxAgentsLowered {
+		t.Errorf("told %v, want %s to %s and %s", told, CutMaxAgentsLowered, third, newest)
+	}
+	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, domain.EventFilter{PlatformExperimentID: pe}, before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cuts := 0
+	for _, e := range replayed {
+		if e.Kind == domain.EventStageBoundary {
+			t.Errorf("replayed a ladder move: %+v", e)
+		}
+		if e.Kind == domain.EventAgentCut && e.Detail == CutMaxAgentsLowered {
+			cuts++
+		}
+	}
+	if cuts != 2 {
+		t.Errorf("replayed %d cuts for max_agents, want 2", cuts)
 	}
 }
 

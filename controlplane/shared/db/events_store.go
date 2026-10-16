@@ -424,7 +424,7 @@ SELECT a.stage_index, 'advanced', '', a.advanced_xid
 FROM platform_experiment_stage_advances a WHERE a.platform_experiment_id = $1 AND a.advanced_xid >= $2
 UNION ALL
 SELECT c.stage_index, 'cut', c.agent_id, c.cut_xid
-FROM platform_experiment_cuts c WHERE c.platform_experiment_id = $1 AND c.cut_xid >= $2`
+FROM platform_experiment_cuts c WHERE c.platform_experiment_id = $1 AND c.cut_xid >= $2 AND c.reason = ''`
 	rows, err := tx.Query(ctx, q, peID, since)
 	if err != nil {
 		return nil, fmt.Errorf("events_store.replayStageBoundaries: %w", err)
@@ -452,7 +452,7 @@ FROM platform_experiment_cuts c WHERE c.platform_experiment_id = $1 AND c.cut_xi
 // replayAgentCuts derives the cut of each agent from the cut row. A cut is written once and never
 // revised, so this replays exactly, with no collapsing of intermediate states.
 func replayAgentCuts(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]domain.Event, error) {
-	const q = `SELECT agent_id, stage_index, cut_xid FROM platform_experiment_cuts
+	const q = `SELECT agent_id, stage_index, reason, cut_xid FROM platform_experiment_cuts
 WHERE platform_experiment_id = $1 AND cut_xid >= $2`
 	rows, err := tx.Query(ctx, q, peID, since)
 	if err != nil {
@@ -462,14 +462,14 @@ WHERE platform_experiment_id = $1 AND cut_xid >= $2`
 
 	var events []domain.Event
 	for rows.Next() {
-		var agentID string
+		var agentID, reason string
 		var stageIndex int
 		var position int64
-		if err := rows.Scan(&agentID, &stageIndex, &position); err != nil {
+		if err := rows.Scan(&agentID, &stageIndex, &reason, &position); err != nil {
 			return nil, fmt.Errorf("events_store.replayAgentCuts: scan: %w", err)
 		}
 		events = append(events, domain.Event{Kind: domain.EventAgentCut, Subject: agentID,
-			Value: fmt.Sprintf("%d", stageIndex), PlatformExperimentID: peID, AgentID: agentID,
+			Value: fmt.Sprintf("%d", stageIndex), Detail: reason, PlatformExperimentID: peID, AgentID: agentID,
 			Position: position})
 	}
 	if err := rows.Err(); err != nil {

@@ -67,6 +67,17 @@ func TestAPoolIsCheckedAndResolved(t *testing.T) {
 	}
 }
 
+func TestACappedPoolLowersItsLastEntriesFirst(t *testing.T) {
+	pool := ResearcherPool{{AgentType: "generalist", Model: "m", Count: 2}, {AgentType: "data-search", Model: "m", Count: 2}}
+	got := pool.Capped(1)
+	if got.Total() != 1 || got[0].Count != 1 || got[1].Count != 0 || pool.Total() != 4 {
+		t.Errorf("got = %+v from %+v, want one generalist and the pool given unchanged", got, pool)
+	}
+	if got := pool.Capped(5); got.Total() != 4 {
+		t.Errorf("a cap above the total: got = %+v, want it unchanged", got)
+	}
+}
+
 func TestReplacementLeadIsOneTrialAndAtLeastTheFloor(t *testing.T) {
 	if got := ReplacementLead(0); got != ReplacementLeadFloor {
 		t.Errorf("no estimate: got = %v, want the floor", got)

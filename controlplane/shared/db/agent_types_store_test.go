@@ -318,7 +318,7 @@ func TestAnAgentThatCannotBeMovedLeavesTheOthersMoved(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		pool.pool.Exec(context.Background(), `DROP TRIGGER IF EXISTS `+fn+` ON experiment_signups`) //nolint:errcheck
-		pool.pool.Exec(context.Background(), `DROP FUNCTION IF EXISTS `+fn+`()`)                 //nolint:errcheck
+		pool.pool.Exec(context.Background(), `DROP FUNCTION IF EXISTS `+fn+`()`)                    //nolint:errcheck
 	})
 
 	_, propagation, err := store.Edit(ctx, AgentTypeEdit{OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "Tuner", Prompt: testPrompt + " Again.", Settings: testTypeSettings()}, testModelDefaults)

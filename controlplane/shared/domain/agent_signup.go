@@ -46,6 +46,9 @@ type AgentSignup struct {
 	// A hosted agent's machine is told to stop for this and for nothing else, and the agent
 	// reads it to learn why.
 	Ended RunEnd `json:"-"`
+	// CutReason is why the platform cut the agent other than at a stage boundary, empty for a stage
+	// cut and for an agent that was not cut.
+	CutReason string `json:"cut_reason,omitempty" doc:"Why the platform cut it other than at a stage boundary: max_agents_lowered for one of the newest researchers above a max_agents lowered below those at work. Absent for a stage cut and an agent that was not cut."`
 	// Instance is what became of a hosted agent's machine, nil for an agent the platform does
 	// not run.
 	Instance *AgentInstance `json:"instance,omitempty"`

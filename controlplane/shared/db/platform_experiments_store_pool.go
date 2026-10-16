@@ -16,9 +16,10 @@ import (
 // its flavor, and its model. A flavor from before flavors were stored reads as the default.
 const signupKeySQL = `COALESCE(NULLIF(s.flavor, ''), '` + domain.DefaultAgentFlavor + `'), s.model`
 
-// PoolBelowAtWorkError refuses a max_agents below the researchers at work, or researchers that
-// want fewer of an agent type and model at work than are: a researcher at work is never taken out
-// by a change of either.
+// PoolBelowAtWorkError refuses a max_agents below the researchers at work of a platform experiment
+// that does not run yet, or researchers that want fewer of an agent type and model at work than
+// are: a change of researchers takes no researcher at work out, and a lowered max_agents takes out
+// only those of a running one (evictAboveMaxTx).
 type PoolBelowAtWorkError struct {
 	// Key is the entry's agent type and model, empty for max_agents.
 	Key    domain.PoolKey
@@ -82,10 +83,14 @@ func holdsAtWork(maxAgents int, pool domain.ResearcherPool, atWork map[domain.Po
 	return nil
 }
 
-// setResearchersTx holds the max_agents just written to the platform experiment platformExpID,
-// whose row the write locked, and pool unless it is nil, to the researchers at work
-// (holdsAtWork), and writes pool unless it is nil.
+// setResearchersTx holds the platform experiment platformExpID, whose row the write locked, to the
+// max_agents just written to it: a running one loses the newest of its researchers at work above
+// it (evictAboveMaxTx), and its researchers, unless pool states them, are capped to it. Then pool,
+// unless it is nil, is held to the researchers at work (holdsAtWork) and written.
 func setResearchersTx(ctx context.Context, tx pgx.Tx, platformExpID string, maxAgents int, pool domain.ResearcherPool) error {
+	if err := evictAboveMaxTx(ctx, tx, platformExpID, maxAgents, pool == nil); err != nil {
+		return err
+	}
 	atWork, err := researchersAtWorkTx(ctx, tx, platformExpID)
 	if err != nil {
 		return err
@@ -94,7 +99,11 @@ func setResearchersTx(ctx context.Context, tx pgx.Tx, platformExpID string, maxA
 		return err
 	}
 	if pool == nil {
-		return nil
+		stored, err := lockedPoolTx(ctx, tx, platformExpID)
+		if err != nil || stored.Total() <= maxAgents {
+			return err
+		}
+		pool = stored.Capped(maxAgents)
 	}
 	encoded, err := poolJSON(pool)
 	if err != nil {
@@ -104,6 +113,48 @@ func setResearchersTx(ctx context.Context, tx pgx.Tx, platformExpID string, maxA
 		return fmt.Errorf("write researchers: %w", err)
 	}
 	return nil
+}
+
+// CutMaxAgentsLowered is why the platform cut a researcher that was one of the newest at work above
+// a max_agents lowered below them (platform_experiment_cuts.reason).
+const CutMaxAgentsLowered = "max_agents_lowered"
+
+// evictAboveMaxTx cuts the newest researchers at work of the running platform experiment
+// platformExpID above maxAgents, at its current stage with reason CutMaxAgentsLowered: a decision
+// of the platform written as their end, after which each winds down as a cut researcher does and
+// nobody takes its place. With lowerPool their entries of its researchers are lowered by them, as
+// a stage cut lowers them; a change that states the researchers states them itself. A platform
+// experiment that does not run evicts nobody.
+func evictAboveMaxTx(ctx context.Context, tx pgx.Tx, platformExpID string, maxAgents int, lowerPool bool) error {
+	var status string
+	var stage int
+	if err := tx.QueryRow(ctx, `SELECT status, current_stage FROM platform_experiments WHERE id = $1`, platformExpID).Scan(&status, &stage); err != nil {
+		return fmt.Errorf("read status: %w", err)
+	}
+	if status != string(domain.PlatformExpRunning) {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `
+SELECT s.agent_id FROM experiment_signups s
+WHERE s.platform_experiment_id = $1 AND `+researcherAtWorkSQL+`
+ORDER BY s.signed_up_at, s.agent_id
+OFFSET $2`, platformExpID, maxAgents)
+	if err != nil {
+		return fmt.Errorf("researchers above max_agents: %w", err)
+	}
+	evicted, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil || len(evicted) == 0 {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index, reason)
+SELECT $1, unnest($2::text[]), $3, $4`, platformExpID, evicted, stage, CutMaxAgentsLowered); err != nil {
+		return fmt.Errorf("cut researchers above max_agents: %w", err)
+	}
+	if !lowerPool {
+		return nil
+	}
+	return lowerPoolTx(ctx, tx, platformExpID, evicted)
 }
 
 // lockedPoolTx locks platform experiment platformExpID and reads its researchers.
