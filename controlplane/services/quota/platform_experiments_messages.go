@@ -40,7 +40,8 @@ type refusedMessage struct {
 // SendMessage sends text from by to the agent named, with all to every researcher at work that by
 // may message now and names the rest as refused, or with coordinator to the hosted coordinator.
 func (s *PlatformExperimentsService) SendMessage(ctx context.Context, platformExpID string, req SendMessageRequest, by domain.Actor) ([]domain.AgentMessage, []refusedMessage, error) {
-	text := strings.TrimSpace(req.Text)
+	written := strings.TrimSpace(req.Text)
+	text := strings.TrimSpace(domain.EventDetail(written))
 	named := 0
 	for _, set := range []bool{req.AgentID != "", req.All, req.Coordinator} {
 		if set {
@@ -54,8 +55,8 @@ func (s *PlatformExperimentsService) SendMessage(ctx context.Context, platformEx
 		return nil, nil, api.Refuse(http.StatusUnprocessableEntity, "invalid_recipient", "invalid_recipient: the coordinator sends no message to itself")
 	case text == "":
 		return nil, nil, api.Refuse(http.StatusUnprocessableEntity, "empty_message", "empty_message: text is empty")
-	case len(text) > domain.MaxAgentMessageBytes:
-		return nil, nil, api.Refuse(http.StatusUnprocessableEntity, "message_too_long", fmt.Sprintf("message_too_long: text is %d bytes, at most %d: say the one direction that matters, with the job and hypothesis ids it rests on", len(text), domain.MaxAgentMessageBytes))
+	case len(written) > domain.MaxAgentMessageBytes:
+		return nil, nil, api.Refuse(http.StatusUnprocessableEntity, "message_too_long", fmt.Sprintf("message_too_long: text is %d bytes, at most %d: say the one direction that matters, with the job and hypothesis ids it rests on", len(written), domain.MaxAgentMessageBytes))
 	}
 	var messages []domain.AgentMessage
 	var refused []refusedMessage

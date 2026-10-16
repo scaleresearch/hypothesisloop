@@ -546,8 +546,8 @@ func (s *Service) sameHypothesis(ctx context.Context, exp *domain.Experiment, ac
 	for i, job := range others {
 		named[i] = fmt.Sprintf("%s of %s (%s)", job.ID, job.AgentName, job.Status)
 	}
-	return fmt.Sprintf("hypothesis %s is tested by another agent too: %s. If this job repeats that work, cancel it (hl job cancel %s) and take a hypothesis no other agent runs; the coordinator is told",
-		exp.HypothesisID, strings.Join(named, ", "), exp.ID), nil
+	return domain.EventDetail(fmt.Sprintf("hypothesis %s is tested by another agent too: %s. If this job repeats that work, cancel it (hl job cancel %s) and take a hypothesis no other agent runs; the coordinator is told",
+		exp.HypothesisID, strings.Join(named, ", "), exp.ID)), nil
 }
 
 // bindHypothesis checks the hypothesis a job names and keeps its text on the job.

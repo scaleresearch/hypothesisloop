@@ -237,14 +237,15 @@ const (
 )
 
 // withLastOutput is cause followed by the last lines of tail, the most recent last, so a failed
-// job's agent reads why without fetching its logs. Blank lines are left out, a line is cut at
-// failureOutputLineBytes so one long line does not crowd out the ones before it, and the most
-// recent lines are kept that fit in failureOutputBytes.
+// job's agent reads why without fetching its logs. It is the detail of the job's event, so it is
+// a domain.EventDetail, each line too: blank lines are left out once their control characters
+// are, a line is cut at failureOutputLineBytes so one long line does not crowd out the ones
+// before it, and the most recent lines are kept that fit in failureOutputBytes.
 func withLastOutput(cause string, tail []string) string {
 	var kept []string
 	size := 0
 	for i := len(tail) - 1; i >= 0; i-- {
-		line := strings.TrimRightFunc(tail[i], unicode.IsSpace)
+		line := strings.TrimRightFunc(domain.EventDetail(tail[i]), unicode.IsSpace)
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -262,8 +263,8 @@ func withLastOutput(cause string, tail []string) string {
 		kept = append(kept, line)
 	}
 	if len(kept) == 0 {
-		return cause
+		return domain.EventDetail(cause)
 	}
 	slices.Reverse(kept)
-	return cause + "\nlast output:\n" + strings.Join(kept, "\n")
+	return domain.EventDetail(cause + "\nlast output:\n" + strings.Join(kept, "\n"))
 }

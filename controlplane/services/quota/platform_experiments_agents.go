@@ -545,7 +545,7 @@ func (s *PlatformExperimentsService) FinishAgent(ctx context.Context, platformEx
 			return nil, err
 		}
 	}
-	err = s.store.FinishAgent(ctx, platformExpID, agentID, reason)
+	err = s.store.FinishAgent(ctx, platformExpID, agentID, domain.EventDetail(reason))
 	switch {
 	case errors.Is(err, db.ErrNotSignedUp):
 		return nil, refuseSignup(404, "not_signed_up", "agent %s is not in platform experiment %s", agentID, platformExpID)

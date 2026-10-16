@@ -1285,7 +1285,7 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, by *d
 			return nil, fmt.Errorf("close: %w", err)
 		}
 	}
-	if err := s.store.ClosePlatformExperiment(ctx, id, by, message); err != nil {
+	if err := s.store.ClosePlatformExperiment(ctx, id, by, domain.EventDetail(message)); err != nil {
 		return nil, fmt.Errorf("close: %w", err)
 	}
 	closed, err := s.stored(ctx, id)
