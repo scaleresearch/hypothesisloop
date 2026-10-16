@@ -51,8 +51,8 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
   const needsGitHub = useNeedsGitHub()
   const isEdit = !!initial
   // Once running, admission and the stage ladder have acted on everything but the name, the
-  // description, the duration and the most researchers, and the API takes no other field, so the
-  // rest is locked here.
+  // description, the duration and the researchers, and the API takes no other field, so the rest is
+  // locked here. The researchers are changed in place on the experiment's page.
   const lockedWhileRunning = isEdit && initial?.status === PlatformExperimentStatus.RUNNING
   const [form, setForm] = useState<FormState>(() => ({
     name: initial?.name ?? '',
@@ -159,7 +159,6 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
     if (form.name.trim() !== opened.name) patch.name = form.name.trim()
     if (form.description.trim() !== opened.description) patch.description = form.description.trim()
     if (Number(form.duration_hours) !== Number(opened.duration_hours)) patch.duration_hours = Number(form.duration_hours)
-    if (Number(form.max_agents) !== Number(opened.max_agents)) patch.max_agents = Number(form.max_agents)
     if (lockedWhileRunning) return patch
     if (Number(form.budget_accelerator_hours) !== Number(opened.budget_accelerator_hours)) patch.budget_accelerator_hours = Number(form.budget_accelerator_hours)
     if (form.max_concurrent_accelerators !== opened.max_concurrent_accelerators) patch.max_concurrent_accelerators = Number(form.max_concurrent_accelerators)

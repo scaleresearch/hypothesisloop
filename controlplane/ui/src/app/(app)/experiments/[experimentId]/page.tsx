@@ -31,6 +31,7 @@ import { CloseExperiment } from '@/components/close-experiment'
 import { PhaseStrip } from '@/components/phase-strip'
 import { AgentJobsPanel, AgentSelector, CompetingAgentsChart, LiveMetricsPicker, MetricSelector, useAgentColorMap } from '@/components/experiment-charts'
 import { ExperimentAgents } from '@/components/experiment-agents'
+import { ResearcherPool } from '@/components/researcher-pool'
 import { HostedMachines } from '@/components/hosted-machines'
 import { AgentLabel, AgentNames } from '@/components/agent-label'
 import { verdictBy } from '@/components/actor'
@@ -558,6 +559,7 @@ function PlatformExperimentDetail({ id }: { id: string }) {
       {phase === 'running' && findingsSection}
       {chartSection}
 
+      {!plannedOnly && <ResearcherPool pe={pe} />}
       <ExperimentAgents pe={pe} />
 
       {(pe.description || metrics.length > 0) && (

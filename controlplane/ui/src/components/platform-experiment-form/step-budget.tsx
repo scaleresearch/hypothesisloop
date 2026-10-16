@@ -22,9 +22,15 @@ export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps 
   return (
     <>
       <div className="grid grid-cols-2 gap-4">
-        <FormField label="Max researchers" hint="The most at work at once. The coordinator may add researchers up to it.">
-          <Input type="number" min={1} max={500} step={1} value={form.max_agents} onChange={e => set('max_agents', e.target.value)} />
-        </FormField>
+        {isEdit ? (
+          <FieldGroup label="Max researchers" hint="Changed on the experiment page, under Researchers, with the pool.">
+            <span className="text-sm tabular-nums">{form.max_agents}</span>
+          </FieldGroup>
+        ) : (
+          <FormField label="Max researchers" hint="The most at work at once. The coordinator may add researchers up to it.">
+            <Input type="number" min={1} max={500} step={1} value={form.max_agents} onChange={e => set('max_agents', e.target.value)} />
+          </FormField>
+        )}
         <FormField
           label="Budget (accelerator hours)"
           hint={locked ? LOCKED : <>Caps everything it spends.<InfoTip>{`Counted in ${unit}. An hour on an accelerator spends its type's price; memory and storage spend nothing.`}</InfoTip></>}
