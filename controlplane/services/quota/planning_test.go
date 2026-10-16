@@ -438,13 +438,18 @@ func TestAnOwnersReasonToCloseIsRecorded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	said := `closed_by asked for it to be closed, saying "the baseline is wrong: it measured the old split"`
+	said := `named user-1 asked for it to be closed, saying "the baseline is wrong: it measured the old split"`
 	if want := "Close reason: closed_by_request: " + said + ".\n"; !strings.Contains(closed.Summary, want) {
 		t.Errorf("summary = %q, want it to say %q", closed.Summary, want)
 	}
 	why, err := svc.closedReason(context.Background(), closed)
 	if err != nil || why.Message != said {
 		t.Errorf("status_reason = %+v, %v, want the message %q", why, err, said)
+	}
+	closed.ClosedBy, closed.CloseMessage = nil, ""
+	why, err = svc.closedReason(context.Background(), closed)
+	if want := "the owner asked for it to be closed"; err != nil || why.Message != want {
+		t.Errorf("status_reason without a recorded closer = %+v, %v, want %q", why, err, want)
 	}
 }
 
@@ -535,6 +540,13 @@ type statusStore struct {
 	records   map[string]string
 	// closeAgents are the agent lines each took before its close.
 	closeAgents map[string]string
+}
+
+func (s *statusStore) NameActors(_ context.Context, actors []*domain.Actor) error {
+	for _, actor := range actors {
+		actor.Name = "named " + actor.ID
+	}
+	return nil
 }
 
 func (s *statusStore) SetCloseAgents(_ context.Context, id, lines string) error {

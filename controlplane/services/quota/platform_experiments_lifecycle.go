@@ -926,9 +926,16 @@ func runningReason(pe *domain.PlatformExperiment, signups []domain.AgentSignup, 
 // closedReason is why the closed pe closed: its close_reason and what that means. Of one closed
 // before its run started for want of a baseline, it says whether a job was submitted for one.
 func (s *PlatformExperimentsService) closedReason(ctx context.Context, pe *domain.PlatformExperiment) (*domain.StatusReason, error) {
+	closer := "the owner"
+	if pe.CloseReason == domain.CloseByRequest && pe.ClosedBy != nil {
+		if err := s.store.NameActors(ctx, []*domain.Actor{pe.ClosedBy}); err != nil {
+			return nil, fmt.Errorf("platform_experiments.closedReason: %w", err)
+		}
+		closer = pe.ClosedBy.Name
+	}
 	how := map[domain.CloseReason]string{
 		domain.CloseEndTimeReached:       "the run reached its ends_at and the platform closed it",
-		domain.CloseByRequest:            "closed_by asked for it to be closed",
+		domain.CloseByRequest:            closer + " asked for it to be closed",
 		domain.ClosePlanningLimitReached: "its planner answered nothing by planning_ends_at and the platform closed the draft",
 		domain.CloseProposalExpired:      "no person accepted or revised its planner's answer by proposal_expires_at and the platform closed the draft",
 		domain.ClosePlannerStopped:       "its planner's machine ended before it answered and the platform had restarted it as often as it restarts one, so it closed the draft: the planner's instance in the roster says how the last machine ended (end_reason, exit_log). Nothing was spent on a run, and the same goal makes a new draft",
