@@ -6,7 +6,7 @@ import { fetchOrgClusters, registerCluster, removeCluster, setClusterEnabled, se
 import type { Me } from '@/types/accounts'
 import type { OrgCluster } from '@/types/clusters'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
-import { OrgClusters } from '@/components/org-clusters'
+import { OrgClusters } from '@/components/clusters/org-clusters'
 
 vi.mock('@/lib/api/clusters', () => ({
   fetchOrgClusters: vi.fn(), registerCluster: vi.fn(), removeCluster: vi.fn(), setClusterEnabled: vi.fn(), setClusterOrder: vi.fn(), updateCluster: vi.fn(),
