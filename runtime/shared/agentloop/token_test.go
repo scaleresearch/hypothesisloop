@@ -57,7 +57,7 @@ func TestARefusalIsLoggedWithTheControlPlanesReasonAndTheLoopGoesOn(t *testing.T
 		logged = append(logged, fmt.Sprintf(format, args...))
 		mu.Unlock()
 	}
-	agent.ReconcileInterval = 5 * time.Millisecond
+	agent.ReconcileInterval = 10 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	agent.reconcileLoop(ctx)

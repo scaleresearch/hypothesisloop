@@ -60,10 +60,11 @@ func (e *Executor) forgetPullsExcept(desiredIDs map[string]bool) {
 	maps.DeleteFunc(e.failedPulls, func(id string, _ failedPull) bool { return !desiredIDs[id] })
 }
 
-// begin runs one operation for experimentID under ctx, which must outlive the call: cancelling
-// it is how shutdown stops the operation. A job that already has one in flight gets no second.
-func (e *Executor) begin(ctx context.Context, experimentID, what string, op operation, run func(context.Context) error) {
-	ctx, op.cancel = context.WithCancel(ctx)
+// begin runs one operation for experimentID under the executor's life, as it outlives the pass
+// that starts it. A job that already has one in flight gets no second.
+func (e *Executor) begin(experimentID, what string, op operation, run func(context.Context) error) {
+	ctx, cancel := context.WithCancel(e.life)
+	op.cancel = cancel
 	e.mu.Lock()
 	if _, busy := e.inFlight[experimentID]; busy {
 		e.mu.Unlock()
@@ -98,8 +99,8 @@ func (e *Executor) operations() map[string]operation {
 	return maps.Clone(e.inFlight)
 }
 
-// Wait blocks until every operation in flight has returned. Cancel the context the reconcile
-// pass ran under first, or this waits for whole pulls and grace periods.
+// Wait blocks until every operation in flight has returned. Cancel the executor's life first, or
+// this waits for whole pulls and grace periods.
 func (e *Executor) Wait() {
 	e.workers.Wait()
 }

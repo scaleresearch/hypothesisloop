@@ -156,13 +156,7 @@ func TestReconcilePushesFinalOutputBeforeDeletingAnUndesiredWorkload(t *testing.
 	}))
 	defer server.Close()
 
-	agent := &Agent{
-		ClusterName: "test",
-		APIURL:      server.URL,
-		Executor:    exec,
-		HTTPClient:  server.Client(),
-		Log:         func(string, ...any) {},
-	}
+	agent := newTestAgent(server, exec)
 	if err := agent.reconcileOnce(context.Background()); err != nil {
 		t.Fatalf("reconcileOnce: %v", err)
 	}
@@ -214,13 +208,7 @@ func TestReportChangedStatusesPushesNothingRatherThanAPartialSnapshot(t *testing
 	}))
 	defer server.Close()
 
-	agent := &Agent{
-		ClusterName: "test",
-		APIURL:      server.URL,
-		Executor:    exec,
-		HTTPClient:  server.Client(),
-		Log:         func(string, ...any) {},
-	}
+	agent := newTestAgent(server, exec)
 	agent.reportChangedStatuses(context.Background())
 
 	mu.Lock()
@@ -253,13 +241,7 @@ func TestReconcileDeletesUndesiredWorkloadEvenWhenTheFinalPushHangs(t *testing.T
 		server.Close()
 	}()
 
-	agent := &Agent{
-		ClusterName: "test",
-		APIURL:      server.URL,
-		Executor:    exec,
-		HTTPClient:  server.Client(),
-		Log:         func(string, ...any) {},
-	}
+	agent := newTestAgent(server, exec)
 
 	// The capture budget is what bounds this; the test's own ceiling is well above it so a
 	// regression shows up as a failure here rather than as a hung test binary.

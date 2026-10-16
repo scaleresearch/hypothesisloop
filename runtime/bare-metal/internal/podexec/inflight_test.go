@@ -282,6 +282,7 @@ func newFakeExecutor(f *fakeEngine, devicePaths ...string) *Executor {
 	return &Executor{
 		apiURL: "http://example.invalid:8083",
 		docker: bounded{f},
+		life:   context.Background(),
 		probe: func(context.Context) ([]acceleratorDevice, error) {
 			var devices []acceleratorDevice
 			for _, p := range devicePaths {
@@ -305,10 +306,13 @@ func fakeJob(id, image string, accelerators int) *clusterapi.DesiredJob {
 	}
 }
 
-// pass is one reconcile pass as agentloop runs it: compare desired with actual, create, delete,
-// reap. It fails the test if the pass waits on an operation in flight.
+// pass is one reconcile pass as agentloop runs it, under a context that ends with it: compare
+// desired with actual, create, delete, reap. It fails the test if the pass waits on an operation
+// in flight.
 func pass(t *testing.T, ctx context.Context, e *Executor, desired ...*clusterapi.DesiredJob) {
 	t.Helper()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -693,6 +697,7 @@ func TestShutdownCancelsOperationsAndWaitsForThem(t *testing.T) {
 	e := newFakeExecutor(f)
 	ctx, shutdown := context.WithCancel(t.Context())
 	defer shutdown()
+	e.life = ctx
 	defer f.block("pull slow")()
 	pulling, stopping := fakeJob("pulling", "slow", 0), fakeJob("stopping", "fast", 0)
 

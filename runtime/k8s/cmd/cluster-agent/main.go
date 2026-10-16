@@ -4,9 +4,9 @@
 //
 // Environment variables:
 //
-// cluster-agent detach, run with the same environment and service account, removes this
-// cluster from the control plane and stays until every job object it created here is gone. The
-// chart runs it before the release is uninstalled.
+// cluster-agent detach, run with the same environment and service account, deletes every job
+// object this agent created here and says whether the cluster is still registered. The chart
+// runs it before the release is uninstalled.
 //
 // cluster-agent check, run with CLUSTER_NAME, API_URL, METRICS_URL and RUNTIME_TOKEN, asks the
 // API's and the metrics service's /healthz and whether the API takes the token, changes nothing
@@ -73,13 +73,46 @@ func main() {
 	// The runtime token the cluster's owner was given when the cluster was registered.
 	token := agentloop.RequiredEnv(binaryName, "RUNTIME_TOKEN")
 	version := os.Getenv("HYPOTHESISLOOP_AGENT_VERSION")
-	// Optional: how many trailing log lines to report per job per status push. Not required —
-	// agentloop.DefaultLogTailLines (100) applies when unset.
-	logTailLines := agentloop.OptionalIntEnv(binaryName, "LOG_TAIL_LINES")
 	// Optional: whether this cluster sits behind a native autoscaler. Fail-closed default false —
 	// see autoscaler.md's "Cluster capability".
 	autoscalerEnabled := agentloop.OptionalBoolEnv(binaryName, "AUTOSCALER_ENABLED")
-	var builder agentloop.Builder
+
+	jwc, err := k8sexec.New(k8sexec.Config{APIURL: apiURL})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cluster-agent: workload client: %v\n", err)
+		os.Exit(1)
+	}
+
+	log := func(format string, args ...any) {
+		fmt.Printf("[cluster-agent] "+format+"\n", args...)
+	}
+
+	ctx, cancel := agentloop.SignalContext(log)
+	defer cancel()
+
+	a := &agentloop.Agent{
+		ClusterName:       clusterName,
+		APIURL:            apiURL,
+		Token:             token,
+		Version:           version,
+		Executor:          jwc,
+		HTTPClient:        &http.Client{Timeout: 35 * time.Second},
+		ReconcileInterval: reconcileInterval,
+		StatusInterval:    statusInterval,
+		LogTailLines:      agentloop.LogTailLines,
+		AutoscalerEnabled: autoscalerEnabled,
+		Log:               log,
+	}
+	if detach {
+		if err := a.Detach(ctx); err != nil {
+			fmt.Fprintln(os.Stderr, "cluster-agent: detach was interrupted before every job object was gone")
+			os.Exit(1)
+		}
+		log("every job object this agent created here is gone")
+		a.SayIfStillRegistered(ctx, log)
+		return
+	}
+
 	if address := os.Getenv("HYPOTHESISLOOP_BUILDS"); address != "" {
 		daemon, err := envbuild.Dial(context.Background(), address)
 		if err != nil {
@@ -97,63 +130,26 @@ func main() {
 				daemon.LoadInto(node, os.Getenv("HYPOTHESISLOOP_NODE_NAME"))
 			}
 		}
-		builder = daemon
+		a.Builder = daemon
 	}
 
-	jwc, err := k8sexec.New(k8sexec.Config{APIURL: apiURL})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "cluster-agent: workload client: %v\n", err)
+	log("starting: cluster=%s control_plane=%s version=%s", clusterName, apiURL, cmp.Or(version, "unknown"))
+	log("checking the jobs namespace and priority classes")
+	setupCtx, setupCancel := context.WithTimeout(ctx, 30*time.Second)
+	if err := jwc.SetupCluster(setupCtx); err != nil {
+		fmt.Fprintf(os.Stderr, "cluster-agent: SetupCluster: %v\n", err)
 		os.Exit(1)
 	}
-
-	log := func(format string, args ...any) {
-		fmt.Printf("[cluster-agent] "+format+"\n", args...)
+	setupCancel()
+	if err := jwc.SyncCache(ctx, cacheSyncTimeout, log); err != nil {
+		fmt.Fprintf(os.Stderr, "cluster-agent: %v\n", err)
+		os.Exit(1)
 	}
-
-	ctx, cancel := agentloop.SignalContext(log)
-	defer cancel()
-
-	if detach {
-		agentloop.RunDetach(ctx, binaryName, log)
-	} else {
-		log("starting: cluster=%s control_plane=%s version=%s", clusterName, apiURL, cmp.Or(version, "unknown"))
-		log("checking the jobs namespace and priority classes")
-		setupCtx, setupCancel := context.WithTimeout(ctx, 30*time.Second)
-		if err := jwc.SetupCluster(setupCtx); err != nil {
-			fmt.Fprintf(os.Stderr, "cluster-agent: SetupCluster: %v\n", err)
-			os.Exit(1)
-		}
-		setupCancel()
-		if err := jwc.SyncCache(ctx, cacheSyncTimeout, log); err != nil {
-			fmt.Fprintf(os.Stderr, "cluster-agent: %v\n", err)
-			os.Exit(1)
-		}
-		log("first contact with the control plane at %s", apiURL)
-	}
-
-	a := &agentloop.Agent{
-		ClusterName:       clusterName,
-		APIURL:            apiURL,
-		Token:             token,
-		Version:           version,
-		Executor:          jwc,
-		HTTPClient:        &http.Client{Timeout: 35 * time.Second},
-		ReconcileInterval: reconcileInterval,
-		StatusInterval:    statusInterval,
-		LogTailLines:      logTailLines,
-		AutoscalerEnabled: autoscalerEnabled,
-		Builder:           builder,
-		Log:               log,
-	}
-	// After a detach the control plane refuses this cluster's token, and the same loop that
-	// keeps a cluster in step is what stops everything a removed one still holds.
+	log("first contact with the control plane at %s", apiURL)
+	// Once its owner removed the cluster the control plane refuses this cluster's token, and the
+	// same loop that keeps a cluster in step is what stops everything a removed one still holds.
 	if err := a.Run(ctx); errors.Is(err, agentloop.ErrClusterRemoved) {
 		log("cluster %s was removed from the control plane: its jobs are stopped, exiting", clusterName)
-		return
-	}
-	if detach {
-		fmt.Fprintln(os.Stderr, "cluster-agent: detach was interrupted before every job object was gone")
-		os.Exit(1)
 	}
 }
 

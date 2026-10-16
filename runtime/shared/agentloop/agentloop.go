@@ -24,9 +24,13 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/cpclient"
 )
 
-// DefaultLogTailLines is how many trailing lines FetchLogTail is asked for when the agent
-// binary doesn't override it (see OptionalIntEnv("LOG_TAIL_LINES", ...) in each cmd/'s main.go).
-const DefaultLogTailLines = 100
+// LogTailLines is how many trailing log lines a status report carries per job.
+const LogTailLines = 100
+
+// passIntervals bounds one reconcile pass or status push at this many of its intervals. It
+// outlasts one control plane call (the agents' HTTP timeout) plus the final capture, and a
+// stalled call is cancelled with the pass, which the next pass asks again.
+const passIntervals = 30
 
 // finalStatusCaptureBudget bounds the whole last-chance observation-and-push phase for workloads
 // about to be deleted — the entire phase, not each workload, so a slow or unreachable control
@@ -47,8 +51,7 @@ type Agent struct {
 	HTTPClient        *http.Client
 	ReconcileInterval time.Duration
 	StatusInterval    time.Duration
-	// LogTailLines caps how many trailing lines FetchLogTail is asked for per status push.
-	// Configurable per agent binary; DefaultLogTailLines if unset (zero).
+	// LogTailLines is how many trailing lines FetchLogTail is asked for per job and push.
 	LogTailLines int
 	// AutoscalerEnabled is the operator's own claim that this cluster sits behind a native
 	// autoscaler (cluster-autoscaler / Karpenter) reacting to Pending pods — AUTOSCALER_ENABLED
@@ -157,12 +160,21 @@ func (a *Agent) reconcileLoop(ctx context.Context) error {
 	}
 }
 
+// passContext bounds one pass that recurs every interval.
+func passContext(ctx context.Context, interval time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, passIntervals*interval)
+}
+
+// reconcileOnce runs one pass under its own deadline. Builds outlive the pass, so they run under
+// ctx.
 func (a *Agent) reconcileOnce(ctx context.Context) error {
-	exec, err := a.executorForPass(ctx)
+	pass, cancel := passContext(ctx, a.ReconcileInterval)
+	defer cancel()
+	exec, err := a.executorForPass(pass)
 	if err != nil {
 		return fmt.Errorf("read actual state: %w", err)
 	}
-	answer, err := a.fetchDesiredState(ctx, exec)
+	answer, err := a.fetchDesiredState(pass, exec)
 	// A removed cluster desires nothing: its jobs went back to the queue with the removal, so
 	// the pass runs on as one whose every workload is no longer desired, until none is left.
 	removed := errors.Is(err, ErrClusterRemoved)
@@ -176,6 +188,16 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 		a.Log("first contact with the control plane ok: %d workloads desired here", len(answer.Jobs))
 	}
 	a.reconcileBuilds(ctx, answer.Builds)
+	done, err := a.converge(pass, exec, answer, removed)
+	if done {
+		return ErrClusterRemoved
+	}
+	return err
+}
+
+// converge makes what exec holds what answer desires. desiresNothing stops everything held; done
+// is true once nothing is.
+func (a *Agent) converge(ctx context.Context, exec agentexec.Executor, answer clusterapi.ReconcileAnswer, desiresNothing bool) (done bool, err error) {
 	desired := answer.Jobs
 	checkpointWindow := make(map[string]bool, len(answer.CheckpointWindow))
 	for _, id := range answer.CheckpointWindow {
@@ -183,41 +205,41 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 	}
 	actual, err := exec.ListManagedJobs(ctx)
 	if err != nil {
-		return fmt.Errorf("list local workloads: %w", err)
+		return false, fmt.Errorf("list local workloads: %w", err)
 	}
 	auxiliary, err := exec.ListManagedAuxiliaryWorkloads(ctx)
 	if err != nil {
-		return fmt.Errorf("list local auxiliary resources: %w", err)
+		return false, fmt.Errorf("list local auxiliary resources: %w", err)
 	}
-	if removed {
+	if desiresNothing {
 		// The status set also holds what is stopping and what stopped and is not reaped yet.
 		held, err := exec.ListManagedJobsForStatus(ctx)
 		if err != nil {
-			return fmt.Errorf("list local workloads: %w", err)
+			return false, fmt.Errorf("list local workloads: %w", err)
 		}
 		if len(held) == 0 && len(auxiliary) == 0 {
-			return ErrClusterRemoved
+			return true, nil
 		}
-		a.Log("this cluster was removed from the control plane: stopping the %d workloads it holds", len(held))
+		a.Log("stopping the %d workloads this cluster holds", len(held))
 	}
 
 	desiredByID := make(map[string]*clusterapi.DesiredJob, len(desired))
 	for _, exp := range desired {
 		if exp == nil || exp.ID == "" {
-			return fmt.Errorf("desired state contains experiment without identity")
+			return false, fmt.Errorf("desired state contains experiment without identity")
 		}
 		if _, exists := desiredByID[exp.ID]; exists {
-			return fmt.Errorf("desired state contains duplicate experiment %q", exp.ID)
+			return false, fmt.Errorf("desired state contains duplicate experiment %q", exp.ID)
 		}
 		desiredByID[exp.ID] = exp
 	}
 	actualSet := make(map[string]bool, len(actual))
 	for _, id := range actual {
 		if id == "" {
-			return fmt.Errorf("actual state contains workload without experiment identity")
+			return false, fmt.Errorf("actual state contains workload without experiment identity")
 		}
 		if actualSet[id] {
-			return fmt.Errorf("actual state contains duplicate experiment identity %q", id)
+			return false, fmt.Errorf("actual state contains duplicate experiment identity %q", id)
 		}
 		actualSet[id] = true
 	}
@@ -305,7 +327,7 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 			break
 		}
 	}
-	if needsFinalCapture && !removed {
+	if needsFinalCapture && !desiresNothing {
 		captureCtx, cancelCapture := context.WithTimeout(ctx, finalStatusCaptureBudget)
 		a.reportStatuses(captureCtx, exec)
 		cancelCapture()
@@ -338,7 +360,7 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 		a.Log("reap terminal workloads: %v", err)
 		reconcileErrors = append(reconcileErrors, fmt.Errorf("reap terminal workloads: %w", err))
 	}
-	return errors.Join(reconcileErrors...)
+	return false, errors.Join(reconcileErrors...)
 }
 
 func orphanAuxiliaryIDs(desired map[string]*clusterapi.DesiredJob, actualJobs map[string]bool, auxiliary []string) []string {
@@ -419,12 +441,14 @@ func (a *Agent) statusReportLoop(ctx context.Context) {
 }
 
 func (a *Agent) reportChangedStatuses(ctx context.Context) {
-	exec, err := a.executorForPass(ctx)
+	pass, cancel := passContext(ctx, a.StatusInterval)
+	defer cancel()
+	exec, err := a.executorForPass(pass)
 	if err != nil {
 		a.Log("read actual state for status: %v", err)
 		return
 	}
-	a.reportStatuses(ctx, exec)
+	a.reportStatuses(pass, exec)
 }
 
 // reportStatuses pushes one snapshot observed through exec. The reconcile pass hands it its own
@@ -532,7 +556,7 @@ func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id
 		// Diagnostics accompany the phase; they are not the phase. A read error on one job must
 		// not stop this batch reporting phase for every other job (important.md #19), so it is
 		// logged and that job reports phase alone.
-		logTail, err = exec.FetchLogTail(ctx, id, a.logTailLines())
+		logTail, err = exec.FetchLogTail(ctx, id, a.LogTailLines)
 		if err != nil {
 			a.Log("fetch log tail %s: %v", id, err)
 			logTail = nil
@@ -594,15 +618,50 @@ func (a *Agent) call(ctx context.Context, method, path string, body, out any) er
 	return err
 }
 
-// Detach ends this cluster on the control plane, as its owner would by removing it: its jobs go
-// back to the queue, named in requeued, and its runtime token is refused from then on. The
-// running agent reads that refusal, stops the workloads it holds and exits.
-func (a *Agent) Detach(ctx context.Context) (requeued []string, err error) {
-	var answer clusterapi.DetachAnswer
-	if err := a.call(ctx, http.MethodDelete, "", nil, &answer); err != nil {
-		return nil, err
+// Detach stops every workload this cluster holds here, as a pass that desires nothing, and
+// returns once none is left or ctx ends. It tells the control plane nothing: removing the cluster
+// there is its owner's, in the UI or with hl cluster remove.
+func (a *Agent) Detach(ctx context.Context) error {
+	ticker := time.NewTicker(a.ReconcileInterval)
+	defer ticker.Stop()
+	for {
+		done, err := a.detachOnce(ctx)
+		if done {
+			return nil
+		}
+		if err != nil {
+			a.Log("detach: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
 	}
-	return answer.Requeued, nil
+}
+
+func (a *Agent) detachOnce(ctx context.Context) (done bool, err error) {
+	pass, cancel := passContext(ctx, a.ReconcileInterval)
+	defer cancel()
+	exec, err := a.executorForPass(pass)
+	if err != nil {
+		return false, fmt.Errorf("read actual state: %w", err)
+	}
+	return a.converge(pass, exec, clusterapi.ReconcileAnswer{}, true)
+}
+
+// SayIfStillRegistered tells, through log, how to remove this cluster from the control plane
+// when it still takes the cluster's token.
+func (a *Agent) SayIfStillRegistered(ctx context.Context, log func(format string, args ...any)) {
+	err := a.CheckToken(ctx)
+	switch {
+	case errors.Is(err, ErrClusterRemoved):
+		log("cluster %s is not registered at %s", a.ClusterName, a.APIURL)
+	case err != nil:
+		log("could not ask %s whether cluster %s is still registered (%v): if it is, remove it in the UI or with hl cluster remove %s", a.APIURL, a.ClusterName, err, a.ClusterName)
+	default:
+		log("cluster %s is still registered at %s: remove it in the UI or with hl cluster remove %s", a.ClusterName, a.APIURL, a.ClusterName)
+	}
 }
 
 func (a *Agent) pushStatus(ctx context.Context, reports []clusterapi.StatusReport) {
@@ -622,21 +681,6 @@ func RequiredEnv(binaryName, key string) string {
 	value := os.Getenv(key)
 	if value == "" {
 		fmt.Fprintf(os.Stderr, "%s: %s environment variable is required\n", binaryName, key)
-		os.Exit(1)
-	}
-	return value
-}
-
-// OptionalIntEnv reads an integer environment variable, returning 0 when it is unset and exiting
-// the process with a labeled error when it is set but malformed.
-func OptionalIntEnv(binaryName, key string) int {
-	raw := os.Getenv(key)
-	if raw == "" {
-		return 0
-	}
-	value, err := strconv.Atoi(raw)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %s=%q is not an integer\n", binaryName, key, raw)
 		os.Exit(1)
 	}
 	return value
@@ -671,14 +715,6 @@ func SignalContext(logFn func(format string, args ...any)) (context.Context, con
 	return ctx, cancel
 }
 
-// logTailLines is how many trailing log lines a status report carries.
-func (a *Agent) logTailLines() int {
-	if a.LogTailLines <= 0 {
-		return DefaultLogTailLines
-	}
-	return a.LogTailLines
-}
-
 // CheckToken asks the control plane whether it takes this cluster's token, and changes nothing
 // there: no capacity is reported and no identity bound. An installer's dry run asks it.
 func (a *Agent) CheckToken(ctx context.Context) error {
@@ -700,36 +736,4 @@ func CheckReachable(ctx context.Context, client *http.Client, base string) error
 		return fmt.Errorf("%s/healthz answered %d", base, resp.StatusCode)
 	}
 	return nil
-}
-
-// CheckAccess makes the call every pass starts with and acts on nothing it answers, so an
-// installer learns that the control plane refuses this cluster's token before it starts an
-// agent that would only log the refusal.
-func (a *Agent) CheckAccess(ctx context.Context) error {
-	_, err := a.fetchDesiredState(ctx, a.Executor)
-	return err
-}
-
-// RunDetach is the detach command of an agent binary: it ends the cluster named by the
-// environment the agent itself runs with and says what became of its jobs. A cluster already
-// removed is the state asked for.
-func RunDetach(ctx context.Context, binaryName string, log func(format string, args ...any)) *Agent {
-	a := &Agent{
-		ClusterName: RequiredEnv(binaryName, "CLUSTER_NAME"),
-		APIURL:      RequiredEnv(binaryName, "API_URL"),
-		Token:       RequiredEnv(binaryName, "RUNTIME_TOKEN"),
-		HTTPClient:  &http.Client{Timeout: 35 * time.Second},
-		Log:         log,
-	}
-	requeued, err := a.Detach(ctx)
-	switch {
-	case errors.Is(err, ErrClusterRemoved):
-		log("cluster %s is already removed from %s", a.ClusterName, a.APIURL)
-	case err != nil:
-		fmt.Fprintf(os.Stderr, "%s: detach %s: %v\n", binaryName, a.ClusterName, err)
-		os.Exit(1)
-	default:
-		log("detached cluster %s from %s: %d of its jobs went back to the queue", a.ClusterName, a.APIURL, len(requeued))
-	}
-	return a
 }

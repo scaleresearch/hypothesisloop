@@ -3,6 +3,7 @@ package agentloop
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -61,7 +62,7 @@ func TestARemovedClustersAgentStopsItsWorkloadsAndReturns(t *testing.T) {
 	exec := drainingExecutor{&captureExecutor{managed: []string{"job-a", "job-b"}}}
 	agent := newTestAgent(server, exec.captureExecutor)
 	agent.Executor = exec
-	agent.ReconcileInterval = time.Millisecond
+	agent.ReconcileInterval = 10 * time.Millisecond
 	agent.StatusInterval = time.Hour
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -88,7 +89,7 @@ func TestARefusalWithoutThatReasonStopsNothing(t *testing.T) {
 	exec := drainingExecutor{&captureExecutor{managed: []string{"job-a"}}}
 	agent := newTestAgent(server, exec.captureExecutor)
 	agent.Executor = exec
-	agent.ReconcileInterval = time.Millisecond
+	agent.ReconcileInterval = 10 * time.Millisecond
 	agent.StatusInterval = time.Hour
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -101,30 +102,52 @@ func TestARefusalWithoutThatReasonStopsNothing(t *testing.T) {
 	}
 }
 
-func TestDetachEndsTheClusterWithItsOwnTokenAndNamesTheRequeuedJobs(t *testing.T) {
-	var got string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got = r.Method + " " + r.URL.Path + " " + r.Header.Get("Authorization")
-		_, _ = w.Write([]byte(`{"requeued":["job-a","job-b"]}`))
-	}))
-	defer server.Close()
-	agent := newTestAgent(server, &captureExecutor{})
-	agent.Token = "runtime-token"
+// Detach stops what this cluster holds here and asks nothing of the control plane: removing the
+// cluster there is its owner's alone.
+func TestDetachStopsEveryWorkloadAndTellsTheControlPlaneNothing(t *testing.T) {
+	server, asked := refusingServer(t, `{"error":"unexpected"}`)
+	exec := drainingExecutor{&captureExecutor{managed: []string{"job-a", "job-b"}}}
+	agent := newTestAgent(server, exec.captureExecutor)
+	agent.Executor = exec
+	agent.ReconcileInterval = 10 * time.Millisecond
 
-	requeued, err := agent.Detach(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := agent.Detach(ctx); err != nil {
+		t.Fatalf("Detach returned %v", err)
 	}
-	if got != "DELETE /internal/clusters/test Bearer runtime-token" || len(requeued) != 2 {
-		t.Fatalf("request = %q, requeued = %v", got, requeued)
+	if left := exec.left(); len(left) != 0 {
+		t.Fatalf("workloads still held after detach: %v", left)
+	}
+	if calls := asked(); len(calls) != 0 {
+		t.Fatalf("detach called the control plane: %v", calls)
 	}
 }
 
-// Detaching twice, or after the owner removed the cluster, says the cluster is already gone.
-func TestDetachOfAClusterAlreadyRemovedSaysSo(t *testing.T) {
-	server, _ := refusingServer(t, `{"error":"unauthenticated: cluster test is not registered","reason":"cluster_not_registered"}`)
-	agent := newTestAgent(server, &captureExecutor{})
-	if _, err := agent.Detach(context.Background()); !errors.Is(err, ErrClusterRemoved) {
-		t.Fatalf("Detach returned %v, want ErrClusterRemoved", err)
+func TestAnAgentSaysHowToRemoveAClusterThatIsStillRegistered(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status int
+		body   string
+		want   string
+	}{
+		"registered":     {http.StatusNoContent, "", "is still registered at"},
+		"not registered": {http.StatusUnauthorized, `{"error":"unauthenticated","reason":"cluster_not_registered"}`, "is not registered at"},
+		"unreachable":    {http.StatusBadGateway, "", "if it is, remove it"},
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/access") {
+				t.Errorf("%s: asked %s %s, want GET .../access", name, r.Method, r.URL.Path)
+			}
+			w.WriteHeader(tc.status)
+			_, _ = w.Write([]byte(tc.body))
+		}))
+		var said string
+		newTestAgent(server, &captureExecutor{}).SayIfStillRegistered(context.Background(), func(format string, args ...any) {
+			said = fmt.Sprintf(format, args...)
+		})
+		server.Close()
+		if !strings.Contains(said, tc.want) {
+			t.Errorf("%s: said %q, want it to contain %q", name, said, tc.want)
+		}
 	}
 }

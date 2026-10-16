@@ -20,7 +20,7 @@ import (
 func newTestExecutor(t *testing.T) *Executor {
 	t.Helper()
 	dir := t.TempDir()
-	e, err := New(Config{
+	e, err := New(t.Context(), Config{
 		APIURL:      "http://example.invalid:8083",
 		ClusterName: "integration-test-" + t.Name(),
 		StorageDir:  dir,

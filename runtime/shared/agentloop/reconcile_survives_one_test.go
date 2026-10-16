@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A reconcile pass is a loop over every workload on the cluster, and deletion is how a finished
@@ -32,11 +33,14 @@ func newUndesiredStateServer(t *testing.T) *httptest.Server {
 
 func newTestAgent(server *httptest.Server, exec *captureExecutor) *Agent {
 	return &Agent{
-		ClusterName: "test",
-		APIURL:      server.URL,
-		Executor:    exec,
-		HTTPClient:  server.Client(),
-		Log:         func(string, ...any) {},
+		ClusterName:       "test",
+		APIURL:            server.URL,
+		Executor:          exec,
+		HTTPClient:        server.Client(),
+		ReconcileInterval: time.Second,
+		StatusInterval:    time.Second,
+		LogTailLines:      LogTailLines,
+		Log:               func(string, ...any) {},
 	}
 }
 

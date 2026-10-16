@@ -86,6 +86,9 @@ type Executor struct {
 	storageQuotaEnforced bool
 	storageQuotaRefusal  string
 	probe                func(context.Context) ([]acceleratorDevice, error)
+	// life is what the operations a pass starts run under, as they outlive the pass. Cancelling
+	// it is how shutdown stops them.
+	life context.Context
 
 	mu sync.Mutex
 	// unscoped is the containers already reported as started before containers were scoped.
@@ -158,7 +161,9 @@ func (b bounded) ImageInspect(ctx context.Context, imageID string, inspectOpts .
 	return b.engine.ImageInspect(ctx, imageID, inspectOpts...)
 }
 
-func New(cfg Config) (*Executor, error) {
+// New returns the executor of this node. ctx is its life: the pulls, starts and stops a pass
+// starts run under it.
+func New(ctx context.Context, cfg Config) (*Executor, error) {
 	if cfg.APIURL == "" {
 		return nil, fmt.Errorf("podexec: APIURL is required")
 	}
@@ -217,6 +222,7 @@ func New(cfg Config) (*Executor, error) {
 		storageQuotaEnforced: quotaEnforced,
 		storageQuotaRefusal:  quotaRefusal,
 		probe:                probeAccelerators,
+		life:                 ctx,
 	}, nil
 }
 

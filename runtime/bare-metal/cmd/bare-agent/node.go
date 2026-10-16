@@ -21,7 +21,7 @@ import (
 const usage = `usage: bare-agent                                          run the agent (what the installed unit does)
        bare-agent install --cluster NAME --api-url URL     install or upgrade the agent on this node and start it
                           [--dry-run]                      check the node and the token, print what install does, change nothing
-       bare-agent detach                                   remove this node's cluster, stop its jobs, stop the agent
+       bare-agent detach                                   stop this node's jobs and the agent; remove the cluster in the UI or with hl cluster remove
        bare-agent version                                  print the version this binary was built as
        bare-agent uninstall                                remove the agent from a detached node`
 
@@ -105,12 +105,12 @@ func install(args []string) error {
 	}
 
 	check := func() (string, error) {
-		executor, err := newExecutor(settings.ClusterName, settings.APIURL)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		executor, err := newExecutor(ctx, settings.ClusterName, settings.APIURL)
 		if err != nil {
 			return "", err
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		defer cancel()
 		facts, err := executor.Preflight(ctx, &http.Client{Timeout: 10 * time.Second})
 		if err != nil {
 			return "", err
@@ -118,9 +118,7 @@ func install(args []string) error {
 		for _, fact := range facts {
 			say("%s", fact)
 		}
-		agent := agentFor(settings)
-		agent.Executor = executor
-		if err := agent.CheckAccess(ctx); errors.Is(err, agentloop.ErrClusterRemoved) {
+		if err := agentFor(settings).CheckToken(ctx); errors.Is(err, agentloop.ErrClusterRemoved) {
 			return "", fmt.Errorf("no cluster named %s is registered at %s", settings.ClusterName, settings.APIURL)
 		} else if err != nil {
 			return "", fmt.Errorf("the platform does not take this token for cluster %s: %w", settings.ClusterName, err)
@@ -223,35 +221,25 @@ func detach(args []string) error {
 			Token:       agentloop.RequiredEnv(binaryName, "RUNTIME_TOKEN"),
 		}
 	}
-	agent := agentFor(settings)
 	ctx, cancel := agentloop.SignalContext(say)
 	defer cancel()
-
-	requeued, err := agent.Detach(ctx)
-	switch {
-	case errors.Is(err, agentloop.ErrClusterRemoved):
-		say("cluster %s is already removed from %s", settings.ClusterName, settings.APIURL)
-	case err != nil:
-		return fmt.Errorf("nothing was changed: %w", err)
-	default:
-		say("removed cluster %s from %s: %d of its jobs went back to the queue", settings.ClusterName, settings.APIURL, len(requeued))
-	}
 	if err := hostinstall.Stop(host); err != nil {
 		return err
 	}
-	// With the unit stopped this process is the node's only agent, and the loop that keeps a
-	// node in step is what stops everything a removed cluster's node still runs.
-	executor, err := newExecutor(settings.ClusterName, settings.APIURL)
+	// With the unit stopped this process is the node's only agent.
+	executor, err := newExecutor(ctx, settings.ClusterName, settings.APIURL)
 	if err != nil {
 		return err
 	}
+	agent := agentFor(settings)
 	agent.Executor = executor
-	err = agent.Run(ctx)
+	err = agent.Detach(ctx)
 	executor.Wait()
-	if !errors.Is(err, agentloop.ErrClusterRemoved) {
+	if err != nil {
 		return errors.New("interrupted before every job container was stopped; run it again")
 	}
 	say("every job container this node ran is stopped, and the agent no longer starts at boot")
+	agent.SayIfStillRegistered(ctx, say)
 	if installed {
 		say("sudo bare-agent uninstall removes the agent from this node")
 	}

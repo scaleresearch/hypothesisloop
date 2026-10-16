@@ -207,7 +207,7 @@ func StayStopped(host Host) error {
 // running with nothing to stop them.
 func Uninstall(host Host) error {
 	if Attached(host) {
-		return fmt.Errorf("this node is still attached: run bare-agent detach first, which removes its cluster and stops its jobs")
+		return fmt.Errorf("this node is still attached: run bare-agent detach first, which stops its jobs")
 	}
 	if err := Stop(host); err != nil {
 		return err

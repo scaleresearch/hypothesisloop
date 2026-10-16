@@ -65,24 +65,17 @@ func main() {
 	apiURL := agentloop.RequiredEnv(binaryName, "API_URL")
 	// The runtime token the cluster's owner was given when the cluster was registered.
 	token := agentloop.RequiredEnv(binaryName, "RUNTIME_TOKEN")
-	// Optional: how many trailing log lines to report per job per status push. Not required —
-	// agentloop.DefaultLogTailLines (100) applies when unset.
-	logTailLines := agentloop.OptionalIntEnv(binaryName, "LOG_TAIL_LINES")
 
-	exec, err := newExecutor(clusterName, apiURL)
+	ctx, cancel := agentloop.SignalContext(say)
+	defer cancel()
+
+	exec, err := newExecutor(ctx, clusterName, apiURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bare-agent: %v\n", err)
 		os.Exit(1)
 	}
 
-	log := func(format string, args ...any) {
-		fmt.Printf("[bare-agent] "+format+"\n", args...)
-	}
-
-	ctx, cancel := agentloop.SignalContext(log)
-	defer cancel()
-
-	log("starting: cluster=%s node=%s engine=%s control_plane=%s storage_quota_enforced=%v", clusterName, exec.NodeName(), exec.Engine(), apiURL, exec.StorageQuotaEnforced())
+	say("starting: cluster=%s node=%s engine=%s control_plane=%s storage_quota_enforced=%v", clusterName, exec.NodeName(), exec.Engine(), apiURL, exec.StorageQuotaEnforced())
 	preflightCtx, preflightCancel := context.WithTimeout(ctx, 30*time.Second)
 	facts, err := exec.Preflight(preflightCtx, &http.Client{Timeout: 10 * time.Second})
 	preflightCancel()
@@ -91,7 +84,7 @@ func main() {
 		os.Exit(1)
 	}
 	for _, fact := range facts {
-		log("%s", fact)
+		say("%s", fact)
 	}
 
 	a := &agentloop.Agent{
@@ -103,29 +96,29 @@ func main() {
 		HTTPClient:        &http.Client{Timeout: 35 * time.Second},
 		ReconcileInterval: reconcileInterval,
 		StatusInterval:    statusInterval,
-		LogTailLines:      logTailLines,
-		Log:               log,
+		LogTailLines:      agentloop.LogTailLines,
+		Log:               say,
 	}
 	err = a.Run(ctx)
 	exec.Wait()
 	if errors.Is(err, agentloop.ErrClusterRemoved) {
-		log("cluster %s was removed from the control plane: its jobs are stopped, exiting", clusterName)
+		say("cluster %s was removed from the control plane: its jobs are stopped, exiting", clusterName)
 		// systemd sets INVOCATION_ID on what it starts. Run as the installed unit, the agent
 		// keeps that unit from starting again at boot for a cluster that is gone.
 		if os.Getenv("INVOCATION_ID") != "" {
 			if err := hostinstall.StayStopped(hostinstall.Node{}); err != nil {
-				log("%v", err)
+				say("%v", err)
 			}
 		}
 	}
 }
 
-func newExecutor(clusterName, apiURL string) (*podexec.Executor, error) {
+func newExecutor(ctx context.Context, clusterName, apiURL string) (*podexec.Executor, error) {
 	nodeLabels, err := parseNodeLabels(os.Getenv("NODE_LABELS"))
 	if err != nil {
 		return nil, err
 	}
-	return podexec.New(podexec.Config{
+	return podexec.New(ctx, podexec.Config{
 		ClusterName: clusterName,
 		APIURL:      apiURL,
 		StorageDir:  os.Getenv("SCRATCH_DIR"),

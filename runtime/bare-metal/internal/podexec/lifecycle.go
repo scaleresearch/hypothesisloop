@@ -17,7 +17,7 @@ import (
 // loop already decided this experiment fits before calling this, matching k8sexec.CreateWorkload.
 //
 // The devices are chosen here, in the pass. The pull and start then run in their own goroutine
-// under ctx, so a slow pull holds up no other job; a failure is logged and the next pass, finding
+// under the executor's life, so a slow pull holds up no other job; a failure is logged and the next pass, finding
 // the job still without a container, tries again. How the pull ended is remembered: a pass that
 // finds the image of this very spec and attempt can never be pulled starts no further pull and
 // returns the job as unrunnable with what the engine said.
@@ -59,7 +59,7 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJo
 		// Drifted: remove the stale container (whatever state it's in). A later pass, finding
 		// it gone, creates the desired one.
 		name := c.name()
-		e.begin(ctx, exp.ID, "remove drifted container of", operation{}, func(ctx context.Context) error {
+		e.begin(exp.ID, "remove drifted container of", operation{}, func(ctx context.Context) error {
 			return e.removeContainer(ctx, name)
 		})
 		return nil
@@ -68,7 +68,7 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJo
 		failed.labels[LabelDesiredSpecHash] == spec.Labels[LabelDesiredSpecHash] && failed.labels[LabelAttempt] == spec.Labels[LabelAttempt] {
 		return &agentexec.Unrunnable{Reason: failed.reason, Why: failed.message}
 	}
-	e.begin(ctx, exp.ID, "create workload", operation{starting: true, labels: spec.Labels, devices: placement.DevicePaths}, func(ctx context.Context) error {
+	e.begin(exp.ID, "create workload", operation{starting: true, labels: spec.Labels, devices: placement.DevicePaths}, func(ctx context.Context) error {
 		err := e.pullImage(ctx, spec.Image, auth)
 		e.recordPull(ctx, exp.ID, spec.Labels, err)
 		if err != nil {
@@ -84,7 +84,7 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJo
 // A naive remove-on-delete would mean status reporting could never observe
 // a "gone" phase for a container that no longer exists to be listed.
 //
-// The stop runs in its own goroutine under ctx and may take the whole grace. Until it returns the
+// The stop runs in its own goroutine under the executor's life and may take the whole grace. Until it returns the
 // job keeps its requests and devices, whatever state the engine reports for a container that is
 // on its way down. A job still pulling has its pull cancelled instead; if a container came up
 // anyway, a later pass finds it and stops it here.
@@ -116,7 +116,7 @@ func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string, gran
 		if err != nil {
 			return err
 		}
-		e.begin(ctx, experimentID, "delete workload", operation{labels: c.Labels, devices: devices}, func(ctx context.Context) error {
+		e.begin(experimentID, "delete workload", operation{labels: c.Labels, devices: devices}, func(ctx context.Context) error {
 			return e.stopContainer(ctx, name, grace)
 		})
 		if graceErr != nil {
@@ -394,7 +394,7 @@ func (e *Executor) reapTerminal(ctx context.Context, desiredIDs map[string]bool)
 			continue
 		}
 		name := c.name()
-		e.begin(ctx, id, "reap terminal container of", operation{}, func(ctx context.Context) error {
+		e.begin(id, "reap terminal container of", operation{}, func(ctx context.Context) error {
 			return e.removeContainer(ctx, name)
 		})
 	}

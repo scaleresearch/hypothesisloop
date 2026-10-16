@@ -62,7 +62,7 @@ func TestTheFirstContactIsLoggedOnce(t *testing.T) {
 		logged = append(logged, fmt.Sprintf(format, args...))
 		mu.Unlock()
 	}
-	agent.ReconcileInterval = 5 * time.Millisecond
+	agent.ReconcileInterval = 10 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	_ = agent.reconcileLoop(ctx)
