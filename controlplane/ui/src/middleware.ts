@@ -4,6 +4,7 @@ import type { ServerSession } from '@/lib/auth'
 import { movedTo, recordPath } from '@/lib/legacy-routes'
 import { INVITE_PATH } from '@/lib/invite'
 import { apiURL } from '@/lib/api'
+import { NONCE_HEADER, contentSecurityPolicy, newNonce } from '@/lib/content-security'
 
 type WrittenCookie = Parameters<NextResponse['cookies']['set']>[2] & { name: string; value: string }
 
@@ -33,6 +34,10 @@ export async function middleware(request: NextRequest) {
   // The pages behind this read the answer here rather than asking the identity provider again.
   // Set on every request, so no visitor can send it.
   request.headers.set(SIGNED_IN_HEADER, signedIn ? 'yes' : 'no')
+  const nonce = newNonce()
+  const policy = contentSecurityPolicy(nonce, process.env.NODE_ENV === 'development')
+  request.headers.set(NONCE_HEADER, nonce)
+  request.headers.set('Content-Security-Policy', policy)
 
   const { pathname, search, searchParams } = request.nextUrl
   let response: NextResponse
@@ -54,6 +59,8 @@ export async function middleware(request: NextRequest) {
   // Whatever the session check wrote, a refreshed token or a cleared one, leaves with the answer.
   for (const cookie of cookies) response.cookies.set(cookie)
   for (const [name, value] of Object.entries(headers)) response.headers.set(name, value)
+  response.headers.set('Content-Security-Policy', policy)
+  if (session.https) response.headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains')
   return response
 }
 

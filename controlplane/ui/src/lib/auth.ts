@@ -18,6 +18,11 @@ function config(): { url: string; key: string } {
   return { url, key }
 }
 
+/** Where the sign-in service is reached, which the browser calls for sessions and tokens. */
+export function identityServiceURL(): string {
+  return config().url
+}
+
 // The session lives in cookies, which the browser client reads and writes itself and the server
 // reads through the request it is handling. Nothing is put in local storage. A UI served over
 // https marks them Secure, so the browser never sends the session over plain http.
@@ -46,7 +51,7 @@ export function overHTTPS(headers: Headers, url: URL): boolean {
   return (forwarded ? forwarded.split(',')[0].trim() : url.protocol.replace(':', '')) === 'https'
 }
 
-export const CALLBACK_PATH = '/auth/callback'
+const CALLBACK_PATH = '/auth/callback'
 export const LOGIN_PATH = '/login'
 /** The public landing page. */
 export const LANDING_PATH = '/'
@@ -141,7 +146,7 @@ export async function signOut(): Promise<void> {
 }
 
 /** Why a session stopped: it ran out, or the API would not take its token. */
-export type SessionEnd = 'ended' | 'refused'
+type SessionEnd = 'ended' | 'refused'
 
 /**
  * Drops the session and loads the sign-in page, which says why and returns here afterwards. The
