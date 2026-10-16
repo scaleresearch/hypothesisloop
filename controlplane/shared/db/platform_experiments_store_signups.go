@@ -774,20 +774,6 @@ WHERE platform_experiment_id = $1 AND agent_id = $2 AND finished_at IS NOT NULL)
 	return finished, nil
 }
 
-// AgentFinishedAt returns when the agent finished in the platform experiment, nil while it has
-// not, and for an agent that is not in it.
-func (s *PlatformExperimentsStore) AgentFinishedAt(ctx context.Context, platformExpID, agentID string) (*time.Time, error) {
-	var finishedAt *time.Time
-	err := s.pool.pool.QueryRow(ctx, `SELECT finished_at FROM experiment_signups WHERE platform_experiment_id = $1 AND agent_id = $2`, platformExpID, agentID).Scan(&finishedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.AgentFinishedAt: %w", err)
-	}
-	return finishedAt, nil
-}
-
 // runEndSQL is why the run of signup s is over, a domain.RunEnd, empty while it goes on.
 const runEndSQL = `CASE WHEN (SELECT ended.status = 'closed' FROM platform_experiments ended WHERE ended.id = s.platform_experiment_id) THEN '` + string(domain.RunEndClosed) + `'
             WHEN EXISTS (SELECT 1 FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = s.platform_experiment_id AND cut.agent_id = s.agent_id) THEN '` + string(domain.RunEndCut) + `'

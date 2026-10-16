@@ -367,3 +367,27 @@ func newWorldSigner(t *testing.T) (func(claims map[string]any) string, config.JW
 	return sign, config.JWTKey{Kid: "world", Kty: "EC", Alg: "ES256", Crv: "P-256",
 		X: b64.EncodeToString(key.X.FillBytes(make([]byte, 32))), Y: b64.EncodeToString(key.Y.FillBytes(make([]byte, 32)))}
 }
+
+func (w *world) AgentStanding(ctx context.Context, pe, agent string) (db.AgentStanding, error) {
+	tenancy, closedAt, err := w.PlatformExperimentTenancy(ctx, pe)
+	if err != nil || tenancy == nil {
+		return db.AgentStanding{}, err
+	}
+	signedUp, err := w.IsSignedUp(ctx, pe, agent)
+	if err != nil {
+		return db.AgentStanding{}, err
+	}
+	cutAt, err := w.AgentCutAt(ctx, pe, agent)
+	if err != nil {
+		return db.AgentStanding{}, err
+	}
+	answeredAt, err := w.PlannerAnsweredAt(ctx, pe, agent)
+	if err != nil {
+		return db.AgentStanding{}, err
+	}
+	finishedAt, err := w.AgentFinishedAt(ctx, pe, agent)
+	if err != nil {
+		return db.AgentStanding{}, err
+	}
+	return db.AgentStanding{Tenancy: tenancy, ClosedAt: closedAt, SignedUp: signedUp, CutAt: cutAt, PlannerAnsweredAt: answeredAt, FinishedAt: finishedAt}, nil
+}

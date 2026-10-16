@@ -226,7 +226,7 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 	// over says the planner's run has ended, which is what ends its token.
 	over := func() bool {
 		t.Helper()
-		at, err := pes.PlannerAnsweredAt(ctx, pe, planner)
+		at, err := plannerAnsweredAt(ctx, pes, pe, planner)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -658,11 +658,11 @@ func TestAnAgentsFinishIsReadWithItsMoment(t *testing.T) {
 	if err := pes.FinishAgent(ctx, id, agents[0], "the baseline is measured"); err != nil {
 		t.Fatal(err)
 	}
-	if at, err := pes.AgentFinishedAt(ctx, id, agents[0]); err != nil || at == nil || time.Since(*at) > time.Minute {
+	if at, err := agentFinishedAt(ctx, pes, id, agents[0]); err != nil || at == nil || time.Since(*at) > time.Minute {
 		t.Errorf("the agent that finished: got = %v, %v, want the moment it did", at, err)
 	}
 	for name, agent := range map[string]string{"its neighbour at work": agents[1], "an agent that never joined": "ag-none"} {
-		if at, err := pes.AgentFinishedAt(ctx, id, agent); err != nil || at != nil {
+		if at, err := agentFinishedAt(ctx, pes, id, agent); err != nil || at != nil {
 			t.Errorf("%s: got = %v, %v, want no moment", name, at, err)
 		}
 	}
@@ -953,4 +953,14 @@ func TestAProposalSignsUpTheBaselineAgentWhoseMachineRunsUntilTheDraftIsHeld(t *
 	if revised, _ := pes.GetPlatformExperiment(ctx, revising); revised.AcceptsAt != nil {
 		t.Fatalf("revised: accepts_at %v, want none", revised.AcceptsAt)
 	}
+}
+
+func plannerAnsweredAt(ctx context.Context, pes *PlatformExperimentsStore, pe, agent string) (*time.Time, error) {
+	standing, err := pes.AgentStanding(ctx, pe, agent)
+	return standing.PlannerAnsweredAt, err
+}
+
+func agentFinishedAt(ctx context.Context, pes *PlatformExperimentsStore, pe, agent string) (*time.Time, error) {
+	standing, err := pes.AgentStanding(ctx, pe, agent)
+	return standing.FinishedAt, err
 }

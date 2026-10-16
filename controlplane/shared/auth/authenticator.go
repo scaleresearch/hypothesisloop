@@ -45,9 +45,7 @@ type Directory interface {
 	PlatformExperimentTenancy(ctx context.Context, platformExperimentID string) (tenancy *domain.Tenancy, closedAt *time.Time, err error)
 	ExperimentTenancy(ctx context.Context, experimentID string) (*domain.Tenancy, bool, error)
 	AgentCutAt(ctx context.Context, platformExperimentID, agentID string) (*time.Time, error)
-	IsSignedUp(ctx context.Context, platformExperimentID, agentID string) (bool, error)
-	AgentFinishedAt(ctx context.Context, platformExperimentID, agentID string) (*time.Time, error)
-	PlannerAnsweredAt(ctx context.Context, platformExperimentID, agentID string) (*time.Time, error)
+	AgentStanding(ctx context.Context, platformExperimentID, agentID string) (db.AgentStanding, error)
 	ClusterOrg(ctx context.Context, name string) (orgID string, found bool, err error)
 	LauncherKnown(ctx context.Context, name string) (bool, error)
 	AssignedEnvironmentBuild(ctx context.Context, cluster, key string, attempt int) (*domain.Environment, error)
@@ -161,46 +159,26 @@ func (a *Authenticator) derived(ctx context.Context, token string) (Principal, e
 		p.PlatformExperimentClosed = closedAt != nil
 		p.RunOver = closedAt != nil
 	case KindAgent:
-		tenancy, closedAt, err := a.directory.PlatformExperimentTenancy(ctx, p.PlatformExperimentID)
+		standing, err := a.directory.AgentStanding(ctx, p.PlatformExperimentID, p.AgentID)
 		if err != nil {
 			return Principal{}, err
 		}
-		if tenancy == nil {
+		switch {
+		case standing.Tenancy == nil:
 			return Principal{}, unauthenticated("platform experiment %s does not exist", p.PlatformExperimentID)
-		}
-		signedUp, err := a.directory.IsSignedUp(ctx, p.PlatformExperimentID, p.AgentID)
-		if err != nil {
-			return Principal{}, err
-		}
-		if !signedUp {
+		case !standing.SignedUp:
 			return Principal{}, unauthenticated("agent %s is not in platform experiment %s", p.AgentID, p.PlatformExperimentID)
-		}
-		if a.woundDown(closedAt) {
+		case a.woundDown(standing.ClosedAt):
 			return Principal{}, unauthenticated("platform experiment %s is closed", p.PlatformExperimentID)
-		}
-		cutAt, err := a.directory.AgentCutAt(ctx, p.PlatformExperimentID, p.AgentID)
-		if err != nil {
-			return Principal{}, err
-		}
-		if a.woundDown(cutAt) {
+		case a.woundDown(standing.CutAt):
 			return Principal{}, unauthenticated("agent %s was cut from platform experiment %s", p.AgentID, p.PlatformExperimentID)
-		}
-		answeredAt, err := a.directory.PlannerAnsweredAt(ctx, p.PlatformExperimentID, p.AgentID)
-		if err != nil {
-			return Principal{}, err
-		}
-		if a.woundDown(answeredAt) {
+		case a.woundDown(standing.PlannerAnsweredAt):
 			return Principal{}, unauthenticated("agent %s planned platform experiment %s and its planning is over", p.AgentID, p.PlatformExperimentID)
-		}
-		finishedAt, err := a.directory.AgentFinishedAt(ctx, p.PlatformExperimentID, p.AgentID)
-		if err != nil {
-			return Principal{}, err
-		}
-		if a.woundDown(finishedAt) {
+		case a.woundDown(standing.FinishedAt):
 			return Principal{}, unauthenticated("agent %s finished in platform experiment %s", p.AgentID, p.PlatformExperimentID)
 		}
-		p = p.within(tenancy)
-		p.RunOver = closedAt != nil || cutAt != nil || answeredAt != nil || finishedAt != nil
+		p = p.within(standing.Tenancy)
+		p.RunOver = standing.ClosedAt != nil || standing.CutAt != nil || standing.PlannerAnsweredAt != nil || standing.FinishedAt != nil
 	}
 	return p, nil
 }

@@ -360,23 +360,45 @@ WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.Ma
 	return nil
 }
 
-// PlannerAnsweredAt returns the moment the run of the planner agentID ended: it answered its
-// draft, with a proposal or with why there is none, and the time its machine is kept after an
-// answer has passed (planner_ends_at). nil for an agent that is no planner, for a planner that
-// is planning, which a revision makes true again, and for one kept after its answer.
-func (s *PlatformExperimentsStore) PlannerAnsweredAt(ctx context.Context, platformExpID, agentID string) (*time.Time, error) {
-	var answeredAt *time.Time
+// AgentStanding is what an agent's token stands on, read in one statement: where its platform
+// experiment is and when it closed, whether the agent is in it, and when its run ended for each
+// of the reasons that end one.
+type AgentStanding struct {
+	// Tenancy is nil when there is no such platform experiment.
+	Tenancy  *domain.Tenancy
+	ClosedAt *time.Time
+	SignedUp bool
+	CutAt    *time.Time
+	// PlannerAnsweredAt is the moment the run of a planner ended: it answered its draft, with a
+	// proposal or with why there is none, and the time its machine is kept after an answer has
+	// passed (planner_ends_at). nil for an agent that is no planner, for a planner that is
+	// planning, which a revision makes true again, and for one kept after its answer.
+	PlannerAnsweredAt *time.Time
+	FinishedAt        *time.Time
+}
+
+// AgentStanding reads the standing of agentID in platformExpID.
+func (s *PlatformExperimentsStore) AgentStanding(ctx context.Context, platformExpID, agentID string) (AgentStanding, error) {
+	t := &domain.Tenancy{PlatformExperimentID: platformExpID}
+	var out AgentStanding
 	err := s.pool.pool.QueryRow(ctx, `
-SELECT CASE WHEN pe.planner_ends_at <= now() THEN pe.planner_ends_at END
-FROM experiment_signups s JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
-WHERE s.platform_experiment_id = $1 AND s.agent_id = $2 AND s.role = '`+string(domain.SignupRolePlanner)+`'`, platformExpID, agentID).Scan(&answeredAt)
+SELECT pe.project_id, p.org_id, pe.shared, ARRAY(`+priorRuns+`), pe.closed_at,
+       s.agent_id IS NOT NULL,
+       (SELECT cut.cut_at FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = pe.id AND cut.agent_id = $2),
+       CASE WHEN s.role = '`+string(domain.SignupRolePlanner)+`' AND pe.planner_ends_at <= now() THEN pe.planner_ends_at END,
+       s.finished_at
+FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
+LEFT JOIN experiment_signups s ON s.platform_experiment_id = pe.id AND s.agent_id = $2
+WHERE pe.id = $1`, platformExpID, agentID).Scan(&t.ProjectID, &t.OrgID, &t.Shared, &t.PriorRuns, &out.ClosedAt,
+		&out.SignedUp, &out.CutAt, &out.PlannerAnsweredAt, &out.FinishedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
+		return AgentStanding{}, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.PlannerAnsweredAt: %w", err)
+		return AgentStanding{}, fmt.Errorf("platform_experiments_store.AgentStanding: %w", err)
 	}
-	return answeredAt, nil
+	out.Tenancy = t
+	return out, nil
 }
 
 // JobHasFinding says a finding was filed for the job.

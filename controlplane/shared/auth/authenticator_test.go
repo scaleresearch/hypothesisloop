@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -528,4 +529,28 @@ func TestOnlyARemovedClustersRuntimeIsToldItsClusterIsNotRegistered(t *testing.T
 			t.Errorf("%s: status = %d reason = %q, want 401 and %q", name, recorder.Code, body.Reason, tc.reason)
 		}
 	}
+}
+
+func (d *fakeDirectory) AgentStanding(ctx context.Context, pe, agent string) (db.AgentStanding, error) {
+	tenancy, closedAt, err := d.PlatformExperimentTenancy(ctx, pe)
+	if err != nil || tenancy == nil {
+		return db.AgentStanding{}, err
+	}
+	signedUp, err := d.IsSignedUp(ctx, pe, agent)
+	if err != nil {
+		return db.AgentStanding{}, err
+	}
+	cutAt, err := d.AgentCutAt(ctx, pe, agent)
+	if err != nil {
+		return db.AgentStanding{}, err
+	}
+	answeredAt, err := d.PlannerAnsweredAt(ctx, pe, agent)
+	if err != nil {
+		return db.AgentStanding{}, err
+	}
+	finishedAt, err := d.AgentFinishedAt(ctx, pe, agent)
+	if err != nil {
+		return db.AgentStanding{}, err
+	}
+	return db.AgentStanding{Tenancy: tenancy, ClosedAt: closedAt, SignedUp: signedUp, CutAt: cutAt, PlannerAnsweredAt: answeredAt, FinishedAt: finishedAt}, nil
 }
