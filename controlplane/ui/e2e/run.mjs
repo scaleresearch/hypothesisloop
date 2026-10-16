@@ -378,7 +378,7 @@ async function scenarios(browser) {
   await visitorPage.goto(UI)
   await visitorPage.getByRole('heading', { level: 1 }).waitFor()
   assert.equal(new URL(visitorPage.url()).pathname, '/', 'a visitor without a session stays on the landing page')
-  assert.equal(await visitorPage.getByRole('link', { name: 'Experiments', exact: true }).count(), 0)
+  assert.equal(await visitorPage.getByRole('link', { name: 'Console', exact: true }).count(), 0)
   await visitorPage.getByRole('link', { name: 'Sign up' }).click()
   await visitorPage.waitForURL(`${UI}/login?mode=sign-up`)
   await visitorPage.getByRole('heading', { name: 'Create your account' }).waitFor()
@@ -416,10 +416,12 @@ async function scenarios(browser) {
     await visitorPage.waitForURL(LANDING)
   }
 
-  section('the landing page offers a signed-in visitor the experiments')
+  section('the landing page offers a signed-in visitor the console')
   await visitorPage.goto(UI)
   assert.equal(await visitorPage.getByRole('link', { name: 'Sign in' }).count(), 0)
-  await visitorPage.getByRole('link', { name: 'Experiments', exact: true }).click()
+  const consoleLink = visitorPage.getByRole('link', { name: 'Console', exact: true })
+  assert.equal(await consoleLink.getAttribute('href'), '/console')
+  await consoleLink.click()
   await visitorPage.waitForURL(LANDING)
   await visitor.close()
 
