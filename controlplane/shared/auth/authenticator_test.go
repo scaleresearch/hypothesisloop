@@ -32,6 +32,8 @@ type fakeDirectory struct {
 	notSignedUp map[string]bool
 	launchers   map[string]bool
 	clusters    map[string]string
+	// builds are the builds building now, by BuildScope.
+	builds      map[string]bool
 	staff       map[string]bool
 	homes       map[string][]string
 	names       map[string]string

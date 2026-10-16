@@ -19,6 +19,7 @@ func TestMintedTokensVerifyToTheScopeTheyWereMintedFor(t *testing.T) {
 		{CoordinatorScope("pe-1"), Principal{Kind: KindCoordinator, PlatformExperimentID: "pe-1"}},
 		{RuntimeScope("local"), Principal{Kind: KindRuntime, ClusterName: "local"}},
 		{LauncherScope("fly"), Principal{Kind: KindLauncher, LauncherName: "fly"}},
+		{BuildScope("local", "abc123", 2), Principal{Kind: KindBuild, Build: BuildRef{Cluster: "local", Key: "abc123", Attempt: 2}}},
 	} {
 		token, err := Mint(testSecret, tc.scope)
 		if err != nil {
@@ -72,7 +73,7 @@ func TestForgedAndMalformedDerivedTokensAreRefused(t *testing.T) {
 }
 
 func TestMintRefusesWhatItCouldNotVerify(t *testing.T) {
-	for _, scope := range []string{"", "root", "job:", "agent:pe-1", "agent:/agent-1", "agent:pe-1/", "unknown:x"} {
+	for _, scope := range []string{"", "root", "job:", "agent:pe-1", "agent:/agent-1", "agent:pe-1/", "unknown:x", "build:local/abc", "build:local/abc/0", "build:local/abc/x", "build:local/abc/01", "build:/abc/1", "build:local//1", "build:a/b/c/1"} {
 		if token, err := Mint(testSecret, scope); err == nil {
 			t.Errorf("mint %q: got token %q, want an error", scope, token)
 		}
@@ -94,7 +95,7 @@ func mustMint(t *testing.T, secret, scope string) string {
 func samePrincipal(a, b Principal) bool {
 	return a.Kind == b.Kind && a.UserID == b.UserID && a.Name == b.Name && a.ProjectID == b.ProjectID &&
 		a.PlatformExperimentID == b.PlatformExperimentID && a.AgentID == b.AgentID && a.ExperimentID == b.ExperimentID &&
-		a.ClusterName == b.ClusterName && a.LauncherName == b.LauncherName && strings.Join(a.OrgIDs, ",") == strings.Join(b.OrgIDs, ",")
+		a.ClusterName == b.ClusterName && a.LauncherName == b.LauncherName && a.Build == b.Build && strings.Join(a.OrgIDs, ",") == strings.Join(b.OrgIDs, ",")
 }
 
 func TestAPIKeysAreDistinctAndHashStably(t *testing.T) {

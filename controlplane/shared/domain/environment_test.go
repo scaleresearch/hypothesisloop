@@ -36,8 +36,9 @@ func TestAnEnvironmentFileIsBuiltOnTheBaseThePlatformPasses(t *testing.T) {
 func TestAFileThatCopiesFromABuildContextIsToldItIsBuiltAlone(t *testing.T) {
 	err := ValidateEnvironmentFile("ARG BASE\nFROM ${BASE}\nRUN true\nCOPY vendor/codec /opt/codec\n")
 	if err == nil || !strings.Contains(err.Error(), "line 4") || !strings.Contains(err.Error(), "vendor/codec") ||
-		!strings.Contains(err.Error(), "built from this file alone") || !strings.Contains(err.Error(), "clone") {
-		t.Errorf("got %v, want the line, the source, and that the file is built alone and the code comes by the clone", err)
+		!strings.Contains(err.Error(), "built from this file alone") || !strings.Contains(err.Error(), "clone") ||
+		!strings.Contains(err.Error(), "RUN --mount=type=secret,id=git-credentials git -c include.path=/run/secrets/git-credentials clone <repository url> /tmp/src") {
+		t.Errorf("got %v, want the line, the source, that the file is built alone and the code comes by the clone, and the line that clones the repository", err)
 	}
 }
 
@@ -71,5 +72,8 @@ func TestTheTemplatesEnvironmentFileSaysItIsBuiltAloneAndTheCodeComesByTheClone(
 	}
 	if !strings.Contains(file, "from this file alone") || !strings.Contains(file, "clones its commit") {
 		t.Errorf("the template says nothing of how it is built:\n%s", file)
+	}
+	if !strings.Contains(file, "# "+EnvironmentGitRun+" ") || strings.Contains(file, "credential.helper") {
+		t.Errorf("the template does not show the line that clones the repository, %q:\n%s", EnvironmentGitRun, file)
 	}
 }

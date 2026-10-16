@@ -44,6 +44,7 @@ const (
 	worldIssuer   = "https://issuer.test/auth/v1"
 	worldAudience = "hypothesisloop-test"
 	worldLauncher = "main"
+	worldBuildKey = "key-building"
 	worldMember   = "user-m"
 	// worldShared is the one platform experiment of org-b that staff shared with every account.
 	worldShared = "pe-show"
@@ -156,6 +157,13 @@ func (w *world) OrgRole(_ context.Context, _ string, userID string) (domain.OrgR
 		return domain.OrgRoleMember, true, nil
 	}
 	return domain.OrgRoleOwner, true, nil
+}
+
+func (w *world) AssignedEnvironmentBuild(_ context.Context, cluster, key string, attempt int) (*domain.Environment, error) {
+	if cluster != "cluster-a" || key != worldBuildKey || attempt != 1 {
+		return nil, nil
+	}
+	return &domain.Environment{Key: key, OrgID: "org-a", ProjectID: "prj-a1", ClusterName: cluster, Attempt: attempt, State: domain.EnvironmentBuilding}, nil
 }
 
 func (w *world) LauncherKnown(_ context.Context, name string) (bool, error) {
@@ -327,6 +335,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	api.tokens["job"] = mint(auth.JobScope("job-own"))
 	api.tokens["runtime"] = mint(auth.RuntimeScope("cluster-a"))
 	api.tokens["launcher"] = mint(auth.LauncherScope(worldLauncher))
+	api.tokens["build"] = mint(auth.BuildScope("cluster-a", worldBuildKey, 1))
 	api.tokens["staff"] = mint(auth.StaffScope)
 	return api
 }

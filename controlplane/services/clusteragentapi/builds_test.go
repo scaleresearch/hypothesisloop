@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -174,6 +175,40 @@ func TestAPushLoginIsHandedOutOnlyForTheAssignedAttempt(t *testing.T) {
 	}
 	if w.logins.pushes != 1 {
 		t.Errorf("minted %d push logins, want only the one handed out", w.logins.pushes)
+	}
+}
+
+// A build reads its repository through the git proxy with a token of that attempt of that build,
+// and never holds a credential of the git host.
+func TestAGitCredentialIsABuildTokenForTheProxyAndNoHostCredential(t *testing.T) {
+	w := newReconcileWorld(t, "of-a")
+	env := assignedBuild("key-1", 2)
+	env.ProjectID, env.GitRepository = "prj-1", "acme/model.git"
+	noRepository := assignedBuild("key-2", 1)
+	w.store.assigned["of-a"] = []*domain.Environment{env, noRepository}
+	rec := w.post(t, "/of-a/builds/key-1/git-credential", domain.EnvironmentBuildCredentialRequest{Attempt: 2})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got = %d %s, want = 200", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "host-password") || strings.Contains(rec.Body.String(), "platform:") {
+		t.Errorf("the answer %s carries the git host's credential", rec.Body)
+	}
+	var credential domain.EnvironmentGitCredential
+	if err := json.Unmarshal(rec.Body.Bytes(), &credential); err != nil {
+		t.Fatal(err)
+	}
+	want, _ := auth.Mint("test-signing-secret-of-enough-length", auth.BuildScope("of-a", "key-1", 2))
+	if credential != (domain.EnvironmentGitCredential{ProxyURL: "https://api.test/git/builds/key-1", RepositoryURL: "https://git.test/acme/model.git", Token: want}) {
+		t.Errorf("credential = %+v, want the proxy, the repository's address and the build's token", credential)
+	}
+	if _, err := credential.GitConfig(); err != nil {
+		t.Errorf("the credential makes no git config: %v", err)
+	}
+	if rec := w.post(t, "/of-a/builds/key-1/git-credential", domain.EnvironmentBuildCredentialRequest{Attempt: 1}); rec.Code != http.StatusConflict {
+		t.Errorf("a superseded attempt: got = %d %s, want = 409", rec.Code, rec.Body)
+	}
+	if rec := w.post(t, "/of-a/builds/key-2/git-credential", domain.EnvironmentBuildCredentialRequest{Attempt: 1}); rec.Code != http.StatusNotFound {
+		t.Errorf("an environment of no repository: got = %d %s, want = 404", rec.Code, rec.Body)
 	}
 }
 

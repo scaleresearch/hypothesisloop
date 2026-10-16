@@ -264,7 +264,10 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 			ProgressLimit:   time.Duration(pcfg.Agents.ProgressLimitSeconds) * time.Second,
 			MaxNewPerAnswer: pcfg.Agents.MaxNewInstancesPerAnswer,
 		}, logger),
-		gitProxy: gitproxy.New(db.NewPlatformExperimentsStore(pool), gitHost, logger),
+		gitProxy: gitproxy.New(struct {
+			*db.PlatformExperimentsStore
+			*db.EnvironmentsStore
+		}{db.NewPlatformExperimentsStore(pool), store.EnvironmentsStore}, gitHost, logger),
 	}, logger)
 
 	return &http.Server{

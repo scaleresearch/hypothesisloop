@@ -20,6 +20,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 )
 
@@ -170,7 +171,11 @@ func newWorld(t *testing.T, cluster string, wrap func(*reconcileStore) Store, bu
 		builds: map[string]bool{}, assigned: map[string][]*domain.Environment{}}}
 	var environments *EnvironmentRegistry
 	if buildsEnvironments {
-		environments = &EnvironmentRegistry{Repository: testRepository, Logins: w.logins}
+		git, err := githost.NewPlain("https://git.test", "platform", "host-password")
+		if err != nil {
+			t.Fatal(err)
+		}
+		environments = &EnvironmentRegistry{Repository: testRepository, Logins: w.logins, Git: git}
 	}
 	metrics := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/sql" {

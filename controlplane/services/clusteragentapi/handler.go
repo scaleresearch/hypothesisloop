@@ -468,10 +468,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{
 		OperationID: "cluster-build-git-credential", Method: "POST", Path: "/{name}/builds/{key}/git-credential",
 		Summary: "A read of the repository an assigned environment build is of", Tags: []string{"cluster-agent"},
-		Description: "What git reads the repository whose environment file this is with, minted for this call and for that repository alone, read-only. " +
-			"The build mounts it as the secret " + domain.EnvironmentGitSecret + " of a RUN that asks for it, never into a layer. Handed out only while the " +
-			"build of key is assigned to this cluster at attempt and still building; otherwise 409. 404 for an environment of no repository or a git host " +
-			"that takes no credential: the build then mounts no secret and reads the repository anonymously.",
+		Description: "The git proxy address the repository whose environment file this is is read at, the repository's own address, and a platform token " +
+			"that reads that repository alone through the proxy, read-only, while the build of key is assigned to this cluster at attempt and still building. " +
+			"The build mounts them as the git config secret " + domain.EnvironmentGitSecret + " of a RUN that asks for it, never into a layer. Handed out only while the " +
+			"build is assigned and building; otherwise 409. 404 for an environment of no repository: the build then mounts no secret.",
 	}, func(ctx context.Context, in *struct {
 		Name string `path:"name"`
 		Key  string `path:"key"`
@@ -492,17 +492,20 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if env.GitRepository == "" {
 			return nil, huma.Error404NotFound("the environment " + in.Key + " is of no repository")
 		}
-		minted, err := h.environments.Git.Credential(ctx, env.ProjectID, env.GitRepository, false)
-		var refused huma.StatusError
-		if errors.As(err, &refused) {
-			return nil, err
+		if h.proxyURL == "" {
+			return nil, auth.Internal(h.logger, "environment git credential", errors.New("git_host.proxy_url is not configured"), zap.String("key", in.Key))
 		}
+		token, err := auth.Mint(h.signingSecret, auth.BuildScope(in.Name, in.Key, in.Body.Attempt))
 		if err != nil {
 			return nil, auth.Internal(h.logger, "environment git credential", err, zap.String("cluster", in.Name), zap.String("key", in.Key))
 		}
 		return &struct {
 			Body domain.EnvironmentGitCredential
-		}{Body: domain.EnvironmentGitCredential{URL: h.environments.Git.URL(env.GitRepository), Username: minted.Username, Password: minted.Password, ExpiresAt: minted.ExpiresAt}}, nil
+		}{Body: domain.EnvironmentGitCredential{
+			ProxyURL:      domain.BuildGitProxyURL(h.proxyURL, in.Key),
+			RepositoryURL: h.environments.Git.URL(env.GitRepository),
+			Token:         token,
+		}}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{

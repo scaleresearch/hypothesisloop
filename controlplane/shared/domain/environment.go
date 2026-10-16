@@ -21,9 +21,13 @@ import (
 const EnvironmentFile = ".hypothesisloop/Dockerfile"
 
 // EnvironmentGitSecret is the id of the BuildKit secret a RUN of an environment file mounts to
-// read the repository that declared it, at /run/secrets/git-credentials by default. A secret
-// mount is never part of a layer.
+// read the repository that declared it, at /run/secrets/git-credentials by default: a git config
+// that reads it through the git proxy with a token of that build alone. A secret mount is never
+// part of a layer.
 const EnvironmentGitSecret = clusterapi.EnvironmentGitSecret
+
+// EnvironmentGitRun is the line an environment file clones its repository with.
+const EnvironmentGitRun = clusterapi.EnvironmentGitRun
 
 // MaxEnvironmentFileBytes bounds an environment file.
 const MaxEnvironmentFileBytes = 64 << 10
@@ -230,8 +234,8 @@ func refuseBuildContext(dockerfile string) error {
 			if strings.HasPrefix(source, "<<") || instruction == "add" && remoteSource(source) {
 				continue
 			}
-			return &EnvironmentFileError{Why: fmt.Sprintf("%s line %d, %s, reads %s from a build context the build does not have: the environment is built from this file alone, and a job gets the repository's code by its clone at start. Install what the code needs with RUN or COPY --from an image; a RUN with --mount=type=secret,id=%s reads the repository at a commit it pins through git's credential store at /run/secrets/%s",
-				EnvironmentFile, node.StartLine, strings.TrimSpace(node.Original), source, EnvironmentGitSecret, EnvironmentGitSecret)}
+			return &EnvironmentFileError{Why: fmt.Sprintf("%s line %d, %s, reads %s from a build context the build does not have: the environment is built from this file alone, and a job gets the repository's code by its clone at start. Install what the code needs with RUN or COPY --from an image. To read the repository at a commit the file pins, clone it with this line, the repository's own address in place of <repository url>, then check out the commit: %s && git -C /tmp/src checkout <commit>",
+				EnvironmentFile, node.StartLine, strings.TrimSpace(node.Original), source, EnvironmentGitRun)}
 		}
 	}
 	return nil

@@ -24,11 +24,13 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 )
 
-// Store is what the proxy reads to decide. *db.PlatformExperimentsStore satisfies it.
+// Store is what the proxy reads to decide. *db.PlatformExperimentsStore with *db.EnvironmentsStore
+// satisfies it.
 type Store interface {
 	PlatformExperimentRepository(ctx context.Context, id string) (projectID, repository string, closed, draft bool, err error)
 	GetAgentSignup(ctx context.Context, platformExpID, agentID string) (*domain.AgentSignup, error)
 	AgentNames(ctx context.Context, platformExpID string) (map[string]string, error)
+	AssignedEnvironmentBuild(ctx context.Context, cluster, key string, attempt int) (*domain.Environment, error)
 }
 
 const (
@@ -40,7 +42,8 @@ const (
 // own deadlines are sized for API calls, far shorter than a large pack takes.
 const transferLimit = time.Hour
 
-// Proxy serves /git/<platform experiment id>.git behind auth.Gate.
+// Proxy serves /git/<platform experiment id>.git, and /git/builds/<key>.git to the build of an
+// environment, behind auth.Gate.
 type Proxy struct {
 	store  Store
 	host   githost.Provider
@@ -68,6 +71,10 @@ type grant struct {
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rest, _ := strings.CutPrefix(r.URL.Path, auth.GitPrefix)
+	buildRest, build := strings.CutPrefix(rest, domain.BuildsGitPath+"/")
+	if build {
+		rest = buildRest
+	}
 	pe, endpoint, _ := strings.Cut(rest, "/")
 	pe = strings.TrimSuffix(pe, ".git")
 	var service string
@@ -90,7 +97,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.internal(w, "set the deadlines of a git transfer", err)
 		return
 	}
-	g, err := p.authorize(r.Context(), pe, service == receivePack)
+	var g *grant
+	var err error
+	if build {
+		g, err = p.authorizeBuild(r.Context(), pe, service == receivePack)
+	} else {
+		g, err = p.authorize(r.Context(), pe, service == receivePack)
+	}
 	if err != nil {
 		p.refusal(w, err)
 		return
@@ -117,6 +130,8 @@ func (p *Proxy) authorize(ctx context.Context, pe string, write bool) (*grant, e
 	}
 	switch principal.Kind {
 	case auth.KindAgent, auth.KindCoordinator, auth.KindJob:
+	case auth.KindBuild:
+		return nil, huma.Error404NotFound("no repository at this address: your build token's is " + auth.GitPrefix + domain.BuildsGitPath + "/" + principal.Build.Key + ".git")
 	default:
 		return nil, auth.Forbidden("a " + string(principal.Kind) + " token reaches no repository through the git proxy: it serves the agents, coordinators and jobs of a platform experiment")
 	}
@@ -171,6 +186,35 @@ func (p *Proxy) authorize(ctx context.Context, pe string, write bool) (*grant, e
 	}
 	g.write, g.role, g.agentName = true, signup.Role, signup.Name
 	return g, nil
+}
+
+// authorizeBuild grants the token of an environment build a read of the repository of that
+// environment, while the build is assigned and building, and nothing else.
+func (p *Proxy) authorizeBuild(ctx context.Context, key string, write bool) (*grant, error) {
+	principal, ok := auth.FromContext(ctx)
+	if !ok {
+		return nil, auth.Unauthenticated("the request carries no principal")
+	}
+	if principal.Kind != auth.KindBuild {
+		return nil, auth.Forbidden("a " + string(principal.Kind) + " token reaches no environment build's repository: " + auth.GitPrefix + domain.BuildsGitPath + "/ serves environment builds alone")
+	}
+	if key == "" || key != principal.Build.Key {
+		return nil, huma.Error404NotFound("no repository at this address: your build token's is " + auth.GitPrefix + domain.BuildsGitPath + "/" + principal.Build.Key + ".git")
+	}
+	if write {
+		return nil, auth.Forbidden("read-only: an environment build reads the repository it is of, so nothing is pushed with its token")
+	}
+	env, err := p.store.AssignedEnvironmentBuild(ctx, principal.Build.Cluster, principal.Build.Key, principal.Build.Attempt)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case env == nil:
+		return nil, auth.Forbidden("build over: the build of " + key + " is no longer building at this attempt, so its repository is no longer reached with its token")
+	case env.GitRepository == "":
+		return nil, huma.Error404NotFound("the environment " + key + " is of no repository")
+	}
+	return &grant{principal: principal, projectID: env.ProjectID, repository: env.GitRepository}, nil
 }
 
 // receive forwards a push whose every ref update the pusher may make, and answers any other with

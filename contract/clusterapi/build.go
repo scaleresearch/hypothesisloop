@@ -1,6 +1,11 @@
 package clusterapi
 
-import "time"
+import (
+	"fmt"
+	"net/url"
+	"strings"
+	"time"
+)
 
 // EnvironmentBuild is a build the control plane assigned to a cluster, as its reconcile answer
 // lists it under builds. The cluster builds Dockerfile with the build argument BASE set to Base,
@@ -24,8 +29,17 @@ type EnvironmentBuild struct {
 var PlatformTools = []string{"/usr/local/bin/hl", "/usr/local/bin/hl-clone"}
 
 // EnvironmentGitSecret is the id of the BuildKit secret a RUN of an environment file mounts to
-// read the repository that declared it: one line of git's credential store, read-only.
+// read the repository that declared it: a git config file (EnvironmentGitCredential.GitConfig),
+// which EnvironmentGitCommand includes.
 const EnvironmentGitSecret = "git-credentials"
+
+// EnvironmentGitCommand is how a RUN that mounts EnvironmentGitSecret calls git to read the
+// repository: with the secret's config included, the repository's own address reaches it.
+const EnvironmentGitCommand = "git -c include.path=/run/secrets/" + EnvironmentGitSecret
+
+// EnvironmentGitRun is the line of an environment file that clones the repository it is of, the
+// one an author is told to write.
+const EnvironmentGitRun = "RUN --mount=type=secret,id=" + EnvironmentGitSecret + " " + EnvironmentGitCommand + " clone <repository url> /tmp/src"
 
 // RegistryLogin is a login to the registry host Registry, good until ExpiresAt. It is handed out
 // to push one build (POST /internal/clusters/{name}/builds/{key}/credential) and, as registry_pull
@@ -43,16 +57,42 @@ type EnvironmentBuildCredentialRequest struct {
 	Attempt int `json:"attempt"`
 }
 
-// EnvironmentGitCredential reads the repository that declared an environment, at URL, as git
-// sends it, good until ExpiresAt, zero for one that does not run out. It is handed out to one
-// build (POST /internal/clusters/{name}/builds/{key}/git-credential), which mounts it as the
-// secret EnvironmentGitSecret, and is never written to disk or a layer. A 404 means the
-// repository is read with no credential.
+// EnvironmentGitCredential reads the repository that declared an environment through the
+// control plane's git proxy at ProxyURL, with Token, a platform token that reads that repository
+// alone while the build is assigned and building and does nothing else. RepositoryURL is the
+// repository's own address, the one an environment file names. It is handed out to one build
+// (POST /internal/clusters/{name}/builds/{key}/git-credential), which mounts GitConfig as the
+// secret EnvironmentGitSecret, never written to disk or a layer. A 404 means the environment is
+// of no repository.
 type EnvironmentGitCredential struct {
-	URL       string    `json:"url"`
-	Username  string    `json:"username"`
-	Password  string    `json:"password"`
-	ExpiresAt time.Time `json:"expires_at"`
+	ProxyURL      string `json:"proxy_url"`
+	RepositoryURL string `json:"repository_url"`
+	Token         string `json:"token"`
+}
+
+// GitConfig is the git config EnvironmentGitCommand includes: it rewrites RepositoryURL, with or
+// without .git, to ProxyURL, and sends Token there alone.
+func (c EnvironmentGitCredential) GitConfig() ([]byte, error) {
+	for name, value := range map[string]string{"proxy_url": c.ProxyURL, "repository_url": c.RepositoryURL, "token": c.Token} {
+		if value == "" || strings.ContainsAny(value, "\"\\\n\r") {
+			return nil, fmt.Errorf("the git credential's %s is empty or holds a quote, a backslash or a line break", name)
+		}
+	}
+	for name, value := range map[string]string{"proxy_url": c.ProxyURL, "repository_url": c.RepositoryURL} {
+		address, err := url.Parse(value)
+		if err != nil || address.Host == "" || address.Scheme != "http" && address.Scheme != "https" || address.User != nil || address.RawQuery != "" || address.Fragment != "" {
+			return nil, fmt.Errorf("the git credential's %s %q is not an http(s) address of a host, without credentials, query or fragment", name, value)
+		}
+	}
+	proxy := strings.TrimSuffix(strings.TrimSuffix(c.ProxyURL, "/"), ".git")
+	repository := strings.TrimSuffix(strings.TrimSuffix(c.RepositoryURL, "/"), ".git")
+	var b strings.Builder
+	fmt.Fprintf(&b, "[url \"%s\"]\n\tinsteadOf = \"%s\"\n", proxy, repository)
+	// git matches an http.<url> section only at a path boundary, so P does not cover P.git.
+	for _, address := range []string{proxy, proxy + ".git"} {
+		fmt.Fprintf(&b, "[http \"%s\"]\n\textraHeader = \"Authorization: Bearer %s\"\n", address, c.Token)
+	}
+	return []byte(b.String()), nil
 }
 
 // EnvironmentBuildOutcomeKind is how a build ended, as the cluster that ran it reports it.

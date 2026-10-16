@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 func (d *fakeDirectory) IsSignedUp(_ context.Context, pe, agent string) (bool, error) {
@@ -12,6 +14,42 @@ func (d *fakeDirectory) IsSignedUp(_ context.Context, pe, agent string) (bool, e
 
 func (d *fakeDirectory) LauncherKnown(_ context.Context, name string) (bool, error) {
 	return d.launchers[name], d.fail
+}
+
+func (d *fakeDirectory) AssignedEnvironmentBuild(_ context.Context, cluster, key string, attempt int) (*domain.Environment, error) {
+	if !d.builds[BuildScope(cluster, key, attempt)] {
+		return nil, d.fail
+	}
+	return &domain.Environment{Key: key, ClusterName: cluster, Attempt: attempt}, d.fail
+}
+
+// A build token reads its repository only while that attempt of the build is assigned to that
+// cluster and building: a later attempt, another cluster, or a build that ended refuse it.
+func TestABuildTokenWorksOnlyWhileItsBuildIsBuilding(t *testing.T) {
+	a, directory := newTestAuthenticator(t)
+	token := mustMint(t, testSecret, BuildScope("cluster-a", "key-1", 1))
+
+	p, err := a.Authenticate(context.Background(), token)
+	assertRefused(t, "build not assigned", p, err)
+
+	directory.builds = map[string]bool{BuildScope("cluster-a", "key-1", 1): true}
+	p, err = a.Authenticate(context.Background(), token)
+	if err != nil || p.Kind != KindBuild || p.Build != (BuildRef{Cluster: "cluster-a", Key: "key-1", Attempt: 1}) {
+		t.Fatalf("build building: got = %+v, %v, want the build principal", p, err)
+	}
+	if len(p.OrgIDs) != 0 || p.ProjectID != "" || p.ClusterName != "" || p.Scope().Admits(tenancyA) {
+		t.Errorf("build principal: got = %+v, want one that names no org, project or cluster", p)
+	}
+
+	directory.builds = map[string]bool{BuildScope("cluster-a", "key-1", 2): true, BuildScope("cluster-b", "key-1", 1): true}
+	p, err = a.Authenticate(context.Background(), token)
+	assertRefused(t, "build moved on to another attempt or cluster", p, err)
+
+	directory.builds = nil
+	directory.fail = errors.New("db down")
+	if _, err := a.Authenticate(context.Background(), token); !errors.Is(err, directory.fail) {
+		t.Errorf("directory down: got = %v, want its error", err)
+	}
 }
 
 // Joining is done for an agent, never by it, so its token has nothing to stand on until the

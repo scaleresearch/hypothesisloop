@@ -233,11 +233,12 @@ job_images:
 #       app_slug: hypothesisloop
 #       private_key: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY}
 #
-#   proxy_url          the address agents and jobs reach this API's /git at, the git proxy every
+#   proxy_url          the address agents, jobs and environment builds reach this API's /git at, the git proxy every
 #                      clone, fetch and push of theirs goes through with their own token. The proxy
 #                      mints the host's credential for each request and refuses a push to any ref
 #                      but the pusher's own branches, so no agent or job ever holds a credential
-#                      of the host. Required with every provider; a loopback address is rejected.
+#                      of the host; an environment build reads its repository there with a token of
+#                      that build alone. Required with every provider; a loopback address is rejected.
 #   app_id, app_slug   the App's number and the name in its URL.
 #   private_key        the PEM GitHub issued for the App. It signs the request for every token.
 #

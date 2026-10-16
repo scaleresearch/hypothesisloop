@@ -24,9 +24,8 @@ type Unrunnable struct{ Reason, Why string }
 
 func (u *Unrunnable) Error() string { return u.Why }
 
-// ErrNoEnvironmentGitCredential is a build whose repository is read with no credential: the
-// control plane answers its git credential with 404. Its clusterapi.EnvironmentGitSecret is
-// absent then, so a RUN that mounts it reads the repository anonymously.
+// ErrNoEnvironmentGitCredential is a build of an environment of no repository: the control plane
+// answers its git credential with 404. Its clusterapi.EnvironmentGitSecret is absent then.
 var ErrNoEnvironmentGitCredential = errors.New("the repository of the build takes no credential")
 
 // Waiting is what CreateWorkload returns while what the job needs is not there yet and may still

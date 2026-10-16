@@ -19,7 +19,10 @@ const (
 	KindJob         Kind = "job"
 	KindRuntime     Kind = "runtime"
 	KindLauncher    Kind = "launcher"
-	KindStaff       Kind = "staff"
+	// KindBuild reads, through the git proxy, the repository of one environment build while it
+	// is assigned and building, and reaches nothing else.
+	KindBuild Kind = "build"
+	KindStaff Kind = "staff"
 )
 
 // Principal is the authenticated caller. Which fields are set depends on Kind: a user carries
@@ -54,6 +57,15 @@ type Principal struct {
 	ExperimentID string
 	ClusterName  string
 	LauncherName string
+	// Build is the environment build a build token reads the repository of.
+	Build BuildRef
+}
+
+// BuildRef names one attempt of an environment build on the cluster it was assigned to.
+type BuildRef struct {
+	Cluster string
+	Key     string
+	Attempt int
 }
 
 // Scope is the part of the platform this principal may see.

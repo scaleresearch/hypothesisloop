@@ -50,6 +50,7 @@ type Directory interface {
 	PlannerAnsweredAt(ctx context.Context, platformExperimentID, agentID string) (*time.Time, error)
 	ClusterOrg(ctx context.Context, name string) (orgID string, found bool, err error)
 	LauncherKnown(ctx context.Context, name string) (bool, error)
+	AssignedEnvironmentBuild(ctx context.Context, cluster, key string, attempt int) (*domain.Environment, error)
 }
 
 // StoreDirectory is the Directory over the platform's own database.
@@ -57,10 +58,11 @@ type StoreDirectory struct {
 	*db.AccountsStore
 	*db.ClustersStore
 	*db.PlatformExperimentsStore
+	*db.EnvironmentsStore
 }
 
 func NewStoreDirectory(pool *db.Pool) StoreDirectory {
-	return StoreDirectory{AccountsStore: db.NewAccountsStore(pool), ClustersStore: db.NewClustersStore(pool), PlatformExperimentsStore: db.NewPlatformExperimentsStore(pool)}
+	return StoreDirectory{AccountsStore: db.NewAccountsStore(pool), ClustersStore: db.NewClustersStore(pool), PlatformExperimentsStore: db.NewPlatformExperimentsStore(pool), EnvironmentsStore: db.NewEnvironmentsStore(pool)}
 }
 
 // Authenticator turns a token into a Principal. Nothing is kept between requests: a derived
@@ -117,6 +119,14 @@ func (a *Authenticator) derived(ctx context.Context, token string) (Principal, e
 		}
 		if !known {
 			return Principal{}, unauthenticated("launcher %s is not registered", p.LauncherName)
+		}
+	case KindBuild:
+		env, err := a.directory.AssignedEnvironmentBuild(ctx, p.Build.Cluster, p.Build.Key, p.Build.Attempt)
+		if err != nil {
+			return Principal{}, err
+		}
+		if env == nil {
+			return Principal{}, unauthenticated("the build of %s is not building on cluster %s at attempt %d", p.Build.Key, p.Build.Cluster, p.Build.Attempt)
 		}
 	case KindJob:
 		tenancy, ended, err := a.directory.ExperimentTenancy(ctx, p.ExperimentID)

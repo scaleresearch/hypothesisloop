@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -358,12 +357,10 @@ func (a *registryAuth) Credentials(ctx context.Context, req *auth.CredentialsReq
 	return &auth.CredentialsResponse{Username: username, Secret: password}, nil
 }
 
-// repositorySecret answers clusterapi.EnvironmentGitSecret, and no other secret, with git's credential
-// store for the repository the build's file is of: a line of its host alone, which a git that
-// sends no path matches, then a line of its path with and without .git, which a git with
-// credential.useHttpPath (the job images set it) matches as cloned. The credential reads that one
-// repository alone. A repository read with no credential has no secret, which a RUN mounts as
-// nothing and reads it anonymously.
+// repositorySecret answers clusterapi.EnvironmentGitSecret, and no other secret, with the git
+// config that reads the repository the build's file is of through the control plane's git proxy,
+// with a token that reads that one repository while the build runs. An environment of no
+// repository has no secret, which a RUN mounts as nothing.
 type repositorySecret GitCredential
 
 func (r repositorySecret) GetSecret(ctx context.Context, id string) ([]byte, error) {
@@ -377,13 +374,7 @@ func (r repositorySecret) GetSecret(ctx context.Context, id string) ([]byte, err
 	if err != nil {
 		return nil, fmt.Errorf("the credential of the repository: %w", err)
 	}
-	address, err := url.Parse(credential.URL)
-	if err != nil || address.Scheme == "" || address.Host == "" {
-		return nil, fmt.Errorf("the repository's address %q names no scheme and host", credential.URL)
-	}
-	origin := address.Scheme + "://" + url.UserPassword(credential.Username, credential.Password).String() + "@" + address.Host
-	path := strings.TrimSuffix(strings.Trim(address.Path, "/"), ".git")
-	return []byte(origin + "\n" + origin + "/" + path + "\n" + origin + "/" + path + ".git\n"), nil
+	return credential.GitConfig()
 }
 
 // withTools is dockerfile with clusterapi.PlatformTools copied from the image tools into the stage

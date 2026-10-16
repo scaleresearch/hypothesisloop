@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -27,6 +28,12 @@ func CoordinatorScope(platformExperimentID string) string {
 func RuntimeScope(clusterName string) string { return "runtime:" + clusterName }
 
 func LauncherScope(name string) string { return "launcher:" + name }
+
+// BuildScope is the scope of the token one attempt of an environment build reads its repository
+// with through the git proxy.
+func BuildScope(cluster, key string, attempt int) string {
+	return "build:" + cluster + "/" + key + "/" + strconv.Itoa(attempt)
+}
 
 var encoding = base64.RawURLEncoding
 
@@ -93,6 +100,13 @@ func parseScope(scope string) (Principal, error) {
 		return Principal{Kind: KindRuntime, ClusterName: subject}, nil
 	case KindLauncher:
 		return Principal{Kind: KindLauncher, LauncherName: subject}, nil
+	case KindBuild:
+		parts := strings.Split(subject, "/")
+		attempt, err := strconv.Atoi(parts[len(parts)-1])
+		if len(parts) != 3 || parts[0] == "" || parts[1] == "" || err != nil || attempt < 1 || strconv.Itoa(attempt) != parts[2] {
+			return Principal{}, fmt.Errorf("auth: build scope must be build:<cluster>/<key>/<attempt>, got %q", scope)
+		}
+		return Principal{Kind: KindBuild, Build: BuildRef{Cluster: parts[0], Key: parts[1], Attempt: attempt}}, nil
 	default:
 		return Principal{}, fmt.Errorf("auth: unknown scope %q", scope)
 	}

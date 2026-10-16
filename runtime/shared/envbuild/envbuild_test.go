@@ -177,17 +177,29 @@ func TestABuildThatNamesNoCacheScopeIsNotBuilt(t *testing.T) {
 	}
 }
 
-func TestTheGitSecretIsTheRepositorysCredentialStoreAndAbsentWithoutOne(t *testing.T) {
+func TestTheGitSecretRewritesTheRepositoryToTheProxyAndIsAbsentWithoutOne(t *testing.T) {
 	ctx := context.Background()
 	asked := 0
 	secret := repositorySecret(func(context.Context) (clusterapi.EnvironmentGitCredential, error) {
 		asked++
-		return clusterapi.EnvironmentGitCredential{URL: "https://github.com/acme/model.git", Username: "x-access-token", Password: "p@ss"}, nil
+		return clusterapi.EnvironmentGitCredential{ProxyURL: "https://api.test/git/builds/k1", RepositoryURL: "https://github.com/acme/model.git", Token: "hls_build.mac"}, nil
 	})
 	got, err := secret.GetSecret(ctx, clusterapi.EnvironmentGitSecret)
-	want := "https://x-access-token:p%40ss@github.com\nhttps://x-access-token:p%40ss@github.com/acme/model\nhttps://x-access-token:p%40ss@github.com/acme/model.git\n"
+	want := `[url "https://api.test/git/builds/k1"]
+	insteadOf = "https://github.com/acme/model"
+[http "https://api.test/git/builds/k1"]
+	extraHeader = "Authorization: Bearer hls_build.mac"
+[http "https://api.test/git/builds/k1.git"]
+	extraHeader = "Authorization: Bearer hls_build.mac"
+`
 	if err != nil || string(got) != want {
 		t.Errorf("the secret = %q %v, want %q", got, err, want)
+	}
+	malformed := repositorySecret(func(context.Context) (clusterapi.EnvironmentGitCredential, error) {
+		return clusterapi.EnvironmentGitCredential{ProxyURL: "https://api.test/git/builds/k1", RepositoryURL: "https://github.com/acme/model.git", Token: "a\"\n[core]"}, nil
+	})
+	if got, err := malformed.GetSecret(ctx, clusterapi.EnvironmentGitSecret); err == nil {
+		t.Errorf("a token that would break out of its value: the secret = %q, want an error", got)
 	}
 	if _, err := secret.GetSecret(ctx, "other"); !errors.Is(err, secrets.ErrNotFound) || asked != 1 {
 		t.Errorf("another secret: %v after %d asks, want not found and the credential not asked", err, asked)

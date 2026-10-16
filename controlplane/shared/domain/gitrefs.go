@@ -9,6 +9,14 @@ import (
 // empty commit. Once it exists no agent writes it.
 const DefaultBranch = "main"
 
+// BuildsGitPath is where under the git proxy an environment build reads the repository it is of.
+const BuildsGitPath = "builds"
+
+// BuildGitProxyURL is where the build of the environment key reads its repository through the
+// git proxy at base. It has no .git suffix, so a URL rewrite of the repository's address with or
+// without one lands on it.
+func BuildGitProxyURL(base, key string) string { return base + "/" + BuildsGitPath + "/" + key }
+
 // GitProxyURL is the address the repository of a platform experiment is cloned from through the
 // control plane's git proxy served at base.
 func GitProxyURL(base, platformExperimentID string) string {

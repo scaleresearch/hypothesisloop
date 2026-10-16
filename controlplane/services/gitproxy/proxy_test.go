@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -32,6 +33,12 @@ const (
 type fakeStore struct {
 	closed, draft bool
 	signups       map[string]domain.AgentSignup
+	// builds are the environment builds building now, by cluster/key/attempt.
+	builds map[string]*domain.Environment
+}
+
+func (s *fakeStore) AssignedEnvironmentBuild(_ context.Context, cluster, key string, attempt int) (*domain.Environment, error) {
+	return s.builds[fmt.Sprintf("%s/%s/%d", cluster, key, attempt)], nil
 }
 
 func (s *fakeStore) PlatformExperimentRepository(_ context.Context, id string) (string, string, bool, bool, error) {
@@ -73,6 +80,7 @@ var principals = tokens{
 	"tok-other-pe":     {Kind: auth.KindAgent, AgentID: "agent-x", PlatformExperimentID: "pe-2"},
 	"tok-over":         {Kind: auth.KindAgent, AgentID: "agent-r2", PlatformExperimentID: "pe-1", RunOver: true},
 	"tok-staff":        {Kind: auth.KindStaff},
+	"tok-build":        {Kind: auth.KindBuild, Build: auth.BuildRef{Cluster: "cluster-a", Key: "key-1", Attempt: 1}},
 }
 
 func signups() map[string]domain.AgentSignup {
@@ -85,13 +93,16 @@ func signups() map[string]domain.AgentSignup {
 }
 
 type world struct {
-	t       *testing.T
-	root    string
-	bare    string
-	proxy   string
-	store   *fakeStore
-	logs    *observer.ObservedLogs
-	outputs []string
+	t     *testing.T
+	root  string
+	bare  string
+	proxy string
+	// proxyBase is where the proxy is served, hostURL the repository's address at the host.
+	proxyBase string
+	hostURL   string
+	store     *fakeStore
+	logs      *observer.ObservedLogs
+	outputs   []string
 }
 
 func gitBinary(t *testing.T) string {
@@ -137,7 +148,9 @@ func newWorld(t *testing.T) *world {
 	handler := api.LoggingMiddleware(logger)(auth.Gate(principals, logger, nil)(New(w.store, plain, logger)))
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	w.proxy = domain.GitProxyURL(server.URL+"/git", "pe-1")
+	w.proxyBase = server.URL + "/git"
+	w.proxy = domain.GitProxyURL(w.proxyBase, "pe-1")
+	w.hostURL = plain.URL(repository)
 	return w
 }
 
@@ -418,4 +431,69 @@ func TestAnAgentWhoseNameMakesAnotherAgentsBranchNamesPushesNothing(t *testing.T
 	if out, err := w.git("tok-researcher-2", dir, "push", "origin", "hl/pe-1/researcher-2/x"); err == nil || !strings.Contains(out, "make the same branch names") {
 		t.Errorf("pushing beside an agent of the same branch names: %v: %s, want it refused", err, out)
 	}
+}
+
+// An environment build clones the repository at its own address with the git config it mounts
+// as a secret, which sends it through the proxy with its build token, and pushes nothing.
+func TestAnEnvironmentBuildReadsItsRepositoryThroughTheProxyAndNothingElse(t *testing.T) {
+	w := newWorld(t)
+	w.store.builds = map[string]*domain.Environment{"cluster-a/key-1/1": {Key: "key-1", ProjectID: "prj-1", GitRepository: repository}}
+	config, err := clusterapi.EnvironmentGitCredential{ProxyURL: domain.BuildGitProxyURL(w.proxyBase, "key-1"), RepositoryURL: w.hostURL, Token: "tok-build"}.GitConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(w.root, "git-credentials")
+	if err := os.WriteFile(secret, config, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	main := w.hostRef("refs/heads/main")
+	var dir string
+	for i, address := range []string{w.hostURL, strings.TrimSuffix(w.hostURL, ".git")} {
+		dir = filepath.Join(w.root, fmt.Sprintf("build-%d", i))
+		if out, err := w.git("", w.root, "-c", "include.path="+secret, "clone", "--quiet", address, dir); err != nil {
+			t.Fatalf("a build cloning %s: %v: %s", address, err, out)
+		}
+		if got := w.run(dir, "rev-parse", "HEAD"); got != main {
+			t.Errorf("a build cloned %s at %s, want main %s", address, got, main)
+		}
+	}
+	w.commitOn(dir, "hl/pe-1/researcher-2/x")
+	if out, err := w.git("", dir, "-c", "include.path="+secret, "push", "origin", "hl/pe-1/researcher-2/x"); err == nil || !strings.Contains(out, "read-only") {
+		t.Errorf("a build pushing: %v: %s, want it refused as read-only", err, out)
+	}
+	if w.hostRef("refs/heads/hl/pe-1/researcher-2/x") != "" {
+		t.Error("a build's push reached the host")
+	}
+
+	get := func(token, address string) (int, string) {
+		request, err := http.NewRequest(http.MethodGet, address+"/info/refs?service=git-upload-pack", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close() //nolint:errcheck
+		body, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(body)
+	}
+	for name, c := range map[string]struct {
+		token, address string
+		status         int
+	}{
+		"the build's token on a platform experiment's repository": {"tok-build", w.proxy, http.StatusNotFound},
+		"the build's token on another build's repository":         {"tok-build", domain.BuildGitProxyURL(w.proxyBase, "key-2"), http.StatusNotFound},
+		"an agent's token on a build's repository":                {"tok-researcher-2", domain.BuildGitProxyURL(w.proxyBase, "key-1"), http.StatusForbidden},
+	} {
+		if status, body := get(c.token, c.address); status != c.status {
+			t.Errorf("%s: got = %d %s, want %d", name, status, body, c.status)
+		}
+	}
+	w.store.builds = nil
+	if status, body := get("tok-build", domain.BuildGitProxyURL(w.proxyBase, "key-1")); status != http.StatusForbidden || !strings.Contains(body, "build over") {
+		t.Errorf("a build that ended: %d %s, want 403 build over", status, body)
+	}
+	w.noSecretLeaked()
 }
