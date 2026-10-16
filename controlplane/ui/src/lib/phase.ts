@@ -1,7 +1,7 @@
 import { PlatformExperimentStatus } from '@/types/platform-experiments'
 import type { PlatformExperiment, StatusReason } from '@/types/platform-experiments'
 
-type Phase = 'planning' | 'proposal' | 'baseline' | 'running' | 'closed'
+export type Phase = 'planning' | 'proposal' | 'baseline' | 'running' | 'closed'
 
 /** The course of an experiment from a sentence to its close, in order. */
 export const PHASES: { key: Phase; label: string }[] = [
