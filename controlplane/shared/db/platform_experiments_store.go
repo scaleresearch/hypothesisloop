@@ -157,7 +157,7 @@ const summarySQL = `concat_ws(E'\n\n', NULLIF(pe.summary, ''), NULLIF(pe.close_r
 const plannerOfDraft = `planner.platform_experiment_id = pe.id AND planner.role = '` + string(domain.SignupRolePlanner) + `' AND pe.status = 'draft'`
 
 // priorRuns selects, latest close first, the ids of the prior runs of platform experiment $1:
-// every other closed one of its project that works on the same repository and ran: its
+// every other closed one of its project, not removed, that works on the same repository and ran: its
 // researchers started or it declared a baseline, so a draft closed before either is none. The run
 // its continues names, and each one that run carried on, is among them, since only a run that
 // declared a baseline can be continued.
@@ -165,7 +165,7 @@ const priorRuns = `
 SELECT prior.id FROM platform_experiments run
 JOIN platform_experiments prior ON prior.project_id = run.project_id AND prior.repository = run.repository
 WHERE run.id = $1 AND run.repository <> '' AND prior.id <> run.id AND prior.status = '` + string(domain.PlatformExpClosed) + `'
-  AND (prior.started_at IS NOT NULL OR prior.baseline_job_id <> '')
+  AND (prior.started_at IS NOT NULL OR prior.baseline_job_id <> '') AND prior.removed_at IS NULL
 ORDER BY prior.closed_at DESC, prior.id`
 
 // PriorRuns is the ids of the prior runs of platform experiment id, empty when it has none.
@@ -229,7 +229,7 @@ func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id
 	q := `
 SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hours, pe.max_agents, pe.researchers, pe.metrics, pe.report_interval_seconds, pe.starts_at, pe.ends_at, pe.status, pe.stages, pe.current_stage, ` + summarySQL + `, pe.created_at, pe.updated_at, pe.max_concurrent_accelerators, pe.default_quota_tier, pe.shared,
        ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.repository_url, pe.agent_image, pe.goal, COALESCE(pe.continues, ''), pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason,
-       pe.baseline_job_id, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id, pe.close_message, pe.repository_error, pe.repository_account, COALESCE(pe.researchers_held, ''),
+       pe.baseline_job_id, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id, pe.close_message, pe.removed_at, pe.repository_error, pe.repository_account, COALESCE(pe.researchers_held, ''),
        pe.duration_hours, pe.started_at, pe.planner_ends_at, pe.accepts_at, COALESCE(ci.activity, ''), ci.activity_at,
        pe.accepted_at, pe.accepted_by_kind, pe.accepted_by_id, pe.accepted_answers,
        (SELECT pi.activity FROM experiment_signups planner JOIN hosted_instances pi USING (platform_experiment_id, agent_id) WHERE ` + plannerOfDraft + `),
@@ -257,7 +257,7 @@ WHERE pe.id = $1`
 		&coordinator.Instance.Renewals, &coordinator.Instance.Stopped, &coordinator.Instance.ExitedAt, &coordinator.Instance.ExitLog,
 		&coordinator.Instance.SeenAt, &coordinator.Instance.AskedAt, &coordinator.Instance.Launch, &coordinator.Instance.Reported, &coordinator.Instance.ProgressAt, &coordinator.Instance.EndReason, &coordinator.Instance.Released, &pe.MaxHosted, &pe.Repository, &pe.RepositoryURL, &pe.AgentImage,
 		&pe.Goal, &pe.Continues, &createdBy.Kind, &createdBy.ID, &proposal, &answeredAt, &pe.DeclinedReason,
-		&pe.BaselineJobID, &pe.JobEstimatedDurationHours, &pe.ClosedAt, &pe.CloseReason, &closedBy.Kind, &closedBy.ID, &pe.CloseMessage, &pe.RepositoryError, &pe.RepositoryAccount, &pe.ResearchersHeld,
+		&pe.BaselineJobID, &pe.JobEstimatedDurationHours, &pe.ClosedAt, &pe.CloseReason, &closedBy.Kind, &closedBy.ID, &pe.CloseMessage, &pe.RemovedAt, &pe.RepositoryError, &pe.RepositoryAccount, &pe.ResearchersHeld,
 		&pe.DurationHours, &startedAt, &plannerEndsAt, &acceptsAt, &coordinatorActivity, &coordinatorActivityAt,
 		&pe.AcceptedAt, &acceptedBy.Kind, &acceptedBy.ID, &acceptedAnswers,
 		&plannerActivity, &plannerActivityAt,
@@ -400,8 +400,10 @@ func platformExperimentOrderBy(sort string) string {
 	return col + " " + dir + ", " + statusPriorityTiebreak
 }
 
+// platformExperimentFilterClauses is the filter of a listing, which a removed platform experiment
+// is in for nobody.
 func platformExperimentFilterClauses(filter PlatformExperimentsFilter) ([]string, []any) {
-	clauses := []string{"1=1"}
+	clauses := []string{"pe.removed_at IS NULL"}
 	args := []any{}
 	n := 1
 	if filter.Status != "" {
@@ -467,10 +469,10 @@ func (s *PlatformExperimentsStore) ListPlatformExperiments(ctx context.Context, 
 // borrowed it silently stopped reconciling at the page boundary — stage ladders past the first
 // twenty running platform experiments never advanced, and nothing anywhere said so. A control
 // loop acts on all of its subjects or on none of them, so it must never read them through a
-// paginated query.
+// paginated query. A removed one is among them: its jobs are evicted and its spend settled as
+// any other's.
 func (s *PlatformExperimentsStore) ListPlatformExperimentsByStatus(ctx context.Context, status domain.PlatformExperimentStatus) ([]*domain.PlatformExperiment, error) {
-	clauses, args := platformExperimentFilterClauses(PlatformExperimentsFilter{Scope: domain.AllTenants, Status: string(status)})
-	return s.queryPlatformExperiments(ctx, platformExperimentSelect(clauses, ""), args...)
+	return s.queryPlatformExperiments(ctx, platformExperimentSelect([]string{"pe.status = $1"}, ""), string(status))
 }
 
 func platformExperimentSelect(clauses []string, sort string) string {
@@ -577,6 +579,29 @@ WHERE id = $1 AND status <> 'closed'`
 	return nil
 }
 
+// RemovePlatformExperiment removes platform experiment id for by: from then on it is answered to
+// nobody and read by the platform's own loops alone, and everything it holds is kept. One not
+// closed yet is closed in the same write, with close_reason removed. The trigger of the row
+// announces the close and the removal. ErrPlatformExperimentNotFound for an id none has, and for
+// one removed before.
+func (s *PlatformExperimentsStore) RemovePlatformExperiment(ctx context.Context, id string, by domain.Actor) error {
+	tag, err := s.pool.pool.Exec(ctx, `
+UPDATE platform_experiments
+SET removed_at = now(), removed_by_kind = $2, removed_by_id = $3, updated_at = now(),
+    status = 'closed', closed_at = COALESCE(closed_at, now()),
+    close_reason = CASE WHEN status = 'closed' THEN close_reason ELSE $4 END,
+    closed_by_kind = CASE WHEN status = 'closed' THEN closed_by_kind ELSE $2 END,
+    closed_by_id = CASE WHEN status = 'closed' THEN closed_by_id ELSE $3 END
+WHERE id = $1 AND removed_at IS NULL`, id, string(by.Kind), by.ID, string(domain.CloseRemoved))
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.Remove: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrPlatformExperimentNotFound
+	}
+	return nil
+}
+
 // RecordClose writes record as the platform's record of the close of the closed platform
 // experiment id, once: one written before stays. The coordinator's summary is kept beside it.
 func (s *PlatformExperimentsStore) RecordClose(ctx context.Context, id, record string) error {
@@ -596,7 +621,8 @@ var ErrNotReopenable = errors.New("platform experiment is not a closed run that 
 // coordinatorModel that is not empty its hosted coordinator on that model. What the close wrote
 // goes with it: closed_at, why and by whom, the agent lines and record of the close and the
 // placements, so every reader takes it for the running run it was. The status change is announced
-// by the row's trigger. ErrNotReopenable, and ErrPlatformExperimentNotFound for an id none has.
+// by the row's trigger. ErrNotReopenable, and ErrPlatformExperimentNotFound for an id none has
+// and a removed one.
 func (s *PlatformExperimentsStore) ReopenPlatformExperiment(ctx context.Context, id string, endsAt time.Time, durationHours float64, coordinatorModel string) error {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
@@ -609,14 +635,14 @@ SET status = 'running', updated_at = now(), ends_at = $2, duration_hours = $3,
     coordinator_model = CASE WHEN $4 <> '' THEN $4 ELSE coordinator_model END,
     closed_at = NULL, close_reason = '', closed_by_kind = '', closed_by_id = '', close_message = '',
     close_agents = '', close_record = ''
-WHERE pe.id = $1 AND pe.status = 'closed' AND pe.started_at IS NOT NULL AND ($4 = '' OR pe.coordinator_hosted)
+WHERE pe.id = $1 AND pe.status = 'closed' AND pe.removed_at IS NULL AND pe.started_at IS NOT NULL AND ($4 = '' OR pe.coordinator_hosted)
   AND NOT EXISTS (SELECT 1 FROM platform_experiments later WHERE later.continues = pe.id)`, id, endsAt, durationHours, coordinatorModel)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Reopen: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		var exists bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM platform_experiments WHERE id = $1)`, id).Scan(&exists); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM platform_experiments WHERE id = $1 AND removed_at IS NULL)`, id).Scan(&exists); err != nil {
 			return fmt.Errorf("platform_experiments_store.Reopen: %w", err)
 		}
 		if !exists {

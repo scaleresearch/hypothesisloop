@@ -7,13 +7,14 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// tenantClause restricts rows to the platform experiments inside scope, matched on peColumn. It
-// returns "" for an unrestricted scope, and otherwise a predicate numbered after args.
+// tenantClause restricts rows to the platform experiments inside scope, matched on peColumn, and
+// not removed. It returns "" for an unrestricted scope, and otherwise a predicate numbered after
+// args.
 func tenantClause(scope domain.TenantScope, peColumn string, args []any) (string, []any) {
 	if scope.Unrestricted() {
 		return "", args
 	}
-	var conds []string
+	conds := []string{"tpe.removed_at IS NULL"}
 	if !scope.AllOrgs {
 		args = append(args, scope.OrgIDs)
 		conds = append(conds, fmt.Sprintf("tp.org_id = ANY($%d)", len(args)))

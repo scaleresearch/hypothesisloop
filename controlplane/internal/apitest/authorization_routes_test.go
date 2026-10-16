@@ -304,6 +304,7 @@ var routes = []route{
 	{method: "PATCH", path: "/platform-experiments/{id}", request: "/platform-experiments/<pe>", body: `{"description":"d"}`, rule: scoped(coordinatorAudience, reached)},
 	{method: "GET", path: "/platform-experiments/{id}/signups/{agent_id}", request: "/platform-experiments/<pe>/signups/<agent>", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "POST", path: "/platform-experiments/{id}/close", request: "/platform-experiments/<pe>/close", rule: scoped(coordinatorAudience, reached)},
+	{method: "DELETE", path: "/platform-experiments/{id}", request: "/platform-experiments/<pe>", rule: scoped(coordinatorAudience, reached)},
 	{method: "POST", path: "/platform-experiments/{id}/reopen", request: "/platform-experiments/<pe>/reopen", body: `{"ends_at":"2030-01-01T00:00:00Z"}`, rule: staffOnly},
 	{method: "GET", path: "/platform-experiments/{id}/results", request: "/platform-experiments/<pe>/results", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "GET", path: "/platform-experiments/{id}/health", request: "/platform-experiments/<pe>/health", rule: scoped(agentAudience, reached), sharedRead: true},

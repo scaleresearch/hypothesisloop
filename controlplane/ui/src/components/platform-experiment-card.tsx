@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge'
 import { SharedBadge } from '@/components/shared-badge'
 import { Button } from '@/components/ui/button'
 import { Inline } from '@/components/ui/stack'
+import { RemoveExperiment } from '@/components/remove-experiment'
 
 const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' })
 
@@ -25,7 +26,8 @@ const EDITABLE: string[] = [PlatformExperimentStatus.OPEN, PlatformExperimentSta
 
 /**
  * One platform experiment in a list, on one line, opening its page. It shows the figures its
- * state gives a meaning to and none that are zero. One the caller only reads offers no edit.
+ * state gives a meaning to and none that are zero. One the caller only reads offers no edit and
+ * no removal.
  */
 export function PlatformExperimentCard({
   pe,
@@ -102,6 +104,12 @@ export function PlatformExperimentCard({
           {when && <span>{when}</span>}
           {!readOnly && EDITABLE.includes(pe.status) && (
             <Button size="sm" onClick={e => { e.stopPropagation(); onEdit(pe) }}>Edit</Button>
+          )}
+          {!readOnly && (
+            // The dialog is rendered in a portal, and its clicks and keys still bubble to the row through React.
+            <span onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
+              <RemoveExperiment pe={pe} label="Remove" />
+            </span>
           )}
         </Inline>
       </div>

@@ -26,9 +26,10 @@ type Placement interface {
 // Access answers whether the request's principal may touch a resource. The rule is the same for
 // every resource: place it in a platform experiment, compare that platform experiment's org and
 // project to the principal's, and for an agent or a coordinator the platform experiment itself.
-// A resource outside the principal's scope and one that does not exist are answered alike, as
-// not found, so the answer says nothing about another org. Only staff, who see every org, pass
-// on an id with no row and get the handler's own answer for it.
+// A resource outside the principal's scope, one that does not exist and one in a removed
+// platform experiment are answered alike, as not found, so the answer says nothing about another
+// org. Only staff, who see every org, pass on an id with no row and get the handler's own answer
+// for it.
 //
 // One thing reaches past a caller's scope: a platform experiment staff shared is read by every
 // account, and only read (reaches). It is listed beside the caller's own in every project. Every write to it, and every credential of it, is answered

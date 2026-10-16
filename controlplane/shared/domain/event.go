@@ -88,6 +88,9 @@ const (
 	// EventPlatformExperimentBaseline says the baseline of a running platform experiment was
 	// raised to a stronger job, with the sentence every agent is told.
 	EventPlatformExperimentBaseline = "platform_experiment.baseline"
+	// EventPlatformExperimentRemoved says a person removed the platform experiment: it is answered
+	// to nobody from then on, its tokens included, so the event is the last word of its stream.
+	EventPlatformExperimentRemoved = "platform_experiment.removed"
 	// EventMetricPoint is a pointer, never a value: experiment id, metric name, fraction
 	// complete. Metrics live solely in the metrics store, and this event says only that one
 	// arrived — a subscriber that wants the number reads it from there. It is the one kind
@@ -184,6 +187,8 @@ var EventKinds = []EventKindDoc{
 		Description: "A person asked the planner of a draft to change its answer (POST /platform-experiments/{id}/revise). What was asked is the last of revisions on GET /platform-experiments/{id}, whose status_reason reads revising until the planner answers again. A planner whose machine is still there after its answer is told by this event, and one whose machine was released is started again."},
 	{Kind: EventPlatformExperimentBaseline, Subject: "platform experiment id", Value: "the job that is the baseline from now on",
 		Description: "The baseline of the running run was raised to a stronger job that measured the control (PATCH /platform-experiments/{id} with baseline_job_id and baseline_reason). detail says by whom, from which value to which on the ranking metric, and why. The brief's measured baseline changed with it, and standings are set against the new bar: re-read the brief with GET /platform-experiments/{id}."},
+	{Kind: EventPlatformExperimentRemoved, Subject: "platform experiment id", Value: "empty by design",
+		Description: "A person removed the run (DELETE /platform-experiments/{id}). One still going was closed in the same write, told by platform_experiment.status closed just before. It is a stop condition for every agent in it: every read of it answers 404 from then on, and the tokens of its agents and coordinator are refused, so stop at once and file nothing more."},
 	{Kind: EventMetricPoint, Subject: "experiment id", Value: "metric name and fraction complete",
 		Description: "A sample arrived. The number lives only in the metrics store — read it with GET /experiments/{id}/metrics. The one kind replay cannot return."},
 	{Kind: EventJobHeld, Subject: "experiment id", Value: "the code of the queue reason (not_admitted_reason), or baseline_late",

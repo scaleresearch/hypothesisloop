@@ -504,14 +504,14 @@ func (s *AccountsStore) RevokeAPIKey(ctx context.Context, id string) error {
 }
 
 // PlatformExperimentTenancy places a platform experiment and reports when it closed, nil while
-// it has not. A nil tenancy means there is no such platform experiment.
+// it has not. A nil tenancy means there is no such platform experiment, or it was removed.
 func (s *AccountsStore) PlatformExperimentTenancy(ctx context.Context, platformExperimentID string) (*domain.Tenancy, *time.Time, error) {
 	t := &domain.Tenancy{PlatformExperimentID: platformExperimentID}
 	var closedAt *time.Time
 	err := s.pool.pool.QueryRow(ctx, `
 SELECT pe.project_id, p.org_id, pe.shared, ARRAY(`+priorRuns+`), pe.closed_at
 FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
-WHERE pe.id = $1`, platformExperimentID).Scan(&t.ProjectID, &t.OrgID, &t.Shared, &t.PriorRuns, &closedAt)
+WHERE pe.id = $1 AND pe.removed_at IS NULL`, platformExperimentID).Scan(&t.ProjectID, &t.OrgID, &t.Shared, &t.PriorRuns, &closedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, nil
 	}
@@ -522,7 +522,8 @@ WHERE pe.id = $1`, platformExperimentID).Scan(&t.ProjectID, &t.OrgID, &t.Shared,
 }
 
 // ExperimentTenancy places a job through its platform experiment, names the agent it belongs to
-// and reports whether the job has ended. nil when there is no such job.
+// and reports whether the job has ended. nil when there is no such job, or its platform
+// experiment was removed.
 func (s *AccountsStore) ExperimentTenancy(ctx context.Context, experimentID string) (*domain.Tenancy, bool, error) {
 	t := &domain.Tenancy{}
 	var terminal bool
@@ -531,7 +532,7 @@ SELECT pe.id, pe.project_id, p.org_id, pe.shared, e.agent_id, e.status IN ('COMP
 FROM experiments e
 JOIN platform_experiments pe ON pe.id = e.platform_experiment_id
 JOIN projects p ON p.id = pe.project_id
-WHERE e.id = $1`, experimentID).Scan(&t.PlatformExperimentID, &t.ProjectID, &t.OrgID, &t.Shared, &t.AgentID, &terminal)
+WHERE e.id = $1 AND pe.removed_at IS NULL`, experimentID).Scan(&t.PlatformExperimentID, &t.ProjectID, &t.OrgID, &t.Shared, &t.AgentID, &terminal)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
 	}

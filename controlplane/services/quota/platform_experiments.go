@@ -40,6 +40,9 @@ type PlatformExperimentsStore interface {
 	// ClosePlatformExperiment closes it and records why: by is whose credential asked, nil for
 	// the platform at the end time.
 	ClosePlatformExperiment(ctx context.Context, id string, by *domain.Actor, message string) error
+	// RemovePlatformExperiment removes it for by, closing one not closed yet in the same write:
+	// db.ErrPlatformExperimentNotFound.
+	RemovePlatformExperiment(ctx context.Context, id string, by domain.Actor) error
 	// ReopenPlatformExperiment sets a closed run that started running again until endsAt, its
 	// hosted coordinator on coordinatorModel unless it is empty, and takes back what the close
 	// wrote: db.ErrNotReopenable, db.ErrPlatformExperimentNotFound.

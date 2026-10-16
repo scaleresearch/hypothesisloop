@@ -409,7 +409,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if err != nil {
 			return nil, auth.Internal(peh.logger, "get platform experiment", err, zap.String("id", in.ID))
 		}
-		if pe == nil {
+		if pe == nil || pe.RemovedAt != nil {
 			return nil, huma.Error404NotFound("platform experiment not found")
 		}
 		signups, err := peh.svc.store.ListSignups(ctx, in.ID)
@@ -566,6 +566,30 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			return nil, peh.refusal("close platform experiment", err)
 		}
 		return peh.Answer(ctx, pe)
+	})
+
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "remove-platform-experiment", Method: "DELETE", Path: "/platform-experiments/{id}", DefaultStatus: http.StatusNoContent,
+		Summary: "Remove a platform experiment", Tags: []string{"platform-experiments"},
+		Description: "Takes the platform experiment off the platform for every account: its lists, its reads and those of everything in it, its hypotheses, jobs, " +
+			"standings and watch stream, answer 404 from then on, to staff too, and the tokens of its agents and coordinator are refused. Whoever may close it removes it. " +
+			"One not closed yet is closed first as POST /platform-experiments/{id}/close closes it, every running job evicted and every agent stopped, with close_reason removed, " +
+			"in the same write. Nothing it holds is deleted, and what it spent counts toward every total as before. " +
+			"Its agents and its coordinator are told with platform_experiment.removed. 404 for one removed before.",
+	}, func(ctx context.Context, in *struct {
+		ID string `path:"id"`
+	}) (*struct{}, error) {
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
+		caller, err := peh.caller(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := peh.svc.Remove(ctx, in.ID, caller.Actor()); err != nil {
+			return nil, peh.refusal("remove platform experiment", err)
+		}
+		return &struct{}{}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceStaff, huma.Operation{

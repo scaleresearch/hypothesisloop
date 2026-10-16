@@ -656,6 +656,10 @@ export function closePlatformExperiment(id: string): Promise<PlatformExperiment>
   return apiSend<PlatformExperiment>('POST', `/platform-experiments/${id}/close`)
 }
 
+export async function removePlatformExperiment(id: string): Promise<void> {
+  await answer('DELETE', `/platform-experiments/${id}`)
+}
+
 export interface Stage {
   length_pct: number
   evict_pct: number

@@ -271,7 +271,7 @@ func (s *PlatformExperimentsService) requireContinuable(ctx context.Context, pro
 		return fmt.Errorf("platform_experiments: reading the run to continue: %w", err)
 	}
 	switch {
-	case prior == nil || prior.ProjectID != projectID:
+	case prior == nil || prior.RemovedAt != nil || prior.ProjectID != projectID:
 		return refuseUpdate(422, "invalid_continues", "continues %q names no platform experiment of project %s", continues, projectID)
 	case prior.Status != domain.PlatformExpClosed:
 		return refuseUpdate(422, "invalid_continues", "continues %s, which is %s: a run carries on one that closed", continues, prior.Status)
@@ -978,7 +978,7 @@ func runningReason(pe *domain.PlatformExperiment, signups []domain.AgentSignup, 
 // before its run started for want of a baseline, it says whether a job was submitted for one.
 func (s *PlatformExperimentsService) closedReason(ctx context.Context, pe *domain.PlatformExperiment) (*domain.StatusReason, error) {
 	closer := "the owner"
-	if pe.CloseReason == domain.CloseByRequest && pe.ClosedBy != nil {
+	if (pe.CloseReason == domain.CloseByRequest || pe.CloseReason == domain.CloseRemoved) && pe.ClosedBy != nil {
 		if err := s.store.NameActors(ctx, []*domain.Actor{pe.ClosedBy}); err != nil {
 			return nil, fmt.Errorf("platform_experiments.closedReason: %w", err)
 		}
@@ -987,6 +987,7 @@ func (s *PlatformExperimentsService) closedReason(ctx context.Context, pe *domai
 	how := map[domain.CloseReason]string{
 		domain.CloseEndTimeReached:       "the run reached its ends_at and the platform closed it",
 		domain.CloseByRequest:            closer + " asked for it to be closed",
+		domain.CloseRemoved:              closer + " removed it",
 		domain.ClosePlanningLimitReached: "its planner answered nothing by planning_ends_at and the platform closed the draft",
 		domain.CloseProposalExpired:      "no person accepted or revised its planner's answer by proposal_expires_at and the platform closed the draft",
 		domain.ClosePlannerStopped:       "its planner's machine ended before it answered and the platform had restarted it as often as it restarts one, so it closed the draft: the planner's instance in the roster says how the last machine ended (end_reason, exit_log). Nothing was spent on a run, and the same goal makes a new draft",
@@ -1265,6 +1266,44 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, by *d
 	if pe.Status == domain.PlatformExpClosed {
 		return nil, invalidTransition("platform experiment %s is already closed", id)
 	}
+	return s.close(ctx, pe, topResults, func() error {
+		return s.store.ClosePlatformExperiment(ctx, id, by, domain.EventDetail(message))
+	})
+}
+
+// Remove removes platform experiment id for by: it is answered to nobody from then on, and
+// everything it holds is kept, its spend included. One not closed yet is closed as Close closes
+// it, its agents stopped and its jobs evicted, with close_reason removed, in the write that
+// removes it.
+func (s *PlatformExperimentsService) Remove(ctx context.Context, id string, by domain.Actor) error {
+	pe, err := s.stored(ctx, id)
+	if err != nil {
+		return err
+	}
+	remove := func() error {
+		err := s.store.RemovePlatformExperiment(ctx, id, by)
+		if errors.Is(err, db.ErrPlatformExperimentNotFound) {
+			return noPlatformExperiment(id)
+		}
+		return err
+	}
+	if pe.Status == domain.PlatformExpClosed {
+		err = remove()
+	} else {
+		_, err = s.close(ctx, pe, nil, remove)
+	}
+	if err != nil {
+		return err
+	}
+	s.logger.Info("platform experiment removed", zap.String("platform_experiment_id", id))
+	return nil
+}
+
+// close records the standings and the agent lines of pe, which is not closed, runs write, which
+// closes it, and writes the record of the close once its every job settled.
+func (s *PlatformExperimentsService) close(ctx context.Context, pe *domain.PlatformExperiment, topResults []AgentResult, write func() error) (*domain.PlatformExperiment, error) {
+	id := pe.ID
+	var err error
 	// A draft never ran: closing it abandons the plan, and there are no standings to record.
 	if pe.Status != domain.PlatformExpDraft {
 		if len(topResults) == 0 {
@@ -1292,7 +1331,7 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, by *d
 			return nil, fmt.Errorf("close: %w", err)
 		}
 	}
-	if err := s.store.ClosePlatformExperiment(ctx, id, by, domain.EventDetail(message)); err != nil {
+	if err := write(); err != nil {
 		return nil, fmt.Errorf("close: %w", err)
 	}
 	closed, err := s.stored(ctx, id)
