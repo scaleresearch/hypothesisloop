@@ -252,33 +252,18 @@ func TestDestroyReportsEveryOtherFailure(t *testing.T) {
 
 const tooMany = `{"message": "The action could not be performed because there were too many requests by the client."}`
 
-// Seen on a real account: two destroys of one instance were refused with 429 in a row. An
-// instance that is not destroyed is paid for.
-func TestDestroyAsksAgainWhenTheAPISaysTheAccountCalledTooOften(t *testing.T) {
-	api := newFakeAPI(t)
-	api.on(http.MethodDelete, "/api/v0/instances/9001/", inSequence(answer(429, tooMany), answer(429, tooMany), answer(200, `{"success":true}`)))
-	p := newTestProvider(t, api, Settings{})
-
-	if err := p.Destroy(context.Background(), "9001"); err != nil {
-		t.Fatalf("Destroy: %v", err)
-	}
-	if sent := api.sent(http.MethodDelete, "/api/v0/instances/9001/"); len(sent) != 3 {
-		t.Fatalf("destroy requests = %d, want the two refused and the one that went through", len(sent))
-	}
-}
-
-func TestDestroyRefusedUntilTimeRunsOutSaysTheInstanceIsStillRented(t *testing.T) {
+// A destroy the API refuses as one call too many is asked once and fails, so the caller's next
+// pass asks again.
+func TestDestroyRefusedAsOneCallTooManyFailsOnce(t *testing.T) {
 	api := newFakeAPI(t)
 	api.on(http.MethodDelete, "/api/v0/instances/9001/", answer(429, tooMany))
 	p := newTestProvider(t, api, Settings{})
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
-	defer cancel()
 
-	err := p.Destroy(ctx, "9001")
-	if err == nil || !strings.Contains(err.Error(), "still rented") || !strings.Contains(err.Error(), "HTTP 429") {
-		t.Fatalf("Destroy = %v, want it to say the instance is still rented and why", err)
+	err := p.Destroy(context.Background(), "9001")
+	if err == nil || !strings.Contains(err.Error(), "HTTP 429") {
+		t.Fatalf("Destroy = %v, want the refusal", err)
 	}
-	if sent := api.sent(http.MethodDelete, "/api/v0/instances/9001/"); len(sent) < 2 {
-		t.Fatalf("destroy requests = %d, want more than one try", len(sent))
+	if sent := api.sent(http.MethodDelete, "/api/v0/instances/9001/"); len(sent) != 1 {
+		t.Fatalf("destroy requests = %d, want one", len(sent))
 	}
 }
