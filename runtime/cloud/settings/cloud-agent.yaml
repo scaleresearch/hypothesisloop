@@ -21,8 +21,9 @@ environments_repository: registry.example.invalid/hypothesisloop-environments/en
 # would run and bill unmanaged, and every job still desired would be rented a second time.
 namespace: main
 
-# A reconcile pass costs the provider one list call. A status push costs one list call and one
-# log read per job whose command has started. Set these against the provider's rate limit.
+# A reconcile pass costs the provider one list call, and for a provider with a market one offer
+# search per shape. A status push costs one list call and one log read per job whose command has
+# started. Set these against the provider's rate limit.
 reconcile_interval_seconds: 10
 status_interval_seconds: 10
 # How much of a job's output a status push relays.
@@ -33,8 +34,6 @@ log_tail_lines: 100
 # control plane bounds each wait on its own: it requeues a job whose stuck-pending timeout (300
 # seconds unless the cluster's settings give stuck_pending_timeout_seconds) has passed since
 # this runtime first reported the wait the job is in, so the two waits are never added up.
-# offer_wait_seconds is also how long one count of the provider's offers stands: a provider with
-# a market is searched once per shape in that time, and never once per pass.
 offer_wait_seconds: 180
 startup_seconds: 240
 

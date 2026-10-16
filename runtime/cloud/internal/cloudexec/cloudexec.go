@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
@@ -74,20 +73,10 @@ type Executor struct {
 	shapes       []Shape
 	provider     provider.Provider
 	// market is the provider's Market capability, nil for a vendor that has none.
-	market provider.Market
-	// offers is the market's last answers, shared by the executor of every pass, and now the
-	// clock they are aged on.
-	offers    *offerCounts
-	now       func() time.Time
+	market    provider.Market
 	offerWait time.Duration
 	startup   time.Duration
 	pass      *view
-	// undestroyed is the instances a destroy failed for since the process started, by id with
-	// their names. It is only what Leave asks for again: each pass finds them anew in the
-	// vendor's list, and a process that starts without it loses nothing. The executor of every
-	// pass shares it.
-	undestroyed   map[string]string
-	undestroyedMu *sync.Mutex
 }
 
 var (
@@ -114,8 +103,6 @@ func New(cfg Config) (*Executor, error) {
 	market, _ := rented.(provider.Market)
 	return &Executor{
 		market:       market,
-		offers:       &offerCounts{byShape: map[string]counted{}},
-		now:          time.Now,
 		clusterID:    cfg.ClusterID,
 		prefix:       cfg.prefix(),
 		apiURL:       cfg.APIURL,
@@ -126,7 +113,6 @@ func New(cfg Config) (*Executor, error) {
 		provider:     rented,
 		offerWait:    cfg.OfferWait,
 		startup:      cfg.Startup,
-		undestroyed:  map[string]string{}, undestroyedMu: &sync.Mutex{},
 	}, nil
 }
 

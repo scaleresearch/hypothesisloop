@@ -6,8 +6,6 @@ import (
 	"log"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
@@ -45,23 +43,6 @@ func (e *Executor) slots(ctx context.Context) ([]slot, error) {
 	return e.slotsAgainst(v, rentable), nil
 }
 
-// counted is one answer of the market about a shape: what it had to rent, how many instances of
-// the shape the account held then, and when it was asked.
-type counted struct {
-	supply provider.Supply
-	held   int
-	at     time.Time
-}
-
-// offerCounts keeps the market's last answer per shape for the executors of every pass, because
-// the vendor's search is rate limited and a refused search fails the whole pass. A count that
-// went stale reports a slot free the market no longer has a machine for: the job placed on it
-// waits and goes back to the queue as no_offer. A process that starts without it asks again.
-type offerCounts struct {
-	mu      sync.Mutex
-	byShape map[string]counted
-}
-
 // onOffer is how many more instances of a shape the vendor has a machine for, and why a slot of
 // the shape beyond them has none.
 type onOffer struct {
@@ -69,52 +50,29 @@ type onOffer struct {
 	why  string
 }
 
-// rentable is what the vendor has to rent of each shape, at the size Create rents a slot at. It
-// is nil for a provider with no market, where every slot no instance holds can be rented.
-//
-// The market is asked about a shape when its last answer is OfferWait old, the time a job is
-// given to find a machine anyway, and in between that answer stands less every instance of the
-// shape rented since: each took one of the machines counted. An instance that left is not added
-// back, since its machine need not be on offer again. A count of nothing is logged each time it
-// is asked, which is once per shape and OfferWait at most.
+// rentable is what the vendor has to rent of each shape, at the size Create rents a slot at, asked
+// once per shape and view. It is nil for a provider with no market, where every slot no instance
+// holds can be rented.
 func (e *Executor) rentable(ctx context.Context, v *view) (map[string]onOffer, error) {
 	if e.market == nil || v.rentable != nil {
 		return v.rentable, nil
 	}
-	held := map[string]int{}
-	for _, i := range v.instances {
-		held[i.shape]++
-	}
-	e.offers.mu.Lock()
-	defer e.offers.mu.Unlock()
 	rentable := make(map[string]onOffer, len(e.shapes))
 	for _, shape := range e.shapes {
-		last, asked := e.offers.byShape[shape.Name]
-		if !asked || e.now().Sub(last.at) >= e.offerWait {
-			supply, err := e.market.Rentable(ctx, provider.Spec{
-				AcceleratorType: shape.AcceleratorType, AcceleratorCount: shape.Accelerators,
-				CPUMillis: shape.CPUMillis, MemoryBytes: shape.MemoryBytes, DiskBytes: shape.StorageBytes,
-			}, shape.MaxInstances)
-			if err != nil {
-				return nil, fmt.Errorf("cloudexec: count what there is to rent for shape %s: %w", shape.Name, err)
-			}
-			if supply.Count == 0 {
-				log.Printf("cloudexec: shape %s has nothing to rent: %s (%s)", shape.Name, supply.Why, supply.Detail)
-			}
-			last = counted{supply: supply, held: held[shape.Name], at: e.now()}
-			e.offers.byShape[shape.Name] = last
+		supply, err := e.market.Rentable(ctx, provider.Spec{
+			AcceleratorType: shape.AcceleratorType, AcceleratorCount: shape.Accelerators,
+			CPUMillis: shape.CPUMillis, MemoryBytes: shape.MemoryBytes, DiskBytes: shape.StorageBytes,
+		}, shape.MaxInstances)
+		if err != nil {
+			return nil, fmt.Errorf("cloudexec: count what there is to rent for shape %s: %w", shape.Name, err)
 		}
-		left := max(0, last.supply.Count-max(0, held[shape.Name]-last.held))
-		why := "shape " + shape.Name + ": "
-		switch {
-		case last.supply.Count == 0:
-			why += last.supply.Why
-		case left == 0:
-			why += "every machine on offer for it when last counted is rented by this cluster since"
-		default:
-			why += "the provider has fewer machines on offer for it than max_instances, and the shape's lower slots take them"
+		why := "shape " + shape.Name + ": " + supply.Why
+		if supply.Count == 0 {
+			log.Printf("cloudexec: shape %s has nothing to rent: %s (%s)", shape.Name, supply.Why, supply.Detail)
+		} else {
+			why = "shape " + shape.Name + ": the provider has fewer machines on offer for it than max_instances, and the shape's lower slots take them"
 		}
-		rentable[shape.Name] = onOffer{left: left, why: why}
+		rentable[shape.Name] = onOffer{left: supply.Count, why: why}
 	}
 	v.rentable = rentable
 	return rentable, nil

@@ -634,10 +634,9 @@ func TestAJobARentedInstanceCanNeverRunIsUnrunnableAndAFailedRentIsNot(t *testin
 	}
 }
 
-// A destroy the vendor refused is asked for again by the next pass. The process's last pass has
-// none after it, so its last step asks again, and an instance it still cannot destroy is the
-// error the process ends with.
-func TestLeavingAsksAgainForEveryDestroyThatFailedAndSaysWhatStaysRented(t *testing.T) {
+// A destroy the vendor refused is asked for again by the next pass and by nothing else: leaving
+// destroys nothing and names what stays rented.
+func TestAFailedDestroyIsAskedForAgainByTheNextPassAndLeavingDestroysNothing(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
 	done, running := job(t, "exp-done", 0, 1), on(job(t, "exp-running", 0, 1), "h100-1")
@@ -646,6 +645,7 @@ func TestLeavingAsksAgainForEveryDestroyThatFailedAndSaysWhatStaysRented(t *test
 	p.Start(e.instanceName("exp-done", 0, "h100", 0))
 	p.Start(e.instanceName("exp-running", 0, "h100", 1))
 	p.Exit(e.instanceName("exp-done", 0, "h100", 0), "done")
+	desired := map[string]*clusterapi.DesiredJob{"exp-running": running}
 
 	refused := errors.New("vendor: HTTP 429")
 	p.Fail = func(method, _ string) error {
@@ -654,24 +654,20 @@ func TestLeavingAsksAgainForEveryDestroyThatFailedAndSaysWhatStaysRented(t *test
 		}
 		return nil
 	}
-	if err := e.ReapTerminal(ctx, map[string]*clusterapi.DesiredJob{"exp-running": running}); !errors.Is(err, refused) {
+	if err := e.ReapTerminal(ctx, desired); !errors.Is(err, refused) {
 		t.Fatalf("ReapTerminal = %v, want the refused destroy", err)
-	}
-	err := e.Leave(ctx)
-	if !errors.Is(err, refused) || !strings.Contains(err.Error(), e.instanceName("exp-done", 0, "h100", 0)) || strings.Contains(err.Error(), "exp-running") {
-		t.Fatalf("Leave with the vendor still refusing = %v, want the one instance it could not destroy named", err)
-	}
-
-	p.Fail = nil
-	if err := e.Leave(ctx); err != nil {
-		t.Fatalf("Leave: %v", err)
-	}
-	if names := p.Names(); len(names) != 1 || names[0] != e.instanceName("exp-running", 0, "h100", 1) {
-		t.Fatalf("rented after leaving: %v, want the running job alone", names)
 	}
 	destroys := p.Calls("Destroy")
 	if err := e.Leave(ctx); err != nil || p.Calls("Destroy") != destroys {
-		t.Fatalf("Leave with nothing outstanding: err = %v, destroys %d then %d", err, destroys, p.Calls("Destroy"))
+		t.Fatalf("Leave: err = %v, destroys %d then %d, want none asked for", err, destroys, p.Calls("Destroy"))
+	}
+
+	p.Fail = nil
+	if err := e.ReapTerminal(ctx, desired); err != nil {
+		t.Fatalf("the next pass: %v", err)
+	}
+	if names := p.Names(); len(names) != 1 || names[0] != e.instanceName("exp-running", 0, "h100", 1) {
+		t.Fatalf("rented after the next pass: %v, want the running job alone", names)
 	}
 }
 
