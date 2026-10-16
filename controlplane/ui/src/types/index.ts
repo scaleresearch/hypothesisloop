@@ -777,7 +777,7 @@ export interface GitHubInstallation {
   connected_actor: Actor
   connected_at: string
   /** A new repository goes to this account when a create names none. At most one is. */
-  default?: boolean
+  default: boolean
 }
 
 /** An installation the person can reach, as a connect that must ask which one lists it. */

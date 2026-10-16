@@ -25,8 +25,8 @@ const owner: Me = {
 }
 const member: Me = { ...owner, user_id: 'u2', orgs: [{ ...owner.orgs[0], role: 'member' }] }
 const app = { slug: 'hl', client_id: 'app', install_url: 'https://github.test/apps/hl/installations/new', authorize_url: 'https://github.test/login/oauth/authorize?client_id=app', new_repository_url: 'https://github.test/new' }
-const acme: GitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_actor: { kind: 'user', id: 'u1', name: 'Ada Lovelace' }, connected_at: at }
-const lab: GitHubInstallation = { org_id: 'org_a', installation_id: 9, account_login: 'lab', connected_actor: { kind: 'key', id: 'key_3', name: 'ci' }, connected_at: at }
+const acme: GitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_actor: { kind: 'user', id: 'u1', name: 'Ada Lovelace' }, connected_at: at, default: false }
+const lab: GitHubInstallation = { org_id: 'org_a', installation_id: 9, account_login: 'lab', connected_actor: { kind: 'key', id: 'key_3', name: 'ci' }, connected_at: at, default: false }
 
 let installations: GitHubInstallation[]
 

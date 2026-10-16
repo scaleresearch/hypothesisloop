@@ -33,7 +33,7 @@ function newRepositoryURL(form: string, accounts: GitHubInstallation[]): string 
 }
 
 // What the owner of the GitHub account fixes on GitHub, where the App is installed and configured.
-const FIXED_ON_GITHUB = new Set(['installation_gone', 'permission_not_granted', 'repository_not_reachable', 'repository_creation_not_permitted'])
+const FIXED_ON_GITHUB = new Set(['installation_gone', 'github_permission_missing', 'repository_not_reachable', 'repository_creation_not_permitted'])
 
 /**
  * Runs the create's own repository checks for the value picked, so a GitHub account the App left

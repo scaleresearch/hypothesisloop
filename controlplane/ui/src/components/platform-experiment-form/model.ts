@@ -96,7 +96,7 @@ export type StepID = typeof STEPS[number]['id']
 
 /** The step a refusal of the create concerns, by the API's reason: the repository, what is measured, or the rest. */
 export function refusedStep(reason: string | undefined): StepID {
-  if (reason && /repositor|github|installation|experiment_file|unreadable_file|permission_not_granted/.test(reason)) return '1'
+  if (reason && /repositor|github|installation|experiment_file|unreadable_file/.test(reason)) return '1'
   if (reason && /metric|stage|report/.test(reason)) return '2'
   return '3'
 }

@@ -29,7 +29,7 @@ const repositories: GitHubRepository[] = [
   { repository: 'acme/open', installation_id: 7, private: false },
 ]
 
-const organisation: GitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: 'u9', name: 'Una' }, connected_at: at }
+const organisation: GitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: 'u9', name: 'Una' }, connected_at: at, default: false }
 
 function Picker({ initial = '' }: { initial?: string }) {
   const [value, setValue] = useState(initial)
@@ -54,7 +54,7 @@ function show(initial?: string) {
 beforeEach(() => {
   vi.mocked(checkRepository).mockResolvedValue({ repository_account: 'acme' })
   vi.mocked(fetchGitHubApp).mockResolvedValue({ slug: 'hl', client_id: 'c', install_url: 'https://github.test/install', authorize_url: 'https://github.test/authorize', new_repository_url: 'https://github.test/new' })
-  vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [{ org_id: 'org_a', installation_id: 7, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: 'u9', name: 'Una' }, connected_at: at }], total: 1 })
+  vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [{ org_id: 'org_a', installation_id: 7, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: 'u9', name: 'Una' }, connected_at: at, default: false }], total: 1 })
   vi.mocked(fetchGitHubRepositories).mockImplementation(async (_, params) => {
     const found = repositories.filter(r => r.repository.includes(params?.q ?? ''))
     return { items: found, total: found.length }
