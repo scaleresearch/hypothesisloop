@@ -875,6 +875,7 @@ The whole public API is served from one port and described by one OpenAPI docume
 | `make dev-api`                    | Rebuild and restart the API and metrics-service after a Go change   |
 | `make dev-status` / `make dev-down` | Show or stop the `make dev` processes                             |
 | `make dev-hosted`                 | `make dev` plus agent-launcher (on `SANDBOX_PROVIDER`) and cloud-agent (on `CLOUD_COMPUTE_PROVIDER`), through public tunnels (`make tunnels`); rents compute. It runs the agent and job images published under `IMAGE_TAG` |
+| `make images-remote BUILDER=host` | Build the images a hosted run uses on another machine and push them from there |
 | `make staff-token`                | Print a staff token for local work (`make -s staff-token`)          |
 | `make git-repository NAME=x`      | Create a repository on the local git server                         |
 | `make db-migration NAME=x`        | Create the next numbered database migration                         |
@@ -889,6 +890,16 @@ The whole public API is served from one port and described by one OpenAPI docume
 | `make full-stop` / `make full-start` | Pause and resume the podman machine, k3s and the control plane, keeping their state |
 | `make reload`                     | Rebuild every image, push it to the dev registry and reinstall the local cluster's runtime |
 | `make reset`                      | `controlplane-down` and `controlplane-up`                           |
+
+### Publishing images without uploading from your laptop
+
+`make dev-hosted` runs the agent and job images under `IMAGE_TAG` from the registry `.env` names. To build and push them on a Linux x86 machine with good upload instead of your own, commit your changes and run:
+
+```bash
+make images-remote BUILDER=<ssh host>
+```
+
+It sends HEAD's source (a few MB) to `~/hl-build/<you>` on that host, builds the agent image, `job-base`, `job`, `cluster-agent`, `node-agent`, `bare-agent` and the runtime chart there with docker buildx for linux/amd64, and pushes them from there under HEAD's short SHA. Images the registry already holds under that tag are skipped. The registry token is minted here with `gcloud` as `GCP_ACCOUNT`, reaches the host on ssh's stdin and is logged out after. `IMPORT=true` also imports the images into that host's k3s, `FRAMEWORK_JOBS=true` adds the framework job images of `infra/images/job/bases.mk`, and `IMAGES="job node-agent"` picks a subset. Set the `IMAGE_TAG` it prints in `.env` and run `make dev-hosted`; a cluster attached with that tag pulls the same images.
 
 ## Development
 

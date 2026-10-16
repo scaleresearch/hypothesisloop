@@ -1,5 +1,5 @@
 .PHONY: $(addprefix locked-,images ui-image tt-hardware-image sparse-sdpa-workload-image)
-.PHONY: dev reset build test agent-test lint check images job-images sparse-sdpa-workload-image sparse-sdpa-experiment \
+.PHONY: dev reset build test agent-test lint check images job-images images-remote sparse-sdpa-workload-image sparse-sdpa-experiment \
 	experimentator-base-image experimentator-image check-tag ui-image check-ui-build-args registry-up prune-images \
 	helm-prepare helm-lint chart-push \
 	controlplane-up controlplane-down controlplane-destroy render-settings \
@@ -383,6 +383,14 @@ job-images: check-tag
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name-base:$(TAG)" || exit 1; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" || exit 1; \
 	done
+
+# The images a hosted run uses, built on BUILDER (an ssh host with docker buildx, linux/amd64) and
+# pushed from there to the registry of .env, so none is uploaded from this machine
+# (localdev/images-remote.sh). Builds HEAD and prints the IMAGE_TAG to set.
+# Usage: make images-remote BUILDER=<ssh host> [IMPORT=true] [FRAMEWORK_JOBS=true] [IMAGES="<name>..."]
+images-remote:
+	@test -n "$(BUILDER)" || { echo "usage: make images-remote BUILDER=<ssh host> [IMPORT=true] [FRAMEWORK_JOBS=true] [IMAGES=...]" >&2; exit 1; }
+	@IMAGES="$(IMAGES)" bash localdev/images-remote.sh "$(BUILDER)" $(if $(filter true,$(IMPORT)),--import) $(if $(filter true,$(FRAMEWORK_JOBS)),$(JOB_IMAGE_BASES))
 
 # The runtime chart goes to the registry its images are in, as an OCI artifact under charts/, so
 # a cluster is attached with one helm command and no checkout (hl cluster add prints it). Its
