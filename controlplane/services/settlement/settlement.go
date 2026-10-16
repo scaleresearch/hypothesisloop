@@ -1,13 +1,7 @@
-// Package settlement is the single place a terminal experiment's final observed usage gets
-// written to the metrics DB — used by every termination path (natural completion, stuck-pending
-// eviction, every controller eviction reason) so they all settle and retry the same way.
-//
-// The write happens after the already-committed status transition to COMPLETED/FAILED/EVICTED,
-// so it can never share a transaction with it: Postgres and the metrics DB are separate stores.
-// A crash or metrics-DB outage between the status commit and this write would otherwise leave
-// the reservation stuck at its estimate forever. Settle is idempotent (recomputes purely from
-// confirmed-alive time and writes an absolute value — see metricsdb.UsageTracker.SetObserved),
-// so Reconciler can retry it any number of times, from any process, until it succeeds.
+// Package settlement writes a terminal experiment's final observed usage after its status commit,
+// which it can never share a transaction with: Postgres and the metrics DB are separate stores.
+// Settle is idempotent (it recomputes from confirmed-alive time and writes an absolute value), so
+// Reconciler retries it from any process until it succeeds.
 package settlement
 
 import (

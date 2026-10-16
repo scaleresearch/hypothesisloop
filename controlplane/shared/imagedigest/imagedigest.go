@@ -1,5 +1,3 @@
-// Package imagedigest names an image by the digest of the manifest its reference names now, so
-// what is keyed on an image changes when its content does and never with its tag.
 package imagedigest
 
 import (

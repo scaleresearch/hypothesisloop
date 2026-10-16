@@ -1,7 +1,3 @@
-// Package modelproxy makes the model calls of the agents the platform runs. An agent's harness
-// reaches the model provider through the control plane with its own platform token, and the proxy
-// makes the call with the platform's credential, which no agent's machine holds, and records what
-// the provider counted for it under the agent's org, platform experiment and agent.
 package modelproxy
 
 import (

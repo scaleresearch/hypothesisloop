@@ -1,4 +1,3 @@
-// Package authtest gives handler tests a caller without a signing secret or a database.
 package authtest
 
 import (

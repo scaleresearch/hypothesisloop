@@ -1,6 +1,3 @@
-// Package gcp hands out logins to an Artifact Registry repository of environment images, as tokens
-// of two service accounts the control plane impersonates with its Google application default
-// credentials.
 package gcp
 
 import (

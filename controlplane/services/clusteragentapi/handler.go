@@ -1,25 +1,7 @@
-// Package clusteragentapi exposes the HTTP surface cluster-agents call — and only
-// cluster-agents call. Every request in this package is initiated by an agent running
-// inside a target cluster; the control plane never calls out. Endpoints:
-//
-//	POST /internal/clusters/{name}/reconcile — actual capacity in, desired workloads out
-//	POST /internal/clusters/{name}/status        — push job phase observations
-//	POST /internal/clusters/{name}/builds/{key}/credential — the push login of an assigned build
-//	POST /internal/clusters/{name}/builds/{key}/git-credential — a read of the repository an assigned build is of
-//	POST /internal/clusters/{name}/builds/{key}  — the outcome of an assigned build
-//	POST /internal/clusters/{name}/builds/{key}/progress — the step an assigned build is at
-//	POST /internal/clusters/{name}/builds/{key}/loaded — an assigned build held on one node
-//
-// There is no command/ack protocol: an experiment's own status (SUBMITTED/RUNNING)
-// is the single source of truth for "should a Job exist" — the agent fetches that view and
-// reconciles its local Jobs to match, the same way a kubelet reconciles pods to a desired
-// spec. This means desired-state is naturally idempotent and safe to poll from any number of
-// concurrent cluster-agent replicas without coordination.
-//
-// This is a distinct *consumer* surface from the research-agent/dashboard API: it is served
-// with its own Huma registration, its own /internal/clusters/openapi.json and its own
-// /internal/clusters/explore digest, tagged "cluster-agent", so the Go cluster-agent binary's
-// contract is never mixed into the Python research agent's discovery doc.
+// Package clusteragentapi serves what cluster-agents call; the control plane never calls out.
+// There is no command/ack protocol: an experiment's status (SUBMITTED/RUNNING) alone says whether
+// a Job should exist, and each agent reconciles its Jobs to that view, so any number of agent
+// replicas may poll it without coordination.
 package clusteragentapi
 
 import (

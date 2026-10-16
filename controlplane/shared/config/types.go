@@ -1,4 +1,3 @@
-// Package config loads hypothesisloop.yaml and exposes a typed Config used across all services.
 package config
 
 import (

@@ -1,5 +1,3 @@
-// Package minio registers data keys through the MinIO admin API (MinIO, Silo, AIStor): each key is
-// a service account of the control plane's own key, limited by the policy it is created with.
 package minio
 
 import (

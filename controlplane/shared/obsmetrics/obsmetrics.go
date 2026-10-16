@@ -1,7 +1,3 @@
-// Package obsmetrics is the admission/eviction-loop self-observability that Kueue and Volcano
-// both have and we didn't.
-// Registered on the default Prometheus registry, so it's served by the existing /metrics
-// endpoint (promhttp.Handler()) with no additional wiring per service.
 package obsmetrics
 
 import (

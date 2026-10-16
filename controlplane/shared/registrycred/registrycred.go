@@ -1,5 +1,3 @@
-// Package registrycred hands out short-lived logins to the registry of environment images. Each
-// registry provider mints them its own way, in a sub-package of its own.
 package registrycred
 
 import (

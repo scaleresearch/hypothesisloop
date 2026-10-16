@@ -1,8 +1,3 @@
-// Package metricsdb is the single client for GreptimeDB (a Prometheus-remote-write- and
-// PromQL-compatible TSDB). It is the only place in the control plane that speaks the
-// remote-write/PromQL wire protocol — every metric sample (job-reported metrics, agent quota
-// usage) is written and read through here, so there is exactly one store for "numbers that
-// change over time" and Postgres never duplicates it.
 package metricsdb
 
 import (
