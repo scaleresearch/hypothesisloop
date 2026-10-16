@@ -136,9 +136,9 @@ def sandbox_repository(api: API):
     if api.get("/github/app").status_code == 503:
         yield api.sandbox_repository()
         return
-    installation, repository = os.environ.get("HL_E2E_GITHUB_INSTALLATION"), os.environ.get("HL_E2E_GITHUB_REPO")
+    installation, repository = os.environ.get("TEST_GIT_HOST_GITHUB_INSTALLATION"), os.environ.get("TEST_GIT_HOST_GITHUB_REPOSITORY")
     if not installation or not repository:
-        pytest.skip("needs a repository: set HL_E2E_GITHUB_INSTALLATION and HL_E2E_GITHUB_REPO")
+        pytest.skip("needs a repository: set TEST_GIT_HOST_GITHUB_INSTALLATION and TEST_GIT_HOST_GITHUB_REPOSITORY")
     installations = f"/orgs/{api.org_id}/github-installations"
     found = any(i["installation_id"] == int(installation) for i in api.get_json(installations, params={"limit": 200}))
     if not found:

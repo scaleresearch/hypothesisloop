@@ -43,10 +43,12 @@ environments:
   gcp:
     pusher: env-pusher@made-up-project.iam.gserviceaccount.com
     puller: env-puller@made-up-project.iam.gserviceaccount.com
-github:
-  appId: 4242
-  appSlug: made-up-app
-  clientId: Iv23made-up
+gitHost:
+  provider: github
+  github:
+    appId: 4242
+    appSlug: made-up-app
+    clientId: Iv23made-up
 cloudAgent:
   enabled: true
   clusterName: vast

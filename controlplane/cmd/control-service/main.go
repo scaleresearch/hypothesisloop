@@ -148,20 +148,21 @@ func main() {
 	}
 	var githubApp accounts.GitHubApp
 	var gitHost githost.Provider
-	switch pcfg.Git.Provider {
-	case hypothesisloopcfg.GitProviderGitHub:
-		client, err := github.New(pcfg.GitHub)
+	switch pcfg.GitHost.Provider {
+	case hypothesisloopcfg.GitHostProviderGitHub:
+		client, err := github.New(*pcfg.GitHost.GitHub)
 		if err != nil {
 			logger.Fatal("control-service: configure the GitHub App", zap.Error(err))
 		}
 		githubApp, gitHost = client, github.NewHost(accountsStore, client, logger)
-	case hypothesisloopcfg.GitProviderPlain:
-		gitHost, err = githost.NewPlain(pcfg.Git.BaseURL, pcfg.Git.Username, pcfg.Git.Password)
+	case hypothesisloopcfg.GitHostProviderPlain:
+		plain := pcfg.GitHost.Plain
+		gitHost, err = githost.NewPlain(plain.BaseURL, plain.Username, plain.Password)
 		if err != nil {
 			logger.Fatal("control-service: configure the git host", zap.Error(err))
 		}
 	default:
-		logger.Fatal("control-service: the settings name no git host", zap.String("provider", pcfg.Git.Provider))
+		logger.Fatal("control-service: the settings name no git host", zap.String("provider", pcfg.GitHost.Provider))
 	}
 	repos := accounts.NewRepositories(accountsStore, db.NewPlatformExperimentsStore(pool), githubApp, gitHost, gate.access, logger)
 

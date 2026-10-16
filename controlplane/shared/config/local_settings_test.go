@@ -24,7 +24,7 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 	// secrets, its identity provider and its registry are that machine's.
 	render(t, repo, dir, rendered, `HL_ENVIRONMENTS_REPOSITORY=""`)
 	t.Setenv("HYPOTHESISLOOP_SIGNING_SECRET", "a-signing-secret-only-this-test-knows")
-	t.Setenv("HYPOTHESISLOOP_GIT_PASSWORD", "a-password-only-this-test-knows")
+	t.Setenv("HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD", "a-password-only-this-test-knows")
 	cfg, err := Load(rendered)
 	if err != nil {
 		t.Fatalf("the rendered local settings do not load: %v", err)
@@ -33,8 +33,8 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 		providers[0].Audience != "hypothesisloop-dev" || len(providers[0].JWTKeys) != 1 || providers[0].JWTKeys[0].Kid != "local-dev" {
 		t.Errorf("identity providers = %+v, want the one key made on this machine", providers)
 	}
-	if want := (GitConfig{Provider: GitProviderPlain, BaseURL: "http://host.example.internal:8085", AllowHTTP: true, Username: "hypothesisloop", Password: "a-password-only-this-test-knows"}); cfg.Git != want {
-		t.Errorf("git host = %s at %s, want the git server of this machine", cfg.Git.Provider, cfg.Git.BaseURL)
+	if want := (PlainGitConfig{BaseURL: "http://host.example.internal:8085", AllowHTTP: true, Username: "hypothesisloop", Password: "a-password-only-this-test-knows"}); cfg.GitHost.Provider != GitHostProviderPlain || cfg.GitHost.Plain == nil || *cfg.GitHost.Plain != want {
+		t.Errorf("git host = %s, want the git server of this machine", cfg.GitHost.Provider)
 	}
 	if cfg.Agents.Launcher == "" || cfg.Agents.DefaultModel == "" || cfg.Agents.BootLimitSeconds <= 0 {
 		t.Errorf("agents = %+v, want every key set", cfg.Agents)
@@ -67,7 +67,7 @@ func render(t *testing.T, repo, dir, rendered, environments string) {
 	t.Helper()
 	// The tag is stated: computing it reads the git state of the tree, which is absent in an
 	// exported checkout and changes under a tree others are writing to.
-	script := `. localdev/lib/auth.sh && HL_DEV_JWT_KEY="$1/key.pem" && HL_GITHUB_APP_ID="" && HL_IDENTITY_PROVIDER="" && ` + environments + ` && TAG=abc1234 lib_render_settings host.example.internal "$2"`
+	script := `. localdev/lib/auth.sh && HL_DEV_JWT_KEY="$1/key.pem" && HL_GIT_HOST_PROVIDER=local && HL_IDENTITY_PROVIDER="" && ` + environments + ` && TAG=abc1234 lib_render_settings host.example.internal "$2"`
 	cmd := exec.Command("bash", "-c", script, "render", dir, rendered)
 	cmd.Dir = repo
 	if out, err := cmd.CombinedOutput(); err != nil {

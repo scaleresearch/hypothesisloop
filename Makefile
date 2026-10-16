@@ -85,7 +85,7 @@ BUILDS := images ui-image tt-hardware-image sparse-sdpa-workload-image
 $(BUILDS):
 	@python3 localdev/images-lock.py $(MAKE) locked-$@ TAG="$(TAG)"
 
-# compose is started under auth.sh, which exports the GitHub App's secrets when .env has an App:
+# compose is started under auth.sh, which exports the git host's secrets GIT_HOST_PROVIDER names:
 # a PEM does not survive being a make variable.
 controlplane-up: registry-up render-settings images
 	bash -c '. localdev/lib/auth.sh && podman compose -f $(COMPOSE_FILE) up -d'
@@ -294,13 +294,14 @@ tt-dev-nodes-down:
 tt-status:
 	bash localdev/k3s-tenstorrent/status.sh
 
-# ---- Local git host: a stack with no GitHub App keeps its code on the git server make dev runs ----
+# ---- Local git host: a stack whose GIT_HOST_PROVIDER is local keeps its code on the git server make dev runs ----
 # One bare repository on it, which a platform experiment then names in `repository` as NAME.git:
 # the platform creates none on a plain git host. Usage: make git-repository NAME=my-experiment
 git-repository:
 	@test -n "$(NAME)" || { echo "make git-repository: NAME is required" >&2; exit 1; }
 	@bash -c '. localdev/lib/auth.sh && \
-	  { test "$$(lib_git_provider)" = plain || { echo "make git-repository: this stack keeps its code on GitHub (.env names a GitHub App)" >&2; exit 1; }; } && \
+	  git_host="$$(lib_git_host_provider)" && \
+	  { test "$$git_host" = local || { echo "make git-repository: this stack keeps its code on GitHub (GIT_HOST_PROVIDER=$$git_host in .env)" >&2; exit 1; }; } && \
 	  git init -q --bare "$$HL_GIT_ROOT/$(NAME).git" && echo "$(NAME).git"'
 
 tt-stop:
@@ -472,24 +473,23 @@ agent-test:
 	cd agents/experimentator && uv run python -m unittest discover -s tests
 
 # The GitHub client's checks against github.com itself, as the App .env names
-# (controlplane/shared/githost/github/live_test.go). Both the token checks and the push check use
-# the sandbox repository of HL_E2E_GITHUB_REPO; the push check and the first-commit check each
-# make a branch there and delete it. The App's key reaches the test in a file that exists only
-# for the run. The creation check runs with HYPOTHESISLOOP_GITHUB_LIVE_CREATE=1 and creates on
-# the organisation of HL_E2E_GITHUB_CREATE_INSTALLATION, skipping when .env names none.
+# (controlplane/shared/githost/github/live_test.go). The token checks and the push check use the
+# sandbox repository of TEST_GIT_HOST_GITHUB_REPOSITORY; the push check and the first-commit check
+# each make a branch there and delete it. The App's key reaches the test in a file that exists
+# only for the run. The creation check runs with TEST_GIT_HOST_GITHUB_CREATE=1 and creates on the
+# organisation of TEST_GIT_HOST_GITHUB_CREATE_INSTALLATION, skipping when .env names none.
 test-github-live:
 	@bash -c 'set -euo pipefail; . localdev/lib/auth.sh; \
-	  test -n "$$HL_GITHUB_APP_ID" || { echo "make test-github-live: .env does not set GITHUB_APP_ID" >&2; exit 1; }; \
-	  for key in INSTALLATION REPO; do \
-	    test -n "$$(lib_env_value "HL_E2E_GITHUB_$$key")" || { echo "make test-github-live: .env does not set HL_E2E_GITHUB_$$key" >&2; exit 1; }; \
+	  test "$$(lib_git_host_provider)" = github || { echo "make test-github-live: .env does not set GIT_HOST_PROVIDER=github" >&2; exit 1; }; \
+	  for key in INSTALLATION REPOSITORY; do \
+	    test -n "$$(lib_env_value "TEST_GIT_HOST_GITHUB_$$key")" || { echo "make test-github-live: .env does not set TEST_GIT_HOST_GITHUB_$$key" >&2; exit 1; }; \
 	  done; \
 	  key_file="$$(umask 077 && mktemp)"; trap "rm -f \"$$key_file\"" EXIT; \
-	  printf "%s\n" "$$HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY" > "$$key_file"; \
-	  HYPOTHESISLOOP_GITHUB_LIVE_APP_ID="$$HL_GITHUB_APP_ID" HYPOTHESISLOOP_GITHUB_LIVE_KEY_FILE="$$key_file" \
-	  HYPOTHESISLOOP_GITHUB_LIVE_INSTALLATION="$$(lib_env_value HL_E2E_GITHUB_INSTALLATION)" \
-	  HYPOTHESISLOOP_GITHUB_LIVE_REPOSITORY="$$(lib_env_value HL_E2E_GITHUB_REPO)" \
-	  HYPOTHESISLOOP_GITHUB_LIVE_PUSH_REPOSITORY="$$(lib_env_value HL_E2E_GITHUB_REPO)" \
-	  HYPOTHESISLOOP_GITHUB_LIVE_CREATE_INSTALLATION="$$(lib_env_value HL_E2E_GITHUB_CREATE_INSTALLATION)" \
+	  printf "%s\n" "$$HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY" > "$$key_file"; \
+	  TEST_GIT_HOST_GITHUB_APP_ID="$$HL_GIT_HOST_GITHUB_APP_ID" TEST_GIT_HOST_GITHUB_KEY_FILE="$$key_file" \
+	  TEST_GIT_HOST_GITHUB_INSTALLATION="$$(lib_env_value TEST_GIT_HOST_GITHUB_INSTALLATION)" \
+	  TEST_GIT_HOST_GITHUB_REPOSITORY="$$(lib_env_value TEST_GIT_HOST_GITHUB_REPOSITORY)" \
+	  TEST_GIT_HOST_GITHUB_CREATE_INSTALLATION="$$(lib_env_value TEST_GIT_HOST_GITHUB_CREATE_INSTALLATION)" \
 	  go test ./controlplane/shared/githost/github -run Live -count=1 -v -timeout 180s'
 
 lint:

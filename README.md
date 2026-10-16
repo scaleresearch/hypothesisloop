@@ -157,18 +157,42 @@ it cleans up what it created.
 ### GitHub
 
 Every experiment keeps its code in git. A deployment's settings name its git host
-(`git.provider`):
+(`git_host.provider`); local development takes it from `GIT_HOST_PROVIDER` in `.env`:
 
 - `github`: the platform's GitHub App. Settings, then GitHub, connects an installation of the App
   to an org. An owner installs the App on a GitHub account and confirms on GitHub who they are.
   An experiment then names a repository the installation covers, or the platform creates a
-  private one on that account. Connecting an organisation account needs the App's Members (read)
-  permission, which lets the platform check that the person is an admin there. GitHub returns to `<ui origin>/settings/repository`, so the App's
+  private one on that account. GitHub returns to `<ui origin>/settings/repository`, so the App's
   callback URL and setup URL must be that address. The page reads the App's details from
   `GET /github/app`.
-- `plain`: any git server that serves repositories under one root. A repository is created
-  beforehand and named when the experiment is created. `make dev` with no App runs a `plain`
-  host, and `make git-repository NAME=my-experiment` adds a repository to it.
+- `plain` (`local` in `.env`): any git server that serves repositories under one root. A
+  repository is created beforehand and named when the experiment is created. `make dev` with
+  `GIT_HOST_PROVIDER=local` runs one, and `make git-repository NAME=my-experiment` adds a
+  repository to it.
+
+The App's permissions are stated once, in `controlplane/shared/githost/github/app-manifest.json`:
+
+| Permission | Level | What needs it |
+|---|---|---|
+| Administration (repository) | write | creating a repository: `POST /orgs/{org}/repos` with an installation token, `POST /user/repos` with the owner's user token |
+| Contents (repository) | write | git clone, fetch and push of agents' branches, reading `.hypothesisloop/` files, the first commit of a created repository (trees, commits, refs) |
+| Metadata (repository) | read | listing the repositories an installation covers, reading a repository's default branch |
+| Members (organisation) | read | checking that the person connecting an organisation administers it |
+
+Nothing else is asked: no pull requests, issues, checks or workflows. Without Workflows (write)
+GitHub refuses a push that changes `.github/workflows`, so agents cannot change what CI runs.
+Users sign in to the App through its own OAuth, which takes no scopes: a user token holds the
+App's permissions as far as that person reaches. An installation that has not granted every
+permission is refused at connect and at each token, `github_permission_missing`, naming the
+missing ones.
+
+To make the App, fill the `REPLACE-WITH-` values of the manifest (the UI origin and a name),
+post it from a page as GitHub's manifest flow describes
+(<https://docs.github.com/apps/sharing-github-apps/registering-a-github-app-from-a-manifest>),
+and convert the code GitHub returns with `POST /app-manifests/{code}/conversions`, whose answer
+holds the App's id, slug, client id, client secret and private key. An App made by hand takes the
+same permissions from the table. Enable "Request user authorization (OAuth) during
+installation"; webhooks stay off.
 
 The login page offers the providers `NEXT_PUBLIC_SIGN_IN_PROVIDERS` lists, out of the ones
 `controlplane/ui/src/lib/auth.ts` knows: `github`, `google` and `apple`. Each must also be
@@ -590,7 +614,7 @@ the same way, so the rest of the system never depends on which one it is:
 | container registry | `CONTAINER_REGISTRY_PROVIDER` | `environments.provider` | `gcp` (Artifact Registry) |
 | durable-data object store | (local MinIO) | `data_store.provider` | `minio` (MinIO admin API: MinIO, Silo, AIStor) |
 | sign-in service | `IDENTITY_PROVIDER`, UI `NEXT_PUBLIC_IDENTITY_PROVIDER` | `auth.identity_providers` (any OIDC issuer) | `supabase` |
-| git host | `GITHUB_APP_*` | `git.provider` | `github`, `plain` |
+| git host | `GIT_HOST_PROVIDER` | `git_host.provider` | `github`, `plain` (`local` in `.env`, the local git server) |
 | hosted agent sandboxes | `SANDBOX_PROVIDER` | agent-launcher `provider.name` | `fly`, `e2b` |
 | models of hosted agents | `MODEL_PROVIDER` | agent-launcher `model_provider.name` | `anthropic` |
 | rented compute for jobs | `CLOUD_COMPUTE_PROVIDER` | cloud-agent `provider.name` | `vast` |

@@ -28,9 +28,10 @@ images:
 #                                    more. Whoever holds it can mint a staff token.
 #   OBJECT_STORE_ACCESS_KEY_ID       object store key that may create service accounts; with
 #   OBJECT_STORE_SECRET_ACCESS_KEY   objectStore.enabled these become the store's root user
-#   HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET   only with github.appId: the App's OAuth client
-#   HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY     secret and the PEM GitHub issued for it
-#   HYPOTHESISLOOP_GIT_PASSWORD      only with git.username: that account's password
+#   HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET   only with gitHost.provider github: the
+#   HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY     App's OAuth client secret and the PEM
+#                                                      GitHub issued for it
+#   HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD   only with gitHost.plain.username: that account's password
 #   ENVIRONMENTS_GCP_CREDENTIALS     only with environments.provider gcp: control-service's own
 #                                    Google identity, as an application default credentials file
 #                                    (a service account key or a workload identity federation
@@ -62,15 +63,25 @@ auth:
   # Required: the address people open the UI at.
   uiOrigin: ""
 
-# The git host platform experiments keep their code on is one of the two below.
-#
-# The GitHub App a project's repository is reached through: the github section of
-# hypothesisloop.yaml, which explains each value. With appId 0 the deployment has no App and
-# keeps its code on the git host below. Its two secrets come from the Secret.
-github:
-  appId: 0
-  appSlug: ""
-  clientId: ""
+# The git host platform experiments keep their code on: the git_host section of
+# hypothesisloop.yaml, which explains each value. Required: provider is github or plain, and only
+# the section of that name is read.
+gitHost:
+  provider: ""
+  # The GitHub App a project's repository is reached through. Its two secrets come from the Secret.
+  github:
+    appId: 0
+    appSlug: ""
+    clientId: ""
+  # Any git host that serves repositories under one root.
+  plain:
+    # The https root repositories are cloned from.
+    baseURL: ""
+    # true lets baseURL be http, for a host on the deployment's own network.
+    allowHTTP: false
+    # The account the platform and every agent reach the host as. Its password is the Secret's
+    # HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD. Left empty for a host that asks for no credential.
+    username: ""
 
 # Where environment images are pushed and the registry provider whose logins control-service hands
 # out for them: the environments section of hypothesisloop.yaml, which explains each value. With
@@ -84,17 +95,6 @@ environments:
   gcp:
     pusher: ""
     puller: ""
-
-# Any git host that serves repositories under one root: the git section of hypothesisloop.yaml
-# with provider plain. Read only without github.appId, and then baseURL is required.
-git:
-  # The https root repositories are cloned from.
-  baseURL: ""
-  # true lets baseURL be http, for a host on the deployment's own network.
-  allowHTTP: false
-  # The account the platform and every agent reach the host as. Its password is the Secret's
-  # HYPOTHESISLOOP_GIT_PASSWORD. Left empty for a host that asks for no credential.
-  username: ""
 
 # Required: the one address this API is reached at from outside the control plane, by hosted
 # agents and by every cluster's runtime. services.public_api_url of hypothesisloop.yaml.

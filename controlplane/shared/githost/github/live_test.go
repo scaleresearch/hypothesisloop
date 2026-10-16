@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -21,27 +22,26 @@ import (
 
 // The live checks talk to github.com as the real App and run only when asked to:
 //
-//	HYPOTHESISLOOP_GITHUB_LIVE_APP_ID         the App's id
-//	HYPOTHESISLOOP_GITHUB_LIVE_KEY_FILE       a file holding its private key
-//	HYPOTHESISLOOP_GITHUB_LIVE_INSTALLATION   an installation of it, for the token checks
-//	HYPOTHESISLOOP_GITHUB_LIVE_REPOSITORY     owner/name of a repository that installation covers
-//	HYPOTHESISLOOP_GITHUB_LIVE_PUSH_REPOSITORY  owner/name of a sandbox repository the push check
-//	                                          and the first-commit check may each make a branch
-//	                                          in, which they delete again
-//	HYPOTHESISLOOP_GITHUB_LIVE_CREATE_INSTALLATION  an installation on an organisation, for the
-//	                                          creation check
+//	TEST_GIT_HOST_GITHUB_APP_ID         the App's id
+//	TEST_GIT_HOST_GITHUB_KEY_FILE       a file holding its private key
+//	TEST_GIT_HOST_GITHUB_INSTALLATION   an installation of it, for the token checks
+//	TEST_GIT_HOST_GITHUB_REPOSITORY     owner/name of a sandbox repository that installation
+//	                                    covers, which the push check and the first-commit check
+//	                                    may each make a branch in and delete again
+//	TEST_GIT_HOST_GITHUB_CREATE_INSTALLATION  an installation on an organisation, for the
+//	                                    creation check, which also needs TEST_GIT_HOST_GITHUB_CREATE=1
 //
 // Connecting an installation needs a person's authorisation code from a browser, so the code
 // exchange, GET /user/installations with a person's token and its revocation have no check here.
 func liveClient(t *testing.T) *Client {
 	t.Helper()
-	appID, keyFile := os.Getenv("HYPOTHESISLOOP_GITHUB_LIVE_APP_ID"), os.Getenv("HYPOTHESISLOOP_GITHUB_LIVE_KEY_FILE")
+	appID, keyFile := os.Getenv("TEST_GIT_HOST_GITHUB_APP_ID"), os.Getenv("TEST_GIT_HOST_GITHUB_KEY_FILE")
 	if appID == "" || keyFile == "" {
-		t.Skip("HYPOTHESISLOOP_GITHUB_LIVE_APP_ID and HYPOTHESISLOOP_GITHUB_LIVE_KEY_FILE are not set")
+		t.Skip("TEST_GIT_HOST_GITHUB_APP_ID and TEST_GIT_HOST_GITHUB_KEY_FILE are not set")
 	}
 	id, err := strconv.ParseInt(appID, 10, 64)
 	if err != nil {
-		t.Fatalf("HYPOTHESISLOOP_GITHUB_LIVE_APP_ID is not a number")
+		t.Fatalf("TEST_GIT_HOST_GITHUB_APP_ID is not a number")
 	}
 	key, err := os.ReadFile(keyFile)
 	if err != nil {
@@ -80,8 +80,8 @@ func TestLiveGitHubTakesTheAppJWT(t *testing.T) {
 	if err := client.call(ctx, http.MethodGet, "/app", jwt, nil, &app); err != nil {
 		t.Fatalf("GET /app as the App: %v", err)
 	}
-	if app.ID != client.appID || app.Permissions["contents"] != "write" || app.Permissions["metadata"] != "read" {
-		t.Fatalf("app = %+v, want id %d with contents write and metadata read", app, client.appID)
+	if app.ID != client.appID || !maps.Equal(app.Permissions, Permissions) {
+		t.Fatalf("app = %+v, want id %d with the permissions app-manifest.json states, %v", app, client.appID, Permissions)
 	}
 }
 
@@ -99,10 +99,10 @@ func TestLiveGitHubRefusalsReadAsTheClientNamesThem(t *testing.T) {
 // Read only: it mints read tokens and reads with them, and writes to no repository.
 func TestLiveInstallationTokenIsLimitedToOneRepository(t *testing.T) {
 	client := liveClient(t)
-	installation := liveID(t, "HYPOTHESISLOOP_GITHUB_LIVE_INSTALLATION")
-	name := os.Getenv("HYPOTHESISLOOP_GITHUB_LIVE_REPOSITORY")
+	installation := liveID(t, "TEST_GIT_HOST_GITHUB_INSTALLATION")
+	name := os.Getenv("TEST_GIT_HOST_GITHUB_REPOSITORY")
 	if ValidRepository(name) != nil {
-		t.Skip("HYPOTHESISLOOP_GITHUB_LIVE_REPOSITORY is not set to owner/name")
+		t.Skip("TEST_GIT_HOST_GITHUB_REPOSITORY is not set to owner/name")
 	}
 	owner, repoName, _ := strings.Cut(name, "/")
 	found, err := client.Installation(ctx, installation)
@@ -208,22 +208,22 @@ func liveGit(t *testing.T, dir, token string, args ...string) (string, error) {
 
 // A read token clones and cannot push. A write token pushes a branch, and the branch is deleted.
 // Creating leaves a repository behind that the App cannot delete, so it runs only when asked to
-// by name: HYPOTHESISLOOP_GITHUB_LIVE_CREATE=1, on the installation
-// HYPOTHESISLOOP_GITHUB_LIVE_CREATE_INSTALLATION names, which is on an organisation and grants
+// by name: TEST_GIT_HOST_GITHUB_CREATE=1, on the installation
+// TEST_GIT_HOST_GITHUB_CREATE_INSTALLATION names, which is on an organisation and grants
 // the creation of repositories. On a person's own account their own token creates, which only
 // their browser's pass through GitHub yields, so no live check covers it.
 func TestLiveARepositoryIsCreatedAndCoveredByItsInstallation(t *testing.T) {
-	if os.Getenv("HYPOTHESISLOOP_GITHUB_LIVE_CREATE") != "1" {
-		t.Skip("HYPOTHESISLOOP_GITHUB_LIVE_CREATE is not 1: this creates a repository on an organisation and cannot delete it")
+	if os.Getenv("TEST_GIT_HOST_GITHUB_CREATE") != "1" {
+		t.Skip("TEST_GIT_HOST_GITHUB_CREATE is not 1: this creates a repository on an organisation and cannot delete it")
 	}
 	client := liveClient(t)
-	installation := liveID(t, "HYPOTHESISLOOP_GITHUB_LIVE_CREATE_INSTALLATION")
+	installation := liveID(t, "TEST_GIT_HOST_GITHUB_CREATE_INSTALLATION")
 	target, err := client.Installation(t.Context(), installation)
 	if err != nil {
 		t.Fatalf("Installation(%d) = %v", installation, err)
 	}
 	if target.AccountType != AccountOrganization {
-		t.Skipf("HYPOTHESISLOOP_GITHUB_LIVE_CREATE_INSTALLATION is on %s, a personal account, where a repository is created with its owner's own token: name an installation on an organisation", target.AccountLogin)
+		t.Skipf("TEST_GIT_HOST_GITHUB_CREATE_INSTALLATION is on %s, a personal account, where a repository is created with its owner's own token: name an installation on an organisation", target.AccountLogin)
 	}
 	name := "hl-live-create-" + strconv.FormatInt(client.now().Unix(), 10)
 	created, err := client.CreateRepository(t.Context(), installation, "", name, "Created by the platform's live check. Safe to delete.", map[string]string{"README.md": "Created by the platform's live check. Safe to delete.\n"})
@@ -241,10 +241,10 @@ func TestLiveARepositoryIsCreatedAndCoveredByItsInstallation(t *testing.T) {
 // that stands in for a new repository's default branch and is deleted again.
 func TestLiveFirstCommitReplacesWhatABranchHeld(t *testing.T) {
 	client := liveClient(t)
-	installation := liveID(t, "HYPOTHESISLOOP_GITHUB_LIVE_INSTALLATION")
-	name := os.Getenv("HYPOTHESISLOOP_GITHUB_LIVE_PUSH_REPOSITORY")
+	installation := liveID(t, "TEST_GIT_HOST_GITHUB_INSTALLATION")
+	name := os.Getenv("TEST_GIT_HOST_GITHUB_REPOSITORY")
 	if ValidRepository(name) != nil {
-		t.Skip("HYPOTHESISLOOP_GITHUB_LIVE_PUSH_REPOSITORY is not set to owner/name")
+		t.Skip("TEST_GIT_HOST_GITHUB_REPOSITORY is not set to owner/name")
 	}
 	write, err := client.Token(ctx, installation, name, Write)
 	if err != nil {
@@ -299,10 +299,10 @@ func TestLiveFirstCommitReplacesWhatABranchHeld(t *testing.T) {
 
 func TestLiveReadTokenClonesAndOnlyAWriteTokenPushes(t *testing.T) {
 	client := liveClient(t)
-	installation := liveID(t, "HYPOTHESISLOOP_GITHUB_LIVE_INSTALLATION")
-	name := os.Getenv("HYPOTHESISLOOP_GITHUB_LIVE_PUSH_REPOSITORY")
+	installation := liveID(t, "TEST_GIT_HOST_GITHUB_INSTALLATION")
+	name := os.Getenv("TEST_GIT_HOST_GITHUB_REPOSITORY")
 	if ValidRepository(name) != nil {
-		t.Skip("HYPOTHESISLOOP_GITHUB_LIVE_PUSH_REPOSITORY is not set to owner/name")
+		t.Skip("TEST_GIT_HOST_GITHUB_REPOSITORY is not set to owner/name")
 	}
 	read, err := client.Token(ctx, installation, name, Read)
 	if err != nil {

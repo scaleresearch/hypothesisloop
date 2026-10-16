@@ -26,7 +26,7 @@ func settingsPath(t *testing.T) string {
 	rendered := strings.ReplaceAll(string(committed), config.Placeholder+"HOST-ADDRESS", "host.example.invalid")
 	rendered = strings.ReplaceAll(rendered, config.Placeholder+"IMAGE-TAG", "abc1234")
 	rendered = strings.ReplaceAll(rendered, config.Placeholder+"UI-ORIGIN", "http://localhost:3000")
-	rendered += "\ngit:\n  provider: plain\n  base_url: https://git.example.invalid\n"
+	rendered += "\ngit_host:\n  provider: plain\n  plain:\n    base_url: https://git.example.invalid\n"
 	if err := os.WriteFile(path, []byte(rendered), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestGitHubConnectNeedsItsNumberAndAnApp(t *testing.T) {
 		"the command it replaced":         {[]string{"repo", "attach", "prj_1", "100", "7"}, "usage: hl-admin"},
 		"an installation that is a name":  {[]string{"github", "connect", "org-1", "acme"}, "INSTALLATION_ID"},
 		"no installation":                 {[]string{"github", "connect", "org-1"}, "usage: hl-admin"},
-		"a deployment with no GitHub App": {[]string{"github", "connect", "org-1", "100"}, "no github section"},
+		"a deployment with no GitHub App": {[]string{"github", "connect", "org-1", "100"}, "git host is not github"},
 	} {
 		if err := run(tc.args, &stdout); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: got = %v, want an error holding %q", name, err, tc.want)

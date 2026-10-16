@@ -384,28 +384,28 @@ func (c *Config) build() error {
 		}
 		issuers[provider.Issuer] = true
 	}
-	if g := c.GitHub; g.Configured() && (g.AppID <= 0 || g.AppSlug == "" || g.ClientID == "" || g.ClientSecret == "" || g.PrivateKey == "") {
-		return fmt.Errorf("github app_id, app_slug, client_id, client_secret and private_key are all required once any of them is set")
-	}
-	switch g := c.Git; g.Provider {
+	switch g := c.GitHost; g.Provider {
 	case "":
-		return fmt.Errorf("git provider is required, the git host platform experiments keep their code on: %s or %s", GitProviderGitHub, GitProviderPlain)
-	case GitProviderGitHub:
-		if !c.GitHub.Configured() || g != (GitConfig{Provider: GitProviderGitHub}) {
-			return fmt.Errorf("git provider github is the GitHub App of the github section: that section is required, and base_url, allow_http, username and password are for provider plain")
+		return fmt.Errorf("git_host provider is required, the git host platform experiments keep their code on: %s or %s", GitHostProviderGitHub, GitHostProviderPlain)
+	case GitHostProviderGitHub:
+		if g.GitHub == nil || g.Plain != nil {
+			return fmt.Errorf("git_host provider github takes the git_host github section and no other")
 		}
-	case GitProviderPlain:
-		if c.GitHub.Configured() {
-			return fmt.Errorf("git provider plain and a github section are set together: a deployment keeps its code on one git host")
+		if a := g.GitHub; a.AppID <= 0 || a.AppSlug == "" || a.ClientID == "" || a.ClientSecret == "" || a.PrivateKey == "" {
+			return fmt.Errorf("git_host github app_id, app_slug, client_id, client_secret and private_key are all required")
 		}
-		if !strings.HasPrefix(g.BaseURL, "https://") && !(g.AllowHTTP && strings.HasPrefix(g.BaseURL, "http://")) {
-			return fmt.Errorf("git base_url %q must be the https root the repositories of the deployment are cloned from, or an http one with allow_http: true", g.BaseURL)
+	case GitHostProviderPlain:
+		if g.Plain == nil || g.GitHub != nil {
+			return fmt.Errorf("git_host provider plain takes the git_host plain section and no other")
 		}
-		if (g.Username == "") != (g.Password == "") {
-			return fmt.Errorf("git username and password are set together or not at all")
+		if p := g.Plain; !strings.HasPrefix(p.BaseURL, "https://") && !(p.AllowHTTP && strings.HasPrefix(p.BaseURL, "http://")) {
+			return fmt.Errorf("git_host plain base_url %q must be the https root the repositories of the deployment are cloned from, or an http one with allow_http: true", p.BaseURL)
+		}
+		if p := g.Plain; (p.Username == "") != (p.Password == "") {
+			return fmt.Errorf("git_host plain username and password are set together or not at all")
 		}
 	default:
-		return fmt.Errorf("git provider %q is neither %s nor %s", g.Provider, GitProviderGitHub, GitProviderPlain)
+		return fmt.Errorf("git_host provider %q is neither %s nor %s", g.Provider, GitHostProviderGitHub, GitHostProviderPlain)
 	}
 	return nil
 }

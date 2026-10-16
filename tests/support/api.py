@@ -229,11 +229,11 @@ class API:
                 subprocess.run(["git", "init", "-q", "--bare", str(created)], check=True)
                 API.local_repository = created
             return API.local_repository.name
-        installation, repository = os.environ.get("HL_E2E_GITHUB_INSTALLATION"), os.environ.get("HL_E2E_GITHUB_REPO")
+        installation, repository = os.environ.get("TEST_GIT_HOST_GITHUB_INSTALLATION"), os.environ.get("TEST_GIT_HOST_GITHUB_REPOSITORY")
         if not installation or not repository:
             raise RuntimeError(
                 "this stack has a GitHub App, so every platform experiment names a repository: "
-                "set HL_E2E_GITHUB_INSTALLATION and HL_E2E_GITHUB_REPO (.env.example says what each is)")
+                "set TEST_GIT_HOST_GITHUB_INSTALLATION and TEST_GIT_HOST_GITHUB_REPOSITORY (.env.example says what each is)")
         if self.org_id and self.org_id not in API._connected:
             listed = self.get_json(f"/orgs/{self.org_id}/github-installations", params={"limit": 200})
             if not any(i["installation_id"] == int(installation) for i in listed):

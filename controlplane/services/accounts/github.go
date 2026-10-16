@@ -167,6 +167,10 @@ func (r *Repositories) connect(ctx context.Context, orgID, code, redirectURI str
 	// On a person's own account GitHub creates a repository for that person alone, so the grant
 	// of the one who connects theirs is kept. Any other is ended here.
 	chosen, err := chosenInstallation(grant.Installations, connected, installationID)
+	if err == nil {
+		// GitHub as the App states whether the installation granted every permission it asks for.
+		_, err = app.Installation(ctx, chosen.ID)
+	}
 	if err != nil || chosen.AccountType != github.AccountUser {
 		if revokeErr := app.RevokeUser(ctx, grant.AccessToken); revokeErr != nil && err == nil {
 			err = revokeErr

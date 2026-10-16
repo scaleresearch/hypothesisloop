@@ -48,7 +48,7 @@ const usage = `usage: hl-admin <command>
                                    person to prove they reach the installation, and this does not
 
 token reads HYPOTHESISLOOP_CONFIG. The others also read DATABASE_URL, and github connect needs the
-github section of the config.`
+git_host github section of the config.`
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
@@ -163,10 +163,10 @@ func run(args []string, stdout io.Writer) error {
 		if err != nil || installation <= 0 {
 			return fmt.Errorf("INSTALLATION_ID must be the installation's number, got %q", args[3])
 		}
-		if !cfg.GitHub.Configured() {
-			return errors.New("the config has no github section, so there is no App to ask about the installation")
+		if cfg.GitHost.GitHub == nil {
+			return errors.New("the config's git host is not github, so there is no App to ask about the installation")
 		}
-		app, err := github.New(cfg.GitHub)
+		app, err := github.New(*cfg.GitHost.GitHub)
 		if err != nil {
 			return err
 		}

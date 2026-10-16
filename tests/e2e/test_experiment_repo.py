@@ -7,8 +7,8 @@ real connect needs a person to authorise the App in a browser, so the one test t
 pushes has hl-admin connect the installation instead, which asks GitHub as the App that it
 exists. It runs only when the environment names a sandbox repository:
 
-    HL_E2E_GITHUB_INSTALLATION    the installation of the App that covers it
-    HL_E2E_GITHUB_REPO            owner/name, a repository tests may push branches to
+    TEST_GIT_HOST_GITHUB_INSTALLATION   the installation of the App that covers it
+    TEST_GIT_HOST_GITHUB_REPOSITORY     owner/name, a repository tests may push branches to
 """
 from __future__ import annotations
 
@@ -193,7 +193,7 @@ def test_a_repository_is_checked_after_the_project_and_must_be_one_the_org_reach
     assert all(pe["name"] != whole["name"] for pe in listed), "a refused create left a platform experiment behind"
 
 
-SANDBOX_ENV = ("HL_E2E_GITHUB_INSTALLATION", "HL_E2E_GITHUB_REPO")
+SANDBOX_ENV = ("TEST_GIT_HOST_GITHUB_INSTALLATION", "TEST_GIT_HOST_GITHUB_REPOSITORY")
 
 
 def _git(agent: API, cwd, *args: str) -> subprocess.CompletedProcess:

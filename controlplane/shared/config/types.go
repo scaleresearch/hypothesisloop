@@ -386,8 +386,21 @@ func (c *Config) OfferedJobImages() []domain.JobImage {
 	return images
 }
 
-// GitHubConfig is the GitHub App a project's repository is reached through, on a deployment whose
-// git host is GitHub. Set, all of it is required.
+// The git hosts a deployment can keep its platform experiments' code on.
+const (
+	GitHostProviderGitHub = "github"
+	GitHostProviderPlain  = "plain"
+)
+
+// GitHostConfig is the one git host platform experiments keep their code on: Provider names it,
+// and the section of that name, the only one set, configures it.
+type GitHostConfig struct {
+	Provider string          `yaml:"provider"`
+	GitHub   *GitHubConfig   `yaml:"github"`
+	Plain    *PlainGitConfig `yaml:"plain"`
+}
+
+// GitHubConfig is the GitHub App a project's repository is reached through. All of it is required.
 type GitHubConfig struct {
 	AppID   int64  `yaml:"app_id"`
 	AppSlug string `yaml:"app_slug"`
@@ -400,21 +413,10 @@ type GitHubConfig struct {
 	PrivateKey string `yaml:"private_key"`
 }
 
-// Configured reports whether the deployment has a GitHub App.
-func (c GitHubConfig) Configured() bool { return c != GitHubConfig{} }
-
-// The git hosts a deployment can keep its platform experiments' code on.
-const (
-	GitProviderGitHub = "github"
-	GitProviderPlain  = "plain"
-)
-
-// GitConfig says which git host platform experiments keep their code on. github is the GitHub
-// App of the github section. plain is any host that serves repositories under BaseURL over
-// https, reached with Username and Password, or with neither when it asks for none.
-type GitConfig struct {
-	Provider string `yaml:"provider"`
-	BaseURL  string `yaml:"base_url"`
+// PlainGitConfig is any host that serves repositories under BaseURL over https, reached with
+// Username and Password, or with neither when it asks for none.
+type PlainGitConfig struct {
+	BaseURL string `yaml:"base_url"`
 	// AllowHTTP lets BaseURL be http, for a host on the deployment's own network. The credential
 	// then travels in the clear.
 	AllowHTTP bool `yaml:"allow_http"`
@@ -441,8 +443,7 @@ type Config struct {
 	Accounts         AccountsConfig          `yaml:"accounts"`
 	Runtimes         RuntimesConfig          `yaml:"runtimes"`
 	JobImages        []JobImageConfig        `yaml:"job_images"`
-	GitHub           GitHubConfig            `yaml:"github"`
-	Git              GitConfig               `yaml:"git"`
+	GitHost          GitHostConfig           `yaml:"git_host"`
 	Environments     *EnvironmentsConfig     `yaml:"environments"`
 
 	// Derived maps built by Load() for fast lookup — not in YAML.

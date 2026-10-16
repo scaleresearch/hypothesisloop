@@ -139,12 +139,14 @@ type fakeApp struct {
 	covers  map[int64][]github.Repository
 	asked   []asked
 	listed  []int64
-	// looked holds each installation GitHub was asked about by its id.
-	looked  []int64
-	mints   []minted
-	files   []string
-	userErr error
-	listErr map[int64]error
+	// looked holds each installation GitHub was asked about by its id, and installationErr fails
+	// every such question.
+	looked          []int64
+	installationErr error
+	mints           []minted
+	files           []string
+	userErr         error
+	listErr         map[int64]error
 	// tokenErr fails every mint, fileErr every file read.
 	tokenErr error
 	fileErr  error
@@ -269,6 +271,9 @@ func (a *fakeApp) UserInstallations(_ context.Context, code, redirect string) (*
 
 func (a *fakeApp) Installation(_ context.Context, installationID int64) (*github.Installation, error) {
 	a.looked = append(a.looked, installationID)
+	if a.installationErr != nil {
+		return nil, a.installationErr
+	}
 	for _, one := range []github.Installation{acme, rival, carol} {
 		if _, covered := a.covers[installationID]; covered && one.ID == installationID {
 			return &one, nil
@@ -586,6 +591,21 @@ func TestConnectRefusals(t *testing.T) {
 }
 
 const leak = "ghs_a_token_in_an_error"
+
+// An installation whose owner has yet to accept a permission the App asks for is not connected,
+// and the refusal names what is missing. The person's grant is ended all the same.
+func TestConnectRefusesAnInstallationMissingAPermissionNamingIt(t *testing.T) {
+	w := newGitHubWorld(t, true)
+	w.app.installationErr = &github.PermissionMissingError{Installation: 100, Missing: []string{"administration:write"}}
+	rec := w.call("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-acme", 100))
+	reason, message := refusalOf(t, rec)
+	if rec.Code != http.StatusUnprocessableEntity || reason != github.ReasonPermissionMissing || !strings.Contains(message, "administration:write") {
+		t.Fatalf("got = %d %s, want 422 %s naming administration:write", rec.Code, rec.Body, github.ReasonPermissionMissing)
+	}
+	if len(w.installations.connected[w.orgA]) != 0 || len(w.app.revoked) != 1 {
+		t.Fatalf("connected %v and revoked %v, want nothing connected and the grant ended", w.installations.connected[w.orgA], w.app.revoked)
+	}
+}
 
 func TestInstallationsAreListedPagedAndDisconnected(t *testing.T) {
 	w := newGitHubWorld(t, true)

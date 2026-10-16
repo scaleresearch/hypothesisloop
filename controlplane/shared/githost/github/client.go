@@ -8,6 +8,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -171,6 +172,42 @@ func failedFor(installationID int64, err error) error {
 		failed.Status, failed.Message = refused.status, refused.message
 	}
 	return failed
+}
+
+//go:embed app-manifest.json
+var manifest []byte
+
+// Permissions is every permission the App asks an installation for, by name, as
+// app-manifest.json, the one statement of them, declares: administration (write) creates a
+// repository, contents (write) reads, commits and pushes, metadata (read) lists repositories, and
+// members (read), an organisation permission, shows who administers an organisation.
+var Permissions = func() map[string]string {
+	var app struct {
+		Permissions map[string]string `json:"default_permissions"`
+	}
+	if err := json.Unmarshal(manifest, &app); err != nil || len(app.Permissions) == 0 {
+		panic("github: app-manifest.json states no default_permissions")
+	}
+	return app.Permissions
+}()
+
+// organisationPermissions are those of Permissions an installation on a person's own account
+// has nothing to grant.
+var organisationPermissions = map[string]bool{"members": true}
+
+// missingPermissions is what of Permissions an installation on an account of that type has not
+// granted, each as name:level.
+func missingPermissions(accountType string, granted map[string]string) []string {
+	missing := []string{}
+	for _, name := range slices.Sorted(maps.Keys(Permissions)) {
+		if accountType == AccountUser && organisationPermissions[name] {
+			continue
+		}
+		if permissionLevels[granted[name]] < permissionLevels[Permissions[name]] {
+			missing = append(missing, name+":"+Permissions[name])
+		}
+	}
+	return missing
 }
 
 // Access is what an installation token may do to the repository's contents.
@@ -455,16 +492,19 @@ func (c *Client) administers(ctx context.Context, userToken, organisation string
 	return membership.State == "active" && membership.Role == "admin", false, nil
 }
 
-// Installation returns one installation of the App as GitHub states it to the App itself.
+// Installation returns one installation of the App as GitHub states it to the App itself:
+// ErrInstallationGone for one removed or suspended, and PermissionMissingError for one that has
+// not granted every permission the App asks for, as when its owner has yet to accept them.
 func (c *Client) Installation(ctx context.Context, installationID int64) (*Installation, error) {
 	jwt, err := c.appJWT()
 	if err != nil {
 		return nil, err
 	}
 	var out struct {
-		ID                  int64   `json:"id"`
-		SuspendedAt         *string `json:"suspended_at"`
-		RepositorySelection string  `json:"repository_selection"`
+		ID                  int64             `json:"id"`
+		SuspendedAt         *string           `json:"suspended_at"`
+		RepositorySelection string            `json:"repository_selection"`
+		Permissions         map[string]string `json:"permissions"`
 		Account             struct {
 			Login string `json:"login"`
 			Type  string `json:"type"`
@@ -484,6 +524,9 @@ func (c *Client) Installation(ctx context.Context, installationID int64) (*Insta
 	}
 	if out.ID != installationID || out.Account.Login == "" || !accountType(out.Account.Type) || (out.RepositorySelection != "all" && out.RepositorySelection != "selected") {
 		return nil, fmt.Errorf("github: GET /app/installations/{id} answered without the installation asked for, its account, a user or an organisation, or whether it covers all repositories or selected ones")
+	}
+	if missing := missingPermissions(out.Account.Type, out.Permissions); len(missing) > 0 {
+		return nil, &PermissionMissingError{Installation: installationID, Missing: missing}
 	}
 	return &Installation{ID: out.ID, AccountLogin: out.Account.Login, AccountType: out.Account.Type, SelectedRepositories: out.RepositorySelection == "selected"}, nil
 }

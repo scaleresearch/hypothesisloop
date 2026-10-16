@@ -15,9 +15,11 @@ runtimes:
   metricsURL: http://metrics.example.invalid:30084
 objectStore:
   endpoint: http://object-store.hypothesisloop.svc:9000
-git:
-  baseURL: https://git.example.invalid/experiments
-  username: made-up-git-account
+gitHost:
+  provider: plain
+  plain:
+    baseURL: https://git.example.invalid/experiments
+    username: made-up-git-account
 ui:
   identity:
     provider: supabase

@@ -120,12 +120,12 @@ services:
     environment:
       DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable
       HYPOTHESISLOOP_SIGNING_SECRET: ${HYPOTHESISLOOP_SIGNING_SECRET:?run through make, which supplies local development's signing secret}
-      # The GitHub App's two secrets, which the rendered settings name when .env has an App
-      # (localdev/lib/auth.sh). Empty and unread otherwise.
-      HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET: ${HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET:-}
-      HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY: ${HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY:-}
-      # The local git server's password, which the rendered settings name when .env has no App.
-      HYPOTHESISLOOP_GIT_PASSWORD: ${HYPOTHESISLOOP_GIT_PASSWORD:-}
+      # The git host's secrets, which the rendered settings name (localdev/lib/auth.sh): the
+      # GitHub App's two with GIT_HOST_PROVIDER=github, the local git server's password with local.
+      # Empty and unread otherwise.
+      HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET:-}
+      HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY:-}
+      HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD: ${HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD:-}
       # With CONTAINER_REGISTRY_PROVIDER=gcp in .env, the control service's own Google identity,
       # which mints the environment registry's tokens: the application default credentials
       # `gcloud auth application-default login` writes to its well-known path, or
@@ -153,12 +153,12 @@ services:
     environment:
       DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable
       HYPOTHESISLOOP_SIGNING_SECRET: ${HYPOTHESISLOOP_SIGNING_SECRET:?run through make, which supplies local development's signing secret}
-      # The GitHub App's two secrets, which the rendered settings name when .env has an App
-      # (localdev/lib/auth.sh). Empty and unread otherwise.
-      HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET: ${HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET:-}
-      HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY: ${HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY:-}
-      # The local git server's password, which the rendered settings name when .env has no App.
-      HYPOTHESISLOOP_GIT_PASSWORD: ${HYPOTHESISLOOP_GIT_PASSWORD:-}
+      # The git host's secrets, which the rendered settings name (localdev/lib/auth.sh): the
+      # GitHub App's two with GIT_HOST_PROVIDER=github, the local git server's password with local.
+      # Empty and unread otherwise.
+      HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET:-}
+      HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY:-}
+      HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD: ${HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD:-}
     ports:
       - "8084:8084"
     volumes:

@@ -9,8 +9,8 @@ environment says where it runs:
 
     API_URL, HL_TOKEN                 the hosted dev stack (make dev-hosted) and its staff token,
                                       used here only to make the org and connect the repository
-    HL_E2E_GITHUB_INSTALLATION        the installation of the platform's GitHub App that covers
-    HL_E2E_GITHUB_REPO                the repository, which must hold .hypothesisloop/experiment.yaml,
+    TEST_GIT_HOST_GITHUB_INSTALLATIONthe installation of the platform's GitHub App that covers
+    TEST_GIT_HOST_GITHUB_REPOSITORY  the repository, which must hold .hypothesisloop/experiment.yaml,
                                       mlp/job.yaml and a workload that reports val_accuracy
     SANDBOX_PROVIDER                  fly or e2b, as the stack's launcher is configured
     SANDBOX_FLY_APP, SANDBOX_FLY_API_TOKEN
@@ -64,7 +64,7 @@ def provider() -> str:
     provider = os.environ.get("SANDBOX_PROVIDER", "")
     if provider not in NEEDED:
         pytest.skip("needs real providers: set SANDBOX_PROVIDER to fly or e2b, as the stack's launcher is configured")
-    missing = [key for key in (*NEEDED[provider], "CLOUD_COMPUTE_VAST_API_KEY", "HL_E2E_GITHUB_INSTALLATION", "HL_E2E_GITHUB_REPO") if not os.environ.get(key)]
+    missing = [key for key in (*NEEDED[provider], "CLOUD_COMPUTE_VAST_API_KEY", "TEST_GIT_HOST_GITHUB_INSTALLATION", "TEST_GIT_HOST_GITHUB_REPOSITORY") if not os.environ.get(key)]
     if missing:
         pytest.skip(f"needs real providers: {', '.join(missing)} not set")
     return provider
@@ -78,7 +78,7 @@ def org(api: API, run_id: str, provider: str) -> API:
     home = admin.add_user(subject, f"Real providers {run_id}")
     key = admin.add_api_key(subject, home["org_id"])
     assert key.startswith("hlk_")
-    admin.connect_github(home["org_id"], os.environ["HL_E2E_GITHUB_INSTALLATION"])
+    admin.connect_github(home["org_id"], os.environ["TEST_GIT_HOST_GITHUB_INSTALLATION"])
     return api.as_caller(key, home["org_id"], home["project_id"])
 
 
@@ -91,7 +91,7 @@ def test_a_hosted_experiment_runs_end_to_end_on_rented_machines_and_survives_a_l
     # and metrics, which point at mlp/job.yaml there, and takes the rest from the file.
     stated = yaml.safe_load((Path(__file__).parent / "real_providers_experiment.yaml").read_text())
     created = org.post("/platform-experiments", {
-        "project_id": org.project_id, "from_repo": True, "repository": os.environ["HL_E2E_GITHUB_REPO"],
+        "project_id": org.project_id, "from_repo": True, "repository": os.environ["TEST_GIT_HOST_GITHUB_REPOSITORY"],
         "description": stated["description"], "metrics": stated["metrics"],
         "name": f"real-providers-{run_id}", "budget_accelerator_hours": 1, "max_agents": 3,
         "coordinator_hosted": True, "duration_hours": 24,
@@ -99,7 +99,7 @@ def test_a_hosted_experiment_runs_end_to_end_on_rented_machines_and_survives_a_l
     assert created.status_code == 201, f"create: {created.status_code} {created.text}"
     pe_id = created.json()["id"]
     org.created_platform_experiments.append(pe_id)
-    assert created.json()["repository_url"].endswith(os.environ["HL_E2E_GITHUB_REPO"] + ".git")
+    assert created.json()["repository_url"].endswith(os.environ["TEST_GIT_HOST_GITHUB_REPOSITORY"] + ".git")
     researchers = [org.add_agents(pe_id, hosted=True, flavor=flavor)[0]["agent_id"] for flavor in ("hyperparameter-search", "architecture-search")]
     # Its start time is now. The create made its agent of role baseline, and when that agent
     # finishes with one completed job the platform declares it and starts the run: no researcher's
@@ -161,7 +161,7 @@ def test_a_hosted_experiment_runs_end_to_end_on_rented_machines_and_survives_a_l
         assert {row["agent_id"] for row in standings} == set(researchers) and all(0.5 < row["best"] <= 1 for row in standings), standings
         for job in finished:
             if job["status"] == "COMPLETED":
-                assert job["cluster_name"] and "@" in job["code_ref"] and os.environ["HL_E2E_GITHUB_REPO"] in job["code_ref"], job
+                assert job["cluster_name"] and "@" in job["code_ref"] and os.environ["TEST_GIT_HOST_GITHUB_REPOSITORY"] in job["code_ref"], job
         closed = eventually("the coordinator closes the experiment with a summary", lambda: org.get_json(f"/platform-experiments/{pe_id}"), deadline=deadline,
                             accept=lambda pe: pe["status"] == "closed" and len(pe.get("summary") or "") > 40, interval=15)
         assert all(not _instance(org, pe_id, who)["stopped"] for who in everyone), closed

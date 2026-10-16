@@ -378,7 +378,10 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		body := map[string]any{"id": id, "suspended_at": nil, "account": f.accountOf(id), "repository_selection": "selected",
-			"permissions": map[string]string{"metadata": "read", "contents": "write"}}
+			"permissions": maps.Clone(Permissions)}
+		if !installation.members {
+			delete(body["permissions"].(map[string]string), "members")
+		}
 		if f.ungranted {
 			body["permissions"] = map[string]string{"metadata": "read", "contents": "read"}
 		}
@@ -1298,6 +1301,26 @@ func TestTokenRefusals(t *testing.T) {
 				t.Fatalf("Token = %v, %v, want %v", token, err, tc.want)
 			}
 		})
+	}
+}
+
+// An installation whose owner has not accepted every permission the App asks for is refused with
+// those it lacks named, whatever else it holds. A person's own account has no organisation
+// permission to grant.
+func TestAnInstallationThatHasNotGrantedTheAppsPermissionsIsRefusedNamingThem(t *testing.T) {
+	f, client := newFakeGitHub(t)
+	if _, err := client.Installation(ctx, 300); err != nil {
+		t.Fatalf("a personal account's installation, which grants no organisation permission: %v", err)
+	}
+	f.installations[100].members = false
+	_, err := client.Installation(ctx, 100)
+	var missing *PermissionMissingError
+	if !errors.As(err, &missing) || !slices.Equal(missing.Missing, []string{"members:read"}) || !errors.Is(err, ErrPermissionNotGranted) {
+		t.Fatalf("an organisation's installation without members: got = %v, want members:read named", err)
+	}
+	f.ungranted = true
+	if _, err := client.Installation(ctx, 300); !errors.As(err, &missing) || !slices.Equal(missing.Missing, []string{"administration:write", "contents:write"}) {
+		t.Fatalf("an installation that holds contents read alone: got = %v, want administration:write and contents:write named", err)
 	}
 }
 

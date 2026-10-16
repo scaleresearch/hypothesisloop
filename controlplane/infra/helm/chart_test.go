@@ -160,23 +160,23 @@ func TestTwoRendersOfTheSameValuesAreIdentical(t *testing.T) {
 	}
 }
 
-// The staged file names no git host. The chart adds the App of a deployment that has one, the ids
-// as values and the two secrets as references both services resolve from the Secret, and
-// otherwise the plain host of the values with its password from the Secret.
+// The staged file names no git host. The chart adds the one gitHost.provider names: the App, the
+// ids as values and the two secrets as references both services resolve from the Secret, or the
+// plain host of the values with its password from the Secret.
 func TestTheGitHostOfTheValuesReachesTheConfig(t *testing.T) {
 	inCluster := charttest.Render(t, charttest.InCluster)
 	release := charttest.Render(t, charttest.External)
 	for _, deployment := range configLoaders {
 		plain := loadRendered(t, inCluster, charttest.InCluster, deployment)
-		if want := (config.GitConfig{Provider: config.GitProviderPlain, BaseURL: "https://git.example.invalid/experiments", Username: "made-up-git-account",
-			Password: charttest.Secret["HYPOTHESISLOOP_GIT_PASSWORD"]}); plain.GitHub.Configured() || plain.Git != want {
-			t.Errorf("%s: in-cluster git host is %s at %s as %s with an App %v, want the values' plain host and the Secret's password", deployment, plain.Git.Provider, plain.Git.BaseURL, plain.Git.Username, plain.GitHub.Configured())
+		if want := (config.PlainGitConfig{BaseURL: "https://git.example.invalid/experiments", Username: "made-up-git-account",
+			Password: charttest.Secret["HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD"]}); plain.GitHost.Provider != config.GitHostProviderPlain || plain.GitHost.GitHub != nil || plain.GitHost.Plain == nil || *plain.GitHost.Plain != want {
+			t.Errorf("%s: in-cluster git host is %s, want the values' plain host and the Secret's password", deployment, plain.GitHost.Provider)
 		}
 		cfg := loadRendered(t, release, charttest.External, deployment)
 		want := config.GitHubConfig{AppID: 4242, AppSlug: "made-up-app", ClientID: "Iv23made-up",
-			ClientSecret: charttest.Secret["HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET"], PrivateKey: charttest.Secret["HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY"]}
-		if got := cfg.GitHub; got != want || cfg.Git != (config.GitConfig{Provider: config.GitProviderGitHub}) {
-			t.Errorf("%s: github app %d (%s, %s), or its secrets, are not the values' and the Secret's, or the git host is %q", deployment, got.AppID, got.AppSlug, got.ClientID, cfg.Git.Provider)
+			ClientSecret: charttest.Secret["HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET"], PrivateKey: charttest.Secret["HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY"]}
+		if got := cfg.GitHost; got.Provider != config.GitHostProviderGitHub || got.Plain != nil || got.GitHub == nil || *got.GitHub != want {
+			t.Errorf("%s: the git host is %q, or its App or secrets are not the values' and the Secret's", deployment, got.Provider)
 		}
 	}
 }
@@ -244,7 +244,11 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		"cloud-agent with no cluster": {charttest.External, `cloudAgent.clusterName=""`, "cloudAgent.clusterName is required"},
 		"cloud-agent with no org":     {charttest.External, `cloudAgent.org=""`, "cloudAgent.org is required"},
 		"a cluster name with a shell": {charttest.External, `cloudAgent.clusterName="a; rm"`, "/cloudAgent/clusterName"},
-		"an App with no client id":    {charttest.External, `github.clientId=""`, "github.clientId is required"},
+		"an App with no client id":    {charttest.External, `gitHost.github.clientId=""`, "gitHost.github.clientId is required"},
+		"an App with no id":           {charttest.External, `gitHost.github.appId=0`, "gitHost.github.appId is required"},
+		"no git host":                 {charttest.External, `gitHost.provider=""`, "gitHost/provider"},
+		"a git host nobody wrote":     {charttest.External, `gitHost.provider="gitlab"`, "gitHost/provider"},
+		"plain with no root":          {charttest.InCluster, `gitHost.plain.baseURL=""`, "gitHost.plain.baseURL is required"},
 		"providers as text":           {charttest.External, `auth.identityProviders="supabase"`, "/auth/identityProviders"},
 		"a provider with no audience": {charttest.External, `auth.identityProviders=[{"issuer":"https://a.example","jwt_keys":[{"kid":"a","kty":"EC","alg":"ES256"}]}]`, "/auth/identityProviders/0"},
 		"a provider with no keys":     {charttest.External, `auth.identityProviders=[{"issuer":"https://a.example","audience":"a","jwt_keys":[]}]`, "/auth/identityProviders/0/jwt_keys"},

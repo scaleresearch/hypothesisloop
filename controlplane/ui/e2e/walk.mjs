@@ -31,9 +31,9 @@ const until = flag('--until', 'done')
 const off = flag('--off', '').split(',').filter(Boolean)
 const RESEARCHERS = 2
 const LONGEST = 60 * 60 * 1000
-const REPOSITORY = process.env.HL_E2E_GITHUB_REPO
-const INSTALLATION = process.env.HL_E2E_GITHUB_INSTALLATION
-assert.ok(REPOSITORY && INSTALLATION, 'usage: HL_E2E_GITHUB_REPO=.. HL_E2E_GITHUB_INSTALLATION=.. node e2e/walk.mjs')
+const REPOSITORY = process.env.TEST_GIT_HOST_GITHUB_REPOSITORY
+const INSTALLATION = process.env.TEST_GIT_HOST_GITHUB_INSTALLATION
+assert.ok(REPOSITORY && INSTALLATION, 'usage: TEST_GIT_HOST_GITHUB_REPOSITORY=.. TEST_GIT_HOST_GITHUB_INSTALLATION=.. node e2e/walk.mjs')
 
 const run = randomUUID().slice(0, 6)
 const person = { id: randomUUID(), name: `Walk ${run}` }

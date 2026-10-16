@@ -465,34 +465,44 @@
         }
       }
     },
-    "github": {
+    "gitHost": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "appId": {
-          "type": "integer",
-          "minimum": 0
+        "provider": {
+          "type": "string",
+          "enum": ["github", "plain"]
         },
-        "appSlug": {
-          "type": "string"
+        "github": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "appId": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "appSlug": {
+              "type": "string"
+            },
+            "clientId": {
+              "type": "string"
+            }
+          }
         },
-        "clientId": {
-          "type": "string"
-        }
-      }
-    },
-    "git": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "baseURL": {
-          "type": "string"
-        },
-        "allowHTTP": {
-          "type": "boolean"
-        },
-        "username": {
-          "type": "string"
+        "plain": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "baseURL": {
+              "type": "string"
+            },
+            "allowHTTP": {
+              "type": "boolean"
+            },
+            "username": {
+              "type": "string"
+            }
+          }
         }
       }
     },

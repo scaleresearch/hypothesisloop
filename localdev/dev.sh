@@ -6,7 +6,7 @@
 # with its pid and its log in localdev/.run, so one can be restarted while the rest keep running.
 #
 #   up       render the settings for the local cluster and (re)start the API and metrics-service;
-#            start the UI unless it runs, and the git server when the stack has no GitHub App
+#            start the UI unless it runs, and the git server when GIT_HOST_PROVIDER is local
 #   hosted   the same with what rents compute elsewhere: agent-launcher, on the sandbox provider
 #            SANDBOX_PROVIDER in .env names, and cloud-agent, on the compute provider
 #            CLOUD_COMPUTE_PROVIDER names, as two more processes, and settings that name the
@@ -26,6 +26,7 @@ action="${1:?usage: dev.sh up|hosted|api|ui|status|require-local|down}"
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo}"
 . localdev/lib/auth.sh
+git_host="$(lib_git_host_provider)"
 
 compose=localdev/controlplane/docker-compose.yml
 rendered=controlplane/settings/.hypothesisloop.rendered.yaml
@@ -118,9 +119,9 @@ render_settings() {
             -e "s|^  image: registry.example.invalid/hypothesisloop-experimentator-base:latest$|  image: ${registry}/hypothesisloop-experimentator-base:${tag}|"
             -e "s|^  registry: ${host}:5000$|  registry: ${registry}|"
             -e "s|^  image_tag: .*$|  image_tag: ${tag}|")
-    if [[ "$(lib_git_provider)" == "plain" ]]; then
-      hosted+=(-e "s|^  base_url: http://${host}:${HL_GIT_PORT}$|  base_url: ${public_git}|")
-      values+=("  base_url: ${public_git}")
+    if [[ "${git_host}" == "local" ]]; then
+      hosted+=(-e "s|^    base_url: http://${host}:${HL_GIT_PORT}$|    base_url: ${public_git}|")
+      values+=("    base_url: ${public_git}")
     fi
     values+=("  public_api_url: ${public_api}" "  metrics_url: ${public_metrics}" "  endpoint: ${public_store}" "  image: ${registry}/hypothesisloop-experimentator-base:${tag}"
              "  registry: ${registry}" "  image_tag: ${tag}")
@@ -248,9 +249,9 @@ local_cluster() {
   exit 1
 }
 
-# The git host of a stack with no GitHub App. A stack with one runs none.
+# The git host of a stack whose GIT_HOST_PROVIDER is local. Any other runs none.
 start_git_server() {
-  if [[ "$(lib_git_provider)" != "plain" ]]; then
+  if [[ "${git_host}" != "local" ]]; then
     stop git-server
     return
   fi
@@ -259,7 +260,7 @@ start_git_server() {
   stop git-server
   require_port "${HL_GIT_PORT}"
   GIT_SERVER_ADDRESS=":${HL_GIT_PORT}" GIT_SERVER_ROOT="${HL_GIT_ROOT}" GIT_SERVER_USERNAME="${HL_GIT_USERNAME}" \
-    GIT_SERVER_PASSWORD="${HYPOTHESISLOOP_GIT_PASSWORD}" start git-server "${bin}/git-server"
+    GIT_SERVER_PASSWORD="${HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD}" start git-server "${bin}/git-server"
   wait_for git-server "http://localhost:${HL_GIT_PORT}/health"
 }
 

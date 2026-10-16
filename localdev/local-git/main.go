@@ -1,5 +1,5 @@
 // git-server serves the bare repositories under one directory over git's smart HTTP, to
-// whoever presents the one credential: local development's git host (git provider plain).
+// whoever presents the one credential: local development's git host (git_host provider plain, GIT_HOST_PROVIDER=local).
 package main
 
 import (

@@ -46,33 +46,62 @@ if [[ -z "${HL_GOOGLE_CREDENTIALS_FILE:-}" ]]; then
 fi
 export HL_GOOGLE_CREDENTIALS_FILE
 
-# The GitHub App local development reaches repositories through, when the repository's .env
-# names one by GITHUB_APP_ID (.env.example). The rendered settings then get a github section, and
-# its two secrets reach every process that loads them (the compose services, hl-admin) through
-# the two variables exported here. With no .env or no id there is no App.
 lib_env_value() {
   (set +u; . "${LIB_AUTH_REPO}/.env"; printf '%s' "${!1:-}")
 }
 HL_IDENTITY_PROVIDER=""
-HL_GITHUB_APP_ID=""
 if [[ -f "${LIB_AUTH_REPO}/.env" ]]; then
-  HL_GITHUB_APP_ID="$(lib_env_value GITHUB_APP_ID)"
   HL_IDENTITY_PROVIDER="$(lib_env_value IDENTITY_PROVIDER)"
 fi
-if [[ -n "${HL_GITHUB_APP_ID}" ]]; then
-  for lib_auth_key in GITHUB_APP_SLUG GITHUB_APP_CLIENT_ID GITHUB_APP_CLIENT_SECRET GITHUB_APP_PRIVATE_KEY; do
-    if [[ -z "$(lib_env_value "${lib_auth_key}")" ]]; then
-      echo "auth: .env sets GITHUB_APP_ID and not ${lib_auth_key} (.env.example says what it is)" >&2
-      return 1 2>/dev/null || exit 1
-    fi
-  done
-  unset lib_auth_key
-  HL_GITHUB_APP_SLUG="$(lib_env_value GITHUB_APP_SLUG)"
-  HL_GITHUB_APP_CLIENT_ID="$(lib_env_value GITHUB_APP_CLIENT_ID)"
-  HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET="$(lib_env_value GITHUB_APP_CLIENT_SECRET)"
-  HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY="$(lib_env_value GITHUB_APP_PRIVATE_KEY)"
-  export HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY
+
+# The git host local platform experiments keep their code on, as GIT_HOST_PROVIDER in .env names
+# it (.env.example): github, the GitHub App of the GIT_HOST_GITHUB_APP_* keys, or local, the git
+# server `make dev` runs on this machine (localdev/local-git). That one serves the bare
+# repositories under HL_GIT_ROOT (make git-repository) to its one credential, whose password is
+# made on this machine by the first use and never leaves it. The secrets of either reach every
+# process that loads the rendered settings (the compose services, hl-admin) through the
+# variables exported here.
+HL_GIT_PORT=8085
+HL_GIT_ROOT="${LIB_AUTH_REPO}/localdev/.run/git"
+HL_GIT_USERNAME=hypothesisloop
+HL_GIT_HOST_PROVIDER=""
+if [[ -f "${LIB_AUTH_REPO}/.env" ]]; then
+  HL_GIT_HOST_PROVIDER="$(lib_env_value GIT_HOST_PROVIDER)"
 fi
+lib_git_host_provider() {
+  case "${HL_GIT_HOST_PROVIDER}" in
+    github|local) echo "${HL_GIT_HOST_PROVIDER}" ;;
+    "") echo "auth: .env does not set GIT_HOST_PROVIDER, which is github or local (.env.example says what each is)" >&2; return 1 ;;
+    *) echo "auth: .env sets GIT_HOST_PROVIDER=${HL_GIT_HOST_PROVIDER}, which is github or local" >&2; return 1 ;;
+  esac
+}
+case "${HL_GIT_HOST_PROVIDER}" in
+  github)
+    for lib_auth_key in GIT_HOST_GITHUB_APP_ID GIT_HOST_GITHUB_APP_SLUG GIT_HOST_GITHUB_APP_CLIENT_ID GIT_HOST_GITHUB_APP_CLIENT_SECRET GIT_HOST_GITHUB_APP_PRIVATE_KEY; do
+      if [[ -z "$(lib_env_value "${lib_auth_key}")" ]]; then
+        echo "auth: .env sets GIT_HOST_PROVIDER=github and not ${lib_auth_key} (.env.example says what it is)" >&2
+        return 1 2>/dev/null || exit 1
+      fi
+    done
+    unset lib_auth_key
+    HL_GIT_HOST_GITHUB_APP_ID="$(lib_env_value GIT_HOST_GITHUB_APP_ID)"
+    HL_GIT_HOST_GITHUB_APP_SLUG="$(lib_env_value GIT_HOST_GITHUB_APP_SLUG)"
+    HL_GIT_HOST_GITHUB_APP_CLIENT_ID="$(lib_env_value GIT_HOST_GITHUB_APP_CLIENT_ID)"
+    HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET="$(lib_env_value GIT_HOST_GITHUB_APP_CLIENT_SECRET)"
+    HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY="$(lib_env_value GIT_HOST_GITHUB_APP_PRIVATE_KEY)"
+    export HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY
+    ;;
+  local)
+    if [[ ! -s "${LIB_AUTH_REPO}/localdev/.run/git-password" ]]; then
+      mkdir -p "${LIB_AUTH_REPO}/localdev/.run"
+      (umask 077 && openssl rand -hex 24 > "${LIB_AUTH_REPO}/localdev/.run/git-password")
+    fi
+    HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD="$(cat "${LIB_AUTH_REPO}/localdev/.run/git-password")"
+    export HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD
+    ;;
+  "") ;;
+  *) lib_git_host_provider || return 1 2>/dev/null || exit 1 ;;
+esac
 
 # The container registry CONTAINER_REGISTRY_PROVIDER in .env names, read from that provider's own
 # keys. lib_container_registry sets HL_REGISTRY, the address the deployment's images are pushed
@@ -116,28 +145,9 @@ if [[ -f "${LIB_AUTH_REPO}/.env" ]]; then
   lib_container_registry || return 1 2>/dev/null || exit 1
 fi
 
-# The git host local platform experiments keep their code on: GitHub through the App when .env
-# names one, and otherwise the git server `make dev` runs on this machine (localdev/local-git).
-# That one serves the bare repositories under HL_GIT_ROOT (make git-repository) to its one
-# credential, whose password is made on this machine by the first use and never leaves it.
-HL_GIT_PORT=8085
-HL_GIT_ROOT="${LIB_AUTH_REPO}/localdev/.run/git"
-HL_GIT_USERNAME=hypothesisloop
-lib_git_provider() {
-  if [[ -n "${HL_GITHUB_APP_ID}" ]]; then echo github; else echo plain; fi
-}
-if [[ "$(lib_git_provider)" == "plain" ]]; then
-  if [[ ! -s "${LIB_AUTH_REPO}/localdev/.run/git-password" ]]; then
-    mkdir -p "${LIB_AUTH_REPO}/localdev/.run"
-    (umask 077 && openssl rand -hex 24 > "${LIB_AUTH_REPO}/localdev/.run/git-password")
-  fi
-  HYPOTHESISLOOP_GIT_PASSWORD="$(cat "${LIB_AUTH_REPO}/localdev/.run/git-password")"
-  export HYPOTHESISLOOP_GIT_PASSWORD
-fi
-
 # lib_render_settings <host address> <output>: the settings the local control plane runs with,
 # which are the committed ones with this host's address and the local identity providers filled
-# in, the git host: the GitHub App's section when there is one, the local git server otherwise,
+# in, the git host GIT_HOST_PROVIDER names: the GitHub App or the local git server,
 # and the environments section when .env names a registry.
 lib_render_settings() {
   local host_address="$1" output="$2" coordinate providers project issuer keys rendered
@@ -186,21 +196,26 @@ lib_render_settings() {
   for rendered in "issuer: \"${HL_DEV_JWT_ISSUER}\"" ${issuer:+"issuer: \"${issuer}\""}; do
     grep -qF -- "${rendered}" "${output}" || { echo "render-settings: the auth section of the settings file changed shape, '${rendered}' was not rendered" >&2; return 1; }
   done
-  if grep -qE '^(github|git|environments):' "${output}"; then
-    echo "render-settings: the settings file has a github, git or environments section, and the render would add a second one" >&2
+  if grep -qE '^(git_host|environments):' "${output}"; then
+    echo "render-settings: the settings file has a git_host or environments section, and the render would add a second one" >&2
     return 1
   fi
   if [[ -n "${HL_ENVIRONMENTS_REPOSITORY}" ]]; then
     printf '\nenvironments:\n  repository: %s\n%s\n' "${HL_ENVIRONMENTS_REPOSITORY}" "${HL_ENVIRONMENTS_PROVIDER}" >> "${output}"
   fi
-  if [[ "$(lib_git_provider)" == "github" ]]; then
-    # The values are JSON strings, which YAML reads as they are.
-    printf '\ngithub:\n  app_id: %d\n  app_slug: "%s"\n  client_id: "%s"\n  client_secret: ${HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET}\n  private_key: ${HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY}\n\ngit:\n  provider: github\n' \
-      "${HL_GITHUB_APP_ID}" "${HL_GITHUB_APP_SLUG}" "${HL_GITHUB_APP_CLIENT_ID}" >> "${output}"
-  else
-    printf '\ngit:\n  provider: plain\n  base_url: http://%s:%s\n  allow_http: true\n  username: %s\n  password: ${HYPOTHESISLOOP_GIT_PASSWORD}\n' \
-      "${host_address}" "${HL_GIT_PORT}" "${HL_GIT_USERNAME}" >> "${output}"
-  fi
+  case "$(lib_git_host_provider)" in
+    github)
+      # The values are JSON strings, which YAML reads as they are.
+      printf '\ngit_host:\n  provider: github\n  github:\n    app_id: %d\n    app_slug: "%s"\n    client_id: "%s"\n    client_secret: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_CLIENT_SECRET}\n    private_key: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY}\n' \
+        "${HL_GIT_HOST_GITHUB_APP_ID}" "${HL_GIT_HOST_GITHUB_APP_SLUG}" "${HL_GIT_HOST_GITHUB_APP_CLIENT_ID}" >> "${output}"
+      ;;
+    local)
+      printf '\ngit_host:\n  provider: plain\n  plain:\n    base_url: http://%s:%s\n    allow_http: true\n    username: %s\n    password: ${HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD}\n' \
+        "${host_address}" "${HL_GIT_PORT}" "${HL_GIT_USERNAME}" >> "${output}"
+      ;;
+    *) return 1 ;;
+  esac
+
 }
 # hl-admin reads the settings the local control plane runs with. The committed file holds
 # placeholders and is refused at load, so `make render-settings` comes first.

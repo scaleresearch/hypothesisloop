@@ -4,16 +4,16 @@ context is refused at submit. One whose build fails ends its job as the file's f
 of the build's output, and the same file submitted again is built again.
 
 The platform reads the file from GitHub alone, so the module needs the sandbox repository
-(HL_E2E_GITHUB_INSTALLATION, HL_E2E_GITHUB_REPO): each test pushes its experiment's baseline
-branch there and deletes it at the end. A build needs a connected cluster that builds for org
+(TEST_GIT_HOST_GITHUB_INSTALLATION, TEST_GIT_HOST_GITHUB_REPOSITORY): each test pushes its
+experiment's baseline branch there and deletes it at the end. A build needs a connected cluster that builds for org
 default (install.sh BUILDER=true). The local k3s of make e2e builds nothing, so there the build
 tests skip. Where another cluster builds, such as a Tenstorrent host's, localdev/e2e.sh refuses the stack,
 and the module runs with what make tt-e2e gives the suite, while nothing else uses that cluster:
 
     bash -c '. localdev/lib/auth.sh && export HYPOTHESISLOOP_CONFIG="$PWD/controlplane/settings/.hypothesisloop.dev.yaml" \
       API_URL=http://localhost:8081 HL_TOKEN="$(lib_hl_admin token staff)" \
-      HL_E2E_GITHUB_INSTALLATION="$(lib_env_value HL_E2E_GITHUB_INSTALLATION)" \
-      HL_E2E_GITHUB_REPO="$(lib_env_value HL_E2E_GITHUB_REPO)" && cd tests && uv run pytest e2e/test_environment_build.py'
+      TEST_GIT_HOST_GITHUB_INSTALLATION="$(lib_env_value TEST_GIT_HOST_GITHUB_INSTALLATION)" \
+      TEST_GIT_HOST_GITHUB_REPOSITORY="$(lib_env_value TEST_GIT_HOST_GITHUB_REPOSITORY)" && cd tests && uv run pytest e2e/test_environment_build.py'
 """
 from __future__ import annotations
 

@@ -26,11 +26,13 @@ require_cloudflared() {
   fi
 }
 
-# A stack with no GitHub App keeps its code on the git server make dev runs, which a hosted agent
-# and a rented instance clone from like they call the API.
+# A stack whose GIT_HOST_PROVIDER is local keeps its code on the git server make dev runs, which a
+# hosted agent and a rented instance clone from like they call the API.
 read_services() {
+  local git_host
+  git_host="$(lib_git_host_provider)" || exit 1
   grep -Ev '^\s*(#|$)' "$CONF_FILE"
-  if [[ "$(lib_git_provider)" == "plain" ]]; then
+  if [[ "${git_host}" == "local" ]]; then
     echo "git ${HL_GIT_PORT}"
   fi
 }

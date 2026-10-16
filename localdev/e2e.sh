@@ -18,6 +18,7 @@ cd "${repo}"
 # hl-admin, which the tests run, reads the settings the running control plane was started with.
 export HYPOTHESISLOOP_CONFIG="${repo}/controlplane/settings/.hypothesisloop.dev.yaml"
 . localdev/lib/auth.sh
+git_host="$(lib_git_host_provider)"
 
 lock=/tmp/hl-stack.lock
 context=k3s-local
@@ -109,16 +110,16 @@ if [[ "${reported}" != "${installed}" ]]; then
   exit 1
 fi
 
-# The tests that work on a real repository run when .env names the sandbox and the stack has the
-# GitHub App that reaches it. They skip themselves otherwise.
-if [[ -n "${HL_GITHUB_APP_ID}" && -n "$(lib_env_value HL_E2E_GITHUB_REPO)" ]]; then
-  HL_E2E_GITHUB_INSTALLATION="$(lib_env_value HL_E2E_GITHUB_INSTALLATION)"
-  HL_E2E_GITHUB_REPO="$(lib_env_value HL_E2E_GITHUB_REPO)"
-  export HL_E2E_GITHUB_INSTALLATION HL_E2E_GITHUB_REPO
+# The tests that work on a real repository run when .env names the sandbox and the stack's git
+# host is the GitHub App that reaches it. They skip themselves otherwise.
+if [[ "${git_host}" == "github" && -n "$(lib_env_value TEST_GIT_HOST_GITHUB_REPOSITORY)" ]]; then
+  TEST_GIT_HOST_GITHUB_INSTALLATION="$(lib_env_value TEST_GIT_HOST_GITHUB_INSTALLATION)"
+  TEST_GIT_HOST_GITHUB_REPOSITORY="$(lib_env_value TEST_GIT_HOST_GITHUB_REPOSITORY)"
+  export TEST_GIT_HOST_GITHUB_INSTALLATION TEST_GIT_HOST_GITHUB_REPOSITORY
 fi
 
-# On a stack with no App the suite makes its repository where the local git server serves from.
-if [[ "$(lib_git_provider)" == "plain" ]]; then
+# On a stack with the local git host the suite makes its repository where that server serves from.
+if [[ "${git_host}" == "local" ]]; then
   export HL_E2E_GIT_ROOT="${HL_GIT_ROOT}"
 fi
 

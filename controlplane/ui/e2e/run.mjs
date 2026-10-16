@@ -90,8 +90,8 @@ async function findSandbox(token) {
     return
   }
   const value = key => execFileSync('bash', ['-c', '. localdev/lib/auth.sh && lib_env_value "$1"', 'env', key], { cwd: repo, encoding: 'utf8' }).trim()
-  sandbox = { installation: value('HL_E2E_GITHUB_INSTALLATION'), repository: value('HL_E2E_GITHUB_REPO') }
-  assert.ok(sandbox.installation && sandbox.repository, 'this stack has a GitHub App: .env must set HL_E2E_GITHUB_INSTALLATION and HL_E2E_GITHUB_REPO')
+  sandbox = { installation: value('TEST_GIT_HOST_GITHUB_INSTALLATION'), repository: value('TEST_GIT_HOST_GITHUB_REPOSITORY') }
+  assert.ok(sandbox.installation && sandbox.repository, 'this stack has a GitHub App: .env must set TEST_GIT_HOST_GITHUB_INSTALLATION and TEST_GIT_HOST_GITHUB_REPOSITORY')
 }
 
 const creates = url => url.href === `${API}/platform-experiments` || url.href === `${API}/platform-experiments/drafts`
