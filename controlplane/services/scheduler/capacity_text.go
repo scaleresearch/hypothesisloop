@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"fmt"
 	"math"
 	"sort"
 	"strconv"
@@ -67,4 +68,15 @@ func describeNodeResources(resources map[string]int64) string {
 		}
 	}
 	return describeFootprint(fp)
+}
+
+// footprintStr renders a Footprint for logging — domain.Footprint's struct-keyed map can't be
+// marshalled by zap.Any (JSON keys must be strings).
+func footprintStr(fp domain.Footprint) string {
+	parts := make([]string, 0, len(fp))
+	for k, v := range fp {
+		parts = append(parts, fmt.Sprintf("%s:%s=%d", k.Kind, k.Flavor, v))
+	}
+	sort.Strings(parts)
+	return "{" + strings.Join(parts, ",") + "}"
 }
