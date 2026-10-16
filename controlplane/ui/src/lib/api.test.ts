@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { accessToken, endSession } from '@/lib/auth'
 import {
   ApiError, addHumanHypothesisComment, registerCluster, beginGitHubInstall, finishGitHubInstall, disconnectGitHubInstallation, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories, createAPIKey, createPlatformExperiment, fetchAgentsPage, fetchMe,
-  fetchPlatformExperimentAgentToken, fetchPlatformExperimentsPage, fetchResourceCapacity, updateCluster, setClusterEnabled, setClusterOrder,
+  fetchPlatformExperimentAgentToken, fetchPlatformExperimentsPage, removePlatformExperimentAgent, fetchResourceCapacity, updateCluster, setClusterEnabled, setClusterOrder,
   registerHumanHypothesis, revokeAPIKey,
   acceptOrgInvite, createOrgInvite, fetchOrgInvites, fetchOrgMembers, removeOrgMember, revokeOrgInvite, setOrgMemberRole,
 } from '@/lib/api'
@@ -341,5 +341,19 @@ describe('org members and invites', () => {
     const refusal = await acceptOrgInvite('hli_abc').catch((e: unknown) => e)
     expect(refusal).toBeInstanceOf(ApiError)
     expect(refusal).toMatchObject({ status: 409, reason: 'invite_expired' })
+  })
+})
+
+describe('an agent taken out of a platform experiment', () => {
+  it('is one DELETE answered with no body', async () => {
+    fetchMock().mockResolvedValue(new Response(null, { status: 204 }))
+    await expect(removePlatformExperimentAgent('pe-1', 'ag-1')).resolves.toBeUndefined()
+    expect(sent().init.method).toBe('DELETE')
+    expect(sent().url.pathname).toBe('/platform-experiments/pe-1/agents/ag-1')
+  })
+
+  it('carries the API\'s refusal', async () => {
+    fetchMock().mockResolvedValue(answer(409, { reason: 'work_unfinished', message: 'the agent has a job running' }))
+    await expect(removePlatformExperimentAgent('pe-1', 'ag-1')).rejects.toMatchObject({ status: 409, reason: 'work_unfinished' })
   })
 })

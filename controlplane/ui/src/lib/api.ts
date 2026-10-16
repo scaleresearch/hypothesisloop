@@ -745,7 +745,7 @@ export async function sendPlatformExperimentMessage(platformExpID: string, agent
 
 // Answered 409 once the platform experiment has started.
 export async function removePlatformExperimentAgent(platformExpID: string, agentID: string): Promise<void> {
-  await apiSend('DELETE', `/platform-experiments/${platformExpID}/agents/${agentID}`)
+  await answer('DELETE', `/platform-experiments/${platformExpID}/agents/${agentID}`)
 }
 
 // ---------------------------------------------------------------------------
