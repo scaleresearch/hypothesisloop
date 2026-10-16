@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -74,14 +74,18 @@ beforeEach(() => {
 })
 
 describe('a new platform experiment', () => {
-  it('is run by the platform with its defaults: a hosted coordinator, the researchers as max_agents, and the platform\'s ladder', async () => {
+  it('is run by the platform with its defaults in one create: a hosted coordinator, max_agents generalists to start with, and the platform\'s ladder', async () => {
     show()
     await essentials()
     await create()
-    await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created, { failure: undefined }))
-    expect(sent()).toMatchObject({ name: 'Run', description: 'The brief', coordinator_hosted: true, max_agents: 2, duration_hours: 48, budget_accelerator_hours: 10 })
+    await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created, true))
+    expect(sent()).toMatchObject({
+      name: 'Run', description: 'The brief', coordinator_hosted: true, max_agents: 2, duration_hours: 48, budget_accelerator_hours: 10,
+      researchers: [{ agent_type: 'generalist', count: 2 }],
+    })
     for (const left of ['stages', 'report_interval_seconds', 'starts_at', 'repository']) expect(sent()).not.toHaveProperty(left)
-    expect(addPlatformExperimentAgents).toHaveBeenCalledTimes(2)
+    expect(createPlatformExperiment).toHaveBeenCalledTimes(1)
+    expect(addPlatformExperimentAgents).not.toHaveBeenCalled()
   })
 
   it('sends what the person states over the defaults', async () => {
@@ -92,12 +96,43 @@ describe('a new platform experiment', () => {
     await userEvent.clear(screen.getByLabelText('Duration (hours)'))
     await userEvent.type(screen.getByLabelText('Duration (hours)'), '6')
     await next()
-    await userEvent.clear(screen.getByLabelText('Researchers'))
-    await userEvent.type(screen.getByLabelText('Researchers'), '3')
+    await userEvent.clear(screen.getByLabelText('Max researchers'))
+    await userEvent.type(screen.getByLabelText('Max researchers'), '3')
     await create()
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
-    expect(sent()).toMatchObject({ duration_hours: 6, max_agents: 3 })
-    expect(addPlatformExperimentAgents).toHaveBeenCalledTimes(3)
+    expect(sent()).toMatchObject({ duration_hours: 6, max_agents: 3, researchers: [{ agent_type: 'generalist', count: 3 }] })
+    expect(addPlatformExperimentAgents).not.toHaveBeenCalled()
+  })
+
+  it('starts with the agents the person lists, within max researchers', async () => {
+    show()
+    await userEvent.type(name(), 'Run')
+    await userEvent.type(screen.getByLabelText('Brief'), 'The brief')
+    await next()
+    await next()
+    await userEvent.clear(screen.getByLabelText('Max researchers'))
+    await userEvent.type(screen.getByLabelText('Max researchers'), '4')
+    await userEvent.click(within(screen.getByRole('group', { name: 'Starting agents choice' })).getByRole('button', { name: 'Custom' }))
+    await userEvent.clear(screen.getByLabelText('Starting agent 1 count'))
+    await userEvent.type(screen.getByLabelText('Starting agent 1 count'), '2')
+    await userEvent.click(screen.getByRole('button', { name: '+ Add agents' }))
+    await userEvent.type(screen.getByLabelText('Starting agent 2 model'), 'model-2')
+    await create()
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(sent()).toMatchObject({ max_agents: 4, researchers: [{ agent_type: 'generalist', count: 2 }, { agent_type: 'generalist', count: 1, model: 'model-2' }] })
+  })
+
+  it('says starting agents beyond max researchers before the API does', async () => {
+    show()
+    await userEvent.type(name(), 'Run')
+    await userEvent.type(screen.getByLabelText('Brief'), 'The brief')
+    await next()
+    await next()
+    await userEvent.click(within(screen.getByRole('group', { name: 'Starting agents choice' })).getByRole('button', { name: 'Custom' }))
+    await userEvent.clear(screen.getByLabelText('Starting agent 1 count'))
+    await userEvent.type(screen.getByLabelText('Starting agent 1 count'), '5')
+    expect(await screen.findByText('5 starting agents, more than the 2 researchers allowed at once.')).toBeTruthy()
+    expect(createPlatformExperiment).not.toHaveBeenCalled()
   })
 
   it('adds a common metric or a typed key from one control, a typed key maximizing', async () => {
@@ -161,19 +196,10 @@ describe('a new platform experiment', () => {
     expect(screen.getByText(/What you typed is kept as a draft/)).toBeTruthy()
 
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
-    await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created, { failure: undefined }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created, true))
     expect(deleteExperimentDraft).toHaveBeenCalledExactlyOnceWith('prj_1', 'draft-1')
   })
 
-  it('hands on the experiment with the step the API stopped at, since the experiment exists', async () => {
-    vi.mocked(addPlatformExperimentAgents).mockRejectedValue(new Error('the platform runs at most 1 machine'))
-    show()
-    await essentials({ repository: 'acme/widgets' })
-    await create()
-    await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created, {
-      failure: { step: 'adding hosted agent 1 of 2', message: 'the platform runs at most 1 machine' },
-    }))
-  })
 })
 
 describe('a repository that brings its own experiment', () => {
@@ -276,7 +302,7 @@ describe('a draft of a new platform experiment', () => {
     expect(screen.getByRole('tab', { name: '2. Measure', selected: true })).toBeTruthy()
     await next()
     await create()
-    await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created, { failure: undefined }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created, true))
     expect(sent()).toMatchObject({ name: 'Half done', description: 'A brief', budget_accelerator_hours: 3 })
     expect(deleteExperimentDraft).toHaveBeenCalledExactlyOnceWith('prj_1', 'draft-7')
   })

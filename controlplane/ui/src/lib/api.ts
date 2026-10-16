@@ -39,6 +39,7 @@ import type {
   GitHubInstallFinished,
   GitHubInstallStart,
   GitHubRepository,
+  ResearcherPoolEntry,
 } from '@/types'
 
 import type { TypeKind } from '@/lib/units'
@@ -463,8 +464,10 @@ export interface CreatePlatformExperimentRequest {
   name: string
   description: string
   budget_accelerator_hours: number
-  /** Omitted is as many as the platform runs machines for one experiment. */
-  max_agents?: number
+  /** How many researchers may be at work at once. */
+  max_agents: number
+  /** Who the platform starts and keeps at work, at most max_agents in all. Optional. */
+  researchers?: ResearcherPoolEntry[]
   /** Accelerators-in-flight (SUBMITTED+RUNNING) this experiment may hold at once. Omitted uses
    *  the platform default (quota.default_max_concurrent_accelerators). */
   max_concurrent_accelerators?: number
@@ -646,7 +649,7 @@ export function fetchResourceCapacity(orgID: string): Promise<ResourceCapacity> 
 
 /** The fields of a platform experiment that can change after it is created. */
 export type PlatformExperimentPatch = Partial<Pick<CreatePlatformExperimentRequest,
-  'name' | 'description' | 'budget_accelerator_hours' | 'max_agents' | 'max_concurrent_accelerators' | 'metrics' |
+  'name' | 'description' | 'budget_accelerator_hours' | 'max_agents' | 'researchers' | 'max_concurrent_accelerators' | 'metrics' |
   'report_interval_seconds' | 'starts_at' | 'duration_hours'>>
 
 /** Changes the fields the patch names and no others. */

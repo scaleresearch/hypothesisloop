@@ -7,7 +7,6 @@ import {
   createPlatformExperiment, fetchPlatformExperimentMessages, sendPlatformExperimentMessage,
 } from '@/lib/api'
 import { ExperimentAgents } from '@/components/experiment-agents'
-import { clearRunFailure, createAndRun, runFailure } from '@/lib/run-experiment'
 import { PlatformExperimentStatus } from '@/types'
 import type { AgentMessage, AgentSignup, JoinedAgent, PlatformExperiment } from '@/types'
 
@@ -207,28 +206,5 @@ describe('an experiment waiting to start', () => {
     show(PlatformExperimentStatus.OPEN, { status_reason: waits })
     await screen.findByRole('cell', { name: 'ag-old' })
     expect(screen.queryByRole('button', { name: /^Start/ })).toBeNull()
-  })
-})
-
-describe('an experiment the create form went on to run, and the API stopped part way', () => {
-  beforeEach(async () => {
-    clearRunFailure('pe-1')
-    vi.mocked(createPlatformExperiment).mockResolvedValue({ id: 'pe-1' } as PlatformExperiment)
-    vi.mocked(addPlatformExperimentAgents).mockRejectedValueOnce(new Error('the platform experiment names no repository'))
-    await createAndRun('prj_1', {} as never, 2)
-  })
-
-  it('says which step failed in the API\'s words, and that nothing was undone', async () => {
-    show()
-    const said = await screen.findByText(/it is not running as asked: adding hosted agent 1 of 2 failed\. the platform experiment names no repository/)
-    expect(said.textContent).toContain('Nothing was undone. Finish with the controls below.')
-    expect(screen.getByRole('button', { name: 'Add agent' })).toBeTruthy()
-  })
-
-  it('stops saying so once dismissed', async () => {
-    show()
-    await userEvent.click(await screen.findByRole('button', { name: 'Dismiss' }))
-    expect(screen.queryByText(/is not running as asked/)).toBeNull()
-    expect(runFailure('pe-1')).toBeUndefined()
   })
 })

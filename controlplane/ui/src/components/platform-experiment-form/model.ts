@@ -1,5 +1,6 @@
 import type { Stage } from '@/lib/api'
-import type { MetricDefinition } from '@/types'
+import type { MetricDefinition, ResearcherPoolEntry } from '@/types'
+import { DEFAULT_AGENT_TYPE } from '@/lib/agent-types'
 
 // What a new experiment starts from. The stage ladder and the report interval are left out, so
 // the platform applies its own (stages.default, scheduler.default_report_interval_seconds).
@@ -10,8 +11,10 @@ export interface FormState {
   name: string
   description: string
   budget_accelerator_hours: string
-  // The researchers the platform runs, sent as max_agents: nobody else joins a hosted run.
+  // The most researchers at work at once, sent as max_agents.
   max_agents: string
+  // Who the platform starts and keeps at work. null is max_agents generalists on the default model.
+  starting_agents: StartingAgentDraft[] | null
   // Empty is the platform's default (quota.default_max_concurrent_accelerators).
   max_concurrent_accelerators: string
   // Empty is no start time: the platform starts it once its baseline is declared.
@@ -42,6 +45,28 @@ export interface StepProps {
 // the next digit is typed. Strings let a field be empty while editing; the ladder is parsed once,
 // on submit.
 export type StageDraft = { length_pct: string; evict_pct: string; max_job_hours: string }
+
+// One row of the starting agents, held as typed, for the reason StageDraft gives.
+export type StartingAgentDraft = { agent_type: string; count: string; model: string }
+
+export const ONE_STARTING_AGENT: StartingAgentDraft = { agent_type: DEFAULT_AGENT_TYPE, count: '1', model: '' }
+
+/** The researchers a new experiment is sent with: the rows given, or max_agents generalists. */
+export function toResearchers(rows: StartingAgentDraft[] | null, maxAgents: number): ResearcherPoolEntry[] {
+  if (!rows) return [{ agent_type: DEFAULT_AGENT_TYPE, count: maxAgents }]
+  return rows.map(r => ({ agent_type: r.agent_type, count: Number(r.count), ...(r.model.trim() ? { model: r.model.trim() } : {}) }))
+}
+
+/** Mirrors what the API holds starting agents to, so the form says it before the API does. */
+export function startingAgentsError(rows: StartingAgentDraft[] | null, maxAgents: number): string | null {
+  if (!rows) return null
+  if (rows.some(r => !Number.isInteger(Number(r.count)) || Number(r.count) < 1)) return 'Every starting agent row needs a count of at least 1.'
+  const keys = rows.map(r => `${r.agent_type}/${r.model.trim()}`)
+  if (new Set(keys).size !== keys.length) return 'Two starting agent rows name the same type and model: give one row their count.'
+  const total = rows.reduce((sum, r) => sum + Number(r.count), 0)
+  if (total > maxAgents) return `${total} starting agents, more than the ${maxAgents} researchers allowed at once.`
+  return null
+}
 
 export const ONE_STAGE: StageDraft[] = [{ length_pct: '100', evict_pct: '0', max_job_hours: '' }]
 

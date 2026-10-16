@@ -272,7 +272,7 @@ async function fillNewExperiment(page, form, name) {
   await metric.fill('val_acc')
   await page.getByRole('option', { name: /^Val Accuracy/ }).click()
   await form.getByRole('button', { name: 'Next', exact: true }).click()
-  await form.getByLabel('Researchers').waitFor()
+  await form.getByLabel('Max researchers').waitFor()
 }
 
 // Where a person lands once signed in: the experiments of their home project.
@@ -638,7 +638,6 @@ async function scenarios(browser) {
     headers: { ...runCors, 'X-Total-Count': '1' }, json: [{ repository: 'acme/widgets', installation_id: 4242, private: false }],
   }))
   const runWrites = []
-  let standInAgents = true
   const runWrite = url => url.origin === API && /^\/platform-experiments(\/[^/]+(\/agents)?)?$/.test(url.pathname)
   await page.route(runWrite, route => {
     const request = route.request()
@@ -649,13 +648,6 @@ async function scenarios(browser) {
     if (path === '/platform-experiments') {
       const { repository: _repository, coordinator_hosted: _coordinator, ...rest } = body
       return route.continue({ postData: JSON.stringify({ ...rest, repository: sandbox.repository }) })
-    }
-    if (path.endsWith('/agents')) {
-      // Never hosted for real: joined as one its operator runs, or refused as a deployment
-      // with no launcher registered refuses it.
-      return standInAgents
-        ? route.continue({ postData: JSON.stringify({ ...body, hosted: false }) })
-        : route.fulfill({ status: 503, headers: runCors, json: { reason: 'launcher_not_registered', message: 'no launcher named main is registered' } })
     }
     return route.continue()
   })
@@ -668,7 +660,7 @@ async function scenarios(browser) {
     await dialog.getByLabel('Repository').click()
     await page.getByRole('option', { name: 'acme/widgets' }).click()
     await fillNewExperiment(page, dialog, name)
-    await dialog.getByLabel('Researchers').fill(String(researchers))
+    await dialog.getByLabel('Max researchers').fill(String(researchers))
     runWrites.length = 0
     await dialog.getByRole('button', { name: 'Create experiment' }).click()
     await page.waitForURL(u => /^\/experiments\/[^/]+$/.test(u.pathname))
@@ -678,32 +670,19 @@ async function scenarios(browser) {
 
   const ranID = await createAndRunFromHome(`ui-e2e-run-${run}`, 2)
   await page.getByText('Preparing the baseline.').waitFor()
-  assert.deepEqual(runWrites.map(w => w.path), [
-    '/platform-experiments', `/platform-experiments/${ranID}/agents`, `/platform-experiments/${ranID}/agents`,
-  ], 'create, then one call an agent, and no start: the platform starts it once its baseline is declared')
+  assert.deepEqual(runWrites.map(w => w.path), ['/platform-experiments'],
+    'one create and no start: the platform creates the researchers with it and starts it once its baseline is declared')
   assert.equal(runWrites[0].body.repository, 'acme/widgets')
   assert.equal(runWrites[0].body.coordinator_hosted, true)
-  assert.equal(runWrites[0].body.max_agents, 2, 'the researchers are sent as max_agents')
+  assert.equal(runWrites[0].body.max_agents, 2, 'the most researchers at once')
+  assert.deepEqual(runWrites[0].body.researchers, [{ agent_type: 'generalist', count: 2 }], 'max_agents generalists to start with')
   assert.deepEqual(runWrites[0].body.metrics, [{ key: 'val_accuracy', direction: 'maximize' }])
   assert.ok(!('starts_at' in runWrites[0].body), 'no start time is sent, so nothing starts it between two agents')
-  assert.deepEqual(runWrites.slice(1).map(w => w.body), [{ hosted: true }, { hosted: true }], 'each agent is asked for hosted, with no count')
   const ranToken = await tokenOf(ada)
   const ran = await (await api(ranToken, `/platform-experiments/${ranID}`)).json()
   assert.equal(ran.status, 'open', 'the API holds it open until its baseline is declared')
-  assert.equal((await (await api(ranToken, `/platform-experiments/${ranID}/agents`)).json()).agents.length, 2, 'and holds the two agents')
   assert.equal(await page.locator('.error-banner').count(), 0)
 
-  section('home: a run the API stops part way opens the experiment and says which step failed')
-  // The first hosted agent is refused, as by a deployment with no launcher registered.
-  standInAgents = false
-  const stoppedID = await createAndRunFromHome(`ui-e2e-stopped-${run}`, 2)
-  const stoppedBanner = page.locator('.error-banner', { hasText: 'it is not running as asked: adding hosted agent 1 of 2 failed.' })
-  await stoppedBanner.getByText('no launcher named main is registered').waitFor()
-  assert.deepEqual(runWrites.map(w => w.path), ['/platform-experiments', `/platform-experiments/${stoppedID}/agents`], 'nothing is called after the refusal, and nothing again')
-  const stoppedExperiment = await (await api(await tokenOf(ada), `/platform-experiments/${stoppedID}`)).json()
-  assert.equal(stoppedExperiment.status, 'open', 'the experiment exists and was not started')
-  await stoppedBanner.getByRole('button', { name: 'Dismiss' }).click()
-  await stoppedBanner.waitFor({ state: 'detached' })
   await page.unroute(runWrite)
   await page.unroute(runRepositories)
   await page.unroute(runInstallations)
@@ -1200,7 +1179,7 @@ async function scenarios(browser) {
   await page.getByRole('button', { name: 'Next', exact: true }).click()
   await page.getByLabel('Duration (hours)').waitFor()
   await page.getByRole('button', { name: 'Next', exact: true }).click()
-  await page.getByLabel('Researchers').waitFor()
+  await page.getByLabel('Max researchers').waitFor()
   await page.getByRole('button', { name: 'Save changes' }).click()
   await page.getByText(`${experimentName}-edited`).first().waitFor()
 

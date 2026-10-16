@@ -8,7 +8,8 @@ import { Segmented } from '@/components/ui/segmented'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Pill } from '@/components/ui/text'
 import { StagesEditor } from '@/components/platform-experiment-form/stages-editor'
-import { LOCKED, ONE_STAGE } from '@/components/platform-experiment-form/model'
+import { StartingAgentsEditor } from '@/components/platform-experiment-form/starting-agents-editor'
+import { LOCKED, ONE_STAGE, ONE_STARTING_AGENT } from '@/components/platform-experiment-form/model'
 import type { StepProps } from '@/components/platform-experiment-form/model'
 
 const PLATFORM_DEFAULT = "Empty is the platform's default."
@@ -21,8 +22,8 @@ export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps 
   return (
     <>
       <div className="grid grid-cols-2 gap-4">
-        <FormField label="Researchers" hint={locked ? LOCKED : isEdit ? 'Nobody joins once it has started.' : 'Run by the platform, with a coordinator.'}>
-          <Input type="number" min={1} max={500} step={1} value={form.max_agents} disabled={locked} onChange={e => set('max_agents', e.target.value)} />
+        <FormField label="Max researchers" hint="The most at work at once. The coordinator may add researchers up to it.">
+          <Input type="number" min={1} max={500} step={1} value={form.max_agents} onChange={e => set('max_agents', e.target.value)} />
         </FormField>
         <FormField
           label="Budget (accelerator hours)"
@@ -31,6 +32,24 @@ export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps 
           <Input type="number" min={1} step={0.5} value={form.budget_accelerator_hours} disabled={locked} onChange={e => set('budget_accelerator_hours', e.target.value)} />
         </FormField>
       </div>
+
+      {!isEdit && (
+        <FieldGroup
+          label="Starting agents"
+          hint="The platform starts these with the experiment and replaces one that finishes or loses its machine while time and budget allow. A cut lowers the count."
+        >
+          <Stack>
+            <Segmented
+              label="Starting agents choice"
+              size="sm"
+              options={[{ value: 'default', label: `${form.max_agents || 0} generalists` }, { value: 'custom', label: 'Custom' }]}
+              value={form.starting_agents ? 'custom' : 'default'}
+              onChange={v => set('starting_agents', v === 'custom' ? [ONE_STARTING_AGENT] : null)}
+            />
+            {form.starting_agents && <StartingAgentsEditor rows={form.starting_agents} onChange={rows => set('starting_agents', rows)} />}
+          </Stack>
+        </FieldGroup>
+      )}
 
       <FieldGroup
         label="Stage ladder"

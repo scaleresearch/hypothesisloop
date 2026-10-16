@@ -213,13 +213,25 @@ export interface AgentActivity {
   at: string
 }
 
+/** How many researchers of one agent type on one model an experiment keeps at work. */
+export interface ResearcherPoolEntry {
+  agent_type?: string
+  model?: string
+  hyperparameters?: Record<string, unknown>
+  count: number
+}
+
 export interface PlatformExperiment {
   id: string
   project_id: string
   name: string
   description?: string
   budget_accelerator_hours: number
+  // How many researchers may be at work at once, its owner's to change.
   max_agents: number
+  // Who it is to keep at work, at most max_agents in all. Where the platform runs them it replaces
+  // one that finished or lost its machine, and a cut lowers the counts. Empty on a draft.
+  researchers?: ResearcherPoolEntry[]
   // Accelerators-in-flight (SUBMITTED+RUNNING) this experiment may hold at once. Absent uses the
   // platform default (quota.default_max_concurrent_accelerators).
   max_concurrent_accelerators?: number
@@ -731,6 +743,9 @@ export interface AgentSignup {
   hosted: boolean
   flavor?: string
   model?: string
+  // The researcher whose place the platform gave this one, and the one given this one's place.
+  replaces?: string
+  replaced_by?: string
   signed_up_at: string
   // Set once the agent said it has nothing left to do, which is final, with why.
   finished_at?: string

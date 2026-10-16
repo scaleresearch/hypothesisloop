@@ -3,13 +3,11 @@
 import { useState } from 'react'
 import { useSWRConfig } from 'swr'
 import {
-  ApiError, NO_EXPERIMENT_FILE, createExperimentDraft, deleteExperimentDraft, fetchExperimentFile, updateExperimentDraft, updatePlatformExperiment,
+  ApiError, NO_EXPERIMENT_FILE, createExperimentDraft, createPlatformExperiment, deleteExperimentDraft, fetchExperimentFile, updateExperimentDraft, updatePlatformExperiment,
 } from '@/lib/api'
 import type { CreatePlatformExperimentRequest, ExperimentDraft, PlatformExperimentPatch } from '@/lib/api'
 import type { TypeKind } from '@/lib/units'
 import { isZeroDate } from '@/lib/format'
-import { createAndRun } from '@/lib/run-experiment'
-import type { RunFailure } from '@/lib/run-experiment'
 import { useTenant } from '@/lib/tenant'
 import { PlatformExperimentStatus } from '@/types'
 import type { PlatformExperiment } from '@/types'
@@ -21,7 +19,7 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { ErrorMessage } from '@/components/ui/status-message'
 import { Tabs } from '@/components/ui/tabs'
 import { Text } from '@/components/ui/text'
-import { NEW_EXPERIMENT, STEPS, refusedStep, stagesError, toDrafts, toStages } from '@/components/platform-experiment-form/model'
+import { NEW_EXPERIMENT, STEPS, refusedStep, stagesError, startingAgentsError, toDrafts, toResearchers, toStages } from '@/components/platform-experiment-form/model'
 import type { FormState, StepID } from '@/components/platform-experiment-form/model'
 import { StepWhat } from '@/components/platform-experiment-form/step-what'
 import type { FileNote } from '@/components/platform-experiment-form/step-what'
@@ -35,19 +33,17 @@ interface FormProps {
   draft?: ExperimentDraft
   /** What the budget of the experiment being edited is spent on, when the page knows. */
   budgetKind?: TypeKind
-  /**
-   * Told the experiment the API answered with, once it is saved. `run` is set when the form went
-   * on to add hosted agents, with what stopped that when something did.
-   */
-  onSaved: (saved: PlatformExperiment, run?: { failure?: RunFailure }) => void
+  /** Told the experiment the API answered with, once it is saved. `created` is set for a new one. */
+  onSaved: (saved: PlatformExperiment, created?: boolean) => void
   /** Offers Cancel. A form that is the page's own content has nothing to go back to and passes none. */
   onCancel?: () => void
 }
 
 /**
  * The one form a platform experiment is created and edited with, in three steps. A new one is
- * run by the platform: a hosted coordinator and the researchers asked for. It checks only what
- * it needs to build the request; every other rule is the API's, whose refusal it shows.
+ * run by the platform: one create stands up a hosted coordinator and the starting agents. It
+ * checks only what it needs to build the request; every other rule is the API's, whose refusal it
+ * shows.
  */
 export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, onCancel }: FormProps) {
   const { project } = useTenant()
@@ -55,13 +51,15 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
   const needsGitHub = useNeedsGitHub()
   const isEdit = !!initial
   // Once running, admission and the stage ladder have acted on everything but the name, the
-  // description and the duration, and the API takes no other field, so the rest is locked here.
+  // description, the duration and the most researchers, and the API takes no other field, so the
+  // rest is locked here.
   const lockedWhileRunning = isEdit && initial?.status === PlatformExperimentStatus.RUNNING
   const [form, setForm] = useState<FormState>(() => ({
     name: initial?.name ?? '',
     description: initial?.description ?? '',
     budget_accelerator_hours: String(initial?.budget_accelerator_hours ?? NEW_EXPERIMENT.budget_accelerator_hours),
     max_agents: String(initial?.max_agents ?? NEW_EXPERIMENT.researchers),
+    starting_agents: null,
     max_concurrent_accelerators: initial?.max_concurrent_accelerators != null ? String(initial.max_concurrent_accelerators) : '',
     starts_at: !isZeroDate(initial?.starts_at) ? new Date(initial!.starts_at!).toISOString().slice(0, 16) : '',
     duration_hours: String(initial?.duration_hours ?? NEW_EXPERIMENT.duration_hours),
@@ -142,13 +140,14 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
   }
 
   const ladderError = form.stages && !isEdit ? stagesError(form.stages) : null
+  const startingError = !isEdit ? startingAgentsError(form.starting_agents, Number(form.max_agents)) : null
 
   function formError(): string | null {
     if (!form.name.trim()) return 'Name is required.'
     if (!isEdit && !form.description.trim()) return 'A brief is required: it is the only text every agent reads about the task.'
     if (Number(form.duration_hours) <= 0) return 'Duration must be greater than 0.'
     if (Number(form.budget_accelerator_hours) <= 0) return 'Budget must be greater than 0.'
-    if (!isEdit && Number(form.max_agents) < 1) return 'At least one researcher.'
+    if (Number(form.max_agents) < 1) return 'At least one researcher.'
     if (form.metrics.some(m => m.role === 'constraint' && m.bound === undefined)) return 'Every gate needs a bound.'
     return null
   }
@@ -160,9 +159,9 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
     if (form.name.trim() !== opened.name) patch.name = form.name.trim()
     if (form.description.trim() !== opened.description) patch.description = form.description.trim()
     if (Number(form.duration_hours) !== Number(opened.duration_hours)) patch.duration_hours = Number(form.duration_hours)
+    if (Number(form.max_agents) !== Number(opened.max_agents)) patch.max_agents = Number(form.max_agents)
     if (lockedWhileRunning) return patch
     if (Number(form.budget_accelerator_hours) !== Number(opened.budget_accelerator_hours)) patch.budget_accelerator_hours = Number(form.budget_accelerator_hours)
-    if (Number(form.max_agents) !== Number(opened.max_agents)) patch.max_agents = Number(form.max_agents)
     if (form.max_concurrent_accelerators !== opened.max_concurrent_accelerators) patch.max_concurrent_accelerators = Number(form.max_concurrent_accelerators)
     if (JSON.stringify(form.metrics) !== JSON.stringify(opened.metrics)) patch.metrics = form.metrics
     if (form.report_interval_seconds !== opened.report_interval_seconds) patch.report_interval_seconds = Number(form.report_interval_seconds)
@@ -185,7 +184,7 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     // Every step is checked here, whichever is showing: the steps themselves are never gated.
-    const err = formError() ?? clearedError() ?? ladderError
+    const err = formError() ?? clearedError() ?? ladderError ?? startingError
     if (err) { setError(err); return }
     setSubmitting(true)
     setError(null)
@@ -200,6 +199,7 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
         description: form.description.trim(),
         budget_accelerator_hours: Number(form.budget_accelerator_hours),
         max_agents: Number(form.max_agents),
+        researchers: toResearchers(form.starting_agents, Number(form.max_agents)),
         ...(form.max_concurrent_accelerators.trim() !== '' ? { max_concurrent_accelerators: Number(form.max_concurrent_accelerators) } : {}),
         metrics: form.metrics,
         ...(form.report_interval_seconds.trim() !== '' ? { report_interval_seconds: Number(form.report_interval_seconds) } : {}),
@@ -209,11 +209,12 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
         duration_hours: Number(form.duration_hours),
       }
       setRefused(null)
-      const { experiment, failure } = await createAndRun(project.id, payload, Number(form.max_agents))
-      // The draft goes once the experiment it was for exists.
-      const dropped = draftID ? await deleteExperimentDraft(project.id, draftID).then(() => undefined, (e: unknown) => ({ step: 'deleting the draft it was made from', message: said(e) })) : undefined
+      // No start time: the platform starts it once its baseline is declared.
+      const experiment = await createPlatformExperiment(project.id, { ...payload, coordinator_hosted: true })
+      // The draft goes once the experiment it was for exists. One that stays is listed, to delete.
+      if (draftID) await deleteExperimentDraft(project.id, draftID).catch(() => undefined)
       void mutate(['experiment-drafts', project.id])
-      onSaved(experiment, { failure: failure ?? dropped })
+      onSaved(experiment, true)
     } catch (err: unknown) {
       if (isEdit) {
         setError(said(err))
@@ -257,6 +258,7 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
             <Text variant="hint">Not created. {draftID ? 'What you typed is kept as a draft: change what the refusal names and try again.' : 'Change what the refusal names and try again.'}</Text>
           </Stack>
         )}
+        {startingError && step === '3' && <ErrorMessage>{startingError}</ErrorMessage>}
         {error && <ErrorMessage>{error}</ErrorMessage>}
 
         <Inline nowrap className="mt-1">
@@ -267,7 +269,7 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
           {back && <Button type="button" onClick={() => go(back.id)}>Back</Button>}
           {next && <Button type="button" variant={isEdit || refused ? 'default' : 'primary'} onClick={() => go(next.id)}>Next</Button>}
           {(isEdit || !next || refused) && (!isEdit && needsGitHub ? <ConnectGitHubStep /> : (
-            <Button type="submit" variant="primary" loading={submitting} disabled={!!ladderError}>
+            <Button type="submit" variant="primary" loading={submitting} disabled={!!ladderError || !!startingError}>
               {isEdit ? 'Save changes' : refused ? 'Try again' : 'Create experiment'}
             </Button>
           ))}
@@ -290,7 +292,7 @@ export function PlatformExperimentDialog({ initial, draft, onSaved, onClose }: {
 }) {
   return (
     <Dialog open onClose={onClose} title={initial ? 'Edit experiment' : 'New experiment'}>
-      <PlatformExperimentForm initial={initial} draft={draft} onCancel={onClose} onSaved={(saved, run) => { onSaved(saved, run); onClose() }} />
+      <PlatformExperimentForm initial={initial} draft={draft} onCancel={onClose} onSaved={(saved, created) => { onSaved(saved, created); onClose() }} />
     </Dialog>
   )
 }

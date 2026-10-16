@@ -156,8 +156,8 @@ function PlatformExperimentsPageContent() {
           initial={dialog.editing}
           draft={dialog.draft}
           onClose={() => setDialog(null)}
-          // An edit stays here and rereads the list. A new experiment, or one the form also ran, opens.
-          onSaved={(saved, run) => (dialog.editing && !run ? void mutate() : open(saved))}
+          // An edit stays here and rereads the list. A new experiment opens.
+          onSaved={(saved, created) => (dialog.editing && !created ? void mutate() : open(saved))}
         />
       )}
 

@@ -26,15 +26,12 @@ import { Code, Eyebrow, Text } from '@/components/ui/text'
 import { Secret } from '@/components/ui/secret'
 import { Activity } from '@/components/agent-at-work'
 import { InstanceHealth } from '@/components/instance-health'
-import { clearRunFailure, runFailure } from '@/lib/run-experiment'
+import { AGENT_TYPES } from '@/lib/agent-types'
 import { relTime } from '@/lib/format'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { useReadOnly } from '@/lib/read-only'
 import type { Tone } from '@/lib/colors'
 
-// The specializations the agent harness ships (agents/experimentator/src/hypothesisloop_agent/prompts/flavors/).
-// Another name is accepted when the harness image carries a prompt for it.
-const FLAVORS = ['generalist', 'hyperparameter-search', 'architecture-search', 'data-search']
 
 // What the operator's own `podman run --env-file` takes for one agent, and all an agent is
 // started with: its token says which agent of which platform experiment it is, and it reads its
@@ -78,7 +75,7 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
             value={flavor}
             onChange={e => setFlavor(e.target.value)}
           />
-          <datalist id="agent-flavors">{FLAVORS.map(f => <option key={f} value={f} />)}</datalist>
+          <datalist id="agent-flavors">{AGENT_TYPES.map(f => <option key={f} value={f} />)}</datalist>
         </FormField>
         <FormField label="Model">
           <Input
@@ -216,12 +213,6 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   const [removing, setRemoving] = useState<AgentSignup | null>(null)
   const [messaging, setMessaging] = useState<AgentSignup | null>(null)
   const [open, setOpen] = useState<string | null>(null)
-  // Set when the create form went on to run this experiment and the API stopped it part way.
-  const [stopped, setStopped] = useState(() => runFailure(pe.id))
-  function forgetStopped() {
-    clearRunFailure(pe.id)
-    setStopped(undefined)
-  }
   const readOnly = useReadOnly()
   // Quota is divided at the start over the agents present, so the roster is fixed from then on.
   const started = pe.status === PlatformExperimentStatus.RUNNING || pe.status === PlatformExperimentStatus.CLOSED
@@ -266,13 +257,6 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   return (
     <Section id={AGENTS_CARD} title="Agents" note={agents && `(${agents.length})`} scrollX>
         <Stack>
-          {stopped && (
-            <ErrorMessage>
-              This experiment was created, but it is not running as asked: {stopped.step} failed. {stopped.message}{' '}
-              Nothing was undone. Finish with the controls below.{' '}
-              <Button variant="link" size="sm" onClick={forgetStopped}>Dismiss</Button>
-            </ErrorMessage>
-          )}
           {!readOnly && !started && <AddAgents pe={pe} onAdded={joined => { show(joined); return mutate() }} />}
           {shown.map(agent => (
             <Secret
