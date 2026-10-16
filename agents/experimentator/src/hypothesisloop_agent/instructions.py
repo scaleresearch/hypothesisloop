@@ -15,8 +15,7 @@ from hypothesisloop_agent import api_client, config, prompt
 # subject is the agent, or config.COORDINATOR for the coordinator's own.
 EVENT = "agent.instructions"
 # Where the instructions the session in the state directory runs with are kept, so that a session
-# resumed on another machine is compared with what it was started with: a resumed session keeps
-# the system prompt it was started with.
+# resumed on another machine is compared with what it was started with.
 FILE = ".instructions.json"
 # The effort only a session started with runs at.
 MAX_EFFORT = "max"
@@ -38,12 +37,16 @@ class Instructions:
     digest: str
 
     def needs_new_session(self, other: Instructions) -> bool:
-        """Whether running other takes a new session: a session keeps its system prompt and model.
-        The subagent limits and the effort change in the session, except to and from max: the
-        CLI's effortLevel setting, which a session is changed with, holds low to xhigh and drops
-        anything else without a word (Claude Code 2.1.294)."""
+        """Whether running other takes a new session: a session keeps its model, whose signed
+        thinking another model refuses. The subagent limits and the effort change in the session,
+        except to and from max: the CLI's effortLevel setting, which a session is changed with,
+        holds low to xhigh and drops anything else without a word (Claude Code 2.1.294)."""
         max_changes = self.effort != other.effort and MAX_EFFORT in (self.effort, other.effort)
-        return (self.prompt, self.model) != (other.prompt, other.model) or max_changes
+        return self.model != other.model or max_changes
+
+    def needs_new_prompt(self, other: Instructions) -> bool:
+        """Whether running other takes the session restarted with another system prompt."""
+        return self.prompt != other.prompt
 
 
 def path(cfg: config.Config) -> str:

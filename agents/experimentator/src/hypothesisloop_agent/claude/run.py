@@ -473,8 +473,7 @@ _HANDOFF_PROMPT = (
     "use tools; output only the handoff."
 )
 _COMPACTION_PROMPT = _HANDOFF_PROMPT.format(why="this session has reached its context budget")
-# A session keeps the system prompt and the model it started with, a resumed one too (seen on the
-# real API), so new instructions that change either start a fresh session.
+# A session keeps the model it started with, so new instructions that change it start a fresh session.
 _INSTRUCTIONS_ROTATION = _HANDOFF_PROMPT.format(
     why="the instructions you run with changed, and the next session runs with the new ones")
 
@@ -614,6 +613,56 @@ def _transcript_files(session_id: str | None) -> list[str]:
         kept = transcript.with_suffix("")
         found.extend(path for path in kept.rglob("*") if path.is_file() and path.relative_to(kept).parts[0] != "subagents")
     return [str(path.relative_to(home)) for path in found]
+
+
+# The CLI records the system prompt a session runs with in its transcript, as attachments of this
+# type, and a resumed session runs with the recorded one whatever prompt it is started with. A
+# session resumed without them records and runs with the prompt it is started with, its whole
+# history kept, signed thinking and tool calls included (Claude Code 2.1.294, on the real API).
+_PROMPT_SNAPSHOT = "prompt_snapshot"
+# The fields of a transcript line that name another line by its uuid.
+_LINE_LINKS = ("parentUuid", "logicalParentUuid", "leafUuid")
+
+
+def _transcript_lines(session_id: str) -> tuple[Path, list[dict]]:
+    """The session's transcript and its lines, parsed."""
+    transcripts = list(Path(_model_home()).glob(f"projects/*/{session_id}.jsonl"))
+    if len(transcripts) != 1:
+        raise FileNotFoundError(f"session {session_id} has {len(transcripts)} transcripts")
+    transcript = transcripts[0]
+    return transcript, [json.loads(line) for line in transcript.read_text().splitlines() if line.strip()]
+
+
+def _is_prompt_snapshot(line: dict) -> bool:
+    attachment = line.get("attachment")
+    return line.get("type") == "attachment" and isinstance(attachment, dict) and attachment.get("type") == _PROMPT_SNAPSHOT
+
+
+def _records_prompt(session_id: str | None) -> bool:
+    """Whether the session's transcript records the system prompt it runs with, which is what
+    restarting it with another prompt replaces."""
+    if not session_id:
+        return False
+    try:
+        _, lines = _transcript_lines(session_id)
+    except FileNotFoundError:
+        return False
+    return any(_is_prompt_snapshot(line) for line in lines)
+
+
+def _drop_recorded_prompt(session_id: str) -> None:
+    """Removes the system prompt the session's transcript records, for the session to be resumed
+    with another. The lines that follow a removed one are linked to the line it followed."""
+    transcript, lines = _transcript_lines(session_id)
+    dropped = {line["uuid"]: line.get("parentUuid") for line in lines if _is_prompt_snapshot(line)}
+    kept = [line for line in lines if not _is_prompt_snapshot(line)]
+    for line in kept:
+        for link in _LINE_LINKS:
+            while line.get(link) in dropped:
+                line[link] = dropped[line[link]]
+    tmp = transcript.with_suffix(".jsonl.tmp")
+    tmp.write_text("".join(json.dumps(line, ensure_ascii=False) + "\n" for line in kept))
+    os.replace(tmp, transcript)
 
 
 async def _store_session(setup: core.RunSetup) -> None:
@@ -916,21 +965,32 @@ def _not_own_instructions(setup: core.RunSetup, events: list[dict]) -> list[dict
     return rest
 
 
-def _connection_instructions(setup: core.RunSetup, resume_id: str | None) -> instructions.Instructions:
-    """The instructions a connection starts with, read from the platform. A resumed session keeps
-    the system prompt it was started with, so it is run with the instructions it was started with
-    and the ones read now are applied at its first turn boundary."""
+# Opens a session restarted with a new system prompt.
+_PROMPT_REPLACED = ("The instructions you run with changed: the system prompt you read now is their new version, "
+                    "and it replaces the one this session ran with so far.")
+
+
+def _connection_instructions(setup: core.RunSetup, resume_id: str | None) -> tuple[instructions.Instructions, bool]:
+    """The instructions a connection starts with, read from the platform, and whether they replace
+    the system prompt of the session it resumes. A resumed session whose recorded prompt alone
+    differs is resumed with the new one; otherwise it is run with the instructions it was started
+    with and the ones read now are applied at its first turn boundary."""
     global _instructions_told
     newest = instructions.fetch(setup.client, setup.cfg, setup.commands, setup.workdir)
     kept = instructions.load(setup.statedir) if resume_id else None
-    running = kept or newest
+    replaced = bool(kept and kept.needs_new_prompt(newest) and not kept.needs_new_session(newest) and _records_prompt(resume_id))
+    if replaced:
+        _drop_recorded_prompt(resume_id)
+        log.info("resuming session %s with the new system prompt of %s version %d (digest %s)",
+                 resume_id, newest.agent_type, newest.version, newest.digest[:12])
+    running = newest if replaced else kept or newest
     _instructions_told = running.digest != newest.digest
     instructions.save(setup.statedir, running)
     log.info("running %s version %d (digest %s): model=%s effort=%s max_subagents=%d pacing_subagents=%d%s",
              running.agent_type, running.version, running.digest[:12], running.model, running.effort,
              running.max_subagents, running.pacing_subagents,
              f", version {newest.version} (digest {newest.digest[:12]}) applies at the first turn boundary" if _instructions_told else "")
-    return running
+    return running, replaced
 
 
 async def _set_effort(client, effort: str) -> None:
@@ -941,10 +1001,13 @@ async def _set_effort(client, effort: str) -> None:
 
 async def _apply_instructions(client, setup: core.RunSetup, background: dict[str, dict], resume_id: str | None) -> bool:
     """At a turn boundary, reads the instructions agent.instructions said changed and applies them:
-    the subagent limits and the effort in the session, a prompt or a model in a fresh session the
-    lead hands off to. A subagent that ended before the boundary has reported; one still at work
-    stops with the session, and the handoff names it for the lead to start again. Whether the
-    session rotated. A read or an apply that failed is tried again at the next boundary."""
+    the subagent limits and the effort in the session, a prompt by ending the connection for the
+    next to resume the session with it (_connection_instructions), a model in a fresh session the
+    lead hands off to. So is a prompt whose session's transcript records none to replace. A
+    subagent that ended before the boundary has reported; one still at work stops with the
+    session, and the handoff names it for the lead to start again, or a resumed session says so by
+    itself. Whether the connection ended for the next to start. A read or an apply that failed is
+    tried again at the next boundary."""
     global _running, _instructions_told
     if not _instructions_told:
         return False
@@ -956,8 +1019,14 @@ async def _apply_instructions(client, setup: core.RunSetup, background: dict[str
     _instructions_told = False
     if newest.digest == _running.digest:
         return False
-    if _running.needs_new_session(newest):
-        log.info("instructions changed to %s version %d (digest %s), its prompt or model with them: handing off to a fresh session",
+    if _running.needs_new_prompt(newest) and not _running.needs_new_session(newest):
+        if _records_prompt(resume_id):
+            log.info("instructions changed to %s version %d (digest %s), its prompt with them: resuming the session with it",
+                     newest.agent_type, newest.version, newest.digest[:12])
+            return True
+        log.error("the transcript of session %s records no system prompt to replace: handing off to a fresh session", resume_id)
+    if _running.needs_new_session(newest) or _running.needs_new_prompt(newest):
+        log.info("instructions changed to %s version %d (digest %s), its prompt, model or effort with them: handing off to a fresh session",
                  newest.agent_type, newest.version, newest.digest[:12])
         if await _hand_off(client, setup, _INSTRUCTIONS_ROTATION, background, resume_id):
             return True
@@ -1117,13 +1186,13 @@ async def _run_one_session(setup: core.RunSetup, resume_id: str | None,
                             ) -> bool:
     """Runs one ClaudeSDKClient connection until it ends (real stop, error, or rate limit).
 
-    Returns whether it rotated: a handoff was written and the next session starts fresh from
-    it. A rate limit is read by the run loop from _refused_until. The session id and the handoff live on disk, see _restart_state.
+    Returns whether the next connection starts at once: a handoff was written and the next session
+    starts fresh from it, or the session is resumed with a new system prompt. A rate limit is read by the run loop from _refused_until. The session id and the handoff live on disk, see _restart_state.
     """
     global _running
     cfg = setup.cfg
     try:
-        _running = await asyncio.to_thread(_connection_instructions, setup, resume_id)
+        _running, prompt_replaced = await asyncio.to_thread(_connection_instructions, setup, resume_id)
     except api_client.APIError as e:
         log.warning("the instructions were not read (%s): connecting again after the backoff", e)
         return False
@@ -1182,7 +1251,8 @@ async def _run_one_session(setup: core.RunSetup, resume_id: str | None,
             await _store_session(setup)
         return True
 
-    opening = await _with_situation(setup, watch_env, await asyncio.to_thread(_opening, setup, resume_id, initial_prompt))
+    opening = await asyncio.to_thread(_opening, setup, resume_id, initial_prompt)
+    opening = await _with_situation(setup, watch_env, _PROMPT_REPLACED + "\n\n" + opening if prompt_replaced else opening)
     connecting = time.monotonic()
     told_nothing = False
     _progress.subagents(0)

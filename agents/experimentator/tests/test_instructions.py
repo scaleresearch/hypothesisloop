@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -27,6 +28,32 @@ def _handoff():
 def _result(text="worked"):
     return ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
                          session_id="s-1", result=text)
+
+
+def _transcript(home: str, session_id="s-1", prompt="the system prompt") -> str:
+    """A transcript as the CLI writes one: its prompt recorded before the turn that ran with it."""
+    lines = [
+        {"type": "user", "uuid": "u-1", "parentUuid": None, "sessionId": session_id,
+         "message": {"role": "user", "content": "the secret number is 42"}},
+        {"type": "attachment", "uuid": "snap-1", "parentUuid": "u-1", "sessionId": session_id,
+         "attachment": {"type": "prompt_snapshot", "systemPrompt": [prompt]}},
+        {"type": "attachment", "uuid": "snap-2", "parentUuid": "snap-1", "sessionId": session_id,
+         "attachment": {"type": "prompt_snapshot", "systemPrompt": [prompt], "tools": []}},
+        {"type": "assistant", "uuid": "a-1", "parentUuid": "snap-2", "sessionId": session_id,
+         "message": {"role": "assistant", "content": [{"type": "thinking", "thinking": "noted", "signature": "sig"},
+                                                      {"type": "text", "text": "OK"}]}},
+        {"type": "last-prompt", "leafUuid": "a-1", "sessionId": session_id},
+    ]
+    path = os.path.join(home, "projects", "p", f"{session_id}.jsonl")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.writelines(json.dumps(line) + "\n" for line in lines)
+    return path
+
+
+def _lines(path: str) -> list[dict]:
+    with open(path) as f:
+        return [json.loads(line) for line in f]
 
 
 def _config(scope: str) -> config.Config:
@@ -98,6 +125,12 @@ class InstructedClient(StoppableClient):
 
 
 class SessionTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.home = tempfile.mkdtemp()
+        patched = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.home})
+        patched.start()
+        self.addCleanup(patched.stop)
+
     async def run_session(self, fetched: list, batches: list, turns: list, resume_id=None, setup=None):
         """One session whose fetches answer fetched in turn and whose waits return batches in turn,
         the last of which stops it."""
@@ -171,52 +204,104 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         for before, after in (("high", "xhigh"), ("max", "max")):
             self.assertFalse(served(setup.cfg, effort=before).needs_new_session(served(setup.cfg, digest="d2", effort=after, max_subagents=5)))
 
-    # A session keeps the system prompt it started with, a resumed one too (seen on the real API):
-    # a new prompt or model starts a fresh session the lead hands off to, and a subagent still at
-    # work stops with the old one and is named for the lead to start again.
-    async def test_a_new_prompt_or_model_hands_off_to_a_fresh_session_naming_the_subagents_it_stops(self):
-        for changed in ({"prompt": "the new prompt"}, {"model": "claude-y"}):
-            setup = _setup()
-            first = served(setup.cfg)
-            edited = served(setup.cfg, version=2, digest="digest-2", **changed)
-            subagents = SystemMessage("background_tasks_changed", {"tasks": [
-                {"task_id": "sub-1", "task_type": "local_agent", "description": "lr warmup on hyp-1"}]})
-            turns = [[subagents, _result()], _handoff()]
-            rotated, client = await self.run_session([first, edited], [[OWN], []], turns, setup=setup)
-            self.assertTrue(rotated, changed)
-            self.assertEqual(client.queries[1:], [run._INSTRUCTIONS_ROTATION])
-            self.assertEqual(run._load_handoff(setup), "where things stand\n\n" + run._STOPPED_SUBAGENTS.format(
-                tasks="- lr warmup on hyp-1"))
-            self.assertEqual(settings(client), [])
-            # The next connection starts fresh, and runs what the platform serves then.
-            self.assertEqual(run._restart_state(setup)[0], None)
+    # A session keeps the model it started with: a new model starts a fresh session the lead hands
+    # off to, and a subagent still at work stops with the old one and is named for the lead to start again.
+    async def test_a_new_model_hands_off_to_a_fresh_session_naming_the_subagents_it_stops(self):
+        setup = _setup()
+        _transcript(self.home)
+        first = served(setup.cfg)
+        edited = served(setup.cfg, version=2, digest="digest-2", prompt="the new prompt", model="claude-y")
+        subagents = SystemMessage("background_tasks_changed", {"tasks": [
+            {"task_id": "sub-1", "task_type": "local_agent", "description": "lr warmup on hyp-1"}]})
+        turns = [[subagents, _result()], _handoff()]
+        rotated, client = await self.run_session([first, edited], [[OWN], []], turns, setup=setup)
+        self.assertTrue(rotated)
+        self.assertEqual(client.queries[1:], [run._INSTRUCTIONS_ROTATION])
+        self.assertEqual(run._load_handoff(setup), "where things stand\n\n" + run._STOPPED_SUBAGENTS.format(
+            tasks="- lr warmup on hyp-1"))
+        self.assertEqual(settings(client), [])
+        # The next connection starts fresh, and runs what the platform serves then.
+        self.assertEqual(run._restart_state(setup)[0], None)
+
+    # A new prompt on the same model ends the connection at the boundary, with no handoff, and the
+    # next resumes the session, its whole history kept, with the new prompt in place of the one
+    # its transcript recorded (seen on the real API).
+    async def test_a_new_prompt_resumes_the_session_with_it_and_its_history(self):
+        setup = _setup()
+        transcript = _transcript(self.home)
+        first = served(setup.cfg)
+        edited = served(setup.cfg, version=2, digest="digest-2", prompt="the new prompt", effort="low")
+        rotated, client = await self.run_session([first, edited], [[OWN], []], [[_result()]], setup=setup)
+        self.assertTrue(rotated)
+        self.assertEqual(client.queries[1:], [])
+        self.assertIsNone(run._load_handoff(setup))
+        self.assertEqual(run._restart_state(setup), ("s-1", None))
+        self.assertEqual(len(_lines(transcript)), 5)
+
+        rotated, client = await self.run_session([edited], [[]], [], resume_id="s-1", setup=setup)
+        self.assertFalse(rotated)
+        self.assertEqual((client.options.system_prompt, client.options.effort, client.options.resume),
+                         ("the new prompt" + run._FILE_TOOLS_NOTE, "low", "s-1"))
+        self.assertTrue(client.queries[0].startswith(run._PROMPT_REPLACED + "\n\nContinue where you left off."), client.queries[0])
+        self.assertEqual(instructions.load(setup.statedir), edited)
+        lines = _lines(transcript)
+        self.assertEqual([line["uuid"] for line in lines if "uuid" in line], ["u-1", "a-1"])
+        self.assertEqual(lines[1]["parentUuid"], "u-1")
+        self.assertEqual(lines[1]["message"]["content"][0]["signature"], "sig")
+        self.assertEqual(lines[2], {"type": "last-prompt", "leafUuid": "a-1", "sessionId": "s-1"})
+
+    # A transcript that records no prompt cannot be resumed with another: a CLI that stopped
+    # recording one would resume with whatever it keeps instead. That session is handed off.
+    async def test_a_new_prompt_hands_off_when_the_transcript_records_none_to_replace(self):
+        setup = _setup()
+        first = served(setup.cfg)
+        edited = served(setup.cfg, version=2, digest="digest-2", prompt="the new prompt")
+        rotated, client = await self.run_session([first, edited], [[OWN], []], [[_result()], _handoff()], setup=setup)
+        self.assertTrue(rotated)
+        self.assertEqual(client.queries[1:], [run._INSTRUCTIONS_ROTATION])
+        self.assertIn("the transcript of session s-1 records no system prompt to replace: handing off to a fresh session", self.logged)
+        self.assertEqual(run._restart_state(setup)[0], None)
 
     # The event can arrive while a turn is under way: the hook keeps it from the agent and the
     # change applies once the turn ends.
     async def test_an_event_handed_over_during_a_turn_applies_when_the_turn_ends(self):
         setup = _setup()
+        _transcript(self.home)
         first, edited = served(setup.cfg), served(setup.cfg, version=2, digest="digest-2", prompt="the new prompt")
         hook = run._updates_hook(setup, {"HL_STATE_DIR": os.path.join(setup.statedir, ".hl-state")}, asyncio.Lock())
         with mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=[OWN])), \
                 mock.patch.object(run, "_running", first), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(await hook({"hook_event_name": "PostToolUse"}, "tool-1", {}), {})
         self.assertTrue(run._instructions_told)
-        with mock.patch.object(run, "_connection_instructions", lambda setup, resume_id: first):
-            rotated, client = await self.run_session([edited], [[]], [[_result()], _handoff()], setup=setup)
+        with mock.patch.object(run, "_connection_instructions", lambda setup, resume_id: (first, False)):
+            rotated, client = await self.run_session([edited], [[]], [[_result()]], setup=setup)
         self.assertTrue(rotated)
-        self.assertEqual(client.queries[1:], [run._INSTRUCTIONS_ROTATION])
+        self.assertEqual(client.queries[1:], [])
+        self.assertIn("its prompt with them: resuming the session with it", self.logged)
 
     # A machine replaced while the type was edited resumes a session that still holds the old
-    # prompt: it runs as it was started, and hands off at its first turn boundary.
-    async def test_a_resumed_session_runs_with_what_it_was_started_with_until_its_first_boundary(self):
+    # prompt: a new prompt alone it resumes with at once; with a new model it runs as it was
+    # started, and hands off at its first turn boundary.
+    async def test_a_resumed_session_takes_a_new_prompt_and_keeps_its_model_until_its_first_boundary(self):
         setup = _setup()
-        kept = served(setup.cfg, prompt="the old prompt", effort="medium")
-        instructions.save(setup.statedir, kept)
+        transcript = _transcript(self.home, prompt="the old prompt")
+        instructions.save(setup.statedir, served(setup.cfg, prompt="the old prompt", effort="medium"))
         newest = served(setup.cfg, version=2, digest="digest-2", prompt="the new prompt")
+        rotated, client = await self.run_session([newest], [[]], [], resume_id="s-1", setup=setup)
+        self.assertFalse(rotated)
+        self.assertEqual((client.options.system_prompt, client.options.effort), ("the new prompt" + run._FILE_TOOLS_NOTE, "high"))
+        self.assertIn("resuming session s-1 with the new system prompt of generalist version 2", self.logged)
+        self.assertFalse(any(line.get("type") == "attachment" for line in _lines(transcript)))
+
+        setup = _setup()
+        _transcript(self.home, prompt="the old prompt")
+        instructions.save(setup.statedir, served(setup.cfg, prompt="the old prompt", effort="medium"))
+        newest = served(setup.cfg, version=2, digest="digest-2", prompt="the new prompt", model="claude-y")
         rotated, client = await self.run_session([newest], [[]], [[_result()], _handoff()],
                                                  resume_id="s-1", setup=setup)
         self.assertEqual((client.options.system_prompt, client.options.effort), ("the old prompt" + run._FILE_TOOLS_NOTE, "medium"))
         self.assertTrue(rotated)
+        self.assertEqual(client.queries[1:], [run._INSTRUCTIONS_ROTATION])
         self.assertIn("version 2 (digest digest-2) applies at the first turn boundary", self.logged)
 
     async def test_a_read_that_fails_at_the_boundary_is_tried_again_at_the_next(self):
