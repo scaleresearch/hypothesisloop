@@ -13,8 +13,6 @@ export function useGitHubApp(enabled = true) {
   return useSWR(enabled ? 'github-app' : null, fetchGitHubApp)
 }
 
-/** The setup URL registered on the platform's GitHub App: where GitHub returns the install tab. */
-export const GITHUB_RETURN_PATH = '/settings/repository'
 /** The id of the GitHub card in the org's settings, for a link that leads to it. */
 export const GITHUB_CARD = 'github'
 
@@ -33,7 +31,7 @@ export function installationSettingsURL(installation: Pick<GitHubInstallation, '
 
 // A path of this app: one leading slash and no second, and no backslash or control character,
 // which a browser reads as a slash or drops and so turns into a second one that leaves the origin.
-export function inApp(path: unknown): path is string {
+function inApp(path: unknown): path is string {
   return typeof path === 'string' && /^\/(?!\/)/.test(path) && !/[\\\u0000-\u001f\u007f]/.test(path)
 }
 
@@ -41,7 +39,7 @@ export function inApp(path: unknown): path is string {
 // is told apart by its state; a change made on GitHub without one asks every tab to read again.
 const CHANNEL = 'hl-github-install'
 
-export type InstallOutcome = { ok: true; installation: GitHubInstallation } | { ok: false; message: string; reason?: string }
+type InstallOutcome = { ok: true; installation: GitHubInstallation } | { ok: false; message: string; reason?: string }
 
 type Message = { state: string; outcome: InstallOutcome } | { changed: true }
 
@@ -58,7 +56,7 @@ function listen(onMessage: (message: Message) => void): () => void {
 }
 
 /** The tab GitHub's install page opens in. */
-export interface InstallTab {
+interface InstallTab {
   location: { href: string }
   close(): void
 }

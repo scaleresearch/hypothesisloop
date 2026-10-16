@@ -2,7 +2,7 @@ import type { HTMLAttributes } from 'react'
 import { clsx } from 'clsx'
 
 /** The gaps between things, from a label and its value (2xs) to the sections of a page (xl). */
-export type Gap = '2xs' | 'xs' | 'sm' | 'md' | 'lg' | 'xl'
+type Gap = '2xs' | 'xs' | 'sm' | 'md' | 'lg' | 'xl'
 
 const gapClass: Record<Gap, string> = {
   '2xs': 'gap-0.5',

@@ -182,7 +182,7 @@ function Messages({ messages }: { messages: AgentMessage[] }) {
 
 /** Everything about one agent that its row has no room for. */
 /** The agent type an agent runs, by name. */
-export function AgentTypeLabel({ agent, catalog }: { agent: AgentSignup; catalog: AgentType[] | undefined }) {
+function AgentTypeLabel({ agent, catalog }: { agent: AgentSignup; catalog: AgentType[] | undefined }) {
   if (!agent.flavor) return <span className="text-muted">default</span>
   return <span title={agent.flavor}>{typeName(agent.flavor, catalog)}</span>
 }

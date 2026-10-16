@@ -32,7 +32,7 @@ export function diffLines(before: string, after: string): DiffLine[] {
   return out
 }
 
-export type DiffHunk = { kind: 'lines'; lines: DiffLine[] } | { kind: 'skipped'; lines: DiffLine[] }
+type DiffHunk = { kind: 'lines'; lines: DiffLine[] } | { kind: 'skipped'; lines: DiffLine[] }
 
 /** The diff with runs of unchanged lines longer than twice `context` folded, keeping `context` lines around each change. */
 export function foldUnchanged(lines: DiffLine[], context = 3): DiffHunk[] {

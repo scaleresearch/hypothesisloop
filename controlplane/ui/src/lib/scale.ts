@@ -13,7 +13,7 @@ export const textPx = {
   '3xl': 44,
 } as const
 
-export type TextSize = keyof typeof textPx
+type TextSize = keyof typeof textPx
 
 // Line heights of xs and sm are whole pixels, so a control of either holds the height of field.ts.
 // Display sizes close up as they grow, the way a set headline does.

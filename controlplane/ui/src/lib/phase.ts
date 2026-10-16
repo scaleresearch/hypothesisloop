@@ -1,7 +1,7 @@
 import { PlatformExperimentStatus } from '@/types'
 import type { PlatformExperiment, StatusReason } from '@/types'
 
-export type Phase = 'planning' | 'proposal' | 'baseline' | 'running' | 'closed'
+type Phase = 'planning' | 'proposal' | 'baseline' | 'running' | 'closed'
 
 /** The course of an experiment from a sentence to its close, in order. */
 export const PHASES: { key: Phase; label: string }[] = [
@@ -28,7 +28,7 @@ export function waitsFor(pe: Stated): NonNullable<StatusReason['waits_for']> {
 }
 
 /** What the page offers a person whose move it is: the experiment's edit form, or the agents card. */
-export type OwnerAction = { opens: 'edit' | 'agents'; label: string }
+type OwnerAction = { opens: 'edit' | 'agents'; label: string }
 
 /**
  * For every status reason that can wait for the owner, what the page offers them. The reasons are

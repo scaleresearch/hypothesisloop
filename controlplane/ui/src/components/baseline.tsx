@@ -8,7 +8,7 @@ import { Callout } from '@/components/ui/status-message'
 import { jobPath } from '@/lib/routes'
 
 /** The last raw value a job reported for each metric key. */
-export function lastReported(points: MetricDataPoint[]): Map<string, number> {
+function lastReported(points: MetricDataPoint[]): Map<string, number> {
   const last = new Map<string, number>()
   for (const point of points) {
     if (!point.metric_basis || point.metric_basis === 'raw') last.set(point.metric_name, point.metric_value)

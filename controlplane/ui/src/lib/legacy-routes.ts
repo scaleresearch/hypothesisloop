@@ -2,7 +2,7 @@ import { experimentPath, hypothesisPath, jobPath, projectPath, withQuery } from 
 import type { ProjectSection, Section } from '@/lib/routes'
 
 /** Where a page moved: a path, or a record whose experiment must be read to know it. */
-export type Moved = { path: string } | { record: 'job' | 'hypothesis'; id: string }
+type Moved = { path: string } | { record: 'job' | 'hypothesis'; id: string }
 
 // A section's bare name, as the nav calls it, is answered too: it means the caller's own project.
 const SECTIONS: Record<string, Section> = {

@@ -43,7 +43,7 @@ function permissionsIn(message: string): string {
  * A refusal about GitHub as a short status: the reason code picks the chip and its one fix, and
  * the API's message is shown only where no plain sentence says it better.
  */
-export function githubProblem(reason: string | undefined, message: string, account: string): Problem {
+function githubProblem(reason: string | undefined, message: string, account: string): Problem {
   const on = account ? ` on ${account}` : ''
   switch (reason) {
     case 'installation_gone':

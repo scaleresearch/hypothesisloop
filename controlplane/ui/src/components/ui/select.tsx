@@ -6,7 +6,7 @@ import { fieldClass } from '@/components/ui/field'
 import type { FieldSize } from '@/components/ui/field'
 import { OptionLabel, OptionsIcon, optionClass, panelClass } from '@/components/ui/option'
 
-export interface SelectOption<T extends string = string> {
+interface SelectOption<T extends string = string> {
   value: T
   label: string
   disabled?: boolean

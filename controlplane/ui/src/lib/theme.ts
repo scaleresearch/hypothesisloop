@@ -7,7 +7,7 @@ import type { Theme } from '@/lib/theme-script'
 export type { Theme }
 
 /** The theme this browser remembers; Light when there is none, or one no longer offered. */
-export function storedTheme(): Theme {
+function storedTheme(): Theme {
   try {
     return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light'
   } catch {

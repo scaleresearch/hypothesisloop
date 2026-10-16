@@ -19,10 +19,7 @@ export enum ExperimentStatus {
 // the types a cluster reports and their rates.
 type AcceleratorType = string
 
-enum CapacityTier {
-  GUARANTEED = 'guaranteed',
-  BURST = 'burst',
-}
+type CapacityTier = 'guaranteed' | 'burst'
 
 export enum PlatformExperimentStatus {
   DRAFT = 'draft',
@@ -30,11 +27,6 @@ export enum PlatformExperimentStatus {
   RUNNING = 'running',
   CLOSED = 'closed',
 }
-
-// ---------------------------------------------------------------------------
-// Metric contract
-// ---------------------------------------------------------------------------
-
 
 // ---------------------------------------------------------------------------
 // Metric data point (timeseries emitted by running experiment)

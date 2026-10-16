@@ -28,7 +28,7 @@ export function useReadOnly(): boolean {
   return useContext(ReadOnlyContext)
 }
 
-export interface ExperimentAccess {
+interface ExperimentAccess {
   pe?: PlatformExperiment
   readOnly: boolean
   /** False while the platform experiment is being read. */

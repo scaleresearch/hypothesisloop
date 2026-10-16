@@ -28,7 +28,7 @@ export const brand = {
 } as const
 
 /** The states of globals.css a colour can be laid on at, the same as the class tints of tailwind.config.ts. */
-export type TintLevel = 'hover' | 'track' | 'tint' | 'faint' | 'edge'
+type TintLevel = 'hover' | 'track' | 'tint' | 'faint' | 'edge'
 
 /** A colour at one of the theme's state strengths, for a fill behind a line or dot of the same colour. */
 export function tint(color: string, level: TintLevel): string {

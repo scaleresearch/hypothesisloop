@@ -19,7 +19,7 @@ const variants = {
   code: 'font-mono text-xs',
 } as const
 
-export type TextVariant = keyof typeof variants
+type TextVariant = keyof typeof variants
 
 type TextTone = Tone | 'default' | 'muted' | 'subtle'
 
