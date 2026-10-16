@@ -1,7 +1,6 @@
 import { headers } from 'next/headers'
 import { HOME_PATH, LOGIN_PATH, SIGNED_IN_HEADER, SIGN_UP_PATH } from '@/lib/auth'
 import { ButtonLink } from '@/components/ui/button'
-import { Logo } from '@/components/ui/logo'
 import { Heading } from '@/components/ui/text'
 
 export default function LandingPage() {

@@ -4,7 +4,7 @@ import { addHumanHypothesisLink } from '@/lib/api/hypotheses'
 import type { HypothesisGraph, HypothesisLinkInput, HypothesisLinkType, RegisteredHypothesis, SimilarHypothesis } from '@/types/hypotheses'
 import { allowedLinkKinds, linkPlanner, withEdge, withHypothesis } from '@/lib/hypothesis-graph'
 
-export interface GraphEditor {
+interface GraphEditor {
   graph: HypothesisGraph
   /** The ids some link of the graph points to. */
   linked: Set<string>
