@@ -22,14 +22,15 @@ export function lastReported(points: MetricDataPoint[]): Map<string, number> {
  */
 export function Baseline({ pe }: { pe: PlatformExperiment }) {
   const job = pe.baseline_job_id
-  const { data: points } = useSWR(job ? ['baseline', job] : null, () => fetchExperimentMetrics(job!))
+  const { data: points, error } = useSWR(job ? ['baseline', job] : null, () => fetchExperimentMetrics(job!))
   if (!job) return null
   const reported = points && lastReported(points)
   const values = (pe.metrics ?? []).filter(m => reported?.has(m.key)).map(m => `${m.key} ${reported!.get(m.key)}`).join(', ')
   const raised = pe.baseline_raises?.at(-1)
   return (
     <Callout tone="info">
-      Baseline measured by <TextLink href={jobPath(pe.id, job)}>job {job}</TextLink>{values && `: ${values}`}.
+      Baseline measured by <TextLink href={jobPath(pe.id, job)}>job {job}</TextLink>
+      {error ? `. What it reported could not be loaded: ${error.message}` : !points ? ': reading what it reported' : values && `: ${values}`}.
       {raised && ` Raised from job ${raised.from} by ${raised.actor.name || raised.actor.kind}: ${raised.reason}.`}
     </Callout>
   )

@@ -124,15 +124,16 @@ function JobMetricMini({ jobId, trackedMetrics }: { jobId: string; trackedMetric
   // 48h-scale experiments move slowly enough that 10s polling here just repeats the same
   // full per-job history over and over; 30s keeps mini-charts fresh without redundant load
   // when dozens of these mount at once (one per running/expanded job).
-  const { data: metrics } = useSWR<MetricDataPoint[]>(
+  const { data: metrics, error } = useSWR<MetricDataPoint[]>(
     `metrics-${jobId}`,
     () => fetchExperimentMetrics(jobId),
     { refreshInterval: 30_000 },
   )
-  const points = (metrics ?? []).filter((p) => p.recorded_at)
+  if (error) return <ErrorMessage>Could not load the metrics of job {jobId}: {error.message}</ErrorMessage>
+  if (!metrics) return <Loading />
   return (
     <ExpandableChart label={`Metrics of job ${jobId}`}>
-      <MetricLineChart points={points} trackedMetrics={trackedMetrics} height={400} />
+      <MetricLineChart points={metrics.filter(p => p.recorded_at)} trackedMetrics={trackedMetrics} height={400} />
     </ExpandableChart>
   )
 }
@@ -155,7 +156,7 @@ export function LiveMetricsPicker({ jobs }: { jobs: Experiment[] }) {
   const selectedJob = sorted.find(j => j.id === jobId) ?? sorted[0]
   const effectiveJobId = selectedJob?.id
 
-  const { data: metrics } = useSWR<MetricDataPoint[]>(
+  const { data: metrics, error } = useSWR<MetricDataPoint[]>(
     effectiveJobId ? `metrics-${effectiveJobId}` : null,
     () => fetchExperimentMetrics(effectiveJobId as string),
     { refreshInterval: 30_000 },
@@ -191,7 +192,11 @@ export function LiveMetricsPicker({ jobs }: { jobs: Experiment[] }) {
           />
         </Captioned>
         <Captioned caption="Metrics" className="min-w-52 flex-1">
-          {availableMetrics.length === 0 ? (
+          {error ? (
+            <Text as="span" variant="hint">Unknown</Text>
+          ) : !metrics ? (
+            <Loading rows={1} />
+          ) : availableMetrics.length === 0 ? (
             <Text as="span" variant="hint">No metrics reported yet</Text>
           ) : (
             <Inline gap="xs">
@@ -215,9 +220,12 @@ export function LiveMetricsPicker({ jobs }: { jobs: Experiment[] }) {
           )}
         </Captioned>
       </Inline>
-      <ExpandableChart label={`Metrics of job ${selectedJob.id}`}>
-        <MetricLineChart points={points} trackedMetrics={Array.from(selected)} height={420} />
-      </ExpandableChart>
+      {error && <ErrorMessage>Could not load the metrics of job {selectedJob.id}: {error.message}</ErrorMessage>}
+      {metrics && (
+        <ExpandableChart label={`Metrics of job ${selectedJob.id}`}>
+          <MetricLineChart points={points} trackedMetrics={Array.from(selected)} height={420} />
+        </ExpandableChart>
+      )}
     </Stack>
   )
 }

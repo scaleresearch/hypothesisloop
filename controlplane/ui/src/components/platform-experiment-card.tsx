@@ -40,37 +40,43 @@ export function PlatformExperimentCard({
   const href = experimentPath(pe.id)
   const started = pe.status !== PlatformExperimentStatus.DRAFT
 
-  const { data: quotas } = useSWR<AgentQuota[]>(
+  const { data: quotas, error: quotasError } = useSWR<AgentQuota[]>(
     started ? ['pe-quotas', pe.id] : null,
     () => fetchPlatformExperimentQuotas(pe.id),
     { refreshInterval: 10_000 },
   )
-  const { data: verdicts } = useSWR(
+  const { data: verdicts, error: verdictsError } = useSWR(
     started ? ['pe-hypothesis-stats', pe.id] : null,
     () => fetchHypothesisStats(pe.id),
     { refreshInterval: 15_000 },
   )
 
-  const used = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
   const unit = budgetUnit(budgetKind((pe as Draft).proposal?.accelerator_type, []))
   const live = pe.status === PlatformExperimentStatus.OPEN || pe.status === PlatformExperimentStatus.RUNNING
   const daysLeft = live && !isZeroDate(pe.ends_at)
     ? Math.ceil((new Date(pe.ends_at!).getTime() - Date.now()) / 86_400_000)
     : null
 
-  const figures: string[] = []
-  if (live && pe.budget_accelerator_hours > 0) {
-    figures.push(used > 0 ? `${formatAccH(used)} of ${pe.budget_accelerator_hours} ${unit}` : `${pe.budget_accelerator_hours} ${unit}`)
-  } else if (used > 0) {
-    figures.push(`${formatAccH(used)} ${unit} used`)
+  // A figure whose read failed says so, and one still in flight is left out, so neither reads as none.
+  const figures: { text: string; title?: string }[] = []
+  if (quotasError) {
+    figures.push({ text: 'compute used unknown', title: `Could not load: ${quotasError.message}` })
+  } else if (!started || quotas) {
+    const used = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
+    if (live && pe.budget_accelerator_hours > 0) {
+      figures.push({ text: used > 0 ? `${formatAccH(used)} of ${pe.budget_accelerator_hours} ${unit}` : `${pe.budget_accelerator_hours} ${unit}` })
+    } else if (used > 0) {
+      figures.push({ text: `${formatAccH(used)} ${unit} used` })
+    }
   }
-  if (live && pe.signup_count > 0) figures.push(`${pe.signup_count} ${pe.signup_count === 1 ? 'agent' : 'agents'}`)
-  const hypotheses = verdicts?.total ?? 0
-  if (hypotheses > 0) {
-    figures.push(`${hypotheses} ${hypotheses === 1 ? 'hypothesis' : 'hypotheses'}`)
+  if (live && pe.signup_count > 0) figures.push({ text: `${pe.signup_count} ${pe.signup_count === 1 ? 'agent' : 'agents'}` })
+  if (verdictsError) {
+    figures.push({ text: 'hypotheses unknown', title: `Could not load: ${verdictsError.message}` })
+  } else if (verdicts && verdicts.total > 0) {
+    figures.push({ text: `${verdicts.total} ${verdicts.total === 1 ? 'hypothesis' : 'hypotheses'}` })
     for (const v of ['confirmed', 'refuted'] as const) {
-      const n = verdicts?.by_status[v] ?? 0
-      if (n > 0) figures.push(`${n} ${v}`)
+      const n = verdicts.by_status[v] ?? 0
+      if (n > 0) figures.push({ text: `${n} ${v}` })
     }
   }
 
@@ -91,7 +97,7 @@ export function PlatformExperimentCard({
         <span className="min-w-0 truncate text-base text-foreground">{pe.name}</span>
         <SharedBadge pe={pe} />
         <Inline gap="lg" nowrap className="ml-auto shrink-0 text-xs tabular-nums text-muted">
-          {figures.map(f => <span key={f}>{f}</span>)}
+          {figures.map(f => <span key={f.text} title={f.title} className={clsx(f.title && 'text-danger')}>{f.text}</span>)}
           {daysLeft != null && daysLeft > 0 && <span className={clsx(daysLeft < 2 && 'text-danger')}>{daysLeft}d left</span>}
           {when && <span>{when}</span>}
           {!readOnly && EDITABLE.includes(pe.status) && (

@@ -116,7 +116,7 @@ function PlatformExperimentsPageContent() {
     return () => { live = false }
   }, [draftID, project.id, pathname, router, searchParams])
 
-  const { data, error, isLoading, mutate } = useSWR(
+  const { data, error, mutate } = useSWR(
     ['platform-experiments', project.id, statusFilter, search, sort, page],
     () => fetchPlatformExperimentsPage({
       project_id: project.id,
@@ -126,7 +126,7 @@ function PlatformExperimentsPageContent() {
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
     }),
-    { refreshInterval: 10_000, keepPreviousData: true },
+    { refreshInterval: 10_000 },
   )
   // The sidebar reads the same key, so this is one request for both.
   const { data: clusters } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 10_000 })
@@ -195,8 +195,8 @@ function PlatformExperimentsPageContent() {
 
       {(statusFilter === '' || statusFilter === 'draft') && !search && <ExperimentDrafts onOpen={draft => setDialog({ editing: null, draft })} />}
 
-      {isLoading && <Loading />}
       {error && <ErrorMessage>Could not load the experiments of {project.name}: {error.message}</ErrorMessage>}
+      {!data && !error && <Loading />}
 
       {data && experiments.length === 0 && (
         <EmptyState framed>
