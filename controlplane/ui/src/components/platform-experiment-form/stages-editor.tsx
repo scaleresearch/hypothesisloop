@@ -6,7 +6,19 @@ import { Eyebrow, Text } from '@/components/ui/text'
 import { MAX_STAGES, round2, stagesError } from '@/components/platform-experiment-form/model'
 import type { StageDraft } from '@/components/platform-experiment-form/model'
 
-/** A custom stage ladder, one row per stage, with its total and what is wrong with it. */
+// A new stage takes half of the last one's length, so the ladder still adds up to 100%, and the
+// stage before it cuts a quarter, since only the final stage cuts nobody.
+function withStageAdded(stages: StageDraft[]): StageDraft[] {
+  const last = stages[stages.length - 1]
+  const half = round2(Number(last.length_pct || 0) / 2)
+  return [
+    ...stages.slice(0, -1),
+    { ...last, length_pct: String(half), evict_pct: '25' },
+    { length_pct: String(round2(Number(last.length_pct || 0) - half)), evict_pct: '0', max_job_hours: '' },
+  ]
+}
+
+/** A custom stage ladder, one row per stage, with its total and what the API will refuse of it. */
 export function StagesEditor({ stages, onChange }: { stages: StageDraft[]; onChange: (s: StageDraft[]) => void }) {
   const err = stagesError(stages)
   const total = round2(stages.reduce((s, x) => s + Number(x.length_pct || 0), 0))
@@ -52,8 +64,10 @@ export function StagesEditor({ stages, onChange }: { stages: StageDraft[]; onCha
                 type="button"
                 variant="ghost"
                 size="icon"
+                className="size-6"
                 onClick={() => onChange(stages.filter((_, idx) => idx !== i).map((st, idx, arr) => idx === arr.length - 1 ? { ...st, evict_pct: '0' } : st))}
                 disabled={stages.length <= 1}
+                aria-label={`Remove stage ${i + 1}`}
                 title="Remove this stage"
               >×</Button>
             </Fragment>
@@ -65,11 +79,7 @@ export function StagesEditor({ stages, onChange }: { stages: StageDraft[]; onCha
         <Button
           type="button" size="sm"
           disabled={stages.length >= MAX_STAGES}
-          onClick={() => onChange([
-            ...stages.slice(0, -1),
-            { ...stages[stages.length - 1], evict_pct: '25' },
-            { length_pct: '', evict_pct: '0', max_job_hours: '' },
-          ])}
+          onClick={() => onChange(withStageAdded(stages))}
         >+ Add stage</Button>
         <Text as="span" variant="note" tone={Math.abs(total - 100) < 0.001 ? 'success' : 'warning'} className="tabular-nums">
           Total {total}%

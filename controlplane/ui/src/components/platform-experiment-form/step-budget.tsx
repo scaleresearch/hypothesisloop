@@ -19,6 +19,7 @@ export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps 
   const unit = budgetKind
     ? budgetUnit(budgetKind, 'long')
     : `${budgetUnit('accelerator', 'long')}, or ${budgetUnit('cpu', 'long')} for jobs on CPU`
+  const researchers = Number.isInteger(Number(form.max_agents)) ? Number(form.max_agents) : 0
   return (
     <>
       <div className="grid grid-cols-2 gap-4">
@@ -48,11 +49,11 @@ export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps 
             <Segmented
               label="Starting agents choice"
               size="sm"
-              options={[{ value: 'default', label: `${form.max_agents || 0} generalists` }, { value: 'custom', label: 'Custom' }]}
+              options={[{ value: 'default', label: researchers >= 1 ? `${researchers} ${researchers === 1 ? 'generalist' : 'generalists'}` : 'Generalists' }, { value: 'custom', label: 'Custom' }]}
               value={form.starting_agents ? 'custom' : 'default'}
               onChange={v => set('starting_agents', v === 'custom' ? [ONE_STARTING_AGENT] : null)}
             />
-            {form.starting_agents && <StartingAgentsEditor rows={form.starting_agents} onChange={rows => set('starting_agents', rows)} />}
+            {form.starting_agents && <StartingAgentsEditor rows={form.starting_agents} maxAgents={researchers} onChange={rows => set('starting_agents', rows)} />}
           </Stack>
         </FieldGroup>
       )}

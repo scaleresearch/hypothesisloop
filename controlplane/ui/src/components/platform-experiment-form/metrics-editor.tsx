@@ -108,9 +108,9 @@ export function MetricsEditor({ metrics, onChange }: { metrics: MetricDefinition
               <Inline as="li" key={m.key} gap="sm" nowrap>
                 {m.key === primary
                   ? <span className="w-5 text-center" title="Primary: ranks the leaderboard">★</span>
-                  : <Button type="button" variant="ghost" size="icon" disabled={role !== 'ranking'} onClick={() => makePrimary(m.key)} title="Make primary">☆</Button>}
+                  : <Button type="button" variant="ghost" size="icon" className="size-6" disabled={role !== 'ranking'} onClick={() => makePrimary(m.key)} aria-label={`Make ${m.key} the primary metric`} title="Make primary: it ranks the leaderboard">☆</Button>}
                 <Code className="min-w-0 flex-1 truncate">{m.key}</Code>
-                <Button type="button" size="sm" onClick={() => change(m.key, flip)} title="Flip between maximize and minimize">
+                <Button type="button" size="sm" onClick={() => change(m.key, flip)} aria-label={`${m.key}: ${m.direction === 'maximize' ? 'higher' : 'lower'} is better. Flip`} title="Flip between maximize and minimize">
                   {arrow(m.direction)}
                 </Button>
                 {role === 'reference'
@@ -134,7 +134,7 @@ export function MetricsEditor({ metrics, onChange }: { metrics: MetricDefinition
                     <Text as="span" variant="hint">% past baseline</Text>
                   </Inline>
                 )}
-                <Button type="button" variant="ghost" size="icon" onClick={() => onChange(metrics.filter(x => x.key !== m.key))} title="Remove this metric">×</Button>
+                <Button type="button" variant="ghost" size="icon" className="size-6" onClick={() => onChange(metrics.filter(x => x.key !== m.key))} aria-label={`Remove ${m.key}`} title="Remove this metric">×</Button>
               </Inline>
             )
           })}

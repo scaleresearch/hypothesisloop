@@ -1,12 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { useSWRConfig } from 'swr'
 import {
   ApiError, NO_EXPERIMENT_FILE, createExperimentDraft, createPlatformExperiment, deleteExperimentDraft, fetchExperimentFile, updateExperimentDraft, updatePlatformExperiment,
 } from '@/lib/api'
 import type { CreatePlatformExperimentRequest, ExperimentDraft, PlatformExperimentPatch } from '@/lib/api'
-import type { TypeKind } from '@/lib/units'
 import { isZeroDate } from '@/lib/format'
 import { useTenant } from '@/lib/tenant'
 import { PlatformExperimentStatus } from '@/types'
@@ -19,7 +18,7 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { ErrorMessage } from '@/components/ui/status-message'
 import { Tabs } from '@/components/ui/tabs'
 import { Text } from '@/components/ui/text'
-import { NEW_EXPERIMENT, STEPS, refusedStep, stagesError, startingAgentsError, toDrafts, toResearchers, toStages } from '@/components/platform-experiment-form/model'
+import { NEW_EXPERIMENT, STEPS, refusedStep, toDrafts, toResearchers, toStages } from '@/components/platform-experiment-form/model'
 import type { FormState, StepID } from '@/components/platform-experiment-form/model'
 import { StepWhat } from '@/components/platform-experiment-form/step-what'
 import type { FileNote } from '@/components/platform-experiment-form/step-what'
@@ -31,21 +30,27 @@ interface FormProps {
   initial?: PlatformExperiment | null
   /** The draft a new experiment is finished from, at the step it was left on. */
   draft?: ExperimentDraft
-  /** What the budget of the experiment being edited is spent on, when the page knows. */
-  budgetKind?: TypeKind
   /** Told the experiment the API answered with, once it is saved. `created` is set for a new one. */
   onSaved: (saved: PlatformExperiment, created?: boolean) => void
   /** Offers Cancel. A form that is the page's own content has nothing to go back to and passes none. */
   onCancel?: () => void
 }
 
+/** What the dialog asks of the form it holds: to be left, keeping what was typed. */
+export interface FormHandle {
+  leave: () => void
+}
+
+// The fields the repository's experiment file can fill, by the words the form names them with.
+const FILE_FIELDS = [['name', 'the name'], ['description', 'the brief'], ['metrics', 'the metrics'], ['report_interval_seconds', 'the report interval'], ['stages', 'the stage ladder']] as const
+
 /**
  * The one form a platform experiment is created and edited with, in three steps. A new one is
- * run by the platform: one create stands up a hosted coordinator and the starting agents. It
- * checks only what it needs to build the request; every other rule is the API's, whose refusal it
- * shows.
+ * run by the platform: one create stands up a hosted coordinator and the starting agents. Every
+ * rule is the API's: the editors hint at what the API will refuse as it is typed, and a refusal
+ * is shown at the step it concerns. A new experiment left with anything typed is kept as a draft.
  */
-export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, onCancel }: FormProps) {
+export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function PlatformExperimentForm({ initial, draft, onSaved, onCancel }, ref) {
   const { project } = useTenant()
   const { mutate } = useSWRConfig()
   const needsGitHub = useNeedsGitHub()
@@ -70,31 +75,40 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
     agent_image: initial?.agent_image ?? '',
     ...draft?.form as Partial<FormState> | undefined,
   }))
-  // The form as it opened. An edit sends the fields that differ from it.
+  // The form as it opened. An edit sends the fields that differ from it, and a new one left
+  // unchanged needs no draft kept.
   const [opened] = useState(form)
+  const [kept, setKept] = useState(form)
   const [step, setStep] = useState<StepID>(() => STEPS.find(s => s.id === draft?.step)?.id ?? '1')
   const [fromFile, setFromFile] = useState<FileNote | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [draftID, setDraftID] = useState(draft?.id ?? null)
   const [savingDraft, setSavingDraft] = useState(false)
-  const [draftSaved, setDraftSaved] = useState(false)
   // Why the last create was refused, kept until the next try.
   const [refused, setRefused] = useState(draft?.failure || null)
-  // What the API said of a new repository GitHub would not give it, shown where one is chosen.
+  const panel = useRef<HTMLDivElement>(null)
+  const moved = useRef(false)
+
+  const unsaved = JSON.stringify(form) !== JSON.stringify(kept)
 
   function set<K extends keyof FormState>(field: K, value: FormState[K]) {
-    setDraftSaved(false)
     setForm(f => ({ ...f, [field]: value }))
   }
 
+  // A step that changed takes the focus to its first field, so the keyboard goes on from there.
+  useEffect(() => {
+    if (!moved.current) return
+    panel.current?.querySelector<HTMLElement>('input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])')?.focus()
+  }, [step])
+
   // Keeps the form as it stands as this form's draft, the one it opened from or a new one.
-  async function keepDraft(at: StepID, failure: string): Promise<string> {
+  async function keepDraft(at: StepID, failure: string): Promise<void> {
     const body = { form: { ...form }, step: at, failure }
-    const kept = draftID ? await updateExperimentDraft(project.id, draftID, body) : await createExperimentDraft(project.id, body)
-    setDraftID(kept.id)
+    const saved = draftID ? await updateExperimentDraft(project.id, draftID, body) : await createExperimentDraft(project.id, body)
+    setDraftID(saved.id)
+    setKept(body.form)
     void mutate(['experiment-drafts', project.id])
-    return kept.id
   }
 
   async function saveDraft() {
@@ -102,7 +116,6 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
     setError(null)
     try {
       await keepDraft(step, refused ?? '')
-      setDraftSaved(true)
     } catch (err: unknown) {
       setError(`Could not save the draft: ${said(err)}`)
     } finally {
@@ -110,21 +123,38 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
     }
   }
 
+  // Leaving a new experiment with something typed since it was last kept keeps it first. One that
+  // cannot be kept stays open, with why, so that nothing typed is lost.
+  async function leave() {
+    if (isEdit || !unsaved) return onCancel?.()
+    setSavingDraft(true)
+    try {
+      await keepDraft(step, refused ?? '')
+      onCancel?.()
+    } catch (err: unknown) {
+      setError(`Could not keep what you typed as a draft, so the form stays open: ${said(err)}`)
+      setSavingDraft(false)
+    }
+  }
+
+  useImperativeHandle(ref, () => ({ leave: () => void leave() }))
+
   function go(next: StepID) {
     setError(null)
+    moved.current = true
     setStep(next)
   }
 
   // A repository may bring its own experiment: the brief, the metrics and the ladder its code
   // is written for. Choosing it fills them in, for the person to read and change before anything
-  // is created. A name or a description already typed stays.
+  // is created. A name or a brief already typed stays.
   async function chooseRepository(repository: string) {
     set('repository', repository)
     if (!repository) return setFromFile(null)
     setFromFile({ repository, state: 'reading' })
     try {
       const file = await fetchExperimentFile(project.id, repository)
-      setForm(f => f.repository !== repository ? f : {
+      const next = (f: FormState): FormState => ({
         ...f,
         name: f.name.trim() || file.name || '',
         description: f.description.trim() || file.description || '',
@@ -132,24 +162,13 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
         report_interval_seconds: file.report_interval_seconds ? String(file.report_interval_seconds) : f.report_interval_seconds,
         stages: file.stages?.length ? toDrafts(file.stages) : f.stages,
       })
-      setFromFile({ repository, state: 'filled' })
+      const filled = FILE_FIELDS.filter(([field]) => JSON.stringify(next(form)[field]) !== JSON.stringify(form[field])).map(([, words]) => words)
+      setForm(f => f.repository !== repository ? f : next(f))
+      setFromFile({ repository, state: 'filled', filled })
     } catch (err: unknown) {
       if (err instanceof ApiError && err.reason === NO_EXPERIMENT_FILE) return setFromFile({ repository, state: 'none' })
-      setFromFile({ repository, state: 'failed', message: err instanceof Error ? err.message : String(err) })
+      setFromFile({ repository, state: 'failed', message: said(err) })
     }
-  }
-
-  const ladderError = form.stages && !isEdit ? stagesError(form.stages) : null
-  const startingError = !isEdit ? startingAgentsError(form.starting_agents, Number(form.max_agents)) : null
-
-  function formError(): string | null {
-    if (!form.name.trim()) return 'Name is required.'
-    if (!isEdit && !form.description.trim()) return 'A brief is required: it is the only text every agent reads about the task.'
-    if (Number(form.duration_hours) <= 0) return 'Duration must be greater than 0.'
-    if (Number(form.budget_accelerator_hours) <= 0) return 'Budget must be greater than 0.'
-    if (Number(form.max_agents) < 1) return 'At least one researcher.'
-    if (form.metrics.some(m => m.role === 'constraint' && m.bound === undefined)) return 'Every gate needs a bound.'
-    return null
   }
 
   // What an edit changed, as the fields of the update. A date is compared as the form holds it,
@@ -169,7 +188,7 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
   }
 
   // The update takes a value for each of these and nothing that puts one back to unset, so an
-  // edit that empties one that was set is refused here.
+  // edit that empties one that was set cannot be sent at all.
   function clearedError(): string | null {
     if (!isEdit) return null
     const cleared = ([
@@ -182,8 +201,7 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    // Every step is checked here, whichever is showing: the steps themselves are never gated.
-    const err = formError() ?? clearedError() ?? ladderError ?? startingError
+    const err = clearedError()
     if (err) { setError(err); return }
     setSubmitting(true)
     setError(null)
@@ -223,7 +241,7 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
       const message = said(err)
       const at = refusedStep(err instanceof ApiError ? err.reason : undefined)
       setRefused(message)
-      setStep(at)
+      go(at)
       try {
         await keepDraft(at, message)
       } catch (unkept: unknown) {
@@ -245,11 +263,11 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
       <Tabs label="Steps" tabs={[...STEPS]} value={step} onChange={go} />
 
       <Stack as="form" gap="xl" onSubmit={handleSubmit}>
-        {step === '1' && (
-          <StepWhat {...stepProps} fileNote={fileNote} onRepository={r => void chooseRepository(r)} />
-        )}
-        {step === '2' && <StepMeasure {...stepProps} />}
-        {step === '3' && <StepBudget {...stepProps} budgetKind={budgetKind} />}
+        <div ref={panel} role="tabpanel" aria-label={STEPS[at].label} className="grid gap-6">
+          {step === '1' && <StepWhat {...stepProps} fileNote={fileNote} onRepository={r => void chooseRepository(r)} />}
+          {step === '2' && <StepMeasure {...stepProps} />}
+          {step === '3' && <StepBudget {...stepProps} />}
+        </div>
 
         {refused && (
           <Stack gap="xs">
@@ -257,18 +275,17 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
             <Text variant="hint">Not created. {draftID ? 'What you typed is kept as a draft: change what the refusal names and try again.' : 'Change what the refusal names and try again.'}</Text>
           </Stack>
         )}
-        {startingError && step === '3' && <ErrorMessage>{startingError}</ErrorMessage>}
         {error && <ErrorMessage>{error}</ErrorMessage>}
 
         <Inline nowrap className="mt-1">
-          {onCancel && <Button type="button" onClick={onCancel}>Cancel</Button>}
-          {!isEdit && <Button type="button" loading={savingDraft} onClick={() => void saveDraft()}>Save draft</Button>}
-          {draftSaved && <Text as="span" variant="hint">Draft saved.</Text>}
+          {onCancel && <Button type="button" disabled={savingDraft} onClick={() => void leave()}>Cancel</Button>}
+          {!isEdit && <Button type="button" loading={savingDraft} disabled={!unsaved} onClick={() => void saveDraft()}>Save draft</Button>}
+          {!isEdit && draftID && !unsaved && <Text as="span" variant="hint" role="status">Draft saved.</Text>}
           <span className="flex-1" />
           {back && <Button type="button" onClick={() => go(back.id)}>Back</Button>}
-          {next && <Button type="button" variant={isEdit || refused ? 'default' : 'primary'} onClick={() => go(next.id)}>Next</Button>}
+          {next && <Button type="button" variant={isEdit || refused ? 'default' : 'primary'} onClick={() => go(next.id)}>Next: {next.label.replace(/^\d+\. /, '')}</Button>}
           {(isEdit || !next || refused) && (!isEdit && needsGitHub ? <ConnectGitHubStep /> : (
-            <Button type="submit" variant="primary" loading={submitting} disabled={!!ladderError || !!startingError}>
+            <Button type="submit" variant="primary" loading={submitting}>
               {isEdit ? 'Save changes' : refused ? 'Try again' : 'Create experiment'}
             </Button>
           ))}
@@ -276,22 +293,23 @@ export function PlatformExperimentForm({ initial, draft, budgetKind, onSaved, on
       </Stack>
     </Stack>
   )
-}
+})
 
 function said(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/** The form in a dialog, which closes once the experiment is saved. */
+/** The form in a dialog, which closes once the experiment is saved. Escape and a click outside leave it as Cancel does. */
 export function PlatformExperimentDialog({ initial, draft, onSaved, onClose }: {
   initial?: PlatformExperiment | null
   draft?: ExperimentDraft
   onSaved: FormProps['onSaved']
   onClose: () => void
 }) {
+  const form = useRef<FormHandle>(null)
   return (
-    <Dialog open onClose={onClose} title={initial ? 'Edit experiment' : 'New experiment'}>
-      <PlatformExperimentForm initial={initial} draft={draft} onCancel={onClose} onSaved={(saved, created) => { onSaved(saved, created); onClose() }} />
+    <Dialog open onClose={() => form.current?.leave()} title={initial ? 'Edit experiment' : 'New experiment'}>
+      <PlatformExperimentForm ref={form} initial={initial} draft={draft} onCancel={onClose} onSaved={(saved, created) => { onSaved(saved, created); onClose() }} />
     </Dialog>
   )
 }

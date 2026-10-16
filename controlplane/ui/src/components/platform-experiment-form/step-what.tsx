@@ -1,29 +1,30 @@
-import { useRef } from 'react'
-import { BriefPoints } from '@/components/brief-points'
+import { BriefGuide } from '@/components/brief-guide'
 import { RepositorySelect } from '@/components/repository-select'
+import { Button } from '@/components/ui/button'
 import { FieldGroup, FormField } from '@/components/ui/form-field'
-import { InfoTip } from '@/components/ui/info-tip'
 import { Input, Textarea } from '@/components/ui/input'
+import { Inline } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 import type { StepProps } from '@/components/platform-experiment-form/model'
 
-/** What the chosen repository's experiment file did to the form: is being read, filled it, is not there, or could not be read. */
-export type FileNote = { repository: string; state: 'reading' | 'filled' | 'none' | 'failed'; message?: string }
+/** What the chosen repository's experiment file did to the form: is being read, filled the fields named, is not there, or could not be read. */
+export type FileNote =
+  | { repository: string; state: 'reading' | 'none' }
+  | { repository: string; state: 'filled'; filled: string[] }
+  | { repository: string; state: 'failed'; message: string }
 
 const FILE = '.hypothesisloop/experiment.yaml'
 
-const BRIEF_PLACEHOLDER = `Objective: what to find out, in a sentence.
-Metric: …
-Control: …
-Win: …`
+const listed = (words: string[]) => words.length === 1 ? words[0] : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`
+
+const BRIEF_PLACEHOLDER = 'What to find out, the number that decides it and how it is measured, what to compare against, and what must stay the same.'
 
 /** Step 1: the code, the name and the brief. */
 export function StepWhat({ form, set, isEdit, fileNote, onRepository }: StepProps & {
   fileNote: FileNote | null
   onRepository: (repository: string) => void
 }) {
-  const brief = useRef<HTMLTextAreaElement>(null)
   return (
     <>
       {isEdit ? (
@@ -31,15 +32,24 @@ export function StepWhat({ form, set, isEdit, fileNote, onRepository }: StepProp
           <Text>{form.repository || 'No repository'} · {form.agent_image || 'the platform\'s agent image'}</Text>
         </FieldGroup>
       ) : (
-        <FormField
-          label="Repository"
-          hint={<InfoTip>{`A repository with ${FILE} fills in the rest of this form.`}</InfoTip>}
-        >
+        <FormField label="Repository">
           <RepositorySelect value={form.repository} onChange={onRepository} />
-          {fileNote?.state === 'reading' && <Text variant="hint">Reading {FILE} of {fileNote.repository}…</Text>}
-          {fileNote?.state === 'filled' && <Text variant="note">Filled in from {FILE} of {fileNote.repository}.</Text>}
-          {fileNote?.state === 'none' && <Text variant="note">{fileNote.repository} has no {FILE}.</Text>}
-          {fileNote?.state === 'failed' && <InlineError>Could not read {FILE} of {fileNote.repository}: {fileNote.message}</InlineError>}
+          {!fileNote && <Text variant="hint">A repository with {FILE} fills in the rest of this form.</Text>}
+          {fileNote?.state === 'reading' && <Text variant="hint" role="status">Reading {FILE} of {fileNote.repository}…</Text>}
+          {fileNote?.state === 'filled' && (
+            <Text variant="note" role="status">
+              {fileNote.filled.length > 0
+                ? `Filled in ${listed(fileNote.filled)} from ${FILE}. Change anything before you create it.`
+                : `${FILE} of ${fileNote.repository} states nothing this form does not already hold.`}
+            </Text>
+          )}
+          {fileNote?.state === 'none' && <Text variant="note" role="status">{fileNote.repository} has no {FILE}, so the rest is yours to fill in.</Text>}
+          {fileNote?.state === 'failed' && (
+            <Inline gap="sm">
+              <InlineError>Could not read {FILE} of {fileNote.repository}: {fileNote.message}</InlineError>
+              <Button type="button" size="sm" onClick={() => onRepository(fileNote.repository)}>Try again</Button>
+            </Inline>
+          )}
         </FormField>
       )}
       <FormField label="Name">
@@ -47,10 +57,9 @@ export function StepWhat({ form, set, isEdit, fileNote, onRepository }: StepProp
       </FormField>
       <FormField
         label="Brief"
-        hint={<>The only text every agent reads about the task. Whatever it leaves open, agents guess from the code.<InfoTip>Write it so that anyone could check a result against it, with numbers, units and file names.</InfoTip></>}
+        hint="The only text every agent reads about the task."
       >
         <Textarea
-          ref={brief}
           rows={8}
           className="overflow-x-hidden break-words"
           value={form.description}
@@ -58,7 +67,7 @@ export function StepWhat({ form, set, isEdit, fileNote, onRepository }: StepProp
           placeholder={BRIEF_PLACEHOLDER}
         />
       </FormField>
-      <BriefPoints text={form.description} onChange={text => set('description', text)} box={brief} />
+      <BriefGuide note="Anything the brief leaves open, the agents decide from the code." />
     </>
   )
 }
