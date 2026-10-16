@@ -48,7 +48,8 @@ remote_dir="hl-build/$(id -un)"
 box="${remote_dir}/src/localdev/images-remote-box.sh"
 read -r -a ssh <<<"ssh -o BatchMode=yes ${SSH_OPTIONS:-}"
 
-# ssh_box COMMAND...: runs the box script with a fresh registry token as the first line of stdin.
+# ssh_box COMMAND...: runs the box script with a registry token as the first line of stdin. gcloud
+# hands out the token it holds until that one nearly expires, so each long step asks again.
 ssh_box() {
   local token
   token="$(gcloud auth print-access-token --account "${account}")"
@@ -83,7 +84,9 @@ if [[ ${#missing[@]} -gt 0 ]]; then
   echo "==> building on ${builder}: ${missing[*]}"
   ssh_box build "${HL_REGISTRY}" "${tag}" "'${samples// /,}'" "'$*'" "${missing[@]}" | tee -a "${results}"
   echo "==> pushing from ${builder}: ${missing[*]}"
-  ssh_box push "${HL_REGISTRY}" "${tag}" "${missing[@]}" | tee -a "${results}"
+  for name in "${missing[@]}"; do
+    ssh_box push "${HL_REGISTRY}" "${tag}" "${name}" | tee -a "${results}"
+  done
 fi
 if [[ "${import}" == true ]]; then
   echo "==> importing into the k3s containerd of ${builder}"
