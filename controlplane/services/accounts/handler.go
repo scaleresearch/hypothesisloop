@@ -60,6 +60,15 @@ type Clusters interface {
 // Connectivity reports which clusters have an agent connected right now, by name.
 type Connectivity func(ctx context.Context) (map[string]bool, error)
 
+// Contact is a cluster's last reconcile exchange: when, and the version its agent said it runs.
+type Contact struct {
+	At           time.Time
+	AgentVersion string
+}
+
+// Contacts reports each cluster's last contact, by name, for the clusters heard from lately.
+type Contacts func(ctx context.Context) (map[string]Contact, error)
+
 // RuntimeAddresses is what a cluster's agents are installed with: where they reach the platform
 // from inside their cluster, and the registry and tag their images are pulled under.
 type RuntimeAddresses struct {
@@ -67,6 +76,8 @@ type RuntimeAddresses struct {
 	MetricsURL string
 	Registry   string
 	ImageTag   string
+	// RegistryPlainHTTP says Registry serves plain HTTP (config.RuntimesConfig.RegistryPlainHTTP).
+	RegistryPlainHTTP bool
 }
 
 type Handler struct {
@@ -74,6 +85,7 @@ type Handler struct {
 	clusters      Clusters
 	connected     Connectivity
 	autoscalers   Connectivity
+	contacts      Contacts
 	signingSecret string
 	runtimes      RuntimeAddresses
 	limits        Limits
@@ -90,16 +102,17 @@ type Limits struct {
 	MaxProjectsPerOrg int `json:"max_projects_per_org" doc:"How many projects one org may hold. The projects of this answer with that org_id are the ones that count."`
 }
 
-// NewHandler takes connected, the clusters with an agent connected now, and autoscalers, those
-// whose connected agent reports an autoscaler, both by name.
-func NewHandler(accounts Accounts, clusters Clusters, connected, autoscalers Connectivity, signingSecret string, runtimes RuntimeAddresses, limits Limits, logger *zap.Logger) *Handler {
+// NewHandler takes connected, the clusters with an agent connected now, autoscalers, those
+// whose connected agent reports an autoscaler, and contacts, each cluster's last contact, all by
+// name.
+func NewHandler(accounts Accounts, clusters Clusters, connected, autoscalers Connectivity, contacts Contacts, signingSecret string, runtimes RuntimeAddresses, limits Limits, logger *zap.Logger) *Handler {
 	if logger == nil {
 		panic("accounts.NewHandler: a logger is required")
 	}
 	if limits.MaxOrgsPerUser <= 0 || limits.MaxProjectsPerOrg <= 0 {
 		panic("accounts.NewHandler: both account limits are required and positive")
 	}
-	return &Handler{accounts: accounts, clusters: clusters, connected: connected, autoscalers: autoscalers, signingSecret: signingSecret, runtimes: runtimes, limits: limits, logger: logger}
+	return &Handler{accounts: accounts, clusters: clusters, connected: connected, autoscalers: autoscalers, contacts: contacts, signingSecret: signingSecret, runtimes: runtimes, limits: limits, logger: logger}
 }
 
 // limit is bound for a caller held to the account limits, and none, zero, for staff.
@@ -160,26 +173,46 @@ func viewFor(c *domain.Cluster, orgID string, caller auth.Principal) ClusterView
 // RegisteredCluster is a cluster with everything its agents are started with.
 type RegisteredCluster struct {
 	ClusterView
-	RuntimeToken string         `json:"runtime_token" doc:"The token this cluster's agents start with. Derived from the cluster's name, so it can be read again at any time by registering the name again."`
-	APIURL       string         `json:"api_url" doc:"The address this cluster's agents reach the API at."`
-	MetricsURL   string         `json:"metrics_url" doc:"The address this cluster's agents send metrics to."`
-	Registry     string         `json:"registry" doc:"The registry this cluster's nodes pull the agents' images from."`
-	ImageTag     string         `json:"image_tag" doc:"The tag of the agents' images."`
-	Attach       AttachCommands `json:"attach_commands" doc:"The command that attaches the cluster, for each kind of runtime, built from the fields above. It asks for runtime_token."`
+	RuntimeToken      string         `json:"runtime_token" doc:"The token this cluster's agents start with. Derived from the cluster's name, so it can be read again at any time by registering the name again."`
+	APIURL            string         `json:"api_url" doc:"The address this cluster's agents reach the API at."`
+	MetricsURL        string         `json:"metrics_url" doc:"The address this cluster's agents send metrics to."`
+	Registry          string         `json:"registry" doc:"The registry this cluster's nodes pull the agents' images from."`
+	ImageTag          string         `json:"image_tag" doc:"The tag of the agents' images."`
+	RegistryPlainHTTP bool           `json:"registry_plain_http" doc:"The registry serves plain HTTP with no TLS, as a local development registry does. The Kubernetes command then pulls the chart over HTTP and has every node's containerd pull from the registry over HTTP."`
+	Attach            AttachCommands `json:"attach_commands" doc:"The command that attaches the cluster, for each kind of runtime, built from the fields above. It asks for runtime_token."`
 }
 
-// ListedCluster is a cluster an org can use, whether the org has it on for its jobs, and whether
-// its agent is connected right now.
+// ListedCluster is a cluster an org can use, whether the org has it on for its jobs, whether
+// its agent is connected right now, and when it was last heard from.
 type ListedCluster struct {
 	ClusterView
-	Owned             bool `json:"owned" doc:"The org registered the cluster and may change its settings. False for a cluster of another org that the platform shares: its org_id, cluster_id and settings are left out."`
-	Connected         bool `json:"connected"`
-	AutoscalerEnabled bool `json:"autoscaler_enabled" doc:"The cluster's connected agent reports an autoscaler that adds nodes for waiting jobs, which is what scale_up_timeout_seconds and max_speculative_accelerators act on."`
+	Owned             bool       `json:"owned" doc:"The org registered the cluster and may change its settings. False for a cluster of another org that the platform shares: its org_id, cluster_id, settings, agent_version and last_error are left out."`
+	Connected         bool       `json:"connected"`
+	AutoscalerEnabled bool       `json:"autoscaler_enabled" doc:"The cluster's connected agent reports an autoscaler that adds nodes for waiting jobs, which is what scale_up_timeout_seconds and max_speculative_accelerators act on."`
+	LastContactAt     *time.Time `json:"last_contact_at,omitempty" doc:"When the cluster's agent last reconciled with the platform, if within the last 30 days. Absent: not heard from in them, or never."`
+	AgentVersion      string     `json:"agent_version,omitempty" doc:"The version, an image tag, the cluster's agent said it runs at its last contact."`
+	VersionSkew       bool       `json:"version_skew,omitempty" doc:"The agent runs another version than the platform, whose own is the image_tag registering a cluster answers: run the attach command again to upgrade it."`
+	LastError         string     `json:"last_error,omitempty" doc:"What the platform last refused the agent's reconcile with, until it accepts one again."`
+	LastErrorAt       *time.Time `json:"last_error_at,omitempty"`
 }
 
-// listed shows a cluster to a caller listing the clusters of orgID.
-func listed(c *domain.Cluster, orgID string, caller auth.Principal, connected, autoscaler bool) ListedCluster {
-	return ListedCluster{ClusterView: viewFor(c, orgID, caller), Owned: c.OrgID == orgID, Connected: connected, AutoscalerEnabled: autoscaler}
+// listed shows a cluster to a caller listing the clusters of orgID. platformVersion is the image
+// tag the platform runs, which an agent's version is compared with.
+func listed(c *domain.Cluster, orgID string, caller auth.Principal, connected, autoscaler bool, contact *Contact, platformVersion string) ListedCluster {
+	out := ListedCluster{ClusterView: viewFor(c, orgID, caller), Owned: c.OrgID == orgID, Connected: connected, AutoscalerEnabled: autoscaler}
+	if contact != nil {
+		at := contact.At
+		out.LastContactAt = &at
+	}
+	if !caller.KnowsCluster(*c) {
+		return out
+	}
+	if contact != nil {
+		out.AgentVersion = contact.AgentVersion
+		out.VersionSkew = contact.AgentVersion != "" && contact.AgentVersion != platformVersion
+	}
+	out.LastError, out.LastErrorAt = c.LastError, c.LastErrorAt
+	return out
 }
 
 type clusterList struct {
@@ -202,10 +235,18 @@ func (h *Handler) listClusters(ctx context.Context, orgID string, caller auth.Pr
 	if err != nil {
 		return nil, err
 	}
+	contacts, err := h.contacts(ctx)
+	if err != nil {
+		return nil, err
+	}
 	out := &clusterList{}
 	out.Body.Clusters = make([]ListedCluster, len(clusters))
 	for i, c := range clusters {
-		out.Body.Clusters[i] = listed(c, orgID, caller, connected[c.Name], connected[c.Name] && autoscalers[c.Name])
+		var contact *Contact
+		if seen, ok := contacts[c.Name]; ok {
+			contact = &seen
+		}
+		out.Body.Clusters[i] = listed(c, orgID, caller, connected[c.Name], connected[c.Name] && autoscalers[c.Name], contact, h.runtimes.ImageTag)
 	}
 	return out, nil
 }
@@ -530,7 +571,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		registered := RegisteredCluster{
 			ClusterView: viewOf(cluster, in.ID), RuntimeToken: token, APIURL: h.runtimes.APIURL, MetricsURL: h.runtimes.MetricsURL,
-			Registry: h.runtimes.Registry, ImageTag: h.runtimes.ImageTag,
+			Registry: h.runtimes.Registry, ImageTag: h.runtimes.ImageTag, RegistryPlainHTTP: h.runtimes.RegistryPlainHTTP,
 		}
 		registered.Attach = attachCommands(registered)
 		return &struct{ Body RegisteredCluster }{Body: registered}, nil

@@ -244,6 +244,17 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	autoscaledClusters := func(ctx context.Context) (map[string]bool, error) {
 		return metricsdb.LiveClusterAutoscalerCapability(ctx, metricsDBURL, connectedWithin)
 	}
+	clusterContacts := func(ctx context.Context) (map[string]accounts.Contact, error) {
+		seen, err := metricsdb.ClusterLastContacts(ctx, metricsDBURL, clusterContactLookback)
+		if err != nil {
+			return nil, err
+		}
+		out := make(map[string]accounts.Contact, len(seen))
+		for name, contact := range seen {
+			out[name] = accounts.Contact{At: contact.At, AgentVersion: contact.AgentVersion}
+		}
+		return out, nil
+	}
 
 	r := newRouter(gate, pcfg.Auth.UIOrigin, routes{
 		quota:               handler,
@@ -255,7 +266,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		dataUsage:           quota.NewDataUsageHandler(dataStore, store, peSvc, pcfg.DataStore.MaxBytesPerAgent, logger),
 		sessions:            dataStore,
 		drafts:              db.NewExperimentDraftsStore(pool),
-		accounts: accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, autoscaledClusters, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag},
+		accounts: accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, autoscaledClusters, clusterContacts, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag, RegistryPlainHTTP: pcfg.Runtimes.RegistryPlainHTTP},
 			accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, logger),
 		repositories: repos,
 		scheduler:    schedulerHandler,
@@ -305,6 +316,10 @@ type routes struct {
 }
 
 // webSockets are the paths a WebSocket client opens, with the subprotocol that carries its token.
+// clusterContactLookback is how far back a cluster's last contact is looked for: one silent for
+// longer is listed with none.
+const clusterContactLookback = 30 * 24 * time.Hour
+
 var webSockets = map[string]string{"/watch": registry.WatchSubprotocol}
 
 // newRouter mounts every route of the API behind auth.Gate, which every request but a CORS

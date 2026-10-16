@@ -25,11 +25,13 @@ package clusteragentapi
 import (
 	"context"
 	"errors"
+	"net/http"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/opencontainers/go-digest"
@@ -67,6 +69,9 @@ type Store interface {
 	BindReportedID(ctx context.Context, name, reportedID string) error
 	// RecordJobImage keeps the one image the cluster's runtime says it runs.
 	RecordJobImage(ctx context.Context, name, image string) error
+	// RecordContactRefusal keeps what a reconcile of the cluster was refused with, and clears it
+	// with an empty refusal (db.ClustersStore).
+	RecordContactRefusal(ctx context.Context, name, refusal string) error
 	// RemoveCluster ends a cluster and returns its jobs to the queue (db.ClustersStore).
 	RemoveCluster(ctx context.Context, name string) (requeued []string, err error)
 	// RecordBuilds keeps whether the cluster's runtime builds environments.
@@ -261,14 +266,29 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	})
 
 	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{
+		OperationID: "cluster-access", Method: "GET", Path: "/{name}/access", DefaultStatus: http.StatusNoContent,
+		Summary: "Check this cluster's runtime token", Tags: []string{"cluster-agent"},
+		Description: "Answers 204 to the runtime token of a registered cluster named name, and refuses any other token as every route here does. It records and changes nothing, so an installer's dry run asks it before anything is installed.",
+	}, func(ctx context.Context, in *struct {
+		Name string `path:"name"`
+	}) (*struct{}, error) {
+		return nil, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{
 		OperationID: "cluster-reconcile", Method: "POST", Path: "/{name}/reconcile",
 		Summary: "Exchange actual capacity for desired workloads", Tags: []string{"cluster-agent"},
 		Description: "Atomically records one complete actual-capacity snapshot in metrics storage, keeping only priced accelerator types, then returns the complete PostgreSQL desired workload set for this cluster, plus the ids of workloads whose termination earns them their declared checkpoint window, " +
-			"the environment builds assigned to this cluster (builds, recorded as building only for a runtime that reports builds true), and registry_pull, a login that reads environment images, when a listed workload runs in one.",
-	}, func(ctx context.Context, in *reconcileInput) (*struct {
+			"the environment builds assigned to this cluster (builds, recorded as building only for a runtime that reports builds true), and registry_pull, a login that reads environment images, when a listed workload runs in one. " +
+			"The version the agent sends in " + clusterapi.AgentVersionHeader + " is kept with the snapshot, and a refusal of the request is kept as the cluster's last error until one is accepted.",
+	}, func(ctx context.Context, in *reconcileInput) (out *struct {
 		Body clusterapi.ReconcileAnswer
-	}, error) {
+	}, err error) {
 		clusterName := in.Name
+		defer func() { h.recordContact(ctx, clusterName, err) }()
+		if len(in.AgentVersion) > maxAgentVersionLength || strings.ContainsFunc(in.AgentVersion, unicode.IsControl) {
+			return nil, huma.Error400BadRequest(clusterapi.AgentVersionHeader + " is longer than " + strconv.Itoa(maxAgentVersionLength) + " characters or holds a control character")
+		}
 
 		report := in.Body
 		if report.AcceleratorAvailableByFlavor == nil || report.AcceleratorTotalByFlavor == nil || report.AcceleratorAvailableByNode == nil {
@@ -397,6 +417,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			MultiNodeCapable:           report.MultiNodeCapable,
 			AutoscalerEnabled:          report.AutoscalerEnabled,
 			ClusterID:                  report.ClusterID,
+			AgentVersion:               in.AgentVersion,
 			RAMAvailable:               report.RAMAvailableBytes, RAMTotal: report.RAMTotalBytes,
 			StorageAvailable: report.StorageAvailableBytes, StorageTotal: report.StorageTotalBytes,
 		}); err != nil {
@@ -779,7 +800,29 @@ func (h *Handler) environmentWork(ctx context.Context, cluster string, exps []*d
 
 type reconcileInput struct {
 	Name string `path:"name"`
-	Body clusterapi.ReconcileRequest
+	// AgentVersion is clusterapi.AgentVersionHeader's value.
+	AgentVersion string `header:"X-Hypothesisloop-Agent-Version"`
+	Body         clusterapi.ReconcileRequest
+}
+
+// maxAgentVersionLength bounds the version an agent says it runs, an image tag.
+const maxAgentVersionLength = 128
+
+// recordContact keeps what a reconcile of the cluster was refused with, or clears it once one is
+// accepted. A failure of the platform's own is not the cluster's to fix, and an unregistered
+// name has nowhere to keep it.
+func (h *Handler) recordContact(ctx context.Context, cluster string, err error) {
+	refusal := ""
+	if err != nil {
+		var status huma.StatusError
+		if !errors.As(err, &status) || status.GetStatus() >= http.StatusInternalServerError || status.GetStatus() == http.StatusNotFound {
+			return
+		}
+		refusal = status.Error()
+	}
+	if err := h.store.RecordContactRefusal(ctx, cluster, refusal); err != nil {
+		h.logger.Warn("could not keep the last refusal of a cluster's reconcile", zap.String("cluster", cluster), zap.Error(err))
+	}
 }
 
 // clusterInfo is one row of GET /internal/clusters.

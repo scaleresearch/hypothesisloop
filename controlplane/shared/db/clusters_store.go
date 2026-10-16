@@ -74,12 +74,14 @@ func NewClustersStore(pool *Pool) *ClustersStore {
 
 const clusterColumns = `name, org_id, shared, priority, COALESCE(reported_id, ''), job_image, created_at,
 	scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds, status_silence_ceiling_seconds,
+	last_error, last_error_at,
 	ARRAY(SELECT d.org_id FROM org_disabled_clusters d WHERE d.cluster_name = clusters.name ORDER BY d.org_id)`
 
 func scanCluster(row rowScanner) (*domain.Cluster, error) {
 	c := &domain.Cluster{}
 	if err := row.Scan(&c.Name, &c.OrgID, &c.Shared, &c.Priority, &c.ReportedID, &c.JobImage, &c.CreatedAt,
-		&c.ScaleUpTimeoutSeconds, &c.MaxSpeculativeAccelerators, &c.StuckPendingTimeoutSeconds, &c.StatusSilenceCeilingSeconds, &c.DisabledOrgs); err != nil {
+		&c.ScaleUpTimeoutSeconds, &c.MaxSpeculativeAccelerators, &c.StuckPendingTimeoutSeconds, &c.StatusSilenceCeilingSeconds,
+		&c.LastError, &c.LastErrorAt, &c.DisabledOrgs); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -147,6 +149,20 @@ func (s *ClustersStore) ClusterOrg(ctx context.Context, name string) (orgID stri
 func (s *ClustersStore) RecordJobImage(ctx context.Context, name, image string) error {
 	if _, err := s.pool.pool.Exec(ctx, `UPDATE clusters SET job_image = $2 WHERE name = $1 AND job_image <> $2`, name, image); err != nil {
 		return fmt.Errorf("clusters_store.RecordJobImage: %w", err)
+	}
+	return nil
+}
+
+// RecordContactRefusal keeps what the control plane refused a reconcile of the cluster's agent
+// with, and when. An empty refusal is a reconcile it accepted, which clears what was kept, and
+// writes nothing when nothing was.
+func (s *ClustersStore) RecordContactRefusal(ctx context.Context, name, refusal string) error {
+	query := `UPDATE clusters SET last_error = $2, last_error_at = now() WHERE name = $1`
+	if refusal == "" {
+		query = `UPDATE clusters SET last_error = '', last_error_at = NULL WHERE name = $1 AND last_error <> $2`
+	}
+	if _, err := s.pool.pool.Exec(ctx, query, name, refusal); err != nil {
+		return fmt.Errorf("clusters_store.RecordContactRefusal: %w", err)
 	}
 	return nil
 }

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -45,6 +46,8 @@ type world struct {
 	personKey, parentKey string
 	memberKey            string
 	inviteA, inviteToken string
+	// contacts is each cluster's last contact as the metrics store answers it.
+	contacts map[string]Contact
 }
 
 // tokens resolves a token to the principal of that name, and refuses a revoked API key as the
@@ -155,7 +158,8 @@ func newWorld(t *testing.T) *world {
 	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
 	connected := func(context.Context) (map[string]bool, error) { return map[string]bool{w.clusterA: true}, nil }
 	autoscalers := func(context.Context) (map[string]bool, error) { return map[string]bool{}, nil }
-	RegisterHuma(doc, NewHandler(w.store, w.store, connected, autoscalers, testSigningSecret, testRuntimeAddresses, testLimits, zap.NewNop()))
+	contacts := func(context.Context) (map[string]Contact, error) { return w.contacts, nil }
+	RegisterHuma(doc, NewHandler(w.store, w.store, connected, autoscalers, contacts, testSigningSecret, testRuntimeAddresses, testLimits, zap.NewNop()))
 	w.agentTypes = newMemAgentTypes()
 	ownType, _ := w.agentTypes.Create(ctx, w.orgA, "Own", domain.AgentRoleResearcher, ownPrompt, domain.AgentTypeSettings{MaxSubagents: 2, PacingSubagents: 1, Effort: "high"}, domain.Actor{Kind: domain.ActorUser, ID: "u-owner"})
 	w.ownType = ownType.ID
@@ -790,6 +794,50 @@ func TestClustersAreListedForTheirOrgWithConnectivity(t *testing.T) {
 	}
 }
 
+// An owner whose cluster reads disconnected is told when its agent was last heard from, what it
+// last was refused with and which version it runs, and whether that is the platform's own: a
+// cluster left on an old install, or pointed at an address that stopped answering, is otherwise
+// only connected: false.
+func TestAClusterIsListedWithItsLastContactLastErrorAndAgentVersion(t *testing.T) {
+	w := newWorld(t)
+	seen := time.Date(2026, 10, 12, 8, 0, 0, 0, time.UTC)
+	w.contacts = map[string]Contact{w.clusterA: {At: seen, AgentVersion: "old1234"}, w.clusterB: {At: seen, AgentVersion: testRuntimeAddresses.ImageTag}}
+	refused := seen.Add(time.Hour)
+	w.store.clusters[w.clusterA].LastError, w.store.clusters[w.clusterA].LastErrorAt = "cluster_id x is the identity of another registered cluster", &refused
+	list := func(caller, orgID string) ListedCluster {
+		t.Helper()
+		var listed struct {
+			Clusters []ListedCluster `json:"clusters"`
+		}
+		w.ok(caller, "GET", "/orgs/"+orgID+"/clusters", nil, http.StatusOK, &listed)
+		if len(listed.Clusters) == 0 {
+			t.Fatalf("%s lists no cluster of %s", caller, orgID)
+		}
+		return listed.Clusters[0]
+	}
+	a := list("owner", w.orgA)
+	if a.LastContactAt == nil || !a.LastContactAt.Equal(seen) || a.AgentVersion != "old1234" || !a.VersionSkew ||
+		a.LastError != w.store.clusters[w.clusterA].LastError || a.LastErrorAt == nil || !a.LastErrorAt.Equal(refused) {
+		t.Errorf("cluster a = %+v, want its last contact, the version skew and its last error", a)
+	}
+	if b := list("outsider", w.orgB); b.AgentVersion != testRuntimeAddresses.ImageTag || b.VersionSkew || b.LastError != "" {
+		t.Errorf("cluster b = %+v, want its version with no skew and no error", b)
+	}
+
+	// Another org that runs on the shared cluster is told when it was heard from, and nothing its
+	// owner alone is told.
+	w.ok("staff", "PATCH", "/orgs/"+w.orgA+"/clusters/"+w.clusterA, map[string]any{"shared": true}, http.StatusOK, nil)
+	var listed struct {
+		Clusters []ListedCluster `json:"clusters"`
+	}
+	w.ok("outsider", "GET", "/orgs/"+w.orgB+"/clusters", nil, http.StatusOK, &listed)
+	for _, c := range listed.Clusters {
+		if c.Name == w.clusterA && (c.LastContactAt == nil || c.AgentVersion != "" || c.VersionSkew || c.LastError != "" || c.LastErrorAt != nil) {
+			t.Errorf("the shared cluster to another org = %+v, want its last contact alone", c)
+		}
+	}
+}
+
 func TestASharedClusterIsListedToEveryOrgWithoutItsOwnerOrItsSettingsKey(t *testing.T) {
 	w := newWorld(t)
 	w.store.clusters[w.clusterA].ReportedID = "id-of-a"
@@ -955,7 +1003,8 @@ func TestAFailureOfThePlatformIsAnsweredWithoutItsText(t *testing.T) {
 	connected := func(context.Context) (map[string]bool, error) {
 		return nil, errors.New("metrics store at 10.0.0.7 refused the connection")
 	}
-	RegisterHuma(doc, NewHandler(failingStore{w.store}, w.store, connected, connected, testSigningSecret, testRuntimeAddresses, testLimits, zap.NewNop()))
+	contacts := func(context.Context) (map[string]Contact, error) { return nil, nil }
+	RegisterHuma(doc, NewHandler(failingStore{w.store}, w.store, connected, connected, contacts, testSigningSecret, testRuntimeAddresses, testLimits, zap.NewNop()))
 	w.router = router
 	for _, path := range []string{"/me", "/orgs/" + w.orgA + "/projects", "/orgs/" + w.orgA + "/clusters"} {
 		rec := w.call("owner", "GET", path, nil)

@@ -11,7 +11,11 @@ repository.
 ## Requirements
 
 - Kubernetes 1.34 or newer, helm 3.17 or newer.
-- Outbound access from every node to `apiURL`, `metricsURL` and `images.registry`.
+- Outbound access from every node to `apiURL`, `metricsURL` and `images.registry`. Pods resolve
+  them with the cluster's DNS, which does not know tailnet names: name a control plane on a
+  tailnet by its IP.
+- A registry of plain HTTP needs `insecureRegistry.enabled=true`, which writes a containerd
+  `hosts.toml` for it on every node (`values.yaml` says where).
 - For accelerators, their device plugin or DRA driver (NVIDIA GPU Operator, AMD GPU device
   plugin with node labeller, Tenstorrent DRA driver).
 

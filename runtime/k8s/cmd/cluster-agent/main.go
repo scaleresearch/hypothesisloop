@@ -8,8 +8,14 @@
 // cluster from the control plane and stays until every job object it created here is gone. The
 // chart runs it before the release is uninstalled.
 //
+// cluster-agent check, run with CLUSTER_NAME, API_URL, METRICS_URL and RUNTIME_TOKEN, asks the
+// API's and the metrics service's /healthz and whether the API takes the token, changes nothing
+// and exits 1 when any fails. install.sh --dry-run runs it in a pod of the cluster.
+//
 //	CLUSTER_NAME          — this cluster's stable identity
 //	API_URL               — base URL of the control-plane API
+//	HYPOTHESISLOOP_AGENT_VERSION: the image tag this agent runs, sent on every call. The chart
+//	                        sets it from images.tag.
 //	HYPOTHESISLOOP_BUILDS — the BuildKit daemon this cluster builds environments on, a unix
 //	                        socket in the pod. Unset, the cluster builds none.
 //	HYPOTHESISLOOP_NODE_IMAGES — the containerd socket of this pod's node. Set, each environment
@@ -22,6 +28,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -39,16 +46,22 @@ const (
 	binaryName        = "cluster-agent"
 	reconcileInterval = 2 * time.Second
 	statusInterval    = 3 * time.Second
+	// cacheSyncTimeout bounds reading every node and pod of the cluster at start.
+	cacheSyncTimeout = 5 * time.Minute
 )
 
 func main() {
 	detach := false
 	if len(os.Args) > 1 {
-		if len(os.Args) != 2 || os.Args[1] != "detach" {
-			fmt.Fprintln(os.Stderr, "usage: cluster-agent [detach]")
+		switch {
+		case len(os.Args) == 2 && os.Args[1] == "detach":
+			detach = true
+		case len(os.Args) == 2 && os.Args[1] == "check":
+			os.Exit(check())
+		default:
+			fmt.Fprintln(os.Stderr, "usage: cluster-agent [detach | check]")
 			os.Exit(2)
 		}
-		detach = true
 	}
 	clusterName := agentloop.RequiredEnv(binaryName, "CLUSTER_NAME")
 	// One URL for both jobs of this process: polling the control plane, and the value passed to
@@ -59,6 +72,7 @@ func main() {
 	apiURL := agentloop.RequiredEnv(binaryName, "API_URL")
 	// The runtime token the cluster's owner was given when the cluster was registered.
 	token := agentloop.RequiredEnv(binaryName, "RUNTIME_TOKEN")
+	version := os.Getenv("HYPOTHESISLOOP_AGENT_VERSION")
 	// Optional: how many trailing log lines to report per job per status push. Not required —
 	// agentloop.DefaultLogTailLines (100) applies when unset.
 	logTailLines := agentloop.OptionalIntEnv(binaryName, "LOG_TAIL_LINES")
@@ -102,19 +116,26 @@ func main() {
 	if detach {
 		agentloop.RunDetach(ctx, binaryName, log)
 	} else {
-		log("starting: cluster=%s control_plane=%s", clusterName, apiURL)
+		log("starting: cluster=%s control_plane=%s version=%s", clusterName, apiURL, cmp.Or(version, "unknown"))
+		log("checking the jobs namespace and priority classes")
 		setupCtx, setupCancel := context.WithTimeout(ctx, 30*time.Second)
 		if err := jwc.SetupCluster(setupCtx); err != nil {
 			fmt.Fprintf(os.Stderr, "cluster-agent: SetupCluster: %v\n", err)
 			os.Exit(1)
 		}
 		setupCancel()
+		if err := jwc.SyncCache(ctx, cacheSyncTimeout, log); err != nil {
+			fmt.Fprintf(os.Stderr, "cluster-agent: %v\n", err)
+			os.Exit(1)
+		}
+		log("first contact with the control plane at %s", apiURL)
 	}
 
 	a := &agentloop.Agent{
 		ClusterName:       clusterName,
 		APIURL:            apiURL,
 		Token:             token,
+		Version:           version,
 		Executor:          jwc,
 		HTTPClient:        &http.Client{Timeout: 35 * time.Second},
 		ReconcileInterval: reconcileInterval,
@@ -134,4 +155,38 @@ func main() {
 		fmt.Fprintln(os.Stderr, "cluster-agent: detach was interrupted before every job object was gone")
 		os.Exit(1)
 	}
+}
+
+// check is the cluster-agent check subcommand: each line says ok or FAIL, and the exit status is
+// 1 when any failed.
+func check() int {
+	agent := &agentloop.Agent{
+		ClusterName: agentloop.RequiredEnv(binaryName, "CLUSTER_NAME"),
+		APIURL:      agentloop.RequiredEnv(binaryName, "API_URL"),
+		Token:       agentloop.RequiredEnv(binaryName, "RUNTIME_TOKEN"),
+		HTTPClient:  &http.Client{Timeout: 10 * time.Second},
+	}
+	metricsURL := agentloop.RequiredEnv(binaryName, "METRICS_URL")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	failed := 0
+	say := func(what string, err error) {
+		if err != nil {
+			failed++
+			fmt.Printf("FAIL %s: %v\n", what, err)
+			return
+		}
+		fmt.Printf("ok   %s\n", what)
+	}
+	say("api: "+agent.APIURL+" answers from this pod", agentloop.CheckReachable(ctx, agent.HTTPClient, agent.APIURL))
+	say("metrics: "+metricsURL+" answers from this pod", agentloop.CheckReachable(ctx, agent.HTTPClient, metricsURL))
+	tokenErr := agent.CheckToken(ctx)
+	if errors.Is(tokenErr, agentloop.ErrClusterRemoved) {
+		tokenErr = fmt.Errorf("no cluster named %s is registered there (hl cluster add %s)", agent.ClusterName, agent.ClusterName)
+	}
+	say("token: the API takes the runtime token of cluster "+agent.ClusterName, tokenErr)
+	if failed > 0 {
+		return 1
+	}
+	return 0
 }

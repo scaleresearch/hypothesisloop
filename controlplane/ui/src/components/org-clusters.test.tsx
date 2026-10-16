@@ -78,6 +78,26 @@ describe('the org\'s clusters', () => {
     expect(names()).toEqual(['lab', 'new', 'spare', 'platform-gpu'])
   })
 
+  it('say of one that is disconnected when it was last heard from, its agent\'s version against the platform\'s, and its last refusal', async () => {
+    clusters = [
+      owned('lab', { connected: true, agent_version: 'abc1234' }),
+      owned('tt-box', { last_contact_at: '2026-01-01T00:00:00Z', agent_version: 'old1234', version_skew: true, last_error: 'cluster tt-box is bound to another cluster_id', last_error_at: '2026-01-02T00:00:00Z' }),
+      owned('never'),
+      platform,
+    ]
+    show()
+    const lab = within(await rowOf('lab'))
+    expect(lab.getByText('abc1234')).toBeTruthy()
+    expect(lab.queryByText('Not the platform\'s version')).toBeNull()
+    expect(lab.queryByText(/Last contact/)).toBeNull()
+    const box = within(await rowOf('tt-box'))
+    expect(box.getByText(/Last contact/)).toBeTruthy()
+    expect(box.getByText('old1234')).toBeTruthy()
+    expect(box.getByText('Not the platform\'s version')).toBeTruthy()
+    expect(box.getByText(/Last refused .*: cluster tt-box is bound to another cluster_id/)).toBeTruthy()
+    expect(within(await rowOf('never')).getByText('Not heard from in 30 days')).toBeTruthy()
+  })
+
   it('are only shown to a member', async () => {
     clusters = clusters.map(c => (c.name === 'platform-gpu' ? { ...c, enabled: false } : c))
     show(member)

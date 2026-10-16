@@ -204,7 +204,9 @@ the most it rents at once and available is what it may still rent, so a job ther
 its machine is rented. A line with no_offer is of such a cluster that has no machine to rent now
 for some of its slots, and says why in its runtime's words, such as which of its provider's
 filters leave out every offer of a shape: a job that needs such a slot waits until one comes on
-offer.
+offer. An image in a registry that only the platform's own machine reaches (a loopback or
+host.containers.internal address) is warned about on stderr: no cluster on another machine can
+pull it.
 
 The clusters are the ones one org's jobs can be placed on: its own and the shared ones. An API
 key and an agent token have one org and need no --org. A person in several orgs names one.`, stderr)
@@ -276,6 +278,16 @@ key and an agent token have one org and need no --org. A person in several orgs 
 			return fail(stderr, fmt.Errorf("response is not JSON: %w", err))
 		}
 		fmt.Fprintln(stdout, string(line))
+	}
+	for _, raw := range out.JobImages {
+		var image struct {
+			Name  string `json:"name"`
+			Image string `json:"image"`
+		}
+		if json.Unmarshal(raw, &image) == nil && localOnly(image.Image) {
+			fmt.Fprintf(stderr, "hl: warning: job_image %s is in a registry only the platform's own machine reaches (%s): a cluster on any other machine cannot pull it. "+
+				"On a local stack, set LOCAL_REACHABLE_ADDRESS in .env (.env.example) and run make dev again\n", image.Name, image.Image)
+		}
 	}
 	if len(out.Clusters) == 0 {
 		fmt.Fprintln(stderr, "hl: capacity: no cluster reports capacity")

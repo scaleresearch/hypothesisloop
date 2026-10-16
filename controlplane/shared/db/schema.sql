@@ -1226,6 +1226,11 @@ ALTER TABLE clusters ADD COLUMN IF NOT EXISTS reported_id TEXT UNIQUE;
 -- job_image is the one image the cluster runs, as its runtime last reported it. Empty for a
 -- cluster that runs whatever image a job names. Placement reads it.
 ALTER TABLE clusters ADD COLUMN IF NOT EXISTS job_image TEXT NOT NULL DEFAULT '';
+-- last_error is what the control plane last refused a reconcile of the cluster's agent with, and
+-- last_error_at when. The next one it accepts clears both. Its owner reads them beside the last
+-- contact and the agent's version, which are the metrics store's.
+ALTER TABLE clusters ADD COLUMN IF NOT EXISTS last_error TEXT NOT NULL DEFAULT '';
+ALTER TABLE clusters ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ;
 -- job_image_default marked a job_image that was only where a job naming none ran. Such a cluster
 -- runs any image. A job placed before admission wrote the image keeps the one it runs in.
 DO $$ BEGIN

@@ -1,0 +1,58 @@
+{{- if .Values.insecureRegistry.enabled }}
+{{- $registry := regexReplaceAll "/.*$" (required "images.registry is required" .Values.images.registry) "" }}
+# Has every node's containerd pull from images.registry over plain HTTP, for a registry with no
+# TLS such as the local dev registry. containerd reads a registry's hosts.toml at each pull, so
+# nothing restarts. k3s rewrites its directory when it starts, which is why the file is written
+# again every minute rather than once.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: hypothesisloop-insecure-registry
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: hypothesisloop-insecure-registry
+spec:
+  selector:
+    matchLabels:
+      app: hypothesisloop-insecure-registry
+  template:
+    metadata:
+      labels:
+        app: hypothesisloop-insecure-registry
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: hosts
+          # Pulled from its own registry: the one this configures cannot be read until it ran.
+          image: {{ required "insecureRegistry.image is required" .Values.insecureRegistry.image }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              dir="/hosts/{{ $registry }}"
+              while true; do
+                mkdir -p "$dir"
+                printf 'server = "http://%s"\n\n[host."http://%s"]\n  capabilities = ["pull", "resolve"]\n  skip_verify = true\n' \
+                  "{{ $registry }}" "{{ $registry }}" > "$dir/hosts.toml.new"
+                mv "$dir/hosts.toml.new" "$dir/hosts.toml"
+                sleep 60
+              done
+          resources:
+            requests:
+              cpu: "1m"
+              memory: "4Mi"
+            limits:
+              cpu: "50m"
+              memory: "16Mi"
+          volumeMounts:
+            - name: hosts
+              mountPath: /hosts
+      volumes:
+        - name: hosts
+          hostPath:
+            path: {{ required "insecureRegistry.hostsDir is required" .Values.insecureRegistry.hostsDir }}
+            type: DirectoryOrCreate
+      tolerations:
+        - operator: Exists
+{{- end }}

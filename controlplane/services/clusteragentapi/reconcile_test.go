@@ -45,6 +45,9 @@ type reconcileStore struct {
 	finished []string
 	progress []string
 	loaded   []string
+	// refusals is what each reconcile was refused with, empty for one accepted, as
+	// RecordContactRefusal kept it.
+	refusals []string
 }
 
 func (s *reconcileStore) RecordEnvironmentLoaded(ctx context.Context, cluster, key string, attempt int, node, image string) (bool, error) {

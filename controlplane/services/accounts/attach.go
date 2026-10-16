@@ -28,15 +28,21 @@ func lines(groups ...string) string {
 
 // kubernetesCommand installs or upgrades the runtime chart that make images pushed beside the
 // images. --take-ownership takes over the jobs namespace an install from before the chart
-// created. The values set are the cluster's one config file; the token comes on stdin.
+// created. The values set are the cluster's one config file; the token comes on stdin. A
+// registry of plain HTTP is read so by helm, and by every node through the chart's
+// insecureRegistry.
 func kubernetesCommand(registered RegisteredCluster) string {
 	set := func(key, value string) string {
 		return "--set-string " + shellQuote(key+"="+helmValue(value))
 	}
-	return lines(
+	chart := "helm upgrade --install hypothesisloop-cluster-agent " + shellQuote("oci://"+registered.Registry+"/charts/hypothesisloop-cluster-agent")
+	if registered.RegistryPlainHTTP {
+		chart += " --plain-http"
+	}
+	groups := []string{
 		askToken,
-		"helm upgrade --install hypothesisloop-cluster-agent "+shellQuote("oci://"+registered.Registry+"/charts/hypothesisloop-cluster-agent"),
-		"--version "+shellQuote("0.1.0+"+registered.ImageTag),
+		chart,
+		"--version " + shellQuote("0.1.0+"+registered.ImageTag),
 		"--namespace hypothesisloop --create-namespace --take-ownership",
 		"--set-file runtimeToken=/dev/stdin",
 		set("clusterName", registered.Name),
@@ -44,7 +50,11 @@ func kubernetesCommand(registered RegisteredCluster) string {
 		set("metricsURL", registered.MetricsURL),
 		set("images.registry", registered.Registry),
 		set("images.tag", registered.ImageTag),
-	)
+	}
+	if registered.RegistryPlainHTTP {
+		groups = append(groups, "--set insecureRegistry.enabled=true")
+	}
+	return lines(groups...)
 }
 
 // helmValue writes text as one value of helm's --set-string, which splits on commas and reads a

@@ -39,6 +39,23 @@ func TestTheKubernetesCommandRunsHelmWithTheTokenOnStdin(t *testing.T) {
 	}
 }
 
+// A registry of plain HTTP, as the local dev registry is, is read so by helm and by every node:
+// over HTTPS neither the chart nor an image is found.
+func TestTheKubernetesCommandReadsARegistryOfPlainHTTPSo(t *testing.T) {
+	registered := RegisteredCluster{ClusterView: ClusterView{Name: "tt-box"}, APIURL: "http://100.64.0.5:8081", MetricsURL: "http://100.64.0.5:8084",
+		Registry: "100.64.0.5:5000", ImageTag: "abc1234"}
+	if command := kubernetesCommand(registered); strings.Contains(command, "--plain-http") || strings.Contains(command, "insecureRegistry") {
+		t.Errorf("command for a registry of TLS:\n%s\nwant neither --plain-http nor insecureRegistry", command)
+	}
+	registered.RegistryPlainHTTP = true
+	command := kubernetesCommand(registered)
+	for _, want := range []string{"'oci://100.64.0.5:5000/charts/hypothesisloop-cluster-agent' --plain-http", "--set insecureRegistry.enabled=true"} {
+		if !strings.Contains(command, want) {
+			t.Errorf("command for a registry of plain HTTP:\n%s\nwant %q", command, want)
+		}
+	}
+}
+
 // The command copies the agent out of the image with the node's engine and runs it with the
 // arguments printed after the image, which a dry run extends with --dry-run.
 func TestTheBareMetalCommandRunsTheAgentFromItsImage(t *testing.T) {

@@ -39,7 +39,10 @@ type Agent struct {
 	ClusterName string
 	APIURL      string
 	// Token is this cluster's runtime token, sent on every call to the control plane.
-	Token             string
+	Token string
+	// Version is what the agent runs, its image tag, sent on every call beside the token
+	// (clusterapi.AgentVersionHeader). Empty sends none.
+	Version           string
 	Executor          agentexec.Executor
 	HTTPClient        *http.Client
 	ReconcileInterval time.Duration
@@ -66,6 +69,9 @@ type Agent struct {
 	// removed is set once the control plane said this cluster is no longer registered. From
 	// then on there is nobody to report to.
 	removed atomic.Bool
+
+	// contacted is set by the first reconcile exchange the control plane answers, which is logged.
+	contacted atomic.Bool
 
 	// builds is what runs of the builds the last reconcile answer listed, by key: started when
 	// listed, cancelled when no longer listed at that attempt, and kept once reported until then
@@ -165,6 +171,9 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 	}
 	if removed {
 		a.removed.Store(true)
+	}
+	if !removed && !a.contacted.Swap(true) {
+		a.Log("first contact with the control plane ok: %d workloads desired here", len(answer.Jobs))
 	}
 	a.reconcileBuilds(ctx, answer.Builds)
 	desired := answer.Jobs
@@ -565,7 +574,11 @@ func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id
 
 // controlPlane is this cluster's API on the control plane.
 func (a *Agent) controlPlane() *cpclient.Client {
-	return &cpclient.Client{BaseURL: fmt.Sprintf("%s/internal/clusters/%s", a.APIURL, a.ClusterName), Token: a.Token, HTTP: a.HTTPClient}
+	client := &cpclient.Client{BaseURL: fmt.Sprintf("%s/internal/clusters/%s", a.APIURL, a.ClusterName), Token: a.Token, HTTP: a.HTTPClient}
+	if a.Version != "" {
+		client.Header = http.Header{clusterapi.AgentVersionHeader: {a.Version}}
+	}
+	return client
 }
 
 // call makes one request of this cluster's API. A 401 that says the cluster is no longer
@@ -664,6 +677,29 @@ func (a *Agent) logTailLines() int {
 		return DefaultLogTailLines
 	}
 	return a.LogTailLines
+}
+
+// CheckToken asks the control plane whether it takes this cluster's token, and changes nothing
+// there: no capacity is reported and no identity bound. An installer's dry run asks it.
+func (a *Agent) CheckToken(ctx context.Context) error {
+	return a.call(ctx, http.MethodGet, "/access", nil, nil)
+}
+
+// CheckReachable asks base's /healthz, which answers without a token.
+func CheckReachable(ctx context.Context, client *http.Client, base string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/healthz", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s/healthz answered %d", base, resp.StatusCode)
+	}
+	return nil
 }
 
 // CheckAccess makes the call every pass starts with and acts on nothing it answers, so an

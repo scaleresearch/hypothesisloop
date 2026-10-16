@@ -49,7 +49,7 @@ func platformRoutes(caller auth.Principal) http.Handler {
 	quota.RegisterPlanningHuma(doc, experiments)
 	quota.RegisterDataUsageHuma(doc, quota.NewDataUsageHandler(nil, nil, nil, 0, logger))
 	quota.RegisterSessionsHuma(doc, nil, logger)
-	accounts.RegisterHuma(doc, accounts.NewHandler(nil, nil, nil, nil, "secret", accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 1, MaxProjectsPerOrg: 1}, logger))
+	accounts.RegisterHuma(doc, accounts.NewHandler(nil, nil, nil, nil, nil, "secret", accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 1, MaxProjectsPerOrg: 1}, logger))
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(scheduler.NewService(nil, nil, nil, nil,
 		struct{ scheduler.CodeHost }{}, struct{ scheduler.InstalledCapacity }{}, struct{ scheduler.QuotaSettler }{}, "http://metrics.invalid", logger).
 		WithLoop(struct{ scheduler.Triggerable }{})))

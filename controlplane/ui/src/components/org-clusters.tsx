@@ -6,6 +6,7 @@ import { ChevronDown, ChevronUp, GripVertical } from 'lucide-react'
 import { fetchOrgClusters, registerCluster, removeCluster, setClusterEnabled, setClusterOrder, updateCluster } from '@/lib/api'
 import type { ClusterKind as Kind, OrgCluster, RegisteredCluster } from '@/types'
 import { useTenant } from '@/lib/tenant'
+import { formatDate, relTime } from '@/lib/format'
 import { ClusterSettingsEditor } from '@/components/cluster-settings-editor'
 import { Badge, StatusLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -47,7 +48,7 @@ function InstallGuide({ kind, registered }: { kind: Kind; registered: Registered
         <GuidePart title="Before you run it">
           <ul className={guideList}>
             <li>Kubernetes 1.34 or newer, <Code>helm</Code> 3.17 or newer, and <Code>kubectl</Code> access that may create namespaces, PriorityClasses and cluster roles.</li>
-            <li>Every node reaches <Code>{registered.api_url}</Code> and <Code>{registered.metrics_url}</Code> and pulls images from <Code>{registered.registry}</Code>. Nothing connects into the cluster.</li>
+            <li>Every node reaches <Code>{registered.api_url}</Code> and <Code>{registered.metrics_url}</Code> and pulls images from <Code>{registered.registry}</Code>. Nothing connects into the cluster. Pods resolve these names with the cluster&apos;s DNS, which does not know tailnet names: a platform on a tailnet is named by its IP.</li>
             <li>Accelerators need their device plugin or DRA driver: the NVIDIA GPU Operator, the AMD GPU device plugin with its node labeller, or the Tenstorrent DRA driver. Every cluster also offers its CPU cores.</li>
           </ul>
         </GuidePart>
@@ -60,7 +61,7 @@ function InstallGuide({ kind, registered }: { kind: Kind; registered: Registered
         </GuidePart>
         <GuidePart title="Steps">
           <ol className="list-decimal space-y-1 pl-5 text-xs text-muted">
-            <li>To preview every object first, add <Code>--dry-run=server</Code> at the end of the command.</li>
+            <li>To preview every object first, add helm&apos;s own flag <Code>--dry-run=server</Code> at the end of the command. It does not check that the cluster reaches the platform or pulls the images: <Code>install.sh --dry-run</Code> from a checkout does.</li>
             <li>Run the command and paste the runtime token when it asks.</li>
             <li>Check <Code>kubectl -n hypothesisloop get pods</Code>. The cluster shows Connected in the list below within a minute.</li>
           </ol>
@@ -105,6 +106,34 @@ function InstallGuide({ kind, registered }: { kind: Kind; registered: Registered
         </ul>
       </GuidePart>
     </div>
+  )
+}
+
+/**
+ * Whether the cluster's agent is connected, when it was last heard from, the version it runs and
+ * whether that is the platform's own, and what the platform last refused it with.
+ */
+function ClusterStatus({ cluster: c }: { cluster: OrgCluster }) {
+  return (
+    <Stack gap="xs" start>
+      <StatusLabel tone={c.connected ? 'success' : 'danger'}>{c.connected ? 'Connected' : 'Disconnected'}</StatusLabel>
+      {!c.connected && (
+        <Text as="div" variant="meta">
+          {c.last_contact_at ? <>Last contact <span title={formatDate(c.last_contact_at)}>{relTime(c.last_contact_at)}</span></> : 'Not heard from in 30 days'}
+        </Text>
+      )}
+      {c.agent_version && (
+        <Text as="div" variant="meta">Agent <Code>{c.agent_version}</Code></Text>
+      )}
+      {c.version_skew && (
+        <Badge tone="warning" title="The agent runs another version than the platform. Run the start command again to upgrade it.">Not the platform&apos;s version</Badge>
+      )}
+      {c.last_error && (
+        <Text as="div" variant="meta" className="max-w-72 text-danger" title={formatDate(c.last_error_at)}>
+          Last refused{c.last_error_at ? ` ${relTime(c.last_error_at)}` : ''}: {c.last_error}
+        </Text>
+      )}
+    </Stack>
   )
 }
 
@@ -284,7 +313,7 @@ export function OrgClusters() {
                 onDragEnd={() => setDragged('')}
               >
                 <td className="font-mono text-xs font-medium">{c.name}</td>
-                <td><StatusLabel tone={c.connected ? 'success' : 'danger'}>{c.connected ? 'Connected' : 'Disconnected'}</StatusLabel></td>
+                <td><ClusterStatus cluster={c} /></td>
                 <td className="text-xs">
                   {c.owned ? org.name : <Badge tone="neutral">Platform</Badge>}
                   {c.shared && <Text as="div" variant="meta">shared with every org</Text>}

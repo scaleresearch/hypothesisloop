@@ -30,6 +30,11 @@ const (
 // workloads it holds and exits. Any other 401 is a token somebody has to fix.
 const ReasonClusterNotRegistered = "cluster_not_registered"
 
+// AgentVersionHeader carries, on every request a cluster's agent makes, the version it runs: the
+// image tag it was installed with. The control plane keeps the one of the cluster's last contact
+// and shows a cluster whose version is not its own.
+const AgentVersionHeader = "X-Hypothesisloop-Agent-Version"
+
 // ReconcileRequest is what a runtime tells the control plane with every reconcile
 // (POST /internal/clusters/{name}/reconcile): its live capacity and what it can do.
 type ReconcileRequest struct {

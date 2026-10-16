@@ -21,6 +21,8 @@ type Client struct {
 	BaseURL string
 	Token   string
 	HTTP    *http.Client
+	// Header is sent on every request beside the token, such as the version of the caller.
+	Header http.Header
 	// MaxAnswerBytes bounds an answer held in memory; 0 bounds nothing.
 	MaxAnswerBytes int
 }
@@ -55,6 +57,9 @@ func (c *Client) Do(ctx context.Context, method, path string, body, out any) err
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for name, values := range c.Header {
+		req.Header[name] = values
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Token)
 	resp, err := c.HTTP.Do(req)

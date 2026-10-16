@@ -131,8 +131,12 @@ type Cluster struct {
 	// that runs whatever image a job names.
 	JobImage string `json:"job_image,omitempty"`
 	ClusterSettings
-	CreatedAt    time.Time `json:"created_at"`
-	DisabledOrgs []string  `json:"-"`
+	CreatedAt time.Time `json:"created_at"`
+	// LastError is what the control plane last refused a reconcile of the cluster's agent with,
+	// at LastErrorAt. Empty once one is accepted again.
+	LastError    string     `json:"-"`
+	LastErrorAt  *time.Time `json:"-"`
+	DisabledOrgs []string   `json:"-"`
 }
 
 // The priorities a cluster holds. DefaultClusterPriority is the one a cluster is registered with.

@@ -404,6 +404,9 @@ func apiKeyRevoke(c *apiclient.Client, args []string, stdout, stderr io.Writer) 
 type registeredCluster struct {
 	Name         string `json:"name"`
 	RuntimeToken string `json:"runtime_token"`
+	APIURL       string `json:"api_url"`
+	MetricsURL   string `json:"metrics_url"`
+	Registry     string `json:"registry"`
 	Attach       struct {
 		Kubernetes string `json:"kubernetes"`
 		BareMetal  string `json:"bare_metal"`
@@ -421,12 +424,21 @@ history and the machine needs neither hl nor an API key. Adding a name the org a
 prints the same again. A cluster takes its own org's jobs only.
 
 Without --bare-metal the command is for a Kubernetes cluster (1.34 or newer): run it with helm
-3.17 or newer where kubectl reaches the cluster (add --kube-context to name another). It
-installs the runtime's chart from the registry into the namespace hypothesisloop, or upgrades
-it, and adds the namespace hypothesisloop-jobs where jobs run. Add --dry-run=server at the end
-to see every object without installing. helm uninstall hypothesisloop-cluster-agent -n
+3.17 or newer where kubectl reaches the cluster (add --kube-context CONTEXT to name another,
+and --set-string kubeContext=CONTEXT for the notes it prints to name it too). It installs the
+runtime's chart from the registry into the namespace hypothesisloop, or upgrades it, and adds
+the namespace hypothesisloop-jobs where jobs run. To preview, add helm's own flag
+--dry-run=server at the end: the API server checks every object and nothing is installed. It
+does not check that the cluster reaches the platform or pulls the images; install.sh --dry-run
+from a checkout does (docs/install-cluster.md). Pods resolve the addresses with the cluster's
+DNS, so a platform on a tailnet is named by its IP. A registry of plain HTTP, as a local
+stack's is, makes the command pull the chart over HTTP and set insecureRegistry, which has
+every node's containerd pull from it over HTTP. helm uninstall hypothesisloop-cluster-agent -n
 hypothesisloop detaches the cluster again: it removes the cluster here, where its jobs go back
 to the queue, and stops what it runs there.
+
+Each address the command names that only the platform's own machine reaches is warned about
+on stderr.
 
 With --bare-metal it is for one node with docker or podman, which is a cluster of its own. Run
 the command on the node. It copies the agent out of its image and installs it as a systemd
@@ -461,6 +473,11 @@ hl cluster remove NAME detaches from this side: the agent stops its jobs and sta
 		command = registered.Attach.BareMetal
 	}
 	fmt.Fprintf(stdout, "%s\n\nIt asks for the runtime token of %s:\n%s\n", command, registered.Name, registered.RuntimeToken)
+	warnLocalOnly(stderr, "the API address", registered.APIURL)
+	if !*bareMetal {
+		warnLocalOnly(stderr, "the metrics address", registered.MetricsURL)
+	}
+	warnLocalOnly(stderr, "the image registry", registered.Registry)
 	return 0
 }
 
@@ -627,7 +644,16 @@ func onCluster(c *apiclient.Client, fs *flagSet, args []string, method, rest str
 }
 
 func clusterList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster list", "usage: hl cluster list [--org ORG]\n\nThe clusters the org's jobs run on, by name: the ones it registered (owned) and the ones the platform shares with every org, in the order a job is placed on them (see hl cluster order), with whether an agent is connected now and whether the org has the cluster on for its jobs (enabled; see hl cluster disable).", stderr)
+	fs := newFlags("cluster list", `usage: hl cluster list [--org ORG]
+
+The clusters the org's jobs run on, by name: the ones it registered (owned) and the ones the
+platform shares with every org, in the order a job is placed on them (see hl cluster order),
+with whether an agent is connected now and whether the org has the cluster on for its jobs
+(enabled; see hl cluster disable). last_contact_at is when its agent was last heard from, within
+30 days. Of a cluster the org registered: agent_version, the image tag its agent runs, with
+version_skew when that is not the platform's own, and last_error, what the platform last refused
+its agent with. A cluster with version_skew, or not connected with a last_error, is also warned
+about on stderr.`, stderr)
 	org := fs.String("org", "", orgFlagHelp)
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
@@ -636,7 +662,35 @@ func clusterList(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 	if err != nil {
 		return fail(stderr, err)
 	}
-	return call(c, "GET", orgPath(id, "/clusters"), nil, "clusters", "cluster list: none", stdout, stderr)
+	var listing struct {
+		Clusters json.RawMessage `json:"clusters"`
+	}
+	if err := c.Do("GET", orgPath(id, "/clusters"), nil, &listing); err != nil {
+		return fail(stderr, err)
+	}
+	if err := printLines(stdout, stderr, "cluster list: none", listing.Clusters); err != nil {
+		return fail(stderr, err)
+	}
+	var clusters []struct {
+		Name         string `json:"name"`
+		Connected    bool   `json:"connected"`
+		AgentVersion string `json:"agent_version"`
+		VersionSkew  bool   `json:"version_skew"`
+		LastError    string `json:"last_error"`
+	}
+	if err := json.Unmarshal(listing.Clusters, &clusters); err != nil {
+		return fail(stderr, fmt.Errorf("response is not a list of clusters: %w", err))
+	}
+	for _, cluster := range clusters {
+		if cluster.VersionSkew {
+			fmt.Fprintf(stderr, "hl: warning: cluster %s runs agent version %s, not the platform's: run its attach command again (hl cluster add %s) to upgrade it\n",
+				cluster.Name, cluster.AgentVersion, cluster.Name)
+		}
+		if !cluster.Connected && cluster.LastError != "" {
+			fmt.Fprintf(stderr, "hl: warning: cluster %s is not connected, and its agent was last refused with: %s\n", cluster.Name, cluster.LastError)
+		}
+	}
+	return 0
 }
 
 // parseNone parses the flags of a command that takes no operand.

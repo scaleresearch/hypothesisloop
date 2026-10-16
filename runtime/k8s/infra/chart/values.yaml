@@ -8,7 +8,8 @@
 # Name this cluster was registered under.
 clusterName: ""
 # Control-plane API base URL. Handed to training pods as well, so it must be reachable from inside
-# a pod in this cluster.
+# a pod in this cluster. Pods resolve names with the cluster's DNS, which does not know tailnet
+# (MagicDNS) names: a control plane on a tailnet is named by its IP, here and in metricsURL.
 apiURL: ""
 # This cluster's runtime token, given when the cluster was registered for its org. The chart keeps
 # it in the Secret hypothesisloop-runtime-token. A token for another name, or for a name nobody
@@ -74,5 +75,24 @@ images:
   # Registry the agents' images are pulled from, as every node in this cluster reaches it
   # (host[:port][/path]). It holds hypothesisloop-cluster-agent and hypothesisloop-node-agent.
   registry: ""
-  # Tag of those images. The control plane names the one it runs with.
+  # Tag of those images. The control plane names the one it runs with. The cluster-agent reports
+  # it, and the control plane shows a cluster whose tag differs from its own.
   tag: ""
+
+# For a registry that serves plain HTTP with no TLS, such as the local development registry: true
+# runs a DaemonSet that writes a containerd hosts.toml for images.registry on every node, so the
+# agents' and the jobs' images are pulled from it over HTTP. Off by default: a registry of TLS
+# needs none of it. The command `hl cluster add` prints sets it when the control plane's registry
+# is one of plain HTTP (runtimes.registry_plain_http).
+insecureRegistry:
+  enabled: false
+  # containerd's registry hosts directory on the nodes (its registry config_path). k3s and RKE2:
+  # /var/lib/rancher/k3s/agent/etc/containerd/certs.d (RKE2: /var/lib/rancher/rke2/...). Plain
+  # containerd: /etc/containerd/certs.d, with config_path set to it in its config.toml.
+  hostsDir: /var/lib/rancher/k3s/agent/etc/containerd/certs.d
+  # The image that writes the file, pulled from its own registry.
+  image: docker.io/library/busybox:1.37.0
+
+# The kube context the install was run against. Only the notes read it, to print kubectl commands
+# that reach this cluster from where helm ran. install.sh sets it.
+kubeContext: ""

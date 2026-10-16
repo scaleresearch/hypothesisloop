@@ -365,6 +365,7 @@ var routes = []route{
 	// ---- runtimes and launchers ----
 	{method: "GET", path: "/internal/clusters", rule: staffOnly},
 	{method: "POST", path: "/internal/clusters/{name}/reconcile", request: "/internal/clusters/<cluster>/reconcile", body: capacity1, rule: ofCluster(reached)},
+	{method: "GET", path: "/internal/clusters/{name}/access", request: "/internal/clusters/<cluster>/access", rule: ofCluster(http.StatusNoContent)},
 	{method: "DELETE", path: "/internal/clusters/{name}", request: "/internal/clusters/<cluster>", rule: ofCluster(reached)},
 	{method: "POST", path: "/internal/clusters/{name}/status", request: "/internal/clusters/<cluster>/status", body: `{"reports":[]}`, rule: ofCluster(reached)},
 	{method: "POST", path: "/internal/clusters/{name}/builds/{key}/credential", request: "/internal/clusters/<cluster>/builds/key-1/credential", body: `{"attempt":1}`, rule: ofCluster(reached)},

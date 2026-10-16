@@ -90,7 +90,13 @@ func TestAJobTheRuntimeDidNotCreateIsReportedWithItsReason(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if n := len(logged.lines); n != 2 {
+	refusedLines := 0
+	for _, line := range logged.lines {
+		if strings.HasPrefix(line, "create workload ") {
+			refusedLines++
+		}
+	}
+	if refusedLines != 2 {
 		t.Fatalf("logged %q over three passes, want each refused create once", logged.lines)
 	}
 	agent.reportStatuses(ctx, exec)

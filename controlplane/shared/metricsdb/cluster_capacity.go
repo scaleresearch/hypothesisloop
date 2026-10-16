@@ -40,6 +40,9 @@ type ClusterCapacitySnapshot struct {
 	// join a display name to the identity everything else keys on. Empty on runtimes that have not
 	// been upgraded to send it yet — callers must not assume presence.
 	ClusterID string
+	// AgentVersion is what the cluster's agent says it runs (clusterapi.AgentVersionHeader), a label
+	// on the heartbeat beside ClusterID. Empty from an agent that says nothing.
+	AgentVersion string
 	// MultiNodeCapable is the cluster's own report of whether its runtime can execute a job
 	// spanning more than one node. A capability, not a capacity, but reported and read on the
 	// same snapshot for the same reason: it is a live fact about the cluster that goes stale the
@@ -56,7 +59,7 @@ type ClusterCapacitySnapshot struct {
 
 func RecordClusterCapacitySnapshot(ctx context.Context, dbURL string, snapshot ClusterCapacitySnapshot) error {
 	labels := map[string]string{"cluster_name": snapshot.ClusterName}
-	heartbeatLabels := map[string]string{"cluster_name": snapshot.ClusterName, "cluster_id": snapshot.ClusterID}
+	heartbeatLabels := map[string]string{"cluster_name": snapshot.ClusterName, "cluster_id": snapshot.ClusterID, "agent_version": snapshot.AgentVersion}
 	samples := []GaugeSample{
 		{MetricName: clusterCPUAvailableMetric, Labels: labels, Value: snapshot.CPUAvailable, At: snapshot.At},
 		{MetricName: clusterCPUTotalMetric, Labels: labels, Value: snapshot.CPUTotal, At: snapshot.At},
@@ -184,6 +187,44 @@ func LiveClusterIDs(ctx context.Context, dbURL string, window time.Duration) (ma
 			continue
 		}
 		out[cluster] = clusterID
+	}
+	return out, nil
+}
+
+// ClusterContact is a cluster's last reconcile exchange: when it was and the version its agent
+// said it runs, empty from an agent that said none.
+type ClusterContact struct {
+	At           time.Time
+	AgentVersion string
+}
+
+// ClusterLastContacts returns each cluster's last contact within lookback, which is much longer
+// than the freshness window that decides connected: a cluster silent for days is shown with when
+// it was last heard from. A cluster absent from the map was not heard from within lookback.
+func ClusterLastContacts(ctx context.Context, dbURL string, lookback time.Duration) (map[string]ClusterContact, error) {
+	if lookback <= 0 {
+		return nil, fmt.Errorf("metricsdb.ClusterLastContacts: lookback must be positive")
+	}
+	seconds := int64(math.Ceil(lookback.Seconds()))
+	query := fmt.Sprintf(
+		`WITH latest_heartbeat AS (`+
+			`SELECT cluster_name, MAX(greptime_timestamp) AS snapshot_at FROM %s `+
+			`WHERE greptime_timestamp >= NOW() - INTERVAL '%d seconds' GROUP BY cluster_name`+
+			`) SELECT metric.* FROM %s metric JOIN latest_heartbeat heartbeat `+
+			`ON metric.cluster_name = heartbeat.cluster_name AND metric.greptime_timestamp = heartbeat.snapshot_at`,
+		clusterHeartbeatMetric, seconds, clusterHeartbeatMetric,
+	)
+	samples, err := runClusterSnapshotQuery(ctx, dbURL, query)
+	if err != nil {
+		return nil, fmt.Errorf("metricsdb.ClusterLastContacts: %w", err)
+	}
+	out := make(map[string]ClusterContact, len(samples))
+	for _, sample := range samples {
+		cluster := sample.Labels["cluster_name"]
+		if cluster == "" {
+			continue
+		}
+		out[cluster] = ClusterContact{At: sample.At, AgentVersion: sample.Labels["agent_version"]}
 	}
 	return out, nil
 }

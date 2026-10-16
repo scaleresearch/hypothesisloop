@@ -678,6 +678,14 @@ export interface OrgCluster extends ClusterSettings {
   connected: boolean
   // The connected agent reports an autoscaler that adds nodes for waiting jobs.
   autoscaler_enabled: boolean
+  // When the cluster's agent was last heard from, within the last 30 days.
+  last_contact_at?: string
+  // Of a cluster the org registered: the image tag its agent runs, whether that is not the
+  // platform's own, and what the platform last refused its agent with, until it accepts one.
+  agent_version?: string
+  version_skew?: boolean
+  last_error?: string
+  last_error_at?: string
 }
 
 export type ClusterKind = 'kubernetes' | 'bare_metal'
