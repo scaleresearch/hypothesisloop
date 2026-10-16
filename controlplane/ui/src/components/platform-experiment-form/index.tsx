@@ -147,7 +147,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
   const settled = useRef(false)
   const keepOnUnmount = useRef<() => void>(() => undefined)
   keepOnUnmount.current = () => {
-    if (!isEdit && unsaved && !settled.current) void keepDraft(step, failure).catch(() => undefined)
+    if (!isEdit && unsaved && !settled.current) void keepDraft(step, failure)
   }
   useEffect(() => () => keepOnUnmount.current(), [])
   useEffect(() => {
