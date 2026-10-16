@@ -148,15 +148,9 @@ type buildFailed struct{ log string }
 
 func (e *buildFailed) Error() string { return "the build failed" }
 
-// pushRetries are the waits before each push of a build again after its push failed with its
-// image already in its node, where a job may run it. The daemon's cache holds the build, so each
-// is a push alone.
-var pushRetries = []time.Duration{15 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute}
-
 // build builds the file on a context holding only the file and pushes the result by digest,
 // with no tag, which it returns. A *buildFailed is an instruction of the file failing; any other
-// error is the platform's. A push that fails once the image is loaded into its node is tried
-// again (pushRetries): a job there may already run it.
+// error is the platform's.
 func (d *Daemon) build(ctx context.Context, attachables []session.Attachable, b clusterapi.EnvironmentBuild, steps *steps, onLoaded Loaded) (string, error) {
 	if b.CacheScope == "" {
 		return "", errors.New("build: the build names no cache scope")
@@ -221,11 +215,7 @@ func (d *Daemon) build(ctx context.Context, attachables []session.Attachable, b 
 		if ctx.Err() == nil && fileFault(err) {
 			return "", &buildFailed{log: lastBytes(log.String()+"\n"+err.Error(), clusterapi.MaxEnvironmentLogBytes)}
 		}
-		if load == nil || loadErr != nil || loaded == "" || ctx.Err() != nil {
-			return "", fmt.Errorf("build: %w", err)
-		}
-		opt.Exports = []client.ExportEntry{push}
-		return d.pushAgain(ctx, opt, steps, err)
+		return "", fmt.Errorf("build: %w", err)
 	}
 	digest := resp.ExporterResponse[exptypes.ExporterImageDigestKey]
 	if digest == "" {
@@ -244,28 +234,6 @@ func (d *Daemon) build(ctx context.Context, attachables []session.Attachable, b 
 		}
 	}
 	return digest, nil
-}
-
-// pushAgain solves opt, which pushes and loads nothing, after each wait of pushRetries until one
-// push names its digest, and returns the last error when none does.
-func (d *Daemon) pushAgain(ctx context.Context, opt client.SolveOpt, steps *steps, failed error) (string, error) {
-	for i, wait := range pushRetries {
-		steps.progress("pushing: %v; the image is in its node, pushing again in %s (%d of %d)", failed, wait, i+1, len(pushRetries))
-		select {
-		case <-ctx.Done():
-			return "", fmt.Errorf("build: %w", failed)
-		case <-time.After(wait):
-		}
-		resp, err := d.solve(ctx, nil, opt, steps.follow)
-		if err == nil {
-			if digest := resp.ExporterResponse[exptypes.ExporterImageDigestKey]; digest != "" {
-				return digest, nil
-			}
-			err = errors.New("the daemon pushed and named no digest")
-		}
-		failed = err
-	}
-	return "", fmt.Errorf("build: pushed %d more times: %w", len(pushRetries), failed)
 }
 
 // loadGrace is how long a build that has pushed waits for its load to finish. The load is the

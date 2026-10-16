@@ -428,44 +428,6 @@ func TestALoadThatFailedOrIntoNoNamedNodeTellsNothing(t *testing.T) {
 	}
 }
 
-// A push that fails once the image is in its node is pushed again, alone, so a job already running
-// it there is not failed for a registry that went away a moment. One that fails every time is the
-// platform's fault.
-func TestAPushThatFailsOnceTheImageIsInItsNodeIsTriedAgain(t *testing.T) {
-	waits := pushRetries
-	pushRetries = []time.Duration{0, 0}
-	t.Cleanup(func() { pushRetries = waits })
-	image := bytes.Repeat([]byte("layer"), 1<<10)
-	for name, c := range map[string]struct {
-		pushes  []error
-		outcome clusterapi.EnvironmentBuildOutcomeKind
-		solves  int
-	}{
-		"pushed the second time": {[]error{errors.New("failed to push: 503"), nil}, clusterapi.EnvironmentBuildPushed, 2},
-		"never pushed":           {[]error{errors.New("failed to push: 503"), errors.New("failed to push: 503"), errors.New("failed to push: broken pipe")}, clusterapi.EnvironmentBuildPlatformFault, 3},
-	} {
-		daemon := &fakeDaemon{digest: "sha256:abc", image: image, pushes: c.pushes}
-		d := &Daemon{solver: daemon}
-		d.LoadInto(&fakeLoader{read: len(image), digest: "sha256:abc"}, "node-1")
-		told := 0
-		got := d.Run(context.Background(), clusterapi.EnvironmentBuild{Base: "registry.test/hl/job:1", Repository: "registry.test/envs/env", CacheScope: "hl-test"}, nil, nil, ignoreProgress, func(string, string) { told++ })
-		if got.Outcome != c.outcome || len(daemon.builds) != c.solves || told != 1 {
-			t.Errorf("%s: %+v after %d solves, told %d times, want %s after %d, told once", name, got, len(daemon.builds), told, c.outcome, c.solves)
-		}
-		if c.outcome == clusterapi.EnvironmentBuildPushed && got.Digest != "sha256:abc" {
-			t.Errorf("%s: digest %q", name, got.Digest)
-		}
-		if c.outcome == clusterapi.EnvironmentBuildPlatformFault && !strings.Contains(got.LogTail, "broken pipe") {
-			t.Errorf("%s: log %q, want the last push's error", name, got.LogTail)
-		}
-		for _, again := range daemon.builds[1:] {
-			if len(again.Exports) != 1 || again.Exports[0].Type != client.ExporterImage || again.Exports[0].Attrs["push"] != "true" {
-				t.Errorf("%s: pushed again with exports %+v, want the push alone", name, again.Exports)
-			}
-		}
-	}
-}
-
 func TestAPushThatFailsBeforeTheImageIsInItsNodeIsNotTriedAgain(t *testing.T) {
 	image := bytes.Repeat([]byte("layer"), 1<<10)
 	daemon := &fakeDaemon{digest: "sha256:abc", image: image, pushes: []error{errors.New("failed to push: 503"), nil}}
