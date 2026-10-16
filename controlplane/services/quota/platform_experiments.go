@@ -93,9 +93,8 @@ type PlatformExperimentsStore interface {
 	// or the agent was already signed up. A researcher past max_agents is db.ErrMaxAgentsReached,
 	// decided inside the insert's own transaction.
 	Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) (bool, error)
-	// LauncherAnsweredAt is when each launcher named last checked in, nil for never, and absent
-	// for a name no launcher is registered under.
-	LauncherAnsweredAt(ctx context.Context, names []string) (map[string]*time.Time, error)
+	// LauncherContacts is each launcher named's last check-in, absent for one not registered.
+	LauncherContacts(ctx context.Context, names []string) (map[string]db.LauncherContact, error)
 	// SetProposal stores a draft's proposal with what p says of it: until when it waits, when the
 	// platform accepts it by itself, how long its planner's machine is kept for a revision and
 	// the baseline agent it signs up; db.ErrNotDraft for anything but a draft.

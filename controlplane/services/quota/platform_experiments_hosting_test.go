@@ -18,6 +18,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -30,11 +31,11 @@ type hostingStore struct {
 	unregistered bool
 }
 
-func (s *hostingStore) LauncherAnsweredAt(ctx context.Context, names []string) (map[string]*time.Time, error) {
+func (s *hostingStore) LauncherContacts(ctx context.Context, names []string) (map[string]db.LauncherContact, error) {
 	if s.unregistered {
-		return map[string]*time.Time{}, nil
+		return map[string]db.LauncherContact{}, nil
 	}
-	return s.createdStore.LauncherAnsweredAt(ctx, names)
+	return s.createdStore.LauncherContacts(ctx, names)
 }
 
 func (s *hostingStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error {

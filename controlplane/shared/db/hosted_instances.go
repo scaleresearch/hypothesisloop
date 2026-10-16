@@ -299,31 +299,39 @@ func (s *PlatformExperimentsStore) RegisterLauncher(ctx context.Context, name st
 	return nil
 }
 
-// SetLauncherHolds records that a launcher was answered, now, and whether it holds machines after
-// that question: holds is true when it listed any, or its answer asks for any.
-func (s *PlatformExperimentsStore) SetLauncherHolds(ctx context.Context, name string, holds bool) error {
-	if _, err := s.pool.pool.Exec(ctx, `UPDATE launchers SET holds_machines = $2, answered_at = now() WHERE name = $1`, name, holds); err != nil {
+// SetLauncherHolds records that a launcher was answered, now, the version it said it runs, and
+// whether it holds machines after that question: holds is true when it listed any, or its answer
+// asks for any.
+func (s *PlatformExperimentsStore) SetLauncherHolds(ctx context.Context, name string, holds bool, agentVersion string) error {
+	if _, err := s.pool.pool.Exec(ctx, `UPDATE launchers SET holds_machines = $2, answered_at = now(), agent_version = $3 WHERE name = $1`, name, holds, agentVersion); err != nil {
 		return fmt.Errorf("platform_experiments_store.SetLauncherHolds: %w", err)
 	}
 	return nil
 }
 
-// LauncherAnsweredAt is when each launcher named was last answered: nil for one never answered,
-// and absent for a name no launcher is registered under.
-func (s *PlatformExperimentsStore) LauncherAnsweredAt(ctx context.Context, names []string) (map[string]*time.Time, error) {
-	rows, err := s.pool.pool.Query(ctx, `SELECT name, answered_at FROM launchers WHERE name = ANY($1)`, names)
+// LauncherContact is a launcher's last answered question: when, nil for one never answered, and
+// the version its agent said it runs then, empty from one that said none.
+type LauncherContact struct {
+	At           *time.Time
+	AgentVersion string
+}
+
+// LauncherContacts is each launcher named's last contact, absent for a name no launcher is
+// registered under.
+func (s *PlatformExperimentsStore) LauncherContacts(ctx context.Context, names []string) (map[string]LauncherContact, error) {
+	rows, err := s.pool.pool.Query(ctx, `SELECT name, answered_at, agent_version FROM launchers WHERE name = ANY($1)`, names)
 	if err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.LauncherAnsweredAt: %w", err)
+		return nil, fmt.Errorf("platform_experiments_store.LauncherContacts: %w", err)
 	}
 	defer rows.Close()
-	out := map[string]*time.Time{}
+	out := map[string]LauncherContact{}
 	for rows.Next() {
 		var name string
-		var at *time.Time
-		if err := rows.Scan(&name, &at); err != nil {
-			return nil, fmt.Errorf("platform_experiments_store.LauncherAnsweredAt: %w", err)
+		var contact LauncherContact
+		if err := rows.Scan(&name, &contact.At, &contact.AgentVersion); err != nil {
+			return nil, fmt.Errorf("platform_experiments_store.LauncherContacts: %w", err)
 		}
-		out[name] = at
+		out[name] = contact
 	}
 	return out, rows.Err()
 }

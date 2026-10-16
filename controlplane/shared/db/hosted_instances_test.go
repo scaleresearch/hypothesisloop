@@ -434,17 +434,17 @@ func TestALaunchersTokenFollowsItsRow(t *testing.T) {
 	setPEStatus(t, pool, pe, domain.PlatformExpClosed, domain.AgentWindDown/2)
 	refused("inside the wind-down of its last platform experiment", pe)
 	setPEStatus(t, pool, pe, domain.PlatformExpClosed, domain.AgentWindDown+time.Minute)
-	if answered, err := pes.LauncherAnsweredAt(ctx, []string{name}); err != nil || answered[name] != nil {
+	if answered, err := pes.LauncherContacts(ctx, []string{name}); err != nil || answered[name].At != nil {
 		t.Fatalf("a launcher never answered: got = %v, %v, want no moment", answered, err)
 	}
-	if err := pes.SetLauncherHolds(ctx, name, true); err != nil {
+	if err := pes.SetLauncherHolds(ctx, name, true, ""); err != nil {
 		t.Fatal(err)
 	}
-	if answered, err := pes.LauncherAnsweredAt(ctx, []string{name}); err != nil || answered[name] == nil || time.Since(*answered[name]) > time.Minute {
+	if answered, err := pes.LauncherContacts(ctx, []string{name}); err != nil || answered[name].At == nil || time.Since(*answered[name].At) > time.Minute {
 		t.Fatalf("a launcher just answered: got = %v, %v, want now", answered, err)
 	}
 	refused("while its last question listed machines")
-	if err := pes.SetLauncherHolds(ctx, name, false); err != nil {
+	if err := pes.SetLauncherHolds(ctx, name, false, ""); err != nil {
 		t.Fatal(err)
 	}
 	if removed, err := pes.RemoveLauncher(ctx, name); err != nil || !removed || known() {

@@ -623,11 +623,11 @@ type draftStore struct {
 	acceptedSignups []domain.AgentSignup
 }
 
-func (s *draftStore) LauncherAnsweredAt(ctx context.Context, names []string) (map[string]*time.Time, error) {
+func (s *draftStore) LauncherContacts(ctx context.Context, names []string) (map[string]db.LauncherContact, error) {
 	if s.unregistered {
-		return map[string]*time.Time{}, nil
+		return map[string]db.LauncherContact{}, nil
 	}
-	return s.statusStore.LauncherAnsweredAt(ctx, names)
+	return s.statusStore.LauncherContacts(ctx, names)
 }
 
 func (s *draftStore) CreateDraft(_ context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup) error {

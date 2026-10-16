@@ -43,7 +43,7 @@ func TestARefusedReconcileIsKeptAsTheClustersLastErrorUntilOneIsAccepted(t *test
 // anything is recorded.
 func TestAnAgentVersionNoTagCouldBeIsRefused(t *testing.T) {
 	w := newReconcileWorld(t, "of-a")
-	for _, version := range []string{strings.Repeat("v", maxAgentVersionLength+1), "abc\n1234"} {
+	for _, version := range []string{strings.Repeat("v", 129), "abc\n1234"} {
 		body, err := json.Marshal(idleReport("id-of-a"))
 		if err != nil {
 			t.Fatal(err)

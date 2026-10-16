@@ -10,6 +10,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -64,9 +65,10 @@ func readableDuration(d time.Duration) string {
 	return count(math.Round(d.Hours()/24), "day")
 }
 
-// launcherSilence is the status_reason of what waits for the launcher name, which last checked in
-// at (nil for never), at now: nil while it checks in. Staff are told what to check.
-func launcherSilence(name string, at *time.Time, now time.Time, staff bool) *domain.StatusReason {
+// launcherSilence is the status_reason of what waits for the launcher name, whose last check-in is
+// contact, at now: nil while it checks in. Staff are told what to check.
+func launcherSilence(name string, contact db.LauncherContact, now time.Time, staff bool) *domain.StatusReason {
+	at := contact.At
 	why := &domain.StatusReason{Reason: reasonLauncherUnreachable, Since: at}
 	var silence string
 	switch {
@@ -85,6 +87,9 @@ func launcherSilence(name string, at *time.Time, now time.Time, staff bool) *dom
 	why.Message += ", so none of its machines starts or is watched until it checks in again. Deadlines keep running, and only the platform's operator brings the launcher (agent-launcher) back"
 	if staff {
 		why.OperatorDetail = fmt.Sprintf("The agent-launcher registered as %q %s. Start it or check its logs (on a dev stack: make dev-hosted).", name, silence)
+		if contact.AgentVersion != "" {
+			why.OperatorDetail += " At its last check-in it ran version " + contact.AgentVersion + "."
+		}
 	}
 	return why
 }
@@ -96,12 +101,12 @@ func (s *PlatformExperimentsService) silentLaunchers(ctx context.Context, names 
 	if len(names) == 0 {
 		return silent, nil
 	}
-	answered, err := s.store.LauncherAnsweredAt(ctx, names)
+	contacts, err := s.store.LauncherContacts(ctx, names)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.silentLaunchers: %w", err)
 	}
 	for _, name := range names {
-		if why := launcherSilence(name, answered[name], now, staff); why != nil {
+		if why := launcherSilence(name, contacts[name], now, staff); why != nil {
 			silent[name] = why
 		}
 	}
@@ -145,11 +150,11 @@ type Hosting struct {
 // machines to: it is registered and checked in within launcherSilentAfter. Staff are told what
 // to check.
 func (s *PlatformExperimentsService) hosting(ctx context.Context, launcher string, staff bool) (Hosting, error) {
-	answered, err := s.store.LauncherAnsweredAt(ctx, []string{launcher})
+	contacts, err := s.store.LauncherContacts(ctx, []string{launcher})
 	if err != nil {
 		return Hosting{}, fmt.Errorf("platform_experiments.hosting: %w", err)
 	}
-	at, registered := answered[launcher]
+	contact, registered := contacts[launcher]
 	if !registered {
 		why := &domain.StatusReason{
 			Reason:  reasonLauncherNotRegistered,
@@ -161,16 +166,12 @@ func (s *PlatformExperimentsService) hosting(ctx context.Context, launcher strin
 		}
 		return Hosting{Unavailable: why}, nil
 	}
-	why := launcherSilence(launcher, at, time.Now(), staff)
+	why := launcherSilence(launcher, contact, time.Now(), staff)
 	if why == nil {
 		return Hosting{Available: true}, nil
 	}
 	why.Message = "nothing can be hosted now: " + why.Message
-	if at == nil {
-		why.Summary = "Hosted agents aren't available right now. They become available automatically."
-	} else {
-		why.Summary = "Hosted agents aren't available right now. They become available automatically."
-	}
+	why.Summary = "Hosted agents aren't available right now. They become available automatically."
 	return Hosting{Unavailable: why}, nil
 }
 

@@ -31,13 +31,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/opencontainers/go-digest"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
@@ -287,8 +287,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	}, err error) {
 		clusterName := in.Name
 		defer func() { h.recordContact(ctx, clusterName, err) }()
-		if len(in.AgentVersion) > maxAgentVersionLength || strings.ContainsFunc(in.AgentVersion, unicode.IsControl) {
-			return nil, huma.Error400BadRequest(clusterapi.AgentVersionHeader + " is longer than " + strconv.Itoa(maxAgentVersionLength) + " characters or holds a control character")
+		if err := api.CheckAgentVersion(in.AgentVersion); err != nil {
+			return nil, huma.Error400BadRequest(err.Error())
 		}
 
 		report := in.Body
@@ -809,9 +809,6 @@ type reconcileInput struct {
 // maxReconcileBytes bounds one capacity report. Its size grows with nodes times the labels each
 // carries: a thousand nodes with a hundred labels apiece is about 10 MiB.
 const maxReconcileBytes = 32 << 20
-
-// maxAgentVersionLength bounds the version an agent says it runs, an image tag.
-const maxAgentVersionLength = 128
 
 // recordContact keeps what a reconcile of the cluster was refused with, or clears it once one is
 // accepted. A failure of the platform's own is not the cluster's to fix, and an unregistered

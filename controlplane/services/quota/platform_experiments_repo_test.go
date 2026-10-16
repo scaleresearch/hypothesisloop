@@ -221,13 +221,13 @@ func (s *createdStore) FailRepository(_ context.Context, id, answer string) erro
 	return nil
 }
 
-func (s *createdStore) LauncherAnsweredAt(_ context.Context, names []string) (map[string]*time.Time, error) {
+func (s *createdStore) LauncherContacts(_ context.Context, names []string) (map[string]db.LauncherContact, error) {
 	now := time.Now()
-	out := map[string]*time.Time{}
+	out := map[string]db.LauncherContact{}
 	for _, name := range names {
-		out[name] = &now
+		out[name] = db.LauncherContact{At: &now}
 		if at, ok := s.answered[name]; ok {
-			out[name] = at
+			out[name] = db.LauncherContact{At: at}
 		}
 	}
 	return out, nil

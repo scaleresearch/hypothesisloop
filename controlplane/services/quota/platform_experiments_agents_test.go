@@ -124,15 +124,15 @@ func (f *rosterStore) Create(context.Context, string, string, string, string, ma
 
 func (f *rosterStore) CreatesOn(context.Context, string, string) (string, error) { return "", nil }
 
-// LauncherAnsweredAt answers every launcher as checking in now, and none while unregistered.
-func (f *rosterStore) LauncherAnsweredAt(_ context.Context, names []string) (map[string]*time.Time, error) {
+// LauncherContacts answers every launcher as checking in now, and none while unregistered.
+func (f *rosterStore) LauncherContacts(_ context.Context, names []string) (map[string]db.LauncherContact, error) {
 	now := time.Now()
-	out := map[string]*time.Time{}
+	out := map[string]db.LauncherContact{}
 	for _, name := range names {
 		if f.unregistered {
 			break
 		}
-		out[name] = &now
+		out[name] = db.LauncherContact{At: &now}
 	}
 	return out, nil
 }

@@ -233,7 +233,7 @@ func (noLauncherAgents) EndInstance(context.Context, string, string, string, db.
 	panic("the launcher handler reached its store")
 }
 
-func (noLauncherAgents) SetLauncherHolds(context.Context, string, bool) error {
+func (noLauncherAgents) SetLauncherHolds(context.Context, string, bool, string) error {
 	panic("the launcher handler reached its store")
 }
 

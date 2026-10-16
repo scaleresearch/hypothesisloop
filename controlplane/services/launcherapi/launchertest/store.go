@@ -274,7 +274,7 @@ func (s *Store) ListLauncherMachines(_ context.Context, launcher string) ([]db.L
 	return held, nil
 }
 
-func (s *Store) SetLauncherHolds(_ context.Context, launcher string, holds bool) error {
+func (s *Store) SetLauncherHolds(_ context.Context, launcher string, holds bool, _ string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.Holds == nil {

@@ -15,6 +15,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
@@ -30,7 +31,7 @@ type Store interface {
 	AskInstance(ctx context.Context, platformExpID, agentID, name, launch string) error
 	ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity, machine string) error
 	EndInstance(ctx context.Context, platformExpID, agentID, name string, how db.InstanceEnd, exitLog string, limit time.Duration, maxRestarts int) (after domain.AgentInstance, recorded bool, err error)
-	SetLauncherHolds(ctx context.Context, launcher string, holds bool) error
+	SetLauncherHolds(ctx context.Context, launcher string, holds bool, agentVersion string) error
 	ListLauncherMachines(ctx context.Context, launcher string) ([]db.LauncherMachine, error)
 }
 
@@ -144,7 +145,7 @@ func (h *Handler) imageOf(agentImage string) string {
 //
 // With a refusal everything is recorded and evaluated the same and no new machine is asked for:
 // the answer carries the refusal beside the machines to keep and the ones that end.
-func (h *Handler) reconcile(ctx context.Context, launcher string, observed Observed, refusal *Refusal) (*Desired, error) {
+func (h *Handler) reconcile(ctx context.Context, launcher string, agentVersion string, observed Observed, refusal *Refusal) (*Desired, error) {
 	// A machine this answer no longer names is taken down by the launcher: that is written
 	// down first, as the platform's own doing, so no later answer reads it as lost.
 	if err := h.store.ReleaseInstances(ctx, launcher, domain.AgentWindDown, domain.CoordinatorWindDown); err != nil {
@@ -283,7 +284,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 	}
 	// Written before the answer leaves: a launcher is removed only once a question of it listed
 	// no machine and was answered with none, and an answer it never got asked for nothing.
-	if err := h.store.SetLauncherHolds(ctx, launcher, len(observed.Instances) > 0 || len(out.Instances) > 0); err != nil {
+	if err := h.store.SetLauncherHolds(ctx, launcher, len(observed.Instances) > 0 || len(out.Instances) > 0, agentVersion); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -544,8 +545,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "Every machine the platform holds for the launcher, an agent's or a coordinator's: the name it is asked for under and the provider's id the launcher last reported it by. It changes nothing. " +
 			"The platform gives up on a machine it saw that the launcher no longer reports, so a launcher whose provider's list leaves one of these out reads it by its id before it reports, and leaves it out only when the provider says it is gone.",
 	}, func(ctx context.Context, in *struct {
-		Name string `path:"name"`
+		Name         string `path:"name"`
+		AgentVersion string `header:"X-Hypothesisloop-Agent-Version"`
 	}) (*struct{ Body *Held }, error) {
+		if err := api.CheckAgentVersion(in.AgentVersion); err != nil {
+			return nil, huma.Error400BadRequest(err.Error())
+		}
 		machines, err := h.store.ListLauncherMachines(ctx, in.Name)
 		if err != nil {
 			return nil, auth.Internal(h.logger, "list launcher machines failed", err, zap.String("launcher", in.Name))
@@ -572,13 +577,17 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"the answer either asks for the agent under a new name or no longer names it. The answer is a list and carries no rule; ask again for the next one. " +
 			"A launcher whose pass can outlast the platform's boot limit or progress limit is answered 200 with refusal {reason: pass_does_not_fit, message}: the two lists stand and are acted on, so instances whose run is over are still stopped and destroyed, no instance that does not exist yet is asked for, and the launcher creates none until an answer carries no refusal.",
 	}, func(ctx context.Context, in *struct {
-		Name string `path:"name"`
-		Body Observed
+		Name         string `path:"name"`
+		AgentVersion string `header:"X-Hypothesisloop-Agent-Version"`
+		Body         Observed
 	}) (*struct{ Body *Desired }, error) {
+		if err := api.CheckAgentVersion(in.AgentVersion); err != nil {
+			return nil, huma.Error400BadRequest(err.Error())
+		}
 		if err := validateObserved(in.Body); err != nil {
 			return nil, huma.Error400BadRequest(err.Error())
 		}
-		desired, err := h.reconcile(ctx, in.Name, in.Body, h.fits(in.Body))
+		desired, err := h.reconcile(ctx, in.Name, in.AgentVersion, in.Body, h.fits(in.Body))
 		if err != nil {
 			// Never the answer itself: it holds every agent's token.
 			return nil, auth.Internal(h.logger, "launcher reconcile failed", err, zap.String("launcher", in.Name))
