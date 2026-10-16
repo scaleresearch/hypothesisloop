@@ -53,10 +53,14 @@ VALUES ($1, $2, $3, $4, $5)`, planner.ID, planner.Name, planner.OrgID, planner.P
 	if signup.Actor != nil {
 		addedBy = *signup.Actor
 	}
+	agentType, version, err := agentTypePinTx(ctx, tx, pe.ID, signup.Flavor, domain.RoleOfSignup(signup.Role))
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.CreateDraft: %w", err)
+	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, flavor, hyperparameters, model, added_by_kind, added_by_id)
-VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9, $10, $11)`, pe.ID, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
-		signup.Hosted, signup.Launcher, signup.Flavor, hyperparameters, signup.Model, string(addedBy.Kind), addedBy.ID); err != nil {
+INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, flavor, agent_type_version, hyperparameters, model, added_by_kind, added_by_id)
+VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $12, $8, $9, $10, $11)`, pe.ID, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
+		signup.Hosted, signup.Launcher, agentType, hyperparameters, signup.Model, string(addedBy.Kind), addedBy.ID, version); err != nil {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: sign the planner up: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -191,10 +195,14 @@ VALUES ($1, $2, $3, $4, $5)`, agent.ID, agent.Name, agent.OrgID, agent.Performan
 	if signup.Actor != nil {
 		addedBy = *signup.Actor
 	}
+	agentType, version, err := agentTypePinTx(ctx, tx, id, signup.Flavor, domain.RoleOfSignup(signup.Role))
+	if err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, flavor, hyperparameters, model, added_by_kind, added_by_id)
-VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9, $10, $11)`, id, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
-		signup.Hosted, signup.Launcher, signup.Flavor, hyperparameters, signup.Model, string(addedBy.Kind), addedBy.ID); err != nil {
+INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, flavor, agent_type_version, hyperparameters, model, added_by_kind, added_by_id)
+VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $12, $8, $9, $10, $11)`, id, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
+		signup.Hosted, signup.Launcher, agentType, hyperparameters, signup.Model, string(addedBy.Kind), addedBy.ID, version); err != nil {
 		return fmt.Errorf("sign the baseline agent up: %w", err)
 	}
 	return nil

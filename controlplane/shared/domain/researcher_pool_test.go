@@ -52,15 +52,16 @@ func TestAPoolIsCheckedAndResolved(t *testing.T) {
 		"within max_agents":        {ResearcherPool{{Count: 2}, {AgentType: "data-search", Count: 1}}, true},
 		"above max_agents":         {ResearcherPool{{Count: 4}}, false},
 		"an unknown agent type":    {ResearcherPool{{AgentType: "poet", Count: 1}}, false},
+		"a type of another role":   {ResearcherPool{{AgentType: "baseline", Count: 1}}, false},
 		"a count of none":          {ResearcherPool{{Count: 0}}, false},
 		"one agent type twice":     {ResearcherPool{{Count: 1}, {AgentType: "generalist", Count: 1}}, false},
 		"a model no agent can run": {ResearcherPool{{Model: "two words", Count: 1}}, false},
 	} {
-		if err := c.pool.Check(3); (err == nil) != c.ok {
+		if err := c.pool.Check(3, testCatalog()); (err == nil) != c.ok {
 			t.Errorf("%s: got = %v, want ok %v", name, err, c.ok)
 		}
 	}
-	resolved, err := ResearcherPool{{Count: 1}, {AgentType: "generalist", Model: "default", Count: 2}}.Resolved("default")
+	resolved, err := ResearcherPool{{Count: 1}, {AgentType: "generalist", Model: "default", Count: 2}}.Resolved(testCatalog(), "default")
 	if err != nil || len(resolved) != 1 || resolved[0].Key() != (PoolKey{AgentType: "generalist", Model: "default"}) || resolved[0].Count != 3 {
 		t.Errorf("resolved = %+v %v, want one entry of three generalists on the default", resolved, err)
 	}

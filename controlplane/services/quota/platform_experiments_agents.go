@@ -198,26 +198,30 @@ func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID
 	if !domain.ValidQuotaTierOverride(req.QuotaTier) {
 		return nil, refuseSignup(400, "invalid_request", "quota_tier must be \"guaranteed\", \"burst_only\", or omitted, got %s", req.QuotaTier)
 	}
-	flavor, model, err := domain.ResolveAgentLaunch(req.Flavor, req.Model, launch.DefaultModel, req.Hyperparameters)
-	if err != nil {
-		return nil, refuseSignup(400, "invalid_request", "%s", err)
-	}
-	signup := domain.AgentSignup{
-		AgentID: req.AgentID, Role: role, QuotaTier: domain.QuotaTier(req.QuotaTier),
-		Hosted: req.Hosted, Flavor: flavor, Hyperparameters: req.Hyperparameters, Model: model, Actor: &by,
-	}
-	if req.Hosted {
-		signup.Launcher = launch.Launcher
-		if err := s.requireLauncher(ctx, launch.Launcher); err != nil {
-			return nil, err
-		}
-	}
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}
 	if pe == nil {
 		return nil, refuseSignup(404, "experiment_not_found", "no platform experiment %s", platformExpID)
+	}
+	catalog, err := s.store.AgentTypeCatalog(ctx, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
+	}
+	choice, err := domain.ResolveAgentLaunch(catalog, domain.RoleOfSignup(role), req.Flavor, req.Model, launch.DefaultModel, req.Hyperparameters)
+	if err != nil {
+		return nil, refuseSignup(400, "invalid_request", "%s", err)
+	}
+	signup := domain.AgentSignup{
+		AgentID: req.AgentID, Role: role, QuotaTier: domain.QuotaTier(req.QuotaTier),
+		Hosted: req.Hosted, Flavor: choice.AgentType, Hyperparameters: choice.Hyperparameters, Model: choice.Model, Actor: &by,
+	}
+	if req.Hosted {
+		signup.Launcher = launch.Launcher
+		if err := s.requireLauncher(ctx, launch.Launcher); err != nil {
+			return nil, err
+		}
 	}
 	member := false
 	if req.AgentID != "" {
@@ -360,8 +364,11 @@ func (h *PlatformExperimentsHandler) withHosting(ctx context.Context, req Create
 	if err := h.svc.requireLauncher(ctx, h.launch.Launcher); err != nil {
 		return req, err
 	}
-	_, model, err := domain.ResolveAgentLaunch("", req.CoordinatorModel, h.launch.CoordinatorModel, nil)
-	if err != nil {
+	model := req.CoordinatorModel
+	if model == "" {
+		model = h.launch.CoordinatorModel
+	}
+	if err := domain.ValidateModel(model); err != nil {
 		return req, refuseSignup(400, "invalid_request", "coordinator_model: %s", err)
 	}
 	// Checked before anything is made for the experiment: its repository is created ahead of
@@ -378,7 +385,7 @@ func (h *PlatformExperimentsHandler) withHosting(ctx context.Context, req Create
 // researcher asked for, and after them the one that measures the baseline, whose machine is asked
 // for at once beside the coordinator's, so that nothing waits for anyone to add it. An accepted
 // draft and a create with coordinator_hosted both get theirs here.
-func (h *PlatformExperimentsHandler) hostedAgents(researchers []ProposedAgent, by domain.Actor, now time.Time) ([]*domain.Agent, []domain.AgentSignup, error) {
+func (h *PlatformExperimentsHandler) hostedAgents(catalog domain.AgentTypeCatalog, researchers []ProposedAgent, by domain.Actor, now time.Time) ([]*domain.Agent, []domain.AgentSignup, error) {
 	agents := make([]*domain.Agent, 0, len(researchers)+1)
 	signups := make([]domain.AgentSignup, 0, len(researchers)+1)
 	for i, asked := range append(slices.Clone(researchers), ProposedAgent{}) {
@@ -386,7 +393,7 @@ func (h *PlatformExperimentsHandler) hostedAgents(researchers []ProposedAgent, b
 		if i == len(researchers) {
 			role = domain.SignupRoleBaseline
 		}
-		flavor, model, err := domain.ResolveAgentLaunch(asked.Flavor, asked.Model, h.launch.DefaultModel, asked.Hyperparameters)
+		choice, err := domain.ResolveAgentLaunch(catalog, domain.RoleOfSignup(role), asked.Flavor, asked.Model, h.launch.DefaultModel, asked.Hyperparameters)
 		if err != nil {
 			return nil, nil, refusedProposal("invalid_agents", "agents[%d]: %s", i, err)
 		}
@@ -397,7 +404,7 @@ func (h *PlatformExperimentsHandler) hostedAgents(researchers []ProposedAgent, b
 		agents = append(agents, &domain.Agent{ID: agentID, PerformanceScore: 0.5, CreatedAt: now})
 		signups = append(signups, domain.AgentSignup{
 			AgentID: agentID, Role: role, Hosted: true, Launcher: h.launch.Launcher,
-			Flavor: flavor, Model: model, Hyperparameters: asked.Hyperparameters, Actor: &by,
+			Flavor: choice.AgentType, Model: choice.Model, Hyperparameters: choice.Hyperparameters, Actor: &by,
 		})
 	}
 	return agents, signups, nil

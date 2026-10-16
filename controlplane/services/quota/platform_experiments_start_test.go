@@ -22,7 +22,7 @@ import (
 // set, so what is under test is the allocation itself rather than the transaction around it.
 // Every other method is inherited from the embedded nil interface and panics if reached.
 type startStore struct {
-	PlatformExperimentsStore
+	fakeStore
 	pe           *domain.PlatformExperiment
 	participants []db.StartParticipant
 	// baselines are the agents of role baseline, which take no share and whose spend is taken

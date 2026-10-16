@@ -906,8 +906,8 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 			t.Errorf("agent %d: %+v signed up as %+v, want a hosted researcher added by the person who accepted", i, agent, signup)
 		}
 	}
-	if measures := store.baselines[0]; measures.Role != domain.SignupRoleBaseline || !measures.Hosted || measures.Launcher != "main" || measures.Flavor != domain.DefaultAgentFlavor || len(measures.Hyperparameters) != 0 {
-		t.Errorf("the baseline agent runs as %+v, want a hosted one of the default flavor and no hyperparameters", measures)
+	if measures := store.baselines[0]; measures.Role != domain.SignupRoleBaseline || !measures.Hosted || measures.Launcher != "main" || measures.Flavor != "baseline" || len(measures.Hyperparameters) != 0 {
+		t.Errorf("the baseline agent runs as %+v, want a hosted one of the built-in baseline type and no hyperparameters", measures)
 	}
 	if first := store.acceptedSignups[0]; first.Flavor != "architecture-search" || first.Hyperparameters["depth"] != float64(4) || store.acceptedSignups[1].Flavor != domain.DefaultAgentFlavor {
 		t.Errorf("signups %+v, want the flavors and hyperparameters the person stated", store.acceptedSignups)

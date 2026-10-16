@@ -19,7 +19,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-type noExperimentStore struct{ PlatformExperimentsStore }
+type noExperimentStore struct{ fakeStore }
 
 func (noExperimentStore) GetPlatformExperiment(context.Context, string) (*domain.PlatformExperiment, error) {
 	return nil, nil
@@ -90,7 +90,7 @@ func (pagedAgents) AgentStats(context.Context, db.AgentsFilter) (*domain.AgentSt
 }
 
 type pagedExperiments struct {
-	PlatformExperimentsStore
+	fakeStore
 	limits *[]int
 }
 
@@ -200,7 +200,7 @@ func TestCloseAndSummaryAnswerThePlatformExperimentAndRefuseByReason(t *testing.
 	}
 }
 
-type constraintResultsStore struct{ PlatformExperimentsStore }
+type constraintResultsStore struct{ fakeStore }
 
 func (constraintResultsStore) GetPlatformExperiment(context.Context, string) (*domain.PlatformExperiment, error) {
 	bound := 0.0

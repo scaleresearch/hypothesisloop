@@ -16,6 +16,11 @@ import (
 // Overridable via HYPOTHESISLOOP_SCHEMA_SQL for local `go run` against a repo checkout.
 const DefaultSchemaSQLPath = "/schema/schema.sql"
 
+// schemaMigrationLockKey is a fixed, arbitrary lock key shared by ApplySchema and the seeding that
+// follows it: the number means nothing, it only has to be the same everywhere so every caller
+// contends on the same lock.
+const schemaMigrationLockKey = 8125_2026
+
 // ApplySchema runs schema.sql (every statement in it idempotent by construction — see the file's
 // own header) against pool, serialized by a Postgres advisory lock so two processes starting at
 // once (two control-service replicas) can't run DDL concurrently and trip Postgres's "tuple
@@ -39,10 +44,6 @@ func ApplySchema(ctx context.Context, pool *Pool) error {
 	}
 	defer conn.Release()
 
-	// A fixed, arbitrary lock key shared by every caller of this function — the number itself
-	// means nothing, it only has to be the same constant everywhere so every caller contends on
-	// the same lock rather than each getting its own.
-	const schemaMigrationLockKey = 8125_2026
 	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", schemaMigrationLockKey); err != nil {
 		return fmt.Errorf("db.ApplySchema: acquire advisory lock: %w", err)
 	}

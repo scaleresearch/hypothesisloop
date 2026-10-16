@@ -275,10 +275,10 @@ func (c *Config) build() error {
 	if c.Agents.Image == "" {
 		return fmt.Errorf("agents image is required: what a hosted agent's machine boots")
 	}
-	if _, _, err := domain.ResolveAgentLaunch("", "", c.Agents.DefaultModel, nil); err != nil {
+	if err := domain.ValidateModel(c.Agents.DefaultModel); err != nil {
 		return fmt.Errorf("agents default_model is required, the model an agent runs on when it names none: %w", err)
 	}
-	if _, _, err := domain.ResolveAgentLaunch("", "", c.Agents.CoordinatorModel, nil); err != nil {
+	if err := domain.ValidateModel(c.Agents.CoordinatorModel); err != nil {
 		return fmt.Errorf("agents coordinator_model is required, the model a hosted coordinator runs on when it names none: %w", err)
 	}
 	if c.Agents.BootLimitSeconds <= 0 {

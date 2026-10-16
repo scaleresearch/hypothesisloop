@@ -17,7 +17,7 @@ import (
 )
 
 type messageStore struct {
-	PlatformExperimentsStore
+	fakeStore
 	to      []string
 	text    string
 	sender  domain.Actor

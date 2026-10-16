@@ -22,12 +22,15 @@ type AgentSignup struct {
 	// Launcher is the launcher that runs a hosted agent, written when it joins so that a later
 	// change of the configured launcher moves new agents only.
 	Launcher string `json:"launcher,omitempty"`
-	// Flavor and Model are resolved when the agent joins: what it asked for, or the platform's
-	// default at that moment. Neither is ever empty on a stored signup.
-	Flavor          string         `json:"flavor"`
-	Hyperparameters map[string]any `json:"hyperparameters"`
-	Model           string         `json:"model"`
-	SignedUpAt      time.Time      `json:"signed_up_at"`
+	// Flavor, the id of the agent type it runs, and Model are resolved when the agent joins: what it
+	// asked for, or the default at that moment. Neither is ever empty on a stored signup.
+	Flavor string `json:"flavor" doc:"The agent type it runs, by id."`
+	// AgentTypeVersion is the version of its agent type it is pinned to: the current one when it
+	// joined, moved by each edit of the type while its run goes on.
+	AgentTypeVersion int            `json:"agent_type_version" doc:"The version of its agent type it is pinned to: the current one when it joined, and each edit of the type while its run goes on moves it to the new version (agent.instructions)."`
+	Hyperparameters  map[string]any `json:"hyperparameters"`
+	Model            string         `json:"model"`
+	SignedUpAt       time.Time      `json:"signed_up_at"`
 	// Actor is whose credential added the agent, unverified with no id on a signup from before
 	// this was kept. A coordinator removes only the agents its own token added.
 	Actor *Actor `json:"actor,omitempty"`
@@ -355,41 +358,12 @@ const MaxAgentInstanceLogBytes = 4 << 10
 // to the agent's launcher and in the agent's environment.
 const MaxHyperparametersBytes = 4 << 10
 
-// AgentFlavors are the specializations an agent can be started as: the briefs the agent image
-// holds under prompts/flavors.
-var AgentFlavors = []string{"generalist", "hyperparameter-search", "architecture-search", "data-search"}
-
-// DefaultAgentFlavor is what an agent runs when it joins without naming one.
+// DefaultAgentFlavor is the agent type a researcher runs as when it joins without naming one.
 const DefaultAgentFlavor = "generalist"
 
 const maxModelLength = 128
 
 var modelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:\[\]-]*$`)
-
-// ResolveAgentLaunch checks what an agent asked to be started with and fills what it left out, so
-// that a signup always says exactly what its agent runs. defaultModel is the platform's own.
-func ResolveAgentLaunch(flavor, model, defaultModel string, hyperparameters map[string]any) (resolvedFlavor, resolvedModel string, err error) {
-	if flavor == "" {
-		flavor = DefaultAgentFlavor
-	}
-	if err := LookupAgentType(flavor); err != nil {
-		return "", "", err
-	}
-	if model == "" {
-		model = defaultModel
-	}
-	if len(model) > maxModelLength || !modelPattern.MatchString(model) {
-		return "", "", fmt.Errorf("model %q must be at most %d characters of letters, digits and . _ : - [ ]", model, maxModelLength)
-	}
-	encoded, err := json.Marshal(hyperparameters)
-	if err != nil {
-		return "", "", fmt.Errorf("hyperparameters cannot be encoded: %w", err)
-	}
-	if len(encoded) > MaxHyperparametersBytes {
-		return "", "", fmt.Errorf("hyperparameters are %d bytes as JSON, the limit is %d", len(encoded), MaxHyperparametersBytes)
-	}
-	return flavor, model, nil
-}
 
 // AgentName is what an agent created without a name is called in a platform experiment: its
 // role and the first number no agent of that experiment carries yet, "Baseline 1" or

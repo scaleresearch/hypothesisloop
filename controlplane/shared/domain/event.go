@@ -63,6 +63,11 @@ const (
 	// reaches that agent and whoever steers the run, and no rival. Its value is IdleNew on the
 	// first notice of a stretch and IdleContinues on each after it.
 	EventAgentIdle = "agent.idle"
+	// EventAgentInstructions says the agent type an agent runs was edited and the agent was moved to
+	// the new version: a pointer like the description event, whose text is read from its
+	// instructions. It reaches that agent, or the coordinator for its own (CoordinatorRecipient),
+	// and whoever steers the run.
+	EventAgentInstructions = "agent.instructions"
 	// EventCapacityIdle says the capacity of a running platform experiment with time left holds
 	// places beyond its queued jobs, whether or not its researchers have jobs in flight and
 	// whatever the best stands at against the target. It is the run's, so it reaches whoever
@@ -151,6 +156,10 @@ var EventKinds = []EventKindDoc{
 		Description: "No job of this researcher of a running platform experiment ran on the platform for the platform's agents.idle_notice_minutes, and it has none queued or running: nothing of its own is in flight. " +
 			"Sent again every agents.idle_notice_minutes while the stretch lasts: new on the first notice of a stretch, continues on each after it, and a job it starts ends the stretch. " +
 			"detail says, as the platform knows them at the notice: for how long, the subagents and turn its harness last reported, how many jobs shaped like the run's baseline job the free capacity places now, the minutes left in the run and what is left of its share. Nothing is done to the agent."},
+	{Kind: EventAgentInstructions, Subject: "agent id, or coordinator", Value: "the version of its agent type it is pinned to now",
+		Description: "The agent type this agent runs was edited, and the platform moved the agent to the new version: detail is the agent type. " +
+			"A pointer that carries no text: read them with GET /platform-experiments/{id}/agents/{agent_id}/instructions, or /platform-experiments/{id}/coordinator/instructions for the coordinator, whose subject and agent_id are coordinator, and apply them at the next turn boundary. " +
+			"An agent the edit could not be moved is not told, and keeps the version it has."},
 	{Kind: EventCapacityIdle, Subject: "platform experiment id", Value: "new or continues",
 		Description: "The free capacity of a running platform experiment with time left has placed more jobs shaped like its baseline job than it has queued (fits_now beyond the queued jobs) for the platform's agents.idle_notice_minutes, whoever has jobs in flight. " +
 			"Sent again every agents.idle_notice_minutes while places stay free, a reached target included: new on the first notice of a stretch, continues on each after it, and a pass that sees no place free ends the stretch. " +
@@ -250,7 +259,7 @@ func isExperimentSubject(kind string) bool {
 // one agent's stop condition, the boundary is about the ladder.
 func isAgentOwned(kind string) bool {
 	switch kind {
-	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventQuotaChanged, EventAgentCut, EventAgentFinished, EventAgentReplaced, EventAgentIdle, EventAgentMessage, EventJobUnderperforming, EventJobHeld,
+	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventQuotaChanged, EventAgentCut, EventAgentFinished, EventAgentReplaced, EventAgentIdle, EventAgentInstructions, EventAgentMessage, EventJobUnderperforming, EventJobHeld,
 		EventJobDuplicate, EventEnvironmentStatus:
 		return true
 	default:

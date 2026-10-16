@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -45,7 +46,7 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 		}
 	}
 	svc := NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute)
-	spec, err := svc.validate(valid())
+	spec, err := svc.validate(valid(), agenttypes.Catalog())
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
@@ -55,7 +56,7 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 	block := valid()
 	block.Name, block.Description, block.DefaultQuotaTier = " exp\n", "\nthe brief\nof two lines\n", "burst_only\n"
 	block.Metrics = []domain.MetricDefinition{{Key: " loss\n", Direction: "minimize\n", Role: "ranking\n"}}
-	spec, err = svc.validate(block)
+	spec, err = svc.validate(block, agenttypes.Catalog())
 	if err != nil || spec.Name != "exp" || spec.Description != "the brief\nof two lines" || spec.DefaultQuotaTier != "burst_only" ||
 		!reflect.DeepEqual(spec.Metrics, []domain.MetricDefinition{{Key: "loss", Direction: "minimize", Role: "ranking"}}) {
 		t.Errorf("texts written as blocks: got %+v, %v, want each without the whitespace around it", spec, err)
@@ -66,7 +67,7 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 	twoLines := valid()
 	twoLines.Metrics[0].Key = "loss\nval"
 	var refused *api.Refusal
-	if _, err := svc.validate(twoLines); !errors.As(err, &refused) || refused.GetStatus() != 422 || !strings.Contains(refused.Error(), "metrics[0].key is one line") {
+	if _, err := svc.validate(twoLines, agenttypes.Catalog()); !errors.As(err, &refused) || refused.GetStatus() != 422 || !strings.Contains(refused.Error(), "metrics[0].key is one line") {
 		t.Errorf("a metric key of two lines: got %v, want 422 naming metrics[0].key", err)
 	}
 	for name, c := range map[string]struct {
@@ -91,7 +92,7 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 	} {
 		req := valid()
 		c.mutate(&req)
-		_, err := svc.validate(req)
+		_, err := svc.validate(req, agenttypes.Catalog())
 		var refused *api.Refusal
 		if !errors.As(err, &refused) || refused.GetStatus() != 422 || refused.Reason != c.reason {
 			t.Errorf("%s: got %v, want 422 %s", name, err, c.reason)
@@ -113,7 +114,7 @@ func TestAFieldNoBoundaryCanCutIsStoredWithTheLadderItRuns(t *testing.T) {
 		}
 	}
 	for _, researchers := range []int{2, domain.MinResearchersForCut} {
-		checked, err := svc.validate(spec(researchers, nil))
+		checked, err := svc.validate(spec(researchers, nil), agenttypes.Catalog())
 		if err != nil {
 			t.Fatalf("%d researchers, stages left out: %v", researchers, err)
 		}
@@ -122,10 +123,10 @@ func TestAFieldNoBoundaryCanCutIsStoredWithTheLadderItRuns(t *testing.T) {
 		}
 	}
 	var refused *api.Refusal
-	if _, err := svc.validate(spec(2, ladder)); !errors.As(err, &refused) || refused.GetStatus() != 422 || refused.Reason != "invalid_stages" {
+	if _, err := svc.validate(spec(2, ladder), agenttypes.Catalog()); !errors.As(err, &refused) || refused.GetStatus() != 422 || refused.Reason != "invalid_stages" {
 		t.Errorf("two stages stated for 2 researchers: got %v, want 422 invalid_stages", err)
 	}
-	if _, err := svc.validate(spec(domain.MinResearchersForCut, ladder)); err != nil {
+	if _, err := svc.validate(spec(domain.MinResearchersForCut, ladder), agenttypes.Catalog()); err != nil {
 		t.Errorf("two stages stated for %d researchers: %v", domain.MinResearchersForCut, err)
 	}
 }

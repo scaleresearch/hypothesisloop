@@ -84,7 +84,7 @@ func TestCreateWithAHostedCoordinatorGivesItToTheConfiguredLauncher(t *testing.T
 	// What accepting a draft stands up for the time before the run, a create with a hosted
 	// coordinator does too: nobody adds the agent that measures the baseline.
 	owner := auth.Principal(ownerOfA).Actor()
-	want := domain.AgentSignup{AgentID: store.baselines[0].AgentID, Name: "Baseline 1", Role: domain.SignupRoleBaseline, Hosted: true, Launcher: "main", Flavor: "generalist", Model: "model-default", Actor: &owner}
+	want := domain.AgentSignup{AgentID: store.baselines[0].AgentID, Name: "Baseline 1", Role: domain.SignupRoleBaseline, Hosted: true, Launcher: "main", Flavor: "baseline", Hyperparameters: map[string]any{}, Model: "model-default", Actor: &owner}
 	if len(store.baselines) != 1 || len(store.researchers) != 0 || !reflect.DeepEqual(store.baselines[0], want) {
 		t.Errorf("created with %+v and researchers %v, want one hosted baseline agent added by the creator and no researcher", store.baselines, store.researchers)
 	}

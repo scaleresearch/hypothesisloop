@@ -90,14 +90,14 @@ func maxProposedResearchers(maxHosted int) int {
 
 // proposedPool is the researchers the agents of a proposal make: an entry for each agent type and
 // model they run on, as each is resolved when the platform creates it (domain.ResolveAgentLaunch).
-func proposedPool(agents []ProposedAgent, defaultModel string) (domain.ResearcherPool, error) {
+func proposedPool(catalog domain.AgentTypeCatalog, agents []ProposedAgent, defaultModel string) (domain.ResearcherPool, error) {
 	keys := make([]domain.PoolKey, 0, len(agents))
 	for i, agent := range agents {
-		agentType, model, err := domain.ResolveAgentLaunch(agent.Flavor, agent.Model, defaultModel, agent.Hyperparameters)
+		choice, err := domain.ResolveAgentLaunch(catalog, domain.AgentRoleResearcher, agent.Flavor, agent.Model, defaultModel, agent.Hyperparameters)
 		if err != nil {
 			return nil, refusedProposal("invalid_agents", "agents[%d]: %s", i, err)
 		}
-		keys = append(keys, domain.PoolKey{AgentType: agentType, Model: model})
+		keys = append(keys, domain.PoolKey{AgentType: choice.AgentType, Model: choice.Model})
 	}
 	return domain.PoolOf(keys), nil
 }
@@ -123,6 +123,10 @@ func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p *Propo
 	refuse := func(reason, format string, args ...any) {
 		problems = append(problems, api.Refuse(http.StatusUnprocessableEntity, reason, fmt.Sprintf(format, args...)))
 	}
+	catalog, err := h.svc.store.AgentTypeCatalog(ctx, draft.ID)
+	if err != nil {
+		return CreatePlatformExperimentRequest{}, err
+	}
 	experiment, err := decodeExperimentBase(p.Experiment)
 	decoded := err == nil
 	if !decoded {
@@ -141,13 +145,13 @@ func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p *Propo
 		// An accepted draft starts when it is accepted, whatever its experiment says of a start.
 		experiment.StartsAt = time.Time{}
 		experiment.BudgetAcceleratorHours, experiment.DurationHours, experiment.MaxAgents = p.BudgetAcceleratorHours, p.DurationHours, len(p.Agents)
-		pool, unresolved := proposedPool(p.Agents, h.launch.DefaultModel)
+		pool, unresolved := proposedPool(catalog, p.Agents, h.launch.DefaultModel)
 		if err := problems.Add(unresolved); err != nil {
 			return experiment, err
 		}
 		experiment.Researchers = pool
 		var invalid error
-		experiment, invalid = h.svc.validate(experiment)
+		experiment, invalid = h.svc.validate(experiment, catalog)
 		if err := problems.Add(invalid); err != nil {
 			return experiment, err
 		}
@@ -178,7 +182,7 @@ func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p *Propo
 		refuse("invalid_resources", "%s", err)
 	}
 	for i, agent := range p.Agents {
-		if _, _, err := domain.ResolveAgentLaunch(agent.Flavor, agent.Model, h.launch.DefaultModel, agent.Hyperparameters); err != nil {
+		if _, err := domain.ResolveAgentLaunch(catalog, domain.AgentRoleResearcher, agent.Flavor, agent.Model, h.launch.DefaultModel, agent.Hyperparameters); err != nil {
 			refuse("invalid_agents", "agents[%d]: %s", i, err)
 		}
 	}
@@ -405,7 +409,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err != nil {
 			return nil, h.refusal("encode proposal", err)
 		}
-		proposed, err := h.proposed(pe, &in.Body)
+		proposed, err := h.proposed(ctx, pe, &in.Body)
 		if err != nil {
 			return nil, h.refusal("store proposal", err)
 		}
@@ -432,7 +436,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 // the platform accepts it by itself, and the agent that is to measure its baseline, signed up for
 // the person who created the draft so that its machine starts while the proposal is read. One
 // with questions is never accepted by itself, since only a person can answer them.
-func (h *PlatformExperimentsHandler) proposed(pe *domain.PlatformExperiment, p *Proposal) (db.Proposed, error) {
+func (h *PlatformExperimentsHandler) proposed(ctx context.Context, pe *domain.PlatformExperiment, p *Proposal) (db.Proposed, error) {
 	now := time.Now().UTC()
 	proposed := db.Proposed{WaitUntil: now.Add(h.planning.ProposedFor), KeepPlanner: h.planning.PlannerKept}
 	if h.planning.AutoAccept > 0 && len(p.Questions) == 0 {
@@ -446,7 +450,11 @@ func (h *PlatformExperimentsHandler) proposed(pe *domain.PlatformExperiment, p *
 	if pe.Actor != nil {
 		by = *pe.Actor
 	}
-	agents, signups, err := h.hostedAgents(nil, by, now)
+	catalog, err := h.svc.store.AgentTypeCatalog(ctx, pe.ID)
+	if err != nil {
+		return proposed, err
+	}
+	agents, signups, err := h.hostedAgents(catalog, nil, by, now)
 	if err != nil {
 		return proposed, err
 	}
@@ -575,7 +583,11 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: h.launch.Launcher, Model: h.launch.CoordinatorModel}
 	pe.AcceptedAt, pe.AcceptedBy, pe.AcceptedAnswers = &now, acceptedBy, answers
 
-	agents, signups, err := h.hostedAgents(req.Agents, by, now)
+	catalog, err := h.svc.store.AgentTypeCatalog(ctx, id)
+	if err != nil {
+		return nil, h.refusal("accept", err)
+	}
+	agents, signups, err := h.hostedAgents(catalog, req.Agents, by, now)
 	if err != nil {
 		return nil, h.refusal("accept", err)
 	}

@@ -23,7 +23,7 @@ import (
 // PlatformExperimentsStore method is inherited from the embedded nil interface, so a test that
 // reaches one panics loudly instead of quietly getting a zero value back.
 type signupStore struct {
-	PlatformExperimentsStore
+	fakeStore
 	pe          *domain.PlatformExperiment
 	byRole      map[domain.SignupRole]int
 	insertedFor domain.SignupRole
@@ -412,7 +412,7 @@ func bestPerAgentMetricServer(t *testing.T, values map[string]float64) *httptest
 }
 
 type priorRunsStore struct {
-	PlatformExperimentsStore
+	fakeStore
 	runs []db.RunToRank
 }
 

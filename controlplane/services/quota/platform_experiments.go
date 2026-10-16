@@ -20,6 +20,14 @@ type PlatformExperimentsStore interface {
 	// CreatePlatformExperiment stores pe with the agents it is created with signed up, or neither.
 	CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
+	// AgentTypeCatalog and ProjectAgentTypeCatalog are the agent types the agents of a platform
+	// experiment, or of one of a project, may run as.
+	AgentTypeCatalog(ctx context.Context, platformExpID string) (domain.AgentTypeCatalog, error)
+	ProjectAgentTypeCatalog(ctx context.Context, projectID string) (domain.AgentTypeCatalog, error)
+	// AgentInstructions and CoordinatorInstructions are what the instructions of an agent and of
+	// the coordinator are composed from, nil for none.
+	AgentInstructions(ctx context.Context, platformExpID, agentID string) (*db.InstructionsSource, error)
+	CoordinatorInstructions(ctx context.Context, platformExpID string) (*db.InstructionsSource, error)
 	// PriorRuns is the ids of the prior runs of platform experiment id (domain.Tenancy.PriorRuns).
 	PriorRuns(ctx context.Context, id string) ([]string, error)
 	// RunsToRank reads platform experiments ids as their standings are read, in their order.

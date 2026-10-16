@@ -1,0 +1,7 @@
+{
+  "rules": "\n## platform rules\n\n- A rule with {braces} and a {{workdir}} that is no placeholder of its own.\n",
+  "agent_id": "ag-0193f2a4c5d67e8f9a0b1c2d3e4f5a6b",
+  "platform_experiment_id": "pe-0193f2a4c5d67e8f9a0b1c2d3e4f5a6c",
+  "repository_url": "https://github.com/acme/vision.git",
+  "hyperparameters": {"note": "café \"quoted\"", "lr": 0.001, "layers": [2, 4], "decay": 1.5e-05, "warmup": true}
+}

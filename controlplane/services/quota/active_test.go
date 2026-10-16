@@ -19,7 +19,7 @@ import (
 // windDownStore holds one platform experiment in a given status with one agent cut, and records
 // what a request went on to write.
 type windDownStore struct {
-	PlatformExperimentsStore
+	fakeStore
 	status    domain.PlatformExperimentStatus
 	cut       string
 	keysAsked int

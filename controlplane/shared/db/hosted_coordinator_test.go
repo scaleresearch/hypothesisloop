@@ -115,7 +115,7 @@ func TestAPlatformExperimentIsCreatedWithItsAgentsOrNotAtAll(t *testing.T) {
 	}
 	measuring := func() ([]*domain.Agent, []domain.AgentSignup) {
 		agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], PerformanceScore: 0.5, CreatedAt: now}
-		return []*domain.Agent{agent}, []domain.AgentSignup{{AgentID: agent.ID, Role: domain.SignupRoleBaseline, Hosted: true, Launcher: launcher, Flavor: "generalist", Model: "model-1"}}
+		return []*domain.Agent{agent}, []domain.AgentSignup{{AgentID: agent.ID, Role: domain.SignupRoleBaseline, Hosted: true, Launcher: launcher, Flavor: "baseline", Model: "model-1"}}
 	}
 
 	pe := experiment(4)

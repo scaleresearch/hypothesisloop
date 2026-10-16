@@ -222,7 +222,7 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 	// nobody else. One of them is done when it finishes, there and then.
 	open := newPE()
 	measuring := hosted
-	measuring.Role = domain.SignupRoleBaseline
+	measuring.Role, measuring.Flavor = domain.SignupRoleBaseline, "baseline"
 	spawnTestAgents(t, pes, open, hosted)
 	baselines := spawnTestAgents(t, pes, open, measuring, measuring)
 	expect(baselines[0], false)
@@ -506,7 +506,7 @@ func TestAgentsOfAPlatformExperimentAreNamedByRoleAndNoTwoAlike(t *testing.T) {
 			t.Fatal(err)
 		}
 		agent := &domain.Agent{ID: id, Name: name, PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
-		return agent, pes.SpawnAgent(ctx, pe, agent, domain.AgentSignup{AgentID: id, Role: role, Flavor: "generalist", Model: "model-1"})
+		return agent, pes.SpawnAgent(ctx, pe, agent, domain.AgentSignup{AgentID: id, Role: role, Model: "model-1"})
 	}
 	want := func(role domain.SignupRole, name string) *domain.Agent {
 		t.Helper()
@@ -547,7 +547,7 @@ func TestFinishedBaselineJobsAreTheCompletedObjectiveJobsOfBaselineAgentsThatFin
 	jobs := NewExperimentsStore(pool)
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
-	measuring := domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "generalist"}
+	measuring := domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "baseline"}
 	baselines := spawnTestAgents(t, pes, pe, measuring, measuring)
 	researcher := spawnTestAgents(t, pes, pe, domain.AgentSignup{Flavor: "generalist"})[0]
 	if err := pes.FinishAgent(ctx, pe, baselines[0], "the baseline is measured"); err != nil {
@@ -584,7 +584,7 @@ func TestABaselineAgentHoldsItsQuotaForAsLongAsAJobOfItIsInFlight(t *testing.T) 
 	pes := NewPlatformExperimentsStore(pool)
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
-	baseline := spawnTestAgents(t, pes, pe, domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "generalist"})[0]
+	baseline := spawnTestAgents(t, pes, pe, domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "baseline"})[0]
 	holds := func(when string) {
 		t.Helper()
 		if quota, err := pes.GetAgentQuota(ctx, baseline, pe); err != nil || quota == nil || quota.GuaranteedAcceleratorHours <= 0 {
@@ -619,7 +619,7 @@ func TestABaselineAgentHoldsItsQuotaForAsLongAsAJobOfItIsInFlight(t *testing.T) 
 	if quota, err := pes.GetAgentQuota(ctx, baseline, pe); err != nil || quota != nil {
 		t.Fatalf("after the removal: quota = %+v, %v, want none", quota, err)
 	}
-	if added, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: baseline, Role: domain.SignupRoleBaseline, Flavor: "generalist"}); err != nil || !added {
+	if added, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: baseline, Role: domain.SignupRoleBaseline, Flavor: "baseline"}); err != nil || !added {
 		t.Fatalf("joining again: %v, %v", added, err)
 	}
 	holds("joined again")

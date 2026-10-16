@@ -4,23 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 )
-
-// LookupAgentType checks that key names an agent type a researcher can be started as. It is the
-// one place an agent type is resolved: today the types are the built-in flavors (AgentFlavors).
-func LookupAgentType(key string) error {
-	if !slices.Contains(AgentFlavors, key) {
-		return fmt.Errorf("agent_type %q is not an agent type: %s", key, strings.Join(AgentFlavors, ", "))
-	}
-	return nil
-}
 
 // ResearcherPoolEntry is how many researchers of one agent type on one model a platform
 // experiment is to have at work, and what a new one of them is started with.
 type ResearcherPoolEntry struct {
-	AgentType       string         `json:"agent_type,omitempty" doc:"The agent type these researchers are started as, by key: generalist (default), hyperparameter-search, architecture-search or data-search."`
+	AgentType       string         `json:"agent_type,omitempty" doc:"The agent type these researchers are started as, by id: a researcher type of the org (GET /orgs/{id}/agent-types), the built-in generalist by default, or hyperparameter-search, architecture-search, data-search."`
 	Model           string         `json:"model,omitempty" doc:"The model they run on. Omitted, the platform's default at the moment the pool is stated, which the answer shows."`
 	Hyperparameters map[string]any `json:"hyperparameters,omitempty" doc:"A small JSON object each new researcher of the entry reads from its signup, at most 4096 bytes as JSON. A researcher added in the place of one that ended reads the one it replaces."`
 	Count           int            `json:"count" doc:"How many of them are to be at work. A stage boundary lowers it by each of them it cuts."`
@@ -51,9 +41,10 @@ func (p ResearcherPool) Total() int {
 }
 
 // Check refuses a pool a person or a planner states: an entry for no researcher, an agent type
-// LookupAgentType does not know, a model no agent can be started on, hyperparameters too large,
-// two entries of one agent type and model, and more researchers in all than maxAgents.
-func (p ResearcherPool) Check(maxAgents int) error {
+// catalog holds no researcher type of (LookupAgentType), a model no agent can be started on,
+// hyperparameters too large, two entries of one agent type and model, and more researchers in all
+// than maxAgents.
+func (p ResearcherPool) Check(maxAgents int, catalog AgentTypeCatalog) error {
 	seen := map[PoolKey]bool{}
 	for i, e := range p {
 		if e.Count <= 0 {
@@ -63,11 +54,13 @@ func (p ResearcherPool) Check(maxAgents int) error {
 		if agentType == "" {
 			agentType = DefaultAgentFlavor
 		}
-		if err := LookupAgentType(agentType); err != nil {
+		if _, err := LookupAgentType(catalog, agentType, AgentRoleResearcher); err != nil {
 			return fmt.Errorf("researchers[%d]: %w", i, err)
 		}
-		if e.Model != "" && (len(e.Model) > maxModelLength || !modelPattern.MatchString(e.Model)) {
-			return fmt.Errorf("researchers[%d]: model %q must be at most %d characters of letters, digits and . _ : - [ ]", i, e.Model, maxModelLength)
+		if e.Model != "" {
+			if err := ValidateModel(e.Model); err != nil {
+				return fmt.Errorf("researchers[%d]: %w", i, err)
+			}
 		}
 		if encoded, err := json.Marshal(e.Hyperparameters); err != nil || len(encoded) > MaxHyperparametersBytes {
 			return fmt.Errorf("researchers[%d]: hyperparameters must be a JSON object of at most %d bytes", i, MaxHyperparametersBytes)
@@ -87,21 +80,21 @@ func (p ResearcherPool) Check(maxAgents int) error {
 // Resolved is the pool with each entry's agent type and model filled as a joining agent's are
 // (ResolveAgentLaunch), entries that come to name one agent type and model merged, and its order
 // kept.
-func (p ResearcherPool) Resolved(defaultModel string) (ResearcherPool, error) {
+func (p ResearcherPool) Resolved(catalog AgentTypeCatalog, defaultModel string) (ResearcherPool, error) {
 	out := make(ResearcherPool, 0, len(p))
 	at := map[PoolKey]int{}
 	for i, e := range p {
-		agentType, model, err := ResolveAgentLaunch(e.AgentType, e.Model, defaultModel, e.Hyperparameters)
+		choice, err := ResolveAgentLaunch(catalog, AgentRoleResearcher, e.AgentType, e.Model, defaultModel, e.Hyperparameters)
 		if err != nil {
 			return nil, fmt.Errorf("researchers[%d]: %w", i, err)
 		}
-		key := PoolKey{AgentType: agentType, Model: model}
+		key := PoolKey{AgentType: choice.AgentType, Model: choice.Model}
 		if j, ok := at[key]; ok {
 			out[j].Count += e.Count
 			continue
 		}
 		at[key] = len(out)
-		out = append(out, ResearcherPoolEntry{AgentType: agentType, Model: model, Hyperparameters: e.Hyperparameters, Count: e.Count})
+		out = append(out, ResearcherPoolEntry{AgentType: choice.AgentType, Model: choice.Model, Hyperparameters: e.Hyperparameters, Count: e.Count})
 	}
 	return out, nil
 }

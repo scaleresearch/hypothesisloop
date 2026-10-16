@@ -11,7 +11,7 @@ import (
 // createStore fakes the single write Create makes; every other PlatformExperimentsStore method
 // is inherited from the embedded nil interface.
 type createStore struct {
-	PlatformExperimentsStore
+	fakeStore
 	created *domain.PlatformExperiment
 }
 

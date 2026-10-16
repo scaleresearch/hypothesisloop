@@ -539,7 +539,7 @@ func TestOneMachineIsKeptForTheBaselineAndAFinishedAgentHoldsNone(t *testing.T) 
 			t.Fatal(err)
 		}
 		agent := &domain.Agent{ID: id, Name: id, PerformanceScore: 0.5, CreatedAt: now}
-		return id, pes.SpawnAgent(ctx, pe.ID, agent, domain.AgentSignup{AgentID: id, Role: role, Hosted: true, Launcher: "main", Flavor: "generalist"})
+		return id, pes.SpawnAgent(ctx, pe.ID, agent, domain.AgentSignup{AgentID: id, Role: role, Hosted: true, Launcher: "main"})
 	}
 	for i := range 2 {
 		if _, err := add(domain.SignupRoleCompetitor); err != nil {
@@ -918,7 +918,7 @@ func TestWhatAHostedAgentIsDoingIsKeptOnItsRowAndAnsweredWhereItIsRead(t *testin
 	pes := NewPlatformExperimentsStore(pool)
 	launcher := "launcher-" + uuid.New().String()[:8]
 	pe := createTestPEWithCoordinator(t, pool, launcher)
-	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Role: domain.SignupRoleBaseline, Hosted: true, Launcher: launcher, Flavor: "generalist"})[0]
+	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Role: domain.SignupRoleBaseline, Hosted: true, Launcher: launcher, Flavor: "baseline"})[0]
 	draft, planner := createTestDraft(t, pool, launcher)
 
 	said := func(platformExpID, agentID string) *domain.AgentActivity {

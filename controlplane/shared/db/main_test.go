@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/agenttypes"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 const devDSN = "postgres://hypothesisloop:hypothesisloop@localhost:5433/hypothesisloop?sslmode=disable"
@@ -76,5 +79,16 @@ func applySchemaAt(ctx context.Context, dsn string) error {
 		return err
 	}
 	defer os.Unsetenv("HYPOTHESISLOOP_SCHEMA_SQL") //nolint:errcheck
-	return ApplySchema(ctx, pool)
+	if err := ApplySchema(ctx, pool); err != nil {
+		return err
+	}
+	builtins, err := agenttypes.Builtins()
+	if err != nil {
+		return err
+	}
+	_, err = SeedBuiltinAgentTypes(ctx, pool, builtins, testModelDefaults)
+	return err
 }
+
+// testModelDefaults is the platform's default models in the tests of this package.
+var testModelDefaults = domain.ModelDefaults{Agent: "agent-default", Coordinator: "coordinator-default"}

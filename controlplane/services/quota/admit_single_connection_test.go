@@ -17,7 +17,7 @@ import (
 // inTxStore runs observe the way the real transactions do and fails any pool read made while one
 // is open: that read needs a second connection the transaction's own request is already holding.
 type inTxStore struct {
-	PlatformExperimentsStore
+	fakeStore
 	inTx bool
 }
 

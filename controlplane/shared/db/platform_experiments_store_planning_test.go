@@ -385,7 +385,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 			}
 			agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
 			agents = append(agents, agent)
-			signups = append(signups, domain.AgentSignup{AgentID: agent.ID, Role: role, Hosted: true, Launcher: launcher, Flavor: "generalist", Model: "model-1"})
+			signups = append(signups, domain.AgentSignup{AgentID: agent.ID, Role: role, Hosted: true, Launcher: launcher, Model: "model-1"})
 		}
 		return pe, agents, signups
 	}
@@ -506,7 +506,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	// Every machine the draft may have is taken, so a second baseline agent has none while the
 	// first holds its own, and takes its place once the first's machine stopped for good.
 	second := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
-	another := domain.AgentSignup{AgentID: second.ID, Role: domain.SignupRoleBaseline, Hosted: true, Launcher: launcher, Flavor: "generalist", Model: "model-1"}
+	another := domain.AgentSignup{AgentID: second.ID, Role: domain.SignupRoleBaseline, Hosted: true, Launcher: launcher, Flavor: "baseline", Model: "model-1"}
 	if err := pes.SpawnAgent(ctx, id, second, another); err != ErrMaxHostedReached {
 		t.Fatalf("a second baseline agent beside the first: got = %v, want ErrMaxHostedReached", err)
 	}
@@ -555,8 +555,8 @@ func TestABaselineAgentHoldsItsQuotaFromSignupUntilItIsRemoved(t *testing.T) {
 	id := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, id, 10)
 	agents := spawnTestAgents(t, pes, id,
-		domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "generalist"},
-		domain.AgentSignup{Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierBurstOnly, Flavor: "generalist"},
+		domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "baseline"},
+		domain.AgentSignup{Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierBurstOnly, Flavor: "baseline"},
 		domain.AgentSignup{Role: domain.SignupRoleCompetitor, Flavor: "generalist"},
 		domain.AgentSignup{Role: domain.SignupRoleReviewer, Flavor: "generalist"})
 	// Half the budget of 10.
@@ -573,7 +573,7 @@ func TestABaselineAgentHoldsItsQuotaFromSignupUntilItIsRemoved(t *testing.T) {
 	if _, err := pool.pool.Exec(ctx, `UPDATE agent_quotas SET guaranteed_accelerator_hours = 0.1 WHERE platform_experiment_id = $1 AND agent_id = $2`, id, agents[0]); err != nil {
 		t.Fatal(err)
 	}
-	if inserted, err := pes.Signup(ctx, id, domain.AgentSignup{AgentID: agents[0], Role: domain.SignupRoleBaseline, Flavor: "generalist"}); err != nil || inserted {
+	if inserted, err := pes.Signup(ctx, id, domain.AgentSignup{AgentID: agents[0], Role: domain.SignupRoleBaseline, Flavor: "baseline"}); err != nil || inserted {
 		t.Fatalf("signing up again: got = %v, %v, want nothing inserted", inserted, err)
 	}
 	if quota, _ := pes.GetAgentQuota(ctx, agents[0], id); quota == nil || quota.GuaranteedAcceleratorHours != 0.1 {
@@ -600,8 +600,8 @@ func TestABaselineAgentsQuotaIsHalfTheBudgetOfAnOpenExperiment(t *testing.T) {
 	id := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, id, 10)
 	agents := spawnTestAgents(t, pes, id,
-		domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "generalist"},
-		domain.AgentSignup{Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierBurstOnly, Flavor: "generalist"},
+		domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "baseline"},
+		domain.AgentSignup{Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierBurstOnly, Flavor: "baseline"},
 		domain.AgentSignup{Role: domain.SignupRoleCompetitor, Flavor: "generalist"})
 	held := func(when string, want float64) {
 		t.Helper()
@@ -654,8 +654,8 @@ func TestAnAgentsFinishIsReadWithItsMoment(t *testing.T) {
 	id := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, id, 10)
 	agents := spawnTestAgents(t, pes, id,
-		domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "generalist"},
-		domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "generalist"})
+		domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "baseline"},
+		domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "baseline"})
 	if err := pes.FinishAgent(ctx, id, agents[0], "the baseline is measured"); err != nil {
 		t.Fatal(err)
 	}
@@ -883,7 +883,7 @@ func TestAProposalSignsUpTheBaselineAgentWhoseMachineRunsUntilTheDraftIsHeld(t *
 	by := domain.Actor{Kind: domain.ActorUser, ID: "u-planning"}
 	baselineAgent := func() (*domain.Agent, domain.AgentSignup) {
 		agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
-		return agent, domain.AgentSignup{AgentID: agent.ID, Role: domain.SignupRoleBaseline, Hosted: true, Launcher: launcher, Flavor: "generalist", Model: "model-1", Actor: &by}
+		return agent, domain.AgentSignup{AgentID: agent.ID, Role: domain.SignupRoleBaseline, Hosted: true, Launcher: launcher, Flavor: "baseline", Model: "model-1", Actor: &by}
 	}
 	wait := time.Now().UTC().Add(7 * 24 * time.Hour)
 	soon := time.Now().UTC().Add(30 * time.Second)

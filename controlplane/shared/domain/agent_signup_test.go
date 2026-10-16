@@ -1,68 +1,53 @@
 package domain
 
 import (
-	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 )
 
 func TestAgentLaunchValuesAreResolvedAndSafeAsEnvironment(t *testing.T) {
 	const platformModel = "platform-model-1"
+	catalog := testCatalog()
 	for _, ok := range []struct{ flavor, model, wantFlavor, wantModel string }{
 		{"", "", "generalist", platformModel},
 		{"generalist", "claude-sonnet-5", "generalist", "claude-sonnet-5"},
 		{"data-search", "claude-opus-5[1m]", "data-search", "claude-opus-5[1m]"},
 		{"architecture-search", "vendor.model:v1_2", "architecture-search", "vendor.model:v1_2"},
 		{"hyperparameter-search", "", "hyperparameter-search", platformModel},
+		{"at-custom", "", "at-custom", "custom-model"},
 	} {
-		flavor, model, err := ResolveAgentLaunch(ok.flavor, ok.model, platformModel, map[string]any{"batch_size": 64})
-		if err != nil || flavor != ok.wantFlavor || model != ok.wantModel {
-			t.Errorf("flavor %q model %q resolved to %q %q, %v", ok.flavor, ok.model, flavor, model, err)
+		choice, err := ResolveAgentLaunch(catalog, AgentRoleResearcher, ok.flavor, ok.model, platformModel, map[string]any{"batch_size": 64})
+		if err != nil || choice.AgentType != ok.wantFlavor || choice.Model != ok.wantModel {
+			t.Errorf("flavor %q model %q resolved to %+v, %v", ok.flavor, ok.model, choice, err)
 		}
 	}
 	for _, bad := range [][2]string{
-		{"Generalist", ""}, {"../etc", ""}, {"a b", ""}, {"no-such-flavor", ""}, {"generalist.md", ""},
+		{"Generalist", ""}, {"../etc", ""}, {"a b", ""}, {"no-such-flavor", ""}, {"generalist.md", ""}, {"planner", ""}, {"at-archived", ""},
 		{"", "model with space"}, {"", "$(id)"}, {"", "-leading"}, {"", strings.Repeat("m", 129)}, {"", "a\nb"},
 	} {
-		if _, _, err := ResolveAgentLaunch(bad[0], bad[1], platformModel, nil); err == nil {
+		if _, err := ResolveAgentLaunch(catalog, AgentRoleResearcher, bad[0], bad[1], platformModel, nil); err == nil {
 			t.Errorf("flavor %q model %q accepted", bad[0], bad[1])
 		}
 	}
-	if _, _, err := ResolveAgentLaunch("", "", "", nil); err == nil {
+	if _, err := ResolveAgentLaunch(catalog, AgentRoleResearcher, "", "", "", nil); err == nil {
 		t.Error("no model and no platform default accepted")
+	}
+	if choice, err := ResolveAgentLaunch(catalog, AgentRoleBaseline, "", "", platformModel, nil); err != nil || choice.AgentType != "baseline" {
+		t.Errorf("a baseline agent naming no type: %+v, %v, want the built-in baseline", choice, err)
+	}
+	choice, err := ResolveAgentLaunch(catalog, AgentRoleResearcher, "at-custom", "", platformModel, nil)
+	if err != nil || choice.Hyperparameters["lr"] != 0.1 {
+		t.Errorf("an agent given no hyperparameters: %+v, %v, want its type's", choice, err)
 	}
 }
 
 func TestHyperparametersAreBoundedAsJSON(t *testing.T) {
 	fits := map[string]any{"note": strings.Repeat("a", MaxHyperparametersBytes-len(`{"note":""}`))}
-	if _, _, err := ResolveAgentLaunch("", "m", "m", fits); err != nil {
+	if _, err := ResolveAgentLaunch(testCatalog(), AgentRoleResearcher, "", "m", "m", fits); err != nil {
 		t.Errorf("hyperparameters of exactly the limit refused: %v", err)
 	}
 	over := map[string]any{"note": strings.Repeat("a", MaxHyperparametersBytes)}
-	if _, _, err := ResolveAgentLaunch("", "m", "m", over); err == nil || !strings.Contains(err.Error(), "the limit is 4096") {
+	if _, err := ResolveAgentLaunch(testCatalog(), AgentRoleResearcher, "", "m", "m", over); err == nil || !strings.Contains(err.Error(), "the limit is 4096") {
 		t.Errorf("hyperparameters above the limit: err = %v", err)
-	}
-}
-
-// The agent image reads prompts/flavors/<flavor>.md and exits when the file is missing, so the
-// set an agent may join with is the set of briefs the image holds.
-func TestTheKnownFlavorsAreTheBriefsTheAgentImageHolds(t *testing.T) {
-	briefs, err := filepath.Glob("../../../agents/experimentator/src/hypothesisloop_agent/prompts/flavors/*.md")
-	if err != nil || len(briefs) == 0 {
-		t.Fatalf("no flavor briefs found: %v", err)
-	}
-	held := []string{}
-	for _, brief := range briefs {
-		held = append(held, strings.TrimSuffix(filepath.Base(brief), ".md"))
-	}
-	known := slices.Clone(AgentFlavors)
-	slices.Sort(known)
-	slices.Sort(held)
-	if !slices.Equal(known, held) {
-		t.Fatalf("AgentFlavors = %v, the image holds %v", known, held)
-	}
-	if !slices.Contains(AgentFlavors, DefaultAgentFlavor) {
-		t.Fatalf("the default flavor %q is not a known one", DefaultAgentFlavor)
 	}
 }

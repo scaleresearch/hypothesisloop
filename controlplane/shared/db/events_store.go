@@ -229,6 +229,7 @@ FROM pg_current_snapshot() s`).Scan(&horizon, &next); err != nil {
 		replayAgentsFinished,
 		replayAgentsReplaced,
 		replayAgentsIdle,
+		replayAgentInstructions,
 		replayCapacityIdle,
 		replayPlatformExperiment,
 		replayRevisions,
@@ -548,6 +549,30 @@ WHERE platform_experiment_id = $1 AND idle_xid >= $2`, peID, since, IdleNew, Idl
 	})
 	if err != nil {
 		return nil, fmt.Errorf("events_store.replayAgentsIdle: %w", err)
+	}
+	return events, nil
+}
+
+// replayAgentInstructions derives agent.instructions from the signups and the coordinator, which
+// record the version an edit last moved them to.
+func replayAgentInstructions(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]domain.Event, error) {
+	rows, err := tx.Query(ctx, `
+SELECT agent_id, agent_type_version::text, flavor, instructions_xid FROM experiment_signups
+WHERE platform_experiment_id = $1 AND instructions_xid >= $2
+UNION ALL
+SELECT $3, coordinator_agent_type_version::text, coordinator_agent_type, coordinator_instructions_xid FROM platform_experiments
+WHERE id = $1 AND coordinator_instructions_xid >= $2`, peID, since, domain.CoordinatorRecipient)
+	if err != nil {
+		return nil, fmt.Errorf("events_store.replayAgentInstructions: %w", err)
+	}
+	events, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.Event, error) {
+		event := domain.Event{Kind: domain.EventAgentInstructions, PlatformExperimentID: peID}
+		err := row.Scan(&event.AgentID, &event.Value, &event.Detail, &event.Position)
+		event.Subject = event.AgentID
+		return event, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("events_store.replayAgentInstructions: %w", err)
 	}
 	return events, nil
 }

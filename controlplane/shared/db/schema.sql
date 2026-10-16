@@ -1779,3 +1779,113 @@ CREATE TABLE IF NOT EXISTS experiment_drafts (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS experiment_drafts_project ON experiment_drafts (project_id, updated_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- agent_types — the prompt and settings an agent runs with (domain.AgentType)
+-- ---------------------------------------------------------------------------
+
+-- A built-in type has no org: control-service seeds it from the repository at start
+-- (db.SeedBuiltinAgentTypes) and nothing else writes it. An org's own types are its owners'.
+-- current_version is the version new agents are pinned to.
+CREATE TABLE IF NOT EXISTS agent_types (
+    id              TEXT        PRIMARY KEY,
+    org_id          TEXT        REFERENCES orgs(id),
+    name            TEXT        NOT NULL,
+    role            TEXT        NOT NULL,
+    current_version INTEGER     NOT NULL,
+    archived_at     TIMESTAMPTZ,
+    created_by_kind TEXT        NOT NULL DEFAULT '',
+    created_by_id   TEXT        NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT agent_types_role CHECK (role IN ('researcher', 'baseline', 'coordinator', 'planner'))
+);
+CREATE INDEX IF NOT EXISTS idx_agent_types_org ON agent_types(org_id);
+
+-- Every edit inserts the next version, and none is changed or deleted (the trigger below refuses
+-- both): an agent pins one, and what it ran with stays readable.
+CREATE TABLE IF NOT EXISTS agent_type_versions (
+    type_id         TEXT        NOT NULL REFERENCES agent_types(id),
+    version         INTEGER     NOT NULL,
+    prompt          TEXT        NOT NULL,
+    settings        JSONB       NOT NULL,
+    digest          TEXT        NOT NULL,
+    created_by_kind TEXT        NOT NULL DEFAULT '',
+    created_by_id   TEXT        NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (type_id, version),
+    CONSTRAINT agent_type_versions_positive CHECK (version > 0)
+);
+
+DO $$ BEGIN
+    ALTER TABLE agent_types ADD CONSTRAINT agent_types_current_version
+        FOREIGN KEY (id, current_version) REFERENCES agent_type_versions(type_id, version) DEFERRABLE INITIALLY DEFERRED;
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE OR REPLACE FUNCTION hypothesisloop_agent_type_versions_immutable() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'agent_type_versions are immutable: insert the next version instead';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS agent_type_versions_immutable ON agent_type_versions;
+CREATE TRIGGER agent_type_versions_immutable BEFORE UPDATE OR DELETE ON agent_type_versions
+    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_agent_type_versions_immutable();
+
+-- A signup's flavor is the id of the agent type it runs, and agent_type_version the version it is
+-- pinned to: written when it joins, and moved by an edit of its type while its run goes on, in
+-- the transaction that recorded instructions_xid for the replay of agent.instructions. NULL only
+-- on a row from before agent types, until the first start seeds them and pins it.
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS agent_type_version INTEGER;
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instructions_xid   BIGINT;
+-- A baseline agent ran as the generalist flavor with a briefing of its own; it runs the baseline
+-- type now, and a researcher stored with no flavor the default one.
+UPDATE experiment_signups SET flavor = 'baseline' WHERE role = 'baseline' AND flavor <> 'baseline';
+UPDATE experiment_signups SET flavor = 'generalist' WHERE flavor = '';
+
+DO $$ BEGIN
+    ALTER TABLE experiment_signups ADD CONSTRAINT experiment_signups_agent_type
+        FOREIGN KEY (flavor, agent_type_version) REFERENCES agent_type_versions(type_id, version);
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
+
+-- The coordinator's agent type and pinned version, and the transaction that last moved the pin,
+-- for the replay of agent.instructions to it.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_agent_type         TEXT NOT NULL DEFAULT 'coordinator';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_agent_type_version INTEGER;
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instructions_xid   BIGINT;
+
+DO $$ BEGIN
+    ALTER TABLE platform_experiments ADD CONSTRAINT platform_experiments_coordinator_agent_type
+        FOREIGN KEY (coordinator_agent_type, coordinator_agent_type_version) REFERENCES agent_type_versions(type_id, version);
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE OR REPLACE FUNCTION hypothesisloop_agent_instructions_notify() RETURNS trigger AS $$
+BEGIN
+    PERFORM hypothesisloop_notify_event('agent.instructions', NEW.agent_id,
+        NEW.agent_type_version::text, NEW.flavor, NEW.platform_experiment_id, NEW.agent_id);
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS signup_instructions_notify ON experiment_signups;
+CREATE TRIGGER signup_instructions_notify AFTER UPDATE OF instructions_xid ON experiment_signups
+    FOR EACH ROW WHEN (NEW.instructions_xid IS DISTINCT FROM OLD.instructions_xid)
+    EXECUTE FUNCTION hypothesisloop_agent_instructions_notify();
+
+CREATE OR REPLACE FUNCTION hypothesisloop_coordinator_instructions_notify() RETURNS trigger AS $$
+BEGIN
+    PERFORM hypothesisloop_notify_event('agent.instructions', 'coordinator',
+        NEW.coordinator_agent_type_version::text, NEW.coordinator_agent_type, NEW.id, 'coordinator');
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS platform_experiments_coordinator_instructions_notify ON platform_experiments;
+CREATE TRIGGER platform_experiments_coordinator_instructions_notify AFTER UPDATE OF coordinator_instructions_xid ON platform_experiments
+    FOR EACH ROW WHEN (NEW.coordinator_instructions_xid IS DISTINCT FROM OLD.coordinator_instructions_xid)
+    EXECUTE FUNCTION hypothesisloop_coordinator_instructions_notify();

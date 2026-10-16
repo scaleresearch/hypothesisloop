@@ -245,7 +245,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			}
 			in.Body = body
 		}
-		if in.Body.Researchers, err = peh.resolvedPool(in.Body.Researchers); err != nil {
+		catalog, err := peh.svc.store.ProjectAgentTypeCatalog(ctx, in.Body.ProjectID)
+		if err != nil {
+			return nil, auth.Internal(peh.logger, "create platform experiment", err)
+		}
+		if in.Body.Researchers, err = peh.resolvedPool(catalog, in.Body.Researchers); err != nil {
 			return nil, err
 		}
 		hosting, err := peh.withHosting(ctx, in.Body)
@@ -259,7 +263,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		by := caller.Actor()
 		hosting.createdBy = &by
 		if hosting.CoordinatorHosted {
-			if hosting.agents, hosting.signups, err = peh.hostedAgents(poolAgents(hosting.Researchers), by, time.Now().UTC()); err != nil {
+			if hosting.agents, hosting.signups, err = peh.hostedAgents(catalog, poolAgents(hosting.Researchers), by, time.Now().UTC()); err != nil {
 				return nil, peh.refusal("create platform experiment", err)
 			}
 		}
@@ -465,7 +469,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		by := caller.Actor()
 		in.Body.by = &by
 		if in.Body.Researchers != nil {
-			resolved, err := peh.resolvedPool(*in.Body.Researchers)
+			catalog, err := peh.svc.store.AgentTypeCatalog(ctx, in.ID)
+			if err != nil {
+				return nil, peh.refusal("update platform experiment", err)
+			}
+			resolved, err := peh.resolvedPool(catalog, *in.Body.Researchers)
 			if err != nil {
 				return nil, err
 			}
@@ -567,10 +575,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			if peh.launch.CoordinatorModel == "" {
 				return nil, auth.Internal(peh.logger, "reopen platform experiment failed", errors.New("the handler has no agent launch settings"))
 			}
-			var err error
-			if _, model, err = domain.ResolveAgentLaunch("", in.Body.CoordinatorModel, peh.launch.CoordinatorModel, nil); err != nil {
+			if err := domain.ValidateModel(in.Body.CoordinatorModel); err != nil {
 				return nil, refuseSignup(400, "invalid_request", "coordinator_model: %s", err)
 			}
+			model = in.Body.CoordinatorModel
 		}
 		pe, err := peh.svc.Reopen(ctx, in.ID, in.Body.EndsAt, model)
 		if err != nil {

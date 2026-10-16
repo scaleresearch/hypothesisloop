@@ -17,8 +17,8 @@ import (
 // resolvedPool is pool as it is stored: each entry's agent type and model filled as a joining
 // agent's are, entries that come to name one agent type and model merged. 422 invalid_agents for
 // an entry no agent can be started as; validate holds the rest, max_agents among it.
-func (h *PlatformExperimentsHandler) resolvedPool(pool domain.ResearcherPool) (domain.ResearcherPool, error) {
-	resolved, err := pool.Resolved(h.launch.DefaultModel)
+func (h *PlatformExperimentsHandler) resolvedPool(catalog domain.AgentTypeCatalog, pool domain.ResearcherPool) (domain.ResearcherPool, error) {
+	resolved, err := pool.Resolved(catalog, h.launch.DefaultModel)
 	if err != nil {
 		return nil, refuseUpdate(422, "invalid_agents", "%s", err)
 	}
@@ -69,7 +69,11 @@ func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *do
 	if err != nil {
 		return fmt.Errorf("platform_experiments.KeepResearchers: %w", err)
 	}
-	pool, err := state.Pool.Resolved(launch.DefaultModel)
+	catalog, err := s.store.AgentTypeCatalog(ctx, pe.ID)
+	if err != nil {
+		return fmt.Errorf("platform_experiments.KeepResearchers: %w", err)
+	}
+	pool, err := state.Pool.Resolved(catalog, launch.DefaultModel)
 	if err != nil {
 		return fmt.Errorf("platform_experiments.KeepResearchers: the researchers of %s: %w", pe.ID, err)
 	}
@@ -101,12 +105,18 @@ func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *do
 		if refused[place.Entry.Model] {
 			continue
 		}
-		signup := domain.AgentSignup{
-			Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: launch.Launcher,
-			Flavor: place.Entry.AgentType, Model: place.Entry.Model, Hyperparameters: place.Entry.Hyperparameters, Actor: &by, Replaces: place.Replaces,
-		}
+		hyperparameters, tier := place.Entry.Hyperparameters, domain.QuotaTier("")
 		if predecessor, ok := predecessors[place.Replaces]; ok {
-			signup.Hyperparameters, signup.QuotaTier = predecessor.Hyperparameters, predecessor.QuotaTier
+			hyperparameters, tier = predecessor.Hyperparameters, predecessor.QuotaTier
+		}
+		choice, err := domain.ResolveAgentLaunch(catalog, domain.AgentRoleResearcher, place.Entry.AgentType, place.Entry.Model, launch.DefaultModel, hyperparameters)
+		if err != nil {
+			s.logger.Warn("keep researchers: an entry no researcher can be started as", zap.String("platform_experiment_id", pe.ID), zap.String("agent_type", place.Entry.AgentType), zap.Error(err))
+			continue
+		}
+		signup := domain.AgentSignup{
+			Role: domain.SignupRoleCompetitor, QuotaTier: tier, Hosted: true, Launcher: launch.Launcher,
+			Flavor: choice.AgentType, Model: choice.Model, Hyperparameters: choice.Hyperparameters, Actor: &by, Replaces: place.Replaces,
 		}
 		late, err := s.lateShare(ctx, pe)
 		if err != nil {

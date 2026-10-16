@@ -38,7 +38,7 @@ func aliveServer(t *testing.T, now time.Time, step, ago time.Duration) *httptest
 // every other method panics if ever reached, so a test that exercises an unexpected call fails
 // loudly instead of silently returning a zero value.
 type runningExpStore struct {
-	PlatformExperimentsStore
+	fakeStore
 	running []*domain.Experiment
 }
 

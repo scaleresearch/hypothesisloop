@@ -25,6 +25,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/settlement"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
@@ -85,6 +86,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("control-service: apply schema", zap.Error(err))
 	}
+	seedBuiltinAgentTypes(pool, modelDefaults(pcfg), logger)
 
 	metricsCtx, metricsCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	err = metricsdb.EnsureObservationTables(metricsCtx, metricsDBURL)
@@ -506,4 +508,28 @@ func requiredEnv(key string, logger *zap.Logger) string {
 		logger.Fatal(key + " environment variable is required")
 	}
 	return value
+}
+
+// modelDefaults is the platform's model for an agent and for a coordinator that names none.
+func modelDefaults(pcfg *hypothesisloopcfg.Config) domain.ModelDefaults {
+	return domain.ModelDefaults{Agent: pcfg.Agents.DefaultModel, Coordinator: pcfg.Agents.CoordinatorModel}
+}
+
+// seedBuiltinAgentTypes writes the built-in agent types this build holds, right after the schema
+// and under its lock, and pins every agent from before agent types to them.
+func seedBuiltinAgentTypes(pool *db.Pool, defaults domain.ModelDefaults, logger *zap.Logger) {
+	builtins, err := agenttypes.Builtins()
+	if err != nil {
+		logger.Fatal("control-service: built-in agent types", zap.Error(err))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	seeded, err := db.SeedBuiltinAgentTypes(ctx, pool, builtins, defaults)
+	if err != nil {
+		logger.Fatal("control-service: seed built-in agent types", zap.Error(err))
+	}
+	for _, s := range seeded {
+		logger.Info("built-in agent type has a new version", zap.String("agent_type", s.ID), zap.Int("version", s.Propagation.Version),
+			zap.Int("agents_moved", len(s.Propagation.Moved)), zap.Any("agents_not_moved", s.Propagation.Failed))
+	}
 }

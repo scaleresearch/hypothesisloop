@@ -216,12 +216,16 @@ VALUES ($1, $2, $3, $4, $5)`, agent.ID, agent.Name, agent.OrgID, agent.Performan
 		if signup.Actor != nil {
 			addedBy = *signup.Actor
 		}
+		agentType, version, err := agentTypePinTx(ctx, tx, platformExpID, signup.Flavor, domain.RoleOfSignup(signup.Role))
+		if err != nil {
+			return 0, err
+		}
 		tag, err := tx.Exec(ctx, `
-INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, flavor, hyperparameters, model, added_by_kind, added_by_id,
+INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, flavor, agent_type_version, hyperparameters, model, added_by_kind, added_by_id,
                                 replaces, replaces_xid)
-VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::text, CASE WHEN $12::text <> '' THEN pg_current_xact_id()::text::bigint END)
+VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $13, $8, $9, $10, $11, $12::text, CASE WHEN $12::text <> '' THEN pg_current_xact_id()::text::bigint END)
 ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
-			signup.Hosted, signup.Launcher, signup.Flavor, hyperparameters, signup.Model, string(addedBy.Kind), addedBy.ID, signup.Replaces)
+			signup.Hosted, signup.Launcher, agentType, hyperparameters, signup.Model, string(addedBy.Kind), addedBy.ID, signup.Replaces, version)
 		if err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: %w", err)
 		}
@@ -748,7 +752,7 @@ const researcherAtWorkSQL = `s.role = '` + string(domain.SignupRoleCompetitor) +
 // released, and why it ended: its platform experiment closed, it was cut, it finished, or it is
 // a planner whose answer is stored.
 var agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name, s.agent_id), s.role, s.quota_tier,
-       s.hosted, s.launcher, s.flavor, s.hyperparameters, s.model, s.signed_up_at,
+       s.hosted, s.launcher, s.flavor, COALESCE(s.agent_type_version, 0), s.hyperparameters, s.model, s.signed_up_at,
        s.instance_name, s.instance_restarts, s.instance_renewals, s.instance_stopped, s.instance_exited_at, s.instance_exit_log,
        s.instance_seen_at, s.instance_asked_at, s.instance_launch,
        s.instance_state, s.instance_progress_at, s.instance_end_reason, s.instance_activity, s.instance_activity_at,
@@ -770,7 +774,7 @@ func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 	var activity string
 	var activityAt *time.Time
 	if err := row.Scan(append([]any{&signup.PlatformExperimentID, &signup.AgentID, &signup.Name, &signup.Role, &signup.QuotaTier,
-		&signup.Hosted, &signup.Launcher, &signup.Flavor, &hyperparameters, &signup.Model, &signup.SignedUpAt,
+		&signup.Hosted, &signup.Launcher, &signup.Flavor, &signup.AgentTypeVersion, &hyperparameters, &signup.Model, &signup.SignedUpAt,
 		&instance.Name, &instance.Restarts, &instance.Renewals, &instance.Stopped, &instance.ExitedAt, &instance.ExitLog,
 		&instance.SeenAt, &instance.AskedAt, &instance.Launch, &instance.Reported, &instance.ProgressAt, &instance.EndReason, &activity, &activityAt,
 		&signup.FinishedAt, &signup.FinishedReason, &addedBy.Kind, &addedBy.ID, &signup.Replaces, &signup.ReplacedBy, &instance.Released, &signup.Ended}, more...)...); err != nil {

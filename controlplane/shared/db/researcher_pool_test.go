@@ -213,7 +213,7 @@ func TestAPlatformExperimentIsCreatedWithItsResearchersOrNotAtAll(t *testing.T) 
 				role = domain.SignupRoleBaseline
 			}
 			agents = append(agents, &domain.Agent{ID: id, CreatedAt: now})
-			signups = append(signups, domain.AgentSignup{AgentID: id, Role: role, Hosted: true, Launcher: "main", Flavor: "generalist", Model: "model-1"})
+			signups = append(signups, domain.AgentSignup{AgentID: id, Role: role, Hosted: true, Launcher: "main", Model: "model-1"})
 		}
 		return pe.ID, pes.CreatePlatformExperiment(ctx, pe, agents, signups)
 	}

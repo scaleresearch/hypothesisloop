@@ -77,7 +77,7 @@ func trimTexts(spec CreatePlatformExperimentRequest) (CreatePlatformExperimentRe
 // validate is the one check of what a platform experiment is, whoever states it: a create, a
 // planner's proposal, the person accepting one or a patch of an existing one. It returns spec as it is stored,
 // with the platform's settings where spec leaves a field to them, and refuses with every problem it finds.
-func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
+func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentRequest, catalog domain.AgentTypeCatalog) (CreatePlatformExperimentRequest, error) {
 	spec, err := trimTexts(s.withSettings(spec))
 	if err != nil {
 		return spec, err
@@ -119,7 +119,7 @@ func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentReque
 			len(spec.Stages), spec.MaxAgents, domain.MinResearchersForCut)
 	}
 	if spec.MaxAgents > 0 {
-		if err := spec.Researchers.Check(spec.MaxAgents); err != nil {
+		if err := spec.Researchers.Check(spec.MaxAgents, catalog); err != nil {
 			refuse("invalid_agents", "%s: researchers is the researchers it is to have at work, [{agent_type, model, hyperparameters, count}]", err)
 		}
 	}
@@ -197,8 +197,11 @@ func requireImage(offered []domain.JobImage, clusters []domain.Cluster, image st
 // the agents req carries signed up in the same write.
 func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatformExperimentRequest) (*domain.PlatformExperiment, error) {
 	now := time.Now().UTC()
-	req, err := s.validate(req)
+	catalog, err := s.store.ProjectAgentTypeCatalog(ctx, req.ProjectID)
 	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
+	}
+	if req, err = s.validate(req, catalog); err != nil {
 		return nil, err
 	}
 	if _, err := s.requireReachable(ctx, req.ProjectID, nil); err != nil {
@@ -421,13 +424,17 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	// neither writes it nor loses it.
 	authored, _ := splitMeasuredBaseline(patched.Description)
 	_, measured := splitMeasuredBaseline(pe.Description)
+	catalog, err := s.store.AgentTypeCatalog(ctx, pe.ID)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.Update: %w", err)
+	}
 	checked, err := s.validate(CreatePlatformExperimentRequest{
 		Name: patched.Name, Description: authored,
 		BudgetAcceleratorHours: patched.BudgetAcceleratorHours, MaxAgents: patched.MaxAgents, Researchers: patched.Researchers,
 		MaxConcurrentAccelerators: patched.MaxConcurrentAccelerators, Metrics: patched.Metrics,
 		ReportIntervalSeconds: patched.ReportIntervalSeconds, StartsAt: patched.StartsAt, DurationHours: patched.DurationHours,
 		Stages: patched.Stages, DefaultQuotaTier: string(patched.DefaultQuotaTier),
-	})
+	}, catalog)
 	if err != nil {
 		return nil, err
 	}

@@ -28,7 +28,7 @@ const agentsTestSecret = "a-signing-secret-only-this-test-knows"
 
 // rosterStore is a platform experiment's roster in memory, with the store's own refusals.
 type rosterStore struct {
-	PlatformExperimentsStore
+	fakeStore
 	pe      *domain.PlatformExperiment
 	agents  map[string]*domain.Agent
 	signups []domain.AgentSignup
@@ -469,7 +469,7 @@ func TestARegisteredAgentJoinsByIDAndJoiningAgainReturnsTheSameTokenAndChangesNo
 	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", OrgID: "org-a"}
 	r := agentsRouter(t, store, staff)
 
-	code, first := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"agent_id":"veteran","role":"baseline","quota_tier":"burst_only","flavor":"generalist"}`)
+	code, first := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"agent_id":"veteran","role":"baseline","quota_tier":"burst_only","flavor":"baseline"}`)
 	if code != http.StatusCreated {
 		t.Fatalf("status = %d: %v", code, first)
 	}

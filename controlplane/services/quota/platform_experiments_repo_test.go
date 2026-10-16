@@ -148,7 +148,7 @@ func (f *fakeRepositories) File(_ context.Context, projectID, repository, _ stri
 }
 
 type createdStore struct {
-	PlatformExperimentsStore
+	fakeStore
 	created []*domain.PlatformExperiment
 	// prior are the prior runs of every platform experiment it holds.
 	prior []string
