@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -14,6 +15,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/launcherapi"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/modelproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
@@ -47,6 +49,10 @@ func testRouter(t *testing.T) chi.Router {
 	unreachable := authtest.As{Kind: auth.KindStaff}
 	platformExperiments := quota.NewPlatformExperimentsHandler(nil, noRepositories{}, quota.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}, zap.NewNop()).
 		WithAgentLaunch(quota.AgentLaunch{Launcher: "launcher", DefaultModel: "model", CoordinatorModel: "model", SigningSecret: "secret", MaxHosted: 1})
+	modelProxy, err := modelproxy.New(noOneHosted{}, modelproxy.MetricsDB{}, "https://model.example.invalid", "credential", zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
 	return newRouter(apiGate{tokens: unreachable, access: auth.NewAccess(authtest.Placement{})}, "http://ui.test", routes{
 		quota:               &quota.Handler{},
 		platformExperiments: platformExperiments,
@@ -60,8 +66,14 @@ func testRouter(t *testing.T) chi.Router {
 		watch:               &registry.WatchHandler{},
 		clusterAgent:        &clusteragentapi.Handler{},
 		launcher:            &launcherapi.Handler{},
+		modelProxy:          modelProxy,
+		modelUsage:          modelproxy.MetricsDB{},
 	}, zap.NewNop())
 }
+
+type noOneHosted struct{}
+
+func (noOneHosted) Hosted(context.Context, string, string) (bool, error) { return false, nil }
 
 var pathParam = regexp.MustCompile(`\{[^}]+\}`)
 

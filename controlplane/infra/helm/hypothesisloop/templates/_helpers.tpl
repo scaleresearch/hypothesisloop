@@ -32,7 +32,7 @@ Every ${NAME} of the rendered hypothesisloop.yaml, for the two processes that lo
 is in no file: both read it from the environment.
 */}}
 {{- define "hypothesisloop.configSecretEnv" -}}
-{{- $keys := list "DATABASE_URL" "HYPOTHESISLOOP_SIGNING_SECRET" "OBJECT_STORE_ACCESS_KEY_ID" "OBJECT_STORE_SECRET_ACCESS_KEY" -}}
+{{- $keys := list "DATABASE_URL" "HYPOTHESISLOOP_SIGNING_SECRET" "MODEL_ANTHROPIC_OAUTH_TOKEN" "OBJECT_STORE_ACCESS_KEY_ID" "OBJECT_STORE_SECRET_ACCESS_KEY" -}}
 {{- if eq .Values.gitHost.provider "github" -}}
 {{- $keys = concat $keys (list "HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY") -}}
 {{- else if and (eq .Values.gitHost.provider "plain") .Values.gitHost.plain.username -}}

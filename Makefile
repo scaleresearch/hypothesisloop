@@ -46,6 +46,8 @@ export HOST_ADDRESS REGISTRY_PUBLISH_IP REGISTRY_REACHABLE_IP REGISTRY TAG
 # made by the first render in localdev/.run/signing-secret (localdev/lib/auth.sh reads it) and
 # reaches compose, the scripts and the tests from here.
 export HYPOTHESISLOOP_SIGNING_SECRET ?= $(shell bash -c '. localdev/lib/auth.sh && printf %s "$$HYPOTHESISLOOP_SIGNING_SECRET"')
+# The model credential the settings name, from .env (localdev/lib/auth.sh), for compose's control plane.
+export MODEL_ANTHROPIC_OAUTH_TOKEN ?= $(shell bash -c '. localdev/lib/auth.sh && printf %s "$$MODEL_ANTHROPIC_OAUTH_TOKEN"')
 REGISTRY_TLS_VERIFY ?= false
 # Run before every push. A registry whose login expires logs in here (set by the deployment tooling); the
 # dev registry takes none.

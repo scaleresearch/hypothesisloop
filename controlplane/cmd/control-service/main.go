@@ -21,6 +21,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/environments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/gitproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/launcherapi"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/modelproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
@@ -98,6 +99,12 @@ func main() {
 	metricsCtx, metricsCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	err = metricsdb.EnsureObservationTables(metricsCtx, metricsDBURL)
 	metricsCancel()
+	if err != nil {
+		logger.Fatal("control-service: metrics store tables", zap.Error(err))
+	}
+	modelUsageCtx, modelUsageCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	err = metricsdb.EnsureModelUsageTable(modelUsageCtx, metricsDBURL)
+	modelUsageCancel()
 	if err != nil {
 		logger.Fatal("control-service: metrics store tables", zap.Error(err))
 	}
@@ -263,6 +270,12 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		return out, nil
 	}
 
+	modelProxy, err := modelproxy.New(db.NewPlatformExperimentsStore(pool), modelproxy.MetricsDB{URL: metricsDBURL},
+		modelproxy.AnthropicUpstream, pcfg.Models.Anthropic.OAuthToken, logger)
+	if err != nil {
+		logger.Fatal("control-service: configure the model proxy", zap.Error(err))
+	}
+
 	r := newRouter(gate, pcfg.Auth.UIOrigin, routes{
 		quota:               handler,
 		platformExperiments: peHandler,
@@ -290,6 +303,8 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 			*db.PlatformExperimentsStore
 			*db.EnvironmentsStore
 		}{db.NewPlatformExperimentsStore(pool), store.EnvironmentsStore}, gitHost, logger),
+		modelProxy: modelProxy,
+		modelUsage: modelproxy.MetricsDB{URL: metricsDBURL},
 	}, logger)
 
 	return &http.Server{
@@ -320,6 +335,8 @@ type routes struct {
 	clusterAgent        *clusteragentapi.Handler
 	launcher            *launcherapi.Handler
 	gitProxy            *gitproxy.Proxy
+	modelProxy          *modelproxy.Proxy
+	modelUsage          modelproxy.UsageReader
 }
 
 // webSockets are the paths a WebSocket client opens, with the subprotocol that carries its token.
@@ -352,6 +369,9 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	r.Get("/watch", h.watch.ServeHTTP)
 	// git's smart HTTP is no JSON API, so it is mounted beside the documented operations.
 	r.Handle(auth.GitPrefix+"*", h.gitProxy)
+	// The model calls of hosted agents are the provider's own API, passed on with the platform's
+	// credential, and no operation of this one.
+	r.Handle(modelproxy.Prefix+"*", h.modelProxy)
 
 	// Cluster-agent traffic (Go cluster-agent binaries, not research agents) keeps its own
 	// registration and its own docs under a distinct prefix — a different audience entirely.
@@ -384,6 +404,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	accounts.RegisterAgentTypesHuma(doc, h.agentTypes)
 	accounts.RegisterRepositoriesHuma(doc, h.repositories)
 	scheduler.RegisterHuma(doc, h.scheduler)
+	modelproxy.RegisterHuma(doc, h.modelUsage, logger)
 	registry.RegisterHuma(doc, h.registry)
 	// /watch itself cannot be registered here (it is an upgrade), but its vocabulary can be, so
 	// an agent reading /explore learns what the stream carries rather than having to be told.

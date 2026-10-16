@@ -27,6 +27,7 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 	// secrets, its identity provider and its registry are that machine's.
 	render(t, repo, dir, rendered, `HL_ENVIRONMENTS_REPOSITORY=""`)
 	t.Setenv("HYPOTHESISLOOP_SIGNING_SECRET", "a-signing-secret-only-this-test-knows")
+	t.Setenv("MODEL_ANTHROPIC_OAUTH_TOKEN", "a-model-credential-only-this-test-knows")
 	t.Setenv("HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD", "a-password-only-this-test-knows")
 	cfg, err := Load(rendered)
 	if err != nil {
@@ -102,6 +103,7 @@ func TestTheLocalReachableAddressIsTheOneAddressEveryClusterIsHanded(t *testing.
 	rendered := filepath.Join(dir, "rendered.yaml")
 	render(t, repo, dir, rendered, `HL_ENVIRONMENTS_REPOSITORY=""`)
 	t.Setenv("HYPOTHESISLOOP_SIGNING_SECRET", "a-signing-secret-only-this-test-knows")
+	t.Setenv("MODEL_ANTHROPIC_OAUTH_TOKEN", "a-model-credential-only-this-test-knows")
 	t.Setenv("HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD", "a-password-only-this-test-knows")
 	cfg, err := Load(rendered)
 	if err != nil {

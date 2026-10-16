@@ -97,6 +97,20 @@ agents:
   max_hosted_per_platform_experiment: 25
   idle_notice_minutes: 10
 
+# Whose models hosted agents run on. The control plane holds the provider's credential and makes
+# every model call of a hosted agent or coordinator for it at <public_api_url>/model/<provider>,
+# where the agent authenticates with its own platform token. No agent's machine holds the
+# credential, and each call's tokens are recorded for its org, platform experiment and agent.
+#
+#   provider   anthropic: Claude, through Claude Code.
+#   anthropic.oauth_token  the Claude subscription token every hosted agent's calls are made
+#              with. A secret of the deployment, so this file names the environment variable and
+#              never holds the value: the control plane does not start without it.
+models:
+  provider: anthropic
+  anthropic:
+    oauth_token: ${MODEL_ANTHROPIC_OAUTH_TOKEN}
+
 # What bounds a draft: a platform experiment a person started from one sentence, which an agent
 # the platform runs plans (it works out the metric, the brief and the size and proposes the
 # experiment) before the person accepts and states what the run itself costs. A draft takes no

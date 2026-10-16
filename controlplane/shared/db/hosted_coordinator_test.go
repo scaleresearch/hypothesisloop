@@ -27,6 +27,32 @@ func createTestPEWithCoordinator(t *testing.T, pool *Pool, launcher string) stri
 	return pe.ID
 }
 
+func TestHostedSaysWhoThePlatformRuns(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	coordinated := createTestPEWithCoordinator(t, pool, "main")
+	plain := "pe-" + uuid.New().String()[:8]
+	createTestPE(t, pool, plain, 10)
+	agents := spawnTestAgents(t, pes, plain, domain.AgentSignup{Hosted: true, Launcher: "main"}, domain.AgentSignup{})
+	for _, tc := range []struct {
+		name, pe, agent string
+		want            bool
+	}{
+		{"a hosted coordinator", coordinated, "", true},
+		{"a coordinator the platform does not run", plain, "", false},
+		{"a hosted agent", plain, agents[0], true},
+		{"an agent run elsewhere", plain, agents[1], false},
+		{"an agent of another platform experiment", coordinated, agents[0], false},
+		{"no platform experiment", "pe-missing", "", false},
+	} {
+		got, err := pes.Hosted(ctx, tc.pe, tc.agent)
+		if err != nil || got != tc.want {
+			t.Errorf("%s: got = %v, %v, want = %v", tc.name, got, err, tc.want)
+		}
+	}
+}
+
 func TestAHostedCoordinatorIsStoredReadAndListedOnlyWhereItIsOne(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()

@@ -11,7 +11,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const signingSecretEnv = "HYPOTHESISLOOP_SIGNING_SECRET"
+const (
+	signingSecretEnv   = "HYPOTHESISLOOP_SIGNING_SECRET"
+	modelCredentialEnv = "MODEL_ANTHROPIC_OAUTH_TOKEN"
+)
 
 // productionConfig is the committed settings file, with the deployment's secret in the
 // environment as every deployment supplies it.
@@ -27,6 +30,7 @@ func productionConfig(t *testing.T) string {
 func withoutGitHost(t *testing.T) string {
 	t.Helper()
 	t.Setenv(signingSecretEnv, "a-signing-secret-only-this-test-knows")
+	t.Setenv(modelCredentialEnv, "a-model-credential-only-this-test-knows")
 	b, err := os.ReadFile(committedConfig)
 	if err != nil {
 		t.Fatal(err)
@@ -148,6 +152,43 @@ func TestTheSigningSecretComesFromTheEnvironmentAndIsRequired(t *testing.T) {
 	}
 }
 
+// The model credential is the control plane's alone: the committed file names its variable, and a
+// control plane without it does not start, since no hosted agent could make a model call.
+func TestTheModelCredentialComesFromTheEnvironmentAndIsRequired(t *testing.T) {
+	text := productionConfig(t)
+	if !strings.Contains(text, "models:\n  provider: anthropic\n  anthropic:\n    oauth_token: ${"+modelCredentialEnv+"}\n") {
+		t.Fatal("the committed settings hold a model credential or no models section; they must name the environment variable")
+	}
+	cfg, err := loadConfigText(t, text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Models.Anthropic.OAuthToken != "a-model-credential-only-this-test-knows" {
+		t.Fatal("the credential was not read from the environment")
+	}
+	t.Setenv(modelCredentialEnv, "")
+	if err := loadText(t, text); err == nil || !strings.Contains(err.Error(), "oauth_token") {
+		t.Fatalf("Load with an empty credential: got = %v, want it refused", err)
+	}
+	os.Unsetenv(modelCredentialEnv)
+	if err := loadText(t, text); err == nil || !strings.Contains(err.Error(), modelCredentialEnv) {
+		t.Fatalf("Load without the variable: got = %v, want an error naming it", err)
+	}
+	t.Setenv(modelCredentialEnv, "set")
+	if err := loadText(t, strings.Replace(text, "  provider: anthropic\n", "  provider: other\n", 1)); err == nil {
+		t.Fatal("Load accepted a model provider it has no proxy for")
+	}
+}
+
+func loadConfigText(t *testing.T, text string) (*Config, error) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return Load(path)
+}
+
 func TestLoadRequiresTheUIOrigin(t *testing.T) {
 	text := strings.Replace(productionConfig(t), "  ui_origin: http://localhost:3000", `  ui_origin: ""`, 1)
 	if err := loadText(t, text); err == nil {
@@ -186,6 +227,7 @@ func TestLoadRequiresEveryIdentityProviderToBeCompleteAndListedOnce(t *testing.T
 
 func TestLoadRefusesTheCommittedFileUntilItsPlaceholdersAreFilledIn(t *testing.T) {
 	t.Setenv(signingSecretEnv, "a-signing-secret-only-this-test-knows")
+	t.Setenv(modelCredentialEnv, "a-model-credential-only-this-test-knows")
 	if _, err := Load(committedConfig); err == nil || !strings.Contains(err.Error(), "placeholder") {
 		t.Fatalf("Load of the committed settings: got = %v, want it refused for its placeholders", err)
 	}

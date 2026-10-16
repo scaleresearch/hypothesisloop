@@ -286,6 +286,24 @@ type AgentsConfig struct {
 	IdleNoticeMinutes int `yaml:"idle_notice_minutes"`
 }
 
+// ModelsConfig is whose models hosted agents run on. The control plane holds that provider's
+// credential and makes every model call of a hosted agent for it (services/modelproxy), so no
+// agent's machine holds the credential. Provider names it, and the section of that name, the only
+// one set, configures it.
+type ModelsConfig struct {
+	Provider  string                 `yaml:"provider"`
+	Anthropic *AnthropicModelsConfig `yaml:"anthropic"`
+}
+
+const ModelProviderAnthropic = "anthropic"
+
+// AnthropicModelsConfig is Claude, which hosted agents run through Claude Code.
+type AnthropicModelsConfig struct {
+	// OAuthToken is the Claude subscription token every hosted agent's model calls are made with,
+	// a secret of the deployment: the settings file names the environment variable that holds it.
+	OAuthToken string `yaml:"oauth_token"`
+}
+
 // PlanningConfig bounds a draft: a platform experiment being planned from one sentence by an
 // agent the platform runs, before a person accepts its proposal. The platform pays for its machine.
 type PlanningConfig struct {
@@ -442,6 +460,7 @@ type Config struct {
 	Services         ServicesConfig          `yaml:"services"`
 	Auth             AuthConfig              `yaml:"auth"`
 	Agents           AgentsConfig            `yaml:"agents"`
+	Models           ModelsConfig            `yaml:"models"`
 	Planning         PlanningConfig          `yaml:"planning"`
 	Accounts         AccountsConfig          `yaml:"accounts"`
 	Runtimes         RuntimesConfig          `yaml:"runtimes"`

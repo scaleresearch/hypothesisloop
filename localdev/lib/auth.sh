@@ -102,6 +102,16 @@ case "${HL_GIT_HOST_PROVIDER}" in
   *) lib_git_host_provider || return 1 2>/dev/null || exit 1 ;;
 esac
 
+# The Claude subscription token the local control plane makes every hosted agent's model calls
+# with (models in the settings), MODEL_ANTHROPIC_OAUTH_TOKEN in .env. It reaches the processes
+# that load the rendered settings (the control plane, hl-admin) through the variable exported
+# here, and no agent's machine. The control plane does not start without it.
+MODEL_ANTHROPIC_OAUTH_TOKEN=""
+if [[ -f "${LIB_AUTH_REPO}/.env" ]]; then
+  MODEL_ANTHROPIC_OAUTH_TOKEN="$(lib_env_value MODEL_ANTHROPIC_OAUTH_TOKEN)"
+fi
+export MODEL_ANTHROPIC_OAUTH_TOKEN
+
 # The container registry CONTAINER_REGISTRY_PROVIDER in .env names, read from that provider's own
 # keys. lib_container_registry sets HL_REGISTRY, the address the deployment's images are pushed
 # under, which make dev-hosted runs them from; HL_ENVIRONMENTS_REPOSITORY, where local

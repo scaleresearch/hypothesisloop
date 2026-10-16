@@ -75,6 +75,21 @@ const instanceColumns = `COALESCE(i.name, ''), COALESCE(i.restarts, 0), COALESCE
 const stoppedSQL = `EXISTS (SELECT 1 FROM hosted_instances stopped
         WHERE stopped.platform_experiment_id = s.platform_experiment_id AND stopped.agent_id = s.agent_id AND stopped.stopped)`
 
+// hostedSQL is whether the platform runs the agent $2 of platform experiment $1, or with $2 empty
+// its coordinator.
+const hostedSQL = `(EXISTS (SELECT 1 FROM experiment_signups s WHERE s.platform_experiment_id = $1 AND s.agent_id = $2 AND s.hosted)
+   OR $2 = '' AND EXISTS (SELECT 1 FROM platform_experiments pe WHERE pe.id = $1 AND pe.coordinator_hosted))`
+
+// Hosted reports whether the platform runs the agent agentID of a platform experiment, or with no
+// agentID its coordinator.
+func (s *PlatformExperimentsStore) Hosted(ctx context.Context, platformExpID, agentID string) (bool, error) {
+	var hosted bool
+	if err := s.pool.pool.QueryRow(ctx, `SELECT `+hostedSQL, platformExpID, agentID).Scan(&hosted); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.Hosted: %w", err)
+	}
+	return hosted, nil
+}
+
 // AskInstance records the name a hosted agent's machine, or with no agentID a hosted
 // coordinator's, is asked for under, and when. launch identifies what the machine is started
 // with: under the launch the restart budget was spent under it stands, and under another the
@@ -84,8 +99,7 @@ func (s *PlatformExperimentsStore) AskInstance(ctx context.Context, platformExpI
 	_, err := s.pool.pool.Exec(ctx, `
 INSERT INTO hosted_instances AS i (platform_experiment_id, agent_id, name, launch, asked_at)
 SELECT $1, $2, $3, $4, now()
-WHERE EXISTS (SELECT 1 FROM experiment_signups s WHERE s.platform_experiment_id = $1 AND s.agent_id = $2 AND s.hosted)
-   OR $2 = '' AND EXISTS (SELECT 1 FROM platform_experiments pe WHERE pe.id = $1 AND pe.coordinator_hosted)
+WHERE `+hostedSQL+`
 ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE
 SET name = $3, asked_at = now(), seen_at = NULL, launch = $4, machine = '',
     state = '', progress = '', progress_at = NULL, activity = '', activity_at = NULL,

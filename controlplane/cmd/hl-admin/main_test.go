@@ -32,6 +32,7 @@ func settingsPath(t *testing.T) string {
 	}
 	t.Setenv("HYPOTHESISLOOP_CONFIG", path)
 	t.Setenv("HYPOTHESISLOOP_SIGNING_SECRET", "a-signing-secret-only-this-test-knows")
+	t.Setenv("MODEL_ANTHROPIC_OAUTH_TOKEN", "a-model-credential-only-this-test-knows")
 	return path
 }
 

@@ -297,6 +297,14 @@ func (c *Config) build() error {
 	if c.Agents.IdleNoticeMinutes <= 0 {
 		return fmt.Errorf("agents idle_notice_minutes is required and positive: how long a researcher may go with no job in flight before it and the coordinator are told")
 	}
+	switch m := c.Models; m.Provider {
+	case ModelProviderAnthropic:
+		if m.Anthropic == nil || m.Anthropic.OAuthToken == "" {
+			return fmt.Errorf("models anthropic oauth_token is required: the Claude subscription token hosted agents' model calls are made with")
+		}
+	default:
+		return fmt.Errorf("models provider %q is not %s: the provider whose models hosted agents run on", m.Provider, ModelProviderAnthropic)
+	}
 	if c.Planning.LimitMinutes <= 0 {
 		return fmt.Errorf("planning limit_minutes is required and positive: how long a draft's planner has to propose")
 	}
