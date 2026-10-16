@@ -250,6 +250,34 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(lines[1]["message"]["content"][0]["signature"], "sig")
         self.assertEqual(lines[2], {"type": "last-prompt", "leafUuid": "a-1", "sessionId": "s-1"})
 
+    # A new current version of the agent's type reaches the running harness as agent.instructions:
+    # the session is resumed in place, on the same machine, with the new prompt and its whole
+    # history, and nothing of the agent's on the platform is touched, its jobs least of all: the
+    # harness only reads.
+    async def test_a_new_version_swaps_the_prompt_in_place_keeping_history_and_leaves_jobs_alone(self):
+        setup = _setup()
+        platform_calls = []
+
+        def read(name):
+            def call(*args):
+                platform_calls.append(name)
+                return {"status": "running"} if name == "get_platform_experiment" else {}
+            return call
+
+        setup.client = SimpleNamespace(get_platform_experiment=read("get_platform_experiment"), get_signup=read("get_signup"))
+        transcript = _transcript(self.home)
+        first = served(setup.cfg)
+        edited = served(setup.cfg, version=2, digest="digest-2", prompt="the prompt of version 2")
+        rotated, _ = await self.run_session([first, edited], [[OWN], []], [[_result()]], setup=setup)
+        self.assertTrue(rotated)
+        self.assertIsNone(run._load_handoff(setup))
+        rotated, client = await self.run_session([edited], [[]], [], resume_id="s-1", setup=setup)
+        self.assertFalse(rotated)
+        self.assertEqual((client.options.system_prompt, client.options.resume), ("the prompt of version 2" + run._FILE_TOOLS_NOTE, "s-1"))
+        self.assertEqual([line["uuid"] for line in _lines(transcript) if "uuid" in line], ["u-1", "a-1"])
+        self.assertEqual(run._running.version, 2)
+        self.assertTrue(set(platform_calls) <= {"get_platform_experiment", "get_signup"}, platform_calls)
+
     # A transcript that records no prompt cannot be resumed with another: a CLI that stopped
     # recording one would resume with whatever it keeps instead. That session is handed off.
     async def test_a_new_prompt_hands_off_when_the_transcript_records_none_to_replace(self):

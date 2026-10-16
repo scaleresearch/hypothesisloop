@@ -31,11 +31,12 @@ THINKING = "thinking"
 WAITING = "waiting for platform updates"
 
 
-def state_line(subagents: int, working: bool, since: float, digest: str, model: dict[str, object]) -> str:
-    """The state line: subagents, turn and since, the instructions_digest once the harness runs
-    instructions, then the model_ fields of model that are known."""
+def state_line(subagents: int, working: bool, since: float, digest: str, version: int, model: dict[str, object]) -> str:
+    """The state line: subagents, turn and since, the instructions_digest and the version of the
+    agent type they are once the harness runs instructions, then the model_ fields of model that
+    are known."""
     fields = {"subagents": subagents, "turn": "working" if working else "waiting", "since": int(since),
-              **({"instructions_digest": digest[:DIGEST_LENGTH]} if digest else {}),
+              **({"instructions_digest": digest[:DIGEST_LENGTH], "version": version} if digest else {}),
               **{f"model_{k}": v for k, v in model.items() if v is not None}}
     return " ".join([STATE_PREFIX] + [f"{k}={v}" for k, v in fields.items()])
 
@@ -70,6 +71,7 @@ class Progress:
         self._subagents = 0
         self._turn_since = wall()
         self._digest = ""
+        self._version = 0
         self._model: dict[str, object] = {}
 
     def awaiting(self) -> None:
@@ -108,9 +110,10 @@ class Progress:
         """How many subagents of the agent are live from now on."""
         self._subagents = live
 
-    def instructions(self, digest: str) -> None:
-        """The digest of the instructions the agent runs from now on."""
-        self._digest = digest
+    def instructions(self, digest: str, version: int) -> None:
+        """The digest of the instructions the agent runs from now on, and the version of its agent
+        type they are."""
+        self._digest, self._version = digest, version
 
     def model(self, status: str, kind: str | None, utilization: float | None, resets_at: int | None) -> None:
         """The model provider's rate limit as the CLI said it last."""
@@ -130,7 +133,7 @@ class Progress:
             self._count += 1
             self._emit(f"{PREFIX} {self._count}")
             self._say()
-            self._emit(state_line(self._subagents, self._awaiting_since is not None, self._turn_since, self._digest, self._model))
+            self._emit(state_line(self._subagents, self._awaiting_since is not None, self._turn_since, self._digest, self._version, self._model))
 
     async def run(self) -> None:
         while True:

@@ -117,12 +117,12 @@ class ProgressTest(unittest.TestCase):
 
     # launcherapi.parseHarnessState reads instructions_digest and the launcher keeps 200 characters.
     def test_the_state_carries_the_digest_of_the_instructions_it_runs_within_the_launchers_limit(self):
-        self.progress.instructions("0123456789abcdef" * 4)
+        self.progress.instructions("0123456789abcdef" * 4, 12)
         self.progress.awaiting()
         self.progress.model("allowed_warning", "seven_day_opus", 0.95, 1760090000)
         self.progress.subagents(12)
         self.progress.beat()
-        self.assertEqual(self.states[-1], "hl-state subagents=12 turn=working since=1760000000 instructions_digest=0123456789ab "
+        self.assertEqual(self.states[-1], "hl-state subagents=12 turn=working since=1760000000 instructions_digest=0123456789ab version=12 "
                                           "model_status=allowed_warning model_type=seven_day_opus model_utilization=0.95 model_resets_at=1760090000")
         self.assertLessEqual(len(self.states[-1].removeprefix("hl-state ")), 200)
 
@@ -186,7 +186,7 @@ class BeatInTheRunLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({line for line in printed if line not in markers and not line.startswith(progress.STATE_PREFIX)},
                          {"hl-activity thinking"})
         self.assertRegex([line for line in printed if line.startswith(progress.STATE_PREFIX)][-1],
-                         r"^hl-state subagents=0 turn=working since=\d+ instructions_digest=digest-1$")
+                         r"^hl-state subagents=0 turn=working since=\d+ instructions_digest=digest-1 version=1$")
 
 
 class StreamingClient:

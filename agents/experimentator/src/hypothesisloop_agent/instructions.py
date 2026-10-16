@@ -1,7 +1,7 @@
-"""The instructions an agent runs with: the prompt of the version of its agent type it is pinned to
-and that version's settings, as the platform serves them. They are read at the start of each
-connection, and again at the next turn boundary once agent.instructions says the agent was moved
-to another version."""
+"""The instructions an agent runs with: the prompt of the current version of its agent type and its
+settings, as the platform serves them. They are read at the start of each connection, and again at
+the next turn boundary once agent.instructions says they changed: the type has a new current
+version, or the platform's rules do."""
 from __future__ import annotations
 
 import dataclasses
@@ -11,8 +11,8 @@ from dataclasses import dataclass
 
 from hypothesisloop_agent import api_client, config, prompt
 
-# The event that says the agent's type was edited and the agent moved to the new version. Its
-# subject is the agent, or config.COORDINATOR for the coordinator's own.
+# The event that says what the agent is served changed. Its subject is the agent, or
+# config.COORDINATOR for the coordinator's own.
 EVENT = "agent.instructions"
 # Where the instructions the session in the state directory runs with are kept, so that a session
 # resumed on another machine is compared with what it was started with.
