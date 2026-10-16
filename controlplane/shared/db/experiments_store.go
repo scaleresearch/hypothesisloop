@@ -55,7 +55,7 @@ var ErrDuplicateExperiment = errors.New("experiment already exists")
 // createExperiment inserts a new experiment row.
 func createExperiment(ctx context.Context, executor sqlExecutor, exp *domain.Experiment) error {
 	if exp.CapacityTier == "" {
-		exp.CapacityTier = domain.CapacityGuaranteed
+		return fmt.Errorf("experiments_store.CreateExperiment: job %s names no capacity tier: admission decides it", exp.ID)
 	}
 	if exp.Status == domain.StatusQueued && exp.NotAdmittedReason == "" {
 		exp.NotAdmittedReason = domain.QueueReasonAwaitingAdmission
