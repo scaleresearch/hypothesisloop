@@ -6,7 +6,7 @@ import { Field, Label } from '@headlessui/react'
 import { ApiError, GITHUB_NOT_CONFIGURED, fetchHosting } from '@/lib/api'
 import type { ExperimentDraft } from '@/lib/api'
 import { useGitHubApp } from '@/lib/github-connect'
-import { GOAL_EXAMPLES, SUGGESTED } from '@/lib/goal-examples'
+import { GOAL_EXAMPLES } from '@/lib/goal-examples'
 import { createDraft, formDraftFromGoal, hostingRefusal, MAX_GOAL_LENGTH } from '@/lib/planning'
 import type { Draft } from '@/lib/planning'
 import type { StatusReason } from '@/types'
@@ -49,7 +49,7 @@ function useTypedExamples(stopped: boolean): string {
       setShown(text.slice(0, length))
       if (length > 0) timer = setTimeout(erase, ERASE)
       else {
-        text = GOAL_EXAMPLES[next].brief
+        text = GOAL_EXAMPLES[next]
         next = (next + 1) % GOAL_EXAMPLES.length
         timer = setTimeout(type, GAP)
       }
@@ -121,15 +121,6 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
     }
   }
 
-  function fillExample(brief: string) {
-    setTouched(true)
-    setGoal(brief)
-    const el = box.current
-    if (!el) return
-    el.focus()
-    requestAnimationFrame(() => el.setSelectionRange(brief.length, brief.length))
-  }
-
   async function configure() {
     setMoving(true)
     setError(null)
@@ -161,22 +152,6 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
           void plan()
         }}
       />
-      {goal === '' && (
-        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 px-6 pb-2 text-xs text-muted">
-          <span>Try</span>
-          {GOAL_EXAMPLES.slice(0, SUGGESTED).map(example => (
-            <button
-              key={example.label}
-              type="button"
-              title={example.brief}
-              className="rounded-full border border-border px-2.5 py-0.5 transition-colors hover:border-border-strong hover:text-foreground"
-              onClick={() => fillExample(example.brief)}
-            >
-              {example.label}
-            </button>
-          ))}
-        </div>
-      )}
       <BriefGuide note="Anything you leave out, the planner proposes, and you review the whole plan before anything runs or is spent." className="px-6 pb-3" />
       {unavailable && (
         <div className="px-4 pb-3">
