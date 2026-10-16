@@ -6,7 +6,7 @@ hl saved, so a batch waits server-side instead of in this process, survives a re
 delivered once whichever of the two hands it over, which is when its cursor moves. An event is a
 pointer; a job that ended is handed over with the machine it ran on and its metrics, so that
 learning of it costs no call. What stands around the batch (time, capacity, budget, standings,
-jobs and subagents in flight, allowances) comes with every prompt as the situation.
+jobs and subagents in flight) comes as the situation with every prompt that starts a turn.
 """
 from __future__ import annotations
 

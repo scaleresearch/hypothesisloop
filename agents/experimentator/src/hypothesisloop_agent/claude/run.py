@@ -156,7 +156,7 @@ def _updates_hook(setup: core.RunSetup, watch_env: dict[str, str], handing: asyn
         async with handing:
             env = updates.taking(watch_env, "draining")
             events = await updates.drain(env)
-            told = await _told(setup, watch_env, events)
+            told = await _told(setup, events)
             updates.delivered(env)
         if not told:
             return {}
@@ -724,19 +724,20 @@ def _revision_prompt(setup: core.RunSetup, draft: dict) -> str:
     return prompt + _REVISION_PROPOSAL.format(path=path)
 
 
-async def _with_situation(setup: core.RunSetup, watch_env: dict[str, str], prompt: str) -> str:
-    """prompt with the situation at its end, read now, for every role in a run: a planner has
-    none yet."""
-    if config.plans(setup.cfg):
-        return prompt
-    return f"{prompt}\n\n{await updates.situation(watch_env)}"
+async def _turn_start(setup: core.RunSetup, watch_env: dict[str, str], prompt: str) -> str:
+    """prompt as it starts a turn: with what stands around it, read now, at its end. The one
+    place a turn's context is put together: a baseline agent's clock, and the situation for every
+    role in a run, which a planner has none of yet. A tool call mid-turn is handed its updates
+    alone."""
+    clock = await asyncio.to_thread(core.baseline_clock, setup)
+    situation = "" if config.plans(setup.cfg) else await updates.situation(watch_env)
+    return "\n\n".join(part for part in (prompt, clock, situation) if part)
 
 
-async def _told(setup: core.RunSetup, watch_env: dict[str, str], events: list[dict]) -> str:
+async def _told(setup: core.RunSetup, events: list[dict]) -> str:
     """What the agent is told of a batch of updates, "" for nothing. A revision asked of a planner
     is an event that points at the draft: it is told as the revision itself, and one that the
-    planner has answered since, which a restored cursor replays, is told as nothing. A baseline
-    agent is told its clock with the updates, and everyone the situation. That its own
+    planner has answered since, which a restored cursor replays, is told as nothing. That its own
     instructions changed is told to no one: the harness applies them at the turn boundary."""
     events = _not_own_instructions(setup, events)
     rest = [e for e in events if e["kind"] != updates.REVISION]
@@ -745,35 +746,28 @@ async def _told(setup: core.RunSetup, watch_env: dict[str, str], events: list[di
         draft = await asyncio.to_thread(core.revising, setup)
         if draft:
             parts.insert(0, _revision_prompt(setup, draft))
-    if not parts:
-        return ""
-    parts.append(await asyncio.to_thread(core.baseline_clock, setup))
-    return await _with_situation(setup, watch_env, "\n\n".join(part for part in parts if part))
-
-
-def _first_prompt(setup: core.RunSetup, resume_id: str | None, initial_prompt: str | None) -> str:
-    """What opens a connection: a handoff, the start, or for a resumed session the revision that
-    brought a planner back, else that it goes on, with a baseline agent's clock. A new machine is
-    said in each."""
-    draft = core.revising(setup) if resume_id and not initial_prompt else None
-    if draft:
-        return _revision_prompt(setup, draft)
-    waited = _LIMIT_WAITED.format(since=time.strftime("%Y-%m-%d %H:%M", time.gmtime(_limit_since))) if _limit_since else ""
-    prompt = "\n\n".join(part for part in (waited, initial_prompt or ("Continue where you left off." if resume_id else "Begin."),
-                                             core.baseline_clock(setup)) if part)
-    return _new_machine_note(setup.cfg) + "\n\n" + prompt if _on_new_machine else prompt
+    return "\n\n".join(parts)
 
 
 def _opening(setup: core.RunSetup, resume_id: str | None, initial_prompt: str | None) -> str:
-    """_first_prompt, and for a session that starts fresh what its role reads first: a planner's
-    opening reads, a baseline agent's goal with the planner's map of the repository."""
-    if resume_id or initial_prompt:
-        return _first_prompt(setup, resume_id, initial_prompt)
-    if config.measures_baseline(setup.cfg):
-        return _first_prompt(setup, None, seed.baseline(core.repo_map(setup)))
-    prompt = _first_prompt(setup, None, None)
-    reads = seed.planner(setup.workdir) if config.plans(setup.cfg) else ""
-    return prompt + "\n\n" + reads if reads else prompt
+    """What opens a connection: for a resumed session the revision that brought a planner back,
+    else a handoff, that it goes on, or for a session that starts fresh what its role reads first:
+    a planner's opening reads, a baseline agent's goal with the planner's map of the repository.
+    A wait for the model provider's limit and a new machine are said before it."""
+    if resume_id and not initial_prompt and (draft := core.revising(setup)):
+        return _revision_prompt(setup, draft)
+    if initial_prompt:
+        body = initial_prompt
+    elif resume_id:
+        body = "Continue where you left off."
+    elif config.measures_baseline(setup.cfg):
+        body = seed.baseline(core.repo_map(setup))
+    elif config.plans(setup.cfg):
+        body = "\n\n".join(part for part in ("Begin.", seed.planner(setup.workdir)) if part)
+    else:
+        body = "Begin."
+    waited = _LIMIT_WAITED.format(since=time.strftime("%Y-%m-%d %H:%M", time.gmtime(_limit_since))) if _limit_since else ""
+    return "\n\n".join(part for part in (_new_machine_note(setup.cfg) if _on_new_machine else "", waited, body) if part)
 
 
 _on_new_machine = False
@@ -831,7 +825,7 @@ async def _last_turn(client, setup: core.RunSetup, watch_env: dict[str, str], ha
         for line in activity.event_lines(events, agent):
             print(line, flush=True)
         events = _not_own_instructions(setup, events)
-        await client.query(await _with_situation(setup, watch_env, prompt + ("\n\n" + updates.message(events, agent) if events else "")))
+        await client.query(await _turn_start(setup, watch_env, prompt + ("\n\n" + updates.message(events, agent) if events else "")))
         updates.delivered(env)
     limit = _shutdown_turn_s(setup)
     try:
@@ -1211,7 +1205,7 @@ async def _run_one_session(setup: core.RunSetup, resume_id: str | None,
         return True
 
     opening = await asyncio.to_thread(_opening, setup, resume_id, initial_prompt)
-    opening = await _with_situation(setup, watch_env, _PROMPT_REPLACED + "\n\n" + opening if prompt_replaced else opening)
+    opening = await _turn_start(setup, watch_env, _PROMPT_REPLACED + "\n\n" + opening if prompt_replaced else opening)
     connecting = time.monotonic()
     told_nothing = False
     _progress.subagents(0)
@@ -1312,7 +1306,7 @@ async def _run_one_session(setup: core.RunSetup, resume_id: str | None,
                     and await updates.jobs_in_flight(watch_env) == 0):
                 log.info("nothing in flight at the end of the turn, saying so")
                 _forget_job_reads()
-                await client.query(await _with_situation(setup, watch_env, updates.NOTHING_IN_FLIGHT))
+                await client.query(await _turn_start(setup, watch_env, updates.NOTHING_IN_FLIGHT))
                 told_nothing = True
                 continue
             # An agent waits for an update with no limit, a coordinator until its review.
@@ -1343,6 +1337,7 @@ async def _run_one_session(setup: core.RunSetup, resume_id: str | None,
             if await over():
                 return False
             if told:
+                prompt = await _turn_start(setup, watch_env, told)
                 async with handing:
                     # A drain since the batch was taken belongs to a turn under way, which is
                     # read next, and handed the batch over or reads it again.
@@ -1351,13 +1346,13 @@ async def _run_one_session(setup: core.RunSetup, resume_id: str | None,
                     for line in activity.event_lines(events, cfg.agent_id):
                         print(line, flush=True)
                     _forget_job_reads()
-                    await client.query(told)
+                    await client.query(prompt)
                     updates.delivered(taken)
                 continue
             log.info("nothing woke the session for %ds: its review", wait_s)
             _forget_job_reads()
             standing = await updates.standing(watch_env)
-            await client.query(await _with_situation(setup, watch_env, updates.review_prompt(round(wait_s / 60), standing)))
+            await client.query(await _turn_start(setup, watch_env, updates.review_prompt(round(wait_s / 60), standing)))
 
 
 async def _next_told(setup: core.RunSetup, watch_env: dict[str, str], ended, idle_s: float,
@@ -1369,7 +1364,7 @@ async def _next_told(setup: core.RunSetup, watch_env: dict[str, str], ended, idl
     while True:
         taken = updates.taking(watch_env, "waiting")
         events = await updates.next_batch(taken, ended, idle_s)
-        told = await _told(setup, watch_env, events) if events and not ended() else ""
+        told = await _told(setup, events) if events and not ended() else ""
         if told or not events or ended() or _instructions_told:
             return events, told, taken
         async with handing:
