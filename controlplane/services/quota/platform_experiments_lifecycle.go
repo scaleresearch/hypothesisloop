@@ -208,7 +208,7 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		return nil, err
 	}
 	if req.CoordinatorHosted != (req.coordinator != nil) {
-		return nil, fmt.Errorf("platform_experiments.Create: coordinator_hosted is %v and its launcher and model are resolved: %v", req.CoordinatorHosted, req.coordinator != nil)
+		return nil, fmt.Errorf("platform_experiments.Create: coordinator_hosted is %v and its model is resolved: %v", req.CoordinatorHosted, req.coordinator != nil)
 	}
 	if err := s.requireContinuable(ctx, req.ProjectID, req.repository.Named, req.Continues); err != nil {
 		return nil, err

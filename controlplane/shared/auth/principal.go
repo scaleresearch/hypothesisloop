@@ -76,8 +76,7 @@ func (p Principal) Scope() domain.TenantScope {
 
 // Actor is whose credential this is, as a record of what it did names it. It is the only place
 // an actor is made, so no record names one a request merely claimed. Staff who signed in are the
-// person they are; a job is the agent it runs for. A runtime and a launcher author no record and
-// have none.
+// person they are; a job is the agent it runs for. A runtime authors no record and has none.
 func (p Principal) Actor() domain.Actor {
 	switch {
 	case p.UserID != "":

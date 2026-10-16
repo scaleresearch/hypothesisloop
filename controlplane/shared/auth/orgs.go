@@ -10,7 +10,7 @@ import (
 // This file is the one place that says who may do what to an org and to the clusters it owns.
 //
 //   - A person, an API key and staff hold accounts. Every token the platform derives for
-//     something it launched (agent, coordinator, job, runtime, launcher) does not.
+//     something it launched (agent, coordinator, job, runtime) does not.
 //   - Whoever reaches an org reads it. An org outside the caller's reach is not found.
 //   - An org and what it owns are changed by its administrators: staff, a signed-in owner, and
 //     an API key of the whole org. A member and a key bound to one project are refused. What an

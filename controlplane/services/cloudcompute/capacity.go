@@ -64,11 +64,11 @@ func (e *Executor) rentable(ctx context.Context, v *view) (map[string]onOffer, e
 			CPUMillis: shape.CPUMillis, MemoryBytes: shape.MemoryBytes, DiskBytes: shape.StorageBytes,
 		}, shape.MaxInstances)
 		if err != nil {
-			return nil, fmt.Errorf("cloudexec: count what there is to rent for shape %s: %w", shape.Name, err)
+			return nil, fmt.Errorf("cloudcompute: count what there is to rent for shape %s: %w", shape.Name, err)
 		}
 		why := "shape " + shape.Name + ": " + supply.Why
 		if supply.Count == 0 {
-			log.Printf("cloudexec: shape %s has nothing to rent: %s (%s)", shape.Name, supply.Why, supply.Detail)
+			log.Printf("cloudcompute: shape %s has nothing to rent: %s (%s)", shape.Name, supply.Why, supply.Detail)
 		} else {
 			why = "shape " + shape.Name + ": the provider has fewer machines on offer for it than max_instances, and the shape's lower slots take them"
 		}

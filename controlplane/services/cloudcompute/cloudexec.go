@@ -94,7 +94,7 @@ func New(cfg Config) (*Executor, error) {
 		return nil, err
 	}
 	if cfg.Provider == nil {
-		return nil, fmt.Errorf("cloudexec: Provider is required")
+		return nil, fmt.Errorf("cloudcompute: Provider is required")
 	}
 	rented := provider.Bounded(cfg.Provider)
 	market, _ := rented.(provider.Market)
@@ -118,43 +118,43 @@ func (cfg Config) prefix() string { return provider.JobPrefix(cfg.Namespace) }
 // before any vendor is contacted.
 func (cfg Config) Validate() error {
 	if cfg.ClusterID == "" || cfg.APIURL == "" || cfg.JobImage == "" {
-		return fmt.Errorf("cloudexec: ClusterID, APIURL and JobImage are required")
+		return fmt.Errorf("cloudcompute: ClusterID, APIURL and JobImage are required")
 	}
 	if r := cfg.EnvironmentsRepository; r != "" && (!strings.Contains(r, "/") || strings.ContainsAny(r, " \t@")) {
-		return fmt.Errorf("cloudexec: EnvironmentsRepository %q must be host/path with no digest", r)
+		return fmt.Errorf("cloudcompute: EnvironmentsRepository %q must be host/path with no digest", r)
 	}
 	if err := provider.ValidateSegment("namespace", cfg.Namespace); err != nil {
-		return fmt.Errorf("cloudexec: %w", err)
+		return fmt.Errorf("cloudcompute: %w", err)
 	}
 	if cfg.OfferWait <= 0 || cfg.Startup <= 0 {
-		return fmt.Errorf("cloudexec: OfferWait and Startup must be positive")
+		return fmt.Errorf("cloudcompute: OfferWait and Startup must be positive")
 	}
 	if len(cfg.Shapes) == 0 {
-		return fmt.Errorf("cloudexec: at least one shape is required")
+		return fmt.Errorf("cloudcompute: at least one shape is required")
 	}
 	longest := (&Executor{prefix: cfg.prefix()}).instanceName
 	seen := map[string]bool{}
 	for _, s := range cfg.Shapes {
 		if err := provider.ValidateSegment("shape name", s.Name); err != nil {
-			return fmt.Errorf("cloudexec: %w", err)
+			return fmt.Errorf("cloudcompute: %w", err)
 		}
 		if seen[s.Name] {
-			return fmt.Errorf("cloudexec: shape name %q is used twice", s.Name)
+			return fmt.Errorf("cloudcompute: shape name %q is used twice", s.Name)
 		}
 		seen[s.Name] = true
 		if s.CPUMillis <= 0 || s.MemoryBytes <= 0 || s.StorageBytes <= 0 || s.MaxInstances <= 0 {
-			return fmt.Errorf("cloudexec: shape %q needs positive cpu, memory, storage and max_instances", s.Name)
+			return fmt.Errorf("cloudcompute: shape %q needs positive cpu, memory, storage and max_instances", s.Name)
 		}
 		if (s.Accelerators > 0) != (s.AcceleratorType != "") || s.Accelerators < 0 {
-			return fmt.Errorf("cloudexec: shape %q must set accelerator_type and accelerators together", s.Name)
+			return fmt.Errorf("cloudcompute: shape %q must set accelerator_type and accelerators together", s.Name)
 		}
 		if s.AcceleratorType != "" {
 			if err := acceleratorname.Validate(s.AcceleratorType); err != nil {
-				return fmt.Errorf("cloudexec: shape %q: %w", s.Name, err)
+				return fmt.Errorf("cloudcompute: shape %q: %w", s.Name, err)
 			}
 		}
 		if err := provider.ValidateName(longest(strings.Repeat("x", experimentIDBudget), attemptBudget, s.Name, s.MaxInstances-1)); err != nil {
-			return fmt.Errorf("cloudexec: shape %q leaves no room for an experiment id in an instance name: %w", s.Name, err)
+			return fmt.Errorf("cloudcompute: shape %q leaves no room for an experiment id in an instance name: %w", s.Name, err)
 		}
 	}
 	return nil

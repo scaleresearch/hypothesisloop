@@ -9,7 +9,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/acceleratorname"
 )
 
-// Settings is the adapter's own section of the cloud-agent config file, provider.settings.
+// Settings is the adapter's own section of a cloud_compute entry, provider.settings.
 type Settings struct {
 	// APIKeyEnv names the environment variable holding the account's API key.
 	APIKeyEnv string `yaml:"api_key_env"`

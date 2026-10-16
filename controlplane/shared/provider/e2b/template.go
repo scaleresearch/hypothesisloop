@@ -12,7 +12,7 @@ const bytesPerMB = 1 << 20
 
 // templateCommand builds the template an image and size need (TemplateBuilder), run from the
 // repository's root with the image, the cores and the memory in MiB after it.
-const templateCommand = "go run ./runtime/cloud/cmd/e2b-template"
+const templateCommand = "go run ./controlplane/cmd/e2b-template"
 
 // size is what a template fixes for every sandbox started from it.
 type size struct {

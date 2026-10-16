@@ -355,7 +355,7 @@ type CreatePlatformExperimentRequest struct {
 	AgentImage        string `json:"agent_image,omitempty" doc:"The image hosted agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Empty is the platform's own."`
 	Continues         string `json:"continues,omitempty" doc:"The id of a closed platform experiment of the same project to carry on, which keeps its code in the repository this one names. Its baseline starts from the commit of that run's baseline job, so both are measured by the same harness. It keeps the metric keys and directions of that run: 422 invalid_metrics for others. Left out, it starts fresh. 422 invalid_continues for one that is no closed platform experiment of the project, keeps its code in another repository or declared no baseline."`
 
-	// coordinator is CoordinatorHosted resolved by the handler: which launcher and which model.
+	// coordinator is CoordinatorHosted resolved by the handler: which model.
 	coordinator *domain.HostedCoordinator
 	// agents and signups are the agents created with it (hostedAgents), none without a hosted
 	// coordinator.

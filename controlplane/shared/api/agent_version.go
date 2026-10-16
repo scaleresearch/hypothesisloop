@@ -6,7 +6,7 @@ import (
 	"unicode"
 )
 
-// AgentVersionHeader carries, on every call a cluster's or a launcher's agent makes, the version
+// AgentVersionHeader carries, on every call a cluster's agent makes, the version
 // it runs: the image tag it was installed with (clusterapi.AgentVersionHeader).
 const AgentVersionHeader = "X-Hypothesisloop-Agent-Version"
 

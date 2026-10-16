@@ -47,20 +47,20 @@ func (e *Executor) buildSpec(exp *clusterapi.DesiredJob) (provider.Spec, error) 
 	group := spec.NodeGroups()[0]
 	for name, quantity := range map[string]string{"cpu": group.CPU, "memory": group.Memory, "storage": group.Storage} {
 		if quantity == "" {
-			return provider.Spec{}, fmt.Errorf("cloudexec: experiment %s has no resolved %s in desired state", exp.ID, name)
+			return provider.Spec{}, fmt.Errorf("cloudcompute: experiment %s has no resolved %s in desired state", exp.ID, name)
 		}
 	}
 	cpu, err := resource.ParseQuantity(group.CPU)
 	if err != nil {
-		return provider.Spec{}, fmt.Errorf("cloudexec: parse cpu %q: %w", group.CPU, err)
+		return provider.Spec{}, fmt.Errorf("cloudcompute: parse cpu %q: %w", group.CPU, err)
 	}
 	memory, err := resource.ParseQuantity(group.Memory)
 	if err != nil {
-		return provider.Spec{}, fmt.Errorf("cloudexec: parse memory %q: %w", group.Memory, err)
+		return provider.Spec{}, fmt.Errorf("cloudcompute: parse memory %q: %w", group.Memory, err)
 	}
 	storage, err := resource.ParseQuantity(group.Storage)
 	if err != nil {
-		return provider.Spec{}, fmt.Errorf("cloudexec: parse storage %q: %w", group.Storage, err)
+		return provider.Spec{}, fmt.Errorf("cloudcompute: parse storage %q: %w", group.Storage, err)
 	}
 	// A job that expects a dataset at a host path must not run without it, and a rented instance
 	// has no host of ours to mount from.
@@ -75,7 +75,7 @@ func (e *Executor) buildSpec(exp *clusterapi.DesiredJob) (provider.Spec, error) 
 	}
 	env, err := workloadenv.Merged(exp, spec, group, e.apiURL, func(url string) string { return url })
 	if err != nil {
-		return provider.Spec{}, fmt.Errorf("cloudexec: %w", err)
+		return provider.Spec{}, fmt.Errorf("cloudcompute: %w", err)
 	}
 
 	// The wrapper is only sent SIGTERM for a termination the control plane granted the checkpoint
@@ -83,7 +83,7 @@ func (e *Executor) buildSpec(exp *clusterapi.DesiredJob) (provider.Spec, error) 
 	// lengthens the ordinary grace.
 	grace, checkpointGrace, err := spec.ResolvedGrace()
 	if err != nil {
-		return provider.Spec{}, fmt.Errorf("cloudexec: experiment %s: %w", exp.ID, err)
+		return provider.Spec{}, fmt.Errorf("cloudcompute: experiment %s: %w", exp.ID, err)
 	}
 
 	// A job on CPU counts its cores as units of the CPU type, which is no device to rent.

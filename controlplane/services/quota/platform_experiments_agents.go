@@ -324,8 +324,7 @@ func agentNameTaken(name string) error {
 	return refuseSignup(409, "agent_name_taken", "another agent of this platform experiment is named %q, and a name tells its agents apart: state another name, or none to have the platform name it by its role", name)
 }
 
-// withHosting resolves the coordinator a create asks the platform to run: its launcher and the
-// model it asked for, empty for its agent type's, and that the experiment names the repository it
+// withHosting resolves the coordinator a create asks the platform to run: the model it asked for, empty for its agent type's, and that the experiment names the repository it
 // works in.
 func (h *PlatformExperimentsHandler) withHosting(ctx context.Context, req CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
 	if req.CoordinatorModel != "" && !req.CoordinatorHosted {

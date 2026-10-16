@@ -309,7 +309,7 @@ type PlatformExperiment struct {
 	Shared bool `json:"shared"`
 
 	// CoordinatorHosted means the platform runs this platform experiment's coordinator. Fixed at
-	// creation. Coordinator says on which launcher and model and what became of its machine; it
+	// creation. Coordinator says on which model and what became of its machine; it
 	// is carried by a read of one platform experiment and left out of a list.
 	CoordinatorHosted bool               `json:"coordinator_hosted"`
 	Coordinator       *HostedCoordinator `json:"coordinator,omitempty"`

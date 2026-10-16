@@ -12,7 +12,7 @@ import (
 // The conformance tests rent real sandboxes and cost real money, a few cents a run. They run
 // when E2B_API_KEY is set, and need the template of the image below built first:
 //
-//	E2B_API_KEY=... go run ./runtime/cloud/cmd/e2b-template alpine/curl:8.14.1 1 1024
+//	E2B_API_KEY=... go run ./controlplane/cmd/e2b-template alpine/curl:8.14.1 1 1024
 //	E2B_API_KEY=... go test ./controlplane/shared/provider/e2b -run Conformance -v -timeout 45m
 //
 // E2B_CONFORMANCE_HOLD=1 adds the thirty minute hold. One run per team at a time: a run starts by

@@ -211,7 +211,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"Without coordinator_hosted this call creates the experiment and no agent, and the platform adds none: every researcher, and any other agent, joins by its own POST /platform-experiments/{id}/agents. " +
 			"max_hosted in the answer is how many machines the platform runs for this platform experiment at once, its hosted agents of every role and its coordinator together: " +
 			"one of them is kept for an agent of role baseline, and an agent that finished holds none. " +
-			"GET /platform-experiments/{id} shows the coordinator's launcher, model and what became of its machine.",
+			"GET /platform-experiments/{id} shows the coordinator's model and what became of its machine.",
 	}, func(ctx context.Context, in *struct {
 		Body CreatePlatformExperimentRequest
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {

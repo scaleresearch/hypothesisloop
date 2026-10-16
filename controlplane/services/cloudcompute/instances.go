@@ -108,7 +108,7 @@ func (e *Executor) read(ctx context.Context) (*view, error) {
 	// A job is never paused: one found paused is one that does not run.
 	listed = provider.PausedAsStarting(listed)
 	if err != nil {
-		return nil, fmt.Errorf("cloudexec: list instances: %w", err)
+		return nil, fmt.Errorf("cloudcompute: list instances: %w", err)
 	}
 	v := &view{outputs: map[string]output{}}
 	for _, l := range listed {
@@ -186,7 +186,7 @@ func (e *Executor) output(ctx context.Context, v *view, i instance) output {
 	}
 	lines, err := e.provider.Logs(ctx, i.ID, max(agentexec.LogTailLines, exitLineTail))
 	if err != nil {
-		err = fmt.Errorf("cloudexec: read output of instance %s: %w", i.Name, err)
+		err = fmt.Errorf("cloudcompute: read output of instance %s: %w", i.Name, err)
 	}
 	v.outputs[i.ID] = output{lines: lines, err: err}
 	return v.outputs[i.ID]

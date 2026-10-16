@@ -41,20 +41,20 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJo
 	}
 	if spec.Image != e.jobImage {
 		if pull == nil {
-			return fmt.Errorf("cloudexec: experiment %s runs in an environment and the reconcile answer has no registry_pull", exp.ID)
+			return fmt.Errorf("cloudcompute: experiment %s runs in an environment and the reconcile answer has no registry_pull", exp.ID)
 		}
 		spec.ImageLogin = &provider.ImageLogin{Registry: pull.Registry, Username: pull.Username, Password: pull.Password}
 	}
 	name := exp.EffectiveJob().NodeSelector[clusterapi.NodeSlotLabel]
 	if name == "" {
-		return fmt.Errorf("cloudexec: experiment %s was admitted without a slot in its node selector (%s)", exp.ID, clusterapi.NodeSlotLabel)
+		return fmt.Errorf("cloudcompute: experiment %s was admitted without a slot in its node selector (%s)", exp.ID, clusterapi.NodeSlotLabel)
 	}
 	shape, index, ok := e.configured(name)
 	if !ok {
-		return fmt.Errorf("cloudexec: experiment %s was placed on slot %q, which is not configured", exp.ID, name)
+		return fmt.Errorf("cloudcompute: experiment %s was placed on slot %q, which is not configured", exp.ID, name)
 	}
 	if err := shape.holds(spec); err != nil {
-		return fmt.Errorf("cloudexec: experiment %s on slot %s: %w", exp.ID, name, err)
+		return fmt.Errorf("cloudcompute: experiment %s on slot %s: %w", exp.ID, name, err)
 	}
 	v, err := e.current(ctx)
 	if err != nil {
@@ -65,7 +65,7 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJo
 		case workloadOf(exp, i):
 			return nil
 		case i.live():
-			return fmt.Errorf("cloudexec: experiment %s is placed on slot %s while instance %s of it still runs", exp.ID, name, i.Name)
+			return fmt.Errorf("cloudcompute: experiment %s is placed on slot %s while instance %s of it still runs", exp.ID, name, i.Name)
 		}
 		if err := e.destroy(ctx, v, i, "it exited and is left from an earlier attempt or placement of its job"); err != nil {
 			return err
@@ -73,22 +73,22 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJo
 	}
 	for _, i := range v.instances {
 		if i.slot() == name {
-			return fmt.Errorf("cloudexec: experiment %s was placed on slot %s, which instance %s still holds", exp.ID, name, i.Name)
+			return fmt.Errorf("cloudcompute: experiment %s was placed on slot %s, which instance %s still holds", exp.ID, name, i.Name)
 		}
 	}
 	spec.Name = e.instanceName(exp.ID, exp.AttemptCount, shape.Name, index)
 	spec.AvoidHosts = v.unstarting
 	if err := provider.ValidateName(spec.Name); err != nil {
-		return fmt.Errorf("cloudexec: experiment %s: %w", exp.ID, err)
+		return fmt.Errorf("cloudcompute: experiment %s: %w", exp.ID, err)
 	}
 	id, err := e.provider.Create(ctx, spec)
 	if errors.Is(err, provider.ErrNoOffer) {
 		return e.withoutOffer(exp, shape)
 	}
 	if err != nil {
-		return fmt.Errorf("cloudexec: create instance %s: %w", spec.Name, err)
+		return fmt.Errorf("cloudcompute: create instance %s: %w", spec.Name, err)
 	}
-	log.Printf("cloudexec: created instance %s (%s): attempt %d of experiment %s is desired in slot %s", spec.Name, id, exp.AttemptCount, exp.ID, name)
+	log.Printf("cloudcompute: created instance %s (%s): attempt %d of experiment %s is desired in slot %s", spec.Name, id, exp.AttemptCount, exp.ID, name)
 	v.add(instance{
 		Instance:     provider.Instance{ID: id, Name: spec.Name, State: provider.StateStarting},
 		experimentID: exp.ID, attempt: exp.AttemptCount, shape: shape.Name, index: index,
@@ -101,7 +101,7 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJo
 // control plane then queues the job again, where it waits for a slot that has an offer.
 func (e *Executor) withoutOffer(exp *clusterapi.DesiredJob, shape Shape) error {
 	if exp.SubmittedAt == nil {
-		return fmt.Errorf("cloudexec: experiment %s is placed here with no admission time", exp.ID)
+		return fmt.Errorf("cloudcompute: experiment %s is placed here with no admission time", exp.ID)
 	}
 	what := fmt.Sprintf("no machine to rent for shape %s (%s) within the provider's configured filters", shape.Name, cmp.Or(shape.AcceleratorType, "no accelerator"))
 	if time.Since(*exp.SubmittedAt) >= e.offerWait {
@@ -138,7 +138,7 @@ func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string, gran
 	for _, i := range v.of(experimentID) {
 		if grantCheckpointWindow && i.State == provider.StateRunning {
 			if err := e.provider.Stop(ctx, i.ID); err != nil {
-				errs = append(errs, fmt.Errorf("cloudexec: stop instance %s: %w", i.Name, err))
+				errs = append(errs, fmt.Errorf("cloudcompute: stop instance %s: %w", i.Name, err))
 			}
 			continue
 		}
@@ -151,9 +151,9 @@ func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string, gran
 
 func (e *Executor) destroy(ctx context.Context, v *view, i instance, why string) error {
 	if err := e.provider.Destroy(ctx, i.ID); err != nil {
-		return fmt.Errorf("cloudexec: destroy instance %s (%s): %s: %w", i.Name, i.ID, why, err)
+		return fmt.Errorf("cloudcompute: destroy instance %s (%s): %s: %w", i.Name, i.ID, why, err)
 	}
-	log.Printf("cloudexec: destroyed instance %s (%s): %s", i.Name, i.ID, why)
+	log.Printf("cloudcompute: destroyed instance %s (%s): %s", i.Name, i.ID, why)
 	v.remove(i.ID)
 	return nil
 }
@@ -164,10 +164,10 @@ func (e *Executor) destroy(ctx context.Context, v *view, i instance, why string)
 func (e *Executor) Leave(ctx context.Context) error {
 	listed, err := e.provider.List(ctx, e.prefix)
 	if err != nil {
-		return fmt.Errorf("cloudexec: what is still rented could not be listed: %w", err)
+		return fmt.Errorf("cloudcompute: what is still rented could not be listed: %w", err)
 	}
 	for _, i := range listed {
-		log.Printf("cloudexec: leaving instance %s (%s) rented, %s", i.Name, i.ID, i.State)
+		log.Printf("cloudcompute: leaving instance %s (%s) rented, %s", i.Name, i.ID, i.State)
 	}
 	return nil
 }
@@ -235,10 +235,10 @@ func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *clusterapi.D
 			return false, nil
 		}
 		if _, _, ok := e.configured(i.slot()); !ok {
-			return false, fmt.Errorf("cloudexec: instance %s runs experiment %s in slot %s, which no configured shape has, so it is billed beside every slot: restore the shape or its max_instances, or end the job", i.Name, exp.ID, i.slot())
+			return false, fmt.Errorf("cloudcompute: instance %s runs experiment %s in slot %s, which no configured shape has, so it is billed beside every slot: restore the shape or its max_instances, or end the job", i.Name, exp.ID, i.slot())
 		}
 		if e.overdue(i) {
-			log.Printf("cloudexec: instance %s has not started in %s and is replaced", i.Name, e.startup)
+			log.Printf("cloudcompute: instance %s has not started in %s and is replaced", i.Name, e.startup)
 			return false, nil
 		}
 		matches = true
@@ -283,7 +283,7 @@ func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agen
 	case provider.StateExited:
 		how, _, readErr := e.ending(ctx, v, i)
 		if readErr != nil {
-			log.Printf("cloudexec: reporting %s as gone: %v", i.Name, readErr)
+			log.Printf("cloudcompute: reporting %s as gone: %v", i.Name, readErr)
 		}
 		if how != endingUnknown {
 			observed.StartedAt, observed.EndedAt, _ = exitline.FindRun(e.output(ctx, v, i).lines)
