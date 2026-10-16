@@ -40,6 +40,11 @@ import type {
   GitHubInstallStart,
   GitHubRepository,
   ResearcherPoolEntry,
+  AgentRole,
+  AgentType,
+  AgentTypeSettings,
+  AgentTypeVersion,
+  EditedAgentType,
 } from '@/types'
 
 import type { TypeKind } from '@/lib/units'
@@ -812,6 +817,51 @@ export async function revokeOrgInvite(inviteID: string): Promise<void> {
 // accepted is answered 409 with the reason, one the platform does not know 404.
 export function acceptOrgInvite(token: string): Promise<OrgMember> {
   return apiSend<OrgMember>('POST', '/invites/accept', { token })
+}
+
+// ---------------------------------------------------------------------------
+// Agent types
+// ---------------------------------------------------------------------------
+
+// The built-in types and the org's own, archived ones included.
+export function fetchAgentTypes(orgID: string): Promise<AgentType[]> {
+  return apiFetch<AgentType[]>(`/orgs/${orgID}/agent-types`)
+}
+
+export function fetchAgentType(orgID: string, typeID: string): Promise<AgentType> {
+  return apiFetch<AgentType>(`/orgs/${orgID}/agent-types/${encodeURIComponent(typeID)}`)
+}
+
+// Newest first.
+export function fetchAgentTypeVersions(orgID: string, typeID: string): Promise<AgentTypeVersion[]> {
+  return apiFetch<AgentTypeVersion[]>(`/orgs/${orgID}/agent-types/${encodeURIComponent(typeID)}/versions`)
+}
+
+export type CreateAgentTypeRequest =
+  | { from: string; name?: string }
+  | { name: string; role: AgentRole; prompt: string; settings: AgentTypeSettings }
+
+// For an owner. A copy (from) takes its role, prompt and settings from the type it copies.
+export function createAgentType(orgID: string, req: CreateAgentTypeRequest): Promise<AgentType> {
+  return apiSend<AgentType>('POST', `/orgs/${orgID}/agent-types`, req)
+}
+
+export interface EditAgentTypeRequest {
+  /** The version the edit was made from: 409 version_conflict when it is no longer current. */
+  if_version: number
+  name: string
+  prompt: string
+  settings: AgentTypeSettings
+}
+
+// Makes the next version and moves every live agent of the type to it, at its next turn.
+export function editAgentType(orgID: string, typeID: string, req: EditAgentTypeRequest): Promise<EditedAgentType> {
+  return apiSend<EditedAgentType>('PUT', `/orgs/${orgID}/agent-types/${encodeURIComponent(typeID)}`, req)
+}
+
+// Refused 409 agent_type_in_use while an experiment that is not closed names it.
+export function archiveAgentType(orgID: string, typeID: string): Promise<AgentType> {
+  return apiSend<AgentType>('POST', `/orgs/${orgID}/agent-types/${encodeURIComponent(typeID)}/archive`)
 }
 
 // ---------------------------------------------------------------------------

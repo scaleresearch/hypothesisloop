@@ -213,6 +213,60 @@ export interface AgentActivity {
   at: string
 }
 
+// ---------------------------------------------------------------------------
+// Agent types: a role, a prompt and settings an agent runs with. Mirrors domain.AgentType.
+// ---------------------------------------------------------------------------
+
+export type AgentRole = 'researcher' | 'baseline' | 'coordinator' | 'planner'
+
+export interface AgentTypeSettings {
+  // Empty is the platform's default.
+  model?: string
+  max_subagents: number
+  pacing_subagents: number
+  effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+  hyperparameters?: Record<string, unknown>
+}
+
+/** One immutable version of an agent type. */
+export interface AgentTypeVersion {
+  agent_type: string
+  version: number
+  prompt: string
+  settings: AgentTypeSettings
+  digest: string
+  created_by?: Actor
+  created_at: string
+}
+
+/** An agent type with its current version. */
+export interface AgentType {
+  id: string
+  // Empty for a built-in type.
+  org_id?: string
+  name: string
+  role: AgentRole
+  builtin: boolean
+  current_version: number
+  archived_at?: string
+  created_by?: Actor
+  created_at: string
+  current: AgentTypeVersion
+  // How many agents and coordinators whose run goes on run it now.
+  live_agents: number
+}
+
+export interface PinMove {
+  platform_experiment_id: string
+  agent_id?: string
+  error?: string
+}
+
+/** An agent type after an edit, and the live agents it moved to the new version. */
+export interface EditedAgentType extends AgentType {
+  propagation: { version: number; moved: PinMove[] | null; failed: PinMove[] | null }
+}
+
 /** How many researchers of one agent type on one model an experiment keeps at work. */
 export interface ResearcherPoolEntry {
   agent_type?: string
@@ -749,8 +803,13 @@ export interface AgentSignup {
   actor: Actor
   // true: the platform runs the agent on a machine of its own.
   hosted: boolean
+  // The agent type it runs, by id, and the version of it the agent is pinned to: an edit of the
+  // type while the run goes on moves the agent to the new version.
   flavor?: string
+  agent_type_version?: number
   model?: string
+  // Why the platform cut it other than at a stage boundary: max_agents_lowered.
+  cut_reason?: string
   // The researcher whose place the platform gave this one, and the one given this one's place.
   replaces?: string
   replaced_by?: string

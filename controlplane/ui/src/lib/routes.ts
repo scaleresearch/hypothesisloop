@@ -23,6 +23,12 @@ export function orgPath(orgID: string, section: OrgSection): string {
   return `/orgs/${orgID}/${section}`
 }
 
+/** The agent types of an org, or one of them. */
+export function agentTypesPath(orgID: string, typeID?: string): string {
+  const base = `${orgPath(orgID, 'settings')}/agent-types`
+  return typeID ? `${base}/${encodeURIComponent(typeID)}` : base
+}
+
 export function experimentPath(experimentID: string, section?: 'hypotheses' | 'jobs' | 'agents'): string {
   return section ? `/experiments/${experimentID}/${section}` : `/experiments/${experimentID}`
 }
