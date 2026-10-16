@@ -2,12 +2,12 @@ package k8sexec
 
 import (
 	"fmt"
-	"path/filepath"
+	"os"
 	"strings"
+	"time"
 
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/homedir"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/boundedname"
 )
@@ -64,31 +64,33 @@ const (
 	k8sClientBurst = 400
 )
 
-func buildRestConfig(kubeconfigPath, context string) (*rest.Config, error) {
-	cfg, err := loadRestConfig(kubeconfigPath, context)
+// k8sCallTimeout bounds every call to the API server, a log stream read whole included.
+const k8sCallTimeout = 30 * time.Second
+
+func buildRestConfig() (*rest.Config, error) {
+	cfg, err := loadRestConfig()
 	if err != nil {
 		return nil, err
 	}
 	cfg.QPS = k8sClientQPS
 	cfg.Burst = k8sClientBurst
+	cfg.Timeout = k8sCallTimeout
 	return cfg, nil
 }
 
-func loadRestConfig(kubeconfigPath, context string) (*rest.Config, error) {
-	if kubeconfigPath == "" && context == "" {
-		if cfg, err := rest.InClusterConfig(); err == nil {
-			return cfg, nil
+// loadRestConfig reads the kubeconfig file KUBECONFIG names when it is set, and the pod's own
+// service account otherwise.
+func loadRestConfig() (*rest.Config, error) {
+	if path := os.Getenv("KUBECONFIG"); path != "" {
+		cfg, err := clientcmd.BuildConfigFromFlags("", path)
+		if err != nil {
+			return nil, fmt.Errorf("kubeconfig %s (KUBECONFIG): %w", path, err)
 		}
+		return cfg, nil
 	}
-	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-	if kubeconfigPath != "" {
-		loadingRules.ExplicitPath = kubeconfigPath
-	} else if home := homedir.HomeDir(); home != "" {
-		loadingRules.Precedence = append(loadingRules.Precedence, filepath.Join(home, ".kube", "config"))
+	cfg, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, fmt.Errorf("not running in a pod and KUBECONFIG is not set: %w", err)
 	}
-	overrides := &clientcmd.ConfigOverrides{}
-	if context != "" {
-		overrides.CurrentContext = context
-	}
-	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, overrides).ClientConfig()
+	return cfg, nil
 }

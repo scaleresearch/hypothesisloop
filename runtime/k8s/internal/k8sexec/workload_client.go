@@ -37,9 +37,7 @@ const (
 )
 
 type Config struct {
-	KubeconfigPath string
-	KubeContext    string
-	APIURL         string
+	APIURL string
 }
 
 type JobWorkloadClient struct {
@@ -54,7 +52,7 @@ func New(cfg Config) (*JobWorkloadClient, error) {
 	if cfg.APIURL == "" {
 		return nil, fmt.Errorf("workload: APIURL is required")
 	}
-	restCfg, err := buildRestConfig(cfg.KubeconfigPath, cfg.KubeContext)
+	restCfg, err := buildRestConfig()
 	if err != nil {
 		return nil, fmt.Errorf("workload: rest config: %w", err)
 	}

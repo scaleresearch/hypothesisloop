@@ -138,6 +138,8 @@ func (c *JobWorkloadClient) podTail(ctx context.Context, experimentID, podName s
 		TailLines: &tailLines,
 		Previous:  previous,
 	})
+	ctx, cancel := context.WithTimeout(ctx, k8sCallTimeout)
+	defer cancel()
 	stream, err := req.Stream(ctx)
 	if err != nil {
 		// A 400 here means the container hasn't started producing logs yet (e.g. still pulling
