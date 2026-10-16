@@ -711,7 +711,6 @@ func aProposal(more map[string]any) map[string]any {
 		"metric_reason":    "Validation loss on held-out text is the goal itself.",
 		"measurement":      "bench.py trains for a fixed number of steps and scores a split the training never reads.",
 		"sizing_reason":    "An estimate, nothing has run: a trial of about 6 minutes at 1 an hour is 0.1, and 2 researchers with 30 trials each need 6 and 4 hours.",
-		"questions":        []string{"Is 4 hours enough?"},
 	}
 	for key, value := range more {
 		body[key] = value
@@ -800,6 +799,7 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 		"no reason for the metric":                {map[string]any{"metric_reason": ""}, "missing_explanation"},
 		"no reason for the size":                  {map[string]any{"sizing_reason": " "}, "missing_explanation"},
 		"a measurement that is a paper":           {map[string]any{"measurement": strings.Repeat("x", maxProposalTextBytes+1)}, "too_long"},
+		"a question with no answer planned on":    {map[string]any{"questions": []map[string]any{{"question": "How big a win counts?", "answer": " "}}}, "too_long"},
 		"a type nobody has now":                   {map[string]any{"accelerator_type": "a100"}, "accelerator_unreachable"},
 		"no type":                                 {map[string]any{"accelerator_type": ""}, "accelerator_unreachable"},
 		"an image by a word of its own":           {map[string]any{"image": "pytorch"}, "unknown_job_image"},
@@ -1483,7 +1483,8 @@ func TestAcceptingADraftTakesTheNameThePersonGaveIt(t *testing.T) {
 }
 
 // An owner accepted 10 s after the proposal and its set-up still took 30 minutes, and an
-// owner away from the page held the run up for as long as they were away. A proposal is accepted
+// owner away from the page held the run up for as long as they were away. A proposal without
+// questions (TestAProposalWithQuestionsWaitsForAPersonWhoseAnswersGoIntoTheBrief) is accepted
 // as proposed by itself unless a person acts first: accepts it, holds it to edit it, revises it
 // or closes it.
 func TestAProposalIsAcceptedAsProposedUnlessAPersonActsFirst(t *testing.T) {
@@ -1573,6 +1574,69 @@ func TestAProposalIsAcceptedAsProposedUnlessAPersonActsFirst(t *testing.T) {
 	}
 	if pe := store.created[0]; pe.Status != domain.PlatformExpDraft || pe.AcceptsAt != nil {
 		t.Fatalf("a proposal the check refuses: status %s, accepts_at %v, want a draft held for a person", pe.Status, pe.AcceptsAt)
+	}
+}
+
+// A planner listed what the goal left open ("no margin was stated, so I set 1.5x") and the
+// platform accepted the proposal 30 s later, so the agents ran on its guesses. A proposal with
+// questions waits for a person, who answers each on accepting it, and the brief states the answers.
+func TestAProposalWithQuestionsWaitsForAPersonWhoseAnswersGoIntoTheBrief(t *testing.T) {
+	questions := []map[string]any{
+		{"question": "How big a win counts?", "answer": "1.5x the control's throughput."},
+		{"question": "Which batch sizes are held equal?", "answer": "32 only."},
+	}
+	proposed := func(t *testing.T) (*draftStore, *PlatformExperimentsHandler, func(method, path string, body any) (int, map[string]any)) {
+		t.Helper()
+		store := draftWithPlanner()
+		_, propose := planningAPI(t, store, thePlanner)
+		if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"questions": questions})); code != http.StatusOK {
+			t.Fatalf("propose: %d %v", code, out)
+		}
+		svc, call := planningAPI(t, store, planner)
+		handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).
+			WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
+			WithJobImages([]domain.JobImage{{Name: "torch", Image: "registry.example.com/hl/torch:1"}})
+		return store, handler, call
+	}
+	accept := func(answers any) map[string]any {
+		return map[string]any{"budget_accelerator_hours": 6, "duration_hours": 4, "baseline_minutes": 30, "agents": []map[string]any{{}, {}}, "answers": answers}
+	}
+
+	store, handler, call := proposed(t)
+	_, out := call("GET", "/platform-experiments/pe-draft", nil)
+	if why, _ := out["status_reason"].(map[string]any); why["reason"] != "proposed" || why["waits_for"] != "owner" || out["accepts_at"] != nil {
+		t.Fatalf("proposed with questions: status_reason %v, accepts_at %v, want proposed, waiting for the owner, with no accepts_at", why, out["accepts_at"])
+	}
+	if err := handler.AcceptDue(context.Background()); err != nil || store.created[0].Status != domain.PlatformExpDraft {
+		t.Fatalf("auto-accept pass: %v, status %s, want a draft still", err, store.created[0].Status)
+	}
+
+	for name, answers := range map[string]any{"none": nil, "one of two": []string{"1.5x"}, "an empty one": []string{"1.5x", "  "}} {
+		code, out := call("POST", "/platform-experiments/pe-draft/accept", accept(answers))
+		if code != http.StatusUnprocessableEntity || out["reason"] != "invalid_answers" || store.created[0].Status != domain.PlatformExpDraft {
+			t.Errorf("answers %s: got = %d %v, want 422 invalid_answers and the draft left a draft", name, code, out)
+		}
+	}
+
+	code, out := call("POST", "/platform-experiments/pe-draft/accept", accept([]string{"1.5x the control's throughput.", "32 and\n 64."}))
+	pe := store.created[0]
+	if code != http.StatusOK || pe.Status != domain.PlatformExpOpen {
+		t.Fatalf("accepting with answers: got = %d %v, status %s", code, out, pe.Status)
+	}
+	want := "Decisions the owner made before the run:\n- How big a win counts? Answer: 1.5x the control's throughput.\n- Which batch sizes are held equal? Answer: 32 and 64."
+	if !strings.HasPrefix(pe.Description, "Train the small transformer") || !strings.HasSuffix(pe.Description, "\n\n"+want) {
+		t.Errorf("accepted brief %q, want the proposal's brief followed by\n%s", pe.Description, want)
+	}
+
+	// Without questions an accept that answers some is refused, so no answer is dropped unread.
+	store = draftWithPlanner()
+	_, propose := planningAPI(t, store, thePlanner)
+	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
+		t.Fatalf("propose: %d %v", code, out)
+	}
+	_, call = planningAPI(t, store, planner)
+	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept([]string{"1.5x"})); code != http.StatusUnprocessableEntity || out["reason"] != "invalid_answers" {
+		t.Errorf("answers to no question: got = %d %v, want 422 invalid_answers", code, out)
 	}
 }
 

@@ -107,7 +107,8 @@ function Countdown({ draft, accept, sending, onDone }: { draft: Draft; accept: (
 /**
  * What the planner proposed, as the experiment filled in: what is measured, how and on what,
  * who runs it, and what it may spend. The name, the budget, the duration, the minutes the baseline
- * has and the number of researchers are the person's to change, and accepting sends them as shown.
+ * has, the number of researchers and the answers to the planner's questions are the person's to
+ * change, and accepting sends them as shown.
  * Nothing has run.
  * `editable` is off for a reader, while the planner revises and while the platform counts down
  * to accepting it by itself, when it is only read. `accepting` shows that countdown, with Accept
@@ -127,6 +128,8 @@ export function ProposalForm({ draft, proposal, editable, accepting, onDone, chi
   const [hours, setHours] = useState(String(proposal.duration_hours))
   const [baselineMinutes, setBaselineMinutes] = useState(String(proposal.baseline_minutes))
   const [researchers, setResearchers] = useState(String(proposal.agents.length))
+  const questions = proposal.questions ?? []
+  const [answers, setAnswers] = useState(() => questions.map(q => q.answer))
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // What the API refused the name for, said beside the name.
@@ -136,7 +139,8 @@ export function ProposalForm({ draft, proposal, editable, accepting, onDone, chi
   const unit = budgetUnit(kindOf(proposal.accelerator_type), 'long')
   const count = Number(researchers)
   const countValid = Number.isInteger(count) && count > 0
-  const valid = name.trim() !== '' && Number(budget) > 0 && Number(hours) > 0 && Number.isInteger(Number(baselineMinutes)) && Number(baselineMinutes) > 0 && countValid
+  const answered = answers.every(answer => answer.trim() !== '')
+  const valid = name.trim() !== '' && Number(budget) > 0 && Number(hours) > 0 && Number.isInteger(Number(baselineMinutes)) && Number(baselineMinutes) > 0 && countValid && answered
   // The researchers proposed keep what the planner gave them; one added beyond them is a generalist.
   const agents = Array.from({ length: countValid ? count : proposal.agents.length }, (_, i) => proposal.agents[i] ?? {})
 
@@ -145,7 +149,10 @@ export function ProposalForm({ draft, proposal, editable, accepting, onDone, chi
     setError(null)
     setNameError(null)
     try {
-      await acceptDraft(draft.id, { name: name.trim(), budget_accelerator_hours: Number(budget), duration_hours: Number(hours), baseline_minutes: Number(baselineMinutes), agents })
+      await acceptDraft(draft.id, {
+        name: name.trim(), budget_accelerator_hours: Number(budget), duration_hours: Number(hours), baseline_minutes: Number(baselineMinutes), agents,
+        ...(questions.length > 0 && { answers: answers.map(answer => answer.trim()) }),
+      })
       onDone()
     } catch (e) {
       // Accepting changes nothing of the proposal's experiment but its name.
@@ -161,7 +168,20 @@ export function ProposalForm({ draft, proposal, editable, accepting, onDone, chi
       <Stack gap="lg">
         {accepting && <Countdown draft={draft} accept={accept} sending={sending} onDone={onDone} />}
         {accepting && error && <InlineError>{error}</InlineError>}
-        <Sentences title="Before you start, the planner asks" items={proposal.questions} />
+        {questions.length > 0 && (
+          <Captioned caption="Before you start, answer the planner's questions">
+            <Stack gap="sm">
+              <Text tone="muted">
+                The goal left these open. Each answer is the one the planner planned on: keep it or change it. Your answers are added to the brief every agent reads, so this proposal waits for you.
+              </Text>
+              {questions.map((q, i) => (
+                <FormField key={i} label={q.question}>
+                  <Input value={answers[i]} disabled={!editable} onChange={e => setAnswers(answers.map((answer, j) => j === i ? e.target.value : answer))} />
+                </FormField>
+              ))}
+            </Stack>
+          </Captioned>
+        )}
         <FormField label="Name" error={nameError}>
           <Input value={name} disabled={!editable} onChange={e => setName(e.target.value)} />
         </FormField>

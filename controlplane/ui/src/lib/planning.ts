@@ -9,6 +9,12 @@ export interface ProposedAgent {
   hyperparameters?: Record<string, unknown> & { direction?: string }
 }
 
+/** A decision the goal left open, and the answer the planner planned on. */
+export interface ProposalQuestion {
+  question: string
+  answer: string
+}
+
 /** What a draft's planner proposed, as the API stored it. */
 export interface Proposal {
   // The experiment as its file would state it. The description is the brief every agent reads.
@@ -42,7 +48,9 @@ export interface Proposal {
   sizing_reason?: string
   out_of_scope?: string[]
   risks?: string[]
-  questions?: string[]
+  // A proposal with questions is never accepted by itself: the person confirms or changes each
+  // answer, and accepting adds them to the brief.
+  questions?: ProposalQuestion[]
 }
 
 export interface PlanningRequest {
@@ -83,6 +91,8 @@ export interface Acceptance {
   duration_hours: number
   baseline_minutes: number
   agents: ProposedAgent[]
+  // One for each of the proposal's questions, in their order; absent when it has none.
+  answers?: string[]
 }
 
 export const MAX_GOAL_LENGTH = 2000

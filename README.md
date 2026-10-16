@@ -319,7 +319,12 @@ within minutes, or declines with a reason (`hl platform-experiments decline`).
 The platform accepts a proposal as it is after `planning.auto_accept_seconds` (30). Before that a
 person can accept it (`POST /platform-experiments/{id}/accept`), hold it to edit it (`.../hold`),
 ask for a change in a sentence (`.../revise`) or close the draft. The baseline agent's machine
-starts while the proposal waits, so measuring begins as soon as it is accepted. The planner stays
+starts while the proposal waits, so measuring begins as soon as it is accepted.
+
+A proposal with `questions` (decisions the goal left open, each with the answer the planner
+planned on) is never accepted by itself. The person confirms or changes each answer and accepts
+with them (`answers` on the same accept), and each question and its answer are added to the brief
+the agents read. Its baseline agent's machine starts with the accept. The planner stays
 up for `planning.planner_kept_minutes` (10) after it answers, so a revision reaches it quickly.
 
 After acceptance the owner can still change the brief and duration

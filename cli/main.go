@@ -972,9 +972,11 @@ a leading quote.
   risks:
     - |
       what could make the result mislead
-  questions:
-    - |
-      what the goal left open and you decided
+  questions:                           # each decision the goal left open, with the answer you
+    - question: |                      # planned on. A proposal with questions waits for the
+        how big a win counts           # person to confirm or change each answer, which then goes
+      answer: |                        # into the brief; one without is accepted as proposed
+        1.5x the control's throughput, since the goal states no margin
   repo_map: |                          # optional, at most 4000 bytes: what you read of the repository,
     a line per file or directory that matters, its entry points, how it builds and runs, and
     the toolchain and dependency pins. The baseline agent is given it when it starts.
@@ -1027,10 +1029,10 @@ func quantitiesAsStrings(body map[string]any) {
 	}
 }
 
-// textsAsLists sends a proposal's out_of_scope, risks or questions written as one | block as the
-// one-item list the API reads. A planner was refused 422 "expected array" for questions: |.
+// textsAsLists sends a proposal's out_of_scope or risks written as one | block as the one-item
+// list the API reads. A planner was refused 422 "expected array" for questions: |.
 func textsAsLists(body map[string]any) {
-	for _, key := range []string{"out_of_scope", "risks", "questions"} {
+	for _, key := range []string{"out_of_scope", "risks"} {
 		if text, ok := body[key].(string); ok {
 			body[key] = []any{text}
 		}

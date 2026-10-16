@@ -787,7 +787,7 @@ func draftReason(pe *domain.PlatformExperiment) *domain.StatusReason {
 	case pe.ProposedAt != nil && pe.AcceptsAt != nil:
 		return &domain.StatusReason{Reason: "accepting", Message: "its planner proposed an experiment, in proposal, and the platform accepts it as proposed at accepts_at, with its baseline agent's machine starting now. Accept it sooner with POST /platform-experiments/" + pe.ID + "/accept, hold it to edit it with POST /platform-experiments/" + pe.ID + "/hold, revise it or close it"}
 	case pe.ProposedAt != nil:
-		return &domain.StatusReason{Reason: "proposed", Message: "its planner proposed an experiment, in proposal: accept it with POST /platform-experiments/" + pe.ID + "/accept, revise it or close it. The platform closes it at proposal_expires_at"}
+		return &domain.StatusReason{Reason: "proposed", Message: "its planner proposed an experiment, in proposal: accept it with POST /platform-experiments/" + pe.ID + "/accept, with answers to proposal.questions where it has any, revise it or close it. The platform closes it at proposal_expires_at"}
 	case len(pe.Revisions) > 0:
 		return &domain.StatusReason{Reason: "revising", Message: "its planner is answering the last of revisions and has until planning_ends_at"}
 	}

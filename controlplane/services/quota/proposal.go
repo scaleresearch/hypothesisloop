@@ -25,8 +25,9 @@ import (
 // Proposal is what a draft's planner proposes: the experiment as its file would state it, and
 // beside it what a run costs, which is only ever proposed. A person states the budget, the
 // duration and the agents again when accepting, by the rule that keeps them out of the
-// experiment file: an agent's token wrote this. The platform accepts it as proposed after
-// planning.auto_accept_seconds unless a person acts first. Nothing has run when it is written:
+// experiment file: an agent's token wrote this. One without questions the platform accepts as
+// proposed after planning.auto_accept_seconds unless a person acts first; one with questions
+// waits for a person to answer them. Nothing has run when it is written:
 // the baseline is measured once it is accepted, before any researcher starts.
 type Proposal struct {
 	// Experiment is shaped exactly like .hypothesisloop/experiment.yaml: name, description (the
@@ -47,15 +48,21 @@ type Proposal struct {
 	Memory  string `json:"memory,omitempty" doc:"What the run's jobs state as job.memory: a quantity such as 32Gi. Checked as a submit checks it."`
 	Storage string `json:"storage,omitempty" doc:"What the run's jobs state as job.storage: a quantity such as 100Gi. Checked as a submit checks it."`
 
-	MetricReason string   `json:"metric_reason" doc:"Why the ranked metric is the goal itself, in plain words."`
-	Measurement  string   `json:"measurement" doc:"How it is measured, in plain words: the harness, the data it never trains on, the repeats."`
-	SizingReason string   `json:"sizing_reason" doc:"Why this budget, this long and this many researchers are the least that can reach the goal, in plain words, as an estimate: the trial length assumed, what an hour on the type costs, and the trials counted."`
-	OutOfScope   []string `json:"out_of_scope,omitempty"`
-	Risks        []string `json:"risks,omitempty"`
-	Questions    []string `json:"questions,omitempty" doc:"What the person should answer before starting, when the goal left it open: among them any bound of a gate that depends on a number nobody has measured yet."`
+	MetricReason string             `json:"metric_reason" doc:"Why the ranked metric is the goal itself, in plain words."`
+	Measurement  string             `json:"measurement" doc:"How it is measured, in plain words: the harness, the data it never trains on, the repeats."`
+	SizingReason string             `json:"sizing_reason" doc:"Why this budget, this long and this many researchers are the least that can reach the goal, in plain words, as an estimate: the trial length assumed, what an hour on the type costs, and the trials counted."`
+	OutOfScope   []string           `json:"out_of_scope,omitempty"`
+	Risks        []string           `json:"risks,omitempty"`
+	Questions    []ProposalQuestion `json:"questions,omitempty" doc:"Each decision the goal left open that changes what counts, with the answer the proposal is planned on: among them any bound of a gate that depends on a number nobody has measured yet. A proposal with questions is never accepted by itself: a person confirms or changes each answer on accepting it, and the answers go into the brief."`
 	// RepoMap is what the planner read of the repository, handed to the baseline agent so that it
 	// does not read it all again.
 	RepoMap string `json:"repo_map,omitempty" doc:"What the planner learned of the repository, for the baseline agent, which is given it when it starts: the files and directories that matter to the goal, the entry points and how the code builds and runs, the toolchain and dependency pins, a line each. Optional, at most 4000 bytes."`
+}
+
+// ProposalQuestion is one decision a goal left open, and the answer its planner planned on.
+type ProposalQuestion struct {
+	Question string `json:"question" doc:"The decision, in a sentence."`
+	Answer   string `json:"answer" doc:"The answer the proposal is planned on, which the person confirms or changes."`
 }
 
 // ProposedAgent is one researcher of a proposal, as POST /platform-experiments/{id}/agents takes it.
@@ -138,12 +145,19 @@ func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p *Propo
 	if p.RepoMap = strings.TrimSpace(p.RepoMap); len(p.RepoMap) > maxProposalTextBytes {
 		return experiment, refusedProposal("too_long", "repo_map is %d bytes and at most %d: a line per file or directory that matters", len(p.RepoMap), maxProposalTextBytes)
 	}
-	for name, list := range map[string][]string{"out_of_scope": p.OutOfScope, "risks": p.Risks, "questions": p.Questions} {
+	for name, list := range map[string][]string{"out_of_scope": p.OutOfScope, "risks": p.Risks} {
 		for i, entry := range list {
 			list[i] = strings.TrimSpace(entry)
 			if list[i] == "" || len(list[i]) > maxProposalTextBytes {
 				return experiment, refusedProposal("too_long", "%s: each entry is a sentence of at most %d bytes", name, maxProposalTextBytes)
 			}
+		}
+	}
+	for i := range p.Questions {
+		q := &p.Questions[i]
+		q.Question, q.Answer = strings.TrimSpace(q.Question), strings.TrimSpace(q.Answer)
+		if q.Question == "" || q.Answer == "" || len(q.Question) > maxProposalTextBytes || len(q.Answer) > maxProposalTextBytes {
+			return experiment, refusedProposal("too_long", "questions[%d]: question and answer are each a sentence of at most %d bytes: the decision, and the answer the proposal is planned on", i, maxProposalTextBytes)
 		}
 	}
 	return experiment, nil
@@ -238,11 +252,12 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Description: "Makes a proposed draft an open platform experiment in one write: its name, description, metrics, report interval, stages and policies are the proposal's; " +
 			"its budget, its length, the minutes its baseline has and its researchers are the ones this body states, whatever the proposal proposed, because an agent wrote the proposal. " +
 			"name, when the body states one, replaces the proposal's name and nothing else of it (422 invalid_experiment for one that is no name). " +
+			"answers holds one answer for each of the proposal's questions, in their order, as the person confirmed or changed it: each question and its answer are added to the end of the brief, a line each, so every agent reads the decisions as made. 422 invalid_answers when it does not hold one non-empty answer for each question. " +
 			"The budget caps everything the platform experiment spends, the baseline included: what measuring it cost is taken from the budget, the rest is shared among the researchers, and an agent's burst hours run on idle capacity and come out of its share, never on top of it. " +
 			"The platform hosts its coordinator, each researcher and one agent of role baseline, named by its role, which the proposal signed up so that its machine starts while the proposal is read, and which is created here for a proposal that signed none up. " + coordinatorWanted + " " +
 			"starts_at is now and it is open until baseline_due_at, baseline_minutes from now, and one not running by then is closed with close_reason baseline_limit_reached. The run lasts duration_hours from the moment it starts, and measuring the baseline takes nothing from it. Nothing has run yet: the baseline agent measures the baseline, the platform declares the job it leaves when it finishes and starts the run, " +
 			"and no researcher's machine is started before. Where that agent leaves no job, or several, the coordinator adds another or declares one (PATCH /platform-experiments/{id}, baseline_job_id), and status_reason says so. " +
-			"The platform makes the same accept by itself at accepts_at, at the proposal's own budget, length, baseline_minutes and researchers, for the person who created the draft, unless a person accepted, held, revised or closed it first; one the check refuses then waits for a person. " +
+			"The platform makes the same accept by itself at accepts_at, at the proposal's own budget, length, baseline_minutes and researchers, for the person who created the draft, unless a person accepted, held, revised or closed it first; one the check refuses then waits for a person. A proposal with questions has no accepts_at and waits for a person to answer them. " +
 			"409 invalid_transition for anything but a draft with a proposal; 422 with the proposal's reasons when the stated cost, baseline_minutes or agents do not pass its check, " +
 			"accelerator_unreachable among them when the proposal's accelerator_type is on no cluster the org's jobs can be placed on now, and no_cluster_for_image when none that has it runs the proposal's image any more; " +
 			"503 launcher_not_registered when nothing could run it. A draft's own planner cannot accept it.",
@@ -300,7 +315,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"invalid_cost, invalid_agents, invalid_length, run_too_long (duration_hours over the platform's quota.max_platform_experiment_days), invalid_baseline_minutes (under planning.min_baseline_minutes, or over planning.baseline_limit_minutes), missing_explanation, too_long, " +
 			"accelerator_unreachable for an accelerator_type no cluster this org's jobs can be placed on has now, and for image the two refusals a job submit gives: " +
 			"unknown_job_image for one that is neither a job image the platform offers nor a whole registry address, and no_cluster_for_image for one no cluster that has the type runs. Stored, it replaces the one before, marks the draft proposed " +
-			"(proposed_at), and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the platform accepts it as proposed at accepts_at (planning.auto_accept_seconds from now) unless a person accepts it sooner, holds it, revises it or closes it. With no auto-accept configured it waits for a person to accept it.",
+			"(proposed_at), and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the platform accepts it as proposed at accepts_at (planning.auto_accept_seconds from now) unless a person accepts it sooner, holds it, revises it or closes it. A proposal with questions, or one made with no auto-accept configured, has no accepts_at and waits for a person to accept it, and its baseline agent's machine starts with the accept.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body Proposal
@@ -328,7 +343,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err != nil {
 			return nil, h.refusal("encode proposal", err)
 		}
-		proposed, err := h.proposed(pe)
+		proposed, err := h.proposed(pe, &in.Body)
 		if err != nil {
 			return nil, h.refusal("store proposal", err)
 		}
@@ -351,13 +366,14 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 	})
 }
 
-// proposed is what a proposal of draft pe stored now writes beside it: until when it waits, when
+// proposed is what proposal p of draft pe stored now writes beside it: until when it waits, when
 // the platform accepts it by itself, and the agent that is to measure its baseline, signed up for
-// the person who created the draft so that its machine starts while the proposal is read.
-func (h *PlatformExperimentsHandler) proposed(pe *domain.PlatformExperiment) (db.Proposed, error) {
+// the person who created the draft so that its machine starts while the proposal is read. One
+// with questions is never accepted by itself, since only a person can answer them.
+func (h *PlatformExperimentsHandler) proposed(pe *domain.PlatformExperiment, p *Proposal) (db.Proposed, error) {
 	now := time.Now().UTC()
 	proposed := db.Proposed{WaitUntil: now.Add(h.planning.ProposedFor), KeepPlanner: h.planning.PlannerKept}
-	if h.planning.AutoAccept > 0 {
+	if h.planning.AutoAccept > 0 && len(p.Questions) == 0 {
 		at := now.Add(h.planning.AutoAccept)
 		proposed.AcceptsAt = &at
 	}
@@ -384,7 +400,40 @@ type AcceptRequest struct {
 	DurationHours          float64         `json:"duration_hours" doc:"How long the run lasts from the moment it starts, once its baseline is declared."`
 	BaselineMinutes        int             `json:"baseline_minutes" doc:"The minutes measuring the baseline has from this accept, at least planning.min_baseline_minutes and at most planning.baseline_limit_minutes: baseline_due_at is that much later, and moves out by the time the platform spends building and starting the baseline's jobs."`
 	Agents                 []ProposedAgent `json:"agents" doc:"The researchers the platform runs, one entry each."`
-	Name                   string          `json:"name,omitempty" doc:"The name of the platform experiment, when the person changed the one proposed. One line, held to the rule of name on POST /platform-experiments. Left out, the proposal's name stands. Nothing else of the proposal's experiment is changed here: its metrics and its brief change by a revision."`
+	Name                   string          `json:"name,omitempty" doc:"The name of the platform experiment, when the person changed the one proposed. One line, held to the rule of name on POST /platform-experiments. Left out, the proposal's name stands. Nothing else of the proposal's experiment is changed here but by answers: its metrics and the rest of its brief change by a revision."`
+	Answers                []string        `json:"answers,omitempty" doc:"One answer for each of the proposal's questions, in their order: the answer the planner planned on, or the person's own. Each question and its answer are added to the end of the brief. Left out for a proposal without questions."`
+}
+
+// answered is the proposal's experiment with each question and its answer added to the end of
+// its brief, a line each, so that every agent reads the decisions the person made.
+func answered(experiment json.RawMessage, questions []ProposalQuestion, answers []string) (json.RawMessage, error) {
+	if len(answers) != len(questions) {
+		return nil, refusedProposal("invalid_answers", "answers: the proposal has %d questions and the accept answers %d: answer each, in their order", len(questions), len(answers))
+	}
+	if len(questions) == 0 {
+		return experiment, nil
+	}
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(experiment, &fields); err != nil {
+		return nil, err
+	}
+	var brief string
+	if err := json.Unmarshal(fields["description"], &brief); err != nil {
+		return nil, err
+	}
+	lines := []string{strings.TrimRight(brief, "\n"), "", "Decisions the owner made before the run:"}
+	for i, q := range questions {
+		answer := strings.Join(strings.Fields(answers[i]), " ")
+		if answer == "" || len(answer) > maxProposalTextBytes {
+			return nil, refusedProposal("invalid_answers", "answers[%d]: answer %q in a sentence of at most %d bytes", i, q.Question, maxProposalTextBytes)
+		}
+		lines = append(lines, "- "+strings.Join(strings.Fields(q.Question), " ")+" Answer: "+answer)
+	}
+	var err error
+	if fields["description"], err = json.Marshal(strings.Join(lines, "\n")); err != nil {
+		return nil, err
+	}
+	return json.Marshal(fields)
 }
 
 // named is the proposal's experiment under the name the person who accepts gave it.
@@ -434,6 +483,9 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 		if proposal.Experiment, err = named(proposal.Experiment, req.Name); err != nil {
 			return nil, h.refusal("name the proposed experiment", err)
 		}
+	}
+	if proposal.Experiment, err = answered(proposal.Experiment, proposal.Questions, req.Answers); err != nil {
+		return nil, h.refusal("answer the proposal's questions", err)
 	}
 	now := time.Now().UTC()
 	experiment, err := h.checkProposal(ctx, &proposal, pe)

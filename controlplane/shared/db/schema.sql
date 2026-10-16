@@ -1689,3 +1689,12 @@ ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS continues TEXT REFEREN
 -- read. Researchers start from the baseline's commit and agents read every earlier run again.
 ALTER TABLE platform_experiments DROP COLUMN IF EXISTS start_commit;
 ALTER TABLE platform_experiments DROP COLUMN IF EXISTS history;
+
+-- A proposal's questions were sentences that stated the decision and the answer planned on
+-- together; each is now a question with its answer, and a sentence stored before is both.
+UPDATE platform_experiments
+SET proposal = jsonb_set(proposal, '{questions}', (
+    SELECT jsonb_agg(CASE WHEN jsonb_typeof(q) = 'string' THEN jsonb_build_object('question', q, 'answer', q) ELSE q END)
+    FROM jsonb_array_elements(proposal->'questions') q))
+WHERE jsonb_typeof(proposal->'questions') = 'array'
+  AND EXISTS (SELECT 1 FROM jsonb_array_elements(proposal->'questions') q WHERE jsonb_typeof(q) = 'string');

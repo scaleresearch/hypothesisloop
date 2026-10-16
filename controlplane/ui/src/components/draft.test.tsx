@@ -40,7 +40,6 @@ const proposal: Proposal = {
   metric_reason: 'Validation loss on held-out text is the goal itself.',
   measurement: 'bench.py scores a split the training never reads.',
   sizing_reason: 'An estimate, nothing has run: a trial is assumed to take 6 minutes, so 30 trials each for 2 researchers is 6.',
-  questions: ['Is 4 hours enough?'],
   risks: ['One seed only.'],
 }
 
@@ -248,6 +247,38 @@ describe('a proposal the platform accepts by itself unless the person acts first
     render(<SWRConfig value={{ provider: () => new Map() }}><TenantContext.Provider value={tenant}><DraftView draft={accepting()} readOnly /></TenantContext.Provider></SWRConfig>)
     expect(countdown()).toBeUndefined()
     for (const name of ['Accept now', 'Edit', 'Reject']) expect(screen.queryByRole('button', { name })).toBeNull()
+  })
+})
+
+// The planner wrote what the goal left open ("no margin was stated, so I set 1.5x") and the
+// platform accepted it 30 s later, so the agents ran on its guesses. A proposal with questions
+// waits for the person, who confirms or changes each answer the planner planned on.
+describe('a proposal with questions', () => {
+  const asking = () => draft('proposed', {
+    proposed_at: '2026-10-05T12:10:00Z',
+    proposal: { ...proposal, questions: [
+      { question: 'How big a win counts?', answer: 'A 20% lower val_loss.' },
+      { question: 'Which batch size is held equal?', answer: '32.' },
+    ] },
+  })
+
+  it('shows each question with the planner\'s answer and accepts with the answers as edited', async () => {
+    show(asking())
+    expect(screen.getByLabelText('How big a win counts?')).toHaveProperty('value', 'A 20% lower val_loss.')
+    const batch = screen.getByLabelText('Which batch size is held equal?')
+    await userEvent.clear(batch)
+    expect(screen.getByRole('button', { name: 'Accept and run' })).toHaveProperty('disabled', true)
+    await userEvent.type(batch, '64, the size the control ships with. ')
+    await userEvent.click(screen.getByRole('button', { name: 'Accept and run' }))
+    expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/accept', {
+      name: 'Cosine or constant', budget_accelerator_hours: 6, duration_hours: 4, baseline_minutes: 30, agents: [sweeper, {}],
+      answers: ['A 20% lower val_loss.', '64, the size the control ships with.'],
+    })
+  })
+
+  it('shows a reader the questions and answers with nothing to edit', () => {
+    render(<SWRConfig value={{ provider: () => new Map() }}><TenantContext.Provider value={tenant}><DraftView draft={asking()} readOnly /></TenantContext.Provider></SWRConfig>)
+    expect(screen.getByLabelText('How big a win counts?')).toMatchObject({ value: 'A 20% lower val_loss.', disabled: true })
   })
 })
 
