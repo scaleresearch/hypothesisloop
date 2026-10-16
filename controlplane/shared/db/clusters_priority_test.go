@@ -78,32 +78,3 @@ func TestAnOrgOrdersItsClustersAndASharedOneComesLast(t *testing.T) {
 		t.Fatalf("once the sharing ended: %+v, %v, want priority %d", unshared, err, domain.DefaultClusterPriority)
 	}
 }
-
-// A database from before priorities has shared clusters at the column's default. Applying the
-// schema again puts them at the platform's priority.
-func TestTheSchemaPutsAnAlreadySharedClusterAtThePlatformsPriority(t *testing.T) {
-	w := newTwoOrgs(t)
-	ctx := context.Background()
-	t.Setenv("HYPOTHESISLOOP_SCHEMA_SQL", "schema.sql")
-	if _, err := w.pool.pool.Exec(ctx, `ALTER TABLE clusters DROP CONSTRAINT clusters_priority`); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = w.pool.pool.Exec(context.Background(), `UPDATE clusters SET shared = false, priority = 100 WHERE name = $1`, w.ofA)
-		if err := ApplySchema(context.Background(), w.pool); err != nil {
-			t.Errorf("restore the schema: %v", err)
-		}
-	})
-	if _, err := w.pool.pool.Exec(ctx, `UPDATE clusters SET shared = true, priority = 100 WHERE name = $1`, w.ofA); err != nil {
-		t.Fatal(err)
-	}
-	if err := ApplySchema(ctx, w.pool); err != nil {
-		t.Fatalf("apply the schema again: %v", err)
-	}
-	if c, _ := w.clusters.GetCluster(ctx, w.ofA); c.Priority != domain.SharedClusterPriority {
-		t.Fatalf("an already shared cluster after the schema is applied: priority %d, want %d", c.Priority, domain.SharedClusterPriority)
-	}
-	if _, err := w.pool.pool.Exec(ctx, `UPDATE clusters SET priority = 100 WHERE name = $1`, w.ofA); err == nil {
-		t.Fatal("the schema lets a shared cluster hold an org's priority")
-	}
-}

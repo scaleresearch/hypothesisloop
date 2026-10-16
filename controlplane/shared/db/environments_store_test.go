@@ -313,41 +313,6 @@ func TestAJobEndedForAnUnbuiltEnvironmentIsSettledWithItsStatusAndNotRequeued(t 
 	}
 }
 
-// A database from when one builder built every org's files keyed without the org: a row a job
-// named takes that job's org, an abandoned one fails as the platform's fault, and one no job named
-// goes.
-func TestTheSchemaGivesAnEnvironmentTheOrgOfItsJobAndFailsAnAbandonedOne(t *testing.T) {
-	w := newEnvironments(t)
-	ctx := context.Background()
-	named, unnamed := "old-named-"+w.suffix, "old-unnamed-"+w.suffix
-	job := w.queued(t, "old-env-job", w.peB)
-	for _, statement := range []string{
-		`ALTER TABLE environments DROP CONSTRAINT environments_state_check`,
-		`ALTER TABLE environments ALTER COLUMN org_id DROP NOT NULL`,
-		`ALTER TABLE environments ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0`,
-		`INSERT INTO environments (key, base, dockerfile, image, state, attempts) VALUES
-			('` + named + `', 'b', 'f', 'registry.test/env:` + named + `', 'abandoned', 3),
-			('` + unnamed + `', 'b', 'f', 'registry.test/env:` + unnamed + `', 'ready', 0)`,
-		`UPDATE experiments SET environment_key = '` + named + `' WHERE id = '` + job + `'`,
-	} {
-		if _, err := w.pool.pool.Exec(ctx, statement); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for range 2 {
-		if err := applySchemaAt(ctx, testDSN()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	got, err := w.envs.GetEnvironment(ctx, named)
-	if err != nil || got == nil || got.OrgID != w.orgB || got.State != domain.EnvironmentFailed || got.Fault != domain.EnvironmentFaultPlatform {
-		t.Fatalf("the named row: %+v, %v, want org b's, failed as the platform's fault", got, err)
-	}
-	if gone, err := w.envs.GetEnvironment(ctx, unnamed); err != nil || gone != nil {
-		t.Fatalf("the unnamed row: %+v, %v, want it gone", gone, err)
-	}
-}
-
 func TestAssigningAnEnvironmentNoRowNamesIsNothing(t *testing.T) {
 	w := newEnvironments(t)
 	if env, err := w.envs.AssignEnvironment(context.Background(), "no-such-"+w.suffix, []string{w.ofA}, []string{w.ofA}, time.Minute); err != nil || env != nil {

@@ -621,6 +621,37 @@ HypothesisLoop has two kinds of deployable parts:
 The scheduler (`controlplane/services/scheduler`) keeps desired state in Postgres and reads actual
 state from what the runtimes report to the metrics store.
 
+### Database
+
+The Postgres schema is a sequence of migrations, `controlplane/shared/db/migrations/NNNN_name.sql`,
+embedded in `control-service`. At start it applies the pending ones in order, each in its own
+transaction, and records each in `schema_migrations` with the checksum of its file. It refuses to
+start when an applied migration's file has changed, or when the database has a migration it does
+not know. `make db-migration NAME=add_widget_color` creates the next file.
+
+A migration is never edited once merged, and it must keep the previous release working, so two
+releases can serve side by side during a rolling deploy. A change the previous release cannot run
+against is split across releases (expand, then contract):
+
+1. add a column nullable or with a default, a table, or an index, and backfill;
+2. ship the code that uses it;
+3. drop or tighten what only the old code needed, in a later release's migration.
+
+`migrations/snapshots/NNNN.sql`, when present, is the whole schema at version NNNN in one file. A
+fresh database is built from the newest snapshot and recorded as having run the migrations up to
+it; an existing database runs those migrations in order. A test requires each snapshot to build
+the same schema as its migrations.
+
+Migrations hold schema and the data changes that go with it. Built-in agent types are not
+migrations: they are seeded at every start from the files embedded in the binary
+(`db.SeedBuiltinAgentTypes`), and a version is added only when a file's digest changes.
+
+A database from before migrations (built by the idempotent `schema.sql` of commit `7c630417`) is
+adopted at `0001_baseline` on its first start: the baseline is built in a scratch schema inside a
+rolled back transaction, every column it defines must be present with the same type and
+nullability, and the database is recorded at version 1 without running it. One that falls short
+is refused with the columns it lacks.
+
 ## Configuration
 
 The control plane reads one settings file (`controlplane/settings/hypothesisloop.yaml`, which
@@ -845,6 +876,7 @@ The whole public API is served from one port and described by one OpenAPI docume
 | `make dev-hosted`                 | `make dev` plus agent-launcher (on `SANDBOX_PROVIDER`) and cloud-agent (on `CLOUD_COMPUTE_PROVIDER`), through public tunnels (`make tunnels`); rents compute. It runs the agent and job images published under `IMAGE_TAG` |
 | `make staff-token`                | Print a staff token for local work (`make -s staff-token`)          |
 | `make git-repository NAME=x`      | Create a repository on the local git server                         |
+| `make db-migration NAME=x`        | Create the next numbered database migration                         |
 | `make e2e`                        | The e2e suite against the `make dev` stack and the local k3s cluster |
 | `make controlplane-up`            | Build images and start the control plane in containers              |
 | `make controlplane-down`          | Stop the control plane and keep its data                            |

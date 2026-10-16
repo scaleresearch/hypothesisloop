@@ -47,7 +47,6 @@ cloud_cluster="${cloud_provider:+hypothesisloop-${cloud_provider}}"
 
 mkdir -p "${bin}" "${run}"
 export HYPOTHESISLOOP_CONFIG="${repo}/${settings}"
-export HYPOTHESISLOOP_SCHEMA_SQL="${repo}/controlplane/shared/db/schema.sql"
 export DATABASE_URL="postgres://hypothesisloop:hypothesisloop@localhost:5433/hypothesisloop?sslmode=disable"
 
 running() {

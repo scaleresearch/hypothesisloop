@@ -75,16 +75,19 @@ func main() {
 	}
 	defer pool.Close()
 
-	// control-service is the sole owner of the schema (schema.sql is baked into this image only
-	// — see controlplane/build/Dockerfile.control-service — not metrics-service's, which needs
-	// Postgres to READ the same tables but never applies DDL to them). Every statement in it is
-	// idempotent, so this is safe on every boot, not just the first; a Postgres advisory lock
-	// inside ApplySchema serializes it against a second control-service replica doing the same.
+	// control-service is the sole owner of the schema: metrics-service reads the same tables and
+	// never migrates them.
 	migrateCtx, migrateCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	err = db.ApplySchema(migrateCtx, pool)
+	migrated, err := db.Migrate(migrateCtx, pool)
 	migrateCancel()
 	if err != nil {
-		logger.Fatal("control-service: apply schema", zap.Error(err))
+		logger.Fatal("control-service: migrate database", zap.Error(err))
+	}
+	if migrated.Adopted {
+		logger.Info("adopted a database from before migrations at the baseline migration, without running it")
+	}
+	for _, name := range migrated.Applied {
+		logger.Info("applied database migration", zap.String("migration", name))
 	}
 	seedBuiltinAgentTypes(pool, modelDefaults(pcfg), logger)
 

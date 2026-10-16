@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"slices"
 	"testing"
@@ -708,48 +707,6 @@ func TestAnOpenExperimentClosedWithoutABaselineSaysTheBaselineLimitEndedIt(t *te
 		if got := closed(c.prepare, c.by); got != c.want {
 			t.Errorf("%s: close_reason = %q, want %q", name, got, c.want)
 		}
-	}
-}
-
-// A planner once held a quota, the allowance its baseline job ran against. It runs no job now,
-// and a row left from then is removed where the schema is applied.
-func TestAQuotaLeftWithAPlannerIsRemoved(t *testing.T) {
-	pool := eventsTestDB(t)
-	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
-	pe, planner := createTestDraft(t, pool, "launcher-"+uuid.New().String()[:8])
-	if _, err := pool.pool.Exec(ctx, upsertAgentQuotaSQL, agentQuotaUpsertArgs(&domain.AgentQuota{
-		ID: uuid.New().String(), AgentID: planner, PlatformExperimentID: pe, GuaranteedAcceleratorHours: 2, CreatedAt: time.Now().UTC(),
-	})...); err != nil {
-		t.Fatal(err)
-	}
-	applyTestSchema(t, pool)
-	if quota, err := pes.GetAgentQuota(ctx, planner, pe); err != nil || quota != nil {
-		t.Fatalf("the planner's quota = %+v, %v, want none", quota, err)
-	}
-}
-
-// A proposal stored before the baseline had its own columns carried the job and the estimate a
-// trial takes from it. Rows from then keep both, and their proposals no longer state them.
-func TestABaselineStoredInAProposalMovesToItsColumns(t *testing.T) {
-	pool := eventsTestDB(t)
-	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
-	id := "pe-" + uuid.New().String()[:8]
-	createTestPE(t, pool, id, 10)
-	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET proposal = $2 WHERE id = $1`, id,
-		`{"budget_accelerator_hours":6,"baseline_job_id":"job-old","accelerator_type":"rtx-4090","job_estimated_duration_hours":0.3}`); err != nil {
-		t.Fatal(err)
-	}
-	applyTestSchema(t, pool)
-	applyTestSchema(t, pool)
-	got, err := pes.GetPlatformExperiment(ctx, id)
-	if err != nil || got.BaselineJobID != "job-old" || got.JobEstimatedDurationHours != 0.3 {
-		t.Fatalf("got = baseline %q with an estimate of %g, %v, want job-old and 0.3", got.BaselineJobID, got.JobEstimatedDurationHours, err)
-	}
-	var left map[string]any
-	if err := json.Unmarshal(got.Proposal, &left); err != nil || len(left) != 2 || left["accelerator_type"] != "rtx-4090" {
-		t.Fatalf("the proposal keeps %v, %v, want its budget and its type alone", left, err)
 	}
 }
 

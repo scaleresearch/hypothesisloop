@@ -59,7 +59,6 @@ func TestAnOrgConnectsSeveralInstallationsAndFindsOneByItsAccount(t *testing.T) 
 	if _, err := pool.pool.Exec(ctx, `UPDATE org_github_installations SET account_type = '' WHERE org_id = $1 AND installation_id = 7`, orgA); err != nil {
 		t.Fatal(err)
 	}
-	applyTestSchema(t, pool)
 	if found, err := accounts.GitHubInstallationOfAccount(ctx, orgA, "acme-renamed"); err != nil || found == nil || found.AccountType != "" {
 		t.Fatalf("a row from before the type was kept: got = %+v, %v, want it read with no type", found, err)
 	}
@@ -214,7 +213,7 @@ func TestAnInstallStateIsTakenOnceByThePersonItWasIssuedToWhileItHolds(t *testin
 	}
 }
 
-func TestARepositorysAddressIsStoredAtCreationAndBackfilledOnceForGitHub(t *testing.T) {
+func TestARepositorysAddressIsStoredAtCreation(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
@@ -243,12 +242,9 @@ func TestARepositorysAddressIsStoredAtCreationAndBackfilledOnceForGitHub(t *test
 	}
 
 	elsewhere := create("group/model", "https://git.example/experiments/group/model")
-	before := create("Acme/Model", "")
 	bare := create("", "")
-	applyTestSchema(t, pool)
 	for name, tc := range map[string][2]string{
 		"an address stored at creation":            {elsewhere, "https://git.example/experiments/group/model"},
-		"a repository from before the column":      {before, "https://github.com/Acme/Model.git"},
 		"a platform experiment with no repository": {bare, ""},
 	} {
 		if got := address(tc[0]); got != tc[1] {

@@ -458,38 +458,3 @@ func TestAClaimPlacesAJobOnlyWhereItsImageRuns(t *testing.T) {
 		t.Fatalf("named is to run in %q, want the %q it names", got.ResolvedJob.Image, got.Job.Image)
 	}
 }
-
-// A database from when a cluster that runs any image also kept where a job naming none ran:
-// the jobs placed then keep the image they run in, and the cluster is read as running any.
-func TestTheSchemaTurnsADefaultJobImageIntoAClusterThatRunsAnyImage(t *testing.T) {
-	w := newTwoOrgs(t)
-	ctx := context.Background()
-	const platformImage = "registry.test/platform-job:7"
-	onAny, onOne := w.placed(t, "on-any", w.peA, w.ofA, domain.StatusRunning), w.placed(t, "on-one", w.peB, w.ofB, domain.StatusSubmitted)
-	for _, statement := range []string{
-		`ALTER TABLE clusters ADD COLUMN job_image_default BOOLEAN NOT NULL DEFAULT false`,
-		`UPDATE clusters SET job_image = '` + platformImage + `', job_image_default = (name = '` + w.ofA + `') WHERE name IN ('` + w.ofA + `', '` + w.ofB + `')`,
-		`UPDATE experiments SET resolved_job_spec = resolved_job_spec - 'image' WHERE id IN ('` + onAny + `', '` + onOne + `')`,
-	} {
-		if _, err := w.pool.pool.Exec(ctx, statement); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for range 2 {
-		if err := applySchemaAt(ctx, testDSN()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, id := range []string{onAny, onOne} {
-		if got := w.get(t, id); got.ResolvedJob.Image != platformImage {
-			t.Errorf("%s is to run in %q, want the %q it was started in", id, got.ResolvedJob.Image, platformImage)
-		}
-	}
-	registered, err := w.clusters.RegisteredClusters(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if registered[w.ofA].JobImage != "" || registered[w.ofB].JobImage != platformImage {
-		t.Errorf("the clusters run %q and %q, want any image and %q", registered[w.ofA].JobImage, registered[w.ofB].JobImage, platformImage)
-	}
-}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"reflect"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -117,39 +116,6 @@ func TestAUserCarriesTheNameLastStatedForThem(t *testing.T) {
 		}
 	}
 
-	// A database from before the kind was kept: loading the schema reads it off what
-	// connected_by names, calls a row that names nobody unverified, and refuses to load while
-	// one names somebody who is neither a user nor a key.
-	if _, err := pool.pool.Exec(ctx, `INSERT INTO org_github_installations (org_id, installation_id, account_login, connected_by) VALUES ($1, 4, 'acme-nobody', '')`, orgID); err != nil {
-		t.Fatal(err)
-	}
-	connectors = append(connectors, domain.Actor{Kind: domain.ActorUnverified})
-	if _, err := pool.pool.Exec(ctx, `
-UPDATE org_github_installations SET connected_by_kind = '', connected_by = CASE installation_id WHEN 3 THEN 'hl-admin' ELSE connected_by END WHERE org_id = $1`, orgID); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("HYPOTHESISLOOP_SCHEMA_SQL", "schema.sql")
-	if err := ApplySchema(ctx, pool); err != nil {
-		t.Fatalf("ApplySchema over rows with no kind: got = %v, want nil", err)
-	}
-	listed, err := accounts.ListGitHubInstallations(ctx, orgID)
-	if err != nil || len(listed) != len(connectors) {
-		t.Fatalf("installations after the schema loaded: got = %+v, %v", listed, err)
-	}
-	for n, in := range listed {
-		if in.ConnectedActor != connectors[n] {
-			t.Errorf("installation %d after the schema loaded: got = %+v, want %+v", in.InstallationID, in.ConnectedActor, connectors[n])
-		}
-	}
-	if _, err := pool.pool.Exec(ctx, `UPDATE org_github_installations SET connected_by_kind = '', connected_by = 'nobody-known' WHERE org_id = $1 AND installation_id = 1`, orgID); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		pool.pool.Exec(context.Background(), `DELETE FROM org_github_installations WHERE org_id = $1`, orgID) //nolint:errcheck
-	})
-	if err := ApplySchema(ctx, pool); err == nil || !strings.Contains(err.Error(), "nobody-known") {
-		t.Fatalf("ApplySchema over a row that names nobody: got = %v, want a refusal naming it", err)
-	}
 }
 
 func TestConcurrentFirstRequestsEndWithOneOrg(t *testing.T) {

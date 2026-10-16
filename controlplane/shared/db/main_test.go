@@ -16,7 +16,7 @@ import (
 
 const devDSN = "postgres://hypothesisloop:hypothesisloop@localhost:5433/hypothesisloop?sslmode=disable"
 
-// scratchDSN is the database TestMain creates for this run with schema.sql applied in full. Tests
+// scratchDSN is the database TestMain creates for this run with every migration applied. Tests
 // never touch the server's own databases: schema DDL there takes locks that deadlocked live
 // transactions of a running stack.
 var scratchDSN string
@@ -61,25 +61,21 @@ func runWithScratchDatabase(m *testing.M) int {
 		return 1
 	}
 	dsn.Path = "/" + name
-	if err := applySchemaAt(ctx, dsn.String()); err != nil {
-		fmt.Fprintf(os.Stderr, "apply schema to scratch database: %v\n", err)
+	if err := migrateAt(ctx, dsn.String()); err != nil {
+		fmt.Fprintf(os.Stderr, "migrate scratch database: %v\n", err)
 		return 1
 	}
 	scratchDSN = dsn.String()
 	return m.Run()
 }
 
-func applySchemaAt(ctx context.Context, dsn string) error {
+func migrateAt(ctx context.Context, dsn string) error {
 	pool, err := NewPool(ctx, Config{DSN: dsn, MaxConns: 1, MinConns: 1})
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	if err := os.Setenv("HYPOTHESISLOOP_SCHEMA_SQL", "schema.sql"); err != nil {
-		return err
-	}
-	defer os.Unsetenv("HYPOTHESISLOOP_SCHEMA_SQL") //nolint:errcheck
-	if err := ApplySchema(ctx, pool); err != nil {
+	if _, err := Migrate(ctx, pool); err != nil {
 		return err
 	}
 	builtins, err := agenttypes.Builtins()

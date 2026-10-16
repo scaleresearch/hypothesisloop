@@ -160,7 +160,7 @@ WHERE id = $1 AND status = 'SUBMITTED'`
 }
 
 // MarkUnderperforming records the ranking metric the job trails its cohort on. Only the first
-// call for a job writes, and that write is what emits job.underperforming (see schema.sql), so
+// call for a job writes, and that write is what emits job.underperforming (see the migrations), so
 // the advisory is sent once per job and replays like every other row-backed event.
 func (s *ExperimentsStore) MarkUnderperforming(ctx context.Context, id, metricName string) error {
 	const q = `UPDATE experiments SET underperforming_metric = $2
@@ -181,7 +181,7 @@ func sentenced(reason string) error {
 }
 
 // MarkHeldJobs records on a QUEUED job the queue reason it is held for, and that write is what
-// emits job.held (see schema.sql): once, when the job has waited since it was queued for longer
+// emits job.held (see the migrations): once, when the job has waited since it was queued for longer
 // than its estimated duration and longer than minimum. A job the scheduler has not judged yet has
 // no reason to tell.
 func (s *ExperimentsStore) MarkHeldJobs(ctx context.Context, minimum time.Duration) error {

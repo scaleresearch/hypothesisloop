@@ -457,7 +457,7 @@ type SeededAgentType struct {
 }
 
 // SeedBuiltinAgentTypes writes the built-in agent types as the repository has them, under the lock
-// ApplySchema takes, in one transaction: a type that does not exist yet is created at version 1, and
+// Migrate takes, in one transaction: a type that does not exist yet is created at version 1, and
 // one whose prompt and settings match none of its versions gets the next version, which its live
 // agents move to (propagateTx). Matching any version, not just the current one, keeps an older
 // replica of a rolling deploy from writing its own back. Then every agent and coordinator from

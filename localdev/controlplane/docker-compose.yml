@@ -37,14 +37,8 @@ services:
       # Host port 5433, not 5432: leaves a real local Postgres (if the host has one) alone.
       - "5433:5432"
     volumes:
+      # No schema here: control-service migrates the database at start (db.Migrate).
       - postgres-data:/var/lib/postgresql/data
-      # Demo-seed only (agent-alice/agent-bob, one sample platform experiment) — runs once, at
-      # Postgres's own first boot against an empty volume, which is BEFORE control-service ever
-      # starts. Its `\i /schema/schema.sql` include is what lets its INSERTs find real tables at
-      # that moment; the actual migration path for every later boot is control-service's own
-      # db.ApplySchema (see controlplane/shared/db/migrate.go) baked into its image, not this file.
-      - ../../localdev/controlplane/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-      - ../../controlplane/shared/db/schema.sql:/schema/schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hypothesisloop -d hypothesisloop"]
       interval: 2s

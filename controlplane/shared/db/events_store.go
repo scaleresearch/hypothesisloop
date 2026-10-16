@@ -18,7 +18,7 @@ import (
 var ErrUnknownCursor = errors.New("since is not a cursor this platform issued")
 
 // eventsChannel is the single Postgres NOTIFY channel every event is emitted on, by the AFTER
-// triggers in schema.sql. One channel, so one LISTEN per process carries the whole stream.
+// triggers the migrations create. One channel, so one LISTEN per process carries the whole stream.
 const eventsChannel = "hypothesisloop_events"
 
 // EventsStore is the only path to the change stream: it listens for live events and derives the

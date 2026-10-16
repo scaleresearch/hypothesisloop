@@ -173,20 +173,11 @@ func TestARunWaitsForItsFirstResearchersMachineWithinItsRun(t *testing.T) {
 	if closed := read(pe); closed.CloseReason != domain.CloseAgentsNotStarted || !closed.AgentsDueAt.Equal(due) || !closed.StartedAt.IsZero() || !closed.EndsAt.IsZero() {
 		t.Fatalf("closed waiting: got = %s, agents due %v, started %v, ends %v, want agents_not_started with its deadline kept and no run", closed.CloseReason, closed.AgentsDueAt, closed.StartedAt, closed.EndsAt)
 	}
-	// Applying the schema again leaves a run with no clock as it is: only a row from before
-	// started_at was kept is given one.
-	if err := applySchemaAt(ctx, testDSN()); err != nil {
-		t.Fatal(err)
-	}
-	if closed := read(pe); !closed.StartedAt.IsZero() {
-		t.Fatalf("after the schema is applied again: started %v, want none", closed.StartedAt)
-	}
 }
 
 // The platform's record of a close is written once and kept beside the coordinator's summary,
 // after it: a summary written before the close never stands alone as the record, and one
-// written after it replaces only the coordinator's part. A record that was once written as the
-// summary itself moves beside it when the schema is applied.
+// written after it replaces only the coordinator's part.
 func TestTheRecordOfACloseIsKeptBesideTheSummary(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
@@ -237,19 +228,6 @@ func TestTheRecordOfACloseIsKeptBesideTheSummary(t *testing.T) {
 		t.Fatalf("rewritten after the close: summary %q, want the new one and the record", got)
 	}
 
-	exec(t, pool, `UPDATE platform_experiments SET summary = 'Recorded by the platform: it closed.', close_record = '' WHERE id = $1`, pe)
-	if err := applySchemaAt(ctx, testDSN()); err != nil {
-		t.Fatal(err)
-	}
-	if got := summary(); got != "Recorded by the platform: it closed." {
-		t.Fatalf("an old record after the schema is applied: summary %q", got)
-	}
-	if err := pes.SetPlatformExperimentSummary(ctx, pe, "Written after."); err != nil {
-		t.Fatal(err)
-	}
-	if got := summary(); got != "Written after.\n\nRecorded by the platform: it closed." {
-		t.Fatalf("an old record kept beside a summary: %q", got)
-	}
 }
 
 func TestAListSaysWhyAPlatformExperimentClosed(t *testing.T) {
