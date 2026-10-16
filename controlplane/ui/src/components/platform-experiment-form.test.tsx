@@ -3,17 +3,19 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  ApiError, addPlatformExperimentAgents, beginGitHubInstall, createExperimentDraft, createPlatformExperiment, deleteExperimentDraft, fetchExperimentFile, fetchGitHubApp,
+  ApiError, addPlatformExperimentAgents, beginGitHubInstall, fetchAgentTypes, createExperimentDraft, createPlatformExperiment, deleteExperimentDraft, fetchExperimentFile, fetchGitHubApp,
   fetchGitHubInstallations, fetchGitHubRepositories, updateExperimentDraft, updatePlatformExperiment,
 } from '@/lib/api'
 import type { ExperimentDraft } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { PlatformExperimentForm } from '@/components/platform-experiment-form'
 import type { Me, PlatformExperiment } from '@/types'
+import { CATALOG } from '@/test-agent-types'
+import { choose } from '@/test-select'
 
 vi.mock('@/lib/api', async importActual => ({
   ...(await importActual<typeof import('@/lib/api')>()),
-  addPlatformExperimentAgents: vi.fn(), beginGitHubInstall: vi.fn(), createPlatformExperiment: vi.fn(), fetchExperimentFile: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
+  addPlatformExperimentAgents: vi.fn(), beginGitHubInstall: vi.fn(), fetchAgentTypes: vi.fn(), createPlatformExperiment: vi.fn(), fetchExperimentFile: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
   updatePlatformExperiment: vi.fn(), createExperimentDraft: vi.fn(), updateExperimentDraft: vi.fn(), deleteExperimentDraft: vi.fn(),
 }))
 
@@ -71,6 +73,7 @@ beforeEach(() => {
   vi.mocked(createExperimentDraft).mockReset().mockImplementation(kept('draft-1'))
   vi.mocked(updateExperimentDraft).mockReset().mockImplementation(kept('draft-1'))
   vi.mocked(deleteExperimentDraft).mockReset().mockResolvedValue()
+  vi.mocked(fetchAgentTypes).mockResolvedValue(CATALOG)
 })
 
 describe('a new platform experiment', () => {
@@ -113,13 +116,33 @@ describe('a new platform experiment', () => {
     await userEvent.clear(screen.getByLabelText('Max researchers'))
     await userEvent.type(screen.getByLabelText('Max researchers'), '4')
     await userEvent.click(within(screen.getByRole('group', { name: 'Starting agents choice' })).getByRole('button', { name: 'Custom' }))
-    await userEvent.clear(screen.getByLabelText('Starting agent 1 count'))
+    await userEvent.clear(await screen.findByLabelText('Starting agent 1 count'))
     await userEvent.type(screen.getByLabelText('Starting agent 1 count'), '2')
     await userEvent.click(screen.getByRole('button', { name: '+ Add agents' }))
     await userEvent.type(screen.getByLabelText('Starting agent 2 model'), 'model-2')
     await create()
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
     expect(sent()).toMatchObject({ max_agents: 4, researchers: [{ agent_type: 'generalist', count: 2 }, { agent_type: 'generalist', count: 1, model: 'model-2' }] })
+  })
+
+  it('offers the org\'s researcher types from the API, each with what it does, and links to manage them', async () => {
+    show()
+    await userEvent.type(name(), 'Run')
+    await userEvent.type(screen.getByLabelText('Brief'), 'The brief')
+    await next()
+    await next()
+    await userEvent.click(within(screen.getByRole('group', { name: 'Starting agents choice' })).getByRole('button', { name: 'Custom' }))
+    const type = await screen.findByLabelText('Starting agent 1 type')
+    expect(screen.getByText(/No fixed axis/)).toBeTruthy()
+    await userEvent.click(type)
+    const offered = (await screen.findAllByRole('option')).map(o => o.textContent)
+    expect(offered).toEqual(['Generalist', 'Hyperparameter search', 'Architecture search', 'Data search', 'LR sweeper (v3)'])
+    await userEvent.click(screen.getByRole('option', { name: 'LR sweeper (v3)' }))
+    expect(screen.getByText("Your org's researcher type, v3 by Ada.")).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Manage agent types' }).getAttribute('href')).toBe('/orgs/org_a/settings/agent-types')
+    await create()
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(sent()).toMatchObject({ researchers: [{ agent_type: 'at-lr', count: 1 }] })
   })
 
   it('says starting agents beyond max researchers before the API does', async () => {
@@ -129,7 +152,7 @@ describe('a new platform experiment', () => {
     await next()
     await next()
     await userEvent.click(within(screen.getByRole('group', { name: 'Starting agents choice' })).getByRole('button', { name: 'Custom' }))
-    await userEvent.clear(screen.getByLabelText('Starting agent 1 count'))
+    await userEvent.clear(await screen.findByLabelText('Starting agent 1 count'))
     await userEvent.type(screen.getByLabelText('Starting agent 1 count'), '5')
     expect(await screen.findByText('5 starting agents, more than the 2 researchers allowed at once.')).toBeTruthy()
     expect(createPlatformExperiment).not.toHaveBeenCalled()
@@ -246,6 +269,13 @@ describe('editing a platform experiment', () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(renamed))
     expect(updatePlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-1', { name: 'New' })
     expect(createPlatformExperiment).not.toHaveBeenCalled()
+  })
+
+  it('shows max researchers without changing it: that is done in place on the experiment page', async () => {
+    show(existing)
+    await userEvent.click(screen.getByRole('tab', { name: '3. Budget and rules' }))
+    expect(screen.queryByRole('spinbutton', { name: 'Max researchers' })).toBeNull()
+    expect(screen.getByText('Changed on the experiment page, under Researchers, with the pool.')).toBeTruthy()
   })
 
   it('reads the experiment\'s duration and sends a changed one as duration_hours', async () => {

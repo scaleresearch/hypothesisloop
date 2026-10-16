@@ -4,11 +4,14 @@ import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   addPlatformExperimentAgents, fetchPlatformExperimentAgents, fetchPlatformExperimentAgentToken, removePlatformExperimentAgent,
-  createPlatformExperiment, fetchPlatformExperimentMessages, sendPlatformExperimentMessage,
+  createPlatformExperiment, fetchAgentTypes, fetchPlatformExperimentMessages, sendPlatformExperimentMessage,
 } from '@/lib/api'
+import { resolveTenant, TenantContext } from '@/lib/tenant'
+import { choose } from '@/test-select'
+import { CATALOG } from '@/test-agent-types'
 import { ExperimentAgents } from '@/components/experiment-agents'
 import { PlatformExperimentStatus } from '@/types'
-import type { AgentMessage, AgentSignup, JoinedAgent, PlatformExperiment } from '@/types'
+import type { AgentMessage, AgentSignup, JoinedAgent, Me, PlatformExperiment } from '@/types'
 
 class ApiError extends Error {
   constructor(readonly status: number, message: string, readonly reason?: string) { super(message) }
@@ -19,11 +22,17 @@ vi.mock('@/lib/api', () => ({
   createPlatformExperiment: vi.fn(),
   addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
   fetchPlatformExperimentAgentToken: vi.fn(), removePlatformExperimentAgent: vi.fn(),
-  fetchPlatformExperimentMessages: vi.fn(), sendPlatformExperimentMessage: vi.fn(),
+  fetchPlatformExperimentMessages: vi.fn(), sendPlatformExperimentMessage: vi.fn(), fetchAgentTypes: vi.fn(),
 }))
 
 const at = '2026-01-01T00:00:00Z'
 let roster: JoinedAgent[]
+
+const me: Me = {
+  kind: 'user', user_id: 'u1', name: 'Ada',
+  orgs: [{ id: 'org_a', name: 'Lab', role: 'owner', created_at: at }],
+  projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
+}
 
 function signup(id: string, hosted: boolean, flavor?: string): AgentSignup {
   return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted, flavor, signed_up_at: at }
@@ -31,8 +40,12 @@ function signup(id: string, hosted: boolean, flavor?: string): AgentSignup {
 
 function show(status = PlatformExperimentStatus.OPEN, more: Partial<PlatformExperiment> = {}) {
   const pe = { id: 'pe-1', project_id: 'prj_1', status, ...more } as PlatformExperiment
+  const resolved = resolveTenant(me, '')
+  if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
-    <SWRConfig value={{ provider: () => new Map() }}><ExperimentAgents pe={pe} /></SWRConfig>,
+    <SWRConfig value={{ provider: () => new Map() }}>
+      <TenantContext.Provider value={resolved.tenant}><ExperimentAgents pe={pe} /></TenantContext.Provider>
+    </SWRConfig>,
   )
 }
 
@@ -51,6 +64,7 @@ beforeEach(() => {
     roster = roster.filter(a => a.agent_id !== id)
   })
   vi.mocked(fetchPlatformExperimentMessages).mockResolvedValue([])
+  vi.mocked(fetchAgentTypes).mockResolvedValue(CATALOG)
 })
 
 describe('messaging an agent', () => {
@@ -87,14 +101,14 @@ describe('adding agents', () => {
   it('asks the platform to run them by default and shows no token', async () => {
     show()
     await userEvent.click(screen.getByRole('button', { name: 'Add agent' }))
-    expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', { hosted: true, flavor: undefined, model: undefined })
+    expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', { hosted: true, flavor: 'generalist', model: undefined })
     expect(await screen.findByRole('cell', { name: 'ag-new1' })).toBeTruthy()
     expect(screen.queryByTestId('secret')).toBeNull()
   })
 
   it('adds one agent a click, with flavor and model, and shows the self-run agent\'s token', async () => {
     show()
-    await userEvent.type(screen.getByLabelText('Specialization'), 'data-search')
+    await choose(await screen.findByLabelText('Type'), 'Data search')
     await userEvent.type(screen.getByLabelText('Model'), 'claude-opus-4-5')
     await userEvent.click(screen.getByRole('button', { name: 'Me' }))
     await userEvent.click(screen.getByRole('button', { name: 'Add agent' }))
@@ -206,5 +220,30 @@ describe('an experiment waiting to start', () => {
     show(PlatformExperimentStatus.OPEN, { status_reason: waits })
     await screen.findByRole('cell', { name: 'ag-old' })
     expect(screen.queryByRole('button', { name: /^Start/ })).toBeNull()
+  })
+})
+
+describe('agent types in the roster', () => {
+  async function row(id: string) {
+    return within((await screen.findByRole('cell', { name: id })).closest('tr')!)
+  }
+
+  it('names each agent\'s type and the version it is pinned to, an unknown type by its id', async () => {
+    roster = [
+      { ...signup('ag-1', true, 'at-lr'), agent_type_version: 3 },
+      { ...signup('ag-2', true, 'data-search'), agent_type_version: 1 },
+      { ...signup('ag-3', true, 'at-gone'), agent_type_version: 2 },
+    ]
+    show(PlatformExperimentStatus.RUNNING)
+    await screen.findByText('LR sweeper')
+    expect((await row('ag-1')).getByText('v3')).toBeTruthy()
+    expect((await row('ag-2')).getByText('Data search')).toBeTruthy()
+    expect((await row('ag-3')).getByText('at-gone')).toBeTruthy()
+  })
+
+  it('says a researcher was cut when max researchers was lowered', async () => {
+    roster = [{ ...signup('ag-1', true, 'generalist'), agent_type_version: 1, cut_reason: 'max_agents_lowered' }]
+    show(PlatformExperimentStatus.RUNNING)
+    expect(await screen.findByText('Cut, max researchers lowered')).toBeTruthy()
   })
 })

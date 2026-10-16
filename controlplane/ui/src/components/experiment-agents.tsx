@@ -26,7 +26,10 @@ import { Code, Eyebrow, Text } from '@/components/ui/text'
 import { Secret } from '@/components/ui/secret'
 import { Activity } from '@/components/agent-at-work'
 import { InstanceHealth } from '@/components/instance-health'
-import { AGENT_TYPES } from '@/lib/agent-types'
+import { DEFAULT_AGENT_TYPE, researcherTypes, typeName, useAgentTypes } from '@/lib/agent-types'
+import { useTenant } from '@/lib/tenant'
+import { Select } from '@/components/ui/select'
+import type { AgentType } from '@/types'
 import { relTime } from '@/lib/format'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { useReadOnly } from '@/lib/read-only'
@@ -41,8 +44,10 @@ function envFile(agent: JoinedAgent): string {
 }
 
 function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: JoinedAgent[]) => Promise<unknown> }) {
+  const { org } = useTenant()
+  const { data: catalog } = useAgentTypes(org.id)
   const [hosted, setHosted] = useState(true)
-  const [flavor, setFlavor] = useState('')
+  const [flavor, setFlavor] = useState(DEFAULT_AGENT_TYPE)
   const [model, setModel] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -53,7 +58,7 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
     setError('')
     try {
       await onAdded(await addPlatformExperimentAgents(pe.id, {
-        hosted, flavor: flavor.trim() || undefined, model: model.trim() || undefined,
+        hosted, flavor, model: model.trim() || undefined,
       }))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -65,24 +70,22 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
   return (
     <Stack>
       <Inline as="form" align="end" onSubmit={submit}>
-        <FormField label="Specialization">
-          <Input
+        <FormField label="Type">
+          <Select
             fieldSize="sm"
-            mono
-            className="w-52"
-            list="agent-flavors"
-            placeholder="agent's default"
+            className="w-56"
             value={flavor}
-            onChange={e => setFlavor(e.target.value)}
+            placeholder={typeName(flavor, catalog)}
+            options={researcherTypes(catalog).map(t => ({ value: t.id, label: t.builtin ? t.name : `${t.name} (v${t.current_version})` }))}
+            onChange={setFlavor}
           />
-          <datalist id="agent-flavors">{AGENT_TYPES.map(f => <option key={f} value={f} />)}</datalist>
         </FormField>
         <FormField label="Model">
           <Input
             fieldSize="sm"
             mono
             className="w-56"
-            placeholder="agent's default"
+            placeholder={catalog?.find(t => t.id === flavor)?.current.settings.model || 'platform default'}
             value={model}
             onChange={e => setModel(e.target.value)}
           />
@@ -110,6 +113,7 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
 function statusOf(agent: JoinedAgent, closed: boolean): { label: string; tone: Tone; detail?: string } {
   const detail = [agent.finished_reason, agent.activity?.text, agent.status_reason?.message].filter(Boolean).join(' ') || undefined
   if (agent.finished_at) return { label: `Finished ${relTime(agent.finished_at)}`, tone: 'neutral', detail }
+  if (agent.cut_reason === 'max_agents_lowered') return { label: 'Cut, max researchers lowered', tone: 'neutral', detail }
   if (closed) return { label: 'Stopped, experiment closed', tone: 'neutral', detail }
   if (!agent.instance) return { label: agent.hosted ? 'Not reported yet' : 'Run by its operator', tone: 'neutral', detail }
   switch (agent.instance.state) {
@@ -176,13 +180,24 @@ function Messages({ messages }: { messages: AgentMessage[] }) {
 }
 
 /** Everything about one agent that its row has no room for. */
-function AgentDetails({ agent, messages }: { agent: JoinedAgent; messages: AgentMessage[] }) {
+/** The agent type an agent runs, by name, and the version it is pinned to. */
+export function AgentTypeLabel({ agent, catalog }: { agent: AgentSignup; catalog: AgentType[] | undefined }) {
+  if (!agent.flavor) return <span className="text-muted">default</span>
+  return (
+    <span title={`${agent.flavor}, pinned to v${agent.agent_type_version}`}>
+      {typeName(agent.flavor, catalog)}
+      {agent.agent_type_version ? <span className="ml-1 font-mono text-2xs text-subtle">v{agent.agent_type_version}</span> : null}
+    </span>
+  )
+}
+
+function AgentDetails({ agent, messages, catalog }: { agent: JoinedAgent; messages: AgentMessage[]; catalog: AgentType[] | undefined }) {
   return (
     <Stack gap="sm">
       <Facts facts={[
         ['Id', agent.agent_id],
         ['Run by', agent.hosted ? 'the platform' : 'its operator'],
-        ['Specialization', agent.flavor ?? 'default'],
+        ['Type', <AgentTypeLabel key="type" agent={agent} catalog={catalog} />],
         ['Model', agent.model ?? 'default'],
         ['Joined', new Date(agent.signed_up_at).toLocaleString()],
       ]} />
@@ -214,6 +229,8 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   const [messaging, setMessaging] = useState<AgentSignup | null>(null)
   const [open, setOpen] = useState<string | null>(null)
   const readOnly = useReadOnly()
+  const { org } = useTenant()
+  const { data: catalog } = useAgentTypes(org.id)
   // Quota is divided at the start over the agents present, so the roster is fixed from then on.
   const started = pe.status === PlatformExperimentStatus.RUNNING || pe.status === PlatformExperimentStatus.CLOSED
   const { data: messages, mutate: mutateMessages } = useSWR(
@@ -293,7 +310,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
           {agents && agents.length > 0 && (
             <Table aria-label="Agents">
               <thead>
-                <tr><th className="w-8" /><th>Agent</th><th>Role</th><th>Status</th><th /></tr>
+                <tr><th className="w-8" /><th>Agent</th><th>Role</th><th>Type</th><th>Status</th><th /></tr>
               </thead>
               <tbody>
                 {agents.map(agent => {
@@ -323,6 +340,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
                           )}
                         </td>
                         <td className="text-xs">{agent.role}</td>
+                        <td className="whitespace-nowrap text-xs"><AgentTypeLabel agent={agent} catalog={catalog} /></td>
                         <td><StatusLabel tone={status.tone} title={status.detail}>{status.label}</StatusLabel></td>
                         <td>
                           {!readOnly && (
@@ -338,8 +356,8 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
                       </tr>
                       {expanded && (
                         <tr>
-                          <td colSpan={5} className="bg-surface-inset">
-                            <AgentDetails agent={agent} messages={sent} />
+                          <td colSpan={6} className="bg-surface-inset">
+                            <AgentDetails agent={agent} messages={sent} catalog={catalog} />
                           </td>
                         </tr>
                       )}
