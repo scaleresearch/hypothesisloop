@@ -71,6 +71,11 @@ export function PromptEditor({ role, value, onChange, readOnly }: {
           })}
         </div>
       </Stack>
+      {problems.length > 0 && (
+        <Stack gap="2xs" aria-live="polite" className="rounded border border-danger-edge bg-danger-faint px-3 py-2">
+          {problems.map(p => <InlineError key={p}>{p}</InlineError>)}
+        </Stack>
+      )}
       <Textarea
         ref={area}
         aria-label="Prompt"
@@ -83,12 +88,7 @@ export function PromptEditor({ role, value, onChange, readOnly }: {
         onChange={e => onChange?.(e.target.value)}
         className="text-xs leading-relaxed"
       />
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <Stack gap="2xs" aria-live="polite">
-          {problems.map(p => <InlineError key={p}>{p}</InlineError>)}
-        </Stack>
-        <Text variant="meta" className="ml-auto tabular-nums">{kb(size)} of {kb(MAX_PROMPT_BYTES)}</Text>
-      </div>
+      <Text variant="meta" className="text-right tabular-nums">{kb(size)} of {kb(MAX_PROMPT_BYTES)}</Text>
     </Stack>
   )
 }

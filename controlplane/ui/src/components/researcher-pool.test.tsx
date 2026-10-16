@@ -74,6 +74,7 @@ describe('the researchers of an experiment', () => {
     const dialog = within(screen.getByRole('dialog'))
     expect(dialog.getByText('Lower max researchers to 1?')).toBeTruthy()
     expect(dialog.getAllByRole('listitem').map(li => li.firstChild?.textContent)).toEqual(['ag-mid', 'ag-lr'])
+    expect(dialog.getByText(/^LR sweeper · joined/)).toBeTruthy()
     expect(updatePlatformExperiment).not.toHaveBeenCalled()
     await userEvent.click(dialog.getByRole('button', { name: 'Lower and cut 2' }))
     expect(updatePlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-1', { max_agents: 1 })

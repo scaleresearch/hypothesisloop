@@ -24,7 +24,7 @@ export function toDraft(s: AgentTypeSettings): SettingsDraft {
     max_subagents: s.max_subagents,
     pacing_subagents: s.pacing_subagents,
     effort: s.effort,
-    hyperparameters: Object.keys(h).length === 0 ? '' : JSON.stringify(h, null, 2),
+    hyperparameters: Object.keys(h).length === 0 ? '' : JSON.stringify(h).length <= 80 ? JSON.stringify(h) : JSON.stringify(h, null, 2),
   }
 }
 

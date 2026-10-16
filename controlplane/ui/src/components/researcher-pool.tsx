@@ -34,7 +34,13 @@ function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`
 }
 
-function CutConfirm({ max, cut, onConfirm, onCancel }: { max: number; cut: JoinedAgent[]; onConfirm: () => void; onCancel: () => void }) {
+function CutConfirm({ max, cut, nameOf, onConfirm, onCancel }: {
+  max: number
+  cut: JoinedAgent[]
+  nameOf: (typeID: string) => string
+  onConfirm: () => void
+  onCancel: () => void
+}) {
   return (
     <Dialog open onClose={onCancel} title={`Lower max researchers to ${max}?`} size="sm">
       <Stack>
@@ -45,8 +51,8 @@ function CutConfirm({ max, cut, onConfirm, onCancel }: { max: number; cut: Joine
         <ul className="grid gap-1 rounded border bg-surface-inset px-3 py-2 text-xs" aria-label="Researchers to cut">
           {cut.map(a => (
             <li key={a.agent_id} className="flex items-baseline justify-between gap-3">
-              <span className="font-medium">{a.name}</span>
-              <span className="text-muted">{a.flavor} · joined {relTime(a.signed_up_at)}</span>
+              <span className="whitespace-nowrap font-medium">{a.name}</span>
+              <span className="text-right text-muted">{a.flavor ? nameOf(a.flavor) : 'default'} · joined {relTime(a.signed_up_at)}</span>
             </li>
           ))}
         </ul>
@@ -179,7 +185,7 @@ function PoolEditor({ pe, atWork, onDone }: { pe: PlatformExperiment; atWork: Jo
           onClick={() => cut.length > 0 ? setConfirming(true) : void save()}
         >Save</Button>
       </Inline>
-      {confirming && <CutConfirm max={maxN} cut={cut} onConfirm={() => void save()} onCancel={() => setConfirming(false)} />}
+      {confirming && <CutConfirm max={maxN} cut={cut} nameOf={id => typeName(id, catalog)} onConfirm={() => void save()} onCancel={() => setConfirming(false)} />}
     </Stack>
   )
 }

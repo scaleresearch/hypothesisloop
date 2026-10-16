@@ -33,8 +33,8 @@ const BUILTIN_DESCRIPTIONS: Record<string, string> = {
 /** One line on what agents of the type do. */
 export function describeType(t: AgentType): string {
   if (t.builtin) return BUILTIN_DESCRIPTIONS[t.id] ?? roleOf(t.role).description
-  const by = t.created_by?.name ? ` by ${t.created_by.name}` : ''
-  return `Your org's ${roleOf(t.role).label.toLowerCase()} type, v${t.current_version}${by}.`
+  const by = t.created_by?.name ? `, made by ${t.created_by.name}` : ''
+  return `Your org's own ${roleOf(t.role).label.toLowerCase()} type${by}.`
 }
 
 /** The name an agent type id reads as, or the id itself when the catalog does not hold it. */

@@ -86,7 +86,7 @@ describe('editing an org\'s agent type', () => {
     show()
     await screen.findByRole('textbox', { name: 'Prompt' })
     await choose(screen.getByLabelText('Max subagents'), '6')
-    expect(screen.getByText('Saving makes v4. Used by 2 live agents move to it.')).toBeTruthy()
+    expect(screen.getByText('Saving makes v4. 2 live agents move to it.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Save as v4' }))
     const dialog = within(screen.getByRole('dialog'))
     expect(dialog.getByText(/2 live agents run this type\. Each one restarts its session with the new version at its next turn/)).toBeTruthy()

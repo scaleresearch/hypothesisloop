@@ -203,7 +203,7 @@ function Editor({ type, editable, onSaved, onReload }: {
                 {problems.length > 0
                   ? `${problems.length} ${problems.length === 1 ? 'problem' : 'problems'} to fix before saving.`
                   : newVersion
-                    ? `Saving makes v${type.current_version + 1}.${type.live_agents > 0 ? ` ${liveAgents(type.live_agents)} move to it.` : ''}`
+                    ? `Saving makes v${type.current_version + 1}.${type.live_agents > 0 ? ` ${type.live_agents} live ${type.live_agents === 1 ? 'agent moves' : 'agents move'} to it.` : ''}`
                     : 'Only the name changed: no new version.'}
               </Text>
               <Inline gap="xs">

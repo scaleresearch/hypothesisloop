@@ -83,9 +83,12 @@ function RoleGroup({ role, types, administers, duplicate, busy }: {
     Number(b.builtin) - Number(a.builtin) || Number(!!a.archived_at) - Number(!!b.archived_at) || (a.builtin ? 0 : a.name.localeCompare(b.name)))
   return (
     <Section title={r.plural} note={r.description} scrollX>
-      <Table aria-label={`${r.label} types`}>
+      <Table aria-label={`${r.label} types`} className="min-w-3xl table-fixed">
         <thead>
-          <tr><th>Type</th><th>Settings</th><th className="text-right">Version</th><th>In use</th>{administers && <th />}</tr>
+          <tr>
+            <th>Type</th><th className="w-64">Settings</th><th className="w-20 text-right">Version</th><th className="w-44">In use</th>
+            {administers && <th className="w-28" />}
+          </tr>
         </thead>
         <tbody>
           {ordered.map(t => (

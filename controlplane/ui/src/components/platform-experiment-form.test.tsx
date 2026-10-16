@@ -138,7 +138,7 @@ describe('a new platform experiment', () => {
     const offered = (await screen.findAllByRole('option')).map(o => o.textContent)
     expect(offered).toEqual(['Generalist', 'Hyperparameter search', 'Architecture search', 'Data search', 'LR sweeper (v3)'])
     await userEvent.click(screen.getByRole('option', { name: 'LR sweeper (v3)' }))
-    expect(screen.getByText("Your org's researcher type, v3 by Ada.")).toBeTruthy()
+    expect(screen.getByText("Your org's own researcher type, made by Ada.")).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Manage agent types' }).getAttribute('href')).toBe('/orgs/org_a/settings/agent-types')
     await create()
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
