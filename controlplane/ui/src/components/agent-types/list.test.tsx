@@ -43,27 +43,32 @@ describe('the agent types page', () => {
     expect(names).toEqual(['Generalist', 'Hyperparameter search', 'Architecture search', 'Data search', 'LR sweeper', 'Old sweeper'])
     expect(researchers.getAllByText('Built-in, read-only')).toHaveLength(4)
     expect(researchers.getByText('Archived')).toBeTruthy()
-    expect(researchers.getByText('Used by 2 live agents')).toBeTruthy()
+    expect(researchers.queryByRole('columnheader', { name: 'In use' })).toBeNull()
     for (const role of ['Baseline', 'Planner', 'Coordinator']) expect(screen.getByRole('table', { name: `${role} types` })).toBeTruthy()
   })
 
-  it('duplicates any type, built-in ones included, and opens the copy', async () => {
+  it('duplicates a researcher or baseline type, built-in ones included, and opens the copy', async () => {
     show()
     const row = (await screen.findByRole('link', { name: 'Data search' })).closest('tr')!
     await userEvent.click(within(row).getByRole('button', { name: 'Duplicate' }))
     expect(createAgentType).toHaveBeenCalledExactlyOnceWith('org_a', { from: 'data-search' })
     expect(navigation.push).toHaveBeenCalledWith('/orgs/org_a/settings/agent-types/at-new')
+    for (const role of ['Planner', 'Coordinator']) {
+      expect(within(screen.getByRole('table', { name: `${role} types` })).queryByRole('button', { name: 'Duplicate' })).toBeNull()
+    }
   })
 
-  it('starts a new type from the built-in one of the role chosen', async () => {
+  it('starts a new type from the built-in one of the role chosen, a researcher or a baseline', async () => {
     show()
     await userEvent.click(await screen.findByRole('button', { name: 'New type' }))
     const dialog = within(screen.getByRole('dialog'))
-    await userEvent.click(dialog.getByRole('button', { name: 'Coordinator' }))
-    expect(dialog.getByText('Starts as a copy of Coordinator, which you then edit.')).toBeTruthy()
-    await userEvent.type(dialog.getByLabelText('Name'), 'Strict coordinator')
+    expect(dialog.queryByRole('button', { name: 'Coordinator' })).toBeNull()
+    expect(dialog.queryByRole('button', { name: 'Planner' })).toBeNull()
+    await userEvent.click(dialog.getByRole('button', { name: 'Baseline' }))
+    expect(dialog.getByText('Starts as a copy of Baseline, which you then edit.')).toBeTruthy()
+    await userEvent.type(dialog.getByLabelText('Name'), 'Strict baseline')
     await userEvent.click(dialog.getByRole('button', { name: 'Create and edit' }))
-    expect(createAgentType).toHaveBeenCalledExactlyOnceWith('org_a', { from: 'coordinator', name: 'Strict coordinator' })
+    expect(createAgentType).toHaveBeenCalledExactlyOnceWith('org_a', { from: 'baseline', name: 'Strict baseline' })
   })
 
   it('shows the API\'s refusal of a copy', async () => {

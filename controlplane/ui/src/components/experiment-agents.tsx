@@ -180,15 +180,10 @@ function Messages({ messages }: { messages: AgentMessage[] }) {
 }
 
 /** Everything about one agent that its row has no room for. */
-/** The agent type an agent runs, by name, and the version it is pinned to. */
+/** The agent type an agent runs, by name. */
 export function AgentTypeLabel({ agent, catalog }: { agent: AgentSignup; catalog: AgentType[] | undefined }) {
   if (!agent.flavor) return <span className="text-muted">default</span>
-  return (
-    <span title={`${agent.flavor}, pinned to v${agent.agent_type_version}`}>
-      {typeName(agent.flavor, catalog)}
-      {agent.agent_type_version ? <span className="ml-1 font-mono text-2xs text-subtle">v{agent.agent_type_version}</span> : null}
-    </span>
-  )
+  return <span title={agent.flavor}>{typeName(agent.flavor, catalog)}</span>
 }
 
 function AgentDetails({ agent, messages, catalog }: { agent: JoinedAgent; messages: AgentMessage[]; catalog: AgentType[] | undefined }) {

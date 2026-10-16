@@ -235,6 +235,8 @@ export interface AgentTypeVersion {
   prompt: string
   settings: AgentTypeSettings
   digest: string
+  // For a built-in version, the platform release that seeded it.
+  release?: number
   created_by?: Actor
   created_at: string
 }
@@ -254,19 +256,11 @@ export interface AgentType {
   created_by?: Actor
   created_at: string
   current: AgentTypeVersion
-  // How many agents and coordinators whose run goes on run it now.
-  live_agents: number
 }
 
-export interface PinMove {
-  platform_experiment_id: string
-  agent_id?: string
-  error?: string
-}
-
-/** An agent type after an edit, and the live agents it moved to the new version. */
+/** An agent type after an edit or a restore, and how many running agents were told of its new version. */
 export interface EditedAgentType extends AgentType {
-  propagation: { version: number; moved: PinMove[] | null; failed: PinMove[] | null }
+  propagation: { version: number; told: number }
 }
 
 /** How many researchers of one agent type on one model an experiment keeps at work. */
@@ -297,6 +291,8 @@ export interface PlatformExperiment {
   researchers?: ResearcherPoolEntry[]
   // The researchers at work by the one rule max_agents holds to, answered with the experiment.
   researchers_at_work?: ResearchersAtWork
+  // The places of researchers the platform keeps empty and why, absent when none.
+  researchers_held?: string
   // Accelerators-in-flight (SUBMITTED+RUNNING) this experiment may hold at once. Absent uses the
   // platform default (quota.default_max_concurrent_accelerators).
   max_concurrent_accelerators?: number
@@ -816,10 +812,9 @@ export interface AgentSignup {
   actor: Actor
   // true: the platform runs the agent on a machine of its own.
   hosted: boolean
-  // The agent type it runs, by id, and the version of it the agent is pinned to: an edit of the
-  // type while the run goes on moves the agent to the new version.
+  // The agent type it runs, by id: it runs the type's current version. model is its own, empty
+  // when it runs on its type's.
   flavor?: string
-  agent_type_version?: number
   model?: string
   // Whether it is a researcher at work, by the one rule max_agents holds to.
   at_work: boolean

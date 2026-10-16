@@ -1,5 +1,5 @@
 import useSWR from 'swr'
-import { fetchAgentTypes } from '@/lib/api'
+import { ApiError, fetchAgentTypes } from '@/lib/api'
 import type { AgentRole, AgentType, AgentTypeSettings } from '@/types'
 
 /** The built-in researcher type an agent runs as when it names none. */
@@ -11,6 +11,12 @@ export const ROLES: { role: AgentRole; label: string; plural: string; builtin: s
   { role: 'planner', label: 'Planner', plural: 'Planners', builtin: 'planner', description: 'Turns a one-line goal into a draft experiment.' },
   { role: 'coordinator', label: 'Coordinator', plural: 'Coordinators', builtin: 'coordinator', description: 'Supervises a run and writes its summary.' },
 ]
+
+/** The roles an org makes types of: a coordinator or a planner runs its built-in type only. */
+export const ORG_ROLES: AgentRole[] = ['researcher', 'baseline']
+
+/** The sentence every save and restore of a type says of the agents running it. */
+export const APPLIES_LIVE = 'Changes apply in real time to running agents.'
 
 export function roleOf(role: AgentRole) {
   const found = ROLES.find(r => r.role === role)
@@ -166,4 +172,12 @@ export const REFUSALS: Record<string, string> = {
   archived: 'This type is archived and can no longer be edited.',
   version_conflict: 'Someone saved a newer version while you were editing.',
   agent_type_in_use: 'It is still in use.',
+  agent_type_limit: 'The org has as many agent types as it may.',
+  edit_rate_limited: 'This type was changed as often as it may be in an hour.',
+}
+
+/** A refusal of a change to a type in words, its reason explained where it has one. */
+export function said(e: unknown): string {
+  if (e instanceof ApiError && e.reason && REFUSALS[e.reason]) return `${REFUSALS[e.reason]} ${e.message}`
+  return e instanceof Error ? e.message : String(e)
 }

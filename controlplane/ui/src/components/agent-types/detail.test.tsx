@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, archiveAgentType, createAgentType, editAgentType, fetchAgentType, fetchAgentTypeVersions } from '@/lib/api'
+import { ApiError, archiveAgentType, createAgentType, editAgentType, fetchAgentType, fetchAgentTypeVersions, restoreAgentType } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { AgentTypeDetail } from '@/components/agent-types/detail'
 import { CATALOG, RESEARCHER_PROMPT, agentType } from '@/test-agent-types'
@@ -13,7 +13,7 @@ const navigation = vi.hoisted(() => ({ push: vi.fn() }))
 vi.mock('next/navigation', () => ({ useRouter: () => navigation }))
 vi.mock('@/lib/api', () => ({
   ApiError: class extends Error { constructor(readonly status: number, message: string, readonly reason?: string) { super(message) } },
-  fetchAgentType: vi.fn(), fetchAgentTypeVersions: vi.fn(), editAgentType: vi.fn(), archiveAgentType: vi.fn(), createAgentType: vi.fn(),
+  fetchAgentType: vi.fn(), fetchAgentTypeVersions: vi.fn(), editAgentType: vi.fn(), restoreAgentType: vi.fn(), archiveAgentType: vi.fn(), createAgentType: vi.fn(),
 }))
 
 const at = '2026-01-01T00:00:00Z'
@@ -45,8 +45,8 @@ function setPrompt(text: string) {
   fireEvent.change(prompt(), { target: { value: text } })
 }
 
-function edited(t: AgentType, moved: number, failed: EditedAgentType['propagation']['failed'] = []): EditedAgentType {
-  return { ...t, propagation: { version: t.current_version, moved: Array.from({ length: moved }, (_, i) => ({ platform_experiment_id: 'pe-1', agent_id: `ag-${i}` })), failed } }
+function edited(t: AgentType, told: number): EditedAgentType {
+  return { ...t, propagation: { version: t.current_version, told } }
 }
 
 beforeEach(() => {
@@ -80,35 +80,34 @@ describe('editing an org\'s agent type', () => {
     expect((screen.getByRole('button', { name: 'Save as v4' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('asks before an edit that restarts live agents\' sessions, then saves from the version it was made on and says who moved', async () => {
-    const saved = agentType('at-lr', 'LR sweeper', 'researcher', { current_version: 4, live_agents: 2 })
+  it('asks before a new version, saying it applies in real time, then saves from the version it was made on', async () => {
+    const saved = agentType('at-lr', 'LR sweeper', 'researcher', { current_version: 4 })
     vi.mocked(editAgentType).mockImplementation(async () => { type = saved; return edited(saved, 2) })
     show()
     await screen.findByRole('textbox', { name: 'Prompt' })
     await choose(screen.getByLabelText('Max subagents'), '6')
-    expect(screen.getByText('Saving makes v4. 2 live agents move to it.')).toBeTruthy()
+    expect(screen.getByText('Saving makes v4.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Save as v4' }))
     const dialog = within(screen.getByRole('dialog'))
-    expect(dialog.getByText(/2 live agents run this type\. Each one restarts its session with the new version at its next turn/)).toBeTruthy()
+    expect(dialog.getByText('Changes apply in real time to running agents.')).toBeTruthy()
+    expect(dialog.queryByText(/restart|live agent|\d+ agents/i)).toBeNull()
     expect(editAgentType).not.toHaveBeenCalled()
-    await userEvent.click(dialog.getByRole('button', { name: 'Save and restart sessions' }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
     expect(editAgentType).toHaveBeenCalledExactlyOnceWith('org_a', 'at-lr', {
       if_version: 3, name: 'LR sweeper', description: '', prompt: RESEARCHER_PROMPT,
       settings: { model: '', max_subagents: 6, pacing_subagents: 2, effort: 'high', hyperparameters: {} },
     })
-    expect(await screen.findByText(/Saved as v4\. 2 live agents pick it up at their next turn\./)).toBeTruthy()
+    expect(await screen.findByText('v4 is current. Changes apply in real time to running agents.')).toBeTruthy()
   })
 
-  it('names the agents an edit could not move, which keep their version', async () => {
-    const saved = agentType('at-lr', 'LR sweeper', 'researcher', { current_version: 4 })
-    vi.mocked(editAgentType).mockImplementation(async () => { type = saved; return edited(saved, 1, [{ platform_experiment_id: 'pe-9', agent_id: 'ag-x', error: 'model refused' }]) })
-    type = { ...type, live_agents: 0 }
+  it('says plainly when the type was changed as often as it may be in an hour', async () => {
+    vi.mocked(editAgentType).mockRejectedValue(new ApiError(429, 'at-lr has 60 versions in the last hour', 'edit_rate_limited'))
     show()
     await screen.findByRole('textbox', { name: 'Prompt' })
     setPrompt(`${RESEARCHER_PROMPT}More.`)
     await userEvent.click(screen.getByRole('button', { name: 'Save as v4' }))
-    expect(await screen.findByText('1 could not be moved and keep the version they had:')).toBeTruthy()
-    expect(screen.getByText(/: model refused/)).toBeTruthy()
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText(/This type was changed as often as it may be in an hour\. at-lr has 60 versions/)).toBeTruthy()
   })
 
   it('renames without asking, since a name makes no version', async () => {
@@ -141,11 +140,11 @@ describe('editing an org\'s agent type', () => {
 
   it('says another save came first, and offers to reload', async () => {
     vi.mocked(editAgentType).mockRejectedValue(new ApiError(409, 'version 3 is not current: 4 is', 'version_conflict'))
-    type = { ...type, live_agents: 0 }
     show()
     await screen.findByRole('textbox', { name: 'Prompt' })
     setPrompt(`${RESEARCHER_PROMPT}More.`)
     await userEvent.click(screen.getByRole('button', { name: 'Save as v4' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save' }))
     expect(await screen.findByText(/Someone saved a newer version while you were editing\. version 3 is not current/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Reload' })).toBeTruthy()
   })
@@ -169,6 +168,8 @@ describe('what nobody here edits', () => {
     expect(await screen.findByText('Only an owner of Lab can edit agent types. You can read this one.')).toBeTruthy()
     expect(prompt().readOnly).toBe(true)
     expect(screen.queryByRole('button', { name: /Duplicate|Archive/ })).toBeNull()
+    await screen.findByText('3 versions')
+    expect(screen.queryByRole('button', { name: 'Restore' })).toBeNull()
   })
 })
 
@@ -203,5 +204,34 @@ describe('version history', () => {
     expect(within(diff).getByText('You are a researcher.')).toBeTruthy()
     await choose(screen.getByLabelText('Compare from'), 'v1')
     expect(within(screen.getByLabelText('Prompt diff')).getByText('Old.')).toBeTruthy()
+  })
+})
+
+describe('restoring a version', () => {
+  const listed = (n: number) => screen.getAllByRole('listitem').find(li => li.textContent?.startsWith(`v${n}`))!
+  it('asks, saying it applies in real time, and makes the earlier version current as the next one', async () => {
+    const restored = agentType('at-lr', 'LR sweeper', 'researcher', { current_version: 4 })
+    vi.mocked(restoreAgentType).mockImplementation(async () => { type = restored; return edited(restored, 1) })
+    show()
+    await screen.findByText('3 versions')
+    const v1 = listed(1)
+    expect(within(listed(3)).queryByRole('button', { name: 'Restore' })).toBeNull()
+    await userEvent.click(within(v1).getByRole('button', { name: 'Restore' }))
+    const dialog = within(screen.getByRole('dialog', { name: 'Restore v1?' }))
+    expect(dialog.getByText('Its prompt and settings become v4. Every version stays. Changes apply in real time to running agents.')).toBeTruthy()
+    expect(dialog.queryByText(/restart|live agent/i)).toBeNull()
+    await userEvent.click(dialog.getByRole('button', { name: 'Restore' }))
+    expect(restoreAgentType).toHaveBeenCalledExactlyOnceWith('org_a', 'at-lr', 1)
+    expect(await screen.findByText('v4 is current. Changes apply in real time to running agents.')).toBeTruthy()
+  })
+
+  it('shows the refusal of a restore in the dialog', async () => {
+    vi.mocked(restoreAgentType).mockRejectedValue(new ApiError(429, 'at-lr has 60 versions in the last hour', 'edit_rate_limited'))
+    show()
+    await screen.findByText('3 versions')
+    await userEvent.click(within(listed(2)).getByRole('button', { name: 'Restore' }))
+    const dialog = within(screen.getByRole('dialog'))
+    await userEvent.click(dialog.getByRole('button', { name: 'Restore' }))
+    expect(await dialog.findByText(/This type was changed as often as it may be in an hour/)).toBeTruthy()
   })
 })

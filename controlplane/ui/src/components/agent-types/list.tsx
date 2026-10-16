@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ROLES, describeType, roleOf, useAgentTypes } from '@/lib/agent-types'
+import { ORG_ROLES, ROLES, describeType, roleOf, useAgentTypes } from '@/lib/agent-types'
 import { agentTypesPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
 import type { AgentRole, AgentType } from '@/types'
@@ -19,11 +19,6 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Table, num } from '@/components/ui/table'
 import { Text } from '@/components/ui/text'
-
-/** Live agents of a type in words, for a cell and a heading. */
-export function liveAgents(n: number): string {
-  return n === 0 ? 'Not in use' : `Used by ${n} live ${n === 1 ? 'agent' : 'agents'}`
-}
 
 function settingsLine(t: AgentType): string {
   const s = t.current.settings
@@ -50,7 +45,7 @@ function NewTypeDialog({ catalog, onClose }: { catalog: AgentType[]; onClose: ()
           <Segmented
             label="Role"
             size="sm"
-            options={ROLES.map(r => ({ value: r.role, label: r.label }))}
+            options={ROLES.filter(r => ORG_ROLES.includes(r.role)).map(r => ({ value: r.role, label: r.label }))}
             value={role}
             onChange={setRole}
           />
@@ -86,7 +81,7 @@ function RoleGroup({ role, types, administers, duplicate, busy }: {
       <Table aria-label={`${r.label} types`} className="min-w-3xl table-fixed">
         <thead>
           <tr>
-            <th>Type</th><th className="w-64">Settings</th><th className="w-20 text-right">Version</th><th className="w-44">In use</th>
+            <th>Type</th><th className="w-64">Settings</th><th className="w-20 text-right">Version</th>
             {administers && <th className="w-28" />}
           </tr>
         </thead>
@@ -103,10 +98,9 @@ function RoleGroup({ role, types, administers, duplicate, busy }: {
               </td>
               <td className="whitespace-nowrap text-xs text-muted">{settingsLine(t)}</td>
               <td className={num}>v{t.current_version}</td>
-              <td className="whitespace-nowrap text-xs">{liveAgents(t.live_agents)}</td>
               {administers && (
                 <td className="text-right">
-                  <Button size="sm" loading={busy === t.id} onClick={() => duplicate(t)}>Duplicate</Button>
+                  {ORG_ROLES.includes(t.role) && <Button size="sm" loading={busy === t.id} onClick={() => duplicate(t)}>Duplicate</Button>}
                 </td>
               )}
             </tr>

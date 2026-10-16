@@ -4,13 +4,12 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import useSWR, { useSWRConfig } from 'swr'
 import { ApiError, archiveAgentType, editAgentType, fetchAgentType } from '@/lib/api'
-import { REFUSALS, describeType, descriptionProblem, nameProblem, promptProblems, roleOf } from '@/lib/agent-types'
+import { APPLIES_LIVE, describeType, descriptionProblem, nameProblem, promptProblems, roleOf, said } from '@/lib/agent-types'
 import { relTime } from '@/lib/format'
 import { agentTypesPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
 import type { AgentType, EditedAgentType } from '@/types'
 import { useCreateAgentType } from '@/components/agent-types/duplicate'
-import { liveAgents } from '@/components/agent-types/list'
 import { PromptEditor } from '@/components/agent-types/prompt-editor'
 import { SettingsFacts, SettingsForm, fromDraft, toDraft } from '@/components/agent-types/settings-form'
 import type { SettingsDraft } from '@/components/agent-types/settings-form'
@@ -25,11 +24,6 @@ import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Code, Text } from '@/components/ui/text'
-
-function said(e: unknown): string {
-  if (e instanceof ApiError && e.reason && REFUSALS[e.reason]) return `${REFUSALS[e.reason]} ${e.message}`
-  return e instanceof Error ? e.message : String(e)
-}
 
 // Why the person cannot edit the type, or null when they can.
 function readOnlyReason(t: AgentType, administers: boolean, orgName: string): string | null {
@@ -54,29 +48,10 @@ function Saved({ edited, onDismiss }: { edited: EditedAgentType | 'renamed'; onD
   if (edited === 'renamed') {
     return <Callout tone="success">Saved. A new name or description makes no new version.</Callout>
   }
-  const moved = edited.propagation.moved ?? []
-  const failed = edited.propagation.failed ?? []
   return (
-    <Callout tone={failed.length > 0 ? 'warning' : 'success'}>
+    <Callout tone="success">
       <Stack gap="xs">
-        <span>
-          Saved as v{edited.current_version}.{' '}
-          {moved.length > 0
-            ? `${moved.length} live ${moved.length === 1 ? 'agent picks' : 'agents pick'} it up at their next turn.`
-            : 'No live agent runs it now.'}
-        </span>
-        {failed.length > 0 && (
-          <>
-            <span>{failed.length} could not be moved and keep the version they had:</span>
-            <ul className="list-disc pl-5 text-xs">
-              {failed.map(f => (
-                <li key={`${f.platform_experiment_id}/${f.agent_id ?? ''}`}>
-                  <Code>{f.agent_id ?? 'researchers'}</Code> in <Code>{f.platform_experiment_id}</Code>{f.error && `: ${f.error}`}
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
+        <span>v{edited.current_version} is current. {APPLIES_LIVE}</span>
         <div><Button variant="link" size="sm" onClick={onDismiss}>Dismiss</Button></div>
       </Stack>
     </Callout>
@@ -166,7 +141,7 @@ function Editor({ type, editable, onSaved, onReload }: {
   }
 
   function trySave() {
-    if (newVersion && type.live_agents > 0) setConfirming(true)
+    if (newVersion) setConfirming(true)
     else void save()
   }
 
@@ -208,7 +183,7 @@ function Editor({ type, editable, onSaved, onReload }: {
                 {problems.length > 0
                   ? `${problems.length} ${problems.length === 1 ? 'problem' : 'problems'} to fix before saving.`
                   : newVersion
-                    ? `Saving makes v${type.current_version + 1}.${type.live_agents > 0 ? ` ${type.live_agents} live ${type.live_agents === 1 ? 'agent moves' : 'agents move'} to it.` : ''}`
+                    ? `Saving makes v${type.current_version + 1}.`
                     : 'Only the name or description changed: no new version.'}
               </Text>
               <Inline gap="xs">
@@ -226,13 +201,10 @@ function Editor({ type, editable, onSaved, onReload }: {
       {confirming && (
         <Dialog open onClose={() => setConfirming(false)} title={`Save as v${type.current_version + 1}?`} size="sm">
           <Stack>
-            <Text variant="note">
-              {type.live_agents} live {type.live_agents === 1 ? 'agent runs' : 'agents run'} this type.
-              Each one restarts its session with the new version at its next turn. Its work so far stays.
-            </Text>
+            <Text variant="note">{APPLIES_LIVE}</Text>
             <Inline gap="xs" className="justify-end">
               <Button onClick={() => setConfirming(false)}>Cancel</Button>
-              <Button variant="primary" onClick={() => void save()}>Save and restart sessions</Button>
+              <Button variant="primary" onClick={() => void save()}>Save</Button>
             </Inline>
           </Stack>
         </Dialog>
@@ -279,7 +251,7 @@ export function AgentTypeDetail({ typeID }: { typeID: string }) {
             <Badge tone="accent">{roleOf(type.role).label}</Badge>
             {type.builtin && <Badge tone="neutral">Built-in, read-only</Badge>}
             {type.archived_at && <Badge tone="warning">Archived</Badge>}
-            <Text as="span" variant="note">v{type.current_version} · {liveAgents(type.live_agents)}</Text>
+            <Text as="span" variant="note">v{type.current_version}</Text>
             <Code className="text-2xs text-subtle">{type.id}</Code>
           </Inline>
           <span>{describeType(type)}</span>
@@ -296,7 +268,7 @@ export function AgentTypeDetail({ typeID }: { typeID: string }) {
       {duplicateError && <ErrorMessage>{duplicateError}</ErrorMessage>}
       {saved && <Saved edited={saved.renamed ? 'renamed' : saved.edited} onDismiss={() => setSaved(null)} />}
       <Editor key={`${type.id}:${type.current_version}`} type={type} editable={reason === null} onSaved={edited} onReload={() => refresh()} />
-      <VersionHistory orgID={org.id} type={type} />
+      <VersionHistory orgID={org.id} type={type} editable={reason === null} onRestored={edited} />
       {archiving && <ArchiveDialog type={type} onClose={() => setArchiving(false)} onArchived={() => refresh()} />}
     </Page>
   )

@@ -24,7 +24,7 @@ import { TextLink } from '@/components/ui/link'
 import { Section } from '@/components/ui/section'
 import { Select } from '@/components/ui/select'
 import { Inline, Stack } from '@/components/ui/stack'
-import { ErrorMessage, Loading } from '@/components/ui/status-message'
+import { Callout, ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Table, num } from '@/components/ui/table'
 import { Code, Eyebrow, Text } from '@/components/ui/text'
 
@@ -226,7 +226,7 @@ export function ResearcherPool({ pe }: { pe: PlatformExperiment }) {
                 {pool.map((e, i) => (
                   <tr key={poolKey(e.agent_type, e.model)}>
                     <td className="text-xs font-medium">{typeName(e.agent_type || DEFAULT_AGENT_TYPE, catalog)}</td>
-                    <td><Code className="text-xs">{e.model || 'platform default'}</Code></td>
+                    <td><Code className="text-xs">{e.model || "type's model"}</Code></td>
                     <td className={num}>{e.count}</td>
                     <td className={num}>{counts.pool[i]?.at_work ?? 0}</td>
                   </tr>
@@ -240,8 +240,9 @@ export function ResearcherPool({ pe }: { pe: PlatformExperiment }) {
               </tbody>
             </Table>
           )}
+          {pe.researchers_held && <Callout tone="warning">{pe.researchers_held}</Callout>}
           {pe.coordinator && pool.length > 0 && (
-            <Text variant="hint">The platform keeps these at work and replaces one that finishes or loses its machine while time and budget allow.</Text>
+            <Text variant="hint">The platform keeps these at work and replaces one that finishes or loses its machine while time and budget allow, except one that ended before submitting a job or within 10 minutes, and at most 3 an hour per entry.</Text>
           )}
         </Stack>
       )}

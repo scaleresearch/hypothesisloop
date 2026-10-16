@@ -228,21 +228,17 @@ describe('agent types in the roster', () => {
     return within((await screen.findByRole('cell', { name: id })).closest('tr')!)
   }
 
-  it('names each agent\'s type and the version it is pinned to, an unknown type by its id', async () => {
-    roster = [
-      { ...signup('ag-1', true, 'at-lr'), agent_type_version: 3 },
-      { ...signup('ag-2', true, 'data-search'), agent_type_version: 1 },
-      { ...signup('ag-3', true, 'at-gone'), agent_type_version: 2 },
-    ]
+  it('names each agent\'s type, an unknown type by its id', async () => {
+    roster = [signup('ag-1', true, 'at-lr'), signup('ag-2', true, 'data-search'), signup('ag-3', true, 'at-gone')]
     show(PlatformExperimentStatus.RUNNING)
     await screen.findByText('LR sweeper')
-    expect((await row('ag-1')).getByText('v3')).toBeTruthy()
+    expect((await row('ag-1')).getByText('LR sweeper')).toBeTruthy()
     expect((await row('ag-2')).getByText('Data search')).toBeTruthy()
     expect((await row('ag-3')).getByText('at-gone')).toBeTruthy()
   })
 
   it('says a researcher was cut when max researchers was lowered', async () => {
-    roster = [{ ...signup('ag-1', true, 'generalist'), agent_type_version: 1, cut_reason: 'max_agents_lowered' }]
+    roster = [{ ...signup('ag-1', true, 'generalist'), cut_reason: 'max_agents_lowered' }]
     show(PlatformExperimentStatus.RUNNING)
     expect(await screen.findByText('Cut, max researchers lowered')).toBeTruthy()
   })

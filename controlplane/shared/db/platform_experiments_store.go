@@ -229,7 +229,7 @@ func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id
 	q := `
 SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hours, pe.max_agents, pe.researchers, pe.metrics, pe.report_interval_seconds, pe.starts_at, pe.ends_at, pe.status, pe.stages, pe.current_stage, ` + summarySQL + `, pe.created_at, pe.updated_at, pe.max_concurrent_accelerators, pe.default_quota_tier, pe.shared,
        ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.repository_url, pe.agent_image, pe.goal, COALESCE(pe.continues, ''), pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason,
-       pe.baseline_job_id, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id, pe.close_message, pe.repository_error, pe.repository_account,
+       pe.baseline_job_id, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id, pe.close_message, pe.repository_error, pe.repository_account, COALESCE(pe.researchers_held, ''),
        pe.duration_hours, pe.started_at, pe.planner_ends_at, pe.accepts_at, COALESCE(ci.activity, ''), ci.activity_at,
        pe.accepted_at, pe.accepted_by_kind, pe.accepted_by_id, pe.accepted_answers,
        (SELECT pi.activity FROM experiment_signups planner JOIN hosted_instances pi USING (platform_experiment_id, agent_id) WHERE ` + plannerOfDraft + `),
@@ -257,7 +257,7 @@ WHERE pe.id = $1`
 		&coordinator.Instance.Renewals, &coordinator.Instance.Stopped, &coordinator.Instance.ExitedAt, &coordinator.Instance.ExitLog,
 		&coordinator.Instance.SeenAt, &coordinator.Instance.AskedAt, &coordinator.Instance.Launch, &coordinator.Instance.Reported, &coordinator.Instance.ProgressAt, &coordinator.Instance.EndReason, &coordinator.Instance.Released, &pe.MaxHosted, &pe.Repository, &pe.RepositoryURL, &pe.AgentImage,
 		&pe.Goal, &pe.Continues, &createdBy.Kind, &createdBy.ID, &proposal, &answeredAt, &pe.DeclinedReason,
-		&pe.BaselineJobID, &pe.JobEstimatedDurationHours, &pe.ClosedAt, &pe.CloseReason, &closedBy.Kind, &closedBy.ID, &pe.CloseMessage, &pe.RepositoryError, &pe.RepositoryAccount,
+		&pe.BaselineJobID, &pe.JobEstimatedDurationHours, &pe.ClosedAt, &pe.CloseReason, &closedBy.Kind, &closedBy.ID, &pe.CloseMessage, &pe.RepositoryError, &pe.RepositoryAccount, &pe.ResearchersHeld,
 		&pe.DurationHours, &startedAt, &plannerEndsAt, &acceptsAt, &coordinatorActivity, &coordinatorActivityAt,
 		&pe.AcceptedAt, &acceptedBy.Kind, &acceptedBy.ID, &acceptedAnswers,
 		&plannerActivity, &plannerActivityAt,

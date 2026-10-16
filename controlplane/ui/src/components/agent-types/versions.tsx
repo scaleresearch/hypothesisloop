@@ -3,12 +3,14 @@
 import { useState } from 'react'
 import { clsx } from 'clsx'
 import useSWR from 'swr'
-import { fetchAgentTypeVersions } from '@/lib/api'
+import { fetchAgentTypeVersions, restoreAgentType } from '@/lib/api'
+import { APPLIES_LIVE, said } from '@/lib/agent-types'
 import { diffLines, foldUnchanged } from '@/lib/diff'
 import type { DiffLine } from '@/lib/diff'
 import { relTime } from '@/lib/format'
-import type { AgentType, AgentTypeSettings, AgentTypeVersion } from '@/types'
+import type { AgentType, AgentTypeSettings, AgentTypeVersion, EditedAgentType } from '@/types'
 import { Button } from '@/components/ui/button'
+import { Dialog } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Section } from '@/components/ui/section'
 import { Select } from '@/components/ui/select'
@@ -115,11 +117,55 @@ function VersionDiff({ before, after }: { before: AgentTypeVersion; after: Agent
   )
 }
 
-/** Every version of an agent type, newest first, and what changed between any two of them. */
-export function VersionHistory({ orgID, type }: { orgID: string; type: AgentType }) {
+function RestoreDialog({ orgID, type, version, onClose, onRestored }: {
+  orgID: string
+  type: AgentType
+  version: number
+  onClose: () => void
+  onRestored: (t: EditedAgentType) => Promise<unknown>
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function restore() {
+    setBusy(true)
+    setError('')
+    try {
+      await onRestored(await restoreAgentType(orgID, type.id, version))
+      onClose()
+    } catch (e) {
+      setError(said(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open onClose={onClose} title={`Restore v${version}?`} size="sm">
+      <Stack>
+        <Text variant="note">Its prompt and settings become v{type.current_version + 1}. Every version stays. {APPLIES_LIVE}</Text>
+        {error && <ErrorMessage>{error}</ErrorMessage>}
+        <Inline gap="xs" className="justify-end">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" loading={busy} onClick={() => void restore()}>Restore</Button>
+        </Inline>
+      </Stack>
+    </Dialog>
+  )
+}
+
+/** Every version of an agent type, newest first, what changed between any two of them, and a
+ * restore of an earlier one for an owner. */
+export function VersionHistory({ orgID, type, editable, onRestored }: {
+  orgID: string
+  type: AgentType
+  editable: boolean
+  onRestored: (t: EditedAgentType) => Promise<unknown>
+}) {
   const { data: versions, error } = useSWR(['agent-type-versions', orgID, type.id, type.current_version], () => fetchAgentTypeVersions(orgID, type.id))
   const [from, setFrom] = useState<number | null>(null)
   const [to, setTo] = useState<number | null>(null)
+  const [restoring, setRestoring] = useState<number | null>(null)
 
   if (error) return <Section title="Version history"><ErrorMessage>Could not load the versions: {error.message}</ErrorMessage></Section>
   if (!versions) return <Section title="Version history"><Loading /></Section>
@@ -144,6 +190,9 @@ export function VersionHistory({ orgID, type }: { orgID: string; type: AgentType
               {versions.length > 1 && v.version > 1 && (
                 <Button variant="link" size="sm" onClick={() => { setFrom(v.version - 1); setTo(v.version) }}>Changes</Button>
               )}
+              {editable && v.version !== type.current_version && (
+                <Button variant="link" size="sm" onClick={() => setRestoring(v.version)}>Restore</Button>
+              )}
             </li>
           ))}
         </ol>
@@ -161,6 +210,9 @@ export function VersionHistory({ orgID, type }: { orgID: string; type: AgentType
           </Stack>
         )}
       </Stack>
+      {restoring !== null && (
+        <RestoreDialog orgID={orgID} type={type} version={restoring} onClose={() => setRestoring(null)} onRestored={onRestored} />
+      )}
     </Section>
   )
 }

@@ -855,9 +855,14 @@ export interface EditAgentTypeRequest {
   settings: AgentTypeSettings
 }
 
-// Makes the next version and moves every live agent of the type to it, at its next turn.
+// Makes the next version current: running agents of the type apply it at their next turn.
 export function editAgentType(orgID: string, typeID: string, req: EditAgentTypeRequest): Promise<EditedAgentType> {
   return apiSend<EditedAgentType>('PUT', `/orgs/${orgID}/agent-types/${encodeURIComponent(typeID)}`, req)
+}
+
+// Makes a new version holding version's prompt and settings, current as an edit makes it.
+export function restoreAgentType(orgID: string, typeID: string, version: number): Promise<EditedAgentType> {
+  return apiSend<EditedAgentType>('POST', `/orgs/${orgID}/agent-types/${encodeURIComponent(typeID)}/restore`, { version })
 }
 
 // Refused 409 agent_type_in_use while an experiment that is not closed names it.

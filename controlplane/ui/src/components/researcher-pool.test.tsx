@@ -25,7 +25,7 @@ const me: Me = {
 function researcher(id: string, hour: number, flavor = 'generalist'): JoinedAgent {
   return {
     platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' },
-    hosted: true, flavor, model: 'm', agent_type_version: 1, at_work: true, signed_up_at: `2026-01-01T0${hour}:00:00Z`,
+    hosted: true, flavor, model: 'm', at_work: true, signed_up_at: `2026-01-01T0${hour}:00:00Z`,
   }
 }
 
