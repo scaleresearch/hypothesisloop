@@ -40,7 +40,7 @@ func TestIntegrationLifecycle(t *testing.T) {
 	defer cancel()
 
 	exp := &clusterapi.DesiredJob{
-		Data: testDataAccess(), Token: "test-job-token",
+		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git",
 		ID:           "it-" + filepath.Base(t.TempDir()),
 		AgentID:      "agent-1",
 		ProjectID:    "proj-1",
@@ -162,7 +162,7 @@ func TestIntegrationRejectsMultiNode(t *testing.T) {
 		Image: "busybox", CPU: "0.5", Memory: "64Mi", Storage: "128Mi",
 		MaxRetries: maxRetries(0), TerminationGracePeriodSeconds: int64Ptr(5), NumNodes: 2,
 	}
-	exp := &clusterapi.DesiredJob{ID: "reject-num-nodes", Job: spec, Data: testDataAccess(), Token: "test-job-token"}
+	exp := &clusterapi.DesiredJob{ID: "reject-num-nodes", Job: spec, Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git"}
 	if _, err := e.BuildContainerSpec(exp, Placement{}); err == nil {
 		t.Fatal("expected rejection for num_nodes>1")
 	}
@@ -177,7 +177,7 @@ func TestIntegrationToleratesTolerations(t *testing.T) {
 		MaxRetries: maxRetries(0), TerminationGracePeriodSeconds: int64Ptr(5),
 		AcceleratorTolerations: []string{"x"},
 	}
-	exp := &clusterapi.DesiredJob{ID: "tolerations", Job: spec, Data: testDataAccess(), Token: "test-job-token"}
+	exp := &clusterapi.DesiredJob{ID: "tolerations", Job: spec, Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git"}
 	if _, err := e.BuildContainerSpec(exp, Placement{}); err != nil {
 		t.Fatalf("a job carrying tolerations was refused: %v", err)
 	}

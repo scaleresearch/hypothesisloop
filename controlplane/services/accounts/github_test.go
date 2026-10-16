@@ -22,7 +22,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost/github"
 )
 
@@ -112,17 +111,6 @@ func (s *memInstallations) MakeGitHubInstallationDefault(_ context.Context, orgI
 		have.Default = have.InstallationID == id
 	}
 	return nil
-}
-
-// experiments says which repository each platform experiment names, and in which org.
-type experiments map[string][3]string
-
-func (e experiments) PlatformExperimentRepository(_ context.Context, id string) (string, string, bool, bool, error) {
-	found, ok := e[id]
-	if !ok {
-		return "", "", false, false, db.ErrPlatformExperimentNotFound
-	}
-	return found[0], found[1], found[2] == "closed", found[2] == "draft", nil
 }
 
 type minted struct {
@@ -270,45 +258,26 @@ func (a *fakeApp) File(_ context.Context, token *github.Token, ref, path string)
 type githubWorld struct {
 	*world
 	installations *memInstallations
-	experiments   experiments
 	app           *fakeApp
 	svc           *Repositories
 	host          *github.Host
 }
 
-// newGitHubWorld is the accounts world with the GitHub routes on it. Platform experiment pe-a,
-// which the world's agent, coordinator and job belong to, names Acme/Model. withApp false is a
-// deployment whose git host is a plain one and that has no GitHub App.
+// newGitHubWorld is the accounts world with the GitHub routes on it, and the GitHub host over the
+// same installations. withApp false is a deployment whose git host is a plain one and that has no
+// GitHub App.
 func newGitHubWorld(t *testing.T, withApp bool) *githubWorld {
 	t.Helper()
 	w := &githubWorld{world: newWorld(t), app: newFakeApp()}
 	w.installations = &memInstallations{memStore: w.store, connected: map[string][]*domain.OrgGitHubInstallation{}, states: map[string]memState{}}
 	w.app.now = w.store.now
-	w.experiments = experiments{"pe-a": {w.projectA, "Acme/Model"}, "pe-bare": {w.projectA, ""}, "pe-b": {w.projectB, "Acme/Model"}, "pe-closed": {w.projectA, "Acme/Model", "closed"}, "pe-draft": {w.projectA, "Acme/Model", "draft"}}
 	access := auth.NewAccess(placement{memStore: w.store})
-	if withApp {
-		w.host = github.NewHost(w.installations, w.app, zap.NewNop())
-		w.svc = NewRepositories(w.installations, w.experiments, w.app, w.host, access, zap.NewNop())
-	} else {
-		plain, err := githost.NewPlain("https://git.example.invalid", "", "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		w.svc = NewRepositories(w.installations, w.experiments, nil, plain, access, zap.NewNop())
+	w.host = github.NewHost(w.installations, w.app, zap.NewNop())
+	app := GitHubApp(w.app)
+	if !withApp {
+		app = nil
 	}
-	w.callers["agent-bare"] = auth.Principal{Kind: auth.KindAgent, OrgIDs: []string{w.orgA}, ProjectID: w.projectA, PlatformExperimentID: "pe-bare", AgentID: "agent-2"}
-	w.callers["agent-other-org"] = auth.Principal{Kind: auth.KindAgent, OrgIDs: []string{w.orgB}, ProjectID: w.projectB, PlatformExperimentID: "pe-b", AgentID: "agent-b"}
-	for _, kind := range []string{"agent", "coordinator", "job"} {
-		over := w.callers[kind]
-		over.RunOver = true
-		w.callers[kind+"-run-over"] = over
-	}
-	closedAfterTheToken := w.callers["agent"]
-	closedAfterTheToken.PlatformExperimentID = "pe-closed"
-	w.callers["agent-closed"] = closedAfterTheToken
-	planner := w.callers["agent"]
-	planner.PlatformExperimentID = "pe-draft"
-	w.callers["planner"] = planner
+	w.svc = NewRepositories(w.installations, app, access, zap.NewNop())
 	router := authtest.Router(tokens{w.world})
 	doc := apidocs.New(router, "test", "1.0.0", "", access, zap.NewNop())
 	RegisterRepositoriesHuma(doc, w.svc)
@@ -364,12 +333,6 @@ func (w *githubWorld) refused(caller, method, path string, body any, status int,
 	}
 	return message
 }
-
-func credentialBody(path string) map[string]any {
-	return map[string]any{"protocol": "https", "host": "github.com", "path": path}
-}
-
-var modelCredential = credentialBody("Acme/Model.git")
 
 func TestWhoMayReachAnOrgsGitHub(t *testing.T) {
 	const ok, created, gone, forbidden, notFound, noToken = http.StatusOK, http.StatusCreated, http.StatusNoContent, http.StatusForbidden, http.StatusNotFound, http.StatusUnauthorized
@@ -655,8 +618,6 @@ func TestADeploymentWithoutAnAppAnswersSoAfterTheAccessCheck(t *testing.T) {
 		{"start an install", "owner", "POST", org + "/github-install-states", map[string]any{"return_to": "/settings"}, 503, ReasonGitHubNotConfigured},
 		{"finish an install", "owner", "POST", "/github/installations", finishBody("state-1", 100), 503, ReasonGitHubNotConfigured},
 		{"repositories", "member", "GET", org + "/github-repositories", nil, 503, ReasonGitHubNotConfigured},
-		{"a credential for a GitHub address", "agent", "POST", "/git-credentials", modelCredential, 404, ReasonNotFound},
-		{"a credential of an experiment with no repository", "agent-bare", "POST", "/git-credentials", modelCredential, 404, ReasonNoRepository},
 	} {
 		message := w.refused(tc.caller, tc.method, tc.path, tc.body, tc.status, tc.reason)
 		if tc.status == 503 && !strings.Contains(message, "no GitHub App configured") {
@@ -670,7 +631,6 @@ func TestADeploymentWithoutAnAppAnswersSoAfterTheAccessCheck(t *testing.T) {
 	}{
 		"install for another org":     {"owner", "POST", "/orgs/" + w.orgB + "/github-install-states", map[string]any{"return_to": "/settings"}, 404},
 		"install as a member":         {"member", "POST", org + "/github-install-states", map[string]any{"return_to": "/settings"}, 403},
-		"a credential for a person":   {"owner", "POST", "/git-credentials", modelCredential, 403},
 		"listing what is connected":   {"member", "GET", org + "/github-installations", nil, 200},
 		"disconnecting what is there": {"owner", "DELETE", org + "/github-installations/100", nil, 204},
 	} {
@@ -696,133 +656,40 @@ func reasonOf(err error) string {
 	return ""
 }
 
-func TestAGitCredentialGoesToWhatThePlatformLaunchedForItsExperimentsRepository(t *testing.T) {
+// The git proxy reaches GitHub with a token minted for the one repository and each request, with
+// write only for a push.
+func TestTheHostMintsACredentialForTheOneRepositoryAndTheAccessAsked(t *testing.T) {
 	w := newGitHubWorld(t, true)
 	w.connect(w.orgA, acme)
-	for _, tc := range []struct {
-		caller string
-		access github.Access
-	}{{"agent", github.Write}, {"coordinator", github.Read}, {"job", github.Read}, {"planner", github.Read}} {
+	ctx := context.Background()
+	for _, write := range []bool{true, false} {
 		before := len(w.app.mints)
-		rec := w.call(tc.caller, "POST", "/git-credentials", modelCredential)
-		if rec.Code != http.StatusCreated || rec.Header().Get("Cache-Control") != "no-store" {
-			t.Fatalf("%s: got = %d %s (Cache-Control %q), want 201 that is not stored", tc.caller, rec.Code, rec.Body, rec.Header().Get("Cache-Control"))
+		credential, err := w.host.Credential(ctx, w.projectA, "Acme/Model", write)
+		if err != nil {
+			t.Fatal(err)
 		}
-		var credential GitCredential
-		w.ok(tc.caller, "POST", "/git-credentials", modelCredential, http.StatusCreated, &credential)
-		want := minted{100, "Acme/Model", tc.access}
-		if len(w.app.mints) != before+2 || w.app.mints[before] != want || w.app.mints[before+1] != want {
-			t.Fatalf("%s: minted %+v, want %+v on each of the two calls", tc.caller, w.app.mints[before:], want)
+		want := minted{100, "Acme/Model", github.Read}
+		if write {
+			want.access = github.Write
 		}
-		if credential.Protocol != "https" || credential.Host != "github.com" || credential.Path != "Acme/Model.git" ||
-			credential.Username != "x-access-token" || credential.Password != fmt.Sprintf("ghs_minted_%d", before+2) || credential.ExpiresAt.IsZero() {
-			t.Fatalf("%s: credential = %+v", tc.caller, credential)
+		if len(w.app.mints) != before+1 || w.app.mints[before] != want {
+			t.Fatalf("write %v: minted %+v, want %+v", write, w.app.mints[before:], want)
 		}
-	}
-}
-
-// Nothing is minted until the address git asked about is known to be the experiment's repository.
-func TestAGitCredentialIsMintedOnlyForTheAddressOfTheExperimentsRepository(t *testing.T) {
-	w := newGitHubWorld(t, true)
-	w.connect(w.orgA, acme)
-	ask := func(protocol, host, path string) map[string]any {
-		return map[string]any{"protocol": protocol, "host": host, "path": path}
-	}
-	for _, path := range []string{"Acme/Model.git", "Acme/Model", "acme/model.git", "/Acme/Model.git/", "Acme/Model.git/info/lfs"} {
-		var credential GitCredential
-		w.ok("agent", "POST", "/git-credentials", ask("https", "github.com", path), http.StatusCreated, &credential)
-		if credential.Path != strings.Trim(path, "/") || credential.Password == "" {
-			t.Errorf("path %q: credential path = %q", path, credential.Path)
+		if credential.Username != "x-access-token" || credential.Password != fmt.Sprintf("ghs_minted_%d", before+1) || credential.ExpiresAt.IsZero() {
+			t.Fatalf("write %v: credential = %+v", write, credential)
 		}
 	}
-	w.ok("agent", "POST", "/git-credentials", ask("https", "GitHub.com", "Acme/Model.git"), http.StatusCreated, nil)
-	served := len(w.app.mints)
-	for name, body := range map[string]map[string]any{
-		"another repository of the installation": ask("https", "github.com", "acme/other.git"),
-		"a repository under it":                  ask("https", "github.com", "Acme/Model.git/extra"),
-		"a repository that starts so":            ask("https", "github.com", "Acme/Model.github"),
-		"the lfs path of another":                ask("https", "github.com", "acme/other.git/info/lfs"),
-		"another host":                           ask("https", "evil.example", "Acme/Model.git"),
-		"a host that starts so":                  ask("https", "github.com.evil.example", "Acme/Model.git"),
-		"plain http":                             ask("http", "github.com", "Acme/Model.git"),
-		"no protocol":                            ask("", "github.com", "Acme/Model.git"),
-		"no path":                                ask("https", "github.com", ""),
-	} {
-		message := w.refused("agent", "POST", "/git-credentials", body, http.StatusNotFound, ReasonNotFound)
-		if strings.Contains(message, "ghs_") {
-			t.Errorf("%s: the refusal holds a token: %s", name, message)
-		}
-	}
-	for name, body := range map[string]map[string]any{
-		"no body fields": {}, "no path field": {"protocol": "https", "host": "github.com"},
-		"a field it does not know": {"protocol": "https", "host": "github.com", "path": "Acme/Model.git", "username": "x"},
-	} {
-		if rec := w.call("agent", "POST", "/git-credentials", body); rec.Code != http.StatusUnprocessableEntity {
-			t.Errorf("%s: got = %d %s, want 422", name, rec.Code, rec.Body)
-		}
-	}
-	if rec := w.call("agent", "GET", "/git-credential?protocol=https&host=github.com&path=Acme%2FModel.git", nil); rec.Code != http.StatusNotFound {
-		t.Errorf("the route this one replaced: got = %d, want it gone", rec.Code)
-	}
-	if len(w.app.mints) != served {
-		t.Fatalf("%d tokens were minted for addresses that are not the repository's", len(w.app.mints)-served)
-	}
-}
-
-func TestNoGitCredentialForAnyoneElse(t *testing.T) {
-	w := newGitHubWorld(t, true)
-	w.connect(w.orgA, acme)
-	for _, caller := range []string{"owner", "member", "outsider", "org-key", "project-key", "staff", "staff-user", "runtime", "launcher"} {
-		if rec := w.call(caller, "POST", "/git-credentials", modelCredential); rec.Code != http.StatusForbidden {
-			t.Errorf("%s: got = %d %s, want 403", caller, rec.Code, rec.Body)
-		}
-	}
-	if rec := w.call("", "POST", "/git-credentials", modelCredential); rec.Code != http.StatusUnauthorized {
-		t.Errorf("no token: got = %d, want 401", rec.Code)
-	}
-	// An agent of another org's experiment that names the same repository gets nothing through
-	// this org's installation: its own org connected none.
-	w.refused("agent-other-org", "POST", "/git-credentials", modelCredential, http.StatusConflict, github.ReasonInstallationNotConnected)
-	w.refused("agent-bare", "POST", "/git-credentials", modelCredential, http.StatusNotFound, ReasonNoRepository)
-	if len(w.app.mints) != 0 {
-		t.Fatalf("a token was minted for a refused caller: %+v", w.app.mints)
-	}
-}
-
-// The token of a run that is over still works for its wind-down. A credential would outlive it
-// by an hour, so none is minted: for an agent, a coordinator and a job alike.
-func TestNoGitCredentialOnceTheRunIsOver(t *testing.T) {
-	w := newGitHubWorld(t, true)
-	w.connect(w.orgA, acme)
-	for _, caller := range []string{"agent-run-over", "coordinator-run-over", "job-run-over"} {
-		w.refused(caller, "POST", "/git-credentials", modelCredential, http.StatusForbidden, ReasonRunOver)
-	}
-	if len(w.app.mints) != 0 {
-		t.Fatalf("a token was minted for a run that is over: %+v", w.app.mints)
-	}
-	for _, caller := range []string{"agent", "coordinator", "job"} {
-		w.ok(caller, "POST", "/git-credentials", modelCredential, http.StatusCreated, nil)
-	}
-}
-
-// An agent's last turn after the close pushed, and GitHub was asked for a token. A run closed
-// after its token was read is refused all the same, with what it means for the push, and GitHub
-// is asked nothing.
-func TestAClosedRunIsToldNothingMoreIsPushedAndGitHubIsNotAsked(t *testing.T) {
-	w := newGitHubWorld(t, true)
-	w.connect(w.orgA, acme)
-	rec := w.call("agent-closed", "POST", "/git-credentials", modelCredential)
-	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), ReasonRunOver) || !strings.Contains(rec.Body.String(), "run closed, nothing more is pushed") {
-		t.Fatalf("got = %d %s, want 403 run_over saying nothing more is pushed", rec.Code, rec.Body)
-	}
-	if len(w.app.mints) != 0 {
-		t.Fatalf("a token was minted for a closed run: %+v", w.app.mints)
+	// A project of another org that names the same repository gets nothing through this org's
+	// installation: its own org connected none.
+	if _, err := w.host.Credential(ctx, w.projectB, "Acme/Model", false); reasonOf(err) != github.ReasonInstallationNotConnected {
+		t.Fatalf("another org's project: %v, want installation_not_connected", err)
 	}
 }
 
 // What changes after the experiment was created shows on the next credential, as a state the
 // caller cannot fix and with the reason that says who can.
 func TestACredentialIsRefusedOnceTheRepositoryCanNoLongerBeReached(t *testing.T) {
+	ctx := context.Background()
 	for name, tc := range map[string]struct {
 		arrange func(*githubWorld)
 		status  int
@@ -838,20 +705,24 @@ func TestACredentialIsRefusedOnceTheRepositoryCanNoLongerBeReached(t *testing.T)
 		"github fails": {func(w *githubWorld) {
 			w.app.tokenErr = &github.FailedError{Installation: 100, Status: 500, Err: errors.New(leak)}
 		}, 502, github.ReasonGitHubFailed},
-		"something else": {func(w *githubWorld) { w.app.tokenErr = errors.New("unexpected " + leak) }, 500, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := newGitHubWorld(t, true)
 			w.connect(w.orgA, acme)
-			w.ok("agent", "POST", "/git-credentials", modelCredential, http.StatusCreated, nil)
+			if _, err := w.host.Credential(ctx, w.projectA, "Acme/Model", true); err != nil {
+				t.Fatal(err)
+			}
 			tc.arrange(w)
-			for _, caller := range []string{"agent", "coordinator", "job"} {
-				message := w.refused(caller, "POST", "/git-credentials", modelCredential, tc.status, tc.reason)
-				if strings.Contains(message, leak) || strings.Contains(message, "ghs_") {
-					t.Fatalf("%s: the refusal holds a credential or the failure's text: %s", caller, message)
+			for _, write := range []bool{true, false} {
+				_, err := w.host.Credential(ctx, w.projectA, "Acme/Model", write)
+				if statusOf(err) != tc.status || reasonOf(err) != tc.reason {
+					t.Fatalf("write %v: %v, want %d %s", write, err, tc.status, tc.reason)
 				}
-				if tc.reason == github.ReasonInstallationGone && (!strings.Contains(message, "no longer installed on Acme") || !strings.Contains(message, "installation 100")) {
-					t.Fatalf("%s: %s, want the account and the installation named", caller, message)
+				if strings.Contains(err.Error(), leak) || strings.Contains(err.Error(), "ghs_") {
+					t.Fatalf("write %v: the refusal holds a credential or the failure's text: %s", write, err)
+				}
+				if tc.reason == github.ReasonInstallationGone && (!strings.Contains(err.Error(), "no longer installed on Acme") || !strings.Contains(err.Error(), "installation 100")) {
+					t.Fatalf("write %v: %s, want the account and the installation named", write, err)
 				}
 			}
 			if len(w.app.mints) != 1 {
@@ -859,11 +730,15 @@ func TestACredentialIsRefusedOnceTheRepositoryCanNoLongerBeReached(t *testing.T)
 			}
 		})
 	}
-	// Connected again, the same agent is served again with no other step.
+	// Connected again, the same repository is served again with no other step.
 	w := newGitHubWorld(t, true)
-	w.refused("agent", "POST", "/git-credentials", modelCredential, http.StatusConflict, github.ReasonInstallationNotConnected)
+	if _, err := w.host.Credential(ctx, w.projectA, "Acme/Model", true); reasonOf(err) != github.ReasonInstallationNotConnected {
+		t.Fatalf("before the connect: %v, want installation_not_connected", err)
+	}
 	w.connect(w.orgA, acme)
-	w.ok("agent", "POST", "/git-credentials", modelCredential, http.StatusCreated, nil)
+	if _, err := w.host.Credential(ctx, w.projectA, "Acme/Model", true); err != nil {
+		t.Fatalf("after the connect: %v", err)
+	}
 }
 
 func TestARepositoryIsReachableThroughTheInstallationsOfTheProjectsOrgAlone(t *testing.T) {

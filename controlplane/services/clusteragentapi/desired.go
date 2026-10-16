@@ -1,6 +1,8 @@
 package clusteragentapi
 
 import (
+	"errors"
+
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -16,11 +18,15 @@ import (
 // The job is handed its durable-data address, derived from its own identity, with the permanent
 // key stored with it; the store already limits that key to writing the job's own prefix and
 // reading its platform experiment's, and nothing here calls the store. It is handed the token it
-// reports metrics with, derived from its id, so every reconcile answers with the same one.
+// reports metrics and fetches its commit with, derived from its id, so every reconcile answers
+// with the same one, and its platform experiment's repository through the git proxy.
 func (h *Handler) desiredJob(exp *domain.Experiment) (*clusterapi.DesiredJob, error) {
 	token, err := auth.Mint(h.signingSecret, auth.JobScope(exp.ID))
 	if err != nil {
 		return nil, err
+	}
+	if h.proxyURL == "" {
+		return nil, errors.New("no git proxy address to hand jobs their repository at")
 	}
 	job := &clusterapi.DesiredJob{
 		ID:                     exp.ID,
@@ -45,6 +51,7 @@ func (h *Handler) desiredJob(exp *domain.Experiment) (*clusterapi.DesiredJob, er
 			SecretAccessKey: exp.DataKey.SecretAccessKey,
 		},
 		Token:        token,
+		GitURL:       domain.GitProxyURL(h.proxyURL, exp.PlatformExperimentID),
 		AttemptCount: exp.AttemptCount,
 	}
 	if exp.ResolvedJob != nil {

@@ -123,7 +123,7 @@ render_settings() {
       hosted+=(-e "s|^    base_url: http://${host}:${HL_GIT_PORT}$|    base_url: ${public_git}|")
       values+=("    base_url: ${public_git}")
     fi
-    values+=("  public_api_url: ${public_api}" "  metrics_url: ${public_metrics}" "  endpoint: ${public_store}" "  image: ${registry}/hypothesisloop-experimentator-base:${tag}"
+    values+=("  public_api_url: ${public_api}" "  proxy_url: ${public_api}/git" "  metrics_url: ${public_metrics}" "  endpoint: ${public_store}" "  image: ${registry}/hypothesisloop-experimentator-base:${tag}"
              "  registry: ${registry}" "  image_tag: ${tag}")
   fi
   sed -e 's|http://greptimedb:4000|http://localhost:4010|' \

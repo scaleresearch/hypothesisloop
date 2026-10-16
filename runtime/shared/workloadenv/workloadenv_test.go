@@ -8,7 +8,7 @@ import (
 
 func TestPlatformRewritesOnlyTheURLsAndRefusesAJobWithNowhereToSave(t *testing.T) {
 	exp := &clusterapi.DesiredJob{ID: "exp-1", AgentID: "agent-1", AttemptCount: 2,
-		Data: &clusterapi.DataAccess{Endpoint: "http://localhost:9000", URI: "s3://bucket/exp-1"}, Token: "job-token"}
+		Data: &clusterapi.DataAccess{Endpoint: "http://localhost:9000", URI: "s3://bucket/exp-1"}, Token: "job-token", GitURL: "https://api.test/git/pe-1.git"}
 	reach := func(url string) string { return url + "/reached" }
 
 	vars, err := Platform(exp, clusterapi.JobGroup{AcceleratorCount: 4}, "http://localhost:8081", reach)
@@ -26,6 +26,7 @@ func TestPlatformRewritesOnlyTheURLsAndRefusesAJobWithNowhereToSave(t *testing.T
 		"HYPOTHESISLOOP_DATA_URI":          "s3://bucket/exp-1",
 		"HYPOTHESISLOOP_ACCELERATOR_COUNT": "4",
 		"HYPOTHESISLOOP_ATTEMPT":           "2",
+		"HYPOTHESISLOOP_GIT_URL":           "https://api.test/git/pe-1.git/reached",
 	} {
 		if got[name] != want {
 			t.Errorf("%s = %q, want %q", name, got[name], want)
@@ -39,16 +40,20 @@ func TestPlatformRewritesOnlyTheURLsAndRefusesAJobWithNowhereToSave(t *testing.T
 }
 
 // The k8s runtime hashes the variable list, so a variable added anywhere but the end would
-// change the hash of every position after it.
-func TestPlatformEmitsTheJobTokenLastAndRefusesAJobWithoutOne(t *testing.T) {
-	exp := &clusterapi.DesiredJob{ID: "exp-1", Data: &clusterapi.DataAccess{Endpoint: "http://store:9000"}, Token: "job-token"}
+// change the hash of every position after it. The repository address came after the token.
+func TestPlatformEmitsTheJobTokenAndRepositoryLastAndRefusesAJobWithoutThem(t *testing.T) {
+	exp := &clusterapi.DesiredJob{ID: "exp-1", Data: &clusterapi.DataAccess{Endpoint: "http://store:9000"}, Token: "job-token", GitURL: "https://api.test/git/pe-1.git"}
 	same := func(url string) string { return url }
 	vars, err := Platform(exp, clusterapi.JobGroup{}, "http://api:8081", same)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if last := vars[len(vars)-1]; last.Name != "HYPOTHESISLOOP_TOKEN" || last.Value != "job-token" {
-		t.Errorf("last variable = %+v, want HYPOTHESISLOOP_TOKEN=job-token", last)
+	if token, repository := vars[len(vars)-2], vars[len(vars)-1]; token != (Var{"HYPOTHESISLOOP_TOKEN", "job-token"}) || repository != (Var{"HYPOTHESISLOOP_GIT_URL", exp.GitURL}) {
+		t.Errorf("last variables = %+v, %+v, want HYPOTHESISLOOP_TOKEN=job-token, then HYPOTHESISLOOP_GIT_URL", token, repository)
+	}
+	exp.GitURL = ""
+	if _, err := Platform(exp, clusterapi.JobGroup{}, "http://api:8081", same); err == nil {
+		t.Error("Platform for an experiment without a repository address: got nil, want an error")
 	}
 	exp.Token = ""
 	if _, err := Platform(exp, clusterapi.JobGroup{}, "http://api:8081", same); err == nil {
@@ -64,7 +69,7 @@ func TestJobLayersTheGroupEnvironmentOverTheJobs(t *testing.T) {
 }
 
 func TestMergedKeepsTheJobsOwnValueOverThePlatforms(t *testing.T) {
-	exp := &clusterapi.DesiredJob{ID: "exp-1", Data: &clusterapi.DataAccess{Region: "eu"}, Token: "job-token"}
+	exp := &clusterapi.DesiredJob{ID: "exp-1", Data: &clusterapi.DataAccess{Region: "eu"}, Token: "job-token", GitURL: "https://api.test/git/pe-1.git"}
 	spec := clusterapi.JobSpec{Env: map[string]string{"LR": "0.1", "AWS_REGION": "us"}}
 	group := clusterapi.JobGroup{Env: map[string]string{"LR": "0.3", "ROLE": "learner"}}
 
@@ -110,7 +115,7 @@ func TestJobCarriesTheSecretEnvironment(t *testing.T) {
 // A container sees all of its node's cores, so the job is told the whole cores its cpu holds,
 // and a thread pool it sizes itself still wins.
 func TestPlatformTellsTheJobTheCoresItHolds(t *testing.T) {
-	exp := &clusterapi.DesiredJob{ID: "exp-1", Data: &clusterapi.DataAccess{}, Token: "job-token"}
+	exp := &clusterapi.DesiredJob{ID: "exp-1", Data: &clusterapi.DataAccess{}, Token: "job-token", GitURL: "https://api.test/git/pe-1.git"}
 	same := func(url string) string { return url }
 	for cpu, want := range map[string]string{"4": "4", "500m": "1", "2.5": "3", "": ""} {
 		env, err := Merged(exp, clusterapi.JobSpec{}, clusterapi.JobGroup{CPU: cpu}, "http://api", same)

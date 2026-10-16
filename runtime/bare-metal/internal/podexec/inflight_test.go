@@ -294,7 +294,7 @@ func newFakeExecutor(f *fakeEngine, devicePaths ...string) *Executor {
 
 func fakeJob(id, image string, accelerators int) *clusterapi.DesiredJob {
 	return &clusterapi.DesiredJob{
-		Data: testDataAccess(), Token: "test-job-token",
+		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git",
 		ID: id, AgentID: "agent", ProjectID: "project",
 		AcceleratorType: fakeAcceleratorType, CapacityTier: clusterapi.CapacityGuaranteed,
 		Job: clusterapi.JobSpec{

@@ -322,7 +322,10 @@ type PlatformExperiment struct {
 	// names it, and RepositoryURL the address it is cloned from. AgentImage is the image its hosted agents and
 	// coordinator run, empty for the platform's own. All fixed at creation.
 	Repository    string `json:"repository,omitempty"`
-	RepositoryURL string `json:"repository_url,omitempty" doc:"The HTTPS address agents and jobs clone."`
+	RepositoryURL string `json:"repository_url,omitempty" doc:"The HTTPS address of the repository on the git host. A job's code_ref names it."`
+	// GitURL is where what the platform launches reaches the repository: the control plane's git
+	// proxy, with its own platform token. Set on a read of one platform experiment.
+	GitURL string `json:"git_url,omitempty" doc:"Where the agents, the coordinator and the jobs of the platform experiment clone, fetch and push repository_url: the platform's git proxy, which takes their own platform token as the password and refuses a push to any ref but the pusher's own branches. git config url.<git_url>.insteadOf <repository_url> sends git there."`
 	// RepositoryAccount is the account the platform creates the repository on, for one created
 	// without naming its repository: the repository pass creates it after the create answered
 	// (AwaitsRepository). Empty for one that named its repository.

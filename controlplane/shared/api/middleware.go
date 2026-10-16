@@ -89,6 +89,10 @@ func (sr *statusRecorder) WriteHeader(code int) {
 	sr.ResponseWriter.WriteHeader(code)
 }
 
+// Unwrap lets http.ResponseController reach the server's writer, to flush a stream and move its
+// deadlines.
+func (sr *statusRecorder) Unwrap() http.ResponseWriter { return sr.ResponseWriter }
+
 // Hijack forwards to the wrapped writer so a WebSocket upgrade still works behind this
 // middleware. Embedding http.ResponseWriter promotes its methods but NOT the optional interfaces
 // the concrete server type also satisfies, so wrapping silently removes the ability to take over

@@ -344,9 +344,19 @@ WHERE platform_experiment_id = $1 AND agent_id = $2`, platformExpID, agentID, ta
 	return nil
 }
 
-// agentNamesTx returns the names carried in a platform experiment, each with its agent: of the
+// AgentNames returns the names carried in a platform experiment, each with its agent: of the
 // agents signed up to it and of those that have a job in it.
-func agentNamesTx(ctx context.Context, tx pgx.Tx, platformExpID string) (map[string]string, error) {
+func (s *PlatformExperimentsStore) AgentNames(ctx context.Context, platformExpID string) (map[string]string, error) {
+	names, err := agentNamesTx(ctx, s.pool.pool, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.AgentNames: %w", err)
+	}
+	return names, nil
+}
+
+func agentNamesTx(ctx context.Context, tx interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}, platformExpID string) (map[string]string, error) {
 	rows, err := tx.Query(ctx, `
 SELECT a.name, a.id FROM agents a
 WHERE a.id IN (SELECT agent_id FROM experiment_signups WHERE platform_experiment_id = $1)

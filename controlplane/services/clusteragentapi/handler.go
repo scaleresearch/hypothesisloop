@@ -128,6 +128,9 @@ type Handler struct {
 	maxLogLineChars int
 	// signingSecret derives each job's own token, handed out beside its data key.
 	signingSecret string
+	// proxyURL is where the control plane's git proxy serves repositories, which each job fetches
+	// its commit from with its token.
+	proxyURL string
 	// environments is nil on a deployment that builds no environments, which counts no cluster
 	// as building.
 	environments *EnvironmentRegistry
@@ -150,14 +153,14 @@ func (h *Handler) wakeAdmission() {
 
 // NewHandler constructs a Handler. connectedWithin is how recent a cluster's heartbeat must be
 // to count as reachable/connected.
-func NewHandler(store Store, connectedWithin time.Duration, metricsDBURL string, observationCadence time.Duration, dataStore *objectstore.Client, maxCheckpointGrace time.Duration, pricedAcceleratorTypes []string, maxLogLineChars int, signingSecret string, environments *EnvironmentRegistry, logger *zap.Logger) *Handler {
+func NewHandler(store Store, connectedWithin time.Duration, metricsDBURL string, observationCadence time.Duration, dataStore *objectstore.Client, maxCheckpointGrace time.Duration, pricedAcceleratorTypes []string, maxLogLineChars int, signingSecret, proxyURL string, environments *EnvironmentRegistry, logger *zap.Logger) *Handler {
 	priced := make(map[string]bool, len(pricedAcceleratorTypes))
 	for _, name := range pricedAcceleratorTypes {
 		priced[strings.ToLower(name)] = true
 	}
 	return &Handler{store: store, connectedWithin: connectedWithin, metricsDBURL: metricsDBURL, observationCadence: observationCadence,
 		dataStore: dataStore, maxCheckpointGrace: maxCheckpointGrace,
-		pricedAcceleratorTypes: priced, maxLogLineChars: maxLogLineChars, signingSecret: signingSecret, environments: environments, logger: logger}
+		pricedAcceleratorTypes: priced, maxLogLineChars: maxLogLineChars, signingSecret: signingSecret, proxyURL: proxyURL, environments: environments, logger: logger}
 }
 
 // keepPricedAccelerators drops every accelerator type outside the priced catalog from report.

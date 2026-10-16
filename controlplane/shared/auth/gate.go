@@ -47,7 +47,12 @@ func Gate(tokens Tokens, logger *zap.Logger, webSockets map[string]string) func(
 				next.ServeHTTP(w, r)
 				return
 			}
-			token, err := requestToken(r, webSockets)
+			git := strings.HasPrefix(r.URL.Path, GitPrefix)
+			if git {
+				// git sends a credential only once a 401 asks for one in a scheme it knows.
+				w.Header().Set("WWW-Authenticate", `Basic realm="hypothesisloop"`)
+			}
+			token, err := requestToken(r, webSockets, git)
 			if err != nil {
 				WriteError(w, logger, err)
 				return
@@ -61,6 +66,9 @@ func Gate(tokens Tokens, logger *zap.Logger, webSockets map[string]string) func(
 				WriteError(w, logger, err)
 				return
 			}
+			if git {
+				w.Header().Del("WWW-Authenticate")
+			}
 			recheck := func(ctx context.Context) (Principal, error) { return tokens.Authenticate(ctx, token) }
 			ctx := context.WithValue(WithPrincipal(r.Context(), principal), recheckKey{}, recheck)
 			next.ServeHTTP(w, r.WithContext(ctx))
@@ -68,9 +76,20 @@ func Gate(tokens Tokens, logger *zap.Logger, webSockets map[string]string) func(
 	}
 }
 
-func requestToken(r *http.Request, webSockets map[string]string) (string, error) {
+// GitPrefix is where the git proxy is served. git's credential helpers answer with a username
+// and a password, so a request there may carry its token as the password of Basic
+// authentication, beside the Bearer header every request may carry it in.
+const GitPrefix = "/git/"
+
+func requestToken(r *http.Request, webSockets map[string]string, git bool) (string, error) {
 	if protocol, ok := webSockets[r.URL.Path]; ok {
 		return subprotocolToken(r.Header, protocol)
+	}
+	if _, password, ok := r.BasicAuth(); git && ok {
+		if password == "" {
+			return "", unauthenticated("send your platform token as the password")
+		}
+		return password, nil
 	}
 	return bearerToken(r.Header.Get("Authorization"))
 }

@@ -395,6 +395,9 @@ const (
 // GitHostConfig is the one git host platform experiments keep their code on: Provider names it,
 // and the section of that name, the only one set, configures it.
 type GitHostConfig struct {
+	// ProxyURL is the address agents and jobs reach the control plane's git proxy at, the API's
+	// /git: they push and fetch through it with their own token and never hold the host's.
+	ProxyURL string          `yaml:"proxy_url"`
 	Provider string          `yaml:"provider"`
 	GitHub   *GitHubConfig   `yaml:"github"`
 	Plain    *PlainGitConfig `yaml:"plain"`

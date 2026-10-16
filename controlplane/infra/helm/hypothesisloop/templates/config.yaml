@@ -31,16 +31,17 @@ The staged file names no git host: the chart adds the one gitHost.provider names
 {{- fail "files/hypothesisloop.yaml has a git_host section, and the chart would add a second one" }}
 {{- end }}
 {{- $gitHost := .Values.gitHost }}
+{{- $proxyURL := toJson (required "gitHost.proxyURL is required: the address agents and jobs reach the API's /git at" $gitHost.proxyURL) }}
 {{- if eq $gitHost.provider "github" }}
 {{- if not $gitHost.github.appId }}
 {{- fail "gitHost.github.appId is required with gitHost.provider github: the App's number" }}
 {{- end }}
-{{- $raw = printf "%s\ngit_host:\n  provider: github\n  github:\n    app_id: %s\n    app_slug: %s\n    private_key: %s\n" (trimSuffix "\n" $raw)
+{{- $raw = printf "%s\ngit_host:\n  proxy_url: %s\n  provider: github\n  github:\n    app_id: %s\n    app_slug: %s\n    private_key: %s\n" (trimSuffix "\n" $raw) $proxyURL
   (toJson (int64 $gitHost.github.appId))
   (toJson (required "gitHost.github.appSlug is required with gitHost.provider github: the name in the App's URL" $gitHost.github.appSlug))
   (toJson "${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY}") }}
 {{- else if eq $gitHost.provider "plain" }}
-{{- $raw = printf "%s\ngit_host:\n  provider: plain\n  plain:\n    base_url: %s\n    allow_http: %s\n" (trimSuffix "\n" $raw)
+{{- $raw = printf "%s\ngit_host:\n  proxy_url: %s\n  provider: plain\n  plain:\n    base_url: %s\n    allow_http: %s\n" (trimSuffix "\n" $raw) $proxyURL
   (toJson (required "gitHost.plain.baseURL is required with gitHost.provider plain: the root the deployment's repositories are cloned from" $gitHost.plain.baseURL))
   (toJson $gitHost.plain.allowHTTP) }}
 {{- if $gitHost.plain.username }}

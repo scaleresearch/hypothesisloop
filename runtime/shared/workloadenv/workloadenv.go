@@ -35,6 +35,9 @@ func Platform(exp *clusterapi.DesiredJob, group clusterapi.JobGroup, apiURL stri
 	if exp.Token == "" {
 		return nil, fmt.Errorf("experiment %s has no job token in desired state", exp.ID)
 	}
+	if exp.GitURL == "" {
+		return nil, fmt.Errorf("experiment %s has no repository address in desired state", exp.ID)
+	}
 	cpus, err := allottedCPUs(group.CPU)
 	if err != nil {
 		return nil, err
@@ -69,6 +72,7 @@ func Platform(exp *clusterapi.DesiredJob, group clusterapi.JobGroup, apiURL stri
 	return append(vars,
 		Var{"TRACEPARENT", fmt.Sprintf("00-%x-%x-01", traceID[:16], traceID[16:24])},
 		Var{"HYPOTHESISLOOP_TOKEN", exp.Token},
+		Var{"HYPOTHESISLOOP_GIT_URL", reach(exp.GitURL)},
 	), nil
 }
 

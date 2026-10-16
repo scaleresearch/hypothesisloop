@@ -44,6 +44,7 @@ environments:
     pusher: env-pusher@made-up-project.iam.gserviceaccount.com
     puller: env-puller@made-up-project.iam.gserviceaccount.com
 gitHost:
+  proxyURL: https://api.example.invalid/git
   provider: github
   github:
     appId: 4242

@@ -333,7 +333,7 @@ func repoAPI(t *testing.T, caller authtest.As, repos *fakeRepositories) (*create
 	}
 	router := authtest.Router(caller)
 	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
-	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, repos, testPlanning, zap.NewNop()))
+	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, repos, testPlanning, zap.NewNop()).WithGitProxy("https://api.test/git"))
 	return store, func(method, path string, body any) *httptest.ResponseRecorder {
 		var payload bytes.Buffer
 		if body != nil {
@@ -388,6 +388,9 @@ func TestCreateFromRepoTakesWhatTheRequestLeavesOutFromTheFile(t *testing.T) {
 	}
 	if pe.Repository != testRepository || pe.RepositoryURL != "https://github.com/Acme/Model.git" {
 		t.Fatalf("created with repository %q at %q, want GitHub's own spelling and its clone address", pe.Repository, pe.RepositoryURL)
+	}
+	if want := "https://api.test/git/" + pe.ID + ".git"; pe.GitURL != want {
+		t.Fatalf("answered with git_url %q, want the repository through the proxy, %q", pe.GitURL, want)
 	}
 }
 

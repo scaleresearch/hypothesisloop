@@ -204,12 +204,12 @@ lib_render_settings() {
   case "$(lib_git_host_provider)" in
     github)
       # The values are JSON strings, which YAML reads as they are.
-      printf '\ngit_host:\n  provider: github\n  github:\n    app_id: %d\n    app_slug: "%s"\n    private_key: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY}\n' \
-        "${HL_GIT_HOST_GITHUB_APP_ID}" "${HL_GIT_HOST_GITHUB_APP_SLUG}" >> "${output}"
+      printf '\ngit_host:\n  proxy_url: http://%s:8081/git\n  provider: github\n  github:\n    app_id: %d\n    app_slug: "%s"\n    private_key: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY}\n' \
+        "${host_address}" "${HL_GIT_HOST_GITHUB_APP_ID}" "${HL_GIT_HOST_GITHUB_APP_SLUG}" >> "${output}"
       ;;
     local)
-      printf '\ngit_host:\n  provider: plain\n  plain:\n    base_url: http://%s:%s\n    allow_http: true\n    username: %s\n    password: ${HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD}\n' \
-        "${host_address}" "${HL_GIT_PORT}" "${HL_GIT_USERNAME}" >> "${output}"
+      printf '\ngit_host:\n  proxy_url: http://%s:8081/git\n  provider: plain\n  plain:\n    base_url: http://%s:%s\n    allow_http: true\n    username: %s\n    password: ${HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD}\n' \
+        "${host_address}" "${host_address}" "${HL_GIT_PORT}" "${HL_GIT_USERNAME}" >> "${output}"
       ;;
     *) return 1 ;;
   esac

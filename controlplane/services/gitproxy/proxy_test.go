@@ -1,0 +1,421 @@
+package gitproxy
+
+import (
+	"context"
+	"crypto/sha1"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/cgi"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
+)
+
+const (
+	hostUser     = "platform"
+	hostPassword = "host-password-no-agent-may-see"
+	repository   = "model.git"
+)
+
+type fakeStore struct {
+	closed, draft bool
+	signups       map[string]domain.AgentSignup
+}
+
+func (s *fakeStore) PlatformExperimentRepository(_ context.Context, id string) (string, string, bool, bool, error) {
+	return "prj-1", repository, s.closed, s.draft, nil
+}
+
+func (s *fakeStore) GetAgentSignup(_ context.Context, _, agentID string) (*domain.AgentSignup, error) {
+	signup, ok := s.signups[agentID]
+	if !ok {
+		return nil, nil
+	}
+	return &signup, nil
+}
+
+func (s *fakeStore) AgentNames(context.Context, string) (map[string]string, error) {
+	names := map[string]string{}
+	for id, signup := range s.signups {
+		names[signup.Name] = id
+	}
+	return names, nil
+}
+
+type tokens map[string]auth.Principal
+
+func (t tokens) Authenticate(_ context.Context, token string) (auth.Principal, error) {
+	if p, ok := t[token]; ok {
+		return p, nil
+	}
+	return auth.Principal{}, auth.Unauthenticated("unknown token")
+}
+
+var principals = tokens{
+	"tok-researcher-2": {Kind: auth.KindAgent, AgentID: "agent-r2", PlatformExperimentID: "pe-1"},
+	"tok-researcher-3": {Kind: auth.KindAgent, AgentID: "agent-r3", PlatformExperimentID: "pe-1"},
+	"tok-baseline":     {Kind: auth.KindAgent, AgentID: "agent-b1", PlatformExperimentID: "pe-1"},
+	"tok-planner":      {Kind: auth.KindAgent, AgentID: "agent-p1", PlatformExperimentID: "pe-1"},
+	"tok-coordinator":  {Kind: auth.KindCoordinator, PlatformExperimentID: "pe-1"},
+	"tok-job":          {Kind: auth.KindJob, AgentID: "agent-r2", ExperimentID: "job-1", PlatformExperimentID: "pe-1"},
+	"tok-other-pe":     {Kind: auth.KindAgent, AgentID: "agent-x", PlatformExperimentID: "pe-2"},
+	"tok-over":         {Kind: auth.KindAgent, AgentID: "agent-r2", PlatformExperimentID: "pe-1", RunOver: true},
+	"tok-staff":        {Kind: auth.KindStaff},
+}
+
+func signups() map[string]domain.AgentSignup {
+	return map[string]domain.AgentSignup{
+		"agent-r2": {AgentID: "agent-r2", Name: "Researcher 2", Role: domain.SignupRoleCompetitor},
+		"agent-r3": {AgentID: "agent-r3", Name: "Researcher 3", Role: domain.SignupRoleCompetitor},
+		"agent-b1": {AgentID: "agent-b1", Name: "Baseline 1", Role: domain.SignupRoleBaseline},
+		"agent-p1": {AgentID: "agent-p1", Name: "Planner 1", Role: domain.SignupRolePlanner},
+	}
+}
+
+type world struct {
+	t       *testing.T
+	root    string
+	bare    string
+	proxy   string
+	store   *fakeStore
+	logs    *observer.ObservedLogs
+	outputs []string
+}
+
+func gitBinary(t *testing.T) string {
+	t.Helper()
+	path, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("no git on this machine")
+	}
+	return path
+}
+
+// newWorld is a bare repository served by git http-backend behind the host's one credential, as
+// a plain host serves it, and the proxy in front of it behind the gate, as the API serves it.
+func newWorld(t *testing.T) *world {
+	t.Helper()
+	binary := gitBinary(t)
+	w := &world{t: t, root: t.TempDir(), store: &fakeStore{signups: signups()}}
+	w.bare = filepath.Join(w.root, "host", repository)
+	w.run("", "init", "--quiet", "--bare", "-b", "main", w.bare)
+	w.run(w.bare, "config", "http.receivepack", "true")
+	seed := filepath.Join(w.root, "seed")
+	w.run("", "init", "--quiet", "-b", "main", seed)
+	w.run(seed, "commit", "--quiet", "--allow-empty", "-m", "Start the repository")
+	w.run(seed, "push", "--quiet", w.bare, "main")
+
+	backend := &cgi.Handler{Path: binary, Args: []string{"http-backend"}, Env: []string{"GIT_PROJECT_ROOT=" + filepath.Join(w.root, "host"), "GIT_HTTP_EXPORT_ALL=1"}}
+	host := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		if user, password, ok := r.BasicAuth(); !ok || user != hostUser || password != hostPassword {
+			rw.Header().Set("WWW-Authenticate", `Basic realm="host"`)
+			rw.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		backend.ServeHTTP(rw, r)
+	}))
+	t.Cleanup(host.Close)
+	plain, err := githost.NewPlain(host.URL, hostUser, hostPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	core, logs := observer.New(zap.DebugLevel)
+	w.logs = logs
+	logger := zap.New(core)
+	handler := api.LoggingMiddleware(logger)(auth.Gate(principals, logger, nil)(New(w.store, plain, logger)))
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	w.proxy = domain.GitProxyURL(server.URL+"/git", "pe-1")
+	return w
+}
+
+func (w *world) env(token string) []string {
+	home := filepath.Join(w.root, "home")
+	_ = os.MkdirAll(home, 0o700)
+	env := []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0",
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.invalid", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.invalid"}
+	if token != "" {
+		// What hl git-credential answers: the caller's own platform token.
+		env = append(env, "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=credential.helper",
+			"GIT_CONFIG_VALUE_0=!f() { test \"$1\" = get && printf 'username=hl\\npassword="+token+"\\n'; }; f")
+	}
+	return env
+}
+
+func (w *world) git(token, dir string, args ...string) (string, error) {
+	w.t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = w.env(token)
+	out, err := cmd.CombinedOutput()
+	w.outputs = append(w.outputs, string(out))
+	return string(out), err
+}
+
+func (w *world) run(dir string, args ...string) string {
+	w.t.Helper()
+	out, err := w.git("", dir, args...)
+	if err != nil {
+		w.t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(out)
+}
+
+func (w *world) clone(token, name string) string {
+	w.t.Helper()
+	dir := filepath.Join(w.root, name)
+	if out, err := w.git(token, w.root, "clone", "--quiet", w.proxy, dir); err != nil {
+		w.t.Fatalf("clone as %s: %v: %s", token, err, out)
+	}
+	return dir
+}
+
+func (w *world) hostRef(ref string) string {
+	w.t.Helper()
+	out, _ := w.git("", w.bare, "rev-parse", "--verify", "--quiet", ref)
+	return strings.TrimSpace(out)
+}
+
+// commitOn makes a new commit on branch in the clone at dir.
+func (w *world) commitOn(dir, branch string) string {
+	w.t.Helper()
+	w.run(dir, "checkout", "--quiet", "-B", branch)
+	w.run(dir, "commit", "--quiet", "--allow-empty", "-m", "work on "+branch)
+	return w.run(dir, "rev-parse", "HEAD")
+}
+
+// noSecretLeaked checks that neither the host's credential nor a platform token is in anything git
+// printed or the proxy logged.
+func (w *world) noSecretLeaked() {
+	w.t.Helper()
+	secrets := []string{hostPassword}
+	for token := range principals {
+		secrets = append(secrets, token)
+	}
+	var logged strings.Builder
+	for _, entry := range w.logs.All() {
+		fmt.Fprintln(&logged, entry.Message, entry.ContextMap())
+	}
+	if len(w.logs.All()) == 0 {
+		w.t.Fatal("the proxy logged nothing, so nothing is checked")
+	}
+	for _, secret := range secrets {
+		if strings.Contains(logged.String(), secret) {
+			w.t.Errorf("the proxy logged %q", secret)
+		}
+		for _, out := range w.outputs {
+			if strings.Contains(out, secret) {
+				w.t.Errorf("git printed %q: %s", secret, out)
+			}
+		}
+	}
+}
+
+func TestAResearcherPushesItsOwnBranchAndNothingElseThroughTheProxy(t *testing.T) {
+	w := newWorld(t)
+	dir := w.clone("tok-researcher-2", "researcher-2")
+	main := w.hostRef("refs/heads/main")
+
+	own := "hl/pe-1/researcher-2/faster-attention-abc123"
+	head := w.commitOn(dir, own)
+	if out, err := w.git("tok-researcher-2", dir, "push", "--quiet", "origin", own); err != nil {
+		t.Fatalf("pushing its own branch: %v: %s", err, out)
+	}
+	if got := w.hostRef("refs/heads/" + own); got != head {
+		t.Fatalf("the host holds %q on %s, want %s", got, own, head)
+	}
+	head = w.commitOn(dir, own)
+	if out, err := w.git("tok-researcher-2", dir, "push", "--quiet", "origin", own); err != nil || w.hostRef("refs/heads/"+own) != head {
+		t.Fatalf("pushing more onto its own branch: %v: %s", err, out)
+	}
+	theirs := "hl/pe-1/researcher-3/y"
+	otherDir := w.clone("tok-researcher-3", "researcher-3")
+	w.commitOn(otherDir, theirs)
+	if out, err := w.git("tok-researcher-3", otherDir, "push", "--quiet", "origin", theirs); err != nil {
+		t.Fatalf("another agent pushing its own branch: %v: %s", err, out)
+	}
+
+	for name, c := range map[string]struct {
+		args []string
+		ref  string
+		why  string
+	}{
+		"the default branch":               {[]string{"push", "origin", "HEAD:refs/heads/main"}, "refs/heads/main", "the default branch main is no agent's"},
+		"another agent's branch":           {[]string{"push", "origin", "HEAD:refs/heads/hl/pe-1/researcher-3/x"}, "refs/heads/hl/pe-1/researcher-3/x", "your branches are under hl/pe-1/researcher-2/"},
+		"a force push to another's branch": {[]string{"push", "--force", "origin", "HEAD:refs/heads/" + theirs}, "refs/heads/" + theirs, "your branches are under hl/pe-1/researcher-2/"},
+		"a delete of another's branch":     {[]string{"push", "origin", ":refs/heads/" + theirs}, "refs/heads/" + theirs, "your branches are under hl/pe-1/researcher-2/"},
+		"a delete of the default branch":   {[]string{"push", "origin", ":refs/heads/main"}, "refs/heads/main", "the default branch main is no agent's"},
+		"a tag":                            {[]string{"push", "origin", "HEAD:refs/tags/v1"}, "refs/tags/v1", "only branches are pushed"},
+		"a force push to main":             {[]string{"push", "--force", "origin", "HEAD:refs/heads/main"}, "refs/heads/main", "the default branch main is no agent's"},
+	} {
+		before := w.hostRef(c.ref)
+		out, err := w.git("tok-researcher-2", dir, c.args...)
+		if err == nil || !strings.Contains(out, "[remote rejected]") || !strings.Contains(out, c.why) {
+			t.Errorf("%s: %v: %s, want it rejected saying %q", name, err, out, c.why)
+		}
+		if after := w.hostRef(c.ref); after != before {
+			t.Errorf("%s: the host's %s moved from %q to %q", name, c.ref, before, after)
+		}
+	}
+	if w.hostRef("refs/heads/main") != main {
+		t.Error("main moved")
+	}
+	refused := w.logs.FilterMessage("git push refused").All()
+	if len(refused) < 7 || refused[0].ContextMap()["agentID"] != "agent-r2" || refused[0].ContextMap()["ref"] == "" {
+		t.Errorf("refused pushes logged = %+v, want each with the agent and the ref", refused)
+	}
+
+	// One refused ref refuses the push it is in whole.
+	other := w.commitOn(dir, own)
+	out, err := w.git("tok-researcher-2", dir, "push", "origin", own, "HEAD:refs/heads/main")
+	if err == nil || !strings.Contains(out, "a push is taken whole") || w.hostRef("refs/heads/"+own) == other {
+		t.Errorf("a push of its own branch beside main: %v: %s, want both refused", err, out)
+	}
+
+	// Its own branch it deletes, and the other agent's stays.
+	if out, err := w.git("tok-researcher-2", dir, "push", "--quiet", "origin", ":refs/heads/"+own); err != nil || w.hostRef("refs/heads/"+own) != "" {
+		t.Errorf("deleting its own branch: %v: %s", err, out)
+	}
+	if w.hostRef("refs/heads/"+theirs) == "" {
+		t.Error("the other agent's branch is gone")
+	}
+	w.noSecretLeaked()
+}
+
+func TestTheBaselineCreatesTheDefaultBranchOfAnEmptyRepositoryAndMovesItNever(t *testing.T) {
+	w := newWorld(t)
+	empty := filepath.Join(w.root, "host", repository)
+	if err := os.RemoveAll(empty); err != nil {
+		t.Fatal(err)
+	}
+	w.run("", "init", "--quiet", "--bare", "-b", "main", empty)
+	w.run(empty, "config", "http.receivepack", "true")
+	dir := w.clone("tok-baseline", "baseline")
+	w.run(dir, "commit", "--quiet", "--allow-empty", "-m", "Start the repository")
+	if out, err := w.git("tok-baseline", dir, "push", "--quiet", "origin", "HEAD:refs/heads/main"); err != nil {
+		t.Fatalf("creating main on an empty repository: %v: %s", err, out)
+	}
+	w.commitOn(dir, "hl/pe-1/baseline")
+	if out, err := w.git("tok-baseline", dir, "push", "--quiet", "origin", "hl/pe-1/baseline"); err != nil {
+		t.Fatalf("pushing the baseline branch: %v: %s", err, out)
+	}
+	if out, err := w.git("tok-baseline", dir, "push", "origin", "HEAD:refs/heads/main"); err == nil || !strings.Contains(out, "[remote rejected]") {
+		t.Errorf("moving main: %v: %s, want it rejected", err, out)
+	}
+
+	// A push that claims main has no value to create it anew is refused by the host itself.
+	main := w.hostRef("refs/heads/main")
+	pack := []byte("PACK\x00\x00\x00\x02\x00\x00\x00\x00")
+	sum := sha1.Sum(pack)
+	body := pkts(zero+" "+w.hostRef("refs/heads/hl/pe-1/baseline")+" refs/heads/main\x00report-status", "") + string(pack) + string(sum[:])
+	request, err := http.NewRequest(http.MethodPost, w.proxy+"/git-receive-pack", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.SetBasicAuth("hl", "tok-baseline")
+	request.Header.Set("Content-Type", "application/x-git-receive-pack-request")
+	resp, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if !strings.Contains(string(answer), "ng refs/heads/main") || w.hostRef("refs/heads/main") != main {
+		t.Errorf("a forged create of main: %s, want the host to refuse it", answer)
+	}
+	w.noSecretLeaked()
+}
+
+func TestOnlyAnAgentPastTheDraftPushes(t *testing.T) {
+	w := newWorld(t)
+	for _, token := range []string{"tok-planner", "tok-coordinator", "tok-job"} {
+		dir := w.clone(token, strings.TrimPrefix(token, "tok-"))
+		w.commitOn(dir, "hl/pe-1/researcher-2/x")
+		out, err := w.git(token, dir, "push", "origin", "hl/pe-1/researcher-2/x")
+		if err == nil || !strings.Contains(out, "read-only") {
+			t.Errorf("%s pushing: %v: %s, want it refused as read-only", token, err, out)
+		}
+	}
+	w.store.draft = true
+	dir := w.clone("tok-researcher-2", "in-draft")
+	w.commitOn(dir, "hl/pe-1/researcher-2/x")
+	if out, err := w.git("tok-researcher-2", dir, "push", "origin", "hl/pe-1/researcher-2/x"); err == nil || !strings.Contains(out, "is a draft") {
+		t.Errorf("a researcher pushing in a draft: %v: %s, want it refused", err, out)
+	}
+	if w.hostRef("refs/heads/hl/pe-1/researcher-2/x") != "" {
+		t.Error("a read-only push reached the host")
+	}
+	w.noSecretLeaked()
+}
+
+func TestTheProxyServesNoOneElse(t *testing.T) {
+	w := newWorld(t)
+	get := func(token, path string) (int, string, http.Header) {
+		request, err := http.NewRequest(http.MethodGet, w.proxy+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if token != "" {
+			request.SetBasicAuth("hl", token)
+		}
+		resp, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close() //nolint:errcheck
+		body, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(body), resp.Header
+	}
+	status, body, header := get("tok-researcher-2", "/info/refs?service=git-upload-pack")
+	if status != http.StatusOK || header.Get("Content-Type") != "application/x-git-upload-pack-advertisement" || !strings.Contains(body, "refs/heads/main") {
+		t.Fatalf("an agent's ref listing: %d %s", status, body)
+	}
+	for name, c := range map[string]struct {
+		token, path string
+		status      int
+	}{
+		"no token":                       {"", "/info/refs?service=git-upload-pack", http.StatusUnauthorized},
+		"staff":                          {"tok-staff", "/info/refs?service=git-upload-pack", http.StatusForbidden},
+		"another platform experiment's":  {"tok-other-pe", "/info/refs?service=git-upload-pack", http.StatusNotFound},
+		"a run that is over":             {"tok-over", "/info/refs?service=git-upload-pack", http.StatusForbidden},
+		"the dumb protocol":              {"tok-researcher-2", "/info/refs", http.StatusForbidden},
+		"a file of the repository":       {"tok-researcher-2", "/HEAD", http.StatusNotFound},
+		"a job listing refs to push":     {"tok-job", "/info/refs?service=git-receive-pack", http.StatusForbidden},
+		"a planner listing refs to push": {"tok-planner", "/info/refs?service=git-receive-pack", http.StatusForbidden},
+	} {
+		status, body, header := get(c.token, c.path)
+		if status != c.status {
+			t.Errorf("%s: got = %d %s, want %d", name, status, body, c.status)
+		}
+		if strings.Contains(body, hostPassword) || strings.Contains(header.Get("WWW-Authenticate"), "host") {
+			t.Errorf("%s: the host's credential or challenge reached the caller: %v %s", name, header, body)
+		}
+	}
+	w.store.closed = true
+	if status, body, _ := get("tok-researcher-2", "/info/refs?service=git-upload-pack"); status != http.StatusForbidden || !strings.Contains(body, "run closed") {
+		t.Errorf("a closed platform experiment: %d %s, want 403 run closed", status, body)
+	}
+	w.noSecretLeaked()
+}
+
+func TestAnAgentWhoseNameMakesAnotherAgentsBranchNamesPushesNothing(t *testing.T) {
+	w := newWorld(t)
+	w.store.signups["agent-r3"] = domain.AgentSignup{AgentID: "agent-r3", Name: "researcher-2", Role: domain.SignupRoleCompetitor}
+	dir := w.clone("tok-researcher-2", "researcher-2")
+	w.commitOn(dir, "hl/pe-1/researcher-2/x")
+	if out, err := w.git("tok-researcher-2", dir, "push", "origin", "hl/pe-1/researcher-2/x"); err == nil || !strings.Contains(out, "make the same branch names") {
+		t.Errorf("pushing beside an agent of the same branch names: %v: %s, want it refused", err, out)
+	}
+}

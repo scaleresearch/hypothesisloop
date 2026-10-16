@@ -163,7 +163,7 @@ func TestBuildContainerSpecInjectsPerNodeAcceleratorCount(t *testing.T) {
 		apiURL: "http://example.invalid:8083",
 	}
 	exp := &clusterapi.DesiredJob{
-		Data: testDataAccess(), Token: "test-job-token",
+		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git",
 		ID: "per-node-count", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 		// Deliberately disagreeing with the spec: only reading the spec produces "2".
@@ -220,7 +220,7 @@ func TestBuildContainerSpecInjectsDurableDataAddressFromDesiredState(t *testing.
 		apiURL: "http://example.invalid:8083",
 	}
 	exp := &clusterapi.DesiredJob{
-		Data: testDataAccess(), Token: "test-job-token",
+		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git",
 		ID: "data-env", AgentID: "agent", ProjectID: "project",
 		AcceleratorType:        "tenstorrent.com/chipArch=blackhole",
 		AcceleratorCount:       1,
@@ -314,7 +314,7 @@ func TestTwoGroupJobIsRejectedByTheSameSingleNodeRuleNumNodesMeets(t *testing.T)
 		apiURL: "http://example.invalid:8083",
 	}
 	exp := &clusterapi.DesiredJob{
-		Data: testDataAccess(), Token: "test-job-token",
+		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git",
 		ID: "grouped", AgentID: "agent", ProjectID: "project",
 		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
 		Job: clusterapi.JobSpec{
@@ -347,7 +347,7 @@ func TestSingleReplicaGroupRunsAndTakesItsShapeFromTheGroup(t *testing.T) {
 		apiURL: "http://example.invalid:8083",
 	}
 	exp := &clusterapi.DesiredJob{
-		Data: testDataAccess(), Token: "test-job-token",
+		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git",
 		ID: "one-group", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 2,
 		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
@@ -428,7 +428,7 @@ func TestAJobWithoutResolvedGraceIsRefused(t *testing.T) {
 
 func checkpointWindowExperiment(checkpointGrace *int64) *clusterapi.DesiredJob {
 	return &clusterapi.DesiredJob{
-		Data: testDataAccess(), Token: "test-job-token",
+		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git",
 		ID: "checkpoint-window", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
 		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,

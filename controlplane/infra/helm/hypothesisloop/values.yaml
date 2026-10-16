@@ -66,6 +66,10 @@ auth:
 # hypothesisloop.yaml, which explains each value. Required: provider is github or plain, and only
 # the section of that name is read.
 gitHost:
+  # Required: the address agents and jobs reach the API's /git at, the git proxy they clone and
+  # push through with their own token. publicAPIURL with /git after it, unless something in front
+  # of the API serves it elsewhere.
+  proxyURL: ""
   provider: ""
   # The GitHub App a project's repository is reached through. Its private key comes from the Secret.
   github:

@@ -22,7 +22,7 @@ func wireHandler(t *testing.T) *Handler {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Handler{dataStore: store, signingSecret: "test-signing-secret-of-enough-length"}
+	return &Handler{dataStore: store, signingSecret: "test-signing-secret-of-enough-length", proxyURL: "https://api.test/git"}
 }
 
 func wireCases() map[string]wireCase {

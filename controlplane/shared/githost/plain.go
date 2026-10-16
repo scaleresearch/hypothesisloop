@@ -94,9 +94,12 @@ func (p *Plain) FileAt(context.Context, string, string, string, string) ([]byte,
 	return nil, ErrFileNotFound
 }
 
+// ErrNoCredential is Credential's answer on a host that takes none.
+var ErrNoCredential = api.Refuse(http.StatusNotFound, "not_found", "this deployment's git host takes no credential")
+
 func (p *Plain) Credential(context.Context, string, string, bool) (*Credential, error) {
 	if p.username == "" {
-		return nil, api.Refuse(http.StatusNotFound, "not_found", "this deployment's git host takes no credential")
+		return nil, ErrNoCredential
 	}
 	return &Credential{Username: p.username, Password: p.password}, nil
 }

@@ -20,7 +20,7 @@ var committedConfig = filepath.Join("..", "..", "settings", "hypothesisloop.yaml
 // productionConfig is the committed settings file as a deployment renders it: with its git host.
 func productionConfig(t *testing.T) string {
 	t.Helper()
-	return withoutGitHost(t) + "\ngit_host:\n  provider: plain\n  plain:\n    base_url: https://git.example.invalid\n"
+	return withoutGitHost(t) + "\ngit_host:\n  proxy_url: https://api.example.invalid/git\n  provider: plain\n  plain:\n    base_url: https://git.example.invalid\n"
 }
 
 // withoutGitHost is the rendered settings file before the deployment's git host is added.
@@ -370,6 +370,7 @@ func TestLoadRejectsAnIncompleteAccountsSection(t *testing.T) {
 
 const githubSection = `
 git_host:
+  proxy_url: https://api.example.invalid/git
   provider: github
   github:
     app_id: 4242
@@ -402,13 +403,13 @@ func TestLoadTakesOneGitHostAndRefusesAHalfStatedOne(t *testing.T) {
 	t.Setenv("HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY", "pem")
 	t.Setenv("HL_TEST_GIT_USERNAME", "platform")
 	t.Setenv("HL_TEST_GIT_PASSWORD", "secret")
-	const plain = "\ngit_host:\n  provider: plain\n  plain:\n    base_url: https://git.example/experiments\n"
+	const plain = "\ngit_host:\n  proxy_url: https://api.example.invalid/git\n  provider: plain\n  plain:\n    base_url: https://git.example/experiments\n"
 	const credential = "    username: ${HL_TEST_GIT_USERNAME}\n    password: ${HL_TEST_GIT_PASSWORD}\n"
 	const app = "  github:\n    app_id: 4242\n    app_slug: hypothesisloop\n    private_key: y\n"
 	for name, section := range map[string]string{
 		"a plain host that asks for no credential": plain,
 		"a plain host with the credential":         plain + credential,
-		"a plain host over http that says so":      "\ngit_host:\n  provider: plain\n  plain:\n    base_url: http://git.example\n    allow_http: true\n",
+		"a plain host over http that says so":      "\ngit_host:\n  proxy_url: https://api.example.invalid/git\n  provider: plain\n  plain:\n    base_url: http://git.example\n    allow_http: true\n",
 		"github with its App":                      githubSection,
 	} {
 		if err := loadText(t, withoutGitHost(t)+section); err != nil {
@@ -426,17 +427,20 @@ func TestLoadTakesOneGitHostAndRefusesAHalfStatedOne(t *testing.T) {
 	for name, section := range map[string]string{
 		"no git_host section":              "",
 		"no provider":                      "\ngit_host:\n  plain:\n    base_url: https://git.example\n",
-		"a provider nobody wrote":          "\ngit_host:\n  provider: gitlab\n",
-		"github with no App":               "\ngit_host:\n  provider: github\n",
+		"a provider nobody wrote":          "\ngit_host:\n  proxy_url: https://api.example.invalid/git\n  provider: gitlab\n",
+		"github with no App":               "\ngit_host:\n  proxy_url: https://api.example.invalid/git\n  provider: github\n",
 		"github with a plain section":      githubSection + "  plain:\n    base_url: https://git.example\n",
 		"plain beside a GitHub App":        plain + app,
-		"plain with no section":            "\ngit_host:\n  provider: plain\n",
-		"plain with no base_url":           "\ngit_host:\n  provider: plain\n  plain:\n    allow_http: false\n",
-		"plain over http":                  "\ngit_host:\n  provider: plain\n  plain:\n    base_url: http://git.example\n",
-		"plain over another scheme":        "\ngit_host:\n  provider: plain\n  plain:\n    base_url: git://git.example\n    allow_http: true\n",
+		"plain with no section":            "\ngit_host:\n  proxy_url: https://api.example.invalid/git\n  provider: plain\n",
+		"plain with no base_url":           "\ngit_host:\n  proxy_url: https://api.example.invalid/git\n  provider: plain\n  plain:\n    allow_http: false\n",
+		"plain over http":                  "\ngit_host:\n  proxy_url: https://api.example.invalid/git\n  provider: plain\n  plain:\n    base_url: http://git.example\n",
+		"plain over another scheme":        "\ngit_host:\n  proxy_url: https://api.example.invalid/git\n  provider: plain\n  plain:\n    base_url: git://git.example\n    allow_http: true\n",
 		"plain with a username alone":      plain + "    username: ${HL_TEST_GIT_USERNAME}\n",
 		"plain with a variable nobody set": plain + "    username: platform\n    password: ${HL_TEST_GIT_UNSET}\n",
 		"the old github section":           "\ngithub:\n  app_id: 4242\ngit:\n  provider: github\n",
+		"no proxy_url":                     strings.Replace(plain, "  proxy_url: https://api.example.invalid/git\n", "", 1),
+		"a loopback proxy_url":             strings.Replace(plain, "api.example.invalid", "localhost:8081", 1),
+		"a proxy_url with a credential":    strings.Replace(plain, "https://", "https://user:pw@", 1),
 	} {
 		if err := loadText(t, withoutGitHost(t)+section); err == nil {
 			t.Errorf("%s: accepted", name)

@@ -17,14 +17,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 )
 
 // planningAPI is the planning routes and the ones a draft passes through, over store.
@@ -43,7 +41,7 @@ func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Princ
 	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
 	planningRepositories = &fakeRepositories{files: map[string]string{"prj-a": ""}}
 	svc.WithRepositories(planningRepositories)
-	handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).
+	handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).WithGitProxy("https://api.test/git").
 		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
 		WithJobImages([]domain.JobImage{{Name: "torch", Image: "registry.example.com/hl/torch:1"}})
 	if drafts, ok := store.(*draftStore); ok {
@@ -222,46 +220,6 @@ type plannerListed struct{ *draftStore }
 
 func (s plannerListed) ListAgentSignups(_ context.Context, id string) ([]domain.AgentSignup, error) {
 	return []domain.AgentSignup{s.signups[id]}, nil
-}
-
-// draftRepositories answers the git credential service from the drafts a store holds.
-type draftRepositories struct{ store *draftStore }
-
-func (d draftRepositories) PlatformExperimentRepository(ctx context.Context, id string) (string, string, bool, bool, error) {
-	pe, err := d.store.GetPlatformExperiment(ctx, id)
-	if err != nil || pe == nil {
-		return "", "", false, false, db.ErrPlatformExperimentNotFound
-	}
-	return pe.ProjectID, pe.Repository, pe.Status == domain.PlatformExpClosed, pe.Status == domain.PlatformExpDraft, nil
-}
-
-// A planner clones its draft's repository before it proposes, so the token of a planner at work
-// is handed the git credential of that repository, and of no other.
-func TestThePlannerOfADraftIsGivenAGitCredentialForItsRepository(t *testing.T) {
-	store := &draftStore{}
-	svc, call := planningAPI(t, store, planner)
-	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": "Find out whether warmup helps"}); code != http.StatusCreated {
-		t.Fatalf("got = %d %v, want a draft", code, out)
-	}
-	if err := svc.ProvideRepositories(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	pe := store.created[0]
-	host, err := githost.NewPlain("https://git.test", "platform", "secret")
-	if err != nil {
-		t.Fatal(err)
-	}
-	atWork := authtest.As{Kind: auth.KindAgent, PlatformExperimentID: pe.ID, AgentID: store.planners[pe.ID].ID, ProjectID: pe.ProjectID, OrgIDs: []string{"org-a"}}
-	access := auth.NewAccess(authtest.Placement{})
-	router := authtest.Router(atWork)
-	accounts.RegisterRepositoriesHuma(apidocs.New(router, "test", "1.0.0", "", access, zap.NewNop()),
-		accounts.NewRepositories(struct{ accounts.InstallationStore }{}, draftRepositories{store}, nil, host, access, zap.NewNop()))
-	for repository, want := range map[string]int{pe.Repository: http.StatusCreated, "acme/another": http.StatusNotFound} {
-		code, out := call2(t, router, "POST", "/git-credentials", `{"protocol":"https","host":"git.test","path":"`+repository+`.git"}`)
-		if code != want || (want == http.StatusCreated && (out["username"] != "platform" || out["password"] != "secret")) {
-			t.Errorf("a credential for %s: got = %d %v, want %d", repository, code, out, want)
-		}
-	}
 }
 
 // call2 is the agents tests' call under a name that does not shadow this file's.
@@ -1596,7 +1554,7 @@ func TestAProposalIsAcceptedAsProposedUnlessAPersonActsFirst(t *testing.T) {
 			t.Fatalf("propose: %d %v", code, out)
 		}
 		svc, call := planningAPI(t, store, planner)
-		handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).
+		handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).WithGitProxy("https://api.test/git").
 			WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
 			WithJobImages([]domain.JobImage{{Name: "torch", Image: "registry.example.com/hl/torch:1"}})
 		return store, handler, call
@@ -1699,7 +1657,7 @@ func TestAProposalWithQuestionsWaitsForAPersonWhoseAnswersGoIntoTheBrief(t *test
 			t.Fatalf("propose: %d %v", code, out)
 		}
 		svc, call := planningAPI(t, store, planner)
-		handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).
+		handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).WithGitProxy("https://api.test/git").
 			WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
 			WithJobImages([]domain.JobImage{{Name: "torch", Image: "registry.example.com/hl/torch:1"}})
 		return store, handler, call

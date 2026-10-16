@@ -384,6 +384,12 @@ func (c *Config) build() error {
 		}
 		issuers[provider.Issuer] = true
 	}
+	if proxy, err := url.Parse(c.GitHost.ProxyURL); err != nil || proxy.Host == "" || (proxy.Scheme != "http" && proxy.Scheme != "https") ||
+		proxy.User != nil || proxy.RawQuery != "" || proxy.Fragment != "" {
+		return fmt.Errorf("git_host proxy_url %q is required: the http(s) address agents and jobs reach the API's /git at", c.GitHost.ProxyURL)
+	} else if unreachableFromElsewhere(proxy.Hostname()) {
+		return fmt.Errorf("git_host proxy_url %q is loopback or unspecified: a hosted agent or a job inside a cluster cannot reach it", c.GitHost.ProxyURL)
+	}
 	switch g := c.GitHost; g.Provider {
 	case "":
 		return fmt.Errorf("git_host provider is required, the git host platform experiments keep their code on: %s or %s", GitHostProviderGitHub, GitHostProviderPlain)

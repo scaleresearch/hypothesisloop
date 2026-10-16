@@ -16,6 +16,7 @@ runtimes:
 objectStore:
   endpoint: http://object-store.hypothesisloop.svc:9000
 gitHost:
+  proxyURL: http://api.example.invalid:30081/git
   provider: plain
   plain:
     baseURL: https://git.example.invalid/experiments

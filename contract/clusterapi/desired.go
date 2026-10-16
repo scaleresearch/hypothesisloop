@@ -37,9 +37,12 @@ type DesiredJob struct {
 	// measures that wait from.
 	SubmittedAt *time.Time `json:"submitted_at,omitempty"`
 	// Data is the job's durable-data address and key, and Token its own platform token, good
-	// for reporting its metrics and nothing else.
+	// for reporting its metrics and reading its repository through the git proxy.
 	Data  *DataAccess `json:"data,omitempty"`
 	Token string      `json:"token,omitempty"`
+	// GitURL is where the job fetches its commit from with Token: its platform experiment's
+	// repository through the control plane's git proxy.
+	GitURL string `json:"git_url,omitempty"`
 	// AttemptCount numbers the job's generation. A requeue reuses the job's id and advances it,
 	// so every attempt is a distinct desired state and its workload a distinct one.
 	AttemptCount int `json:"attempt_count"`

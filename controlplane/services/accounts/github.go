@@ -18,7 +18,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost/github"
 )
 
@@ -46,31 +45,20 @@ type InstallationStore interface {
 	MakeGitHubInstallationDefault(ctx context.Context, orgID string, installationID int64) error
 }
 
-// ExperimentRepositories says which repository a platform experiment names, which project it is
-// in, whether it is closed and whether it is still a draft. *db.PlatformExperimentsStore
-// satisfies it.
-type ExperimentRepositories interface {
-	PlatformExperimentRepository(ctx context.Context, id string) (projectID, repository string, closed, draft bool, err error)
-}
-
-// Repositories serves the GitHub installations orgs connect and what they cover, and the git
-// credential for the one repository a platform experiment names on the deployment's git host.
+// Repositories serves the GitHub installations orgs connect and what they cover.
 type Repositories struct {
-	store       InstallationStore
-	experiments ExperimentRepositories
-	github      GitHubApp
-	host        githost.Provider
-	logger      *zap.Logger
-	access      *auth.Access
+	store  InstallationStore
+	github GitHubApp
+	logger *zap.Logger
+	access *auth.Access
 }
 
-// NewRepositories takes the App's client, or nil for a deployment whose git host is not GitHub,
-// and the git host credentials are minted on.
-func NewRepositories(store InstallationStore, experiments ExperimentRepositories, app GitHubApp, host githost.Provider, access *auth.Access, logger *zap.Logger) *Repositories {
-	if store == nil || experiments == nil || host == nil || access == nil || logger == nil {
-		panic("accounts.NewRepositories: the stores, a git host, an access check and a logger are required")
+// NewRepositories takes the App's client, or nil for a deployment whose git host is not GitHub.
+func NewRepositories(store InstallationStore, app GitHubApp, access *auth.Access, logger *zap.Logger) *Repositories {
+	if store == nil || access == nil || logger == nil {
+		panic("accounts.NewRepositories: the store, an access check and a logger are required")
 	}
-	return &Repositories{store: store, experiments: experiments, github: app, host: host, logger: logger, access: access}
+	return &Repositories{store: store, github: app, logger: logger, access: access}
 }
 
 // Repository is a repository an org can name on a platform experiment.
@@ -80,17 +68,6 @@ type Repository struct {
 	Private        bool   `json:"private"`
 }
 
-// GitCredential answers git's credential helper: the fields git reads, and when the password
-// stops working.
-type GitCredential struct {
-	Protocol  string    `json:"protocol"`
-	Host      string    `json:"host"`
-	Path      string    `json:"path" doc:"The path asked for, which names the one repository the password works on."`
-	Username  string    `json:"username"`
-	Password  string    `json:"password" doc:"What the git host takes for the repository. On GitHub an installation token minted for this call and stored nowhere."`
-	ExpiresAt time.Time `json:"expires_at,omitzero" doc:"Absent for a password that does not run out."`
-}
-
 // The reasons a client tells a refusal of a connect or a credential apart by. The others are
 // the git host's (github.Reason*).
 const (
@@ -98,8 +75,6 @@ const (
 	ReasonInvalidRequest      = "invalid_request"
 	ReasonInstallStateInvalid = "install_state_invalid"
 	ReasonInstallationNotNew  = "installation_not_new"
-	ReasonNoRepository        = "no_repository"
-	ReasonRunOver             = "run_over"
 	ReasonForbidden           = "forbidden"
 )
 
@@ -280,51 +255,6 @@ func (r *Repositories) repositories(ctx context.Context, orgID, q string) ([]Rep
 	}
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Repository) < strings.ToLower(out[j].Repository) })
 	return out, nil
-}
-
-// credential mints the caller's git credential. It goes only to what the platform launched into
-// a platform experiment, for the repository that experiment names and for no other address: an
-// agent may push once the experiment is past its draft, and a coordinator, a job and the planner
-// of a draft read. Nothing is minted for a run that is over, though
-// its token still files summaries, since the credential would outlive the token by an hour. The
-// close is read again here, so a run closed after the token was read asks nothing of the git host.
-func (r *Repositories) credential(ctx context.Context, protocol, host, path string) (*GitCredential, error) {
-	p, ok := auth.FromContext(ctx)
-	if !ok {
-		return nil, auth.Unauthenticated("the request carries no principal")
-	}
-	switch p.Kind {
-	case auth.KindAgent, auth.KindCoordinator, auth.KindJob:
-	default:
-		return nil, api.Refuse(http.StatusForbidden, ReasonForbidden, "a "+string(p.Kind)+" token has no repository of its own: a git credential goes to an agent, a coordinator or a job")
-	}
-	projectID, repository, closed, draft, err := r.experiments.PlatformExperimentRepository(ctx, p.PlatformExperimentID)
-	if err != nil {
-		return nil, err
-	}
-	write := p.Kind == auth.KindAgent && !draft
-	if closed {
-		return nil, api.Refuse(http.StatusForbidden, ReasonRunOver, "run closed, nothing more is pushed: platform experiment "+p.PlatformExperimentID+" is closed, so no git credential is handed out for it. "+
-			"What is not pushed stays out of the repository; the summary and comments still take what matters until the token ends")
-	}
-	if p.RunOver {
-		return nil, api.Refuse(http.StatusForbidden, ReasonRunOver, "run over, nothing more is pushed: the run of this "+string(p.Kind)+" token in platform experiment "+p.PlatformExperimentID+
-			" has ended (finished, cut, or for a job its agent's run ended), so no git credential is handed out for it")
-	}
-	if repository == "" {
-		return nil, api.Refuse(http.StatusNotFound, ReasonNoRepository, "platform experiment "+p.PlatformExperimentID+" names no repository")
-	}
-	if !r.host.Serves(repository, protocol, host, path) {
-		return nil, api.Refuse(http.StatusNotFound, ReasonNotFound, "no git credential for that address: this token's is for "+r.host.URL(repository)+" only")
-	}
-	minted, err := r.host.Credential(ctx, projectID, repository, write)
-	if err != nil {
-		return nil, err
-	}
-	return &GitCredential{
-		Protocol: protocol, Host: strings.ToLower(host), Path: strings.Trim(path, "/"),
-		Username: minted.Username, Password: minted.Password, ExpiresAt: minted.ExpiresAt,
-	}, nil
 }
 
 // RegisterRepositoriesHuma registers the GitHub operations on the shared API document.
@@ -518,38 +448,6 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 			return nil, refusal(r.logger, op, err, http.StatusConflict)
 		}
 		return &repositoriesPage{TotalCount: len(found), Body: pageOf(found, limit, offset)}, nil
-	})
-
-	type credentialCreated struct {
-		CacheControl string `header:"Cache-Control"`
-		Body         GitCredential
-	}
-	apidocs.Register(doc, apidocs.AudienceJob, huma.Operation{
-		OperationID: "create-git-credential", Method: "POST", Path: "/git-credentials", DefaultStatus: http.StatusCreated,
-		Summary: "Mint a git credential for your platform experiment's repository", Tags: []string{"github"},
-		Description: "For an agent, a coordinator and a job: a GitHub token minted for this call, good for about an hour and for the one repository the " +
-			"caller's platform experiment names. An agent's may push once the platform experiment is past its draft; a coordinator's, a job's and a draft's planner's read. `hl git-credential` is git's credential helper " +
-			"over this call, so git asks for a fresh one whenever it needs one and nothing has to be stored. protocol, host and path are what git asked " +
-			"a credential for: nothing is minted unless they name that repository over https, as owner/name, owner/name.git or its LFS endpoint " +
-			"owner/name.git/info/lfs. 403 run_over once the platform experiment is closed or the agent, for a job the agent it belongs to, was cut, and " +
-			"403 forbidden for any other kind of token. 404 no_repository when the platform experiment names none, 404 not_found for another address. " +
-			"409 installation_not_connected when the org disconnected the installation, repository_not_reachable when the repository left it, " +
-			"installation_gone when the App was removed on GitHub, installation_suspended when it was suspended there, github_permission_missing when its owner has yet to accept the App's permissions, naming each one missing as name:level. " +
-			"502 github_failed when GitHub answers 5xx or not at all for the installation, the message naming it and GitHub's answer. " +
-			"On a deployment whose git host is plain the credential is the deployment's one, the same for every caller and with no expires_at, " +
-			"and 404 not_found when that host takes none.",
-	}, func(ctx context.Context, in *struct {
-		Body struct {
-			Protocol string `json:"protocol" doc:"The protocol git asked for. Only https is served."`
-			Host     string `json:"host" doc:"The host git asked for."`
-			Path     string `json:"path" doc:"The path git asked for: git sends it when credential.useHttpPath is true."`
-		}
-	}) (*credentialCreated, error) {
-		credential, err := r.credential(ctx, in.Body.Protocol, in.Body.Host, in.Body.Path)
-		if err != nil {
-			return nil, refusal(r.logger, "create-git-credential", err, http.StatusConflict)
-		}
-		return &credentialCreated{CacheControl: "no-store", Body: *credential}, nil
 	})
 }
 

@@ -114,7 +114,7 @@ func TestAProbeImageTheEngineKeepsFailsTheProbeAndIsNamed(t *testing.T) {
 
 func sizedExperiment() *clusterapi.DesiredJob {
 	return &clusterapi.DesiredJob{
-		Data: testDataAccess(), Token: "test-job-token",
+		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git",
 		ID: "sized", AgentID: "agent", ProjectID: "project",
 		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
 		Job: clusterapi.JobSpec{

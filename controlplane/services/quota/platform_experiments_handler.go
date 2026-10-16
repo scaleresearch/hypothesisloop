@@ -35,6 +35,15 @@ type PlatformExperimentsHandler struct {
 	planning Planning
 	// repos is the git host platform experiments keep their code on.
 	repos githost.Provider
+	// proxyURL is where the control plane's proxy serves their repositories. Set via WithGitProxy.
+	proxyURL string
+}
+
+// WithGitProxy is where the control plane's proxy serves repositories: a platform experiment's
+// answer names its repository there, the address what the platform launches clones and pushes.
+func (h *PlatformExperimentsHandler) WithGitProxy(proxyURL string) *PlatformExperimentsHandler {
+	h.proxyURL = proxyURL
+	return h
 }
 
 // NewPlatformExperimentsHandler constructs the handler.

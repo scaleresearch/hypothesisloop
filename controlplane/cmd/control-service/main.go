@@ -19,6 +19,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/dedup"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/environments"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/gitproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/launcherapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
@@ -159,7 +160,7 @@ func main() {
 	default:
 		logger.Fatal("control-service: the settings name no git host", zap.String("provider", pcfg.GitHost.Provider))
 	}
-	repos := accounts.NewRepositories(accountsStore, db.NewPlatformExperimentsStore(pool), githubApp, gitHost, gate.access, logger)
+	repos := accounts.NewRepositories(accountsStore, githubApp, gate.access, logger)
 
 	apiServer := newAPIServer(runCtx, gate, repos, gitHost, pool, store, graph, peFullStore, quotaCfg, pcfg, metricsDBURL, apiPort, logger)
 
@@ -220,6 +221,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		AutoAccept:  time.Duration(pcfg.Planning.AutoAcceptSeconds) * time.Second,
 	}, logger).
 		WithJobImages(pcfg.OfferedJobImages()).
+		WithGitProxy(pcfg.GitHost.ProxyURL).
 		WithLiveCapacity(metricsDBURL, connectedWithin, store).
 		WithAgentLaunch(quota.AgentLaunch{
 			Launcher: pcfg.Agents.Launcher, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
@@ -262,6 +264,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 			ProgressLimit:   time.Duration(pcfg.Agents.ProgressLimitSeconds) * time.Second,
 			MaxNewPerAnswer: pcfg.Agents.MaxNewInstancesPerAnswer,
 		}, logger),
+		gitProxy: gitproxy.New(db.NewPlatformExperimentsStore(pool), gitHost, logger),
 	}, logger)
 
 	return &http.Server{
@@ -289,6 +292,7 @@ type routes struct {
 	watch               *registry.WatchHandler
 	clusterAgent        *clusteragentapi.Handler
 	launcher            *launcherapi.Handler
+	gitProxy            *gitproxy.Proxy
 }
 
 // webSockets are the paths a WebSocket client opens, with the subprotocol that carries its token.
@@ -315,6 +319,8 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	// upgrade needs the raw connection. Its vocabulary is GET /watch/kinds, registered below, and
 	// `hl watch` is its client, which the experimentator harness runs for an agent between turns.
 	r.Get("/watch", h.watch.ServeHTTP)
+	// git's smart HTTP is no JSON API, so it is mounted beside the documented operations.
+	r.Handle(auth.GitPrefix+"*", h.gitProxy)
 
 	// Cluster-agent traffic (Go cluster-agent binaries, not research agents) keeps its own
 	// registration and its own docs under a distinct prefix — a different audience entirely.
@@ -441,7 +447,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 	clusterAgentHandler := clusteragentapi.NewHandler(store,
 		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metricsDBURL, pcfg.Scheduler.ObservationCadence(), dataStore,
 		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second,
-		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.Auth.SigningSecret, environmentRegistry, logger).
+		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.Auth.SigningSecret, pcfg.GitHost.ProxyURL, environmentRegistry, logger).
 		WithBuildReported(schedulerLoop.Trigger)
 	return schedulerHandler, clusterAgentHandler
 }

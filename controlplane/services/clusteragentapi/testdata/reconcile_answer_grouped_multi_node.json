@@ -90,6 +90,7 @@
         "secret_access_key": "SK2"
       },
       "token": "hls_am9iOmpvYi0y.gRh9hADYFl_MMpTp7KZc6cJr3r6mENIQSw2B--33kII",
+      "git_url": "https://api.test/git/pe-1.git",
       "attempt_count": 0,
       "infra_requeue_count": 0,
       "created_at": "0001-01-01T00:00:00Z",

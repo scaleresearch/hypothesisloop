@@ -469,6 +469,9 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "proxyURL": {
+          "type": "string"
+        },
         "provider": {
           "type": "string",
           "enum": ["github", "plain"]

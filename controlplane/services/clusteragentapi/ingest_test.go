@@ -13,7 +13,7 @@ import (
 // Agents report every accelerator type their hardware publishes; capacity keeps only the priced
 // ones, matched case-insensitively.
 func TestReconcileIngestKeepsOnlyPricedAcceleratorTypes(t *testing.T) {
-	h := NewHandler(nil, 0, "", 0, nil, 0, []string{"nvidia.com/gpu.product=Tesla-T4"}, 10, "", nil, nil)
+	h := NewHandler(nil, 0, "", 0, nil, 0, []string{"nvidia.com/gpu.product=Tesla-T4"}, 10, "", "https://api.test/git", nil, nil)
 	report := clusterapi.ReconcileRequest{
 		AcceleratorAvailableByFlavor: map[string]int64{"nvidia.com/gpu.product=tesla-t4": 1, "nvidia.com/cuda.driver.major=550": 1},
 		AcceleratorTotalByFlavor:     map[string]int64{"nvidia.com/gpu.product=tesla-t4": 2, "nvidia.com/cuda.driver.major=550": 2},
@@ -46,9 +46,12 @@ func TestReconcileHandsEachJobItsOwnToken(t *testing.T) {
 	h.signingSecret = secret
 	tokens := map[string]string{}
 	for _, id := range []string{"job-1", "job-2", "job-1"} {
-		job, err := h.desiredJob(&domain.Experiment{ID: id})
+		job, err := h.desiredJob(&domain.Experiment{ID: id, PlatformExperimentID: "pe-1"})
 		if err != nil {
 			t.Fatalf("desired job: %v", err)
+		}
+		if job.GitURL != "https://api.test/git/pe-1.git" {
+			t.Errorf("repository of %s: got = %q, want its platform experiment's through the proxy", id, job.GitURL)
 		}
 		want, _ := auth.Mint(secret, auth.JobScope(id))
 		if job.Token == "" || job.Token != want {

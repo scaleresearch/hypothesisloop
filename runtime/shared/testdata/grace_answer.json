@@ -27,7 +27,8 @@
       "access_key_id": "key",
       "secret_access_key": "secret"
     },
-    "token": "job-token"
+    "token": "job-token",
+    "git_url": "https://api.test/git/pe-1.git"
   },
   "ordinary_stop_grace_seconds": 30,
   "checkpoint_stop_grace_seconds": 600

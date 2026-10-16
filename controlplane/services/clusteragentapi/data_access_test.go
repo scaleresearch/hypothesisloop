@@ -16,7 +16,7 @@ func TestTheDesiredJobCarriesItsOwnStoredKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &Handler{dataStore: store, signingSecret: "test-signing-secret-of-enough-length"}
+	h := &Handler{dataStore: store, signingSecret: "test-signing-secret-of-enough-length", proxyURL: "https://api.test/git"}
 	a, err := h.desiredJob(&domain.Experiment{ID: "exp-1", AgentID: "agent-a", PlatformExperimentID: "pe-1",
 		DataKey: domain.DataKey{AccessKeyID: "AK1", SecretAccessKey: "SK1"}})
 	if err != nil {

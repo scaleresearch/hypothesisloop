@@ -222,16 +222,22 @@ job_images:
 # The git host platform experiments keep their code on. Required: this file names none, and each
 # deployment adds the section when it renders the file. provider names the host, and the section
 # of that name, the only one set, configures it. github is the platform's GitHub App: a person
-# installs it on repositories they choose and attaches one to a project; agents and jobs then
-# clone it with tokens minted per repository, each good for about an hour and stored nowhere.
+# installs it on repositories they choose and attaches one to a project; the platform then reaches
+# it with tokens minted per repository, each good for about an hour and stored nowhere.
 #
 #   git_host:
+#     proxy_url: https://api.example.com/git
 #     provider: github
 #     github:
 #       app_id: 123456
 #       app_slug: hypothesisloop
 #       private_key: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY}
 #
+#   proxy_url          the address agents and jobs reach this API's /git at, the git proxy every
+#                      clone, fetch and push of theirs goes through with their own token. The proxy
+#                      mints the host's credential for each request and refuses a push to any ref
+#                      but the pusher's own branches, so no agent or job ever holds a credential
+#                      of the host. Required with every provider; a loopback address is rejected.
 #   app_id, app_slug   the App's number and the name in its URL.
 #   private_key        the PEM GitHub issued for the App. It signs the request for every token.
 #
@@ -241,6 +247,7 @@ job_images:
 # plain is any host that serves repositories under one root:
 #
 #   git_host:
+#     proxy_url: https://api.example.com/git
 #     provider: plain
 #     plain:
 #       base_url: https://git.example.com/experiments
@@ -254,9 +261,9 @@ job_images:
 #   username, password
 #              what the host takes, both left out for a host that asks for nothing.
 #
-# The plain credential is deployment-wide: every agent, coordinator and job of every org is handed
-# the same one, and it reads and writes whatever that account reaches on the host. Secrets are
-# named here as environment variables and never held in this file.
+# The plain credential is deployment-wide: it reads and writes whatever that account reaches on the
+# host. The proxy uses it, so no agent, coordinator or job is handed it; an environment build's RUN
+# that asks for the repository's secret still reads it. Secrets are named here as environment variables and never held in this file.
 
 # Durable data between jobs — checkpoints and datasets one job produces and another needs.
 #

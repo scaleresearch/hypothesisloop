@@ -30,7 +30,7 @@ func pullTestClient(t *testing.T, objects ...runtime.Object) *JobWorkloadClient 
 
 func pullTestExperiment(id, environmentKey, image string) *clusterapi.DesiredJob {
 	return &clusterapi.DesiredJob{
-		Data: testDataAccess(), Token: "test-job-token", ID: id, AgentID: "agent", EnvironmentKey: environmentKey,
+		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git", ID: id, AgentID: "agent", EnvironmentKey: environmentKey,
 		EstimatedDurationHours: 1, CapacityTier: clusterapi.CapacityGuaranteed,
 		Job: clusterapi.JobSpec{Image: image, Command: []string{"python", "train.py"}, CPU: "1", Memory: "1Gi", Storage: "1Gi",
 			MaxRetries: intPtr(1), TerminationGracePeriodSeconds: int64Ptr(5)},

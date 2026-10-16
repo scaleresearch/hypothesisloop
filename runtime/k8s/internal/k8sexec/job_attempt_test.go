@@ -14,7 +14,7 @@ import (
 
 func attemptTestExperiment(attempt int) *clusterapi.DesiredJob {
 	return &clusterapi.DesiredJob{
-		Data: testDataAccess(), Token: "test-job-token", ID: "attempt-test", AgentID: "agent",
+		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git", ID: "attempt-test", AgentID: "agent",
 		AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
 		EstimatedDurationHours: 1, CapacityTier: clusterapi.CapacityGuaranteed, AttemptCount: attempt,
 		Job: clusterapi.JobSpec{Image: "image:v1", CPU: "1", Memory: "1Gi", Storage: "1Gi",

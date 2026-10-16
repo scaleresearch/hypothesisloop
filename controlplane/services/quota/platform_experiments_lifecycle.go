@@ -1092,6 +1092,12 @@ func (h *PlatformExperimentsHandler) Answer(ctx context.Context, pe *domain.Plat
 	if err := h.svc.Describe(ctx, pe, reader); err != nil {
 		return nil, auth.Internal(h.logger, "describe platform experiment", err, zap.String("id", pe.ID))
 	}
+	if pe.Repository != "" {
+		if h.proxyURL == "" {
+			return nil, auth.Internal(h.logger, "describe platform experiment", errors.New("no git proxy address to name its repository at"), zap.String("id", pe.ID))
+		}
+		pe.GitURL = domain.GitProxyURL(h.proxyURL, pe.ID)
+	}
 	return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 }
 
