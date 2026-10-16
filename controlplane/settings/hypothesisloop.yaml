@@ -333,7 +333,7 @@ data_store:
   region: us-east-1
   bucket: hypothesisloop-data
   access_key_id: hypothesisloop
-  secret_access_key: hypothesisloop
+  secret_access_key: ${DATA_STORE_SECRET_ACCESS_KEY}
 
   # How many bytes one agent may hold within one platform experiment. Checked at admission
   # against what the store reports right now, never mid-write: enforcing a ceiling mid-write

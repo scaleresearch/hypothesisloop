@@ -117,6 +117,7 @@ services:
       DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable
       HYPOTHESISLOOP_SIGNING_SECRET: ${HYPOTHESISLOOP_SIGNING_SECRET:?run through make, which supplies local development's signing secret}
       MODEL_ANTHROPIC_OAUTH_TOKEN: ${MODEL_ANTHROPIC_OAUTH_TOKEN:?run through make, which reads it from .env}
+      DATA_STORE_SECRET_ACCESS_KEY: ${DATA_STORE_SECRET_ACCESS_KEY:?run through make, which reads it from .env}
       # The git host's secrets, which the rendered settings name (localdev/lib/auth.sh): the
       # GitHub App's two with GIT_HOST_PROVIDER=github, the local git server's password with local.
       # Empty and unread otherwise.
@@ -150,6 +151,7 @@ services:
       DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable
       HYPOTHESISLOOP_SIGNING_SECRET: ${HYPOTHESISLOOP_SIGNING_SECRET:?run through make, which supplies local development's signing secret}
       MODEL_ANTHROPIC_OAUTH_TOKEN: ${MODEL_ANTHROPIC_OAUTH_TOKEN:?run through make, which reads it from .env}
+      DATA_STORE_SECRET_ACCESS_KEY: ${DATA_STORE_SECRET_ACCESS_KEY:?run through make, which reads it from .env}
       # The git host's secrets, which the rendered settings name (localdev/lib/auth.sh): the
       # GitHub App's two with GIT_HOST_PROVIDER=github, the local git server's password with local.
       # Empty and unread otherwise.

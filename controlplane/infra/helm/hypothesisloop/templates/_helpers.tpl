@@ -28,8 +28,7 @@
 {{- end -}}
 
 {{/*
-Every ${NAME} of the rendered hypothesisloop.yaml, for the two processes that load it. DATABASE_URL
-is in no file: both read it from the environment.
+Every ${NAME} of the rendered hypothesisloop.yaml, for the two processes that load it.
 */}}
 {{- define "hypothesisloop.configSecretEnv" -}}
 {{- $keys := list "DATABASE_URL" "HYPOTHESISLOOP_SIGNING_SECRET" "MODEL_ANTHROPIC_OAUTH_TOKEN" "OBJECT_STORE_ACCESS_KEY_ID" "OBJECT_STORE_SECRET_ACCESS_KEY" -}}

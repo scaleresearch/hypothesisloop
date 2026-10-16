@@ -112,6 +112,13 @@ if [[ -f "${LIB_AUTH_REPO}/.env" ]]; then
 fi
 export MODEL_ANTHROPIC_OAUTH_TOKEN
 
+# The object store's secret key the settings name (data_store.secret_access_key), from .env.
+DATA_STORE_SECRET_ACCESS_KEY=""
+if [[ -f "${LIB_AUTH_REPO}/.env" ]]; then
+  DATA_STORE_SECRET_ACCESS_KEY="$(lib_env_value DATA_STORE_SECRET_ACCESS_KEY)"
+fi
+export DATA_STORE_SECRET_ACCESS_KEY
+
 # The container registry CONTAINER_REGISTRY_PROVIDER in .env names, read from that provider's own
 # keys. lib_container_registry sets HL_REGISTRY, the address the deployment's images are pushed
 # under, which make dev-hosted runs them from; HL_ENVIRONMENTS_REPOSITORY, where local
