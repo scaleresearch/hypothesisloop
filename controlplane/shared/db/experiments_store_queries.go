@@ -364,15 +364,16 @@ WHERE id = ANY($1) AND run_reported_at >= submitted_at`, ids)
 // (line 109): "don't line up other jobs behind the same dead node group" needs no state of its
 // own, since every failover is already recorded on the failing job's row; this reads across all
 // of them rather than adding a second per-cluster ledger.
+//
+// An entry is written in the statement that sets its row's updated_at, which only grows, so
+// updated_at bounds the scan.
 func (s *ExperimentsStore) RecentlyTriedClusters(ctx context.Context, ttl time.Duration) (map[string]bool, error) {
-	if ttl <= 0 {
-		return map[string]bool{}, nil
-	}
 	since := time.Now().UTC().Add(-ttl)
 	rows, err := s.pool.pool.Query(ctx, `
 		SELECT DISTINCT t.entry->>'cluster_id'
 		FROM experiments, jsonb_array_elements(tried_clusters) AS t(entry)
-		WHERE (t.entry->>'at')::timestamptz > $1
+		WHERE updated_at > $1 AND tried_clusters <> '[]'::jsonb
+		  AND (t.entry->>'at')::timestamptz > $1
 		  AND COALESCE(t.entry->>'reason', '') IN ('', $2, $3)`, since, string(domain.EvictionScaleUpTimeout), string(domain.EvictionFlavorMismatch))
 	if err != nil {
 		return nil, fmt.Errorf("experiments_store.RecentlyTriedClusters: %w", err)

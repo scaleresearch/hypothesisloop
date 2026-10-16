@@ -160,7 +160,7 @@ func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Exper
 	// still succeeded (the two are fetched independently in scanAndWatch). The two failure modes
 	// must not be conflated: treating the latter as "not an autoscaler cluster" would judge a
 	// scale-up by the stuck-pending deadline and name the wrong reason.
-	onAutoscalerCluster := w.scaleUpTimeout > 0 && autoscalerEnabled[exp.ClusterName] && clusterIDs[exp.ClusterName] != ""
+	onAutoscalerCluster := autoscalerEnabled[exp.ClusterName] && clusterIDs[exp.ClusterName] != ""
 	if onAutoscalerCluster {
 		timeout = w.scaleUpTimeout
 		evictionReason = domain.EvictionScaleUpTimeout

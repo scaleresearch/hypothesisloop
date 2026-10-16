@@ -18,8 +18,8 @@ import (
 // Start repeatedly derives lifecycle work from PostgreSQL desired state and the latest backend
 // observation. No per-experiment goroutine or transition history survives a pass.
 func (w *JobWatcher) Start(ctx context.Context, passTimeout time.Duration) {
-	if w.pollInterval <= 0 {
-		panic("job_watcher: poll interval must be positive")
+	if w.pollInterval <= 0 || w.scaleUpTimeout <= 0 {
+		panic("job_watcher: poll interval and scale-up timeout must be positive")
 	}
 	ticker := time.NewTicker(w.pollInterval)
 	defer ticker.Stop()
@@ -49,28 +49,14 @@ func (w *JobWatcher) scanAndWatch(ctx context.Context) error {
 	// decision in it needs the id to find its cluster's timeout, and reading it per job cost one
 	// cluster-wide metrics query for every job still waiting to start.
 	clusterIDs, idsErr := w.reports.GetClusterIDs(ctx)
-	// Speculative-submit inputs (autoscaler.md), read only when a deployment has opted in via
-	// WithScaleUpTimeout — mirrors Loop.tick's own opt-in gate for the same reason: a backend
-	// that has not implemented the capability read must not be asked to. With the opt-in a fetch
-	// failure ends the pass: judging a placement deadline without them would apply the wrong
-	// timeout.
-	var autoscalerEnabled map[string]bool
-	if w.scaleUpTimeout > 0 {
-		var err error
-		autoscalerEnabled, err = w.reports.GetAutoscalerCapability(ctx)
-		if err != nil {
-			return fmt.Errorf("autoscaler capability: %w", err)
-		}
-		if idsErr != nil {
-			return fmt.Errorf("cluster ids: %w", idsErr)
-		}
-	}
-	// Without it the pass goes on with no ids: no stuck-pending decision is made in it, and
-	// everything else a job's reconcile does, reading a finished job as finished above all,
-	// still is.
+	// Speculative-submit inputs (autoscaler.md). A fetch failure ends the pass: judging a
+	// placement deadline without them would apply the wrong timeout.
 	if idsErr != nil {
-		w.logger.Warn("job_watcher: cluster ids unreadable, no stuck-pending deadline is judged this pass", zap.Error(idsErr))
-		clusterIDs = nil
+		return fmt.Errorf("cluster ids: %w", idsErr)
+	}
+	autoscalerEnabled, err := w.reports.GetAutoscalerCapability(ctx)
+	if err != nil {
+		return fmt.Errorf("autoscaler capability: %w", err)
 	}
 	for _, status := range statuses {
 		exps, err := w.store.ListExperimentsWithStatus(ctx, status)

@@ -32,11 +32,6 @@ func (l *Loop) speculativeCandidates(
 	speculativeFootprintByCluster map[string]int,
 	desiredFreeByCluster map[string]domain.Footprint,
 ) ([]string, map[string]bool, error) {
-	if l.triedClusterTTL <= 0 {
-		// WithSpeculation was never called: this deployment has not opted in, so admission keeps
-		// today's live-fit-only behaviour exactly (see loop_types.go's triedClusterTTL doc).
-		return nil, nil, nil
-	}
 	gang := placement.RequiresDistinctHosts(exp) || len(exp.Job.Groups) > 0 || exp.Job.Nodes() > 1
 	now := time.Now()
 

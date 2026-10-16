@@ -227,10 +227,7 @@ type Loop struct {
 	evictionTTL time.Duration
 
 	// triedClusterTTL bounds how long a cluster this job already failed a speculative attempt on
-	// stays excluded from that job's candidate list — see speculativeCandidates. Zero (the
-	// zero-value default) disables speculative submission entirely: WithSpeculation must be
-	// called to opt a deployment in, so a control plane that never wires it keeps today's
-	// live-fit-only admission behaviour exactly.
+	// stays excluded from that job's candidate list — see speculativeCandidates.
 	triedClusterTTL time.Duration
 }
 
@@ -260,7 +257,7 @@ func (l *Loop) WithQuotaSettler(s LoopQuotaSettler) *Loop {
 	return l
 }
 
-// WithSpeculation opts the loop into speculative submission (autoscaler.md): guaranteed jobs
+// WithSpeculation wires speculative submission (autoscaler.md): guaranteed jobs
 // that fit nowhere live may be submitted to an autoscaler-enabled cluster with no capacity yet,
 // ahead of preemption. triedClusterTTL is scheduler.tried_cluster_ttl_seconds — how long a
 // cluster a job already failed over from stays excluded from that job's next candidate search.
@@ -336,8 +333,8 @@ func (l *Loop) Start(ctx context.Context, passTimeout time.Duration) {
 	if l.observed == nil {
 		panic("scheduler: Loop started without WithObservedTimeConfig — preemption and disbalance eviction both read observed state")
 	}
-	if l.heartbeat <= 0 || l.guaranteedFairnessWindow <= 0 || l.heldJobNotice <= 0 {
-		panic("scheduler: Loop started without WithHeartbeat, WithGuaranteedFairnessWindow and WithHeldJobNotice")
+	if l.heartbeat <= 0 || l.guaranteedFairnessWindow <= 0 || l.heldJobNotice <= 0 || l.triedClusterTTL <= 0 {
+		panic("scheduler: Loop started without WithHeartbeat, WithGuaranteedFairnessWindow, WithHeldJobNotice and WithSpeculation")
 	}
 	ticker := time.NewTicker(l.heartbeat)
 	defer ticker.Stop()

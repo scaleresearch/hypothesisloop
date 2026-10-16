@@ -103,11 +103,7 @@ type JobWatcher struct {
 
 	// scaleUpTimeout is the global default deadline (scheduler.scale_up_timeout_seconds) for an
 	// incomplete gang (scheduled_nodes < Nodes()) on an autoscaler-enabled cluster with no
-	// per-cluster override in the cluster's settings. Zero (WithScaleUpTimeout never called) disables
-	// the autoscaler-aware deadline entirely: every incomplete gang falls back to
-	// stuckPendingTimeout, exactly today's behaviour — the same opt-in shape as
-	// Loop.WithSpeculation, for the same reason (a deployment/test fake that never wired the new
-	// capability calls must not be asked to answer them).
+	// per-cluster override in the cluster's settings.
 	scaleUpTimeout time.Duration
 
 	// freed wakes admission when a job lets go of what it held, so its room is refilled without
@@ -159,8 +155,8 @@ func (w *JobWatcher) WithStartTimeout(d time.Duration) *JobWatcher {
 	return w
 }
 
-// WithScaleUpTimeout enables the autoscaler-aware placement deadline (autoscaler.md) and sets its
-// global default. d must be under domain.MaxScaleUpTimeoutSeconds (the rendezvous-timeout
+// WithScaleUpTimeout sets the autoscaler-aware placement deadline's (autoscaler.md) global
+// default. d must be under domain.MaxScaleUpTimeoutSeconds (the rendezvous-timeout
 // invariant) — config load-time validation already enforces this on scheduler.scale_up_timeout_seconds.
 func (w *JobWatcher) WithScaleUpTimeout(d time.Duration) *JobWatcher {
 	w.scaleUpTimeout = d

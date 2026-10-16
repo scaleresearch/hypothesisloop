@@ -186,20 +186,15 @@ func (l *Loop) readTickState(ctx context.Context, start time.Time) (*tickState, 
 	}, nil
 }
 
-// readSpeculation reads the speculative-submit inputs (autoscaler.md), only when a deployment has
-// opted in via WithSpeculation — a ClusterCapacity that has not implemented these two methods
-// (every pre-autoscaler test fake, and any deployment that never calls WithSpeculation) must not
-// be asked to.
+// readSpeculation reads the speculative-submit inputs (autoscaler.md).
 func (l *Loop) readSpeculation(ctx context.Context, gAvail map[string]domain.Footprint) (autoscalerEnabled map[string]bool, clusterIDs map[string]string, connected map[string]bool, speculativeFootprint map[string]int, err error) {
-	if l.triedClusterTTL > 0 {
-		autoscalerEnabled, err = l.clusters.GetAutoscalerCapability(ctx)
-		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("autoscaler capability: %w", err)
-		}
-		clusterIDs, err = l.clusters.GetClusterIDs(ctx)
-		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("cluster ids: %w", err)
-		}
+	autoscalerEnabled, err = l.clusters.GetAutoscalerCapability(ctx)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("autoscaler capability: %w", err)
+	}
+	clusterIDs, err = l.clusters.GetClusterIDs(ctx)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("cluster ids: %w", err)
 	}
 	// gAvail only has entries for clusters GetFlavorCapacity's heartbeat read found connected
 	// (see ClusterReports.GetFlavorCapacity) — reusing its key set here is the same
@@ -215,15 +210,13 @@ func (l *Loop) readSpeculation(ctx context.Context, gAvail map[string]domain.Foo
 	// Counting every SUBMITTED accelerator here makes clusterSpeculativeCap strictly more
 	// conservative than the design's exact definition, never less — the safe direction for a cap.
 	speculativeFootprint = map[string]int{}
-	if l.triedClusterTTL > 0 {
-		submitted, err := l.store.ListSubmittedExperiments(ctx)
-		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("list submitted for speculative footprint: %w", err)
-		}
-		for _, s := range submitted {
-			if autoscalerEnabled[s.ClusterName] {
-				speculativeFootprint[s.ClusterName] += s.AcceleratorCount
-			}
+	submitted, err := l.store.ListSubmittedExperiments(ctx)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("list submitted for speculative footprint: %w", err)
+	}
+	for _, s := range submitted {
+		if autoscalerEnabled[s.ClusterName] {
+			speculativeFootprint[s.ClusterName] += s.AcceleratorCount
 		}
 	}
 	return autoscalerEnabled, clusterIDs, connected, speculativeFootprint, nil
