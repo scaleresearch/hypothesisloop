@@ -813,11 +813,11 @@ func TestWhatAHarnessSaysOfItselfReachesTheRunsHealth(t *testing.T) {
 	c.pass()
 	name := c.rented.Names()[0]
 	c.rented.Start(name)
-	c.rented.Print(name, "hl-progress 1", "hl-state subagents=4 turn=waiting since=1759990000 instructions_digest=0123456789ab model_status=allowed_warning model_type=five_hour model_utilization=0.8 model_resets_at=1760000000")
+	c.rented.Print(name, "hl-progress 1", "hl-state subagents=4 turn=waiting since=1759990000 instructions_digest=0123456789ab version=2 model_status=allowed_warning model_type=five_hour model_utilization=0.8 model_resets_at=1760000000")
 	c.pass()
 	utilization, resets := 0.8, time.Unix(1760000000, 0).UTC()
 	want := []domain.HarnessState{{PlatformExperimentID: "pe-1", AgentID: "ag-one", Subagents: 4, TurnWaiting: true, TurnSince: time.Unix(1759990000, 0).UTC(), InstructionsDigest: "0123456789ab",
-		Model: domain.RateLimit{Utilization: &utilization, ResetsAt: &resets}}}
+		AgentType: "data-search", AgentTypeVersion: 2, Model: domain.RateLimit{Utilization: &utilization, ResetsAt: &resets}}}
 	if got := c.metrics.Written(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("written %+v, want %+v", got, want)
 	}

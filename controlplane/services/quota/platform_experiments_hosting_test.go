@@ -75,8 +75,8 @@ func TestCreateWithAHostedCoordinatorGivesItToTheConfiguredLauncher(t *testing.T
 		t.Fatalf("got = %d %v, want 201", code, out)
 	}
 	pe := store.created[0]
-	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Launcher != "main" || pe.Coordinator.Model != "coordinator-default" {
-		t.Fatalf("created = %+v (coordinator %+v), want one on the configured launcher and default model", pe, pe.Coordinator)
+	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Launcher != "main" || pe.Coordinator.Model != "" {
+		t.Fatalf("created = %+v (coordinator %+v), want one on the configured launcher and its type's model", pe, pe.Coordinator)
 	}
 	if out["coordinator_hosted"] != true || out["signup_count"] != float64(1) || out["max_hosted"] != float64(hostingMaxHosted) {
 		t.Errorf("answer = %v, want coordinator_hosted, its baseline agent and the bound on machines", out)
@@ -84,7 +84,7 @@ func TestCreateWithAHostedCoordinatorGivesItToTheConfiguredLauncher(t *testing.T
 	// What accepting a draft stands up for the time before the run, a create with a hosted
 	// coordinator does too: nobody adds the agent that measures the baseline.
 	owner := auth.Principal(ownerOfA).Actor()
-	want := domain.AgentSignup{AgentID: store.baselines[0].AgentID, Name: "Baseline 1", Role: domain.SignupRoleBaseline, Hosted: true, Launcher: "main", AgentType: "baseline", Hyperparameters: map[string]any{}, Model: "model-default", Actor: &owner}
+	want := domain.AgentSignup{AgentID: store.baselines[0].AgentID, Name: "Baseline 1", Role: domain.SignupRoleBaseline, Hosted: true, Launcher: "main", AgentType: "baseline", Actor: &owner}
 	if len(store.baselines) != 1 || len(store.researchers) != 0 || !reflect.DeepEqual(store.baselines[0], want) {
 		t.Errorf("created with %+v and researchers %v, want one hosted baseline agent added by the creator and no researcher", store.baselines, store.researchers)
 	}

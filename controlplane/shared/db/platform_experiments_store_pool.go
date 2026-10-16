@@ -12,8 +12,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// signupKeySQL is the pool entry signup s is one of: its agent type and its model.
-const signupKeySQL = `s.agent_type, s.model`
+// signupKeySQL is the pool entry signup s is one of: its agent type and its model, ” for the type's.
+const signupKeySQL = `s.agent_type, COALESCE(s.model, '')`
 
 // PoolBelowAtWorkError refuses a max_agents below the researchers at work of a platform experiment
 // that does not run yet, or researchers that want fewer of an agent type and model at work than
@@ -102,6 +102,9 @@ func holdsAtWork(maxAgents int, pool domain.ResearcherPool, atWork map[domain.Po
 // it (evictAboveMaxTx), and its researchers, unless pool states them, are capped to it. Then pool,
 // unless it is nil, is held to the researchers at work (holdsAtWork) and written.
 func setResearchersTx(ctx context.Context, tx pgx.Tx, platformExpID string, maxAgents int, pool domain.ResearcherPool) error {
+	if err := poolTypesTx(ctx, tx, platformExpID, pool); err != nil {
+		return err
+	}
 	if err := evictAboveMaxTx(ctx, tx, platformExpID, maxAgents, pool == nil); err != nil {
 		return err
 	}
@@ -246,11 +249,13 @@ func shrinkPoolToAtWorkTx(ctx context.Context, tx pgx.Tx, platformExpID string, 
 }
 
 // EndedResearcher is a researcher whose place is free for good: it finished, or its machine
-// stopped with no restart left. It was not cut, and nobody replaced it yet.
+// stopped with no restart left. It was not cut, and nobody replaced it yet. Early is one that
+// submitted no job or ended within domain.ReplacementMinRun of joining.
 type EndedResearcher struct {
 	domain.AgentSignup
 	Key     domain.PoolKey
 	EndedAt time.Time
+	Early   bool
 }
 
 // PoolState is what keeping the researchers of a running platform experiment is decided from.
@@ -265,6 +270,11 @@ type PoolState struct {
 	// Ended is every researcher whose place is free for good, by agent type and model, the one that
 	// ended first first.
 	Ended map[domain.PoolKey][]EndedResearcher
+	// Recent counts the researchers added in the places of others in the last hour, by agent type
+	// and model.
+	Recent map[domain.PoolKey]int
+	// Held is what the platform last said of the places it keeps empty (HoldResearchers).
+	Held string
 }
 
 // ResearcherPoolState reads what keeping the researchers of platform experiment platformExpID is
@@ -276,21 +286,26 @@ func (s *PlatformExperimentsStore) ResearcherPoolState(ctx context.Context, plat
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	state := PoolState{Ended: map[domain.PoolKey][]EndedResearcher{}}
-	if err := tx.QueryRow(ctx, `SELECT researchers, max_agents FROM platform_experiments WHERE id = $1`, platformExpID).Scan(&state.Pool, &state.MaxAgents); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT researchers, max_agents, COALESCE(researchers_held, '') FROM platform_experiments WHERE id = $1`, platformExpID).Scan(&state.Pool, &state.MaxAgents, &state.Held); err != nil {
 		return PoolState{}, fmt.Errorf("platform_experiments_store.ResearcherPoolState: read researchers: %w", err)
 	}
 	if state.AtWork, err = researchersAtWork(ctx, tx, platformExpID); err != nil {
 		return PoolState{}, fmt.Errorf("platform_experiments_store.ResearcherPoolState: %w", err)
 	}
+	if state.Recent, err = recentReplacements(ctx, tx, platformExpID); err != nil {
+		return PoolState{}, fmt.Errorf("platform_experiments_store.ResearcherPoolState: %w", err)
+	}
 	rows, err := tx.Query(ctx, `
-SELECT `+signupKeySQL+`, s.agent_id, s.quota_tier, s.hyperparameters, s.added_by_kind, s.added_by_id,
-       COALESCE(s.finished_at, i.exited_at, s.signed_up_at)
+SELECT `+signupKeySQL+`, s.agent_id, s.quota_tier, s.hyperparameters, s.added_by_kind, s.added_by_id, ended.at,
+       NOT EXISTS (SELECT 1 FROM experiments e WHERE e.platform_experiment_id = s.platform_experiment_id AND e.agent_id = s.agent_id)
+         OR ended.at < s.signed_up_at + make_interval(secs => $2)
 FROM experiment_signups s`+signupInstanceJoin+`
+CROSS JOIN LATERAL (SELECT COALESCE(s.finished_at, i.exited_at, s.signed_up_at) AS at) ended
 WHERE s.platform_experiment_id = $1 AND s.role = '`+string(domain.SignupRoleCompetitor)+`'
   AND (s.finished_at IS NOT NULL OR `+stoppedSQL+`)
   AND NOT EXISTS (SELECT 1 FROM platform_experiment_cuts c WHERE c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id)
   AND NOT `+replacedSQL+`
-ORDER BY 7, s.agent_id`, platformExpID)
+ORDER BY 7, s.agent_id`, platformExpID, domain.ReplacementMinRun.Seconds())
 	if err != nil {
 		return PoolState{}, fmt.Errorf("platform_experiments_store.ResearcherPoolState: %w", err)
 	}
@@ -299,11 +314,13 @@ ORDER BY 7, s.agent_id`, platformExpID)
 		var ended EndedResearcher
 		var hyperparameters []byte
 		addedBy := domain.Actor{}
-		if err := rows.Scan(&ended.Key.AgentType, &ended.Key.Model, &ended.AgentID, &ended.QuotaTier, &hyperparameters, &addedBy.Kind, &addedBy.ID, &ended.EndedAt); err != nil {
+		if err := rows.Scan(&ended.Key.AgentType, &ended.Key.Model, &ended.AgentID, &ended.QuotaTier, &hyperparameters, &addedBy.Kind, &addedBy.ID, &ended.EndedAt, &ended.Early); err != nil {
 			return PoolState{}, fmt.Errorf("platform_experiments_store.ResearcherPoolState: scan: %w", err)
 		}
-		if err := json.Unmarshal(hyperparameters, &ended.Hyperparameters); err != nil {
-			return PoolState{}, fmt.Errorf("platform_experiments_store.ResearcherPoolState: decode hyperparameters of %s: %w", ended.AgentID, err)
+		if hyperparameters != nil {
+			if err := json.Unmarshal(hyperparameters, &ended.Hyperparameters); err != nil {
+				return PoolState{}, fmt.Errorf("platform_experiments_store.ResearcherPoolState: decode hyperparameters of %s: %w", ended.AgentID, err)
+			}
 		}
 		if addedBy.Kind != "" {
 			ended.Actor = &addedBy
@@ -315,6 +332,42 @@ ORDER BY 7, s.agent_id`, platformExpID)
 		return PoolState{}, fmt.Errorf("platform_experiments_store.ResearcherPoolState: %w", err)
 	}
 	return state, nil
+}
+
+// recentReplacements counts the researchers of platform experiment platformExpID added in the
+// places of others in the last hour, by agent type and model.
+func recentReplacements(ctx context.Context, q querier, platformExpID string) (map[domain.PoolKey]int, error) {
+	rows, err := q.Query(ctx, `
+SELECT `+signupKeySQL+`, count(*) FROM experiment_signups s
+WHERE s.platform_experiment_id = $1 AND s.replaces <> '' AND s.signed_up_at > now() - interval '1 hour'
+GROUP BY 1, 2`, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("count recent replacements: %w", err)
+	}
+	recent := map[domain.PoolKey]int{}
+	var key domain.PoolKey
+	var n int
+	_, err = pgx.ForEachRow(rows, []any{&key.AgentType, &key.Model, &n}, func() error {
+		recent[key] = n
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("count recent replacements: %w", err)
+	}
+	return recent, nil
+}
+
+// HoldResearchers records line as what the running platform experiment id says of the places of
+// its researchers the platform keeps empty, "" for none (domain.HoldsLine). A line that differs
+// from the one recorded is told as platform_experiment.status with it as the detail, by the
+// trigger on the row; one that is the same writes nothing.
+func (s *PlatformExperimentsStore) HoldResearchers(ctx context.Context, id, line string) error {
+	const q = `UPDATE platform_experiments SET researchers_held = NULLIF($2, '')
+WHERE id = $1 AND status = 'running' AND researchers_held IS DISTINCT FROM NULLIF($2, '')`
+	if _, err := s.pool.pool.Exec(ctx, q, id, line); err != nil {
+		return fmt.Errorf("platform_experiments_store.HoldResearchers: %w", err)
+	}
+	return nil
 }
 
 // ErrPoolBelowAtWork is a pool refused for wanting fewer researchers at work than are

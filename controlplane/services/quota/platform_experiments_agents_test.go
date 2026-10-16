@@ -805,17 +805,17 @@ func TestAHostedAgentJoinsAPlatformExperimentThatNamesNoRepository(t *testing.T)
 	}
 }
 
-func TestFlavorAndModelAreResolvedWhenAnAgentJoinsAndStored(t *testing.T) {
+func TestAnAgentNamingNoModelIsStoredRunningItsTypes(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	r := agentsRouter(t, store, staff)
 	code, body := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"hosted":true}`)
 	if code != http.StatusCreated {
 		t.Fatalf("status = %d: %v", code, body)
 	}
-	if a := joined(t, body)[0]; a["flavor"] != "generalist" || a["model"] != "platform-model-1" {
-		t.Errorf("an agent that named neither: flavor %v, model %v, want the defaults", a["flavor"], a["model"])
+	if a := joined(t, body)[0]; a["flavor"] != "generalist" || a["model"] != "" {
+		t.Errorf("an agent that named neither: flavor %v, model %v, want the default type and its model", a["flavor"], a["model"])
 	}
-	if s := store.signups[0]; s.AgentType != "generalist" || s.Model != "platform-model-1" {
+	if s := store.signups[0]; s.AgentType != "generalist" || s.Model != "" || s.Hyperparameters != nil {
 		t.Errorf("stored signup: flavor %q, model %q", s.AgentType, s.Model)
 	}
 	code, body = call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"flavor":"data-search","model":"another-model"}`)

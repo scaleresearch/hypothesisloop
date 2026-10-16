@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -43,6 +44,19 @@ func signupOf(t *testing.T, pes *PlatformExperimentsStore, peID, agentID string)
 	return signup
 }
 
+func actions(t *testing.T, store *AgentTypesStore, orgID, id string) []string {
+	t.Helper()
+	events, err := store.Events(context.Background(), orgID, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, e := range events {
+		out = append(out, fmt.Sprintf("%s@%d", e.Action, e.Version))
+	}
+	return out
+}
+
 func TestAVersionIsNeverChangedOrDeleted(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
@@ -55,31 +69,40 @@ func TestAVersionIsNeverChangedOrDeleted(t *testing.T) {
 	if _, err := pool.pool.Exec(ctx, `DELETE FROM agent_type_versions WHERE type_id = $1`, custom.ID); err == nil {
 		t.Error("a version was deleted")
 	}
-	edited, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "Tuner", Prompt: testPrompt + " Tune.", Settings: testTypeSettings()}, testModelDefaults)
+	edited, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "Tuner", Description: custom.Description, Prompt: testPrompt + " Tune.", Settings: testTypeSettings()})
 	if err != nil || edited.CurrentVersion != 2 || edited.Current.Prompt != testPrompt+" Tune." {
 		t.Fatalf("edit: got = %+v, %v, want version 2", edited, err)
 	}
 	first, err := store.Version(ctx, orgID, custom.ID, 1)
-	if err != nil || first.Prompt != testPrompt || first.Digest != custom.Current.Digest {
-		t.Errorf("version 1 after the edit: got = %+v, %v, want it as it was", first, err)
+	if err != nil || first.Prompt != testPrompt || first.Digest != custom.Current.Digest || first.Release != nil {
+		t.Errorf("version 1 after the edit: got = %+v, %v, want it as it was, of no release", first, err)
 	}
 	versions, err := store.Versions(ctx, orgID, custom.ID)
 	if err != nil || len(versions) != 2 || versions[0].Version != 2 {
 		t.Errorf("versions: got = %+v, %v, want 2 then 1", versions, err)
 	}
-	if again, propagation, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 2, Name: "Tuner 2", Prompt: testPrompt + " Tune.", Settings: testTypeSettings()}, testModelDefaults); err != nil || again.CurrentVersion != 2 || again.Name != "Tuner 2" || propagation.Version != 2 {
+	if again, propagation, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 2, Name: "Tuner 2", Description: custom.Description, Prompt: testPrompt + " Tune.", Settings: testTypeSettings()}); err != nil || again.CurrentVersion != 2 || again.Name != "Tuner 2" || propagation.Version != 2 {
 		t.Errorf("an edit of the name alone: got = %+v, %+v, %v, want the name changed and no version", again, propagation, err)
+	}
+	if got := actions(t, store, orgID, custom.ID); !slices.Equal(got, []string{"rename@2", "edit@2", "create@1"}) {
+		t.Errorf("events: got = %v, want create, edit, rename", got)
+	}
+	if _, err := pool.pool.Exec(ctx, `DELETE FROM agent_type_events WHERE type_id = $1`, custom.ID); err == nil {
+		t.Error("an event was deleted")
 	}
 }
 
-func TestSeedingAddsAVersionOnlyForADigestNoVersionHas(t *testing.T) {
+// A release writes what it holds whenever it differs from the current version and the release is
+// that version's or newer: a revert shipped under a newer release becomes current, and an older
+// release, as an older replica of a rolling deploy has, writes nothing.
+func TestSeedingWritesWhatDiffersFromTheCurrentVersionUnlessAnOlderReleaseHasIt(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	store := NewAgentTypesStore(pool)
 	builtin := agenttypes.Builtin{ID: "test-" + uuid.New().String()[:8], Name: "Test", Role: domain.AgentRoleResearcher, Prompt: testPrompt, Settings: testTypeSettings()}
-	seed := func(b agenttypes.Builtin) []SeededAgentType {
+	seed := func(release int, b agenttypes.Builtin) Seeded {
 		t.Helper()
-		seeded, err := SeedBuiltinAgentTypes(ctx, pool, []agenttypes.Builtin{b}, testModelDefaults)
+		seeded, err := SeedBuiltins(ctx, pool, release, []agenttypes.Builtin{b}, testRules)
 		if err != nil {
 			t.Fatalf("seed: got = %v, want = nil", err)
 		}
@@ -94,26 +117,78 @@ func TestSeedingAddsAVersionOnlyForADigestNoVersionHas(t *testing.T) {
 		return got
 	}
 
-	seed(builtin)
-	if got := current(); got.CurrentVersion != 1 || !got.Builtin || got.OrgID != "" {
-		t.Fatalf("first seed: got = %+v, want a built-in at version 1", got)
+	seed(5, builtin)
+	if got := current(); got.CurrentVersion != 1 || !got.Builtin || got.OrgID != "" || *got.Current.Release != 5 {
+		t.Fatalf("first seed: got = %+v, want a built-in at version 1 of release 5", got)
 	}
-	if seeded := seed(builtin); len(seeded) != 0 || current().CurrentVersion != 1 {
+	if seeded := seed(5, builtin); len(seeded.Types) != 0 || current().CurrentVersion != 1 {
 		t.Errorf("a second seed of the same: seeded %+v, version %d, want nothing", seeded, current().CurrentVersion)
 	}
 	changed := builtin
 	changed.Prompt += " Changed."
-	if seeded := seed(changed); len(seeded) != 1 || seeded[0].Propagation.Version != 2 || current().CurrentVersion != 2 {
+	changed.Name = "Test, changed"
+	if seeded := seed(6, changed); len(seeded.Types) != 1 || seeded.Types[0].Propagation.Version != 2 || current().CurrentVersion != 2 {
 		t.Errorf("a changed prompt: seeded %+v, version %d, want version 2", seeded, current().CurrentVersion)
 	}
-	// An older replica of a rolling deploy seeds what it holds: a version already has it.
-	if seeded := seed(builtin); len(seeded) != 0 || current().CurrentVersion != 2 {
-		t.Errorf("the old prompt again: seeded %+v, version %d, want version 2 kept", seeded, current().CurrentVersion)
+	if seeded := seed(5, builtin); len(seeded.Types) != 0 || !slices.Contains(seeded.Skipped, builtin.ID) || current().CurrentVersion != 2 || current().Name != "Test, changed" {
+		t.Errorf("the older release again: seeded %+v, got %+v, want version 2 and its name kept", seeded, current())
+	}
+	if seeded := seed(7, builtin); len(seeded.Types) != 1 || current().CurrentVersion != 3 || current().Current.Prompt != testPrompt || current().Name != "Test" {
+		t.Errorf("the revert under release 7: seeded %+v, got %+v, want version 3 with the first prompt", seeded, current())
 	}
 	other := changed
 	other.Role = domain.AgentRoleBaseline
-	if _, err := SeedBuiltinAgentTypes(ctx, pool, []agenttypes.Builtin{other}, testModelDefaults); err == nil {
+	if _, err := SeedBuiltins(ctx, pool, 7, []agenttypes.Builtin{other}, testRules); err == nil {
 		t.Error("a built-in seeded with another role was accepted")
+	}
+	if got := actions(t, store, "", builtin.ID); !slices.Equal(got, []string{"edit@3", "rename@2", "edit@2", "rename@1", "create@1"}) {
+		t.Errorf("events: got = %v", got)
+	}
+}
+
+// The platform's rules are versioned as a built-in is, and a new version tells every live agent
+// and coordinator, whose instructions hold it and its version from then on.
+func TestNewRulesAreAVersionEveryLiveAgentIsToldOf(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	_, peID, custom := orgWithExperiment(t, pool)
+	ids := spawnTestAgents(t, pes, peID, domain.AgentSignup{Actor: testActor, AgentType: custom.ID})
+	before, err := pes.AgentInstructions(ctx, peID, ids[0])
+	if err != nil || before.Rules != testRules {
+		t.Fatalf("before: got = %+v, %v", before, err)
+	}
+	live, stop := listenForEvents(t, pool)
+	defer stop()
+
+	const release = 1000
+	seeded, err := SeedBuiltins(ctx, pool, release, nil, "## new rules")
+	if err != nil || seeded.RulesVersion != before.RulesVersion+1 || seeded.RulesTold < 2 {
+		t.Fatalf("new rules: got = %+v, %v, want the next version and the agent and coordinator told", seeded, err)
+	}
+	told := map[string]bool{}
+	for deadline := time.After(5 * time.Second); len(told) < 2; {
+		select {
+		case e := <-live:
+			if e.Kind == domain.EventAgentInstructions && e.PlatformExperimentID == peID {
+				told[e.AgentID] = true
+			}
+		case <-deadline:
+			t.Fatalf("told: got = %v, want the agent and the coordinator", told)
+		}
+	}
+	after, err := pes.AgentInstructions(ctx, peID, ids[0])
+	if err != nil || after.Rules != "## new rules" || after.RulesVersion != seeded.RulesVersion {
+		t.Errorf("after: got = %+v, %v", after, err)
+	}
+	if seeded, err := SeedBuiltins(ctx, pool, release-1, nil, testRules); err != nil || seeded.RulesVersion != 0 || !slices.Contains(seeded.Skipped, "rules") {
+		t.Errorf("an older release's rules: got = %+v, %v, want them left alone", seeded, err)
+	}
+	if seeded, err := SeedBuiltins(ctx, pool, release, nil, testRules); err != nil || seeded.RulesVersion != after.RulesVersion+1 {
+		t.Errorf("the rules back under the same release: got = %+v, %v, want the next version", seeded, err)
+	}
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_rules SET rules = 'x'`); err == nil {
+		t.Error("rules were updated")
 	}
 }
 
@@ -127,20 +202,29 @@ func TestAnOrgsTypeIsItsAloneAndABuiltinIsNobodys(t *testing.T) {
 	if _, err := store.Get(ctx, other, custom.ID); !errors.Is(err, ErrAgentTypeNotFound) {
 		t.Errorf("another org reads it: got = %v, want ErrAgentTypeNotFound", err)
 	}
-	if _, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: other, ID: custom.ID, IfVersion: 1, Name: "x", Prompt: testPrompt, Settings: testTypeSettings()}, testModelDefaults); !errors.Is(err, ErrAgentTypeNotFound) {
+	if _, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: other, ID: custom.ID, IfVersion: 1, Name: "x", Prompt: testPrompt, Settings: testTypeSettings()}); !errors.Is(err, ErrAgentTypeNotFound) {
 		t.Errorf("another org edits it: got = %v, want ErrAgentTypeNotFound", err)
 	}
-	if _, err := store.Archive(ctx, other, custom.ID); !errors.Is(err, ErrAgentTypeNotFound) {
+	if _, _, err := store.Restore(ctx, other, custom.ID, 1, *testActor); !errors.Is(err, ErrAgentTypeNotFound) {
+		t.Errorf("another org restores it: got = %v, want ErrAgentTypeNotFound", err)
+	}
+	if _, err := store.Archive(ctx, other, custom.ID, *testActor); !errors.Is(err, ErrAgentTypeNotFound) {
 		t.Errorf("another org archives it: got = %v, want ErrAgentTypeNotFound", err)
 	}
-	if _, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: domain.DefaultAgentFlavor, IfVersion: 1, Name: "x", Prompt: testPrompt, Settings: testTypeSettings()}, testModelDefaults); !errors.Is(err, ErrAgentTypeBuiltin) {
+	if _, err := store.Events(ctx, other, custom.ID); !errors.Is(err, ErrAgentTypeNotFound) {
+		t.Errorf("another org reads its events: got = %v, want ErrAgentTypeNotFound", err)
+	}
+	if _, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: domain.DefaultAgentFlavor, IfVersion: 1, Name: "x", Prompt: testPrompt, Settings: testTypeSettings()}); !errors.Is(err, ErrAgentTypeBuiltin) {
 		t.Errorf("an org edits a built-in: got = %v, want ErrAgentTypeBuiltin", err)
 	}
-	if _, err := store.Archive(ctx, orgID, domain.DefaultAgentFlavor); !errors.Is(err, ErrAgentTypeBuiltin) {
+	if _, _, err := store.Restore(ctx, orgID, domain.DefaultAgentFlavor, 1, *testActor); !errors.Is(err, ErrAgentTypeBuiltin) {
+		t.Errorf("an org restores a built-in: got = %v, want ErrAgentTypeBuiltin", err)
+	}
+	if _, err := store.Archive(ctx, orgID, domain.DefaultAgentFlavor, *testActor); !errors.Is(err, ErrAgentTypeBuiltin) {
 		t.Errorf("an org archives a built-in: got = %v, want ErrAgentTypeBuiltin", err)
 	}
 	var conflict *AgentTypeVersionConflict
-	if _, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 7, Name: "x", Prompt: testPrompt, Settings: testTypeSettings()}, testModelDefaults); !errors.As(err, &conflict) || conflict.Current != 1 {
+	if _, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 7, Name: "x", Prompt: testPrompt, Settings: testTypeSettings()}); !errors.As(err, &conflict) || conflict.Current != 1 {
 		t.Errorf("an edit from a stale version: got = %v, want a conflict naming version 1", err)
 	}
 	listed, err := store.List(ctx, orgID)
@@ -149,6 +233,57 @@ func TestAnOrgsTypeIsItsAloneAndABuiltinIsNobodys(t *testing.T) {
 	}
 	if listed, _ := store.List(ctx, other); slices.ContainsFunc(listed, func(t domain.CurrentAgentType) bool { return t.ID == custom.ID }) {
 		t.Error("another org lists it")
+	}
+}
+
+func TestARestoreMakesAnEarlierVersionCurrentAgain(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	store := NewAgentTypesStore(pool)
+	orgID, _, custom := orgWithExperiment(t, pool)
+	if _, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: custom.Name, Description: custom.Description, Prompt: testPrompt + " Two.", Settings: testTypeSettings()}); err != nil {
+		t.Fatal(err)
+	}
+	restored, propagation, err := store.Restore(ctx, orgID, custom.ID, 1, *testActor)
+	if err != nil || restored.CurrentVersion != 3 || restored.Current.Prompt != testPrompt || restored.Current.Digest != custom.Current.Digest || propagation.Version != 3 {
+		t.Fatalf("restore 1: got = %+v, %+v, %v, want version 3 holding version 1", restored, propagation, err)
+	}
+	if again, propagation, err := store.Restore(ctx, orgID, custom.ID, 1, *testActor); err != nil || again.CurrentVersion != 3 || propagation.Version != 3 {
+		t.Errorf("restore what is current: got = %+v, %+v, %v, want no version", again, propagation, err)
+	}
+	if _, _, err := store.Restore(ctx, orgID, custom.ID, 9, *testActor); !errors.Is(err, ErrAgentTypeNotFound) {
+		t.Errorf("restore a version it lacks: got = %v, want ErrAgentTypeNotFound", err)
+	}
+	events, err := store.Events(ctx, orgID, custom.ID)
+	if err != nil || events[0].Action != domain.AgentTypeRestored || events[0].Version != 3 || events[0].Detail != "version 1" || events[0].By == nil {
+		t.Errorf("events: got = %+v, %v, want the restore first", events, err)
+	}
+}
+
+func TestAnOrgsTypesAndTheirEditsAreBounded(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	store := NewAgentTypesStore(pool)
+	orgID, _, custom := orgWithExperiment(t, pool)
+	var limit *AgentTypeLimit
+	for n := 1; n < domain.MaxOrgAgentTypes; n++ {
+		if _, err := store.Create(ctx, orgID, fmt.Sprintf("Type %d", n), "", domain.AgentRoleResearcher, testPrompt, testTypeSettings(), *testActor); err != nil {
+			t.Fatalf("type %d: %v", n+1, err)
+		}
+	}
+	if _, err := store.Create(ctx, orgID, "One too many", "", domain.AgentRoleResearcher, testPrompt, testTypeSettings(), *testActor); !errors.As(err, &limit) || !limit.Types {
+		t.Errorf("type %d: got = %v, want the limit on types", domain.MaxOrgAgentTypes+1, err)
+	}
+	for n := 1; n < domain.MaxAgentTypeEditsAnHour; n++ {
+		if _, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: n, Name: custom.Name, Description: custom.Description, Prompt: fmt.Sprintf("%s %d", testPrompt, n), Settings: testTypeSettings()}); err != nil {
+			t.Fatalf("edit %d: %v", n, err)
+		}
+	}
+	if _, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: domain.MaxAgentTypeEditsAnHour, Name: custom.Name, Description: custom.Description, Prompt: testPrompt + " more", Settings: testTypeSettings()}); !errors.As(err, &limit) || limit.Types {
+		t.Errorf("edit %d: got = %v, want the limit on edits", domain.MaxAgentTypeEditsAnHour, err)
+	}
+	if _, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: domain.MaxAgentTypeEditsAnHour, Name: "Renamed", Description: custom.Description, Prompt: fmt.Sprintf("%s %d", testPrompt, domain.MaxAgentTypeEditsAnHour-1), Settings: testTypeSettings()}); err != nil {
+		t.Errorf("a rename past the limit: got = %v, want it written, as it makes no version", err)
 	}
 }
 
@@ -162,15 +297,21 @@ func TestATypeInUseIsNotArchivedAndAnArchivedOneTakesNoAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	var inUse *AgentTypeInUse
-	if _, err := store.Archive(ctx, orgID, custom.ID); !errors.As(err, &inUse) || !slices.Equal(inUse.PlatformExperimentIDs, []string{peID}) {
+	if _, err := store.Archive(ctx, orgID, custom.ID, *testActor); !errors.As(err, &inUse) || !slices.Equal(inUse.PlatformExperimentIDs, []string{peID}) {
 		t.Fatalf("archive while a pool names it: got = %v, want in use by %s", err, peID)
 	}
 	setPEStatus(t, pool, peID, domain.PlatformExpClosed, time.Minute)
-	archived, err := store.Archive(ctx, orgID, custom.ID)
+	archived, err := store.Archive(ctx, orgID, custom.ID, *testActor)
 	if err != nil || archived.ArchivedAt == nil {
 		t.Fatalf("archive once its experiment closed: got = %+v, %v", archived, err)
 	}
-	if _, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "x", Prompt: testPrompt, Settings: testTypeSettings()}, testModelDefaults); !errors.Is(err, ErrAgentTypeArchived) {
+	if _, err := store.Archive(ctx, orgID, custom.ID, *testActor); err != nil {
+		t.Errorf("archive again: got = %v", err)
+	}
+	if got := actions(t, store, orgID, custom.ID); !slices.Equal(got, []string{"archive@1", "create@1"}) {
+		t.Errorf("events: got = %v, want one archive", got)
+	}
+	if _, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "x", Prompt: testPrompt, Settings: testTypeSettings()}); !errors.Is(err, ErrAgentTypeArchived) {
 		t.Errorf("edit an archived type: got = %v, want ErrAgentTypeArchived", err)
 	}
 	open := "pe-" + uuid.New().String()[:8]
@@ -181,36 +322,67 @@ func TestATypeInUseIsNotArchivedAndAnArchivedOneTakesNoAgent(t *testing.T) {
 	}
 }
 
-func TestAnAgentIsPinnedToAnAgentTypeOfItsOrgAndItsRole(t *testing.T) {
+// The write that names an agent type holds its row FOR SHARE until it commits, so an archive
+// waits for it and then sees it in use.
+func TestAWriteNamingATypeHoldsItAgainstAnArchive(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	_, peID, custom := orgWithExperiment(t, pool)
+	tx, err := pool.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := agentTypeTx(ctx, tx, peID, custom.ID, domain.AgentRoleResearcher); err != nil {
+		t.Fatal(err)
+	}
+	archive, err := pool.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer archive.Rollback(ctx) //nolint:errcheck
+	if _, err := archive.Exec(ctx, `SET LOCAL lock_timeout = '100ms'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := archive.Exec(ctx, `SELECT 1 FROM agent_types WHERE id = $1 FOR UPDATE`, custom.ID); err == nil {
+		t.Error("the type was locked for an archive while a write naming it was open")
+	}
+}
+
+func TestAnAgentRunsAnAgentTypeOfItsOrgAndItsRole(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
 	_, peID, custom := orgWithExperiment(t, pool)
 	_, _, foreign := orgWithExperiment(t, pool)
 
-	spawn := func(role domain.SignupRole, agentType string) (string, error) {
+	spawn := func(role domain.SignupRole, agentType, model string) (string, error) {
 		agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:8], CreatedAt: time.Now()}
-		return agent.ID, pes.SpawnAgent(ctx, peID, agent, domain.AgentSignup{Actor: testActor, AgentID: agent.ID, Role: role, AgentType: agentType, Model: "m"})
+		return agent.ID, pes.SpawnAgent(ctx, peID, agent, domain.AgentSignup{Actor: testActor, AgentID: agent.ID, Role: role, AgentType: agentType, Model: model})
 	}
-	own, err := spawn(domain.SignupRoleCompetitor, custom.ID)
+	own, err := spawn(domain.SignupRoleCompetitor, custom.ID, "m")
 	if err != nil {
 		t.Fatalf("an agent of its org's type: got = %v, want = nil", err)
 	}
-	if got := signupOf(t, pes, peID, own); got.AgentType != custom.ID || got.AgentTypeVersion != 1 {
-		t.Errorf("its signup: got = %s v%d, want %s v1", got.AgentType, got.AgentTypeVersion, custom.ID)
+	if got := signupOf(t, pes, peID, own); got.AgentType != custom.ID || got.Model != "m" || got.Hyperparameters != nil {
+		t.Errorf("its signup: got = %+v, want %s on m with its type's hyperparameters", got, custom.ID)
 	}
-	if _, err := spawn(domain.SignupRoleCompetitor, foreign.ID); !errors.Is(err, ErrUnknownAgentType) {
+	follows, err := spawn(domain.SignupRoleCompetitor, custom.ID, "")
+	if err != nil || signupOf(t, pes, peID, follows).Model != "" {
+		t.Errorf("an agent naming no model: got = %v, want its signup holding none", err)
+	}
+	if _, err := spawn(domain.SignupRoleCompetitor, foreign.ID, ""); !errors.Is(err, ErrUnknownAgentType) {
 		t.Errorf("another org's type: got = %v, want ErrUnknownAgentType", err)
 	}
-	if _, err := spawn(domain.SignupRoleBaseline, custom.ID); !errors.Is(err, ErrUnknownAgentType) {
+	if _, err := spawn(domain.SignupRoleBaseline, custom.ID, ""); !errors.Is(err, ErrUnknownAgentType) {
 		t.Errorf("a researcher type for a baseline agent: got = %v, want ErrUnknownAgentType", err)
 	}
-	baseline, err := spawn(domain.SignupRoleBaseline, "")
+	baseline, err := spawn(domain.SignupRoleBaseline, "", "")
 	if err != nil || signupOf(t, pes, peID, baseline).AgentType != "baseline" {
 		t.Errorf("a baseline agent naming no type: got = %v, want the built-in baseline", err)
 	}
 	src, err := pes.AgentInstructions(ctx, peID, own)
-	if err != nil || src == nil || src.Role != domain.AgentRoleResearcher || src.Version.Prompt != testPrompt || src.Model != "m" {
+	if err != nil || src == nil || src.Role != domain.AgentRoleResearcher || src.Version.Prompt != testPrompt || src.Model != "m" || src.Hyperparameters != nil || src.Rules == "" || src.RulesVersion < 1 {
 		t.Errorf("what its instructions are composed from: got = %+v, %v", src, err)
 	}
 	if src, err := pes.AgentInstructions(ctx, peID, "ag-nobody"); err != nil || src != nil {
@@ -222,7 +394,9 @@ func TestAnAgentIsPinnedToAnAgentTypeOfItsOrgAndItsRole(t *testing.T) {
 	}
 }
 
-func TestAnEditMovesEveryLiveAgentAndTellsEach(t *testing.T) {
+// An edit makes the next version current: every agent of the type runs it, those that name no
+// model or hyperparameters of their own on the type's new ones, and each whose run goes on is told.
+func TestAnEditIsWhatEveryAgentOfTheTypeRunsAndEachLiveOneIsTold(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	store := NewAgentTypesStore(pool)
@@ -230,15 +404,15 @@ func TestAnEditMovesEveryLiveAgentAndTellsEach(t *testing.T) {
 	events := NewEventsStore(pool, noHypothesisEvents{})
 	orgID, peID, custom := orgWithExperiment(t, pool)
 	ids := spawnTestAgents(t, pes, peID,
-		domain.AgentSignup{Actor: testActor, AgentType: custom.ID, Model: testModelDefaults.Agent},
+		domain.AgentSignup{Actor: testActor, AgentType: custom.ID},
 		domain.AgentSignup{Actor: testActor, AgentType: custom.ID, Model: "its-own", Hyperparameters: map[string]any{"lr": 1.0}},
-		domain.AgentSignup{Actor: testActor, AgentType: custom.ID, Model: testModelDefaults.Agent})
+		domain.AgentSignup{Actor: testActor, AgentType: custom.ID})
 	follows, own, finished := ids[0], ids[1], ids[2]
 	setPEStatus(t, pool, peID, domain.PlatformExpRunning, time.Minute)
 	if err := pes.FinishAgent(ctx, peID, finished, "done"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET researchers = jsonb_build_array(jsonb_build_object('agent_type', $2::text, 'model', $3::text, 'count', 3)) WHERE id = $1`, peID, custom.ID, testModelDefaults.Agent); err != nil {
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET researchers = jsonb_build_array(jsonb_build_object('agent_type', $2::text, 'count', 3)) WHERE id = $1`, peID, custom.ID); err != nil {
 		t.Fatal(err)
 	}
 	live, stop := listenForEvents(t, pool)
@@ -246,45 +420,37 @@ func TestAnEditMovesEveryLiveAgentAndTellsEach(t *testing.T) {
 
 	settings := testTypeSettings()
 	settings.Model, settings.Hyperparameters = "the-new-model", map[string]any{"lr": 0.5}
-	edited, propagation, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "Tuner", Prompt: testPrompt, Settings: settings}, testModelDefaults)
-	if err != nil || edited.CurrentVersion != 2 {
-		t.Fatalf("edit: got = %+v, %v", edited, err)
+	edited, propagation, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "Tuner", Description: custom.Description, Prompt: testPrompt, Settings: settings})
+	if err != nil || edited.CurrentVersion != 2 || propagation.Version != 2 || propagation.Told != 2 {
+		t.Fatalf("edit: got = %+v, %+v, %v, want version 2 told to the two live agents", edited, propagation, err)
 	}
-	moved := map[string]bool{}
-	for _, pin := range propagation.Moved {
-		moved[pin.AgentID] = true
-	}
-	if len(propagation.Failed) != 0 || len(moved) != 2 || !moved[follows] || !moved[own] {
-		t.Fatalf("propagation: got = %+v, want %s and %s moved", propagation, follows, own)
-	}
-	if got := signupOf(t, pes, peID, follows); got.AgentTypeVersion != 2 || got.Model != "the-new-model" || got.Hyperparameters["lr"] != 0.5 {
-		t.Errorf("an agent on the type's model and hyperparameters: got = v%d %s %v, want v2 on the new ones", got.AgentTypeVersion, got.Model, got.Hyperparameters)
-	}
-	if got := signupOf(t, pes, peID, own); got.AgentTypeVersion != 2 || got.Model != "its-own" || got.Hyperparameters["lr"] != 1.0 {
-		t.Errorf("an agent on its own model and hyperparameters: got = v%d %s %v, want v2 keeping its own", got.AgentTypeVersion, got.Model, got.Hyperparameters)
-	}
-	if got := signupOf(t, pes, peID, finished); got.AgentTypeVersion != 1 {
-		t.Errorf("a finished agent: got = v%d, want v1 kept", got.AgentTypeVersion)
+	for _, c := range []struct {
+		agent, model string
+		lr           any
+	}{{follows, "", nil}, {own, "its-own", 1.0}} {
+		src, err := pes.AgentInstructions(ctx, peID, c.agent)
+		if err != nil || src.Version.Version != 2 || src.Version.Settings.Model != "the-new-model" || src.Model != c.model || (c.lr != nil && src.Hyperparameters["lr"] != c.lr) || (c.lr == nil && src.Hyperparameters != nil) {
+			t.Errorf("%s: got = %+v, %v, want version 2 with model %q of its own", c.agent, src, err, c.model)
+		}
 	}
 	pe, err := pes.GetPlatformExperiment(ctx, peID)
-	if err != nil || len(pe.Researchers) != 1 || pe.Researchers[0].Model != "the-new-model" {
-		t.Errorf("the pool: got = %+v, %v, want its entry on the new model", pe.Researchers, err)
+	if err != nil || len(pe.Researchers) != 1 || pe.Researchers[0].Model != "" {
+		t.Errorf("the pool: got = %+v, %v, want its entry still naming no model", pe.Researchers, err)
 	}
 
 	told := map[string]string{}
-	deadline := time.After(5 * time.Second)
-	for len(told) < 2 {
+	for deadline := time.After(5 * time.Second); len(told) < 2; {
 		select {
 		case e := <-live:
-			if e.Kind == domain.EventAgentInstructions && e.PlatformExperimentID == peID {
+			if e.Kind == domain.EventAgentInstructions && e.PlatformExperimentID == peID && e.AgentID != domain.CoordinatorRecipient {
 				told[e.AgentID] = e.Value + "/" + e.Detail
 			}
 		case <-deadline:
 			t.Fatalf("told: got = %v, want both live agents", told)
 		}
 	}
-	if told[follows] != "2/"+custom.ID || told[own] != "2/"+custom.ID {
-		t.Errorf("told: got = %v, want version 2 of %s to each", told, custom.ID)
+	if told[follows] != "2/"+custom.ID || told[own] != "2/"+custom.ID || told[finished] != "" {
+		t.Errorf("told: got = %v, want version 2 of %s to each live one", told, custom.ID)
 	}
 	replayed, err := events.Replay(ctx, domain.EventFilter{PlatformExperimentID: peID, AgentID: own}, 0)
 	if err != nil {
@@ -301,45 +467,7 @@ func TestAnEditMovesEveryLiveAgentAndTellsEach(t *testing.T) {
 	}
 }
 
-func TestAnAgentThatCannotBeMovedLeavesTheOthersMoved(t *testing.T) {
-	pool := eventsTestDB(t)
-	ctx := context.Background()
-	store := NewAgentTypesStore(pool)
-	pes := NewPlatformExperimentsStore(pool)
-	orgID, peID, custom := orgWithExperiment(t, pool)
-	ids := spawnTestAgents(t, pes, peID, domain.AgentSignup{Actor: testActor, AgentType: custom.ID, Model: "m"}, domain.AgentSignup{Actor: testActor, AgentType: custom.ID, Model: "m"}, domain.AgentSignup{Actor: testActor, AgentType: custom.ID, Model: "m"})
-	broken := ids[1]
-	fn := "refuse_" + uuid.New().String()[:8]
-	if _, err := pool.pool.Exec(ctx, `CREATE FUNCTION `+fn+`() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'this agent cannot be moved'; END; $$ LANGUAGE plpgsql`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.pool.Exec(ctx, `CREATE TRIGGER `+fn+` BEFORE UPDATE OF agent_type_version ON experiment_signups FOR EACH ROW WHEN (NEW.agent_id = '`+broken+`') EXECUTE FUNCTION `+fn+`()`); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		pool.pool.Exec(context.Background(), `DROP TRIGGER IF EXISTS `+fn+` ON experiment_signups`) //nolint:errcheck
-		pool.pool.Exec(context.Background(), `DROP FUNCTION IF EXISTS `+fn+`()`)                    //nolint:errcheck
-	})
-
-	_, propagation, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "Tuner", Prompt: testPrompt + " Again.", Settings: testTypeSettings()}, testModelDefaults)
-	if err != nil {
-		t.Fatalf("edit: got = %v, want = nil", err)
-	}
-	if len(propagation.Moved) != 2 || len(propagation.Failed) != 1 || propagation.Failed[0].AgentID != broken || propagation.Failed[0].Error == "" {
-		t.Fatalf("propagation: got = %+v, want two moved and %s failed with why", propagation, broken)
-	}
-	for _, id := range ids {
-		want := 2
-		if id == broken {
-			want = 1
-		}
-		if got := signupOf(t, pes, peID, id); got.AgentTypeVersion != want {
-			t.Errorf("%s: got = v%d, want v%d", id, got.AgentTypeVersion, want)
-		}
-	}
-}
-
-func TestAnEditOfACoordinatorTypeMovesTheCoordinatorsOfRunsThatGoOn(t *testing.T) {
+func TestAnEditOfACoordinatorTypeTellsTheCoordinatorsOfRunsThatGoOn(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	store := NewAgentTypesStore(pool)
@@ -350,17 +478,17 @@ func TestAnEditOfACoordinatorTypeMovesTheCoordinatorsOfRunsThatGoOn(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET coordinator_agent_type = $2, coordinator_agent_type_version = 1, coordinator_model = $3 WHERE id = $1`, peID, custom.ID, testModelDefaults.Coordinator); err != nil {
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET coordinator_agent_type = $2, coordinator_model = NULL WHERE id = $1`, peID, custom.ID); err != nil {
 		t.Fatal(err)
 	}
 	settings := testTypeSettings()
 	settings.Model = "coordinator-next"
-	_, propagation, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: custom.Name, Prompt: coordinatorPrompt + " Strictly.", Settings: settings}, testModelDefaults)
-	if err != nil || len(propagation.Moved) != 1 || propagation.Moved[0] != (domain.PinMove{PlatformExperimentID: peID, AgentID: domain.CoordinatorRecipient}) {
-		t.Fatalf("edit: got = %+v, %v, want the coordinator of %s moved", propagation, err, peID)
+	_, propagation, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: custom.Name, Prompt: coordinatorPrompt + " Strictly.", Settings: settings})
+	if err != nil || propagation.Told != 1 {
+		t.Fatalf("edit: got = %+v, %v, want the coordinator of %s told", propagation, err, peID)
 	}
 	src, err := pes.CoordinatorInstructions(ctx, peID)
-	if err != nil || src.Version.Version != 2 || src.Model != "coordinator-next" {
+	if err != nil || src.Version.Version != 2 || src.Model != "" || src.Version.Settings.Model != "coordinator-next" {
 		t.Errorf("the coordinator: got = %+v, %v, want version 2 on the type's new model", src, err)
 	}
 	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, domain.EventFilter{PlatformExperimentID: peID}, 0)

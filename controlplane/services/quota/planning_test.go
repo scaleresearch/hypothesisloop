@@ -891,8 +891,8 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	if pe.StartsAt.Before(before) || pe.DurationHours != 2 || !pe.EndsAt.IsZero() || !pe.BaselineDueAt.Equal(pe.StartsAt.Add(25*time.Minute)) {
 		t.Errorf("starts %v, %v hours ending %v, baseline due %v: want 2 hours with no end yet and the baseline due 25 minutes after the accept", pe.StartsAt, pe.DurationHours, pe.EndsAt, pe.BaselineDueAt)
 	}
-	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Launcher != "main" || pe.Coordinator.Model != "platform-coordinator-1" {
-		t.Errorf("coordinator %+v, want one the platform hosts", pe.Coordinator)
+	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Launcher != "main" || pe.Coordinator.Model != "" {
+		t.Errorf("coordinator %+v, want one the platform hosts on its type's model", pe.Coordinator)
 	}
 	// A coordinator had to boot, take a turn and add the agent that measures the baseline before
 	// anything was measured: the proposal signed it up, and the accept signs up the researchers.
@@ -901,7 +901,7 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	}
 	for i, signup := range store.acceptedSignups {
 		agent := store.acceptedAgents[i]
-		if agent.Name != "" || signup.AgentID != agent.ID || !signup.Hosted || signup.Launcher != "main" || signup.Role != domain.SignupRoleCompetitor || signup.Model != "platform-model-1" ||
+		if agent.Name != "" || signup.AgentID != agent.ID || !signup.Hosted || signup.Launcher != "main" || signup.Role != domain.SignupRoleCompetitor || signup.Model != "" ||
 			signup.Actor == nil || signup.Actor.ID != "u-1" {
 			t.Errorf("agent %d: %+v signed up as %+v, want a hosted researcher added by the person who accepted", i, agent, signup)
 		}

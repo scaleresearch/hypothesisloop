@@ -117,3 +117,43 @@ func TestADigestChangesWithPromptOrSettings(t *testing.T) {
 		t.Errorf("digests %s %s %s %s: want each change to move it and nothing else", a, b, c, again)
 	}
 }
+
+// A built-in id can never be one an org's type is given, which starts with at-.
+func TestABuiltinIDStaysOutOfTheNamespaceOfOrgTypes(t *testing.T) {
+	for _, id := range []string{"generalist", "hyperparameter-search", "a1"} {
+		if err := ValidateBuiltinAgentTypeID(id); err != nil {
+			t.Errorf("%s: %v", id, err)
+		}
+	}
+	org, err := NewID(AgentTypeIDPrefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{org, "at-tuner", "Generalist", "1st", "a b", "", strings.Repeat("a", 41)} {
+		if err := ValidateBuiltinAgentTypeID(id); err == nil {
+			t.Errorf("%q accepted as a built-in id", id)
+		}
+	}
+}
+
+func TestAnOrgMakesResearcherAndBaselineTypesOnly(t *testing.T) {
+	for _, role := range AgentRoles {
+		err := CheckOrgAgentRole(role)
+		if want := role == AgentRoleResearcher || role == AgentRoleBaseline; (err == nil) != want {
+			t.Errorf("%s: got = %v, want allowed %v", role, err, want)
+		}
+	}
+}
+
+func TestTheModelAnAgentRunsOnIsItsOwnElseItsTypesElseTheDefault(t *testing.T) {
+	catalog := testCatalog()
+	for _, c := range []struct{ agentType, model, want string }{
+		{"at-custom", "own", "own"},
+		{"at-custom", "", "custom-model"},
+		{"generalist", "", "platform"},
+	} {
+		if got := ResolveModel(catalog, c.agentType, c.model, "platform"); got != c.want {
+			t.Errorf("%s %q: got = %s, want %s", c.agentType, c.model, got, c.want)
+		}
+	}
+}

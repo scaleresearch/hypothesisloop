@@ -14,8 +14,12 @@ type HarnessState struct {
 	TurnWaiting          bool
 	TurnSince            time.Time
 	// InstructionsDigest is the first InstructionsDigestLength hex characters of the digest of
-	// the instructions the harness runs, "" for one that has not said.
+	// the instructions the harness runs, "" for one that has not said, and AgentTypeVersion the
+	// version of its agent type they are, 0 for one that has not said. AgentType is the type the
+	// agent runs, as the platform knows it.
 	InstructionsDigest string
+	AgentType          string
+	AgentTypeVersion   int
 	Model              RateLimit
 	At                 time.Time
 }

@@ -103,7 +103,7 @@ func TestSpawnedAgentsAreCreatedInTheExperimentsOrgWithWhatTheyWereLaunchedWith(
 		t.Errorf("hosted signup: got = %+v", hosted)
 	}
 	if own.Hosted || own.Launcher != "" || own.Role != domain.SignupRoleBaseline || own.QuotaTier != domain.QuotaTierBurstOnly ||
-		own.Hyperparameters == nil || len(own.Hyperparameters) != 0 {
+		own.Hyperparameters != nil || own.Model != "" {
 		t.Errorf("self-run signup: got = %+v", own)
 	}
 	if hosted.InFlight == nil || *hosted.InFlight != (domain.InFlight{}) {

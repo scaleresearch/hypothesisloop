@@ -231,7 +231,7 @@ func TestALoweredMaxAgentsCutsTheNewestResearchersAndNobodyReplacesThem(t *testi
 	if state.MaxAgents != 2 || state.AtWork[generalist] != 2 || state.AtWork[dataSearch] != 0 || len(state.Ended[generalist])+len(state.Ended[dataSearch]) != 0 {
 		t.Fatalf("state = %+v, want two at work and nobody whose place is free", state)
 	}
-	if state.Pool.Total() != 2 || len(domain.PoolDeficit(state.Pool, state.MaxAgents, state.AtWork, nil)) != 0 {
+	if state.Pool.Total() != 2 || len(poolPlaces(state)) != 0 {
 		t.Errorf("researchers %+v, want them lowered by the two cut, so that nobody is added", state.Pool)
 	}
 
@@ -317,4 +317,9 @@ func TestAPlatformExperimentIsCreatedWithItsResearchersOrNotAtAll(t *testing.T) 
 	if got, err := pes.GetPlatformExperiment(ctx, id); err != nil || got != nil {
 		t.Errorf("after the refusal: got = %+v %v, want no platform experiment", got, err)
 	}
+}
+
+func poolPlaces(state PoolState) []domain.PoolPlace {
+	places, _ := domain.PoolDeficit(state.Pool, state.MaxAgents, state.AtWork, nil, state.Recent)
+	return places
 }

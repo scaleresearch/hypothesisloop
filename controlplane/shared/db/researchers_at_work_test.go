@@ -84,7 +84,7 @@ func TestADescriptionIsSeededForABuiltinAndWrittenOnAnOrgsType(t *testing.T) {
 	ctx := context.Background()
 	store := NewAgentTypesStore(pool)
 	builtin := agenttypes.Builtin{ID: "test-" + uuid.New().String()[:8], Name: "Test", Description: "First.", Role: domain.AgentRoleResearcher, Prompt: testPrompt, Settings: testTypeSettings()}
-	if _, err := SeedBuiltinAgentTypes(ctx, pool, []agenttypes.Builtin{builtin}, testModelDefaults); err != nil {
+	if _, err := SeedBuiltins(ctx, pool, agenttypes.Release, []agenttypes.Builtin{builtin}, testRules); err != nil {
 		t.Fatal(err)
 	}
 	read := func() *domain.CurrentAgentType {
@@ -99,8 +99,8 @@ func TestADescriptionIsSeededForABuiltinAndWrittenOnAnOrgsType(t *testing.T) {
 		t.Fatalf("seeded: got description %q", got.Description)
 	}
 	builtin.Description = "Second."
-	seeded, err := SeedBuiltinAgentTypes(ctx, pool, []agenttypes.Builtin{builtin}, testModelDefaults)
-	if err != nil || len(seeded) != 0 {
+	seeded, err := SeedBuiltins(ctx, pool, agenttypes.Release, []agenttypes.Builtin{builtin}, testRules)
+	if err != nil || len(seeded.Types) != 0 {
 		t.Fatalf("seed with a new description: %+v, %v, want no new version", seeded, err)
 	}
 	if got := read(); got.Description != "Second." || got.CurrentVersion != 1 {
@@ -111,7 +111,7 @@ func TestADescriptionIsSeededForABuiltinAndWrittenOnAnOrgsType(t *testing.T) {
 	if custom.Description != "Tunes the knobs." {
 		t.Errorf("created: got description %q", custom.Description)
 	}
-	edited, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "Tuner", Description: "Changed.", Prompt: testPrompt, Settings: testTypeSettings()}, testModelDefaults)
+	edited, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "Tuner", Description: "Changed.", Prompt: testPrompt, Settings: testTypeSettings()})
 	if err != nil || edited.Description != "Changed." || edited.CurrentVersion != 1 {
 		t.Errorf("edited: got = %+v, %v, want the description changed at version 1", edited, err)
 	}

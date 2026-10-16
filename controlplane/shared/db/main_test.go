@@ -82,9 +82,12 @@ func migrateAt(ctx context.Context, dsn string) error {
 	if err != nil {
 		return err
 	}
-	_, err = SeedBuiltinAgentTypes(ctx, pool, builtins, testModelDefaults)
+	_, err = SeedBuiltins(ctx, pool, agenttypes.Release, builtins, testRules)
 	return err
 }
 
 // testModelDefaults is the platform's default models in the tests of this package.
 var testModelDefaults = domain.ModelDefaults{Agent: "agent-default", Coordinator: "coordinator-default"}
+
+// testRules is the platform's rules the tests of this package seed.
+const testRules = "## platform rules (read first)"

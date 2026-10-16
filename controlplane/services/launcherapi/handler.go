@@ -109,10 +109,10 @@ const refusalPassDoesNotFit = contract.RefusalPassDoesNotFit
 // coordinator, whose agentID is empty. Both are evaluated by the same steps.
 type kept struct {
 	platformExperimentID, agentID string
-	// role is its role in the run's health series.
-	role     string
-	instance domain.AgentInstance
-	ending   bool
+	// role is its role in the run's health series, and agentType the agent type it runs.
+	role, agentType string
+	instance        domain.AgentInstance
+	ending          bool
 	// launch is launchOf the image this one boots and the launcher's digest.
 	launch string
 	// describe takes how many machines of this one ended before.
@@ -171,7 +171,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		}
 		signup, image := agent.AgentSignup, h.imageOf(agent.AgentImage)
 		all = append(all, kept{
-			platformExperimentID: agent.PlatformExperimentID, agentID: agent.AgentID, role: string(agent.Role), instance: *agent.Instance, ending: agent.Ended != "",
+			platformExperimentID: agent.PlatformExperimentID, agentID: agent.AgentID, role: string(agent.Role), agentType: agent.AgentType, instance: *agent.Instance, ending: agent.Ended != "",
 			launch: launchOf(image, observed.LaunchDigest),
 			describe: func(ended int) (Instance, error) {
 				return instanceFor(signup, ended, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
@@ -179,12 +179,12 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		})
 	}
 	for _, coordinator := range coordinators {
-		pe, model, image := coordinator.PlatformExperimentID, coordinator.Model, h.imageOf(coordinator.AgentImage)
+		pe, image := coordinator.PlatformExperimentID, h.imageOf(coordinator.AgentImage)
 		all = append(all, kept{
-			platformExperimentID: pe, role: domain.CoordinatorHealthRole, instance: coordinator.Instance, ending: coordinator.Ending,
+			platformExperimentID: pe, role: domain.CoordinatorHealthRole, agentType: domain.CoordinatorFlavor, instance: coordinator.Instance, ending: coordinator.Ending,
 			launch: launchOf(image, observed.LaunchDigest),
 			describe: func(ended int) (Instance, error) {
-				return coordinatorInstanceFor(pe, model, ended, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
+				return coordinatorInstanceFor(pe, ended, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
 			},
 		})
 	}
@@ -227,7 +227,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 				if err != nil {
 					log.Warn("hosted instance reported a harness state that cannot be read", zap.String("instance", current.Name), zap.Error(err))
 				} else {
-					state.PlatformExperimentID, state.AgentID, state.Role = one.platformExperimentID, one.agentID, one.role
+					state.PlatformExperimentID, state.AgentID, state.Role, state.AgentType = one.platformExperimentID, one.agentID, one.role, one.agentType
 					states = append(states, state)
 				}
 			}
@@ -364,8 +364,8 @@ func said(activity, token string) string {
 var instructionsDigestPattern = regexp.MustCompile(fmt.Sprintf(`^[0-9a-f]{%d}$`, domain.InstructionsDigestLength))
 
 // parseHarnessState reads the state line a harness printed (agents/experimentator, progress.py):
-// key=value fields, subagents, turn and since required, instructions_digest once the harness runs
-// instructions, the model_ ones present once the harness
+// key=value fields, subagents, turn and since required, instructions_digest and version, the
+// version of its agent type, once the harness runs instructions, the model_ ones present once the harness
 // has read a rate limit, and then model_status among them.
 func parseHarnessState(line string) (domain.HarnessState, error) {
 	var state domain.HarnessState
@@ -413,6 +413,11 @@ func parseHarnessState(line string) (domain.HarnessState, error) {
 				return state, fmt.Errorf("instructions_digest %q is no %d lowercase hex characters", value, domain.InstructionsDigestLength)
 			}
 			state.InstructionsDigest = value
+		case "version":
+			state.AgentTypeVersion, err = strconv.Atoi(value)
+			if err != nil || state.AgentTypeVersion < 1 {
+				return state, fmt.Errorf("version %q is no version", value)
+			}
 		case "model_status":
 			switch value {
 			case "allowed", "allowed_warning":

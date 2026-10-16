@@ -22,15 +22,12 @@ type AgentSignup struct {
 	// Launcher is the launcher that runs a hosted agent, written when it joins so that a later
 	// change of the configured launcher moves new agents only.
 	Launcher string `json:"launcher,omitempty"`
-	// AgentType, the id of the agent type it runs, and Model are resolved when the agent joins: what it
-	// asked for, or the default at that moment. Neither is ever empty on a stored signup.
-	AgentType string `json:"flavor" doc:"The agent type it runs, by id."`
-	// AgentTypeVersion is the version of its agent type it is pinned to: the current one when it
-	// joined, moved by each edit of the type while its run goes on.
-	AgentTypeVersion int            `json:"agent_type_version" doc:"The version of its agent type it is pinned to: the current one when it joined, and each edit of the type while its run goes on moves it to the new version (agent.instructions)."`
-	Hyperparameters  map[string]any `json:"hyperparameters"`
-	Model            string         `json:"model"`
-	SignedUpAt       time.Time      `json:"signed_up_at"`
+	// AgentType is the id of the agent type it runs, fixed when it joins: it runs the type's current
+	// version. Model, empty, and Hyperparameters, nil, are the type's, read whenever it is served.
+	AgentType       string         `json:"flavor" doc:"The agent type it runs, by id. It runs the type's current version, told with agent.instructions when that changes."`
+	Hyperparameters map[string]any `json:"hyperparameters" doc:"Its own hyperparameters, null when it runs with its agent type's."`
+	Model           string         `json:"model" doc:"Its own model, empty when it runs on its agent type's or, for a type that names none, the platform's default."`
+	SignedUpAt      time.Time      `json:"signed_up_at"`
 	// Actor is whose credential added the agent, unverified with no id on a signup from before
 	// this was kept. A coordinator removes only the agents its own token added.
 	Actor *Actor `json:"actor,omitempty"`

@@ -22,11 +22,14 @@ const (
 	agentCoordinatorMessagesMetric      = "agent_coordinator_messages"
 	// The harness series are written from the launchers' reports (RecordHarnessState) and carry
 	// the same labels, the rate-limit ones once a harness has read a rate limit.
-	agentStateReportedAtMetric      = "agent_state_reported_at_seconds"
-	agentSubagentsMetric            = "agent_subagents"
-	agentTurnWaitingMetric          = "agent_turn_waiting"
-	agentTurnSinceMetric            = "agent_turn_since_seconds"
-	agentInstructionsDigestMetric   = "agent_instructions_digest"
+	agentStateReportedAtMetric    = "agent_state_reported_at_seconds"
+	agentSubagentsMetric          = "agent_subagents"
+	agentTurnWaitingMetric        = "agent_turn_waiting"
+	agentTurnSinceMetric          = "agent_turn_since_seconds"
+	agentInstructionsDigestMetric = "agent_instructions_digest"
+	// agentInstructionsVersionMetric is the version of its agent type the harness runs, labelled
+	// agent_type besides: the history of which version each agent ran.
+	agentInstructionsVersionMetric  = "agent_instructions_version"
 	agentRateLimitUtilizationMetric = "agent_rate_limit_utilization"
 	agentRateLimitRejectedMetric    = "agent_rate_limit_rejected"
 	agentRateLimitResetsAtMetric    = "agent_rate_limit_resets_at_seconds"
@@ -86,6 +89,11 @@ func RecordHarnessState(ctx context.Context, dbURL string, at time.Time, states 
 				return fmt.Errorf("metricsdb.RecordHarnessState: instructions digest %q: %w", s.InstructionsDigest, err)
 			}
 			gauge(agentInstructionsDigestMetric, float64(digest))
+		}
+		if s.AgentTypeVersion > 0 {
+			versionLabels := healthLabels(s.PlatformExperimentID, s.AgentID, s.Role)
+			versionLabels["agent_type"] = s.AgentType
+			samples = append(samples, GaugeSample{MetricName: agentInstructionsVersionMetric, Labels: versionLabels, Value: float64(s.AgentTypeVersion), At: at})
 		}
 		if s.Model == (domain.RateLimit{}) {
 			continue

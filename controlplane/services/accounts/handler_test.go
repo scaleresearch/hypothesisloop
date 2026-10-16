@@ -164,7 +164,7 @@ func newWorld(t *testing.T) *world {
 	w.agentTypes = newMemAgentTypes()
 	ownType, _ := w.agentTypes.Create(ctx, w.orgA, "Own", "", domain.AgentRoleResearcher, ownPrompt, domain.AgentTypeSettings{MaxSubagents: 2, PacingSubagents: 1, Effort: "high"}, domain.Actor{Kind: domain.ActorUser, ID: "u-owner"})
 	w.ownType = ownType.ID
-	RegisterAgentTypesHuma(doc, NewAgentTypesHandler(w.agentTypes, domain.ModelDefaults{Agent: "model-a", Coordinator: "model-c"}, zap.NewNop()))
+	RegisterAgentTypesHuma(doc, NewAgentTypesHandler(w.agentTypes, zap.NewNop()))
 	w.router = router
 	return w
 }

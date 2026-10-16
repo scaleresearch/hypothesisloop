@@ -210,7 +210,7 @@ func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}
-	choice, err := domain.ResolveAgentLaunch(catalog, domain.RoleOfSignup(role), req.Flavor, req.Model, launch.DefaultModel, req.Hyperparameters)
+	choice, err := domain.ResolveAgentLaunch(catalog, domain.RoleOfSignup(role), req.Flavor, req.Model, req.Hyperparameters)
 	if err != nil {
 		return nil, refuseSignup(400, "invalid_request", "%s", err)
 	}
@@ -349,8 +349,9 @@ func (s *PlatformExperimentsService) requireLauncher(ctx context.Context, launch
 	return nil
 }
 
-// withHosting resolves the coordinator a create asks the platform to run: its launcher and
-// model, and that the experiment names the repository it works in.
+// withHosting resolves the coordinator a create asks the platform to run: its launcher and the
+// model it asked for, empty for its agent type's, and that the experiment names the repository it
+// works in.
 func (h *PlatformExperimentsHandler) withHosting(ctx context.Context, req CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
 	if req.CoordinatorModel != "" && !req.CoordinatorHosted {
 		return req, refuseSignup(400, "invalid_request", "coordinator_model is set and coordinator_hosted is not")
@@ -365,19 +366,17 @@ func (h *PlatformExperimentsHandler) withHosting(ctx context.Context, req Create
 	if err := h.svc.requireLauncher(ctx, h.launch.Launcher); err != nil {
 		return req, err
 	}
-	model := req.CoordinatorModel
-	if model == "" {
-		model = h.launch.CoordinatorModel
-	}
-	if err := domain.ValidateModel(model); err != nil {
-		return req, refuseSignup(400, "invalid_request", "coordinator_model: %s", err)
+	if req.CoordinatorModel != "" {
+		if err := domain.ValidateModel(req.CoordinatorModel); err != nil {
+			return req, refuseSignup(400, "invalid_request", "coordinator_model: %s", err)
+		}
 	}
 	// Checked before anything is made for the experiment: its repository is created ahead of
 	// the write that would refuse this.
 	if h.launch.MaxHosted < 2 {
 		return req, refuseSignup(409, "max_hosted_reached", "%s", maxHostedReached(h.launch.MaxHosted))
 	}
-	req.coordinator = &domain.HostedCoordinator{Launcher: h.launch.Launcher, Model: model}
+	req.coordinator = &domain.HostedCoordinator{Launcher: h.launch.Launcher, Model: req.CoordinatorModel}
 	return req, nil
 }
 
@@ -394,7 +393,7 @@ func (h *PlatformExperimentsHandler) hostedAgents(catalog domain.AgentTypeCatalo
 		if i == len(researchers) {
 			role = domain.SignupRoleBaseline
 		}
-		choice, err := domain.ResolveAgentLaunch(catalog, domain.RoleOfSignup(role), asked.Flavor, asked.Model, h.launch.DefaultModel, asked.Hyperparameters)
+		choice, err := domain.ResolveAgentLaunch(catalog, domain.RoleOfSignup(role), asked.Flavor, asked.Model, asked.Hyperparameters)
 		if err != nil {
 			return nil, nil, refusedProposal("invalid_agents", "agents[%d]: %s", i, err)
 		}

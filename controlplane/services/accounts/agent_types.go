@@ -23,6 +23,8 @@ const (
 	ReasonVersionConflict  = "version_conflict"
 	ReasonAgentTypeInUse   = "agent_type_in_use"
 	ReasonArchived         = "archived"
+	ReasonAgentTypeLimit   = "agent_type_limit"
+	ReasonEditRateLimited  = "edit_rate_limited"
 )
 
 // AgentTypes is the persistence of agent types. *db.AgentTypesStore satisfies it.
@@ -31,27 +33,27 @@ type AgentTypes interface {
 	Get(ctx context.Context, orgID, id string) (*domain.CurrentAgentType, error)
 	Versions(ctx context.Context, orgID, id string) ([]domain.AgentTypeVersion, error)
 	Version(ctx context.Context, orgID, id string, n int) (*domain.AgentTypeVersion, error)
+	Events(ctx context.Context, orgID, id string) ([]domain.AgentTypeEvent, error)
 	Create(ctx context.Context, orgID, name, description string, role domain.AgentRole, prompt string, settings domain.AgentTypeSettings, by domain.Actor) (*domain.CurrentAgentType, error)
-	Edit(ctx context.Context, e db.AgentTypeEdit, defaults domain.ModelDefaults) (*domain.CurrentAgentType, *domain.Propagation, error)
-	Archive(ctx context.Context, orgID, id string) (*domain.CurrentAgentType, error)
+	Edit(ctx context.Context, e db.AgentTypeEdit) (*domain.CurrentAgentType, *domain.Propagation, error)
+	Restore(ctx context.Context, orgID, id string, version int, by domain.Actor) (*domain.CurrentAgentType, *domain.Propagation, error)
+	Archive(ctx context.Context, orgID, id string, by domain.Actor) (*domain.CurrentAgentType, error)
 }
 
 // AgentTypesHandler serves an org's agent types: every member reads them, its administrators make
 // and change its own, and nobody changes a built-in one.
 type AgentTypesHandler struct {
-	store    AgentTypes
-	defaults domain.ModelDefaults
-	logger   *zap.Logger
-	access   *auth.Access
+	store  AgentTypes
+	logger *zap.Logger
+	access *auth.Access
 }
 
-// NewAgentTypesHandler serves store, moving the agents of an edited type to their new model with
-// defaults standing for a type that names none.
-func NewAgentTypesHandler(store AgentTypes, defaults domain.ModelDefaults, logger *zap.Logger) *AgentTypesHandler {
-	if store == nil || logger == nil || defaults.Agent == "" || defaults.Coordinator == "" {
-		panic("accounts.NewAgentTypesHandler: a store, a logger and both default models are required")
+// NewAgentTypesHandler serves store.
+func NewAgentTypesHandler(store AgentTypes, logger *zap.Logger) *AgentTypesHandler {
+	if store == nil || logger == nil {
+		panic("accounts.NewAgentTypesHandler: a store and a logger are required")
 	}
-	return &AgentTypesHandler{store: store, defaults: defaults, logger: logger}
+	return &AgentTypesHandler{store: store, logger: logger}
 }
 
 type agentTypeList struct {
@@ -62,10 +64,15 @@ type agentTypeAnswer struct {
 	Body domain.CurrentAgentType
 }
 
-// EditedAgentType is an agent type after an edit, and which agents it moved to the new version.
+// EditedAgentType is an agent type after an edit or a restore, and whom its new version told.
 type EditedAgentType struct {
 	domain.CurrentAgentType
-	Propagation domain.Propagation `json:"propagation" doc:"The agents and coordinators whose run goes on that the edit moved to the new version, each told with agent.instructions, and any that could not be moved, which keep the version they had. An edit that changes neither prompt nor settings makes no version and moves nobody."`
+	Propagation domain.Propagation `json:"propagation" doc:"The version now current and how many agents and coordinators whose run goes on were told with agent.instructions: each runs it from its next turn boundary. A change that leaves prompt and settings as they were makes no version and tells nobody."`
+}
+
+// RestoreAgentTypeBody names the version a restore copies.
+type RestoreAgentTypeBody struct {
+	Version int `json:"version" minimum:"1" doc:"The version whose prompt and settings the new version holds."`
 }
 
 // CreateAgentTypeBody makes an agent type: from scratch, or as a copy of one the org reads.
@@ -166,7 +173,9 @@ func RegisterAgentTypesHuma(doc *apidocs.Doc, h *AgentTypesHandler) {
 		OperationID: "create-agent-type", Method: "POST", Path: "/orgs/{id}/agent-types", Tags: []string{"agent-types"}, DefaultStatus: http.StatusCreated,
 		Summary: "Make an agent type of an org",
 		Description: "At version 1, from a role, a prompt and settings, or as a copy of an agent type the org reads (from), which is how a built-in one is changed. " +
-			"Only the org's administrators make one: a member is refused with 403. 422 invalid_agent_type for a prompt or settings an agent could not run with.",
+			"An org makes types of role researcher or baseline: a coordinator or a planner runs only its built-in type, and asking for one, or copying one, is refused with 422 invalid_agent_type. " +
+			"Only the org's administrators make one: a member is refused with 403. 422 invalid_agent_type for a prompt or settings an agent could not run with; " +
+			"409 agent_type_limit once the org has 100 types that are not archived.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body CreateAgentTypeBody
@@ -189,10 +198,11 @@ func RegisterAgentTypesHuma(doc *apidocs.Doc, h *AgentTypesHandler) {
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "edit-agent-type", Method: "PUT", Path: "/orgs/{id}/agent-types/{type_id}", Tags: []string{"agent-types"},
 		Summary: "Make the next version of an org's agent type",
-		Description: "Inserts the next version, makes it current and, in the same write, moves every agent and coordinator whose run goes on that runs the type to it, telling each with agent.instructions; " +
-			"its harness applies it at its next turn boundary. An agent on the model or the hyperparameters the old version gave it takes the new ones, as do the entries of the type in the researchers of platform experiments that are not closed. " +
+		Description: "Inserts the next version and makes it current, which every agent and coordinator of the type runs, and in the same write tells each whose run goes on with agent.instructions; " +
+			"its harness applies it at its next turn boundary: a new prompt, model or the effort max in a new session, the rest in the session it has. An agent given no model or hyperparameters of its own, and a pool entry naming none, run the type's from then on. " +
 			"Only the org's administrators edit: a member is refused with 403, and so is anyone editing a built-in type (builtin_read_only), which only the platform's repository changes. " +
-			"409 version_conflict when if_version is not current, archived for an archived type; 422 invalid_agent_type for a prompt or settings an agent could not run with.",
+			"409 version_conflict when if_version is not current, archived for an archived type; 422 invalid_agent_type for a prompt or settings an agent could not run with; " +
+			"429 edit_rate_limited once 60 versions of the type were made in the last hour.",
 	}, func(ctx context.Context, in *struct {
 		ID     string `path:"id"`
 		TypeID string `path:"type_id"`
@@ -216,15 +226,51 @@ func RegisterAgentTypesHuma(doc *apidocs.Doc, h *AgentTypesHandler) {
 		}
 		edited, propagation, err := h.store.Edit(ctx, db.AgentTypeEdit{
 			OrgID: in.ID, ID: in.TypeID, IfVersion: in.Body.IfVersion, Name: name, Description: description, Prompt: in.Body.Prompt, Settings: in.Body.Settings, By: caller.Actor(),
-		}, h.defaults)
+		})
 		if err != nil {
 			return nil, h.answer("edit-agent-type", err)
 		}
-		if len(propagation.Failed) > 0 {
-			h.logger.Warn("agent type edited, some agents keep the version they had", zap.String("agent_type", in.TypeID),
-				zap.Int("version", propagation.Version), zap.Any("not_moved", propagation.Failed))
-		}
 		return &struct{ Body EditedAgentType }{Body: EditedAgentType{CurrentAgentType: *edited, Propagation: *propagation}}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "restore-agent-type", Method: "POST", Path: "/orgs/{id}/agent-types/{type_id}/restore", Tags: []string{"agent-types"},
+		Summary: "Make an earlier version of an org's agent type current again",
+		Description: "Inserts the next version with the prompt and settings of version, makes it current and tells every agent and coordinator of the type whose run goes on with agent.instructions, as an edit does. " +
+			"Restoring what the current version holds makes no version. Name and description stay as they are. " +
+			"Only the org's administrators restore, and nobody a built-in type (builtin_read_only). 404 for a version the type does not have, 409 archived for an archived type, 429 edit_rate_limited as for an edit.",
+	}, func(ctx context.Context, in *struct {
+		ID     string `path:"id"`
+		TypeID string `path:"type_id"`
+		Body   RestoreAgentTypeBody
+	}) (*struct{ Body EditedAgentType }, error) {
+		caller, err := h.access.OrgAdmin(ctx, in.ID)
+		if err != nil {
+			return nil, err
+		}
+		restored, propagation, err := h.store.Restore(ctx, in.ID, in.TypeID, in.Body.Version, caller.Actor())
+		if err != nil {
+			return nil, h.answer("restore-agent-type", err)
+		}
+		return &struct{ Body EditedAgentType }{Body: EditedAgentType{CurrentAgentType: *restored, Propagation: *propagation}}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "list-agent-type-events", Method: "GET", Path: "/orgs/{id}/agent-types/{type_id}/events", Tags: []string{"agent-types"},
+		Summary:     "List every change of an agent type",
+		Description: "The newest first: who created, edited, renamed, described, archived or restored it, when, and the version it was at after. Nothing is ever removed from it.",
+	}, func(ctx context.Context, in *struct {
+		ID     string `path:"id"`
+		TypeID string `path:"type_id"`
+	}) (*struct{ Body []domain.AgentTypeEvent }, error) {
+		if _, err := h.access.OrgMember(ctx, in.ID); err != nil {
+			return nil, err
+		}
+		events, err := h.store.Events(ctx, in.ID, in.TypeID)
+		if err != nil {
+			return nil, h.answer("list-agent-type-events", err)
+		}
+		return &struct{ Body []domain.AgentTypeEvent }{Body: events}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
@@ -237,10 +283,11 @@ func RegisterAgentTypesHuma(doc *apidocs.Doc, h *AgentTypesHandler) {
 		ID     string `path:"id"`
 		TypeID string `path:"type_id"`
 	}) (*agentTypeAnswer, error) {
-		if _, err := h.access.OrgAdmin(ctx, in.ID); err != nil {
+		caller, err := h.access.OrgAdmin(ctx, in.ID)
+		if err != nil {
 			return nil, err
 		}
-		archived, err := h.store.Archive(ctx, in.ID, in.TypeID)
+		archived, err := h.store.Archive(ctx, in.ID, in.TypeID, caller.Actor())
 		if err != nil {
 			return nil, h.answer("archive-agent-type", err)
 		}
@@ -253,6 +300,9 @@ func (h *AgentTypesHandler) newType(ctx context.Context, orgID string, body Crea
 	name := strings.TrimSpace(body.Name)
 	if body.From == "" {
 		role, err := domain.ParseAgentRole(string(body.Role))
+		if err == nil {
+			err = domain.CheckOrgAgentRole(role)
+		}
 		if err != nil {
 			return "", "", "", "", domain.AgentTypeSettings{}, invalid(ReasonInvalidAgentType, err.Error())
 		}
@@ -268,6 +318,9 @@ func (h *AgentTypesHandler) newType(ctx context.Context, orgID string, body Crea
 	source, err := h.store.Get(ctx, orgID, body.From)
 	if err != nil {
 		return "", "", "", "", domain.AgentTypeSettings{}, err
+	}
+	if err := domain.CheckOrgAgentRole(source.Role); err != nil {
+		return "", "", "", "", domain.AgentTypeSettings{}, invalid(ReasonInvalidAgentType, err.Error())
 	}
 	if name == "" {
 		name = "Copy of " + source.Name
@@ -295,6 +348,7 @@ func (h *AgentTypesHandler) answer(op string, err error) error {
 	var refusal huma.StatusError
 	var conflictErr *db.AgentTypeVersionConflict
 	var inUse *db.AgentTypeInUse
+	var limit *db.AgentTypeLimit
 	switch {
 	case err == nil:
 		return nil
@@ -310,6 +364,10 @@ func (h *AgentTypesHandler) answer(op string, err error) error {
 		return conflict(ReasonVersionConflict, conflictErr.Error())
 	case errors.As(err, &inUse):
 		return conflict(ReasonAgentTypeInUse, inUse.Error()+": archive it once they closed or stopped using it")
+	case errors.As(err, &limit) && limit.Types:
+		return conflict(ReasonAgentTypeLimit, limit.Error())
+	case errors.As(err, &limit):
+		return api.Refuse(http.StatusTooManyRequests, ReasonEditRateLimited, limit.Error())
 	default:
 		return auth.Internal(h.logger, "agent types request failed", err, zap.String("operation", op))
 	}

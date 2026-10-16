@@ -74,6 +74,44 @@ type LateJoin struct {
 	BurstFraction float64
 	// MinShare is the least share worth giving: what one trial of the baseline holds.
 	MinShare float64
+	// Pool is a researcher the platform adds to keep the pool (quota.KeepResearchers): its entry
+	// must want one beyond those at work when the row is locked (poolWantsTx).
+	Pool bool
+}
+
+// ErrPoolSatisfied refuses a researcher the platform would add to keep the pool when, with the
+// platform experiment locked, its entry wants none beyond those at work, or it would replace
+// another beyond domain.MaxReplacementsAnHour of its entry.
+var ErrPoolSatisfied = errors.New("the pool entry wants no researcher added now")
+
+// poolWantsTx refuses signup, a researcher the platform adds to keep the pool of the platform
+// experiment platformExpID whose row the transaction locked, with ErrPoolSatisfied: what the
+// keeper decided from is checked again where no other write can move it.
+func poolWantsTx(ctx context.Context, tx pgx.Tx, platformExpID string, signup domain.AgentSignup) error {
+	var pool domain.ResearcherPool
+	if err := tx.QueryRow(ctx, `SELECT researchers FROM platform_experiments WHERE id = $1`, platformExpID).Scan(&pool); err != nil {
+		return fmt.Errorf("read researchers: %w", err)
+	}
+	atWork, err := researchersAtWork(ctx, tx, platformExpID)
+	if err != nil {
+		return err
+	}
+	key := domain.PoolKey{AgentType: signup.AgentType, Model: signup.Model}
+	i := slices.IndexFunc(pool, func(e domain.ResearcherPoolEntry) bool { return e.Key() == key })
+	if i < 0 || pool[i].Count <= atWork[key] {
+		return ErrPoolSatisfied
+	}
+	if signup.Replaces == "" {
+		return nil
+	}
+	recent, err := recentReplacements(ctx, tx, platformExpID)
+	if err != nil {
+		return err
+	}
+	if recent[key] >= domain.MaxReplacementsAnHour {
+		return ErrPoolSatisfied
+	}
+	return nil
 }
 
 // JoinRunning gives a researcher a place in a running platform experiment, and its quota: a fair
@@ -157,6 +195,13 @@ WHERE pe.id=$1 FOR UPDATE OF pe`, platformExpID).Scan(&status, &maxAgents, &maxH
 	if !running && status != string(domain.PlatformExpOpen) {
 		return 0, ErrSignupClosed
 	}
+	if running && late.Pool {
+		for _, signup := range signups {
+			if err := poolWantsTx(ctx, tx, platformExpID, signup); err != nil {
+				return 0, err
+			}
+		}
+	}
 	// Names are unique in a platform experiment, among the agents in it and those that left a
 	// job in it. The experiment row is locked, so two agents added at once cannot share one.
 	names, err := agentNamesTx(ctx, tx, platformExpID)
@@ -208,25 +253,25 @@ VALUES ($1, $2, $3, $4)`, agent.ID, agent.Name, agent.OrgID, agent.CreatedAt); e
 				return 0, err
 			}
 		}
-		hyperparameters, err := json.Marshal(nonNilObject(signup.Hyperparameters))
+		model, hyperparameters, err := ownSettings(signup)
 		if err != nil {
-			return 0, fmt.Errorf("platform_experiments_store.Signup: encode hyperparameters: %w", err)
+			return 0, fmt.Errorf("platform_experiments_store.Signup: %w", err)
 		}
 		var addedBy domain.Actor
 		if signup.Actor != nil {
 			addedBy = *signup.Actor
 		}
-		agentType, version, err := agentTypePinTx(ctx, tx, platformExpID, signup.AgentType, domain.RoleOfSignup(signup.Role))
+		agentType, err := agentTypeTx(ctx, tx, platformExpID, signup.AgentType, domain.RoleOfSignup(signup.Role))
 		if err != nil {
 			return 0, err
 		}
 		signup.QuotaTier = domain.ResolveQuotaTier(signup.QuotaTier, defaultTier)
 		tag, err := tx.Exec(ctx, `
-INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, agent_type, agent_type_version, hyperparameters, model, added_by_kind, added_by_id,
+INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, agent_type, hyperparameters, model, added_by_kind, added_by_id,
                                 replaces, replaces_xid)
-VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $13, $8, $9, $10, $11, $12::text, CASE WHEN $12::text <> '' THEN pg_current_xact_id()::text::bigint END)
+VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::text, CASE WHEN $12::text <> '' THEN pg_current_xact_id()::text::bigint END)
 ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
-			signup.Hosted, signup.Launcher, agentType, hyperparameters, signup.Model, string(addedBy.Kind), addedBy.ID, signup.Replaces, version)
+			signup.Hosted, signup.Launcher, agentType, hyperparameters, model, string(addedBy.Kind), addedBy.ID, signup.Replaces)
 		if err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: %w", err)
 		}
@@ -381,11 +426,20 @@ WHERE a.id IN (SELECT agent_id FROM experiment_signups WHERE platform_experiment
 	return names, rows.Err()
 }
 
-func nonNilObject(m map[string]any) map[string]any {
-	if m == nil {
-		return map[string]any{}
+// ownSettings is what a signup row holds of signup's model and hyperparameters: NULL for each it
+// leaves to its agent type.
+func ownSettings(signup domain.AgentSignup) (model, hyperparameters any, err error) {
+	if signup.Model != "" {
+		model = signup.Model
 	}
-	return m
+	if signup.Hyperparameters != nil {
+		encoded, err := json.Marshal(signup.Hyperparameters)
+		if err != nil {
+			return nil, nil, fmt.Errorf("encode hyperparameters: %w", err)
+		}
+		hyperparameters = string(encoded)
+	}
+	return model, hyperparameters, nil
 }
 
 // RemoveAgent takes an agent out of a platform experiment that has not started. ErrSignupClosed
@@ -763,7 +817,7 @@ const endedReasonSQL = `CASE WHEN EXISTS (SELECT 1 FROM platform_experiment_cuts
 // released, and why it ended: its platform experiment closed, it was cut, it finished, or it is
 // a planner whose answer is stored.
 var agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name, s.agent_id), s.role, s.quota_tier,
-       s.hosted, s.launcher, s.agent_type, COALESCE(s.agent_type_version, 0), s.hyperparameters, s.model, s.signed_up_at,
+       s.hosted, s.launcher, s.agent_type, s.hyperparameters, COALESCE(s.model, ''), s.signed_up_at,
        ` + instanceColumns + `,
        s.finished_at, s.finished_reason, s.added_by_kind, s.added_by_id, s.replaces,
        COALESCE((SELECT r.agent_id FROM experiment_signups r WHERE r.platform_experiment_id = s.platform_experiment_id AND r.replaces = s.agent_id), ''),
@@ -785,7 +839,7 @@ func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 	var activity string
 	var activityAt *time.Time
 	if err := row.Scan(append([]any{&signup.PlatformExperimentID, &signup.AgentID, &signup.Name, &signup.Role, &signup.QuotaTier,
-		&signup.Hosted, &signup.Launcher, &signup.AgentType, &signup.AgentTypeVersion, &hyperparameters, &signup.Model, &signup.SignedUpAt,
+		&signup.Hosted, &signup.Launcher, &signup.AgentType, &hyperparameters, &signup.Model, &signup.SignedUpAt,
 		&instance.Name, &instance.Restarts, &instance.Renewals, &instance.Stopped, &instance.ExitedAt, &instance.ExitLog,
 		&instance.SeenAt, &instance.AskedAt, &instance.Launch, &instance.Reported, &instance.ProgressAt, &instance.EndReason, &activity, &activityAt,
 		&signup.FinishedAt, &signup.FinishedReason, &addedBy.Kind, &addedBy.ID, &signup.Replaces, &signup.ReplacedBy, &instance.Released, &signup.Ended, &signup.CutReason, &signup.AtWork, &signup.EndedReason}, more...)...); err != nil {
@@ -795,6 +849,9 @@ func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 	if signup.Hosted {
 		signup.Instance = &instance
 		signup.Activity = domain.ActivityOf(activity, activityAt)
+	}
+	if hyperparameters == nil {
+		return signup, nil
 	}
 	if err := json.Unmarshal(hyperparameters, &signup.Hyperparameters); err != nil {
 		return domain.AgentSignup{}, fmt.Errorf("decode hyperparameters of %s: %w", signup.AgentID, err)

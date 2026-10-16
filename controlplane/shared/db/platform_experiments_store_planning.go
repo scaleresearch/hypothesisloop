@@ -45,22 +45,22 @@ INSERT INTO agents (id, name, org_id, created_at)
 VALUES ($1, $2, $3, $4)`, planner.ID, planner.Name, planner.OrgID, planner.CreatedAt); err != nil {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: create planner: %w", err)
 	}
-	hyperparameters, err := json.Marshal(nonNilObject(signup.Hyperparameters))
+	model, hyperparameters, err := ownSettings(signup)
 	if err != nil {
-		return fmt.Errorf("platform_experiments_store.CreateDraft: encode hyperparameters: %w", err)
+		return fmt.Errorf("platform_experiments_store.CreateDraft: %w", err)
 	}
 	var addedBy domain.Actor
 	if signup.Actor != nil {
 		addedBy = *signup.Actor
 	}
-	agentType, version, err := agentTypePinTx(ctx, tx, pe.ID, signup.AgentType, domain.RoleOfSignup(signup.Role))
+	agentType, err := agentTypeTx(ctx, tx, pe.ID, signup.AgentType, domain.RoleOfSignup(signup.Role))
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, agent_type, agent_type_version, hyperparameters, model, added_by_kind, added_by_id)
-VALUES ($1, $2, NOW(), $3, COALESCE(NULLIF($4, ''), (SELECT default_quota_tier FROM platform_experiments WHERE id = $1)), $5, $6, $7, $12, $8, $9, $10, $11)`, pe.ID, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
-		signup.Hosted, signup.Launcher, agentType, hyperparameters, signup.Model, string(addedBy.Kind), addedBy.ID, version); err != nil {
+INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, agent_type, hyperparameters, model, added_by_kind, added_by_id)
+VALUES ($1, $2, NOW(), $3, COALESCE(NULLIF($4, ''), (SELECT default_quota_tier FROM platform_experiments WHERE id = $1)), $5, $6, $7, $8, $9, $10, $11)`, pe.ID, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
+		signup.Hosted, signup.Launcher, agentType, hyperparameters, model, string(addedBy.Kind), addedBy.ID); err != nil {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: sign the planner up: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -187,22 +187,22 @@ INSERT INTO agents (id, name, org_id, created_at)
 VALUES ($1, $2, $3, $4)`, agent.ID, agent.Name, agent.OrgID, agent.CreatedAt); err != nil {
 		return fmt.Errorf("create the baseline agent: %w", err)
 	}
-	hyperparameters, err := json.Marshal(nonNilObject(signup.Hyperparameters))
+	model, hyperparameters, err := ownSettings(signup)
 	if err != nil {
-		return fmt.Errorf("encode hyperparameters: %w", err)
+		return fmt.Errorf("%w", err)
 	}
 	var addedBy domain.Actor
 	if signup.Actor != nil {
 		addedBy = *signup.Actor
 	}
-	agentType, version, err := agentTypePinTx(ctx, tx, id, signup.AgentType, domain.RoleOfSignup(signup.Role))
+	agentType, err := agentTypeTx(ctx, tx, id, signup.AgentType, domain.RoleOfSignup(signup.Role))
 	if err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, agent_type, agent_type_version, hyperparameters, model, added_by_kind, added_by_id)
-VALUES ($1, $2, NOW(), $3, COALESCE(NULLIF($4, ''), (SELECT default_quota_tier FROM platform_experiments WHERE id = $1)), $5, $6, $7, $12, $8, $9, $10, $11)`, id, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
-		signup.Hosted, signup.Launcher, agentType, hyperparameters, signup.Model, string(addedBy.Kind), addedBy.ID, version); err != nil {
+INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, agent_type, hyperparameters, model, added_by_kind, added_by_id)
+VALUES ($1, $2, NOW(), $3, COALESCE(NULLIF($4, ''), (SELECT default_quota_tier FROM platform_experiments WHERE id = $1)), $5, $6, $7, $8, $9, $10, $11)`, id, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
+		signup.Hosted, signup.Launcher, agentType, hyperparameters, model, string(addedBy.Kind), addedBy.ID); err != nil {
 		return fmt.Errorf("sign the baseline agent up: %w", err)
 	}
 	return nil
@@ -335,13 +335,16 @@ UPDATE platform_experiments
 SET status = 'open', name = $2, description = $3, budget_accelerator_hours = $4, max_agents = $5, metrics = $6,
     report_interval_seconds = $7, starts_at = $15, ends_at = $8, stages = $9, current_stage = 1,
     default_quota_tier = $10, max_concurrent_accelerators = $11,
-    coordinator_hosted = true, coordinator_launcher = $12, coordinator_model = $13, duration_hours = $14, updated_at = now(),
+    coordinator_hosted = true, coordinator_launcher = $12, coordinator_model = NULLIF($13, ''), duration_hours = $14, updated_at = now(),
     planner_ends_at = LEAST(planner_ends_at, now()), accepts_at = NULL,
     accepted_at = $16, accepted_by_kind = $17, accepted_by_id = $18, accepted_answers = $19, researchers = $20
 WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents, metrics,
 		pe.ReportIntervalSeconds, pe.BaselineDueAt, stages,
 		string(pe.DefaultQuotaTier), pe.MaxConcurrentAccelerators, pe.Coordinator.Launcher, pe.Coordinator.Model, pe.DurationHours, optionalTime(pe.StartsAt),
 		pe.AcceptedAt, string(acceptedBy.Kind), acceptedBy.ID, answers, researchers); err != nil {
+		return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
+	}
+	if err := poolTypesTx(ctx, tx, pe.ID, pe.Researchers); err != nil {
 		return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
 	}
 	if _, err := enrolTx(ctx, tx, pe.ID, create, signups, nil); err != nil {

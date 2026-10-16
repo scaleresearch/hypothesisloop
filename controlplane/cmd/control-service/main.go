@@ -94,7 +94,7 @@ func main() {
 		logger.Warn("the database has migrations of a later release, which this one runs against until it is replaced",
 			zap.Strings("migrations", migrated.Unknown))
 	}
-	seedBuiltinAgentTypes(pool, modelDefaults(pcfg), logger)
+	seedBuiltins(pool, logger)
 
 	metricsCtx, metricsCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	err = metricsdb.EnsureObservationTables(metricsCtx, metricsDBURL)
@@ -229,7 +229,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	environmentsSvc := environments.NewService(store.EnvironmentsStore, gitHost).WithJobImages(pcfg.OfferedJobImages(), imagedigest.New(time.Minute))
 
 	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap).WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent).WithRepositories(gitHost).
-		WithEnvironments(environmentsSvc).WithIdleNotice(peFullStore, time.Duration(pcfg.Agents.IdleNoticeMinutes)*time.Minute).WithPersonIdeas(graph)
+		WithEnvironments(environmentsSvc).WithModelDefaults(modelDefaults(pcfg)).WithIdleNotice(peFullStore, time.Duration(pcfg.Agents.IdleNoticeMinutes)*time.Minute).WithPersonIdeas(graph)
 	peHandler := quota.NewPlatformExperimentsHandler(peSvc, gitHost, quota.Planning{
 		Limit:       time.Duration(pcfg.Planning.LimitMinutes) * time.Minute,
 		ProposedFor: time.Duration(pcfg.Planning.ProposedForDays) * 24 * time.Hour,
@@ -282,7 +282,8 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		hypotheses:          graph,
 		sharing:             db.NewPlatformExperimentsStore(pool),
 		instructions:        db.NewPlatformExperimentsStore(pool),
-		agentTypes:          accounts.NewAgentTypesHandler(db.NewAgentTypesStore(pool), modelDefaults(pcfg), logger),
+		agentTypes:          accounts.NewAgentTypesHandler(db.NewAgentTypesStore(pool), logger),
+		models:              modelDefaults(pcfg),
 		dataUsage:           quota.NewDataUsageHandler(dataStore, store, peSvc, pcfg.DataStore.MaxBytesPerAgent, logger),
 		sessions:            dataStore,
 		drafts:              db.NewExperimentDraftsStore(pool),
@@ -325,6 +326,7 @@ type routes struct {
 	dataUsage           *quota.DataUsageHandler
 	sessions            quota.SessionStore
 	instructions        quota.InstructionsStore
+	models              domain.ModelDefaults
 	drafts              quota.ExperimentDraftStore
 	accounts            *accounts.Handler
 	agentTypes          *accounts.AgentTypesHandler
@@ -398,7 +400,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	quota.RegisterShareHuma(doc, h.sharing, h.platformExperiments.Answer, logger)
 	quota.RegisterDataUsageHuma(doc, h.dataUsage)
 	quota.RegisterSessionsHuma(doc, h.sessions, logger)
-	quota.RegisterInstructionsHuma(doc, h.instructions, logger)
+	quota.RegisterInstructionsHuma(doc, h.instructions, h.models, logger)
 	quota.RegisterExperimentDraftsHuma(doc, h.drafts, logger)
 	accounts.RegisterHuma(doc, h.accounts)
 	accounts.RegisterAgentTypesHuma(doc, h.agentTypes)
@@ -547,21 +549,27 @@ func modelDefaults(pcfg *hypothesisloopcfg.Config) domain.ModelDefaults {
 	return domain.ModelDefaults{Agent: pcfg.Agents.DefaultModel, Coordinator: pcfg.Agents.CoordinatorModel}
 }
 
-// seedBuiltinAgentTypes writes the built-in agent types this build holds, right after the schema
-// and under its lock, and pins every agent from before agent types to them.
-func seedBuiltinAgentTypes(pool *db.Pool, defaults domain.ModelDefaults, logger *zap.Logger) {
+// seedBuiltins writes the built-in agent types and the platform's rules this build holds, under
+// its release (agenttypes.Release), right after the schema and under its lock.
+func seedBuiltins(pool *db.Pool, logger *zap.Logger) {
 	builtins, err := agenttypes.Builtins()
 	if err != nil {
 		logger.Fatal("control-service: built-in agent types", zap.Error(err))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	seeded, err := db.SeedBuiltinAgentTypes(ctx, pool, builtins, defaults)
+	seeded, err := db.SeedBuiltins(ctx, pool, agenttypes.Release, builtins, apidocs.PlatformRules)
 	if err != nil {
-		logger.Fatal("control-service: seed built-in agent types", zap.Error(err))
+		logger.Fatal("control-service: seed built-in agent types and rules", zap.Error(err))
 	}
-	for _, s := range seeded {
+	for _, s := range seeded.Types {
 		logger.Info("built-in agent type has a new version", zap.String("agent_type", s.ID), zap.Int("version", s.Propagation.Version),
-			zap.Int("agents_moved", len(s.Propagation.Moved)), zap.Any("agents_not_moved", s.Propagation.Failed))
+			zap.Int("agents_told", s.Propagation.Told))
+	}
+	if seeded.RulesVersion > 0 {
+		logger.Info("the platform's rules have a new version", zap.Int("version", seeded.RulesVersion), zap.Int("agents_told", seeded.RulesTold))
+	}
+	if len(seeded.Skipped) > 0 {
+		logger.Warn("a later release seeded these, which this one leaves as they are", zap.Int("release", agenttypes.Release), zap.Strings("seeded", seeded.Skipped))
 	}
 }

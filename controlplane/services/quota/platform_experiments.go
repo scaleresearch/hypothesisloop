@@ -53,6 +53,9 @@ type PlatformExperimentsStore interface {
 	// ResearcherPoolState is what keeping the researchers of a running platform experiment is
 	// decided from: its pool and max_agents, who is at work and whose place is free for good.
 	ResearcherPoolState(ctx context.Context, platformExpID string) (db.PoolState, error)
+	// HoldResearchers records what a running platform experiment says of the places of its
+	// researchers the platform keeps empty, "" for none.
+	HoldResearchers(ctx context.Context, id, line string) error
 	// RaiseBaseline writes the running pe as patched with its baseline raised and records the
 	// raise, or does neither.
 	RaiseBaseline(ctx context.Context, pe *domain.PlatformExperiment, raise domain.BaselineRaise) error
@@ -211,6 +214,9 @@ type PlatformExperimentsService struct {
 	repositoryWake chan struct{}
 	// environments reads what the baseline branch declares and the environment a job ran in.
 	environments Environments
+	// models is the platform's model for an agent and a coordinator whose agent type names none
+	// (WithModelDefaults).
+	models domain.ModelDefaults
 	// idle tells researchers with no job for idleAfter that they are idle, and whoever steers a
 	// run that its capacity has held places free for idleAfter (WithIdleNotice).
 	idle      IdleNotices
@@ -248,6 +254,13 @@ type Environments interface {
 // WithPersonIdeas wires the graph the situation counts the open ideas of people in.
 func (s *PlatformExperimentsService) WithPersonIdeas(ideas PersonIdeas) *PlatformExperimentsService {
 	s.personIdeas = ideas
+	return s
+}
+
+// WithModelDefaults sets the platform's model for an agent and a coordinator whose agent type names
+// none.
+func (s *PlatformExperimentsService) WithModelDefaults(models domain.ModelDefaults) *PlatformExperimentsService {
+	s.models = models
 	return s
 }
 

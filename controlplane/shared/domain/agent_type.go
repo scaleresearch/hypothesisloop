@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -64,9 +63,39 @@ func DefaultAgentType(role AgentRole) string {
 	}
 }
 
-// AgentTypeIDPrefix starts the id of an agent type an org creates. A built-in type's id is its
-// name in the repository, which holds no dash.
+// AgentTypeIDPrefix starts the id of an agent type an org creates, followed by a dash. A built-in
+// type's id is its name in the repository, which never starts so (ValidateBuiltinAgentTypeID).
 const AgentTypeIDPrefix = "at"
+
+var builtinAgentTypeIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}$`)
+
+// ValidateBuiltinAgentTypeID refuses a built-in id that could be an org's: one in the namespace
+// of AgentTypeIDPrefix, or not lower-case letters, digits and dashes.
+func ValidateBuiltinAgentTypeID(id string) error {
+	if !builtinAgentTypeIDPattern.MatchString(id) || strings.HasPrefix(id, AgentTypeIDPrefix+"-") {
+		return fmt.Errorf("built-in agent type id %q must be lower-case letters, digits and dashes, and not start with %q, which org types' ids do", id, AgentTypeIDPrefix+"-")
+	}
+	return nil
+}
+
+// OrgAgentRoles is the roles an org makes agent types of: a coordinator or a planner runs only a
+// built-in type yet.
+var OrgAgentRoles = []AgentRole{AgentRoleResearcher, AgentRoleBaseline}
+
+// CheckOrgAgentRole refuses a role an org cannot make an agent type of.
+func CheckOrgAgentRole(role AgentRole) error {
+	if !slices.Contains(OrgAgentRoles, role) {
+		return fmt.Errorf("an org makes agent types of role researcher or baseline: a %s runs only its built-in type", role)
+	}
+	return nil
+}
+
+// Limits on what an org writes: the agent types it has that are not archived, and the versions an
+// edit or a restore makes of one type in an hour.
+const (
+	MaxOrgAgentTypes        = 100
+	MaxAgentTypeEditsAnHour = 60
+)
 
 // AgentType is a named prompt and settings an agent runs with. A built-in one has no org, is
 // seeded from the repository at start and is read-only for everyone.
@@ -77,8 +106,8 @@ type AgentType struct {
 	Description    string     `json:"description" doc:"One line on what agents of the type do, at most 200 characters. Empty when none was written."`
 	Role           AgentRole  `json:"role" enum:"researcher,baseline,coordinator,planner"`
 	Builtin        bool       `json:"builtin" doc:"Seeded by the platform from its repository and read-only for everyone. Duplicate one to change it."`
-	CurrentVersion int        `json:"current_version" doc:"The version new agents of the type are pinned to, and live agents are moved to when it is edited."`
-	ArchivedAt     *time.Time `json:"archived_at,omitempty" doc:"When it was archived. An archived type takes no new agent; agents pinned to it keep running."`
+	CurrentVersion int        `json:"current_version" doc:"The version every agent of the type runs: an edit or a restore makes the next one current, and each live agent is told with agent.instructions."`
+	ArchivedAt     *time.Time `json:"archived_at,omitempty" doc:"When it was archived. An archived type takes no new agent; agents that run it keep running."`
 	CreatedBy      *Actor     `json:"created_by,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 }
@@ -90,26 +119,48 @@ type AgentTypeVersion struct {
 	Version   int               `json:"version"`
 	Prompt    string            `json:"prompt" doc:"The system prompt, with {{name}} placeholders for the values filled at run time (AgentPlaceholders)."`
 	Settings  AgentTypeSettings `json:"settings"`
-	Digest    string            `json:"digest" doc:"sha256 of prompt and settings. A built-in is seeded again only when its digest matches no version it has."`
+	Digest    string            `json:"digest" doc:"sha256 of prompt and settings."`
+	Release   *int              `json:"release,omitempty" doc:"For a built-in version, the platform release that seeded it."`
 	CreatedBy *Actor            `json:"created_by,omitempty"`
 	CreatedAt time.Time         `json:"created_at"`
+}
+
+// AgentTypeAction is what a change did to an agent type.
+type AgentTypeAction string
+
+const (
+	AgentTypeCreated   AgentTypeAction = "create"
+	AgentTypeEdited    AgentTypeAction = "edit"
+	AgentTypeRenamed   AgentTypeAction = "rename"
+	AgentTypeDescribed AgentTypeAction = "describe"
+	AgentTypeArchived  AgentTypeAction = "archive"
+	AgentTypeRestored  AgentTypeAction = "restore"
+)
+
+// AgentTypeEvent is one change of an agent type, as it is kept: none is ever changed or deleted.
+type AgentTypeEvent struct {
+	ID      int64           `json:"id"`
+	TypeID  string          `json:"agent_type"`
+	Action  AgentTypeAction `json:"action" enum:"create,edit,rename,describe,archive,restore"`
+	Version int             `json:"version" doc:"The version the type was at after the change: the one an edit or a restore made."`
+	Detail  string          `json:"detail" doc:"The new name of a rename, the new description of a describe, the version a restore copied, the release that seeded a built-in edit; empty otherwise."`
+	By      *Actor          `json:"by,omitempty" doc:"Whose credential made the change: staff for the platform's seeding of a built-in type."`
+	At      time.Time       `json:"at"`
 }
 
 // CurrentAgentType is an agent type with its current version.
 type CurrentAgentType struct {
 	AgentType
 	Current AgentTypeVersion `json:"current"`
-	// LiveAgents is how many agents and coordinators whose run goes on run the type now.
-	LiveAgents int `json:"live_agents" doc:"How many agents and coordinators whose run goes on run the type now: an edit moves each of them to the new version."`
 }
 
 // AgentTypeSettings is what an agent type runs with besides its prompt.
 type AgentTypeSettings struct {
-	Model           string         `json:"model" required:"false" doc:"The model an agent of the type runs on when the agent names none. Empty or left out: the platform's default."`
+	Model           string         `json:"model" required:"false" doc:"The model an agent of the type runs on when the agent names none, read whenever the agent is served. Empty or left out: the platform's default."`
 	MaxSubagents    int            `json:"max_subagents" doc:"How many subagents run at once, 1 to 10."`
 	PacingSubagents int            `json:"pacing_subagents" doc:"How many run at once while the model account is ahead of its pace, 1 to max_subagents."`
 	Effort          string         `json:"effort" enum:"low,medium,high,xhigh,max" doc:"How hard the model thinks."`
-	Hyperparameters map[string]any `json:"hyperparameters" required:"false" doc:"What an agent of the type starts from when it is given none, at most 4096 bytes as JSON. Left out: none."`
+	Hyperparameters map[string]any `json:"hyperparameters" required:"false" doc:"What an agent of the type starts from when it is given none, read whenever the agent is served, at most 4096 bytes as JSON. Left out: none."`
 }
 
 // MaxSubagentsLimit bounds max_subagents.
@@ -442,32 +493,28 @@ func LookupAgentType(catalog AgentTypeCatalog, id string, role AgentRole) (Curre
 	return CurrentAgentType{}, fmt.Errorf("agent_type %q is not a %s agent type of this org: %s", id, role, strings.Join(names, ", "))
 }
 
-// AgentLaunchChoice is what a new agent is started with once ResolveAgentLaunch filled it.
+// AgentLaunchChoice is what a new agent is started with once ResolveAgentLaunch checked it. An
+// empty Model and nil Hyperparameters are the type's, read whenever the agent is served.
 type AgentLaunchChoice struct {
 	AgentType       string
 	Model           string
 	Hyperparameters map[string]any
 }
 
-// ResolveAgentLaunch checks what an agent of role asked to be started with and fills what it left
-// out, so that a signup always says exactly what its agent runs: the role's built-in type, the
-// type's model or else defaultModel, the type's hyperparameters.
-func ResolveAgentLaunch(catalog AgentTypeCatalog, role AgentRole, agentType, model, defaultModel string, hyperparameters map[string]any) (AgentLaunchChoice, error) {
+// ResolveAgentLaunch checks what an agent of role asked to be started with: the role's built-in
+// type for none, a model an agent can be started on and hyperparameters of the size allowed.
+// What it leaves out stays out, and is the type's.
+func ResolveAgentLaunch(catalog AgentTypeCatalog, role AgentRole, agentType, model string, hyperparameters map[string]any) (AgentLaunchChoice, error) {
 	if agentType == "" {
 		agentType = DefaultAgentType(role)
 	}
-	t, err := LookupAgentType(catalog, agentType, role)
-	if err != nil {
+	if _, err := LookupAgentType(catalog, agentType, role); err != nil {
 		return AgentLaunchChoice{}, err
 	}
-	if model == "" {
-		model = t.Current.Settings.ResolvedModel(defaultModel)
-	}
-	if err := ValidateModel(model); err != nil {
-		return AgentLaunchChoice{}, err
-	}
-	if hyperparameters == nil {
-		hyperparameters = t.Current.Settings.Hyperparameters
+	if model != "" {
+		if err := ValidateModel(model); err != nil {
+			return AgentLaunchChoice{}, err
+		}
 	}
 	if err := validateHyperparameters(hyperparameters); err != nil {
 		return AgentLaunchChoice{}, err
@@ -475,19 +522,40 @@ func ResolveAgentLaunch(catalog AgentTypeCatalog, role AgentRole, agentType, mod
 	return AgentLaunchChoice{AgentType: agentType, Model: model, Hyperparameters: hyperparameters}, nil
 }
 
-// EffectiveAgentSettings is what an agent runs with now: its pinned version's settings with the
-// model and hyperparameters its signup holds, which were resolved when it joined and follow the
-// type's when the type changes them (PropagatedSettings).
-func EffectiveAgentSettings(version AgentTypeSettings, model string, hyperparameters map[string]any) AgentTypeSettings {
+// ResolveModel is the model an agent of agentType in catalog that asked for model runs on now:
+// its own, else its type's, else defaultModel.
+func ResolveModel(catalog AgentTypeCatalog, agentType, model, defaultModel string) string {
+	if model != "" {
+		return model
+	}
+	for _, t := range catalog {
+		if t.ID == agentType {
+			return t.Current.Settings.ResolvedModel(defaultModel)
+		}
+	}
+	return defaultModel
+}
+
+// EffectiveAgentSettings is what an agent runs with now: the settings of its type's current
+// version, with the model and hyperparameters of its own where it names them. A model neither
+// names is defaultModel.
+func EffectiveAgentSettings(version AgentTypeSettings, model string, hyperparameters map[string]any, defaultModel string) AgentTypeSettings {
+	if model == "" {
+		model = version.ResolvedModel(defaultModel)
+	}
+	if hyperparameters == nil {
+		hyperparameters = version.Hyperparameters
+	}
 	version.Model, version.Hyperparameters = model, nonNilMap(hyperparameters)
 	return version
 }
 
-// InstructionsDigest is sha256 of what an agent is served: the composed prompt and the settings it
-// runs with. The harness compares it with the one it runs to tell whether anything changed.
-func InstructionsDigest(prompt string, settings AgentTypeSettings) (string, error) {
+// InstructionsDigest is sha256 of what an agent is served: the composed prompt, the settings it
+// runs with and the version of the platform's rules the prompt holds. The harness compares it with
+// the one it runs to tell whether anything changed.
+func InstructionsDigest(prompt string, settings AgentTypeSettings, rulesVersion int) (string, error) {
 	settings.Hyperparameters = nonNilMap(settings.Hyperparameters)
-	return AgentTypeDigest(prompt, settings)
+	return AgentTypeDigest(fmt.Sprintf("%s\x00rules %d", prompt, rulesVersion), settings)
 }
 
 // ModelDefaults is the platform's model for an agent and for a coordinator that names none.
@@ -504,49 +572,9 @@ func (d ModelDefaults) For(role AgentRole) string {
 	return d.Agent
 }
 
-// PinMove is one live agent an edit of its type moved to the new version, or failed to: AgentID is
-// CoordinatorRecipient for a coordinator, and empty for a platform experiment's researchers.
-type PinMove struct {
-	PlatformExperimentID string `json:"platform_experiment_id"`
-	AgentID              string `json:"agent_id,omitempty"`
-	Error                string `json:"error,omitempty"`
-}
-
-// Propagation is what a new version of an agent type did to the agents that run it: each live one
-// moved to it, and any that could not be, which stay on the version they had.
+// Propagation is what a new version of an agent type told the agents that run it: every agent
+// and coordinator whose run goes on runs it from its next turn boundary.
 type Propagation struct {
-	Version int       `json:"version"`
-	Moved   []PinMove `json:"moved"`
-	Failed  []PinMove `json:"failed"`
-}
-
-// Followed is the pool with the entries of agent type typeID that ran on its old model or with its
-// old hyperparameters moved to the new ones, as its agents are when the type changes them, and
-// entries that come to name one agent type and model merged.
-func (p ResearcherPool) Followed(typeID, oldModel, newModel string, oldHyperparameters, newHyperparameters map[string]any) ResearcherPool {
-	out := make(ResearcherPool, 0, len(p))
-	at := map[PoolKey]int{}
-	for _, e := range p {
-		if e.AgentType == typeID {
-			if e.Model == oldModel {
-				e.Model = newModel
-			}
-			if e.Hyperparameters != nil && sameJSON(e.Hyperparameters, nonNilMap(oldHyperparameters)) {
-				e.Hyperparameters = newHyperparameters
-			}
-		}
-		if j, ok := at[e.Key()]; ok {
-			out[j].Count += e.Count
-			continue
-		}
-		at[e.Key()] = len(out)
-		out = append(out, e)
-	}
-	return out
-}
-
-func sameJSON(a, b any) bool {
-	ea, errA := json.Marshal(a)
-	eb, errB := json.Marshal(b)
-	return errA == nil && errB == nil && bytes.Equal(ea, eb)
+	Version int `json:"version"`
+	Told    int `json:"told" doc:"The agents and coordinators whose run goes on told with agent.instructions."`
 }

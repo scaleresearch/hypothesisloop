@@ -36,9 +36,6 @@ const MaxInstanceNameLength = namePlatformExperimentLength + 1 + nameAgentLength
 // and hyperparameters from its instructions, again whenever they change. None of them goes into
 // the machine's name: the agent applies an edit of its type or model on the machine it has.
 func instanceFor(agent domain.AgentSignup, ended int, image, apiURL, signingSecret, launchDigest string) (Instance, error) {
-	if agent.AgentType == "" || agent.Model == "" {
-		return Instance{}, fmt.Errorf("signup of %s has no flavor or no model", agent.AgentID)
-	}
 	startedAs := map[string]string{
 		"API_URL":                apiURL,
 		"AGENT_ID":               agent.AgentID,
@@ -61,10 +58,7 @@ const coordinatorName = "coordinator"
 // coordinatorInstanceFor is the machine a platform experiment's hosted coordinator runs in: the
 // agents' image started with the platform experiment's coordinator token, which is what makes it
 // a coordinator. It reads its model from its instructions, so a change of it keeps the machine.
-func coordinatorInstanceFor(platformExperimentID, model string, ended int, image, apiURL, signingSecret, launchDigest string) (Instance, error) {
-	if model == "" {
-		return Instance{}, fmt.Errorf("coordinator of %s has no model", platformExperimentID)
-	}
+func coordinatorInstanceFor(platformExperimentID string, ended int, image, apiURL, signingSecret, launchDigest string) (Instance, error) {
 	startedAs := map[string]string{
 		"API_URL":                apiURL,
 		"PLATFORM_EXPERIMENT_ID": platformExperimentID,

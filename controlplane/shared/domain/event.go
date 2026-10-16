@@ -63,10 +63,10 @@ const (
 	// reaches that agent and whoever steers the run, and no rival. Its value is IdleNew on the
 	// first notice of a stretch and IdleContinues on each after it.
 	EventAgentIdle = "agent.idle"
-	// EventAgentInstructions says the agent type an agent runs was edited and the agent was moved to
-	// the new version: a pointer like the description event, whose text is read from its
-	// instructions. It reaches that agent, or the coordinator for its own (CoordinatorRecipient),
-	// and whoever steers the run.
+	// EventAgentInstructions says the instructions an agent is served changed: its agent type has
+	// a new current version, or the platform's rules do. A pointer like the description event,
+	// whose text is read from its instructions. It reaches that agent, or the coordinator for its
+	// own (CoordinatorRecipient), and whoever steers the run.
 	EventAgentInstructions = "agent.instructions"
 	// EventCapacityIdle says the capacity of a running platform experiment with time left holds
 	// places beyond its queued jobs, whether or not its researchers have jobs in flight and
@@ -156,10 +156,9 @@ var EventKinds = []EventKindDoc{
 		Description: "No job of this researcher of a running platform experiment ran on the platform for the platform's agents.idle_notice_minutes, and it has none queued or running: nothing of its own is in flight. " +
 			"Sent again every agents.idle_notice_minutes while the stretch lasts: new on the first notice of a stretch, continues on each after it, and a job it starts ends the stretch. " +
 			"detail says, as the platform knows them at the notice: for how long, the subagents and turn its harness last reported, how many jobs shaped like the run's baseline job the free capacity places now, the minutes left in the run and what is left of its share. Nothing is done to the agent."},
-	{Kind: EventAgentInstructions, Subject: "agent id, or coordinator", Value: "the version of its agent type it is pinned to now",
-		Description: "The agent type this agent runs was edited, and the platform moved the agent to the new version: detail is the agent type. " +
-			"A pointer that carries no text: read them with GET /platform-experiments/{id}/agents/{agent_id}/instructions, or /platform-experiments/{id}/coordinator/instructions for the coordinator, whose subject and agent_id are coordinator, and apply them at the next turn boundary. " +
-			"An agent the edit could not be moved is not told, and keeps the version it has."},
+	{Kind: EventAgentInstructions, Subject: "agent id, or coordinator", Value: "the current version of its agent type",
+		Description: "The instructions this agent is served changed: the agent type it runs was edited or restored, or the platform's rules have a new version. detail is the agent type. " +
+			"A pointer that carries no text: read them with GET /platform-experiments/{id}/agents/{agent_id}/instructions, or /platform-experiments/{id}/coordinator/instructions for the coordinator, whose subject and agent_id are coordinator, and apply them at the next turn boundary."},
 	{Kind: EventCapacityIdle, Subject: "platform experiment id", Value: "new or continues",
 		Description: "The free capacity of a running platform experiment with time left has placed more jobs shaped like its baseline job than it has queued (fits_now beyond the queued jobs) for the platform's agents.idle_notice_minutes, whoever has jobs in flight. " +
 			"Sent again every agents.idle_notice_minutes while places stay free, a reached target included: new on the first notice of a stretch, continues on each after it, and a pass that sees no place free ends the stretch. " +
@@ -177,7 +176,8 @@ var EventKinds = []EventKindDoc{
 	{Kind: EventCommentNew, Subject: "hypothesis id, or the platform experiment id for the objective", Value: "empty by design",
 		Description: "Someone said something on a claim, or on the objective, people included. agent_id is whose note it is, empty on one no agent owns. GET /hypotheses/{id}/comments reads it."},
 	{Kind: EventPlatformExperimentStatus, Subject: "platform experiment id", Value: "draft, open, running, closed",
-		Description: "The run itself moved. 'closed' is a stop condition for every agent in it, and its detail is what whoever closed it said of why, empty when they said nothing. With a detail on any other status the status stayed and its status_reason changed to one that waits for its coordinator, where the platform hosts one: detail is that reason, such as researchers_done once no researcher is left to work, sent within a minute of the change and once for each. GET /platform-experiments/{id} has its message."},
+		Description: "The run itself moved. 'closed' is a stop condition for every agent in it, and its detail is what whoever closed it said of why, empty when they said nothing. With a detail on any other status the status stayed and either its status_reason changed to one that waits for its coordinator, where the platform hosts one: detail is that reason, such as researchers_done once no researcher is left to work, sent within a minute of the change and once for each; " +
+			"or, on a running one, the platform keeps places of its researchers empty: detail starts researchers not replaced, and names each researcher that ended before submitting a job or within 10 minutes of joining, which is never replaced, and each that waits because its pool entry had 3 replacements in the last hour (researchers_held on GET /platform-experiments/{id}). GET /platform-experiments/{id} has its message."},
 	{Kind: EventPlatformExperimentDescription, Subject: "platform experiment id", Value: "empty by design",
 		Description: "The brief or the run's length (duration_hours) changed. A description is unbounded and is never copied into an event: re-read both with GET /platform-experiments/{id}."},
 	{Kind: EventPlatformExperimentRevision, Subject: "platform experiment id", Value: "empty by design",

@@ -3,6 +3,7 @@ package quota
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ func TestCreateWithAHostedCoordinatorCreatesItsResearchersInTheSameWrite(t *test
 	}
 	pe := store.created[0]
 	want := domain.ResearcherPool{
-		{AgentType: "generalist", Model: "model-default", Count: 2},
+		{AgentType: "generalist", Count: 2},
 		{AgentType: "data-search", Model: "model-2", Hyperparameters: map[string]any{"lr": 0.1}, Count: 1},
 	}
 	if len(pe.Researchers) != 2 || pe.Researchers[0].Key() != want[0].Key() || pe.Researchers[1].Key() != want[1].Key() || pe.Researchers.Total() != 3 || pe.MaxAgents != 4 {
@@ -42,8 +43,8 @@ func TestCreateWithAHostedCoordinatorCreatesItsResearchersInTheSameWrite(t *test
 func TestTheAnswerCountsTheResearchersAtWorkPerPoolEntryAndOutsideIt(t *testing.T) {
 	store, create := hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
 	store.atWork = map[domain.PoolKey]int{
-		{AgentType: "generalist", Model: "model-default"}:            2,
-		{AgentType: "hyperparameter-search", Model: "model-default"}: 3,
+		{AgentType: "generalist"}:            2,
+		{AgentType: "hyperparameter-search"}: 3,
 	}
 	code, out := create(run(map[string]any{"coordinator_hosted": true, "max_agents": 6, "researchers": []map[string]any{
 		{"count": 2},
@@ -89,6 +90,14 @@ type keepStore struct {
 	joined []domain.AgentSignup
 	// joinErr refuses every join, as the store refuses one the budget holds no share for.
 	joinErr error
+	// held is every line HoldResearchers wrote, and pool whether each join asked for the pool's check.
+	held []string
+	pool []bool
+}
+
+func (s *keepStore) HoldResearchers(_ context.Context, _, line string) error {
+	s.held = append(s.held, line)
+	return nil
 }
 
 func (s *keepStore) ResearcherPoolState(context.Context, string) (db.PoolState, error) {
@@ -101,7 +110,8 @@ func (s *keepStore) ListSignupsByRole(context.Context, string, domain.SignupRole
 	return nil, nil
 }
 
-func (s *keepStore) JoinRunning(_ context.Context, _ string, _ *domain.Agent, signup domain.AgentSignup, _ db.LateJoin) error {
+func (s *keepStore) JoinRunning(_ context.Context, _ string, _ *domain.Agent, signup domain.AgentSignup, late db.LateJoin) error {
+	s.pool = append(s.pool, late.Pool)
 	if s.joinErr != nil {
 		return s.joinErr
 	}
@@ -190,5 +200,48 @@ func TestKeepResearchersFillsAPlaceThePoolGained(t *testing.T) {
 	}
 	if len(store.joined) != 2 || store.joined[0].Replaces != "" || store.joined[0].Hyperparameters["from"] != "entry" {
 		t.Errorf("added %+v, want two researchers with the entry's hyperparameters, replacing nobody", store.joined)
+	}
+}
+
+// A researcher that ended early is not replaced, nor one beyond the limit of an entry an hour: the
+// places kept empty are written as one line, once while it stays the same and cleared once none
+// is, and every researcher added asks the store to check its entry again under the lock.
+func TestKeepResearchersHoldsThePlacesOfEarlyEndsAndAboveTheLimitAndSaysWhy(t *testing.T) {
+	key := domain.PoolKey{AgentType: "generalist"}
+	ended := func(id string, early bool) db.EndedResearcher {
+		r := db.EndedResearcher{Key: key, Early: early}
+		r.AgentID = id
+		return r
+	}
+	store := &keepStore{state: db.PoolState{
+		Pool: domain.ResearcherPool{{AgentType: "generalist", Count: 4}}, MaxAgents: 10, AtWork: map[domain.PoolKey]int{},
+		Ended:  map[domain.PoolKey][]db.EndedResearcher{key: {ended("ag-early", true), ended("ag-1", false), ended("ag-2", false), ended("ag-3", false)}},
+		Recent: map[domain.PoolKey]int{key: domain.MaxReplacementsAnHour - 1},
+	}}
+	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute)
+	now := time.Now().UTC()
+	pe := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning, CoordinatorHosted: true, EndsAt: now.Add(10 * time.Hour)}
+	keep := func() {
+		t.Helper()
+		if err := svc.KeepResearchers(context.Background(), pe, AgentLaunch{Launcher: "main", DefaultModel: "model-1"}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keep()
+	if len(store.joined) != 1 || store.joined[0].Replaces != "ag-1" || len(store.pool) != 1 || !store.pool[0] {
+		t.Errorf("joined %+v (pool checks %v), want ag-1 replaced under the pool's check", store.joined, store.pool)
+	}
+	if len(store.held) != 1 || !strings.Contains(store.held[0], "ag-early (generalist) ended before submitting a job") || !strings.Contains(store.held[0], "ag-2 (generalist), ag-3 (generalist) wait to be replaced") {
+		t.Fatalf("held %q", store.held)
+	}
+	store.state.Held = store.held[0]
+	keep()
+	if len(store.held) != 1 {
+		t.Errorf("the same holds again: written %q, want nothing more", store.held)
+	}
+	store.state.Pool = domain.ResearcherPool{{AgentType: "generalist", Count: 0}}
+	keep()
+	if len(store.held) != 2 || store.held[1] != "" {
+		t.Errorf("no place held: written %q, want the line cleared", store.held)
 	}
 }

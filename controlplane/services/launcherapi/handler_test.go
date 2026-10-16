@@ -199,18 +199,19 @@ func TestALauncherWithNothingToRunIsAnsweredWithTwoEmptyListsAndThePlatformsImag
 }
 
 // The agent reads its type, model and hyperparameters from its instructions and applies an edit of
-// them itself, so none of them replaces its machine.
-func TestAnAgentWhoseTypeModelOrHyperparametersChangeKeepsItsMachineAndASignupWithoutFlavorOrModelIsLeftOutAndLogged(t *testing.T) {
+// them itself, so none of them replaces its machine, and a signup naming no model of its own runs
+// on its type's like any other.
+func TestAnAgentWhoseTypeModelOrHyperparametersChangeKeepsItsMachine(t *testing.T) {
 	agent := hosted("pe-1", "ag-1")
 	instance, err := instanceFor(agent, agent.Instance.Restarts, testImage, testAPIURL, testSecret, testDigest)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for what, edit := range map[string]func(*domain.AgentSignup){
-		"flavor":             func(a *domain.AgentSignup) { a.AgentType = "data-search" },
-		"agent type version": func(a *domain.AgentSignup) { a.AgentTypeVersion++ },
-		"model":              func(a *domain.AgentSignup) { a.Model = "another-model" },
-		"hyperparameters":    func(a *domain.AgentSignup) { a.Hyperparameters = map[string]any{"batch_size": float64(32)} },
+		"flavor":          func(a *domain.AgentSignup) { a.AgentType = "data-search" },
+		"model":           func(a *domain.AgentSignup) { a.Model = "another-model" },
+		"no model":        func(a *domain.AgentSignup) { a.Model = "" },
+		"hyperparameters": func(a *domain.AgentSignup) { a.Hyperparameters = map[string]any{"batch_size": float64(32)} },
 	} {
 		edited := agent
 		edit(&edited)
@@ -219,30 +220,8 @@ func TestAnAgentWhoseTypeModelOrHyperparametersChangeKeepsItsMachineAndASignupWi
 			t.Errorf("after a change of %s: got = %+v, %v, want the machine %s as it was", what, changed, err, instance.Name)
 		}
 	}
-	coordinator, err := coordinatorInstanceFor("pe-1", "claude-sonnet-5", 0, testImage, testAPIURL, testSecret, testDigest)
-	if err != nil {
+	if _, err := coordinatorInstanceFor("pe-1", 0, testImage, testAPIURL, testSecret, testDigest); err != nil {
 		t.Fatal(err)
-	}
-	if other, err := coordinatorInstanceFor("pe-1", "another-model", 0, testImage, testAPIURL, testSecret, testDigest); err != nil || other.Name != coordinator.Name {
-		t.Errorf("after a change of the coordinator's model: got = %+v, %v, want the machine %s as it was", other, err, coordinator.Name)
-	}
-
-	noFlavor, noModel := hosted("pe-1", "ag-no-flavor"), hosted("pe-1", "ag-no-model")
-	noFlavor.AgentType, noModel.Model = "", ""
-	core, logs := observer.New(zap.ErrorLevel)
-	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {
-		{AgentSignup: noFlavor}, {AgentSignup: hosted("pe-1", "ag-whole")}, {AgentSignup: noModel},
-	}}}
-	code, raw := reconcileWith(t, store, mainLauncher, "main", zap.New(core), observed())
-	if code != http.StatusOK {
-		t.Fatalf("one bad row failed the whole list: %d %s", code, raw)
-	}
-	desired := decode(t, raw)
-	if len(desired.Instances) != 1 || !strings.HasPrefix(desired.Instances[0].Name, "pe1-agwhole-") {
-		t.Fatalf("instances = %+v, want the one whole agent", desired.Instances)
-	}
-	if logs.Len() != 2 {
-		t.Fatalf("logged %d entries, want one for each agent left out", logs.Len())
 	}
 }
 
@@ -696,7 +675,7 @@ func TestARunningMachinesHarnessStateGoesToTheRunsHealth(t *testing.T) {
 	agent, coordinator := first.Instances[0].Name, first.Instances[1].Name
 	metrics := &launchertest.Metrics{}
 	body := observed(
-		ObservedInstance{Name: agent, State: "running", Progress: marker("1"), HarnessState: "subagents=3 turn=working since=1759990000 instructions_digest=0123456789ab model_status=rejected model_type=seven_day model_utilization=1.0 model_resets_at=1760000000"},
+		ObservedInstance{Name: agent, State: "running", Progress: marker("1"), HarnessState: "subagents=3 turn=working since=1759990000 instructions_digest=0123456789ab version=4 model_status=rejected model_type=seven_day model_utilization=1.0 model_resets_at=1760000000"},
 		ObservedInstance{Name: coordinator, State: "running", Progress: marker("1"), HarnessState: "subagents=0 turn=waiting since=1759999000"})
 	if code, raw := reconcileRecording(t, store, metrics, testSettings, body); code != http.StatusOK {
 		t.Fatalf("status = %d: %s", code, raw)
@@ -704,8 +683,8 @@ func TestARunningMachinesHarnessStateGoesToTheRunsHealth(t *testing.T) {
 	full, resets := 1.0, time.Unix(1760000000, 0).UTC()
 	want := []domain.HarnessState{
 		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "competitor", Subagents: 3, TurnSince: time.Unix(1759990000, 0).UTC(), InstructionsDigest: "0123456789ab",
-			Model: domain.RateLimit{Rejected: true, Utilization: &full, ResetsAt: &resets}},
-		{PlatformExperimentID: "pe-1", Role: domain.CoordinatorHealthRole, TurnWaiting: true, TurnSince: time.Unix(1759999000, 0).UTC()},
+			AgentType: "data-search", AgentTypeVersion: 4, Model: domain.RateLimit{Rejected: true, Utilization: &full, ResetsAt: &resets}},
+		{PlatformExperimentID: "pe-1", Role: domain.CoordinatorHealthRole, AgentType: domain.CoordinatorFlavor, TurnWaiting: true, TurnSince: time.Unix(1759999000, 0).UTC()},
 	}
 	if got := metrics.Written(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("written %+v, want %+v", got, want)
@@ -740,6 +719,8 @@ func TestParseHarnessStateRefusesWhatTheHarnessDoesNotPrint(t *testing.T) {
 		"subagents=1 turn=working since=1759990000 instructions_digest=0123456789",
 		"subagents=1 turn=working since=1759990000 instructions_digest=0123456789AB",
 		"subagents=1 turn=working since=1759990000 instructions_digest=0123456789ab instructions_digest=0123456789ab",
+		"subagents=1 turn=working since=1759990000 instructions_digest=0123456789ab version=0",
+		"subagents=1 turn=working since=1759990000 instructions_digest=0123456789ab version=v2",
 	} {
 		if state, err := parseHarnessState(line); err == nil {
 			t.Errorf("%q: read %+v, want an error", line, state)

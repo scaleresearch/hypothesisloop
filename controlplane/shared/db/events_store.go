@@ -554,14 +554,17 @@ WHERE platform_experiment_id = $1 AND idle_xid >= $2`, peID, since, IdleNew, Idl
 }
 
 // replayAgentInstructions derives agent.instructions from the signups and the coordinator, which
-// record the version an edit last moved them to.
+// record the last change of what they are served, with the current version of their type, as the
+// trigger reads it: a change of the version writes the xid again, so the two agree.
 func replayAgentInstructions(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]domain.Event, error) {
 	rows, err := tx.Query(ctx, `
-SELECT agent_id, agent_type_version::text, agent_type, instructions_xid FROM experiment_signups
-WHERE platform_experiment_id = $1 AND instructions_xid >= $2
+SELECT s.agent_id, t.current_version::text, s.agent_type, s.instructions_xid
+FROM experiment_signups s JOIN agent_types t ON t.id = s.agent_type
+WHERE s.platform_experiment_id = $1 AND s.instructions_xid >= $2
 UNION ALL
-SELECT $3, coordinator_agent_type_version::text, coordinator_agent_type, coordinator_instructions_xid FROM platform_experiments
-WHERE id = $1 AND coordinator_instructions_xid >= $2`, peID, since, domain.CoordinatorRecipient)
+SELECT $3, t.current_version::text, pe.coordinator_agent_type, pe.coordinator_instructions_xid
+FROM platform_experiments pe JOIN agent_types t ON t.id = pe.coordinator_agent_type
+WHERE pe.id = $1 AND pe.coordinator_instructions_xid >= $2`, peID, since, domain.CoordinatorRecipient)
 	if err != nil {
 		return nil, fmt.Errorf("events_store.replayAgentInstructions: %w", err)
 	}
@@ -604,8 +607,9 @@ WHERE id = $1 AND capacity_xid >= $2`, peID, since, IdleNew, IdleContinues)
 //
 // A NULL column is a field that has never moved since the row was created, and produces nothing.
 func replayPlatformExperiment(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]domain.Event, error) {
-	const q = `SELECT status::text, close_message, status_changed_xid, description_changed_xid, coordinator_reason, coordinator_reason_xid
-FROM platform_experiments WHERE id = $1 AND (status_changed_xid >= $2 OR description_changed_xid >= $2 OR coordinator_reason_xid >= $2)`
+	const q = `SELECT status::text, close_message, status_changed_xid, description_changed_xid, coordinator_reason, coordinator_reason_xid,
+       researchers_held, researchers_held_xid
+FROM platform_experiments WHERE id = $1 AND (status_changed_xid >= $2 OR description_changed_xid >= $2 OR coordinator_reason_xid >= $2 OR researchers_held_xid >= $2)`
 	rows, err := tx.Query(ctx, q, peID, since)
 	if err != nil {
 		return nil, fmt.Errorf("events_store.replayPlatformExperiment: %w", err)
@@ -615,9 +619,9 @@ FROM platform_experiments WHERE id = $1 AND (status_changed_xid >= $2 OR descrip
 	var events []domain.Event
 	for rows.Next() {
 		var status, closeMessage string
-		var coordinatorReason *string
-		var statusXid, descriptionXid, coordinatorReasonXid *int64
-		if err := rows.Scan(&status, &closeMessage, &statusXid, &descriptionXid, &coordinatorReason, &coordinatorReasonXid); err != nil {
+		var coordinatorReason, researchersHeld *string
+		var statusXid, descriptionXid, coordinatorReasonXid, researchersHeldXid *int64
+		if err := rows.Scan(&status, &closeMessage, &statusXid, &descriptionXid, &coordinatorReason, &coordinatorReasonXid, &researchersHeld, &researchersHeldXid); err != nil {
 			return nil, fmt.Errorf("events_store.replayPlatformExperiment: scan: %w", err)
 		}
 		if statusXid != nil {
@@ -631,6 +635,10 @@ FROM platform_experiments WHERE id = $1 AND (status_changed_xid >= $2 OR descrip
 		if coordinatorReason != nil {
 			events = append(events, domain.Event{Kind: domain.EventPlatformExperimentStatus, Subject: peID,
 				Value: status, Detail: *coordinatorReason, PlatformExperimentID: peID, Position: *coordinatorReasonXid})
+		}
+		if researchersHeld != nil {
+			events = append(events, domain.Event{Kind: domain.EventPlatformExperimentStatus, Subject: peID,
+				Value: status, Detail: *researchersHeld, PlatformExperimentID: peID, Position: *researchersHeldXid})
 		}
 		if descriptionXid != nil {
 			events = append(events, domain.Event{Kind: domain.EventPlatformExperimentDescription, Subject: peID,

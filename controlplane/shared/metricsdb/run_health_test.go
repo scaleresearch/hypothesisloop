@@ -122,9 +122,11 @@ func TestLatestHarnessStateReadsWhatEachHarnessLastSaid(t *testing.T) {
 	}
 }
 
-// Each state is written as its gauges, the rate-limit ones only of a harness that has read one.
+// Each state is written as its gauges, the rate-limit ones only of a harness that has read one, and
+// the version of its agent type, labelled with the type, only of one that said it.
 func TestRecordHarnessStateWritesTheRateLimitOnlyOnceRead(t *testing.T) {
 	written := map[string][]string{}
+	versionOf := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -139,14 +141,19 @@ func TestRecordHarnessStateWritesTheRateLimitOnlyOnceRead(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, ts := range req.Timeseries {
-			name, role := "", ""
+			name, role, agentType := "", "", ""
 			for _, l := range ts.Labels {
 				switch l.Name {
 				case "__name__":
 					name = l.Value
 				case "role":
 					role = l.Value
+				case "agent_type":
+					agentType = l.Value
 				}
+			}
+			if name == agentInstructionsVersionMetric {
+				versionOf = agentType
 			}
 			written[role] = append(written[role], name)
 		}
@@ -155,7 +162,7 @@ func TestRecordHarnessStateWritesTheRateLimitOnlyOnceRead(t *testing.T) {
 	utilization := 0.4
 	err := RecordHarnessState(context.Background(), server.URL, time.Now(), []domain.HarnessState{
 		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "competitor", Subagents: 2, TurnSince: time.Now(), Model: domain.RateLimit{Utilization: &utilization}},
-		{PlatformExperimentID: "pe-1", Role: "coordinator", TurnWaiting: true, TurnSince: time.Now(), InstructionsDigest: "0123456789ab"},
+		{PlatformExperimentID: "pe-1", Role: "coordinator", TurnWaiting: true, TurnSince: time.Now(), InstructionsDigest: "0123456789ab", AgentType: "coordinator", AgentTypeVersion: 3},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -163,9 +170,9 @@ func TestRecordHarnessStateWritesTheRateLimitOnlyOnceRead(t *testing.T) {
 	state := []string{agentStateReportedAtMetric, agentSubagentsMetric, agentTurnWaitingMetric, agentTurnSinceMetric}
 	want := map[string][]string{
 		"competitor":  append(slices.Clone(state), agentRateLimitRejectedMetric, agentRateLimitUtilizationMetric),
-		"coordinator": append(slices.Clone(state), agentInstructionsDigestMetric),
+		"coordinator": append(slices.Clone(state), agentInstructionsDigestMetric, agentInstructionsVersionMetric),
 	}
-	if !reflect.DeepEqual(written, want) {
-		t.Errorf("written %v, want %v", written, want)
+	if !reflect.DeepEqual(written, want) || versionOf != "coordinator" {
+		t.Errorf("written %v of version labelled %q, want %v of coordinator", written, versionOf, want)
 	}
 }

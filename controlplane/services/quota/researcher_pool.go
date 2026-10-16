@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -18,7 +17,7 @@ import (
 // agent's are, entries that come to name one agent type and model merged. 422 invalid_agents for
 // an entry no agent can be started as; validate holds the rest, max_agents among it.
 func (h *PlatformExperimentsHandler) resolvedPool(catalog domain.AgentTypeCatalog, pool domain.ResearcherPool) (domain.ResearcherPool, error) {
-	resolved, err := pool.Resolved(catalog, h.launch.DefaultModel)
+	resolved, err := pool.Resolved(catalog)
 	if err != nil {
 		return nil, refuseUpdate(422, "invalid_agents", "%s", err)
 	}
@@ -49,7 +48,10 @@ func (k *ResearcherKeeper) KeepResearchers(ctx context.Context, pe *domain.Platf
 // entry that finished or whose machine stopped with no restart left, with its hyperparameters and
 // quota tier, or of nobody where the pool gained a place, with the entry's. Never more than max_agents
 // leaves beside every researcher at work, the coordinator's additions among them. A cut lowered the pool
-// in the write that cut, so no cut researcher is replaced.
+// in the write that cut, so no cut researcher is replaced. Nor is one that ended early, and an entry
+// is given at most domain.MaxReplacementsAnHour replacements an hour: the places it keeps empty
+// are told on the platform experiment (db.HoldResearchers), and the entry is checked again in the
+// write that adds each one (db.LateJoin.Pool).
 //
 // It adds none while less of the run is left than domain.ReplacementLead, none of an entry whose
 // model account refuses its calls now, and stops at the first one the budget its researchers
@@ -73,23 +75,28 @@ func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *do
 	if err != nil {
 		return fmt.Errorf("platform_experiments.KeepResearchers: %w", err)
 	}
-	pool, err := state.Pool.Resolved(catalog, launch.DefaultModel)
+	pool, err := state.Pool.Resolved(catalog)
 	if err != nil {
 		return fmt.Errorf("platform_experiments.KeepResearchers: the researchers of %s: %w", pe.ID, err)
 	}
-	ended := make(map[domain.PoolKey][]string, len(state.Ended))
+	ended := make(map[domain.PoolKey][]domain.EndedPlace, len(state.Ended))
 	predecessors := map[string]db.EndedResearcher{}
 	for key, researchers := range state.Ended {
 		for _, r := range researchers {
-			ended[key] = append(ended[key], r.AgentID)
+			ended[key] = append(ended[key], domain.EndedPlace{AgentID: r.AgentID, Early: r.Early})
 			predecessors[r.AgentID] = r
 		}
 	}
-	places := domain.PoolDeficit(pool, state.MaxAgents, state.AtWork, ended)
+	places, holds := domain.PoolDeficit(pool, state.MaxAgents, state.AtWork, ended, state.Recent)
+	if line := domain.HoldsLine(holds); line != state.Held {
+		if err := s.store.HoldResearchers(ctx, pe.ID, line); err != nil {
+			return fmt.Errorf("platform_experiments.KeepResearchers: %w", err)
+		}
+	}
 	if len(places) == 0 {
 		return nil
 	}
-	refused, err := s.refusedModels(ctx, pe, now)
+	refused, err := s.refusedModels(ctx, pe, catalog, now)
 	if err != nil {
 		return fmt.Errorf("platform_experiments.KeepResearchers: %w", err)
 	}
@@ -102,14 +109,14 @@ func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *do
 		by = *pe.Actor
 	}
 	for _, place := range places {
-		if refused[place.Entry.Model] {
+		if refused[domain.ResolveModel(catalog, place.Entry.AgentType, place.Entry.Model, launch.DefaultModel)] {
 			continue
 		}
 		hyperparameters, tier := place.Entry.Hyperparameters, domain.QuotaTier("")
 		if predecessor, ok := predecessors[place.Replaces]; ok {
 			hyperparameters, tier = predecessor.Hyperparameters, predecessor.QuotaTier
 		}
-		choice, err := domain.ResolveAgentLaunch(catalog, domain.AgentRoleResearcher, place.Entry.AgentType, place.Entry.Model, launch.DefaultModel, hyperparameters)
+		choice, err := domain.ResolveAgentLaunch(catalog, domain.AgentRoleResearcher, place.Entry.AgentType, place.Entry.Model, hyperparameters)
 		if err != nil {
 			s.logger.Warn("keep researchers: an entry no researcher can be started as", zap.String("platform_experiment_id", pe.ID), zap.String("agent_type", place.Entry.AgentType), zap.Error(err))
 			continue
@@ -122,6 +129,7 @@ func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *do
 		if err != nil {
 			return fmt.Errorf("platform_experiments.KeepResearchers: %w", err)
 		}
+		late.Pool = true
 		id, err := domain.NewID(domain.AgentIDPrefix)
 		if err != nil {
 			return fmt.Errorf("platform_experiments.KeepResearchers: %w", err)
@@ -130,7 +138,7 @@ func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *do
 		agent := &domain.Agent{ID: id, CreatedAt: now}
 		err = s.store.JoinRunning(ctx, pe.ID, agent, signup, *late)
 		switch {
-		case errors.Is(err, db.ErrNoShareLeft), errors.Is(err, db.ErrMaxAgentsReached), errors.Is(err, db.ErrMaxHostedReached), errors.Is(err, db.ErrSignupClosed):
+		case errors.Is(err, db.ErrNoShareLeft), errors.Is(err, db.ErrMaxAgentsReached), errors.Is(err, db.ErrMaxHostedReached), errors.Is(err, db.ErrSignupClosed), errors.Is(err, db.ErrPoolSatisfied):
 			s.logger.Info("keep researchers: none added", zap.String("platform_experiment_id", pe.ID), zap.String("replaces", place.Replaces), zap.String("why", err.Error()))
 			return nil
 		case err != nil:
@@ -144,7 +152,8 @@ func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *do
 
 // refusedModels is the models whose account the provider refuses the calls of now, as the
 // harness of an agent of pe at work on one last read it: a researcher added on one would only wait.
-func (s *PlatformExperimentsService) refusedModels(ctx context.Context, pe *domain.PlatformExperiment, now time.Time) (map[string]bool, error) {
+// An agent on its type's model is on the model catalog resolves.
+func (s *PlatformExperimentsService) refusedModels(ctx context.Context, pe *domain.PlatformExperiment, catalog domain.AgentTypeCatalog, now time.Time) (map[string]bool, error) {
 	states, err := metricsdb.LatestHarnessState(ctx, s.metricsDBURL, pe.ID, pe.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -167,7 +176,7 @@ func (s *PlatformExperimentsService) refusedModels(ctx context.Context, pe *doma
 			continue
 		}
 		if allowance := domain.ModelAllowanceOf(state.Model, now); allowance.RefusedUntil != nil {
-			refused[strings.TrimSpace(signup.Model)] = true
+			refused[domain.ResolveModel(catalog, signup.AgentType, signup.Model, s.models.Agent)] = true
 		}
 	}
 	return refused, nil

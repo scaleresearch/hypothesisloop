@@ -651,7 +651,7 @@ func (s *PlatformExperimentsService) runsPinnedInstructions(ctx context.Context,
 	if err != nil || src == nil {
 		return nil, err
 	}
-	pinned, err := composeInstructions(platformExpID, agentID, src)
+	pinned, err := composeInstructions(platformExpID, agentID, src, s.models)
 	if err != nil {
 		return nil, err
 	}

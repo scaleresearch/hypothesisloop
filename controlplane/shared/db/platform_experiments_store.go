@@ -36,7 +36,7 @@ func NewPlatformExperimentsStore(pool *Pool) *PlatformExperimentsStore {
 
 // coordinatorColumns are what a platform experiment says of the coordinator the platform runs
 // for it, read from platform_experiments as pe joined to its machine as ci (coordinatorInstanceJoin).
-var coordinatorColumns = `pe.coordinator_hosted, pe.coordinator_launcher, pe.coordinator_model,
+var coordinatorColumns = `pe.coordinator_hosted, pe.coordinator_launcher, COALESCE(pe.coordinator_model, ''),
        COALESCE(ci.name, ''), COALESCE(ci.restarts, 0), COALESCE(ci.renewals, 0), COALESCE(ci.stopped, false), ci.exited_at, COALESCE(ci.exit_log, ''),
        ci.seen_at, ci.asked_at, COALESCE(ci.launch, ''), COALESCE(ci.state, ''), ci.progress_at, COALESCE(ci.end_reason, ''),
        ` + domain.InstanceReleasedSQL("pe.closed_at")
@@ -90,12 +90,14 @@ type execer interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }
 
-func insertPlatformExperiment(ctx context.Context, db execer, pe *domain.PlatformExperiment) error {
+// insertPlatformExperiment inserts pe, whose coordinator runs the built-in coordinator type, and
+// locks the agent type of each entry of its researchers (poolTypesTx).
+func insertPlatformExperiment(ctx context.Context, tx pgx.Tx, pe *domain.PlatformExperiment) error {
 	const q = `
 INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_launcher, coordinator_model, max_hosted, repository, repository_url, agent_image, goal, created_by_kind, created_by_id, duration_hours, repository_account, continues, researchers,
-                                  coordinator_agent_type, coordinator_agent_type_version)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, NULLIF($30, ''), $31,
-        '` + domain.CoordinatorFlavor + `', (SELECT current_version FROM agent_types WHERE id = '` + domain.CoordinatorFlavor + `'))`
+                                  coordinator_agent_type)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NULLIF($20, ''), $21, $22, $23, $24, $25, $26, $27, $28, $29, NULLIF($30, ''), $31,
+        '` + domain.CoordinatorFlavor + `')`
 
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {
@@ -128,7 +130,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 	if pe.Actor != nil {
 		createdBy = *pe.Actor
 	}
-	_, err = db.Exec(ctx, q,
+	_, err = tx.Exec(ctx, q,
 		pe.ID, pe.ProjectID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
 		metrics, pe.ReportIntervalSeconds,
 		optionalTime(pe.StartsAt), pe.ClosesAt(), string(pe.Status),
@@ -139,6 +141,9 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 		pe.Goal, string(createdBy.Kind), createdBy.ID, pe.DurationHours, pe.RepositoryAccount, pe.Continues, researchers,
 	)
 	if err != nil {
+		return fmt.Errorf("platform_experiments_store.Create: %w", err)
+	}
+	if err := poolTypesTx(ctx, tx, pe.ID, pe.Researchers); err != nil {
 		return fmt.Errorf("platform_experiments_store.Create: %w", err)
 	}
 	return nil

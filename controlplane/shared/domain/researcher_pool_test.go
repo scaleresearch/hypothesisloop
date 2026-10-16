@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -9,22 +10,29 @@ func TestPoolDeficitReplacesWhoEndedWithinMaxAgents(t *testing.T) {
 	g := PoolKey{AgentType: "generalist", Model: "m"}
 	d := PoolKey{AgentType: "data-search", Model: "m"}
 	pool := ResearcherPool{{AgentType: "generalist", Model: "m", Count: 2}, {AgentType: "data-search", Model: "m", Count: 1}}
+	ended := func(ids ...string) []EndedPlace {
+		out := make([]EndedPlace, len(ids))
+		for i, id := range ids {
+			out[i] = EndedPlace{AgentID: id}
+		}
+		return out
+	}
 	for name, c := range map[string]struct {
 		maxAgents int
 		atWork    map[PoolKey]int
-		ended     map[PoolKey][]string
+		ended     map[PoolKey][]EndedPlace
 		want      []PoolPlace
 	}{
 		"nobody missing":     {3, map[PoolKey]int{g: 2, d: 1}, nil, nil},
-		"one ended":          {3, map[PoolKey]int{g: 1, d: 1}, map[PoolKey][]string{g: {"ag-1", "ag-2"}}, []PoolPlace{{Entry: pool[0], Replaces: "ag-1"}}},
+		"one ended":          {3, map[PoolKey]int{g: 1, d: 1}, map[PoolKey][]EndedPlace{g: ended("ag-1", "ag-2")}, []PoolPlace{{Entry: pool[0], Replaces: "ag-1"}}},
 		"a place gained":     {3, map[PoolKey]int{g: 2}, nil, []PoolPlace{{Entry: pool[1]}}},
-		"max_agents is full": {3, map[PoolKey]int{g: 1, d: 1, {AgentType: "architecture-search", Model: "m"}: 1}, map[PoolKey][]string{g: {"ag-1"}}, nil},
-		"room for one of two": {3, map[PoolKey]int{d: 1, {AgentType: "architecture-search", Model: "m"}: 1}, map[PoolKey][]string{g: {"ag-1", "ag-2"}},
+		"max_agents is full": {3, map[PoolKey]int{g: 1, d: 1, {AgentType: "architecture-search", Model: "m"}: 1}, map[PoolKey][]EndedPlace{g: ended("ag-1")}, nil},
+		"room for one of two": {3, map[PoolKey]int{d: 1, {AgentType: "architecture-search", Model: "m"}: 1}, map[PoolKey][]EndedPlace{g: ended("ag-1", "ag-2")},
 			[]PoolPlace{{Entry: pool[0], Replaces: "ag-1"}}},
 	} {
-		got := PoolDeficit(pool, c.maxAgents, c.atWork, c.ended)
-		if len(got) != len(c.want) {
-			t.Errorf("%s: got = %+v, want = %+v", name, got, c.want)
+		got, holds := PoolDeficit(pool, c.maxAgents, c.atWork, c.ended, nil)
+		if len(got) != len(c.want) || len(holds) != 0 {
+			t.Errorf("%s: got = %+v %+v, want = %+v", name, got, holds, c.want)
 			continue
 		}
 		for i := range got {
@@ -32,6 +40,30 @@ func TestPoolDeficitReplacesWhoEndedWithinMaxAgents(t *testing.T) {
 				t.Errorf("%s: got = %+v, want = %+v", name, got, c.want)
 			}
 		}
+	}
+}
+
+// A researcher that ended early keeps its place empty, and an entry is given at most
+// MaxReplacementsAnHour replacements an hour: each place kept empty says why.
+func TestPoolDeficitHoldsThePlacesOfEarlyEndsAndAboveTheReplacementLimit(t *testing.T) {
+	g := PoolKey{AgentType: "generalist"}
+	pool := ResearcherPool{{AgentType: "generalist", Count: 4}}
+	places, holds := PoolDeficit(pool, 10, map[PoolKey]int{}, map[PoolKey][]EndedPlace{g: {{AgentID: "ag-early", Early: true}, {AgentID: "ag-1"}, {AgentID: "ag-2"}}}, map[PoolKey]int{g: MaxReplacementsAnHour - 1})
+	if len(places) != 2 || places[0].Replaces != "ag-1" || places[1].Replaces != "" {
+		t.Errorf("places = %+v, want ag-1 replaced and the place nobody left filled", places)
+	}
+	if len(holds) != 2 || holds[0] != (PoolHold{Key: g, Replaces: "ag-early", Reason: HoldEndedEarly}) || holds[1] != (PoolHold{Key: g, Replaces: "ag-2", Reason: HoldReplacementLimit}) {
+		t.Errorf("holds = %+v, want ag-early held for ending early and ag-2 for the limit", holds)
+	}
+	line := HoldsLine(holds)
+	if !strings.Contains(line, "ag-early (generalist) ended before submitting a job") || !strings.Contains(line, "ag-2 (generalist) wait to be replaced") {
+		t.Errorf("line = %q", line)
+	}
+	if HoldsLine(nil) != "" {
+		t.Error("no hold: want no line")
+	}
+	if _, holds := PoolDeficit(ResearcherPool{{AgentType: "generalist", Count: 1}}, 10, map[PoolKey]int{g: 1}, map[PoolKey][]EndedPlace{g: {{AgentID: "ag-early", Early: true}}}, nil); len(holds) != 0 {
+		t.Errorf("an entry that needs nobody: holds = %+v, want none", holds)
 	}
 }
 
@@ -61,9 +93,9 @@ func TestAPoolIsCheckedAndResolved(t *testing.T) {
 			t.Errorf("%s: got = %v, want ok %v", name, err, c.ok)
 		}
 	}
-	resolved, err := ResearcherPool{{Count: 1}, {AgentType: "generalist", Model: "default", Count: 2}}.Resolved(testCatalog(), "default")
-	if err != nil || len(resolved) != 1 || resolved[0].Key() != (PoolKey{AgentType: "generalist", Model: "default"}) || resolved[0].Count != 3 {
-		t.Errorf("resolved = %+v %v, want one entry of three generalists on the default", resolved, err)
+	resolved, err := ResearcherPool{{Count: 1}, {AgentType: "generalist", Count: 2}, {AgentType: "generalist", Model: "own", Count: 1}}.Resolved(testCatalog())
+	if err != nil || len(resolved) != 2 || resolved[0].Key() != (PoolKey{AgentType: "generalist"}) || resolved[0].Count != 3 || resolved[1].Model != "own" {
+		t.Errorf("resolved = %+v %v, want three generalists on the type's model and one on its own", resolved, err)
 	}
 }
 

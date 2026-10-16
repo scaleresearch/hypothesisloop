@@ -1,9 +1,11 @@
 // Package agenttypes holds the built-in agent types as the repository has them. control-service
-// seeds them into the database at start (db.SeedBuiltinAgentTypes), which serves them from then on.
+// seeds them into the database at start (db.SeedBuiltins), which serves them from then on.
 package agenttypes
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 
@@ -12,6 +14,15 @@ import (
 
 //go:embed builtin/*.md builtin/descriptions.json
 var files embed.FS
+
+// Release numbers what this binary seeds: the built-in agent types and the platform's rules. A
+// seeded version keeps the release that wrote it, and a start writes what it has when that differs
+// from the current version and Release is that version's or newer. So an older replica of a
+// rolling deploy never writes its own back over a newer one's, and a revert of a prompt, shipped
+// under the next Release, becomes current like any other change. Raise it by one with every change
+// of a built-in's name, description, prompt or settings, or of the rules: TestReleaseNamesWhatItSeeds
+// keeps the digest of each.
+const Release = 1
 
 // Builtin is one built-in agent type: its id, which is also the file its prompt is in, name, role
 // and settings.
@@ -53,6 +64,9 @@ func Builtins() ([]Builtin, error) {
 	}
 	out := make([]Builtin, 0, len(builtins))
 	for _, b := range builtins {
+		if err := domain.ValidateBuiltinAgentTypeID(b.id); err != nil {
+			return nil, fmt.Errorf("agenttypes: %w", err)
+		}
 		prompt, err := files.ReadFile("builtin/" + b.id + ".md")
 		if err != nil {
 			return nil, fmt.Errorf("agenttypes: %w", err)
@@ -89,4 +103,22 @@ func Catalog() domain.AgentTypeCatalog {
 		}
 	}
 	return catalog
+}
+
+// Digest is sha256 of everything a release seeds: each built-in's id, name, description, role,
+// prompt and settings, and rules.
+func Digest(all []Builtin, rules string) (string, error) {
+	sum := sha256.New()
+	for _, b := range all {
+		settings, err := json.Marshal(b.Settings)
+		if err != nil {
+			return "", err
+		}
+		for _, part := range []string{b.ID, b.Name, b.Description, string(b.Role), b.Prompt, string(settings)} {
+			sum.Write([]byte(part))
+			sum.Write([]byte{0})
+		}
+	}
+	sum.Write([]byte(rules))
+	return hex.EncodeToString(sum.Sum(nil)), nil
 }
