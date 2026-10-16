@@ -60,7 +60,7 @@ export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps 
 
       <FieldGroup
         label="Stage ladder"
-        hint={isEdit ? 'Fixed at creation.' : <>Each stage ends by cutting the weakest share of agents.<InfoTip>Lengths add up to 100% and the final stage cuts nobody. Cuts are skipped at 4 agents or fewer. Max job hours caps how long one job runs in a stage.</InfoTip></>}
+        hint={isEdit ? 'Fixed at creation.' : <>Each stage ends by cutting the weakest share of agents.<InfoTip>Lengths add up to 100% and the final stage cuts nobody. A run of fewer than 5 researchers has one stage, since nobody is cut. Max job hours caps how long one job runs in a stage.</InfoTip></>}
       >
         {isEdit ? (
           <Inline gap="xs">

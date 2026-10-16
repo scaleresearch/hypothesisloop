@@ -13,6 +13,7 @@ import { actorLabel } from '@/components/actor'
 import { PhaseStrip } from '@/components/phase-strip'
 import { ProposalForm } from '@/components/proposal-form'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/dialog'
 import { FormField } from '@/components/ui/form-field'
 import { Textarea } from '@/components/ui/input'
 import { Page } from '@/components/ui/page'
@@ -78,11 +79,13 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
   const { project } = useTenant()
   const { mutate } = useSWRConfig()
   const [abandonError, setAbandonError] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState(false)
   const state = reasonOf(draft).reason
   const reread = () => void mutate(['pe', draft.id])
   const revise = !readOnly && (state === 'proposed' || state === 'accepting' || state === 'declined') && <Revise draft={draft} declined={state === 'declined'} onDone={reread} />
 
   async function abandon() {
+    setConfirming(false)
     setAbandonError(null)
     try {
       await abandonDraft(draft.id)
@@ -129,8 +132,11 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
       ) : revise}
       {!readOnly && (
         <Inline gap="md">
-          <Button variant="ghost" onClick={abandon}>Abandon this draft</Button>
+          <Button variant="ghost" onClick={() => setConfirming(true)}>Abandon this draft</Button>
           {abandonError && <InlineError>{abandonError}</InlineError>}
+          <ConfirmDialog open={confirming} title="Abandon this draft?" confirmLabel="Abandon draft" onConfirm={() => void abandon()} onCancel={() => setConfirming(false)}>
+            Planning stops and the draft closes. Nothing ran, so nothing is charged, and what you asked stays readable here.
+          </ConfirmDialog>
         </Inline>
       )}
     </Page>

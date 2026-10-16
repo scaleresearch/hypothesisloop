@@ -4,17 +4,20 @@ import { useState } from 'react'
 import useSWR from 'swr'
 import { deleteExperimentDraft, fetchExperimentDrafts } from '@/lib/api'
 import type { ExperimentDraft } from '@/lib/api'
-import { relTime } from '@/lib/format'
+import { headline, relTime } from '@/lib/format'
 import { useTenant } from '@/lib/tenant'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/dialog'
 import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { ErrorMessage, InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 
+// The name typed, else the start of the brief, so that a draft kept from a goal reads as that goal.
 function nameOf(draft: ExperimentDraft): string {
   const name = typeof draft.form.name === 'string' ? draft.form.name.trim() : ''
-  return name || 'Unnamed experiment'
+  const brief = typeof draft.form.description === 'string' ? draft.form.description.trim() : ''
+  return name || (brief && headline(brief, 80)) || 'Unnamed experiment'
 }
 
 /**
@@ -25,8 +28,10 @@ export function ExperimentDrafts({ onOpen }: { onOpen: (draft: ExperimentDraft) 
   const { project } = useTenant()
   const { data, error, mutate } = useSWR(['experiment-drafts', project.id], () => fetchExperimentDrafts(project.id))
   const [deleteError, setDeleteError] = useState('')
+  const [deleting, setDeleting] = useState<ExperimentDraft | null>(null)
 
   async function drop(draft: ExperimentDraft) {
+    setDeleting(null)
     setDeleteError('')
     try {
       await deleteExperimentDraft(project.id, draft.id)
@@ -49,10 +54,19 @@ export function ExperimentDrafts({ onOpen }: { onOpen: (draft: ExperimentDraft) 
               {draft.failure && <InlineError>Not created: {draft.failure}</InlineError>}
             </Stack>
             <Button size="sm" onClick={() => onOpen(draft)}>Continue</Button>
-            <Button size="sm" variant="ghost" onClick={() => void drop(draft)}>Delete</Button>
+            <Button size="sm" variant="ghost" onClick={() => setDeleting(draft)}>Delete</Button>
           </Inline>
         ))}
         {deleteError && <InlineError>Could not delete the draft: {deleteError}</InlineError>}
+        <ConfirmDialog
+          open={deleting !== null}
+          title="Delete this draft?"
+          confirmLabel="Delete draft"
+          onConfirm={() => deleting && void drop(deleting)}
+          onCancel={() => setDeleting(null)}
+        >
+          {deleting && `"${nameOf(deleting)}" and everything typed in it are deleted. Nothing was created from it.`}
+        </ConfirmDialog>
       </Stack>
     </Section>
   )

@@ -119,10 +119,16 @@ export const STEPS = [
 
 export type StepID = typeof STEPS[number]['id']
 
-/** The step a refusal of the create concerns, by the API's reason: the repository, what is measured, or the rest. */
+/** One thing the API refused a create for. A refusal of several checks lists each in problems. */
+export interface Problem {
+  reason?: string
+  message: string
+}
+
+/** The step a problem of the create concerns, by the API's reason: the repository, the metrics, or the rest, on Budget and rules. */
 export function refusedStep(reason: string | undefined): StepID {
   if (reason && /repositor|github|installation|experiment_file|unreadable_file/.test(reason)) return '1'
-  if (reason && /metric|stage|report/.test(reason)) return '2'
+  if (reason && /metric/.test(reason)) return '2'
   return '3'
 }
 

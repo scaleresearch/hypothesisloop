@@ -19,7 +19,7 @@ import { ErrorMessage } from '@/components/ui/status-message'
 import { Tabs } from '@/components/ui/tabs'
 import { Text } from '@/components/ui/text'
 import { NEW_EXPERIMENT, STEPS, refusedStep, toDrafts, toResearchers, toStages } from '@/components/platform-experiment-form/model'
-import type { FormState, StepID } from '@/components/platform-experiment-form/model'
+import type { FormState, Problem, StepID } from '@/components/platform-experiment-form/model'
 import { StepWhat } from '@/components/platform-experiment-form/step-what'
 import type { FileNote } from '@/components/platform-experiment-form/step-what'
 import { StepMeasure } from '@/components/platform-experiment-form/step-measure'
@@ -85,8 +85,10 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
   const [error, setError] = useState<string | null>(null)
   const [draftID, setDraftID] = useState(draft?.id ?? null)
   const [savingDraft, setSavingDraft] = useState(false)
-  // Why the last create was refused, kept until the next try.
-  const [refused, setRefused] = useState(draft?.failure || null)
+  // Why the last create was refused, kept until the next try: each problem the API named, or the
+  // one sentence a draft kept of them.
+  const [refused, setRefused] = useState<Problem[] | null>(draft?.failure ? [{ message: draft.failure }] : null)
+  const failure = refused?.map(p => p.message).join(' ') ?? ''
   const panel = useRef<HTMLDivElement>(null)
   const moved = useRef(false)
 
@@ -115,7 +117,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
     setSavingDraft(true)
     setError(null)
     try {
-      await keepDraft(step, refused ?? '')
+      await keepDraft(step, failure)
     } catch (err: unknown) {
       setError(`Could not save the draft: ${said(err)}`)
     } finally {
@@ -129,7 +131,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
     if (isEdit || !unsaved) return onCancel?.()
     setSavingDraft(true)
     try {
-      await keepDraft(step, refused ?? '')
+      await keepDraft(step, failure)
       onCancel?.()
     } catch (err: unknown) {
       setError(`Could not keep what you typed as a draft, so the form stays open: ${said(err)}`)
@@ -237,13 +239,13 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
         setError(said(err))
         return
       }
-      // A refused create keeps what was typed, as a draft that names why, at the step it concerns.
-      const message = said(err)
-      const at = refusedStep(err instanceof ApiError ? err.reason : undefined)
-      setRefused(message)
+      // A refused create keeps what was typed, as a draft that names why, at the step of its first problem.
+      const problems = problemsOf(err)
+      const at = refusedStep(problems[0].reason)
+      setRefused(problems)
       go(at)
       try {
-        await keepDraft(at, message)
+        await keepDraft(at, problems.map(p => p.message).join(' '))
       } catch (unkept: unknown) {
         setError(`Could not save the draft: ${said(unkept)}`)
       }
@@ -271,7 +273,13 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
 
         {refused && (
           <Stack gap="xs">
-            <ErrorMessage>{refused}</ErrorMessage>
+            <ErrorMessage>
+              {refused.length === 1 ? refused[0].message : (
+                <ul className="grid list-disc gap-1 pl-4">
+                  {refused.map((p, i) => <li key={i}>{p.message}</li>)}
+                </ul>
+              )}
+            </ErrorMessage>
             <Text variant="hint">Not created. {draftID ? 'What you typed is kept as a draft: change what the refusal names and try again.' : 'Change what the refusal names and try again.'}</Text>
           </Stack>
         )}
@@ -279,8 +287,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
 
         <Inline nowrap className="mt-1">
           {onCancel && <Button type="button" disabled={savingDraft} onClick={() => void leave()}>Cancel</Button>}
-          {!isEdit && <Button type="button" loading={savingDraft} disabled={!unsaved} onClick={() => void saveDraft()}>Save draft</Button>}
-          {!isEdit && draftID && !unsaved && <Text as="span" variant="hint" role="status">Draft saved.</Text>}
+          {!isEdit && <Button type="button" loading={savingDraft} disabled={!unsaved} onClick={() => void saveDraft()}>{draftID && !unsaved ? 'Draft saved' : 'Save draft'}</Button>}
           <span className="flex-1" />
           {back && <Button type="button" onClick={() => go(back.id)}>Back</Button>}
           {next && <Button type="button" variant={isEdit || refused ? 'default' : 'primary'} onClick={() => go(next.id)}>Next: {next.label.replace(/^\d+\. /, '')}</Button>}
@@ -294,6 +301,14 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
     </Stack>
   )
 })
+
+// Every problem a refusal names: the several of a check that found more than one, or the one.
+function problemsOf(error: unknown): Problem[] {
+  if (!(error instanceof ApiError)) return [{ message: said(error) }]
+  const listed = error.body?.problems
+  if (Array.isArray(listed) && listed.length > 0) return listed as Problem[]
+  return [{ reason: error.reason, message: error.message }]
+}
 
 function said(error: unknown): string {
   return error instanceof Error ? error.message : String(error)

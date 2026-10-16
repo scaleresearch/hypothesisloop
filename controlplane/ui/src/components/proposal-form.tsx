@@ -141,11 +141,9 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
   const { metrics, stages, report_interval_seconds: reportEvery } = proposal.experiment
   const unit = budgetUnit(kindOf(proposal.accelerator_type), 'long')
   const count = Number(researchers)
-  const countValid = Number.isInteger(count) && count > 0
-  const answered = answers.every(answer => answer.trim() !== '')
-  const valid = name.trim() !== '' && Number(budget) > 0 && Number(hours) > 0 && Number.isInteger(Number(baselineMinutes)) && Number(baselineMinutes) > 0 && countValid && answered
   // The researchers proposed keep what the planner gave them; one added beyond them is a generalist.
-  const agents = Array.from({ length: countValid ? count : proposal.agents.length }, (_, i) => proposal.agents[i] ?? {})
+  // A count that is no whole number sends none, which the API refuses with why.
+  const agents = Array.from({ length: Number.isInteger(count) && count > 0 ? count : 0 }, (_, i) => proposal.agents[i] ?? {})
 
   async function accept() {
     setSending(true)
@@ -298,7 +296,7 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
         </Captioned>
         {editable && (
           <Inline gap="md">
-            <Button variant="primary" loading={sending} disabled={!valid} onClick={accept}>Accept and run</Button>
+            <Button variant="primary" loading={sending} onClick={accept}>Accept and run</Button>
             {error && <InlineError>{error}</InlineError>}
           </Inline>
         )}
