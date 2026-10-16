@@ -577,66 +577,6 @@ CREATE (p)-[:BUILDS_ON {agent_id: '', author: 'Grace', created_at: $at, created_
 		}
 	}
 }
-
-// The accounts the retired human_writes table held reach the old records it names, and nothing
-// else: a record that already has an actor keeps it, and one it does not name stays unverified.
-func TestCreditUsersGivesOldRecordsTheAccountKeptForThem(t *testing.T) {
-	s := testStore(t)
-	pe := testExperiment(t, s)
-	ctx := context.Background()
-	if err := s.ensureObjective(ctx, pe); err != nil {
-		t.Fatalf("ensureObjective: %v", err)
-	}
-	_, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		return collect(ctx, tx, `MATCH (o:Objective {id: $pe})
-CREATE (p:Hypothesis {id: $pe + '-person', platform_experiment_id: $pe, agent_id: '', source: 'human', author: 'Ada Lovelace',
-  text: 'an old human idea', normalized_text: 'an old human idea', status: 'open', created_at: $at, created_xid: 1})
-CREATE (q:Hypothesis {id: $pe + '-typed', platform_experiment_id: $pe, agent_id: '', source: 'human', author: 'Mallory',
-  text: 'a typed name', normalized_text: 'a typed name', status: 'open', created_at: $at, created_xid: 1})
-CREATE (p)-[:BUILDS_ON {agent_id: '', author: 'Ada Lovelace', created_at: $at, created_xid: 1}]->(o)
-CREATE (q)-[:BUILDS_ON {agent_id: '', author: 'Mallory', created_at: $at, created_xid: 1}]->(o)
-CREATE (p)-[:RELATED {agent_id: '', author: 'Ada Lovelace', created_at: $later, created_xid: 2}]->(q)
-CREATE (q)-[:RELATED {agent_id: '', author: 'Mallory', created_at: $later, created_xid: 2}]->(p)`,
-			map[string]any{"pe": pe, "at": now(), "later": now().Add(time.Minute)})
-	})
-	if err != nil {
-		t.Fatalf("write old rows: %v", err)
-	}
-	fresh := register(t, s, pe, "agent-1", "a new one entirely", onRoot(pe))
-	writes := []domain.HumanWrite{
-		{UserID: "user-ada", Kind: "hypothesis", Subject: pe + "-person"},
-		{UserID: "user-ada", Kind: "link", Subject: pe + "-person related " + pe + "-typed"},
-		{UserID: "user-ada", Kind: "hypothesis", Subject: fresh.ID},
-		{UserID: "user-ada", Kind: "hypothesis", Subject: "one-that-is-gone"},
-	}
-	for range 2 {
-		if err := s.CreditUsers(ctx, writes); err != nil {
-			t.Fatalf("CreditUsers: got = %v, want nil", err)
-		}
-	}
-	ada, typed := userActor("user-ada"), domain.Actor{Kind: domain.ActorUnverified, Name: "Mallory"}
-	wantNodes := map[string]domain.Actor{pe + "-person": ada, pe + "-typed": typed, fresh.ID: agentActor("agent-1")}
-	nodes, edges, err := s.ExperimentGraph(ctx, pe)
-	if err != nil || len(nodes) != 3 || len(edges) != 5 {
-		t.Fatalf("ExperimentGraph: got = %d nodes, %d edges, %v, want 3 and 5", len(nodes), len(edges), err)
-	}
-	for _, n := range nodes {
-		if n.Actor != wantNodes[n.ID] {
-			t.Errorf("node %s: got actor %+v, want %+v", n.ID, n.Actor, wantNodes[n.ID])
-		}
-	}
-	for _, e := range edges {
-		if e.Actor != wantNodes[e.From] {
-			t.Errorf("edge %s -%s-> %s: got actor %+v, want %+v", e.From, e.Type, e.To, e.Actor, wantNodes[e.From])
-		}
-	}
-	for _, bad := range []domain.HumanWrite{{Kind: "link", Subject: "two parts"}, {Kind: "link", Subject: "a likes b"}, {Kind: "comment", Subject: "c"}} {
-		if err := s.CreditUsers(ctx, []domain.HumanWrite{bad}); err == nil {
-			t.Errorf("CreditUsers of %+v: got = nil, want an error", bad)
-		}
-	}
-}
-
 func agentActor(id string) domain.Actor { return domain.Actor{Kind: domain.ActorAgent, ID: id} }
 func userActor(id string) domain.Actor  { return domain.Actor{Kind: domain.ActorUser, ID: id} }
 
@@ -1021,37 +961,6 @@ func TestReAddingARegistrationLinkAnnouncesNothing(t *testing.T) {
 	abortedAll := domain.Stamp{Position: 31, Aborted: func(int64) (bool, error) { return true, nil }}
 	if result, err := s.AddLink(ctx, h.ID, "agent-1", agentActor("agent-1"), onRoot(pe)[0], abortedAll); err != nil || result.Announce {
 		t.Errorf("AddLink of the registration link: got = (%+v, %v), want nothing announced", result, err)
-	}
-}
-
-func TestImportLegacyPlacesOldHypothesesOnTheObjectiveAndIsRepeatable(t *testing.T) {
-	s := testStore(t)
-	pe := testExperiment(t, s)
-	ctx := context.Background()
-	created := time.Date(2026, 1, 2, 3, 4, 5, 123456000, time.UTC)
-	rows := []*domain.Hypothesis{{
-		ID: "legacy-" + pe, AgentID: "agent-1", PlatformExperimentID: pe,
-		Text: "Old Idea", Status: domain.HypothesisConfirmed, CreatedAt: created,
-	}}
-	for range 2 {
-		if err := s.ImportLegacy(ctx, rows); err != nil {
-			t.Fatalf("ImportLegacy: got = %v, want nil", err)
-		}
-	}
-	items, err := s.ListHypotheses(ctx, ListFilter{PlatformExperimentID: pe, Limit: maxListLimit})
-	if err != nil || len(items) != 1 {
-		t.Fatalf("list after import: got = (%v, %v), want one hypothesis", items, err)
-	}
-	h := items[0]
-	if want := (domain.Actor{Kind: domain.ActorUnverified, Name: "agent-1"}); h.Actor != want {
-		t.Errorf("imported hypothesis: got actor %+v, want %+v", h.Actor, want)
-	}
-	if h.ID != rows[0].ID || h.Status != domain.HypothesisConfirmed || !h.CreatedAt.Equal(created) || len(h.BuildsOn) != 1 || h.BuildsOn[0] != pe {
-		t.Errorf("imported hypothesis: got = %+v builds_on=%v, want the legacy row on the objective", h.Hypothesis, h.BuildsOn)
-	}
-	if _, _, existed, _, _, err := s.Register(ctx, NewHypothesis{AgentID: "agent-2",
-		PlatformExperimentID: pe, Text: "old idea", Links: onRoot(pe)}); err != nil || !existed {
-		t.Errorf("registering the legacy claim again: got = (existed=%v, %v), want the imported one", existed, err)
 	}
 }
 

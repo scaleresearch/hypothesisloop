@@ -103,7 +103,7 @@ func main() {
 	}
 
 	graphCtx, graphCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	graph, err := openGraph(graphCtx, pcfg.Services.GraphDBURL, pool)
+	graph, err := openGraph(graphCtx, pcfg.Services.GraphDBURL)
 	graphCancel()
 	if err != nil {
 		logger.Fatal("control-service: graph store", zap.Error(err))
@@ -500,11 +500,8 @@ func newEnvironmentRegistry(ctx context.Context, pcfg *hypothesisloopcfg.Config,
 	return &clusteragentapi.EnvironmentRegistry{Repository: e.Repository, Logins: logins, Git: gitHost}
 }
 
-// openGraph connects to the hypothesis graph, makes sure its schema exists, moves any hypotheses
-// still in the retired Postgres table into it (see db.MoveLegacyHypotheses), and gives the
-// records of signed-in people written before actors were kept their account (see
-// db.MoveHumanWrites).
-func openGraph(ctx context.Context, url string, pool *db.Pool) (*graphdb.Store, error) {
+// openGraph connects to the hypothesis graph and makes sure its schema exists.
+func openGraph(ctx context.Context, url string) (*graphdb.Store, error) {
 	graph, err := graphdb.Open(ctx, url)
 	if err != nil {
 		return nil, err
@@ -512,20 +509,6 @@ func openGraph(ctx context.Context, url string, pool *db.Pool) (*graphdb.Store, 
 	if err := graph.EnsureSchema(ctx); err != nil {
 		graph.Close(ctx) //nolint:errcheck
 		return nil, err
-	}
-	err = db.MoveLegacyHypotheses(ctx, pool, func(rows []*domain.Hypothesis) error {
-		return graph.ImportLegacy(ctx, rows)
-	})
-	if err != nil {
-		graph.Close(ctx) //nolint:errcheck
-		return nil, fmt.Errorf("move hypotheses from postgres to the graph: %w", err)
-	}
-	err = db.MoveHumanWrites(ctx, pool, func(writes []domain.HumanWrite) error {
-		return graph.CreditUsers(ctx, writes)
-	})
-	if err != nil {
-		graph.Close(ctx) //nolint:errcheck
-		return nil, fmt.Errorf("give earlier records the accounts behind them: %w", err)
 	}
 	return graph, nil
 }
