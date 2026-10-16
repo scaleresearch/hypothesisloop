@@ -553,7 +553,7 @@ var knownKinds = func() map[string]bool {
 // socket itself cannot be a Huma operation — an upgrade needs the raw connection, and Huma owns
 // the response of everything registered with it — so its vocabulary is served as an ordinary GET
 // beside it. That makes it discoverable from /explore instead of folklore an agent could only
-// learn by being told; an agent's prompt carries only /explore/rules.
+// learn by being told; the instructions the platform serves an agent carry only the rules, as /explore/rules.
 //
 // The body is domain.EventKinds itself, the same slice parseWatchQuery validates against, so this
 // cannot describe a stream the server does not serve.

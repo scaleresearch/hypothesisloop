@@ -119,7 +119,7 @@ func (h *Handler) hypothesisWriteError(err error) error {
 }
 
 // queryDescription is the schema an agent needs to write Cypher against the graph. It is served
-// at /explore; an agent's prompt carries only /explore/rules.
+// at /explore; the instructions the platform serves an agent carry only the rules, as /explore/rules.
 var queryDescription = "Read-only Cypher against one platform experiment's hypothesis graph (Memgraph). " +
 	"Body {platform_experiment_id, cypher, params}; answer " +
 	"{columns, rows, truncated}. Use it to find where an idea belongs before registering it, and to walk lineage. " +

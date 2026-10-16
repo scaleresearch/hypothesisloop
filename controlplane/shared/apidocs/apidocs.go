@@ -350,8 +350,8 @@ func (d *Doc) render(audience Audience) string {
 }
 
 // PlatformRules is the single authority for the rules every agent works under, whatever client it
-// uses: the preamble of /explore and all of /explore/rules, which the experimentator splices into
-// its system prompt. It names no endpoint, so a rule changed here reaches every agent as is.
+// uses: the preamble of /explore and all of /explore/rules. The platform composes it into the
+// prompt it serves each agent as its instructions (composeInstructions). It names no endpoint, so a rule changed here reaches every agent as is.
 const PlatformRules = `## platform rules (read first)
 
 - Nothing kills a job for converging badly, and estimated_duration_hours is not a deadline. Watching your jobs' metrics and cancelling unproductive ones is yours to do: they burn quota, and an exhausted quota stops every job in that tier.

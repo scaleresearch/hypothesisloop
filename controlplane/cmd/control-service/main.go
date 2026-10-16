@@ -390,7 +390,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	registry.RegisterWatchHuma(doc)
 	// /explore is the agent-only digest: nothing an agent isn't permitted to call.
 	// /explore/coordinator is the same registrations' operator/dashboard-admin-only view, and
-	// /explore/rules the rules alone, which a research agent's system prompt carries.
+	// /explore/rules the rules alone, which the instructions the platform serves an agent carry.
 	doc.MountExploreAudience(r, "/explore", apidocs.AudienceAgent)
 	doc.MountExploreAudience(r, "/explore/coordinator", apidocs.AudienceCoordinator)
 	doc.MountRules(r, "/explore/rules")

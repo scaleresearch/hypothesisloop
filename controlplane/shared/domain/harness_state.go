@@ -16,8 +16,8 @@ type HarnessState struct {
 	// InstructionsDigest is the first InstructionsDigestLength hex characters of the digest of
 	// the instructions the harness runs, "" for one that has not said.
 	InstructionsDigest string
-	Model                RateLimit
-	At                   time.Time
+	Model              RateLimit
+	At                 time.Time
 }
 
 // InstructionsDigestLength is how many characters of an instructions digest a harness reports.
