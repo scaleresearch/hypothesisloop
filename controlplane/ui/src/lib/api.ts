@@ -484,6 +484,19 @@ export function fetchExperimentFile(projectID: string, repository: string): Prom
   return apiFetch<ExperimentFile>(withQuery(`/projects/${projectID}/experiment-file`, { repository }))
 }
 
+/** Where a create with these repository fields would keep its code. */
+export interface RepositoryCheck {
+  repository?: string
+  repository_url?: string
+  /** The account a new repository would be created on. */
+  repository_account?: string
+}
+
+// The create's own repository checks, creating nothing: what it refuses, the create refuses.
+export function checkRepository(projectID: string, fields: { repository?: string; repository_account?: string }): Promise<RepositoryCheck> {
+  return apiFetch<RepositoryCheck>(withQuery(`/projects/${projectID}/repository-check`, fields))
+}
+
 export function createPlatformExperiment(projectID: string, req: CreatePlatformExperimentRequest): Promise<PlatformExperiment> {
   return apiSend<PlatformExperiment>('POST', '/platform-experiments', { ...req, project_id: projectID })
 }
@@ -775,6 +788,17 @@ export function connectGitHubInstallation(
 
 export async function disconnectGitHubInstallation(orgID: string, installationID: number): Promise<void> {
   await answer('DELETE', `/orgs/${orgID}/github-installations/${installationID}`)
+}
+
+// Asks GitHub whether the App is still installed there and may create and push. Refused with
+// the reason and what to do, as a create on that account would be.
+export async function checkGitHubInstallation(orgID: string, installationID: number): Promise<void> {
+  await answer('GET', `/orgs/${orgID}/github-installations/${installationID}/check`)
+}
+
+// For an owner: where a new repository goes when a create names no account.
+export async function makeGitHubInstallationDefault(orgID: string, installationID: number): Promise<void> {
+  await answer('PUT', `/orgs/${orgID}/github-installations/${installationID}/default`)
 }
 
 // Read from GitHub on every call, so a caller that searches as the person types waits for a pause.

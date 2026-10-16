@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, connectGitHubInstallation, disconnectGitHubInstallation, fetchGitHubApp, fetchGitHubInstallations } from '@/lib/api'
+import { ApiError, checkGitHubInstallation, connectGitHubInstallation, disconnectGitHubInstallation, fetchGitHubApp, fetchGitHubInstallations } from '@/lib/api'
 import { beginConnect, leaveFor, resetConnect, takeReturn } from '@/lib/github-connect'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { OrgGitHub } from '@/components/org-github'
@@ -10,7 +10,7 @@ import type { GitHubInstallation, Me } from '@/types'
 
 vi.mock('@/lib/api', async importActual => ({
   ...(await importActual<typeof import('@/lib/api')>()),
-  connectGitHubInstallation: vi.fn(), disconnectGitHubInstallation: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(),
+  checkGitHubInstallation: vi.fn(), connectGitHubInstallation: vi.fn(), disconnectGitHubInstallation: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(),
 }))
 vi.mock('@/lib/github-connect', async importActual => ({
   ...(await importActual<typeof import('@/lib/github-connect')>()),
@@ -54,6 +54,7 @@ beforeEach(() => {
   resetConnect()
   installations = [acme]
   vi.mocked(fetchGitHubApp).mockResolvedValue(app)
+  vi.mocked(checkGitHubInstallation).mockResolvedValue(undefined)
   vi.mocked(fetchGitHubInstallations).mockImplementation(async () => ({ items: [...installations], total: installations.length }))
   vi.mocked(disconnectGitHubInstallation).mockImplementation(async (_, id) => { installations = installations.filter(i => i.installation_id !== id) })
   vi.mocked(connectGitHubInstallation).mockImplementation(async () => {

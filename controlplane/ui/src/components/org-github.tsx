@@ -2,21 +2,46 @@
 
 import { useEffect, useState } from 'react'
 import useSWR from 'swr'
-import { ApiError, GITHUB_NOT_CONFIGURED, disconnectGitHubInstallation, fetchGitHubInstallations } from '@/lib/api'
+import { ApiError, GITHUB_NOT_CONFIGURED, checkGitHubInstallation, disconnectGitHubInstallation, fetchGitHubInstallations, makeGitHubInstallationDefault } from '@/lib/api'
 import { beginConnect, beginInstall, leaveFor, resetConnect, useConnect, useGitHubApp } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
 import type { GitHubApp, GitHubInstallation } from '@/types'
 import { Actor } from '@/components/actor'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { Table } from '@/components/ui/table'
 import { InsetCard } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Inline, Stack } from '@/components/ui/stack'
-import { Callout, ErrorMessage, Loading } from '@/components/ui/status-message'
+import { Callout, ErrorMessage, InlineError, Loading } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 
 const KIND = { User: 'Personal', Organization: 'Organisation' } as const
+
+/**
+ * Whether GitHub still lets the App create and push on a connected account, asked of GitHub by
+ * the check a create runs there. A refusal says what to do, with the way to GitHub.
+ */
+function InstallationState({ installation, app }: { installation: GitHubInstallation; app?: GitHubApp }) {
+  const { org } = useTenant()
+  const { data, error, isValidating, mutate } = useSWR(
+    ['github-installation-check', org.id, installation.installation_id],
+    () => checkGitHubInstallation(org.id, installation.installation_id).then(() => true),
+    { shouldRetryOnError: false },
+  )
+  if (error) {
+    return (
+      <InlineError>
+        {error.message}{' '}
+        {app && <><a href={app.install_url} target="_blank" rel="noreferrer" className="underline">Open the App on GitHub</a>,{' '}</>}
+        <Button type="button" variant="link" size="sm" loading={isValidating} onClick={() => void mutate()}>check again</Button>
+      </InlineError>
+    )
+  }
+  if (!data) return <Text as="span" variant="hint">Checking…</Text>
+  return <Badge tone="success">Working</Badge>
+}
 
 /**
  * The GitHub accounts the org connected through the platform's GitHub App. An experiment
@@ -44,6 +69,16 @@ export function OrgGitHub() {
   function leave(address: string) {
     setLeaving(true)
     leaveFor(address)
+  }
+
+  async function makeDefault(installation: GitHubInstallation) {
+    setActionError('')
+    try {
+      await makeGitHubInstallationDefault(org.id, installation.installation_id)
+      await mutate()
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e))
+    }
   }
 
   async function disconnect(installation: GitHubInstallation) {
@@ -103,13 +138,20 @@ export function OrgGitHub() {
       {installations && installations.length > 0 && (
         <Table aria-label="Connected GitHub accounts">
           <thead>
-            <tr><th>GitHub account</th><th>Kind</th><th>Connected by</th>{administers && <th />}</tr>
+            <tr><th>GitHub account</th><th>Kind</th><th>On GitHub</th>{installations.length > 1 && <th>New repositories</th>}<th>Connected by</th>{administers && <th />}</tr>
           </thead>
           <tbody>
             {installations.map(installation => (
               <tr key={installation.installation_id}>
                 <td className="font-mono text-xs font-medium">{installation.account_login}</td>
                 <td className="text-xs text-muted">{installation.account_type ? KIND[installation.account_type] : ''}</td>
+                <td><InstallationState installation={installation} app={github} /></td>
+                {installations.length > 1 && (
+                  <td>
+                    {installation.default ? <Badge tone="accent">Default</Badge>
+                      : administers ? <Button size="sm" onClick={() => void makeDefault(installation)}>Make default</Button> : null}
+                  </td>
+                )}
                 <td title={new Date(installation.connected_at).toLocaleString()}>
                   <Actor actor={installation.connected_actor} self={installation.connected_actor.kind === 'user' && installation.connected_actor.id === me.user_id} />
                 </td>
