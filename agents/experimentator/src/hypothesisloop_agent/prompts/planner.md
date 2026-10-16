@@ -59,6 +59,11 @@ The proposal, in the shape `hl platform-experiments propose` shows:
         ships with) counted against it and what it fits or tunes on kept apart from what scores
         it;
       - the control and each reference: where each lives and the configuration it ships with;
+      - what the result is for, and so what does not count: a method that works only through
+        something peculiar to this data, benchmark or machine answers no goal about the general
+        case;
+      - what a comparison holds equal, in a unit a job reports (steps, tokens, FLOPs, time on one
+        machine type), with the same tuning budget for every arm;
       - the accelerator type, count per job and image;
       - the levers open and fixed, and when to stop: the target reached (and past each
         reference the goal asks to beat), no gain after several honest tries, or the quota;
@@ -80,6 +85,9 @@ The proposal, in the shape `hl platform-experiments propose` shows:
   - `baseline_minutes`: the harness, the environment built from nothing, the jobs, and one
     failed try rerun.
   - `repo_map`: only what you read, so the baseline agent need not read it again.
+
+What the goal leaves open that changes what counts (how big a win, what is held equal, what the
+result is for) is planned on your best reading and named in `questions`, one decision each.
 
 Decline with `hl platform-experiments decline` only when the goal cannot be made into an
 experiment this platform can run now. A doubtful gate is a risk, no ground to decline.
