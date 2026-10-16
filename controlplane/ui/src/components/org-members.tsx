@@ -19,6 +19,7 @@ import { Eyebrow, Text } from '@/components/ui/text'
 import { Inline, Stack } from '@/components/ui/stack'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
+import { keys } from '@/lib/keys'
 
 const ROLES: OrgRole[] = ['owner', 'member']
 
@@ -39,7 +40,7 @@ function when(at: string): string {
 /** The pending invites of the org: create one and read its link once, list them, revoke one. */
 function Invites({ onError }: { onError: (message: string) => void }) {
   const { me, org } = useTenant()
-  const { data, error: listError, mutate } = useSWR(['org-invites', org.id], () => fetchOrgInvites(org.id))
+  const { data, error: listError, mutate } = useSWR(keys.orgInvites(org.id), () => fetchOrgInvites(org.id))
   const [role, setRole] = useState<OrgRole>('member')
   const [busy, setBusy] = useState(false)
   // The token exists here and nowhere else: no read of the API returns it again.
@@ -135,7 +136,7 @@ export function OrgMembers() {
   const { me, org, administers } = useTenant()
   const router = useRouter()
   const refreshMe = useRefreshMe()
-  const { data, error: listError, mutate } = useSWR(['org-members', org.id], () => fetchOrgMembers(org.id))
+  const { data, error: listError, mutate } = useSWR(keys.orgMembers(org.id), () => fetchOrgMembers(org.id))
   const [error, setError] = useState('')
   const [change, setChange] = useState<Change | null>(null)
 

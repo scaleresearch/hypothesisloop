@@ -5,13 +5,14 @@ import { ApiError } from '@/lib/api/request'
 import type { GitHubInstallation, GitHubInstallFinished, GitHubInstallStart } from '@/types/github'
 import { orgPath } from '@/lib/routes'
 import { errorMessage } from '@/lib/errors'
+import { keys, githubReads } from '@/lib/keys'
 
 /**
  * The platform's GitHub App, read under one key by every component that needs it. An error whose
  * reason is GITHUB_NOT_CONFIGURED says the deployment's git host is not GitHub.
  */
 export function useGitHubApp(enabled = true) {
-  return useSWR(enabled ? 'github-app' : null, fetchGitHubApp)
+  return useSWR(enabled ? keys.githubApp() : null, fetchGitHubApp)
 }
 
 /** The id of the GitHub card in the org's settings, for a link that leads to it. */
@@ -93,7 +94,6 @@ export type Install =
   | { phase: 'failed'; message: string; reason?: string }
 
 const IDLE: Install = { phase: 'idle' }
-const GITHUB_KEYS = new Set(['github-installations', 'github-repositories', 'repository-check', 'github-installation-check', 'github-installation-checks'])
 
 /**
  * Installs the App from this tab without leaving it: `start`, from a click, opens GitHub in a new
@@ -108,7 +108,7 @@ export function useGitHubInstall(orgID: string, returnTo: string) {
 
   useEffect(() => listen(message => {
     if ('state' in message && message.state !== waiting) return
-    void mutate(key => Array.isArray(key) && GITHUB_KEYS.has(key[0]))
+    void mutate(githubReads)
     if ('state' in message) {
       setInstall(message.outcome.ok ? { phase: 'connected', installation: message.outcome.installation } : { phase: 'failed', message: message.outcome.message, reason: message.outcome.reason })
     }

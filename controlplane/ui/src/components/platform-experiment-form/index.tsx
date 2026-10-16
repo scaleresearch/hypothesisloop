@@ -26,6 +26,7 @@ import type { FileNote } from '@/components/platform-experiment-form/step-what'
 import { StepMeasure } from '@/components/platform-experiment-form/step-measure'
 import { StepBudget } from '@/components/platform-experiment-form/step-budget'
 import { errorMessage } from '@/lib/errors'
+import { keys } from '@/lib/keys'
 
 interface FormProps {
   /** The experiment to edit. Without one the form creates one in the selected project. */
@@ -112,7 +113,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
     const saved = draftID ? await updateExperimentDraft(project.id, draftID, body) : await createExperimentDraft(project.id, body)
     setDraftID(saved.id)
     setKept(body.form)
-    void mutate(['experiment-drafts', project.id])
+    void mutate(keys.experimentDrafts(project.id))
   }
 
   async function saveDraft() {
@@ -250,7 +251,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
       const experiment = await createPlatformExperiment(project.id, { ...payload, coordinator_hosted: true })
       // The draft goes once the experiment it was for exists. One that stays is listed, to delete.
       if (draftID) await deleteExperimentDraft(project.id, draftID).catch(() => undefined)
-      void mutate(['experiment-drafts', project.id])
+      void mutate(keys.experimentDrafts(project.id))
       settled.current = true
       onSaved(experiment, true)
     } catch (err: unknown) {

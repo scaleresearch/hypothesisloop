@@ -25,6 +25,7 @@ import { Callout } from '@/components/ui/status-message'
 import { Steps } from '@/components/ui/steps'
 import { Eyebrow, Text } from '@/components/ui/text'
 import { jobPath } from '@/lib/routes'
+import { keys } from '@/lib/keys'
 
 /** The control for what an experiment waits on its owner for, where this page has one. */
 function OwnerMove({ pe }: { pe: Draft }) {
@@ -38,7 +39,7 @@ function OwnerMove({ pe }: { pe: Draft }) {
   return (
     <>
       <Button size="sm" onClick={() => setEditing(true)}>{action.label}</Button>
-      {editing && <PlatformExperimentDialog initial={pe} onClose={() => setEditing(false)} onSaved={() => void mutate(['pe', pe.id])} />}
+      {editing && <PlatformExperimentDialog initial={pe} onClose={() => setEditing(false)} onSaved={() => void mutate(keys.experiment(pe.id))} />}
     </>
   )
 }

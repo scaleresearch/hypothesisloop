@@ -28,6 +28,8 @@ import { budgetUnit, kindOf } from '@/lib/units'
 import { notAdmittedLabel } from '@/lib/eviction'
 import { JobReason } from '@/components/job-reason'
 import { graphHref } from '@/lib/hypothesis-graph'
+import { keys } from '@/lib/keys'
+import { POLL } from '@/lib/poll'
 
 // What eviction_reason says of a job in each status that carries one: a QUEUED job's is the
 // reason its last attempt was requeued for.
@@ -41,16 +43,16 @@ const LAST_ATTEMPT: Record<string, string> = {
 export default function JobDetailPage({ params }: { params: { experimentId: string; jobId: string } }) {
   const { experimentId, jobId: id } = params
 
-  const { data: job, error } = useSWR(id, fetchExperiment, { refreshInterval: 5_000 })
+  const { data: job, error } = useSWR(keys.job(id), () => fetchExperiment(id), { refreshInterval: POLL.live })
   const { data: logs, error: logsError } = useSWR(
-    job ? `logs-${id}` : null,
+    job ? keys.jobLogs(id) : null,
     () => fetchExperimentLogs(id),
-    { refreshInterval: 10_000 },
+    { refreshInterval: POLL.reports },
   )
   const { data: metrics, error: metricsError } = useSWR(
-    job ? `metrics-${id}` : null,
+    job ? keys.jobMetrics(id) : null,
     () => fetchExperimentMetrics(id),
-    { refreshInterval: 10_000 },
+    { refreshInterval: POLL.reports },
   )
   // A job is reached through the experiment it ran for, and through no other.
   const elsewhere = job && job.platform_experiment_id !== experimentId

@@ -56,6 +56,8 @@ import { graphHref } from '@/lib/hypothesis-graph'
 import { budgetKind, budgetUnit, inFlight, kindOf } from '@/lib/units'
 import { phaseOf } from '@/lib/phase'
 import { pollEvery, useRoster } from '@/lib/roster'
+import { keys } from '@/lib/keys'
+import { POLL } from '@/lib/poll'
 
 // How many of the newest jobs the page reads, for the jobs table and the metrics picker.
 const RECENT_JOBS = 20
@@ -75,7 +77,7 @@ function PlatformExperimentDetail({ id }: { id: string }) {
 
   const [editing, setEditing] = useState(false)
   const { data: pe, error: peError, isLoading: peLoading, mutate: mutatePE } = useSWR<PlatformExperiment>(
-    ['pe', id],
+    keys.experiment(id),
     () => fetchPlatformExperiment(id),
     { refreshInterval: pollEvery },
   )
@@ -83,74 +85,74 @@ function PlatformExperimentDetail({ id }: { id: string }) {
   const { data: roster } = useRoster(pe)
 
   const { data: quotas, error: quotasError } = useSWR<AgentQuota[]>(
-    ['pe-quotas', id],
+    keys.quotas(id),
     () => fetchPlatformExperimentQuotas(id),
-    { refreshInterval: 15_000 },
+    { refreshInterval: POLL.standing },
   )
 
   // Each list below is asked for inside the platform experiment's own project, so it waits for
   // the experiment itself. The newest jobs only, for the jobs table and the live metrics picker.
   const { data: experimentsPage, error: experimentsError } = useSWR(
-    pe ? ['pe-experiments', id] : null,
+    pe ? keys.experimentJobs(id) : null,
     () => fetchExperimentsPage({ project_id: pe!.project_id, platform_experiment_id: id, sort: '-created_at', limit: RECENT_JOBS }),
-    { refreshInterval: 15_000 },
+    { refreshInterval: POLL.standing },
   )
   const experiments = experimentsPage?.items
 
   // Asked for by status: a job that outlived the newest page of jobs is still running.
   const { data: runningPage, error: runningError } = useSWR(
-    pe ? ['pe-running', id] : null,
+    pe ? keys.runningJobs(id) : null,
     () => fetchExperimentsPage({ project_id: pe!.project_id, platform_experiment_id: id, status: 'RUNNING', sort: '-created_at' }),
-    { refreshInterval: 15_000 },
+    { refreshInterval: POLL.standing },
   )
 
   // Whole-experiment job counts, grouped server-side. The job list above is one bounded page,
   // so tallying it would report the page's shape under a label that reads as the experiment's.
   const { data: stats, error: statsError } = useSWR(
-    pe ? ['pe-stats-by-agent', id] : null,
+    pe ? keys.jobStatsByAgent(id) : null,
     () => fetchExperimentStats({ project_id: pe!.project_id, platform_experiment_id: id, group_by: 'agent' }),
-    { refreshInterval: 15_000 },
+    { refreshInterval: POLL.standing },
   )
   const jobsByAgent = stats?.groups ?? {}
   const { data: hypothesisStats, error: hypothesisStatsError } = useSWR(
-    pe ? ['pe-stats-by-hypothesis', id] : null,
+    pe ? keys.jobStatsByHypothesis(id) : null,
     () => fetchExperimentStats({ project_id: pe!.project_id, platform_experiment_id: id, group_by: 'hypothesis' }),
-    { refreshInterval: 15_000 },
+    { refreshInterval: POLL.standing },
   )
 
   const { data: stagesStatus, error: stagesError } = useSWR<StagesStatus>(
-    ['pe-stages', id],
+    keys.stages(id),
     () => fetchStages(id),
-    { refreshInterval: 15_000 },
+    { refreshInterval: POLL.standing },
   )
 
   const { data: verdicts, error: hypothesesError } = useSWR(
-    ['pe-hypothesis-stats', id],
+    keys.hypothesisStats(id),
     () => fetchHypothesisStats(id),
-    { refreshInterval: 15_000 },
+    { refreshInterval: POLL.standing },
   )
 
   const { data: findings, error: findingsError } = useSWR(
-    ['pe-findings', id],
+    keys.findings(id),
     () => fetchFindings(id),
-    { refreshInterval: 15_000 },
+    { refreshInterval: POLL.standing },
   )
 
   const { data: results, error: resultsError } = useSWR(
-    ['pe-results', id],
+    keys.results(id),
     () => fetchPlatformExperimentResults(id),
-    { refreshInterval: 15_000 },
+    { refreshInterval: POLL.standing },
   )
 
   // The history of every declared metric, for the chart. The heaviest read on the page, so it
   // polls slower than the rest.
   const peMetricKeys = (pe?.metrics ?? []).map(m => m.key)
   const { data: allMetricSeries, error: metricSeriesError } = useSWR<{ key: string; series: AgentMetricSeries[] }[]>(
-    pe && peMetricKeys.length > 0 ? ['pe-all-metrics', id, peMetricKeys.join(','), pe.started_at, pe.ends_at] : null,
+    pe && peMetricKeys.length > 0 ? keys.metricSeries(id, peMetricKeys.join(','), pe.started_at, pe.ends_at) : null,
     () => Promise.all(peMetricKeys.map(k =>
       fetchPlatformExperimentTimeseries(pe!, k).then(r => ({ key: k, series: r.series })),
     )),
-    { refreshInterval: 30_000 },
+    { refreshInterval: POLL.slow },
   )
 
   // Every agent known to this platform experiment, whether via quota signup or a submitted job.

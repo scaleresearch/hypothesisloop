@@ -17,6 +17,7 @@ import { Select } from '@/components/ui/select'
 import { Inline, Stack } from '@/components/ui/stack'
 import { ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Eyebrow, Text } from '@/components/ui/text'
+import { keys } from '@/lib/keys'
 
 const lineClass: Record<DiffLine['kind'], string> = {
   same: 'text-muted',
@@ -162,7 +163,7 @@ export function VersionHistory({ orgID, type, editable, onRestored }: {
   editable: boolean
   onRestored: (t: EditedAgentType) => Promise<unknown>
 }) {
-  const { data: versions, error } = useSWR(['agent-type-versions', orgID, type.id, type.current_version], () => fetchAgentTypeVersions(orgID, type.id))
+  const { data: versions, error } = useSWR(keys.agentTypeVersions(orgID, type.id, type.current_version), () => fetchAgentTypeVersions(orgID, type.id))
   const [from, setFrom] = useState<number | null>(null)
   const [to, setTo] = useState<number | null>(null)
   const [restoring, setRestoring] = useState<number | null>(null)

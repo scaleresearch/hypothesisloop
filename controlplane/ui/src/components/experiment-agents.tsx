@@ -34,6 +34,7 @@ import { relTime } from '@/lib/format'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { useReadOnly } from '@/lib/read-only'
 import type { Tone } from '@/lib/colors'
+import { keys } from '@/lib/keys'
 
 
 // What the operator's own `podman run --env-file` takes for one agent, and all an agent is
@@ -232,7 +233,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   // Quota is divided at the start over the agents present, so the roster is fixed from then on.
   const started = pe.status === PlatformExperimentStatus.RUNNING || pe.status === PlatformExperimentStatus.CLOSED
   const { data: messages, mutate: mutateMessages } = useSWR(
-    pe.status === PlatformExperimentStatus.DRAFT ? null : ['pe-messages', pe.id],
+    pe.status === PlatformExperimentStatus.DRAFT ? null : keys.messages(pe.id),
     () => fetchPlatformExperimentMessages(pe.id),
     { refreshInterval: pollEvery(pe) },
   )

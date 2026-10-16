@@ -2,6 +2,7 @@ import useSWR from 'swr'
 import { fetchAgentTypes } from '@/lib/api/agent-types'
 import { ApiError } from '@/lib/api/request'
 import type { AgentRole, AgentType, AgentTypeSettings } from '@/types/agent-types'
+import { keys } from '@/lib/keys'
 
 /** The built-in researcher type an agent runs as when it names none. */
 export const DEFAULT_AGENT_TYPE = 'generalist'
@@ -39,7 +40,7 @@ export function typeName(id: string, catalog: AgentType[] | undefined): string {
 
 /** Every agent type the org's agents may run as: the built-in ones and its own. */
 export function useAgentTypes(orgID: string | undefined) {
-  return useSWR(orgID ? ['agent-types', orgID] : null, () => fetchAgentTypes(orgID!))
+  return useSWR(orgID ? keys.agentTypes(orgID) : null, () => fetchAgentTypes(orgID!))
 }
 
 /** The types a new researcher may be started as, built-in first. */

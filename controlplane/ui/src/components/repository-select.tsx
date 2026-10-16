@@ -15,6 +15,7 @@ import { inlineLinkClass } from '@/components/ui/link'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
+import { keys } from '@/lib/keys'
 
 const LISTED = 50
 
@@ -62,7 +63,7 @@ function accountOf(value: string, accounts: GitHubInstallation[], unasked?: GitH
  */
 function RepositoryCheckNote({ value, account, onInstall }: { value: string; account?: GitHubInstallation; onInstall?: () => void }) {
   const { project } = useTenant()
-  const { error, isValidating, mutate } = useSWR(['repository-check', project.id, value], () => checkRepository(project.id, repositoryFields(value)))
+  const { error, isValidating, mutate } = useSWR(keys.repositoryCheck(project.id, value), () => checkRepository(project.id, repositoryFields(value)))
   if (!error) return null
   return (
     <GitHubProblem
@@ -98,16 +99,16 @@ export function RepositorySelect({ value, onChange, compact = false }: {
   const app = useGitHubApp()
   const { install, start, reset } = useGitHubInstall(org.id, typeof window === 'undefined' ? '/' : window.location.pathname + window.location.search)
   const onInstall = administers && app.data ? start : undefined
-  const installations = useSWR(app.data ? ['github-installations', org.id] : null, () => fetchGitHubInstallations(org.id))
+  const installations = useSWR(app.data ? keys.githubInstallations(org.id) : null, () => fetchGitHubInstallations(org.id))
   const connected = (installations.data?.total ?? 0) > 0
   const listedAccounts = installations.data?.items ?? []
   const dead = useSWR(
-    listedAccounts.length > 0 ? ['github-installation-checks', org.id, ...listedAccounts.map(a => a.installation_id)] : null,
+    listedAccounts.length > 0 ? keys.githubInstallationChecks(org.id, listedAccounts.map(a => a.installation_id)) : null,
     () => unusable(org.id, listedAccounts),
   ).data ?? []
   const [refreshing, setRefreshing] = useState(false)
   const { data, error, mutate } = useSWR(
-    connected ? ['github-repositories', org.id, q] : null,
+    connected ? keys.githubRepositories(org.id, q) : null,
     () => fetchGitHubRepositories(org.id, { q, limit: LISTED }),
     { keepPreviousData: true },
   )

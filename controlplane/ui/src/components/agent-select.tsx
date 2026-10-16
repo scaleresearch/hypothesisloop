@@ -5,6 +5,7 @@ import useSWR from 'swr'
 import { fetchAgentsPage } from '@/lib/api/agents'
 import { useTenant } from '@/lib/tenant'
 import { SearchableSelect } from '@/components/ui/searchable-select'
+import { keys } from '@/lib/keys'
 
 const LISTED = 50
 
@@ -22,7 +23,7 @@ export function AgentSelect({ value, onChange, platformExperimentID }: {
   const [q, setQ] = useState('')
   const scope = platformExperimentID ? { platform_experiment_id: platformExperimentID } : { project_id: project.id }
   const { data } = useSWR(
-    ['agent-search', scope, q],
+    keys.agentSearch(scope, q),
     () => fetchAgentsPage({ ...scope, q, limit: LISTED }),
     { keepPreviousData: true },
   )

@@ -7,6 +7,7 @@ import type { PlatformExperiment } from '@/types/platform-experiments'
 import { TextLink } from '@/components/ui/link'
 import { Callout } from '@/components/ui/status-message'
 import { jobPath } from '@/lib/routes'
+import { keys } from '@/lib/keys'
 
 /** The last raw value a job reported for each metric key. */
 function lastReported(points: MetricDataPoint[]): Map<string, number> {
@@ -23,7 +24,7 @@ function lastReported(points: MetricDataPoint[]): Map<string, number> {
  */
 export function Baseline({ pe }: { pe: PlatformExperiment }) {
   const job = pe.baseline_job_id
-  const { data: points, error } = useSWR(job ? ['baseline', job] : null, () => fetchExperimentMetrics(job!))
+  const { data: points, error } = useSWR(job ? keys.jobMetrics(job) : null, () => fetchExperimentMetrics(job!))
   if (!job) return null
   const reported = points && lastReported(points)
   const values = (pe.metrics ?? []).filter(m => reported?.has(m.key)).map(m => `${m.key} ${reported!.get(m.key)}`).join(', ')

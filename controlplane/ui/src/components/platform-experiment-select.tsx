@@ -5,6 +5,7 @@ import useSWR from 'swr'
 import { fetchPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api/platform-experiments'
 import { useTenant } from '@/lib/tenant'
 import { SearchableSelect } from '@/components/ui/searchable-select'
+import { keys } from '@/lib/keys'
 
 const LISTED = 50
 
@@ -20,11 +21,11 @@ export function PlatformExperimentSelect({ value, onChange, allLabel, placeholde
   const { project } = useTenant()
   const [q, setQ] = useState('')
   const { data } = useSWR(
-    ['platform-experiment-search', project.id, q],
+    keys.experimentSearch(project.id, q),
     () => fetchPlatformExperimentsPage({ project_id: project.id, q, sort: '-starts_at', limit: LISTED }),
     { keepPreviousData: true },
   )
-  const { data: selected } = useSWR(value ? ['pe', value] : null, () => fetchPlatformExperiment(value))
+  const { data: selected } = useSWR(value ? keys.experiment(value) : null, () => fetchPlatformExperiment(value))
 
   const listed = data?.items ?? []
   const more = (data?.total ?? 0) - listed.length

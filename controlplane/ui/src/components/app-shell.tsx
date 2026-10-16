@@ -18,6 +18,8 @@ import { Centered } from '@/components/ui/centered'
 import { Inline } from '@/components/ui/stack'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
+import { keys } from '@/lib/keys'
+import { POLL } from '@/lib/poll'
 
 // A failed read stays failed until the person comes back to the tab, the network returns or they
 // try again: no read is retried on a timer, and refreshInterval stops on an error until then.
@@ -75,10 +77,10 @@ export function AppShell({ children }: { children: ReactNode }) {
 function Shell({ children }: { children: ReactNode }) {
   // Reread on a timer: that is how a rename made in another tab, or a membership that ended,
   // reaches a page that is already open.
-  const { data: me, error, mutate } = useSWR('me', fetchMe, { refreshInterval: 30_000 })
+  const { data: me, error, mutate } = useSWR(keys.me(), fetchMe, { refreshInterval: POLL.slow })
   const place = useParams<Place>()
   const { data: pe, error: peError, mutate: mutatePE } = useSWR(
-    place.experimentId ? ['pe', place.experimentId] : null,
+    place.experimentId ? keys.experiment(place.experimentId) : null,
     () => fetchPlatformExperiment(place.experimentId as string),
   )
 

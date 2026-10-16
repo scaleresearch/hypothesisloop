@@ -17,13 +17,14 @@ import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Code, Text } from '@/components/ui/text'
+import { keys } from '@/lib/keys'
 
 const WHOLE_ORG = ''
 
 /** The org's API keys: create one and read its token once, list them, revoke one. */
 export function APIKeys() {
   const { me, org } = useTenant()
-  const { data: keys, error: listError, mutate } = useSWR(['api-keys', org.id], () => fetchAPIKeys(org.id))
+  const { data: apiKeys, error: listError, mutate } = useSWR(keys.apiKeys(org.id), () => fetchAPIKeys(org.id))
   const [name, setName] = useState('')
   const [scope, setScope] = useState(WHOLE_ORG)
   const [busy, setBusy] = useState(false)
@@ -96,20 +97,20 @@ export function APIKeys() {
       )}
 
       {listError && <ErrorMessage>Could not load API keys: {listError.message}</ErrorMessage>}
-      {!keys && !listError && <Loading />}
-      {keys && keys.length === 0 && <EmptyState>No API keys yet.</EmptyState>}
-      {keys && keys.length > 0 && (
+      {!apiKeys && !listError && <Loading />}
+      {apiKeys && apiKeys.length === 0 && <EmptyState>No API keys yet.</EmptyState>}
+      {apiKeys && apiKeys.length > 0 && (
         <Table>
           <thead>
             <tr><th>Name</th><th>Reaches</th><th>Created</th><th>Status</th><th /></tr>
           </thead>
           <tbody>
-            {keys.map(key => (
+            {apiKeys.map(key => (
               <tr key={key.id}>
                 <td>
                   <span className="font-medium">{key.name}</span>
                   {key.minted_by && (
-                    <Text as="div" variant="hint">minted from {keys.find(k => k.id === key.minted_by)?.name ?? 'a key no longer listed'}</Text>
+                    <Text as="div" variant="hint">minted from {apiKeys.find(k => k.id === key.minted_by)?.name ?? 'a key no longer listed'}</Text>
                   )}
                 </td>
                 <td className="text-xs">{scopeLabel(key)}</td>

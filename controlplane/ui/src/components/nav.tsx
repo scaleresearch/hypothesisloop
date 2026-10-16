@@ -22,6 +22,8 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
 import { Eyebrow, Text } from '@/components/ui/text'
 import type { Tone } from '@/lib/colors'
+import { keys } from '@/lib/keys'
+import { POLL } from '@/lib/poll'
 
 const navItems: { section: Section; label: string; icon: typeof Settings; staffOnly?: boolean }[] = [
   { section: 'experiments', label: 'Experiments', icon: FlaskConical },
@@ -46,7 +48,7 @@ function StatusLine({ tone, label, sub }: { tone: Tone | 'idle'; label: string; 
 
 function SystemStatus() {
   const { org } = useTenant()
-  const { data, error } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 10_000 })
+  const { data, error } = useSWR(keys.orgClusters(org.id), () => fetchOrgClusters(org.id), { refreshInterval: POLL.reports })
   if (error || !data) {
     return (
       <StatusLine tone={error ? 'danger' : 'idle'} label={error ? 'Cluster status unknown' : 'Checking clusters…'} sub={error?.message} />

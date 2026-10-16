@@ -34,6 +34,8 @@ import { useTenant } from '@/lib/tenant'
 import { isReadOnly, ReadOnlyProvider } from '@/lib/read-only'
 import { HUMAN_OWNER, extendLayout, graphHref, layoutGraph, matchesFilters, shareUnchanged } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
+import { keys } from '@/lib/keys'
+import { POLL } from '@/lib/poll'
 
 /** The view a hypotheses page opens in, which the URL leaves out. */
 export const HYPOTHESES_VIEW = 'outline'
@@ -91,13 +93,13 @@ export function ExperimentHypotheses({ peID, embedded = false }: { peID: string;
   const [ownerFilter, setOwnerFilter] = useQueryParam('agent')
   const [q, setQ] = useQueryParam('q')
 
-  const { data: pe, error: selectedError } = useSWR(['pe', peID], () => fetchPlatformExperiment(peID))
+  const { data: pe, error: selectedError } = useSWR(keys.experiment(peID), () => fetchPlatformExperiment(peID))
 
   const shown = useRef<HypothesisGraph>()
   const { data: graph, error, mutate } = useSWR(
-    ['hypothesis-graph', peID],
+    keys.hypothesisGraph(peID),
     async () => shareUnchanged(shown.current, await fetchHypothesisGraph(peID)),
-    { refreshInterval: 15_000 },
+    { refreshInterval: POLL.standing },
   )
   shown.current = graph
   const search = useHypothesisSearch(peID, q)

@@ -26,6 +26,8 @@ import { Segmented } from '@/components/ui/segmented'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Heading, Text } from '@/components/ui/text'
 import { ErrorMessage, Loading } from '@/components/ui/status-message'
+import { keys } from '@/lib/keys'
+import { POLL } from '@/lib/poll'
 
 // The experiments a project holds are few; past this many the newest are listed and the rest named.
 const EXPERIMENTS_LISTED = 50
@@ -51,14 +53,14 @@ interface Standing {
 /** The experiment's primary metric with its best result and the baseline's, from its standings. */
 function useStanding(pe: PlatformExperiment | undefined): Standing | undefined {
   const asked = pe && pe.status !== PlatformExperimentStatus.DRAFT
-  const { data } = useSWR(asked ? ['pe-results', pe.id] : null, () => fetchPlatformExperimentResults(pe!.id), { refreshInterval: 15_000 })
+  const { data } = useSWR(asked ? keys.results(pe.id) : null, () => fetchPlatformExperimentResults(pe!.id), { refreshInterval: POLL.standing })
   const primary = data?.metrics[0]
   if (!primary) return undefined
   return { metric: primary.metric, direction: primary.direction, best: primary.standings[0]?.best, baseline: primary.baseline }
 }
 
 function useStats(pe: PlatformExperiment) {
-  return useSWR(['hypothesis-stats', pe.id], () => fetchHypothesisStats(pe.id), { refreshInterval: 15_000 })
+  return useSWR(keys.hypothesisStats(pe.id), () => fetchHypothesisStats(pe.id), { refreshInterval: POLL.standing })
 }
 
 /** How far value is from the baseline, signed so that better reads as positive in the metric's direction. */
@@ -136,9 +138,9 @@ function ProjectHypotheses() {
   const [chosen, setChosen] = useQueryParam('experiment')
   const [view, setView] = useQueryParam('view', HYPOTHESES_VIEW)
   const { data, error } = useSWR(
-    ['platform-experiments', project.id, 'hypotheses-scope'],
+    keys.experiments(project.id, 'hypotheses-scope'),
     () => fetchPlatformExperimentsPage({ project_id: project.id, sort: '-starts_at', limit: EXPERIMENTS_LISTED }),
-    { refreshInterval: 15_000, keepPreviousData: true },
+    { refreshInterval: POLL.standing, keepPreviousData: true },
   )
   const experiments = (data?.items ?? []).filter(pe => pe.status !== PlatformExperimentStatus.DRAFT)
   const selected = experiments.length === 0 ? undefined : chosen ? experiments.find(pe => pe.id === chosen) : mostRecentlyActive(experiments)

@@ -6,6 +6,7 @@ import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
 import type { Me, Project } from '@/types/accounts'
 import type { PlatformExperiment } from '@/types/platform-experiments'
 import { useTenant } from '@/lib/tenant'
+import { keys } from '@/lib/keys'
 
 function reaches(me: Me, projectID: string): boolean {
   return me.projects.some(p => p.id === projectID)
@@ -44,7 +45,7 @@ interface ExperimentAccess {
 export function useExperimentAccess(platformExperimentID: string | undefined): ExperimentAccess {
   const { me } = useTenant()
   const { data: pe, error } = useSWR(
-    platformExperimentID ? ['pe', platformExperimentID] : null,
+    platformExperimentID ? keys.experiment(platformExperimentID) : null,
     () => fetchPlatformExperiment(platformExperimentID as string),
   )
   if (!platformExperimentID) return { readOnly: false, known: true }

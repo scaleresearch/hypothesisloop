@@ -22,6 +22,8 @@ import { Inline } from '@/components/ui/stack'
 import { Callout, InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 import { errorMessage } from '@/lib/errors'
+import { keys } from '@/lib/keys'
+import { POLL } from '@/lib/poll'
 
 const ASK = 'What do you want to find out?'
 const CONNECT_FIRST = 'Install the GitHub App to start'
@@ -92,7 +94,7 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
   const app = useGitHubApp()
   const plainHost = app.error instanceof ApiError && app.error.reason === GITHUB_NOT_CONFIGURED
   // Read again while the page is open, so that planning is offered again once it can start.
-  const hosting = useSWR(['hosting'], fetchHosting, { refreshInterval: 15_000, onSuccess: h => { if (h.available) setRefused(null) } })
+  const hosting = useSWR(keys.hosting(), fetchHosting, { refreshInterval: POLL.standing, onSuccess: h => { if (h.available) setRefused(null) } })
   const unavailable = hosting.data && !hosting.data.available ? hosting.data.unavailable ?? null : refused
   const [repository, setRepository] = useState('')
   const box = useRef<HTMLTextAreaElement>(null)

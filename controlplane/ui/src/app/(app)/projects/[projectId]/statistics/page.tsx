@@ -22,6 +22,8 @@ import { chart, statusColor } from '@/lib/colors'
 import { evictionCode, evictionCodeLabel, evictionDetailLines } from '@/lib/eviction'
 import { acceleratorLabel, shortId } from '@/lib/format'
 import { occupancy } from '@/lib/units'
+import { keys } from '@/lib/keys'
+import { POLL } from '@/lib/poll'
 
 // How many of the newest evicted jobs the audit log shows.
 const RECENT_EVICTIONS = 10
@@ -41,8 +43,9 @@ function completionRate(byStatus: Record<string, number>): string {
 // How well the platform as a whole places and finishes work, over every org's jobs and clusters.
 // The API answers these reads for staff alone.
 function SchedulerQuality() {
-  const { data: stats, error: statsError } = useSWR('all-experiment-stats', fetchAllExperimentStats, { refreshInterval: 15_000 })
-  const { data: clusters, error: clustersError } = useSWR('all-clusters', () => fetchAllClusters().then(r => r.clusters), { refreshInterval: 5_000 })
+  const { data: stats, error: statsError } = useSWR(keys.allJobStats(), fetchAllExperimentStats, { refreshInterval: POLL.standing })
+  const { data: all, error: clustersError } = useSWR(keys.allClusters(), fetchAllClusters, { refreshInterval: POLL.live })
+  const clusters = all?.clusters
 
   const connected = clusters?.filter(c => c.connected).length ?? 0
   // Real hardware occupancy, busy against total accelerators in each connected cluster's latest
@@ -124,16 +127,16 @@ function StaffStatistics() {
   // are capped at one page, so a client-side tally would silently report the page's shape as
   // the platform's.
   const { data: stats, error } = useSWR(
-    ['experiment-stats', project.id],
+    keys.projectJobStats(project.id),
     () => fetchExperimentStats({ project_id: project.id }),
-    { refreshInterval: 15_000 },
+    { refreshInterval: POLL.standing },
   )
 
   // The audit log below is the one place that needs actual rows, the newest handful of them.
   const { data: recentEvictions, error: evictionsError } = useSWR(
-    ['recent-evictions', project.id],
+    keys.recentEvictions(project.id),
     () => fetchExperiments({ project_id: project.id, status: 'EVICTED', sort: '-updated_at', limit: RECENT_EVICTIONS }),
-    { refreshInterval: 15_000 },
+    { refreshInterval: POLL.standing },
   )
 
   return (

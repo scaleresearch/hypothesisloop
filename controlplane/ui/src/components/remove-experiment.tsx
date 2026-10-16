@@ -6,9 +6,7 @@ import { removePlatformExperiment } from '@/lib/api/platform-experiments'
 import type { PlatformExperiment } from '@/types/platform-experiments'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
-
-// The reads a removed experiment no longer counts in.
-const LISTS = new Set(['platform-experiments', 'experiment-stats', 'all-experiment-stats', 'agent-count'])
+import { experimentTallies } from '@/lib/keys'
 
 /** The owner's control to remove an experiment, behind a confirmation that says what removing does. */
 export function RemoveExperiment({ pe, label = 'Remove experiment', onRemoved }: { pe: PlatformExperiment; label?: string; onRemoved?: () => void }) {
@@ -24,7 +22,7 @@ export function RemoveExperiment({ pe, label = 'Remove experiment', onRemoved }:
         confirmLabel="Remove experiment"
         onConfirm={async () => {
           await removePlatformExperiment(pe.id)
-          void mutate(key => Array.isArray(key) && LISTS.has(key[0]))
+          void mutate(experimentTallies)
           onRemoved?.()
         }}
         onClose={() => setAsking(false)}

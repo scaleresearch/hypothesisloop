@@ -30,6 +30,8 @@ import { budgetKind, budgetUnit } from '@/lib/units'
 import { useRouter } from 'next/navigation'
 import { experimentPath, jobPath, projectPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
+import { keys } from '@/lib/keys'
+import { POLL } from '@/lib/poll'
 
 const PAGE_SIZE = 25
 
@@ -41,9 +43,9 @@ function unitOf(pe: PlatformExperiment): string {
 // the API answers 404 and this shows as no row.
 function AgentExperimentQuota({ agentId, pe, colSpan }: { agentId: string; pe: PlatformExperiment; colSpan: number }) {
   const { data: q, error } = useSWR(
-    ['agent-quota', pe.id, agentId],
+    keys.agentQuota(pe.id, agentId),
     () => fetchAgentQuota(pe.id, agentId),
-    { refreshInterval: 30_000 },
+    { refreshInterval: POLL.slow },
   )
   if (error instanceof ApiError && error.status === 404) return null
   if (error) return (
@@ -102,47 +104,47 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
   const [page, setPage] = useState(0)
 
   const { data, error } = useSWR(
-    ['agents-page', project.id, experimentFilter, page],
+    keys.agents(project.id, experimentFilter, page),
     () => fetchAgentsPage({ project_id: project.id, platform_experiment_id: experimentFilter, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
-    { refreshInterval: 15_000 },
+    { refreshInterval: POLL.standing },
   )
   const agents = data?.items
   const total = data?.total ?? 0
 
   const { data: stats, error: statsError } = useSWR(
-    ['agent-stats', project.id, experimentFilter],
+    keys.agentStats(project.id, experimentFilter),
     () => fetchAgentStats({ project_id: project.id, platform_experiment_id: experimentFilter }),
-    { refreshInterval: 15_000 },
+    { refreshInterval: POLL.standing },
   )
 
   // Quota exists from an experiment's start, so only running ones have a row to show.
   const { data: running, error: runningError } = useSWR<PlatformExperiment[]>(
-    experimentFilter ? null : ['platform-experiments-running', project.id],
+    experimentFilter ? null : keys.runningExperiments(project.id),
     () => fetchPlatformExperimentsPage({ project_id: project.id, status: 'running', limit: MAX_LIST_PAGE_SIZE }).then(p => p.items),
-    { refreshInterval: 30_000 },
+    { refreshInterval: POLL.slow },
   )
 
   const { data: selectedPE, error: selectedPEError } = useSWR(
-    experimentFilter ? ['pe', experimentFilter] : null,
+    experimentFilter ? keys.experiment(experimentFilter) : null,
     () => fetchPlatformExperiment(experimentFilter),
   )
   // What the platform allocated each agent of the selected experiment.
   const { data: quotas, error: quotasError } = useSWR(
-    experimentFilter ? ['pe-quotas', experimentFilter] : null,
+    experimentFilter ? keys.quotas(experimentFilter) : null,
     () => fetchPlatformExperimentQuotas(experimentFilter),
-    { refreshInterval: 30_000 },
+    { refreshInterval: POLL.slow },
   )
 
   // What each agent did in the selected experiment: its jobs, its best result and standing.
   const { data: jobStats, error: jobStatsError } = useSWR(
-    experimentFilter ? ['pe-stats-by-agent', experimentFilter] : null,
+    experimentFilter ? keys.jobStatsByAgent(experimentFilter) : null,
     () => fetchExperimentStats({ project_id: project.id, platform_experiment_id: experimentFilter, group_by: 'agent' }),
-    { refreshInterval: 15_000 },
+    { refreshInterval: POLL.standing },
   )
   const { data: results, error: resultsError } = useSWR(
-    experimentFilter ? ['pe-results', experimentFilter] : null,
+    experimentFilter ? keys.results(experimentFilter) : null,
     () => fetchPlatformExperimentResults(experimentFilter),
-    { refreshInterval: 15_000 },
+    { refreshInterval: POLL.standing },
   )
   const ranking = results?.metrics[0]
   const shown = experimentFilter

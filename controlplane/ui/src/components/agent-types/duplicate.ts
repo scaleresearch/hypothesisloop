@@ -4,6 +4,7 @@ import { useSWRConfig } from 'swr'
 import { createAgentType } from '@/lib/api/agent-types'
 import type { CreateAgentTypeRequest } from '@/lib/api/agent-types'
 import { agentTypesPath } from '@/lib/routes'
+import { keys } from '@/lib/keys'
 
 /** Makes an agent type of the org, a copy or a new one, and opens it in the editor. */
 export function useCreateAgentType(orgID: string) {
@@ -17,7 +18,7 @@ export function useCreateAgentType(orgID: string) {
     setError('')
     try {
       const made = await createAgentType(orgID, req)
-      await mutate(['agent-types', orgID])
+      await mutate(keys.agentTypes(orgID))
       router.push(agentTypesPath(orgID, made.id))
       return true
     } catch (e) {

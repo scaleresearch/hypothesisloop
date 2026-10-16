@@ -2,9 +2,8 @@ import useSWR from 'swr'
 import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
 import type { PlatformExperiment } from '@/types/platform-experiments'
 import { phaseOf } from '@/lib/phase'
-
-const WHILE_PLANNING_MS = 3_000
-const OTHERWISE_MS = 15_000
+import { keys } from '@/lib/keys'
+import { POLL } from '@/lib/poll'
 
 /**
  * How often an experiment's page asks the API again: often while its planner works, when what
@@ -12,7 +11,7 @@ const OTHERWISE_MS = 15_000
  * being accepted, and at the page's usual pace otherwise.
  */
 export function pollEvery(pe: Pick<PlatformExperiment, 'id' | 'status' | 'status_reason'> | undefined): number {
-  return pe && (phaseOf(pe) === 'planning' || pe.status_reason?.reason === 'accepting') ? WHILE_PLANNING_MS : OTHERWISE_MS
+  return pe && (phaseOf(pe) === 'planning' || pe.status_reason?.reason === 'accepting') ? POLL.planning : POLL.standing
 }
 
 /**
@@ -21,5 +20,5 @@ export function pollEvery(pe: Pick<PlatformExperiment, 'id' | 'status' | 'status
  * and not before the experiment itself is read.
  */
 export function useRoster(pe: Pick<PlatformExperiment, 'id' | 'status' | 'status_reason'> | undefined) {
-  return useSWR(pe ? ['pe-agents', pe.id] : null, () => fetchPlatformExperimentAgents(pe!.id), { refreshInterval: pollEvery(pe) })
+  return useSWR(pe ? keys.roster(pe.id) : null, () => fetchPlatformExperimentAgents(pe!.id), { refreshInterval: pollEvery(pe) })
 }

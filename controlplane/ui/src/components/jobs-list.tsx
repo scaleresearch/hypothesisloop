@@ -37,6 +37,8 @@ import { useTenant } from '@/lib/tenant'
 import { listProject, useExperimentAccess } from '@/lib/read-only'
 import { variedEnvByHypothesis, variedEnvSettings } from '@/lib/hypothesis-progress'
 import { BASELINE_JOB, JobHypothesis, measuresBaseline } from '@/components/job-hypothesis'
+import { keys } from '@/lib/keys'
+import { POLL } from '@/lib/poll'
 
 const CANCELABLE = new Set(['SUBMITTED', 'QUEUED', 'RUNNING'])
 const PAGE_SIZE = 25
@@ -89,7 +91,7 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
   // Every cluster a job of this org can be on, its own and the ones the platform shares. A job
   // on a cluster no longer listed, such as one that stopped being shared, shows its name alone.
   // Until that read answers, and when it fails, no job shows a connection dot.
-  const { data: clusters, error: clustersError } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 10_000 })
+  const { data: clusters, error: clustersError } = useSWR(keys.orgClusters(org.id), () => fetchOrgClusters(org.id), { refreshInterval: POLL.reports })
   const connectedByCluster = new Map(clustersError ? [] : clusters?.map(c => [c.name, c.connected]))
 
   function toggleSort(key: SortKey) {
@@ -105,7 +107,7 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
   const sort = `${sortDir === 'desc' ? '-' : ''}${sortKey}`
 
   const { data, error, mutate } = useSWR(
-    access.known ? ['jobs', scopeKey, agentFilter, peFilter, statusFilter, page, sort] : null,
+    access.known ? keys.jobs(scopeKey, agentFilter, peFilter, statusFilter, page, sort) : null,
     () => fetchExperimentsPage({
       ...scope,
       agent_id: agentFilter || undefined,
@@ -115,7 +117,7 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
       offset: page * PAGE_SIZE,
       sort,
     }),
-    { refreshInterval: 8_000 },
+    { refreshInterval: POLL.activity },
   )
 
   async function cancel(id: string) {
@@ -130,13 +132,13 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
   // The tiles count every job the agent and experiment filters match, whatever its status, so
   // each tile says how many jobs choosing it lists.
   const { data: stats, error: statsError } = useSWR(
-    access.known ? ['job-stats', scopeKey, agentFilter, peFilter] : null,
+    access.known ? keys.jobListStats(scopeKey, agentFilter, peFilter) : null,
     () => fetchExperimentStats({
       ...scope,
       agent_id: agentFilter || undefined,
       platform_experiment_id: peFilter || undefined,
     }),
-    { refreshInterval: 8_000 },
+    { refreshInterval: POLL.activity },
   )
 
   const evictionReasons = Object.entries(stats?.evictions_by_reason ?? {}).sort((a, b) => b[1] - a[1])
@@ -321,7 +323,7 @@ function JobRow({ job, showExperiment, varied, connected, onCancel }: JobRowProp
 
 /** An experiment by its name, linked to it; its id only while the name is read or when it cannot be. */
 function ExperimentLink({ id }: { id: string }) {
-  const { data, error } = useSWR(['pe', id], () => fetchPlatformExperiment(id))
+  const { data, error } = useSWR(keys.experiment(id), () => fetchPlatformExperiment(id))
   if (!data) return <span className="font-mono text-2xs text-subtle" title={error ? `Could not load its name: ${error.message}` : id}>{error ? id : '…'}</span>
   return <TextLink href={experimentPath(id)} title={data.name}>{data.name}</TextLink>
 }

@@ -29,6 +29,8 @@ import { AgentLabel, AgentNames } from '@/components/agent-label'
 import { Branch, Commit } from '@/components/code-ref'
 import { graphHref, linkGroups } from '@/lib/hypothesis-graph'
 import { envSettings, filedAfterVerdict, variedEnvKeys } from '@/lib/hypothesis-progress'
+import { keys } from '@/lib/keys'
+import { POLL } from '@/lib/poll'
 
 function LinkRow({ link, platformExperimentID, pe }: {
   link: HypothesisLink
@@ -73,7 +75,7 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
   const { experimentId, hypothesisId: id } = params
   const router = useRouter()
 
-  const { data, error, mutate } = useSWR(id, fetchHypothesis, { refreshInterval: 8_000 })
+  const { data, error, mutate } = useSWR(keys.hypothesis(id), () => fetchHypothesis(id), { refreshInterval: POLL.activity })
 
   const access = useExperimentAccess(experimentId)
   const pe = access.pe

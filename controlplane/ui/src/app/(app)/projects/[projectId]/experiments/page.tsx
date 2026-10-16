@@ -32,6 +32,8 @@ import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Pagination } from '@/components/ui/pagination'
 import { Segmented } from '@/components/ui/segmented'
 import { errorMessage } from '@/lib/errors'
+import { keys } from '@/lib/keys'
+import { POLL } from '@/lib/poll'
 
 const PAGE_SIZE = 10
 
@@ -50,8 +52,8 @@ function useLiveCounts(): ReactNode {
   const { project } = useTenant()
   // Both counts are server-side totals, not the length of a fetched page: see
   // fetchExperimentStats. The agent read asks for a single row purely to carry X-Total-Count.
-  const { data: stats, error: statsError } = useSWR(['experiment-stats', project.id], () => fetchExperimentStats({ project_id: project.id }), { refreshInterval: 15_000 })
-  const { data: agents, error: agentsError } = useSWR(['agent-count', project.id], () => fetchAgentsPage({ project_id: project.id, limit: 1 }), { refreshInterval: 30_000 })
+  const { data: stats, error: statsError } = useSWR(keys.projectJobStats(project.id), () => fetchExperimentStats({ project_id: project.id }), { refreshInterval: POLL.standing })
+  const { data: agents, error: agentsError } = useSWR(keys.agentCount(project.id), () => fetchAgentsPage({ project_id: project.id, limit: 1 }), { refreshInterval: POLL.slow })
 
   // A status no job holds is absent from the answer.
   const running = stats?.by_status?.RUNNING ?? 0
@@ -121,7 +123,7 @@ function PlatformExperimentsPageContent() {
   }, [draftID, project.id, pathname, router, searchParams])
 
   const { data, error, mutate } = useSWR(
-    ['platform-experiments', project.id, statusFilter, search, sort, page],
+    keys.experiments(project.id, statusFilter, search, sort, page),
     () => fetchPlatformExperimentsPage({
       project_id: project.id,
       status: statusFilter || undefined,
@@ -130,10 +132,10 @@ function PlatformExperimentsPageContent() {
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
     }),
-    { refreshInterval: 10_000 },
+    { refreshInterval: POLL.reports },
   )
   // The sidebar reads the same key, so this is one request for both.
-  const { data: clusters } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 10_000 })
+  const { data: clusters } = useSWR(keys.orgClusters(org.id), () => fetchOrgClusters(org.id), { refreshInterval: POLL.reports })
 
   // A new experiment opens on its own page: a draft to be planned, or one to add agents to.
   const open = (pe: PlatformExperiment) => router.push(experimentPath(pe.id))

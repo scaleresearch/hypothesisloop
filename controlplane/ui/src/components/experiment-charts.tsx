@@ -34,6 +34,8 @@ import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Eyebrow, Pill, Text } from '@/components/ui/text'
 import { semantic, seriesPalette, chart } from '@/lib/colors'
 import { jobPath } from '@/lib/routes'
+import { keys } from '@/lib/keys'
+import { POLL } from '@/lib/poll'
 
 // Bounded-score metrics (roughly 0-1) get their own axis so they aren't flattened to a
 // hairline by unbounded metrics like seconds_per_subject/cv_seconds sitting in the tens+.
@@ -122,9 +124,9 @@ function JobMetricMini({ jobId, trackedMetrics }: { jobId: string; trackedMetric
   // full per-job history over and over; 30s keeps mini-charts fresh without redundant load
   // when dozens of these mount at once (one per running/expanded job).
   const { data: metrics, error } = useSWR<MetricDataPoint[]>(
-    `metrics-${jobId}`,
+    keys.jobMetrics(jobId),
     () => fetchExperimentMetrics(jobId),
-    { refreshInterval: 30_000 },
+    { refreshInterval: POLL.slow },
   )
   if (error) return <ErrorMessage>Could not load the metrics of job {jobId}: {error.message}</ErrorMessage>
   if (!metrics) return <Loading />
@@ -154,9 +156,9 @@ export function LiveMetricsPicker({ jobs }: { jobs: Experiment[] }) {
   const effectiveJobId = selectedJob?.id
 
   const { data: metrics, error } = useSWR<MetricDataPoint[]>(
-    effectiveJobId ? `metrics-${effectiveJobId}` : null,
+    effectiveJobId ? keys.jobMetrics(effectiveJobId) : null,
     () => fetchExperimentMetrics(effectiveJobId as string),
-    { refreshInterval: 30_000 },
+    { refreshInterval: POLL.slow },
   )
   const points = (metrics ?? []).filter((p) => p.recorded_at)
   const availableMetrics = useMemo(
@@ -451,9 +453,9 @@ export function CompetingAgentsChart({
 
 export function AgentJobsPanel({ projectId, platformExperimentId, agentId, trackedMetrics }: { projectId: string; platformExperimentId: string; agentId: string; trackedMetrics: string[] }) {
   const { data, error } = useSWR(
-    ['pe-agent-jobs', platformExperimentId, agentId],
+    keys.agentJobs(platformExperimentId, agentId),
     () => fetchExperimentsPage({ project_id: projectId, platform_experiment_id: platformExperimentId, agent_id: agentId, sort: '-created_at' }),
-    { refreshInterval: 15_000 },
+    { refreshInterval: POLL.standing },
   )
   if (error) return <ErrorMessage>Could not load jobs from <AgentLabel id={agentId} />.</ErrorMessage>
   if (!data) return <Loading />

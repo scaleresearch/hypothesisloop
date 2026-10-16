@@ -5,6 +5,7 @@ import { useSWRConfig } from 'swr'
 import { fetchMe } from '@/lib/api/accounts'
 import type { Me, Org, Project } from '@/types/accounts'
 import type { PlatformExperiment } from '@/types/platform-experiments'
+import { keys } from '@/lib/keys'
 
 /** The signed-in caller and the org and project every page is showing. */
 export interface Tenant {
@@ -83,7 +84,7 @@ export function useTenant(): Tenant {
 export function useRefreshMe(): () => Promise<Me> {
   const { mutate } = useSWRConfig()
   return async () => {
-    const me = await mutate('me', fetchMe(), { revalidate: false })
+    const me = await mutate(keys.me(), fetchMe(), { revalidate: false })
     if (!me) throw new Error('GET /me answered with nothing')
     return me
   }

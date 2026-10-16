@@ -23,6 +23,7 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
 import { errorMessage } from '@/lib/errors'
 import { Text } from '@/components/ui/text'
+import { keys } from '@/lib/keys'
 
 function Revise({ draft, declined, onDone }: { draft: Draft; declined: boolean; onDone: () => void }) {
   const [message, setMessage] = useState('')
@@ -81,7 +82,7 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
   const { mutate } = useSWRConfig()
   const [confirming, setConfirming] = useState(false)
   const state = reasonOf(draft).reason
-  const reread = () => void mutate(['pe', draft.id])
+  const reread = () => void mutate(keys.experiment(draft.id))
   const revise = !readOnly && (state === 'proposed' || state === 'accepting' || state === 'declined') && <Revise draft={draft} declined={state === 'declined'} onDone={reread} />
 
   async function abandon() {

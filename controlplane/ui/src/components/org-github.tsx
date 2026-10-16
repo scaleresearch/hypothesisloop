@@ -18,6 +18,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
+import { keys } from '@/lib/keys'
 
 const KIND = { User: 'Personal', Organization: 'Organization' } as const
 
@@ -28,7 +29,7 @@ const KIND = { User: 'Personal', Organization: 'Organization' } as const
 function InstallationState({ installation, onInstall }: { installation: GitHubInstallation; onInstall?: () => void }) {
   const { org } = useTenant()
   const { data, error, isValidating, mutate } = useSWR(
-    ['github-installation-check', org.id, installation.installation_id],
+    keys.githubInstallationCheck(org.id, installation.installation_id),
     () => checkGitHubInstallation(org.id, installation.installation_id).then(() => true),
   )
   if (error) {
@@ -56,7 +57,7 @@ function InstallationState({ installation, onInstall }: { installation: GitHubIn
  */
 export function OrgGitHub() {
   const { me, org, administers } = useTenant()
-  const { data, error, mutate } = useSWR(['github-installations', org.id], () => fetchGitHubInstallations(org.id))
+  const { data, error, mutate } = useSWR(keys.githubInstallations(org.id), () => fetchGitHubInstallations(org.id))
   const app = useGitHubApp(administers)
   const { install, start, reset } = useGitHubInstall(org.id, githubCardPath(org.id))
   const [disconnecting, setDisconnecting] = useState<GitHubInstallation | null>(null)

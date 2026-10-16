@@ -29,6 +29,7 @@ import { Callout, ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Table, num } from '@/components/ui/table'
 import { Code, Eyebrow, Text } from '@/components/ui/text'
 import { errorMessage } from '@/lib/errors'
+import { keys } from '@/lib/keys'
 
 const NEW_ROW: PoolRow = { agent_type: DEFAULT_AGENT_TYPE, model: '', count: '1' }
 
@@ -101,8 +102,8 @@ function PoolEditor({ pe, atWork, onDone }: { pe: PlatformExperiment; atWork: Jo
     if (poolChanged) patch.researchers = toPool(rows)
     try {
       const saved = await updatePlatformExperiment(pe.id, patch)
-      await mutate(['pe', pe.id], saved, { revalidate: false })
-      await mutate(['pe-agents', pe.id])
+      await mutate(keys.experiment(pe.id), saved, { revalidate: false })
+      await mutate(keys.roster(pe.id))
       onDone()
     } catch (e) {
       setError(errorMessage(e))

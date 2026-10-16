@@ -20,6 +20,8 @@ import { SharedBadge } from '@/components/shared-badge'
 import { Button } from '@/components/ui/button'
 import { Inline } from '@/components/ui/stack'
 import { RemoveExperiment } from '@/components/remove-experiment'
+import { keys } from '@/lib/keys'
+import { POLL } from '@/lib/poll'
 
 const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' })
 
@@ -45,14 +47,14 @@ export function PlatformExperimentCard({
   const started = pe.status !== PlatformExperimentStatus.DRAFT
 
   const { data: quotas, error: quotasError } = useSWR<AgentQuota[]>(
-    started ? ['pe-quotas', pe.id] : null,
+    started ? keys.quotas(pe.id) : null,
     () => fetchPlatformExperimentQuotas(pe.id),
-    { refreshInterval: 10_000 },
+    { refreshInterval: POLL.reports },
   )
   const { data: verdicts, error: verdictsError } = useSWR(
-    started ? ['pe-hypothesis-stats', pe.id] : null,
+    started ? keys.hypothesisStats(pe.id) : null,
     () => fetchHypothesisStats(pe.id),
-    { refreshInterval: 15_000 },
+    { refreshInterval: POLL.standing },
   )
 
   const unit = budgetUnit(budgetKind((pe as Draft).proposal?.accelerator_type, []))

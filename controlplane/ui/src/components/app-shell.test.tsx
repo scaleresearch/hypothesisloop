@@ -10,6 +10,7 @@ import type { Me } from '@/types/accounts'
 import type { PlatformExperiment } from '@/types/platform-experiments'
 import { useTenant } from '@/lib/tenant'
 import { AppShell } from '@/components/app-shell'
+import { keys } from '@/lib/keys'
 
 const navigation = vi.hoisted(() => ({ params: {} as Record<string, string> }))
 
@@ -48,7 +49,7 @@ function Page() {
       <p>page of {org.name} / {project.name}</p>
       <p>retries {String(shouldRetryOnError)}, rereads on focus {String(revalidateOnFocus)}</p>
       <button onClick={() => setToken('hls_shown')}>show token</button>
-      <button onClick={() => void mutate('me')}>reread account</button>
+      <button onClick={() => void mutate(keys.me())}>reread account</button>
       <output>{token}</output>
     </>
   )

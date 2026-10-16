@@ -25,6 +25,7 @@ import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Code, Text } from '@/components/ui/text'
+import { keys } from '@/lib/keys'
 
 // Why the person cannot edit the type, or null when they can.
 function readOnlyReason(t: AgentType, administers: boolean, orgName: string): string | null {
@@ -219,14 +220,14 @@ export function AgentTypeDetail({ typeID }: { typeID: string }) {
   const router = useRouter()
   const { org, administers } = useTenant()
   const { mutate } = useSWRConfig()
-  const { data: type, error, mutate: mutateType } = useSWR(['agent-type', org.id, typeID], () => fetchAgentType(org.id, typeID))
+  const { data: type, error, mutate: mutateType } = useSWR(keys.agentType(org.id, typeID), () => fetchAgentType(org.id, typeID))
   const { create, busy: duplicating, error: duplicateError } = useCreateAgentType(org.id)
   const [archiving, setArchiving] = useState(false)
   const [saved, setSaved] = useState<{ edited: EditedAgentType; renamed: boolean } | null>(null)
 
   async function refresh(next?: AgentType) {
     await mutateType(next)
-    await mutate(['agent-types', org.id])
+    await mutate(keys.agentTypes(org.id))
   }
 
   async function edited(t: EditedAgentType) {

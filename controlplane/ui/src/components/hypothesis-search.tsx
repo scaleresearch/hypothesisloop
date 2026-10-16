@@ -10,10 +10,11 @@ import { Input } from '@/components/ui/input'
 import { Inline, Stack } from '@/components/ui/stack'
 import { InlineError, Loading } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
+import { keys } from '@/lib/keys'
 
 export function useHypothesisSearch(platformExperimentID: string, q: string) {
   return useSWR(
-    platformExperimentID && q ? ['hypothesis-search', platformExperimentID, q] : null,
+    platformExperimentID && q ? keys.hypothesisSearch(platformExperimentID, q) : null,
     () => searchHypotheses(platformExperimentID, q),
   )
 }

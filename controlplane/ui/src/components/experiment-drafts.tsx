@@ -12,6 +12,7 @@ import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { ErrorMessage, InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
+import { keys } from '@/lib/keys'
 
 // The name typed, else the start of the brief, so that a draft kept from a goal reads as that goal.
 function nameOf(draft: ExperimentDraft): string {
@@ -26,7 +27,7 @@ function nameOf(draft: ExperimentDraft): string {
  */
 export function ExperimentDrafts({ onOpen }: { onOpen: (draft: ExperimentDraft) => void }) {
   const { project } = useTenant()
-  const { data, error, mutate } = useSWR(['experiment-drafts', project.id], () => fetchExperimentDrafts(project.id))
+  const { data, error, mutate } = useSWR(keys.experimentDrafts(project.id), () => fetchExperimentDrafts(project.id))
   const [deleting, setDeleting] = useState<ExperimentDraft | null>(null)
 
   async function drop(draft: ExperimentDraft) {

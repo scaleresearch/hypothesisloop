@@ -7,6 +7,7 @@ import { useTenant } from '@/lib/tenant'
 import { InstallProgress } from '@/components/github-status'
 import { Button } from '@/components/ui/button'
 import { Text } from '@/components/ui/text'
+import { keys } from '@/lib/keys'
 
 /**
  * Where the org stands with GitHub when it creates an experiment. On a deployment whose git host
@@ -17,7 +18,7 @@ import { Text } from '@/components/ui/text'
 export function useGitHub(): 'connected' | 'unconnected' | undefined {
   const { org } = useTenant()
   const app = useGitHubApp()
-  const installations = useSWR(app.data ? ['github-installations', org.id] : null, () => fetchGitHubInstallations(org.id))
+  const installations = useSWR(app.data ? keys.githubInstallations(org.id) : null, () => fetchGitHubInstallations(org.id))
   if (!app.data || !installations.data) return undefined
   return installations.data.total > 0 ? 'connected' : 'unconnected'
 }

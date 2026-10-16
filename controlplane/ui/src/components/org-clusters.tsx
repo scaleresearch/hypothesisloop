@@ -21,6 +21,8 @@ import { Segmented } from '@/components/ui/segmented'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Code, Heading, Text } from '@/components/ui/text'
+import { keys } from '@/lib/keys'
+import { POLL } from '@/lib/poll'
 
 // What runs the jobs. The API records no kind: a cluster is a name, and its kind is whichever agent
 // connects under it. Registering answers the command for each, and the choice here shows one.
@@ -229,7 +231,7 @@ function NextPlacement({ clusters }: { clusters: OrgCluster[] }) {
  */
 export function OrgClusters() {
   const { org, administers, staff } = useTenant()
-  const { data, error, mutate } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 5_000 })
+  const { data, error, mutate } = useSWR(keys.orgClusters(org.id), () => fetchOrgClusters(org.id), { refreshInterval: POLL.live })
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState('')

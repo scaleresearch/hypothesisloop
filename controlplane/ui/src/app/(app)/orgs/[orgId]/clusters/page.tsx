@@ -15,6 +15,8 @@ import { Stack } from '@/components/ui/stack'
 import { Table, num } from '@/components/ui/table'
 import { Heading, Text } from '@/components/ui/text'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
+import { keys } from '@/lib/keys'
+import { POLL } from '@/lib/poll'
 
 function AllClustersCounts({ clusters }: { clusters: ClusterInfo[] }) {
   const connected = clusters.filter(c => c.connected).length
@@ -38,9 +40,9 @@ function AllClustersCounts({ clusters }: { clusters: ClusterInfo[] }) {
 // Every org's clusters with their live occupancy, which the API answers for staff alone.
 function AllClusters() {
   const { data, error, isLoading } = useSWR<ClustersResponse>(
-    'all-clusters',
+    keys.allClusters(),
     fetchAllClusters,
-    { refreshInterval: 5_000 },
+    { refreshInterval: POLL.live },
   )
 
   return (
@@ -89,9 +91,9 @@ const gib = (bytes: number) => Math.round((bytes / 2 ** 30) * 10) / 10
 function LiveCapacity() {
   const { org } = useTenant()
   const { data, error, isLoading } = useSWR(
-    ['resource-capacity', org.id],
+    keys.resourceCapacity(org.id),
     () => fetchResourceCapacity(org.id),
-    { refreshInterval: 5_000 },
+    { refreshInterval: POLL.live },
   )
 
   // The numbers agents get from GET /resource-catalog/capacity, so an operator sees what an
