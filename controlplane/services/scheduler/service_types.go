@@ -89,15 +89,6 @@ type QuotaService interface {
 	Describe(ctx context.Context, pe *domain.PlatformExperiment, reader auth.Principal) error
 }
 
-// NoveltyDetector computes the novelty of a hypothesis relative to existing experiments.
-type NoveltyDetector interface {
-	// ComputeNovelty returns a value in [0,1] where 1.0 is completely novel. hypothesisID
-	// identifies a hypothesis registered via the hypotheses registry (services/registry); real
-	// duplicate *rejection* happens there (a graph uniqueness constraint), so this score is purely
-	// advisory, based on how many active experiments share the same hypothesis_id.
-	ComputeNovelty(ctx context.Context, hypothesisID string, existingExperiments []*domain.Experiment) (float64, error)
-}
-
 // Triggerable is anything that can wake the scheduler loop.
 type Triggerable interface {
 	Trigger()
@@ -140,7 +131,6 @@ type InstalledCapacity interface {
 type Service struct {
 	store        Store
 	quota        QuotaService
-	novelty      NoveltyDetector
 	hypotheses   HypothesisStore
 	codeHost     CodeHost
 	environments Environments
@@ -168,7 +158,6 @@ type Service struct {
 func NewService(
 	store Store,
 	quota QuotaService,
-	novelty NoveltyDetector,
 	hypotheses HypothesisStore,
 	codeHost CodeHost,
 	clusters InstalledCapacity,
@@ -185,7 +174,6 @@ func NewService(
 	return &Service{
 		store:        store,
 		quota:        quota,
-		novelty:      novelty,
 		hypotheses:   hypotheses,
 		codeHost:     codeHost,
 		clusters:     clusters,

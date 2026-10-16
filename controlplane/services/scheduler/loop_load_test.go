@@ -883,7 +883,7 @@ func TestReprioritizingAQueueReadsEachAgentsQuotaOnce(t *testing.T) {
 		store.queued = append(store.queued, exp)
 	}
 	quota := &countingQuota{}
-	svc := &Service{store: store, quota: quota, novelty: countingNovelty{}, weights: domain.SchedulingWeights{W1Novelty: 1, W3CostEfficiency: 1}, logger: zap.NewNop()}
+	svc := &Service{store: store, quota: quota, weights: domain.SchedulingWeights{W1Novelty: 1, W3CostEfficiency: 1}, logger: zap.NewNop()}
 
 	if err := svc.RePrioritize(context.Background()); err != nil {
 		t.Fatal(err)

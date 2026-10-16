@@ -32,17 +32,12 @@ func (s *Service) RePrioritize(ctx context.Context) error {
 			}
 			active[exp.PlatformExperimentID] = activeExps
 		}
-		// A per-job failure here (novelty lookup, quota lookup, or the DB write) must not abort
-		// reprioritization of the rest of the queue: an unrelated job's transient error would
-		// otherwise leave every job after it with a stale score for the rest of this tick. Log
-		// and skip just this job instead, mirroring completionFractions' per-item skip in
-		// loop_preempt.go.
-		noveltyScore, err := s.novelty.ComputeNovelty(ctx, exp.HypothesisID, excludeExperiment(activeExps, exp.ID))
-		if err != nil {
-			s.logger.Warn("reprioritize: compute novelty failed; leaving stale priority",
-				zap.String("exp", exp.ID), zap.Error(err))
-			continue
-		}
+		// A per-job failure here (quota lookup or the DB write) must not abort reprioritization
+		// of the rest of the queue: an unrelated job's transient error would otherwise leave every
+		// job after it with a stale score for the rest of this tick. Log and skip just this job
+		// instead, mirroring completionFractions' per-item skip in loop_preempt.go.
+		noveltyScore := novelty(exp.HypothesisID, excludeExperiment(activeExps, exp.ID))
+		var err error
 		key := quotaKey(exp.AgentID, exp.PlatformExperimentID)
 		aq, read := quotas[key]
 		if !read {
@@ -129,4 +124,16 @@ func excludeExperiment(exps []*domain.Experiment, id string) []*domain.Experimen
 		}
 	}
 	return out
+}
+
+// novelty is advisory, for priority alone: 1 / (1 + n), n the active jobs on the same
+// hypothesis. Rejecting a duplicate hypothesis is the hypothesis graph's.
+func novelty(hypothesisID string, active []*domain.Experiment) float64 {
+	var n float64
+	for _, exp := range active {
+		if exp.HypothesisID == hypothesisID {
+			n++
+		}
+	}
+	return 1 / (1 + n)
 }

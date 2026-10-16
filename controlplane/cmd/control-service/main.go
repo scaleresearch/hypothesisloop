@@ -17,7 +17,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/dedup"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/environments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/gitproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/launcherapi"
@@ -446,8 +445,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 		MaxShutdownSeconds:     int64(pcfg.Scheduler.MaxTerminationGracePeriodSeconds),
 		MaxCheckpointSeconds:   int64(pcfg.Scheduler.MaxCheckpointGraceSeconds),
 	}
-	noveltyDetector := dedup.New()
-	schedulerSvc := scheduler.NewService(store, expQuotaSvc, noveltyDetector, graph, gitHost, clusterReports, settler, metricsDBURL, logger).
+	schedulerSvc := scheduler.NewService(store, expQuotaSvc, graph, gitHost, clusterReports, settler, metricsDBURL, logger).
 		WithQuotaConfig(quotaCfg).
 		WithJobImages(pcfg.OfferedJobImages()).
 		WithEnvironments(environmentsSvc).

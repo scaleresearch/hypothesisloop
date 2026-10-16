@@ -50,7 +50,7 @@ func TestAnEnvironmentBuiltAheadIsTheOneItsJobWaitsFor(t *testing.T) {
 	}
 
 	job := humanIdeaSubmission()
-	if err := (&Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: admittingStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
+	if err := (&Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: admittingStore{}, hypotheses: humanHypothesis("pe-1"),
 		quota: insertingQuota{}, loop: wokenLoop{new(int)}, environments: declared{files: map[string]string{commit: rustEnvironment}}}).Submit(context.Background(), job); err != nil {
 		t.Fatal(err)
 	}

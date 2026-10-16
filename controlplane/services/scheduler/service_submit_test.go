@@ -515,7 +515,7 @@ func (n *recordingNovelty) ComputeNovelty(_ context.Context, _ string, existing 
 // another's jobs may be another org's.
 func TestNoveltyComparesAgainstTheJobsOfTheSamePlatformExperimentOnly(t *testing.T) {
 	novelty := &recordingNovelty{}
-	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: twoExperimentsStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novelty}
+	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: twoExperimentsStore{}, hypotheses: humanHypothesis("pe-1")}
 	if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.Is(err, errReachedScoring) {
 		t.Fatalf("Submit: got = %v, want it to reach novelty scoring", err)
 	}

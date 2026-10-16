@@ -379,10 +379,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 			return err
 		}
 	}
-	noveltyScore, err := s.novelty.ComputeNovelty(ctx, exp.HypothesisID, excludeExperiment(activeExps, exp.ID))
-	if err != nil {
-		return fmt.Errorf("scheduler: compute novelty: %w", err)
-	}
+	noveltyScore := novelty(exp.HypothesisID, excludeExperiment(activeExps, exp.ID))
 	exp.NoveltyScore = noveltyScore
 
 	// 6. Priority scoring.
