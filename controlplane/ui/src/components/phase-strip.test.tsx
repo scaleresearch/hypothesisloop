@@ -4,7 +4,8 @@ import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchPlatformExperimentAgents } from '@/lib/api'
 import { PhaseStrip } from '@/components/phase-strip'
-import type { Draft } from '@/lib/planning'
+import { formatDate } from '@/lib/format'
+import type { Draft, Proposal } from '@/lib/planning'
 import { PlatformExperimentStatus } from '@/types'
 import type { JoinedAgent, StatusReason } from '@/types'
 
@@ -142,5 +143,63 @@ describe('the baseline agent in the phase strip', () => {
     first.unmount()
     show(experiment('running', 'running', { ends_at: at }))
     expect(screen.queryByRole('group', { name: 'Baseline agent' })).toBeNull()
+  })
+})
+
+// Once a proposal was accepted the page had no way back to it: what was proposed, the planner's
+// questions and the answers given, and who accepted it were gone from sight.
+describe('the proposal of an accepted experiment', () => {
+  const proposal: Proposal = {
+    experiment: {
+      name: 'Schedules on tiny transformers',
+      description: 'Train the small transformer in train.py and report val_loss.',
+      metrics: [{ key: 'val_loss', direction: 'minimize' }],
+    },
+    budget_accelerator_hours: 6,
+    duration_hours: 4,
+    baseline_minutes: 30,
+    agents: [{}, {}],
+    accelerator_type: 'rtx-4090',
+    metric_reason: 'Validation loss on held-out text is the goal itself.',
+    measurement: 'bench.py scores a split the training never reads.',
+    questions: [
+      { question: 'How big a win counts?', answer: '20% lower loss.' },
+      { question: 'Which batch sizes are held equal?', answer: '32 only.' },
+    ],
+  }
+  const accepted = { proposal, proposed_at: '2026-10-05T12:10:00Z', accepted_at: '2026-10-05T12:15:00Z' }
+  const step = () => within(screen.getByRole('list', { name: 'Phase' })).queryByRole('button', { name: 'Proposal' })
+
+  it('opens from the Proposal step as a record, with who accepted it and the answers given, and nothing to act on', async () => {
+    show(experiment('running', 'running', { ...accepted, accepted_by: { kind: 'user', id: 'u-1', name: 'Ada' }, accepted_answers: ['20% lower loss.', '32 and 64.'] }))
+    expect(screen.queryByText('How big a win counts?')).toBeNull()
+    await userEvent.click(step()!)
+    expect(step()!.getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('note').textContent).toBe(`Accepted by Ada on ${formatDate('2026-10-05T12:15:00Z')}.`)
+    expect(screen.getByText('How big a win counts?')).toBeTruthy()
+    expect(screen.getByText('32 and 64.')).toBeTruthy()
+    expect(screen.getByText('The planner had planned on: 32 only.')).toBeTruthy()
+    expect(screen.getByText('Schedules on tiny transformers')).toBeTruthy()
+    expect(screen.getByText('val_loss, lower is better')).toBeTruthy()
+    expect(screen.getByText('Researcher 2')).toBeTruthy()
+    expect(screen.queryAllByRole('textbox')).toHaveLength(0)
+    expect(screen.queryAllByRole('spinbutton')).toHaveLength(0)
+    for (const name of ['Accept and run', 'Accept now', 'Edit', 'Reject', 'Revise']) expect(screen.queryByRole('button', { name })).toBeNull()
+    await userEvent.click(step()!)
+    expect(screen.queryByText('How big a win counts?')).toBeNull()
+  })
+
+  it('says when the platform accepted it by itself', async () => {
+    show(experiment('closed', 'end_time_reached', { ...accepted, proposal: { ...proposal, questions: undefined } }))
+    await userEvent.click(step()!)
+    expect(screen.getByRole('note').textContent).toBe(`Accepted automatically on ${formatDate('2026-10-05T12:15:00Z')}.`)
+  })
+
+  it('is no step to open on a draft, whose proposal is on its page, nor on one created whole', () => {
+    const draft = show(experiment('draft', 'proposed', { proposal, proposed_at: accepted.proposed_at }))
+    expect(step()).toBeNull()
+    draft.unmount()
+    show(experiment('open', 'baseline_measuring'))
+    expect(step()).toBeNull()
   })
 })

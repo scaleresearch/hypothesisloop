@@ -82,6 +82,12 @@ export type Draft = PlatformExperiment & {
   declined_at?: string
   declined_reason?: string
   revisions?: PlanningRequest[]
+  // Once its proposal was accepted: when, by whom (absent when the platform accepted it by itself
+  // at accepts_at) and the answers given to proposal.questions, in their order. The proposal
+  // itself stays as it was proposed.
+  accepted_at?: string
+  accepted_by?: Actor
+  accepted_answers?: string[]
 }
 
 /** What the person who accepts states themselves, whatever was proposed. */

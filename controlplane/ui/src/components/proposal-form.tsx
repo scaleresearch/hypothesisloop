@@ -4,11 +4,12 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { ApiError } from '@/lib/api'
 import { useSecondsUntil } from '@/lib/auto-accept'
-import { acceleratorLabel, formatAccH } from '@/lib/format'
+import { acceleratorLabel, formatAccH, formatDate } from '@/lib/format'
 import { abandonDraft, acceptDraft, holdDraft } from '@/lib/planning'
 import type { Draft, Proposal, ProposedAgent } from '@/lib/planning'
 import { budgetUnit, kindOf } from '@/lib/units'
 import type { MetricDefinition } from '@/types'
+import { actorLabel } from '@/components/actor'
 import { Button } from '@/components/ui/button'
 import { Captioned } from '@/components/ui/captioned'
 import { InsetCard } from '@/components/ui/card'
@@ -113,13 +114,15 @@ function Countdown({ draft, accept, sending, onDone }: { draft: Draft; accept: (
  * `editable` is off for a reader, while the planner revises and while the platform counts down
  * to accepting it by itself, when it is only read. `accepting` shows that countdown, with Accept
  * now, Edit, which stops the countdown and makes the form editable, and Reject, which closes the
- * draft. `children` is the box that asks the planner for a change.
+ * draft. `children` is the box that asks the planner for a change. `accepted` shows a proposal
+ * that was accepted as the record of it: the same layout with the values as text and no control.
  */
-export function ProposalForm({ draft, proposal, editable, accepting, onDone, children }: {
+export function ProposalForm({ draft, proposal, editable, accepting, accepted = false, onDone, children }: {
   draft: Draft
   proposal: Proposal
   editable: boolean
   accepting: boolean
+  accepted?: boolean
   onDone: () => void
   children?: ReactNode
 }) {
@@ -164,11 +167,36 @@ export function ProposalForm({ draft, proposal, editable, accepting, onDone, chi
 
   return (
     <Stack gap="xl">
-    <Section title="Proposed experiment">
+    <Section title={accepted ? 'Accepted proposal' : 'Proposed experiment'}>
       <Stack gap="lg">
+        {accepted && draft.accepted_at && (
+          <Text role="note">
+            {draft.accepted_by ? `Accepted by ${actorLabel(draft.accepted_by)} on ${formatDate(draft.accepted_at)}.` : `Accepted automatically on ${formatDate(draft.accepted_at)}.`}
+          </Text>
+        )}
         {accepting && <Countdown draft={draft} accept={accept} sending={sending} onDone={onDone} />}
         {accepting && error && <InlineError>{error}</InlineError>}
-        {questions.length > 0 && (
+        {accepted && questions.length > 0 && (
+          <Captioned caption="The planner's questions and the answers given">
+            <dl className="grid gap-3">
+              {questions.map((q, i) => {
+                const given = draft.accepted_answers?.[i]
+                return (
+                  <div key={i}>
+                    <dt className="text-sm text-muted">{q.question}</dt>
+                    <dd>
+                      <Text>{given ?? q.answer}</Text>
+                      {given === undefined
+                        ? <Text variant="note">The answer the planner planned on.</Text>
+                        : given !== q.answer && <Text variant="note">The planner had planned on: {q.answer}</Text>}
+                    </dd>
+                  </div>
+                )
+              })}
+            </dl>
+          </Captioned>
+        )}
+        {!accepted && questions.length > 0 && (
           <Captioned caption="Before you start, answer the planner's questions">
             <Stack gap="sm">
               <Text tone="muted">
@@ -182,9 +210,13 @@ export function ProposalForm({ draft, proposal, editable, accepting, onDone, chi
             </Stack>
           </Captioned>
         )}
-        <FormField label="Name" error={nameError}>
-          <Input value={name} disabled={!editable} onChange={e => setName(e.target.value)} />
-        </FormField>
+        {accepted ? (
+          <Captioned caption="Name"><Text>{proposal.experiment.name}</Text></Captioned>
+        ) : (
+          <FormField label="Name" error={nameError}>
+            <Input value={name} disabled={!editable} onChange={e => setName(e.target.value)} />
+          </FormField>
+        )}
         <Captioned caption="What is measured">
           <Stack as="ul" gap="xs" className="mb-2">
             {metrics.map(metric => (
@@ -202,9 +234,11 @@ export function ProposalForm({ draft, proposal, editable, accepting, onDone, chi
           <Stack gap="sm">
             <Text>{proposal.measurement}</Text>
             <Facts facts={runsOn(proposal)} />
-            <Text variant="note">
-              Nothing has run yet. Once you accept, the baseline is measured on {acceleratorLabel(proposal.accelerator_type)} before any researcher starts.
-            </Text>
+            {!accepted && (
+              <Text variant="note">
+                Nothing has run yet. Once you accept, the baseline is measured on {acceleratorLabel(proposal.accelerator_type)} before any researcher starts.
+              </Text>
+            )}
           </Stack>
         </Captioned>
         <Captioned caption="Researchers">
@@ -231,6 +265,19 @@ export function ProposalForm({ draft, proposal, editable, accepting, onDone, chi
             <Text>{proposal.sizing_reason}</Text>
           </Captioned>
         )}
+        {accepted ? (
+          <Captioned caption="What it may spend, as proposed">
+            <Text tone="muted" className="mb-2">
+              The planner estimated these before anything ran. Whoever accepted stated the figures the run started with, shown on this page.
+            </Text>
+            <Facts facts={[
+              [`Budget (${unit})`, formatAccH(proposal.budget_accelerator_hours)],
+              ['Baseline (minutes)', String(proposal.baseline_minutes)],
+              ['Duration (hours)', String(proposal.duration_hours)],
+              ['Researchers', String(proposal.agents.length)],
+            ]} />
+          </Captioned>
+        ) : (
         <Captioned caption="What it may spend">
           <Text tone="muted" className="mb-2">
             These four are yours to state. The planner proposed {formatAccH(proposal.budget_accelerator_hours)} {unit} over {proposal.duration_hours} hours of research
@@ -243,9 +290,10 @@ export function ProposalForm({ draft, proposal, editable, accepting, onDone, chi
             <FormField label="Researchers"><Input type="number" min={1} step={1} value={researchers} disabled={!editable} onChange={e => setResearchers(e.target.value)} /></FormField>
           </div>
         </Captioned>
+        )}
         <Sentences title="What could mislead" items={proposal.risks} />
         <Sentences title="Left out on purpose" items={proposal.out_of_scope} />
-        <Captioned caption="The brief every researcher works from">
+        <Captioned caption={!accepted ? 'The brief every researcher works from' : questions.length > 0 ? 'The brief as proposed, before the answers were added' : 'The brief as proposed'}>
           <CollapsibleDescription text={proposal.experiment.description} />
         </Captioned>
         {editable && (

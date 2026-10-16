@@ -15,6 +15,7 @@ import { AgentAtWork, PlannerAtWork } from '@/components/agent-at-work'
 import { AGENTS_CARD } from '@/components/experiment-agents'
 import { JobReason } from '@/components/job-reason'
 import { PlatformExperimentDialog } from '@/components/platform-experiment-form'
+import { ProposalForm } from '@/components/proposal-form'
 import { RunProgress } from '@/components/run-progress'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, InsetCard } from '@/components/ui/card'
@@ -109,7 +110,8 @@ function baselineAgent(agents: JoinedAgent[] | undefined): JoinedAgent | undefin
  * waits for is doing. `jobs` are the experiment's newest, among which the baseline agent's is
  * looked for. `stages` puts how far the run is under the phases while it runs, and `children`
  * say what its machines are doing. A reader of a shared experiment is told neither that a move is
- * theirs nor that none is.
+ * theirs nor that none is. Past its proposal, the Proposal step opens the proposal as it was
+ * accepted, to read.
  */
 export function PhaseStrip({ pe, jobs = [], stages, readOnly = false, children }: {
   pe: Draft
@@ -131,10 +133,16 @@ export function PhaseStrip({ pe, jobs = [], stages, readOnly = false, children }
   const { data: agents } = useRoster(pe)
   const planner = agents?.find(agent => agent.flavor === 'planner')
   const baseline = baselineAgent(agents)
+  const [showProposal, setShowProposal] = useState(false)
+  const pastProposal = phase !== 'planning' && phase !== 'proposal' && !!pe.proposal
   return (
+    <>
     <Card role="region" aria-label="Where this experiment stands">
       <CardContent className="grid gap-3">
-        <Steps label="Phase" steps={PHASES} current={phase} live={phase !== 'closed'} />
+        <Steps
+          label="Phase" steps={PHASES} current={phase} live={phase !== 'closed'}
+          open={pastProposal ? ['proposal'] : []} shown={showProposal ? 'proposal' : undefined} onOpen={() => setShowProposal(shown => !shown)}
+        />
         {phase === 'running' && pe.started_at && stages && stages.stages.length > 0 && <RunProgress status={stages} />}
         {!who ? why : who === 'owner' ? (
           <Callout tone="warning" className="grid justify-items-start gap-1.5">
@@ -159,5 +167,9 @@ export function PhaseStrip({ pe, jobs = [], stages, readOnly = false, children }
         )}
       </CardContent>
     </Card>
+    {pastProposal && showProposal && (
+      <ProposalForm key={pe.proposed_at} draft={pe} proposal={pe.proposal!} editable={false} accepting={false} accepted onDone={() => {}} />
+    )}
+    </>
   )
 }

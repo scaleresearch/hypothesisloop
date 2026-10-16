@@ -3,12 +3,16 @@ import { clsx } from 'clsx'
 /**
  * The steps of a course in order, with the one it stands at now. Nothing here moves by itself:
  * `current` is where the record says it stands, and `live` marks a step something is at work in.
+ * A step in `open` is a button that shows what the course left at it, `shown` while it does.
  */
-export function Steps({ label, steps, current, live }: {
+export function Steps({ label, steps, current, live, open = [], shown, onOpen }: {
   label: string
   steps: { key: string; label: string }[]
   current?: string
   live?: boolean
+  open?: string[]
+  shown?: string
+  onOpen?: (key: string) => void
 }) {
   const at = steps.findIndex(step => step.key === current)
   return (
@@ -24,7 +28,11 @@ export function Steps({ label, steps, current, live }: {
             aria-hidden="true"
             className={clsx('h-2 w-2 rounded-full', i === at ? 'bg-accent' : i < at ? 'bg-accent-edge' : 'bg-border-strong', i === at && live && 'animate-pulse')}
           />
-          {step.label}
+          {open.includes(step.key) ? (
+            <button type="button" aria-pressed={shown === step.key} onClick={() => onOpen?.(step.key)} className="underline decoration-dotted underline-offset-2 hover:text-foreground">
+              {step.label}
+            </button>
+          ) : step.label}
         </li>
       ))}
     </ol>
