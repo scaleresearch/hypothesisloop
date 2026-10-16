@@ -2,12 +2,15 @@
 # does not emulate it.
 FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 ARG TARGETOS TARGETARCH
+ARG VERSION
 WORKDIR /app
 COPY go.mod go.sum ./
 
 COPY . .
 COPY vendor ./vendor
-RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=vendor -o /node-agent ./runtime/k8s/cmd/node-agent
+RUN --mount=type=cache,target=/root/.cache/go-build set -e; \
+    [ -n "$VERSION" ] || { echo "build with --build-arg VERSION=<image tag>: the binary names the version it runs" >&2; exit 1; }; \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=vendor -ldflags "-X main.version=$VERSION" -o /node-agent ./runtime/k8s/cmd/node-agent
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates

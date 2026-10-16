@@ -33,6 +33,9 @@ type Config struct {
 	APIURL string
 	// Token is this launcher's own token, sent on every call to the control plane.
 	Token string
+	// Version is what the launcher runs, its image tag, sent on every call beside the token
+	// (clusterapi.AgentVersionHeader). Empty sends none.
+	Version string
 	// Command is the argv every instance runs.
 	Command []string
 	Size    Size

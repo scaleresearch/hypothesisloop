@@ -626,18 +626,6 @@ func TestTheInsecureRegistryDaemonSetWritesTheRegistrysHostsFileOnlyWhenEnabled(
 	}
 }
 
-// The agent reports the tag it was installed with, which is the tag of its image.
-func TestTheClusterAgentKnowsItsVersion(t *testing.T) {
-	if _, err := exec.LookPath("helm"); err != nil {
-		t.Skip("helm is not installed")
-	}
-	deployment := ofKind(render(t), "Deployment")[0]
-	container := podSpec(deployment)["containers"].([]any)[0]
-	if got := envValue(container, "HYPOTHESISLOOP_AGENT_VERSION"); got != "t1" {
-		t.Errorf("HYPOTHESISLOOP_AGENT_VERSION = %v, want images.tag", got)
-	}
-}
-
 // A customer's install names the registry it pulls from: no local development registry is a default.
 func TestInstallRequiresTheRegistry(t *testing.T) {
 	bin, _, _ := fakeBin(t)

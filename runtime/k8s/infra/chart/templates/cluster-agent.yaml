@@ -175,10 +175,6 @@ spec:
               value: {{ required "clusterName is required" .Values.clusterName | quote }}
             - name: API_URL
               value: {{ required "apiURL is required" .Values.apiURL | quote }}
-            # Reported on every contact, so the control plane shows a cluster that runs another
-            # version than its own.
-            - name: HYPOTHESISLOOP_AGENT_VERSION
-              value: {{ required "images.tag is required" .Values.images.tag | quote }}
             - name: RUNTIME_TOKEN
               valueFrom:
                 secretKeyRef:

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,6 +15,10 @@ import (
 )
 
 const binaryName = "agent-launcher"
+
+// version is the image tag this binary was built from, set at link time (-X main.version=TAG).
+// Built without it, the launcher names no version.
+var version string
 
 func main() {
 	cfg, err := loadConfig(agentloop.RequiredEnv(binaryName, "AGENT_LAUNCHER_CONFIG"))
@@ -31,6 +36,7 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.LUTC | log.Lmsgprefix)
 	launch := cfg.launch()
 	launch.Token = agentloop.RequiredEnv(binaryName, "LAUNCHER_TOKEN")
+	launch.Version = version
 	launch.Provider = rented
 	launch.WarmPool = cfg.warmPool(rented)
 	launch.HTTPClient = &http.Client{Timeout: 35 * time.Second}
@@ -43,8 +49,8 @@ func main() {
 
 	ctx, cancel := agentloop.SignalContext(log.Printf)
 	defer cancel()
-	log.Printf("starting: launcher=%s provider=%s capabilities=%v control_plane=%s interval=%s create_pause=%s warm_pool=%d",
-		cfg.LauncherName, cfg.Provider.Name, provider.Capabilities(rented), cfg.APIURL, launch.Interval, launch.CreatePause, launch.WarmPool)
+	log.Printf("starting: version=%s launcher=%s provider=%s capabilities=%v control_plane=%s interval=%s create_pause=%s warm_pool=%d",
+		cmp.Or(version, "unknown"), cfg.LauncherName, cfg.Provider.Name, provider.Capabilities(rented), cfg.APIURL, launch.Interval, launch.CreatePause, launch.WarmPool)
 	if err := launcher.Run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "agent-launcher: %v\n", err)
 		os.Exit(1)

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/contract/launcherapi"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
@@ -222,6 +223,24 @@ func TestTheReconcileCallCarriesTheLaunchersTokenAndName(t *testing.T) {
 	}
 	if got := call.Header.Get("Authorization"); got != "Bearer "+launcherToken {
 		t.Errorf("Authorization = %q", got)
+	}
+}
+
+func TestEveryCallCarriesTheLaunchersVersion(t *testing.T) {
+	h := newHarness(t)
+	cfg := h.config()
+	cfg.Version = "v1.2.3"
+	launcher, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := launcher.Pass(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range append(h.cp.heldReads, h.cp.calls...) {
+		if got := call.Header.Get(clusterapi.AgentVersionHeader); got != "v1.2.3" {
+			t.Errorf("%s %s: %s = %q, want v1.2.3", call.Method, call.URL.Path, clusterapi.AgentVersionHeader, got)
+		}
 	}
 }
 

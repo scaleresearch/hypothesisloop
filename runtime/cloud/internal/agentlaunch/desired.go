@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/contract/launcherapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/cpclient"
@@ -42,10 +43,14 @@ var ErrRefused = errors.New("the control plane refuses this launcher's configura
 
 // controlPlane is this launcher's API on the control plane.
 func (l *Launcher) controlPlane() *cpclient.Client {
-	return &cpclient.Client{
+	client := &cpclient.Client{
 		BaseURL: fmt.Sprintf("%s/internal/launchers/%s", l.cfg.APIURL, url.PathEscape(l.cfg.Name)),
 		Token:   l.cfg.Token, HTTP: l.cfg.HTTPClient, MaxAnswerBytes: l.maxAnswer,
 	}
+	if l.cfg.Version != "" {
+		client.Header = http.Header{clusterapi.AgentVersionHeader: {l.cfg.Version}}
+	}
+	return client
 }
 
 // fetchHeld asks the control plane which machines it holds for this launcher, which changes

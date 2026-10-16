@@ -44,9 +44,9 @@ spec() {
     job-base) dockerfile=infra/images/job/Dockerfile.base ;;
     job) dockerfile=infra/images/job/Dockerfile; args=(--build-arg "BASE=$(image job-base)") ;;
     control-service | metrics-service) dockerfile="controlplane/build/Dockerfile.$1" ;;
-    cluster-agent | node-agent) dockerfile="runtime/k8s/build/Dockerfile.$1" ;;
+    cluster-agent | node-agent) dockerfile="runtime/k8s/build/Dockerfile.$1"; args=(--build-arg "VERSION=${tag}") ;;
     bare-agent) dockerfile=runtime/bare-metal/build/Dockerfile.bare-agent; args=(--build-arg "VERSION=${tag}") ;;
-    cloud-agent | agent-launcher) dockerfile="runtime/cloud/build/Dockerfile.$1" ;;
+    cloud-agent | agent-launcher) dockerfile="runtime/cloud/build/Dockerfile.$1"; args=(--build-arg "VERSION=${tag}") ;;
     workload) dockerfile=tests/workloads/generic/Dockerfile.train; context=tests/workloads/generic ;;
     *)
       local entry base_name base torch
