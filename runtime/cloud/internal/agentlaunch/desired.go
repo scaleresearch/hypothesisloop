@@ -1,18 +1,17 @@
 package agentlaunch
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/launcherapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/cpclient"
 )
 
 // instance is one entry of the control plane's list under the name the provider will hold it by.
@@ -34,153 +33,60 @@ type desired struct {
 	image string
 }
 
-// reconcileAnswer is the wire shape. Both lists are pointers because an answer without one is
-// not an empty list: it is an answer this launcher cannot read, and acting on it would destroy
-// every agent.
-type reconcileAnswer struct {
-	Instances *[]struct {
-		Name  string            `json:"name"`
-		Image string            `json:"image"`
-		Env   map[string]string `json:"env"`
-	} `json:"instances"`
-	Ending  *[]string `json:"ending"`
-	Image   string    `json:"image"`
-	Refusal *struct {
-		Reason  string `json:"reason"`
-		Message string `json:"message"`
-	} `json:"refusal"`
-}
-
 // maxAnswerBytes bounds what one answer may hold in memory.
 const maxAnswerBytes = 64 << 20
-
-// observedInstance is one name of this launcher's namespace as its provider lists it, without
-// the launcher's prefix.
-type observedInstance struct {
-	Name string `json:"name"`
-	// Machine is the provider's id of the instance the name is reported by.
-	Machine string `json:"machine"`
-	State   string `json:"state"`
-	Log     string `json:"log,omitempty"`
-	// Expired is provider.Instance.Expired of an exited instance.
-	Expired bool `json:"expired,omitempty"`
-	// Progress is nil when the output of a running instance could not be read.
-	Progress *string `json:"progress,omitempty"`
-	// Activity is what the agent of a running instance last said it is doing, empty when it
-	// said nothing in the output the progress was read from.
-	Activity string `json:"activity,omitempty"`
-	// HarnessState is what the harness of a running instance last said of itself on its state
-	// line, verbatim, empty when it printed none in that output.
-	HarnessState string `json:"harness_state,omitempty"`
-}
-
-// reconcileQuestion is what the launcher tells the control plane with every question.
-type reconcileQuestion struct {
-	LaunchDigest string             `json:"launch_digest"`
-	Instances    []observedInstance `json:"instances"`
-	// How this launcher paces its passes, which the control plane holds against its boot limit.
-	ReconcileIntervalSeconds int `json:"reconcile_interval_seconds"`
-	CreatePauseMilliseconds  int `json:"create_pause_milliseconds"`
-}
 
 // ErrRefused is the control plane refusing this launcher's own configuration. A pass returns it
 // after it stopped and destroyed by the answer's lists, having created nothing.
 var ErrRefused = errors.New("the control plane refuses this launcher's configuration")
 
-// heldMachine is a machine the platform holds for this launcher: the name it was asked for
-// under, without the launcher's prefix, and the provider's id it was last reported by.
-type heldMachine struct {
-	Name    string `json:"name"`
-	Machine string `json:"machine"`
+// controlPlane is this launcher's API on the control plane.
+func (l *Launcher) controlPlane() *cpclient.Client {
+	return &cpclient.Client{
+		BaseURL: fmt.Sprintf("%s/internal/launchers/%s", l.cfg.APIURL, url.PathEscape(l.cfg.Name)),
+		Token:   l.cfg.Token, HTTP: l.cfg.HTTPClient, MaxAnswerBytes: l.maxAnswer,
+	}
 }
 
 // fetchHeld asks the control plane which machines it holds for this launcher, which changes
 // nothing there.
-func (l *Launcher) fetchHeld(ctx context.Context) ([]heldMachine, error) {
-	endpoint := fmt.Sprintf("%s/internal/launchers/%s/machines", l.cfg.APIURL, url.PathEscape(l.cfg.Name))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
+func (l *Launcher) fetchHeld(ctx context.Context) ([]launcherapi.HeldMachine, error) {
+	var answer launcherapi.Held
+	if err := l.controlPlane().Do(ctx, http.MethodGet, "/machines", nil, &answer); err != nil {
 		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+l.cfg.Token)
-	resp, err := l.cfg.HTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, int64(l.maxAnswer)+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(raw) > l.maxAnswer {
-		return nil, fmt.Errorf("answer is larger than %d bytes", l.maxAnswer)
-	}
-	var answer struct {
-		Machines *[]heldMachine `json:"machines"`
-	}
-	if err := json.Unmarshal(raw, &answer); err != nil {
-		return nil, fmt.Errorf("decode answer: %w", err)
 	}
 	if answer.Machines == nil {
 		return nil, errors.New("answer carries no machines list")
 	}
-	for _, held := range *answer.Machines {
+	for _, held := range answer.Machines {
 		if held.Name == "" || held.Machine == "" {
 			return nil, fmt.Errorf("a held machine has no name or no id: %+v", held)
 		}
 	}
-	return *answer.Machines, nil
+	return answer.Machines, nil
 }
 
-func (l *Launcher) fetchDesired(ctx context.Context, observed []observedInstance) (*desired, error) {
-	question, err := json.Marshal(reconcileQuestion{
+func (l *Launcher) fetchDesired(ctx context.Context, observed []launcherapi.ObservedInstance) (*desired, error) {
+	question := launcherapi.Observed{
 		LaunchDigest: l.launchDigest, Instances: observed,
 		ReconcileIntervalSeconds: int(l.cfg.Interval / time.Second), CreatePauseMilliseconds: int(l.cfg.CreatePause / time.Millisecond),
-	})
-	if err != nil {
+	}
+	var answer launcherapi.Desired
+	if err := l.controlPlane().Do(ctx, http.MethodPost, "/reconcile", question, &answer); err != nil {
 		return nil, err
-	}
-	endpoint := fmt.Sprintf("%s/internal/launchers/%s/reconcile", l.cfg.APIURL, url.PathEscape(l.cfg.Name))
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(question))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+l.cfg.Token)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := l.cfg.HTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, int64(l.maxAnswer)+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(raw) > l.maxAnswer {
-		return nil, fmt.Errorf("answer is larger than %d bytes", l.maxAnswer)
-	}
-	var answer reconcileAnswer
-	if err := json.Unmarshal(raw, &answer); err != nil {
-		return nil, fmt.Errorf("decode answer: %w", err)
 	}
 	return l.read(answer)
 }
 
 // read turns an answer into the pass's view of it, or refuses the whole answer. Nothing in it is
 // repaired or skipped: a list this launcher understands in part would have it destroy the agents
-// it did not understand.
-func (l *Launcher) read(answer reconcileAnswer) (*desired, error) {
+// it did not understand. A list that is absent or null decodes as nil, which is no empty list.
+func (l *Launcher) read(answer launcherapi.Desired) (*desired, error) {
 	if answer.Instances == nil || answer.Ending == nil {
 		return nil, errors.New("answer carries no instances or no ending list")
 	}
 	want := &desired{instances: map[string]instance{}, ending: map[string]bool{}, image: answer.Image}
-	for _, entry := range *answer.Instances {
+	for _, entry := range answer.Instances {
 		name := l.prefix + entry.Name
 		if entry.Name == "" || entry.Image == "" {
 			return nil, fmt.Errorf("desired instance %q has no name or no image", entry.Name)
@@ -207,7 +113,7 @@ func (l *Launcher) read(answer reconcileAnswer) (*desired, error) {
 		}
 		want.refusal = answer.Refusal.Reason + ": " + answer.Refusal.Message
 	}
-	for _, short := range *answer.Ending {
+	for _, short := range answer.Ending {
 		name := l.prefix + short
 		if short == "" {
 			return nil, errors.New("desired state names an ending instance with no name")

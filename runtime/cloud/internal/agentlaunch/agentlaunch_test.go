@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/launcherapi"
+
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/fake"
 )
@@ -30,23 +32,23 @@ type controlPlane struct {
 	body   string
 	calls  []*http.Request
 	// asked holds the body of every call, as the launcher sent it.
-	asked  []reconcileQuestion
+	asked  []launcherapi.Observed
 	server *httptest.Server
 	// held is what the machines call answers, heldStatus a failure in its place, and heldReads
 	// the calls made to it, which calls leaves out.
-	held       []heldMachine
+	held       []launcherapi.HeldMachine
 	heldStatus int
 	heldReads  []*http.Request
 }
 
 // holds sets the machines the platform holds, as the machines call answers them.
-func (cp *controlPlane) holds(machines ...heldMachine) {
+func (cp *controlPlane) holds(machines ...launcherapi.HeldMachine) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	cp.held = machines
 }
 
-func (cp *controlPlane) lastQuestion() reconcileQuestion {
+func (cp *controlPlane) lastQuestion() launcherapi.Observed {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	return cp.asked[len(cp.asked)-1]
@@ -64,12 +66,12 @@ func newControlPlane(t *testing.T) *controlPlane {
 				w.WriteHeader(cp.heldStatus)
 				return
 			}
-			raw, _ := json.Marshal(map[string]any{"machines": append([]heldMachine{}, cp.held...)})
+			raw, _ := json.Marshal(map[string]any{"machines": append([]launcherapi.HeldMachine{}, cp.held...)})
 			_, _ = w.Write(raw)
 			return
 		}
 		cp.calls = append(cp.calls, r)
-		var question reconcileQuestion
+		var question launcherapi.Observed
 		if err := json.NewDecoder(r.Body).Decode(&question); err != nil {
 			t.Errorf("the reconcile call carries no readable question: %v", err)
 		}
@@ -367,7 +369,7 @@ func TestAnExitedInstanceIsReportedWithTheEndOfItsOutputAndNeverRentedAgainFromH
 	for pass := 1; pass <= 3; pass++ {
 		h.mustPass()
 		question := h.cp.lastQuestion()
-		want := []observedInstance{
+		want := []launcherapi.ObservedInstance{
 			{Name: "a", Machine: crashed[0], State: "exited", Log: "starting\nTraceback (most recent call last):\nSystemExit: agent: the reason"},
 			{Name: "b", Machine: h.rented.IDs(full("b"))[0], State: "running", Progress: new(string)},
 		}
@@ -429,7 +431,7 @@ func TestAnExitWhoseOutputCannotBeReadIsStillReported(t *testing.T) {
 		return nil
 	}
 	h.mustPass()
-	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []observedInstance{{Name: "a", Machine: "fake-0001", State: "exited"}}) {
+	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []launcherapi.ObservedInstance{{Name: "a", Machine: "fake-0001", State: "exited"}}) {
 		t.Fatalf("told the control plane %+v", got)
 	}
 	if h.logged("read the output of exited "+full("a")) != 1 {
@@ -448,7 +450,7 @@ func TestANameIsReportedOnceAndAsLiveWhileAnyInstanceOfItIs(t *testing.T) {
 	rent(t, h.rented, full("b"))
 	rent(t, h.rented, "hl-agent-other-zzz")
 	h.mustPass()
-	want := []observedInstance{{Name: "a", Machine: "fake-0002", State: "starting"}, {Name: "b", Machine: "fake-0003", State: "running", Progress: new(string)}}
+	want := []launcherapi.ObservedInstance{{Name: "a", Machine: "fake-0002", State: "starting"}, {Name: "b", Machine: "fake-0003", State: "running", Progress: new(string)}}
 	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, want) {
 		t.Fatalf("told the control plane %+v\nwant %+v", got, want)
 	}
@@ -1000,7 +1002,7 @@ func TestAnInstanceTheProviderCannotPlaceIsReportedAsUnknownAndLeftAlone(t *test
 	h.rented.Lose(full("a"))
 
 	h.mustPass()
-	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []observedInstance{{Name: "a", Machine: "fake-0001", State: "unknown"}}) {
+	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []launcherapi.ObservedInstance{{Name: "a", Machine: "fake-0001", State: "unknown"}}) {
 		t.Fatalf("told the control plane %+v", got)
 	}
 	if h.rented.Calls("Create") != 1 || h.rented.Calls("Destroy") != 0 || h.rented.Calls("Logs") != 0 {
@@ -1015,7 +1017,7 @@ func TestAnInstanceThatStaysStartingIsReportedAndNeverReplacedFromHere(t *testin
 	ids := h.rented.IDs(full("a"))
 	for range 5 {
 		h.mustPass()
-		if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []observedInstance{{Name: "a", Machine: "fake-0001", State: "starting"}}) {
+		if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []launcherapi.ObservedInstance{{Name: "a", Machine: "fake-0001", State: "starting"}}) {
 			t.Fatalf("told the control plane %+v", got)
 		}
 	}
@@ -1203,7 +1205,7 @@ func TestTheNewestProgressMarkerOfEachRunningInstanceIsReported(t *testing.T) {
 	}
 	h.mustPass()
 	four, none := "4", ""
-	want := []observedInstance{
+	want := []launcherapi.ObservedInstance{
 		{Name: "a", Machine: "fake-0001", State: "running", Progress: &four},
 		{Name: "b", Machine: "fake-0002", State: "running", Progress: &none},
 		{Name: "c", Machine: "fake-0003", State: "starting"},
@@ -1297,10 +1299,10 @@ func TestAHeldMachineTheListLeavesOutIsReadByItsIDAndReportedAsFound(t *testing.
 	h.mustPass()
 	h.rented.Start(full("a"))
 	id := h.rented.IDs(full("a"))[0]
-	h.cp.holds(heldMachine{Name: "a", Machine: id})
+	h.cp.holds(launcherapi.HeldMachine{Name: "a", Machine: id})
 	h.rented.Hide(full("a"))
 	h.mustPass()
-	want := []observedInstance{{Name: "a", Machine: id, State: "running", Progress: new(string)}}
+	want := []launcherapi.ObservedInstance{{Name: "a", Machine: id, State: "running", Progress: new(string)}}
 	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, want) {
 		t.Fatalf("told the control plane %+v\nwant %+v", got, want)
 	}
@@ -1321,7 +1323,7 @@ func TestAHeldMachineTheListLeavesOutIsReadByItsIDAndReportedAsFound(t *testing.
 // Only a read that says the machine is gone leaves it out of the report.
 func TestAHeldMachineThatIsGoneIsLeftOut(t *testing.T) {
 	h := newHarness(t)
-	h.cp.holds(heldMachine{Name: "a", Machine: "fake-9999"})
+	h.cp.holds(launcherapi.HeldMachine{Name: "a", Machine: "fake-9999"})
 	h.mustPass()
 	if got := h.cp.lastQuestion().Instances; len(got) != 0 {
 		t.Fatalf("told the control plane %+v, want nothing", got)
@@ -1338,7 +1340,7 @@ func TestAPassThatCannotTellWhetherAHeldMachineIsGoneReportsNothing(t *testing.T
 	h.cp.want([]entry{agent("a")}, nil)
 	h.mustPass()
 	h.rented.Start(full("a"))
-	h.cp.holds(heldMachine{Name: "a", Machine: h.rented.IDs(full("a"))[0]})
+	h.cp.holds(launcherapi.HeldMachine{Name: "a", Machine: h.rented.IDs(full("a"))[0]})
 	h.rented.Hide(full("a"))
 	h.rented.Fail = func(method, _ string) error {
 		if method == "Get" {

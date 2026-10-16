@@ -7,19 +7,14 @@ import (
 	"fmt"
 	"strings"
 
+	contract "github.com/scaleresearch/hypothesisloop/contract/launcherapi"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// Instance is one machine a launcher keeps: what it boots and the environment its agent starts
-// with. Name is its identity, and the launcher puts its own prefix in front of it.
-//
-// The launcher stops the machine when its run is listed as ending.
-type Instance struct {
-	Name  string            `json:"name"`
-	Image string            `json:"image"`
-	Env   map[string]string `json:"env"`
-}
+// Instance is the launcher contract's (contract/launcherapi).
+type Instance = contract.Instance
 
 const (
 	// A name is <platform experiment>-<agent>-<digest>. The first two parts are there to be read

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/launcherapi"
+
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 )
 
@@ -279,7 +281,7 @@ func (l *Launcher) Pass(ctx context.Context) error {
 // a read that says the machine is gone leaves it out, and a read that fails fails the pass, so
 // nothing is reported from a list that may be missing a machine. A read that finds the machine
 // replaces whatever the list says of that id.
-func (l *Launcher) confirmUnlisted(ctx context.Context, rented []provider.Instance, held []heldMachine) ([]provider.Instance, error) {
+func (l *Launcher) confirmUnlisted(ctx context.Context, rented []provider.Instance, held []launcherapi.HeldMachine) ([]provider.Instance, error) {
 	for _, h := range held {
 		name := l.prefix + h.Name
 		listed := false
@@ -492,8 +494,8 @@ var liveness = map[provider.State]int{
 // printed and what it last said its agent is doing, both from one read of its output. A marker
 // that could not be read is left out, which the control plane tells apart from one that was
 // never printed. The output is sent and never logged here.
-func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Instance) []observedInstance {
-	observed := []observedInstance{}
+func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Instance) []launcherapi.ObservedInstance {
+	observed := []launcherapi.ObservedInstance{}
 	for _, name := range sortedKeys(byName) {
 		instances := byName[name]
 		sort.SliceStable(instances, func(a, b int) bool { return instances[a].ID < instances[b].ID })
@@ -509,7 +511,7 @@ func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Ins
 				running = &i
 			}
 		}
-		entry := observedInstance{Name: name[len(l.prefix):], Machine: reportedBy.ID, State: string(state)}
+		entry := launcherapi.ObservedInstance{Name: name[len(l.prefix):], Machine: reportedBy.ID, State: string(state)}
 		if running != nil {
 			if seen, ok := l.progressOf(ctx, *running); ok {
 				entry.Progress = &seen.progress
