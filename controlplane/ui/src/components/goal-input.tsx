@@ -1,26 +1,72 @@
 'use client'
 
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import useSWR from 'swr'
 import { Field, Label } from '@headlessui/react'
 import { ApiError, GITHUB_NOT_CONFIGURED, fetchHosting } from '@/lib/api'
 import type { ExperimentDraft } from '@/lib/api'
 import { useGitHubApp } from '@/lib/github-connect'
+import { GOAL_EXAMPLES, SUGGESTED } from '@/lib/goal-examples'
 import { createDraft, formDraftFromGoal, hostingRefusal, MAX_GOAL_LENGTH } from '@/lib/planning'
 import type { Draft } from '@/lib/planning'
 import type { StatusReason } from '@/types'
 import { BriefGuide } from '@/components/brief-guide'
 import { InstallGitHub, useGitHub } from '@/components/connect-github-step'
-import { HostingNotice } from '@/components/hosting-notice'
 import { RepositorySelect, repositoryFields } from '@/components/repository-select'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/input'
 import { Inline } from '@/components/ui/stack'
-import { InlineError } from '@/components/ui/status-message'
+import { Callout, InlineError } from '@/components/ui/status-message'
+import { Text } from '@/components/ui/text'
 import { errorMessage } from '@/lib/errors'
 
 const ASK = 'What do you want to find out?'
-const PLACEHOLDER = `${ASK} For example: does a cosine learning-rate schedule beat a constant one for train.py, judged by validation loss?`
+const CONNECT_FIRST = 'Install the GitHub App to start'
+const CANNOT_START = "Planning can't start right now"
+
+// The rhythm of the examples typed in the empty box, in milliseconds.
+const FIRST = 1500
+const TYPE = 42
+const ERASE = 16
+const HOLD = 2400
+const GAP = 450
+
+/**
+ * The placeholder of the empty box: the question, erased, then one example typed after another,
+ * each held, erased and followed by the next. It stops for good, back on the question, once the
+ * person takes the box, and never starts for one who asks for reduced motion.
+ */
+function useTypedExamples(stopped: boolean): string {
+  const [shown, setShown] = useState(ASK)
+  useEffect(() => {
+    if (stopped || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    let text = ASK
+    let length = ASK.length
+    let next = 0
+    let timer: ReturnType<typeof setTimeout>
+    const erase = () => {
+      length -= 1
+      setShown(text.slice(0, length))
+      if (length > 0) timer = setTimeout(erase, ERASE)
+      else {
+        text = GOAL_EXAMPLES[next].brief
+        next = (next + 1) % GOAL_EXAMPLES.length
+        timer = setTimeout(type, GAP)
+      }
+    }
+    const type = () => {
+      length += 1
+      setShown(text.slice(0, length))
+      timer = setTimeout(length < text.length ? type : erase, length < text.length ? TYPE : HOLD)
+    }
+    timer = setTimeout(erase, FIRST)
+    return () => {
+      clearTimeout(timer)
+      setShown(ASK)
+    }
+  }, [stopped])
+  return shown
+}
 
 /**
  * The shortest way to an experiment: a few sentences saying what to find out. The platform plans
@@ -34,6 +80,7 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
   onConfigure: (draft: ExperimentDraft) => void
 }) {
   const [goal, setGoal] = useState('')
+  const [touched, setTouched] = useState(false)
   const [sending, setSending] = useState(false)
   const [moving, setMoving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -46,6 +93,7 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
   const unavailable = hosting.data && !hosting.data.available ? hosting.data.unavailable ?? null : refused
   const [repository, setRepository] = useState('')
   const box = useRef<HTMLTextAreaElement>(null)
+  const placeholder = useTypedExamples(touched)
 
   useLayoutEffect(() => {
     const el = box.current
@@ -73,6 +121,15 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
     }
   }
 
+  function fillExample(brief: string) {
+    setTouched(true)
+    setGoal(brief)
+    const el = box.current
+    if (!el) return
+    el.focus()
+    requestAnimationFrame(() => el.setSelectionRange(brief.length, brief.length))
+  }
+
   async function configure() {
     setMoving(true)
     setError(null)
@@ -92,26 +149,42 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
         rows={3}
         maxLength={MAX_GOAL_LENGTH}
         aria-label={ASK}
-        placeholder={PLACEHOLDER}
+        placeholder={placeholder}
         // The page's styled scrollbars give an empty textarea a horizontal one; the sentence wraps instead.
         className="block max-h-[60vh] w-full resize-none overflow-y-auto overflow-x-hidden break-words px-6 pb-2 pt-5 text-lg"
         value={goal}
-        onChange={e => setGoal(e.target.value)}
+        onFocus={() => setTouched(true)}
+        onChange={e => { setTouched(true); setGoal(e.target.value) }}
         onKeyDown={e => {
           if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
           e.preventDefault()
           void plan()
         }}
       />
+      {goal === '' && (
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 px-6 pb-2 text-xs text-muted">
+          <span>Try</span>
+          {GOAL_EXAMPLES.slice(0, SUGGESTED).map(example => (
+            <button
+              key={example.label}
+              type="button"
+              title={example.brief}
+              className="rounded-full border border-border px-2.5 py-0.5 transition-colors hover:border-border-strong hover:text-foreground"
+              onClick={() => fillExample(example.brief)}
+            >
+              {example.label}
+            </button>
+          ))}
+        </div>
+      )}
       <BriefGuide note="Anything you leave out, the planner proposes, and you review the whole plan before anything runs or is spent." className="px-6 pb-3" />
       {unavailable && (
         <div className="px-4 pb-3">
-          <HostingNotice
-            reason={unavailable}
-            title="Planning can't start right now"
-            meaning="Your text stays here. Planning becomes available again by itself, or you can set the experiment up yourself and keep what you wrote as its brief."
-            actions={<Button size="sm" loading={moving} onClick={() => void configure()}>Set it up myself</Button>}
-          />
+          <Callout tone="warning" className="flex flex-wrap items-center justify-between gap-2">
+            <Text>{unavailable.summary}</Text>
+            <Button size="sm" loading={moving} onClick={() => void configure()}>Set it up myself</Button>
+            {unavailable.operator_detail && <Text variant="note" className="basis-full">Operator: {unavailable.operator_detail}</Text>}
+          </Callout>
         </div>
       )}
       {hosting.error && <InlineError className="block px-6 pb-3">Could not check whether planning is available: {hosting.error.message}</InlineError>}
@@ -126,7 +199,8 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
           <Inline gap="sm" className="px-2"><InstallGitHub /></Inline>
         )}
         {error && <InlineError className="px-2">{error}</InlineError>}
-        <span className="ml-auto">
+        {/* A disabled button shows no tooltip in every browser, so the reason sits on its wrapper. */}
+        <span className="ml-auto" title={unavailable ? CANNOT_START : github === 'unconnected' ? CONNECT_FIRST : undefined}>
           <Button variant="primary" loading={sending} disabled={!ready && !sending} onClick={plan} aria-keyshortcuts="Enter">
             Plan it
           </Button>
