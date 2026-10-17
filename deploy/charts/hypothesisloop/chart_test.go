@@ -365,3 +365,48 @@ func TestEachStoreAcceptsOnlyThePodsThatUseIt(t *testing.T) {
 		})
 	}
 }
+
+// Every secret the chart hands a process beside the platform's own few is named by the one rule,
+// <SECTION>_<PROVIDER>_<FIELD>, with the provider the rendered settings name for that section.
+func TestEveryProviderSecretTheChartHandsOverIsNamedBySectionProviderAndField(t *testing.T) {
+	own := []string{config.SettingsPath.Name, config.DatabaseURL.Name, config.MetricsDBURL.Name, config.GraphDBURL.Name, config.AuthSigningSecret.Name, "GOOGLE_APPLICATION_CREDENTIALS"}
+	for _, values := range []string{InCluster, External} {
+		release := Render(t, values)
+		for deployment := range programs {
+			settings := loadRendered(t, release, values, deployment)
+			providers := map[string][]string{
+				config.SectionObjectStore: {settings.ObjectStore.Provider},
+				config.SectionGitHost:     {settings.GitHost.Provider},
+				"MODEL":                   {settings.Models.Provider},
+			}
+			if r := settings.ContainerRegistry; r != nil {
+				providers[config.SectionContainerRegistry] = []string{r.Provider}
+			}
+			if s := settings.Sandbox; s != nil {
+				providers[config.SectionSandbox] = []string{s.Provider}
+			}
+			for _, cc := range settings.CloudCompute {
+				providers[config.SectionCloudCompute] = append(providers[config.SectionCloudCompute], cc.Provider)
+			}
+			for name := range release.Env(t, deployment, secretNames[values]) {
+				if slices.Contains(own, name) {
+					continue
+				}
+				if !config.IsKey(name) {
+					t.Errorf("%s/%s: %s is no key of the platform", values, deployment, name)
+					continue
+				}
+				named := false
+				for section, names := range providers {
+					for _, provider := range names {
+						field, ok := strings.CutPrefix(name, section+"_"+strings.ToUpper(provider)+"_")
+						named = named || ok && field != "" && strings.Trim(field, "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_") == ""
+					}
+				}
+				if !named {
+					t.Errorf("%s/%s: %s is not <SECTION>_<PROVIDER>_<FIELD> of a provider the settings name (%v)", values, deployment, name, providers)
+				}
+			}
+		}
+	}
+}

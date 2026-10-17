@@ -548,3 +548,77 @@ func TestTwoCloudComputeAccountsOnOneProviderAreRefused(t *testing.T) {
 		t.Errorf("one vast account: %v", err)
 	}
 }
+
+// A sandbox or cloud_compute section names its provider and holds that provider's section alone
+// beside its own keys: another provider's section, a second one or none at all is refused, since
+// what the adapter does not read would be dropped with no word said.
+func TestARentedSectionHoldsTheSectionOfTheProviderItNamesAndNoOther(t *testing.T) {
+	sandbox := "\nsandbox:\n  provider: fly\n  name: main\n  reconcile_interval_seconds: 5\n  create_pause_milliseconds: 0\n  warm_pool_size: 0\n  fly: {}\n" +
+		"  instance:\n    command: [run]\n    cpu: \"1\"\n    memory: 1Gi\n    storage: 1Gi\n"
+	computed := "\ncloud_compute:\n" + cluster
+	if err := loadText(t, productionConfig(t)+sandbox+computed); err != nil {
+		t.Fatalf("a sandbox and a cloud_compute entry each with its provider's section: %v", err)
+	}
+	for name, tc := range map[string]struct{ text, want string }{
+		"sandbox: another provider's section":  {strings.Replace(sandbox, "  fly: {}\n", "  e2b: {}\n", 1), `"e2b" is neither a key of the section nor the section of its provider fly`},
+		"sandbox: a second provider's section": {strings.Replace(sandbox, "  fly: {}\n", "  fly: {}\n  e2b: {}\n", 1), `"e2b" is neither`},
+		"sandbox: no provider section":         {strings.Replace(sandbox, "  fly: {}\n", "", 1), "sandbox provider fly takes the sandbox section of the same name"},
+		"sandbox: no provider":                 {strings.Replace(sandbox, "  provider: fly\n", "", 1), "sandbox provider is required"},
+		"sandbox: a misspelt key":              {strings.Replace(sandbox, "  name: main\n", "  name: main\n  warm_pool: 1\n", 1), `"warm_pool" is neither`},
+		"cloud_compute: another provider's section": {
+			strings.Replace(computed, "    vast:\n      account_id: \"1\"\n", "    fly:\n      org: x\n", 1), `"fly" is neither a key of the section nor the section of its provider vast`},
+		"cloud_compute: no provider section": {strings.Replace(computed, "    vast:\n      account_id: \"1\"\n", "", 1), "cloud_compute a provider vast takes"},
+		"cloud_compute: no provider":         {strings.Replace(computed, "    provider: vast\n", "", 1), "cloud_compute a provider is required"},
+	} {
+		var text string
+		if strings.HasPrefix(name, "sandbox") {
+			text = productionConfig(t) + tc.text + computed
+		} else {
+			text = productionConfig(t) + sandbox + tc.text
+		}
+		if err := loadText(t, text); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: got %v, want an error saying %q", name, err, tc.want)
+		}
+	}
+}
+
+// warm_pool_size and create_pause_milliseconds have no default in code: each is stated, 0 for
+// none.
+func TestASandboxStatesItsWarmPoolAndItsPause(t *testing.T) {
+	sandbox := "\nsandbox:\n  provider: fly\n  name: main\n  reconcile_interval_seconds: 5\n  create_pause_milliseconds: 0\n  warm_pool_size: 2\n  fly: {}\n" +
+		"  instance:\n    command: [run]\n    cpu: \"1\"\n    memory: 1Gi\n    storage: 1Gi\n"
+	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
+	if err := os.WriteFile(path, []byte(productionConfig(t)+sandbox), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err := LoadSettings(path); err != nil || cfg.Sandbox == nil || *cfg.Sandbox.WarmPoolSize != 2 || cfg.Sandbox.CreatePause() != 0 {
+		t.Fatalf("Load: %v, want a pool of 2 and no pause", err)
+	}
+	for name, tc := range map[string]struct{ from, to, want string }{
+		"no warm_pool_size":            {"  warm_pool_size: 2\n", "", "sandbox warm_pool_size is required"},
+		"a negative warm_pool_size":    {"  warm_pool_size: 2\n", "  warm_pool_size: -1\n", "sandbox warm_pool_size is required"},
+		"no create_pause_milliseconds": {"  create_pause_milliseconds: 0\n", "", "sandbox create_pause_milliseconds is required"},
+	} {
+		if err := loadText(t, productionConfig(t)+strings.Replace(sandbox, tc.from, tc.to, 1)); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: got %v, want %q", name, err, tc.want)
+		}
+	}
+}
+
+// The object store names its provider and holds that provider's section.
+func TestTheObjectStoreHoldsTheSectionOfTheProviderItNames(t *testing.T) {
+	const minio = "  provider: minio\n  minio:\n    access_key_id: hypothesisloop\n"
+	if !strings.Contains(productionConfig(t), minio) {
+		t.Fatalf("the committed object_store no longer starts with %q", minio)
+	}
+	for name, tc := range map[string]struct{ to, want string }{
+		"no minio section":      {"  provider: minio\n", "object_store provider minio takes the object_store minio section"},
+		"no access_key_id":      {"  provider: minio\n  minio: {}\n", "object_store provider minio takes the object_store minio section"},
+		"a provider not built":  {"  provider: s3\n  minio:\n    access_key_id: hypothesisloop\n", `object_store provider "s3" is not a store provider this build knows`},
+		"the minio secret here": {minio + "    secret_access_key: s\n", "secret_access_key"},
+	} {
+		if err := loadText(t, strings.Replace(productionConfig(t), minio, tc.to, 1)); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: got %v, want %q", name, err, tc.want)
+		}
+	}
+}

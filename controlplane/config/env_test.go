@@ -152,3 +152,34 @@ func TestE2BTemplateTakesTheRegistryLoginWholeOrNotAtAll(t *testing.T) {
 		t.Errorf("no key: %v, want it named", err)
 	}
 }
+
+// A provider's secret is <SECTION>_<PROVIDER>_<FIELD>, and IsKey knows every key some program
+// reads by that rule and the platform's own few, so a key a test or a chart sets is never
+// mistaken for anything else.
+func TestAProvidersKeyIsItsSectionItsProviderAndItsField(t *testing.T) {
+	for key, want := range map[Key]string{
+		AccountKey(SectionSandbox, "fly"):                    "SANDBOX_FLY_API_KEY",
+		AccountKey(SectionCloudCompute, "vast"):              "CLOUD_COMPUTE_VAST_API_KEY",
+		ProviderKey(SectionGitHost, "plain", "PASSWORD", ""): "GIT_HOST_PLAIN_PASSWORD",
+		ObjectStoreMinIOSecretAccessKey:                      "OBJECT_STORE_MINIO_SECRET_ACCESS_KEY",
+		GitHostGitHubAppPrivateKey:                           "GIT_HOST_GITHUB_APP_PRIVATE_KEY",
+		SandboxE2BRegistryPassword:                           "SANDBOX_E2B_REGISTRY_PASSWORD",
+	} {
+		if key.Name != want {
+			t.Errorf("key = %s, want %s", key.Name, want)
+		}
+		if !IsKey(key.Name) {
+			t.Errorf("IsKey(%s) = false", key.Name)
+		}
+	}
+	for _, name := range []string{SettingsPath.Name, DatabaseURL.Name, MetricsDBURL.Name, GraphDBURL.Name, AuthSigningSecret.Name, ModelAnthropicOAuthToken.Name, "CLOUD_COMPUTE_RUNPOD_API_KEY"} {
+		if !IsKey(name) {
+			t.Errorf("IsKey(%s) = false, want a key some program reads", name)
+		}
+	}
+	for _, name := range []string{"", "PATH", "HOME", "DATA_STORE_MINIO_SECRET_ACCESS_KEY", "ENVIRONMENTS_GCP_CREDENTIALS", "GITHUB_APP_PRIVATE_KEY", "SANDBOX", "sandbox_fly_api_key", "DATABASE_URL_RO", "HL_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS"} {
+		if IsKey(name) {
+			t.Errorf("IsKey(%q) = true, want no key of the platform", name)
+		}
+	}
+}
