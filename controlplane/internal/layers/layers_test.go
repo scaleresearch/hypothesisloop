@@ -54,8 +54,7 @@ type layer struct {
 
 var (
 	base     = []string{"controlplane/domain", "controlplane/refusal"}
-	services = append([]string{"controlplane/storage", "controlplane/clients", "controlplane/auth", "controlplane/obsmetrics",
-		"controlplane/config"}, base...)
+	services = append([]string{"controlplane/storage", "controlplane/clients", "controlplane/auth", "controlplane/config"}, base...)
 )
 
 // layers is matched by the longest path. A package no layer names is refused, so a new top-level
@@ -68,7 +67,6 @@ var layers = []layer{
 	{path: "controlplane/auth", may: []string{"controlplane/config", "controlplane/domain"}},
 	// authtest serves a test router.
 	{path: "controlplane/auth/authtest", may: []string{"controlplane/auth", "controlplane/domain"}, web: true},
-	{path: "controlplane/obsmetrics", may: []string{"controlplane/domain"}},
 	{path: "controlplane/storage", may: []string{"controlplane/config", "controlplane/domain"}},
 	{path: "controlplane/storage/objectstore", may: []string{"controlplane/config", "controlplane/domain"}, own: true},
 	{path: "controlplane/clients", may: []string{"controlplane/config", "controlplane/auth", "controlplane/domain", "controlplane/refusal"}},
@@ -88,11 +86,12 @@ var layers = []layer{
 	// Metrics ingest writes what node-agents push into the metrics store.
 	{path: "controlplane/httpapi/metricsingest", may: []string{"controlplane/auth", "controlplane/domain", "controlplane/storage/metricsdb"}},
 	{path: "controlplane/httpapi/middleware", may: []string{"controlplane/auth"}},
-	// What rents machines elsewhere reaches the control plane only through interfaces wired in cmd.
-	{path: "controlplane/cloud", may: []string{"controlplane/cloud/provider", "runtime/shared"}, own: true},
-	{path: "controlplane/cmd", may: []string{"controlplane", "runtime/shared"}, own: true, web: true},
+	{path: "controlplane/cmd", may: []string{"controlplane"}, own: true, web: true},
+	// What rents machines elsewhere reaches the control plane only through interfaces wired here.
+	{path: "controlplane/cmd/control-service", may: []string{"controlplane", "runtime/cloud"}, web: true},
+	{path: "controlplane/cmd/e2b-template", may: []string{"controlplane/config", "runtime/cloud/provider/e2b"}},
 	// metrics-service serves node-agent pushes only, so it never mounts the API.
-	{path: "controlplane/cmd/metrics-service", may: []string{"controlplane", "runtime/shared"}, never: []string{"controlplane/httpapi"}, web: true},
+	{path: "controlplane/cmd/metrics-service", may: []string{"controlplane"}, never: []string{"controlplane/httpapi"}, web: true},
 	{path: "controlplane/cmd/hl-admin", may: []string{"controlplane/auth", "controlplane/config", "controlplane/domain",
 		"controlplane/clients/githost/github", "controlplane/storage/db"}, exact: true},
 	{path: "controlplane/internal", may: []string{"controlplane"}, own: true, web: true},

@@ -9,7 +9,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider/e2b"
+	"github.com/scaleresearch/hypothesisloop/runtime/cloud/provider/e2b"
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 )
 
