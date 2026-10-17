@@ -36,9 +36,9 @@ from __future__ import annotations
 import pytest
 
 from conftest import make_agent
+from support.api import ENDED
 from support.wait import eventually
 
-TERMINAL = {"COMPLETED", "FAILED", "EVICTED", "REJECTED"}
 
 # A100. The suite runs its slow group concurrently and this scenario is in it (see run.sh): of the
 # slow group, distributed-jobs holds H100 and everything else runs on the TEST_ACCELERATOR_TYPE
@@ -76,7 +76,7 @@ def _wait_completed(api, deadline, job_id, description):
         description,
         lambda: api.experiment(job_id),
         accept=lambda e: e["status"] == "COMPLETED",
-        reject=lambda e: e["status"] in (TERMINAL - {"COMPLETED"}),
+        reject=lambda e: e["status"] in ENDED - {"COMPLETED"},
         deadline=deadline,
     )
     return exp

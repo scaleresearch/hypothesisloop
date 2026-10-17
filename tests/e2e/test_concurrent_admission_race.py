@@ -35,10 +35,10 @@ import pytest
 
 from conftest import make_agent
 from support.cluster import L40, H100, job_resource_absent, node_allocatable_gpu_total
+from support.api import ENDED
 from support.wait import eventually
 
 ADMITTED_STATUSES = ("SUBMITTED", "RUNNING")
-TERMINAL_STATUSES = ("COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED")
 
 
 @pytest.mark.exclusive("l40")
@@ -110,10 +110,10 @@ def test_concurrent_accelerator_requests_never_exceed_node_capacity(api, run_id,
         final = eventually(
             f"{j} to stop after race assertions",
             lambda j=j: api.experiment(j),
-            accept=lambda e: e["status"] in TERMINAL_STATUSES,
+            accept=lambda e: e["status"] in ENDED,
             deadline=deadline,
         )
-        assert final["status"] in TERMINAL_STATUSES, f"{j} did not stop after cancellation (status={final['status']})"
+        assert final["status"] in ENDED, f"{j} did not stop after cancellation (status={final['status']})"
         eventually(
             f"{j} Kubernetes Job to be removed after cancellation",
             lambda j=j: job_resource_absent(j),

@@ -47,6 +47,7 @@ from support.cluster import (
     restart_node_agent_daemonset,
     uncordon_node,
 )
+from support.api import ENDED
 from support.wait import Deadline, eventually
 
 # order=-2: must run before test_connectivity_loss.py's order=-1 (see that file's docstring) --
@@ -55,8 +56,7 @@ pytestmark = [pytest.mark.exclusive("h100"), pytest.mark.order(-2)]
 
 JOB_HOURS = 0.02
 PROBE_JOB_HOURS = 0.003
-ADMITTED_OR_TERMINAL = ("RUNNING", "COMPLETED", "FAILED", "EVICTED")
-TERMINAL = ("FAILED", "EVICTED", "REJECTED")
+ADMITTED_OR_ENDED = {"RUNNING"} | ENDED
 
 
 # 480s was tight enough to flake in the exclusive lane: this test chains four sequential
@@ -101,7 +101,7 @@ def _run(api, pe_id: str, agent: str, deadline: Deadline) -> None:
     running = eventually(
         f"{job} to reach RUNNING",
         lambda: api.experiment(job),
-        accept=lambda e: e["status"] in ADMITTED_OR_TERMINAL,
+        accept=lambda e: e["status"] in ADMITTED_OR_ENDED,
         deadline=deadline,
     )
     assert running["status"] == "RUNNING", f"job never reached RUNNING (status={running['status']}) -- cannot exercise infra-fault scenarios"
@@ -121,7 +121,7 @@ def _run(api, pe_id: str, agent: str, deadline: Deadline) -> None:
     post_ds_running = eventually(
         f"{post_ds_job} to be admitted right after the DaemonSet redeploy",
         lambda: api.experiment(post_ds_job),
-        accept=lambda e: e["status"] in ADMITTED_OR_TERMINAL,
+        accept=lambda e: e["status"] in ADMITTED_OR_ENDED,
         deadline=deadline,
     )
     assert post_ds_running["status"] in ("RUNNING", "COMPLETED"), (
@@ -130,7 +130,7 @@ def _run(api, pe_id: str, agent: str, deadline: Deadline) -> None:
     post_ds_final = eventually(
         f"{post_ds_job} to complete cleanly",
         lambda: api.experiment(post_ds_job),
-        accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert post_ds_final["status"] == "COMPLETED", f"post-DaemonSet job did not complete cleanly (status={post_ds_final['status']})"
@@ -200,7 +200,7 @@ def _run(api, pe_id: str, agent: str, deadline: Deadline) -> None:
     shrink_status = eventually(
         f"{shrink_job} status while H100 capacity is reduced",
         lambda: api.experiment(shrink_job),
-        accept=lambda e: e["status"] in ADMITTED_OR_TERMINAL
+        accept=lambda e: e["status"] in ADMITTED_OR_ENDED
         or (e["status"] == "QUEUED" and e.get("not_admitted_reason") != "awaiting_admission"),
         deadline=deadline,
     )
@@ -224,7 +224,7 @@ def _run(api, pe_id: str, agent: str, deadline: Deadline) -> None:
     shrink_status = eventually(
         f"{shrink_job} to be admitted once H100 capacity returned",
         lambda: api.experiment(shrink_job),
-        accept=lambda e: e["status"] in ADMITTED_OR_TERMINAL,
+        accept=lambda e: e["status"] in ADMITTED_OR_ENDED,
         deadline=deadline,
     )
     assert shrink_status["status"] in ("RUNNING", "COMPLETED"), (
@@ -237,7 +237,7 @@ def _run(api, pe_id: str, agent: str, deadline: Deadline) -> None:
     final = eventually(
         f"{job} to complete after reschedule",
         lambda: api.experiment(job),
-        accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert final["status"] == "COMPLETED", f"job did not complete cleanly after reschedule (status={final['status']})"
@@ -248,7 +248,7 @@ def _run(api, pe_id: str, agent: str, deadline: Deadline) -> None:
     shrink_final = eventually(
         f"{shrink_job} to complete cleanly",
         lambda: api.experiment(shrink_job),
-        accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert shrink_final["status"] == "COMPLETED", f"capacity-growth probe did not complete cleanly (status={shrink_final['status']})"

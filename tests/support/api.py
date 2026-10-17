@@ -26,6 +26,8 @@ from . import admin
 from .wait import Deadline, eventually
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# The statuses a job ends in (platformapi.EndedStatuses).
+ENDED = frozenset({"COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED"})
 JOB_SPEC_PATH = REPO_ROOT / "tests" / "workloads" / "generic" / "job.yaml"
 
 

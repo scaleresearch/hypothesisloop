@@ -48,6 +48,7 @@ from support.cluster import (
     job_resource_exists,
     reconnect_cluster_agent,
 )
+from support.api import ENDED
 from support.wait import Deadline, assert_stable, eventually
 
 # order=-1: must run after test_node_and_daemonset_faults.py's order=-2 (see that file's
@@ -55,8 +56,7 @@ from support.wait import Deadline, assert_stable, eventually
 # order otherwise.
 pytestmark = [pytest.mark.exclusive("cluster"), pytest.mark.order(-1)]
 
-ADMITTED_OR_TERMINAL = ("RUNNING", "COMPLETED", "FAILED", "EVICTED")
-TERMINAL = ("COMPLETED", "FAILED", "EVICTED")
+ADMITTED_OR_ENDED = {"RUNNING"} | ENDED
 
 
 @pytest.mark.timeout(480)
@@ -88,7 +88,7 @@ def _run(api, pe_id: str, agent: str, cluster_name: str, deadline: Deadline) -> 
     running = eventually(
         f"{running_job} to reach RUNNING before disconnect",
         lambda: api.experiment(running_job),
-        accept=lambda e: e["status"] in ADMITTED_OR_TERMINAL,
+        accept=lambda e: e["status"] in ADMITTED_OR_ENDED,
         deadline=deadline,
     )
     assert running["status"] == "RUNNING", (
@@ -138,7 +138,7 @@ def _run(api, pe_id: str, agent: str, cluster_name: str, deadline: Deadline) -> 
     queued_final = eventually(
         f"{queued_job} to be admitted once capacity reporting resumed",
         lambda: api.experiment(queued_job),
-        accept=lambda e: e["status"] in ADMITTED_OR_TERMINAL,
+        accept=lambda e: e["status"] in ADMITTED_OR_ENDED,
         deadline=deadline,
     )
     assert queued_final["status"] in ("RUNNING", "COMPLETED"), (
@@ -150,7 +150,7 @@ def _run(api, pe_id: str, agent: str, cluster_name: str, deadline: Deadline) -> 
         final = eventually(
             f"{job_id} to reach a terminal state",
             lambda job_id=job_id: api.experiment(job_id),
-            accept=lambda e: e["status"] in TERMINAL,
+            accept=lambda e: e["status"] in ENDED,
             deadline=deadline,
         )
         if final["status"] == "COMPLETED":
@@ -164,7 +164,7 @@ def _run(api, pe_id: str, agent: str, cluster_name: str, deadline: Deadline) -> 
     running2 = eventually(
         f"{running_job2} to reach RUNNING before second disconnect",
         lambda: api.experiment(running_job2),
-        accept=lambda e: e["status"] in ADMITTED_OR_TERMINAL,
+        accept=lambda e: e["status"] in ADMITTED_OR_ENDED,
         deadline=deadline,
     )
     assert running2["status"] == "RUNNING", (
@@ -225,7 +225,7 @@ def _run(api, pe_id: str, agent: str, cluster_name: str, deadline: Deadline) -> 
         eventually(
             f"{stuck_job} to leave QUEUED after reconnect",
             lambda: api.experiment(stuck_job),
-            accept=lambda e: e["status"] in ADMITTED_OR_TERMINAL,
+            accept=lambda e: e["status"] in ADMITTED_OR_ENDED,
             deadline=Deadline.in_seconds(45),
         )
     except AssertionError:
@@ -236,7 +236,7 @@ def _run(api, pe_id: str, agent: str, cluster_name: str, deadline: Deadline) -> 
     delete_running = eventually(
         f"{delete_job} to reach RUNNING before delete-convergence disconnect",
         lambda: api.experiment(delete_job),
-        accept=lambda e: e["status"] in ADMITTED_OR_TERMINAL,
+        accept=lambda e: e["status"] in ADMITTED_OR_ENDED,
         deadline=deadline,
     )
     assert delete_running["status"] == "RUNNING", (
