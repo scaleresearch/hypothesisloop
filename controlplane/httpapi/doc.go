@@ -3,7 +3,10 @@
 // handler. An operation cannot be registered without an Audience, which is its authorization
 // class, so the digest an agent reads never lists an operation its token is refused on.
 //
-// Every error is answered as the API's one error body, platformapi.ErrorModel (see init).
+// Every error is answered as the API's one error body, platformapi.ErrorModel (see init). A
+// request that cannot be read at all, a body that is not JSON or a content type the operation does
+// not take, is 400 invalid_request. A request that reads and breaks a rule, a value missing or
+// invalid, is 422, its problems naming each field (see invalid).
 package httpapi
 
 import (
@@ -142,7 +145,7 @@ func NewDoc(r chi.Router, title, version, preamble string, access *auth.Access, 
 	}
 	// A filter the server doesn't know is a filter that wasn't applied, and returning unfiltered
 	// data for it is indistinguishable from a correct answer — a caller filtering by a mistyped or
-	// imagined param silently reads the whole table and believes it. 400 instead, naming the param.
+	// imagined param silently reads the whole table and believes it. 422 instead, naming the param.
 	cfg.RejectUnknownQueryParameters = true
 	cfg.Formats = readableFormats(cfg.Formats)
 	api := humachi.New(r, cfg)
@@ -155,6 +158,11 @@ func NewDoc(r chi.Router, title, version, preamble string, access *auth.Access, 
 // errNotJSON is a body that cannot be read as JSON at all, answered 400 invalid_request. A body
 // that is JSON and breaks a rule of the operation is 422.
 var errNotJSON = errors.New("not valid JSON")
+
+// invalid refuses a request that reads and breaks a rule on field, with 422 invalid_request.
+func invalid(field, message string) *refusal.Refusal {
+	return refusal.Invalid(refusal.ReasonInvalidRequest, message).On(field)
+}
 
 // readableFormats is formats with a JSON body that does not parse refused by errNotJSON, never by
 // the parser's text, which quotes what was sent.

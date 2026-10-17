@@ -64,7 +64,7 @@ func (a experimentDataAPI) key(ctx context.Context, in *struct {
 	Body dataKeyRequest
 }) (*struct{ Body *domain.DataAccess }, error) {
 	if in.Body.AgentID == "" {
-		return nil, huma.Error400BadRequest("agent_id is required")
+		return nil, invalid("agent_id", "agent_id is required")
 	}
 	if err := a.access.PlatformExperiment(ctx, in.ID); err != nil {
 		return nil, err

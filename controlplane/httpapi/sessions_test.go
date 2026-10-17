@@ -89,8 +89,8 @@ func TestAnAgentAndACoordinatorEachStoreAndReadBackTheirOwnSessionByteForByte(t 
 	if len(store.stored) != 2 || store.stored["pe-1/ag-1"] == nil || store.stored["pe-1/"] == nil {
 		t.Fatalf("stored under %v, want the agent's and the coordinator's own place", store.stored)
 	}
-	if code, body := sessionCall(t, store, sessionPlacement, agentOne, "PUT", agentSession, []byte{}); code != http.StatusBadRequest {
-		t.Fatalf("an empty session: %d %s, want 400", code, body)
+	if code, body := sessionCall(t, store, sessionPlacement, agentOne, "PUT", agentSession, []byte{}); code != http.StatusUnprocessableEntity {
+		t.Fatalf("an empty session: %d %s, want 422", code, body)
 	}
 }
 

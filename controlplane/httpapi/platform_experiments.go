@@ -333,10 +333,10 @@ func (a platformExperimentsAPI) listPlatformExperiments(ctx context.Context, in 
 	TotalCount int `header:"X-Total-Count"`
 }, error) {
 	if in.Status != "" && !domain.ValidPlatformExperimentStatus(domain.PlatformExperimentStatus(in.Status)) {
-		return nil, huma.Error400BadRequest("unknown status " + in.Status)
+		return nil, invalid("status", "status is not one of the platform experiment statuses")
 	}
 	if !platformexperiments.ValidListSort(in.Sort) {
-		return nil, huma.Error400BadRequest("unknown sort field " + in.Sort)
+		return nil, invalid("sort", "sort is created_at, name or status, optionally prefixed with '-'")
 	}
 	if in.Limit < 0 || in.Limit > platformexperiments.MaxListLimit || in.Offset < 0 {
 		return nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_page", "limit must be 1 to "+strconv.Itoa(platformexperiments.MaxListLimit)+" and offset must not be negative")

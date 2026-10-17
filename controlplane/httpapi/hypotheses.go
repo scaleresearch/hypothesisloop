@@ -417,7 +417,7 @@ func (a hypothesesAPI) checkOut(ctx context.Context, in *struct {
 	Body checkOutRequest
 }) (*struct{ Body *registry.Checkout }, error) {
 	if in.Body.Branch == "" {
-		return nil, huma.Error400BadRequest("branch is required")
+		return nil, invalid("branch", "branch is required")
 	}
 	hyp, err := a.registry.GetHypothesis(ctx, in.ID)
 	if err != nil {
@@ -434,7 +434,7 @@ func (a hypothesesAPI) checkOut(ctx context.Context, in *struct {
 		return nil, err
 	}
 	if agentID == "" {
-		return nil, huma.Error400BadRequest("agent_id is required: a checkout is an agent's")
+		return nil, invalid("agent_id", "agent_id is required: a checkout is an agent's")
 	}
 	out, err := a.registry.CheckOut(ctx, hyp, agentID, in.Body.Branch)
 	if err != nil {
@@ -451,10 +451,10 @@ func (a hypothesesAPI) register(ctx context.Context, in *struct {
 }, error) {
 	b := in.Body
 	if b.PlatformExperimentID == "" {
-		return nil, huma.Error400BadRequest("platform_experiment_id is required")
+		return nil, invalid("platform_experiment_id", "platform_experiment_id is required")
 	}
 	if b.Text == "" {
-		return nil, huma.Error400BadRequest("text is required")
+		return nil, invalid("text", "text is required")
 	}
 	if err := a.access.PlatformExperiment(ctx, b.PlatformExperimentID); err != nil {
 		return nil, err
@@ -528,8 +528,11 @@ type graphQueryRequest struct {
 func (a hypothesesAPI) query(ctx context.Context, in *struct {
 	Body graphQueryRequest
 }) (*struct{ Body *registry.QueryResult }, error) {
-	if in.Body.PlatformExperimentID == "" || in.Body.Cypher == "" {
-		return nil, huma.Error400BadRequest("platform_experiment_id and cypher are required")
+	if in.Body.PlatformExperimentID == "" {
+		return nil, invalid("platform_experiment_id", "platform_experiment_id is required")
+	}
+	if in.Body.Cypher == "" {
+		return nil, invalid("cypher", "cypher is required")
 	}
 	if err := a.access.PlatformExperiment(ctx, in.Body.PlatformExperimentID); err != nil {
 		return nil, err
@@ -537,7 +540,7 @@ func (a hypothesesAPI) query(ctx context.Context, in *struct {
 	result, err := a.registry.QueryGraph(ctx, in.Body.PlatformExperimentID, in.Body.Cypher, in.Body.Params)
 	if err != nil {
 		if errors.Is(err, registry.ErrInvalidQuery) {
-			return nil, huma.Error400BadRequest(err.Error())
+			return nil, invalid("cypher", err.Error())
 		}
 		return nil, auth.Internal(a.logger, "query hypotheses", err)
 	}
@@ -548,7 +551,7 @@ func (a hypothesesAPI) graph(ctx context.Context, in *struct {
 	PlatformExperimentID string `query:"platform_experiment_id" doc:"Required."`
 }) (*struct{ Body *registry.HypothesisGraph }, error) {
 	if in.PlatformExperimentID == "" {
-		return nil, huma.Error400BadRequest("platform_experiment_id is required")
+		return nil, invalid("platform_experiment_id", "platform_experiment_id is required")
 	}
 	if err := a.access.PlatformExperiment(ctx, in.PlatformExperimentID); err != nil {
 		return nil, err
@@ -581,7 +584,7 @@ func (a hypothesesAPI) list(ctx context.Context, in *struct {
 	TotalCount int `header:"X-Total-Count"`
 }, error) {
 	if in.Status != "" && !domain.ValidHypothesisStatus(in.Status) {
-		return nil, huma.Error400BadRequest(fmt.Sprintf("invalid status %q", in.Status))
+		return nil, invalid("status", "status is open, confirmed, refuted or inconclusive")
 	}
 	limit, offset, err := page(in.Limit, in.Offset)
 	if err != nil {
@@ -736,7 +739,7 @@ func (a hypothesesAPI) edit(ctx context.Context, in *struct {
 	Body editHypothesisRequest
 }) (*struct{ Body *domain.Hypothesis }, error) {
 	if strings.TrimSpace(in.Body.Text) == "" {
-		return nil, huma.Error400BadRequest("text is required")
+		return nil, invalid("text", "text is required")
 	}
 	hyp, err := a.loadHypothesis(ctx, in.ID)
 	if err != nil {
@@ -791,7 +794,7 @@ func (a hypothesesAPI) addComment(ctx context.Context, in *struct {
 	Body   *domain.HypothesisComment
 }, error) {
 	if in.Body.Text == "" {
-		return nil, huma.Error400BadRequest("text is required")
+		return nil, invalid("text", "text is required")
 	}
 	if err := a.commentsOf(ctx, in.ID); err != nil {
 		return nil, err
@@ -848,7 +851,7 @@ func (a hypothesesAPI) setStatus(ctx context.Context, in *struct {
 	Body verdictRequest
 }) (*struct{ Body *domain.Hypothesis }, error) {
 	if !domain.ValidHypothesisStatus(in.Body.Status) {
-		return nil, huma.Error400BadRequest("status must be one of: open, confirmed, refuted, inconclusive")
+		return nil, invalid("status", "status must be one of: open, confirmed, refuted, inconclusive")
 	}
 	if _, err := a.loadHypothesis(ctx, in.ID); err != nil {
 		return nil, err

@@ -907,7 +907,7 @@ Examples:
 	if err := c.Do("POST", "/hypotheses/query", map[string]any{"platform_experiment_id": *pe, "cypher": cypher, "params": bound}, &out); err != nil {
 		code := command.Fail(stderr, err)
 		var refused *apiclient.HTTPError
-		if errors.As(err, &refused) && refused.Status == http.StatusBadRequest {
+		if errors.As(err, &refused) && refused.Status == http.StatusUnprocessableEntity {
 			fmt.Fprintf(stderr, "hl: hypothesis query: every node names its label and is tied to platform experiment %s for you ($pe, pass no --param for it); 'hl hypothesis query --help' has what a query may contain. A query that works:\n  %s\n", *pe, queryExample)
 		}
 		return code

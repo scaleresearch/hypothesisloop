@@ -202,8 +202,8 @@ func TestUnknownQueryParameterIsRejected(t *testing.T) {
 	r := schedulerRouter(t, spy)
 
 	code, body := get(t, r, "/experiments?platfrom_experiment_id=pe-1")
-	if code != http.StatusUnprocessableEntity && code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 4xx for an unknown query param; body=%s", code, body)
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422 for an unknown query param; body=%s", code, body)
 	}
 	if !strings.Contains(body, "platfrom_experiment_id") {
 		t.Errorf("error should name the offending param, got: %s", body)
@@ -214,8 +214,8 @@ func TestUnknownQueryParameterIsRejected(t *testing.T) {
 // 500 — a client mistake reported as a server fault.
 func TestUnknownStatusIsClientError(t *testing.T) {
 	r := schedulerRouter(t, &filterSpyStore{})
-	if code, body := get(t, r, "/experiments?status=bogus"); code != http.StatusBadRequest {
-		t.Fatalf("status=bogus returned %d, want 400; body=%s", code, body)
+	if code, body := get(t, r, "/experiments?status=bogus"); code != http.StatusUnprocessableEntity {
+		t.Fatalf("status=bogus returned %d, want 422; body=%s", code, body)
 	}
 	for _, s := range []string{"QUEUED", "RUNNING", "COMPLETED", "EVICTED", "REJECTED", "FAILED", "SUBMITTED"} {
 		if code, body := get(t, r, "/experiments?status="+s); code != 200 {
@@ -233,8 +233,8 @@ func TestInvalidSortAndPaginationAreRejected(t *testing.T) {
 		"/experiments?sort=bogus",
 		"/experiments?since=yesterday", // must be RFC3339, not prose
 	} {
-		if code, body := get(t, r, q); code != http.StatusBadRequest {
-			t.Errorf("GET %s = %d, want 400; body=%s", q, code, body)
+		if code, body := get(t, r, q); code != http.StatusUnprocessableEntity {
+			t.Errorf("GET %s = %d, want 422; body=%s", q, code, body)
 		}
 	}
 	for _, q := range []string{
@@ -304,8 +304,8 @@ func TestExperimentStatsForwardsKnownGroupByAndRejectsOthers(t *testing.T) {
 	if spy.gotGroupBy != "agent" || spy.gotStats.PlatformExperimentID != "pe-1" {
 		t.Errorf("group by = %q, platform experiment = %q, want agent, pe-1", spy.gotGroupBy, spy.gotStats.PlatformExperimentID)
 	}
-	if code, body := get(t, r, "/experiments/stats?group_by=status"); code != 400 {
-		t.Errorf("unknown group_by: status = %d (%s), want 400", code, body)
+	if code, body := get(t, r, "/experiments/stats?group_by=status"); code != http.StatusUnprocessableEntity {
+		t.Errorf("unknown group_by: status = %d (%s), want 422", code, body)
 	}
 }
 

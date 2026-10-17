@@ -21,7 +21,7 @@ type experimentDraftRequest struct {
 func (b *experimentDraftRequest) form() ([]byte, error) {
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(b.Form, &object); err != nil || object == nil {
-		return nil, huma.Error400BadRequest("form must be a JSON object")
+		return nil, invalid("form", "form must be a JSON object")
 	}
 	return b.Form, nil
 }

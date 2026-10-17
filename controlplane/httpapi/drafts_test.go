@@ -105,8 +105,8 @@ func TestADraftIsKeptAsTypedAndFinishedOrDeletedWithinItsProject(t *testing.T) {
 		t.Fatalf("list: %d %s", code, body)
 	}
 	for _, form := range []string{`"text"`, `null`, `[1]`} {
-		if code, body := draftCall(t, store, owner, "PUT", draft, `{"form":`+form+`,"step":"1"}`); code != http.StatusBadRequest {
-			t.Fatalf("put a form of %s: %d %s, want 400", form, code, body)
+		if code, body := draftCall(t, store, owner, "PUT", draft, `{"form":`+form+`,"step":"1"}`); code != http.StatusUnprocessableEntity {
+			t.Fatalf("put a form of %s: %d %s, want 422", form, code, body)
 		}
 	}
 	if code, _ := draftCall(t, store, owner, "DELETE", draft, ""); code != http.StatusNoContent {

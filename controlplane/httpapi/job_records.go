@@ -109,7 +109,7 @@ func (r jobRecordsAPI) timeseries(ctx context.Context, in *struct {
 		return nil, err
 	}
 	if in.MetricName == "" {
-		return nil, huma.Error400BadRequest("metric_name is required")
+		return nil, invalid("metric_name", "metric_name is required")
 	}
 	lookback := 24 * time.Hour
 	if in.LookbackHours > 0 {
@@ -119,7 +119,7 @@ func (r jobRecordsAPI) timeseries(ctx context.Context, in *struct {
 	if in.End != "" {
 		parsed, err := time.Parse(time.RFC3339, in.End)
 		if err != nil {
-			return nil, huma.Error400BadRequest("end must be RFC3339")
+			return nil, invalid("end", "end must be RFC3339")
 		}
 		end = parsed
 	}

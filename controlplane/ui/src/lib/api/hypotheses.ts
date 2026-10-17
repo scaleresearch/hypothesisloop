@@ -23,7 +23,7 @@ export function fetchHypothesisGraph(platformExperimentID: string): Promise<Hypo
 }
 
 // Read-only Cypher against one platform experiment's hypothesis graph, which the backend binds as
-// $pe. A Cypher error comes back as a 400 whose body is the database's own message.
+// $pe. A Cypher error comes back as a 422 whose body is the database's own message.
 function queryHypothesisGraph(platformExperimentID: string, cypher: string, params: Record<string, unknown>): Promise<QueryResult> {
   return apiSend<QueryResult>('POST', '/hypotheses/query', { platform_experiment_id: platformExperimentID, cypher, params })
 }

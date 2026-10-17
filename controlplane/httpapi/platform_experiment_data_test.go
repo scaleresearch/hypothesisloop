@@ -93,8 +93,8 @@ func TestDataKeyIsRefusedWithoutASignupOrOnceClosed(t *testing.T) {
 		}
 	}
 	r, _ := dataKeyRouter(t, &signupKeys{}, http.StatusOK)
-	if rec := postDataKey(r, `{"agent_id":""}`); rec.Code != http.StatusBadRequest {
-		t.Errorf("empty agent_id: status = %d, want 400: %s", rec.Code, rec.Body)
+	if rec := postDataKey(r, `{"agent_id":""}`); rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("empty agent_id: status = %d, want 422: %s", rec.Code, rec.Body)
 	}
 }
 

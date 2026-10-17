@@ -93,7 +93,7 @@ func (a sessionsAPI) put(ctx context.Context, platformExperimentID, agentID stri
 		return nil, err
 	}
 	if len(snapshot) == 0 {
-		return nil, huma.Error400BadRequest("the body is the session and must not be empty")
+		return nil, invalid("body", "the body is the session and must not be empty")
 	}
 	if err := a.sessions.Put(ctx, platformExperimentID, agentID, snapshot); err != nil {
 		return nil, auth.Internal(a.logger, "store session failed", err, zap.String("platformExpID", platformExperimentID), zap.String("agentID", agentID))

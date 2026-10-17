@@ -56,7 +56,7 @@ func (a agentsAPI) register(ctx context.Context, in *struct {
 	// Kubernetes object names and into the object-store key policy that decides what a
 	// job may write. Registration is the one moment it can be refused for free.
 	if err := domain.ValidateIdentifier("id", in.Body.ID); err != nil {
-		return nil, huma.Error400BadRequest(err.Error())
+		return nil, invalid("id", err.Error())
 	}
 	orgID, err := a.access.Org(ctx, in.Body.OrgID)
 	if err != nil {

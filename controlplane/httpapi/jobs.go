@@ -247,10 +247,10 @@ func (a jobsAPI) list(ctx context.Context, in *struct {
 	TotalCount int `header:"X-Total-Count" doc:"Total experiments matching the filter, ignoring limit/offset."`
 }, error) {
 	if in.Status != "" && !domain.ValidExperimentStatus(domain.ExperimentStatus(in.Status)) {
-		return nil, huma.Error400BadRequest("unknown status " + in.Status)
+		return nil, invalid("status", "status is not one of the experiment statuses")
 	}
 	if !domain.ValidSortField(in.Sort, domain.ExperimentSortFields) {
-		return nil, huma.Error400BadRequest("unknown sort field " + in.Sort)
+		return nil, invalid("sort", "sort is not one of created_at, updated_at, priority_score and status, optionally prefixed with '-'")
 	}
 	if in.Sort == "" {
 		in.Sort = "-created_at"
@@ -265,7 +265,7 @@ func (a jobsAPI) list(ctx context.Context, in *struct {
 	if in.Since != "" {
 		parsed, err := time.Parse(time.RFC3339, in.Since)
 		if err != nil {
-			return nil, huma.Error400BadRequest("since must be RFC3339, got " + in.Since)
+			return nil, invalid("since", "since must be RFC3339")
 		}
 		since = parsed
 	}
@@ -309,16 +309,16 @@ func (a jobsAPI) stats(ctx context.Context, in *struct {
 	GroupBy              string `query:"group_by" doc:"agent or hypothesis: also return the counts per agent or per hypothesis, under groups."`
 }) (*struct{ Body *domain.ExperimentStats }, error) {
 	if _, ok := domain.ExperimentStatsGroupFields[in.GroupBy]; in.GroupBy != "" && !ok {
-		return nil, huma.Error400BadRequest("unknown group_by " + in.GroupBy)
+		return nil, invalid("group_by", "group_by is agent or hypothesis")
 	}
 	if in.Status != "" && !domain.ValidExperimentStatus(domain.ExperimentStatus(in.Status)) {
-		return nil, huma.Error400BadRequest("unknown status " + in.Status)
+		return nil, invalid("status", "status is not one of the experiment statuses")
 	}
 	var since time.Time
 	if in.Since != "" {
 		parsed, err := time.Parse(time.RFC3339, in.Since)
 		if err != nil {
-			return nil, huma.Error400BadRequest("since must be RFC3339, got " + in.Since)
+			return nil, invalid("since", "since must be RFC3339")
 		}
 		since = parsed
 	}
@@ -397,7 +397,7 @@ func (a jobsAPI) writeSummary(ctx context.Context, in *struct {
 		return nil, err
 	}
 	if in.Body.Summary == "" {
-		return nil, huma.Error400BadRequest("summary is required")
+		return nil, invalid("summary", "summary is required")
 	}
 	caller, ok := auth.FromContext(ctx)
 	if !ok {

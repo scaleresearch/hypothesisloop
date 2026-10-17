@@ -708,7 +708,7 @@ def _sessions_are_their_owners(api: API, pe_id: str) -> None:
         r = api.session.get(api._url(paths[whose]), timeout=30)
         assert r.status_code == 200 and r.content == stored, f"the org's own caller GET the session of {whose}: {r.status_code}"
 
-    assert call("PUT", first, first, b"").status_code == 400
+    assert call("PUT", first, first, b"").status_code == 422
     assert call("PUT", first, first, b"x" * ((32 << 20) + 1)).status_code == 413
 
 
