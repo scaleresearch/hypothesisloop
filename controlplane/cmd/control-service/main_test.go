@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"flag"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -141,5 +145,41 @@ func TestAPreflightIsAnsweredWithoutAToken(t *testing.T) {
 	testRouter(t).ServeHTTP(recorder, httptest.NewRequest(http.MethodOptions, "/platform-experiments", nil))
 	if recorder.Code != http.StatusNoContent {
 		t.Fatalf("got = %d, want = 204", recorder.Code)
+	}
+}
+
+var update = flag.Bool("update", false, "rewrite testdata with the documents the API publishes now")
+
+// The documents the API publishes are its contract with every client: a change to any of them is
+// a change of the API, never a side effect of moving code.
+func TestThePublishedDocumentsAreUnchanged(t *testing.T) {
+	r := testRouter(t)
+	for path, file := range map[string]string{
+		"/openapi.json":                   "openapi.json",
+		"/explore":                        "explore.md",
+		"/explore/coordinator":            "explore-coordinator.md",
+		"/explore/rules":                  "explore-rules.md",
+		"/internal/clusters/openapi.json": "clusters-openapi.json",
+		"/internal/clusters/explore":      "clusters-explore.md",
+	} {
+		recorder := httptest.NewRecorder()
+		r.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("%s: got = %d, want = 200", path, recorder.Code)
+		}
+		golden := filepath.Join("testdata", file)
+		if *update {
+			if err := os.WriteFile(golden, recorder.Body.Bytes(), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		want, err := os.ReadFile(golden)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(recorder.Body.Bytes(), want) {
+			t.Errorf("%s differs from %s", path, golden)
+		}
 	}
 }
