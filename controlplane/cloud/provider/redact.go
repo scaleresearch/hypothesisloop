@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// minSecretLength keeps short values such as a flavor readable in an error: nothing that short
+// minSecretLength keeps short values such as an accelerator type readable in an error: nothing that short
 // is a secret.
 const minSecretLength = 8
 

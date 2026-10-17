@@ -20,7 +20,7 @@ NODE_CPUS="${NODE_CPUS:-8}"
 NODE_MEMORY="${NODE_MEMORY:-8g}"
 K3S_VERSION="$(kubectl --context "${CONTEXT}" version -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["serverVersion"]["gitVersion"].replace("+k3s", "-k3s"))')"
 IMAGE="docker.io/rancher/k3s:${K3S_VERSION}"
-# H100 x2: distributed-jobs.sh needs two distinct hosts of the same flavor (anti-affinity).
+# H100 x2: distributed-jobs.sh needs two distinct hosts of the same accelerator type (anti-affinity).
 # H200 dropped to keep 4 node slots total (other scenarios tolerate zero H200 capacity).
 ACCELERATOR_TYPES=(H100:NVIDIA-H100-80GB-HBM3 H100:NVIDIA-H100-80GB-HBM3 L40:NVIDIA-L40 A100:NVIDIA-A100-80GB-PCIe)
 

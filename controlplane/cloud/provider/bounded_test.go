@@ -16,12 +16,12 @@ func TestAVendorThatEchoesTheRequestNeverPutsASecretInAnError(t *testing.T) {
 	spec := provider.Spec{
 		Name: "agent-a", Image: "registry.example/agent:1", Command: []string{"run"},
 		CPUMillis: 1000, MemoryBytes: 1 << 30, DiskBytes: 1 << 30,
-		Env:        map[string]string{"HYPOTHESISLOOP_TOKEN": token, "FLAVOR": "small"},
+		Env:        map[string]string{"HYPOTHESISLOOP_TOKEN": token, "ACCELERATOR_TYPE": "small"},
 		ImageLogin: &provider.ImageLogin{Registry: "registry.example", Username: "robot", Password: password},
 	}
 	vendor := fake.New()
 	vendor.Fail = func(method, name string) error {
-		echoed := fmt.Sprintf(`HTTP 400: {"env":{"HYPOTHESISLOOP_TOKEN":%q,"FLAVOR":"small"},"image_login":"-u robot -p %s registry.example"}`, token, password)
+		echoed := fmt.Sprintf(`HTTP 400: {"env":{"HYPOTHESISLOOP_TOKEN":%q,"ACCELERATOR_TYPE":"small"},"image_login":"-u robot -p %s registry.example"}`, token, password)
 		return fmt.Errorf("%s: %w", echoed, provider.ErrNoOffer)
 	}
 	bounded := provider.Bounded(vendor)
