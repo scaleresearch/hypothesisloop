@@ -293,33 +293,3 @@ lib_default_org_cluster() {
     return 1
   fi
 }
-
-# lib_cloud_cluster_off: keeps every job of a run that must rent nothing off the cloud cluster: org
-# default no longer places jobs on it and no other org is shared it. It prints what it turned off,
-# which lib_cloud_cluster_restore is given afterwards.
-lib_cloud_cluster_off() {
-  local name state
-  name="$(lib_cloud_cluster)" || return 1
-  state="$(printf 'Authorization: Bearer %s\n' "$(lib_hl_admin token staff)" |
-    curl -fsS -H @- "http://localhost:${HL_API_PORT}/orgs/default/clusters" |
-    python3 -c 'import json, sys; c = next((c for c in json.load(sys.stdin)["clusters"] if c["name"] == sys.argv[1]), {}); print(*(k for k in ("enabled", "shared") if c.get(k)))' "${name}")" || return 1
-  if [[ " ${state} " == *" enabled "* ]]; then
-    lib_default_org_cluster "${name}" disable || return 1
-  fi
-  if [[ " ${state} " == *" shared "* ]]; then
-    lib_hl_admin cluster share "${name}" off >/dev/null || return 1
-  fi
-  printf '%s' "${state}"
-}
-
-# lib_cloud_cluster_restore STATE: turns back on what lib_cloud_cluster_off printed it turned off.
-lib_cloud_cluster_restore() {
-  local name
-  name="$(lib_cloud_cluster)" || return 1
-  if [[ " $1 " == *" shared "* ]]; then
-    lib_hl_admin cluster share "${name}" on >/dev/null || return 1
-  fi
-  if [[ " $1 " == *" enabled "* ]]; then
-    lib_default_org_cluster "${name}" enable || return 1
-  fi
-}

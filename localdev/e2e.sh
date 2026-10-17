@@ -6,9 +6,8 @@
 # nothing.
 #
 # The tests that rent machines at real vendors (marker real_providers) run only with E2E_RENT=1,
-# and with no arguments then they are all it runs. Without it no job of the run is placed on the
-# cloud cluster make dev registers: it is turned off for org default and its sharing ended while
-# the run lasts, and put back afterwards.
+# and with no arguments then they are all it runs. The cloud cluster make dev registers is not
+# the suite's concern: the suite ignores it.
 #
 # It holds the stack lock while it runs: the scheduler tests need the cluster's whole capacity
 # and stop the cluster's agents, so nothing else may use the stack meanwhile.
@@ -44,11 +43,7 @@ if ! mkdir "${lock}" 2>/dev/null; then
   exit 1
 fi
 echo "make e2e (pid $$) since $(date '+%Y-%m-%d %H:%M:%S')" > "${lock}/owner"
-cloud_off=""
 cleanup() {
-  if [[ -n "${cloud_off}" ]]; then
-    lib_cloud_cluster_restore "${cloud_off}" || true
-  fi
   if [[ -z "${nodes_were_up}" ]]; then
     bash "${repo}/localdev/k3s-macos/dev-nodes-down.sh" || true
   fi
@@ -56,17 +51,14 @@ cleanup() {
   rm -rf "${lock}"
 }
 trap cleanup EXIT
-if [[ -z "${rent}" ]]; then
-  cloud_off="$(lib_cloud_cluster_off)"
-fi
 
 # The suite reads the capacity of every cluster as its own and submits jobs any cluster its org
 # may use could take, so the local cluster must be the only connected one that takes them: a job
 # placed on another would run on somebody's hardware, or rent some. A cluster that stays
 # connected is kept out by turning it off for the suite's org, which places no job there. The
-# cloud cluster is one only a run with E2E_RENT=1 keeps.
+# cloud cluster is ignored.
 others="$(curl -fsS -H "Authorization: Bearer ${HL_TOKEN}" "${api}/orgs/default/clusters" |
-  python3 -c 'import json, sys; print(" ".join(c["name"] for c in json.load(sys.stdin)["clusters"] if c["connected"] and c["enabled"] and c["name"] not in sys.argv[1:]))' local ${rent:+"${cloud}"})"
+  python3 -c 'import json, sys; print(" ".join(c["name"] for c in json.load(sys.stdin)["clusters"] if c["connected"] and c["enabled"] and c["name"] not in sys.argv[1:]))' local "${cloud}")"
 if [[ -n "${others}" ]]; then
   echo "e2e: other clusters are connected to this control plane and take the jobs of org default (${others}); the suite's jobs could be placed on them. Stop their agents, or turn each off for the run: hl cluster disable NAME --org default (and hl cluster enable afterwards)" >&2
   exit 1
@@ -75,7 +67,7 @@ fi
 # The tenancy tests make orgs that own no cluster and read what such an org is told. A cluster the
 # platform shares with every org gives each of them one.
 shared="$(curl -fsS -H "Authorization: Bearer ${HL_TOKEN}" "${api}/orgs/default/clusters" |
-  python3 -c 'import json, sys; print(" ".join(c["name"] for c in json.load(sys.stdin)["clusters"] if c["shared"] and c["name"] not in sys.argv[1:]))' ${rent:+"${cloud}"})"
+  python3 -c 'import json, sys; print(" ".join(c["name"] for c in json.load(sys.stdin)["clusters"] if c["shared"] and c["name"] not in sys.argv[1:]))' "${cloud}")"
 if [[ -n "${shared}" ]]; then
   echo "e2e: the platform shares clusters with every org (${shared}), so no org of the suite is one without a cluster. End the sharing for the run: hl-admin cluster share NAME off" >&2
   exit 1
