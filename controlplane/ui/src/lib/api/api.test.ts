@@ -250,17 +250,17 @@ describe('an org\'s GitHub accounts', () => {
     expect(sent().body).toEqual({ return_to: '/orgs/org_a/settings#github' })
   })
 
-  it('finish an install with the state and the installation GitHub handed back', async () => {
+  it('finish an install with the state, the code and the installation GitHub handed back', async () => {
     fetchMock().mockResolvedValue(answer(201, { org_id: 'org_a', return_to: '/', installation: { installation_id: 7 } }))
-    await finishGitHubInstall('s-1', 7)
+    await finishGitHubInstall('s-1', 'c-1', 7)
     expect(sent().init.method).toBe('POST')
     expect(sent().url.pathname).toBe('/github/installations')
-    expect(sent().body).toEqual({ state: 's-1', installation_id: 7 })
+    expect(sent().body).toEqual({ state: 's-1', code: 'c-1', installation_id: 7 })
   })
 
   it('carry the API\'s reason for a refusal of the install', async () => {
     fetchMock().mockResolvedValue(answer(422, { reason: 'install_state_invalid', message: 'press Install GitHub App again' }))
-    await expect(finishGitHubInstall('forged', 7)).rejects.toMatchObject({ status: 422, reason: 'install_state_invalid', message: 'press Install GitHub App again' })
+    await expect(finishGitHubInstall('forged', 'c-1', 7)).rejects.toMatchObject({ status: 422, reason: 'install_state_invalid', message: 'press Install GitHub App again' })
   })
 
   it('are disconnected by a call that answers with no body', async () => {

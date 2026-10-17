@@ -114,7 +114,7 @@ describe('adding agents', () => {
   it('asks the platform to run them by default and shows no token', async () => {
     show()
     await userEvent.click(screen.getByRole('button', { name: 'Add agent' }))
-    expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', { in_agentsandbox: true, agent_type: 'generalist', model: undefined })
+    expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', { in_agentsandbox: true, agent_type: 'generalist', role: 'competitor', model: undefined })
     expect(await screen.findByRole('cell', { name: 'ag-new1' })).toBeTruthy()
     expect(screen.queryByTestId('secret')).toBeNull()
   })
@@ -126,7 +126,7 @@ describe('adding agents', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Me' }))
     await userEvent.click(screen.getByRole('button', { name: 'Add agent' }))
     expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', {
-      in_agentsandbox: false, agent_type: 'data-search', model: 'claude-opus-4-5',
+      in_agentsandbox: false, agent_type: 'data-search', role: 'competitor', model: 'claude-opus-4-5',
     })
     const secrets = await screen.findAllByTestId('secret')
     expect(secrets.map(s => s.textContent)).toEqual([

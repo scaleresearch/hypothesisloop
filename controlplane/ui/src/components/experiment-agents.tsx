@@ -55,7 +55,7 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
     setError('')
     try {
       await onAdded(await addPlatformExperimentAgents(pe.id, {
-        in_agentsandbox: sandboxed, agent_type: agentType, model: model.trim() || undefined,
+        in_agentsandbox: sandboxed, agent_type: agentType, role: 'competitor', model: model.trim() || undefined,
       }))
     } catch (e) {
       setError(errorMessage(e))
