@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
@@ -70,7 +69,7 @@ func (e *InstallationGoneError) Unwrap() error {
 // platform's failure or GitHub's: it is logged and answered without its text, but for a create
 // GitHub refused, whose answer is GitHub's own message.
 func Refusal(logger *zap.Logger, op string, err error, gone int) error {
-	var status huma.StatusError
+	var status interface{ GetStatus() int }
 	var uncommitted *FirstCommitError
 	var notCovered *NotCoveredError
 	var notPermitted *CreationNotPermittedError
